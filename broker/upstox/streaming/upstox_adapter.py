@@ -354,11 +354,29 @@ class UpstoxWebSocketAdapter(BaseBrokerWebSocketAdapter, AdapterSocketMixin):  #
                     for cid, sub in self.subscriptions.items()
                     if cid != correlation_id
                 )
-                if shares_key:
+                # SUDARSHAN (M18.2): Upstox forgets every key when its socket closes,
+                # so with the socket closed the last record goes now. Refusing left it
+                # to the reconnect's replay, which streamed the key with no owner.
+                closed = not shares_key and self._socket_closed()
+                if shares_key or closed:
                     self.subscriptions.pop(correlation_id, None)
+                if closed:
+                    self._last_ltpc.pop(instrument_key, None)
+                    self._day_carry.forget(instrument_key)
+
+            if closed:  # SUDARSHAN (M18.2): released here; nothing to tell Upstox
+                self._forget_key(instrument_key)
+                self.logger.info(f"Released {symbol} on {exchange}; the Upstox socket is closed")
+                return self._create_success_response(f"Unsubscribed from {symbol} on {exchange}")
 
             if shares_key:
-                self._narrow_key(instrument_key)
+                # SUDARSHAN (M18.2): the record is gone, so the release has happened.
+                # Reporting a failure now would have the pool restore a mode this
+                # adapter no longer holds; switching the key down is best effort.
+                try:
+                    self._narrow_key(instrument_key)
+                except Exception:
+                    self.logger.exception(f"Could not switch {instrument_key} to a lower mode")
                 self.logger.debug(
                     f"Released {symbol} on {exchange} mode {mode}; another mode keeps its feed"
                 )

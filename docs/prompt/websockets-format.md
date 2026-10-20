@@ -282,11 +282,18 @@ one, as `MarketDataManager` does. A frame with only the last trade carries no
 #### Slow clients
 
 Each client has its own queue, so a slow client never delays another. A client
-that falls behind receives the newest tick of each symbol and mode rather than
-every tick; replies, errors and order updates are never merged and keep their
-order relative to ticks. A client whose oldest unsent message has waited 10
-seconds is disconnected without a closing handshake, and should reconnect and
-subscribe again.
+that falls behind does not receive every tick. Ticks are merged per stream: a
+symbol as published in one mode, delivered for the mode the client subscribed
+(a symbol published in more than one mode is more than one stream). Within a
+stream the newest tick is merged into the one still waiting: newer values win,
+values only the waiting tick carried stay, and `depth` and `greeks` are replaced
+whole. A client that merges each tick into the last, as `MarketDataManager`
+does, ends up holding what it would have held after every tick, except the
+quantities of the trades in between. Replies, errors and order updates are never
+merged and keep their order relative to ticks. A client whose oldest unsent
+message has waited 10 seconds, not counting time the server itself was busy, is
+disconnected without a closing handshake, and should reconnect and subscribe
+again.
 
 ### Order Updates (Account-Level Stream)
 

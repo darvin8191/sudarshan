@@ -17,14 +17,16 @@ import asyncio
 import json
 import time
 from collections import defaultdict
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 import websocket_proxy  # noqa: F401  (loads the adapter registry before anything else)
 from websocket_proxy import server as proxy_server
+from websocket_proxy import sudarshan_ext
 from websocket_proxy.server import WebSocketProxy
-from websocket_proxy.sudarshan_ext import ClientOutbox
+from websocket_proxy.sudarshan_ext import ClientOutbox, merge_ticks
 
 USER = "owner"
 KEY = ("RELIANCE", "NSE", 2)
@@ -182,16 +184,16 @@ def test_a_stalled_client_does_not_delay_a_healthy_one() -> None:
         assert took < 0.5  # the listener never waited for the stalled client
         # The stalled one holds one tick in flight and the newest one waiting.
         (waiting,) = outbox._queue
-        assert json.loads(waiting[1])["data"]["ltp"] == 20
+        assert waiting[1]["data"]["ltp"] == 20  # waits as a dict, JSON once sent
 
         await asyncio.sleep(0.8)
         # Dropped without a closing handshake, so its browser reconnects and
-        # resubscribes; its sender ended by itself, with no error left behind.
+        # resubscribes; its sender was stopped with no error left behind.
         assert stalled.aborted == 1
         assert id(stalled) not in proxy.clients  # cleanup_client ran for it
         assert id(stalled) not in proxy.subscription_index.get(KEY, set())
-        assert outbox.task.done() and not outbox.task.cancelled()
-        assert outbox.task.exception() is None
+        assert outbox.task.done()
+        assert outbox.task.cancelled() or outbox.task.exception() is None
 
         await _hang_up(proxy, handlers, healthy)
 
@@ -310,6 +312,97 @@ def test_a_client_whose_oldest_message_waits_too_long_is_dropped() -> None:
         assert 0 < len(trickle.sent) < 20
 
         await _hang_up(proxy, handlers)
+
+    asyncio.run(scenario())
+
+
+class _StoppedClock:
+    """A loop clock that never beats and never freezes: the test checks for stalls itself."""
+
+    def hold(self, _outbox) -> None:
+        pass
+
+    def release(self, _outbox) -> None:
+        pass
+
+    def frozen(self) -> float:
+        return 0.0
+
+
+class _GatedSocket:
+    """A socket that holds each send until the test lets that one through."""
+
+    def __init__(self) -> None:
+        self.sent: list[str] = []
+        self.gates: list[asyncio.Event] = []
+        self.aborted = 0
+        self.transport = self
+
+    def abort(self) -> None:
+        self.aborted += 1
+
+    async def send(self, text: str) -> None:
+        gate = asyncio.Event()
+        self.gates.append(gate)
+        await gate.wait()
+        self.sent.append(text)
+
+
+def _outbox_at(monkeypatch, now: list[float]) -> tuple[ClientOutbox, _GatedSocket]:
+    """An outbox on a gated socket, with a 10 s stall limit, read against the clock `now`."""
+    monkeypatch.setattr(sudarshan_ext, "time", SimpleNamespace(monotonic=lambda: now[0]))
+    socket = _GatedSocket()
+    return ClientOutbox(1, socket, 10.0, clock=_StoppedClock()), socket
+
+
+def test_a_message_counts_its_wait_from_when_it_was_queued(monkeypatch) -> None:
+    """Through its own send too: a reply that waited 6 s behind another and then hangs in
+    its send is dropped at 10 s from when it was queued, not 10 s from when its send began."""
+    now = [100.0]
+
+    async def scenario() -> None:
+        outbox, socket = _outbox_at(monkeypatch, now)
+        outbox.offer('{"type": "first"}')
+        outbox.offer('{"type": "second"}')
+        await _settle()  # the first is in its send
+
+        now[0] = 106.0
+        socket.gates[0].set()
+        await _settle()  # the first went; the second, 6 s old, is in its send
+        assert socket.sent == ['{"type": "first"}'] and len(socket.gates) == 2
+
+        now[0] = 109.9
+        outbox.check_stall()
+        assert socket.aborted == 0
+        now[0] = 110.0
+        outbox.check_stall()
+        assert socket.aborted == 1 and outbox.dropped
+
+        outbox.close()
+        await _settle()
+
+    asyncio.run(scenario())
+
+
+def test_a_message_that_waited_the_limit_is_never_sent(monkeypatch) -> None:
+    """Taken from the queue only once it has waited the stall limit behind a slow send, a
+    reply is not sent that late: the client is dropped, before the loop clock looks."""
+    now = [100.0]
+
+    async def scenario() -> None:
+        outbox, socket = _outbox_at(monkeypatch, now)
+        outbox.offer('{"type": "first"}')
+        outbox.offer('{"type": "second"}')
+        await _settle()  # the first is in its send
+
+        now[0] = 110.0  # it took the whole limit, and the second waited behind it
+        socket.gates[0].set()
+        await _settle()
+
+        assert socket.sent == ['{"type": "first"}']
+        assert len(socket.gates) == 1  # the second never reached the socket
+        assert socket.aborted == 1 and outbox.dropped
+        assert outbox.task.done()
 
     asyncio.run(scenario())
 
@@ -470,5 +563,89 @@ def test_an_outbox_whose_connection_closed_stops_queueing() -> None:
             outbox.offer("{}", (f"NSE_S{n}_QUOTE", 2))
             outbox.offer('{"type": "pong"}')
         assert len(outbox._queue) == 0
+
+    asyncio.run(scenario())
+
+
+def test_a_merged_tick_keeps_what_only_the_older_one_said() -> None:
+    """Newer values win, nested ones (depth, greeks) are replaced whole, and the payloads,
+    which the fan-out shares between clients, are never changed."""
+    older = {
+        "type": "market_data",
+        "mode": 3,
+        "data": {
+            "ltp": 1.0,
+            "oi": 10,
+            "depth": {"buy": [1], "sell": [2]},
+            "greeks": {"delta": 0.5},
+        },
+    }
+    newer = {"type": "market_data", "mode": 3, "data": {"ltp": 2.0, "depth": {"buy": [3]}}}
+
+    merged = merge_ticks(older, newer)
+
+    assert merged == {
+        "type": "market_data",
+        "mode": 3,
+        "data": {"ltp": 2.0, "oi": 10, "depth": {"buy": [3]}, "greeks": {"delta": 0.5}},
+    }
+    assert newer["data"] == {"ltp": 2.0, "depth": {"buy": [3]}}
+    assert older["data"]["ltp"] == 1.0
+
+
+def test_a_frozen_loop_does_not_drop_a_healthy_client() -> None:
+    """The proxy's loop sometimes blocks: rebuilding an adapter runs Upstox's authorize
+    request on it, with a 10 s timeout, twice on the retry path. A message queued just before
+    waits that long through no fault of the client, which must not be dropped for it."""
+
+    async def scenario() -> None:
+        proxy = _bare_proxy()
+        proxy.CLIENT_SEND_STALL_SECONDS = 0.8
+        browser = _Browser()
+        handlers = await _serve(proxy, browser)
+
+        await proxy.send_message(id(browser), {"type": "subscribe", "status": "success"})
+        time.sleep(1.5)  # the loop is frozen before the sender can run
+        await _settle()
+
+        assert browser.aborted == 0
+        assert [m["type"] for m in browser.sent] == ["subscribe"]
+        await _hang_up(proxy, handlers, browser)
+
+    asyncio.run(scenario())
+
+
+def test_a_loop_frozen_during_a_send_does_not_drop_the_client() -> None:
+    async def scenario() -> None:
+        proxy = _bare_proxy()
+        proxy.CLIENT_SEND_STALL_SECONDS = 0.8
+        slow = _Browser(delay=0.3)  # each send takes 0.3 s
+        handlers = await _serve(proxy, slow)
+
+        asyncio.get_running_loop().call_later(0.05, time.sleep, 1.5)  # mid-send freeze
+        await _listen(proxy, [_tick(1.0)])
+        await asyncio.sleep(2.2)
+
+        assert slow.aborted == 0
+        assert _ltps(slow) == [1.0]
+        await _hang_up(proxy, handlers, slow)
+
+    asyncio.run(scenario())
+
+
+def test_the_loop_clock_runs_only_while_an_outbox_holds_it() -> None:
+    async def scenario() -> None:
+        clock = sudarshan_ext.loop_clock()
+        assert clock is sudarshan_ext.loop_clock()  # one per loop
+        proxy = _bare_proxy()
+        browser = _Browser()
+        handlers = await _serve(proxy, browser)
+        beat = clock._task
+        assert beat is not None and not beat.done()
+
+        await _hang_up(proxy, handlers, browser)
+        await _settle()
+
+        assert clock._task is None and beat.cancelled()
 
     asyncio.run(scenario())

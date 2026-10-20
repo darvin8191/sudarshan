@@ -26,28 +26,60 @@ MODE_RANK = {"ltpc": 1, "option_greeks": 1, "full": 2, "full_d30": 3}
 
 
 class ClientSocketMixin:
-    """For UpstoxWebSocketClient: the mode each key is streamed in, and change_mode."""
+    """For UpstoxWebSocketClient: the mode each key is streamed in, and change_mode.
+
+    `_keys_by_mode` is read and changed from three threads (the proxy's loop
+    switching keys down, the batch timer subscribing, the socket thread on a
+    handshake), so every use of it holds `_modes_lock`, an in-memory critical
+    section with no network call inside. A mode left with no key is dropped from
+    it, so the combined cap, which applies only while two modes are in use, does
+    not count it.
+    """
 
     def _move_keys(self, instrument_keys: list[str], mode: str) -> None:
         """Record that these keys now stream in `mode`, and in no other.
 
         A sub in another mode, or a change_mode, moves a key, so the per-mode
         sets follow it: the subscription caps count each key once, and
-        mode_of() can tell the adapter what Upstox is sending for it. A mode
-        left with no key is dropped, so the combined cap, which applies only
-        while two modes are in use, does not count it.
+        mode_of() can tell the adapter what Upstox is sending for it.
         """
+        with self._modes_lock:
+            self._drop_from_modes(instrument_keys)
+            self._keys_by_mode.setdefault(mode, set()).update(instrument_keys)
+
+    def _forget_keys(self, instrument_keys: list[str]) -> None:
+        """These keys stream in no mode any more."""
+        with self._modes_lock:
+            self._drop_from_modes(instrument_keys)
+
+    def _reset_modes(self) -> None:
+        """No key streams: the socket closed, or a new one opened."""
+        with self._modes_lock:
+            self._keys_by_mode.clear()
+
+    def _drop_from_modes(self, instrument_keys: list[str]) -> None:
+        """Caller holds _modes_lock."""
         for held in self._keys_by_mode.values():
             held.difference_update(instrument_keys)
-        self._keys_by_mode.setdefault(mode, set()).update(instrument_keys)
         for empty in [other for other, held in self._keys_by_mode.items() if not held]:
             del self._keys_by_mode[empty]
 
+    def socket_open(self) -> bool:
+        """Whether this connection's socket to Upstox is open now.
+
+        Read from the socket itself (websocket-client's WebSocketApp.sock), not
+        from `_connected`: an error can clear that while the socket stays open and
+        Upstox keeps streaming every key.
+        """
+        sock = getattr(self.ws, "sock", None)
+        return bool(sock is not None and getattr(sock, "connected", False))
+
     def mode_of(self, instrument_key: str) -> str | None:
         """The Upstox mode this connection streams the key in, or None."""
-        for mode, held in self._keys_by_mode.items():
-            if instrument_key in held:
-                return mode
+        with self._modes_lock:
+            for mode, held in self._keys_by_mode.items():
+                if instrument_key in held:
+                    return mode
         return None
 
     def change_mode(self, instrument_keys: list[str], mode: str) -> bool:
@@ -122,6 +154,25 @@ class AdapterSocketMixin:
         if thread is None or not thread.is_alive():
             return False
         return not getattr(client, "_authorize_refusals", 0)
+
+    def _socket_closed(self) -> bool:
+        """True when the Upstox socket is closed now, so Upstox holds no key of ours."""
+        socket_open = getattr(self.ws_client, "socket_open", None)
+        return socket_open is not None and not socket_open()
+
+    def _forget_key(self, instrument_key: str) -> None:
+        """A key released while the socket was closed: no mode streams it.
+
+        Never raises: the record is already gone, and a failure reported now would
+        have the pool restore a mode this adapter no longer holds.
+        """
+        forget = getattr(self.ws_client, "_forget_keys", None)
+        if forget is None:
+            return
+        try:
+            forget([instrument_key])
+        except Exception:
+            self.logger.exception(f"Could not forget {instrument_key} on the closed socket")
 
     def _narrow_key(self, instrument_key: str) -> None:
         """A record of this key has gone: switch it down if Upstox sends more than the rest need.

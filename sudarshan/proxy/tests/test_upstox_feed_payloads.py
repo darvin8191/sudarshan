@@ -18,18 +18,21 @@ from typing import Any
 
 import pytest
 
-# The proxy package imports every broker adapter when it loads, so it has to load before any
-# adapter module does, or the adapter's own import of it is circular.
-import websocket_proxy  # noqa: F401
-from websocket_proxy import broker_factory, connection_manager
+# upstox_fakes loads the proxy package before any adapter module, as it has to (see there).
+from upstox_fakes import ClientSocket as _ClientSocket
+from upstox_fakes import UpstoxServer as _UpstoxServer
+from upstox_fakes import build_adapter, map_symbols
+from upstox_fakes import connected_client as _connected_client
+from upstox_fakes import lingering_proxy as _lingering_proxy
+from upstox_fakes import pool_around as _pool
+from upstox_fakes import pooled as _pooled
+
 from websocket_proxy import server as proxy_server
 from websocket_proxy.base_adapter import BaseBrokerWebSocketAdapter
-from websocket_proxy.connection_manager import ConnectionPool
 from websocket_proxy.server import WebSocketProxy
 
 # isort: split
 from broker.upstox.streaming import MarketDataFeedV3_pb2 as pb
-from broker.upstox.streaming import upstox_adapter
 from broker.upstox.streaming.upstox_adapter import UpstoxWebSocketAdapter
 from broker.upstox.streaming.upstox_client import UpstoxWebSocketClient
 
@@ -247,64 +250,6 @@ SBIN_FROM_LTPC = _base(SBIN) | {
 # --------------------------------------------------------------------------------------------
 
 
-class _NoZmq:
-    """Stands in for the shared publisher, so building an adapter opens no ZeroMQ socket."""
-
-    socket = None
-    zmq_port = 0
-    context = None
-
-
-class _UpstoxServer:
-    """Upstox's end of one market-data socket, written to by the real client.
-
-    Applies each request as Upstox does: `sub` streams its keys in its mode (a key
-    already streamed moves to it), `change_mode` moves keys already streamed, `unsub`
-    stops them. `held` is what Upstox is sending: instrument key -> mode.
-    """
-
-    def __init__(self) -> None:
-        self.held: dict[str, str] = {}
-        self.sent: list[tuple[str, list[str], str | None]] = []
-
-    def send(self, data: bytes, opcode: int | None = None) -> None:
-        request = json.loads(data)
-        method, keys = request["method"], request["data"]["instrumentKeys"]
-        mode = request["data"].get("mode")
-        self.sent.append((method, list(keys), mode))
-        for key in keys:
-            if method == "sub" or (method == "change_mode" and key in self.held):
-                self.held[key] = mode
-            elif method == "unsub":
-                self.held.pop(key, None)
-
-    @property
-    def unsubscribed(self) -> list[list[str]]:
-        return [keys for method, keys, _mode in self.sent if method == "unsub"]
-
-    def close(self) -> None:
-        pass
-
-
-class _SocketThread:
-    """Stands in for the client's socket thread: alive until a test ends it."""
-
-    def __init__(self) -> None:
-        self.alive = True
-
-    def is_alive(self) -> bool:
-        return self.alive
-
-
-def _connected_client() -> UpstoxWebSocketClient:
-    """The production client, its socket replaced by _UpstoxServer."""
-    client = UpstoxWebSocketClient("not-a-real-token")
-    client.ws = _UpstoxServer()
-    client._connected = client.running = True
-    client._ws_thread = _SocketThread()
-    return client
-
-
 def _canon(payload: dict[str, Any]) -> str:
     """Canonical JSON: key order ignored, types and values exact, NaN refused."""
     return json.dumps(payload, sort_keys=True, allow_nan=False)
@@ -314,35 +259,14 @@ def _canon(payload: dict[str, Any]) -> str:
 def make_adapter(monkeypatch):
     """Build real UpstoxWebSocketAdapters: no ZeroMQ, no Upstox, no database."""
     instances = BaseBrokerWebSocketAdapter._instance_count
-    monkeypatch.setattr(
-        upstox_adapter.SymbolMapper,
-        "get_token_from_symbol",
-        staticmethod(
-            lambda symbol, exchange: {
-                "token": _KEYS[(symbol, exchange)],
-                "brexchange": _KEYS[(symbol, exchange)].split("|")[0],
-            }
-        ),
-    )
+    map_symbols(monkeypatch, _KEYS)
 
     def build() -> UpstoxWebSocketAdapter:
-        context = connection_manager._pooled_creation_context
-        context.active, context.shared_publisher = True, _NoZmq()
-        try:
-            adapter = UpstoxWebSocketAdapter()
-        finally:
-            context.active, context.shared_publisher = False, None
-        adapter.published = []
-        adapter.publish_market_data = lambda topic, data: adapter.published.append((topic, data))
+        adapter = build_adapter()
         # The production client decodes the frames, and another one, its socket
-        # replaced by _UpstoxServer (adapter.upstox), sends the requests.
+        # replaced by an UpstoxServer (adapter.upstox), sends the requests.
         adapter.decoder = UpstoxWebSocketClient("not-a-real-token")
         adapter.decoder.callbacks["on_message"] = adapter._on_market_data
-        adapter.ws_client = _connected_client()
-        adapter.upstox = adapter.ws_client.ws
-        # Send batched subscribes at once instead of on a 0.5 s timer thread.
-        adapter._start_batch_timer = adapter._process_batch_subscriptions
-        adapter.connected = True
         return adapter
 
     yield build
@@ -629,30 +553,6 @@ def test_no_published_number_is_nan_or_infinity(make_adapter) -> None:
 # --------------------------------------------------------------------------------------------
 
 
-def _pool(adapter: UpstoxWebSocketAdapter) -> ConnectionPool:
-    """A ConnectionPool around one adapter, built without a ZeroMQ publisher."""
-    pool = ConnectionPool.__new__(ConnectionPool)
-    pool.lock = threading.RLock()
-    pool.logger = logging.getLogger("test.sudarshan.pool")
-    pool.broker_name, pool.user_id = "upstox", "owner"
-    pool.adapters, pool.adapter_symbol_counts = [adapter], [0]
-    pool.max_symbols, pool.max_connections = 1000, 2
-    pool.subscription_map, pool.subscription_depths = {}, {}
-    pool.peak_total_symbols, pool.peak_connections_used, pool.peak_symbol_counts = 0, 0, []
-    pool.initialized = pool.connected = True
-    return pool
-
-
-class _ClientSocket:
-    """A browser's WebSocket as the proxy sees it."""
-
-    def __init__(self) -> None:
-        self.sent: list[dict[str, Any]] = []
-
-    async def send(self, text: str) -> None:
-        self.sent.append(json.loads(text))
-
-
 class _OneShotSub:
     """The proxy's ZeroMQ SUB, replaying given frames, then stopping the listener."""
 
@@ -831,6 +731,90 @@ def test_a_refused_downgrade_leaves_the_higher_mode_owned(make_adapter, monkeypa
     assert adapter.upstox.held == {key: "full"}
 
 
+class _OneTokenAdapter:
+    """A broker adapter without RELEASE_EVERY_MODE, holding one token per symbol: a release
+    of any mode drops it, whatever mode another subscriber still needs."""
+
+    def __init__(self) -> None:
+        self.subscriptions: dict[str, Any] = {}
+        self.calls: list[tuple[str, int]] = []
+        self.at_broker: dict[tuple[str, str], int] = {}
+
+    def subscribe(self, symbol: str, exchange: str, mode: int, _depth: int = 5) -> dict:
+        self.calls.append(("subscribe", mode))
+        self.at_broker[(symbol, exchange)] = mode
+        return {"status": "success"}
+
+    def unsubscribe(self, symbol: str, exchange: str, mode: int) -> dict:
+        self.calls.append(("unsubscribe", mode))
+        self.at_broker.pop((symbol, exchange), None)
+        return {"status": "success"}
+
+
+def test_a_broker_without_the_flag_keeps_the_pools_old_paths() -> None:
+    """Only an adapter that declares RELEASE_EVERY_MODE is handed a lower mode's release or
+    a lower-first downgrade. Another broker's token, which a Depth subscriber still uses,
+    must not be dropped when the LTP subscriber leaves."""
+    adapter = _OneTokenAdapter()
+    pool = _pool(adapter)
+    assert pool.subscribe("RELIANCE", "NSE", 1)["status"] == "success"
+    assert pool.subscribe("RELIANCE", "NSE", 3)["status"] == "success"
+    adapter.calls.clear()
+
+    assert pool.unsubscribe("RELIANCE", "NSE", 1)["status"] == "success"
+    assert adapter.calls == []
+    assert adapter.at_broker == {("RELIANCE", "NSE"): 3}
+
+    assert pool.subscribe("RELIANCE", "NSE", 2)["status"] == "success"  # covered by Depth
+    adapter.calls.clear()
+    assert pool.unsubscribe("RELIANCE", "NSE", 3)["status"] == "success"
+    assert adapter.calls == [("unsubscribe", 3), ("subscribe", 2)]  # upstream's order
+    assert adapter.at_broker == {("RELIANCE", "NSE"): 2}
+
+
+def test_a_refused_release_after_the_lower_mode_was_taken_leaves_both_owned(
+    make_adapter, monkeypatch
+) -> None:
+    """Depth is released after LTP was taken for the downgrade, and the adapter refuses: Depth
+    goes back into the pool with its depth, and the adapter's records stay within the pool's."""
+    adapter = make_adapter()
+    pool = _pool(adapter)
+    symbol, exchange, key = OPTION
+    assert pool.subscribe(symbol, exchange, 3, 20)["status"] == "success"
+    assert pool.subscribe(symbol, exchange, 1)["status"] == "success"  # covered
+    release = adapter.unsubscribe
+    refused = {"status": "error", "message": "refused"}
+    monkeypatch.setattr(
+        adapter, "unsubscribe", lambda s, e, m: refused if m == 3 else release(s, e, m)
+    )
+
+    result = pool.unsubscribe(symbol, exchange, 3)
+
+    assert (result["status"], result["code"]) == ("error", "DOWNGRADE_FAILED")
+    assert result["phase"] == "release_high_mode"
+    assert set(pool.subscription_map) == {(symbol, exchange, 1), (symbol, exchange, 3)}
+    assert pool.subscription_depths[(symbol, exchange, 3)] == 20
+    assert sorted(adapter.subscriptions) == [f"{symbol}_{exchange}_1", f"{symbol}_{exchange}_3"]
+    assert adapter.upstox.held == {key: "full"}
+
+
+def test_a_refused_release_of_a_lower_mode_leaves_it_owned(make_adapter, monkeypatch) -> None:
+    adapter = make_adapter()
+    pool = _pool(adapter)
+    symbol, exchange, key = OPTION
+    assert pool.subscribe(symbol, exchange, 1)["status"] == "success"
+    assert pool.subscribe(symbol, exchange, 3)["status"] == "success"
+    refused = {"status": "error", "message": "refused"}
+    monkeypatch.setattr(adapter, "unsubscribe", lambda *_args: refused)
+
+    result = pool.unsubscribe(symbol, exchange, 1)
+
+    assert result == refused
+    assert set(pool.subscription_map) == {(symbol, exchange, 1), (symbol, exchange, 3)}
+    assert pool.subscription_depths[(symbol, exchange, 1)] == 5
+    assert adapter.upstox.held == {key: "full"}
+
+
 def test_a_lower_mode_beside_a_higher_one_never_switches_the_key_down(make_adapter) -> None:
     """The adapter used directly, without the pool: LTP subscribed while Depth holds the key
     is sent in the mode the key needs, `full`, so nothing is sent at all."""
@@ -840,6 +824,124 @@ def test_a_lower_mode_beside_a_higher_one_never_switches_the_key_down(make_adapt
 
     assert adapter.upstox.sent == [("sub", [OPTION[2]], "full")]
     assert adapter.upstox.held == {OPTION[2]: "full"}
+
+
+def test_releasing_a_mode_never_switches_a_key_up(make_adapter) -> None:
+    """LTP is streamed in `ltpc` while a Depth subscribe still waits in the batch. Releasing
+    LTP leaves a record needing `full`, but switching keys is only ever downward: the
+    batch's subscribe takes the key up when it goes out."""
+    adapter = make_adapter()
+    adapter._start_batch_timer = lambda: None  # hold the batch, as the 0.5 s timer does
+    _hold(adapter, OPTION, 1)
+    adapter._process_batch_subscriptions()
+    _hold(adapter, OPTION, 3)
+
+    assert adapter.unsubscribe(OPTION[0], OPTION[1], 1)["status"] == "success"
+
+    assert adapter.upstox.sent == [("sub", [OPTION[2]], "ltpc")]
+    adapter._process_batch_subscriptions()
+    assert adapter.upstox.held == {OPTION[2]: "full"}
+
+
+class _PausingModes(dict):
+    """The client's _keys_by_mode: the thread named `reading` pauses halfway through
+    iterating it until the test lets it go on."""
+
+    def __init__(self, *args) -> None:
+        super().__init__(*args)
+        self.inside = threading.Event()
+        self.go_on = threading.Event()
+
+    def _pausing(self, entries):
+        for index, entry in enumerate(entries):
+            if index == 1 and threading.current_thread().name == "reading":
+                self.inside.set()
+                self.go_on.wait(5)
+            yield entry
+
+    def values(self):
+        return self._pausing(super().values())
+
+    def items(self):
+        return self._pausing(super().items())
+
+
+# Every use of the key modes, read on one thread while another changes them:
+# (read, change, the modes once both are done).
+READ_THEN_CHANGE = {
+    "a release, then a switch": (
+        lambda client: client.unsubscribe(["K9"]),
+        lambda client: client.change_mode(["K1"], "ltpc"),
+        {"ltpc": {"K1", "K2"}},
+    ),
+    "a mode lookup, then a switch": (
+        lambda client: client.mode_of("K1"),
+        lambda client: client.change_mode(["K1"], "ltpc"),
+        {"ltpc": {"K1", "K2"}},
+    ),
+    "a subscribe, then a switch": (
+        lambda client: client.subscribe(["K3"], "full"),
+        lambda client: client.change_mode(["K1"], "ltpc"),
+        {"ltpc": {"K1", "K2"}, "full": {"K3"}},
+    ),
+    "a release, then a new socket": (
+        lambda client: client.unsubscribe(["K9"]),
+        lambda client: client._reset_modes(),
+        {},
+    ),
+}
+
+
+@pytest.mark.parametrize(
+    ("read", "change", "after"), READ_THEN_CHANGE.values(), ids=READ_THEN_CHANGE.keys()
+)
+def test_the_key_modes_change_only_while_no_other_thread_reads_them(read, change, after) -> None:
+    """The proxy's loop switching a key down, the batch timer subscribing and the socket
+    thread on a handshake all use the client's per-mode key sets. One thread is paused
+    midway through reading them while another changes them, emptying a mode: the change
+    must wait, or the paused thread fails with 'dictionary changed size during iteration'."""
+    client = _connected_client()
+    modes = client._keys_by_mode = _PausingModes({"ltpc": {"K2"}, "full": {"K1"}})
+    errors: list[BaseException] = []
+
+    def run_read() -> None:
+        try:
+            read(client)
+        except BaseException as error:  # noqa: BLE001 - the test reports any failure
+            errors.append(error)
+
+    reading = threading.Thread(target=run_read, name="reading")
+    reading.start()
+    assert modes.inside.wait(5)
+    changing = threading.Thread(target=change, args=(client,))
+    changing.start()
+    changing.join(0.2)
+    assert changing.is_alive()  # waiting for the lock, not changing the sets
+    modes.go_on.set()
+    reading.join(5)
+    changing.join(5)
+
+    assert errors == []
+    assert dict(client._keys_by_mode) == after
+
+
+def test_a_release_that_removed_its_record_never_reports_failure(make_adapter, monkeypatch) -> None:
+    """Switching the key down after a release can fail; the release itself has happened, and
+    a failure reported now would have the pool restore a mode the adapter no longer holds."""
+    adapter = make_adapter()
+    pool = _pool(adapter)
+    symbol, exchange, key = OPTION
+    assert pool.subscribe(symbol, exchange, 1)["status"] == "success"
+    assert pool.subscribe(symbol, exchange, 3)["status"] == "success"
+
+    def broken(_key: str) -> None:
+        raise RuntimeError("switching failed")
+
+    monkeypatch.setattr(adapter, "_narrow_key", broken)
+
+    assert pool.unsubscribe(symbol, exchange, 1)["status"] == "success"
+    assert set(pool.subscription_map) == {(symbol, exchange, 3)}
+    assert list(adapter.subscriptions) == [f"{symbol}_{exchange}_3"]
 
 
 def test_a_reconnect_replays_each_key_once_in_the_mode_it_needs(make_adapter) -> None:
@@ -855,6 +957,45 @@ def test_a_reconnect_replays_each_key_once_in_the_mode_it_needs(make_adapter) ->
 
     assert sorted(fresh.sent) == [("sub", [SBIN[2]], "ltpc"), ("sub", [OPTION[2]], "full")]
     assert fresh.held == {OPTION[2]: "full", SBIN[2]: "ltpc"}
+
+
+def test_a_mode_released_while_the_socket_is_closed_is_released_and_not_replayed(
+    make_adapter,
+) -> None:
+    """Upstox forgets every key when its socket closes, so a release then is complete here.
+    It used to be refused, and the reconnect's replay streamed the key with no owner."""
+    adapter = make_adapter()
+    pool = _pool(adapter)
+    symbol, exchange, key = SBIN
+    assert pool.subscribe(symbol, exchange, 1)["status"] == "success"
+    _feed(adapter, ltpc_only_frame())
+    assert key in adapter._last_ltpc
+    adapter.upstox.close_socket()
+    adapter.ws_client._connected = False
+
+    assert pool.unsubscribe(symbol, exchange, 1)["status"] == "success"
+    assert pool.subscription_map == {} and adapter.subscriptions == {}
+    assert adapter.ws_client.mode_of(key) is None
+    assert key not in adapter._last_ltpc and key not in adapter._day_carry
+
+    fresh = adapter.ws_client.ws = adapter.upstox = _UpstoxServer()
+    adapter.ws_client._reset_modes()
+    adapter.ws_client._connected = True
+    adapter._on_connect()
+    assert fresh.sent == [] and fresh.held == {}
+
+
+def test_an_error_on_an_open_socket_does_not_count_as_closed(make_adapter) -> None:
+    """An error clears the client's connected flag while the socket stays open and Upstox
+    keeps streaming; the release is refused as before, so the record stays to be retried."""
+    adapter = make_adapter()
+    symbol, exchange, key = SBIN
+    _hold(adapter, SBIN, 1)
+    adapter.ws_client._connected = False  # what an error callback does
+
+    assert adapter.unsubscribe(symbol, exchange, 1)["status"] == "error"
+    assert list(adapter.subscriptions) == [f"{symbol}_{exchange}_1"]
+    assert adapter.upstox.held == {key: "ltpc"}
 
 
 def test_a_key_released_before_its_subscribe_went_out_is_not_sent(make_adapter) -> None:
@@ -909,39 +1050,6 @@ def test_the_last_mode_leaving_releases_the_key_and_its_carry_forward(make_adapt
 # --------------------------------------------------------------------------------------------
 # The broker linger over the real pool and adapter
 # --------------------------------------------------------------------------------------------
-
-
-class _HeldSleep:
-    """The linger's sleep, held until the test lets it run out."""
-
-    def __init__(self) -> None:
-        self.gates: list[asyncio.Event] = []
-
-    async def __call__(self, _seconds: float) -> None:
-        gate = asyncio.Event()
-        self.gates.append(gate)
-        await gate.wait()
-
-
-def _lingering_proxy(monkeypatch, wrapper) -> WebSocketProxy:
-    """A proxy built without __init__, whose broker adapter is `wrapper`, lingering 300 s."""
-    monkeypatch.setattr(proxy_server, "verify_api_key", lambda _key: "owner")
-    monkeypatch.setattr(proxy_server, "get_broker_name", lambda _key: "upstox")
-    monkeypatch.setattr(proxy_server, "create_broker_adapter", lambda _broker: wrapper)
-    proxy = WebSocketProxy.__new__(WebSocketProxy)
-    proxy.clients, proxy.subscriptions, proxy.user_mapping = {}, {}, {}
-    proxy.user_broker_mapping, proxy.broker_adapters = {}, {}
-    proxy.subscription_index = defaultdict(set)
-    proxy.order_subscribers = defaultdict(set)
-    proxy.broker_linger_seconds = 300.0
-    proxy._linger_sleep = _HeldSleep()
-    return proxy
-
-
-def _pooled(adapter: UpstoxWebSocketAdapter):
-    wrapper = broker_factory._PooledAdapterWrapper(UpstoxWebSocketAdapter, "upstox")
-    wrapper._pool, wrapper._user_id = _pool(adapter), "owner"
-    return wrapper
 
 
 async def _screen(proxy: WebSocketProxy, client_id: int, mode: str) -> None:
@@ -1100,3 +1208,66 @@ def test_an_unsubscribe_naming_its_mode_releases_it_at_upstox(make_adapter, monk
         assert adapter.upstox.held == {}
 
     asyncio.run(scenario())
+
+
+# --------------------------------------------------------------------------------------------
+# A lagging client and the values a newer frame leaves out
+# --------------------------------------------------------------------------------------------
+
+
+class _GatedPhone:
+    """A phone on a slow link: its first send waits until the test lets it through."""
+
+    def __init__(self) -> None:
+        self.sent: list[dict[str, Any]] = []
+        self.gate = asyncio.Event()
+        self.transport = self
+
+    async def send(self, frame: str) -> None:
+        if not self.sent:
+            await self.gate.wait()
+        self.sent.append(json.loads(frame))
+
+    def abort(self) -> None:
+        pass
+
+
+def test_a_lagging_client_still_gets_what_only_the_merged_tick_carried(
+    make_adapter, monkeypatch
+) -> None:
+    """A trade frame (open interest, iv, greeks, average price) waits behind a slow send, and
+    a book-only frame of the same stream, which leaves those out, merges into it. The client
+    gets one Quote message: the newer frame's values and the older one's open interest and
+    greeks, never old open interest left on screen as current."""
+    adapter = make_adapter()
+    _hold(adapter, OPTION, 2)
+    _hold(adapter, SBIN, 1)  # another stream, whose tick occupies the sender
+    published = []
+    for frame in (ltpc_only_frame(), option_full_frame(), _book_only(OPTION, OPTION_BOOK)):
+        adapter.published.clear()
+        adapter.decoder._process_binary_message(frame.SerializeToString())
+        published.extend(adapter.published)
+    trade, book_only = published[1][1], published[2][1]
+    assert "oi" in trade and "oi" not in book_only
+
+    monkeypatch.setattr(proxy_server, "get_market_data_service", _MarketDataServiceStub)
+    proxy = _proxy_with_clients({7: (OPTION[0], OPTION[1], 2)})
+    proxy.subscription_index[(SBIN[0], SBIN[1], 1)].add(7)
+
+    async def scenario() -> list[dict[str, Any]]:
+        phone = _GatedPhone()
+        proxy.clients[7] = phone
+        proxy._open_outbox(7, phone)
+        await _deliver(proxy, published)  # SBIN in flight, the trade waiting, then book-only
+        phone.gate.set()
+        for _ in range(20):
+            await asyncio.sleep(0)
+        proxy._close_outbox(7)
+        return phone.sent
+
+    sent = asyncio.run(scenario())
+    (quote,) = [message["data"] for message in sent if message["symbol"] == OPTION[0]]
+    assert (quote["oi"], quote["iv"], quote["average_price"]) == (4567800, 0.1432, 99.87)
+    assert quote["greeks"] == trade["greeks"]
+    assert quote["last_trade_quantity"] == 0  # the newer frame reports no new trade
+    assert (quote["ltp"], quote["volume"]) == (101.5, 123450)
