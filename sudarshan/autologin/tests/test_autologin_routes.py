@@ -167,37 +167,52 @@ def test_clearing(setup):
     assert not vault.secret_info(SECRET_TOTP).is_set and not vault.secret_info(SECRET_PIN).is_set
 
 
-def test_switch_and_resume_after_a_pause(setup):
+def test_the_switch_never_ends_a_pause_but_a_saved_secret_does(setup):
     _, client, vault, _ = setup
     login_session(client)
     headers = csrf_headers(client)
-    assert (
-        _call(
-            client, "post", "/sudarshan/autologin/enabled", {"enabled": "yes"}, headers
-        ).status_code
-        == 400
-    )
-    vault.update_status(paused_code="invalid_credentials")
-    assert (
-        _call(
-            client, "post", "/sudarshan/autologin/enabled", {"enabled": False}, headers
-        ).status_code
-        == 200
-    )
-    assert vault.state().enabled is False and vault.state().paused_code == "invalid_credentials"
-    status = _call(client, "get", "/sudarshan/autologin/status").get_json()["data"]
-    assert "paused" in status["paused"]["message"] and status["next_run"] is None
-    assert (
-        _call(
-            client, "post", "/sudarshan/autologin/enabled", {"enabled": True}, headers
-        ).status_code
-        == 200
-    )
-    assert vault.state().enabled is True and vault.state().paused_code is None
 
+    def switch(value):
+        return _call(client, "post", "/sudarshan/autologin/enabled", {"enabled": value}, headers)
+
+    assert switch("yes").status_code == 400
+    vault.update_status(paused_code="invalid_credentials")
+    for value in (False, True, False, True):
+        assert switch(value).status_code == 200
+        assert vault.state().enabled is value
+        assert vault.state().paused_code == "invalid_credentials"
+    status = _call(client, "get", "/sudarshan/autologin/status").get_json()["data"]
+    assert status["paused"] == {"message": "Upstox did not accept the saved TOTP key or PIN."}
+    assert status["next_run"] is None
+
+    _call(client, "post", "/sudarshan/autologin/pin", {"pin": FAKE_PIN}, headers)
+    assert vault.state().paused_code is None
     vault.update_status(paused_code="totp_not_enabled")
     _call(client, "post", "/sudarshan/autologin/totp-secret", {"secret": FAKE_TOTP_SECRET}, headers)
     assert vault.state().paused_code is None
+    vault.update_status(paused_code="upstox_refused")
+    _call(client, "post", "/sudarshan/autologin/pin", {"pin": "12"}, headers)  # invalid: not saved
+    assert vault.state().paused_code == "upstox_refused"
+
+
+def test_test_now_waits_for_a_new_secret_after_a_refusal(setup, monkeypatch):
+    _, client, vault, _ = setup
+    _ready(vault)
+    vault.update_status(paused_code="invalid_credentials")
+    started = []
+    monkeypatch.setattr(bp_module, "run_test_child", lambda run_id: started.append(run_id))
+    login_session(client)
+    headers = csrf_headers(client)
+    response = _call(client, "post", "/sudarshan/autologin/test", None, headers)
+    assert response.status_code == 409 and started == []
+    assert response.get_json()["code"] == "test_paused"
+    assert "Save the TOTP key or the PIN again first" in response.get_json()["message"]
+    status = _call(client, "get", "/sudarshan/autologin/status").get_json()["data"]
+    assert status["test"]["allowed"] is False and "paused" in status["test"]["reason"]
+
+    _call(client, "post", "/sudarshan/autologin/totp-secret", {"secret": FAKE_TOTP_SECRET}, headers)
+    _call(client, "post", "/sudarshan/autologin/test", None, headers)
+    assert len(started) == 1
 
 
 def test_status_shows_the_next_run_and_the_last_result(setup):

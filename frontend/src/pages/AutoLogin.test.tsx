@@ -246,20 +246,30 @@ describe('Auto login page', () => {
     expect(screen.getByText('Recent attempts')).toBeInTheDocument()
   })
 
-  it('shows a pause and stops promising a next run', async () => {
+  it('shows a pause once, says how to end it, and keeps Test now waiting', async () => {
+    const refusal =
+      'Auto-login is paused because Upstox refused the last login. Save the TOTP key or the PIN again first, so the same ones are not sent to Upstox twice.'
     api.status.mockResolvedValue(
       makeStatus({
         enabled: true,
         secrets: SAVED,
-        paused: {
-          message:
-            'Scheduled auto-login is paused. Upstox did not accept the saved TOTP key or PIN.',
-        },
+        paused: { message: 'Upstox did not accept the saved TOTP key or PIN.' },
+        test: { allowed: false, reason: refusal },
       })
     )
     renderPage()
-    expect(await screen.findByText('Scheduled auto-login is paused')).toBeInTheDocument()
+    const banner = (await screen.findByText('Auto-login is paused')).closest(
+      '[role="alert"]'
+    ) as HTMLElement
+    expect(
+      within(banner).getByText('Upstox did not accept the saved TOTP key or PIN.')
+    ).toBeVisible()
+    expect(within(banner).getByText(/save the TOTP key or the PIN again/)).toBeVisible()
+    expect(within(banner).getByText(/off and on does not resume it/)).toBeVisible()
+    expect(banner.textContent?.match(/paused/g)).toHaveLength(1)
     expect(screen.getByText('None while paused')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Test now/ })).toBeDisabled()
+    expect(screen.getByText(refusal)).toBeInTheDocument()
   })
 
   it('says so when the settings cannot be loaded', async () => {

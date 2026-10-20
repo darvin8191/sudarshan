@@ -308,11 +308,13 @@ export default function AutoLogin() {
       {data.paused && (
         <Alert variant="warning">
           <TriangleAlert className="h-4 w-4" aria-hidden="true" />
-          <AlertTitle>Scheduled auto-login is paused</AlertTitle>
+          <AlertTitle>Auto-login is paused</AlertTitle>
           <AlertDescription>
             <p>{data.paused.message}</p>
             <p>
-              To resume, fix the cause, then save the key and PIN again or switch it off and on.
+              To resume, fix the cause, then save the TOTP key or the PIN again. Switching
+              auto-login off and on does not resume it, so the same key and PIN are not sent to
+              Upstox again. Test now waits for the new key or PIN too.
             </p>
           </AlertDescription>
         </Alert>
@@ -387,8 +389,8 @@ export default function AutoLogin() {
                 {test.isPending ? 'Testing...' : 'Test now'}
               </Button>
               <p className="text-sm text-muted-foreground">
-                One login now, at any time. Not available between 09:15 and 15:30 while Upstox is
-                already connected for today.
+                One login now, at any time. Not available while auto-login is paused, or between
+                09:15 and 15:30 while Upstox is already connected for today.
               </p>
               {!data.test.allowed && data.test.reason && !test.isPending && (
                 <p className="inline-flex items-start gap-1.5 text-sm text-amber-800">

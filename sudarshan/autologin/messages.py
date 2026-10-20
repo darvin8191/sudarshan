@@ -13,24 +13,36 @@ from .schedule import HAND_LOGIN_DEADLINE, hhmm
 
 BRAND = "सुदर्शन / SUDARSHAN"
 
+#: Said once wherever a pause begins or is shown. Only a newly saved TOTP key or PIN ends a pause:
+#: switching auto-login off and on does not, so a refused key and PIN are not sent again by mistake.
+PAUSE_NOTE = (
+    "Auto-login is paused until you save the TOTP key or the PIN again on the Auto login page."
+)
+
+# The cause only; a message that pauses gets PAUSE_NOTE added once (``paused_message``).
 MESSAGES = {
     "ok": "Logged in to Upstox.",
-    "invalid_credentials": (
-        "Upstox did not accept the saved TOTP key or PIN. Scheduled auto-login is paused until "
-        "you save both again on the Auto login page."
-    ),
+    "invalid_credentials": "Upstox did not accept the saved TOTP key or PIN.",
     "totp_not_enabled": (
         "TOTP is not turned on for this Upstox account. Turn it on in the Upstox app, then save "
-        "the new TOTP key here. Scheduled auto-login is paused until then."
+        "the new TOTP key here."
     ),
     "not_individual_app": (
         "Upstox allows this login only for an individual (personal) API app, and the API key in "
-        "OpenAlgo belongs to another kind of app. Scheduled auto-login is paused."
+        "OpenAlgo belongs to another kind of app."
+    ),
+    "paused": PAUSE_NOTE,
+    "test_paused": (
+        "Auto-login is paused because Upstox refused the last login. Save the TOTP key or the PIN "
+        "again first, so the same ones are not sent to Upstox twice."
     ),
     "rate_limited": "Upstox is refusing logins for a few minutes because of too many attempts.",
     "network": "Could not reach Upstox. The server's internet connection or Upstox may be down.",
     "upstox_unavailable": "Upstox's login service is not working right now.",
-    "upstox_refused": "Upstox refused the login. The server log has the details.",
+    "upstox_refused": (
+        "Upstox refused the login. Check the TOTP key and PIN in the Upstox app; the server log "
+        "has the details."
+    ),
     "unexpected_response": "Upstox answered in an unexpected way. The server log has the details.",
     "secrets_missing": "The TOTP key or the PIN is not saved yet.",
     "secrets_unreadable": (
@@ -63,29 +75,14 @@ MESSAGES = {
     "crashed": "The login check stopped unexpectedly. The server log has the details.",
 }
 
-#: Codes that are a setup problem rather than a passing failure: told once a day, not per slot.
-SETUP_CODES = frozenset(
-    {
-        "invalid_credentials",
-        "totp_not_enabled",
-        "not_individual_app",
-        "secrets_missing",
-        "secrets_unreadable",
-        "not_configured",
-        "wrong_broker",
-        "no_user",
-        "handoff_rejected",
-        "paused",
-    }
-)
-
 
 def message_for(code: str) -> str:
     return MESSAGES.get(code, MESSAGES["crashed"])
 
 
 def paused_message(paused_code: str) -> str:
-    return f"Scheduled auto-login is paused. {message_for(paused_code)}"
+    """The cause of a pause, then the pause and how to end it, each said once."""
+    return f"{message_for(paused_code)} {PAUSE_NOTE}"
 
 
 def telegram_ok(at: datetime, *, test: bool) -> str:

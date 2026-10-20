@@ -190,6 +190,8 @@ def _test_refusal(vault: Vault, state, now: datetime, fresh: bool) -> str | None
         return "secrets_missing"
     if not (totp_info.readable and pin_info.readable):
         return "secrets_unreadable"
+    if state.paused_code:
+        return "test_paused"
     if fresh and _calendar().in_market_hours(now):
         return "market_hours"
     return rate_refusal(vault, state, now)
@@ -243,7 +245,8 @@ def status():
                     "totp_secret": _secret_view(vault.secret_info(SECRET_TOTP)),
                     "pin": _secret_view(vault.secret_info(SECRET_PIN)),
                 },
-                "paused": {"message": messages.paused_message(state.paused_code)}
+                # The cause only: the page says that auto-login is paused and how to resume.
+                "paused": {"message": messages.message_for(state.paused_code)}
                 if state.paused_code
                 else None,
                 "last_run": last_run,
@@ -261,10 +264,12 @@ def status():
     )
 
 
-def _resume_after_change(vault: Vault) -> None:
-    """A new secret (or switching on again) is the owner's answer to a pause."""
+def _resume_after_new_secret(vault: Vault) -> None:
+    """A newly saved TOTP key or PIN is the owner's answer to a pause; the next refusal pauses
+    again. Switching auto-login off and on is not an answer: it would send the same pair again."""
     if vault.state().paused_code:
         vault.update_status(paused_code=None)
+        logger.info("Auto-login: pause ended by a newly saved secret")
 
 
 @sudarshan_autologin_bp.route("/totp-secret", methods=["POST"])
@@ -280,7 +285,7 @@ def set_totp_secret():
         return jsonify({"status": "error", "message": TOTP_INVALID}), 400
     vault = _vault()
     vault.set_secret(SECRET_TOTP, secret)
-    _resume_after_change(vault)
+    _resume_after_new_secret(vault)
     logger.info("Auto-login: TOTP key saved")
     return jsonify({"status": "success", "message": "TOTP key saved."})
 
@@ -306,7 +311,7 @@ def set_pin():
         return jsonify({"status": "error", "message": PIN_INVALID}), 400
     vault = _vault()
     vault.set_secret(SECRET_PIN, pin)
-    _resume_after_change(vault)
+    _resume_after_new_secret(vault)
     logger.info("Auto-login: PIN saved")
     return jsonify({"status": "success", "message": "PIN saved."})
 
@@ -329,10 +334,7 @@ def set_enabled():
     enabled = (request.get_json(silent=True) or {}).get("enabled")
     if not isinstance(enabled, bool):
         return jsonify({"status": "error", "message": "Send on or off."}), 400
-    vault = _vault()
-    vault.set_enabled(enabled)
-    if enabled:
-        _resume_after_change(vault)
+    _vault().set_enabled(enabled)  # a pause stays: see _resume_after_new_secret
     logger.info("Auto-login switched %s", "on" if enabled else "off")
     return jsonify(
         {"status": "success", "message": "Auto-login is on." if enabled else "Auto-login is off."}

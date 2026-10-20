@@ -84,21 +84,47 @@ def test_snake_case_error_code_and_200_with_error():
 
 
 @pytest.mark.parametrize(
-    ("status", "payload", "code"),
+    ("status", "payload", "code", "pause"),
     [
-        (429, b"slow down", "rate_limited"),
-        (500, b"<html>oops</html>", "upstox_unavailable"),
-        (503, error_payload("UDAPI100500"), "upstox_unavailable"),
-        (400, error_payload("UDAPI100016"), "upstox_refused"),
-        (401, {}, "upstox_refused"),
-        (200, {"status": "success"}, "unexpected_response"),
-        (200, b"not json", "unexpected_response"),
+        (429, b"slow down", "rate_limited", False),
+        (500, b"<html>oops</html>", "upstox_unavailable", False),
+        (503, error_payload("UDAPI100500"), "upstox_unavailable", False),
+        (400, error_payload("UDAPI100016"), "upstox_refused", True),
+        (401, {}, "upstox_refused", True),
+        (200, {"status": "success"}, "unexpected_response", False),
+        (200, b"not json", "unexpected_response", False),
+        (302, b"", "unexpected_response", False),
     ],
 )
-def test_other_answers(status, payload, code):
+def test_other_answers(status, payload, code, pause):
     client, _ = _client(_answer(status, payload))
     result = request_token(client, BASE, FAKE_API_KEY, CODE, FAKE_PIN)
-    assert (result.ok, result.code) == (False, code)
+    assert (result.ok, result.code, result.pause) == (False, code, pause)
+
+
+@pytest.mark.parametrize("status", [400, 401, 403, 404, 409, 422, 451])
+@pytest.mark.parametrize(
+    "payload",
+    [b"", {}, error_payload("UDAPI199999"), error_payload("UDAPI100099")],
+    ids=["empty", "no-code", "unknown-code", "rate-limit-code"],
+)
+def test_every_refusal_except_too_many_requests_pauses(status, payload):
+    """Until Upstox's codes are seen live, a refused key and PIN are never sent again."""
+    client, _ = _client(_answer(status, payload))
+    result = request_token(client, BASE, FAKE_API_KEY, CODE, FAKE_PIN)
+    assert not result.ok and result.pause is True
+    assert result.code in MESSAGES
+
+
+@pytest.mark.parametrize(
+    ("status", "payload"),
+    [(429, b""), (429, error_payload("UDAPI100099")), (502, b""), (504, {})],
+)
+def test_too_many_requests_and_server_trouble_do_not_pause(status, payload):
+    client, _ = _client(_answer(status, payload))
+    result = request_token(client, BASE, FAKE_API_KEY, CODE, FAKE_PIN)
+    assert not result.ok and result.pause is False
+    assert result.cooldown_s == (RATE_LIMIT_COOLDOWN_S if status == 429 else 0)
 
 
 @pytest.mark.parametrize(

@@ -123,13 +123,30 @@ def test_scheduled_success(ready_vault, calendar, caplog):
         assert secret not in caplog.text
 
 
-def test_success_clears_an_earlier_pause_and_cooldown(ready_vault, calendar):
+def test_success_clears_an_earlier_cooldown(ready_vault, calendar):
     ready_vault.update_status(cooldown_until=MONDAY_0835 - timedelta(minutes=1))
-    run = make_run(ready_vault, calendar, kind="test")
-    ready_vault.update_status(paused_code="invalid_credentials")
-    assert run.execute() == EXIT_OK
+    assert make_run(ready_vault, calendar, kind="test").execute() == EXIT_OK
     state = ready_vault.state()
     assert state.paused_code is None and state.cooldown_until is None
+
+
+def test_test_now_is_refused_while_paused(ready_vault, calendar):
+    """A refused key and PIN are not sent again by Test now either, until one is saved again."""
+    ready_vault.update_status(paused_code="invalid_credentials")
+    link, upstox = FakeLink(), FakeUpstoxCall()
+    assert (
+        make_run(ready_vault, calendar, link=link, upstox=upstox, kind="test").execute() == EXIT_OK
+    )
+    assert upstox.calls == [] and link.reports() == []
+    state = ready_vault.state()
+    assert (state.last_outcome, state.last_code) == ("refused", "test_paused")
+    assert "Save the TOTP key or the PIN again first" in state.last_message
+
+    ready_vault.update_status(paused_code=None)  # what saving a secret does
+    assert (
+        make_run(ready_vault, calendar, link=link, upstox=upstox, kind="test").execute() == EXIT_OK
+    )
+    assert len(upstox.calls) == 1
 
 
 def test_code_is_not_used_in_its_last_seconds(ready_vault, calendar):
@@ -202,6 +219,7 @@ def test_test_run_never_replaces_a_live_session_in_market_hours(ready_vault, cal
         ("invalid_credentials", True, "did not accept the saved TOTP key or PIN"),
         ("totp_not_enabled", True, "TOTP is not turned on"),
         ("not_individual_app", True, "individual (personal) API app"),
+        ("upstox_refused", True, "Upstox refused the login"),
     ],
 )
 def test_credential_problems_pause_scheduled_runs(ready_vault, calendar, code, pause, text):
@@ -212,8 +230,11 @@ def test_credential_problems_pause_scheduled_runs(ready_vault, calendar, code, p
     assert (state.last_outcome, state.last_code, state.paused_code) == ("failed", code, code)
     (report,) = link.reports("failed")
     assert text in report["telegram"]
+    assert report["telegram"].count("paused") == 1  # said once
+    assert "save the TOTP key or the PIN again" in report["telegram"]
     assert "Please log in by hand before 09:15." in report["telegram"]
     assert "try again" not in report["telegram"]  # no retry with the same wrong secrets
+    assert state.last_message.count("paused") == 1
 
     # 08:45 and 08:55: paused, so Upstox is not asked again, and the owner is not told again.
     for minutes in (10, 20):
@@ -238,7 +259,8 @@ def test_credential_problems_pause_scheduled_runs(ready_vault, calendar, code, p
         == EXIT_FAILED
     )
     reminders = link.reports("failed")[1:]
-    assert len(reminders) == 1 and "Scheduled auto-login is paused." in reminders[0]["telegram"]
+    assert len(reminders) == 1 and "Auto-login is paused until" in reminders[0]["telegram"]
+    assert reminders[0]["telegram"].count("paused") == 1
 
 
 def test_rate_limited_sets_a_cooldown_and_retries_at_the_next_slot(ready_vault, calendar):

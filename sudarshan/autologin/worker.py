@@ -7,8 +7,13 @@ or an NSE holiday costs nothing:
 
   scheduled  trading day, inside the window (08:30-15:30), switched on, not paused, and OpenAlgo
              does not already hold a login from this trading session
-  test       any day and time, switch on or off; refused 09:15-15:30 on a trading day when
-             OpenAlgo already holds today's login (a new one would cut off the live session)
+  test       any day and time, switch on or off, but not while paused; refused 09:15-15:30 on a
+             trading day when OpenAlgo already holds today's login (a new one would cut off the
+             live session)
+
+A pause begins when Upstox refuses the login for any reason other than "too many requests" and
+ends only when the owner saves the TOTP key or the PIN again: the same refused pair is never sent
+twice by a timer, a restart, the switch or Test now.
 
 The TOTP key, the PIN, the TOTP code and the access token are never logged or printed.
 """
@@ -173,7 +178,11 @@ class AutoLoginRun:
         if fresh and self.calendar.in_market_hours(self.now()):
             return self._finish("refused", "market_hours")
 
-        if self.scheduled and state.paused_code:
+        if state.paused_code:
+            # Upstox refused the saved key and PIN. Only a newly saved one ends the pause, so the
+            # same ones are never sent again by a timer, a restart or Test now.
+            if not self.scheduled:
+                return self._finish("refused", "test_paused")
             # Told already this session, when the pause began or at an earlier wake-up.
             told = (
                 state.last_run_at is not None
@@ -220,7 +229,8 @@ class AutoLoginRun:
                 extra["paused_code"] = result.code
             if result.cooldown_s:
                 extra["cooldown_until"] = self.now() + timedelta(seconds=result.cooldown_s)
-            return self._failed(result.code, setup=result.pause, status=extra)
+            message = messages.paused_message(result.code) if result.pause else None
+            return self._failed(result.code, message=message, setup=result.pause, status=extra)
         self.vault.finish_attempt(attempt_id, outcome="ok", code="ok")
         log.info("Upstox issued a token; handing it to OpenAlgo")
         return self._hand_over(result.token)

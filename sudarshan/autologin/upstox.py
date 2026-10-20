@@ -105,35 +105,38 @@ def request_token(
         token = _access_token(payload)
         if token:
             return LoginResult(ok=True, code="ok", token=token, http_status=status)
-        if not codes:
-            log.error("Upstox answered 200 without an access token")
-            return LoginResult(ok=False, code="unexpected_response", http_status=status)
 
-    for upstox_code in codes:
-        if upstox_code in KNOWN_ERRORS:
-            code, pause = KNOWN_ERRORS[upstox_code]
-            log.warning("Upstox refused the login: %s (HTTP %s)", upstox_code, status)
-            return LoginResult(
-                ok=False,
-                code=code,
-                pause=pause,
-                cooldown_s=RATE_LIMIT_COOLDOWN_S if code == "rate_limited" else 0,
-                upstox_codes=codes,
-                http_status=status,
-            )
-    if status == 429:
-        log.warning("Upstox refused the login: HTTP 429")
-        return LoginResult(
-            ok=False,
-            code="rate_limited",
-            cooldown_s=RATE_LIMIT_COOLDOWN_S,
-            upstox_codes=codes,
-            http_status=status,
-        )
-    if status >= 500:
-        log.warning("Upstox login service error: HTTP %s %s", status, ",".join(codes) or "-")
-        return LoginResult(
-            ok=False, code="upstox_unavailable", upstox_codes=codes, http_status=status
-        )
-    log.error("Upstox refused the login: HTTP %s %s", status, ",".join(codes) or "(no error code)")
-    return LoginResult(ok=False, code="upstox_refused", upstox_codes=codes, http_status=status)
+    known = [KNOWN_ERRORS[upstox_code] for upstox_code in codes if upstox_code in KNOWN_ERRORS]
+    refused = 400 <= status < 500 and status != 429
+    if known:
+        code, pause = known[0]
+    elif status == 429:
+        code, pause = "rate_limited", False
+    elif refused:
+        code, pause = "upstox_refused", True
+    elif status >= 500:
+        code, pause = "upstox_unavailable", False
+    else:  # 200 without a token, or a redirect
+        code, pause = "unexpected_response", False
+    # The error codes above come from Upstox's documentation and have not all been seen live. Until
+    # they have, every refusal except "too many requests" pauses: sending the same TOTP key and PIN
+    # again could lock the Upstox account, and only the owner can tell what is wrong.
+    pause = pause or refused
+    cooldown_s = RATE_LIMIT_COOLDOWN_S if code == "rate_limited" or status == 429 else 0
+    log_level = logging.ERROR if pause or code == "unexpected_response" else logging.WARNING
+    log.log(
+        log_level,
+        "Upstox did not issue a token: HTTP %s, %s -> %s%s",
+        status,
+        ",".join(codes) or "no error code",
+        code,
+        " (auto-login paused)" if pause else "",
+    )
+    return LoginResult(
+        ok=False,
+        code=code,
+        pause=pause,
+        cooldown_s=cooldown_s,
+        upstox_codes=codes,
+        http_status=status,
+    )
