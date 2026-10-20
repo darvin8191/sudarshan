@@ -111,6 +111,14 @@ in brand. Icon "Mor": tile #0E5A73, ring #E3A21A, glyph #FFFFFF. Numbers via
     /trading and the tools share one pooled connection per user.
   - Always keep one slot free for reconnects.
 - Feature flags default **OFF**; order-path changes ship behind a flag and pass Analyzer-mode tests.
+  - A new screen that only opens the existing order ticket (`PlaceOrderDialog`, no new order
+    code) is a new entry point, not an order-path change. It ships without a flag and needs one
+    Analyzer-mode order from that screen after deploy.
+  - Order alerts on Telegram (M6.8) are on by default (owner's broker-app benchmark, 20 Oct
+    2026).
+- The order ticket opens with `productPref.ticketProduct`, one rule for every screen: the
+  product last picked for the segment on this phone, else Intraday (MIS) for derivatives and
+  Delivery (CNC) for cash.
 - Family layer: every write namespace, admin route and bot command must return 401/403 for a viewer
   session (automated test). The family data plane runs on the read-only Analytics Token only.
 

@@ -5,6 +5,95 @@ publish. The owner publishes each release on GitHub. The server's deploy timer t
 outside 09:00-15:45 IST on trading days, keeps backups, and rolls back if the app does not come up
 healthy.
 
+## v0.3.0 (21 Oct 2026)
+
+Everything moves with the live feed, the way Kite, Dhan, Upstox and Fyers do. This release
+includes everything in v0.2.1, so you can skip v0.2.1.
+
+### What changes for you
+- **Watchlist, first on the phone.**
+  - The bottom bar is now Watchlist, Dashboard, Orders, Positions. Tradebook is in the menu.
+  - Your watchlists from the trading screen show as tabs.
+  - Prices move with every tick. The last move shows as a green up or red down arrow, and the
+    day's change is shown in rupees and percent.
+  - You can make, rename and delete lists, add symbols by search, and move or remove them.
+  - Tap a symbol to buy or sell it, open its chart or option chain, or watch live market depth.
+    The phone's Back button closes what is open before it leaves the page.
+- **Order ticket product.** Every order ticket (watchlist and chart) opens with the product you
+  last picked for that segment on this phone. Until you pick one it opens with Intraday (MIS) for
+  F&O, commodity and currency, and Delivery (CNC) for shares. You can still change it in the
+  ticket for one order.
+- **Live charts.** On the trading screen and on the new phone chart:
+  - The candle moves with every tick, and a new candle opens on time by the exchange's clock,
+    even if your phone's clock is wrong.
+  - Day, week and month candles are live. Volume comes from the day's total.
+  - A quiet market shows one flat candle at the end.
+  - On an hourly chart the last candle says "Closes 15:30".
+  - The phone chart opens from the menu (Chart), or by tapping a symbol in Watchlist,
+    Positions, Orders, Holdings or Trades, or an index tile on the dashboard.
+  - Hold a finger on a candle to read it. Buy and Sell are on the same screen. "Keep screen on"
+    stops the phone sleeping while you watch.
+- **Positions, Holdings, Orders, Trades, Scalping and PnL Tracker are live.**
+  - They change the moment Upstox reports a fill, part fill, rejection or cancel, with a short
+    message and a soft sound. You can mute the sound under Profile > Display.
+  - Prices and P&L move with every tick. P&L starts from Upstox's own figure, so profit you
+    have already booked stays in it.
+  - A page you are not looking at asks Upstox nothing until you come back.
+- **Order alerts on Telegram.**
+  - You get a message for a fill, a part fill (how many of how many), a rejection with the
+    broker's words, a cancellation and a stop order's trigger, once each.
+  - After any pause (a restart or an update) the order book is checked again. Anything missed is
+    sent, marked "(found after a pause in order alerts)".
+  - They run on trading days from 08:45 to 16:00, and are on by default.
+- **Status words on every live screen:**
+  - "Real-time" while prices arrive.
+  - "Stale · updated Ns ago" when they stop during market hours.
+  - "Reconnecting" while the connection is down.
+  - "Delayed" while prices are fetched without the live connection.
+  - "Market closed" after the close.
+
+  Old figures are greyed and never shown as current. The green LIVE chip at the top still
+  means your orders go to Upstox, not the sandbox.
+- **Complete live data from Upstox.** Volume, previous close, open interest, IV and greeks now
+  arrive with each tick, so change and % change use the previous close. On Upstox they read
+  about 0% before. Option chain OI and volume no longer wait 30 seconds.
+- **Phone wake and weak networks.**
+  - The Upstox price connection is kept for 5 minutes after your last screen closes, so prices
+    come back at once when the phone wakes.
+  - A slow phone gets the newest prices instead of a backlog, and never delays your other
+    screens.
+- **Fewer Upstox calls.** A burst of 20 fills costs about 72 calls instead of about 149.
+
+### What you must do
+- **Server settings: nothing by hand.** The update sets the 5-minute connection hold and
+  limits live prices to one Upstox connection. It does not overwrite a value you set yourself.
+  - If v0.2.1 was skipped, these two settings take effect from the update after this one.
+  - Until then the connection still stays open during market hours, because Telegram alerts
+    keep it in use.
+- **Sound.** Tap the screen once after opening the app, so the order sound can play.
+- **Analyze-mode check.** Place one order from the watchlist sheet and one from the phone chart,
+  then cancel them, to check the two new ways into the order ticket.
+
+### What is refused now
+- A screen that has taken nothing for 10 seconds while the server was free is disconnected. It
+  reconnects by itself with fresh prices.
+- Prices are no longer re-read on a timer while the live feed works.
+
+### Not in this release yet
+- **Phone cards.** Positions, Orders, Holdings and Trades still use the wide table on a phone.
+  Cards like the broker apps come next.
+- **Live tools.** The option tools (OI tracker, GEX, IV smile, straddle) are not live yet.
+- **Watchlist extras.** Built-in preset lists (NIFTY 50 and others), drag to reorder, and groups.
+- **Product in the ticket.** A product changed inside the order ticket is not remembered; only
+  the watchlist sheet's choice is.
+- **Not yet seen on the live Upstox feed.** The first trading session after this update is the
+  live check for:
+  - the new tick fields;
+  - the price-only switch when depth closes;
+  - the 09:15 candle;
+  - part fills on Telegram;
+  - how far Upstox's order book lags its push.
+
 ## v0.2.1 (20 Oct 2026)
 
 ### What changes for you
