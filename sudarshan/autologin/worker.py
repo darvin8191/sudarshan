@@ -429,7 +429,7 @@ def _main(args, env, clock) -> int:
         return EXIT_CONFIG
     kind = KIND_TEST if args.test else KIND_SCHEDULED
     run_id = (args.run_id or uuid.uuid4().hex)[:40]
-    calendar = TradingCalendar(settings.holidays_file)
+    calendar = TradingCalendar(settings.holidays_file, settings.extra_days_file)
     clock = clock or (lambda: datetime.now(IST))
     now = clock()
     if kind == KIND_SCHEDULED:

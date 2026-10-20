@@ -137,7 +137,8 @@ def test_time_limits_outlast_the_slowest_run():
 
 def test_timer_matches_the_schedule_in_code():
     calendars = _directives(TIMER, "OnCalendar")
-    assert calendars == [f"Mon..Fri *-*-* {t}:00 Asia/Kolkata" for t in SCHEDULE]
+    # Every day: the worker skips closed days itself, and a weekend session can be an extra day.
+    assert calendars == [f"*-*-* {t}:00 Asia/Kolkata" for t in SCHEDULE]
     assert _directives(TIMER, "Unit") == ["sudarshan-autologin.service"]
     assert _directives(TIMER, "Persistent") == ["true"]
     assert _directives(TIMER, "WantedBy") == ["timers.target"]
@@ -160,4 +161,4 @@ def test_systemd_reads_the_units_without_complaint(tmp_path):
         out = subprocess.run(
             ["systemd-analyze", "calendar", calendar], capture_output=True, text=True
         ).stdout
-        assert "Next elapse:" in out and calendar.split()[2] in out
+        assert "Next elapse:" in out and calendar.split()[-2] in out  # the time of day

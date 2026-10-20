@@ -57,6 +57,7 @@ from sudarshan.autologin.handoff import (
 )
 from sudarshan.autologin.launcher import run_test_child
 from sudarshan.autologin.schedule import (
+    EXTRA_TRADING_DAYS_FILE,
     HOLIDAYS_FILE,
     IST,
     SCHEDULE,
@@ -119,7 +120,10 @@ _handoff_lazy = LazyInit(
     lambda: fernet_for(pepper_from(os.environ), HANDOFF_INFO), "sudarshan-autologin-handoff"
 )
 _calendar_lazy = LazyInit(
-    lambda: TradingCalendar(os.environ.get("SUDARSHAN_NSE_HOLIDAYS_FILE") or HOLIDAYS_FILE),
+    lambda: TradingCalendar(
+        os.environ.get("SUDARSHAN_NSE_HOLIDAYS_FILE") or HOLIDAYS_FILE,
+        os.environ.get("SUDARSHAN_NSE_EXTRA_DAYS_FILE") or EXTRA_TRADING_DAYS_FILE,
+    ),
     "sudarshan-autologin-calendar",
 )
 

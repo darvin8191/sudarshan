@@ -595,6 +595,22 @@ def test_scheduled_start_outside_its_time_does_nothing(
     assert not (tmp_path / "db" / "entry_vault.db").exists()
 
 
+def test_an_extra_trading_day_on_a_weekend_gets_its_login(
+    tmp_path, openalgo_env_file, holidays_file, caplog
+):
+    sunday = datetime(2026, 10, 18, 8, 35, tzinfo=IST)
+    caplog.set_level(logging.INFO)
+    env = _entry_env(tmp_path, openalgo_env_file, holidays_file)
+    assert worker.main([], env=env, clock=lambda: sunday) == EXIT_OK
+    assert "not a trading day" in caplog.text
+    caplog.clear()
+    extra = tmp_path / "nse_extra_trading_days.txt"
+    extra.write_text("# a session on a Sunday\n2026-10-18\n")
+    env["SUDARSHAN_NSE_EXTRA_DAYS_FILE"] = str(extra)
+    assert worker.main([], env=env, clock=lambda: sunday) == EXIT_OK
+    assert "not a trading day" not in caplog.text and "not set up yet" in caplog.text
+
+
 def test_no_vault_yet_means_nothing_to_do(tmp_path, openalgo_env_file, holidays_file, caplog):
     """Before the first saved key or PIN there is no vault, and the unit may not create one."""
     caplog.set_level(logging.INFO)

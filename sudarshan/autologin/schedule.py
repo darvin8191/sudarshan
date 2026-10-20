@@ -32,6 +32,9 @@ DEFAULT_WINDOW = "08:30-15:30"
 #: When the owner should have logged in by hand if auto-login could not.
 HAND_LOGIN_DEADLINE = "09:15"
 HOLIDAYS_FILE = "/etc/sudarshan/nse_holidays.txt"
+#: Optional: days the exchange opens although they are a weekend or in the holiday file (a
+#: Muhurat session, a special Saturday session). Same format; missing or empty means none.
+EXTRA_TRADING_DAYS_FILE = "/etc/sudarshan/nse_extra_trading_days.txt"
 
 
 def minutes(hhmm: str) -> int:
@@ -69,20 +72,18 @@ def minute_of_day(at: datetime) -> int:
     return local.hour * 60 + local.minute
 
 
-class TradingCalendar:
-    """Weekends and the NSE holiday file decide the trading days.
+class _DayFile:
+    """A list of dates in a file, read again only when the file changes."""
 
-    A missing or unreadable holiday file leaves only weekends closed (and is logged once): an
-    attempt on a holiday is harmless, a skipped trading day is not.
-    """
-
-    def __init__(self, holidays_file: Path | str = HOLIDAYS_FILE):
-        self.file = Path(holidays_file)
+    def __init__(self, path: Path | str, *, optional: bool, missing_note: str):
+        self.file = Path(path)
+        self.optional = optional
+        self.missing_note = missing_note
         self._mtime: int | None = None
         self._days: set[date] = set()
         self._warned = False
 
-    def holidays(self) -> set[date]:
+    def days(self) -> set[date]:
         try:
             mtime = self.file.stat().st_mtime_ns
             if mtime != self._mtime:
@@ -90,16 +91,50 @@ class TradingCalendar:
                 self._mtime = mtime
                 if bad:
                     log.warning("%s: %d unreadable lines ignored", self.file, bad)
-        except OSError:
+        except FileNotFoundError:
+            if not (self.optional or self._warned):
+                log.warning("%s not found: %s", self.file, self.missing_note)
+                self._warned = True
+            self._mtime, self._days = None, set()
+        except (OSError, UnicodeError):
             if not self._warned:
-                log.warning(
-                    "holiday file %s not readable: only weekends count as closed", self.file
-                )
+                log.warning("%s not readable: %s", self.file, self.missing_note)
                 self._warned = True
             self._mtime, self._days = None, set()
         return self._days
 
+
+class TradingCalendar:
+    """Weekends and the NSE holiday file decide the trading days; the extra-days file reopens one.
+
+    A missing or unreadable holiday file leaves only weekends closed (and is logged once): an
+    attempt on a holiday is harmless, a skipped trading day is not.
+    """
+
+    def __init__(
+        self,
+        holidays_file: Path | str = HOLIDAYS_FILE,
+        extra_days_file: Path | str | None = None,
+    ):
+        self._holidays = _DayFile(
+            holidays_file, optional=False, missing_note="only weekends count as closed"
+        )
+        self._extra = (
+            _DayFile(extra_days_file, optional=True, missing_note="no extra trading days")
+            if extra_days_file
+            else None
+        )
+        self.file = self._holidays.file
+
+    def holidays(self) -> set[date]:
+        return self._holidays.days()
+
+    def extra_days(self) -> set[date]:
+        return self._extra.days() if self._extra else set()
+
     def is_trading_day(self, day: date) -> bool:
+        if day in self.extra_days():
+            return True
         return day.weekday() < 5 and day not in self.holidays()
 
     def _within(self, at: datetime, span: tuple[str, str]) -> bool:

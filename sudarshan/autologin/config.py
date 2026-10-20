@@ -18,7 +18,7 @@ from dotenv import dotenv_values
 
 from sudarshan.vault.store import DB_FILENAME, VAULT_DIR
 
-from .schedule import DEFAULT_WINDOW, HOLIDAYS_FILE, parse_window
+from .schedule import DEFAULT_WINDOW, EXTRA_TRADING_DAYS_FILE, HOLIDAYS_FILE, parse_window
 from .upstox import UPSTOX_API_BASE
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -48,6 +48,7 @@ class Settings:
     env_file: Path
     vault_path: Path
     holidays_file: Path
+    extra_days_file: Path
     openalgo_url: str
     upstox_base: str
     window: tuple[int, int]
@@ -69,6 +70,7 @@ class Settings:
             env_file=Path(get("SUDARSHAN_OPENALGO_ENV_FILE") or app_dir / ".env"),
             vault_path=Path(get("SUDARSHAN_VAULT_DB") or app_dir / "db" / VAULT_DIR / DB_FILENAME),
             holidays_file=Path(get("SUDARSHAN_NSE_HOLIDAYS_FILE") or HOLIDAYS_FILE),
+            extra_days_file=Path(get("SUDARSHAN_NSE_EXTRA_DAYS_FILE") or EXTRA_TRADING_DAYS_FILE),
             openalgo_url=openalgo_url,
             upstox_base=upstox_base,
             window=parse_window(get("SUDARSHAN_AUTOLOGIN_WINDOW") or DEFAULT_WINDOW),

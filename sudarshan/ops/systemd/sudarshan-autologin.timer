@@ -1,16 +1,19 @@
-# सुदर्शन / SUDARSHAN auto-login schedule: 08:35, 08:45 and 08:55 IST, Monday to Friday (M2.20).
-# The worker skips NSE holidays and any day OpenAlgo already holds today's login, so the first
-# success ends the day's work. Mirrors SCHEDULE in sudarshan/autologin/schedule.py (a test
-# compares the two). Persistent: a wake-up missed while the server was down runs at boot, and the
-# worker ignores it unless it falls inside 08:30-15:30 IST on a trading day.
+# सुदर्शन / SUDARSHAN auto-login schedule: 08:35, 08:45 and 08:55 IST, every day (M2.20).
+# Every day, not Monday to Friday, so that a session on a weekend listed in
+# /etc/sudarshan/nse_extra_trading_days.txt (a Muhurat session) gets its login too; on any day
+# that is not a trading day the worker stops at once. It also skips any day OpenAlgo already
+# holds a working login, so the first success ends the day's work. Mirrors SCHEDULE in
+# sudarshan/autologin/schedule.py (a test compares the two). Persistent: a wake-up missed while
+# the server was down runs at boot, and the worker ignores it unless it falls inside 08:30-15:30
+# IST on a trading day.
 
 [Unit]
 Description=SUDARSHAN Upstox auto-login schedule (trading mornings, IST)
 
 [Timer]
-OnCalendar=Mon..Fri *-*-* 08:35:00 Asia/Kolkata
-OnCalendar=Mon..Fri *-*-* 08:45:00 Asia/Kolkata
-OnCalendar=Mon..Fri *-*-* 08:55:00 Asia/Kolkata
+OnCalendar=*-*-* 08:35:00 Asia/Kolkata
+OnCalendar=*-*-* 08:45:00 Asia/Kolkata
+OnCalendar=*-*-* 08:55:00 Asia/Kolkata
 AccuracySec=1s
 Persistent=true
 Unit=sudarshan-autologin.service
