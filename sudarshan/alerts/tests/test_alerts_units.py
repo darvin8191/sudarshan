@@ -77,7 +77,9 @@ def test_service_shape():
     assert _directives(SERVICE, "ExecStart") == [
         "/opt/sudarshan/apps/openalgo/.venv/bin/python -m sudarshan.alerts"
     ]
-    assert _directives(SERVICE, "Restart") == ["always"]
+    # A clean exit (switched off) stays stopped; exit status 2 (a bad setting) is not retried.
+    assert _directives(SERVICE, "Restart") == ["on-failure"]
+    assert _directives(SERVICE, "RestartPreventExitStatus") == ["2"]
     # Optional: a missing file means the defaults.
     assert _directives(SERVICE, "EnvironmentFile") == ["-/etc/sudarshan/alerts.env"]
 
@@ -113,6 +115,10 @@ def test_it_writes_only_its_state_directory():
         # It holds the owner's API key and needs nothing but OpenAlgo on this server.
         ("IPAddressDeny", "any"),
         ("IPAddressAllow", "localhost"),
+        ("ProtectProc", "invisible"),
+        ("RestrictRealtime", "yes"),
+        ("SystemCallArchitectures", "native"),
+        ("LimitCORE", "0"),
     ],
 )
 def test_service_hardening(key, value):
@@ -152,3 +158,8 @@ def test_systemd_reads_the_unit_without_complaint(tmp_path):
         if "sudarshan-alerts" in line and not absent_on_this_machine.search(line)
     ]
     assert complaints == []
+
+
+def test_proc_net_stays_readable_for_the_listener_check():
+    """ProcSubset=pid would hide /proc/net, which loopback.py reads."""
+    assert _directives(SERVICE, "ProcSubset") == []

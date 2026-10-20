@@ -4,7 +4,8 @@
 # Connected only on trading days 08:45-16:00 IST (weekends and /etc/sudarshan/nse_holidays.txt are
 # closed, a day in /etc/sudarshan/nse_extra_trading_days.txt is open); idle otherwise.
 # Docs: sudarshan/alerts/README.md. Optional settings: /etc/sudarshan/alerts.env
-# (root:sudarshan 640); SUDARSHAN_ORDER_ALERTS=off there turns the alerts off.
+# (root:sudarshan 640); SUDARSHAN_ORDER_ALERTS=off there turns the alerts off (the service then
+# exits at once and stays stopped until the next restart).
 # Installed, enabled and restarted by sudarshan-deploy from each release, like sudarshan-feed.
 
 [Unit]
@@ -29,17 +30,22 @@ EnvironmentFile=-/etc/sudarshan/alerts.env
 # openalgo.db is read without write access (see owner.py), so db/ stays read-only here.
 StateDirectory=sudarshan-alerts
 StateDirectoryMode=0700
-Restart=always
+# Restarted after a crash, every 10 s. Not after a clean exit (switched off), and not after
+# exit status 2 (a setting it cannot use): that would only repeat the same error line.
+Restart=on-failure
 RestartSec=10
+RestartPreventExitStatus=2
 # SIGTERM: the stream closes within 1 s plus 5 s for the close handshake, waiting alerts get
 # 5 s to go out; killed after 20 s.
 TimeoutStopSec=20
 MemoryMax=256M
 CPUWeight=50
 UMask=0077
+LimitCORE=0
 NoNewPrivileges=yes
 PrivateTmp=yes
 PrivateDevices=yes
+ProtectProc=invisible
 ProtectSystem=strict
 ProtectHome=yes
 ReadOnlyPaths=-/etc/sudarshan
@@ -51,9 +57,11 @@ ProtectClock=yes
 RestrictNamespaces=yes
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 RestrictSUIDSGID=yes
+RestrictRealtime=yes
 LockPersonality=yes
 SystemCallFilter=@system-service
 SystemCallErrorNumber=EPERM
+SystemCallArchitectures=native
 # It holds the owner's OpenAlgo API key and talks only to OpenAlgo on this server.
 IPAddressDeny=any
 IPAddressAllow=localhost
