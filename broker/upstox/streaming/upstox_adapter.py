@@ -16,10 +16,11 @@ from websocket_proxy.base_adapter import BaseBrokerWebSocketAdapter
 from websocket_proxy.mapping import SymbolMapper
 
 from . import sudarshan_payload  # SUDARSHAN: the normalized tick payload (M11.3)
+from .sudarshan_socket import AdapterSocketMixin  # SUDARSHAN: key modes, feed health
 from .upstox_client import UpstoxWebSocketClient
 
 
-class UpstoxWebSocketAdapter(BaseBrokerWebSocketAdapter):
+class UpstoxWebSocketAdapter(BaseBrokerWebSocketAdapter, AdapterSocketMixin):  # SUDARSHAN
     """
     Upstox V3 WebSocket adapter implementation.
 
@@ -306,11 +307,9 @@ class UpstoxWebSocketAdapter(BaseBrokerWebSocketAdapter):
             )
             return
 
-        # Group instrument keys by Upstox mode string ("ltpc" or "full").
-        keys_by_mode: dict[str, list[str]] = {}
-        for sub in queue:
-            mode_str = self._get_upstox_mode(sub["mode"], sub.get("depth_level", 0))
-            keys_by_mode.setdefault(mode_str, []).append(sub["instrument_key"])
+        # SUDARSHAN (M18.2): each key once, in the mode its records need now.
+        with self.lock:
+            keys_by_mode = self._keys_by_needed_mode(sub["instrument_key"] for sub in queue)
 
         for mode_str, instrument_keys in keys_by_mode.items():
             try:
@@ -345,14 +344,11 @@ class UpstoxWebSocketAdapter(BaseBrokerWebSocketAdapter):
                         f"Not subscribed to {symbol} on {exchange}"
                     )
 
-                # SUDARSHAN (M11.3): one Upstox key serves every mode of a symbol.
-                # When the pool downgrades Depth -> Quote (or Quote -> LTP) it
-                # unsubscribes the higher mode and then subscribes the lower one,
-                # which this adapter already holds and so does not re-send. Sending
-                # `unsub` here dropped the key at Upstox and froze the remaining
-                # subscriber until the next reconnect. While another mode still
-                # needs the key, only the record goes; the key stays in its
-                # current Upstox mode, a superset of what the rest need.
+                # SUDARSHAN (M11.3, M18.2): one Upstox key serves every mode of a
+                # symbol. While another mode's record still needs the key, only this
+                # record goes, and the key is switched down if Upstox now sends more
+                # than the rest need (sudarshan_socket). It leaves Upstox with its
+                # last record, never in between.
                 shares_key = any(
                     sub.get("instrument_key") == instrument_key
                     for cid, sub in self.subscriptions.items()
@@ -362,6 +358,7 @@ class UpstoxWebSocketAdapter(BaseBrokerWebSocketAdapter):
                     self.subscriptions.pop(correlation_id, None)
 
             if shares_key:
+                self._narrow_key(instrument_key)
                 self.logger.debug(
                     f"Released {symbol} on {exchange} mode {mode}; another mode keeps its feed"
                 )
@@ -617,10 +614,9 @@ class UpstoxWebSocketAdapter(BaseBrokerWebSocketAdapter):
         if not all_subs or not self.ws_client:
             return
 
-        keys_by_mode: dict[str, list[str]] = {}
-        for sub in all_subs:
-            mode_str = self._get_upstox_mode(sub["mode"], sub.get("depth_level", 0))
-            keys_by_mode.setdefault(mode_str, []).append(sub["instrument_key"])
+        # SUDARSHAN (M18.2): each key once, in the mode its records need.
+        with self.lock:
+            keys_by_mode = self._keys_by_needed_mode(sub["instrument_key"] for sub in all_subs)
 
         for mode_str, instrument_keys in keys_by_mode.items():
             try:

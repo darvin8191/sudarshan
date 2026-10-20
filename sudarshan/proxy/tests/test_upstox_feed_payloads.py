@@ -21,7 +21,7 @@ import pytest
 # The proxy package imports every broker adapter when it loads, so it has to load before any
 # adapter module does, or the adapter's own import of it is circular.
 import websocket_proxy  # noqa: F401
-from websocket_proxy import connection_manager
+from websocket_proxy import broker_factory, connection_manager
 from websocket_proxy import server as proxy_server
 from websocket_proxy.base_adapter import BaseBrokerWebSocketAdapter
 from websocket_proxy.connection_manager import ConnectionPool
@@ -255,29 +255,43 @@ class _NoZmq:
     context = None
 
 
-class _FakeUpstoxSocket:
-    """What Upstox holds for this connection: instrument key -> Upstox mode."""
+class _UpstoxServer:
+    """Upstox's end of one market-data socket, written to by the real client.
+
+    Applies each request as Upstox does: `sub` streams its keys in its mode (a key
+    already streamed moves to it), `change_mode` moves keys already streamed, `unsub`
+    stops them. `held` is what Upstox is sending: instrument key -> mode.
+    """
 
     def __init__(self) -> None:
-        self.running = True
-        self._connected = True
         self.held: dict[str, str] = {}
-        self.unsubscribed: list[list[str]] = []
+        self.sent: list[tuple[str, list[str], str | None]] = []
 
-    def subscribe(self, keys: list[str], mode: str) -> bool:
+    def send(self, data: bytes, opcode: int | None = None) -> None:
+        request = json.loads(data)
+        method, keys = request["method"], request["data"]["instrumentKeys"]
+        mode = request["data"].get("mode")
+        self.sent.append((method, list(keys), mode))
         for key in keys:
-            self.held[key] = mode
-        return True
+            if method == "sub" or (method == "change_mode" and key in self.held):
+                self.held[key] = mode
+            elif method == "unsub":
+                self.held.pop(key, None)
 
-    def unsubscribe(self, keys: list[str]) -> bool:
-        self.unsubscribed.append(list(keys))
-        for key in keys:
-            self.held.pop(key, None)
-        return True
+    @property
+    def unsubscribed(self) -> list[list[str]]:
+        return [keys for method, keys, _mode in self.sent if method == "unsub"]
 
-    def disconnect(self) -> None:
-        self.running = False
-        self._connected = False
+    def close(self) -> None:
+        pass
+
+
+def _connected_client() -> UpstoxWebSocketClient:
+    """The production client, its socket replaced by _UpstoxServer."""
+    client = UpstoxWebSocketClient("not-a-real-token")
+    client.ws = _UpstoxServer()
+    client._connected = client.running = True
+    return client
 
 
 def _canon(payload: dict[str, Any]) -> str:
@@ -309,10 +323,12 @@ def make_adapter(monkeypatch):
             context.active, context.shared_publisher = False, None
         adapter.published = []
         adapter.publish_market_data = lambda topic, data: adapter.published.append((topic, data))
-        # The production client decodes the frames; a fake one stands in for the socket.
+        # The production client decodes the frames, and another one, its socket
+        # replaced by _UpstoxServer (adapter.upstox), sends the requests.
         adapter.decoder = UpstoxWebSocketClient("not-a-real-token")
         adapter.decoder.callbacks["on_message"] = adapter._on_market_data
-        adapter.ws_client = _FakeUpstoxSocket()
+        adapter.ws_client = _connected_client()
+        adapter.upstox = adapter.ws_client.ws
         # Send batched subscribes at once instead of on a 0.5 s timer thread.
         adapter._start_batch_timer = adapter._process_batch_subscriptions
         adapter.connected = True
@@ -687,7 +703,7 @@ def test_a_quote_subscriber_covered_by_depth_receives_volume_ohlc_and_oi(
     covered = pool.subscribe(symbol, exchange, 2)
     assert covered["status"] == "success" and "covered" in covered["message"]
     assert list(adapter.subscriptions) == [f"{symbol}_{exchange}_3"]  # Upstox sees Depth only
-    assert adapter.ws_client.held == {key: "full"}
+    assert adapter.upstox.held == {key: "full"}
 
     _feed(adapter, option_full_frame())
     assert [topic for topic, _payload in adapter.published] == ["NFO_NIFTY27OCT2625100CE_DEPTH"]
@@ -705,29 +721,163 @@ def test_a_quote_subscriber_covered_by_depth_receives_volume_ohlc_and_oi(
     assert data["ltp"] == 101.5
 
 
+def _option_ltpc_frame() -> pb.FeedResponse:
+    """What Upstox sends for OPTION while it streams the key in `ltpc`."""
+    response = _response()
+    _ltpc(response.feeds[OPTION[2]].ltpc, 101.5, 95.25, ltq=75)
+    return response
+
+
 @pytest.mark.parametrize(("lower", "higher"), [(2, 3), (1, 2), (1, 3)])
 def test_downgrade_keeps_the_upstox_key_for_the_remaining_mode(
     make_adapter, lower: int, higher: int
 ) -> None:
-    """Closing the higher mode must not unsubscribe the key the lower mode still uses."""
+    """Closing the higher mode must not unsubscribe the key the lower mode still uses. Once
+    only LTP is left, the key goes back to `ltpc`, which is all LTP needs."""
     adapter = make_adapter()
     pool = _pool(adapter)
     symbol, exchange, key = OPTION
     assert pool.subscribe(symbol, exchange, lower)["status"] == "success"
     assert pool.subscribe(symbol, exchange, higher)["status"] == "success"
+    assert adapter.upstox.held == {key: "full"}
 
     downgraded = pool.unsubscribe(symbol, exchange, higher)
 
     assert downgraded["status"] == "success"
-    assert adapter.ws_client.unsubscribed == []
-    assert adapter.ws_client.held == {key: "full"}  # a superset of what `lower` needs
+    assert adapter.upstox.unsubscribed == []
+    upstox_mode = "ltpc" if lower == 1 else "full"
+    assert adapter.upstox.held == {key: upstox_mode}
+    assert adapter.ws_client.mode_of(key) == upstox_mode
+    assert sum(len(keys) for keys in adapter.ws_client._keys_by_mode.values()) == 1
     assert list(adapter.subscriptions) == [f"{symbol}_{exchange}_{lower}"]
 
     # The remaining subscriber keeps receiving ticks.
-    topics = _feed(adapter, option_full_frame())
+    frame = _option_ltpc_frame() if lower == 1 else option_full_frame()
+    topics = _feed(adapter, frame)
     suffix = {1: "LTP", 2: "QUOTE"}[lower]
     assert list(topics) == [f"NFO_NIFTY27OCT2625100CE_{suffix}"]
     assert json.loads(topics[f"NFO_NIFTY27OCT2625100CE_{suffix}"])["ltp"] == 101.5
+
+
+@pytest.mark.parametrize(("low", "high"), [(1, 2), (1, 3), (2, 3)])
+def test_the_key_leaves_upstox_when_every_mode_is_released(
+    make_adapter, low: int, high: int
+) -> None:
+    """The lower mode's owner leaves first, then the higher one's. The pool hands each mode
+    back to the adapter, so no forgotten record keeps the key streaming with no owner."""
+    adapter = make_adapter()
+    pool = _pool(adapter)
+    symbol, exchange, key = OPTION
+    assert pool.subscribe(symbol, exchange, low)["status"] == "success"
+    assert pool.subscribe(symbol, exchange, high)["status"] == "success"
+
+    assert pool.unsubscribe(symbol, exchange, low)["status"] == "success"
+    assert list(adapter.subscriptions) == [f"{symbol}_{exchange}_{high}"]
+    assert adapter.upstox.held == {key: "full"}  # still needed by `high`
+
+    assert pool.unsubscribe(symbol, exchange, high)["status"] == "success"
+    assert pool.subscription_map == {} and adapter.subscriptions == {}
+    assert adapter.upstox.held == {}
+    assert adapter.upstox.unsubscribed == [[key]]
+
+
+@pytest.mark.parametrize(("covered", "upstox_mode"), [(2, "full"), (1, "ltpc")])
+def test_a_downgrade_never_drops_the_key_in_between(
+    make_adapter, covered: int, upstox_mode: str
+) -> None:
+    """Depth subscribed first, a lower mode covered by it, then Depth released. The lower
+    mode is taken before Depth goes, so the key never leaves Upstox and nothing is sent
+    again; with only LTP left it is switched to `ltpc` in place."""
+    adapter = make_adapter()
+    pool = _pool(adapter)
+    symbol, exchange, key = OPTION
+    assert pool.subscribe(symbol, exchange, 3)["status"] == "success"
+    assert pool.subscribe(symbol, exchange, covered)["status"] == "success"
+    adapter.upstox.sent.clear()
+
+    assert pool.unsubscribe(symbol, exchange, 3)["status"] == "success"
+
+    switched = [("change_mode", [key], "ltpc")] if upstox_mode == "ltpc" else []
+    assert adapter.upstox.sent == switched
+    assert adapter.upstox.held == {key: upstox_mode}
+    assert list(adapter.subscriptions) == [f"{symbol}_{exchange}_{covered}"]
+
+
+def test_a_refused_downgrade_leaves_the_higher_mode_owned(make_adapter, monkeypatch) -> None:
+    adapter = make_adapter()
+    pool = _pool(adapter)
+    symbol, exchange, key = OPTION
+    assert pool.subscribe(symbol, exchange, 3)["status"] == "success"
+    assert pool.subscribe(symbol, exchange, 1)["status"] == "success"
+    refused = {"status": "error", "message": "refused"}
+    monkeypatch.setattr(adapter, "subscribe", lambda *_args, **_kwargs: refused)
+
+    result = pool.unsubscribe(symbol, exchange, 3)
+
+    assert (result["status"], result["code"]) == ("error", "DOWNGRADE_FAILED")
+    assert set(pool.subscription_map) == {(symbol, exchange, 1), (symbol, exchange, 3)}
+    assert list(adapter.subscriptions) == [f"{symbol}_{exchange}_3"]
+    assert adapter.upstox.held == {key: "full"}
+
+
+def test_a_lower_mode_beside_a_higher_one_never_switches_the_key_down(make_adapter) -> None:
+    """The adapter used directly, without the pool: LTP subscribed while Depth holds the key
+    is sent in the mode the key needs, `full`, so nothing is sent at all."""
+    adapter = make_adapter()
+    _hold(adapter, OPTION, 3)
+    _hold(adapter, OPTION, 1)
+
+    assert adapter.upstox.sent == [("sub", [OPTION[2]], "full")]
+    assert adapter.upstox.held == {OPTION[2]: "full"}
+
+
+def test_a_reconnect_replays_each_key_once_in_the_mode_it_needs(make_adapter) -> None:
+    adapter = make_adapter()
+    _hold(adapter, OPTION, 3)
+    _hold(adapter, OPTION, 1)
+    _hold(adapter, SBIN, 1)
+    fresh = _UpstoxServer()  # Upstox forgets every key when a socket closes
+    adapter.ws_client.ws = adapter.upstox = fresh
+    adapter.ws_client._keys_by_mode.clear()  # as the client's _on_ws_open does
+
+    adapter._on_connect()
+
+    assert sorted(fresh.sent) == [("sub", [SBIN[2]], "ltpc"), ("sub", [OPTION[2]], "full")]
+    assert fresh.held == {OPTION[2]: "full", SBIN[2]: "ltpc"}
+
+
+def test_a_key_released_before_its_subscribe_went_out_is_not_sent(make_adapter) -> None:
+    adapter = make_adapter()
+    adapter._start_batch_timer = lambda: None  # hold the batch, as the 0.5 s timer does
+    _hold(adapter, SBIN, 1)
+    assert adapter.unsubscribe("SBIN", "NSE", 1)["status"] == "success"
+
+    adapter._process_batch_subscriptions()
+
+    assert ("sub", [SBIN[2]], "ltpc") not in adapter.upstox.sent
+    assert adapter.upstox.held == {}
+
+
+def test_the_client_streams_each_key_in_one_mode_and_says_so() -> None:
+    """The per-mode sets follow a key between modes, so the caps count it once."""
+    client = _connected_client()
+    upstox = client.ws
+    key = OPTION[2]
+
+    assert client.subscribe([key], "ltpc") and client.mode_of(key) == "ltpc"
+    assert client.subscribe([key], "full") and client.mode_of(key) == "full"
+    assert client._keys_by_mode == {"full": {key}}  # counted once, in one mode
+    assert client.change_mode([key], "ltpc") and client.mode_of(key) == "ltpc"
+    assert client.unsubscribe([key]) and client.mode_of(key) is None
+
+    assert upstox.sent == [
+        ("sub", [key], "ltpc"),
+        ("sub", [key], "full"),
+        ("change_mode", [key], "ltpc"),
+        ("unsub", [key], None),
+    ]
+    client._connected = False
+    assert not client.change_mode([key], "full")  # never sent on a closed socket
 
 
 def test_the_last_mode_leaving_releases_the_key_and_its_carry_forward(make_adapter) -> None:
@@ -740,6 +890,101 @@ def test_the_last_mode_leaving_releases_the_key_and_its_carry_forward(make_adapt
 
     assert pool.unsubscribe(symbol, exchange, 2)["status"] == "success"
 
-    assert adapter.ws_client.unsubscribed == [[key]]
-    assert adapter.ws_client.held == {}
+    assert adapter.upstox.unsubscribed == [[key]]
+    assert adapter.upstox.held == {}
     assert key not in adapter._last_ltpc and key not in adapter._day_carry
+
+
+# --------------------------------------------------------------------------------------------
+# The broker linger over the real pool and adapter
+# --------------------------------------------------------------------------------------------
+
+
+class _HeldSleep:
+    """The linger's sleep, held until the test lets it run out."""
+
+    def __init__(self) -> None:
+        self.gates: list[asyncio.Event] = []
+
+    async def __call__(self, _seconds: float) -> None:
+        gate = asyncio.Event()
+        self.gates.append(gate)
+        await gate.wait()
+
+
+def _lingering_proxy(monkeypatch, wrapper) -> WebSocketProxy:
+    """A proxy built without __init__, whose broker adapter is `wrapper`, lingering 300 s."""
+    monkeypatch.setattr(proxy_server, "verify_api_key", lambda _key: "owner")
+    monkeypatch.setattr(proxy_server, "get_broker_name", lambda _key: "upstox")
+    monkeypatch.setattr(proxy_server, "create_broker_adapter", lambda _broker: wrapper)
+    proxy = WebSocketProxy.__new__(WebSocketProxy)
+    proxy.clients, proxy.subscriptions, proxy.user_mapping = {}, {}, {}
+    proxy.user_broker_mapping, proxy.broker_adapters = {}, {}
+    proxy.subscription_index = defaultdict(set)
+    proxy.order_subscribers = defaultdict(set)
+    proxy.broker_linger_seconds = 300.0
+    proxy._linger_sleep = _HeldSleep()
+    return proxy
+
+
+def _pooled(adapter: UpstoxWebSocketAdapter):
+    wrapper = broker_factory._PooledAdapterWrapper(UpstoxWebSocketAdapter, "upstox")
+    wrapper._pool, wrapper._user_id = _pool(adapter), "owner"
+    return wrapper
+
+
+async def _screen(proxy: WebSocketProxy, client_id: int, mode: str) -> None:
+    """A browser signs in and subscribes OPTION in `mode`."""
+    proxy.clients[client_id] = _ClientSocket()
+    proxy.subscriptions[client_id] = set()
+    await proxy.authenticate_client(client_id, {"api_key": "k"})
+    symbol, exchange, _key = OPTION
+    request = {"symbols": [{"symbol": symbol, "exchange": exchange}], "mode": mode, "depth": 5}
+    await proxy.subscribe_client(client_id, request)
+
+
+def test_the_linger_keeps_a_socket_only_once_upstox_streams_nothing(
+    make_adapter, monkeypatch
+) -> None:
+    """A positions screen (LTP) and a chart (Depth) on one option both close. Every record
+    is handed back, Upstox stops the key, and only then is the idle socket kept."""
+    adapter = make_adapter()
+    wrapper = _pooled(adapter)
+    proxy = _lingering_proxy(monkeypatch, wrapper)
+
+    async def scenario() -> None:
+        await _screen(proxy, 1, "LTP")
+        await _screen(proxy, 2, "Depth")
+        assert adapter.upstox.held == {OPTION[2]: "full"}
+        await proxy.cleanup_client(1)
+        await proxy.cleanup_client(2)
+        for _ in range(5):
+            await asyncio.sleep(0)
+
+        assert "owner" in proxy._broker_lingers
+        assert wrapper.subscriptions == {} and adapter.subscriptions == {}
+        assert adapter.upstox.held == {}
+        proxy._cancel_all_broker_lingers()
+
+    asyncio.run(scenario())
+
+
+def test_a_record_the_pool_lost_track_of_ends_the_connection_at_once(
+    make_adapter, monkeypatch
+) -> None:
+    """The pool's map is empty but the adapter still streams a key: the socket is not
+    provably idle, so it is closed at once instead of kept."""
+    adapter = make_adapter()
+    wrapper = _pooled(adapter)
+    proxy = _lingering_proxy(monkeypatch, wrapper)
+
+    async def scenario() -> None:
+        await _screen(proxy, 1, "Quote")
+        _hold(adapter, SBIN, 1)  # a record no pool entry owns, streaming at Upstox
+        await proxy.cleanup_client(1)
+
+        assert proxy._lingers() == {}
+        assert "owner" not in proxy.broker_adapters
+        assert adapter.subscriptions == {}  # the pool's disconnect took the adapter down
+
+    asyncio.run(scenario())

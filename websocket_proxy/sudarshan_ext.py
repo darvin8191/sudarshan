@@ -53,6 +53,24 @@ def broker_linger_seconds() -> float:
     return seconds
 
 
+def holds_no_symbol(adapter) -> bool:
+    """True only when the adapter provably holds no subscription at the broker.
+
+    A pooled adapter's own map is the pool's view. The broker adapters behind it
+    keep records of their own, and a record the pool has lost track of still
+    streams its symbol, so each of them must be empty too.
+    """
+    held = getattr(adapter, "subscriptions", None)
+    if held is None or len(held) > 0:
+        return False
+    pool = getattr(adapter, "_pool", None)
+    for inner in list(getattr(pool, "adapters", None) or ()):
+        inner_held = getattr(inner, "subscriptions", None)
+        if inner_held is None or len(inner_held) > 0:
+            return False
+    return True
+
+
 class BrokerLinger(NamedTuple):
     """An idle adapter kept connected, and the task ending it."""
 
@@ -224,10 +242,7 @@ class SudarshanProxyMixin:
         the setting is 0 or the adapter cannot be shown to hold no symbols.
         """
         seconds = self.broker_linger_seconds
-        if seconds <= 0:
-            return False
-        held = getattr(adapter, "subscriptions", None)
-        if held is None or len(held) > 0:
+        if seconds <= 0 or not holds_no_symbol(adapter):
             return False
         self._cancel_broker_linger(user_id)
         loop = aio.get_running_loop()

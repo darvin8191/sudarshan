@@ -22,9 +22,10 @@ from database.auth_db import get_auth_token
 from utils.logging import get_logger
 
 from . import MarketDataFeedV3_pb2
+from .sudarshan_socket import ClientSocketMixin  # SUDARSHAN: change_mode, mode_of (M18.2)
 
 
-class UpstoxWebSocketClient:
+class UpstoxWebSocketClient(ClientSocketMixin):  # SUDARSHAN: mixin (M18.2)
     """
     Upstox V3 WebSocket client implementation (synchronous).
 
@@ -359,7 +360,7 @@ class UpstoxWebSocketClient:
                     json.dumps(message).encode("utf-8"), opcode=websocket.ABNF.OPCODE_BINARY
                 )
                 self._subscriptions.update(chunk)
-                self._keys_by_mode.setdefault(mode, set()).update(chunk)
+                self._move_keys(chunk, mode)  # SUDARSHAN: one mode per key (M18.2)
             self.logger.debug(f"Subscribed to {len(keys)} instruments in {mode} mode")
             return True
         except Exception as e:
@@ -747,7 +748,7 @@ class UpstoxWebSocketClient:
             "method": method,
             "data": {"instrumentKeys": instrument_keys},
         }
-        if mode and method == "sub":
+        if mode and method in ("sub", "change_mode"):  # SUDARSHAN: change_mode too (M18.2)
             message["data"]["mode"] = mode
         return message
 
