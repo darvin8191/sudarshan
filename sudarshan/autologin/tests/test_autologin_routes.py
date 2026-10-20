@@ -464,6 +464,8 @@ PROXIED = [
     {"X-Forwarded-For": "192.0.2.10"},
     {"X-Real-IP": "192.0.2.10"},
     {"Forwarded": "for=192.0.2.10;proto=https"},
+    {"X-Forwarded-Proto": "https"},
+    {"X-Forwarded-Host": "example.invalid"},
     {"x-forwarded-for": "127.0.0.1"},  # any value, any spelling
 ]
 

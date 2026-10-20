@@ -134,7 +134,8 @@ owner's session and the CSRF token.
 
 The worker calls `127.0.0.1:5000` directly, never through nginx. nginx sets `X-Forwarded-For`,
 `X-Real-IP` and `X-Forwarded-Proto` on every proxied location, so a request carrying a forwarding
-header (`X-Forwarded-For`, `X-Real-IP` or `Forwarded`) is answered 404 before its body is read.
+header (`X-Forwarded-For`, `X-Real-IP`, `Forwarded`, `X-Forwarded-Proto` or `X-Forwarded-Host`)
+is answered 404 before its body is read.
 A body without a declared length is refused (411), and one above 16 KB too (413). The two routes
 have no rate limit on purpose: behind nginx every client shares the address 127.0.0.1, so a limit
 there was one bucket for the whole internet, and thirty junk requests a minute locked out the

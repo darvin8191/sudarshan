@@ -106,8 +106,15 @@ TOTP_INVALID = (
 PIN_INVALID = "The PIN must be exactly 6 digits."
 OWNER_ONLY = "Only the account owner can change auto-login."
 
-#: Set by nginx on every proxied location: a request carrying one did not come from this server.
-PROXY_HEADERS = ("X-Forwarded-For", "X-Real-IP", "Forwarded")
+#: Set by nginx on every proxied location (the first three, at least): a request carrying any
+#: of them did not come from this server's worker, which calls 127.0.0.1:5000 directly.
+PROXY_HEADERS = (
+    "X-Forwarded-For",
+    "X-Real-IP",
+    "Forwarded",
+    "X-Forwarded-Proto",
+    "X-Forwarded-Host",
+)
 
 # Nonces of accepted hand-off requests, kept past their expiry so none is accepted twice.
 _seen_nonces = LockedTTLCache(maxsize=256, ttl=2 * SEAL_TTL_S)
