@@ -39,6 +39,13 @@ members, tokens, keys, `.env` content, logs or the private specs. The specs — 
    - When a screen cannot be live (market closed, feed down, no broker login), it says so with a
      stale or closed marker and a label. It never shows old numbers as current.
    - New SUDARSHAN features are built live from day one.
+   - The benchmark is the owner's broker apps: Kite, Dhan, Upstox and Fyers (owner, 20 Oct 2026).
+     - Prices, P&L and depth move with every tick the broker sends.
+     - A fill, rejection or broker square-off shows at once, in the app and on Telegram.
+     - Screens resume within a second or two after the phone wakes, with a visible
+       "reconnecting" state, never silently old numbers.
+     - Candles open on time.
+     - SUDARSHAN adds no delay of its own to what Upstox delivers.
 
 ## Design tokens: the D look (light only; text tokens ≥ 4.5:1 on the #F4F6F8 page)
 Source of truth: `frontend/src/sudarshan/theme.css`; `theme.test.ts` checks every value below.
