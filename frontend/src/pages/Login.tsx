@@ -285,7 +285,7 @@ export default function Login() {
               </div>
 
               <div className="flex flex-col gap-1.5">
-                <div className="flex items-end justify-between gap-3">
+                <div className="flex items-center justify-between gap-3">
                   <Label htmlFor="password" className={LABEL}>
                     Password
                   </Label>
