@@ -22,7 +22,11 @@ export function FullWidthLayout() {
     <SocketProvider>
       <div className="h-screen bg-background flex flex-col overflow-hidden">
         <AnalyzeBanner />
-        <Outlet />
+        {/* The height the banner leaves, so a page sized h-full still ends at
+            the bottom of the screen instead of past it. */}
+        <div className="flex min-h-0 flex-1 flex-col">
+          <Outlet />
+        </div>
       </div>
     </SocketProvider>
   )
