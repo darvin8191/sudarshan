@@ -4,10 +4,38 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useBrokerStore } from '@/stores/brokerStore'
 import { HoldingsCard } from './HoldingsCard'
 
+vi.mock('@/lib/MarketDataManager', () => import('@/test/marketDataHarness'))
+
 const getHoldings = vi.fn()
 vi.mock('@/api/trading', () => ({
-  tradingApi: { getHoldings: (...args: unknown[]) => getHoldings(...args) },
+  tradingApi: {
+    getHoldings: (...args: unknown[]) => getHoldings(...args),
+    getMultiQuotes: vi.fn().mockResolvedValue({ status: 'success', results: [] }),
+  },
 }))
+
+/** The app-wide Socket.IO connection, reduced to what the re-read listens on. */
+const socket = vi.hoisted(() => {
+  const handlers = new Map<string, Set<(...args: unknown[]) => void>>()
+  return {
+    on(event: string, handler: (...args: unknown[]) => void) {
+      handlers.set(event, (handlers.get(event) ?? new Set()).add(handler))
+      return this
+    },
+    off(event: string, handler: (...args: unknown[]) => void) {
+      handlers.get(event)?.delete(handler)
+      return this
+    },
+    fire(event: string, ...args: unknown[]) {
+      for (const handler of [...(handlers.get(event) ?? [])]) handler(...args)
+    },
+  }
+})
+vi.mock('@/components/socket/SocketProvider', () => ({
+  useSocketContext: () => ({ playAlertSound: () => {}, socket }),
+}))
+
+import { feed } from '@/test/marketDataHarness'
 
 const MINUS = '−'
 
@@ -40,6 +68,7 @@ async function show(apiKey: string | null = 'key') {
 
 beforeEach(() => {
   getHoldings.mockReset()
+  feed.reset()
   useBrokerStore.setState({ capabilities: null, isLoaded: false })
 })
 
@@ -81,6 +110,57 @@ describe('HoldingsCard', () => {
     const { container } = await show()
 
     expect(container).toBeEmptyDOMElement()
+  })
+
+  // SUDARSHAN (M6.4): read again when the broker reports an order update, and
+  // the value moves with every tick in between, from the broker's own figures.
+  it('reads the holdings again when the broker reports a fill', async () => {
+    vi.useFakeTimers()
+    getHoldings.mockResolvedValue(answer(2))
+    await show()
+    expect(getHoldings).toHaveBeenCalledTimes(1)
+
+    act(() => socket.fire('order_update', { orderid: '1', order_status: 'complete' }))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500)
+    })
+    expect(getHoldings).toHaveBeenCalledTimes(2)
+    vi.useRealTimers()
+  })
+
+  it('moves the value and the P&L with each tick, from the broker figures', async () => {
+    getHoldings.mockResolvedValue({
+      status: 'success',
+      data: {
+        holdings: [
+          {
+            symbol: 'INFY',
+            exchange: 'NSE',
+            quantity: 10,
+            product: 'CNC',
+            average_price: 1400,
+            ltp: 1500,
+            pnl: 1000,
+            pnlpercent: 7.14,
+          },
+        ],
+        statistics: {
+          totalholdingvalue: 15000,
+          totalinvvalue: 14000,
+          totalprofitandloss: 1000,
+          totalpnlpercentage: 7.14,
+        },
+      },
+    })
+    await show()
+    expect(screen.getByText('₹15,000')).toBeInTheDocument()
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5))
+    })
+    act(() => feed.push('INFY', 'NSE', { ltp: 1510 }))
+    expect(screen.getByText('₹15,100')).toBeInTheDocument()
+    expect(screen.getByText('+₹1,100')).toHaveClass('text-[color:var(--up)]')
   })
 
   it('does not ask a broker that has no holdings, or without an API key', async () => {

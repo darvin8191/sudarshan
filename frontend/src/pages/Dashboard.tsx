@@ -18,6 +18,7 @@ import { useOrderEventRefresh } from '@/hooks/useOrderEventRefresh'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
 import { onModeChange } from '@/stores/themeStore'
+import { useBookSync } from '@/sudarshan/books/useBookSync'
 import { HoldingsCard } from '@/sudarshan/dashboard/HoldingsCard'
 import { useMarketOpen } from '@/sudarshan/dashboard/hooks'
 import { IndexStrip } from '@/sudarshan/dashboard/IndexStrip'
@@ -226,6 +227,9 @@ export default function Dashboard() {
   useOrderEventRefresh(reread, {
     events: ['order_event', 'analyzer_update', 'close_position_event', 'order_update'],
   })
+  // SUDARSHAN: and once when the Socket.IO connection comes back, since
+  // anything the server pushed while it was down went to nobody.
+  useBookSync(reread, { events: [], resyncMs: null, awayMs: null })
 
   // SUDARSHAN: re-read the broker's figures every 45 seconds while the page is
   // in view and a market is open (or not known to be shut), so the base the
@@ -413,7 +417,7 @@ export default function Dashboard() {
               marketOpen={marketOpen}
             />
           )}
-          <HoldingsCard apiKey={apiKey} />
+          <HoldingsCard apiKey={apiKey} marketOpen={marketOpen} />
         </div>
 
         <section
