@@ -25,7 +25,9 @@ export function Providers({ children }: ProvidersProps) {
   return (
     <QueryClientProvider client={queryClient}>
       <MarketDataProvider>{children}</MarketDataProvider>
+      {/* Light only: without this the toaster follows the phone's system dark setting. */}
       <Toaster
+        theme="light"
         position={position}
         richColors
         visibleToasts={maxVisibleToasts}

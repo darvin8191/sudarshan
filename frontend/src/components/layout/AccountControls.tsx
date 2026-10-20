@@ -1,4 +1,4 @@
-import { BarChart3, BookOpen, LogOut, Moon, Sun, Zap } from 'lucide-react'
+import { BarChart3, BookOpen, LogOut, Zap } from 'lucide-react'
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import { authApi } from '@/api/auth'
@@ -20,7 +20,8 @@ import { showToast } from '@/utils/toast'
 
 /**
  * The account end of the app's header: the broker, which mode the platform is
- * in, the switch between Live and Analyze, light or dark, and the profile menu.
+ * in, the switch between Live and Analyze, and the profile menu. There is no
+ * light or dark switch: SUDARSHAN is light only.
  *
  * One component in two places. The navbar shows it on every page, and the
  * charting terminal, which gives the whole viewport to the chart and has no
@@ -35,7 +36,7 @@ import { showToast } from '@/utils/toast'
 export function AccountControls({ variant = 'navbar' }: { variant?: 'navbar' | 'toolbar' }) {
   const navigate = useNavigate()
   const [showLogoutDialog, setShowLogoutDialog] = useState(false)
-  const { mode, appMode, toggleMode, toggleAppMode, isTogglingMode } = useThemeStore()
+  const { appMode, toggleAppMode, isTogglingMode } = useThemeStore()
   const { user, logout } = useAuthStore()
   const toolbar = variant === 'toolbar'
 
@@ -129,19 +130,6 @@ export function AccountControls({ variant = 'navbar' }: { variant?: 'navbar' | '
         ) : (
           <BarChart3 className={glyph} />
         )}
-      </Button>
-
-      {/* Theme Toggle */}
-      <Button
-        variant="ghost"
-        size="icon"
-        className={iconButton}
-        onClick={toggleMode}
-        disabled={appMode !== 'live'}
-        title={mode === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
-        aria-label={mode === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
-      >
-        {mode === 'light' ? <Sun className={glyph} /> : <Moon className={glyph} />}
       </Button>
 
       {/* Profile Dropdown */}

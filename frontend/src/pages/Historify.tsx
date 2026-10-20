@@ -11,14 +11,12 @@ import {
   ListPlus,
   Loader2,
   LogOut,
-  Moon,
   Pause,
   Play,
   Plus,
   RefreshCw,
   Settings,
   Square,
-  Sun,
   Target,
   Trash2,
   TrendingUp,
@@ -254,7 +252,7 @@ function getDateFromPreset(months: number): string {
 }
 
 export default function Historify() {
-  const { appMode, toggleAppMode, mode, toggleMode, isTogglingMode } = useThemeStore()
+  const { appMode, toggleAppMode, isTogglingMode } = useThemeStore()
   const { user, logout } = useAuthStore()
   // Filtered by broker capabilities (hides crypto-only Leverage on Indian brokers, issue #1480)
   const profileMenuItems = useProfileMenuItems()
@@ -1573,19 +1571,6 @@ export default function Historify() {
               ) : (
                 <BarChart3 className="h-4 w-4" />
               )}
-            </Button>
-
-            {/* Theme Toggle */}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8"
-              onClick={toggleMode}
-              disabled={appMode !== 'live'}
-              title={mode === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
-              aria-label={mode === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
-            >
-              {mode === 'light' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </Button>
 
             {/* Charts Link - navigates with first available symbol */}

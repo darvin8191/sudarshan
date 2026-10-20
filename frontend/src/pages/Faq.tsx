@@ -1,13 +1,4 @@
-import {
-  BookOpen,
-  ClipboardList,
-  Download,
-  HelpCircle,
-  Menu,
-  MessageCircle,
-  Moon,
-  Sun,
-} from 'lucide-react'
+import { BookOpen, ClipboardList, Download, HelpCircle, Menu, MessageCircle } from 'lucide-react'
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { Footer } from '@/components/layout/Footer'
@@ -27,7 +18,6 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet'
-import { useThemeStore } from '@/stores/themeStore'
 
 const faqData = [
   {
@@ -128,7 +118,6 @@ const faqData = [
 ]
 
 export default function Faq() {
-  const { mode, toggleMode } = useThemeStore()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   const navLinks = [
@@ -261,14 +250,6 @@ export default function Faq() {
             <Link to="/download">
               <Button size="sm">Download</Button>
             </Link>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={toggleMode}
-              aria-label={mode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-            >
-              {mode === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
-            </Button>
           </div>
         </nav>
       </header>

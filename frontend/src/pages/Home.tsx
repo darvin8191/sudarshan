@@ -11,12 +11,10 @@ import {
   LogIn,
   Menu,
   MessageCircle,
-  Moon,
   Server,
   ShieldCheck,
   Sigma,
   Sparkles,
-  Sun,
   Wand2,
   Zap,
 } from 'lucide-react'
@@ -34,7 +32,6 @@ import {
   SheetTrigger,
 } from '@/components/ui/sheet'
 import { tools } from '@/lib/tools'
-import { useThemeStore } from '@/stores/themeStore'
 
 const integrations = [
   'Amibroker',
@@ -96,7 +93,6 @@ const platformDesks = [
 ]
 
 export default function Home() {
-  const { mode, toggleMode } = useThemeStore()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   const navLinks = [
@@ -239,14 +235,6 @@ export default function Home() {
             <Link to="/download">
               <Button size="sm">Download</Button>
             </Link>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={toggleMode}
-              aria-label={mode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-            >
-              {mode === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
-            </Button>
           </div>
         </nav>
       </header>

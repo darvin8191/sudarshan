@@ -12,13 +12,11 @@ import {
   Key,
   Lock,
   Mail,
-  Moon,
   Palette,
   RefreshCw,
   RotateCcw,
   Send,
   Shield,
-  Sun,
   User,
   Volume2,
   VolumeX,
@@ -58,24 +56,8 @@ import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { type AlertCategories, type ToastPosition, useAlertStore } from '@/stores/alertStore'
 import { useAuthStore } from '@/stores/authStore'
-import { type ThemeColor, type ThemeMode, useThemeStore } from '@/stores/themeStore'
+import { type ThemeColor, useThemeStore } from '@/stores/themeStore'
 import { showToast, toast } from '@/utils/toast'
-
-// Professional themes suitable for trading terminals
-const THEME_MODES: { value: ThemeMode; label: string; icon: typeof Sun; description: string }[] = [
-  {
-    value: 'light',
-    label: 'Light',
-    icon: Sun,
-    description: 'Clean, bright interface for daytime trading',
-  },
-  {
-    value: 'dark',
-    label: 'Dark',
-    icon: Moon,
-    description: 'Reduced eye strain for extended sessions',
-  },
-]
 
 // Accent colors for customization
 const ACCENT_COLORS: { value: ThemeColor; label: string; color: string }[] = [
@@ -707,15 +689,6 @@ export default function ProfilePage() {
     } finally {
       setIsDebugging(false)
     }
-  }
-
-  const handleThemeModeChange = (newMode: ThemeMode) => {
-    if (isAnalyzerMode) {
-      showToast.error('Cannot change theme while in Analyzer Mode', 'system')
-      return
-    }
-    setMode(newMode)
-    showToast.success(`Theme changed to ${newMode}`, 'system')
   }
 
   const handleAccentColorChange = (newColor: ThemeColor) => {
@@ -1992,50 +1965,6 @@ export default function ProfilePage() {
             </CardHeader>
           </Card>
 
-          {/* Theme Mode Selection */}
-          <Card className={isAnalyzerMode ? 'opacity-60' : ''}>
-            <CardHeader>
-              <CardTitle>Theme Mode</CardTitle>
-              <CardDescription>Choose between light and dark interface</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {THEME_MODES.map((themeOption) => {
-                  const Icon = themeOption.icon
-                  const isSelected = mode === themeOption.value && !isAnalyzerMode
-                  return (
-                    <button
-                      type="button"
-                      key={themeOption.value}
-                      onClick={() => handleThemeModeChange(themeOption.value)}
-                      disabled={isAnalyzerMode}
-                      className={`flex items-start gap-4 p-4 rounded-lg border-2 transition-all text-left ${
-                        isSelected
-                          ? 'border-primary bg-primary/5'
-                          : 'border-border hover:border-primary/50'
-                      } ${isAnalyzerMode ? 'cursor-not-allowed' : 'cursor-pointer'}`}
-                    >
-                      <div
-                        className={`p-2 rounded-lg ${isSelected ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}
-                      >
-                        <Icon className="h-5 w-5" />
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium">{themeOption.label}</span>
-                          {isSelected && <Check className="h-4 w-4 text-primary" />}
-                        </div>
-                        <p className="text-sm text-muted-foreground mt-1">
-                          {themeOption.description}
-                        </p>
-                      </div>
-                    </button>
-                  )
-                })}
-              </div>
-            </CardContent>
-          </Card>
-
           {/* Accent Color Selection */}
           <Card className={isAnalyzerMode ? 'opacity-60' : ''}>
             <CardHeader>
@@ -2079,10 +2008,6 @@ export default function ProfilePage() {
               <p>
                 <strong>Light Mode:</strong> Optimized for daytime use with high contrast and
                 readability.
-              </p>
-              <p>
-                <strong>Dark Mode:</strong> Reduces eye strain during extended trading sessions,
-                especially in low-light environments.
               </p>
               <p>
                 <strong>Analyzer Mode:</strong> When in sandbox/analyzer mode, a distinct purple

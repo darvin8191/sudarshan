@@ -291,19 +291,19 @@ describe('terminal header', () => {
     const dashboard = screen.getByRole('link', { name: 'Dashboard' })
     expect(dashboard).toHaveAttribute('href', '/dashboard')
     expect(screen.getByRole('button', { name: 'Switch to Analyze mode' })).toBeEnabled()
-    expect(screen.getByRole('button', { name: /^Switch to (dark|light) mode$/ })).toBeEnabled()
+    // Light only: there is no light or dark switch to pin, and none may come back.
+    expect(screen.queryByRole('button', { name: /(dark|light) mode/i })).toBeNull()
     const profile = screen.getByRole('button', { name: 'Open user menu' })
     expect(screen.getByText('fixturebroker')).toBeInTheDocument()
     expect(screen.getByText('Live', { exact: true })).toBeInTheDocument()
 
-    // All four sit outside the chart toolbar's scrolling region, so a narrow
+    // All three sit outside the chart toolbar's scrolling region, so a narrow
     // screen scrolls the chart controls and never these.
     const host = container.querySelector('[data-workspace-toolbar]') as HTMLElement
     for (const control of [
       dashboard,
       profile,
       screen.getByRole('button', { name: 'Switch to Analyze mode' }),
-      screen.getByRole('button', { name: /^Switch to (dark|light) mode$/ }),
     ]) {
       expect(host.contains(control)).toBe(false)
       expect(host.parentElement?.contains(control)).toBe(true)

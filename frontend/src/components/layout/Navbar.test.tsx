@@ -60,6 +60,13 @@ describe('Navbar', () => {
     expect(currentLinks(sheet)).toEqual([trading])
   })
 
+  it('offers no light or dark switch, because the app is light only', () => {
+    renderNavbar('/dashboard')
+
+    expect(screen.queryByRole('button', { name: /(dark|light) mode/i })).toBeNull()
+    expect(screen.getByRole('button', { name: /^Switch to (Analyze|Live) mode$/ })).toBeVisible()
+  })
+
   it('marks the active quick-access sheet link as current', async () => {
     const user = userEvent.setup()
     renderNavbar('/profile')

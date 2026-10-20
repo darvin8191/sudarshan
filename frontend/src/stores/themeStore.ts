@@ -1,6 +1,12 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
+/**
+ * SUDARSHAN is light only. `mode` stays in the store because upstream readers
+ * branch on it, but it is always 'light': a persisted 'dark' is read back as
+ * light, setMode('dark') and toggleMode() do nothing, and nothing in this store
+ * puts the `.dark` class on <html>.
+ */
 export type ThemeMode = 'light' | 'dark'
 export type AppMode = 'live' | 'analyzer'
 export type ThemeColor =
@@ -32,6 +38,14 @@ const notifyModeChange = (newMode: AppMode) => {
   modeChangeListeners.forEach((cb) => cb(newMode))
 }
 
+/** The mode classes on <html>: `analyzer` or none. Never `dark`. */
+const applyModeClasses = (appMode: AppMode) => {
+  if (typeof document === 'undefined') return
+  const root = document.documentElement
+  root.classList.remove('analyzer', 'sandbox', 'dark')
+  if (appMode === 'analyzer') root.classList.add('analyzer')
+}
+
 interface ThemeStore {
   mode: ThemeMode
   color: ThemeColor
@@ -55,13 +69,9 @@ export const useThemeStore = create<ThemeStore>()(
       isTogglingMode: false,
 
       setMode: (mode) => {
-        // Only allow theme change in live mode
-        if (get().appMode !== 'live') return
-
+        // Light only: 'dark' is refused.
+        if (mode !== 'light') return
         set({ mode })
-        if (typeof document !== 'undefined') {
-          document.documentElement.classList.toggle('dark', mode === 'dark')
-        }
       },
 
       setColor: (color) => {
@@ -77,19 +87,8 @@ export const useThemeStore = create<ThemeStore>()(
       setAppMode: (appMode) => {
         const previousMode = get().appMode
         set({ appMode })
-        if (typeof document !== 'undefined') {
-          // Remove all mode classes first
-          document.documentElement.classList.remove('analyzer', 'sandbox', 'dark')
-
-          if (appMode === 'live') {
-            // Restore the saved light/dark mode when returning to live
-            const savedMode = get().mode
-            document.documentElement.classList.toggle('dark', savedMode === 'dark')
-          } else {
-            // Analyzer mode uses its own dark purple theme (like dracula)
-            document.documentElement.classList.add('analyzer')
-          }
-        }
+        // Analyze mode's palette hangs off the `analyzer` class alone.
+        applyModeClasses(appMode)
         // Notify listeners if mode changed
         if (previousMode !== appMode) {
           notifyModeChange(appMode)
@@ -97,14 +96,7 @@ export const useThemeStore = create<ThemeStore>()(
       },
 
       toggleMode: () => {
-        // Only allow toggle in live mode
-        if (get().appMode !== 'live') return
-
-        const newMode = get().mode === 'light' ? 'dark' : 'light'
-        set({ mode: newMode })
-        if (typeof document !== 'undefined') {
-          document.documentElement.classList.toggle('dark', newMode === 'dark')
-        }
+        // Light only: there is nothing to toggle to. Kept so upstream callers compile.
       },
 
       // Toggle app mode via backend API
@@ -176,18 +168,17 @@ export const useThemeStore = create<ThemeStore>()(
         color: state.color,
         appMode: state.appMode, // Persist appMode for visual continuity across logout
       }),
+      // A 'dark' saved by an earlier build is read back as light.
+      merge: (persisted, current) => ({
+        ...current,
+        ...(persisted as Partial<ThemeStore> | undefined),
+        mode: 'light',
+      }),
       onRehydrateStorage: () => (state) => {
         // Apply theme on rehydration
         if (state && typeof document !== 'undefined') {
-          document.documentElement.classList.remove('analyzer', 'sandbox', 'dark')
-
           // Apply persisted appMode for visual continuity
-          if (state.appMode === 'analyzer') {
-            document.documentElement.classList.add('analyzer')
-          } else {
-            // Live mode - apply light/dark preference
-            document.documentElement.classList.toggle('dark', state.mode === 'dark')
-          }
+          applyModeClasses(state.appMode)
           document.documentElement.setAttribute('data-theme', state.color)
         }
       },
