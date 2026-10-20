@@ -1,0 +1,14 @@
+<!-- सुदर्शन app icon: सु in Tiro Devanagari Sanskrit 400 (SIL OFL 1.1, The Indigo Project Authors) shaped with HarfBuzz and drawn as paths, so it needs no font. Glyph and ring stay inside the maskable safe zone (radius 40%). frontend/scripts/render-sudarshan-icons.mjs renders the PNG and ICO files from it; the root classes "full-bleed" (square tile, for iOS) and "small" (no ring, larger and bolder glyph, for 16 and 32 px) select its variants. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="सुदर्शन">
+  <style>
+    .full-bleed #tile { rx: 0; }
+    .small #ring { display: none; }
+    .small #glyph { transform: translate(248px, 261px) scale(1.75) translate(-256px, -256px); }
+    .small #glyph path { stroke: #FFFFFF; stroke-width: 20px; stroke-linejoin: round; }
+  </style>
+  <rect id="tile" width="512" height="512" rx="112" fill="#284CAC"/>
+  <circle id="ring" cx="256" cy="256" r="194" fill="none" stroke="#C46D00" stroke-width="12"/>
+  <g id="glyph">
+    <path fill="#FFFFFF" transform="matrix(0.26922 0 0 0.26922 164.60 294.64)" d="M316 20H306L129 -196Q80 -257 63 -288.5Q46 -320 46 -342Q46 -374 97 -374Q112 -374 138.5 -372Q165 -370 183 -368Q188 -393 189.5 -425.5Q191 -458 191 -482Q191 -504 190.5 -518.5Q190 -533 189 -545H6L-28 -610V-620H673L707 -555V-545H590L592 10H582L502 -42L503 -239Q462 -224 417 -224Q389 -224 345 -235.5Q301 -247 244 -293Q220 -249 159 -237L367 -22ZM260 -333Q272 -326 294.5 -318.5Q317 -311 342.5 -306Q368 -301 391 -301Q426 -301 457 -312.5Q488 -324 504 -338L506 -545H270Q272 -526 272.5 -503Q273 -480 273 -471Q273 -427 269.5 -391Q266 -355 260 -333ZM477 139 423 77Q447 55 473 42Q499 29 532 29Q573 29 607 49Q641 69 661 101Q681 133 681 169Q681 219 643.5 249Q606 279 554 279Q507 279 459 257Q411 235 367.5 202Q324 169 289.5 135.5Q255 102 236 80L271 37H278Q329 101 369.5 139Q410 177 446 194Q482 211 519 211Q567 211 593.5 189.5Q620 168 620 138Q620 113 604.5 102Q589 91 568 91Q539 91 516.5 108Q494 125 477 139Z"/>
+  </g>
+</svg>
