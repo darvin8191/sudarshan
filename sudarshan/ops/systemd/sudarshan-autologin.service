@@ -5,7 +5,7 @@
 # the deploy tool restarting this unit is harmless. "Test now" runs the same program from
 # OpenAlgo, with the same settings.
 # Docs: sudarshan/autologin/README.md. Optional settings: /etc/sudarshan/autologin.env.
-# Assumes OpenAlgo itself runs as the sudarshan user (the vault in db/ is mode 600).
+# OpenAlgo runs as the same user (sudarshan) and owns the vault directory (mode 700).
 
 [Unit]
 Description=SUDARSHAN Upstox auto-login (one attempt)
@@ -38,13 +38,21 @@ CPUWeight=50
 UMask=0077
 NoNewPrivileges=yes
 PrivateTmp=yes
+PrivateDevices=yes
 ProtectSystem=strict
 ProtectHome=yes
-# The only writes: the vault (db/sudarshan_vault.db and its -wal/-shm). Logs go to the journal.
-ReadWritePaths=/opt/sudarshan/apps/openalgo/db
+# The only writes: the vault and its -wal/-shm files. Logs go to the journal. "-": until OpenAlgo
+# creates the directory (the first saved TOTP key or PIN) the unit starts and finds nothing to do.
+ReadWritePaths=-/opt/sudarshan/apps/openalgo/db/sudarshan-vault
 ReadOnlyPaths=-/etc/sudarshan
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
+ProtectKernelLogs=yes
 ProtectControlGroups=yes
+ProtectClock=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 RestrictSUIDSGID=yes
 LockPersonality=yes
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM

@@ -20,6 +20,7 @@ from .store import (
     SecretUnreadable,
     Vault,
     default_vault_path,
+    move_legacy_vault,
     utcnow,
 )
 
@@ -36,6 +37,7 @@ __all__ = [
     "derive_key",
     "fernet_for",
     "key_fingerprint",
+    "move_legacy_vault",
     "pepper_from",
     "utcnow",
 ]

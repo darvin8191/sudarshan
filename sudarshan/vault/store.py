@@ -1,4 +1,4 @@
-"""The vault database: ``db/sudarshan_vault.db`` next to OpenAlgo's own databases.
+"""The vault database: ``db/sudarshan-vault/sudarshan_vault.db``, beside OpenAlgo's databases.
 
 Tables:
     secrets             one row per secret: Fernet ciphertext under the vault key, never plaintext
@@ -7,7 +7,9 @@ Tables:
 
 Two processes write it: OpenAlgo (secrets, the switch) and the auto-login worker (run results).
 Every status write is a targeted UPDATE of the columns its writer owns, so neither can undo the
-other's change. The file is created with mode 600; SQLite gives its -wal/-shm files the same mode.
+other's change. The directory is created with mode 700 and the file with mode 600; SQLite gives
+its -wal/-shm files the same mode. The directory exists so that the auto-login unit can be
+allowed to write the vault and nothing else (``ReadWritePaths``).
 Engines come from OpenAlgo's ``database.engine_factory`` (NullPool, and inside OpenAlgo the
 cooperative SQLite lock wait that keeps the eventlet hub running).
 """
@@ -34,6 +36,10 @@ from .keys import VAULT_INFO, fernet_for, key_fingerprint
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DB_FILENAME = "sudarshan_vault.db"
+#: The vault's own directory under db/ (mode 700): the auto-login unit may write only here.
+VAULT_DIR = "sudarshan-vault"
+#: Where the first version kept the vault, directly in db/ next to OpenAlgo's databases.
+LEGACY_PATH = REPO_ROOT / "db" / DB_FILENAME
 #: Rows kept in autologin_attempts; older ones are pruned after each run.
 ATTEMPT_RETENTION = timedelta(days=30)
 
@@ -132,9 +138,37 @@ class Attempt:
 
 
 def default_vault_path() -> Path:
-    """``db/sudarshan_vault.db`` in the OpenAlgo checkout (``SUDARSHAN_VAULT_DB`` overrides)."""
+    """``db/sudarshan-vault/sudarshan_vault.db`` in the OpenAlgo checkout.
+
+    ``SUDARSHAN_VAULT_DB`` overrides it (tests, or a vault kept elsewhere).
+    """
     override = os.environ.get("SUDARSHAN_VAULT_DB")
-    return Path(override) if override else REPO_ROOT / "db" / DB_FILENAME
+    return Path(override) if override else REPO_ROOT / "db" / VAULT_DIR / DB_FILENAME
+
+
+def move_legacy_vault(path: Path | None = None, legacy: Path = LEGACY_PATH) -> bool:
+    """Move a vault left at ``db/sudarshan_vault.db`` into its own directory; True if moved.
+
+    OpenAlgo calls this when it starts: the worker cannot, because the only place its unit may
+    write is the vault directory. It acts only when the old file exists and the new one does not,
+    never on a vault chosen with ``SUDARSHAN_VAULT_DB``, and nothing has the old file open then.
+    The write-ahead log and the shared-memory file go first and the database file last, so a move
+    cut short is finished by the next start and nothing committed is left behind.
+    """
+    if path is None:
+        if os.environ.get("SUDARSHAN_VAULT_DB"):
+            return False
+        path = default_vault_path()
+    if path == legacy or path.exists() or not legacy.exists():
+        return False
+    ensure_private_dir(path.parent)
+    for suffix in ("-wal", "-shm"):
+        side = Path(f"{legacy}{suffix}")
+        if side.exists():
+            os.replace(side, Path(f"{path}{suffix}"))
+    os.replace(legacy, path)
+    ensure_private_file(path)
+    return True
 
 
 def utcnow() -> datetime:
@@ -154,9 +188,23 @@ def _from_db(value: datetime | None) -> datetime | None:
     return None if value is None else value.replace(tzinfo=UTC)
 
 
+def ensure_private_dir(directory: Path) -> None:
+    """Create ``directory`` with mode 700 if missing; narrow the vault's own directory to 700.
+
+    Only a directory named ``VAULT_DIR`` is narrowed: a vault kept elsewhere by
+    ``SUDARSHAN_VAULT_DB`` may sit in a directory that is not ours to change.
+    """
+    directory.parent.mkdir(parents=True, exist_ok=True)
+    with contextlib.suppress(FileExistsError):
+        directory.mkdir(mode=0o700)
+    if directory.name == VAULT_DIR and stat.S_IMODE(directory.stat().st_mode) & 0o077:
+        with contextlib.suppress(OSError):
+            os.chmod(directory, 0o700)
+
+
 def ensure_private_file(path: Path) -> None:
     """Create ``path`` empty with mode 600 if missing; narrow it to 600 if it is wider."""
-    path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_private_dir(path.parent)
     try:
         fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     except FileExistsError:

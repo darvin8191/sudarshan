@@ -11,6 +11,7 @@ import pytest
 
 from sudarshan.autologin import launcher, worker
 from sudarshan.autologin.schedule import SCHEDULE
+from sudarshan.vault.store import VAULT_DIR, default_vault_path
 
 REPO = Path(__file__).resolve().parents[3]
 UNITS = REPO / "sudarshan" / "ops" / "systemd"
@@ -66,10 +67,41 @@ def test_service_shape():
     assert _directives(SERVICE, "ExecStart") == [
         "/opt/sudarshan/apps/openalgo/.venv/bin/python -m sudarshan.autologin"
     ]
-    assert _directives(SERVICE, "ProtectSystem") == ["strict"]
-    assert _directives(SERVICE, "ReadWritePaths") == ["/opt/sudarshan/apps/openalgo/db"]
     assert _directives(SERVICE, "SuccessExitStatus") == ["75"]
     assert "[Install]" not in SERVICE.read_text()  # only the timer starts it
+
+
+def test_service_may_write_the_vault_and_nothing_else(monkeypatch):
+    monkeypatch.delenv("SUDARSHAN_VAULT_DB", raising=False)  # the shipped default, not a test's
+    assert _directives(SERVICE, "ProtectSystem") == ["strict"]
+    assert _directives(SERVICE, "ProtectHome") == ["yes"]
+    (writable,) = _directives(SERVICE, "ReadWritePaths")
+    app_dir = _directives(SERVICE, "WorkingDirectory")[0]
+    assert writable == f"-{app_dir}/db/{VAULT_DIR}"
+    assert default_vault_path().parent.name == VAULT_DIR  # where the code keeps it
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("PrivateTmp", "yes"),
+        ("PrivateDevices", "yes"),
+        ("ProtectKernelTunables", "yes"),
+        ("ProtectKernelModules", "yes"),
+        ("ProtectKernelLogs", "yes"),
+        ("ProtectControlGroups", "yes"),
+        ("ProtectClock", "yes"),
+        ("RestrictNamespaces", "yes"),
+        ("RestrictAddressFamilies", "AF_UNIX AF_INET AF_INET6"),
+        ("RestrictSUIDSGID", "yes"),
+        ("LockPersonality", "yes"),
+        ("SystemCallFilter", "@system-service"),
+        ("SystemCallErrorNumber", "EPERM"),
+        ("UMask", "0077"),
+    ],
+)
+def test_service_hardening(key, value):
+    assert _directives(SERVICE, key) == [value]
 
 
 def test_service_waits_for_openalgo_but_never_starts_it():

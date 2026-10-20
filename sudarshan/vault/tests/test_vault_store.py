@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import base64
 import os
+import shutil
 import sqlite3
 import stat
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from cryptography.fernet import Fernet, InvalidToken
@@ -17,11 +19,14 @@ from sudarshan.vault import (
     SecretUnreadable,
     Vault,
     VaultKeyError,
+    default_vault_path,
     derive_key,
     fernet_for,
     key_fingerprint,
+    move_legacy_vault,
     pepper_from,
 )
+from sudarshan.vault.store import LEGACY_PATH, VAULT_DIR
 
 PEPPER = "a1" * 32  # fake
 OTHER_PEPPER = "b2" * 32  # fake
@@ -179,6 +184,84 @@ def test_existing_wide_file_is_narrowed(path):
     os.chmod(path, 0o644)
     Vault(path, pepper=PEPPER).state()
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+def test_default_place_is_its_own_directory(monkeypatch):
+    monkeypatch.delenv("SUDARSHAN_VAULT_DB", raising=False)
+    default = default_vault_path()
+    assert (default.parent.name, default.parent.parent.name) == (VAULT_DIR, "db")
+    assert default.name == LEGACY_PATH.name and LEGACY_PATH.parent == default.parent.parent
+
+
+def test_the_vault_directory_is_private(tmp_path):
+    vault_path = tmp_path / "db" / VAULT_DIR / "sudarshan_vault.db"
+    Vault(vault_path, pepper=PEPPER).state()
+    assert stat.S_IMODE(vault_path.parent.stat().st_mode) == 0o700
+    os.chmod(vault_path.parent, 0o755)
+    Vault(vault_path, pepper=PEPPER).state()
+    assert stat.S_IMODE(vault_path.parent.stat().st_mode) == 0o700
+    # A directory chosen by hand for SUDARSHAN_VAULT_DB is not ours to narrow.
+    elsewhere = tmp_path / "shared"
+    elsewhere.mkdir(mode=0o755)
+    os.chmod(elsewhere, 0o755)
+    Vault(elsewhere / "v.db", pepper=PEPPER).state()
+    assert stat.S_IMODE(elsewhere.stat().st_mode) == 0o755
+
+
+def _legacy_vault(tmp_path):
+    """The first version's vault in db/, as a killed process leaves it: the last commit (a
+    pause) is only in the write-ahead log, not yet in the database file."""
+    live = tmp_path / "live" / "sudarshan_vault.db"
+    old = Vault(live, pepper=PEPPER)
+    old.set_secret("upstox_pin", "246813")
+    old.set_enabled(True)
+    keeper = sqlite3.connect(live)
+    keeper.execute("PRAGMA wal_autocheckpoint=0")
+    keeper.execute("UPDATE autologin_status SET paused_code='invalid_credentials' WHERE id=1")
+    keeper.commit()
+    legacy = tmp_path / "db" / "sudarshan_vault.db"
+    legacy.parent.mkdir()
+    for suffix in ("", "-wal"):  # copied while the writer still has them open
+        shutil.copyfile(f"{live}{suffix}", f"{legacy}{suffix}")
+    keeper.close()
+    assert Path(f"{legacy}-wal").stat().st_size > 0
+    return legacy
+
+
+def _assert_everything_arrived(new):
+    moved = Vault(new, pepper=PEPPER)
+    assert moved.get_secret("upstox_pin") == "246813"
+    assert moved.state().enabled is True
+    assert moved.state().paused_code == "invalid_credentials"  # the commit from the WAL
+
+
+def test_a_legacy_vault_moves_into_its_directory_with_everything_in_it(tmp_path):
+    legacy = _legacy_vault(tmp_path)
+    new = tmp_path / "db" / VAULT_DIR / "sudarshan_vault.db"
+    assert move_legacy_vault(new, legacy) is True
+    assert not legacy.exists() and not Path(f"{legacy}-wal").exists()
+    assert stat.S_IMODE(new.stat().st_mode) == 0o600
+    assert stat.S_IMODE(new.parent.stat().st_mode) == 0o700
+    _assert_everything_arrived(new)
+    assert move_legacy_vault(new, legacy) is False  # once only
+
+
+def test_a_move_cut_short_is_finished_by_the_next_start(tmp_path):
+    legacy = _legacy_vault(tmp_path)
+    new = tmp_path / "db" / VAULT_DIR / "sudarshan_vault.db"
+    new.parent.mkdir(mode=0o700)
+    os.replace(f"{legacy}-wal", f"{new}-wal")  # the side file went first, then the process died
+    assert move_legacy_vault(new, legacy) is True
+    _assert_everything_arrived(new)
+
+
+def test_nothing_moves_when_the_new_vault_exists_or_was_chosen_by_hand(tmp_path, monkeypatch):
+    legacy = _legacy_vault(tmp_path)
+    new = tmp_path / "db" / VAULT_DIR / "sudarshan_vault.db"
+    Vault(new, pepper=OTHER_PEPPER).state()
+    assert move_legacy_vault(new, legacy) is False and legacy.exists()
+    monkeypatch.setenv("SUDARSHAN_VAULT_DB", str(tmp_path / "custom.db"))
+    assert move_legacy_vault(legacy=legacy) is False and legacy.exists()
 
 
 # -- status -----------------------------------------------------------------------------------

@@ -25,7 +25,7 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 MIN_PEPPER_LEN = 32
 #: Public, fixed salt: it only separates these derivations from any other HKDF use of the pepper.
 HKDF_SALT = b"sudarshan/hkdf-salt/v1"
-#: Encrypts secrets at rest in ``db/sudarshan_vault.db``.
+#: Encrypts secrets at rest in the vault (``db/sudarshan-vault/sudarshan_vault.db``).
 VAULT_INFO = b"sudarshan/vault/secrets/v1"
 #: Seals the worker's loopback calls to OpenAlgo (authenticates them and hides the token).
 HANDOFF_INFO = b"sudarshan/autologin/handoff/v1"

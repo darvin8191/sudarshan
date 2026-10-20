@@ -62,7 +62,7 @@ from sudarshan.autologin.worker import (
     SECRET_TOTP,
     rate_refusal,
 )
-from sudarshan.vault import HANDOFF_INFO, Vault, fernet_for, pepper_from
+from sudarshan.vault import HANDOFF_INFO, Vault, fernet_for, move_legacy_vault, pepper_from
 from utils.auth_utils import (
     should_download_master_contract,
     try_start_cached_master_contract_load,
@@ -570,6 +570,17 @@ def internal_report():
     logger.info("Auto-login: new Upstox login stored for %s", owner.username)
     _notify_owner(owner.username, text)
     return jsonify({"status": "success", "applied": True})
+
+
+@sudarshan_autologin_bp.record_once
+def _move_a_legacy_vault(state):
+    """The first version kept the vault in db/ itself; it now has its own directory, the only
+    place the auto-login unit may write. Two file checks when there is nothing to move."""
+    try:
+        if move_legacy_vault():
+            logger.info("Auto-login: moved the vault into db/sudarshan-vault/")
+    except Exception:
+        logger.exception("Auto-login: could not move the vault into db/sudarshan-vault/")
 
 
 @sudarshan_autologin_bp.record_once

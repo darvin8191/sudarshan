@@ -16,6 +16,8 @@ from urllib.parse import urlsplit
 
 from dotenv import dotenv_values
 
+from sudarshan.vault.store import DB_FILENAME, VAULT_DIR
+
 from .schedule import DEFAULT_WINDOW, HOLIDAYS_FILE, parse_window
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -64,7 +66,7 @@ class Settings:
         return cls(
             app_dir=app_dir,
             env_file=Path(get("SUDARSHAN_OPENALGO_ENV_FILE") or app_dir / ".env"),
-            vault_path=Path(get("SUDARSHAN_VAULT_DB") or app_dir / "db" / "sudarshan_vault.db"),
+            vault_path=Path(get("SUDARSHAN_VAULT_DB") or app_dir / "db" / VAULT_DIR / DB_FILENAME),
             holidays_file=Path(get("SUDARSHAN_NSE_HOLIDAYS_FILE") or HOLIDAYS_FILE),
             openalgo_url=openalgo_url,
             upstox_base=upstox_base,

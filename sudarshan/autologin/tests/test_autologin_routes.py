@@ -477,6 +477,19 @@ def test_junk_cannot_use_up_a_limit_and_lock_out_the_worker(
     )
 
 
+def test_starting_openalgo_moves_a_legacy_vault_and_never_fails_on_it(monkeypatch):
+    moved = []
+    monkeypatch.setattr(bp_module, "move_legacy_vault", lambda: moved.append(1) or True)
+    make_app()
+    assert moved == [1]
+
+    def read_only_disk():
+        raise OSError("read-only file system")
+
+    monkeypatch.setattr(bp_module, "move_legacy_vault", read_only_disk)
+    assert make_app().test_client() is not None  # OpenAlgo still starts
+
+
 def test_report_of_a_failure_only_tells_the_owner(setup, pepper):
     _, client, vault, calls = setup
     text = (

@@ -424,6 +424,11 @@ def _main(args, env, clock) -> int:
     except (ConfigError, VaultKeyError) as exc:
         log.error("cannot read OpenAlgo's settings: %s", exc)
         return EXIT_CONFIG
+    if not settings.vault_path.exists():
+        # OpenAlgo creates the vault when the TOTP key or PIN is first saved; until then there is
+        # nothing to do (and this unit may not write outside the vault's directory anyway).
+        log.info("auto-login is not set up yet: no TOTP key or PIN has been saved")
+        return EXIT_OK
     vault = Vault(settings.vault_path, pepper=pepper)
     with (
         httpx.Client(trust_env=False, follow_redirects=False) as local_client,
