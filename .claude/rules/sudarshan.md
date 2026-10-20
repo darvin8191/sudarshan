@@ -30,8 +30,10 @@ members, tokens, keys, `.env` content, logs or the private specs. The specs — 
    Readable on a phone in outdoor sunlight.
 7. **Real-time everywhere, tick by tick** (owner, 20 Oct 2026: "without it SUDARSHAN is of no
    use").
-   - What updates live: every price, P&L, position, holding value, order and trade status,
-     watchlist, screener result and alert, from the live feed as ticks or events arrive.
+   - What updates live: every price, **chart** (the forming candle updates on every tick, and a
+     new candle opens on time), P&L, position, holding value, order and trade status, watchlist,
+     screener result and alert, from the live feed as ticks or events arrive. Charts are a must
+     (owner, 20 Oct 2026), including a phone-first live chart screen.
    - Timed polling of market data is not acceptable. REST is only for the first snapshot, a
      periodic re-sync and data that is not market data.
    - When a screen cannot be live (market closed, feed down, no broker login), it says so with a
