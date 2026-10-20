@@ -127,8 +127,14 @@ class FakeSocketIO:
         self.log.append(("socketio.emit", (event, data), kwargs))
 
 
-def stub_outside_world(monkeypatch, *, should_download: bool = True) -> list:
-    """Replace everything that would leave the process; returns the shared call log."""
+def stub_outside_world(
+    monkeypatch, *, should_download: bool = True, token_check: str | None = "dead"
+) -> list:
+    """Replace everything that would leave the process; returns the shared call log.
+
+    ``token_check`` is what Upstox says about the stored token in the preflight; None keeps the
+    real check, for a test that points ``SUDARSHAN_UPSTOX_API_BASE`` at a fake Upstox.
+    """
     import database.cache_invalidation as cache_invalidation
     import database.telegram_db as telegram_db
     import services.order_update_service as order_updates
@@ -168,6 +174,10 @@ def stub_outside_world(monkeypatch, *, should_download: bool = True) -> list:
         Recorder("try_start_cached_master_contract_load", calls, True),
     )
     monkeypatch.setattr(bp_module, "socketio", FakeSocketIO(calls))
+    if token_check is not None:
+        monkeypatch.setattr(
+            bp_module, "check_token", Recorder("upstox_token_check", calls, token_check)
+        )
     # Telegram: the bot is running and the owner is linked; delivery is recorded.
     monkeypatch.setattr(telegram_alerts.TelegramAlertService, "is_bot_active", lambda self: True)
     monkeypatch.setattr(

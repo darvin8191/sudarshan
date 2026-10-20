@@ -1,9 +1,9 @@
 # सुदर्शन / SUDARSHAN auto-login: one Upstox login attempt with TOTP + PIN (M2.20).
 # Started by sudarshan-autologin.timer (08:35, 08:45, 08:55 IST on weekdays). The worker decides
 # for itself: it does nothing on weekends, NSE holidays (/etc/sudarshan/nse_holidays.txt), outside
-# 08:30-15:30 IST, when switched off or paused, or when OpenAlgo already holds today's login, so
-# the deploy tool restarting this unit is harmless. "Test now" runs the same program from
-# OpenAlgo, with the same settings.
+# 08:30-15:30 IST, when switched off or paused, or when Upstox still accepts the login OpenAlgo
+# holds, so the deploy tool restarting this unit is harmless. "Test now" runs the same program
+# from OpenAlgo, with the same settings.
 # Docs: sudarshan/autologin/README.md. Optional settings: /etc/sudarshan/autologin.env.
 # OpenAlgo runs as the same user (sudarshan) and owns the vault directory (mode 700).
 
@@ -28,7 +28,7 @@ Environment=PYTHONDONTWRITEBYTECODE=1
 EnvironmentFile=-/etc/sudarshan/autologin.env
 # 75: a "Test now" attempt holds the run lease; this start stops quietly (not a failure).
 SuccessExitStatus=75
-# The slowest possible run is about 190 s (worker.run_budget_s: 75 s waiting for OpenAlgo plus
+# The slowest possible run is about 195 s (worker.run_budget_s: 75 s waiting for OpenAlgo plus
 # its last call, a TOTP step, 20 s for Upstox, three hand-off tries of 23 s); a healthy one takes
 # a few seconds. Stopped after 270 s, killed 15 s later; the run lease (300 s) outlives both.
 TimeoutStartSec=270

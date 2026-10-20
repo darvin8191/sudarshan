@@ -36,6 +36,7 @@ from flask import Blueprint, jsonify, request, session
 
 from database.auth_db import (
     Auth,
+    decrypt_token,
     get_active_sessions,
     log_login_attempt,
     register_session,
@@ -47,6 +48,7 @@ from database.user_db import find_user_by_username
 from extensions import socketio
 from limiter import limiter
 from sudarshan.autologin import messages
+from sudarshan.autologin.config import is_loopback_url
 from sudarshan.autologin.handoff import (
     MAX_SEALED_BYTES,
     SEAL_TTL_S,
@@ -54,8 +56,16 @@ from sudarshan.autologin.handoff import (
     open_sealed,
 )
 from sudarshan.autologin.launcher import run_test_child
-from sudarshan.autologin.schedule import HOLIDAYS_FILE, IST, SCHEDULE, TradingCalendar
+from sudarshan.autologin.schedule import (
+    HOLIDAYS_FILE,
+    IST,
+    SCHEDULE,
+    UPSTOX_TOKEN_EXPIRY,
+    TradingCalendar,
+    trading_session_start,
+)
 from sudarshan.autologin.totp import InvalidSecret, normalize_secret
+from sudarshan.autologin.upstox import UPSTOX_API_BASE, check_token
 from sudarshan.autologin.worker import (
     EXIT_BUSY,
     SECRET_PIN,
@@ -68,9 +78,10 @@ from utils.auth_utils import (
     try_start_cached_master_contract_load,
     try_start_master_contract_download,
 )
+from utils.httpx_client import get_httpx_client
 from utils.lazy import LazyInit
 from utils.logging import get_logger
-from utils.session import check_session_validity, has_login_this_trading_session
+from utils.session import check_session_validity
 from utils.thread_safe_cache import MISSING, LockedTTLCache
 
 logger = get_logger(__name__)
@@ -139,17 +150,62 @@ def _configured_broker() -> str:
     return match.group(1).lower() if match else ""
 
 
-def _holds_fresh_token(username: str) -> bool:
-    """OpenAlgo holds an Upstox login from the current trading session (after 03:00 IST).
+def _logged_in_since_token_expiry(username: str, now: datetime) -> bool:
+    """A login on record since the last 03:30 IST, when Upstox's daily tokens stop working.
+
+    Not OpenAlgo's own ``has_login_this_trading_session``: its boundary is 03:00, so a login at
+    03:10 would count as today's although its token died at 03:30.
+    """
+    since = trading_session_start(now, rollover=UPSTOX_TOKEN_EXPIRY)
+    for item in get_active_sessions(username):
+        try:
+            at = datetime.fromisoformat(item.get("login_time") or "")
+        except ValueError:
+            continue
+        if at.tzinfo is None:
+            at = at.replace(tzinfo=IST)  # stored as IST wall-clock time, zone stripped
+        if at >= since:
+            return True
+    return False
+
+
+def _holds_fresh_token(username: str, now: datetime | None = None) -> bool:
+    """OpenAlgo holds an Upstox login made since the last 03:30 IST.
 
     ``is_revoked`` alone is not enough: the row is only revoked by the auto-expiry sweep, which
-    needs a browser request. A login since the rollover is what proves the token is today's, the
-    same test OpenAlgo's order-update boot scan uses.
+    needs a browser request. A login since the token expiry is what proves the token is today's.
     """
     auth = Auth.query.filter_by(name=username).first()
     if auth is None or auth.is_revoked or auth.broker != BROKER:
         return False
-    return has_login_this_trading_session(username)
+    return _logged_in_since_token_expiry(username, now or _now())
+
+
+def _upstox_base() -> str | None:
+    base = (os.environ.get("SUDARSHAN_UPSTOX_API_BASE") or UPSTOX_API_BASE).rstrip("/")
+    if base.startswith("https://") or is_loopback_url(base):
+        return base
+    logger.error("Auto-login: SUDARSHAN_UPSTOX_API_BASE must use https://; token not checked")
+    return None
+
+
+def _check_stored_token(username: str) -> str:
+    """Whether Upstox still accepts the token OpenAlgo holds: works, dead, unknown or none.
+
+    One read-only call (Upstox's funds endpoint, which OpenAlgo's plugin already uses). The
+    worker uses the answer so that no TOTP login ever ends a token that still works.
+    """
+    auth = Auth.query.filter_by(name=username).first()
+    if auth is None or auth.is_revoked or auth.broker != BROKER or not auth.auth:
+        return "none"
+    try:
+        token = decrypt_token(auth.auth)
+    except Exception:
+        return "none"  # unreadable here means unusable by OpenAlgo too
+    base = _upstox_base()
+    if not token or base is None:
+        return "none" if not token else "unknown"
+    return check_token(get_httpx_client(), base, token)
 
 
 def _clean_text(value) -> str:
@@ -193,7 +249,7 @@ def _test_refusal(vault: Vault, state, now: datetime, fresh: bool) -> str | None
         return "secrets_unreadable"
     if state.paused_code:
         return "test_paused"
-    if fresh and _calendar().in_market_hours(now):
+    if fresh and _calendar().blocks_test_now(now):
         return "market_hours"
     return rate_refusal(vault, state, now)
 
@@ -425,13 +481,15 @@ def internal_preflight():
     _, refused = _open_sealed_request("preflight")
     if refused:
         return refused
-    owner = find_user_by_username()
+    owner, broker = find_user_by_username(), _configured_broker()
+    ready = owner is not None and broker == BROKER
     return jsonify(
         {
             "status": "success",
             "user": owner is not None,
-            "broker": _configured_broker(),
-            "fresh_session": bool(owner) and _holds_fresh_token(owner.username),
+            "broker": broker,
+            "fresh_session": ready and _holds_fresh_token(owner.username),
+            "token": _check_stored_token(owner.username) if ready else "none",
         }
     )
 

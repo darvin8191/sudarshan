@@ -47,7 +47,9 @@ from utils.session import has_login_this_trading_session
 
 @pytest.fixture
 def world(monkeypatch, tmp_path, vault_path, holidays_file, openalgo_env_file, pepper):
-    calls = stub_outside_world(monkeypatch)  # before seeding: upsert_auth calls these too
+    # Before seeding (upsert_auth calls these too). The stored-token check stays real: it goes to
+    # the fake Upstox below, which accepts only the token it issued last.
+    calls = stub_outside_world(monkeypatch, token_check=None)
     reset_openalgo_db()
     add_owner()
     # Yesterday's token: the row stays unrevoked until a browser request runs the 03:00 sweep.
@@ -71,6 +73,7 @@ def world(monkeypatch, tmp_path, vault_path, holidays_file, openalgo_env_file, p
     monkeypatch.setenv("SUDARSHAN_AUTOLOGIN_TEST_LOG", str(test_log))
 
     upstox = FakeUpstox().start()
+    monkeypatch.setenv("SUDARSHAN_UPSTOX_API_BASE", upstox.api_base)  # OpenAlgo's check, too
     app = make_app()
     with LiveServer(app) as server:
         env = {
@@ -151,12 +154,13 @@ def test_scheduled_login_lands_exactly_like_a_manual_upstox_login(world, caplog,
     state = world.vault.state()
     assert (state.last_outcome, state.last_success_at) == ("ok", MONDAY_0835)
 
-    # 08:45: today's login is there, so nothing is done and nothing is revoked.
+    # 08:45: Upstox still accepts the stored login, so nothing is done and nothing is revoked.
     assert (
         worker.main([], env=world.env, clock=lambda: MONDAY_0835 + timedelta(minutes=10)) == EXIT_OK
     )
     assert len(world.upstox.requests) == 1
     assert world.vault.state().last_code == "already_logged_in"
+    assert world.upstox.checks == ["/v3/user/get-funds-and-margin"] * 2  # one check per run
 
     out = capfd.readouterr()
     _no_secret_in(caplog.text + out.out + out.err, code)
@@ -258,6 +262,34 @@ def test_a_store_that_finds_the_database_locked_leaves_no_login_on_record(world,
     auth_db.db_session.remove()
 
 
+MONDAY_1000 = MONDAY_0835.replace(hour=10, minute=0)
+
+
+def test_a_login_that_still_works_is_never_replaced(world):
+    """Market hours, no login on record since 03:30, but Upstox still accepts the stored token
+    (for example the session row was removed): a TOTP login would end it, so none is made."""
+    world.upstox.working_token = OLD_TOKEN
+    assert worker.main([], env=world.env, clock=lambda: MONDAY_1000) == EXIT_OK
+    assert world.upstox.requests == [] and len(world.upstox.checks) == 1
+    assert world.vault.state().last_code == "already_logged_in"
+    assert auth_db.get_auth_token(OWNER) == OLD_TOKEN
+    auth_db.db_session.remove()
+
+
+def test_an_unchecked_login_is_not_replaced_in_market_hours(world):
+    world.upstox.funds_status = 503  # the check cannot tell
+    assert worker.main([], env=world.env, clock=lambda: MONDAY_1000) == EXIT_FAILED
+    assert world.upstox.requests == []
+    assert world.vault.state().last_code == "token_unchecked"
+    (telegram,) = [c for c in world.calls if c[0] == "telegram"]
+    assert "could not confirm" in telegram[1][1] and "log in by hand now" in telegram[1][1]
+    # Before 09:15 the same answer does not stop the morning login: without a login since 03:30
+    # the stored token cannot be today's.
+    tuesday_0835 = MONDAY_0835 + timedelta(days=1)
+    assert worker.main([], env=world.env, clock=lambda: tuesday_0835) == EXIT_OK
+    assert len(world.upstox.requests) == 1
+
+
 def test_openalgo_down_means_upstox_is_not_asked(world, monkeypatch):
     monkeypatch.setitem(worker.PREFLIGHT_PATIENCE_S, "scheduled", 0.0)  # no 75 s wait here
     env = dict(world.env, SUDARSHAN_OPENALGO_URL="http://127.0.0.1:9")  # nothing listens there
@@ -288,9 +320,10 @@ def test_test_now_button_runs_the_real_worker_process(world, monkeypatch, tmp_pa
         monkeypatch.setenv(key, value)  # the child process inherits them
     # The unit's EnvironmentFile reaches the child too, and wins, as it does under systemd.
     settings = tmp_path / "autologin.env"
-    settings.write_text(f"# settings only\nSUDARSHAN_UPSTOX_API_BASE='{world.upstox.api_base}'\n")
+    env_file = world.env["SUDARSHAN_OPENALGO_ENV_FILE"]
+    settings.write_text(f"# settings only\nSUDARSHAN_OPENALGO_ENV_FILE='{env_file}'\n")
     monkeypatch.setenv("SUDARSHAN_AUTOLOGIN_ENV_FILE", str(settings))
-    monkeypatch.setenv("SUDARSHAN_UPSTOX_API_BASE", "http://127.0.0.1:9")  # overridden by the file
+    monkeypatch.setenv("SUDARSHAN_OPENALGO_ENV_FILE", str(tmp_path / "missing.env"))  # file wins
     client = world.app.test_client()
     login_session(client)
     response = client.post(

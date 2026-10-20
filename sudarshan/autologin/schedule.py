@@ -20,6 +20,12 @@ IST = timezone(timedelta(hours=5, minutes=30), "IST")  # India keeps no daylight
 SCHEDULE = ("08:35", "08:45", "08:55")
 #: Continuous trading session; a new login then would cut off a live session.
 MARKET_HOURS = ("09:15", "15:30")
+#: From the pre-open to the close: Test now, which replaces today's login, is refused then while
+#: the login works.
+TEST_BLOCKED = ("09:00", "15:30")
+#: Upstox's daily access tokens stop working at 03:30 IST. OpenAlgo's own session rollover is
+#: 03:00, so a login between the two is on record as today's while its token is already dead.
+UPSTOX_TOKEN_EXPIRY = "03:30"
 #: When a scheduled wake-up may log in. A wake-up outside it (a deploy restart in the evening,
 #: Persistent= catching up after a night-time boot) is ignored.
 DEFAULT_WINDOW = "08:30-15:30"
@@ -96,10 +102,17 @@ class TradingCalendar:
     def is_trading_day(self, day: date) -> bool:
         return day.weekday() < 5 and day not in self.holidays()
 
-    def in_market_hours(self, at: datetime) -> bool:
+    def _within(self, at: datetime, span: tuple[str, str]) -> bool:
         local = at.astimezone(IST)
-        start, end = (minutes(t) for t in MARKET_HOURS)
+        start, end = (minutes(t) for t in span)
         return self.is_trading_day(local.date()) and start <= minute_of_day(local) < end
+
+    def in_market_hours(self, at: datetime) -> bool:
+        return self._within(at, MARKET_HOURS)
+
+    def blocks_test_now(self, at: datetime) -> bool:
+        """09:00-15:30 on a trading day: Test now must not replace a working login then."""
+        return self._within(at, TEST_BLOCKED)
 
     def slots(self, day: date) -> list[datetime]:
         return [

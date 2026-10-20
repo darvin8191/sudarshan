@@ -189,11 +189,13 @@ def test_already_logged_in_today_is_left_alone(ready_vault, calendar):
 @pytest.mark.parametrize(
     ("at", "allowed"),
     [
+        (datetime(2026, 10, 19, 9, 0, 10, tzinfo=IST), False),  # the pre-open
+        (datetime(2026, 10, 19, 9, 14, 10, tzinfo=IST), False),
         (datetime(2026, 10, 19, 9, 15, tzinfo=IST), False),
         (datetime(2026, 10, 19, 12, 0, tzinfo=IST), False),
         (datetime(2026, 10, 19, 15, 29, 40, tzinfo=IST), False),
         (datetime(2026, 10, 19, 15, 30, 10, tzinfo=IST), True),
-        (datetime(2026, 10, 19, 9, 14, 10, tzinfo=IST), True),
+        (datetime(2026, 10, 19, 8, 59, 10, tzinfo=IST), True),
         (datetime(2026, 10, 18, 11, 0, 10, tzinfo=IST), True),  # Sunday
         (datetime(2026, 11, 9, 11, 0, 10, tzinfo=IST), True),  # holiday in the fake file
     ],
@@ -208,6 +210,62 @@ def test_test_run_never_replaces_a_live_session_in_market_hours(ready_vault, cal
     if not allowed:
         state = ready_vault.state()
         assert (state.last_outcome, state.last_code) == ("refused", "market_hours")
+
+
+MONDAY_1000 = MONDAY_0835.replace(hour=10, minute=0, second=10)
+
+
+@pytest.mark.parametrize(
+    ("token", "fresh", "at", "logs_in", "code"),
+    [
+        # A stored login Upstox still accepts is never replaced, whatever the record says.
+        ("works", False, MONDAY_0835, False, "already_logged_in"),
+        ("works", False, MONDAY_1000, False, "already_logged_in"),
+        # A dead or missing one is replaced, in market hours too: it cannot be used anyway.
+        ("dead", True, MONDAY_1000, True, "ok"),
+        ("none", False, MONDAY_1000, True, "ok"),
+        # The check could not tell: trust a login since 03:30; without one, log in before 09:15
+        # (the stored token cannot be today's) but never during market hours.
+        ("unknown", True, MONDAY_1000, False, "already_logged_in"),
+        ("unknown", False, MONDAY_0835, True, "ok"),
+        ("unknown", False, MONDAY_1000, False, "token_unchecked"),
+    ],
+)
+def test_scheduled_runs_never_end_a_login_that_may_still_work(
+    ready_vault, calendar, token, fresh, at, logs_in, code
+):
+    link, upstox = FakeLink(fresh=fresh, token=token), FakeUpstoxCall()
+    make_run(ready_vault, calendar, link=link, upstox=upstox, at=at).execute()
+    assert bool(upstox.calls) is logs_in
+    assert ready_vault.state().last_code == code
+
+
+def test_an_unchecked_login_in_market_hours_is_told_once(ready_vault, calendar):
+    link = FakeLink(token="unknown")
+    for minutes in (0, 10, 20):
+        at = MONDAY_1000 + timedelta(minutes=minutes)
+        assert make_run(ready_vault, calendar, link=link, at=at).execute() == EXIT_FAILED
+    (report,) = link.reports("failed")
+    assert "could not confirm whether the stored login still works" in report["telegram"]
+    assert report["telegram"].endswith("Please log in by hand now.")
+
+
+@pytest.mark.parametrize(
+    ("token", "at", "allowed"),
+    [
+        ("unknown", MONDAY_1000, False),  # cannot tell: Test now could end a working login
+        ("dead", MONDAY_1000, True),  # nothing to lose: Test now can fix it
+        ("none", MONDAY_1000, True),
+        ("works", MONDAY_0835.replace(hour=18), True),  # after the close it may replace it
+    ],
+)
+def test_test_runs_follow_the_stored_login_check(ready_vault, calendar, token, at, allowed):
+    upstox = FakeUpstoxCall()
+    run = make_run(
+        ready_vault, calendar, link=FakeLink(token=token), upstox=upstox, kind="test", at=at
+    )
+    run.execute()
+    assert bool(upstox.calls) is allowed
 
 
 # -- Upstox says no -----------------------------------------------------------------------------

@@ -10,7 +10,12 @@ import pytest
 from autologin_fakes import FAKE_API_KEY, FAKE_PIN, FAKE_TOKEN, error_payload, ok_payload
 
 from sudarshan.autologin.messages import MESSAGES
-from sudarshan.autologin.upstox import RATE_LIMIT_COOLDOWN_S, TOKEN_PATH, request_token
+from sudarshan.autologin.upstox import (
+    RATE_LIMIT_COOLDOWN_S,
+    TOKEN_PATH,
+    check_token,
+    request_token,
+)
 
 BASE = "https://api.upstox.com"
 CODE = "081804"
@@ -153,3 +158,36 @@ def test_error_body_is_never_logged(caplog):
     assert CODE not in caplog.text
     assert FAKE_API_KEY not in caplog.text
     assert "UDAPI100097" in caplog.text  # the code itself is useful and harmless
+
+
+# -- the read-only check of the stored token ------------------------------------------------------
+
+
+def test_token_check_is_one_read_only_call():
+    client, seen = _client(_answer(200, {"status": "success", "data": {}}))
+    assert check_token(client, BASE, FAKE_TOKEN) == "works"
+    (request,) = seen
+    assert request.method == "GET" and request.content == b""
+    assert str(request.url) == f"{BASE}/v3/user/get-funds-and-margin"
+    assert request.headers["authorization"] == f"Bearer {FAKE_TOKEN}"
+    assert request.headers["api-version"] == "3.0"
+
+
+@pytest.mark.parametrize(
+    ("status", "verdict"),
+    [(401, "dead"), (403, "unknown"), (429, "unknown"), (500, "unknown"), (503, "unknown")],
+)
+def test_token_check_verdicts(status, verdict, caplog):
+    caplog.set_level(logging.DEBUG)
+    client, _ = _client(_answer(status, error_payload("UDAPI100050", "Invalid token")))
+    assert check_token(client, BASE, FAKE_TOKEN) == verdict
+    assert FAKE_TOKEN not in caplog.text
+
+
+@pytest.mark.parametrize("error", [httpx.ConnectTimeout("t"), httpx.ReadTimeout("t")])
+def test_token_check_never_guesses_on_a_network_problem(error):
+    def handler(request):
+        raise error
+
+    client, _ = _client(handler)
+    assert check_token(client, BASE, FAKE_TOKEN) == "unknown"

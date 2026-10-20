@@ -64,8 +64,12 @@ MESSAGES = {
     ),
     "already_logged_in": "Upstox is already connected for today. Nothing to do.",
     "market_hours": (
-        "Not available between 09:15 and 15:30 while Upstox is already connected for today: a "
-        "new login would cut off the live session."
+        "Not available from 09:00 to 15:30 on a trading day while Upstox is connected: Test now "
+        "replaces today's login, which would cut off the live session."
+    ),
+    "token_unchecked": (
+        "Upstox could not confirm whether the stored login still works. No new login was made "
+        "during market hours, because it would end the stored one if it does."
     ),
     "disabled": "Auto-login is off.",
     "busy": "Another login attempt is running. Try again in a minute.",

@@ -55,15 +55,37 @@ def error_payload(code: str, message: str = "error") -> dict:
 
 
 class FakeUpstox:
-    """The TOTP token endpoint on 127.0.0.1, recording every request it receives."""
+    """The TOTP token endpoint on 127.0.0.1, recording every request it receives.
+
+    Also the funds endpoint OpenAlgo checks the stored token with: it answers 200 for the token
+    issued last and 401 for any other, because each new login ends the one before (as Upstox
+    does). ``funds_status`` forces another answer.
+    """
 
     def __init__(self):
         self.requests: list[dict] = []
         self.answers: deque[tuple[int, object]] = deque()
         self.default: tuple[int, object] = (200, ok_payload())
+        self.working_token: str | None = None
+        self.funds_status: int | None = None
+        self.checks: list[str] = []
         fake = self
 
         class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802 (http.server naming)
+                bearer = (self.headers.get("Authorization") or "").removeprefix("Bearer ")
+                fake.checks.append(self.path)
+                status = fake.funds_status
+                if status is None:
+                    status = 200 if bearer and bearer == fake.working_token else 401
+                body = {"status": "success" if status == 200 else "error", "data": {}}
+                data = json.dumps(body).encode()
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
             def do_POST(self):  # noqa: N802 (http.server naming)
                 length = int(self.headers.get("Content-Length") or 0)
                 raw = self.rfile.read(length)
@@ -79,6 +101,8 @@ class FakeUpstox:
                     }
                 )
                 status, payload = fake.answers.popleft() if fake.answers else fake.default
+                if status == 200 and isinstance(payload, dict) and payload.get("access_token"):
+                    fake.working_token = payload["access_token"]  # the one before is ended
                 data = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
@@ -108,12 +132,22 @@ class FakeUpstox:
 class FakeLink:
     """Stands in for OpenAlgoLink: answers preflight/report and records what was asked."""
 
-    def __init__(self, *, fresh: bool = False, broker: str = "upstox", user: bool = True):
+    def __init__(
+        self,
+        *,
+        fresh: bool = False,
+        broker: str = "upstox",
+        user: bool = True,
+        token: str | None = None,
+    ):
         self.preflight_answer = {
             "status": "success",
             "user": user,
             "broker": broker,
             "fresh_session": fresh,
+            # What Upstox says about the stored token: by default today's login works and
+            # yesterday's (no login since 03:30) does not.
+            "token": token or ("works" if fresh else "dead"),
         }
         self.report_answers: deque = deque()
         self.preflight_errors: deque[LinkError] = deque()  # raised once each, in order

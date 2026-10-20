@@ -5,11 +5,11 @@ weekdays) and, for "Test now", by OpenAlgo as a child process (``--test``). Ever
 itself whether to act, so a deploy restarting the unit, a catch-up start after a boot, a weekend
 or an NSE holiday costs nothing:
 
-  scheduled  trading day, inside the window (08:30-15:30), switched on, not paused, and OpenAlgo
-             does not already hold a login from this trading session
-  test       any day and time, switch on or off, but not while paused; refused 09:15-15:30 on a
-             trading day when OpenAlgo already holds today's login (a new one would cut off the
-             live session)
+  scheduled  trading day, inside the window (08:30-15:30), switched on, not paused, and Upstox
+             no longer accepts the login OpenAlgo holds (OpenAlgo checks it with one read-only
+             call); during market hours never without that check
+  test       any day and time, switch on or off, but not while paused; refused 09:00-15:30 on a
+             trading day while the stored login works (Test now replaces today's login)
 
 A pause begins when Upstox refuses the login for any reason other than "too many requests" and
 ends only when the owner saves the TOTP key or the PIN again: the same refused pair is never sent
@@ -189,11 +189,9 @@ class AutoLoginRun:
             return self._failed("no_user", setup=True)
         if info.get("broker") != "upstox":
             return self._failed("wrong_broker", setup=True)
-        fresh = bool(info.get("fresh_session"))
-        if fresh and self.scheduled:
-            return self._finish("skipped", "already_logged_in")
-        if fresh and self.calendar.in_market_hours(self.now()):
-            return self._finish("refused", "market_hours")
+        stop = self._keep_the_stored_login(info)
+        if stop is not None:
+            return stop
 
         if state.paused_code:
             # Upstox refused the saved key and PIN. Only a newly saved one ends the pause, so the
@@ -251,6 +249,30 @@ class AutoLoginRun:
         self.vault.finish_attempt(attempt_id, outcome="ok", code="ok")
         log.info("Upstox issued a token; handing it to OpenAlgo")
         return self._hand_over(result.token)
+
+    def _keep_the_stored_login(self, info: dict) -> Outcome | None:
+        """Stop here when a TOTP login could end a login that still works (it would revoke it).
+
+        ``token`` is OpenAlgo's check of the stored token with Upstox: works, dead, unknown (the
+        check failed) or none. ``fresh_session``: a login on record since 03:30 IST.
+
+          scheduled  works: nothing to do. unknown: trust a fresh login; with none on record,
+                     log in before 09:15 but never during market hours. dead or none: log in.
+          test       works or unknown, 09:00-15:30 on a trading day: refused, because Test now
+                     replaces today's login. Otherwise it goes ahead.
+        """
+        token = info.get("token", "unknown")
+        fresh = bool(info.get("fresh_session"))
+        now = self.now()
+        if not self.scheduled:
+            if token in ("works", "unknown") and self.calendar.blocks_test_now(now):
+                return self._finish("refused", "market_hours")
+            return None
+        if token == "works" or (token == "unknown" and fresh):
+            return self._finish("skipped", "already_logged_in")
+        if token == "unknown" and self.calendar.in_market_hours(now):
+            return self._failed("token_unchecked", setup=True)
+        return None
 
     def _preflight(self) -> dict:
         """OpenAlgo's answer, asking again every few seconds while it says it is busy.

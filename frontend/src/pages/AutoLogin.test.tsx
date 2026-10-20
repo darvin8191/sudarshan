@@ -86,6 +86,10 @@ describe('Auto login page', () => {
     expect(screen.getByRole('button', { name: /Test now/ })).toBeDisabled()
     expect(screen.getByText('The TOTP key or the PIN is not saved yet.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+    // Before anyone presses it: Test now replaces today's login, hence its hours.
+    expect(screen.getByText(/Test now replaces today's login/)).toHaveTextContent(
+      /from 09:00 to 15:30 on a trading day while Upstox is connected/
+    )
   })
 
   it('explains where the TOTP key is, in English and in Gujarati', async () => {

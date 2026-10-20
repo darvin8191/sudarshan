@@ -31,7 +31,7 @@ from pathlib import Path
 log = logging.getLogger("sudarshan.autologin")
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-#: Longer than the slowest possible test run, ``worker.run_budget_s("test")`` (about 125 s, when
+#: Longer than the slowest possible test run, ``worker.run_budget_s("test")`` (about 130 s, when
 #: every call uses up its timeout); a healthy one takes a few seconds. A test keeps the two apart.
 TEST_TIMEOUT_S = 150.0
 KILL_GRACE_S = 5.0

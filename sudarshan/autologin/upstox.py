@@ -19,7 +19,12 @@ import httpx
 
 log = logging.getLogger("sudarshan.autologin")
 
+UPSTOX_API_BASE = "https://api.upstox.com"
 TOKEN_PATH = "/v2/totp-login/authorization/token"
+#: Read-only, and already called by OpenAlgo's Upstox plugin (broker/upstox/api/funds.py).
+FUNDS_PATH = "/v3/user/get-funds-and-margin"
+#: The check runs inside OpenAlgo's preflight answer, so it is kept short.
+CHECK_TIMEOUT = httpx.Timeout(5.0, connect=3.0)
 CONNECT_TIMEOUT_S = 5.0
 READ_TIMEOUT_S = 15.0
 #: The longest the token call can take when it uses up its timeouts (for the run budget).
@@ -142,3 +147,31 @@ def request_token(
         upstox_codes=codes,
         http_status=status,
     )
+
+
+def check_token(client: httpx.Client, base_url: str, token: str) -> str:
+    """Does Upstox still accept ``token``? One read-only call; never raises.
+
+    Returns:
+        "works" (HTTP 200), "dead" (HTTP 401: expired, or ended by a newer login), or "unknown"
+        for anything else, a timeout included: the caller must then not assume either way.
+    """
+    try:
+        response = client.get(
+            base_url.rstrip("/") + FUNDS_PATH,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/json",
+                "Api-Version": "3.0",
+            },
+            timeout=CHECK_TIMEOUT,
+        )
+    except httpx.HTTPError as exc:
+        log.warning("Upstox token check failed: %s", type(exc).__name__)
+        return "unknown"
+    if response.status_code == 200:
+        return "works"
+    if response.status_code == 401:
+        return "dead"
+    log.warning("Upstox token check: HTTP %s", response.status_code)
+    return "unknown"

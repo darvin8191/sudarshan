@@ -262,16 +262,35 @@ def test_test_now_refuses_without_secrets(setup, monkeypatch):
     assert response.get_json()["message"] == "The TOTP key or the PIN is not saved yet."
 
 
-def test_test_now_refuses_in_market_hours_when_already_connected(setup, monkeypatch):
+@pytest.mark.parametrize(
+    ("hour", "minute", "refused"),
+    [(8, 59, False), (9, 0, True), (9, 5, True), (10, 0, True), (15, 29, True), (15, 30, False)],
+)
+def test_test_now_refuses_from_the_pre_open_to_the_close_when_connected(
+    setup, monkeypatch, hour, minute, refused
+):
     _, client, vault, calls = setup
     _ready(vault)
-    _fresh_upstox_login()
-    monkeypatch.setattr(bp_module, "_now", lambda: datetime(2026, 10, 19, 10, 0, tzinfo=IST))
-    monkeypatch.setattr(bp_module, "run_test_child", lambda run_id: pytest.fail("must not start"))
+    now = datetime.now(IST)
+    # Any trading day (a weekday off the fake holiday list) at this time, logged in since 03:30.
+    day = next(
+        d
+        for d in (now.date() + timedelta(days=k) for k in range(7))
+        if bp_module._calendar().is_trading_day(d)
+    )
+    at = datetime(day.year, day.month, day.day, hour, minute, tzinfo=IST)
+    monkeypatch.setattr(bp_module, "_now", lambda: at)
+    monkeypatch.setattr(bp_module, "_holds_fresh_token", lambda username, now=None: True)
+    started = []
+    monkeypatch.setattr(bp_module, "run_test_child", lambda run_id: started.append(run_id))
     login_session(client)
     response = _call(client, "post", "/sudarshan/autologin/test", None, csrf_headers(client))
-    assert response.status_code == 409
-    assert "would cut off the live session" in response.get_json()["message"]
+    if refused:
+        assert response.status_code == 409 and started == []
+        message = response.get_json()["message"]
+        assert "Test now replaces today's login" in message and "09:00 to 15:30" in message
+    else:
+        assert started
 
 
 def test_test_now_refuses_while_another_attempt_runs_or_too_soon(setup, monkeypatch):
@@ -365,7 +384,7 @@ def _post_sealed(client, op, blob):
 
 
 def test_preflight_answers_a_sealed_request_without_any_session_or_csrf(setup, pepper):
-    _, client, _, _ = setup
+    _, client, _, calls = setup
     blob = seal(fernet_for(pepper, HANDOFF_INFO), "preflight")
     response = _post_sealed(client, "preflight", blob)
     assert response.status_code == 200
@@ -374,11 +393,50 @@ def test_preflight_answers_a_sealed_request_without_any_session_or_csrf(setup, p
         "user": True,
         "broker": "upstox",
         "fresh_session": False,
+        "token": "none",  # no stored login: nothing to ask Upstox about
     }
+    assert [c for c in calls if c[0] == "upstox_token_check"] == []
     assert _post_sealed(client, "preflight", blob).status_code == 403  # a nonce is used once
     _fresh_upstox_login()
     again = _post_sealed(client, "preflight", seal(fernet_for(pepper, HANDOFF_INFO), "preflight"))
     assert again.get_json()["fresh_session"] is True
+    assert again.get_json()["token"] == "dead"  # what the (stubbed) check answered
+    ((_, (_, base, token), _),) = [c for c in calls if c[0] == "upstox_token_check"]
+    assert (base, token) == ("https://api.upstox.com", FAKE_TOKEN)  # the decrypted stored token
+
+
+@pytest.mark.parametrize(
+    ("base", "expected"),
+    [("http://192.0.2.10", "unknown"), ("http://127.0.0.1:9", "dead")],
+)
+def test_the_token_is_sent_only_over_https_or_to_this_server(
+    setup, pepper, monkeypatch, base, expected
+):
+    _, client, _, calls = setup
+    monkeypatch.setenv("SUDARSHAN_UPSTOX_API_BASE", base)
+    _fresh_upstox_login()
+    blob = seal(fernet_for(pepper, HANDOFF_INFO), "preflight")
+    assert _post_sealed(client, "preflight", blob).get_json()["token"] == expected
+    sent = [c for c in calls if c[0] == "upstox_token_check"]
+    assert len(sent) == (0 if expected == "unknown" else 1)
+
+
+@pytest.mark.parametrize(
+    ("minutes_after_midnight", "fresh"),
+    [(3 * 60 + 10, False), (3 * 60 + 29, False), (3 * 60 + 30, True), (8 * 60, True)],
+)
+def test_only_a_login_after_0330_counts_as_today(setup, monkeypatch, minutes_after_midnight, fresh):
+    """Upstox ends its tokens at 03:30; OpenAlgo's own rollover is 03:00."""
+    _, client, _, _ = setup
+    auth_db.upsert_auth(OWNER, FAKE_TOKEN, "upstox")
+    login = datetime(2026, 10, 19, tzinfo=IST) + timedelta(minutes=minutes_after_midnight)
+    auth_db.register_session(OWNER, "fake-session-id", device_info="phone", broker="upstox")
+    row = auth_db.ActiveSession.query.filter_by(session_id="fake-session-id").one()
+    row.login_time = login.replace(tzinfo=None)  # stored as IST wall-clock time
+    auth_db.db_session.commit()
+    now = datetime(2026, 10, 19, 9, 0, tzinfo=IST)
+    assert bp_module._holds_fresh_token(OWNER, now) is fresh
+    auth_db.db_session.remove()
 
 
 @pytest.mark.parametrize(

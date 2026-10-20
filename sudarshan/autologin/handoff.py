@@ -31,9 +31,10 @@ PREFLIGHT_PATH = "/sudarshan/autologin/internal/preflight"
 REPORT_PATH = "/sudarshan/autologin/internal/report"
 OPS = {"preflight": PREFLIGHT_PATH, "report": REPORT_PATH}
 CONNECT_TIMEOUT_S = 3.0
-#: Per call. The preflight only reads; the report stores the token, which can wait behind a held
-#: SQLite write lock for up to OpenAlgo's 15 s retry budget (database/__init__.py).
-READ_TIMEOUT_S = {"preflight": 10.0, "report": 20.0}
+#: Per call. The preflight reads and asks Upstox whether the stored token still works (at most
+#: 8 s); the report stores the token, which can wait behind a held SQLite write lock for up to
+#: OpenAlgo's 15 s retry budget (database/__init__.py).
+READ_TIMEOUT_S = {"preflight": 15.0, "report": 20.0}
 
 
 def call_max_s(op: str) -> float:

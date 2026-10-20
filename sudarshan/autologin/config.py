@@ -19,6 +19,7 @@ from dotenv import dotenv_values
 from sudarshan.vault.store import DB_FILENAME, VAULT_DIR
 
 from .schedule import DEFAULT_WINDOW, HOLIDAYS_FILE, parse_window
+from .upstox import UPSTOX_API_BASE
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
@@ -56,7 +57,7 @@ class Settings:
         env = os.environ if env is None else env
         get = env.get
         app_dir = Path(get("SUDARSHAN_OPENALGO_DIR") or REPO_ROOT)
-        upstox_base = get("SUDARSHAN_UPSTOX_API_BASE", "https://api.upstox.com").rstrip("/")
+        upstox_base = get("SUDARSHAN_UPSTOX_API_BASE", UPSTOX_API_BASE).rstrip("/")
         # The PIN and TOTP travel to this base URL: plain http only to a local test server.
         if not upstox_base.startswith("https://") and not is_loopback_url(upstox_base):
             raise ConfigError("SUDARSHAN_UPSTOX_API_BASE must use https://")
