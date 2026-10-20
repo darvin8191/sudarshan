@@ -1,0 +1,18 @@
+/* =============================================================================
+   सुदर्शन / SUDARSHAN theme layer
+   -----------------------------------------------------------------------------
+   Loaded once, after the upstream index.css (src/main.tsx imports index.css and
+   then src/sudarshan), so a rule here wins over an upstream rule of the same
+   specificity by order alone. That is what keeps upstream's index.css almost
+   untouched and rebases cheap: tokens are overridden here, not edited there.
+
+   Light only. Nothing in this file has a dark variant, and nothing may add one.
+   ============================================================================= */
+
+/* The page is light and says so. `only` also opts out of Chrome's Auto Dark
+   Theme, which would otherwise invert a light page on a phone set to dark.
+   `.analyzer` is named because upstream gives it `color-scheme: dark`. */
+:root,
+.analyzer {
+  color-scheme: only light;
+}
