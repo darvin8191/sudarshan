@@ -10,8 +10,11 @@
 # Also manages the SUDARSHAN ring services: unit files under sudarshan/ops/systemd at the tag
 # (sudarshan-*.service / .timer) are fetched from GitHub, checked against a strict policy (never
 # root, no privileged exec prefixes, capabilities or realtime scheduling), installed and restarted.
+# And OpenAlgo's .env gets the settings the release lists in sudarshan/ops/deploy/openalgo-env.conf
+# (added when missing, replaced only while they hold a default an earlier release shipped).
 # Usage: sudarshan-deploy [--check | --redeploy | --force]
-#   --check     show latest Release / deployed tag / market state, change nothing
+#   --check     show latest Release / deployed tag / market state and the .env settings that
+#               release would change, change nothing
 #   --redeploy  install the latest Release again even if it is already deployed (still gated)
 #   --force     like --redeploy but ALSO ignores the market-hours gate (root only, emergencies)
 set -Eeuo pipefail
@@ -45,13 +48,139 @@ market_open() {   # 0 = trading hours (do not restart), 1 = safe
     local t=$((10#${hhmm}))
     (( t >= 900 && t <= 1545 )) && return 0 || return 1
 }
+# ---- OpenAlgo .env settings a release needs: sudarshan/ops/deploy/openalgo-env.conf, whose header
+# gives the format. Read from GitHub at the release tag, like this tool and the unit files. A key is
+# added when missing and replaced only while it holds an old value listed for it, so a value the
+# owner chose stays. .env holds secrets: nothing from it is printed, only managed key names and
+# the values the release sets. Root works on a private copy and moves the result into place, so a
+# symlink planted in APP_DIR or in the backup folder is never followed.
+ENV_FILE="${APP_DIR}/.env"
+env_conf_fetch() {   # $1 = tag, $2 = output; 1 = not fetched (a release without the list gets an empty one)
+    local code
+    code="$(curl -sSL -o "$2" -w '%{http_code}' "https://raw.githubusercontent.com/${OWNER_REPO}/$1/sudarshan/ops/deploy/openalgo-env.conf" 2>/dev/null || true)"
+    case "${code}" in
+        200) return 0 ;;
+        404) : > "$2" ;;
+        *) return 1 ;;
+    esac
+}
+env_sync() {   # $1 = check|apply, $2 = settings list, $3 = .env, $4 = private work dir (root only),
+               # $5 = backup to write (apply). 0 = done or nothing to do, 1 = bad list or I/O error.
+    local mode="$1" conf="$2" env="$3" work="$4" backup="${5:-}"
+    local LC_ALL=C   # bytes, not characters: in a UTF-8 locale a stray byte hides a line from =~
+    local orig="$4/env.orig" new="$4/env.new" q="'" eol=$'\n' line k v pre n=0 prev=0 spans=0
+    local re_key='^[A-Za-z_][A-Za-z0-9_]*$' re_word='^[A-Za-z0-9._:/@+,-]+$'
+    local re_bind='^([[:space:]]*(export[[:space:]]+)?)([^=#[:space:]]+)([[:space:]]*=[[:space:]]*)(.*)$'
+    local re_qkey="^[${q}\"](.*)[${q}\"]\$"
+    local re_sq="^${q}([^${q}\\]*)${q}([[:space:]]*(#.*)?)\$"   # 'value' # comment
+    local re_dq='^"([^"\$]*)"([[:space:]]*(#.*)?)$'            # "value" # comment
+    local re_uq="^([^[:space:]${q}\"][^[:space:]]*)?(([[:space:]]+#.*)?[[:space:]]*)\$"
+    local w_add="added" w_set="set"
+    local -a words=() keys=() add=() changed_keys=() repl=()
+    local -A want=() olds=() count=() line_of=() cur=() lead=() post=() odd=()
+    if [[ "${mode}" == "check" ]]; then w_add="would add"; w_set="would set"; fi
+    [[ -f "${conf}" && -r "${conf}" ]] || { log "settings: the list ${conf} is missing"; return 1; }
+    while IFS= read -r line || [[ -n "${line}" ]]; do
+        n=$((n + 1))
+        read -r -a words <<< "${line%%#*}"
+        [[ ${#words[@]} -gt 0 ]] || continue
+        k="${words[0]}"
+        if [[ ${#words[@]} -lt 2 || ! "${k}" =~ ${re_key} || -n "${want[${k}]+set}" ]]; then
+            log "settings: list line ${n} is not a new KEY followed by VALUE and OLD values"; return 1
+        fi
+        olds[${k}]="|"
+        for v in "${words[@]:1}"; do
+            if [[ "${v}" == "''" ]]; then v=""; elif [[ ! "${v}" =~ ${re_word} ]]; then
+                log "settings: list line ${n} has a value with a character the list does not allow"; return 1
+            fi
+            if [[ -z "${want[${k}]+set}" ]]; then want[${k}]="${v}"; else olds[${k}]+="${v}|"; fi
+        done
+        keys+=("${k}")
+    done < "${conf}"
+    rm -rf -- "${orig}" "${new}"
+    if [[ ! -e "${env}" && ! -L "${env}" ]]; then log "settings: there is no ${env}, so nothing is changed"; return 0; fi
+    # cp -a never follows a symlink (it opens the source with O_NOFOLLOW) and never reads a FIFO
+    if ! cp -a -- "${env}" "${orig}" 2>/dev/null || [[ -L "${orig}" || ! -f "${orig}" ]]; then
+        rm -rf -- "${orig}"; log "WARNING: settings: ${env} is not a plain file, so it is left alone"; return 0
+    fi
+    if [[ "${mode}" == "apply" ]] && ! { cp -a -- "${orig}" "${work}/env.backup" && chmod 600 "${work}/env.backup" \
+            && mv -fT -- "${work}/env.backup" "${backup}"; }; then
+        log "settings: could not back up ${env}"; return 1
+    fi
+    n=0
+    while IFS= read -r line || [[ -n "${line}" ]]; do
+        n=$((n + 1))
+        [[ "${line}" =~ ${re_bind} ]] || continue
+        pre="${BASH_REMATCH[1]}${BASH_REMATCH[3]}${BASH_REMATCH[4]}"; k="${BASH_REMATCH[3]}"; v="${BASH_REMATCH[5]}"
+        if [[ "${k}" =~ ${re_qkey} ]]; then k="${BASH_REMATCH[1]}"; fi   # python-dotenv reads 'KEY'=
+        case "${v}" in   # a quote not closed on its line runs on: this line-by-line edit stays away
+            \'*) [[ "${v:1}" == *\'* ]] || spans=1 ;;
+            \"*) [[ "${v:1}" == *\"* ]] || spans=1 ;;
+        esac
+        [[ -n "${want[${k}]+set}" ]] || continue
+        count[${k}]=$(( ${count[${k}]:-0} + 1 )); line_of[${k}]=${n}; lead[${k}]="${pre}"
+        if [[ "${v}" =~ ${re_sq} || "${v}" =~ ${re_dq} || "${v}" =~ ${re_uq} ]]; then
+            cur[${k}]="${BASH_REMATCH[1]}"; post[${k}]="${BASH_REMATCH[2]}"
+        else
+            odd[${k}]=1
+        fi
+    done < "${orig}"
+    if [[ "${mode}" == "check" ]]; then rm -f -- "${orig}"; fi   # a copy of secrets kept no longer than needed
+    if [[ ${spans} -eq 1 ]]; then
+        log "WARNING: settings: ${env} has a value running over several lines, so it is left alone"; return 0
+    fi
+    for k in "${keys[@]}"; do
+        v="${want[${k}]}"
+        if [[ -z "${count[${k}]:-}" ]]; then
+            add+=("${k}"); changed_keys+=("${k}"); log "settings: ${w_add} ${k}='${v}'"
+        elif [[ ${count[${k}]} -gt 1 ]]; then
+            log "settings: ${k} left alone: .env sets it ${count[${k}]} times"
+        elif [[ -n "${odd[${k}]:-}" ]]; then
+            log "settings: ${k} left alone: its line is in a form this tool does not rewrite"
+        elif [[ "${cur[${k}]}" == "${v}" ]]; then
+            :
+        elif [[ "${olds[${k}]}" == *"|${cur[${k}]}|"* ]]; then   # the guard: only a shipped default
+            repl[${line_of[${k}]}]="${lead[${k}]}'${v}'${post[${k}]}"; changed_keys+=("${k}")
+            log "settings: ${w_set} ${k}='${v}' in place of a default an earlier release shipped"
+        else
+            log "settings: ${k} left alone: the owner chose its value"
+        fi
+    done
+    [[ ${#changed_keys[@]} -gt 0 ]] || { log "settings: nothing to change in ${env}"; return 0; }
+    [[ "${mode}" == "apply" ]] || return 0
+    if grep -q $'\r$' "${orig}"; then eol=$'\r\n'; fi
+    # The copy keeps owner, group, mode and ACLs; only the listed lines are rewritten, every other
+    # byte comes from sed/tail, and the result replaces .env in one rename.
+    { cp -a -- "${orig}" "${new}" && : > "${new}"; } || { log "settings: could not write ${new}"; return 1; }
+    for n in "${!repl[@]}"; do
+        if [[ ${n} -gt $((prev + 1)) ]]; then sed -n "$((prev + 1)),$((n - 1))p" "${orig}" >> "${new}" || return 1; fi
+        printf '%s\n' "${repl[${n}]}" >> "${new}" || return 1
+        prev=${n}
+    done
+    tail -n "+$((prev + 1))" "${orig}" >> "${new}" || return 1
+    if [[ ${#add[@]} -gt 0 && -s "${new}" && -n "$(tail -c 1 "${new}")" ]]; then printf '%s' "${eol}" >> "${new}" || return 1; fi
+    for k in "${add[@]}"; do printf "%s='%s'%s" "${k}" "${want[${k}]}" "${eol}" >> "${new}" || return 1; done
+    mv -fT -- "${new}" "${env}" || { log "settings: could not replace ${env}"; return 1; }
+    log "settings: ${env} updated (${changed_keys[*]}); the previous one is in ${backup}"
+}
+env_restore() {   # $1 = env_sync's work dir, $2 = .env: put back the copy env_sync took before any change
+    [[ -f "$1/env.orig" ]] || return 0   # this deploy never read .env, so it never changed it
+    cp -a -- "$1/env.orig" "$1/env.restore" && mv -fT -- "$1/env.restore" "$2" || return 1
+    log "settings: ${2} put back as it was before the deploy"
+}
 json="$(curl -fsSL -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${OWNER_REPO}/releases/latest" 2>/dev/null)" \
     || { [[ "${MODE}" == "check" ]] && echo "no GitHub Release found yet for ${OWNER_REPO} (or API unreachable)"; exit 0; }
 tag="$(jq -r '.tag_name // empty' <<< "${json}")"
 asset_url="$(jq -r --arg a "${ASSET}" '.assets[]? | select(.name==$a) | .browser_download_url' <<< "${json}" | head -1)"
 deployed="$(cat "${STATE}/deployed_tag" 2>/dev/null || echo none)"
 if [[ "${MODE}" == "check" ]]; then
-    echo "latest release: ${tag:-none} | deployed: ${deployed} | asset: ${asset_url:-MISSING} | market_open: $(market_open && echo yes || echo no)"; exit 0
+    echo "latest release: ${tag:-none} | deployed: ${deployed} | asset: ${asset_url:-MISSING} | market_open: $(market_open && echo yes || echo no)"
+    if [[ "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then   # what that release would change in .env
+        ck="$(mktemp -d)"; trap 'rm -rf "${ck}"' EXIT
+        if ! env_conf_fetch "${tag}" "${ck}/openalgo-env.conf"; then echo "settings: could not fetch the list of ${tag}"
+        elif ! env_sync check "${ck}/openalgo-env.conf" "${ENV_FILE}" "${ck}"; then echo "settings: the list of ${tag} is not valid"; fi
+    fi
+    exit 0
 fi
 [[ -n "${tag}" ]] || exit 0
 [[ "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { log "latest release '${tag}' is not a vA.B.C tag - ignored"; exit 0; }
@@ -74,6 +203,11 @@ else
 fi
 # (no grep -q here: with pipefail an early grep exit could SIGPIPE tar and fake a failure)
 tar -tzf "${tmp}/${ASSET}" | grep -x 'dist/index.html' > /dev/null || { log "${ASSET} has no dist/index.html - not deploying"; exit 1; }
+# ---- the .env settings of this release, fetched and checked while OpenAlgo still runs: a list that
+# cannot be fetched or read stops the deploy before anything is touched.
+env_conf="${tmp}/openalgo-env.conf"; mkdir -m 700 "${tmp}/env-plan" "${tmp}/env"
+env_conf_fetch "${tag}" "${env_conf}" || { log "could not fetch the settings list of ${tag} - not deploying"; exit 1; }
+env_sync check "${env_conf}" "${ENV_FILE}" "${tmp}/env-plan" || { log "the settings list of ${tag} is not valid - not deploying"; exit 1; }
 # ---- self-update: a release may carry a newer version of this tool. It is read straight from
 # GitHub at the release tag (never from APP_DIR, which the service user can write), checked, and
 # used from the NEXT run on - so a fixed tool arrives even when this run's deploy fails.
@@ -132,6 +266,8 @@ rollback() {
     if [[ -f "${bdir}/historify.duckdb" ]]; then
         rm -f "${APP_DIR}/db/historify.duckdb.wal"; cp -a "${bdir}/historify.duckdb" "${APP_DIR}/db/"
     fi
+    # .env goes back with the databases: a start may have rewritten it (OpenAlgo saves FERNET_SALT)
+    env_restore "${tmp}/env" "${ENV_FILE}" || log "WARNING: could not put the previous ${ENV_FILE} back"
     chown -R "${SVC_USER}:${SVC_USER}" "${APP_DIR}/frontend/dist" "${APP_DIR}/db"
     systemctl start "${SERVICE}"; log "rollback done (${SERVICE} $(systemctl is-active "${SERVICE}"))"
     for u in $(ring_services); do systemctl start "${u}" || log "WARNING: ${u} did not start after rollback"; done
@@ -157,6 +293,8 @@ as_svc "${UV[@]}"
 if [[ -f "${APP_DIR}/sudarshan/requirements.txt" ]]; then
     as_svc env UV_PYTHON_DOWNLOADS=never /usr/local/bin/uv pip install --quiet --python "${APP_DIR}/.venv/bin/python" -r "${APP_DIR}/sudarshan/requirements.txt"
 fi
+# OpenAlgo's .env gets the settings this release lists (backed up first; a rollback puts it back)
+if ! env_sync apply "${env_conf}" "${ENV_FILE}" "${tmp}/env" "${bdir}/openalgo.env"; then log "updating ${ENV_FILE} failed"; rollback; exit 1; fi
 # migrate_all.py runs each migration with sys.executable, so the venv python is enough (no 'uv run').
 if ! as_svc bash -c "cd '${APP_DIR}/upgrade' && '${APP_DIR}/.venv/bin/python' migrate_all.py"; then log "migrations failed"; rollback; exit 1; fi
 # ---- start + health (this is our own service; TRINETRA is never touched)
