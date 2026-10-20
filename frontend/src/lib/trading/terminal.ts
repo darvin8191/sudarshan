@@ -6561,6 +6561,12 @@ export class TradingTerminal {
    */
   private applyLiveBar(u: LiveBarUpdate): boolean {
     this.liveBucket = u.bar.time
+    // A late trade from the interval before the forming bar changed that bar
+    // too: it is replaced in place, and the series redrawn rather than
+    // updated at its tail. History's buffer keeps its own copy until the
+    // repair after the boundary brings the bar back.
+    const corrected =
+      u.previous !== undefined && upsertLiveBar(this.rawBars, u.previous) === 'replace'
     // Keyed on time rather than the builder's isNew flag, so a builder that
     // ever disagrees with rawBars about the current bucket overwrites that bar
     // instead of appending a duplicate of it, and never lands out of order.
@@ -6583,8 +6589,9 @@ export class TradingTerminal {
     // prefix. rawBars keeps accumulating either way, so leaving replay finds
     // the session already caught up.
     if (this.replayOwnsDisplay()) return false
-    // One bar in, one bar out. Only a transformed chart has to rebuild.
-    if (!this.updateLiveBar(u.bar)) this.setPriceData()
+    // One bar in, one bar out. Only a transformed chart, or a corrected bar
+    // behind the tail, has to rebuild.
+    if (corrected || !this.updateLiveBar(u.bar)) this.setPriceData()
     return true
   }
 

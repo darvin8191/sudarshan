@@ -68,6 +68,37 @@ describe('readFrameExtras', () => {
 })
 
 describe('FrameExtrasTap', () => {
+  it('keeps the last volume, open interest, previous close and trade time across a price-only frame, but never a last quantity', () => {
+    const tap = new FrameExtrasTap()
+    tap.read(
+      depthFrame({
+        volume: 1_250_000,
+        last_trade_quantity: 65,
+        oi: 4_100_000,
+        prev_close: 108.2,
+        last_trade_time: 1_792_470_000_000,
+      })
+    )
+    // A price-only update reaching the book subscription: no volume, no OI.
+    tap.read(
+      JSON.stringify({
+        type: 'market_data',
+        symbol: 'NIFTY27OCT2625000CE',
+        exchange: 'NFO',
+        mode: 3,
+        data: { ltp: 113, timestamp: 1_792_470_001_000, last_trade_time: 1_792_470_001_000 },
+      })
+    )
+    expect(tap.get('NIFTY27OCT2625000CE', 'NFO')).toEqual({
+      dayVolume: 1_250_000,
+      oi: 4_100_000,
+      prevClose: 108.2,
+      tradeTime: 1_792_470_001,
+    })
+    tap.clear()
+    expect(tap.get('NIFTY27OCT2625000CE', 'NFO')).toBeUndefined()
+  })
+
   class FakeSocket {
     static last: FakeSocket | null = null
     readyState = 1

@@ -24,6 +24,12 @@
  * - **No bar opens outside a session.** A tick that would start a new bar while
  *   the calendar says the exchange is shut, such as the snapshot a feed sends
  *   on subscribing at night or a pre-open price, moves no bar.
+ * - **A tick goes to the bar its time belongs to.** Where the feed stamps a
+ *   tick with the exchange's last-trade time, a book update after a boundary
+ *   still carries the last trade before it. Such a late tick updates the bar
+ *   that trade belongs to (the one before the forming bar) and never the
+ *   forming bar, so a bar the clock opened keeps waiting for its own first
+ *   trade, which becomes its open.
  * - **History merges by bucket.** A history snapshot and the forming bar meet
  *   in `mergeSnapshot`, which keeps one bar per bucket whatever time stamp each
  *   side gave it.
@@ -85,6 +91,12 @@ export interface LiveBarUpdate {
   provisional: boolean
   /** Opened by the clock, with no trade yet: a flat bar at the last close. */
   placeholder: boolean
+  /**
+   * The bar before `bar`, when a late trade changed it: a trade from the
+   * previous interval that arrived after the next bar opened. Draw it again
+   * too. Absent when only `bar` changed.
+   */
+  previous?: Bar
 }
 
 /** How an interval cuts time into bars. */
@@ -181,6 +193,20 @@ export class LiveBarBuilder {
    * history yet hands exactly this back, and that is not news.
    */
   private echo: Bar | null = null
+  /** Tick time of the newest trade folded into the current bar: its close. */
+  private curCloseAt = Number.NEGATIVE_INFINITY
+  /**
+   * The bar before the current one, while a late trade may still reach it:
+   * from the moment the current bar opened until history holds that bar.
+   */
+  private prev: Bar | null = null
+  /** The day's count when `prev` began, when known. */
+  private prevBase: number | null = null
+  /** Tick time of the newest trade folded into `prev`. */
+  private prevCloseAt = Number.NEGATIVE_INFINITY
+  /** The newest trade seen, by tick time: what a bar the clock opens is flat at. */
+  private lastTradeAt = Number.NEGATIVE_INFINITY
+  private lastTradePrice: number | null = null
 
   constructor(options: LiveBarOptions) {
     const bucketing = liveBucketing(options.interval)
@@ -220,6 +246,13 @@ export class LiveBarBuilder {
     this.provisional = false
     this.dayBase = null
     this.lastDayTrusted = false
+    this.prev = null
+    this.prevBase = null
+    this.prevCloseAt = Number.NEGATIVE_INFINITY
+    // History's close is at least as new as its bar's start.
+    this.curCloseAt = bar.time
+    this.lastTradeAt = bar.time
+    this.lastTradePrice = bar.close
     if (this.anchor === null) this.anchor = bar.time
     if (this.bucketing.kind === 'calendar')
       this.stampOffset = bar.time - startOfZonedDay(bar.time, this.zone)
@@ -292,25 +325,39 @@ export class LiveBarBuilder {
 
   /**
    * Fold one tick. Returns the bar it changed or opened, or null when the
-   * tick moves no bar: an unusable price, or a bar that would open while the
-   * exchange is shut.
+   * tick moves no bar: an unusable price, a bar that would open while the
+   * exchange is shut, or a late tick that changes nothing (a book update
+   * carrying a trade already counted).
    */
   onTick(tick: LiveTick): LiveBarUpdate | null {
     const price = tick.price
     if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(tick.time)) return null
     const bucket = this.bucketStart(tick.time)
     const cur = this.cur
-    // The bar forming, or a late tick from an earlier bucket, which is folded
-    // into the current bar rather than reopening a closed one.
-    if (cur && bucket <= cur.time) {
+    if (cur && bucket < cur.time) return this.onLateTick(tick, bucket)
+    if (cur && bucket === cur.time) {
       this.fold(cur, tick)
+      this.noteTrade(tick)
       this.streamed = true
       this.live = true
       this.echo = { ...cur }
       return { bar: { ...cur }, isNew: false, provisional: this.provisional, placeholder: false }
     }
-    if (this.session && !this.session.sessionAt(tick.time)) return null
-    const provisional = cur === null || !this.streamed
+    if (this.session && !this.session.sessionAt(tick.time)) {
+      // A trade before the open (the pre-open auction) opens no bar, but it
+      // is the price the session's first bar starts flat at.
+      this.noteTrade(tick)
+      return null
+    }
+    // The open of a day, week or month bar, and of a session's first bar,
+    // includes the opening auction, which a feed does not stream as ticks:
+    // history's open is the true one.
+    const provisional =
+      cur === null ||
+      !this.streamed ||
+      this.bucketing.kind === 'calendar' ||
+      this.opensSession(bucket)
+    this.retire(cur)
     const bar: Bar = {
       time: bucket,
       open: price,
@@ -321,12 +368,88 @@ export class LiveBarBuilder {
     }
     if (isCount(tick.oi)) bar.oi = tick.oi
     this.cur = bar
+    this.curCloseAt = tick.time
+    this.noteTrade(tick)
     this.empty = false
     this.live = true
     this.streamed = true
     this.provisional = provisional
     this.echo = { ...bar }
     return { bar: { ...bar }, isNew: true, provisional, placeholder: false }
+  }
+
+  /**
+   * A tick whose time belongs to an earlier bucket than the forming bar: the
+   * last trade before a boundary, delivered after the next bar opened, or a
+   * book update that still carries it. It updates the bar before the forming
+   * one when it belongs there, and nothing older. The forming bar takes none
+   * of it; a bar the clock opened only follows the last traded price, and
+   * stays waiting for its first trade.
+   */
+  private onLateTick(tick: LiveTick, bucket: number): LiveBarUpdate | null {
+    const cur = this.cur as Bar
+    const day = isCount(tick.dayVolume) ? tick.dayVolume : undefined
+    let previous: Bar | undefined
+    const prev = this.prev
+    if (prev && bucket === prev.time) {
+      const next: Bar = { ...prev }
+      if (tick.price > next.high) next.high = tick.price
+      if (tick.price < next.low) next.low = tick.price
+      if (tick.time >= this.prevCloseAt) {
+        next.close = tick.price
+        this.prevCloseAt = tick.time
+      }
+      if (day !== undefined && this.prevBase !== null)
+        next.volume = Math.max(next.volume ?? 0, day - this.prevBase)
+      if (isCount(tick.oi)) next.oi = tick.oi
+      if (!sameBar(next, prev) || next.oi !== prev.oi) {
+        this.prev = next
+        previous = { ...next }
+      }
+    }
+    this.noteTrade(tick)
+    let changed = false
+    if (this.empty) {
+      const level = this.lastTradePrice
+      if (level !== null && cur.close !== level) {
+        cur.open = level
+        cur.high = level
+        cur.low = level
+        cur.close = level
+        changed = true
+      }
+      // Everything counted so far traded before this bar. The session's first
+      // bar is the exception: it takes the whole day, pre-open included.
+      if (day !== undefined && !this.opensSession(cur.time))
+        this.dayBase = Math.max(this.dayBase ?? day, day)
+    }
+    if (day !== undefined && (this.lastDay === null || day >= this.lastDay))
+      this.noteDay(day, tick.time)
+    this.streamed = true
+    if (!previous && !changed) return null
+    this.echo = { ...cur }
+    const update: LiveBarUpdate = {
+      bar: { ...cur },
+      isNew: false,
+      provisional: this.provisional,
+      placeholder: this.empty,
+    }
+    if (previous) update.previous = previous
+    return update
+  }
+
+  /** The current bar is giving way to the next: keep it while a late trade may still reach it. */
+  private retire(cur: Bar | null): void {
+    this.prev = cur ? { ...cur } : null
+    this.prevBase = cur ? this.dayBase : null
+    this.prevCloseAt = this.curCloseAt
+  }
+
+  /** Remember the newest trade by its time, whichever bar it went to. */
+  private noteTrade(tick: LiveTick): void {
+    if (tick.time < this.lastTradeAt) return
+    this.lastTradeAt = tick.time
+    this.lastTradePrice = tick.price
   }
 
   /**
@@ -345,10 +468,15 @@ export class LiveBarBuilder {
     if (bucket <= cur.time || bucket < session.open || bucket >= session.close) return null
     const opensSession = session.open >= bucket && session.open < bucket + seconds
     if (bucket !== cur.time + seconds && !opensSession) return null
-    const close = cur.close
+    // Flat at the last traded price: the bar's own close, or a pre-open trade
+    // before the session's first bar.
+    const close = this.lastTradePrice ?? cur.close
     const bar: Bar = { time: bucket, open: close, high: close, low: close, close, volume: 0 }
-    const provisional = !this.streamed
+    // A session's first bar opens at its auction, which history has and ticks do not.
+    const provisional = !this.streamed || opensSession
+    this.retire(cur)
     this.cur = bar
+    this.curCloseAt = Number.NEGATIVE_INFINITY
     this.empty = true
     this.live = true
     this.provisional = provisional
@@ -419,6 +547,10 @@ export class LiveBarBuilder {
     const out = bars.slice()
     const cur = this.cur
     if (!cur || !out.length) return out
+    // History holds the bar before the forming one now: it is history's to
+    // keep, and a late trade no longer goes to it.
+    const prev = this.prev
+    if (prev && out.some((b) => b.time === prev.time)) this.prev = null
     const last = out[out.length - 1]
     if (!this.live) {
       if (last.time >= cur.time) this.adopt(last)
@@ -483,7 +615,12 @@ export class LiveBarBuilder {
       if (price > cur.high) cur.high = price
       if (price < cur.low) cur.low = price
     }
-    cur.close = price
+    // The close is the newest trade by time; one delivered out of order
+    // widens the bar but does not take the close back.
+    if (tick.time >= this.curCloseAt) {
+      cur.close = price
+      this.curCloseAt = tick.time
+    }
     const volume = this.foldVolume(cur, tick)
     if (volume === undefined) delete cur.volume
     else cur.volume = volume

@@ -124,10 +124,19 @@ export class FrameExtrasTap {
     this.latest.clear()
   }
 
-  /** Record one frame. */
+  /**
+   * Record one frame. A field the frame leaves out keeps its last value: a
+   * price-only update reaching a book subscription carries no volume or open
+   * interest, and the bar must not lose them for it. The last trade's
+   * quantity is the exception, since it describes that one trade only.
+   */
   read(raw: unknown): void {
     const frame = readFrameExtras(raw)
-    if (frame) this.latest.set(`${frame.exchange}:${frame.symbol}`, frame.extras)
+    if (!frame) return
+    const key = `${frame.exchange}:${frame.symbol}`
+    const kept: FrameExtras = { ...this.latest.get(key) }
+    delete kept.ltq
+    this.latest.set(key, { ...kept, ...frame.extras })
   }
 
   /** A factory for the stream client: a browser socket whose frames pass through `read` first. */

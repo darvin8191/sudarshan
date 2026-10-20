@@ -1385,6 +1385,41 @@ describe('the live bar in the terminal', () => {
     live.liveClock.stop()
   })
 
+  it('gives a late trade to the bar before the one the clock opened, and redraws that bar', async () => {
+    const { state } = mount()
+    const live = state as LiveState
+    state.data = {
+      pushBar: vi.fn(),
+      refresh: vi.fn(async () => state.rawBars),
+      bars: () => [bar(ist(10, 0), 100)],
+      destroy() {},
+    } as unknown as NonNullable<TerminalState['data']>
+    state.rawBars = [bar(ist(9, 59), 99), bar(ist(10, 0), 100)]
+    state.setPriceData()
+    const depth = wired(state)
+    vi.setSystemTime(ist(10, 0, 50) * 1000)
+    state.connectLive()
+    depth(100.5, ist(10, 0, 50))
+    state.builder.setSession(
+      new SessionCalendar({ timezone: 'Asia/Kolkata', sessions: ['0915-1530:23456'] })
+    )
+    live.liveClock.start()
+    vi.advanceTimersByTime(11_000) // 10:01:01: the clock has opened 10:01
+    // The last trade of 10:00, stamped 10:00:59 by the exchange, arrives now.
+    depth(100.9, ist(10, 0, 59))
+    expect(state.rawBars.slice(-2)).toEqual([
+      expect.objectContaining({ time: ist(10, 0), high: 102, close: 100.9 }),
+      { time: ist(10, 1), open: 100.9, high: 100.9, low: 100.9, close: 100.9, volume: 0 },
+    ])
+    const drawn = state.price.getData()
+    expect(drawn.find((b) => b.time === ist(10, 0))?.close).toBe(100.9)
+    expect(drawn.filter((b) => b.time === ist(10, 1))).toHaveLength(1)
+    // The first trade of 10:01 is its open.
+    depth(101.2, ist(10, 1, 2))
+    expect(state.rawBars.at(-1)).toMatchObject({ time: ist(10, 1), open: 101.2, close: 101.2 })
+    live.liveClock.stop()
+  })
+
   it('reads the book on an order event, once for a burst, and re-syncs it each minute', async () => {
     let socket: {
       onopen: (() => void) | null

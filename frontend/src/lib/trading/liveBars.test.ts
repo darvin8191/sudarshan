@@ -366,6 +366,146 @@ describe("volume from the day's running total", () => {
   })
 })
 
+describe('ticks stamped with the last trade time', () => {
+  // A feed that stamps each tick with the exchange's last-trade time sends a
+  // book update after a boundary with the last trade before it. Such a tick
+  // belongs to the bar before the forming one.
+  function streaming() {
+    const b = new LiveBarBuilder({ interval: '1m', session: nse() })
+    b.seed(bar(tue(10, 0), 100))
+    b.onTick({ time: tue(10, 0, 30), price: 101, dayVolume: 50_000 })
+    return b
+  }
+
+  function drawn(b: LiveBarBuilder) {
+    const bars: Bar[] = [b.current() as Bar]
+    const draw = (u: LiveBarUpdate | null) => {
+      if (!u) return u
+      if (u.previous) expect(upsertLiveBar(bars, u.previous)).toBe('replace')
+      upsertLiveBar(bars, u.bar)
+      return u
+    }
+    return { bars, draw }
+  }
+
+  it("opens the clock's bar once, and makes the first trade inside it its open", () => {
+    const b = streaming()
+    const { bars, draw } = drawn(b)
+    draw(b.onClock(tue(10, 1) + 0.1))
+    // Book updates after the boundary still carry the 10:00:30 trade: nothing moves.
+    expect(draw(b.onTick({ time: tue(10, 0, 30), price: 101, dayVolume: 50_000 }))).toBeNull()
+    expect(b.isPlaceholder()).toBe(true)
+    const first = draw(b.onTick({ time: tue(10, 1, 2), price: 102, dayVolume: 50_300 }))
+    expect(first).toMatchObject({ isNew: false, placeholder: false })
+    expect(first?.bar).toEqual({
+      time: tue(10, 1),
+      open: 102,
+      high: 102,
+      low: 102,
+      close: 102,
+      volume: 300,
+    })
+    // One bar for the bucket, at the bucket's own time, and a late clock adds none.
+    expect(draw(b.onClock(tue(10, 1, 3)))).toBeNull()
+    expect(bars.map((x) => x.time)).toEqual([tue(10, 0), tue(10, 1)])
+  })
+
+  it('gives a late trade from the previous interval to the previous bar, never the new one', () => {
+    const b = streaming()
+    const { bars, draw } = drawn(b)
+    draw(b.onClock(tue(10, 1) + 0.1))
+    // The last trade of 10:00, at 10:00:59, arrives after the clock opened 10:01.
+    const late = draw(b.onTick({ time: tue(10, 0, 59), price: 101.6, dayVolume: 50_250 }))
+    expect(late?.previous).toEqual({
+      time: tue(10, 0),
+      open: 99,
+      high: 101.6,
+      low: 98,
+      close: 101.6,
+      volume: 1_250,
+    })
+    // The new bar has not traded: it follows the last price and takes no volume.
+    expect(late?.bar).toEqual({
+      time: tue(10, 1),
+      open: 101.6,
+      high: 101.6,
+      low: 101.6,
+      close: 101.6,
+      volume: 0,
+    })
+    expect(late).toMatchObject({ isNew: false, placeholder: true })
+    // Its first trade is its open, and counts only what traded after the late one.
+    const first = draw(b.onTick({ time: tue(10, 1, 1), price: 101.8, dayVolume: 50_400 }))
+    expect(first?.bar).toMatchObject({ open: 101.8, close: 101.8, volume: 150 })
+    expect(first?.previous).toBeUndefined()
+    // A trade older than the previous bar's close widens nothing it already holds
+    // and does not take the close back.
+    expect(draw(b.onTick({ time: tue(10, 0, 58), price: 101.2, dayVolume: 50_240 }))).toBeNull()
+    expect(bars).toEqual([
+      { time: tue(10, 0), open: 99, high: 101.6, low: 98, close: 101.6, volume: 1_250 },
+      { time: tue(10, 1), open: 101.8, high: 101.8, low: 101.8, close: 101.8, volume: 150 },
+    ])
+  })
+
+  it('gives a late trade to the previous bar when a trade, not the clock, opened the new one', () => {
+    const b = new LiveBarBuilder({ interval: '1m' })
+    b.seed(bar(tue(10, 0), 100))
+    b.onTick({ time: tue(10, 0, 30), price: 101, dayVolume: 50_000 })
+    const opened = b.onTick({ time: tue(10, 1, 0), price: 102, dayVolume: 50_100 })
+    expect(opened?.bar).toMatchObject({ time: tue(10, 1), open: 102, volume: 100 })
+    // Delivered out of order: a trade at 10:00:59 after the one at 10:01:00.
+    const late = b.onTick({ time: tue(10, 0, 59), price: 100.4, dayVolume: 50_080 })
+    expect(late?.previous).toMatchObject({ time: tue(10, 0), close: 100.4, volume: 1_080 })
+    expect(late?.bar).toEqual(opened?.bar)
+  })
+
+  it('forgets the previous bar once history holds it', () => {
+    const b = streaming()
+    b.onClock(tue(10, 1) + 0.1)
+    b.mergeSnapshot([bar(tue(9, 59), 99), { ...bar(tue(10, 0), 101.6), volume: 1_300 }])
+    // History is the previous bar's owner now; a late copy of its last trade changes nothing.
+    expect(b.onTick({ time: tue(10, 0, 59), price: 101.6, dayVolume: 50_300 })).toMatchObject({
+      bar: { time: tue(10, 1), close: 101.6 },
+    })
+    expect(b.onTick({ time: tue(10, 0, 59), price: 101.6, dayVolume: 50_300 })).toBeNull()
+  })
+
+  it("folds a pre-open book update into the last bar, opens nothing before the session, and starts the first bar flat at the auction's price", () => {
+    const b = new LiveBarBuilder({ interval: '5m', session: nse() })
+    b.seed(bar(ist(2026, 10, 19, 15, 25), 250, 9_000))
+    // 09:03 on Tuesday: the feed still carries Monday's last trade, and today's count is nil.
+    const folded = b.onTick({ time: ist(2026, 10, 19, 15, 29, 59), price: 250, dayVolume: 0 })
+    expect(folded?.bar).toEqual(bar(ist(2026, 10, 19, 15, 25), 250, 9_000))
+    // The opening auction trades at 09:07:30. No bar opens before the session.
+    expect(b.onTick({ time: tue(9, 7, 30), price: 252, dayVolume: 40_000 })).toBeNull()
+    expect(b.current()?.time).toBe(ist(2026, 10, 19, 15, 25))
+    // 09:15: the session's first bar opens flat at the auction's price, and stays
+    // provisional, so history's open (the auction) stands.
+    const first = b.onClock(tue(9, 15) + 0.1)
+    expect(first).toMatchObject({
+      bar: { time: tue(9, 15), open: 252, close: 252, volume: 0 },
+      placeholder: true,
+      provisional: true,
+    })
+    // Book updates still carrying the auction trade change nothing.
+    expect(b.onTick({ time: tue(9, 7, 30), price: 252, dayVolume: 40_000 })).toBeNull()
+    // The session's first trade is the bar's open, and its volume includes the auction's.
+    expect(b.onTick({ time: tue(9, 15, 1), price: 252.5, dayVolume: 41_000 })?.bar).toMatchObject({
+      open: 252.5,
+      volume: 41_000,
+    })
+  })
+
+  it("leaves a day bar's open to history, whose open includes the auction", () => {
+    const yesterday = Date.UTC(2026, 9, 19) / 1000
+    const b = new LiveBarBuilder({ interval: 'D', session: nse() })
+    b.seed({ time: yesterday, open: 100, high: 105, low: 99, close: 104, volume: 80_000 })
+    b.onTick({ time: ist(2026, 10, 19, 15, 29), price: 104, dayVolume: 90_000 })
+    const today = b.onTick({ time: tue(9, 15, 2), price: 103, dayVolume: 1_200 })
+    expect(today).toMatchObject({ isNew: true, provisional: true })
+  })
+})
+
 describe('history merges without duplicates', () => {
   it('follows history until a tick or the clock has moved the bar', () => {
     const b = new LiveBarBuilder({ interval: '1m', session: nse() })
