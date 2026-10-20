@@ -334,6 +334,30 @@ describe('Order book on a phone: the cards', () => {
     expect(cancel.getAttribute('class')).not.toContain('--down')
   })
 
+  it('greys a working order’s last price once its ticks stop, keeping its arrow', async () => {
+    await renderPhone(WORKING)
+    act(() => {
+      feed.push(CALL, 'NFO', { ltp: 151.2 })
+      frames.flush()
+    })
+    act(() => {
+      feed.push(CALL, 'NFO', { ltp: 152.4 })
+      frames.flush()
+    })
+    const ltp = () => orderCard('1001').querySelector('[data-tick]') as HTMLElement
+    expect(ltp()).toHaveClass('text-[color:var(--up)]')
+    await pass(12_000)
+    expect(ltp()).toHaveAttribute('data-stale', 'true')
+    expect(ltp()).toHaveClass('text-muted-foreground')
+    expect(ltp()).not.toHaveClass('text-[color:var(--up)]')
+    expect(ltp().querySelector('svg')).toHaveAttribute('data-direction', 'up')
+  })
+
+  it('counts only working orders in Cancel all: a cancelled one is not', async () => {
+    await renderPhone(WORKING, CANCELLED, FILLED, REFUSED)
+    expect(screen.getByRole('button', { name: 'Cancel all (1)' })).toBeEnabled()
+  })
+
   it('filters by Open, Executed, Rejected and Cancelled, with counts', async () => {
     const tap = user()
     await renderPhone(...ALL)
@@ -458,6 +482,42 @@ describe('Order book on a phone: the sheet and its actions', () => {
 
     await reread()
     expect(reason()).toHaveTextContent('Broker says: RMS:Margin Exceeds')
+  })
+
+  it('offers Modify and Cancel on a working order only: trigger pending yes, complete or cancelled no', async () => {
+    const tap = user()
+    await renderPhone(STOP, FILLED, CANCELLED)
+    const actions = async (orderid: string) => {
+      await tap.click(orderCard(orderid))
+      const sheet = screen.getByRole('dialog')
+      const found = ['Modify', 'Cancel order'].filter(
+        (name) => within(sheet).queryByRole('button', { name }) !== null
+      )
+      await tap.click(within(sheet).getByRole('button', { name: 'Close' }))
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+      return found
+    }
+    expect(await actions('1002')).toEqual(['Modify', 'Cancel order'])
+    expect(await actions('1003')).toEqual([])
+    expect(await actions('1005')).toEqual([])
+  })
+
+  it('closes a cancel confirmation once the order has ended, sending nothing', async () => {
+    const tap = user()
+    await renderPhone(WORKING)
+    await tap.click(orderCard('1001'))
+    await tap.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel order' })
+    )
+    expect(screen.getByRole('dialog', { name: 'Cancel this order?' })).toBeInTheDocument()
+
+    // It filled while the trader read the confirmation.
+    push({ orderid: '1001', order_status: 'complete', filled_quantity: 65, average_price: 168 })
+    await settle()
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Cancel this order?' })).toBeNull()
+    )
+    expect(api.cancelOrder).not.toHaveBeenCalled()
   })
 
   it('says the sandbox refused it in Analyze mode, and when no reason was given', async () => {

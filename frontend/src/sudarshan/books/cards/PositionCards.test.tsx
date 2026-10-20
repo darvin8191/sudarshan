@@ -118,6 +118,7 @@ import { back, frame, pass, renderBook, settle, where } from '@/test/bookPages'
 import { fakeClock, frames } from '@/test/frames'
 import { feed } from '@/test/marketDataHarness'
 import { fakeScreen } from '@/test/screenWidth'
+import { STALE } from './parts'
 
 vi.setConfig({ testTimeout: 15_000 })
 
@@ -269,7 +270,10 @@ describe('Positions on a phone: the cards', () => {
     expect(long).toHaveTextContent('+₹650.00')
     expect(long).toHaveTextContent('+7.02%')
     // The P&L's arrow points the way its sign does.
-    expect(long.querySelector('span[data-direction="up"] svg')).not.toBeNull()
+    expect(long.querySelector('span[data-direction="up"] > svg')).toHaveAttribute(
+      'data-direction',
+      'up'
+    )
 
     const short = card(/BANKNIFTY 57500 PE/)
     expect(short).toHaveTextContent('NRML')
@@ -328,16 +332,43 @@ describe('Positions on a phone: the cards', () => {
   it('greys a position whose ticks have stopped, keeping its sign, arrow and a clock', async () => {
     await renderPhone(LONG)
     tick(CALL, { ltp: 149 })
+    const total = screen.getByTestId('positions-total')
+    expect(total).toHaveClass('text-[color:var(--up)]')
     await pass(12_000)
 
     const long = card(/NIFTY 25900 CE/)
     expect(long.closest('li')).toHaveAttribute('data-stale', 'true')
     const pnl = long.querySelector('span[data-direction]') as HTMLElement
     expect(pnl).toHaveAttribute('data-stale', 'true')
+    expect(pnl).toHaveClass(STALE)
+    expect(pnl).not.toHaveClass('text-[color:var(--up)]')
     expect(pnl).toHaveTextContent('+₹422.50')
-    expect(pnl.querySelector('svg')).not.toBeNull()
-    expect(long.querySelector('[data-tick="down"]')).toHaveAttribute('data-stale', 'true')
+    expect(pnl.querySelector(':scope > svg')).toHaveAttribute('data-direction', 'up')
+    const percent = [...long.querySelectorAll('span[data-stale]')].find((el) =>
+      el.textContent?.endsWith('%')
+    )
+    expect(percent).toHaveClass(STALE)
+    const ltp = long.querySelector('[data-tick="down"]') as HTMLElement
+    expect(ltp).toHaveAttribute('data-stale', 'true')
+    expect(ltp).toHaveClass('text-muted-foreground')
+    // The big total too: grey, still signed and with its arrow.
+    expect(screen.getByTestId('positions-total')).toHaveClass(STALE)
+    expect(screen.getByTestId('positions-total')).not.toHaveClass('text-[color:var(--up)]')
+    expect(screen.getByTestId('positions-total')).toHaveTextContent('+₹422.50')
     expect(screen.getByText(/Stale · updated 12s ago/)).toBeInTheDocument()
+  })
+
+  it('points a losing position’s arrow down, its own arrow, not the last tick’s', async () => {
+    // Bought at 142.50, now 130: a loss, while the last tick was up.
+    await renderPhone({ ...LONG, ltp: 129, pnl: -877.5, pnlpercent: -9.47 } as Position)
+    tick(CALL, { ltp: 130 })
+    const long = card(/NIFTY 25900 CE/)
+    const pnl = long.querySelector('span[data-direction]') as HTMLElement
+    expect(pnl).toHaveAttribute('data-direction', 'down')
+    expect(pnl.querySelector(':scope > svg')).toHaveAttribute('data-direction', 'down')
+    expect(long.querySelector('[data-tick="up"]')).toHaveTextContent('130.00')
+    const total = screen.getByTestId('positions-total')
+    expect(total.querySelector(':scope > svg')).toHaveAttribute('data-direction', 'down')
   })
 
   it('groups closed positions below, muted, with what they booked', async () => {
@@ -520,6 +551,57 @@ describe('Positions on a phone: the sheet and its actions', () => {
     const confirm = screen.getByRole('dialog', { name: 'Exit NIFTY 25900 CE?' })
     expect(confirm).toHaveTextContent('This cannot be undone.')
     expect(confirm).not.toHaveTextContent('sandbox')
+  })
+
+  it('exits the position whose sheet it is: the second card’s, not the first', async () => {
+    const tap = user()
+    await renderPhone(LONG, SHORT)
+    await tap.click(card(/BANKNIFTY 57500 PE/))
+    await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: /^Exit/ }))
+    await tap.click(
+      within(screen.getByRole('dialog', { name: 'Exit BANKNIFTY 57500 PE?' })).getByRole('button', {
+        name: 'Exit',
+      })
+    )
+    expect(api.closePosition).toHaveBeenCalledTimes(1)
+    expect(api.closePosition).toHaveBeenCalledWith(PUT, 'NFO', 'NRML')
+  })
+
+  it('sends one exit for two taps in the same moment', async () => {
+    const tap = user()
+    await renderPhone(LONG)
+    await tap.click(card(/NIFTY 25900 CE/))
+    await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: /^Exit/ }))
+    const exit = within(screen.getByRole('dialog', { name: 'Exit NIFTY 25900 CE?' })).getByRole(
+      'button',
+      { name: 'Exit' }
+    )
+    act(() => {
+      exit.click()
+      exit.click()
+    })
+    await settle()
+    expect(api.closePosition).toHaveBeenCalledTimes(1)
+  })
+
+  it('closes an exit confirmation once the book shows the position closed, sending nothing', async () => {
+    const tap = user()
+    await renderPhone(LONG, SHORT)
+    await tap.click(card(/NIFTY 25900 CE/))
+    await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: /^Exit/ }))
+    expect(screen.getByRole('dialog', { name: 'Exit NIFTY 25900 CE?' })).toBeInTheDocument()
+
+    // Squared off elsewhere (the broker's app, a stop): the next read says so.
+    api.getPositions.mockResolvedValue(book({ ...LONG, quantity: 0, pnl: 650 } as Position, SHORT))
+    act(() =>
+      socket.fire('order_update', { mode: 'live', orderid: 'x1', order_status: 'complete' })
+    )
+    await pass(3_000)
+    await settle()
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Exit NIFTY 25900 CE?' })).toBeNull()
+    )
+    expect(api.closePosition).not.toHaveBeenCalled()
   })
 
   it('makes the same call as the wide table’s close button', async () => {

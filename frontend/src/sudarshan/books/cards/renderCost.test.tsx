@@ -20,11 +20,12 @@ import type { Position } from '@/types/trading'
 
 vi.mock('@/lib/MarketDataManager', () => import('@/test/marketDataHarness'))
 
-const api = vi.hoisted(() => ({ getPositions: vi.fn(), getOrders: vi.fn() }))
+const api = vi.hoisted(() => ({ getPositions: vi.fn(), getOrders: vi.fn(), getHoldings: vi.fn() }))
 vi.mock('@/api/trading', () => ({
   tradingApi: {
     getPositions: (...args: unknown[]) => api.getPositions(...args),
     getOrders: (...args: unknown[]) => api.getOrders(...args),
+    getHoldings: (...args: unknown[]) => api.getHoldings(...args),
     getMultiQuotes: vi.fn().mockResolvedValue({ status: 'success', results: [] }),
     closePosition: vi.fn(),
     closeAllPositions: vi.fn(),
@@ -69,6 +70,7 @@ vi.mock('@/sudarshan/watchlist/rows', async (importOriginal) => {
 })
 
 import { createQueryClient } from '@/app/providers'
+import Holdings from '@/pages/Holdings'
 import OrderBook from '@/pages/OrderBook'
 import Positions from '@/pages/Positions'
 import { frames } from '@/test/frames'
@@ -214,6 +216,44 @@ describe('What a tick costs the Positions page', () => {
     act(() => frames.flush())
     expect(commits).toBe(1)
     expect(Object.fromEntries(count.cards)).toEqual({ [orders[0].symbol]: 1 })
+  })
+
+  it('on a phone’s holdings: a frame redraws only the holdings that moved', async () => {
+    // Twenty delivery holdings, each its own instrument; five of them tick.
+    const holdings = Array.from({ length: 20 }, (_, index) => ({
+      symbol: `STOCK${index}`,
+      exchange: 'NSE',
+      product: 'CNC',
+      quantity: 10,
+      average_price: 100,
+      ltp: 110,
+      pnl: 100,
+      pnlpercent: 10,
+    }))
+    api.getHoldings.mockResolvedValue({
+      status: 'success',
+      data: {
+        holdings,
+        statistics: {
+          totalholdingvalue: 22000,
+          totalinvvalue: 20000,
+          totalprofitandloss: 2000,
+          totalpnlpercentage: 10,
+        },
+      },
+    })
+    await renderAt('phone', <Holdings />)
+    expect(count.cards.size).toBe(20)
+    resetCounts()
+
+    const moving = holdings.slice(0, 5).map((holding) => holding.symbol)
+    for (let round = 0; round < 10; round += 1) {
+      for (const symbol of moving) act(() => feed.push(symbol, 'NSE', { ltp: 111 + round }))
+    }
+    act(() => frames.flush())
+    expect(commits).toBe(1)
+    expect([...count.cards.keys()].sort()).toEqual([...moving].sort())
+    expect([...count.cards.values()]).toEqual([1, 1, 1, 1, 1])
   })
 
   it('on a wide screen (upstream’s table, for comparison): the whole page, once per tick', async () => {

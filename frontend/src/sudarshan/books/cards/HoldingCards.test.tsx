@@ -78,10 +78,11 @@ vi.mock('@/components/socket/SocketProvider', () => ({
 }))
 
 import Holdings from '@/pages/Holdings'
-import { back, renderBook, settle, where } from '@/test/bookPages'
+import { back, pass, renderBook, settle, where } from '@/test/bookPages'
 import { fakeClock, frames } from '@/test/frames'
 import { feed } from '@/test/marketDataHarness'
 import { fakeScreen } from '@/test/screenWidth'
+import { STALE } from './parts'
 
 vi.setConfig({ testTimeout: 15_000 })
 
@@ -182,7 +183,11 @@ describe('Holdings on a phone', () => {
     expect(reliance).toHaveTextContent('LTP1,452.30')
     expect(reliance).toHaveTextContent('Day −0.60%')
     expect(reliance).toHaveTextContent('Value ₹58,092.00')
-    expect(reliance.querySelector('span[data-direction="up"] svg')).not.toBeNull()
+    // The P&L's own arrow points the way its sign does.
+    expect(reliance.querySelector('span[data-direction="up"] > svg')).toHaveAttribute(
+      'data-direction',
+      'up'
+    )
   })
 
   it('moves the value and the P&L with every tick', async () => {
@@ -197,6 +202,53 @@ describe('Holdings on a phone', () => {
     expect(reliance).toHaveTextContent('Value ₹58,400.00')
     expect(reliance.querySelector('[data-tick="up"]')).toHaveTextContent('1,460.00')
     expect(screen.getByTestId('holdings-value')).toHaveTextContent('₹1,17,359.00')
+  })
+
+  it('says it waits for the previous close rather than showing a day’s change of zero', async () => {
+    api.getMultiQuotes.mockImplementation(
+      async (_key: string, symbols: Array<{ symbol: string; exchange: string }>) => ({
+        status: 'success',
+        results: symbols.map(({ symbol, exchange }) => ({ symbol, exchange, data: { ltp: 0 } })),
+      })
+    )
+    await renderPhone(RELIANCE, HDFCBANK)
+    const summary = screen.getByRole('region', { name: 'Current value' })
+    expect(summary).toHaveTextContent("Day's changeWaiting for the previous close")
+    expect(summary).not.toHaveTextContent('₹0.00')
+    expect(card(/RELIANCE/)).not.toHaveTextContent('Day')
+  })
+
+  it('greys the summary and the holdings whose ticks have stopped, keeping signs and arrows', async () => {
+    await renderPhone(RELIANCE, HDFCBANK)
+    act(() => {
+      feed.push('RELIANCE', 'NSE', { ltp: 1460, cp: 1461 })
+      feed.push('HDFCBANK', 'NSE', { ltp: 990, cp: 975.2 })
+      frames.flush()
+    })
+    const value = screen.getByTestId('holdings-value')
+    expect(value).not.toHaveClass(STALE)
+    await pass(12_000)
+
+    expect(screen.getByTestId('holdings-value')).toHaveClass(STALE)
+    const summary = screen.getByRole('region', { name: 'Current value' })
+    const overall = summary.querySelector('span[data-direction]') as HTMLElement
+    expect(overall).toHaveClass(STALE)
+    expect(overall.querySelector(':scope > svg')).toHaveAttribute('data-direction', 'up')
+
+    const reliance = card(/RELIANCE/)
+    const pnl = reliance.querySelector('span[data-direction]') as HTMLElement
+    expect(pnl).toHaveClass(STALE)
+    expect(pnl).not.toHaveClass('text-[color:var(--up)]')
+    expect(pnl).toHaveTextContent('+₹3,428.00')
+    const percent = [...reliance.querySelectorAll('span[data-stale]')].find((el) =>
+      el.textContent?.endsWith('%')
+    )
+    expect(percent).toHaveClass(STALE)
+    expect(reliance.querySelector('[data-tick]')).toHaveClass('text-muted-foreground')
+    const worth = [...reliance.querySelectorAll('span')].find((el) =>
+      el.textContent?.startsWith('₹58,400')
+    )
+    expect(worth).toHaveClass(STALE)
   })
 
   it('says plainly when there are no holdings', async () => {
