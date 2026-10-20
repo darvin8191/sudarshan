@@ -215,6 +215,49 @@ def test_a_failed_store_leaves_no_login_on_record(world, monkeypatch):
     auth_db.db_session.remove()
 
 
+def test_a_store_that_finds_the_database_locked_leaves_no_login_on_record(world, monkeypatch):
+    """A real write lock held by another connection past the retry budget.
+
+    The failed commit leaves the session unusable until it is rolled back; without that the
+    session row cannot be removed, and the 08:45 wake-up would take the day as done.
+    """
+    import sqlite3
+
+    import database
+
+    monkeypatch.setattr(database, "LOCK_RETRY_BUDGET_S", 0.3)
+    db_file = auth_db.engine.url.database
+    working_upsert = bp_module.upsert_auth
+    held = []
+
+    def upsert_while_another_writer_holds_the_lock(*args, **kwargs):
+        holder = sqlite3.connect(db_file, isolation_level=None, factory=sqlite3.Connection)
+        try:
+            holder.execute("BEGIN IMMEDIATE")  # the write lock, as a long transaction holds it
+            held.append(db_file)
+            return working_upsert(*args, **kwargs)
+        finally:
+            if holder.in_transaction:
+                holder.execute("ROLLBACK")
+            holder.close()
+
+    monkeypatch.setattr(bp_module, "upsert_auth", upsert_while_another_writer_holds_the_lock)
+    assert worker.main([], env=world.env, clock=lambda: MONDAY_0835) == EXIT_FAILED
+    assert held and world.vault.state().last_code == "store_failed"
+    assert world.vault.state().active_session_id is None
+    assert auth_db.ActiveSession.query.filter_by(username=OWNER).count() == 0
+    row = auth_db.Auth.query.filter_by(name=OWNER).one()
+    assert auth_db.decrypt_token(row.auth) == OLD_TOKEN  # nothing half-written
+    auth_db.db_session.remove()
+    assert not has_login_this_trading_session(OWNER)
+
+    monkeypatch.setattr(bp_module, "upsert_auth", working_upsert)
+    later = MONDAY_0835 + timedelta(minutes=10)
+    assert worker.main([], env=world.env, clock=lambda: later) == EXIT_OK
+    assert auth_db.get_auth_token(OWNER) == FAKE_TOKEN
+    auth_db.db_session.remove()
+
+
 def test_openalgo_down_means_upstox_is_not_asked(world, monkeypatch):
     env = dict(world.env, SUDARSHAN_OPENALGO_URL="http://127.0.0.1:9")  # nothing listens there
     assert worker.main([], env=env, clock=lambda: MONDAY_0835) == EXIT_FAILED

@@ -42,6 +42,7 @@ from database.auth_db import (
     remove_session,
     upsert_auth,
 )
+from database.auth_db import db_session as auth_db_session
 from database.user_db import find_user_by_username
 from extensions import socketio
 from limiter import limiter
@@ -482,7 +483,13 @@ def _apply_token(username: str, auth_token: str) -> None:
             raise RuntimeError("upsert_auth stored nothing")
     except Exception:
         # No login on record without the token behind it: the next wake-up would otherwise take
-        # yesterday's stored token for today's and skip the day.
+        # yesterday's stored token for today's and skip the day. A commit that failed (a write
+        # lock held past the retry budget, a full disk) leaves the session unusable until it is
+        # rolled back, and remove_session would fail on it and leave the row in place.
+        try:
+            auth_db_session.rollback()
+        except Exception:
+            logger.exception("Auto-login: could not roll back the failed store")
         remove_session(session_id)
         vault.update_status(active_session_id=None)
         raise
