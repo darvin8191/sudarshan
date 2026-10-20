@@ -182,6 +182,10 @@ import { fakeClock, frames } from '@/test/frames'
 import { feed } from '@/test/marketDataHarness'
 import Watchlist, { LIST_FULL, OPEN_LIST_KEY } from './Watchlist'
 
+// Each test here is a whole flow in jsdom (a sheet, a search, a ticket, a list
+// of 250 rows); on a busy machine one can pass five seconds with nothing wrong.
+vi.setConfig({ testTimeout: 15_000 })
+
 const MINUS = '−'
 
 const MAIN: List = {
@@ -631,9 +635,8 @@ describe('Watchlist lists', () => {
     expect(screen.getByText(LISTS_FULL)).toBeInTheDocument()
   })
 
-  // The two below hold a full list of 250 rows: they find things by text (a
-  // role query over that many rows costs a second or more each time it polls),
-  // and take a longer budget for drawing that many rows in jsdom.
+  // The two below hold a full list of 250 rows: they find things by text, a
+  // role query over that many rows costs a second or more each time it polls.
   it('turns Add off for a full list, and says why', async () => {
     server.state.lists[0].items = Array.from({ length: 250 }, (_, index) => ({
       id: 5000 + index,
@@ -647,7 +650,7 @@ describe('Watchlist lists', () => {
     const add = screen.getByText('Add', { selector: 'button' })
     expect(add).toBeDisabled()
     expect(add).toHaveAttribute('aria-describedby', reason.id)
-  }, 15_000)
+  })
 
   it('stops taking symbols in the search once the list is full', async () => {
     const user = userEvent.setup()
@@ -671,7 +674,7 @@ describe('Watchlist lists', () => {
 
     expect(await within(sheet).findByText(/Main holds 250 symbols/)).toBeInTheDocument()
     expect(within(sheet).getByRole('button', { name: 'Add ICICIBANK, NSE' })).toBeDisabled()
-  }, 15_000)
+  })
 
   it('offers to add symbols to an empty list', async () => {
     const user = userEvent.setup()
@@ -1055,6 +1058,9 @@ describe('Watchlist sheet', () => {
     // The row keeps the line streaming in LTP; its old book stays on it.
     tick('SBIN', 'NSE', { ltp: 830 })
     sheet = await openSheet(user, /^SBIN/, 'SBIN')
+    // A frame passes: the sheet has the line, old book and all, and still waits.
+    frame()
+    expect(feed.cache.get('NSE:SBIN')?.data.depth).toBe(DEPTH)
     expect(within(sheet).queryByRole('table')).toBeNull()
     expect(within(sheet).getByText('Waiting for market depth.')).toBeInTheDocument()
 
