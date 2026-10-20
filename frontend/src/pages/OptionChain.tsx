@@ -572,12 +572,21 @@ export default function OptionChain() {
     resetToDefaults,
   } = useOptionChainPreferences()
 
-  // SUDARSHAN M8.2: opened on the underlying a link names, until the exchange is changed.
-  const [searchParams] = useSearchParams()
+  // SUDARSHAN M8.2: opened on the underlying a link names, until the exchange is
+  // changed. The link is read once and leaves the address at once (replaced, so
+  // Back is unchanged): a refresh then opens the page as usual.
+  const [searchParams, setSearchParams] = useSearchParams()
   const linked = useRef(linkedChain(searchParams))
   const [selectedExchange, setSelectedExchange] = useState(
     linked.current?.exchange ?? defaultFnoExchange
   )
+  useEffect(() => {
+    if (!searchParams.has('exchange') && !searchParams.has('underlying')) return
+    const rest = new URLSearchParams(searchParams)
+    rest.delete('exchange')
+    rest.delete('underlying')
+    setSearchParams(rest, { replace: true })
+  }, [searchParams, setSearchParams])
   const [underlyings, setUnderlyings] = useState<string[]>(
     defaultUnderlyings[defaultFnoExchange] || []
   )
