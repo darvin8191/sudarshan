@@ -11,9 +11,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from sudarshan.autologin.handoff import LinkError
 from sudarshan.autologin.schedule import IST
 
-FAKE_TOTP_SECRET = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"  # RFC 6238's test key, base32
+# RFC 6238's published test key, in base32.
+FAKE_TOTP_SECRET = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"  # pragma: allowlist secret
 FAKE_PIN = "246813"
-FAKE_API_KEY = "fake-upstox-api-key-0000"
+FAKE_API_KEY = "fake-upstox-api-key-0000"  # pragma: allowlist secret
 FAKE_TOKEN = "fake-access-token-" + "z" * 24
 OLD_TOKEN = "fake-old-access-token-" + "y" * 20
 

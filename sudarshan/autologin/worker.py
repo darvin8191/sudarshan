@@ -60,8 +60,9 @@ EXIT_BUSY = 75  # EX_TEMPFAIL: another attempt holds the lease (SuccessExitStatu
 
 KIND_SCHEDULED = "scheduled"
 KIND_TEST = "test"
-SECRET_TOTP = "upstox_totp_secret"
-SECRET_PIN = "upstox_pin"
+# Names of the vault rows that hold the TOTP key and the PIN (names, not values).
+SECRET_TOTP = "upstox_totp_secret"  # pragma: allowlist secret
+SECRET_PIN = "upstox_pin"  # pragma: allowlist secret
 
 #: A crashed run's lease expires after this; a healthy run takes a few seconds. Longer than the
 #: unit's TimeoutStartSec plus TimeoutStopSec and the launcher's limit (a test pins both), so no
@@ -222,7 +223,7 @@ class AutoLoginRun:
         try:
             totp_secret = normalize_secret(totp_secret)
         except InvalidSecret:
-            return self._failed("secrets_unreadable", setup=True)
+            return self._failed("secret_invalid", setup=True)
         if not self.api_key:
             return self._failed("not_configured", setup=True)
 

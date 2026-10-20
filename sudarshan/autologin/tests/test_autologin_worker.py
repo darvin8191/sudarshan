@@ -397,6 +397,16 @@ def test_missing_secrets(vault, calendar):
     assert len(link.reports("failed")) == 1
 
 
+def test_a_saved_key_that_is_not_a_valid_key(ready_vault, calendar):
+    ready_vault.set_secret(SECRET_TOTP, "not a key!")  # only an old version or a hand edit
+    link, upstox = FakeLink(), FakeUpstoxCall()
+    assert make_run(ready_vault, calendar, link=link, upstox=upstox).execute() == EXIT_FAILED
+    assert upstox.calls == []
+    state = ready_vault.state()
+    assert state.last_code == "secret_invalid" and "not a valid key" in state.last_message
+    assert "encryption key" not in link.reports("failed")[0]["telegram"]
+
+
 def test_secrets_saved_under_another_pepper(ready_vault, calendar):
     rotated = Vault(ready_vault.path, pepper="c3" * 32)  # fake, as after rotate_pepper.py
     link, upstox = FakeLink(), FakeUpstoxCall()

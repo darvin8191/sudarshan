@@ -20,14 +20,15 @@ from database import auth_db, user_db
 from limiter import limiter
 
 OWNER = "owner"
-OWNER_PASSWORD = "Fake-Pass-123!"  # fake
-FAKE_OPENALGO_API_KEY = "fake-openalgo-api-key-" + "0" * 40
+# Fake credentials, for the throwaway test database only.
+OWNER_PASSWORD = "Fake-Pass-123!"  # pragma: allowlist secret
+FAKE_OPENALGO_API_KEY = "fake-openalgo-api-key-" + "0" * 40  # pragma: allowlist secret
 TELEGRAM_ID = 4242
 
 
 def make_app(*, rate_limits: bool = False) -> Flask:
     app = Flask("sudarshan-autologin-tests")
-    app.secret_key = "test-only-secret-key-" + "0" * 32
+    app.secret_key = "test-only-secret-key-" + "0" * 32  # pragma: allowlist secret
     app.config.update(
         TESTING=True,
         WTF_CSRF_ENABLED=True,

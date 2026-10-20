@@ -117,7 +117,7 @@ def _manual_upstox_login(monkeypatch, *, should_download):
     log: list = []
     _recorders(monkeypatch, auth_utils, log, should_download=should_download)
     app = Flask("parity")
-    app.secret_key = "test-only"
+    app.secret_key = "test-only"  # pragma: allowlist secret
     with app.test_request_context(
         "/upstox/callback", headers={"Accept": "application/json", "User-Agent": "phone"}
     ):

@@ -44,10 +44,13 @@ MESSAGES = {
         "has the details."
     ),
     "unexpected_response": "Upstox answered in an unexpected way. The server log has the details.",
-    "secrets_missing": "The TOTP key or the PIN is not saved yet.",
+    "secrets_missing": "The TOTP key or the PIN is not saved yet.",  # pragma: allowlist secret
     "secrets_unreadable": (
         "The saved TOTP key and PIN can no longer be read because OpenAlgo's encryption key "
         "changed. Save them again on the Auto login page."
+    ),
+    "secret_invalid": (
+        "The saved TOTP key is not a valid key. Save it again, exactly as the Upstox app shows it."
     ),
     "not_configured": "The Upstox API key is missing from OpenAlgo's broker settings.",
     "wrong_broker": "OpenAlgo is set up for another broker. Auto-login works only with Upstox.",

@@ -30,7 +30,8 @@ from sudarshan.vault.store import LEGACY_PATH, VAULT_DIR
 
 PEPPER = "a1" * 32  # fake
 OTHER_PEPPER = "b2" * 32  # fake
-SECRET = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"  # RFC 6238's published test key
+# RFC 6238's published test key.
+SECRET = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"  # pragma: allowlist secret
 T0 = datetime(2026, 10, 19, 3, 5, tzinfo=UTC)
 
 

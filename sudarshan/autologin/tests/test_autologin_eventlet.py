@@ -45,10 +45,13 @@ def ticks_between(start, end):
     return sum(1 for t in ticks if start < t < end)
 
 def leftover_children():
+    # (0, 0) is a child still running, a pid is one that ended unreaped: both are left over.
+    # Only "no child at all" is clean.
     try:
-        return os.waitpid(-1, os.WNOHANG) != (0, 0)
+        os.waitpid(-1, os.WNOHANG)
     except ChildProcessError:
         return False
+    return True
 """
 
 
@@ -85,6 +88,23 @@ def test_a_blocking_wait_would_freeze_the_hub(tmp_path):
     )
     assert result["elapsed"] >= 0.8
     assert result["ticks"] <= 2  # a live hub ticks ~20 times in that second
+
+
+def test_the_leftover_check_sees_running_and_unreaped_children(tmp_path):
+    """The reaping checks below cannot pass vacuously: a child still running is caught too."""
+    result = run(
+        """
+        import subprocess
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        running = leftover_children()
+        child.kill()
+        eventlet.sleep(0.5)
+        unreaped = leftover_children()  # this call reaps it
+        print(json.dumps({"running": running, "unreaped": unreaped, "after": leftover_children()}))
+        """,
+        tmp_path,
+    )
+    assert result == {"running": True, "unreaped": True, "after": False}
 
 
 def test_launcher_waits_cooperatively_and_reaps(tmp_path):
