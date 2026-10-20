@@ -1,0 +1,42 @@
+# सुदर्शन / SUDARSHAN auto-login: one Upstox login attempt with TOTP + PIN (M2.20).
+# Started by sudarshan-autologin.timer (08:35, 08:45, 08:55 IST on weekdays). The worker decides
+# for itself: it does nothing on weekends, NSE holidays (/etc/sudarshan/nse_holidays.txt), outside
+# 08:30-15:30 IST, when switched off, or when OpenAlgo already holds today's login, so the deploy
+# tool restarting this unit is harmless. "Test now" runs the same program from OpenAlgo.
+# Docs: sudarshan/autologin/README.md. Optional settings: /etc/sudarshan/autologin.env.
+# Assumes OpenAlgo itself runs as the sudarshan user (the vault in db/ is mode 600).
+
+[Unit]
+Description=SUDARSHAN Upstox auto-login (one attempt)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=sudarshan
+Group=sudarshan
+Slice=sudarshan.slice
+WorkingDirectory=/opt/sudarshan/apps/openalgo
+ExecStart=/opt/sudarshan/apps/openalgo/.venv/bin/python -m sudarshan.autologin
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+EnvironmentFile=-/etc/sudarshan/autologin.env
+# 75: a "Test now" attempt holds the run lease; this start stops quietly (not a failure).
+SuccessExitStatus=75
+# Upstox 5 s connect + 15 s read, hand-off to OpenAlgo up to 3 x 20 s, plus a TOTP step.
+TimeoutStartSec=120
+MemoryMax=256M
+CPUWeight=50
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+# The only writes: the vault (db/sudarshan_vault.db and its -wal/-shm). Logs go to the journal.
+ReadWritePaths=/opt/sudarshan/apps/openalgo/db
+ReadOnlyPaths=-/etc/sudarshan
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
