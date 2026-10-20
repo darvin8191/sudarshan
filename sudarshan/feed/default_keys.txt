@@ -1,0 +1,21 @@
+# sudarshan-feed base subscriptions: one "MODE KEY" per line.
+# MODE: ltpc | full | option_greeks | full_d30 (full_d30 needs Upstox Plus).
+# KEY: an Upstox instrument key, SEGMENT|TOKEN; NSE equities use the ISIN.
+# A split or a merger changes an ISIN, and Upstox silently sends nothing for an unknown key:
+# check these against the Upstox instrument master (NSE.json.gz) and watch
+# keys_without_data in /health after the first connect of the day.
+# Runtime changes go through POST /subscribe and persist in $STATE_DIR/subscriptions.json.
+
+ltpc NSE_INDEX|Nifty 50
+ltpc NSE_INDEX|Nifty Bank
+ltpc NSE_INDEX|India VIX
+
+full NSE_EQ|INE002A01018  # RELIANCE
+full NSE_EQ|INE040A01034  # HDFCBANK
+full NSE_EQ|INE090A01021  # ICICIBANK
+full NSE_EQ|INE009A01021  # INFY
+full NSE_EQ|INE467B01029  # TCS
+full NSE_EQ|INE062A01020  # SBIN
+full NSE_EQ|INE397D01024  # BHARTIARTL
+full NSE_EQ|INE154A01025  # ITC
+full NSE_EQ|INE018A01030  # LT
