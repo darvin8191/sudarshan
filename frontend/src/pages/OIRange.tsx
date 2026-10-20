@@ -60,7 +60,7 @@ export default function OIRange() {
     defaultUnderlyings,
   } = useSupportedExchanges()
   const isAnalyzer = appMode === 'analyzer'
-  const isDark = mode === 'dark' || isAnalyzer
+  const isDark = mode === 'dark'
 
   const [selectedExchange, setSelectedExchange] = useState(defaultFnoExchange)
   const [underlyings, setUnderlyings] = useState<string[]>(

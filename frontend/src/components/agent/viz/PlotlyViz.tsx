@@ -270,9 +270,9 @@ interface VizTheme {
 function useVizTheme(): VizTheme {
   const { mode, appMode } = useThemeStore()
   const isAnalyzer = appMode === 'analyzer'
-  // Analyzer mode is the dark purple theme, so it reads as dark regardless of
-  // the light and dark setting. PayoffChart and CodeArtifact do the same.
-  const isDark = mode === 'dark' || isAnalyzer
+  // Dark only on a dark theme; Analyze mode is the light page here (SUDARSHAN).
+  // PayoffChart and CodeArtifact do the same.
+  const isDark = mode === 'dark'
 
   return useMemo(
     () => ({

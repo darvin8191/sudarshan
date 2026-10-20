@@ -129,7 +129,7 @@ export default function StraddleChart() {
 
   // Theme colors
   const colors = useMemo(() => {
-    if (isAnalyzer) {
+    if (isAnalyzer && isDarkMode) {
       return {
         text: '#d4bfff',
         grid: 'rgba(139, 92, 246, 0.1)',

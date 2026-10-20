@@ -135,9 +135,9 @@ export function PythonEditor({
   className = '',
   height = '100%',
 }: PythonEditorProps) {
-  const { mode, appMode } = useThemeStore()
-  // Dark mode when: explicit dark theme OR analyzer mode (always dark purple theme)
-  const isDark = mode === 'dark' || appMode === 'analyzer'
+  const { mode } = useThemeStore()
+  // Dark only on a dark theme; Analyze mode is the light page here (SUDARSHAN)
+  const isDark = mode === 'dark'
 
   const extensions = useMemo(() => {
     return [python(), createPythonTheme(isDark), createBaseTheme(isDark), EditorView.lineWrapping]

@@ -130,7 +130,8 @@ export default function StrategyChartTab({
   }, [showUnderlying])
 
   const colors = useMemo(() => {
-    if (appMode === 'analyzer') return { underlying: '#fbbf24', combined: '#a78bfa' }
+    if (appMode === 'analyzer' && mode === 'dark')
+      return { underlying: '#fbbf24', combined: '#a78bfa' }
     if (mode === 'dark') return { underlying: '#fbbf24', combined: '#a78bfa' }
     return { underlying: '#d97706', combined: '#7c3aed' }
   }, [mode, appMode])

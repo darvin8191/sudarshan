@@ -137,7 +137,6 @@ export default function MultiStrikeOITab({
   optionExchange,
 }: MultiStrikeOITabProps) {
   const mode = useThemeStore((s) => s.mode)
-  const appMode = useThemeStore((s) => s.appMode)
 
   const [intervals, setIntervals] = useState<string[]>(DEFAULT_INTERVALS)
   const [interval, setInterval] = useState('5m')
@@ -147,10 +146,7 @@ export default function MultiStrikeOITab({
   const [widget, setWidget] = useState<Widget | null>(null)
   const [hidden, setHidden] = useState<Record<string, boolean>>({})
 
-  const underlyingColor = useMemo(
-    () => (mode === 'dark' || appMode === 'analyzer' ? '#fbbf24' : '#d97706'),
-    [mode, appMode]
-  )
+  const underlyingColor = useMemo(() => (mode === 'dark' ? '#fbbf24' : '#d97706'), [mode])
 
   const payloadLegs = useMemo(
     () =>

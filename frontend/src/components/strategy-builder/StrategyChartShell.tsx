@@ -145,7 +145,7 @@ interface HoverPoint {
  * means the tab looks the same after the migration as before it.
  */
 function tooltipPalette(mode: string, appMode: string) {
-  if (appMode === 'analyzer') {
+  if (appMode === 'analyzer' && mode === 'dark') {
     return {
       background: 'rgba(30, 15, 60, 0.92)',
       border: 'rgba(139, 92, 246, 0.3)',

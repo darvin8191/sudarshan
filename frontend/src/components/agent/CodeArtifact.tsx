@@ -151,10 +151,10 @@ export interface CodeArtifactProps {
  *   streaming: Whether the fence is still open.
  */
 export function CodeArtifact({ code, language, streaming = false }: CodeArtifactProps) {
-  const { mode, appMode } = useThemeStore()
-  // Analyzer mode is always the dark purple theme, so it reads as dark here
-  // regardless of the light and dark setting. This matches PythonEditor.
-  const isDark = mode === 'dark' || appMode === 'analyzer'
+  const { mode } = useThemeStore()
+  // Dark only on a dark theme; Analyze mode is the light page here (SUDARSHAN).
+  // This matches PythonEditor.
+  const isDark = mode === 'dark'
   const prism = prismLanguage(language)
   const label = language?.trim() || 'text'
 

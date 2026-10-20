@@ -69,7 +69,7 @@ export function PayoffChart({
   const regionHeadingId = useId()
   const { mode, appMode } = useThemeStore()
   const isAnalyzer = appMode === 'analyzer'
-  const isDark = mode === 'dark' || isAnalyzer
+  const isDark = mode === 'dark'
 
   const colors = useMemo(
     () => ({
