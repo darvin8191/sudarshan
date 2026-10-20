@@ -26,30 +26,46 @@ export function mergeTick(
   wsLastUpdate: number | undefined,
   mq: QuotesData | undefined,
   nowMs: number,
-  staleMs: number
+  staleMs: number,
+  // SUDARSHAN: when the MultiQuotes snapshot was asked for. Given, the newer of
+  // the tick and the snapshot wins, however old the tick is: the snapshot is
+  // read once, not every 30 s, so "under 5 s" would hand a quiet leg back to a
+  // snapshot older than the tick it already has.
+  mqAt?: number | null
 ): TickView | undefined {
   if (!wsData && !mq) return undefined
 
-  const wsFresh = wsData?.ltp != null && wsLastUpdate != null && nowMs - wsLastUpdate < staleMs
+  let wsFresh = false
+  if (wsData?.ltp != null && wsLastUpdate != null) {
+    wsFresh =
+      mqAt != null
+        ? mq === undefined || wsLastUpdate >= mqAt // SUDARSHAN: the newer wins
+        : nowMs - wsLastUpdate < staleMs
+  }
 
   // Per field: a fresh WS value if present, else MultiQuotes, else the WS snapshot.
   const pick = (wsVal?: number, mqVal?: number) =>
     wsFresh && wsVal != null ? wsVal : (mqVal ?? wsVal)
 
   const ltp = pick(wsData?.ltp, mq?.ltp)
-  const prev = mq?.prev_close || 0
-  const mqChange = prev && ltp != null ? ltp - prev : undefined
-  const mqChangePct = prev && ltp != null ? ((ltp - prev) / prev) * 100 : undefined
+  // SUDARSHAN: a tick's own previous close (prev_close, or cp in LTP mode) when
+  // it carries one, else the snapshot's.
+  const fields = (wsData ?? {}) as Record<string, unknown>
+  const tickPrev = [fields.prev_close, fields.cp].find(
+    (value): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0
+  )
+  const prev = tickPrev ?? (mq?.prev_close || 0)
+  const mqChange = prev && ltp ? ltp - prev : undefined
+  const mqChangePct = prev && ltp ? ((ltp - prev) / prev) * 100 : undefined
 
   return {
     ltp,
     open: pick(wsData?.open, mq?.open),
     high: pick(wsData?.high, mq?.high),
     low: pick(wsData?.low, mq?.low),
-    change: wsFresh && wsData?.change != null ? wsData.change : (mqChange ?? wsData?.change),
-    change_percent:
-      wsFresh && wsData?.change_percent != null
-        ? wsData.change_percent
-        : (mqChangePct ?? wsData?.change_percent),
+    // SUDARSHAN: from the previous close whenever one is known, so the change
+    // agrees with it; a tick's own change only when none is.
+    change: mqChange ?? wsData?.change,
+    change_percent: mqChangePct ?? wsData?.change_percent,
   }
 }

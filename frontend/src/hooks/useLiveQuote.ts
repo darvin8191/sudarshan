@@ -3,6 +3,9 @@ import { type DepthData, type DepthLevel, type QuotesData, tradingApi } from '@/
 import { useMarketData } from '@/hooks/useMarketData'
 import { useMarketStatus } from '@/hooks/useMarketStatus'
 import { useAuthStore } from '@/stores/authStore'
+// SUDARSHAN: optional tick fields, read defensively (src/sudarshan/books/prices.ts).
+import { tickNumber, tickPrevClose } from '@/sudarshan/books/prices'
+import { useOnReturn } from '@/sudarshan/books/useReturn'
 
 /**
  * Depth data in normalized format (used by both WebSocket and REST)
@@ -63,7 +66,13 @@ export interface UseLiveQuoteOptions {
   useDepthFallback?: boolean
   /** Time in ms after which WebSocket data is considered stale (default: 5000) */
   staleThreshold?: number
-  /** Interval in ms to refresh REST data (default: 30000) */
+  /**
+   * Interval in ms to refresh REST data (default: 30000)
+   *
+   * SUDARSHAN: kept for callers and ignored. REST gives the first snapshot and
+   * re-syncs (the market-data socket signing in again, coming back to the page
+   * after more than 15 seconds); ticks do the rest (rule 7).
+   */
   refreshInterval?: number
   /** Pause when tab is hidden (default: true) */
   pauseWhenHidden?: boolean
@@ -89,7 +98,25 @@ export interface UseLiveQuoteResult {
   dataSource: 'websocket' | 'rest' | 'none'
   /** Manually refresh REST data */
   refresh: () => Promise<void>
+  /** SUDARSHAN: where the figures stand, for a status line. */
+  feed: {
+    lastTickAt: number | null
+    lastUpdateAt: number | null
+    due: number
+    connected: boolean
+  }
+  /** SUDARSHAN: the market calendar this hook reads. */
+  calendar: Pick<
+    ReturnType<typeof useMarketStatus>,
+    'isLoading' | 'error' | 'isMarketOpen' | 'isAnyMarketOpen'
+  >
 }
+
+/** SUDARSHAN: coming back after more than this long away reads the snapshot again. */
+const AWAY_MS = 15_000
+
+/** SUDARSHAN: two reasons to re-read this close together make one read. */
+const MIN_GAP_MS = 3_000
 
 /**
  * Centralized hook for real-time quote and depth data with automatic REST fallback.
@@ -123,16 +150,18 @@ export function useLiveQuote(
     useQuotesFallback = true,
     useDepthFallback = true,
     staleThreshold = 5000,
-    refreshInterval = 30000,
   } = options
 
   const { apiKey } = useAuthStore()
-  const { isMarketOpen } = useMarketStatus()
+  const calendar = useMarketStatus()
+  const { isMarketOpen } = calendar
 
   // REST fallback state
   const [restQuotes, setRestQuotes] = useState<QuotesData | null>(null)
   const [restDepth, setRestDepth] = useState<DepthData | null>(null)
   const [isLoadingRest, setIsLoadingRest] = useState(false)
+  // SUDARSHAN: when that snapshot was asked for, so a newer tick beats it field by field.
+  const [restAt, setRestAt] = useState<number | null>(null)
 
   // Track last fetch time
   const lastFetchRef = useRef<number>(0)
@@ -149,16 +178,22 @@ export function useLiveQuote(
   const {
     data: marketData,
     isConnected: wsConnected,
+    isAuthenticated: wsAuthenticated,
     isPaused: wsPaused,
     isFallbackMode,
+    connectionEpoch,
   } = useMarketData({
     symbols,
     mode,
     enabled: enabled && hasSymbol,
   })
 
-  const wsData = marketData.get(`${exchange}:${symbol}`)?.data
-  const wsLastUpdate = marketData.get(`${exchange}:${symbol}`)?.lastUpdate
+  const wsEntry = marketData.get(`${exchange}:${symbol}`)
+  const wsData = wsEntry?.data
+  const wsLastUpdate = wsEntry?.lastUpdate
+  // SUDARSHAN: a tick (or the manager's outage fallback) newer than the REST
+  // snapshot wins; the snapshot fills only what the tick does not carry.
+  const wsNewer = wsLastUpdate !== undefined && (restAt === null || wsLastUpdate >= restAt)
 
   // Check if market is open for this exchange
   const marketOpen = isMarketOpen(exchange)
@@ -177,9 +212,16 @@ export function useLiveQuote(
   /**
    * Fetch REST data (quotes and/or depth)
    */
+  // SUDARSHAN: an answer for an earlier symbol, or one a newer read overtook, is dropped.
+  const restRead = useRef(0)
+  const lastRestReadAt = useRef(0)
   const fetchRestData = useCallback(async () => {
     if (!apiKey || !hasSymbol) return
 
+    const read = ++restRead.current
+    const at = Date.now()
+    lastRestReadAt.current = at
+    const latest = () => read === restRead.current
     setIsLoadingRest(true)
     try {
       // Fetch quotes and depth in parallel
@@ -190,7 +232,7 @@ export function useLiveQuote(
           tradingApi
             .getQuotes(apiKey, symbol, exchange)
             .then((response) => {
-              if (response.status === 'success' && response.data) {
+              if (latest() && response.status === 'success' && response.data) {
                 setRestQuotes(response.data)
               }
             })
@@ -203,7 +245,7 @@ export function useLiveQuote(
           tradingApi
             .getDepth(apiKey, symbol, exchange)
             .then((response) => {
-              if (response.status === 'success' && response.data) {
+              if (latest() && response.status === 'success' && response.data) {
                 setRestDepth(response.data)
               }
             })
@@ -213,8 +255,9 @@ export function useLiveQuote(
 
       await Promise.all(promises)
       lastFetchRef.current = Date.now()
+      if (latest()) setRestAt(at)
     } finally {
-      setIsLoadingRest(false)
+      if (latest()) setIsLoadingRest(false)
     }
   }, [apiKey, symbol, exchange, hasSymbol, useQuotesFallback, useDepthFallback, mode])
 
@@ -231,30 +274,43 @@ export function useLiveQuote(
     fetchRestDataRef.current = fetchRestData
   }, [enabled, hasSymbol, fetchRestData])
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: symbol/exchange intentionally restart the interval + initial fetch when the watched instrument changes, even though the body reads them only via the stable fetchRestDataRef
+  // biome-ignore lint/correctness/useExhaustiveDependencies: symbol/exchange intentionally restart the initial fetch when the watched instrument changes, even though the body reads them only via the stable fetchRestDataRef
   useEffect(() => {
     if (!enabled || !hasSymbol) return
 
     // Initial fetch - use ref to ensure we have the latest function
+    // SUDARSHAN: the first snapshot only, no interval: ticks move the quote from here.
     fetchRestDataRef.current()
+  }, [enabled, hasSymbol, symbol, exchange])
 
-    // Set up periodic refresh
-    const interval = setInterval(() => {
-      // Check current enabled state before fetching
-      if (enabledRef.current && hasSymbolRef.current) {
-        fetchRestDataRef.current()
-      }
-    }, refreshInterval)
-
-    return () => clearInterval(interval)
-    // Only depend on stable values that should trigger new interval setup
-  }, [enabled, hasSymbol, symbol, exchange, refreshInterval])
+  // SUDARSHAN: read again when the market-data socket signs in again (a
+  // reconnect, the phone waking), and on coming back after 15 s away.
+  const epochSeen = useRef<number | null>(null)
+  useEffect(() => {
+    if (!wsAuthenticated) return
+    if (epochSeen.current === null || connectionEpoch === epochSeen.current) {
+      epochSeen.current = connectionEpoch
+      return
+    }
+    epochSeen.current = connectionEpoch
+    if (!enabledRef.current || !hasSymbolRef.current) return
+    if (Date.now() - lastRestReadAt.current < MIN_GAP_MS) return
+    fetchRestDataRef.current()
+  }, [wsAuthenticated, connectionEpoch])
+  useOnReturn(() => {
+    if (!enabledRef.current || !hasSymbolRef.current) return
+    if (Date.now() - lastRestReadAt.current < MIN_GAP_MS) return
+    fetchRestDataRef.current()
+  }, AWAY_MS)
 
   // Reset state when symbol changes
   // biome-ignore lint/correctness/useExhaustiveDependencies: symbol/exchange are the intended trigger to clear stale REST data when the watched instrument changes
   useEffect(() => {
     setRestQuotes(null)
     setRestDepth(null)
+    // SUDARSHAN: and the snapshot time. A read still out for the old symbol was
+    // overtaken by the new symbol's first read, so its answer is dropped.
+    setRestAt(null)
   }, [symbol, exchange])
 
   // Convert REST depth format to normalized format
@@ -268,28 +324,41 @@ export function useLiveQuote(
 
   // Merge WebSocket and REST data
   const mergedData: LiveQuoteData = useMemo(() => {
+    // SUDARSHAN: the newer of the tick and the REST snapshot goes first, field
+    // by field; the older fills only what the newer does not carry.
+    const ws = wsNewer ? wsData : undefined
+    const wsOld = wsNewer ? undefined : wsData
+
     // Determine best depth source
-    const depth = wsData?.depth ?? restDepthNormalized
+    const depth = ws?.depth ?? restDepthNormalized ?? wsOld?.depth
 
     // Determine best bid/ask from depth or quotes
     const bidPrice =
-      wsData?.depth?.buy?.[0]?.price ??
+      ws?.depth?.buy?.[0]?.price ??
+      ws?.bid_price ??
       restDepthNormalized?.buy?.[0]?.price ??
-      wsData?.bid_price ??
-      restQuotes?.bid
+      restQuotes?.bid ??
+      wsOld?.depth?.buy?.[0]?.price ??
+      wsOld?.bid_price
     const askPrice =
-      wsData?.depth?.sell?.[0]?.price ??
+      ws?.depth?.sell?.[0]?.price ??
+      ws?.ask_price ??
       restDepthNormalized?.sell?.[0]?.price ??
-      wsData?.ask_price ??
-      restQuotes?.ask
+      restQuotes?.ask ??
+      wsOld?.depth?.sell?.[0]?.price ??
+      wsOld?.ask_price
     const bidSize =
-      wsData?.depth?.buy?.[0]?.quantity ??
+      ws?.depth?.buy?.[0]?.quantity ??
+      ws?.bid_size ??
       restDepthNormalized?.buy?.[0]?.quantity ??
-      wsData?.bid_size
+      wsOld?.depth?.buy?.[0]?.quantity ??
+      wsOld?.bid_size
     const askSize =
-      wsData?.depth?.sell?.[0]?.quantity ??
+      ws?.depth?.sell?.[0]?.quantity ??
+      ws?.ask_size ??
       restDepthNormalized?.sell?.[0]?.quantity ??
-      wsData?.ask_size
+      wsOld?.depth?.sell?.[0]?.quantity ??
+      wsOld?.ask_size
 
     // Merge all data with priority: WebSocket > REST depth > REST quotes.
     //
@@ -299,31 +368,43 @@ export function useLiveQuote(
     // undefined, so a 0 would win and pin the display at 0.00 while depth shows
     // a real bid/ask, with the REST fallback never consulted. Treating 0 as
     // absent lets REST fill the gap.
+    //
+    // SUDARSHAN: the previous close is a tick's `prev_close` (or `cp`) when it
+    // carries one, else the REST snapshot's. Never a tick's `close`: today's
+    // Upstox adapter puts the running day bar there, and the completed feed
+    // the same previous close, or 0 when unknown. Open interest: tick first.
     return {
-      ltp: firstPrice(wsData?.ltp, restDepth?.ltp, restQuotes?.ltp),
-      open: firstPrice(wsData?.open, restDepth?.open, restQuotes?.open),
-      high: firstPrice(wsData?.high, restDepth?.high, restQuotes?.high),
-      low: firstPrice(wsData?.low, restDepth?.low, restQuotes?.low),
-      close: firstPrice(wsData?.close, restDepth?.prev_close, restQuotes?.prev_close),
-      volume: wsData?.volume ?? restDepth?.volume ?? restQuotes?.volume,
-      oi: restDepth?.oi ?? restQuotes?.oi,
-      change: wsData?.change,
-      changePercent: wsData?.change_percent,
+      ltp: firstPrice(ws?.ltp, restDepth?.ltp, restQuotes?.ltp, wsOld?.ltp),
+      open: firstPrice(ws?.open, restDepth?.open, restQuotes?.open, wsOld?.open),
+      high: firstPrice(ws?.high, restDepth?.high, restQuotes?.high, wsOld?.high),
+      low: firstPrice(ws?.low, restDepth?.low, restQuotes?.low, wsOld?.low),
+      close: firstPrice(
+        tickPrevClose(wsData) ?? undefined,
+        restDepth?.prev_close,
+        restQuotes?.prev_close
+      ),
+      volume: ws?.volume ?? restDepth?.volume ?? restQuotes?.volume ?? wsOld?.volume,
+      oi: (ws ? tickNumber(ws, 'oi') : null) ?? restDepth?.oi ?? restQuotes?.oi,
+      change: ws?.change,
+      changePercent: ws?.change_percent,
       bidPrice,
       askPrice,
       bidSize,
       askSize,
       depth,
     }
-  }, [wsData, restQuotes, restDepth, restDepthNormalized])
+  }, [wsData, wsNewer, restQuotes, restDepth, restDepthNormalized])
 
   // Calculate change if not available from WebSocket
+  // SUDARSHAN: from the previous close whenever one is known, so the change
+  // agrees with the close shown beside it (a tick's own change only when no
+  // close is known); and a change of exactly 0 keeps its 0.00%.
   const dataWithChange: LiveQuoteData = useMemo(() => {
-    if (mergedData.change !== undefined) return mergedData
+    const { ltp, close } = mergedData
+    if (!ltp || !close) return mergedData
 
-    const change =
-      mergedData.ltp && mergedData.close ? mergedData.ltp - mergedData.close : undefined
-    const changePercent = change && mergedData.close ? (change / mergedData.close) * 100 : undefined
+    const change = ltp - close
+    const changePercent = (change / close) * 100
 
     return {
       ...mergedData,
@@ -339,6 +420,20 @@ export function useLiveQuote(
     return 'none'
   }, [hasWsData, restQuotes, restDepth])
 
+  // SUDARSHAN: where the quote stands, for the status line beside it.
+  const lastTickAt =
+    wsEntry?.updateSource === 'websocket' && typeof wsLastUpdate === 'number' ? wsLastUpdate : null
+  const lastUpdateAt =
+    typeof wsLastUpdate === 'number' && (restAt === null || wsLastUpdate > restAt)
+      ? wsLastUpdate
+      : restAt
+  const feed = {
+    lastTickAt,
+    lastUpdateAt,
+    due: enabled && hasSymbol ? 1 : 0,
+    connected: wsAuthenticated && !wsPaused,
+  }
+
   return {
     data: dataWithChange,
     isLive,
@@ -348,5 +443,7 @@ export function useLiveQuote(
     isFallbackMode,
     dataSource,
     refresh: fetchRestData,
+    feed,
+    calendar,
   }
 }

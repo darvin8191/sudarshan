@@ -5,7 +5,14 @@ import { usePageVisibility } from './usePageVisibility'
 
 interface UseOptionChainPollingOptions {
   enabled: boolean
-  refreshInterval?: number
+  /** SUDARSHAN: null reads once (and on refetch) with no timer. */
+  refreshInterval?: number | null
+  /**
+   * SUDARSHAN: asked before each timed read; false skips it, so a caller can
+   * stop polling for fields the live feed already carries without restarting
+   * the timer (which would read at once) each time that changes.
+   */
+  pollWhen?: () => boolean
   pauseWhenHidden?: boolean
   derivativeExchange?: string
 }
@@ -48,8 +55,11 @@ export function useOptionChainPolling(
     refreshInterval = 30000,
     pauseWhenHidden = true,
     derivativeExchange = exchange,
+    pollWhen,
   } = options
   const { isVisible } = usePageVisibility()
+  const pollWhenRef = useRef(pollWhen)
+  pollWhenRef.current = pollWhen
 
   const [state, setState] = useState<UseOptionChainPollingState>({
     data: null,
@@ -85,6 +95,11 @@ export function useOptionChainPolling(
   // Determine if polling should be active
   const shouldPoll = enabled && (!pauseWhenHidden || isVisible)
 
+  // SUDARSHAN: set while a re-read the trader did not ask for starts (resync,
+  // below: a reconnect, a re-centre). It leaves the loading state alone, so
+  // nothing flips to "refreshing" or spins while the chain is brought up to date.
+  const quietReadRef = useRef(false)
+
   const fetchData = useCallback(async () => {
     if (!apiKey || !underlying || !exchange || !expiryDate) {
       return
@@ -95,7 +110,7 @@ export function useOptionChainPolling(
       return
     }
 
-    setState((prev) => ({ ...prev, isLoading: true }))
+    if (!quietReadRef.current) setState((prev) => ({ ...prev, isLoading: true }))
 
     const generation = requestGenerationRef.current
     const dataIdentity: OptionChainDataIdentity = {
@@ -192,7 +207,14 @@ export function useOptionChainPolling(
     fetchData()
 
     // Set up interval
-    intervalRef.current = setInterval(fetchData, refreshInterval)
+    // SUDARSHAN: none when the caller has nothing left to poll for, and a timed
+    // read is skipped while the caller says so.
+    if (refreshInterval !== null) {
+      intervalRef.current = setInterval(() => {
+        if (pollWhenRef.current && !pollWhenRef.current()) return
+        fetchData()
+      }, refreshInterval)
+    }
 
     return () => {
       if (intervalRef.current) {
@@ -210,8 +232,19 @@ export function useOptionChainPolling(
     fetchData()
   }, [fetchData])
 
+  // SUDARSHAN: the quiet re-read. fetchData reads the flag before its first await.
+  const resync = useCallback(() => {
+    quietReadRef.current = true
+    try {
+      fetchData()
+    } finally {
+      quietReadRef.current = false
+    }
+  }, [fetchData])
+
   return {
     ...state,
     refetch,
+    resync,
   }
 }

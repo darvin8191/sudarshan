@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { type QuotesData, tradingApi } from '@/api/trading'
 import { useMarketData } from '@/hooks/useMarketData'
 import { useMarketStatus } from '@/hooks/useMarketStatus'
-import { usePageVisibility } from '@/hooks/usePageVisibility'
 import { useAuthStore } from '@/stores/authStore'
+// SUDARSHAN: how a row is priced (newest source, broker P&L moved by ticks), M6.2/M6.3.
+import { isClosedRow, type LiveRowFields, priceRow, TickDirections } from '@/sudarshan/books/prices'
+import { useOnReturn } from '@/sudarshan/books/useReturn'
 
 /**
  * Base interface for items that can have live price data
@@ -66,16 +68,52 @@ export function positionPnlAt(
 export interface UseLivePriceOptions {
   /** Whether the hook is enabled (default: true) */
   enabled?: boolean
-  /** Time in ms after which WebSocket data is considered stale (default: 5000) */
+  /**
+   * Time in ms after which WebSocket data is considered stale (default: 5000)
+   *
+   * SUDARSHAN: kept for callers and no longer used. A price is chosen by how
+   * recently it was confirmed (src/sudarshan/books/prices.ts), and how old the
+   * figures on screen are is said by the page's status line.
+   */
   staleThreshold?: number
-  /** Whether to use MultiQuotes API as fallback when WebSocket unavailable (default: true) */
+  /**
+   * Whether to read REST quotes (default: true)
+   *
+   * SUDARSHAN: the first snapshot of each symbol set, read again when the
+   * market-data socket signs in again and on coming back to the page after
+   * more than 15 seconds. Never on a timer: ticks move the prices, and the
+   * market-data manager's own fallback covers an outage.
+   */
   useMultiQuotesFallback?: boolean
-  /** Interval in ms to refresh MultiQuotes data (default: 30000) */
+  /**
+   * Interval in ms to refresh MultiQuotes data (default: 30000)
+   *
+   * SUDARSHAN: kept for callers and ignored. Timed polling of prices is not
+   * done while the socket is healthy (rule 7).
+   */
   multiQuotesRefreshInterval?: number
   /** Pause WebSocket and polling when tab is hidden (default: true) */
   pauseWhenHidden?: boolean
   /** Time in ms to wait before pausing when hidden (default: 5000) */
   pauseDelay?: number
+  /**
+   * SUDARSHAN: when the items' own figures (ltp, pnl) were asked of the
+   * broker. Only prices newer than this move them. Left out, a row's figures
+   * count from when this hook first saw them.
+   */
+  snapshotAt?: number | null
+}
+
+/** SUDARSHAN: where the prices on screen stand, for the page's status line. */
+export interface LiveFeed {
+  /** The newest WebSocket tick for any row that can still move, or null. */
+  lastTickAt: number | null
+  /** The newest confirmation of any figure shown: a tick, a REST quote or the book. */
+  lastUpdateAt: number | null
+  /** Rows whose prices are due to tick: open positions, holdings, watchlist rows. */
+  due: number
+  /** The market-data socket is up and signed in. */
+  connected: boolean
 }
 
 /**
@@ -83,7 +121,7 @@ export interface UseLivePriceOptions {
  */
 export interface UseLivePriceResult<T extends PriceableItem> {
   /** Enhanced items with real-time LTP and recalculated PnL */
-  data: T[]
+  data: Array<T & LiveRowFields>
   /** Whether real-time data is available (WebSocket connected AND market open) */
   isLive: boolean
   /** Whether WebSocket is connected */
@@ -98,7 +136,20 @@ export interface UseLivePriceResult<T extends PriceableItem> {
   multiQuotes: Map<string, QuotesData>
   /** Manually refresh MultiQuotes data */
   refreshMultiQuotes: () => Promise<void>
+  /** SUDARSHAN: where the prices stand, for the status line. */
+  feed: LiveFeed
+  /** SUDARSHAN: the market calendar this hook reads, so a page need not read it again. */
+  calendar: Pick<
+    ReturnType<typeof useMarketStatus>,
+    'isLoading' | 'error' | 'isMarketOpen' | 'isAnyMarketOpen'
+  >
 }
+
+/** SUDARSHAN: coming back after more than this long away reads the quotes again. */
+const QUOTES_AWAY_MS = 15_000
+
+/** SUDARSHAN: two reasons to re-read the quotes this close together make one read. */
+const QUOTES_MIN_GAP_MS = 3_000
 
 /**
  * Centralized hook for real-time price data with automatic fallback.
@@ -107,6 +158,11 @@ export interface UseLivePriceResult<T extends PriceableItem> {
  * 1. WebSocket LTP (when market is open and data is fresh)
  * 2. MultiQuotes API (fallback when WebSocket unavailable)
  * 3. REST API data (baseline from initial fetch)
+ *
+ * SUDARSHAN: the newest of the three wins instead (src/sudarshan/books/prices.ts),
+ * an open row's P&L is the broker's own figure moved by the price change since
+ * the book was read, and REST quotes are read only for the first snapshot and
+ * re-syncs, never on a timer.
  *
  * @example
  * ```tsx
@@ -120,24 +176,17 @@ export function useLivePrice<T extends PriceableItem>(
   items: T[],
   options: UseLivePriceOptions = {}
 ): UseLivePriceResult<T> {
-  const {
-    enabled = true,
-    staleThreshold = 5000,
-    useMultiQuotesFallback = true,
-    multiQuotesRefreshInterval = 30000,
-    pauseWhenHidden = true,
-  } = options
+  const { enabled = true, useMultiQuotesFallback = true, snapshotAt } = options
 
   const { apiKey } = useAuthStore()
-  const { isMarketOpen, isAnyMarketOpen } = useMarketStatus()
-  const { isVisible, wasHidden, timeSinceHidden } = usePageVisibility()
+  const calendar = useMarketStatus()
+  const { isAnyMarketOpen } = calendar
   const anyMarketOpen = isAnyMarketOpen()
 
   // State for MultiQuotes fallback data
   const [multiQuotes, setMultiQuotes] = useState<Map<string, QuotesData>>(new Map())
-
-  // Track last fetch time for visibility-aware refresh
-  const lastFetchRef = useRef<number>(Date.now())
+  // SUDARSHAN: when that snapshot was asked for, so a newer tick can beat it.
+  const [quotesAt, setQuotesAt] = useState<number | null>(null)
 
   // Extract symbols for WebSocket subscription
   const symbols = useMemo(
@@ -148,13 +197,26 @@ export function useLivePrice<T extends PriceableItem>(
       })),
     [items]
   )
+  // SUDARSHAN: the symbol set by content, so a re-read book with the same
+  // instruments does not read the quotes again.
+  const symbolsKey = useMemo(
+    () =>
+      Array.from(new Set(symbols.map((s) => `${s.exchange}:${s.symbol}`)))
+        .sort()
+        .join(','),
+    [symbols]
+  )
+  const symbolsRef = useRef(symbols)
+  symbolsRef.current = symbols
 
   // WebSocket market data - connect when enabled, with visibility awareness
   const {
     data: marketData,
     isConnected: wsConnected,
+    isAuthenticated: wsAuthenticated,
     isPaused: wsPaused,
     isFallbackMode,
+    connectionEpoch,
   } = useMarketData({
     symbols,
     mode: 'LTP',
@@ -167,16 +229,20 @@ export function useLivePrice<T extends PriceableItem>(
   /**
    * Fetch MultiQuotes data from API
    */
+  // SUDARSHAN: an answer a newer read overtook is dropped, and the snapshot is
+  // stamped with when it was asked for.
+  const quoteRead = useRef(0)
+  const lastQuoteReadAt = useRef(0)
   const fetchMultiQuotes = useCallback(async () => {
-    if (!apiKey || items.length === 0 || !useMultiQuotesFallback) return
+    const symbolsList = symbolsRef.current
+    if (!apiKey || symbolsList.length === 0 || !useMultiQuotesFallback) return
 
+    const read = ++quoteRead.current
+    const at = Date.now()
+    lastQuoteReadAt.current = at
     try {
-      const symbolsList = items.map((item) => ({
-        symbol: item.symbol,
-        exchange: item.exchange,
-      }))
-
       const response = await tradingApi.getMultiQuotes(apiKey, symbolsList)
+      if (read !== quoteRead.current) return
 
       if (response.status === 'success' && response.results) {
         const quotesMap = new Map<string, QuotesData>()
@@ -187,140 +253,133 @@ export function useLivePrice<T extends PriceableItem>(
           }
         })
         setMultiQuotes(quotesMap)
+        setQuotesAt(at)
       }
     } catch {
       // Silently fail - MultiQuotes is a fallback mechanism
     }
-  }, [apiKey, items, useMultiQuotesFallback])
+  }, [apiKey, useMultiQuotesFallback])
 
-  // Fetch MultiQuotes on mount and when items change
-  // Visibility-aware: pause polling when tab is hidden
+  // SUDARSHAN: the first snapshot of each symbol set. No interval: ticks move
+  // the prices from here, and the manager's fallback covers a feed outage.
   useEffect(() => {
-    if (!enabled || items.length === 0 || !useMultiQuotesFallback) return
+    if (!enabled || !symbolsKey || !useMultiQuotesFallback) return
+    void fetchMultiQuotes()
+  }, [enabled, symbolsKey, useMultiQuotesFallback, fetchMultiQuotes])
 
-    // Don't poll when hidden (if pauseWhenHidden is true)
-    if (pauseWhenHidden && !isVisible) return
-
-    // Initial fetch
-    fetchMultiQuotes()
-    lastFetchRef.current = Date.now()
-
-    // Set up periodic refresh
-    const interval = setInterval(() => {
-      fetchMultiQuotes()
-      lastFetchRef.current = Date.now()
-    }, multiQuotesRefreshInterval)
-
-    return () => clearInterval(interval)
-  }, [
-    enabled,
-    items.length,
-    useMultiQuotesFallback,
-    fetchMultiQuotes,
-    multiQuotesRefreshInterval,
-    pauseWhenHidden,
-    isVisible,
-  ])
+  // SUDARSHAN: read again when the market-data socket signs in again (a
+  // reconnect, or the phone waking), for instruments that do not tick soon.
+  const epochSeen = useRef<number | null>(null)
+  useEffect(() => {
+    if (!wsAuthenticated) return
+    if (epochSeen.current === null || connectionEpoch === epochSeen.current) {
+      epochSeen.current = connectionEpoch
+      return
+    }
+    epochSeen.current = connectionEpoch
+    if (!enabled || !useMultiQuotesFallback) return
+    if (Date.now() - lastQuoteReadAt.current < QUOTES_MIN_GAP_MS) return
+    void fetchMultiQuotes()
+  }, [wsAuthenticated, connectionEpoch, enabled, useMultiQuotesFallback, fetchMultiQuotes])
 
   // Refresh MultiQuotes immediately when tab becomes visible after being hidden
-  useEffect(() => {
-    if (!wasHidden || !isVisible || !useMultiQuotesFallback || !enabled) return
-
-    // If we were hidden for more than the refresh interval, fetch immediately
-    if (timeSinceHidden > multiQuotesRefreshInterval) {
-      fetchMultiQuotes()
-      lastFetchRef.current = Date.now()
-    }
-  }, [
-    wasHidden,
-    isVisible,
-    timeSinceHidden,
-    multiQuotesRefreshInterval,
-    useMultiQuotesFallback,
-    enabled,
-    fetchMultiQuotes,
-  ])
+  // SUDARSHAN: after more than 15 seconds away, unless a read just ran.
+  useOnReturn(
+    () => {
+      if (Date.now() - lastQuoteReadAt.current < QUOTES_MIN_GAP_MS) return
+      void fetchMultiQuotes()
+    },
+    QUOTES_AWAY_MS,
+    enabled && useMultiQuotesFallback
+  )
 
   /**
    * Enhance items with real-time LTP and recalculated P&L
-   * Priority: WebSocket (fresh + market open) → MultiQuotes → REST API
    *
-   * For open positions (qty != 0): P&L and P&L% are recalculated using live LTP
-   * For closed positions (qty = 0): P&L and P&L% from REST API (realized values)
+   * SUDARSHAN: each row from the newest of its tick, the quote snapshot and
+   * its own book figures; an open row's P&L is the broker's moved by the
+   * price change since the book was read; a closed row keeps the broker's
+   * figures (src/sudarshan/books/prices.ts). A row's book time is the
+   * caller's `snapshotAt`, or when its figures were first seen here.
    */
+  const bookStamps = useRef(new Map<string, { signature: string; at: number }>())
+  const directions = useRef(new TickDirections())
   const enhancedData = useMemo(() => {
-    return items.map((item) => {
+    const now = Date.now()
+    const rowKeys = new Set<string>()
+    const symbolKeys = new Set<string>()
+    const priced = items.map((item) => {
       const key = `${item.exchange}:${item.symbol}`
-      const wsData = marketData.get(key)
-      const mqData = multiQuotes.get(key)
-
-      const qty = item.quantity || 0
-
-      // Check if market is open for this exchange
-      const exchangeMarketOpen = isMarketOpen(item.exchange)
-
-      // Check if WebSocket LTP is fresh AND market is open
-      const hasWsData =
-        exchangeMarketOpen &&
-        wsData?.data?.ltp &&
-        wsData.lastUpdate &&
-        Date.now() - wsData.lastUpdate < staleThreshold
-
-      // Check if we have MultiQuotes data (fallback when WebSocket not available)
-      const hasMqData = !hasWsData && mqData?.ltp
-
-      // Determine the best available LTP source
-      let currentLtp: number | undefined
-      let dataSource: 'websocket' | 'multiquotes' | 'rest' = 'rest'
-
-      if (hasWsData && wsData?.data?.ltp) {
-        currentLtp = wsData.data.ltp
-        dataSource = 'websocket'
-      } else if (hasMqData && mqData?.ltp) {
-        currentLtp = mqData.ltp
-        dataSource = 'multiquotes'
-      } else {
-        currentLtp = item.ltp
-        dataSource = 'rest'
+      symbolKeys.add(key)
+      let bookAt = snapshotAt ?? null
+      if (snapshotAt === undefined || snapshotAt === null) {
+        const rowKey = `${key}:${(item as { product?: string }).product ?? ''}`
+        rowKeys.add(rowKey)
+        const signature = `${item.quantity}|${item.average_price}|${item.ltp}|${item.pnl}`
+        let stamp = bookStamps.current.get(rowKey)
+        if (!stamp || stamp.signature !== signature) {
+          stamp = { signature, at: now }
+          bookStamps.current.set(rowKey, stamp)
+        }
+        bookAt = stamp.at
       }
-
-      // For closed positions (qty=0), preserve ALL REST API values including LTP
-      // This ensures P&L% calculation remains stable (realized values don't change)
-      //
-      // Gated on the field being PRESENT, not just falsy. `quantity` is optional
-      // on PriceableItem, and an item that never carried one is not a position
-      // at all -- a watchlist row, say. Those must still take live prices, and
-      // `item.quantity || 0` reads the same 0 for both cases.
-      if (item.quantity !== undefined && qty === 0) {
-        return {
-          ...item,
-          // Keep item.ltp from REST API - don't update with live data
-          // This prevents P&L% from recalculating with changing LTP
-          _dataSource: 'rest',
-        } as T & { _dataSource: string }
-      }
-
-      // For open positions: recalculate P&L and P&L% using live LTP
-      // This ensures real-time updates as LTP changes. Today's realized P&L
-      // (sandbox mode) is included, so the cumulative figure is shown.
-      let calculatedPnl = item.pnl || 0
-      let calculatedPnlPercent = item.pnlpercent || 0
-
-      const live = positionPnlAt(item, currentLtp)
-      if (live) {
-        calculatedPnl = live.pnl
-        calculatedPnlPercent = live.pnlPercent
-      }
-
+      const tick = marketData.get(key)
+      const quote = multiQuotes.get(key)
+      const price = priceRow(
+        item,
+        { tick, quoteLtp: quote?.ltp, quoteAt: quotesAt, bookAt },
+        positionPnlAt
+      )
+      // The direction of the last tick, as a broker app shows it; a closed row
+      // keeps the broker's frozen price and shows none.
+      const tickLtp = tick?.data?.ltp
+      const direction = isClosedRow(item)
+        ? null
+        : price.live && typeof tickLtp === 'number' && tickLtp > 0
+          ? directions.current.observe(key, tickLtp, item.ltp ?? quote?.ltp)
+          : directions.current.get(key)
       return {
         ...item,
-        ltp: currentLtp,
-        pnl: calculatedPnl,
-        pnlpercent: calculatedPnlPercent,
-        _dataSource: dataSource,
-      } as T & { _dataSource: string }
+        ltp: price.ltp,
+        pnl: price.pnl,
+        pnlpercent: price.pnlpercent,
+        _dataSource: price.source,
+        _at: price.at,
+        _live: price.live,
+        _tick: direction,
+      } as T & LiveRowFields
     })
-  }, [items, marketData, multiQuotes, isMarketOpen, staleThreshold])
+    // Forget rows and instruments no longer shown, so a long session does not grow these.
+    for (const rowKey of bookStamps.current.keys()) {
+      if (!rowKeys.has(rowKey)) bookStamps.current.delete(rowKey)
+    }
+    directions.current.keep(symbolKeys)
+    return priced
+  }, [items, marketData, multiQuotes, quotesAt, snapshotAt])
+
+  // SUDARSHAN: the newest tick and the newest confirmation, over the rows
+  // whose prices can still move, for the page's status line.
+  const feed = useMemo<LiveFeed>(() => {
+    let lastTickAt: number | null = null
+    let lastUpdateAt: number | null = null
+    let due = 0
+    for (const row of enhancedData) {
+      if (isClosedRow(row)) continue
+      due += 1
+      const tick = marketData.get(`${row.exchange}:${row.symbol}`)
+      if (
+        tick?.updateSource === 'websocket' &&
+        typeof tick.lastUpdate === 'number' &&
+        (lastTickAt === null || tick.lastUpdate > lastTickAt)
+      ) {
+        lastTickAt = tick.lastUpdate
+      }
+      if (row._at !== null && (lastUpdateAt === null || row._at > lastUpdateAt)) {
+        lastUpdateAt = row._at
+      }
+    }
+    return { lastTickAt, lastUpdateAt, due, connected: wsAuthenticated && !wsPaused }
+  }, [enhancedData, marketData, wsAuthenticated, wsPaused])
 
   return {
     data: enhancedData,
@@ -331,6 +390,8 @@ export function useLivePrice<T extends PriceableItem>(
     isAnyMarketOpen: anyMarketOpen,
     multiQuotes,
     refreshMultiQuotes: fetchMultiQuotes,
+    feed,
+    calendar,
   }
 }
 

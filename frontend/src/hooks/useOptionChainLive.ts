@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { SymbolData } from '@/lib/MarketDataManager'
 import { chainGreeks, forwardFromParity, priceForGreeks, yearsToExpiry } from '@/lib/optionGreeks'
+// SUDARSHAN: tick-borne counts and tick direction (src/sudarshan/books/prices.ts).
+import { type TickDirection, TickDirections, tickCount } from '@/sudarshan/books/prices'
 import type { OptionChainResponse, OptionStrike } from '@/types/option-chain'
 import { useMarketData } from './useMarketData'
 import { useOptionChainPolling } from './useOptionChainPolling'
@@ -133,6 +135,9 @@ export function mergeOptionChainMarketData(
       const depthSell = tick.depth?.sell?.[0]
       return {
         ...contract,
+        // SUDARSHAN: open interest and volume from the tick when it carries them.
+        oi: tickCount(tick, 'oi') ?? contract.oi,
+        volume: tickCount(tick, 'volume') ?? contract.volume,
         ltp: roundToTickSize(tick.ltp, contract.tick_size) ?? contract.ltp,
         bid:
           roundToTickSize(depthBuy?.price ?? tick.bid_price, contract.tick_size) ?? contract.bid,
@@ -214,6 +219,47 @@ interface UseOptionChainLiveOptions {
  * @param strikeCount - Number of strikes to fetch
  * @param options - Live options
  */
+/**
+ * SUDARSHAN: whether the feed now carries open interest and volume for the
+ * chain's legs: some leg's tick in the current session has each. Then the
+ * REST poll, kept only for those fields, has nothing left to poll for.
+ */
+export function ticksCarryOiAndVolume(
+  polledData: OptionChainResponse | null,
+  optionExchange: string,
+  marketData: Map<string, SymbolData>
+): boolean {
+  if (!polledData) return false
+  let oi = false
+  let volume = false
+  for (const row of polledData.chain) {
+    for (const leg of [row.ce, row.pe]) {
+      if (!leg?.symbol) continue
+      const tick = marketData.get(`${optionExchange}:${leg.symbol}`)?.data
+      if (tickCount(tick, 'oi') !== null) oi = true
+      if (tickCount(tick, 'volume') !== null) volume = true
+      if (oi && volume) return true
+    }
+  }
+  return false
+}
+
+/**
+ * SUDARSHAN: the gap between two strikes of a chain, or null when it has
+ * fewer than two.
+ */
+function strikeStep(chain: OptionStrike[]): number | null {
+  let step: number | null = null
+  for (let i = 1; i < chain.length; i++) {
+    const gap = Math.abs(chain[i].strike - chain[i - 1].strike)
+    if (gap > 0 && (step === null || gap < step)) step = gap
+  }
+  return step
+}
+
+/** SUDARSHAN: the chain is re-read to re-centre at most this often. */
+const RECENTRE_MIN_MS = 15_000
+
 export function useOptionChainLive(
   apiKey: string | null,
   underlying: string,
@@ -233,6 +279,10 @@ export function useOptionChainLive(
   const [mergedData, setMergedData] = useState<OptionChainResponse | null>(null)
   const [lastLtpUpdate, setLastLtpUpdate] = useState<Date | null>(null)
 
+  // SUDARSHAN: the REST poll reads on its timer only while the ticks do not
+  // carry open interest and volume yet (decided below from the chain's ticks).
+  const countsFromTicksRef = useRef(false)
+
   // Polling for OI/Volume/Greeks (less frequent)
   const {
     data: polledData,
@@ -243,11 +293,13 @@ export function useOptionChainLive(
     lastUpdate: lastPollUpdate,
     dataIdentity,
     refetch,
+    resync,
   } = useOptionChainPolling(apiKey, underlying, exchange, expiryDate, strikeCount, {
     enabled,
     refreshInterval: oiRefreshInterval,
     pauseWhenHidden,
     derivativeExchange: optionExchange,
+    pollWhen: () => !countsFromTicksRef.current,
   })
 
   // Build symbol list from the latest option-chain response for subscription.
@@ -305,6 +357,45 @@ export function useOptionChainLive(
     )
   }, [wsData, isWsAuthenticated, wsConnectionEpoch, wsSymbols, enabled])
 
+  // SUDARSHAN: stop the timed reads once the ticks carry what they were kept for.
+  const feedCarriesCounts = useMemo(
+    () => ticksCarryOiAndVolume(polledData, optionExchange, currentWsData),
+    [polledData, optionExchange, currentWsData]
+  )
+  countsFromTicksRef.current = feedCarriesCounts
+
+  // SUDARSHAN: re-read the chain once when the market-data socket signs in
+  // again (a reconnect, the phone waking), and when the underlying has moved
+  // more than a strike away from the polled ATM, so the strike window stays
+  // centred without a timer. Both are quiet re-reads: no loading state.
+  const epochSeen = useRef<number | null>(null)
+  const lastRecentreAt = useRef(0)
+  useEffect(() => {
+    if (!isWsAuthenticated) return
+    const first = epochSeen.current === null
+    const changed = epochSeen.current !== wsConnectionEpoch
+    epochSeen.current = wsConnectionEpoch
+    if (!first && changed && enabled) resync()
+  }, [isWsAuthenticated, wsConnectionEpoch, enabled, resync])
+  const underlyingTickLtp = polledData
+    ? currentWsData.get(`${polledData.underlying_exchange}:${polledData.underlying_symbol}`)?.data
+        ?.ltp
+    : undefined
+  useEffect(() => {
+    if (!enabled || !polledData || typeof underlyingTickLtp !== 'number') return
+    const step = strikeStep(polledData.chain)
+    if (step === null || Math.abs(underlyingTickLtp - polledData.atm_strike) <= step) return
+    if (Date.now() - lastRecentreAt.current < RECENTRE_MIN_MS) return
+    lastRecentreAt.current = Date.now()
+    resync()
+  }, [enabled, polledData, underlyingTickLtp, resync])
+
+  // SUDARSHAN: which way each leg's last tick moved, for a broker-style LTP.
+  const directionsRef = useRef(new TickDirections())
+  const [tickDirections, setTickDirections] = useState<Map<string, TickDirection | null>>(
+    () => new Map()
+  )
+
   // Track last LTP update time using ref to avoid triggering effect loops
   const lastLtpUpdateRef = useRef<number>(0)
 
@@ -356,6 +447,24 @@ export function useOptionChainLive(
       setLastLtpUpdate(new Date(newestLtpUpdate))
     }
 
+    // SUDARSHAN: each leg's tick direction, from current-session ticks only.
+    const directions = new Map<string, TickDirection | null>()
+    for (const row of polledData.chain) {
+      for (const leg of [row.ce, row.pe]) {
+        if (!leg?.symbol) continue
+        const key = `${optionExchange}:${leg.symbol}`
+        const ltp = currentWsData.get(key)?.data?.ltp
+        directions.set(
+          key,
+          typeof ltp === 'number' && ltp > 0
+            ? directionsRef.current.observe(key, ltp, leg.ltp)
+            : directionsRef.current.get(key)
+        )
+      }
+    }
+    directionsRef.current.keep(new Set(directions.keys()))
+    setTickDirections(directions)
+
     setMergedData(
       mergeOptionChainMarketData(
         polledData,
@@ -398,5 +507,15 @@ export function useOptionChainLive(
     clockOffsetMs: clockOffsetRef.current,
     forwardPrice: mergedData?.forward_price ?? null,
     refetch,
+    // SUDARSHAN: the legs' tick directions, and where the chain stands for a status line.
+    tickDirections,
+    feed: {
+      lastTickAt: lastLtpUpdate ? lastLtpUpdate.getTime() : null,
+      lastUpdateAt: lastUpdate ? lastUpdate.getTime() : null,
+      due: enabled ? wsSymbols.length : 0,
+      connected: isWsAuthenticated && !isWsPaused,
+    },
+    /** SUDARSHAN: true once the ticks carry open interest and volume, so the poll has stopped. */
+    countsFromTicks: feedCarriesCounts,
   }
 }
