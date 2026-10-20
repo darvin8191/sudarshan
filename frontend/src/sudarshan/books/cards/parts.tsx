@@ -265,10 +265,7 @@ export function RefreshIcon({
       aria-label={refreshing ? 'Refreshing' : 'Refresh'}
       className={cn(OUTLINED, 'w-12 shrink-0 px-0')}
     >
-      <RefreshCw
-        aria-hidden="true"
-        className={cn('size-4', refreshing && 'animate-spin motion-reduce:animate-none')}
-      />
+      <RefreshCw aria-hidden="true" className={cn('size-4', refreshing && 'animate-spin')} />
     </button>
   )
 }
@@ -287,10 +284,7 @@ export function BookHeading({
     <div className="flex items-center justify-between gap-3">
       <h1 className="sd-display text-[1.75rem] leading-none font-bold">{title}</h1>
       <button type="button" onClick={onRefresh} disabled={refreshing} className={OUTLINED}>
-        <RefreshCw
-          aria-hidden="true"
-          className={cn('size-4', refreshing && 'animate-spin motion-reduce:animate-none')}
-        />
+        <RefreshCw aria-hidden="true" className={cn('size-4', refreshing && 'animate-spin')} />
         {refreshing ? 'Refreshing' : 'Refresh'}
       </button>
     </div>
@@ -407,7 +401,7 @@ export function ProblemCard({ message, onRetry }: { message: string; onRetry: ()
   return (
     <section
       role="alert"
-      className="flex flex-col items-start gap-3 rounded-[1.125rem] border border-[color:var(--down)] bg-card px-4 py-3.5"
+      className="flex flex-col items-start gap-3 rounded-[1.125rem] border border-destructive bg-card px-4 py-3.5"
     >
       <p className="flex items-center gap-2 text-sm font-semibold">
         <AlertTriangle

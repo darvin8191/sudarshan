@@ -113,11 +113,11 @@ vi.mock('@/components/trading/PlaceOrderDialog', async () => {
   }
 })
 
+import Positions from '@/pages/Positions'
 import { back, frame, pass, renderBook, settle, where } from '@/test/bookPages'
 import { fakeClock, frames } from '@/test/frames'
 import { feed } from '@/test/marketDataHarness'
 import { fakeScreen } from '@/test/screenWidth'
-import Positions from '@/pages/Positions'
 
 vi.setConfig({ testTimeout: 15_000 })
 
@@ -351,6 +351,24 @@ describe('Positions on a phone: the cards', () => {
     expect(row).toHaveTextContent('Booked')
     expect(row).toHaveTextContent('Closed')
     expect(row).toHaveClass('bg-[color:var(--surface-2)]')
+  })
+
+  it('subscribes only what is held: a closed position’s figures are the book’s', async () => {
+    await renderPhone(LONG, CLOSED)
+    expect(feed.live()).toContain(`NFO:${CALL}:LTP`)
+    expect(feed.opened.filter((key) => key.includes(FUT))).toEqual([])
+    const closed = screen.getByRole('region', { name: 'Closed (1)' })
+    expect(within(closed).getByRole('button', { name: /NIFTY FUT/ })).toHaveTextContent(
+      '+₹1,200.00'
+    )
+    expect(screen.getByTestId('positions-total')).toHaveTextContent('+₹1,850.00')
+  })
+
+  it('draws Exit all in the danger colour, which colour-blind mode keeps red', async () => {
+    await renderPhone(LONG)
+    const all = screen.getByRole('button', { name: 'Exit all' })
+    expect(all).toHaveClass('border-destructive', 'text-destructive')
+    expect(all.getAttribute('class')).not.toContain('--down')
   })
 
   it('says plainly when there are no positions', async () => {

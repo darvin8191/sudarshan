@@ -33,20 +33,20 @@ import {
   LoadingCards,
   Money,
   OUTLINED,
+  PositionSide,
   ProblemCard,
   ProductChip,
-  PositionSide,
   price,
   SANDBOX_SENTENCE,
   SELL_FILL,
   SentChip,
-  STALE,
   SignedPercent,
+  STALE,
   StaleBookNote,
   useSandbox,
 } from './parts'
 import { useBookOverlay } from './useBookOverlay'
-import { type PricedRow, useFramePrices } from './useFramePrices'
+import { bookRow, type PricedRow, useFramePrices } from './useFramePrices'
 import { useHeld, useLatest } from './useLatest'
 import { useSent } from './useSent'
 
@@ -210,7 +210,18 @@ const PositionBoard = memo(function PositionBoard({
   onExit,
   onExitAll,
 }: PositionCardsProps) {
-  const { rows, feed } = useFramePrices({ items: positions as BookPosition[], bookAt, marketOpen })
+  // Only what is held is priced tick by tick, and so subscribed: a closed
+  // position's figures are the book's own and never move.
+  const book = positions as BookPosition[]
+  const { rows: held, feed } = useFramePrices({
+    items: book.filter((position) => quantityOf(position) !== 0),
+    bookAt,
+    marketOpen,
+  })
+  const closed = book
+    .filter((position) => quantityOf(position) === 0)
+    .map((position) => bookRow(position, bookAt))
+  const rows = [...held, ...closed]
   const { line, now, stale } = useBookFeed(rows.map(feedRowOf), feed, marketOpen)
   const { overlay, open, swap, close } = useBookOverlay()
   const openSheet = useCallback((id: string) => open({ act: 'sheet', row: id }), [open])
@@ -228,8 +239,6 @@ const PositionBoard = memo(function PositionBoard({
     settleExits([...exits].filter(([id, mark]) => now.get(id) !== mark.was).map(([id]) => id))
   }, [positions, exits, settleExits])
 
-  const held = rows.filter((row) => quantityOf(row.item) !== 0)
-  const closed = rows.filter((row) => quantityOf(row.item) === 0)
   const total = rows.reduce((sum, row) => sum + (row.pnl ?? 0), 0)
   const figuresStale = (line.kind === 'delayed' || line.kind === 'connecting') && line.stale
   const target =
@@ -455,7 +464,7 @@ function Summary({
           disabled={open === 0 || exitsSent}
           onClick={onExitAll}
           aria-haspopup="dialog"
-          className={cn(OUTLINED, 'border-[color:var(--down)] text-[color:var(--down)]')}
+          className={cn(OUTLINED, 'border-destructive text-destructive')}
         >
           <LogOut aria-hidden="true" className="size-4" />
           Exit all

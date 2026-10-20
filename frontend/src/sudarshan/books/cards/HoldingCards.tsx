@@ -28,8 +28,8 @@ import {
   ProblemCard,
   price,
   SELL_FILL,
-  STALE,
   SignedPercent,
+  STALE,
   StaleBookNote,
   useSandbox,
 } from './parts'

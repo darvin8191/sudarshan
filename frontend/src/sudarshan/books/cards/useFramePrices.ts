@@ -81,6 +81,26 @@ function positive(value: unknown): number | null {
   return n !== null && n > 0 ? n : null
 }
 
+/**
+ * A row priced from the book alone, as `priceRow` prices a closed one: the
+ * broker's figures as read, no tick. For rows the cards do not subscribe.
+ */
+export function bookRow<T extends PriceableItem>(item: T, bookAt: number | null): PricedRow<T> {
+  return {
+    item,
+    key: keyOf(item.symbol, item.exchange),
+    ltp: positive(item.ltp),
+    pnl: finite(item.pnl),
+    pnlPercent: finite(item.pnlpercent),
+    at: bookAt,
+    live: false,
+    source: 'rest',
+    tick: null,
+    prevClose: null,
+    tickAt: null,
+  }
+}
+
 export function useFramePrices<T extends PriceableItem>({
   items,
   bookAt,

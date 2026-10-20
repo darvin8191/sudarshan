@@ -10,8 +10,9 @@
  * The wide table is upstream's `useLivePrice`, which keeps every tick in the
  * page's state; it is measured too, as the comparison.
  */
-import { act, render } from '@testing-library/react'
+
 import { QueryClientProvider } from '@tanstack/react-query'
+import { act, render } from '@testing-library/react'
 import { Profiler } from 'react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -70,10 +71,10 @@ vi.mock('@/sudarshan/watchlist/rows', async (importOriginal) => {
 import { createQueryClient } from '@/app/providers'
 import OrderBook from '@/pages/OrderBook'
 import Positions from '@/pages/Positions'
-import type { Order } from '@/types/trading'
 import { frames } from '@/test/frames'
 import { feed } from '@/test/marketDataHarness'
 import { fakeScreen } from '@/test/screenWidth'
+import type { Order } from '@/types/trading'
 
 // Fifty renders of the wide table take a few seconds on a busy machine; nothing here is timed.
 vi.setConfig({ testTimeout: 30_000 })

@@ -322,6 +322,18 @@ describe('Order book on a phone: the cards', () => {
     expect(actions.contains(line)).toBe(false)
   })
 
+  it('draws Cancel all and Cancel order in the danger colour, which colour-blind mode keeps red', async () => {
+    const tap = user()
+    await renderPhone(WORKING)
+    const all = screen.getByRole('button', { name: 'Cancel all (1)' })
+    expect(all).toHaveClass('border-destructive', 'text-destructive')
+    expect(all.getAttribute('class')).not.toContain('--down')
+    await tap.click(orderCard('1001'))
+    const cancel = within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel order' })
+    expect(cancel).toHaveClass('border-destructive', 'text-destructive')
+    expect(cancel.getAttribute('class')).not.toContain('--down')
+  })
+
   it('filters by Open, Executed, Rejected and Cancelled, with counts', async () => {
     const tap = user()
     await renderPhone(...ALL)

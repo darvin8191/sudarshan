@@ -323,10 +323,7 @@ const OrderBoard = memo(function OrderBoard({
           disabled={cancellable === 0}
           aria-haspopup="dialog"
           onClick={() => open({ act: 'cancelall', row: null })}
-          className={cn(
-            OUTLINED,
-            'shrink-0 whitespace-nowrap border-[color:var(--down)] text-[color:var(--down)]'
-          )}
+          className={cn(OUTLINED, 'shrink-0 whitespace-nowrap border-destructive text-destructive')}
         >
           <X aria-hidden="true" className="size-4" />
           Cancel all{cancellable > 0 ? ` (${cancellable})` : ''}
@@ -598,7 +595,7 @@ function OrderSheet({
               aria-haspopup="dialog"
               disabled={sent}
               onClick={onCancel}
-              className={cn(OUTLINED, 'border-[color:var(--down)] text-[color:var(--down)]')}
+              className={cn(OUTLINED, 'border-destructive text-destructive')}
             >
               <X aria-hidden="true" className="size-4" />
               {sent ? 'Cancel sent' : <ActionWords sandbox={sandbox}>Cancel order</ActionWords>}
