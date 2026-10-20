@@ -8,7 +8,13 @@ import { useSyncExternalStore } from 'react'
  * for a rejection to be told from a fill without looking. Chrome lets a page
  * make a sound only after the person has touched it, so the audio context is
  * started by the first tap or key press anywhere on the page; until then an
- * alert is shown without its sound.
+ * alert is shown without its sound. Chrome can suspend the context again
+ * later (a phone that slept, a tab long in the background), so the next tap
+ * starts it again.
+ *
+ * One sound per moment: an order placed and filled at once raises the app's
+ * own placement sound and this one together, so whichever asks first plays
+ * and the other stays quiet (claimOrderSound).
  *
  * The mute is a preference of this device, kept in this browser like the
  * colour-blind switch (src/sudarshan/display.ts), and it follows a change made
@@ -85,8 +91,11 @@ if (typeof window !== 'undefined') {
 type AudioContextClass = typeof AudioContext
 
 let context: AudioContext | null = null
-let lastPlayedAt = 0
-let unlockInstalled = false
+let lastOrderSoundAt = Number.NEGATIVE_INFINITY
+let tapWatch = false
+
+/** The events a browser counts as the person activating the page. */
+const TAP_EVENTS = ['pointerdown', 'pointerup', 'touchend', 'click', 'keydown'] as const
 
 function audioContextClass(): AudioContextClass | null {
   if (typeof window === 'undefined') return null
@@ -94,40 +103,76 @@ function audioContextClass(): AudioContextClass | null {
   return scope.AudioContext ?? scope.webkitAudioContext ?? null
 }
 
-function startContext(): void {
+function stopWatchingTaps(): void {
+  if (!tapWatch || typeof document === 'undefined') return
+  tapWatch = false
+  for (const event of TAP_EVENTS) document.removeEventListener(event, onTap, true)
+}
+
+function watchTaps(): void {
+  if (tapWatch || typeof document === 'undefined') return
+  tapWatch = true
+  for (const event of TAP_EVENTS) document.addEventListener(event, onTap, true)
+}
+
+function onTap(): void {
   const Context = audioContextClass()
-  if (!Context) return
+  if (!Context) {
+    stopWatchingTaps()
+    return
+  }
   try {
-    context ??= new Context()
-    if (context.state === 'suspended') void context.resume().catch(() => {})
+    if (!context) {
+      context = new Context()
+      // Suspended again later: start it on the next tap.
+      context.onstatechange = () => {
+        if (context && context.state !== 'running') watchTaps()
+      }
+    }
+    if (context.state === 'running') {
+      stopWatchingTaps()
+      return
+    }
+    void context
+      .resume()
+      .then(() => {
+        if (context?.state === 'running') stopWatchingTaps()
+      })
+      .catch(() => {})
   } catch {
     context = null
   }
 }
 
 /**
- * Start the audio context on the first tap or key press, as Chrome requires.
- * Safe to call more than once.
+ * Start the audio context on the first tap or key press, as Chrome requires,
+ * and again whenever it has been suspended since. Safe to call more than once.
  */
 export function unlockSoundOnFirstTap(): void {
-  if (unlockInstalled || typeof document === 'undefined') return
-  unlockInstalled = true
-  // The events a browser counts as the person activating the page.
-  const events = ['pointerdown', 'pointerup', 'touchend', 'click', 'keydown'] as const
-  const unlock = () => {
-    startContext()
-    if (context?.state === 'running') {
-      for (const event of events) document.removeEventListener(event, unlock, true)
-    }
-  }
-  for (const event of events) document.addEventListener(event, unlock, true)
+  if (context?.state === 'running') return
+  watchTaps()
+}
+
+/**
+ * Claim the moment for an order sound. True if no order sound has played in
+ * the last `QUIET_MS`, and then nothing else plays until it has passed. The
+ * app's own placement sound asks here too (hooks/useSocket.ts).
+ */
+export function claimOrderSound(now = Date.now()): boolean {
+  if (now - lastOrderSoundAt < QUIET_MS) return false
+  lastOrderSoundAt = now
+  return true
 }
 
 /** Play the alert sound for an order, unless muted, not yet unlocked, or just played. */
 export function playChime(kind: ChimeKind, now = Date.now()): boolean {
-  if (muted || !context || context.state !== 'running') return false
-  if (now - lastPlayedAt < QUIET_MS) return false
-  lastPlayedAt = now
+  if (muted) return false
+  if (!context || context.state !== 'running') {
+    // Not started, or suspended since: the next tap starts it.
+    watchTaps()
+    return false
+  }
+  if (!claimOrderSound(now)) return false
   try {
     const start = context.currentTime + 0.01
     const [first, second] = NOTES[kind]
@@ -153,9 +198,9 @@ export function playChime(kind: ChimeKind, now = Date.now()): boolean {
   }
 }
 
-/** Tests only: forget the audio context and the last sound. */
+/** Tests only: forget the audio context, the last sound and the tap watch. */
 export function resetChimeForTests(): void {
+  stopWatchingTaps()
   context = null
-  lastPlayedAt = 0
-  unlockInstalled = false
+  lastOrderSoundAt = Number.NEGATIVE_INFINITY
 }

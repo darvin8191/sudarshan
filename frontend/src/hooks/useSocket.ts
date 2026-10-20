@@ -6,6 +6,7 @@ import { type AlertCategories, useAlertStore } from '@/stores/alertStore'
 import { useAuthStore } from '@/stores/authStore'
 import { useSessionStore } from '@/stores/sessionStore'
 // SUDARSHAN: the shared connection and the app-wide order alerts (src/sudarshan/books).
+import { claimOrderSound } from '@/sudarshan/books/chime'
 import { installOrderAlerts, noteAppCancelEvent } from '@/sudarshan/books/orderAlerts'
 import { acquireSharedSocket, releaseSharedSocket } from '@/sudarshan/books/sharedSocket'
 
@@ -99,6 +100,10 @@ export function useSocket() {
     }
 
     lastAudioTimeRef.current = now
+
+    // SUDARSHAN: one sound per moment with the order alert chime (an order
+    // placed and filled at once would otherwise sound twice).
+    if ((category === 'orders' || category === 'analyzer') && !claimOrderSound(now)) return
 
     if (audioRef.current) {
       audioRef.current
@@ -297,7 +302,12 @@ export function useSocket() {
       ]
       const isPassiveMonitoring = passiveApiTypes.includes(data.request.api_type)
 
-      if (!isPassiveMonitoring) {
+      // SUDARSHAN: the sandbox engine's own updates (a fill, a square-off) carry
+      // no request type; their orders' alerts sound once, and the order alert
+      // mute silences them (src/sudarshan/books/orderAlerts.ts).
+      const isSandboxEngine = !data.request?.api_type
+
+      if (!isPassiveMonitoring && !isSandboxEngine) {
         playAlertSound('analyzer')
       }
 

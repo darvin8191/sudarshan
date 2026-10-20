@@ -24,8 +24,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const sio = vi.hoisted(() => {
   class Emitter {
     handlers = new Map<string, Set<(...args: unknown[]) => void>>()
+    /** How many times a handler was registered for each event, however many remain. */
+    calls = new Map<string, number>()
 
     on(event: string, handler: (...args: unknown[]) => void) {
+      this.calls.set(event, (this.calls.get(event) ?? 0) + 1)
       const set = this.handlers.get(event) ?? new Set()
       set.add(handler)
       this.handlers.set(event, set)
@@ -132,6 +135,7 @@ import ActionCenterPage from '@/pages/ActionCenter'
 import Historify from '@/pages/Historify'
 import WhatsAppIndex from '@/pages/whatsapp/WhatsAppIndex'
 import { useAuthStore } from '@/stores/authStore'
+import { resetChimeForTests } from '@/sudarshan/books/chime'
 
 /** The provider's global alert handlers, registered once per connection. */
 const PROVIDER_EVENTS = [
@@ -355,6 +359,62 @@ describe('SocketProvider', () => {
     // One set of the shell's handlers, not one per mount, and one order alert listener.
     for (const event of PROVIDER_EVENTS) expect(socket.listenerCount(event)).toBe(1)
     expect(socket.listenerCount('order_update')).toBe(1)
+    // Registered once in all: a page change does not run the connection effect
+    // again (it reads the router's navigate through a ref), only a layout swap does.
+    expect(socket.calls.get('force_logout')).toBe(3)
+  })
+
+  it('registers the shell handlers once across page changes within one layout', async () => {
+    function GoTo({ to }: { to: string }) {
+      const navigate = useNavigate()
+      return (
+        <button type="button" onClick={() => navigate(to)}>
+          go {to}
+        </button>
+      )
+    }
+
+    renderAt(
+      '/one',
+      <Route element={<Layout />}>
+        <Route path="/one" element={<GoTo to="/two" />} />
+        <Route path="/two" element={<GoTo to="/one" />} />
+      </Route>
+    )
+    const socket = onlySocket()
+    for (let i = 0; i < 3; i++) {
+      fireEvent.click(screen.getByRole('button', { name: 'go /two' }))
+      await screen.findByRole('button', { name: 'go /one' })
+      fireEvent.click(screen.getByRole('button', { name: 'go /one' }))
+      await screen.findByRole('button', { name: 'go /two' })
+    }
+    expect(socket.calls.get('force_logout')).toBe(1)
+    expect(socket.calls.get('order_update')).toBe(1)
+  })
+
+  it("sounds an order placed in Analyze mode, not the sandbox engine's own update", () => {
+    resetChimeForTests()
+    renderAt(
+      '/probe',
+      <Route element={<Layout />}>
+        <Route path="/probe" element={<p>page</p>} />
+      </Route>
+    )
+    const socket = onlySocket()
+    const play = vi.mocked(window.HTMLMediaElement.prototype.play)
+    play.mockClear()
+
+    // A sandbox fill or square-off: its orders' alerts sound, as the mute allows.
+    act(() => socket.fire('analyzer_update', { request: {}, response: {} }))
+    expect(play).not.toHaveBeenCalled()
+
+    act(() =>
+      socket.fire('analyzer_update', {
+        request: { api_type: 'placeorder', symbol: 'SBIN', action: 'BUY', quantity: '1' },
+        response: { status: 'success', orderid: '7' },
+      })
+    )
+    expect(play).toHaveBeenCalledTimes(1)
   })
 
   it('closes the connection on logout', async () => {

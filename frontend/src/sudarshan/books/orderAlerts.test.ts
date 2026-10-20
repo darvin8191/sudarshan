@@ -1,8 +1,11 @@
 /**
  * In-app order alerts (M6.8): what the broker's `order_update` frames say, in
- * a trader's words; each order id, status and filled quantity announced once;
- * a cancel this app asked for not announced again; a soft sound, muted per
- * device; and "Sandbox" on every alert in Analyze mode.
+ * a trader's words, with the time it came; each order id, status and filled
+ * quantity announced once, in one tab; a cancel this app asked for not
+ * announced again, and a cancel-all covering only the orders working when it
+ * went; a soft sound, as the app's alert settings allow; and "Sandbox" on
+ * every alert in Analyze mode. The real mute is tested in
+ * orderAlerts.sound.test.ts, over the real sound.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -14,28 +17,48 @@ const toast = vi.hoisted(() => ({
 }))
 vi.mock('@/utils/toast', () => ({ showToast: toast }))
 
-const chime = vi.hoisted(() => ({ played: [] as string[], muted: false }))
+const chime = vi.hoisted(() => ({ played: [] as string[] }))
 vi.mock('./chime', () => ({
   unlockSoundOnFirstTap: () => {},
   playChime: (kind: string) => {
-    if (chime.muted) return false
     chime.played.push(kind)
     return true
   },
 }))
 
 import { useAlertStore } from '@/stores/alertStore'
+import type { Order } from '@/types/trading'
 import {
   APP_CANCEL_MS,
+  announceOrderAlert,
   CANCEL_SETTLE_MS,
   describeOrderUpdate,
   installOrderAlerts,
   noteAppCancelEvent,
+  noteCancelAllFromApp,
   type OrderUpdateFrame,
   resetOrderAlertsForTests,
+  setTabChannelForTests,
+  TAB_DEFER_MS,
+  type TabChannel,
 } from './orderAlerts'
+import { noteOrderBook, resetOrderMemoryForTests } from './orderFold'
 
 const MINUS = '−'
+
+const BOOKED: Order = {
+  symbol: 'NIFTY28OCT2525900CE',
+  exchange: 'NFO',
+  action: 'BUY',
+  quantity: 65,
+  price: 120,
+  trigger_price: 0,
+  pricetype: 'LIMIT',
+  product: 'NRML',
+  orderid: 'X',
+  order_status: 'open',
+  timestamp: '20-Oct-2026 10:15:02',
+}
 
 function frame(patch: Partial<OrderUpdateFrame>): OrderUpdateFrame {
   return {
@@ -70,15 +93,52 @@ function fakeSocket() {
   }
 }
 
+/** The browser's channel between this app's tabs, stood in for. */
+function fakeChannel() {
+  const sent: unknown[] = []
+  const channel: TabChannel & {
+    sent: unknown[]
+    hear: (key: string) => void
+    say: (data: unknown) => void
+  } = {
+    sent,
+    onmessage: null,
+    postMessage: (message: unknown) => {
+      sent.push(message)
+    },
+    close: () => {},
+    hear: (key: string) => channel.say({ key }),
+    say: (data: unknown) => channel.onmessage?.({ data } as MessageEvent),
+  }
+  return channel
+}
+
+let channel = fakeChannel()
+
+/** 10:12:31 in India. */
+const NOW = Date.UTC(2026, 9, 20, 4, 42, 31)
+
+function setVisibility(state: 'visible' | 'hidden') {
+  Object.defineProperty(document, 'visibilityState', { value: state, configurable: true })
+}
+
 beforeEach(() => {
   vi.useFakeTimers()
+  vi.setSystemTime(NOW)
   resetOrderAlertsForTests()
+  resetOrderMemoryForTests()
+  channel = fakeChannel()
+  setTabChannelForTests(channel)
+  vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+  setVisibility('visible')
   for (const fn of Object.values(toast)) fn.mockClear()
   chime.played = []
-  chime.muted = false
 })
 
 afterEach(() => {
+  setTabChannelForTests(null)
+  vi.restoreAllMocks()
+  setVisibility('visible')
   vi.useRealTimers()
 })
 
@@ -164,20 +224,32 @@ describe('describeOrderUpdate', () => {
   })
 })
 
+describe('announceOrderAlert', () => {
+  it('shows an alert once, however often it is asked to', () => {
+    const alert = describeOrderUpdate(frame({ orderid: 'ONCE' }))
+    if (!alert) throw new Error('a fill is an alert')
+    expect(announceOrderAlert(alert)).toBe(true)
+    expect(announceOrderAlert(alert)).toBe(false)
+    expect(toast.success).toHaveBeenCalledTimes(1)
+    expect(chime.played).toEqual(['filled'])
+  })
+})
+
 describe('installOrderAlerts', () => {
-  it('toasts and sounds a fill once, however often the frame arrives or the shell remounts', () => {
+  it('toasts and sounds a fill once, however often the frame arrives or the shell remounts', async () => {
     const socket = fakeSocket()
     const remove = installOrderAlerts(socket as never)
     socket.fire('order_update', frame({}))
     socket.fire('order_update', frame({}))
     remove()
+    await Promise.resolve()
     const again = installOrderAlerts(socket as never)
     socket.fire('order_update', frame({}))
     again()
 
     expect(toast.success).toHaveBeenCalledTimes(1)
     expect(toast.success).toHaveBeenCalledWith('Filled · BUY 65 NIFTY28OCT2525900CE', 'orders', {
-      description: '65 filled at ₹123.45 average',
+      description: '10:12:31 · 65 filled at ₹123.45 average',
       duration: 6000,
     })
     expect(chime.played).toEqual(['filled'])
@@ -195,7 +267,7 @@ describe('installOrderAlerts', () => {
     expect(toast.success).toHaveBeenCalledTimes(1)
   })
 
-  it('puts a rejection in front of the trader for longer, with the broker reason', () => {
+  it('puts a rejection in front of the trader for longer, with the broker reason and the time', () => {
     const socket = fakeSocket()
     installOrderAlerts(socket as never)
     socket.fire(
@@ -208,7 +280,7 @@ describe('installOrderAlerts', () => {
     )
 
     expect(toast.error).toHaveBeenCalledWith('Rejected · BUY 65 NIFTY28OCT2525900CE', 'orders', {
-      description: 'Broker says: RMS: margin exceeds',
+      description: '10:12:31 · Broker says: RMS: margin exceeds',
       duration: 12000,
     })
     expect(chime.played).toEqual(['rejected'])
@@ -226,7 +298,7 @@ describe('installOrderAlerts', () => {
     )
   })
 
-  it('announces a cancel made at the broker, after a moment', () => {
+  it('announces a cancel made at the broker, after a moment, with the time it came', () => {
     const socket = fakeSocket()
     installOrderAlerts(socket as never)
     socket.fire('order_update', frame({ order_status: 'cancelled', filled_quantity: 0 }))
@@ -234,6 +306,9 @@ describe('installOrderAlerts', () => {
 
     vi.advanceTimersByTime(CANCEL_SETTLE_MS)
     expect(toast.warning).toHaveBeenCalledTimes(1)
+    expect(toast.warning.mock.calls[0][2].description).toMatch(
+      /^10:12:31 · Cancelled at the broker/
+    )
   })
 
   it('does not announce a cancel this app asked for, whichever arrives first', () => {
@@ -246,31 +321,189 @@ describe('installOrderAlerts', () => {
     // ...or the broker's echo a moment before it.
     socket.fire('order_update', frame({ orderid: '2', order_status: 'cancelled' }))
     noteAppCancelEvent('cancel_order_event', { orderid: '2', status: 'success', mode: 'live' })
-    // A sandbox cancel all, from the analyzer's update.
+    // ...and the sandbox's own cancel, from the analyzer's update.
     noteAppCancelEvent('analyzer_update', {
-      request: { api_type: 'cancelallorder' },
-      response: { status: 'success', canceled_orders: ['3'] },
+      request: { api_type: 'cancelorder', orderid: '3' },
+      response: { status: 'success', orderid: '3' },
     })
     socket.fire('order_update', frame({ orderid: '3', mode: 'analyze', order_status: 'cancelled' }))
+    // A cancel the app did not ask for, at the same moment, still alerts.
+    socket.fire('order_update', frame({ orderid: '4', order_status: 'cancelled' }))
 
+    vi.advanceTimersByTime(CANCEL_SETTLE_MS)
+    expect(toast.warning).toHaveBeenCalledTimes(1)
+    expect(toast.warning.mock.calls[0][0]).toBe('Cancelled · BUY 65 NIFTY28OCT2525900CE')
+
+    // A cancel the app asked for long ago no longer quiets the broker's.
+    noteAppCancelEvent('cancel_order_event', { orderid: '5', status: 'success', mode: 'live' })
+    vi.advanceTimersByTime(APP_CANCEL_MS + 1)
+    socket.fire('order_update', frame({ orderid: '5', order_status: 'cancelled' }))
+    vi.advanceTimersByTime(CANCEL_SETTLE_MS)
+    expect(toast.warning).toHaveBeenCalledTimes(2)
+  })
+
+  it('lets a cancel-all from this app quiet only the orders that were working when it went', () => {
+    const socket = fakeSocket()
+    installOrderAlerts(socket as never)
+    noteOrderBook([
+      { ...BOOKED, orderid: 'A', order_status: 'open' },
+      { ...BOOKED, orderid: 'B', order_status: 'trigger pending' },
+      { ...BOOKED, orderid: 'C', order_status: 'complete' },
+    ])
+    // Live cancel-all: one batch event, with no order ids (socketio_subscriber.on_all_orders_cancelled).
+    noteAppCancelEvent('cancel_order_event', {
+      status: 'success',
+      orderid: '2 orders canceled',
+      mode: 'live',
+      batch_order: true,
+    })
+    socket.fire('order_update', frame({ orderid: 'A', order_status: 'cancelled' }))
+    socket.fire('order_update', frame({ orderid: 'B', order_status: 'cancelled' }))
     vi.advanceTimersByTime(CANCEL_SETTLE_MS)
     expect(toast.warning).not.toHaveBeenCalled()
 
-    // Long after, a cancel nobody here asked for is the broker's again.
-    vi.advanceTimersByTime(APP_CANCEL_MS)
-    socket.fire('order_update', frame({ orderid: '4', order_status: 'cancelled' }))
+    // An order placed afterwards, and an unrelated one, cancelled by the exchange or the broker's risk checks.
+    vi.advanceTimersByTime(3_500)
+    socket.fire('order_update', frame({ orderid: 'D', order_status: 'open', filled_quantity: 0 }))
+    socket.fire('order_update', frame({ orderid: 'D', order_status: 'cancelled' }))
+    socket.fire('order_update', frame({ orderid: 'OTHER-9', order_status: 'cancelled' }))
+    vi.advanceTimersByTime(CANCEL_SETTLE_MS)
+    expect(toast.warning).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not let a cancel-all hide a different order cancelled at the broker a moment later', () => {
+    const socket = fakeSocket()
+    installOrderAlerts(socket as never)
+    noteAppCancelEvent('cancel_order_event', {
+      status: 'success',
+      orderid: '2 orders canceled',
+      mode: 'live',
+      batch_order: true,
+    })
+    vi.advanceTimersByTime(5_000)
+    // An order the exchange cancels five seconds later (IOC, RMS, price band).
+    socket.fire('order_update', {
+      mode: 'live',
+      orderid: 'OTHER-9',
+      symbol: 'BANKNIFTY28OCT2556000PE',
+      action: 'SELL',
+      quantity: 30,
+      order_status: 'cancelled',
+    })
     vi.advanceTimersByTime(CANCEL_SETTLE_MS)
     expect(toast.warning).toHaveBeenCalledTimes(1)
   })
 
-  it('still shows the alert when the sound is muted', () => {
-    chime.muted = true
+  it('takes the ids a sandbox cancel-all lists, and no others', () => {
     const socket = fakeSocket()
     installOrderAlerts(socket as never)
-    socket.fire('order_update', frame({}))
+    noteAppCancelEvent('analyzer_update', {
+      request: { api_type: 'cancelallorder' },
+      response: { status: 'success', canceled_orders: ['S1', 'S2'] },
+    })
+    for (const orderid of ['S1', 'S2', 'S3']) {
+      socket.fire('order_update', frame({ orderid, mode: 'analyze', order_status: 'cancelled' }))
+    }
+    vi.advanceTimersByTime(CANCEL_SETTLE_MS)
+    expect(toast.warning).toHaveBeenCalledTimes(1)
+  })
 
+  it('snapshots the working orders when the order book sends its cancel-all', () => {
+    const socket = fakeSocket()
+    installOrderAlerts(socket as never)
+    noteOrderBook([{ ...BOOKED, orderid: 'A', order_status: 'open' }])
+    noteCancelAllFromApp()
+    // The broker's echo arrives before the server's batch event.
+    socket.fire('order_update', frame({ orderid: 'A', order_status: 'cancelled' }))
+    vi.advanceTimersByTime(CANCEL_SETTLE_MS)
+    expect(toast.warning).not.toHaveBeenCalled()
+  })
+
+  it('keeps a broker cancel still waiting when the shell remounts at once, and drops it on logout', async () => {
+    const socket = fakeSocket()
+    const remove = installOrderAlerts(socket as never)
+    socket.fire('order_update', frame({ orderid: 'W1', order_status: 'cancelled' }))
+    // A move between /trading and a normal page swaps the layout in one commit.
+    remove()
+    const again = installOrderAlerts(socket as never)
+    await Promise.resolve()
+    vi.advanceTimersByTime(CANCEL_SETTLE_MS)
+    expect(toast.warning).toHaveBeenCalledTimes(1)
+
+    socket.fire('order_update', frame({ orderid: 'W2', order_status: 'cancelled' }))
+    again()
+    await Promise.resolve()
+    vi.advanceTimersByTime(CANCEL_SETTLE_MS)
+    socket.fire('order_update', frame({ orderid: 'W3' }))
+    expect(toast.warning).toHaveBeenCalledTimes(1)
+    expect(toast.success).not.toHaveBeenCalled()
+  })
+
+  it('shows an alert in one tab: the tab in front tells the others', () => {
+    const socket = fakeSocket()
+    installOrderAlerts(socket as never)
+    socket.fire('order_update', frame({ orderid: 'T1' }))
     expect(toast.success).toHaveBeenCalledTimes(1)
-    expect(chime.played).toEqual([])
+    expect(channel.sent.filter((message) => 'key' in (message as object))).toEqual([
+      { key: 'T1|complete|65' },
+    ])
+
+    // Another tab showed this one first: not again here.
+    channel.hear('T2|complete|65')
+    socket.fire('order_update', frame({ orderid: 'T2' }))
+    expect(toast.success).toHaveBeenCalledTimes(1)
+  })
+
+  it('in a tab not in front, waits a moment for the tab in front, and shows it if none does', () => {
+    const socket = fakeSocket()
+    installOrderAlerts(socket as never)
+    setVisibility('hidden')
+
+    socket.fire('order_update', frame({ orderid: 'H1' }))
+    socket.fire('order_update', frame({ orderid: 'H2' }))
+    expect(toast.success).not.toHaveBeenCalled()
+    // The tab in front shows H1 and says so.
+    channel.hear('H1|complete|65')
+    vi.advanceTimersByTime(TAB_DEFER_MS)
+    expect(toast.success).toHaveBeenCalledTimes(1)
+    expect(toast.success.mock.calls[0][2].description).toMatch(/^10:12:31 · /)
+  })
+
+  it('on screen while the trader works in another window, shows an alert at once', () => {
+    vi.mocked(document.hasFocus).mockReturnValue(false)
+    const socket = fakeSocket()
+    installOrderAlerts(socket as never)
+    socket.fire('order_update', frame({ orderid: 'S1' }))
+    expect(toast.success).toHaveBeenCalledTimes(1)
+  })
+
+  it("on screen while another of the app's tabs is in use, leaves the alert to that tab", () => {
+    vi.mocked(document.hasFocus).mockReturnValue(false)
+    const socket = fakeSocket()
+    installOrderAlerts(socket as never)
+    channel.say({ inUse: 'other-tab' })
+    socket.fire('order_update', frame({ orderid: 'U1' }))
+    expect(toast.success).not.toHaveBeenCalled()
+    channel.hear('U1|complete|65')
+    vi.advanceTimersByTime(TAB_DEFER_MS)
+    expect(toast.success).not.toHaveBeenCalled()
+
+    // That tab has left the screen: this one shows the next at once.
+    channel.say({ away: 'other-tab' })
+    socket.fire('order_update', frame({ orderid: 'U2' }))
+    expect(toast.success).toHaveBeenCalledTimes(1)
+  })
+
+  it('tells the other tabs when it comes into use and when it leaves the screen', () => {
+    installOrderAlerts(fakeSocket() as never)
+    channel.sent.length = 0
+    window.dispatchEvent(new Event('focus'))
+    setVisibility('hidden')
+    document.dispatchEvent(new Event('visibilitychange'))
+    const [use, away] = channel.sent as [{ inUse?: string }, { away?: string }]
+    expect(channel.sent).toHaveLength(2)
+    expect(typeof use.inUse).toBe('string')
+    expect(away.away).toBe(use.inUse)
   })
 
   it('plays no sound when the app alert settings turn order alerts or alert sounds off', () => {
@@ -292,11 +525,12 @@ describe('installOrderAlerts', () => {
     }
   })
 
-  it('stops listening when removed, dropping a cancel still waiting', () => {
+  it('stops listening when removed, dropping a cancel still waiting', async () => {
     const socket = fakeSocket()
     const remove = installOrderAlerts(socket as never)
     socket.fire('order_update', frame({ order_status: 'cancelled' }))
     remove()
+    await Promise.resolve()
     vi.advanceTimersByTime(CANCEL_SETTLE_MS)
     socket.fire('order_update', frame({ orderid: '9' }))
 

@@ -3,6 +3,8 @@ import { type AlertCategories, useAlertStore } from '@/stores/alertStore'
 import { formatAmount, formatRupees } from '@/sudarshan/dashboard/format'
 import { showToast } from '@/utils/toast'
 import { type ChimeKind, playChime, unlockSoundOnFirstTap } from './chime'
+import { cancelAllTargets, notePushedFrame } from './orderFold'
+import { istTime } from './time'
 
 /**
  * App-wide order alerts (M6.8, in-app part): a toast, and a soft sound, the
@@ -15,7 +17,9 @@ import { type ChimeKind, playChime, unlockSoundOnFirstTap } from './chime'
  * toasts, so a frame that only says an order is open or waiting for its
  * trigger raises none, and a cancel this app asked for is not announced again
  * as one the broker made. Each order id, status and filled quantity is
- * announced once, however often the frame arrives or the shell remounts.
+ * announced once, however often the frame arrives, the shell remounts or
+ * the app is open in more than one tab, and each alert carries the time it
+ * came, in India time, so one seen late does not read as new.
  *
  * Telegram gets the same events from a server-side service; nothing here
  * sends anything anywhere.
@@ -132,6 +136,10 @@ class Shown {
   private readonly keys = new Set<string>()
   private readonly limit = 500
 
+  has(key: string): boolean {
+    return this.keys.has(key)
+  }
+
   /** True the first time a key is offered. */
   add(key: string): boolean {
     if (this.keys.has(key)) return false
@@ -162,7 +170,6 @@ export const APP_CANCEL_MS = 15_000
 export const CANCEL_SETTLE_MS = 1_500
 
 const cancelledHere = new Map<string, number>()
-let cancelledAllHereAt = Number.NEGATIVE_INFINITY
 
 /** A cancel this app sent: the server's cancel_order_event or the sandbox's analyzer_update. */
 export function noteCancelFromApp(orderid: unknown, now = Date.now()): void {
@@ -174,13 +181,19 @@ export function noteCancelFromApp(orderid: unknown, now = Date.now()): void {
   }
 }
 
-/** Cancel all, sent from this app: the broker's cancels that follow are its own echo. */
-export function noteCancelAllFromApp(now = Date.now()): void {
-  cancelledAllHereAt = now
+/**
+ * Cancel all, sent from this app. It reaches the app as one event with no
+ * order ids, so the orders it covers are the ones known to be working when it
+ * went (from the books read and the frames pushed), or the ids the sandbox
+ * lists. Only their cancels are its echo: an order placed after it, or
+ * another order the exchange or the broker's risk checks cancel, still alerts.
+ */
+export function noteCancelAllFromApp(now = Date.now(), ids?: readonly unknown[]): void {
+  const covered = ids && ids.length > 0 ? ids : cancelAllTargets(APP_CANCEL_MS, now)
+  for (const id of covered) noteCancelFromApp(id, now)
 }
 
 function cancelledFromApp(orderid: string, now: number): boolean {
-  if (now - cancelledAllHereAt <= APP_CANCEL_MS) return true
   const at = cancelledHere.get(orderid)
   return at !== undefined && now - at <= APP_CANCEL_MS
 }
@@ -203,10 +216,8 @@ export function noteAppCancelEvent(event: string, data: unknown, now = Date.now(
     const response = (frame.response ?? {}) as Record<string, unknown>
     if (response.status !== 'success') return
     if (request.api_type === 'cancelallorder') {
-      noteCancelAllFromApp(now)
-      if (Array.isArray(response.canceled_orders)) {
-        for (const id of response.canceled_orders) noteCancelFromApp(id, now)
-      }
+      const listed = Array.isArray(response.canceled_orders) ? response.canceled_orders : []
+      noteCancelAllFromApp(now, listed)
     } else if (request.api_type === 'cancelorder') {
       noteCancelFromApp(response.orderid ?? request.orderid, now)
     }
@@ -228,15 +239,18 @@ const DURATION_MS: Record<OrderAlertKind, number> = {
 }
 
 /**
- * Show an alert once: the toast, then the sound. The app's alert settings
- * decide both, as they do for its other alerts: with that kind of alert, or
- * every alert sound, turned off there, nothing plays.
+ * Show an alert once: the toast, then the sound, and tell the app's other
+ * tabs it has been shown. The app's alert settings decide both, as they do
+ * for its other alerts: with that kind of alert, or every alert sound, turned
+ * off there, nothing plays.
  */
-export function announceOrderAlert(alert: OrderAlert): boolean {
+export function announceOrderAlert(alert: OrderAlert, at = Date.now()): boolean {
   if (!shown.add(alert.key)) return false
+  forgetDeferred(alert.key)
+  tellOtherTabs({ key: alert.key })
   const category: keyof AlertCategories = alert.sandbox ? 'analyzer' : 'orders'
   showToast[TOAST[alert.kind]](alert.title, category, {
-    description: alert.description,
+    description: `${istTime(at)} · ${alert.description}`,
     duration: DURATION_MS[alert.kind],
   })
   const settings = useAlertStore.getState()
@@ -244,25 +258,165 @@ export function announceOrderAlert(alert: OrderAlert): boolean {
   return true
 }
 
+// ---------------------------------------------------------------------------
+// One alert across the app's tabs. Every tab gets the same frame. The tab in
+// use shows it at once and tells the others. A tab that is hidden, or on
+// screen while another of the app's tabs is the one in use, waits a moment
+// for that word before showing it itself. A tab on screen while no other tab
+// is in use (the trader working in another window) shows it at once: the app
+// adds no delay of its own where the trader can see it.
+
+/** How long a tab not in use waits for the tab in use to show an alert. */
+export const TAB_DEFER_MS = 400
+
+/** What the order alerts need of a BroadcastChannel. */
+export interface TabChannel {
+  postMessage(message: unknown): void
+  onmessage: ((event: MessageEvent) => void) | null
+  close(): void
+}
+
+let channel: TabChannel | null | undefined
+
+/** This tab, among the app's tabs. */
+const TAB_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+
+/** The app's tab the trader used last, while it is on screen; null when none is. */
+let inUse: string | null = null
+
+function onTabMessage(event: MessageEvent): void {
+  const data = (event.data ?? {}) as { key?: unknown; inUse?: unknown; away?: unknown }
+  if (typeof data.key === 'string') {
+    shown.add(data.key)
+    forgetDeferred(data.key)
+  }
+  if (typeof data.inUse === 'string') inUse = data.inUse
+  if (typeof data.away === 'string' && inUse === data.away) inUse = null
+}
+
+function tabChannel(): TabChannel | null {
+  if (channel !== undefined) return channel
+  try {
+    channel =
+      typeof BroadcastChannel === 'function' ? new BroadcastChannel('sudarshan-order-alerts') : null
+  } catch {
+    channel = null
+  }
+  if (channel) {
+    channel.onmessage = onTabMessage
+    // Node's channel (the test runner's) would keep its process alive; browsers have no unref.
+    ;(channel as { unref?: () => void }).unref?.()
+  }
+  return channel
+}
+
+function tellOtherTabs(message: unknown): void {
+  try {
+    tabChannel()?.postMessage(message)
+  } catch {
+    // A closed channel: the other tabs may show it too, nothing worse.
+  }
+}
+
+/** Tests only: stand in for the browser's channel between tabs. */
+export function setTabChannelForTests(fake: TabChannel | null): void {
+  channel = fake
+  if (fake) fake.onmessage = onTabMessage
+}
+
+function focused(): boolean {
+  return typeof document.hasFocus === 'function' ? document.hasFocus() : true
+}
+
+function nowInUse(): void {
+  inUse = TAB_ID
+  tellOtherTabs({ inUse: TAB_ID })
+}
+
+function nowAway(): void {
+  if (inUse === TAB_ID) inUse = null
+  tellOtherTabs({ away: TAB_ID })
+}
+
+let watchingUse = false
+
+/** Tell the other tabs when this one comes into use and when it leaves the screen. */
+function watchUse(): void {
+  if (watchingUse || typeof window === 'undefined' || typeof document === 'undefined') return
+  watchingUse = true
+  window.addEventListener('focus', nowInUse)
+  window.addEventListener('pagehide', nowAway)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') nowAway()
+    else if (focused()) nowInUse()
+  })
+  if (document.visibilityState !== 'hidden' && focused()) nowInUse()
+}
+
+/** Whether this tab shows an alert at once rather than wait for the tab in use. */
+function showsAtOnce(): boolean {
+  if (typeof document === 'undefined') return true
+  if (document.visibilityState === 'hidden') return false
+  if (focused()) return true
+  return inUse === null || inUse === TAB_ID
+}
+
+const deferred = new Map<string, ReturnType<typeof setTimeout>>()
+
+function forgetDeferred(key: string): void {
+  const timer = deferred.get(key)
+  if (timer !== undefined) clearTimeout(timer)
+  deferred.delete(key)
+}
+
+/** Show an alert in this tab now, or shortly unless the tab in use does. */
+function deliver(alert: OrderAlert, at: number): void {
+  if (shown.has(alert.key) || deferred.has(alert.key)) return
+  tabChannel()
+  if (showsAtOnce()) {
+    announceOrderAlert(alert, at)
+    return
+  }
+  deferred.set(
+    alert.key,
+    setTimeout(() => {
+      deferred.delete(alert.key)
+      announceOrderAlert(alert, at)
+    }, TAB_DEFER_MS)
+  )
+}
+
+// ---------------------------------------------------------------------------
+
+/** Broker cancels waiting out `CANCEL_SETTLE_MS`, kept across a remount of the shell. */
+const waiting = new Set<ReturnType<typeof setTimeout>>()
+let installed = 0
+
 /**
  * Listen for `order_update` on the shell's connection. Returns the function
- * that stops listening; anything waiting to be announced is dropped with it.
+ * that stops listening. A broker cancel still waiting is kept if the shell
+ * listens again at once (a move between /trading and a normal page swaps the
+ * layout in one commit), and dropped when nothing does (a logout).
  */
 export function installOrderAlerts(socket: Socket): () => void {
   unlockSoundOnFirstTap()
-  const waiting = new Set<ReturnType<typeof setTimeout>>()
+  tabChannel()
+  watchUse()
+  installed += 1
 
   const onUpdate = (frame: OrderUpdateFrame) => {
+    const at = Date.now()
+    notePushedFrame(frame ?? {}, at)
     const alert = describeOrderUpdate(frame ?? {})
     if (!alert) return
     if (alert.kind !== 'cancelled') {
-      announceOrderAlert(alert)
+      deliver(alert, at)
       return
     }
     const timer = setTimeout(() => {
       waiting.delete(timer)
       if (cancelledFromApp(alert.orderid, Date.now())) shown.add(alert.key)
-      else announceOrderAlert(alert)
+      else deliver(alert, at)
     }, CANCEL_SETTLE_MS)
     waiting.add(timer)
   }
@@ -270,14 +424,25 @@ export function installOrderAlerts(socket: Socket): () => void {
   socket.on('order_update', onUpdate)
   return () => {
     socket.off('order_update', onUpdate)
-    for (const timer of waiting) clearTimeout(timer)
-    waiting.clear()
+    installed -= 1
+    queueMicrotask(() => {
+      if (installed > 0) return
+      for (const timer of waiting) clearTimeout(timer)
+      waiting.clear()
+      for (const timer of deferred.values()) clearTimeout(timer)
+      deferred.clear()
+    })
   }
 }
 
 /** Tests only: forget every alert shown and every cancel noted. */
 export function resetOrderAlertsForTests(): void {
   shown.clear()
+  inUse = null
   cancelledHere.clear()
-  cancelledAllHereAt = Number.NEGATIVE_INFINITY
+  for (const timer of waiting) clearTimeout(timer)
+  waiting.clear()
+  for (const timer of deferred.values()) clearTimeout(timer)
+  deferred.clear()
+  installed = 0
 }
