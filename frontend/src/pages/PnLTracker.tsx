@@ -1,10 +1,27 @@
 import { AlertTriangle, Camera, RefreshCw, TrendingDown, TrendingUp } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { tradingApi } from '@/api/trading'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { makeFormatCurrency } from '@/lib/utils'
+import { useMarketData } from '@/hooks/useMarketData'
+import { cn, makeFormatCurrency } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
-import { useThemeStore } from '@/stores/themeStore'
+import { onModeChange, useThemeStore } from '@/stores/themeStore'
+// SUDARSHAN: the current MTM live, from the position book moved by ticks (M6.5).
+import { useMarketCalendar } from '@/sudarshan/books/market'
+import { useBookSync, useLatestRead } from '@/sudarshan/books/useBookSync'
+import { directionOf } from '@/sudarshan/dashboard/format'
+import { useNow } from '@/sudarshan/dashboard/hooks'
+import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
+import {
+  anyOpen,
+  feedLine,
+  latest,
+  liveMove,
+  openPositions,
+  type PositionsSnapshot,
+} from '@/sudarshan/dashboard/live'
+import { TREND_TEXT, TrendArrow } from '@/sudarshan/dashboard/Trend'
 import { showToast } from '@/utils/toast'
 
 async function fetchCSRFToken(): Promise<string> {
@@ -65,8 +82,49 @@ interface PnLData {
 export default function PnLTracker() {
   const { mode } = useThemeStore()
   const isDarkMode = mode === 'dark'
-  const { user } = useAuthStore()
+  const { user, apiKey } = useAuthStore()
   const formatCurrency = useMemo(() => makeFormatCurrency(user?.broker), [user?.broker])
+
+  // SUDARSHAN: the current MTM moves with every tick. Its base is the broker's
+  // position book (the total P&L of every row), read when the page opens,
+  // after every order event, on a reconnect, on coming back after 15 s and
+  // every 45 s while a market is open; between reads each open position moves
+  // it by what it has made or lost since (liveMove, as the dashboard does).
+  // The curve and the other cards are the tracker's own, read by Refresh.
+  const [book, setBook] = useState<PositionsSnapshot | null>(null)
+  const beginBookRead = useLatestRead()
+  const readBook = useCallback(async () => {
+    if (!apiKey) return
+    const isLatest = beginBookRead()
+    const at = Date.now()
+    try {
+      const response = await tradingApi.getPositions(apiKey)
+      if (!isLatest()) return
+      if (response.status === 'success' && Array.isArray(response.data)) {
+        setBook({ positions: response.data, at })
+      }
+    } catch {
+      // The tracker's own figure stands until the next read.
+    }
+  }, [apiKey, beginBookRead])
+  useEffect(() => {
+    void readBook()
+  }, [readBook])
+  useEffect(() => onModeChange(() => void readBook()), [readBook])
+  const { isOpen: marketOpen, anyOpen: anyMarketOpen } = useMarketCalendar()
+  useBookSync(readBook, { marketOpen: anyMarketOpen })
+  const held = useMemo(() => openPositions(book?.positions ?? []), [book])
+  const heldSymbols = useMemo(
+    () => held.map(({ symbol, exchange }) => ({ symbol, exchange })),
+    [held]
+  )
+  const {
+    data: prices,
+    isAuthenticated: feedUp,
+    isPaused: feedPaused,
+  } = useMarketData({ symbols: heldSymbols, mode: 'LTP', enabled: heldSymbols.length > 0 })
+  const now = useNow()
+  const move = liveMove(book, prices)
 
   // State
   const [isLoading, setIsLoading] = useState(false)
@@ -459,6 +517,26 @@ export default function PnLTracker() {
     }
   }, [initChart, loadPnLData])
 
+  // SUDARSHAN: the live figure: the book's total P&L moved by ticks, or the
+  // tracker's own figure when the book could not be read.
+  const bookTotal = book
+    ? book.positions.reduce((sum, position) => sum + (Number(position.pnl) || 0), 0)
+    : null
+  const currentMtm = bookTotal === null ? metrics.currentMtm : bookTotal + move.delta
+  const mtmDirection = directionOf(currentMtm)
+  const mtmLine = feedLine({
+    now,
+    marketOpen:
+      held.length > 0
+        ? anyOpen(held.map((position) => marketOpen(position.exchange)))
+        : marketOpen('NSE'),
+    lastTickAt: move.lastTickAt,
+    lastUpdateAt: latest(move.lastTickAt, book?.at),
+    ticksDue: held.length > 0,
+    connected: feedUp && !feedPaused,
+  })
+  const mtmStale = (mtmLine.kind === 'delayed' || mtmLine.kind === 'connecting') && mtmLine.stale
+
   return (
     <div className="container mx-auto py-6 px-4">
       {/* Header */}
@@ -502,23 +580,33 @@ export default function PnLTracker() {
         {/* Metrics Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           {/* Current MTM */}
+          {/* SUDARSHAN: live, with its status; greyed (sign and arrow kept) when stale. */}
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
+              <CardTitle className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-sm font-medium text-muted-foreground">
                 Current MTM
+                {book && <LiveLine line={mtmLine} now={now} />}
               </CardTitle>
             </CardHeader>
             <CardContent>
               <div
-                className={`text-2xl font-bold font-mono ${metrics.currentMtm >= 0 ? 'text-green-500' : 'text-red-500'}`}
+                className={cn(
+                  'flex items-center gap-1.5 text-2xl font-bold font-mono',
+                  mtmStale ? 'text-muted-foreground' : TREND_TEXT[mtmDirection]
+                )}
+                data-testid="current-mtm"
               >
-                {formatCurrency(metrics.currentMtm)}
+                <TrendArrow direction={mtmDirection} className="size-3.5" />
+                {formatCurrency(currentMtm)}
               </div>
               <div
-                className={`text-sm ${metrics.currentMtm >= 0 ? 'text-green-500' : 'text-red-500'}`}
+                className={cn(
+                  'text-sm',
+                  mtmStale ? 'text-muted-foreground' : TREND_TEXT[mtmDirection]
+                )}
               >
-                {metrics.currentMtm >= 0 ? '+' : ''}
-                {((metrics.currentMtm / 100000) * 100).toFixed(2)}%
+                {currentMtm >= 0 ? '+' : ''}
+                {((currentMtm / 100000) * 100).toFixed(2)}%
               </div>
             </CardContent>
           </Card>
