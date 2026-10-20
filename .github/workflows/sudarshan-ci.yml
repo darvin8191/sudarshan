@@ -46,6 +46,11 @@ jobs:
           enable-cache: true
           python-version: "3.12"
       - run: uv sync --dev
+      # The production server packages, which pyproject does not install: without them the
+      # eventlet and gunicorn tests in sudarshan/ skip instead of running. Same pins as the
+      # upstream gthread-migration job; `uv run` below keeps them (its sync is not exact).
+      - name: Production server packages (gunicorn, eventlet)
+        run: uv pip install "gunicorn>=25.0,<26" "eventlet==0.41.2"
       - name: Ruff (sudarshan/ only)
         run: |
           if find sudarshan -name '*.py' 2>/dev/null | grep -q .; then
