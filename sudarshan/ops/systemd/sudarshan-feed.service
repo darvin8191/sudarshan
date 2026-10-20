@@ -1,0 +1,34 @@
+# सुदर्शन / SUDARSHAN feed: the single Upstox Feed V3 socket, fanned out on 127.0.0.1
+# (HTTP 5580, ZMQ PUB 5581). Docs: sudarshan/feed/README.md in the repo.
+# Install: copy to /etc/systemd/system/, then systemctl daemon-reload && systemctl enable --now.
+# Settings: optional /etc/sudarshan/feed.env (root:sudarshan 640), see the README env table.
+
+[Unit]
+Description=SUDARSHAN feed (single Upstox Feed V3 socket, local fan-out)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sudarshan
+Group=sudarshan
+Slice=sudarshan.slice
+WorkingDirectory=/opt/sudarshan/apps/openalgo
+ExecStart=/opt/sudarshan/apps/openalgo/.venv/bin/python -m sudarshan.feed
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/etc/sudarshan/feed.env
+StateDirectory=sudarshan-feed
+Restart=always
+RestartSec=10
+# SIGTERM -> close frame to Upstox (<= 5 s), final snapshot and recorder flush.
+TimeoutStopSec=20
+MemoryMax=512M
+CPUWeight=50
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadOnlyPaths=/etc/sudarshan
+
+[Install]
+WantedBy=multi-user.target
