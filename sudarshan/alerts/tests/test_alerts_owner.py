@@ -171,3 +171,92 @@ def test_openalgos_sessions_are_left_as_they_were(fake_db):
         read_owner(fake_db.path.parent / "missing.db")
     after = [s.session_factory.kw.get("bind") for s in (auth_db.db_session, user_db.db_session)]
     assert after == binds and binds[0] is auth_db.engine
+
+
+def test_a_failed_read_leaves_no_openalgo_traceback(fake_db, monkeypatch, caplog):
+    """A read cut across a write-back is tried again; OpenAlgo's ERROR traceback would alarm."""
+    import logging
+
+    from sqlalchemy.exc import OperationalError
+
+    caplog.set_level(logging.DEBUG)
+    fake_db.set_key("", ciphertext="gAAAAA-not-a-fernet-token")  # OpenAlgo logs a decrypt error
+    with pytest.raises(OwnerError):
+        read_owner(fake_db.path)
+    real = owner_module._read_with
+    calls = []
+
+    def torn_then_fine(url):
+        calls.append(url)
+        if len(calls) == 1:
+            raise OperationalError("SELECT", {}, sqlite3.DatabaseError("malformed"))
+        return real(url)
+
+    fake_db.set_key(API_KEY)
+    monkeypatch.setattr(owner_module, "_read_with", torn_then_fine)
+    assert read_owner(fake_db.path).api_key == API_KEY
+    loud = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert loud == []
+    assert "a read of openalgo.db did not complete" in caplog.text
+
+
+def test_a_lock_free_read_during_a_write_is_done_again(fake_db, monkeypatch):
+    fake_db.set_key(API_KEY)
+    real = owner_module._read_with
+    calls = []
+
+    def write_meanwhile(url):
+        calls.append(url)
+        result = real(url)
+        if len(calls) == 1:
+            fake_db.set_key(NEW_API_KEY)  # OpenAlgo regenerates the key during the first read
+        return result
+
+    monkeypatch.setattr(owner_module, "_read_with", write_meanwhile)
+    assert read_owner(fake_db.path).api_key == NEW_API_KEY
+    assert len(calls) == 2 and "immutable=1" in calls[0]
+
+
+_DOTENV_PROBE = """
+import os, sys
+import dotenv, dotenv.main
+calls = []
+def record(*args, **kwargs):
+    calls.append(1)
+    return False
+dotenv.load_dotenv = dotenv.main.load_dotenv = record
+real_exists = os.path.exists
+# As on the server, where OpenAlgo's .env exists next to its code.
+os.path.exists = lambda p: True if str(p).endswith(".env") else real_exists(p)
+from sudarshan.alerts.owner import load_openalgo_modules
+{call}
+print("loads:", len(calls))
+"""
+
+
+@pytest.mark.parametrize(
+    ("call", "loads"),
+    [
+        ("load_openalgo_modules()", 0),
+        ("from database import auth_db, user_db", 1),  # the control: the probe can see a load
+    ],
+)
+def test_openalgos_env_file_is_not_loaded_into_this_process(tmp_path, call, loads):
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[3]
+    env = {
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "PYTHONPATH": str(repo),
+        "API_KEY_PEPPER": "d" * 64,
+        "DATABASE_URL": f"sqlite:///{tmp_path}/unused.db",
+        "LOG_DIR": str(tmp_path / "log"),
+    }
+    done = subprocess.run(
+        [sys.executable, "-c", _DOTENV_PROBE.format(call=call)], cwd=tmp_path, env=env,
+        capture_output=True, text=True, timeout=120,
+    )  # fmt: skip
+    assert done.returncode == 0, done.stderr
+    assert f"loads: {loads}" in done.stdout

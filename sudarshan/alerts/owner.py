@@ -114,19 +114,37 @@ def _bound(engine, *sessions):
             session.configure(bind=bind)
 
 
+#: OpenAlgo's loggers inside the read: a read cut short by a write-back is tried again here, and
+#: their error tracebacks for it ("malformed", "error decrypting") would only alarm.
+OPENALGO_LOGGERS = ("database.auth_db", "database.user_db")
+
+
+@contextlib.contextmanager
+def _quiet_openalgo():
+    loggers = [logging.getLogger(name) for name in OPENALGO_LOGGERS]
+    levels = [logger.level for logger in loggers]
+    for logger in loggers:
+        logger.setLevel(logging.CRITICAL + 1)
+    try:
+        yield
+    finally:
+        for logger, level in zip(loggers, levels, strict=True):
+            logger.setLevel(level)
+
+
 def _read_with(url: str) -> Owner:
     from database import auth_db, user_db
     from database.engine_factory import create_db_engine
 
     engine = create_db_engine(url)  # NullPool: one connection per query, closed at once
     try:
-        with _bound(engine, user_db.db_session, auth_db.db_session):
+        with _quiet_openalgo(), _bound(engine, user_db.db_session, auth_db.db_session):
             admin = user_db.find_user_by_username()
             if admin is None:
                 raise OwnerError("no_user")
             username = admin.username
             has_key = auth_db.get_api_key(username)
-            if has_key is None:  # OpenAlgo logged the read error
+            if has_key is None:  # the read failed inside OpenAlgo's function
                 raise OwnerError("database")
             if not has_key:
                 raise OwnerError("no_key")
@@ -138,23 +156,46 @@ def _read_with(url: str) -> Owner:
         engine.dispose()
 
 
-def read_owner(db_path: Path) -> Owner:
+def _file_state(db_path: Path) -> tuple:
+    """Size and modification time of the file and of its write-ahead log (None if absent)."""
+
+    def stat(path: Path):
+        try:
+            found = path.stat()
+        except FileNotFoundError:
+            return None
+        return found.st_size, found.st_mtime_ns
+
+    return stat(db_path), stat(Path(f"{db_path}-wal"))
+
+
+def read_owner(db_path: Path, *, again: bool = True) -> Owner:
     """The owner and his key. Raises OwnerError when there is none to use now.
 
     "No user" and "no key" are answers. A failed read, or a key that does not decrypt (a read cut
-    across a write-back, or a changed pepper), is tried once more the other way.
+    across a write-back, or a changed pepper), is tried once more the other way. A read of the
+    main file alone (``immutable=1``, no locks) during which the file or its log changed is done
+    once more, the way that fits the file then.
     """
     from sqlalchemy.exc import SQLAlchemyError
 
     failure = OwnerError("database")
     for url in database_urls(db_path):
+        lock_free = "immutable=1" in url
+        before = _file_state(db_path)
         try:
-            return _read_with(url)
+            owner = _read_with(url)
         except OwnerError as exc:
-            if exc.kind in ("no_user", "no_key"):
+            if exc.kind in ("no_user", "no_key") and _file_state(db_path) == before:
                 raise
             failure = exc
-        except SQLAlchemyError as exc:
-            log.debug("reading openalgo.db failed (%s); trying the other way", type(exc).__name__)
+            continue
+        except SQLAlchemyError:
+            log.debug("a read of openalgo.db did not complete; trying the other way")
             failure = OwnerError("database")
+            continue
+        if lock_free and again and _file_state(db_path) != before:
+            log.debug("openalgo.db changed during the read; reading it once more")
+            return read_owner(db_path, again=False)
+        return owner
     raise failure
