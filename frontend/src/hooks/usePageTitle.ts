@@ -11,6 +11,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/download': 'Download',
   '/broker': 'Select Broker',
   '/dashboard': 'Dashboard',
+  '/watchlist': 'Watchlist', // SUDARSHAN M8.2
   '/positions': 'Positions',
   '/orderbook': 'Order Book',
   '/tradebook': 'Trade Book',

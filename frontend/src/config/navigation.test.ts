@@ -43,9 +43,20 @@ describe('Navigation Config', () => {
       expect(bottomNavItems).toHaveLength(4)
     })
 
-    it('has the correct order: Dashboard, Orderbook, Tradebook, Positions', () => {
-      const labels = bottomNavItems.map((item) => item.label)
-      expect(labels).toEqual(['Dashboard', 'Orderbook', 'Tradebook', 'Positions'])
+    // SUDARSHAN M8.2: led by the watchlist, as the owner's broker apps are.
+    it('has the correct order: Watchlist, Dashboard, Orders, Positions', () => {
+      const items = bottomNavItems.map((item) => [item.label, item.href])
+      expect(items).toEqual([
+        ['Watchlist', '/watchlist'],
+        ['Dashboard', '/dashboard'],
+        ['Orders', '/orderbook'],
+        ['Positions', '/positions'],
+      ])
+    })
+
+    it('leaves the Tradebook to the menu, which lists every page the bar does not', () => {
+      expect(bottomNavItems.map((item) => item.href)).not.toContain('/tradebook')
+      expect(mobileSheetItems.map((item) => item.href)).toContain('/tradebook')
     })
   })
 
@@ -87,6 +98,11 @@ describe('Navigation Config', () => {
     it('lists the SUDARSHAN phone chart (M4.15)', () => {
       const entry = profileMenuItems.find((item) => item.href === '/chart')
       expect(entry?.label).toBe('Chart')
+    })
+
+    it('lists the watchlist for a wide screen, where the bottom bar is hidden (M8.2)', () => {
+      const entry = profileMenuItems.find((item) => item.href === '/watchlist')
+      expect(entry?.label).toBe('Watchlist')
     })
   })
 

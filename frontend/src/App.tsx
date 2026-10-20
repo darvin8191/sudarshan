@@ -46,6 +46,7 @@ const About = lazy(() => import('@/sudarshan/pages/About'))
 const MasterContract = lazy(() => import('@/pages/MasterContract'))
 const ActionCenter = lazy(() => import('@/pages/ActionCenter'))
 const AutoLogin = lazy(() => import('@/sudarshan/pages/AutoLogin')) // SUDARSHAN M2.20
+const Watchlist = lazy(() => import('@/sudarshan/pages/Watchlist')) // SUDARSHAN M8.2
 
 // Platform pages
 const Platforms = lazy(() => import('@/pages/Platforms'))
@@ -189,6 +190,8 @@ function App() {
               {/* Protected routes - requires broker auth */}
               <Route element={<Layout />}>
                 <Route path="/dashboard" element={<Dashboard />} />
+                {/* SUDARSHAN M8.2: the phone-first watchlist */}
+                <Route path="/watchlist" element={<Watchlist />} />
                 <Route path="/positions" element={<Positions />} />
                 <Route path="/orderbook" element={<OrderBook />} />
                 <Route path="/tradebook" element={<TradeBook />} />

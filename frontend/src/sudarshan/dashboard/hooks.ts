@@ -5,16 +5,22 @@ import type { MarketCalendar } from './MarketCalendar'
 /**
  * The time now, moved on every `stepMs` while the page is in view, so that an
  * age ("Updated 12s ago") or a stale mark is re-read even when no tick comes to
- * prompt it. A hidden page skips the re-render; the first step after it comes
- * back catches up.
+ * prompt it. A hidden page skips the re-render, and the page coming back into
+ * view moves it at once (M8.2), so the first frame after the phone wakes shows
+ * the figures' true age rather than the one from before it slept.
  */
 export function useNow(stepMs = 1000): number {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
-    const timer = setInterval(() => {
+    const step = () => {
       if (document.visibilityState === 'visible') setNow(Date.now())
-    }, stepMs)
-    return () => clearInterval(timer)
+    }
+    const timer = setInterval(step, stepMs)
+    document.addEventListener('visibilitychange', step)
+    return () => {
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', step)
+    }
   }, [stepMs])
   return now
 }

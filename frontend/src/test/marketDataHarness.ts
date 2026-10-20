@@ -189,6 +189,13 @@ export class MarketDataManager {
       if (index < 0) return
       feed.open.splice(index, 1)
       feed.closed.push(key)
+      // As the real manager does: once nothing subscribes to an instrument in
+      // any mode, its cache line goes, so a later subscriber starts empty
+      // rather than from a level that stopped arriving long ago.
+      const stillWanted = feed.open.some(
+        (other) => other.symbol === symbol && other.exchange === exchange
+      )
+      if (!stillWanted) feed.cache.delete(`${exchange}:${symbol}`)
     }
   }
 

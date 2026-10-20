@@ -5,15 +5,20 @@ import { Toaster } from '@/components/ui/sonner'
 import { MarketDataProvider } from '@/contexts/MarketDataContext'
 import { useAlertStore } from '@/stores/alertStore'
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 1000 * 60, // 1 minute
-      refetchOnWindowFocus: true,
-      retry: 1,
+// SUDARSHAN M8.2: the app's query defaults, made by a function so tests run on the real ones.
+export function createQueryClient(): QueryClient {
+  return new QueryClient({
+    defaultOptions: {
+      queries: {
+        staleTime: 1000 * 60, // 1 minute
+        refetchOnWindowFocus: true,
+        retry: 1,
+      },
     },
-  },
-})
+  })
+}
+
+const queryClient = createQueryClient()
 
 interface ProvidersProps {
   children: ReactNode
