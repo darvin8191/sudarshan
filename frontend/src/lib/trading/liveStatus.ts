@@ -10,12 +10,18 @@
  * hours; "Market closed" outside them. This file only follows one chart's
  * inputs over time and asks those rules again when the answer can change.
  *
+ * The calendar says when the market is open, and trades say so too: stream
+ * ticks whose trade times keep advancing are a market trading, so the chart
+ * says "Real-time" while they flow even when the calendar says closed (a
+ * special session the holiday list does not carry), and never "Market
+ * closed" over prices that are moving.
+ *
  * Event driven: a tick, a change of transport or a new calendar re-evaluates
  * it, plus one timer aimed at the next moment the answer can change by itself
  * (prices growing old, or the session opening or closing). Nothing here polls.
  */
 import { type FeedLine, feedLine, sameFeedState } from '@/sudarshan/dashboard/live'
-import type { SessionHours } from './liveBars'
+import { FLOW_GAP_SEC, type SessionHours } from './liveBars'
 
 /** How prices are reaching the chart. */
 export type LiveTransport =
@@ -171,6 +177,10 @@ export class LiveStatusTracker {
   private lastTickAt: number | null = null
   private lastUpdateAt: number | null = null
   private lastTickTime: number | null = null
+  /** The newest trade time a stream tick carried, in UTC seconds. */
+  private lastTradeTime: number | null = null
+  /** Wall clock, in milliseconds, of the last stream tick whose trade time moved on: trades flowing. */
+  private flowAt: number | null = null
   private timer: unknown = null
   private shown: FeedLine | null = null
   private destroyed = false
@@ -189,6 +199,8 @@ export class LiveStatusTracker {
     this.exchange = exchange
     this.lastTickAt = null
     this.lastTickTime = null
+    this.lastTradeTime = null
+    this.flowAt = null
     this.lastUpdateAt = this.now()
     this.update()
   }
@@ -211,22 +223,35 @@ export class LiveStatusTracker {
   /**
    * A price arrived. `time` is the exchange's time for it, in UTC seconds,
    * when known; `fromStream` is false for a quote request standing in for the
-   * stream, which updates the figures but is never real-time.
+   * stream, which updates the figures but is never real-time. `tradeTime` is
+   * the time of the last trade where the frame carried one: a newer trade
+   * within a minute of the one before is the market trading.
    */
-  noteTick(time?: number, fromStream = true): void {
+  noteTick(time?: number, fromStream = true, tradeTime?: number | null): void {
     const now = this.now()
     this.lastUpdateAt = now
     if (fromStream) this.lastTickAt = now
     if (typeof time === 'number' && Number.isFinite(time)) this.lastTickTime = time
+    if (fromStream && typeof tradeTime === 'number' && Number.isFinite(tradeTime)) {
+      const last = this.lastTradeTime
+      if (last !== null && tradeTime > last && tradeTime - last <= FLOW_GAP_SEC) this.flowAt = now
+      if (last === null || tradeTime > last) this.lastTradeTime = tradeTime
+    }
     // Ticks arrive several times a second; while real-time, the timer already
     // aimed at the moment they would be too old is re-aimed when it fires.
     if (this.shown?.kind !== 'live' || this.timer === null) this.update()
   }
 
+  /** Trades have been flowing within the stale window: the market is open, whatever the calendar says. */
+  private flowing(now: number, staleMs: number): boolean {
+    return this.flowAt !== null && now - this.flowAt <= staleMs
+  }
+
   status(): LiveStatus {
     const now = this.now()
     const staleMs = staleAfterMs(this.exchange)
-    const marketOpen = this.calendar ? this.calendar.sessionAt(now / 1000) !== null : null
+    const calendarOpen = this.calendar ? this.calendar.sessionAt(now / 1000) !== null : null
+    const marketOpen = this.flowing(now, staleMs) ? true : calendarOpen
     const line = feedLine({
       now,
       marketOpen,
@@ -287,8 +312,9 @@ export class LiveStatusTracker {
     const waits: number[] = []
     if (status.line.kind !== 'closed') {
       // Real-time ends when the last tick is too old; a figure turns stale
-      // when the last update is.
-      for (const at of [this.lastTickAt, this.lastUpdateAt])
+      // when the last update is; trades stop counting as a market open once
+      // they stop flowing.
+      for (const at of [this.lastTickAt, this.lastUpdateAt, this.flowAt])
         if (at !== null) waits.push(at + status.staleAfterMs - now + 1)
     }
     const changesAt = this.calendar?.marketStatusAt?.(now / 1000)?.changesAt

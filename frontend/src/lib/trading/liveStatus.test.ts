@@ -173,6 +173,37 @@ describe('LiveStatusTracker', () => {
     tracker.destroy()
   })
 
+  it('says Real-time while trades keep flowing though the calendar says shut, and closed once they stop', () => {
+    vi.useFakeTimers()
+    // 18:00 on Tuesday: a special session the holiday list does not carry.
+    vi.setSystemTime(ist(2026, 10, 20, 18, 0))
+    const { tracker, kinds } = track('NSE')
+    tracker.setCalendar(nse())
+    tracker.setTransport('live')
+    tracker.reset('NSE')
+    expect(kinds()).toEqual(['closed'])
+    const trade = (s: number) => {
+      vi.setSystemTime(ist(2026, 10, 20, 18, 0, s))
+      tracker.noteTick(ist(2026, 10, 20, 18, 0, s) / 1000, true, ist(2026, 10, 20, 18, 0, s) / 1000)
+    }
+    // One trade is not a flow; the next newer one is.
+    trade(1)
+    expect(kinds()).toEqual(['closed'])
+    trade(4)
+    expect(kinds()).toEqual(['closed', 'live'])
+    // A book moving on its frames' own stamps, with the same last trade, is not trading.
+    vi.advanceTimersByTime(5_000)
+    tracker.noteTick(Date.now() / 1000, true, ist(2026, 10, 20, 18, 0, 4) / 1000)
+    expect(kinds()).toEqual(['closed', 'live'])
+    vi.advanceTimersByTime(30_000)
+    expect(kinds()).toEqual(['closed', 'live', 'closed'])
+    // A quote standing in for the stream never says the market is open.
+    tracker.noteTick(Date.now() / 1000, false, Date.now() / 1000)
+    tracker.noteTick(Date.now() / 1000 + 1, false, Date.now() / 1000 + 1)
+    expect(kinds().at(-1)).toBe('closed')
+    tracker.destroy()
+  })
+
   it('starts over for a new instrument, with its own threshold', () => {
     vi.useFakeTimers()
     vi.setSystemTime(ist(2026, 10, 20, 10, 0))

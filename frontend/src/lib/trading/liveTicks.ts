@@ -24,7 +24,10 @@ export interface FrameExtras {
   oi?: number
   /** The previous session's close. */
   prevClose?: number
-  /** The exchange's time of the last trade, in UTC seconds. */
+  /**
+   * The exchange's time of the last trade, in UTC seconds: `last_trade_time`,
+   * or the short `ltt` a price-only frame carries instead.
+   */
   tradeTime?: number
 }
 
@@ -63,14 +66,8 @@ function topicParts(topic: unknown): { symbol: string; exchange: string } | null
   return { symbol: parts[0], exchange: parts[1] }
 }
 
-/**
- * Read one inbound frame. Returns the instrument and its extras for a market
- * data frame, and null for anything else (acknowledgements, order updates,
- * pings, malformed text). Never throws.
- */
-export function readFrameExtras(
-  raw: unknown
-): { symbol: string; exchange: string; extras: FrameExtras } | null {
+/** A frame's text as an object, or the object itself; null for anything else. Never throws. */
+function parsed(raw: unknown): Record<string, unknown> | null {
   let message: unknown = raw
   if (typeof raw === 'string') {
     try {
@@ -79,7 +76,19 @@ export function readFrameExtras(
       return null
     }
   }
-  if (!message || typeof message !== 'object') return null
+  return message && typeof message === 'object' ? (message as Record<string, unknown>) : null
+}
+
+/**
+ * Read one inbound frame. Returns the instrument and its extras for a market
+ * data frame, and null for anything else (acknowledgements, order updates,
+ * pings, malformed text). Never throws.
+ */
+export function readFrameExtras(
+  raw: unknown
+): { symbol: string; exchange: string; extras: FrameExtras } | null {
+  const message = parsed(raw)
+  if (!message) return null
   const envelope = message as Record<string, unknown>
   const type = typeof envelope.type === 'string' ? envelope.type : ''
   if (type && type !== 'market_data') return null
@@ -99,18 +108,124 @@ export function readFrameExtras(
   if (oi !== undefined) extras.oi = oi
   const prevClose = positive(data.prev_close)
   if (prevClose !== undefined) extras.prevClose = prevClose
-  const tradeTime = seconds(data.last_trade_time)
+  const tradeTime = seconds(data.last_trade_time ?? data.ltt)
   if (tradeTime !== undefined) extras.tradeTime = tradeTime
   return { symbol, exchange, extras }
 }
 
+/** When the server stamped a market-data frame, in milliseconds, or undefined. */
+function frameStamp(message: Record<string, unknown>): number | undefined {
+  if (message.type !== 'market_data') return undefined
+  const data = (
+    message.data && typeof message.data === 'object' ? message.data : message
+  ) as Record<string, unknown>
+  const at = positive(data.timestamp)
+  if (at === undefined) return undefined
+  return at > 1e12 ? at : at * 1000
+}
+
+/** A reading further than this from the phone's clock is a field that is not a clock. */
+export const MAX_CLOCK_SKEW_MS = 10 * 60_000
+
+/** How long a frame's stamp counts toward the server clock. */
+const STAMP_WINDOW_MS = 60_000
+
 /**
- * Away from the page longer than this, and a chart starts its stream again on
- * coming back. A phone that slept can hold a socket that is open on paper and
- * dead in fact, and the stream client's own watchdog takes most of a minute
- * to find out.
+ * The server's clock, as its frames show it.
+ *
+ * A phone's clock can be well off, and a candle must open when the exchange's
+ * minute turns, not the phone's. Two readings give the difference. A ping's
+ * answer carries the server's time, taken between sending and receiving, so
+ * the half-way point is within half a round trip of the truth. A market-data
+ * frame is stamped before it arrives, so its stamp less the arrival time is a
+ * floor under the difference. The estimate is the higher of the answer and
+ * the last minute's best floor; with neither, the phone's own clock stands.
+ */
+export class ServerClock {
+  private readonly local: () => number
+  /** Server less phone, in milliseconds, from the last ping answered. */
+  private answered: number | null = null
+  /** The best floor under that difference from recent frames, and when it was read. */
+  private floor: { offset: number; at: number } | null = null
+  /** The estimate listeners last heard. */
+  private told = 0
+  private readonly listeners = new Set<() => void>()
+
+  constructor(local: () => number = () => Date.now()) {
+    this.local = local
+  }
+
+  /**
+   * Hear when the estimate moves by more than a quarter of a second: a timer
+   * aimed by the old one (the next candle's open) is aimed again.
+   */
+  onChange(listener: () => void): () => void {
+    this.listeners.add(listener)
+    return () => {
+      this.listeners.delete(listener)
+    }
+  }
+
+  /** A frame the server stamped `stampMs` arrived at `arrivedAt` (phone milliseconds). */
+  noteStamp(stampMs: number, arrivedAt = this.local()): void {
+    const offset = stampMs - arrivedAt
+    if (!Number.isFinite(offset) || Math.abs(offset) > MAX_CLOCK_SKEW_MS) return
+    const floor = this.floor
+    if (!floor || offset >= floor.offset || arrivedAt - floor.at > STAMP_WINDOW_MS)
+      this.floor = { offset, at: arrivedAt }
+    this.tell()
+  }
+
+  /** A ping sent at `sentAt` came back at `arrivedAt` carrying the server's time. */
+  notePong(serverMs: number, sentAt: number, arrivedAt = this.local()): void {
+    if (!(arrivedAt >= sentAt)) return
+    const offset = serverMs - (sentAt + arrivedAt) / 2
+    if (!Number.isFinite(offset) || Math.abs(offset) > MAX_CLOCK_SKEW_MS) return
+    this.answered = offset
+    this.tell()
+  }
+
+  private tell(): void {
+    const offset = this.offsetMs()
+    if (Math.abs(offset - this.told) <= 250) return
+    this.told = offset
+    for (const listener of [...this.listeners]) listener()
+  }
+
+  /** Server less phone, in milliseconds. */
+  offsetMs(): number {
+    const now = this.local()
+    const floor = this.floor && now - this.floor.at <= STAMP_WINDOW_MS ? this.floor.offset : null
+    if (this.answered === null) return floor ?? 0
+    return floor === null ? this.answered : Math.max(this.answered, floor)
+  }
+
+  /** The server's time, in milliseconds. */
+  now(): number {
+    return this.local() + this.offsetMs()
+  }
+
+  /** The server's time, in UTC seconds, with the fraction. */
+  seconds(): number {
+    return this.now() / 1000
+  }
+
+  /** The server's time, in whole UTC seconds. */
+  nowSec(): number {
+    return Math.floor(this.now() / 1000)
+  }
+}
+
+/**
+ * Away from the page longer than this, and a chart tests its stream on coming
+ * back. A phone that slept can hold a socket that is open on paper and dead in
+ * fact, and the stream client's own watchdog takes most of a minute to find
+ * out.
  */
 export const WAKE_RECONNECT_MS = 5000
+
+/** How long a ping on waking may go unanswered before the socket is taken for dead. */
+export const PROBE_TIMEOUT_MS = 1500
 
 /**
  * Hands the stream client a socket that reads each frame on its way past.
@@ -120,9 +235,17 @@ export const WAKE_RECONNECT_MS = 5000
  * the extras of the very frame that callback is reporting.
  */
 export class FrameExtrasTap {
+  /** The server's clock, read off the frames and the answers to pings. */
+  readonly clock = new ServerClock()
+  /** Wall clock, in milliseconds, of the last frame of any kind on any socket. */
+  lastFrameAt: number | null = null
   private readonly latest = new Map<string, FrameExtras>()
   /** One per socket still open, each closing its socket as a dead connection would. */
   private readonly droppers = new Set<() => void>()
+  /** Sockets that have opened and not closed: where a ping goes. */
+  private readonly open = new Set<WebSocket>()
+  /** Probes waiting for the next frame. */
+  private readonly waiters = new Set<() => void>()
 
   /** The latest extras for an instrument, or undefined before any frame for it. */
   get(symbol: string, exchange: string): FrameExtras | undefined {
@@ -141,12 +264,73 @@ export class FrameExtrasTap {
    * quantity is the exception, since it describes that one trade only.
    */
   read(raw: unknown): void {
-    const frame = readFrameExtras(raw)
+    const at = Date.now()
+    this.lastFrameAt = at
+    for (const wake of [...this.waiters]) wake()
+    const message = parsed(raw)
+    if (!message) return
+    if (message.type === 'pong') {
+      const server = positive(message.server_timestamp)
+      const sent = positive(message.client_timestamp)
+      if (server !== undefined && sent !== undefined) this.clock.notePong(server, sent, at)
+      return
+    }
+    const stamp = frameStamp(message)
+    if (stamp !== undefined) this.clock.noteStamp(stamp, at)
+    const frame = readFrameExtras(message)
     if (!frame) return
     const key = `${frame.exchange}:${frame.symbol}`
     const kept: FrameExtras = { ...this.latest.get(key) }
     delete kept.ltq
     this.latest.set(key, { ...kept, ...frame.extras })
+  }
+
+  /**
+   * Ask the server for its time on every open socket. The answer sets the
+   * clock, and any frame proves the socket alive. False when no socket is
+   * open to ask.
+   */
+  ping(): boolean {
+    const sentAt = Date.now()
+    const message = JSON.stringify({
+      action: 'ping',
+      _pingId: `chart-${sentAt}`,
+      timestamp: sentAt,
+    })
+    let sent = false
+    for (const ws of this.open) {
+      if (ws.readyState !== 1) continue
+      try {
+        ws.send(message)
+        sent = true
+      } catch {
+        // Closing.
+      }
+    }
+    return sent
+  }
+
+  /**
+   * Whether the connection still answers: a ping goes out, and any frame back
+   * within `timeoutMs` (its answer, a tick, anything) says yes. Silence, or no
+   * open socket to ask, says no.
+   */
+  probe(timeoutMs = PROBE_TIMEOUT_MS): Promise<boolean> {
+    return new Promise((resolve) => {
+      let timer: ReturnType<typeof setTimeout> | null = null
+      const finish = (alive: boolean) => {
+        if (!this.waiters.delete(answer)) return
+        if (timer) clearTimeout(timer)
+        resolve(alive)
+      }
+      const answer = () => finish(true)
+      this.waiters.add(answer)
+      if (!this.ping()) {
+        finish(false)
+        return
+      }
+      timer = setTimeout(() => finish(false), timeoutMs)
+    })
   }
 
   /**
@@ -181,6 +365,7 @@ export class FrameExtrasTap {
       if (closed) return
       closed = true
       this.droppers.delete(drop)
+      this.open.delete(ws)
       socket.onclose?.()
     }
     const drop = () => {
@@ -196,7 +381,10 @@ export class FrameExtrasTap {
       finish()
     }
     this.droppers.add(drop)
-    ws.onopen = () => socket.onopen?.()
+    ws.onopen = () => {
+      this.open.add(ws)
+      socket.onopen?.()
+    }
     ws.onclose = finish
     ws.onerror = () => socket.onerror?.()
     ws.onmessage = (event: MessageEvent) => {

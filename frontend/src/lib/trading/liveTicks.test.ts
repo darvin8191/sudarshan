@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { FrameExtrasTap, readFrameExtras } from './liveTicks'
+import { FrameExtrasTap, MAX_CLOCK_SKEW_MS, readFrameExtras, ServerClock } from './liveTicks'
 
 const depthFrame = (data: Record<string, unknown>) =>
   JSON.stringify({
@@ -58,6 +58,12 @@ describe('readFrameExtras', () => {
     ).toBeNull()
     expect(readFrameExtras('not json')).toBeNull()
     expect(readFrameExtras(JSON.stringify({ type: 'market_data', data: { volume: 1 } }))).toBeNull()
+  })
+
+  it("reads a price-only frame's short trade time", () => {
+    expect(readFrameExtras(depthFrame({ ltt: 1_792_470_005_000 }))?.extras).toEqual({
+      tradeTime: 1_792_470_005,
+    })
   })
 
   it('reads the instrument from a topic when the frame carries no names', () => {
@@ -153,6 +159,48 @@ describe('FrameExtrasTap', () => {
     expect(events).toEqual(['open', 'error', 'close'])
   })
 
+  it('answers a wake probe yes on any frame back, no on silence or with no socket open', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.stubGlobal('WebSocket', FakeSocket)
+      const tap = new FrameExtrasTap()
+      expect(await tap.probe()).toBe(false)
+      tap.socketFactory('ws://test.invalid')
+      const fake = FakeSocket.last as FakeSocket
+      fake.onopen?.()
+      const answered = tap.probe()
+      const ping = JSON.parse(fake.sent.at(-1) as string)
+      expect(ping).toMatchObject({ action: 'ping', timestamp: Date.now() })
+      vi.advanceTimersByTime(200)
+      fake.onmessage?.({
+        data: JSON.stringify({
+          type: 'pong',
+          status: 'success',
+          // Twenty seconds ahead, read half-way through the round trip.
+          server_timestamp: ping.timestamp + 100 + 20_000,
+          client_timestamp: ping.timestamp,
+          _pingId: ping._pingId,
+        }),
+      })
+      expect(await answered).toBe(true)
+      expect(tap.lastFrameAt).toBe(Date.now())
+      // The answer set the clock.
+      expect(tap.clock.offsetMs()).toBe(20_000)
+      const silent = tap.probe()
+      vi.advanceTimersByTime(1_499)
+      let settled = false
+      void silent.then(() => {
+        settled = true
+      })
+      await Promise.resolve()
+      expect(settled).toBe(false)
+      vi.advanceTimersByTime(1)
+      expect(await silent).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('closes every socket at once on drop, as a dead connection would, and only once', () => {
     vi.stubGlobal('WebSocket', FakeSocket)
     const tap = new FrameExtrasTap()
@@ -170,5 +218,41 @@ describe('FrameExtrasTap', () => {
     fake.onclose?.()
     tap.drop()
     expect(closed).toHaveBeenCalledOnce()
+  })
+})
+
+describe('ServerClock', () => {
+  it("follows the server's clock from a ping's answer and from the frames' stamps", () => {
+    let local = 1_000_000
+    const clock = new ServerClock(() => local)
+    // Nothing read yet: the phone's own clock.
+    expect(clock.now()).toBe(1_000_000)
+    // Stamped before they arrived: each is a floor under the difference, and the best of the minute counts.
+    clock.noteStamp(local - 20_400, local)
+    clock.noteStamp(local - 20_150, local)
+    expect(clock.offsetMs()).toBe(-20_150)
+    // A ping's answer: the server read its clock half-way through a 300 ms round trip.
+    clock.notePong(local - 300 - 20_000 + 150, local - 300, local)
+    expect(clock.offsetMs()).toBe(-20_000)
+    expect(clock.nowSec()).toBe(Math.floor((1_000_000 - 20_000) / 1000))
+    // A minute on, the stamps have aged out and the answer stands.
+    local += 61_000
+    expect(clock.offsetMs()).toBe(-20_000)
+  })
+
+  it('ignores a reading too far out to be a clock', () => {
+    const local = 5_000_000
+    const clock = new ServerClock(() => local)
+    clock.noteStamp(local + MAX_CLOCK_SKEW_MS + 1, local)
+    clock.notePong(local - 5.5 * 3_600_000, local - 100, local)
+    expect(clock.offsetMs()).toBe(0)
+  })
+
+  it('reads the frames a tap sees', () => {
+    const tap = new FrameExtrasTap()
+    const stamp = Date.now() - 1_000
+    tap.read(depthFrame({ timestamp: stamp }))
+    expect(tap.clock.offsetMs()).toBeGreaterThanOrEqual(-1_050)
+    expect(tap.clock.offsetMs()).toBeLessThanOrEqual(-1_000)
   })
 })
