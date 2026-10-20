@@ -8,6 +8,7 @@ screener and other alerts come later in the same service.
 Upstox Portfolio Stream Feed -> OpenAlgo's order adapter (in gunicorn) -> event bus -> ZMQ
   -> OpenAlgo's WebSocket proxy, ws://127.0.0.1:8765
   -> sudarshan-alerts: authenticate (the owner's API key), subscribe_orders
+       after every subscription: the day's order book and trade book, once (resync.py)
   -> orders.py: is this change worth a message? claimed once in /var/lib/sudarshan-alerts/alerts.db
   -> outbox.py: merged and paced -> POST 127.0.0.1:5000/api/v1/telegram/notify
   -> OpenAlgo's Telegram bot -> the owner's linked chat
@@ -15,6 +16,10 @@ Upstox Portfolio Stream Feed -> OpenAlgo's order adapter (in gunicorn) -> event 
 
 A standalone asyncio process with its own unit, never inside the OpenAlgo app: no thread,
 scheduler or event loop is added to gunicorn, and nothing in OpenAlgo was changed for it.
+
+**On by default: the owner's decision.** His rule 7 benchmark (Kite, Dhan, Upstox, Fyers) says a
+fill or a rejection must show at once, in the app and on Telegram. The switch below turns it off;
+the default stays on.
 
 ## What the owner receives
 
@@ -29,9 +34,12 @@ Filled: BUY 65 NIFTY 21 OCT 25900 CE at ₹123.45 (MIS, NFO)
 | complete | `Filled: BUY 65 NIFTY 21 OCT 25900 CE at ₹123.45 (MIS, NFO)` |
 | part fill | `Part filled: BUY 65 of 130 NIFTY 21 OCT 25900 CE at ₹98.10 (MIS, NFO)` |
 | rejected | `Rejected: SELL 65 NIFTY 21 OCT 25900 CE (NRML, NFO). Broker says: ...` |
+| rejected after a part fill | `Rejected: BUY 65 ... (MIS, NFO); 40 were filled at ₹121.50. Broker says: ...` |
 | cancelled | `Cancelled: BUY 65 NIFTY 21 OCT 25900 CE, none filled (MIS, NFO)` |
 | cancelled after a part fill | `Part filled, rest cancelled: BUY 40 of 65 NIFTY 21 OCT 25900 CE at ₹121.50 (MIS, NFO)` |
 | stop triggered, not filled | `Triggered: SELL 65 NIFTY 21 OCT 25900 CE at trigger ₹120.00, not filled yet (SL, MIS, NFO)` |
+| found after a pause | `Filled: BUY 65 ... (MIS, NFO) (found after a pause in order alerts)` |
+| the pause itself | `Order alerts paused 10:42:05 to 10:44:10 IST; the order book was checked.` |
 
 - Quantities are units, as the broker reports them; money and quantities use Indian grouping
   (₹1,23,456.50); currency contracts show four decimals.
@@ -39,7 +47,8 @@ Filled: BUY 65 NIFTY 21 OCT 25900 CE at ₹123.45 (MIS, NFO)
 - Upstox's carry-forward product reaches the order stream as CNC; on a derivatives exchange it is
   shown as NRML.
 - The broker's reason is quoted after "Broker says:", with the Markdown characters (asterisk,
-  underscore, backtick, square brackets) replaced (OpenAlgo sends with Telegram Markdown and does not escape).
+  underscore, backtick, square brackets) replaced: OpenAlgo sends with Telegram Markdown and does
+  not escape.
 - The time is when SUDARSHAN received the update. A merged message spanning more than a minute (a
   retry after OpenAlgo was down) shows the range.
 - A burst (a basket, a multi-leg exit) becomes one message listing every order, one line per order
@@ -52,7 +61,8 @@ broker or exchange cancel. Every cancellation is sent by default, because a canc
 (a stop order removed before the square-off) or by the exchange (an unfilled market order under
 price protection, an IOC order) matters and looks the same. A cancellation after a part fill is
 always sent: the position is not what was ordered. `SUDARSHAN_ORDER_ALERTS_CANCELLED=part-filled`
-keeps only those.
+keeps only those. An order placed, changed or cancelled through OpenAlgo's own screens or API may
+also get OpenAlgo's own Telegram line for that action (when its bot is on), next to this one.
 
 **Broker square-off.** Upstox squares off by placing its own order, which arrives as a new order
 and is told as `Filled`. The message does not say "square-off": nothing in the update says so,
@@ -63,26 +73,52 @@ and a guessed cause would mislead.
 pending" and "cancel pending" arrive as open). So a stop order is reported as triggered only after
 it stayed working and unfilled for 3 s; a fill, a cancel or a return to trigger pending inside that
 time is reported as itself (or not at all). A stop that fills at once is one `Filled` line with
-`(SL, ...)`.
+`(SL, ...)`. A modify that takes longer than 3 s is told as a trigger (nothing in the updates
+tells the two apart), but each trigger-pending episode has its own record, so the real trigger
+that follows is still told.
+
+**After a pause.** OpenAlgo's proxy replays nothing when a client subscribes, so whatever happened
+while nothing was listening (OpenAlgo, the proxy or this service restarting, a deploy, a dropped
+connection) would never be told. So after every subscription, the day's first included, the
+service reads OpenAlgo's order book and trade book once and runs each order through the same
+rules, marked "(found after a pause in order alerts)" and timed when it was found. What was told
+before stays silent. A pause longer than 10 s inside the window gets its own line when anything
+was found, or when the book could not be read (three tries); otherwise only the journal has it.
+The moment the stream was last up is kept in `alerts.db`, so a restart knows its pause; the first
+start of a day counts from the window's opening.
+- OpenAlgo's order book for Upstox carries no fill price or rejection reason: fills and prices
+  come from the trade book, and a rejection found this way points to the Upstox app for the reason.
+- While OpenAlgo is in Analyze mode, its REST books answer from the sandbox, so the live book
+  cannot be checked from here; the pause line then says the book could not be checked.
 
 ## When it runs
 
 Connected on trading days from 08:45 to 16:00 IST, with the calendar auto-login uses
 (`sudarshan/autologin/schedule.py`): weekends and the dates in `/etc/sudarshan/nse_holidays.txt`
-are closed, a date in `/etc/sudarshan/nse_extra_trading_days.txt` (a Muhurat session) is open. Both
-files are read again when they change. Outside the window the process stays up, disconnected, and
-connects again at the next opening. The MCX evening session is not covered.
+are closed, a date in `/etc/sudarshan/nse_extra_trading_days.txt` is open. Both files are read
+again when they change. Outside the window the process stays up, disconnected, and connects again
+at the next opening. The MCX evening session is not covered.
 
-**Upstox connections.** OpenAlgo's proxy opens an Upstox market-data connection (the daily access
-token) for every authenticated client and keeps it while any client of the owner is connected. So
-from 08:45 to 16:00 this service keeps that one connection open, even with no screen open. It is
-the same pooled connection the owner's real-time screens use, within the proxy's budget of at most 2.
-Before the day's Upstox login the proxy answers the sign-in with a broker error but still
+A special session outside the usual hours gets its own window after the date, which the alerts use
+for that day instead of 08:45-16:00 (include the pre-open):
+
+```
+2026-11-08 17:45-19:30  # Muhurat
+```
+
+Auto-login reads only the date of such a line, and the deploy tool only the date at its start, so
+both work as before (a test holds each to it).
+
+**Upstox connections.** OpenAlgo's proxy keeps one pooled Upstox market-data connection per user
+(the daily access token), opened when the first of the owner's clients signs in and kept while any
+of them is connected. So from 08:45 to 16:00 this service keeps that connection open, even with no
+screen open. It is the same one the owner's real-time screens use, within the proxy's budget of at
+most 2. Before the day's Upstox login the proxy answers the sign-in with a broker error but still
 subscribes this service to orders; the updates start with the login.
 
 ## Turning it off
 
-On by default (the owner asked for it). To stop all messages:
+To stop all messages:
 
 ```bash
 echo 'SUDARSHAN_ORDER_ALERTS=off' | sudo tee -a /etc/sudarshan/alerts.env
@@ -90,17 +126,18 @@ sudo chown root:sudarshan /etc/sudarshan/alerts.env && sudo chmod 640 /etc/sudar
 sudo systemctl restart sudarshan-alerts
 ```
 
-The service then idles and does not contact OpenAlgo at all. Remove the line and restart to turn
-it on again. Stopping OpenAlgo's Telegram bot also stops these messages (OpenAlgo refuses to send
-while its bot is stopped); messages refused that way are dropped, not held back for later.
-`systemctl stop` is not lasting: the deploy tool starts ring services again after each release.
+The service then exits at once without reading any other setting and without contacting OpenAlgo,
+and stays stopped. Remove the line and restart to turn it on again. Stopping OpenAlgo's Telegram
+bot also stops these messages (OpenAlgo refuses to send while its bot is stopped); messages refused
+that way are dropped, not held back for later. `systemctl stop` alone is not lasting: the deploy
+tool starts ring services again after each release.
 
 | variable | default | meaning |
 |---|---|---|
-| `SUDARSHAN_ORDER_ALERTS` | `on` | `off`: nothing is sent and the proxy is not contacted |
+| `SUDARSHAN_ORDER_ALERTS` | `on` | `off`: the service exits; nothing is sent and OpenAlgo is not contacted |
 | `SUDARSHAN_ORDER_ALERTS_CANCELLED` | `all` | `part-filled`: only cancellations of an order that was part filled |
 | `SUDARSHAN_ORDER_ALERTS_SANDBOX` | `off` | `on`: Analyze-mode (sandbox) orders too, each line starting with "Sandbox" |
-| `SUDARSHAN_ALERTS_WINDOW` | `08:45-16:00` | IST, on trading days |
+| `SUDARSHAN_ALERTS_WINDOW` | `08:45-16:00` | IST, on trading days (a special day's own window wins) |
 | `SUDARSHAN_ALERTS_ALWAYS_ON` | `0` | `1`: ignore the window and the calendar (tests, an evening sandbox check) |
 | `SUDARSHAN_ALERTS_STATE_DIR` | systemd's `$STATE_DIRECTORY` | `/var/lib/sudarshan-alerts` |
 | `SUDARSHAN_ALERTS_LOG_LEVEL` | `INFO` | |
@@ -113,61 +150,79 @@ while its bot is stopped); messages refused that way are dropped, not held back 
 
 Settings go in `/etc/sudarshan/alerts.env` (root:sudarshan 640); a missing file means the
 defaults; a change needs `sudo systemctl restart sudarshan-alerts`. A value the service cannot
-read stops it with a plain line in the journal (systemd tries again every 10 s).
+use stops it with a plain line in the journal and exit status 2, which systemd does not retry:
+fix the file, then restart. After a crash systemd restarts it every 10 s.
 
 ## The API key and the trust boundary
 
-The service needs the owner's OpenAlgo API key twice: to sign in to the proxy and to ask OpenAlgo
-to send a Telegram message. Nobody pastes it anywhere. The service reads it from openalgo.db
-exactly as OpenAlgo's TradingView page does (`user_db.find_user_by_username`,
-`auth_db.get_api_key`, `auth_db.get_api_key_for_tradingview`), decrypting it with the Fernet key
-OpenAlgo derives from `API_KEY_PEPPER` and `FERNET_SALT`.
+The service needs the owner's OpenAlgo API key to sign in to the proxy, to read the order book
+after a pause, and to ask OpenAlgo to send a Telegram message. Nobody pastes it anywhere. The
+service reads it from openalgo.db exactly as OpenAlgo's TradingView page does
+(`user_db.find_user_by_username`, `auth_db.get_api_key`, `auth_db.get_api_key_for_tradingview`),
+decrypting it with the Fernet key OpenAlgo derives from `API_KEY_PEPPER` and `FERNET_SALT`.
 
 - **Read-only.** The unit may write only `/var/lib/sudarshan-alerts`. openalgo.db is in WAL mode,
   which SQLite cannot open read-only unless its `-wal` file exists or can be created. So each
   read picks its way: with a `-wal` file present it opens the database read-only (`mode=ro`) and
   sees the newest data; without one, the last connection to close has written everything back, and
-  it reads the main file as it is (`immutable=1`), creating nothing. A read that fails is tried the
-  other way (owner.py).
+  it reads the main file as it is (`immutable=1`), creating nothing. If the file or its log changed
+  during such a lock-free read, it is read once more; a read that fails is tried the other way
+  (owner.py). OpenAlgo's own error tracebacks for a read cut short are silenced; the service logs
+  one plain line instead.
 - **Fresh.** The key is read again before every connection attempt and after OpenAlgo refuses it,
-  so a regenerated key is used from the next reconnect. No key yet: one line in the journal, no
-  message, and it starts by itself once a key is generated (it looks again every minute).
-- **What it holds.** The key is order-capable. The service uses it for those two calls only and
-  never calls an order endpoint. It is never logged, printed or written anywhere, and the unit
-  allows network traffic to this server only (`IPAddressDeny=any`, `IPAddressAllow=localhost`).
+  so a regenerated key is used from the next reconnect. A failed read keeps the key in use. No key
+  yet: one line in the journal, no message, and it starts by itself once a key is generated (it
+  looks again every minute).
+- **Only to OpenAlgo.** Before the key goes to 127.0.0.1:8765 or :5000, the service checks in
+  `/proc/net/tcp` and `tcp6` that the listening socket on that port belongs to its own user
+  (OpenAlgo runs as the same `sudarshan` user); otherwise it refuses with a plain line in the
+  journal. This narrows, not closes, the moment in which another local program could take the port
+  while OpenAlgo is down. The WebSocket client follows no redirect, and the HTTP client neither.
+- **What it holds.** The key is order-capable. The service uses it for those calls only and never
+  calls an order endpoint. It is never logged, printed or written anywhere, and the unit allows
+  network traffic to this server only (`IPAddressDeny=any`, `IPAddressAllow=localhost`).
 - **What it could already reach.** It runs as `sudarshan`, the user OpenAlgo runs as, so it gains
   nothing that user could not already read: OpenAlgo's `.env` and databases. It takes three values
   from `.env` (the pepper, the salt and `DATABASE_URL`) and skips the rest: OpenAlgo's logging
   module would load the whole file (broker secrets included) into the environment when imported,
-  and that load is turned off here. Family members' services must never run as this user.
+  and that load is turned off here (a test in a fresh interpreter holds it). Family members'
+  services must never run as this user.
 - **Telegram.** OpenAlgo looks up the chat linked to the owner's username and sends with its own
   bot: this service never sees the bot token or a chat id and cannot message anyone else.
   OpenAlgo's per-user notification switch on its Telegram page is not consulted by
   `/api/v1/telegram/notify`, and not by this service either.
+- **Upstream, not changed here.** OpenAlgo's ZeroMQ bus on 127.0.0.1:5555 accepts a publisher from
+  any local user, so a local program could put a made-up order update on it, and this service would
+  tell it like a real one. The fix belongs in OpenAlgo (an authenticated bus or a Unix socket).
 
 ## Reliability
 
 - **Once only.** Each alert is claimed in `alerts.db` by (order id, kind, filled quantity) before
-  it is queued. A reconnect, a restart, a replay, or the same update from both the order stream and
-  a webhook finds the claim and stays silent. Nothing is sent for an order after its final state,
-  and a part fill only when more is filled than last time. Records older than 7 days are pruned
-  at start-up and when the window closes.
+  it is queued. A reconnect, a restart, a replay, the order book after a pause, or the same update
+  from both the order stream and a webhook finds the claim and stays silent. Nothing is sent for an
+  order after its final state, and a part fill only when more is filled than last time. Records
+  older than 7 days are pruned at start-up and when the window closes.
+- **If the record fails** (a full disk, a state directory that cannot be written): the service
+  goes on with a bounded copy in memory, one ERROR line says why, and alerts are still sent;
+  repeats are held back for the rest of the run, only a restart might repeat earlier ones.
 - **Reconnects.** Backoff with jitter, 2 s doubling to 60 s, reset only after a connection stayed
   up 60 s; a refused key waits 60 s and is read again.
 - **Pace.** At least 1.1 s between messages and at most 20 a minute (Telegram asks for about one a
   second per chat; OpenAlgo allows `/notify` 30 times a minute). A message waits 0.3 s after the
   first alert of a burst, so the burst goes out as one.
-- **Delivery.** OpenAlgo is asked to wait for Telegram's answer. A message Telegram did not confirm
-  is tried up to 3 times; if OpenAlgo's wait had timed out after Telegram had in fact delivered,
-  the owner may see it twice (rare). When OpenAlgo cannot be reached, messages are retried for up
-  to 30 minutes, then dropped with a line in the journal. Telegram bot stopped, or the owner's
-  account not linked to a chat: dropped, with one line in the journal every 10 minutes.
+- **Delivery.** OpenAlgo is asked to wait for Telegram's answer. Its "queued for delivery" answer
+  means Telegram did not take the message (nothing in OpenAlgo sends that queue later), so it is
+  tried up to 3 times; any other success counts as delivered. If OpenAlgo's wait had timed out
+  after Telegram had in fact delivered, the owner may see it twice (rare). When OpenAlgo cannot be
+  reached, messages are retried for up to 30 minutes, then dropped with a line in the journal.
+  Telegram bot stopped, or the owner's account not linked to a chat: dropped, with one line in the
+  journal every 10 minutes.
 - **Bounded.** At most 300 orders wait to be sent (beyond that the oldest are dropped and the next
   message says how many could not be listed), at most 200 stop orders wait out the trigger check,
   one proxy message is at most 1 MiB and at most 64 wait to be read. Memory limit 256 MB.
 - **On stop** (SIGTERM, a deploy): the stream closes cleanly within a second, waiting alerts get
   5 s to go out. A crash loses only alerts that were waiting to be sent (claimed, so never sent
-  twice); normally that is less than a second's worth.
+  twice); normally that is less than a second's worth. The next start reads the order book.
 
 ## On the server
 
@@ -202,8 +257,13 @@ and one per alert (`order <id>: filled`); repeated problems at most once per 5 o
 - **`No OpenAlgo API key yet`**: generate one in OpenAlgo; the service picks it up within a minute.
 - **`OpenAlgo's WebSocket proxy refused the API key`**: the key was regenerated; it is read again.
 - **`OpenAlgo's WebSocket proxy is not reachable`**: OpenAlgo is starting or stopped; it retries.
+- **`The API key is not sent ...: port ... is held by another user's program`**: something other
+  than OpenAlgo listens on OpenAlgo's port. Find it with `sudo ss -ltnp`.
 - **`No Telegram message: OpenAlgo's Telegram bot is stopped`** or **`... not linked`**: start
   the bot or link the owner's account on OpenAlgo's Telegram Bot page.
+- **`The order book could not be read after the pause`**: OpenAlgo had no working Upstox login, or
+  was busy; a pause longer than 10 s is then told to the owner as not checked.
+- **`The alert record ... cannot be used`**: the state directory or the disk; alerts still go out.
 - **`The OpenAlgo API key cannot be decrypted ...`**: OpenAlgo's pepper or salt changed (for
   example `upgrade/rotate_pepper.py`); restart the service.
 - **No alerts while connected**: `/websocket/order` in OpenAlgo shows the same stream; if it is
@@ -216,12 +276,16 @@ and one per alert (`order <id>: filled`); repeated problems at most once per 5 o
   modify or cancel of one; the 3 s rule is built on OpenAlgo's mapping of those statuses.
 - How a broker square-off appears (expected: a new MIS order filled near the square-off time).
 - Upstox's rejection wording, shown verbatim after "Broker says:".
-- That Upstox replays nothing when OpenAlgo's order adapter reconnects (a replay would be silent
-  for orders already told, but orders that ended while nothing was connected would be told late).
+- The order book and trade book after a pause, against a real account (the fields are read from
+  OpenAlgo's code and its tests, not seen live).
+- A "trigger pending" that arrived again after the order had left it (a duplicate from a webhook,
+  out of order) would start a new episode, and a second trigger line could follow.
 
 ## Tests
 
-`uv run pytest -q sudarshan/alerts` (no network: a fake WebSocket proxy and a fake `/notify` on
-127.0.0.1, an openalgo.db written with OpenAlgo's own models, and one run of the real entry point
-as a child process). The unit is checked against the deploy tool's own `unit_ok` policy and with
-`systemd-analyze verify` when it is installed.
+`uv run pytest -q sudarshan/alerts` (no network: a fake WebSocket proxy and a fake OpenAlgo on
+127.0.0.1, an openalgo.db written with OpenAlgo's own models, and runs of the real entry point as a
+child process). Contract tests read OpenAlgo's own sources for every behaviour the fakes assume
+(the proxy's sign-in and subscription, the Telegram answers, the order stream's statuses, the
+books' sandbox marker), so an upstream change fails a test. The unit is checked against the deploy
+tool's own `unit_ok` policy and with `systemd-analyze verify` when it is installed.
