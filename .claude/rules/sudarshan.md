@@ -28,6 +28,15 @@ members, tokens, keys, `.env` content, logs or the private specs. The specs — 
    first_seen / last_seen / exited / pinned) and raise alerts.
 6. Colour-code everything useful; **never colour-only** (always an icon, label or sign too).
    Readable on a phone in outdoor sunlight.
+7. **Real-time everywhere, tick by tick** (owner, 20 Oct 2026: "without it SUDARSHAN is of no
+   use").
+   - What updates live: every price, P&L, position, holding value, order and trade status,
+     watchlist, screener result and alert, from the live feed as ticks or events arrive.
+   - Timed polling of market data is not acceptable. REST is only for the first snapshot, a
+     periodic re-sync and data that is not market data.
+   - When a screen cannot be live (market closed, feed down, no broker login), it says so with a
+     stale or closed marker and a label. It never shows old numbers as current.
+   - New SUDARSHAN features are built live from day one.
 
 ## Design tokens: the D look (light only; text tokens ≥ 4.5:1 on the #F4F6F8 page)
 Source of truth: `frontend/src/sudarshan/theme.css`; `theme.test.ts` checks every value below.
@@ -78,8 +87,14 @@ in brand. Icon "Mor": tile #0E5A73, ring #E3A21A, glyph #FFFFFF. Numbers via
 - **Never run `install/update.sh`** (it stashes local changes and pulls upstream main) and never use
   GitHub's "Sync fork". Upgrades = rebase `sudarshan` on a tested upstream commit, then
   `upgrade/migrate_all.py`.
-- One Upstox WebSocket only for SUDARSHAN services (Basic tier: 2 per user and TRINETRA holds one;
-  Plus tier: 5). The feed service subscribes once and fans out; nothing else opens a socket.
+- Upstox WebSocket budget. The owner is on **Plus: 5 connections per user**. Stale sockets count
+  until they time out.
+  - TRINETRA: 1 (Analytics Token).
+  - `sudarshan-feed`: 1 (Analytics Token). It subscribes once and fans out to every ring service;
+    ring services never open their own socket.
+  - OpenAlgo's own WebSocket proxy (daily access token): at most 2. The owner's live screens,
+    /trading and the tools share one pooled connection per user.
+  - Always keep one slot free for reconnects.
 - Feature flags default **OFF**; order-path changes ship behind a flag and pass Analyzer-mode tests.
 - Family layer: every write namespace, admin route and bot command must return 401/403 for a viewer
   session (automated test). The family data plane runs on the read-only Analytics Token only.
