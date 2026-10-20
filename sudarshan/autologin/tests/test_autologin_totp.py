@@ -96,6 +96,42 @@ def test_normalize_rejects(raw):
         normalize_secret(raw)
 
 
+QR = f"otpauth://totp/Upstox:OWNER?secret={FAKE_TOTP_SECRET}&issuer=Upstox"
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        QR,
+        f"  {QR}\n",
+        QR.replace("otpauth://totp", "OTPAUTH://TOTP"),
+        QR + "&algorithm=SHA1&digits=6&period=30",
+        QR.replace(FAKE_TOTP_SECRET, FAKE_TOTP_SECRET.lower()),
+        f"otpauth://totp/Upstox?issuer=Upstox&secret={FAKE_TOTP_SECRET}",
+    ],
+)
+def test_normalize_takes_the_key_out_of_the_qr_text(raw):
+    """Upstox shows a QR code; the text a phone camera copies from it is accepted whole."""
+    assert normalize_secret(raw) == FAKE_TOTP_SECRET
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        QR + "&algorithm=SHA256",
+        QR + "&digits=8",
+        QR + "&period=60",
+        "otpauth://totp/Upstox:OWNER?issuer=Upstox",  # no key
+        QR.replace("otpauth://totp", "otpauth://hotp"),
+        QR.replace(FAKE_TOTP_SECRET, "SHORT"),
+        "otpauth-migration://offline?data=abc",  # an authenticator export, not an account
+    ],
+)
+def test_normalize_refuses_qr_text_it_cannot_use(raw):
+    with pytest.raises(InvalidSecret):
+        normalize_secret(raw)
+
+
 def test_normalized_secret_produces_the_same_code():
     spaced = normalize_secret("gezd gnbv gy3t qojq gezd gnbv gy3t qojq")
     assert totp(spaced, 1111111109) == totp(FAKE_TOTP_SECRET, 1111111109)

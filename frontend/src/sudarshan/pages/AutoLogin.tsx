@@ -59,9 +59,37 @@ const UP = 'text-[color:var(--up)]'
 const DOWN = 'text-[color:var(--down)]'
 const WARNING = 'text-[color:var(--warning-text)]'
 
-/** The key as the server stores it: no spaces, upper case, no trailing padding. */
+/**
+ * The key as the server stores it: no spaces, upper case, no trailing padding.
+ *
+ * Upstox shows TOTP setup as a QR code, and a phone camera copies that code's text
+ * (`otpauth://totp/...?secret=...`), so the whole text is accepted too and the key is taken out
+ * of it, exactly as the server does. Only a standard code (SHA1, 6 digits, 30 s) qualifies;
+ * anything else gives '' (not a key).
+ */
 export function normalizeTotpKey(raw: string): string {
+  const text = raw.trim()
+  if (/^otpauth:/i.test(text)) return keyFromQrText(text)
   return raw.replace(/\s+/g, '').toUpperCase().replace(/=+$/, '')
+}
+
+function keyFromQrText(text: string): string {
+  let link: URL
+  try {
+    link = new URL(text)
+  } catch {
+    return ''
+  }
+  if (link.protocol.toLowerCase() !== 'otpauth:' || link.hostname.toLowerCase() !== 'totp') {
+    return ''
+  }
+  const params = new Map<string, string>()
+  link.searchParams.forEach((value, key) => params.set(key.toLowerCase(), value))
+  if ((params.get('algorithm') ?? 'SHA1').toUpperCase() !== 'SHA1') return ''
+  if ((params.get('digits') ?? '6') !== '6') return ''
+  if ((params.get('period') ?? '30') !== '30') return ''
+  const secret = params.get('secret') ?? ''
+  return secret.replace(/\s+/g, '').toUpperCase().replace(/=+$/, '')
 }
 
 const shortTime = new Intl.DateTimeFormat('en-IN', {
@@ -494,7 +522,7 @@ export default function AutoLogin() {
                       id="autologin-totp-key"
                       type="text"
                       className={`h-12 pr-14 text-base ${showKey ? '' : MASKED}`}
-                      placeholder="Paste the key from the Upstox app"
+                      placeholder="Paste the key, or the QR code's text"
                       value={totpKey}
                       onChange={(event) => setTotpKey(event.target.value)}
                       onKeyDown={saveOnEnter}
@@ -522,8 +550,8 @@ export default function AutoLogin() {
                     aria-live="polite"
                   >
                     {keyProblem
-                      ? '16 to 64 characters: letters A to Z and digits 2 to 7. Spaces are fine.'
-                      : 'Letters A to Z and digits 2 to 7, as the Upstox app shows it.'}
+                      ? 'This is not a TOTP key. Paste the key (16 to 64 letters A to Z and digits 2 to 7; spaces are fine) or the whole text of the Upstox QR code.'
+                      : 'The key (letters A to Z and digits 2 to 7), or the whole text a phone camera copies from the Upstox QR code.'}
                   </p>
                 </div>
 
@@ -581,19 +609,34 @@ export default function AutoLogin() {
             <CardContent className="space-y-3 text-sm">
               <ol className="list-decimal space-y-2 pl-5">
                 <li>
-                  In the Upstox app open Profile (Account settings) &gt; Security (2FA) &gt; TOTP.
+                  On a laptop open account.upstox.com &gt; Profile &gt; Time-based OTP (TOTP) &gt;
+                  Enable TOTP, and enter the SMS OTP. A QR code appears. (In the Upstox app: Upstox
+                  icon &gt; My account &gt; Profile &gt; Time-based OTP (TOTP).) If TOTP is already
+                  on, reset it there to get a new QR code.
                 </li>
                 <li>
-                  Copy the key shown with the QR code and paste it above. If TOTP is already on with
-                  an authenticator app, the key may need to be re-generated there; add the new key
-                  to your authenticator app as well.
+                  Scan that QR code with your phone's authenticator app, such as Google
+                  Authenticator. Upstox still lets you log in with the SMS OTP too.
                 </li>
-                <li>Then press Test now once to check everything works.</li>
+                <li>
+                  For this page: if Upstox shows a key under the QR code, paste the key above. If
+                  not, point the phone camera at the same QR code, copy the text it shows (it starts
+                  with otpauth://) and paste the whole text above. Do not keep that text anywhere
+                  else.
+                </li>
+                <li>
+                  Finish on Upstox: type the 6-digit code from the authenticator app and press
+                  Enable TOTP.
+                </li>
+                <li>Enter your 6-digit Upstox PIN, Save, then press Test now once.</li>
               </ol>
               <p lang="gu">
-                Upstox app માં Profile (Account settings) &gt; Security (2FA) &gt; TOTP ખોલો અને ત્યાં
-                બતાવેલી TOTP key અહીં paste કરો. જો TOTP પહેલેથી authenticator app સાથે ચાલુ હોય, તો key
-                ત્યાં ફરીથી generate કરવી પડી શકે.
+                Laptop પર account.upstox.com &gt; Profile &gt; Time-based OTP (TOTP) &gt; Enable
+                TOTP ખોલો અને SMS OTP નાખો; QR code દેખાશે. એ QR ને phone ના authenticator app (Google
+                Authenticator) થી scan કરો. QR ની નીચે key દેખાય તો એ key અહીં paste કરો; ન દેખાય તો
+                phone ના camera થી એ જ QR scan કરી, દેખાતું લખાણ (otpauth:// થી શરૂ થતું) આખું copy કરી અહીં
+                paste કરો. પછી Upstox પર authenticator નો 6 આંકડાનો code નાખી Enable TOTP દબાવો. છેલ્લે
+                તમારો 6 આંકડાનો Upstox PIN નાખી Save અને એક વાર Test now.
               </p>
             </CardContent>
           </Card>

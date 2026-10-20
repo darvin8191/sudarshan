@@ -95,12 +95,18 @@ describe('Auto login page', () => {
   it('explains where the TOTP key is, in English and in Gujarati', async () => {
     const { container } = renderPage()
     await screen.findByRole('heading', { name: /Auto login/ })
+    // The path Upstox's own help pages give (help-center articles 260343 and 260346).
     expect(
-      screen.getByText(/Profile \(Account settings\) > Security \(2FA\) > TOTP\./)
+      screen.getByText(
+        /On a laptop open account\.upstox\.com > Profile > Time-based OTP \(TOTP\) >/
+      )
     ).toBeInTheDocument()
-    expect(screen.getByText(/re-generated there/)).toBeInTheDocument()
+    expect(
+      screen.getByText(/copy the text it shows \(it starts\s+with otpauth:\/\/\)/)
+    ).toBeInTheDocument()
     const gujarati = container.querySelector('[lang="gu"]')
-    expect(gujarati?.textContent).toContain('TOTP key')
+    expect(gujarati?.textContent).toContain('Time-based OTP (TOTP)')
+    expect(gujarati?.textContent).toContain('otpauth://')
     expect(gujarati?.textContent).toMatch(/[\u0A80-\u0AFF]/) // Gujarati script
   })
 
@@ -150,7 +156,17 @@ describe('Auto login page', () => {
       target: { value: 'not-a-key-1890' },
     })
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
-    expect(screen.getByText(/16 to 64 characters/)).toBeInTheDocument()
+    expect(screen.getByText(/This is not a TOTP key/)).toBeInTheDocument()
+  })
+
+  it('accepts the text of the Upstox QR code and saves only the key in it', async () => {
+    renderPage()
+    const key = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ' // pragma: allowlist secret
+    fireEvent.change(await screen.findByLabelText('TOTP key'), {
+      target: { value: `otpauth://totp/Upstox:OWNER?secret=${key}&issuer=Upstox` },
+    })
+    expect(screen.queryByText(/This is not a TOTP key/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled()
   })
 
   it('saves with Enter, as a form would', async () => {
@@ -336,5 +352,30 @@ describe('Auto login page', () => {
 describe('normalizeTotpKey', () => {
   it('drops spaces and padding and upper-cases, as the server does', () => {
     expect(normalizeTotpKey(' gezd gnbv\ngy3t qojq== ')).toBe('GEZDGNBVGY3TQOJQ')
+  })
+
+  const KEY = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ' // pragma: allowlist secret
+  const QR = `otpauth://totp/Upstox:OWNER?secret=${KEY}&issuer=Upstox`
+
+  it.each([
+    QR,
+    `  ${QR}\n`,
+    QR.replace('otpauth://totp', 'OTPAUTH://TOTP'),
+    `${QR}&algorithm=SHA1&digits=6&period=30`,
+    QR.replace(KEY, KEY.toLowerCase()),
+    `otpauth://totp/Upstox?issuer=Upstox&secret=${KEY}`,
+  ])('takes the key out of the QR code text %#', (raw) => {
+    expect(normalizeTotpKey(raw)).toBe(KEY)
+  })
+
+  it.each([
+    `${QR}&algorithm=SHA256`,
+    `${QR}&digits=8`,
+    `${QR}&period=60`,
+    'otpauth://totp/Upstox:OWNER?issuer=Upstox',
+    QR.replace('otpauth://totp', 'otpauth://hotp'),
+    'otpauth://',
+  ])('gives no key for QR text it cannot use %#', (raw) => {
+    expect(normalizeTotpKey(raw)).toBe('')
   })
 })

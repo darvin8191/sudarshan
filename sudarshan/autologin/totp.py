@@ -7,6 +7,7 @@ import binascii
 import hashlib
 import hmac
 import re
+from urllib.parse import parse_qs, urlsplit
 
 STEP_S = 30
 DIGITS = 6
@@ -19,14 +20,45 @@ class InvalidSecret(ValueError):
     """Not a base32 TOTP key of an acceptable length."""
 
 
+def _secret_from_qr_text(raw: str) -> str:
+    """The key inside an authenticator QR code's text (``otpauth://totp/...?secret=...``).
+
+    Upstox shows TOTP setup as a QR code; a phone camera can copy the QR's text, so the owner may
+    paste that whole text instead of the bare key. Only a standard code is accepted (SHA1, 6
+    digits, 30 s), because that is the only kind ``totp`` computes.
+
+    Raises:
+        InvalidSecret: not a TOTP link, no key in it, or a non-standard code.
+    """
+    link = urlsplit(raw.strip())
+    if link.scheme.lower() != "otpauth" or link.netloc.lower() != "totp":
+        raise InvalidSecret("not a TOTP link")
+    params = {key.lower(): values[-1] for key, values in parse_qs(link.query).items()}
+    if params.get("algorithm", "SHA1").upper() != "SHA1":
+        raise InvalidSecret("not SHA1")
+    if params.get("digits", str(DIGITS)) != str(DIGITS):
+        raise InvalidSecret("not 6 digits")
+    if params.get("period", str(STEP_S)) != str(STEP_S):
+        raise InvalidSecret("not 30 seconds")
+    secret = params.get("secret", "")
+    if not secret:
+        raise InvalidSecret("no key in the link")
+    return secret
+
+
 def normalize_secret(raw: str) -> str:
     """The canonical form of a TOTP key as typed or pasted: no whitespace, upper case, no padding.
+
+    The whole text of an authenticator QR code (``otpauth://totp/...``) is accepted too; its key
+    is taken out of it.
 
     Raises:
         InvalidSecret: not 16-64 base32 characters (A-Z, 2-7), or not decodable.
     """
     if not isinstance(raw, str):
         raise InvalidSecret("not text")
+    if raw.strip().lower().startswith("otpauth:"):
+        raw = _secret_from_qr_text(raw)
     secret = re.sub(r"\s+", "", raw).upper().rstrip("=")
     if not MIN_SECRET_LEN <= len(secret) <= MAX_SECRET_LEN:
         raise InvalidSecret("wrong length")
