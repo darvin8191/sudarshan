@@ -18,18 +18,21 @@ from typing import Any
 
 import pytest
 
-# The proxy package imports every broker adapter when it loads, so it has to load before any
-# adapter module does, or the adapter's own import of it is circular.
-import websocket_proxy  # noqa: F401
-from websocket_proxy import broker_factory, connection_manager
+# upstox_fakes loads the proxy package before any adapter module, as it has to (see there).
+from upstox_fakes import ClientSocket as _ClientSocket
+from upstox_fakes import UpstoxServer as _UpstoxServer
+from upstox_fakes import build_adapter, map_symbols
+from upstox_fakes import connected_client as _connected_client
+from upstox_fakes import lingering_proxy as _lingering_proxy
+from upstox_fakes import pool_around as _pool
+from upstox_fakes import pooled as _pooled
+
 from websocket_proxy import server as proxy_server
 from websocket_proxy.base_adapter import BaseBrokerWebSocketAdapter
-from websocket_proxy.connection_manager import ConnectionPool
 from websocket_proxy.server import WebSocketProxy
 
 # isort: split
 from broker.upstox.streaming import MarketDataFeedV3_pb2 as pb
-from broker.upstox.streaming import upstox_adapter
 from broker.upstox.streaming.upstox_adapter import UpstoxWebSocketAdapter
 from broker.upstox.streaming.upstox_client import UpstoxWebSocketClient
 
@@ -247,64 +250,6 @@ SBIN_FROM_LTPC = _base(SBIN) | {
 # --------------------------------------------------------------------------------------------
 
 
-class _NoZmq:
-    """Stands in for the shared publisher, so building an adapter opens no ZeroMQ socket."""
-
-    socket = None
-    zmq_port = 0
-    context = None
-
-
-class _UpstoxServer:
-    """Upstox's end of one market-data socket, written to by the real client.
-
-    Applies each request as Upstox does: `sub` streams its keys in its mode (a key
-    already streamed moves to it), `change_mode` moves keys already streamed, `unsub`
-    stops them. `held` is what Upstox is sending: instrument key -> mode.
-    """
-
-    def __init__(self) -> None:
-        self.held: dict[str, str] = {}
-        self.sent: list[tuple[str, list[str], str | None]] = []
-
-    def send(self, data: bytes, opcode: int | None = None) -> None:
-        request = json.loads(data)
-        method, keys = request["method"], request["data"]["instrumentKeys"]
-        mode = request["data"].get("mode")
-        self.sent.append((method, list(keys), mode))
-        for key in keys:
-            if method == "sub" or (method == "change_mode" and key in self.held):
-                self.held[key] = mode
-            elif method == "unsub":
-                self.held.pop(key, None)
-
-    @property
-    def unsubscribed(self) -> list[list[str]]:
-        return [keys for method, keys, _mode in self.sent if method == "unsub"]
-
-    def close(self) -> None:
-        pass
-
-
-class _SocketThread:
-    """Stands in for the client's socket thread: alive until a test ends it."""
-
-    def __init__(self) -> None:
-        self.alive = True
-
-    def is_alive(self) -> bool:
-        return self.alive
-
-
-def _connected_client() -> UpstoxWebSocketClient:
-    """The production client, its socket replaced by _UpstoxServer."""
-    client = UpstoxWebSocketClient("not-a-real-token")
-    client.ws = _UpstoxServer()
-    client._connected = client.running = True
-    client._ws_thread = _SocketThread()
-    return client
-
-
 def _canon(payload: dict[str, Any]) -> str:
     """Canonical JSON: key order ignored, types and values exact, NaN refused."""
     return json.dumps(payload, sort_keys=True, allow_nan=False)
@@ -314,35 +259,14 @@ def _canon(payload: dict[str, Any]) -> str:
 def make_adapter(monkeypatch):
     """Build real UpstoxWebSocketAdapters: no ZeroMQ, no Upstox, no database."""
     instances = BaseBrokerWebSocketAdapter._instance_count
-    monkeypatch.setattr(
-        upstox_adapter.SymbolMapper,
-        "get_token_from_symbol",
-        staticmethod(
-            lambda symbol, exchange: {
-                "token": _KEYS[(symbol, exchange)],
-                "brexchange": _KEYS[(symbol, exchange)].split("|")[0],
-            }
-        ),
-    )
+    map_symbols(monkeypatch, _KEYS)
 
     def build() -> UpstoxWebSocketAdapter:
-        context = connection_manager._pooled_creation_context
-        context.active, context.shared_publisher = True, _NoZmq()
-        try:
-            adapter = UpstoxWebSocketAdapter()
-        finally:
-            context.active, context.shared_publisher = False, None
-        adapter.published = []
-        adapter.publish_market_data = lambda topic, data: adapter.published.append((topic, data))
+        adapter = build_adapter()
         # The production client decodes the frames, and another one, its socket
-        # replaced by _UpstoxServer (adapter.upstox), sends the requests.
+        # replaced by an UpstoxServer (adapter.upstox), sends the requests.
         adapter.decoder = UpstoxWebSocketClient("not-a-real-token")
         adapter.decoder.callbacks["on_message"] = adapter._on_market_data
-        adapter.ws_client = _connected_client()
-        adapter.upstox = adapter.ws_client.ws
-        # Send batched subscribes at once instead of on a 0.5 s timer thread.
-        adapter._start_batch_timer = adapter._process_batch_subscriptions
-        adapter.connected = True
         return adapter
 
     yield build
@@ -627,30 +551,6 @@ def test_no_published_number_is_nan_or_infinity(make_adapter) -> None:
 # --------------------------------------------------------------------------------------------
 # Mode coverage through the proxy's connection pool
 # --------------------------------------------------------------------------------------------
-
-
-def _pool(adapter: UpstoxWebSocketAdapter) -> ConnectionPool:
-    """A ConnectionPool around one adapter, built without a ZeroMQ publisher."""
-    pool = ConnectionPool.__new__(ConnectionPool)
-    pool.lock = threading.RLock()
-    pool.logger = logging.getLogger("test.sudarshan.pool")
-    pool.broker_name, pool.user_id = "upstox", "owner"
-    pool.adapters, pool.adapter_symbol_counts = [adapter], [0]
-    pool.max_symbols, pool.max_connections = 1000, 2
-    pool.subscription_map, pool.subscription_depths = {}, {}
-    pool.peak_total_symbols, pool.peak_connections_used, pool.peak_symbol_counts = 0, 0, []
-    pool.initialized = pool.connected = True
-    return pool
-
-
-class _ClientSocket:
-    """A browser's WebSocket as the proxy sees it."""
-
-    def __init__(self) -> None:
-        self.sent: list[dict[str, Any]] = []
-
-    async def send(self, text: str) -> None:
-        self.sent.append(json.loads(text))
 
 
 class _OneShotSub:
@@ -1076,39 +976,6 @@ def test_the_last_mode_leaving_releases_the_key_and_its_carry_forward(make_adapt
 # --------------------------------------------------------------------------------------------
 # The broker linger over the real pool and adapter
 # --------------------------------------------------------------------------------------------
-
-
-class _HeldSleep:
-    """The linger's sleep, held until the test lets it run out."""
-
-    def __init__(self) -> None:
-        self.gates: list[asyncio.Event] = []
-
-    async def __call__(self, _seconds: float) -> None:
-        gate = asyncio.Event()
-        self.gates.append(gate)
-        await gate.wait()
-
-
-def _lingering_proxy(monkeypatch, wrapper) -> WebSocketProxy:
-    """A proxy built without __init__, whose broker adapter is `wrapper`, lingering 300 s."""
-    monkeypatch.setattr(proxy_server, "verify_api_key", lambda _key: "owner")
-    monkeypatch.setattr(proxy_server, "get_broker_name", lambda _key: "upstox")
-    monkeypatch.setattr(proxy_server, "create_broker_adapter", lambda _broker: wrapper)
-    proxy = WebSocketProxy.__new__(WebSocketProxy)
-    proxy.clients, proxy.subscriptions, proxy.user_mapping = {}, {}, {}
-    proxy.user_broker_mapping, proxy.broker_adapters = {}, {}
-    proxy.subscription_index = defaultdict(set)
-    proxy.order_subscribers = defaultdict(set)
-    proxy.broker_linger_seconds = 300.0
-    proxy._linger_sleep = _HeldSleep()
-    return proxy
-
-
-def _pooled(adapter: UpstoxWebSocketAdapter):
-    wrapper = broker_factory._PooledAdapterWrapper(UpstoxWebSocketAdapter, "upstox")
-    wrapper._pool, wrapper._user_id = _pool(adapter), "owner"
-    return wrapper
 
 
 async def _screen(proxy: WebSocketProxy, client_id: int, mode: str) -> None:
