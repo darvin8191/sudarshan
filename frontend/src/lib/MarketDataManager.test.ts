@@ -221,3 +221,84 @@ describe('MarketDataManager keeps the whole tick', () => {
     expect(manager.getCachedData('NIFTY27OCT2625100CE', 'NFO')?.data.greeks).toBeUndefined()
   })
 })
+
+// SUDARSHAN (M11.3): every release names its exact mode, so the proxy frees what
+// this screen held. Without a mode it frees Quote, whatever was subscribed.
+describe('MarketDataManager releases the exact mode it subscribed', () => {
+  interface SocketHarness {
+    socket: { readyState: number; send: (text: string) => void } | null
+    connectionState: string
+  }
+
+  function attach(manager: MarketDataManager): Array<Record<string, unknown>> {
+    const sent: Array<Record<string, unknown>> = []
+    const harness = manager as unknown as SocketHarness
+    harness.socket = {
+      readyState: WebSocket.OPEN,
+      send: (text: string) => sent.push(JSON.parse(text)),
+    }
+    harness.connectionState = 'authenticated'
+    return sent
+  }
+
+  afterEach(() => {
+    const harness = MarketDataManager.getInstance() as unknown as SocketHarness
+    harness.socket = null
+    MarketDataManager.resetInstance()
+  })
+
+  const release = (symbol: string, exchange: string, mode: string) => ({
+    action: 'unsubscribe',
+    symbols: [{ symbol, exchange }],
+    mode,
+  })
+
+  it('releases LTP as LTP', () => {
+    const manager = MarketDataManager.getInstance()
+    const sent = attach(manager)
+    const off = manager.subscribe('NIFTY', 'NSE_INDEX', 'LTP', () => {})
+    off()
+
+    expect(sent).toEqual([
+      { action: 'subscribe', symbols: [{ symbol: 'NIFTY', exchange: 'NSE_INDEX' }], mode: 'LTP' },
+      release('NIFTY', 'NSE_INDEX', 'LTP'),
+    ])
+  })
+
+  it('releases Depth as Depth', () => {
+    const manager = MarketDataManager.getInstance()
+    const sent = attach(manager)
+    const off = manager.subscribe('NIFTY27OCT2625100CE', 'NFO', 'Depth', () => {})
+    off()
+
+    expect(sent[1]).toEqual(release('NIFTY27OCT2625100CE', 'NFO', 'Depth'))
+  })
+
+  it('releases Depth while LTP of the same symbol stays, and keeps its data', () => {
+    const manager = MarketDataManager.getInstance()
+    const sent = attach(manager)
+    const offLtp = manager.subscribe('SBIN', 'NSE', 'LTP', () => {})
+    const offDepth = manager.subscribe('SBIN', 'NSE', 'Depth', () => {})
+
+    offDepth()
+    expect(sent).toHaveLength(3)
+    expect(sent[2]).toEqual(release('SBIN', 'NSE', 'Depth'))
+    expect(manager.getCachedData('SBIN', 'NSE')).toBeDefined()
+
+    offLtp()
+    expect(sent[3]).toEqual(release('SBIN', 'NSE', 'LTP'))
+    expect(manager.getCachedData('SBIN', 'NSE')).toBeUndefined()
+  })
+
+  it('releases a mode only when its last consumer leaves', () => {
+    const manager = MarketDataManager.getInstance()
+    const sent = attach(manager)
+    const first = manager.subscribe('SBIN', 'NSE', 'Quote', () => {})
+    const second = manager.subscribe('SBIN', 'NSE', 'Quote', () => {})
+
+    first()
+    expect(sent).toHaveLength(1)
+    second()
+    expect(sent[1]).toEqual(release('SBIN', 'NSE', 'Quote'))
+  })
+})

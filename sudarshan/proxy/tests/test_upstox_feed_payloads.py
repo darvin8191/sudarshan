@@ -1073,3 +1073,30 @@ def test_a_screen_coming_back_reuses_a_lingering_socket_only_while_its_feed_live
             assert not adapter.ws_client.running  # the old socket was closed
 
     asyncio.run(scenario())
+
+
+def test_an_unsubscribe_naming_its_mode_releases_it_at_upstox(make_adapter, monkeypatch) -> None:
+    """The proxy reads an unsubscribe without a mode as Quote, so the frame MarketDataManager
+    sent before M2 released nothing it held. The frame it sends now names the mode."""
+    adapter = make_adapter()
+    proxy = _lingering_proxy(monkeypatch, _pooled(adapter))
+    symbol, exchange, key = SBIN
+
+    async def scenario() -> None:
+        proxy.clients[1] = browser = _ClientSocket()
+        proxy.subscriptions[1] = set()
+        await proxy.authenticate_client(1, {"api_key": "k"})
+        held = {"symbol": symbol, "exchange": exchange}
+        await proxy.subscribe_client(1, {"symbols": [held], "mode": "LTP"})
+
+        await proxy.unsubscribe_client(1, {"action": "unsubscribe", "symbols": [held]})
+        assert browser.sent[-1]["successful"][0]["mode"] == "Quote"  # not what it held
+        assert adapter.upstox.held == {key: "ltpc"}
+
+        request = {"action": "unsubscribe", "symbols": [held], "mode": "LTP"}
+        await proxy.unsubscribe_client(1, request)
+        assert browser.sent[-1]["successful"][0]["mode"] == "LTP"
+        assert (symbol, exchange, 1) not in proxy.subscription_index
+        assert adapter.upstox.held == {}
+
+    asyncio.run(scenario())

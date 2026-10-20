@@ -331,11 +331,14 @@ export class MarketDataManager {
         // Clean up cache
         const dataKey = `${exchange}:${symbol}`
         this.dataCache.delete(dataKey)
+      }
 
-        // Send unsubscribe if connected
-        if (this.connectionState === 'authenticated') {
-          this.sendUnsubscribe([{ symbol, exchange }])
-        }
+      // SUDARSHAN (M11.3): release this exact mode on the server, whatever other
+      // mode of the symbol stays. The proxy reads an unsubscribe without a mode as
+      // Quote, so LTP and Depth were never released, and a Depth leaving while LTP
+      // stayed sent nothing at all.
+      if (this.connectionState === 'authenticated') {
+        this.sendUnsubscribe([{ symbol, exchange }], mode)
       }
 
       // Stop fallback polling if no more subscriptions
@@ -734,13 +737,17 @@ export class MarketDataManager {
     )
   }
 
-  private sendUnsubscribe(symbols: Array<{ symbol: string; exchange: string }>): void {
+  private sendUnsubscribe(
+    symbols: Array<{ symbol: string; exchange: string }>,
+    mode: SubscriptionMode // SUDARSHAN (M11.3): always the exact mode
+  ): void {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return
 
     this.socket.send(
       JSON.stringify({
         action: 'unsubscribe',
         symbols,
+        mode,
       })
     )
   }
