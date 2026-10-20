@@ -79,16 +79,20 @@ export function Navbar({ fluid = false }: NavbarProps = {}) {
   const moreActive = overflowItems.some((item) => isActive(item.href))
 
   return (
-    <nav className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+    // SUDARSHAN: the D app bar, white and solid (no blur over a tinted page).
+    <nav className="sticky top-0 z-50 w-full border-b bg-card">
       <div
         data-testid="navbar-row"
-        className={cn('px-4 flex h-14 items-center', fluid ? 'w-full' : 'container mx-auto')}
+        className={cn(
+          'flex h-16 items-center pl-1 pr-1 md:px-4',
+          fluid ? 'w-full' : 'container mx-auto'
+        )}
       >
         {/* Mobile Menu */}
         <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
           <SheetTrigger asChild className="md:hidden">
-            <Button variant="ghost" size="icon" className="mr-2 min-h-[44px] min-w-[44px]">
-              <Menu className="h-5 w-5" />
+            <Button variant="ghost" size="icon" className="size-12 shrink-0 rounded-full">
+              <Menu className="size-6" />
               <span className="sr-only">Toggle menu</span>
             </Button>
           </SheetTrigger>
@@ -189,7 +193,10 @@ export function Navbar({ fluid = false }: NavbarProps = {}) {
         </Sheet>
 
         {/* Wordmark: both scripts at every width (owner rule 2). */}
-        <Link to="/dashboard" className="flex shrink-0 items-center mr-2 md:mr-6">
+        <Link
+          to="/dashboard"
+          className="ml-1 mr-2 flex shrink-0 items-center rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring md:ml-0 md:mr-6"
+        >
           <BrandLockup />
         </Link>
 
@@ -280,7 +287,7 @@ export function Navbar({ fluid = false }: NavbarProps = {}) {
         </nav>
 
         {/* Right Side: shared with the charting terminal's toolbar row. */}
-        <div className="ml-auto flex items-center gap-1 2xl:gap-2">
+        <div className="ml-auto flex shrink-0 items-center md:gap-1 2xl:gap-2">
           <AccountControls />
         </div>
       </div>

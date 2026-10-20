@@ -28,7 +28,9 @@ export function Layout() {
           <AnalyzeBanner />
           <Navbar />
         </div>
-        <main className="container mx-auto px-4 py-6 pb-24 md:pb-6 flex-1">
+        {/* SUDARSHAN: on a phone the page starts closer to the bar (D), and
+            ends clear of the 76px bottom bar and any gesture-bar inset. */}
+        <main className="container mx-auto flex-1 px-4 pt-4 pb-[calc(6rem+env(safe-area-inset-bottom))] md:py-6">
           <Outlet />
         </main>
         <Footer className="hidden md:block" />

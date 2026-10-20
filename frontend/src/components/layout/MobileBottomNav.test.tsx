@@ -77,6 +77,21 @@ describe('MobileBottomNav', () => {
       const positionsLink = screen.getByRole('link', { name: /positions/i })
       expect(positionsLink).toHaveClass('text-muted-foreground')
     })
+
+    it('marks the current page by more than colour: a tinted pill and a bold label', () => {
+      renderWithRouter('/orderbook')
+
+      const current = screen.getByRole('link', { name: /orderbook/i })
+      const other = screen.getByRole('link', { name: /dashboard/i })
+      expect(current).toHaveClass('font-bold')
+      expect(other).not.toHaveClass('font-bold')
+      expect(current.querySelector('[aria-hidden="true"]')).toHaveClass(
+        'bg-[color:var(--primary-tint)]'
+      )
+      expect(other.querySelector('[aria-hidden="true"]')).not.toHaveClass(
+        'bg-[color:var(--primary-tint)]'
+      )
+    })
   })
 
   describe('responsive visibility', () => {
@@ -89,12 +104,12 @@ describe('MobileBottomNav', () => {
   })
 
   describe('touch targets', () => {
-    it('has minimum touch target size of 44px', () => {
+    it('has minimum touch target size of 48px', () => {
       renderWithRouter('/dashboard')
 
       const links = screen.getAllByRole('link')
       links.forEach((link) => {
-        expect(link).toHaveClass('min-h-[44px]')
+        expect(link).toHaveClass('min-h-12')
       })
     })
 

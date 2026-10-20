@@ -16,7 +16,7 @@ import { useProfileMenuItems } from '@/hooks/useProfileMenuItems'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
 import { useThemeStore } from '@/stores/themeStore'
-import { MODE_CHIP } from '@/sudarshan/modeChip'
+import { MODE_CHIP, MODE_CHIP_BASE, MODE_DOT } from '@/sudarshan/modeChip'
 import { showToast } from '@/utils/toast'
 
 /**
@@ -76,10 +76,12 @@ export function AccountControls({ variant = 'navbar' }: { variant?: 'navbar' | '
   }
 
   // The toolbar's quiet button: its glyph on the toolbar surface, a fill on hover.
+  // The app bar's buttons are 48px tap targets on a phone (owner rule: 48 dp),
+  // 40px where a mouse points.
   const iconButton = toolbar
     ? 'h-7 w-7 rounded-md text-foreground/80 hover:bg-accent hover:text-foreground dark:hover:bg-accent'
-    : 'h-8 w-8'
-  const glyph = 'h-4 w-4'
+    : 'size-12 rounded-full md:size-10'
+  const glyph = toolbar ? 'h-4 w-4' : 'size-5'
   const modeLabel = appMode === 'live' ? 'Live' : 'Analyze'
 
   return (
@@ -101,8 +103,20 @@ export function AccountControls({ variant = 'navbar' }: { variant?: 'navbar' | '
       {/* Mode Badge: the Live and Analyze status chips */}
       <Badge
         variant="outline"
-        className={cn(toolbar ? 'h-6 px-2 text-[11px]' : 'text-xs', MODE_CHIP[appMode])}
+        className={cn(
+          MODE_CHIP_BASE,
+          toolbar ? 'h-6 px-2 text-[11px]' : 'h-7 px-2.5 text-xs',
+          MODE_CHIP[appMode]
+        )}
       >
+        <span
+          aria-hidden="true"
+          className={cn(
+            'shrink-0 rounded-full',
+            toolbar ? 'size-1.5' : 'size-2',
+            MODE_DOT[appMode]
+          )}
+        />
         {/* The toolbar shares its row with the whole chart toolbar, so the long
             wording waits for a wider screen there than in the navbar. */}
         <span className={toolbar ? 'hidden min-[1800px]:inline' : 'hidden 2xl:inline'}>
@@ -133,21 +147,31 @@ export function AccountControls({ variant = 'navbar' }: { variant?: 'navbar' | '
       {/* Profile Dropdown */}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            className={cn(
-              'rounded-full bg-primary text-primary-foreground',
-              toolbar
-                ? 'ml-0.5 h-7 w-7 hover:bg-primary/90 hover:text-primary-foreground dark:hover:bg-primary/90'
-                : 'h-8 w-8'
-            )}
-            aria-label="Open user menu"
-          >
-            <span className={toolbar ? 'text-[13px] font-semibold' : 'text-sm font-medium'}>
-              {user?.username?.[0]?.toUpperCase() || 'O'}
-            </span>
-          </Button>
+          {toolbar ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="ml-0.5 h-7 w-7 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground dark:hover:bg-primary/90"
+              aria-label="Open user menu"
+            >
+              <span className="text-[13px] font-semibold">
+                {user?.username?.[0]?.toUpperCase() || 'O'}
+              </span>
+            </Button>
+          ) : (
+            // A 48px target around a 36px avatar, so the circle stays the size
+            // of the design while the thumb gets the whole square.
+            <Button
+              variant="ghost"
+              size="icon"
+              className="group size-12 rounded-full p-0 hover:bg-transparent md:size-10"
+              aria-label="Open user menu"
+            >
+              <span className="flex size-9 items-center justify-center rounded-full bg-primary text-base font-semibold text-primary-foreground transition-colors group-hover:bg-primary/90 md:size-8 md:text-sm">
+                {user?.username?.[0]?.toUpperCase() || 'O'}
+              </span>
+            </Button>
+          )}
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-56">
           {filteredProfileMenuItems.map((item) =>
