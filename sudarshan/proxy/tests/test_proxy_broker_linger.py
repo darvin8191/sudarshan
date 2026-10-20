@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 
 import websocket_proxy  # noqa: F401  (loads the adapter registry before anything else)
-from websocket_proxy import broker_factory
+from websocket_proxy import broker_factory, sudarshan_ext
 from websocket_proxy import server as proxy_server
 from websocket_proxy.server import WebSocketProxy
 
@@ -354,7 +354,7 @@ def test_the_setting_is_read_safely(monkeypatch, raw: str | None, seconds: float
         monkeypatch.delenv("WEBSOCKET_BROKER_LINGER_SECONDS", raising=False)
     else:
         monkeypatch.setenv("WEBSOCKET_BROKER_LINGER_SECONDS", raw)
-    assert proxy_server._broker_linger_seconds() == seconds
+    assert sudarshan_ext.broker_linger_seconds() == seconds
 
 
 def test_many_screen_off_and_on_cycles_hold_one_connection_and_no_stray_tasks(

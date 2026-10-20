@@ -1,31 +1,24 @@
 import asyncio as aio
 import json
-import math  # SUDARSHAN: WEBSOCKET_BROKER_LINGER_SECONDS parsing (M18.2)
 import os
 import signal
 import socket
 import threading
 import time
 from collections import defaultdict
-from typing import Any, NamedTuple  # SUDARSHAN: the broker linger record (M18.2)
 
 import websockets
 import zmq
 import zmq.asyncio
 from dotenv import load_dotenv
 from sqlalchemy import text
-from websockets.exceptions import ConnectionClosed  # SUDARSHAN: _ClientOutbox (M18.2)
 
 from database.auth_db import get_broker_name, verify_api_key
 from services.market_data_service import get_market_data_service
 from utils.logging import get_logger, highlight_url
 
 from .base_adapter import BaseBrokerWebSocketAdapter
-from .broker_factory import (  # SUDARSHAN: pool cleanup listener (M18.2)
-    add_pool_cleanup_listener,
-    create_broker_adapter,
-    remove_pool_cleanup_listener,
-)
+from .broker_factory import create_broker_adapter
 from .mode_utils import (
     MODE_BY_UPPER_LABEL as _MODE_BY_UPPER_LABEL,
 )
@@ -34,127 +27,18 @@ from .mode_utils import (
     normalize_mode_or_none,
 )
 from .port_check import find_available_port, is_port_in_use
+from .sudarshan_ext import SudarshanProxyMixin  # SUDARSHAN: linger, client outboxes (M18.2)
 
 # Initialize logger
 logger = get_logger("websocket_proxy")
 
-# SUDARSHAN (M18.2): how long a user's broker connection stays open after their
-# last client leaves. A phone closes its live connection 5 s after the screen
-# turns off, and without this every screen-on opened a new broker socket.
-BROKER_LINGER_ENV = "WEBSOCKET_BROKER_LINGER_SECONDS"
 
-
-def _broker_linger_seconds() -> float:
-    """WEBSOCKET_BROKER_LINGER_SECONDS in seconds; 0 (close at once) unless set."""
-    raw = os.getenv(BROKER_LINGER_ENV, "0").strip().strip("'\"")
-    try:
-        seconds = float(raw or "0")
-    except ValueError:
-        seconds = math.nan
-    if not math.isfinite(seconds) or seconds < 0:
-        logger.warning(
-            f"{BROKER_LINGER_ENV}={raw!r} in .env is not a number of seconds, so the "
-            f"broker connection closes as soon as the last screen does. Set it to a "
-            f"number such as 300, or to 0."
-        )
-        return 0.0
-    return seconds
-
-
-class _BrokerLinger(NamedTuple):
-    """SUDARSHAN (M18.2): an idle adapter kept connected, and the task ending it."""
-
-    adapter: Any
-    task: aio.Task
-    loop: aio.AbstractEventLoop
-
-
-class _ClientOutbox:
-    """SUDARSHAN (M18.2): one client's outgoing messages, sent in order by its own task.
-
-    The fan-out only queues, so it never waits for a client: one slow phone can
-    no longer hold back every other screen's ticks. A client more than `limit`
-    messages behind, or whose connection takes nothing for `stall_seconds`, is
-    dropped without a closing handshake. Its browser sees a lost connection,
-    reconnects, resubscribes and starts again from fresh prices.
-    """
-
-    def __init__(self, client_id, websocket, limit: int, stall_seconds: float):
-        self.client_id = client_id
-        self.websocket = websocket
-        self.stall_seconds = stall_seconds
-        self.queue: aio.Queue = aio.Queue(maxsize=limit)
-        self.dropped = False
-        self.task = aio.get_running_loop().create_task(
-            self._run(), name=f"ws-client-outbox-{client_id}"
-        )
-
-    def offer(self, frame: str) -> None:
-        """Queue one message. Never waits; drops the client when it is too far behind."""
-        if self.dropped:
-            return
-        try:
-            self.queue.put_nowait(frame)
-        except aio.QueueFull:
-            self.drop(f"it fell {self.queue.maxsize} messages behind")
-
-    async def _run(self) -> None:
-        while True:
-            frame = await self.queue.get()
-            try:
-                await aio.wait_for(self.websocket.send(frame), self.stall_seconds)
-            except TimeoutError:
-                self.drop(f"its connection took nothing for {self.stall_seconds:g}s")
-                return
-            except ConnectionClosed:
-                return
-            except Exception:
-                logger.exception(f"Sending to client {self.client_id} failed")
-                self.drop("a send to it failed")
-                return
-
-    def drop(self, reason: str) -> None:
-        """Abort the connection, with no closing handshake, so the browser reconnects."""
-        if self.dropped:
-            return
-        self.dropped = True
-        while not self.queue.empty():
-            self.queue.get_nowait()
-        logger.warning(
-            f"Disconnecting client {self.client_id} because {reason}. Its screen "
-            f"reconnects and resubscribes by itself."
-        )
-        transport = getattr(self.websocket, "transport", None)
-        if transport is None:
-            return
-        try:
-            transport.abort()
-        except Exception:
-            logger.exception(f"Could not drop client {self.client_id}")
-
-    def close(self) -> None:
-        """The client has gone: stop the sender and forget what is queued."""
-        self.dropped = True
-        self.task.cancel()
-
-
-class WebSocketProxy:
+class WebSocketProxy(SudarshanProxyMixin):  # SUDARSHAN: mixin (M18.2)
     """
     WebSocket Proxy Server that handles client connections and authentication,
     manages subscriptions, and routes market data from broker adapters to clients.
     Supports dynamic broker selection based on user configuration.
     """
-
-    # SUDARSHAN (M18.2): class-level defaults, so a proxy built without __init__
-    # (as the tests build one) keeps today's behaviour: no linger at all.
-    broker_linger_seconds: float = 0.0
-    _linger_sleep = staticmethod(aio.sleep)
-
-    # SUDARSHAN (M18.2): per-client outboxes (see _ClientOutbox). 2048 messages
-    # is about 10 s of a busy option chain; 10 s of a socket taking nothing is
-    # well inside the 40 s keepalive would otherwise need to notice it.
-    CLIENT_OUTBOX_LIMIT = 2048
-    CLIENT_SEND_STALL_SECONDS = 10.0
 
     def __init__(self, host: str = "127.0.0.1", port: int = 8765):
         """
@@ -250,17 +134,7 @@ class WebSocketProxy:
         # Receive all topics (market data + CACHE_INVALIDATE_*)
         self.socket.setsockopt(zmq.SUBSCRIBE, b"")
 
-        # SUDARSHAN (M18.2): keep the broker connection through brief client gaps.
-        # A pool teardown from anywhere (a login, the daily token change) also ends
-        # a pending linger at once, through the listener.
-        self.broker_linger_seconds = _broker_linger_seconds()
-        self._broker_lingers: dict[str, _BrokerLinger] = {}
-        add_pool_cleanup_listener(self._on_user_pools_cleaned)
-        if self.broker_linger_seconds > 0:
-            logger.info(
-                f"Broker connections stay open {self.broker_linger_seconds:g}s after a "
-                f"user's last screen closes ({BROKER_LINGER_ENV})"
-            )
+        self._sudarshan_init()  # SUDARSHAN (M18.2): broker linger setting and listener
 
     async def start(self):
         """Start the WebSocket server and ZeroMQ listener"""
@@ -404,9 +278,7 @@ class WebSocketProxy:
                 except Exception as e:
                     logger.exception(f"Error closing WebSocket server: {e}")
 
-            # SUDARSHAN (M18.2): the client outboxes' sender tasks end with the server.
-            for client_id in list(self._outboxes()):
-                self._close_outbox(client_id)
+            self._close_all_outboxes()  # SUDARSHAN (M18.2)
 
             # Close all client connections
             close_tasks = []
@@ -427,10 +299,7 @@ class WebSocketProxy:
                 except TimeoutError:
                     logger.warning("Timeout waiting for client connections to close")
 
-            # SUDARSHAN (M18.2): no linger outlives the server. Its adapters are
-            # still in broker_adapters and are disconnected just below.
-            self._cancel_all_broker_lingers()
-            remove_pool_cleanup_listener(self._on_user_pools_cleaned)
+            self._end_all_lingers()  # SUDARSHAN (M18.2): before the adapters go below
 
             # Disconnect all broker adapters
             for user_id, adapter in self.broker_adapters.items():
@@ -712,9 +581,7 @@ class WebSocketProxy:
         client_id = id(websocket)
         self.clients[client_id] = websocket
         self.subscriptions[client_id] = set()
-        # SUDARSHAN (M18.2): everything this client is sent goes through its own
-        # outbox, so no send to it ever holds up another client.
-        self._open_outbox(client_id, websocket)
+        self._open_outbox(client_id, websocket)  # SUDARSHAN (M18.2): its own sender
 
         # Get path info from websocket if available
         path = getattr(websocket, "path", "/unknown")
@@ -867,18 +734,10 @@ class WebSocketProxy:
                         user_id,
                     )
 
-            # SUDARSHAN (M18.2): with WEBSOCKET_BROKER_LINGER_SECONDS above 0, an
-            # idle adapter (every subscription released) stays connected for that
-            # long, so a screen that comes back reuses it. Anything not provably
-            # idle is torn down at once, exactly as before.
-            lingering = (
-                not keep_special_adapter
-                and not release_failed
-                and broker_name not in ("flattrade", "shoonya")
-                and self._begin_broker_linger(user_id, adapter, broker_name)
-            )
-
-            if not keep_special_adapter and not lingering:
+            # SUDARSHAN (M18.2): an idle adapter may stay connected a while (linger).
+            if not keep_special_adapter and not self._keep_adapter_lingering(
+                user_id, adapter, broker_name, release_failed
+            ):
                 logger.info(
                     "Last client for user %s disconnected. Disconnecting %s adapter.",
                     user_id,
@@ -909,140 +768,6 @@ class WebSocketProxy:
 
         self._purge_client_subscription_ownership(client_id)
         self.user_mapping.pop(client_id, None)
-
-    # ------------------------------------------------------------------------
-    # SUDARSHAN (M18.2): broker linger. Everything below runs on the proxy's
-    # event loop except _on_user_pools_cleaned, which may be called from any
-    # thread and hands its work to the loop.
-    # ------------------------------------------------------------------------
-
-    def _lingers(self) -> dict:
-        """The pending lingers, user_id -> _BrokerLinger (made on first use)."""
-        lingers = self.__dict__.get("_broker_lingers")
-        if lingers is None:
-            lingers = self._broker_lingers = {}
-        return lingers
-
-    def _user_has_live_client(self, user_id) -> bool:
-        return any(
-            client_id in self.clients and mapped == user_id
-            for client_id, mapped in self.user_mapping.items()
-        )
-
-    def _begin_broker_linger(self, user_id, adapter, broker_name) -> bool:
-        """Keep an idle adapter connected for broker_linger_seconds.
-
-        Returns True when it does; False (disconnect at once, as before) when
-        the setting is 0 or the adapter cannot be shown to hold no symbols.
-        """
-        seconds = self.broker_linger_seconds
-        if seconds <= 0:
-            return False
-        held = getattr(adapter, "subscriptions", None)
-        if held is None or len(held) > 0:
-            return False
-        self._cancel_broker_linger(user_id)
-        loop = aio.get_running_loop()
-        task = loop.create_task(self._broker_linger(user_id, adapter, seconds))
-        self._lingers()[user_id] = _BrokerLinger(adapter, task, loop)
-        logger.info(
-            "Last client for user %s disconnected. Keeping the %s connection open "
-            "for %gs, with no symbols, in case a screen comes back.",
-            user_id,
-            broker_name or "broker",
-            seconds,
-        )
-        return True
-
-    async def _broker_linger(self, user_id, adapter, seconds) -> None:
-        await self._linger_sleep(seconds)  # a cancel ends the task here
-        entry = self._lingers().get(user_id)
-        if entry is None or entry.adapter is not adapter:
-            return
-        del self._lingers()[user_id]
-        self._close_lingering_adapter(user_id, adapter, f"no screen came back within {seconds:g}s")
-
-    def _close_lingering_adapter(self, user_id, adapter, reason) -> None:
-        """Disconnect exactly as the last client's departure did before the linger."""
-        if self.broker_adapters.get(user_id) is not adapter or self._user_has_live_client(user_id):
-            return  # already replaced or torn down, or a screen is back
-        broker_name = self.user_broker_mapping.get(user_id)
-        logger.info(
-            "Disconnecting %s adapter for user %s: %s.",
-            broker_name or "unknown broker",
-            user_id,
-            reason,
-        )
-        try:
-            adapter.disconnect()
-        except Exception:
-            logger.exception(
-                "Error disconnecting %s adapter for user %s",
-                broker_name or "unknown broker",
-                user_id,
-            )
-        finally:
-            self.broker_adapters.pop(user_id, None)
-            self.user_broker_mapping.pop(user_id, None)
-
-    def _cancel_broker_linger(self, user_id):
-        """Stop a pending linger without disconnecting; returns its adapter or None."""
-        entry = self._lingers().pop(user_id, None)
-        if entry is None:
-            return None
-        entry.task.cancel()
-        return entry.adapter
-
-    def _cancel_all_broker_lingers(self) -> None:
-        for user_id in list(self._lingers()):
-            self._cancel_broker_linger(user_id)
-
-    def _end_broker_linger(self, user_id, reason) -> None:
-        """A teardown elsewhere: stop the linger and close its adapter now."""
-        adapter = self._cancel_broker_linger(user_id)
-        if adapter is not None:
-            self._close_lingering_adapter(user_id, adapter, reason)
-
-    def _on_user_pools_cleaned(self, user_id) -> None:
-        """broker_factory.cleanup_pools_for_user tore this user's pools down.
-
-        Called from whichever thread ran the cleanup: the proxy's loop in the
-        proxy process, a request thread on the development server.
-        """
-        entry = (self.__dict__.get("_broker_lingers") or {}).get(user_id)
-        if entry is None:
-            return
-        reason = "its broker connections were reset (new login or token change)"
-        try:
-            on_loop = aio.get_running_loop() is entry.loop
-        except RuntimeError:
-            on_loop = False
-        if on_loop:
-            self._end_broker_linger(user_id, reason)
-        elif not entry.loop.is_closed():
-            entry.loop.call_soon_threadsafe(self._end_broker_linger, user_id, reason)
-
-    # SUDARSHAN (M18.2): client outboxes (see _ClientOutbox). A client without
-    # one (a proxy driven without handle_client, as the tests do) is sent to
-    # directly, as before.
-
-    def _outboxes(self) -> dict:
-        """client_id -> _ClientOutbox (made on first use)."""
-        outboxes = self.__dict__.get("_client_outboxes")
-        if outboxes is None:
-            outboxes = self._client_outboxes = {}
-        return outboxes
-
-    def _open_outbox(self, client_id, websocket) -> None:
-        self._close_outbox(client_id)
-        self._outboxes()[client_id] = _ClientOutbox(
-            client_id, websocket, self.CLIENT_OUTBOX_LIMIT, self.CLIENT_SEND_STALL_SECONDS
-        )
-
-    def _close_outbox(self, client_id) -> None:
-        outbox = self._outboxes().pop(client_id, None)
-        if outbox is not None:
-            outbox.close()
 
     async def process_client_message(self, client_id, message):
         """
@@ -1176,9 +901,7 @@ class WebSocketProxy:
         # Store the user mapping
         self.user_mapping[client_id] = user_id
 
-        # SUDARSHAN (M18.2): a screen of this user is back. A lingering adapter is
-        # still in broker_adapters and is reused below like any cached one.
-        self._cancel_broker_linger(user_id)
+        self._cancel_broker_linger(user_id)  # SUDARSHAN (M18.2): a screen is back
 
         # Get broker name
         broker_name = get_broker_name(api_key)
@@ -2028,11 +1751,7 @@ class WebSocketProxy:
             message: The message to send
         """
         if client_id in self.clients:
-            # SUDARSHAN (M18.2): through the client's outbox, in order with its
-            # ticks, and never waiting on a slow client.
-            outbox = self._outboxes().get(client_id)
-            if outbox is not None:
-                outbox.offer(json.dumps(message))
+            if self._offer_to_outbox(client_id, message):  # SUDARSHAN (M18.2)
                 return
             websocket = self.clients[client_id]
             try:
@@ -2125,9 +1844,7 @@ class WebSocketProxy:
             else:
                 logger.debug(f"No cached data found for user {user_id}")
 
-            # SUDARSHAN (M18.2): a token change, logout or revoke ends a pending
-            # linger now; its adapter is in broker_adapters and goes just below.
-            self._cancel_broker_linger(user_id)
+            self._cancel_broker_linger(user_id)  # SUDARSHAN (M18.2): torn down below
 
             # Also disconnect and clean up any existing broker adapters for this user
             # This forces re-initialization with fresh credentials on next connection
@@ -2410,7 +2127,6 @@ class WebSocketProxy:
 
                 # OPTIMIZATION 3: Batch message sends for parallel delivery
                 send_tasks = []
-                outboxes = self._outboxes()  # SUDARSHAN (M18.2)
 
                 # OPTIMIZATION 4: Pre-create base message (reused for all clients)
                 # This avoids creating the same dict 1000 times
@@ -2447,12 +2163,7 @@ class WebSocketProxy:
                     message["mode"] = client_mode
                     message["broker"] = broker_name if broker_name != "unknown" else client_broker
 
-                    # SUDARSHAN (M18.2): queue into the client's own outbox, which
-                    # never waits for the client. Only a client without an outbox
-                    # is sent to directly, as before.
-                    outbox = outboxes.get(client_id)
-                    if outbox is not None:
-                        outbox.offer(json.dumps(message))
+                    if self._offer_to_outbox(client_id, message):  # SUDARSHAN (M18.2)
                         continue
 
                     # Add to batch
@@ -2461,10 +2172,7 @@ class WebSocketProxy:
                 # Send all messages in parallel (non-blocking)
                 if send_tasks:
                     await aio.gather(*send_tasks, return_exceptions=True)
-                else:
-                    # SUDARSHAN (M18.2): give the outboxes their turn between ticks,
-                    # as the gather above always did. A burst read without yielding
-                    # could otherwise overflow a healthy client's outbox.
+                else:  # SUDARSHAN (M18.2): the outboxes' turn, as the gather gave
                     await aio.sleep(0)
 
                 # METRICS: Track message count for health monitoring
