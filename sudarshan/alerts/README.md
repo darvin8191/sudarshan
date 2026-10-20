@@ -38,8 +38,8 @@ Filled: BUY 65 NIFTY 21 OCT 25900 CE at ₹123.45 (MIS, NFO)
 - The price is the average fill price. The order type is shown only for stop orders (SL, SL-M).
 - Upstox's carry-forward product reaches the order stream as CNC; on a derivatives exchange it is
   shown as NRML.
-- The broker's reason is quoted after "Broker says:", with the Markdown characters `* _ ` [ ]`
-  replaced (OpenAlgo sends with Telegram Markdown and does not escape).
+- The broker's reason is quoted after "Broker says:", with the Markdown characters (asterisk,
+  underscore, backtick, square brackets) replaced (OpenAlgo sends with Telegram Markdown and does not escape).
 - The time is when SUDARSHAN received the update. A merged message spanning more than a minute (a
   retry after OpenAlgo was down) shows the range.
 - A burst (a basket, a multi-leg exit) becomes one message listing every order, one line per order
