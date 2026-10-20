@@ -14,6 +14,7 @@ import zmq
 import zmq.asyncio
 from dotenv import load_dotenv
 from sqlalchemy import text
+from websockets.exceptions import ConnectionClosed  # SUDARSHAN: _ClientOutbox (M18.2)
 
 from database.auth_db import get_broker_name, verify_api_key
 from services.market_data_service import get_market_data_service
@@ -68,6 +69,75 @@ class _BrokerLinger(NamedTuple):
     loop: aio.AbstractEventLoop
 
 
+class _ClientOutbox:
+    """SUDARSHAN (M18.2): one client's outgoing messages, sent in order by its own task.
+
+    The fan-out only queues, so it never waits for a client: one slow phone can
+    no longer hold back every other screen's ticks. A client more than `limit`
+    messages behind, or whose connection takes nothing for `stall_seconds`, is
+    dropped without a closing handshake. Its browser sees a lost connection,
+    reconnects, resubscribes and starts again from fresh prices.
+    """
+
+    def __init__(self, client_id, websocket, limit: int, stall_seconds: float):
+        self.client_id = client_id
+        self.websocket = websocket
+        self.stall_seconds = stall_seconds
+        self.queue: aio.Queue = aio.Queue(maxsize=limit)
+        self.dropped = False
+        self.task = aio.get_running_loop().create_task(
+            self._run(), name=f"ws-client-outbox-{client_id}"
+        )
+
+    def offer(self, frame: str) -> None:
+        """Queue one message. Never waits; drops the client when it is too far behind."""
+        if self.dropped:
+            return
+        try:
+            self.queue.put_nowait(frame)
+        except aio.QueueFull:
+            self.drop(f"it fell {self.queue.maxsize} messages behind")
+
+    async def _run(self) -> None:
+        while True:
+            frame = await self.queue.get()
+            try:
+                await aio.wait_for(self.websocket.send(frame), self.stall_seconds)
+            except TimeoutError:
+                self.drop(f"its connection took nothing for {self.stall_seconds:g}s")
+                return
+            except ConnectionClosed:
+                return
+            except Exception:
+                logger.exception(f"Sending to client {self.client_id} failed")
+                self.drop("a send to it failed")
+                return
+
+    def drop(self, reason: str) -> None:
+        """Abort the connection, with no closing handshake, so the browser reconnects."""
+        if self.dropped:
+            return
+        self.dropped = True
+        while not self.queue.empty():
+            self.queue.get_nowait()
+        logger.warning(
+            f"Disconnecting client {self.client_id} because {reason}. Its screen "
+            f"reconnects and resubscribes by itself."
+        )
+        transport = getattr(self.websocket, "transport", None)
+        if transport is None:
+            return
+        try:
+            transport.abort()
+        except Exception:
+            logger.exception(f"Could not drop client {self.client_id}")
+
+    def close(self) -> None:
+        """The client has gone: stop the sender and forget what is queued."""
+        self.dropped = True
+        self.task.cancel()
+
+
 class WebSocketProxy:
     """
     WebSocket Proxy Server that handles client connections and authentication,
@@ -79,6 +149,12 @@ class WebSocketProxy:
     # (as the tests build one) keeps today's behaviour: no linger at all.
     broker_linger_seconds: float = 0.0
     _linger_sleep = staticmethod(aio.sleep)
+
+    # SUDARSHAN (M18.2): per-client outboxes (see _ClientOutbox). 2048 messages
+    # is about 10 s of a busy option chain; 10 s of a socket taking nothing is
+    # well inside the 40 s keepalive would otherwise need to notice it.
+    CLIENT_OUTBOX_LIMIT = 2048
+    CLIENT_SEND_STALL_SECONDS = 10.0
 
     def __init__(self, host: str = "127.0.0.1", port: int = 8765):
         """
@@ -327,6 +403,10 @@ class WebSocketProxy:
                             raise
                 except Exception as e:
                     logger.exception(f"Error closing WebSocket server: {e}")
+
+            # SUDARSHAN (M18.2): the client outboxes' sender tasks end with the server.
+            for client_id in list(self._outboxes()):
+                self._close_outbox(client_id)
 
             # Close all client connections
             close_tasks = []
@@ -632,6 +712,9 @@ class WebSocketProxy:
         client_id = id(websocket)
         self.clients[client_id] = websocket
         self.subscriptions[client_id] = set()
+        # SUDARSHAN (M18.2): everything this client is sent goes through its own
+        # outbox, so no send to it ever holds up another client.
+        self._open_outbox(client_id, websocket)
 
         # Get path info from websocket if available
         path = getattr(websocket, "path", "/unknown")
@@ -690,6 +773,7 @@ class WebSocketProxy:
             client_id: Client ID to clean up
         """
         self.clients.pop(client_id, None)
+        self._close_outbox(client_id)  # SUDARSHAN (M18.2)
         user_id = self.user_mapping.get(client_id)
         adapter = self.broker_adapters.get(user_id) if user_id else None
         release_failed = False
@@ -937,6 +1021,28 @@ class WebSocketProxy:
             self._end_broker_linger(user_id, reason)
         elif not entry.loop.is_closed():
             entry.loop.call_soon_threadsafe(self._end_broker_linger, user_id, reason)
+
+    # SUDARSHAN (M18.2): client outboxes (see _ClientOutbox). A client without
+    # one (a proxy driven without handle_client, as the tests do) is sent to
+    # directly, as before.
+
+    def _outboxes(self) -> dict:
+        """client_id -> _ClientOutbox (made on first use)."""
+        outboxes = self.__dict__.get("_client_outboxes")
+        if outboxes is None:
+            outboxes = self._client_outboxes = {}
+        return outboxes
+
+    def _open_outbox(self, client_id, websocket) -> None:
+        self._close_outbox(client_id)
+        self._outboxes()[client_id] = _ClientOutbox(
+            client_id, websocket, self.CLIENT_OUTBOX_LIMIT, self.CLIENT_SEND_STALL_SECONDS
+        )
+
+    def _close_outbox(self, client_id) -> None:
+        outbox = self._outboxes().pop(client_id, None)
+        if outbox is not None:
+            outbox.close()
 
     async def process_client_message(self, client_id, message):
         """
@@ -1922,6 +2028,12 @@ class WebSocketProxy:
             message: The message to send
         """
         if client_id in self.clients:
+            # SUDARSHAN (M18.2): through the client's outbox, in order with its
+            # ticks, and never waiting on a slow client.
+            outbox = self._outboxes().get(client_id)
+            if outbox is not None:
+                outbox.offer(json.dumps(message))
+                return
             websocket = self.clients[client_id]
             try:
                 await websocket.send(json.dumps(message))
@@ -2298,6 +2410,7 @@ class WebSocketProxy:
 
                 # OPTIMIZATION 3: Batch message sends for parallel delivery
                 send_tasks = []
+                outboxes = self._outboxes()  # SUDARSHAN (M18.2)
 
                 # OPTIMIZATION 4: Pre-create base message (reused for all clients)
                 # This avoids creating the same dict 1000 times
@@ -2334,12 +2447,25 @@ class WebSocketProxy:
                     message["mode"] = client_mode
                     message["broker"] = broker_name if broker_name != "unknown" else client_broker
 
+                    # SUDARSHAN (M18.2): queue into the client's own outbox, which
+                    # never waits for the client. Only a client without an outbox
+                    # is sent to directly, as before.
+                    outbox = outboxes.get(client_id)
+                    if outbox is not None:
+                        outbox.offer(json.dumps(message))
+                        continue
+
                     # Add to batch
                     send_tasks.append(self.send_message(client_id, message))
 
                 # Send all messages in parallel (non-blocking)
                 if send_tasks:
                     await aio.gather(*send_tasks, return_exceptions=True)
+                else:
+                    # SUDARSHAN (M18.2): give the outboxes their turn between ticks,
+                    # as the gather above always did. A burst read without yielding
+                    # could otherwise overflow a healthy client's outbox.
+                    await aio.sleep(0)
 
                 # METRICS: Track message count for health monitoring
                 self._messages_processed += 1
