@@ -107,7 +107,10 @@ export function liveMove(
 export interface IndexView {
   /** The level shown: the newest of the snapshot and the ticks. */
   ltp: number | null
-  /** The previous session's close, from the snapshot; ticks do not carry it. */
+  /**
+   * The previous session's close, from the snapshot. Upstox ticks carry it too, as
+   * `prev_close` (M11.3), but this view still takes it from the snapshot.
+   */
   prevClose: number | null
   /** When the level shown was last confirmed. */
   at: number | null
@@ -117,8 +120,9 @@ export interface IndexView {
 
 /**
  * Merge an index's REST snapshot with its ticks: whichever is newer gives the
- * level, and the snapshot alone gives the previous close, because the feed's
- * quote ticks carry today's running candle and no previous close.
+ * level, and the snapshot gives the previous close. Upstox ticks now carry the
+ * previous close as `prev_close` in every mode, and a Quote tick's `close` is
+ * the previous close too (M11.3); reading it from a tick is not done here yet.
  */
 export function indexView(
   snapshot: { ltp: number; prev_close: number } | undefined,

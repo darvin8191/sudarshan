@@ -114,6 +114,9 @@ To unsubscribe from a stream:
 
 For an array request, a `mode` on an individual symbol wins; otherwise the
 top-level `mode` applies, and only a request with neither defaults to `Quote`.
+<!-- SUDARSHAN (M11.3): a release without a mode frees Quote only. -->
+Name the mode you subscribed with: an unsubscribe without one releases `Quote`,
+so an `LTP` or `Depth` subscription would stay.
 For mode-valid requests, the acknowledgement identifies the exact canonical
 mode on each successful or failed item. When mode validation itself fails, the
 failed item cannot have a canonical label, so its `mode` is `null`:
@@ -249,6 +252,41 @@ is no standardized top-level error code for this case.
   }
 }
 ```
+
+<!-- SUDARSHAN (M11.3, M18.2): what the Upstox adapter publishes, and slow clients. -->
+#### Upstox fields
+
+The Upstox adapter publishes these fields, each where Upstox sent the value:
+
+| Field | Modes | Meaning |
+| ----- | ----- | ------- |
+| `timestamp` | all | Time of the Upstox frame, epoch milliseconds (an integer) |
+| `prev_close` | all | The previous session's close |
+| `last_trade_time` | all | Time of the last trade, epoch milliseconds |
+| `ltq`, `ltt`, `cp` | LTP | Upstox's names for the last trade's quantity and time and the previous close |
+| `close` | Quote, Depth | The previous session's close, so `ltp - close` is the day's change; `0` when unknown |
+| `open`, `high`, `low` | Quote, Depth | Today's candle |
+| `volume` | Quote, Depth | Volume traded today |
+| `last_trade_quantity` | Quote, Depth | Quantity of the trade this tick reports; `0` when it reports none |
+| `average_price`, `total_buy_quantity`, `total_sell_quantity` | Quote, Depth | When the frame carries them |
+| `oi`, `iv` | Quote, Depth | Open interest and implied volatility, when above 0 |
+| `greeks` | Quote, Depth | Options only: `{delta, gamma, theta, vega, rho}`; a greek Upstox could not compute is `null` |
+
+Depth carries every Quote field beside `depth`. Upstox sends incremental frames:
+one that only moves the book still carries the last trade's price and time and
+the day's candle and volume, with a traded quantity of `0`. A value a frame does
+not carry is left out rather than sent as `0`, so merge each tick into the last
+one, as `MarketDataManager` does. A frame with only the last trade carries no
+`depth`. No number is ever NaN or Infinity.
+
+#### Slow clients
+
+Each client has its own queue, so a slow client never delays another. A client
+that falls behind receives the newest tick of each symbol and mode rather than
+every tick; replies, errors and order updates are never merged and keep their
+order relative to ticks. A client whose oldest unsent message has waited 10
+seconds is disconnected without a closing handshake, and should reconnect and
+subscribe again.
 
 ### Order Updates (Account-Level Stream)
 
