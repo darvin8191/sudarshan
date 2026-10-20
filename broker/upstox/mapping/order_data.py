@@ -168,6 +168,16 @@ def transform_order_data(orders):
             "timestamp": order.get("order_timestamp", ""),
         }
 
+        # SUDARSHAN M6.9: the broker's reason for a rejection, under the name the
+        # sandbox's book and the Upstox order stream already use. Fills stay out
+        # on purpose: /orderstatus (services/orderstatus_service.py) replaces the
+        # average price with 0.0 on every order that is not complete, so a filled
+        # quantity here would reach the strategy module's reconciliation as a part
+        # fill with no price, and the priced push for the same fill would then be
+        # dropped. Fills come from the trade book and the order stream.
+        if transformed_order["order_status"] == "rejected":
+            transformed_order["rejection_reason"] = str(order.get("status_message") or "").strip()
+
         transformed_orders.append(transformed_order)
 
     return transformed_orders
@@ -244,6 +254,20 @@ def transform_positions_data(positions_data):
             "pnl": position.get("pnl", 0.0),
             "ltp": position.get("last_price", 0.0),
         }
+        # SUDARSHAN M6.9: the phone position sheet's details, as Upstox reports
+        # them: P&L booked and still open, what was bought and sold today, and
+        # the quantity carried in from before. Only the ones Upstox sends.
+        for field in (
+            "realised",
+            "unrealised",
+            "day_buy_quantity",
+            "day_buy_value",
+            "day_sell_quantity",
+            "day_sell_value",
+            "overnight_quantity",
+        ):
+            if position.get(field) is not None:
+                transformed_position[field] = position[field]
         transformed_data.append(transformed_position)
     return transformed_data
 

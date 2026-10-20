@@ -132,7 +132,7 @@ def line(kind: str, update, today: date, *, found_later: bool = False) -> str:
         reason = clean(update.reason, REASON_MAX)
         if reason:
             said = f"Broker says: {reason}"
-        elif found_later:  # OpenAlgo's order book does not carry the broker's words
+        elif found_later:  # the order book row came without Upstox's words
             said = "The reason is in the Upstox app's order book."
         else:
             said = "The broker gave no reason."

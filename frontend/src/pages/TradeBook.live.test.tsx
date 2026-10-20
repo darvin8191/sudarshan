@@ -104,14 +104,14 @@ describe('Trade book, live', () => {
   })
 })
 
-// SUDARSHAN M4.15: on a phone a trade's symbol opens the phone chart; a wide
-// screen keeps upstream's link into the terminal.
+// SUDARSHAN M4.15, M6.9: on a phone a trade is a card that opens the phone
+// chart; a wide screen keeps upstream's link into the terminal.
 describe('Trade book chart link', () => {
   afterEach(() => {
     vi.restoreAllMocks()
   })
 
-  it("opens the phone chart from a trade's symbol on a phone, the terminal on a wide screen", async () => {
+  it("opens the phone chart from a trade's card on a phone, the terminal on a wide screen", async () => {
     const CALL = 'NIFTY28OCT2525900CE'
     getTrades.mockResolvedValue({
       status: 'success',
@@ -132,7 +132,7 @@ describe('Trade book chart link', () => {
     const screenNow = fakeScreen('phone')
     render(<TradeBook />)
     await pass(0)
-    expect(screen.getByRole('link', { name: `Open the chart for ${CALL} on NFO` })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: /NIFTY 25900 CE/ })).toHaveAttribute(
       'href',
       `/chart/NFO/${CALL}`
     )

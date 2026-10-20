@@ -267,3 +267,11 @@ def test_a_book_row_becomes_a_stream_message():
     sandbox = as_update(book_row("r2", "complete", filled_quantity=10, average_price=3.0), {},
                         sandbox=True)  # fmt: skip
     assert sandbox["mode"] == "analyze" and sandbox["filled_quantity"] == 10
+
+
+def test_a_rejection_found_later_carries_the_reason_the_book_names():
+    """Upstox's book carries a rejection's message (M6.9); a row without one names none."""
+    named = as_update(book_row("r3", "rejected", rejection_reason="RMS:Margin Exceeds"), {},
+                      sandbox=False)  # fmt: skip
+    assert named["rejection_reason"] == "RMS:Margin Exceeds"
+    assert as_update(book_row("r4", "rejected"), {}, sandbox=False)["rejection_reason"] == ""

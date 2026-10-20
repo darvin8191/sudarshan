@@ -163,6 +163,8 @@ describe('SUDARSHAN tokens', () => {
     ['--gold-ink', '--gold-tint'],
     ['--up', '--up-tint'],
     ['--down', '--down-tint'],
+    // Colour-blind mode moves the down chips to an orange tint of their own (M6.9).
+    ['--down-cvd', '--down-cvd-tint'],
     ['--brand', '--brand-tint'],
     ['--text-secondary', '--surface-2'],
     ['--text-secondary', '--surface-3'],
@@ -213,6 +215,19 @@ describe('SUDARSHAN tokens', () => {
     const triplets = new Map(hslTokens(css).map((t) => [t.name, t.hex]))
     expect(byName.get('--buy-solid')).toBe(triplets.get('--buy'))
     expect(byName.get('--sell-solid')).toBe(triplets.get('--sell'))
+  })
+
+  it('gives colour-blind mode chips that read: every pair its block makes clears 4.5:1', () => {
+    const block = /html\[data-cvd='1'\]\s*{([\s\S]*?)}/.exec(css)?.[1] ?? ''
+    const swaps = new Map(
+      [...block.matchAll(/(--[\w-]+):\s*var\((--[\w-]+)\)/g)].map((m) => [m[1], m[2]])
+    )
+    expect(swaps.get('--down')).toBe('--down-cvd')
+    expect(swaps.get('--down-tint')).toBe('--down-cvd-tint')
+    const ink = (name: string) => byName.get(swaps.get(name) ?? name) as string
+    // The chips (parts.tsx STATUS_LOOK) as colour-blind mode draws them.
+    expect(contrast(ink('--down'), ink('--down-tint'))).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(ink('--up'), ink('--up-tint'))).toBeGreaterThanOrEqual(4.5)
   })
 
   it('keeps --profit and --loss the same colours as --up and --down', () => {

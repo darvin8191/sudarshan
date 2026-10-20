@@ -97,6 +97,7 @@
   --info: oklch(0.4998 0.1142 239.87); /* #006A9D 5.46:1 informational */
   --up-cvd: oklch(0.5206 0.1695 257.86); /* #1C65C8 5.18:1 colour-blind up */
   --down-cvd: oklch(0.5495 0.1365 54.72); /* #AC5700 4.71:1 colour-blind down */
+  --down-cvd-tint: oklch(0.9643 0.0206 67.58); /* #FDF1E5 colour-blind down chips; down-cvd on it 4.59:1 */
   --focus-ring: oklch(0.601 0.18 258); /* #317DE9 3.70:1 tap and keyboard focus */
 
   /* Depth: cards barely lift off the page; the login card floats. */
@@ -196,6 +197,8 @@ html {
 html[data-cvd='1'] {
   --up: var(--up-cvd);
   --down: var(--down-cvd);
+  /* Orange on the red tint read 4.43:1 (a REJECTED chip); on its own tint 4.59:1. */
+  --down-tint: var(--down-cvd-tint);
   --profit: 214.5 75.4% 44.7%; /* #1C65C8 = --up-cvd */
   --loss: 30.3 100% 33.7%; /* #AC5700 = --down-cvd */
 }

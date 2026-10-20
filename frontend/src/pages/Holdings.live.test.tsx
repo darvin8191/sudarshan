@@ -23,7 +23,11 @@ vi.mock('@/components/trading', () => ({ PlaceOrderDialog: () => null }))
 vi.mock('@/stores/authStore', () => ({
   useAuthStore: () => ({ apiKey: 'test-api-key', user: { broker: 'upstox' } }),
 }))
-vi.mock('@/stores/themeStore', () => ({ onModeChange: () => () => {} }))
+vi.mock('@/stores/themeStore', () => ({
+  onModeChange: () => () => {},
+  // SUDARSHAN M6.9: a phone's cards read the mode to say where an order goes.
+  useThemeStore: (pick: (state: { appMode: string }) => unknown) => pick({ appMode: 'live' }),
+}))
 const calendar = {
   isMarketOpen: () => true,
   isAnyMarketOpen: () => true,
@@ -183,10 +187,12 @@ describe('Holdings chart link', () => {
     vi.restoreAllMocks()
   })
 
-  it("opens the phone chart from a holding's symbol on a phone, and only there", async () => {
+  it("opens the phone chart from a holding's sheet on a phone, and only there", async () => {
     const screenNow = fakeScreen('phone')
     render(<Holdings />)
     await pass(0)
+    // SUDARSHAN M6.9: on a phone the holding is a card; its sheet has the chart.
+    act(() => screen.getByRole('button', { name: /SBIN/ }).click())
     expect(screen.getByRole('link', { name: 'Open the chart for SBIN on NSE' })).toHaveAttribute(
       'href',
       '/chart/NSE/SBIN'
