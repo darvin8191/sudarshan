@@ -14,6 +14,7 @@ from alerts_fakes import (
     OWNER,
     FakeOpenAlgo,
     FakeProxy,
+    RunningClock,
     book_row,
     ist,
     trade_row,
@@ -60,7 +61,8 @@ def _lines(openalgo: FakeOpenAlgo) -> list[str]:
 def test_a_fill_during_a_disconnect_is_told_after_the_reconnect(settings_for, fast, quick_resync):
     async def scenario():
         async with FakeProxy() as proxy, FakeOpenAlgo() as openalgo:
-            svc, task = await _start(settings_for(proxy, openalgo))
+            clock = RunningClock(ist(2026, 10, 21, 10, 0))
+            svc, task = await _start(settings_for(proxy, openalgo), clock)
             await wait_until(lambda: proxy.subscribed)
             await wait_until(lambda: openalgo.book_reads() == 1)  # the first subscription too
             await proxy.drop_all()  # OpenAlgo restarts; meanwhile the order fills
@@ -200,7 +202,8 @@ def test_an_analyze_mode_book_is_not_the_live_book(settings_for, fast, quick_res
 def test_part_fills_and_rejections_found_later(settings_for, fast, quick_resync):
     async def scenario():
         async with FakeProxy() as proxy, FakeOpenAlgo() as openalgo:
-            svc, task = await _start(settings_for(proxy, openalgo))
+            clock = RunningClock(ist(2026, 10, 21, 10, 0))
+            svc, task = await _start(settings_for(proxy, openalgo), clock)
             await wait_until(lambda: openalgo.book_reads() == 1)
             await proxy.drop_all()
             openalgo.orders = [book_row("p1", "open"), book_row("p2", "rejected", action="SELL")]
