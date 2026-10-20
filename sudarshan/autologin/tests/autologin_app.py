@@ -56,7 +56,9 @@ def use_app_state(monkeypatch, *, vault, holidays_file=None, pepper=None) -> Non
     """Point the blueprint's lazily built vault, calendar and hand-off key at this test's."""
     from sudarshan.autologin.schedule import TradingCalendar
     from sudarshan.vault import HANDOFF_INFO, fernet_for
+    from utils.thread_safe_cache import LockedTTLCache
 
+    monkeypatch.setattr(bp_module, "_rejections_warned", LockedTTLCache(maxsize=4, ttl=600))
     monkeypatch.setattr(bp_module, "_vault", lambda: vault)
     if holidays_file is not None:
         calendar = TradingCalendar(holidays_file)

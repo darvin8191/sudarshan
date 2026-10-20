@@ -67,6 +67,11 @@ MAX_ATTEMPTS_PER_WINDOW = 10
 TOTP_MIN_LEFT_S = 5.0
 #: Pauses between hand-off retries when OpenAlgo does not answer (the token is already issued).
 REPORT_RETRIES_S = (2.0, 5.0)
+#: How long the first call to OpenAlgo keeps asking again while OpenAlgo answers that it is busy,
+#: and the pause between two asks. Nothing has been sent to Upstox yet, so waiting is free.
+PREFLIGHT_PATIENCE_S = {KIND_SCHEDULED: 75.0, KIND_TEST: 10.0}
+PREFLIGHT_RETRY_S = 5.0
+PREFLIGHT_RETRY_KINDS = frozenset({"busy"})
 
 
 @dataclass(frozen=True)
@@ -151,10 +156,12 @@ class AutoLoginRun:
         # OpenAlgo first: a day on which the owner already logged in by hand needs nothing,
         # and must not produce a failure message for a setup problem either.
         try:
-            info = self.link.preflight()
+            info = self._preflight()
         except LinkError as exc:
             log.error("OpenAlgo preflight failed: %s", exc.kind)
-            code = "handoff_rejected" if exc.kind == "rejected" else "openalgo_unreachable"
+            code = {"rejected": "handoff_rejected", "busy": "openalgo_busy"}.get(
+                exc.kind, "openalgo_unreachable"
+            )
             return self._failed(code, setup=code == "handoff_rejected", can_notify=False)
         if not info.get("user"):
             return self._failed("no_user", setup=True)
@@ -217,6 +224,28 @@ class AutoLoginRun:
         self.vault.finish_attempt(attempt_id, outcome="ok", code="ok")
         log.info("Upstox issued a token; handing it to OpenAlgo")
         return self._hand_over(result.token)
+
+    def _preflight(self) -> dict:
+        """OpenAlgo's answer, asking again every few seconds while it says it is busy.
+
+        Bounded twice: by the clock (a slow answer uses up the patience too) and by a count of
+        tries, so a clock that does not move cannot keep a run here.
+        """
+        patience = PREFLIGHT_PATIENCE_S[self.kind]
+        give_up = self.now() + timedelta(seconds=patience)
+        retries_left = int(patience // PREFLIGHT_RETRY_S)
+        while True:
+            try:
+                return self.link.preflight()
+            except LinkError as exc:
+                too_late = self.now() + timedelta(seconds=PREFLIGHT_RETRY_S) > give_up
+                if exc.kind not in PREFLIGHT_RETRY_KINDS or retries_left <= 0 or too_late:
+                    raise
+                retries_left -= 1
+                log.info(
+                    "OpenAlgo answered %s; asking again in %.0f s", exc.kind, PREFLIGHT_RETRY_S
+                )
+                self.sleep(PREFLIGHT_RETRY_S)
 
     def _code_time(self) -> datetime:
         at = self.now()

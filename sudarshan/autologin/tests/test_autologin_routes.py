@@ -21,7 +21,7 @@ from autologin_fakes import FAKE_PIN, FAKE_TOKEN, FAKE_TOTP_SECRET
 
 import blueprints.sudarshan_autologin as bp_module
 from database import auth_db
-from sudarshan.autologin.handoff import seal
+from sudarshan.autologin.handoff import MAX_SEALED_BYTES, seal
 from sudarshan.autologin.schedule import IST
 from sudarshan.autologin.worker import EXIT_BUSY, SECRET_PIN, SECRET_TOTP
 from sudarshan.vault import HANDOFF_INFO, fernet_for
@@ -369,7 +369,6 @@ def test_preflight_answers_a_sealed_request_without_any_session_or_csrf(setup, p
 @pytest.mark.parametrize(
     "make_blob",
     [
-        lambda pepper: b"",
         lambda pepper: b"not a sealed request",
         lambda pepper: seal(fernet_for("e5" * 32, HANDOFF_INFO), "preflight"),  # another key
         lambda pepper: seal(
@@ -377,7 +376,7 @@ def test_preflight_answers_a_sealed_request_without_any_session_or_csrf(setup, p
         ),  # wrong op
         lambda pepper: seal(fernet_for(pepper, HANDOFF_INFO), "preflight", now=time.time() - 120),
         lambda pepper: seal(fernet_for(pepper, HANDOFF_INFO), "preflight", now=time.time() + 600),
-        lambda pepper: b"x" * 20_000,
+        lambda pepper: b"x" * MAX_SEALED_BYTES,
     ],
 )
 def test_preflight_rejects_anything_not_genuine(setup, pepper, make_blob):
@@ -385,6 +384,82 @@ def test_preflight_rejects_anything_not_genuine(setup, pepper, make_blob):
     response = _post_sealed(client, "preflight", make_blob(pepper))
     assert response.status_code == 403
     assert set(response.get_json()) == {"status", "message"}
+
+
+# nginx sets these on every proxied location; the addresses are RFC 5737 documentation ones.
+PROXIED = [
+    {"X-Forwarded-For": "192.0.2.10"},
+    {"X-Real-IP": "192.0.2.10"},
+    {"Forwarded": "for=192.0.2.10;proto=https"},
+    {"x-forwarded-for": "127.0.0.1"},  # any value, any spelling
+]
+
+
+@pytest.mark.parametrize("op", ["preflight", "report"])
+@pytest.mark.parametrize("proxied", PROXIED)
+def test_requests_that_came_through_nginx_are_not_found(setup, pepper, monkeypatch, op, proxied):
+    _, client, _, _ = setup
+    opened = []
+    real_open = bp_module.open_sealed
+    monkeypatch.setattr(
+        bp_module, "open_sealed", lambda *a, **k: opened.append(op) or real_open(*a, **k)
+    )
+    fields = {"outcome": "failed", "telegram": "x"} if op == "report" else {}
+    blob = seal(fernet_for(pepper, HANDOFF_INFO), op, **fields)
+    response = client.post(
+        f"/sudarshan/autologin/internal/{op}",
+        data=blob,
+        headers={"Content-Type": "application/octet-stream", **JSON, **proxied},
+    )
+    assert response.status_code == 404 and opened == []  # refused before the body was read
+    assert _post_sealed(client, op, blob).status_code == 200  # its nonce was never used
+
+
+def test_sealed_routes_need_a_declared_small_body(setup):
+    _, client, _, _ = setup
+    path = "/sudarshan/autologin/internal/preflight"
+    assert _post_sealed(client, "preflight", b"").status_code == 411
+    chunked = client.post(
+        path,
+        data=b"x" * 64,
+        headers={"Content-Type": "application/octet-stream", "Transfer-Encoding": "chunked"},
+    )
+    assert chunked.status_code == 411
+    assert _post_sealed(client, "preflight", b"x" * (MAX_SEALED_BYTES + 1)).status_code == 413
+
+
+def test_junk_cannot_use_up_a_limit_and_lock_out_the_worker(
+    monkeypatch, vault, holidays_file, pepper, caplog
+):
+    """Behind nginx every client is 127.0.0.1, so a per-address limit here was a shared one."""
+    reset_openalgo_db()
+    add_owner()
+    use_app_state(monkeypatch, vault=vault, holidays_file=holidays_file, pepper=pepper)
+    stub_outside_world(monkeypatch)
+    client = make_app(rate_limits=True).test_client()
+    caplog.set_level("DEBUG", logger=bp_module.logger.name)
+    codes = set()
+    for op in ("preflight", "report"):
+        path = f"/sudarshan/autologin/internal/{op}"
+        for index in range(60):
+            junk = f"junk {index}".encode()
+            codes.add(client.post(path, data=junk, headers=PROXIED[index % 3]).status_code)
+            codes.add(_post_sealed(client, op, junk).status_code)
+    assert codes == {403, 404}
+
+    cipher = fernet_for(pepper, HANDOFF_INFO)
+    assert _post_sealed(client, "preflight", seal(cipher, "preflight")).status_code == 200
+    report = seal(cipher, "report", outcome="failed", telegram="x")
+    assert _post_sealed(client, "report", report).status_code == 200
+
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert [r.getMessage().split(" request")[0] for r in warnings] == [
+        "Auto-login: rejected a preflight",
+        "Auto-login: rejected a report",
+    ]
+    assert (
+        sum(r.levelname == "DEBUG" and "rejected" in r.getMessage() for r in caplog.records) == 120
+    )
 
 
 def test_report_of_a_failure_only_tells_the_owner(setup, pepper):

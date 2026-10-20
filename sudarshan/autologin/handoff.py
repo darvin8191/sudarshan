@@ -37,7 +37,8 @@ class HandoffRejected(Exception):
 
 
 class LinkError(Exception):
-    """OpenAlgo could not be asked (``unreachable``) or refused the request (``rejected``)."""
+    """OpenAlgo could not be asked (``unreachable``), asked us to wait (``busy``), refused the
+    request (``rejected``) or failed (``error``)."""
 
     def __init__(self, kind: str, status: int | None = None):
         super().__init__(kind)
@@ -107,7 +108,9 @@ class OpenAlgoLink:
             )
         except httpx.HTTPError as exc:
             raise LinkError("unreachable") from exc
-        if response.status_code in (401, 403):
+        if response.status_code == 429:
+            raise LinkError("busy", 429)  # retry shortly
+        if response.status_code in (401, 403, 404):
             raise LinkError("rejected", response.status_code)
         try:
             payload = response.json()

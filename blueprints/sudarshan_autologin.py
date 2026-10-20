@@ -11,7 +11,8 @@ Owner routes (OpenAlgo session + CSRF, like the other owner-only JSON endpoints)
     POST   /sudarshan/autologin/test          one attempt now (child process, waited for)
 
 Worker routes (no session and no CSRF cookie: each body is a sealed Fernet token only a process
-that can read OpenAlgo's .env can make, see ``sudarshan/autologin/handoff.py``):
+that can read OpenAlgo's .env can make, see ``sudarshan/autologin/handoff.py``). They answer 404
+to anything that came through nginx, and have no rate limit (see ``_open_sealed_request``):
     POST   /sudarshan/autologin/internal/preflight   who is the owner, which broker, logged in?
     POST   /sudarshan/autologin/internal/report      apply a new Upstox token and/or tell the owner
 
@@ -45,7 +46,12 @@ from database.user_db import find_user_by_username
 from extensions import socketio
 from limiter import limiter
 from sudarshan.autologin import messages
-from sudarshan.autologin.handoff import SEAL_TTL_S, HandoffRejected, open_sealed
+from sudarshan.autologin.handoff import (
+    MAX_SEALED_BYTES,
+    SEAL_TTL_S,
+    HandoffRejected,
+    open_sealed,
+)
 from sudarshan.autologin.launcher import run_test_child
 from sudarshan.autologin.schedule import HOLIDAYS_FILE, IST, SCHEDULE, TradingCalendar
 from sudarshan.autologin.totp import InvalidSecret, normalize_secret
@@ -64,7 +70,7 @@ from utils.auth_utils import (
 from utils.lazy import LazyInit
 from utils.logging import get_logger
 from utils.session import check_session_validity, has_login_this_trading_session
-from utils.thread_safe_cache import LockedTTLCache
+from utils.thread_safe_cache import MISSING, LockedTTLCache
 
 logger = get_logger(__name__)
 
@@ -87,8 +93,13 @@ TOTP_INVALID = (
 PIN_INVALID = "The PIN must be exactly 6 digits."
 OWNER_ONLY = "Only the account owner can change auto-login."
 
+#: Set by nginx on every proxied location: a request carrying one did not come from this server.
+PROXY_HEADERS = ("X-Forwarded-For", "X-Real-IP", "Forwarded")
+
 # Nonces of accepted hand-off requests, kept past their expiry so none is accepted twice.
 _seen_nonces = LockedTTLCache(maxsize=256, ttl=2 * SEAL_TTL_S)
+# Which sealed routes have warned about a rejected request in the last 10 minutes.
+_rejections_warned = LockedTTLCache(maxsize=4, ttl=600)
 # Built once on first use. Each factory only constructs (derives a key, stores a path); the vault
 # opens its file later, on first use, outside LazyInit's lock.
 _vault_lazy = LazyInit(lambda: Vault(pepper=pepper_from(os.environ)), "sudarshan-autologin-vault")
@@ -367,20 +378,51 @@ def test_now():
 # -- worker routes ------------------------------------------------------------------------------
 
 
+def _note_rejection(op: str, reason: str) -> None:
+    """Junk must not flood the log: debug always, one warning per op every 10 minutes."""
+    logger.debug("Auto-login: rejected a %s request (%s)", op, reason)
+    with _rejections_warned.lock:
+        first = _rejections_warned.get(op, MISSING) is MISSING
+        if first:
+            _rejections_warned[op] = True
+    if first:
+        logger.warning(
+            "Auto-login: rejected a %s request that was not from this server's worker (%s); "
+            "more are logged at debug level for 10 minutes",
+            op,
+            reason,
+        )
+
+
 def _open_sealed_request(op: str):
-    """The verified message, or None (the caller answers 403 without saying why)."""
+    """``(message, None)`` for a genuine sealed request, else ``(None, response)``.
+
+    These routes are for the worker on this server, which calls 127.0.0.1:5000 directly. A
+    request that came through nginx carries its forwarding headers (nginx sets them on every
+    proxied location) and is answered 404 before its body is read. There is no rate limit here:
+    behind nginx every client shares one address, so a limit would let anyone use it up and
+    block the worker; a forged request costs one HMAC check and is refused.
+    """
+    if any(header in request.headers for header in PROXY_HEADERS):
+        return None, (jsonify({"status": "error", "message": "Not found"}), 404)
+    length = request.content_length
+    if length is None:
+        return None, (jsonify({"status": "error", "message": "Length required"}), 411)
+    if length > MAX_SEALED_BYTES:
+        return None, (jsonify({"status": "error", "message": "Too large"}), 413)
     try:
-        return open_sealed(_handoff(), request.get_data(cache=False), op=op, seen=_seen_nonces)
+        message = open_sealed(_handoff(), request.get_data(cache=False), op=op, seen=_seen_nonces)
     except HandoffRejected as exc:
-        logger.warning("Auto-login: rejected a %s request (%s)", op, exc)
-        return None
+        _note_rejection(op, str(exc))
+        return None, (jsonify({"status": "error", "message": "Forbidden"}), 403)
+    return message, None
 
 
 @sudarshan_autologin_bp.route("/internal/preflight", methods=["POST"])
-@limiter.limit("30 per minute")
 def internal_preflight():
-    if _open_sealed_request("preflight") is None:
-        return jsonify({"status": "error", "message": "Forbidden"}), 403
+    _, refused = _open_sealed_request("preflight")
+    if refused:
+        return refused
     owner = find_user_by_username()
     return jsonify(
         {
@@ -480,11 +522,10 @@ def _notify_owner(username: str, text: str) -> bool:
 
 
 @sudarshan_autologin_bp.route("/internal/report", methods=["POST"])
-@limiter.limit("30 per minute")
 def internal_report():
-    message = _open_sealed_request("report")
-    if message is None:
-        return jsonify({"status": "error", "message": "Forbidden"}), 403
+    message, refused = _open_sealed_request("report")
+    if refused:
+        return refused
     owner = find_user_by_username()
     if owner is None:
         return jsonify(

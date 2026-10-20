@@ -354,6 +354,46 @@ def test_openalgo_not_answering_before_login(ready_vault, calendar, kind, code):
     assert link.reports() == []  # the Telegram path runs through OpenAlgo itself
 
 
+def test_preflight_asks_again_while_openalgo_is_busy(ready_vault, calendar):
+    link, upstox = FakeLink(), FakeUpstoxCall()
+    link.preflight_errors.extend([LinkError("busy", 429)] * 2)
+    run = make_run(ready_vault, calendar, link=link, upstox=upstox)
+    assert run.execute() == EXIT_OK
+    assert run.sleeps == [5.0, 5.0]
+    assert [op for op, _ in link.calls] == ["preflight"] * 3 + ["report"]
+    assert len(upstox.calls) == 1
+
+
+@pytest.mark.parametrize(("kind", "waits"), [("scheduled", 15), ("test", 2)])
+def test_preflight_stops_asking_in_time(ready_vault, calendar, kind, waits):
+    link, upstox = FakeLink(), FakeUpstoxCall()
+    link.preflight_error = LinkError("busy", 429)
+    run = make_run(ready_vault, calendar, link=link, upstox=upstox, kind=kind)
+    assert run.execute() == EXIT_FAILED
+    assert run.sleeps == [worker.PREFLIGHT_RETRY_S] * waits  # 75 s scheduled, 10 s test
+    assert upstox.calls == [] and link.reports() == []
+    state = ready_vault.state()
+    assert state.last_code == "openalgo_busy" and "kept asking to wait" in state.last_message
+
+
+def test_preflight_does_not_wait_on_a_refusal(ready_vault, calendar):
+    link = FakeLink()
+    link.preflight_error = LinkError("rejected", 404)
+    run = make_run(ready_vault, calendar, link=link)
+    assert run.execute() == EXIT_FAILED
+    assert run.sleeps == [] and ready_vault.state().last_code == "handoff_rejected"
+
+
+def test_preflight_patience_is_bounded_without_a_moving_clock(ready_vault, calendar):
+    link = FakeLink()
+    link.preflight_error = LinkError("busy", 429)
+    run = make_run(ready_vault, calendar, link=link)
+    run.sleep = lambda seconds: None  # the clock never moves
+    assert run.execute() == EXIT_FAILED
+    patience = worker.PREFLIGHT_PATIENCE_S["scheduled"]
+    assert len(link.calls) == 1 + int(patience // worker.PREFLIGHT_RETRY_S)
+
+
 # -- our own pace -------------------------------------------------------------------------------
 
 

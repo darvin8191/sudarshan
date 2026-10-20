@@ -116,11 +116,14 @@ class FakeLink:
             "fresh_session": fresh,
         }
         self.report_answers: deque = deque()
-        self.preflight_error: LinkError | None = None
+        self.preflight_errors: deque[LinkError] = deque()  # raised once each, in order
+        self.preflight_error: LinkError | None = None  # then this one on every call
         self.calls: list[tuple[str, dict]] = []
 
     def preflight(self) -> dict:
         self.calls.append(("preflight", {}))
+        if self.preflight_errors:
+            raise self.preflight_errors.popleft()
         if self.preflight_error:
             raise self.preflight_error
         return dict(self.preflight_answer)

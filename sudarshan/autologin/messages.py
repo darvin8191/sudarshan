@@ -41,6 +41,7 @@ MESSAGES = {
     "wrong_broker": "OpenAlgo is set up for another broker. Auto-login works only with Upstox.",
     "no_user": "OpenAlgo has no user account yet.",
     "openalgo_unreachable": "OpenAlgo is not responding on this server.",
+    "openalgo_busy": "OpenAlgo on this server kept asking to wait, so the login was not tried.",
     "handoff_failed": (
         "Upstox gave a new login, but OpenAlgo did not respond, so it was not saved."
     ),
