@@ -175,6 +175,12 @@ export function istDay(at: number): string {
 export type FeedLine =
   | { kind: 'live' }
   | { kind: 'delayed'; at: number; stale: boolean }
+  /**
+   * The socket is down and a quote request every few seconds is filling in:
+   * "Delayed", with the age of the last answer. Only a screen that runs such a
+   * fallback (the chart) says so; the others never pass `polling`.
+   */
+  | { kind: 'polling'; at: number; stale: boolean }
   /** The socket is not up: on first load, after the phone wakes, or while the feed is down. */
   | { kind: 'connecting'; at: number | null; stale: boolean; again: boolean }
   | { kind: 'waiting' }
@@ -183,9 +189,10 @@ export type FeedLine =
 /**
  * The live line for a set of instruments: "Live" only while WebSocket ticks
  * are arriving, never on the strength of a REST answer. While the socket is
- * down and ticks are due it says it is (re)connecting, and how old the figures
- * are; otherwise it gives their age. Either is called stale when the market is
- * known to be open, ticks are due, and nothing has come for `STALE_MS`.
+ * down and ticks are due it says it is (re)connecting, or delayed when a quote
+ * request is filling in, and how old the figures are; otherwise it gives their
+ * age. Any of those is called stale when the market is known to be open, ticks
+ * are due, and nothing has come for `STALE_MS` (or the screen's `staleMs`).
  */
 export function feedLine({
   now,
@@ -194,6 +201,8 @@ export function feedLine({
   lastUpdateAt,
   ticksDue = true,
   connected = true,
+  polling = false,
+  staleMs = STALE_MS,
 }: {
   now: number
   marketOpen: boolean | null
@@ -203,11 +212,25 @@ export function feedLine({
   ticksDue?: boolean
   /** Whether the market-data socket is up and signed in. */
   connected?: boolean
+  /**
+   * Whether a quote request every few seconds is standing in for the socket
+   * while it is down. With an answer in hand the line says "Delayed" and its
+   * age rather than "Reconnecting".
+   */
+  polling?: boolean
+  /**
+   * How long without a tick, in market hours, before the figures are stale.
+   * The dashboard's own `STALE_MS` unless a screen knows its instrument better
+   * (a chart of a thinly traded stock goes quiet for longer than an index).
+   */
+  staleMs?: number
 }): FeedLine {
   if (marketOpen === false) return { kind: 'closed' }
   const old = (at: number | null) =>
-    ticksDue && marketOpen === true && (at === null || now - at > STALE_MS)
+    ticksDue && marketOpen === true && (at === null || now - at > staleMs)
   if (ticksDue && !connected) {
+    if (polling && lastUpdateAt !== null)
+      return { kind: 'polling', at: lastUpdateAt, stale: old(lastUpdateAt) }
     return {
       kind: 'connecting',
       at: lastUpdateAt,
@@ -215,9 +238,20 @@ export function feedLine({
       again: lastTickAt !== null,
     }
   }
-  if (lastTickAt !== null && now - lastTickAt <= STALE_MS) return { kind: 'live' }
+  if (lastTickAt !== null && now - lastTickAt <= staleMs) return { kind: 'live' }
   if (lastUpdateAt !== null) return { kind: 'delayed', at: lastUpdateAt, stale: old(lastUpdateAt) }
   return { kind: 'waiting' }
+}
+
+/**
+ * Whether two lines say the same thing apart from the age they show, which
+ * moves every second: what a screen re-renders on, or a marker announces.
+ */
+export function sameFeedState(a: FeedLine, b: FeedLine): boolean {
+  if (a.kind !== b.kind) return false
+  const stale = (line: FeedLine) => ('stale' in line ? line.stale : false)
+  const again = (line: FeedLine) => (line.kind === 'connecting' ? line.again : false)
+  return stale(a) === stale(b) && again(a) === again(b)
 }
 
 /** The latest of some moments, or null when none of them is known. */

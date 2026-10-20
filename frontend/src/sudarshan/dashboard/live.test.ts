@@ -21,6 +21,7 @@ import {
   openPositions,
   priceOf,
   STALE_MS,
+  sameFeedState,
 } from './live'
 
 /** When the position book was asked for. */
@@ -362,6 +363,78 @@ describe('feedLine', () => {
         ticksDue: false,
       })
     ).toEqual({ kind: 'delayed', at: READ, stale: false })
+  })
+
+  it('says delayed, with the age of the last answer, while a quote request fills in for the socket', () => {
+    expect(
+      feedLine({
+        now: READ + 3000,
+        marketOpen: true,
+        lastTickAt: READ - 20_000,
+        lastUpdateAt: READ,
+        connected: false,
+        polling: true,
+      })
+    ).toEqual({ kind: 'polling', at: READ, stale: false })
+    // The requests stopped answering too: stale, never real-time.
+    expect(
+      feedLine({
+        now: READ + STALE_MS + 1,
+        marketOpen: true,
+        lastTickAt: READ - 20_000,
+        lastUpdateAt: READ,
+        connected: false,
+        polling: true,
+      })
+    ).toEqual({ kind: 'polling', at: READ, stale: true })
+  })
+
+  it('says reconnecting while polling has nothing to show yet, and nothing changes without polling', () => {
+    expect(
+      feedLine({
+        now: READ,
+        marketOpen: true,
+        lastTickAt: READ - 2000,
+        lastUpdateAt: null,
+        connected: false,
+        polling: true,
+      })
+    ).toEqual({ kind: 'connecting', at: null, stale: true, again: true })
+    expect(
+      feedLine({
+        now: READ,
+        marketOpen: false,
+        lastTickAt: null,
+        lastUpdateAt: READ,
+        connected: false,
+        polling: true,
+      })
+    ).toEqual({ kind: 'closed' })
+  })
+
+  it('takes a screen its own stale threshold, and the dashboard keeps its own', () => {
+    const quiet = { now: READ + 20_000, marketOpen: true, lastTickAt: READ, lastUpdateAt: READ }
+    expect(feedLine(quiet)).toEqual({ kind: 'delayed', at: READ, stale: true })
+    expect(feedLine({ ...quiet, staleMs: 30_000 })).toEqual({ kind: 'live' })
+    expect(feedLine({ ...quiet, now: READ + 31_000, staleMs: 30_000 })).toEqual({
+      kind: 'delayed',
+      at: READ,
+      stale: true,
+    })
+  })
+
+  it('tells a change of state from a change of age', () => {
+    const at = { kind: 'delayed' as const, at: READ, stale: false }
+    expect(sameFeedState(at, { ...at, at: READ + 5000 })).toBe(true)
+    expect(sameFeedState(at, { ...at, stale: true })).toBe(false)
+    expect(sameFeedState(at, { kind: 'polling', at: READ, stale: false })).toBe(false)
+    expect(
+      sameFeedState(
+        { kind: 'connecting', at: null, stale: false, again: false },
+        { kind: 'connecting', at: null, stale: false, again: true }
+      )
+    ).toBe(false)
+    expect(sameFeedState({ kind: 'live' }, { kind: 'live' })).toBe(true)
   })
 
   it('says the market is closed when it is known to be, and waits when there is nothing yet', () => {

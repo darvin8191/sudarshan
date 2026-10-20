@@ -770,6 +770,18 @@ def react_autologin():
     return serve_react_app()
 
 
+# SUDARSHAN M4.15: the phone chart. A bare /chart opens the last instrument.
+@react_bp.route("/chart", strict_slashes=False)
+def react_phone_chart():
+    return serve_react_app()
+
+
+# Strings, not paths: the React ":exchange/:symbol" segments do not match slashes.
+@react_bp.route("/chart/<exchange>/<symbol>", strict_slashes=False)
+def react_phone_chart_symbol(exchange, symbol):
+    return serve_react_app()
+
+
 # ============================================================
 # Flow Routes - Visual Workflow Automation
 # ============================================================

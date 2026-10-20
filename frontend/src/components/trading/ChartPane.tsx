@@ -100,6 +100,7 @@ import {
   type DrawSelection,
   type DrawStats,
   type IndicatorSettingsRequest,
+  type LiveStatus, // SUDARSHAN M4.1
   type OrderTicketRequest,
   type ReplayState,
   type SymbolView,
@@ -128,6 +129,7 @@ import {
   stillHeld,
 } from './dock/chartOrderRows'
 import { cancelDockOrder, closeDockPosition } from './dock/orderActions'
+import { LiveStatusMarker } from './LiveStatusMarker' // SUDARSHAN M4.1
 import { PriceScaleMenu } from './PriceScaleMenu'
 import { QuickIntervalBox, useQuickEntry, useSeedBuffer } from './QuickEntry'
 import { Tip } from './Tip'
@@ -380,6 +382,8 @@ export function ChartPane({
   const [branding, setBranding] = useState<BrandingLink | null>(null)
   const [qty, setQty] = useState(1)
   const [wsState, setWsState] = useState('connecting')
+  /** SUDARSHAN M4.1: real-time, delayed, stale or closed; the pane marks all but real-time. */
+  const [liveStatus, setLiveStatus] = useState<LiveStatus | null>(null)
   /**
    * Just the two history flags, mirrored locally. The full DrawStats is pushed
    * to the parent for the drawing rail, but the toolbar's undo/redo sit in THIS
@@ -540,6 +544,7 @@ export function ChartPane({
         intervalCbRef.current?.(paneId, iv)
       },
       onWsState: (s) => current && setWsState(s),
+      onLiveStatus: (status) => current && setLiveStatus(status), // SUDARSHAN M4.1
       onSymbolLoaded: (view) => {
         if (!current) return
         setSym(view)
@@ -1667,6 +1672,8 @@ export function ChartPane({
           {sym && lotInfoText(sym, qty) && (
             <span className="text-[10px] text-muted-foreground">{lotInfoText(sym, qty)}</span>
           )}
+          {/* SUDARSHAN M4.1: whether the prices are real-time, and why not. */}
+          <LiveStatusMarker status={liveStatus} className="mt-0.5" />
         </div>
         {/* The armed drawing tool's glyph follows the pointer: the terminal
             sets --tool-cursor while a tool is armed and clears it after. */}

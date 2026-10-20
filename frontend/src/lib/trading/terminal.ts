@@ -31,7 +31,6 @@ import {
   type AlertsDocument,
   type Bar,
   BuySellButtons,
-  CandleBuilder,
   ChartObjects,
   type ChartTheme,
   type ContextMenuEvent,
@@ -111,6 +110,19 @@ import {
   readStoredIndicators,
   type StoredIndicatorRecord,
 } from './indicatorTemplates'
+// SUDARSHAN M4.1: the live-bar pipeline shared with the phone chart.
+import {
+  HistoryResync,
+  insertLiveBar,
+  LiveBarBuilder,
+  LiveBarClock,
+  type LiveBarUpdate,
+  removeLiveBar,
+  tradedToday,
+  upsertLiveBar,
+} from './liveBars'
+import { type LiveStatus, LiveStatusTracker } from './liveStatus'
+import { FrameExtrasTap, WAKE_RECONNECT_MS } from './liveTicks'
 import { openInterestCapability } from './openInterest'
 import {
   isPriceAxisSetting,
@@ -125,7 +137,7 @@ import {
 } from './priceAxis'
 import { parseRangeChoice, type RangeChoice, serializeRangeChoice } from './rangeChoice'
 import { replayTiming } from './replayTiming'
-import { applySessionHours } from './sessionHours'
+import { applySessionHours, sessionCalendarFor } from './sessionHours' // SUDARSHAN M4.1: the hours
 import { TerminalComparisons } from './terminalComparisons'
 import type { PreparedReplayMember } from './workspaceReplay'
 import {
@@ -139,7 +151,8 @@ export { dedupeIndicators } from './indicatorTemplates'
 // Re-exported so the React layer imports its chart types from this facade
 // rather than reaching into the library directly, as it already does for
 // SymbolView, DrawStats and the rest.
-export type { ReplayState }
+// SUDARSHAN M4.1: LiveStatus, for the pane's feed marker.
+export type { LiveStatus, ReplayState }
 
 type ChartInstance = ReturnType<typeof createChart>
 type BuySellButtonsInstance = InstanceType<typeof BuySellButtons>
@@ -420,6 +433,11 @@ export interface TerminalCallbacks {
   onContextMenu?(menu: TerminalContextMenu): void
   onToast(msg: string, kind: ToastKind): void
   onWsState(state: string): void
+  /**
+   * SUDARSHAN M4.1: whether the chart's prices are live, delayed, stale or
+   * from a closed market. Fires when the state changes, not on every tick.
+   */
+  onLiveStatus?(status: LiveStatus): void
   onSymbolLoaded(view: SymbolView): void
   /** Linked branding exposed in host chrome for keyboard and assistive technology. */
   onBrandingChange?(link: BrandingLink | null): void
@@ -1000,6 +1018,12 @@ const LEGEND_GAP = 6
 const nowSec = () => Math.floor(Date.now() / 1000)
 
 /**
+ * SUDARSHAN M4.1: the order and position book's re-sync. Every order event
+ * already refreshes the book; this catches one the stream never delivered.
+ */
+const BOOK_RESYNC_MS = 60_000
+
+/**
  * Resolve once the chart has repainted.
  *
  * The chart schedules its repaint on `requestAnimationFrame`, and rAF callbacks
@@ -1191,7 +1215,54 @@ export class TradingTerminal {
   /** The request whose symbol/interval metadata the current chart was built for. */
   private chartDataKey: string | null = null
   private trade: TradeFeedInstance | null = null
-  private builder: CandleBuilder | null = null
+  /** SUDARSHAN M4.1: the forming bar, from ticks and the clock. Shared with the phone chart (liveBars.ts). */
+  private builder: LiveBarBuilder | null = null
+  /**
+   * SUDARSHAN M4.1: opens a bar at each boundary while the session is open,
+   * when no tick has, by the server's clock rather than the machine's.
+   */
+  private readonly liveClock = new LiveBarClock({
+    builder: () => (this.destroyed ? null : this.builder),
+    onBar: (update) => this.onClockBar(update),
+    history: () => this.data,
+    now: () => this.frames.clock.seconds(),
+  })
+  /** SUDARSHAN M4.1: live, delayed, stale or closed: what the pane's marker says. */
+  private readonly liveStatus = new LiveStatusTracker({
+    exchange: '',
+    onChange: (status) => {
+      if (this.destroyed) return
+      this.syncCountdown()
+      this.cb.onLiveStatus?.(status)
+    },
+  })
+  /** SUDARSHAN M4.1: the bar countdown is off because the session closes before the bar would. */
+  private countdownCut = false
+  /** SUDARSHAN M4.1: a wake check is waiting for the stream to answer. */
+  private wakeCheck = false
+  private offServerClock: (() => void) | null = null
+  /**
+   * SUDARSHAN M4.1: reads the fields a depth frame carries besides the price
+   * (the day's volume above all), and the server's clock off the same frames.
+   */
+  private readonly frames = new FrameExtrasTap()
+  /**
+   * SUDARSHAN M4.1: the history re-sync behind the stream, shared with the
+   * phone chart: fast while ticks carry no traded volume, slow once they do.
+   * A hidden tab skips it unless an alert is waiting on the answer, as the
+   * controller's own repairs do.
+   */
+  private readonly resync = new HistoryResync({
+    builder: () => this.builder,
+    refresh: () => {
+      if (this.data && this.sym) void this.data.refresh()
+    },
+    active: () => document.visibilityState !== 'hidden' || this.alertsArmed(),
+  })
+  /** SUDARSHAN M4.1: coalesces the book refreshes a burst of order events asks for. */
+  private bookRefreshTimer: ReturnType<typeof setTimeout> | null = null
+  /** SUDARSHAN M4.1: the stream has been open before, so the next open is a reconnect. */
+  private wsOpened = false
   /** The expression on the chart, when the pane shows a combination rather than an instrument. */
   private expr: SymbolExpression | null = null
   /** History for plain symbols and combinations alike; the controller talks only to this. */
@@ -1511,6 +1582,41 @@ export class TradingTerminal {
     const visible = document.visibilityState !== 'hidden'
     this.data?.setVisible(visible || this.alertsArmed())
     this.comparisons?.setVisibleHost(visible)
+    // SUDARSHAN M4.1: back after the phone slept, the stream is tested.
+    if (!visible) {
+      this.hiddenAt ??= Date.now()
+      return
+    }
+    const hiddenAt = this.hiddenAt
+    this.hiddenAt = null
+    if (hiddenAt !== null && Date.now() - hiddenAt > WAKE_RECONNECT_MS && this.wsOpened)
+      void this.checkStream(hiddenAt)
+  }
+  /** SUDARSHAN M4.1: when the page was hidden, for the check on waking. */
+  private hiddenAt: number | null = null
+
+  /**
+   * SUDARSHAN M4.1: back after the phone slept. A socket can look open and be
+   * dead, so it is tested rather than trusted or thrown away: a frame since
+   * the page was hidden, or any answer to a ping within a second and a half,
+   * keeps it. Silence closes it as a dead connection would close, so the
+   * client reconnects within a second and subscribes everything again. The
+   * marker says Reconnecting while the answer is awaited.
+   */
+  private async checkStream(hiddenAt: number): Promise<void> {
+    if (this.wakeCheck || this.destroyed) return
+    const heard = this.frames.lastFrameAt
+    if (heard !== null && heard > hiddenAt) return
+    this.wakeCheck = true
+    this.liveStatus.setTransport('connecting')
+    try {
+      const alive = await this.frames.probe()
+      if (this.destroyed) return
+      if (!alive) this.frames.drop()
+      else if (this.ws?.isReady()) this.liveStatus.setTransport('live')
+    } finally {
+      this.wakeCheck = false
+    }
   }
 
   constructor(opts: TerminalOptions) {
@@ -1802,24 +1908,23 @@ export class TradingTerminal {
     // so keep rawBars current for the eventual resume without touching canvas.
     const owned = snapshot.paused ? this.data?.bars() : snapshot.bars
     if (!owned?.length) return
-    const next = [...owned]
+    let next = [...owned]
     const chart = this.chart
     const before = snapshot.reason === 'prepend' ? chart?.getVisibleLogicalRange() : null
     const countBefore = this.shownCount
 
-    // History's view of the bar still forming: the sampled volume (a depth
-    // subscription carries none), the true open when the builder opened the
-    // bucket mid-way, and the union of the extremes. The close stays with the
-    // ticks, which are fresher than any poll. The builder's own copy is
-    // reconciled as well, or its next tick would write the stale values
-    // straight back over the repair.
-    if (snapshot.reason === 'refresh' && this.builder && this.liveBucket != null) {
-      const current = this.builder.current()
-      const index = current ? next.findIndex((bar) => bar.time === current.time) : -1
-      if (current && index >= 0 && current.time === this.liveBucket) {
-        const reconciled = this.builder.reconcile(next[index])
-        if (reconciled) next[index] = reconciled
-      }
+    // SUDARSHAN M4.1: history's view of the bar still forming: its volume where the feed sent
+    // none, the true open when the builder opened the bucket mid-way, and the
+    // union of the extremes. The close stays with the ticks, which are fresher
+    // than any poll. A bar the clock opened, which history has not seen, is
+    // kept after history's last; one bar per bucket either way. The builder's
+    // own copy is reconciled too, or its next tick would write the stale
+    // values straight back over the repair. The builder belongs to this
+    // request: every load clears it before asking for history, and the guard
+    // above has matched the request to this pane.
+    if (this.builder) {
+      next = this.builder.mergeSnapshot(next, this.frames.clock.nowSec())
+      this.liveBucket = this.builder.isLive() ? (this.builder.current()?.time ?? null) : null
     }
 
     this.rawBars = next
@@ -2129,6 +2234,15 @@ export class TradingTerminal {
       },
       0
     )
+  }
+
+  /** SUDARSHAN M4.1: read the book soon, once for a burst of order events. */
+  private scheduleBookRefresh(): void {
+    if (this.destroyed || this.bookRefreshTimer) return
+    this.bookRefreshTimer = setTimeout(() => {
+      this.bookRefreshTimer = null
+      if (!this.destroyed) void this.pollBook()
+    }, 250)
   }
 
   private async pollBook() {
@@ -2486,7 +2600,13 @@ export class TradingTerminal {
       // ago. A live trading terminal is the case they are for, so this host opts
       // in. The clock reads the exchange's wall time through the chart's
       // configured timezone, which is what a trader is actually watching.
-      axisChrome: { sessionClock: { showOffset: true }, barCountdown: true },
+      // SUDARSHAN M4.1: both read the server's clock, and the countdown gives
+      // way where the session closes before the bar would (syncCountdown).
+      axisChrome: {
+        sessionClock: { showOffset: true },
+        barCountdown: !this.countdownCut,
+        clock: () => this.frames.clock.seconds(),
+      },
       // The library's built-in screenshot command calls its own
       // `downloadScreenshot()`, which knows nothing about this terminal's DOM
       // OHLC readout or its trade panel. Unbind it and claim the same chord for
@@ -6392,7 +6512,8 @@ export class TradingTerminal {
   private startLtpFallback() {
     if (this.ltpPollTimer) return
     this.ltpPollTimer = setInterval(async () => {
-      if (!this.sym) return
+      // SUDARSHAN M4.1: a quote never stands in for a stream that is up.
+      if (!this.sym || this.ws?.isReady()) return
       if (this.sym.synthetic && this.expr) {
         // A combination polls each leg and folds, the same as the socket path.
         try {
@@ -6404,7 +6525,10 @@ export class TradingTerminal {
             })
             if (typeof j.data?.ltp === 'number' && j.data.ltp > 0) this.legLtp.set(leg, j.data.ltp)
           }
-          this.onCombinedTick(this.expr, nowSec())
+          // SUDARSHAN M4.1: the stream came back while the legs were asked: it speaks, not they.
+          if (this.ws?.isReady() || !this.ltpPollTimer) return
+          this.onCombinedTick(this.expr, this.frames.clock.nowSec(), true)
+          this.liveStatus.setTransport('polling')
           this.cb.onWsState('fallback')
         } catch {
           /* next cycle */
@@ -6412,16 +6536,27 @@ export class TradingTerminal {
         return
       }
       try {
-        const j = await this.api<{ data?: { ltp?: number; bid?: number; ask?: number } }>(
-          'quotes',
-          {
-            symbol: this.sym.symbol,
-            exchange: this.sym.exchange,
-          }
-        )
+        const j = await this.api<{
+          data?: { ltp?: number; bid?: number; ask?: number; volume?: number; oi?: number }
+        }>('quotes', {
+          symbol: this.sym.symbol,
+          exchange: this.sym.exchange,
+        })
         const q = j.data || {}
+        // SUDARSHAN M4.1: the stream came back while the quote was asked: it speaks, not the quote.
+        if (this.ws?.isReady() || !this.ltpPollTimer) return
+        // SUDARSHAN M4.1: the quote's volume is the day's running total, so
+        // the forming bar's volume keeps moving on the fallback too.
         if (typeof q.ltp === 'number' && q.ltp > 0)
-          this.onTick({ symbol: this.sym.symbol, ltp: q.ltp, timeSec: nowSec() })
+          this.onTick({
+            symbol: this.sym.symbol,
+            ltp: q.ltp,
+            timeSec: this.frames.clock.nowSec(),
+            dayVolume: q.volume,
+            oi: this.sym.hasOpenInterest ? q.oi : undefined,
+            polled: true,
+          })
+        this.liveStatus.setTransport('polling')
         if (!this.sym.quoteOnly) this.priceAxis.setQuote(q.bid, q.ask)
         if (
           this.tradeBtns &&
@@ -6447,44 +6582,41 @@ export class TradingTerminal {
   }
 
   /* single tick path shared by WS pushes and the REST fallback */
-  private onTick(e: { symbol?: string; ltp: number; ltq?: number; timeSec?: number }) {
+  private onTick(e: {
+    symbol?: string
+    ltp: number
+    ltq?: number
+    timeSec?: number
+    /** SUDARSHAN M4.1: the day's cumulative volume, when the frame or quote carried it. */
+    dayVolume?: number
+    oi?: number
+    /** SUDARSHAN M4.1: a quote request standing in for the stream: it moves the chart but is never real-time. */
+    polled?: boolean
+    /** SUDARSHAN M4.1: the exchange's time of the last trade, when the frame carried one. */
+    tradeTime?: number
+  }) {
     if (!this.sym || (e.symbol && e.symbol !== this.sym.symbol)) return
     this.lastLtp = e.ltp
     this.cb.onLtp(e.ltp)
+    // SUDARSHAN M4.1: the feed marker hears every price; a quote is never real-time.
+    this.liveStatus.noteTick(e.timeSec, !e.polled, e.tradeTime)
     // Recolour with the price: the line belongs to the forming candle, so it
     // follows that candle's direction rather than sitting amber forever.
     if (this.position && this.posLine) this.posLine.setLeftLabel(this.posLabel())
     if (this.tradeBtns && !this.depthActive) this.tradeBtns.setMark(e.ltp)
-    if (this.builder) {
-      const u = this.builder.onTick({ time: e.timeSec || nowSec(), price: e.ltp, ltq: e.ltq })
-      if (u) {
-        this.liveBucket = u.bar.time
-        // Key the upsert on time rather than the builder's isNew flag, so a
-        // builder that ever disagrees with rawBars about the current bucket
-        // overwrites that bar instead of appending a duplicate of it.
-        const last = this.rawBars[this.rawBars.length - 1]
-        if (last && last.time === u.bar.time) this.rawBars[this.rawBars.length - 1] = u.bar
-        else this.rawBars.push(u.bar)
-        // History and live bars share one bounded store. The terminal retains
-        // its existing single WS subscription and supplies its built bar here.
-        // A bucket the builder opened mid-way, because history stopped one bar
-        // short or the socket came back, is provisional: history keeps the open.
-        if (u.provisional) this.data?.pushBar(u.bar, { provisional: true })
-        else this.data?.pushBar(u.bar)
-        // Replay owns the series while it is running. Writing the live bar into
-        // it puts a candle at the current wall-clock bucket, at the current
-        // price, hundreds of bars past the playhead: a lone spike far from the
-        // replayed action that drags the price axis and the last-price line with
-        // it, then vanishes on the next replay frame when setData rewrites the
-        // prefix. rawBars keeps accumulating either way, so leaving replay finds
-        // the session already caught up.
-        if (this.replayOwnsDisplay()) {
-          this.cb.onLtp(e.ltp)
-          return
-        }
-        // One bar in, one bar out. Only a transformed chart has to rebuild.
-        if (!this.updateLiveBar(u.bar)) this.setPriceData()
-      }
+    // SUDARSHAN M4.1: the forming bar from liveBars.ts, which the phone chart shares.
+    const u = this.builder?.onTick({
+      time: e.timeSec || this.frames.clock.nowSec(),
+      price: e.ltp,
+      ltq: e.ltq,
+      dayVolume: e.dayVolume,
+      oi: e.oi,
+      polled: e.polled,
+      tradeTime: e.tradeTime,
+    })
+    if (u && !this.applyLiveBar(u)) {
+      this.cb.onLtp(e.ltp)
+      return
     }
     // The legend belongs to the bar on screen. During replay that is the
     // playhead's, written by onReplayChange, not the live one.
@@ -6493,25 +6625,155 @@ export class TradingTerminal {
     }
   }
 
-  /* ── live data: WS ticks → candles; depth → bid/ask ───────────────────── */
-  private connectLive() {
-    if (!this.ws || !this.sym) return
-    const sec = intervalSeconds(this.interval)
+  /**
+   * SUDARSHAN M4.1: put a bar the live path changed into the store and on the
+   * chart: a tick's, or one the clock opened at a boundary. Returns false when
+   * replay owns the display, so the bar went to the store only.
+   */
+  private applyLiveBar(u: LiveBarUpdate): boolean {
+    this.liveBucket = u.bar.time
+    // SUDARSHAN M4.1: a flat bar nobody traded gives its place to this one,
+    // so a quiet market keeps one flat bar at the tail, not a trail of them.
+    let corrected = u.replaces !== undefined && removeLiveBar(this.rawBars, u.replaces)
+    // A late trade from the interval before the forming bar changed that bar
+    // too, or gave an interval that had none a bar of its own: it goes in its
+    // place, and the series is redrawn rather than updated at its tail.
+    // History's buffer keeps its own copy until the repair after the boundary
+    // brings the bar back.
+    if (u.previous !== undefined && insertLiveBar(this.rawBars, u.previous) !== 'append')
+      corrected = true
+    // Keyed on time rather than the builder's isNew flag, so a builder that
+    // ever disagrees with rawBars about the current bucket overwrites that bar
+    // instead of appending a duplicate of it, and never lands out of order.
+    if (upsertLiveBar(this.rawBars, u.bar) === 'skip') {
+      if (corrected && !this.replayOwnsDisplay()) this.setPriceData()
+      return true
+    }
+    // A new bar may be the session's last, which the countdown must not overshoot.
+    if (u.isNew) this.syncCountdown()
+    // History and live bars share one bounded store. The terminal retains its
+    // single WS subscription and supplies its built bar here. A bucket the
+    // builder opened mid-way, because history stopped one bar short or the
+    // socket came back, is provisional: history keeps the open. A bar the
+    // clock opened stays out: a flat bar nobody traded is not history, and
+    // the clock asks history for the bar that closed itself.
+    if (!u.placeholder) {
+      if (u.provisional) this.data?.pushBar(u.bar, { provisional: true })
+      else this.data?.pushBar(u.bar)
+    }
+    // Replay owns the series while it is running. Writing the live bar into
+    // it puts a candle at the current wall-clock bucket, at the current
+    // price, hundreds of bars past the playhead: a lone spike far from the
+    // replayed action that drags the price axis and the last-price line with
+    // it, then vanishes on the next replay frame when setData rewrites the
+    // prefix. rawBars keeps accumulating either way, so leaving replay finds
+    // the session already caught up.
+    if (this.replayOwnsDisplay()) return false
+    // One bar in, one bar out. Only a transformed chart, or a corrected bar
+    // behind the tail, has to rebuild.
+    if (corrected || !this.updateLiveBar(u.bar)) this.setPriceData()
+    return true
+  }
+
+  /** SUDARSHAN M4.1: a bar the clock opened at a boundary, with no tick to draw it. */
+  private onClockBar(u: LiveBarUpdate): void {
+    if (this.applyLiveBar(u)) this.refreshLegend()
+  }
+
+  /**
+   * SUDARSHAN M4.1: the bar countdown runs to the forming bar's close, which
+   * for the session's last bar can fall after the session's (an hourly bar
+   * from 15:15 would count to 16:15). There it is turned off; elsewhere it is
+   * left as it always was.
+   */
+  private syncCountdown(): void {
+    const cut = this.builder?.countdown(this.frames.clock.seconds()).kind === 'closes'
+    if (cut === this.countdownCut) return
+    this.countdownCut = cut
+    this.chart?.setAxisChromeOptions({ barCountdown: !cut })
+  }
+
+  /**
+   * SUDARSHAN M4.1: a week or month bar from history ends with yesterday.
+   * Today's own bar goes on top of it from one quote (today's open, high,
+   * low, last price and count), so the forming bar holds the whole of today
+   * rather than only what has ticked since the chart opened. Only once
+   * today's session has opened: before it, a quote still carries the last
+   * session's figures, which history already holds.
+   */
+  private async foldTodayFromQuote(builder: LiveBarBuilder, exchange: string): Promise<void> {
+    const sym = this.sym
+    if (!sym || sym.synthetic || (this.interval !== 'W' && this.interval !== 'M')) return
+    try {
+      const j = await this.api<{
+        data?: { open?: number; high?: number; low?: number; ltp?: number; volume?: number }
+      }>('quotes', { symbol: sym.symbol, exchange: sym.exchange })
+      const calendar = await sessionCalendarFor(exchange, this.apiKey)
+      if (this.destroyed || this.builder !== builder || !calendar) return
+      const q = j.data || {}
+      const { open, high, low, ltp, volume } = q
+      if (!(typeof open === 'number' && open > 0 && typeof ltp === 'number' && ltp > 0)) return
+      if (!(typeof high === 'number' && high > 0 && typeof low === 'number' && low > 0)) return
+      const now = this.frames.clock.nowSec()
+      if (!tradedToday(calendar, now)) return
+      const u = builder.foldDay({ time: now, open, high, low, close: ltp, volume })
+      if (u && this.applyLiveBar(u)) this.refreshLegend()
+    } catch {
+      // The ticks still build today's part.
+    }
+  }
+
+  /**
+   * SUDARSHAN M4.1: the forming bar for the loaded instrument and interval,
+   * seeded from the last bar of history, and the exchange's hours once they
+   * arrive: those are
+   * what let a bar open on the clock and what tell the marker the market is
+   * shut. An instrument with no hours (or a combination, which has no single
+   * exchange) stays live on ticks alone.
+   */
+  private startLiveBar(exchange: string): void {
+    this.liveClock.stop()
+    const last = this.rawBars[this.rawBars.length - 1]
     // Broker history is already aligned to the instrument's actual session.
     // Using one known bar as the congruent anchor preserves openings such as
     // 09:15 for hourly candles instead of snapping them to the Unix epoch.
-    const sessionAnchorSec = this.rawBars[this.rawBars.length - 1]?.time ?? 0
-    this.builder = sec
-      ? new CandleBuilder({ intervalSec: sec, volumeMode: 'ltq-sum', sessionAnchorSec })
+    const builder = LiveBarBuilder.supports(this.interval)
+      ? new LiveBarBuilder({ interval: this.interval, anchorSec: last?.time })
       : null
     // History normally ends *inside* the bar currently forming. An unseeded
     // builder has no current bar, so its first tick opens a second one for that
     // same bucket -- opening at whatever tick price arrives first instead of the
     // bucket's true open, restarting volume at 0, and leaving rawBars with two
     // entries for one time. Seeding hands it the last bar so ticks fold into it.
-    if (this.builder && this.rawBars.length) {
-      this.builder.seed(this.rawBars[this.rawBars.length - 1])
-    }
+    if (builder && last) builder.seed(last, this.frames.clock.nowSec())
+    this.builder = builder
+    this.liveStatus.setCalendar(null)
+    this.liveStatus.reset(exchange)
+    this.syncCountdown()
+    if (!exchange) return
+    const ticket = this.loadTicket
+    void sessionCalendarFor(exchange, this.apiKey).then((calendar) => {
+      if (this.destroyed || ticket !== this.loadTicket || !calendar) return
+      this.liveStatus.setCalendar(calendar)
+      if (!builder || this.builder !== builder) return
+      builder.setSession(calendar)
+      this.liveClock.start()
+      this.syncCountdown()
+    })
+    if (builder) void this.foldTodayFromQuote(builder, exchange)
+  }
+
+  /** SUDARSHAN M4.1: stop the forming bar: a load is about to replace what it belongs to. */
+  private stopLiveBar(): void {
+    this.liveClock.stop()
+    this.builder = null
+    this.liveBucket = null
+  }
+
+  /* ── live data: WS ticks → candles; depth → bid/ask ───────────────────── */
+  private connectLive() {
+    if (!this.ws || !this.sym) return
+    this.startLiveBar(this.sym.exchange) // SUDARSHAN M4.1
     this.depthActive = false
     // A new subscription starts with no book: the last one's bid and ask belong to another symbol.
     this.priceAxis.setQuote(null, null)
@@ -6525,10 +6787,18 @@ export class TradingTerminal {
     }
     this.offLtp = this.ws.onLtp((e: LtpEvent) => {
       this.cb.onWsState('live')
+      this.liveStatus.setTransport('live')
       this.stopLtpFallback()
-      this.onTick(e)
+      // SUDARSHAN M4.1: the day's volume, open interest and trade time off the same frame.
+      const extra = this.frames.get(e.symbol, e.exchange)
+      this.onTick({
+        ...e,
+        dayVolume: e.volume ?? extra?.dayVolume,
+        oi: extra?.oi,
+        tradeTime: extra?.tradeTime,
+      })
     })
-    this.offDepth = this.ws.onDepth((symbol: string, _exchange: string, depth: MarketDepth) => {
+    this.offDepth = this.ws.onDepth((symbol: string, exchange: string, depth: MarketDepth) => {
       if (!this.sym || symbol !== this.sym.symbol) return
       const bid = depth.bids?.[0]?.price
       const ask = depth.asks?.[0]?.price
@@ -6545,11 +6815,23 @@ export class TradingTerminal {
       // chart froze while depth kept flowing -- issue #1664).
       if (typeof depth.ltp === 'number' && depth.ltp > 0) {
         this.cb.onWsState('live')
+        this.liveStatus.setTransport('live')
         this.stopLtpFallback()
-        // Depth has an exchange timestamp but no classified trade quantity in
-        // the OpenAlgo mode-3 contract. Preserve its time and leave volume for
-        // the authoritative history reconcile.
-        this.onTick({ ltp: depth.ltp, timeSec: depth.timeSec })
+        // SUDARSHAN M4.1: depth carries an exchange timestamp, and where the feed sends them
+        // the day's running volume and open interest beside the book. The
+        // engine's parser keeps only the book and the price, so those come
+        // from the same frame through the socket tap. The last traded quantity
+        // is deliberately not summed here: a book update repeats it without a
+        // new trade. Without a day volume the bar keeps history's, and the
+        // re-sync supplies the rest.
+        const extra = this.frames.get(symbol, exchange)
+        this.onTick({
+          ltp: depth.ltp,
+          timeSec: depth.timeSec,
+          dayVolume: extra?.dayVolume,
+          oi: extra?.oi,
+          tradeTime: extra?.tradeTime,
+        })
       }
     })
     // One subscription per symbol, mode picked by instrument type: indices
@@ -6564,19 +6846,18 @@ export class TradingTerminal {
   /* ── live data for a combination: one LTP stream per leg, folded per tick ── */
   private connectExpressionLive(expr: SymbolExpression) {
     if (!this.ws) return
-    const sec = intervalSeconds(this.interval)
-    const sessionAnchorSec = this.rawBars[this.rawBars.length - 1]?.time ?? 0
     // The builder aggregates the folded value, so the forming bar's open, high
     // and low belong to the combination rather than to any one leg. Seeded from
     // the folded history like an instrument's builder: when history stopped one
     // bucket short, the first tick opens a provisional bar and the repair after
-    // the bar closes brings the open it missed.
-    this.builder = sec
-      ? new CandleBuilder({ intervalSec: sec, volumeMode: 'ltq-sum', sessionAnchorSec })
-      : null
-    if (this.builder && this.rawBars.length) {
-      this.builder.seed(this.rawBars[this.rawBars.length - 1])
-    }
+    // the bar closes brings the open it missed. SUDARSHAN M4.1: legs that all
+    // trade on one exchange share its hours, so the clock and the closed
+    // marker apply; legs across exchanges have no single session and stay
+    // live on ticks alone.
+    const exchanges = new Set(
+      expr.symbols.map((leg) => resolveLeg(leg, this.exprLegExchange).exchange)
+    )
+    this.startLiveBar(exchanges.size === 1 ? [...exchanges][0] : '')
     // Every leg starts at the close its history ended on, so the first tick of
     // any one leg already has a price for the others to fold with.
     this.legLtp.clear()
@@ -6600,6 +6881,7 @@ export class TradingTerminal {
       const leg = this.legFor(expr, e.symbol, e.exchange)
       if (!leg) return
       this.cb.onWsState('live')
+      this.liveStatus.setTransport('live') // SUDARSHAN M4.1
       this.stopLtpFallback()
       this.legLtp.set(leg, e.ltp)
       this.onCombinedTick(expr, e.timeSec)
@@ -6618,8 +6900,11 @@ export class TradingTerminal {
     return null
   }
 
-  /** Fold the latest price of every leg into one tick for the combined series. */
-  private onCombinedTick(expr: SymbolExpression, timeSec?: number) {
+  /**
+   * Fold the latest price of every leg into one tick for the combined series.
+   * SUDARSHAN M4.1: `polled` for legs a quote request answered.
+   */
+  private onCombinedTick(expr: SymbolExpression, timeSec?: number, polled = false) {
     const legs: Record<string, Bar[]> = {}
     for (const leg of expr.symbols) {
       const p = this.legLtp.get(leg)
@@ -6629,7 +6914,7 @@ export class TradingTerminal {
     const value = evaluateExpression(expr, legs)[0]?.close
     // A divisor at zero folds to a gap, and a gap is not a price.
     if (value === undefined || !Number.isFinite(value)) return
-    this.onTick({ ltp: value, timeSec })
+    this.onTick({ ltp: value, timeSec, polled })
   }
 
   /** Repair a known stream gap immediately through the shared data owner. */
@@ -6861,6 +7146,9 @@ export class TradingTerminal {
   ): Promise<boolean> {
     if (this.destroyed || !this.rest) return false
     const ticket = ++this.loadTicket
+    // SUDARSHAN M4.1: the forming bar belongs to what is on screen now; history
+    // for the next load must never merge into it. connectLive builds the next one.
+    this.stopLiveBar()
     this.lastPick = pick
     this.loadOutcome = null
     this.cb.onChartState?.({ kind: 'loading', symbol: pick.symbol, interval: this.interval })
@@ -7769,14 +8057,13 @@ export class TradingTerminal {
     this.exprFeed = new ExpressionFeed(this.cachedBars, () => this.exprLegExchange)
     // Repair follows the stream: one small refresh a moment after each bar
     // closes, an immediate one when the stream skips a bucket, and each asks
-    // history for the last few bars only. The 30-second poll stays, now as a
-    // tail request rather than the whole window, because a tradeable's only
-    // subscription is Depth, which carries no traded quantity: history is the
-    // sole source of the forming bar's volume, and a volume pane frozen for a
-    // whole bar reads as a dead feed.
+    // history for the last few bars only. SUDARSHAN M4.1: the controller's own
+    // poll is off; the terminal runs the re-sync itself (HistoryResync), fast
+    // while ticks carry no traded volume and slow once they do.
     this.data = new DataLoadingController(this.exprFeed, {
-      now: nowSec,
-      pollIntervalMs: 30_000,
+      // SUDARSHAN M4.1: the server's clock: a bar closes when the exchange's minute turns.
+      now: () => this.frames.clock.nowSec(),
+      pollIntervalMs: 0,
       refreshOnBarClose: true,
       refreshOnGap: true,
       refreshWindowBars: 5,
@@ -7787,6 +8074,7 @@ export class TradingTerminal {
     this.offData = this.data.subscribe((snapshot) => this.applyDataSnapshot(snapshot))
     document.addEventListener('visibilitychange', this.onVisibilityChange)
     this.onVisibilityChange()
+    this.resync.start() // SUDARSHAN M4.1
     this.trade = new OpenAlgoTradeFeed({ baseUrl: '', apiKey: this.apiKey, strategy: STRATEGY })
 
     // broker-supported intervals → the timeframe dropdown
@@ -7832,22 +8120,48 @@ export class TradingTerminal {
     }
     this.cb.onReady({ intervalGroups: groups, interval: this.interval, chartType: this.ctype })
 
-    // one WebSocket for ticks + the account-level order stream.
-    this.ws = new OpenAlgoWsFeed({ url: this.wsUrl, apiKey: this.apiKey })
+    // one WebSocket for ticks + the account-level order stream. SUDARSHAN
+    // M4.1: its frames pass through the tap on the way in, for the fields the
+    // engine's parser leaves out of a depth update (the day's volume above all).
+    this.ws = new OpenAlgoWsFeed({
+      url: this.wsUrl,
+      apiKey: this.apiKey,
+      socketFactory: this.frames.socketFactory,
+    })
     this.offWsState = this.ws.onState((s) => {
       if (this.destroyed) return
       this.cb.onWsState(s)
-      if (s === 'closed' || s === 'error' || s === 'reconnecting') this.startLtpFallback()
+      if (s === 'closed' || s === 'error' || s === 'reconnecting') {
+        this.startLtpFallback()
+        // SUDARSHAN M4.1: until a quote request answers, nothing is arriving at all.
+        this.liveStatus.setTransport('connecting')
+      }
       // Back on the wire after a break: whatever closed between the drop and
       // now was never built from ticks, so reconcile at once instead of waiting
-      // for the next poll staring at the hole. The builder is reseeded from its
-      // own bar first, which marks the bucket it opens next as provisional: the
-      // first tick after a gap is not that bucket's open.
+      // for the next poll staring at the hole. The builder is told first, which
+      // marks the bucket it opens next as provisional: the first tick after a
+      // gap is not that bucket's open. SUDARSHAN M4.1: order events sent while
+      // the stream was down never arrived either, so the book is read again.
       if (s === 'open') {
-        const current = this.builder?.current()
-        if (current) this.builder?.seed(current)
+        // SUDARSHAN M4.1: the quotes standing in for the stream stop now, not
+        // at its first tick, which on a quiet instrument may be a while
+        // coming; the server is asked its time; and what the last connection
+        // read about each instrument is forgotten.
+        this.stopLtpFallback()
+        this.liveStatus.setTransport('live')
+        this.frames.ping()
+        this.builder?.resync()
         this.reconcileNow()
+        if (this.wsOpened) {
+          this.frames.clear()
+          this.scheduleBookRefresh()
+        }
+        this.wsOpened = true
       }
+    })
+    // SUDARSHAN M4.1: the server's clock moved: the next candle's open is aimed again by it.
+    this.offServerClock = this.frames.clock.onChange(() => {
+      if (!this.destroyed && this.builder?.hasSession()) this.liveClock.start()
     })
     this.offWsControl = this.ws.onControl((m) => {
       if (m.type === 'auth' && m.status !== 'success') this.cb.onWsState('auth failed')
@@ -7882,13 +8196,18 @@ export class TradingTerminal {
           `filled: ${e.action} ${e.quantity} @ ${this.fmt(e.averagePrice || e.price)}`,
           'ok'
         )
-      if (!working) this.pollBook() // fills/cancels move the position book too
+      // SUDARSHAN M4.1: the book follows the event: fills and cancels move the
+      // position, and a modify can change what the broker holds for the line.
+      // A burst of events (a partial fill, then the rest) reads the book once.
+      this.scheduleBookRefresh()
     })
     this.ws.connect()
     this.ws.subscribeOrders()
 
+    // SUDARSHAN M4.1: the book is refreshed on every order event above. This is
+    // only the slow re-sync behind them, for an event the stream never delivered.
     if (this.bookTimer) clearInterval(this.bookTimer)
-    this.bookTimer = setInterval(() => this.pollBook(), 8000)
+    this.bookTimer = setInterval(() => this.pollBook(), BOOK_RESYNC_MS)
 
     if (this.initialWorkspacePane) {
       const pane = this.initialWorkspacePane
@@ -7973,6 +8292,15 @@ export class TradingTerminal {
     this.detachDrawing()
     if (this.bookTimer) clearInterval(this.bookTimer)
     this.bookTimer = null
+    // SUDARSHAN M4.1: the live pieces. Optional, like the history above: a
+    // test double is built without them.
+    if (this.bookRefreshTimer) clearTimeout(this.bookRefreshTimer)
+    this.bookRefreshTimer = null
+    this.resync?.stop()
+    this.liveClock?.stop()
+    this.liveStatus?.destroy()
+    this.offServerClock?.()
+    this.offServerClock = null
     this.stopLtpFallback()
     this.offLtp?.()
     this.offLtp = null
