@@ -1657,6 +1657,28 @@ describe('the live bar in the terminal', () => {
     terminal.destroy()
   })
 
+  it('drops a quote that answers after the stream is back', async () => {
+    const all = sockets()
+    const late = deferred<unknown>()
+    let asked = 0
+    const { terminal, live } = await started((path) => {
+      if (path !== 'quotes') return undefined
+      asked++
+      return late.promise
+    })
+    all.at(-1)?.accept()
+    all.at(-1)?.drop()
+    await vi.advanceTimersByTimeAsync(4_000)
+    expect(asked).toBe(1)
+    await vi.advanceTimersByTimeAsync(3_000)
+    all.at(-1)?.accept()
+    late.resolve({ data: { ltp: 90, volume: 1 } })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(live.liveStatus.status().line.kind).not.toBe('polling')
+    expect(live.rawBars.at(-1)?.close).not.toBe(90)
+    terminal.destroy()
+  })
+
   it('never takes a quote standing in for the stream for a tick, even once the stream is back', () => {
     const { state } = mount()
     const live = state as Watched
