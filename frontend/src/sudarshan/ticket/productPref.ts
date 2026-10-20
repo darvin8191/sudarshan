@@ -84,9 +84,9 @@ export function rememberProduct(exchange: string, product: Product): void {
   }
 }
 
-/** What a product means to a trader, for the label beside it. */
+/** What a product means to a trader, short enough for one line under it on a phone. */
 export const PRODUCT_MEANING: Record<Product, string> = {
-  MIS: 'Intraday, squared off by the broker',
+  MIS: 'Intraday',
   NRML: 'Carry forward',
   CNC: 'Delivery',
 }
