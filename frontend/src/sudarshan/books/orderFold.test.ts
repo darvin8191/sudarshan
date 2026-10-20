@@ -92,6 +92,59 @@ describe('foldOrderUpdate', () => {
   })
 })
 
+describe('foldOrderUpdate: the fill and the reason', () => {
+  const ID = OPEN.orderid
+
+  it('takes the filled count, the average and the rest the moment they are pushed', () => {
+    const [row] = foldOrderUpdate([OPEN], {
+      orderid: ID,
+      order_status: 'open',
+      filled_quantity: 30,
+      pending_quantity: 35,
+      average_price: 119.95,
+    })
+    expect(row).toMatchObject({ filled_quantity: 30, pending_quantity: 35, average_price: 119.95 })
+  })
+
+  it('never lowers the filled count: a frame naming fewer filled is older, all of it', () => {
+    const later = foldOrderUpdate([OPEN], {
+      orderid: ID,
+      order_status: 'open',
+      filled_quantity: 40,
+      average_price: 120,
+    })
+    const after = foldOrderUpdate(later, {
+      orderid: ID,
+      order_status: 'open',
+      filled_quantity: 10,
+      average_price: 119.5,
+      price: 117,
+    })
+    expect(after).toBe(later)
+    expect(after[0]).toMatchObject({ filled_quantity: 40, average_price: 120, price: 120 })
+  })
+
+  it('leaves an average of zero out: nothing known about it', () => {
+    const [row] = foldOrderUpdate([OPEN], {
+      orderid: ID,
+      order_status: 'open',
+      filled_quantity: 0,
+      average_price: 0,
+    })
+    expect(row).toMatchObject({ filled_quantity: 0 })
+    expect(row).not.toHaveProperty('average_price')
+  })
+
+  it('takes the broker’s reason with a rejection', () => {
+    const [row] = foldOrderUpdate([OPEN], {
+      orderid: ID,
+      order_status: 'rejected',
+      rejection_reason: 'RMS:Margin Exceeds',
+    })
+    expect(row).toMatchObject({ order_status: 'rejected', rejection_reason: 'RMS:Margin Exceeds' })
+  })
+})
+
 describe('holdPushed', () => {
   it('keeps a pushed fill over a re-read that still says open, for a few seconds', () => {
     const pushed = new Map<string, Pushed>()
@@ -115,6 +168,109 @@ describe('holdPushed', () => {
     rememberPushed(pushed, { orderid: OPEN.orderid, order_status: 'complete' }, 1_000)
     const rejected = { ...OPEN, order_status: 'rejected' as const }
     expect(holdPushed([rejected], pushed, 1_500)[0].order_status).toBe('rejected')
+  })
+
+  it('holds a pushed fill’s count and average with its status over a lagging re-read', () => {
+    const pushed = new Map<string, Pushed>()
+    const fill = { filled_quantity: 65, average_price: 120.05 }
+    rememberPushed(pushed, { orderid: OPEN.orderid, order_status: 'complete', ...fill }, 1_000)
+    expect(holdPushed([OPEN], pushed, 2_000)[0]).toMatchObject({
+      order_status: 'complete',
+      ...fill,
+    })
+  })
+
+  it('keeps a pushed rejection’s reason over a re-read that has none', () => {
+    const pushed = new Map<string, Pushed>()
+    const reason = 'RMS:Margin Exceeds'
+    rememberPushed(
+      pushed,
+      { orderid: OPEN.orderid, order_status: 'rejected', rejection_reason: reason },
+      1_000
+    )
+    // Lagging, then caught up with an empty reason: the pushed words stay either way.
+    expect(holdPushed([OPEN], pushed, 1_500)[0]).toMatchObject({ rejection_reason: reason })
+    const caughtUp = { ...OPEN, order_status: 'rejected' as const, rejection_reason: '' }
+    expect(holdPushed([caughtUp], pushed, 60_000)[0]).toMatchObject({ rejection_reason: reason })
+  })
+
+  it('fills what a re-read leaves out from the frames, long after the hold', () => {
+    const pushed = new Map<string, Pushed>()
+    rememberPushed(
+      pushed,
+      { orderid: OPEN.orderid, order_status: 'open', filled_quantity: 30, average_price: 119.9 },
+      1_000
+    )
+    // Upstox's REST book carries no fills: the pushed part fill stays on the row.
+    const [row] = holdPushed([OPEN], pushed, 60_000)
+    expect(row).toMatchObject({ order_status: 'open', filled_quantity: 30, average_price: 119.9 })
+    // A book that carries its own (the sandbox's) is taken as it is.
+    const own = { ...OPEN, filled_quantity: 35, average_price: 120 }
+    expect(holdPushed([own], pushed, 60_000)[0]).toMatchObject({
+      filled_quantity: 35,
+      average_price: 120,
+    })
+  })
+
+  it('keeps what filled before a cancel, as the frames built it up', () => {
+    const pushed = new Map<string, Pushed>()
+    const id = OPEN.orderid
+    rememberPushed(
+      pushed,
+      { orderid: id, order_status: 'open', filled_quantity: 30, average_price: 119.9 },
+      1_000
+    )
+    rememberPushed(pushed, { orderid: id, order_status: 'cancelled' }, 2_000)
+    const cancelled = { ...OPEN, order_status: 'cancelled' as const }
+    expect(holdPushed([cancelled], pushed, 3_000)[0]).toMatchObject({
+      order_status: 'cancelled',
+      filled_quantity: 30,
+      average_price: 119.9,
+    })
+  })
+
+  it('does not put an earlier part fill on an order the book says is complete', () => {
+    const pushed = new Map<string, Pushed>()
+    rememberPushed(
+      pushed,
+      { orderid: OPEN.orderid, order_status: 'open', filled_quantity: 30, average_price: 119.9 },
+      1_000
+    )
+    const complete = { ...OPEN, order_status: 'complete' as const }
+    const [row] = holdPushed([complete], pushed, 60_000)
+    expect(row).not.toHaveProperty('filled_quantity')
+    expect(row).not.toHaveProperty('average_price')
+  })
+
+  it('never lowers the count it remembers, whatever order the frames come in', () => {
+    const pushed = new Map<string, Pushed>()
+    const id = OPEN.orderid
+    rememberPushed(pushed, { orderid: id, order_status: 'open', filled_quantity: 40 }, 1_000)
+    rememberPushed(pushed, { orderid: id, order_status: 'open', filled_quantity: 10 }, 1_010)
+    expect(pushed.get(id)?.filled_quantity).toBe(40)
+  })
+
+  it('keeps a pushed "trigger pending" over the REST book’s "open" until a frame says otherwise', () => {
+    const pushed = new Map<string, Pushed>()
+    const id = OPEN.orderid
+    rememberPushed(pushed, { orderid: id, order_status: 'trigger pending' }, 1_000)
+    // Upstox's REST book says "open" for an order waiting for its trigger, however long it waits.
+    expect(holdPushed([OPEN], pushed, 1_000 + 10 * PUSH_HOLD_MS)[0].order_status).toBe(
+      'trigger pending'
+    )
+    // Triggered: the broker pushes "open", and the row says so.
+    rememberPushed(pushed, { orderid: id, order_status: 'open' }, 2_000)
+    expect(holdPushed([OPEN], pushed, 3_000)[0].order_status).toBe('open')
+  })
+
+  it('remembers a bounded number of orders, oldest forgotten first', () => {
+    const pushed = new Map<string, Pushed>()
+    for (let n = 0; n < 2_100; n += 1) {
+      rememberPushed(pushed, { orderid: `o${n}`, order_status: 'open', filled_quantity: 1 }, n)
+    }
+    expect(pushed.size).toBe(2_000)
+    expect(pushed.has('o0')).toBe(false)
+    expect(pushed.has('o2099')).toBe(true)
   })
 })
 

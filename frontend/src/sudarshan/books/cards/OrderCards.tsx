@@ -3,7 +3,7 @@ import { memo, type ReactNode, useCallback, useEffect, useMemo, useState } from 
 import { cn } from '@/lib/utils'
 import { useThemeStore } from '@/stores/themeStore'
 import { type FeedRow, useBookFeed } from '@/sudarshan/books/feed'
-import { isFinalStatus } from '@/sudarshan/books/orderFold'
+import { type BookOrder, isFinalStatus } from '@/sudarshan/books/orderFold'
 import type { TickDirection } from '@/sudarshan/books/prices'
 import { SymbolChartLink } from '@/sudarshan/chart/SymbolChartLink'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
@@ -40,14 +40,6 @@ import { useHeld, useLatest } from './useLatest'
  * rows themselves are the page's: the broker's pushes already change them the
  * moment they arrive (`orderFold`), and its re-reads confirm them.
  */
-
-/** An order as the book sends it, with what the broker and the sandbox add. */
-export type BookOrder = Order & {
-  filled_quantity?: unknown
-  pending_quantity?: unknown
-  average_price?: unknown
-  rejection_reason?: unknown
-}
 
 export type OrderFilter = 'all' | 'open' | 'executed' | 'rejected' | 'cancelled'
 

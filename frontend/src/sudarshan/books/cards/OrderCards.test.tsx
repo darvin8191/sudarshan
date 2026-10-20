@@ -78,8 +78,8 @@ vi.mock('@/components/socket/SocketProvider', () => ({
 }))
 
 import OrderBook from '@/pages/OrderBook'
-import { resetOrderMemoryForTests } from '@/sudarshan/books/orderFold'
-import { back, renderBook, settle, where } from '@/test/bookPages'
+import { notePushedFrame, resetOrderMemoryForTests } from '@/sudarshan/books/orderFold'
+import { back, pass, renderBook, settle, where } from '@/test/bookPages'
 import { fakeClock, frames } from '@/test/frames'
 import { feed } from '@/test/marketDataHarness'
 import { fakeScreen } from '@/test/screenWidth'
@@ -162,6 +162,37 @@ const CANCELLED = {
 } as Order
 
 const ALL = [CANCELLED, FILLED, WORKING, REFUSED, STOP]
+
+/** A working order as Upstox's REST book has it (M6.9): no fill fields. */
+const UPSTOX_WORKING = {
+  symbol: CALL,
+  exchange: 'NFO',
+  action: 'SELL',
+  quantity: 65,
+  price: 168,
+  trigger_price: 0,
+  pricetype: 'LIMIT',
+  product: 'MIS',
+  orderid: '1001',
+  order_status: 'open',
+  timestamp: '2026-10-20 10:41:51',
+} as Order
+
+/** A frame as the shell and the page both receive it. */
+function push(frame: Record<string, unknown>) {
+  const full = { mode: 'live', ...frame }
+  // As the shell's order-alert listener does for every frame (orderAlerts.ts).
+  notePushedFrame(full)
+  act(() => socket.fire('order_update', full))
+}
+
+/** Let the re-read behind an order event land (useBookSync), with the book still behind. */
+async function reread() {
+  const before = api.getOrders.mock.calls.length
+  await pass(3_000)
+  await settle()
+  expect(api.getOrders.mock.calls.length).toBeGreaterThan(before)
+}
 
 function book(...orders: Order[]) {
   return {
@@ -320,6 +351,43 @@ describe('Order book on a phone: the cards', () => {
     expect(orderCard('1001').querySelector('[data-status]')).toHaveTextContent('COMPLETE')
   })
 
+  it('shows a pushed fill’s count and average at once, over a re-read that is behind', async () => {
+    await renderPhone(UPSTOX_WORKING)
+    push({ orderid: '1001', order_status: 'complete', filled_quantity: 65, average_price: 168.05 })
+    const chip = () => orderCard('1001').querySelector('[data-status]')
+    expect(chip()).toHaveTextContent('COMPLETE')
+    expect(orderCard('1001')).toHaveTextContent('65/65 · Limit 168.00 · Avg 168.05')
+
+    await reread()
+    expect(chip()).toHaveTextContent('COMPLETE')
+    expect(orderCard('1001')).toHaveTextContent('65/65 · Limit 168.00 · Avg 168.05')
+  })
+
+  it('moves the count on a pushed part fill, and keeps it after the re-read', async () => {
+    await renderPhone(UPSTOX_WORKING)
+    push({ orderid: '1001', order_status: 'open', filled_quantity: 30, average_price: 168 })
+    expect(orderCard('1001')).toHaveTextContent('30/65 · Limit 168.00 · Avg 168.00')
+
+    await reread()
+    expect(orderCard('1001')).toHaveTextContent('30/65 · Limit 168.00 · Avg 168.00')
+    // A frame from before the fill, delivered late, does not take it back.
+    push({ orderid: '1001', order_status: 'open', filled_quantity: 0 })
+    expect(orderCard('1001')).toHaveTextContent('30/65')
+  })
+
+  it('keeps TRIGGER PENDING from the broker over the REST book’s "open"', async () => {
+    // Upstox's REST book says "open" for a stop order waiting for its trigger.
+    await renderPhone({ ...STOP, order_status: 'open' } as Order)
+    const chip = () => orderCard('1002').querySelector('[data-status]')
+    expect(chip()).toHaveTextContent('OPEN')
+    push({ orderid: '1002', order_status: 'trigger pending' })
+    expect(chip()).toHaveTextContent('TRIGGER PENDING')
+
+    await reread()
+    await pass(10_000)
+    expect(chip()).toHaveTextContent('TRIGGER PENDING')
+  })
+
   it('keeps the GTT tab as upstream shows it', async () => {
     const tap = user()
     await renderPhone(WORKING)
@@ -343,6 +411,23 @@ describe('Order book on a phone: the sheet and its actions', () => {
       'href',
       '/chart/NFO/BANKNIFTY27OCT2658000CE'
     )
+  })
+
+  it('says the broker’s reason for a pushed rejection, before and after the re-read', async () => {
+    const tap = user()
+    await renderPhone(UPSTOX_WORKING)
+    push({
+      orderid: '1001',
+      order_status: 'rejected',
+      filled_quantity: 0,
+      rejection_reason: 'RMS:Margin Exceeds,Required:14250.00, Available:9120.55',
+    })
+    await tap.click(orderCard('1001'))
+    const reason = () => screen.getByTestId('rejection-reason')
+    expect(reason()).toHaveTextContent('Broker says: RMS:Margin Exceeds')
+
+    await reread()
+    expect(reason()).toHaveTextContent('Broker says: RMS:Margin Exceeds')
   })
 
   it('says the sandbox refused it in Analyze mode, and when no reason was given', async () => {
