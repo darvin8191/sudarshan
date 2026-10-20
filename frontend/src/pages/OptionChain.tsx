@@ -1,5 +1,6 @@
 import { Check, ChevronsUpDown, RefreshCw, TrendingUp, Wifi, WifiOff } from 'lucide-react'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router' // SUDARSHAN M8.2
 import { oiProfileApi } from '@/api/oi-profile'
 import {
   BarSettingsDropdown,
@@ -46,6 +47,13 @@ import { COLUMN_DEFINITIONS } from '@/types/option-chain'
 import { showToast } from '@/utils/toast'
 
 // FNO_EXCHANGES and DEFAULT_UNDERLYINGS are now provided by useSupportedExchanges() hook
+
+// SUDARSHAN M8.2: the underlying a link names (/optionchain?exchange=NFO&underlying=NIFTY).
+function linkedChain(params: URLSearchParams): { exchange: string; underlying: string } | null {
+  const exchange = params.get('exchange')?.trim().toUpperCase()
+  const underlying = params.get('underlying')?.trim().toUpperCase()
+  return exchange && underlying ? { exchange, underlying } : null
+}
 
 const STRIKE_COUNTS = [
   { value: 5, label: '5 strikes' },
@@ -564,7 +572,12 @@ export default function OptionChain() {
     resetToDefaults,
   } = useOptionChainPreferences()
 
-  const [selectedExchange, setSelectedExchange] = useState(defaultFnoExchange)
+  // SUDARSHAN M8.2: opened on the underlying a link names, until the exchange is changed.
+  const [searchParams] = useSearchParams()
+  const linked = useRef(linkedChain(searchParams))
+  const [selectedExchange, setSelectedExchange] = useState(
+    linked.current?.exchange ?? defaultFnoExchange
+  )
   const [underlyings, setUnderlyings] = useState<string[]>(
     defaultUnderlyings[defaultFnoExchange] || []
   )
@@ -617,8 +630,10 @@ export default function OptionChain() {
   // Fetch underlyings when exchange changes
   useEffect(() => {
     const defaults = defaultUnderlyings[selectedExchange] || []
+    // SUDARSHAN M8.2: a linked underlying on this exchange comes before the default.
+    const wanted = linked.current?.exchange === selectedExchange ? linked.current.underlying : null
     setUnderlyings(defaults)
-    setSelectedUnderlying(defaults[0] || '')
+    setSelectedUnderlying(wanted ?? (defaults[0] || ''))
     setExpiries([])
     setSelectedExpiry('')
 
@@ -629,8 +644,11 @@ export default function OptionChain() {
         if (cancelled) return
         if (response.status === 'success' && response.underlyings.length > 0) {
           setUnderlyings(response.underlyings)
-          if (!response.underlyings.includes(defaults[0])) {
-            setSelectedUnderlying(response.underlyings[0])
+          // SUDARSHAN M8.2: keeps a linked underlying the exchange lists.
+          if (!response.underlyings.includes(wanted ?? defaults[0])) {
+            setSelectedUnderlying(
+              response.underlyings.includes(defaults[0]) ? defaults[0] : response.underlyings[0]
+            )
           }
         }
       } catch {
@@ -719,6 +737,7 @@ export default function OptionChain() {
   // previous exchange's underlying / expiry.
   const handleExchangeChange = (value: string) => {
     if (value === selectedExchange) return
+    linked.current = null // SUDARSHAN M8.2: the link is spent
     setSelectedExchange(value)
     setSelectedUnderlying('')
     setExpiries([])
