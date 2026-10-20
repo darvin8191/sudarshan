@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChartStateView } from '@/lib/trading/chartState'
 import type { LiveStatus } from '@/lib/trading/liveStatus'
@@ -47,9 +47,13 @@ vi.mock('./api', () => ({
   loadInstrument: async () => fakes.instrument,
   searchSymbols: async () => [],
 }))
+// Both close themselves the way the real dialogs do: the action's own
+// callback first, then onOpenChange(false).
 vi.mock('@/components/trading/PlaceOrderDialog', () => ({
   PlaceOrderDialog: (props: {
     open: boolean
+    onOpenChange(open: boolean): void
+    onSuccess?(orderId: string): void
     action: string
     product: string
     lotSize: number
@@ -63,17 +67,35 @@ vi.mock('@/components/trading/PlaceOrderDialog', () => ({
         {[props.action, props.symbol, props.exchange, props.product, props.lotSize, props.strategy]
           .map(String)
           .join(' ')}
+        <button
+          type="button"
+          className="h-12"
+          onClick={() => {
+            props.onSuccess?.('1')
+            props.onOpenChange(false)
+          }}
+        >
+          Place order
+        </button>
       </div>
     ) : null,
 }))
 vi.mock('@/components/trading/SymbolSearchDialog', () => ({
   SymbolSearchDialog: (props: {
     open: boolean
+    onOpenChange(open: boolean): void
     onPick(row: { symbol: string; exchange: string }): void
   }) =>
     props.open ? (
       <div role="dialog" aria-label="Symbol Search">
-        <button type="button" onClick={() => props.onPick({ symbol: 'RELIANCE', exchange: 'NSE' })}>
+        <button
+          type="button"
+          className="h-12"
+          onClick={() => {
+            props.onPick({ symbol: 'RELIANCE', exchange: 'NSE' })
+            props.onOpenChange(false)
+          }}
+        >
           RELIANCE
         </button>
       </div>
@@ -87,15 +109,26 @@ function Where() {
   return <output aria-label="Location">{location.pathname + location.search}</output>
 }
 
-function renderAt(path: string) {
+/** The phone's own Back, which a page cannot see coming. */
+function PhoneBack() {
+  const navigate = useNavigate()
+  return (
+    <button type="button" className="h-12" onClick={() => navigate(-1)}>
+      Phone back
+    </button>
+  )
+}
+
+function renderAt(path: string, before: string[] = []) {
   return render(
-    <MemoryRouter initialEntries={[path]}>
+    <MemoryRouter initialEntries={[...before, path]}>
       <Routes>
         <Route path="/chart" element={<ChartPage />} />
         <Route path="/chart/:exchange/:symbol" element={<ChartPage />} />
         <Route path="*" element={<p>Elsewhere</p>} />
       </Routes>
       <Where />
+      <PhoneBack />
     </MemoryRouter>
   )
 }
@@ -119,8 +152,8 @@ function emit(fn: (callbacks: PhoneChartCallbacks) => void) {
   act(() => fn(chart().opts.callbacks))
 }
 
-async function opened(path = '/chart/NSE/SBIN') {
-  const view = renderAt(path)
+async function opened(path = '/chart/NSE/SBIN', before: string[] = []) {
+  const view = renderAt(path, before)
   await waitFor(() => expect(fakes.charts.length).toBeGreaterThan(0))
   await waitFor(() => expect(chart().load).toHaveBeenCalled())
   return view
@@ -330,6 +363,84 @@ describe('the phone chart page at 390 px', () => {
     }
     await userEvent.click(screen.getByRole('button', { name: 'Close the candle reading' }))
     expect(screen.queryByTestId('chart-readout')).toBeNull()
+  })
+
+  it('moves the price on a tick alone, at the next frame', async () => {
+    await opened()
+    emit((cb) =>
+      cb.onTick({ ltp: 812.35, time: null, tradeTime: null, at: Date.now(), polled: false })
+    )
+    await waitFor(() => expect(screen.getByTestId('chart-ltp')).toHaveTextContent('812.35'))
+  })
+
+  it('says when the session closes in place of a countdown that would run past it', async () => {
+    await opened()
+    emit((cb) => cb.onStatus(status({ kind: 'live' })))
+    emit((cb) => cb.onSessionClose?.(Date.UTC(2026, 9, 20, 10, 0) / 1000))
+    expect(screen.getByTestId('chart-closes')).toHaveTextContent('· Closes 15:30')
+    emit((cb) => cb.onSessionClose?.(null))
+    expect(screen.queryByTestId('chart-closes')).toBeNull()
+  })
+
+  it("closes the order ticket and the search with the phone's Back before leaving the chart", async () => {
+    await opened('/chart/NSE/SBIN', ['/dashboard'])
+    const buy = await screen.findByRole('button', { name: 'BUY' })
+    await waitFor(() => expect(buy).toBeEnabled())
+    await userEvent.click(buy)
+    expect(screen.getByRole('dialog', { name: 'Order ticket' })).toBeVisible()
+    await userEvent.click(screen.getByRole('button', { name: 'Phone back' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.getByRole('status', { name: 'Location' })).toHaveTextContent('/chart/NSE/SBIN')
+    await userEvent.click(screen.getByRole('button', { name: 'Search instruments' }))
+    expect(screen.getByRole('dialog', { name: 'Symbol Search' })).toBeVisible()
+    await userEvent.click(screen.getByRole('button', { name: 'Phone back' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Phone back' }))
+    expect(screen.getByRole('status', { name: 'Location' })).toHaveTextContent('/dashboard')
+  })
+
+  it('closes the ticket on an order placed, and stays on the chart', async () => {
+    await opened('/chart/NSE/SBIN', ['/dashboard'])
+    const sell = await screen.findByRole('button', { name: 'SELL' })
+    await waitFor(() => expect(sell).toBeEnabled())
+    await userEvent.click(sell)
+    await userEvent.click(screen.getByRole('button', { name: 'Place order' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.getByRole('status', { name: 'Location' })).toHaveTextContent('/chart/NSE/SBIN')
+    await userEvent.click(screen.getByRole('button', { name: 'Phone back' }))
+    expect(screen.getByRole('status', { name: 'Location' })).toHaveTextContent('/dashboard')
+  })
+
+  it("puts a new instrument in the chart's own place, so Back leaves the chart", async () => {
+    await opened('/chart/NSE/SBIN', ['/dashboard'])
+    await userEvent.click(screen.getByRole('button', { name: 'Search instruments' }))
+    await userEvent.click(screen.getByRole('button', { name: 'RELIANCE' }))
+    await waitFor(() =>
+      expect(screen.getByRole('status', { name: 'Location' })).toHaveTextContent(
+        '/chart/NSE/RELIANCE'
+      )
+    )
+    expect(screen.queryByRole('dialog')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Phone back' }))
+    expect(screen.getByRole('status', { name: 'Location' })).toHaveTextContent('/dashboard')
+  })
+
+  it('keeps the screen on across a switch of instrument', async () => {
+    const release = vi.fn(async () => {})
+    const request = vi.fn(async () => ({ release, addEventListener() {} }))
+    Object.defineProperty(navigator, 'wakeLock', { configurable: true, value: { request } })
+    await opened()
+    await userEvent.click(screen.getByRole('switch', { name: 'Keep screen on' }))
+    await waitFor(() => expect(request).toHaveBeenCalledOnce())
+    await userEvent.click(screen.getByRole('button', { name: 'Search instruments' }))
+    await userEvent.click(screen.getByRole('button', { name: 'RELIANCE' }))
+    await waitFor(() =>
+      expect(screen.getByRole('status', { name: 'Location' })).toHaveTextContent(
+        '/chart/NSE/RELIANCE'
+      )
+    )
+    expect(screen.getByRole('switch', { name: 'Keep screen on' })).toBeChecked()
+    expect(release).not.toHaveBeenCalled()
   })
 
   it('gives every control a target a thumb can hit: 48 px at least', async () => {

@@ -8,6 +8,11 @@
  * rest; and Buy and Sell, which open the app's own order ticket. Press and
  * hold the chart to read a candle.
  *
+ * The order ticket and the instrument search are entries in the browser's
+ * history, so the phone's Back closes them before it leaves the chart. A new
+ * instrument takes the chart's own entry, so Back from it leaves the chart
+ * rather than walking back through every instrument looked at.
+ *
  * The chart itself is `PhoneChart`, on the same live-bar pipeline as /trading.
  * This file is layout and wiring only. A tick re-renders the price header and
  * nothing else: the price lives in a small store outside React's tree.
@@ -70,23 +75,69 @@ const barDay = new Intl.DateTimeFormat('en-IN', {
 })
 const compact = new Intl.NumberFormat('en-IN', { notation: 'compact', maximumFractionDigits: 2 })
 
+const closesStamp = new Intl.DateTimeFormat('en-IN', {
+  timeZone: 'Asia/Kolkata',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+})
+
 /** A bare /chart: the instrument last opened on this phone, or NIFTY. */
 export function ChartIndex() {
   const last = readLastInstrument()
   return <Navigate replace to={chartPath(last.symbol, last.exchange)} />
 }
 
+type WakeLock = ReturnType<typeof useWakeLock>
+
 export default function ChartPage() {
   const params = useParams()
+  // Held here, above the screen that is built anew for each instrument, so
+  // switching instrument keeps the screen on.
+  const wake = useWakeLock()
   const symbol = params.symbol ?? ''
   const exchange = (params.exchange ?? '').toUpperCase()
   if (!symbol || !exchange) return <ChartIndex />
-  return <PhoneChartScreen key={`${exchange}:${symbol}`} symbol={symbol} exchange={exchange} />
+  return (
+    <PhoneChartScreen
+      key={`${exchange}:${symbol}`}
+      symbol={symbol}
+      exchange={exchange}
+      wake={wake}
+    />
+  )
 }
 
 type Inspect = { bar: Bar; x: number | null; y: number }
 
-function PhoneChartScreen({ symbol, exchange }: { symbol: string; exchange: string }) {
+/** A sheet over the chart, as the browser history entry it is. */
+type Sheet = { sheet: 'ticket'; side: 'BUY' | 'SELL' } | { sheet: 'search' }
+
+function readSheet(state: unknown): Sheet | null {
+  if (!state || typeof state !== 'object') return null
+  const value = state as { sheet?: unknown; side?: unknown }
+  if (value.sheet === 'search') return { sheet: 'search' }
+  if (value.sheet === 'ticket' && (value.side === 'BUY' || value.side === 'SELL'))
+    return { sheet: 'ticket', side: value.side }
+  return null
+}
+
+/** Whether nothing in this tab's history is behind the current page. */
+function firstInHistory(key: string): boolean {
+  if (key === 'default') return true
+  const state = (globalThis.history?.state ?? null) as { idx?: unknown } | null
+  return state?.idx === 0
+}
+
+function PhoneChartScreen({
+  symbol,
+  exchange,
+  wake,
+}: {
+  symbol: string
+  exchange: string
+  wake: WakeLock
+}) {
   const navigate = useNavigate()
   const location = useLocation()
   const appMode = useThemeStore((s) => s.appMode)
@@ -97,14 +148,19 @@ function PhoneChartScreen({ symbol, exchange }: { symbol: string; exchange: stri
   const [status, setStatus] = useState<LiveStatus | null>(null)
   const [load, setLoad] = useState<ChartStateView | null>(null)
   const [inspect, setInspect] = useState<Inspect | null>(null)
-  const [side, setSide] = useState<'BUY' | 'SELL' | null>(null)
-  const [searching, setSearching] = useState(false)
+  const [closesAt, setClosesAt] = useState<number | null>(null)
   const [owner, setOwner] = useState<PhoneChart | null>(null)
   const [prices] = useState(() => new PriceStore())
   const host = useRef<HTMLDivElement>(null)
   const surface = useRef<HTMLDivElement>(null)
-  const wake = useWakeLock()
+  /** An instrument picked in search, opened once the search's history entry is gone. */
+  const picked = useRef<{ symbol: string; exchange: string } | null>(null)
+  /** The sheet's entry is already being left: a dialog that closes twice goes back once. */
+  const closing = useRef(false)
   const quoteOnly = isQuoteOnly(exchange)
+  const sheet = readSheet(location.state)
+  const side = sheet?.sheet === 'ticket' ? sheet.side : null
+  const searching = sheet?.sheet === 'search'
 
   useEffect(() => {
     saveLastInstrument(symbol, exchange)
@@ -147,6 +203,7 @@ function PhoneChartScreen({ symbol, exchange }: { symbol: string; exchange: stri
         onPrevClose: setPrevClose,
         onStatus: setStatus,
         onLoad: (state) => gate.set(state),
+        onSessionClose: setClosesAt,
       },
     })
     setOwner(next)
@@ -197,9 +254,39 @@ function PhoneChartScreen({ symbol, exchange }: { symbol: string; exchange: stri
 
   // Opened from a link with nothing behind it: back goes to the dashboard.
   const back = useCallback(() => {
-    if (location.key === 'default') navigate('/dashboard')
+    if (firstInHistory(location.key)) navigate('/dashboard')
     else navigate(-1)
   }, [location.key, navigate])
+
+  // A sheet is pushed as a history entry, so the phone's Back closes it. One
+  // already open is swapped rather than stacked.
+  const openSheet = useCallback(
+    (next: Sheet) =>
+      navigate(location.pathname + location.search, {
+        state: next,
+        replace: readSheet(location.state) !== null,
+      }),
+    [location.pathname, location.search, location.state, navigate]
+  )
+  const closeSheet = useCallback(() => {
+    if (!readSheet(location.state) || closing.current) return
+    closing.current = true
+    navigate(-1)
+  }, [location.state, navigate])
+  // Every move through history settles what is open.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the key is the trigger
+  useEffect(() => {
+    closing.current = false
+  }, [location.key])
+
+  // The search's entry is gone: the instrument picked takes the chart's own.
+  const sheetKind = sheet?.sheet ?? null
+  useEffect(() => {
+    const next = picked.current
+    if (sheetKind || !next) return
+    picked.current = null
+    navigate(chartPath(next.symbol, next.exchange), { replace: true })
+  }, [sheetKind, navigate])
 
   const dp = (ltp: number) => priceDp(info?.tickSize, ltp)
 
@@ -231,7 +318,7 @@ function PhoneChartScreen({ symbol, exchange }: { symbol: string; exchange: stri
         exchange={exchange}
         name={info?.name}
         onBack={back}
-        onSearch={() => setSearching(true)}
+        onSearch={() => openSheet({ sheet: 'search' })}
       />
 
       <PriceHeader
@@ -240,6 +327,7 @@ function PhoneChartScreen({ symbol, exchange }: { symbol: string; exchange: stri
         status={status}
         dp={dp}
         traded={!quoteOnly}
+        closesAt={closesAt}
       />
 
       <fieldset className="flex shrink-0 gap-1 border-b bg-card px-2 py-1">
@@ -307,7 +395,7 @@ function PhoneChartScreen({ symbol, exchange }: { symbol: string; exchange: stri
           <button
             type="button"
             disabled={ordersOff}
-            onClick={() => setSide('BUY')}
+            onClick={() => openSheet({ sheet: 'ticket', side: 'BUY' })}
             className="h-12 rounded-xl bg-[color:var(--buy-solid)] text-base font-bold tracking-[0.06em] text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-45"
           >
             BUY
@@ -315,7 +403,7 @@ function PhoneChartScreen({ symbol, exchange }: { symbol: string; exchange: stri
           <button
             type="button"
             disabled={ordersOff}
-            onClick={() => setSide('SELL')}
+            onClick={() => openSheet({ sheet: 'ticket', side: 'SELL' })}
             className="h-12 rounded-xl bg-[color:var(--sell-solid)] text-base font-bold tracking-[0.06em] text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-45"
           >
             SELL
@@ -336,7 +424,7 @@ function PhoneChartScreen({ symbol, exchange }: { symbol: string; exchange: stri
       {info && (
         <PlaceOrderDialog
           open={side !== null}
-          onOpenChange={(open) => !open && setSide(null)}
+          onOpenChange={(open) => !open && closeSheet()}
           symbol={symbol}
           exchange={exchange}
           action={side ?? 'BUY'}
@@ -344,21 +432,21 @@ function PhoneChartScreen({ symbol, exchange }: { symbol: string; exchange: stri
           tickSize={info.tickSize}
           product="MIS"
           strategy={STRATEGY}
-          onSuccess={() => setSide(null)}
         />
       )}
       <SymbolSearchDialog
         open={searching}
-        onOpenChange={setSearching}
+        onOpenChange={(open) => !open && closeSheet()}
         search={search}
         initialQuery={symbol}
         onPick={(row) => {
-          setSearching(false)
           if (!row.exchange) {
+            closeSheet()
             showToast.info('A computed chart opens in the full terminal.')
             return
           }
-          navigate(chartPath(String(row.symbol), String(row.exchange)))
+          picked.current = { symbol: String(row.symbol), exchange: String(row.exchange) }
+          closeSheet()
         }}
       />
     </Screen>
@@ -445,6 +533,7 @@ function PriceHeader({
   status,
   dp,
   traded,
+  closesAt,
 }: {
   prices: PriceStore
   prevClose: number | null
@@ -452,6 +541,8 @@ function PriceHeader({
   dp(ltp: number): number
   /** An index is quoted, not traded. */
   traded: boolean
+  /** The session's close, while the forming bar would run past it. */
+  closesAt: number | null
 }) {
   const { tick, streamed } = useSyncExternalStore(prices.subscribe, prices.get)
   const now = useNow()
@@ -509,6 +600,11 @@ function PriceHeader({
         </p>
         <p className="text-xs font-medium text-muted-foreground" data-testid="chart-last-tick">
           {tickLine(streamed, status, now, traded)}
+          {closesAt !== null && status?.line.kind !== 'closed' && (
+            <span data-testid="chart-closes">
+              {' · '}Closes {closesStamp.format(new Date(closesAt * 1000))}
+            </span>
+          )}
         </p>
       </div>
     </section>

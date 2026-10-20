@@ -12,10 +12,28 @@ export interface Prices {
   streamed: PhoneTick | null
 }
 
-/** Holds the price for `useSyncExternalStore`, so a tick re-renders only what reads it. */
+/** Runs a callback before the next paint, or soon where a page has no paints. */
+export type FrameScheduler = (run: () => void) => void
+
+const nextFrame: FrameScheduler = (run) => {
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => run())
+  else setTimeout(run, 16)
+}
+
+/**
+ * Holds the price for `useSyncExternalStore`, so a tick re-renders only what
+ * reads it. The value is current at once; its readers hear once per frame, so
+ * a burst of ticks between two paints renders the header once, at the last.
+ */
 export class PriceStore {
   private value: Prices = { tick: null, streamed: null }
   private readonly listeners = new Set<() => void>()
+  private readonly schedule: FrameScheduler
+  private pending = false
+
+  constructor(schedule: FrameScheduler = nextFrame) {
+    this.schedule = schedule
+  }
 
   readonly get = (): Prices => this.value
 
@@ -28,7 +46,12 @@ export class PriceStore {
 
   set(tick: PhoneTick): void {
     this.value = { tick, streamed: tick.polled ? this.value.streamed : tick }
-    for (const listener of this.listeners) listener()
+    if (this.pending) return
+    this.pending = true
+    this.schedule(() => {
+      this.pending = false
+      for (const listener of [...this.listeners]) listener()
+    })
   }
 }
 

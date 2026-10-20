@@ -29,23 +29,58 @@ const status = (line: LiveStatus['line'], opensAt: number | null = null): LiveSt
 })
 
 describe('PriceStore', () => {
+  /** A frame clock a test turns by hand. */
+  function frames() {
+    const queued: Array<() => void> = []
+    return {
+      schedule: (run: () => void) => {
+        queued.push(run)
+      },
+      paint: () => {
+        for (const run of queued.splice(0)) run()
+      },
+      waiting: () => queued.length,
+    }
+  }
+
   it('tells its readers about every price, and keeps the last one the stream sent', () => {
-    const store = new PriceStore()
+    const frame = frames()
+    const store = new PriceStore(frame.schedule)
     const heard = vi.fn()
     const off = store.subscribe(heard)
     expect(store.get()).toEqual({ tick: null, streamed: null })
 
     const first = tick(100, false, ist(10, 0, 1))
     store.set(first)
+    frame.paint()
     // A quote standing in for the stream changes the price, not the last tick.
     const quote = tick(100.5, true)
     store.set(quote)
+    frame.paint()
     expect(store.get()).toEqual({ tick: quote, streamed: first })
     expect(heard).toHaveBeenCalledTimes(2)
 
     off()
     store.set(tick(101, false))
+    frame.paint()
     expect(heard).toHaveBeenCalledTimes(2)
+  })
+
+  it('renders a burst of ticks between two paints once, at the last price', () => {
+    const frame = frames()
+    const store = new PriceStore(frame.schedule)
+    const seen: number[] = []
+    store.subscribe(() => seen.push(store.get().tick?.ltp ?? 0))
+    for (const ltp of [100, 100.05, 100.1, 100.15]) store.set(tick(ltp, false))
+    // The value is current at once; the readers hear at the next paint.
+    expect(store.get().tick?.ltp).toBe(100.15)
+    expect(seen).toEqual([])
+    expect(frame.waiting()).toBe(1)
+    frame.paint()
+    expect(seen).toEqual([100.15])
+    store.set(tick(100.2, false))
+    frame.paint()
+    expect(seen).toEqual([100.15, 100.2])
   })
 
   it('hands back the same object until something changes, as a store for React must', () => {
