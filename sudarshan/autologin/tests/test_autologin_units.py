@@ -153,8 +153,15 @@ def test_systemd_reads_the_units_without_complaint(tmp_path):
         capture_output=True,
         text=True,
     )
+    # The service runs the server's own interpreter under /opt/sudarshan, which a CI runner does
+    # not have. That says nothing about the unit, so only that complaint is set aside.
+    absent_on_this_machine = re.compile(
+        r"Command /opt/sudarshan/\S+ is not executable: No such file or directory"
+    )
     complaints = [
-        line for line in (done.stdout + done.stderr).splitlines() if "sudarshan-autologin" in line
+        line
+        for line in (done.stdout + done.stderr).splitlines()
+        if "sudarshan-autologin" in line and not absent_on_this_machine.search(line)
     ]
     assert complaints == []
     for calendar in _directives(TIMER, "OnCalendar"):
