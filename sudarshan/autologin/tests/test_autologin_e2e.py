@@ -17,6 +17,7 @@ from autologin_app import (
     OWNER,
     TELEGRAM_ID,
     LiveServer,
+    WallClock,
     add_owner,
     csrf_headers,
     login_session,
@@ -96,14 +97,18 @@ def _no_secret_in(text: str, *codes: str) -> None:
         assert not re.search(rf"\b{code}\b", text)
 
 
-def test_scheduled_login_lands_exactly_like_a_manual_upstox_login(world, caplog, capfd):
+def test_scheduled_login_lands_exactly_like_a_manual_upstox_login(
+    world, monkeypatch, caplog, capfd
+):
     caplog.set_level("DEBUG")
     # The running OpenAlgo has yesterday's token in memory, for the API, the bot and the proxy.
     assert auth_db.get_auth_token_broker(FAKE_OPENALGO_API_KEY) == (OLD_TOKEN, "upstox")
     assert auth_db.get_auth_token(OWNER) == OLD_TOKEN
     auth_db.db_session.remove()
 
-    assert worker.main([], env=world.env, clock=lambda: MONDAY_0835) == EXIT_OK
+    # OpenAlgo's clock is the worker's: the session row and the 03:00 rollover below read it.
+    clock = WallClock(monkeypatch, MONDAY_0835)
+    assert worker.main([], env=world.env, clock=clock) == EXIT_OK
 
     code = totp(FAKE_TOTP_SECRET, MONDAY_0835.timestamp())
     (request,) = world.upstox.requests
@@ -140,6 +145,7 @@ def test_scheduled_login_lands_exactly_like_a_manual_upstox_login(world, caplog,
     assert has_login_this_trading_session(OWNER)
     (session_row,) = auth_db.ActiveSession.query.filter_by(username=OWNER).all()
     assert session_row.device_info == bp_module.AUTOLOGIN_DEVICE and session_row.broker == "upstox"
+    assert session_row.login_time.replace(tzinfo=None) == MONDAY_0835.replace(tzinfo=None)
     (attempt,) = auth_db.LoginAttempt.query.filter_by(username=OWNER).all()
     assert (attempt.status, attempt.login_type, attempt.broker) == (
         "success",
@@ -155,9 +161,8 @@ def test_scheduled_login_lands_exactly_like_a_manual_upstox_login(world, caplog,
     assert (state.last_outcome, state.last_success_at) == ("ok", MONDAY_0835)
 
     # 08:45: Upstox still accepts the stored login, so nothing is done and nothing is revoked.
-    assert (
-        worker.main([], env=world.env, clock=lambda: MONDAY_0835 + timedelta(minutes=10)) == EXIT_OK
-    )
+    clock.at = MONDAY_0835 + timedelta(minutes=10)
+    assert worker.main([], env=world.env, clock=clock) == EXIT_OK
     assert len(world.upstox.requests) == 1
     assert world.vault.state().last_code == "already_logged_in"
     assert world.upstox.checks == ["/v3/user/get-funds-and-margin"] * 2  # one check per run
