@@ -809,7 +809,7 @@ describe('Watchlist prices', () => {
     expect(statusLine(container)).toHaveTextContent('Market closed')
   })
 
-  it('says Reconnecting with the age of the figures while the socket is down, never Real-time', async () => {
+  it('says Delayed with the age of the figures while the REST fallback stands in, never Real-time', async () => {
     const { container } = renderPage()
     await screen.findByRole('button', { name: /^SBIN/ })
     tick('SBIN', 'NSE', { ltp: 820 })
@@ -825,8 +825,8 @@ describe('Watchlist prices', () => {
     )
     tick('SBIN', 'NSE', { ltp: 821 }, 'rest')
     expect(row(/^SBIN/)).toHaveTextContent('821.00')
-    expect(statusLine(container)).toHaveAttribute('data-feed', 'connecting')
-    expect(statusLine(container)).toHaveTextContent(/^Reconnecting · updated \d+s ago$/)
+    expect(statusLine(container)).toHaveAttribute('data-feed', 'polling')
+    expect(statusLine(container)).toHaveTextContent(/^Delayed · updated \d+s ago$/)
   })
 
   it('subscribes only the open list in LTP mode, and closes it on a tab switch and on leaving', async () => {

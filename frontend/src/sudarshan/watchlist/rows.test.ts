@@ -263,7 +263,7 @@ group('statusLine', () => {
     })
   })
 
-  it('says Reconnecting, not Connecting, while the REST fallback moves the figures', () => {
+  it('says Delayed, with the age, while the REST fallback moves the figures', () => {
     expect(
       statusLine({
         ...base,
@@ -272,7 +272,22 @@ group('statusLine', () => {
         connected: false,
         fallback: true,
       })
-    ).toEqual({ kind: 'connecting', at: T0 + 19_000, stale: false, again: true })
+    ).toEqual({ kind: 'polling', at: T0 + 19_000, stale: false })
+    // After ticks too: the fallback's figures are not ticks.
+    expect(
+      statusLine({
+        ...base,
+        lastTickAt: T0 + 2_000,
+        lastUpdateAt: T0 + 19_000,
+        connected: false,
+        fallback: true,
+      })
+    ).toEqual({ kind: 'polling', at: T0 + 19_000, stale: false })
+    // Stale once the fallback's answers stop coming too.
+    expect(
+      statusLine({ ...base, lastTickAt: null, lastUpdateAt: T0, connected: false, fallback: true })
+    ).toEqual({ kind: 'polling', at: T0, stale: true })
+    // Nothing in hand yet: still connecting.
     expect(
       statusLine({
         ...base,

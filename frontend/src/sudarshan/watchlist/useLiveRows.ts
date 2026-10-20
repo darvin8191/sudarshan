@@ -48,9 +48,10 @@ export interface LiveRow {
  * and leaving the page releases them all.
  *
  * The line above the list follows the socket: "Real-time" while ticks come,
- * "Reconnecting" with the figures' age while the socket is down, and the age
- * alone when the socket is up but nothing in the list has traded for a while,
- * which is not staleness. Rows that have not ticked for a minute, their market
+ * "Reconnecting" with the figures' age while the socket is down ("Delayed"
+ * while upstream's REST fallback fills in), and the age alone when the socket
+ * is up but nothing in the list has traded for a while, which is not
+ * staleness. Rows that have not ticked for a minute, their market
  * open and the socket up, are read again over REST, once a minute at most.
  */
 export function useLiveRows({

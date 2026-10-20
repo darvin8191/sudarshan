@@ -107,7 +107,8 @@ export const QUIET_RESYNC_MS = 60_000
  * old; and only the age while the socket is up but nothing has traded, which
  * is not staleness (the dashboard's "no ticks due"). Upstream's REST fallback
  * moves figures while the socket is down; those are not ticks, so the line
- * says "Reconnecting" with their age even before the first tick of the visit.
+ * says "Delayed" with their age (the chart's `polling` line), even before the
+ * first tick of the visit, and "Stale" once they stop coming too.
  */
 export function statusLine({
   now,
@@ -124,18 +125,15 @@ export function statusLine({
   connected: boolean
   fallback: boolean
 }): FeedLine {
-  const line = feedLine({
+  return feedLine({
     now,
     marketOpen,
     lastTickAt,
     lastUpdateAt,
     ticksDue: !connected,
     connected,
+    polling: fallback,
   })
-  if (line.kind === 'connecting' && !line.again && fallback && line.at !== null) {
-    return { ...line, again: true }
-  }
-  return line
 }
 
 export type TickDirection = 'up' | 'down'
