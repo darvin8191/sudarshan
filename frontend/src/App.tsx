@@ -45,6 +45,7 @@ const Profile = lazy(() => import('@/pages/Profile'))
 const About = lazy(() => import('@/sudarshan/pages/About'))
 const MasterContract = lazy(() => import('@/pages/MasterContract'))
 const ActionCenter = lazy(() => import('@/pages/ActionCenter'))
+const AutoLogin = lazy(() => import('@/pages/AutoLogin')) // SUDARSHAN M2.20
 
 // Platform pages
 const Platforms = lazy(() => import('@/pages/Platforms'))
@@ -304,6 +305,8 @@ function App() {
                 <Route path="/about" element={<About />} />
                 <Route path="/master-contract" element={<MasterContract />} />
                 <Route path="/action-center" element={<ActionCenter />} />
+                {/* SUDARSHAN M2.20: Upstox auto-login */}
+                <Route path="/autologin" element={<AutoLogin />} />
               </Route>
 
               {/* Full-width protected routes */}

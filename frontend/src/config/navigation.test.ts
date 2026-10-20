@@ -78,6 +78,11 @@ describe('Navigation Config', () => {
       expect(labels).toContain('Action Center')
       expect(labels.indexOf('Action Center')).toBe(labels.indexOf('API Key') + 1)
     })
+
+    it('lists the SUDARSHAN Auto login page (M2.20)', () => {
+      const entry = profileMenuItems.find((item) => item.href === '/autologin')
+      expect(entry?.label).toBe('Auto login')
+    })
   })
 
   describe('isActiveRoute', () => {

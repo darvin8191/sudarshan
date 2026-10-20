@@ -15,6 +15,7 @@ import {
   Gauge,
   Info,
   Key,
+  KeyRound,
   Layers,
   LayoutDashboard,
   type LucideIcon,
@@ -83,6 +84,8 @@ export const profileMenuItems: NavItem[] = [
   // menu holding one.
   { href: '/agent', label: 'Agent', icon: Bot },
   { href: '/master-contract', label: 'Master Contract', icon: FileStack },
+  // SUDARSHAN M2.20: Upstox auto-login (TOTP + PIN), shown unfiltered like the bots below.
+  { href: '/autologin', label: 'Auto login', icon: KeyRound },
   { href: '/telegram', label: 'Telegram Bot', icon: MessageSquare },
   { href: '/whatsapp', label: 'WhatsApp Bot', icon: MessageCircle },
   { href: '/holdings', label: 'Holdings', icon: ClipboardList },

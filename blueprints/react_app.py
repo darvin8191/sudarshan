@@ -764,6 +764,12 @@ def react_master_contract():
     return serve_react_app()
 
 
+# SUDARSHAN M2.20: Upstox auto-login settings
+@react_bp.route("/autologin", strict_slashes=False)
+def react_autologin():
+    return serve_react_app()
+
+
 # ============================================================
 # Flow Routes - Visual Workflow Automation
 # ============================================================
