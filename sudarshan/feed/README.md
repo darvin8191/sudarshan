@@ -40,8 +40,10 @@ SUDARSHAN_FEED_STATE_DIR=/tmp/feed-state SUDARSHAN_FEED_ALWAYS_ON=1 \
 SUDARSHAN_UPSTOX_TOKEN_FILE=$HOME/.upstox_token .venv/bin/python -m sudarshan.feed
 ```
 
-`sudarshan-deploy` restarts only OpenAlgo. After a release that changes `sudarshan/feed/`,
-restart the feed outside market hours: `sudo systemctl restart sudarshan-feed`.
+On the server, `sudarshan-deploy` installs `sudarshan/ops/systemd/sudarshan-feed.service` from each
+release (after its unit policy check), stops the feed together with OpenAlgo during an update and
+restarts it afterwards - always outside market hours. By hand: `sudo systemctl restart sudarshan-feed`
+(allowed for the dev user), also outside market hours.
 
 ## HTTP API: 127.0.0.1:5580
 
