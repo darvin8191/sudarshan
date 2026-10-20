@@ -13,7 +13,7 @@ import {
   X,
   XCircle,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { tradingApi } from '@/api/trading'
 import { ChartSymbolLink } from '@/components/trading/ChartSymbolLink'
 import GttTab from '@/components/trading/GttTab'
@@ -62,13 +62,14 @@ import { onModeChange, useThemeStore } from '@/stores/themeStore'
 // SUDARSHAN: live status, the LTP of working orders, the book re-read (src/sudarshan/books).
 import { useBookFeed } from '@/sudarshan/books/feed'
 import { TickPrice } from '@/sudarshan/books/LiveFigures'
+import { noteCancelAllFromApp } from '@/sudarshan/books/orderAlerts'
 import {
   foldOrderUpdate,
   frameFitsMode,
   holdPushed,
   isFinalStatus,
-  type Pushed,
-  rememberPushed,
+  noteOrderBook,
+  pushedStatuses,
   useOrderUpdates,
 } from '@/sudarshan/books/orderFold'
 import { QuoteStatus } from '@/sudarshan/books/QuoteStatus'
@@ -260,9 +261,9 @@ export default function OrderBook() {
     setStatusFilter([])
   }
 
-  // SUDARSHAN: what the broker last pushed for each order, held over a lagging re-read.
+  // SUDARSHAN: what the broker last pushed for each order (kept app-wide, so a
+  // page opened just after a fill holds it too), held over a lagging re-read.
   const beginRead = useLatestRead()
-  const pushed = useRef(new Map<string, Pushed>())
   const appMode = useThemeStore((s) => s.appMode)
 
   const fetchOrders = useCallback(
@@ -276,11 +277,13 @@ export default function OrderBook() {
 
       // SUDARSHAN: an answer a newer read has overtaken is dropped.
       const isLatest = beginRead()
+      const askedAt = Date.now()
       try {
         const response = await tradingApi.getOrders(apiKey)
         if (!isLatest()) return
         if (response.status === 'success' && response.data) {
-          setOrders(holdPushed(response.data.orders || [], pushed.current, Date.now()))
+          noteOrderBook(response.data.orders || [], askedAt)
+          setOrders(holdPushed(response.data.orders || [], pushedStatuses(), Date.now()))
           setStats(response.data.statistics)
           setError(null)
         } else {
@@ -308,7 +311,6 @@ export default function OrderBook() {
   // back after 15 s and a 45 s re-sync while a market is open re-read the book.
   useOrderUpdates((frame) => {
     if (!frameFitsMode(frame, appMode)) return
-    rememberPushed(pushed.current, frame, Date.now())
     setOrders((current) => foldOrderUpdate(current, frame))
   })
 
@@ -367,6 +369,8 @@ export default function OrderBook() {
   }
 
   const handleCancelAllOrders = async () => {
+    // SUDARSHAN: the orders working now are the ones this cancels; their cancels are not alerts.
+    noteCancelAllFromApp()
     try {
       const response = await tradingApi.cancelAllOrders()
       if (response.status === 'success') {
