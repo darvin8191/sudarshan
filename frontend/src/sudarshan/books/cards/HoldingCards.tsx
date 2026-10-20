@@ -38,8 +38,10 @@ import { useLatest } from './useLatest'
 /**
  * Holdings on a phone (M6.9): what they are worth now, what went into them, the
  * overall P&L and the day's change at the top, one card per holding, and a sheet
- * per holding. Buy more and Sell open the page's own order ticket exactly as its
- * table's Add and Exit do (the same holding, the same quantity, delivery).
+ * per holding. Buy more and Sell open the page's own order ticket as its
+ * table's Add and Exit do (the same holding, delivery). Sell starts from the
+ * whole holding, as Exit does; Buy more starts from one share, so a market
+ * buy of the entire holding again is never one tap away.
  */
 
 /** The ticket the page opens for a holding: the shape its table's Add and Exit pass. */
@@ -176,7 +178,7 @@ const HoldingBoard = memo(function HoldingBoard({
       symbol: row.item.symbol,
       exchange: row.item.exchange,
       action,
-      quantity: row.item.quantity,
+      quantity: action === 'BUY' ? 1 : row.item.quantity,
     })
     swap({ act: action === 'BUY' ? 'buy' : 'sell', row: holdingId(row.item) })
   }

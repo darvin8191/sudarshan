@@ -2,8 +2,8 @@
  * Holdings on a phone (M6.9), through the real Holdings page at 390px: the
  * current value, invested, overall P&L and day's change at the top, one card
  * per holding, prices that move with ticks, and a sheet whose Buy more and Sell
- * open the page's own ticket exactly as its table's Add and Exit do. Back
- * closes the ticket. On a wide screen the table is upstream's.
+ * open the page's own ticket (Sell as its table's Exit does, Buy more from one
+ * share). Back closes the ticket. On a wide screen the table is upstream's.
  */
 import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -194,7 +194,7 @@ describe('Holdings on a phone', () => {
     expect(screen.getByText('No holdings')).toBeInTheDocument()
   })
 
-  it('opens the page’s own ticket from Buy more and Sell, as its table’s Add and Exit do', async () => {
+  it('opens the page’s own ticket: Sell as its table’s Exit does, Buy more from one share', async () => {
     const tap = user()
     api.getHoldings.mockResolvedValue({
       status: 'success',
@@ -216,7 +216,10 @@ describe('Holdings on a phone', () => {
     await renderPhone(RELIANCE)
     await tap.click(card(/RELIANCE/))
     await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Buy more' }))
-    expect(screen.getByRole('region', { name: 'Order ticket' })).toHaveTextContent(fromAdd ?? '')
+    // One share, not the whole holding: a market buy of all 40 again is never one tap away.
+    expect(screen.getByRole('region', { name: 'Order ticket' })).toHaveTextContent(
+      'BUY RELIANCE NSE qty 1 product CNC MARKET Holdings'
+    )
     expect(where()).toBe('/holdings?act=buy&row=NSE%3ARELIANCE')
 
     await tap.click(screen.getByRole('button', { name: 'Close ticket' }))
