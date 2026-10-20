@@ -95,7 +95,11 @@ export function PnlCard({
 }: PnlCardProps) {
   const held = useMemo(() => openPositions(positions?.positions ?? []), [positions])
   const symbols = useMemo(() => held.map(({ symbol, exchange }) => ({ symbol, exchange })), [held])
-  const { data: prices } = useMarketData({ symbols, mode: 'LTP', enabled: symbols.length > 0 })
+  const {
+    data: prices,
+    isAuthenticated,
+    isPaused,
+  } = useMarketData({ symbols, mode: 'LTP', enabled: symbols.length > 0 })
   const now = useNow()
   const move = liveMove(positions, prices)
 
@@ -116,11 +120,12 @@ export function PnlCard({
     lastTickAt: move.lastTickAt,
     lastUpdateAt: latest(move.lastTickAt, syncedAt),
     ticksDue: held.length > 0,
+    connected: isAuthenticated && !isPaused,
   })
   // Figures that ticks should be moving and are not: greyed, keeping sign and
   // arrow, so an old number never looks current. Realised P&L does not move
   // with prices, so it keeps its colour.
-  const stale = line.kind === 'delayed' && line.stale
+  const stale = (line.kind === 'delayed' || line.kind === 'connecting') && line.stale
 
   return (
     <section

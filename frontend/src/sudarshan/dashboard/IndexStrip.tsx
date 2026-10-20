@@ -206,8 +206,10 @@ function IndexTile({
  * market-data connection the whole app shares (`useMarketData`, LTP mode),
  * starting from a REST read that also gives the previous close. While NSE is
  * open, a level that has stopped arriving is muted and marked with a clock;
- * the line underneath says "Live" only while ticks are coming in. Shown only
- * when the account has an API key, which the feed and the quote call need.
+ * the line underneath says "Live" only while ticks are coming in, and
+ * "Reconnecting" with the age of the levels while the socket is down (after
+ * the phone wakes, say). Shown only when the account has an API key, which
+ * the feed and the quote call need.
  */
 export function IndexStrip({
   apiKey,
@@ -217,7 +219,12 @@ export function IndexStrip({
   marketOpen: MarketOpen
 }) {
   const nseOpen = marketOpen('NSE_INDEX')
-  const { data: prices, connectionEpoch } = useMarketData({
+  const {
+    data: prices,
+    connectionEpoch,
+    isAuthenticated,
+    isPaused,
+  } = useMarketData({
     symbols: INDEX_SYMBOLS,
     mode: 'LTP',
     enabled: apiKey !== null,
@@ -264,6 +271,7 @@ export function IndexStrip({
             marketOpen: nseOpen,
             lastTickAt: feedTickAt,
             lastUpdateAt: latest(...rows.map((row) => row.view.at)),
+            connected: isAuthenticated && !isPaused,
           })}
         />
       )}

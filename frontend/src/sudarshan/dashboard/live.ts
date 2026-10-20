@@ -175,13 +175,16 @@ export function istDay(at: number): string {
 export type FeedLine =
   | { kind: 'live' }
   | { kind: 'delayed'; at: number; stale: boolean }
+  /** The socket is not up: on first load, after the phone wakes, or while the feed is down. */
+  | { kind: 'connecting'; at: number | null; stale: boolean; again: boolean }
   | { kind: 'waiting' }
   | { kind: 'closed' }
 
 /**
  * The live line for a set of instruments: "Live" only while WebSocket ticks
- * are arriving, never on the strength of a connection or a REST answer.
- * Otherwise the age of the newest figure, called stale when the market is
+ * are arriving, never on the strength of a REST answer. While the socket is
+ * down and ticks are due it says it is (re)connecting, and how old the figures
+ * are; otherwise it gives their age. Either is called stale when the market is
  * known to be open, ticks are due, and nothing has come for `STALE_MS`.
  */
 export function feedLine({
@@ -190,6 +193,7 @@ export function feedLine({
   lastTickAt,
   lastUpdateAt,
   ticksDue = true,
+  connected = true,
 }: {
   now: number
   marketOpen: boolean | null
@@ -197,13 +201,22 @@ export function feedLine({
   lastUpdateAt: number | null
   /** False when nothing is held, so nothing should tick and nothing can go stale. */
   ticksDue?: boolean
+  /** Whether the market-data socket is up and signed in. */
+  connected?: boolean
 }): FeedLine {
   if (marketOpen === false) return { kind: 'closed' }
-  if (lastTickAt !== null && now - lastTickAt <= STALE_MS) return { kind: 'live' }
-  if (lastUpdateAt !== null) {
-    const stale = ticksDue && marketOpen === true && now - lastUpdateAt > STALE_MS
-    return { kind: 'delayed', at: lastUpdateAt, stale }
+  const old = (at: number | null) =>
+    ticksDue && marketOpen === true && (at === null || now - at > STALE_MS)
+  if (ticksDue && !connected) {
+    return {
+      kind: 'connecting',
+      at: lastUpdateAt,
+      stale: old(lastUpdateAt),
+      again: lastTickAt !== null,
+    }
   }
+  if (lastTickAt !== null && now - lastTickAt <= STALE_MS) return { kind: 'live' }
+  if (lastUpdateAt !== null) return { kind: 'delayed', at: lastUpdateAt, stale: old(lastUpdateAt) }
   return { kind: 'waiting' }
 }
 

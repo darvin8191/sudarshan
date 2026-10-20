@@ -233,6 +233,37 @@ describe('PnlCard, live', () => {
     expect(total()).toHaveClass('text-[color:var(--up)]')
   })
 
+  it('after the phone wakes, says it is reconnecting over greyed figures until the first tick', async () => {
+    vi.useFakeTimers()
+    const { container } = render(card([position()]))
+    tick(131)
+    // Hidden: the shared socket is paused, and a minute goes by.
+    act(() => feed.setState({ connectionState: 'paused', isConnected: false, isPaused: true }))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000)
+    })
+    // Back in view, signing in again.
+    act(() =>
+      feed.setState({
+        connectionState: 'authenticating',
+        isConnected: true,
+        isAuthenticated: false,
+        isPaused: false,
+      })
+    )
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+    expect(line(container)).toHaveAttribute('data-feed', 'connecting')
+    expect(line(container)).toHaveTextContent('Reconnecting · updated 1m ago')
+    expect(total()).toHaveClass('text-muted-foreground')
+
+    act(() => feed.setState({ connectionState: 'authenticated', isAuthenticated: true }))
+    tick(132)
+    expect(line(container)).toHaveTextContent('Live')
+    expect(total()).toHaveClass('text-[color:var(--up)]')
+  })
+
   it('says the market is closed when it is', () => {
     const { container } = render(card([position()], {}, { marketOpen: () => false }))
     expect(line(container)).toHaveTextContent('Market closed')

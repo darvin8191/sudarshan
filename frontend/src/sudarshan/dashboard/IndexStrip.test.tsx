@@ -164,6 +164,32 @@ describe('IndexStrip', () => {
     expect(container.querySelectorAll('[data-stale]')).toHaveLength(3)
   })
 
+  it('says it is reconnecting while the feed is down, and is Live again with the next tick', async () => {
+    const { container } = render(<IndexStrip apiKey="key" marketOpen={OPEN} />)
+    await settle()
+    tick('NIFTY', 25900)
+    expect(line(container)).toHaveTextContent('Live')
+
+    act(() =>
+      feed.setState({ connectionState: 'connecting', isConnected: false, isAuthenticated: false })
+    )
+    expect(line(container)).toHaveAttribute('data-feed', 'connecting')
+    expect(line(container)).toHaveTextContent(/^Reconnecting · updated \ds ago$/)
+
+    act(() =>
+      feed.setState({ connectionState: 'authenticated', isConnected: true, isAuthenticated: true })
+    )
+    tick('NIFTY', 25901)
+    expect(line(container)).toHaveTextContent('Live')
+  })
+
+  it('says it is connecting before the first tick, not reconnecting', async () => {
+    feed.setState({ connectionState: 'connecting', isConnected: false, isAuthenticated: false })
+    const { container } = render(<IndexStrip apiKey="key" marketOpen={OPEN} />)
+    await settle()
+    expect(line(container)).toHaveTextContent(/^Connecting$/)
+  })
+
   it('marks nothing stale while the market is closed, and says it is closed', async () => {
     vi.useFakeTimers()
     const { container } = render(<IndexStrip apiKey="key" marketOpen={CLOSED} />)

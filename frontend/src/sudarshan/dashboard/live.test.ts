@@ -308,6 +308,62 @@ describe('feedLine', () => {
     ).toEqual({ kind: 'delayed', at: READ, stale: false })
   })
 
+  it('says it is reconnecting while the socket is down, however recent the last tick', () => {
+    expect(
+      feedLine({
+        now: READ + 2000,
+        marketOpen: true,
+        lastTickAt: READ,
+        lastUpdateAt: READ,
+        connected: false,
+      })
+    ).toEqual({ kind: 'connecting', at: READ, stale: false, again: true })
+    // After the phone wakes: the figures are old, and greyed.
+    expect(
+      feedLine({
+        now: READ + 300_000,
+        marketOpen: true,
+        lastTickAt: READ,
+        lastUpdateAt: READ,
+        connected: false,
+      })
+    ).toEqual({ kind: 'connecting', at: READ, stale: true, again: true })
+  })
+
+  it('says connecting, not reconnecting, before the first tick', () => {
+    expect(
+      feedLine({
+        now: READ,
+        marketOpen: null,
+        lastTickAt: null,
+        lastUpdateAt: READ,
+        connected: false,
+      })
+    ).toEqual({ kind: 'connecting', at: READ, stale: false, again: false })
+  })
+
+  it('does not talk about the socket when the market is closed or nothing is held', () => {
+    expect(
+      feedLine({
+        now: READ,
+        marketOpen: false,
+        lastTickAt: null,
+        lastUpdateAt: READ,
+        connected: false,
+      })
+    ).toEqual({ kind: 'closed' })
+    expect(
+      feedLine({
+        now: READ + 1000,
+        marketOpen: true,
+        lastTickAt: null,
+        lastUpdateAt: READ,
+        connected: false,
+        ticksDue: false,
+      })
+    ).toEqual({ kind: 'delayed', at: READ, stale: false })
+  })
+
   it('says the market is closed when it is known to be, and waits when there is nothing yet', () => {
     expect(
       feedLine({ now: READ, marketOpen: false, lastTickAt: READ, lastUpdateAt: READ })
