@@ -1,6 +1,8 @@
 // SUDARSHAN (M2.20): Upstox auto-login settings. Server: blueprints/sudarshan_autologin.py,
 // worker: sudarshan/autologin/. The TOTP key and PIN are write-only here: the page can save or
-// remove them and shows when they were saved, never their values.
+// remove them and shows when they were saved, never their values. Neither field is a password
+// field and there is no <form>, so no password manager offers to keep them: they are masked by
+// CSS instead (MASKED), and Save is an ordinary button.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Ban,
@@ -18,7 +20,7 @@ import {
   PlayCircle,
   TriangleAlert,
 } from 'lucide-react'
-import { type FormEvent, type ReactNode, useState } from 'react'
+import { type KeyboardEvent, type ReactNode, useState } from 'react'
 import {
   type AutoLoginAttempt,
   type AutoLoginStatus,
@@ -39,6 +41,23 @@ import { showToast } from '@/utils/toast'
 export const STATUS_KEY = ['sudarshan-autologin-status'] as const
 const TOTP_SHAPE = /^[A-Z2-7]{16,64}$/
 const PIN_SHAPE = /^[0-9]{6}$/
+/** Dots instead of characters, without type="password" (which invites a password manager). */
+const MASKED = '[-webkit-text-security:disc]'
+/** Attributes that keep password managers (and the keyboard's suggestions) away. */
+const NOT_A_PASSWORD = {
+  autoComplete: 'off',
+  autoCorrect: 'off',
+  autoCapitalize: 'off',
+  spellCheck: false,
+  'data-1p-ignore': true,
+  'data-lpignore': 'true',
+  'data-bwignore': true,
+  'data-form-type': 'other',
+} as const
+// Brand tokens (sudarshan/theme.css), never a fixed palette: they follow colour-blind mode.
+const UP = 'text-[color:var(--up)]'
+const DOWN = 'text-[color:var(--down)]'
+const WARNING = 'text-[color:var(--warning-text)]'
 
 /** The key as the server stores it: no spaces, upper case, no trailing padding. */
 export function normalizeTotpKey(raw: string): string {
@@ -76,11 +95,11 @@ function errorMessage(error: unknown, fallback: string): string {
 
 const OUTCOMES: Record<RunOutcome | 'started', { label: string; icon: LucideIcon; tone: string }> =
   {
-    ok: { label: 'Logged in', icon: CircleCheck, tone: 'text-green-700' },
-    failed: { label: 'Failed', icon: CircleX, tone: 'text-red-700' },
+    ok: { label: 'Logged in', icon: CircleCheck, tone: UP },
+    failed: { label: 'Failed', icon: CircleX, tone: DOWN },
     skipped: { label: 'Nothing to do', icon: CircleMinus, tone: 'text-muted-foreground' },
-    refused: { label: 'Not run', icon: Ban, tone: 'text-amber-800' },
-    started: { label: 'Did not finish', icon: TriangleAlert, tone: 'text-amber-800' },
+    refused: { label: 'Not run', icon: Ban, tone: WARNING },
+    started: { label: 'Did not finish', icon: TriangleAlert, tone: WARNING },
   }
 
 function Outcome({ outcome }: { outcome: RunOutcome | 'started' }) {
@@ -124,12 +143,12 @@ function SavedLine({
   return (
     <div className="flex flex-wrap items-center justify-between gap-2">
       {secret.readable ? (
-        <p className="inline-flex items-center gap-1.5 text-sm text-green-700">
+        <p className={`inline-flex items-center gap-1.5 text-sm ${UP}`}>
           <Lock className="h-4 w-4" aria-hidden="true" />
           {what}: saved {formatTime(secret.updated_at)}
         </p>
       ) : (
-        <p className="inline-flex items-center gap-1.5 text-sm text-red-700">
+        <p className={`inline-flex items-center gap-1.5 text-sm ${DOWN}`}>
           <TriangleAlert className="h-4 w-4" aria-hidden="true" />
           {what}: saved, but it can no longer be read. Save it again.
         </p>
@@ -244,9 +263,11 @@ export default function AutoLogin() {
     onSettled: refresh,
   })
 
-  const onSave = (event: FormEvent) => {
-    event.preventDefault()
-    if (canSave) save.mutate()
+  const onSave = () => {
+    if (canSave && !save.isPending) save.mutate()
+  }
+  const saveOnEnter = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter') onSave()
   }
 
   if (status.isPending) {
@@ -336,7 +357,7 @@ export default function AutoLogin() {
             <dl className="divide-y">
               <Row label="Upstox today">
                 {data.connected_today ? (
-                  <span className="inline-flex items-center gap-1.5 text-green-700">
+                  <span className={`inline-flex items-center gap-1.5 ${UP}`}>
                     <CircleCheck className="h-4 w-4" aria-hidden="true" />
                     Connected for today
                   </span>
@@ -394,7 +415,7 @@ export default function AutoLogin() {
                 is paused.
               </p>
               {!data.test.allowed && data.test.reason && !test.isPending && (
-                <p className="inline-flex items-start gap-1.5 text-sm text-amber-800">
+                <p className={`inline-flex items-start gap-1.5 text-sm ${WARNING}`}>
                   <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
                   {data.test.reason}
                 </p>
@@ -424,9 +445,10 @@ export default function AutoLogin() {
                     Off: nothing runs and nothing else changes. You can still log in by hand.
                   </p>
                 </div>
+                {/* 48 dp to touch: the after: layer widens the hit area, not the look. */}
                 <Switch
                   id="autologin-enabled"
-                  className="h-7 w-12"
+                  className="relative h-7 w-12 after:absolute after:-inset-3 after:content-['']"
                   checked={data.enabled}
                   disabled={toggle.isPending}
                   onCheckedChange={(checked) => toggle.mutate(checked)}
@@ -462,7 +484,7 @@ export default function AutoLogin() {
                 />
               </div>
 
-              <form className="space-y-4" onSubmit={onSave} autoComplete="off">
+              <div className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="autologin-totp-key">
                     {data.secrets.totp_secret.set ? 'New TOTP key' : 'TOTP key'}
@@ -470,16 +492,13 @@ export default function AutoLogin() {
                   <div className="relative">
                     <Input
                       id="autologin-totp-key"
-                      name="autologin-totp-key"
-                      type={showKey ? 'text' : 'password'}
-                      className="h-12 pr-14 text-base"
+                      type="text"
+                      className={`h-12 pr-14 text-base ${showKey ? '' : MASKED}`}
                       placeholder="Paste the key from the Upstox app"
                       value={totpKey}
                       onChange={(event) => setTotpKey(event.target.value)}
-                      autoComplete="off"
-                      autoCapitalize="characters"
-                      autoCorrect="off"
-                      spellCheck={false}
+                      onKeyDown={saveOnEnter}
+                      {...NOT_A_PASSWORD}
                       aria-invalid={Boolean(keyProblem)}
                       aria-describedby="autologin-totp-help"
                     />
@@ -499,7 +518,7 @@ export default function AutoLogin() {
                   </div>
                   <p
                     id="autologin-totp-help"
-                    className={`text-sm ${keyProblem ? 'text-red-700' : 'text-muted-foreground'}`}
+                    className={`text-sm ${keyProblem ? DOWN : 'text-muted-foreground'}`}
                     aria-live="polite"
                   >
                     {keyProblem
@@ -512,24 +531,24 @@ export default function AutoLogin() {
                   <Label htmlFor="autologin-pin">{data.secrets.pin.set ? 'New PIN' : 'PIN'}</Label>
                   <Input
                     id="autologin-pin"
-                    name="autologin-pin"
-                    type="password"
+                    type="text"
                     inputMode="numeric"
                     pattern="[0-9]*"
                     maxLength={6}
-                    className="h-12 text-base tracking-widest"
+                    className={`h-12 text-base tracking-widest ${MASKED}`}
                     placeholder="6 digits"
                     value={pin}
                     onChange={(event) =>
                       setPin(event.target.value.replace(/[^0-9]/g, '').slice(0, 6))
                     }
-                    autoComplete="off"
+                    onKeyDown={saveOnEnter}
+                    {...NOT_A_PASSWORD}
                     aria-invalid={Boolean(pinProblem)}
                     aria-describedby="autologin-pin-help"
                   />
                   <p
                     id="autologin-pin-help"
-                    className={`text-sm ${pinProblem ? 'text-red-700' : 'text-muted-foreground'}`}
+                    className={`text-sm ${pinProblem ? DOWN : 'text-muted-foreground'}`}
                   >
                     {pinProblem
                       ? 'The PIN has exactly 6 digits.'
@@ -538,8 +557,9 @@ export default function AutoLogin() {
                 </div>
 
                 <Button
-                  type="submit"
+                  type="button"
                   className="h-12 w-full sm:w-auto"
+                  onClick={onSave}
                   disabled={!canSave || save.isPending}
                 >
                   {save.isPending && (
@@ -547,7 +567,7 @@ export default function AutoLogin() {
                   )}
                   Save
                 </Button>
-              </form>
+              </div>
             </CardContent>
           </Card>
 

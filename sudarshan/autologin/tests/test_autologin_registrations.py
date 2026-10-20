@@ -10,7 +10,7 @@ REPO = Path(__file__).resolve().parents[3]
 
 def test_route_in_app_tsx():
     source = (REPO / "frontend" / "src" / "App.tsx").read_text(encoding="utf-8")
-    assert "const AutoLogin = lazy(() => import('@/pages/AutoLogin'))" in source
+    assert "const AutoLogin = lazy(() => import('@/sudarshan/pages/AutoLogin'))" in source
     assert re.search(r'<Route path="/autologin" element=\{<AutoLogin />\} />', source)
 
 

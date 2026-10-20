@@ -104,23 +104,36 @@ describe('Auto login page', () => {
     expect(gujarati?.textContent).toMatch(/[\u0A80-\u0AFF]/) // Gujarati script
   })
 
+  it('offers a password manager nothing: no password field and no form', async () => {
+    const { container } = renderPage()
+    await screen.findByLabelText('TOTP key')
+    expect(container.querySelectorAll('input[type="password"]')).toHaveLength(0)
+    expect(container.querySelector('form')).toBeNull()
+    for (const field of [screen.getByLabelText('TOTP key'), screen.getByLabelText('PIN')]) {
+      expect(field).toHaveAttribute('type', 'text')
+      expect(field).not.toHaveAttribute('name')
+      expect(field).toHaveAttribute('autocomplete', 'off')
+      expect(field).toHaveAttribute('autocapitalize', 'off')
+      expect(field).toHaveAttribute('spellcheck', 'false')
+      expect(field).toHaveAttribute('data-1p-ignore')
+      expect(field).toHaveAttribute('data-lpignore', 'true')
+    }
+  })
+
   it('keeps the TOTP key masked until asked, and paste friendly', async () => {
     renderPage()
     const key = await screen.findByLabelText('TOTP key')
-    expect(key).toHaveAttribute('type', 'password')
-    expect(key).toHaveAttribute('autocomplete', 'off')
-    expect(key).toHaveAttribute('autocapitalize', 'characters')
-    expect(key).toHaveAttribute('spellcheck', 'false')
+    expect(key.className).toContain('[-webkit-text-security:disc]')
     fireEvent.click(screen.getByRole('button', { name: 'Show TOTP key' }))
-    expect(key).toHaveAttribute('type', 'text')
+    expect(key.className).not.toContain('-webkit-text-security')
     fireEvent.click(screen.getByRole('button', { name: 'Hide TOTP key' }))
-    expect(key).toHaveAttribute('type', 'password')
+    expect(key.className).toContain('[-webkit-text-security:disc]')
   })
 
   it('takes only 6 digits for the PIN, masked, with a number pad', async () => {
     renderPage()
     const pin = await screen.findByLabelText('PIN')
-    expect(pin).toHaveAttribute('type', 'password')
+    expect(pin.className).toContain('[-webkit-text-security:disc]')
     expect(pin).toHaveAttribute('inputmode', 'numeric')
     fireEvent.change(pin, { target: { value: '12a45' } })
     expect(pin).toHaveValue('1245')
@@ -138,6 +151,42 @@ describe('Auto login page', () => {
     })
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
     expect(screen.getByText(/16 to 64 characters/)).toBeInTheDocument()
+  })
+
+  it('saves with Enter, as a form would', async () => {
+    renderPage()
+    const pin = await screen.findByLabelText('PIN')
+    fireEvent.change(pin, { target: { value: FAKE_PIN } })
+    fireEvent.keyDown(pin, { key: 'Enter' })
+    await waitFor(() => expect(api.savePin).toHaveBeenCalledWith(FAKE_PIN))
+    expect(api.saveTotpSecret).not.toHaveBeenCalled()
+  })
+
+  it('colours with the brand tokens, which follow colour-blind mode, never a fixed palette', async () => {
+    api.status.mockResolvedValue(
+      makeStatus({
+        connected_today: true,
+        secrets: {
+          totp_secret: SAVED.totp_secret,
+          pin: { set: true, updated_at: null, readable: false },
+        },
+      })
+    )
+    const { container } = renderPage()
+    expect(await screen.findByText('Connected for today')).toHaveClass('text-[color:var(--up)]')
+    expect(screen.getByText(/PIN: saved, but it can no longer be read/)).toHaveClass(
+      'text-[color:var(--down)]'
+    )
+    expect(screen.getByText('The TOTP key or the PIN is not saved yet.')).toHaveClass(
+      'text-[color:var(--warning-text)]'
+    )
+    expect(container.innerHTML).not.toMatch(/text-(green|red|amber)-\d/)
+  })
+
+  it('gives the switch a 48 dp touch area', async () => {
+    renderPage()
+    const toggle = await screen.findByRole('switch', { name: /Log in automatically/ })
+    expect(toggle).toHaveClass('relative', 'after:absolute', 'after:-inset-3')
   })
 
   it('saves the normalised key and the PIN, then forgets both', async () => {
