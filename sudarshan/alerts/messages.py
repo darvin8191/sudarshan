@@ -30,6 +30,8 @@ CURRENCY_EXCHANGES = {"CDS", "BCD"}
 STOP_TYPES = {"SL": "SL", "SL-M": "SL-M", "SLM": "SL-M", "SL M": "SL-M"}
 _MARKDOWN = str.maketrans({"*": " ", "_": " ", "`": "'", "[": "(", "]": ")"})
 REASON_MAX = 220
+#: After a line learned from the order book rather than from the stream (resync.py).
+FOUND_LATER = " (found after a pause in order alerts)"
 #: A merged message spanning more than this shows a range of times rather than one.
 SAME_MOMENT = timedelta(seconds=60)
 
@@ -103,8 +105,12 @@ def tags(update) -> str:
     return ", ".join(part for part in (stop, product, exchange) if part)
 
 
-def line(kind: str, update, today: date) -> str:
-    """One order's line, e.g. 'Filled: BUY 65 NIFTY 21 OCT 25900 CE at ₹123.45 (MIS, NFO)'."""
+def line(kind: str, update, today: date, *, found_later: bool = False) -> str:
+    """One order's line, e.g. 'Filled: BUY 65 NIFTY 21 OCT 25900 CE at ₹123.45 (MIS, NFO)'.
+
+    ``found_later``: learned from the order book after a pause in the stream, not as it happened;
+    the line says so.
+    """
     action = clean(update.action, 8).upper() or "ORDER"
     name = instrument(update.symbol, today)
     # Quantities in units, as the broker reports them; a missing one is left out, never "0".
@@ -124,8 +130,15 @@ def line(kind: str, update, today: date) -> str:
         body = f"{action}{total} {name}, none filled{meta}"
     elif kind == "rejected":
         reason = clean(update.reason, REASON_MAX)
-        said = f"Broker says: {reason}" if reason else "The broker gave no reason."
-        body = f"{action}{total} {name}{meta}. {said}"
+        if reason:
+            said = f"Broker says: {reason}"
+        elif found_later:  # OpenAlgo's order book does not carry the broker's words
+            said = "The reason is in the Upstox app's order book."
+        else:
+            said = "The broker gave no reason."
+        # The rest of a part-filled order can be rejected; the filled part is a position.
+        part = f"; {quantity(update.filled)} were filled{at}" if update.filled else ""
+        body = f"{action}{total} {name}{meta}{part}. {said}"
     elif kind == "triggered":
         price = update.trigger_price
         trigger = f" at trigger {money(price, places)}" if price > 0 else ""
@@ -135,7 +148,14 @@ def line(kind: str, update, today: date) -> str:
     label = LABELS[kind]
     if update.sandbox:
         label = f"Sandbox {label[0].lower()}{label[1:]}"
-    return f"{label}: {body}"
+    return f"{label}: {body}{FOUND_LATER if found_later else ''}"
+
+
+def gap_line(start: datetime, end: datetime, checked: bool) -> str:
+    """The pause in the stream, and whether the order book could cover it."""
+    start, end = start.astimezone(IST), end.astimezone(IST)
+    book = "the order book was checked" if checked else "the order book could not be checked"
+    return f"Order alerts paused {start:%H:%M:%S} to {end:%H:%M:%S} IST; {book}."
 
 
 def compose(lines: list[str], first: datetime, last: datetime, dropped: int = 0) -> str:

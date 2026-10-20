@@ -201,3 +201,203 @@ def test_old_records_are_pruned(store):
     assert kinds(tracker.on_update(update("p1", "complete"), T0 + timedelta(days=8))) == [
         ("p1", "filled", 65)
     ]
+
+
+# -- the 3 s rule, pinned ------------------------------------------------------------------------
+
+
+def test_a_modify_that_takes_2_5_s_is_not_a_trigger(store):
+    tracker = OrderTracker(store)  # the shipped settle time
+    tracker.on_update(_stop("p1", "trigger pending"), T0)
+    tracker.on_update(_stop("p1", "open"), T0 + timedelta(seconds=0.1))  # modify pending
+    tracker.on_update(_stop("p1", "trigger pending"), T0 + timedelta(seconds=2.6))  # done
+    assert tracker.due(T0 + timedelta(seconds=30)) == []
+
+
+def test_an_unfilled_trigger_is_told_at_3_1_s_and_not_at_2_9_s(store):
+    tracker = OrderTracker(store)
+    tracker.on_update(_stop("p2", "trigger pending"), T0)
+    tracker.on_update(_stop("p2", "open"), T0)
+    assert tracker.due(T0 + timedelta(seconds=2.9)) == []
+    assert kinds(tracker.due(T0 + timedelta(seconds=3.1))) == [("p2", "triggered", 0)]
+
+
+def test_a_slow_modify_does_not_use_up_the_real_trigger(store):
+    """A modify slower than 3 s is told as a trigger (nothing tells them apart); the real one
+    that follows, in the next trigger-pending episode, is still told."""
+    tracker = OrderTracker(store)
+    tracker.on_update(_stop("p3", "trigger pending"), T0)
+    tracker.on_update(_stop("p3", "open"), T0 + timedelta(seconds=1))  # modify pending
+    assert len(tracker.due(T0 + timedelta(seconds=4.5))) == 1  # slow: told
+    tracker.on_update(_stop("p3", "trigger pending"), T0 + timedelta(seconds=5))  # modified
+    tracker.on_update(_stop("p3", "open"), T0 + timedelta(seconds=60))  # the real trigger
+    assert kinds(tracker.due(T0 + timedelta(seconds=64))) == [("p3", "triggered", 0)]
+    assert tracker.due(T0 + timedelta(seconds=120)) == []
+
+
+# Two guards stand between a modify or a cancel and a false "Triggered": the update that ends the
+# wait drops it, and due() reads the record again. Each test below holds one of them alone.
+
+
+def test_an_update_that_ends_the_wait_drops_it_at_once(store):
+    tracker = OrderTracker(store)
+    for order_id, end in (("w1", "trigger pending"), ("w2", "cancelled"), ("w3", "complete")):
+        tracker.on_update(_stop(order_id, "trigger pending"), T0)
+        tracker.on_update(_stop(order_id, "open"), T0 + timedelta(seconds=0.1))
+        assert order_id in tracker._waiting
+        tracker.on_update(_stop(order_id, end), T0 + timedelta(seconds=0.2))
+        assert order_id not in tracker._waiting  # nothing lingers for the rest of the settle time
+
+
+def test_due_goes_by_the_record_not_by_the_wait(store):
+    tracker = OrderTracker(store)
+    record = {
+        "d1": ("trigger_pending", 0, False),  # modified back to waiting for its trigger
+        "d2": ("cancelled", 0, True),
+        "d3": ("working", 20, False),  # part filled: told as a fill, not as a trigger
+    }
+    for order_id, (state, filled, final) in record.items():
+        tracker.on_update(_stop(order_id, "trigger pending"), T0)
+        tracker.on_update(_stop(order_id, "open"), T0)
+        with store.transaction() as tx:  # the record moved on; the wait was not told
+            tx.save_order(order_id, state, filled, final, tx.order(order_id).pending_seen, T0)
+    assert tracker.due(T0 + timedelta(seconds=60)) == []
+
+
+# -- rows found in the order book after a pause ------------------------------------------------
+
+
+def test_book_rows_are_marked_and_never_start_a_trigger_check(store):
+    tracker = OrderTracker(store)
+    tracker.on_update(_stop("b1", "trigger pending"), T0)
+    # The book reads a stop order waiting for its trigger as open: no trigger, no state change.
+    assert tracker.on_update(_stop("b1", "open"), T0, found_later=True) == []
+    assert tracker._waiting == {}
+    with store.transaction() as tx:
+        assert tx.order("b1").state == "trigger_pending"
+    # A real trigger afterwards is still seen.
+    tracker.on_update(_stop("b1", "open"), T0 + timedelta(seconds=10))
+    assert len(tracker.due(T0 + timedelta(seconds=20))) == 1
+    (found,) = tracker.on_update(update("b2", "complete"), T0, found_later=True)
+    assert found.line.endswith(" (found after a pause in order alerts)")
+
+
+def test_book_rows_repeat_nothing_already_told(store):
+    tracker = OrderTracker(store)
+    feed(tracker, update("b3", "open", filled_quantity=20, average_price=9),
+         update("b4", "complete"), update("b5", "rejected", rejection_reason="No margin"))  # fmt: skip
+    again = [
+        update("b3", "open", filled_quantity=20, average_price=9),
+        update("b3", "open", filled_quantity=10, average_price=9),  # a lagging trade book
+        update("b4", "complete"),
+        update("b5", "rejected"),
+    ]
+    assert [a for p in again for a in tracker.on_update(p, T0, found_later=True)] == []
+    more = tracker.on_update(update("b3", "open", filled_quantity=30), T0, found_later=True)
+    assert kinds(more) == [("b3", "part", 30)]
+
+
+def test_a_rejection_found_later_does_not_claim_the_broker_gave_no_reason(store):
+    (alert,) = OrderTracker(store).on_update(update("b6", "rejected"), T0, found_later=True)
+    assert "The reason is in the Upstox app's order book." in alert.line
+    assert "gave no reason" not in alert.line
+
+
+def test_a_rejection_after_a_part_fill_says_what_was_filled(store):
+    payload = update("b7", "rejected", filled_quantity=40, average_price=121.5,
+                     rejection_reason="Circuit limit")  # fmt: skip
+    (alert,) = OrderTracker(store).on_update(payload, T0)
+    assert alert.line == (
+        "Rejected: BUY 65 NIFTY 21 OCT 25900 CE (MIS, NFO); 40 were filled at ₹121.50. "
+        "Broker says: Circuit limit"
+    )
+
+
+# -- the record failing ------------------------------------------------------------------------
+
+
+class _Refusing:
+    """An engine whose every transaction fails, as a full disk would."""
+
+    def begin(self):
+        from sqlalchemy.exc import OperationalError
+
+        raise OperationalError("COMMIT", {}, Exception("database or disk is full"))
+
+    def dispose(self):
+        pass
+
+
+def test_a_failing_record_still_queues_and_holds_back_repeats(tmp_path, caplog):
+    import logging
+
+    caplog.set_level(logging.DEBUG, logger="sudarshan.alerts")
+    store = Store(tmp_path / "alerts.db")
+    tracker = OrderTracker(store)
+    assert kinds(tracker.on_update(update("f1", "complete"), T0)) == [("f1", "filled", 65)]
+    store.engine = _Refusing()
+    assert kinds(tracker.on_update(update("f2", "complete"), T0)) == [("f2", "filled", 65)]
+    assert store.in_memory
+    assert tracker.on_update(update("f2", "complete"), T0) == []  # held back in memory
+    assert tracker.on_update(update("f1", "complete"), T0) == []  # told before the failure
+    errors = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert len(errors) == 1 and "database or disk is full" in errors[0].getMessage()
+
+
+def test_a_commit_that_fails_does_not_lose_the_alert(tmp_path):
+    """The claim was written, then the commit failed: memory must not believe it was made."""
+    store = Store(tmp_path / "alerts.db")
+    tracker = OrderTracker(store)
+    real_begin = store.engine.begin
+
+    class FailAtCommit:
+        def __init__(self):
+            self.inner = real_begin()
+
+        def __enter__(self):
+            return self.inner.__enter__()
+
+        def __exit__(self, *exc):
+            from sqlalchemy.exc import OperationalError
+
+            self.inner.__exit__(ValueError, ValueError("rolled back"), None)
+            raise OperationalError("COMMIT", {}, Exception("disk I/O error"))
+
+    class Engine:
+        begin = staticmethod(FailAtCommit)
+
+        def dispose(self):
+            pass
+
+    store.engine = Engine()
+    assert kinds(tracker.on_update(update("f3", "complete"), T0)) == [("f3", "filled", 65)]
+
+
+def test_the_sent_table_admits_each_claim_once(tmp_path):
+    path = tmp_path / "alerts.db"
+    store = Store(path)
+    with store.transaction() as tx:
+        assert tx.claim("o1", "part", 20, T0) is True
+        assert tx.claim("o1", "part", 20, T0) is False
+        assert tx.claim("o1", "part", 40, T0) is True
+        assert tx.claim("o1", "filled", 20, T0) is True
+        assert tx.claim("o2", "part", 20, T0) is True
+    store.close()
+    again = Store(path)
+    with again.transaction() as tx:
+        assert tx.claim("o1", "part", 20, T0) is False
+        assert tx.most_filled("o1", "part") == 40
+    again.close()
+
+
+def test_claims_held_in_memory_are_admitted_once_too(tmp_path):
+    blocked = tmp_path / "a-file-not-a-directory"
+    blocked.write_text("")
+    store = Store(blocked / "alerts.db")  # cannot be created: the alerts run from memory
+    assert store.in_memory
+    with store.transaction() as tx:
+        assert tx.claim("o1", "part", 20, T0) is True
+        assert tx.claim("o1", "part", 20, T0) is False
+        assert tx.claim("o1", "part", 40, T0) is True
+        assert tx.most_filled("o1", "part") == 40
+    store.close()

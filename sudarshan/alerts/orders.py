@@ -24,7 +24,13 @@ Alerts:
 Nothing is sent for an order after its final state (filled, rejected, cancelled), and a part fill
 is sent only when more is filled than last time, so a late or repeated message never goes out of
 order. Each alert is claimed once in the store by (order id, kind, filled quantity) before it is
-queued: a replay after a reconnect or a restart finds the claim and stays silent.
+queued: a replay after a reconnect or a restart finds the claim and stays silent. A trigger is
+claimed per trigger-pending episode, so a modify slower than the settle time (told as a trigger,
+which nothing here can tell apart) does not use up the record a later real trigger needs.
+
+Rows from the order book after a pause (resync.py) go through the same rules, marked found
+later: they never start a trigger check and never overwrite a finer state with the book's coarse
+one (the book reports a stop order waiting for its trigger as open).
 
 Who cancelled an order cannot be read from this message: OpenAlgo's normalized payload has no
 field for it (Upstox's status_message is kept only for rejections), so a cancellation is told
@@ -38,7 +44,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from . import messages
-from .store import Store
+from .store import Store, StoreFailed
 
 FINAL_STATES = ("complete", "rejected", "cancelled")
 _CANCELLED = {"cancelled", "canceled", "cancelled after market order", "expired"}
@@ -173,26 +179,40 @@ class OrderTracker:
         self.settle = timedelta(seconds=settle_s)
         self._waiting: dict[str, _Waiting] = {}
 
-    def on_update(self, message: dict, now: datetime) -> list[Alert]:
+    def on_update(self, message: dict, now: datetime, *, found_later: bool = False) -> list[Alert]:
+        """Alerts for one update. ``found_later``: a row of the order book after a pause."""
         update = parse(message)
         if update is None or (update.sandbox and not self.sandbox):
             return []
+        if found_later and classify(update, self.cancelled) is None:
+            return []  # the book's coarse state tells nothing new and must not replace a finer one
+        waiting = self._waiting.pop(update.key, None)
+        try:
+            return self._apply(update, now, waiting, found_later)
+        except StoreFailed:  # the store now answers from memory: the same work once more
+            return self._apply(update, now, waiting, found_later)
+
+    def _apply(self, update: OrderUpdate, now, waiting, found_later: bool) -> list[Alert]:
         alerts = []
         with self.store.transaction() as tx:
             before = tx.order(update.key)
             if before is not None and before.final:
                 return []  # nothing after the final message, whatever arrives late
-            waiting = self._waiting.pop(update.key, None)
             decision = classify(update, self.cancelled)
             kind, filled = decision or (None, 0)
             # "Filled" is final too, even before the broker says complete: a late part fill
             # must not follow it.
             final = update.state in FINAL_STATES or kind == "filled"
-            tx.save_order(update.key, update.state, update.filled, final, now)
+            episodes = before.pending_seen if before is not None else 0
+            if update.state == "trigger_pending" and (
+                before is None or before.state != "trigger_pending"
+            ):
+                episodes += 1
+            tx.save_order(update.key, update.state, update.filled, final, episodes, now)
             if kind is not None:
                 newer = kind != "part" or filled > tx.most_filled(update.key, "part")
                 if newer and tx.claim(update.key, kind, filled, now):
-                    alerts.append(self._alert(kind, filled, update, now))
+                    alerts.append(self._alert(kind, filled, update, now, found_later))
             elif self._left_trigger_pending(update, before):
                 self._wait_for_trigger(update, now)
             elif waiting is not None and update.state == "working" and not update.filled:
@@ -200,18 +220,25 @@ class OrderTracker:
         return alerts
 
     def due(self, now: datetime) -> list[Alert]:
-        """Triggers that stayed unfilled for the settle time; they are reported once."""
+        """Triggers that stayed unfilled for the settle time; told once per episode."""
         alerts = []
         for key, waiting in list(self._waiting.items()):
             if waiting.due > now:
                 continue
             del self._waiting[key]
-            with self.store.transaction() as tx:
-                state = tx.order(key)
-                still = state is not None and state.state == "working" and not state.final
-                if still and not state.filled and tx.claim(key, "triggered", 0, now):
-                    alerts.append(self._alert("triggered", 0, waiting.update, waiting.since))
+            try:
+                alerts += self._settle(key, waiting, now)
+            except StoreFailed:
+                alerts += self._settle(key, waiting, now)
         return alerts
+
+    def _settle(self, key: str, waiting: _Waiting, now: datetime) -> list[Alert]:
+        with self.store.transaction() as tx:
+            state = tx.order(key)
+            still = state is not None and state.state == "working" and not state.final
+            if still and not state.filled and tx.claim(key, "triggered", state.pending_seen, now):
+                return [self._alert("triggered", 0, waiting.update, waiting.since)]
+        return []
 
     def _left_trigger_pending(self, update: OrderUpdate, before) -> bool:
         return (
@@ -227,6 +254,9 @@ class OrderTracker:
             del self._waiting[min(self._waiting, key=lambda k: self._waiting[k].due)]
         self._waiting[update.key] = _Waiting(update, now, now + self.settle)
 
-    def _alert(self, kind: str, filled: int, update: OrderUpdate, at: datetime) -> Alert:
-        text = messages.line(kind, update, at.astimezone(messages.IST).date())
+    def _alert(
+        self, kind: str, filled: int, update: OrderUpdate, at: datetime, found_later=False
+    ) -> Alert:
+        today = at.astimezone(messages.IST).date()
+        text = messages.line(kind, update, today, found_later=found_later)
         return Alert(update.key, kind, filled, text, at)
