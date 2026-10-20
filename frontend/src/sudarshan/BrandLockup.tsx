@@ -3,10 +3,11 @@ import { BRAND } from './brand'
 
 interface BrandLockupProps {
   /**
-   * `bar`: the app bar's compact lockup, the Devanagari before the Latin caps
-   * behind a hairline (stacked on the narrowest phones, where one line does
-   * not fit beside the account controls). `stacked`: the full lockup for the
-   * login screen, the Devanagari above tracked Latin caps.
+   * `bar`: the app bar's lockup. On phones it stacks the Devanagari over the
+   * caps, which is what fits beside the account controls down to 320px; from
+   * the sm breakpoint it runs on one line, the two scripts behind a hairline.
+   * `stacked`: the full lockup for the login screen, the Devanagari above
+   * tracked Latin caps.
    */
   variant?: 'bar' | 'stacked'
   className?: string

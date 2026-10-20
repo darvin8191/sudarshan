@@ -189,7 +189,7 @@ export function Navbar({ fluid = false }: NavbarProps = {}) {
         </Sheet>
 
         {/* Wordmark: both scripts at every width (owner rule 2). */}
-        <Link to="/dashboard" className="flex shrink-0 items-center mr-3 md:mr-6">
+        <Link to="/dashboard" className="flex shrink-0 items-center mr-2 md:mr-6">
           <BrandLockup />
         </Link>
 

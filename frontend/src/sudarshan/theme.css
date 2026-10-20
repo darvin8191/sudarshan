@@ -229,24 +229,44 @@ html[data-cvd='1'] {
     line-height: 1;
   }
 
+  /* Phones: stacked, Devanagari over the caps, which fits beside the account
+     controls down to 320px. From the sm breakpoint: one line, with a hairline. */
   .sd-lockup--bar {
-    gap: 0.5rem;
+    flex-direction: column;
+    gap: 0.125rem;
   }
   .sd-lockup--bar .sd-wordmark {
-    font-size: 1.25rem;
+    font-size: 1.75rem;
+    line-height: 1;
   }
   .sd-lockup--bar .sd-lockup__latin {
-    font-size: 0.8125rem;
+    font-size: 0.5625rem;
+    letter-spacing: 0.1em;
+    padding-left: 0.1em;
   }
   .sd-lockup__rule {
+    display: none;
     align-self: stretch;
     width: 1px;
     margin-block: 0.25rem;
     background: var(--border);
   }
   @media (min-width: 40rem) {
+    .sd-lockup--bar {
+      flex-direction: row;
+      gap: 0.5rem;
+    }
+    .sd-lockup--bar .sd-wordmark {
+      font-size: 1.25rem;
+      line-height: 1.25;
+    }
     .sd-lockup--bar .sd-lockup__latin {
       font-size: 0.9375rem;
+      letter-spacing: 0.08em;
+      padding-left: 0;
+    }
+    .sd-lockup__rule {
+      display: block;
     }
   }
 
@@ -254,14 +274,15 @@ html[data-cvd='1'] {
     flex-direction: column;
     gap: 0.25rem;
   }
+  /* The Devanagari line about 1.2 times the width of the caps line. */
   .sd-lockup--stacked .sd-wordmark {
-    font-size: 2.75rem;
+    font-size: 3rem;
   }
   .sd-lockup--stacked .sd-lockup__latin {
     font-size: 0.875rem;
-    letter-spacing: 0.16em;
+    letter-spacing: 0.12em;
     /* Tracking adds space after the last letter too; pad the start to match,
        so the caps centre under the Devanagari. */
-    padding-left: 0.16em;
+    padding-left: 0.12em;
   }
 }
