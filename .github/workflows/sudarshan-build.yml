@@ -1,0 +1,78 @@
+# सुदर्शन / SUDARSHAN release build.
+# Push a tag vA.B.C (on the `sudarshan` branch) -> builds frontend/dist on an ARM64 runner and
+# publishes a GitHub Release with `frontend-dist.tar.gz` + `frontend-dist.tar.gz.sha256`.
+# The server's sudarshan-deploy.timer installs the latest Release outside market hours.
+# Manual runs (workflow_dispatch) build and test only; they never publish a Release.
+name: SUDARSHAN release build
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sudarshan-build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build and test frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run lint
+          npm run build
+          npm run test:run
+          test -f dist/index.html
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: "3.12"
+
+      - name: SUDARSHAN service tests
+        run: |
+          uv sync --dev
+          if find sudarshan -path '*/tests/*' -name 'test_*.py' 2>/dev/null | grep -q .; then
+            uv run pytest -q sudarshan
+          else
+            echo "no sudarshan tests yet"
+          fi
+
+      - name: Package dist
+        run: |
+          tar -czf frontend-dist.tar.gz -C frontend dist
+          sha256sum frontend-dist.tar.gz | tee frontend-dist.tar.gz.sha256
+
+      - name: Keep the build (manual runs)
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: frontend-dist
+          path: |
+            frontend-dist.tar.gz
+            frontend-dist.tar.gz.sha256
+          retention-days: 7
+
+      - name: Publish Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" frontend-dist.tar.gz frontend-dist.tar.gz.sha256 \
+            --verify-tag --generate-notes --title "सुदर्शन SUDARSHAN ${GITHUB_REF_NAME}"

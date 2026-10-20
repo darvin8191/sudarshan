@@ -1,0 +1,62 @@
+# सुदर्शन / SUDARSHAN checks for the `sudarshan` branch.
+# Upstream's ci.yml runs only for `main` (which this fork never pushes to), so the two never overlap.
+# Only our own code is gated here: upstream's test suite is upstream's business.
+name: SUDARSHAN CI
+
+on:
+  pull_request:
+    branches: ["sudarshan"]
+  push:
+    branches: ["sudarshan"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sudarshan-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - run: npm run test:run
+
+  backend:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - run: uv sync --dev
+      - name: Ruff (sudarshan/ only)
+        run: |
+          if find sudarshan -name '*.py' 2>/dev/null | grep -q .; then
+            uv run ruff check sudarshan
+          else
+            echo "no Python code in sudarshan/ yet"
+          fi
+      - name: Tests (sudarshan/ only)
+        run: |
+          if find sudarshan -path '*/tests/*' -name 'test_*.py' 2>/dev/null | grep -q .; then
+            uv run pytest -q sudarshan
+          else
+            echo "no sudarshan tests yet"
+          fi
