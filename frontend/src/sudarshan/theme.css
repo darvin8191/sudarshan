@@ -119,9 +119,14 @@
   --sell-foreground: 0 0% 100%;
 }
 
-/* Figures line up: every number in tables, tickers and P&L takes one width, so
-   columns align and a ticking price never shifts the text beside it. */
-body {
+/* Figures line up where numbers are read in columns or change in place: tables
+   and number inputs here, and everything upstream already marks `tabular-nums`
+   (230 places). Not on body: Inter's tabular set also fixes the width of the
+   space, hyphen, brackets and punctuation, which gaps ordinary text. */
+table,
+input[type='number'],
+input[inputmode='numeric'],
+input[inputmode='decimal'] {
   font-variant-numeric: tabular-nums lining-nums;
 }
 
