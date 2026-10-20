@@ -4,7 +4,12 @@ import { ago, type FeedLine } from './live'
 
 const TEXT = 'inline-flex items-center gap-1.5 text-xs font-semibold whitespace-nowrap'
 
-function words(line: Exclude<FeedLine, { kind: 'live' }>, now: number): string {
+/**
+ * The words for a line that is not real-time, with the age of the figures
+ * where it has one. Shared with the chart's own marker, which draws them
+ * beside its own glyph.
+ */
+export function feedWords(line: Exclude<FeedLine, { kind: 'live' }>, now: number): string {
   switch (line.kind) {
     case 'closed':
       return 'Market closed'
@@ -12,6 +17,8 @@ function words(line: Exclude<FeedLine, { kind: 'live' }>, now: number): string {
       return 'Waiting for prices'
     case 'delayed':
       return `${line.stale ? 'Stale · updated' : 'Updated'} ${ago(now - line.at)}`
+    case 'polling':
+      return `${line.stale ? 'Stale' : 'Delayed'} · updated ${ago(now - line.at)}`
     case 'connecting':
       if (!line.again) return 'Connecting'
       return line.at === null ? 'Reconnecting' : `Reconnecting · updated ${ago(now - line.at)}`
@@ -45,12 +52,15 @@ export function LiveLine({
     )
   }
 
-  const stale = (line.kind === 'delayed' || line.kind === 'connecting') && line.stale
+  const stale =
+    (line.kind === 'delayed' || line.kind === 'polling' || line.kind === 'connecting') && line.stale
   const Icon = line.kind === 'closed' ? Moon : line.kind === 'connecting' ? RefreshCw : Clock
 
   return (
     <span
-      data-feed={line.kind === 'delayed' && stale ? 'stale' : line.kind}
+      data-feed={
+        (line.kind === 'delayed' || line.kind === 'polling') && stale ? 'stale' : line.kind
+      }
       className={cn(
         TEXT,
         stale ? 'text-[color:var(--warning-text)]' : 'text-muted-foreground',
@@ -58,7 +68,7 @@ export function LiveLine({
       )}
     >
       <Icon aria-hidden="true" className="size-3.5 shrink-0" />
-      {words(line, now)}
+      {feedWords(line, now)}
     </span>
   )
 }

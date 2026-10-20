@@ -6480,7 +6480,7 @@ export class TradingTerminal {
             })
             if (typeof j.data?.ltp === 'number' && j.data.ltp > 0) this.legLtp.set(leg, j.data.ltp)
           }
-          this.onCombinedTick(this.expr, nowSec())
+          this.onCombinedTick(this.expr, nowSec(), true)
           this.liveStatus.setTransport('polling')
           this.cb.onWsState('fallback')
         } catch {
@@ -6505,6 +6505,7 @@ export class TradingTerminal {
             timeSec: nowSec(),
             dayVolume: q.volume,
             oi: this.sym.hasOpenInterest ? q.oi : undefined,
+            polled: true,
           })
         this.liveStatus.setTransport('polling')
         if (!this.sym.quoteOnly) this.priceAxis.setQuote(q.bid, q.ask)
@@ -6540,11 +6541,13 @@ export class TradingTerminal {
     /** The day's cumulative volume, when the frame or quote carried it. */
     dayVolume?: number
     oi?: number
+    /** A quote request standing in for the stream: it moves the chart but is never real-time. */
+    polled?: boolean
   }) {
     if (!this.sym || (e.symbol && e.symbol !== this.sym.symbol)) return
     this.lastLtp = e.ltp
     this.cb.onLtp(e.ltp)
-    this.liveStatus.noteTick(e.timeSec)
+    this.liveStatus.noteTick(e.timeSec, !e.polled)
     // Recolour with the price: the line belongs to the forming candle, so it
     // follows that candle's direction rather than sitting amber forever.
     if (this.position && this.posLine) this.posLine.setLeftLabel(this.posLabel())
@@ -6772,7 +6775,7 @@ export class TradingTerminal {
   }
 
   /** Fold the latest price of every leg into one tick for the combined series. */
-  private onCombinedTick(expr: SymbolExpression, timeSec?: number) {
+  private onCombinedTick(expr: SymbolExpression, timeSec?: number, polled = false) {
     const legs: Record<string, Bar[]> = {}
     for (const leg of expr.symbols) {
       const p = this.legLtp.get(leg)
@@ -6782,7 +6785,7 @@ export class TradingTerminal {
     const value = evaluateExpression(expr, legs)[0]?.close
     // A divisor at zero folds to a gap, and a gap is not a price.
     if (value === undefined || !Number.isFinite(value)) return
-    this.onTick({ ltp: value, timeSec })
+    this.onTick({ ltp: value, timeSec, polled })
   }
 
   /** Repair a known stream gap immediately through the shared data owner. */

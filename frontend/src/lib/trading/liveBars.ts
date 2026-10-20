@@ -610,7 +610,12 @@ export interface LiveBarClockOptions {
   now?(): number
   setTimer?(run: () => void, ms: number): unknown
   clearTimer?(handle: unknown): void
-  /** How long after a boundary a tick has to open the bar before the clock does. */
+  /**
+   * How long after a boundary the clock looks, in milliseconds. A tick that
+   * lands first opens the bar itself; this only covers the timer firing a
+   * hair before the wall clock agrees the boundary has passed. Kept small: a
+   * candle opens on time, with nothing added to what the feed delivers.
+   */
   graceMs?: number
   /** How long after a boundary history is asked for the bar that closed. */
   repairDelayMs?: number
@@ -672,7 +677,7 @@ export class LiveBarClock {
     const now = this.now()
     const at = builder.nextClockAt(now)
     if (at === null) return
-    const grace = this.opts.graceMs ?? 500
+    const grace = this.opts.graceMs ?? 100
     const wait = Math.min(MAX_WAIT_MS, Math.max(0, (at - now) * 1000) + grace)
     this.timer = this.set(() => {
       this.timer = null

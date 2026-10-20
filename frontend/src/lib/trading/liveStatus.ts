@@ -1,24 +1,25 @@
 /**
- * Whether a chart's prices are live, and the marker it shows when they are not.
+ * Whether a chart's prices are arriving in real time, and what its marker
+ * says when they are not.
  *
- * A chart is live when ticks are arriving over the stream. It is delayed while
- * the stream is down and prices come from a quote request every few seconds,
- * stale when nothing has arrived for a while during the session, and closed
- * outside the session. The words and the order they win in are decided here
- * once, so every chart that shows one says the same thing.
+ * The rules and the words are the app's own (`sudarshan/dashboard/live.ts`,
+ * `feedLine`): "Real-time" only while the stream is delivering ticks;
+ * "Delayed" with the age of the figures while the stream is down and a quote
+ * request every few seconds fills in; "Reconnecting" while it is down with
+ * nothing filling in; "Stale" when nothing has come for a while in market
+ * hours; "Market closed" outside them. This file only follows one chart's
+ * inputs over time and asks those rules again when the answer can change.
  *
- * Event driven: a tick, a change of transport or a new calendar is what
- * re-evaluates it, plus one timer aimed at the next moment the answer can
- * change by itself (a tick becoming too old, or the session opening or
- * closing). Nothing here polls.
+ * Event driven: a tick, a change of transport or a new calendar re-evaluates
+ * it, plus one timer aimed at the next moment the answer can change by itself
+ * (prices growing old, or the session opening or closing). Nothing here polls.
  */
+import { type FeedLine, feedLine, sameFeedState } from '@/sudarshan/dashboard/live'
 import type { SessionHours } from './liveBars'
-
-export type LiveState = 'live' | 'delayed' | 'stale' | 'closed' | 'connecting'
 
 /** How prices are reaching the chart. */
 export type LiveTransport =
-  /** The stream is connecting and no quote request has answered yet. */
+  /** The stream is not up yet, or is down with nothing filling in. */
   | 'connecting'
   /** The stream is up and subscribed. */
   | 'live'
@@ -27,24 +28,27 @@ export type LiveTransport =
 
 /** What a marker shows, read from a tracker. */
 export interface LiveStatus {
-  state: LiveState
-  /** Wall clock, in milliseconds, when the last price arrived. Null before the first. */
+  /** What the feed is doing, in the words the whole app uses. */
+  line: FeedLine
+  /** Wall clock, in milliseconds, of the last price the stream delivered. */
   lastTickAt: number | null
+  /** Wall clock, in milliseconds, of the last price from anywhere: the stream, a quote or history. */
+  lastUpdateAt: number | null
   /** The exchange's time of the last price, in UTC seconds, when the feed sent one. */
   lastTickTime: number | null
-  /** How long without a price, during the session, makes the chart stale. */
+  /** How long without a tick, in market hours, makes the chart's prices stale. */
   staleAfterMs: number
   /** The next session's open, in UTC seconds, while the market is closed and it is known. */
   opensAt: number | null
 }
 
 /**
- * How long a chart may go without a price during the session before it is
- * called stale.
+ * How long a chart may go without a tick in market hours before its prices
+ * are called stale.
  *
  * - **Indices, 10 seconds.** An index is recomputed and sent about once a
  *   second through the session, so ten seconds without one is a stopped feed,
- *   not a quiet market.
+ *   not a quiet market. The dashboard uses the same figure for its indices.
  * - **Futures and options, 15 seconds.** Liquid contracts change many times a
  *   second and the book moves between trades, so this is several updates
  *   missed. A far strike can sit still for longer, and on a contract somebody
@@ -58,39 +62,19 @@ export function staleAfterMs(exchange: string): number {
   return 30_000
 }
 
-export interface LiveStateInput {
-  transport: LiveTransport
-  /** Whether the exchange is in its regular session now; null when its hours are not known. */
-  marketOpen: boolean | null
-  /** Milliseconds: when the last price arrived, or null before the first. */
-  lastTickAt: number | null
-  /** Milliseconds: when the chart started waiting for prices (its subscription). */
-  since: number
-  now: number
-  staleAfterMs: number
-}
-
-/**
- * The state, in the order a trader would want to be told: a shut market
- * explains everything else, then a stream that is down, then a stream that is
- * up but silent.
- */
-export function liveStateOf(input: LiveStateInput): LiveState {
-  if (input.marketOpen === false) return 'closed'
-  const age = input.now - (input.lastTickAt ?? input.since)
-  if (input.transport === 'polling') return age > input.staleAfterMs ? 'stale' : 'delayed'
-  if (input.transport === 'connecting') return age > input.staleAfterMs ? 'stale' : 'connecting'
-  if (input.lastTickAt === null) return age > input.staleAfterMs ? 'stale' : 'connecting'
-  return age > input.staleAfterMs ? 'stale' : 'live'
-}
-
-/** The label a marker carries. Never a protocol word, never a brand. */
-export const LIVE_LABEL: Record<LiveState, string> = {
-  live: 'Live',
-  delayed: 'Delayed',
-  stale: 'Stale',
-  closed: 'Market closed',
-  connecting: 'Connecting',
+/** Whether a line is worth a marker on a chart that is otherwise quiet about its feed. */
+export function needsMarker(line: FeedLine): boolean {
+  switch (line.kind) {
+    case 'live':
+    case 'waiting':
+      return false
+    case 'delayed':
+      // Fresh from history and waiting for the first tick is the normal half
+      // second after every load; only an old figure is worth saying.
+      return line.stale
+    default:
+      return true
+  }
 }
 
 const clock = new Intl.DateTimeFormat('en-IN', {
@@ -114,18 +98,31 @@ const dayAndClock = new Intl.DateTimeFormat('en-IN', {
   hourCycle: 'h23',
 })
 
-/** One line under or beside the label: what it means, and what happens next. */
+/**
+ * One sentence on what the marker means and what happens next, for its
+ * tooltip and for a screen reader. Times rather than ages, so it stays true
+ * however long it is shown.
+ */
 export function liveDetail(status: LiveStatus, now = Date.now()): string {
-  switch (status.state) {
+  const line = status.line
+  switch (line.kind) {
     case 'live':
-      return 'Prices are updating as they trade.'
+      return 'Prices are arriving in real time.'
+    case 'waiting':
+      return 'Waiting for the first price.'
+    case 'polling':
+      return line.stale
+        ? `No price since ${clockSeconds.format(new Date(line.at))}. The real-time feed is reconnecting and the quotes standing in for it have stopped too.`
+        : 'The real-time feed is reconnecting. Prices come from a quote every few seconds until it is back.'
+    case 'connecting':
+      if (!line.again) return 'Connecting to real-time prices.'
+      return line.at === null
+        ? 'The real-time feed dropped and is reconnecting.'
+        : `The real-time feed dropped and is reconnecting. Prices shown are from ${clockSeconds.format(new Date(line.at))}.`
     case 'delayed':
-      return 'The live stream is reconnecting. Prices refresh every few seconds until it is back.'
-    case 'stale':
-      // A time rather than an age, so the line stays true however long it is shown.
-      return status.lastTickAt === null
-        ? 'No price has arrived yet. The prices shown are from history.'
-        : `No price update since ${clockSeconds.format(new Date(status.lastTickAt))}. The last price shown may be out of date.`
+      return line.stale
+        ? `No price update since ${clockSeconds.format(new Date(line.at))}. The last price shown may be out of date.`
+        : `Prices shown are from ${clockSeconds.format(new Date(line.at))}.`
     case 'closed': {
       if (status.opensAt === null) return 'Prices are from the last session.'
       const opens = new Date(status.opensAt * 1000)
@@ -137,8 +134,6 @@ export function liveDetail(status: LiveStatus, now = Date.now()): string {
         : dayAndClock.format(opens).replace(', ', ' ')
       return `Opens ${at}. Prices are from the last session.`
     }
-    case 'connecting':
-      return 'Connecting to live prices.'
   }
 }
 
@@ -159,35 +154,34 @@ export interface LiveStatusTrackerOptions {
 /** Longest single wait, so a sleeping machine is caught up within this. */
 const MAX_WAIT_MS = 30 * 60_000
 
-/** Follows one chart's prices and says when its state changes. */
+/** Follows one chart's prices and says when what its feed line says changes. */
 export class LiveStatusTracker {
   private readonly opts: LiveStatusTrackerOptions
   private exchange: string
   private calendar: StatusCalendar | null = null
   private transport: LiveTransport = 'connecting'
   private lastTickAt: number | null = null
+  private lastUpdateAt: number | null = null
   private lastTickTime: number | null = null
-  private since: number
   private timer: unknown = null
-  private shown: LiveState | null = null
+  private shown: FeedLine | null = null
   private destroyed = false
 
   constructor(options: LiveStatusTrackerOptions) {
     this.opts = options
     this.exchange = options.exchange
-    this.since = this.now()
   }
 
   private now(): number {
     return this.opts.now ? this.opts.now() : Date.now()
   }
 
-  /** A new instrument: nothing has arrived for it yet. */
+  /** A new instrument, just loaded from history: nothing has ticked for it yet. */
   reset(exchange: string): void {
     this.exchange = exchange
     this.lastTickAt = null
     this.lastTickTime = null
-    this.since = this.now()
+    this.lastUpdateAt = this.now()
     this.update()
   }
 
@@ -198,46 +192,53 @@ export class LiveStatusTracker {
 
   setTransport(transport: LiveTransport): void {
     if (transport === this.transport) return
-    // While quote requests are answering, another failed attempt to reconnect
-    // the stream changes nothing a trader can see: still delayed, not
-    // connecting. Only the stream coming back ends the fallback.
+    // While quotes are answering, another failed attempt to reconnect the
+    // stream changes nothing a trader can see: still delayed. Only the stream
+    // coming back ends the fallback.
     if (transport === 'connecting' && this.transport === 'polling') return
-    // The silence of a stream that has just come up is measured from now.
-    if (transport === 'live' || transport === 'polling') this.since = this.now()
     this.transport = transport
     this.update()
   }
 
-  /** A price arrived. `time` is the exchange's time for it, in UTC seconds, when known. */
-  noteTick(time?: number): void {
-    this.lastTickAt = this.now()
+  /**
+   * A price arrived. `time` is the exchange's time for it, in UTC seconds,
+   * when known; `fromStream` is false for a quote request standing in for the
+   * stream, which updates the figures but is never real-time.
+   */
+  noteTick(time?: number, fromStream = true): void {
+    const now = this.now()
+    this.lastUpdateAt = now
+    if (fromStream) this.lastTickAt = now
     if (typeof time === 'number' && Number.isFinite(time)) this.lastTickTime = time
-    // Ticks arrive several times a second; only a change of state is worth a
-    // callback, and the timer already in place is re-aimed when it fires.
-    if (this.shown !== 'live' || this.timer === null) this.update()
+    // Ticks arrive several times a second; while real-time, the timer already
+    // aimed at the moment they would be too old is re-aimed when it fires.
+    if (this.shown?.kind !== 'live' || this.timer === null) this.update()
   }
 
   status(): LiveStatus {
     const now = this.now()
+    const staleMs = staleAfterMs(this.exchange)
     const marketOpen = this.calendar ? this.calendar.sessionAt(now / 1000) !== null : null
-    const state = liveStateOf({
-      transport: this.transport,
+    const line = feedLine({
+      now,
       marketOpen,
       lastTickAt: this.lastTickAt,
-      since: this.since,
-      now,
-      staleAfterMs: staleAfterMs(this.exchange),
+      lastUpdateAt: this.lastUpdateAt,
+      connected: this.transport === 'live',
+      polling: this.transport === 'polling',
+      staleMs,
     })
     let opensAt: number | null = null
-    if (state === 'closed' && this.calendar) {
+    if (line.kind === 'closed' && this.calendar) {
       const next = this.calendar.sessionFrom?.(now / 1000)
       opensAt = next ? next.open : null
     }
     return {
-      state,
+      line,
       lastTickAt: this.lastTickAt,
+      lastUpdateAt: this.lastUpdateAt,
       lastTickTime: this.lastTickTime,
-      staleAfterMs: staleAfterMs(this.exchange),
+      staleAfterMs: staleMs,
       opensAt,
     }
   }
@@ -257,21 +258,23 @@ export class LiveStatusTracker {
   private update(): void {
     if (this.destroyed) return
     const status = this.status()
-    if (status.state !== this.shown) {
-      this.shown = status.state
+    if (!this.shown || !sameFeedState(this.shown, status.line)) {
+      this.shown = status.line
       this.opts.onChange(status)
     }
     this.aim(status)
   }
 
-  /** One timer, at the next instant the state can change without an event. */
+  /** One timer, at the next instant the line can change without an event. */
   private aim(status: LiveStatus): void {
     this.clearTimer()
     const now = this.now()
     const waits: number[] = []
-    if (status.state !== 'closed') {
-      const from = this.lastTickAt ?? this.since
-      waits.push(from + status.staleAfterMs - now + 1)
+    if (status.line.kind !== 'closed') {
+      // Real-time ends when the last tick is too old; a figure turns stale
+      // when the last update is.
+      for (const at of [this.lastTickAt, this.lastUpdateAt])
+        if (at !== null) waits.push(at + status.staleAfterMs - now + 1)
     }
     const changesAt = this.calendar?.marketStatusAt?.(now / 1000)?.changesAt
     if (typeof changesAt === 'number' && Number.isFinite(changesAt))
