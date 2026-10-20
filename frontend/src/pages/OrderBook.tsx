@@ -58,6 +58,8 @@ import { useSupportedExchanges } from '@/hooks/useSupportedExchanges'
 import { cn, makeFormatCurrency, sanitizeCSV } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
 import { onModeChange, useThemeStore } from '@/stores/themeStore'
+// SUDARSHAN M6.9: on a phone the orders are cards (src/sudarshan/books/cards).
+import { OrderCards } from '@/sudarshan/books/cards/OrderCards'
 // SUDARSHAN: live status, the LTP of working orders, the book re-read (src/sudarshan/books).
 import { useBookFeed } from '@/sudarshan/books/feed'
 import { TickPrice } from '@/sudarshan/books/LiveFigures'
@@ -75,6 +77,7 @@ import { QuoteStatus } from '@/sudarshan/books/QuoteStatus'
 import { useBookSync, useLatestRead } from '@/sudarshan/books/useBookSync'
 // SUDARSHAN M4.15: on a phone, a symbol opens the phone chart (src/sudarshan/chart).
 import { BookSymbolLink } from '@/sudarshan/chart/BookSymbolLink'
+import { usePhoneLayout } from '@/sudarshan/chart/usePhoneLayout'
 import { useMarketOpen } from '@/sudarshan/dashboard/hooks'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
 import type { Order, OrderStats } from '@/types/trading'
@@ -327,11 +330,14 @@ export default function OrderBook() {
     }
     return Array.from(seen.values())
   }, [orders])
+  // SUDARSHAN M6.9: a phone's cards subscribe themselves, drawn once a frame,
+  // so this page's own subscription is off there and a tick never redraws it.
+  const phone = usePhoneLayout()
   const {
     data: workingPrices,
     feed: workingFeed,
     calendar,
-  } = useLivePrice(working, { enabled: working.length > 0 })
+  } = useLivePrice(working, { enabled: working.length > 0 && !phone })
   const { isOpen: marketOpen, anyOpen: anyMarketOpen } = useMarketOpen(calendar)
   const {
     line: ltpLine,
@@ -515,7 +521,28 @@ export default function OrderBook() {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="orders" className="space-y-6">
+        {/* SUDARSHAN M6.9: on a phone the Orders tab holds a card per order. The wide
+            toolbar, stats and table below then take a tab value that never opens, so
+            they are not mounted; the GTT tab and the modify dialog are the same on both. */}
+        {phone && (
+          <TabsContent value="orders">
+            <OrderCards
+              orders={orders}
+              loading={isLoading}
+              error={error}
+              refreshing={isRefreshing}
+              apiKey={apiKey}
+              marketOpen={marketOpen}
+              onRefresh={fetchOrders}
+              onCancel={handleCancelOrder}
+              onCancelAll={handleCancelAllOrders}
+              onModify={openModifyDialog}
+              modifyOpen={modifyDialogOpen}
+              onModifyOpenChange={setModifyDialogOpen}
+            />
+          </TabsContent>
+        )}
+        <TabsContent value={phone ? 'orders-wide' : 'orders'} className="space-y-6">
           {/* Orders tab toolbar */}
           <div className="flex items-center justify-start sm:justify-end gap-2 flex-wrap">
             {/* SUDARSHAN: where the LTP of the working orders stands. */}

@@ -229,17 +229,18 @@ describe('Order book, live', () => {
   })
 })
 
-// SUDARSHAN M4.15: on a phone an order's symbol opens the phone chart; a wide
-// screen keeps upstream's link into the terminal.
+// SUDARSHAN M4.15, M6.9: on a phone an order's card opens a sheet whose Chart
+// opens the phone chart; a wide screen keeps upstream's link into the terminal.
 describe('Order book chart link', () => {
   afterEach(() => {
     vi.restoreAllMocks()
   })
 
-  it("opens the phone chart from an order's symbol on a phone, the terminal on a wide screen", async () => {
+  it("opens the phone chart from an order's sheet on a phone, the terminal on a wide screen", async () => {
     const screenNow = fakeScreen('phone')
     render(<OrderBook />)
     await pass(0)
+    act(() => screen.getByRole('button', { name: /NIFTY 25900 CE/ }).click())
     expect(screen.getByRole('link', { name: `Open the chart for ${CALL} on NFO` })).toHaveAttribute(
       'href',
       `/chart/NFO/${CALL}`
