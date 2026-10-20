@@ -70,15 +70,33 @@ export interface OrderCardsProps {
   onModifyOpenChange: (open: boolean) => void
 }
 
-/** "0/65": filled of ordered, when the broker says; the quantity alone otherwise. */
+/**
+ * "30/65": filled of ordered, once something is known to have filled (a
+ * pushed frame, or the sandbox's book), and a complete order in full. The
+ * quantity alone otherwise: Upstox's REST book says nothing of fills (M6.9),
+ * and "0/65" would claim to know that nothing has.
+ */
 export function filledText(order: BookOrder): { text: string; filled: boolean } {
   const total = figure(order.quantity) ?? 0
-  const filled = figure(order.filled_quantity)
-  if (filled !== null) return { text: `${units(filled)}/${units(total)}`, filled: true }
   if (orderState(order.order_status).filter === 'executed') {
     return { text: `${units(total)}/${units(total)}`, filled: true }
   }
+  const filled = figure(order.filled_quantity)
+  if (filled !== null && filled > 0) {
+    return { text: `${units(filled)}/${units(total)}`, filled: true }
+  }
   return { text: units(total), filled: false }
+}
+
+/** What a cancel stops: "the remaining 60 of 100" of a part-filled order, else the quantity. */
+export function remainingText(order: BookOrder): string {
+  const total = figure(order.quantity) ?? 0
+  const filled = figure(order.filled_quantity)
+  if (filled === null || filled <= 0 || filled >= total) return units(total)
+  const pending = figure(order.pending_quantity)
+  const rest =
+    pending !== null && pending > 0 && pending <= total - filled ? pending : total - filled
+  return `the remaining ${units(rest)} of ${units(total)}`
 }
 
 /** "Limit 168.00", "Trigger 305.00 · Limit 310.00", with the average once something filled. */
@@ -357,7 +375,7 @@ const OrderBoard = memo(function OrderBoard({
         title="Cancel this order?"
         description={
           cancelShown
-            ? `${cancelShown.action} ${units(figure(cancelShown.quantity) ?? 0)} ${describe(cancelShown.symbol, cancelShown.exchange).title} · ${priceText(cancelShown)}. The order stops working at the exchange.`
+            ? `${cancelShown.action} ${remainingText(cancelShown)} ${describe(cancelShown.symbol, cancelShown.exchange).title} · ${priceText(cancelShown)}. The order stops working at the exchange.`
             : ''
         }
         cancelLabel="Keep order"

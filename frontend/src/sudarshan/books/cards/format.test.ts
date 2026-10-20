@@ -3,7 +3,7 @@ import type { PriceSource } from '@/sudarshan/books/prices'
 import type { Holding, Order, Position } from '@/types/trading'
 import { clockOf, figure, momentOf, orderState, sideOf, signedUnits, units } from './format'
 import { dayChangeOf } from './HoldingCards'
-import { filledText, priceText } from './OrderCards'
+import { filledText, priceText, remainingText } from './OrderCards'
 import { addProduct, realisedOf, unrealisedOf } from './PositionCards'
 import type { PricedRow } from './useFramePrices'
 
@@ -98,10 +98,40 @@ describe('an order as its card says it', () => {
       ...fields,
     }) as Order
 
-  it('says filled of ordered when the broker does, the quantity alone when it does not', () => {
+  it('says filled of ordered once something filled, the quantity alone otherwise', () => {
     expect(filledText(order({ filled_quantity: 20 }))).toEqual({ text: '20/65', filled: true })
     expect(filledText(order({ order_status: 'complete' }))).toEqual({ text: '65/65', filled: true })
+    // Upstox's REST book carries no fills: nothing known, nothing claimed.
     expect(filledText(order({}))).toEqual({ text: '65', filled: false })
+    // Never "0/65".
+    expect(filledText(order({ filled_quantity: 0 }))).toEqual({ text: '65', filled: false })
+    expect(filledText(order({ order_status: 'cancelled', filled_quantity: 0 }))).toEqual({
+      text: '65',
+      filled: false,
+    })
+    expect(filledText(order({ order_status: 'cancelled', filled_quantity: 40 }))).toEqual({
+      text: '40/65',
+      filled: true,
+    })
+  })
+
+  it('names what a cancel stops: the rest of a part-filled order', () => {
+    expect(remainingText(order({ quantity: 100, filled_quantity: 40 }))).toBe(
+      'the remaining 60 of 100'
+    )
+    expect(remainingText(order({ quantity: 100, filled_quantity: 40, pending_quantity: 60 }))).toBe(
+      'the remaining 60 of 100'
+    )
+    expect(remainingText(order({}))).toBe('65')
+    expect(remainingText(order({ filled_quantity: 0 }))).toBe('65')
+  })
+
+  it('shows an average only when one is known', () => {
+    expect(priceText(order({ price: 168 }))).toBe('Limit 168.00')
+    expect(priceText(order({ price: 168, average_price: 0 }))).toBe('Limit 168.00')
+    expect(priceText(order({ price: 168, average_price: 168.05 }))).toBe(
+      'Limit 168.00 · Avg 168.05'
+    )
   })
 
   it('says what price the order works at, and the average once it filled', () => {

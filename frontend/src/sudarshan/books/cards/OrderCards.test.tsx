@@ -265,7 +265,9 @@ describe('Order book on a phone: the cards', () => {
     expect(working).toHaveTextContent('NIFTY 25900 CE')
     expect(working).toHaveTextContent('NFO · 27 Oct 2026 · MIS')
     expect(working).toHaveTextContent('10:41:51')
-    expect(working).toHaveTextContent('0/65 · Limit 168.00')
+    // Nothing filled yet: the quantity alone, never "0/65".
+    expect(working).toHaveTextContent('65 · Limit 168.00')
+    expect(working).not.toHaveTextContent('0/65')
 
     const chip = (orderid: string) =>
       orderCard(orderid).querySelector('[data-status]') as HTMLElement
@@ -451,6 +453,19 @@ describe('Order book on a phone: the sheet and its actions', () => {
     expect(api.cancelOrder).toHaveBeenCalledTimes(1)
     expect(api.cancelOrder).toHaveBeenCalledWith('1001')
     await waitFor(() => expect(where()).toBe('/orderbook'))
+  })
+
+  it('names the rest of a part-filled order in the cancel confirmation', async () => {
+    const tap = user()
+    await renderPhone({ ...UPSTOX_WORKING, quantity: 100 } as Order)
+    push({ orderid: '1001', order_status: 'open', filled_quantity: 40, pending_quantity: 60 })
+    await tap.click(orderCard('1001'))
+    await tap.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel order' })
+    )
+    expect(screen.getByRole('dialog', { name: 'Cancel this order?' })).toHaveTextContent(
+      'SELL the remaining 60 of 100 NIFTY 25900 CE · Limit 168.00'
+    )
   })
 
   it('makes the same cancel call as the wide table’s button', async () => {
