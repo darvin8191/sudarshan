@@ -446,8 +446,14 @@ describe('Watchlist prices', () => {
     renderPage()
     await screen.findByRole('button', { name: /^SBIN/ })
 
-    tick('SBIN', 'NSE', { ltp: 820, prev_close: 805 } as Record<string, number>)
+    // The completed LTP payload (M11.3): prev_close and last_trade_time ride along.
+    tick('SBIN', 'NSE', { ltp: 820, prev_close: 805, last_trade_time: Date.now() - 400 })
     expect(row(/^SBIN/)).toHaveTextContent('820.00+15.00 (+1.86%)')
+
+    // A frame that leaves prev_close out does not undo it: the manager keeps
+    // the last value of every field, and the row never falls back to zero.
+    tick('SBIN', 'NSE', { ltp: 821 })
+    expect(row(/^SBIN/)).toHaveTextContent('821.00+16.00 (+1.99%)')
   })
 
   it('greys a row whose ticks have stopped while its market is open, keeping sign and arrow', async () => {
@@ -587,6 +593,10 @@ describe('Watchlist sheet', () => {
     const depth = within(sheet).getByRole('table')
     const first = within(depth).getAllByRole('row')[1]
     expect(first).toHaveTextContent('1,200812.45812.5545,000')
+
+    // A frame with only the last price keeps the book it does not mention.
+    tick('SBIN', 'NSE', { ltp: 812.55 })
+    expect(within(depth).getAllByRole('row')[1]).toHaveTextContent('1,200812.45812.5545,000')
 
     await user.click(within(sheet).getByRole('button', { name: 'Close' }))
     expect(feed.closed).toContain('NSE:SBIN:Depth')

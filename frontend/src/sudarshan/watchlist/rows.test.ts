@@ -1,8 +1,8 @@
 /**
  * The watchlist's arithmetic as plain functions: which level a row shows,
- * which previous close it measures the change from (the snapshot's, or a
- * tick's once ticks carry one), the direction of the last tick, and how a
- * contract is named on a phone.
+ * which previous close it measures the change from (a tick's whenever the
+ * tick carries one, the snapshot's otherwise), the direction of the last
+ * tick, and how a contract is named on a phone.
  */
 import { expect, describe as group, it } from 'vitest'
 import type { QuotesData } from '@/api/trading'
@@ -60,23 +60,41 @@ group('rowView', () => {
     expect(rowView(snapshot(812.4, 800), line(700, T0 - 1000)).ltp).toBe(812.4)
   })
 
-  it("measures from a newer tick's prev_close when the tick carries one", () => {
+  it("measures from a tick's prev_close when the tick carries one", () => {
     const view = rowView(snapshot(812.4, 800), line(820, T0 + 1000, { prev_close: 805 }))
     expect(view.prevClose).toBe(805)
     expect(view.change).toBeCloseTo(15)
+    expect(view.changePercent).toBeCloseTo(1.86)
   })
 
-  it("keeps the snapshot's previous close when it is the newer of the two", () => {
+  it("prefers a tick's prev_close even when the snapshot read is newer", () => {
     const view = rowView(snapshot(812.4, 800, T0 + 5000), line(820, T0, { prev_close: 795 }))
-    expect(view.prevClose).toBe(800)
     expect(view.ltp).toBe(812.4)
+    expect(view.prevClose).toBe(795)
+    expect(view.change).toBeCloseTo(17.4)
   })
 
-  it("falls back to a tick's previous close when there is no snapshot, or it has none", () => {
+  it("uses the snapshot's previous close when the tick has none, or a zero", () => {
+    // Before the completed payloads (M11.3), or a frame that left it out.
+    expect(rowView(snapshot(812.4, 800), line(820, T0 + 1000)).prevClose).toBe(800)
+    expect(rowView(snapshot(812.4, 800), line(820, T0 + 1000, { prev_close: 0 })).prevClose).toBe(
+      800
+    )
+  })
+
+  it("takes a tick's previous close when there is no snapshot, or it has none", () => {
     expect(rowView(undefined, line(820, T0, { prev_close: 805 })).prevClose).toBe(805)
     expect(
       rowView(snapshot(812.4, 0, T0 + 5000), line(820, T0, { prev_close: 805 })).prevClose
     ).toBe(805)
+  })
+
+  it("never measures from the manager's close field, which is not this row's rule", () => {
+    // On the completed payloads `close` is also the previous close (0.0 when
+    // unknown); before them a Quote frame's close was today's running price.
+    // prev_close and the snapshot are the two sources; close is neither.
+    const view = rowView(snapshot(812.4, 800), line(820, T0 + 1000, { close: 819 }))
+    expect(view.prevClose).toBe(800)
   })
 
   it('shows no change without a previous close, rather than a confident zero', () => {

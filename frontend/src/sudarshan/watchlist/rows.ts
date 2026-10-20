@@ -6,10 +6,12 @@
  * Where a row's figures come from:
  * - **The level** is the newer of the REST snapshot and the newest tick
  *   (`indexView`), so a tick older than the read never undoes it.
- * - **The previous close** comes from the newer of the two that carries one.
- *   The snapshot (Upstox `prev_close_price`) always does; Upstox ticks carry
- *   it as `prev_close` once the completed tick payloads (M11.3) are in. Until
- *   then the snapshot alone gives it.
+ * - **The previous close** is a tick's `prev_close` whenever the tick carries
+ *   one, and the snapshot's (Upstox `prev_close_price`) otherwise. Upstox ticks
+ *   carry it in every mode once the completed tick payloads (M11.3) are in;
+ *   until then, and for a frame without it, the snapshot gives it. A frame
+ *   that leaves a field out never clears it: the market-data manager keeps the
+ *   last value of every field, so nothing here falls back to zero.
  * - **The direction of the last tick** is worked out from the level shown,
  *   one render to the next (`tickDirection`).
  */
@@ -39,13 +41,15 @@ function positive(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null
 }
 
-/** A row from its snapshot and its cache line in the market-data manager. */
+/**
+ * A row from its snapshot and its cache line in the market-data manager. The
+ * change is measured from a tick's previous close when the line holds one (a
+ * missing, zero or non-numeric one does not count), and from the snapshot's
+ * otherwise.
+ */
 export function rowView(snapshot: Snapshot | undefined, data: SymbolData | undefined): RowView {
   const view = indexView(snapshot?.quote, snapshot?.at ?? null, data)
-  const fromTick = positive((data?.data as Tick | undefined)?.prev_close)
-  const tickAt = data?.lastUpdate ?? null
-  const tickIsNewer = tickAt !== null && (snapshot === undefined || tickAt >= snapshot.at)
-  const prevClose = tickIsNewer ? (fromTick ?? view.prevClose) : (view.prevClose ?? fromTick)
+  const prevClose = positive((data?.data as Tick | undefined)?.prev_close) ?? view.prevClose
   const change = view.ltp !== null && prevClose !== null ? view.ltp - prevClose : null
   return {
     ...view,
