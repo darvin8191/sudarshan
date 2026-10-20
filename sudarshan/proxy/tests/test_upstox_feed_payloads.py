@@ -831,6 +831,90 @@ def test_a_refused_downgrade_leaves_the_higher_mode_owned(make_adapter, monkeypa
     assert adapter.upstox.held == {key: "full"}
 
 
+class _OneTokenAdapter:
+    """A broker adapter without RELEASE_EVERY_MODE, holding one token per symbol: a release
+    of any mode drops it, whatever mode another subscriber still needs."""
+
+    def __init__(self) -> None:
+        self.subscriptions: dict[str, Any] = {}
+        self.calls: list[tuple[str, int]] = []
+        self.at_broker: dict[tuple[str, str], int] = {}
+
+    def subscribe(self, symbol: str, exchange: str, mode: int, _depth: int = 5) -> dict:
+        self.calls.append(("subscribe", mode))
+        self.at_broker[(symbol, exchange)] = mode
+        return {"status": "success"}
+
+    def unsubscribe(self, symbol: str, exchange: str, mode: int) -> dict:
+        self.calls.append(("unsubscribe", mode))
+        self.at_broker.pop((symbol, exchange), None)
+        return {"status": "success"}
+
+
+def test_a_broker_without_the_flag_keeps_the_pools_old_paths() -> None:
+    """Only an adapter that declares RELEASE_EVERY_MODE is handed a lower mode's release or
+    a lower-first downgrade. Another broker's token, which a Depth subscriber still uses,
+    must not be dropped when the LTP subscriber leaves."""
+    adapter = _OneTokenAdapter()
+    pool = _pool(adapter)
+    assert pool.subscribe("RELIANCE", "NSE", 1)["status"] == "success"
+    assert pool.subscribe("RELIANCE", "NSE", 3)["status"] == "success"
+    adapter.calls.clear()
+
+    assert pool.unsubscribe("RELIANCE", "NSE", 1)["status"] == "success"
+    assert adapter.calls == []
+    assert adapter.at_broker == {("RELIANCE", "NSE"): 3}
+
+    assert pool.subscribe("RELIANCE", "NSE", 2)["status"] == "success"  # covered by Depth
+    adapter.calls.clear()
+    assert pool.unsubscribe("RELIANCE", "NSE", 3)["status"] == "success"
+    assert adapter.calls == [("unsubscribe", 3), ("subscribe", 2)]  # upstream's order
+    assert adapter.at_broker == {("RELIANCE", "NSE"): 2}
+
+
+def test_a_refused_release_after_the_lower_mode_was_taken_leaves_both_owned(
+    make_adapter, monkeypatch
+) -> None:
+    """Depth is released after LTP was taken for the downgrade, and the adapter refuses: Depth
+    goes back into the pool with its depth, and the adapter's records stay within the pool's."""
+    adapter = make_adapter()
+    pool = _pool(adapter)
+    symbol, exchange, key = OPTION
+    assert pool.subscribe(symbol, exchange, 3, 20)["status"] == "success"
+    assert pool.subscribe(symbol, exchange, 1)["status"] == "success"  # covered
+    release = adapter.unsubscribe
+    refused = {"status": "error", "message": "refused"}
+    monkeypatch.setattr(
+        adapter, "unsubscribe", lambda s, e, m: refused if m == 3 else release(s, e, m)
+    )
+
+    result = pool.unsubscribe(symbol, exchange, 3)
+
+    assert (result["status"], result["code"]) == ("error", "DOWNGRADE_FAILED")
+    assert result["phase"] == "release_high_mode"
+    assert set(pool.subscription_map) == {(symbol, exchange, 1), (symbol, exchange, 3)}
+    assert pool.subscription_depths[(symbol, exchange, 3)] == 20
+    assert sorted(adapter.subscriptions) == [f"{symbol}_{exchange}_1", f"{symbol}_{exchange}_3"]
+    assert adapter.upstox.held == {key: "full"}
+
+
+def test_a_refused_release_of_a_lower_mode_leaves_it_owned(make_adapter, monkeypatch) -> None:
+    adapter = make_adapter()
+    pool = _pool(adapter)
+    symbol, exchange, key = OPTION
+    assert pool.subscribe(symbol, exchange, 1)["status"] == "success"
+    assert pool.subscribe(symbol, exchange, 3)["status"] == "success"
+    refused = {"status": "error", "message": "refused"}
+    monkeypatch.setattr(adapter, "unsubscribe", lambda *_args: refused)
+
+    result = pool.unsubscribe(symbol, exchange, 1)
+
+    assert result == refused
+    assert set(pool.subscription_map) == {(symbol, exchange, 1), (symbol, exchange, 3)}
+    assert pool.subscription_depths[(symbol, exchange, 1)] == 5
+    assert adapter.upstox.held == {key: "full"}
+
+
 def test_a_lower_mode_beside_a_higher_one_never_switches_the_key_down(make_adapter) -> None:
     """The adapter used directly, without the pool: LTP subscribed while Depth holds the key
     is sent in the mode the key needs, `full`, so nothing is sent at all."""
@@ -839,6 +923,23 @@ def test_a_lower_mode_beside_a_higher_one_never_switches_the_key_down(make_adapt
     _hold(adapter, OPTION, 1)
 
     assert adapter.upstox.sent == [("sub", [OPTION[2]], "full")]
+    assert adapter.upstox.held == {OPTION[2]: "full"}
+
+
+def test_releasing_a_mode_never_switches_a_key_up(make_adapter) -> None:
+    """LTP is streamed in `ltpc` while a Depth subscribe still waits in the batch. Releasing
+    LTP leaves a record needing `full`, but switching keys is only ever downward: the
+    batch's subscribe takes the key up when it goes out."""
+    adapter = make_adapter()
+    adapter._start_batch_timer = lambda: None  # hold the batch, as the 0.5 s timer does
+    _hold(adapter, OPTION, 1)
+    adapter._process_batch_subscriptions()
+    _hold(adapter, OPTION, 3)
+
+    assert adapter.unsubscribe(OPTION[0], OPTION[1], 1)["status"] == "success"
+
+    assert adapter.upstox.sent == [("sub", [OPTION[2]], "ltpc")]
+    adapter._process_batch_subscriptions()
     assert adapter.upstox.held == {OPTION[2]: "full"}
 
 
