@@ -16,7 +16,9 @@ from alerts_fakes import (
     OWNER,
     FakeOpenAlgo,
     FakeProxy,
+    RunningClock,
     ist,
+    this_years_option,
     update,
     wait_until,
 )
@@ -70,7 +72,8 @@ def test_fills_reach_telegram_merged_and_once(settings_for, fast, caplog):
 
     async def scenario():
         async with FakeProxy() as proxy, FakeOpenAlgo() as notify:
-            svc, task = await _start(settings_for(proxy, notify))
+            clock = RunningClock(ist(2026, 10, 21, 10, 0))
+            svc, task = await _start(settings_for(proxy, notify), clock=clock)
             await wait_until(lambda: proxy.subscribed)
             assert proxy.keys_seen == [API_KEY] and svc.state == "connected"
             await proxy.push(update("1", "complete", average_price=123.45))
@@ -340,7 +343,9 @@ def test_the_whole_process_end_to_end(tmp_path):
             try:
                 await wait_until(lambda: proxy.subscribed, 30)
                 assert proxy.keys_seen == [API_KEY]
-                await proxy.push(update("e2e1", "complete", average_price=123.45))
+                # The child reads the real clock, so the option expires this year (no year shown).
+                symbol = this_years_option()
+                await proxy.push(update("e2e1", "complete", average_price=123.45, symbol=symbol))
                 await wait_until(lambda: notify.bodies, 10)
                 assert (
                     "\nFilled: BUY 65 NIFTY 21 OCT 25900 CE at ₹123.45 (MIS, NFO)\n"

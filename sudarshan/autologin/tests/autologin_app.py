@@ -69,6 +69,41 @@ def use_app_state(monkeypatch, *, vault, holidays_file=None, pepper=None) -> Non
         monkeypatch.setattr(bp_module, "_handoff", lambda: cipher)
 
 
+class WallClock:
+    """One wall clock for the worker and for this server process, as on the real machine.
+
+    The worker takes its clock as an argument; OpenAlgo and the blueprint read the real one when
+    they stamp a session's login time (``auth_db._now_ist``), work out today's 03:00 rollover
+    (``utils.session``) and decide whether the login on record is today's (``_now``). A test that
+    runs the worker at "Monday 08:35" and asserts on those must move all of them together, or it
+    passes only when the suite happens to run after 03:00 IST: CI at 00:19 IST failed one.
+
+    Pass the object as the worker's ``clock``; set ``at`` to move every reader at once.
+    """
+
+    def __init__(self, monkeypatch, at: datetime):
+        import utils.session as openalgo_session
+        from sudarshan.autologin.schedule import IST
+
+        self.at = at
+        clock = self
+
+        class _ClockDatetime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                if tz is None:
+                    return clock.at.astimezone().replace(tzinfo=None)
+                return clock.at.astimezone(tz)
+
+        india = pytz.timezone("Asia/Kolkata")
+        monkeypatch.setattr(openalgo_session, "datetime", _ClockDatetime)
+        monkeypatch.setattr(auth_db, "_now_ist", lambda: clock.at.astimezone(india))
+        monkeypatch.setattr(bp_module, "_now", lambda: clock.at.astimezone(IST))
+
+    def __call__(self) -> datetime:
+        return self.at
+
+
 def reset_openalgo_db() -> None:
     auth_db.Base.metadata.create_all(auth_db.engine)
     user_db.Base.metadata.create_all(user_db.engine)

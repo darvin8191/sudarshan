@@ -6,7 +6,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from websockets.asyncio.server import serve
@@ -22,6 +22,27 @@ OPTION = "NIFTY21OCT2625900CE"
 
 def ist(y: int, mo: int, d: int, h: int = 0, mi: int = 0, s: int = 0) -> datetime:
     return datetime(y, mo, d, h, mi, s, tzinfo=IST)
+
+
+class RunningClock:
+    """Real time's pace from a fixed start, for a service that runs on its own in a test.
+
+    Reconnects, pauses and the outbox pace still take real time, but the date the service reads is
+    the test's. An alert names an expiry's year only when it is not the current one, so on the real
+    clock a line expected as "NIFTY 21 OCT 25900 CE" turns into "NIFTY 21 OCT 2026 25900 CE" on
+    1 January 2027.
+    """
+
+    def __init__(self, start: datetime):
+        self.start, self._began = start, time.monotonic()
+
+    def __call__(self) -> datetime:
+        return self.start + timedelta(seconds=time.monotonic() - self._began)
+
+
+def this_years_option() -> str:
+    """OPTION expiring this year, for a service in another process, which reads the real clock."""
+    return f"NIFTY21OCT{datetime.now(IST):%y}25900CE"
 
 
 def update(order_id: str = "251021000000001", status: str = "complete", **fields) -> dict:
