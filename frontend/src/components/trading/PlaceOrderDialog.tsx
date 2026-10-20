@@ -24,6 +24,8 @@ import {
 import { useLiveQuote } from '@/hooks/useLiveQuote'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
+// SUDARSHAN: where the quote stands (Real-time, Reconnecting, Updated, Market closed).
+import { QuoteStatus } from '@/sudarshan/books/QuoteStatus'
 import { showToast } from '@/utils/toast'
 import { MarketDepthPanel } from './MarketDepthPanel'
 import { QuoteHeader } from './QuoteHeader'
@@ -178,10 +180,13 @@ export function PlaceOrderDialog({
   const usesLots = isFnOExchange(exchange_) && lotSize > 1
 
   // Centralized live quote + depth with REST fallback (like useLivePrice for Holdings/Positions)
+  // SUDARSHAN: one REST snapshot when the ticket opens, then ticks; no polling while open.
   const {
     data: liveData,
     isLoading: isLoadingQuotes,
     isConnected,
+    feed: quoteFeed,
+    calendar: quoteCalendar,
   } = useLiveQuote(symbol, exchange_, {
     enabled: open && !!symbol && !!exchange_,
     mode: 'Depth',
@@ -402,6 +407,15 @@ export function PlaceOrderDialog({
             askSize={mergedData.askSize}
             isLoading={isLoading}
           />
+          {/* SUDARSHAN: never old numbers that look current. */}
+          {!isLoading && mergedData.ltp !== undefined && quoteFeed && quoteCalendar && (
+            <QuoteStatus
+              exchange={exchange_}
+              feed={quoteFeed}
+              calendar={quoteCalendar}
+              className="-mt-2"
+            />
+          )}
 
           {/* Market Depth Panel - only from WebSocket */}
           <MarketDepthPanel
