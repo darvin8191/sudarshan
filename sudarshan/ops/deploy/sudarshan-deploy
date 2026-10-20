@@ -7,6 +7,9 @@
 # the systemd unit, nginx and the venv all point at APP_DIR, and changing that would touch the
 # live unit. Rollback = previous git ref + previous frontend/dist tarball + SQLite .backup copies.
 # Lives in the repo at sudarshan/ops/deploy/sudarshan-deploy; every release can update it.
+# Also manages the SUDARSHAN ring services: unit files under sudarshan/ops/systemd at the tag
+# (sudarshan-*.service / .timer) are fetched from GitHub, checked against a strict policy (never
+# root, no privileged exec prefixes, capabilities or realtime scheduling), installed and restarted.
 # Usage: sudarshan-deploy [--check | --redeploy | --force]
 #   --check     show latest Release / deployed tag / market state, change nothing
 #   --redeploy  install the latest Release again even if it is already deployed (still gated)
@@ -87,6 +90,26 @@ as_svc git -C "${APP_DIR}" fetch --tags --quiet sudarshan
 as_svc git -C "${APP_DIR}" rev-parse -q --verify "refs/tags/${tag}^{commit}" > /dev/null || { log "tag ${tag} not found after fetch"; exit 1; }
 prev_ref="$(as_svc git -C "${APP_DIR}" rev-parse HEAD)"; echo "${prev_ref}" > "${bdir}/prev_ref"
 UV=(env UV_PYTHON_DOWNLOADS=never /usr/local/bin/uv pip install --quiet --python "${APP_DIR}/.venv/bin/python" -r "${APP_DIR}/requirements-nginx.txt")
+UNIT_DIR="/etc/systemd/system"; MANAGED="${STATE}/managed_units"
+managed_units() { [[ -f "${MANAGED}" ]] && grep -E '^sudarshan-[a-z0-9-]+\.(service|timer)$' "${MANAGED}" || true; }
+ring_services() { managed_units | grep '\.service$' || true; }
+unit_ok() {   # $1 = downloaded unit file, $2 = unit name; 0 = acceptable
+    local f="$1" n="$2" ws='[[:space:]]*'
+    [[ "${n}" =~ ^sudarshan-[a-z0-9-]+\.(service|timer)$ ]] || { log "unit ${n}: bad name"; return 1; }
+    case "${n}" in sudarshan-deploy.*|sudarshan-claude.*|sudarshan-dev.*) log "unit ${n}: reserved name"; return 1 ;; esac
+    # every User=/Group= line must name sudarshan (an empty value would reset to root)
+    if grep -Ei "^${ws}(User|Group)${ws}=" "${f}" | grep -Eiqv "=${ws}sudarshan${ws}$"; then log "unit ${n}: User/Group other than sudarshan"; return 1; fi
+    if grep -Eq "^${ws}Exec[A-Za-z]*${ws}=${ws}[-@:]*[+!]" "${f}"; then log "unit ${n}: privileged exec prefix (+ or !)"; return 1; fi
+    if grep -Eiq "^${ws}(AmbientCapabilities|CapabilityBoundingSet|SupplementaryGroups|PermissionsStartOnly|DynamicUser|RootDirectory|RootImage|PAMName|CPUSchedulingPolicy|CPUSchedulingPriority|IOSchedulingClass|IOSchedulingPriority)${ws}=" "${f}"; then log "unit ${n}: forbidden setting"; return 1; fi
+    if grep -Eiq "^${ws}(Nice|OOMScoreAdjust)${ws}=${ws}-" "${f}"; then log "unit ${n}: negative Nice/OOMScoreAdjust"; return 1; fi
+    if [[ "${n}" == *.service ]]; then
+        grep -Eq "^${ws}User${ws}=${ws}sudarshan${ws}$" "${f}" || { log "unit ${n}: must say User=sudarshan"; return 1; }
+        grep -Eiq "^${ws}NoNewPrivileges${ws}=${ws}(yes|true)${ws}$" "${f}" || { log "unit ${n}: must say NoNewPrivileges=yes"; return 1; }
+    elif grep -Eq "^${ws}Unit${ws}=" "${f}" && ! grep -Eq "^${ws}Unit${ws}=${ws}sudarshan-[a-z0-9-]+\.service${ws}$" "${f}"; then
+        log "unit ${n}: timer starts a non-SUDARSHAN unit"; return 1
+    fi
+    return 0
+}
 rollback() {
     trap - ERR; set +e
     log "!! rolling back to ${prev_ref}"
@@ -105,10 +128,12 @@ rollback() {
     fi
     chown -R "${SVC_USER}:${SVC_USER}" "${APP_DIR}/frontend/dist" "${APP_DIR}/db"
     systemctl start "${SERVICE}"; log "rollback done (${SERVICE} $(systemctl is-active "${SERVICE}"))"
+    for u in $(ring_services); do systemctl start "${u}" || log "WARNING: ${u} did not start after rollback"; done
 }
 # ---- stop first: no requests, no DB writes and no half-old/half-new code during the update.
 # From here on ANY error rolls back and starts the service again (never leave openalgo stopped).
 log "stopping ${SERVICE} for the update"
+for u in $(ring_services); do systemctl stop "${u}" || true; done   # same code tree, so same window
 systemctl stop "${SERVICE}"
 trap 'log "unexpected error at line ${LINENO}"; rollback; exit 1' ERR
 # ---- backups (SQLite online backup API, DuckDB copy while stopped, previous dist, previous ref)
@@ -123,6 +148,9 @@ as_svc git -C "${APP_DIR}" checkout -f --detach "refs/tags/${tag}"
 rm -rf "${APP_DIR}/frontend/dist"; tar -xzf "${tmp}/${ASSET}" -C "${APP_DIR}/frontend"
 chown -R "${SVC_USER}:${SVC_USER}" "${APP_DIR}/frontend/dist"
 as_svc "${UV[@]}"
+if [[ -f "${APP_DIR}/sudarshan/requirements.txt" ]]; then
+    as_svc env UV_PYTHON_DOWNLOADS=never /usr/local/bin/uv pip install --quiet --python "${APP_DIR}/.venv/bin/python" -r "${APP_DIR}/sudarshan/requirements.txt"
+fi
 # migrate_all.py runs each migration with sys.executable, so the venv python is enough (no 'uv run').
 if ! as_svc bash -c "cd '${APP_DIR}/upgrade' && '${APP_DIR}/.venv/bin/python' migrate_all.py"; then log "migrations failed"; rollback; exit 1; fi
 # ---- start + health (this is our own service; TRINETRA is never touched)
@@ -135,5 +163,44 @@ if [[ ${ok} -eq 1 ]]; then
 else
     log "health check failed after start (last http ${code:-none})"; rollback; exit 1
 fi
+# ---- ring services: install the unit files of this release and (re)start them. A failing ring
+# service is reported but never rolls back OpenAlgo (trading does not depend on them).
+ring_deploy() {
+    local list n f names=() changed=0 old
+    list="$(curl -fsSL -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${OWNER_REPO}/contents/sudarshan/ops/systemd?ref=${tag}" 2>/dev/null)" || list='[]'
+    mkdir -p "${tmp}/units"
+    while IFS= read -r n; do
+        [[ -n "${n}" ]] || continue
+        f="${tmp}/units/${n}"
+        if ! curl -fsSL "https://raw.githubusercontent.com/${OWNER_REPO}/${tag}/sudarshan/ops/systemd/${n}" -o "${f}"; then log "ring: download of ${n} failed - skipped"; continue; fi
+        if unit_ok "${f}" "${n}"; then names+=("${n}"); else log "ring: ${n} REFUSED by the unit policy"; fi
+    done < <(jq -r '.[]? | select(.type=="file") | .name | select(test("^sudarshan-[a-z0-9-]+\\.(service|timer)$"))' <<< "${list}")
+    for n in "${names[@]}"; do
+        if ! cmp -s "${tmp}/units/${n}" "${UNIT_DIR}/${n}"; then
+            install -m 644 -o root -g root "${tmp}/units/${n}" "${UNIT_DIR}/${n}"; changed=1; log "ring: installed ${n}"
+        fi
+    done
+    for old in $(managed_units); do   # units this tool installed before but the release dropped
+        if [[ " ${names[*]} " != *" ${old} "* ]]; then
+            systemctl disable --now "${old}" > /dev/null 2>&1 || true
+            rm -f "${UNIT_DIR:?}/${old}"; changed=1; log "ring: removed ${old}"
+        fi
+    done
+    [[ ${changed} -eq 1 ]] && systemctl daemon-reload
+    printf '%s\n' "${names[@]}" > "${MANAGED}"
+    for n in "${names[@]}"; do
+        if [[ "${n}" == *.timer ]]; then
+            systemctl enable --now "${n}" > /dev/null 2>&1 || log "ring: ${n} could not be enabled"
+        else
+            systemctl enable "${n}" > /dev/null 2>&1 || true
+            systemctl restart "${n}" || log "ring: ${n} did not start"
+        fi
+    done
+    if [[ ${#names[@]} -gt 0 ]]; then
+        sleep 5
+        for n in "${names[@]}"; do log "ring: ${n} $(systemctl is-active "${n}" 2>/dev/null || true)"; done
+    fi
+}
+ring_deploy || log "WARNING: ring service step failed - OpenAlgo itself is deployed"
 # keep the 10 newest backups
 { ls -1dt /opt/sudarshan/backups/*/ 2>/dev/null | tail -n +11 | xargs -r rm -rf; } || true
