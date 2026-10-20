@@ -86,8 +86,13 @@ def _stop_process_group(proc: subprocess.Popen, grace_s: float = 5.0, settle_s: 
     then follows for whatever is left. That is in a ``finally``, so it still runs when the grace wait
     is cut short (a test timeout raises here). The leader is reaped only after the SIGKILL, so the
     group id cannot have passed to an unrelated process by then.
+
+    The wait for the other members is in the ``finally`` too. ``killpg`` returns before the kernel
+    has finished them: on a loaded machine a member was still running (state R) right after the
+    SIGKILL, and a cut-short grace wait used to skip straight past it.
     """
     pgid = proc.pid
+    left: list[int] = []
     try:
         _signal_group(pgid, signal.SIGTERM)
         deadline = time.monotonic() + grace_s
@@ -96,9 +101,9 @@ def _stop_process_group(proc: subprocess.Popen, grace_s: float = 5.0, settle_s: 
     finally:
         _signal_group(pgid, signal.SIGKILL)
         proc.wait(timeout=settle_s)
-    deadline = time.monotonic() + settle_s
-    while (left := _running_members(pgid)) and time.monotonic() < deadline:
-        time.sleep(0.05)
+        deadline = time.monotonic() + settle_s
+        while (left := _running_members(pgid)) and time.monotonic() < deadline:
+            time.sleep(0.05)
     assert not left, f"processes {left} of the test server outlived SIGKILL"
 
 
@@ -148,6 +153,34 @@ def test_the_teardown_leaves_no_process_behind(tmp_path, arbiter, outcome):
     assert time.monotonic() - started < 20  # a timed-out wait was cut short, not sat out
     assert _process_state(workers[0]) is None
     assert _running_members(proc.pid) == []
+
+
+@posix_only
+def test_a_cut_short_stop_still_waits_for_the_group_to_go(monkeypatch):
+    """SIGKILL lands asynchronously, so even an interrupted stop waits until no member runs.
+
+    A member that takes a moment to die is simulated: /proc reports it running for two more reads
+    after the kill. The interrupt arrives in the grace wait, as a test timeout does.
+    """
+    this_module = sys.modules[__name__]
+    reads: list[int] = []
+
+    def slow_to_die(pgid: int) -> list[int]:
+        reads.append(pgid)
+        return [pgid + 1] if len(reads) < 3 else []
+
+    def interrupted(proc: subprocess.Popen) -> bool:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(this_module, "_running_members", slow_to_die)
+    monkeypatch.setattr(this_module, "_has_exited", interrupted)
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"], start_new_session=True
+    )
+    with pytest.raises(KeyboardInterrupt):
+        _stop_process_group(proc, grace_s=30.0, settle_s=5.0)
+    assert proc.returncode is not None  # the leader was stopped and reaped
+    assert reads == [proc.pid] * 3  # read until the group was empty, not skipped
 
 
 @pytest.mark.parametrize("worker_class", ["eventlet", "gthread"])
