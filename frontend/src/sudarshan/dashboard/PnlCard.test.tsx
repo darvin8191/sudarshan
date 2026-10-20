@@ -162,7 +162,7 @@ describe('PnlCard, live', () => {
     tick(134)
     expect(unrealised()).toHaveTextContent('+₹910.00')
     expect(total()).toHaveTextContent('+₹2,710.00')
-    expect(line(container)).toHaveTextContent('Live')
+    expect(line(container)).toHaveTextContent('Real-time')
 
     tick(112)
     expect(unrealised()).toHaveTextContent(`${MINUS}₹520.00`)
@@ -216,7 +216,7 @@ describe('PnlCard, live', () => {
     vi.useFakeTimers()
     const { container } = render(card([position()]))
     tick(131)
-    expect(line(container)).toHaveTextContent('Live')
+    expect(line(container)).toHaveTextContent('Real-time')
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(STALE_MS + 1000)
@@ -260,7 +260,7 @@ describe('PnlCard, live', () => {
 
     act(() => feed.setState({ connectionState: 'authenticated', isAuthenticated: true }))
     tick(132)
-    expect(line(container)).toHaveTextContent('Live')
+    expect(line(container)).toHaveTextContent('Real-time')
     expect(total()).toHaveClass('text-[color:var(--up)]')
   })
 

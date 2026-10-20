@@ -19,7 +19,8 @@ function words(line: Exclude<FeedLine, { kind: 'live' }>, now: number): string {
 }
 
 /**
- * Where a set of figures stands: "Live" while their ticks are arriving, and
+ * Where a set of figures stands: "Real-time" while their ticks are arriving (not
+ * "Live", which the app bar already uses for the live trading mode), and
  * otherwise what is happening instead: (re)connecting, how old the figures are
  * ("Stale" when ticks are due and have stopped), or that the market is closed.
  * Always a word, with a mark beside it, never a coloured dot alone. Not a live
@@ -39,7 +40,7 @@ export function LiveLine({
     return (
       <span data-feed="live" className={cn(TEXT, 'text-[color:var(--live-ink)]', className)}>
         <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-current" />
-        Live
+        Real-time
       </span>
     )
   }

@@ -101,7 +101,7 @@ describe('IndexStrip', () => {
     tick('NIFTY', 25900)
     expect(tiles()[0]).toHaveTextContent('NIFTY 5025,900.00+0.72%')
     expect(line(container)).toHaveAttribute('data-feed', 'live')
-    expect(line(container)).toHaveTextContent('Live')
+    expect(line(container)).toHaveTextContent('Real-time')
 
     tick('NIFTY', 25650.5)
     expect(tiles()[0]).toHaveTextContent(`NIFTY 5025,650.50${MINUS}0.25%`)
@@ -144,7 +144,7 @@ describe('IndexStrip', () => {
 
     tick('NIFTY', 25901)
     expect(tiles()[0]).not.toHaveAttribute('data-stale')
-    expect(line(container)).toHaveTextContent('Live')
+    expect(line(container)).toHaveTextContent('Real-time')
   })
 
   it('leaves a quiet index unmarked while the others tick, and marks every one when the feed stops', async () => {
@@ -158,7 +158,7 @@ describe('IndexStrip', () => {
       await pass(2000)
     }
     expect(container.querySelectorAll('[data-stale]')).toHaveLength(0)
-    expect(line(container)).toHaveTextContent('Live')
+    expect(line(container)).toHaveTextContent('Real-time')
 
     await pass(STALE_MS + 1000)
     expect(container.querySelectorAll('[data-stale]')).toHaveLength(3)
@@ -168,7 +168,7 @@ describe('IndexStrip', () => {
     const { container } = render(<IndexStrip apiKey="key" marketOpen={OPEN} />)
     await settle()
     tick('NIFTY', 25900)
-    expect(line(container)).toHaveTextContent('Live')
+    expect(line(container)).toHaveTextContent('Real-time')
 
     act(() =>
       feed.setState({ connectionState: 'connecting', isConnected: false, isAuthenticated: false })
@@ -180,7 +180,7 @@ describe('IndexStrip', () => {
       feed.setState({ connectionState: 'authenticated', isConnected: true, isAuthenticated: true })
     )
     tick('NIFTY', 25901)
-    expect(line(container)).toHaveTextContent('Live')
+    expect(line(container)).toHaveTextContent('Real-time')
   })
 
   it('says it is connecting before the first tick, not reconnecting', async () => {

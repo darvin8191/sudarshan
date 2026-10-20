@@ -22,13 +22,14 @@ healthy.
   - NIFTY 50, NIFTY BANK and INDIA VIX, moving tick by tick;
   - a holdings summary.
 
-  "Live" beside the figures means prices are arriving. If they stop for 10 seconds while the
-  market is open, it says "Stale" and how long ago the last update came, and the figures that
-  should be moving turn grey (an index also gets a clock mark). After the close it says "Market
-  closed". When the phone wakes up, or the price feed drops, the app reconnects by itself and
-  says "Reconnecting" with the age of the figures until prices arrive again; it never says
-  "Live" in that time. If reconnecting takes a while, prices are fetched every few seconds until
-  the feed is back. All figures come from your account; nothing is sample data.
+  "Real-time" beside the figures means prices are arriving. (The green LIVE chip at the top is
+  different: it means orders go to Upstox, not to the sandbox.) If prices stop for 10 seconds
+  while the market is open, it says "Stale" and how long ago the last update came, and the
+  figures that should be moving turn grey (an index also gets a clock mark). After the close it
+  says "Market closed". When the phone wakes up, or the price feed drops, the app reconnects by
+  itself and says "Reconnecting" with the age of the figures until prices arrive again; it never
+  says "Real-time" in that time. If reconnecting takes a while, prices are fetched every few
+  seconds until the feed is back. All figures come from your account; nothing is sample data.
 - **Login page.** New layout. If Chrome has saved your password, it can fill it in after your
   fingerprint: Chrome, then Settings, then Google Password Manager, then "Verify it's you to
   autofill passwords".

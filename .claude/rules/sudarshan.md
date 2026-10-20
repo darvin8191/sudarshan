@@ -35,7 +35,13 @@ members, tokens, keys, `.env` content, logs or the private specs. The specs — 
      screener result and alert, from the live feed as ticks or events arrive. Charts are a must
      (owner, 20 Oct 2026), including a phone-first live chart screen.
    - Timed polling of market data is not acceptable. REST is only for the first snapshot, a
-     periodic re-sync and data that is not market data.
+     periodic re-sync and data that is not market data. During a feed outage, upstream's slow
+     REST fallback may fill the gap. The screen then says "Reconnecting" or "Delayed" with the
+     age of the figures, never "Real-time".
+   - Words on screen:
+     - "Real-time" means ticks are arriving.
+     - "LIVE" stays the trading mode chip (orders go to Upstox), as opposed to ANALYZE (sandbox).
+     - Never use "Live" for the feed.
    - When a screen cannot be live (market closed, feed down, no broker login), it says so with a
      stale or closed marker and a label. It never shows old numbers as current.
    - New SUDARSHAN features are built live from day one.
