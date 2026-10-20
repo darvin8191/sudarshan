@@ -311,6 +311,66 @@ describe('SocketProvider', () => {
     await screen.findByRole('button', { name: 'go /two' })
     expect(liveSockets()).toHaveLength(1)
   })
+
+  // SUDARSHAN: a page change re-ran the connection effect (it depended on the
+  // router's `navigate`, new on every pathname) and moving between /trading
+  // and a normal page swapped the provider, so either closed the connection
+  // and opened another, and whatever the server pushed meanwhile went to nobody.
+  it('keeps the same connection across page changes and the move to and from /trading', async () => {
+    function GoTo({ to }: { to: string }) {
+      const navigate = useNavigate()
+      return (
+        <button type="button" onClick={() => navigate(to)}>
+          go {to}
+        </button>
+      )
+    }
+
+    renderAt(
+      '/one',
+      <>
+        <Route element={<Layout />}>
+          <Route path="/one" element={<GoTo to="/two" />} />
+          <Route path="/two" element={<GoTo to="/trading" />} />
+        </Route>
+        <Route element={<FullWidthLayout />}>
+          <Route path="/trading" element={<GoTo to="/one" />} />
+        </Route>
+      </>
+    )
+    const socket = onlySocket()
+
+    fireEvent.click(screen.getByRole('button', { name: 'go /two' }))
+    await screen.findByRole('button', { name: 'go /trading' })
+    fireEvent.click(screen.getByRole('button', { name: 'go /trading' }))
+    await screen.findByRole('button', { name: 'go /one' })
+    fireEvent.click(screen.getByRole('button', { name: 'go /one' }))
+    await screen.findByRole('button', { name: 'go /two' })
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(io).toHaveBeenCalledTimes(1)
+    expect(socket.disconnected).toBe(false)
+    // One set of the shell's handlers, not one per mount.
+    for (const event of PROVIDER_EVENTS) expect(socket.listenerCount(event)).toBe(1)
+  })
+
+  it('closes the connection on logout', async () => {
+    renderAt(
+      '/probe',
+      <Route element={<Layout />}>
+        <Route path="/probe" element={<p>page</p>} />
+      </Route>
+    )
+    const socket = onlySocket()
+
+    act(() => useAuthStore.setState({ isAuthenticated: false }))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(socket.disconnected).toBe(true)
+  })
 })
 
 describe('Action Center on the shared connection', () => {

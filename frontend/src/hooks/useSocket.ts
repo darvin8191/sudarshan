@@ -5,6 +5,8 @@ import { toast } from 'sonner'
 import { type AlertCategories, useAlertStore } from '@/stores/alertStore'
 import { useAuthStore } from '@/stores/authStore'
 import { useSessionStore } from '@/stores/sessionStore'
+// SUDARSHAN: one connection for the signed-in tab (src/sudarshan/books).
+import { acquireSharedSocket, releaseSharedSocket } from '@/sudarshan/books/sharedSocket'
 
 // Audio throttling configuration
 const AUDIO_THROTTLE_MS = 1000
@@ -67,6 +69,10 @@ const showCategoryToast = (
 
 export function useSocket() {
   const navigate = useNavigate()
+  // SUDARSHAN: `navigate` changes identity with every pathname; read through a
+  // ref so a page change does not re-run the connection effect below.
+  const navigateRef = useRef(navigate)
+  navigateRef.current = navigate
   const { isAuthenticated } = useAuthStore()
   const socketRef = useRef<Socket | null>(null)
   // Reactive copy so consumers (SocketProvider -> useOrderEventRefresh) can share
@@ -148,17 +154,31 @@ export function useSocket() {
 
     // Use polling transport only - WebSocket upgrade fails with threading async mode
     // Polling is still real-time via HTTP long-polling
-    socketRef.current = io(`${protocol}//${host}:${port}`, {
-      transports: ['polling'],
-      upgrade: false,
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000,
-      timeout: 20000,
-      forceNew: true, // Always create new session to avoid "Invalid session" errors on reconnect
-    })
+    // SUDARSHAN: borrowed for the signed-in tab, not opened per mount, so a page
+    // or layout change never drops what the server pushes (sudarshan/books/sharedSocket.ts).
+    const shared = acquireSharedSocket(() =>
+      io(`${protocol}//${host}:${port}`, {
+        transports: ['polling'],
+        upgrade: false,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000,
+        timeout: 20000,
+        forceNew: true, // Always create new session to avoid "Invalid session" errors on reconnect
+      })
+    )
+    socketRef.current = shared
+    setSocketInstance(shared)
 
-    const socket = socketRef.current
-    setSocketInstance(socket)
+    // SUDARSHAN: the handlers below register through this recorder, so cleanup
+    // removes exactly this provider's from the connection it shares.
+    const registered: Array<[string, (...args: any[]) => void]> = []
+    const socket = {
+      on(event: string, handler: (...args: any[]) => void) {
+        shared.on(event, handler)
+        registered.push([event, handler])
+        return socket
+      },
+    }
 
     // Force logout from another device
     socket.on('force_logout', (data: { message: string }) => {
@@ -171,7 +191,7 @@ export function useSocket() {
         duration: 10000,
       })
       setTimeout(() => {
-        navigate('/login', { replace: true })
+        navigateRef.current('/login', { replace: true })
       }, 2000)
     })
 
@@ -331,13 +351,16 @@ export function useSocket() {
     })
 
     return () => {
-      socket.disconnect()
+      // SUDARSHAN: remove this provider's handlers and give the connection back;
+      // it closes only if no provider takes it again (logout, leaving the app pages).
+      for (const [event, handler] of registered) shared.off(event, handler)
+      releaseSharedSocket(shared)
       setSocketInstance(null)
       ;['click', 'touchstart', 'keydown'].forEach((eventType) => {
         document.removeEventListener(eventType, handleInteraction)
       })
     }
-  }, [isAuthenticated, playAlertSound, enableAudio, navigate])
+  }, [isAuthenticated, playAlertSound, enableAudio])
 
   return {
     socket: socketInstance,
