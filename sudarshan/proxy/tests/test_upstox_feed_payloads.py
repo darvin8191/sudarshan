@@ -924,6 +924,45 @@ def test_a_reconnect_replays_each_key_once_in_the_mode_it_needs(make_adapter) ->
     assert fresh.held == {OPTION[2]: "full", SBIN[2]: "ltpc"}
 
 
+def test_a_mode_released_while_the_socket_is_closed_is_released_and_not_replayed(
+    make_adapter,
+) -> None:
+    """Upstox forgets every key when its socket closes, so a release then is complete here.
+    It used to be refused, and the reconnect's replay streamed the key with no owner."""
+    adapter = make_adapter()
+    pool = _pool(adapter)
+    symbol, exchange, key = SBIN
+    assert pool.subscribe(symbol, exchange, 1)["status"] == "success"
+    _feed(adapter, ltpc_only_frame())
+    assert key in adapter._last_ltpc
+    adapter.upstox.close_socket()
+    adapter.ws_client._connected = False
+
+    assert pool.unsubscribe(symbol, exchange, 1)["status"] == "success"
+    assert pool.subscription_map == {} and adapter.subscriptions == {}
+    assert adapter.ws_client.mode_of(key) is None
+    assert key not in adapter._last_ltpc and key not in adapter._day_carry
+
+    fresh = adapter.ws_client.ws = adapter.upstox = _UpstoxServer()
+    adapter.ws_client._reset_modes()
+    adapter.ws_client._connected = True
+    adapter._on_connect()
+    assert fresh.sent == [] and fresh.held == {}
+
+
+def test_an_error_on_an_open_socket_does_not_count_as_closed(make_adapter) -> None:
+    """An error clears the client's connected flag while the socket stays open and Upstox
+    keeps streaming; the release is refused as before, so the record stays to be retried."""
+    adapter = make_adapter()
+    symbol, exchange, key = SBIN
+    _hold(adapter, SBIN, 1)
+    adapter.ws_client._connected = False  # what an error callback does
+
+    assert adapter.unsubscribe(symbol, exchange, 1)["status"] == "error"
+    assert list(adapter.subscriptions) == [f"{symbol}_{exchange}_1"]
+    assert adapter.upstox.held == {key: "ltpc"}
+
+
 def test_a_key_released_before_its_subscribe_went_out_is_not_sent(make_adapter) -> None:
     adapter = make_adapter()
     adapter._start_batch_timer = lambda: None  # hold the batch, as the 0.5 s timer does
