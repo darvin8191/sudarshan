@@ -32,6 +32,12 @@
    and wins. Analyze mode's own accent comes after, in its own block.
    ----------------------------------------------------------------------------- */
 :root {
+  /* Type (M1.10; faces in fonts.css). Inter for Latin and figures, Noto Sans for
+     Devanagari and Gujarati; Tailwind's preflight reads --font-sans for <html>. */
+  --font-sans:
+    'Inter', 'Noto Sans Devanagari', 'Noto Sans Gujarati', ui-sans-serif, system-ui, sans-serif;
+  --font-wordmark: 'Tiro Devanagari Sanskrit', 'Noto Serif Devanagari', serif;
+
   /* Surfaces and text */
   --bg-canvas: oklch(0.976 0.005 95.1); /* #F8F7F3 page; never #FFFFFF (glare) */
   --surface-card: oklch(0.991 0.004 91.45); /* #FDFCF9 cards, always with a border */
@@ -111,6 +117,12 @@
   --buy-foreground: 0 0% 100%;
   --sell: 8.6 82.5% 44.7%; /* #D02F14 4.78:1 SELL, SHORT */
   --sell-foreground: 0 0% 100%;
+}
+
+/* Figures line up: every number in tables, tickers and P&L takes one width, so
+   columns align and a ticking price never shifts the text beside it. */
+body {
+  font-variant-numeric: tabular-nums lining-nums;
 }
 
 /* One accent (M1.12). Upstream's picker themes ([data-theme="green"] and the
@@ -205,7 +217,7 @@ html[data-cvd='1'] {
     white-space: nowrap;
   }
   .sd-wordmark {
-    font-family: 'Tiro Devanagari Sanskrit', 'Noto Serif Devanagari', serif;
+    font-family: var(--font-wordmark);
     font-weight: 400;
     font-synthesis: none;
     letter-spacing: 0;

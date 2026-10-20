@@ -4,6 +4,7 @@
  * effect behind this one import is what keeps the upstream entry point a
  * one-line change.
  */
+import './fonts.css'
 import './theme.css'
 // Applies the colour-blind preference to <html> before React renders.
 import './display'
