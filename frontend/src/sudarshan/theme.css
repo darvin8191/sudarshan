@@ -291,3 +291,35 @@ html[data-cvd='1'] {
     padding-left: 0.12em;
   }
 }
+
+/* -----------------------------------------------------------------------------
+   Motion (M1.21)
+   -----------------------------------------------------------------------------
+   Minimal: no colour flash on ticks, no pulsing live dots, and what has to
+   appear fades in over 150 to 200 ms. On a device set to reduce motion nothing
+   moves: every animation and transition finishes at once. A spinner keeps
+   turning, because it is the only sign that a wait is still a wait.
+   ----------------------------------------------------------------------------- */
+@keyframes sd-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.sd-analyze-banner {
+  animation: sd-fade-in 160ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *:not(.animate-spin),
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

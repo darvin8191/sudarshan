@@ -155,6 +155,14 @@ describe('SUDARSHAN tokens', () => {
     for (const t of triplets) expect(t.hex, t.name).toBe(t.claimed)
   })
 
+  it('stops motion for reduce-motion devices, spinners excepted (M1.21)', () => {
+    const reduced = /@media \(prefers-reduced-motion: reduce\)\s*{([\s\S]*?)\n}/.exec(css)?.[1]
+    expect(reduced, 'a prefers-reduced-motion block').toBeDefined()
+    expect(reduced).toContain('*:not(.animate-spin)')
+    expect(reduced).toMatch(/animation-duration: 0\.01ms !important/)
+    expect(reduced).toMatch(/transition-duration: 0\.01ms !important/)
+  })
+
   it('has no dark variant anywhere', () => {
     const rules = css.replace(/\/\*[\s\S]*?\*\//g, '')
     expect(rules).not.toMatch(/\.dark\b/)

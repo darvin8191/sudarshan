@@ -19,3 +19,4 @@ One row per feature id from the (private) feature list. Status: `todo` → `part
 | M1.12 | One brand accent: upstream accent themes collapse to indigo, picker removed | partial | — | branch `feat/brand`; awaiting review and release |
 | M1.13 | Colour-blind mode: `<html data-cvd="1">` blue/orange up/down, Profile > Display switch (per device) | partial | — | branch `feat/brand`; awaiting review and release |
 | M1.16 | About page `/about` (route, Flask known path, profile menu): release, commit and source link from the release build, OpenAlgo version, licences (AGPL-3.0, Apache-2.0, OFL, ISC) | partial | — | branch `feat/brand`; awaiting review and release |
+| M1.21 | Motion: shell has no tick flash or pulsing dot; Analyze banner fades in 160 ms; `prefers-reduced-motion` stops all animation and transition (spinners keep turning) | partial | — | branch `feat/brand`; pages outside the shell still flash on ticks (OptionChain, strategy builder P&L, agent live cards) |
