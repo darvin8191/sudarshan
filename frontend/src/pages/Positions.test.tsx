@@ -38,7 +38,11 @@ vi.mock('@/stores/authStore', () => ({
   useAuthStore: () => ({ apiKey: 'test-api-key', user: { broker: 'zerodha' } }),
 }))
 
-vi.mock('@/stores/themeStore', () => ({ onModeChange: () => () => {} }))
+vi.mock('@/stores/themeStore', () => ({
+  onModeChange: () => () => {},
+  // SUDARSHAN M6.9: a phone's cards read the mode to say where an order goes.
+  useThemeStore: (pick: (state: { appMode: string }) => unknown) => pick({ appMode: 'live' }),
+}))
 
 // SUDARSHAN M6.9: a phone's cards subscribe through the shared manager, here the harness.
 vi.mock('@/lib/MarketDataManager', () => import('@/test/marketDataHarness'))

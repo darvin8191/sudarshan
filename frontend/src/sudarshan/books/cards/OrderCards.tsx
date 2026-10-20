@@ -14,6 +14,7 @@ import { describe } from '@/sudarshan/watchlist/rows'
 import type { Order } from '@/types/trading'
 import { clockOf, figure, momentOf, type OrderState, orderState, units } from './format'
 import {
+  ActionWords,
   CARD,
   Confirm,
   Details,
@@ -24,6 +25,7 @@ import {
   ProblemCard,
   price,
   RefreshIcon,
+  SANDBOX_SENTENCE,
   SentChip,
   SideChip,
   StaleBookNote,
@@ -258,6 +260,8 @@ const OrderBoard = memo(function OrderBoard({
   })
 
   const who = appMode === 'analyzer' ? 'Sandbox' : 'Broker'
+  // Analyze mode: the book is the sandbox's, and so is every cancel and modify from it.
+  const sandbox = appMode === 'analyzer'
   const cancelling = overlay?.act === 'cancel' && targetState?.working ? target : null
   const cancelShown = useHeld(cancelling)
 
@@ -379,6 +383,7 @@ const OrderBoard = memo(function OrderBoard({
           line={line}
           now={now}
           who={who}
+          sandbox={sandbox}
           sent={cancels.has(target.orderid)}
           onClose={close}
           onModify={() => {
@@ -395,7 +400,7 @@ const OrderBoard = memo(function OrderBoard({
         title="Cancel this order?"
         description={
           cancelShown
-            ? `${cancelShown.action} ${remainingText(cancelShown)} ${describe(cancelShown.symbol, cancelShown.exchange).title} · ${priceText(cancelShown)}. The order stops working at the exchange.`
+            ? `${cancelShown.action} ${remainingText(cancelShown)} ${describe(cancelShown.symbol, cancelShown.exchange).title} · ${priceText(cancelShown)}. ${sandbox ? `The order stops working in the sandbox. ${SANDBOX_SENTENCE}` : 'The order stops working at the exchange.'}`
             : ''
         }
         cancelLabel="Keep order"
@@ -411,7 +416,7 @@ const OrderBoard = memo(function OrderBoard({
       <Confirm
         open={overlay?.act === 'cancelall'}
         title="Cancel all open orders?"
-        description={`This will cancel all ${cancellable} open ${cancellable === 1 ? 'order' : 'orders'}. This cannot be undone.`}
+        description={`This will cancel all ${cancellable} open ${cancellable === 1 ? 'order' : 'orders'}${sandbox ? ` in the sandbox. ${SANDBOX_SENTENCE}` : '. This cannot be undone.'}`}
         cancelLabel="Keep orders"
         confirmLabel="Cancel all"
         onConfirm={() =>
@@ -515,6 +520,7 @@ function OrderSheet({
   line,
   now,
   who,
+  sandbox,
   sent,
   onClose,
   onModify,
@@ -527,6 +533,8 @@ function OrderSheet({
   line: FeedLine
   now: number
   who: 'Broker' | 'Sandbox'
+  /** Analyze mode: Modify and Cancel go to the sandbox, and say so. */
+  sandbox: boolean
   /** Its cancel went, and the order has not ended yet: Modify and Cancel wait. */
   sent: boolean
   onClose: () => void
@@ -583,7 +591,7 @@ function OrderSheet({
               className={cn(OUTLINED, 'border-primary text-primary')}
             >
               <Pencil aria-hidden="true" className="size-4" />
-              Modify
+              <ActionWords sandbox={sandbox && !sent}>Modify</ActionWords>
             </button>
             <button
               type="button"
@@ -593,7 +601,7 @@ function OrderSheet({
               className={cn(OUTLINED, 'border-[color:var(--down)] text-[color:var(--down)]')}
             >
               <X aria-hidden="true" className="size-4" />
-              {sent ? 'Cancel sent' : 'Cancel order'}
+              {sent ? 'Cancel sent' : <ActionWords sandbox={sandbox}>Cancel order</ActionWords>}
             </button>
           </div>
         )}

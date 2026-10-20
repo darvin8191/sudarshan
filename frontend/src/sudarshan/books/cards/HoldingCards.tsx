@@ -15,6 +15,7 @@ import type { Holding, HoldingsStats } from '@/types/trading'
 import { figure, units } from './format'
 import {
   ACTION,
+  ActionWords,
   BookHeading,
   BUY_FILL,
   CARD,
@@ -30,6 +31,7 @@ import {
   STALE,
   SignedPercent,
   StaleBookNote,
+  useSandbox,
 } from './parts'
 import { useBookOverlay, usePageDialog } from './useBookOverlay'
 import { type PricedRow, useFramePrices } from './useFramePrices'
@@ -440,6 +442,8 @@ function HoldingSheet({
       ? ((row.ltp - row.prevClose) / row.prevClose) * 100
       : null
   const meaning = PRODUCT_MEANING[product as Product]
+  // Analyze mode: Buy more and Sell go to the sandbox, and say so.
+  const sandbox = useSandbox()
 
   return (
     <BottomSheet
@@ -471,7 +475,7 @@ function HoldingSheet({
             className={cn(ACTION, 'font-bold', BUY_FILL)}
           >
             <Plus aria-hidden="true" className="size-4" />
-            Buy more
+            <ActionWords sandbox={sandbox}>Buy more</ActionWords>
           </button>
           <button
             type="button"
@@ -480,7 +484,7 @@ function HoldingSheet({
             className={cn(ACTION, 'font-bold', SELL_FILL)}
           >
             <Minus aria-hidden="true" className="size-4" />
-            Sell
+            <ActionWords sandbox={sandbox}>Sell</ActionWords>
           </button>
         </div>
 

@@ -18,6 +18,7 @@ import {
 } from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
+import { useThemeStore } from '@/stores/themeStore'
 import { TickPrice } from '@/sudarshan/books/LiveFigures'
 import type { TickDirection } from '@/sudarshan/books/prices'
 import { directionOf, formatPercent, formatPrice, formatRupees } from '@/sudarshan/dashboard/format'
@@ -212,6 +213,25 @@ export function StatusChip({ state }: { state: OrderState }) {
     <span data-status={state.label} className={cn(CHIP, 'px-2', look.className)}>
       <Icon aria-hidden="true" className="size-3.5" />
       {state.label}
+    </span>
+  )
+}
+
+/** Whether an order from here goes to the sandbox: Analyze mode is on. */
+export function useSandbox(): boolean {
+  return useThemeStore((state) => state.appMode) === 'analyzer'
+}
+
+/** What a confirmation says in Analyze mode, after where the order goes. */
+export const SANDBOX_SENTENCE = 'Analyze mode is on, so nothing goes to Upstox.'
+
+/** An action's words, and in Analyze mode a second line: its order goes to the sandbox. */
+export function ActionWords({ children, sandbox }: { children: ReactNode; sandbox: boolean }) {
+  if (!sandbox) return <>{children}</>
+  return (
+    <span className="flex flex-col items-center leading-tight">
+      <span>{children}</span>{' '}
+      <span className="text-[0.71875rem] font-semibold">in the sandbox</span>
     </span>
   )
 }

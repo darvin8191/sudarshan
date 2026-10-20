@@ -563,6 +563,27 @@ describe('Order book on a phone: the sheet and its actions', () => {
     expect(screen.getByRole('button', { name: 'Cancel all' })).toBeDisabled()
   })
 
+  it('says a cancel or a modify goes to the sandbox when Analyze mode is on', async () => {
+    const tap = user()
+    theme.appMode = 'analyzer'
+    await renderPhone(WORKING, STOP)
+    await tap.click(orderCard('1001'))
+    const sheet = screen.getByRole('dialog')
+    expect(within(sheet).getByRole('button', { name: 'Modify in the sandbox' })).toBeInTheDocument()
+    await tap.click(within(sheet).getByRole('button', { name: 'Cancel order in the sandbox' }))
+    expect(screen.getByRole('dialog', { name: 'Cancel this order?' })).toHaveTextContent(
+      'The order stops working in the sandbox. Analyze mode is on, so nothing goes to Upstox.'
+    )
+    back()
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+
+    await tap.click(screen.getByRole('button', { name: 'Cancel all (2)' }))
+    expect(screen.getByRole('dialog', { name: 'Cancel all open orders?' })).toHaveTextContent(
+      'This will cancel all 2 open orders in the sandbox. ' +
+        'Analyze mode is on, so nothing goes to Upstox.'
+    )
+  })
+
   it('makes the same cancel call as the wide table’s button', async () => {
     const tap = user()
     api.getOrders.mockResolvedValue(book(WORKING))

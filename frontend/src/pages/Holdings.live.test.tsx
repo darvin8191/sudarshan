@@ -23,7 +23,11 @@ vi.mock('@/components/trading', () => ({ PlaceOrderDialog: () => null }))
 vi.mock('@/stores/authStore', () => ({
   useAuthStore: () => ({ apiKey: 'test-api-key', user: { broker: 'upstox' } }),
 }))
-vi.mock('@/stores/themeStore', () => ({ onModeChange: () => () => {} }))
+vi.mock('@/stores/themeStore', () => ({
+  onModeChange: () => () => {},
+  // SUDARSHAN M6.9: a phone's cards read the mode to say where an order goes.
+  useThemeStore: (pick: (state: { appMode: string }) => unknown) => pick({ appMode: 'live' }),
+}))
 const calendar = {
   isMarketOpen: () => true,
   isAnyMarketOpen: () => true,

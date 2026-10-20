@@ -61,7 +61,11 @@ vi.mock('@/components/trading', async () => {
 vi.mock('@/stores/authStore', () => ({
   useAuthStore: () => ({ apiKey: 'test-api-key', user: { broker: 'upstox' } }),
 }))
-vi.mock('@/stores/themeStore', () => ({ onModeChange: () => () => {} }))
+const theme = vi.hoisted(() => ({ appMode: 'live' }))
+vi.mock('@/stores/themeStore', () => ({
+  onModeChange: () => () => {},
+  useThemeStore: (pick: (state: { appMode: string }) => unknown) => pick(theme),
+}))
 const calendar = vi.hoisted(() => ({
   isMarketOpen: () => true,
   isAnyMarketOpen: () => true,
@@ -132,6 +136,7 @@ function user() {
 
 beforeEach(() => {
   fakeClock()
+  theme.appMode = 'live'
   frames.install()
   feed.reset()
   ticket.opened = []
@@ -262,6 +267,16 @@ describe('Holdings on a phone', () => {
     expect(screen.getByRole('region', { name: 'Order ticket' })).toHaveTextContent(
       'SELL RELIANCE NSE qty 40'
     )
+  })
+
+  it('says Buy more and Sell go to the sandbox when Analyze mode is on', async () => {
+    const tap = user()
+    theme.appMode = 'analyzer'
+    await renderPhone(RELIANCE)
+    await tap.click(card(/RELIANCE/))
+    const sheet = screen.getByRole('dialog')
+    expect(within(sheet).getByRole('button', { name: 'Buy more in the sandbox' })).toBeEnabled()
+    expect(within(sheet).getByRole('button', { name: 'Sell in the sandbox' })).toBeEnabled()
   })
 
   it('closes the ticket on Back, then leaves the page', async () => {

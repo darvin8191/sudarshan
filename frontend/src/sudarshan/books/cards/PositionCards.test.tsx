@@ -34,7 +34,11 @@ vi.mock('@/sudarshan/watchlist/api', () => ({
 vi.mock('@/stores/authStore', () => ({
   useAuthStore: () => ({ apiKey: 'test-api-key', user: { broker: 'upstox' } }),
 }))
-vi.mock('@/stores/themeStore', () => ({ onModeChange: () => () => {} }))
+const theme = vi.hoisted(() => ({ appMode: 'live' }))
+vi.mock('@/stores/themeStore', () => ({
+  onModeChange: () => () => {},
+  useThemeStore: (pick: (state: { appMode: string }) => unknown) => pick(theme),
+}))
 vi.mock('@/utils/toast', () => ({
   showToast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
 }))
@@ -233,6 +237,7 @@ function user() {
 
 beforeEach(() => {
   fakeClock()
+  theme.appMode = 'live'
   frames.install()
   feed.reset()
   socket.clear()
@@ -459,6 +464,44 @@ describe('Positions on a phone: the sheet and its actions', () => {
     expect(screen.getByRole('button', { name: 'Exit all' })).toBeDisabled()
     await pass(15_500)
     expect(screen.queryByText('Exit sent')).toBeNull()
+  })
+
+  it('says an exit goes to the sandbox when Analyze mode is on', async () => {
+    const tap = user()
+    theme.appMode = 'analyzer'
+    await renderPhone(LONG, SHORT)
+    await tap.click(card(/NIFTY 25900 CE/))
+    const sheet = screen.getByRole('dialog')
+    expect(within(sheet).getByRole('button', { name: /^Exit/ })).toHaveTextContent(
+      'Sell 65 in the sandbox'
+    )
+    const add = within(sheet).getByRole('button', { name: /^Add/ })
+    expect(add).toHaveTextContent('Buy more in the sandbox')
+    await tap.click(within(sheet).getByRole('button', { name: /^Exit/ }))
+    expect(screen.getByRole('dialog', { name: 'Exit NIFTY 25900 CE?' })).toHaveTextContent(
+      'Sells 65 (MIS) at market price in the sandbox to close this position. ' +
+        'Analyze mode is on, so nothing goes to Upstox.'
+    )
+    back()
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+
+    await tap.click(screen.getByRole('button', { name: 'Exit all' }))
+    expect(screen.getByRole('dialog', { name: 'Exit all positions?' })).toHaveTextContent(
+      'This closes all 2 open positions at market price in the sandbox. ' +
+        'Analyze mode is on, so nothing goes to Upstox.'
+    )
+  })
+
+  it('names no sandbox when orders go to the broker', async () => {
+    const tap = user()
+    await renderPhone(LONG)
+    await tap.click(card(/NIFTY 25900 CE/))
+    const sheet = screen.getByRole('dialog')
+    expect(sheet).not.toHaveTextContent('sandbox')
+    await tap.click(within(sheet).getByRole('button', { name: /^Exit/ }))
+    const confirm = screen.getByRole('dialog', { name: 'Exit NIFTY 25900 CE?' })
+    expect(confirm).toHaveTextContent('This cannot be undone.')
+    expect(confirm).not.toHaveTextContent('sandbox')
   })
 
   it('makes the same call as the wide table’s close button', async () => {

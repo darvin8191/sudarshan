@@ -37,11 +37,13 @@ import {
   ProductChip,
   PositionSide,
   price,
+  SANDBOX_SENTENCE,
   SELL_FILL,
   SentChip,
   STALE,
   SignedPercent,
   StaleBookNote,
+  useSandbox,
 } from './parts'
 import { useBookOverlay } from './useBookOverlay'
 import { type PricedRow, useFramePrices } from './useFramePrices'
@@ -213,6 +215,8 @@ const PositionBoard = memo(function PositionBoard({
   const { overlay, open, swap, close } = useBookOverlay()
   const openSheet = useCallback((id: string) => open({ act: 'sheet', row: id }), [open])
   const refresh = useCallback(() => void onRefresh(true), [onRefresh])
+  // Analyze mode: the book is the sandbox's, and so is every exit from it.
+  const sandbox = useSandbox()
 
   // An exit sent holds the position's Exit (and Exit all) until the book shows
   // its quantity changed, or SENT_HOLD_MS pass: the broker's book can lag the
@@ -338,6 +342,7 @@ const PositionBoard = memo(function PositionBoard({
           now={now}
           apiKey={apiKey}
           sent={exits.has(positionId(target.item))}
+          sandbox={sandbox}
           onClose={close}
           onExit={() => swap({ act: 'exit', row: positionId(target.item) })}
           onAdd={() => swap({ act: 'add', row: positionId(target.item) })}
@@ -349,7 +354,7 @@ const PositionBoard = memo(function PositionBoard({
         title={`Exit ${exitName}?`}
         description={
           exitShown
-            ? `${sideOf(quantityOf(exitShown.item)) === 'SHORT' ? 'Buys' : 'Sells'} ${units(Math.abs(quantityOf(exitShown.item)))} (${exitShown.item.product}) at market price to close this position. This cannot be undone.`
+            ? `${sideOf(quantityOf(exitShown.item)) === 'SHORT' ? 'Buys' : 'Sells'} ${units(Math.abs(quantityOf(exitShown.item)))} (${exitShown.item.product}) at market price${sandbox ? ' in the sandbox' : ''} to close this position. ${sandbox ? SANDBOX_SENTENCE : 'This cannot be undone.'}`
             : ''
         }
         cancelLabel="Keep it"
@@ -366,7 +371,7 @@ const PositionBoard = memo(function PositionBoard({
       <Confirm
         open={overlay?.act === 'exitall'}
         title="Exit all positions?"
-        description={`This closes all ${held.length} open ${held.length === 1 ? 'position' : 'positions'} at market price. This cannot be undone.`}
+        description={`This closes all ${held.length} open ${held.length === 1 ? 'position' : 'positions'} at market price${sandbox ? ` in the sandbox. ${SANDBOX_SENTENCE}` : '. This cannot be undone.'}`}
         confirmLabel="Exit all"
         onConfirm={() =>
           void holdExits(
@@ -576,6 +581,7 @@ function PositionSheet({
   now,
   apiKey,
   sent,
+  sandbox,
   onClose,
   onExit,
   onAdd,
@@ -587,6 +593,8 @@ function PositionSheet({
   apiKey: string | null
   /** Its exit went, and the book has not shown it yet: Exit waits. */
   sent: boolean
+  /** Analyze mode: Exit and Add go to the sandbox, and say so. */
+  sandbox: boolean
   onClose: () => void
   onExit: () => void
   onAdd: () => void
@@ -659,7 +667,7 @@ function PositionSheet({
                 <span className="text-[0.71875rem] font-semibold">
                   {sent
                     ? 'Exit sent'
-                    : `${side === 'LONG' ? 'Sell' : 'Buy'} ${units(Math.abs(quantity))} at market`}
+                    : `${side === 'LONG' ? 'Sell' : 'Buy'} ${units(Math.abs(quantity))} ${sandbox ? 'in the sandbox' : 'at market'}`}
                 </span>
               </button>
               <button
@@ -679,6 +687,7 @@ function PositionSheet({
                 </span>
                 <span className="text-[0.71875rem] font-semibold">
                   {side === 'LONG' ? 'Buy more' : 'Sell more'}
+                  {sandbox ? ' in the sandbox' : ''}
                 </span>
               </button>
             </div>
