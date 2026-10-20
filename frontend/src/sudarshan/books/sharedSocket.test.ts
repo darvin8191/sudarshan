@@ -5,7 +5,7 @@
  * to be open and is not is asked to connect again.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { acquireSharedSocket, RETRY_MS, releaseSharedSocket } from './sharedSocket'
+import { acquireSharedSocket, connectionCount, RETRY_MS, releaseSharedSocket } from './sharedSocket'
 
 class FakeSocket {
   connected = true
@@ -109,5 +109,34 @@ describe('shared Socket.IO connection', () => {
     socket.fire('connect')
     vi.advanceTimersByTime(RETRY_MS * 3)
     expect(socket.connects).toBe(4)
+  })
+
+  it('recovers by itself from a first connect that failed, past the point Socket.IO gives up', () => {
+    vi.useFakeTimers()
+    acquireSharedSocket(create)
+    const socket = made[0]
+    // A tab opened while the server restarts: never connected, every attempt failing.
+    socket.connected = false
+    for (let attempt = 0; attempt < 5; attempt++) socket.fire('connect_error')
+    // Socket.IO's last attempt has failed and it has stopped; nothing else fires.
+    vi.advanceTimersByTime(RETRY_MS)
+    expect(socket.connects).toBe(1)
+    vi.advanceTimersByTime(RETRY_MS * 5)
+    expect(socket.connects).toBe(6)
+
+    socket.connected = true
+    socket.fire('connect')
+    vi.advanceTimersByTime(RETRY_MS * 3)
+    expect(socket.connects).toBe(6)
+  })
+
+  it('counts how often the connection has come up, so a book can tell a reconnect from the first connect', () => {
+    const socket = acquireSharedSocket(create)
+    expect(connectionCount(socket)).toBeUndefined()
+    made[0].fire('connect')
+    expect(connectionCount(socket)).toBe(1)
+    made[0].fire('disconnect')
+    made[0].fire('connect')
+    expect(connectionCount(socket)).toBe(2)
   })
 })

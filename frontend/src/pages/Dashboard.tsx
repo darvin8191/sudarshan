@@ -14,7 +14,6 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { tradingApi } from '@/api/trading'
-import { useOrderEventRefresh } from '@/hooks/useOrderEventRefresh'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
 import { onModeChange } from '@/stores/themeStore'
@@ -22,7 +21,7 @@ import { useBookSync } from '@/sudarshan/books/useBookSync'
 import { HoldingsCard } from '@/sudarshan/dashboard/HoldingsCard'
 import { useMarketOpen } from '@/sudarshan/dashboard/hooks'
 import { IndexStrip } from '@/sudarshan/dashboard/IndexStrip'
-import { type PositionsSnapshot, RESYNC_MS } from '@/sudarshan/dashboard/live'
+import type { PositionsSnapshot } from '@/sudarshan/dashboard/live'
 import {
   CALENDAR_LOADING,
   type MarketCalendar,
@@ -136,7 +135,6 @@ export default function Dashboard() {
   const [positions, setPositions] = useState<PositionsSnapshot | null>(null)
   const [syncedAt, setSyncedAt] = useState<number | null>(null)
   const readCount = useRef(0)
-  const lastReadAt = useRef(0)
   // SUDARSHAN: the market calendar, read again each day (MarketCalendarSource).
   const [market, setMarket] = useState<MarketCalendar>(CALENDAR_LOADING)
   const day = useIstDay()
@@ -151,7 +149,6 @@ export default function Dashboard() {
     // SUDARSHAN: a read that a newer one overtakes is dropped, so an old answer
     // arriving late never replaces a newer one.
     const read = ++readCount.current
-    lastReadAt.current = Date.now()
     try {
       setIsLoading(true)
       // SUDARSHAN: the position book first, then the funds. Analyze mode marks
@@ -196,66 +193,16 @@ export default function Dashboard() {
     fetchFundsData()
   }, [fetchFundsData])
 
-  // SUDARSHAN: one read at a time for everything below that asks again. An
-  // order passing through several states in a second sends an event for each;
-  // the ones that arrive during a read queue a single read after it.
-  const latestRead = useRef(fetchFundsData)
-  useEffect(() => {
-    latestRead.current = fetchFundsData
-  }, [fetchFundsData])
-  const reading = useRef(false)
-  const queued = useRef(false)
-  const reread = useCallback(async () => {
-    if (reading.current) {
-      queued.current = true
-      return
-    }
-    reading.current = true
-    try {
-      do {
-        queued.current = false
-        await latestRead.current()
-      } while (queued.current)
-    } finally {
-      reading.current = false
-    }
-  }, [])
-
-  // Refresh funds when an order is placed (via SocketIO event).
-  // SUDARSHAN: and when the broker reports a fill, a rejection or a square-off
-  // (order_update), which the other three do not cover.
-  useOrderEventRefresh(reread, {
-    events: ['order_event', 'analyzer_update', 'close_position_event', 'order_update'],
-  })
-  // SUDARSHAN: and once when the Socket.IO connection comes back, since
-  // anything the server pushed while it was down went to nobody.
-  useBookSync(reread, { events: [], resyncMs: null, awayMs: null })
-
-  // SUDARSHAN: re-read the broker's figures every 45 seconds while the page is
-  // in view and a market is open (or not known to be shut), so the base the
-  // ticks move from never drifts far, whether or not order updates arrive; and
-  // on coming back into view after more than 15 seconds away. Three broker
-  // reads each time, well inside its limits.
-  useEffect(() => {
-    const timer = setInterval(() => {
-      if (document.visibilityState === 'visible' && anyMarketOpen.current() !== false) {
-        reread()
-      }
-    }, RESYNC_MS)
-    const shown = () => {
-      if (
-        document.visibilityState === 'visible' &&
-        Date.now() - lastReadAt.current > RESYNC_MS / 3
-      ) {
-        reread()
-      }
-    }
-    document.addEventListener('visibilitychange', shown)
-    return () => {
-      clearInterval(timer)
-      document.removeEventListener('visibilitychange', shown)
-    }
-  }, [reread])
+  // SUDARSHAN: every reason to read the broker's figures again goes through
+  // one place (src/sudarshan/books/useBookSync.ts): each order event, the
+  // broker's fills, rejections and square-offs (order_update) included, one
+  // read per burst and one more once the broker's books have caught up; a
+  // Socket.IO reconnect; coming back after 15 s; and every 45 s while a market
+  // is open (or not known to be shut), so the base the ticks move from never
+  // drifts far. One read at a time, and none while the page is hidden. Three
+  // broker reads each time.
+  const marketOpenNow = useCallback(() => anyMarketOpen.current(), [])
+  useBookSync(fetchFundsData, { marketOpen: marketOpenNow })
 
   // Listen for mode changes and refresh data
   useEffect(() => {

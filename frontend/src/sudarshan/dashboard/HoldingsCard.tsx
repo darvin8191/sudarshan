@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils'
 import { useBrokerStore } from '@/stores/brokerStore'
 import { onModeChange } from '@/stores/themeStore'
 import { useBookFeed } from '@/sudarshan/books/feed'
-import { useBookSync, useLatestRead } from '@/sudarshan/books/useBookSync'
+import { holdingsMayChange, useBookSync, useLatestRead } from '@/sudarshan/books/useBookSync'
 import type { Holding, PortfolioStats } from '@/types/trading'
 import { directionOf, formatPercent, formatRupees, toNumber } from './format'
 import { LiveLine } from './LiveLine'
@@ -105,7 +105,13 @@ export function HoldingsCard({
         : marketOpen('NSE'),
     [holdings, marketOpen]
   )
-  useBookSync(load, { enabled: supported && !!apiKey, marketOpen: anyMarketOpen })
+  // Only an update that can change the holdings is answered (an equity
+  // delivery fill or rejection, the sandbox's settlement), not every F&O fill.
+  useBookSync(load, {
+    enabled: supported && !!apiKey,
+    marketOpen: anyMarketOpen,
+    accept: holdingsMayChange,
+  })
 
   const { data: priced, feed } = useLivePrice(holdings, {
     enabled: holdings.length > 0,

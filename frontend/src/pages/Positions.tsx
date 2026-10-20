@@ -12,7 +12,7 @@ import {
   TrendingUp,
   X,
 } from 'lucide-react'
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { tradingApi } from '@/api/trading'
 import { ChartSymbolLink } from '@/components/trading/ChartSymbolLink'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -51,7 +51,6 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useLivePrice } from '@/hooks/useLivePrice'
-import { usePageVisibility } from '@/hooks/usePageVisibility'
 import { useSupportedExchanges } from '@/hooks/useSupportedExchanges'
 import { cn, makeFormatCurrency, sanitizeCSV } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
@@ -158,10 +157,6 @@ export default function Positions() {
   const [error, setError] = useState<string | null>(null)
   const [showStaleWarning, setShowStaleWarning] = useState(false)
 
-  // Page visibility tracking for resource optimization
-  const { isVisible, wasHidden, timeSinceHidden } = usePageVisibility()
-  const lastFetchRef = useRef<number>(Date.now())
-
   // Filter and grouping state
   const [grouping, setGrouping] = useState<GroupingType>('none')
   const [filters, setFilters] = useState<FilterState>({
@@ -259,27 +254,17 @@ export default function Positions() {
   // SUDARSHAN: the first read only; coming back to the page is useBookSync's.
   useEffect(() => {
     fetchPositions()
-    lastFetchRef.current = Date.now()
   }, [fetchPositions])
 
   // SUDARSHAN: re-read after every order event including the broker's fills,
   // rejections and square-offs (order_update), on a Socket.IO reconnect, on
-  // coming back after 15 s, and every 45 s while a market is open.
-  useBookSync(fetchPositions, { marketOpen: anyMarketOpen })
-
-  // Refresh data when tab becomes visible after being hidden
-  useEffect(() => {
-    if (!wasHidden || !isVisible) return
-
-    const timeSinceLastFetch = Date.now() - lastFetchRef.current
-
-    // If hidden for more than 30 seconds, show stale warning and refresh
-    // SUDARSHAN: the warning only; useBookSync has already asked again.
-    if (timeSinceHidden > 30000 || timeSinceLastFetch > 30000) {
-      setShowStaleWarning(true)
-      lastFetchRef.current = Date.now()
-    }
-  }, [wasHidden, isVisible, timeSinceHidden])
+  // coming back after 15 s, and every 45 s while a market is open. The
+  // "being refreshed" note shows while a read on coming back runs, and only then.
+  const onReturnRead = useCallback((read: Promise<void>) => {
+    setShowStaleWarning(true)
+    void read.finally(() => setShowStaleWarning(false))
+  }, [])
+  useBookSync(fetchPositions, { marketOpen: anyMarketOpen, onReturnRead })
 
   // Auto-dismiss stale data warning after 5 seconds
   useEffect(() => {

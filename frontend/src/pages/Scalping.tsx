@@ -27,7 +27,6 @@ import {
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useMarketData } from '@/hooks/useMarketData'
-import { useOrderEventRefresh } from '@/hooks/useOrderEventRefresh'
 import { findLegSL, type SLState, useTrailingSL } from '@/hooks/useTrailingSL'
 import { priceDecimals } from '@/lib/scalpingPrice'
 import { buildPositionRows } from '@/lib/scalpingRows'
@@ -39,7 +38,8 @@ import { TickPrice } from '@/sudarshan/books/LiveFigures'
 import { useMarketCalendar } from '@/sudarshan/books/market'
 import { type TickDirection, TickDirections } from '@/sudarshan/books/prices'
 import { useBookSync } from '@/sudarshan/books/useBookSync'
-import { useOnReturn } from '@/sudarshan/books/useReturn'
+import { AWAY_MS } from '@/sudarshan/books/useReturn'
+import { useSpacedRead } from '@/sudarshan/books/useSpacedRead'
 import { useNow } from '@/sudarshan/dashboard/hooks'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
 import { anyOpen, feedLine, isStale, latest } from '@/sudarshan/dashboard/live'
@@ -105,6 +105,9 @@ const BOOK_EVENTS = [
 
 // A WebSocket tick considered stale after this -> fall back to MultiQuotes.
 const TICK_STALE_MS = 5000
+
+// SUDARSHAN: the MultiQuotes snapshot is read at most once in this long.
+const MQ_GAP_MS = 5_000
 
 // Collapse rapid book-refresh triggers (multi-leg entries, and the SocketIO order events
 // for several legs arriving together) into at most one refetch per window, so we don't
@@ -504,7 +507,7 @@ export default function Scalping() {
 
   // Books (positions / orders / trades). Fully event-driven (no polling):
   // prices/MTM stream over the WebSocket feed, and these fetches refresh on broker
-  // order events (useOrderEventRefresh below) — including the server-side risk
+  // order events (useBookSync below) — including the server-side risk
   // monitor's auto-exits, which emit order events. refetchOnWindowFocus is an
   // event (tab focus), not an interval. The query key includes appMode so toggling
   // Analyze/Live re-fetches the corresponding (sandbox vs live) positions/books.
@@ -590,14 +593,19 @@ export default function Scalping() {
     }
   }, [])
 
-  // Refresh the books on order/position events instead of polling. The short delay lets
-  // the server finish persisting before we refetch (was 500ms; 150ms keeps the UI snappy).
-  useOrderEventRefresh(refreshBooks, { events: [...BOOK_EVENTS], delay: 150 })
-  // SUDARSHAN: and on the broker's own fills, rejections and square-offs
-  // (order_update, read once more 2.5 s later), a Socket.IO reconnect, coming
-  // back after 15 s, and every 45 s while a market is open.
+  // Refresh the books on order/position events instead of polling.
+  // SUDARSHAN: one listener for all of them, the broker's own fills, rejections
+  // and square-offs (order_update) included, so a fill costs one reload (and one
+  // more once the broker's books have caught up, shared by fills close
+  // together); plus a Socket.IO reconnect and every 45 s while a market is
+  // open. Nothing while the page is hidden; coming back is react-query's
+  // refetch on focus.
   const { isOpen: marketOpen, anyOpen: anyMarketOpen } = useMarketCalendar()
-  useBookSync(refreshBooks, { events: ['order_update'], marketOpen: anyMarketOpen })
+  useBookSync(refreshBooks, {
+    events: [...BOOK_EVENTS, 'order_update'],
+    marketOpen: anyMarketOpen,
+    awayMs: null,
+  })
 
   // Subscribe the live feed for underlying (Quote, for %chg), CE/PE legs, AND
   // every symbol in the position book — so book LTP and P&L update in realtime.
@@ -666,19 +674,22 @@ export default function Scalping() {
       })
       .catch(() => {})
   }, [apiKey])
+  // Every reason to read it goes through one gate: at most one read in 5 s
+  // (a book gaining a row with each fill asks each time), none while hidden,
+  // and one on coming back after more than 15 s away.
+  const requestMq = useSpacedRead(fetchMq, MQ_GAP_MS, { awayMs: AWAY_MS })
   // biome-ignore lint/correctness/useExhaustiveDependencies: symbolsKey tracks symbols content
   useEffect(() => {
-    fetchMq()
-  }, [fetchMq, symbolsKey])
+    requestMq()
+  }, [requestMq, symbolsKey])
   const epochSeen = useRef<number | null>(null)
   useEffect(() => {
     if (!isAuthenticated) return
     const first = epochSeen.current === null
     const changed = epochSeen.current !== connectionEpoch
     epochSeen.current = connectionEpoch
-    if (!first && changed) fetchMq()
-  }, [isAuthenticated, connectionEpoch, fetchMq])
-  useOnReturn(fetchMq)
+    if (!first && changed) requestMq()
+  }, [isAuthenticated, connectionEpoch, requestMq])
 
   // Merged tick (live WS, MultiQuotes after-hours), field-by-field to avoid flicker.
   // Logic lives in lib/scalpingTick.mergeTick (pure + unit-tested).
@@ -953,7 +964,7 @@ export default function Scalping() {
         if (res.status === 'success') {
           attachPredefinedSL(leg, action, quantity, s.product)
           // Books refresh from this order's SocketIO event (order_event / analyzer_update)
-          // via useOrderEventRefresh — no manual refetch here, to avoid a double refresh.
+          // via useBookSync — no manual refetch here, to avoid a double refresh.
         } else if (s.appMode === 'live') {
           showToast.error(res.message ?? 'Order failed', 'orders')
         }

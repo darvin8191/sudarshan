@@ -21,8 +21,15 @@ import type { Socket } from 'socket.io-client'
  * lost its network for half a minute would then never hear about an order
  * again until a reload. A connection that is meant to be open and is not is
  * asked to connect when the page comes back into view, when the browser says
- * it is online again, and every 10 seconds while it stays down. Asking while
- * Socket.IO is already retrying changes nothing.
+ * it is online again, and every 10 seconds while it stays down: from a drop
+ * or from a first connect that failed (a tab opened while the server
+ * restarts, or on a bad network) until it is up, through and past the point
+ * where Socket.IO itself gives up. Asking while Socket.IO is already retrying
+ * changes nothing.
+ *
+ * It counts how often the connection has come up, so a book can tell the
+ * first connect (nothing was missed: the page has just read it) from a
+ * reconnect (whatever was pushed meanwhile went to nobody).
  */
 
 /** How often a connection that is meant to be open, and is not, is asked to connect. */
@@ -35,6 +42,17 @@ interface Shared {
 }
 
 let shared: Shared | null = null
+
+/** How many times each connection has come up. */
+const connects = new WeakMap<Socket, number>()
+
+/**
+ * How many times this connection has come up, or undefined for one this
+ * module did not open. 1 during the first connect; more on a reconnect.
+ */
+export function connectionCount(socket: Socket): number | undefined {
+  return connects.get(socket)
+}
 
 function keepConnected(socket: Socket): () => void {
   let timer: ReturnType<typeof setTimeout> | null = null
@@ -55,19 +73,28 @@ function keepConnected(socket: Socket): () => void {
     if (timer) clearTimeout(timer)
     timer = null
   }
+  const connected = () => {
+    connects.set(socket, (connects.get(socket) ?? 0) + 1)
+    settle()
+  }
   const shown = () => {
     if (document.visibilityState === 'visible') nudge()
   }
 
+  // Every failed attempt raises connect_error, the first connect's included,
+  // and the loop above keeps asking until the connection is up, so it runs on
+  // after Socket.IO's last attempt (reconnect_failed) without a listener there.
+  socket.on('connect', connected)
   socket.on('disconnect', watch)
-  socket.on('connect', settle)
+  socket.on('connect_error', watch)
   document.addEventListener('visibilitychange', shown)
   window.addEventListener('online', nudge)
 
   return () => {
     settle()
+    socket.off('connect', connected)
     socket.off('disconnect', watch)
-    socket.off('connect', settle)
+    socket.off('connect_error', watch)
     document.removeEventListener('visibilitychange', shown)
     window.removeEventListener('online', nudge)
   }

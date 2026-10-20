@@ -7,7 +7,7 @@ import {
   TrendingUp,
   Wallet,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { tradingApi } from '@/api/trading'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -24,14 +24,13 @@ import {
 } from '@/components/ui/table'
 import { PlaceOrderDialog } from '@/components/trading'
 import { calculateLiveStats, useLivePrice } from '@/hooks/useLivePrice'
-import { usePageVisibility } from '@/hooks/usePageVisibility'
 import { cn, makeFormatCurrency, sanitizeCSV } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
 import { onModeChange } from '@/stores/themeStore'
 // SUDARSHAN: the book re-read, status line and tick prices (src/sudarshan/books).
 import { useBookFeed } from '@/sudarshan/books/feed'
 import { TickPrice } from '@/sudarshan/books/LiveFigures'
-import { useBookSync, useLatestRead } from '@/sudarshan/books/useBookSync'
+import { holdingsMayChange, useBookSync, useLatestRead } from '@/sudarshan/books/useBookSync'
 import { useMarketOpen } from '@/sudarshan/dashboard/hooks'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
 import type { Holding, HoldingsStats } from '@/types/trading'
@@ -61,10 +60,6 @@ export default function Holdings() {
   const [error, setError] = useState<string | null>(null)
   const [showStaleWarning, setShowStaleWarning] = useState(false)
   const [orderIntent, setOrderIntent] = useState<HoldingOrderIntent | null>(null)
-
-  // Page visibility tracking for resource optimization
-  const { isVisible, wasHidden, timeSinceHidden } = usePageVisibility()
-  const lastFetchRef = useRef<number>(Date.now())
 
   // SUDARSHAN: when the shown holdings were asked for, so only newer ticks move them.
   const [bookAt, setBookAt] = useState<number | null>(null)
@@ -143,27 +138,21 @@ export default function Holdings() {
   // SUDARSHAN: the first read only; coming back to the page is useBookSync's.
   useEffect(() => {
     fetchHoldings()
-    lastFetchRef.current = Date.now()
   }, [fetchHoldings])
 
-  // SUDARSHAN: re-read after every order event including the broker's fills
-  // (order_update), on a Socket.IO reconnect, on coming back after 15 s, and
-  // every 45 s while a market is open.
-  useBookSync(fetchHoldings, { marketOpen: anyMarketOpen })
-
-  // Refresh data when tab becomes visible after being hidden
-  useEffect(() => {
-    if (!wasHidden || !isVisible) return
-
-    const timeSinceLastFetch = Date.now() - lastFetchRef.current
-
-    // If hidden for more than 30 seconds, show stale warning and refresh
-    // SUDARSHAN: the warning only; useBookSync has already asked again.
-    if (timeSinceHidden > 30000 || timeSinceLastFetch > 30000) {
-      setShowStaleWarning(true)
-      lastFetchRef.current = Date.now()
-    }
-  }, [wasHidden, isVisible, timeSinceHidden])
+  // SUDARSHAN: re-read after an update that can change the holdings (an equity
+  // delivery fill or rejection, the sandbox's settlement), on a Socket.IO
+  // reconnect, on coming back after 15 s, and every 45 s while a market is
+  // open. The "being refreshed" note shows while a read on coming back runs.
+  const onReturnRead = useCallback((read: Promise<void>) => {
+    setShowStaleWarning(true)
+    void read.finally(() => setShowStaleWarning(false))
+  }, [])
+  useBookSync(fetchHoldings, {
+    marketOpen: anyMarketOpen,
+    accept: holdingsMayChange,
+    onReturnRead,
+  })
 
   // Auto-dismiss stale data warning after 5 seconds
   useEffect(() => {

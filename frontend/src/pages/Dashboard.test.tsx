@@ -190,8 +190,9 @@ describe('Dashboard', () => {
     render(<Dashboard />)
     await pass(0)
     expect(reads(calls)).toBe(1)
-    // The P&L's listener, and the holdings card's (it re-reads on fills too).
-    expect(socket.listeners('order_update')).toBeGreaterThanOrEqual(1)
+    // Two listeners: the P&L's, and the holdings card's (which answers only
+    // an update that can change the holdings).
+    expect(socket.listeners('order_update')).toBe(2)
 
     act(() => socket.fire('order_update', { orderid: '251020000598204', status: 'complete' }))
     await pass(600)
@@ -199,7 +200,7 @@ describe('Dashboard', () => {
     expect(calls.filter((url) => url === 'positionbook')).toHaveLength(2)
   })
 
-  it('answers a burst of order updates with one read after the one in progress, not one each', async () => {
+  it('answers a burst of order updates with one read, and one more once the broker has caught up', async () => {
     vi.useFakeTimers()
     latency = 300
     const calls = server(OK)
@@ -213,8 +214,33 @@ describe('Dashboard', () => {
       await pass(100)
     }
     await pass(2000)
-    // The first update's read, then one more for the three that came during it.
+    // One read for the burst, not one per update...
+    expect(reads(calls)).toBe(2)
+    // ...and one more when Upstox's books have caught up with its push.
+    await pass(2000)
     expect(reads(calls)).toBe(3)
+    await pass(30_000)
+    expect(reads(calls)).toBe(3)
+  })
+
+  it('reads nothing while the page is hidden, and once when it is seen again', async () => {
+    vi.useFakeTimers()
+    marketOpen = true
+    const calls = server(OK)
+    render(<Dashboard />)
+    await pass(0)
+    expect(reads(calls)).toBe(1)
+
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true })
+    document.dispatchEvent(new Event('visibilitychange'))
+    act(() => socket.fire('order_update', { orderid: '1', order_status: 'complete' }))
+    await pass(RESYNC_MS)
+    expect(reads(calls)).toBe(1)
+
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
+    document.dispatchEvent(new Event('visibilitychange'))
+    await pass(0)
+    expect(reads(calls)).toBe(2)
   })
 
   it('keeps the last figures and says so when a later read fails', async () => {
