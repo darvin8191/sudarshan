@@ -10,45 +10,78 @@
    the page holds a character it covers, so a Latin-only page never fetches the
    Devanagari or Gujarati faces, and Gujarati text never fetches Devanagari.
 
-   Subsets: Latin (Inter), Devanagari (Noto Sans Devanagari, and Tiro Devanagari
-   Sanskrit for the wordmark only), Gujarati (Noto Sans Gujarati). Weights 400 to
-   700; Tiro has one weight and is never synthesised. The rupee sign U+20B9 comes
-   from the Devanagari face, as Inter's Latin subset does not carry it.
+   The D look: Barlow for every piece of UI and body text, Khand for screen
+   titles and big single figures, Tiro Devanagari Sanskrit for the wordmark.
+   Barlow and Khand ship their Latin subsets only. Neither carries the rupee
+   sign U+20B9, so it comes from Noto Sans Devanagari, next in both stacks; set
+   beside Khand's figures it is all but indistinguishable from Khand's own,
+   which would cost an 88 KB Devanagari file per weight for one glyph.
+
+   Weights: Barlow 400 to 700, Khand 500 to 700, Noto 400 to 700. Tiro has one
+   weight and is never synthesised. The shell draws the wordmark from outlines
+   (src/sudarshan/marks.ts), so Tiro is fetched only by text set in it.
    ============================================================================= */
 
 @font-face {
-  font-family: 'Inter';
+  font-family: 'Barlow';
   font-style: normal;
   font-display: swap;
   font-weight: 400;
-  src: url('@fontsource/inter/files/inter-latin-400-normal.woff2') format('woff2');
+  src: url('@fontsource/barlow/files/barlow-latin-400-normal.woff2') format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
 @font-face {
-  font-family: 'Inter';
+  font-family: 'Barlow';
   font-style: normal;
   font-display: swap;
   font-weight: 500;
-  src: url('@fontsource/inter/files/inter-latin-500-normal.woff2') format('woff2');
+  src: url('@fontsource/barlow/files/barlow-latin-500-normal.woff2') format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
 @font-face {
-  font-family: 'Inter';
+  font-family: 'Barlow';
   font-style: normal;
   font-display: swap;
   font-weight: 600;
-  src: url('@fontsource/inter/files/inter-latin-600-normal.woff2') format('woff2');
+  src: url('@fontsource/barlow/files/barlow-latin-600-normal.woff2') format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
 @font-face {
-  font-family: 'Inter';
+  font-family: 'Barlow';
   font-style: normal;
   font-display: swap;
   font-weight: 700;
-  src: url('@fontsource/inter/files/inter-latin-700-normal.woff2') format('woff2');
+  src: url('@fontsource/barlow/files/barlow-latin-700-normal.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Khand';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 500;
+  src: url('@fontsource/khand/files/khand-latin-500-normal.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Khand';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 600;
+  src: url('@fontsource/khand/files/khand-latin-600-normal.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Khand';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 700;
+  src: url('@fontsource/khand/files/khand-latin-700-normal.woff2') format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 

@@ -45,9 +45,10 @@ const CREDITS: Credit[] = [
     licenceUrl: 'https://www.apache.org/licenses/LICENSE-2.0',
   },
   {
-    name: 'Inter, Noto Sans Devanagari, Noto Sans Gujarati, Tiro Devanagari Sanskrit',
+    name: 'Barlow, Khand, Noto Sans Devanagari, Noto Sans Gujarati, Tiro Devanagari Sanskrit',
     role: 'Fonts, served from this server',
-    notice: 'Copyright the Inter, Noto and Indigo Project Authors',
+    notice:
+      'Copyright the Barlow Project Authors, Indian Type Foundry, and the Noto and Indigo Project Authors',
     licence: 'SIL Open Font License 1.1',
     licenceUrl: '/docs/licenses/fonts-OFL.txt',
   },

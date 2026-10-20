@@ -4,8 +4,10 @@
  * Each token is written in oklch() with the design spec's hex in a comment
  * beside it. The two can drift apart silently, since nothing renders the
  * comment, so this converts every value back to sRGB and requires the hex it
- * claims. It then requires every text token to clear 4.5:1 on the canvas,
- * the rule the owner set for reading a phone in sunlight.
+ * claims. It then requires every text token to clear 4.5:1 on the page, the
+ * rule the owner set for reading a phone in sunlight, every chip's text to
+ * clear it on the chip's own fill, and every outline that has to be seen to
+ * clear 3:1.
  */
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -13,13 +15,16 @@ import { describe, expect, it } from 'vitest'
 
 const css = readFileSync(join(process.cwd(), 'src/sudarshan/theme.css'), 'utf8')
 
-const CANVAS = '#F8F7F3'
+const CANVAS = '#F4F6F8'
+const WHITE = '#FFFFFF'
 
 /** Tokens that colour text, which must read at 4.5:1 or better on the canvas. */
 const TEXT_TOKENS = [
   '--text-primary',
   '--text-secondary',
   '--text-tertiary',
+  '--brand-hover',
+  '--gold-ink',
   '--up',
   '--down',
   '--profit-strong',
@@ -137,14 +142,59 @@ describe('SUDARSHAN tokens', () => {
     expect(t.hex).toBe(t.claimed)
   })
 
-  it.each(TEXT_TOKENS)('%s reads at 4.5:1 or better on the canvas', (name) => {
+  it.each(TEXT_TOKENS)('%s reads at 4.5:1 or better on the page', (name) => {
     const hex = byName.get(name)
     expect(hex, `${name} not found in theme.css`).toBeDefined()
     expect(contrast(hex as string, CANVAS)).toBeGreaterThanOrEqual(4.5)
   })
 
-  it('keeps the canvas off pure white', () => {
+  it('lays white cards on a grey page, never white on white', () => {
     expect(byName.get('--bg-canvas')).toBe(CANVAS)
+    expect(byName.get('--surface-card')).toBe(WHITE)
+  })
+
+  // Text that sits on a fill of its own: the chips, the selected nav pill, and
+  // the white or ink labels on solid buttons and badges.
+  it.each([
+    ['--live-ink', '--live-tint'],
+    ['--sandbox-ink', '--sandbox-tint'],
+    ['--gold-ink', '--gold-tint'],
+    ['--up', '--up-tint'],
+    ['--down', '--down-tint'],
+    ['--brand', '--brand-tint'],
+    ['--text-secondary', '--surface-2'],
+    ['--text-secondary', '--surface-3'],
+  ])('%s reads at 4.5:1 or better on %s', (text, fill) => {
+    const fg = byName.get(text)
+    const bg = byName.get(fill)
+    expect(fg && bg, `${text} or ${fill} not found`).toBeTruthy()
+    expect(contrast(fg as string, bg as string)).toBeGreaterThanOrEqual(4.5)
+  })
+
+  it.each([
+    '--brand',
+    '--brand-hover',
+    '--up',
+    '--down',
+    '--sandbox',
+    '--destructive',
+  ])('white text reads at 4.5:1 or better on %s', (fill) => {
+    expect(contrast(WHITE, byName.get(fill) as string)).toBeGreaterThanOrEqual(4.5)
+  })
+
+  it('takes ink, not white, on the gold warning fill', () => {
+    const fill = byName.get('--warning-fill') as string
+    expect(contrast(byName.get('--text-primary') as string, fill)).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(WHITE, fill)).toBeLessThan(4.5)
+  })
+
+  it.each([
+    ['--border-strong', CANVAS],
+    ['--border-strong', WHITE],
+    ['--focus-ring', CANVAS],
+    ['--focus-ring', WHITE],
+  ])('%s, an outline that must be seen, clears 3:1 on %s', (name, ground) => {
+    expect(contrast(byName.get(name) as string, ground)).toBeGreaterThanOrEqual(3)
   })
 
   it('writes the upstream trading tokens as HSL triplets of the spec colours', () => {
@@ -153,6 +203,23 @@ describe('SUDARSHAN tokens', () => {
       expect.arrayContaining(['--profit', '--loss', '--buy', '--sell'])
     )
     for (const t of triplets) expect(t.hex, t.name).toBe(t.claimed)
+  })
+
+  it('keeps --profit and --loss the same colours as --up and --down', () => {
+    const triplets = new Map(
+      hslTokens(css.slice(0, css.indexOf("html[data-cvd='1']"))).map((t) => [t.name, t.hex])
+    )
+    expect(triplets.get('--profit')).toBe(byName.get('--up'))
+    expect(triplets.get('--loss')).toBe(byName.get('--down'))
+  })
+
+  it.each([
+    ['--buy', CANVAS],
+    ['--sell', CANVAS],
+  ])('%s reads at 4.5:1 or better on the page, and white reads on it', (name, ground) => {
+    const hex = hslTokens(css).find((t) => t.name === name)?.hex as string
+    expect(contrast(hex, ground)).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(WHITE, hex)).toBeGreaterThanOrEqual(4.5)
   })
 
   it('stops motion for reduce-motion devices, spinners excepted (M1.21)', () => {

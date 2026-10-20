@@ -20,7 +20,7 @@ describe('candle colours from the app tokens', () => {
 
     expect(theme.upColor).toBe(CANDLE_PAIRS.light.up)
     expect(theme.downColor).toBe(CANDLE_PAIRS.light.down)
-    expect(CANDLE_PAIRS.light).toEqual({ up: '#007e3f', down: '#c9302d' })
+    expect(CANDLE_PAIRS.light).toEqual({ up: '#067a45', down: '#c3282e' })
   })
 
   it('reads --up and --down when they are defined', () => {

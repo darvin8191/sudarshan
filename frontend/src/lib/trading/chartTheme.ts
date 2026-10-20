@@ -125,14 +125,14 @@ export function isLightTheme(mode: ThemeMode, _appMode: AppMode): boolean {
  * lightness, so neither direction shouts over the other, and both clear 6:1
  * against the background. On a light ground they are a step darker, because
  * the last-price tag prints white text on them and has to stay readable. The
- * light pair is the app's own `--up` and `--down` tokens (#007E3F and #C9302D,
- * white text on them 5.2:1 and 5.3:1), read live so colour-blind mode's blue
+ * light pair is the app's own `--up` and `--down` tokens (#067A45 and #C3282E,
+ * white text on them 5.4:1 and 5.7:1), read live so colour-blind mode's blue
  * and orange reach the candles too; the values here are the fallback when no
  * stylesheet defines the tokens.
  */
 export const CANDLE_PAIRS = {
   dark: { up: '#14b887', down: '#f0525f' },
-  light: { up: '#007e3f', down: '#c9302d' },
+  light: { up: '#067a45', down: '#c3282e' },
 } as const
 
 /** The light pair from the tokens, so a theme change in CSS reaches the chart. */
@@ -173,7 +173,7 @@ function withAlpha(color: string, alpha: number): string {
  *
  * Every surface comes from the app's own tokens, so the chart sits inside the
  * chrome of whichever mode is on rather than beside it. The accent is the
- * app's primary: the brand indigo in Live and the violet in Analyze. It is the
+ * app's primary: the brand peacock in Live and the violet in Analyze. It is the
  * line chart's colour and its gradient, the crosshair's
  * value pills, a new drawing's default colour, and, through the bottom bar's
  * tokens, that bar's active buttons, so one switch of mode recolours all of

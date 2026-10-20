@@ -21,14 +21,17 @@ function prop(face: string, name: string): string {
 const VITE_INLINE_LIMIT = 4096
 
 describe('self-hosted fonts', () => {
-  it('declares the four families, in the weights the UI uses', () => {
+  it('declares the five families, in the weights the UI uses', () => {
     const declared = faces.map((f) => `${prop(f, 'font-family')} ${prop(f, 'font-weight')}`).sort()
     expect(declared).toEqual(
       [
-        "'Inter' 400",
-        "'Inter' 500",
-        "'Inter' 600",
-        "'Inter' 700",
+        "'Barlow' 400",
+        "'Barlow' 500",
+        "'Barlow' 600",
+        "'Barlow' 700",
+        "'Khand' 500",
+        "'Khand' 600",
+        "'Khand' 700",
         "'Noto Sans Devanagari' 400",
         "'Noto Sans Devanagari' 500",
         "'Noto Sans Devanagari' 600",
@@ -56,5 +59,13 @@ describe('self-hosted fonts', () => {
 
   it('fetches nothing from another origin', () => {
     expect(css).not.toMatch(/url\(['"]?(https?:)?\/\//)
+  })
+
+  it('ships Barlow and Khand as their Latin subsets only', () => {
+    for (const face of faces) {
+      const family = prop(face, 'font-family')
+      if (family !== "'Barlow'" && family !== "'Khand'") continue
+      expect(prop(face, 'src'), family).toMatch(/-latin-\d00-normal\.woff2/)
+    }
   })
 })

@@ -32,7 +32,7 @@ export function DisplaySettings() {
               aria-hidden="true"
               className="size-4 shrink-0 rounded-full border bg-[color:var(--brand)]"
             />
-            Brand indigo. Analyze mode turns it violet and shows a banner.
+            Peacock blue, from the app icon. Analyze mode turns it violet and shows a banner.
           </dd>
         </dl>
 

@@ -6,8 +6,9 @@ function Card({ className, ...props }: React.ComponentProps<'div'>) {
   return (
     <div
       data-slot="card"
+      // SUDARSHAN: the card shadow is the theme's (--shadow-card), lighter than shadow-sm.
       className={cn(
-        'bg-card text-card-foreground flex flex-col gap-6 rounded-xl border py-6 shadow-sm',
+        'bg-card text-card-foreground flex flex-col gap-6 rounded-xl border py-6 shadow-[var(--shadow-card)]',
         className
       )}
       {...props}

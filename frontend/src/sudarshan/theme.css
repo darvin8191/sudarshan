@@ -18,59 +18,85 @@
 }
 
 /* -----------------------------------------------------------------------------
-   Design tokens (M1.8)
+   Design tokens (M1.8), the D look
    -----------------------------------------------------------------------------
-   Written in oklch() like upstream's live shadcn tokens: complete colours,
-   used as var(--x) and through Tailwind's @theme mapping. The four upstream
-   trading tokens (--profit --loss --buy --sell) are HSL channel triplets in
-   upstream and stay triplets here, for hsl(var(--profit)). Each value is the
-   spec hex exactly (given after it); text tokens state their contrast on the
-   #F8F7F3 canvas and all clear 4.5:1.
+   White cards and a white app bar on a cool grey page, ink text, and the two
+   colours of the icon: Mor (peacock) for everything a trader acts on and gold
+   for decoration and "new". Written in oklch() like upstream's live shadcn
+   tokens: complete colours, used as var(--x) and through Tailwind's @theme
+   mapping. The four upstream trading tokens (--profit --loss --buy --sell) are
+   HSL channel triplets in upstream and stay triplets here, for
+   hsl(var(--profit)). Each value is the spec hex exactly (given after it);
+   text tokens state their contrast on the #F4F6F8 page, which is lower than on
+   a white card, and all clear 4.5:1. theme.test.ts holds every one of them to
+   it, and checks the chip and tint pairs as well.
 
    Every property upstream's dark `.analyzer` block sets is restated here, so
    that block never leaks into a page: at equal specificity this file is later
    and wins. Analyze mode's own accent comes after, in its own block.
    ----------------------------------------------------------------------------- */
 :root {
-  /* Type (M1.10; faces in fonts.css). Inter for Latin and figures, Noto Sans for
-     Devanagari and Gujarati; Tailwind's preflight reads --font-sans for <html>. */
+  /* Type (M1.10; faces in fonts.css). Barlow for every piece of UI and body
+     text, Khand for screen titles and big single figures, Noto Sans for
+     Devanagari, Gujarati and the rupee sign. Tailwind's preflight reads
+     --font-sans for <html>. */
   --font-sans:
-    'Inter', 'Noto Sans Devanagari', 'Noto Sans Gujarati', ui-sans-serif, system-ui, sans-serif;
+    'Barlow', 'Noto Sans Devanagari', 'Noto Sans Gujarati', ui-sans-serif, system-ui, sans-serif;
+  --font-display:
+    'Khand', 'Barlow', 'Noto Sans Devanagari', 'Noto Sans Gujarati', ui-sans-serif, system-ui,
+    sans-serif;
   --font-wordmark: 'Tiro Devanagari Sanskrit', 'Noto Serif Devanagari', serif;
 
-  /* Surfaces and text */
-  --bg-canvas: oklch(0.976 0.005 95.1); /* #F8F7F3 page; never #FFFFFF (glare) */
-  --surface-card: oklch(0.991 0.004 91.45); /* #FDFCF9 cards, always with a border */
-  --surface-2: oklch(0.956 0.006 84.57); /* #F2F0EC grouped rows, input fills */
-  --surface-3: oklch(0.929 0.007 80.72); /* #EAE7E2 selected or pressed row */
-  --border-subtle: oklch(0.88 0.01 87.48); /* #DAD7D0 decorative hairlines */
-  --border-strong: oklch(0.65 0 0); /* #8F8F8F 3.02:1 outlines that must be seen */
-  --text-primary: oklch(0.249 0.02 271.87); /* #1E212B 14.98:1 body, numbers */
-  --text-secondary: oklch(0.45 0.02 270.94); /* #515561 6.94:1 labels */
-  --text-tertiary: oklch(0.549 0.016 272.52); /* #6E717B 4.54:1 14px/500 and up only */
+  /* Surfaces and lines */
+  --bg-canvas: oklch(0.972 0.003 247.9); /* #F4F6F8 page, under the white cards */
+  --surface-card: oklch(1 0 0); /* #FFFFFF cards, app bar, bottom nav; always with a border */
+  --surface-2: oklch(0.957 0.006 255.5); /* #EEF1F5 muted fills: tab and segment tracks */
+  --surface-3: oklch(0.944 0.007 247.9); /* #E9EDF1 hover and pressed fills, meter tracks */
+  --border-subtle: oklch(0.926 0.008 253.9); /* #E3E7EC card and bar edges, decorative */
+  --divider: oklch(0.954 0.005 247.9); /* #EDF0F3 rules inside a card */
+  --border-strong: oklch(0.63 0.025 258.4); /* #808A99 3.22:1 outlines that must be seen */
+
+  /* Text */
+  --text-primary: oklch(0.212 0.025 246.7); /* #0F1A24 16.24:1 ink: body, numbers */
+  --text-secondary: oklch(0.446 0.037 257.3); /* #475569 6.99:1 ink-2: labels */
+  --text-tertiary: oklch(0.507 0.029 257.7); /* #5B6676 5.37:1 ink-3: meta lines */
+
+  /* Brand: the icon's Mor (peacock) and gold. */
+  --brand: oklch(0.437 0.079 226.4); /* #0E5A73 7.10:1 primary actions, links */
+  --brand-hover: oklch(0.365 0.0646 225.5); /* #0A4558 9.67:1 primary hover and press */
+  --brand-tint: oklch(0.95 0.0144 213.1); /* #E4F1F4 selected fills; brand on it 6.67:1 */
+  --gold: oklch(0.755 0.1518 78.6); /* #E3A21A decoration only: 2.22:1 on white, never text */
+  --gold-tint: oklch(0.966 0.032 87.3); /* #FDF3DC "new" and attention chips */
+  --gold-ink: oklch(0.508 0.108 73.3); /* #8A5A00 5.47:1, 5.37:1 on the gold tint */
 
   /* Meaning. Never colour alone: a sign, arrow, letter, icon or word as well. */
-  --up: oklch(0.5195 0.1361 152.19); /* #007E3F 4.83:1 profit, up, COMPLETE, LIVE */
-  --down: oklch(0.551 0.19 26.94); /* #C9302D 4.97:1 loss, down, REJECTED */
-  --profit-strong: oklch(0.499 0.131 152.14); /* #00773B 5.29:1 large P&L figures */
-  --loss-strong: oklch(0.52 0.19 27); /* #BE2323 5.67:1 large negative P&L */
-  --neutral: oklch(0.499 0.012 267.27); /* #60636A 5.61:1 unchanged, CANCELLED */
-  --stale: oklch(0.549 0.016 272.52); /* #6E717B 4.54:1 stale data, with an icon */
-  --brand: oklch(0.449 0.159 265); /* #284CAC 7.20:1 primary actions, links */
-  --family: oklch(0.4999 0.0853 194.77); /* #007272 5.37:1 FAMILY VIEW ONLY, with a lock */
-  --sandbox: oklch(0.5 0.2 305.03); /* #7F36BC 6.21:1 ANALYZE mode */
+  --up: oklch(0.51 0.124 155.04); /* #067A45 5.00:1 profit, up, COMPLETE, LIVE */
+  --up-tint: oklch(0.957 0.02 162.9); /* #E6F5ED up chips; up on it 4.81:1 */
+  --down: oklch(0.534 0.19 24.9); /* #C3282E 5.29:1 loss, down, REJECTED */
+  --down-tint: oklch(0.954 0.019 13.4); /* #FCEBEC down chips; down on it 4.98:1 */
+  --profit-strong: oklch(0.455 0.1107 155); /* #05683A 6.36:1 large P&L figures */
+  --loss-strong: oklch(0.48 0.1692 23.8); /* #A8222A 6.62:1 large negative P&L */
+  --neutral: oklch(0.507 0.029 257.7); /* #5B6676 5.37:1 unchanged, CANCELLED */
+  --stale: oklch(0.507 0.029 257.7); /* #5B6676 5.37:1 stale data, with an icon */
+  /* Indigo now that the brand is peacock: the two teals were too close to tell apart. */
+  --family: oklch(0.45 0.157 271.6); /* #3949AB 7.14:1 FAMILY VIEW ONLY, with a lock */
+  --sandbox: oklch(0.5 0.2 305.03); /* #7F36BC 6.14:1 ANALYZE mode */
   --sandbox-tint: oklch(0.946 0.032 305.35); /* #F2E8FF banner and chip fill */
-  --sandbox-ink: oklch(0.38 0.12 305.47); /* #522D74 9.86:1, 8.94:1 on the tint */
+  --sandbox-ink: oklch(0.38 0.12 305.47); /* #522D74 9.76:1, 8.94:1 on the tint */
   --sandbox-border: oklch(0.821 0.079 304.95); /* #D0B8EE chip edge */
-  --live-tint: oklch(0.945 0.04 152.14); /* #DAF5E0 LIVE / COMPLETE chip fill */
-  --live-ink: oklch(0.381 0.1 152.07); /* #005126 8.88:1, 8.22:1 on the tint */
-  --live-border: oklch(0.821 0.081 152.21); /* #9DD4AB chip edge */
-  --warning-text: oklch(0.5 0.109 69.63); /* #8A5600 5.74:1 OPEN, PENDING */
-  --warning-fill: oklch(0.76 0.15 74.79); /* #E8A127 2.05:1 fill; ink text only, never white */
-  --info: oklch(0.4998 0.1142 239.87); /* #006A9D 5.52:1 informational */
-  --up-cvd: oklch(0.5206 0.1695 257.86); /* #1C65C8 5.23:1 colour-blind up */
-  --down-cvd: oklch(0.5495 0.1365 54.72); /* #AC5700 4.76:1 colour-blind down */
-  --focus-ring: oklch(0.601 0.18 258); /* #317DE9 3.74:1 tap and keyboard focus */
+  --live-tint: oklch(0.957 0.02 162.9); /* #E6F5ED LIVE / COMPLETE chip fill */
+  --live-ink: oklch(0.455 0.1107 155); /* #05683A 6.36:1, 6.12:1 on the tint */
+  --live-border: oklch(0.843 0.064 161); /* #A7D9BE chip edge */
+  --warning-text: oklch(0.508 0.108 73.3); /* #8A5A00 5.47:1 OPEN, PENDING */
+  --warning-fill: oklch(0.755 0.1518 78.6); /* #E3A21A fill; ink text 7.92:1, never white */
+  --info: oklch(0.4998 0.1142 239.87); /* #006A9D 5.46:1 informational */
+  --up-cvd: oklch(0.5206 0.1695 257.86); /* #1C65C8 5.18:1 colour-blind up */
+  --down-cvd: oklch(0.5495 0.1365 54.72); /* #AC5700 4.71:1 colour-blind down */
+  --focus-ring: oklch(0.601 0.18 258); /* #317DE9 3.70:1 tap and keyboard focus */
+
+  /* Depth: cards barely lift off the page; the login card floats. */
+  --shadow-card: 0 1px 2px rgb(16 24 40 / 0.05);
+  --shadow-raised: 0 10px 30px rgb(14 90 115 / 0.08);
 
   /* shadcn tokens */
   --background: var(--bg-canvas);
@@ -80,7 +106,9 @@
   --popover: var(--surface-card);
   --popover-foreground: var(--text-primary);
   --primary: var(--brand);
-  --primary-foreground: oklch(1 0 0); /* white on brand 7.72:1 */
+  --primary-foreground: oklch(1 0 0); /* white on brand 7.70:1 */
+  /* The selected fill that goes with --primary, so it follows Analyze mode too. */
+  --primary-tint: var(--brand-tint);
   --secondary: var(--surface-3);
   --secondary-foreground: var(--text-primary);
   --muted: var(--surface-2);
@@ -88,10 +116,10 @@
   --accent: var(--surface-3);
   --accent-foreground: var(--text-primary);
   /* Danger, not direction: stays red in colour-blind mode. */
-  --destructive: oklch(0.551 0.19 26.94); /* #C9302D 4.97:1; white on it 5.32:1 */
+  --destructive: oklch(0.534 0.19 24.9); /* #C3282E 5.29:1; white on it 5.73:1 */
   --destructive-foreground: oklch(1 0 0);
   --border: var(--border-subtle);
-  --input: oklch(0.64 0.015 85); /* #908C82 3.13:1 input outlines, seen outdoors */
+  --input: var(--border-strong); /* input outlines, seen outdoors */
   --ring: var(--focus-ring);
   /* Indicator lines, 2px and up: lines, not text. */
   --chart-1: oklch(0.499 0.16 255.11); /* #0961BB */
@@ -109,25 +137,32 @@
   --sidebar-ring: var(--focus-ring);
 
   /* Upstream trading tokens, HSL channel triplets as upstream defines them. */
-  --profit: 150 100% 24.7%; /* #007E3F = --up */
+  --profit: 152.6 90.6% 25.1%; /* #067A45 = --up */
   --profit-foreground: 0 0% 100%;
-  --loss: 1.2 63.4% 48.2%; /* #C9302D = --down */
+  --loss: 357.7 66% 46.1%; /* #C3282E = --down */
   --loss-foreground: 0 0% 100%;
-  --buy: 214.5 75.4% 44.7%; /* #1C65C8 5.23:1 BUY, LONG */
+  --buy: 214.5 75.4% 44.7%; /* #1C65C8 5.18:1 BUY, LONG; white on it 5.61:1 */
   --buy-foreground: 0 0% 100%;
-  --sell: 8.6 82.5% 44.7%; /* #D02F14 4.78:1 SELL, SHORT */
+  --sell: 8.6 82.5% 44.7%; /* #D02F14 4.73:1 SELL, SHORT; white on it 5.12:1 */
   --sell-foreground: 0 0% 100%;
 }
 
-/* Figures line up where numbers are read in columns or change in place: tables
-   and number inputs here, and everything upstream already marks `tabular-nums`
-   (230 places). Not on body: Inter's tabular set also fixes the width of the
-   space, hyphen, brackets and punctuation, which gaps ordinary text. */
-table,
-input[type='number'],
-input[inputmode='numeric'],
-input[inputmode='decimal'] {
-  font-variant-numeric: tabular-nums lining-nums;
+/* Figures (M1.10). Barlow's tabular set swaps the ten digits and nothing else,
+   so it is on for the whole page: every figure lines up wherever numbers are
+   read in a column or change in place, prose included. Khand has no tabular
+   figures, so it is kept to titles and single big figures, never a column. */
+html {
+  font-variant-numeric: tabular-nums;
+}
+
+@layer components {
+  /* Screen titles and big figures (P&L, prices): Khand, which comes in 500,
+     600 and 700 only; never synthesised. */
+  .sd-display {
+    font-family: var(--font-display);
+    font-synthesis: none;
+    letter-spacing: 0;
+  }
 }
 
 /* One accent (M1.12). Upstream's picker themes ([data-theme="green"] and the
@@ -136,6 +171,7 @@ input[inputmode='decimal'] {
 :root[data-theme]:not(.analyzer) {
   --primary: var(--brand);
   --primary-foreground: oklch(1 0 0);
+  --primary-tint: var(--brand-tint);
   --ring: var(--focus-ring);
 }
 
@@ -161,6 +197,7 @@ html[data-cvd='1'] {
 .analyzer {
   --primary: var(--sandbox);
   --primary-foreground: oklch(1 0 0); /* white on violet 6.65:1 */
+  --primary-tint: var(--sandbox-tint);
   /* Upstream steps the terminal band and rail for a dark ground; back to the
      light steps. Its stronger violet for the selected rail tool is kept. */
   --oa-band: color-mix(in oklab, var(--background) 97.5%, var(--foreground));
