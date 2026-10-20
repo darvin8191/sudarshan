@@ -38,6 +38,22 @@ describe('Display settings', () => {
     expect(localStorage.getItem('sudarshan-cvd')).toBeNull()
   })
 
+  // SUDARSHAN (M6.8): the order alert sound, muted per device beside colour-blind mode.
+  it('turns the order alert sound off and on for this device', async () => {
+    const user = userEvent.setup()
+    render(<DisplaySettings />)
+    const toggle = screen.getByRole('switch', { name: 'Order alert sound' })
+    expect(toggle).toBeChecked()
+
+    await user.click(toggle)
+    expect(toggle).not.toBeChecked()
+    expect(localStorage.getItem('sudarshan-order-sound')).toBe('off')
+
+    await user.click(toggle)
+    expect(toggle).toBeChecked()
+    expect(localStorage.getItem('sudarshan-order-sound')).toBeNull()
+  })
+
   it('still switches when storage is refused, for the rest of the visit', async () => {
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new DOMException('blocked', 'SecurityError')

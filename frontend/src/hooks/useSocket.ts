@@ -5,7 +5,8 @@ import { toast } from 'sonner'
 import { type AlertCategories, useAlertStore } from '@/stores/alertStore'
 import { useAuthStore } from '@/stores/authStore'
 import { useSessionStore } from '@/stores/sessionStore'
-// SUDARSHAN: one connection for the signed-in tab (src/sudarshan/books).
+// SUDARSHAN: the shared connection and the app-wide order alerts (src/sudarshan/books).
+import { installOrderAlerts, noteAppCancelEvent } from '@/sudarshan/books/orderAlerts'
 import { acquireSharedSocket, releaseSharedSocket } from '@/sudarshan/books/sharedSocket'
 
 // Audio throttling configuration
@@ -209,6 +210,8 @@ export function useSocket() {
 
     // Cancel order notification - only play sound, UI handles toast
     socket.on('cancel_order_event', (data: CancelOrderEventData) => {
+      // SUDARSHAN: a cancel sent from this app, so the broker's echo is not announced.
+      noteAppCancelEvent('cancel_order_event', data)
       if (!data.batch_order) {
         playAlertSound('orders')
       }
@@ -282,6 +285,8 @@ export function useSocket() {
 
     // Analyzer update notification
     socket.on('analyzer_update', (data: AnalyzerUpdateData) => {
+      // SUDARSHAN: a sandbox cancel sent from this app, so its echo is not announced.
+      noteAppCancelEvent('analyzer_update', data)
       const passiveApiTypes = [
         'orderstatus',
         'openposition',
@@ -350,9 +355,13 @@ export function useSocket() {
       }
     })
 
+    // SUDARSHAN: fills, partial fills, rejections and broker cancels (M6.8).
+    const removeOrderAlerts = installOrderAlerts(shared)
+
     return () => {
       // SUDARSHAN: remove this provider's handlers and give the connection back;
       // it closes only if no provider takes it again (logout, leaving the app pages).
+      removeOrderAlerts()
       for (const [event, handler] of registered) shared.off(event, handler)
       releaseSharedSocket(shared)
       setSocketInstance(null)

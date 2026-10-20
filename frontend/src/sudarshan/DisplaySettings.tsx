@@ -2,17 +2,20 @@ import { ArrowDown, ArrowUp } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
+import { setOrderSoundMuted, useOrderSoundMuted } from './books/chime'
 import { setCvdMode, useCvdMode } from './display'
 
 /**
  * Profile's Display tab, in place of upstream's theme picker. The theme and the
  * accent are stated here rather than offered (light only, one brand accent: a
- * control that cannot change anything is not shown as one). Colour-blind mode is
- * the one setting, and the preview under it is drawn in the live tokens, so it
+ * control that cannot change anything is not shown as one). Colour-blind mode
+ * and the order alert sound are the settings, both kept on this device only;
+ * the preview under colour-blind mode is drawn in the live tokens, so it
  * changes the moment the switch does.
  */
 export function DisplaySettings() {
   const cvd = useCvdMode()
+  const soundMuted = useOrderSoundMuted()
 
   return (
     <Card>
@@ -55,6 +58,21 @@ export function DisplaySettings() {
             </p>
           </div>
           <Switch id="sd-cvd-mode" checked={cvd} onCheckedChange={setCvdMode} />
+        </div>
+
+        <div className="flex items-start justify-between gap-4 rounded-lg border p-4">
+          <div className="space-y-1">
+            <Label htmlFor="sd-order-sound">Order alert sound</Label>
+            <p className="text-sm text-muted-foreground">
+              A short soft sound when an order fills, partly fills, is rejected or is cancelled at
+              the broker. The alert itself still shows when this is off. This device only.
+            </p>
+          </div>
+          <Switch
+            id="sd-order-sound"
+            checked={!soundMuted}
+            onCheckedChange={(on) => setOrderSoundMuted(!on)}
+          />
         </div>
       </CardContent>
     </Card>

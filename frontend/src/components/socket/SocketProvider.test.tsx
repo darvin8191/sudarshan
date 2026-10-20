@@ -352,8 +352,9 @@ describe('SocketProvider', () => {
 
     expect(io).toHaveBeenCalledTimes(1)
     expect(socket.disconnected).toBe(false)
-    // One set of the shell's handlers, not one per mount.
+    // One set of the shell's handlers, not one per mount, and one order alert listener.
     for (const event of PROVIDER_EVENTS) expect(socket.listenerCount(event)).toBe(1)
+    expect(socket.listenerCount('order_update')).toBe(1)
   })
 
   it('closes the connection on logout', async () => {
