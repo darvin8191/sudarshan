@@ -32,11 +32,13 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { useOrderEventRefresh } from '@/hooks/useOrderEventRefresh'
 import { useSupportedExchanges } from '@/hooks/useSupportedExchanges'
 import { cn, makeFormatCurrency, sanitizeCSV } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
 import { onModeChange } from '@/stores/themeStore'
+// SUDARSHAN: the book re-read (src/sudarshan/books/useBookSync.ts).
+import { useMarketCalendar } from '@/sudarshan/books/market'
+import { useBookSync, useLatestRead } from '@/sudarshan/books/useBookSync'
 import type { Trade } from '@/types/trading'
 import { showToast } from '@/utils/toast'
 
@@ -107,6 +109,9 @@ export default function TradeBook() {
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // SUDARSHAN: an answer a newer read has overtaken is dropped.
+  const beginRead = useLatestRead()
+  const { anyOpen: anyMarketOpen } = useMarketCalendar()
 
   // Filter state
   const [filters, setFilters] = useState<FilterState>({
@@ -184,8 +189,11 @@ export default function TradeBook() {
 
       if (showRefresh) setIsRefreshing(true)
 
+      // SUDARSHAN: an answer a newer read has overtaken is dropped.
+      const isLatest = beginRead()
       try {
         const response = await tradingApi.getTrades(apiKey)
+        if (!isLatest()) return
         if (response.status === 'success' && response.data) {
           setTrades(response.data)
           setError(null)
@@ -193,13 +201,15 @@ export default function TradeBook() {
           setError(response.message || 'Failed to fetch trades')
         }
       } catch {
-        setError('Failed to fetch trades')
+        if (isLatest()) setError('Failed to fetch trades')
       } finally {
-        setIsLoading(false)
-        setIsRefreshing(false)
+        if (isLatest()) {
+          setIsLoading(false)
+          setIsRefreshing(false)
+        }
       }
     },
-    [apiKey]
+    [apiKey, beginRead]
   )
 
   useEffect(() => {
@@ -207,9 +217,9 @@ export default function TradeBook() {
   }, [fetchTrades])
 
   // Refresh on order events instead of polling
-  useOrderEventRefresh(fetchTrades, {
-    events: ['order_event', 'analyzer_update'],
-  })
+  // SUDARSHAN: including the broker's fills (order_update), a Socket.IO
+  // reconnect, coming back after 15 s, and every 45 s while a market is open.
+  useBookSync(fetchTrades, { marketOpen: anyMarketOpen })
 
   // Listen for mode changes (live/analyze) and refresh data
   useEffect(() => {
