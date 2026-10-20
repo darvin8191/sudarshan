@@ -1,13 +1,15 @@
 # सुदर्शन / SUDARSHAN release build.
-# Push a tag vA.B.C (on the `sudarshan` branch) -> builds frontend/dist on an ARM64 runner and
-# publishes a GitHub Release with `frontend-dist.tar.gz` + `frontend-dist.tar.gz.sha256`.
-# The server's sudarshan-deploy.timer installs the latest Release outside market hours.
-# Manual runs (workflow_dispatch) build and test only; they never publish a Release.
+# A release vA.B.C is created (as a pre-release) on a commit of the `sudarshan` branch, through the
+# GitHub UI or the Releases API -> this workflow builds frontend/dist on an ARM64 runner, attaches
+# `frontend-dist.tar.gz` + `frontend-dist.tar.gz.sha256`, and only then marks the release as the
+# latest full release. The server's sudarshan-deploy.timer installs the latest release outside
+# market hours, so a failed build (still a pre-release, no assets) is never deployed.
+# Manual runs (workflow_dispatch) build and test only.
 name: SUDARSHAN release build
 
 on:
-  push:
-    tags: ["v*"]
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -23,6 +25,16 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Release must be a vA.B.C tag on the sudarshan branch
+        if: github.event_name == 'release'
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          [[ "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "release tag '${TAG}' is not vA.B.C"; exit 1; }
+          git merge-base --is-ancestor HEAD origin/sudarshan || { echo "${TAG} is not on the sudarshan branch"; exit 1; }
 
       - uses: actions/setup-node@v7
         with:
@@ -59,7 +71,7 @@ jobs:
           sha256sum frontend-dist.tar.gz | tee frontend-dist.tar.gz.sha256
 
       - name: Keep the build (manual runs)
-        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        if: github.event_name != 'release'
         uses: actions/upload-artifact@v6
         with:
           name: frontend-dist
@@ -68,11 +80,12 @@ jobs:
             frontend-dist.tar.gz.sha256
           retention-days: 7
 
-      - name: Publish Release
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Attach to the release and make it the latest
+        if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.event.release.tag_name }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" frontend-dist.tar.gz frontend-dist.tar.gz.sha256 \
-            --verify-tag --generate-notes --title "सुदर्शन SUDARSHAN ${GITHUB_REF_NAME}"
+          gh release upload "${TAG}" frontend-dist.tar.gz frontend-dist.tar.gz.sha256 --clobber
+          gh release edit "${TAG}" --prerelease=false --latest
