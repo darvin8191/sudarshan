@@ -163,9 +163,11 @@ describe('Dashboard', () => {
     expect(book).toBeLessThan(calls.indexOf('/auth/dashboard-data'))
     expect(getPositions).toHaveBeenCalledWith('key')
 
+    // The P&L card subscribes in an effect, which can run after the text above
+    // is on the page: a tick pushed before it reaches no one. Wait for it.
+    await waitFor(() => expect(feed.live()).toContain(`NFO:${CALL}:LTP`))
     act(() => feed.push(CALL, 'NFO', { ltp: 134 }))
     expect(screen.getByTestId('pnl-total')).toHaveTextContent('+₹2,710.75')
-    expect(feed.live()).toContain(`NFO:${CALL}:LTP`)
   })
 
   it('reads the broker again every 45 seconds while a market is open, never while all are shut', async () => {
