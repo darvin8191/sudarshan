@@ -35,11 +35,14 @@ import { useSupportedExchanges } from '@/hooks/useSupportedExchanges'
 import { cn, makeFormatCurrency, sanitizeCSV } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
 import { onModeChange } from '@/stores/themeStore'
+// SUDARSHAN M6.9: on a phone the trades are cards (src/sudarshan/books/cards).
+import { TradeCards } from '@/sudarshan/books/cards/TradeCards'
 // SUDARSHAN: the book re-read (src/sudarshan/books/useBookSync.ts).
 import { useMarketCalendar } from '@/sudarshan/books/market'
 import { useBookSync, useLatestRead } from '@/sudarshan/books/useBookSync'
 // SUDARSHAN M4.15: on a phone, a symbol opens the phone chart (src/sudarshan/chart).
 import { BookSymbolLink } from '@/sudarshan/chart/BookSymbolLink'
+import { usePhoneLayout } from '@/sudarshan/chart/usePhoneLayout'
 import type { Trade } from '@/types/trading'
 import { showToast } from '@/utils/toast'
 
@@ -113,6 +116,8 @@ export default function TradeBook() {
   // SUDARSHAN: an answer a newer read has overtaken is dropped.
   const beginRead = useLatestRead()
   const { anyOpen: anyMarketOpen } = useMarketCalendar()
+  // SUDARSHAN M6.9: a phone gets cards instead of the wide table.
+  const phone = usePhoneLayout()
 
   // Filter state
   const [filters, setFilters] = useState<FilterState>({
@@ -302,6 +307,19 @@ export default function TradeBook() {
       {label}
     </Button>
   )
+
+  // SUDARSHAN M6.9: on a phone, a card per trade instead of the wide table.
+  if (phone) {
+    return (
+      <TradeCards
+        trades={trades}
+        loading={isLoading}
+        error={error}
+        refreshing={isRefreshing}
+        onRefresh={fetchTrades}
+      />
+    )
+  }
 
   return (
     <div className="space-y-6">
