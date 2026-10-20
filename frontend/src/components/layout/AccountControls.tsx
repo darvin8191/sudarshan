@@ -16,6 +16,7 @@ import { useProfileMenuItems } from '@/hooks/useProfileMenuItems'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
 import { useThemeStore } from '@/stores/themeStore'
+import { MODE_CHIP } from '@/sudarshan/modeChip'
 import { showToast } from '@/utils/toast'
 
 /**
@@ -97,13 +98,10 @@ export function AccountControls({ variant = 'navbar' }: { variant?: 'navbar' | '
         </Badge>
       )}
 
-      {/* Mode Badge */}
+      {/* Mode Badge: the Live and Analyze status chips */}
       <Badge
-        variant={appMode === 'live' ? 'default' : 'secondary'}
-        className={cn(
-          toolbar ? 'h-6 px-2 text-[11px]' : 'text-xs',
-          appMode === 'analyzer' && 'bg-purple-500 hover:bg-purple-600 text-white'
-        )}
+        variant="outline"
+        className={cn(toolbar ? 'h-6 px-2 text-[11px]' : 'text-xs', MODE_CHIP[appMode])}
       >
         {/* The toolbar shares its row with the whole chart toolbar, so the long
             wording waits for a wider screen there than in the navbar. */}

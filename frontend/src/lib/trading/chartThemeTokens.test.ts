@@ -5,7 +5,7 @@
  * painting candles in the ink an undefined var() would resolve to.
  */
 import { afterEach, describe, expect, it } from 'vitest'
-import { buildChartTheme, CANDLE_PAIRS } from './chartTheme'
+import { buildChartTheme, CANDLE_PAIRS, isLightTheme, volumeColor } from './chartTheme'
 
 const root = document.documentElement
 
@@ -35,5 +35,23 @@ describe('candle colours from the app tokens', () => {
     expect(theme.downColor).toBe('var(--down)')
     expect(theme.lastPriceUp).toBe(theme.upColor)
     expect(theme.lastPriceDown).toBe(theme.downColor)
+  })
+})
+
+describe('Analyze mode on the chart', () => {
+  it('is a light ground, like live, so both modes share one palette source', () => {
+    expect(isLightTheme('light', 'analyzer')).toBe(true)
+    expect(isLightTheme('light', 'live')).toBe(true)
+    expect(volumeColor('light', 'analyzer')).toBe(volumeColor('light', 'live'))
+  })
+
+  it('draws the light candle pair and white tag text, not upstream dark purple', () => {
+    const analyze = buildChartTheme('light', 'analyzer')
+    const live = buildChartTheme('light', 'live')
+
+    expect(analyze.upColor).toBe(live.upColor)
+    expect(analyze.downColor).toBe(live.downColor)
+    expect(analyze.lastPriceText).toBe('#ffffff')
+    expect(analyze.upColor).not.toBe(CANDLE_PAIRS.dark.up)
   })
 })

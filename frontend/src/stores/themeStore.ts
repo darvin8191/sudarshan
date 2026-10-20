@@ -82,7 +82,8 @@ export const useThemeStore = create<ThemeStore>()(
       setAppMode: (appMode) => {
         const previousMode = get().appMode
         set({ appMode })
-        // Analyze mode's palette hangs off the `analyzer` class alone.
+        // Analyze mode is the light page with a violet accent and a banner, all
+        // hung off the `analyzer` class (src/sudarshan/theme.css).
         applyModeClasses(appMode)
         // Notify listeners if mode changed
         if (previousMode !== appMode) {

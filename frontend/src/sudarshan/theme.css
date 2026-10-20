@@ -131,3 +131,60 @@ html[data-cvd='1'] {
   --profit: 214.5 75.4% 44.7%; /* #1C65C8 = --up-cvd */
   --loss: 30.3 100% 33.7%; /* #AC5700 = --down-cvd */
 }
+
+/* -----------------------------------------------------------------------------
+   Analyze mode (M1.7)
+   -----------------------------------------------------------------------------
+   The same light page, told apart by a violet accent and AnalyzeBanner: the
+   tint, a 1px violet top border, the words ANALYZE / સેન્ડબોક્સ and an icon.
+   Upstream paints a dark purple page instead. The :root block above already
+   overrides every token of that palette, so this block names only what the mode
+   changes, after :root so it wins for those.
+   ----------------------------------------------------------------------------- */
+.analyzer {
+  --primary: var(--sandbox);
+  --primary-foreground: oklch(1 0 0); /* white on violet 6.65:1 */
+  /* Upstream steps the terminal band and rail for a dark ground; back to the
+     light steps. Its stronger violet for the selected rail tool is kept. */
+  --oa-band: color-mix(in oklab, var(--background) 97.5%, var(--foreground));
+  --oa-rail-faint: color-mix(in oklab, var(--muted-foreground) 50%, var(--background));
+  --oa-rail-elev: color-mix(in oklab, var(--foreground) 6%, transparent);
+  --oa-rail-elev-2: color-mix(in oklab, var(--foreground) 10%, transparent);
+}
+
+@layer components {
+  .sd-analyze-banner {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    min-height: 2rem;
+    padding: 0.25rem 1rem;
+    border-top: 1px solid var(--sandbox);
+    border-bottom: 1px solid var(--sandbox-border);
+    background: var(--sandbox-tint);
+    color: var(--sandbox-ink);
+    /* Semantic text: 14px and 600, never smaller or lighter, for sunlight. */
+    font-size: 0.875rem;
+    font-weight: 600;
+    line-height: 1.25rem;
+    letter-spacing: 0.02em;
+  }
+  .sd-analyze-banner [lang='gu'] {
+    letter-spacing: 0;
+  }
+  .sd-analyze-banner__note {
+    display: none;
+    font-weight: 500;
+    letter-spacing: 0;
+  }
+  /* A hairline rather than a typed separator, so a screen reader hears none. */
+  @media (min-width: 40rem) {
+    .sd-analyze-banner__note {
+      display: inline;
+      padding-left: 0.5rem;
+      border-left: 1px solid var(--sandbox-border);
+    }
+  }
+}

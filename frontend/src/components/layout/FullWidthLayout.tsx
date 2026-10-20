@@ -1,6 +1,7 @@
 import { Navigate, Outlet } from 'react-router'
 import { SocketProvider } from '@/components/socket/SocketProvider'
 import { useAuthStore } from '@/stores/authStore'
+import { AnalyzeBanner } from '@/sudarshan/AnalyzeBanner'
 
 /**
  * Full-width layout for apps like Playground that need maximum screen space.
@@ -20,6 +21,7 @@ export function FullWidthLayout() {
   return (
     <SocketProvider>
       <div className="h-screen bg-background flex flex-col overflow-hidden">
+        <AnalyzeBanner />
         <Outlet />
       </div>
     </SocketProvider>

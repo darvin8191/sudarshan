@@ -1,7 +1,8 @@
 /**
  * Bridges the app's shadcn CSS theme tokens into an openalgo-charts `ChartTheme`
  * so the canvas chrome (background, grid, axes, crosshair) matches whatever
- * theme the app is in: live light, live dark, or the analyzer violet palette.
+ * theme the app is in. In SUDARSHAN that is two looks from one source: live
+ * light, and Analyze mode, the same light page with the violet accent.
  *
  * Tokens are oklch, which the canvas color parser doesn't read; we resolve each
  * to a plain rgb() string by painting it onto a 1×1 canvas and reading the pixel
@@ -106,9 +107,14 @@ function tokenOr(name: string, fallback: string): string {
  */
 export const resolveCssColor = (cssColor: string): string => rasterize(cssColor)
 
-/** True when the app is in live light mode (analyzer is always a dark palette). */
-export function isLightTheme(mode: ThemeMode, appMode: AppMode): boolean {
-  return appMode === 'live' && mode === 'light'
+/**
+ * True when the chart sits on a light ground, which in SUDARSHAN is always:
+ * Analyze mode is the same light page with a violet accent, and there is no
+ * live dark. `mode` is still read so a caller that forces dark (a test) gets
+ * the dark palette it asked for.
+ */
+export function isLightTheme(mode: ThemeMode, _appMode: AppMode): boolean {
+  return mode !== 'dark'
 }
 
 /**
@@ -167,8 +173,8 @@ function withAlpha(color: string, alpha: number): string {
  *
  * Every surface comes from the app's own tokens, so the chart sits inside the
  * chrome of whichever mode is on rather than beside it. The accent is the
- * app's primary: the operator's neutral or colour in Live and the violet in
- * Analyze. It is the line chart's colour and its gradient, the crosshair's
+ * app's primary: the brand indigo in Live and the violet in Analyze. It is the
+ * line chart's colour and its gradient, the crosshair's
  * value pills, a new drawing's default colour, and, through the bottom bar's
  * tokens, that bar's active buttons, so one switch of mode recolours all of
  * them together.
