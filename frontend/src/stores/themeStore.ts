@@ -5,7 +5,8 @@ import { persist } from 'zustand/middleware'
  * SUDARSHAN is light only. `mode` stays in the store because upstream readers
  * branch on it, but it is always 'light': a persisted 'dark' is read back as
  * light, setMode('dark') and toggleMode() do nothing, and nothing in this store
- * puts the `.dark` class on <html>.
+ * puts the `.dark` class on <html>. The accent is fixed the same way: `color`
+ * stays 'zinc', upstream's no-override value, and the brand is set in CSS.
  */
 export type ThemeMode = 'light' | 'dark'
 export type AppMode = 'live' | 'analyzer'
@@ -74,14 +75,8 @@ export const useThemeStore = create<ThemeStore>()(
         set({ mode })
       },
 
-      setColor: (color) => {
-        // Only allow color change in live mode
-        if (get().appMode !== 'live') return
-
-        set({ color })
-        if (typeof document !== 'undefined') {
-          document.documentElement.setAttribute('data-theme', color)
-        }
+      setColor: () => {
+        // One accent, the brand (src/sudarshan/theme.css). Kept so upstream callers compile.
       },
 
       setAppMode: (appMode) => {
@@ -168,11 +163,13 @@ export const useThemeStore = create<ThemeStore>()(
         color: state.color,
         appMode: state.appMode, // Persist appMode for visual continuity across logout
       }),
-      // A 'dark' saved by an earlier build is read back as light.
+      // A 'dark' or an accent saved by an earlier build is read back as light
+      // with the brand accent.
       merge: (persisted, current) => ({
         ...current,
         ...(persisted as Partial<ThemeStore> | undefined),
         mode: 'light',
+        color: 'zinc',
       }),
       onRehydrateStorage: () => (state) => {
         // Apply theme on rehydration

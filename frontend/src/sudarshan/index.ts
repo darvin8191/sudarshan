@@ -5,3 +5,5 @@
  * one-line change.
  */
 import './theme.css'
+// Applies the colour-blind preference to <html> before React renders.
+import './display'

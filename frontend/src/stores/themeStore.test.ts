@@ -55,6 +55,20 @@ describe('light-only theme store', () => {
     expect(html.classList.contains('dark')).toBe(false)
   })
 
+  it('keeps the one brand accent: the picker is gone and a saved accent is ignored', async () => {
+    useThemeStore.getState().setColor('green')
+    expect(useThemeStore.getState().color).toBe('zinc')
+
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ state: { mode: 'light', color: 'orange', appMode: 'live' }, version: 0 })
+    )
+    await useThemeStore.persist.rehydrate()
+
+    expect(useThemeStore.getState().color).toBe('zinc')
+    expect(html.getAttribute('data-theme')).toBe('zinc')
+  })
+
   it('keeps a saved Analyze mode across a reload, still without dark', async () => {
     localStorage.setItem(
       STORAGE_KEY,

@@ -56,20 +56,8 @@ import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { type AlertCategories, type ToastPosition, useAlertStore } from '@/stores/alertStore'
 import { useAuthStore } from '@/stores/authStore'
-import { type ThemeColor, useThemeStore } from '@/stores/themeStore'
+import { DisplaySettings } from '@/sudarshan/DisplaySettings'
 import { showToast, toast } from '@/utils/toast'
-
-// Accent colors for customization
-const ACCENT_COLORS: { value: ThemeColor; label: string; color: string }[] = [
-  { value: 'zinc', label: 'Zinc', color: 'bg-zinc-500' },
-  { value: 'slate', label: 'Slate', color: 'bg-slate-500' },
-  { value: 'gray', label: 'Gray', color: 'bg-gray-500' },
-  { value: 'neutral', label: 'Neutral', color: 'bg-neutral-500' },
-  { value: 'green', label: 'Green', color: 'bg-green-500' },
-  { value: 'blue', label: 'Blue', color: 'bg-blue-500' },
-  { value: 'violet', label: 'Violet', color: 'bg-violet-500' },
-  { value: 'orange', label: 'Orange', color: 'bg-orange-500' },
-]
 
 interface ProfileData {
   username: string
@@ -246,7 +234,6 @@ const ALERT_CATEGORIES_ADMIN: {
 
 export default function ProfilePage() {
   const user = useAuthStore((s) => s.user)
-  const { mode, color, appMode, setMode, setColor } = useThemeStore()
   const alertStore = useAlertStore()
   const [activeTab, setActiveTab] = useState('account')
   const [isLoading, setIsLoading] = useState(true)
@@ -301,9 +288,6 @@ export default function ProfilePage() {
   const [permissionsData, setPermissionsData] = useState<PermissionsData | null>(null)
   const [isLoadingPermissions, setIsLoadingPermissions] = useState(false)
   const [isFixingPermissions, setIsFixingPermissions] = useState(false)
-
-  // Check if in analyzer mode (theme changes blocked)
-  const isAnalyzerMode = appMode === 'analyzer'
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: one-time data load on mount; fetchProfileData/fetchBrokerCredentials are stable per-render fetchers and must not refire when their closures are recreated.
   useEffect(() => {
@@ -691,25 +675,6 @@ export default function ProfilePage() {
     }
   }
 
-  const handleAccentColorChange = (newColor: ThemeColor) => {
-    if (isAnalyzerMode) {
-      showToast.error('Cannot change theme while in Analyzer Mode', 'system')
-      return
-    }
-    setColor(newColor)
-    showToast.success(`Accent color changed to ${newColor}`, 'system')
-  }
-
-  const handleResetTheme = () => {
-    if (isAnalyzerMode) {
-      showToast.error('Cannot change theme while in Analyzer Mode', 'system')
-      return
-    }
-    setMode('light')
-    setColor('zinc')
-    showToast.success('Theme reset to default', 'system')
-  }
-
   const copyToClipboard = (text: string) => {
     navigator.clipboard
       .writeText(text)
@@ -779,7 +744,7 @@ export default function ProfilePage() {
           </TabsTrigger>
           <TabsTrigger value="theme" className="gap-1">
             <Palette className="h-4 w-4" />
-            <span className="hidden sm:inline">Theme</span>
+            <span className="hidden sm:inline">Display</span>
           </TabsTrigger>
           <TabsTrigger value="smtp" className="gap-1">
             <Mail className="h-4 w-4" />
@@ -1919,103 +1884,7 @@ export default function ProfilePage() {
 
         {/* Theme Tab */}
         <TabsContent value="theme" className="space-y-6">
-          {/* Analyzer Mode Warning */}
-          {isAnalyzerMode && (
-            <Alert variant="destructive">
-              <AlertCircle className="h-4 w-4" />
-              <AlertTitle>Theme Changes Disabled</AlertTitle>
-              <AlertDescription>
-                Theme customization is disabled while in Analyzer Mode. The purple theme is
-                automatically applied for visual distinction. Switch back to Live Mode to change
-                themes.
-              </AlertDescription>
-            </Alert>
-          )}
-
-          {/* Current Theme Status */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>Current Theme</CardTitle>
-                  <CardDescription>
-                    {isAnalyzerMode
-                      ? 'Analyzer Mode (Purple Theme)'
-                      : `${mode.charAt(0).toUpperCase() + mode.slice(1)} Mode with ${color.charAt(0).toUpperCase() + color.slice(1)} accent`}
-                  </CardDescription>
-                </div>
-                <div className="flex items-center gap-4">
-                  <div className="flex gap-2">
-                    <div className="w-6 h-6 rounded bg-primary" title="Primary" />
-                    <div className="w-6 h-6 rounded bg-secondary" title="Secondary" />
-                    <div className="w-6 h-6 rounded bg-accent" title="Accent" />
-                    <div className="w-6 h-6 rounded bg-muted" title="Muted" />
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleResetTheme}
-                    disabled={isAnalyzerMode || (mode === 'light' && color === 'zinc')}
-                  >
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                    Reset
-                  </Button>
-                </div>
-              </div>
-            </CardHeader>
-          </Card>
-
-          {/* Accent Color Selection */}
-          <Card className={isAnalyzerMode ? 'opacity-60' : ''}>
-            <CardHeader>
-              <CardTitle>Accent Color</CardTitle>
-              <CardDescription>Customize the primary accent color</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-4 sm:grid-cols-8 gap-3">
-                {ACCENT_COLORS.map((accentColor) => {
-                  const isSelected = color === accentColor.value && !isAnalyzerMode
-                  return (
-                    <button
-                      type="button"
-                      key={accentColor.value}
-                      onClick={() => handleAccentColorChange(accentColor.value)}
-                      disabled={isAnalyzerMode}
-                      className={`flex flex-col items-center gap-2 p-3 rounded-lg border-2 transition-all ${
-                        isSelected
-                          ? 'border-primary bg-primary/5'
-                          : 'border-border hover:border-primary/50'
-                      } ${isAnalyzerMode ? 'cursor-not-allowed' : 'cursor-pointer'}`}
-                      title={accentColor.label}
-                    >
-                      <div
-                        className={`w-8 h-8 rounded-full ${accentColor.color} ring-2 ring-offset-2 ring-offset-background ${isSelected ? 'ring-primary' : 'ring-transparent'}`}
-                      />
-                      <span className="text-xs font-medium">{accentColor.label}</span>
-                    </button>
-                  )
-                })}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Theme Info */}
-          <Card>
-            <CardHeader>
-              <CardTitle>About Themes</CardTitle>
-            </CardHeader>
-            <CardContent className="text-sm text-muted-foreground space-y-2">
-              <p>
-                <strong>Light Mode:</strong> Optimized for daytime use with high contrast and
-                readability.
-              </p>
-              <p>
-                <strong>Analyzer Mode:</strong> When in sandbox/analyzer mode, a distinct purple
-                theme is applied automatically to clearly indicate you are not trading with real
-                funds.
-              </p>
-            </CardContent>
-          </Card>
+          <DisplaySettings />
         </TabsContent>
 
         {/* SMTP Tab */}

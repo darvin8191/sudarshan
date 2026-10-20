@@ -8,4 +8,7 @@ One row per feature id from the (private) feature list. Status: `todo` → `part
 | M0.1 | Fork, CI (`SUDARSHAN CI`), release build + server auto-deploy | partial | — | branch `sudarshan` created from OpenAlgo 2.0.2.8 (`9d55811e`) |
 | M18.1 | Feed service `sudarshan-feed` (= M13.1): one Upstox V3 socket, ZMQ 5581 + HTTP 5580 fan-out, recorder/replayer; with M18.8 snapshot store | partial | — | branch `feat/feed`: built + tested offline (fake Upstox); live test pending (Wed 21 Oct: U7 cap, U9 drops) |
 | M1.6 | Light-only lock: store stays light, no theme switch anywhere, toasts light | partial | — | branch `feat/brand`; awaiting review and release |
+| M1.8 | Design tokens: shadcn + trading tokens mapped to the spec, new `--up/--down/--brand/--family/--sandbox/--warning-text/--info/--up-cvd/--down-cvd` (`frontend/src/sudarshan/theme.css`) | partial | — | branch `feat/brand`; awaiting review and release |
 | M1.9 | `color-scheme: only light`, `<meta name="color-scheme" content="light">` before CSS, `theme-color #F8F7F3` | partial | — | branch `feat/brand`; awaiting review and release |
+| M1.12 | One brand accent: upstream accent themes collapse to indigo, picker removed | partial | — | branch `feat/brand`; awaiting review and release |
+| M1.13 | Colour-blind mode: `<html data-cvd="1">` blue/orange up/down, Profile > Display switch (per device) | partial | — | branch `feat/brand`; awaiting review and release |

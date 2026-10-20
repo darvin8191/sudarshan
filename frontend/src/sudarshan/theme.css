@@ -16,3 +16,118 @@
 .analyzer {
   color-scheme: only light;
 }
+
+/* -----------------------------------------------------------------------------
+   Design tokens (M1.8)
+   -----------------------------------------------------------------------------
+   Written in oklch() like upstream's live shadcn tokens: complete colours,
+   used as var(--x) and through Tailwind's @theme mapping. The four upstream
+   trading tokens (--profit --loss --buy --sell) are HSL channel triplets in
+   upstream and stay triplets here, for hsl(var(--profit)). Each value is the
+   spec hex exactly (given after it); text tokens state their contrast on the
+   #F8F7F3 canvas and all clear 4.5:1.
+
+   Every property upstream's dark `.analyzer` block sets is restated here, so
+   that block never leaks into a page: at equal specificity this file is later
+   and wins. Analyze mode's own accent comes after, in its own block.
+   ----------------------------------------------------------------------------- */
+:root {
+  /* Surfaces and text */
+  --bg-canvas: oklch(0.976 0.005 95.1); /* #F8F7F3 page; never #FFFFFF (glare) */
+  --surface-card: oklch(0.991 0.004 91.45); /* #FDFCF9 cards, always with a border */
+  --surface-2: oklch(0.956 0.006 84.57); /* #F2F0EC grouped rows, input fills */
+  --surface-3: oklch(0.929 0.007 80.72); /* #EAE7E2 selected or pressed row */
+  --border-subtle: oklch(0.88 0.01 87.48); /* #DAD7D0 decorative hairlines */
+  --border-strong: oklch(0.65 0 0); /* #8F8F8F 3.02:1 outlines that must be seen */
+  --text-primary: oklch(0.249 0.02 271.87); /* #1E212B 14.98:1 body, numbers */
+  --text-secondary: oklch(0.45 0.02 270.94); /* #515561 6.94:1 labels */
+  --text-tertiary: oklch(0.549 0.016 272.52); /* #6E717B 4.54:1 14px/500 and up only */
+
+  /* Meaning. Never colour alone: a sign, arrow, letter, icon or word as well. */
+  --up: oklch(0.5195 0.1361 152.19); /* #007E3F 4.83:1 profit, up, COMPLETE, LIVE */
+  --down: oklch(0.551 0.19 26.94); /* #C9302D 4.97:1 loss, down, REJECTED */
+  --profit-strong: oklch(0.499 0.131 152.14); /* #00773B 5.29:1 large P&L figures */
+  --loss-strong: oklch(0.52 0.19 27); /* #BE2323 5.67:1 large negative P&L */
+  --neutral: oklch(0.499 0.012 267.27); /* #60636A 5.61:1 unchanged, CANCELLED */
+  --stale: oklch(0.549 0.016 272.52); /* #6E717B 4.54:1 stale data, with an icon */
+  --brand: oklch(0.449 0.159 265); /* #284CAC 7.20:1 primary actions, links */
+  --family: oklch(0.4999 0.0853 194.77); /* #007272 5.37:1 FAMILY VIEW ONLY, with a lock */
+  --sandbox: oklch(0.5 0.2 305.03); /* #7F36BC 6.21:1 ANALYZE mode */
+  --sandbox-tint: oklch(0.946 0.032 305.35); /* #F2E8FF banner and chip fill */
+  --sandbox-ink: oklch(0.38 0.12 305.47); /* #522D74 9.86:1, 8.94:1 on the tint */
+  --sandbox-border: oklch(0.821 0.079 304.95); /* #D0B8EE chip edge */
+  --live-tint: oklch(0.945 0.04 152.14); /* #DAF5E0 LIVE / COMPLETE chip fill */
+  --live-ink: oklch(0.381 0.1 152.07); /* #005126 8.88:1, 8.22:1 on the tint */
+  --live-border: oklch(0.821 0.081 152.21); /* #9DD4AB chip edge */
+  --warning-text: oklch(0.5 0.109 69.63); /* #8A5600 5.74:1 OPEN, PENDING */
+  --warning-fill: oklch(0.76 0.15 74.79); /* #E8A127 2.05:1 fill; ink text only, never white */
+  --info: oklch(0.4998 0.1142 239.87); /* #006A9D 5.52:1 informational */
+  --up-cvd: oklch(0.5206 0.1695 257.86); /* #1C65C8 5.23:1 colour-blind up */
+  --down-cvd: oklch(0.5495 0.1365 54.72); /* #AC5700 4.76:1 colour-blind down */
+  --focus-ring: oklch(0.601 0.18 258); /* #317DE9 3.74:1 tap and keyboard focus */
+
+  /* shadcn tokens */
+  --background: var(--bg-canvas);
+  --foreground: var(--text-primary);
+  --card: var(--surface-card);
+  --card-foreground: var(--text-primary);
+  --popover: var(--surface-card);
+  --popover-foreground: var(--text-primary);
+  --primary: var(--brand);
+  --primary-foreground: oklch(1 0 0); /* white on brand 7.72:1 */
+  --secondary: var(--surface-3);
+  --secondary-foreground: var(--text-primary);
+  --muted: var(--surface-2);
+  --muted-foreground: var(--text-secondary);
+  --accent: var(--surface-3);
+  --accent-foreground: var(--text-primary);
+  /* Danger, not direction: stays red in colour-blind mode. */
+  --destructive: oklch(0.551 0.19 26.94); /* #C9302D 4.97:1; white on it 5.32:1 */
+  --destructive-foreground: oklch(1 0 0);
+  --border: var(--border-subtle);
+  --input: oklch(0.64 0.015 85); /* #908C82 3.13:1 input outlines, seen outdoors */
+  --ring: var(--focus-ring);
+  /* Indicator lines, 2px and up: lines, not text. */
+  --chart-1: oklch(0.499 0.16 255.11); /* #0961BB */
+  --chart-2: oklch(0.6204 0.1534 55.11); /* #CA6800 line only; its label uses --warning-text */
+  --chart-3: oklch(0.5 0.18 309.79); /* #823BAE */
+  --chart-4: oklch(0.5189 0.0884 195.79); /* #007879 */
+  --chart-5: oklch(0.299 0.02 273.14); /* #2A2D38 VWAP */
+  --sidebar: var(--surface-2);
+  --sidebar-foreground: var(--text-primary);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--surface-3);
+  --sidebar-accent-foreground: var(--text-primary);
+  --sidebar-border: var(--border-subtle);
+  --sidebar-ring: var(--focus-ring);
+
+  /* Upstream trading tokens, HSL channel triplets as upstream defines them. */
+  --profit: 150 100% 24.7%; /* #007E3F = --up */
+  --profit-foreground: 0 0% 100%;
+  --loss: 1.2 63.4% 48.2%; /* #C9302D = --down */
+  --loss-foreground: 0 0% 100%;
+  --buy: 214.5 75.4% 44.7%; /* #1C65C8 5.23:1 BUY, LONG */
+  --buy-foreground: 0 0% 100%;
+  --sell: 8.6 82.5% 44.7%; /* #D02F14 4.78:1 SELL, SHORT */
+  --sell-foreground: 0 0% 100%;
+}
+
+/* One accent (M1.12). Upstream's picker themes ([data-theme="green"] and the
+   rest, specificity 0-2-0) collapse to the brand here at 0-3-0, so a choice
+   saved by an earlier build cannot recolour the app. */
+:root[data-theme]:not(.analyzer) {
+  --primary: var(--brand);
+  --primary-foreground: oklch(1 0 0);
+  --ring: var(--focus-ring);
+}
+
+/* Colour-blind mode (M1.13): up and down move from green and red to blue and
+   orange, which stay apart under deutan, protan and tritan vision alike. The
+   sign, arrow or label that every number carries is unchanged. */
+html[data-cvd='1'] {
+  --up: var(--up-cvd);
+  --down: var(--down-cvd);
+  --profit: 214.5 75.4% 44.7%; /* #1C65C8 = --up-cvd */
+  --loss: 30.3 100% 33.7%; /* #AC5700 = --down-cvd */
+}

@@ -87,6 +87,17 @@ function rasterize(cssColor: string): string {
 const token = (name: string) => rasterize(`var(${name})`)
 
 /**
+ * A token as the canvas reads it, or `fallback` when no stylesheet defines it on
+ * the root. An undefined `var()` does not fail loudly: it resolves to the
+ * inherited text colour, which would paint every candle in the ink.
+ */
+function tokenOr(name: string, fallback: string): string {
+  if (typeof document === 'undefined') return fallback
+  const defined = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+  return defined ? token(name) : fallback
+}
+
+/**
  * Any CSS colour as an `rgb()` or `rgba()` string the canvas is certain to
  * parse: a token, a computed style read back off an element, anything.
  * Exported for code that paints app-themed text onto a canvas (the chart's PNG
@@ -106,15 +117,25 @@ export function isLightTheme(mode: ThemeMode, appMode: AppMode): boolean {
  * Tuned rather than taken from the engine's defaults, which are one pair for
  * every host. On a near-black or navy ground both colours sit at the same
  * lightness, so neither direction shouts over the other, and both clear 6:1
- * against the background. On white they are a step darker, because the
- * last-price tag prints white text on them and has to stay readable (4.6:1
- * and 4.9:1). The analyzer shares the dark pair: the mode is told by its
- * violet chrome, and an up candle must mean the same thing in both.
+ * against the background. On a light ground they are a step darker, because
+ * the last-price tag prints white text on them and has to stay readable. The
+ * light pair is the app's own `--up` and `--down` tokens (#007E3F and #C9302D,
+ * white text on them 5.2:1 and 5.3:1), read live so colour-blind mode's blue
+ * and orange reach the candles too; the values here are the fallback when no
+ * stylesheet defines the tokens.
  */
 export const CANDLE_PAIRS = {
   dark: { up: '#14b887', down: '#f0525f' },
-  light: { up: '#00855d', down: '#d42f34' },
+  light: { up: '#007e3f', down: '#c9302d' },
 } as const
+
+/** The light pair from the tokens, so a theme change in CSS reaches the chart. */
+function lightCandlePair(): { up: string; down: string } {
+  return {
+    up: tokenOr('--up', CANDLE_PAIRS.light.up),
+    down: tokenOr('--down', CANDLE_PAIRS.light.down),
+  }
+}
 
 /** How far the grid sits from the background towards the text colour. */
 const GRID_STEP = { dark: 0.06, light: 0.055 }
@@ -155,7 +176,7 @@ function withAlpha(color: string, alpha: number): string {
 export function buildChartTheme(mode: ThemeMode, appMode: AppMode): ChartTheme {
   const light = isLightTheme(mode, appMode)
   const base = light ? lightTheme : darkTheme
-  const pair = light ? CANDLE_PAIRS.light : CANDLE_PAIRS.dark
+  const pair = light ? lightCandlePair() : CANDLE_PAIRS.dark
   const background = token('--background')
   const foreground = token('--foreground')
   const accent = token('--primary')
