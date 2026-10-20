@@ -11,14 +11,18 @@ import {
   Search,
   Zap,
 } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
+import { tradingApi } from '@/api/trading'
+import { useMarketStatus } from '@/hooks/useMarketStatus'
 import { useOrderEventRefresh } from '@/hooks/useOrderEventRefresh'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
 import { onModeChange } from '@/stores/themeStore'
 import { HoldingsCard } from '@/sudarshan/dashboard/HoldingsCard'
+import { useMarketOpen } from '@/sudarshan/dashboard/hooks'
 import { IndexStrip } from '@/sudarshan/dashboard/IndexStrip'
+import { type PositionsSnapshot, RESYNC_MS } from '@/sudarshan/dashboard/live'
 import { type DashboardFunds, PnlCard } from '@/sudarshan/dashboard/PnlCard'
 import { formatAmount } from '@/sudarshan/dashboard/format'
 
@@ -28,9 +32,29 @@ interface MasterContractStatus {
   total_symbols?: number
 }
 
-// SUDARSHAN: the D home. The data and its refresh rules are upstream's; what
-// changed is how it is shown (src/sudarshan/dashboard) and the index strip and
-// holdings summary, which read existing APIs only.
+// SUDARSHAN: the D home, live. The funds call and its error handling are
+// upstream's. Added: the position book, read with the funds so the P&L can move
+// tick by tick between reads (src/sudarshan/dashboard/live.ts); a re-read every
+// 45 seconds while a market is open, on top of upstream's order-event refresh;
+// and the index strip and holdings summary. Existing APIs only.
+
+/**
+ * The position book, stamped with when it was asked for, so that only ticks
+ * newer than it move the P&L. Null when there is no API key to ask with or the
+ * read fails: the P&L then holds the broker's figures until the next read.
+ */
+async function readPositions(apiKey: string | null): Promise<PositionsSnapshot | null> {
+  if (!apiKey) return null
+  const at = Date.now()
+  try {
+    const response = await tradingApi.getPositions(apiKey)
+    return response.status === 'success' && Array.isArray(response.data)
+      ? { positions: response.data, at }
+      : null
+  } catch {
+    return null
+  }
+}
 
 /** The master contract's state as a chip: an icon and words, never a coloured dot alone. */
 const CONTRACT_CHIP = {
@@ -102,14 +126,34 @@ export default function Dashboard() {
   // Broker token revoked/expired while the app session is still valid
   // (daily token rollover). Routes the user to /broker, not /login (#1400).
   const [brokerExpired, setBrokerExpired] = useState(false)
+  // SUDARSHAN: the position book read with the funds, and when that was.
+  const [positions, setPositions] = useState<PositionsSnapshot | null>(null)
+  const [syncedAt, setSyncedAt] = useState<number | null>(null)
+  const readCount = useRef(0)
+  const lastReadAt = useRef(0)
+  const market = useMarketStatus()
+  const { isOpen: marketOpen, anyOpen } = useMarketOpen(market)
+  const anyMarketOpen = useRef(anyOpen)
+  useEffect(() => {
+    anyMarketOpen.current = anyOpen
+  }, [anyOpen])
 
   // Fetch dashboard funds data
   const fetchFundsData = useCallback(async () => {
+    // SUDARSHAN: a read that a newer one overtakes is dropped, so an old answer
+    // arriving late never replaces a newer one.
+    const read = ++readCount.current
+    lastReadAt.current = Date.now()
     try {
       setIsLoading(true)
+      // SUDARSHAN: the position book first, then the funds. Analyze mode marks
+      // its positions to market when the book is read and its funds carry that
+      // figure, so in this order the funds and the book agree on prices.
+      const book = await readPositions(apiKey)
       const response = await fetch('/auth/dashboard-data', {
         credentials: 'include',
       })
+      if (read !== readCount.current) return
 
       if (response.status === 401) {
         const body = await response.json().catch(() => null)
@@ -123,19 +167,22 @@ export default function Dashboard() {
       }
 
       const data = await response.json()
+      if (read !== readCount.current) return
 
       if (data.status === 'success' && data.data) {
         setMarginData(data.data)
+        setPositions(book)
+        setSyncedAt(Date.now())
         setError(null)
       } else {
         setError(data.message || 'Failed to fetch margin data')
       }
     } catch (_err) {
-      setError('Failed to fetch margin data')
+      if (read === readCount.current) setError('Failed to fetch margin data')
     } finally {
-      setIsLoading(false)
+      if (read === readCount.current) setIsLoading(false)
     }
-  }, [])
+  }, [apiKey])
 
   useEffect(() => {
     fetchFundsData()
@@ -145,6 +192,31 @@ export default function Dashboard() {
   useOrderEventRefresh(fetchFundsData, {
     events: ['order_event', 'analyzer_update', 'close_position_event'],
   })
+
+  // SUDARSHAN: re-read the broker's figures every 45 seconds while the page is
+  // in view and a market is open (or not known to be shut), so the base the
+  // ticks move from never drifts far; and on coming back into view after more
+  // than 15 seconds away. Three broker reads each time, well inside its limits.
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'visible' && anyMarketOpen.current() !== false) {
+        fetchFundsData()
+      }
+    }, RESYNC_MS)
+    const shown = () => {
+      if (
+        document.visibilityState === 'visible' &&
+        Date.now() - lastReadAt.current > RESYNC_MS / 3
+      ) {
+        fetchFundsData()
+      }
+    }
+    document.addEventListener('visibilitychange', shown)
+    return () => {
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', shown)
+    }
+  }, [fetchFundsData])
 
   // Listen for mode changes and refresh data
   useEffect(() => {
@@ -266,11 +338,11 @@ export default function Dashboard() {
         </Link>
       </div>
 
-      <IndexStrip apiKey={apiKey} />
+      <IndexStrip apiKey={apiKey} marketOpen={marketOpen} />
 
       <div className="grid items-start gap-2.5 md:gap-4 lg:grid-cols-2">
         <div className="flex min-w-0 flex-col gap-2.5 md:gap-4">
-          {error ? (
+          {error && !marginData ? (
             <section
               role="alert"
               className="flex flex-col items-start gap-3 rounded-[1.125rem] border border-[color:var(--down)] bg-card px-4 py-3.5 shadow-[var(--shadow-card)]"
@@ -296,7 +368,14 @@ export default function Dashboard() {
               </button>
             </section>
           ) : (
-            <PnlCard funds={marginData} loading={isLoading && !marginData} />
+            <PnlCard
+              funds={marginData}
+              loading={isLoading && !marginData}
+              positions={positions}
+              syncedAt={syncedAt}
+              syncFailed={error !== null}
+              marketOpen={marketOpen}
+            />
           )}
           <HoldingsCard apiKey={apiKey} />
         </div>

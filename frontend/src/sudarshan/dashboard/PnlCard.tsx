@@ -1,7 +1,20 @@
-import { Wallet } from 'lucide-react'
+import { AlertTriangle, Wallet } from 'lucide-react'
+import { useMemo } from 'react'
 import { Skeleton } from '@/components/ui/skeleton'
+import { useMarketData } from '@/hooks/useMarketData'
 import { cn } from '@/lib/utils'
 import { directionOf, formatRupees, toNumber } from './format'
+import { useNow } from './hooks'
+import { LiveLine } from './LiveLine'
+import {
+  anyOpen,
+  feedLine,
+  latest,
+  liveMove,
+  type MarketOpen,
+  openPositions,
+  type PositionsSnapshot,
+} from './live'
 import { TREND_TEXT, TrendArrow } from './Trend'
 
 /** The funds summary /auth/dashboard-data returns, figures as strings. */
@@ -45,23 +58,65 @@ function percentLabel(percent: number): string {
 interface PnlCardProps {
   funds: DashboardFunds | null
   loading: boolean
+  /** The position book, read just before these funds; null when it could not be read. */
+  positions?: PositionsSnapshot | null
+  /** When the funds and the position book were last read. */
+  syncedAt?: number | null
+  /** The last re-read failed, so the figures shown are from the one before it. */
+  syncFailed?: boolean
+  marketOpen?: MarketOpen
+}
+
+const NOT_KNOWN: MarketOpen = () => null
+
+function openCount(count: number): string {
+  if (count === 0) return 'No open positions'
+  return count === 1 ? '1 open position' : `${count} open positions`
 }
 
 /**
- * Today's P&L (realised plus unrealised, as the broker reports them for the
- * day's positions), the funds available and the share of margin in use. Every
- * figure is the broker's, refreshed by the dashboard after each order event;
- * nothing here is estimated.
+ * Today's P&L, live, then the funds available and the share of margin in use.
+ *
+ * The broker's own figures are the base: realised and unrealised as the funds
+ * call reports them, re-read together with the position book after every order
+ * event and every 45 seconds while a market is open. Between re-reads the
+ * unrealised part moves on every tick of an open position, by what that
+ * position has made or lost since the book was read (`liveMove`, priced by the
+ * Positions page's own evaluator). Realised P&L moves only with a trade, and a
+ * trade re-reads the broker. Funds and margin are as of the last re-read.
  */
-export function PnlCard({ funds, loading }: PnlCardProps) {
+export function PnlCard({
+  funds,
+  loading,
+  positions = null,
+  syncedAt = null,
+  syncFailed = false,
+  marketOpen = NOT_KNOWN,
+}: PnlCardProps) {
+  const held = useMemo(() => openPositions(positions?.positions ?? []), [positions])
+  const symbols = useMemo(() => held.map(({ symbol, exchange }) => ({ symbol, exchange })), [held])
+  const { data: prices } = useMarketData({ symbols, mode: 'LTP', enabled: symbols.length > 0 })
+  const now = useNow()
+  const move = liveMove(positions, prices)
+
   const realised = toNumber(funds?.m2mrealized) ?? 0
-  const unrealised = toNumber(funds?.m2munrealized) ?? 0
+  const unrealised = (toNumber(funds?.m2munrealized) ?? 0) + move.delta
   const pnl = realised + unrealised
   const available = toNumber(funds?.availablecash) ?? 0
   const pledge = toNumber(funds?.collateral) ?? 0
   const margin = funds ? marginUse(funds) : null
   const showFigures = !loading && funds !== null
   const direction = directionOf(pnl)
+  const line = feedLine({
+    now,
+    marketOpen:
+      held.length > 0
+        ? anyOpen(held.map((position) => marketOpen(position.exchange)))
+        : marketOpen('NSE'),
+    lastTickAt: move.lastTickAt,
+    lastUpdateAt: latest(move.lastTickAt, syncedAt),
+    ticksDue: held.length > 0,
+  })
 
   return (
     <section
@@ -69,9 +124,12 @@ export function PnlCard({ funds, loading }: PnlCardProps) {
       aria-busy={loading || undefined}
       className="flex flex-col gap-1 rounded-[1.125rem] border bg-card px-4 py-3.5 shadow-[var(--shadow-card)]"
     >
-      <h2 id="sd-pnl-title" className="text-[0.84375rem] font-semibold text-muted-foreground">
-        Today&apos;s P&amp;L
-      </h2>
+      <div className="flex min-h-5 items-center justify-between gap-3">
+        <h2 id="sd-pnl-title" className="text-[0.84375rem] font-semibold text-muted-foreground">
+          Today&apos;s P&amp;L
+        </h2>
+        {showFigures && <LiveLine line={line} now={now} />}
+      </div>
 
       {showFigures ? (
         <p className={cn('flex items-center gap-2', TREND_TEXT[direction])} data-testid="pnl-total">
@@ -94,11 +152,30 @@ export function PnlCard({ funds, loading }: PnlCardProps) {
           </span>
           <span>
             Unrealised{' '}
-            <strong className={cn('font-bold', TREND_TEXT[directionOf(unrealised)])}>
+            <strong
+              className={cn('font-bold', TREND_TEXT[directionOf(unrealised)])}
+              data-testid="pnl-unrealised"
+            >
               {formatRupees(unrealised, { signed: true })}
             </strong>
           </span>
         </p>
+      )}
+
+      {showFigures && positions && (
+        <p className="text-[0.78125rem] font-medium text-[color:var(--text-tertiary)]">
+          {openCount(held.length)}
+        </p>
+      )}
+
+      {showFigures && syncFailed && (
+        <output className="flex items-start gap-1.5 text-[0.78125rem] font-medium">
+          <AlertTriangle
+            aria-hidden="true"
+            className="mt-px size-3.5 shrink-0 text-[color:var(--warning-text)]"
+          />
+          Could not refresh just now. Showing the last figures.
+        </output>
       )}
 
       <div aria-hidden="true" className="my-2 h-px bg-[color:var(--divider)]" />
