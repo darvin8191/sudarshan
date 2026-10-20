@@ -49,7 +49,7 @@ describe('About page', () => {
   it('shows the release, its commit and where its source is', async () => {
     render(<AboutView build={RELEASE} />)
 
-    expect(screen.getByText('सुदर्शन')).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'सुदर्शन' })).toBeInTheDocument()
     expect(screen.getByText('v1.2.3')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'abcdef1' })).toHaveAttribute(
       'href',

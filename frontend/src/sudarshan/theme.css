@@ -244,12 +244,14 @@ html[data-cvd='1'] {
 }
 
 /* -----------------------------------------------------------------------------
-   Wordmark lockup (M1.1)
+   Wordmark lockup (M1.1), the D look
    -----------------------------------------------------------------------------
-   सुदर्शन in Tiro Devanagari Sanskrit, one weight: never letter-spaced (the
-   headline would break) and never synthesised bold. SUDARSHAN in tracked caps.
-   Side by side, the caps are sized so their height sits near the Devanagari
-   headline (Tiro's headline is 0.62 em, Inter's caps 0.73 em).
+   The Mor icon, सुदर्शन drawn from Tiro outlines (marks.ts) and SUDARSHAN in
+   Khand 600 caps tracked 0.4em, in the brand colour in either mode: it is the
+   name, not an accent. The outlines are sized by height. Their box is 1.23 em
+   of the face (the reph above the headline, the u-matra below the line), so a
+   30px box sets the face at about 25px, the D app bar's size, and a 76px box
+   the login screen's 62px.
    ----------------------------------------------------------------------------- */
 @layer components {
   .sd-lockup {
@@ -258,74 +260,113 @@ html[data-cvd='1'] {
     color: var(--foreground);
     white-space: nowrap;
   }
+  .sd-lockup__icon {
+    display: block;
+    flex: none;
+  }
+  .sd-lockup__name {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .sd-lockup__wordmark {
+    display: block;
+    width: auto;
+    overflow: visible;
+    fill: currentColor;
+    /* A hair of weight where Tiro's thin strokes would fade, in font units, so
+       it scales with the outlines: 22 units is 0.5px in the app bar. */
+    stroke: currentColor;
+    stroke-width: var(--sd-wordmark-weight, 0);
+    stroke-linejoin: round;
+  }
+  .sd-lockup__latin {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-synthesis: none;
+    line-height: 1;
+    color: var(--brand);
+    letter-spacing: var(--sd-latin-tracking, 0.4em);
+    /* Tracking adds space after the last letter too; take it back, so the caps
+       end where they appear to and centre under the Devanagari. */
+    margin-right: calc(-1 * var(--sd-latin-tracking, 0.4em));
+  }
+
+  /* App bar: icon 34px beside the wordmark at about 25px over 10px caps. */
+  .sd-lockup--bar {
+    gap: 0.625rem;
+  }
+  .sd-lockup--bar .sd-lockup__icon {
+    width: 2.125rem;
+    height: 2.125rem;
+  }
+  .sd-lockup--bar .sd-lockup__name {
+    gap: 0.125rem;
+  }
+  .sd-lockup--bar .sd-lockup__wordmark {
+    --sd-wordmark-weight: 22;
+    height: 1.875rem;
+  }
+  .sd-lockup--bar .sd-lockup__latin {
+    font-size: 0.625rem;
+  }
+  /* The narrowest phones: the icon steps aside so the account controls fit
+     beside both scripts down to 320px. */
+  @media (max-width: 359.98px) {
+    .sd-lockup--bar .sd-lockup__icon {
+      display: none;
+    }
+  }
+
+  /* Stacked: the icon over the name. md under a card title (broker, About),
+     lg on the login screen. */
+  .sd-lockup--stacked {
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .sd-lockup--stacked .sd-lockup__name {
+    gap: 0.25rem;
+  }
+  .sd-lockup--center,
+  .sd-lockup--center .sd-lockup__name {
+    align-items: center;
+  }
+  .sd-lockup--start,
+  .sd-lockup--start .sd-lockup__name {
+    align-items: flex-start;
+  }
+  .sd-lockup--md .sd-lockup__icon {
+    width: 3.5rem;
+    height: 3.5rem;
+  }
+  .sd-lockup--md .sd-lockup__wordmark {
+    --sd-wordmark-weight: 12;
+    height: 3.375rem;
+  }
+  .sd-lockup--md .sd-lockup__latin {
+    --sd-latin-tracking: 0.44em;
+    font-size: 0.8125rem;
+  }
+  .sd-lockup--lg .sd-lockup__icon {
+    width: 5rem;
+    height: 5rem;
+  }
+  .sd-lockup--lg .sd-lockup__wordmark {
+    --sd-wordmark-weight: 6;
+    height: 4.75rem;
+  }
+  .sd-lockup--lg .sd-lockup__latin {
+    --sd-latin-tracking: 0.46em;
+    font-size: 1rem;
+  }
+
+  /* Text set in the wordmark's face, where outlines will not do. Never
+     letter-spaced (the headline would break) and never synthesised bold. */
   .sd-wordmark {
     font-family: var(--font-wordmark);
     font-weight: 400;
     font-synthesis: none;
     letter-spacing: 0;
-    line-height: 1.25;
-  }
-  .sd-lockup__latin {
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    line-height: 1;
-  }
-
-  /* Phones: stacked, Devanagari over the caps, which fits beside the account
-     controls down to 320px. From the sm breakpoint: one line, with a hairline. */
-  .sd-lockup--bar {
-    flex-direction: column;
-    gap: 0.125rem;
-  }
-  .sd-lockup--bar .sd-wordmark {
-    font-size: 1.75rem;
-    line-height: 1;
-  }
-  .sd-lockup--bar .sd-lockup__latin {
-    font-size: 0.5625rem;
-    letter-spacing: 0.1em;
-    padding-left: 0.1em;
-  }
-  .sd-lockup__rule {
-    display: none;
-    align-self: stretch;
-    width: 1px;
-    margin-block: 0.25rem;
-    background: var(--border);
-  }
-  @media (min-width: 40rem) {
-    .sd-lockup--bar {
-      flex-direction: row;
-      gap: 0.5rem;
-    }
-    .sd-lockup--bar .sd-wordmark {
-      font-size: 1.25rem;
-      line-height: 1.25;
-    }
-    .sd-lockup--bar .sd-lockup__latin {
-      font-size: 0.9375rem;
-      letter-spacing: 0.08em;
-      padding-left: 0;
-    }
-    .sd-lockup__rule {
-      display: block;
-    }
-  }
-
-  .sd-lockup--stacked {
-    flex-direction: column;
-    gap: 0.25rem;
-  }
-  /* The Devanagari line about 1.2 times the width of the caps line. */
-  .sd-lockup--stacked .sd-wordmark {
-    font-size: 3rem;
-  }
-  .sd-lockup--stacked .sd-lockup__latin {
-    font-size: 0.875rem;
-    letter-spacing: 0.12em;
-    /* Tracking adds space after the last letter too; pad the start to match,
-       so the caps centre under the Devanagari. */
-    padding-left: 0.12em;
   }
 }
 
