@@ -14,13 +14,21 @@ healthy.
   - Name: सुदर्शन is drawn with the same letters as the icon.
   - Fonts: Barlow for text, Khand for headings and large figures.
   - Gains are green with an up arrow and a plus sign. Losses are red with a down arrow and a minus sign.
-- **Dashboard.** It shows:
-  - today's P&L (realised plus unrealised);
-  - funds available, and how much margin is in use;
-  - NIFTY 50, NIFTY BANK and INDIA VIX, refreshed every 30 seconds while NSE is open;
+- **Dashboard, live.** It shows:
+  - today's P&L (realised plus unrealised). The unrealised part moves with every price tick of
+    your open positions. It is checked against Upstox's own figures whenever an order is placed,
+    fills or is rejected, and every 45 seconds while the market is open;
+  - funds available, and how much margin is in use, updated with those checks;
+  - NIFTY 50, NIFTY BANK and INDIA VIX, moving tick by tick;
   - a holdings summary.
 
-  All figures come from your account; nothing is sample data.
+  "Live" beside the figures means prices are arriving. If they stop for 10 seconds while the
+  market is open, it says "Stale" and how long ago the last update came, and the figures that
+  should be moving turn grey (an index also gets a clock mark). After the close it says "Market
+  closed". When the phone wakes up, or the price feed drops, the app reconnects by itself and
+  says "Reconnecting" with the age of the figures until prices arrive again; it never says
+  "Live" in that time. If reconnecting takes a while, prices are fetched every few seconds until
+  the feed is back. All figures come from your account; nothing is sample data.
 - **Login page.** New layout. If Chrome has saved your password, it can fill it in after your
   fingerprint: Chrome, then Settings, then Google Password Manager, then "Verify it's you to
   autofill passwords".
@@ -44,6 +52,7 @@ healthy.
 
 ### Not in this release yet
 - Watchlists, the screener and alerts. Their screens are designed and come next.
+- The holdings summary on the dashboard is read when the page opens, not tick by tick yet.
 - Positions, Tradebook and the other inner pages still use the older green and red shades.
 - The login page does not show whether NSE is open, because that needs data that only exists
   after login.
