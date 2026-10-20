@@ -1073,6 +1073,18 @@ describe('Watchlist sheet', () => {
     )
   })
 
+  it('says the market is closed instead of waiting for a book', async () => {
+    const user = userEvent.setup()
+    calendar.state.open = false
+    renderPage()
+    const sheet = await openSheet(user, /^SBIN/, 'SBIN')
+    expect(within(sheet).getByText('Market closed. Depth shows when it opens.')).toBeInTheDocument()
+
+    // A book that does come (the broker's snapshot on subscribing) is shown.
+    tick('SBIN', 'NSE', { ltp: 812.5, depth: DEPTH })
+    expect(within(sheet).getByRole('table')).toHaveTextContent('812.45')
+  })
+
   it('ages the book from its last change, and calls it stale once the socket is down', async () => {
     fakeClock()
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })

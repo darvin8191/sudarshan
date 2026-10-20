@@ -102,7 +102,8 @@ function Level({
  * earlier visit: LTP ticks keep that line moving but carry no book, and after a
  * reconnect only the list's LTP subscriptions are sent again. So nothing is
  * shown until a depth frame arrives after the sheet opens (the manager makes a
- * new book object for each one). Its age runs from the last change of the book,
+ * new book object for each one); with the market closed, the sheet says so
+ * rather than waiting. Its age runs from the last change of the book,
  * not from the last LTP tick: a book that has not changed for `STALE_MS` while
  * the market is open shows how old it is, and is stale, greyed, once the
  * socket is down as well. While the socket is up an unchanged book is the
@@ -187,7 +188,11 @@ function Depth({
           </tbody>
         </table>
       ) : (
-        <p className="py-1 text-sm font-medium text-muted-foreground">Waiting for market depth.</p>
+        <p className="py-1 text-sm font-medium text-muted-foreground">
+          {marketOpen === false
+            ? 'Market closed. Depth shows when it opens.'
+            : 'Waiting for market depth.'}
+        </p>
       )}
     </section>
   )
