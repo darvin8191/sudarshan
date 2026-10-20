@@ -129,11 +129,13 @@ def test_orderstatus_answers_a_part_fill_as_before():
     assert _orderstatus(raw) == {**PART_FILLED_ROW, "average_price": 0.0}
 
 
-#: A position partly booked today: bought 130, sold 65; 65 still held.
+#: A position partly booked today: bought 130 at 120, sold 65 at 140; 65 still held, last 130.
+#: Its figures hold together: value = sell value - buy value (9,100 - 15,600), and the net pnl =
+#: value + quantity x last price = realised 1,300 + unrealised 650.
 POSITION = {
     "exchange": "NFO",
     "multiplier": 1.0,
-    "value": -9100.0,
+    "value": -6500.0,
     "pnl": 1950.0,
     "product": "MIS",
     "instrument_token": "NSE_FO|49213",
@@ -184,3 +186,61 @@ def test_a_position_carries_what_its_sheet_shows():
 def test_a_position_field_upstox_leaves_out_stays_out(missing):
     (row,) = transform_positions_data([{**POSITION, missing: None}])
     assert missing not in row
+
+
+#: A position carried in from yesterday: 65 bought at 100, closed yesterday at 118.40, last 130,
+#: nothing traded today. Upstox documents realised and unrealised as the DAY's P&L
+#: (65 x (130 - 118.40) = 754) and pnl as the position's net (65 x (130 - 100) = 1,950).
+CARRIED = {
+    "exchange": "NFO",
+    "multiplier": 1.0,
+    "value": -6500.0,
+    "pnl": 1950.0,
+    "product": "D",
+    "instrument_token": "NSE_FO|49213",
+    "average_price": 100.0,
+    "buy_value": 6500.0,
+    "overnight_quantity": 65,
+    "day_buy_value": 0.0,
+    "day_buy_price": 0.0,
+    "overnight_buy_amount": 6500.0,
+    "overnight_buy_quantity": 65,
+    "day_buy_quantity": 0,
+    "day_sell_value": 0.0,
+    "day_sell_price": 0.0,
+    "overnight_sell_amount": 0.0,
+    "overnight_sell_quantity": 0,
+    "day_sell_quantity": 0,
+    "quantity": 65,
+    "last_price": 130.0,
+    "unrealised": 754.0,
+    "realised": 0.0,
+    "sell_value": 0.0,
+    "tradingsymbol": "NIFTY27OCT2625900CE",
+    "close_price": 118.4,
+    "buy_price": 100.0,
+    "sell_price": 0.0,
+}
+
+
+def _adds_up(row: dict) -> bool:
+    """The rule the phone's Positions cards apply before showing booked and open apart."""
+    return abs(row["realised"] + row["unrealised"] - row["pnl"]) <= 1.0
+
+
+def test_the_vectors_hold_together():
+    for raw in (POSITION, CARRIED):
+        assert raw["value"] == raw["sell_value"] - raw["buy_value"]
+        assert raw["pnl"] == raw["value"] + raw["quantity"] * raw["last_price"] * raw["multiplier"]
+    # Today's P&L on the part carried in counts from yesterday's close.
+    assert CARRIED["unrealised"] == pytest.approx(65 * (130.0 - 118.4))
+
+
+def test_a_carried_position_s_day_split_need_not_add_up_to_its_net_pnl():
+    intraday, carried = transform_positions_data([POSITION, CARRIED])
+    # Passed through as Upstox sends them, for the sheet to judge.
+    assert (carried["realised"], carried["unrealised"], carried["pnl"]) == (0.0, 754.0, 1950.0)
+    assert carried["overnight_quantity"] == 65
+    # A position opened today adds up; the carried one does not, so its cards show the total alone.
+    assert _adds_up(intraday)
+    assert not _adds_up(carried)

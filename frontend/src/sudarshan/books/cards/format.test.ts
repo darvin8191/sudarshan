@@ -4,7 +4,7 @@ import type { Holding, Order, Position } from '@/types/trading'
 import { clockOf, figure, momentOf, orderState, sideOf, signedUnits, units } from './format'
 import { dayChangeOf } from './HoldingCards'
 import { filledText, priceText, remainingText } from './OrderCards'
-import { addProduct, realisedOf, unrealisedOf } from './PositionCards'
+import { addProduct, realisedOf, splitAddsUp, splitOf, unrealisedOf } from './PositionCards'
 import type { PricedRow } from './useFramePrices'
 
 function priced<T>(item: T, figures: Partial<PricedRow<T>> = {}): PricedRow<T> {
@@ -178,6 +178,26 @@ describe('a position’s P&L, booked and open', () => {
     expect(unrealisedOf(priced(position({ realised: 1300 }), { pnl: 2210 }))).toBe(910)
     expect(unrealisedOf(priced(position({}), { pnl: 2210 }))).toBeNull()
     expect(unrealisedOf(priced(position({ quantity: 0 }), { pnl: 1200 }))).toBe(0)
+  })
+
+  it('splits the P&L only where booked and open add up to it, within a rupee', () => {
+    // Opened today: 1,300 booked + 650 open = 1,950.
+    expect(splitAddsUp(position({ realised: 1300, unrealised: 650 }))).toBe(true)
+    // The broker's rounding is not a disagreement.
+    expect(splitAddsUp(position({ realised: 1300.4, unrealised: 650.45 }))).toBe(true)
+    // Carried in: the day's 0 + 754 is not the net 1,950.
+    expect(splitAddsUp(position({ realised: 0, unrealised: 754 }))).toBe(false)
+    // An open part worked out as the P&L less what was booked adds up by itself.
+    expect(splitAddsUp(position({ realised: 1300 }))).toBe(true)
+    // Nothing booked said: nothing to split.
+    expect(splitAddsUp(position({ unrealised: 1950 }))).toBe(false)
+  })
+
+  it('splits the whole book only when every position adds up', () => {
+    const today = priced(position({ realised: 1300, unrealised: 650 }), { pnl: 1950 })
+    const carried = priced(position({ realised: 0, unrealised: 754 }), { pnl: 1950 })
+    expect(splitOf([today])).toEqual({ realised: 1300, unrealised: 650 })
+    expect(splitOf([today, carried])).toBeNull()
   })
 
   it('adds on the position’s own product, so the order adds to it', () => {

@@ -168,6 +168,43 @@ const CLOSED = {
   unrealised: 0,
 } as Position
 
+/**
+ * Carried in from yesterday, as Upstox's book reads it (sudarshan/books/tests, CARRIED):
+ * bought 65 at 100, closed yesterday at 118.40, last 130. Realised and unrealised are the
+ * day's (0 and 754), pnl the net (1,950): they do not add up, so only the total is shown.
+ */
+const CARRIED = {
+  symbol: 'NIFTY27OCT2625700CE',
+  exchange: 'NFO',
+  product: 'NRML',
+  quantity: 65,
+  average_price: 100,
+  ltp: 130,
+  pnl: 1950,
+  pnlpercent: 30,
+  realised: 0,
+  unrealised: 754,
+  day_buy_quantity: 0,
+  day_buy_value: 0,
+  day_sell_quantity: 0,
+  day_sell_value: 0,
+  overnight_quantity: 65,
+} as Position
+
+/** Carried in and squared off today: 900 net, of which the day's part is 300. */
+const CLOSED_CARRIED = {
+  symbol: 'BANKNIFTY27OCT2657000CE',
+  exchange: 'NFO',
+  product: 'NRML',
+  quantity: 0,
+  average_price: 0,
+  ltp: 410,
+  pnl: 900,
+  pnlpercent: 0,
+  realised: 300,
+  unrealised: 0,
+} as Position
+
 function book(...positions: Position[]) {
   return { status: 'success', data: positions }
 }
@@ -247,6 +284,23 @@ describe('Positions on a phone: the cards', () => {
     expect(summary).toHaveTextContent('Realised +₹1,200.00')
     expect(summary).toHaveTextContent('Unrealised +₹1,133.00')
     expect(summary).toHaveTextContent('2 open positions')
+  })
+
+  it('shows the total alone when a position’s booked and open do not add up to its P&L', async () => {
+    await renderPhone(LONG, CARRIED)
+    const summary = screen.getByRole('region', { name: 'Total P&L' })
+    expect(screen.getByTestId('positions-total')).toHaveTextContent('+₹2,600.00')
+    expect(summary).not.toHaveTextContent('Realised')
+    expect(summary).not.toHaveTextContent('Unrealised')
+  })
+
+  it('keeps a closed position’s booked figure at its P&L, and the total alone', async () => {
+    await renderPhone(LONG, CLOSED_CARRIED)
+    const closed = screen.getByRole('region', { name: 'Closed (1)' })
+    const row = within(closed).getByRole('button', { name: /BANKNIFTY 57000 CE/ })
+    expect(row).toHaveTextContent('+₹900.00')
+    expect(row).toHaveTextContent('Booked')
+    expect(screen.getByRole('region', { name: 'Total P&L' })).not.toHaveTextContent('Realised')
   })
 
   it('moves the P&L and the LTP with every tick, with the last tick’s arrow', async () => {
@@ -404,6 +458,18 @@ describe('Positions on a phone: the sheet and its actions', () => {
 
     tick(CALL, { ltp: 154.5 })
     expect(details).toHaveTextContent('Unrealised+₹780.00')
+  })
+
+  it('leaves booked and open out of a carried position’s sheet: they do not add up', async () => {
+    const tap = user()
+    await renderPhone(CARRIED)
+    await tap.click(card(/NIFTY 25700 CE/))
+    const sheet = screen.getByRole('dialog', { name: 'NIFTY 25700 CE' })
+    expect(sheet).toHaveTextContent('+₹1,950.00')
+    const details = within(sheet).getByRole('region', { name: 'Details' })
+    expect(details).not.toHaveTextContent('Realised')
+    expect(details).not.toHaveTextContent('Unrealised')
+    expect(details).toHaveTextContent('Overnight quantity+65')
   })
 
   it('leaves out the details a broker does not send', async () => {

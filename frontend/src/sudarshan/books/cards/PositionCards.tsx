@@ -116,11 +116,34 @@ export function unrealisedOf(row: PricedRow<BookPosition>): number | null {
   return realised !== null && row.pnl !== null ? row.pnl - realised : null
 }
 
-/** The book's P&L split into booked and open, when every position says. */
-function splitOf(rows: PricedRow<BookPosition>[]): { realised: number; unrealised: number } | null {
+/** Rs 1: the broker's own rounding, not a disagreement. */
+const SPLIT_TOLERANCE = 1
+
+/**
+ * Whether a position's booked and open add up to its P&L, as the book read it.
+ * Upstox documents realised and unrealised as the day's P&L and pnl as the
+ * position's net, so on a position carried in from an earlier day they need
+ * not: the split would then say something the total does not, and only the
+ * total is shown. An open part worked out as the P&L less what was booked adds
+ * up by itself.
+ */
+export function splitAddsUp(position: BookPosition): boolean {
+  const pnl = figure(position.pnl)
+  const booked = realisedOf(position)
+  if (pnl === null || booked === null) return false
+  const open = figure(position.unrealised) ?? figure(position.unrealized_pnl)
+  if (open === null) return true
+  return Math.abs(booked + open - pnl) <= SPLIT_TOLERANCE
+}
+
+/** The book's P&L split into booked and open, when every position says and adds up. */
+export function splitOf(
+  rows: PricedRow<BookPosition>[]
+): { realised: number; unrealised: number } | null {
   let realised = 0
   let unrealised = 0
   for (const row of rows) {
+    if (!splitAddsUp(row.item)) return null
     const booked = realisedOf(row.item)
     const open = unrealisedOf(row)
     if (booked === null || open === null) return null
@@ -542,8 +565,10 @@ function PositionSheet({
   const quantity = quantityOf(position)
   const side = sideOf(quantity)
   const contract = useContract(side ? apiKey : null, symbol, exchange)
-  const realised = realisedOf(position)
-  const unrealised = unrealisedOf(row)
+  // Booked and open apart only when they add up to the P&L at the top (see splitAddsUp).
+  const split = splitAddsUp(position)
+  const realised = split ? realisedOf(position) : null
+  const unrealised = split ? unrealisedOf(row) : null
   const dayBuy = [figure(position.day_buy_quantity), figure(position.day_buy_value)] as const
   const daySell = [figure(position.day_sell_quantity), figure(position.day_sell_value)] as const
   const overnight = figure(position.overnight_quantity)
