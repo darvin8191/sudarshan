@@ -235,8 +235,12 @@ const PositionBoard = memo(function PositionBoard({
   const { marks: exits, hold: holdExits, settle: settleExits } = useSent<number>()
   useEffect(() => {
     if (exits.size === 0) return
-    const now = new Map(positions.map((position) => [positionId(position), quantityOf(position)]))
-    settleExits([...exits].filter(([id, mark]) => now.get(id) !== mark.was).map(([id]) => id))
+    const quantities = new Map(
+      positions.map((position) => [positionId(position), quantityOf(position)])
+    )
+    settleExits(
+      [...exits].filter(([id, mark]) => quantities.get(id) !== mark.was).map(([id]) => id)
+    )
   }, [positions, exits, settleExits])
 
   const total = rows.reduce((sum, row) => sum + (row.pnl ?? 0), 0)
