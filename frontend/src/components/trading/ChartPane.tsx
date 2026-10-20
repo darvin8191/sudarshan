@@ -100,6 +100,7 @@ import {
   type DrawSelection,
   type DrawStats,
   type IndicatorSettingsRequest,
+  type LiveStatus,
   type OrderTicketRequest,
   type ReplayState,
   type SymbolView,
@@ -118,6 +119,7 @@ import { ChartToolbar } from './ChartToolbar'
 import { ComparisonMenu } from './ComparisonMenu'
 import { DrawingStyleBar } from './DrawingStyleBar'
 import { DrawingTextDialog, type TextRequest } from './DrawingTextDialog'
+import { LiveStatusMarker } from './LiveStatusMarker'
 import { ChartOrderBridgeContext } from './dock/chartOrderBridge'
 import {
   type ChartOrderAction,
@@ -380,6 +382,8 @@ export function ChartPane({
   const [branding, setBranding] = useState<BrandingLink | null>(null)
   const [qty, setQty] = useState(1)
   const [wsState, setWsState] = useState('connecting')
+  /** Live, delayed, stale or closed; the pane shows a marker for all but live. */
+  const [liveStatus, setLiveStatus] = useState<LiveStatus | null>(null)
   /**
    * Just the two history flags, mirrored locally. The full DrawStats is pushed
    * to the parent for the drawing rail, but the toolbar's undo/redo sit in THIS
@@ -540,6 +544,7 @@ export function ChartPane({
         intervalCbRef.current?.(paneId, iv)
       },
       onWsState: (s) => current && setWsState(s),
+      onLiveStatus: (status) => current && setLiveStatus(status),
       onSymbolLoaded: (view) => {
         if (!current) return
         setSym(view)
@@ -1667,6 +1672,7 @@ export function ChartPane({
           {sym && lotInfoText(sym, qty) && (
             <span className="text-[10px] text-muted-foreground">{lotInfoText(sym, qty)}</span>
           )}
+          <LiveStatusMarker status={liveStatus} className="mt-0.5" />
         </div>
         {/* The armed drawing tool's glyph follows the pointer: the terminal
             sets --tool-cursor while a tool is armed and clears it after. */}

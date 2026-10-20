@@ -1,11 +1,11 @@
 import {
   type Bar,
-  CandleBuilder,
   comparisonController,
   createChart,
   DataLoadingController,
   ReplayGroup,
   type SeriesApi,
+  SessionCalendar,
 } from 'openalgo-charts'
 import {
   parseExpression,
@@ -16,6 +16,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { quietVolumeStyle } from './chartTheme'
 import { CHART_TYPES } from './chartTypes'
+import { LiveBarBuilder } from './liveBars'
 import { type SymbolView, TradingTerminal } from './terminal'
 import { WorkspaceReplayCoordinator } from './workspaceReplay'
 
@@ -28,7 +29,7 @@ type TerminalState = {
   volumeMA: SeriesApi | null
   ctype: string
   rawBars: Bar[]
-  builder: CandleBuilder
+  builder: LiveBarBuilder
   liveBucket: number
   sym: SymbolView
   interval: string
@@ -175,7 +176,7 @@ function mount() {
   state.interval = '1m' // Whole-bar replay has no finer history request.
   state.rawBars = bars.map((b) => ({ ...b }))
   state.liveBucket = 240
-  state.builder = new CandleBuilder({ intervalSec: 60, volumeMode: 'ltq-sum' })
+  state.builder = new LiveBarBuilder({ interval: '1m' })
   state.builder.seed(state.rawBars[3])
   state.setPriceData()
   return { terminal, state, container, legendEl }
@@ -1291,6 +1292,161 @@ describe('live candle alignment', () => {
       expect.objectContaining({ time: sessionOpen + 60 * 60, close: 104, volume: 0 }),
       { provisional: true }
     )
+  })
+})
+
+describe('the live bar in the terminal', () => {
+  /** UTC seconds of a wall-clock time in India. */
+  const ist = (h: number, mi: number, s = 0) => Date.UTC(2026, 9, 20, h, mi, s) / 1000 - 19_800
+  type LiveState = TerminalState & {
+    frames: { read(raw: unknown): void }
+    liveClock: { start(): void; stop(): void }
+    pollBook(): Promise<void>
+  }
+
+  function wired(state: TerminalState) {
+    let onDepth: ((symbol: string, exchange: string, depth: unknown) => void) | undefined
+    state.ws = {
+      onLtp: () => () => {},
+      onDepth: (cb: typeof onDepth) => {
+        onDepth = cb
+        return () => {}
+      },
+      subscribe() {},
+    }
+    return (ltp: number, timeSec: number) =>
+      onDepth?.(state.sym.symbol, state.sym.exchange, { bids: [], asks: [], ltp, timeSec })
+  }
+
+  it("moves the forming bar's volume with the day's total each depth frame carries", () => {
+    const { state } = mount()
+    const live = state as LiveState
+    const pushBar = vi.fn()
+    state.data = { pushBar, destroy() {} } as unknown as NonNullable<TerminalState['data']>
+    state.rawBars = [bar(ist(10, 0), 100, 5000)]
+    const depth = wired(state)
+    state.connectLive()
+    const frame = (volume: number) =>
+      JSON.stringify({
+        type: 'market_data',
+        symbol: state.sym.symbol,
+        exchange: state.sym.exchange,
+        data: { ltp: 101, volume, depth: { buy: [], sell: [] } },
+      })
+    live.frames.read(frame(800_000))
+    depth(101, ist(10, 0, 20))
+    expect(state.rawBars.at(-1)?.volume).toBe(5000)
+    live.frames.read(frame(800_650))
+    depth(101.5, ist(10, 0, 40))
+    expect(state.rawBars.at(-1)).toMatchObject({ time: ist(10, 0), close: 101.5, volume: 5650 })
+    expect(state.volume.getData().at(-1)?.close).toBe(5650)
+  })
+
+  it('opens the next bar on the clock, draws it, and keeps it out of history', async () => {
+    const { state } = mount()
+    const live = state as LiveState
+    const pushBar = vi.fn()
+    const refresh = vi.fn(async () => state.rawBars)
+    state.data = {
+      pushBar,
+      refresh,
+      bars: () => [bar(ist(10, 0), 100)],
+      destroy() {},
+    } as unknown as NonNullable<TerminalState['data']>
+    state.rawBars = [bar(ist(9, 59), 99), bar(ist(10, 0), 100)]
+    state.setPriceData()
+    const depth = wired(state)
+    vi.setSystemTime(ist(10, 0, 50) * 1000)
+    state.connectLive()
+    depth(100.5, ist(10, 0, 50))
+    state.builder.setSession(
+      new SessionCalendar({ timezone: 'Asia/Kolkata', sessions: ['0915-1530:23456'] })
+    )
+    live.liveClock.start()
+    pushBar.mockClear()
+    vi.advanceTimersByTime(11_000) // 10:01:01
+    expect(state.rawBars.at(-1)).toEqual({
+      time: ist(10, 1),
+      open: 100.5,
+      high: 100.5,
+      low: 100.5,
+      close: 100.5,
+      volume: 0,
+    })
+    expect(state.price.getData().at(-1)?.time).toBe(ist(10, 1))
+    expect(pushBar).not.toHaveBeenCalled()
+    // History is asked for the bar that closed, as a tick opening it would have.
+    vi.advanceTimersByTime(2_500)
+    expect(refresh).toHaveBeenCalledOnce()
+    // The first trade is the bar's open, and that bar is history's to keep.
+    depth(101, ist(10, 1, 3))
+    expect(state.rawBars.at(-1)).toMatchObject({ time: ist(10, 1), open: 101, low: 101 })
+    expect(pushBar).toHaveBeenCalledWith(expect.objectContaining({ time: ist(10, 1), open: 101 }))
+    live.liveClock.stop()
+  })
+
+  it('reads the book on an order event, once for a burst, and re-syncs it each minute', async () => {
+    let socket: {
+      onopen: (() => void) | null
+      onmessage: ((event: { data: string }) => void) | null
+    } | null = null
+    vi.stubGlobal(
+      'WebSocket',
+      class {
+        readyState = 1
+        onopen: (() => void) | null = null
+        onclose: (() => void) | null = null
+        onerror: (() => void) | null = null
+        onmessage: ((event: { data: string }) => void) | null = null
+        constructor() {
+          socket = this
+        }
+        send() {}
+        close() {
+          this.readyState = 3
+        }
+      }
+    )
+    const { terminal, state } = mount()
+    const live = state as LiveState
+    vi.spyOn(terminal, 'api').mockResolvedValue({ data: { minutes: ['1m'] } })
+    vi.spyOn(terminal, 'search').mockResolvedValue([])
+    await terminal.init()
+    const pollBook = vi.spyOn(live, 'pollBook').mockResolvedValue()
+    socket!.onopen?.()
+    socket!.onmessage?.({ data: JSON.stringify({ type: 'auth', status: 'success' }) })
+    const order = (status: string) =>
+      socket!.onmessage?.({
+        data: JSON.stringify({
+          type: 'order_update',
+          orderid: '1',
+          symbol: state.sym.symbol,
+          exchange: state.sym.exchange,
+          action: 'BUY',
+          quantity: 65,
+          price: 100,
+          pricetype: 'LIMIT',
+          product: 'MIS',
+          order_status: status,
+          filled_quantity: 0,
+          pending_quantity: 65,
+          average_price: 0,
+          rejection_reason: '',
+          mode: 'live',
+        }),
+      })
+    order('open')
+    order('complete')
+    expect(pollBook).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(300)
+    expect(pollBook).toHaveBeenCalledOnce()
+    // Nothing on the old eight-second cadence; the re-sync comes at a minute.
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(pollBook).toHaveBeenCalledOnce()
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(pollBook).toHaveBeenCalledTimes(2)
+    terminal.destroy()
+    expect(vi.getTimerCount()).toBe(0)
   })
 })
 

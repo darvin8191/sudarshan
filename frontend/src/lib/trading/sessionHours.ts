@@ -234,6 +234,28 @@ export function applySessionHours(chart: Chart, exchange: string, apiKey: string
   else apply()
 }
 
+/**
+ * The exchange's calendar on its own, for the live bar and its status marker:
+ * the same hours the chart gets, from the same once-a-day fetch. Resolves to
+ * null when the hours cannot be had, which leaves a chart live but without a
+ * clock, never broken.
+ */
+export function sessionCalendarFor(
+  exchange: string,
+  apiKey: string
+): Promise<SessionCalendar | null> {
+  if (!exchange) return Promise.resolve(null)
+  const source = currentBook(apiKey)
+  const read = () => {
+    try {
+      return calendarOf(source, exchange)
+    } catch {
+      return null
+    }
+  }
+  return source.pending ? source.pending.then(read, () => null) : Promise.resolve(read())
+}
+
 /** Forget today's calendar. For tests. */
 export function resetSessionHours(): void {
   book = null
