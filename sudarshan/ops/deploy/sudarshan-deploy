@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+# sudarshan-deploy — bring the live OpenAlgo to the latest GitHub Release tag of the fork.
+# Design (first version, deliberately simple): the code is checked out IN PLACE in APP_DIR
+# (git checkout -f of the tag), frontend/dist is replaced by the CI-built release asset,
+# Python deps are refreshed the same way the installer did it (uv pip -r requirements-nginx.txt),
+# migrations run, openalgo restarts, health is checked. No releases/current symlink layout yet:
+# the systemd unit, nginx and the venv all point at APP_DIR, and changing that would touch the
+# live unit. Rollback = previous git ref + previous frontend/dist tarball + SQLite .backup copies.
+# Lives in the repo at sudarshan/ops/deploy/sudarshan-deploy; every release can update it.
+# Usage: sudarshan-deploy [--check | --redeploy | --force]
+#   --check     show latest Release / deployed tag / market state, change nothing
+#   --redeploy  install the latest Release again even if it is already deployed (still gated)
+#   --force     like --redeploy but ALSO ignores the market-hours gate (root only, emergencies)
+set -Eeuo pipefail
+MODE="deploy"; FORCE=0; REDEPLOY=0
+case "${1:-}" in
+    --check) MODE="check" ;;
+    --redeploy) REDEPLOY=1 ;;
+    --force) FORCE=1; REDEPLOY=1 ;;
+    "") ;;
+    *) echo "usage: sudarshan-deploy [--check|--redeploy|--force]" >&2; exit 2 ;;
+esac
+# shellcheck disable=SC1091
+source /etc/sudarshan/deploy.env
+STATE="/var/lib/sudarshan"; mkdir -p "${STATE}"
+exec 9> "${STATE}/deploy.lock"; flock -n 9 || { echo "another deploy is running"; exit 0; }
+OWNER_REPO="${REPO#https://github.com/}"
+as_svc() { sudo -u "${SVC_USER}" -H -- "$@"; }
+log() { echo "[$(date '+%F %T %Z')] $*"; }
+market_open() {   # 0 = trading hours (do not restart), 1 = safe
+    local now dow hhmm today
+    now="$(TZ=Asia/Kolkata date '+%u %H%M %F')"; read -r dow hhmm today <<< "${now}"
+    [[ "${dow}" -ge 6 ]] && return 1
+    grep -qx "${today}" /etc/sudarshan/nse_holidays.txt 2>/dev/null && return 1
+    # 10# forces decimal: "0930" would otherwise be read as an invalid octal number
+    local t=$((10#${hhmm}))
+    (( t >= 900 && t <= 1545 )) && return 0 || return 1
+}
+json="$(curl -fsSL -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${OWNER_REPO}/releases/latest" 2>/dev/null)" \
+    || { [[ "${MODE}" == "check" ]] && echo "no GitHub Release found yet for ${OWNER_REPO} (or API unreachable)"; exit 0; }
+tag="$(jq -r '.tag_name // empty' <<< "${json}")"
+asset_url="$(jq -r --arg a "${ASSET}" '.assets[]? | select(.name==$a) | .browser_download_url' <<< "${json}" | head -1)"
+deployed="$(cat "${STATE}/deployed_tag" 2>/dev/null || echo none)"
+if [[ "${MODE}" == "check" ]]; then
+    echo "latest release: ${tag:-none} | deployed: ${deployed} | asset: ${asset_url:-MISSING} | market_open: $(market_open && echo yes || echo no)"; exit 0
+fi
+[[ -n "${tag}" ]] || exit 0
+[[ "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { log "latest release '${tag}' is not a vA.B.C tag - ignored"; exit 0; }
+[[ "${tag}" != "${deployed}" || ${REDEPLOY} -eq 1 ]] || exit 0
+if market_open && [[ ${FORCE} -eq 0 ]]; then log "release ${tag} waiting for market close"; exit 0; fi
+[[ -n "${asset_url}" ]] || { log "release ${tag} has no ${ASSET} asset - not deploying"; exit 0; }
+sha_url="$(jq -r --arg a "${ASSET}.sha256" '.assets[]? | select(.name==$a) | .browser_download_url' <<< "${json}" | head -1)"
+ts="$(date +%Y%m%d-%H%M%S)"; bdir="/opt/sudarshan/backups/${ts}-${tag}"; mkdir -p "${bdir}"
+exec > >(tee -a "${STATE}/deploy-${ts}.log") 2>&1
+log "== deploy ${deployed} -> ${tag}"
+tmp="$(mktemp -d)"; trap 'rm -rf "${tmp}"' EXIT
+curl -fsSL "${asset_url}" -o "${tmp}/${ASSET}"
+if [[ -n "${sha_url}" ]]; then
+    want="$(curl -fsSL "${sha_url}" | awk '{print $1; exit}')"
+    have="$(sha256sum "${tmp}/${ASSET}" | awk '{print $1}')"
+    [[ -n "${want}" && "${want}" == "${have}" ]] || { log "checksum mismatch for ${ASSET} - not deploying"; exit 1; }
+    log "checksum OK (${have:0:12}...)"
+else
+    log "no ${ASSET}.sha256 in the release - continuing without checksum"
+fi
+# (no grep -q here: with pipefail an early grep exit could SIGPIPE tar and fake a failure)
+tar -tzf "${tmp}/${ASSET}" | grep -x 'dist/index.html' > /dev/null || { log "${ASSET} has no dist/index.html - not deploying"; exit 1; }
+# ---- self-update: a release may carry a newer version of this tool. It is read straight from
+# GitHub at the release tag (never from APP_DIR, which the service user can write), checked, and
+# used from the NEXT run on - so a fixed tool arrives even when this run's deploy fails.
+self_update() {
+    local url="https://raw.githubusercontent.com/${OWNER_REPO}/${tag}/sudarshan/ops/deploy/sudarshan-deploy"
+    local new="${tmp}/sudarshan-deploy.new" me
+    me="$(readlink -f "$0")"
+    curl -fsSL "${url}" -o "${new}" 2>/dev/null || return 0      # this release carries no tool
+    cmp -s "${new}" "${me}" && return 0                            # already current
+    if bash -n "${new}" 2>/dev/null && grep -q '^# sudarshan-deploy' "${new}"; then
+        cp -a "${me}" "${me}.prev" 2>/dev/null || true
+        install -m 755 "${new}" "${me}.tmp" && mv -f "${me}.tmp" "${me}"
+        log "deploy tool updated from ${tag} (used from the next run; previous kept as ${me}.prev)"
+    else
+        log "WARNING: the deploy tool in ${tag} failed the syntax check - kept the current one"
+    fi
+}
+self_update
+as_svc git -C "${APP_DIR}" fetch --tags --quiet sudarshan
+as_svc git -C "${APP_DIR}" rev-parse -q --verify "refs/tags/${tag}^{commit}" > /dev/null || { log "tag ${tag} not found after fetch"; exit 1; }
+prev_ref="$(as_svc git -C "${APP_DIR}" rev-parse HEAD)"; echo "${prev_ref}" > "${bdir}/prev_ref"
+UV=(env UV_PYTHON_DOWNLOADS=never /usr/local/bin/uv pip install --quiet --python "${APP_DIR}/.venv/bin/python" -r "${APP_DIR}/requirements-nginx.txt")
+rollback() {
+    trap - ERR; set +e
+    log "!! rolling back to ${prev_ref}"
+    systemctl stop "${SERVICE}"
+    as_svc git -C "${APP_DIR}" checkout -f --detach "${prev_ref}"
+    as_svc "${UV[@]}" || log "WARNING: re-installing the previous Python packages failed"
+    rm -rf "${APP_DIR}/frontend/dist"; tar -xzf "${bdir}/frontend-dist-prev.tar.gz" -C "${APP_DIR}/frontend"
+    for b in "${bdir}"/*.db; do
+        [[ -f "${b}" ]] || continue
+        n="$(basename "${b}")"
+        rm -f "${APP_DIR}/db/${n}-wal" "${APP_DIR}/db/${n}-shm"   # stale WAL must never meet a restored DB
+        cp -a "${b}" "${APP_DIR}/db/${n}"
+    done
+    if [[ -f "${bdir}/historify.duckdb" ]]; then
+        rm -f "${APP_DIR}/db/historify.duckdb.wal"; cp -a "${bdir}/historify.duckdb" "${APP_DIR}/db/"
+    fi
+    chown -R "${SVC_USER}:${SVC_USER}" "${APP_DIR}/frontend/dist" "${APP_DIR}/db"
+    systemctl start "${SERVICE}"; log "rollback done (${SERVICE} $(systemctl is-active "${SERVICE}"))"
+}
+# ---- stop first: no requests, no DB writes and no half-old/half-new code during the update.
+# From here on ANY error rolls back and starts the service again (never leave openalgo stopped).
+log "stopping ${SERVICE} for the update"
+systemctl stop "${SERVICE}"
+trap 'log "unexpected error at line ${LINENO}"; rollback; exit 1' ERR
+# ---- backups (SQLite online backup API, DuckDB copy while stopped, previous dist, previous ref)
+for db in "${APP_DIR}"/db/*.db; do
+    if [[ -f "${db}" ]]; then sqlite3 "${db}" ".backup '${bdir}/$(basename "${db}")'"; fi
+done
+if [[ -f "${APP_DIR}/db/historify.duckdb" ]]; then cp -a "${APP_DIR}/db/historify.duckdb" "${bdir}/"; fi
+tar -czf "${bdir}/frontend-dist-prev.tar.gz" -C "${APP_DIR}/frontend" dist
+chown -R "${SVC_USER}:${SVC_USER}" "${bdir}"; chmod -R go-rwx "${bdir}"
+# ---- code + dist + deps + migrations
+as_svc git -C "${APP_DIR}" checkout -f --detach "refs/tags/${tag}"
+rm -rf "${APP_DIR}/frontend/dist"; tar -xzf "${tmp}/${ASSET}" -C "${APP_DIR}/frontend"
+chown -R "${SVC_USER}:${SVC_USER}" "${APP_DIR}/frontend/dist"
+as_svc "${UV[@]}"
+# migrate_all.py runs each migration with sys.executable, so the venv python is enough (no 'uv run').
+if ! as_svc bash -c "cd '${APP_DIR}/upgrade' && '${APP_DIR}/.venv/bin/python' migrate_all.py"; then log "migrations failed"; rollback; exit 1; fi
+# ---- start + health (this is our own service; TRINETRA is never touched)
+systemctl start "${SERVICE}"
+ok=0; code=""
+for _ in $(seq 1 90); do sleep 2; code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:5000/ || true)"; [[ "${code}" == "200" || "${code}" == "302" ]] && { ok=1; break; }; done
+if [[ ${ok} -eq 1 ]]; then
+    trap - ERR
+    echo "${tag}" > "${STATE}/deployed_tag"; log "deployed ${tag} OK (http ${code}); backup in ${bdir}"
+else
+    log "health check failed after start (last http ${code:-none})"; rollback; exit 1
+fi
+# keep the 10 newest backups
+{ ls -1dt /opt/sudarshan/backups/*/ 2>/dev/null | tail -n +11 | xargs -r rm -rf; } || true
