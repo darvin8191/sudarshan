@@ -20,7 +20,11 @@ export function FullWidthLayout() {
 
   return (
     <SocketProvider>
-      <div className="h-screen bg-background flex flex-col overflow-hidden">
+      {/* SUDARSHAN M4.15: the visible height (dvh), not the layout viewport's
+          (vh), which on a phone runs on under the address bar and pushes the
+          bottom of a page (the chart's Buy and Sell) off the screen. A browser
+          without dvh keeps h-screen. */}
+      <div className="h-screen supports-[height:100dvh]:h-dvh bg-background flex flex-col overflow-hidden">
         <AnalyzeBanner />
         {/* The height the banner leaves, so a page sized h-full still ends at
             the bottom of the screen instead of past it. */}
