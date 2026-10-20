@@ -64,11 +64,26 @@ describe('MobileBottomNav', () => {
       expect(positionsLink).toHaveClass('text-primary')
     })
 
-    it('highlights Tradebook when on the tradebook route', () => {
-      renderWithRouter('/tradebook')
+    // SUDARSHAN M8.2: the bar leads with the watchlist; Tradebook is in the menu.
+    it('highlights Watchlist when on the watchlist route', () => {
+      renderWithRouter('/watchlist')
 
-      const tradebookLink = screen.getByRole('link', { name: /tradebook/i })
-      expect(tradebookLink).toHaveClass('text-primary')
+      const watchlistLink = screen.getByRole('link', { name: /watchlist/i })
+      expect(watchlistLink).toHaveClass('text-primary')
+      expect(watchlistLink).toHaveAttribute('aria-current', 'page')
+    })
+
+    it('reads Watchlist, Dashboard, Orders, Positions from the left', () => {
+      renderWithRouter('/dashboard')
+
+      expect(screen.getAllByRole('link').map((link) => link.textContent)).toEqual([
+        'Watchlist',
+        'Dashboard',
+        'Orders',
+        'Positions',
+      ])
+      expect(screen.getByRole('link', { name: 'Orders' })).toHaveAttribute('href', '/orderbook')
+      expect(screen.queryByRole('link', { name: /tradebook/i })).toBeNull()
     })
 
     it('non-active items have muted color', () => {
@@ -81,7 +96,7 @@ describe('MobileBottomNav', () => {
     it('marks the current page by more than colour: a tinted pill and a bold label', () => {
       renderWithRouter('/orderbook')
 
-      const current = screen.getByRole('link', { name: /orderbook/i })
+      const current = screen.getByRole('link', { name: /orders/i })
       const other = screen.getByRole('link', { name: /dashboard/i })
       expect(current).toHaveClass('font-bold')
       expect(other).not.toHaveClass('font-bold')

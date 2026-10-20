@@ -1,6 +1,7 @@
 import {
   BarChart3,
   Bell,
+  Bookmark,
   BookOpen,
   Bot,
   Boxes,
@@ -57,10 +58,11 @@ export const navItems: NavItem[] = [
 ]
 
 // Items shown in mobile bottom navigation
+// SUDARSHAN M8.2: led by the watchlist, as a broker's app is; Tradebook moves to the menu.
 export const bottomNavItems: NavItem[] = [
+  { href: '/watchlist', label: 'Watchlist', icon: Bookmark },
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/orderbook', label: 'Orderbook', icon: ClipboardList },
-  { href: '/tradebook', label: 'Tradebook', icon: FileText },
+  { href: '/orderbook', label: 'Orders', icon: ClipboardList },
   { href: '/positions', label: 'Positions', icon: TrendingUp },
 ]
 
@@ -88,6 +90,8 @@ export const profileMenuItems: NavItem[] = [
   { href: '/autologin', label: 'Auto login', icon: KeyRound },
   { href: '/telegram', label: 'Telegram Bot', icon: MessageSquare },
   { href: '/whatsapp', label: 'WhatsApp Bot', icon: MessageCircle },
+  // SUDARSHAN M8.2: the watchlist, for a wide screen where the bottom bar is hidden.
+  { href: '/watchlist', label: 'Watchlist', icon: Bookmark },
   { href: '/holdings', label: 'Holdings', icon: ClipboardList },
   { href: '/flow', label: 'Flow Editor', icon: Workflow },
   { href: '/scalping', label: 'Scalping', icon: Zap },

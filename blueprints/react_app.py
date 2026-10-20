@@ -770,6 +770,12 @@ def react_autologin():
     return serve_react_app()
 
 
+# SUDARSHAN M8.2: the phone-first watchlist (its API is /watchlist/api/*, blueprints/watchlist.py)
+@react_bp.route("/watchlist", strict_slashes=False)
+def react_watchlist():
+    return serve_react_app()
+
+
 # ============================================================
 # Flow Routes - Visual Workflow Automation
 # ============================================================
