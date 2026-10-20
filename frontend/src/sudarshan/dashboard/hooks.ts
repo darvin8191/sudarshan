@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { useMarketStatus } from '@/hooks/useMarketStatus'
 import { istDay, type MarketOpen } from './live'
+import type { MarketCalendar } from './MarketCalendar'
 
 /**
  * The time now, moved on every `stepMs` while the page is in view, so that an
@@ -22,12 +22,13 @@ export function useNow(stepMs = 1000): number {
 /**
  * The market calendar `useMarketStatus` reads, as three answers instead of two.
  * Its `isMarketOpen` says "closed" while the timings are still loading, when
- * they could not be read, and, on a page left open overnight, all of the next
- * day, because the timings it holds are for the day they were read. A live
- * view must not call the market closed on any of those grounds, so each of
- * them is "not known" (null) here, and only a known open counts as open.
+ * they could not be read, and for timings read on an earlier day (the
+ * dashboard reads the calendar again each day, `MarketCalendarSource`, and
+ * this covers the moments before that read lands). A live view must not call
+ * the market closed on any of those grounds, so each of them is "not known"
+ * (null) here, and only a known open counts as open.
  */
-export function useMarketOpen(market: ReturnType<typeof useMarketStatus>): {
+export function useMarketOpen(market: MarketCalendar): {
   isOpen: MarketOpen
   anyOpen: () => boolean | null
 } {

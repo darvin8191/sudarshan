@@ -14,7 +14,6 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { tradingApi } from '@/api/trading'
-import { useMarketStatus } from '@/hooks/useMarketStatus'
 import { useOrderEventRefresh } from '@/hooks/useOrderEventRefresh'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
@@ -23,6 +22,12 @@ import { HoldingsCard } from '@/sudarshan/dashboard/HoldingsCard'
 import { useMarketOpen } from '@/sudarshan/dashboard/hooks'
 import { IndexStrip } from '@/sudarshan/dashboard/IndexStrip'
 import { type PositionsSnapshot, RESYNC_MS } from '@/sudarshan/dashboard/live'
+import {
+  CALENDAR_LOADING,
+  type MarketCalendar,
+  MarketCalendarSource,
+  useIstDay,
+} from '@/sudarshan/dashboard/MarketCalendar'
 import { type DashboardFunds, PnlCard } from '@/sudarshan/dashboard/PnlCard'
 import { formatAmount } from '@/sudarshan/dashboard/format'
 
@@ -131,7 +136,9 @@ export default function Dashboard() {
   const [syncedAt, setSyncedAt] = useState<number | null>(null)
   const readCount = useRef(0)
   const lastReadAt = useRef(0)
-  const market = useMarketStatus()
+  // SUDARSHAN: the market calendar, read again each day (MarketCalendarSource).
+  const [market, setMarket] = useState<MarketCalendar>(CALENDAR_LOADING)
+  const day = useIstDay()
   const { isOpen: marketOpen, anyOpen } = useMarketOpen(market)
   const anyMarketOpen = useRef(anyOpen)
   useEffect(() => {
@@ -366,6 +373,7 @@ export default function Dashboard() {
         </Link>
       </div>
 
+      <MarketCalendarSource key={day} onChange={setMarket} />
       <IndexStrip apiKey={apiKey} marketOpen={marketOpen} />
 
       <div className="grid items-start gap-2.5 md:gap-4 lg:grid-cols-2">

@@ -41,14 +41,14 @@ vi.mock('@/components/socket/SocketProvider', () => ({
 }))
 
 let marketOpen = false
-vi.mock('@/hooks/useMarketStatus', () => ({
-  useMarketStatus: () => ({
-    isMarketOpen: () => marketOpen,
-    isAnyMarketOpen: () => marketOpen,
-    isLoading: false,
-    error: null,
-  }),
-}))
+/** One object, as the real hook keeps its answers stable between renders. */
+const calendar = {
+  isMarketOpen: () => marketOpen,
+  isAnyMarketOpen: () => marketOpen,
+  isLoading: false,
+  error: null,
+}
+vi.mock('@/hooks/useMarketStatus', () => ({ useMarketStatus: () => calendar }))
 
 import { useAuthStore } from '@/stores/authStore'
 import { RESYNC_MS } from '@/sudarshan/dashboard/live'
