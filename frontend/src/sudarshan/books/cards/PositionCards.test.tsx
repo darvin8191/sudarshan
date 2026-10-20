@@ -387,6 +387,80 @@ describe('Positions on a phone: the sheet and its actions', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 
+  it('marks the position "Exit sent" and holds its Exit until the book shows the change', async () => {
+    const tap = user()
+    await renderPhone(LONG, SHORT)
+    await tap.click(card(/NIFTY 25900 CE/))
+    await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: /^Exit/ }))
+    await tap.click(
+      within(screen.getByRole('dialog', { name: 'Exit NIFTY 25900 CE?' })).getByRole('button', {
+        name: 'Exit',
+      })
+    )
+    await settle()
+    expect(api.closePosition).toHaveBeenCalledTimes(1)
+    // The broker's book lags the order: the re-read after it still says 65.
+    expect(card(/NIFTY 25900 CE/)).toHaveTextContent('Exit sent')
+    expect(card(/BANKNIFTY 57500 PE/)).not.toHaveTextContent('Exit sent')
+    expect(screen.getByRole('button', { name: 'Exit all' })).toBeDisabled()
+    await tap.click(card(/NIFTY 25900 CE/))
+    const exit = within(screen.getByRole('dialog')).getByRole('button', { name: /^Exit/ })
+    expect(exit).toBeDisabled()
+    expect(exit).toHaveTextContent('Exit sent')
+    await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Close' }))
+
+    // The book catches up: the position is closed, and nothing is held any more.
+    api.getPositions.mockResolvedValue(book(SHORT, { ...LONG, quantity: 0, pnl: 650 } as Position))
+    await tap.click(screen.getByRole('button', { name: 'Refresh' }))
+    await settle()
+    expect(screen.queryByText('Exit sent')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Exit all' })).toBeEnabled()
+  })
+
+  it('offers Exit again 15 s after an exit the book never showed', async () => {
+    const tap = user()
+    await renderPhone(LONG)
+    await tap.click(card(/NIFTY 25900 CE/))
+    await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: /^Exit/ }))
+    await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Exit' }))
+    await settle()
+    expect(card(/NIFTY 25900 CE/)).toHaveTextContent('Exit sent')
+
+    await pass(14_000)
+    expect(card(/NIFTY 25900 CE/)).toHaveTextContent('Exit sent')
+    await pass(1_500)
+    expect(card(/NIFTY 25900 CE/)).not.toHaveTextContent('Exit sent')
+    await tap.click(card(/NIFTY 25900 CE/))
+    expect(within(screen.getByRole('dialog')).getByRole('button', { name: /^Exit/ })).toBeEnabled()
+  })
+
+  it('holds nothing when the exit was refused, so it can be tried again', async () => {
+    const tap = user()
+    api.closePosition.mockResolvedValue({ status: 'error', message: 'Not now' })
+    await renderPhone(LONG)
+    await tap.click(card(/NIFTY 25900 CE/))
+    await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: /^Exit/ }))
+    await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Exit' }))
+    await settle()
+    expect(api.closePosition).toHaveBeenCalledTimes(1)
+    expect(card(/NIFTY 25900 CE/)).not.toHaveTextContent('Exit sent')
+    expect(screen.getByRole('button', { name: 'Exit all' })).toBeEnabled()
+  })
+
+  it('marks every open position "Exit sent" after Exit all', async () => {
+    const tap = user()
+    await renderPhone(LONG, SHORT, CLOSED)
+    await tap.click(screen.getByRole('button', { name: 'Exit all' }))
+    await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Exit all' }))
+    await settle()
+    expect(api.closeAllPositions).toHaveBeenCalledTimes(1)
+    expect(card(/NIFTY 25900 CE/)).toHaveTextContent('Exit sent')
+    expect(card(/BANKNIFTY 57500 PE/)).toHaveTextContent('Exit sent')
+    expect(screen.getByRole('button', { name: 'Exit all' })).toBeDisabled()
+    await pass(15_500)
+    expect(screen.queryByText('Exit sent')).toBeNull()
+  })
+
   it('makes the same call as the wide table’s close button', async () => {
     const tap = user()
     api.getPositions.mockResolvedValue(book(SHORT))

@@ -458,12 +458,15 @@ export default function Positions() {
       if (response.status === 'success') {
         showToast.success(response.message || `Position closed for ${position.symbol}`, 'positions')
         fetchPositions(true)
+        // SUDARSHAN M6.9: whether it went, so a phone card holds its Exit until the book moves.
+        return true
       } else {
         showToast.error(response.message || 'Failed to close position', 'positions')
       }
     } catch (_err) {
       showToast.error('Failed to close position', 'positions')
     }
+    return false
   }
 
   const handleCloseAllPositions = async () => {
@@ -472,12 +475,15 @@ export default function Positions() {
       if (response.status === 'success') {
         // Toast handled by close_position_event socket
         fetchPositions(true)
+        // SUDARSHAN M6.9: whether it went, so the phone's cards hold their Exits until the book moves.
+        return true
       } else {
         showToast.error(response.message || 'Failed to close all positions', 'positions')
       }
     } catch (_err) {
       showToast.error('Failed to close all positions', 'positions')
     }
+    return false
   }
 
   const exportToCSV = () => {

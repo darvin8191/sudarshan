@@ -1,4 +1,12 @@
-import { AlertTriangle, Ban, CheckCircle2, Clock, RefreshCw, XCircle } from 'lucide-react'
+import {
+  AlertTriangle,
+  Ban,
+  CheckCircle2,
+  Clock,
+  Hourglass,
+  RefreshCw,
+  XCircle,
+} from 'lucide-react'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 import {
   Dialog,
@@ -204,6 +212,19 @@ export function StatusChip({ state }: { state: OrderState }) {
     <span data-status={state.label} className={cn(CHIP, 'px-2', look.className)}>
       <Icon aria-hidden="true" className="size-3.5" />
       {state.label}
+    </span>
+  )
+}
+
+/** "Exit sent", "Cancel sent": a row whose order went and whose book has not caught up yet. */
+export function SentChip({ label }: { label: string }) {
+  return (
+    <span
+      data-sent="true"
+      className={cn(CHIP, 'px-2 bg-[color:var(--gold-tint)] text-[color:var(--warning-text)]')}
+    >
+      <Hourglass aria-hidden="true" className="size-3.5" />
+      {label}
     </span>
   )
 }

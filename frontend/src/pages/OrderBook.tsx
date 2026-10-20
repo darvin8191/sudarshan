@@ -365,6 +365,8 @@ export default function OrderBook() {
       if (response.status === 'success') {
         showToast.success(`Order cancelled: ${orderid}`, 'orders')
         setTimeout(() => fetchOrders(true), 1000)
+        // SUDARSHAN M6.9: whether it went, so a phone card holds its Cancel until the order ends.
+        return true
       } else {
         showToast.error(response.message || 'Failed to cancel order', 'orders')
       }
@@ -373,6 +375,7 @@ export default function OrderBook() {
       const message = axiosError.response?.data?.message || 'Failed to cancel order'
       showToast.error(message, 'orders')
     }
+    return false
   }
 
   const handleCancelAllOrders = async () => {
@@ -384,6 +387,8 @@ export default function OrderBook() {
         showToast.success(response.message || 'All orders cancelled', 'orders')
         // Delay refresh to allow broker to process cancellations
         setTimeout(() => fetchOrders(true), 2000)
+        // SUDARSHAN M6.9: whether it went, so the phone's cards hold their Cancels until the orders end.
+        return true
       } else if (response.status === 'info') {
         showToast.info(response.message || 'No open orders to cancel', 'orders')
       } else {
@@ -394,6 +399,7 @@ export default function OrderBook() {
       const message = axiosError.response?.data?.message || 'Failed to cancel all orders'
       showToast.error(message, 'orders')
     }
+    return false
   }
 
   const openModifyDialog = async (order: Order) => {

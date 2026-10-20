@@ -484,6 +484,85 @@ describe('Order book on a phone: the sheet and its actions', () => {
     )
   })
 
+  it('marks the order "Cancel sent" and holds Cancel and Modify until it ends', async () => {
+    const tap = user()
+    await renderPhone(WORKING, STOP)
+    await tap.click(orderCard('1001'))
+    await tap.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel order' })
+    )
+    await tap.click(
+      within(screen.getByRole('dialog', { name: 'Cancel this order?' })).getByRole('button', {
+        name: 'Cancel order',
+      })
+    )
+    await settle()
+    expect(api.cancelOrder).toHaveBeenCalledTimes(1)
+    expect(orderCard('1001')).toHaveTextContent('Cancel sent')
+    expect(orderCard('1002')).not.toHaveTextContent('Cancel sent')
+    // Cancel all now counts only the order whose cancel has not gone.
+    expect(screen.getByRole('button', { name: 'Cancel all (1)' })).toBeEnabled()
+    await tap.click(orderCard('1001'))
+    const sheet = screen.getByRole('dialog')
+    expect(within(sheet).getByRole('button', { name: 'Cancel sent' })).toBeDisabled()
+    expect(within(sheet).getByRole('button', { name: 'Modify' })).toBeDisabled()
+    await tap.click(within(sheet).getByRole('button', { name: 'Close' }))
+
+    // The broker says it is cancelled: nothing held.
+    push({ orderid: '1001', order_status: 'cancelled' })
+    expect(orderCard('1001')).not.toHaveTextContent('Cancel sent')
+    expect(orderCard('1001').querySelector('[data-status]')).toHaveTextContent('CANCELLED')
+  })
+
+  it('offers Cancel again 15 s after a cancel the order never showed', async () => {
+    const tap = user()
+    await renderPhone(WORKING)
+    await tap.click(orderCard('1001'))
+    await tap.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel order' })
+    )
+    await tap.click(
+      within(screen.getByRole('dialog', { name: 'Cancel this order?' })).getByRole('button', {
+        name: 'Cancel order',
+      })
+    )
+    await settle()
+    expect(orderCard('1001')).toHaveTextContent('Cancel sent')
+    await pass(15_500)
+    expect(orderCard('1001')).not.toHaveTextContent('Cancel sent')
+    expect(screen.getByRole('button', { name: 'Cancel all (1)' })).toBeEnabled()
+  })
+
+  it('holds nothing when the cancel was refused', async () => {
+    const tap = user()
+    api.cancelOrder.mockResolvedValue({ status: 'error', message: 'Already filled' })
+    await renderPhone(WORKING)
+    await tap.click(orderCard('1001'))
+    await tap.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel order' })
+    )
+    await tap.click(
+      within(screen.getByRole('dialog', { name: 'Cancel this order?' })).getByRole('button', {
+        name: 'Cancel order',
+      })
+    )
+    await settle()
+    expect(orderCard('1001')).not.toHaveTextContent('Cancel sent')
+  })
+
+  it('marks every working order "Cancel sent" after Cancel all', async () => {
+    const tap = user()
+    await renderPhone(WORKING, STOP, FILLED)
+    await tap.click(screen.getByRole('button', { name: 'Cancel all (2)' }))
+    await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel all' }))
+    await settle()
+    expect(api.cancelAllOrders).toHaveBeenCalledTimes(1)
+    expect(orderCard('1001')).toHaveTextContent('Cancel sent')
+    expect(orderCard('1002')).toHaveTextContent('Cancel sent')
+    expect(orderCard('1003')).not.toHaveTextContent('Cancel sent')
+    expect(screen.getByRole('button', { name: 'Cancel all' })).toBeDisabled()
+  })
+
   it('makes the same cancel call as the wide table’s button', async () => {
     const tap = user()
     api.getOrders.mockResolvedValue(book(WORKING))

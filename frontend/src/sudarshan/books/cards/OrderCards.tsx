@@ -24,6 +24,7 @@ import {
   ProblemCard,
   price,
   RefreshIcon,
+  SentChip,
   SideChip,
   StaleBookNote,
   StatusChip,
@@ -31,6 +32,7 @@ import {
 import { useBookOverlay, usePageDialog } from './useBookOverlay'
 import { type PricedRow, useFramePrices } from './useFramePrices'
 import { useHeld, useLatest } from './useLatest'
+import { useSent } from './useSent'
 
 /**
  * The order book on a phone (M6.9): filter chips, one card per order with its
@@ -196,6 +198,17 @@ const OrderBoard = memo(function OrderBoard({
   const { overlay, open, swap, close } = useBookOverlay()
   const openSheet = useCallback((orderid: string) => open({ act: 'sheet', row: orderid }), [open])
 
+  // A cancel sent holds the order's Cancel and Modify until it shows a final
+  // status (pushed or read), or SENT_HOLD_MS pass.
+  const { marks: cancels, hold: holdCancels, settle: settleCancels } = useSent<true>()
+  useEffect(() => {
+    if (cancels.size === 0) return
+    const working = new Set(
+      orders.filter((order) => !isFinalStatus(order.order_status)).map((order) => order.orderid)
+    )
+    settleCancels([...cancels.keys()].filter((orderid) => !working.has(orderid)))
+  }, [orders, cancels, settleCancels])
+
   const states = new Map(sorted.map((order) => [order.orderid, orderState(order.order_status)]))
   const counts: Record<OrderFilter, number> = {
     all: sorted.length,
@@ -204,11 +217,13 @@ const OrderBoard = memo(function OrderBoard({
     rejected: 0,
     cancelled: 0,
   }
-  let cancellable = 0
-  for (const state of states.values()) {
+  // What Cancel all would cancel: the working orders whose cancel has not been sent.
+  const cancellableIds: string[] = []
+  for (const [orderid, state] of states) {
     if (state.filter) counts[state.filter] += 1
-    if (state.working) cancellable += 1
+    if (state.working && !cancels.has(orderid)) cancellableIds.push(orderid)
   }
+  const cancellable = cancellableIds.length
   const shown =
     filter === 'all'
       ? sorted
@@ -284,6 +299,7 @@ const OrderBoard = memo(function OrderBoard({
                   tick={live ? live.tick : null}
                   stale={live ? stale(feedRowOf(live)) : false}
                   showLtp={live !== undefined}
+                  sent={cancels.has(order.orderid)}
                   onOpen={openSheet}
                 />
               )
@@ -363,6 +379,7 @@ const OrderBoard = memo(function OrderBoard({
           line={line}
           now={now}
           who={who}
+          sent={cancels.has(target.orderid)}
           onClose={close}
           onModify={() => {
             modifyOpening()
@@ -384,7 +401,9 @@ const OrderBoard = memo(function OrderBoard({
         cancelLabel="Keep order"
         confirmLabel="Cancel order"
         onConfirm={() => {
-          if (cancelling) void onCancel(cancelling.orderid)
+          if (!cancelling) return
+          const { orderid } = cancelling
+          void holdCancels([[orderid, true]], () => onCancel(orderid))
         }}
         onClose={close}
       />
@@ -395,7 +414,12 @@ const OrderBoard = memo(function OrderBoard({
         description={`This will cancel all ${cancellable} open ${cancellable === 1 ? 'order' : 'orders'}. This cannot be undone.`}
         cancelLabel="Keep orders"
         confirmLabel="Cancel all"
-        onConfirm={() => void onCancelAll()}
+        onConfirm={() =>
+          void holdCancels(
+            cancellableIds.map((orderid) => [orderid, true]),
+            () => onCancelAll()
+          )
+        }
         onClose={close}
       />
     </div>
@@ -418,6 +442,7 @@ const OrderCard = memo(function OrderCard({
   tick,
   stale,
   showLtp,
+  sent,
   onOpen,
 }: {
   orderid: string
@@ -434,6 +459,8 @@ const OrderCard = memo(function OrderCard({
   tick: TickDirection | null
   stale: boolean
   showLtp: boolean
+  /** Its cancel went, and the order has not ended yet. */
+  sent: boolean
   onOpen: (orderid: string) => void
 }) {
   const named = describe(symbol, exchange)
@@ -451,7 +478,8 @@ const OrderCard = memo(function OrderCard({
               {named.title}
             </span>
           </span>
-          <span className="ml-auto">
+          <span className="ml-auto flex items-center gap-1.5">
+            {sent && <SentChip label="Cancel sent" />}
             <StatusChip state={state} />
           </span>
         </span>
@@ -487,6 +515,7 @@ function OrderSheet({
   line,
   now,
   who,
+  sent,
   onClose,
   onModify,
   onCancel,
@@ -498,6 +527,8 @@ function OrderSheet({
   line: FeedLine
   now: number
   who: 'Broker' | 'Sandbox'
+  /** Its cancel went, and the order has not ended yet: Modify and Cancel wait. */
+  sent: boolean
   onClose: () => void
   onModify: () => void
   onCancel: () => void
@@ -547,6 +578,7 @@ function OrderSheet({
             <button
               type="button"
               aria-haspopup="dialog"
+              disabled={sent}
               onClick={onModify}
               className={cn(OUTLINED, 'border-primary text-primary')}
             >
@@ -556,11 +588,12 @@ function OrderSheet({
             <button
               type="button"
               aria-haspopup="dialog"
+              disabled={sent}
               onClick={onCancel}
               className={cn(OUTLINED, 'border-[color:var(--down)] text-[color:var(--down)]')}
             >
               <X aria-hidden="true" className="size-4" />
-              Cancel order
+              {sent ? 'Cancel sent' : 'Cancel order'}
             </button>
           </div>
         )}

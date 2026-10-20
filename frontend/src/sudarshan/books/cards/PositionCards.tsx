@@ -38,6 +38,7 @@ import {
   PositionSide,
   price,
   SELL_FILL,
+  SentChip,
   STALE,
   SignedPercent,
   StaleBookNote,
@@ -45,6 +46,7 @@ import {
 import { useBookOverlay } from './useBookOverlay'
 import { type PricedRow, useFramePrices } from './useFramePrices'
 import { useHeld, useLatest } from './useLatest'
+import { useSent } from './useSent'
 
 /**
  * The Positions page on a phone (M6.9): the day's P&L at the top, one card per
@@ -212,6 +214,16 @@ const PositionBoard = memo(function PositionBoard({
   const openSheet = useCallback((id: string) => open({ act: 'sheet', row: id }), [open])
   const refresh = useCallback(() => void onRefresh(true), [onRefresh])
 
+  // An exit sent holds the position's Exit (and Exit all) until the book shows
+  // its quantity changed, or SENT_HOLD_MS pass: the broker's book can lag the
+  // order, and a second exit sized from it would reverse the position.
+  const { marks: exits, hold: holdExits, settle: settleExits } = useSent<number>()
+  useEffect(() => {
+    if (exits.size === 0) return
+    const now = new Map(positions.map((position) => [positionId(position), quantityOf(position)]))
+    settleExits([...exits].filter(([id, mark]) => now.get(id) !== mark.was).map(([id]) => id))
+  }, [positions, exits, settleExits])
+
   const held = rows.filter((row) => quantityOf(row.item) !== 0)
   const closed = rows.filter((row) => quantityOf(row.item) === 0)
   const total = rows.reduce((sum, row) => sum + (row.pnl ?? 0), 0)
@@ -251,6 +263,7 @@ const PositionBoard = memo(function PositionBoard({
           total={total}
           split={splitOf(rows)}
           open={held.length}
+          exitsSent={exits.size > 0}
           stale={figuresStale}
           line={line}
           now={now}
@@ -273,6 +286,7 @@ const PositionBoard = memo(function PositionBoard({
                 pnl={row.pnl}
                 pnlPercent={row.pnlPercent}
                 stale={stale(feedRowOf(row))}
+                sent={exits.has(positionId(row.item))}
                 onOpen={openSheet}
               />
             ))}
@@ -323,6 +337,7 @@ const PositionBoard = memo(function PositionBoard({
           line={line}
           now={now}
           apiKey={apiKey}
+          sent={exits.has(positionId(target.item))}
           onClose={close}
           onExit={() => swap({ act: 'exit', row: positionId(target.item) })}
           onAdd={() => swap({ act: 'add', row: positionId(target.item) })}
@@ -341,7 +356,9 @@ const PositionBoard = memo(function PositionBoard({
         confirmLabel="Exit"
         confirmClassName={exitShown && quantityOf(exitShown.item) < 0 ? BUY_FILL : SELL_FILL}
         onConfirm={() => {
-          if (exiting) void onExit(exiting.item)
+          if (!exiting) return
+          const { item } = exiting
+          void holdExits([[positionId(item), quantityOf(item)]], () => onExit(item))
         }}
         onClose={close}
       />
@@ -351,7 +368,12 @@ const PositionBoard = memo(function PositionBoard({
         title="Exit all positions?"
         description={`This closes all ${held.length} open ${held.length === 1 ? 'position' : 'positions'} at market price. This cannot be undone.`}
         confirmLabel="Exit all"
-        onConfirm={() => void onExitAll()}
+        onConfirm={() =>
+          void holdExits(
+            held.map((row) => [positionId(row.item), quantityOf(row.item)]),
+            () => onExitAll()
+          )
+        }
         onClose={close}
       />
 
@@ -367,6 +389,7 @@ function Summary({
   total,
   split,
   open,
+  exitsSent,
   stale,
   line,
   now,
@@ -375,6 +398,8 @@ function Summary({
   total: number
   split: { realised: number; unrealised: number } | null
   open: number
+  /** An exit went and the book has not caught up yet: Exit all would size from it too. */
+  exitsSent: boolean
   stale: boolean
   line: FeedLine
   now: number
@@ -422,7 +447,7 @@ function Summary({
         </p>
         <button
           type="button"
-          disabled={open === 0}
+          disabled={open === 0 || exitsSent}
           onClick={onExitAll}
           aria-haspopup="dialog"
           className={cn(OUTLINED, 'border-[color:var(--down)] text-[color:var(--down)]')}
@@ -448,6 +473,7 @@ const PositionCard = memo(function PositionCard({
   pnl,
   pnlPercent,
   stale,
+  sent,
   onOpen,
 }: {
   id: string
@@ -461,6 +487,8 @@ const PositionCard = memo(function PositionCard({
   pnl: number | null
   pnlPercent: number | null
   stale: boolean
+  /** Its exit went, and the book has not shown it yet. */
+  sent: boolean
   onOpen: (id: string) => void
 }) {
   const named = describe(symbol, exchange)
@@ -468,9 +496,10 @@ const PositionCard = memo(function PositionCard({
     <li data-stale={stale || undefined} data-position={id}>
       <button type="button" aria-haspopup="dialog" onClick={() => onOpen(id)} className={CARD}>
         <span className="flex items-center justify-between gap-2">
-          <span className="flex min-w-0 items-center gap-2">
+          <span className="flex min-w-0 flex-wrap items-center gap-2">
             <ProductChip product={product} />
             <PositionSide quantity={quantity} />
+            {sent && <SentChip label="Exit sent" />}
           </span>
           <Last value={ltp} tick={tick} stale={stale} exchange={exchange} className="text-sm" />
         </span>
@@ -546,6 +575,7 @@ function PositionSheet({
   line,
   now,
   apiKey,
+  sent,
   onClose,
   onExit,
   onAdd,
@@ -555,6 +585,8 @@ function PositionSheet({
   line: FeedLine
   now: number
   apiKey: string | null
+  /** Its exit went, and the book has not shown it yet: Exit waits. */
+  sent: boolean
   onClose: () => void
   onExit: () => void
   onAdd: () => void
@@ -612,6 +644,7 @@ function PositionSheet({
               <button
                 type="button"
                 aria-haspopup="dialog"
+                disabled={sent}
                 onClick={onExit}
                 className={cn(
                   ACTION,
@@ -624,7 +657,9 @@ function PositionSheet({
                   Exit
                 </span>
                 <span className="text-[0.71875rem] font-semibold">
-                  {side === 'LONG' ? 'Sell' : 'Buy'} {units(Math.abs(quantity))} at market
+                  {sent
+                    ? 'Exit sent'
+                    : `${side === 'LONG' ? 'Sell' : 'Buy'} ${units(Math.abs(quantity))} at market`}
                 </span>
               </button>
               <button
