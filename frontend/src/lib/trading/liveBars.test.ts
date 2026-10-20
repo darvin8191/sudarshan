@@ -2,10 +2,12 @@ import { type Bar, SessionCalendar } from 'openalgo-charts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   HistoryResync,
+  insertLiveBar,
   LiveBarBuilder,
   LiveBarClock,
   type LiveBarUpdate,
   liveBucketing,
+  removeLiveBar,
   upsertLiveBar,
 } from './liveBars'
 
@@ -210,15 +212,16 @@ describe('no bar opens outside the session', () => {
 })
 
 describe('day, week and month bars are live', () => {
-  it("folds today's ticks into today's bar, in history's own stamp", () => {
+  it("folds today's ticks into today's bar, in history's own stamp, its volume the day's count", () => {
     // History stamps a day at midnight UTC, which is 05:30 in India.
     const today = Date.UTC(2026, 9, 20) / 1000
     const b = new LiveBarBuilder({ interval: 'D', session: nse() })
     b.seed({ time: today, open: 100, high: 105, low: 99, close: 104, volume: 80_000 })
     const u = b.onTick({ time: tue(14, 0), price: 106, dayVolume: 90_000 })
     expect(u?.isNew).toBe(false)
-    expect(u?.bar).toMatchObject({ time: today, open: 100, high: 106, close: 106, volume: 80_000 })
-    expect(b.onTick({ time: tue(14, 1), price: 105, dayVolume: 91_000 })?.bar.volume).toBe(81_000)
+    // The day's running total is the bar's volume: history's figure was a snapshot of it.
+    expect(u?.bar).toMatchObject({ time: today, open: 100, high: 106, close: 106, volume: 90_000 })
+    expect(b.onTick({ time: tue(14, 1), price: 105, dayVolume: 91_000 })?.bar.volume).toBe(91_000)
   })
 
   it("opens tomorrow's bar on its first tick, stamped the way history stamps", () => {
@@ -230,34 +233,90 @@ describe('day, week and month bars are live', () => {
     expect(u?.bar).toMatchObject({ time: Date.UTC(2026, 9, 22) / 1000, open: 103, volume: 1_200 })
   })
 
-  it("folds the week's days into one bar and carries the volume across them", () => {
+  it("lays each day of the week on history's part, which ends with yesterday", () => {
     const monday = ist(2026, 10, 19, 0, 0)
     const b = new LiveBarBuilder({ interval: 'W', session: nse() })
+    // History's week, read on Thursday, runs to Wednesday.
     b.seed({ time: monday, open: 100, high: 110, low: 95, close: 108, volume: 10_000 })
-    // Thursday: the bar keeps what history said and grows from the first count.
-    expect(
-      b.onTick({ time: ist(2026, 10, 22, 9, 30), price: 109, dayVolume: 2_000 })?.bar
-    ).toMatchObject({
-      time: monday,
-      volume: 10_000,
-    })
+    // Thursday's whole count goes on top of it.
+    expect(b.onTick({ time: ist(2026, 10, 22, 9, 30), price: 109, dayVolume: 2_000 })?.bar).toEqual(
+      { time: monday, open: 100, high: 110, low: 95, close: 109, volume: 12_000 }
+    )
     expect(
       b.onTick({ time: ist(2026, 10, 22, 15, 0), price: 111, dayVolume: 2_500 })?.bar
-    ).toMatchObject({
-      high: 111,
-      volume: 10_500,
-    })
-    // Friday's count starts again from zero under the same weekly bar.
+    ).toMatchObject({ high: 111, close: 111, volume: 12_500 })
+    // Friday starts its own count; Thursday's stays in the week.
     expect(
-      b.onTick({ time: ist(2026, 10, 23, 9, 30), price: 110, dayVolume: 100 })?.bar.volume
-    ).toBe(10_500)
+      b.onTick({ time: ist(2026, 10, 23, 9, 30), price: 110, dayVolume: 100 })?.bar
+    ).toMatchObject({ high: 111, close: 110, volume: 12_600 })
     expect(
       b.onTick({ time: ist(2026, 10, 23, 9, 31), price: 110, dayVolume: 600 })?.bar.volume
-    ).toBe(11_000)
-    // The next Monday opens the next week.
+    ).toBe(13_100)
+    // The next Monday opens the next week, with that day's count.
     const next = b.onTick({ time: ist(2026, 10, 26, 9, 15, 1), price: 112, dayVolume: 300 })
     expect(next?.isNew).toBe(true)
     expect(next?.bar).toMatchObject({ time: ist(2026, 10, 26, 0, 0), volume: 300 })
+  })
+
+  it("puts today's true open and extremes on the week from a quote, not only what has ticked", () => {
+    const monday = ist(2026, 10, 19, 0, 0)
+    const b = new LiveBarBuilder({ interval: 'W', session: nse() })
+    b.seed({ time: monday, open: 100, high: 110, low: 95, close: 108, volume: 10_000 })
+    b.onTick({ time: ist(2026, 10, 22, 14, 0), price: 109, dayVolume: 2_000 })
+    // Thursday opened at 107 and traded down to 94 before the chart opened.
+    const folded = b.foldDay({
+      time: ist(2026, 10, 22, 14, 0, 1),
+      open: 107,
+      high: 109.5,
+      low: 94,
+      close: 109,
+      volume: 2_050,
+    })
+    expect(folded?.bar).toEqual({
+      time: monday,
+      open: 100,
+      high: 110,
+      low: 94,
+      close: 109,
+      volume: 12_050,
+    })
+    // Another period's quote, or another timeframe, folds nothing.
+    expect(b.foldDay({ ...bar(ist(2026, 10, 27, 10, 0), 1), volume: 1 })).toBeNull()
+    const intraday = new LiveBarBuilder({ interval: '5m', session: nse() })
+    intraday.seed(bar(tue(10, 0), 100))
+    expect(intraday.foldDay(bar(tue(10, 0), 100))).toBeNull()
+  })
+
+  it('counts no day history already holds: a weekend snapshot, or a pre-open frame carrying the last trade', () => {
+    const monday = ist(2026, 10, 19, 0, 0)
+    const week = { time: monday, open: 100, high: 110, low: 95, close: 108, volume: 50_000 }
+    const b = new LiveBarBuilder({ interval: 'W', session: nse() })
+    // Read on Saturday: history's week holds Monday to Friday.
+    b.seed(week, ist(2026, 10, 24, 10, 0))
+    const friday = ist(2026, 10, 23, 15, 29, 59)
+    expect(b.onTick({ time: friday, tradeTime: friday, price: 108, dayVolume: 9_000 })).toBeNull()
+    expect(
+      b.foldDay({ time: friday, open: 104, high: 109, low: 103, close: 108, volume: 9_000 })
+    ).toBeNull()
+    expect(b.current()).toEqual(week)
+  })
+
+  it('gives a day back to history once a re-sync holds it', () => {
+    const monday = ist(2026, 10, 19, 0, 0)
+    const b = new LiveBarBuilder({ interval: 'W', session: nse() })
+    // Read on Tuesday morning: history's week is Monday.
+    b.seed({ time: monday, open: 100, high: 104, low: 99, close: 103, volume: 10_000 }, tue(9, 0))
+    expect(b.onTick({ time: tue(15, 29), price: 105, dayVolume: 12_000 })?.bar).toMatchObject({
+      high: 105,
+      close: 105,
+      volume: 22_000,
+    })
+    // Thursday's re-sync (Wednesday is a holiday) holds Tuesday: nothing is counted twice.
+    const resynced = { time: monday, open: 100, high: 105.5, low: 99, close: 105, volume: 22_400 }
+    expect(b.mergeSnapshot([resynced], ist(2026, 10, 22, 8, 0))).toEqual([resynced])
+    expect(
+      b.onTick({ time: ist(2026, 10, 22, 9, 15, 5), price: 106, dayVolume: 1_000 })?.bar
+    ).toMatchObject({ high: 106, close: 106, volume: 23_400 })
   })
 
   it("folds the month's ticks into one bar and opens the next month", () => {
@@ -356,13 +415,14 @@ describe("volume from the day's running total", () => {
     expect(b.hasTickVolume()).toBe(false)
   })
 
-  it('ignores a running total that goes backwards inside a bar', () => {
+  it("keeps the day's highest count: a lower reading inside the day is an older one", () => {
     const b = new LiveBarBuilder({ interval: '1m', session: nse() })
     b.seed(bar(tue(10, 0), 100, 0))
     b.onTick({ time: tue(10, 0, 5), price: 100, dayVolume: 70_000 })
     b.onTick({ time: tue(10, 0, 6), price: 100, dayVolume: 70_300 })
     expect(b.onTick({ time: tue(10, 0, 7), price: 100, dayVolume: 70_200 })?.bar.volume).toBe(300)
-    expect(b.onTick({ time: tue(10, 0, 8), price: 100, dayVolume: 70_250 })?.bar.volume).toBe(350)
+    expect(b.onTick({ time: tue(10, 0, 8), price: 100, dayVolume: 70_250 })?.bar.volume).toBe(300)
+    expect(b.onTick({ time: tue(10, 0, 9), price: 100, dayVolume: 70_400 })?.bar.volume).toBe(400)
   })
 })
 
@@ -579,11 +639,12 @@ describe('history merges without duplicates', () => {
   })
 
   it("moves a week's bar to history's stamp rather than keeping two for one week", () => {
-    // History stamped the week by its first trading day, a Tuesday.
+    // History stamped the week by its first trading day, a Tuesday, and runs
+    // to yesterday; the chart opened on Thursday (Wednesday was a holiday).
     const lastWeek = ist(2026, 10, 12, 0, 0)
     const b = new LiveBarBuilder({ interval: 'W', session: nse() })
     b.seed({ time: lastWeek, open: 90, high: 100, low: 89, close: 99, volume: 9_000 })
-    const opened = b.onTick({ time: ist(2026, 10, 20, 10, 0), price: 101, dayVolume: 500 })
+    const opened = b.onTick({ time: ist(2026, 10, 22, 10, 0), price: 101, dayVolume: 500 })
     expect(opened?.bar.time).toBe(ist(2026, 10, 19, 0, 0))
     const tuesday = ist(2026, 10, 20, 0, 0)
     const merged = b.mergeSnapshot([
@@ -592,8 +653,31 @@ describe('history merges without duplicates', () => {
       { time: tuesday, open: 100.5, high: 102, low: 100, close: 101.5, volume: 800 },
     ])
     expect(merged.map((x) => x.time)).toEqual([lastWeek, tuesday])
-    expect(merged[1]).toMatchObject({ open: 100.5, close: 101, high: 102, volume: 800 })
-    expect(b.onTick({ time: ist(2026, 10, 20, 10, 5), price: 103 })?.bar.time).toBe(tuesday)
+    // History's open and extremes for the days it has, today's on top.
+    expect(merged[1]).toEqual({
+      time: tuesday,
+      open: 100.5,
+      high: 102,
+      low: 100,
+      close: 101,
+      volume: 1_300,
+    })
+    expect(b.onTick({ time: ist(2026, 10, 22, 10, 5), price: 103 })?.bar.time).toBe(tuesday)
+  })
+
+  it.todo(
+    "a week that history stamps on Sunday: Monday-start weeks for now; check Upstox's weekly stamp live"
+  )
+
+  it('keeps the bar that just closed when a repair comes back without it', () => {
+    const b = new LiveBarBuilder({ interval: '1m', session: nse() })
+    b.seed(bar(tue(10, 0), 100))
+    b.onTick({ time: tue(10, 0, 30), price: 100.5 })
+    b.onClock(tue(10, 1) + 0.1)
+    // The broker's history is a minute behind.
+    const merged = b.mergeSnapshot([bar(tue(9, 58), 98), bar(tue(9, 59), 99)])
+    expect(merged.map((x) => x.time)).toEqual([tue(9, 58), tue(9, 59), tue(10, 0), tue(10, 1)])
+    expect(merged[2]).toMatchObject({ close: 100.5 })
   })
 
   it('follows history when it is already a bucket ahead', () => {
@@ -606,6 +690,277 @@ describe('history merges without duplicates', () => {
     const u = b.onTick({ time: tue(10, 1, 30), price: 106 })
     expect(u?.isNew).toBe(false)
     expect(u?.bar).toMatchObject({ time: tue(10, 1), open: 104, high: 106, close: 106 })
+  })
+})
+
+/** A host's bar list, drawing every update the way the hosts do. */
+function drawing(seed: Bar[]) {
+  const bars = seed.slice()
+  const draw = (u: LiveBarUpdate | null) => {
+    if (!u) return u
+    if (u.replaces !== undefined) removeLiveBar(bars, u.replaces)
+    if (u.previous) insertLiveBar(bars, u.previous)
+    upsertLiveBar(bars, u.bar)
+    return u
+  }
+  return { bars, draw }
+}
+
+describe('a quiet market keeps one flat bar, at the tail', () => {
+  it('moves the flat bar on at each boundary rather than leaving a trail of them, before and after a re-sync', () => {
+    const b = new LiveBarBuilder({ interval: '1m', session: nse() })
+    b.seed(bar(tue(10, 0), 100))
+    b.onTick({ time: tue(10, 0, 30), price: 100.5 })
+    const { bars, draw } = drawing([bar(tue(9, 59), 99), b.current() as Bar])
+    expect(draw(b.onClock(tue(10, 1) + 0.1))?.replaces).toBeUndefined()
+    expect(draw(b.onClock(tue(10, 2) + 0.1))?.replaces).toBe(tue(10, 1))
+    expect(draw(b.onClock(tue(10, 3) + 0.1))?.replaces).toBe(tue(10, 2))
+    const minutes = (list: Bar[]) => list.map((x) => (x.time - tue(10, 0)) / 60)
+    expect(minutes(bars)).toEqual([-1, 0, 3])
+    expect(bars.at(-1)).toEqual({
+      time: tue(10, 3),
+      open: 100.5,
+      high: 100.5,
+      low: 100.5,
+      close: 100.5,
+      volume: 0,
+    })
+    const merged = b.mergeSnapshot([bar(tue(9, 59), 99), bar(tue(10, 0), 100.5)])
+    expect(minutes(merged)).toEqual([-1, 0, 3])
+  })
+
+  it('leaves one flat bar after the last trade before a late close, not one a minute', () => {
+    // The F&O calendar runs to 15:40; trading stops at 15:30.
+    const nfo = new SessionCalendar({
+      timezone: 'Asia/Kolkata',
+      sessions: ['0915-1540:23456'],
+      exceptions: {},
+    })
+    const b = new LiveBarBuilder({ interval: '1m', session: nfo })
+    b.seed(bar(tue(15, 29), 100))
+    b.onTick({ time: tue(15, 29, 59), price: 100.2 })
+    const { bars, draw } = drawing([bar(tue(15, 28), 99), b.current() as Bar])
+    for (let minute = 30; minute <= 40; minute++) draw(b.onClock(tue(15, minute) + 0.1))
+    expect(bars.map((x) => x.time)).toEqual([tue(15, 28), tue(15, 29), tue(15, 39)])
+    expect(bars.at(-1)).toMatchObject({ open: 100.2, close: 100.2, volume: 0 })
+  })
+
+  it('asks history to repair a bar somebody traded, and not one nobody did', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(tue(10, 0, 30) * 1000)
+    const b = new LiveBarBuilder({ interval: '1m', session: nse() })
+    b.seed(bar(tue(10, 0), 100))
+    b.onTick({ time: tue(10, 0, 30), price: 100.5 })
+    const refresh = vi.fn(async () => [])
+    const clock = new LiveBarClock({
+      builder: () => b,
+      onBar: () => {},
+      history: () => ({ bars: () => [bar(tue(10, 0), 100)], refresh }),
+    })
+    clock.start()
+    vi.advanceTimersByTime(3.5 * 60_000) // 10:01 closes 10:00; 10:02 and 10:03 move the flat bar
+    expect(refresh).toHaveBeenCalledOnce()
+    clock.stop()
+  })
+
+  it('puts a bar in time order, and takes one out by its time', () => {
+    const list = [bar(60, 1), bar(180, 3)]
+    expect(insertLiveBar(list, bar(120, 2))).toBe('insert')
+    expect(insertLiveBar(list, bar(180, 4))).toBe('replace')
+    expect(insertLiveBar(list, bar(240, 5))).toBe('append')
+    expect(list.map((x) => [x.time, x.close])).toEqual([
+      [60, 1],
+      [120, 2],
+      [180, 4],
+      [240, 5],
+    ])
+    expect(removeLiveBar(list, 180)).toBe(true)
+    expect(removeLiveBar(list, 300)).toBe(false)
+    expect(list.map((x) => x.time)).toEqual([60, 120, 240])
+  })
+})
+
+describe('what the stream may be late with', () => {
+  it("gives the session's first bar the whole day's count, when the clock opened it", () => {
+    const monday = (h: number, mi: number, s = 0) => ist(2026, 10, 19, h, mi, s)
+    const b = new LiveBarBuilder({ interval: '5m', session: nse() })
+    b.seed(bar(monday(15, 25), 250, 9_000))
+    // Yesterday's last trade, with yesterday's total, then the night.
+    b.onTick({ time: monday(15, 29, 59), price: 250, dayVolume: 4_000_000 })
+    expect(b.onClock(tue(9, 15) + 0.1)?.placeholder).toBe(true)
+    expect(b.onTick({ time: tue(9, 15, 1), price: 252.5, dayVolume: 41_000 })?.bar).toMatchObject({
+      open: 252.5,
+      volume: 41_000,
+    })
+    expect(b.onTick({ time: tue(9, 15, 2), price: 252.6, dayVolume: 41_500 })?.bar.volume).toBe(
+      41_500
+    )
+  })
+
+  it("counts a later first bar from today's count, never from yesterday's or the whole day's", () => {
+    const monday = (h: number, mi: number, s = 0) => ist(2026, 10, 19, h, mi, s)
+    const open = (auction: boolean) => {
+      const b = new LiveBarBuilder({ interval: '1m', session: nse() })
+      b.seed(bar(monday(15, 29), 250, 9_000))
+      b.onTick({ time: monday(15, 29, 59), price: 250, dayVolume: 4_000_000 })
+      if (auction) b.onTick({ time: tue(9, 7, 30), price: 252, dayVolume: 40_000 })
+      b.onClock(tue(9, 15) + 0.1)
+      // Nobody trades 09:15 once the session opens; the flat bar moves on.
+      expect(b.onClock(tue(9, 16) + 0.1)?.replaces).toBe(tue(9, 15))
+      return b
+    }
+    // The auction was streamed: 09:16 counts what traded after it.
+    const seen = open(true)
+    expect(seen.onTick({ time: tue(9, 16, 5), price: 252.5, dayVolume: 41_000 })?.bar.volume).toBe(
+      1_000
+    )
+    // It was not: 09:16 counts from its own first trade, and history fills in the rest.
+    const missed = open(false)
+    expect(
+      missed.onTick({ time: tue(9, 16, 5), price: 252.5, dayVolume: 41_000 })?.bar.volume
+    ).toBe(0)
+    expect(
+      missed.onTick({ time: tue(9, 16, 9), price: 252.5, dayVolume: 41_400 })?.bar.volume
+    ).toBe(400)
+  })
+
+  it('gives the only trades of an interval the flat bar moved on from a bar of their own, all at their price', () => {
+    const b = new LiveBarBuilder({ interval: '1m', session: nse() })
+    b.seed(bar(tue(10, 0), 100))
+    b.onTick({ time: tue(10, 0, 30), price: 100, dayVolume: 50_000 })
+    const { bars, draw } = drawing([b.current() as Bar])
+    draw(b.onClock(tue(10, 1) + 0.1)) // nobody trades 10:01 as it forms
+    draw(b.onClock(tue(10, 2) + 0.1)) // the flat bar moves on to 10:02
+    // The only 10:01 trade, at 10:01:59, delivered after the boundary.
+    const late = draw(b.onTick({ time: tue(10, 1, 59), price: 102, dayVolume: 50_300 }))
+    expect(late?.previous).toEqual({
+      time: tue(10, 1),
+      open: 102,
+      high: 102,
+      low: 102,
+      close: 102,
+      volume: 300,
+    })
+    expect(late?.bar).toMatchObject({ time: tue(10, 2), open: 102, close: 102, volume: 0 })
+    expect(late?.placeholder).toBe(true)
+    expect(bars.map((x) => x.time)).toEqual([tue(10, 0), tue(10, 1), tue(10, 2)])
+    // 10:02's first trade counts only what traded after the late one.
+    expect(draw(b.onTick({ time: tue(10, 2, 3), price: 102.4, dayVolume: 50_450 }))?.bar).toEqual({
+      time: tue(10, 2),
+      open: 102.4,
+      high: 102.4,
+      low: 102.4,
+      close: 102.4,
+      volume: 150,
+    })
+  })
+
+  it('keeps the bar before the forming one through a repair, so a late trade still reaches it', () => {
+    const b = new LiveBarBuilder({ interval: '1m', session: nse() })
+    b.seed(bar(tue(10, 0), 100, 0))
+    b.onTick({ time: tue(10, 0, 30), price: 100, dayVolume: 10_000 })
+    const { bars, draw } = drawing([bar(tue(9, 59), 99), b.current() as Bar])
+    // A clock running fast opens 10:01 at 10:00:40 by the exchange's clock.
+    draw(b.onClock(tue(10, 1) + 0.1))
+    draw(b.onTick({ time: tue(10, 0, 41), price: 100.4, dayVolume: 10_100 }))
+    // The repair after the boundary brings a copy of 10:00 that is already old.
+    const partial = {
+      time: tue(10, 0),
+      open: 99.5,
+      high: 100.4,
+      low: 99,
+      close: 100.4,
+      volume: 1_100,
+    }
+    bars.splice(0, bars.length, ...b.mergeSnapshot([bar(tue(9, 59), 99), partial]))
+    // A spike at 10:00:50 belongs to 10:00.
+    const spike = draw(b.onTick({ time: tue(10, 0, 50), price: 103, dayVolume: 10_300 }))
+    expect(spike?.previous).toMatchObject({ time: tue(10, 0), open: 99.5, high: 103, close: 103 })
+    expect(bars.find((x) => x.time === tue(10, 0))).toMatchObject({ high: 103, close: 103 })
+    expect(bars.at(-1)).toMatchObject({ time: tue(10, 1), open: 103, close: 103, volume: 0 })
+  })
+
+  it("ignores a count read before the stream's last one, from a quote or from the stream", () => {
+    const b = new LiveBarBuilder({ interval: '1m', session: nse() })
+    b.seed(bar(tue(10, 0), 100, 0))
+    b.onTick({ time: tue(10, 0, 5), price: 100, dayVolume: 1_000_000 })
+    expect(b.onTick({ time: tue(10, 0, 10), price: 100, dayVolume: 1_000_500 })?.bar.volume).toBe(
+      500
+    )
+    // A quote answered a second earlier, delivered after the stream resumed.
+    expect(
+      b.onTick({ time: tue(10, 0, 11), price: 100, dayVolume: 999_800, polled: true })
+    ).toBeNull()
+    expect(b.onTick({ time: tue(10, 0, 11), price: 100, dayVolume: 999_800 })?.bar.volume).toBe(500)
+    expect(b.onTick({ time: tue(10, 0, 12), price: 100, dayVolume: 1_000_600 })?.bar.volume).toBe(
+      600
+    )
+  })
+
+  it("never lets a quote set where a bar's count starts, or count a repeat as a trade", () => {
+    const b = new LiveBarBuilder({ interval: '1m', session: nse() })
+    b.seed(bar(tue(10, 0), 100, 1_000))
+    // The stream is down; a quote answers with the day's count.
+    const quote = { time: tue(10, 0, 20), price: 100.5, dayVolume: 70_000, polled: true }
+    expect(b.onTick(quote)?.bar).toMatchObject({ close: 100.5, volume: 1_000 })
+    expect(b.onTick({ ...quote, time: tue(10, 0, 24) })).toBeNull()
+    // The stream is back: its first count is where the bar's count grows from.
+    expect(b.onTick({ time: tue(10, 0, 30), price: 100.6, dayVolume: 70_200 })?.bar.volume).toBe(
+      1_000
+    )
+    expect(b.onTick({ time: tue(10, 0, 40), price: 100.6, dayVolume: 70_300 })?.bar.volume).toBe(
+      1_100
+    )
+    // A quote's first count of a new day starts nothing either: the next
+    // day's count grows from the stream's first reading of it.
+    const thu = (s: number) => ist(2026, 10, 22, 9, 16, s)
+    expect(b.onTick({ time: thu(0), price: 101, dayVolume: 5_000, polled: true })?.bar.volume).toBe(
+      0
+    )
+    expect(b.onTick({ time: thu(30), price: 101, dayVolume: 5_200 })?.bar.volume).toBe(0)
+    expect(b.onTick({ time: thu(40), price: 101, dayVolume: 5_300 })?.bar.volume).toBe(100)
+  })
+})
+
+describe('trades say the market is open', () => {
+  it('opens bars for trades that keep flowing while the calendar says shut, but not in the pre-open and not on the clock', () => {
+    const b = new LiveBarBuilder({ interval: '1m', session: nse() })
+    b.seed(bar(tue(15, 29), 100))
+    const trade = (time: number, price: number) => b.onTick({ time, tradeTime: time, price })
+    // 18:00 on a special session the calendar does not list. One trade is not a flow.
+    expect(trade(tue(18, 0, 0), 101)).toBeNull()
+    expect(trade(tue(18, 0, 20), 101.5)).toMatchObject({
+      isNew: true,
+      bar: { time: tue(18, 0), open: 101.5, close: 101.5 },
+    })
+    expect(trade(tue(18, 0, 40), 102)?.bar).toMatchObject({ time: tue(18, 0), high: 102 })
+    expect(trade(tue(18, 1, 5), 101.8)).toMatchObject({ isNew: true, bar: { time: tue(18, 1) } })
+    // The clock still keeps to the calendar.
+    expect(b.onClock(tue(18, 2) + 0.1)).toBeNull()
+    // A frame whose own stamp moves on, with no trade time, is not a trade.
+    expect(b.onTick({ time: tue(18, 5, 0), price: 101.8 })).toBeNull()
+    // The pre-open's book moves on its trade times too, and opens nothing.
+    const pre = (s: number) => ist(2026, 10, 22, 9, 7, s)
+    expect(trade(pre(30), 103)).toBeNull()
+    expect(trade(pre(40), 103.5)).toBeNull()
+    expect(b.current()?.time).toBe(tue(18, 1))
+  })
+})
+
+describe("the countdown to the forming bar's close", () => {
+  it("runs to the bar's close in the session, says when the session closes first, and is off otherwise", () => {
+    const hourly = new LiveBarBuilder({ interval: '1h', session: nse() })
+    hourly.seed(bar(tue(14, 15), 100))
+    expect(hourly.countdown(tue(14, 20))).toEqual({ kind: 'bar' })
+    // 15:15 to 16:15 would run past the 15:30 close.
+    expect(hourly.countdown(tue(15, 20))).toEqual({ kind: 'closes', at: tue(15, 30) })
+    expect(hourly.countdown(tue(16, 0))).toEqual({ kind: 'off' })
+    const day = new LiveBarBuilder({ interval: 'D', session: nse() })
+    day.seed({ time: Date.UTC(2026, 9, 20) / 1000, open: 1, high: 1, low: 1, close: 1 })
+    expect(day.countdown(tue(10, 0))).toEqual({ kind: 'off' })
+    const bare = new LiveBarBuilder({ interval: '5m' })
+    bare.seed(bar(tue(10, 0), 100))
+    expect(bare.countdown(tue(10, 1))).toEqual({ kind: 'off' })
   })
 })
 
