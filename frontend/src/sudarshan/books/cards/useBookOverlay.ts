@@ -20,7 +20,7 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router'
  *
  * A sheet may open from the address (a reload keeps it). A step never does: a
  * confirmation, a ticket or a dialog opens only from a tap on this page, and
- * one met any other way (a reload, Forward to an entry already closed) is
+ * one met any other way (a reload, Forward to an entry the page has left) is
  * closed at once rather than shown.
  */
 export type BookAct =
@@ -46,10 +46,14 @@ const ACTS = new Set<string>([
   'sell',
 ])
 
-/** The history entry's state: whether this page pushed it, and on which visit. */
+/**
+ * The history entry's state: whether this page pushed it, on which visit, and
+ * the entry's own number within that visit.
+ */
 interface EntryState {
   sdOverlay?: boolean
   sdVisit?: string
+  sdEntry?: number
 }
 
 function entryState(state: unknown): EntryState {
@@ -72,18 +76,62 @@ function withOverlay(params: URLSearchParams, next: BookOverlay | null): URLSear
   return out
 }
 
+function isStep(overlay: BookOverlay | null): boolean {
+  return overlay !== null && overlay.act !== 'sheet'
+}
+
+/**
+ * This page load's own name. History entries outlive a reload (Android Chrome
+ * reloads a tab it has discarded) while the visit counter below starts again
+ * from one, so without it a step pushed before the reload would read as this
+ * visit's own and open by itself.
+ */
+function loadName(): string {
+  let name = ''
+  try {
+    const bytes = new Uint32Array(2)
+    globalThis.crypto.getRandomValues(bytes)
+    name = Array.from(bytes, (n) => n.toString(36)).join('')
+  } catch {
+    // No Web Crypto: the clock and Math.random still differ from one load to the next.
+  }
+  return `${name}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
+}
+
+const LOAD = loadName()
 let visits = 0
 
 /** A name for one visit to a page, for the entries it pushes. */
 function nextVisit(): string {
   visits += 1
-  return `v${visits}`
+  return `${LOAD}.${visits}`
+}
+
+/** How long a Back sent by `close` may take to land before a tap stops waiting for it. */
+const BACK_WAIT_MS = 1000
+
+/** The overlay as this page last set it, ahead of the router (see `useBookOverlay`). */
+interface Standing {
+  params: URLSearchParams
+  pathname: string
+  raw: BookOverlay | null
+  pushed: boolean
+  /** The entry's number when this visit made it, else null. */
+  entry: number | null
+  /** When `close` went back, until the address lands; 0 when no Back is under way. */
+  backSince: number
 }
 
 /**
  * The open overlay, and how to open, swap and close one. `open`, `swap` and
  * `close` keep their identity while overlays come and go, so the cards that are
  * handed them are not redrawn each time one does.
+ *
+ * The router moves the address at once but lands it in a transition, a render
+ * or more after the tap, so the handlers work from the overlay as this page
+ * last set it rather than from the address it last rendered: a double tap
+ * pushes one entry, a second close in the same moment goes back once, and a
+ * tap made while a close is still going back waits for it to land.
  */
 export function useBookOverlay(): {
   overlay: BookOverlay | null
@@ -95,69 +143,124 @@ export function useBookOverlay(): {
   const location = useLocation()
   const navigate = useNavigate()
   const [visit] = useState(nextVisit)
-  const closed = useRef(new Set<string>())
+  const entries = useRef(0)
+  // The step entries this visit has left (closed, Back, swapped away): none shows again.
+  const left = useRef(new Set<number>())
 
   const raw = bookOverlayOf(params)
   const state = entryState(location.state)
   const pushed = state.sdOverlay === true
-  // A step shows only on the entry this visit made for it, and only until it is closed.
-  const foreign =
-    raw !== null &&
-    raw.act !== 'sheet' &&
-    (state.sdVisit !== visit || closed.current.has(location.key))
+  const mine = state.sdVisit === visit && typeof state.sdEntry === 'number'
+  const entry = mine ? (state.sdEntry as number) : null
+  // A step shows only on an entry this visit made for it, and only until the page leaves it.
+  const foreign = isStep(raw) && (entry === null || left.current.has(entry))
   const overlay = foreign ? null : raw
 
-  // Where the page stands, for the handlers below; set after each render, so
-  // a tap (which comes after it) always reads the address it was made on.
-  const here = useRef({ params, raw, pushed, pathname: location.pathname, key: location.key })
-  useLayoutEffect(() => {
-    here.current = { params, raw, pushed, pathname: location.pathname, key: location.key }
+  const standing = useRef<Standing>({
+    params,
+    pathname: location.pathname,
+    raw,
+    pushed,
+    entry,
+    backSince: 0,
   })
+  const landed = useRef(location.key)
+  const onStep = useRef<number | null>(isStep(overlay) ? entry : null)
+  const waiting = useRef<(() => void) | null>(null)
 
   const go = useCallback(
     (next: BookOverlay | null, replace: boolean, own: boolean) => {
-      const { params: current, pathname } = here.current
-      const search = withOverlay(current, next).toString()
+      const { params: current, pathname } = standing.current
+      const after = withOverlay(current, next)
+      const search = after.toString()
+      entries.current += 1
+      const number = next ? entries.current : null
+      standing.current = {
+        params: after,
+        pathname,
+        raw: next,
+        pushed: next ? own : false,
+        entry: number,
+        backSince: 0,
+      }
       navigate(
         { pathname, search: search ? `?${search}` : '' },
-        { replace, state: next ? { sdOverlay: own, sdVisit: visit } : null }
+        { replace, state: next ? { sdOverlay: own, sdVisit: visit, sdEntry: number } : null }
       )
     },
     [navigate, visit]
   )
 
+  /** Run `act` now, or once a Back that `close` sent has landed. */
+  const whenSettled = useCallback((act: () => void) => {
+    const { backSince } = standing.current
+    if (backSince !== 0 && Date.now() - backSince < BACK_WAIT_MS) {
+      waiting.current = act
+    } else {
+      waiting.current = null
+      act()
+    }
+  }, [])
+
   const open = useCallback(
-    (next: BookOverlay) => {
-      // One overlay at a time: opening over another takes its place.
-      const { raw: shown, pushed: own } = here.current
-      const replace = shown !== null
-      go(next, replace, replace ? own : true)
-    },
-    [go]
+    (next: BookOverlay) =>
+      whenSettled(() => {
+        // One overlay at a time: opening over another takes its place.
+        const { raw: shown, pushed: own } = standing.current
+        const replace = shown !== null
+        go(next, replace, replace ? own : true)
+      }),
+    [go, whenSettled]
   )
 
   const swap = useCallback(
-    (next: BookOverlay) => {
-      const { raw: shown, pushed: own } = here.current
-      // Nothing to swap: a step opened straight from a card is opened.
-      if (shown === null) go(next, false, true)
-      else go(next, true, own)
-    },
-    [go]
+    (next: BookOverlay) =>
+      whenSettled(() => {
+        const { raw: shown, pushed: own } = standing.current
+        // Nothing to swap: a step opened straight from a card is opened.
+        if (shown === null) go(next, false, true)
+        else go(next, true, own)
+      }),
+    [go, whenSettled]
   )
 
   const close = useCallback(() => {
-    const { raw: shown, pushed: own, key } = here.current
-    if (shown === null || closed.current.has(key)) return
-    closed.current.add(key)
-    if (own) navigate(-1)
-    else go(null, true, false)
+    const { raw: shown, pushed: own, entry: number } = standing.current
+    // Closed already, by this tap or the one before it.
+    if (shown === null) return
+    if (isStep(shown) && number !== null) left.current.add(number)
+    if (own) {
+      standing.current = {
+        ...standing.current,
+        raw: null,
+        pushed: false,
+        entry: null,
+        backSince: Date.now(),
+      }
+      navigate(-1)
+    } else {
+      go(null, true, false)
+    }
   }, [go, navigate])
 
-  // A step met without a tap (a reload, Forward) is taken out of the address in place.
+  // Each time the address lands somewhere new: take it as it is, remember a
+  // step entry the page has just left, and run a tap that waited for a Back.
+  useLayoutEffect(() => {
+    if (landed.current === location.key) return
+    landed.current = location.key
+    standing.current = { params, pathname: location.pathname, raw, pushed, entry, backSince: 0 }
+    if (onStep.current !== null) left.current.add(onStep.current)
+    onStep.current = isStep(overlay) ? entry : null
+    const next = waiting.current
+    waiting.current = null
+    next?.()
+  })
+
+  // A step met without a tap (a reload, Forward) is taken out of the address in
+  // place. Not one this page is already taking out (a close under way).
   const cleaned = useRef<string | null>(null)
   useEffect(() => {
-    if (!foreign || cleaned.current === location.key) return
+    if (!foreign || cleaned.current === location.key || standing.current.raw === null) return
     cleaned.current = location.key
     go(null, true, false)
   }, [foreign, location.key, go])

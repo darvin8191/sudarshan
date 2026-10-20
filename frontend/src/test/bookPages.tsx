@@ -7,7 +7,15 @@
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, render } from '@testing-library/react'
 import type { ReactElement } from 'react'
-import { MemoryRouter, Route, Routes, useLocation, useNavigate, useParams } from 'react-router'
+import {
+  type InitialEntry,
+  MemoryRouter,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+  useParams,
+} from 'react-router'
 import { vi } from 'vitest'
 import { createQueryClient } from '@/app/providers'
 import { frames } from './frames'
@@ -23,7 +31,11 @@ function Nav() {
 
 function Where() {
   const location = useLocation()
-  return <p data-testid="where">{`${location.pathname}${location.search}`}</p>
+  return (
+    <p data-testid="where" data-state={JSON.stringify(location.state ?? null)}>
+      {`${location.pathname}${location.search}`}
+    </p>
+  )
 }
 
 function ChartProbe() {
@@ -31,11 +43,14 @@ function ChartProbe() {
   return <p>{`Chart of ${symbol} on ${exchange}`}</p>
 }
 
-/** Render a book page at `path`, with the dashboard before it in the history. */
+/**
+ * Render a book page at `path`, with the dashboard before it in the history.
+ * An entry may carry history state, as one restored by a reload does.
+ */
 export function renderBook(
   path: string,
   page: ReactElement,
-  entries: string[] = ['/dashboard', path]
+  entries: InitialEntry[] = ['/dashboard', path]
 ) {
   return render(
     <QueryClientProvider client={createQueryClient()}>
@@ -84,4 +99,11 @@ export async function pass(ms: number): Promise<void> {
 /** Where the router is: path and query. */
 export function where(): string {
   return document.querySelector('[data-testid="where"]')?.textContent ?? ''
+}
+
+/** The history entry the router is on, state and all, as a reload would restore it. */
+export function entryHere(): InitialEntry {
+  const probe = document.querySelector('[data-testid="where"]')
+  const [pathname, search = ''] = (probe?.textContent ?? '').split(/(?=\?)/)
+  return { pathname, search, state: JSON.parse(probe?.getAttribute('data-state') ?? 'null') }
 }
