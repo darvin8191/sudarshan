@@ -13,7 +13,7 @@ Owner routes (OpenAlgo session + CSRF, like the other owner-only JSON endpoints)
 Worker routes (no session and no CSRF cookie: each body is a sealed Fernet token only a process
 that can read OpenAlgo's .env can make, see ``sudarshan/autologin/handoff.py``). They answer 404
 to anything that came through nginx, and have no rate limit (see ``_open_sealed_request``):
-    POST   /sudarshan/autologin/internal/preflight   who is the owner, which broker, logged in?
+    POST   /sudarshan/autologin/internal/preflight   owner, broker, and does the login still work?
     POST   /sudarshan/autologin/internal/report      apply a new Upstox token and/or tell the owner
 
 Secrets are write-only here: they can be set, cleared and reported as set, never read back.
@@ -206,9 +206,11 @@ def _check_stored_token(username: str) -> str:
         token = decrypt_token(auth.auth)
     except Exception:
         return "none"  # unreadable here means unusable by OpenAlgo too
+    if not token:
+        return "none"
     base = _upstox_base()
-    if not token or base is None:
-        return "none" if not token else "unknown"
+    if base is None:
+        return "unknown"
     return check_token(get_httpx_client(), base, token)
 
 
