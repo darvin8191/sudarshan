@@ -14,10 +14,12 @@
  * Close". Only this table had missed it.
  */
 
+import { QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createQueryClient } from '@/app/providers'
 import type { Position } from '@/types/trading'
 import { fakeScreen } from '@/test/screenWidth'
-import { render, screen, within } from '@/test/test-utils'
+import { act, render, screen, within } from '@/test/test-utils'
 
 const mocks = vi.hoisted(() => ({
   getPositions: vi.fn(),
@@ -38,9 +40,15 @@ vi.mock('@/stores/authStore', () => ({
 
 vi.mock('@/stores/themeStore', () => ({ onModeChange: () => () => {} }))
 
+// SUDARSHAN M6.9: a phone's cards subscribe through the shared manager, here the harness.
+vi.mock('@/lib/MarketDataManager', () => import('@/test/marketDataHarness'))
+
 // The live-price hook owns the WebSocket. Pass the positions straight through
 // so the table renders exactly what the API returned.
-vi.mock('@/hooks/useLivePrice', () => ({
+// SUDARSHAN M6.9: the module's other exports (the P&L evaluator the phone cards
+// price with) are kept.
+vi.mock('@/hooks/useLivePrice', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/hooks/useLivePrice')>()),
   useLivePrice: (positions: Position[]) => ({
     data: positions,
     isLive: false,
@@ -182,8 +190,8 @@ describe('Positions close button', () => {
   })
 })
 
-// SUDARSHAN M4.15: on a phone a symbol opens the phone chart; a wide screen keeps
-// upstream's link into the terminal.
+// SUDARSHAN M4.15, M6.9: on a phone a position is a card whose sheet opens the
+// phone chart; a wide screen keeps upstream's link into the terminal.
 describe('Positions chart link', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -193,9 +201,16 @@ describe('Positions chart link', () => {
     vi.restoreAllMocks()
   })
 
-  it("opens the phone chart from a position's symbol on a phone", async () => {
+  it("opens the phone chart from a position's sheet on a phone", async () => {
     fakeScreen('phone')
-    await renderPositions([OPEN_POSITION])
+    mocks.getPositions.mockResolvedValue({ status: 'success', data: [OPEN_POSITION] })
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <Positions />
+      </QueryClientProvider>
+    )
+    const card = await screen.findByRole('button', { name: /NIFTY 25000 CE/ })
+    act(() => card.click())
 
     expect(
       screen.getByRole('link', { name: `Open the chart for ${OPEN_POSITION.symbol} on NFO` })

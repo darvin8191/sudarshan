@@ -54,12 +54,15 @@ import { useSupportedExchanges } from '@/hooks/useSupportedExchanges'
 import { cn, makeFormatCurrency, sanitizeCSV } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
 import { onModeChange } from '@/stores/themeStore'
+// SUDARSHAN M6.9: on a phone the positions are cards (src/sudarshan/books/cards).
+import { PositionCards } from '@/sudarshan/books/cards/PositionCards'
 // SUDARSHAN: the book re-read, status line and tick prices (src/sudarshan/books).
 import { useBookFeed } from '@/sudarshan/books/feed'
 import { TickPrice } from '@/sudarshan/books/LiveFigures'
 import { useBookSync, useLatestRead } from '@/sudarshan/books/useBookSync'
 // SUDARSHAN M4.15: on a phone, a symbol opens the phone chart (src/sudarshan/chart).
 import { BookSymbolLink } from '@/sudarshan/chart/BookSymbolLink'
+import { usePhoneLayout } from '@/sudarshan/chart/usePhoneLayout'
 import { useMarketOpen } from '@/sudarshan/dashboard/hooks'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
 import type { Position } from '@/types/trading'
@@ -172,6 +175,9 @@ export default function Positions() {
   // SUDARSHAN: when the shown book was asked for, so only newer ticks move its P&L.
   const [bookAt, setBookAt] = useState<number | null>(null)
   const beginRead = useLatestRead()
+  // SUDARSHAN M6.9: a phone's cards subscribe themselves, drawn once a frame,
+  // so this page's own subscription is off there and a tick never redraws it.
+  const phone = usePhoneLayout()
 
   // Centralized real-time price hook with WebSocket + MultiQuotes fallback
   // Automatically pauses when tab is hidden
@@ -180,7 +186,7 @@ export default function Positions() {
     feed,
     calendar,
   } = useLivePrice(positions, {
-    enabled: positions.length > 0,
+    enabled: positions.length > 0 && !phone,
     useMultiQuotesFallback: true,
     pauseWhenHidden: true,
     snapshotAt: bookAt,
@@ -589,6 +595,26 @@ export default function Positions() {
     if (!a.startsWith('Equity') && b.startsWith('Equity')) return 1
     return a.localeCompare(b)
   })
+
+  // SUDARSHAN M6.9: on a phone, a card per position instead of the wide table.
+  // Every position is shown (the filters here are the wide table's), and Exit
+  // and Exit all are this page's own calls.
+  if (phone) {
+    return (
+      <PositionCards
+        positions={positions}
+        bookAt={bookAt}
+        loading={isLoading}
+        error={error}
+        refreshing={isRefreshing || showStaleWarning}
+        apiKey={apiKey}
+        marketOpen={marketOpen}
+        onRefresh={fetchPositions}
+        onExit={handleClosePosition}
+        onExitAll={handleCloseAllPositions}
+      />
+    )
+  }
 
   return (
     <div className="space-y-6">
