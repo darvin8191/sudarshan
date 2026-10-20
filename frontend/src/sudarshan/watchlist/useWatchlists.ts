@@ -18,6 +18,12 @@ export const DEFAULT_LIST_NAME = 'Watchlist'
 /** The longest name the server accepts. */
 export const MAX_NAME_LENGTH = 64
 
+/** The most lists the server keeps for one user (`MAX_LISTS_PER_USER`). */
+export const MAX_LISTS = 50
+
+/** The most instruments the server keeps in one list (`MAX_ITEMS_PER_LIST`). */
+export const MAX_ITEMS = 250
+
 /** Every list, making the first one when there is none, so the page always has one to act on. */
 export async function readLists(): Promise<Watchlist[]> {
   const lists = await watchlistApi.list()
@@ -44,6 +50,17 @@ export function moved(items: WatchlistItem[], itemId: number, by: -1 | 1): Watch
   return next
 }
 
+/**
+ * The lists, and every change to them.
+ *
+ * Changes show at once where the answer is already known (an instrument
+ * removed or moved, a list made, renamed or given an instrument once the
+ * server has said yes), and every save goes to the server one after another
+ * on a single chain, so two quick taps cannot land out of order. The lists are
+ * read again once, when the chain runs dry: never while a save is still out,
+ * whose answer such a read could not yet hold. A refused save is reported, and
+ * that read puts the screen back as the server has it.
+ */
 export function useWatchlists() {
   const client = useQueryClient()
   const query = useQuery({
@@ -58,104 +75,150 @@ export function useWatchlists() {
     [client]
   )
 
-  /** Change the lists on screen at once; the server's answer follows. */
+  /** Change the lists on screen at once, past any read in flight. */
   const patch = useCallback(
-    async (listId: number, change: (items: WatchlistItem[]) => WatchlistItem[]) => {
+    async (change: (lists: Watchlist[]) => Watchlist[]) => {
       await client.cancelQueries({ queryKey: WATCHLISTS_KEY })
-      client.setQueryData<Watchlist[]>(WATCHLISTS_KEY, (lists) =>
-        lists?.map((list) => (list.id === listId ? { ...list, items: change(list.items) } : list))
-      )
+      client.setQueryData<Watchlist[]>(WATCHLISTS_KEY, (lists) => lists && change(lists))
     },
     [client]
   )
 
-  /** Make a list. Throws with the server's reason (a name already used, the cap). */
-  const create = useCallback(
-    async (name: string): Promise<Watchlist> => {
-      const created = await watchlistApi.create(name.trim())
-      await refresh()
-      return created
+  const patchList = useCallback(
+    (listId: number, change: (list: Watchlist) => Watchlist) =>
+      patch((lists) => lists.map((list) => (list.id === listId ? change(list) : list))),
+    [patch]
+  )
+
+  const chain = useRef<Promise<void>>(Promise.resolve())
+  const waiting = useRef(0)
+
+  /** Run a save after every save before it; read the lists again once the last one is done. */
+  const enqueue = useCallback(
+    <T>(save: () => Promise<T>): Promise<T> => {
+      waiting.current += 1
+      const run = chain.current.then(save)
+      chain.current = run
+        .then(
+          () => undefined,
+          () => undefined
+        )
+        .then(() => {
+          waiting.current -= 1
+          // Not waited for: a read that hangs must not hold the next save. A
+          // save that follows cancels it before it draws (`patch`).
+          if (waiting.current === 0) void refresh()
+        })
+      return run
     },
     [refresh]
   )
 
+  /** Make a list. Throws with the server's reason (a name already used, the cap). */
+  const create = useCallback(
+    (name: string): Promise<Watchlist> =>
+      enqueue(async () => {
+        const created = await watchlistApi.create(name.trim())
+        await patch((lists) =>
+          lists.some((list) => list.id === created.id) ? lists : [...lists, created]
+        )
+        return created
+      }),
+    [enqueue, patch]
+  )
+
   /** Rename a list. Throws with the server's reason. */
   const rename = useCallback(
-    async (listId: number, name: string): Promise<void> => {
-      await watchlistApi.rename(listId, name.trim())
-      await refresh()
-    },
-    [refresh]
+    (listId: number, name: string): Promise<void> =>
+      enqueue(async () => {
+        await watchlistApi.rename(listId, name.trim())
+        await patchList(listId, (list) => ({ ...list, name: name.trim() }))
+      }),
+    [enqueue, patchList]
   )
 
   /**
    * Delete a list, and say which list to show next. Deleting the last one
    * makes a fresh empty list in its place, so the page is never left with
-   * nothing to act on. Throws with the server's reason.
+   * nothing to act on. The lists are read afresh before answering, whatever
+   * the cache thinks of its own age. Throws with the server's reason.
    */
   const remove = useCallback(
-    async (listId: number): Promise<number | null> => {
-      await watchlistApi.remove(listId)
-      const lists = await client.fetchQuery({ queryKey: WATCHLISTS_KEY, queryFn: readLists })
-      return lists[0]?.id ?? null
-    },
-    [client]
+    (listId: number): Promise<number | null> =>
+      enqueue(async () => {
+        await watchlistApi.remove(listId)
+        const lists = await client.fetchQuery({
+          queryKey: WATCHLISTS_KEY,
+          queryFn: readLists,
+          staleTime: 0,
+        })
+        return lists[0]?.id ?? null
+      }),
+    [client, enqueue]
   )
 
   /** Add an instrument at the end of a list. Throws with the server's reason (the list is full). */
   const addItem = useCallback(
-    async (listId: number, symbol: string, exchange: string): Promise<void> => {
-      await watchlistApi.addItem(listId, symbol, exchange)
-      await refresh()
-    },
-    [refresh]
+    (listId: number, symbol: string, exchange: string): Promise<void> =>
+      enqueue(async () => {
+        const added = await watchlistApi.addItem(listId, symbol, exchange)
+        if (added) {
+          await patchList(listId, (list) =>
+            list.items.some((item) => item.id === added.id)
+              ? list
+              : { ...list, items: [...list.items, added] }
+          )
+        }
+      }),
+    [enqueue, patchList]
   )
 
   /** Take an instrument out of a list: gone from the screen at once, put back if the server refuses. */
   const removeItem = useCallback(
     async (listId: number, item: WatchlistItem): Promise<void> => {
-      await patch(listId, (items) => items.filter((each) => each.id !== item.id))
+      await patchList(listId, (list) => ({
+        ...list,
+        items: list.items.filter((each) => each.id !== item.id),
+      }))
       try {
-        await watchlistApi.removeItem(listId, item.id)
+        await enqueue(() => watchlistApi.removeItem(listId, item.id))
       } catch (error) {
         showToast.error(watchlistError(error, `Could not remove ${item.symbol}`))
-      } finally {
-        await refresh()
       }
     },
-    [patch, refresh]
+    [enqueue, patchList]
   )
 
   /**
-   * Move an instrument one place up or down, and save the whole order. Saves
-   * go one after another, so two quick taps cannot reach the server out of
-   * order and leave the first order in place.
+   * Move an instrument one place up or down, and save the whole order as the
+   * screen now shows it. Each save carries the order of its own tap, and they
+   * reach the server in the order they were made.
    */
-  const saving = useRef<Promise<void>>(Promise.resolve())
   const move = useCallback(
     async (listId: number, itemId: number, by: -1 | 1): Promise<void> => {
-      const list = client
-        .getQueryData<Watchlist[]>(WATCHLISTS_KEY)
-        ?.find((each) => each.id === listId)
-      if (!list) return
-      const order = moved(list.items, itemId, by)
-      if (order === list.items) return
-      await patch(listId, () => order)
-      const save = saving.current.then(async () => {
-        try {
-          await watchlistApi.reorderItems(
+      // Worked out from the lists as they stand when the change is drawn, so a
+      // second tap builds on the first even before the first is saved.
+      const made: { order: WatchlistItem[] | null } = { order: null }
+      await patchList(listId, (list) => {
+        const order = moved(list.items, itemId, by)
+        if (order === list.items) return list
+        made.order = order
+        return { ...list, items: order }
+      })
+      const order = made.order
+      if (!order) return
+      try {
+        await enqueue(() =>
+          watchlistApi.reorderItems(
             listId,
             order.map((item) => item.id)
           )
-        } catch (error) {
-          showToast.error(watchlistError(error, 'Could not save the new order'))
-          await refresh()
-        }
-      })
-      saving.current = save
-      await save
+        )
+      } catch (error) {
+        showToast.error(watchlistError(error, 'Could not save the new order'))
+      }
     },
-    [client, patch, refresh]
+    [enqueue, patchList]
   )
 
   return {

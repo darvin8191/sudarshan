@@ -9,17 +9,22 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
+import { MAX_LISTS } from './useWatchlists'
 
 export const PANEL_ID = 'sd-watchlist-panel'
 export const tabId = (listId: number) => `sd-watchlist-tab-${listId}`
 
 const MENU_ITEM = 'min-h-12 gap-3 text-[0.9375rem] font-medium'
 
+/** Why "New list" is off, in a trader's words. */
+export const LISTS_FULL = `You have ${MAX_LISTS} lists, the most there can be. Delete one to make another.`
+
 /**
  * The lists as tabs along the top, as a broker app shows them: the open one in
  * a tinted pill with a bold label (more than colour), its count beside each
  * name, the row scrolling sideways when the names do not fit. Arrow keys move
- * between tabs. The menu beside them makes, renames, edits and deletes lists.
+ * between tabs. The menu beside them makes, renames, edits and deletes lists;
+ * at the server's cap of lists, "New list" is off and says why.
  */
 export function ListTabs({
   lists,
@@ -48,6 +53,8 @@ export function ListTabs({
       tab.scrollIntoView({ block: 'nearest', inline: 'nearest' })
     }
   }, [activeId])
+
+  const full = lists.length >= MAX_LISTS
 
   const step = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
     const count = lists.length
@@ -110,10 +117,23 @@ export function ListTabs({
           <MoreVertical aria-hidden="true" className="size-5" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-56">
-          <DropdownMenuItem className={MENU_ITEM} onSelect={onCreate}>
+          <DropdownMenuItem
+            className={MENU_ITEM}
+            disabled={full}
+            aria-describedby={full ? 'sd-lists-full' : undefined}
+            onSelect={onCreate}
+          >
             <Plus aria-hidden="true" className="size-5" />
             New list
           </DropdownMenuItem>
+          {full && (
+            <p
+              id="sd-lists-full"
+              className="px-2 pb-2 text-xs leading-snug font-medium text-muted-foreground"
+            >
+              {LISTS_FULL}
+            </p>
+          )}
           <DropdownMenuItem className={MENU_ITEM} disabled={activeId === null} onSelect={onRename}>
             <Pencil aria-hidden="true" className="size-5" />
             Rename list
