@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChartStateView } from '@/lib/trading/chartState'
 import type { LiveStatus } from '@/lib/trading/liveStatus'
 import type { FeedLine } from '@/sudarshan/dashboard/live'
@@ -135,6 +135,10 @@ beforeEach(() => {
   Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 })
 })
 
+afterEach(() => {
+  Reflect.deleteProperty(navigator, 'wakeLock')
+})
+
 describe('the phone chart page at 390 px', () => {
   it('names the instrument and loads it at the timeframe last chosen', async () => {
     localStorage.setItem('sudarshan-chart-interval', '15m')
@@ -256,6 +260,20 @@ describe('the phone chart page at 390 px', () => {
       'href',
       '/trading?symbol=SBIN&exchange=NSE'
     )
+  })
+
+  it('offers to keep the screen on only where the phone can', async () => {
+    await opened()
+    expect(screen.queryByRole('switch')).toBeNull()
+  })
+
+  it('offers to keep the screen on where it can', async () => {
+    Object.defineProperty(navigator, 'wakeLock', {
+      configurable: true,
+      value: { request: vi.fn() },
+    })
+    await opened()
+    expect(screen.getByRole('switch', { name: 'Keep screen on' })).toBeVisible()
   })
 
   it('says what to do when there is no API key', async () => {

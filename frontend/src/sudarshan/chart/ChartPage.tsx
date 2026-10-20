@@ -12,12 +12,13 @@
  * This file is layout and wiring only. A tick re-renders the price header and
  * nothing else: the price lives in a small store outside React's tree.
  */
-import { ArrowLeft, Search, X } from 'lucide-react'
+import { ArrowLeft, Search, SunMedium, X } from 'lucide-react'
 import type { Bar } from 'openalgo-charts'
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { Link, Navigate, useLocation, useNavigate, useParams } from 'react-router'
 import { PlaceOrderDialog } from '@/components/trading/PlaceOrderDialog'
 import { SymbolSearchDialog } from '@/components/trading/SymbolSearchDialog'
+import { Switch } from '@/components/ui/switch'
 import { chartHref } from '@/lib/trading/chartLink'
 import { type ChartStateView, chartStateCopy, createChartStateGate } from '@/lib/trading/chartState'
 import { priceDp } from '@/lib/trading/format'
@@ -48,6 +49,7 @@ import {
   saveLastInstrument,
 } from './prefs'
 import { PriceStore, tickLine } from './prices'
+import { useWakeLock } from './useWakeLock'
 
 /** The order tag the chart's tickets carry, the same as the /trading terminal's. */
 const STRATEGY = 'chart-trading'
@@ -101,6 +103,7 @@ function PhoneChartScreen({ symbol, exchange }: { symbol: string; exchange: stri
   const [prices] = useState(() => new PriceStore())
   const host = useRef<HTMLDivElement>(null)
   const surface = useRef<HTMLDivElement>(null)
+  const wake = useWakeLock()
   const quoteOnly = isQuoteOnly(exchange)
 
   useEffect(() => {
@@ -284,7 +287,15 @@ function PhoneChartScreen({ symbol, exchange }: { symbol: string; exchange: stri
 
       <footer className="shrink-0 border-t bg-card px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
         <div className="flex min-h-12 items-center justify-between gap-3">
-          <span />
+          {wake.supported ? (
+            <label className="flex min-h-12 items-center gap-2 text-sm font-medium">
+              <SunMedium aria-hidden="true" className="size-4 text-muted-foreground" />
+              Keep screen on
+              <Switch checked={wake.on} onCheckedChange={wake.setOn} />
+            </label>
+          ) : (
+            <span />
+          )}
           <Link
             to={chartHref(symbol, exchange)}
             className="inline-flex min-h-12 items-center text-sm font-semibold text-primary underline-offset-4 hover:underline"
