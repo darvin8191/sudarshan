@@ -13,6 +13,11 @@ healthy.
   starts with otpauth://), or the key if Upstox shows one. Only the key inside is saved.
 - **Upstox's own steps.** The help card on that page gives the steps from Upstox's help pages,
   in English and Gujarati.
+- **Settings arrive with an update.** When a later update needs one of OpenAlgo's settings
+  changed, the update makes the change itself, so you never edit the server's settings file. A
+  value you chose yourself is never overwritten. The old file is kept with that update's backup
+  and put back if the update rolls back. This takes effect from the update after this one; the
+  next one (v0.3.0) uses it to keep the Upstox price connection through a phone screen-off.
 
 ### What is refused now
 - QR code text for a non-standard code (not 6 digits every 30 seconds) is refused, because the
