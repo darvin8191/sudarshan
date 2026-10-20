@@ -23,34 +23,39 @@ vi.mock('@/api/trading', () => ({
 /** The ticket the page opens, as it was opened. */
 const ticket = vi.hoisted(() => ({ opened: [] as string[] }))
 vi.mock('@/components/trading', async () => {
-  const { createElement } = await import('react')
-  return {
-    PlaceOrderDialog: (props: Record<string, unknown>) => {
-      if (!props.open) return null
-      const said = [
-        props.action,
-        props.symbol,
-        props.exchange,
-        `qty ${props.quantity}`,
-        `product ${props.product}`,
-        props.priceType,
-        props.strategy,
-      ].join(' ')
-      ticket.opened.push(said)
-      return createElement(
-        'section',
-        { 'aria-label': 'Order ticket' },
-        said,
-        createElement(
-          'button',
-          {
-            type: 'button',
-            onClick: () => (props.onOpenChange as (open: boolean) => void)(false),
-          },
-          'Close ticket'
-        )
+  const { createElement, useState } = await import('react')
+  // Keeps what is typed in its own state, as the real ticket does: remounting it loses that.
+  function Ticket(props: Record<string, unknown>) {
+    const [typed, setTyped] = useState(props.quantity)
+    const said = [
+      props.action,
+      props.symbol,
+      props.exchange,
+      `qty ${props.quantity}`,
+      `product ${props.product}`,
+      props.priceType,
+      props.strategy,
+    ].join(' ')
+    ticket.opened.push(said)
+    return createElement(
+      'section',
+      { 'aria-label': 'Order ticket' },
+      said,
+      createElement('output', null, `typed ${typed}`),
+      createElement('button', { type: 'button', onClick: () => setTyped(1) }, 'Type 1'),
+      createElement(
+        'button',
+        {
+          type: 'button',
+          onClick: () => (props.onOpenChange as (open: boolean) => void)(false),
+        },
+        'Close ticket'
       )
-    },
+    )
+  }
+  return {
+    PlaceOrderDialog: (props: Record<string, unknown>) =>
+      props.open ? createElement(Ticket, props) : null,
   }
 })
 vi.mock('@/stores/authStore', () => ({
@@ -227,6 +232,36 @@ describe('Holdings on a phone', () => {
     await tap.click(card(/RELIANCE/))
     await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Sell' }))
     expect(screen.getByRole('region', { name: 'Order ticket' })).toHaveTextContent(fromExit ?? '')
+  })
+
+  it('keeps the ticket, with what was typed into it, while the phone turns and back', async () => {
+    const tap = user()
+    const screenNow = fakeScreen('phone')
+    api.getHoldings.mockResolvedValue({
+      status: 'success',
+      data: { holdings: [RELIANCE], statistics: STATS },
+    })
+    renderBook('/holdings', <Holdings />)
+    await settle()
+    await settle()
+    await tap.click(card(/RELIANCE/))
+    await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Sell' }))
+    await tap.click(screen.getByRole('button', { name: 'Type 1' }))
+    const typed = () => screen.getByRole('region', { name: 'Order ticket' }).querySelector('output')
+    expect(typed()).toHaveTextContent('typed 1')
+
+    act(() => screenNow.turn('wide'))
+    await settle()
+    expect(screen.getByRole('table')).toBeInTheDocument()
+    expect(typed()).toHaveTextContent('typed 1')
+
+    act(() => screenNow.turn('phone'))
+    await settle()
+    expect(card(/RELIANCE/)).toBeInTheDocument()
+    expect(typed()).toHaveTextContent('typed 1')
+    expect(screen.getByRole('region', { name: 'Order ticket' })).toHaveTextContent(
+      'SELL RELIANCE NSE qty 40'
+    )
   })
 
   it('closes the ticket on Back, then leaves the page', async () => {

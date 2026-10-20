@@ -276,6 +276,11 @@ export function useBookOverlay(): {
  * dialog can open a render before its entry arrives; `opening`, called just
  * before the dialog is opened from here, keeps that moment from reading as a
  * Back.
+ *
+ * A dialog already open when this mounts was opened by the page's other
+ * layout (the phone turned while it was open, and the page keeps the dialog in
+ * one place for both): it is left open, with what was typed into it, and is
+ * the page's to close.
  */
 export function usePageDialog({
   entered,
@@ -292,7 +297,9 @@ export function usePageDialog({
 }): () => void {
   const awaiting = useRef(false)
   const seen = useRef(false)
+  const inherited = useRef(open)
   useEffect(() => {
+    if (!open) inherited.current = false
     if (entered) {
       awaiting.current = false
       if (open) {
@@ -301,7 +308,7 @@ export function usePageDialog({
         seen.current = false
         close()
       }
-    } else if (open && !awaiting.current) {
+    } else if (open && !awaiting.current && !inherited.current) {
       seen.current = false
       setOpen(false)
     }

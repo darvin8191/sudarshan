@@ -260,30 +260,26 @@ export default function Holdings() {
   )
 
   // SUDARSHAN M6.9: on a phone, a card per holding instead of the wide table;
-  // Buy more and Sell open the ticket above exactly as Add and Exit do.
-  if (phone) {
-    return (
-      <>
-        <HoldingCards
-          holdings={holdings}
-          stats={stats}
-          bookAt={bookAt}
-          loading={isLoading}
-          error={error}
-          refreshing={isRefreshing || showStaleWarning}
-          apiKey={apiKey}
-          marketOpen={marketOpen}
-          onRefresh={fetchHoldings}
-          onOrder={setOrderIntent}
-          orderOpen={orderIntent !== null}
-          onOrderClose={() => setOrderIntent(null)}
-        />
-        {orderDialog}
-      </>
-    )
-  }
+  // Buy more and Sell open the ticket above as Add and Exit do.
+  const cards = phone ? (
+    <HoldingCards
+      holdings={holdings}
+      stats={stats}
+      bookAt={bookAt}
+      loading={isLoading}
+      error={error}
+      refreshing={isRefreshing || showStaleWarning}
+      apiKey={apiKey}
+      marketOpen={marketOpen}
+      onRefresh={fetchHoldings}
+      onOrder={setOrderIntent}
+      orderOpen={orderIntent !== null}
+      onOrderClose={() => setOrderIntent(null)}
+    />
+  ) : null
 
-  return (
+  // SUDARSHAN M6.9: upstream's table, unchanged, on a wide screen.
+  const table = phone ? null : (
     <div className="space-y-6">
       {/* Stale Data Warning */}
       {showStaleWarning && (
@@ -523,8 +519,16 @@ export default function Holdings() {
           )}
         </CardContent>
       </Card>
-
-      {orderDialog}
     </div>
+  )
+
+  // SUDARSHAN M6.9: the ticket beside the cards or the table, in the same place
+  // for both, so turning the phone keeps it open with what was typed into it.
+  return (
+    <>
+      {cards}
+      {table}
+      {orderDialog}
+    </>
   )
 }

@@ -510,6 +510,31 @@ describe('Order book on a phone: the sheet and its actions', () => {
     expect(api.modifyOrder).not.toHaveBeenCalled()
   })
 
+  it('keeps the modify dialog, with what was typed, while the phone turns and back', async () => {
+    const tap = user()
+    api.getOrders.mockResolvedValue(book(WORKING))
+    const screenNow = fakeScreen('phone')
+    renderBook('/orderbook', <OrderBook />)
+    await settle()
+    await tap.click(orderCard('1001'))
+    await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Modify' }))
+    const priceBox = () =>
+      within(screen.getByRole('dialog', { name: /Modify Order/ })).getByLabelText('Price')
+    await tap.clear(priceBox())
+    await tap.type(priceBox(), '170')
+
+    // The dialog hides the page under it from assistive tech, so the page is found by tag.
+    act(() => screenNow.turn('wide'))
+    await settle()
+    expect(document.querySelector('table')).not.toBeNull()
+    expect(priceBox()).toHaveValue(170)
+
+    act(() => screenNow.turn('phone'))
+    await settle()
+    expect(document.querySelector('li[data-order="1001"]')).not.toBeNull()
+    expect(priceBox()).toHaveValue(170)
+  })
+
   it('takes the entry away when the modify dialog closes itself', async () => {
     const tap = user()
     await renderPhone(WORKING)
