@@ -205,6 +205,39 @@ describe('priceOf', () => {
 describe('indexView', () => {
   const quote = { ltp: 25874.3, prev_close: 25714.85 }
 
+  /** NIFTY's cache line: a tick at `at` carrying `fields` besides its level. */
+  const line = (at: number, fields: Record<string, unknown>): SymbolData => ({
+    symbol: 'NIFTY',
+    exchange: 'NSE_INDEX',
+    data: { ltp: 25880, ...fields },
+    lastUpdate: at,
+    updateSource: 'websocket',
+  })
+
+  it("prefers a tick's previous close to the read's whenever the tick carries one (M11.3)", () => {
+    expect(indexView(quote, READ, line(READ + 50, { prev_close: 25700.1 }))).toEqual({
+      ltp: 25880,
+      prevClose: 25700.1,
+      at: READ + 50,
+      live: true,
+    })
+    // Even from a tick older than the read: the level is the read's, the
+    // previous close the tick's, the same figure all session.
+    expect(indexView(quote, READ, line(READ - 50, { prev_close: 25700.1 }))).toMatchObject({
+      ltp: 25874.3,
+      prevClose: 25700.1,
+    })
+    // And with no read at all.
+    expect(indexView(undefined, null, line(READ, { prev_close: 25700.1 })).prevClose).toBe(25700.1)
+  })
+
+  it("falls back to the read's previous close for a missing, zero or non-numeric one", () => {
+    for (const prev_close of [undefined, 0, -1, Number.NaN, '25700.1', null]) {
+      expect(indexView(quote, READ, line(READ + 50, { prev_close })).prevClose).toBe(25714.85)
+    }
+    expect(indexView(undefined, null, line(READ, { prev_close: 0 })).prevClose).toBeNull()
+  })
+
   it('takes the level from a tick newer than the read, and the previous close from the read', () => {
     const view = indexView(
       quote,

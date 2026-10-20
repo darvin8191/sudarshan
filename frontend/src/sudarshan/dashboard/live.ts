@@ -108,8 +108,9 @@ export interface IndexView {
   /** The level shown: the newest of the snapshot and the ticks. */
   ltp: number | null
   /**
-   * The previous session's close, from the snapshot. Upstox ticks carry it too, as
-   * `prev_close` (M11.3), but this view still takes it from the snapshot.
+   * The previous session's close: a tick's `prev_close` whenever the cache line
+   * holds one (Upstox ticks carry it in every mode, M11.3), the snapshot's
+   * otherwise.
    */
   prevClose: number | null
   /** When the level shown was last confirmed. */
@@ -118,18 +119,24 @@ export interface IndexView {
   live: boolean
 }
 
+/** A previous close worth measuring a change from: a finite number above zero. */
+function closeOf(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null
+}
+
 /**
  * Merge an index's REST snapshot with its ticks: whichever is newer gives the
- * level, and the snapshot gives the previous close. Upstox ticks now carry the
- * previous close as `prev_close` in every mode, and a Quote tick's `close` is
- * the previous close too (M11.3); reading it from a tick is not done here yet.
+ * level. The previous close is a tick's `prev_close` whenever the cache line
+ * holds one, however old, since it is the same figure all session and Upstox
+ * ticks carry it in every mode (M11.3); the snapshot's otherwise. A missing,
+ * zero or non-numeric one never counts, so a change is never measured from zero.
  */
 export function indexView(
   snapshot: { ltp: number; prev_close: number } | undefined,
   snapshotAt: number | null,
   data: SymbolData | undefined
 ): IndexView {
-  const prevClose = snapshot && snapshot.prev_close > 0 ? snapshot.prev_close : null
+  const prevClose = closeOf(data?.data.prev_close) ?? closeOf(snapshot?.prev_close)
   const price = priceOf(data)
   if (price && (snapshotAt === null || price.at >= snapshotAt)) {
     return { ltp: price.ltp, prevClose, at: price.at, live: price.live }

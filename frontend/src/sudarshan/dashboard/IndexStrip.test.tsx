@@ -115,6 +115,20 @@ describe('IndexStrip', () => {
     expect(getMultiQuotes).toHaveBeenCalledTimes(1)
   })
 
+  it("measures the change from a tick's previous close once a tick carries one (M11.3)", async () => {
+    render(<IndexStrip apiKey="key" marketOpen={OPEN} />)
+    await settle()
+
+    act(() => feed.push('NIFTY', 'NSE_INDEX', { ltp: 25900, prev_close: 25800 }))
+    expect(tiles()[0]).toHaveTextContent('NIFTY 5025,900.00+0.39%')
+    // A later frame without it keeps it: the manager keeps every field.
+    tick('NIFTY', 25750)
+    expect(tiles()[0]).toHaveTextContent(`NIFTY 5025,750.00${MINUS}0.19%`)
+    // The other tiles, whose ticks carry none, keep the read's.
+    tick('BANKNIFTY', 58016.6)
+    expect(tiles()[1]).toHaveTextContent('NIFTY BANK58,016.600.00%')
+  })
+
   it('ignores a tick older than the REST read, which is newer', async () => {
     render(<IndexStrip apiKey="key" marketOpen={OPEN} />)
     await settle()

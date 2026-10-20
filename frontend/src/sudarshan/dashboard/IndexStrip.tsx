@@ -45,11 +45,11 @@ interface Snapshot {
 /**
  * One REST read of the three quotes, for what the ticks do not give: a level
  * before the first tick (and all day when the market is shut and nothing
- * ticks), and the previous close, which the feed's ticks do not carry. Read on
- * arrival; again when NSE opens or closes, since at the open the previous close
- * becomes yesterday's; and when the page comes back into view or the feed
- * reconnects, if the last good read is over ten minutes old. Never on a timer:
- * the ticks keep the levels current.
+ * ticks), and the previous close until a tick brings its own (`indexView`
+ * prefers the tick's, M11.3). Read on arrival; again when NSE opens or closes,
+ * since at the open the previous close becomes yesterday's; and when the page
+ * comes back into view or the feed reconnects, if the last good read is over
+ * ten minutes old. Never on a timer: the ticks keep the levels current.
  */
 export function useIndexSnapshot(
   apiKey: string | null,
