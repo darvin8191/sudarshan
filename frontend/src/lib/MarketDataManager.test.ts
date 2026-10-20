@@ -101,3 +101,123 @@ describe('MarketDataManager fallback sequencing', () => {
     })
   })
 })
+
+// SUDARSHAN (M11.3): the normalized tick reaches consumers whole.
+describe('MarketDataManager keeps the whole tick', () => {
+  afterEach(() => {
+    MarketDataManager.resetInstance()
+  })
+
+  function tick(manager: MarketDataManager, data: Record<string, unknown>): void {
+    const harness = manager as unknown as ManagerHarness
+    harness.handleMessage(
+      new MessageEvent('message', {
+        data: JSON.stringify({
+          type: 'market_data',
+          symbol: 'NIFTY27OCT2625100CE',
+          exchange: 'NFO',
+          mode: 2,
+          data,
+        }),
+      })
+    )
+  }
+
+  it('keeps every numeric field and the greeks of a quote tick', () => {
+    const manager = MarketDataManager.getInstance()
+    manager.subscribe('NIFTY27OCT2625100CE', 'NFO', 'Quote', () => {})
+
+    tick(manager, {
+      symbol: 'NIFTY27OCT2625100CE',
+      exchange: 'NFO',
+      token: 'NSE_FO|12345',
+      ltp: 101.5,
+      open: 90,
+      high: 110,
+      low: 88,
+      close: 95.25,
+      prev_close: 95.25,
+      volume: 123450,
+      last_trade_quantity: 75,
+      last_trade_time: 1760945399000,
+      average_price: 99.87,
+      total_buy_quantity: 50000,
+      total_sell_quantity: 60000,
+      oi: 4567800,
+      iv: 0.1432,
+      greeks: { delta: 0.52, gamma: 0.0011, theta: -12.3, vega: 9.8, rho: 0 },
+      timestamp: 1760945400123,
+      cas_eligible: true,
+    })
+
+    const cached = manager.getCachedData('NIFTY27OCT2625100CE', 'NFO')?.data
+    expect(cached).toEqual({
+      ltp: 101.5,
+      open: 90,
+      high: 110,
+      low: 88,
+      close: 95.25,
+      volume: 123450,
+      change: undefined,
+      change_percent: undefined,
+      timestamp: 1760945400123,
+      bid_price: undefined,
+      ask_price: undefined,
+      bid_size: undefined,
+      ask_size: undefined,
+      depth: undefined,
+      prev_close: 95.25,
+      last_trade_quantity: 75,
+      last_trade_time: 1760945399000,
+      average_price: 99.87,
+      total_buy_quantity: 50000,
+      total_sell_quantity: 60000,
+      oi: 4567800,
+      iv: 0.1432,
+      greeks: { delta: 0.52, gamma: 0.0011, theta: -12.3, vega: 9.8, rho: 0 },
+    })
+  })
+
+  it('keeps the last value of a field a later tick leaves out', () => {
+    const manager = MarketDataManager.getInstance()
+    manager.subscribe('NIFTY27OCT2625100CE', 'NFO', 'Quote', () => {})
+
+    tick(manager, { ltp: 101.5, oi: 4567800, prev_close: 95.25, greeks: { delta: 0.52 } })
+    tick(manager, { ltp: 102 })
+
+    expect(manager.getCachedData('NIFTY27OCT2625100CE', 'NFO')?.data).toMatchObject({
+      ltp: 102,
+      oi: 4567800,
+      prev_close: 95.25,
+      greeks: { delta: 0.52, gamma: null, theta: null, vega: null, rho: null },
+    })
+  })
+
+  it('keeps a greek the broker could not compute as unknown, never as 0', () => {
+    const manager = MarketDataManager.getInstance()
+    manager.subscribe('NIFTY27OCT2625100CE', 'NFO', 'Quote', () => {})
+
+    tick(manager, {
+      ltp: 0.05,
+      greeks: { delta: null, gamma: null, theta: null, vega: null, rho: 0 },
+    })
+
+    expect(manager.getCachedData('NIFTY27OCT2625100CE', 'NFO')?.data.greeks).toEqual({
+      delta: null,
+      gamma: null,
+      theta: null,
+      vega: null,
+      rho: 0,
+    })
+  })
+
+  it('ignores greeks that carry nothing', () => {
+    const manager = MarketDataManager.getInstance()
+    manager.subscribe('NIFTY27OCT2625100CE', 'NFO', 'Quote', () => {})
+
+    tick(manager, { ltp: 101.5, greeks: {} })
+    tick(manager, { ltp: 101.5, greeks: 'n/a' })
+
+    expect(manager.getCachedData('NIFTY27OCT2625100CE', 'NFO')?.data.greeks).toBeUndefined()
+  })
+})

@@ -1,0 +1,633 @@
+"""Golden vectors for the Upstox stream adapter's normalized payloads (SUDARSHAN M11.3).
+
+Each frame is a real `FeedResponse` built with the generated protobuf module, serialized, and
+fed through `UpstoxWebSocketClient._process_binary_message`, so the bytes take the production
+path: protobuf decode, `MessageToDict` with its default options (int64 as strings, zero scalars
+left out), then the adapter. Payloads are compared as canonical JSON, which also checks every
+type (an int is not a float) and that nothing publishes NaN or Infinity.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import threading
+from collections import defaultdict
+from typing import Any
+
+import pytest
+
+# The proxy package imports every broker adapter when it loads, so it has to load before any
+# adapter module does, or the adapter's own import of it is circular.
+import websocket_proxy  # noqa: F401
+from websocket_proxy import connection_manager
+from websocket_proxy import server as proxy_server
+from websocket_proxy.base_adapter import BaseBrokerWebSocketAdapter
+from websocket_proxy.connection_manager import ConnectionPool
+from websocket_proxy.server import WebSocketProxy
+
+# isort: split
+from broker.upstox.streaming import MarketDataFeedV3_pb2 as pb
+from broker.upstox.streaming import upstox_adapter
+from broker.upstox.streaming.upstox_adapter import UpstoxWebSocketAdapter
+from broker.upstox.streaming.upstox_client import UpstoxWebSocketClient
+
+TS = 1792481400123  # the frame's currentTs: 20 Oct 2026 13:00:00.123 IST
+LTT = 1792481399000  # last trade, one second earlier
+DAY_START = 1792434600000  # the 1d candle's ts: 00:00 IST, the start of the day
+MINUTE = 1792481340000  # the I1 candle's ts: 12:59 IST
+
+NIFTY = ("NIFTY", "NSE_INDEX", "NSE_INDEX|Nifty 50")
+BANKNIFTY = ("BANKNIFTY", "NSE_INDEX", "NSE_INDEX|Nifty Bank")
+RELIANCE = ("RELIANCE", "NSE", "NSE_EQ|INE002A01018")
+SBIN = ("SBIN", "NSE", "NSE_EQ|INE062A01020")
+OPTION = ("NIFTY27OCT2625100CE", "NFO", "NSE_FO|45450")
+
+RELIANCE_BOOK = [
+    (50, 1423.9, 47, 1424.1),
+    (35, 1423.5, 39, 1424.5),
+    (42, 1423.0, 41, 1425.0),
+    (28, 1422.5, 32, 1425.5),
+    (33, 1422.0, 30, 1426.0),
+]
+OPTION_BOOK = [
+    (750, 101.45, 1500, 101.55),
+    (1125, 101.4, 975, 101.6),
+    (600, 101.35, 450, 101.65),
+    (300, 101.3, 1200, 101.7),
+    (75, 101.25, 225, 101.75),
+]
+
+
+# --------------------------------------------------------------------------------------------
+# Frames
+# --------------------------------------------------------------------------------------------
+
+
+def _response() -> pb.FeedResponse:
+    response = pb.FeedResponse()
+    response.type = pb.live_feed
+    response.currentTs = TS
+    return response
+
+
+def _ltpc(message, ltp: float, cp: float, ltq: int = 0) -> None:
+    message.ltp = ltp
+    message.ltt = LTT
+    message.ltq = ltq
+    message.cp = cp
+
+
+def _candle(ohlc, interval: str, o: float, h: float, low: float, c: float, vol: int, ts: int):
+    bar = ohlc.ohlc.add()
+    bar.interval = interval
+    bar.open, bar.high, bar.low, bar.close = o, h, low, c
+    bar.vol = vol
+    bar.ts = ts
+
+
+def _book(level, rows) -> None:
+    for bid_q, bid_p, ask_q, ask_p in rows:
+        quote = level.bidAskQuote.add()
+        quote.bidQ, quote.bidP, quote.askQ, quote.askP = bid_q, bid_p, ask_q, ask_p
+
+
+def index_ltpc_frame() -> pb.FeedResponse:
+    response = _response()
+    _ltpc(response.feeds[NIFTY[2]].ltpc, 25100.5, 25000.0)
+    return response
+
+
+def index_full_frame() -> pb.FeedResponse:
+    response = _response()
+    index = response.feeds[BANKNIFTY[2]].fullFeed.indexFF
+    _ltpc(index.ltpc, 56012.35, 55800.0)
+    _candle(index.marketOHLC, "1d", 55900.0, 56100.0, 55850.0, 56012.35, 0, DAY_START)
+    _candle(index.marketOHLC, "I1", 56005.0, 56015.0, 56001.1, 56012.35, 0, MINUTE)
+    return response
+
+
+def equity_full_frame() -> pb.FeedResponse:
+    response = _response()
+    market = response.feeds[RELIANCE[2]].fullFeed.marketFF
+    _ltpc(market.ltpc, 1424.0, 1418.0, ltq=50)
+    _book(market.marketLevel, RELIANCE_BOOK)
+    # vtt deliberately differs from the 1d candle's vol, to show which one `volume` is.
+    _candle(market.marketOHLC, "1d", 1415.0, 1432.5, 1408.0, 1424.0, 100000, DAY_START)
+    _candle(market.marketOHLC, "I1", 1423.5, 1424.5, 1423.0, 1424.0, 900, MINUTE)
+    market.atp = 1419.35
+    market.vtt = 100250
+    market.tbq = 250000.0
+    market.tsq = 310000.0
+    return response
+
+
+def option_full_frame() -> pb.FeedResponse:
+    response = _response()
+    market = response.feeds[OPTION[2]].fullFeed.marketFF
+    _ltpc(market.ltpc, 101.5, 95.25, ltq=75)
+    _book(market.marketLevel, OPTION_BOOK)
+    greeks = market.optionGreeks
+    greeks.delta, greeks.theta, greeks.gamma, greeks.vega = 0.5213, -12.3, 0.0011, 9.8
+    greeks.rho = 0.0  # proto3 leaves a zero off the wire
+    _candle(market.marketOHLC, "1d", 90.0, 110.0, 88.0, 101.5, 123450, DAY_START)
+    _candle(market.marketOHLC, "I1", 101.0, 102.0, 100.5, 101.5, 900, MINUTE)
+    market.atp = 99.87
+    market.vtt = 123450
+    market.oi = 4567800.0
+    market.iv = 0.1432
+    market.tbq = 50025.0
+    market.tsq = 60075.0
+    return response
+
+
+def ltpc_only_frame() -> pb.FeedResponse:
+    response = _response()
+    _ltpc(response.feeds[SBIN[2]].ltpc, 812.4, 805.0, ltq=10)
+    return response
+
+
+# --------------------------------------------------------------------------------------------
+# Expected payloads
+# --------------------------------------------------------------------------------------------
+
+
+def _base(instrument) -> dict[str, Any]:
+    symbol, exchange, key = instrument
+    return {"symbol": symbol, "exchange": exchange, "token": key}
+
+
+def _ltp(instrument, ltp: float, cp: float, ltq: int = 0) -> dict[str, Any]:
+    return _base(instrument) | {
+        "ltp": ltp,
+        "ltq": ltq,
+        "ltt": LTT,
+        "cp": cp,
+        "prev_close": cp,
+        "last_trade_time": LTT,
+        "timestamp": TS,
+    }
+
+
+def _levels(rows) -> dict[str, list[dict[str, Any]]]:
+    return {
+        "buy": [{"price": bp, "quantity": bq, "orders": 0} for bq, bp, _aq, _ap in rows],
+        "sell": [{"price": ap, "quantity": aq, "orders": 0} for _bq, _bp, aq, ap in rows],
+    }
+
+
+INDEX_LTP = _ltp(NIFTY, 25100.5, 25000.0)
+BANKNIFTY_LTP = _ltp(BANKNIFTY, 56012.35, 55800.0)
+BANKNIFTY_QUOTE = _base(BANKNIFTY) | {
+    "open": 55900.0,
+    "high": 56100.0,
+    "low": 55850.0,
+    "close": 55800.0,  # the previous close, not the 1d candle's running close
+    "ltp": 56012.35,
+    "last_trade_quantity": 0,
+    "volume": 0,
+    "average_price": 0.0,
+    "total_buy_quantity": 0,
+    "total_sell_quantity": 0,
+    "prev_close": 55800.0,
+    "last_trade_time": LTT,
+    "timestamp": TS,
+}
+RELIANCE_LTP = _ltp(RELIANCE, 1424.0, 1418.0, ltq=50)
+RELIANCE_QUOTE = _base(RELIANCE) | {
+    "open": 1415.0,
+    "high": 1432.5,
+    "low": 1408.0,
+    "close": 1418.0,
+    "ltp": 1424.0,
+    "last_trade_quantity": 50,
+    "volume": 100250,  # vtt, not the 1d candle's 100000
+    "average_price": 1419.35,
+    "total_buy_quantity": 250000,
+    "total_sell_quantity": 310000,
+    "prev_close": 1418.0,
+    "last_trade_time": LTT,
+    "timestamp": TS,
+}
+RELIANCE_DEPTH = RELIANCE_QUOTE | {"depth": _levels(RELIANCE_BOOK) | {"timestamp": TS}}
+OPTION_QUOTE = _base(OPTION) | {
+    "open": 90.0,
+    "high": 110.0,
+    "low": 88.0,
+    "close": 95.25,
+    "ltp": 101.5,
+    "last_trade_quantity": 75,
+    "volume": 123450,
+    "average_price": 99.87,
+    "total_buy_quantity": 50025,
+    "total_sell_quantity": 60075,
+    "prev_close": 95.25,
+    "last_trade_time": LTT,
+    "oi": 4567800,
+    "iv": 0.1432,
+    "greeks": {"delta": 0.5213, "gamma": 0.0011, "theta": -12.3, "vega": 9.8, "rho": 0.0},
+    "timestamp": TS,
+}
+OPTION_DEPTH = OPTION_QUOTE | {"depth": _levels(OPTION_BOOK) | {"timestamp": TS}}
+SBIN_LTP = _ltp(SBIN, 812.4, 805.0, ltq=10)
+SBIN_FROM_LTPC = _base(SBIN) | {
+    "ltp": 812.4,
+    "ltq": 10,
+    "ltt": LTT,
+    "cp": 805.0,
+    "last_trade_quantity": 10,
+    "prev_close": 805.0,
+    "last_trade_time": LTT,
+    "close": 805.0,
+    "timestamp": TS,
+}
+
+
+# --------------------------------------------------------------------------------------------
+# Harness
+# --------------------------------------------------------------------------------------------
+
+
+class _NoZmq:
+    """Stands in for the shared publisher, so building an adapter opens no ZeroMQ socket."""
+
+    socket = None
+    zmq_port = 0
+    context = None
+
+
+class _FakeUpstoxSocket:
+    """What Upstox holds for this connection: instrument key -> Upstox mode."""
+
+    def __init__(self) -> None:
+        self.running = True
+        self._connected = True
+        self.held: dict[str, str] = {}
+        self.unsubscribed: list[list[str]] = []
+
+    def subscribe(self, keys: list[str], mode: str) -> bool:
+        for key in keys:
+            self.held[key] = mode
+        return True
+
+    def unsubscribe(self, keys: list[str]) -> bool:
+        self.unsubscribed.append(list(keys))
+        for key in keys:
+            self.held.pop(key, None)
+        return True
+
+    def disconnect(self) -> None:
+        self.running = False
+        self._connected = False
+
+
+def _canon(payload: dict[str, Any]) -> str:
+    """Canonical JSON: key order ignored, types and values exact, NaN refused."""
+    return json.dumps(payload, sort_keys=True, allow_nan=False)
+
+
+@pytest.fixture
+def make_adapter(monkeypatch):
+    """Build real UpstoxWebSocketAdapters: no ZeroMQ, no Upstox, no database."""
+    instances = BaseBrokerWebSocketAdapter._instance_count
+    monkeypatch.setattr(
+        upstox_adapter.SymbolMapper,
+        "get_token_from_symbol",
+        staticmethod(
+            lambda symbol, exchange: {
+                "token": _KEYS[(symbol, exchange)],
+                "brexchange": _KEYS[(symbol, exchange)].split("|")[0],
+            }
+        ),
+    )
+
+    def build() -> UpstoxWebSocketAdapter:
+        context = connection_manager._pooled_creation_context
+        context.active, context.shared_publisher = True, _NoZmq()
+        try:
+            adapter = UpstoxWebSocketAdapter()
+        finally:
+            context.active, context.shared_publisher = False, None
+        adapter.published = []
+        adapter.publish_market_data = lambda topic, data: adapter.published.append((topic, data))
+        # The production client decodes the frames; a fake one stands in for the socket.
+        adapter.decoder = UpstoxWebSocketClient("not-a-real-token")
+        adapter.decoder.callbacks["on_message"] = adapter._on_market_data
+        adapter.ws_client = _FakeUpstoxSocket()
+        # Send batched subscribes at once instead of on a 0.5 s timer thread.
+        adapter._start_batch_timer = adapter._process_batch_subscriptions
+        adapter.connected = True
+        return adapter
+
+    yield build
+    BaseBrokerWebSocketAdapter._instance_count = instances
+
+
+_KEYS = {
+    (symbol, exchange): key for symbol, exchange, key in (NIFTY, BANKNIFTY, RELIANCE, SBIN, OPTION)
+}
+
+
+def _hold(adapter: UpstoxWebSocketAdapter, instrument, mode: int) -> None:
+    symbol, exchange, _key = instrument
+    assert adapter.subscribe(symbol, exchange, mode)["status"] == "success"
+
+
+def _feed(adapter: UpstoxWebSocketAdapter, frame: pb.FeedResponse) -> dict[str, str]:
+    """Send one frame through the client's decoder; return {topic: canonical payload}."""
+    adapter.published.clear()
+    adapter.decoder._process_binary_message(frame.SerializeToString())
+    topics = [topic for topic, _payload in adapter.published]
+    assert len(topics) == len(set(topics)), f"a topic was published twice: {topics}"
+    return {topic: _canon(payload) for topic, payload in adapter.published}
+
+
+# --------------------------------------------------------------------------------------------
+# Golden vectors
+# --------------------------------------------------------------------------------------------
+
+
+def test_index_ltpc_tick_publishes_prev_close_and_trade_time(make_adapter) -> None:
+    adapter = make_adapter()
+    _hold(adapter, NIFTY, 1)
+
+    assert _feed(adapter, index_ltpc_frame()) == {"NSE_INDEX_NIFTY_LTP": _canon(INDEX_LTP)}
+
+
+def test_index_full_feed_ltp_and_quote(make_adapter) -> None:
+    adapter = make_adapter()
+    _hold(adapter, BANKNIFTY, 1)
+    _hold(adapter, BANKNIFTY, 2)
+
+    assert _feed(adapter, index_full_frame()) == {
+        "NSE_INDEX_BANKNIFTY_LTP": _canon(BANKNIFTY_LTP),
+        "NSE_INDEX_BANKNIFTY_QUOTE": _canon(BANKNIFTY_QUOTE),
+    }
+
+
+def test_equity_full_feed_ltp_quote_and_depth(make_adapter) -> None:
+    adapter = make_adapter()
+    for mode in (1, 2, 3):
+        _hold(adapter, RELIANCE, mode)
+
+    assert _feed(adapter, equity_full_frame()) == {
+        "NSE_RELIANCE_LTP": _canon(RELIANCE_LTP),
+        "NSE_RELIANCE_QUOTE": _canon(RELIANCE_QUOTE),
+        "NSE_RELIANCE_DEPTH": _canon(RELIANCE_DEPTH),
+    }
+
+
+def test_option_full_feed_quote_and_depth_carry_oi_iv_and_greeks(make_adapter) -> None:
+    adapter = make_adapter()
+    _hold(adapter, OPTION, 2)
+    _hold(adapter, OPTION, 3)
+
+    assert _feed(adapter, option_full_frame()) == {
+        "NFO_NIFTY27OCT2625100CE_QUOTE": _canon(OPTION_QUOTE),
+        "NFO_NIFTY27OCT2625100CE_DEPTH": _canon(OPTION_DEPTH),
+    }
+
+
+def test_ltpc_only_tick(make_adapter) -> None:
+    adapter = make_adapter()
+    _hold(adapter, SBIN, 1)
+
+    assert _feed(adapter, ltpc_only_frame()) == {"NSE_SBIN_LTP": _canon(SBIN_LTP)}
+
+
+def test_ltpc_only_tick_to_quote_and_depth_publishes_what_the_ltpc_knows(make_adapter) -> None:
+    """No OHLC, volume or book keys: a merging consumer keeps its last values, not zeros."""
+    adapter = make_adapter()
+    _hold(adapter, SBIN, 2)
+    _hold(adapter, SBIN, 3)
+
+    assert _feed(adapter, ltpc_only_frame()) == {
+        "NSE_SBIN_QUOTE": _canon(SBIN_FROM_LTPC),
+        "NSE_SBIN_DEPTH": _canon(
+            SBIN_FROM_LTPC | {"depth": {"buy": [], "sell": [], "timestamp": TS}}
+        ),
+    }
+
+
+def test_depth_is_a_superset_of_quote(make_adapter) -> None:
+    adapter = make_adapter()
+    _hold(adapter, OPTION, 2)
+    _hold(adapter, OPTION, 3)
+    _feed(adapter, option_full_frame())
+    payloads = dict(adapter.published)
+
+    quote = payloads["NFO_NIFTY27OCT2625100CE_QUOTE"]
+    depth = payloads["NFO_NIFTY27OCT2625100CE_DEPTH"]
+    assert {field: depth[field] for field in quote} == quote
+    assert set(depth) - set(quote) == {"depth"}
+
+
+def test_close_is_the_previous_close_and_zero_when_upstox_sent_none(make_adapter) -> None:
+    adapter = make_adapter()
+    _hold(adapter, RELIANCE, 2)
+    frame = equity_full_frame()
+    frame.feeds[RELIANCE[2]].fullFeed.marketFF.ltpc.cp = 0.0  # a contract listed today
+
+    _feed(adapter, frame)
+    ((_topic, quote),) = adapter.published
+
+    assert quote["close"] == 0.0
+    assert "prev_close" not in quote
+    assert quote["open"] == 1415.0  # the day's candle is untouched
+
+
+def test_a_book_only_frame_carries_the_last_trade_fields_and_day_candle(make_adapter) -> None:
+    """A packet without ltpc or marketOHLC must not publish an ltp, open or close of 0."""
+    adapter = make_adapter()
+    _hold(adapter, RELIANCE, 3)
+    _feed(adapter, equity_full_frame())
+
+    book_only = _response()
+    market = book_only.feeds[RELIANCE[2]].fullFeed.marketFF
+    moved = [(bq + 5, bp, aq, ap) for bq, bp, aq, ap in RELIANCE_BOOK]
+    _book(market.marketLevel, moved)
+    market.atp, market.vtt, market.tbq, market.tsq = 1419.35, 100250, 250000.0, 310000.0
+
+    assert _feed(adapter, book_only) == {
+        "NSE_RELIANCE_DEPTH": _canon(RELIANCE_QUOTE | {"depth": _levels(moved) | {"timestamp": TS}})
+    }
+
+
+def test_greeks_or_iv_upstox_could_not_compute_never_publish_nan(make_adapter) -> None:
+    adapter = make_adapter()
+    _hold(adapter, OPTION, 2)
+    frame = option_full_frame()
+    market = frame.feeds[OPTION[2]].fullFeed.marketFF
+    market.optionGreeks.delta = float("nan")
+    market.optionGreeks.vega = float("inf")
+    market.iv = float("nan")
+
+    topics = _feed(adapter, frame)  # _canon refuses NaN and Infinity
+    quote = json.loads(topics["NFO_NIFTY27OCT2625100CE_QUOTE"])
+
+    assert quote["greeks"] == {
+        "delta": None,
+        "gamma": 0.0011,
+        "theta": -12.3,
+        "vega": None,
+        "rho": 0.0,
+    }
+    assert "iv" not in quote
+
+
+def test_an_equity_tick_has_no_oi_iv_or_greeks(make_adapter) -> None:
+    adapter = make_adapter()
+    _hold(adapter, RELIANCE, 2)
+    _feed(adapter, equity_full_frame())
+    ((_topic, quote),) = adapter.published
+
+    assert not {"oi", "iv", "greeks"} & set(quote)
+
+
+# --------------------------------------------------------------------------------------------
+# Mode coverage through the proxy's connection pool
+# --------------------------------------------------------------------------------------------
+
+
+def _pool(adapter: UpstoxWebSocketAdapter) -> ConnectionPool:
+    """A ConnectionPool around one adapter, built without a ZeroMQ publisher."""
+    pool = ConnectionPool.__new__(ConnectionPool)
+    pool.lock = threading.RLock()
+    pool.logger = logging.getLogger("test.sudarshan.pool")
+    pool.broker_name, pool.user_id = "upstox", "owner"
+    pool.adapters, pool.adapter_symbol_counts = [adapter], [0]
+    pool.max_symbols, pool.max_connections = 1000, 2
+    pool.subscription_map, pool.subscription_depths = {}, {}
+    pool.peak_total_symbols, pool.peak_connections_used, pool.peak_symbol_counts = 0, 0, []
+    pool.initialized = pool.connected = True
+    return pool
+
+
+class _ClientSocket:
+    """A browser's WebSocket as the proxy sees it."""
+
+    def __init__(self) -> None:
+        self.sent: list[dict[str, Any]] = []
+
+    async def send(self, text: str) -> None:
+        self.sent.append(json.loads(text))
+
+
+class _OneShotSub:
+    """The proxy's ZeroMQ SUB, replaying given frames, then stopping the listener."""
+
+    def __init__(self, proxy: WebSocketProxy, frames: list[tuple[str, dict[str, Any]]]):
+        self.proxy = proxy
+        self.frames = [[topic.encode(), json.dumps(payload).encode()] for topic, payload in frames]
+
+    async def recv_multipart(self):
+        if self.frames:
+            return self.frames.pop(0)
+        self.proxy.running = False
+        raise TimeoutError
+
+
+class _MarketDataServiceStub:
+    def process_market_data(self, _data: dict[str, Any]) -> bool:
+        return True
+
+
+def _proxy_with_clients(subscribers: dict[int, tuple[str, str, int]]) -> WebSocketProxy:
+    """A proxy built without __init__ (no ports), with one browser client per entry."""
+    proxy = WebSocketProxy.__new__(WebSocketProxy)
+    proxy.running = True
+    proxy.clients = {client_id: _ClientSocket() for client_id in subscribers}
+    proxy.user_mapping = dict.fromkeys(subscribers, "owner")
+    proxy.user_broker_mapping = {"owner": "upstox"}
+    proxy.broker_adapters = {}
+    proxy.subscriptions = {client_id: set() for client_id in subscribers}
+    proxy.subscription_index = defaultdict(set)
+    for client_id, key in subscribers.items():
+        proxy.subscription_index[key].add(client_id)
+    proxy.order_subscribers = defaultdict(set)
+    proxy.last_message_time = {}
+    proxy.last_tick_time = {}
+    proxy._last_stale_warn = {}
+    proxy._stale_tick_warn_seconds = 120
+    proxy._last_stale_check = proxy._last_cleanup_time = 0.0
+    proxy._stale_check_interval = 30
+    proxy._cleanup_interval = 300
+    proxy._throttle_entry_max_age = 60
+    proxy._messages_processed = 0
+    return proxy
+
+
+async def _deliver(proxy: WebSocketProxy, frames: list[tuple[str, dict[str, Any]]]) -> None:
+    proxy.socket = _OneShotSub(proxy, frames)
+    await proxy.zmq_listener()
+    for _ in range(20):  # let any per-client sender drain
+        await asyncio.sleep(0)
+
+
+def test_a_quote_subscriber_covered_by_depth_receives_volume_ohlc_and_oi(
+    make_adapter, monkeypatch
+) -> None:
+    adapter = make_adapter()
+    pool = _pool(adapter)
+    symbol, exchange, key = OPTION
+    assert pool.subscribe(symbol, exchange, 3)["status"] == "success"
+    covered = pool.subscribe(symbol, exchange, 2)
+    assert covered["status"] == "success" and "covered" in covered["message"]
+    assert list(adapter.subscriptions) == [f"{symbol}_{exchange}_3"]  # Upstox sees Depth only
+    assert adapter.ws_client.held == {key: "full"}
+
+    _feed(adapter, option_full_frame())
+    assert [topic for topic, _payload in adapter.published] == ["NFO_NIFTY27OCT2625100CE_DEPTH"]
+
+    monkeypatch.setattr(proxy_server, "get_market_data_service", _MarketDataServiceStub)
+    proxy = _proxy_with_clients({7: (symbol, exchange, 2)})
+    asyncio.run(_deliver(proxy, adapter.published))
+
+    (message,) = proxy.clients[7].sent
+    assert message["type"] == "market_data" and message["mode"] == 2
+    data = message["data"]
+    assert data["volume"] == 123450
+    assert (data["open"], data["high"], data["low"], data["close"]) == (90.0, 110.0, 88.0, 95.25)
+    assert data["oi"] == 4567800
+    assert data["ltp"] == 101.5
+
+
+@pytest.mark.parametrize(("lower", "higher"), [(2, 3), (1, 2), (1, 3)])
+def test_downgrade_keeps_the_upstox_key_for_the_remaining_mode(
+    make_adapter, lower: int, higher: int
+) -> None:
+    """Closing the higher mode must not unsubscribe the key the lower mode still uses."""
+    adapter = make_adapter()
+    pool = _pool(adapter)
+    symbol, exchange, key = OPTION
+    assert pool.subscribe(symbol, exchange, lower)["status"] == "success"
+    assert pool.subscribe(symbol, exchange, higher)["status"] == "success"
+
+    downgraded = pool.unsubscribe(symbol, exchange, higher)
+
+    assert downgraded["status"] == "success"
+    assert adapter.ws_client.unsubscribed == []
+    assert adapter.ws_client.held == {key: "full"}  # a superset of what `lower` needs
+    assert list(adapter.subscriptions) == [f"{symbol}_{exchange}_{lower}"]
+
+    # The remaining subscriber keeps receiving ticks.
+    topics = _feed(adapter, option_full_frame())
+    suffix = {1: "LTP", 2: "QUOTE"}[lower]
+    assert list(topics) == [f"NFO_NIFTY27OCT2625100CE_{suffix}"]
+    assert json.loads(topics[f"NFO_NIFTY27OCT2625100CE_{suffix}"])["ltp"] == 101.5
+
+
+def test_the_last_mode_leaving_releases_the_key_and_its_carry_forward(make_adapter) -> None:
+    adapter = make_adapter()
+    pool = _pool(adapter)
+    symbol, exchange, key = OPTION
+    assert pool.subscribe(symbol, exchange, 2)["status"] == "success"
+    _feed(adapter, option_full_frame())
+    assert key in adapter._last_ltpc and key in adapter._last_daily_ohlc
+
+    assert pool.unsubscribe(symbol, exchange, 2)["status"] == "success"
+
+    assert adapter.ws_client.unsubscribed == [[key]]
+    assert adapter.ws_client.held == {}
+    assert key not in adapter._last_ltpc and key not in adapter._last_daily_ohlc
