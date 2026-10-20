@@ -844,7 +844,7 @@ def test_releasing_a_mode_never_switches_a_key_up(make_adapter) -> None:
 
 
 class _PausingModes(dict):
-    """The client's _keys_by_mode: the thread named `releasing` pauses halfway through
+    """The client's _keys_by_mode: the thread named `reading` pauses halfway through
     iterating it until the test lets it go on."""
 
     def __init__(self, *args) -> None:
@@ -852,42 +852,77 @@ class _PausingModes(dict):
         self.inside = threading.Event()
         self.go_on = threading.Event()
 
-    def values(self):
-        for index, held in enumerate(super().values()):
-            if index == 1 and threading.current_thread().name == "releasing":
+    def _pausing(self, entries):
+        for index, entry in enumerate(entries):
+            if index == 1 and threading.current_thread().name == "reading":
                 self.inside.set()
                 self.go_on.wait(5)
-            yield held
+            yield entry
+
+    def values(self):
+        return self._pausing(super().values())
+
+    def items(self):
+        return self._pausing(super().items())
 
 
-def test_the_key_modes_change_only_while_no_other_thread_reads_them() -> None:
+# Every use of the key modes, read on one thread while another changes them:
+# (read, change, the modes once both are done).
+READ_THEN_CHANGE = {
+    "a release, then a switch": (
+        lambda client: client.unsubscribe(["K9"]),
+        lambda client: client.change_mode(["K1"], "ltpc"),
+        {"ltpc": {"K1", "K2"}},
+    ),
+    "a mode lookup, then a switch": (
+        lambda client: client.mode_of("K1"),
+        lambda client: client.change_mode(["K1"], "ltpc"),
+        {"ltpc": {"K1", "K2"}},
+    ),
+    "a subscribe, then a switch": (
+        lambda client: client.subscribe(["K3"], "full"),
+        lambda client: client.change_mode(["K1"], "ltpc"),
+        {"ltpc": {"K1", "K2"}, "full": {"K3"}},
+    ),
+    "a release, then a new socket": (
+        lambda client: client.unsubscribe(["K9"]),
+        lambda client: client._reset_modes(),
+        {},
+    ),
+}
+
+
+@pytest.mark.parametrize(
+    ("read", "change", "after"), READ_THEN_CHANGE.values(), ids=READ_THEN_CHANGE.keys()
+)
+def test_the_key_modes_change_only_while_no_other_thread_reads_them(read, change, after) -> None:
     """The proxy's loop switching a key down, the batch timer subscribing and the socket
-    thread all use the client's per-mode key sets. An unsubscribe on one thread is paused
-    mid-way through them while another thread switches a key, emptying a mode: the switch
+    thread on a handshake all use the client's per-mode key sets. One thread is paused
+    midway through reading them while another changes them, emptying a mode: the change
     must wait, or the paused thread fails with 'dictionary changed size during iteration'."""
     client = _connected_client()
     modes = client._keys_by_mode = _PausingModes({"ltpc": {"K2"}, "full": {"K1"}})
     errors: list[BaseException] = []
 
-    def release() -> None:
+    def run_read() -> None:
         try:
-            client.unsubscribe(["K9"])
+            read(client)
         except BaseException as error:  # noqa: BLE001 - the test reports any failure
             errors.append(error)
 
-    releasing = threading.Thread(target=release, name="releasing")
-    releasing.start()
+    reading = threading.Thread(target=run_read, name="reading")
+    reading.start()
     assert modes.inside.wait(5)
-    switching = threading.Thread(target=client.change_mode, args=(["K1"], "ltpc"))
-    switching.start()
-    switching.join(0.2)
-    assert switching.is_alive()  # waiting for the lock, not changing the sets
+    changing = threading.Thread(target=change, args=(client,))
+    changing.start()
+    changing.join(0.2)
+    assert changing.is_alive()  # waiting for the lock, not changing the sets
     modes.go_on.set()
-    releasing.join(5)
-    switching.join(5)
+    reading.join(5)
+    changing.join(5)
 
     assert errors == []
-    assert dict(client._keys_by_mode) == {"ltpc": {"K1", "K2"}}
+    assert dict(client._keys_by_mode) == after
 
 
 def test_a_release_that_removed_its_record_never_reports_failure(make_adapter, monkeypatch) -> None:
