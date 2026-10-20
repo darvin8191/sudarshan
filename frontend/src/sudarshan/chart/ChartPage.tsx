@@ -36,7 +36,7 @@ import { directionOf, formatPercent, formatPrice, formatRupees } from '@/sudarsh
 import { useNow } from '@/sudarshan/dashboard/hooks'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
 import { TREND_TEXT, TrendArrow } from '@/sudarshan/dashboard/Trend'
-import { readProduct } from '@/sudarshan/ticket/productPref'
+import { ticketProduct } from '@/sudarshan/ticket/productPref'
 import { showToast } from '@/utils/toast'
 import {
   type FeedConfig,
@@ -435,7 +435,7 @@ function PhoneChartScreen({
           tickSize={info.tickSize}
           // The product picked for this segment on this phone (M8.2), MIS
           // until one is: the owner trades intraday.
-          product={readProduct(exchange) ?? 'MIS'}
+          product={ticketProduct(exchange) ?? 'MIS'}
           strategy={STRATEGY}
         />
       )}

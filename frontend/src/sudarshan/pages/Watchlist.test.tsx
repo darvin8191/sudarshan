@@ -963,7 +963,7 @@ describe('Watchlist sheet', () => {
 
     expect(screen.queryByRole('dialog', { name: 'SBIN' })).toBeNull()
     expect(screen.getByRole('region', { name: 'Order ticket' })).toHaveTextContent(
-      'BUY SBIN NSE lot 750 tick 0.05 product default Watchlist'
+      'BUY SBIN NSE lot 750 tick 0.05 product CNC Watchlist'
     )
     expect(where()).toHaveTextContent('/watchlist?sheet=order')
   })
@@ -1001,11 +1001,11 @@ describe('Watchlist sheet', () => {
     expect(JSON.parse(localStorage.getItem(PRODUCT_KEY) ?? '{}')).toEqual({ cash: 'MIS' })
     await user.click(screen.getByRole('button', { name: 'Cancel order' }))
 
-    // The cash pick is the cash segment's; F&O keeps the ticket's own default.
+    // The cash pick is the cash segment's; F&O opens on its own first-time product, Intraday.
     await user.click(await screen.findByRole('tab', { name: /Options/ }))
     sheet = await openSheet(user, /^NIFTY 25000 CE/, 'NIFTY 25000 CE')
     pick = within(sheet).getByRole('group', { name: 'The ticket opens with' })
-    expect(within(pick).getByRole('button', { name: /^NRML/ })).toHaveAttribute(
+    expect(within(pick).getByRole('button', { name: /^MIS/ })).toHaveAttribute(
       'aria-pressed',
       'true'
     )
@@ -1013,7 +1013,7 @@ describe('Watchlist sheet', () => {
     await waitFor(() => expect(sell).toBeEnabled())
     await user.click(sell)
     expect(screen.getByRole('region', { name: 'Order ticket' })).toHaveTextContent(
-      'SELL NIFTY28OCT2625000CE NFO lot 750 tick 0.05 product default Watchlist'
+      'SELL NIFTY28OCT2625000CE NFO lot 750 tick 0.05 product MIS Watchlist'
     )
   })
 

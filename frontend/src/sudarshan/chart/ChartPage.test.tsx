@@ -271,13 +271,13 @@ describe('the phone chart page at 390 px', () => {
     expect(localStorage.getItem('sudarshan-chart-interval')).toBe('1h')
   })
 
-  it("opens the app's own order ticket from Buy and Sell, on MIS until a product is picked", async () => {
+  it("opens the app's own order ticket from Buy and Sell, on Delivery for a share until a pick", async () => {
     await opened()
     const buy = await screen.findByRole('button', { name: 'BUY' })
     await waitFor(() => expect(buy).toBeEnabled())
     await userEvent.click(buy)
     expect(screen.getByRole('dialog', { name: 'Order ticket' })).toHaveTextContent(
-      'BUY SBIN NSE MIS 1 chart-trading'
+      'BUY SBIN NSE CNC 1 chart-trading'
     )
   })
 
@@ -300,7 +300,7 @@ describe('the phone chart page at 390 px', () => {
     await waitFor(() => expect(buy).toBeEnabled())
     await userEvent.click(buy)
     expect(screen.getByRole('dialog', { name: 'Order ticket' })).toHaveTextContent(
-      'BUY SBIN NSE MIS 1 chart-trading'
+      'BUY SBIN NSE CNC 1 chart-trading'
     )
   })
 

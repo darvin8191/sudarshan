@@ -9,6 +9,7 @@ import {
   rememberProduct,
   STORAGE_KEY,
   segmentOf,
+  ticketProduct,
 } from './productPref'
 
 beforeEach(() => {
@@ -41,6 +42,26 @@ describe('segments', () => {
 
   it('says what each product means', () => {
     expect(Object.keys(PRODUCT_MEANING).sort()).toEqual(['CNC', 'MIS', 'NRML'])
+  })
+})
+
+describe('the one rule every ticket opens with', () => {
+  it('opens derivatives on Intraday and cash on Delivery until a pick', () => {
+    expect(ticketProduct('NFO')).toBe('MIS')
+    expect(ticketProduct('BFO')).toBe('MIS')
+    expect(ticketProduct('MCX')).toBe('MIS')
+    expect(ticketProduct('CDS')).toBe('MIS')
+    expect(ticketProduct('NSE')).toBe('CNC')
+    expect(ticketProduct('BSE')).toBe('CNC')
+  })
+
+  it("opens on the segment's pick once there is one, and nothing for an index", () => {
+    rememberProduct('NFO', 'NRML')
+    rememberProduct('NSE', 'MIS')
+    expect(ticketProduct('NFO')).toBe('NRML')
+    expect(ticketProduct('NSE')).toBe('MIS')
+    expect(ticketProduct('MCX')).toBe('MIS')
+    expect(ticketProduct('NSE_INDEX')).toBeUndefined()
   })
 })
 

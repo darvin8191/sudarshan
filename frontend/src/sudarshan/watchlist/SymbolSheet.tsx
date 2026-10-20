@@ -6,6 +6,7 @@ import { oiProfileApi } from '@/api/oi-profile'
 import type { WatchlistItem } from '@/api/watchlist'
 import type { DepthLevel } from '@/lib/MarketDataManager'
 import { cn } from '@/lib/utils'
+import { chartPath } from '@/sudarshan/chart/prefs'
 import { formatAmount, formatPrice } from '@/sudarshan/dashboard/format'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
 import { ago, keyOf, STALE_MS } from '@/sudarshan/dashboard/live'
@@ -14,23 +15,14 @@ import {
   PRODUCT_MEANING,
   type Product,
   productsFor,
-  readProduct,
   rememberProduct,
+  ticketProduct,
 } from '@/sudarshan/ticket/productPref'
 import { type Contract, contractOf } from './api'
 import { BottomSheet } from './BottomSheet'
 import { chainOf, describe, isIndex, priceDecimals, statusLine } from './rows'
 import type { LiveRow } from './useLiveRows'
 import { Figures, figuresOf } from './WatchlistRows'
-
-/**
- * The phone chart screen for an instrument: the same path the chart screen's
- * own `chartPath` builds (`sudarshan/chart/prefs.ts` on the live-charts
- * change), registered as `/chart/:exchange/:symbol`.
- */
-export function chartPath(symbol: string, exchange: string): string {
-  return `/chart/${encodeURIComponent(exchange)}/${encodeURIComponent(symbol)}`
-}
 
 /** The option chain tool, opened on an underlying. */
 export function chainPath(chain: { exchange: string; underlying: string }): string {
@@ -200,8 +192,9 @@ function Depth({
 
 /**
  * Which product the order ticket opens with on this device for this segment
- * (`sudarshan/ticket/productPref`). The ticket's own default shows until one is
- * picked; the ticket itself can still change it for one order.
+ * (`sudarshan/ticket/productPref`, `ticketProduct`): Intraday for derivatives and
+ * Delivery for cash until one is picked; the ticket itself can still change it
+ * for one order.
  */
 function ProductPick({
   exchange,
@@ -317,7 +310,7 @@ function Sheet({
   const named = describe(item.symbol, item.exchange)
   const tradable = !isIndex(item.exchange)
   const chain = useOptionChain(item)
-  const [product, setProduct] = useState(() => readProduct(item.exchange))
+  const [product, setProduct] = useState(() => ticketProduct(item.exchange))
   const contract = useQuery({
     queryKey: ['sudarshan', 'contract', item.exchange, item.symbol],
     queryFn: () => contractOf(apiKey ?? '', item.symbol, item.exchange),

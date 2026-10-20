@@ -9,7 +9,7 @@ import { join } from 'node:path'
 import { matchRoutes } from 'react-router'
 import { describe, expect, it } from 'vitest'
 import { bottomNavItems, profileMenuItems } from '@/config/navigation'
-import { chartPath } from '@/sudarshan/watchlist/SymbolSheet'
+import { chartPath } from '@/sudarshan/chart/prefs'
 
 const FRONTEND = process.cwd()
 const APP = readFileSync(join(FRONTEND, 'src', 'App.tsx'), 'utf8')

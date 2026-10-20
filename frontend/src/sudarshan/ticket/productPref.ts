@@ -84,6 +84,24 @@ export function rememberProduct(exchange: string, product: Product): void {
   }
 }
 
+/**
+ * What a ticket opens with before anything is picked for the segment. Derivatives open on
+ * Intraday (MIS), because the owner trades intraday F&O and MIS squares itself off. Cash shares
+ * open on Delivery (CNC), because a swing buy left on MIS would be squared off the same day.
+ */
+const FIRST_TIME: Record<Segment, Product> = { fno: 'MIS', cash: 'CNC', mcx: 'MIS', cds: 'MIS' }
+
+/**
+ * The product an order ticket opens with on this device: the last pick for the exchange's
+ * segment, else the segment's first-time product. Undefined for an exchange that takes no orders
+ * here (an index). Every screen that opens a ticket uses this one rule.
+ */
+export function ticketProduct(exchange: string): Product | undefined {
+  const segment = segmentOf(exchange)
+  if (!segment) return undefined
+  return readProduct(exchange) ?? FIRST_TIME[segment]
+}
+
 /** What a product means to a trader, short enough for one line under it on a phone. */
 export const PRODUCT_MEANING: Record<Product, string> = {
   MIS: 'Intraday',
