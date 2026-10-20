@@ -120,7 +120,11 @@ in brand. Icon "Mor": tile #0E5A73, ring #E3A21A, glyph #FFFFFF. Numbers via
 - Feed V3 modes ltpc / full / option_greeks / full_d30; caps per connection ltpc 5,000, full 2,000,
   greeks 3,000; stale sockets count until timeout (fresh authorize URI on reconnect).
 - Daily access token expires 03:30 IST; `POST /v2/totp-login/authorization/token` (x-api-key + totp
-  + pin) can replace the browser login (TOTP sidecar; secrets only in `/etc/sudarshan`).
+  + pin) can replace the browser login. SUDARSHAN does this as auto-login (M2.20).
+  - The owner saves the TOTP key and PIN himself on the Auto login page.
+  - They are sealed in the owner vault (`sudarshan/vault`, stored in `db/sudarshan-vault/` with
+    mode 700/600, key derived from OpenAlgo's pepper).
+  - They are never shown, logged or sent anywhere but Upstox.
 - Market Price Protection: `market_protection` -1 auto (default), 1–25 custom, 0 rejected.
 - GTT: F&O options allowed (NRML, limit); OpenAlgo's "OCO" mapping opens a position — never use it
   to protect an existing one. Lot sizes/freeze come from the master (NIFTY 65, BANKNIFTY 30).
@@ -135,6 +139,12 @@ in brand. Icon "Mor": tile #0E5A73, ring #E3A21A, glyph #FFFFFF. Numbers via
   `/api/v1/*order*`) needs unit tests + golden vectors + one Analyzer-mode session before merge.
 - Secrets never in the repo: `.env`, `keys/`, `*.db`, `/etc/sudarshan/*` stay ignored/outside.
   Never print tokens, keys, PINs or TOTP secrets in logs, tests, commits or chat.
+- Secrets live in one of two places. Owner decision, 20 Oct 2026: whichever is hassle-free for
+  him.
+  - `/etc/sudarshan`, root-provisioned, for machine keys such as the Analytics Token.
+  - The sealed owner vault, for anything the owner types into a SUDARSHAN page.
+  - Ring services may read OpenAlgo's own stored credentials (for example its API key)
+    read-only, through OpenAlgo's functions, and never copy them anywhere else.
 - Releases are published **by the owner** (Claude sessions cannot create releases or tags): send
   him the pre-filled link `https://github.com/<owner>/sudarshan/releases/new?tag=vA.B.C&target=sudarshan&title=SUDARSHAN%20vA.B.C`
   and he taps Publish. `sudarshan-build.yml` then builds `frontend-dist.tar.gz` (+ `.sha256`),
