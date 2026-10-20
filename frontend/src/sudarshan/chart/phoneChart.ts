@@ -39,9 +39,12 @@ import { buildChartTheme, quietVolumeStyle } from '@/lib/trading/chartTheme'
 import { lookbackDays } from '@/lib/trading/intervals'
 import {
   HistoryResync,
+  insertLiveBar,
   LiveBarBuilder,
   LiveBarClock,
   type LiveBarUpdate,
+  type LiveCountdown,
+  removeLiveBar,
   upsertLiveBar,
 } from '@/lib/trading/liveBars'
 import { type LiveStatus, LiveStatusTracker } from '@/lib/trading/liveStatus'
@@ -52,12 +55,10 @@ import { volumePoint } from '@/lib/trading/volumeSettings'
 import type { AppMode } from '@/stores/themeStore'
 import { CHART_BRANDING } from '@/sudarshan/brand'
 
-const nowSec = () => Math.floor(Date.now() / 1000)
-
 /** How often the quote fallback asks while the stream is down: the same as /trading's. */
 export const QUOTE_FALLBACK_MS = 4000
 
-/** Away longer than this, and the chart starts a fresh stream on coming back. */
+/** Away longer than this, and the chart tests its stream on coming back. */
 export { WAKE_RECONNECT_MS }
 
 /** Bars in view when a chart opens: enough candles to read a trend at phone width. */
@@ -98,6 +99,13 @@ export interface PhoneChartCallbacks {
   onStatus(status: LiveStatus): void
   /** Loading, drawn, no bars, or failed: the same states and words as a /trading pane. */
   onLoad(state: ChartStateView): void
+  /**
+   * The session's close, in UTC seconds, while the forming bar would run past
+   * it (an hourly bar from 15:15 ends with the session at 15:30, not at
+   * 16:15), so the page can say when it closes instead of a countdown that
+   * overshoots; null otherwise.
+   */
+  onSessionClose?(at: number | null): void
 }
 
 export interface PhoneChartOptions {
@@ -137,6 +145,10 @@ export class PhoneChart {
   /** Whether the countdown to the bar's close is shown, and the timer that moves it. */
   private countdownOn = false
   private countdownTimer: ReturnType<typeof setInterval> | null = null
+  /** The session close last reported to the page in place of a countdown. */
+  private closesAt: number | null = null
+  /** A wake check is waiting for the stream to answer. */
+  private checking = false
   private loadState: ChartStateView = CHART_READY
   /** A price has come off the stream for this instrument since it loaded. */
   private streamed = false
@@ -152,7 +164,8 @@ export class PhoneChart {
 
     const rest = new OpenAlgoDataFeed({ baseUrl: '', apiKey: this.apiKey })
     this.data = new DataLoadingController(withBarCache(rest, { ttlMs: 10 * 60_000 }), {
-      now: nowSec,
+      // The server's clock, not the phone's: a bar closes when the exchange's minute turns.
+      now: () => this.frames.clock.nowSec(),
       // The re-sync below runs instead of the controller's poll.
       pollIntervalMs: 0,
       refreshOnBarClose: true,
@@ -177,6 +190,7 @@ export class PhoneChart {
       builder: () => (this.destroyed ? null : this.builder),
       onBar: (update) => this.applyLiveBar(update),
       history: () => this.data,
+      now: () => this.frames.clock.seconds(),
     })
     this.resync = new HistoryResync({
       builder: () => this.builder,
@@ -186,6 +200,12 @@ export class PhoneChart {
       active: () => document.visibilityState !== 'hidden',
     })
     this.resync.start()
+    // The server's clock moved: the next candle's open is aimed again by it.
+    this.offs.push(
+      this.frames.clock.onChange(() => {
+        if (!this.destroyed && this.builder?.hasSession()) this.clock.start()
+      })
+    )
 
     this.ws = new OpenAlgoWsFeed({
       url: opts.wsUrl,
@@ -204,23 +224,28 @@ export class PhoneChart {
   /**
    * Show an instrument at an interval. Resolves once history is drawn, or has
    * failed. Either way the price stays real-time: a chart whose history did
-   * not load still streams, and Try again reloads only the history.
+   * not load still streams, and Try again reloads only the history. Another
+   * timeframe of the same instrument keeps its subscription, its feed state
+   * and its price: only the candles load again.
    */
   async load(symbol: string, exchange: string, chip: string): Promise<void> {
     if (this.destroyed) return
     const ticket = ++this.ticket
+    const same = this.sym?.symbol === symbol && this.sym.exchange === exchange
     this.stopLive()
-    this.unsubscribe()
+    if (!same) {
+      this.unsubscribe()
+      this.streamed = false
+    }
     this.sym = { symbol, exchange }
     this.interval = apiInterval(chip)
     this.bars = []
-    this.streamed = false
     this.setLoad({ kind: 'loading', symbol, interval: chip })
     this.chart.destroy()
     ;({ chart: this.chart, price: this.price, volume: this.volume } = this.buildChart(exchange))
     this.chart.setDataContext({ symbol, exchange, interval: this.interval })
     applySessionHours(this.chart, exchange, this.apiKey)
-    const to = nowSec()
+    const to = this.frames.clock.nowSec()
     const request = {
       symbol,
       exchange,
@@ -241,13 +266,21 @@ export class PhoneChart {
     else if (!bars.length) this.setLoad(chartNoData(symbol, chip))
     else {
       this.setLoad(CHART_READY)
+      // History's last close stands in until the first tick, never over one.
       const last = bars[bars.length - 1]
-      this.cb.onTick({ ltp: last.close, time: null, tradeTime: null, at: Date.now(), polled: true })
+      if (!this.streamed)
+        this.cb.onTick({
+          ltp: last.close,
+          time: null,
+          tradeTime: null,
+          at: Date.now(),
+          polled: true,
+        })
     }
-    this.startLive(exchange)
-    this.subscribe(symbol, exchange)
+    this.startLive(exchange, same, to)
+    if (!same || !this.subscribed) this.subscribe(symbol, exchange)
     this.syncCountdown()
-    void this.firstQuote(symbol, exchange, ticket)
+    if (!same) void this.firstQuote(symbol, exchange, ticket)
   }
 
   /**
@@ -311,12 +344,36 @@ export class PhoneChart {
     const visible = document.visibilityState !== 'hidden'
     this.data.setVisible(visible)
     if (!visible) {
-      this.hiddenAt = Date.now()
+      this.hiddenAt ??= Date.now()
       return
     }
-    const away = this.hiddenAt === null ? 0 : Date.now() - this.hiddenAt
+    const hiddenAt = this.hiddenAt
     this.hiddenAt = null
-    if (away > WAKE_RECONNECT_MS) this.reconnect()
+    if (hiddenAt !== null && Date.now() - hiddenAt > WAKE_RECONNECT_MS)
+      void this.checkStream(hiddenAt)
+  }
+
+  /**
+   * Back after the phone slept. A socket can look open and be dead, so it is
+   * tested rather than trusted or thrown away: a frame since the page was
+   * hidden, or any answer to a ping within a second and a half, keeps it;
+   * silence replaces it. "Reconnecting" shows while the answer is awaited, so
+   * old prices are never shown as current.
+   */
+  private async checkStream(hiddenAt: number): Promise<void> {
+    if (this.destroyed || this.checking || !this.wsOpened) return
+    const heard = this.frames.lastFrameAt
+    if (heard !== null && heard > hiddenAt) return
+    this.checking = true
+    this.status.setTransport('connecting')
+    try {
+      const alive = await this.frames.probe()
+      if (this.destroyed) return
+      if (!alive) this.reconnect()
+      else if (this.ws.isReady()) this.status.setTransport('live')
+    } finally {
+      this.checking = false
+    }
   }
 
   /** A fresh stream after the phone wakes: "Reconnecting" at once, real-time again within a second or two. */
@@ -342,21 +399,27 @@ export class PhoneChart {
    * for an intraday timeframe while the session is open, so a trader can
    * watch the next candle arrive. Not for a day bar, whose engine countdown
    * runs to midnight rather than the close, and not in a closed market, where
-   * no bar is coming. The engine paints it only when something else repaints,
-   * so while it is up one timer repaints the price pane each second; that
-   * repaint reads no data.
+   * no bar is coming. Where the session closes before the bar would (the last
+   * hourly bar), the page is told the close instead, and says it. The engine
+   * paints the countdown only when something else repaints, so while it is up
+   * one timer repaints the price pane each second, and asks again whether it
+   * should be up; neither reads any data.
    */
   private syncCountdown(): void {
-    const on =
-      !this.destroyed &&
-      this.sym !== null &&
-      this.builder !== null &&
-      this.interval !== 'D' &&
-      this.lastStatus !== null &&
-      this.lastStatus.line.kind !== 'closed'
-    if (on !== this.countdownOn) {
+    const status = this.lastStatus
+    const countdown: LiveCountdown =
+      this.destroyed || !this.sym || !this.builder || !status || status.line.kind === 'closed'
+        ? { kind: 'off' }
+        : this.builder.countdown(this.frames.clock.seconds())
+    const on = countdown.kind === 'bar'
+    if (on !== this.countdownOn && !this.destroyed) {
       this.countdownOn = on
       this.chart.setAxisChromeOptions({ barCountdown: on })
+    }
+    const closesAt = countdown.kind === 'closes' ? countdown.at : null
+    if (closesAt !== this.closesAt) {
+      this.closesAt = closesAt
+      if (!this.destroyed) this.cb.onSessionClose?.(closesAt)
     }
     if (on && !this.countdownTimer)
       this.countdownTimer = setInterval(() => {
@@ -364,6 +427,7 @@ export class PhoneChart {
         this.chart.invalidate((mask) =>
           mask.invalidatePane(0, { level: InvalidationLevel.Light, autoScale: false })
         )
+        this.syncCountdown()
       }, 1000)
     if (!on) this.stopCountdownTimer()
   }
@@ -391,9 +455,9 @@ export class PhoneChart {
       theme: buildChartTheme('light', this.appMode),
       priceAxisWidth: 64,
       navigation: { defaultVisibleBars: PHONE_VISIBLE_BARS },
-      // The countdown to the bar's close comes and goes with the session;
-      // see syncCountdown.
-      axisChrome: { barCountdown: false },
+      // The countdown to the bar's close comes and goes with the session
+      // (see syncCountdown), and counts by the server's clock.
+      axisChrome: { barCountdown: false, clock: () => this.frames.clock.seconds() },
       shortcuts: false,
       ...chartMotionOptions(),
       branding: CHART_BRANDING,
@@ -433,6 +497,17 @@ export class PhoneChart {
     }
   }
 
+  /** Draw one bar again where it already stands, the tail or just before it. */
+  private drawBar(bar: Bar): void {
+    let i = this.bars.length - 1
+    while (i >= 0 && this.bars[i].time > bar.time) i--
+    if (i < 0 || this.bars[i].time !== bar.time) return
+    this.price.update(bar)
+    this.volume?.update(
+      volumePoint(bar, this.bars[i - 1]?.close, bar.volume ?? 0, this.volumeStyle(), true)
+    )
+  }
+
   private applySnapshot(snapshot: DataLoadingSnapshot): void {
     const request = snapshot.request
     const sym = this.sym
@@ -448,7 +523,7 @@ export class PhoneChart {
     if (snapshot.reason === 'live' || snapshot.reason === 'state') return
     if (!snapshot.bars.length) return
     let next = [...snapshot.bars]
-    if (this.builder) next = this.builder.mergeSnapshot(next)
+    if (this.builder) next = this.builder.mergeSnapshot(next, this.frames.clock.nowSec())
     const before = snapshot.reason === 'prepend' ? this.chart.getVisibleLogicalRange() : null
     const inserted = next.length - this.bars.length
     this.bars = next
@@ -473,15 +548,23 @@ export class PhoneChart {
     }
   }
 
-  private startLive(exchange: string): void {
+  /**
+   * The forming bar for what was just loaded, seeded from history's last bar
+   * (read at `readAt`), and the exchange's hours once they arrive. A new
+   * instrument starts its feed state over; another timeframe of the same one
+   * keeps it.
+   */
+  private startLive(exchange: string, keepStatus: boolean, readAt: number): void {
     const last = this.bars[this.bars.length - 1] ?? this.data.bars().at(-1)
     const builder = LiveBarBuilder.supports(this.interval)
       ? new LiveBarBuilder({ interval: this.interval, anchorSec: last?.time })
       : null
-    if (builder && last) builder.seed(last)
+    if (builder && last) builder.seed(last, readAt)
     this.builder = builder
-    this.status.setCalendar(null)
-    this.status.reset(exchange)
+    if (!keepStatus) {
+      this.status.setCalendar(null)
+      this.status.reset(exchange)
+    }
     const ticket = this.ticket
     void sessionCalendarFor(exchange, this.apiKey).then((calendar) => {
       if (this.destroyed || ticket !== this.ticket || !calendar) return
@@ -489,6 +572,7 @@ export class PhoneChart {
       if (!builder || this.builder !== builder) return
       builder.setSession(calendar)
       this.clock.start()
+      this.syncCountdown()
     })
   }
 
@@ -531,7 +615,7 @@ export class PhoneChart {
       return
     }
     const calendar = await sessionCalendarFor(exchange, this.apiKey)
-    const open = calendar?.sessionAt(nowSec()) != null
+    const open = calendar?.sessionAt(this.frames.clock.nowSec()) != null
     const value = await previousClose(this.apiKey, symbol, exchange, open)
     if (value !== null && ticket === this.ticket && !this.destroyed) this.cb.onPrevClose?.(value)
   }
@@ -560,10 +644,19 @@ export class PhoneChart {
       this.startFallback()
     }
     if (state === 'open') {
+      // The stream is back: the quotes standing in for it stop now, not at
+      // its first tick, which on a quiet instrument may be a while coming.
+      this.stopFallback()
       this.status.setTransport('live')
-      // Back after a break: what traded meanwhile was never built from ticks.
+      // The server's time, for the clock that opens candles.
+      this.frames.ping()
+      // Back after a break: what traded meanwhile was never built from ticks,
+      // and what the last connection read about each instrument is old.
       this.builder?.resync()
-      if (this.wsOpened && this.sym) void this.data.refresh()
+      if (this.wsOpened) {
+        this.frames.clear()
+        if (this.sym) void this.data.refresh()
+      }
       this.wsOpened = true
     }
   }
@@ -614,9 +707,11 @@ export class PhoneChart {
     prevClose?: number
   }): void {
     this.status.setTransport('live')
-    this.stopFallback()
     this.streamed = true
-    if (tick.prevClose) this.cb.onPrevClose?.(tick.prevClose)
+    // A previous close equal to the price is the session's own close, as some
+    // feeds carry it before the open and after the close: not yesterday's.
+    if (tick.prevClose && !needsPreviousClose(tick.prevClose, tick.ltp))
+      this.cb.onPrevClose?.(tick.prevClose)
     this.onPrice({ ...tick, polled: false })
   }
 
@@ -630,7 +725,7 @@ export class PhoneChart {
     polled: boolean
   }): void {
     const at = Date.now()
-    this.status.noteTick(tick.time ?? undefined, !tick.polled)
+    this.status.noteTick(tick.time ?? undefined, !tick.polled, tick.tradeTime)
     this.cb.onTick({
       ltp: tick.ltp,
       time: tick.time,
@@ -639,47 +734,42 @@ export class PhoneChart {
       polled: tick.polled,
     })
     const update = this.builder?.onTick({
-      time: tick.time ?? Math.floor(at / 1000),
+      time: tick.time ?? this.frames.clock.nowSec(),
       price: tick.ltp,
       ltq: tick.ltq,
       dayVolume: tick.dayVolume,
       oi: tick.oi,
+      polled: tick.polled,
+      tradeTime: tick.tradeTime,
     })
     if (update) this.applyLiveBar(update)
   }
 
   private applyLiveBar(update: LiveBarUpdate): void {
-    // A late trade from the interval before: that bar is drawn again first.
-    if (update.previous) this.applyPrevious(update.previous)
-    if (upsertLiveBar(this.bars, update.bar) === 'skip') return
+    let redraw = false
+    // A flat bar nobody traded gives its place to this one.
+    if (update.replaces !== undefined) redraw = removeLiveBar(this.bars, update.replaces)
+    // A late trade changed the bar before the forming one, or gave an
+    // interval that had none a bar of its own. History's buffer keeps its own
+    // copy until the repair after the boundary brings the bar back.
+    if (update.previous) {
+      const placed = insertLiveBar(this.bars, update.previous)
+      if (placed === 'insert') redraw = true
+      else if (!redraw) this.drawBar(update.previous)
+    }
+    if (upsertLiveBar(this.bars, update.bar) === 'skip') {
+      if (redraw) this.draw()
+      return
+    }
     // Nothing in history yet, and now a candle is forming: show it.
     if (this.loadState.kind === 'empty') this.setLoad(CHART_READY)
     // A bar the clock opened stays out of history: nobody traded it.
     if (!update.placeholder)
       this.data.pushBar(update.bar, update.provisional ? { provisional: true } : undefined)
-    this.price.update(update.bar)
-    if (this.volume) {
-      const previous = this.bars[this.bars.length - 2]?.close
-      this.volume.update(
-        volumePoint(update.bar, previous, update.bar.volume ?? 0, this.volumeStyle(), true)
-      )
-    }
-  }
-
-  /**
-   * Correct a bar that has already closed. History's buffer keeps its own
-   * copy until the repair after the boundary brings the bar back, so this only
-   * redraws it.
-   */
-  private applyPrevious(bar: Bar): void {
-    let i = this.bars.length - 1
-    while (i >= 0 && this.bars[i].time > bar.time) i--
-    if (i < 0 || this.bars[i].time !== bar.time) return
-    this.bars[i] = bar
-    this.price.update(bar)
-    this.volume?.update(
-      volumePoint(bar, this.bars[i - 1]?.close, bar.volume ?? 0, this.volumeStyle(), true)
-    )
+    if (redraw) this.draw()
+    else this.drawBar(update.bar)
+    // A new bar may be the session's last, which the countdown must not overshoot.
+    if (update.isNew) this.syncCountdown()
   }
 
   private startFallback(): void {
@@ -695,14 +785,15 @@ export class PhoneChart {
 
   private async pollQuote(): Promise<void> {
     const sym = this.sym
-    if (!sym || this.destroyed) return
+    if (!sym || this.destroyed || !this.fallback || this.ws.isReady()) return
     const quote = await this.quote(sym.symbol, sym.exchange)
-    if (!quote || this.destroyed || sym !== this.sym || !this.fallback) return
+    // The stream may be back by the time the answer is: a quote never speaks over it.
+    if (!quote || this.destroyed || sym !== this.sym || !this.fallback || this.ws.isReady()) return
     if (!(typeof quote.ltp === 'number' && quote.ltp > 0)) return
     this.status.setTransport('polling')
     this.onPrice({
       ltp: quote.ltp,
-      time: nowSec(),
+      time: this.frames.clock.nowSec(),
       dayVolume: isQuoteOnly(sym.exchange) ? undefined : quote.volume,
       polled: true,
     })

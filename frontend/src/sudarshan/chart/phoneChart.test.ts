@@ -22,6 +22,7 @@ vi.mock('@/lib/trading/previousClose', async (importOriginal) => ({
   previousClose: mocks.previousClose,
 }))
 
+import { PROBE_TIMEOUT_MS } from '@/lib/trading/liveTicks'
 import { PhoneChart, type PhoneTick, QUOTE_FALLBACK_MS, WAKE_RECONNECT_MS } from './phoneChart'
 
 /** UTC seconds for a time of day in India on Tuesday 20 October 2026, a trading day. */
@@ -84,6 +85,21 @@ class FakeSocket {
   subscriptions() {
     return this.sent.filter((m) => m.action === 'subscribe')
   }
+  pings() {
+    return this.sent.filter((m) => m.action === 'ping')
+  }
+  /** The proxy answers the last ping, its clock `aheadMs` ahead of the phone's. */
+  pong(aheadMs = 0) {
+    const ping = this.pings().at(-1)
+    if (!ping) throw new Error('no ping to answer')
+    this.receive({
+      type: 'pong',
+      status: 'success',
+      server_timestamp: Date.now() + aheadMs,
+      client_timestamp: ping.timestamp,
+      _pingId: ping._pingId,
+    })
+  }
 }
 
 const latestSocket = () => FakeSocket.all[FakeSocket.all.length - 1]
@@ -109,12 +125,13 @@ interface Heard {
   prevClose: number[]
   statuses: LiveStatus[]
   loads: ChartStateView[]
+  closes: Array<number | null>
 }
 
 const charts: PhoneChart[] = []
 
 function mount(): { chart: PhoneChart; heard: Heard; container: HTMLDivElement } {
-  const heard: Heard = { ticks: [], prevClose: [], statuses: [], loads: [] }
+  const heard: Heard = { ticks: [], prevClose: [], statuses: [], loads: [], closes: [] }
   const container = document.createElement('div')
   Object.defineProperty(container, 'clientWidth', { configurable: true, value: 390 })
   Object.defineProperty(container, 'clientHeight', { configurable: true, value: 520 })
@@ -129,6 +146,7 @@ function mount(): { chart: PhoneChart; heard: Heard; container: HTMLDivElement }
       onPrevClose: (value) => heard.prevClose.push(value),
       onStatus: (status) => heard.statuses.push(status),
       onLoad: (state) => heard.loads.push(state),
+      onSessionClose: (at) => heard.closes.push(at),
     },
   })
   charts.push(chart)
@@ -381,18 +399,23 @@ describe('real-time', () => {
     expect(heard.statuses.slice(dropped).map((s) => s.line.kind)).not.toContain('live')
   })
 
-  it('reconnects at once when the phone wakes after more than a few seconds', async () => {
+  it('replaces a socket that does not answer when the phone wakes, saying Reconnecting meanwhile', async () => {
     const { chart, heard } = mount()
     await chart.load('SBIN', 'NSE', '5m')
     await vi.advanceTimersByTimeAsync(0)
     const first = latestSocket()
     first.accept()
-    first.receive(depthFrame('SBIN', 'NSE', 110.5, ist(10, 0, 31)))
+    first.receive(depthFrame('SBIN', 'NSE', 110.5, ist(10, 0, 30)))
 
     setVisibility('hidden')
     await vi.advanceTimersByTimeAsync(WAKE_RECONNECT_MS + 1000)
+    const pings = first.pings().length
     setVisibility('visible')
+    // Asked at once, and shown as reconnecting while the answer is awaited.
+    expect(first.pings()).toHaveLength(pings + 1)
     expect(lastLine(heard)).toMatchObject({ kind: 'connecting', again: true })
+    expect(latestSocket()).toBe(first)
+    await vi.advanceTimersByTimeAsync(PROBE_TIMEOUT_MS)
     const second = latestSocket()
     expect(second).not.toBe(first)
     expect(first.readyState).toBe(3)
@@ -402,6 +425,131 @@ describe('real-time', () => {
     ])
     second.receive(depthFrame('SBIN', 'NSE', 110.75, ist(10, 0, 38)))
     expect(lastLine(heard)).toEqual({ kind: 'live' })
+  })
+
+  it('keeps a socket that answers when the phone wakes', async () => {
+    const { chart, heard } = mount()
+    await chart.load('SBIN', 'NSE', '5m')
+    await vi.advanceTimersByTimeAsync(0)
+    const socket = latestSocket()
+    socket.accept()
+    socket.receive(depthFrame('SBIN', 'NSE', 110.5, ist(10, 0, 30)))
+    setVisibility('hidden')
+    await vi.advanceTimersByTimeAsync(10_000)
+    setVisibility('visible')
+    await vi.advanceTimersByTimeAsync(150)
+    socket.pong()
+    await vi.advanceTimersByTimeAsync(PROBE_TIMEOUT_MS * 2)
+    expect(FakeSocket.all).toEqual([socket])
+    expect(socket.readyState).toBe(1)
+    expect(lastLine(heard)).toEqual({ kind: 'live' })
+  })
+
+  it('keeps a socket that delivered while the page was hidden, without asking', async () => {
+    const { chart } = mount()
+    await chart.load('SBIN', 'NSE', '5m')
+    await vi.advanceTimersByTimeAsync(0)
+    const socket = latestSocket()
+    socket.accept()
+    const pings = socket.pings().length
+    setVisibility('hidden')
+    await vi.advanceTimersByTimeAsync(8_000)
+    socket.receive(depthFrame('SBIN', 'NSE', 110.5, ist(10, 0, 38)))
+    await vi.advanceTimersByTimeAsync(2_000)
+    setVisibility('visible')
+    await vi.advanceTimersByTimeAsync(PROBE_TIMEOUT_MS * 2)
+    expect(socket.pings()).toHaveLength(pings)
+    expect(FakeSocket.all).toEqual([socket])
+  })
+
+  it('stops asking for quotes the moment the stream is back, before its first tick', async () => {
+    const { chart, heard } = mount()
+    await chart.load('SBIN', 'NSE', '5m')
+    await vi.advanceTimersByTimeAsync(0)
+    latestSocket().accept()
+    latestSocket().drop()
+    await vi.advanceTimersByTimeAsync(QUOTE_FALLBACK_MS)
+    expect(lastLine(heard)).toMatchObject({ kind: 'polling' })
+    // The client reconnects; the instrument is quiet, so no tick comes.
+    await vi.advanceTimersByTimeAsync(2_000)
+    latestSocket().accept()
+    const asked = calls.filter((call) => call.path === 'quotes').length
+    await vi.advanceTimersByTimeAsync(QUOTE_FALLBACK_MS * 3)
+    expect(calls.filter((call) => call.path === 'quotes')).toHaveLength(asked)
+    expect(lastLine(heard)?.kind).not.toBe('polling')
+  })
+
+  it('drops a quote that answers after the stream is back', async () => {
+    let answer: (() => void) | null = null
+    const { chart, heard } = mount()
+    await chart.load('SBIN', 'NSE', '5m')
+    await vi.advanceTimersByTimeAsync(0)
+    latestSocket().accept()
+    latestSocket().drop()
+    // The next quote is slow to answer.
+    vi.mocked(fetch).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          answer = () =>
+            resolve(
+              respond({ status: 'success', data: { ltp: 90, volume: 1 } }) as unknown as Response
+            )
+        })
+    )
+    await vi.advanceTimersByTimeAsync(QUOTE_FALLBACK_MS)
+    await vi.advanceTimersByTimeAsync(2_000)
+    latestSocket().accept()
+    latestSocket().receive(depthFrame('SBIN', 'NSE', 110.5, ist(10, 0, 37)))
+    ;(answer as unknown as () => void)()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(heard.ticks.at(-1)).toMatchObject({ ltp: 110.5, polled: false })
+    expect(internals(chart).bars.at(-1)?.close).toBe(110.5)
+    expect(lastLine(heard)).toEqual({ kind: 'live' })
+  })
+
+  it('opens candles by the server clock, not a phone clock running twenty seconds fast', async () => {
+    // The phone reads 10:05:10; the exchange, 10:04:50.
+    vi.setSystemTime((ist(10, 4, 50) + 20) * 1000)
+    const { chart } = mount()
+    await chart.load('SBIN', 'NSE', '5m')
+    await vi.advanceTimersByTimeAsync(0)
+    const socket = latestSocket()
+    socket.accept()
+    socket.pong(-20_000)
+    socket.receive(depthFrame('SBIN', 'NSE', 110.5, ist(10, 4, 50), 50_000, ist(10, 4, 50)))
+    // 10:04:59 by the exchange: 10:00 is still forming.
+    await vi.advanceTimersByTimeAsync(9_000)
+    expect(internals(chart).bars.at(-1)?.time).toBe(ist(10, 0))
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(internals(chart).bars.at(-1)).toMatchObject({ time: ist(10, 5), close: 110.5 })
+  })
+
+  it('carries nothing a frame said across a reconnect', async () => {
+    const { chart, heard } = mount()
+    await chart.load('SBIN', 'NSE', '5m')
+    await vi.advanceTimersByTimeAsync(0)
+    latestSocket().accept()
+    latestSocket().receive(depthFrame('SBIN', 'NSE', 110.5, ist(10, 0, 30), 50_000, ist(10, 0, 30)))
+    expect(heard.ticks.at(-1)?.tradeTime).toBe(ist(10, 0, 30))
+    latestSocket().drop()
+    await vi.advanceTimersByTimeAsync(3_000)
+    latestSocket().accept()
+    // The first frame on the new connection says nothing of the last trade.
+    latestSocket().receive(depthFrame('SBIN', 'NSE', 110.6, ist(10, 0, 34)))
+    expect(heard.ticks.at(-1)).toMatchObject({ ltp: 110.6, tradeTime: null })
+  })
+
+  it('takes no previous close from a frame that carries the price as one', async () => {
+    const { chart, heard } = mount()
+    await chart.load('SBIN', 'NSE', '5m')
+    await vi.advanceTimersByTimeAsync(0)
+    const before = heard.prevClose.length
+    latestSocket().accept()
+    const frame = depthFrame('SBIN', 'NSE', 110.5, ist(10, 0, 31))
+    latestSocket().receive({ ...frame, data: { ...frame.data, prev_close: 110.5 } })
+    expect(heard.prevClose).toHaveLength(before)
+    latestSocket().receive({ ...frame, data: { ...frame.data, prev_close: 98.5 } })
+    expect(heard.prevClose.at(-1)).toBe(98.5)
   })
 
   it('keeps the stream it has after a short glance away', async () => {
@@ -423,6 +571,40 @@ describe('real-time', () => {
     latestSocket().accept()
     expect(lastLine(heard)).toEqual({ kind: 'closed' })
     expect(heard.statuses.at(-1)?.opensAt).toBe(ist(9, 15) + 2 * 86_400)
+  })
+})
+
+describe('switching', () => {
+  it('keeps the subscription, the feed state and the price across a timeframe change', async () => {
+    const { chart, heard } = mount()
+    await chart.load('SBIN', 'NSE', '5m')
+    await vi.advanceTimersByTimeAsync(0)
+    const socket = latestSocket()
+    socket.accept()
+    socket.receive(depthFrame('SBIN', 'NSE', 110.5, ist(10, 0, 30)))
+    const sent = socket.sent.length
+    const ticks = heard.ticks.length
+    await chart.load('SBIN', 'NSE', '1m')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(socket.sent.slice(sent)).toEqual([])
+    expect(lastLine(heard)).toEqual({ kind: 'live' })
+    // History's last close does not stand in for the streamed price.
+    expect(heard.ticks.slice(ticks)).toEqual([])
+    expect(calls.filter((call) => call.path === 'quotes')).toHaveLength(1)
+  })
+
+  it('moves the subscription to a new instrument', async () => {
+    const { chart } = mount()
+    await chart.load('SBIN', 'NSE', '5m')
+    await vi.advanceTimersByTimeAsync(0)
+    const socket = latestSocket()
+    socket.accept()
+    const sent = socket.sent.length
+    await chart.load('INFY', 'NSE', '5m')
+    expect(socket.sent.slice(sent)).toEqual([
+      expect.objectContaining({ action: 'unsubscribe', symbol: 'SBIN', exchange: 'NSE' }),
+      expect.objectContaining({ action: 'subscribe', symbol: 'INFY', exchange: 'NSE', mode: 3 }),
+    ])
   })
 })
 
@@ -456,6 +638,36 @@ describe('the countdown to the bar close', () => {
     latestSocket().accept()
     expect(countdown(chart)).toBe(false)
   })
+
+  it('gives way to the session close when the last bar is cut short by it', async () => {
+    vi.setSystemTime(ist(15, 14, 50) * 1000)
+    historyReply = () => ({
+      status: 'success',
+      data: [9, 10, 11, 12, 13, 14].map((h) => ({ ...barAt(ist(h, 15)), timestamp: ist(h, 15) })),
+    })
+    const { chart, heard } = mount()
+    await chart.load('SBIN', 'NSE', '1h')
+    await vi.advanceTimersByTimeAsync(0)
+    latestSocket().accept()
+    expect(countdown(chart)).toBe(true)
+    expect(heard.closes).toEqual([])
+    // 15:15: the bar would run to 16:15; the session closes at 15:30.
+    await vi.advanceTimersByTimeAsync(11_000)
+    expect(internals(chart).bars.at(-1)?.time).toBe(ist(15, 15))
+    expect(countdown(chart)).toBe(false)
+    expect(heard.closes).toEqual([ist(15, 30)])
+    await vi.advanceTimersByTimeAsync(15 * 60_000)
+    expect(heard.closes).toEqual([ist(15, 30), null])
+  })
+})
+
+const barAt = (time: number): Bar => ({
+  time,
+  open: 99,
+  high: 101,
+  low: 98,
+  close: 100,
+  volume: 10,
 })
 
 describe('the rest of its life', () => {
@@ -465,6 +677,18 @@ describe('the rest of its life', () => {
     const bars = [...internals(chart).bars]
     chart.setAppMode('analyzer')
     expect(internals(chart).bars).toEqual(bars)
+  })
+
+  it('closes its socket when the page closes, and opens no other', async () => {
+    const { chart } = mount()
+    await chart.load('SBIN', 'NSE', '5m')
+    await vi.advanceTimersByTimeAsync(0)
+    const socket = latestSocket()
+    socket.accept()
+    chart.destroy()
+    expect(socket.readyState).toBe(3)
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(FakeSocket.all).toEqual([socket])
   })
 
   it('leaves nothing running once closed', async () => {
