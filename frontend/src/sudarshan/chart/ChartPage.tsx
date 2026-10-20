@@ -5,8 +5,10 @@
  * From the top: an app bar with the way back and the instrument (tap it, or
  * the search button, to switch); the price, its change on the previous close
  * and whether it is real-time; the timeframes; the chart, which fills the
- * rest; and Buy and Sell, which open the app's own order ticket. Press and
- * hold the chart to read a candle.
+ * rest; and Buy and Sell, which open the app's own order ticket with the
+ * product picked for the segment on this phone (the watchlist's ticket
+ * remembers it), MIS until one is picked. Press and hold the chart to read a
+ * candle.
  *
  * The order ticket and the instrument search are entries in the browser's
  * history, so the phone's Back closes them before it leaves the chart. A new
@@ -34,6 +36,7 @@ import { directionOf, formatPercent, formatPrice, formatRupees } from '@/sudarsh
 import { useNow } from '@/sudarshan/dashboard/hooks'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
 import { TREND_TEXT, TrendArrow } from '@/sudarshan/dashboard/Trend'
+import { readProduct } from '@/sudarshan/ticket/productPref'
 import { showToast } from '@/utils/toast'
 import {
   type FeedConfig,
@@ -430,7 +433,9 @@ function PhoneChartScreen({
           action={side ?? 'BUY'}
           lotSize={info.lotSize}
           tickSize={info.tickSize}
-          product="MIS"
+          // The product picked for this segment on this phone (M8.2), MIS
+          // until one is: the owner trades intraday.
+          product={readProduct(exchange) ?? 'MIS'}
           strategy={STRATEGY}
         />
       )}

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChartStateView } from '@/lib/trading/chartState'
 import type { LiveStatus } from '@/lib/trading/liveStatus'
 import type { FeedLine } from '@/sudarshan/dashboard/live'
+import { rememberProduct } from '@/sudarshan/ticket/productPref'
 import type { PhoneChartCallbacks, PhoneTick } from './phoneChart'
 
 const fakes = vi.hoisted(() => ({
@@ -270,7 +271,30 @@ describe('the phone chart page at 390 px', () => {
     expect(localStorage.getItem('sudarshan-chart-interval')).toBe('1h')
   })
 
-  it("opens the app's own order ticket from Buy and Sell", async () => {
+  it("opens the app's own order ticket from Buy and Sell, on MIS until a product is picked", async () => {
+    await opened()
+    const buy = await screen.findByRole('button', { name: 'BUY' })
+    await waitFor(() => expect(buy).toBeEnabled())
+    await userEvent.click(buy)
+    expect(screen.getByRole('dialog', { name: 'Order ticket' })).toHaveTextContent(
+      'BUY SBIN NSE MIS 1 chart-trading'
+    )
+  })
+
+  it('opens the ticket on the product picked for the segment on this phone (M8.2)', async () => {
+    rememberProduct('NSE', 'CNC')
+    rememberProduct('NFO', 'NRML')
+    await opened()
+    const sell = await screen.findByRole('button', { name: 'SELL' })
+    await waitFor(() => expect(sell).toBeEnabled())
+    await userEvent.click(sell)
+    expect(screen.getByRole('dialog', { name: 'Order ticket' })).toHaveTextContent(
+      'SELL SBIN NSE CNC 1 chart-trading'
+    )
+  })
+
+  it("keeps another segment's pick out of the ticket", async () => {
+    rememberProduct('NFO', 'NRML')
     await opened()
     const buy = await screen.findByRole('button', { name: 'BUY' })
     await waitFor(() => expect(buy).toBeEnabled())
