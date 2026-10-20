@@ -26,28 +26,50 @@ MODE_RANK = {"ltpc": 1, "option_greeks": 1, "full": 2, "full_d30": 3}
 
 
 class ClientSocketMixin:
-    """For UpstoxWebSocketClient: the mode each key is streamed in, and change_mode."""
+    """For UpstoxWebSocketClient: the mode each key is streamed in, and change_mode.
+
+    `_keys_by_mode` is read and changed from three threads (the proxy's loop
+    switching keys down, the batch timer subscribing, the socket thread on a
+    handshake), so every use of it holds `_modes_lock`, an in-memory critical
+    section with no network call inside. A mode left with no key is dropped from
+    it, so the combined cap, which applies only while two modes are in use, does
+    not count it.
+    """
 
     def _move_keys(self, instrument_keys: list[str], mode: str) -> None:
         """Record that these keys now stream in `mode`, and in no other.
 
         A sub in another mode, or a change_mode, moves a key, so the per-mode
         sets follow it: the subscription caps count each key once, and
-        mode_of() can tell the adapter what Upstox is sending for it. A mode
-        left with no key is dropped, so the combined cap, which applies only
-        while two modes are in use, does not count it.
+        mode_of() can tell the adapter what Upstox is sending for it.
         """
+        with self._modes_lock:
+            self._drop_from_modes(instrument_keys)
+            self._keys_by_mode.setdefault(mode, set()).update(instrument_keys)
+
+    def _forget_keys(self, instrument_keys: list[str]) -> None:
+        """These keys stream in no mode any more."""
+        with self._modes_lock:
+            self._drop_from_modes(instrument_keys)
+
+    def _reset_modes(self) -> None:
+        """No key streams: the socket closed, or a new one opened."""
+        with self._modes_lock:
+            self._keys_by_mode.clear()
+
+    def _drop_from_modes(self, instrument_keys: list[str]) -> None:
+        """Caller holds _modes_lock."""
         for held in self._keys_by_mode.values():
             held.difference_update(instrument_keys)
-        self._keys_by_mode.setdefault(mode, set()).update(instrument_keys)
         for empty in [other for other, held in self._keys_by_mode.items() if not held]:
             del self._keys_by_mode[empty]
 
     def mode_of(self, instrument_key: str) -> str | None:
         """The Upstox mode this connection streams the key in, or None."""
-        for mode, held in self._keys_by_mode.items():
-            if instrument_key in held:
-                return mode
+        with self._modes_lock:
+            for mode, held in self._keys_by_mode.items():
+                if instrument_key in held:
+                    return mode
         return None
 
     def change_mode(self, instrument_keys: list[str], mode: str) -> bool:

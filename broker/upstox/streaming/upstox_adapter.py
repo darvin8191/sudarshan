@@ -358,7 +358,13 @@ class UpstoxWebSocketAdapter(BaseBrokerWebSocketAdapter, AdapterSocketMixin):  #
                     self.subscriptions.pop(correlation_id, None)
 
             if shares_key:
-                self._narrow_key(instrument_key)
+                # SUDARSHAN (M18.2): the record is gone, so the release has happened.
+                # Reporting a failure now would have the pool restore a mode this
+                # adapter no longer holds; switching the key down is best effort.
+                try:
+                    self._narrow_key(instrument_key)
+                except Exception:
+                    self.logger.exception(f"Could not switch {instrument_key} to a lower mode")
                 self.logger.debug(
                     f"Released {symbol} on {exchange} mode {mode}; another mode keeps its feed"
                 )

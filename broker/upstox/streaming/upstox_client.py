@@ -107,6 +107,7 @@ class UpstoxWebSocketClient(ClientSocketMixin):  # SUDARSHAN: mixin (M18.2)
         # drops all server-side subscriptions when the socket closes, and the
         # adapter replays them from scratch.
         self._keys_by_mode: dict[str, set] = {}
+        self._modes_lock = threading.Lock()  # SUDARSHAN: guards _keys_by_mode (M18.2)
 
         # True once any handshake has ever succeeded. Distinguishes "the feed
         # dropped" from "the feed was never allowed to open" (issue: an over-limit
@@ -342,7 +343,8 @@ class UpstoxWebSocketClient(ClientSocketMixin):  # SUDARSHAN: mixin (M18.2)
             self.logger.error("WebSocket not connected")
             return False
 
-        keys, dropped = self._enforce_key_limits(instrument_keys, mode)
+        with self._modes_lock:  # SUDARSHAN: no other thread changes it meanwhile (M18.2)
+            keys, dropped = self._enforce_key_limits(instrument_keys, mode)
         if not keys:
             # Nothing left to send: either every key is already live in this mode
             # (a no-op, e.g. OpenAlgo modes 2 and 3 both mapping to `full` for the
@@ -439,8 +441,7 @@ class UpstoxWebSocketClient(ClientSocketMixin):  # SUDARSHAN: mixin (M18.2)
             # Free the cap budget too, otherwise a long-running session that churns
             # symbols would count every key it has ever held and start refusing new
             # subscriptions well below the real limit.
-            for keys in self._keys_by_mode.values():
-                keys.difference_update(instrument_keys)
+            self._forget_keys(instrument_keys)  # SUDARSHAN: under its lock (M18.2)
             self.logger.debug(f"Unsubscribed from {len(instrument_keys)} instruments")
             return True
         except Exception as e:
@@ -477,7 +478,7 @@ class UpstoxWebSocketClient(ClientSocketMixin):  # SUDARSHAN: mixin (M18.2)
         # from here on) so a legitimate reconnect after disconnect() is allowed.
 
         self._subscriptions.clear()
-        self._keys_by_mode.clear()
+        self._reset_modes()  # SUDARSHAN: under its lock (M18.2)
         self._last_message_time = None
         self.logger.info("Disconnected from WebSocket")
 
@@ -494,7 +495,7 @@ class UpstoxWebSocketClient(ClientSocketMixin):  # SUDARSHAN: mixin (M18.2)
         # cap accounting must start from zero on each handshake — the adapter's
         # on_connect callback below replays the whole subscription set, and stale
         # counts here would make that replay look like a cap breach.
-        self._keys_by_mode.clear()
+        self._reset_modes()  # SUDARSHAN: under its lock (M18.2)
         self._subscriptions.clear()
 
         # Start health check thread

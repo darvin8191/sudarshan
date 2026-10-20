@@ -943,6 +943,72 @@ def test_releasing_a_mode_never_switches_a_key_up(make_adapter) -> None:
     assert adapter.upstox.held == {OPTION[2]: "full"}
 
 
+class _PausingModes(dict):
+    """The client's _keys_by_mode: the thread named `releasing` pauses halfway through
+    iterating it until the test lets it go on."""
+
+    def __init__(self, *args) -> None:
+        super().__init__(*args)
+        self.inside = threading.Event()
+        self.go_on = threading.Event()
+
+    def values(self):
+        for index, held in enumerate(super().values()):
+            if index == 1 and threading.current_thread().name == "releasing":
+                self.inside.set()
+                self.go_on.wait(5)
+            yield held
+
+
+def test_the_key_modes_change_only_while_no_other_thread_reads_them() -> None:
+    """The proxy's loop switching a key down, the batch timer subscribing and the socket
+    thread all use the client's per-mode key sets. An unsubscribe on one thread is paused
+    mid-way through them while another thread switches a key, emptying a mode: the switch
+    must wait, or the paused thread fails with 'dictionary changed size during iteration'."""
+    client = _connected_client()
+    modes = client._keys_by_mode = _PausingModes({"ltpc": {"K2"}, "full": {"K1"}})
+    errors: list[BaseException] = []
+
+    def release() -> None:
+        try:
+            client.unsubscribe(["K9"])
+        except BaseException as error:  # noqa: BLE001 - the test reports any failure
+            errors.append(error)
+
+    releasing = threading.Thread(target=release, name="releasing")
+    releasing.start()
+    assert modes.inside.wait(5)
+    switching = threading.Thread(target=client.change_mode, args=(["K1"], "ltpc"))
+    switching.start()
+    switching.join(0.2)
+    assert switching.is_alive()  # waiting for the lock, not changing the sets
+    modes.go_on.set()
+    releasing.join(5)
+    switching.join(5)
+
+    assert errors == []
+    assert dict(client._keys_by_mode) == {"ltpc": {"K1", "K2"}}
+
+
+def test_a_release_that_removed_its_record_never_reports_failure(make_adapter, monkeypatch) -> None:
+    """Switching the key down after a release can fail; the release itself has happened, and
+    a failure reported now would have the pool restore a mode the adapter no longer holds."""
+    adapter = make_adapter()
+    pool = _pool(adapter)
+    symbol, exchange, key = OPTION
+    assert pool.subscribe(symbol, exchange, 1)["status"] == "success"
+    assert pool.subscribe(symbol, exchange, 3)["status"] == "success"
+
+    def broken(_key: str) -> None:
+        raise RuntimeError("switching failed")
+
+    monkeypatch.setattr(adapter, "_narrow_key", broken)
+
+    assert pool.unsubscribe(symbol, exchange, 1)["status"] == "success"
+    assert set(pool.subscription_map) == {(symbol, exchange, 3)}
+    assert list(adapter.subscriptions) == [f"{symbol}_{exchange}_3"]
+
+
 def test_a_reconnect_replays_each_key_once_in_the_mode_it_needs(make_adapter) -> None:
     adapter = make_adapter()
     _hold(adapter, OPTION, 3)
