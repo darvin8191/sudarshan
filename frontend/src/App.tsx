@@ -42,6 +42,7 @@ const ApiKey = lazy(() => import('@/pages/ApiKey'))
 const AgentIndex = lazy(() => import('@/pages/agent/AgentIndex'))
 const AgentConfig = lazy(() => import('@/pages/agent/AgentConfig'))
 const Profile = lazy(() => import('@/pages/Profile'))
+const About = lazy(() => import('@/sudarshan/pages/About'))
 const MasterContract = lazy(() => import('@/pages/MasterContract'))
 const ActionCenter = lazy(() => import('@/pages/ActionCenter'))
 
@@ -300,6 +301,7 @@ function App() {
                 <Route path="/health" element={<HealthMonitor />} />
                 {/* Phase 7: Settings & Action Center */}
                 <Route path="/profile" element={<Profile />} />
+                <Route path="/about" element={<About />} />
                 <Route path="/master-contract" element={<MasterContract />} />
                 <Route path="/action-center" element={<ActionCenter />} />
               </Route>

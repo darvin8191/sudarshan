@@ -44,6 +44,12 @@ jobs:
 
       - name: Build and test frontend
         working-directory: frontend
+        env:
+          # Shown on the About page (M1.16; src/sudarshan/buildInfo.ts checks each
+          # value's shape). The release tag is empty on manual runs.
+          VITE_SD_RELEASE: ${{ github.event.release.tag_name }}
+          VITE_SD_COMMIT: ${{ github.sha }}
+          VITE_SD_SOURCE: ${{ github.server_url }}/${{ github.repository }}
         run: |
           npm ci
           npm run lint

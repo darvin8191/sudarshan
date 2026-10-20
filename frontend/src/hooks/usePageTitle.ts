@@ -68,6 +68,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/logs/latency': 'Latency',
   '/health': 'Health Monitor',
   '/profile': 'Profile',
+  '/about': 'About',
   '/master-contract': 'Master Contract',
   '/action-center': 'Action Center',
   '/playground': 'Playground',

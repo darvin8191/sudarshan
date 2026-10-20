@@ -728,6 +728,12 @@ def react_profile():
     return serve_react_app()
 
 
+# SUDARSHAN About: version, build and licences (M1.16)
+@react_bp.route("/about", strict_slashes=False)
+def react_about():
+    return serve_react_app()
+
+
 # Action Center (Semi-automated trading)
 @react_bp.route("/action-center", strict_slashes=False)
 def react_action_center():

@@ -13,6 +13,7 @@ import {
   FileText,
   FlaskConical,
   Gauge,
+  Info,
   Key,
   Layers,
   LayoutDashboard,
@@ -94,6 +95,8 @@ export const profileMenuItems: NavItem[] = [
   { href: '/sandbox', label: 'Sandbox', icon: FlaskConical },
   { href: '/leverage', label: 'Leverage', icon: Gauge },
   { href: '/admin', label: 'Admin', icon: Settings },
+  // SUDARSHAN: version, build and licences (M1.16).
+  { href: '/about', label: 'About', icon: Info },
 ]
 
 // External links
