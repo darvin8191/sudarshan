@@ -45,7 +45,7 @@ import {
   upsertLiveBar,
 } from '@/lib/trading/liveBars'
 import { type LiveStatus, LiveStatusTracker } from '@/lib/trading/liveStatus'
-import { FrameExtrasTap } from '@/lib/trading/liveTicks'
+import { FrameExtrasTap, WAKE_RECONNECT_MS } from '@/lib/trading/liveTicks'
 import { needsPreviousClose, previousClose } from '@/lib/trading/previousClose'
 import { applySessionHours, sessionCalendarFor } from '@/lib/trading/sessionHours'
 import { volumePoint } from '@/lib/trading/volumeSettings'
@@ -57,12 +57,8 @@ const nowSec = () => Math.floor(Date.now() / 1000)
 /** How often the quote fallback asks while the stream is down: the same as /trading's. */
 export const QUOTE_FALLBACK_MS = 4000
 
-/**
- * Away longer than this, and the chart starts a fresh stream on coming back.
- * A phone that slept can hold a socket that is open on paper and dead in
- * fact, and the stream's own watchdog takes most of a minute to find out.
- */
-export const WAKE_RECONNECT_MS = 5000
+/** Away longer than this, and the chart starts a fresh stream on coming back. */
+export { WAKE_RECONNECT_MS }
 
 /** Bars in view when a chart opens: enough candles to read a trend at phone width. */
 export const PHONE_VISIBLE_BARS = 70

@@ -1420,6 +1420,69 @@ describe('the live bar in the terminal', () => {
     live.liveClock.stop()
   })
 
+  it('starts the stream again at once when the page comes back from more than a few seconds away', async () => {
+    const sockets: Array<{
+      readyState: number
+      onopen: (() => void) | null
+      onclose: (() => void) | null
+      onmessage: ((event: { data: string }) => void) | null
+    }> = []
+    vi.stubGlobal(
+      'WebSocket',
+      class {
+        readyState = 0
+        onopen: (() => void) | null = null
+        onclose: (() => void) | null = null
+        onerror: (() => void) | null = null
+        onmessage: ((event: { data: string }) => void) | null = null
+        constructor() {
+          sockets.push(this)
+        }
+        send() {}
+        close() {
+          this.readyState = 3
+        }
+      }
+    )
+    let visibility: 'visible' | 'hidden' = 'visible'
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => visibility,
+    })
+    const flip = (to: 'visible' | 'hidden') => {
+      visibility = to
+      document.dispatchEvent(new Event('visibilitychange'))
+    }
+    try {
+      const { terminal, state } = mount()
+      const live = state as LiveState & { liveStatus: { status(): { line: { kind: string } } } }
+      vi.spyOn(terminal, 'api').mockResolvedValue({ data: { minutes: ['1m'] } })
+      vi.spyOn(terminal, 'search').mockResolvedValue([])
+      await terminal.init()
+      const first = sockets.at(-1)
+      if (!first) throw new Error('no socket')
+      first.readyState = 1
+      first.onopen?.()
+      first.onmessage?.({ data: JSON.stringify({ type: 'auth', status: 'success' }) })
+      // A glance away keeps the stream it has.
+      flip('hidden')
+      vi.advanceTimersByTime(2_000)
+      flip('visible')
+      expect(sockets).toHaveLength(1)
+      // The phone slept: the stream starts again within a second, Reconnecting meanwhile.
+      flip('hidden')
+      vi.advanceTimersByTime(60_000)
+      flip('visible')
+      expect(first.readyState).toBe(3)
+      expect(live.liveStatus.status().line.kind).toBe('connecting')
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(sockets).toHaveLength(2)
+      terminal.destroy()
+    } finally {
+      Reflect.deleteProperty(document, 'visibilityState')
+    }
+  })
+
   it('reads the book on an order event, once for a burst, and re-syncs it each minute', async () => {
     let socket: {
       onopen: (() => void) | null

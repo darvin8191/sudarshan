@@ -119,7 +119,6 @@ import { ChartToolbar } from './ChartToolbar'
 import { ComparisonMenu } from './ComparisonMenu'
 import { DrawingStyleBar } from './DrawingStyleBar'
 import { DrawingTextDialog, type TextRequest } from './DrawingTextDialog'
-import { LiveStatusMarker } from './LiveStatusMarker'
 import { ChartOrderBridgeContext } from './dock/chartOrderBridge'
 import {
   type ChartOrderAction,
@@ -130,6 +129,7 @@ import {
   stillHeld,
 } from './dock/chartOrderRows'
 import { cancelDockOrder, closeDockPosition } from './dock/orderActions'
+import { LiveStatusMarker } from './LiveStatusMarker'
 import { PriceScaleMenu } from './PriceScaleMenu'
 import { QuickIntervalBox, useQuickEntry, useSeedBuffer } from './QuickEntry'
 import { Tip } from './Tip'

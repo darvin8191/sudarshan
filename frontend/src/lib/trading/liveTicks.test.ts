@@ -152,4 +152,23 @@ describe('FrameExtrasTap', () => {
     fake.onclose?.()
     expect(events).toEqual(['open', 'error', 'close'])
   })
+
+  it('closes every socket at once on drop, as a dead connection would, and only once', () => {
+    vi.stubGlobal('WebSocket', FakeSocket)
+    const tap = new FrameExtrasTap()
+    const socket = tap.socketFactory('ws://test.invalid')
+    const fake = FakeSocket.last as FakeSocket
+    const closed = vi.fn()
+    socket.onclose = closed
+    fake.onopen?.()
+    tap.drop()
+    // The client hears of it now, not when the browser has finished closing.
+    expect(closed).toHaveBeenCalledOnce()
+    expect(fake.readyState).toBe(3)
+    expect(socket.readyState).toBe(3)
+    // The browser's own close event, arriving later, is not a second close.
+    fake.onclose?.()
+    tap.drop()
+    expect(closed).toHaveBeenCalledOnce()
+  })
 })

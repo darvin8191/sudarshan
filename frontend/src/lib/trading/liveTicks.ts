@@ -105,6 +105,14 @@ export function readFrameExtras(
 }
 
 /**
+ * Away from the page longer than this, and a chart starts its stream again on
+ * coming back. A phone that slept can hold a socket that is open on paper and
+ * dead in fact, and the stream client's own watchdog takes most of a minute
+ * to find out.
+ */
+export const WAKE_RECONNECT_MS = 5000
+
+/**
  * Hands the stream client a socket that reads each frame on its way past.
  *
  * The client calls the socket's message handler synchronously, and its tick
@@ -113,6 +121,8 @@ export function readFrameExtras(
  */
 export class FrameExtrasTap {
   private readonly latest = new Map<string, FrameExtras>()
+  /** One per socket still open, each closing its socket as a dead connection would. */
+  private readonly droppers = new Set<() => void>()
 
   /** The latest extras for an instrument, or undefined before any frame for it. */
   get(symbol: string, exchange: string): FrameExtras | undefined {
@@ -139,9 +149,22 @@ export class FrameExtrasTap {
     this.latest.set(key, { ...kept, ...frame.extras })
   }
 
+  /**
+   * Close every socket this tap opened, at once, as a connection that died
+   * would close. The stream client takes it for an unexpected close, so it
+   * reconnects within a second and subscribes everything it had again: what
+   * a chart wants after the phone wakes, without knowing its subscriptions.
+   * The client is told now, not when the browser finishes closing a socket
+   * whose far end may be gone.
+   */
+  drop(): void {
+    for (const drop of [...this.droppers]) drop()
+  }
+
   /** A factory for the stream client: a browser socket whose frames pass through `read` first. */
   readonly socketFactory = (url: string): SocketLike => {
     const ws = new WebSocket(url)
+    let closed = false
     const socket: SocketLike = {
       send: (data: string) => ws.send(data),
       close: () => ws.close(),
@@ -150,11 +173,31 @@ export class FrameExtrasTap {
       onerror: null,
       onmessage: null,
       get readyState() {
-        return ws.readyState
+        // 3 is CLOSED, read without the constructor a test may have replaced.
+        return closed ? 3 : ws.readyState
       },
     }
+    const finish = () => {
+      if (closed) return
+      closed = true
+      this.droppers.delete(drop)
+      socket.onclose?.()
+    }
+    const drop = () => {
+      ws.onopen = null
+      ws.onmessage = null
+      ws.onerror = null
+      ws.onclose = null
+      try {
+        ws.close()
+      } catch {
+        // Already closing.
+      }
+      finish()
+    }
+    this.droppers.add(drop)
     ws.onopen = () => socket.onopen?.()
-    ws.onclose = () => socket.onclose?.()
+    ws.onclose = finish
     ws.onerror = () => socket.onerror?.()
     ws.onmessage = (event: MessageEvent) => {
       this.read(event.data)

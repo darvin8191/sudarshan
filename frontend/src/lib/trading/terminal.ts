@@ -118,7 +118,7 @@ import {
   upsertLiveBar,
 } from './liveBars'
 import { type LiveStatus, LiveStatusTracker } from './liveStatus'
-import { FrameExtrasTap } from './liveTicks'
+import { FrameExtrasTap, WAKE_RECONNECT_MS } from './liveTicks'
 import { openInterestCapability } from './openInterest'
 import {
   isPriceAxisSetting,
@@ -1563,7 +1563,23 @@ export class TradingTerminal {
     const visible = document.visibilityState !== 'hidden'
     this.data?.setVisible(visible || this.alertsArmed())
     this.comparisons?.setVisibleHost(visible)
+    if (!visible) {
+      this.hiddenAt ??= Date.now()
+      return
+    }
+    const away = this.hiddenAt === null ? 0 : Date.now() - this.hiddenAt
+    this.hiddenAt = null
+    // Back after the phone slept: the socket may be dead while it still looks
+    // open. Start the stream again now rather than wait out the watchdog; the
+    // client reconnects within a second and subscribes everything again, and
+    // the marker says Reconnecting meanwhile.
+    if (away > WAKE_RECONNECT_MS && this.wsOpened && !this.destroyed) {
+      this.liveStatus.setTransport('connecting')
+      this.frames.drop()
+    }
   }
+  /** When the page was hidden, for the reconnect on waking. */
+  private hiddenAt: number | null = null
 
   constructor(opts: TerminalOptions) {
     const initial = opts.initialWorkspacePane
