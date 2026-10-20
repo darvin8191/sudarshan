@@ -1,19 +1,26 @@
-import { BarChart3, BookOpen, FileText, Search, Zap } from 'lucide-react'
+import {
+  AlertTriangle,
+  BarChart3,
+  BookOpen,
+  CheckCircle2,
+  ChevronRight,
+  ExternalLink,
+  FileText,
+  Loader2,
+  PlugZap,
+  Search,
+  Zap,
+} from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router'
-import { Badge } from '@/components/ui/badge'
-import { Card, CardContent } from '@/components/ui/card'
 import { useOrderEventRefresh } from '@/hooks/useOrderEventRefresh'
 import { cn } from '@/lib/utils'
+import { useAuthStore } from '@/stores/authStore'
 import { onModeChange } from '@/stores/themeStore'
-
-interface MarginData {
-  availablecash: string
-  collateral: string
-  m2munrealized: string
-  m2mrealized: string
-  utiliseddebits: string
-}
+import { HoldingsCard } from '@/sudarshan/dashboard/HoldingsCard'
+import { IndexStrip } from '@/sudarshan/dashboard/IndexStrip'
+import { type DashboardFunds, PnlCard } from '@/sudarshan/dashboard/PnlCard'
+import { formatAmount } from '@/sudarshan/dashboard/format'
 
 interface MasterContractStatus {
   status: 'pending' | 'downloading' | 'success' | 'error'
@@ -21,46 +28,71 @@ interface MasterContractStatus {
   total_symbols?: number
 }
 
-// Format number in Indian format with Cr/L suffixes
-function formatIndianNumber(value: string | number): string {
-  const num = typeof value === 'string' ? parseFloat(value) : value
-  if (Number.isNaN(num)) return '0.00'
+// SUDARSHAN: the D home. The data and its refresh rules are upstream's; what
+// changed is how it is shown (src/sudarshan/dashboard) and the index strip and
+// holdings summary, which read existing APIs only.
 
-  const isNegative = num < 0
-  const absNum = Math.abs(num)
+/** The master contract's state as a chip: an icon and words, never a coloured dot alone. */
+const CONTRACT_CHIP = {
+  success: {
+    icon: CheckCircle2,
+    label: 'Master contract ready',
+    tone: 'border-[color:var(--live-border)] bg-[color:var(--live-tint)] text-[color:var(--live-ink)]',
+  },
+  downloading: {
+    icon: Loader2,
+    label: 'Downloading master contract',
+    tone: 'border-[color:var(--gold)] bg-[color:var(--gold-tint)] text-[color:var(--gold-ink)]',
+  },
+  error: {
+    icon: AlertTriangle,
+    label: 'Master contract failed',
+    tone: 'border-[color:var(--down)] bg-[color:var(--down-tint)] text-[color:var(--down)]',
+  },
+  pending: {
+    icon: Loader2,
+    label: 'Checking master contract',
+    tone: 'border-border bg-muted text-muted-foreground',
+  },
+} as const
 
-  let formatted: string
-  if (absNum >= 10000000) {
-    // 1 Crore or more
-    formatted = `${(absNum / 10000000).toFixed(2)}Cr`
-  } else if (absNum >= 100000) {
-    // 1 Lakh or more
-    formatted = `${(absNum / 100000).toFixed(2)}L`
-  } else {
-    // Less than 1 Lakh - just decimal format
-    formatted = absNum.toFixed(2)
-  }
-
-  return isNegative ? `-${formatted}` : formatted
-}
-
-// Get color class based on P&L value
-function getPnLColor(value: string | number): string {
-  const num = typeof value === 'string' ? parseFloat(value) : value
-  if (num > 0) return 'text-green-600 dark:text-green-400'
-  if (num < 0) return 'text-red-600 dark:text-red-400'
-  return 'text-foreground'
-}
-
-function getPnLBadgeVariant(value: string | number): 'default' | 'destructive' | 'secondary' {
-  const num = typeof value === 'string' ? parseFloat(value) : value
-  if (num > 0) return 'default'
-  if (num < 0) return 'destructive'
-  return 'secondary'
-}
+const QUICK_ACCESS = [
+  {
+    href: '/search',
+    label: 'Symbols',
+    description: 'Universal symbology across brokers',
+    icon: Search,
+  },
+  {
+    href: '/pnl-tracker',
+    label: 'P&L Tracker',
+    description: 'Live intraday MTM tracker',
+    icon: BarChart3,
+  },
+  {
+    href: '/logs',
+    label: 'Live Logs',
+    description: 'Real-time trading activity logs',
+    icon: FileText,
+  },
+  {
+    href: '/logs/latency',
+    label: 'Latency Monitor',
+    description: 'Monitor order & API latency',
+    icon: Zap,
+  },
+  {
+    href: 'https://docs.openalgo.in',
+    label: 'Documentation',
+    description: 'Tutorials, API docs & features',
+    icon: BookOpen,
+    external: true,
+  },
+] as const
 
 export default function Dashboard() {
-  const [marginData, setMarginData] = useState<MarginData | null>(null)
+  const [marginData, setMarginData] = useState<DashboardFunds | null>(null)
+  const apiKey = useAuthStore((s) => s.apiKey)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [masterContract, setMasterContract] = useState<MasterContractStatus>({
@@ -159,116 +191,27 @@ export default function Dashboard() {
     return () => clearInterval(interval)
   }, [checkMasterContractStatus])
 
-  // Master Contract LED color
-  const getMasterContractLedColor = () => {
-    switch (masterContract.status) {
-      case 'success':
-        return 'bg-green-500'
-      case 'downloading':
-        return 'bg-yellow-500 animate-pulse'
-      case 'error':
-        return 'bg-red-500'
-      default:
-        return 'bg-gray-400 animate-pulse'
-    }
-  }
-
-  const getMasterContractStatusText = () => {
-    switch (masterContract.status) {
-      case 'success':
-        return masterContract.total_symbols
-          ? `Ready (${masterContract.total_symbols} symbols)`
-          : 'Ready'
-      case 'downloading':
-        return 'Downloading...'
-      case 'error':
-        return 'Error'
-      default:
-        return 'Checking...'
-    }
-  }
-
-  const getMasterContractTextColor = () => {
-    switch (masterContract.status) {
-      case 'success':
-        return 'text-green-600 dark:text-green-400'
-      case 'downloading':
-        return 'text-yellow-600 dark:text-yellow-400'
-      case 'error':
-        return 'text-red-600 dark:text-red-400'
-      default:
-        return 'text-muted-foreground'
-    }
-  }
-
-  const quickAccessCards = [
-    {
-      href: '/search',
-      label: 'Symbols',
-      description: 'Universal symbology across brokers',
-      icon: Search,
-      gradient: 'from-primary/10 to-primary/5 hover:from-primary/20 hover:to-primary/10',
-      iconBg: 'bg-primary/20',
-      iconColor: 'text-primary',
-      borderColor: 'border-primary/20 hover:border-primary/40',
-    },
-    {
-      href: '/logs',
-      label: 'Live Logs',
-      description: 'Real-time trading activity logs',
-      icon: FileText,
-      gradient:
-        'from-violet-500/10 to-violet-500/5 hover:from-violet-500/20 hover:to-violet-500/10',
-      iconBg: 'bg-violet-500/20',
-      iconColor: 'text-violet-500',
-      borderColor: 'border-violet-500/20 hover:border-violet-500/40',
-    },
-    {
-      href: 'https://docs.openalgo.in',
-      label: 'Documentation',
-      description: 'Tutorials, API docs & features',
-      icon: BookOpen,
-      gradient: 'from-cyan-500/10 to-cyan-500/5 hover:from-cyan-500/20 hover:to-cyan-500/10',
-      iconBg: 'bg-cyan-500/20',
-      iconColor: 'text-cyan-500',
-      borderColor: 'border-cyan-500/20 hover:border-cyan-500/40',
-      external: true,
-    },
-    {
-      href: '/pnl-tracker',
-      label: 'P&L Tracker',
-      description: 'Live intraday MTM tracker',
-      icon: BarChart3,
-      gradient: 'from-green-500/10 to-green-500/5 hover:from-green-500/20 hover:to-green-500/10',
-      iconBg: 'bg-green-500/20',
-      iconColor: 'text-green-500',
-      borderColor: 'border-green-500/20 hover:border-green-500/40',
-    },
-    {
-      href: '/logs/latency',
-      label: 'Latency Monitor',
-      description: 'Monitor order & API latency',
-      icon: Zap,
-      gradient:
-        'from-orange-500/10 to-orange-500/5 hover:from-orange-500/20 hover:to-orange-500/10',
-      iconBg: 'bg-orange-500/20',
-      iconColor: 'text-orange-500',
-      borderColor: 'border-orange-500/20 hover:border-orange-500/40',
-    },
-  ]
+  const contract = CONTRACT_CHIP[masterContract.status] ?? CONTRACT_CHIP.pending
+  const ContractIcon = contract.icon
+  const spinning = masterContract.status === 'downloading' || masterContract.status === 'pending'
 
   // Broker token expired but the app session is fine: send the user to the
   // broker reconnect flow, not /login (which would bounce back) — #1400.
   if (brokerExpired) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[50vh] space-y-4">
-        <h1 className="text-2xl font-bold">Broker Session Expired</h1>
+      <div className="mx-auto flex min-h-[50vh] max-w-md flex-col items-center justify-center gap-4 text-center">
+        <span className="flex size-14 items-center justify-center rounded-2xl bg-[color:var(--gold-tint)] text-[color:var(--gold-ink)]">
+          <PlugZap aria-hidden="true" className="size-7" />
+        </span>
+        <h1 className="sd-display text-[1.75rem] leading-tight font-bold">
+          Broker Session Expired
+        </h1>
         <p className="text-muted-foreground">
           Your broker token has expired (brokers roll tokens daily). Reconnect to continue trading.
         </p>
         <Link
           to="/broker"
-          className="inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+          className="inline-flex min-h-12 items-center justify-center rounded-[0.875rem] bg-primary px-6 text-base font-semibold text-primary-foreground outline-none hover:bg-primary/90 focus-visible:ring-[3px] focus-visible:ring-ring/50"
         >
           Reconnect Broker
         </Link>
@@ -279,10 +222,13 @@ export default function Dashboard() {
   // If not authenticated, show login prompt
   if (!isAuthenticated) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[50vh] space-y-4">
-        <h1 className="text-2xl font-bold">Session Expired</h1>
+      <div className="mx-auto flex min-h-[50vh] max-w-md flex-col items-center justify-center gap-4 text-center">
+        <h1 className="sd-display text-[1.75rem] leading-tight font-bold">Session Expired</h1>
         <p className="text-muted-foreground">Please log in to access the dashboard.</p>
-        <Link to="/login" className="text-primary hover:underline">
+        <Link
+          to="/login"
+          className="inline-flex min-h-12 items-center justify-center rounded-[0.875rem] bg-primary px-6 text-base font-semibold text-primary-foreground outline-none hover:bg-primary/90 focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        >
           Go to Login
         </Link>
       </div>
@@ -290,204 +236,124 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="space-y-6 md:space-y-12">
-      {/* Dashboard Header */}
-      <div className="flex flex-col lg:flex-row lg:items-start gap-4">
-        <div className="flex-1">
-          <h1 className="text-2xl md:text-3xl font-bold">Trading Dashboard</h1>
-          <p className="text-muted-foreground mt-1 md:mt-2 text-sm md:text-base">
-            Overview of your trading account and market positions
-          </p>
-        </div>
-        {/* Master Contract Status Indicator */}
-        <div className="flex items-center gap-2 md:gap-3 bg-muted rounded-lg px-3 md:px-4 py-2 md:py-3 w-fit lg:ml-auto lg:self-start">
-          <span className="text-xs md:text-sm font-medium whitespace-nowrap">Master Contract:</span>
-          <div className="flex items-center gap-2">
-            <div
-              className={cn('w-2.5 h-2.5 md:w-3 md:h-3 rounded-full', getMasterContractLedColor())}
+    <div className="flex flex-col gap-2.5 md:gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+        <h1 className="sd-display text-[1.75rem] leading-none font-bold md:text-[2rem]">
+          Dashboard
+        </h1>
+        <Link
+          to="/master-contract"
+          className="-my-1.5 inline-flex min-h-12 items-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          title={masterContract.message}
+        >
+          <span
+            className={cn(
+              'flex h-8 items-center gap-1.5 rounded-full border px-3 text-[0.8125rem] font-semibold',
+              contract.tone
+            )}
+          >
+            <ContractIcon
+              aria-hidden="true"
+              className={cn('size-4 shrink-0', spinning && 'animate-spin')}
             />
-            <span
-              className={cn('text-xs md:text-sm', getMasterContractTextColor())}
-              title={masterContract.message}
+            {contract.label}
+            {masterContract.status === 'success' && masterContract.total_symbols ? (
+              <span className="hidden font-medium sm:inline">
+                · {formatAmount(masterContract.total_symbols, 0)} symbols
+              </span>
+            ) : null}
+          </span>
+        </Link>
+      </div>
+
+      <IndexStrip apiKey={apiKey} />
+
+      <div className="grid items-start gap-2.5 md:gap-4 lg:grid-cols-2">
+        <div className="flex min-w-0 flex-col gap-2.5 md:gap-4">
+          {error ? (
+            <section
+              role="alert"
+              className="flex flex-col items-start gap-3 rounded-[1.125rem] border border-[color:var(--down)] bg-card px-4 py-3.5 shadow-[var(--shadow-card)]"
             >
-              {getMasterContractStatusText()}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-4 md:gap-6">
-        {/* Available Balance */}
-        <Card>
-          <CardContent className="pt-6">
-            <div className="space-y-1">
-              <p className="text-sm text-muted-foreground">Available Balance</p>
-              <p className="text-2xl font-bold text-primary">
-                {isLoading
-                  ? '...'
-                  : marginData
-                    ? formatIndianNumber(marginData.availablecash)
-                    : '0.00'}
-              </p>
-              <Badge variant="secondary" className="mt-2">
-                Cash Balance
-              </Badge>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Collateral */}
-        <Card>
-          <CardContent className="pt-6">
-            <div className="space-y-1">
-              <p className="text-sm text-muted-foreground">Collateral</p>
-              <p className="text-2xl font-bold text-violet-500 dark:text-violet-400">
-                {isLoading
-                  ? '...'
-                  : marginData
-                    ? formatIndianNumber(marginData.collateral)
-                    : '0.00'}
-              </p>
-              <Badge variant="secondary" className="mt-2">
-                Total Collateral
-              </Badge>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Unrealized P&L */}
-        <Card>
-          <CardContent className="pt-6">
-            <div className="space-y-1">
-              <p className="text-sm text-muted-foreground">Unrealized P&L</p>
-              <p
-                className={cn(
-                  'text-2xl font-bold',
-                  marginData ? getPnLColor(marginData.m2munrealized) : ''
-                )}
-              >
-                {isLoading
-                  ? '...'
-                  : marginData
-                    ? formatIndianNumber(marginData.m2munrealized)
-                    : '0.00'}
-              </p>
-              <Badge
-                variant={marginData ? getPnLBadgeVariant(marginData.m2munrealized) : 'secondary'}
-                className="mt-2"
-              >
-                Mark to Market
-              </Badge>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Realized P&L */}
-        <Card>
-          <CardContent className="pt-6">
-            <div className="space-y-1">
-              <p className="text-sm text-muted-foreground">Realized P&L</p>
-              <p
-                className={cn(
-                  'text-2xl font-bold',
-                  marginData ? getPnLColor(marginData.m2mrealized) : ''
-                )}
-              >
-                {isLoading
-                  ? '...'
-                  : marginData
-                    ? formatIndianNumber(marginData.m2mrealized)
-                    : '0.00'}
-              </p>
-              <Badge
-                variant={marginData ? getPnLBadgeVariant(marginData.m2mrealized) : 'secondary'}
-                className="mt-2"
-              >
-                Booked P&L
-              </Badge>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Utilised Margin */}
-        <Card>
-          <CardContent className="pt-6">
-            <div className="space-y-1">
-              <p className="text-sm text-muted-foreground">Utilised Margin</p>
-              <p className="text-2xl font-bold text-cyan-500 dark:text-cyan-400">
-                {isLoading
-                  ? '...'
-                  : marginData
-                    ? formatIndianNumber(marginData.utiliseddebits)
-                    : '0.00'}
-              </p>
-              <Badge
-                variant="outline"
-                className="mt-2 border-cyan-500/50 text-cyan-600 dark:text-cyan-400"
-              >
-                Used Margin
-              </Badge>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Error Alert */}
-      {error && (
-        <Card className="border-destructive bg-destructive/5">
-          <CardContent className="pt-6">
-            <p className="text-destructive text-sm">{error}</p>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Quick Access Tools */}
-      <div>
-        <h2 className="text-xl md:text-2xl font-semibold mb-4 md:mb-6">Quick Access</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-5">
-          {quickAccessCards.map((card) => {
-            const cardClasses = cn(
-              'block rounded-lg border transition-all duration-300 hover:shadow-lg',
-              `bg-gradient-to-br ${card.gradient}`,
-              card.borderColor
-            )
-
-            const cardContent = (
-              <div className="p-4 md:p-5">
-                <div className="flex items-start gap-3 md:gap-4">
-                  <div className={cn('p-2.5 md:p-3 rounded-lg flex-shrink-0', card.iconBg)}>
-                    <card.icon className={cn('h-5 w-5 md:h-6 md:w-6', card.iconColor)} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <h3 className="font-semibold mb-1 text-base md:text-lg">{card.label}</h3>
-                    <p className="text-sm text-muted-foreground">{card.description}</p>
-                  </div>
+              <div className="flex items-start gap-2.5">
+                <AlertTriangle
+                  aria-hidden="true"
+                  className="mt-0.5 size-5 shrink-0 text-[color:var(--down)]"
+                />
+                <div className="flex flex-col gap-0.5">
+                  <h2 className="text-[0.9375rem] font-bold">
+                    Funds and P&amp;L could not be loaded
+                  </h2>
+                  <p className="text-sm text-muted-foreground">{error}</p>
                 </div>
               </div>
-            )
-
-            if (card.external) {
-              return (
-                <a
-                  key={card.href}
-                  href={card.href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={cardClasses}
-                >
-                  {cardContent}
-                </a>
-              )
-            }
-
-            return (
-              <Link key={card.href} to={card.href} className={cardClasses}>
-                {cardContent}
-              </Link>
-            )
-          })}
+              <button
+                type="button"
+                onClick={fetchFundsData}
+                className="inline-flex min-h-12 items-center rounded-[0.875rem] border border-input bg-card px-4 text-sm font-semibold outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              >
+                Try again
+              </button>
+            </section>
+          ) : (
+            <PnlCard funds={marginData} loading={isLoading && !marginData} />
+          )}
+          <HoldingsCard apiKey={apiKey} />
         </div>
+
+        <section
+          aria-labelledby="sd-quick-access"
+          className="min-w-0 rounded-[1.125rem] border bg-card px-4 pt-1 pb-1 shadow-[var(--shadow-card)]"
+        >
+          <h2 id="sd-quick-access" className="flex h-11 items-center text-[0.9375rem] font-bold">
+            Quick Access
+          </h2>
+          <ul>
+            {QUICK_ACCESS.map((item) => {
+              const Icon = item.icon
+              const inner = (
+                <>
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-[0.6875rem] bg-[color:var(--brand-tint)] text-[color:var(--brand)]">
+                    <Icon aria-hidden="true" className="size-[1.125rem]" />
+                  </span>
+                  <span className="flex min-w-0 flex-1 flex-col gap-px">
+                    <span className="text-[0.90625rem] font-semibold">{item.label}</span>
+                    <span className="text-[0.78125rem] leading-snug font-medium text-[color:var(--text-tertiary)]">
+                      {item.description}
+                    </span>
+                  </span>
+                  {'external' in item ? (
+                    <ExternalLink
+                      aria-hidden="true"
+                      className="size-4 shrink-0 text-[color:var(--text-tertiary)]"
+                    />
+                  ) : (
+                    <ChevronRight
+                      aria-hidden="true"
+                      className="size-[1.125rem] shrink-0 text-[color:var(--text-tertiary)]"
+                    />
+                  )}
+                </>
+              )
+              const row =
+                'flex min-h-14 items-center gap-3 rounded-lg py-2 outline-none hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring'
+              return (
+                <li key={item.href} className="border-t border-[color:var(--divider)]">
+                  {'external' in item ? (
+                    <a href={item.href} target="_blank" rel="noopener noreferrer" className={row}>
+                      {inner}
+                      <span className="sr-only">(opens in a new tab)</span>
+                    </a>
+                  ) : (
+                    <Link to={item.href} className={row}>
+                      {inner}
+                    </Link>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+        </section>
       </div>
     </div>
   )
