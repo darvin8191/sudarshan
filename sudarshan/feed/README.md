@@ -1,0 +1,195 @@
+# sudarshan-feed (M18.1 / M18.8 / M13.1)
+
+The **single** Upstox Market Data Feed V3 WebSocket for all of सुदर्शन / SUDARSHAN. It uses the
+read-only Analytics Token, subscribes once, and fans the ticks out on 127.0.0.1 to the other
+SUDARSHAN services (alerts, watchlists, screener, portfolio). Nothing else in SUDARSHAN opens an
+Upstox socket: the Basic plan allows 2 sockets per user and TRINETRA holds one (Plus allows 5).
+
+```
+Upstox Feed V3 (wss, 1 socket) -> sudarshan-feed -> ZMQ PUB 127.0.0.1:5581  (ticks + __health__)
+                                                 -> HTTP    127.0.0.1:5580  (/health, /snapshot, /subscribe)
+                                                 -> $STATE_DIR: snapshot.json, subscriptions.json,
+                                                                ticks/YYYY-MM-DD.jsonl.gz
+```
+
+A standalone asyncio process (not inside the OpenAlgo app, so the eventlet rules do not apply).
+It only reads one file from the OpenAlgo tree: the generated protobuf module
+`broker/upstox/streaming/MarketDataFeedV3_pb2.py`. No new dependencies: websockets, httpx,
+protobuf and pyzmq are already in `requirements-nginx.txt`.
+
+## Run
+
+On the server (once):
+
+```bash
+sudo install -m 644 sudarshan/ops/systemd/sudarshan-feed.service /etc/systemd/system/
+sudoedit /etc/sudarshan/upstox_analytics_token     # the token on one line; never echo it in a shell
+sudo chown root:sudarshan /etc/sudarshan/upstox_analytics_token && sudo chmod 640 /etc/sudarshan/upstox_analytics_token
+sudo systemctl daemon-reload && sudo systemctl enable --now sudarshan-feed
+journalctl -u sudarshan-feed -f
+```
+
+`/etc/sudarshan/nse_holidays.txt`: one `YYYY-MM-DD` per line from the NSE holiday circular,
+`#` comment lines allowed. Keep each date alone on its line: `sudarshan-deploy` matches whole
+lines. A missing file means only weekends count as closed (logged, and shown in /health).
+
+By hand from the repo root (a dev box, outside market hours):
+
+```bash
+SUDARSHAN_FEED_STATE_DIR=/tmp/feed-state SUDARSHAN_FEED_ALWAYS_ON=1 \
+SUDARSHAN_UPSTOX_TOKEN_FILE=$HOME/.upstox_token .venv/bin/python -m sudarshan.feed
+```
+
+`sudarshan-deploy` restarts only OpenAlgo. After a release that changes `sudarshan/feed/`,
+restart the feed outside market hours: `sudo systemctl restart sudarshan-feed`.
+
+## HTTP API: 127.0.0.1:5580
+
+Local clients only (bound to loopback; other peers and browser requests carrying an `Origin`
+header get 403). JSON in and out; use `127.0.0.1`, not `localhost` (which may resolve to ::1).
+
+| request | answer |
+|---|---|
+| `GET /health` | state, detail, connected_since, socket_age_s, last_message_age_s, next_retry_in_s, token_file_readable, subscribed (counts by mode), keys_without_data, reconnects, last_error (+ hint), last_disconnect, market_window, market_status, stats, recorder |
+| `GET /snapshot?keys=K1,K2` | `{"ticks": {key: tick or null}}`; URL-encode the keys (`|` is `%7C`, space `%20`) |
+| `GET /snapshot/all` | every key the service has a tick for (survives restarts and after-hours) |
+| `GET /subscriptions` | the desired set by mode |
+| `POST /subscribe` `{"mode": "ltpc", "keys": [...]}` | 200 with counts; 400 bad mode or key; 409 over an Upstox cap |
+| `POST /unsubscribe` `{"keys": [...]}` | 200 with counts |
+
+`last_error` and `last_disconnect` describe the most recent such event and stay after recovery
+(history, not current health): `state` says what is happening now, and comparing their `at` with
+`connected_since` tells whether they came before the current socket.
+
+```bash
+curl -s 127.0.0.1:5580/health | python3 -m json.tool
+curl -s '127.0.0.1:5580/snapshot?keys=NSE_INDEX%7CNifty%2050,NSE_EQ%7CINE002A01018'
+curl -s -X POST 127.0.0.1:5580/subscribe -H 'Content-Type: application/json' \
+     -d '{"mode": "full", "keys": ["NSE_EQ|INE009A01021"]}'
+```
+
+## ZMQ bus: 127.0.0.1:5581
+
+The service **binds** a PUB socket; consumers connect SUB sockets. This is SUDARSHAN's own bus,
+separate from OpenAlgo's 5555 market-data bus, where the opposite rule holds (the proxy's SUB
+binds and publishers connect). A taken port is a startup error, never a silent port change.
+
+Frames: `[topic = instrument key (utf-8), payload = compact JSON]`. Topic `__health__` carries
+the /health document every 5 s and on every state change. ZMQ subscriptions match by prefix
+(`NSE_INDEX|Nifty 50` also matches `NSE_INDEX|Nifty 500`), so compare frame 0 exactly:
+
+```python
+import json, zmq
+
+sub = zmq.Context.instance().socket(zmq.SUB)
+sub.connect("tcp://127.0.0.1:5581")
+sub.subscribe(b"NSE_INDEX|Nifty 50")
+while True:
+    topic, payload = sub.recv_multipart()
+    if topic == b"NSE_INDEX|Nifty 50":
+        tick = json.loads(payload)
+```
+
+Tick fields (present once Upstox has sent them): `key`, `ltp`, `ltt` (epoch ms), `ltq`, `cp`
+(previous close), `bid`, `bid_qty`, `ask`, `ask_qty` (best level), `ohlc` {open, high, low,
+close, vol, ts} (the 1d candle), `greeks` {delta, theta, gamma, vega, rho}, `iv`, `atp`, `vtt`
+(volume traded today), `oi`, `tbq`, `tsq`, and `ts_recv` (epoch ms, when the service received
+it). Each publish is the key's **full current state**: Upstox's initial_feed (after every
+(re)subscribe) starts a key afresh, and live packets merge into it, so a group a packet leaves
+out keeps its last value. Upstox's bare numeric fields cannot say "not sent" apart from 0, so a 0
+there keeps the previous value: a quantity that really drops to 0 (tsq at an upper circuit)
+shows its last non-zero value. Use REST quotes for circuit checks.
+
+## Behaviour
+
+- **Market window**: the socket is held only on trading days from 08:58 to 15:40 IST
+  (`SUDARSHAN_FEED_WINDOW`), closed with a close frame at the end of it.
+  `SUDARSHAN_FEED_ALWAYS_ON=1` ignores the window (tests, special sessions such as Muhurat
+  trading). The holidays file is re-read when it changes.
+- **Connect**: every attempt re-reads the token file, calls
+  `GET /v3/feed/market-data-feed/authorize` and dials the returned single-use URI.
+- **Retry policy**:
+
+  | outcome | next attempt |
+  |---|---|
+  | drop or failure | exponential with jitter: 1-2 s, 2-4 s, ... up to 150-300 s; back to the start once a socket stayed up 60 s |
+  | WebSocket upgrade refused (403/429) | as above but never sooner than 60 s, so a stale socket can expire at Upstox |
+  | authorize 401 ("token rejected") | 10 min, 30 min, then hourly; at once when the token file changes |
+  | token file missing, empty or malformed | 60 s; at once when the file changes |
+  | no data for 120 s during 09:15-15:30 | clean close and reconnect (stall watchdog) |
+
+- **Subscriptions**: `default_keys.txt` (or `SUDARSHAN_FEED_KEYS`) is the base set, one
+  `MODE KEY` per line, re-read at every start. API changes are stored as an overlay in
+  `$STATE_DIR/subscriptions.json` and survive restarts. Every key is re-sent after a reconnect,
+  in batches of 100. Caps per connection (Upstox): ltpc 5,000, full 2,000, option_greeks 3,000,
+  full_d30 50; once two modes are in use, the total may not exceed the smallest "combined"
+  figure among them (ltpc 2,000, option_greeks 2,000, full 1,500, full_d30 1,500). That reading
+  of Upstox's "combined" column is the conservative one OpenAlgo's client uses.
+- **Shutdown** (SIGTERM/SIGINT): close frame to Upstox (waits up to 5 s), final snapshot and
+  recorder flush; `TimeoutStopSec=20` leaves room for both.
+
+## Files and settings
+
+`$STATE_DIR` (`SUDARSHAN_FEED_STATE_DIR`, else systemd's `STATE_DIRECTORY`, else
+`/var/lib/sudarshan-feed`):
+
+| file | what |
+|---|---|
+| `snapshot.json` | last tick per key; written atomically every 30 s and at shutdown, loaded at start |
+| `subscriptions.json` | the API overlay on top of the keys file |
+| `ticks/YYYY-MM-DD.jsonl.gz` | every published tick (IST date), one gzip member per 3 s flush; a day stops at the size cap; old days are deleted |
+
+Replay a recording to test a consumer offline (binds its own port; use another one while the
+live service holds 5581):
+
+```bash
+.venv/bin/python -m sudarshan.feed.replay /var/lib/sudarshan-feed/ticks/2026-10-21.jsonl.gz --speed 10 --port 5591
+```
+
+| variable | default |
+|---|---|
+| `SUDARSHAN_UPSTOX_TOKEN_FILE` | `/etc/sudarshan/upstox_analytics_token` |
+| `SUDARSHAN_FEED_KEYS` | `sudarshan/feed/default_keys.txt` |
+| `SUDARSHAN_FEED_STATE_DIR` | `$STATE_DIRECTORY` or `/var/lib/sudarshan-feed` |
+| `SUDARSHAN_NSE_HOLIDAYS_FILE` | `/etc/sudarshan/nse_holidays.txt` |
+| `SUDARSHAN_FEED_ALWAYS_ON` | `0` |
+| `SUDARSHAN_FEED_WINDOW` | `08:58-15:40` (IST) |
+| `SUDARSHAN_FEED_HTTP_PORT` / `SUDARSHAN_FEED_ZMQ_PORT` | `5580` / `5581` (always 127.0.0.1) |
+| `SUDARSHAN_FEED_RECORD` | `1` |
+| `SUDARSHAN_FEED_RECORD_MAX_MB` / `SUDARSHAN_FEED_RECORD_KEEP_DAYS` | `512` / `10` |
+| `SUDARSHAN_FEED_LOG_LEVEL` | `INFO` |
+| `SUDARSHAN_UPSTOX_API_BASE` | `https://api.upstox.com` (tests point it at a local fake; https is required otherwise) |
+
+Put overrides in `/etc/sudarshan/feed.env` (root:sudarshan 640); the unit reads it if present.
+
+## Troubleshooting
+
+Logs: `journalctl -u sudarshan-feed`. One line per state change (`state connecting -> connected`),
+repeated errors at most once per 5 minutes with a "similar suppressed" count. The token and the
+authorize URI's query string (a one-time code) are never logged or shown.
+
+- **`last_error.kind = "upgrade_refused"`, HTTP 403** (log: "WebSocket upgrade refused with
+  HTTP 403 ... per-user connection limit"): Upstox counted too many sockets for the account.
+  Check who holds them: TRINETRA (one), and OpenAlgo's own WebSocket proxy, which opens a second
+  Upstox socket with the trading token whenever a page streams (M18.2). A socket left behind by
+  a crash counts until Upstox times it out; the service waits at least 60 s between such
+  attempts and connects on its own once a slot frees. On the Plus plan the limit is 5.
+- **`token_rejected`**: the Analytics Token was refused (expired, regenerated, or wrong file).
+  Put the current token in the file; the service retries within 5 s of the change.
+- **`keys_without_data.count > 0`** a minute after `connected`: those keys sent nothing. Upstox
+  ignores unknown keys silently; check them against the instrument master (a split changes an
+  ISIN). Illiquid instruments can also be quiet.
+- **Drops**: `last_disconnect` has `socket_age_s`, `code` (1006 = no close frame) and `by`.
+  Drops near 600 s with 500+ keys are the open Upstox report U9; every drop is logged with its
+  age so a pattern shows.
+- **`network` errors** such as `SSLCertVerificationError` or name resolution: the server's
+  outbound HTTPS to Upstox; the service keeps retrying with backoff.
+- **Start-up failures** (`sudarshan-feed cannot run: ...`): a port already in use, or a keys file
+  line that is not `MODE KEY` or breaks a cap. systemd retries every 10 s; fix and wait.
+
+`sudarshan/` deliberately has no `__init__.py`: the repo root carries one, and in CI the checkout
+directory is itself named `sudarshan`, so pytest would import a `sudarshan/__init__.py` as
+`sudarshan.sudarshan` and fail. As a namespace package it still runs with
+`python -m sudarshan.feed`.
+
+Tests: `uv run pytest -q sudarshan` (no network, no real token; a fake Upstox on 127.0.0.1).
