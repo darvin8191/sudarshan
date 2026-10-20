@@ -77,6 +77,7 @@ Source of truth: `frontend/src/sudarshan/theme.css`; `theme.test.ts` checks ever
 | `--warning-text` | #8A5A00 | OPEN / PENDING text; fill #E3A21A takes ink text only |
 | `--info` | #006A9D | informational |
 | `--up-cvd` / `--down-cvd` | #1C65C8 / #AC5700 | `<html data-cvd="1">` colour-blind mode |
+| `--down-cvd-tint` | #FDF1E5 | colour-blind down chips (`--down-cvd` on it 4.59:1) |
 
 Fonts (self-hosted WOFF2 via @fontsource, SIL OFL; CSP `font-src 'self'`): **Barlow** 400-700
 for all UI and body text, `tabular-nums` on the whole page (its tabular set swaps digits only);
@@ -111,14 +112,28 @@ in brand. Icon "Mor": tile #0E5A73, ring #E3A21A, glyph #FFFFFF. Numbers via
     /trading and the tools share one pooled connection per user.
   - Always keep one slot free for reconnects.
 - Feature flags default **OFF**; order-path changes ship behind a flag and pass Analyzer-mode tests.
-  - A new screen that only opens the existing order ticket (`PlaceOrderDialog`, no new order
-    code) is a new entry point, not an order-path change. It ships without a flag and needs one
-    Analyzer-mode order from that screen after deploy.
+  - A new screen that only opens the existing order ticket (`PlaceOrderDialog`) or calls the
+    page's existing order handlers (exit, exit all, cancel, cancel all, modify), with no new
+    order code, is a new entry point, not an order-path change. It ships without a flag and
+    needs one Analyzer-mode use of each action from that screen after deploy.
+  - A destructive action on a phone (exit, exit all, cancel, cancel all) asks first, sends once
+    however it is tapped, and stays "sent" until the broker's book shows it, so a second tap
+    cannot send a second order.
   - Order alerts on Telegram (M6.8) are on by default (owner's broker-app benchmark, 20 Oct
     2026).
+- Fields added to what a broker's order or position book returns are checked against every
+  reader of `/api/v1/orderbook`, `/orderstatus` and `/positionbook` before they ship (the
+  strategy module folds `/orderstatus` into its legs), get golden vectors built from the
+  broker's raw rows, and are compared with the live book on the first trading session after
+  deploy. A field that changes what a reader decides is an order-path change. Example: Upstox's
+  `filled_quantity` stays out of the order book until `/orderstatus` keeps a part fill's average
+  price (it sets 0.0 for any order that is not complete, so the engine would book an unpriced
+  fill).
 - The order ticket opens with `productPref.ticketProduct`, one rule for every screen: the
   product last picked for the segment on this phone, else Intraday (MIS) for derivatives and
-  Delivery (CNC) for cash.
+  Delivery (CNC) for cash. An order on something already held uses its product instead: Add
+  and Exit on a position use the position's product; Buy more (from one share) and Sell (the
+  whole holding) on a holding use CNC.
 - Family layer: every write namespace, admin route and bot command must return 401/403 for a viewer
   session (automated test). The family data plane runs on the read-only Analytics Token only.
 

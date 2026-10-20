@@ -16,7 +16,7 @@ One row per feature id from the (private) feature list. Status: `todo` → `part
 | M1.8 | Design tokens, the D look (`frontend/src/sudarshan/theme.css`, `theme.test.ts`) | partial | v0.2.0 | server check pending |
 | M1.9 | `color-scheme: only light`, `theme-color #FFFFFF` | partial | v0.2.0 | server check pending |
 | M1.10 | Self-hosted fonts: Barlow (tabular), Khand, Noto Sans Devanagari / Gujarati, Tiro | partial | v0.2.0 | server check pending |
-| M1.11 | Phone navigation: bottom bar Watchlist · Dashboard · Orders · Positions; Tradebook in the menu | partial | v0.3.0 | phone card layouts for the books still to do (M6.9) |
+| M1.11 | Phone navigation: bottom bar Watchlist · Dashboard · Orders · Positions; Tradebook in the menu | partial | v0.3.0 | phone cards for the books in v0.3.0 (M6.9) |
 | M1.12 | One brand accent (Mor), picker removed | partial | v0.2.0 | server check pending |
 | M1.13 | Colour-blind mode (`data-cvd`), Profile > Display switch | partial | v0.2.0 | server check pending |
 | M1.16 | About page `/about` | partial | v0.2.0 | server check pending |
@@ -36,7 +36,7 @@ One row per feature id from the (private) feature list. Status: `todo` → `part
 | M6.4 | Holdings live (as M6.3) | partial | v0.3.0 | |
 | M6.5 | PnL Tracker current MTM from the book plus ticks, each figure's source labelled | partial | v0.3.0 | |
 | M6.8 | Fill / rejection alerts: in-app toast with a soft sound (mute in Profile > Display, once across tabs) and Telegram via `sudarshan-alerts` (fills, part fills, rejections with the broker's words, cancels, stop triggers; once only; order book re-read after any pause; trading days 08:45-16:00 IST plus a special session's window; on by default, `SUDARSHAN_ORDER_ALERTS=off`) | partial | v0.3.0 | live: a real fill, part fill, rejection, cancel and trigger |
-| M6.9 | Phone card layouts for Positions, Orders, Holdings, Trades | todo | — | next |
+| M6.9 | Phone card layouts for Positions, Orders, Holdings, Trades: cards below 48rem with sheets (Exit, Add, Modify, Cancel, Buy more from one share, Sell, Chart); destructive actions ask first, send once and stay "sent" until the book shows them; pushed fills and rejection reasons on the cards; closed positions grouped; Back closes dialogs and sheets first and a reload never reopens one; priced once a frame; Upstox books carry rejection reasons and position details (fills stay out until `/orderstatus` keeps a part fill's price) | partial | v0.3.0 | live: Upstox field names; one Analyzer-mode Exit, Cancel, Add and Buy more from the cards |
 | M8.1 | Multiple watchlists on the phone, the same server-side lists as /trading (50 lists, 250 symbols) | partial | v0.3.0 | built-in presets still to do (M8.8) |
 | M8.2 | Phone Watchlist page, first on the bottom bar: tick-by-tick rows drawn once a frame, last-tick arrows, change on the previous close, symbol sheet (Buy/Sell, chart, option chain, live depth), Back closes what is open | partial | v0.3.0 | live: first frame on subscribe, wake to Real-time |
 | M8.3 | Move up/down saved to the server; the ticket's product remembered per segment on the phone (first time: Intraday for derivatives, Delivery for cash) | partial | v0.3.0 | drag, groups and extra columns still to do |

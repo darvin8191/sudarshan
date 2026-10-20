@@ -22,7 +22,9 @@ includes everything in v0.2.1, so you can skip v0.2.1.
 - **Order ticket product.** Every order ticket (watchlist and chart) opens with the product you
   last picked for that segment on this phone. Until you pick one it opens with Intraday (MIS) for
   F&O, commodity and currency, and Delivery (CNC) for shares. You can still change it in the
-  ticket for one order.
+  ticket for one order. An order on something you already hold uses its product instead: Add
+  and Exit on a position use the position's product, and Buy more and Sell on a holding use
+  Delivery (CNC).
 - **Live charts.** On the trading screen and on the new phone chart:
   - The candle moves with every tick, and a new candle opens on time by the exchange's clock,
     even if your phone's clock is wrong.
@@ -39,6 +41,24 @@ includes everything in v0.2.1, so you can skip v0.2.1.
   - Prices and P&L move with every tick. P&L starts from Upstox's own figure, so profit you
     have already booked stays in it.
   - A page you are not looking at asks Upstox nothing until you come back.
+- **Phone cards for Positions, Orders, Holdings and Trades.** On a phone each row is a card, with
+  the price and P&L always in view and no sideways scrolling. A wider screen keeps the table.
+  - Positions: total P&L at the top, with booked and open when Upstox's figures add up (a
+    position carried from an earlier day shows its total only), and Exit all. Tap a position for
+    Exit, Add, Chart and today's details. Closed positions sit below with what they booked.
+  - Orders: filter by Open, Executed, Rejected or Cancelled. A fill or rejection that Upstox
+    pushes shows on its card at once, with the filled quantity, the average price and Upstox's
+    reason. Modify and Cancel from the order, and Cancel all.
+  - Holdings: current value, invested, overall P&L and today's change. Buy more starts at one
+    share; Sell starts at the whole holding. Turning the phone keeps the ticket and what you
+    typed.
+  - Trades: each fill as a card; tap it for the chart.
+  - Exit, Exit all, Cancel and Cancel all ask first. After you confirm, the card says "Exit
+    sent" or "Cancel sent" and the button waits until Upstox's book shows it (at most 15
+    seconds), so a second tap cannot reverse a position.
+  - In Analyze mode every exit, cancel and order button says the order goes to the sandbox.
+  - The phone's Back button closes the open question or sheet first. Reopening the app never
+    brings back a question you did not just ask for.
 - **Order alerts on Telegram.**
   - You get a message for a fill, a part fill (how many of how many), a rejection with the
     broker's words, a cancellation and a stop order's trigger, once each.
@@ -71,17 +91,27 @@ includes everything in v0.2.1, so you can skip v0.2.1.
   - Until then the connection still stays open during market hours, because Telegram alerts
     keep it in use.
 - **Sound.** Tap the screen once after opening the app, so the order sound can play.
-- **Analyze-mode check.** Place one order from the watchlist sheet and one from the phone chart,
-  then cancel them, to check the two new ways into the order ticket.
+- **Analyze-mode check.** With Analyze mode on, on the phone:
+  - place one order each from the watchlist sheet, the phone chart, a position's Add and a
+    holding's Buy more, then cancel them from the Orders cards;
+  - exit one sandbox position from its card.
+
+  These are the new ways into orders.
 
 ### What is refused now
 - A screen that has taken nothing for 10 seconds while the server was free is disconnected. It
   reconnects by itself with fresh prices.
 - Prices are no longer re-read on a timer while the live feed works.
+- On the phone, a second Exit or Cancel for the same position or order while the first is on its
+  way (until Upstox's book shows it, at most 15 seconds).
 
 ### Not in this release yet
-- **Phone cards.** Positions, Orders, Holdings and Trades still use the wide table on a phone.
-  Cards like the broker apps come next.
+- **Filled quantity after a reload.** Upstox's order book, as OpenAlgo reads it, does not carry
+  the filled quantity or the average price yet; adding them first needs a change in how the
+  strategy module reads an order's status. Until then a part fill shows from Upstox's live
+  update, and after a reload a working order shows its quantity alone. A stop order shows
+  TRIGGER PENDING once Upstox's live update has said so, and OPEN after a reload until the next
+  update.
 - **Live tools.** The option tools (OI tracker, GEX, IV smile, straddle) are not live yet.
 - **Watchlist extras.** Built-in preset lists (NIFTY 50 and others), drag to reorder, and groups.
 - **Product in the ticket.** A product changed inside the order ticket is not remembered; only
@@ -89,6 +119,8 @@ includes everything in v0.2.1, so you can skip v0.2.1.
 - **Not yet seen on the live Upstox feed.** The first trading session after this update is the
   live check for:
   - the new tick fields;
+  - Upstox's rejection reasons and position details (booked, open, today's buys and sells,
+    carried quantity) in its books;
   - the price-only switch when depth closes;
   - the 09:15 candle;
   - part fills on Telegram;
