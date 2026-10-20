@@ -1,14 +1,61 @@
-import { ArrowLeft, Eye, EyeOff, Info, Loader2, LogIn, ShieldCheck } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Eye, EyeOff, Fingerprint, Loader2, ShieldCheck } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
 import { BrandLockup } from '@/sudarshan/BrandLockup'
 import { showToast } from '@/utils/toast'
+
+// SUDARSHAN: the D login. The brand's own colours rather than the mode's
+// accent, because who is signing in has not chosen Live or Analyze yet.
+const FIELD =
+  'h-[3.25rem] rounded-xl bg-card px-3.5 text-[1.0625rem] font-medium shadow-none md:text-[1.0625rem] focus-visible:border-[color:var(--brand)] disabled:opacity-60'
+const LABEL = 'text-[0.84375rem] font-semibold text-muted-foreground'
+const PRIMARY =
+  'inline-flex h-14 items-center justify-center gap-2.5 rounded-[0.875rem] bg-[color:var(--brand)] px-5 text-white transition-colors outline-none hover:bg-[color:var(--brand-hover)] focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-60 sd-display text-[1.4375rem] font-bold tracking-[0.04em]'
+
+/** The faint rings behind the lockup: the icon's ring, echoed. Decoration only. */
+function Rings() {
+  return (
+    <svg
+      aria-hidden="true"
+      focusable="false"
+      viewBox="0 0 420 420"
+      className="pointer-events-none absolute -right-40 -top-36 size-[26.25rem]"
+    >
+      <circle
+        cx="210"
+        cy="210"
+        r="196"
+        fill="none"
+        stroke="var(--gold)"
+        strokeOpacity="0.28"
+        strokeWidth="1.5"
+      />
+      <circle
+        cx="210"
+        cy="210"
+        r="160"
+        fill="none"
+        stroke="var(--brand)"
+        strokeOpacity="0.11"
+        strokeWidth="2"
+      />
+      <circle
+        cx="210"
+        cy="210"
+        r="124"
+        fill="none"
+        stroke="var(--brand)"
+        strokeOpacity="0.07"
+        strokeWidth="1.5"
+      />
+    </svg>
+  )
+}
 
 export default function Login() {
   const navigate = useNavigate()
@@ -199,186 +246,185 @@ export default function Login() {
   // Show loading while checking setup
   if (isCheckingSetup) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      <div className="flex min-h-dvh items-center justify-center bg-background">
+        <Loader2 aria-hidden="true" className="size-8 animate-spin text-[color:var(--brand)]" />
+        <span className="sr-only">Loading</span>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center py-8 px-4">
-      <div className="container max-w-6xl">
-        <div className="flex flex-col lg:flex-row items-center justify-between gap-8 lg:gap-16">
-          {/* Login Form - First on mobile */}
-          <Card className="w-full max-w-md order-1 lg:order-2 shadow-xl">
-            <CardHeader className="text-center">
-              <div className="flex justify-center mb-4">
-                <BrandLockup variant="stacked" />
+    <div className="relative flex min-h-dvh flex-col overflow-hidden bg-background">
+      <Rings />
+
+      <div className="relative mx-auto flex w-full max-w-md flex-1 flex-col px-6 pt-[clamp(2.5rem,12vh,6.25rem)] pb-7 md:justify-center md:gap-10 md:pt-12">
+        {/* The name in both scripts is the page's heading (owner rule 2). */}
+        <h1 className="m-0">
+          <BrandLockup variant="stacked" size="lg" align="start" />
+        </h1>
+
+        <div className="mt-auto rounded-[1.25rem] border bg-card p-5 shadow-[var(--shadow-raised)] md:mt-0">
+          {step === 'password' ? (
+            <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="username" className={LABEL}>
+                  Username
+                </Label>
+                <Input
+                  id="username"
+                  type="text"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  required
+                  disabled={isLoading}
+                  autoComplete="username"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  className={FIELD}
+                />
               </div>
-              <CardTitle className="text-2xl">Welcome Back</CardTitle>
-              <CardDescription>Sign in to your account</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {step === 'password' ? (
-                <form onSubmit={handleSubmit} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="username">Username</Label>
-                    <Input
-                      id="username"
-                      type="text"
-                      placeholder="Enter your username"
-                      value={username}
-                      onChange={(e) => setUsername(e.target.value)}
-                      required
-                      disabled={isLoading}
-                      autoComplete="username"
-                    />
-                  </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="password">Password</Label>
-                    <div className="relative">
-                      <Input
-                        id="password"
-                        type={showPassword ? 'text' : 'password'}
-                        placeholder="Enter your password"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        required
-                        disabled={isLoading}
-                        autoComplete="current-password"
-                        className="pr-10"
-                      />
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
-                        onClick={() => setShowPassword(!showPassword)}
-                        aria-label={showPassword ? 'Hide password' : 'Show password'}
-                      >
-                        {showPassword ? (
-                          <EyeOff className="h-4 w-4 text-muted-foreground" />
-                        ) : (
-                          <Eye className="h-4 w-4 text-muted-foreground" />
-                        )}
-                      </Button>
-                    </div>
-                    <div className="text-right">
-                      <Link
-                        to="/reset-password"
-                        className="text-sm text-muted-foreground hover:text-primary"
-                      >
-                        Forgot password?
-                      </Link>
-                    </div>
-                  </div>
-
-                  {error && (
-                    <Alert variant="destructive">
-                      <AlertDescription>{error}</AlertDescription>
-                    </Alert>
-                  )}
-
-                  <Button type="submit" className="w-full" disabled={isLoading}>
-                    {isLoading ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Signing in...
-                      </>
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-end justify-between gap-3">
+                  <Label htmlFor="password" className={LABEL}>
+                    Password
+                  </Label>
+                  <Link
+                    to="/reset-password"
+                    className="-my-3 inline-flex min-h-12 items-center rounded-lg px-1 text-[0.84375rem] font-semibold text-[color:var(--brand)] outline-none hover:text-[color:var(--brand-hover)] hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    Forgot password?
+                  </Link>
+                </div>
+                <div className="relative flex">
+                  <Input
+                    id="password"
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    disabled={isLoading}
+                    autoComplete="current-password"
+                    className={cn(FIELD, 'pr-14')}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    aria-pressed={showPassword}
+                    className="absolute top-0 right-0 flex h-[3.25rem] w-12 items-center justify-center rounded-r-xl text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    {showPassword ? (
+                      <EyeOff aria-hidden="true" className="size-[1.375rem]" />
                     ) : (
-                      <>
-                        <LogIn className="mr-2 h-4 w-4" />
-                        Sign in
-                      </>
+                      <Eye aria-hidden="true" className="size-[1.375rem]" />
                     )}
-                  </Button>
-                </form>
-              ) : (
-                <form onSubmit={handleTotpSubmit} className="space-y-4">
-                  <Alert>
-                    <ShieldCheck className="h-4 w-4" />
-                    <AlertTitle>Two-factor authentication</AlertTitle>
-                    <AlertDescription>
-                      Enter the 6-digit code from your authenticator app to complete sign-in.
-                    </AlertDescription>
-                  </Alert>
+                  </button>
+                </div>
+              </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="totp_code">Authentication code</Label>
-                    <Input
-                      id="totp_code"
-                      inputMode="numeric"
-                      autoComplete="one-time-code"
-                      pattern="[0-9]{6}"
-                      maxLength={6}
-                      placeholder="123456"
-                      value={totpCode}
-                      onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                      disabled={isLoading}
-                      autoFocus
-                      required
-                      className="font-mono text-center text-lg tracking-widest"
-                    />
-                  </div>
-
-                  {error && (
-                    <Alert variant="destructive">
-                      <AlertDescription>{error}</AlertDescription>
-                    </Alert>
-                  )}
-
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={handleBackToPassword}
-                      disabled={isLoading}
-                    >
-                      <ArrowLeft className="mr-1 h-4 w-4" />
-                      Back
-                    </Button>
-                    <Button
-                      type="submit"
-                      className="flex-1"
-                      disabled={isLoading || totpCode.length !== 6}
-                    >
-                      {isLoading ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Verifying...
-                        </>
-                      ) : (
-                        'Verify code'
-                      )}
-                    </Button>
-                  </div>
-                </form>
+              {error && (
+                <Alert variant="destructive">
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
               )}
-            </CardContent>
-          </Card>
 
-          {/* Welcome Content - Second on mobile */}
-          <div className="flex-1 max-w-xl text-center lg:text-left order-2 lg:order-1">
-            <h1 className="text-4xl lg:text-5xl font-bold mb-6">
-              Welcome to{' '}
-              <span lang="sa" className="sd-wordmark text-primary">
-                सुदर्शन
-              </span>
-            </h1>
-            <p className="text-lg lg:text-xl mb-8 text-muted-foreground">
-              Sign in to your account to access your trading dashboard and manage your algorithmic
-              trading strategies.
-            </p>
+              <button type="submit" disabled={isLoading} className={cn(PRIMARY, 'mt-0.5')}>
+                {isLoading ? (
+                  <>
+                    <Loader2 aria-hidden="true" className="size-5 animate-spin" />
+                    Logging in
+                  </>
+                ) : (
+                  <>
+                    Login
+                    <ArrowRight
+                      aria-hidden="true"
+                      className="size-5 text-[color:var(--gold)]"
+                      strokeWidth={2.4}
+                    />
+                  </>
+                )}
+              </button>
 
-            <Alert className="mb-6">
-              <Info className="h-4 w-4" />
-              <AlertTitle>First Time User?</AlertTitle>
-              <AlertDescription>
-                Contact your administrator to set up your account.
-              </AlertDescription>
-            </Alert>
-          </div>
+              <p className="flex items-center gap-2.5 px-0.5 pt-0.5 text-[0.84375rem] leading-snug font-medium text-muted-foreground">
+                <Fingerprint
+                  aria-hidden="true"
+                  className="size-[1.375rem] shrink-0 text-[color:var(--brand)]"
+                  strokeWidth={1.7}
+                />
+                Saved password? Chrome fills it after your fingerprint.
+              </p>
+            </form>
+          ) : (
+            <form onSubmit={handleTotpSubmit} className="flex flex-col gap-4">
+              <div className="flex items-start gap-3">
+                <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-[color:var(--brand-tint)] text-[color:var(--brand)]">
+                  <ShieldCheck aria-hidden="true" className="size-5" />
+                </span>
+                <div className="flex flex-col gap-0.5">
+                  <h2 className="text-base font-bold">Two-factor authentication</h2>
+                  <p className="text-sm leading-snug text-muted-foreground">
+                    Enter the 6-digit code from your authenticator app to complete sign-in.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="totp_code" className={LABEL}>
+                  Authentication code
+                </Label>
+                <Input
+                  id="totp_code"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  pattern="[0-9]{6}"
+                  maxLength={6}
+                  value={totpCode}
+                  onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  disabled={isLoading}
+                  autoFocus
+                  required
+                  className={cn(
+                    FIELD,
+                    'text-center text-[1.375rem] font-semibold tracking-[0.3em]'
+                  )}
+                />
+              </div>
+
+              {error && (
+                <Alert variant="destructive">
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              )}
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={handleBackToPassword}
+                  disabled={isLoading}
+                  className="inline-flex h-14 items-center justify-center gap-1.5 rounded-[0.875rem] border border-input bg-card px-4 text-base font-semibold text-foreground outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-60"
+                >
+                  <ArrowLeft aria-hidden="true" className="size-5" />
+                  Back
+                </button>
+                <button
+                  type="submit"
+                  disabled={isLoading || totpCode.length !== 6}
+                  className={cn(PRIMARY, 'flex-1')}
+                >
+                  {isLoading ? (
+                    <>
+                      <Loader2 aria-hidden="true" className="size-5 animate-spin" />
+                      Verifying
+                    </>
+                  ) : (
+                    'Verify code'
+                  )}
+                </button>
+              </div>
+            </form>
+          )}
         </div>
       </div>
     </div>
