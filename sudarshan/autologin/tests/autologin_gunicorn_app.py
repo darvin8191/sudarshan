@@ -7,6 +7,8 @@ autologin_app.stub_outside_world, and two test-only routes are added (login, CSR
 
 from __future__ import annotations
 
+import os
+
 import dotenv
 
 dotenv.load_dotenv = lambda *args, **kwargs: False  # never read an operator's .env
@@ -47,6 +49,11 @@ auth_db.Base.metadata.create_all(auth_db.engine)
 user_db.Base.metadata.create_all(user_db.engine)
 if user_db.find_user_by_username() is None:
     add_owner()
+# Yesterday's token, so that the preflight really asks the fake Upstox about it from inside the
+# worker (it answers 401: ended), as it does every morning.
+stored = os.environ.get("AUTOLOGIN_TEST_STORED_TOKEN")
+if stored and auth_db.Auth.query.filter_by(name=OWNER).first() is None:
+    auth_db.upsert_auth(OWNER, stored, "upstox")
 auth_db.db_session.remove()
 
 app = make_app()

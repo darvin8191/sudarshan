@@ -17,7 +17,7 @@ from pathlib import Path
 
 import httpx
 import pytest
-from autologin_fakes import FAKE_PIN, FAKE_TOTP_SECRET, FakeUpstox
+from autologin_fakes import FAKE_PIN, FAKE_TOTP_SECRET, OLD_TOKEN, FakeUpstox
 
 from sudarshan.autologin.worker import SECRET_PIN, SECRET_TOTP
 from sudarshan.vault import Vault
@@ -61,6 +61,7 @@ def test_test_now_round_trip_under_gunicorn(
         "SUDARSHAN_OPENALGO_URL": url,
         "SUDARSHAN_UPSTOX_API_BASE": upstox.api_base,
         "SUDARSHAN_OPENALGO_ENV_FILE": str(openalgo_env_file),
+        "AUTOLOGIN_TEST_STORED_TOKEN": OLD_TOKEN,
         "PYTHONPATH": os.pathsep.join([str(REPO), str(TESTS_DIR)]),
     }
     command = [
@@ -99,8 +100,11 @@ def test_test_now_round_trip_under_gunicorn(
             assert status["connected_today"] is True
             assert status["last_run"]["outcome"] == "ok"
         assert len(upstox.requests) == 1
+        # The stored token was checked with Upstox from inside the worker, while the request
+        # that started the child was still waiting for it.
+        assert upstox.checks == ["/v3/user/get-funds-and-margin"]
         logs = child_log.read_text() + (tmp_path / "gunicorn.log").read_text()
-        for secret in (FAKE_TOTP_SECRET, FAKE_PIN):
+        for secret in (FAKE_TOTP_SECRET, FAKE_PIN, OLD_TOKEN):
             assert secret not in logs
     finally:
         server.terminate()
