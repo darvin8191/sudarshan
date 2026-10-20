@@ -117,11 +117,15 @@ export function AboutView({ build }: { build: BuildInfo }) {
             <dt className="font-medium">Release</dt>
             <dd className="text-muted-foreground">{build.release ?? 'None'}</dd>
             <dt className="font-medium">Commit</dt>
-            <dd className="font-mono text-muted-foreground">
+            <dd className="text-muted-foreground">
               {build.commit && commitLink ? (
-                <OutLink href={commitLink}>{build.commit.slice(0, 7)}</OutLink>
+                <OutLink href={commitLink}>
+                  <span className="font-mono">{build.commit.slice(0, 7)}</span>
+                </OutLink>
+              ) : build.commit ? (
+                <span className="font-mono">{build.commit.slice(0, 7)}</span>
               ) : (
-                (build.commit?.slice(0, 7) ?? 'Not recorded')
+                'Not recorded'
               )}
             </dd>
             <dt className="font-medium">Built on</dt>
