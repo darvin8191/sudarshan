@@ -74,6 +74,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/playground': 'Playground',
   '/historify': 'Historify',
   '/historify/charts': 'Historify Charts',
+  '/chart': 'Chart', // SUDARSHAN M4.15
 }
 
 /** Dynamic route patterns for parameterized routes */
@@ -88,6 +89,7 @@ const DYNAMIC_TITLES: Array<{ pattern: RegExp; title: string }> = [
   { pattern: /^\/flow\/editor\/[^/]+$/, title: 'Flow Editor' },
   { pattern: /^\/historify\/charts\/[^/]+$/, title: 'Historify Charts' },
   { pattern: /^\/websocket\/test\/\d+$/, title: 'WebSocket Test' },
+  { pattern: /^\/chart\/[^/]+\/[^/]+$/, title: 'Chart' }, // SUDARSHAN M4.15
 ]
 
 function getPageTitle(pathname: string): string {

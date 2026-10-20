@@ -62,6 +62,7 @@ const WebSocketOrder = lazy(() => import('@/pages/WebSocketOrder'))
 const ChartTest = lazy(() => import('@/pages/ChartTest'))
 const Playground = lazy(() => import('@/pages/Playground'))
 const Trading = lazy(() => import('@/pages/Trading'))
+const PhoneChart = lazy(() => import('@/sudarshan/chart/ChartPage')) // SUDARSHAN M4.15
 const Historify = lazy(() => import('@/pages/Historify'))
 const HistorifyCharts = lazy(() => import('@/pages/HistorifyCharts'))
 
@@ -313,6 +314,9 @@ function App() {
               <Route element={<FullWidthLayout />}>
                 <Route path="/playground" element={<Playground />} />
                 <Route path="/trading" element={<Trading />} />
+                {/* SUDARSHAN M4.15: the phone chart; a bare /chart opens the last instrument. */}
+                <Route path="/chart" element={<PhoneChart />} />
+                <Route path="/chart/:exchange/:symbol" element={<PhoneChart />} />
                 {/* The agent is an application surface, not a document: the
                     thread scrolls inside a fixed viewport with the composer
                     pinned under it, and a conversation sidebar sits beside it.

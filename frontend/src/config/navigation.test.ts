@@ -83,6 +83,11 @@ describe('Navigation Config', () => {
       const entry = profileMenuItems.find((item) => item.href === '/autologin')
       expect(entry?.label).toBe('Auto login')
     })
+
+    it('lists the SUDARSHAN phone chart (M4.15)', () => {
+      const entry = profileMenuItems.find((item) => item.href === '/chart')
+      expect(entry?.label).toBe('Chart')
+    })
   })
 
   describe('isActiveRoute', () => {
