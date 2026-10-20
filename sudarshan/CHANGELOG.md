@@ -5,6 +5,19 @@ publish. The owner publishes each release on GitHub. The server's deploy timer t
 outside 09:00-15:45 IST on trading days, keeps backups, and rolls back if the app does not come up
 healthy.
 
+## v0.2.1 (20 Oct 2026)
+
+### What changes for you
+- **Auto login takes the Upstox QR code.** Upstox shows TOTP setup only as a QR code. On the Auto
+  login page you can now paste the whole text your phone camera copies from that QR code (it
+  starts with otpauth://), or the key if Upstox shows one. Only the key inside is saved.
+- **Upstox's own steps.** The help card on that page gives the steps from Upstox's help pages,
+  in English and Gujarati.
+
+### What is refused now
+- QR code text for a non-standard code (not 6 digits every 30 seconds) is refused, because the
+  server could not produce the right codes from it.
+
 ## v0.2.0 (20 Oct 2026)
 
 ### What changes for you
