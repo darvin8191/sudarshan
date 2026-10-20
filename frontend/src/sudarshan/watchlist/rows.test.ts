@@ -7,7 +7,18 @@
 import { expect, describe as group, it } from 'vitest'
 import type { QuotesData } from '@/api/trading'
 import type { SymbolData } from '@/lib/MarketDataManager'
-import { chainOf, describe, formatChange, rowView, type Snapshot, tickDirection } from './rows'
+import {
+  chainOf,
+  describe,
+  formatChange,
+  priceDecimals,
+  QUIET_RESYNC_MS,
+  rowStale,
+  rowView,
+  type Snapshot,
+  statusLine,
+  tickDirection,
+} from './rows'
 
 const T0 = 1_760_000_000_000
 
@@ -180,5 +191,108 @@ group('formatChange', () => {
     expect(formatChange(12.4)).toBe('+12.40')
     expect(formatChange(-1234.5)).toBe('−1,234.50')
     expect(formatChange(0.001)).toBe('0.00')
+  })
+
+  it("takes the exchange's decimals", () => {
+    expect(formatChange(0.0125, 4)).toBe('+0.0125')
+    expect(formatChange(-0.0025, 4)).toBe('−0.0025')
+  })
+})
+
+group('priceDecimals', () => {
+  it('gives the currency segments four decimals and everything else two', () => {
+    expect(priceDecimals('CDS')).toBe(4)
+    expect(priceDecimals('bcd')).toBe(4)
+    expect(priceDecimals('NSE')).toBe(2)
+    expect(priceDecimals('NFO')).toBe(2)
+    expect(priceDecimals('MCX')).toBe(2)
+    expect(priceDecimals('NSE_INDEX')).toBe(2)
+  })
+})
+
+group('rowStale', () => {
+  const old = { ltp: 812.4, at: T0 }
+  const later = T0 + 11_000
+
+  it('greys a row only while its market is open and the socket is down', () => {
+    expect(rowStale(old, later, true, false)).toBe(true)
+    // The socket is up: a quiet row has simply not traded.
+    expect(rowStale(old, later, true, true)).toBe(false)
+    // Closed or not known: nothing is due.
+    expect(rowStale(old, later, false, false)).toBe(false)
+    expect(rowStale(old, later, null, false)).toBe(false)
+  })
+
+  it('leaves a fresh level, and a row with no level, alone', () => {
+    expect(rowStale(old, T0 + 9_000, true, false)).toBe(false)
+    expect(rowStale({ ltp: null, at: null }, later, true, false)).toBe(false)
+  })
+
+  it('re-reads quiet rows after a minute', () => {
+    expect(QUIET_RESYNC_MS).toBe(60_000)
+  })
+})
+
+group('statusLine', () => {
+  const base = { now: T0 + 20_000, marketOpen: true, fallback: false }
+
+  it('says Real-time only while ticks arrive on an open socket', () => {
+    expect(
+      statusLine({ ...base, lastTickAt: T0 + 19_000, lastUpdateAt: T0 + 19_000, connected: true })
+    ).toEqual({ kind: 'live' })
+  })
+
+  it('gives a quiet list its age, not Stale, while the socket is up', () => {
+    expect(statusLine({ ...base, lastTickAt: T0, lastUpdateAt: T0, connected: true })).toEqual({
+      kind: 'delayed',
+      at: T0,
+      stale: false,
+    })
+    // Only the snapshot so far: its age, never Real-time.
+    expect(statusLine({ ...base, lastTickAt: null, lastUpdateAt: T0, connected: true }).kind).toBe(
+      'delayed'
+    )
+  })
+
+  it('says Reconnecting, stale once old, while the socket is down', () => {
+    expect(statusLine({ ...base, lastTickAt: T0, lastUpdateAt: T0, connected: false })).toEqual({
+      kind: 'connecting',
+      at: T0,
+      stale: true,
+      again: true,
+    })
+  })
+
+  it('says Reconnecting, not Connecting, while the REST fallback moves the figures', () => {
+    expect(
+      statusLine({
+        ...base,
+        lastTickAt: null,
+        lastUpdateAt: T0 + 19_000,
+        connected: false,
+        fallback: true,
+      })
+    ).toEqual({ kind: 'connecting', at: T0 + 19_000, stale: false, again: true })
+    expect(
+      statusLine({
+        ...base,
+        lastTickAt: null,
+        lastUpdateAt: null,
+        connected: false,
+        fallback: true,
+      })
+    ).toMatchObject({ kind: 'connecting', again: false })
+  })
+
+  it('says the market is closed when it is', () => {
+    expect(
+      statusLine({
+        ...base,
+        marketOpen: false,
+        lastTickAt: null,
+        lastUpdateAt: T0,
+        connected: true,
+      })
+    ).toEqual({ kind: 'closed' })
   })
 })

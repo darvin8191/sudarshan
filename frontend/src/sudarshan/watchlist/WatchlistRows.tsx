@@ -5,7 +5,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import { directionOf, formatPercent, formatPrice } from '@/sudarshan/dashboard/format'
 import { TREND_TEXT, TrendArrow } from '@/sudarshan/dashboard/Trend'
-import { describe, formatChange, type TickDirection } from './rows'
+import { describe, formatChange, priceDecimals, type TickDirection } from './rows'
 import type { LiveRow } from './useLiveRows'
 
 /** Grey for a level that has stopped arriving; its sign and arrow stay. */
@@ -52,7 +52,8 @@ function Name({ symbol, exchange }: { symbol: string; exchange: string }) {
  * The level and its change. The level carries the last tick's direction, in
  * the up or down colour with a solid arrow; the line under it is the change on
  * the previous close, signed. No flash on a tick. Stale: both grey, the sign
- * and the arrow kept, a clock beside them.
+ * and the arrow kept, a clock beside them. Prices take the exchange's decimals
+ * (`priceDecimals`: four on the currency segments).
  */
 export function Figures({
   ltp,
@@ -61,8 +62,9 @@ export function Figures({
   direction,
   stale,
   size = 'row',
-}: FigureValues & { size?: 'row' | 'sheet' }) {
-  const day = change === null ? 'flat' : directionOf(change)
+  decimals = 2,
+}: FigureValues & { size?: 'row' | 'sheet'; decimals?: number }) {
+  const day = change === null ? 'flat' : directionOf(change, decimals)
   return (
     <span className="flex shrink-0 flex-col items-end gap-0.5 text-right">
       <span
@@ -77,7 +79,7 @@ export function Figures({
           <TrendArrow direction={direction} className={size === 'row' ? 'size-2.5' : 'size-3.5'} />
         )}
         {ltp !== null ? (
-          formatPrice(ltp)
+          formatPrice(ltp, decimals)
         ) : (
           <>
             <span aria-hidden="true">&mdash;</span>
@@ -93,7 +95,7 @@ export function Figures({
         )}
       >
         {change !== null && changePercent !== null && (
-          <span>{`${formatChange(change)} (${formatPercent(changePercent)})`}</span>
+          <span>{`${formatChange(change, decimals)} (${formatPercent(changePercent)})`}</span>
         )}
         {stale && (
           <>
@@ -128,7 +130,7 @@ const PriceRow = memo(function PriceRow({
         className="flex min-h-14 w-full items-center gap-3 px-4 py-2 text-left outline-none active:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       >
         <Name symbol={symbol} exchange={exchange} />
-        <Figures {...figures} />
+        <Figures {...figures} decimals={priceDecimals(exchange)} />
       </button>
     </li>
   )

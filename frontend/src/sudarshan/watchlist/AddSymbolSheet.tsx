@@ -8,6 +8,7 @@ import { showToast } from '@/utils/toast'
 import { type SearchResult, searchSymbols } from './api'
 import { BottomSheet } from './BottomSheet'
 import { describe } from './rows'
+import { MAX_ITEMS } from './useWatchlists'
 
 /** One letter matches half the exchange; two is where a search starts to mean something. */
 export const SEARCH_MIN_LENGTH = 2
@@ -32,7 +33,8 @@ function useSettled(value: string, ms: number): string {
  * the master contract the /trading terminal searches too), several words
  * allowed ("NIFTY 25000 CE"). The sheet stays open, so several symbols can go
  * in one after another; one already in the list says so instead of adding it
- * twice.
+ * twice, and a list that reaches the server's cap stops taking more and says
+ * why.
  */
 export function AddSymbolSheet({
   open,
@@ -40,6 +42,7 @@ export function AddSymbolSheet({
   apiKey,
   listName,
   held,
+  full,
   onAdd,
 }: {
   open: boolean
@@ -48,6 +51,8 @@ export function AddSymbolSheet({
   listName: string
   /** EXCHANGE:SYMBOL of everything already in the list. */
   held: ReadonlySet<string>
+  /** The list holds `MAX_ITEMS` already. */
+  full: boolean
   onAdd: (result: SearchResult) => Promise<void>
 }) {
   const [text, setText] = useState('')
@@ -117,6 +122,12 @@ export function AddSymbolSheet({
           )}
         </label>
 
+        {full && (
+          <output className="block rounded-[0.875rem] bg-[color:var(--gold-tint)] px-3 py-2 text-sm font-semibold text-[color:var(--gold-ink)]">
+            {listName} holds {MAX_ITEMS} symbols, the most a list can. Remove one to add another.
+          </output>
+        )}
+
         <div aria-live="polite" className="sr-only">
           {searching && results.isSuccess ? `${rows.length} results` : ''}
         </div>
@@ -143,7 +154,7 @@ export function AddSymbolSheet({
                 <li key={key}>
                   <button
                     type="button"
-                    disabled={inList || adding !== null}
+                    disabled={inList || full || adding !== null}
                     onClick={() => void add(result)}
                     aria-label={
                       inList
@@ -166,8 +177,10 @@ export function AddSymbolSheet({
                       className={cn(
                         'flex h-9 shrink-0 items-center gap-1 rounded-full px-3 text-xs font-bold',
                         inList
-                          ? 'bg-[color:var(--live-tint)] text-[color:var(--live-ink)]'
-                          : 'border border-primary text-primary'
+                          ? 'bg-[color:var(--primary-tint)] text-primary'
+                          : full
+                            ? 'border border-input text-muted-foreground'
+                            : 'border border-primary text-primary'
                       )}
                     >
                       {busy ? (

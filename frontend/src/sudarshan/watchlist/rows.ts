@@ -12,13 +12,19 @@
  *   until then, and for a frame without it, the snapshot gives it. A frame
  *   that leaves a field out never clears it: the market-data manager keeps the
  *   last value of every field, so nothing here falls back to zero.
- * - **The direction of the last tick** is worked out from the level shown,
- *   one render to the next (`tickDirection`).
+ * - **The direction of the last tick** is worked out tick by tick where the
+ *   ticks arrive (`useFrameLines`, with `tickDirection`).
  */
 import type { QuotesData } from '@/api/trading'
 import type { MarketData, SymbolData } from '@/lib/MarketDataManager'
 import { directionOf, formatAmount } from '@/sudarshan/dashboard/format'
-import { type IndexView, indexView } from '@/sudarshan/dashboard/live'
+import {
+  type FeedLine,
+  feedLine,
+  type IndexView,
+  indexView,
+  STALE_MS,
+} from '@/sudarshan/dashboard/live'
 
 /** A tick's fields as this file reads them: upstream's, plus the previous close (M11.3). */
 type Tick = MarketData & { prev_close?: number }
@@ -60,9 +66,76 @@ export function rowView(snapshot: Snapshot | undefined, data: SymbolData | undef
 }
 
 /** +12.40 or −3.05: a change in the instrument's own price, signed, no currency mark. */
-export function formatChange(value: number): string {
-  const direction = directionOf(value)
-  return `${direction === 'up' ? '+' : direction === 'down' ? '−' : ''}${formatAmount(value)}`
+export function formatChange(value: number, decimals = 2): string {
+  const direction = directionOf(value, decimals)
+  return `${direction === 'up' ? '+' : direction === 'down' ? '−' : ''}${formatAmount(value, decimals)}`
+}
+
+/**
+ * How many decimals an exchange's prices are shown with: four on the currency
+ * segments, whose tick is 0.0025, two everywhere else.
+ */
+export function priceDecimals(exchange: string): number {
+  const venue = exchange.toUpperCase()
+  return venue === 'CDS' || venue === 'BCD' ? 4 : 2
+}
+
+/**
+ * Whether a row is stale: its market is open, the market-data socket is down,
+ * and its level is more than `STALE_MS` old. While the socket is up a quiet
+ * row is not stale: it has not traded, and the list re-reads such rows over
+ * REST after a minute (`QUIET_RESYNC_MS`), so a row that never ticked is not
+ * greyed under a "Real-time" line.
+ */
+export function rowStale(
+  view: { ltp: number | null; at: number | null },
+  now: number,
+  marketOpen: boolean | null,
+  connected: boolean
+): boolean {
+  if (marketOpen !== true || connected || view.ltp === null) return false
+  return view.at === null || now - view.at > STALE_MS
+}
+
+/** A row with no tick for this long, its market open and the socket up, is read again over REST. */
+export const QUIET_RESYNC_MS = 60_000
+
+/**
+ * The line over a set of instruments, or over one in its sheet, by the
+ * socket: "Real-time" while their ticks come; "Connecting" or "Reconnecting"
+ * with the figures' age while the socket is down, stale once ticks are due and
+ * old; and only the age while the socket is up but nothing has traded, which
+ * is not staleness (the dashboard's "no ticks due"). Upstream's REST fallback
+ * moves figures while the socket is down; those are not ticks, so the line
+ * says "Reconnecting" with their age even before the first tick of the visit.
+ */
+export function statusLine({
+  now,
+  marketOpen,
+  lastTickAt,
+  lastUpdateAt,
+  connected,
+  fallback,
+}: {
+  now: number
+  marketOpen: boolean | null
+  lastTickAt: number | null
+  lastUpdateAt: number | null
+  connected: boolean
+  fallback: boolean
+}): FeedLine {
+  const line = feedLine({
+    now,
+    marketOpen,
+    lastTickAt,
+    lastUpdateAt,
+    ticksDue: !connected,
+    connected,
+  })
+  if (line.kind === 'connecting' && !line.again && fallback && line.at !== null) {
+    return { ...line, again: true }
+  }
+  return line
 }
 
 export type TickDirection = 'up' | 'down'

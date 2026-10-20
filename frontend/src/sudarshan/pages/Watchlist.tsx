@@ -4,15 +4,14 @@
 // tick by tick on the tab's shared market-data socket, and a tap opens the
 // instrument's sheet: Buy and Sell, chart, option chain and depth.
 import { Check, KeyRound, Plus, RefreshCw } from 'lucide-react'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import type { WatchlistItem } from '@/api/watchlist'
 import { PlaceOrderDialog } from '@/components/trading/PlaceOrderDialog'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
 import { useMarketOpen } from '@/sudarshan/dashboard/hooks'
-import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
-import { anyOpen, keyOf } from '@/sudarshan/dashboard/live'
+import { keyOf } from '@/sudarshan/dashboard/live'
 import {
   CALENDAR_LOADING,
   type MarketCalendar,
@@ -20,13 +19,12 @@ import {
   useIstDay,
 } from '@/sudarshan/dashboard/MarketCalendar'
 import { AddSymbolSheet } from '@/sudarshan/watchlist/AddSymbolSheet'
-import type { Contract } from '@/sudarshan/watchlist/api'
 import { DeleteDialog, NameDialog } from '@/sudarshan/watchlist/ListDialogs'
 import { ListTabs, PANEL_ID, tabId } from '@/sudarshan/watchlist/ListTabs'
-import { SymbolSheet } from '@/sudarshan/watchlist/SymbolSheet'
-import { useLiveRows } from '@/sudarshan/watchlist/useLiveRows'
-import { useWatchlists } from '@/sudarshan/watchlist/useWatchlists'
-import { WatchlistRows } from '@/sudarshan/watchlist/WatchlistRows'
+import { LiveList } from '@/sudarshan/watchlist/LiveList'
+import type { OrderRequest } from '@/sudarshan/watchlist/SymbolSheet'
+import { useOverlay } from '@/sudarshan/watchlist/useOverlay'
+import { MAX_ITEMS, useWatchlists } from '@/sudarshan/watchlist/useWatchlists'
 
 /** The list that was open last on this device: a convenience, so it lives in this browser only. */
 export const OPEN_LIST_KEY = 'sudarshan-watchlist-open'
@@ -48,20 +46,13 @@ function saveOpenList(id: number): void {
   }
 }
 
-/** The exchanges whose opening and closing read the snapshot again, the same for every list. */
-const MAIN_EXCHANGES = ['NSE', 'BSE', 'NFO', 'BFO', 'MCX', 'CDS']
-
 const NO_ITEMS: WatchlistItem[] = []
-
-interface OrderIntent {
-  symbol: string
-  exchange: string
-  action: 'BUY' | 'SELL'
-  contract: Contract
-}
 
 const HEADER_BUTTON =
   'inline-flex min-h-12 items-center gap-1.5 rounded-[0.875rem] px-4 text-[0.9375rem] font-semibold outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50'
+
+/** Why Add is off for a full list, in a trader's words. */
+export const LIST_FULL = `This list holds ${MAX_ITEMS} symbols, the most a list can. Remove one to add another.`
 
 export default function Watchlist() {
   const apiKey = useAuthStore((state) => state.apiKey)
@@ -73,21 +64,28 @@ export default function Watchlist() {
   const [chosen, setChosen] = useState<number | null>(readOpenList)
   const active = watchlists.lists.find((list) => list.id === chosen) ?? watchlists.lists[0] ?? null
   const items = active?.items ?? NO_ITEMS
-
+  const full = items.length >= MAX_ITEMS
   const [editing, setEditing] = useState(false)
-  const [openItem, setOpenItem] = useState<number | null>(null)
-  const [adding, setAdding] = useState(false)
-  const [naming, setNaming] = useState<'create' | 'rename' | null>(null)
-  const [deleting, setDeleting] = useState(false)
-  const [order, setOrder] = useState<OrderIntent | null>(null)
 
-  const live = useLiveRows({
-    items,
-    apiKey,
-    marketOpen: isOpen,
-    anyMarketOpen: anyOpen(MAIN_EXCHANGES.map((exchange) => isOpen(exchange))),
-  })
-  const sheetRow = live.rows.find((row) => row.item.id === openItem) ?? null
+  // What is open over the list lives in the address, so Back closes it.
+  const { overlay, open, swap, close } = useOverlay()
+  const openItemId = overlay?.kind === 'item' ? overlay.itemId : null
+  const order = overlay?.kind === 'order' ? overlay.order : null
+
+  // An overlay that cannot be shown (an instrument no longer in the list, a
+  // ticket without its order, a list action with no list) is closed once the
+  // lists are known, rather than left open over nothing.
+  const settled = !watchlists.loading
+  const orphan =
+    overlay !== null &&
+    settled &&
+    ((overlay.kind === 'item' && !items.some((item) => item.id === overlay.itemId)) ||
+      (overlay.kind === 'order' && overlay.order === null) ||
+      (overlay.kind !== 'item' && overlay.kind !== 'order' && overlay.kind !== 'new' && !active))
+  useEffect(() => {
+    if (orphan) close()
+  }, [orphan, close])
+
   const held = useMemo(
     () => new Set(items.map((item) => keyOf(item.symbol, item.exchange))),
     [items]
@@ -97,20 +95,46 @@ export default function Watchlist() {
     setChosen(listId)
     saveOpenList(listId)
     setEditing(false)
-    setOpenItem(null)
   }, [])
 
-  const removeItem = (item: WatchlistItem) => {
-    if (!active) return
-    if (openItem === item.id) setOpenItem(null)
-    void watchlists.removeItem(active.id, item)
-  }
-
-  const noPrices =
-    apiKey !== null &&
-    live.snapshot === 'error' &&
-    live.rows.length > 0 &&
-    live.rows.every((row) => row.view.ltp === null)
+  const activeId = active?.id ?? null
+  const { move, removeItem: removeFromList } = watchlists
+  const openSheet = useCallback((itemId: number) => open({ kind: 'item', itemId }), [open])
+  const moveItem = useCallback(
+    (item: WatchlistItem, by: -1 | 1) => {
+      if (activeId !== null) void move(activeId, item.id, by)
+    },
+    [activeId, move]
+  )
+  const removeItem = useCallback(
+    (item: WatchlistItem) => {
+      if (activeId === null) return
+      if (openItemId === item.id) close()
+      void removeFromList(activeId, item)
+    },
+    [activeId, openItemId, close, removeFromList]
+  )
+  const startAdding = useMemo(
+    () => (apiKey === null || full ? undefined : () => open({ kind: 'add' })),
+    [apiKey, full, open]
+  )
+  const placeOrder = useCallback(
+    (request: OrderRequest) => swap({ kind: 'order', order: request }),
+    [swap]
+  )
+  const deleting = overlay?.kind === 'delete'
+  const activeName = active?.name
+  const doomed = useMemo(
+    () => (deleting && activeName !== undefined ? { name: activeName, count: items.length } : null),
+    [deleting, activeName, items.length]
+  )
+  const panel = useMemo(
+    () =>
+      active
+        ? { id: PANEL_ID, role: 'tabpanel' as const, 'aria-labelledby': tabId(active.id) }
+        : { 'aria-label': 'Watchlist' },
+    [active]
+  )
 
   return (
     <div className="flex flex-col gap-2">
@@ -132,8 +156,9 @@ export default function Watchlist() {
         ) : (
           <button
             type="button"
-            disabled={!active || apiKey === null}
-            onClick={() => setAdding(true)}
+            disabled={!active || apiKey === null || full}
+            aria-describedby={full ? 'sd-watchlist-full' : undefined}
+            onClick={() => open({ kind: 'add' })}
             className={cn(HEADER_BUTTON, 'bg-primary text-primary-foreground hover:bg-primary/90')}
           >
             <Plus aria-hidden="true" className="size-5" />
@@ -141,6 +166,12 @@ export default function Watchlist() {
           </button>
         )}
       </div>
+
+      {full && !editing && (
+        <p id="sd-watchlist-full" className="px-1 text-xs font-medium text-muted-foreground">
+          {LIST_FULL}
+        </p>
+      )}
 
       {apiKey === null && (
         <div className="flex flex-col items-start gap-2 rounded-[1.125rem] border border-[color:var(--gold)] bg-[color:var(--gold-tint)] px-4 py-3">
@@ -180,81 +211,52 @@ export default function Watchlist() {
               activeId={active.id}
               editing={editing}
               onSelect={select}
-              onCreate={() => setNaming('create')}
-              onRename={() => setNaming('rename')}
+              onCreate={() => open({ kind: 'new' })}
+              onRename={() => open({ kind: 'rename' })}
               onEdit={() => setEditing((on) => !on)}
-              onDelete={() => setDeleting(true)}
+              onDelete={() => open({ kind: 'delete' })}
             />
           )}
 
-          {live.line && <LiveLine line={live.line} now={live.now} className="flex min-h-5 px-1" />}
-
-          {noPrices && (
-            <p className="flex flex-wrap items-center gap-x-2 px-1 text-xs font-medium text-muted-foreground">
-              Prices are not available right now.
-              <button
-                type="button"
-                onClick={live.retry}
-                className="min-h-12 font-semibold text-[color:var(--brand)] underline underline-offset-2"
-              >
-                Try again
-              </button>
-            </p>
-          )}
-
-          <section
-            id={active ? PANEL_ID : undefined}
-            role={active ? 'tabpanel' : undefined}
-            aria-labelledby={active ? tabId(active.id) : undefined}
-            aria-label={active ? undefined : 'Watchlist'}
-            className="overflow-hidden rounded-[1.125rem] border bg-card shadow-[var(--shadow-card)]"
-          >
-            <WatchlistRows
-              rows={live.rows}
-              loading={watchlists.loading}
-              editing={editing}
-              onOpen={setOpenItem}
-              onMove={(item, by) => active && void watchlists.move(active.id, item.id, by)}
-              onRemove={removeItem}
-              onAdd={apiKey === null ? undefined : () => setAdding(true)}
-            />
-          </section>
+          <LiveList
+            items={items}
+            apiKey={apiKey}
+            isOpen={isOpen}
+            loading={watchlists.loading}
+            editing={editing}
+            listName={active?.name ?? 'the list'}
+            openItemId={openItemId}
+            panel={panel}
+            onOpen={openSheet}
+            onMove={moveItem}
+            onRemove={removeItem}
+            onAdd={startAdding}
+            onCloseSheet={close}
+            onOrder={placeOrder}
+          />
         </>
       )}
 
-      <SymbolSheet
-        row={sheetRow}
-        listName={active?.name ?? 'the list'}
-        apiKey={apiKey}
-        line={live.line}
-        marketOpen={sheetRow ? isOpen(sheetRow.item.exchange) : null}
-        feedTickAt={live.feedTickAt}
-        now={live.now}
-        onClose={() => setOpenItem(null)}
-        onOrder={(item, action, contract) => {
-          setOpenItem(null)
-          setOrder({ symbol: item.symbol, exchange: item.exchange, action, contract })
-        }}
-        onRemove={removeItem}
-      />
-
       <AddSymbolSheet
-        open={adding && active !== null}
-        onOpenChange={setAdding}
+        open={overlay?.kind === 'add' && active !== null}
+        onOpenChange={(next) => {
+          if (!next) close()
+        }}
         apiKey={apiKey}
         listName={active?.name ?? 'the list'}
         held={held}
+        full={full}
         onAdd={async (result) => {
           if (active) await watchlists.addItem(active.id, result.symbol, result.exchange)
         }}
       />
 
       <NameDialog
-        mode={naming}
+        mode={overlay?.kind === 'new' ? 'create' : overlay?.kind === 'rename' ? 'rename' : null}
         current={active?.name ?? ''}
-        onClose={() => setNaming(null)}
+        onClose={close}
         onSubmit={async (name) => {
-          if (naming === 'rename' && active) {
+          if (overlay?.kind === 'rename' && active) {
             await watchlists.rename(active.id, name)
           } else {
             const created = await watchlists.create(name)
@@ -264,8 +266,8 @@ export default function Watchlist() {
       />
 
       <DeleteDialog
-        list={deleting && active ? { name: active.name, count: active.items.length } : null}
-        onClose={() => setDeleting(false)}
+        list={doomed}
+        onClose={close}
         onConfirm={async () => {
           if (!active) return
           const next = await watchlists.remove(active.id)
@@ -275,14 +277,15 @@ export default function Watchlist() {
 
       <PlaceOrderDialog
         open={order !== null}
-        onOpenChange={(open) => {
-          if (!open) setOrder(null)
+        onOpenChange={(next) => {
+          if (!next) close()
         }}
-        symbol={order?.symbol ?? ''}
-        exchange={order?.exchange ?? ''}
+        symbol={order?.item.symbol ?? ''}
+        exchange={order?.item.exchange ?? ''}
         action={order?.action ?? 'BUY'}
         lotSize={order?.contract.lotSize ?? 1}
         tickSize={order?.contract.tickSize ?? 0.05}
+        product={order?.product}
         strategy="Watchlist"
       />
     </div>
