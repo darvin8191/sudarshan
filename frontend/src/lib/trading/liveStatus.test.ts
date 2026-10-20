@@ -6,6 +6,7 @@ import {
   LiveStatusTracker,
   liveDetail,
   needsMarker,
+  opensAtWords,
   staleAfterMs,
 } from './liveStatus'
 
@@ -110,6 +111,25 @@ describe('LiveStatusTracker', () => {
     tracker.destroy()
   })
 
+  it('passes on the age of each quote while delayed, so the marker never ages past an answer', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(ist(2026, 10, 20, 10, 0))
+    const { tracker, seen } = track('NFO')
+    tracker.setCalendar(nse())
+    tracker.setTransport('live')
+    tracker.noteTick()
+    vi.advanceTimersByTime(1_000)
+    tracker.setTransport('connecting')
+    vi.advanceTimersByTime(4_000)
+    tracker.setTransport('polling')
+    tracker.noteTick(undefined, false)
+    expect(seen.at(-1)?.line).toEqual({ kind: 'polling', at: Date.now(), stale: false })
+    vi.advanceTimersByTime(4_000)
+    tracker.noteTick(undefined, false)
+    expect(seen.at(-1)?.line).toEqual({ kind: 'polling', at: Date.now(), stale: false })
+    tracker.destroy()
+  })
+
   it('turns stale when the quotes stop answering too', () => {
     vi.useFakeTimers()
     vi.setSystemTime(ist(2026, 10, 20, 10, 0))
@@ -189,6 +209,15 @@ describe('the sentence behind a marker', () => {
     expect(
       liveDetail(status({ kind: 'connecting', at: now - 6_000, stale: false, again: true }), now)
     ).toBe('The real-time feed dropped and is reconnecting. Prices shown are from 09:59:54.')
+  })
+
+  it('says when a closed market opens: a time later today, a day and time otherwise', () => {
+    const at = (h: number, mi: number, day = 20) => ist(2026, 10, day, h, mi) / 1000
+    expect(opensAtWords(at(9, 15), ist(2026, 10, 20, 8, 30))).toBe('at 09:15')
+    expect(opensAtWords(at(9, 15, 22), ist(2026, 10, 20, 16, 0))).toBe('Thu 09:15')
+    expect(liveDetail({ ...status({ kind: 'closed' }), opensAt: at(9, 15, 22) }, now)).toBe(
+      'Opens Thu 09:15. Prices are from the last session.'
+    )
   })
 
   it('never says Live for the feed, nor a protocol word, nor a retired one', () => {

@@ -123,18 +123,23 @@ export function liveDetail(status: LiveStatus, now = Date.now()): string {
       return line.stale
         ? `No price update since ${clockSeconds.format(new Date(line.at))}. The last price shown may be out of date.`
         : `Prices shown are from ${clockSeconds.format(new Date(line.at))}.`
-    case 'closed': {
-      if (status.opensAt === null) return 'Prices are from the last session.'
-      const opens = new Date(status.opensAt * 1000)
-      const sameDay =
-        new Date(now).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' }) ===
-        opens.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })
-      const at = sameDay
-        ? `at ${clock.format(opens)}`
-        : dayAndClock.format(opens).replace(', ', ' ')
-      return `Opens ${at}. Prices are from the last session.`
-    }
+    case 'closed':
+      return status.opensAt === null
+        ? 'Prices are from the last session.'
+        : `Opens ${opensAtWords(status.opensAt, now)}. Prices are from the last session.`
   }
+}
+
+/**
+ * When a closed market opens next, after the word "Opens": "at 09:15" later
+ * the same day, "Thu 09:15" on another. India time, whatever the phone's zone.
+ */
+export function opensAtWords(opensAt: number, now = Date.now()): string {
+  const opens = new Date(opensAt * 1000)
+  const sameDay =
+    new Date(now).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' }) ===
+    opens.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })
+  return sameDay ? `at ${clock.format(opens)}` : dayAndClock.format(opens).replace(', ', ' ')
 }
 
 /** A calendar the tracker can ask about the market's phase. */
@@ -150,6 +155,9 @@ export interface LiveStatusTrackerOptions {
   setTimer?(run: () => void, ms: number): unknown
   clearTimer?(handle: unknown): void
 }
+
+/** When the figures behind a line were last updated, for the lines that say so. */
+const ageOf = (line: FeedLine): number | null => ('at' in line ? line.at : null)
 
 /** Longest single wait, so a sleeping machine is caught up within this. */
 const MAX_WAIT_MS = 30 * 60_000
@@ -258,7 +266,14 @@ export class LiveStatusTracker {
   private update(): void {
     if (this.destroyed) return
     const status = this.status()
-    if (!this.shown || !sameFeedState(this.shown, status.line)) {
+    // A new state, or new figures behind the same one: a quote answering
+    // every few seconds while the stream is down moves the age a marker shows
+    // ("Delayed · updated 2s ago") without changing what it says.
+    if (
+      !this.shown ||
+      !sameFeedState(this.shown, status.line) ||
+      ageOf(this.shown) !== ageOf(status.line)
+    ) {
       this.shown = status.line
       this.opts.onChange(status)
     }
