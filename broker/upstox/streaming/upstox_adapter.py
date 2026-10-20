@@ -6,6 +6,7 @@ Uses sync websocket-client (same as Angel/Dhan) to avoid asyncio event loop
 conflicts with eventlet in gunicorn+eventlet deployments.
 """
 import json
+import math  # SUDARSHAN: no NaN or Infinity in a published tick (M11.3)
 import threading
 from typing import Any
 
@@ -80,11 +81,10 @@ class UpstoxWebSocketAdapter(BaseBrokerWebSocketAdapter):
         # carry forward a non-zero LTP into validation downstream.
         self._last_ltpc: dict[str, dict[str, Any]] = {}
 
-        # SUDARSHAN (M11.3): the same carry-forward for the day's candle (the 1d
-        # `marketOHLC` entry), so a packet without `marketOHLC` cannot publish an
-        # open, high, low or volume of 0. Both caches are dropped per key when its
-        # feed is released, and wholesale on disconnect().
-        self._last_daily_ohlc: dict[str, dict[str, Any]] = {}
+        # SUDARSHAN (M11.3): the same carry-forward for the day's candle and volume
+        # (sudarshan_payload.DayCarry). Both are dropped per key when its feed is
+        # released, and wholesale on disconnect().
+        self._day_carry = sudarshan_payload.DayCarry()
 
         # One-shot flag so a deeper-than-5 depth request reports its downgrade once
         # rather than on every symbol (see _get_upstox_mode for why it downgrades).
@@ -375,7 +375,7 @@ class UpstoxWebSocketAdapter(BaseBrokerWebSocketAdapter):
                     # SUDARSHAN (M11.3): the key left Upstox, so its carry-forward
                     # goes too; a later subscribe starts from fresh values.
                     self._last_ltpc.pop(instrument_key, None)
-                    self._last_daily_ohlc.pop(instrument_key, None)
+                    self._day_carry.forget(instrument_key)
                 self.logger.info(f"Unsubscribed from {symbol} on {exchange}")
                 return self._create_success_response(f"Unsubscribed from {symbol} on {exchange}")
             else:
@@ -451,7 +451,7 @@ class UpstoxWebSocketAdapter(BaseBrokerWebSocketAdapter):
                 self.subscriptions.clear()
                 self.subscription_queue.clear()
                 self._last_ltpc.clear()
-                self._last_daily_ohlc.clear()  # SUDARSHAN (M11.3)
+                self._day_carry.clear()  # SUDARSHAN (M11.3)
 
             self.cleanup_zmq()
             self.logger.info("Disconnected from Upstox WebSocket")
@@ -738,7 +738,7 @@ class UpstoxWebSocketAdapter(BaseBrokerWebSocketAdapter):
 
                 if market_data:
                     self.logger.debug(f"Publishing {symbol}.{exchange} mode={mode} topic={topic} ltp={market_data.get('ltp', 'N/A')}")
-                    if mode == 3:  # Depth mode
+                    if mode == 3 and "buy" in market_data:  # SUDARSHAN: no empty book (M11.3)
                         depth_data = market_data.copy()
                         depth_levels = {
                             "buy": depth_data.pop("buy", []),
@@ -782,33 +782,26 @@ class UpstoxWebSocketAdapter(BaseBrokerWebSocketAdapter):
                 self._last_ltpc[instrument_key] = ltpc_in_tick
 
         # SUDARSHAN (M11.3): every mode reads one LTPC, this tick's or else the last
-        # one seen. That is the old carry-forward made uniform: a frame that only
-        # updates `marketLevel` still publishes the trade fields (ltp, ltq, ltt, cp)
-        # instead of zeros. Only trade fields are carried; a cached `iep` never is,
-        # because an indicative auction price is valid only for the tick that
-        # carried it and a stale one would look like a live auction.
-        ltpc = ltpc_in_tick or self._last_ltpc.get(instrument_key) or {}
-
-        # SUDARSHAN (M11.3): the day's candle by the same rule (see __init__).
-        daily_in_tick = sudarshan_payload.daily_candle(feed_data)
-        if daily_in_tick:
-            with self.lock:
-                self._last_daily_ohlc[instrument_key] = daily_in_tick
-        daily = daily_in_tick or self._last_daily_ohlc.get(instrument_key) or {}
+        # one seen without its quantity and iep (see sudarshan_payload.carried_ltpc),
+        # and the day's candle and volume as last known.
+        ltpc = ltpc_in_tick or sudarshan_payload.carried_ltpc(self._last_ltpc.get(instrument_key))
+        with self.lock:
+            day = self._day_carry.day(instrument_key, sudarshan_payload.full_feed(feed_data))
+        if mode in (2, 3) and "fullFeed" not in feed_data:
+            # An ltpc frame reached a Quote or Depth subscriber: publish what the
+            # LTPC knows, with no book, and leave the rest to the last tick.
+            if not ltpc:
+                return {}
+            fields = sudarshan_payload.ltpc_only_fields(ltpc)
+            return {**base_data, **fields, "timestamp": current_ts}
 
         # Per-mode extraction.
         if mode == 1:
             result = self._extract_ltp_data(feed_data, base_data, ltpc, current_ts)
         elif mode == 2:
-            result = self._extract_quote_data(feed_data, base_data, current_ts, ltpc, daily)
-            if not result and ltpc:
-                # No fullFeed wrapper (an ltpc frame reached a Quote subscriber):
-                # publish what the LTPC knows and leave the rest to the last tick.
-                result = base_data.copy()
-                result.update(sudarshan_payload.ltpc_only_fields(ltpc))
-                result["timestamp"] = current_ts
+            result = self._extract_quote_data(feed_data, base_data, current_ts, ltpc, day)
         elif mode == 3:
-            depth_data = self._extract_depth_data(feed_data, current_ts, ltpc, daily)
+            depth_data = self._extract_depth_data(feed_data, current_ts, ltpc, day)
             depth_data.update(base_data)
             result = depth_data
         else:
@@ -875,10 +868,10 @@ class UpstoxWebSocketAdapter(BaseBrokerWebSocketAdapter):
         iep = self._read_optional_double(ff.get("iep"))
         if iep is None:
             iep = self._read_optional_double((ff.get("ltpc") or {}).get("iep"))
-        if iep is not None:
+        if iep is not None and math.isfinite(iep):  # SUDARSHAN: no NaN (M11.3)
             cas["indicative_equilibrium_price"] = iep
 
-        if "rp" in ff:
+        if "rp" in ff and math.isfinite(float(ff["rp"])):  # SUDARSHAN: no NaN (M11.3)
             cas["reference_price"] = float(ff["rp"])
         if "ieq" in ff:
             cas["indicative_equilibrium_quantity"] = int(ff["ieq"])
@@ -916,21 +909,13 @@ class UpstoxWebSocketAdapter(BaseBrokerWebSocketAdapter):
             ltpc = tick_ltpc
 
         if ltpc:
-            market_data.update(
-                {
-                    "ltp": float(ltpc.get("ltp", 0)),
-                    "ltq": int(ltpc.get("ltq", 0)),
-                    "ltt": int(ltpc.get("ltt", 0)),
-                    "cp": float(ltpc.get("cp", 0)),
-                }
-            )
-            market_data.update(sudarshan_payload.ltpc_fields(ltpc))
+            market_data.update(sudarshan_payload.ltp_fields(ltpc))
 
         # LTPC carries the wrapper-typed iep; the other CAS fields exist only on
         # the full feed, so ltpc mode can gain this one and nothing else. Read from
         # this tick's own LTPC only: a carried-forward one never reports an auction.
         iep = self._read_optional_double(tick_ltpc.get("iep"))
-        if iep is not None:
+        if iep is not None and math.isfinite(iep):  # SUDARSHAN: no NaN (M11.3)
             market_data["indicative_equilibrium_price"] = iep
 
         if current_ts is not None:
@@ -944,7 +929,7 @@ class UpstoxWebSocketAdapter(BaseBrokerWebSocketAdapter):
         base_data: dict[str, Any],
         current_ts: int,
         ltpc: dict[str, Any] | None = None,
-        daily: dict[str, Any] | None = None,
+        day: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Extract QUOTE data from feed."""
         if "fullFeed" not in feed_data:
@@ -961,7 +946,7 @@ class UpstoxWebSocketAdapter(BaseBrokerWebSocketAdapter):
         # the same volume, OHLC and OI. `timestamp` is the frame's tick time; it
         # used to be the 1d candle's `ts`, the start of the trading day, which
         # made every tick look hours old.
-        market_data.update(sudarshan_payload.quote_fields(ff, ltpc, daily))
+        market_data.update(sudarshan_payload.quote_fields(ff, ltpc, day or {}))
         market_data["timestamp"] = current_ts
 
         # Additive CAS/pre-open extras — an empty merge outside an auction window.
@@ -974,7 +959,7 @@ class UpstoxWebSocketAdapter(BaseBrokerWebSocketAdapter):
         feed_data: dict[str, Any],
         current_ts: int,
         ltpc: dict[str, Any] | None = None,
-        daily: dict[str, Any] | None = None,
+        day: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Extract depth data from feed.
 
@@ -985,10 +970,7 @@ class UpstoxWebSocketAdapter(BaseBrokerWebSocketAdapter):
         (`ltp`, `depth.buy/sell`, `timestamp`) is unchanged.
         """
         if "fullFeed" not in feed_data:
-            depth_data = {"buy": [], "sell": [], "timestamp": current_ts, "ltp": 0}
-            if ltpc:
-                depth_data.update(sudarshan_payload.ltpc_only_fields(ltpc))
-            return depth_data
+            return {"buy": [], "sell": [], "timestamp": current_ts, "ltp": 0}
 
         full_feed = feed_data["fullFeed"]
         market_ff = full_feed.get("marketFF") or full_feed.get("indexFF", {})
@@ -1003,12 +985,12 @@ class UpstoxWebSocketAdapter(BaseBrokerWebSocketAdapter):
         sell_levels = []
 
         for level in bid_ask:
-            bid_price = float(level.get("bidP", 0))
+            bid_price = sudarshan_payload.finite(level.get("bidP"))  # SUDARSHAN: no NaN
             bid_qty = int(float(level.get("bidQ", 0)))
             if bid_price > 0:
                 buy_levels.append({"price": bid_price, "quantity": bid_qty, "orders": 0})
 
-            ask_price = float(level.get("askP", 0))
+            ask_price = sudarshan_payload.finite(level.get("askP"))  # SUDARSHAN: no NaN
             ask_qty = int(float(level.get("askQ", 0)))
             if ask_price > 0:
                 sell_levels.append({"price": ask_price, "quantity": ask_qty, "orders": 0})
@@ -1026,7 +1008,7 @@ class UpstoxWebSocketAdapter(BaseBrokerWebSocketAdapter):
             "ltp": ltp,
         }
         # SUDARSHAN (M11.3): every Quote field beside the levels (see docstring).
-        depth_data.update(sudarshan_payload.quote_fields(market_ff, ltpc, daily))
+        depth_data.update(sudarshan_payload.quote_fields(market_ff, ltpc, day or {}))
 
         # Additive CAS/pre-open extras — an empty merge outside an auction window.
         # They sit beside `depth` in the published payload, not inside it, since

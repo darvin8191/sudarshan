@@ -187,9 +187,7 @@ BANKNIFTY_QUOTE = _base(BANKNIFTY) | {
     "ltp": 56012.35,
     "last_trade_quantity": 0,
     "volume": 0,
-    "average_price": 0.0,
-    "total_buy_quantity": 0,
-    "total_sell_quantity": 0,
+    # An index has no average price or book totals: left out, not sent as 0.
     "prev_close": 55800.0,
     "last_trade_time": LTT,
     "timestamp": TS,
@@ -397,16 +395,15 @@ def test_ltpc_only_tick(make_adapter) -> None:
 
 
 def test_ltpc_only_tick_to_quote_and_depth_publishes_what_the_ltpc_knows(make_adapter) -> None:
-    """No OHLC, volume or book keys: a merging consumer keeps its last values, not zeros."""
+    """No OHLC, volume or book keys, not even an empty `depth`: a merging consumer keeps
+    its last values instead of zeros and an empty book."""
     adapter = make_adapter()
     _hold(adapter, SBIN, 2)
     _hold(adapter, SBIN, 3)
 
     assert _feed(adapter, ltpc_only_frame()) == {
         "NSE_SBIN_QUOTE": _canon(SBIN_FROM_LTPC),
-        "NSE_SBIN_DEPTH": _canon(
-            SBIN_FROM_LTPC | {"depth": {"buy": [], "sell": [], "timestamp": TS}}
-        ),
+        "NSE_SBIN_DEPTH": _canon(SBIN_FROM_LTPC),
     }
 
 
@@ -438,7 +435,8 @@ def test_close_is_the_previous_close_and_zero_when_upstox_sent_none(make_adapter
 
 
 def test_a_book_only_frame_carries_the_last_trade_fields_and_day_candle(make_adapter) -> None:
-    """A packet without ltpc or marketOHLC must not publish an ltp, open or close of 0."""
+    """A packet without ltpc or marketOHLC must not publish an ltp, open or close of 0. It
+    reports no trade, so its traded quantity is 0, not the last trade's again."""
     adapter = make_adapter()
     _hold(adapter, RELIANCE, 3)
     _feed(adapter, equity_full_frame())
@@ -450,7 +448,9 @@ def test_a_book_only_frame_carries_the_last_trade_fields_and_day_candle(make_ada
     market.atp, market.vtt, market.tbq, market.tsq = 1419.35, 100250, 250000.0, 310000.0
 
     assert _feed(adapter, book_only) == {
-        "NSE_RELIANCE_DEPTH": _canon(RELIANCE_QUOTE | {"depth": _levels(moved) | {"timestamp": TS}})
+        "NSE_RELIANCE_DEPTH": _canon(
+            RELIANCE_QUOTE | {"last_trade_quantity": 0, "depth": _levels(moved) | {"timestamp": TS}}
+        )
     }
 
 
@@ -483,6 +483,118 @@ def test_an_equity_tick_has_no_oi_iv_or_greeks(make_adapter) -> None:
     ((_topic, quote),) = adapter.published
 
     assert not {"oi", "iv", "greeks"} & set(quote)
+
+
+def _book_only(instrument, rows) -> pb.FeedResponse:
+    """A full-feed frame that only moves the book: no LTPC, no candle, no volume."""
+    response = _response()
+    _book(response.feeds[instrument[2]].fullFeed.marketFF.marketLevel, rows)
+    return response
+
+
+def test_a_frame_without_a_trade_publishes_no_traded_quantity(make_adapter) -> None:
+    """The last trade's price and time are carried to a book-only frame; its quantity is
+    not, or a consumer adding up traded quantity counts that trade again on every frame."""
+    adapter = make_adapter()
+    _hold(adapter, OPTION, 1)
+    _hold(adapter, OPTION, 2)  # the key is streamed in `full`
+    _feed(adapter, option_full_frame())
+
+    _feed(adapter, _book_only(OPTION, OPTION_BOOK))
+    payloads = dict(adapter.published)
+    ltp = payloads["NFO_NIFTY27OCT2625100CE_LTP"]
+    quote = payloads["NFO_NIFTY27OCT2625100CE_QUOTE"]
+
+    assert (ltp["ltp"], ltp["ltt"], ltp["last_trade_time"], ltp["cp"]) == (101.5, LTT, LTT, 95.25)
+    assert ltp["ltq"] == 0
+    assert (quote["ltp"], quote["last_trade_quantity"]) == (101.5, 0)
+
+    _feed(adapter, option_full_frame())  # the next trade reports its own quantity
+    assert dict(adapter.published)["NFO_NIFTY27OCT2625100CE_LTP"]["ltq"] == 75
+
+
+def test_values_a_frame_does_not_carry_are_left_out_or_carried(make_adapter) -> None:
+    """Average price and the book totals are left out, not sent as 0, so a merging consumer
+    keeps its last values. Volume and the day's candle are carried from the last frame."""
+    adapter = make_adapter()
+    _hold(adapter, OPTION, 2)
+    _feed(adapter, option_full_frame())
+
+    _feed(adapter, _book_only(OPTION, OPTION_BOOK))
+    ((_topic, quote),) = adapter.published
+
+    assert not {"average_price", "total_buy_quantity", "total_sell_quantity"} & set(quote)
+    assert quote["volume"] == 123450
+    assert (quote["open"], quote["high"], quote["low"]) == (90.0, 110.0, 88.0)
+
+
+def test_volume_never_falls_back_below_the_last_vtt(make_adapter) -> None:
+    """A frame with the day candle but no vtt keeps the last vtt. The candle's own volume,
+    which Upstox counts differently, used to take over and step volume backwards."""
+    adapter = make_adapter()
+    _hold(adapter, RELIANCE, 2)
+    _feed(adapter, equity_full_frame())  # vtt 100250; the 1d candle says 100000
+
+    later = _response()
+    market = later.feeds[RELIANCE[2]].fullFeed.marketFF
+    _ltpc(market.ltpc, 1424.5, 1418.0, ltq=25)
+    _candle(market.marketOHLC, "1d", 1415.0, 1432.5, 1408.0, 1424.5, 100000, DAY_START)
+    _feed(adapter, later)
+    ((_topic, quote),) = adapter.published
+
+    assert quote["volume"] == 100250
+
+
+def test_only_the_day_candle_gives_open_high_and_low(make_adapter) -> None:
+    """A frame whose marketOHLC holds only the minute candle keeps the day's values. The
+    minute bar's high and low are never shown, or carried, as the day's."""
+    adapter = make_adapter()
+    _hold(adapter, OPTION, 2)
+    minute_only = _response()
+    market = minute_only.feeds[OPTION[2]].fullFeed.marketFF
+    _ltpc(market.ltpc, 101.6, 95.25, ltq=75)
+    _candle(market.marketOHLC, "I1", 101.0, 101.7, 100.9, 101.6, 50, MINUTE)
+
+    _feed(adapter, minute_only)  # nothing is known about the day yet
+    ((_topic, first),) = adapter.published
+    assert (first["open"], first["high"], first["low"], first["volume"]) == (0.0, 0.0, 0.0, 0)
+
+    _feed(adapter, option_full_frame())  # the day candle arrives
+    _feed(adapter, minute_only)
+    ((_topic, later),) = adapter.published
+    assert (later["open"], later["high"], later["low"]) == (90.0, 110.0, 88.0)
+
+
+def test_no_published_number_is_nan_or_infinity(make_adapter) -> None:
+    """A price, average price, book level or auction price Upstox could not compute is sent
+    as 0, left out or skipped. JSON has no NaN, and a browser drops the whole tick."""
+    adapter = make_adapter()
+    _hold(adapter, RELIANCE, 1)
+    _hold(adapter, RELIANCE, 3)
+    frame = equity_full_frame()
+    market = frame.feeds[RELIANCE[2]].fullFeed.marketFF
+    market.ltpc.ltp = float("inf")
+    market.ltpc.iep.value = float("nan")
+    market.atp = float("nan")
+    market.rp = float("inf")
+    market.marketOHLC.ohlc[0].high = float("nan")  # the 1d candle
+    market.marketLevel.bidAskQuote[0].bidP = float("inf")
+
+    topics = _feed(adapter, frame)  # _canon refuses NaN and Infinity
+    ltp = json.loads(topics["NSE_RELIANCE_LTP"])
+    depth = json.loads(topics["NSE_RELIANCE_DEPTH"])
+
+    assert ltp["ltp"] == 0.0 and depth["ltp"] == 0.0
+    assert "indicative_equilibrium_price" not in ltp | depth
+    assert not {"average_price", "reference_price"} & set(depth)
+    assert (depth["open"], depth["high"]) == (1415.0, 0.0)
+    assert [level["price"] for level in depth["depth"]["buy"]] == [
+        1423.5,
+        1423.0,
+        1422.5,
+        1422.0,
+        0.0,
+    ]
 
 
 # --------------------------------------------------------------------------------------------
@@ -624,10 +736,10 @@ def test_the_last_mode_leaving_releases_the_key_and_its_carry_forward(make_adapt
     symbol, exchange, key = OPTION
     assert pool.subscribe(symbol, exchange, 2)["status"] == "success"
     _feed(adapter, option_full_frame())
-    assert key in adapter._last_ltpc and key in adapter._last_daily_ohlc
+    assert key in adapter._last_ltpc and key in adapter._day_carry
 
     assert pool.unsubscribe(symbol, exchange, 2)["status"] == "success"
 
     assert adapter.ws_client.unsubscribed == [[key]]
     assert adapter.ws_client.held == {}
-    assert key not in adapter._last_ltpc and key not in adapter._last_daily_ohlc
+    assert key not in adapter._last_ltpc and key not in adapter._day_carry
