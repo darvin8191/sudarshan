@@ -286,11 +286,22 @@ class _UpstoxServer:
         pass
 
 
+class _SocketThread:
+    """Stands in for the client's socket thread: alive until a test ends it."""
+
+    def __init__(self) -> None:
+        self.alive = True
+
+    def is_alive(self) -> bool:
+        return self.alive
+
+
 def _connected_client() -> UpstoxWebSocketClient:
     """The production client, its socket replaced by _UpstoxServer."""
     client = UpstoxWebSocketClient("not-a-real-token")
     client.ws = _UpstoxServer()
     client._connected = client.running = True
+    client._ws_thread = _SocketThread()
     return client
 
 
@@ -986,5 +997,79 @@ def test_a_record_the_pool_lost_track_of_ends_the_connection_at_once(
         assert proxy._lingers() == {}
         assert "owner" not in proxy.broker_adapters
         assert adapter.subscriptions == {}  # the pool's disconnect took the adapter down
+
+    asyncio.run(scenario())
+
+
+def test_feed_alive_tells_a_stopped_feed_from_a_reconnecting_one(make_adapter) -> None:
+    adapter = make_adapter()
+    client = adapter.ws_client
+    assert adapter.feed_alive
+
+    client._connected = False  # reconnecting: the socket thread is still trying
+    assert adapter.feed_alive
+    client._ws_thread.alive = False  # it gave up after its last attempt
+    assert not adapter.feed_alive
+    client._ws_thread.alive = True
+    client._authorize_refusals = 1  # Upstox refuses the stored login (after 03:30)
+    assert not adapter.feed_alive
+    client._authorize_refusals = 0
+    client.running = False  # stopped
+    assert not adapter.feed_alive
+
+
+class _FreshAdapter:
+    """What create_broker_adapter builds once a stale adapter has been evicted."""
+
+    def __init__(self) -> None:
+        self.subscriptions: dict[str, Any] = {}
+        self.connected = True
+
+    def initialize(self, *_args, **_kwargs) -> dict[str, Any]:
+        return {"status": "success"}
+
+    def connect(self) -> dict[str, Any]:
+        return {"status": "success"}
+
+    def subscribe(self, symbol: str, exchange: str, mode: int, _depth: int) -> dict[str, Any]:
+        self.subscriptions[f"{symbol}_{exchange}_{mode}"] = {"mode": mode}
+        return {"status": "success"}
+
+    def is_auth_error(self, _message: str) -> bool:
+        return False
+
+
+@pytest.mark.parametrize("stopped", [None, "gave up", "login refused"])
+def test_a_screen_coming_back_reuses_a_lingering_socket_only_while_its_feed_lives(
+    make_adapter, monkeypatch, stopped: str | None
+) -> None:
+    """A lingering adapter whose Upstox client gave up, or whose login Upstox refuses, would
+    accept subscriptions and never send a tick. It is rebuilt with the current login."""
+    adapter = make_adapter()
+    wrapper = _pooled(adapter)
+    proxy = _lingering_proxy(monkeypatch, wrapper)
+    fresh = _FreshAdapter()
+
+    async def scenario() -> None:
+        await _screen(proxy, 1, "LTP")
+        await proxy.cleanup_client(1)
+        for _ in range(5):
+            await asyncio.sleep(0)
+        assert "owner" in proxy._broker_lingers
+        if stopped == "gave up":
+            adapter.ws_client._ws_thread.alive = False
+        elif stopped == "login refused":
+            adapter.ws_client._authorize_refusals = 1
+        monkeypatch.setattr(proxy_server, "create_broker_adapter", lambda _broker: fresh)
+
+        await _screen(proxy, 2, "LTP")
+
+        assert proxy._lingers() == {}
+        if stopped is None:
+            assert proxy.broker_adapters["owner"] is wrapper
+            assert adapter.upstox.held == {OPTION[2]: "ltpc"}
+        else:
+            assert proxy.broker_adapters["owner"] is fresh
+            assert not adapter.ws_client.running  # the old socket was closed
 
     asyncio.run(scenario())

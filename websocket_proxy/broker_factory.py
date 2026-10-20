@@ -274,7 +274,10 @@ class _PooledAdapterWrapper:
     def connected(self) -> bool:
         """Check if pool is connected"""
         if self._pool:
-            return self._pool.connected
+            # SUDARSHAN (M18.2): and no adapter's broker feed has stopped for good
+            # (feed_alive, Upstox), so a cached or lingering one is rebuilt.
+            adapters = list(self._pool.adapters)
+            return self._pool.connected and all(getattr(a, "feed_alive", True) for a in adapters)
         return False
 
     def publish_market_data(self, topic: str, data: dict):

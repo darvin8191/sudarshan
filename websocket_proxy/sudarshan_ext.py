@@ -246,7 +246,9 @@ class SudarshanProxyMixin:
             return False
         self._cancel_broker_linger(user_id)
         loop = aio.get_running_loop()
-        task = loop.create_task(self._broker_linger(user_id, adapter, seconds))
+        task = loop.create_task(
+            self._broker_linger(user_id, adapter, seconds), name=f"ws-broker-linger-{user_id}"
+        )
         self._lingers()[user_id] = BrokerLinger(adapter, task, loop)
         logger.info(
             "Last client for user %s disconnected. Keeping the %s connection open "

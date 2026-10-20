@@ -9,8 +9,9 @@ goes, and released only with its last record.
 
 ClientSocketMixin gives UpstoxWebSocketClient the per-key mode it streams and
 Upstox's `change_mode`. AdapterSocketMixin gives UpstoxWebSocketAdapter the mode
-each key needs, and declares to the connection pool that every mode it was given
-must be handed back (see ConnectionPool.unsubscribe).
+each key needs, declares to the connection pool that every mode it was given
+must be handed back (see ConnectionPool.unsubscribe), and says whether its feed
+has stopped for good (feed_alive).
 """
 
 from __future__ import annotations
@@ -102,6 +103,25 @@ class AdapterSocketMixin:
             if key in needed:
                 grouped.setdefault(needed[key], []).append(key)
         return grouped
+
+    @property
+    def feed_alive(self) -> bool:
+        """False once this adapter's Upstox feed has stopped for good.
+
+        That is when the client has given up reconnecting (its socket thread has
+        ended), or Upstox refuses the stored login, as it does from 03:30 until
+        the next login. The proxy then rebuilds the adapter with the current
+        login instead of reusing it (see _PooledAdapterWrapper.connected); a
+        reused one would accept subscriptions and never send a tick. A socket
+        that is merely reconnecting is alive.
+        """
+        client = self.ws_client
+        if client is None or not getattr(client, "running", False):
+            return False
+        thread = getattr(client, "_ws_thread", None)
+        if thread is None or not thread.is_alive():
+            return False
+        return not getattr(client, "_authorize_refusals", 0)
 
     def _narrow_key(self, instrument_key: str) -> None:
         """A record of this key has gone: switch it down if Upstox sends more than the rest need.

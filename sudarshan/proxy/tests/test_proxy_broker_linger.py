@@ -421,3 +421,54 @@ def test_stop_cancels_a_pending_linger(lingering_proxy) -> None:
         assert proxy._broker_lingers == {}
 
     asyncio.run(scenario())
+
+
+def _pending_linger(proxy: WebSocketProxy) -> asyncio.Task:
+    (entry,) = proxy._broker_lingers.values()
+    return entry.task
+
+
+def test_a_screen_signing_in_ends_the_pending_linger_at_once(lingering_proxy) -> None:
+    """Asserted directly: the guard in _close_lingering_adapter would hide a linger left
+    running, since a screen is back by the time it runs out."""
+    proxy, created, sleep = lingering_proxy()
+
+    async def scenario() -> None:
+        await _connect(proxy, 7)
+        await _leave(proxy, 7)
+        await _settle()
+        task = _pending_linger(proxy)
+        assert task.get_name() == f"ws-broker-linger-{USER}"
+
+        await _connect(proxy, 8)
+
+        assert proxy._broker_lingers == {}
+        await _settle()
+        assert task.cancelled()
+
+    asyncio.run(scenario())
+
+
+def test_a_token_change_ends_the_pending_linger_itself(lingering_proxy, monkeypatch) -> None:
+    """Asserted with the pool registry out of the way, so the pool-cleanup listener cannot
+    be what ends it: the cache invalidation handler does."""
+    proxy, created, sleep = lingering_proxy()
+    monkeypatch.setattr(broker_factory, "cleanup_pools_for_user", lambda *_a, **_k: 0)
+
+    async def scenario() -> None:
+        await _connect(proxy, 7)
+        await _leave(proxy, 7)
+        await _settle()
+        task = _pending_linger(proxy)
+
+        proxy._handle_cache_invalidation(
+            f"CACHE_INVALIDATE_ALL_{USER}", json.dumps({"user_id": USER, "cache_type": "ALL"})
+        )
+
+        assert proxy._broker_lingers == {}
+        await _settle()
+        assert task.cancelled()
+        (adapter,) = created
+        assert adapter.disconnects == 1
+
+    asyncio.run(scenario())
