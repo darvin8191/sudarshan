@@ -3,10 +3,16 @@
  * keeping the file names and paths that index.html and the pages already use:
  *   public/favicon.ico                         16, 32 and 48 px frames (PNG-compressed)
  *   public/apple-touch-icon.png                180 px, square tile (iOS rounds the corners)
- *   public/images/android-chrome-192x192.png   192 px
+ *   public/images/android-chrome-192x192.png   192 px  } manifest "any": the rounded tile,
+ *   public/images/android-chrome-512x512.png   512 px  } for the install dialog
+ *   public/images/maskable-192x192.png         192 px  } manifest "maskable": the square
+ *   public/images/maskable-512x512.png         512 px  } tile, which the launcher crops
  *   public/logo.png                            192 px
+ * The manifest that lists them is public/images/sudarshan.webmanifest.
  * The SVG carries its variants as classes on the root element: "full-bleed" squares
  * the tile and "small" drops the ring and enlarges the glyph so 16 px stays legible.
+ * The ring and glyph sit inside the maskable safe zone, so the full-bleed tile is the
+ * maskable icon as it is.
  * Rasterises with the Chromium that @playwright/test already installs for e2e.
  * Run from frontend: node scripts/render-sudarshan-icons.mjs
  */
@@ -19,6 +25,9 @@ const svg = readFileSync(at('public/images/sudarshan-icon.svg'), 'utf8')
 const PNGS = [
   { file: 'public/apple-touch-icon.png', size: 180, variant: 'full-bleed' },
   { file: 'public/images/android-chrome-192x192.png', size: 192 },
+  { file: 'public/images/android-chrome-512x512.png', size: 512 },
+  { file: 'public/images/maskable-192x192.png', size: 192, variant: 'full-bleed' },
+  { file: 'public/images/maskable-512x512.png', size: 512, variant: 'full-bleed' },
   { file: 'public/logo.png', size: 192 },
 ]
 const FAVICON = [

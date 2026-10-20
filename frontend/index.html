@@ -4,11 +4,14 @@
     <meta charset="UTF-8" />
     <link rel="icon" href="/favicon.ico" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <!-- Under /images/ because the server already serves that folder as files. -->
+    <link rel="manifest" href="/images/sudarshan.webmanifest" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!-- Light only, declared before any stylesheet so the browser never paints or
-         force-darkens a dark first frame. No dark theme-color variant on purpose. -->
+         force-darkens a dark first frame. No dark theme-color variant on purpose.
+         White, the colour of the app bar, so Chrome's toolbar runs into it. -->
     <meta name="color-scheme" content="light" />
-    <meta name="theme-color" content="#F8F7F3" />
+    <meta name="theme-color" content="#FFFFFF" />
     <meta name="description" content="सुदर्शन · SUDARSHAN: a personal, self-hosted trading platform for charts, orders, watchlists and portfolios." />
     <meta property="og:title" content="सुदर्शन · SUDARSHAN" />
     <meta property="og:description" content="A personal, self-hosted trading platform for charts, orders, watchlists and portfolios." />
