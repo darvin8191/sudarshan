@@ -1,0 +1,70 @@
+# सुदर्शन / SUDARSHAN order alerts (M6.8): fills, part fills, rejections, cancellations and
+# stop-order triggers from OpenAlgo's order stream (ws://127.0.0.1:8765), sent to the owner's
+# Telegram through OpenAlgo (http://127.0.0.1:5000/api/v1/telegram/notify).
+# Connected only on trading days 08:45-16:00 IST (weekends and /etc/sudarshan/nse_holidays.txt are
+# closed, a day in /etc/sudarshan/nse_extra_trading_days.txt is open); idle otherwise.
+# Docs: sudarshan/alerts/README.md. Optional settings: /etc/sudarshan/alerts.env
+# (root:sudarshan 640); SUDARSHAN_ORDER_ALERTS=off there turns the alerts off (the service then
+# exits at once and stays stopped until the next restart).
+# Installed, enabled and restarted by sudarshan-deploy from each release, like sudarshan-feed.
+
+[Unit]
+Description=SUDARSHAN order alerts (Telegram)
+After=network-online.target
+Wants=network-online.target
+# Ordering only, as for auto-login: no Wants= on OpenAlgo, which would start it while the deploy
+# tool has it stopped. The service waits for OpenAlgo by itself (it reconnects with backoff).
+After=openalgo.service
+
+[Service]
+Type=simple
+User=sudarshan
+Group=sudarshan
+Slice=sudarshan.slice
+WorkingDirectory=/opt/sudarshan/apps/openalgo
+ExecStart=/opt/sudarshan/apps/openalgo/.venv/bin/python -m sudarshan.alerts
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+EnvironmentFile=-/etc/sudarshan/alerts.env
+# The only place it writes: /var/lib/sudarshan-alerts (alerts.db, the once-only record).
+# openalgo.db is read without write access (see owner.py), so db/ stays read-only here.
+StateDirectory=sudarshan-alerts
+StateDirectoryMode=0700
+# Restarted after a crash, every 10 s. Not after a clean exit (switched off), and not after
+# exit status 2 (a setting it cannot use): that would only repeat the same error line.
+Restart=on-failure
+RestartSec=10
+RestartPreventExitStatus=2
+# SIGTERM: the stream closes within 1 s plus 5 s for the close handshake, waiting alerts get
+# 5 s to go out; killed after 20 s.
+TimeoutStopSec=20
+MemoryMax=256M
+CPUWeight=50
+UMask=0077
+LimitCORE=0
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectProc=invisible
+ProtectSystem=strict
+ProtectHome=yes
+ReadOnlyPaths=-/etc/sudarshan
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+SystemCallArchitectures=native
+# It holds the owner's OpenAlgo API key and talks only to OpenAlgo on this server.
+IPAddressDeny=any
+IPAddressAllow=localhost
+
+[Install]
+WantedBy=multi-user.target
