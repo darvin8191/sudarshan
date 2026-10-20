@@ -1,0 +1,129 @@
+"""The Upstox TOTP token call: request shape, answers, error codes. No network (MockTransport)."""
+
+from __future__ import annotations
+
+import json
+import logging
+
+import httpx
+import pytest
+from autologin_fakes import FAKE_API_KEY, FAKE_PIN, FAKE_TOKEN, error_payload, ok_payload
+
+from sudarshan.autologin.messages import MESSAGES
+from sudarshan.autologin.upstox import RATE_LIMIT_COOLDOWN_S, TOKEN_PATH, request_token
+
+BASE = "https://api.upstox.com"
+CODE = "081804"
+
+
+def _client(handler) -> tuple[httpx.Client, list[httpx.Request]]:
+    seen: list[httpx.Request] = []
+
+    def transport(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return handler(request)
+
+    return httpx.Client(transport=httpx.MockTransport(transport)), seen
+
+
+def _answer(status, payload):
+    def handler(request):
+        if isinstance(payload, bytes):
+            return httpx.Response(status, content=payload)
+        return httpx.Response(status, json=payload)
+
+    return handler
+
+
+def test_request_shape_and_top_level_token():
+    client, seen = _client(_answer(200, ok_payload()))
+    result = request_token(client, BASE, FAKE_API_KEY, CODE, FAKE_PIN)
+    assert result.ok and result.token == FAKE_TOKEN and result.code == "ok"
+    (request,) = seen
+    assert request.method == "POST"
+    assert str(request.url) == BASE + TOKEN_PATH == f"{BASE}/v2/totp-login/authorization/token"
+    assert request.headers["x-api-key"] == FAKE_API_KEY
+    assert request.headers["content-type"] == "application/json"
+    assert request.headers["accept"] == "application/json"
+    assert json.loads(request.content) == {"totp": CODE, "pin": FAKE_PIN}
+
+
+def test_token_nested_under_data_is_accepted():
+    client, _ = _client(_answer(200, {"status": "success", "data": ok_payload()}))
+    result = request_token(client, BASE, FAKE_API_KEY, CODE, FAKE_PIN)
+    assert result.ok and result.token == FAKE_TOKEN
+
+
+def test_token_never_in_repr():
+    client, _ = _client(_answer(200, ok_payload()))
+    assert FAKE_TOKEN not in repr(request_token(client, BASE, FAKE_API_KEY, CODE, FAKE_PIN))
+
+
+@pytest.mark.parametrize(
+    ("upstox_code", "status", "code", "pause", "cooldown"),
+    [
+        ("UDAPI100097", 401, "invalid_credentials", True, 0),
+        ("UDAPI100098", 400, "totp_not_enabled", True, 0),
+        ("UDAPI100099", 429, "rate_limited", False, RATE_LIMIT_COOLDOWN_S),
+        ("UDAPI100101", 403, "not_individual_app", True, 0),
+    ],
+)
+def test_documented_error_codes(upstox_code, status, code, pause, cooldown):
+    client, _ = _client(_answer(status, error_payload(upstox_code)))
+    result = request_token(client, BASE, FAKE_API_KEY, CODE, FAKE_PIN)
+    assert not result.ok and result.token is None
+    assert (result.code, result.pause, result.cooldown_s) == (code, pause, cooldown)
+    assert result.upstox_codes == (upstox_code,)
+    assert code in MESSAGES
+
+
+def test_snake_case_error_code_and_200_with_error():
+    payload = {"status": "error", "errors": [{"error_code": "UDAPI100097", "message": "x"}]}
+    client, _ = _client(_answer(200, payload))
+    assert request_token(client, BASE, FAKE_API_KEY, CODE, FAKE_PIN).code == "invalid_credentials"
+
+
+@pytest.mark.parametrize(
+    ("status", "payload", "code"),
+    [
+        (429, b"slow down", "rate_limited"),
+        (500, b"<html>oops</html>", "upstox_unavailable"),
+        (503, error_payload("UDAPI100500"), "upstox_unavailable"),
+        (400, error_payload("UDAPI100016"), "upstox_refused"),
+        (401, {}, "upstox_refused"),
+        (200, {"status": "success"}, "unexpected_response"),
+        (200, b"not json", "unexpected_response"),
+    ],
+)
+def test_other_answers(status, payload, code):
+    client, _ = _client(_answer(status, payload))
+    result = request_token(client, BASE, FAKE_API_KEY, CODE, FAKE_PIN)
+    assert (result.ok, result.code) == (False, code)
+
+
+@pytest.mark.parametrize(
+    "error", [httpx.ConnectTimeout("t"), httpx.ReadTimeout("t"), httpx.ConnectError("refused")]
+)
+def test_network_problems_never_raise(error):
+    def handler(request):
+        raise error
+
+    client, _ = _client(handler)
+    result = request_token(client, BASE, FAKE_API_KEY, CODE, FAKE_PIN)
+    assert (result.ok, result.code) == (False, "network")
+
+
+def test_error_body_is_never_logged(caplog):
+    """An error answer can echo the PIN (``invalidValue``); only codes may reach the log."""
+    caplog.set_level(logging.DEBUG)
+    for status, payload in [
+        (401, error_payload("UDAPI100097")),
+        (400, error_payload("UDAPI199999")),
+        (500, error_payload("UDAPI100500")),
+    ]:
+        client, _ = _client(_answer(status, payload))
+        request_token(client, BASE, FAKE_API_KEY, CODE, FAKE_PIN)
+    assert FAKE_PIN not in caplog.text
+    assert CODE not in caplog.text
+    assert FAKE_API_KEY not in caplog.text
+    assert "UDAPI100097" in caplog.text  # the code itself is useful and harmless
