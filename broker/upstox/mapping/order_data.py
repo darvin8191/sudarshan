@@ -168,13 +168,13 @@ def transform_order_data(orders):
             "timestamp": order.get("order_timestamp", ""),
         }
 
-        # SUDARSHAN M6.9: what the phone's order cards show, under the names the
-        # sandbox's book and the Upstox order stream already use: how much has
-        # filled and at what average, and the broker's reason for a rejection.
-        # Each only when Upstox sends it, so a reader can still tell "not sent".
-        for field in ("filled_quantity", "pending_quantity", "average_price"):
-            if order.get(field) is not None:
-                transformed_order[field] = order[field]
+        # SUDARSHAN M6.9: the broker's reason for a rejection, under the name the
+        # sandbox's book and the Upstox order stream already use. Fills stay out
+        # on purpose: /orderstatus (services/orderstatus_service.py) replaces the
+        # average price with 0.0 on every order that is not complete, so a filled
+        # quantity here would reach the strategy module's reconciliation as a part
+        # fill with no price, and the priced push for the same fill would then be
+        # dropped. Fills come from the trade book and the order stream.
         if transformed_order["order_status"] == "rejected":
             transformed_order["rejection_reason"] = str(order.get("status_message") or "").strip()
 

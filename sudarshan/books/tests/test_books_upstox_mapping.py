@@ -1,12 +1,18 @@
 """The Upstox books carry what the phone's book cards read (M6.9).
 
 Golden rows in the shape Upstox's REST order book and position book return them, through
-OpenAlgo's own transforms. Each added field is passed through only when Upstox sends it, so a
-reader can tell "not sent" from zero: the alerts re-sync (`sudarshan/alerts/resync.py`) then takes
-its fills from the trade book as before, and the cards leave the line out.
+OpenAlgo's own transforms. A rejected order carries the broker's reason. An order carries no fill
+fields, on purpose: /orderstatus answers from this same book and replaces the average price of any
+order that is not complete with 0.0, so a filled quantity here would reach the strategy module's
+reconciliation as a part fill with no price (`test_orderstatus_answers_a_part_fill_as_before`).
+The cards take fills from the order stream, and the alerts re-sync (`sudarshan/alerts/resync.py`)
+from the trade book. A position field is passed through only when Upstox sends it, so a reader can
+tell "not sent" from zero.
 """
 
 from __future__ import annotations
+
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -53,22 +59,29 @@ PART_FILLED = {
     "order_timestamp": "2026-10-20 10:41:51",
 }
 
+#: What OpenAlgo's order book row for PART_FILLED was before M6.9, and still is.
+PART_FILLED_ROW = {
+    "symbol": "NIFTY27OCT2625900CE",
+    "exchange": "NFO",
+    "action": "SELL",
+    "quantity": 130,
+    "price": 168.0,
+    "trigger_price": 0.0,
+    "pricetype": "LIMIT",
+    "product": "MIS",
+    "orderid": "251020000598204",
+    "order_status": "open",
+    "timestamp": "2026-10-20 10:41:51",
+}
 
-def test_an_order_carries_its_fill_and_a_rejection_its_reason():
-    rejected, part = transform_order_data([REJECTED, PART_FILLED])
+FILL_FIELDS = {"filled_quantity", "pending_quantity", "average_price"}
 
+
+def test_a_rejection_carries_the_brokers_reason_and_no_fill():
+    (rejected,) = transform_order_data([REJECTED])
     assert rejected["order_status"] == "rejected"
     assert rejected["rejection_reason"] == "RMS:Margin Exceeds,Required:14250.00, Available:9120.55"
-    assert rejected["filled_quantity"] == 0
-
-    assert part["order_status"] == "open"
-    assert (part["filled_quantity"], part["pending_quantity"], part["average_price"]) == (
-        65,
-        65,
-        168.05,
-    )
-    # A working order's message is not a reason: nothing was refused.
-    assert "rejection_reason" not in part
+    assert not FILL_FIELDS & set(rejected)
 
 
 def test_a_rejection_without_a_message_says_none_rather_than_guessing():
@@ -76,28 +89,44 @@ def test_a_rejection_without_a_message_says_none_rather_than_guessing():
     assert row["rejection_reason"] == ""
 
 
-def test_fields_upstox_does_not_send_are_left_out_not_zeroed():
-    bare = {
-        key: value
-        for key, value in PART_FILLED.items()
-        if key not in ("average_price", "filled_quantity", "pending_quantity", "status_message")
-    }
-    (row,) = transform_order_data([bare])
-    assert not {"average_price", "filled_quantity", "pending_quantity"} & set(row)
-    # Everything upstream already mapped is unchanged.
-    assert row == {
-        "symbol": "NIFTY27OCT2625900CE",
-        "exchange": "NFO",
-        "action": "SELL",
-        "quantity": 130,
-        "price": 168.0,
-        "trigger_price": 0.0,
-        "pricetype": "LIMIT",
-        "product": "MIS",
-        "orderid": "251020000598204",
-        "order_status": "open",
-        "timestamp": "2026-10-20 10:41:51",
-    }
+def test_a_part_fill_reaches_the_order_book_without_its_fill():
+    (row,) = transform_order_data([PART_FILLED])
+    # Exactly the row upstream maps: no fill fields, and a working order's message is not a
+    # reason, since nothing was refused.
+    assert row == PART_FILLED_ROW
+
+
+def _orderstatus(raw: dict) -> dict:
+    """What /api/v1/orderstatus answers for one raw Upstox row, through the real services."""
+    from services import orderstatus_service
+
+    with (
+        patch(
+            "broker.upstox.api.order_api.get_order_book",
+            return_value={"status": "success", "data": [dict(raw)]},
+        ),
+        patch("broker.upstox.mapping.order_data.get_symbol", return_value=raw["tradingsymbol"]),
+        patch.object(orderstatus_service, "get_analyze_mode", return_value=False),
+        patch("database.settings_db.get_analyze_mode", return_value=False),
+        patch.object(orderstatus_service, "log_executor", MagicMock()),
+    ):
+        ok, answer, status = orderstatus_service.get_order_status_with_auth(
+            {"orderid": raw["order_id"]}, "test-token", "upstox", {}
+        )
+    assert (ok, status) == (True, 200), answer
+    return answer["data"]
+
+
+def test_orderstatus_answers_a_part_fill_as_before():
+    """The strategy module folds /orderstatus as a broker fact (order_events.apply_order_snapshot).
+
+    /orderstatus replaces the average of any order that is not complete with 0.0, so with a
+    filled quantity beside it a part fill would be recorded unpriced, and the priced push for the
+    same fill then changes nothing: the leg would have no entry price, so no stop and no target.
+    Without one, the reconciliation sees no fill and the priced push is the one applied.
+    """
+    raw = {**PART_FILLED, "instrument_token": "NSE_FO|49213", "product": "I"}
+    assert _orderstatus(raw) == {**PART_FILLED_ROW, "average_price": 0.0}
 
 
 #: A position partly booked today: bought 130, sold 65; 65 still held.

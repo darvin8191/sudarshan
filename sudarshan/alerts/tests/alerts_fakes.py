@@ -179,7 +179,11 @@ class FakeProxy:
 
 
 def book_row(order_id: str, status: str = "complete", **fields) -> dict:
-    """An order book row as OpenAlgo's REST order book gives it for Upstox (no fill fields)."""
+    """An order book row as OpenAlgo's REST order book gives it for Upstox.
+
+    No fill fields (they come from the trade book); a rejected row may also carry
+    rejection_reason, when Upstox sent a message with it.
+    """
     row = {
         "action": "BUY",
         "symbol": OPTION,

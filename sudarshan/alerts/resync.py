@@ -9,15 +9,14 @@ The store's final rows and the part-fill maximum keep this from repeating anythi
   POST /api/v1/orderbook {apikey}  -> data.orders: orderid, symbol, exchange, action, quantity,
                                       pricetype, product, trigger_price, order_status (open,
                                       complete, cancelled, rejected; a stop order waiting for its
-                                      trigger reads open), and filled_quantity, average_price and
-                                      a rejection's rejection_reason when Upstox sends them
+                                      trigger reads open), and a rejection's rejection_reason
   POST /api/v1/tradebook {apikey}  -> data: one row per trade: orderid, quantity, average_price
 
-Upstox's order book as OpenAlgo maps it carries the filled quantity, the average price and a
-rejection's reason when Upstox sends them (M6.9). A row without them takes its fills from the
-trade book (summed per order, the price weighted), and a rejection found that way names no
-reason. While OpenAlgo is in Analyze mode both answer from the sandbox and say so
-(``"mode": "analyze"``): those rows are sandbox orders, and the live book could not be checked.
+Upstox's order book as OpenAlgo maps it has no filled quantity or average price, so the fills come
+from the trade book (summed per order, the price weighted). A rejection's reason comes from the
+book when Upstox sends one (M6.9); a rejection found without one names no reason. While OpenAlgo
+is in Analyze mode both answer from the sandbox and say so (``"mode": "analyze"``): those rows
+are sandbox orders, and the live book could not be checked.
 """
 
 from __future__ import annotations
