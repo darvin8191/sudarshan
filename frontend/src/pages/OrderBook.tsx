@@ -133,8 +133,8 @@ const statusConfig: Record<string, { icon: typeof CheckCircle2; color: string; l
 // so BUY and SELL read at 5:1 or better and the stats fit three to a row on a
 // phone. White on green-500, as before, was 2.3:1.
 const SIDE_BADGE: Record<string, string> = {
-  BUY: 'border-transparent bg-[hsl(var(--buy))] text-white',
-  SELL: 'border-transparent bg-[hsl(var(--sell))] text-white',
+  BUY: 'border-transparent bg-[color:var(--buy-solid)] text-white',
+  SELL: 'border-transparent bg-[color:var(--sell-solid)] text-white',
 }
 const STAT_CARD = 'gap-0 py-3 sm:py-6'
 const STAT_HEADER = 'gap-1 px-3 pb-0 sm:px-6 sm:pb-2'
@@ -568,7 +568,7 @@ export default function OrderBook() {
             <Card className={STAT_CARD}>
               <CardHeader className={STAT_HEADER}>
                 <CardDescription className={STAT_LABEL}>Buy Orders</CardDescription>
-                <CardTitle className={cn(STAT_VALUE, 'text-[hsl(var(--buy))]')}>
+                <CardTitle className={cn(STAT_VALUE, 'text-[color:var(--buy-solid)]')}>
                   {stats?.total_buy_orders ?? 0}
                 </CardTitle>
               </CardHeader>
@@ -576,7 +576,7 @@ export default function OrderBook() {
             <Card className={STAT_CARD}>
               <CardHeader className={STAT_HEADER}>
                 <CardDescription className={STAT_LABEL}>Sell Orders</CardDescription>
-                <CardTitle className={cn(STAT_VALUE, 'text-[hsl(var(--sell))]')}>
+                <CardTitle className={cn(STAT_VALUE, 'text-[color:var(--sell-solid)]')}>
                   {stats?.total_sell_orders ?? 0}
                 </CardTitle>
               </CardHeader>

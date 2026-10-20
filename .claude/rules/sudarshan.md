@@ -46,8 +46,8 @@ Source of truth: `frontend/src/sudarshan/theme.css`; `theme.test.ts` checks ever
 | `--profit` / `--up` | #067A45 | profit, up, COMPLETE; tint #E6F5ED |
 | `--live-*` | ink #05683A on #E6F5ED, edge #A7D9BE | LIVE chip |
 | `--loss` / `--down` | #C3282E | loss, down, REJECTED; tint #FCEBEC |
-| `--buy` | #1C65C8 | BUY, LONG |
-| `--sell` | #D02F14 | SELL, SHORT |
+| `--buy` / `--buy-solid` | #1C65C8 | BUY, LONG (`--buy` is an HSL triplet as upstream writes it; use `--buy-solid`, since `hsl(var(...))` is banned) |
+| `--sell` / `--sell-solid` | #D02F14 | SELL, SHORT (same pairing) |
 | `--family` | #3949AB | FAMILY · VIEW ONLY badge (with lock icon) |
 | `--sandbox` | #7F36BC | ANALYZE mode: light tint banner (#F2E8FF, ink #522D74), not a purple page |
 | `--warning-text` | #8A5A00 | OPEN / PENDING text; fill #E3A21A takes ink text only |

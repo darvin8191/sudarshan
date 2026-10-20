@@ -27,6 +27,8 @@ const TEXT_TOKENS = [
   '--gold-ink',
   '--up',
   '--down',
+  '--buy-solid',
+  '--sell-solid',
   '--profit-strong',
   '--loss-strong',
   '--neutral',
@@ -178,6 +180,8 @@ describe('SUDARSHAN tokens', () => {
     '--down',
     '--sandbox',
     '--destructive',
+    '--buy-solid',
+    '--sell-solid',
   ])('white text reads at 4.5:1 or better on %s', (fill) => {
     expect(contrast(WHITE, byName.get(fill) as string)).toBeGreaterThanOrEqual(4.5)
   })
@@ -203,6 +207,12 @@ describe('SUDARSHAN tokens', () => {
       expect.arrayContaining(['--profit', '--loss', '--buy', '--sell'])
     )
     for (const t of triplets) expect(t.hex, t.name).toBe(t.claimed)
+  })
+
+  it('keeps --buy-solid and --sell-solid the same colours as the --buy and --sell triplets', () => {
+    const triplets = new Map(hslTokens(css).map((t) => [t.name, t.hex]))
+    expect(byName.get('--buy-solid')).toBe(triplets.get('--buy'))
+    expect(byName.get('--sell-solid')).toBe(triplets.get('--sell'))
   })
 
   it('keeps --profit and --loss the same colours as --up and --down', () => {
