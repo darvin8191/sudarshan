@@ -306,6 +306,22 @@ describe('Order book on a phone: the cards', () => {
     expect(screen.getByText('Real-time')).toBeInTheDocument()
   })
 
+  it('gives the feed line a row of its own, apart from Refresh and Cancel all', async () => {
+    await renderPhone(WORKING, STOP)
+    act(() => {
+      feed.push(CALL, 'NFO', { ltp: 151.2 })
+      frames.flush()
+    })
+    const actions = screen.getByTestId('order-actions')
+    const cancelAll = within(actions).getByRole('button', { name: 'Cancel all (2)' })
+    expect(cancelAll).toHaveClass('whitespace-nowrap')
+    expect(within(actions).getByRole('button', { name: 'Refresh' })).toBeInTheDocument()
+    expect(actions).not.toHaveTextContent('Real-time')
+    const line = screen.getByText('Real-time').closest('p') as HTMLElement
+    expect(line).toHaveTextContent('LTP')
+    expect(actions.contains(line)).toBe(false)
+  })
+
   it('filters by Open, Executed, Rejected and Cancelled, with counts', async () => {
     const tap = user()
     await renderPhone(...ALL)

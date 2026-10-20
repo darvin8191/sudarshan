@@ -296,26 +296,29 @@ const OrderBoard = memo(function OrderBoard({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex items-center gap-2">
-        {working.length > 0 && (
-          <span className="flex min-h-5 min-w-0 items-center gap-1.5 px-1">
-            <span className="text-xs font-semibold text-muted-foreground">LTP</span>
-            <LiveLine line={line} now={now} />
-          </span>
-        )}
-        <span className="flex-1" />
+      <div className="flex items-center justify-end gap-2" data-testid="order-actions">
         <RefreshIcon refreshing={refreshing} onRefresh={refresh} />
         <button
           type="button"
           disabled={cancellable === 0}
           aria-haspopup="dialog"
           onClick={() => open({ act: 'cancelall', row: null })}
-          className={cn(OUTLINED, 'border-[color:var(--down)] text-[color:var(--down)]')}
+          className={cn(
+            OUTLINED,
+            'shrink-0 whitespace-nowrap border-[color:var(--down)] text-[color:var(--down)]'
+          )}
         >
           <X aria-hidden="true" className="size-4" />
           Cancel all{cancellable > 0 ? ` (${cancellable})` : ''}
         </button>
       </div>
+      {/* The feed's line on a row of its own: "Reconnecting · updated 12s ago" needs the width. */}
+      {working.length > 0 && (
+        <p className="-mt-1 flex min-h-5 min-w-0 flex-wrap items-center gap-x-1.5 px-1">
+          <span className="text-xs font-semibold text-muted-foreground">LTP</span>
+          <LiveLine line={line} now={now} />
+        </p>
+      )}
 
       <fieldset className="-mx-4 min-w-0">
         <legend className="sr-only">Show orders</legend>
