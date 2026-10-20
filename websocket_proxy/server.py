@@ -27,12 +27,13 @@ from .mode_utils import (
     normalize_mode_or_none,
 )
 from .port_check import find_available_port, is_port_in_use
+from .sudarshan_ext import SudarshanProxyMixin  # SUDARSHAN: linger, client outboxes (M18.2)
 
 # Initialize logger
 logger = get_logger("websocket_proxy")
 
 
-class WebSocketProxy:
+class WebSocketProxy(SudarshanProxyMixin):  # SUDARSHAN: mixin (M18.2)
     """
     WebSocket Proxy Server that handles client connections and authentication,
     manages subscriptions, and routes market data from broker adapters to clients.
@@ -132,6 +133,8 @@ class WebSocketProxy:
 
         # Receive all topics (market data + CACHE_INVALIDATE_*)
         self.socket.setsockopt(zmq.SUBSCRIBE, b"")
+
+        self._sudarshan_init()  # SUDARSHAN (M18.2): broker linger setting and listener
 
     async def start(self):
         """Start the WebSocket server and ZeroMQ listener"""
@@ -275,6 +278,8 @@ class WebSocketProxy:
                 except Exception as e:
                     logger.exception(f"Error closing WebSocket server: {e}")
 
+            self._close_all_outboxes()  # SUDARSHAN (M18.2)
+
             # Close all client connections
             close_tasks = []
             for client_id, websocket in self.clients.items():
@@ -293,6 +298,8 @@ class WebSocketProxy:
                     )
                 except TimeoutError:
                     logger.warning("Timeout waiting for client connections to close")
+
+            self._end_all_lingers()  # SUDARSHAN (M18.2): before the adapters go below
 
             # Disconnect all broker adapters
             for user_id, adapter in self.broker_adapters.items():
@@ -574,6 +581,7 @@ class WebSocketProxy:
         client_id = id(websocket)
         self.clients[client_id] = websocket
         self.subscriptions[client_id] = set()
+        self._open_outbox(client_id, websocket)  # SUDARSHAN (M18.2): its own sender
 
         # Get path info from websocket if available
         path = getattr(websocket, "path", "/unknown")
@@ -632,6 +640,7 @@ class WebSocketProxy:
             client_id: Client ID to clean up
         """
         self.clients.pop(client_id, None)
+        self._close_outbox(client_id)  # SUDARSHAN (M18.2)
         user_id = self.user_mapping.get(client_id)
         adapter = self.broker_adapters.get(user_id) if user_id else None
         release_failed = False
@@ -725,7 +734,10 @@ class WebSocketProxy:
                         user_id,
                     )
 
-            if not keep_special_adapter:
+            # SUDARSHAN (M18.2): an idle adapter may stay connected a while (linger).
+            if not keep_special_adapter and not self._keep_adapter_lingering(
+                user_id, adapter, broker_name, release_failed
+            ):
                 logger.info(
                     "Last client for user %s disconnected. Disconnecting %s adapter.",
                     user_id,
@@ -888,6 +900,8 @@ class WebSocketProxy:
 
         # Store the user mapping
         self.user_mapping[client_id] = user_id
+
+        self._cancel_broker_linger(user_id)  # SUDARSHAN (M18.2): a screen is back
 
         # Get broker name
         broker_name = get_broker_name(api_key)
@@ -1737,6 +1751,8 @@ class WebSocketProxy:
             message: The message to send
         """
         if client_id in self.clients:
+            if self._offer_to_outbox(client_id, message):  # SUDARSHAN (M18.2)
+                return
             websocket = self.clients[client_id]
             try:
                 await websocket.send(json.dumps(message))
@@ -1827,6 +1843,8 @@ class WebSocketProxy:
                 logger.info(f"Cleared caches for user {user_id}: {', '.join(caches_cleared)}")
             else:
                 logger.debug(f"No cached data found for user {user_id}")
+
+            self._cancel_broker_linger(user_id)  # SUDARSHAN (M18.2): torn down below
 
             # Also disconnect and clean up any existing broker adapters for this user
             # This forces re-initialization with fresh credentials on next connection
@@ -2145,12 +2163,18 @@ class WebSocketProxy:
                     message["mode"] = client_mode
                     message["broker"] = broker_name if broker_name != "unknown" else client_broker
 
+                    stream = (topic_str, client_mode)  # SUDARSHAN (M18.2): ticks merge per stream
+                    if self._offer_to_outbox(client_id, message, stream):
+                        continue
+
                     # Add to batch
                     send_tasks.append(self.send_message(client_id, message))
 
                 # Send all messages in parallel (non-blocking)
                 if send_tasks:
                     await aio.gather(*send_tasks, return_exceptions=True)
+                else:  # SUDARSHAN (M18.2): the outboxes' turn, as the gather gave
+                    await aio.sleep(0)
 
                 # METRICS: Track message count for health monitoring
                 self._messages_processed += 1

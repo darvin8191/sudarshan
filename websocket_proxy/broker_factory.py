@@ -1,4 +1,5 @@
 import importlib
+import weakref  # SUDARSHAN: pool cleanup listeners (M18.2)
 
 from utils import real_threading
 from utils.logging import get_logger
@@ -27,6 +28,35 @@ _POOLED_ADAPTERS: dict[str, ConnectionPool] = {}
 # fail. A real lock, because the proxy's threads are real, held only for dict
 # work: pools are built, disconnected and asked for stats outside it.
 _POOL_LOCK = real_threading.RLock()
+
+# SUDARSHAN (M18.2): called with the user_id after every cleanup_pools_for_user,
+# so the proxy can close at once a broker connection it is keeping open through
+# a client gap (WEBSOCKET_BROKER_LINGER_SECONDS). Held as weak references, so a
+# proxy discarded without stop() is not kept alive by this list. Guarded by
+# _POOL_LOCK.
+_POOL_CLEANUP_LISTENERS: list = []
+
+
+def _listener_ref(listener):
+    try:
+        return weakref.WeakMethod(listener)
+    except TypeError:  # a plain function: nothing to outlive
+        return lambda: listener
+
+
+def add_pool_cleanup_listener(listener) -> None:
+    """SUDARSHAN (M18.2): call `listener(user_id)` after each user pool cleanup."""
+    with _POOL_LOCK:
+        if not any(ref() == listener for ref in _POOL_CLEANUP_LISTENERS):
+            _POOL_CLEANUP_LISTENERS.append(_listener_ref(listener))
+
+
+def remove_pool_cleanup_listener(listener) -> None:
+    """SUDARSHAN (M18.2): undo add_pool_cleanup_listener; also drops dead ones."""
+    with _POOL_LOCK:
+        _POOL_CLEANUP_LISTENERS[:] = [
+            ref for ref in _POOL_CLEANUP_LISTENERS if ref() not in (None, listener)
+        ]
 
 
 def _pool_snapshot() -> list[tuple[str, ConnectionPool]]:
@@ -244,7 +274,10 @@ class _PooledAdapterWrapper:
     def connected(self) -> bool:
         """Check if pool is connected"""
         if self._pool:
-            return self._pool.connected
+            # SUDARSHAN (M18.2): and no adapter's broker feed has stopped for good
+            # (feed_alive, Upstox), so a cached or lingering one is rebuilt.
+            adapters = list(self._pool.adapters)
+            return self._pool.connected and all(getattr(a, "feed_alive", True) for a in adapters)
         return False
 
     def publish_market_data(self, topic: str, data: dict):
@@ -395,6 +428,23 @@ def cleanup_pools_for_user(user_id: str, broker_name: str | None = None) -> int:
             f"Invalidated {len(targets)} cached pool(s) for user={user_id}"
             + (f" broker={broker_name}" if broker_name else "")
         )
+
+    # SUDARSHAN (M18.2): even with no pool registered (pooling off), the user's
+    # broker state is being reset, so a lingering connection must go too.
+    with _POOL_LOCK:
+        listeners = [ref() for ref in _POOL_CLEANUP_LISTENERS]
+        _POOL_CLEANUP_LISTENERS[:] = [
+            ref
+            for ref, live in zip(_POOL_CLEANUP_LISTENERS, listeners, strict=True)
+            if live is not None
+        ]
+    for listener in listeners:
+        if listener is None:
+            continue
+        try:
+            listener(user_id)
+        except Exception:
+            logger.exception(f"Pool cleanup listener failed for user={user_id}")
     return len(targets)
 
 

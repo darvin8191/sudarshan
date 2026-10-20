@@ -824,6 +824,14 @@ class ConnectionPool:
                 else:
                     new_highest = max(remaining_modes.keys())
 
+                    if mode > new_highest and getattr(adapter, "RELEASE_EVERY_MODE", False):
+                        # SUDARSHAN (M18.2): an adapter keeping one record per mode
+                        # (Upstox) takes the lower mode first, so its one broker key
+                        # never leaves the broker between the two.
+                        return self._downgrade_lower_first(
+                            adapter, adapter_idx, sub_key, old_depth, new_highest
+                        )
+
                     if mode > new_highest:
                         # DOWNGRADE: removed the highest mode, broker needs to switch down
                         try:
@@ -935,6 +943,14 @@ class ConnectionPool:
                             }
                     else:
                         # Removed a lower mode — broker still has the higher mode active
+                        # SUDARSHAN (M18.2): an adapter keeping one record per mode is
+                        # told, or that record outlives every subscriber of the symbol.
+                        if getattr(adapter, "RELEASE_EVERY_MODE", False):
+                            result = adapter.unsubscribe(symbol, exchange, mode)
+                            if result.get("status") != "success":
+                                self.subscription_map[sub_key] = adapter_idx
+                                self.subscription_depths[sub_key] = old_depth
+                                return result
                         # No broker call needed
                         self.logger.debug(
                             f"Removed {symbol}.{exchange} mode {mode} tracking "
@@ -952,6 +968,44 @@ class ConnectionPool:
                     self.subscription_depths[sub_key] = old_depth
                 self.logger.exception(f"Error unsubscribing from {symbol}.{exchange}: {e}")
                 return {"status": "error", "code": "UNSUBSCRIPTION_ERROR", "message": str(e)}
+
+    def _downgrade_lower_first(self, adapter, adapter_idx, sub_key, old_depth, lower) -> dict:
+        """SUDARSHAN (M18.2): a downgrade for an adapter declaring RELEASE_EVERY_MODE.
+
+        Subscribes the lower mode, then releases the higher one. Caller holds
+        self.lock and has already removed sub_key; any failure puts it back, and
+        the adapter's records stay within the pool's (a lower record taken
+        before a refused release is still owned by the lower mode's clients).
+        """
+        symbol, exchange, mode = sub_key
+        lower_depth = self.subscription_depths.get((symbol, exchange, lower), 5)
+        result = adapter.subscribe(symbol, exchange, lower, lower_depth)
+        phase = "subscribe_lower_mode"
+        if isinstance(result, dict) and result.get("status") == "success":
+            result = adapter.unsubscribe(symbol, exchange, mode)
+            phase = "release_high_mode"
+        if not (isinstance(result, dict) and result.get("status") == "success"):
+            self.subscription_map[sub_key] = adapter_idx
+            self.subscription_depths[sub_key] = old_depth
+            message = result.get("message", "broker refused") if isinstance(result, dict) else ""
+            return {
+                "status": "error",
+                "code": "DOWNGRADE_FAILED",
+                "message": f"Failed to downgrade {symbol}.{exchange} to mode {lower}: {message}",
+                "phase": phase,
+                "reconciliation_required": False,
+            }
+        self.logger.info(
+            f"[POOL] Downgraded {symbol}.{exchange} from mode {mode} "
+            f"to mode {lower} on connection {adapter_idx + 1}"
+        )
+        return {
+            "status": "success",
+            "message": f"Unsubscribed mode {mode}, downgraded to mode {lower}",
+            "phase": "complete",
+            "release": {"status": "success", "mode": mode},
+            "reconciliation_required": False,
+        }
 
     def unsubscribe_all(self):
         """Unsubscribe from all symbols across all connections.

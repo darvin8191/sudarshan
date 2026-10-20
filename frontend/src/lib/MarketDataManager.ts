@@ -20,15 +20,27 @@ export interface DepthLevel {
   orders?: number
 }
 
+// SUDARSHAN (M11.3): option greeks as a full-mode tick carries them. null is a
+// greek the broker could not compute (an illiquid contract), not a zero.
+export interface OptionGreeks {
+  delta: number | null
+  gamma: number | null
+  theta: number | null
+  vega: number | null
+  rho: number | null
+}
+
 export interface MarketData {
   ltp?: number
   open?: number
   high?: number
   low?: number
+  /** The previous session's close: the base for change and change %. */
   close?: number
   volume?: number
   change?: number
   change_percent?: number
+  /** Tick time. Typed as upstream declares it; most brokers send epoch-ms numbers. */
   timestamp?: string
   bid_price?: number
   ask_price?: number
@@ -38,6 +50,72 @@ export interface MarketData {
     buy: DepthLevel[]
     sell: DepthLevel[]
   }
+  // SUDARSHAN (M11.3): the rest of the normalized tick. Present only when the
+  // broker sends them; every other numeric field is kept too (handleMessage).
+  /** The previous session's close, under its explicit name. */
+  prev_close?: number
+  /** Time of the last trade, epoch milliseconds. */
+  last_trade_time?: number
+  last_trade_quantity?: number
+  average_price?: number
+  total_buy_quantity?: number
+  total_sell_quantity?: number
+  /** Open interest (derivatives). */
+  oi?: number
+  /** Implied volatility as the broker sends it (Upstox: a fraction, 0.1314 = 13.14%). */
+  iv?: number
+  greeks?: OptionGreeks
+  /** LTP-mode names: last trade quantity, last trade time and previous close. */
+  ltq?: number
+  ltt?: number
+  cp?: number
+  /** Pre-open and closing auction figures, only while an auction runs. */
+  indicative_equilibrium_price?: number
+  reference_price?: number
+  indicative_equilibrium_quantity?: number
+  indicative_imbalance_quantity_total?: number
+  indicative_imbalance_quantity_market?: number
+}
+
+// SUDARSHAN (M11.3): fields handleMessage merges by name; every other finite
+// number in a tick is kept as it arrives, so a field the adapter adds later
+// reaches consumers without another change here.
+const NAMED_FIELDS = new Set([
+  'ltp',
+  'open',
+  'high',
+  'low',
+  'close',
+  'volume',
+  'change',
+  'change_percent',
+  'timestamp',
+  'bid_price',
+  'ask_price',
+  'bid_size',
+  'ask_size',
+  'depth',
+  'greeks',
+])
+
+const GREEK_NAMES = ['delta', 'gamma', 'theta', 'vega', 'rho'] as const
+
+/** The greeks in a tick, or undefined when it carries none. */
+function readGreeks(value: unknown): OptionGreeks | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const source = value as Record<string, unknown>
+  const greeks: OptionGreeks = { delta: null, gamma: null, theta: null, vega: null, rho: null }
+  let found = false
+  for (const name of GREEK_NAMES) {
+    const reading = source[name]
+    if (typeof reading === 'number' && Number.isFinite(reading)) {
+      greeks[name] = reading
+      found = true
+    } else if (reading === null) {
+      found = true
+    }
+  }
+  return found ? greeks : undefined
 }
 
 export interface SymbolData {
@@ -253,11 +331,14 @@ export class MarketDataManager {
         // Clean up cache
         const dataKey = `${exchange}:${symbol}`
         this.dataCache.delete(dataKey)
+      }
 
-        // Send unsubscribe if connected
-        if (this.connectionState === 'authenticated') {
-          this.sendUnsubscribe([{ symbol, exchange }])
-        }
+      // SUDARSHAN (M11.3): release this exact mode on the server, whatever other
+      // mode of the symbol stays. The proxy reads an unsubscribe without a mode as
+      // Quote, so LTP and Depth were never released, and a Depth leaving while LTP
+      // stayed sent nothing at all.
+      if (this.connectionState === 'authenticated') {
+        this.sendUnsubscribe([{ symbol, exchange }], mode)
       }
 
       // Stop fallback polling if no more subscriptions
@@ -597,6 +678,17 @@ export class MarketDataManager {
             depth: marketDataPayload.depth ?? newData.depth,
           })
 
+          // SUDARSHAN (M11.3): keep every other numeric field (prev_close, oi, iv,
+          // last_trade_time, ...) and the greeks, instead of dropping them here.
+          const extra = newData as Record<string, unknown>
+          for (const [field, value] of Object.entries(data.data || {})) {
+            if (!NAMED_FIELDS.has(field) && typeof value === 'number' && Number.isFinite(value)) {
+              extra[field] = value
+            }
+          }
+          const greeks = readGreeks(marketDataPayload.greeks)
+          if (greeks) newData.greeks = greeks
+
           const updatedSymbolData: SymbolData = {
             ...existing,
             data: newData,
@@ -645,13 +737,17 @@ export class MarketDataManager {
     )
   }
 
-  private sendUnsubscribe(symbols: Array<{ symbol: string; exchange: string }>): void {
+  private sendUnsubscribe(
+    symbols: Array<{ symbol: string; exchange: string }>,
+    mode: SubscriptionMode // SUDARSHAN (M11.3): always the exact mode
+  ): void {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return
 
     this.socket.send(
       JSON.stringify({
         action: 'unsubscribe',
         symbols,
+        mode,
       })
     )
   }
@@ -830,6 +926,9 @@ export class MarketDataManager {
             volume: result.data.volume ?? newData.volume,
             bid_price: result.data.bid ?? newData.bid_price,
             ask_price: result.data.ask ?? newData.ask_price,
+            // SUDARSHAN (M11.3): the same names the live tick uses.
+            prev_close: result.data.prev_close ?? newData.prev_close,
+            oi: result.data.oi ?? newData.oi,
           })
 
           const updatedSymbolData: SymbolData = {
