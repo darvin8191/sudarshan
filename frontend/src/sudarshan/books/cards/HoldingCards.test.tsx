@@ -1,0 +1,273 @@
+/**
+ * Holdings on a phone (M6.9), through the real Holdings page at 390px: the
+ * current value, invested, overall P&L and day's change at the top, one card
+ * per holding, prices that move with ticks, and a sheet whose Buy more and Sell
+ * open the page's own ticket exactly as its table's Add and Exit do. Back
+ * closes the ticket. On a wide screen the table is upstream's.
+ */
+import { act, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Holding } from '@/types/trading'
+
+vi.mock('@/lib/MarketDataManager', () => import('@/test/marketDataHarness'))
+
+const api = vi.hoisted(() => ({ getHoldings: vi.fn(), getMultiQuotes: vi.fn() }))
+vi.mock('@/api/trading', () => ({
+  tradingApi: {
+    getHoldings: (...args: unknown[]) => api.getHoldings(...args),
+    getMultiQuotes: (...args: unknown[]) => api.getMultiQuotes(...args),
+  },
+}))
+
+/** The ticket the page opens, as it was opened. */
+const ticket = vi.hoisted(() => ({ opened: [] as string[] }))
+vi.mock('@/components/trading', async () => {
+  const { createElement } = await import('react')
+  return {
+    PlaceOrderDialog: (props: Record<string, unknown>) => {
+      if (!props.open) return null
+      const said = [
+        props.action,
+        props.symbol,
+        props.exchange,
+        `qty ${props.quantity}`,
+        `product ${props.product}`,
+        props.priceType,
+        props.strategy,
+      ].join(' ')
+      ticket.opened.push(said)
+      return createElement(
+        'section',
+        { 'aria-label': 'Order ticket' },
+        said,
+        createElement(
+          'button',
+          {
+            type: 'button',
+            onClick: () => (props.onOpenChange as (open: boolean) => void)(false),
+          },
+          'Close ticket'
+        )
+      )
+    },
+  }
+})
+vi.mock('@/stores/authStore', () => ({
+  useAuthStore: () => ({ apiKey: 'test-api-key', user: { broker: 'upstox' } }),
+}))
+vi.mock('@/stores/themeStore', () => ({ onModeChange: () => () => {} }))
+const calendar = vi.hoisted(() => ({
+  isMarketOpen: () => true,
+  isAnyMarketOpen: () => true,
+  isLoading: false,
+  error: null,
+}))
+vi.mock('@/hooks/useMarketStatus', () => ({ useMarketStatus: () => calendar }))
+vi.mock('@/components/socket/SocketProvider', () => ({
+  useSocketContext: () => ({ playAlertSound: () => {}, socket: null }),
+}))
+
+import Holdings from '@/pages/Holdings'
+import { back, renderBook, settle, where } from '@/test/bookPages'
+import { fakeClock, frames } from '@/test/frames'
+import { feed } from '@/test/marketDataHarness'
+import { fakeScreen } from '@/test/screenWidth'
+
+vi.setConfig({ testTimeout: 15_000 })
+
+const RELIANCE = {
+  symbol: 'RELIANCE',
+  exchange: 'NSE',
+  product: 'CNC',
+  quantity: 40,
+  average_price: 1374.3,
+  ltp: 1452.3,
+  pnl: 3120,
+  pnlpercent: 5.67,
+} as Holding
+const HDFCBANK = {
+  symbol: 'HDFCBANK',
+  exchange: 'NSE',
+  product: 'CNC',
+  quantity: 60,
+  average_price: 902.5,
+  ltp: 982.65,
+  pnl: 4809,
+  pnlpercent: 8.88,
+} as Holding
+const STATS = {
+  totalholdingvalue: 117051,
+  totalinvvalue: 109122,
+  totalprofitandloss: 7929,
+  totalpnlpercentage: 7.27,
+}
+/** The previous closes, as the quote snapshot reads them. */
+const PREVIOUS: Record<string, number> = { RELIANCE: 1461, HDFCBANK: 975.2 }
+
+async function renderPhone(...holdings: Holding[]) {
+  api.getHoldings.mockResolvedValue({
+    status: 'success',
+    data: { holdings, statistics: STATS },
+  })
+  fakeScreen('phone')
+  const view = renderBook('/holdings', <Holdings />)
+  await settle()
+  await settle()
+  return view
+}
+
+function card(name: RegExp) {
+  return screen.getByRole('button', { name })
+}
+
+function user() {
+  return userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+}
+
+beforeEach(() => {
+  fakeClock()
+  frames.install()
+  feed.reset()
+  ticket.opened = []
+  api.getHoldings.mockReset()
+  api.getMultiQuotes
+    .mockReset()
+    .mockImplementation(
+      async (_key: string, symbols: Array<{ symbol: string; exchange: string }>) => ({
+        status: 'success',
+        results: symbols.map(({ symbol, exchange }) => ({
+          symbol,
+          exchange,
+          data: { ltp: 0, prev_close: PREVIOUS[symbol] ?? 0 },
+        })),
+      })
+    )
+})
+
+afterEach(() => {
+  vi.useRealTimers()
+  vi.unstubAllGlobals()
+  vi.restoreAllMocks()
+})
+
+describe('Holdings on a phone', () => {
+  it('sums up the holdings: current value, invested, overall P&L and the day’s change', async () => {
+    await renderPhone(RELIANCE, HDFCBANK)
+    expect(screen.queryByRole('table')).toBeNull()
+    const summary = screen.getByRole('region', { name: 'Current value' })
+    expect(screen.getByTestId('holdings-value')).toHaveTextContent('₹1,17,051.00')
+    expect(summary).toHaveTextContent('Invested₹1,09,122.00')
+    expect(summary).toHaveTextContent('Overall P&L+₹7,929.00+7.27%')
+    // (1,452.30 - 1,461) x 40 + (982.65 - 975.20) x 60, on 1,16,952 at the previous close.
+    expect(summary).toHaveTextContent("Day's change+₹99.00+0.08%")
+  })
+
+  it('shows each holding as a card, its figures carried by signs', async () => {
+    await renderPhone(RELIANCE, HDFCBANK)
+    const reliance = card(/RELIANCE/)
+    expect(reliance).toHaveTextContent('Qty 40 · Avg 1,374.30')
+    expect(reliance).toHaveTextContent('+₹3,120.00')
+    expect(reliance).toHaveTextContent('+5.67%')
+    expect(reliance).toHaveTextContent('LTP1,452.30')
+    expect(reliance).toHaveTextContent('Day −0.60%')
+    expect(reliance).toHaveTextContent('Value ₹58,092.00')
+    expect(reliance.querySelector('span[data-direction="up"] svg')).not.toBeNull()
+  })
+
+  it('moves the value and the P&L with every tick', async () => {
+    await renderPhone(RELIANCE, HDFCBANK)
+    act(() => {
+      feed.push('RELIANCE', 'NSE', { ltp: 1460, cp: 1461 })
+      frames.flush()
+    })
+    const reliance = card(/RELIANCE/)
+    // 3,120 + (1,460 - 1,452.30) x 40
+    expect(reliance).toHaveTextContent('+₹3,428.00')
+    expect(reliance).toHaveTextContent('Value ₹58,400.00')
+    expect(reliance.querySelector('[data-tick="up"]')).toHaveTextContent('1,460.00')
+    expect(screen.getByTestId('holdings-value')).toHaveTextContent('₹1,17,359.00')
+  })
+
+  it('says plainly when there are no holdings', async () => {
+    await renderPhone()
+    expect(screen.getByText('No holdings')).toBeInTheDocument()
+  })
+
+  it('opens the page’s own ticket from Buy more and Sell, as its table’s Add and Exit do', async () => {
+    const tap = user()
+    api.getHoldings.mockResolvedValue({
+      status: 'success',
+      data: { holdings: [RELIANCE], statistics: STATS },
+    })
+    fakeScreen('wide')
+    const wide = renderBook('/holdings', <Holdings />)
+    await settle()
+    await tap.click(screen.getByRole('button', { name: 'Add' }))
+    const fromAdd = ticket.opened.at(-1)
+    await tap.click(screen.getByRole('button', { name: 'Close ticket' }))
+    await tap.click(screen.getByRole('button', { name: 'Exit' }))
+    const fromExit = ticket.opened.at(-1)
+    expect(fromAdd).toBe('BUY RELIANCE NSE qty 40 product CNC MARKET Holdings')
+    expect(fromExit).toBe('SELL RELIANCE NSE qty 40 product CNC MARKET Holdings')
+    wide.unmount()
+    vi.restoreAllMocks()
+
+    await renderPhone(RELIANCE)
+    await tap.click(card(/RELIANCE/))
+    await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Buy more' }))
+    expect(screen.getByRole('region', { name: 'Order ticket' })).toHaveTextContent(fromAdd ?? '')
+    expect(where()).toBe('/holdings?act=buy&row=NSE%3ARELIANCE')
+
+    await tap.click(screen.getByRole('button', { name: 'Close ticket' }))
+    await waitFor(() => expect(where()).toBe('/holdings'))
+    await tap.click(card(/RELIANCE/))
+    await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Sell' }))
+    expect(screen.getByRole('region', { name: 'Order ticket' })).toHaveTextContent(fromExit ?? '')
+  })
+
+  it('closes the ticket on Back, then leaves the page', async () => {
+    const tap = user()
+    await renderPhone(RELIANCE)
+    await tap.click(card(/RELIANCE/))
+    await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Buy more' }))
+    expect(screen.getByRole('region', { name: 'Order ticket' })).toBeInTheDocument()
+
+    back()
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Order ticket' })).toBeNull())
+    expect(where()).toBe('/holdings')
+    back()
+    expect(await screen.findByText('Dashboard page')).toBeInTheDocument()
+  })
+
+  it('shows the holding’s figures and its chart in the sheet', async () => {
+    const tap = user()
+    await renderPhone(RELIANCE)
+    await tap.click(card(/RELIANCE/))
+    const sheet = screen.getByRole('dialog', { name: 'RELIANCE' })
+    const details = within(sheet).getByRole('region', { name: 'Details' })
+    expect(details).toHaveTextContent('Current value₹58,092.00')
+    expect(details).toHaveTextContent('Invested₹54,972.00')
+    expect(details).toHaveTextContent("Day's change−₹348.00−0.60%")
+    expect(details).toHaveTextContent('Previous close1,461.00')
+    expect(details).toHaveTextContent('ProductCNC · Delivery')
+    expect(
+      within(sheet).getByRole('link', { name: 'Open the chart for RELIANCE on NSE' })
+    ).toHaveAttribute('href', '/chart/NSE/RELIANCE')
+  })
+})
+
+describe('Holdings on a wide screen', () => {
+  it('keeps upstream’s table', async () => {
+    api.getHoldings.mockResolvedValue({
+      status: 'success',
+      data: { holdings: [RELIANCE], statistics: STATS },
+    })
+    fakeScreen('wide')
+    renderBook('/holdings', <Holdings />)
+    await settle()
+    expect(screen.getByRole('table')).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Trading Symbol' })).toBeInTheDocument()
+    expect(screen.queryByTestId('holdings-value')).toBeNull()
+  })
+})

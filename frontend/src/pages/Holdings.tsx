@@ -27,12 +27,15 @@ import { calculateLiveStats, useLivePrice } from '@/hooks/useLivePrice'
 import { cn, makeFormatCurrency, sanitizeCSV } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
 import { onModeChange } from '@/stores/themeStore'
+// SUDARSHAN M6.9: on a phone the holdings are cards (src/sudarshan/books/cards).
+import { HoldingCards } from '@/sudarshan/books/cards/HoldingCards'
 // SUDARSHAN: the book re-read, status line and tick prices (src/sudarshan/books).
 import { useBookFeed } from '@/sudarshan/books/feed'
 import { TickPrice } from '@/sudarshan/books/LiveFigures'
 import { holdingsMayChange, useBookSync, useLatestRead } from '@/sudarshan/books/useBookSync'
 // SUDARSHAN M4.15: on a phone, a symbol opens the phone chart (src/sudarshan/chart).
 import { BookSymbolLink } from '@/sudarshan/chart/BookSymbolLink'
+import { usePhoneLayout } from '@/sudarshan/chart/usePhoneLayout'
 import { useMarketOpen } from '@/sudarshan/dashboard/hooks'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
 import type { Holding, HoldingsStats } from '@/types/trading'
@@ -66,6 +69,9 @@ export default function Holdings() {
   // SUDARSHAN: when the shown holdings were asked for, so only newer ticks move them.
   const [bookAt, setBookAt] = useState<number | null>(null)
   const beginRead = useLatestRead()
+  // SUDARSHAN M6.9: a phone's cards subscribe themselves, drawn once a frame,
+  // so this page's own subscription is off there and a tick never redraws it.
+  const phone = usePhoneLayout()
 
   // Centralized real-time price hook with WebSocket + MultiQuotes fallback
   // Automatically pauses when tab is hidden
@@ -74,7 +80,7 @@ export default function Holdings() {
     feed,
     calendar,
   } = useLivePrice(holdings, {
-    enabled: holdings.length > 0,
+    enabled: holdings.length > 0 && !phone,
     useMultiQuotesFallback: true,
     pauseWhenHidden: true,
     snapshotAt: bookAt,
@@ -225,6 +231,57 @@ export default function Holdings() {
         : 'text-red-600'
   const rowTone = (value: number, stale: boolean) =>
     stale ? 'text-muted-foreground' : isProfit(value) ? 'text-green-600' : 'text-red-600'
+
+  // Same order dialog the Option Chain uses, prefilled from the holding.
+  // Exit defaults to the full held quantity; Add starts from the same
+  // number so the user only has to change it when topping up. CNC is
+  // forced because a holding is by definition a delivery position.
+  // SUDARSHAN M6.9: kept in a constant, unchanged, so the phone's cards open this same ticket.
+  const orderDialog = (
+    <PlaceOrderDialog
+      open={orderIntent !== null}
+      onOpenChange={(open) => {
+        if (!open) setOrderIntent(null)
+      }}
+      symbol={orderIntent?.symbol ?? ''}
+      exchange={orderIntent?.exchange ?? ''}
+      action={orderIntent?.action ?? 'BUY'}
+      quantity={orderIntent?.quantity}
+      product="CNC"
+      priceType="MARKET"
+      strategy="Holdings"
+      onSuccess={(orderId) => {
+        showToast.success(`Order ${orderId} placed`, 'orders')
+        setOrderIntent(null)
+        fetchHoldings(true)
+      }}
+      onError={(message) => showToast.error(message, 'orders')}
+    />
+  )
+
+  // SUDARSHAN M6.9: on a phone, a card per holding instead of the wide table;
+  // Buy more and Sell open the ticket above exactly as Add and Exit do.
+  if (phone) {
+    return (
+      <>
+        <HoldingCards
+          holdings={holdings}
+          stats={stats}
+          bookAt={bookAt}
+          loading={isLoading}
+          error={error}
+          refreshing={isRefreshing || showStaleWarning}
+          apiKey={apiKey}
+          marketOpen={marketOpen}
+          onRefresh={fetchHoldings}
+          onOrder={setOrderIntent}
+          orderOpen={orderIntent !== null}
+          onOrderClose={() => setOrderIntent(null)}
+        />
+        {orderDialog}
+      </>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -467,29 +524,7 @@ export default function Holdings() {
         </CardContent>
       </Card>
 
-      {/* Same order dialog the Option Chain uses, prefilled from the holding.
-          Exit defaults to the full held quantity; Add starts from the same
-          number so the user only has to change it when topping up. CNC is
-          forced because a holding is by definition a delivery position. */}
-      <PlaceOrderDialog
-        open={orderIntent !== null}
-        onOpenChange={(open) => {
-          if (!open) setOrderIntent(null)
-        }}
-        symbol={orderIntent?.symbol ?? ''}
-        exchange={orderIntent?.exchange ?? ''}
-        action={orderIntent?.action ?? 'BUY'}
-        quantity={orderIntent?.quantity}
-        product="CNC"
-        priceType="MARKET"
-        strategy="Holdings"
-        onSuccess={(orderId) => {
-          showToast.success(`Order ${orderId} placed`, 'orders')
-          setOrderIntent(null)
-          fetchHoldings(true)
-        }}
-        onError={(message) => showToast.error(message, 'orders')}
-      />
+      {orderDialog}
     </div>
   )
 }

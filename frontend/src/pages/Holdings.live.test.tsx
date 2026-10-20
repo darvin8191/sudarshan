@@ -183,10 +183,12 @@ describe('Holdings chart link', () => {
     vi.restoreAllMocks()
   })
 
-  it("opens the phone chart from a holding's symbol on a phone, and only there", async () => {
+  it("opens the phone chart from a holding's sheet on a phone, and only there", async () => {
     const screenNow = fakeScreen('phone')
     render(<Holdings />)
     await pass(0)
+    // SUDARSHAN M6.9: on a phone the holding is a card; its sheet has the chart.
+    act(() => screen.getByRole('button', { name: /SBIN/ }).click())
     expect(screen.getByRole('link', { name: 'Open the chart for SBIN on NSE' })).toHaveAttribute(
       'href',
       '/chart/NSE/SBIN'
