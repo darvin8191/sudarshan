@@ -9,7 +9,7 @@ import httpx
 import pytest
 from autologin_fakes import FAKE_API_KEY, FAKE_PIN, FAKE_TOKEN, error_payload, ok_payload
 
-from sudarshan.autologin.messages import MESSAGES
+from sudarshan.autologin.messages import MESSAGES, paused_message
 from sudarshan.autologin.upstox import (
     RATE_LIMIT_COOLDOWN_S,
     TOKEN_PATH,
@@ -119,6 +119,19 @@ def test_every_refusal_except_too_many_requests_pauses(status, payload):
     result = request_token(client, BASE, FAKE_API_KEY, CODE, FAKE_PIN)
     assert not result.ok and result.pause is True
     assert result.code in MESSAGES
+    # A pause lasts until the owner saves again, so its cause never promises "a few minutes".
+    assert result.code != "rate_limited"
+    assert "few minutes" not in paused_message(result.code)
+
+
+def test_a_refusal_with_the_too_many_requests_code_names_it():
+    client, _ = _client(_answer(400, error_payload("UDAPI100099")))
+    result = request_token(client, BASE, FAKE_API_KEY, CODE, FAKE_PIN)
+    assert (result.code, result.pause, result.cooldown_s) == ("too_many_attempts", True, 0)
+    assert paused_message(result.code) == (
+        "Upstox refused the login because of too many attempts. Auto-login is paused until you "
+        "save the TOTP key or the PIN again on the Auto login page."
+    )
 
 
 @pytest.mark.parametrize(

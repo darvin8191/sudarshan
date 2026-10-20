@@ -30,11 +30,17 @@ exec 9> "${STATE}/deploy.lock"; flock -n 9 || { echo "another deploy is running"
 OWNER_REPO="${REPO#https://github.com/}"
 as_svc() { sudo -u "${SVC_USER}" -H -- "$@"; }
 log() { echo "[$(date '+%F %T %Z')] $*"; }
+listed() {   # 0 = date $1 starts a line of file $2 (a trailing comment is allowed, as auto-login reads it)
+    grep -qE "^[[:space:]]*${1}([[:space:]#]|$)" "$2" 2>/dev/null
+}
 market_open() {   # 0 = trading hours (do not restart), 1 = safe
     local now dow hhmm today
     now="$(TZ=Asia/Kolkata date '+%u %H%M %F')"; read -r dow hhmm today <<< "${now}"
+    # A special session (a weekend or holiday session the exchange announces, such as Muhurat
+    # trading) keeps its own hours, so nothing is restarted at any time that day.
+    listed "${today}" /etc/sudarshan/nse_extra_trading_days.txt && return 0
     [[ "${dow}" -ge 6 ]] && return 1
-    grep -qx "${today}" /etc/sudarshan/nse_holidays.txt 2>/dev/null && return 1
+    listed "${today}" /etc/sudarshan/nse_holidays.txt && return 1
     # 10# forces decimal: "0930" would otherwise be read as an invalid octal number
     local t=$((10#${hhmm}))
     (( t >= 900 && t <= 1545 )) && return 0 || return 1

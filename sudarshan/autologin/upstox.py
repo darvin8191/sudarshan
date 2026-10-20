@@ -129,6 +129,10 @@ def request_token(
     # they have, every refusal except "too many requests" pauses: sending the same TOTP key and PIN
     # again could lock the Upstox account, and only the owner can tell what is wrong.
     pause = pause or refused
+    if pause and code == "rate_limited":
+        # Upstox's "too many requests" code on a refusal: it pauses like any other refusal, so the
+        # owner must not read "for a few minutes" next to "paused until you save again".
+        code = "too_many_attempts"
     cooldown_s = RATE_LIMIT_COOLDOWN_S if code == "rate_limited" or status == 429 else 0
     log_level = logging.ERROR if pause or code == "unexpected_response" else logging.WARNING
     log.log(

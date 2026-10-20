@@ -37,6 +37,7 @@ MESSAGES = {
         "again first, so the same ones are not sent to Upstox twice."
     ),
     "rate_limited": "Upstox is refusing logins for a few minutes because of too many attempts.",
+    "too_many_attempts": "Upstox refused the login because of too many attempts.",
     "network": "Could not reach Upstox. The server's internet connection or Upstox may be down.",
     "upstox_unavailable": "Upstox's login service is not working right now.",
     "upstox_refused": (

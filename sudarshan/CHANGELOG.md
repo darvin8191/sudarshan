@@ -36,8 +36,11 @@ healthy.
 ### What is refused now
 - After any rejected sign-in (wrong PIN or TOTP key), auto login pauses until you save the key or
   PIN again, so a wrong PIN is never retried by itself. Test now is refused while it is paused.
-- Auto login never signs in between 09:15 and 15:30 unless the stored token is known to be dead,
-  so a working session is not replaced during market hours.
+- Between 09:15 and 15:30, auto login signs in only when there is no working login (the stored
+  one has expired, or you logged out). It never replaces a working session. When Upstox cannot
+  confirm either way, it does not sign in and tells you.
+- Updates are not installed at any time on a special trading day (a weekend or holiday session
+  such as Muhurat trading) once that date is in the server's extra trading days list.
 
 ### Not in this release yet
 - Watchlists, the screener and alerts. Their screens are designed and come next.
