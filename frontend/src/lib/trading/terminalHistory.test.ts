@@ -14,6 +14,14 @@ import {
   type SymbolExpression,
 } from 'openalgo-charts/transform'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+// The market's hours, which a test hands in; null, as with no hours to be had, otherwise.
+const hours = vi.hoisted(() => ({ calendar: null as unknown }))
+vi.mock('./sessionHours', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./sessionHours')>()),
+  sessionCalendarFor: async () => hours.calendar,
+}))
+
 import { quietVolumeStyle } from './chartTheme'
 import { CHART_TYPES } from './chartTypes'
 import { LiveBarBuilder } from './liveBars'
@@ -121,6 +129,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  hours.calendar = null
   for (const terminal of terminals.splice(0)) terminal.destroy()
   vi.clearAllTimers()
   vi.useRealTimers()
@@ -1420,67 +1429,249 @@ describe('the live bar in the terminal', () => {
     live.liveClock.stop()
   })
 
-  it('starts the stream again at once when the page comes back from more than a few seconds away', async () => {
-    const sockets: Array<{
-      readyState: number
-      onopen: (() => void) | null
-      onclose: (() => void) | null
-      onmessage: ((event: { data: string }) => void) | null
-    }> = []
-    vi.stubGlobal(
-      'WebSocket',
-      class {
-        readyState = 0
-        onopen: (() => void) | null = null
-        onclose: (() => void) | null = null
-        onerror: (() => void) | null = null
-        onmessage: ((event: { data: string }) => void) | null = null
-        constructor() {
-          sockets.push(this)
-        }
-        send() {}
-        close() {
-          this.readyState = 3
-        }
+  const nseHours = () =>
+    new SessionCalendar({ timezone: 'Asia/Kolkata', sessions: ['0915-1530:23456'] })
+
+  it('keeps one flat bar at the tail through a quiet spell, in the store and on the chart', () => {
+    const { state } = mount()
+    const live = state as LiveState
+    state.data = {
+      pushBar: vi.fn(),
+      refresh: vi.fn(async () => state.rawBars),
+      bars: () => [bar(ist(10, 0), 100)],
+      destroy() {},
+    } as unknown as NonNullable<TerminalState['data']>
+    state.rawBars = [bar(ist(9, 59), 99), bar(ist(10, 0), 100)]
+    state.setPriceData()
+    const depth = wired(state)
+    vi.setSystemTime(ist(10, 0, 50) * 1000)
+    state.connectLive()
+    depth(100.5, ist(10, 0, 50))
+    state.builder.setSession(nseHours())
+    live.liveClock.start()
+    vi.advanceTimersByTime(2 * 60_000 + 11_000) // 10:03:01, nothing traded since 10:00:50
+    const times = [ist(9, 59), ist(10, 0), ist(10, 3)]
+    expect(state.rawBars.map((b) => b.time)).toEqual(times)
+    expect(state.price.getData().map((b) => b.time)).toEqual(times)
+    live.liveClock.stop()
+  })
+
+  it("turns the bar countdown off for a last bar the session's close cuts short", () => {
+    const { state } = mount()
+    state.chart.setAxisChromeOptions({ barCountdown: true })
+    state.interval = '1h'
+    state.rawBars = [bar(ist(13, 15), 100), bar(ist(14, 15), 101)]
+    state.setPriceData()
+    const depth = wired(state)
+    vi.setSystemTime(ist(14, 59, 50) * 1000)
+    state.connectLive()
+    state.builder.setSession(nseHours())
+    const countdown = () => state.chart.axisChromeOptions().barCountdown
+    depth(101.5, ist(14, 59, 55))
+    expect(countdown()).toBe(true)
+    // 15:15: the bar would count to 16:15; the session closes at 15:30.
+    vi.setSystemTime(ist(15, 15, 2) * 1000)
+    depth(102, ist(15, 15, 1))
+    expect(state.rawBars.at(-1)?.time).toBe(ist(15, 15))
+    expect(countdown()).toBe(false)
+  })
+
+  it("lays today's quote on a week bar that history ends with yesterday", async () => {
+    const { terminal, state } = mount()
+    hours.calendar = nseHours()
+    const monday = ist(0, 0) - 86_400
+    vi.setSystemTime(ist(14, 0) * 1000)
+    state.interval = 'W'
+    state.rawBars = [{ time: monday, open: 100, high: 104, low: 99, close: 103, volume: 10_000 }]
+    state.setPriceData()
+    wired(state)
+    const api = vi
+      .spyOn(terminal, 'api')
+      .mockResolvedValue({ data: { open: 103.5, high: 106, low: 98, ltp: 105, volume: 4_000 } })
+    state.connectLive()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(api).toHaveBeenCalledWith('quotes', { symbol: state.sym.symbol, exchange: 'NFO' })
+    expect(state.rawBars.at(-1)).toEqual({
+      time: monday,
+      open: 100,
+      high: 106,
+      low: 98,
+      close: 105,
+      volume: 14_000,
+    })
+  })
+
+  /** Sockets the terminal opens, which a test opens, answers or lets die. */
+  function sockets() {
+    const all: FakeWs[] = []
+    class FakeWs {
+      readyState = 0
+      sent: Array<Record<string, unknown>> = []
+      onopen: (() => void) | null = null
+      onclose: (() => void) | null = null
+      onerror: (() => void) | null = null
+      onmessage: ((event: { data: string }) => void) | null = null
+      constructor() {
+        all.push(this)
       }
-    )
+      send(data: string) {
+        this.sent.push(JSON.parse(data))
+      }
+      close() {
+        this.readyState = 3
+      }
+      accept() {
+        this.readyState = 1
+        this.onopen?.()
+        this.onmessage?.({ data: JSON.stringify({ type: 'auth', status: 'success' }) })
+      }
+      drop() {
+        this.readyState = 3
+        this.onclose?.()
+      }
+      pings() {
+        return this.sent.filter((m) => m.action === 'ping')
+      }
+      pong() {
+        const ping = this.pings().at(-1)
+        this.onmessage?.({
+          data: JSON.stringify({
+            type: 'pong',
+            status: 'success',
+            server_timestamp: Date.now(),
+            client_timestamp: ping?.timestamp,
+            _pingId: ping?._pingId,
+          }),
+        })
+      }
+    }
+    vi.stubGlobal('WebSocket', FakeWs)
+    return all
+  }
+
+  function pageVisibility() {
     let visibility: 'visible' | 'hidden' = 'visible'
     Object.defineProperty(document, 'visibilityState', {
       configurable: true,
       get: () => visibility,
     })
-    const flip = (to: 'visible' | 'hidden') => {
+    return (to: 'visible' | 'hidden') => {
       visibility = to
       document.dispatchEvent(new Event('visibilitychange'))
     }
+  }
+
+  type Watched = LiveState & {
+    liveStatus: {
+      status(): { line: { kind: string } }
+      setTransport(t: string): void
+      reset(exchange: string): void
+    }
+    onTick(e: { ltp: number; timeSec: number; polled?: boolean }): void
+  }
+
+  async function started(api?: (path: string) => unknown) {
+    const { terminal, state } = mount()
+    vi.spyOn(terminal, 'api').mockImplementation(
+      async (path: string) => (api?.(path) ?? { data: { minutes: ['1m'] } }) as never
+    )
+    vi.spyOn(terminal, 'search').mockResolvedValue([])
+    await terminal.init()
+    return { terminal, live: state as Watched }
+  }
+
+  it('keeps a stream that answers when the page comes back after ten seconds', async () => {
+    const all = sockets()
+    const flip = pageVisibility()
     try {
-      const { terminal, state } = mount()
-      const live = state as LiveState & { liveStatus: { status(): { line: { kind: string } } } }
-      vi.spyOn(terminal, 'api').mockResolvedValue({ data: { minutes: ['1m'] } })
-      vi.spyOn(terminal, 'search').mockResolvedValue([])
-      await terminal.init()
-      const first = sockets.at(-1)
+      const { terminal, live } = await started()
+      const first = all.at(-1)
       if (!first) throw new Error('no socket')
-      first.readyState = 1
-      first.onopen?.()
-      first.onmessage?.({ data: JSON.stringify({ type: 'auth', status: 'success' }) })
-      // A glance away keeps the stream it has.
+      first.accept()
+      // A glance away keeps the stream it has, without asking.
       flip('hidden')
       vi.advanceTimersByTime(2_000)
       flip('visible')
-      expect(sockets).toHaveLength(1)
-      // The phone slept: the stream starts again within a second, Reconnecting meanwhile.
+      const asked = first.pings().length
+      expect(all).toHaveLength(1)
       flip('hidden')
-      vi.advanceTimersByTime(60_000)
+      vi.advanceTimersByTime(10_000)
       flip('visible')
-      expect(first.readyState).toBe(3)
+      expect(first.pings()).toHaveLength(asked + 1)
       expect(live.liveStatus.status().line.kind).toBe('connecting')
-      await vi.advanceTimersByTimeAsync(1_000)
-      expect(sockets).toHaveLength(2)
+      await vi.advanceTimersByTimeAsync(100)
+      first.pong()
+      await vi.advanceTimersByTimeAsync(5_000)
+      expect(all).toEqual([first])
+      expect(first.readyState).toBe(1)
+      expect(live.liveStatus.status().line.kind).not.toBe('connecting')
       terminal.destroy()
     } finally {
       Reflect.deleteProperty(document, 'visibilityState')
     }
+  })
+
+  it('replaces a stream that does not answer when the page comes back after ten seconds', async () => {
+    const all = sockets()
+    const flip = pageVisibility()
+    try {
+      const { terminal, live } = await started()
+      const first = all.at(-1)
+      if (!first) throw new Error('no socket')
+      first.accept()
+      flip('hidden')
+      vi.advanceTimersByTime(10_000)
+      flip('visible')
+      expect(live.liveStatus.status().line.kind).toBe('connecting')
+      await vi.advanceTimersByTimeAsync(1_400)
+      expect(first.readyState).toBe(1)
+      await vi.advanceTimersByTimeAsync(100)
+      expect(first.readyState).toBe(3)
+      await vi.advanceTimersByTimeAsync(3_000)
+      expect(all).toHaveLength(2)
+      terminal.destroy()
+    } finally {
+      Reflect.deleteProperty(document, 'visibilityState')
+    }
+  })
+
+  it('stops asking for quotes the moment the stream is back, before its first tick', async () => {
+    const all = sockets()
+    let quotes = 0
+    const { terminal } = await started((path) => {
+      if (path !== 'quotes') return undefined
+      quotes++
+      return { data: { ltp: 101, volume: 1_000 } }
+    })
+    all.at(-1)?.accept()
+    all.at(-1)?.drop()
+    await vi.advanceTimersByTimeAsync(4_000)
+    expect(quotes).toBeGreaterThan(0)
+    await vi.advanceTimersByTimeAsync(3_000)
+    all.at(-1)?.accept()
+    const asked = quotes
+    await vi.advanceTimersByTimeAsync(12_000)
+    expect(quotes).toBe(asked)
+    terminal.destroy()
+  })
+
+  it('never takes a quote standing in for the stream for a tick, even once the stream is back', () => {
+    const { state } = mount()
+    const live = state as Watched
+    vi.setSystemTime(ist(10, 0) * 1000)
+    live.liveStatus.reset('NFO')
+    live.liveStatus.setTransport('live')
+    live.onTick({ ltp: 100, timeSec: ist(10, 0) })
+    expect(live.liveStatus.status().line.kind).toBe('live')
+    // The stream drops; twenty seconds of quotes fill in.
+    live.liveStatus.setTransport('connecting')
+    vi.setSystemTime(ist(10, 0, 20) * 1000)
+    live.onTick({ ltp: 100.5, timeSec: ist(10, 0, 20), polled: true })
+    live.liveStatus.setTransport('polling')
+    expect(live.liveStatus.status().line.kind).toBe('polling')
+    // Back, with no tick yet: the last real one is twenty seconds old.
+    live.liveStatus.setTransport('live')
+    expect(live.liveStatus.status().line.kind).not.toBe('live')
   })
 
   it('reads the book on an order event, once for a burst, and re-syncs it each minute', async () => {

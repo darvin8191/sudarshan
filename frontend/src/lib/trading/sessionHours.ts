@@ -235,10 +235,10 @@ export function applySessionHours(chart: Chart, exchange: string, apiKey: string
 }
 
 /**
- * The exchange's calendar on its own, for the live bar and its status marker:
- * the same hours the chart gets, from the same once-a-day fetch. Resolves to
- * null when the hours cannot be had, which leaves a chart live but without a
- * clock, never broken.
+ * SUDARSHAN M4.1: the exchange's calendar on its own, for the live bar and its
+ * status marker: the same hours the chart gets, from the same once-a-day
+ * fetch. Resolves to null when the hours cannot be had, which leaves a chart
+ * live but without a clock, never broken.
  */
 export function sessionCalendarFor(
   exchange: string,
