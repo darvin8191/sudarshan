@@ -223,6 +223,14 @@ describe('PnlCard, live', () => {
     })
     expect(line(container)).toHaveAttribute('data-feed', 'stale')
     expect(line(container)).toHaveTextContent('Stale · updated 11s ago')
+    // Greyed, but still signed and still pointing the right way.
+    expect(total()).toHaveClass('text-muted-foreground')
+    expect(total()).toHaveTextContent('+₹2,515.00')
+    expect(total().querySelector('svg')).toHaveAttribute('data-direction', 'up')
+    expect(unrealised()).toHaveClass('text-muted-foreground')
+
+    tick(132)
+    expect(total()).toHaveClass('text-[color:var(--up)]')
   })
 
   it('says the market is closed when it is', () => {

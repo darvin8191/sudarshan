@@ -117,6 +117,10 @@ export function PnlCard({
     lastUpdateAt: latest(move.lastTickAt, syncedAt),
     ticksDue: held.length > 0,
   })
+  // Figures that ticks should be moving and are not: greyed, keeping sign and
+  // arrow, so an old number never looks current. Realised P&L does not move
+  // with prices, so it keeps its colour.
+  const stale = line.kind === 'delayed' && line.stale
 
   return (
     <section
@@ -132,7 +136,13 @@ export function PnlCard({
       </div>
 
       {showFigures ? (
-        <p className={cn('flex items-center gap-2', TREND_TEXT[direction])} data-testid="pnl-total">
+        <p
+          className={cn(
+            'flex items-center gap-2',
+            stale ? 'text-muted-foreground' : TREND_TEXT[direction]
+          )}
+          data-testid="pnl-total"
+        >
           <TrendArrow direction={direction} className="size-[0.9375rem]" />
           <span className="sd-display text-[2.625rem] leading-[1.05] font-bold">
             {formatRupees(pnl, { signed: true })}
@@ -153,7 +163,10 @@ export function PnlCard({
           <span>
             Unrealised{' '}
             <strong
-              className={cn('font-bold', TREND_TEXT[directionOf(unrealised)])}
+              className={cn(
+                'font-bold',
+                stale ? 'text-muted-foreground' : TREND_TEXT[directionOf(unrealised)]
+              )}
               data-testid="pnl-unrealised"
             >
               {formatRupees(unrealised, { signed: true })}
