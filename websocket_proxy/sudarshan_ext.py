@@ -20,6 +20,7 @@ import json
 import math
 import os
 import time
+import weakref
 from collections import deque
 from typing import Any, NamedTuple
 
@@ -97,6 +98,73 @@ def merge_ticks(older: dict, newer: dict) -> dict:
     return {**newer, "data": {**old_data, **new_data}}
 
 
+class LoopClock:
+    """How long the proxy's event loop has been unable to run its tasks.
+
+    The loop sometimes blocks: rebuilding a broker adapter runs Upstox's authorize
+    request (a 10 s timeout) on it, twice on the retry path. While it is frozen no
+    outbox can send, so that time is the server's, not the client's, and must not
+    count toward a client's stall limit.
+
+    A heartbeat task wakes every INTERVAL. How late it wakes, beyond SLACK, is time
+    the loop was frozen; frozen() also counts a freeze still going on. On each beat
+    the heartbeat also checks every outbox's stall (ClientOutbox.check_stall), so a
+    send that never completes is caught without a timeout of its own. The task runs
+    only while at least one outbox holds the clock.
+    """
+
+    INTERVAL = 0.25
+    SLACK = 0.05
+
+    def __init__(self) -> None:
+        self._frozen = 0.0
+        self._due: float | None = None
+        self._outboxes: set[ClientOutbox] = set()
+        self._task: aio.Task | None = None
+
+    def frozen(self) -> float:
+        """Seconds the loop has been frozen so far, including a freeze still going on."""
+        late = 0.0
+        if self._due is not None:
+            late = max(0.0, time.monotonic() - self._due - self.SLACK)
+        return self._frozen + late
+
+    def hold(self, outbox: ClientOutbox) -> None:
+        self._outboxes.add(outbox)
+        if self._task is None:
+            self._due = time.monotonic() + self.INTERVAL
+            self._task = aio.get_running_loop().create_task(self._beat(), name="ws-loop-clock")
+
+    def release(self, outbox: ClientOutbox) -> None:
+        self._outboxes.discard(outbox)
+        if not self._outboxes and self._task is not None:
+            self._frozen = self.frozen()
+            self._due = None
+            self._task.cancel()
+            self._task = None
+
+    async def _beat(self) -> None:
+        while True:
+            await aio.sleep(max(0.0, self._due - time.monotonic()))
+            now = time.monotonic()
+            self._frozen += max(0.0, now - self._due - self.SLACK)
+            self._due = now + self.INTERVAL
+            for outbox in list(self._outboxes):
+                outbox.check_stall()
+
+
+_LOOP_CLOCKS: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+
+
+def loop_clock() -> LoopClock:
+    """The LoopClock of the running event loop (one per loop, made on first use)."""
+    loop = aio.get_running_loop()
+    clock = _LOOP_CLOCKS.get(loop)
+    if clock is None:
+        clock = _LOOP_CLOCKS[loop] = LoopClock()
+    return clock
+
+
 class ClientOutbox:
     """One client's outgoing messages, sent in order by its own task.
 
@@ -116,23 +184,28 @@ class ClientOutbox:
     unsent, which a socket taking nothing, or so little that the oldest news it
     has not been given is that old, both come to. It is measured in time, not in
     messages, so a local consumer that pauses for a second or two loses nothing
-    but merged ticks. The connection is then aborted without a closing handshake;
-    the browser reconnects, resubscribes and starts again from fresh prices.
+    but merged ticks, and time the proxy's own loop was frozen does not count
+    (LoopClock). The connection is then aborted without a closing handshake; the
+    browser reconnects, resubscribes and starts again from fresh prices.
 
     Memory: one waiting tick per stream between two replies, plus the replies,
     and nothing older than the stall limit. A closed connection queues nothing.
     """
 
-    def __init__(self, client_id, websocket, stall_seconds: float):
+    def __init__(self, client_id, websocket, stall_seconds: float, clock: LoopClock | None = None):
         self.client_id = client_id
         self.websocket = websocket
         self.stall_seconds = stall_seconds
         self.dropped = False
-        # Waiting messages, oldest first: [stream or None, frame, queued at, replies so far].
+        # Waiting messages, oldest first:
+        # [stream or None, message, queued at, replies so far, loop frozen so far].
         self._queue: deque[list] = deque()
         self._waiting_ticks: dict[Any, list] = {}  # stream -> its tick still in _queue
         self._replies = 0  # replies (anything not a tick) queued so far
+        self._sending: list | None = None  # the entry being sent
         self._wake = aio.Event()
+        self._clock = clock if clock is not None else loop_clock()
+        self._clock.hold(self)
         self.task = aio.get_running_loop().create_task(
             self._run(), name=f"ws-client-outbox-{client_id}"
         )
@@ -148,14 +221,26 @@ class ClientOutbox:
                 both = isinstance(older, dict) and isinstance(message, dict)
                 waiting[1] = merge_ticks(older, message) if both else message
                 return
-            entry = [stream, message, time.monotonic(), self._replies]
+            entry = [stream, message, time.monotonic(), self._replies, self._clock.frozen()]
             self._waiting_ticks[stream] = entry
         else:
             self._replies += 1
             frame = message if isinstance(message, str) else json.dumps(message)
-            entry = [None, frame, time.monotonic(), self._replies]
+            entry = [None, frame, time.monotonic(), self._replies, self._clock.frozen()]
         self._queue.append(entry)
         self._wake.set()
+
+    def _waited(self, entry: list) -> float:
+        """How long the entry has waited unsent, less the time the loop was frozen."""
+        return (time.monotonic() - entry[2]) - (self._clock.frozen() - entry[4])
+
+    def check_stall(self) -> None:
+        """From the loop clock: drop the client once its oldest unsent message is too old."""
+        if self.dropped:
+            return
+        oldest = self._sending or (self._queue[0] if self._queue else None)
+        if oldest is not None and self._waited(oldest) >= self.stall_seconds:
+            self.drop(f"a message to it waited {self.stall_seconds:g}s unsent")
 
     async def _run(self) -> None:
         while True:
@@ -164,22 +249,20 @@ class ClientOutbox:
                 await self._wake.wait()
                 continue
             entry = self._queue.popleft()
-            stream, message, queued_at = entry[0], entry[1], entry[2]
+            stream, message = entry[0], entry[1]
             if stream is not None and self._waiting_ticks.get(stream) is entry:
                 del self._waiting_ticks[stream]
+            if self._waited(entry) >= self.stall_seconds:
+                self.drop(f"a message to it waited {self.stall_seconds:g}s unsent")
+                return
             try:
                 frame = message if isinstance(message, str) else json.dumps(message)
             except (TypeError, ValueError):
                 logger.exception(f"Could not encode a message for client {self.client_id}")
                 continue
-            left = self.stall_seconds - (time.monotonic() - queued_at)
+            self._sending = entry
             try:
-                if left <= 0:
-                    raise TimeoutError
-                await aio.wait_for(self.websocket.send(frame), left)
-            except TimeoutError:
-                self.drop(f"a message to it waited {self.stall_seconds:g}s unsent")
-                return
+                await self.websocket.send(frame)
             except ConnectionClosed:
                 self._forget()  # nothing more can be sent; stop queueing
                 return
@@ -187,6 +270,8 @@ class ClientOutbox:
                 logger.exception(f"Sending to client {self.client_id} failed")
                 self.drop("a send to it failed")
                 return
+            finally:
+                self._sending = None
 
     def drop(self, reason: str) -> None:
         """Abort the connection, with no closing handshake, so the browser reconnects."""
@@ -214,6 +299,7 @@ class ClientOutbox:
         self.dropped = True
         self._queue.clear()
         self._waiting_ticks.clear()
+        self._clock.release(self)
 
 
 class SudarshanProxyMixin:
