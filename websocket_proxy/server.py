@@ -2163,7 +2163,8 @@ class WebSocketProxy(SudarshanProxyMixin):  # SUDARSHAN: mixin (M18.2)
                     message["mode"] = client_mode
                     message["broker"] = broker_name if broker_name != "unknown" else client_broker
 
-                    if self._offer_to_outbox(client_id, message):  # SUDARSHAN (M18.2)
+                    stream = (topic_str, client_mode)  # SUDARSHAN (M18.2): ticks merge per stream
+                    if self._offer_to_outbox(client_id, message, stream):
                         continue
 
                     # Add to batch

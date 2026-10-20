@@ -3,7 +3,8 @@
 The proxy used to await every client's send for a tick before reading the next one, and a send
 waits whenever that client's socket buffer is full. One phone on a bad network therefore held
 back every screen's ticks until keepalive gave up on it. Each client now has its own outbox and
-sender; the fan-out only queues.
+sender; the fan-out only queues. A client that falls behind gets the newest tick per stream
+instead of a backlog, and is dropped only once a message to it has waited the stall limit.
 
 These tests run the proxy's real handle_client and zmq_listener against fake browser
 connections and a fake ZeroMQ socket, so they hold against the old fan-out too: there the
@@ -23,6 +24,7 @@ import pytest
 import websocket_proxy  # noqa: F401  (loads the adapter registry before anything else)
 from websocket_proxy import server as proxy_server
 from websocket_proxy.server import WebSocketProxy
+from websocket_proxy.sudarshan_ext import ClientOutbox
 
 USER = "owner"
 KEY = ("RELIANCE", "NSE", 2)
@@ -91,8 +93,12 @@ class _MarketDataServiceStub:
         return True
 
 
-def _tick(ltp: float) -> tuple[str, dict[str, Any]]:
-    return "NSE_RELIANCE_QUOTE", {"symbol": "RELIANCE", "exchange": "NSE", "ltp": ltp}
+def _tick(ltp: float, symbol: str = "RELIANCE") -> tuple[str, dict[str, Any]]:
+    return f"NSE_{symbol}_QUOTE", {"symbol": symbol, "exchange": "NSE", "ltp": ltp}
+
+
+def _ltps(browser: _Browser, symbol: str = "RELIANCE") -> list[float]:
+    return [m["data"]["ltp"] for m in browser.sent if m.get("symbol") == symbol]
 
 
 def _bare_proxy() -> WebSocketProxy:
@@ -123,16 +129,19 @@ async def _settle(rounds: int = 20) -> None:
         await asyncio.sleep(0)
 
 
-async def _serve(proxy: WebSocketProxy, *browsers: _Browser) -> list[asyncio.Task]:
-    """Connect each browser through handle_client, signed in and subscribed to KEY."""
+async def _serve(
+    proxy: WebSocketProxy, *browsers: _Browser, symbols: tuple[str, ...] = ("RELIANCE",)
+) -> list[asyncio.Task]:
+    """Connect each browser through handle_client, signed in and subscribed (Quote)."""
     handlers = [asyncio.create_task(proxy.handle_client(browser)) for browser in browsers]
     await _settle()
     for browser in browsers:
         client_id = id(browser)
         assert client_id in proxy.clients
         proxy.user_mapping[client_id] = USER
-        proxy.subscriptions[client_id] = {json.dumps(ROW)}
-        proxy.subscription_index[KEY].add(client_id)
+        proxy.subscriptions[client_id] = {json.dumps(ROW | {"symbol": s}) for s in symbols}
+        for symbol in symbols:
+            proxy.subscription_index[(symbol, "NSE", 2)].add(client_id)
     return handlers
 
 
@@ -159,8 +168,7 @@ def _no_market_data_service(monkeypatch):
 def test_a_stalled_client_does_not_delay_a_healthy_one() -> None:
     async def scenario() -> None:
         proxy = _bare_proxy()
-        proxy.CLIENT_OUTBOX_LIMIT = 4
-        proxy.CLIENT_SEND_STALL_SECONDS = 30.0
+        proxy.CLIENT_SEND_STALL_SECONDS = 0.5
         healthy, stalled = _Browser(), _Browser(stall=True)
         handlers = await _serve(proxy, healthy, stalled)
         outbox = proxy.__dict__.get("_client_outboxes", {}).get(id(stalled))
@@ -168,18 +176,43 @@ def test_a_stalled_client_does_not_delay_a_healthy_one() -> None:
         took = await _listen(proxy, [_tick(n) for n in range(1, 21)])
         await _settle()
 
-        assert [m["data"]["ltp"] for m in healthy.sent] == list(range(1, 21))
+        # The healthy client keeps up, so nothing of its waits to be merged.
+        assert _ltps(healthy) == list(range(1, 21))
         assert all(m["mode"] == 2 for m in healthy.sent)
-        assert took < 2.0
-        # Twenty ticks behind with room for four: dropped without a closing
-        # handshake, so its browser reconnects and resubscribes.
+        assert took < 0.5  # the listener never waited for the stalled client
+        # The stalled one holds one tick in flight and the newest one waiting.
+        (waiting,) = outbox._queue
+        assert json.loads(waiting[1])["data"]["ltp"] == 20
+
+        await asyncio.sleep(0.8)
+        # Dropped without a closing handshake, so its browser reconnects and
+        # resubscribes; its sender ended by itself, with no error left behind.
         assert stalled.aborted == 1
         assert id(stalled) not in proxy.clients  # cleanup_client ran for it
         assert id(stalled) not in proxy.subscription_index.get(KEY, set())
-        # Its sender was stopped mid-send, cleanly: cancelled, not failed.
-        assert outbox is not None and outbox.task.cancelled()
+        assert outbox.task.done() and not outbox.task.cancelled()
+        assert outbox.task.exception() is None
 
         await _hang_up(proxy, handlers, healthy)
+
+    asyncio.run(scenario())
+
+
+def test_a_client_leaving_mid_send_stops_its_sender_cleanly() -> None:
+    """Cancelled, not failed: no task exception is left unretrieved."""
+
+    async def scenario() -> None:
+        proxy = _bare_proxy()
+        stalled = _Browser(stall=True)
+        handlers = await _serve(proxy, stalled)
+        outbox = proxy.__dict__["_client_outboxes"][id(stalled)]
+
+        await _listen(proxy, [_tick(1.0)])
+        await _hang_up(proxy, handlers, stalled)
+        await _settle()
+
+        assert outbox.task.cancelled()
+        assert stalled.aborted == 0
 
     asyncio.run(scenario())
 
@@ -204,20 +237,145 @@ def test_a_socket_that_takes_nothing_is_dropped_after_the_stall_limit() -> None:
     asyncio.run(scenario())
 
 
-def test_a_slow_client_that_keeps_up_gets_every_tick_in_order() -> None:
+def test_a_client_that_falls_behind_gets_the_newest_tick_of_each_stream() -> None:
     async def scenario() -> None:
         proxy = _bare_proxy()
-        proxy.CLIENT_OUTBOX_LIMIT = 64
-        slow = _Browser(delay=0.002)
-        handlers = await _serve(proxy, slow)
+        slow = _Browser(delay=0.01)
+        handlers = await _serve(proxy, slow, symbols=("RELIANCE", "SBIN"))
 
-        await _listen(proxy, [_tick(n) for n in range(1, 51)])
+        frames = []
+        for n in range(1, 51):
+            frames += [_tick(n), _tick(1000 + n, "SBIN")]
+        await _listen(proxy, frames)
         await asyncio.sleep(0.5)
 
-        assert [m["data"]["ltp"] for m in slow.sent] == list(range(1, 51))
+        for symbol, last in (("RELIANCE", 50), ("SBIN", 1050)):
+            ltps = _ltps(slow, symbol)
+            assert ltps[-1] == last  # nothing newer is ever lost
+            assert ltps == sorted(set(ltps))  # in order, none twice
+            assert len(ltps) < 50  # the backlog was merged, not queued
         assert slow.aborted == 0
 
         await _hang_up(proxy, handlers, slow)
+
+    asyncio.run(scenario())
+
+
+def test_a_consumer_pausing_briefly_is_not_dropped_however_much_arrives() -> None:
+    """The limit is the age of the oldest waiting message, not a count: a local consumer
+    that stops reading for a moment while thousands of ticks arrive stays connected."""
+
+    async def scenario() -> None:
+        proxy = _bare_proxy()
+        proxy.CLIENT_SEND_STALL_SECONDS = 1.0
+        symbols = tuple(f"S{i}" for i in range(30))
+        paused = _Browser()
+        handlers = await _serve(proxy, paused, symbols=symbols)
+        paused_once = asyncio.Event()  # its first send takes 0.3 s, the rest none
+
+        async def send(text: str) -> None:
+            if not paused_once.is_set():
+                paused_once.set()
+                await asyncio.sleep(0.3)
+            paused.sent.append(json.loads(text))
+
+        paused.send = send
+        await _listen(proxy, [_tick(n, s) for n in range(1, 101) for s in symbols])
+        await asyncio.sleep(0.5)
+
+        assert paused.aborted == 0
+        assert {s: _ltps(paused, s)[-1] for s in symbols} == dict.fromkeys(symbols, 100)
+        assert len(paused.sent) < 3000
+
+        await _hang_up(proxy, handlers, paused)
+
+    asyncio.run(scenario())
+
+
+def test_a_client_whose_oldest_message_waits_too_long_is_dropped() -> None:
+    """A socket that takes a little, but so slowly that what it shows is older than the
+    stall limit, is dropped like one that takes nothing."""
+
+    async def scenario() -> None:
+        proxy = _bare_proxy()
+        proxy.CLIENT_SEND_STALL_SECONDS = 0.3
+        symbols = tuple(f"S{i}" for i in range(20))
+        trickle = _Browser(delay=0.05)
+        handlers = await _serve(proxy, trickle, symbols=symbols)
+
+        await _listen(proxy, [_tick(n, s) for n in range(1, 4) for s in symbols])
+        await asyncio.sleep(1.2)
+
+        assert trickle.aborted == 1
+        assert 0 < len(trickle.sent) < 20
+
+        await _hang_up(proxy, handlers)
+
+    asyncio.run(scenario())
+
+
+class _SlowBrowser(_Browser):
+    """A browser on a slow link: each send takes 50 ms."""
+
+    def __init__(self) -> None:
+        super().__init__(delay=0.05)
+
+
+class _SubWithReply(_Sub):
+    """Replays frames; just before frame `at`, the proxy sends the client a reply."""
+
+    def __init__(self, proxy, frames, client_id: int, at: int):
+        super().__init__(proxy, frames)
+        self.client_id, self.at, self.served = client_id, at, 0
+
+    async def recv_multipart(self):
+        if self.served == self.at:
+            reply = {"type": "subscribe", "status": "success"}
+            await self.proxy.send_message(self.client_id, reply)
+        self.served += 1
+        return await super().recv_multipart()
+
+
+def test_a_reply_does_not_overtake_ticks_queued_before_it() -> None:
+    """The review's slow-client ordering case: five ticks wait behind a slow send, then a
+    reply is sent. The waiting ticks merge into the newest, and the reply comes last."""
+
+    async def scenario() -> None:
+        proxy = _bare_proxy()
+        browser = _SlowBrowser()
+        handlers = await _serve(proxy, browser)
+
+        await _listen(proxy, [_tick(float(n)) for n in range(1, 6)])
+        await proxy.send_message(id(browser), {"type": "subscribe", "status": "success"})
+        await asyncio.sleep(0.4)
+
+        assert [m.get("type") for m in browser.sent] == ["market_data", "market_data", "subscribe"]
+        assert _ltps(browser) == [1.0, 5.0]
+        await _hang_up(proxy, handlers, browser)
+
+    asyncio.run(scenario())
+
+
+def test_a_tick_never_merges_across_a_reply() -> None:
+    """Ticks 1 and 2, a reply, ticks 3 and 4: tick 3 must not take tick 2's place ahead of
+    the reply, so the client sees 1, 2, the reply, then the newest tick, 4."""
+
+    async def scenario() -> None:
+        proxy = _bare_proxy()
+        browser = _SlowBrowser()
+        handlers = await _serve(proxy, browser)
+
+        proxy.running = True
+        frames = [_tick(float(n)) for n in range(1, 5)]
+        proxy.socket = _SubWithReply(proxy, frames, id(browser), at=2)
+        await asyncio.wait_for(proxy.zmq_listener(), 5)
+        await asyncio.sleep(0.4)
+
+        sequence = [
+            m["data"]["ltp"] if m["type"] == "market_data" else m["type"] for m in browser.sent
+        ]
+        assert sequence == [1.0, 2.0, "subscribe", 4.0]
+        await _hang_up(proxy, handlers, browser)
 
     asyncio.run(scenario())
 
@@ -287,5 +445,30 @@ def test_many_clients_coming_and_going_leave_no_outbox_or_task_behind() -> None:
         assert proxy.__dict__.get("_client_outboxes", {}) == {}
         assert proxy.clients == {}
         assert len(asyncio.all_tasks()) == baseline
+
+    asyncio.run(scenario())
+
+
+def test_an_outbox_whose_connection_closed_stops_queueing() -> None:
+    """Between the close and cleanup_client the fan-out still offers; nothing may pile up."""
+    from websockets.exceptions import ConnectionClosedOK
+    from websockets.frames import Close
+
+    class _Closed:
+        transport = None
+
+        async def send(self, _text: str) -> None:
+            raise ConnectionClosedOK(Close(1000, ""), Close(1000, ""), True)
+
+    async def scenario() -> None:
+        outbox = ClientOutbox(1, _Closed(), 10.0)
+        outbox.offer("{}", ("NSE_RELIANCE_QUOTE", 2))
+        await _settle()
+        assert outbox.task.done() and outbox.task.exception() is None
+
+        for n in range(100):
+            outbox.offer("{}", (f"NSE_S{n}_QUOTE", 2))
+            outbox.offer('{"type": "pong"}')
+        assert len(outbox._queue) == 0
 
     asyncio.run(scenario())

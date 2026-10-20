@@ -19,6 +19,8 @@ import asyncio as aio
 import json
 import math
 import os
+import time
+from collections import deque
 from typing import Any, NamedTuple
 
 from websockets.exceptions import ConnectionClosed
@@ -82,41 +84,79 @@ class BrokerLinger(NamedTuple):
 class ClientOutbox:
     """One client's outgoing messages, sent in order by its own task.
 
-    The fan-out only queues, so it never waits for a client: one slow phone can
-    no longer hold back every other screen's ticks. A client more than `limit`
-    messages behind, or whose connection takes nothing for `stall_seconds`, is
-    dropped without a closing handshake. Its browser sees a lost connection,
-    reconnects, resubscribes and starts again from fresh prices.
+    The fan-out and send_message only queue, so they never wait for a client: one
+    slow phone no longer holds back another screen's ticks.
+
+    A client that falls behind gets the newest tick, not a backlog. While a tick
+    for one stream (topic and mode) still waits, a newer one for that stream takes
+    its place in the queue, which is the trailing-edge coalescing server.py's
+    fan-out comment asks for. A client that keeps up has nothing waiting and so
+    gets every tick. Replies, errors and order updates are never merged or
+    dropped, and keep their order relative to ticks: a tick is merged only into
+    one queued after the last of them.
+
+    The one drop is the stall backstop: a message that has waited `stall_seconds`
+    unsent, which a socket taking nothing, or so little that the oldest news it
+    has not been given is that old, both come to. It is measured in time, not in
+    messages, so a local consumer that pauses for a second or two loses nothing
+    but merged ticks. The connection is then aborted without a closing handshake;
+    the browser reconnects, resubscribes and starts again from fresh prices.
+
+    Memory: one waiting tick per stream between two replies, plus the replies,
+    and nothing older than the stall limit. A closed connection queues nothing.
     """
 
-    def __init__(self, client_id, websocket, limit: int, stall_seconds: float):
+    def __init__(self, client_id, websocket, stall_seconds: float):
         self.client_id = client_id
         self.websocket = websocket
         self.stall_seconds = stall_seconds
-        self.queue: aio.Queue = aio.Queue(maxsize=limit)
         self.dropped = False
+        # Waiting messages, oldest first: [stream or None, frame, queued at, replies so far].
+        self._queue: deque[list] = deque()
+        self._waiting_ticks: dict[Any, list] = {}  # stream -> its tick still in _queue
+        self._replies = 0  # replies (anything not a tick) queued so far
+        self._wake = aio.Event()
         self.task = aio.get_running_loop().create_task(
             self._run(), name=f"ws-client-outbox-{client_id}"
         )
 
-    def offer(self, frame: str) -> None:
-        """Queue one message. Never waits; drops the client when it is too far behind."""
+    def offer(self, frame: str, stream: Any = None) -> None:
+        """Queue one message; never waits. `stream` marks a tick that a newer one may replace."""
         if self.dropped:
             return
-        try:
-            self.queue.put_nowait(frame)
-        except aio.QueueFull:
-            self.drop(f"it fell {self.queue.maxsize} messages behind")
+        if stream is not None:
+            waiting = self._waiting_ticks.get(stream)
+            if waiting is not None and waiting[3] == self._replies:
+                waiting[1] = frame  # the newest tick, in the waiting one's place
+                return
+            entry = [stream, frame, time.monotonic(), self._replies]
+            self._waiting_ticks[stream] = entry
+        else:
+            self._replies += 1
+            entry = [None, frame, time.monotonic(), self._replies]
+        self._queue.append(entry)
+        self._wake.set()
 
     async def _run(self) -> None:
         while True:
-            frame = await self.queue.get()
+            if not self._queue:
+                self._wake.clear()
+                await self._wake.wait()
+                continue
+            entry = self._queue.popleft()
+            stream, frame, queued_at = entry[0], entry[1], entry[2]
+            if stream is not None and self._waiting_ticks.get(stream) is entry:
+                del self._waiting_ticks[stream]
+            left = self.stall_seconds - (time.monotonic() - queued_at)
             try:
-                await aio.wait_for(self.websocket.send(frame), self.stall_seconds)
+                if left <= 0:
+                    raise TimeoutError
+                await aio.wait_for(self.websocket.send(frame), left)
             except TimeoutError:
-                self.drop(f"its connection took nothing for {self.stall_seconds:g}s")
+                self.drop(f"a message to it waited {self.stall_seconds:g}s unsent")
                 return
             except ConnectionClosed:
+                self._forget()  # nothing more can be sent; stop queueing
                 return
             except Exception:
                 logger.exception(f"Sending to client {self.client_id} failed")
@@ -127,9 +167,7 @@ class ClientOutbox:
         """Abort the connection, with no closing handshake, so the browser reconnects."""
         if self.dropped:
             return
-        self.dropped = True
-        while not self.queue.empty():
-            self.queue.get_nowait()
+        self._forget()
         logger.warning(
             f"Disconnecting client {self.client_id} because {reason}. Its screen "
             f"reconnects and resubscribes by itself."
@@ -144,8 +182,13 @@ class ClientOutbox:
 
     def close(self) -> None:
         """The client has gone: stop the sender and forget what is queued."""
-        self.dropped = True
+        self._forget()
         self.task.cancel()
+
+    def _forget(self) -> None:
+        self.dropped = True
+        self._queue.clear()
+        self._waiting_ticks.clear()
 
 
 class SudarshanProxyMixin:
@@ -156,10 +199,8 @@ class SudarshanProxyMixin:
     broker_linger_seconds: float = 0.0
     _linger_sleep = staticmethod(aio.sleep)
 
-    # Per-client outboxes (see ClientOutbox). 2048 messages is about 10 s of a busy
-    # option chain; 10 s of a socket taking nothing is well inside the 40 s
-    # keepalive would otherwise need to notice it.
-    CLIENT_OUTBOX_LIMIT = 2048
+    # Per-client outboxes (see ClientOutbox): a client is dropped once a message to
+    # it has waited this long, well inside the 40 s keepalive would otherwise need.
     CLIENT_SEND_STALL_SECONDS = 10.0
 
     # ------------------------------------------------------------------------
@@ -206,16 +247,18 @@ class SudarshanProxyMixin:
             return False
         return self._begin_broker_linger(user_id, adapter, broker_name)
 
-    def _offer_to_outbox(self, client_id, message) -> bool:
-        """From send_message: queue in the client's outbox, in order with its ticks.
+    def _offer_to_outbox(self, client_id, message, stream=None) -> bool:
+        """From send_message and the fan-out: queue in the client's outbox.
 
-        Returns False for a client without an outbox (a proxy driven without
-        handle_client, as the tests do), which is then sent to directly.
+        A reply goes in order with the client's ticks. A tick names its `stream`
+        (the topic and the client's mode), so a newer tick replaces one still
+        waiting. Returns False for a client without an outbox (a proxy driven
+        without handle_client, as the tests do), which is then sent to directly.
         """
         outbox = self._outboxes().get(client_id)
         if outbox is None:
             return False
-        outbox.offer(json.dumps(message))
+        outbox.offer(json.dumps(message), stream)
         return True
 
     # ------------------------------------------------------------------------
@@ -342,7 +385,7 @@ class SudarshanProxyMixin:
         """From handle_client: everything this client is sent goes through its outbox."""
         self._close_outbox(client_id)
         self._outboxes()[client_id] = ClientOutbox(
-            client_id, websocket, self.CLIENT_OUTBOX_LIMIT, self.CLIENT_SEND_STALL_SECONDS
+            client_id, websocket, self.CLIENT_SEND_STALL_SECONDS
         )
 
     def _close_outbox(self, client_id) -> None:
