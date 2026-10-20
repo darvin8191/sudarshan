@@ -4,6 +4,7 @@ import { type QuotesData, tradingApi } from '@/api/trading'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useMarketData } from '@/hooks/useMarketData'
 import { cn } from '@/lib/utils'
+import { SymbolChartLink } from '@/sudarshan/chart/SymbolChartLink'
 import { directionOf, formatPercent, formatPrice } from './format'
 import { useNow } from './hooks'
 import { LiveLine } from './LiveLine'
@@ -136,11 +137,15 @@ export function useIndexSnapshot(
 }
 
 function IndexTile({
+  symbol,
+  exchange,
   label,
   view,
   loading,
   stale,
 }: {
+  symbol: string
+  exchange: string
   label: string
   view: IndexView
   loading: boolean
@@ -155,10 +160,18 @@ function IndexTile({
   return (
     <li
       data-stale={stale || undefined}
-      className="flex min-w-0 flex-col gap-px rounded-[0.875rem] border bg-card px-2 pt-2.5 pb-2 min-[360px]:px-2.5"
+      className="relative flex min-w-0 flex-col gap-px rounded-[0.875rem] border bg-card px-2 pt-2.5 pb-2 min-[360px]:px-2.5"
     >
       <span className="truncate text-[0.6875rem] font-semibold tracking-[0.05em] text-muted-foreground">
-        {label}
+        {/* The whole tile opens the index's phone chart (M4.15); the figures
+            stay plain text, read as they are rather than as a link's name. */}
+        <SymbolChartLink
+          symbol={symbol}
+          exchange={exchange}
+          className="after:absolute after:inset-0 after:rounded-[0.875rem] focus-visible:ring-0 focus-visible:after:ring-2 focus-visible:after:ring-ring"
+        >
+          {label}
+        </SymbolChartLink>
       </span>
       {loading ? (
         <Skeleton className="my-1 h-5 w-[4.5rem] max-w-full" />
@@ -208,8 +221,8 @@ function IndexTile({
  * open, a level that has stopped arriving is muted and marked with a clock;
  * the line underneath says "Live" only while ticks are coming in, and
  * "Reconnecting" with the age of the levels while the socket is down (after
- * the phone wakes, say). Shown only when the account has an API key, which
- * the feed and the quote call need.
+ * the phone wakes, say). A tile opens its index's phone chart (M4.15). Shown
+ * only when the account has an API key, which the feed and the quote call need.
  */
 export function IndexStrip({
   apiKey,
@@ -251,6 +264,8 @@ export function IndexStrip({
         {rows.map((row) => (
           <IndexTile
             key={row.symbol}
+            symbol={row.symbol}
+            exchange={row.exchange}
             label={row.label}
             view={row.view}
             loading={empty && snapshot.status === 'loading'}

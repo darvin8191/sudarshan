@@ -5,7 +5,9 @@
  * that stays on the previous close, a stale mark that appears only when ticks
  * are due and missing, and subscriptions that close when the strip goes away.
  */
-import { act, render, screen } from '@testing-library/react'
+import { act, render as renderBare, screen } from '@testing-library/react'
+import type { ReactElement } from 'react'
+import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/lib/MarketDataManager', () => import('@/test/marketDataHarness'))
@@ -20,6 +22,9 @@ import { IndexStrip, SNAPSHOT_MAX_AGE_MS } from './IndexStrip'
 import { STALE_MS } from './live'
 
 const MINUS = '−'
+
+/** Inside a router, since each tile links to its index's phone chart. */
+const render = (ui: ReactElement) => renderBare(ui, { wrapper: MemoryRouter })
 const OPEN = () => true
 const CLOSED = () => false
 
@@ -198,6 +203,23 @@ describe('IndexStrip', () => {
     await pass(60_000)
     expect(container.querySelectorAll('[data-stale]')).toHaveLength(0)
     expect(line(container)).toHaveTextContent('Market closed')
+  })
+
+  it("opens each index's phone chart from its tile (M4.15)", async () => {
+    render(<IndexStrip apiKey="key" marketOpen={CLOSED} />)
+    await settle()
+
+    const links = tiles().map((tile) => tile.querySelector('a'))
+    expect(links.map((link) => link?.getAttribute('href'))).toEqual([
+      '/chart/NSE_INDEX/NIFTY',
+      '/chart/NSE_INDEX/BANKNIFTY',
+      '/chart/NSE_INDEX/INDIAVIX',
+    ])
+    expect(screen.getByRole('link', { name: 'Open the chart for NIFTY on NSE_INDEX' })).toBe(
+      links[0]
+    )
+    // The figures stay outside the link, read as they are.
+    expect(links[0]).toHaveTextContent(/^NIFTY 50$/)
   })
 
   it('closes every subscription when it goes away', async () => {

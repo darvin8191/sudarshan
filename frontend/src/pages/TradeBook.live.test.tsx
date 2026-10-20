@@ -49,7 +49,8 @@ vi.mock('@/components/socket/SocketProvider', () => ({
 }))
 
 import { RESYNC_MS } from '@/sudarshan/dashboard/live'
-import { render } from '@/test/test-utils'
+import { fakeScreen } from '@/test/screenWidth'
+import { render, screen } from '@/test/test-utils'
 import TradeBook from './TradeBook'
 
 async function pass(ms: number) {
@@ -100,5 +101,46 @@ describe('Trade book, live', () => {
     setVisibility('visible')
     await pass(0)
     expect(getTrades).toHaveBeenCalledTimes(2)
+  })
+})
+
+// SUDARSHAN M4.15: on a phone a trade's symbol opens the phone chart; a wide
+// screen keeps upstream's link into the terminal.
+describe('Trade book chart link', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("opens the phone chart from a trade's symbol on a phone, the terminal on a wide screen", async () => {
+    const CALL = 'NIFTY28OCT2525900CE'
+    getTrades.mockResolvedValue({
+      status: 'success',
+      data: [
+        {
+          symbol: CALL,
+          exchange: 'NFO',
+          action: 'BUY',
+          quantity: 65,
+          average_price: 120,
+          trade_value: 7800,
+          product: 'MIS',
+          orderid: '251020000598204',
+          timestamp: '09:20:05',
+        },
+      ],
+    })
+    const screenNow = fakeScreen('phone')
+    render(<TradeBook />)
+    await pass(0)
+    expect(screen.getByRole('link', { name: `Open the chart for ${CALL} on NFO` })).toHaveAttribute(
+      'href',
+      `/chart/NFO/${CALL}`
+    )
+
+    act(() => screenNow.turn('wide'))
+    expect(screen.getByRole('link', { name: `Open chart for ${CALL} on NFO` })).toHaveAttribute(
+      'href',
+      `/trading?symbol=${CALL}&exchange=NFO`
+    )
   })
 })

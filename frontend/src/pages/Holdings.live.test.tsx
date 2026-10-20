@@ -54,6 +54,7 @@ vi.mock('@/components/socket/SocketProvider', () => ({
 }))
 
 import { feed } from '@/test/marketDataHarness'
+import { fakeScreen } from '@/test/screenWidth'
 import { render, screen } from '@/test/test-utils'
 import Holdings from './Holdings'
 
@@ -172,5 +173,26 @@ describe('Holdings, live', () => {
       answer({ status: 'success', data: { holdings: [SBIN], statistics: STATS } })
     )
     expect(screen.queryByText(/being refreshed/)).toBeNull()
+  })
+})
+
+// SUDARSHAN M4.15: a holding's symbol opens the phone chart on a phone; a wide
+// screen keeps upstream's bare symbol.
+describe('Holdings chart link', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("opens the phone chart from a holding's symbol on a phone, and only there", async () => {
+    const screenNow = fakeScreen('phone')
+    render(<Holdings />)
+    await pass(0)
+    expect(screen.getByRole('link', { name: 'Open the chart for SBIN on NSE' })).toHaveAttribute(
+      'href',
+      '/chart/NSE/SBIN'
+    )
+
+    act(() => screenNow.turn('wide'))
+    expect(screen.queryByRole('link', { name: /chart for SBIN/ })).toBeNull()
   })
 })

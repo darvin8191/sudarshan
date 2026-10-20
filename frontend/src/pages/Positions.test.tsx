@@ -14,8 +14,9 @@
  * Close". Only this table had missed it.
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Position } from '@/types/trading'
+import { fakeScreen } from '@/test/screenWidth'
 import { render, screen, within } from '@/test/test-utils'
 
 const mocks = vi.hoisted(() => ({
@@ -178,5 +179,35 @@ describe('Positions close button', () => {
     await renderPositions([CLOSED_POSITION])
 
     expect(screen.getByRole('button', { name: /Close All/ })).toBeDisabled()
+  })
+})
+
+// SUDARSHAN M4.15: on a phone a symbol opens the phone chart; a wide screen keeps
+// upstream's link into the terminal.
+describe('Positions chart link', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+  })
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("opens the phone chart from a position's symbol on a phone", async () => {
+    fakeScreen('phone')
+    await renderPositions([OPEN_POSITION])
+
+    expect(
+      screen.getByRole('link', { name: `Open the chart for ${OPEN_POSITION.symbol} on NFO` })
+    ).toHaveAttribute('href', `/chart/NFO/${OPEN_POSITION.symbol}`)
+  })
+
+  it('opens the terminal from it on a wide screen, as upstream does', async () => {
+    fakeScreen('wide')
+    await renderPositions([OPEN_POSITION])
+
+    expect(
+      screen.getByRole('link', { name: `Open chart for ${OPEN_POSITION.symbol} on NFO` })
+    ).toHaveAttribute('href', `/trading?symbol=${OPEN_POSITION.symbol}&exchange=NFO`)
   })
 })

@@ -14,7 +14,6 @@ import {
 } from 'lucide-react'
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { tradingApi } from '@/api/trading'
-import { ChartSymbolLink } from '@/components/trading/ChartSymbolLink'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import {
   AlertDialog,
@@ -59,6 +58,8 @@ import { onModeChange } from '@/stores/themeStore'
 import { useBookFeed } from '@/sudarshan/books/feed'
 import { TickPrice } from '@/sudarshan/books/LiveFigures'
 import { useBookSync, useLatestRead } from '@/sudarshan/books/useBookSync'
+// SUDARSHAN M4.15: on a phone, a symbol opens the phone chart (src/sudarshan/chart).
+import { BookSymbolLink } from '@/sudarshan/chart/BookSymbolLink'
 import { useMarketOpen } from '@/sudarshan/dashboard/hooks'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
 import type { Position } from '@/types/trading'
@@ -963,7 +964,7 @@ export default function Positions() {
                             return (
                               <TableRow key={`${position.symbol}-${position.exchange}-${index}`}>
                                 <TableCell className="w-[140px] font-medium">
-                                  <ChartSymbolLink
+                                  <BookSymbolLink
                                     symbol={position.symbol}
                                     exchange={position.exchange}
                                   />

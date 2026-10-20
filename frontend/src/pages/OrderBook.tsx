@@ -15,7 +15,6 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { tradingApi } from '@/api/trading'
-import { ChartSymbolLink } from '@/components/trading/ChartSymbolLink'
 import GttTab from '@/components/trading/GttTab'
 import {
   AlertDialog,
@@ -74,6 +73,8 @@ import {
 } from '@/sudarshan/books/orderFold'
 import { QuoteStatus } from '@/sudarshan/books/QuoteStatus'
 import { useBookSync, useLatestRead } from '@/sudarshan/books/useBookSync'
+// SUDARSHAN M4.15: on a phone, a symbol opens the phone chart (src/sudarshan/chart).
+import { BookSymbolLink } from '@/sudarshan/chart/BookSymbolLink'
 import { useMarketOpen } from '@/sudarshan/dashboard/hooks'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
 import type { Order, OrderStats } from '@/types/trading'
@@ -795,7 +796,7 @@ export default function OrderBook() {
                         return (
                           <TableRow key={`${order.orderid}-${index}`}>
                             <TableCell className="font-medium">
-                              <ChartSymbolLink symbol={order.symbol} exchange={order.exchange} />
+                              <BookSymbolLink symbol={order.symbol} exchange={order.exchange} />
                             </TableCell>
                             <TableCell>
                               <Badge variant="outline">{order.exchange}</Badge>

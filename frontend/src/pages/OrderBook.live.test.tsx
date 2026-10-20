@@ -67,6 +67,7 @@ vi.mock('@/components/socket/SocketProvider', () => ({
 
 import { notePushedFrame, resetOrderMemoryForTests } from '@/sudarshan/books/orderFold'
 import { feed } from '@/test/marketDataHarness'
+import { fakeScreen } from '@/test/screenWidth'
 import { render, screen, within } from '@/test/test-utils'
 import OrderBook from './OrderBook'
 
@@ -225,5 +226,29 @@ describe('Order book, live', () => {
     expect(screen.getAllByText('₹121.50').length).toBeGreaterThan(0)
     await pass(5 * 60_000)
     expect(getMultiQuotes).toHaveBeenCalledTimes(1)
+  })
+})
+
+// SUDARSHAN M4.15: on a phone an order's symbol opens the phone chart; a wide
+// screen keeps upstream's link into the terminal.
+describe('Order book chart link', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("opens the phone chart from an order's symbol on a phone, the terminal on a wide screen", async () => {
+    const screenNow = fakeScreen('phone')
+    render(<OrderBook />)
+    await pass(0)
+    expect(screen.getByRole('link', { name: `Open the chart for ${CALL} on NFO` })).toHaveAttribute(
+      'href',
+      `/chart/NFO/${CALL}`
+    )
+
+    act(() => screenNow.turn('wide'))
+    expect(screen.getByRole('link', { name: `Open chart for ${CALL} on NFO` })).toHaveAttribute(
+      'href',
+      `/trading?symbol=${CALL}&exchange=NFO`
+    )
   })
 })

@@ -10,7 +10,6 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { tradingApi } from '@/api/trading'
-import { ChartSymbolLink } from '@/components/trading/ChartSymbolLink'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -39,6 +38,8 @@ import { onModeChange } from '@/stores/themeStore'
 // SUDARSHAN: the book re-read (src/sudarshan/books/useBookSync.ts).
 import { useMarketCalendar } from '@/sudarshan/books/market'
 import { useBookSync, useLatestRead } from '@/sudarshan/books/useBookSync'
+// SUDARSHAN M4.15: on a phone, a symbol opens the phone chart (src/sudarshan/chart).
+import { BookSymbolLink } from '@/sudarshan/chart/BookSymbolLink'
 import type { Trade } from '@/types/trading'
 import { showToast } from '@/utils/toast'
 
@@ -559,7 +560,7 @@ export default function TradeBook() {
                   {sortedAndFilteredTrades.map((trade, index) => (
                     <TableRow key={`${trade.orderid}-${index}`}>
                       <TableCell className="font-medium">
-                        <ChartSymbolLink symbol={trade.symbol} exchange={trade.exchange} />
+                        <BookSymbolLink symbol={trade.symbol} exchange={trade.exchange} />
                       </TableCell>
                       <TableCell>
                         <Badge variant="outline">{trade.exchange}</Badge>

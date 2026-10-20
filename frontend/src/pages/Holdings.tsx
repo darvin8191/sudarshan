@@ -31,6 +31,8 @@ import { onModeChange } from '@/stores/themeStore'
 import { useBookFeed } from '@/sudarshan/books/feed'
 import { TickPrice } from '@/sudarshan/books/LiveFigures'
 import { holdingsMayChange, useBookSync, useLatestRead } from '@/sudarshan/books/useBookSync'
+// SUDARSHAN M4.15: on a phone, a symbol opens the phone chart (src/sudarshan/chart).
+import { BookSymbolLink } from '@/sudarshan/chart/BookSymbolLink'
 import { useMarketOpen } from '@/sudarshan/dashboard/hooks'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
 import type { Holding, HoldingsStats } from '@/types/trading'
@@ -347,7 +349,13 @@ export default function Holdings() {
                       key={`${holding.symbol}-${holding.exchange}-${index}`}
                       data-stale={rowStale(holding) || undefined}
                     >
-                      <TableCell className="font-medium">{holding.symbol}</TableCell>
+                      <TableCell className="font-medium">
+                        <BookSymbolLink
+                          symbol={holding.symbol}
+                          exchange={holding.exchange}
+                          wide="text"
+                        />
+                      </TableCell>
                       <TableCell>
                         <Badge variant="outline">{holding.exchange}</Badge>
                       </TableCell>
