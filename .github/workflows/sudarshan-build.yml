@@ -1,10 +1,10 @@
 # सुदर्शन / SUDARSHAN release build.
-# A release vA.B.C is created (as a pre-release) on a commit of the `sudarshan` branch, through the
-# GitHub UI or the Releases API -> this workflow builds frontend/dist on an ARM64 runner, attaches
-# `frontend-dist.tar.gz` + `frontend-dist.tar.gz.sha256`, and only then marks the release as the
-# latest full release. The server's sudarshan-deploy.timer installs the latest release outside
-# market hours, so a failed build (still a pre-release, no assets) is never deployed.
-# Manual runs (workflow_dispatch) build and test only.
+# The owner publishes a release vA.B.C on the `sudarshan` branch (GitHub website, one tap on a
+# pre-filled link; Claude sessions cannot create releases or tags) -> this workflow builds
+# frontend/dist on an ARM64 runner, attaches `frontend-dist.tar.gz` + `frontend-dist.tar.gz.sha256`
+# and marks the release as the latest. The server's sudarshan-deploy.timer installs the latest
+# release outside market hours. If the build fails, the release is turned into a pre-release so
+# the server keeps the previous one. Manual runs (workflow_dispatch) build and test only.
 name: SUDARSHAN release build
 
 on:
@@ -89,3 +89,11 @@ jobs:
         run: |
           gh release upload "${TAG}" frontend-dist.tar.gz frontend-dist.tar.gz.sha256 --clobber
           gh release edit "${TAG}" --prerelease=false --latest
+
+      - name: Failed build - demote the release so the server ignores it
+        if: failure() && github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: gh release edit "${TAG}" --prerelease --latest=false || true

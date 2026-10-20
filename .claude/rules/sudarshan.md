@@ -92,10 +92,10 @@ Devanagari + Noto Sans Gujarati; wordmark Tiro Devanagari Sanskrit. Numbers via
   `/api/v1/*order*`) needs unit tests + golden vectors + one Analyzer-mode session before merge.
 - Secrets never in the repo: `.env`, `keys/`, `*.db`, `/etc/sudarshan/*` stay ignored/outside.
   Never print tokens, keys, PINs or TOTP secrets in logs, tests, commits or chat.
-- Releases: create a GitHub **pre-release** `vA.B.C` targeting a commit on `sudarshan` (Releases
-  API, e.g. `gh api repos/{owner}/{repo}/releases -f tag_name=vA.B.C -f target_commitish=<sha>
-  -F prerelease=true`; cloud sessions cannot push tags). `sudarshan-build.yml` builds
-  `frontend-dist.tar.gz` (+ `.sha256`), attaches them and only then marks the release latest; the
+- Releases are published **by the owner** (Claude sessions cannot create releases or tags): send
+  him the pre-filled link `https://github.com/<owner>/sudarshan/releases/new?tag=vA.B.C&target=sudarshan&title=SUDARSHAN%20vA.B.C`
+  and he taps Publish. `sudarshan-build.yml` then builds `frontend-dist.tar.gz` (+ `.sha256`),
+  attaches them and marks the release latest (a failed build is demoted to pre-release). The
   server's `sudarshan-deploy.timer` installs the latest release only outside 09:00–15:45 IST on
   trading days and rolls back on a failed health check.
 - Before finishing a task: run the relevant tests, `npm run lint` for frontend changes, and update
