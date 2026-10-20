@@ -159,6 +159,18 @@ describe('useLiveQuote', () => {
     })
   })
 
+  it('says nothing has traded yet for a contract with no tick and no volume today', async () => {
+    getQuotes.mockResolvedValue({ status: 'success', data: { ...QUOTE, volume: 0 } })
+    const { result } = renderHook(() =>
+      useLiveQuote('NIFTY28OCT2525900CE', 'NFO', { mode: 'Quote' })
+    )
+    await settle(1_000)
+    expect(result.current.feed.noTrade).toBe(true)
+
+    act(() => feed.push('NIFTY28OCT2525900CE', 'NFO', { ltp: 131, volume: 65 }))
+    expect(result.current.feed.noTrade).toBe(false)
+  })
+
   it('keeps the snapshot over a tick older than it', async () => {
     act(() => feed.push('NIFTY28OCT2525900CE', 'NFO', { ltp: 128 }, 'websocket', Date.now() - 1))
     const { result } = renderHook(() =>

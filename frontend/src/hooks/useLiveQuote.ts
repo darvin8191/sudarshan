@@ -104,6 +104,8 @@ export interface UseLiveQuoteResult {
     lastUpdateAt: number | null
     due: number
     connected: boolean
+    /** No tick has come and the day's volume is 0: nothing has traded yet, so nothing is late. */
+    noTrade: boolean
   }
   /** SUDARSHAN: the market calendar this hook reads. */
   calendar: Pick<
@@ -432,6 +434,7 @@ export function useLiveQuote(
     lastUpdateAt,
     due: enabled && hasSymbol ? 1 : 0,
     connected: wsAuthenticated && !wsPaused,
+    noTrade: lastTickAt === null && dataWithChange.volume === 0,
   }
 
   return {

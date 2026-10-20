@@ -8,8 +8,9 @@ export const AWAY_MS = 15_000
  * hidden (the phone woke, the trader came back from another app or tab).
  *
  * Its own listener rather than `usePageVisibility`'s `timeSinceHidden`, which
- * reads zero by the time `wasHidden` is set (its timer update runs in the same
- * batch and wins), so a check against it never fires.
+ * read zero by the time `wasHidden` was set (fixed there too), and which
+ * delivers a return a task late and only for 100 ms, so a check against it is
+ * easy to miss.
  */
 export function useOnReturn(onReturn: () => void, awayMs: number | null = AWAY_MS, enabled = true) {
   const handler = useRef(onReturn)
