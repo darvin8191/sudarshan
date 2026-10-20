@@ -9,6 +9,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { onModeChange, useThemeStore } from '@/stores/themeStore'
 // SUDARSHAN: the current MTM live, from the position book moved by ticks (M6.5).
 import { useMarketCalendar } from '@/sudarshan/books/market'
+import { istTime } from '@/sudarshan/books/time'
 import { useBookSync, useLatestRead } from '@/sudarshan/books/useBookSync'
 import { directionOf } from '@/sudarshan/dashboard/format'
 import { useNow } from '@/sudarshan/dashboard/hooks'
@@ -129,6 +130,8 @@ export default function PnLTracker() {
   // State
   const [isLoading, setIsLoading] = useState(false)
   const [isCapturing, setIsCapturing] = useState(false)
+  // SUDARSHAN: when the tracker's own figures were last worked out.
+  const [trackerAt, setTrackerAt] = useState<number | null>(null)
   const [metrics, setMetrics] = useState({
     currentMtm: 0,
     maxMtm: 0,
@@ -364,6 +367,8 @@ export default function PnLTracker() {
         const data: PnLData = result.data
 
         // Update metrics
+        // SUDARSHAN: and when, for the line that says where each figure comes from.
+        setTrackerAt(Date.now())
         setMetrics({
           currentMtm: data.current_mtm,
           maxMtm: data.max_mtm,
@@ -659,6 +664,14 @@ export default function PnLTracker() {
             </CardContent>
           </Card>
         </div>
+
+        {/* SUDARSHAN: where each figure comes from, in a trader's words. */}
+        <p className="-mt-2 mb-4 text-xs text-muted-foreground" data-testid="mtm-sources">
+          Current MTM is your open positions as the broker reports them, moving with every tick. Max
+          MTM, Min MTM, Max Drawdown and the curve are worked out from today's trades and one-minute
+          prices{trackerAt === null ? '' : `, as at ${istTime(trackerAt)}`}; Refresh brings them up
+          to date.
+        </p>
 
         {/* Chart Container */}
         <Card>
