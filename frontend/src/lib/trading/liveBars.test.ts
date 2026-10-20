@@ -1,6 +1,7 @@
 import { type Bar, SessionCalendar } from 'openalgo-charts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  HistoryResync,
   LiveBarBuilder,
   LiveBarClock,
   type LiveBarUpdate,
@@ -479,5 +480,43 @@ describe('upsertLiveBar', () => {
       [120, 3],
       [180, 4],
     ])
+  })
+})
+
+describe('HistoryResync', () => {
+  it('re-reads every 30 seconds while ticks carry no volume, then every two minutes', () => {
+    vi.useFakeTimers()
+    const b = new LiveBarBuilder({ interval: '1m', session: nse() })
+    b.seed(bar(tue(10, 0), 100))
+    const refresh = vi.fn()
+    const resync = new HistoryResync({ builder: () => b, refresh })
+    resync.start()
+    vi.advanceTimersByTime(30_000)
+    expect(refresh).toHaveBeenCalledTimes(1)
+    vi.advanceTimersByTime(30_000)
+    expect(refresh).toHaveBeenCalledTimes(2)
+    b.onTick({ time: tue(10, 0, 30), price: 100, dayVolume: 1_000 })
+    vi.advanceTimersByTime(30_000) // the wait already set runs out
+    expect(refresh).toHaveBeenCalledTimes(3)
+    vi.advanceTimersByTime(119_000)
+    expect(refresh).toHaveBeenCalledTimes(3)
+    vi.advanceTimersByTime(1_000)
+    expect(refresh).toHaveBeenCalledTimes(4)
+    resync.stop()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('skips a re-read nobody is looking at', () => {
+    vi.useFakeTimers()
+    const refresh = vi.fn()
+    let visible = false
+    const resync = new HistoryResync({ builder: () => null, refresh, active: () => visible })
+    resync.start()
+    vi.advanceTimersByTime(30_000)
+    expect(refresh).not.toHaveBeenCalled()
+    visible = true
+    vi.advanceTimersByTime(30_000)
+    expect(refresh).toHaveBeenCalledOnce()
+    resync.stop()
   })
 })

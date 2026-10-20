@@ -110,7 +110,13 @@ import {
   readStoredIndicators,
   type StoredIndicatorRecord,
 } from './indicatorTemplates'
-import { LiveBarBuilder, LiveBarClock, type LiveBarUpdate, upsertLiveBar } from './liveBars'
+import {
+  HistoryResync,
+  LiveBarBuilder,
+  LiveBarClock,
+  type LiveBarUpdate,
+  upsertLiveBar,
+} from './liveBars'
 import { type LiveStatus, LiveStatusTracker } from './liveStatus'
 import { FrameExtrasTap } from './liveTicks'
 import { openInterestCapability } from './openInterest'
@@ -1007,18 +1013,6 @@ const LEGEND_GAP = 6
 const nowSec = () => Math.floor(Date.now() / 1000)
 
 /**
- * How often history is read again for the forming bar while ticks carry no
- * traded volume. A depth update without one leaves history as the only source
- * of the bar's volume, and a volume pane frozen for a whole bar reads as a
- * dead feed.
- */
-const RESYNC_WITHOUT_TICK_VOLUME_MS = 30_000
-/**
- * The same once ticks carry the day's volume: the stream moves the bar, and
- * this is only the periodic re-sync behind it.
- */
-const RESYNC_MS = 120_000
-/**
  * The order and position book's re-sync. Every order event already refreshes
  * the book; this catches one the stream never delivered.
  */
@@ -1233,8 +1227,19 @@ export class TradingTerminal {
   })
   /** Reads the fields a depth frame carries besides the price (the day's volume above all). */
   private readonly frames = new FrameExtrasTap()
-  /** The slow history re-sync; see {@link scheduleResync}. */
-  private resyncTimer: ReturnType<typeof setTimeout> | null = null
+  /**
+   * The history re-sync behind the stream, shared with the phone chart: fast
+   * while ticks carry no traded volume, slow once they do. A hidden tab skips
+   * it unless an alert is waiting on the answer, as the controller's own
+   * repairs do.
+   */
+  private readonly resync = new HistoryResync({
+    builder: () => this.builder,
+    refresh: () => {
+      if (this.data && this.sym) void this.data.refresh()
+    },
+    active: () => document.visibilityState !== 'hidden' || this.alertsArmed(),
+  })
   /** Coalesces the book refreshes a burst of order events asks for. */
   private bookRefreshTimer: ReturnType<typeof setTimeout> | null = null
   /** The stream has been open before, so the next open is a reconnect. */
@@ -2184,27 +2189,6 @@ export class TradingTerminal {
       this.bookRefreshTimer = null
       if (!this.destroyed) void this.pollBook()
     }, 250)
-  }
-
-  /**
-   * The history re-sync for the forming bar: every 30 seconds while ticks
-   * carry no traded volume, every two minutes once they do. Rule of the
-   * platform: market data is live from the stream, and REST is only the first
-   * snapshot and a periodic re-sync. A hidden tab skips it unless an alert is
-   * waiting on the answer, as the controller's own repairs do.
-   */
-  private scheduleResync(): void {
-    if (this.resyncTimer) clearTimeout(this.resyncTimer)
-    this.resyncTimer = null
-    if (this.destroyed) return
-    const wait = this.builder?.hasTickVolume() ? RESYNC_MS : RESYNC_WITHOUT_TICK_VOLUME_MS
-    this.resyncTimer = setTimeout(() => {
-      this.resyncTimer = null
-      if (this.destroyed) return
-      const visible = document.visibilityState !== 'hidden'
-      if (this.data && this.sym && (visible || this.alertsArmed())) void this.data.refresh()
-      this.scheduleResync()
-    }, wait)
   }
 
   private async pollBook() {
@@ -7929,7 +7913,7 @@ export class TradingTerminal {
     // Repair follows the stream: one small refresh a moment after each bar
     // closes, an immediate one when the stream skips a bucket, and each asks
     // history for the last few bars only. The controller's own poll is off;
-    // the terminal runs the re-sync itself (scheduleResync), fast while ticks
+    // the terminal runs the re-sync itself (HistoryResync), fast while ticks
     // carry no traded volume and slow once they do.
     this.data = new DataLoadingController(this.exprFeed, {
       now: nowSec,
@@ -7944,7 +7928,7 @@ export class TradingTerminal {
     this.offData = this.data.subscribe((snapshot) => this.applyDataSnapshot(snapshot))
     document.addEventListener('visibilitychange', this.onVisibilityChange)
     this.onVisibilityChange()
-    this.scheduleResync()
+    this.resync.start()
     this.trade = new OpenAlgoTradeFeed({ baseUrl: '', apiKey: this.apiKey, strategy: STRATEGY })
 
     // broker-supported intervals → the timeframe dropdown
@@ -8151,9 +8135,8 @@ export class TradingTerminal {
     this.bookTimer = null
     if (this.bookRefreshTimer) clearTimeout(this.bookRefreshTimer)
     this.bookRefreshTimer = null
-    if (this.resyncTimer) clearTimeout(this.resyncTimer)
-    this.resyncTimer = null
     // Optional, like the history above: a test double is built without them.
+    this.resync?.stop()
     this.liveClock?.stop()
     this.liveStatus?.destroy()
     this.stopLtpFallback()

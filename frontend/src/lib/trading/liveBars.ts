@@ -713,3 +713,67 @@ export class LiveBarClock {
     }, this.opts.repairDelayMs ?? 2500)
   }
 }
+
+/**
+ * How often history is read again for the forming bar while ticks carry no
+ * traded volume. A depth update without one leaves history as the only source
+ * of the bar's volume, and a volume pane frozen for a whole bar reads as a
+ * dead feed.
+ */
+export const RESYNC_WITHOUT_TICK_VOLUME_MS = 30_000
+/**
+ * The same once ticks carry the day's volume: the stream moves the bar, and
+ * this is only the periodic re-sync behind it.
+ */
+export const RESYNC_MS = 120_000
+
+export interface HistoryResyncOptions {
+  /** The builder in use, read each time: whether its ticks carry volume sets the pace. */
+  builder(): LiveBarBuilder | null
+  /** Ask history for the tail again. */
+  refresh(): void
+  /** Whether a re-read is worth making now: a hidden page skips it. Defaults to always. */
+  active?(): boolean
+  setTimer?(run: () => void, ms: number): unknown
+  clearTimer?(handle: unknown): void
+}
+
+/**
+ * The periodic history re-sync behind a live chart: every 30 seconds while
+ * ticks carry no traded volume, every two minutes once they do. Market data
+ * is live from the stream; REST is the first snapshot and this re-sync.
+ */
+export class HistoryResync {
+  private readonly opts: HistoryResyncOptions
+  private timer: unknown = null
+  private running = false
+
+  constructor(options: HistoryResyncOptions) {
+    this.opts = options
+  }
+
+  start(): void {
+    this.running = true
+    this.schedule()
+  }
+
+  stop(): void {
+    this.running = false
+    if (this.timer === null) return
+    if (this.opts.clearTimer) this.opts.clearTimer(this.timer)
+    else clearTimeout(this.timer as ReturnType<typeof setTimeout>)
+    this.timer = null
+  }
+
+  private schedule(): void {
+    if (!this.running) return
+    const wait = this.opts.builder()?.hasTickVolume() ? RESYNC_MS : RESYNC_WITHOUT_TICK_VOLUME_MS
+    const run = () => {
+      this.timer = null
+      if (!this.running) return
+      if (this.opts.active?.() ?? true) this.opts.refresh()
+      this.schedule()
+    }
+    this.timer = this.opts.setTimer ? this.opts.setTimer(run, wait) : setTimeout(run, wait)
+  }
+}
