@@ -424,6 +424,29 @@ describe("volume from the day's running total", () => {
     expect(b.onTick({ time: tue(10, 0, 8), price: 100, dayVolume: 70_250 })?.bar.volume).toBe(300)
     expect(b.onTick({ time: tue(10, 0, 9), price: 100, dayVolume: 70_400 })?.bar.volume).toBe(400)
   })
+
+  it('never lets an older reading lower where the next bar starts counting', () => {
+    const streamed = () => {
+      const b = new LiveBarBuilder({ interval: '1m', session: nse() })
+      b.seed(bar(tue(10, 0), 100, 0))
+      b.onTick({ time: tue(10, 0, 5), price: 100, dayVolume: 70_000 })
+      b.onTick({ time: tue(10, 0, 6), price: 100, dayVolume: 70_300 })
+      // A reading from before the last one, as a lagging quote or frame sends it.
+      b.onTick({ time: tue(10, 0, 7), price: 100, dayVolume: 70_200 })
+      return b
+    }
+    // A trade opens 10:01: only what traded after 70,300 is its.
+    const byTrade = streamed()
+    expect(
+      byTrade.onTick({ time: tue(10, 1, 1), price: 100.5, dayVolume: 70_350 })?.bar.volume
+    ).toBe(50)
+    // The clock opens it: the same.
+    const byClock = streamed()
+    byClock.onClock(tue(10, 1) + 0.1)
+    expect(
+      byClock.onTick({ time: tue(10, 1, 1), price: 100.5, dayVolume: 70_350 })?.bar.volume
+    ).toBe(50)
+  })
 })
 
 describe('ticks stamped with the last trade time', () => {

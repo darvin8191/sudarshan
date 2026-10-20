@@ -1649,6 +1649,8 @@ describe('the live bar in the terminal', () => {
     expect(quotes).toBeGreaterThan(0)
     await vi.advanceTimersByTimeAsync(3_000)
     all.at(-1)?.accept()
+    // The fallback itself is stopped, not left running as a no-op.
+    expect((terminal as unknown as TerminalState).ltpPollTimer).toBeNull()
     const asked = quotes
     await vi.advanceTimersByTimeAsync(12_000)
     expect(quotes).toBe(asked)

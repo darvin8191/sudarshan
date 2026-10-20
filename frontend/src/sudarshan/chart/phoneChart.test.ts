@@ -473,6 +473,8 @@ describe('real-time', () => {
     // The client reconnects; the instrument is quiet, so no tick comes.
     await vi.advanceTimersByTimeAsync(2_000)
     latestSocket().accept()
+    // The fallback itself is stopped, not left running as a no-op.
+    expect((chart as unknown as { fallback: unknown }).fallback).toBeNull()
     const asked = calls.filter((call) => call.path === 'quotes').length
     await vi.advanceTimersByTimeAsync(QUOTE_FALLBACK_MS * 3)
     expect(calls.filter((call) => call.path === 'quotes')).toHaveLength(asked)
