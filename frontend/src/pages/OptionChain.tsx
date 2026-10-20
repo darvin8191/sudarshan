@@ -1,4 +1,4 @@
-import { Check, ChevronsUpDown, RefreshCw, TrendingUp, Wifi, WifiOff } from 'lucide-react'
+import { Check, ChevronsUpDown, RefreshCw, TrendingUp } from 'lucide-react'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { oiProfileApi } from '@/api/oi-profile'
 import {
@@ -8,7 +8,6 @@ import {
   ViewModeToggle,
 } from '@/components/option-chain'
 import { PlaceOrderDialog } from '@/components/trading'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import {
@@ -41,6 +40,12 @@ import { useSupportedExchanges } from '@/hooks/useSupportedExchanges'
 import { serverSentence } from '@/lib/serverSentence'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
+// SUDARSHAN: the status line and the legs' tick direction (src/sudarshan/books).
+import { useBookFeed } from '@/sudarshan/books/feed'
+import { useMarketCalendar } from '@/sudarshan/books/market'
+import type { TickDirection } from '@/sudarshan/books/prices'
+import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
+import { TREND_TEXT, TrendArrow } from '@/sudarshan/dashboard/Trend'
 import type { BarDataSource, BarStyle, ColumnKey, OptionStrike } from '@/types/option-chain'
 import { COLUMN_DEFINITIONS } from '@/types/option-chain'
 import { showToast } from '@/utils/toast'
@@ -175,12 +180,15 @@ interface OptionChainRowProps {
   barStyle: BarStyle
   optionExchange: string
   onPlaceOrder: (params: PlaceOrderParams) => void
+  /** SUDARSHAN: which way each leg's last tick moved, and whether the chain's ticks are stale. */
+  ceTick?: TickDirection | null
+  peTick?: TickDirection | null
+  stale?: boolean
 }
 
 // Memoized row component to prevent unnecessary re-renders
 const OptionChainRow = React.memo(function OptionChainRow({
   strike,
-  previousStrike,
   maxBarValue,
   visibleCeColumns,
   visiblePeColumns,
@@ -188,6 +196,9 @@ const OptionChainRow = React.memo(function OptionChainRow({
   barStyle,
   optionExchange,
   onPlaceOrder,
+  ceTick = null,
+  peTick = null,
+  stale = false,
 }: OptionChainRowProps) {
   const ce = strike.ce
   const pe = strike.pe
@@ -199,20 +210,11 @@ const OptionChainRow = React.memo(function OptionChainRow({
   const isCeOTM = label.startsWith('OTM')
   const isPeOTM = label.startsWith('ITM')
 
-  // Flash animation for LTP changes
-  const ceLtpChanged = previousStrike?.ce?.ltp !== undefined && previousStrike.ce.ltp !== ce?.ltp
-  const peLtpChanged = previousStrike?.pe?.ltp !== undefined && previousStrike.pe.ltp !== pe?.ltp
-
-  const ceFlashClass = ceLtpChanged
-    ? ce && previousStrike?.ce && ce.ltp > previousStrike.ce.ltp
-      ? 'bg-green-500/30'
-      : 'bg-red-500/30'
-    : ''
-  const peFlashClass = peLtpChanged
-    ? pe && previousStrike?.pe && pe.ltp > previousStrike.pe.ltp
-      ? 'bg-green-500/30'
-      : 'bg-red-500/30'
-    : ''
+  // SUDARSHAN: the LTP shows its last tick's direction in the up and down
+  // tokens with a triangle, as a broker app does, instead of a background
+  // flash (minimal motion); greyed, triangle kept, when the ticks are stale.
+  const ceFlashClass = stale ? 'text-muted-foreground' : ceTick ? TREND_TEXT[ceTick] : ''
+  const peFlashClass = stale ? 'text-muted-foreground' : peTick ? TREND_TEXT[peTick] : ''
 
   const ceSpread = ce && ce.bid > 0 && ce.ask > 0 ? ce.ask - ce.bid : 0
   const peSpread = pe && pe.bid > 0 && pe.ask > 0 ? pe.ask - pe.bid : 0
@@ -251,7 +253,11 @@ const OptionChainRow = React.memo(function OptionChainRow({
         return <span className={cn(numClass, 'text-red-500')}>{formatPrice(ce?.bid)}</span>
       case 'ce_ltp':
         return (
-          <span className={cn(numClass, 'font-semibold', ceFlashClass)}>
+          <span
+            className={cn(numClass, 'inline-flex items-center gap-0.5 font-semibold', ceFlashClass)}
+            data-tick={ceTick ?? undefined}
+          >
+            {ceTick && <TrendArrow direction={ceTick} className="size-2" />}
             {formatPrice(ce?.ltp)}
           </span>
         )
@@ -308,7 +314,11 @@ const OptionChainRow = React.memo(function OptionChainRow({
         return <span className={cn(numClass, 'text-red-500')}>{formatPrice(pe?.bid)}</span>
       case 'pe_ltp':
         return (
-          <span className={cn(numClass, 'font-semibold', peFlashClass)}>
+          <span
+            className={cn(numClass, 'inline-flex items-center gap-0.5 font-semibold', peFlashClass)}
+            data-tick={peTick ?? undefined}
+          >
+            {peTick && <TrendArrow direction={peTick} className="size-2" />}
             {formatPrice(pe?.ltp)}
           </span>
         )
@@ -596,14 +606,13 @@ export default function OptionChain() {
 
   const {
     data,
-    isConnected,
-    isStreaming,
-    isPaused,
     error,
     lastUpdate,
     refetch,
     isLoading,
     streamingSymbols,
+    tickDirections,
+    feed: chainFeed,
   } = useOptionChainLive(
     apiKey,
     selectedUnderlying,
@@ -613,6 +622,15 @@ export default function OptionChain() {
     strikeCount,
     { enabled: !!selectedExpiry, oiRefreshInterval: 30000, pauseWhenHidden: true }
   )
+  // SUDARSHAN: where the chain's prices stand ("Real-time" only while ticks arrive).
+  const { isOpen: chainMarketOpen } = useMarketCalendar()
+  const chainRows = useMemo(
+    () => (data ? [{ exchange: data.underlying_exchange }, { exchange: optionExchange }] : []),
+    [data, optionExchange]
+  )
+  const { line: chainLine, now: chainNow } = useBookFeed(chainRows, chainFeed, chainMarketOpen)
+  const chainStale =
+    (chainLine.kind === 'delayed' || chainLine.kind === 'connecting') && chainLine.stale
 
   // Fetch underlyings when exchange changes
   useEffect(() => {
@@ -1046,6 +1064,17 @@ export default function OptionChain() {
                         barStyle={barStyle}
                         optionExchange={optionExchange}
                         onPlaceOrder={handlePlaceOrder}
+                        ceTick={
+                          strike.ce
+                            ? tickDirections.get(`${optionExchange}:${strike.ce.symbol}`)
+                            : null
+                        }
+                        peTick={
+                          strike.pe
+                            ? tickDirections.get(`${optionExchange}:${strike.pe.symbol}`)
+                            : null
+                        }
+                        stale={chainStale}
                       />
                     ))}
                   </TableBody>
@@ -1056,23 +1085,11 @@ export default function OptionChain() {
 
           <div className="flex justify-between items-center text-sm text-muted-foreground">
             <div className="flex items-center gap-4">
+              {/* SUDARSHAN: the status line, as on every live table, instead of a
+                  badge that called a REST poll "Polling" beside real ticks. */}
               <div className="flex items-center gap-2">
-                {isStreaming ? (
-                  <Wifi className="h-4 w-4 text-green-500" />
-                ) : (
-                  <WifiOff className="h-4 w-4 text-muted-foreground" />
-                )}
-                <Badge
-                  variant={isStreaming ? 'default' : isConnected ? 'secondary' : 'destructive'}
-                >
-                  {isPaused
-                    ? 'Paused'
-                    : isStreaming
-                      ? `Streaming ${streamingSymbols} symbols`
-                      : isConnected
-                        ? 'Polling'
-                        : 'Disconnected'}
-                </Badge>
+                <LiveLine line={chainLine} now={chainNow} />
+                <span className="text-xs">{streamingSymbols} symbols</span>
               </div>
               <div className="text-xs">
                 Bar: {barDataSource === 'oi' ? 'OI' : 'Volume'} ({barStyle})

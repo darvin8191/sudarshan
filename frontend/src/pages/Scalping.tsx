@@ -27,13 +27,23 @@ import {
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useMarketData } from '@/hooks/useMarketData'
-import { useOrderEventRefresh } from '@/hooks/useOrderEventRefresh'
 import { findLegSL, type SLState, useTrailingSL } from '@/hooks/useTrailingSL'
 import { priceDecimals } from '@/lib/scalpingPrice'
 import { buildPositionRows } from '@/lib/scalpingRows'
 import { mergeTick, type TickView } from '@/lib/scalpingTick'
 import { useAuthStore } from '@/stores/authStore'
 import { useThemeStore } from '@/stores/themeStore'
+// SUDARSHAN: broker order updates, re-syncs, the status line and tick direction (src/sudarshan/books).
+import { TickPrice } from '@/sudarshan/books/LiveFigures'
+import { useMarketCalendar } from '@/sudarshan/books/market'
+import { type TickDirection, TickDirections } from '@/sudarshan/books/prices'
+import { useBookSync } from '@/sudarshan/books/useBookSync'
+import { AWAY_MS } from '@/sudarshan/books/useReturn'
+import { useSpacedRead } from '@/sudarshan/books/useSpacedRead'
+import { useNow } from '@/sudarshan/dashboard/hooks'
+import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
+import { anyOpen, feedLine, isStale, latest } from '@/sudarshan/dashboard/live'
+import { TREND_TEXT, TrendArrow } from '@/sudarshan/dashboard/Trend'
 import type {
   OptionChainRow,
   OptionType,
@@ -95,6 +105,9 @@ const BOOK_EVENTS = [
 
 // A WebSocket tick considered stale after this -> fall back to MultiQuotes.
 const TICK_STALE_MS = 5000
+
+// SUDARSHAN: the MultiQuotes snapshot is read at most once in this long.
+const MQ_GAP_MS = 5_000
 
 // Collapse rapid book-refresh triggers (multi-leg entries, and the SocketIO order events
 // for several legs arriving together) into at most one refetch per window, so we don't
@@ -234,7 +247,9 @@ function Ticker({
   high,
   low,
   decimals = 2,
-}: TickerProps) {
+  direction = null,
+  stale = false,
+}: TickerProps & { direction?: TickDirection | null; stale?: boolean }) {
   const isUp = (changePercent ?? change ?? 0) >= 0
   return (
     <Card>
@@ -245,7 +260,15 @@ function Ticker({
         <div className="font-mono text-xs text-muted-foreground">{symbol ?? '—'}</div>
         <RangeBar ltp={ltp} open={open} high={high} low={low} decimals={decimals} />
         <div className="flex items-baseline gap-2">
-          <span className="font-mono text-2xl font-semibold tabular-nums">
+          {/* SUDARSHAN: the last tick's direction, greyed when its ticks are stale. */}
+          <span
+            className={`inline-flex items-center gap-1.5 font-mono text-2xl font-semibold tabular-nums ${
+              stale ? 'text-muted-foreground' : direction ? TREND_TEXT[direction] : ''
+            }`}
+            data-tick={direction ?? undefined}
+            data-stale={stale || undefined}
+          >
+            {ltp != null && direction && <TrendArrow direction={direction} className="size-3" />}
             {ltp != null ? ltp.toFixed(decimals) : '—'}
           </span>
           {(change != null || changePercent != null) && (
@@ -484,7 +507,7 @@ export default function Scalping() {
 
   // Books (positions / orders / trades). Fully event-driven (no polling):
   // prices/MTM stream over the WebSocket feed, and these fetches refresh on broker
-  // order events (useOrderEventRefresh below) — including the server-side risk
+  // order events (useBookSync below) — including the server-side risk
   // monitor's auto-exits, which emit order events. refetchOnWindowFocus is an
   // event (tab focus), not an interval. The query key includes appMode so toggling
   // Analyze/Live re-fetches the corresponding (sandbox vs live) positions/books.
@@ -570,9 +593,19 @@ export default function Scalping() {
     }
   }, [])
 
-  // Refresh the books on order/position events instead of polling. The short delay lets
-  // the server finish persisting before we refetch (was 500ms; 150ms keeps the UI snappy).
-  useOrderEventRefresh(refreshBooks, { events: [...BOOK_EVENTS], delay: 150 })
+  // Refresh the books on order/position events instead of polling.
+  // SUDARSHAN: one listener for all of them, the broker's own fills, rejections
+  // and square-offs (order_update) included, so a fill costs one reload (and one
+  // more once the broker's books have caught up, shared by fills close
+  // together); plus a Socket.IO reconnect and every 45 s while a market is
+  // open. Nothing while the page is hidden; coming back is react-query's
+  // refetch on focus.
+  const { isOpen: marketOpen, anyOpen: anyMarketOpen } = useMarketCalendar()
+  useBookSync(refreshBooks, {
+    events: [...BOOK_EVENTS, 'order_update'],
+    marketOpen: anyMarketOpen,
+    awayMs: null,
+  })
 
   // Subscribe the live feed for underlying (Quote, for %chg), CE/PE legs, AND
   // every symbol in the position book — so book LTP and P&L update in realtime.
@@ -598,7 +631,9 @@ export default function Scalping() {
     data: marketData,
     isConnected,
     isAuthenticated,
+    isPaused,
     isFallbackMode,
+    connectionEpoch,
   } = useMarketData({
     symbols,
     mode: 'Quote',
@@ -609,39 +644,56 @@ export default function Scalping() {
   // WebSocket feed is idle (market closed), poll the REST multiquotes every 30s so
   // the tickers AND the position book keep fresh LTP/OHLC/MTM. The WS feed stays the
   // live source during market hours; this only kicks in when ticks go stale.
+  // SUDARSHAN: no timer. One snapshot per symbol set (the previous close, and a
+  // price for anything that has not ticked), read again when the market-data
+  // socket signs in again and on coming back after 15 s; ticks do the rest.
   const symbolsKey = useMemo(
     () => symbols.map((s) => `${s.exchange}:${s.symbol}`).join(','),
     [symbols]
   )
   const [mqMap, setMqMap] = useState<Map<string, QuotesData>>(new Map())
+  const [mqAt, setMqAt] = useState<number | null>(null)
+  const symbolsRef = useRef(symbols)
+  symbolsRef.current = symbols
+  const mqRead = useRef(0)
+  const fetchMq = useCallback(() => {
+    const list = symbolsRef.current
+    if (!apiKey || list.length === 0) return
+    const read = ++mqRead.current
+    const at = Date.now()
+    tradingApi
+      .getMultiQuotes(apiKey, list)
+      .then((resp) => {
+        if (read !== mqRead.current || resp.status !== 'success' || !resp.results) return
+        const next = new Map<string, QuotesData>()
+        for (const r of resp.results) {
+          if (r.data) next.set(`${r.exchange}:${r.symbol}`, r.data)
+        }
+        setMqMap(next)
+        setMqAt(at)
+      })
+      .catch(() => {})
+  }, [apiKey])
+  // Every reason to read it goes through one gate: at most one read in 5 s
+  // (a book gaining a row with each fill asks each time), none while hidden,
+  // and one on coming back after more than 15 s away.
+  const requestMq = useSpacedRead(fetchMq, MQ_GAP_MS, { awayMs: AWAY_MS })
   // biome-ignore lint/correctness/useExhaustiveDependencies: symbolsKey tracks symbols content
   useEffect(() => {
-    if (!apiKey || symbols.length === 0) return
-    let cancelled = false
-    const fetchMq = () => {
-      if (document.hidden) return // visibility-aware (don't poll a hidden tab)
-      tradingApi
-        .getMultiQuotes(apiKey, symbols)
-        .then((resp) => {
-          if (cancelled || resp.status !== 'success' || !resp.results) return
-          const next = new Map<string, QuotesData>()
-          for (const r of resp.results) {
-            if (r.data) next.set(`${r.exchange}:${r.symbol}`, r.data)
-          }
-          setMqMap(next)
-        })
-        .catch(() => {})
-    }
-    fetchMq()
-    const id = window.setInterval(fetchMq, 30_000)
-    return () => {
-      cancelled = true
-      window.clearInterval(id)
-    }
-  }, [apiKey, symbolsKey])
+    requestMq()
+  }, [requestMq, symbolsKey])
+  const epochSeen = useRef<number | null>(null)
+  useEffect(() => {
+    if (!isAuthenticated) return
+    const first = epochSeen.current === null
+    const changed = epochSeen.current !== connectionEpoch
+    epochSeen.current = connectionEpoch
+    if (!first && changed) requestMq()
+  }, [isAuthenticated, connectionEpoch, requestMq])
 
   // Merged tick (live WS, MultiQuotes after-hours), field-by-field to avoid flicker.
   // Logic lives in lib/scalpingTick.mergeTick (pure + unit-tested).
+  // SUDARSHAN: the newer of the tick and the snapshot wins (mqAt).
   const getTick = useCallback(
     (symbol: string, exchange: string): TickView | undefined => {
       const key = `${exchange}:${symbol}`
@@ -651,11 +703,54 @@ export default function Scalping() {
         entry?.lastUpdate,
         mqMap.get(key),
         Date.now(),
-        TICK_STALE_MS
+        TICK_STALE_MS,
+        mqAt
       )
     },
-    [marketData, mqMap]
+    [marketData, mqMap, mqAt]
   )
+
+  // SUDARSHAN: where the prices stand, for the status line; which way each
+  // instrument last ticked; and which have gone stale while ticks are due.
+  const now = useNow()
+  const directions = useRef(new TickDirections())
+  const feedTickAt = useMemo(() => {
+    let newest: number | null = null
+    for (const entry of marketData.values()) {
+      if (entry.updateSource !== 'websocket' || typeof entry.lastUpdate !== 'number') continue
+      if (newest === null || entry.lastUpdate > newest) newest = entry.lastUpdate
+    }
+    return newest
+  }, [marketData])
+  const marketState = anyOpen(symbols.map((s) => marketOpen(s.exchange)))
+  const line = feedLine({
+    now,
+    marketOpen: symbols.length > 0 ? marketState : marketOpen('NSE'),
+    lastTickAt: feedTickAt,
+    lastUpdateAt: latest(feedTickAt, mqAt),
+    ticksDue: symbols.length > 0,
+    connected: isAuthenticated && !isPaused,
+  })
+  const liveState = (symbol?: string, exchange?: string) => {
+    if (!symbol || !exchange) return { direction: null, stale: false }
+    const key = `${exchange}:${symbol}`
+    const entry = marketData.get(key)
+    const tickLtp = entry?.data?.ltp
+    const fromTick =
+      entry?.updateSource === 'websocket' && typeof tickLtp === 'number' && tickLtp > 0
+    const direction = fromTick
+      ? directions.current.observe(key, tickLtp, mqMap.get(key)?.ltp)
+      : directions.current.get(key)
+    const shown = getTick(symbol, exchange)?.ltp ?? null
+    const at = latest(entry?.lastUpdate, mqMap.has(key) ? mqAt : null)
+    const stale = isStale(
+      { ltp: shown, prevClose: null, at, live: fromTick },
+      now,
+      marketOpen(exchange),
+      feedTickAt
+    )
+    return { direction, stale }
+  }
 
   const underlyingTick = getTick(underlyingSym, underlyingExch)
   const ceTick = ceLeg ? getTick(ceLeg.symbol, ceLeg.exchange) : undefined
@@ -823,7 +918,8 @@ export default function Scalping() {
     async (leg: SelectedLeg | null, action: ScalpingAction) => {
       const s = stateRef.current
       if (!s.armed) {
-        showToast.error('One-Click is disarmed — enable it to trade', 'orders')
+        // SUDARSHAN: on or off, as a trader says it.
+        showToast.error('One-Click is off. Turn it on to trade.', 'orders')
         return
       }
       if (!leg) {
@@ -868,7 +964,7 @@ export default function Scalping() {
         if (res.status === 'success') {
           attachPredefinedSL(leg, action, quantity, s.product)
           // Books refresh from this order's SocketIO event (order_event / analyzer_update)
-          // via useOrderEventRefresh — no manual refetch here, to avoid a double refresh.
+          // via useBookSync — no manual refetch here, to avoid a double refresh.
         } else if (s.appMode === 'live') {
           showToast.error(res.message ?? 'Order failed', 'orders')
         }
@@ -1032,13 +1128,8 @@ export default function Scalping() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [handleKeyDown])
 
-  const wsBadge = isFallbackMode
-    ? { label: 'Polling (REST)', variant: 'secondary' as const }
-    : isAuthenticated
-      ? { label: 'Live', variant: 'default' as const }
-      : isConnected
-        ? { label: 'Connecting…', variant: 'secondary' as const }
-        : { label: 'Disconnected', variant: 'destructive' as const }
+  // SUDARSHAN: the feed's state is the status line below ("Real-time" only
+  // while ticks arrive), not a badge that said "Live" for the feed.
 
   return (
     <div className="space-y-4 p-4">
@@ -1048,10 +1139,11 @@ export default function Scalping() {
           {lastLatencyMs != null && (
             <span className="font-mono text-xs text-muted-foreground">order {lastLatencyMs}ms</span>
           )}
+          {/* SUDARSHAN: on or off, as a trader says it. */}
           <Badge variant={armed ? 'destructive' : 'secondary'}>
-            One-Click {armed ? 'ARMED' : 'off'}
+            One-Click {armed ? 'on' : 'off'}
           </Badge>
-          <Badge variant={wsBadge.variant}>{wsBadge.label}</Badge>
+          <LiveLine line={line} now={now} />
         </div>
       </div>
 
@@ -1059,10 +1151,11 @@ export default function Scalping() {
           shared WebSocket manager auto-resubscribes active legs on reconnect. */}
       {!isAuthenticated && (
         <div className="rounded-md border border-red-500/50 bg-red-500/10 px-4 py-2 text-sm text-red-700 dark:text-red-400">
+          {/* SUDARSHAN: "Real-time", never "Live", for the feed. */}
           {isFallbackMode
-            ? 'Live feed lost — using slower REST polling. Prices may lag; trade with caution.'
+            ? 'Real-time feed lost — using slower REST polling. Prices may lag; trade with caution.'
             : isConnected
-              ? 'Reconnecting to the live market-data feed… active legs will resubscribe automatically.'
+              ? 'Reconnecting to the market-data feed… active legs will resubscribe automatically.'
               : 'Market-data feed disconnected — prices are stale. Reconnecting…'}
         </div>
       )}
@@ -1281,6 +1374,7 @@ export default function Scalping() {
             high={singleTick?.high}
             low={singleTick?.low}
             decimals={priceDecimals(singleLeg?.exchange)}
+            {...liveState(singleLeg?.symbol, singleLeg?.exchange)}
           />
         </div>
       ) : (
@@ -1295,6 +1389,7 @@ export default function Scalping() {
             high={ceTick?.high}
             low={ceTick?.low}
             decimals={priceDecimals(ceLeg?.exchange ?? foExchange)}
+            {...liveState(ceLeg?.symbol, ceLeg?.exchange)}
           />
           <Ticker
             title={underlying || 'Underlying'}
@@ -1306,6 +1401,7 @@ export default function Scalping() {
             high={underlyingTick?.high}
             low={underlyingTick?.low}
             decimals={priceDecimals(underlyingExch)}
+            {...liveState(underlyingSym, underlyingExch)}
           />
           <Ticker
             title="Put (PE)"
@@ -1317,6 +1413,7 @@ export default function Scalping() {
             high={peTick?.high}
             low={peTick?.low}
             decimals={priceDecimals(peLeg?.exchange ?? foExchange)}
+            {...liveState(peLeg?.symbol, peLeg?.exchange)}
           />
         </div>
       )}
@@ -1690,7 +1787,18 @@ export default function Scalping() {
                         {r.netQty}
                       </TableCell>
                       <TableCell className="text-right font-mono tabular-nums">
-                        {r.ltp ? r.ltp.toFixed(dec) : '—'}
+                        {/* SUDARSHAN: the last tick's direction, greyed when stale. */}
+                        {r.ltp ? (
+                          <TickPrice
+                            value={r.ltp}
+                            format={(v) => v.toFixed(dec)}
+                            {...(open
+                              ? liveState(r.symbol, r.exchange)
+                              : { direction: null, stale: false })}
+                          />
+                        ) : (
+                          '—'
+                        )}
                       </TableCell>
                       <TableCell className="text-right font-mono tabular-nums">
                         {r.sl != null ? r.sl.toFixed(dec) : '-'}

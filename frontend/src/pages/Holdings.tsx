@@ -2,14 +2,12 @@ import {
   AlertTriangle,
   Download,
   Loader2,
-  Pause,
-  Radio,
   RefreshCw,
   TrendingDown,
   TrendingUp,
   Wallet,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { tradingApi } from '@/api/trading'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -26,11 +24,15 @@ import {
 } from '@/components/ui/table'
 import { PlaceOrderDialog } from '@/components/trading'
 import { calculateLiveStats, useLivePrice } from '@/hooks/useLivePrice'
-import { useOrderEventRefresh } from '@/hooks/useOrderEventRefresh'
-import { usePageVisibility } from '@/hooks/usePageVisibility'
 import { cn, makeFormatCurrency, sanitizeCSV } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
 import { onModeChange } from '@/stores/themeStore'
+// SUDARSHAN: the book re-read, status line and tick prices (src/sudarshan/books).
+import { useBookFeed } from '@/sudarshan/books/feed'
+import { TickPrice } from '@/sudarshan/books/LiveFigures'
+import { holdingsMayChange, useBookSync, useLatestRead } from '@/sudarshan/books/useBookSync'
+import { useMarketOpen } from '@/sudarshan/dashboard/hooks'
+import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
 import type { Holding, HoldingsStats } from '@/types/trading'
 import { showToast } from '@/utils/toast'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -59,23 +61,26 @@ export default function Holdings() {
   const [showStaleWarning, setShowStaleWarning] = useState(false)
   const [orderIntent, setOrderIntent] = useState<HoldingOrderIntent | null>(null)
 
-  // Page visibility tracking for resource optimization
-  const { isVisible, wasHidden, timeSinceHidden } = usePageVisibility()
-  const lastFetchRef = useRef<number>(Date.now())
+  // SUDARSHAN: when the shown holdings were asked for, so only newer ticks move them.
+  const [bookAt, setBookAt] = useState<number | null>(null)
+  const beginRead = useLatestRead()
 
   // Centralized real-time price hook with WebSocket + MultiQuotes fallback
   // Automatically pauses when tab is hidden
   const {
     data: enhancedHoldings,
-    isLive,
-    isPaused,
+    feed,
+    calendar,
   } = useLivePrice(holdings, {
     enabled: holdings.length > 0,
     useMultiQuotesFallback: true,
-    staleThreshold: 5000,
-    multiQuotesRefreshInterval: 30000,
     pauseWhenHidden: true,
+    snapshotAt: bookAt,
   })
+  // SUDARSHAN: the status line above the table and the rows to grey.
+  const { isOpen: marketOpen, anyOpen: anyMarketOpen } = useMarketOpen(calendar)
+  const { line, now, stale: rowStale } = useBookFeed(enhancedHoldings, feed, marketOpen)
+  const tableStale = (line.kind === 'delayed' || line.kind === 'connecting') && line.stale
 
   // Calculate enhanced stats based on real-time data
   const enhancedStats = useMemo(() => {
@@ -102,53 +107,52 @@ export default function Holdings() {
 
       if (showRefresh) setIsRefreshing(true)
 
+      // SUDARSHAN: an answer a newer read has overtaken is dropped.
+      const isLatest = beginRead()
+      const askedAt = Date.now()
       try {
         const response = await tradingApi.getHoldings(apiKey)
+        if (!isLatest()) return
         if (response.status === 'success' && response.data) {
           setHoldings(response.data.holdings || [])
           setStats(response.data.statistics)
+          setBookAt(askedAt)
           setError(null)
         } else {
           setError(response.message || 'Failed to fetch holdings')
         }
       } catch {
-        setError('Failed to fetch holdings')
+        if (isLatest()) setError('Failed to fetch holdings')
       } finally {
-        setIsLoading(false)
-        setIsRefreshing(false)
+        if (isLatest()) {
+          setIsLoading(false)
+          setIsRefreshing(false)
+        }
       }
     },
-    [apiKey]
+    [apiKey, beginRead]
   )
 
   // Initial fetch and visibility-aware polling
   // Pauses polling when tab is hidden to save resources
+  // SUDARSHAN: the first read only; coming back to the page is useBookSync's.
   useEffect(() => {
-    // Don't poll when tab is hidden
-    if (!isVisible) return
-
     fetchHoldings()
-    lastFetchRef.current = Date.now()
-  }, [fetchHoldings, isVisible])
+  }, [fetchHoldings])
 
-  // Refresh on order events instead of polling
-  useOrderEventRefresh(fetchHoldings, {
-    events: ['order_event', 'analyzer_update'],
+  // SUDARSHAN: re-read after an update that can change the holdings (an equity
+  // delivery fill or rejection, the sandbox's settlement), on a Socket.IO
+  // reconnect, on coming back after 15 s, and every 45 s while a market is
+  // open. The "being refreshed" note shows while a read on coming back runs.
+  const onReturnRead = useCallback((read: Promise<void>) => {
+    setShowStaleWarning(true)
+    void read.finally(() => setShowStaleWarning(false))
+  }, [])
+  useBookSync(fetchHoldings, {
+    marketOpen: anyMarketOpen,
+    accept: holdingsMayChange,
+    onReturnRead,
   })
-
-  // Refresh data when tab becomes visible after being hidden
-  useEffect(() => {
-    if (!wasHidden || !isVisible) return
-
-    const timeSinceLastFetch = Date.now() - lastFetchRef.current
-
-    // If hidden for more than 30 seconds, show stale warning and refresh
-    if (timeSinceHidden > 30000 || timeSinceLastFetch > 30000) {
-      setShowStaleWarning(true)
-      fetchHoldings()
-      lastFetchRef.current = Date.now()
-    }
-  }, [wasHidden, isVisible, timeSinceHidden, fetchHoldings])
 
   // Auto-dismiss stale data warning after 5 seconds
   useEffect(() => {
@@ -210,6 +214,15 @@ export default function Holdings() {
   }
 
   const isProfit = (value: number) => value >= 0
+  // SUDARSHAN: a total or a row whose ticks are stale is greyed; its sign and arrow stay.
+  const totalsTone = (value: number | undefined) =>
+    tableStale
+      ? 'text-muted-foreground'
+      : value !== undefined && isProfit(value)
+        ? 'text-green-600'
+        : 'text-red-600'
+  const rowTone = (value: number, stale: boolean) =>
+    stale ? 'text-muted-foreground' : isProfit(value) ? 'text-green-600' : 'text-red-600'
 
   return (
     <div className="space-y-6">
@@ -226,25 +239,10 @@ export default function Holdings() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <h1 className="text-3xl font-bold tracking-tight">Investor Summary</h1>
-            {isPaused ? (
-              <Badge
-                variant="outline"
-                className="bg-amber-500/10 text-amber-600 border-amber-500/30 gap-1"
-              >
-                <Pause className="h-3 w-3" />
-                Paused
-              </Badge>
-            ) : isLive ? (
-              <Badge
-                variant="outline"
-                className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30 gap-1"
-              >
-                <Radio className="h-3 w-3 animate-pulse" />
-                Live
-              </Badge>
-            ) : null}
+            {/* SUDARSHAN: "Real-time" only while ticks arrive, never "Live" for the feed. */}
+            {holdings.length > 0 && <LiveLine line={line} now={now} />}
           </div>
           <p className="text-muted-foreground">View your holdings portfolio</p>
         </div>
@@ -286,14 +284,7 @@ export default function Holdings() {
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Total Profit and Loss</CardDescription>
-            <CardTitle
-              className={cn(
-                'text-2xl',
-                enhancedStats && isProfit(enhancedStats.totalprofitandloss)
-                  ? 'text-green-600'
-                  : 'text-red-600'
-              )}
-            >
+            <CardTitle className={cn('text-2xl', totalsTone(enhancedStats?.totalprofitandloss))}>
               {enhancedStats ? (
                 <div className="flex items-center gap-1">
                   {isProfit(enhancedStats.totalprofitandloss) ? (
@@ -312,14 +303,7 @@ export default function Holdings() {
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Total PnL Percentage</CardDescription>
-            <CardTitle
-              className={cn(
-                'text-2xl',
-                enhancedStats && isProfit(enhancedStats.totalpnlpercentage)
-                  ? 'text-green-600'
-                  : 'text-red-600'
-              )}
-            >
+            <CardTitle className={cn('text-2xl', totalsTone(enhancedStats?.totalpnlpercentage))}>
               {enhancedStats ? formatPercent(enhancedStats.totalpnlpercentage) : '---'}
             </CardTitle>
           </CardHeader>
@@ -359,7 +343,10 @@ export default function Holdings() {
                 </TableHeader>
                 <TableBody>
                   {enhancedHoldings.map((holding, index) => (
-                    <TableRow key={`${holding.symbol}-${holding.exchange}-${index}`}>
+                    <TableRow
+                      key={`${holding.symbol}-${holding.exchange}-${index}`}
+                      data-stale={rowStale(holding) || undefined}
+                    >
                       <TableCell className="font-medium">{holding.symbol}</TableCell>
                       <TableCell>
                         <Badge variant="outline">{holding.exchange}</Badge>
@@ -371,7 +358,13 @@ export default function Holdings() {
                           : '-'}
                       </TableCell>
                       <TableCell className="text-right font-mono">
-                        {holding.ltp !== undefined ? formatCurrency(holding.ltp) : '-'}
+                        {/* SUDARSHAN: the last tick's direction, greyed when stale. */}
+                        <TickPrice
+                          value={holding.ltp}
+                          direction={holding._tick}
+                          stale={rowStale(holding)}
+                          format={formatCurrency}
+                        />
                       </TableCell>
                       <TableCell>
                         <Badge variant="secondary">{holding.product}</Badge>
@@ -379,7 +372,7 @@ export default function Holdings() {
                       <TableCell
                         className={cn(
                           'text-right font-medium',
-                          isProfit(holding.pnl) ? 'text-green-600' : 'text-red-600'
+                          rowTone(holding.pnl, rowStale(holding))
                         )}
                       >
                         <div className="flex items-center justify-end gap-1">
@@ -392,10 +385,7 @@ export default function Holdings() {
                         </div>
                       </TableCell>
                       <TableCell
-                        className={cn(
-                          'text-right',
-                          isProfit(holding.pnlpercent) ? 'text-green-600' : 'text-red-600'
-                        )}
+                        className={cn('text-right', rowTone(holding.pnlpercent, rowStale(holding)))}
                       >
                         {formatPercent(holding.pnlpercent)}
                       </TableCell>
@@ -444,9 +434,7 @@ export default function Holdings() {
                     <TableCell
                       className={cn(
                         'text-right font-bold',
-                        enhancedStats && isProfit(enhancedStats.totalprofitandloss)
-                          ? 'text-green-600'
-                          : 'text-red-600'
+                        totalsTone(enhancedStats?.totalprofitandloss)
                       )}
                     >
                       {enhancedStats
@@ -456,9 +444,7 @@ export default function Holdings() {
                     <TableCell
                       className={cn(
                         'text-right font-bold',
-                        enhancedStats && isProfit(enhancedStats.totalpnlpercentage)
-                          ? 'text-green-600'
-                          : 'text-red-600'
+                        totalsTone(enhancedStats?.totalpnlpercentage)
                       )}
                     >
                       {enhancedStats ? formatPercent(enhancedStats.totalpnlpercentage) : '-'}

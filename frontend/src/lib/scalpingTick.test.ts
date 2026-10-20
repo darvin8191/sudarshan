@@ -68,3 +68,54 @@ describe('mergeTick', () => {
     expect(t?.change).toBeCloseTo(1)
   })
 })
+
+// SUDARSHAN: the MultiQuotes snapshot is now read once per symbol set, not
+// every 30 s, so "a WS value under 5 s old" would hand a quiet leg back to a
+// snapshot older than the tick it already has. Given the snapshot's time, the
+// newer of the two wins, however old the tick is.
+describe('mergeTick with the snapshot time', () => {
+  const SNAPSHOT_AT = NOW - 60_000
+
+  it('keeps a quiet tick that is newer than the snapshot, however old', () => {
+    const ws: TickView = { ltp: 101.5, open: 98, high: 103, low: 97 }
+    const m = mq({ ltp: 99, open: 98, high: 100, low: 97, prev_close: 100 })
+    const t = mergeTick(ws, NOW - 30_000, m, NOW, STALE_MS, SNAPSHOT_AT)
+    expect(t?.ltp).toBe(101.5)
+    expect(t?.high).toBe(103)
+    expect(t?.change).toBeCloseTo(1.5)
+  })
+
+  it('takes the snapshot over a tick older than it', () => {
+    const ws: TickView = { ltp: 95 }
+    const m = mq({ ltp: 99, prev_close: 100 })
+    const t = mergeTick(ws, SNAPSHOT_AT - 1, m, NOW, STALE_MS, SNAPSHOT_AT)
+    expect(t?.ltp).toBe(99)
+  })
+
+  it("prefers a tick's own previous close to the snapshot's", () => {
+    const ws = { ltp: 102, prev_close: 101 } as TickView
+    const m = mq({ ltp: 99, prev_close: 100 })
+    const t = mergeTick(ws, NOW - 1000, m, NOW, STALE_MS, SNAPSHOT_AT)
+    expect(t?.change).toBeCloseTo(1)
+  })
+
+  it('works out the change from the previous close, not from a change the tick carries', () => {
+    const ws = { ltp: 102, prev_close: 101, change: 7, change_percent: 7.4 } as TickView
+    const t = mergeTick(
+      ws,
+      NOW - 1000,
+      mq({ ltp: 99, prev_close: 100 }),
+      NOW,
+      STALE_MS,
+      SNAPSHOT_AT
+    )
+    expect(t?.change).toBeCloseTo(1)
+    expect(t?.change_percent).toBeCloseTo((1 / 101) * 100)
+  })
+
+  it('shows no change for a price of 0, before the first trade', () => {
+    const t = mergeTick(undefined, undefined, mq({ ltp: 0, prev_close: 100 }), NOW, STALE_MS, null)
+    expect(t?.change).toBeUndefined()
+    expect(t?.change_percent).toBeUndefined()
+  })
+})

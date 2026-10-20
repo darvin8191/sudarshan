@@ -8,7 +8,7 @@ import {
   Filter,
   Users,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -24,6 +24,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+// SUDARSHAN: new sandbox requests appear as they happen (analyzer_update).
+import { useBookSync } from '@/sudarshan/books/useBookSync'
 
 interface ApiRequest {
   timestamp: string
@@ -87,8 +89,9 @@ export default function Analyzer() {
     fetchData()
   }, [])
 
-  const fetchData = async (start?: string, end?: string) => {
-    setIsLoading(true)
+  // SUDARSHAN: `quiet` re-reads in place, without the full-page spinner.
+  const fetchData = async (start?: string, end?: string, quiet = false) => {
+    if (!quiet) setIsLoading(true)
     try {
       const params = new URLSearchParams()
       if (start) params.append('start_date', start)
@@ -108,14 +111,28 @@ export default function Analyzer() {
       }
     } catch (_error) {
     } finally {
-      setIsLoading(false)
+      if (!quiet) setIsLoading(false)
     }
   }
 
   const handleFilter = (e: React.FormEvent) => {
     e.preventDefault()
     fetchData(startDate, endDate)
+    // SUDARSHAN: live re-reads keep the dates the list was filtered by.
+    applied.current = { start: startDate, end: endDate }
   }
+
+  // SUDARSHAN: re-read quietly after every sandbox request the server reports,
+  // and when the Socket.IO connection comes back; the request log is not
+  // market data, so there is no timer.
+  const applied = useRef<{ start?: string; end?: string }>({})
+  const latestFetch = useRef(fetchData)
+  latestFetch.current = fetchData
+  const quietRead = useCallback(
+    () => latestFetch.current(applied.current.start, applied.current.end, true),
+    []
+  )
+  useBookSync(quietRead, { events: ['analyzer_update'], resyncMs: null })
 
   const handleExport = () => {
     const params = new URLSearchParams()

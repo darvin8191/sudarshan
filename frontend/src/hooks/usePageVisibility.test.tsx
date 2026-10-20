@@ -94,6 +94,31 @@ describe('page visibility notifications', () => {
     expect(state()).toMatchObject({ isVisible: true, wasHidden: true, lastVisibilityChange: 6000 })
   })
 
+  // SUDARSHAN: a return used to read 0 here, because the timers zeroed it in the same update.
+  it('reports how long the page was hidden on the render where wasHidden is true', async () => {
+    const seen: Array<{ wasHidden: boolean; timeSinceHidden: number }> = []
+    function Recorder() {
+      const v = usePageVisibility()
+      seen.push({ wasHidden: v.wasHidden, timeSinceHidden: v.timeSinceHidden })
+      return null
+    }
+    visibility('visible')
+    render(<Recorder />)
+    await act(async () => {
+      visibility('hidden')
+      document.dispatchEvent(new Event('visibilitychange'))
+      await vi.advanceTimersByTimeAsync(60_000)
+    })
+    await act(async () => {
+      visibility('visible')
+      document.dispatchEvent(new Event('visibilitychange'))
+      await vi.advanceTimersByTimeAsync(10)
+    })
+    const returned = seen.filter((entry) => entry.wasHidden)
+    expect(returned.length).toBeGreaterThan(0)
+    expect(Math.max(...returned.map((entry) => entry.timeSinceHidden))).toBeGreaterThan(30_000)
+  })
+
   it('ignores a pending notification after the observer unmounts', async () => {
     visibility('visible')
     const view = render(<Observer />)

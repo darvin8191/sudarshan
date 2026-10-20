@@ -14,7 +14,7 @@ import {
   XCircle,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { type QuotesData, tradingApi } from '@/api/trading'
+import { tradingApi } from '@/api/trading'
 import { ChartSymbolLink } from '@/components/trading/ChartSymbolLink'
 import GttTab from '@/components/trading/GttTab'
 import {
@@ -52,12 +52,30 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { type OrderEventType, useOrderEventRefresh } from '@/hooks/useOrderEventRefresh'
+import { type PriceableItem, useLivePrice } from '@/hooks/useLivePrice'
+import { useLiveQuote } from '@/hooks/useLiveQuote'
 // Note: AlertDialog still used for Cancel All Orders
 import { useSupportedExchanges } from '@/hooks/useSupportedExchanges'
 import { cn, makeFormatCurrency, sanitizeCSV } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
-import { onModeChange } from '@/stores/themeStore'
+import { onModeChange, useThemeStore } from '@/stores/themeStore'
+// SUDARSHAN: live status, the LTP of working orders, the book re-read (src/sudarshan/books).
+import { useBookFeed } from '@/sudarshan/books/feed'
+import { TickPrice } from '@/sudarshan/books/LiveFigures'
+import { noteCancelAllFromApp } from '@/sudarshan/books/orderAlerts'
+import {
+  foldOrderUpdate,
+  frameFitsMode,
+  holdPushed,
+  isFinalStatus,
+  noteOrderBook,
+  pushedStatuses,
+  useOrderUpdates,
+} from '@/sudarshan/books/orderFold'
+import { QuoteStatus } from '@/sudarshan/books/QuoteStatus'
+import { useBookSync, useLatestRead } from '@/sudarshan/books/useBookSync'
+import { useMarketOpen } from '@/sudarshan/dashboard/hooks'
+import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
 import type { Order, OrderStats } from '@/types/trading'
 import { showToast } from '@/utils/toast'
 
@@ -68,13 +86,8 @@ interface SortConfig {
   direction: 'asc' | 'desc'
 }
 
-// Fixed: Defined outside component to prevent effect dependency churn and repeated socket re-subscriptions
-const ORDER_BOOK_EVENTS: OrderEventType[] = [
-  'order_event',
-  'analyzer_update',
-  'cancel_order_event',
-  'modify_order_event',
-]
+// SUDARSHAN: the events that re-read this book are useBookSync's BOOK_EVENTS,
+// which add the broker's own order updates (fills, rejections, square-offs).
 
 /**
  * Helper to convert various broker timestamp formats into a sortable number.
@@ -164,8 +177,21 @@ export default function OrderBook() {
   // Modify order state
   const [modifyDialogOpen, setModifyDialogOpen] = useState(false)
   const [modifyingOrder, setModifyingOrder] = useState<Order | null>(null)
-  const [quotes, setQuotes] = useState<QuotesData | null>(null)
-  const [isLoadingQuotes, setIsLoadingQuotes] = useState(false)
+  // SUDARSHAN: the modify dialog's quote ticks while it is open, instead of
+  // being read once (useLiveQuote: one REST snapshot, then the socket).
+  const {
+    data: liveQuote,
+    isLoading: isLoadingQuotes,
+    feed: quoteFeed,
+    calendar: quoteCalendar,
+  } = useLiveQuote(modifyingOrder?.symbol ?? '', modifyingOrder?.exchange ?? '', {
+    enabled: modifyDialogOpen && !!modifyingOrder,
+    mode: 'Depth',
+  })
+  const quotes = liveQuote.ltp !== undefined ? liveQuote : null
+  // SUDARSHAN: a figure the quote does not carry yet reads "-", never 0.
+  const quoteFigure = (value: number | undefined) =>
+    typeof value === 'number' && value > 0 ? formatCurrency(value) : '-'
   const [modifyForm, setModifyForm] = useState({
     quantity: 0,
     price: 0,
@@ -235,6 +261,11 @@ export default function OrderBook() {
     setStatusFilter([])
   }
 
+  // SUDARSHAN: what the broker last pushed for each order (kept app-wide, so a
+  // page opened just after a fill holds it too), held over a lagging re-read.
+  const beginRead = useLatestRead()
+  const appMode = useThemeStore((s) => s.appMode)
+
   const fetchOrders = useCallback(
     async (showRefresh = false) => {
       if (!apiKey) {
@@ -244,23 +275,30 @@ export default function OrderBook() {
 
       if (showRefresh) setIsRefreshing(true)
 
+      // SUDARSHAN: an answer a newer read has overtaken is dropped.
+      const isLatest = beginRead()
+      const askedAt = Date.now()
       try {
         const response = await tradingApi.getOrders(apiKey)
+        if (!isLatest()) return
         if (response.status === 'success' && response.data) {
-          setOrders(response.data.orders || [])
+          noteOrderBook(response.data.orders || [], askedAt)
+          setOrders(holdPushed(response.data.orders || [], pushedStatuses(), Date.now()))
           setStats(response.data.statistics)
           setError(null)
         } else {
           setError(response.message || 'Failed to fetch orders')
         }
       } catch {
-        setError('Failed to fetch orders')
+        if (isLatest()) setError('Failed to fetch orders')
       } finally {
-        setIsLoading(false)
-        setIsRefreshing(false)
+        if (isLatest()) {
+          setIsLoading(false)
+          setIsRefreshing(false)
+        }
       }
     },
-    [apiKey]
+    [apiKey, beginRead]
   )
 
   useEffect(() => {
@@ -268,9 +306,43 @@ export default function OrderBook() {
   }, [fetchOrders])
 
   // Refresh on order events instead of polling
-  useOrderEventRefresh(fetchOrders, {
-    events: ORDER_BOOK_EVENTS,
+  // SUDARSHAN: the broker's own updates change their row at once and are
+  // confirmed by a re-read; every order event, a Socket.IO reconnect, coming
+  // back after 15 s and a 45 s re-sync while a market is open re-read the book.
+  useOrderUpdates((frame) => {
+    if (!frameFitsMode(frame, appMode)) return
+    setOrders((current) => foldOrderUpdate(current, frame))
   })
+
+  // SUDARSHAN: the last price of every instrument with a working order.
+  const working = useMemo(() => {
+    const seen = new Map<string, PriceableItem>()
+    for (const order of orders) {
+      if (isFinalStatus(order.order_status)) continue
+      seen.set(`${order.exchange}:${order.symbol}`, {
+        symbol: order.symbol,
+        exchange: order.exchange,
+      })
+    }
+    return Array.from(seen.values())
+  }, [orders])
+  const {
+    data: workingPrices,
+    feed: workingFeed,
+    calendar,
+  } = useLivePrice(working, { enabled: working.length > 0 })
+  const { isOpen: marketOpen, anyOpen: anyMarketOpen } = useMarketOpen(calendar)
+  const {
+    line: ltpLine,
+    now: ltpNow,
+    stale: ltpStale,
+  } = useBookFeed(workingPrices, workingFeed, marketOpen)
+  const priceOf = useMemo(
+    () => new Map(workingPrices.map((row) => [`${row.exchange}:${row.symbol}`, row])),
+    [workingPrices]
+  )
+
+  useBookSync(fetchOrders, { marketOpen: anyMarketOpen })
 
   // Listen for mode changes (live/analyze) and refresh data
   useEffect(() => {
@@ -297,6 +369,8 @@ export default function OrderBook() {
   }
 
   const handleCancelAllOrders = async () => {
+    // SUDARSHAN: the orders working now are the ones this cancels; their cancels are not alerts.
+    noteCancelAllFromApp()
     try {
       const response = await tradingApi.cancelAllOrders()
       if (response.status === 'success') {
@@ -324,23 +398,8 @@ export default function OrderBook() {
       pricetype: order.pricetype,
       product: order.product,
     })
-    setQuotes(null)
+    // SUDARSHAN: the quote below is useLiveQuote's, live while the dialog is open.
     setModifyDialogOpen(true)
-
-    // Fetch quotes for the symbol
-    if (apiKey) {
-      setIsLoadingQuotes(true)
-      try {
-        const response = await tradingApi.getQuotes(apiKey, order.symbol, order.exchange)
-        if (response.status === 'success' && response.data) {
-          setQuotes(response.data)
-        }
-      } catch {
-        // Silently fail - quotes are optional for order modification
-      } finally {
-        setIsLoadingQuotes(false)
-      }
-    }
   }
 
   const handleModifyOrder = async () => {
@@ -458,6 +517,13 @@ export default function OrderBook() {
         <TabsContent value="orders" className="space-y-6">
           {/* Orders tab toolbar */}
           <div className="flex items-center justify-start sm:justify-end gap-2 flex-wrap">
+            {/* SUDARSHAN: where the LTP of the working orders stands. */}
+            {working.length > 0 && (
+              <span className="flex min-h-9 items-center gap-1.5 sm:mr-auto">
+                <span className="text-xs font-semibold text-muted-foreground">LTP</span>
+                <LiveLine line={ltpLine} now={ltpNow} />
+              </span>
+            )}
             {/* Settings Button */}
             <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
               <DialogTrigger asChild>
@@ -683,6 +749,8 @@ export default function OrderBook() {
                           </div>
                         </TableHead>
                         <TableHead className="w-[100px] text-right">Trigger</TableHead>
+                        {/* SUDARSHAN: the live price beside a working order. */}
+                        <TableHead className="w-[100px] text-right">LTP</TableHead>
                         <TableHead className="w-[80px]">Type</TableHead>
                         {!isCrypto && <TableHead className="w-[70px]">Product</TableHead>}
                         <TableHead className="w-[140px]">Order ID</TableHead>
@@ -741,6 +809,24 @@ export default function OrderBook() {
                             </TableCell>
                             <TableCell className="text-right font-mono">
                               {formatCurrency(order.trigger_price)}
+                            </TableCell>
+                            <TableCell className="text-right font-mono">
+                              {/* SUDARSHAN: working orders only; a final one has no price to watch. */}
+                              {(() => {
+                                const live = isFinalStatus(order.order_status)
+                                  ? undefined
+                                  : priceOf.get(`${order.exchange}:${order.symbol}`)
+                                return live ? (
+                                  <TickPrice
+                                    value={live.ltp}
+                                    direction={live._tick}
+                                    stale={ltpStale(live)}
+                                    format={formatCurrency}
+                                  />
+                                ) : (
+                                  <span className="text-muted-foreground">-</span>
+                                )
+                              })()}
                             </TableCell>
                             <TableCell>
                               <Badge variant="secondary">{order.pricetype}</Badge>
@@ -860,49 +946,61 @@ export default function OrderBook() {
           <div className="rounded-lg border bg-muted/50 p-4">
             <div className="flex items-center justify-between mb-3">
               <span className="text-sm font-medium">Market Data</span>
-              {isLoadingQuotes && <Loader2 className="h-4 w-4 animate-spin" />}
+              {/* SUDARSHAN: live while the dialog is open, with its status. */}
+              {isLoadingQuotes ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                quotes &&
+                modifyingOrder && (
+                  <QuoteStatus
+                    exchange={modifyingOrder.exchange}
+                    feed={quoteFeed}
+                    calendar={quoteCalendar}
+                  />
+                )
+              )}
             </div>
             {quotes ? (
               <div className="grid grid-cols-4 gap-4 text-sm">
                 <div>
                   <div className="text-muted-foreground text-xs">LTP</div>
-                  <div className="font-mono font-semibold">{formatCurrency(quotes.ltp)}</div>
+                  <div className="font-mono font-semibold">{quoteFigure(quotes.ltp)}</div>
                 </div>
                 <div>
                   <div className="text-muted-foreground text-xs">Bid</div>
                   <div className="font-mono text-[color:var(--up)]">
-                    {formatCurrency(quotes.bid)}
+                    {quoteFigure(quotes.bidPrice)}
                   </div>
                 </div>
                 <div>
                   <div className="text-muted-foreground text-xs">Ask</div>
                   <div className="font-mono text-[color:var(--down)]">
-                    {formatCurrency(quotes.ask)}
+                    {quoteFigure(quotes.askPrice)}
                   </div>
                 </div>
                 <div>
                   <div className="text-muted-foreground text-xs">Prev Close</div>
-                  <div className="font-mono">{formatCurrency(quotes.prev_close)}</div>
+                  <div className="font-mono">{quoteFigure(quotes.close)}</div>
                 </div>
                 <div>
                   <div className="text-muted-foreground text-xs">Open</div>
-                  <div className="font-mono">{formatCurrency(quotes.open)}</div>
+                  <div className="font-mono">{quoteFigure(quotes.open)}</div>
                 </div>
                 <div>
                   <div className="text-muted-foreground text-xs">High</div>
-                  <div className="font-mono text-[color:var(--up)]">
-                    {formatCurrency(quotes.high)}
-                  </div>
+                  <div className="font-mono text-[color:var(--up)]">{quoteFigure(quotes.high)}</div>
                 </div>
                 <div>
                   <div className="text-muted-foreground text-xs">Low</div>
                   <div className="font-mono text-[color:var(--down)]">
-                    {formatCurrency(quotes.low)}
+                    {quoteFigure(quotes.low)}
                   </div>
                 </div>
                 <div>
                   <div className="text-muted-foreground text-xs">Volume</div>
-                  <div className="font-mono">{quotes.volume.toLocaleString('en-IN')}</div>
+                  <div className="font-mono">
+                    {quotes.volume === undefined ? '-' : quotes.volume.toLocaleString('en-IN')}
+                  </div>
                 </div>
               </div>
             ) : (

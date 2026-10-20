@@ -44,6 +44,14 @@ vi.mock('@/hooks/useLivePrice', () => ({
     data: positions,
     isLive: false,
     isPaused: false,
+    // SUDARSHAN: the status line's inputs (useLivePrice's feed and calendar).
+    feed: { lastTickAt: null, lastUpdateAt: null, due: 0, connected: true },
+    calendar: {
+      isLoading: false,
+      error: null,
+      isMarketOpen: () => false,
+      isAnyMarketOpen: () => false,
+    },
   }),
 }))
 

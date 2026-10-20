@@ -82,14 +82,10 @@ export function usePageVisibility(): UsePageVisibilityReturn {
       if (!active) return
 
       // Detect if returning from hidden state
-      if (nowVisible && !previousVisibleRef.current) {
+      const returning = nowVisible && !previousVisibleRef.current
+      if (returning) {
         setWasHidden(true)
         visibleTimestampRef.current = now
-
-        // Calculate how long the tab was hidden
-        if (hiddenTimestampRef.current) {
-          setTimeSinceHidden(now - hiddenTimestampRef.current)
-        }
       } else if (!nowVisible) {
         hiddenTimestampRef.current = now
         setWasHidden(false)
@@ -100,6 +96,13 @@ export function usePageVisibility(): UsePageVisibilityReturn {
       setIsVisible(nowVisible)
       setLastVisibilityChange(now)
       updateTimers()
+
+      // Calculate how long the tab was hidden
+      // SUDARSHAN: after updateTimers, which zeroes it for a visible page and so
+      // left every return reading 0; it now holds the time away on that render.
+      if (returning && hiddenTimestampRef.current) {
+        setTimeSinceHidden(now - hiddenTimestampRef.current)
+      }
     }
 
     const handleVisibilityChange = () => {

@@ -5,6 +5,10 @@ import { toast } from 'sonner'
 import { type AlertCategories, useAlertStore } from '@/stores/alertStore'
 import { useAuthStore } from '@/stores/authStore'
 import { useSessionStore } from '@/stores/sessionStore'
+// SUDARSHAN: the shared connection and the app-wide order alerts (src/sudarshan/books).
+import { claimOrderSound } from '@/sudarshan/books/chime'
+import { installOrderAlerts, noteAppCancelEvent } from '@/sudarshan/books/orderAlerts'
+import { acquireSharedSocket, releaseSharedSocket } from '@/sudarshan/books/sharedSocket'
 
 // Audio throttling configuration
 const AUDIO_THROTTLE_MS = 1000
@@ -67,6 +71,10 @@ const showCategoryToast = (
 
 export function useSocket() {
   const navigate = useNavigate()
+  // SUDARSHAN: `navigate` changes identity with every pathname; read through a
+  // ref so a page change does not re-run the connection effect below.
+  const navigateRef = useRef(navigate)
+  navigateRef.current = navigate
   const { isAuthenticated } = useAuthStore()
   const socketRef = useRef<Socket | null>(null)
   // Reactive copy so consumers (SocketProvider -> useOrderEventRefresh) can share
@@ -92,6 +100,10 @@ export function useSocket() {
     }
 
     lastAudioTimeRef.current = now
+
+    // SUDARSHAN: one sound per moment with the order alert chime (an order
+    // placed and filled at once would otherwise sound twice).
+    if ((category === 'orders' || category === 'analyzer') && !claimOrderSound(now)) return
 
     if (audioRef.current) {
       audioRef.current
@@ -148,17 +160,31 @@ export function useSocket() {
 
     // Use polling transport only - WebSocket upgrade fails with threading async mode
     // Polling is still real-time via HTTP long-polling
-    socketRef.current = io(`${protocol}//${host}:${port}`, {
-      transports: ['polling'],
-      upgrade: false,
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000,
-      timeout: 20000,
-      forceNew: true, // Always create new session to avoid "Invalid session" errors on reconnect
-    })
+    // SUDARSHAN: borrowed for the signed-in tab, not opened per mount, so a page
+    // or layout change never drops what the server pushes (sudarshan/books/sharedSocket.ts).
+    const shared = acquireSharedSocket(() =>
+      io(`${protocol}//${host}:${port}`, {
+        transports: ['polling'],
+        upgrade: false,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000,
+        timeout: 20000,
+        forceNew: true, // Always create new session to avoid "Invalid session" errors on reconnect
+      })
+    )
+    socketRef.current = shared
+    setSocketInstance(shared)
 
-    const socket = socketRef.current
-    setSocketInstance(socket)
+    // SUDARSHAN: the handlers below register through this recorder, so cleanup
+    // removes exactly this provider's from the connection it shares.
+    const registered: Array<[string, (...args: any[]) => void]> = []
+    const socket = {
+      on(event: string, handler: (...args: any[]) => void) {
+        shared.on(event, handler)
+        registered.push([event, handler])
+        return socket
+      },
+    }
 
     // Force logout from another device
     socket.on('force_logout', (data: { message: string }) => {
@@ -171,7 +197,7 @@ export function useSocket() {
         duration: 10000,
       })
       setTimeout(() => {
-        navigate('/login', { replace: true })
+        navigateRef.current('/login', { replace: true })
       }, 2000)
     })
 
@@ -189,6 +215,8 @@ export function useSocket() {
 
     // Cancel order notification - only play sound, UI handles toast
     socket.on('cancel_order_event', (data: CancelOrderEventData) => {
+      // SUDARSHAN: a cancel sent from this app, so the broker's echo is not announced.
+      noteAppCancelEvent('cancel_order_event', data)
       if (!data.batch_order) {
         playAlertSound('orders')
       }
@@ -262,6 +290,8 @@ export function useSocket() {
 
     // Analyzer update notification
     socket.on('analyzer_update', (data: AnalyzerUpdateData) => {
+      // SUDARSHAN: a sandbox cancel sent from this app, so its echo is not announced.
+      noteAppCancelEvent('analyzer_update', data)
       const passiveApiTypes = [
         'orderstatus',
         'openposition',
@@ -272,7 +302,12 @@ export function useSocket() {
       ]
       const isPassiveMonitoring = passiveApiTypes.includes(data.request.api_type)
 
-      if (!isPassiveMonitoring) {
+      // SUDARSHAN: the sandbox engine's own updates (a fill, a square-off) carry
+      // no request type; their orders' alerts sound once, and the order alert
+      // mute silences them (src/sudarshan/books/orderAlerts.ts).
+      const isSandboxEngine = !data.request?.api_type
+
+      if (!isPassiveMonitoring && !isSandboxEngine) {
         playAlertSound('analyzer')
       }
 
@@ -330,14 +365,21 @@ export function useSocket() {
       }
     })
 
+    // SUDARSHAN: fills, partial fills, rejections and broker cancels (M6.8).
+    const removeOrderAlerts = installOrderAlerts(shared)
+
     return () => {
-      socket.disconnect()
+      // SUDARSHAN: remove this provider's handlers and give the connection back;
+      // it closes only if no provider takes it again (logout, leaving the app pages).
+      removeOrderAlerts()
+      for (const [event, handler] of registered) shared.off(event, handler)
+      releaseSharedSocket(shared)
       setSocketInstance(null)
       ;['click', 'touchstart', 'keydown'].forEach((eventType) => {
         document.removeEventListener(eventType, handleInteraction)
       })
     }
-  }, [isAuthenticated, playAlertSound, enableAudio, navigate])
+  }, [isAuthenticated, playAlertSound, enableAudio])
 
   return {
     socket: socketInstance,

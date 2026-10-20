@@ -51,7 +51,10 @@ vi.mock('@/api/trading', () => ({
 describe('useLivePrice closed-position gate', () => {
   beforeEach(() => {
     marketData.clear()
-    marketData.set('NSE:RELIANCE', { data: { ltp: 1350 }, lastUpdate: Date.now() })
+    // SUDARSHAN: the newest price wins (src/sudarshan/books/prices.ts), and the
+    // quote snapshot below is asked for after this render, so the tick is
+    // dated after it: the tick these cases need is the newest on the page.
+    marketData.set('NSE:RELIANCE', { data: { ltp: 1350 }, lastUpdate: Date.now() + 60_000 })
   })
 
   it('takes live prices for an item that carries no quantity at all', async () => {

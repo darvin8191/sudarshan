@@ -6,15 +6,13 @@ import {
   ChevronRight,
   Download,
   Loader2,
-  Pause,
-  Radio,
   RefreshCw,
   Settings2,
   TrendingDown,
   TrendingUp,
   X,
 } from 'lucide-react'
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { tradingApi } from '@/api/trading'
 import { ChartSymbolLink } from '@/components/trading/ChartSymbolLink'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -53,12 +51,16 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useLivePrice } from '@/hooks/useLivePrice'
-import { useOrderEventRefresh } from '@/hooks/useOrderEventRefresh'
-import { usePageVisibility } from '@/hooks/usePageVisibility'
 import { useSupportedExchanges } from '@/hooks/useSupportedExchanges'
 import { cn, makeFormatCurrency, sanitizeCSV } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
 import { onModeChange } from '@/stores/themeStore'
+// SUDARSHAN: the book re-read, status line and tick prices (src/sudarshan/books).
+import { useBookFeed } from '@/sudarshan/books/feed'
+import { TickPrice } from '@/sudarshan/books/LiveFigures'
+import { useBookSync, useLatestRead } from '@/sudarshan/books/useBookSync'
+import { useMarketOpen } from '@/sudarshan/dashboard/hooks'
+import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
 import type { Position } from '@/types/trading'
 import { showToast } from '@/utils/toast'
 
@@ -155,10 +157,6 @@ export default function Positions() {
   const [error, setError] = useState<string | null>(null)
   const [showStaleWarning, setShowStaleWarning] = useState(false)
 
-  // Page visibility tracking for resource optimization
-  const { isVisible, wasHidden, timeSinceHidden } = usePageVisibility()
-  const lastFetchRef = useRef<number>(Date.now())
-
   // Filter and grouping state
   const [grouping, setGrouping] = useState<GroupingType>('none')
   const [filters, setFilters] = useState<FilterState>({
@@ -170,20 +168,26 @@ export default function Positions() {
   const [sortColumn, setSortColumn] = useState<SortColumn>(null)
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // SUDARSHAN: when the shown book was asked for, so only newer ticks move its P&L.
+  const [bookAt, setBookAt] = useState<number | null>(null)
+  const beginRead = useLatestRead()
 
   // Centralized real-time price hook with WebSocket + MultiQuotes fallback
   // Automatically pauses when tab is hidden
   const {
     data: enhancedPositions,
-    isLive,
-    isPaused,
+    feed,
+    calendar,
   } = useLivePrice(positions, {
     enabled: positions.length > 0,
     useMultiQuotesFallback: true,
-    staleThreshold: 5000,
-    multiQuotesRefreshInterval: 30000,
     pauseWhenHidden: true,
+    snapshotAt: bookAt,
   })
+  // SUDARSHAN: the status line above the table and the rows to grey.
+  const { isOpen: marketOpen, anyOpen: anyMarketOpen } = useMarketOpen(calendar)
+  const { line, now, stale: rowStale } = useBookFeed(enhancedPositions, feed, marketOpen)
+  const tableStale = (line.kind === 'delayed' || line.kind === 'connecting') && line.stale
 
   // Load preferences from localStorage
   useEffect(() => {
@@ -220,52 +224,47 @@ export default function Positions() {
 
       if (showRefresh) setIsRefreshing(true)
 
+      // SUDARSHAN: an answer a newer read has overtaken is dropped.
+      const isLatest = beginRead()
+      const askedAt = Date.now()
       try {
         const response = await tradingApi.getPositions(apiKey)
+        if (!isLatest()) return
         if (response.status === 'success' && response.data) {
           setPositions(response.data)
+          setBookAt(askedAt)
           setError(null)
         } else {
           setError(response.message || 'Failed to fetch positions')
         }
       } catch {
-        setError('Failed to fetch positions')
+        if (isLatest()) setError('Failed to fetch positions')
       } finally {
-        setIsLoading(false)
-        setIsRefreshing(false)
+        if (isLatest()) {
+          setIsLoading(false)
+          setIsRefreshing(false)
+        }
       }
     },
-    [apiKey]
+    [apiKey, beginRead]
   )
 
   // Initial fetch and visibility-aware polling
   // Pauses polling when tab is hidden to save resources
+  // SUDARSHAN: the first read only; coming back to the page is useBookSync's.
   useEffect(() => {
-    // Don't poll when tab is hidden
-    if (!isVisible) return
-
     fetchPositions()
-    lastFetchRef.current = Date.now()
-  }, [fetchPositions, isVisible])
+  }, [fetchPositions])
 
-  // Refresh on order events instead of polling
-  useOrderEventRefresh(fetchPositions, {
-    events: ['order_event', 'analyzer_update', 'close_position_event'],
-  })
-
-  // Refresh data when tab becomes visible after being hidden
-  useEffect(() => {
-    if (!wasHidden || !isVisible) return
-
-    const timeSinceLastFetch = Date.now() - lastFetchRef.current
-
-    // If hidden for more than 30 seconds, show stale warning and refresh
-    if (timeSinceHidden > 30000 || timeSinceLastFetch > 30000) {
-      setShowStaleWarning(true)
-      fetchPositions()
-      lastFetchRef.current = Date.now()
-    }
-  }, [wasHidden, isVisible, timeSinceHidden, fetchPositions])
+  // SUDARSHAN: re-read after every order event including the broker's fills,
+  // rejections and square-offs (order_update), on a Socket.IO reconnect, on
+  // coming back after 15 s, and every 45 s while a market is open. The
+  // "being refreshed" note shows while a read on coming back runs, and only then.
+  const onReturnRead = useCallback((read: Promise<void>) => {
+    setShowStaleWarning(true)
+    void read.finally(() => setShowStaleWarning(false))
+  }, [])
+  useBookSync(fetchPositions, { marketOpen: anyMarketOpen, onReturnRead })
 
   // Auto-dismiss stale data warning after 5 seconds
   useEffect(() => {
@@ -377,7 +376,8 @@ export default function Positions() {
       return { _all: sortedPositions }
     }
 
-    const groups: Record<string, Position[]> = {}
+    // SUDARSHAN: the priced rows' own type, so their tick fields reach the table.
+    const groups: Record<string, typeof sortedPositions> = {}
     sortedPositions.forEach((pos) => {
       const groupKey = getGroupKey(pos)
       if (!groups[groupKey]) groups[groupKey] = []
@@ -604,25 +604,10 @@ export default function Positions() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <h1 className="text-3xl font-bold tracking-tight">Positions</h1>
-            {isPaused ? (
-              <Badge
-                variant="outline"
-                className="bg-amber-500/10 text-amber-600 border-amber-500/30 gap-1"
-              >
-                <Pause className="h-3 w-3" />
-                Paused
-              </Badge>
-            ) : isLive ? (
-              <Badge
-                variant="outline"
-                className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30 gap-1"
-              >
-                <Radio className="h-3 w-3 animate-pulse" />
-                Live
-              </Badge>
-            ) : null}
+            {/* SUDARSHAN: "Real-time" only while ticks arrive, never "Live" for the feed. */}
+            {positions.length > 0 && <LiveLine line={line} now={now} />}
           </div>
           <p className="text-muted-foreground">Monitor and manage your active trading positions</p>
         </div>
@@ -852,9 +837,16 @@ export default function Positions() {
             <CardTitle
               className={cn(
                 'text-2xl',
-                isProfit(stats.totalPnl) ? 'text-green-600' : 'text-red-600'
+                // SUDARSHAN: greyed while its ticks are stale; the sign stays.
+                tableStale
+                  ? 'text-muted-foreground'
+                  : isProfit(stats.totalPnl)
+                    ? 'text-green-600'
+                    : 'text-red-600'
               )}
             >
+              {/* SUDARSHAN: a plus on a gain, so a greyed figure still says which way. */}
+              {stats.totalPnl > 0 ? '+' : ''}
               {formatCurrency(stats.totalPnl)}
             </CardTitle>
           </CardHeader>
@@ -965,6 +957,8 @@ export default function Positions() {
                             // coerces for the same reason.
                             const quantity = Number(position.quantity) || 0
                             const isOpen = quantity !== 0
+                            // SUDARSHAN: a price that should be ticking and is not.
+                            const stale = rowStale(position)
 
                             return (
                               <TableRow key={`${position.symbol}-${position.exchange}-${index}`}>
@@ -1010,12 +1004,22 @@ export default function Positions() {
                                   {formatCurrency(position.average_price)}
                                 </TableCell>
                                 <TableCell className="w-[120px] text-right font-mono">
-                                  {position.ltp !== undefined ? formatCurrency(position.ltp) : '-'}
+                                  {/* SUDARSHAN: the last tick's direction, greyed when stale. */}
+                                  <TickPrice
+                                    value={position.ltp}
+                                    direction={position._tick}
+                                    stale={stale}
+                                    format={formatCurrency}
+                                  />
                                 </TableCell>
                                 <TableCell
                                   className={cn(
                                     'w-[120px] text-right font-medium',
-                                    isProfit(position.pnl) ? 'text-green-600' : 'text-red-600'
+                                    stale
+                                      ? 'text-muted-foreground'
+                                      : isProfit(position.pnl)
+                                        ? 'text-green-600'
+                                        : 'text-red-600'
                                   )}
                                 >
                                   <div className="flex items-center justify-end gap-1">
@@ -1030,9 +1034,11 @@ export default function Positions() {
                                 <TableCell
                                   className={cn(
                                     'w-[100px] text-right',
-                                    isProfit(calculatePnlPercent(position))
-                                      ? 'text-green-600'
-                                      : 'text-red-600'
+                                    stale
+                                      ? 'text-muted-foreground'
+                                      : isProfit(calculatePnlPercent(position))
+                                        ? 'text-green-600'
+                                        : 'text-red-600'
                                   )}
                                 >
                                   {calculatePnlPercent(position) >= 0 ? '+' : ''}
@@ -1066,7 +1072,12 @@ export default function Positions() {
                     <TableCell
                       className={cn(
                         'w-[120px] text-right font-bold',
-                        isProfit(stats.totalPnl) ? 'text-green-600' : 'text-red-600'
+                        // SUDARSHAN: greyed while its ticks are stale; the sign stays.
+                        tableStale
+                          ? 'text-muted-foreground'
+                          : isProfit(stats.totalPnl)
+                            ? 'text-green-600'
+                            : 'text-red-600'
                       )}
                     >
                       {stats.totalPnl >= 0 ? '+' : ''}
