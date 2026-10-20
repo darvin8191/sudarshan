@@ -17,6 +17,7 @@ import asyncio
 import json
 import time
 from collections import defaultdict
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -311,6 +312,97 @@ def test_a_client_whose_oldest_message_waits_too_long_is_dropped() -> None:
         assert 0 < len(trickle.sent) < 20
 
         await _hang_up(proxy, handlers)
+
+    asyncio.run(scenario())
+
+
+class _StoppedClock:
+    """A loop clock that never beats and never freezes: the test checks for stalls itself."""
+
+    def hold(self, _outbox) -> None:
+        pass
+
+    def release(self, _outbox) -> None:
+        pass
+
+    def frozen(self) -> float:
+        return 0.0
+
+
+class _GatedSocket:
+    """A socket that holds each send until the test lets that one through."""
+
+    def __init__(self) -> None:
+        self.sent: list[str] = []
+        self.gates: list[asyncio.Event] = []
+        self.aborted = 0
+        self.transport = self
+
+    def abort(self) -> None:
+        self.aborted += 1
+
+    async def send(self, text: str) -> None:
+        gate = asyncio.Event()
+        self.gates.append(gate)
+        await gate.wait()
+        self.sent.append(text)
+
+
+def _outbox_at(monkeypatch, now: list[float]) -> tuple[ClientOutbox, _GatedSocket]:
+    """An outbox on a gated socket, with a 10 s stall limit, read against the clock `now`."""
+    monkeypatch.setattr(sudarshan_ext, "time", SimpleNamespace(monotonic=lambda: now[0]))
+    socket = _GatedSocket()
+    return ClientOutbox(1, socket, 10.0, clock=_StoppedClock()), socket
+
+
+def test_a_message_counts_its_wait_from_when_it_was_queued(monkeypatch) -> None:
+    """Through its own send too: a reply that waited 6 s behind another and then hangs in
+    its send is dropped at 10 s from when it was queued, not 10 s from when its send began."""
+    now = [100.0]
+
+    async def scenario() -> None:
+        outbox, socket = _outbox_at(monkeypatch, now)
+        outbox.offer('{"type": "first"}')
+        outbox.offer('{"type": "second"}')
+        await _settle()  # the first is in its send
+
+        now[0] = 106.0
+        socket.gates[0].set()
+        await _settle()  # the first went; the second, 6 s old, is in its send
+        assert socket.sent == ['{"type": "first"}'] and len(socket.gates) == 2
+
+        now[0] = 109.9
+        outbox.check_stall()
+        assert socket.aborted == 0
+        now[0] = 110.0
+        outbox.check_stall()
+        assert socket.aborted == 1 and outbox.dropped
+
+        outbox.close()
+        await _settle()
+
+    asyncio.run(scenario())
+
+
+def test_a_message_that_waited_the_limit_is_never_sent(monkeypatch) -> None:
+    """Taken from the queue only once it has waited the stall limit behind a slow send, a
+    reply is not sent that late: the client is dropped, before the loop clock looks."""
+    now = [100.0]
+
+    async def scenario() -> None:
+        outbox, socket = _outbox_at(monkeypatch, now)
+        outbox.offer('{"type": "first"}')
+        outbox.offer('{"type": "second"}')
+        await _settle()  # the first is in its send
+
+        now[0] = 110.0  # it took the whole limit, and the second waited behind it
+        socket.gates[0].set()
+        await _settle()
+
+        assert socket.sent == ['{"type": "first"}']
+        assert len(socket.gates) == 1  # the second never reached the socket
+        assert socket.aborted == 1 and outbox.dropped
+        assert outbox.task.done()
 
     asyncio.run(scenario())
 
