@@ -21,6 +21,46 @@ export interface PriceableItem {
 }
 
 /**
+ * A position's P&L at a given price: today's realized P&L from partial closes
+ * (the sandbox reports it as `today_realized_pnl`) plus the unrealized P&L of
+ * what is still held. A long gains as the price rises and a short as it falls.
+ * Quantity is in units, times the contract multiplier where the broker has one
+ * (`lot_size`, e.g. 0.01 for Delta Exchange ETHUSD.P; 1 everywhere else, since
+ * Indian F&O quantities already count lots times the lot size).
+ *
+ * Null when the position cannot be priced: no price, or no average price. This
+ * is the evaluator `useLivePrice` applies to every open position.
+ *
+ * SUDARSHAN: lifted out of the hook unchanged and exported, so the live
+ * dashboard prices positions with this evaluator instead of a copy of it.
+ */
+export function positionPnlAt(
+  item: PriceableItem,
+  ltp: number | undefined
+): { pnl: number; pnlPercent: number } | null {
+  const qty = item.quantity || 0
+  const avgPrice = item.average_price || 0
+  if (!ltp || avgPrice <= 0) return null
+
+  // Contract multiplier: e.g. 0.01 for Delta Exchange ETHUSD.P (1 lot = 0.01 ETH)
+  // Defaults to 1 for all standard brokers where qty is already in underlying units
+  const lotSize = item.lot_size ?? 1
+
+  // Calculate unrealized P&L based on position direction
+  // Long (qty > 0): profit when ltp > avgPrice
+  // Short (qty < 0): profit when ltp < avgPrice
+  const unrealizedPnl =
+    qty > 0 ? (ltp - avgPrice) * qty * lotSize : (avgPrice - ltp) * Math.abs(qty) * lotSize
+
+  // Total P&L = today's realized (from partial closes) + current unrealized
+  const pnl = (item.today_realized_pnl || 0) + unrealizedPnl
+
+  // P&L% based on total P&L and investment
+  const investment = Math.abs(avgPrice * qty)
+  return { pnl, pnlPercent: investment > 0 ? (pnl / investment) * 100 : 0 }
+}
+
+/**
  * Configuration options for useLivePrice hook
  */
 export interface UseLivePriceOptions {
@@ -215,7 +255,6 @@ export function useLivePrice<T extends PriceableItem>(
       const mqData = multiQuotes.get(key)
 
       const qty = item.quantity || 0
-      const avgPrice = item.average_price || 0
 
       // Check if market is open for this exchange
       const exchangeMarketOpen = isMarketOpen(item.exchange)
@@ -262,35 +301,15 @@ export function useLivePrice<T extends PriceableItem>(
       }
 
       // For open positions: recalculate P&L and P&L% using live LTP
-      // This ensures real-time updates as LTP changes
+      // This ensures real-time updates as LTP changes. Today's realized P&L
+      // (sandbox mode) is included, so the cumulative figure is shown.
       let calculatedPnl = item.pnl || 0
       let calculatedPnlPercent = item.pnlpercent || 0
 
-      // Get today's realized P&L if available (from sandbox mode)
-      // This ensures cumulative P&L (realized + unrealized) is shown correctly
-      const todayRealizedPnl = item.today_realized_pnl || 0
-
-      if (currentLtp && avgPrice > 0) {
-        // Contract multiplier: e.g. 0.01 for Delta Exchange ETHUSD.P (1 lot = 0.01 ETH)
-        // Defaults to 1 for all standard brokers where qty is already in underlying units
-        const lotSize = item.lot_size ?? 1
-
-        // Calculate unrealized P&L based on position direction
-        // Long (qty > 0): profit when ltp > avgPrice
-        // Short (qty < 0): profit when ltp < avgPrice
-        let unrealizedPnl: number
-        if (qty > 0) {
-          unrealizedPnl = (currentLtp - avgPrice) * qty * lotSize
-        } else {
-          unrealizedPnl = (avgPrice - currentLtp) * Math.abs(qty) * lotSize
-        }
-
-        // Total P&L = today's realized (from partial closes) + current unrealized
-        calculatedPnl = todayRealizedPnl + unrealizedPnl
-
-        // P&L% based on total P&L and investment
-        const investment = Math.abs(avgPrice * qty)
-        calculatedPnlPercent = investment > 0 ? (calculatedPnl / investment) * 100 : 0
+      const live = positionPnlAt(item, currentLtp)
+      if (live) {
+        calculatedPnl = live.pnl
+        calculatedPnlPercent = live.pnlPercent
       }
 
       return {
