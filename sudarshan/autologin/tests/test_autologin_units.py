@@ -162,3 +162,44 @@ def test_systemd_reads_the_units_without_complaint(tmp_path):
             ["systemd-analyze", "calendar", calendar], capture_output=True, text=True
         ).stdout
         assert "Next elapse:" in out and calendar.split()[-2] in out  # the time of day
+
+
+def _market_gate_says(
+    tmp_path: Path, now: str, holidays: str = "", extra: str | None = None
+) -> int:
+    """The deploy tool's listed() and market_open(), cut out as they ship, on a fake clock.
+
+    ``now`` is what ``date '+%u %H%M %F'`` prints in IST; the day files live in ``tmp_path``.
+    Returns 0 for "trading, do not restart" and 1 for "safe to deploy".
+    """
+    text = DEPLOY_TOOL.read_text()
+    start = text.index("listed() {")
+    end = text.index("\n}\n", text.index("market_open() {")) + 3
+    gate = text[start:end].replace("/etc/sudarshan/", f"{tmp_path}/")
+    (tmp_path / "nse_holidays.txt").write_text(holidays)
+    if extra is not None:
+        (tmp_path / "nse_extra_trading_days.txt").write_text(extra)
+    script = f'date() {{ echo "{now}"; }}\n{gate}\nmarket_open\n'
+    return subprocess.run(["bash", "-c", script], capture_output=True, text=True).returncode
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+@pytest.mark.parametrize(
+    ("now", "holidays", "extra", "trading"),
+    [
+        ("3 1000 2026-10-21", "", None, True),
+        ("3 0859 2026-10-21", "", None, False),
+        ("3 1545 2026-10-21", "", None, True),
+        ("3 1546 2026-10-21", "", None, False),
+        ("2 1000 2026-10-20", "2026-10-20  # Dussehra\n", None, False),
+        ("2 1000 2026-10-20", "2026-10-20\n", None, False),
+        ("2 1000 2026-10-20", "# 2026-10-20\n", None, True),
+        # A special weekend session (Muhurat trading) keeps its own hours: no restart all day.
+        ("7 1830 2026-11-08", "", "2026-11-08 # Muhurat\n", True),
+        ("7 0300 2026-11-08", "", "2026-11-08\n", True),
+        ("7 1830 2026-11-08", "", None, False),
+        ("7 1830 2026-11-08", "", "2026-11-01\n", False),
+    ],
+)
+def test_the_deploy_market_gate(tmp_path, now, holidays, extra, trading):
+    assert (_market_gate_says(tmp_path, now, holidays, extra) == 0) is trading
