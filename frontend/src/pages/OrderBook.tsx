@@ -123,11 +123,23 @@ function formatTime(timestamp: string): string {
 }
 
 const statusConfig: Record<string, { icon: typeof CheckCircle2; color: string; label: string }> = {
-  complete: { icon: CheckCircle2, color: 'text-green-500', label: 'complete' },
-  rejected: { icon: XCircle, color: 'text-red-500', label: 'rejected' },
-  cancelled: { icon: XCircle, color: 'text-gray-500', label: 'cancelled' },
-  open: { icon: Clock, color: 'text-blue-500', label: 'open' },
+  complete: { icon: CheckCircle2, color: 'text-[color:var(--up)]', label: 'complete' },
+  rejected: { icon: XCircle, color: 'text-[color:var(--down)]', label: 'rejected' },
+  cancelled: { icon: XCircle, color: 'text-[color:var(--neutral)]', label: 'cancelled' },
+  open: { icon: Clock, color: 'text-[color:var(--warning-text)]', label: 'open' },
 }
+
+// SUDARSHAN (M1.18): the theme's colours instead of Tailwind's fixed palette,
+// so BUY and SELL read at 5:1 or better and the stats fit three to a row on a
+// phone. White on green-500, as before, was 2.3:1.
+const SIDE_BADGE: Record<string, string> = {
+  BUY: 'border-transparent bg-[hsl(var(--buy))] text-white',
+  SELL: 'border-transparent bg-[hsl(var(--sell))] text-white',
+}
+const STAT_CARD = 'gap-0 py-3 sm:py-6'
+const STAT_HEADER = 'gap-1 px-3 pb-0 sm:px-6 sm:pb-2'
+const STAT_LABEL = 'text-xs sm:text-sm'
+const STAT_VALUE = 'sd-display text-[1.75rem] leading-none font-semibold'
 
 export default function OrderBook() {
   const { apiKey, user } = useAuthStore()
@@ -418,10 +430,7 @@ export default function OrderBook() {
     <Button
       variant={statusFilter.includes(status) ? 'default' : 'outline'}
       size="sm"
-      className={cn(
-        'rounded-full',
-        statusFilter.includes(status) && 'bg-pink-500 hover:bg-pink-600'
-      )}
+      className="rounded-full"
       onClick={() => toggleStatusFilter(status)}
     >
       {label}
@@ -448,7 +457,7 @@ export default function OrderBook() {
 
         <TabsContent value="orders" className="space-y-6">
           {/* Orders tab toolbar */}
-          <div className="flex items-center justify-end gap-2 flex-wrap">
+          <div className="flex items-center justify-start sm:justify-end gap-2 flex-wrap">
             {/* Settings Button */}
             <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
               <DialogTrigger asChild>
@@ -460,7 +469,7 @@ export default function OrderBook() {
                   <Settings2 className="h-4 w-4 mr-2" />
                   Filters
                   {hasActiveFilters && (
-                    <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full" />
+                    <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-[color:var(--gold)] rounded-full" />
                   )}
                 </Button>
               </DialogTrigger>
@@ -538,7 +547,7 @@ export default function OrderBook() {
                 <Badge
                   key={status}
                   variant="secondary"
-                  className="bg-pink-500/10 text-pink-600 border-pink-500/30"
+                  className="border-transparent bg-[color:var(--primary-tint)] text-primary"
                 >
                   {status}
                 </Badge>
@@ -546,7 +555,7 @@ export default function OrderBook() {
               <Button
                 variant="outline"
                 size="sm"
-                className="text-red-500 border-red-500/50 hover:bg-red-500/10"
+                className="text-destructive border-destructive/50 hover:bg-destructive/10"
                 onClick={clearFilters}
               >
                 Clear All
@@ -555,41 +564,41 @@ export default function OrderBook() {
           )}
 
           {/* Stats Cards */}
-          <div className="grid gap-4 md:grid-cols-5">
-            <Card>
-              <CardHeader className="pb-2">
-                <CardDescription>Buy Orders</CardDescription>
-                <CardTitle className="text-2xl text-green-600">
+          <div className="grid grid-cols-3 gap-2 sm:gap-4 md:grid-cols-5">
+            <Card className={STAT_CARD}>
+              <CardHeader className={STAT_HEADER}>
+                <CardDescription className={STAT_LABEL}>Buy Orders</CardDescription>
+                <CardTitle className={cn(STAT_VALUE, 'text-[hsl(var(--buy))]')}>
                   {stats?.total_buy_orders ?? 0}
                 </CardTitle>
               </CardHeader>
             </Card>
-            <Card>
-              <CardHeader className="pb-2">
-                <CardDescription>Sell Orders</CardDescription>
-                <CardTitle className="text-2xl text-red-600">
+            <Card className={STAT_CARD}>
+              <CardHeader className={STAT_HEADER}>
+                <CardDescription className={STAT_LABEL}>Sell Orders</CardDescription>
+                <CardTitle className={cn(STAT_VALUE, 'text-[hsl(var(--sell))]')}>
                   {stats?.total_sell_orders ?? 0}
                 </CardTitle>
               </CardHeader>
             </Card>
-            <Card>
-              <CardHeader className="pb-2">
-                <CardDescription>Completed</CardDescription>
-                <CardTitle className="text-2xl">{stats?.total_completed_orders ?? 0}</CardTitle>
+            <Card className={STAT_CARD}>
+              <CardHeader className={STAT_HEADER}>
+                <CardDescription className={STAT_LABEL}>Completed</CardDescription>
+                <CardTitle className={STAT_VALUE}>{stats?.total_completed_orders ?? 0}</CardTitle>
               </CardHeader>
             </Card>
-            <Card>
-              <CardHeader className="pb-2">
-                <CardDescription>Open</CardDescription>
-                <CardTitle className="text-2xl text-blue-600">
+            <Card className={STAT_CARD}>
+              <CardHeader className={STAT_HEADER}>
+                <CardDescription className={STAT_LABEL}>Open</CardDescription>
+                <CardTitle className={cn(STAT_VALUE, 'text-[color:var(--warning-text)]')}>
                   {stats?.total_open_orders ?? 0}
                 </CardTitle>
               </CardHeader>
             </Card>
-            <Card>
-              <CardHeader className="pb-2">
-                <CardDescription>Rejected</CardDescription>
-                <CardTitle className="text-2xl text-red-600">
+            <Card className={STAT_CARD}>
+              <CardHeader className={STAT_HEADER}>
+                <CardDescription className={STAT_LABEL}>Rejected</CardDescription>
+                <CardTitle className={cn(STAT_VALUE, 'text-[color:var(--down)]')}>
                   {stats?.total_rejected_orders ?? 0}
                 </CardTitle>
               </CardHeader>
@@ -598,7 +607,7 @@ export default function OrderBook() {
 
           {/* Orders Table */}
           <Card>
-            <CardContent className="py-0">
+            <CardContent className="relative px-3 py-0 sm:px-6">
               {isLoading ? (
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="h-8 w-8 animate-spin" />
@@ -724,12 +733,7 @@ export default function OrderBook() {
                               <Badge variant="outline">{order.exchange}</Badge>
                             </TableCell>
                             <TableCell>
-                              <Badge
-                                variant={order.action === 'BUY' ? 'default' : 'destructive'}
-                                className={order.action === 'BUY' ? 'bg-green-500' : ''}
-                              >
-                                {order.action}
-                              </Badge>
+                              <Badge className={SIDE_BADGE[order.action]}>{order.action}</Badge>
                             </TableCell>
                             <TableCell className="text-right font-mono">{order.quantity}</TableCell>
                             <TableCell className="text-right font-mono">
@@ -774,7 +778,7 @@ export default function OrderBook() {
                                 <Button
                                   variant="ghost"
                                   size="icon"
-                                  className="h-8 w-8 text-blue-500 hover:text-blue-600"
+                                  className="h-8 w-8 text-primary hover:text-primary/80"
                                   onClick={() => openModifyDialog(order)}
                                   aria-label={`Modify order for ${order.symbol}`}
                                 >
@@ -788,6 +792,13 @@ export default function OrderBook() {
                     </TableBody>
                   </Table>
                 </div>
+              )}
+              {/* SUDARSHAN: on a phone the table scrolls sideways; the fade says so. */}
+              {!isLoading && !error && sortedAndFilteredOrders.length > 0 && (
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-y-0 right-3 w-10 bg-gradient-to-l from-card to-transparent sm:right-6 md:hidden"
+                />
               )}
             </CardContent>
           </Card>
@@ -804,10 +815,7 @@ export default function OrderBook() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-3">
               <span>Modify Order</span>
-              <Badge
-                variant={modifyingOrder?.action === 'BUY' ? 'default' : 'destructive'}
-                className={modifyingOrder?.action === 'BUY' ? 'bg-green-500' : ''}
-              >
+              <Badge className={SIDE_BADGE[modifyingOrder?.action ?? '']}>
                 {modifyingOrder?.action}
               </Badge>
             </DialogTitle>
@@ -862,11 +870,15 @@ export default function OrderBook() {
                 </div>
                 <div>
                   <div className="text-muted-foreground text-xs">Bid</div>
-                  <div className="font-mono text-green-600">{formatCurrency(quotes.bid)}</div>
+                  <div className="font-mono text-[color:var(--up)]">
+                    {formatCurrency(quotes.bid)}
+                  </div>
                 </div>
                 <div>
                   <div className="text-muted-foreground text-xs">Ask</div>
-                  <div className="font-mono text-red-600">{formatCurrency(quotes.ask)}</div>
+                  <div className="font-mono text-[color:var(--down)]">
+                    {formatCurrency(quotes.ask)}
+                  </div>
                 </div>
                 <div>
                   <div className="text-muted-foreground text-xs">Prev Close</div>
@@ -878,11 +890,15 @@ export default function OrderBook() {
                 </div>
                 <div>
                   <div className="text-muted-foreground text-xs">High</div>
-                  <div className="font-mono text-green-600">{formatCurrency(quotes.high)}</div>
+                  <div className="font-mono text-[color:var(--up)]">
+                    {formatCurrency(quotes.high)}
+                  </div>
                 </div>
                 <div>
                   <div className="text-muted-foreground text-xs">Low</div>
-                  <div className="font-mono text-red-600">{formatCurrency(quotes.low)}</div>
+                  <div className="font-mono text-[color:var(--down)]">
+                    {formatCurrency(quotes.low)}
+                  </div>
                 </div>
                 <div>
                   <div className="text-muted-foreground text-xs">Volume</div>

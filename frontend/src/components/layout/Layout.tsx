@@ -30,7 +30,7 @@ export function Layout() {
         </div>
         {/* SUDARSHAN: on a phone the page starts closer to the bar (D), and
             ends clear of the 76px bottom bar and any gesture-bar inset. */}
-        <main className="container mx-auto flex-1 px-4 pt-4 pb-[calc(6rem+env(safe-area-inset-bottom))] md:py-6">
+        <main className="sd-page container mx-auto flex-1 px-4 pt-4 pb-[calc(6rem+env(safe-area-inset-bottom))] md:py-6">
           <Outlet />
         </main>
         <Footer className="hidden md:block" />

@@ -165,6 +165,16 @@ html {
   }
 }
 
+/* Every page's title in the app shell is a screen title, so it is set in Khand
+   wherever upstream wrote it. Outside any layer on purpose, so it wins over
+   the font and tracking utilities on those headings; their size and weight
+   still apply (Khand has 500 to 700). */
+.sd-page h1 {
+  font-family: var(--font-display);
+  font-synthesis: none;
+  letter-spacing: 0;
+}
+
 /* One accent (M1.12). Upstream's picker themes ([data-theme="green"] and the
    rest, specificity 0-2-0) collapse to the brand here at 0-3-0, so a choice
    saved by an earlier build cannot recolour the app. */
