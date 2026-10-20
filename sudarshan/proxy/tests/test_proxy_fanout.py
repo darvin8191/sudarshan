@@ -24,7 +24,7 @@ import pytest
 import websocket_proxy  # noqa: F401  (loads the adapter registry before anything else)
 from websocket_proxy import server as proxy_server
 from websocket_proxy.server import WebSocketProxy
-from websocket_proxy.sudarshan_ext import ClientOutbox
+from websocket_proxy.sudarshan_ext import ClientOutbox, merge_ticks
 
 USER = "owner"
 KEY = ("RELIANCE", "NSE", 2)
@@ -182,7 +182,7 @@ def test_a_stalled_client_does_not_delay_a_healthy_one() -> None:
         assert took < 0.5  # the listener never waited for the stalled client
         # The stalled one holds one tick in flight and the newest one waiting.
         (waiting,) = outbox._queue
-        assert json.loads(waiting[1])["data"]["ltp"] == 20
+        assert waiting[1]["data"]["ltp"] == 20  # waits as a dict, JSON once sent
 
         await asyncio.sleep(0.8)
         # Dropped without a closing handshake, so its browser reconnects and
@@ -472,3 +472,29 @@ def test_an_outbox_whose_connection_closed_stops_queueing() -> None:
         assert len(outbox._queue) == 0
 
     asyncio.run(scenario())
+
+
+def test_a_merged_tick_keeps_what_only_the_older_one_said() -> None:
+    """Newer values win, nested ones (depth, greeks) are replaced whole, and the payloads,
+    which the fan-out shares between clients, are never changed."""
+    older = {
+        "type": "market_data",
+        "mode": 3,
+        "data": {
+            "ltp": 1.0,
+            "oi": 10,
+            "depth": {"buy": [1], "sell": [2]},
+            "greeks": {"delta": 0.5},
+        },
+    }
+    newer = {"type": "market_data", "mode": 3, "data": {"ltp": 2.0, "depth": {"buy": [3]}}}
+
+    merged = merge_ticks(older, newer)
+
+    assert merged == {
+        "type": "market_data",
+        "mode": 3,
+        "data": {"ltp": 2.0, "oi": 10, "depth": {"buy": [3]}, "greeks": {"delta": 0.5}},
+    }
+    assert newer["data"] == {"ltp": 2.0, "depth": {"buy": [3]}}
+    assert older["data"]["ltp"] == 1.0

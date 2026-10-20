@@ -1100,3 +1100,66 @@ def test_an_unsubscribe_naming_its_mode_releases_it_at_upstox(make_adapter, monk
         assert adapter.upstox.held == {}
 
     asyncio.run(scenario())
+
+
+# --------------------------------------------------------------------------------------------
+# A lagging client and the values a newer frame leaves out
+# --------------------------------------------------------------------------------------------
+
+
+class _GatedPhone:
+    """A phone on a slow link: its first send waits until the test lets it through."""
+
+    def __init__(self) -> None:
+        self.sent: list[dict[str, Any]] = []
+        self.gate = asyncio.Event()
+        self.transport = self
+
+    async def send(self, frame: str) -> None:
+        if not self.sent:
+            await self.gate.wait()
+        self.sent.append(json.loads(frame))
+
+    def abort(self) -> None:
+        pass
+
+
+def test_a_lagging_client_still_gets_what_only_the_merged_tick_carried(
+    make_adapter, monkeypatch
+) -> None:
+    """A trade frame (open interest, iv, greeks, average price) waits behind a slow send, and
+    a book-only frame of the same stream, which leaves those out, merges into it. The client
+    gets one Quote message: the newer frame's values and the older one's open interest and
+    greeks, never old open interest left on screen as current."""
+    adapter = make_adapter()
+    _hold(adapter, OPTION, 2)
+    _hold(adapter, SBIN, 1)  # another stream, whose tick occupies the sender
+    published = []
+    for frame in (ltpc_only_frame(), option_full_frame(), _book_only(OPTION, OPTION_BOOK)):
+        adapter.published.clear()
+        adapter.decoder._process_binary_message(frame.SerializeToString())
+        published.extend(adapter.published)
+    trade, book_only = published[1][1], published[2][1]
+    assert "oi" in trade and "oi" not in book_only
+
+    monkeypatch.setattr(proxy_server, "get_market_data_service", _MarketDataServiceStub)
+    proxy = _proxy_with_clients({7: (OPTION[0], OPTION[1], 2)})
+    proxy.subscription_index[(SBIN[0], SBIN[1], 1)].add(7)
+
+    async def scenario() -> list[dict[str, Any]]:
+        phone = _GatedPhone()
+        proxy.clients[7] = phone
+        proxy._open_outbox(7, phone)
+        await _deliver(proxy, published)  # SBIN in flight, the trade waiting, then book-only
+        phone.gate.set()
+        for _ in range(20):
+            await asyncio.sleep(0)
+        proxy._close_outbox(7)
+        return phone.sent
+
+    sent = asyncio.run(scenario())
+    (quote,) = [message["data"] for message in sent if message["symbol"] == OPTION[0]]
+    assert (quote["oi"], quote["iv"], quote["average_price"]) == (4567800, 0.1432, 99.87)
+    assert quote["greeks"] == trade["greeks"]
+    assert quote["last_trade_quantity"] == 0  # the newer frame reports no new trade
+    assert (quote["ltp"], quote["volume"]) == (101.5, 123450)

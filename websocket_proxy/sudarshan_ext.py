@@ -81,6 +81,22 @@ class BrokerLinger(NamedTuple):
     loop: aio.AbstractEventLoop
 
 
+def merge_ticks(older: dict, newer: dict) -> dict:
+    """The newer tick of a stream, carrying what only the older one said.
+
+    A payload leaves out the values its frame did not carry (oi, iv, greeks, the
+    average price, the book totals, depth), so a newer tick replacing a waiting
+    one whole would lose them: the client would keep showing old open interest
+    as current. Merged, the client holds what a consumer applying both ticks in
+    order holds (MarketDataManager merges each tick into the last): newer values
+    win, and a nested value such as `depth` or `greeks` is replaced whole.
+    """
+    old_data, new_data = older.get("data"), newer.get("data")
+    if not (isinstance(old_data, dict) and isinstance(new_data, dict)):
+        return newer
+    return {**newer, "data": {**old_data, **new_data}}
+
+
 class ClientOutbox:
     """One client's outgoing messages, sent in order by its own task.
 
@@ -88,10 +104,11 @@ class ClientOutbox:
     slow phone no longer holds back another screen's ticks.
 
     A client that falls behind gets the newest tick, not a backlog. While a tick
-    for one stream (topic and mode) still waits, a newer one for that stream takes
-    its place in the queue, which is the trailing-edge coalescing server.py's
-    fan-out comment asks for. A client that keeps up has nothing waiting and so
-    gets every tick. Replies, errors and order updates are never merged or
+    for one stream (topic and the client's mode) still waits, a newer one for that
+    stream is merged into it in its place (merge_ticks), which is the
+    trailing-edge coalescing server.py's fan-out comment asks for. A client that
+    keeps up has nothing waiting and so gets every tick. Ticks wait as dicts and
+    become JSON when sent. Replies, errors and order updates are never merged or
     dropped, and keep their order relative to ticks: a tick is merged only into
     one queued after the last of them.
 
@@ -120,19 +137,22 @@ class ClientOutbox:
             self._run(), name=f"ws-client-outbox-{client_id}"
         )
 
-    def offer(self, frame: str, stream: Any = None) -> None:
-        """Queue one message; never waits. `stream` marks a tick that a newer one may replace."""
+    def offer(self, message: dict | str, stream: Any = None) -> None:
+        """Queue one message; never waits. `stream` marks a tick a newer one merges into."""
         if self.dropped:
             return
         if stream is not None:
             waiting = self._waiting_ticks.get(stream)
             if waiting is not None and waiting[3] == self._replies:
-                waiting[1] = frame  # the newest tick, in the waiting one's place
+                older = waiting[1]
+                both = isinstance(older, dict) and isinstance(message, dict)
+                waiting[1] = merge_ticks(older, message) if both else message
                 return
-            entry = [stream, frame, time.monotonic(), self._replies]
+            entry = [stream, message, time.monotonic(), self._replies]
             self._waiting_ticks[stream] = entry
         else:
             self._replies += 1
+            frame = message if isinstance(message, str) else json.dumps(message)
             entry = [None, frame, time.monotonic(), self._replies]
         self._queue.append(entry)
         self._wake.set()
@@ -144,9 +164,14 @@ class ClientOutbox:
                 await self._wake.wait()
                 continue
             entry = self._queue.popleft()
-            stream, frame, queued_at = entry[0], entry[1], entry[2]
+            stream, message, queued_at = entry[0], entry[1], entry[2]
             if stream is not None and self._waiting_ticks.get(stream) is entry:
                 del self._waiting_ticks[stream]
+            try:
+                frame = message if isinstance(message, str) else json.dumps(message)
+            except (TypeError, ValueError):
+                logger.exception(f"Could not encode a message for client {self.client_id}")
+                continue
             left = self.stall_seconds - (time.monotonic() - queued_at)
             try:
                 if left <= 0:
@@ -251,14 +276,14 @@ class SudarshanProxyMixin:
         """From send_message and the fan-out: queue in the client's outbox.
 
         A reply goes in order with the client's ticks. A tick names its `stream`
-        (the topic and the client's mode), so a newer tick replaces one still
+        (the topic and the client's mode), so a newer tick merges into one still
         waiting. Returns False for a client without an outbox (a proxy driven
         without handle_client, as the tests do), which is then sent to directly.
         """
         outbox = self._outboxes().get(client_id)
         if outbox is None:
             return False
-        outbox.offer(json.dumps(message), stream)
+        outbox.offer(message, stream)
         return True
 
     # ------------------------------------------------------------------------
