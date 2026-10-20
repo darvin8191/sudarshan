@@ -59,6 +59,11 @@ def _switch(env: Mapping[str, str], name: str, default: bool) -> bool:
     raise ConfigError(f"{name} must be on or off")
 
 
+def switched_off(env: Mapping[str, str] | None = None) -> bool:
+    """The kill switch, read before anything else: off means no other setting matters."""
+    return not _switch(os.environ if env is None else env, "SUDARSHAN_ORDER_ALERTS", True)
+
+
 def sqlite_path(database_url: str, app_dir: Path) -> Path | None:
     """The file behind a ``sqlite:///`` URL (relative to OpenAlgo's directory), else None."""
     prefix = "sqlite:///"

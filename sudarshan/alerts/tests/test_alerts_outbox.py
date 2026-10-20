@@ -8,7 +8,7 @@ from datetime import timedelta
 
 import httpx
 import pytest
-from alerts_fakes import API_KEY, NEW_API_KEY, OWNER, FakeNotify, ist, wait_until
+from alerts_fakes import API_KEY, NEW_API_KEY, OWNER, FakeOpenAlgo, ist, wait_until
 
 from sudarshan.alerts import outbox
 from sudarshan.alerts.orders import Alert
@@ -218,18 +218,18 @@ def test_flush_sends_without_the_burst_pause(fast, monkeypatch):
 @pytest.mark.parametrize(
     ("answer", "outcome"),
     [
-        (FakeNotify.SENT, SENT),
-        (FakeNotify.QUEUED, UNCONFIRMED),
-        (FakeNotify.STOPPED, DROP),
-        (FakeNotify.NOT_LINKED, DROP),
-        (FakeNotify.DOWN, RETRY),
+        (FakeOpenAlgo.SENT, SENT),
+        (FakeOpenAlgo.QUEUED, UNCONFIRMED),
+        (FakeOpenAlgo.STOPPED, DROP),
+        (FakeOpenAlgo.NOT_LINKED, DROP),
+        (FakeOpenAlgo.DOWN, RETRY),
         ((429, {"error": "ratelimit exceeded"}), RETRY),
         ((400, {"status": "error"}), DROP),
     ],
 )
 def test_openalgo_answers(answer, outcome):
     async def scenario():
-        async with FakeNotify() as fake, httpx.AsyncClient(trust_env=False) as client:
+        async with FakeOpenAlgo() as fake, httpx.AsyncClient(trust_env=False) as client:
             fake.default = answer
             owner = Owner(OWNER, API_KEY)
             telegram = OpenAlgoTelegram(fake.url, client, lambda: owner, lambda: owner)
@@ -247,7 +247,7 @@ def test_openalgo_answers(answer, outcome):
 
 def test_a_refused_key_is_read_again_and_the_new_one_used():
     async def scenario():
-        async with FakeNotify(key=NEW_API_KEY) as fake, httpx.AsyncClient(trust_env=False) as c:
+        async with FakeOpenAlgo(key=NEW_API_KEY) as fake, httpx.AsyncClient(trust_env=False) as c:
             old, new = Owner(OWNER, API_KEY), Owner(OWNER, NEW_API_KEY)
             reloads = []
             telegram = OpenAlgoTelegram(fake.url, c, lambda: old, lambda: reloads.append(1) or new)
@@ -270,3 +270,43 @@ def test_openalgo_not_running_is_a_retry():
             assert await nobody.send("text") == RETRY
 
     asyncio.run(scenario())
+
+
+def test_the_burst_pause_is_0_3_s():
+    """With the shipped timings: a second alert 0.2 s after the first joins its message."""
+
+    async def scenario():
+        send = Recorder()
+        box = _box(send)
+        task = asyncio.create_task(box.run())
+        started = time.monotonic()
+        box.add([alert("first")])
+        await asyncio.sleep(0.2)
+        box.add([alert("second")])
+        await wait_until(lambda: send.texts, 3)
+        await asyncio.sleep(0.2)
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        assert 0.29 <= send.times[0] - started < 0.6
+        assert len(send.texts) == 1 and "order second" in send.texts[0]
+
+    asyncio.run(scenario())
+
+
+def test_any_success_other_than_queued_is_a_delivery():
+    async def scenario():
+        async with FakeOpenAlgo() as fake, httpx.AsyncClient(trust_env=False) as client:
+            fake.default = (200, {"status": "success", "message": "Sent to 1 chat"})
+            owner = Owner(OWNER, API_KEY)
+            telegram = OpenAlgoTelegram(fake.url, client, lambda: owner, lambda: owner)
+            assert await telegram.send("text") == SENT
+
+    asyncio.run(scenario())
+
+
+def test_the_backoff_ladder_starts_again_after_a_stable_minute():
+    from sudarshan.alerts.service import failures_after
+
+    assert failures_after(3, 60.0) == 1
+    assert failures_after(3, 59.9) == 4
+    assert failures_after(0, 0.0) == 1

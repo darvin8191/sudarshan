@@ -3,11 +3,12 @@
 Telegram: OpenAlgo's ``POST /api/v1/telegram/notify`` (restx_api/telegram_bot.py) with the
 owner's API key and OpenAlgo username. OpenAlgo looks up the Telegram chat linked to that username
 and sends with its own bot, so this service never sees the bot token or a chat id and cannot
-message anyone else. ``wait_for_delivery`` makes OpenAlgo answer only after Telegram did:
-"Notification sent successfully" is a delivery; "queued for delivery" means Telegram did not
-take it (nothing in OpenAlgo sends that queue later), so it is tried again here a few times.
+message anyone else. ``wait_for_delivery`` makes OpenAlgo answer only after Telegram did. A
+success that says "queued for delivery" means Telegram did not take it (nothing in OpenAlgo sends
+that queue later), so it is tried again here a few times; any other success is a delivery.
 OpenAlgo refuses while its bot is stopped (409): those messages are dropped, never held back for
-later, because the owner stopped the bot.
+later, because the owner stopped the bot. Before the key leaves, the port's listener must be this
+service's own user (loopback.py).
 
 Pace: Telegram asks for about one message per second per chat, and OpenAlgo allows /notify 30
 times a minute per address. So: at least MIN_GAP_S between two messages and at most PER_MINUTE a
@@ -31,7 +32,7 @@ from datetime import datetime, timedelta
 
 import httpx
 
-from . import messages
+from . import loopback, messages
 from .orders import Alert
 
 log = logging.getLogger("sudarshan.alerts")
@@ -50,6 +51,8 @@ MAX_AGE = timedelta(minutes=30)
 RETRY_S = (2.0, 5.0, 10.0, 30.0, 60.0)
 #: Tries of a message Telegram did not confirm (OpenAlgo answered "queued").
 UNCONFIRMED_TRIES = 3
+#: The one success answer that is not a delivery (restx_api/telegram_bot.py; a test reads it).
+QUEUED = "queued for delivery"
 FLUSH_S = 5.0
 
 # What one attempt came to.
@@ -103,6 +106,11 @@ class OpenAlgoTelegram:
         owner = self.owner()
         if owner is None:
             return RETRY
+        refused = loopback.refusal(self.url)
+        if refused:
+            self.throttle(logging.ERROR, "listener", "The API key is not sent to OpenAlgo: %s",
+                          refused)  # fmt: skip
+            return RETRY
         outcome = await self._post(owner, text)
         if outcome == KEY:
             fresh = self.reload_owner()
@@ -123,9 +131,8 @@ class OpenAlgoTelegram:
         }
         try:
             answer = await self.client.post(self.url, json=body, timeout=NOTIFY_TIMEOUT_S)
-        except httpx.HTTPError as exc:
-            name = type(exc).__name__
-            self.throttle(logging.WARNING, "down", "OpenAlgo did not take a message (%s)", name)
+        except httpx.HTTPError:
+            self.throttle(logging.WARNING, "down", "OpenAlgo did not answer; the message waits")
             return RETRY
         status = answer.status_code
         if status == 200:
@@ -133,7 +140,7 @@ class OpenAlgoTelegram:
                 said = str(answer.json().get("message", ""))
             except (ValueError, AttributeError):
                 said = ""
-            if "sent successfully" in said.lower():
+            if QUEUED not in said.lower():
                 return SENT
             self.throttle(logging.WARNING, "unconfirmed", "Telegram did not confirm a message")
             return UNCONFIRMED
@@ -144,9 +151,10 @@ class OpenAlgoTelegram:
             self.throttle(logging.WARNING, f"drop-{status}", "No Telegram message: %s", reason)
             return DROP
         if status == 429 or status >= 500:
-            self.throttle(logging.WARNING, "busy", "OpenAlgo answered %d to a message", status)
+            self.throttle(logging.WARNING, "busy", "OpenAlgo is busy or failing; the message waits")
             return RETRY
-        self.throttle(logging.ERROR, f"refused-{status}", "OpenAlgo refused a message (%d)", status)
+        self.throttle(logging.ERROR, "refused", "OpenAlgo refused a message; it is not sent again")
+        log.debug("OpenAlgo answered %d to a message", status)
         return DROP
 
 

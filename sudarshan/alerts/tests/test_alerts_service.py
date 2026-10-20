@@ -14,7 +14,7 @@ from alerts_fakes import (
     API_KEY,
     NEW_API_KEY,
     OWNER,
-    FakeNotify,
+    FakeOpenAlgo,
     FakeProxy,
     ist,
     update,
@@ -49,6 +49,12 @@ class Keys:
         return Owner(OWNER, self.key)
 
 
+def _filled_prices(message: str) -> list[str]:
+    """The price on each Filled line of a message: lines name no order id, prices do."""
+    return [line.split(" at ")[1].split(" ")[0] for line in message.split("\n")
+            if line.startswith("Filled: ")]  # fmt: skip
+
+
 async def _start(settings, keys=None, clock=None) -> tuple[AlertService, asyncio.Task]:
     svc = AlertService(settings, owner_reader=keys or Keys(), clock=clock)
     return svc, asyncio.create_task(svc.run())
@@ -63,7 +69,7 @@ def test_fills_reach_telegram_merged_and_once(settings_for, fast, caplog):
     caplog.set_level(logging.DEBUG, logger="sudarshan.alerts")
 
     async def scenario():
-        async with FakeProxy() as proxy, FakeNotify() as notify:
+        async with FakeProxy() as proxy, FakeOpenAlgo() as notify:
             svc, task = await _start(settings_for(proxy, notify))
             await wait_until(lambda: proxy.subscribed)
             assert proxy.keys_seen == [API_KEY] and svc.state == "connected"
@@ -99,7 +105,7 @@ def test_fills_reach_telegram_merged_and_once(settings_for, fast, caplog):
 def test_a_restart_and_a_replay_send_nothing_again(settings_for, fast):
     async def scenario():
         day = [update("r1", "complete"), update("r2", "rejected", rejection_reason="No margin")]
-        async with FakeProxy() as proxy, FakeNotify() as notify:
+        async with FakeProxy() as proxy, FakeOpenAlgo() as notify:
             settings = settings_for(proxy, notify)
             svc, task = await _start(settings)
             await wait_until(lambda: proxy.subscribed)
@@ -124,21 +130,22 @@ def test_a_restart_and_a_replay_send_nothing_again(settings_for, fast):
 
 def test_reconnects_read_the_key_again_and_do_not_resend(settings_for, fast):
     async def scenario():
-        async with FakeProxy() as proxy, FakeNotify() as notify:
+        async with FakeProxy() as proxy, FakeOpenAlgo() as notify:
             keys = Keys()
             svc, task = await _start(settings_for(proxy, notify), keys)
             await wait_until(lambda: proxy.subscribed)
-            await proxy.push(update("c1", "complete"))
+            await proxy.push(update("c1", "complete", average_price=101.0))
             await wait_until(lambda: len(notify.bodies) == 1)
             reads = keys.reads
             await proxy.drop_all()  # the proxy restarts (a deploy, a crash)
             await wait_until(lambda: proxy.connections == 2 and proxy.subscribed)
             assert keys.reads > reads  # a regenerated key would be picked up here
-            await proxy.push(update("c1", "complete"))  # an old state again
-            await proxy.push(update("c2", "complete"))
+            await proxy.push(update("c1", "complete", average_price=101.0))  # an old state again
+            await proxy.push(update("c2", "complete", average_price=102.0))
             await wait_until(lambda: len(notify.bodies) == 2)
             await asyncio.sleep(0.3)
-            assert len(notify.bodies) == 2 and "c2" not in notify.messages[0]
+            assert len(notify.bodies) == 2
+            assert _filled_prices(notify.messages[1]) == ["₹102.00"]
             await _stop(svc, task)
 
     asyncio.run(scenario())
@@ -146,7 +153,7 @@ def test_reconnects_read_the_key_again_and_do_not_resend(settings_for, fast):
 
 def test_a_regenerated_key_is_used_after_the_proxy_refuses_the_old_one(settings_for, fast):
     async def scenario():
-        async with FakeProxy(key=NEW_API_KEY) as proxy, FakeNotify(key=NEW_API_KEY) as notify:
+        async with FakeProxy(key=NEW_API_KEY) as proxy, FakeOpenAlgo(key=NEW_API_KEY) as notify:
             keys = Keys(API_KEY)
             svc, task = await _start(settings_for(proxy, notify), keys)
             await wait_until(lambda: proxy.keys_seen)
@@ -166,7 +173,7 @@ def test_no_broker_login_yet_still_subscribes(settings_for, fast):
     """The proxy maps the client before it connects its broker adapter, and says so in an error."""
 
     async def scenario():
-        async with FakeProxy() as proxy, FakeNotify() as notify:
+        async with FakeProxy() as proxy, FakeOpenAlgo() as notify:
             proxy.broker_error = "BROKER_INIT_ERROR"
             svc, task = await _start(settings_for(proxy, notify))
             await wait_until(lambda: proxy.subscribed)
@@ -181,7 +188,7 @@ def test_a_missing_api_key_sends_nothing_and_is_logged_once(settings_for, fast, 
     caplog.set_level(logging.INFO, logger="sudarshan.alerts")
 
     async def scenario():
-        async with FakeProxy() as proxy, FakeNotify() as notify:
+        async with FakeProxy() as proxy, FakeOpenAlgo() as notify:
             keys = Keys()
             keys.problem = "no_key"
             svc, task = await _start(settings_for(proxy, notify), keys)
@@ -199,14 +206,13 @@ def test_the_kill_switch(settings_for, fast, caplog):
     caplog.set_level(logging.INFO, logger="sudarshan.alerts")
 
     async def scenario():
-        async with FakeProxy() as proxy, FakeNotify() as notify:
+        async with FakeProxy() as proxy, FakeOpenAlgo() as notify:
             keys = Keys()
             svc, task = await _start(
                 settings_for(proxy, notify, SUDARSHAN_ORDER_ALERTS="off"), keys
             )
-            await asyncio.sleep(0.4)
+            await asyncio.wait_for(task, 2)  # it does not wait for anything
             assert proxy.connections == 0 and keys.reads == 0 and svc.state == "off"
-            await _stop(svc, task)
         assert "Order alerts are off (SUDARSHAN_ORDER_ALERTS=off)" in caplog.text
 
     asyncio.run(scenario())
@@ -227,7 +233,7 @@ def test_outside_trading_hours_it_does_not_connect(settings_for, fast, tmp_path,
         (tmp_path / "nse_holidays.txt").write_text("2026-11-09\n")
         if extra_day:
             (tmp_path / "nse_extra_trading_days.txt").write_text(f"{extra_day}  # Muhurat\n")
-        async with FakeProxy() as proxy, FakeNotify() as notify:
+        async with FakeProxy() as proxy, FakeOpenAlgo() as notify:
             keys = Keys()
             settings = settings_for(proxy, notify, SUDARSHAN_ALERTS_ALWAYS_ON="0")
             svc, task = await _start(settings, keys, Clock(at))
@@ -241,7 +247,7 @@ def test_outside_trading_hours_it_does_not_connect(settings_for, fast, tmp_path,
 def test_an_extra_trading_day_opens_and_the_window_end_closes(settings_for, fast, tmp_path):
     async def scenario():
         (tmp_path / "nse_extra_trading_days.txt").write_text("2026-11-08  # Muhurat\n")
-        async with FakeProxy() as proxy, FakeNotify() as notify:
+        async with FakeProxy() as proxy, FakeOpenAlgo() as notify:
             clock = Clock(ist(2026, 11, 8, 15, 59, 58))  # a Sunday listed as a trading day
             settings = settings_for(proxy, notify, SUDARSHAN_ALERTS_ALWAYS_ON="0")
             svc, task = await _start(settings, Keys(), clock)
@@ -256,16 +262,18 @@ def test_an_extra_trading_day_opens_and_the_window_end_closes(settings_for, fast
 
 def test_telegram_refusals_never_stop_the_stream(settings_for, fast):
     async def scenario():
-        async with FakeProxy() as proxy, FakeNotify() as notify:
-            notify.answers = [FakeNotify.STOPPED]  # the owner stopped OpenAlgo's bot
+        async with FakeProxy() as proxy, FakeOpenAlgo() as notify:
+            notify.answers = [FakeOpenAlgo.STOPPED]  # the owner stopped OpenAlgo's bot
             svc, task = await _start(settings_for(proxy, notify))
             await wait_until(lambda: proxy.subscribed)
-            await proxy.push(update("t1", "complete"))
+            await proxy.push(update("t1", "complete", average_price=111.0))
             await wait_until(lambda: len(notify.bodies) == 1)
             await asyncio.sleep(0.3)
-            await proxy.push(update("t2", "complete"))
+            await proxy.push(update("t2", "complete", average_price=112.0))
             await wait_until(lambda: len(notify.bodies) == 2)
-            assert "t1" not in notify.messages[1] and svc.state == "connected"
+            # The dropped message is not sent again with the next one.
+            assert _filled_prices(notify.messages[1]) == ["₹112.00"]
+            assert svc.state == "connected"
             await _stop(svc, task)
 
     asyncio.run(scenario())
@@ -311,7 +319,7 @@ def test_the_whole_process_end_to_end(tmp_path):
     )
 
     async def scenario():
-        async with FakeProxy() as proxy, FakeNotify() as notify:
+        async with FakeProxy() as proxy, FakeOpenAlgo() as notify:
             env = {
                 "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
                 "TMPDIR": str(tmp_path),
@@ -347,8 +355,139 @@ def test_the_whole_process_end_to_end(tmp_path):
             assert proxy.close_codes == [1000]
         text = log_path.read_text()
         assert "OpenAlgo API key found" in text and "stopping: signal SIGTERM" in text
-        assert API_KEY not in text and "fake-not-read" not in text
+        assert API_KEY not in text
         assert (tmp_path / "state" / "alerts.db").exists()
         assert sorted(p.name for p in (app / "db").iterdir()) == ["openalgo.db"]  # untouched
 
     asyncio.run(scenario())
+
+
+def test_updates_for_another_account_are_ignored(settings_for, fast):
+    async def scenario():
+        async with FakeProxy() as proxy, FakeOpenAlgo() as notify:
+            svc, task = await _start(settings_for(proxy, notify))
+            await wait_until(lambda: proxy.subscribed)
+            await proxy.push(update("u1", "complete", user_id="someone-else", average_price=1.0))
+            await proxy.push(update("u2", "complete", average_price=2.0))
+            await wait_until(lambda: notify.bodies)
+            await asyncio.sleep(0.3)
+            assert [_filled_prices(m) for m in notify.messages] == [["₹2.00"]]
+            await _stop(svc, task)
+
+    asyncio.run(scenario())
+
+
+def test_a_failed_key_read_on_the_telegram_path_keeps_the_key(settings_for, fast):
+    async def scenario():
+        async with FakeProxy() as proxy, FakeOpenAlgo() as notify:
+            keys = Keys()
+            svc, task = await _start(settings_for(proxy, notify), keys)
+            await wait_until(lambda: proxy.subscribed)
+            keys.problem = "database"
+            assert svc._reload_owner() is None and svc.owner.api_key == API_KEY
+            keys.problem = "no_key"
+            assert svc._reload_owner() is None and svc.owner.api_key == API_KEY
+            keys.problem = None
+            await proxy.push(update("r9", "complete"))
+            await wait_until(lambda: notify.bodies)
+            await _stop(svc, task)
+
+    asyncio.run(scenario())
+
+
+def test_an_unusable_alert_record_does_not_stop_the_alerts(settings_for, fast, tmp_path, caplog):
+    caplog.set_level(logging.INFO, logger="sudarshan.alerts")
+    (tmp_path / "state").write_text("a file where the state directory should be")
+
+    async def scenario():
+        async with FakeProxy() as proxy, FakeOpenAlgo() as notify:
+            svc, task = await _start(settings_for(proxy, notify))
+            await wait_until(lambda: proxy.subscribed)
+            assert svc.store.in_memory
+            await proxy.push(update("m1", "complete", average_price=5.0))
+            await proxy.push(update("m1", "complete", average_price=5.0))  # held back in memory
+            await wait_until(lambda: notify.bodies)
+            await asyncio.sleep(0.3)
+            assert [_filled_prices(m) for m in notify.messages] == [["₹5.00"]]
+            await _stop(svc, task)
+        errors = [r for r in caplog.records if r.levelno >= logging.ERROR]
+        assert len(errors) == 1 and "Alerts are still sent" in errors[0].getMessage()
+
+    asyncio.run(scenario())
+
+
+def test_a_muhurat_session_uses_its_own_window(settings_for, fast, tmp_path):
+    async def scenario():
+        (tmp_path / "nse_extra_trading_days.txt").write_text("2026-11-08 17:45-19:30 # Muhurat\n")
+        async with FakeProxy() as proxy, FakeOpenAlgo() as notify:
+            clock = Clock(ist(2026, 11, 8, 10, 0))  # that Sunday's usual hours: closed
+            settings = settings_for(proxy, notify, SUDARSHAN_ALERTS_ALWAYS_ON="0")
+            svc, task = await _start(settings, Keys(), clock)
+            await asyncio.sleep(0.3)
+            assert proxy.connections == 0 and svc.state == "closed"
+            clock.at = ist(2026, 11, 8, 18, 0)
+            await wait_until(lambda: proxy.subscribed)
+            clock.at = ist(2026, 11, 8, 19, 30)
+            await wait_until(lambda: proxy.close_codes == [1000])
+            await _stop(svc, task)
+
+    asyncio.run(scenario())
+
+
+def test_the_key_is_not_sent_to_another_users_port(settings_for, fast, monkeypatch, caplog):
+    from sudarshan.alerts import loopback
+
+    caplog.set_level(logging.INFO, logger="sudarshan.alerts")
+    real_uid = loopback.os.getuid()
+    monkeypatch.setattr(loopback.os, "getuid", lambda: real_uid + 1)
+
+    async def scenario():
+        async with FakeProxy() as proxy, FakeOpenAlgo() as notify:
+            keys = Keys()
+            svc, task = await _start(settings_for(proxy, notify), keys)
+            await wait_until(lambda: keys.reads >= 1)
+            await asyncio.sleep(0.3)
+            assert proxy.connections == 0 and proxy.keys_seen == []
+            await _stop(svc, task)
+        assert "held by another user's program" in caplog.text
+
+    asyncio.run(scenario())
+
+
+def test_a_redirect_is_not_followed(settings_for, fast):
+    from websockets.asyncio.server import serve
+
+    async def scenario():
+        async with FakeProxy() as target, FakeOpenAlgo() as notify:
+
+            def moved(connection, request):
+                response = connection.respond(302, "moved")
+                response.headers["Location"] = target.url
+                return response
+
+            async with serve(lambda ws: None, "127.0.0.1", 0, process_request=moved) as mover:
+                port = mover.sockets[0].getsockname()[1]
+                settings = settings_for(
+                    notify=notify, SUDARSHAN_OPENALGO_WS_URL=f"ws://127.0.0.1:{port}"
+                )
+                svc, task = await _start(settings)
+                await asyncio.sleep(0.5)
+                assert target.connections == 0 and svc.state in ("backoff", "connecting")
+                await _stop(svc, task)
+
+    asyncio.run(scenario())
+
+
+def test_switched_off_it_exits_at_once_whatever_else_is_set(tmp_path):
+    env = {
+        "PATH": "/usr/bin:/bin",
+        "SUDARSHAN_ORDER_ALERTS": "off",
+        "SUDARSHAN_ORDER_ALERTS_CANCELLED": "bogus",  # would stop it if it were read
+        "SUDARSHAN_OPENALGO_URL": "http://192.0.2.1:5000",
+    }
+    done = subprocess.run(
+        [sys.executable, "-m", "sudarshan.alerts"], cwd=REPO_ROOT, env=env,
+        capture_output=True, text=True, timeout=60,
+    )  # fmt: skip
+    assert done.returncode == 0
+    assert "Order alerts are off" in done.stderr

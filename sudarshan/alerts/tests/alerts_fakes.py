@@ -73,9 +73,10 @@ class FakeProxy:
         self.keys_seen: list[str] = []
         self.subscribed: list = []
         self.close_codes: list = []
+        self.refusing = False  # answer every new connection with 503 (OpenAlgo down)
 
     async def __aenter__(self) -> FakeProxy:
-        self._server = await serve(self._handler, "127.0.0.1", 0)
+        self._server = await serve(self._handler, "127.0.0.1", 0, process_request=self._gate)
         self.port = self._server.sockets[0].getsockname()[1]
         return self
 
@@ -86,6 +87,19 @@ class FakeProxy:
     @property
     def url(self) -> str:
         return f"ws://127.0.0.1:{self.port}"
+
+    def _gate(self, connection, request):
+        return connection.respond(503, "down") if self.refusing else None
+
+    async def outage(self, service) -> None:
+        """Cut every connection and refuse new ones until ``refusing`` is cleared."""
+        self.refusing = True
+        await self.drop_all()
+        deadline = time.monotonic() + 5
+        while service.state == "connected":
+            if time.monotonic() > deadline:
+                raise AssertionError("the service did not notice the drop")
+            await asyncio.sleep(0.01)
 
     async def push(self, message: dict) -> None:
         for ws in list(self.subscribed):
@@ -143,8 +157,47 @@ class FakeProxy:
             self.close_codes.append(ws.close_code)
 
 
-class FakeNotify:
-    """OpenAlgo's POST /api/v1/telegram/notify: records each body, answers as configured."""
+def book_row(order_id: str, status: str = "complete", **fields) -> dict:
+    """An order book row as OpenAlgo's REST order book gives it for Upstox (no fill fields)."""
+    row = {
+        "action": "BUY",
+        "symbol": OPTION,
+        "exchange": "NFO",
+        "orderid": order_id,
+        "product": "MIS",
+        "quantity": 65,
+        "price": 0.0,
+        "pricetype": "MARKET",
+        "order_status": status,
+        "trigger_price": 0.0,
+        "timestamp": "21-Oct-2026 10:42:05",
+    }
+    row.update(fields)
+    return row
+
+
+def trade_row(order_id: str, quantity: int = 65, price: float = 123.45) -> dict:
+    """A trade book row as OpenAlgo's REST trade book gives it (one per trade)."""
+    return {
+        "symbol": OPTION,
+        "exchange": "NFO",
+        "product": "MIS",
+        "action": "BUY",
+        "quantity": quantity,
+        "average_price": price,
+        "trade_value": quantity * price,
+        "orderid": order_id,
+        "timestamp": "10:42:05",
+    }
+
+
+class FakeOpenAlgo:
+    """OpenAlgo's REST on 127.0.0.1 as this service uses it.
+
+    ``/api/v1/telegram/notify`` records each body in ``bodies`` and answers as configured;
+    ``/api/v1/orderbook`` and ``/api/v1/tradebook`` serve ``orders`` and ``trades`` (with
+    ``"mode": "analyze"`` when ``analyze``), or fail with ``book_status``.
+    """
 
     SENT = (200, {"status": "success", "message": "Notification sent successfully"})
     QUEUED = (200, {"status": "success", "message": "Notification queued for delivery"})
@@ -157,17 +210,34 @@ class FakeNotify:
         self.key = key
         self.bodies: list[dict] = []
         self.paths: list[str] = []
-        self.answers: list[tuple[int, dict]] = []  # used first, one per request
+        self.answers: list[tuple[int, dict]] = []  # used first, one per notify request
         self.default = self.SENT
+        self.orders: list[dict] = []
+        self.trades: list[dict] = []
+        self.analyze = False
+        self.book_status = 200
+        self._writers: set = set()
 
-    async def __aenter__(self) -> FakeNotify:
+    async def __aenter__(self) -> FakeOpenAlgo:
         self._server = await asyncio.start_server(self._serve, "127.0.0.1", 0)
         self.port = self._server.sockets[0].getsockname()[1]
         return self
 
     async def __aexit__(self, *exc) -> None:
+        # wait_closed() waits for every client connection (Python 3.12+): one its client never
+        # closes would hang the run, so they get a moment to finish and are then cut.
+        deadline = time.monotonic() + 2
+        while self._writers and time.monotonic() < deadline:
+            await asyncio.sleep(0.01)
         self._server.close()
-        await self._server.wait_closed()
+        for writer in list(self._writers):
+            writer.transport.abort()
+        await asyncio.wait_for(self._server.wait_closed(), 5)
+
+    @property
+    def open_connections(self) -> int:
+        """Client connections this server still holds open."""
+        return len(self._writers)
 
     @property
     def url(self) -> str:
@@ -177,27 +247,58 @@ class FakeNotify:
     def messages(self) -> list[str]:
         return [body["message"] for body in self.bodies]
 
-    async def _serve(self, reader, writer) -> None:
-        head = await reader.readuntil(b"\r\n\r\n")
-        request_line, *lines = head.decode("latin-1").split("\r\n")
-        headers = {}
-        for line in lines:
-            name, _, value = line.partition(":")
-            headers[name.strip().lower()] = value.strip()
-        body = await reader.readexactly(int(headers.get("content-length") or 0))
-        self.paths.append(request_line.split(" ")[1])
-        payload = json.loads(body)
-        self.bodies.append(payload)
-        status, answer = self.answers.pop(0) if self.answers else self.default
+    def book_reads(self) -> int:
+        return self.paths.count("/api/v1/orderbook")
+
+    def _answer(self, path: str, payload: dict) -> tuple[int, dict]:
+        if path == "/api/v1/telegram/notify":
+            self.bodies.append(payload)
+            status, answer = self.answers.pop(0) if self.answers else self.default
+        elif path in ("/api/v1/orderbook", "/api/v1/tradebook"):
+            if self.book_status != 200:
+                return self.book_status, {"status": "error", "message": "broker error"}
+            data = {"orders": self.orders, "statistics": {}} if "order" in path else self.trades
+            status, answer = 200, {"status": "success", "data": data}
+            if self.analyze:
+                answer["mode"] = "analyze"
+        else:
+            return 404, {"status": "error", "message": "not found"}
         if status == 200 and payload.get("apikey") != self.key:
-            status, answer = self.BAD_KEY
+            return self.BAD_KEY
+        return status, answer
+
+    async def _serve(self, reader, writer) -> None:
+        self._writers.add(writer)
+        try:
+            await self._exchange(reader, writer)
+        finally:
+            self._writers.discard(writer)
+
+    async def _exchange(self, reader, writer) -> None:
+        try:
+            head = await reader.readuntil(b"\r\n\r\n")
+            request_line, *lines = head.decode("latin-1").split("\r\n")
+            headers = {}
+            for line in lines:
+                name, _, value = line.partition(":")
+                headers[name.strip().lower()] = value.strip()
+            body = await reader.readexactly(int(headers.get("content-length") or 0))
+        except (asyncio.IncompleteReadError, ConnectionError):
+            writer.close()  # a client that went away before asking, or a cut at the end
+            return
+        path = request_line.split(" ")[1]
+        self.paths.append(path)
+        status, answer = self._answer(path, json.loads(body))
         data = json.dumps(answer).encode()
-        writer.write(
-            f"HTTP/1.1 {status} X\r\nContent-Type: application/json\r\n"
-            f"Content-Length: {len(data)}\r\nConnection: close\r\n\r\n".encode()
-            + data
-        )
-        await writer.drain()
+        try:
+            writer.write(
+                f"HTTP/1.1 {status} X\r\nContent-Type: application/json\r\n"
+                f"Content-Length: {len(data)}\r\nConnection: close\r\n\r\n".encode()
+                + data
+            )
+            await writer.drain()
+        except ConnectionError:
+            pass  # the client went away before the answer
         writer.close()
 
 

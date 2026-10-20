@@ -9,13 +9,19 @@
 
 A standalone asyncio process, never inside the OpenAlgo app (no thread, scheduler or event loop is
 added to gunicorn). It holds the proxy connection only on trading days inside the alert window
-(08:45-16:00 IST); while it does, the proxy keeps its Upstox market-data connection for this user
-open (the proxy opens one for every authenticated client). The proxy replays nothing on connect,
-and the claims in alerts.db keep a repeated update silent.
+(08:45-16:00 IST). While any client of the owner is signed in, the proxy keeps one pooled Upstox
+market-data connection for him open, so this service keeps it open through the window.
+
+The proxy replays nothing on connect. So after every subscription the order book is read once
+(resync.py) and what changed while nothing was listening is told, marked as found later; a pause
+longer than GAP_S inside the window is told too when anything was found or the book could not be
+read. The last moment the stream was up is kept in alerts.db, so a restart knows its pause.
 
 Reconnects: a fresh read of the API key from openalgo.db for every attempt (a regenerated key is
 picked up), then backoff with jitter (2 s doubling to 60 s), reset only after a connection stayed
-up STABLE_AFTER_S, so an accept-then-drop loop can never become a tight storm.
+up STABLE_AFTER_S, so an accept-then-drop loop can never become a tight storm. The key goes only
+to a port this service's own user listens on (loopback.py), and the WebSocket client follows no
+redirect.
 """
 
 from __future__ import annotations
@@ -36,11 +42,12 @@ from websockets.exceptions import ConnectionClosed, InvalidHandshake, InvalidURI
 
 from sudarshan.autologin.schedule import IST, TradingCalendar
 
-from . import __version__
-from .config import ConfigError, Settings, setup_logging
-from .orders import OrderTracker
+from . import __version__, loopback, messages
+from .config import ConfigError, Settings, setup_logging, switched_off
+from .orders import Alert, OrderTracker
 from .outbox import OpenAlgoTelegram, Outbox, Throttle
 from .owner import Owner, OwnerError, load_openalgo_modules, prepare_openalgo_env, read_owner
+from .resync import BookUnavailable, read_books
 from .store import DB_FILENAME, Store
 from .window import AlertWindow
 
@@ -50,7 +57,7 @@ log = logging.getLogger("sudarshan.alerts")
 BACKOFF_BASE_S, BACKOFF_CAP_S = 2.0, 60.0
 STABLE_AFTER_S = 60.0  # a connection that lived this long resets the backoff ladder
 KEY_REFUSED_S = 60.0  # the proxy refused the key: read it again after this
-NOT_SUBSCRIBED_S = 30.0
+NOT_SUBSCRIBED_S = 30.0  # also after a refused listener
 NO_OWNER_S = 60.0  # no user or no API key yet: look again after this
 CLOSED_POLL_S = 30.0
 WATCH_EVERY_S = 1.0
@@ -58,7 +65,11 @@ TICK_S = 0.25  # how often stop orders waiting out the settle time are checked
 AUTH_TIMEOUT_S = 30.0  # the proxy connects its broker adapter before it answers
 ACK_TIMEOUT_S = 10.0
 STOP_FLUSH_S = 5.0
+SEEN_EVERY_S = 10.0  # how often the moment the stream was last up is written down
+GAP_S = 10.0  # a pause longer than this inside the window is told (see the module docstring)
+RESYNC_RETRY_S = (5.0, 15.0)  # pauses before reading the order book again after a failure
 REQUEST_ID = "sudarshan-alerts"
+SEEN = "stream_seen"
 WS_OPTIONS = {
     "proxy": None, "open_timeout": 10, "close_timeout": 5, "ping_interval": 20,
     "ping_timeout": 20, "max_size": 1 << 20, "max_queue": 64,
@@ -79,6 +90,13 @@ OWNER_PROBLEMS = {
 }
 
 
+class _Connect(connect):
+    """The WebSocket client without redirects: the key must not follow one anywhere."""
+
+    def process_redirect(self, exc: Exception) -> Exception:
+        return exc
+
+
 class AlertService:
     """Dependencies are passed in so the tests drive it against fakes."""
 
@@ -93,11 +111,14 @@ class AlertService:
         self.read_owner = owner_reader
         self.clock = clock or (lambda: datetime.now(IST))
         calendar = TradingCalendar(settings.holidays_file, settings.extra_days_file)
-        self.window = AlertWindow(calendar, settings.window, settings.always_on)
+        self.window = AlertWindow(
+            calendar, settings.window, settings.always_on, settings.extra_days_file
+        )
         self.owner: Owner | None = None
         self.store: Store | None = None
         self.tracker: OrderTracker | None = None
         self.outbox: Outbox | None = None
+        self.client: httpx.AsyncClient | None = None
         self._stop = asyncio.Event()
         self._state, self._detail = "starting", ""
         self._owner_problem: str | None = None
@@ -111,8 +132,6 @@ class AlertService:
         if not self.settings.enabled:
             log.info("Order alerts are off (SUDARSHAN_ORDER_ALERTS=off): nothing is sent")
             self._set_state("off")
-            await self._stop.wait()
-            self._set_state("stopped")
             return
         self.store = Store(self.settings.state_dir / DB_FILENAME)
         if removed := self.store.prune(self.clock()):
@@ -121,14 +140,15 @@ class AlertService:
             self.store, cancelled=self.settings.cancelled, sandbox=self.settings.sandbox
         )
         async with httpx.AsyncClient(trust_env=False, follow_redirects=False) as client:
+            self.client = client
             telegram = OpenAlgoTelegram(
                 self.settings.openalgo_url, client, lambda: self.owner, self._reload_owner
             )
             self.outbox = Outbox(telegram.send, self.clock)
             log.info(
-                "sudarshan-alerts %s: proxy %s, window %s, cancellations %s, sandbox %s",
-                __version__, self.settings.proxy_url, self._window_text(),
-                self.settings.cancelled, "on" if self.settings.sandbox else "off",
+                "sudarshan-alerts %s: window %s, cancellations %s, sandbox %s",
+                __version__, self._window_text(), self.settings.cancelled,
+                "on" if self.settings.sandbox else "off",
             )  # fmt: skip
             sender = asyncio.create_task(self.outbox.run())
             ticker = asyncio.create_task(self._tick())
@@ -183,7 +203,7 @@ class AlertService:
                 break
             if outcome == "window":
                 continue
-            failures = 1 if self._last_session_s >= STABLE_AFTER_S else failures + 1
+            failures = failures_after(failures, self._last_session_s)
             delay = self._retry_delay(outcome, failures)
             self._set_state("backoff", f"next attempt in {delay:.0f}s")
             await self._sleep(delay)
@@ -193,7 +213,7 @@ class AlertService:
             return KEY_REFUSED_S
         ceiling = min(BACKOFF_CAP_S, BACKOFF_BASE_S * 2 ** min(failures - 1, 16))
         delay = ceiling / 2 + random.uniform(0, ceiling / 2)  # "equal jitter"
-        if outcome == "not_subscribed":
+        if outcome in ("not_subscribed", "refused"):
             delay = max(delay, NOT_SUBSCRIBED_S)
         return delay
 
@@ -207,11 +227,7 @@ class AlertService:
             log.exception("reading the OpenAlgo API key failed unexpectedly")
             problem = "database"
         else:
-            if self._owner_problem is not None or self.owner is None:
-                log.info("OpenAlgo API key found")
-            elif owner.api_key != self.owner.api_key:
-                log.info("OpenAlgo has a new API key; using it")
-            self.owner, self._owner_problem = owner, None
+            self._use(owner)
             return owner
         if problem in ("database", "unreadable_key") and self.owner is not None:
             return self.owner  # a failed read: the key in use is the best one known
@@ -220,17 +236,44 @@ class AlertService:
         self.owner, self._owner_problem = None, problem
         return None
 
+    def _use(self, owner: Owner) -> None:
+        if self._owner_problem is not None or self.owner is None:
+            log.info("OpenAlgo API key found")
+        elif owner.api_key != self.owner.api_key:
+            log.info("OpenAlgo has a new API key; using it")
+        self.owner, self._owner_problem = owner, None
+
     def _reload_owner(self) -> Owner | None:
-        """For the Telegram path after OpenAlgo refused the key."""
-        return self._load_owner()
+        """After OpenAlgo refused the key: read it again. A failed read keeps the key in use."""
+        try:
+            owner = self.read_owner()
+        except Exception:  # OwnerError or worse: the session keeps what it has
+            log.debug("reading the API key again failed", exc_info=True)
+            return None
+        self._use(owner)
+        return owner
 
     async def _session(self, owner: Owner) -> str:
         """One connect -> authenticate -> subscribe -> read cycle; returns how it ended."""
         self._close_reason, self._last_session_s = None, 0.0
+        holder = loopback.holder(self.settings.proxy_url)
+        if holder == loopback.NOBODY:
+            self._throttle(
+                logging.WARNING, "unreachable",
+                "OpenAlgo's WebSocket proxy is not reachable; retrying",
+            )  # fmt: skip
+            return "unreachable"
+        if holder != loopback.OURS:
+            self._throttle(
+                logging.ERROR, "listener", "The API key is not sent to the WebSocket proxy: %s",
+                loopback.refusal(self.settings.proxy_url),
+            )  # fmt: skip
+            return "refused"
         started: float | None = None
+        resync: asyncio.Task | None = None
         self._set_state("connecting")
         try:
-            async with connect(self.settings.proxy_url, **WS_OPTIONS) as ws:
+            async with _Connect(self.settings.proxy_url, **WS_OPTIONS) as ws:
                 # From the first moment: a stop during the sign-in must not wait for its answer.
                 watchdog = asyncio.create_task(self._watchdog(ws))
                 try:
@@ -242,31 +285,39 @@ class AlertService:
                     started = time.monotonic()
                     self.stats["connects"] += 1
                     self._set_state("connected", "receiving order updates")
+                    pause = self._pause(self.clock())
+                    self._mark_seen()
+                    resync = asyncio.create_task(self._resync(owner, pause))
                     async for raw in ws:
                         self._on_message(raw, owner)
                 finally:
-                    watchdog.cancel()
-                    await asyncio.gather(watchdog, return_exceptions=True)
-                return self._ended(ws.close_code, "closed by OpenAlgo")
-        except ConnectionClosed as exc:
-            code = exc.rcvd.code if exc.rcvd else 1006
-            return self._ended(code, "dropped")
-        except (OSError, TimeoutError, InvalidHandshake, InvalidURI) as exc:
+                    for task in (watchdog, resync):
+                        if task is not None:
+                            task.cancel()
+                    await asyncio.gather(
+                        *(t for t in (watchdog, resync) if t is not None), return_exceptions=True
+                    )
+                return self._ended("closed by OpenAlgo")
+        except ConnectionClosed:
+            return self._ended("dropped")
+        except (OSError, TimeoutError, InvalidHandshake, InvalidURI):
             self._throttle(
                 logging.WARNING, "unreachable",
-                "OpenAlgo's WebSocket proxy is not reachable (%s); retrying", type(exc).__name__,
+                "OpenAlgo's WebSocket proxy is not reachable; retrying",
             )  # fmt: skip
+            log.debug("connecting to the proxy failed", exc_info=True)
             return "unreachable"
         finally:
             if started is not None:
                 self._last_session_s = time.monotonic() - started
+                self._mark_seen()
 
-    def _ended(self, code, how: str) -> str:
+    def _ended(self, how: str) -> str:
         reason = self._close_reason
         if reason in (STOPPING, WINDOW_CLOSED):
             log.info("order stream closed: %s", reason)
             return "window" if reason == WINDOW_CLOSED else "stopped"
-        log.warning("order stream %s (code %s); reconnecting", how, code)
+        log.warning("The order stream was %s; reconnecting", how)
         return "dropped"
 
     async def _handshake(self, ws, owner: Owner) -> str:
@@ -313,7 +364,8 @@ class AlertService:
         return None
 
     async def _watchdog(self, ws) -> None:
-        """Closes the stream cleanly on stop and when the alert window ends."""
+        """Closes the stream cleanly on stop and when the window ends; notes it is still up."""
+        seen_at = time.monotonic()
         while True:
             await self._sleep(WATCH_EVERY_S)
             if self._stop.is_set():
@@ -321,9 +373,61 @@ class AlertService:
             elif not self.window.status(self.clock())[0]:
                 self._close_reason = WINDOW_CLOSED
             else:
+                if self._state == "connected" and time.monotonic() - seen_at >= SEEN_EVERY_S:
+                    self._mark_seen()
+                    seen_at = time.monotonic()
                 continue
             await ws.close(1000, self._close_reason)
             return
+
+    # ---- after a pause: the order book -------------------------------------------------------
+    def _pause(self, now: datetime) -> tuple[datetime, datetime] | None:
+        """From when the stream was last known up (not before today's window opened) to now."""
+        seen = self.store.get_meta(SEEN)
+        starts = [datetime.fromtimestamp(seen, IST)] if seen is not None else []
+        opened = self.window.opened_at(now)
+        if opened is not None:
+            starts.append(opened)
+        if not starts:
+            return None
+        start = max(starts)
+        return (start, now) if start < now else None
+
+    def _mark_seen(self) -> None:
+        self.store.set_meta(SEEN, self.clock().timestamp())
+
+    async def _resync(self, owner: Owner, pause: tuple[datetime, datetime] | None) -> None:
+        """Tell what changed while nothing was listening; on failure, try twice more."""
+        books = None
+        for delay in (0.0, *RESYNC_RETRY_S):
+            if delay:
+                await asyncio.sleep(delay)
+            try:
+                books = await read_books(self.client, self.settings.openalgo_url, owner.api_key)
+                break
+            except BookUnavailable as exc:
+                log.info("The order book could not be read after the pause: %s", exc)
+            except Exception:
+                log.exception("reading the order book after the pause failed unexpectedly")
+        # From here to the queue there is no await: a cancelled session (a drop) must not leave
+        # alerts claimed in the store but never queued.
+        found: list[Alert] = []
+        if books is not None:
+            now = self.clock()
+            for message in books.messages:
+                found += self.tracker.on_update(message, now, found_later=True)
+        checked = books is not None and books.live
+        if books is not None and not books.live:
+            log.info("OpenAlgo is in Analyze mode, so its order book is the sandbox's")
+        told = found
+        if pause is not None and (pause[1] - pause[0]).total_seconds() > GAP_S:
+            text = messages.gap_line(pause[0], pause[1], checked)
+            if found or not checked:
+                key = f"gap:{pause[1].timestamp():.0f}"
+                told = [Alert(key, "gap", 0, text, pause[1]), *found]
+            else:
+                log.info("%s Nothing had changed.", text)
+        self._queue(told)
 
     # ---- the data path -----------------------------------------------------------------------
     def _on_message(self, raw, owner: Owner) -> None:
@@ -362,11 +466,12 @@ class AlertService:
         for alert in alerts:
             log.info("order %s: %s", alert.key, alert.kind)
         if alerts:
-            self.stats["alerts"] += len(alerts)
+            self.stats["alerts"] += sum(1 for alert in alerts if alert.kind != "gap")
             self.outbox.add(alerts)
 
     # ---- state ---------------------------------------------------------------------------------
     def _window_closed(self) -> None:
+        """The day's summary (its own counts, then they start again), and the pruning."""
         if self._state not in ("starting", "off"):
             sent = self.outbox.stats if self.outbox else {}
             log.info(
@@ -374,6 +479,9 @@ class AlertService:
                 self.stats["updates"], self.stats["alerts"], sent.get("messages", 0),
                 sent.get("failed", 0) + sent.get("dropped", 0),
             )  # fmt: skip
+            self.stats = dict.fromkeys(self.stats, 0)
+            if self.outbox:
+                self.outbox.stats = dict.fromkeys(self.outbox.stats, 0)
         with contextlib.suppress(Exception):
             self.store.prune(self.clock())
 
@@ -391,6 +499,11 @@ class AlertService:
             return "always on"
         start, end = self.settings.window
         return f"{start // 60:02d}:{start % 60:02d}-{end // 60:02d}:{end % 60:02d} IST"
+
+
+def failures_after(failures: int, lived_s: float) -> int:
+    """The backoff ladder's step after a connection that lived ``lived_s`` seconds."""
+    return 1 if lived_s >= STABLE_AFTER_S else failures + 1
 
 
 def _json(raw) -> dict | None:
@@ -411,12 +524,13 @@ async def _serve(service: AlertService) -> None:
 def main() -> int:
     setup_logging()
     try:
+        if switched_off():
+            log.info("Order alerts are off (SUDARSHAN_ORDER_ALERTS=off): nothing is sent")
+            return 0  # the unit restarts on failure only, so it stays stopped
         settings = Settings.from_env()
-        db_path = None
-        if settings.enabled:
-            db_path = prepare_openalgo_env(settings.env_file, settings.app_dir)
-            load_openalgo_modules()
-            setup_logging()  # OpenAlgo's logging module replaced the handlers on import
+        db_path = prepare_openalgo_env(settings.env_file, settings.app_dir)
+        load_openalgo_modules()
+        setup_logging()  # OpenAlgo's logging module replaced the handlers on import
     except ConfigError as exc:
         log.error("sudarshan-alerts cannot run: %s", exc)
         return 2
@@ -426,7 +540,7 @@ def main() -> int:
     service = AlertService(settings, owner_reader=lambda: read_owner(db_path))
     try:
         asyncio.run(_serve(service))
-    except Exception:  # the state directory cannot be written, or a bug: systemd restarts it
+    except Exception:  # a bug: systemd restarts it
         log.exception("sudarshan-alerts stopped unexpectedly")
         return 1
     return 0

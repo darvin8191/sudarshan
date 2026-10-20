@@ -8,12 +8,15 @@ an operator's .env is never read into a test. Every value below is a fake.
 
 from __future__ import annotations
 
+import atexit
 import os
+import shutil
 import tempfile
 
 import dotenv
 
 _TMP = tempfile.mkdtemp(prefix="sudarshan-alerts-tests-")
+atexit.register(shutil.rmtree, _TMP, ignore_errors=True)
 os.environ.setdefault("API_KEY_PEPPER", "f" * 64)  # fake, test only
 os.environ.setdefault("APP_KEY", "test-only-app-key-" + "0" * 32)
 os.environ.setdefault("DATABASE_URL", f"sqlite:///{_TMP}/openalgo-unused.db")
