@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
 import { fetchCSRFToken } from '@/api/client'
 import { cn } from '@/lib/utils'
+import { BRAND } from '@/sudarshan/brand'
 import { showToast } from '@/utils/toast'
 
 interface PasswordRequirements {
@@ -165,7 +166,7 @@ export default function Setup() {
                 Initial <span className="text-primary">Setup</span>
               </h1>
               <p className="text-lg lg:text-xl text-muted-foreground leading-relaxed">
-                Welcome to OpenAlgo! Create your administrator account to get started with
+                Welcome to {BRAND.full}. Create your administrator account to get started with
                 algorithmic trading. This account will have full access to manage the platform.
               </p>
             </div>
