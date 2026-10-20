@@ -1,3 +1,4 @@
+import { MarketDataManager } from '@/lib/MarketDataManager'
 import { useNow } from '@/sudarshan/dashboard/hooks'
 import {
   anyOpen,
@@ -45,6 +46,30 @@ export interface BookFeed {
 const NOT_KNOWN: MarketOpen = () => null
 
 /**
+ * The newest tick the market-data socket has delivered for any instrument in
+ * this session, or null when it is down or has delivered none. A table's own
+ * instruments can all be quiet while the feed is fine: an option nobody has
+ * traded for a minute is not late, so it is not greyed while ticks arrive.
+ */
+export function newestTickAt(): number | null {
+  try {
+    const manager = MarketDataManager.getInstance()
+    const { isAuthenticated, connectionEpoch } = manager.getState()
+    if (!isAuthenticated) return null
+    let newest: number | null = null
+    for (const line of manager.getAllCachedData().values()) {
+      if (line.updateSource !== 'websocket' || line.connectionEpoch !== connectionEpoch) continue
+      if (typeof line.lastUpdate === 'number' && (newest === null || line.lastUpdate > newest)) {
+        newest = line.lastUpdate
+      }
+    }
+    return newest
+  } catch {
+    return null
+  }
+}
+
+/**
  * The status line for a table, and its stale test for one row. Re-renders the
  * caller once a second while the page is in view, so an age or a stale mark
  * is current even when no tick comes to prompt it.
@@ -66,6 +91,8 @@ export function useBookFeed(
     ticksDue: feed.due > 0,
     connected: feed.connected,
   })
+  // The feed is alive while any instrument ticks, not only this table's.
+  const feedTickAt = latest(feed.lastTickAt, feed.connected ? newestTickAt() : null)
   const stale = (row: FeedRow) => {
     if (row.quantity !== undefined && Number(row.quantity) === 0) return false
     const ltp = typeof row.ltp === 'number' && row.ltp > 0 ? row.ltp : null
@@ -73,7 +100,7 @@ export function useBookFeed(
       { ltp, prevClose: null, at: row._at ?? null, live: row._live === true },
       now,
       marketOpen(row.exchange),
-      feed.lastTickAt
+      feedTickAt
     )
   }
   return { line, now, stale }

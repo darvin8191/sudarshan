@@ -5,7 +5,7 @@ import { useMarketStatus } from '@/hooks/useMarketStatus'
 import { useAuthStore } from '@/stores/authStore'
 // SUDARSHAN: how a row is priced (newest source, broker P&L moved by ticks), M6.2/M6.3.
 import { isClosedRow, type LiveRowFields, priceRow, TickDirections } from '@/sudarshan/books/prices'
-import { useOnReturn } from '@/sudarshan/books/useReturn'
+import { useSpacedRead } from '@/sudarshan/books/useSpacedRead'
 
 /**
  * Base interface for items that can have live price data
@@ -148,8 +148,12 @@ export interface UseLivePriceResult<T extends PriceableItem> {
 /** SUDARSHAN: coming back after more than this long away reads the quotes again. */
 const QUOTES_AWAY_MS = 15_000
 
-/** SUDARSHAN: two reasons to re-read the quotes this close together make one read. */
-const QUOTES_MIN_GAP_MS = 3_000
+/**
+ * SUDARSHAN: the quotes are read at most once in this long: a book gaining a
+ * row with each fill, a reconnect and a return all ask, and within the gap
+ * they make one read at its end.
+ */
+const QUOTES_GAP_MS = 5_000
 
 /**
  * Centralized hook for real-time price data with automatic fallback.
@@ -232,14 +236,12 @@ export function useLivePrice<T extends PriceableItem>(
   // SUDARSHAN: an answer a newer read overtook is dropped, and the snapshot is
   // stamped with when it was asked for.
   const quoteRead = useRef(0)
-  const lastQuoteReadAt = useRef(0)
   const fetchMultiQuotes = useCallback(async () => {
     const symbolsList = symbolsRef.current
     if (!apiKey || symbolsList.length === 0 || !useMultiQuotesFallback) return
 
     const read = ++quoteRead.current
     const at = Date.now()
-    lastQuoteReadAt.current = at
     try {
       const response = await tradingApi.getMultiQuotes(apiKey, symbolsList)
       if (read !== quoteRead.current) return
@@ -260,12 +262,20 @@ export function useLivePrice<T extends PriceableItem>(
     }
   }, [apiKey, useMultiQuotesFallback])
 
+  // SUDARSHAN: every reason to read the quotes goes through one gate: at most
+  // one read in QUOTES_GAP_MS, none while the page is hidden, and one on
+  // coming back after more than QUOTES_AWAY_MS away (or if anything asked
+  // while it was hidden).
+  const requestQuotes = useSpacedRead(() => void fetchMultiQuotes(), QUOTES_GAP_MS, {
+    awayMs: enabled && useMultiQuotesFallback ? QUOTES_AWAY_MS : null,
+  })
+
   // SUDARSHAN: the first snapshot of each symbol set. No interval: ticks move
   // the prices from here, and the manager's fallback covers a feed outage.
   useEffect(() => {
     if (!enabled || !symbolsKey || !useMultiQuotesFallback) return
-    void fetchMultiQuotes()
-  }, [enabled, symbolsKey, useMultiQuotesFallback, fetchMultiQuotes])
+    requestQuotes()
+  }, [enabled, symbolsKey, useMultiQuotesFallback, requestQuotes])
 
   // SUDARSHAN: read again when the market-data socket signs in again (a
   // reconnect, or the phone waking), for instruments that do not tick soon.
@@ -278,20 +288,8 @@ export function useLivePrice<T extends PriceableItem>(
     }
     epochSeen.current = connectionEpoch
     if (!enabled || !useMultiQuotesFallback) return
-    if (Date.now() - lastQuoteReadAt.current < QUOTES_MIN_GAP_MS) return
-    void fetchMultiQuotes()
-  }, [wsAuthenticated, connectionEpoch, enabled, useMultiQuotesFallback, fetchMultiQuotes])
-
-  // Refresh MultiQuotes immediately when tab becomes visible after being hidden
-  // SUDARSHAN: after more than 15 seconds away, unless a read just ran.
-  useOnReturn(
-    () => {
-      if (Date.now() - lastQuoteReadAt.current < QUOTES_MIN_GAP_MS) return
-      void fetchMultiQuotes()
-    },
-    QUOTES_AWAY_MS,
-    enabled && useMultiQuotesFallback
-  )
+    requestQuotes()
+  }, [wsAuthenticated, connectionEpoch, enabled, useMultiQuotesFallback, requestQuotes])
 
   /**
    * Enhance items with real-time LTP and recalculated P&L
@@ -327,7 +325,15 @@ export function useLivePrice<T extends PriceableItem>(
       const quote = multiQuotes.get(key)
       const price = priceRow(
         item,
-        { tick, quoteLtp: quote?.ltp, quoteAt: quotesAt, bookAt },
+        {
+          tick,
+          quoteLtp: quote?.ltp,
+          quoteAt: quotesAt,
+          quoteTradeAt: (quote as { last_trade_time?: unknown } | undefined)?.last_trade_time,
+          bookAt,
+          // A tick from this session of the feed: none while it is down.
+          epoch: wsAuthenticated ? connectionEpoch : null,
+        },
         positionPnlAt
       )
       // The direction of the last tick, as a broker app shows it; a closed row
@@ -355,7 +361,7 @@ export function useLivePrice<T extends PriceableItem>(
     }
     directions.current.keep(symbolKeys)
     return priced
-  }, [items, marketData, multiQuotes, quotesAt, snapshotAt])
+  }, [items, marketData, multiQuotes, quotesAt, snapshotAt, wsAuthenticated, connectionEpoch])
 
   // SUDARSHAN: the newest tick and the newest confirmation, over the rows
   // whose prices can still move, for the page's status line.

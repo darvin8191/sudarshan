@@ -104,6 +104,44 @@ describe('useLivePrice REST quotes', () => {
     expect(getMultiQuotes).toHaveBeenCalledTimes(2)
   })
 
+  it('reads them at most once in 5 seconds while a book gains a row with each fill', async () => {
+    const row = (i: number) => ({ ...PARTLY_BOOKED, symbol: `NIFTY28OCT25${25900 + i * 50}CE` })
+    const { rerender } = renderHook(({ rows }) => useLivePrice(rows), {
+      initialProps: { rows: [row(0)] },
+    })
+    await settle()
+    expect(getMultiQuotes).toHaveBeenCalledTimes(1)
+
+    // Ten fills a quarter of a second apart, each a new instrument in the book.
+    const rows = [row(0)]
+    for (let i = 1; i <= 10; i++) {
+      rows.push(row(i))
+      rerender({ rows: [...rows] })
+      await settle(250)
+    }
+    expect(getMultiQuotes).toHaveBeenCalledTimes(1)
+    // One read at the end of the gap, for the whole set.
+    await settle(5_000)
+    expect(getMultiQuotes).toHaveBeenCalledTimes(2)
+    expect(getMultiQuotes.mock.calls[1][1]).toHaveLength(11)
+  })
+
+  it('reads none while the page is hidden, and once when it is seen again', async () => {
+    const { rerender } = renderHook(({ rows }) => useLivePrice(rows), {
+      initialProps: { rows: [PARTLY_BOOKED] },
+    })
+    await settle()
+    act(() => setVisibility('hidden'))
+    await settle(6_000)
+    rerender({ rows: [PARTLY_BOOKED, { ...PARTLY_BOOKED, symbol: 'NIFTY28OCT2525900PE' }] })
+    await settle(6_000)
+    expect(getMultiQuotes).toHaveBeenCalledTimes(1)
+
+    act(() => setVisibility('visible'))
+    await settle(10)
+    expect(getMultiQuotes).toHaveBeenCalledTimes(2)
+  })
+
   it('reads them again on coming back after more than 15 seconds away, not after a glance away', async () => {
     renderHook(() => useLivePrice([PARTLY_BOOKED]))
     await settle()
@@ -118,6 +156,21 @@ describe('useLivePrice REST quotes', () => {
     await settle(20_000)
     act(() => setVisibility('visible'))
     await settle(10)
+    expect(getMultiQuotes).toHaveBeenCalledTimes(2)
+  })
+
+  it('reads them once, not twice, after a long time away during which the rows changed', async () => {
+    const { rerender } = renderHook(({ rows }) => useLivePrice(rows), {
+      initialProps: { rows: [PARTLY_BOOKED] },
+    })
+    await settle()
+    act(() => setVisibility('hidden'))
+    rerender({ rows: [PARTLY_BOOKED, { ...PARTLY_BOOKED, symbol: 'NIFTY28OCT2525900PE' }] })
+    await settle(20_000)
+    act(() => setVisibility('visible'))
+    await settle(10)
+    expect(getMultiQuotes).toHaveBeenCalledTimes(2)
+    await settle(10_000)
     expect(getMultiQuotes).toHaveBeenCalledTimes(2)
   })
 })
@@ -142,13 +195,40 @@ describe('useLivePrice P&L', () => {
     expect(result.current.data[0]._tick).toBe('down')
   })
 
-  it('leaves the broker figures alone for a tick older than the book', async () => {
+  it('leaves the broker figures alone for a tick older than the book from an earlier session of the feed', async () => {
     act(() => feed.push(CALL, 'NFO', { ltp: 125 }, 'websocket', Date.now() - 10_000))
+    act(() => feed.setState({ connectionEpoch: 2 }))
     getMultiQuotes.mockResolvedValue({ status: 'success', results: [] })
     const { result } = renderHook(() => useLivePrice([PARTLY_BOOKED], { snapshotAt: Date.now() }))
     await settle()
 
     expect(result.current.data[0]).toMatchObject({ ltp: 130, pnl: 1950, _dataSource: 'rest' })
+  })
+
+  it('keeps the last live tick over a book read since, whose price can trail the feed', async () => {
+    act(() => feed.push(CALL, 'NFO', { ltp: 134 }, 'websocket', Date.now() - 300))
+    getMultiQuotes.mockResolvedValue({ status: 'success', results: [] })
+    const { result } = renderHook(() => useLivePrice([PARTLY_BOOKED], { snapshotAt: Date.now() }))
+    await settle()
+
+    expect(result.current.data[0]).toMatchObject({ ltp: 134, _live: true })
+    expect(result.current.data[0].pnl).toBeCloseTo(1950 + 4 * 65)
+  })
+
+  it('moves an MIS long and an NRML short in one instrument each from its own broker figure', async () => {
+    getMultiQuotes.mockResolvedValue({ status: 'success', results: [] })
+    const at = Date.now() - 1_000
+    const rows = [
+      { ...PARTLY_BOOKED, product: 'MIS', quantity: 65, average_price: 120, ltp: 130, pnl: 650 },
+      { ...PARTLY_BOOKED, product: 'NRML', quantity: -30, average_price: 140, ltp: 130, pnl: 300 },
+    ]
+    const { result } = renderHook(() => useLivePrice(rows, { snapshotAt: at }))
+    await settle()
+    act(() => feed.push(CALL, 'NFO', { ltp: 132 }))
+
+    const [long, short] = result.current.data
+    expect(long.pnl).toBeCloseTo(650 + 2 * 65)
+    expect(short.pnl).toBeCloseTo(300 - 2 * 30)
   })
 
   it('without a snapshot time, counts the book from when it was first seen', async () => {

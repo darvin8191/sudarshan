@@ -147,4 +147,45 @@ describe('Positions, live', () => {
     expect(screen.getByText(/Reconnecting/)).toBeInTheDocument()
     expect(screen.queryByText('Real-time')).toBeNull()
   })
+
+  it('drops an answer a newer read has overtaken', async () => {
+    let answerFirst: (value: unknown) => void = () => {}
+    getPositions.mockReset()
+    getPositions.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          answerFirst = resolve
+        })
+    )
+    // After a fill: 65 more bought at 136.
+    getPositions.mockResolvedValue({
+      status: 'success',
+      data: [{ ...PARTLY_BOOKED, quantity: 130, average_price: 128 }],
+    })
+    render(<Positions />)
+    await pass(0)
+
+    act(() => socket.fire('order_update', { orderid: '1', order_status: 'complete' }))
+    await pass(500)
+    expect(getPositions).toHaveBeenCalledTimes(2)
+    // The first read's older book arrives last; the newer one stands.
+    await act(async () => answerFirst({ status: 'success', data: [PARTLY_BOOKED] }))
+    expect(within(row()).getAllByRole('cell')[3]).toHaveTextContent('130')
+  })
+
+  it('keeps a quiet position at its last tick, not greyed, while other prices keep ticking', async () => {
+    render(<Positions />)
+    await pass(1_000)
+    act(() => feed.push(CALL, 'NFO', { ltp: 134 }))
+    // A re-read after an order event; the call does not trade again, other instruments do.
+    act(() => socket.fire('order_event', {}))
+    await pass(500)
+    for (let i = 0; i < 12; i++) {
+      act(() => feed.push('BANKNIFTY', 'NSE_INDEX', { ltp: 56000 + i }))
+      await pass(1_000)
+    }
+    const cells = within(row()).getAllByRole('cell')
+    expect(cells[5]).toHaveTextContent('₹134.00')
+    expect(cells[5].querySelector('[data-stale="true"]')).toBeNull()
+  })
 })

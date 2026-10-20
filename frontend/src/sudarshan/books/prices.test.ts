@@ -1,19 +1,35 @@
 /**
- * How a book row is priced (M6.3): the newest source wins, and an open row's
- * P&L is the broker's own figure moved by the price change since the book
- * was read. The defect this replaces: upstream rebuilt the P&L from the
+ * How a book row is priced (M6.3): while the feed is up, the instrument's last
+ * tick from it wins (a later trade would have brought a later tick, and a book
+ * or quote read since can trail the feed); otherwise the newest source does.
+ * An open row's P&L is the broker's own figure moved by the price change since
+ * the book was read. The defect this replaces: upstream rebuilt the P&L from the
  * average price plus `today_realized_pnl`, a field only the sandbox sends, so
  * a partly booked Upstox position lost its booked profit on the first tick.
  */
 import { describe, expect, it } from 'vitest'
 import { positionPnlAt } from '@/hooks/useLivePrice'
 import type { SymbolData } from '@/lib/MarketDataManager'
+import { isStale } from '@/sudarshan/dashboard/live'
 import { priceRow, TickDirections, tickCount, tickPrevClose } from './prices'
 
 const BOOK_AT = 1_000_000
 
-function tick(ltp: number, at: number, source: 'websocket' | 'rest' = 'websocket'): SymbolData {
-  return { symbol: 'X', exchange: 'NFO', data: { ltp }, lastUpdate: at, updateSource: source }
+function tick(
+  ltp: number,
+  at: number,
+  source: 'websocket' | 'rest' = 'websocket',
+  epoch?: number,
+  extra: Record<string, number> = {}
+): SymbolData {
+  return {
+    symbol: 'X',
+    exchange: 'NFO',
+    data: { ltp, ...extra },
+    lastUpdate: at,
+    updateSource: source,
+    connectionEpoch: epoch,
+  }
 }
 
 describe('priceRow: the broker P&L moved by ticks', () => {
@@ -85,7 +101,7 @@ describe('priceRow: the broker P&L moved by ticks', () => {
     expect(priced.pnl).toBeCloseTo(260 + 1.5 * 130)
   })
 
-  it('ignores a tick older than the book: the broker figures stand', () => {
+  it('ignores a tick older than the book when it is not from the live feed: the broker figures stand', () => {
     const row = {
       symbol: 'X',
       exchange: 'NFO',
@@ -94,12 +110,72 @@ describe('priceRow: the broker P&L moved by ticks', () => {
       ltp: 130,
       pnl: 1950,
     }
-    const priced = priceRow(row, { tick: tick(125, BOOK_AT - 1), bookAt: BOOK_AT }, positionPnlAt)
+    // The manager's REST fallback during an outage, and a tick from an earlier session of the feed.
+    for (const old of [tick(125, BOOK_AT - 1, 'rest'), tick(125, BOOK_AT - 1, 'websocket', 1)]) {
+      const priced = priceRow(row, { tick: old, bookAt: BOOK_AT, epoch: 2 }, positionPnlAt)
+      expect(priced.ltp).toBe(130)
+      expect(priced.pnl).toBe(1950)
+      expect(priced.source).toBe('rest')
+      expect(priced.at).toBe(BOOK_AT)
+      expect(priced.live).toBe(false)
+    }
+    // While the feed is down, no tick is live, however recent.
+    const down = priceRow(
+      row,
+      { tick: tick(125, BOOK_AT - 1, 'websocket', 2), bookAt: BOOK_AT, epoch: null },
+      positionPnlAt
+    )
+    expect(down).toMatchObject({ ltp: 130, live: false })
+  })
 
-    expect(priced.ltp).toBe(130)
-    expect(priced.pnl).toBe(1950)
-    expect(priced.source).toBe('rest')
-    expect(priced.at).toBe(BOOK_AT)
+  it('keeps a quiet option at its last live tick after a re-read, and does not grey it while the feed is alive', () => {
+    // Its last tick (134) came 300 ms before the book was asked for; the book's
+    // own last price (130) trails the feed. Other instruments keep ticking.
+    const row = {
+      symbol: 'X',
+      exchange: 'NFO',
+      quantity: 65,
+      average_price: 120,
+      ltp: 130,
+      pnl: 650,
+    }
+    const priced = priceRow(
+      row,
+      { tick: tick(134, BOOK_AT - 300, 'websocket', 3), bookAt: BOOK_AT, epoch: 3 },
+      positionPnlAt
+    )
+    expect(priced).toMatchObject({ ltp: 134, live: true, source: 'websocket' })
+    expect(priced.pnl).toBeCloseTo(650 + 4 * 65)
+    const stale = isStale(
+      { ltp: priced.ltp ?? null, prevClose: null, at: priced.at, live: priced.live },
+      BOOK_AT + 11_000,
+      true,
+      BOOK_AT + 10_500
+    )
+    expect(stale).toBe(false)
+  })
+
+  it('takes a quote over the live tick only when both carry the exchange time and the quote saw a later trade', () => {
+    const row = { symbol: 'X', exchange: 'NSE' }
+    const live = tick(1350, 2000, 'websocket', 1, { last_trade_time: 5_000 })
+    const later = priceRow(
+      row,
+      { tick: live, quoteLtp: 1352, quoteAt: 2500, quoteTradeAt: 6_000, epoch: 1 },
+      positionPnlAt
+    )
+    expect(later).toMatchObject({ ltp: 1352, source: 'multiquotes', live: false })
+    const earlier = priceRow(
+      row,
+      { tick: live, quoteLtp: 1352, quoteAt: 2500, quoteTradeAt: 4_000, epoch: 1 },
+      positionPnlAt
+    )
+    expect(earlier).toMatchObject({ ltp: 1350, live: true })
+    const unknown = priceRow(
+      row,
+      { tick: live, quoteLtp: 1352, quoteAt: 2500, epoch: 1 },
+      positionPnlAt
+    )
+    expect(unknown.ltp).toBe(1350)
   })
 
   it('in analyze mode, moves the sandbox figure that already holds today_realized_pnl', () => {
@@ -127,17 +203,17 @@ describe('priceRow: the broker P&L moved by ticks', () => {
     expect(priced).toMatchObject({ ltp: 98, pnl: -740, source: 'rest', live: false })
   })
 
-  it('prices a watchlist row, which has no quantity, from its newest source', () => {
+  it('prices a watchlist row, which has no quantity, from its live tick, else its newest source', () => {
     const row = { symbol: 'X', exchange: 'NSE' }
     const fromTick = priceRow(
       row,
-      { tick: tick(1350, 2000), quoteLtp: 1300, quoteAt: 1000 },
+      { tick: tick(1350, 1000), quoteLtp: 1300, quoteAt: 2000 },
       positionPnlAt
     )
-    expect(fromTick.ltp).toBe(1350)
+    expect(fromTick).toMatchObject({ ltp: 1350, live: true })
     const fromQuote = priceRow(
       row,
-      { tick: tick(1350, 1000), quoteLtp: 1300, quoteAt: 2000 },
+      { tick: tick(1350, 1000, 'rest'), quoteLtp: 1300, quoteAt: 2000 },
       positionPnlAt
     )
     expect(fromQuote).toMatchObject({ ltp: 1300, source: 'multiquotes', live: false })

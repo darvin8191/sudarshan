@@ -6,13 +6,19 @@ import type { MarketData, SymbolData } from '@/lib/MarketDataManager'
  * test can call. `useLivePrice` applies them to every row of Positions,
  * Holdings and the /trading dock.
  *
- * **Newest wins.** A row can be priced from three places: the market-data
- * socket (a tick, or the manager's REST fallback during an outage), the REST
- * quote snapshot read when the page opened, and the row's own figures from the
- * broker's book. Whichever was confirmed last is shown. Upstream preferred a
- * tick only while it was under 5 seconds old and otherwise took a REST quote
- * up to 30 seconds old, so a quiet option could show an older price than the
- * tick it already had.
+ * **The live tick wins.** A row can be priced from three places: the
+ * market-data socket (a tick, or the manager's REST fallback during an
+ * outage), the REST quote snapshot read when the page opened, and the row's
+ * own figures from the broker's book. While the feed is up, the instrument's
+ * last tick from it is the market's last trade, however long ago it came: a
+ * later trade would have brought a later tick. So it wins over a book or a
+ * quote read since, whose prices can trail the feed, unless the quote carries
+ * the exchange's time for a later trade. Without a tick from the live feed
+ * (it is down, or the line is the manager's REST fallback or from an earlier
+ * session), whichever source was confirmed last is shown, and nothing older
+ * than the book. Upstream preferred a tick only while it was under 5 seconds
+ * old and otherwise took a REST quote up to 30 seconds old, so a quiet option
+ * could show an older price than the tick it already had.
  *
  * **P&L is the broker's, moved by the market.** For an open row the P&L shown
  * is the broker's own figure for it plus what the price has done since the
@@ -54,8 +60,16 @@ export interface RowSources {
   quoteLtp?: number
   /** When the REST quote snapshot was asked for. */
   quoteAt?: number | null
+  /** The REST quote's own time of its last trade, epoch ms, when it carries one. */
+  quoteTradeAt?: unknown
   /** When the row's own figures (ltp, pnl) were read from the broker; null when not known. */
   bookAt?: number | null
+  /**
+   * The market-data session open now. A WebSocket tick from it is live; null
+   * while the feed is down, when none is. Left out by a caller that cannot
+   * tell, when any WebSocket tick counts.
+   */
+  epoch?: number | null
 }
 
 export interface RowPrice {
@@ -101,28 +115,50 @@ export function priceRow(item: PriceableItem, sources: RowSources, pnlAt: PnlAt)
   }
   if (isClosedRow(item)) return asBooked
 
-  // The newest price, and nothing that is not newer than the book.
-  const floor = bookLtp === null ? Number.NEGATIVE_INFINITY : (bookAt ?? Number.NEGATIVE_INFINITY)
   let newest: { ltp: number; at: number; live: boolean; source: PriceSource } | null = null
-  const tickLtp = positive(sources.tick?.data?.ltp)
-  const tickAt = sources.tick?.lastUpdate
-  if (tickLtp !== null && typeof tickAt === 'number' && tickAt > floor) {
-    newest = {
-      ltp: tickLtp,
-      at: tickAt,
-      live: sources.tick?.updateSource === 'websocket',
-      source: 'websocket',
-    }
-  }
+  const tick = sources.tick
+  const tickLtp = positive(tick?.data?.ltp)
+  const tickAt = tick?.lastUpdate
   const quoteLtp = positive(sources.quoteLtp)
   const quoteAt = sources.quoteAt
-  if (
-    quoteLtp !== null &&
-    typeof quoteAt === 'number' &&
-    quoteAt > floor &&
-    (newest === null || quoteAt > newest.at)
-  ) {
-    newest = { ltp: quoteLtp, at: quoteAt, live: false, source: 'multiquotes' }
+  const liveTick =
+    tickLtp !== null &&
+    typeof tickAt === 'number' &&
+    tick?.updateSource === 'websocket' &&
+    sources.epoch !== null &&
+    (sources.epoch === undefined ||
+      tick.connectionEpoch === undefined ||
+      tick.connectionEpoch === sources.epoch)
+
+  if (liveTick) {
+    // The market's last trade, unless the quote says it saw a later one.
+    newest = { ltp: tickLtp, at: tickAt, live: true, source: 'websocket' }
+    const fields = tick.data as Record<string, unknown>
+    const tickTrade = positive(fields.last_trade_time) ?? positive(fields.ltt)
+    const quoteTrade = positive(sources.quoteTradeAt)
+    if (
+      quoteLtp !== null &&
+      typeof quoteAt === 'number' &&
+      tickTrade !== null &&
+      quoteTrade !== null &&
+      quoteTrade > tickTrade
+    ) {
+      newest = { ltp: quoteLtp, at: quoteAt, live: false, source: 'multiquotes' }
+    }
+  } else {
+    // No live tick: the newest price, and nothing that is not newer than the book.
+    const floor = bookLtp === null ? Number.NEGATIVE_INFINITY : (bookAt ?? Number.NEGATIVE_INFINITY)
+    if (tickLtp !== null && typeof tickAt === 'number' && tickAt > floor) {
+      newest = { ltp: tickLtp, at: tickAt, live: false, source: 'websocket' }
+    }
+    if (
+      quoteLtp !== null &&
+      typeof quoteAt === 'number' &&
+      quoteAt > floor &&
+      (newest === null || quoteAt > newest.at)
+    ) {
+      newest = { ltp: quoteLtp, at: quoteAt, live: false, source: 'multiquotes' }
+    }
   }
   if (newest === null) return asBooked
 
