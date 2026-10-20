@@ -17,7 +17,8 @@ members, tokens, keys, `.env` content, logs or the private specs. The specs — 
 
 ## Binding product rules (from the owner)
 1. **Light theme only.** No `.dark` styles in new code; `color-scheme: only light`;
-   `theme-color #F8F7F3`; the theme switcher is removed/hidden, not left as a dead control.
+   `theme-color #FFFFFF` (the app bar is white; the manifest says the same); the theme switcher
+   is removed/hidden, not left as a dead control.
 2. Name as **"सुदर्शन"** (Devanagari) **and "SUDARSHAN"** in every main place: `<title>`, PWA name,
    login, app-bar lockup, about, notifications, Telegram bot name, report headers.
 3. Portfolio: the Upstox portfolio shown separately (read-only, Analytics Token) **plus** fully
@@ -28,27 +29,39 @@ members, tokens, keys, `.env` content, logs or the private specs. The specs — 
 6. Colour-code everything useful; **never colour-only** (always an icon, label or sign too).
    Readable on a phone in outdoor sunlight.
 
-## Design tokens (light canvas; text tokens ≥ 4.5:1 on #F8F7F3)
+## Design tokens: the D look (light only; text tokens ≥ 4.5:1 on the #F4F6F8 page)
+Source of truth: `frontend/src/sudarshan/theme.css`; `theme.test.ts` checks every value below.
+
 | token | hex | use |
 |---|---|---|
-| `--bg-canvas` | #F8F7F3 | page background (never #FFFFFF) |
-| `--surface-card` | #FDFCF9 | cards (1 px border #DAD7D0) |
-| `--text-primary` | #1E212B | body, numbers |
-| `--text-secondary` | #515561 | labels |
-| `--profit` / `--up` | #007E3F | profit, up, COMPLETE, LIVE |
-| `--loss` / `--down` | #C9302D | loss, down, REJECTED |
+| `--bg-canvas` | #F4F6F8 | page background, under white cards |
+| `--surface-card` | #FFFFFF | cards, app bar, bottom nav (1 px border #E3E7EC, shadow `0 1px 2px rgba(16,24,40,.05)`, radius 14-18) |
+| `--divider` | #EDF0F3 | rules inside a card |
+| `--border-strong` / `--input` | #808A99 | outlines that must be seen (≥ 3:1) |
+| `--text-primary` | #0F1A24 | ink: body, numbers |
+| `--text-secondary` | #475569 | ink-2: labels |
+| `--text-tertiary` | #5B6676 | ink-3: meta lines |
+| `--brand` | #0E5A73 | Mor (peacock): primary actions (white text), links; hover #0A4558, tint #E4F1F4 |
+| `--gold` | #E3A21A | decoration only, never text on white; tint #FDF3DC, ink on tint #8A5A00 |
+| `--profit` / `--up` | #067A45 | profit, up, COMPLETE; tint #E6F5ED |
+| `--live-*` | ink #05683A on #E6F5ED, edge #A7D9BE | LIVE chip |
+| `--loss` / `--down` | #C3282E | loss, down, REJECTED; tint #FCEBEC |
 | `--buy` | #1C65C8 | BUY, LONG |
 | `--sell` | #D02F14 | SELL, SHORT |
-| `--brand` | #284CAC | primary actions, links |
-| `--family` | #007272 | FAMILY · VIEW ONLY badge (with lock icon) |
-| `--sandbox` | #7F36BC | ANALYZE mode: light tint banner (#F2E8FF), not a purple page |
-| `--warning-text` | #8A5600 | OPEN / PENDING text; fill #E8A127 takes ink text only |
+| `--family` | #3949AB | FAMILY · VIEW ONLY badge (with lock icon) |
+| `--sandbox` | #7F36BC | ANALYZE mode: light tint banner (#F2E8FF, ink #522D74), not a purple page |
+| `--warning-text` | #8A5A00 | OPEN / PENDING text; fill #E3A21A takes ink text only |
 | `--info` | #006A9D | informational |
 | `--up-cvd` / `--down-cvd` | #1C65C8 / #AC5700 | `<html data-cvd="1">` colour-blind mode |
 
-Fonts (self-hosted WOFF2, SIL OFL; CSP `font-src 'self'`): Inter (tabular numerals) + Noto Sans
-Devanagari + Noto Sans Gujarati; wordmark Tiro Devanagari Sanskrit. Numbers via
-`Intl.NumberFormat('en-IN')` + `tabular-nums`. Touch targets ≥ 48 dp. Minimal motion.
+Fonts (self-hosted WOFF2 via @fontsource, SIL OFL; CSP `font-src 'self'`): **Barlow** 400-700
+for all UI and body text, `tabular-nums` on the whole page (its tabular set swaps digits only);
+**Khand** 500-700 for screen titles and single big figures (P&L, prices; Khand has no tabular
+figures, so never in a column); Latin subsets only, the ₹ sign and Indic text fall back to
+**Noto Sans Devanagari / Gujarati**. The wordmark सुदर्शन is **Tiro Devanagari Sanskrit** drawn
+as outlines (`frontend/src/sudarshan/marks.ts`), SUDARSHAN beside it in Khand 600, tracked 0.4em,
+in brand. Icon "Mor": tile #0E5A73, ring #E3A21A, glyph #FFFFFF. Numbers via
+`Intl.NumberFormat('en-IN')`. Touch targets ≥ 48 dp. Minimal motion.
 
 ## Architecture rules
 - OpenAlgo core stays upstream-shaped (small, well-marked edits only). **Everything new lives in
