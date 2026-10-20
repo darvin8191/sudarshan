@@ -18,6 +18,28 @@ vi.mock('@/api/trading', () => ({
   },
 }))
 
+/** The app-wide Socket.IO connection, reduced to what the order-event hook uses. */
+const socket = vi.hoisted(() => {
+  const handlers = new Map<string, Set<(...args: unknown[]) => void>>()
+  return {
+    on(event: string, handler: (...args: unknown[]) => void) {
+      handlers.set(event, (handlers.get(event) ?? new Set()).add(handler))
+      return this
+    },
+    off(event: string, handler: (...args: unknown[]) => void) {
+      handlers.get(event)?.delete(handler)
+      return this
+    },
+    fire(event: string, ...args: unknown[]) {
+      for (const handler of [...(handlers.get(event) ?? [])]) handler(...args)
+    },
+    listeners: (event: string) => handlers.get(event)?.size ?? 0,
+  }
+})
+vi.mock('@/components/socket/SocketProvider', () => ({
+  useSocketContext: () => ({ playAlertSound: () => {}, socket }),
+}))
+
 let marketOpen = false
 vi.mock('@/hooks/useMarketStatus', () => ({
   useMarketStatus: () => ({
@@ -58,6 +80,9 @@ const BOOK = [
 
 type Answer = { status: number; body: unknown }
 
+/** How long the funds call takes to answer, in fake-clock milliseconds. */
+let latency = 0
+
 /** Every request in the order it was made: the funds, the book and the contract state. */
 function server(...answers: Answer[]) {
   const calls: string[] = []
@@ -73,6 +98,7 @@ function server(...answers: Answer[]) {
       if (url === '/auth/dashboard-data') {
         const funds = answers[Math.min(next, answers.length - 1)]
         next += 1
+        if (latency > 0) await new Promise((resolve) => setTimeout(resolve, latency))
         return { ok: funds.status === 200, status: funds.status, json: async () => funds.body }
       }
       if (url === '/api/master-contract/status') {
@@ -100,6 +126,7 @@ async function pass(ms: number) {
 
 beforeEach(() => {
   marketOpen = false
+  latency = 0
   feed.reset()
   getPositions.mockReset()
   useAuthStore.setState({ apiKey: 'key' })
@@ -155,6 +182,38 @@ describe('Dashboard', () => {
     await pass(RESYNC_MS)
     expect(reads(calls)).toBe(2)
     expect(calls.filter((url) => url === 'positionbook')).toHaveLength(2)
+  })
+
+  it('reads the broker again when it reports a fill, a rejection or a square-off', async () => {
+    vi.useFakeTimers()
+    const calls = server(OK)
+    render(<Dashboard />)
+    await pass(0)
+    expect(reads(calls)).toBe(1)
+    expect(socket.listeners('order_update')).toBe(1)
+
+    act(() => socket.fire('order_update', { orderid: '251020000598204', status: 'complete' }))
+    await pass(600)
+    expect(reads(calls)).toBe(2)
+    expect(calls.filter((url) => url === 'positionbook')).toHaveLength(2)
+  })
+
+  it('answers a burst of order updates with one read after the one in progress, not one each', async () => {
+    vi.useFakeTimers()
+    latency = 300
+    const calls = server(OK)
+    render(<Dashboard />)
+    await pass(400)
+    expect(reads(calls)).toBe(1)
+
+    // One order passing through four states inside a second.
+    for (const status of ['open pending', 'open', 'trigger pending', 'complete']) {
+      act(() => socket.fire('order_update', { status }))
+      await pass(100)
+    }
+    await pass(2000)
+    // The first update's read, then one more for the three that came during it.
+    expect(reads(calls)).toBe(3)
   })
 
   it('keeps the last figures and says so when a later read fails', async () => {

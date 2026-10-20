@@ -13,6 +13,8 @@ export type OrderEventType =
   | 'modify_order_event'
   // Pushed by the server-side scalping risk monitor when it trails/clears an SL.
   | 'scalping_sl_update'
+  // Broker order status from the order update stream: fills, rejections, square-offs.
+  | 'order_update'
 
 /**
  * Configuration options for useOrderEventRefresh hook

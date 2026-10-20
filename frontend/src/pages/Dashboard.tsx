@@ -188,19 +188,47 @@ export default function Dashboard() {
     fetchFundsData()
   }, [fetchFundsData])
 
-  // Refresh funds when an order is placed (via SocketIO event)
-  useOrderEventRefresh(fetchFundsData, {
-    events: ['order_event', 'analyzer_update', 'close_position_event'],
+  // SUDARSHAN: one read at a time for everything below that asks again. An
+  // order passing through several states in a second sends an event for each;
+  // the ones that arrive during a read queue a single read after it.
+  const latestRead = useRef(fetchFundsData)
+  useEffect(() => {
+    latestRead.current = fetchFundsData
+  }, [fetchFundsData])
+  const reading = useRef(false)
+  const queued = useRef(false)
+  const reread = useCallback(async () => {
+    if (reading.current) {
+      queued.current = true
+      return
+    }
+    reading.current = true
+    try {
+      do {
+        queued.current = false
+        await latestRead.current()
+      } while (queued.current)
+    } finally {
+      reading.current = false
+    }
+  }, [])
+
+  // Refresh funds when an order is placed (via SocketIO event).
+  // SUDARSHAN: and when the broker reports a fill, a rejection or a square-off
+  // (order_update), which the other three do not cover.
+  useOrderEventRefresh(reread, {
+    events: ['order_event', 'analyzer_update', 'close_position_event', 'order_update'],
   })
 
   // SUDARSHAN: re-read the broker's figures every 45 seconds while the page is
   // in view and a market is open (or not known to be shut), so the base the
-  // ticks move from never drifts far; and on coming back into view after more
-  // than 15 seconds away. Three broker reads each time, well inside its limits.
+  // ticks move from never drifts far, whether or not order updates arrive; and
+  // on coming back into view after more than 15 seconds away. Three broker
+  // reads each time, well inside its limits.
   useEffect(() => {
     const timer = setInterval(() => {
       if (document.visibilityState === 'visible' && anyMarketOpen.current() !== false) {
-        fetchFundsData()
+        reread()
       }
     }, RESYNC_MS)
     const shown = () => {
@@ -208,7 +236,7 @@ export default function Dashboard() {
         document.visibilityState === 'visible' &&
         Date.now() - lastReadAt.current > RESYNC_MS / 3
       ) {
-        fetchFundsData()
+        reread()
       }
     }
     document.addEventListener('visibilitychange', shown)
@@ -216,7 +244,7 @@ export default function Dashboard() {
       clearInterval(timer)
       document.removeEventListener('visibilitychange', shown)
     }
-  }, [fetchFundsData])
+  }, [reread])
 
   // Listen for mode changes and refresh data
   useEffect(() => {
