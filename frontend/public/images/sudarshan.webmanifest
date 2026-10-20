@@ -7,7 +7,7 @@
   "dir": "ltr",
   "start_url": "/dashboard",
   "scope": "/",
-  "display": "standalone",
+  "display": "browser",
   "background_color": "#FFFFFF",
   "theme_color": "#FFFFFF",
   "icons": [
