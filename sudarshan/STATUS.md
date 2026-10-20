@@ -7,6 +7,10 @@ One row per feature id from the (private) feature list. Status: `todo` → `part
 |---|---|---|---|---|
 | M0.1 | Fork, CI (`SUDARSHAN CI`), release build + server auto-deploy | partial | — | branch `sudarshan` created from OpenAlgo 2.0.2.8 (`9d55811e`) |
 | M18.1 | Feed service `sudarshan-feed` (= M13.1): one Upstox V3 socket, ZMQ 5581 + HTTP 5580 fan-out, recorder/replayer; with M18.8 snapshot store | partial | — | branch `feat/feed`: built + tested offline (fake Upstox); live test pending (Wed 21 Oct: U7 cap, U9 drops) |
+| M1.1 | Bilingual wordmark: navbar lockup सुदर्शन / SUDARSHAN (both scripts at every width), stacked lockup on login | partial | — | branch `feat/brand`; awaiting review and release |
+| M1.2 | `<title>`, page titles, meta description, og:title / og:description | partial | — | branch `feat/brand`; awaiting review and release |
+| M1.4 | Footer: सुदर्शन / SUDARSHAN, About link, "Built on OpenAlgo (AGPL-3.0)" attribution; upstream social links removed | partial | — | branch `feat/brand`; awaiting review and release |
+| M1.5 | Chart corner mark: vector सुदर्शन wordmark, SUDARSHAN on hover, no outbound link (`/trading` terminal) | partial | — | branch `feat/brand`; awaiting review and release |
 | M1.6 | Light-only lock: store stays light, no theme switch anywhere, toasts light | partial | — | branch `feat/brand`; awaiting review and release |
 | M1.7 | Analyze mode in light form: violet accent, ANALYZE / સેન્ડબોક્સ banner (tint, 1px violet top border, icon) in both shells, LIVE/ANALYZE chips, chart stays light | partial | — | branch `feat/brand`; awaiting review and release |
 | M1.8 | Design tokens: shadcn + trading tokens mapped to the spec, new `--up/--down/--brand/--family/--sandbox/--warning-text/--info/--up-cvd/--down-cvd` (`frontend/src/sudarshan/theme.css`) | partial | — | branch `feat/brand`; awaiting review and release |

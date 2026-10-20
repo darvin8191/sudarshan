@@ -188,3 +188,68 @@ html[data-cvd='1'] {
     }
   }
 }
+
+/* -----------------------------------------------------------------------------
+   Wordmark lockup (M1.1)
+   -----------------------------------------------------------------------------
+   सुदर्शन in Tiro Devanagari Sanskrit, one weight: never letter-spaced (the
+   headline would break) and never synthesised bold. SUDARSHAN in tracked caps.
+   Side by side, the caps are sized so their height sits near the Devanagari
+   headline (Tiro's headline is 0.62 em, Inter's caps 0.73 em).
+   ----------------------------------------------------------------------------- */
+@layer components {
+  .sd-lockup {
+    display: inline-flex;
+    align-items: center;
+    color: var(--foreground);
+    white-space: nowrap;
+  }
+  .sd-wordmark {
+    font-family: 'Tiro Devanagari Sanskrit', 'Noto Serif Devanagari', serif;
+    font-weight: 400;
+    font-synthesis: none;
+    letter-spacing: 0;
+    line-height: 1.25;
+  }
+  .sd-lockup__latin {
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    line-height: 1;
+  }
+
+  .sd-lockup--bar {
+    gap: 0.5rem;
+  }
+  .sd-lockup--bar .sd-wordmark {
+    font-size: 1.25rem;
+  }
+  .sd-lockup--bar .sd-lockup__latin {
+    font-size: 0.8125rem;
+  }
+  .sd-lockup__rule {
+    align-self: stretch;
+    width: 1px;
+    margin-block: 0.25rem;
+    background: var(--border);
+  }
+  @media (min-width: 40rem) {
+    .sd-lockup--bar .sd-lockup__latin {
+      font-size: 0.9375rem;
+    }
+  }
+
+  .sd-lockup--stacked {
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+  .sd-lockup--stacked .sd-wordmark {
+    font-size: 2.75rem;
+  }
+  .sd-lockup--stacked .sd-lockup__latin {
+    font-size: 0.875rem;
+    letter-spacing: 0.16em;
+    /* Tracking adds space after the last letter too; pad the start to match,
+       so the caps centre under the Devanagari. */
+    padding-left: 0.16em;
+  }
+}

@@ -195,6 +195,7 @@ export interface DrawStats {
 
 import type { AgentChartCommand } from '@/lib/agent/stream'
 import type { AppMode, ThemeMode } from '@/stores/themeStore'
+import { CHART_BRANDING } from '@/sudarshan/brand'
 import {
   type AlertChart,
   type AlertDrawings,
@@ -2535,6 +2536,8 @@ export class TradingTerminal {
       // Zoom and autoscale snap instead of easing when the system asks for
       // less motion.
       ...chartMotionOptions(),
+      // The corner mark, configured rather than added, so there is one.
+      branding: CHART_BRANDING,
     })
     this.chart.setDataContext(
       this.sym

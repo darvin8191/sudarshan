@@ -19,6 +19,7 @@ import {
 import { isActiveRoute, mobileSheetItems, navItems } from '@/config/navigation'
 import { useProfileMenuItems } from '@/hooks/useProfileMenuItems'
 import { cn } from '@/lib/utils'
+import { BrandLockup } from '@/sudarshan/BrandLockup'
 import { AccountControls } from './AccountControls'
 
 // Desktop tab: full bar height so the current-page underline lands on the
@@ -103,8 +104,7 @@ export function Navbar({ fluid = false }: NavbarProps = {}) {
                 className="flex items-center gap-2 px-2"
                 onClick={() => setMobileOpen(false)}
               >
-                <img src="/logo.png" alt="OpenAlgo" className="h-8 w-8" />
-                <span className="font-semibold">OpenAlgo</span>
+                <BrandLockup />
               </Link>
 
               {/* Secondary nav items (not in bottom nav) */}
@@ -188,10 +188,9 @@ export function Navbar({ fluid = false }: NavbarProps = {}) {
           </SheetContent>
         </Sheet>
 
-        {/* Logo */}
-        <Link to="/dashboard" className="flex items-center gap-2 mr-6">
-          <img src="/logo.png" alt="OpenAlgo" className="h-8 w-8" />
-          <span className="hidden font-semibold sm:inline-block">OpenAlgo</span>
+        {/* Wordmark: both scripts at every width (owner rule 2). */}
+        <Link to="/dashboard" className="flex shrink-0 items-center mr-3 md:mr-6">
+          <BrandLockup />
         </Link>
 
         {/* Desktop Navigation: text tabs, the current page underlined on the

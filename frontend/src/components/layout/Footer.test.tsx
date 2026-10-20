@@ -1,7 +1,14 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render as renderInDom, screen, waitFor } from '@testing-library/react'
+import type { ReactElement } from 'react'
+import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useSessionStore } from '@/stores/sessionStore'
 import { Footer } from './Footer'
+
+/** The footer links to /about, so it renders inside a router. */
+function render(ui: ReactElement) {
+  return renderInDom(<MemoryRouter>{ui}</MemoryRouter>)
+}
 
 function mockAppInfoResponse(data: unknown) {
   const json = vi.fn().mockResolvedValue(data)
@@ -58,7 +65,7 @@ describe('Footer', () => {
 
     await waitFor(() => expect(json).toHaveBeenCalled())
     expect(screen.queryByText(/session/)).not.toBeInTheDocument()
-    expect(screen.getByText('Open Source Algo Platform for Everyone')).toBeInTheDocument()
+    expect(screen.getByText(/Built on/)).toBeInTheDocument()
     expect(separatorCount()).toBe(1)
   })
 
@@ -82,8 +89,31 @@ describe('Footer', () => {
 
     await request.catch(() => undefined)
     await waitFor(() => expect(fetch).toHaveBeenCalledWith('/auth/app-info'))
-    expect(screen.getByText('Copyright 2026')).toBeInTheDocument()
-    expect(screen.getByText('Open Source Algo Platform for Everyone')).toBeInTheDocument()
+    expect(screen.getByText('SUDARSHAN', { exact: false })).toBeInTheDocument()
+    expect(screen.getByText(/Built on/)).toBeInTheDocument()
     expect(separatorCount()).toBe(1)
+  })
+
+  it('names the product in both scripts and links the About page', async () => {
+    const json = mockAppInfoResponse({ status: 'success' })
+
+    render(<Footer />)
+
+    await waitFor(() => expect(json).toHaveBeenCalled())
+    expect(screen.getByText('सुदर्शन')).toHaveAttribute('lang', 'sa')
+    expect(screen.getByRole('link', { name: 'About' })).toHaveAttribute('href', '/about')
+  })
+
+  it('keeps the AGPL attribution to the platform it is built on', async () => {
+    const json = mockAppInfoResponse({ status: 'success' })
+
+    render(<Footer />)
+
+    await waitFor(() => expect(json).toHaveBeenCalled())
+    expect(screen.getByText(/Built on/)).toHaveTextContent('Built on OpenAlgo (AGPL-3.0)')
+    expect(screen.getByRole('link', { name: 'OpenAlgo' })).toHaveAttribute(
+      'href',
+      'https://github.com/marketcalls/openalgo'
+    )
   })
 })
