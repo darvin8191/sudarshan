@@ -45,9 +45,10 @@ from sudarshan.vault import (
 
 from . import messages
 from .config import ConfigError, Settings, read_openalgo_env, setup_logging
-from .handoff import LinkError, OpenAlgoLink
+from .handoff import LinkError, OpenAlgoLink, call_max_s
 from .schedule import IST, TradingCalendar, minute_of_day, trading_session_start
 from .totp import InvalidSecret, normalize_secret, seconds_left, totp
+from .upstox import CALL_MAX_S as UPSTOX_CALL_MAX_S
 from .upstox import LoginResult, request_token
 
 log = logging.getLogger("sudarshan.autologin")
@@ -62,21 +63,37 @@ KIND_TEST = "test"
 SECRET_TOTP = "upstox_totp_secret"
 SECRET_PIN = "upstox_pin"
 
-#: A crashed run's lease expires after this; a healthy run takes a few seconds.
-LEASE_TTL = timedelta(seconds=180)
+#: A crashed run's lease expires after this; a healthy run takes a few seconds. Longer than the
+#: unit's TimeoutStartSec plus TimeoutStopSec and the launcher's limit (a test pins both), so no
+#: second run can start while a slow one may still be talking to Upstox.
+LEASE_TTL = timedelta(seconds=300)
 #: Our own pace, well inside Upstox's 1/s, 10/min, 60/30 min for this endpoint.
 MIN_SPACING = timedelta(seconds=60)
 ATTEMPT_WINDOW = timedelta(minutes=30)
 MAX_ATTEMPTS_PER_WINDOW = 10
 #: A code with less life left than this waits for the next 30 s step instead of racing it.
 TOTP_MIN_LEFT_S = 5.0
+TOTP_STEP_MARGIN_S = 0.25
 #: Pauses between hand-off retries when OpenAlgo does not answer (the token is already issued).
 REPORT_RETRIES_S = (2.0, 5.0)
-#: How long the first call to OpenAlgo keeps asking again while OpenAlgo answers that it is busy,
-#: and the pause between two asks. Nothing has been sent to Upstox yet, so waiting is free.
+#: How long the first call to OpenAlgo keeps asking again while OpenAlgo answers that it is busy
+#: or is not up yet (a boot, or a deploy restarting it), and the pause between two asks. Nothing
+#: has been sent to Upstox yet, so waiting is free.
 PREFLIGHT_PATIENCE_S = {KIND_SCHEDULED: 75.0, KIND_TEST: 10.0}
 PREFLIGHT_RETRY_S = 5.0
-PREFLIGHT_RETRY_KINDS = frozenset({"busy"})
+PREFLIGHT_RETRY_KINDS = frozenset({"busy", "unreachable"})
+
+
+def run_budget_s(kind: str) -> float:
+    """The longest one run can take when every call uses up its timeouts and every retry happens.
+
+    The preflight's patience plus its last call, the wait for a fresh TOTP step, the Upstox call,
+    then the hand-off with its retries (a failure's single message to OpenAlgo is shorter). The
+    launcher, the unit's TimeoutStartSec and LEASE_TTL are all longer, and a test holds them to it.
+    """
+    preflight = PREFLIGHT_PATIENCE_S[kind] + call_max_s("preflight")
+    hand_off = sum(REPORT_RETRIES_S) + (1 + len(REPORT_RETRIES_S)) * call_max_s("report")
+    return preflight + TOTP_MIN_LEFT_S + TOTP_STEP_MARGIN_S + UPSTOX_CALL_MAX_S + hand_off
 
 
 @dataclass(frozen=True)
@@ -261,7 +278,7 @@ class AutoLoginRun:
         at = self.now()
         left = seconds_left(at.timestamp())
         if left < TOTP_MIN_LEFT_S:
-            self.sleep(left + 0.25)
+            self.sleep(left + TOTP_STEP_MARGIN_S)
             at = self.now()
         return at
 

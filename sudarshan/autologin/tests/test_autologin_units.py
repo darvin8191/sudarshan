@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from sudarshan.autologin import launcher, worker
 from sudarshan.autologin.schedule import SCHEDULE
 
 REPO = Path(__file__).resolve().parents[3]
@@ -69,6 +70,37 @@ def test_service_shape():
     assert _directives(SERVICE, "ReadWritePaths") == ["/opt/sudarshan/apps/openalgo/db"]
     assert _directives(SERVICE, "SuccessExitStatus") == ["75"]
     assert "[Install]" not in SERVICE.read_text()  # only the timer starts it
+
+
+def test_service_waits_for_openalgo_but_never_starts_it():
+    """After= orders a boot; Wants= would start OpenAlgo while a deploy has it stopped."""
+    after = " ".join(_directives(SERVICE, "After")).split()
+    assert "openalgo.service" in after
+    for key in ("Wants", "Requires", "BindsTo", "Requisite", "PartOf"):
+        assert "openalgo.service" not in " ".join(_directives(SERVICE, key))
+
+
+def _seconds(value: str) -> float:
+    match = re.fullmatch(r"(\d+)(s|min)?", value)
+    assert match, value
+    return float(match.group(1)) * (60 if match.group(2) == "min" else 1)
+
+
+def test_time_limits_outlast_the_slowest_run():
+    """Every limit is longer than the run it bounds, computed from the timeouts in code."""
+    scheduled, test = worker.run_budget_s("scheduled"), worker.run_budget_s("test")
+    (start,) = map(_seconds, _directives(SERVICE, "TimeoutStartSec"))
+    (stop,) = map(_seconds, _directives(SERVICE, "TimeoutStopSec"))
+    assert start >= scheduled + 30  # plus interpreter start-up and vault writes
+    assert launcher.TEST_TIMEOUT_S >= test + 15
+    lease = worker.LEASE_TTL.total_seconds()
+    assert lease > start + stop and lease > launcher.TEST_TIMEOUT_S + launcher.KILL_GRACE_S
+    # The page waits for longer than the server lets the child run.
+    api = (REPO / "frontend" / "src" / "api" / "autologin.ts").read_text()
+    (page_ms,) = re.findall(r"timeout: ([0-9_]+)", api)
+    assert (
+        int(page_ms.replace("_", "")) / 1000 > launcher.TEST_TIMEOUT_S + launcher.KILL_GRACE_S + 5
+    )
 
 
 def test_timer_matches_the_schedule_in_code():

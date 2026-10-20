@@ -22,6 +22,8 @@ os.environ["REDIRECT_URL"] = "http://127.0.0.1:5000/upstox/callback"
 os.environ["SUDARSHAN_VAULT_DB"] = f"{_TMP}/vault-unused.db"
 os.environ["SUDARSHAN_NSE_HOLIDAYS_FILE"] = f"{_TMP}/holidays-unused.txt"
 os.environ["SUDARSHAN_AUTOLOGIN_TEST_LOG"] = f"{_TMP}/log/sudarshan_autologin.log"
+# Never the server's /etc/sudarshan/autologin.env: a test that wants one writes its own.
+os.environ["SUDARSHAN_AUTOLOGIN_ENV_FILE"] = f"{_TMP}/autologin-unused.env"
 
 dotenv.load_dotenv = lambda *args, **kwargs: False
 dotenv.main.load_dotenv = dotenv.load_dotenv

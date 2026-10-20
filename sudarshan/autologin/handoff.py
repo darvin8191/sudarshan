@@ -30,6 +30,15 @@ MAX_SEALED_BYTES = 16_384
 PREFLIGHT_PATH = "/sudarshan/autologin/internal/preflight"
 REPORT_PATH = "/sudarshan/autologin/internal/report"
 OPS = {"preflight": PREFLIGHT_PATH, "report": REPORT_PATH}
+CONNECT_TIMEOUT_S = 3.0
+#: Per call. The preflight only reads; the report stores the token, which can wait behind a held
+#: SQLite write lock for up to OpenAlgo's 15 s retry budget (database/__init__.py).
+READ_TIMEOUT_S = {"preflight": 10.0, "report": 20.0}
+
+
+def call_max_s(op: str) -> float:
+    """The longest one call can take when it uses up its timeouts (for the run budget)."""
+    return CONNECT_TIMEOUT_S + READ_TIMEOUT_S[op]
 
 
 class HandoffRejected(Exception):
@@ -89,13 +98,10 @@ def open_sealed(
 class OpenAlgoLink:
     """The worker's side: one sealed POST per call, JSON back."""
 
-    def __init__(
-        self, base_url: str, fernet: Fernet, client: httpx.Client, timeout_s: float = 20.0
-    ):
+    def __init__(self, base_url: str, fernet: Fernet, client: httpx.Client):
         self.base_url = base_url.rstrip("/")
         self._fernet = fernet
         self._client = client
-        self._timeout = httpx.Timeout(timeout_s, connect=3.0)
 
     def call(self, op: str, **fields) -> dict:
         blob = seal(self._fernet, op, **fields)
@@ -104,7 +110,7 @@ class OpenAlgoLink:
                 self.base_url + OPS[op],
                 content=blob,
                 headers={"Content-Type": "application/octet-stream", "Accept": "application/json"},
-                timeout=self._timeout,
+                timeout=httpx.Timeout(READ_TIMEOUT_S[op], connect=CONNECT_TIMEOUT_S),
             )
         except httpx.HTTPError as exc:
             raise LinkError("unreachable") from exc

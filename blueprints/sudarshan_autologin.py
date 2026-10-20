@@ -372,8 +372,7 @@ def test_now():
         return jsonify({"status": "error", "message": messages.message_for("busy")}), 409
     if exit_status is None:
         logger.error("Auto-login test overran its time limit and was stopped")
-        message = "The login check took too long and was stopped. The server log has the details."
-        return jsonify({"status": "error", "message": message}), 504
+        return jsonify({"status": "error", "message": messages.message_for("test_overran")}), 504
     logger.error("Auto-login test ended without a result (exit status %s)", exit_status)
     return jsonify({"status": "error", "message": messages.message_for("crashed")}), 500
 

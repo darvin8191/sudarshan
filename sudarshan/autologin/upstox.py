@@ -22,6 +22,8 @@ log = logging.getLogger("sudarshan.autologin")
 TOKEN_PATH = "/v2/totp-login/authorization/token"
 CONNECT_TIMEOUT_S = 5.0
 READ_TIMEOUT_S = 15.0
+#: The longest the token call can take when it uses up its timeouts (for the run budget).
+CALL_MAX_S = CONNECT_TIMEOUT_S + READ_TIMEOUT_S
 #: How long to stay away after Upstox says "too many requests".
 RATE_LIMIT_COOLDOWN_S = 300
 

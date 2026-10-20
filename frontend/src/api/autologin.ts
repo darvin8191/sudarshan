@@ -80,12 +80,15 @@ export const autologinApi = {
     const response = await webClient.post<Envelope<undefined>>(`${BASE}/enabled`, { enabled })
     return response.data.message
   },
-  /** One login attempt now. Waits for it (a few seconds; the server stops it after 50). */
+  /**
+   * One login attempt now. Usually a few seconds; the server stops it after 150 s, so the page
+   * waits longer than that (sudarshan/autologin/launcher.py TEST_TIMEOUT_S; a test compares them).
+   */
   testNow: async (): Promise<TestResult> => {
     const response = await webClient.post<Envelope<TestResult>>(
       `${BASE}/test`,
       {},
-      { timeout: 70_000 }
+      { timeout: 180_000 }
     )
     return response.data.data
   },

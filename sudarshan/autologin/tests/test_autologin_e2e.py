@@ -259,15 +259,38 @@ def test_a_store_that_finds_the_database_locked_leaves_no_login_on_record(world,
 
 
 def test_openalgo_down_means_upstox_is_not_asked(world, monkeypatch):
+    monkeypatch.setitem(worker.PREFLIGHT_PATIENCE_S, "scheduled", 0.0)  # no 75 s wait here
     env = dict(world.env, SUDARSHAN_OPENALGO_URL="http://127.0.0.1:9")  # nothing listens there
     assert worker.main([], env=env, clock=lambda: MONDAY_0835) == EXIT_FAILED
     assert world.upstox.requests == []
     assert world.vault.state().last_code == "openalgo_unreachable"
 
 
-def test_test_now_button_runs_the_real_worker_process(world, monkeypatch):
+def test_openalgo_starting_late_is_waited_for(world, monkeypatch):
+    """A boot or a deploy: OpenAlgo refuses connections for a while, then answers."""
+    real_preflight = worker.OpenAlgoLink.preflight
+    refusals = []
+
+    def not_up_yet(self):
+        if len(refusals) < 2:
+            refusals.append(1)
+            raise worker.LinkError("unreachable")
+        return real_preflight(self)
+
+    monkeypatch.setattr(worker.OpenAlgoLink, "preflight", not_up_yet)
+    monkeypatch.setattr(worker, "PREFLIGHT_RETRY_S", 0.01)  # real sleeps, made short
+    assert worker.main([], env=world.env, clock=lambda: MONDAY_0835) == EXIT_OK
+    assert len(refusals) == 2 and len(world.upstox.requests) == 1
+
+
+def test_test_now_button_runs_the_real_worker_process(world, monkeypatch, tmp_path):
     for key, value in world.env.items():
         monkeypatch.setenv(key, value)  # the child process inherits them
+    # The unit's EnvironmentFile reaches the child too, and wins, as it does under systemd.
+    settings = tmp_path / "autologin.env"
+    settings.write_text(f"# settings only\nSUDARSHAN_UPSTOX_API_BASE='{world.upstox.api_base}'\n")
+    monkeypatch.setenv("SUDARSHAN_AUTOLOGIN_ENV_FILE", str(settings))
+    monkeypatch.setenv("SUDARSHAN_UPSTOX_API_BASE", "http://127.0.0.1:9")  # overridden by the file
     client = world.app.test_client()
     login_session(client)
     response = client.post(

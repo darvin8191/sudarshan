@@ -73,6 +73,11 @@ MESSAGES = {
     "cooling_down": "Upstox asked for a pause after too many attempts. Try again a little later.",
     "too_many": "Too many login attempts in the last 30 minutes. Try again later.",
     "crashed": "The login check stopped unexpectedly. The server log has the details.",
+    "test_overran": (
+        "The login test took too long and was stopped. Upstox may have ended today's login "
+        "without the new one being saved. Check the Upstox connection, and log in again if it is "
+        "not working."
+    ),
 }
 
 
