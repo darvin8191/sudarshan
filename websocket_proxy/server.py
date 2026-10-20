@@ -1,11 +1,13 @@
 import asyncio as aio
 import json
+import math  # SUDARSHAN: WEBSOCKET_BROKER_LINGER_SECONDS parsing (M18.2)
 import os
 import signal
 import socket
 import threading
 import time
 from collections import defaultdict
+from typing import Any, NamedTuple  # SUDARSHAN: the broker linger record (M18.2)
 
 import websockets
 import zmq
@@ -18,7 +20,11 @@ from services.market_data_service import get_market_data_service
 from utils.logging import get_logger, highlight_url
 
 from .base_adapter import BaseBrokerWebSocketAdapter
-from .broker_factory import create_broker_adapter
+from .broker_factory import (  # SUDARSHAN: pool cleanup listener (M18.2)
+    add_pool_cleanup_listener,
+    create_broker_adapter,
+    remove_pool_cleanup_listener,
+)
 from .mode_utils import (
     MODE_BY_UPPER_LABEL as _MODE_BY_UPPER_LABEL,
 )
@@ -31,6 +37,36 @@ from .port_check import find_available_port, is_port_in_use
 # Initialize logger
 logger = get_logger("websocket_proxy")
 
+# SUDARSHAN (M18.2): how long a user's broker connection stays open after their
+# last client leaves. A phone closes its live connection 5 s after the screen
+# turns off, and without this every screen-on opened a new broker socket.
+BROKER_LINGER_ENV = "WEBSOCKET_BROKER_LINGER_SECONDS"
+
+
+def _broker_linger_seconds() -> float:
+    """WEBSOCKET_BROKER_LINGER_SECONDS in seconds; 0 (close at once) unless set."""
+    raw = os.getenv(BROKER_LINGER_ENV, "0").strip().strip("'\"")
+    try:
+        seconds = float(raw or "0")
+    except ValueError:
+        seconds = math.nan
+    if not math.isfinite(seconds) or seconds < 0:
+        logger.warning(
+            f"{BROKER_LINGER_ENV}={raw!r} in .env is not a number of seconds, so the "
+            f"broker connection closes as soon as the last screen does. Set it to a "
+            f"number such as 300, or to 0."
+        )
+        return 0.0
+    return seconds
+
+
+class _BrokerLinger(NamedTuple):
+    """SUDARSHAN (M18.2): an idle adapter kept connected, and the task ending it."""
+
+    adapter: Any
+    task: aio.Task
+    loop: aio.AbstractEventLoop
+
 
 class WebSocketProxy:
     """
@@ -38,6 +74,11 @@ class WebSocketProxy:
     manages subscriptions, and routes market data from broker adapters to clients.
     Supports dynamic broker selection based on user configuration.
     """
+
+    # SUDARSHAN (M18.2): class-level defaults, so a proxy built without __init__
+    # (as the tests build one) keeps today's behaviour: no linger at all.
+    broker_linger_seconds: float = 0.0
+    _linger_sleep = staticmethod(aio.sleep)
 
     def __init__(self, host: str = "127.0.0.1", port: int = 8765):
         """
@@ -132,6 +173,18 @@ class WebSocketProxy:
 
         # Receive all topics (market data + CACHE_INVALIDATE_*)
         self.socket.setsockopt(zmq.SUBSCRIBE, b"")
+
+        # SUDARSHAN (M18.2): keep the broker connection through brief client gaps.
+        # A pool teardown from anywhere (a login, the daily token change) also ends
+        # a pending linger at once, through the listener.
+        self.broker_linger_seconds = _broker_linger_seconds()
+        self._broker_lingers: dict[str, _BrokerLinger] = {}
+        add_pool_cleanup_listener(self._on_user_pools_cleaned)
+        if self.broker_linger_seconds > 0:
+            logger.info(
+                f"Broker connections stay open {self.broker_linger_seconds:g}s after a "
+                f"user's last screen closes ({BROKER_LINGER_ENV})"
+            )
 
     async def start(self):
         """Start the WebSocket server and ZeroMQ listener"""
@@ -293,6 +346,11 @@ class WebSocketProxy:
                     )
                 except TimeoutError:
                     logger.warning("Timeout waiting for client connections to close")
+
+            # SUDARSHAN (M18.2): no linger outlives the server. Its adapters are
+            # still in broker_adapters and are disconnected just below.
+            self._cancel_all_broker_lingers()
+            remove_pool_cleanup_listener(self._on_user_pools_cleaned)
 
             # Disconnect all broker adapters
             for user_id, adapter in self.broker_adapters.items():
@@ -725,7 +783,18 @@ class WebSocketProxy:
                         user_id,
                     )
 
-            if not keep_special_adapter:
+            # SUDARSHAN (M18.2): with WEBSOCKET_BROKER_LINGER_SECONDS above 0, an
+            # idle adapter (every subscription released) stays connected for that
+            # long, so a screen that comes back reuses it. Anything not provably
+            # idle is torn down at once, exactly as before.
+            lingering = (
+                not keep_special_adapter
+                and not release_failed
+                and broker_name not in ("flattrade", "shoonya")
+                and self._begin_broker_linger(user_id, adapter, broker_name)
+            )
+
+            if not keep_special_adapter and not lingering:
                 logger.info(
                     "Last client for user %s disconnected. Disconnecting %s adapter.",
                     user_id,
@@ -756,6 +825,118 @@ class WebSocketProxy:
 
         self._purge_client_subscription_ownership(client_id)
         self.user_mapping.pop(client_id, None)
+
+    # ------------------------------------------------------------------------
+    # SUDARSHAN (M18.2): broker linger. Everything below runs on the proxy's
+    # event loop except _on_user_pools_cleaned, which may be called from any
+    # thread and hands its work to the loop.
+    # ------------------------------------------------------------------------
+
+    def _lingers(self) -> dict:
+        """The pending lingers, user_id -> _BrokerLinger (made on first use)."""
+        lingers = self.__dict__.get("_broker_lingers")
+        if lingers is None:
+            lingers = self._broker_lingers = {}
+        return lingers
+
+    def _user_has_live_client(self, user_id) -> bool:
+        return any(
+            client_id in self.clients and mapped == user_id
+            for client_id, mapped in self.user_mapping.items()
+        )
+
+    def _begin_broker_linger(self, user_id, adapter, broker_name) -> bool:
+        """Keep an idle adapter connected for broker_linger_seconds.
+
+        Returns True when it does; False (disconnect at once, as before) when
+        the setting is 0 or the adapter cannot be shown to hold no symbols.
+        """
+        seconds = self.broker_linger_seconds
+        if seconds <= 0:
+            return False
+        held = getattr(adapter, "subscriptions", None)
+        if held is None or len(held) > 0:
+            return False
+        self._cancel_broker_linger(user_id)
+        loop = aio.get_running_loop()
+        task = loop.create_task(self._broker_linger(user_id, adapter, seconds))
+        self._lingers()[user_id] = _BrokerLinger(adapter, task, loop)
+        logger.info(
+            "Last client for user %s disconnected. Keeping the %s connection open "
+            "for %gs, with no symbols, in case a screen comes back.",
+            user_id,
+            broker_name or "broker",
+            seconds,
+        )
+        return True
+
+    async def _broker_linger(self, user_id, adapter, seconds) -> None:
+        await self._linger_sleep(seconds)  # a cancel ends the task here
+        entry = self._lingers().get(user_id)
+        if entry is None or entry.adapter is not adapter:
+            return
+        del self._lingers()[user_id]
+        self._close_lingering_adapter(user_id, adapter, f"no screen came back within {seconds:g}s")
+
+    def _close_lingering_adapter(self, user_id, adapter, reason) -> None:
+        """Disconnect exactly as the last client's departure did before the linger."""
+        if self.broker_adapters.get(user_id) is not adapter or self._user_has_live_client(user_id):
+            return  # already replaced or torn down, or a screen is back
+        broker_name = self.user_broker_mapping.get(user_id)
+        logger.info(
+            "Disconnecting %s adapter for user %s: %s.",
+            broker_name or "unknown broker",
+            user_id,
+            reason,
+        )
+        try:
+            adapter.disconnect()
+        except Exception:
+            logger.exception(
+                "Error disconnecting %s adapter for user %s",
+                broker_name or "unknown broker",
+                user_id,
+            )
+        finally:
+            self.broker_adapters.pop(user_id, None)
+            self.user_broker_mapping.pop(user_id, None)
+
+    def _cancel_broker_linger(self, user_id):
+        """Stop a pending linger without disconnecting; returns its adapter or None."""
+        entry = self._lingers().pop(user_id, None)
+        if entry is None:
+            return None
+        entry.task.cancel()
+        return entry.adapter
+
+    def _cancel_all_broker_lingers(self) -> None:
+        for user_id in list(self._lingers()):
+            self._cancel_broker_linger(user_id)
+
+    def _end_broker_linger(self, user_id, reason) -> None:
+        """A teardown elsewhere: stop the linger and close its adapter now."""
+        adapter = self._cancel_broker_linger(user_id)
+        if adapter is not None:
+            self._close_lingering_adapter(user_id, adapter, reason)
+
+    def _on_user_pools_cleaned(self, user_id) -> None:
+        """broker_factory.cleanup_pools_for_user tore this user's pools down.
+
+        Called from whichever thread ran the cleanup: the proxy's loop in the
+        proxy process, a request thread on the development server.
+        """
+        entry = (self.__dict__.get("_broker_lingers") or {}).get(user_id)
+        if entry is None:
+            return
+        reason = "its broker connections were reset (new login or token change)"
+        try:
+            on_loop = aio.get_running_loop() is entry.loop
+        except RuntimeError:
+            on_loop = False
+        if on_loop:
+            self._end_broker_linger(user_id, reason)
+        elif not entry.loop.is_closed():
+            entry.loop.call_soon_threadsafe(self._end_broker_linger, user_id, reason)
 
     async def process_client_message(self, client_id, message):
         """
@@ -888,6 +1069,10 @@ class WebSocketProxy:
 
         # Store the user mapping
         self.user_mapping[client_id] = user_id
+
+        # SUDARSHAN (M18.2): a screen of this user is back. A lingering adapter is
+        # still in broker_adapters and is reused below like any cached one.
+        self._cancel_broker_linger(user_id)
 
         # Get broker name
         broker_name = get_broker_name(api_key)
@@ -1827,6 +2012,10 @@ class WebSocketProxy:
                 logger.info(f"Cleared caches for user {user_id}: {', '.join(caches_cleared)}")
             else:
                 logger.debug(f"No cached data found for user {user_id}")
+
+            # SUDARSHAN (M18.2): a token change, logout or revoke ends a pending
+            # linger now; its adapter is in broker_adapters and goes just below.
+            self._cancel_broker_linger(user_id)
 
             # Also disconnect and clean up any existing broker adapters for this user
             # This forces re-initialization with fresh credentials on next connection
