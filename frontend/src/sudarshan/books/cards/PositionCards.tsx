@@ -1,10 +1,22 @@
 import { useQuery } from '@tanstack/react-query'
 import { CandlestickChart, LogOut, Plus } from 'lucide-react'
-import { memo, type ReactNode, useCallback, useEffect } from 'react'
+import { memo, type ReactNode, useCallback, useEffect, useRef } from 'react'
 import { PlaceOrderDialog } from '@/components/trading/PlaceOrderDialog'
 import { cn } from '@/lib/utils'
 import { type FeedRow, useBookFeed } from '@/sudarshan/books/feed'
 import type { TickDirection } from '@/sudarshan/books/prices'
+import {
+  exitMark,
+  isHeld,
+  marksOf,
+  noteExitBook,
+  type SendTarget,
+  type SentMark,
+  sendHeld,
+  sentMarksNow,
+  useSentMarks,
+} from '@/sudarshan/books/sent'
+import { istTime } from '@/sudarshan/books/time'
 import { SymbolChartLink } from '@/sudarshan/chart/SymbolChartLink'
 import { directionOf, formatRupees } from '@/sudarshan/dashboard/format'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
@@ -20,6 +32,7 @@ import { contractOf } from '@/sudarshan/watchlist/api'
 import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
 import { describe } from '@/sudarshan/watchlist/rows'
 import type { Position } from '@/types/trading'
+import { showToast } from '@/utils/toast'
 import { figure, sideOf, signedUnits, units } from './format'
 import {
   ACTION,
@@ -40,15 +53,16 @@ import {
   SANDBOX_SENTENCE,
   SELL_FILL,
   SentChip,
+  SentNote,
   SignedPercent,
   STALE,
   StaleBookNote,
   useSandbox,
+  WarningLine,
 } from './parts'
 import { useBookOverlay } from './useBookOverlay'
 import { bookRow, type PricedRow, useFramePrices } from './useFramePrices'
 import { useHeld, useLatest } from './useLatest'
-import { useSent } from './useSent'
 
 /**
  * The Positions page on a phone (M6.9): the day's P&L at the top, one card per
@@ -95,6 +109,48 @@ export function positionId(position: Pick<Position, 'exchange' | 'symbol' | 'pro
 
 function quantityOf(position: Position): number {
   return Number(position.quantity) || 0
+}
+
+/** What an exit sent for this position holds: the position, and its size then. */
+function exitTarget(position: Position): SendTarget {
+  return {
+    id: positionId(position),
+    was: quantityOf(position),
+    exchange: position.exchange,
+    symbol: position.symbol,
+    product: position.product,
+  }
+}
+
+/** How an exit still held reads: on its card, in its note, and on its sheet's Exit. */
+export function exitWords(
+  mark: SentMark | undefined
+): { chip: string | null; note: string | null; button: string } | null {
+  if (!isHeld(mark)) return null
+  if (mark.state === 'sending') return { chip: 'Sending exit', note: null, button: 'Sending exit' }
+  if (mark.state === 'unconfirmed') {
+    return {
+      chip: null,
+      note: 'Not confirmed: check Orders before sending again',
+      button: 'Not confirmed',
+    }
+  }
+  const was = Math.abs(mark.was ?? 0)
+  const left = Math.abs(mark.seen ?? was)
+  const words =
+    left > 0 && left < was ? `Exit sent · ${units(left)} of ${units(was)} left` : 'Exit sent'
+  return { chip: words, note: null, button: words }
+}
+
+/** What a confirmation says first when an earlier exit's time ran out unseen. */
+export function exitWarning(mark: SentMark | undefined): string | null {
+  if (!mark?.expired) return null
+  const at = istTime(mark.sentAt)
+  const earlier =
+    mark.state === 'unconfirmed'
+      ? `The exit sent at ${at} was not confirmed and has not shown in the book yet.`
+      : `The exit sent at ${at} has not shown in the book yet.`
+  return `${earlier} If that order is still open in Orders, this sends a second one.`
 }
 
 /** P&L booked today: the broker's realised figure; all of it, for a closed position. */
@@ -229,19 +285,23 @@ const PositionBoard = memo(function PositionBoard({
   // Analyze mode: the book is the sandbox's, and so is every exit from it.
   const sandbox = useSandbox()
 
-  // An exit sent holds the position's Exit (and Exit all) until the book shows
-  // its quantity changed, or SENT_HOLD_MS pass: the broker's book can lag the
-  // order, and a second exit sized from it would reverse the position.
-  const { marks: exits, hold: holdExits, settle: settleExits } = useSent<number>()
+  // An exit sent holds the position's Exit (and Exit all) app-wide until the
+  // book shows it closed (books/sent.ts): the broker's book can lag the order,
+  // and a second exit sized from it would reverse the position.
+  const marks = useSentMarks()
+  const exits = marksOf(marks, 'exit', sandbox)
+  // Each book read tells the exits sent in the book it was read from (a mode
+  // switch alone changes nothing until the other book has been read).
+  const bookMode = useRef({ at: bookAt, sandbox })
   useEffect(() => {
-    if (exits.size === 0) return
-    const quantities = new Map(
-      positions.map((position) => [positionId(position), quantityOf(position)])
+    if (bookMode.current.at !== bookAt) bookMode.current = { at: bookAt, sandbox }
+    if (loading || bookAt === null) return
+    noteExitBook(
+      bookMode.current.sandbox,
+      positions.map((position) => ({ id: positionId(position), quantity: quantityOf(position) })),
+      bookAt
     )
-    settleExits(
-      [...exits].filter(([id, mark]) => quantities.get(id) !== mark.was).map(([id]) => id)
-    )
-  }, [positions, exits, settleExits])
+  }, [positions, bookAt, loading, sandbox])
 
   const total = rows.reduce((sum, row) => sum + (row.pnl ?? 0), 0)
   const figuresStale = (line.kind === 'delayed' || line.kind === 'connecting') && line.stale
@@ -280,7 +340,7 @@ const PositionBoard = memo(function PositionBoard({
           total={total}
           split={splitOf(rows)}
           open={held.length}
-          exitsSent={exits.size > 0}
+          exitsSent={exits.some(isHeld)}
           stale={figuresStale}
           line={line}
           now={now}
@@ -289,24 +349,28 @@ const PositionBoard = memo(function PositionBoard({
         {error && <StaleBookNote text="Could not refresh just now. Showing the last figures." />}
         {held.length > 0 ? (
           <ul aria-label="Open positions" className="flex flex-col gap-2">
-            {held.map((row) => (
-              <PositionCard
-                key={positionId(row.item)}
-                id={positionId(row.item)}
-                symbol={row.item.symbol}
-                exchange={row.item.exchange}
-                product={row.item.product}
-                quantity={quantityOf(row.item)}
-                average={figure(row.item.average_price)}
-                ltp={row.ltp}
-                tick={row.tick}
-                pnl={row.pnl}
-                pnlPercent={row.pnlPercent}
-                stale={stale(feedRowOf(row))}
-                sent={exits.has(positionId(row.item))}
-                onOpen={openSheet}
-              />
-            ))}
+            {held.map((row) => {
+              const words = exitWords(exitMark(marks, sandbox, positionId(row.item)))
+              return (
+                <PositionCard
+                  key={positionId(row.item)}
+                  id={positionId(row.item)}
+                  symbol={row.item.symbol}
+                  exchange={row.item.exchange}
+                  product={row.item.product}
+                  quantity={quantityOf(row.item)}
+                  average={figure(row.item.average_price)}
+                  ltp={row.ltp}
+                  tick={row.tick}
+                  pnl={row.pnl}
+                  pnlPercent={row.pnlPercent}
+                  stale={stale(feedRowOf(row))}
+                  sentChip={words?.chip ?? null}
+                  sentNote={words?.note ?? null}
+                  onOpen={openSheet}
+                />
+              )
+            })}
           </ul>
         ) : (
           <EmptyCard title="No open positions" hint="Everything taken today is closed." />
@@ -341,6 +405,15 @@ const PositionBoard = memo(function PositionBoard({
   const exiting = overlay?.act === 'exit' && targetOpen ? target : null
   const exitShown = useHeld(exiting)
   const exitName = exitShown ? describe(exitShown.item.symbol, exitShown.item.exchange).title : ''
+  const exitEarlier = exitWarning(
+    exitShown ? exitMark(marks, sandbox, positionId(exitShown.item)) : undefined
+  )
+  // Exit all after an exit whose time ran out unseen says so, with the latest.
+  const allEarlier = exitWarning(
+    exits
+      .filter((mark) => mark.expired && held.some((row) => positionId(row.item) === mark.id))
+      .sort((a, b) => b.sentAt - a.sentAt)[0]
+  )
 
   return (
     <div className="flex flex-col gap-3">
@@ -354,7 +427,7 @@ const PositionBoard = memo(function PositionBoard({
           line={line}
           now={now}
           apiKey={apiKey}
-          sent={exits.has(positionId(target.item))}
+          held={exitWords(exitMark(marks, sandbox, positionId(target.item)))?.button ?? null}
           sandbox={sandbox}
           onClose={close}
           onExit={() => swap({ act: 'exit', row: positionId(target.item) })}
@@ -366,9 +439,14 @@ const PositionBoard = memo(function PositionBoard({
         open={exiting !== null}
         title={`Exit ${exitName}?`}
         description={
-          exitShown
-            ? `${sideOf(quantityOf(exitShown.item)) === 'SHORT' ? 'Buys' : 'Sells'} ${units(Math.abs(quantityOf(exitShown.item)))} (${exitShown.item.product}) at market price${sandbox ? ' in the sandbox' : ''} to close this position. ${sandbox ? SANDBOX_SENTENCE : 'This cannot be undone.'}`
-            : ''
+          exitShown ? (
+            <>
+              {exitEarlier && <WarningLine text={exitEarlier} />}
+              {`${sideOf(quantityOf(exitShown.item)) === 'SHORT' ? 'Buys' : 'Sells'} ${units(Math.abs(quantityOf(exitShown.item)))} (${exitShown.item.product}) at market price${sandbox ? ' in the sandbox' : ''} to close this position. ${sandbox ? SANDBOX_SENTENCE : 'This cannot be undone.'}`}
+            </>
+          ) : (
+            ''
+          )
         }
         cancelLabel="Keep it"
         confirmLabel="Exit"
@@ -376,7 +454,8 @@ const PositionBoard = memo(function PositionBoard({
         onConfirm={() => {
           if (!exiting) return
           const { item } = exiting
-          void holdExits([[positionId(item), quantityOf(item)]], () => onExit(item))
+          if (isHeld(exitMark(sentMarksNow(), sandbox, positionId(item)))) return
+          void sendHeld('exit', sandbox, [exitTarget(item)], () => onExit(item))
         }}
         onClose={close}
       />
@@ -384,14 +463,22 @@ const PositionBoard = memo(function PositionBoard({
       <Confirm
         open={overlay?.act === 'exitall'}
         title="Exit all positions?"
-        description={`This closes all ${held.length} open ${held.length === 1 ? 'position' : 'positions'} at market price${sandbox ? ` in the sandbox. ${SANDBOX_SENTENCE}` : '. This cannot be undone.'}`}
+        description={
+          <>
+            {allEarlier && <WarningLine text={allEarlier} />}
+            {`This closes all ${held.length} open ${held.length === 1 ? 'position' : 'positions'} at market price${sandbox ? ` in the sandbox. ${SANDBOX_SENTENCE}` : '. This cannot be undone.'}`}
+          </>
+        }
         confirmLabel="Exit all"
-        onConfirm={() =>
-          void holdExits(
-            held.map((row) => [positionId(row.item), quantityOf(row.item)]),
+        onConfirm={() => {
+          if (marksOf(sentMarksNow(), 'exit', sandbox).some(isHeld)) return
+          void sendHeld(
+            'exit',
+            sandbox,
+            held.map((row) => exitTarget(row.item)),
             () => onExitAll()
           )
-        }
+        }}
         onClose={close}
       />
 
@@ -491,7 +578,8 @@ const PositionCard = memo(function PositionCard({
   pnl,
   pnlPercent,
   stale,
-  sent,
+  sentChip,
+  sentNote,
   onOpen,
 }: {
   id: string
@@ -505,8 +593,10 @@ const PositionCard = memo(function PositionCard({
   pnl: number | null
   pnlPercent: number | null
   stale: boolean
-  /** Its exit went, and the book has not shown it yet. */
-  sent: boolean
+  /** Its exit is held: "Exit sent", "Exit sent · 65 of 130 left". */
+  sentChip: string | null
+  /** Its exit got no answer: what to do before sending another. */
+  sentNote: string | null
   onOpen: (id: string) => void
 }) {
   const named = describe(symbol, exchange)
@@ -517,7 +607,7 @@ const PositionCard = memo(function PositionCard({
           <span className="flex min-w-0 flex-wrap items-center gap-2">
             <ProductChip product={product} />
             <PositionSide quantity={quantity} />
-            {sent && <SentChip label="Exit sent" />}
+            {sentChip && <SentChip label={sentChip} />}
           </span>
           <Last value={ltp} tick={tick} stale={stale} exchange={exchange} className="text-sm" />
         </span>
@@ -536,6 +626,7 @@ const PositionCard = memo(function PositionCard({
           </span>
           <SignedPercent value={pnlPercent} stale={stale} className="text-xs font-semibold" />
         </span>
+        {sentNote && <SentNote text={sentNote} />}
       </button>
     </li>
   )
@@ -593,7 +684,7 @@ function PositionSheet({
   line,
   now,
   apiKey,
-  sent,
+  held,
   sandbox,
   onClose,
   onExit,
@@ -604,8 +695,8 @@ function PositionSheet({
   line: FeedLine
   now: number
   apiKey: string | null
-  /** Its exit went, and the book has not shown it yet: Exit waits. */
-  sent: boolean
+  /** Its exit is held, and Exit waits, saying why: "Exit sent", "Not confirmed". */
+  held: string | null
   /** Analyze mode: Exit and Add go to the sandbox, and say so. */
   sandbox: boolean
   onClose: () => void
@@ -665,7 +756,7 @@ function PositionSheet({
               <button
                 type="button"
                 aria-haspopup="dialog"
-                disabled={sent}
+                disabled={held !== null}
                 onClick={onExit}
                 className={cn(
                   ACTION,
@@ -678,9 +769,8 @@ function PositionSheet({
                   Exit
                 </span>
                 <span className="text-[0.71875rem] font-semibold">
-                  {sent
-                    ? 'Exit sent'
-                    : `${side === 'LONG' ? 'Sell' : 'Buy'} ${units(Math.abs(quantity))} ${sandbox ? 'in the sandbox' : 'at market'}`}
+                  {held ??
+                    `${side === 'LONG' ? 'Sell' : 'Buy'} ${units(Math.abs(quantity))} ${sandbox ? 'in the sandbox' : 'at market'}`}
                 </span>
               </button>
               <button
@@ -808,4 +898,37 @@ function AddTicket({
       strategy="Positions"
     />
   )
+}
+
+/**
+ * The wide table's Close and Close All on the Positions page, held as the
+ * phone's Exit is (M6.9): a phone turned on its side shows the table, and its
+ * Close must not send a second exit while the first has not shown in the book.
+ * A tap on a held one sends nothing and says why.
+ */
+export function useTableExits(
+  onClose: (position: Position) => unknown,
+  onCloseAll: () => unknown,
+  positions: Position[]
+): { close: (position: Position) => void; closeAll: () => void } {
+  const sandbox = useSandbox()
+  const refuse = (mark: SentMark) =>
+    showToast.warning(
+      `An exit for ${describe(mark.symbol, mark.exchange).title} was sent at ${istTime(mark.sentAt)} and ${mark.state === 'unconfirmed' ? 'is not confirmed' : 'has not shown in the book yet'}. Check Orders before sending another.`,
+      'positions'
+    )
+  return {
+    close: (position) => {
+      const mark = exitMark(sentMarksNow(), sandbox, positionId(position))
+      if (isHeld(mark)) return refuse(mark)
+      void sendHeld('exit', sandbox, [exitTarget(position)], () => onClose(position))
+    },
+    // Held while any exit is, as the phone's Exit all is: it sizes from the same book.
+    closeAll: () => {
+      const first = marksOf(sentMarksNow(), 'exit', sandbox).find(isHeld)
+      if (first) return refuse(first)
+      const open = positions.filter((position) => quantityOf(position) !== 0)
+      void sendHeld('exit', sandbox, open.map(exitTarget), () => onCloseAll())
+    },
+  }
 }

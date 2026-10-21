@@ -25,7 +25,11 @@ vi.mock('@/api/trading', () => ({
 vi.mock('@/stores/authStore', () => ({
   useAuthStore: () => ({ apiKey: 'test-api-key', user: { broker: 'upstox' } }),
 }))
-vi.mock('@/stores/themeStore', () => ({ onModeChange: () => () => {} }))
+vi.mock('@/stores/themeStore', () => ({
+  onModeChange: () => () => {},
+  // M6.9: the table's Close is held per book (Live or the sandbox), so the page reads the mode.
+  useThemeStore: (pick: (state: { appMode: string }) => unknown) => pick({ appMode: 'live' }),
+}))
 vi.mock('@/hooks/useSupportedExchanges', () => ({
   useSupportedExchanges: () => ({ isCrypto: false }),
 }))

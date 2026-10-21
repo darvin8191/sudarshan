@@ -74,6 +74,14 @@ import {
   useOrderUpdates,
 } from '@/sudarshan/books/orderFold'
 import { QuoteStatus } from '@/sudarshan/books/QuoteStatus'
+// SUDARSHAN M6.9: what became of a cancel: sent, refused, or not confirmed (no answer).
+import {
+  appAnswered,
+  NOT_CONFIRMED,
+  refusalReason,
+  thrownOutcome,
+} from '@/sudarshan/books/sendOutcome'
+import type { SendOutcome } from '@/sudarshan/books/sent'
 import { useBookSync, useLatestRead } from '@/sudarshan/books/useBookSync'
 // SUDARSHAN M4.15: on a phone, a symbol opens the phone chart (src/sudarshan/chart).
 import { BookSymbolLink } from '@/sudarshan/chart/BookSymbolLink'
@@ -359,26 +367,34 @@ export default function OrderBook() {
     return () => unsubscribe()
   }, [fetchOrders])
 
-  const handleCancelOrder = async (orderid: string) => {
+  // SUDARSHAN M6.9: each returns what became of the cancel, so the phone holds its
+  // Cancel (src/sudarshan/books/sent.ts). No answer is "not confirmed", never "failed".
+  const handleCancelOrder = async (orderid: string): Promise<SendOutcome> => {
     try {
       const response = await tradingApi.cancelOrder(orderid)
       if (response.status === 'success') {
         showToast.success(`Order cancelled: ${orderid}`, 'orders')
         setTimeout(() => fetchOrders(true), 1000)
-        // SUDARSHAN M6.9: whether it went, so a phone card holds its Cancel until the order ends.
-        return true
+        return 'sent'
+      } else if (!appAnswered(response)) {
+        showToast.warning(NOT_CONFIRMED.cancel, 'orders')
+        setTimeout(() => fetchOrders(true), 1000)
+        return 'unconfirmed'
       } else {
         showToast.error(response.message || 'Failed to cancel order', 'orders')
       }
     } catch (error) {
-      const axiosError = error as { response?: { data?: { message?: string } } }
-      const message = axiosError.response?.data?.message || 'Failed to cancel order'
-      showToast.error(message, 'orders')
+      if (thrownOutcome(error) === 'unconfirmed') {
+        showToast.warning(NOT_CONFIRMED.cancel, 'orders')
+        setTimeout(() => fetchOrders(true), 1000)
+        return 'unconfirmed'
+      }
+      showToast.error(refusalReason(error) ?? 'Failed to cancel order', 'orders')
     }
-    return false
+    return 'refused'
   }
 
-  const handleCancelAllOrders = async () => {
+  const handleCancelAllOrders = async (): Promise<SendOutcome> => {
     // SUDARSHAN: the orders working now are the ones this cancels; their cancels are not alerts.
     noteCancelAllFromApp()
     try {
@@ -387,19 +403,25 @@ export default function OrderBook() {
         showToast.success(response.message || 'All orders cancelled', 'orders')
         // Delay refresh to allow broker to process cancellations
         setTimeout(() => fetchOrders(true), 2000)
-        // SUDARSHAN M6.9: whether it went, so the phone's cards hold their Cancels until the orders end.
-        return true
+        return 'sent'
       } else if (response.status === 'info') {
         showToast.info(response.message || 'No open orders to cancel', 'orders')
+      } else if (!appAnswered(response)) {
+        showToast.warning(NOT_CONFIRMED.cancelAll, 'orders')
+        setTimeout(() => fetchOrders(true), 2000)
+        return 'unconfirmed'
       } else {
         showToast.error(response.message || 'Failed to cancel all orders', 'orders')
       }
     } catch (error) {
-      const axiosError = error as { response?: { data?: { message?: string } } }
-      const message = axiosError.response?.data?.message || 'Failed to cancel all orders'
-      showToast.error(message, 'orders')
+      if (thrownOutcome(error) === 'unconfirmed') {
+        showToast.warning(NOT_CONFIRMED.cancelAll, 'orders')
+        setTimeout(() => fetchOrders(true), 2000)
+        return 'unconfirmed'
+      }
+      showToast.error(refusalReason(error) ?? 'Failed to cancel all orders', 'orders')
     }
-    return false
+    return 'refused'
   }
 
   const openModifyDialog = async (order: Order) => {

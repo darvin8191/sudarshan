@@ -40,7 +40,7 @@ vi.mock('@/stores/themeStore', () => ({
   useThemeStore: (pick: (state: { appMode: string }) => unknown) => pick(theme),
 }))
 vi.mock('@/utils/toast', () => ({
-  showToast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
+  showToast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
 }))
 
 /** How often the page itself renders: it asks for the supported exchanges once a render. */
@@ -114,6 +114,7 @@ vi.mock('@/components/trading/PlaceOrderDialog', async () => {
 })
 
 import Positions from '@/pages/Positions'
+import { resetSentForTests } from '@/sudarshan/books/sent'
 import { back, frame, pass, renderBook, settle, where } from '@/test/bookPages'
 import { fakeClock, frames } from '@/test/frames'
 import { feed } from '@/test/marketDataHarness'
@@ -238,6 +239,7 @@ function user() {
 
 beforeEach(() => {
   fakeClock()
+  resetSentForTests()
   theme.appMode = 'live'
   frames.install()
   feed.reset()
@@ -616,6 +618,8 @@ describe('Positions on a phone: the sheet and its actions', () => {
     wide.unmount()
     vi.restoreAllMocks()
     api.closePosition.mockClear()
+    // The table's exit holds the phone's too (sentGuard.test.tsx); this compares the calls.
+    resetSentForTests()
     await renderPhone(SHORT)
     await tap.click(card(/BANKNIFTY 57500 PE/))
     await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: /^Exit/ }))

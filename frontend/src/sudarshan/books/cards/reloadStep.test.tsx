@@ -58,7 +58,7 @@ vi.mock('@/hooks/useSupportedExchanges', () => ({
   useSupportedExchanges: () => ({ isCrypto: false }),
 }))
 vi.mock('@/utils/toast', () => ({
-  showToast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
+  showToast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
 }))
 vi.mock('@/hooks/useMarketStatus', () => ({
   useMarketStatus: () => ({
@@ -183,6 +183,8 @@ beforeEach(() => {
   fakeClock()
   frames.install()
   fakeScreen('phone')
+  // What the tab kept from the last test's sends: each fresh load reads it.
+  sessionStorage.clear()
   api.getPositions.mockReset().mockResolvedValue({ status: 'success', data: [POSITION] })
   api.getOrders.mockReset().mockResolvedValue({
     status: 'success',

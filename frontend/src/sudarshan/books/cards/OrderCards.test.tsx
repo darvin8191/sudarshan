@@ -46,7 +46,7 @@ vi.mock('@/hooks/useSupportedExchanges', () => ({
   useSupportedExchanges: () => ({ isCrypto: false }),
 }))
 vi.mock('@/utils/toast', () => ({
-  showToast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
+  showToast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
 }))
 const calendar = vi.hoisted(() => ({
   isMarketOpen: () => true,
@@ -79,6 +79,7 @@ vi.mock('@/components/socket/SocketProvider', () => ({
 
 import OrderBook from '@/pages/OrderBook'
 import { notePushedFrame, resetOrderMemoryForTests } from '@/sudarshan/books/orderFold'
+import { resetSentForTests } from '@/sudarshan/books/sent'
 import { back, pass, renderBook, settle, where } from '@/test/bookPages'
 import { fakeClock, frames } from '@/test/frames'
 import { feed } from '@/test/marketDataHarness'
@@ -240,6 +241,7 @@ beforeEach(() => {
   feed.reset()
   socket.clear()
   resetOrderMemoryForTests()
+  resetSentForTests()
   theme.appMode = 'live'
   api.getOrders.mockReset()
   api.getMultiQuotes.mockReset().mockResolvedValue({ status: 'success', results: [] })

@@ -1,10 +1,21 @@
 import { CandlestickChart, Pencil, X, XCircle } from 'lucide-react'
-import { memo, type ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
+import { memo, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { useThemeStore } from '@/stores/themeStore'
 import { type FeedRow, useBookFeed } from '@/sudarshan/books/feed'
 import { type BookOrder, isFinalStatus } from '@/sudarshan/books/orderFold'
 import type { TickDirection } from '@/sudarshan/books/prices'
+import {
+  cancelMark,
+  isHeld,
+  marksOf,
+  noteCancelBook,
+  type SentMark,
+  sendHeld,
+  sentMarksNow,
+  useSentMarks,
+} from '@/sudarshan/books/sent'
+import { istTime } from '@/sudarshan/books/time'
 import { SymbolChartLink } from '@/sudarshan/chart/SymbolChartLink'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
 import type { FeedLine, MarketOpen } from '@/sudarshan/dashboard/live'
@@ -27,14 +38,15 @@ import {
   RefreshIcon,
   SANDBOX_SENTENCE,
   SentChip,
+  SentNote,
   SideChip,
   StaleBookNote,
   StatusChip,
+  WarningLine,
 } from './parts'
 import { useBookOverlay, usePageDialog } from './useBookOverlay'
 import { type PricedRow, useFramePrices } from './useFramePrices'
 import { useHeld, useLatest } from './useLatest'
-import { useSent } from './useSent'
 
 /**
  * The order book on a phone (M6.9): filter chips, one card per order with its
@@ -133,6 +145,30 @@ function feedRowOf(row: PricedRow<{ symbol: string; exchange: string }>): FeedRo
   return { exchange: row.item.exchange, ltp: row.ltp ?? undefined, _at: row.at, _live: row.live }
 }
 
+/** How a cancel still held reads: on its card, in its note, and on its sheet's Cancel. */
+export function cancelWords(
+  mark: SentMark | undefined
+): { chip: string | null; note: string | null; button: string } | null {
+  if (!isHeld(mark)) return null
+  if (mark.state === 'sending') {
+    return { chip: 'Sending cancel', note: null, button: 'Sending cancel' }
+  }
+  if (mark.state === 'unconfirmed') {
+    return {
+      chip: null,
+      note: 'Not confirmed: check its status before cancelling again',
+      button: 'Not confirmed',
+    }
+  }
+  return { chip: 'Cancel sent', note: null, button: 'Cancel sent' }
+}
+
+/** What a confirmation says first when an earlier cancel's time ran out with the order working. */
+export function cancelWarning(mark: SentMark | undefined): string | null {
+  if (!mark?.expired) return null
+  return `A cancel was sent at ${istTime(mark.sentAt)} and the order still shows working.`
+}
+
 export function OrderCards(props: OrderCardsProps) {
   const onRefresh = useLatest(props.onRefresh)
   const onCancel = useLatest(props.onCancel)
@@ -200,16 +236,20 @@ const OrderBoard = memo(function OrderBoard({
   const { overlay, open, swap, close } = useBookOverlay()
   const openSheet = useCallback((orderid: string) => open({ act: 'sheet', row: orderid }), [open])
 
-  // A cancel sent holds the order's Cancel and Modify until it shows a final
-  // status (pushed or read), or SENT_HOLD_MS pass.
-  const { marks: cancels, hold: holdCancels, settle: settleCancels } = useSent<true>()
+  // Analyze mode: the book is the sandbox's, and so is every cancel and modify from it.
+  const sandbox = appMode === 'analyzer'
+  // A cancel sent holds the order's Cancel and Modify app-wide until it shows
+  // a final status, pushed or read (books/sent.ts).
+  const marks = useSentMarks()
+  const cancelOf = (orderid: string) => cancelMark(marks, sandbox, orderid)
+  // Each book tells the cancels sent in the book it is (a mode switch alone
+  // changes nothing until the other book is here).
+  const bookMode = useRef({ orders, sandbox })
   useEffect(() => {
-    if (cancels.size === 0) return
-    const working = new Set(
-      orders.filter((order) => !isFinalStatus(order.order_status)).map((order) => order.orderid)
-    )
-    settleCancels([...cancels.keys()].filter((orderid) => !working.has(orderid)))
-  }, [orders, cancels, settleCancels])
+    if (bookMode.current.orders !== orders) bookMode.current = { orders, sandbox }
+    if (loading) return
+    noteCancelBook(bookMode.current.sandbox, orders)
+  }, [orders, loading, sandbox])
 
   const states = new Map(sorted.map((order) => [order.orderid, orderState(order.order_status)]))
   const counts: Record<OrderFilter, number> = {
@@ -223,7 +263,7 @@ const OrderBoard = memo(function OrderBoard({
   const cancellableIds: string[] = []
   for (const [orderid, state] of states) {
     if (state.filter) counts[state.filter] += 1
-    if (state.working && !cancels.has(orderid)) cancellableIds.push(orderid)
+    if (state.working && !isHeld(cancelOf(orderid))) cancellableIds.push(orderid)
   }
   const cancellable = cancellableIds.length
   const shown =
@@ -259,11 +299,15 @@ const OrderBoard = memo(function OrderBoard({
     close,
   })
 
-  const who = appMode === 'analyzer' ? 'Sandbox' : 'Broker'
-  // Analyze mode: the book is the sandbox's, and so is every cancel and modify from it.
-  const sandbox = appMode === 'analyzer'
+  const who = sandbox ? 'Sandbox' : 'Broker'
   const cancelling = overlay?.act === 'cancel' && targetState?.working ? target : null
   const cancelShown = useHeld(cancelling)
+  const cancelEarlier = cancelWarning(cancelShown ? cancelOf(cancelShown.orderid) : undefined)
+  const allEarlier = cancelWarning(
+    marksOf(marks, 'cancel', sandbox)
+      .filter((mark) => mark.expired && cancellableIds.includes(mark.id))
+      .sort((a, b) => b.sentAt - a.sentAt)[0]
+  )
 
   let content: ReactNode
   if (orders.length === 0 && loading) {
@@ -286,6 +330,7 @@ const OrderBoard = memo(function OrderBoard({
               const live = state.working
                 ? priceOf.get(`${order.exchange}:${order.symbol}`)
                 : undefined
+              const words = state.working ? cancelWords(cancelOf(order.orderid)) : null
               return (
                 <OrderCard
                   key={order.orderid}
@@ -303,7 +348,8 @@ const OrderBoard = memo(function OrderBoard({
                   tick={live ? live.tick : null}
                   stale={live ? stale(feedRowOf(live)) : false}
                   showLtp={live !== undefined}
-                  sent={cancels.has(order.orderid)}
+                  sentChip={words?.chip ?? null}
+                  sentNote={words?.note ?? null}
                   onOpen={openSheet}
                 />
               )
@@ -381,7 +427,8 @@ const OrderBoard = memo(function OrderBoard({
           now={now}
           who={who}
           sandbox={sandbox}
-          sent={cancels.has(target.orderid)}
+          held={cancelWords(cancelOf(target.orderid))?.button ?? null}
+          again={cancelOf(target.orderid)?.expired === true}
           onClose={close}
           onModify={() => {
             modifyOpening()
@@ -396,16 +443,22 @@ const OrderBoard = memo(function OrderBoard({
         open={cancelling !== null}
         title="Cancel this order?"
         description={
-          cancelShown
-            ? `${cancelShown.action} ${remainingText(cancelShown)} ${describe(cancelShown.symbol, cancelShown.exchange).title} · ${priceText(cancelShown)}. ${sandbox ? `The order stops working in the sandbox. ${SANDBOX_SENTENCE}` : 'The order stops working at the exchange.'}`
-            : ''
+          cancelShown ? (
+            <>
+              {cancelEarlier && <WarningLine text={cancelEarlier} />}
+              {`${cancelShown.action} ${remainingText(cancelShown)} ${describe(cancelShown.symbol, cancelShown.exchange).title} · ${priceText(cancelShown)}. ${sandbox ? `The order stops working in the sandbox. ${SANDBOX_SENTENCE}` : 'The order stops working at the exchange.'}`}
+            </>
+          ) : (
+            ''
+          )
         }
         cancelLabel="Keep order"
         confirmLabel="Cancel order"
         onConfirm={() => {
           if (!cancelling) return
           const { orderid } = cancelling
-          void holdCancels([[orderid, true]], () => onCancel(orderid))
+          if (isHeld(cancelMark(sentMarksNow(), sandbox, orderid))) return
+          void sendHeld('cancel', sandbox, [{ id: orderid }], () => onCancel(orderid))
         }}
         onClose={close}
       />
@@ -413,12 +466,19 @@ const OrderBoard = memo(function OrderBoard({
       <Confirm
         open={overlay?.act === 'cancelall'}
         title="Cancel all open orders?"
-        description={`This will cancel all ${cancellable} open ${cancellable === 1 ? 'order' : 'orders'}${sandbox ? ` in the sandbox. ${SANDBOX_SENTENCE}` : '. This cannot be undone.'}`}
+        description={
+          <>
+            {allEarlier && <WarningLine text={allEarlier} />}
+            {`This will cancel all ${cancellable} open ${cancellable === 1 ? 'order' : 'orders'}${sandbox ? ` in the sandbox. ${SANDBOX_SENTENCE}` : '. This cannot be undone.'}`}
+          </>
+        }
         cancelLabel="Keep orders"
         confirmLabel="Cancel all"
         onConfirm={() =>
-          void holdCancels(
-            cancellableIds.map((orderid) => [orderid, true]),
+          void sendHeld(
+            'cancel',
+            sandbox,
+            cancellableIds.map((orderid) => ({ id: orderid })),
             () => onCancelAll()
           )
         }
@@ -444,7 +504,8 @@ const OrderCard = memo(function OrderCard({
   tick,
   stale,
   showLtp,
-  sent,
+  sentChip,
+  sentNote,
   onOpen,
 }: {
   orderid: string
@@ -461,8 +522,10 @@ const OrderCard = memo(function OrderCard({
   tick: TickDirection | null
   stale: boolean
   showLtp: boolean
-  /** Its cancel went, and the order has not ended yet. */
-  sent: boolean
+  /** Its cancel is held: "Cancel sent". */
+  sentChip: string | null
+  /** Its cancel got no answer: what to do before cancelling again. */
+  sentNote: string | null
   onOpen: (orderid: string) => void
 }) {
   const named = describe(symbol, exchange)
@@ -481,7 +544,7 @@ const OrderCard = memo(function OrderCard({
             </span>
           </span>
           <span className="ml-auto flex items-center gap-1.5">
-            {sent && <SentChip label="Cancel sent" />}
+            {sentChip && <SentChip label={sentChip} />}
             <StatusChip state={state} />
           </span>
         </span>
@@ -503,6 +566,7 @@ const OrderCard = memo(function OrderCard({
             <Last value={ltp} tick={tick} stale={stale} exchange={exchange} className="shrink-0" />
           )}
         </span>
+        {sentNote && <SentNote text={sentNote} />}
       </button>
     </li>
   )
@@ -518,7 +582,8 @@ function OrderSheet({
   now,
   who,
   sandbox,
-  sent,
+  held,
+  again,
   onClose,
   onModify,
   onCancel,
@@ -532,8 +597,10 @@ function OrderSheet({
   who: 'Broker' | 'Sandbox'
   /** Analyze mode: Modify and Cancel go to the sandbox, and say so. */
   sandbox: boolean
-  /** Its cancel went, and the order has not ended yet: Modify and Cancel wait. */
-  sent: boolean
+  /** Its cancel is held: Modify and Cancel wait, and Cancel says why. */
+  held: string | null
+  /** An earlier cancel's time ran out with the order still working. */
+  again: boolean
   onClose: () => void
   onModify: () => void
   onCancel: () => void
@@ -583,22 +650,26 @@ function OrderSheet({
             <button
               type="button"
               aria-haspopup="dialog"
-              disabled={sent}
+              disabled={held !== null}
               onClick={onModify}
               className={cn(OUTLINED, 'border-primary text-primary')}
             >
               <Pencil aria-hidden="true" className="size-4" />
-              <ActionWords sandbox={sandbox && !sent}>Modify</ActionWords>
+              <ActionWords sandbox={sandbox && held === null}>Modify</ActionWords>
             </button>
             <button
               type="button"
               aria-haspopup="dialog"
-              disabled={sent}
+              disabled={held !== null}
               onClick={onCancel}
               className={cn(OUTLINED, 'border-destructive text-destructive')}
             >
               <X aria-hidden="true" className="size-4" />
-              {sent ? 'Cancel sent' : <ActionWords sandbox={sandbox}>Cancel order</ActionWords>}
+              {held ?? (
+                <ActionWords sandbox={sandbox}>
+                  {again ? 'Cancel again' : 'Cancel order'}
+                </ActionWords>
+              )}
             </button>
           </div>
         )}

@@ -55,10 +55,18 @@ import { cn, makeFormatCurrency, sanitizeCSV } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
 import { onModeChange } from '@/stores/themeStore'
 // SUDARSHAN M6.9: on a phone the positions are cards (src/sudarshan/books/cards).
-import { PositionCards } from '@/sudarshan/books/cards/PositionCards'
+import { PositionCards, useTableExits } from '@/sudarshan/books/cards/PositionCards'
 // SUDARSHAN: the book re-read, status line and tick prices (src/sudarshan/books).
 import { useBookFeed } from '@/sudarshan/books/feed'
 import { TickPrice } from '@/sudarshan/books/LiveFigures'
+// SUDARSHAN M6.9: what became of an exit: sent, refused, or not confirmed (no answer).
+import {
+  appAnswered,
+  NOT_CONFIRMED,
+  refusalReason,
+  thrownOutcome,
+} from '@/sudarshan/books/sendOutcome'
+import type { SendOutcome } from '@/sudarshan/books/sent'
 import { useBookSync, useLatestRead } from '@/sudarshan/books/useBookSync'
 // SUDARSHAN M4.15: on a phone, a symbol opens the phone chart (src/sudarshan/chart).
 import { BookSymbolLink } from '@/sudarshan/chart/BookSymbolLink'
@@ -448,7 +456,10 @@ export default function Positions() {
     filters.exchange.length > 0 ||
     grouping !== 'none'
 
-  const handleClosePosition = async (position: Position) => {
+  // SUDARSHAN M6.9: each returns what became of the exit, so the phone holds its
+  // Exit (src/sudarshan/books/sent.ts). No answer is "not confirmed", never
+  // "failed": the exit may have gone, and a second one would reverse the position.
+  const handleClosePosition = async (position: Position): Promise<SendOutcome> => {
     try {
       const response = await tradingApi.closePosition(
         position.symbol,
@@ -458,33 +469,53 @@ export default function Positions() {
       if (response.status === 'success') {
         showToast.success(response.message || `Position closed for ${position.symbol}`, 'positions')
         fetchPositions(true)
-        // SUDARSHAN M6.9: whether it went, so a phone card holds its Exit until the book moves.
-        return true
+        return 'sent'
+      } else if (!appAnswered(response)) {
+        showToast.warning(NOT_CONFIRMED.exit, 'positions')
+        fetchPositions(true)
+        return 'unconfirmed'
       } else {
         showToast.error(response.message || 'Failed to close position', 'positions')
       }
-    } catch (_err) {
-      showToast.error('Failed to close position', 'positions')
+    } catch (err) {
+      if (thrownOutcome(err) === 'unconfirmed') {
+        showToast.warning(NOT_CONFIRMED.exit, 'positions')
+        fetchPositions(true)
+        return 'unconfirmed'
+      }
+      showToast.error(refusalReason(err) ?? 'Failed to close position', 'positions')
     }
-    return false
+    return 'refused'
   }
 
-  const handleCloseAllPositions = async () => {
+  const handleCloseAllPositions = async (): Promise<SendOutcome> => {
     try {
       const response = await tradingApi.closeAllPositions()
       if (response.status === 'success') {
         // Toast handled by close_position_event socket
         fetchPositions(true)
-        // SUDARSHAN M6.9: whether it went, so the phone's cards hold their Exits until the book moves.
-        return true
+        return 'sent'
+      } else if (!appAnswered(response)) {
+        showToast.warning(NOT_CONFIRMED.exitAll, 'positions')
+        fetchPositions(true)
+        return 'unconfirmed'
       } else {
         showToast.error(response.message || 'Failed to close all positions', 'positions')
       }
-    } catch (_err) {
-      showToast.error('Failed to close all positions', 'positions')
+    } catch (err) {
+      if (thrownOutcome(err) === 'unconfirmed') {
+        showToast.warning(NOT_CONFIRMED.exitAll, 'positions')
+        fetchPositions(true)
+        return 'unconfirmed'
+      }
+      showToast.error(refusalReason(err) ?? 'Failed to close all positions', 'positions')
     }
-    return false
+    return 'refused'
   }
+
+  // SUDARSHAN M6.9: the table's Close and Close All hold as the phone's Exit does:
+  // a phone turned on its side shows this table.
+  const tableExits = useTableExits(handleClosePosition, handleCloseAllPositions, positions)
 
   const exportToCSV = () => {
     if (filteredPositions.length === 0) {
@@ -789,7 +820,7 @@ export default function Positions() {
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={handleCloseAllPositions}>Close All</AlertDialogAction>
+                <AlertDialogAction onClick={tableExits.closeAll}>Close All</AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
@@ -1083,7 +1114,7 @@ export default function Positions() {
                                       variant="ghost"
                                       size="sm"
                                       className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                                      onClick={() => handleClosePosition(position)}
+                                      onClick={() => tableExits.close(position)}
                                       aria-label={`Close ${position.symbol} position`}
                                     >
                                       <X className="h-4 w-4" />

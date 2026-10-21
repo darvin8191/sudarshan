@@ -250,6 +250,32 @@ export function SentChip({ label }: { label: string }) {
   )
 }
 
+/** A card's line when no answer came back for its exit or cancel: what to do first. */
+export function SentNote({ text }: { text: string }) {
+  return (
+    <span
+      data-sent="unconfirmed"
+      className="flex items-start gap-1.5 rounded-[0.625rem] bg-[color:var(--gold-tint)] px-2.5 py-1.5 text-xs leading-snug font-semibold text-[color:var(--warning-text)]"
+    >
+      <AlertTriangle aria-hidden="true" className="mt-px size-3.5 shrink-0" />
+      {text}
+    </span>
+  )
+}
+
+/** A confirmation's first line when an earlier order may still be working. */
+export function WarningLine({ text }: { text: string }) {
+  return (
+    <span
+      data-warning="true"
+      className="mb-2 flex items-start gap-1.5 font-semibold text-[color:var(--warning-text)]"
+    >
+      <AlertTriangle aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+      {text}
+    </span>
+  )
+}
+
 /** Refresh as a 48dp icon, for a row with no room for its word. */
 export function RefreshIcon({
   refreshing,
