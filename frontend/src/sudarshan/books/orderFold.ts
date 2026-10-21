@@ -88,6 +88,16 @@ export interface FillDetail {
   rejection_reason?: string
 }
 
+/**
+ * A rejection's reason as given, or '' when it is empty or only a status word
+ * ("rejected"): a feed that puts its status there has given no reason, and a
+ * screen saying "Broker says: rejected" would read as one.
+ */
+export function reasonOf(value: unknown): string {
+  const reason = text(value)
+  return bookStatus(reason) === null ? reason : ''
+}
+
 function fillOf(frame: OrderUpdateFrame): FillDetail {
   const out: FillDetail = {}
   const filled = count(frame.filled_quantity)
@@ -96,7 +106,7 @@ function fillOf(frame: OrderUpdateFrame): FillDetail {
   if (pending !== null) out.pending_quantity = pending
   const average = positive(frame.average_price)
   if (average !== null) out.average_price = average
-  const reason = text(frame.rejection_reason)
+  const reason = reasonOf(frame.rejection_reason)
   if (reason) out.rejection_reason = reason
   return out
 }
@@ -213,7 +223,7 @@ function missing(row: BookOrder, fill: FillDetail): FillDetail {
     if (fill.average_price !== undefined && positive(row.average_price) === null)
       out.average_price = fill.average_price
   }
-  if (fill.rejection_reason && !text(row.rejection_reason))
+  if (fill.rejection_reason && !reasonOf(row.rejection_reason))
     out.rejection_reason = fill.rejection_reason
   return out
 }
@@ -252,6 +262,89 @@ export function holdPushed(fetched: Order[], pushed: Map<string, Pushed>, now: n
 /** What the frames said, by order (the newest `KNOWN_LIMIT` orders). */
 const appPushed = new Map<string, Pushed>()
 
+/** Which book, instrument, product and side each pushed order is for, as its frames said. */
+interface PushedOrder {
+  mode: string
+  exchange: string
+  symbol: string
+  product: string
+  action: string
+}
+const appOrders = new Map<string, PushedOrder>()
+
+/** Called whenever the app learns something about orders: a frame (given) or a book read. */
+type OrderMemoryListener = (frame: OrderUpdateFrame | null) => void
+const memoryListeners = new Set<OrderMemoryListener>()
+
+/** Hear of every frame recorded and every order book noted. Returns the way to stop. */
+export function onOrderMemory(listener: OrderMemoryListener): () => void {
+  memoryListeners.add(listener)
+  return () => {
+    memoryListeners.delete(listener)
+  }
+}
+
+function told(frame: OrderUpdateFrame | null): void {
+  for (const listener of [...memoryListeners]) listener(frame)
+}
+
+function noteOrderOf(orderid: string, frame: OrderUpdateFrame): void {
+  const before = appOrders.get(orderid)
+  const word = (value: unknown, had: string | undefined) => text(value).toUpperCase() || had || ''
+  appOrders.delete(orderid)
+  appOrders.set(orderid, {
+    mode: text(frame.mode).toLowerCase() || before?.mode || '',
+    exchange: word(frame.exchange, before?.exchange),
+    symbol: word(frame.symbol, before?.symbol),
+    product: word(frame.product, before?.product),
+    action: word(frame.action, before?.action),
+  })
+  if (appOrders.size > KNOWN_LIMIT) {
+    const oldest = appOrders.keys().next().value
+    if (oldest !== undefined) appOrders.delete(oldest)
+  }
+}
+
+/**
+ * Upstox's order stream says CNC for its D product on every exchange, where
+ * its order book says NRML on F&O (broker/upstox/mapping/order_data.py), so
+ * the two match as one.
+ */
+function productClass(product: string): string {
+  const word = product.toUpperCase()
+  return word === 'NRML' ? 'CNC' : word
+}
+
+/**
+ * Whether a pushed order for this instrument and product is still working
+ * (M6.9): on `action`'s side when its frames name one, last pushed at or after
+ * `since`, in the sandbox's book or the broker's. It has ended once either its
+ * frames or a read of the book say so.
+ */
+export function workingPushedFor(match: {
+  sandbox: boolean
+  exchange: string
+  symbol: string
+  product: string
+  action: 'BUY' | 'SELL'
+  since: number
+}): boolean {
+  const exchange = match.exchange.toUpperCase()
+  const symbol = match.symbol.toUpperCase()
+  const product = productClass(match.product)
+  for (const [orderid, order] of appOrders) {
+    const pushed = appPushed.get(orderid)
+    if (!pushed || pushed.at < match.since) continue
+    if (order.exchange !== exchange || order.symbol !== symbol) continue
+    if (productClass(order.product) !== product) continue
+    if (order.action && order.action !== match.action) continue
+    if (!frameFitsMode({ mode: order.mode }, match.sandbox ? 'analyzer' : 'live')) continue
+    const read = known.get(orderid)?.status
+    if (!FINAL.has(pushed.order_status) && !(read && FINAL.has(read))) return true
+  }
+  return false
+}
+
 /** The last frame pushed, and when it arrived. */
 let lastPush: { frame: OrderUpdateFrame; at: number } | null = null
 
@@ -278,7 +371,11 @@ export function notePushedFrame(frame: OrderUpdateFrame, now = Date.now()): void
   rememberPushed(appPushed, frame, now)
   const orderid = text(frame.orderid)
   const status = bookStatus(frame.order_status)
-  if (orderid && status) noteKnown(orderid, status, now)
+  if (orderid && status) {
+    noteKnown(orderid, status, now)
+    noteOrderOf(orderid, frame)
+  }
+  told(frame)
 }
 
 /** The app-wide memory of what was pushed, for `holdPushed`. */
@@ -301,6 +398,7 @@ export function noteOrderBook(orders: readonly Order[], at = Date.now()): void {
     const status = bookStatus(order.order_status)
     if (orderid && status) noteKnown(orderid, status, at)
   }
+  told(null)
 }
 
 /** The orders last known to be working: what a cancel-all sent now would cancel. */
@@ -329,6 +427,7 @@ export function cancelAllTargets(withinMs: number, now = Date.now()): string[] {
 /** Tests only: forget everything pushed and read. */
 export function resetOrderMemoryForTests(): void {
   appPushed.clear()
+  appOrders.clear()
   known.clear()
   lastPush = null
 }

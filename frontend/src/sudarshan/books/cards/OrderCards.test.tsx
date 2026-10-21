@@ -46,7 +46,7 @@ vi.mock('@/hooks/useSupportedExchanges', () => ({
   useSupportedExchanges: () => ({ isCrypto: false }),
 }))
 vi.mock('@/utils/toast', () => ({
-  showToast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
+  showToast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
 }))
 const calendar = vi.hoisted(() => ({
   isMarketOpen: () => true,
@@ -79,7 +79,8 @@ vi.mock('@/components/socket/SocketProvider', () => ({
 
 import OrderBook from '@/pages/OrderBook'
 import { notePushedFrame, resetOrderMemoryForTests } from '@/sudarshan/books/orderFold'
-import { back, pass, renderBook, settle, where } from '@/test/bookPages'
+import { resetSentForTests } from '@/sudarshan/books/sent'
+import { back, openDialog, pass, renderBook, settle, where } from '@/test/bookPages'
 import { fakeClock, frames } from '@/test/frames'
 import { feed } from '@/test/marketDataHarness'
 import { fakeScreen } from '@/test/screenWidth'
@@ -240,6 +241,7 @@ beforeEach(() => {
   feed.reset()
   socket.clear()
   resetOrderMemoryForTests()
+  resetSentForTests()
   theme.appMode = 'live'
   api.getOrders.mockReset()
   api.getMultiQuotes.mockReset().mockResolvedValue({ status: 'success', results: [] })
@@ -304,6 +306,21 @@ describe('Order book on a phone: the cards', () => {
     expect(orderCard('1001').querySelector('[data-tick="up"]')).toHaveTextContent('152.40')
     expect(orderCard('1003')).not.toHaveTextContent('LTP')
     expect(screen.getByText('Real-time')).toBeInTheDocument()
+  })
+
+  it('gives the Orders and GTT tabs 48dp targets on a phone, and leaves the wide ones be', async () => {
+    const view = await renderPhone(WORKING)
+    for (const name of ['Orders', 'GTT']) {
+      expect(screen.getByRole('tab', { name })).toHaveClass('h-12')
+    }
+    expect(screen.getByRole('tablist')).toHaveClass('h-auto')
+    view.unmount()
+
+    fakeScreen('wide')
+    renderBook('/orderbook', <OrderBook />)
+    await settle()
+    expect(screen.getByRole('tab', { name: 'Orders' })).not.toHaveClass('h-12')
+    expect(screen.getByRole('tablist')).toHaveClass('h-10')
   })
 
   it('gives the feed line a row of its own, apart from Refresh and Cancel all', async () => {
@@ -484,6 +501,20 @@ describe('Order book on a phone: the sheet and its actions', () => {
     expect(reason()).toHaveTextContent('Broker says: RMS:Margin Exceeds')
   })
 
+  it('says no reason was given for a pushed rejection whose reason is only the status word', async () => {
+    const tap = user()
+    await renderPhone(UPSTOX_WORKING)
+    push({
+      orderid: '1001',
+      order_status: 'rejected',
+      filled_quantity: 0,
+      rejection_reason: 'rejected',
+    })
+    await tap.click(orderCard('1001'))
+    expect(screen.getByTestId('rejection-reason')).toHaveTextContent('The broker gave no reason.')
+    expect(screen.getByTestId('rejection-reason')).not.toHaveTextContent('Broker says')
+  })
+
   it('offers Modify and Cancel on a working order only: trigger pending yes, complete or cancelled no', async () => {
     const tap = user()
     await renderPhone(STOP, FILLED, CANCELLED)
@@ -504,7 +535,18 @@ describe('Order book on a phone: the sheet and its actions', () => {
 
   it('closes a cancel confirmation once the order has ended, sending nothing', async () => {
     const tap = user()
-    await renderPhone(WORKING)
+    // After every commit: never the confirmation open over an order that has ended.
+    const both: string[] = []
+    const ended = () =>
+      document.querySelector('li[data-order="1001"]')?.getAttribute('data-status') === 'COMPLETE'
+    api.getOrders.mockResolvedValue(book(WORKING))
+    fakeScreen('phone')
+    renderBook('/orderbook', <OrderBook />, undefined, {
+      onCommit: () => {
+        if (ended() && openDialog('Cancel this order?')) both.push(where())
+      },
+    })
+    await settle()
     await tap.click(orderCard('1001'))
     await tap.click(
       within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel order' })
@@ -517,6 +559,9 @@ describe('Order book on a phone: the sheet and its actions', () => {
     await waitFor(() =>
       expect(screen.queryByRole('dialog', { name: 'Cancel this order?' })).toBeNull()
     )
+    // The address leaves the step too: Back from here leaves the page.
+    expect(where()).toBe('/orderbook')
+    expect(both).toEqual([])
     expect(api.cancelOrder).not.toHaveBeenCalled()
   })
 
@@ -705,6 +750,15 @@ describe('Order book on a phone: the sheet and its actions', () => {
     await settle()
     expect(document.querySelector('li[data-order="1001"]')).not.toBeNull()
     expect(priceBox()).toHaveValue(170)
+
+    // Back closes the dialog the trader sees, and the next Back leaves the page.
+    expect(where()).toBe('/orderbook?act=modify&row=1001')
+    back()
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /Modify Order/ })).toBeNull())
+    expect(where()).toBe('/orderbook')
+    back()
+    expect(await screen.findByText('Dashboard page')).toBeInTheDocument()
+    expect(api.modifyOrder).not.toHaveBeenCalled()
   })
 
   it('takes the entry away when the modify dialog closes itself', async () => {

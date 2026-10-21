@@ -24,6 +24,7 @@ import type { TickDirection } from '@/sudarshan/books/prices'
 import { directionOf, formatPercent, formatPrice, formatRupees } from '@/sudarshan/dashboard/format'
 import { TREND_TEXT, TrendArrow } from '@/sudarshan/dashboard/Trend'
 import { PRODUCT_MEANING, type Product } from '@/sudarshan/ticket/productPref'
+import { useOpenGuard } from '@/sudarshan/watchlist/openGuard'
 import { priceDecimals } from '@/sudarshan/watchlist/rows'
 import { type OrderState, sideOf, signedUnits } from './format'
 
@@ -249,6 +250,32 @@ export function SentChip({ label }: { label: string }) {
   )
 }
 
+/** A card's line when no answer came back for its exit or cancel: what to do first. */
+export function SentNote({ text }: { text: string }) {
+  return (
+    <span
+      data-sent="unconfirmed"
+      className="flex items-start gap-1.5 rounded-[0.625rem] bg-[color:var(--gold-tint)] px-2.5 py-1.5 text-xs leading-snug font-semibold text-[color:var(--warning-text)]"
+    >
+      <AlertTriangle aria-hidden="true" className="mt-px size-3.5 shrink-0" />
+      {text}
+    </span>
+  )
+}
+
+/** A confirmation's first line when an earlier order may still be working. */
+export function WarningLine({ text }: { text: string }) {
+  return (
+    <span
+      data-warning="true"
+      className="mb-2 flex items-start gap-1.5 font-semibold text-[color:var(--warning-text)]"
+    >
+      <AlertTriangle aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+      {text}
+    </span>
+  )
+}
+
 /** Refresh as a 48dp icon, for a row with no room for its word. */
 export function RefreshIcon({
   refreshing,
@@ -325,7 +352,10 @@ export function price(value: number | null, exchange: string): string {
  * A yes-or-no step before an order goes out, the watchlist's dialog with 48dp
  * buttons. Its action runs once however fast it is tapped: the dialog stays on
  * screen until Back has taken its entry away, and a second tap in that moment
- * must not send a second order.
+ * must not send a second order. For half a second after it opens it takes no
+ * tap at all (`useOpenGuard`), and its action shows as disabled: on a tall
+ * phone the sheet's Cancel and this dialog's "Cancel order" sit on the same
+ * spot, so the second tap of a double tap on the one lands on the other.
  */
 export function Confirm({
   open,
@@ -348,6 +378,7 @@ export function Confirm({
 }) {
   const [sent, setSent] = useState(false)
   const once = useRef(false)
+  const guard = useOpenGuard(open)
   useEffect(() => {
     if (open) {
       once.current = false
@@ -357,7 +388,12 @@ export function Confirm({
 
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
-      <DialogContent showCloseButton={false} className="rounded-[1.125rem] sm:max-w-sm">
+      <DialogContent
+        {...guard.handlers}
+        data-settling={guard.settling || undefined}
+        showCloseButton={false}
+        className="rounded-[1.125rem] sm:max-w-sm"
+      >
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
@@ -368,7 +404,7 @@ export function Confirm({
           </button>
           <button
             type="button"
-            disabled={sent}
+            disabled={sent || guard.settling}
             onClick={() => {
               if (once.current) return
               once.current = true

@@ -16,6 +16,7 @@ vi.mock('@/lib/MarketDataManager', () => import('@/test/marketDataHarness'))
 const api = vi.hoisted(() => ({
   getPositions: vi.fn(),
   getOrders: vi.fn(),
+  getHoldings: vi.fn(),
   getMultiQuotes: vi.fn(),
   contractOf: vi.fn(),
 }))
@@ -23,6 +24,7 @@ vi.mock('@/api/trading', () => ({
   tradingApi: {
     getPositions: (...args: unknown[]) => api.getPositions(...args),
     getOrders: (...args: unknown[]) => api.getOrders(...args),
+    getHoldings: (...args: unknown[]) => api.getHoldings(...args),
     getMultiQuotes: (...args: unknown[]) => api.getMultiQuotes(...args),
     getQuotes: vi.fn().mockResolvedValue({ status: 'success', data: {} }),
     getDepth: vi.fn().mockResolvedValue({ status: 'success', data: { bids: [], asks: [] } }),
@@ -47,6 +49,14 @@ vi.mock('@/components/trading/PlaceOrderDialog', async () => {
       props.open ? createElement('section', { 'aria-label': 'Order ticket' }, 'ticket') : null,
   }
 })
+// The Holdings page takes its ticket from the folder's index.
+vi.mock('@/components/trading', async () => {
+  const { createElement } = await import('react')
+  return {
+    PlaceOrderDialog: (props: Record<string, unknown>) =>
+      props.open ? createElement('section', { 'aria-label': 'Order ticket' }, 'ticket') : null,
+  }
+})
 vi.mock('@/stores/authStore', () => ({
   useAuthStore: () => ({ apiKey: 'test-api-key', user: { broker: 'upstox' } }),
 }))
@@ -58,7 +68,7 @@ vi.mock('@/hooks/useSupportedExchanges', () => ({
   useSupportedExchanges: () => ({ isCrypto: false }),
 }))
 vi.mock('@/utils/toast', () => ({
-  showToast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
+  showToast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
 }))
 vi.mock('@/hooks/useMarketStatus', () => ({
   useMarketStatus: () => ({
@@ -75,7 +85,7 @@ vi.mock('@/components/socket/SocketProvider', () => ({
   }),
 }))
 
-import { entryHere, renderBook, settle, where } from '@/test/bookPages'
+import { back, entryHere, renderBook, settle, where } from '@/test/bookPages'
 import { fakeClock, frames } from '@/test/frames'
 import { fakeScreen } from '@/test/screenWidth'
 
@@ -106,14 +116,31 @@ const ORDER = {
   timestamp: '2026-10-20 10:41:51',
 }
 
-type Book = 'positions' | 'orderbook'
+const HOLDING = {
+  symbol: 'RELIANCE',
+  exchange: 'NSE',
+  product: 'CNC',
+  quantity: 40,
+  average_price: 1374.3,
+  ltp: 1452.3,
+  pnl: 3120,
+  pnlpercent: 5.67,
+}
+
+type Book = 'positions' | 'orderbook' | 'holdings'
 
 /** The page as a fresh load of the app has it: every module evaluated again. */
 async function freshPage(book: Book): Promise<ReactElement> {
   vi.resetModules()
+  // The fresh module graph has its own tap guard; these tests tap at once.
+  ;(await import('@/sudarshan/watchlist/openGuard')).OPEN_GUARD.ms = 0
   if (book === 'positions') {
     const { default: Positions } = await import('@/pages/Positions')
     return <Positions />
+  }
+  if (book === 'holdings') {
+    const { default: Holdings } = await import('@/pages/Holdings')
+    return <Holdings />
   }
   const { default: OrderBook } = await import('@/pages/OrderBook')
   return <OrderBook />
@@ -127,7 +154,9 @@ const sheet = () => screen.getByRole('dialog')
 const card = (book: Book) =>
   book === 'positions'
     ? screen.getByRole('button', { name: /NIFTY 25900 CE/ })
-    : within(document.querySelector('li[data-order="1001"]') as HTMLElement).getByRole('button')
+    : book === 'holdings'
+      ? screen.getByRole('button', { name: /RELIANCE/ })
+      : within(document.querySelector('li[data-order="1001"]') as HTMLElement).getByRole('button')
 
 /** How each step is opened, by taps, on the first load. */
 const STEPS: Record<string, { book: Book; open: (tap: ReturnType<typeof user>) => Promise<void> }> =
@@ -170,6 +199,20 @@ const STEPS: Record<string, { book: Book; open: (tap: ReturnType<typeof user>) =
         await tap.click(within(sheet()).getByRole('button', { name: 'Modify' }))
       },
     },
+    'the Buy more ticket': {
+      book: 'holdings',
+      open: async (tap) => {
+        await tap.click(card('holdings'))
+        await tap.click(within(sheet()).getByRole('button', { name: 'Buy more' }))
+      },
+    },
+    'the Sell ticket': {
+      book: 'holdings',
+      open: async (tap) => {
+        await tap.click(card('holdings'))
+        await tap.click(within(sheet()).getByRole('button', { name: 'Sell' }))
+      },
+    },
   }
 
 function nothingOpen() {
@@ -181,10 +224,24 @@ beforeEach(() => {
   fakeClock()
   frames.install()
   fakeScreen('phone')
+  // What the tab kept from the last test's sends: each fresh load reads it.
+  sessionStorage.clear()
   api.getPositions.mockReset().mockResolvedValue({ status: 'success', data: [POSITION] })
   api.getOrders.mockReset().mockResolvedValue({
     status: 'success',
     data: { orders: [ORDER], statistics: {} },
+  })
+  api.getHoldings.mockReset().mockResolvedValue({
+    status: 'success',
+    data: {
+      holdings: [HOLDING],
+      statistics: {
+        totalholdingvalue: 58092,
+        totalinvvalue: 54972,
+        totalprofitandloss: 3120,
+        totalpnlpercentage: 5.67,
+      },
+    },
   })
   api.getMultiQuotes.mockReset().mockResolvedValue({ status: 'success', results: [] })
   api.contractOf.mockReset().mockResolvedValue({ lotSize: 65, tickSize: 0.05 })
@@ -201,14 +258,17 @@ describe('a reload with a step open', () => {
     const page = await freshPage('positions')
     renderBook('/positions', page, [
       '/dashboard',
+      '/positions',
       { pathname: '/positions', search: '?act=exitall', state: { sdOverlay: true, sdVisit: 'v1' } },
     ])
     await settle()
     expect(screen.queryByRole('dialog', { name: 'Exit all positions?' })).toBeNull()
     await waitFor(() => expect(where()).toBe('/positions'))
+    back()
+    expect(screen.getByText('Dashboard page')).toBeInTheDocument()
   })
 
-  it.each(Object.keys(STEPS))('does not open %s again by itself', async (name) => {
+  it.each(Object.keys(STEPS))('does not open %s again by itself; Back leaves', async (name) => {
     const { book, open } = STEPS[name]
     const path = `/${book}`
     const tap = user()
@@ -220,13 +280,27 @@ describe('a reload with a step open', () => {
     const restored = entryHere()
     first.unmount()
 
-    renderBook(path, await freshPage(book), ['/dashboard', restored])
+    // The tab comes back on the step's entry, the cards' entry under it. After
+    // every commit: nothing open, not even for one frame.
+    const shown: string[] = []
+    renderBook(path, await freshPage(book), ['/dashboard', path, restored], {
+      onCommit: () => {
+        const open =
+          document.querySelector('[role="dialog"][data-state="open"]') ??
+          document.querySelector('[aria-label="Order ticket"]')
+        if (open) shown.push(open.textContent?.slice(0, 40) ?? 'something')
+      },
+    })
     await settle()
     await act(async () => {
       await vi.advanceTimersByTimeAsync(100)
     })
     nothingOpen()
+    expect(shown).toEqual([])
     await waitFor(() => expect(where()).toBe(path))
     expect(card(book)).toBeInTheDocument()
+    // Every Back closes something or leaves: here, nothing is open, so it leaves.
+    back()
+    expect(screen.getByText('Dashboard page')).toBeInTheDocument()
   })
 })

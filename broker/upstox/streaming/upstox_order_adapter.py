@@ -49,6 +49,17 @@ _STATUS_MAP = {
 _PRODUCT_MAP = {"D": "CNC", "I": "MIS"}
 
 
+def _rejection_reason(data: dict) -> str:
+    """SUDARSHAN M6.9: Upstox's own words for a rejection, or none at all.
+
+    Never the status word: falling back to it put "Broker says: rejected" on the
+    phone's order sheet and in its alerts, which says nothing and reads as a reason.
+    """
+    reason = str(data.get("status_message") or "").strip()
+    status = str(data.get("status") or "").strip().lower()
+    return "" if reason.lower() in _STATUS_MAP or reason.lower() == status else reason
+
+
 class UpstoxOrderUpdateAdapter(BaseOrderUpdateAdapter):
     """Dedicated order-update WebSocket adapter for Upstox."""
 
@@ -140,11 +151,7 @@ class UpstoxOrderUpdateAdapter(BaseOrderUpdateAdapter):
             "filled_quantity": filled_quantity,
             "pending_quantity": int(data.get("pending_quantity") or max(quantity - filled_quantity, 0)),
             "average_price": float(data.get("average_price") or 0),
-            "rejection_reason": (
-                data.get("status_message") or data.get("status", "")
-            )
-            if order_status == "rejected"
-            else "",
+            "rejection_reason": _rejection_reason(data) if order_status == "rejected" else "",
         }
 
 

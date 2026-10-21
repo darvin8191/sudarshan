@@ -92,6 +92,25 @@ describe('a confirmation tapped twice in the same moment', () => {
     })
     expect(onConfirm).toHaveBeenCalledTimes(1)
   })
+
+  it('shows its action as disabled once tapped, while it is still on screen', () => {
+    const onConfirm = vi.fn()
+    render(
+      <Confirm
+        open
+        title="Exit NIFTY 25900 CE?"
+        description="Sells 65 (MIS) at market price."
+        confirmLabel="Exit"
+        onConfirm={onConfirm}
+        onClose={() => {}}
+      />
+    )
+    const button = screen.getByRole('button', { name: 'Exit' })
+    expect(button).toBeEnabled()
+    act(() => button.click())
+    expect(button).toBeDisabled()
+    expect(onConfirm).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('Refresh while a read is under way', () => {

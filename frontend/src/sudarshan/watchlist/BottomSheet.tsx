@@ -2,6 +2,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import { X } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { cn } from '@/lib/utils'
+import { useOpenGuard } from './openGuard'
 
 /**
  * A sheet that rises from the bottom of a phone screen: a modal dialog (focus
@@ -9,6 +10,10 @@ import { cn } from '@/lib/utils'
  * white card, an 18px top radius and a 48dp close button. On a wider screen it
  * sits centred at the bottom. It fades in over 160 ms and does not slide
  * (minimal motion); with reduced motion it simply appears.
+ *
+ * For half a second after it opens, its contents ignore a tap (`useOpenGuard`):
+ * the second tap of a double tap on whatever opened it lands on the sheet, on
+ * its Chart, its Add or its Cancel, and must not set off what sits there.
  */
 export function BottomSheet({
   open,
@@ -28,11 +33,14 @@ export function BottomSheet({
   children: ReactNode
   className?: string
 }) {
+  const guard = useOpenGuard(open)
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 animate-[sd-fade-in_160ms_ease-out] bg-black/40" />
         <Dialog.Content
+          {...guard.handlers}
+          data-settling={guard.settling || undefined}
           className={cn(
             'fixed inset-x-0 bottom-0 z-50 flex max-h-[92dvh] animate-[sd-fade-in_160ms_ease-out] flex-col rounded-t-[1.125rem] border-t bg-card pb-[env(safe-area-inset-bottom)] shadow-[0_-8px_30px_rgb(16_24_40/0.12)] outline-none',
             'md:inset-x-auto md:left-1/2 md:w-[30rem] md:-translate-x-1/2 md:border-x',

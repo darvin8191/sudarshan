@@ -40,7 +40,7 @@ vi.mock('@/stores/themeStore', () => ({
   useThemeStore: (pick: (state: { appMode: string }) => unknown) => pick(theme),
 }))
 vi.mock('@/utils/toast', () => ({
-  showToast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
+  showToast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
 }))
 
 /** How often the page itself renders: it asks for the supported exchanges once a render. */
@@ -114,7 +114,8 @@ vi.mock('@/components/trading/PlaceOrderDialog', async () => {
 })
 
 import Positions from '@/pages/Positions'
-import { back, frame, pass, renderBook, settle, where } from '@/test/bookPages'
+import { resetSentForTests } from '@/sudarshan/books/sent'
+import { back, frame, openDialog, pass, renderBook, settle, where } from '@/test/bookPages'
 import { fakeClock, frames } from '@/test/frames'
 import { feed } from '@/test/marketDataHarness'
 import { fakeScreen } from '@/test/screenWidth'
@@ -225,6 +226,11 @@ function card(name: RegExp) {
   return screen.getByRole('button', { name })
 }
 
+/** The NIFTY call's card among the closed ones, once the book says it is closed. */
+function closedCall() {
+  return document.querySelector(`li[data-position="NFO:${CALL}:MIS"][data-closed]`)
+}
+
 async function renderPhone(...positions: Position[]) {
   api.getPositions.mockResolvedValue(book(...positions))
   fakeScreen('phone')
@@ -238,6 +244,7 @@ function user() {
 
 beforeEach(() => {
   fakeClock()
+  resetSentForTests()
   theme.appMode = 'live'
   frames.install()
   feed.reset()
@@ -586,7 +593,16 @@ describe('Positions on a phone: the sheet and its actions', () => {
 
   it('closes an exit confirmation once the book shows the position closed, sending nothing', async () => {
     const tap = user()
-    await renderPhone(LONG, SHORT)
+    // After every commit: never the confirmation open over the closed position.
+    const both: string[] = []
+    api.getPositions.mockResolvedValue(book(LONG, SHORT))
+    fakeScreen('phone')
+    renderBook('/positions', <Positions />, undefined, {
+      onCommit: () => {
+        if (closedCall() && openDialog('Exit NIFTY 25900 CE?')) both.push(where())
+      },
+    })
+    await settle()
     await tap.click(card(/NIFTY 25900 CE/))
     await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: /^Exit/ }))
     expect(screen.getByRole('dialog', { name: 'Exit NIFTY 25900 CE?' })).toBeInTheDocument()
@@ -601,7 +617,40 @@ describe('Positions on a phone: the sheet and its actions', () => {
     await waitFor(() =>
       expect(screen.queryByRole('dialog', { name: 'Exit NIFTY 25900 CE?' })).toBeNull()
     )
+    // The address leaves the step too: Back from here leaves the page.
+    expect(where()).toBe('/positions')
+    expect(both).toEqual([])
     expect(api.closePosition).not.toHaveBeenCalled()
+  })
+
+  it('closes the Add ticket once the book shows the position closed, its address too', async () => {
+    const tap = user()
+    const ticket = () => screen.queryByRole('region', { name: 'Order ticket' })
+    const both: string[] = []
+    api.getPositions.mockResolvedValue(book(LONG, SHORT))
+    fakeScreen('phone')
+    renderBook('/positions', <Positions />, undefined, {
+      onCommit: () => {
+        if (closedCall() && ticket()) both.push(where())
+      },
+    })
+    await settle()
+    await tap.click(card(/NIFTY 25900 CE/))
+    const add = within(screen.getByRole('dialog')).getByRole('button', { name: /^Add/ })
+    await waitFor(() => expect(add).toBeEnabled())
+    await tap.click(add)
+    expect(ticket()).toBeInTheDocument()
+    expect(where()).toContain('act=add')
+
+    api.getPositions.mockResolvedValue(book({ ...LONG, quantity: 0, pnl: 650 } as Position, SHORT))
+    act(() =>
+      socket.fire('order_update', { mode: 'live', orderid: 'x1', order_status: 'complete' })
+    )
+    await pass(3_000)
+    await settle()
+    await waitFor(() => expect(ticket()).toBeNull())
+    expect(where()).toBe('/positions')
+    expect(both).toEqual([])
   })
 
   it('makes the same call as the wide table’s close button', async () => {
@@ -616,6 +665,8 @@ describe('Positions on a phone: the sheet and its actions', () => {
     wide.unmount()
     vi.restoreAllMocks()
     api.closePosition.mockClear()
+    // The table's exit holds the phone's too (sentExits.test.tsx); this compares the calls.
+    resetSentForTests()
     await renderPhone(SHORT)
     await tap.click(card(/BANKNIFTY 57500 PE/))
     await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: /^Exit/ }))

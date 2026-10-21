@@ -54,6 +54,18 @@ TRIGGER_SETTLE_S = 3.0
 #: Stop orders waiting out TRIGGER_SETTLE_S, at most (beyond it the oldest is not reported).
 MAX_WAITING_TRIGGERS = 200
 _STOP_TYPES = {"SL", "SL-M", "SLM", ""}
+#: Status words, which some feeds put where a rejection's reason goes: no reason at all.
+_STATUS_WORDS = {
+    "open",
+    "pending",
+    "trigger pending",
+    "complete",
+    "completed",
+    "rejected",
+    "failed",
+    "cancelled",
+    "canceled",
+}
 
 
 @dataclass(frozen=True)
@@ -134,8 +146,14 @@ def parse(message: dict) -> OrderUpdate | None:
         trigger_price=_float(message.get("trigger_price")),
         pricetype=str(message.get("pricetype") or ""),
         product=str(message.get("product") or ""),
-        reason=str(message.get("rejection_reason") or ""),
+        reason=_reason(message.get("rejection_reason")),
     )
+
+
+def _reason(value) -> str:
+    """A rejection's reason as given, or none when it is empty or only a status word."""
+    reason = str(value or "").strip()
+    return "" if " ".join(reason.lower().split()) in _STATUS_WORDS else reason
 
 
 def classify(update: OrderUpdate, cancelled: str) -> tuple[str, int] | None:

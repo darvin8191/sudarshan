@@ -3,7 +3,7 @@ import { type AlertCategories, useAlertStore } from '@/stores/alertStore'
 import { formatAmount, formatRupees } from '@/sudarshan/dashboard/format'
 import { showToast } from '@/utils/toast'
 import { type ChimeKind, playChime, unlockSoundOnFirstTap } from './chime'
-import { cancelAllTargets, notePushedFrame } from './orderFold'
+import { cancelAllTargets, notePushedFrame, reasonOf } from './orderFold'
 import { istTime } from './time'
 
 /**
@@ -106,7 +106,7 @@ export function describeOrderUpdate(frame: OrderUpdateFrame): OrderAlert | null 
   } else if (REFUSED.has(status)) {
     kind = 'rejected'
     title = `Rejected · ${order(true)}`
-    const reason = text(frame.rejection_reason)
+    const reason = reasonOf(frame.rejection_reason)
     const who = sandbox ? 'Sandbox' : 'Broker'
     description = reason ? `${who} says: ${reason}` : `The ${who.toLowerCase()} gave no reason.`
   } else if (OFF.has(status)) {
