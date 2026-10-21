@@ -1,12 +1,15 @@
 import { useQuery } from '@tanstack/react-query'
 import { CandlestickChart, LogOut, Plus } from 'lucide-react'
-import { memo, type ReactNode, useCallback, useEffect, useRef } from 'react'
+import { memo, type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { PlaceOrderDialog } from '@/components/trading/PlaceOrderDialog'
 import { cn } from '@/lib/utils'
+import { useExitOrderReads } from '@/sudarshan/books/exitOrders'
 import { type FeedRow, useBookFeed } from '@/sudarshan/books/feed'
+import { isFinalStatus } from '@/sudarshan/books/orderFold'
 import type { TickDirection } from '@/sudarshan/books/prices'
 import {
   exitMark,
+  exitOrderStatuses,
   isHeld,
   marksOf,
   noteExitBook,
@@ -122,12 +125,30 @@ function exitTarget(position: Position): SendTarget {
   }
 }
 
+/**
+ * An exit held by its own order, still working: what its card and its sheet's
+ * Exit say. Where it wraps, it wraps at the dot ("check Orders" stays whole).
+ */
+export const EXIT_ORDER_OPEN = 'Exit order open\u00a0· check\u00a0Orders'
+
 /** How an exit still held reads: on its card, in its note, and on its sheet's Exit. */
 export function exitWords(
   mark: SentMark | undefined
 ): { chip: string | null; note: string | null; button: string } | null {
   if (!isHeld(mark)) return null
   if (mark.state === 'sending') return { chip: 'Sending exit', note: null, button: 'Sending exit' }
+  // Its time is up, and only its own order, still working, holds it.
+  if (mark.byOrder) {
+    return { chip: EXIT_ORDER_OPEN, note: null, button: EXIT_ORDER_OPEN }
+  }
+  if (mark.state === 'unconfirmed' && mark.noAnswer) {
+    // The server may still be placing it: Orders may not show it yet.
+    return {
+      chip: null,
+      note: 'No answer yet: it may still be going through',
+      button: 'No answer yet',
+    }
+  }
   if (mark.state === 'unconfirmed') {
     return {
       chip: null,
@@ -142,15 +163,55 @@ export function exitWords(
   return { chip: words, note: null, button: words }
 }
 
-/** What a confirmation says first when an earlier exit's time ran out unseen. */
+/**
+ * What a confirmation says first when an earlier exit's time ran out with the
+ * position still open: what became of that exit, as far as the book and its
+ * own orders (pushed or read) say, and what this one would do.
+ */
 export function exitWarning(mark: SentMark | undefined): string | null {
   if (!mark?.expired) return null
   const at = istTime(mark.sentAt)
-  const earlier =
-    mark.state === 'unconfirmed'
+  const was = Math.abs(mark.was ?? 0)
+  const left = Math.abs(mark.seen ?? was)
+  const closed = left > 0 && left < was ? `${units(was - left)} of ${units(was)}` : null
+  const statuses = exitOrderStatuses(mark)
+  const ended = statuses.find((status) => status === 'rejected' || status === 'cancelled')
+  const working = statuses.some((status) => !isFinalStatus(status))
+  if (ended && !working) {
+    return closed
+      ? `The exit sent at ${at} closed ${closed}, and Orders shows the rest ${ended}. This sends an exit for the ${units(left)} left.`
+      : `Orders shows the exit sent at ${at} ${ended}: it closed nothing. This sends a new exit.`
+  }
+  if (closed) {
+    return `The exit sent at ${at} has closed ${closed} so far. If the rest is still open in Orders, this sends a second order for it.`
+  }
+  if (statuses.includes('complete') && !working) {
+    return `Orders shows the exit sent at ${at} filled, but the book still shows this position. Check Positions first: a second exit would turn it the other way.`
+  }
+  const earlier = mark.noAnswer
+    ? `The exit sent at ${at} got no answer and has not shown in the book yet.`
+    : mark.state === 'unconfirmed'
       ? `The exit sent at ${at} was not confirmed and has not shown in the book yet.`
       : `The exit sent at ${at} has not shown in the book yet.`
   return `${earlier} If that order is still open in Orders, this sends a second one.`
+}
+
+/** Why a tap on Exit sends nothing: its position's exit is still held. */
+export function heldWhy(mark: SentMark): string {
+  const name = describe(mark.symbol, mark.exchange).title
+  const at = istTime(mark.sentAt)
+  if (mark.state === 'sending') {
+    return `An exit for ${name} is still being sent. Wait for its answer before sending another.`
+  }
+  const was = Math.abs(mark.was ?? 0)
+  const left = Math.abs(mark.seen ?? was)
+  let where = 'has not shown in the book yet'
+  if (mark.byOrder) where = 'its order is still open'
+  else if (left > 0 && left < was) where = `has closed ${units(was - left)} of ${units(was)} so far`
+  else if (mark.noAnswer) {
+    return `An exit for ${name} was sent at ${at} and no answer has come yet: it may still be going through. Wait for Positions or Orders to show it before sending another.`
+  } else if (mark.state === 'unconfirmed') where = 'is not confirmed'
+  return `An exit for ${name} was sent at ${at} and ${where}. Check Orders before sending another.`
 }
 
 /** P&L booked today: the broker's realised figure; all of it, for a closed position. */
@@ -287,21 +348,10 @@ const PositionBoard = memo(function PositionBoard({
 
   // An exit sent holds the position's Exit (and Exit all) app-wide until the
   // book shows it closed (books/sent.ts): the broker's book can lag the order,
-  // and a second exit sized from it would reverse the position.
+  // and a second exit sized from it would reverse the position. The page tells
+  // the hold every book it reads (usePositionExits).
   const marks = useSentMarks()
   const exits = marksOf(marks, 'exit', sandbox)
-  // Each book read tells the exits sent in the book it was read from (a mode
-  // switch alone changes nothing until the other book has been read).
-  const bookMode = useRef({ at: bookAt, sandbox })
-  useEffect(() => {
-    if (bookMode.current.at !== bookAt) bookMode.current = { at: bookAt, sandbox }
-    if (loading || bookAt === null) return
-    noteExitBook(
-      bookMode.current.sandbox,
-      positions.map((position) => ({ id: positionId(position), quantity: quantityOf(position) })),
-      bookAt
-    )
-  }, [positions, bookAt, loading, sandbox])
 
   const total = rows.reduce((sum, row) => sum + (row.pnl ?? 0), 0)
   const figuresStale = (line.kind === 'delayed' || line.kind === 'connecting') && line.stale
@@ -442,7 +492,7 @@ const PositionBoard = memo(function PositionBoard({
           exitShown ? (
             <>
               {exitEarlier && <WarningLine text={exitEarlier} />}
-              {`${sideOf(quantityOf(exitShown.item)) === 'SHORT' ? 'Buys' : 'Sells'} ${units(Math.abs(quantityOf(exitShown.item)))} (${exitShown.item.product}) at market price${sandbox ? ' in the sandbox' : ''} to close this position. ${sandbox ? SANDBOX_SENTENCE : 'This cannot be undone.'}`}
+              {exitSentence(exitShown.item, sandbox)}
             </>
           ) : (
             ''
@@ -454,7 +504,10 @@ const PositionBoard = memo(function PositionBoard({
         onConfirm={() => {
           if (!exiting) return
           const { item } = exiting
-          if (isHeld(exitMark(sentMarksNow(), sandbox, positionId(item)))) return
+          const mark = exitMark(sentMarksNow(), sandbox, positionId(item))
+          // Held since this opened (the book showed the earlier exit working again):
+          // nothing is sent, and the toast says why.
+          if (isHeld(mark)) return void showToast.warning(heldWhy(mark), 'positions')
           void sendHeld('exit', sandbox, [exitTarget(item)], () => onExit(item))
         }}
         onClose={close}
@@ -471,7 +524,8 @@ const PositionBoard = memo(function PositionBoard({
         }
         confirmLabel="Exit all"
         onConfirm={() => {
-          if (marksOf(sentMarksNow(), 'exit', sandbox).some(isHeld)) return
+          const first = marksOf(sentMarksNow(), 'exit', sandbox).find(isHeld)
+          if (first) return void showToast.warning(heldWhy(first), 'positions')
           void sendHeld(
             'exit',
             sandbox,
@@ -900,35 +954,149 @@ function AddTicket({
   )
 }
 
+/** What an exit sends, as its confirmation says it. */
+function exitSentence(position: Position, sandbox: boolean): string {
+  const quantity = quantityOf(position)
+  return `${sideOf(quantity) === 'SHORT' ? 'Buys' : 'Sells'} ${units(Math.abs(quantity))} (${position.product}) at market price${sandbox ? ' in the sandbox' : ''} to close this position. ${sandbox ? SANDBOX_SENTENCE : 'This cannot be undone.'}`
+}
+
 /**
- * The wide table's Close and Close All on the Positions page, held as the
- * phone's Exit is (M6.9): a phone turned on its side shows the table, and its
- * Close must not send a second exit while the first has not shown in the book.
- * A tap on a held one sends nothing and says why.
+ * The Positions page's side of the exit hold (M6.9), on a phone and on a wide
+ * screen alike: every book the page reads is told to the hold, an exit waiting
+ * on its own order has the order book read for it (exitOrders.ts), and the
+ * wide table's Close and Close All are held as the phone's Exit is (a phone
+ * turned on its side shows the table). A tap on a held one sends nothing and
+ * says why; Close offered again after an earlier exit's time ran out asks
+ * first, with the same warning the phone's confirmation shows, and so does
+ * Close All (`allWarning`, for the page's own confirmation). The page renders
+ * `dialog`.
  */
-export function useTableExits(
-  onClose: (position: Position) => unknown,
-  onCloseAll: () => unknown,
+export function usePositionExits({
+  onClose,
+  onCloseAll,
+  positions,
+  bookAt,
+  loading,
+  apiKey,
+}: {
+  onClose: (position: Position) => unknown
+  onCloseAll: () => unknown
   positions: Position[]
-): { close: (position: Position) => void; closeAll: () => void } {
+  /** When the shown book was asked for. */
+  bookAt: number | null
+  loading: boolean
+  apiKey: string | null
+}): {
+  close: (position: Position) => void
+  closeAll: () => void
+  allWarning: string | null
+  dialog: ReactNode
+} {
   const sandbox = useSandbox()
-  const refuse = (mark: SentMark) =>
-    showToast.warning(
-      `An exit for ${describe(mark.symbol, mark.exchange).title} was sent at ${istTime(mark.sentAt)} and ${mark.state === 'unconfirmed' ? 'is not confirmed' : 'has not shown in the book yet'}. Check Orders before sending another.`,
-      'positions'
+  const marks = useSentMarks()
+  // The position Close asks about first, by its place: the book can change under the dialog.
+  const [asking, setAsking] = useState<string | null>(null)
+
+  // Each book read tells the exits sent in the book it was read from (a mode
+  // switch alone changes nothing until the other book has been read).
+  const bookMode = useRef({ at: bookAt, sandbox })
+  useEffect(() => {
+    if (bookMode.current.at !== bookAt) bookMode.current = { at: bookAt, sandbox }
+    if (loading || bookAt === null) return
+    noteExitBook(
+      bookMode.current.sandbox,
+      positions.map((position) => ({ id: positionId(position), quantity: quantityOf(position) })),
+      bookAt
     )
+  }, [positions, bookAt, loading, sandbox])
+  useExitOrderReads(sandbox, apiKey)
+
+  const refuse = (mark: SentMark) => showToast.warning(heldWhy(mark), 'positions')
+  const send = (position: Position) =>
+    void sendHeld('exit', sandbox, [exitTarget(position)], () => onClose(position))
+  const open = positions.filter((position) => quantityOf(position) !== 0)
+  const allWarning = exitWarning(
+    marksOf(marks, 'exit', sandbox)
+      .filter((mark) => mark.expired && open.some((position) => positionId(position) === mark.id))
+      .sort((a, b) => b.sentAt - a.sentAt)[0]
+  )
+  // Closed, or gone from the book, while it asked: nothing left to close.
+  const askedPosition = open.find((position) => positionId(position) === asking) ?? null
+  useEffect(() => {
+    if (asking !== null && askedPosition === null && !loading) setAsking(null)
+  }, [asking, askedPosition, loading])
+  const asked = asking ? exitMark(marks, sandbox, asking) : undefined
+
   return {
     close: (position) => {
       const mark = exitMark(sentMarksNow(), sandbox, positionId(position))
-      if (isHeld(mark)) return refuse(mark)
-      void sendHeld('exit', sandbox, [exitTarget(position)], () => onClose(position))
+      if (mark && !mark.expired) return refuse(mark)
+      // An earlier exit's time ran out unseen: ask first, saying what is known of it.
+      if (mark) return setAsking(positionId(position))
+      send(position)
     },
     // Held while any exit is, as the phone's Exit all is: it sizes from the same book.
     closeAll: () => {
       const first = marksOf(sentMarksNow(), 'exit', sandbox).find(isHeld)
       if (first) return refuse(first)
-      const open = positions.filter((position) => quantityOf(position) !== 0)
       void sendHeld('exit', sandbox, open.map(exitTarget), () => onCloseAll())
     },
+    allWarning,
+    dialog: (
+      <TableExitConfirm
+        position={askedPosition}
+        warning={exitWarning(asked)}
+        sandbox={sandbox}
+        onConfirm={(position) => {
+          const mark = exitMark(sentMarksNow(), sandbox, positionId(position))
+          if (isHeld(mark)) return refuse(mark)
+          send(position)
+        }}
+        onClose={() => setAsking(null)}
+      />
+    ),
   }
+}
+
+/** The wide table's Close, asked first because an earlier exit's time ran out unseen. */
+function TableExitConfirm({
+  position,
+  warning,
+  sandbox,
+  onConfirm,
+  onClose,
+}: {
+  position: Position | null
+  warning: string | null
+  sandbox: boolean
+  onConfirm: (position: Position) => void
+  onClose: () => void
+}) {
+  const shown = useHeld(position)
+  // Gone with the table (the phone turned upright): never reopened by a turn back.
+  const close = useLatest(onClose)
+  useEffect(() => () => close(), [close])
+  return (
+    <Confirm
+      open={position !== null}
+      title={`Close ${shown ? describe(shown.symbol, shown.exchange).title : ''}?`}
+      description={
+        shown ? (
+          <>
+            {warning && <WarningLine text={warning} />}
+            {exitSentence(shown, sandbox)}
+          </>
+        ) : (
+          ''
+        )
+      }
+      cancelLabel="Keep it"
+      confirmLabel="Close"
+      confirmClassName={shown && quantityOf(shown) < 0 ? BUY_FILL : SELL_FILL}
+      onConfirm={() => {
+        if (position) onConfirm(position)
+      }}
+      onClose={onClose}
+    />
+  )
 }

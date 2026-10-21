@@ -389,6 +389,17 @@ html[data-cvd='1'] {
 }
 
 /* -----------------------------------------------------------------------------
+   A sheet, a confirmation or the order ticket that has just opened (M6.9)
+   -----------------------------------------------------------------------------
+   For half a second a tap on it does nothing (watchlist/openGuard.ts: the tail
+   of the double tap that opened it), so its controls look it, as a disabled
+   one does, and come up the moment they work.
+   ----------------------------------------------------------------------------- */
+[data-settling] :is(button, a[href], input, select, textarea) {
+  opacity: 0.5;
+}
+
+/* -----------------------------------------------------------------------------
    Motion (M1.21)
    -----------------------------------------------------------------------------
    Minimal: no colour flash on ticks, no pulsing live dots, and what has to

@@ -28,6 +28,8 @@ type ToastType = 'success' | 'error' | 'warning' | 'info'
 interface ToastOptions {
   duration?: number
   description?: string
+  // SUDARSHAN M6.9: one toast for one result, whichever of its senders speaks first.
+  id?: string | number
 }
 
 /**

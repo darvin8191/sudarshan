@@ -625,6 +625,45 @@ describe('Historify on the shared connection', () => {
     expect(toasts.success).toHaveBeenCalledWith('BUY Order Placed for Symbol: SBIN, Order ID: 42')
   })
 
+  it('shows an Exit all that did not close everything as such, never as a success', async () => {
+    // SUDARSHAN M6.9: the event carries its own status; the toast is the one the Positions
+    // page's answer to the same Exit all shows, so the result shows once.
+    renderHistorify()
+    const socket = onlySocket()
+    const once = { id: 'sudarshan-exit-all-result' }
+
+    act(() => {
+      socket.fire('close_position_event', {
+        status: 'error',
+        message: 'Nothing was sent: the positions could not be read from Upstox.',
+        mode: 'live',
+      })
+    })
+    expect(toasts.error).toHaveBeenCalledWith(
+      'Nothing was sent: the positions could not be read from Upstox.',
+      once
+    )
+    act(() => {
+      socket.fire('close_position_event', {
+        status: 'error',
+        not_confirmed: true,
+        message: 'Exit all did not close every position.',
+        mode: 'live',
+      })
+    })
+    expect(toasts.warning).toHaveBeenCalledWith('Exit all did not close every position.', once)
+    expect(toasts.success).not.toHaveBeenCalled()
+
+    act(() => {
+      socket.fire('close_position_event', {
+        status: 'success',
+        message: 'All Open Positions Squared Off',
+        mode: 'live',
+      })
+    })
+    expect(toasts.success).toHaveBeenCalledWith('All Open Positions Squared Off')
+  })
+
   it('still reports a cancelled download job', async () => {
     renderHistorify()
     const socket = onlySocket()

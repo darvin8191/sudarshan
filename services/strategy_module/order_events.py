@@ -542,6 +542,11 @@ def _cancel_working_retry(run_id: int, retry_order_id: int) -> bool:
     if result is not None and result.ok:
         return True
 
+    # SUDARSHAN M6.9: the reason is its own sentence. A cancel's answer can be a full
+    # sentence already ("This cancel is not confirmed: ... again."), which read as
+    # "because This cancel ... again.. Its position" inside the old clause.
+    reason = str(error).strip().rstrip(".") or "the broker refused cancellation"
+    reason = reason[0].upper() + reason[1:]
     try:
         store.record_event(
             strategy_id,
@@ -549,7 +554,7 @@ def _cancel_working_retry(run_id: int, retry_order_id: int) -> bool:
             "run_stop_failed" if stop_pending else "leg_exit_rejected",
             (
                 f"A higher fill correction made retry order {broker_order_id} too large, "
-                f"but it could not be cancelled because {error}. Its position remains managed; "
+                f"and cancelling it did not succeed. {reason}. Its position remains managed; "
                 "verify the broker order immediately to prevent reversal."
             ),
             run_id=run_id,

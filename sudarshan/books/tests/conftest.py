@@ -1,14 +1,15 @@
-"""Fixtures for the tests of SUDARSHAN's edits to OpenAlgo's book mappings (M6.9).
+"""Fixtures for the tests of SUDARSHAN's edits to OpenAlgo for the phone books (M6.9).
 
 There is no `sudarshan-books` service: the phone's book cards are in the frontend
-(`frontend/src/sudarshan/books/cards/`), and the code under test here is OpenAlgo's Upstox book
-mapping (`broker/upstox/mapping/order_data.py`), where the SUDARSHAN block is marked. The tests
-live here because SUDARSHAN CI runs only `sudarshan/`.
+(`frontend/src/sudarshan/books/cards/`), and the code under test here is OpenAlgo's, where the
+SUDARSHAN blocks are marked: the Upstox book mapping and order stream, and what the close and
+cancel routes answer. The tests live here because SUDARSHAN CI runs only `sudarshan/`.
 
 OpenAlgo's modules read their settings when they are imported, so the environment is made safe
 here, before any of them can be, and python-dotenv is disabled so an operator's .env is never
-read into a test (the same guards as the proxy tests). No test here opens a database, a port or a
-broker connection.
+read into a test (the same guards as the proxy tests). No test here opens a port or a broker
+connection; the route tests (test_books_exit_answers.py) record their latency in a throwaway
+database under the temporary folder above.
 """
 
 from __future__ import annotations

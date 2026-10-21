@@ -252,16 +252,23 @@ describe('g: a cancel sent', () => {
     expect((await sheetButtons(tap)).offered).toBe(true)
   })
 
-  it('with no answer is held as not confirmed, and no toast says it failed', async () => {
+  it('with no answer is held 150 s from the tap, and no toast says it failed', async () => {
     const tap = user()
     api.cancelOrder.mockRejectedValueOnce(new AxiosError('Network Error', AxiosError.ERR_NETWORK))
     await open(WORKING)
     await cancelOnce(tap)
     expect((await sheetButtons(tap)).offered).toBe(false)
-    expect(orderCard()).toHaveTextContent('Not confirmed: check its status before cancelling again')
+    expect(orderCard()).toHaveTextContent('No answer yet: it may still be going through')
     expect(toast.error).not.toHaveBeenCalled()
     expect(toast.warning).toHaveBeenCalledTimes(1)
-    expect(toast.warning.mock.calls[0][0]).not.toMatch(/fail/i)
+    expect(toast.warning).toHaveBeenCalledWith(
+      'No answer came for this cancel: it may still be going through. Wait for the order’s status to change before cancelling again.',
+      'orders'
+    )
+    await pass(60_000)
+    expect((await sheetButtons(tap)).offered).toBe(false)
+    await pass(91_000)
+    expect((await sheetButtons(tap)).offered).toBe(true)
   })
 
   it('after 15 s with the order still working offers "Cancel again", with a short warning', async () => {
@@ -309,5 +316,88 @@ describe('g: a cancel sent', () => {
     renderBook('/orderbook', page)
     await settle()
     expect(orderCard()).not.toHaveTextContent('Cancel sent')
+  })
+})
+
+const CANCEL_NOT_CONFIRMED =
+  'This cancel is not confirmed: it may have gone through. Check the order’s status before cancelling it again.'
+
+/** An answer from the app that may have reached the broker: a 5xx, or one it marks so. */
+function notConfirmedAnswer(status: number, data: object) {
+  return new AxiosError('Request failed', 'ERR_BAD_RESPONSE', undefined, undefined, {
+    status,
+    statusText: '',
+    headers: {},
+    config: { headers: new AxiosHeaders() },
+    data,
+  })
+}
+
+describe('g: a cancel that may have reached the broker', () => {
+  it.each([
+    [
+      'the app’s own JSON 500 (the read timed out after Upstox took it)',
+      () => notConfirmedAnswer(500, { status: 'error', message: 'The read operation timed out' }),
+    ],
+    [
+      'the app’s 502 marked not confirmed',
+      () =>
+        notConfirmedAnswer(502, {
+          status: 'error',
+          message: CANCEL_NOT_CONFIRMED,
+          not_confirmed: true,
+        }),
+    ],
+  ])('%s is held as not confirmed, the toast in the app’s words', async (_, error) => {
+    const tap = user()
+    api.cancelOrder.mockRejectedValueOnce(error())
+    await open(WORKING)
+    await cancelOnce(tap)
+    expect((await sheetButtons(tap)).offered).toBe(false)
+    expect(orderCard()).toHaveTextContent('Not confirmed: check its status before cancelling again')
+    expect(toast.error).not.toHaveBeenCalled()
+    expect(toast.warning).toHaveBeenCalledWith(CANCEL_NOT_CONFIRMED, 'orders')
+    expect(api.cancelOrder).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('g: a cancel confirmation tapped once that order’s cancel is held', () => {
+  it('sends nothing, and says why', async () => {
+    const tap = user()
+    await open(WORKING)
+    await tap.click(orderCard())
+    await tap.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel order' })
+    )
+    const confirmation = screen.getByRole('dialog', { name: /^Cancel this order/ })
+
+    // No path of the page sends one while its confirmation is open; the hold's own store does,
+    // as any other part of the app would.
+    const sent = await import('@/sudarshan/books/sent')
+    act(() => {
+      sent.beginSends('cancel', false, [{ id: '1001' }])
+    })
+    await tap.click(within(confirmation).getByRole('button', { name: 'Cancel order' }))
+    await settle()
+    expect(api.cancelOrder).not.toHaveBeenCalled()
+    expect(toast.warning).toHaveBeenLastCalledWith(
+      'A cancel for this order is still being sent. Wait for its answer before cancelling again.',
+      'orders'
+    )
+  })
+})
+
+describe('g: a cancel answer the app marks not confirmed, whatever its code', () => {
+  it('a 2xx marked so holds the cancel as not confirmed, in the app’s words', async () => {
+    const tap = user()
+    const words =
+      'Upstox took this cancel without confirming it: it may have gone through. Check the order’s status before cancelling it again.'
+    api.cancelOrder.mockResolvedValueOnce({ status: 'error', message: words, not_confirmed: true })
+    await open(WORKING)
+    await cancelOnce(tap)
+    expect(orderCard()).toHaveTextContent('Not confirmed: check its status before cancelling again')
+    expect(toast.warning).toHaveBeenCalledWith(words, 'orders')
+    expect((await sheetButtons(tap)).offered).toBe(false)
+    expect(toast.error).not.toHaveBeenCalled()
   })
 })

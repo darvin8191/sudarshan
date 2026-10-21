@@ -2,10 +2,12 @@ import { useSyncExternalStore } from 'react'
 import type { OrderUpdateFrame } from './orderAlerts'
 import {
   bookStatus,
+  type ClosingMatch,
+  closingOrder,
   frameFitsMode,
   isFinalStatus,
   onOrderMemory,
-  workingPushedFor,
+  orderStatusOf,
 } from './orderFold'
 
 /**
@@ -18,18 +20,25 @@ import {
  * a position's Exit (and Exit all) is held from the tap:
  *
  * - while the send is in flight, however long that takes;
- * - after it went, or when no answer came back (the order may have gone: "not
- *   confirmed"), until the book shows the position flat, gone or turned the
- *   other way. A part of it closing (130 becomes 65) is the exit working: the
- *   hold stays, and its clock starts again;
+ * - after it went, or when the app could not confirm it (the order may have
+ *   gone: "not confirmed"), until the book shows the position flat, gone or
+ *   turned the other way. A part of it closing (130 becomes 65) is the exit
+ *   working: the hold stays, and its clock starts again;
  * - and at most `SENT_HOLD_MS` after the answer or the last change the book
- *   showed, unless a pushed order on the closing side, sent since, is still
- *   working (orderFold's app-wide memory of the frames).
+ *   showed (`NO_ANSWER_HOLD_MS` after the tap when no answer came at all: the
+ *   server may still be placing it, and Orders does not show an order still
+ *   being placed), unless one of its own orders is still working: the order
+ *   the answer named, or else an order the broker
+ *   pushed on the closing side since it was sent. Those are kept on the mark,
+ *   so a reload keeps them too, and until a read of the order book says how
+ *   they stand one counts as working. While only they hold it, the page reads
+ *   the order book (exitOrders.ts), so a final status whose push was lost
+ *   still settles it.
  *
  * A refusal from the server lets go at once. When the time runs out with the
- * book still unchanged, Exit is offered again and its confirmation says the
- * earlier exit has not shown yet. A cancel is held the same way, until its
- * order shows a final status (pushed or read).
+ * book still unchanged, Exit is offered again and its confirmation says what
+ * became of the earlier exit, as far as it is known. A cancel is held the same
+ * way, until its order shows a final status (pushed or read).
  *
  * Marks are keyed by book (Live or the sandbox), kind, and the position
  * (exchange, symbol, product) or the order id.
@@ -38,15 +47,42 @@ import {
 /** How long a sent exit or cancel holds its button after the answer or the book's last change. */
 export const SENT_HOLD_MS = 15_000
 
+/**
+ * How long, from the tap, one that got no answer at all holds: the phone gave
+ * up at 45 s, but one Upstox call may take 120 s on the server.
+ */
+export const NO_ANSWER_HOLD_MS = 150_000
+
 /** How long a mark whose time ran out is kept, for the warning in the next confirmation. */
 const KEEP_MS = 8 * 60 * 60_000
+
+/** How far a read of the order book may lag an order the broker has pushed. */
+const BOOK_LAG_MS = 5_000
+
+/** The most orders kept on one exit (a sliced order is several). */
+const ORDERS_KEPT = 20
 
 const STORAGE_KEY = 'sudarshan-sent-v1'
 
 export type SentKind = 'exit' | 'cancel'
 export type SentState = 'sending' | 'sent' | 'unconfirmed'
-/** What became of a send: it went, no answer came back, or the server said no. */
-export type SendOutcome = 'sent' | 'unconfirmed' | 'refused'
+/**
+ * What became of a send: it went, the app could not confirm it, no answer came
+ * at all, or the server said no.
+ */
+export type SendOutcome = 'sent' | 'unconfirmed' | 'unanswered' | 'refused'
+
+/** A page's send handler's answer, with the order it placed when the server named one. */
+export interface SentAnswer {
+  outcome: SendOutcome
+  orderid?: string | null
+}
+
+/** An order the broker pushed on an exit's closing side since it was sent, and when first heard of. */
+export interface ExitOrder {
+  id: string
+  at: number
+}
 
 export interface SentMark {
   kind: SentKind
@@ -70,6 +106,14 @@ export interface SentMark {
   product: string
   /** The send it came from, so an answer settles only its own marks. */
   batch: string
+  /** An exit's own orders: pushed on its closing side since it was sent. */
+  orders?: ExitOrder[]
+  /** Its time is up and one of its own orders still works (or has not been read since a reload). */
+  byOrder?: boolean
+  /** No answer came at all (a timeout, a dropped connection, a reload in flight). */
+  noAnswer?: boolean
+  /** Its own order is the one the answer named; nothing else pushed on its side is. */
+  pinned?: boolean
 }
 
 export interface SendTarget {
@@ -142,6 +186,18 @@ function valid(mark: unknown): mark is SentMark {
   )
 }
 
+/** The orders a stored mark names, each one well formed. */
+function ordersOf(value: unknown): ExitOrder[] {
+  if (!Array.isArray(value)) return []
+  return value.filter(
+    (order): order is ExitOrder =>
+      typeof order === 'object' &&
+      order !== null &&
+      typeof order.id === 'string' &&
+      typeof order.at === 'number'
+  )
+}
+
 /** What a reload brings back: a send in flight when the page went lost its answer. */
 function load(now: number): Map<string, SentMark> {
   const out = new Map<string, SentMark>()
@@ -151,8 +207,17 @@ function load(now: number): Map<string, SentMark> {
     if (!Array.isArray(list)) return out
     for (const item of list) {
       if (!valid(item) || now - item.sentAt > KEEP_MS) continue
+      const kept: SentMark = {
+        ...item,
+        orders: ordersOf(item.orders),
+        byOrder: false,
+        noAnswer: item.noAnswer === true,
+        pinned: item.pinned === true,
+      }
       const mark: SentMark =
-        item.state === 'sending' ? { ...item, state: 'unconfirmed', since: now } : item
+        kept.state === 'sending'
+          ? { ...kept, state: 'unconfirmed', since: now, noAnswer: true }
+          : kept
       out.set(keyOf(mark.kind, mark.sandbox, mark.id), mark)
     }
   } catch {
@@ -168,22 +233,40 @@ function commit(next: Map<string, SentMark>): void {
   for (const listener of [...listeners]) listener()
 }
 
-/** Whether a mark's time is up: never while in flight, nor while its exit's order works. */
+/** Whether a mark's own time is up: never while in flight. */
 function due(mark: SentMark, now: number): boolean {
   if (mark.expired || mark.state === 'sending' || mark.since === null) return false
   if (now - mark.since < SENT_HOLD_MS) return false
-  if (mark.kind === 'exit' && mark.was !== null && mark.exchange) {
-    const working = workingPushedFor({
-      sandbox: mark.sandbox,
-      exchange: mark.exchange,
-      symbol: mark.symbol,
-      product: mark.product,
-      action: mark.was > 0 ? 'SELL' : 'BUY',
-      since: mark.sentAt,
-    })
-    if (working) return false
-  }
+  // No answer came: the server may still be placing it.
+  if (mark.noAnswer && now - mark.sentAt < NO_ANSWER_HOLD_MS) return false
   return true
+}
+
+/** When a settled mark's own time is up. */
+function dueAt(mark: SentMark & { since: number }): number {
+  const at = mark.since + SENT_HOLD_MS
+  return mark.noAnswer ? Math.max(at, mark.sentAt + NO_ANSWER_HOLD_MS) : at
+}
+
+/** An exit's position and closing side, to tell its own orders by. */
+function matchOf(mark: SentMark): ClosingMatch | null {
+  if (mark.kind !== 'exit' || mark.was === null || mark.was === 0 || !mark.exchange) return null
+  return {
+    sandbox: mark.sandbox,
+    exchange: mark.exchange,
+    symbol: mark.symbol,
+    product: mark.product,
+    action: mark.was > 0 ? 'SELL' : 'BUY',
+    since: mark.sentAt,
+  }
+}
+
+/** Whether one of an exit's own orders still works, or has not been heard of since a reload. */
+function heldByOrder(mark: SentMark): boolean {
+  return (mark.orders ?? []).some(({ id }) => {
+    const status = orderStatusOf(id)
+    return status === null || !isFinalStatus(status)
+  })
 }
 
 function expireDue(now = Date.now()): void {
@@ -193,8 +276,14 @@ function expireDue(now = Date.now()): void {
       next ??= new Map(marks)
       next.delete(key)
     } else if (due(mark, now)) {
-      next ??= new Map(marks)
-      next.set(key, { ...mark, expired: true })
+      if (heldByOrder(mark)) {
+        if (mark.byOrder) continue
+        next ??= new Map(marks)
+        next.set(key, { ...mark, byOrder: true })
+      } else {
+        next ??= new Map(marks)
+        next.set(key, { ...mark, expired: true, byOrder: false })
+      }
     }
   }
   if (next) commit(next)
@@ -202,8 +291,9 @@ function expireDue(now = Date.now()): void {
 }
 
 /**
- * One timer, for the next mark due. A mark past its time but held by a working
- * order is looked at again when the app next hears about orders.
+ * One timer, for the next mark due; one already past its time (a tab restored
+ * after a while) at once. A mark held by its own working order has no timer:
+ * it is looked at again whenever the app hears about orders.
  */
 function schedule(): void {
   if (timer !== null) clearTimeout(timer)
@@ -212,9 +302,8 @@ function schedule(): void {
   let first = Number.POSITIVE_INFINITY
   for (const mark of marks.values()) {
     if (mark.expired) first = Math.min(first, mark.sentAt + KEEP_MS)
-    else if (mark.state !== 'sending' && mark.since !== null) {
-      const at = mark.since + SENT_HOLD_MS
-      if (at > now) first = Math.min(first, at)
+    else if (!mark.byOrder && mark.state !== 'sending' && mark.since !== null) {
+      first = Math.min(first, dueAt({ ...mark, since: mark.since }))
     }
   }
   if (first === Number.POSITIVE_INFINITY) return
@@ -258,23 +347,57 @@ export function beginSends(
   return batch
 }
 
-/** The answer came: a refusal lets go at once; sent or not confirmed, the clock starts. */
-export function settleSends(batch: string, outcome: SendOutcome, now = Date.now()): void {
+/**
+ * The answer came: a refusal lets go at once; otherwise the clock starts. An
+ * exit's answer that named its order pins the exit to that order.
+ */
+export function settleSends(
+  batch: string,
+  outcome: SendOutcome,
+  now = Date.now(),
+  orderid: string | null = null
+): void {
   let next: Map<string, SentMark> | null = null
   for (const [key, mark] of marks) {
     if (mark.batch !== batch || mark.state !== 'sending') continue
     next ??= new Map(marks)
-    if (outcome === 'refused') next.delete(key)
-    else next.set(key, { ...mark, state: outcome, since: now })
+    if (outcome === 'refused') {
+      next.delete(key)
+      continue
+    }
+    const settled: SentMark = {
+      ...mark,
+      state: outcome === 'sent' ? 'sent' : 'unconfirmed',
+      since: now,
+      noAnswer: outcome === 'unanswered',
+    }
+    if (orderid && mark.kind === 'exit') {
+      // Not whatever else was pushed on its side meanwhile (a stop-loss moved, say).
+      settled.orders = [{ id: orderid, at: now }]
+      settled.pinned = true
+    }
+    next.set(key, settled)
   }
   if (next) commit(next)
 }
 
 /** What a page's send handler returned, as an outcome: true and nothing said count as sent. */
 export function outcomeOf(result: unknown): SendOutcome {
-  if (result === 'refused' || result === false) return 'refused'
-  if (result === 'unconfirmed') return 'unconfirmed'
+  const said =
+    typeof result === 'object' && result !== null && 'outcome' in result
+      ? (result as SentAnswer).outcome
+      : result
+  if (said === 'refused' || said === false) return 'refused'
+  if (said === 'unconfirmed') return 'unconfirmed'
+  if (said === 'unanswered') return 'unanswered'
   return 'sent'
+}
+
+/** The order a handler's answer says the send placed, when it names one. */
+function orderIdOf(result: unknown): string | null {
+  if (typeof result !== 'object' || result === null) return null
+  const id = (result as SentAnswer).orderid
+  return typeof id === 'string' && id.trim() ? id.trim() : null
 }
 
 /** Hold `targets` while `send` runs and for as long as its outcome says. */
@@ -286,13 +409,16 @@ export async function sendHeld(
 ): Promise<SendOutcome> {
   const batch = beginSends(kind, sandbox, targets)
   let outcome: SendOutcome
+  let orderid: string | null = null
   try {
-    outcome = outcomeOf(await send())
+    const result = await send()
+    outcome = outcomeOf(result)
+    if (outcome === 'sent') orderid = orderIdOf(result)
   } catch {
-    // The handler itself broke: whether the order went is not known.
-    outcome = 'unconfirmed'
+    // The handler itself broke: whether the order went, or is still going, is not known.
+    outcome = 'unanswered'
   }
-  settleSends(batch, outcome)
+  settleSends(batch, outcome, Date.now(), orderid)
   return outcome
 }
 
@@ -330,6 +456,7 @@ export function noteExitBook(
               seen: quantity,
               since: mark.state === 'sending' ? null : now,
               expired: false,
+              byOrder: false,
             }
           : { ...mark, seen: quantity }
       )
@@ -356,12 +483,27 @@ export function noteCancelBook(
   if (next) commit(next)
 }
 
-/** A pushed final status ends its order's cancel; any news of orders may end an exit's wait. */
+/**
+ * A pushed order on an exit's closing side, since it was sent, is that exit's
+ * own; a pushed final status ends its order's cancel; and any news of orders
+ * may end an exit's wait.
+ */
 function onOrders(frame: OrderUpdateFrame | null): void {
   const orderid = frame ? String(frame.orderid ?? '').trim() : ''
   const status = frame ? bookStatus(frame.order_status) : null
+  let next: Map<string, SentMark> | null = null
+  if (frame && orderid) {
+    const now = Date.now()
+    for (const [key, mark] of marks) {
+      const match = mark.expired || mark.pinned ? null : matchOf(mark)
+      if (!match || mark.orders?.some((order) => order.id === orderid)) continue
+      if (!closingOrder(orderid, match)) continue
+      next ??= new Map(marks)
+      const orders = [...(mark.orders ?? []), { id: orderid, at: now }].slice(-ORDERS_KEPT)
+      next.set(key, { ...mark, orders })
+    }
+  }
   if (frame && orderid && status && isFinalStatus(status)) {
-    let next: Map<string, SentMark> | null = null
     for (const sandbox of [false, true]) {
       const key = keyOf('cancel', sandbox, orderid)
       if (marks.has(key) && frameFitsMode(frame, sandbox ? 'analyzer' : 'live')) {
@@ -369,17 +511,50 @@ function onOrders(frame: OrderUpdateFrame | null): void {
         next.delete(key)
       }
     }
-    if (next) {
-      commit(next)
-      return
-    }
   }
+  if (next) commit(next)
   expireDue()
+}
+
+/**
+ * An order book read at `askedAt` for one book, the sandbox's or the
+ * broker's: an exit's own order it does not list, though pushed well before
+ * the read, is not working there, and stops holding the exit.
+ */
+export function noteExitOrders(
+  sandbox: boolean,
+  orders: ReadonlyArray<{ orderid: unknown }>,
+  askedAt: number
+): void {
+  const listed = new Set(orders.map((order) => String(order.orderid ?? '').trim()))
+  let next: Map<string, SentMark> | null = null
+  for (const [key, mark] of marks) {
+    if (mark.kind !== 'exit' || mark.sandbox !== sandbox || mark.expired || !mark.orders) continue
+    const kept = mark.orders.filter(
+      (order) => listed.has(order.id) || order.at > askedAt - BOOK_LAG_MS
+    )
+    if (kept.length === mark.orders.length) continue
+    next ??= new Map(marks)
+    next.set(key, { ...mark, orders: kept })
+  }
+  if (next) commit(next)
+  expireDue()
+}
+
+/** What is known of an exit's own orders: each one's last status, pushed or read. */
+export function exitOrderStatuses(mark: SentMark): string[] {
+  const statuses: string[] = []
+  for (const { id } of mark.orders ?? []) {
+    const status = orderStatusOf(id)
+    if (status !== null) statuses.push(status)
+  }
+  return statuses
 }
 
 onOrderMemory(onOrders)
 marks = load(Date.now())
-schedule()
+// A tab restored after a while: what is past its time is settled now, not at the next order news.
+expireDue()
 
 function subscribe(listener: () => void): () => void {
   listeners.add(listener)

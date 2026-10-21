@@ -1601,3 +1601,58 @@ def test_replaying_an_id_nothing_buffered_is_harmless(order):
     with patch("services.strategy_module.engine.apply_fill") as apply_fill:
         order_events.replay_for("BRK-1")
     assert apply_fill.call_count == 0
+
+
+_UNSURE_CANCEL = (
+    "This cancel is not confirmed: it may have gone through. "
+    "Check the order's status before cancelling it again."
+)
+
+
+@pytest.mark.parametrize(
+    ("error", "reads"),
+    [
+        (_UNSURE_CANCEL, _UNSURE_CANCEL),
+        (None, "The broker refused cancellation."),
+        ("order not found.", "Order not found."),
+    ],
+    ids=["a sentence", "no reason", "a clause"],
+)
+def test_a_cancel_answer_that_is_a_sentence_reads_as_one_in_the_critical_event(order, error, reads):
+    """SUDARSHAN M6.9: the reason is its own sentence, never "because This cancel ... again..".
+
+    A cancel that may have gone through answers with a full sentence; the decision (the
+    position stays managed) is unchanged, only the words are.
+    """
+    retry = store.record_order(
+        order.run_id,
+        1,
+        "exit_close_all",
+        {
+            "position_ref": "unsure-retry-owner",
+            "symbol": "NIFTY28MAY2624000CE",
+            "exchange": "NFO",
+            "action": "SELL",
+            "qty": 25,
+            "broker_order_id": "BRK-UNSURE-RETRY",
+            "status": "open",
+        },
+    )
+    assert retry is not None
+    with (
+        patch.object(engine, "_api_key_for", return_value="test-key"),
+        patch.object(
+            engine.order_dispatch,
+            "cancel_exit_order",
+            return_value=DispatchResult(ok=False, broker_order_id="BRK-UNSURE-RETRY", error=error),
+        ),
+    ):
+        assert order_events._cancel_working_retry(order.run_id, retry.id) is False
+
+    [event] = [e for e in store.list_events(order.strategy_id) if e["kind"] == "leg_exit_rejected"]
+    assert event["message"] == (
+        "A higher fill correction made retry order BRK-UNSURE-RETRY too large, and cancelling it "
+        f"did not succeed. {reads} Its position remains managed; verify the broker order "
+        "immediately to prevent reversal."
+    )
+    assert event["severity"] == "critical"

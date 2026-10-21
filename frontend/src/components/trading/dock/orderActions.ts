@@ -16,6 +16,8 @@
 
 import { tradingApi } from '@/api/trading'
 import type { AppMode } from '@/stores/themeStore'
+// SUDARSHAN M6.9: a send that may have gone says so in the app's words, never the transport's.
+import { answerBody, heldText, type SendKind, thrownOutcome } from '@/sudarshan/books/sendOutcome'
 import { showToast } from '@/utils/toast'
 import type { DockOrder, DockPosition } from './blotter'
 
@@ -44,6 +46,17 @@ function handledGlobally(ctx: OrderActionContext, e: unknown): boolean {
   return ctx.appMode === 'analyzer' && !!(e as { response?: unknown }).response
 }
 
+/**
+ * SUDARSHAN M6.9: a send that threw. Refused, the reason given; otherwise (no
+ * answer, the 45 s wait run out, or not confirmed) it may have gone, said in
+ * the app's words: never "timeout of 45000ms exceeded" in red.
+ */
+function sendFailed(kind: SendKind, e: unknown): void {
+  const outcome = thrownOutcome(e)
+  if (outcome === 'refused') showToast.error(apiErrorMessage(e), 'orders')
+  else showToast.warning(heldText(kind, outcome, answerBody(e)), 'orders')
+}
+
 /** Cancel one working order. True when the server accepted the cancel. */
 export async function cancelDockOrder(order: DockOrder, ctx: OrderActionContext): Promise<boolean> {
   if (ctx.refuse()) return false
@@ -58,7 +71,7 @@ export async function cancelDockOrder(order: DockOrder, ctx: OrderActionContext)
       showToast.error(res.message || 'Cancel failed', 'orders')
     }
   } catch (e) {
-    if (!handledGlobally(ctx, e)) showToast.error(apiErrorMessage(e), 'orders')
+    if (!handledGlobally(ctx, e)) sendFailed('cancel', e)
   }
   ctx.refresh()
   return ok
@@ -82,7 +95,7 @@ export async function closeDockPosition(
       showToast.error(res.message || 'Close failed', 'orders')
     }
   } catch (e) {
-    if (!handledGlobally(ctx, e)) showToast.error(apiErrorMessage(e), 'orders')
+    if (!handledGlobally(ctx, e)) sendFailed('exit', e)
   }
   ctx.refresh()
   return ok
@@ -93,10 +106,12 @@ export async function cancelAllDockOrders(ctx: OrderActionContext): Promise<void
   try {
     const res = await tradingApi.cancelAllOrders()
     if (res.status !== 'success' && ctx.appMode === 'live') {
-      showToast.error(res.message || 'Cancel all failed', 'orders')
+      // SUDARSHAN M6.9: none open is not a failure; one that failed answers a 4xx or 5xx.
+      if (res.status === 'info') showToast.info(res.message || 'No open orders to cancel', 'orders')
+      else showToast.error(res.message || 'Cancel all failed', 'orders')
     }
   } catch (e) {
-    if (!handledGlobally(ctx, e)) showToast.error(apiErrorMessage(e), 'orders')
+    if (!handledGlobally(ctx, e)) sendFailed('cancelAll', e)
   }
   ctx.refresh()
 }
@@ -109,7 +124,7 @@ export async function closeAllDockPositions(ctx: OrderActionContext): Promise<vo
       showToast.error(res.message || 'Close all failed', 'orders')
     }
   } catch (e) {
-    if (!handledGlobally(ctx, e)) showToast.error(apiErrorMessage(e), 'orders')
+    if (!handledGlobally(ctx, e)) sendFailed('exitAll', e)
   }
   ctx.refresh()
 }

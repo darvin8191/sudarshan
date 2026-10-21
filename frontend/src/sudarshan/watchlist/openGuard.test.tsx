@@ -5,6 +5,8 @@
  * order sheet's Cancel and the confirmation's "Cancel order" sit on the same
  * spot, and a card's second tap lands on the sheet's Chart, Add or Cancel.
  */
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -244,5 +246,98 @@ describe('an order ticket that has just opened', () => {
     await wait(500)
     tap(screen.getByRole('button', { name: 'SELL' }))
     expect(title()).toContain('SELL')
+  })
+})
+
+/** The order ticket behind the button that opens it. */
+function TicketHarness() {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)}>
+        Add
+      </button>
+      <PlaceOrderDialog
+        open={open}
+        onOpenChange={setOpen}
+        symbol="NIFTY27OCT2625900CE"
+        exchange="NFO"
+        action="BUY"
+        lotSize={65}
+        tickSize={0.05}
+        product="MIS"
+        strategy="Positions"
+      />
+    </>
+  )
+}
+
+describe('a tap outside what has just opened', () => {
+  // The dim around a dialog: what a double tap's second tap hits when the dialog is smaller
+  // than what it replaced.
+  const outside = () => fireEvent.pointerDown(document.body)
+
+  it.each([
+    ['a sheet', () => <SheetHarness onCancel={vi.fn()} />, 'NIFTY 25900 CE'],
+    ['a confirmation', () => <ConfirmHarness onConfirm={vi.fn()} onClose={vi.fn()} />, 'Cancel'],
+    ['the order ticket', () => <TicketHarness />, 'Add'],
+  ])('does not close %s for half a second; then it does', async (_, harness, opener) => {
+    render(harness())
+    tap(screen.getByRole('button', { name: opener }))
+    // Radix starts listening for a press outside a moment after it opens.
+    await wait(100)
+    outside()
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    await wait(399)
+    outside()
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+
+    await wait(1)
+    outside()
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it.each([
+    ['a sheet', () => <SheetHarness onCancel={vi.fn()} />, 'NIFTY 25900 CE'],
+    ['a confirmation', () => <ConfirmHarness onConfirm={vi.fn()} onClose={vi.fn()} />, 'Cancel'],
+    ['the order ticket', () => <TicketHarness />, 'Add'],
+  ])('still lets Escape close %s inside the window', async (_, harness, opener) => {
+    render(harness())
+    tap(screen.getByRole('button', { name: opener }))
+    await wait(100)
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+})
+
+describe('what has just opened looks it', () => {
+  // The rule as theme.css writes it, applied to the page as the app applies it.
+  const css = readFileSync(join(process.cwd(), 'src/sudarshan/theme.css'), 'utf8')
+  const rule = css.match(/\[data-settling\][^{]*\{[^}]*\}/)?.[0] ?? ''
+
+  it.each([
+    ['a sheet', () => <SheetHarness onCancel={vi.fn()} />, 'NIFTY 25900 CE', 'Cancel this order'],
+    [
+      'a confirmation',
+      () => <ConfirmHarness onConfirm={vi.fn()} onClose={vi.fn()} />,
+      'Cancel',
+      'Keep order',
+    ],
+    ['the order ticket', () => <TicketHarness />, 'Add', 'SELL'],
+  ])('%s shows its controls as disabled for half a second', async (_, harness, opener, inside) => {
+    expect(rule).toMatch(/opacity:\s*0\.5/)
+    const style = document.createElement('style')
+    style.textContent = rule
+    document.head.append(style)
+    try {
+      render(harness())
+      tap(screen.getByRole('button', { name: opener }))
+      const control = screen.getByRole('button', { name: inside })
+      expect(getComputedStyle(control).opacity).toBe('0.5')
+      await wait(500)
+      expect(getComputedStyle(control).opacity).not.toBe('0.5')
+    } finally {
+      style.remove()
+    }
   })
 })

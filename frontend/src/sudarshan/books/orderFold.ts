@@ -315,34 +315,41 @@ function productClass(product: string): string {
   return word === 'NRML' ? 'CNC' : word
 }
 
-/**
- * Whether a pushed order for this instrument and product is still working
- * (M6.9): on `action`'s side when its frames name one, last pushed at or after
- * `since`, in the sandbox's book or the broker's. It has ended once either its
- * frames or a read of the book say so.
- */
-export function workingPushedFor(match: {
+/** An exit's position, the side that closes it, and when it was sent (M6.9). */
+export interface ClosingMatch {
   sandbox: boolean
   exchange: string
   symbol: string
   product: string
   action: 'BUY' | 'SELL'
   since: number
-}): boolean {
-  const exchange = match.exchange.toUpperCase()
-  const symbol = match.symbol.toUpperCase()
-  const product = productClass(match.product)
-  for (const [orderid, order] of appOrders) {
-    const pushed = appPushed.get(orderid)
-    if (!pushed || pushed.at < match.since) continue
-    if (order.exchange !== exchange || order.symbol !== symbol) continue
-    if (productClass(order.product) !== product) continue
-    if (order.action && order.action !== match.action) continue
-    if (!frameFitsMode({ mode: order.mode }, match.sandbox ? 'analyzer' : 'live')) continue
-    const read = known.get(orderid)?.status
-    if (!FINAL.has(pushed.order_status) && !(read && FINAL.has(read))) return true
-  }
-  return false
+}
+
+/**
+ * Whether the pushed order `orderid` is on an exit's closing side (M6.9): for
+ * its instrument and product, on `action`'s side when its frames name one,
+ * last pushed at or after `since`, in the sandbox's book or the broker's.
+ */
+export function closingOrder(orderid: string, match: ClosingMatch): boolean {
+  const order = appOrders.get(orderid)
+  const pushed = appPushed.get(orderid)
+  if (!order || !pushed || pushed.at < match.since) return false
+  if (order.exchange !== match.exchange.toUpperCase()) return false
+  if (order.symbol !== match.symbol.toUpperCase()) return false
+  if (productClass(order.product) !== productClass(match.product)) return false
+  if (order.action && order.action !== match.action) return false
+  return frameFitsMode({ mode: order.mode }, match.sandbox ? 'analyzer' : 'live')
+}
+
+/**
+ * An order's last known status, from its frames and the books read; null when
+ * none is known. A final status the broker pushed stays final: a read that
+ * lags it says nothing new.
+ */
+export function orderStatusOf(orderid: string): string | null {
+  const pushed = appPushed.get(orderid)?.order_status
+  if (pushed && FINAL.has(pushed)) return pushed
+  return known.get(orderid)?.status ?? pushed ?? null
 }
 
 /** The last frame pushed, and when it arrived. */

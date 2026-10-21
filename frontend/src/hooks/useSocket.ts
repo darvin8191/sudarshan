@@ -8,6 +8,8 @@ import { useSessionStore } from '@/stores/sessionStore'
 // SUDARSHAN: the shared connection and the app-wide order alerts (src/sudarshan/books).
 import { claimOrderSound } from '@/sudarshan/books/chime'
 import { installOrderAlerts, noteAppCancelEvent } from '@/sudarshan/books/orderAlerts'
+// SUDARSHAN M6.9: Exit all's result shows once, whoever speaks first.
+import { EXIT_ALL_TOAST } from '@/sudarshan/books/sendOutcome'
 import { acquireSharedSocket, releaseSharedSocket } from '@/sudarshan/books/sharedSocket'
 
 // Audio throttling configuration
@@ -34,6 +36,8 @@ interface ModifyOrderEventData {
 interface ClosePositionEventData {
   message: string
   status: string
+  /** SUDARSHAN M6.9: some exits may have gone through. */
+  not_confirmed?: boolean
 }
 
 interface MasterContractData {
@@ -61,11 +65,14 @@ interface AnalyzerUpdateData {
 const showCategoryToast = (
   type: 'success' | 'error' | 'warning' | 'info',
   message: string,
-  category?: keyof AlertCategories
+  category?: keyof AlertCategories,
+  // SUDARSHAN M6.9: a toast another sender of the same result shares.
+  id?: string
 ) => {
   const { shouldShowToast } = useAlertStore.getState()
   if (shouldShowToast(category)) {
-    toast[type](message)
+    if (id) toast[type](message, { id })
+    else toast[type](message)
   }
 }
 
@@ -230,6 +237,17 @@ export function useSocket() {
     // Close position notification
     socket.on('close_position_event', (data: ClosePositionEventData) => {
       playAlertSound('orders')
+      // SUDARSHAN M6.9: a close that did not close everything shows as one, never as a
+      // success; it shares its toast with the Positions page's own answer to it.
+      if (data.status === 'error') {
+        showCategoryToast(
+          data.not_confirmed ? 'warning' : 'error',
+          data.message || 'Exit all did not close every position. Check Positions.',
+          'positions',
+          EXIT_ALL_TOAST
+        )
+        return
+      }
       showCategoryToast('success', data.message || 'All Open Positions Squared Off', 'positions')
     })
 

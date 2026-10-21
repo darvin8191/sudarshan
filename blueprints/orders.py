@@ -13,6 +13,9 @@ from services.orderbook_service import get_orderbook
 from services.place_smart_order_service import place_smart_order
 from services.positionbook_service import get_positionbook
 from services.tradebook_service import get_tradebook
+
+# SUDARSHAN M6.9: one exit at a time per position from the app's own screens.
+from sudarshan.books.exit_guard import one_exit_at_a_time
 from utils import runtime
 from utils.latency_monitor import track_latency
 from utils.logging import get_logger
@@ -22,6 +25,74 @@ logger = get_logger(__name__)
 
 # Use existing rate limits from .env
 API_RATE_LIMIT = os.getenv("API_RATE_LIMIT", "50 per second")
+
+# SUDARSHAN M6.9: an exit or a cancel that may have reached the broker is "not confirmed",
+# never a refusal: a trader told it failed sends it again, and a second exit sized from a
+# book that has not caught up reverses the position instead of closing it. Such an answer
+# carries not_confirmed (the phone holds its Exit on it, and on any 5xx), and its words are
+# written for a trader, never an exception's.
+EXIT_NOT_CONFIRMED = (
+    "This exit is not confirmed: it may have gone through. Check Orders before sending it again."
+)
+EXIT_ALL_NOT_CONFIRMED = (
+    "Exit all is not confirmed: some exits may have gone through. "
+    "Check Orders before sending it again."
+)
+CANCEL_NOT_CONFIRMED = (
+    "This cancel is not confirmed: it may have gone through. "
+    "Check the order's status before cancelling it again."
+)
+CANCEL_ALL_NOT_CONFIRMED = (
+    "Cancel all is not confirmed: some cancels may have gone through. "
+    "Check the orders' status before cancelling again."
+)
+
+
+def _not_confirmed(message):
+    """SUDARSHAN M6.9: the body of an answer that may have reached the broker."""
+    return {"status": "error", "message": message, "not_confirmed": True}
+
+
+def _cancel_all_summary(answered):
+    """SUDARSHAN M6.9: Cancel all's answer when not every cancel went through."""
+    canceled = list(answered.get("canceled_orders") or [])
+    failed = list(answered.get("failed_cancellations") or [])
+    unsure = [
+        order for order in answered.get("not_confirmed_cancellations") or [] if order in failed
+    ]
+    refused = len(failed) - len(unsure)
+
+    def counted(count, one, many):
+        return f"{count} {one if count == 1 else many}"
+
+    parts = []
+    if canceled:
+        parts.append(counted(len(canceled), "was cancelled", "were cancelled"))
+    if refused:
+        parts.append(counted(refused, "was refused", "were refused"))
+    if unsure:
+        parts.append(
+            counted(
+                len(unsure),
+                "is not confirmed and may have gone through",
+                "are not confirmed and may have gone through",
+            )
+        )
+    listed = parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
+    total = len(canceled) + len(failed)
+    body = {
+        "status": "error",
+        "message": (
+            f"Cancel all did not cancel every order. Of {counted(total, 'open order', 'open orders')}, "
+            f"{listed}. Check the orders' status before cancelling again."
+        ),
+        "canceled_orders": canceled,
+        "failed_cancellations": failed,
+    }
+    if unsure:
+        body["not_confirmed"] = True
+    return body
+
 
 # Define the blueprint
 orders_bp = Blueprint("orders_bp", __name__, url_prefix="/")
@@ -505,6 +576,7 @@ def export_positions():
 @check_session_validity
 @limiter.limit(API_RATE_LIMIT)
 @track_latency("CLOSE")
+@one_exit_at_a_time()  # SUDARSHAN M6.9: 409 while this position's exit is still being placed
 def close_position():
     """Close a specific position - uses broker API in live mode, placesmartorder service in analyze mode"""
     try:
@@ -606,28 +678,43 @@ def close_position():
             }
             status_code = 200
 
-            # Publish event for logging, socketio, and telegram (fixes missing API log)
-            api_key = get_api_key_for_tradingview(login_username)
-            if api_key:
-                from events import PositionClosedEvent
-                from utils.event_bus import bus
+            # SUDARSHAN M6.9: the order is placed and its id known, so a failure to log it
+            # must not turn the answer into an error.
+            try:
+                # Publish event for logging, socketio, and telegram (fixes missing API log)
+                api_key = get_api_key_for_tradingview(login_username)
+                if api_key:
+                    from events import PositionClosedEvent
+                    from utils.event_bus import bus
 
-                log_request = order_data.copy()
-                log_request["api_type"] = "closeposition"
+                    log_request = order_data.copy()
+                    log_request["api_type"] = "closeposition"
 
-                bus.publish(PositionClosedEvent(
-                    mode="live",
-                    api_type="closeposition",
-                    symbol=symbol,
-                    exchange=exchange,
-                    product=product,
-                    orderid=str(orderid),
-                    message="Position close order placed successfully.",
-                    request_data=log_request,
-                    response_data=response_data,
-                    api_key=api_key,
-                ))
+                    bus.publish(PositionClosedEvent(
+                        mode="live",
+                        api_type="closeposition",
+                        symbol=symbol,
+                        exchange=exchange,
+                        product=product,
+                        orderid=str(orderid),
+                        message="Position close order placed successfully.",
+                        request_data=log_request,
+                        response_data=response_data,
+                        api_key=api_key,
+                    ))
+            except Exception:
+                logger.exception(f"Close position order {orderid} placed; logging it failed")
         else:
+            # SUDARSHAN M6.9: an answer from the broker that names no order (a success
+            # without an id, an error carried by a 2xx, a broker 5xx, or a failure after the
+            # send) may still have placed one. Only a broker's refusal (a 4xx) or no send at
+            # all (no response) is a refusal.
+            sent_status = getattr(res, "status", None)
+            if isinstance(sent_status, int) and not 400 <= sent_status < 500:
+                logger.error(f"Close position for {symbol} not confirmed (status {sent_status})")
+                not_confirmed_code = sent_status if sent_status >= 500 else 502
+                return jsonify(_not_confirmed(EXIT_NOT_CONFIRMED)), not_confirmed_code
+
             # No orderid, definite error
             response_data = {
                 "status": "error",
@@ -644,13 +731,15 @@ def close_position():
 
     except Exception as e:
         logger.exception(f"Error in close_position endpoint: {str(e)}")
-        return jsonify({"status": "error", "message": f"An error occurred: {str(e)}"}), 500
+        # SUDARSHAN M6.9: it may have broken after the order went.
+        return jsonify(_not_confirmed(EXIT_NOT_CONFIRMED)), 500
 
 
 @orders_bp.route("/close_all_positions", methods=["POST"])
 @check_session_validity
 @limiter.limit(API_RATE_LIMIT)
 @track_latency("CLOSE")
+@one_exit_at_a_time(every=True)  # SUDARSHAN M6.9: 409 while any exit is still being placed
 def close_all_positions():
     """Close all open positions using the broker API"""
     try:
@@ -690,7 +779,8 @@ def close_all_positions():
 
     except Exception as e:
         logger.exception(f"Error in close_all_positions endpoint: {str(e)}")
-        return jsonify({"status": "error", "message": f"An error occurred: {str(e)}"}), 500
+        # SUDARSHAN M6.9: it may have broken after some exits went.
+        return jsonify(_not_confirmed(EXIT_ALL_NOT_CONFIRMED)), 500
 
 
 @orders_bp.route("/cancel_all_orders", methods=["POST"])
@@ -727,26 +817,29 @@ def cancel_all_orders_ui():
             canceled_count = len(response_data.get("canceled_orders", []))
             failed_count = len(response_data.get("failed_cancellations", []))
 
-            if canceled_count > 0 or failed_count == 0:
-                message = f"Successfully canceled {canceled_count} orders"
-                if failed_count > 0:
-                    message += f" (Failed to cancel {failed_count} orders)"
-                return jsonify(
-                    {
-                        "status": "success",
-                        "message": message,
-                        "canceled_orders": response_data.get("canceled_orders", []),
-                        "failed_cancellations": response_data.get("failed_cancellations", []),
-                    }
-                ), 200
-            else:
+            # SUDARSHAN M6.9: say what happened. "No open orders" only when there were none;
+            # a cancel with no usable answer is not confirmed, never "failed" or "none".
+            if failed_count:
+                return jsonify(_cancel_all_summary(response_data)), (
+                    502 if response_data.get("not_confirmed_cancellations") else 400
+                )
+            if canceled_count == 0:
                 return jsonify({"status": "info", "message": "No open orders to cancel"}), 200
+            return jsonify(
+                {
+                    "status": "success",
+                    "message": f"Successfully canceled {canceled_count} orders",
+                    "canceled_orders": response_data.get("canceled_orders", []),
+                    "failed_cancellations": response_data.get("failed_cancellations", []),
+                }
+            ), 200
         else:
             return jsonify(response_data), status_code
 
     except Exception as e:
         logger.exception(f"Error in cancel_all_orders_ui endpoint: {str(e)}")
-        return jsonify({"status": "error", "message": f"An error occurred: {str(e)}"}), 500
+        # SUDARSHAN M6.9: it may have broken after some cancels went.
+        return jsonify(_not_confirmed(CANCEL_ALL_NOT_CONFIRMED)), 500
 
 
 @orders_bp.route("/cancel_order", methods=["POST"])
@@ -789,7 +882,8 @@ def cancel_order_ui():
 
     except Exception as e:
         logger.exception(f"Error in cancel_order_ui endpoint: {str(e)}")
-        return jsonify({"status": "error", "message": f"An error occurred: {str(e)}"}), 500
+        # SUDARSHAN M6.9: it may have broken after the cancel went.
+        return jsonify(_not_confirmed(CANCEL_NOT_CONFIRMED)), 500
 
 
 @orders_bp.route("/modify_gtt_order", methods=["POST"])
