@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from sudarshan.autologin.schedule import EXTRA_TRADING_DAYS_FILE
+
 PKG_DIR = Path(__file__).resolve().parent
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 TOKEN_FILE = "/etc/sudarshan/upstox_analytics_token"
@@ -47,6 +49,7 @@ class Settings:
     keys_file: Path
     state_dir: Path
     holidays_file: Path
+    extra_days_file: Path  # sessions on otherwise closed days, as auto-login and the alerts read
     api_base: str
     http_port: int
     zmq_port: int
@@ -75,6 +78,7 @@ class Settings:
             # systemd's StateDirectory= may list several paths separated by ':'; the first is ours.
             state_dir=Path(state_dir.split(":")[0]),
             holidays_file=Path(get("SUDARSHAN_NSE_HOLIDAYS_FILE", HOLIDAYS_FILE)),
+            extra_days_file=Path(get("SUDARSHAN_NSE_EXTRA_DAYS_FILE") or EXTRA_TRADING_DAYS_FILE),
             api_base=api_base,
             http_port=int(get("SUDARSHAN_FEED_HTTP_PORT", "5580")),
             zmq_port=int(get("SUDARSHAN_FEED_ZMQ_PORT", "5581")),

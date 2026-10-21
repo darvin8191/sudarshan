@@ -32,6 +32,7 @@ def feed_env(tmp_path):
             "SUDARSHAN_FEED_KEYS": str(tmp_path / "keys.txt"),
             "SUDARSHAN_FEED_STATE_DIR": str(tmp_path / "state"),
             "SUDARSHAN_NSE_HOLIDAYS_FILE": str(tmp_path / "nse_holidays.txt"),
+            "SUDARSHAN_NSE_EXTRA_DAYS_FILE": str(tmp_path / "nse_extra_trading_days.txt"),
             "SUDARSHAN_UPSTOX_API_BASE": fake.api_base if fake else "https://api.upstox.com",
             "SUDARSHAN_FEED_HTTP_PORT": "0",
             "SUDARSHAN_FEED_ZMQ_PORT": "0",

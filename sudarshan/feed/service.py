@@ -114,7 +114,9 @@ def _age(start: float | None, now: float) -> float | None:
 class FeedService:
     def __init__(self, cfg: Settings, clock=time.time):
         self.cfg, self.clock = cfg, clock
-        self.window = MarketWindow(cfg.holidays_file, cfg.window, cfg.always_on)
+        self.window = MarketWindow(
+            cfg.holidays_file, cfg.window, cfg.always_on, cfg.extra_days_file
+        )
         self.subs = Subscriptions.load(cfg.keys_file, cfg.state_dir / "subscriptions.json")
         self.store = SnapshotStore(cfg.state_dir / "snapshot.json")
         self.recorder = None
@@ -496,7 +498,6 @@ class FeedService:
 
     def health(self) -> dict:
         now, mono = self.clock(), time.monotonic()
-        is_open, why = self.window.status(now)
         missing = [k for k in self.subs.desired() if k not in self._seen] if self._live else []
         retry = None if self._next_retry_at is None else max(0.0, self._next_retry_at - mono)
         stats = self._stats | {"snapshot_keys": len(self.store.ticks)}
@@ -516,12 +517,7 @@ class FeedService:
             "reconnects": max(0, self._stats["connects"] - 1),
             "last_error": self._last_error,
             "last_disconnect": self._last_disconnect,
-            "market_window": {
-                "open": is_open,
-                "reason": why,
-                "holidays": self.window.note,
-                "next_open": None if is_open else iso(self.window.next_open(now)),
-            },
+            "market_window": self.window.describe(now),
             "market_status": self._market_status,
             "stats": stats | {"zmq_dropped": self.pub.dropped if self.pub else 0},
             "recorder": self.recorder.status() if self.recorder else None,
