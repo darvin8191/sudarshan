@@ -5,7 +5,7 @@ One row per feature id from the (private) feature list. Status: `todo` → `part
 
 | id | feature | status | release | PR / notes |
 |---|---|---|---|---|
-| M0.1 | Fork, CI (`SUDARSHAN CI`), release build + server auto-deploy (outside 09:00-15:45 IST on trading days, never on a listed extra trading day, backups, rollback, self-update, ring units) | partial | v0.0.1 | deploys since v0.0.1; settings that ship with a release from v0.2.1 (M18.2) |
+| M0.1 | Fork, CI (`SUDARSHAN CI`), release build + server auto-deploy (outside 09:00-15:45 IST on trading days, never on a listed extra trading day, backups, rollback, self-update, ring units); NSE calendar lines that ship with a release (`ops/deploy/nse-calendar.conf`), merged into the day files on every run | partial | v0.0.1 | deploys since v0.0.1; settings that ship with a release from v0.2.1 (M18.2); calendar lines on branch `feat/calendar-ship`, first line Muhurat 8 Nov 2026 (its window to follow once NSE gives the timings) |
 | M1.1 | Bilingual lockup in the D look: Mor icon + सुदर्शन from Tiro outlines + SUDARSHAN in Khand; white app bar; D login with the Chrome fingerprint-fill hint; stacked lockup on connect and About | partial | v0.2.0 | server check pending; NSE status pill on login left out (needs a session) |
 | M1.2 | `<title>`, page titles, meta and og tags | partial | v0.2.0 | server check pending |
 | M1.3 | Icons "Mor" (सु on peacock with a gold ring, maskable), web manifest with `display: browser` | partial | v0.2.0 | re-add the home-screen shortcut for the new icon |

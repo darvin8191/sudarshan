@@ -107,7 +107,9 @@ for that day instead of 08:45-16:00 (include the pre-open):
 ```
 
 Auto-login reads only the date of such a line, and the deploy tool only the date at its start, so
-both work as before (a test holds each to it).
+both work as before (a test holds each to it). A release ships these lines in
+`sudarshan/ops/deploy/nse-calendar.conf` (see `sudarshan/README.md`). A listed day with no window
+keeps 08:45-16:00, so an evening session gets no alerts until its window is shipped.
 
 **Upstox connections.** OpenAlgo's proxy keeps one pooled Upstox market-data connection per user
 (the daily access token), opened when the first of the owner's clients signs in and kept while any

@@ -15,7 +15,7 @@ read-only Analytics Token (market data, portfolio reads) — never with an order
 | `family/` | `sudarshan-family` | View-only layer for family members: own users/sessions/TOTP, privacy mode, invitations, per-user watchlists/alerts, audit log, viewer UI variants, family Telegram bot. Backed by the Analytics-Token data plane only; every OpenAlgo write/admin/bot route must answer 401/403 to a viewer. |
 | `autologin/` | `sudarshan-autologin` (oneshot + timer) | The daily Upstox login with TOTP + PIN (Upstox's TOTP token API) at 08:35/08:45/08:55 IST on trading days, and "Test now" from the Auto login page. Fetches the token, then hands it to OpenAlgo, which stores it exactly as a manual login does (its in-memory caches only refresh in its own process); never ends a login Upstox still accepts, and pauses after any refusal until the key or PIN is saved again. The one ring process that receives an order-capable token: it passes it to OpenAlgo and never uses it. Result on the page and in Telegram. |
 | `vault/` | (library) | Owner vault `db/sudarshan-vault/sudarshan_vault.db` (directory 700, file 600; the auto-login unit may write only there): small secrets entered on the phone, Fernet under a key derived (HKDF) from OpenAlgo's pepper; write-only over HTTP. Also holds the auto-login status. |
-| `ops/deploy/` | `sudarshan-deploy` (root, timer) | The server's deploy tool: installs the latest release outside market hours (backup, checksum, migrations, the `.env` settings below, health check, rollback) and updates itself from each release. |
+| `ops/deploy/` | `sudarshan-deploy` (root, timer) | The server's deploy tool: installs the latest release outside market hours (backup, checksum, migrations, the `.env` settings below, health check, rollback), keeps the NSE day files in step with the release's calendar lines (below) and updates itself from each release. |
 | `ops/` | `sudarshan-ops` (timers) | Daily-rollover guard (03:35 / 08:45 checks, TOTP token sidecar), backups to OCI Object Storage, health checks (healthchecks.io), EOD file jobs (bhavcopy, index constituents — once a day, outside the trading core), reports/digests (08:45 brief, 15:45 EOD, weekly, FY), kill switch. |
 
 Conventions: one package per service (`sudarshan/<svc>/`), `pyproject`-managed with the repo's `uv`
@@ -41,3 +41,29 @@ gives the format). On every deploy, after the release is checked out and before 
 
 `sudarshan-deploy --check` lists what the latest release would change, without changing it.
 Tests: `sudarshan/ops/tests/test_deploy_env.py`.
+
+## NSE calendar lines that ship with a release (M0.1)
+
+Nobody edits the server's day files by hand either. `/etc/sudarshan/nse_holidays.txt` (days NSE is
+closed) and `/etc/sudarshan/nse_extra_trading_days.txt` (a session on a day that is otherwise
+closed, with its own `HH:MM-HH:MM` window once NSE gives one) drive the deploy tool's market gate,
+auto-login's trading days and the order alerts' window; the feed reads the holiday file. A release
+lists the lines it needs in `ops/deploy/nse-calendar.conf` (a `[FILE]` line, then `line TEXT` and
+`was EARLIER_TEXT`; the file's header gives the format). `sudarshan-deploy`:
+
+- reads the list from GitHub at the release tag, never from the server's copy of the code;
+- applies the list of the installed release on every run, also when it installs nothing and in
+  market hours, because each reader picks up a changed file by itself; an install applies the
+  list of the release it brings;
+- adds a shipped line whose date the file does not list yet, and replaces a line only while it is
+  one an earlier release shipped (a `was`); a date the owner wrote in his own words stays, and the
+  log says it was left alone;
+- never deletes a line, keeps every other byte and the file's owner, group and mode, creates a
+  missing file root:sudarshan 640, and renames the new file into place in one step;
+- logs one line per change; an install keeps the files it changes in its backup folder and puts
+  them back if it rolls back; a list or a write that fails is logged and never stops an install.
+
+The first release that carries the list is installed by the tool before it, which does not read
+the list; the tool that install puts in place applies it on its first run, the next timer tick.
+`sudarshan-deploy --check` shows what the latest release would change. Tests:
+`sudarshan/ops/tests/test_deploy_calendar.py`.

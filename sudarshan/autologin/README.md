@@ -81,10 +81,10 @@ worked)? Nothing happens that day: no new login, no message.
 
 - **Trading days only**: weekends and the dates in `/etc/sudarshan/nse_holidays.txt` (one
   `YYYY-MM-DD` per line, `#` comments) are skipped. A missing file means only weekends are skipped.
-  A date in the optional `/etc/sudarshan/nse_extra_trading_days.txt` (same format; shipped
-  empty, or leave it out) is a trading day even on a weekend or a holiday: a Muhurat session, a
-  special Saturday session. The timer wakes every day for that reason; on a closed day the
-  worker stops at once.
+  A date in the optional `/etc/sudarshan/nse_extra_trading_days.txt` (same format; the deploy
+  tool adds the dates a release lists, see `sudarshan/README.md`) is a trading day even on a
+  weekend or a holiday: a Muhurat session, a special Saturday session. The timer wakes every day
+  for that reason; on a closed day the worker stops at once.
 - **Never end a login that still works**: every successful TOTP login revokes the token before it.
   So each wake-up first asks OpenAlgo, which checks the stored token with Upstox (one read-only
   call to the funds endpoint its own Upstox plugin uses): if Upstox still accepts it, nothing
