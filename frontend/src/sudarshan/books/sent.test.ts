@@ -495,6 +495,45 @@ describe('a reload', () => {
     fresh.resetSentForTests()
   })
 
+  it('keeps the longer hold of a send that got no answer', async () => {
+    const batch = beginSends('exit', false, [LONG])
+    wait(45_000)
+    settleSends(batch, 'unanswered')
+    wait(5_000)
+
+    const fresh = await reload()
+    const mark = () => fresh.exitMark(fresh.sentMarksNow(), false, ID)
+    expect(mark()).toMatchObject({ noAnswer: true, expired: false })
+    wait(SENT_HOLD_MS + 1_000) // 66 s from the tap: one that got an answer would let go
+    expect(fresh.isHeld(mark())).toBe(true)
+    wait(NO_ANSWER_HOLD_MS - 66_000 + 1_000)
+    expect(fresh.isHeld(mark())).toBe(false)
+    fresh.resetSentForTests()
+  })
+
+  it('keeps an exit pinned to the order its answer named', async () => {
+    settleSends(beginSends('exit', false, [LONG]), 'sent', Date.now(), 'X1')
+    wait(2_000)
+
+    const fresh = await reload()
+    const fold = await import('./orderFold')
+    const mark = () => fresh.exitMark(fresh.sentMarksNow(), false, ID)
+    expect(mark()).toMatchObject({ pinned: true, orders: [{ id: 'X1' }] })
+    const frame = { mode: 'live', symbol: 'NIFTY27OCT2625900CE', exchange: 'NFO', product: 'MIS' }
+    fold.notePushedFrame({ ...frame, orderid: 'X1', action: 'SELL', order_status: 'complete' })
+    // The trader's stop-loss on the same contract, moved after the reload.
+    fold.notePushedFrame({
+      ...frame,
+      orderid: 'SL7',
+      action: 'SELL',
+      order_status: 'trigger pending',
+    })
+    wait(SENT_HOLD_MS)
+    expect(mark()?.orders?.map((order) => order.id)).toEqual(['X1'])
+    expect(fresh.isHeld(mark())).toBe(false)
+    fresh.resetSentForTests()
+  })
+
   it('starts empty on storage it cannot read, and keeps working without it', async () => {
     sessionStorage.setItem('sudarshan-sent-v1', '{not json')
     let fresh = await reload()
