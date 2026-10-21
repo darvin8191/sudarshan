@@ -9,6 +9,7 @@ for the same position, or any Exit all, is still running in this process.
 from __future__ import annotations
 
 import threading
+import time
 
 import pytest
 
@@ -119,6 +120,29 @@ def test_two_overlapping_exits_for_one_position_give_one_order_and_one_409(route
     assert answer["code"] == 200 and answer["body"]["orderid"]
     assert routes["placed"] == [EXIT["symbol"]]
     assert len(exit_guard.EXITS) == 0
+
+
+def test_two_exits_released_together_give_one_order_and_one_409(routes):
+    """Barrier-synchronised: two requests on real threads (gthread) arrive at once."""
+    start = threading.Barrier(2)
+    codes = []
+
+    def post():
+        start.wait(WAIT)
+        codes.append(_client().post("/close_position", json=EXIT).status_code)
+
+    threads = [threading.Thread(target=post) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    assert routes["entered"].wait(WAIT)  # one is placing, held at the broker
+    deadline = time.monotonic() + WAIT
+    while not codes and time.monotonic() < deadline:  # the other has its answer
+        time.sleep(0.01)
+    routes["release"].set()
+    for thread in threads:
+        thread.join(WAIT)
+    assert sorted(codes) == [200, 409]
+    assert routes["placed"] == [EXIT["symbol"]]
 
 
 def test_a_refusal_takes_nothing_from_the_exit_it_was_refused_for(routes):
