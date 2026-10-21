@@ -101,7 +101,15 @@ def test_a_title_is_not_said_twice_and_markdown_stays_whole():
     )
 
 
-def test_the_bot_s_closeall_reply_says_the_app_s_sentence(monkeypatch):
+@pytest.mark.parametrize(
+    ("callback", "said"),
+    [
+        ("confirm_closeall", f"*Exit all did not close every position*\n\n{NOT_READ}"),
+        ("confirm_closeall_with_strategies", f"Exit all did not close every position: {NOT_READ}"),
+    ],
+    ids=["/closeall", "/closeall and stop strategies"],
+)
+def test_the_bot_s_closeall_reply_says_the_app_s_sentence(monkeypatch, callback, said):
     import services.telegram_bot_service as bot
 
     service = bot.TelegramBotService()
@@ -111,8 +119,9 @@ def test_the_bot_s_closeall_reply_says_the_app_s_sentence(monkeypatch):
     )
     monkeypatch.setattr(bot, "get_telegram_user", lambda telegram_id: {"telegram_id": telegram_id})
     monkeypatch.setattr(bot, "log_command", lambda *args, **kwargs: None)
+    monkeypatch.setattr(bot, "_running_python_strategies", lambda: [])
     monkeypatch.setattr(service, "_get_sdk_client", lambda telegram_id: client)
-    query = MagicMock(data="confirm_closeall", answer=AsyncMock(), edit_message_text=AsyncMock())
+    query = MagicMock(data=callback, answer=AsyncMock(), edit_message_text=AsyncMock())
     query.from_user.id = 7
     query.message.chat.id = 9
     context = MagicMock()
@@ -121,7 +130,8 @@ def test_the_bot_s_closeall_reply_says_the_app_s_sentence(monkeypatch):
     asyncio.run(service.button_callback(MagicMock(callback_query=query), context))
 
     sent = context.bot.send_message.call_args.kwargs
-    assert sent["text"] == f"*Exit all did not close every position*\n\n{NOT_READ}"
+    assert said in sent["text"]
+    assert "HTTP" not in sent["text"] and "{" not in sent["text"]
     assert sent["parse_mode"] == "Markdown"
 
 
