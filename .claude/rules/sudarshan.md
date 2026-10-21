@@ -119,10 +119,14 @@ in brand. Icon "Mor": tile #0E5A73, ring #E3A21A, glyph #FFFFFF. Numbers via
   - A destructive action (exit, exit all, cancel, cancel all) asks first, sends once however it
     is tapped, and stays "sent" (`books/sent.ts`, app-wide, kept across a reload) until the
     book shows the position flat, gone or flipped (an exit) or the order final (a cancel). A
-    part close keeps the hold; no answer holds it as "not confirmed"; it expires 15 s after
-    the answer or the last change only while no closing order it sent is working, and then
-    asks again with a warning. A stranded hold costs a retry; a released one can reverse a
-    position.
+    part close keeps the hold. No answer at all holds up to 150 s from the tap (one Upstox call
+    can take 120 s); an answer the app could not confirm holds 15 s after the answer or the
+    last change; the exit's own open order (pinned by the order id in the answer) holds until
+    a book read settles it. After that it asks again, saying what is known about the first.
+    The app's close routes also refuse an overlapping exit with 409
+    (`sudarshan/books/exit_guard.py`). Anything that may have reached the broker reads "not
+    confirmed", never a refusal or raw error text. A stranded hold costs a retry; a released
+    one can reverse a position.
   - A sheet, a confirmation or an order ticket ignores taps for 500 ms after it opens
     (`watchlist/openGuard.ts`), so a double tap never presses what appeared under the finger.
   - Order alerts on Telegram (M6.8) are on by default (owner's broker-app benchmark, 20 Oct
