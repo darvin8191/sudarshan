@@ -248,6 +248,23 @@ def test_an_exit_all_waits_for_the_exit_in_flight_then_closes(server):
     assert server.claims() | {"pid": 0} == {"held": 0, "pid": 0, "closed": [0]}
 
 
+def test_an_exit_all_waiting_on_two_exits_keeps_the_worker_serving(server):
+    """After the first exit ends the wait goes on yielding: the worker serves the second's end."""
+    first, _ = _in_background(server.post, "/close_position?hold=1.5", EXIT)
+    second, _ = _in_background(server.post, "/close_position?hold=3", OTHER)
+    time.sleep(0.5)
+    everything, closed = _in_background(server.post, "/api/v1/closeposition", {})
+    first.join(15)  # one exit has ended; the Exit all waits on for the other
+    time.sleep(0.5)
+    started = time.monotonic()
+    assert server.get("/ping", timeout=5)[0] == 200
+    assert time.monotonic() - started < 1.0
+    second.join(15)
+    everything.join(15)
+    assert closed["result"][0] == 200
+    assert server.claims()["closed"] == [0]
+
+
 def test_an_exit_all_whose_caller_gave_up_still_waits_and_closes(server):
     """TradingView gives up on a webhook after 3 s; the view goes on, waits, and closes the rest."""
     single, _ = _in_background(server.post, "/close_position?hold=3", EXIT)

@@ -654,3 +654,15 @@ def test_a_phone_exit_and_an_unattended_exit_all_released_together_never_overlap
     else:
         assert answers["exit"] == (409, EXIT_ALL_BEING_PLACED)
         assert routes["placed"] == ["ALL"]
+
+
+def test_an_exit_all_waits_long_enough_for_one_slow_upstox_call():
+    """The wait covers one exit's broker call at its bound, and the order window's queue before it."""
+    from utils.broker_backpressure import BROKER_MAX_ORDER_QUEUE_WAIT_SECONDS
+    from utils.httpx_client import REQUEST_TIMEOUT_SECONDS
+
+    assert (
+        exit_guard.EXIT_ALL_WAITS_S >= REQUEST_TIMEOUT_SECONDS + BROKER_MAX_ORDER_QUEUE_WAIT_SECONDS
+    )
+    # And not much longer: nginx gives the request 300 s, and the closes still follow the wait.
+    assert exit_guard.EXIT_ALL_WAITS_S <= 150
