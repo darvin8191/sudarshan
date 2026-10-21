@@ -311,3 +311,45 @@ describe('g: a cancel sent', () => {
     expect(orderCard()).not.toHaveTextContent('Cancel sent')
   })
 })
+
+const CANCEL_NOT_CONFIRMED =
+  'This cancel is not confirmed: it may have gone through. Check the order’s status before cancelling it again.'
+
+/** An answer from the app that may have reached the broker: a 5xx, or one it marks so. */
+function notConfirmedAnswer(status: number, data: object) {
+  return new AxiosError('Request failed', 'ERR_BAD_RESPONSE', undefined, undefined, {
+    status,
+    statusText: '',
+    headers: {},
+    config: { headers: new AxiosHeaders() },
+    data,
+  })
+}
+
+describe('g: a cancel that may have reached the broker', () => {
+  it.each([
+    [
+      'the app’s own JSON 500 (the read timed out after Upstox took it)',
+      () => notConfirmedAnswer(500, { status: 'error', message: 'The read operation timed out' }),
+    ],
+    [
+      'the app’s 502 marked not confirmed',
+      () =>
+        notConfirmedAnswer(502, {
+          status: 'error',
+          message: CANCEL_NOT_CONFIRMED,
+          not_confirmed: true,
+        }),
+    ],
+  ])('%s is held as not confirmed, the toast in the app’s words', async (_, error) => {
+    const tap = user()
+    api.cancelOrder.mockRejectedValueOnce(error())
+    await open(WORKING)
+    await cancelOnce(tap)
+    expect((await sheetButtons(tap)).offered).toBe(false)
+    expect(orderCard()).toHaveTextContent('Not confirmed: check its status before cancelling again')
+    expect(toast.error).not.toHaveBeenCalled()
+    expect(toast.warning).toHaveBeenCalledWith(CANCEL_NOT_CONFIRMED, 'orders')
+    expect(api.cancelOrder).toHaveBeenCalledTimes(1)
+  })
+})

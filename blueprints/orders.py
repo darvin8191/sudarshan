@@ -23,6 +23,33 @@ logger = get_logger(__name__)
 # Use existing rate limits from .env
 API_RATE_LIMIT = os.getenv("API_RATE_LIMIT", "50 per second")
 
+# SUDARSHAN M6.9: an exit or a cancel that may have reached the broker is "not confirmed",
+# never a refusal: a trader told it failed sends it again, and a second exit sized from a
+# book that has not caught up reverses the position instead of closing it. Such an answer
+# carries not_confirmed (the phone holds its Exit on it, and on any 5xx), and its words are
+# written for a trader, never an exception's.
+EXIT_NOT_CONFIRMED = (
+    "This exit is not confirmed: it may have gone through. Check Orders before sending it again."
+)
+EXIT_ALL_NOT_CONFIRMED = (
+    "Exit all is not confirmed: some exits may have gone through. "
+    "Check Orders before sending it again."
+)
+CANCEL_NOT_CONFIRMED = (
+    "This cancel is not confirmed: it may have gone through. "
+    "Check the order's status before cancelling it again."
+)
+CANCEL_ALL_NOT_CONFIRMED = (
+    "Cancel all is not confirmed: some cancels may have gone through. "
+    "Check the orders' status before cancelling again."
+)
+
+
+def _not_confirmed(message):
+    """SUDARSHAN M6.9: the body of an answer that may have reached the broker."""
+    return {"status": "error", "message": message, "not_confirmed": True}
+
+
 # Define the blueprint
 orders_bp = Blueprint("orders_bp", __name__, url_prefix="/")
 
@@ -606,28 +633,43 @@ def close_position():
             }
             status_code = 200
 
-            # Publish event for logging, socketio, and telegram (fixes missing API log)
-            api_key = get_api_key_for_tradingview(login_username)
-            if api_key:
-                from events import PositionClosedEvent
-                from utils.event_bus import bus
+            # SUDARSHAN M6.9: the order is placed and its id known, so a failure to log it
+            # must not turn the answer into an error.
+            try:
+                # Publish event for logging, socketio, and telegram (fixes missing API log)
+                api_key = get_api_key_for_tradingview(login_username)
+                if api_key:
+                    from events import PositionClosedEvent
+                    from utils.event_bus import bus
 
-                log_request = order_data.copy()
-                log_request["api_type"] = "closeposition"
+                    log_request = order_data.copy()
+                    log_request["api_type"] = "closeposition"
 
-                bus.publish(PositionClosedEvent(
-                    mode="live",
-                    api_type="closeposition",
-                    symbol=symbol,
-                    exchange=exchange,
-                    product=product,
-                    orderid=str(orderid),
-                    message="Position close order placed successfully.",
-                    request_data=log_request,
-                    response_data=response_data,
-                    api_key=api_key,
-                ))
+                    bus.publish(PositionClosedEvent(
+                        mode="live",
+                        api_type="closeposition",
+                        symbol=symbol,
+                        exchange=exchange,
+                        product=product,
+                        orderid=str(orderid),
+                        message="Position close order placed successfully.",
+                        request_data=log_request,
+                        response_data=response_data,
+                        api_key=api_key,
+                    ))
+            except Exception:
+                logger.exception(f"Close position order {orderid} placed; logging it failed")
         else:
+            # SUDARSHAN M6.9: an answer from the broker that names no order (a success
+            # without an id, an error carried by a 2xx, a broker 5xx, or a failure after the
+            # send) may still have placed one. Only a broker's refusal (a 4xx) or no send at
+            # all (no response) is a refusal.
+            sent_status = getattr(res, "status", None)
+            if isinstance(sent_status, int) and not 400 <= sent_status < 500:
+                logger.error(f"Close position for {symbol} not confirmed (status {sent_status})")
+                not_confirmed_code = sent_status if sent_status >= 500 else 502
+                return jsonify(_not_confirmed(EXIT_NOT_CONFIRMED)), not_confirmed_code
+
             # No orderid, definite error
             response_data = {
                 "status": "error",
@@ -644,7 +686,8 @@ def close_position():
 
     except Exception as e:
         logger.exception(f"Error in close_position endpoint: {str(e)}")
-        return jsonify({"status": "error", "message": f"An error occurred: {str(e)}"}), 500
+        # SUDARSHAN M6.9: it may have broken after the order went.
+        return jsonify(_not_confirmed(EXIT_NOT_CONFIRMED)), 500
 
 
 @orders_bp.route("/close_all_positions", methods=["POST"])
@@ -690,7 +733,8 @@ def close_all_positions():
 
     except Exception as e:
         logger.exception(f"Error in close_all_positions endpoint: {str(e)}")
-        return jsonify({"status": "error", "message": f"An error occurred: {str(e)}"}), 500
+        # SUDARSHAN M6.9: it may have broken after some exits went.
+        return jsonify(_not_confirmed(EXIT_ALL_NOT_CONFIRMED)), 500
 
 
 @orders_bp.route("/cancel_all_orders", methods=["POST"])
@@ -746,7 +790,8 @@ def cancel_all_orders_ui():
 
     except Exception as e:
         logger.exception(f"Error in cancel_all_orders_ui endpoint: {str(e)}")
-        return jsonify({"status": "error", "message": f"An error occurred: {str(e)}"}), 500
+        # SUDARSHAN M6.9: it may have broken after some cancels went.
+        return jsonify(_not_confirmed(CANCEL_ALL_NOT_CONFIRMED)), 500
 
 
 @orders_bp.route("/cancel_order", methods=["POST"])
@@ -789,7 +834,8 @@ def cancel_order_ui():
 
     except Exception as e:
         logger.exception(f"Error in cancel_order_ui endpoint: {str(e)}")
-        return jsonify({"status": "error", "message": f"An error occurred: {str(e)}"}), 500
+        # SUDARSHAN M6.9: it may have broken after the cancel went.
+        return jsonify(_not_confirmed(CANCEL_NOT_CONFIRMED)), 500
 
 
 @orders_bp.route("/modify_gtt_order", methods=["POST"])

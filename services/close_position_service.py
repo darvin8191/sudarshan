@@ -195,6 +195,9 @@ def close_position_with_auth(
             else "Failed to close positions"
         )
         error_response = {"status": "error", "message": message}
+        # SUDARSHAN M6.9: a close-all that sent some of its exits keeps saying so.
+        if isinstance(response_code, dict) and response_code.get("not_confirmed"):
+            error_response["not_confirmed"] = True
         bus.publish(PositionClosedEvent(
             mode="live", api_type=API_TYPE,
             symbol=position_data.get("symbol", ""), exchange=position_data.get("exchange", ""),

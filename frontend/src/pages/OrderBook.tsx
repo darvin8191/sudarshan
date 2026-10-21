@@ -74,10 +74,11 @@ import {
   useOrderUpdates,
 } from '@/sudarshan/books/orderFold'
 import { QuoteStatus } from '@/sudarshan/books/QuoteStatus'
-// SUDARSHAN M6.9: what became of a cancel: sent, refused, or not confirmed (no answer).
+// SUDARSHAN M6.9: what became of a cancel: sent, refused, or not confirmed (it may have gone).
 import {
   appAnswered,
   NOT_CONFIRMED,
+  notConfirmed,
   refusalReason,
   thrownOutcome,
 } from '@/sudarshan/books/sendOutcome'
@@ -368,7 +369,8 @@ export default function OrderBook() {
   }, [fetchOrders])
 
   // SUDARSHAN M6.9: each returns what became of the cancel, so the phone holds its
-  // Cancel (src/sudarshan/books/sent.ts). No answer is "not confirmed", never "failed".
+  // Cancel (src/sudarshan/books/sent.ts). One that may have reached the broker is
+  // "not confirmed", never "failed".
   const handleCancelOrder = async (orderid: string): Promise<SendOutcome> => {
     try {
       const response = await tradingApi.cancelOrder(orderid)
@@ -376,7 +378,7 @@ export default function OrderBook() {
         showToast.success(`Order cancelled: ${orderid}`, 'orders')
         setTimeout(() => fetchOrders(true), 1000)
         return 'sent'
-      } else if (!appAnswered(response)) {
+      } else if (!appAnswered(response) || notConfirmed(response)) {
         showToast.warning(NOT_CONFIRMED.cancel, 'orders')
         setTimeout(() => fetchOrders(true), 1000)
         return 'unconfirmed'
@@ -406,7 +408,7 @@ export default function OrderBook() {
         return 'sent'
       } else if (response.status === 'info') {
         showToast.info(response.message || 'No open orders to cancel', 'orders')
-      } else if (!appAnswered(response)) {
+      } else if (!appAnswered(response) || notConfirmed(response)) {
         showToast.warning(NOT_CONFIRMED.cancelAll, 'orders')
         setTimeout(() => fetchOrders(true), 2000)
         return 'unconfirmed'

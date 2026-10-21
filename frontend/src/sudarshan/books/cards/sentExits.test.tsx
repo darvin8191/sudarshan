@@ -122,6 +122,17 @@ function refusal(status: number, message: string) {
   })
 }
 
+/** An answer from the app that may have reached the broker: a 5xx, or one it marks so. */
+function notConfirmedAnswer(status: number, data: object) {
+  return new AxiosError('Request failed', 'ERR_BAD_RESPONSE', undefined, undefined, {
+    status,
+    statusText: '',
+    headers: {},
+    config: { headers: new AxiosHeaders() },
+    data,
+  })
+}
+
 /** An answer from something between the phone and the app: a gateway's page. */
 function gateway(status: number) {
   return new AxiosError('Request failed', 'ERR_BAD_RESPONSE', undefined, undefined, {
@@ -537,5 +548,62 @@ describe('the wide table on the same page', () => {
     await tap.click(screen.getByRole('button', { name: 'Close All' }))
     await settle()
     expect(api.closeAllPositions).not.toHaveBeenCalled()
+  })
+})
+
+const EXIT_NOT_CONFIRMED =
+  'This exit is not confirmed: it may have gone through. Check Orders before sending it again.'
+
+describe('i: an answer that may have reached the broker is not confirmed', () => {
+  it.each([
+    [
+      'the app’s own JSON 500 (Upstox took it, then the read timed out)',
+      () => notConfirmedAnswer(500, { status: 'error', message: 'The read operation timed out' }),
+    ],
+    [
+      'the app’s 502: Upstox took it without naming an order',
+      () =>
+        notConfirmedAnswer(502, {
+          status: 'error',
+          message: EXIT_NOT_CONFIRMED,
+          not_confirmed: true,
+        }),
+    ],
+  ])('%s: held, the toast in the app’s words, and no second exit', async (_, error) => {
+    const tap = user()
+    api.closePosition.mockRejectedValueOnce(error())
+    await open(LONG, PUT)
+    await exitOnce(tap)
+
+    expect(card()).toHaveTextContent('Not confirmed: check Orders before sending again')
+    expect(await exitOffered(tap)).toBe(false)
+    expect(exitAll()).toBeDisabled()
+    expect(toast.error).not.toHaveBeenCalled()
+    expect(toast.warning).toHaveBeenCalledTimes(1)
+    expect(toast.warning).toHaveBeenCalledWith(EXIT_NOT_CONFIRMED, 'positions')
+    expect(api.closePosition).toHaveBeenCalledTimes(1)
+  })
+
+  it('Exit all that sent some exits before the rest were refused holds every one', async () => {
+    const tap = user()
+    api.closeAllPositions.mockRejectedValueOnce(
+      notConfirmedAnswer(429, {
+        status: 'error',
+        message: '1 of 2 open positions were not squared off.',
+        not_confirmed: true,
+      })
+    )
+    await open(LONG, PUT)
+    await tap.click(exitAll())
+    await tap.click(
+      within(screen.getByRole('dialog', { name: 'Exit all positions?' })).getByRole('button', {
+        name: 'Exit all',
+      })
+    )
+    await settle()
+    expect(exitAll()).toBeDisabled()
+    expect(card()).toHaveTextContent('Not confirmed: check Orders before sending again')
+    expect(putCard()).toHaveTextContent('Not confirmed: check Orders before sending again')
+    expect(toast.error).not.toHaveBeenCalled()
   })
 })

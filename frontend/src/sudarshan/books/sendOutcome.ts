@@ -1,17 +1,21 @@
 import axios from 'axios'
 
 /**
- * What the answer to an exit or a cancel says about the order (M6.9). Only an
- * answer from the app itself can say it was refused. No answer at all (the
- * network dropped, the request timed out, a gateway in between answered, or
- * the server broke without saying why) leaves the order possibly sent, which
- * is "not confirmed", never "failed": a trader told it failed sends it again,
- * and a second exit sized from a book that has not caught up reverses the
- * position instead of closing it.
+ * What the answer to an exit or a cancel says about the order (M6.9). Anything
+ * that may have reached the broker is "not confirmed", never "failed": a
+ * trader told it failed sends it again, and a second exit sized from a book
+ * that has not caught up reverses the position instead of closing it.
+ *
+ * - No answer (the network dropped, the 45 s wait ran out), and every 5xx,
+ *   whoever sent it: the app's own JSON 500 is what a read timeout or a
+ *   dropped connection after Upstox took the order turns into, and the route
+ *   answers 502 when Upstox took it without naming an order.
+ * - An answer the app marks `not_confirmed`, whatever its code: a close-all
+ *   that sent some exits before the order window refused the rest.
+ * - Refused: any other 4xx, which the app gives only before anything was
+ *   sent (a missing field, the login or the security token, no position to
+ *   exit, the rate limit), and a request that never left.
  */
-
-/** Answers from something between the phone and the app, not the app. */
-const GATEWAY = new Set([502, 503, 504])
 
 /** Whether a body is the app's own answer: a JSON object with its status word. */
 export function appAnswered(body: unknown): body is { status: string; message?: unknown } {
@@ -22,17 +26,22 @@ export function appAnswered(body: unknown): body is { status: string; message?: 
   )
 }
 
+/** Whether the app says this answer may have reached the broker. */
+export function notConfirmed(body: unknown): boolean {
+  return appAnswered(body) && (body as { not_confirmed?: unknown }).not_confirmed === true
+}
+
 /**
- * What a send that threw says: `refused` when the app answered no, or when
- * the request never left (the security token step before it failed);
- * `unconfirmed` when no answer of the app's own came back.
+ * What a send that threw says: `refused` when the app answered no before
+ * anything was sent, or when the request never left (the security token step
+ * before it failed); `unconfirmed` otherwise.
  */
 export function thrownOutcome(error: unknown): 'refused' | 'unconfirmed' {
   if (!axios.isAxiosError(error)) return 'refused'
   const response = error.response
   if (!response) return 'unconfirmed'
-  if (GATEWAY.has(response.status)) return 'unconfirmed'
-  if (response.status >= 500 && !appAnswered(response.data)) return 'unconfirmed'
+  if (response.status >= 500) return 'unconfirmed'
+  if (notConfirmed(response.data)) return 'unconfirmed'
   return 'refused'
 }
 
@@ -45,13 +54,16 @@ export function refusalReason(error: unknown): string | null {
   return typeof message === 'string' && message.trim() ? message.trim() : null
 }
 
-/** What the toast says when no answer came back: nothing is known to have failed. */
+/**
+ * What the toast says when it is not confirmed, whatever the cause: nothing is
+ * known to have failed, and the app's own words, never an exception's.
+ */
 export const NOT_CONFIRMED = {
-  exit: 'No answer came back, so this exit is not confirmed. Check Orders before sending it again.',
+  exit: 'This exit is not confirmed: it may have gone through. Check Orders before sending it again.',
   exitAll:
-    'No answer came back, so Exit all is not confirmed. Check Orders before sending it again.',
+    'Exit all is not confirmed: some exits may have gone through. Check Orders before sending it again.',
   cancel:
-    'No answer came back, so this cancel is not confirmed. Check the order’s status before cancelling it again.',
+    'This cancel is not confirmed: it may have gone through. Check the order’s status before cancelling it again.',
   cancelAll:
-    'No answer came back, so Cancel all is not confirmed. Check the orders’ status before cancelling again.',
+    'Cancel all is not confirmed: some cancels may have gone through. Check the orders’ status before cancelling again.',
 } as const

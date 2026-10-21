@@ -159,12 +159,17 @@ def get_api_response(
 
         logger.exception(f"HTTP error on {endpoint}: {error_response}")
         try:
-            return e.response.json()
+            body = e.response.json()
         except json.JSONDecodeError:
-            return {"status": "error", "message": f"HTTP error: {error_response}"}
+            body = {"status": "error", "message": f"HTTP error: {error_response}"}
+        # SUDARSHAN M6.9: an Upstox 5xx does not say a cancel or a modify was not acted on.
+        if e.response.status_code >= 500 and isinstance(body, dict):
+            body["not_confirmed"] = True
+        return body
     except Exception as e:
         logger.exception(f"Unexpected error on {endpoint}")
-        return {"status": "error", "message": str(e)}
+        # SUDARSHAN M6.9: a timeout or a dropped connection may come after Upstox acted.
+        return {"status": "error", "message": str(e), "not_confirmed": True}
 
 
 def get_order_book(auth):
@@ -278,6 +283,23 @@ class _ErrorResponse:
     def __init__(self, status):
         self.status = status
         self.status_code = status
+
+
+# SUDARSHAN M6.9: what an order or a cancel that may have reached Upstox says, and what one
+# that broke before anything was sent says. Written for a trader, never an exception's words.
+_SMART_NOT_CONFIRMED = {
+    "status": "error",
+    "message": "This order is not confirmed: it may have gone through. Check Orders before "
+    "sending it again.",
+}
+_SMART_NOT_SENT = {
+    "status": "error",
+    "message": "The order was not sent: something went wrong before it could be. Try again.",
+}
+_CANCEL_NOT_CONFIRMED = (
+    "This cancel is not confirmed: it may have gone through. Check the order's status before "
+    "cancelling it again."
+)
 
 
 def _extract_error(response):
@@ -419,6 +441,7 @@ def place_smartorder_api(data, auth):
     Places a smart order by comparing the desired position size with the current open position.
     """
     logger.debug(f"Placing smart order with data: {data}")
+    sent = False  # SUDARSHAN M6.9: whether a failure below came after the order went
     try:
         symbol = data.get("symbol")
         exchange = data.get("exchange")
@@ -436,6 +459,7 @@ def place_smartorder_api(data, auth):
 
             if position_size == 0 and current_position == 0 and int(data.get("quantity", 0)) != 0:
                 logger.debug("No existing position and quantity is specified. Placing a new order.")
+                sent = True
                 res, response, orderid = place_order_api(data, auth)
                 # Like every other placement here: the next smart order for this
                 # symbol must not read the book from before this one.
@@ -461,6 +485,7 @@ def place_smartorder_api(data, auth):
             order_data["action"] = action
             order_data["quantity"] = str(quantity)
 
+            sent = True
             res, response, orderid = place_order_api(order_data, auth)
             _invalidate_position_cache(auth)
             return res, response, orderid
@@ -471,9 +496,13 @@ def place_smartorder_api(data, auth):
         return busy_response(str(exc))
     except PositionReadError:
         raise
-    except Exception as e:
+    except Exception:
         logger.exception("Unexpected error in place_smartorder_api")
-        return None, {"status": "error", "message": str(e)}, None
+        # SUDARSHAN M6.9: after the send it is not confirmed (the answer's .status is what
+        # the close-position route reads); before it, a refusal. Never an exception's words.
+        if sent:
+            return _ErrorResponse(500), {**_SMART_NOT_CONFIRMED, "not_confirmed": True}, None
+        return None, dict(_SMART_NOT_SENT), None
 
 
 def close_all_positions(current_api_key, auth):
@@ -532,6 +561,8 @@ def close_all_positions(current_api_key, auth):
                     "turn was too far away. Check your positions and square off the rest "
                     "again."
                 ),
+                # SUDARSHAN M6.9: the rest were sent, so this 429 is not a plain refusal.
+                **({"not_confirmed": True} if refused < attempted else {}),
             }, 429
 
         logger.debug("Successfully initiated closing of all open positions.")
@@ -563,6 +594,11 @@ def cancel_order(orderid, auth):
             canceled_id = _extract_order_id(response_data.get("data"))
             logger.debug(f"Successfully canceled order ID: {canceled_id}")
             return {"status": "success", "orderid": canceled_id}, 200
+        elif response_data.get("not_confirmed"):
+            # SUDARSHAN M6.9: no usable answer (a timeout, a dropped connection, an Upstox
+            # 5xx) may still have cancelled it, so it is not a refusal.
+            logger.error(f"Cancel of order {orderid} not confirmed: {response_data}")
+            return {"status": "error", "message": _CANCEL_NOT_CONFIRMED, "not_confirmed": True}, 502
         else:
             error_msg = response_data.get("message", "Failed to cancel order")
             logger.error(
@@ -572,9 +608,10 @@ def cancel_order(orderid, auth):
 
     except BrokerBusyError as exc:
         return {"status": "error", "message": str(exc)}, 429
-    except Exception as e:
+    except Exception:
         logger.exception(f"Unexpected error canceling order {orderid}")
-        return {"status": "error", "message": str(e)}, 500
+        # SUDARSHAN M6.9: it broke after the cancel went.
+        return {"status": "error", "message": _CANCEL_NOT_CONFIRMED, "not_confirmed": True}, 500
 
 
 def modify_order(data, auth):

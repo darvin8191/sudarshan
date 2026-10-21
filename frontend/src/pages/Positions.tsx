@@ -59,10 +59,11 @@ import { PositionCards, useTableExits } from '@/sudarshan/books/cards/PositionCa
 // SUDARSHAN: the book re-read, status line and tick prices (src/sudarshan/books).
 import { useBookFeed } from '@/sudarshan/books/feed'
 import { TickPrice } from '@/sudarshan/books/LiveFigures'
-// SUDARSHAN M6.9: what became of an exit: sent, refused, or not confirmed (no answer).
+// SUDARSHAN M6.9: what became of an exit: sent, refused, or not confirmed (it may have gone).
 import {
   appAnswered,
   NOT_CONFIRMED,
+  notConfirmed,
   refusalReason,
   thrownOutcome,
 } from '@/sudarshan/books/sendOutcome'
@@ -457,8 +458,8 @@ export default function Positions() {
     grouping !== 'none'
 
   // SUDARSHAN M6.9: each returns what became of the exit, so the phone holds its
-  // Exit (src/sudarshan/books/sent.ts). No answer is "not confirmed", never
-  // "failed": the exit may have gone, and a second one would reverse the position.
+  // Exit (src/sudarshan/books/sent.ts). An answer that may have reached the broker is
+  // "not confirmed", never "failed": a second exit would reverse the position.
   const handleClosePosition = async (position: Position): Promise<SendOutcome> => {
     try {
       const response = await tradingApi.closePosition(
@@ -470,7 +471,7 @@ export default function Positions() {
         showToast.success(response.message || `Position closed for ${position.symbol}`, 'positions')
         fetchPositions(true)
         return 'sent'
-      } else if (!appAnswered(response)) {
+      } else if (!appAnswered(response) || notConfirmed(response)) {
         showToast.warning(NOT_CONFIRMED.exit, 'positions')
         fetchPositions(true)
         return 'unconfirmed'
@@ -495,7 +496,7 @@ export default function Positions() {
         // Toast handled by close_position_event socket
         fetchPositions(true)
         return 'sent'
-      } else if (!appAnswered(response)) {
+      } else if (!appAnswered(response) || notConfirmed(response)) {
         showToast.warning(NOT_CONFIRMED.exitAll, 'positions')
         fetchPositions(true)
         return 'unconfirmed'
