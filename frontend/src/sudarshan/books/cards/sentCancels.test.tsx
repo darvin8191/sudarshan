@@ -388,16 +388,15 @@ describe('g: a cancel confirmation tapped once that order’s cancel is held', (
 })
 
 describe('g: a cancel answer the app marks not confirmed, whatever its code', () => {
-  it('a 2xx marked so holds the cancel as not confirmed', async () => {
+  it('a 2xx marked so holds the cancel as not confirmed, in the app’s words', async () => {
     const tap = user()
-    api.cancelOrder.mockResolvedValueOnce({
-      status: 'error',
-      message: CANCEL_NOT_CONFIRMED,
-      not_confirmed: true,
-    })
+    const words =
+      'Upstox took this cancel without confirming it: it may have gone through. Check the order’s status before cancelling it again.'
+    api.cancelOrder.mockResolvedValueOnce({ status: 'error', message: words, not_confirmed: true })
     await open(WORKING)
     await cancelOnce(tap)
     expect(orderCard()).toHaveTextContent('Not confirmed: check its status before cancelling again')
+    expect(toast.warning).toHaveBeenCalledWith(words, 'orders')
     expect((await sheetButtons(tap)).offered).toBe(false)
     expect(toast.error).not.toHaveBeenCalled()
   })

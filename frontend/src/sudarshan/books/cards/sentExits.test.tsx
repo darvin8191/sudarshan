@@ -889,14 +889,20 @@ describe('n: an exit whose answer named its order', () => {
     const { push } = await open(LONG, PUT)
     await exitOnce(tap)
     push({ ...EXIT_ORDER, order_status: 'complete' })
-    // The trader's stop-loss on the same contract, moved after the exit went.
-    push({
+    // The trader's stop-loss on the same contract, moved after the exit went, and still
+    // working in the order book: taken for the exit's own, it would hold the card.
+    const stopLoss = {
       ...EXIT_ORDER,
       orderid: '251020000699001',
       pricetype: 'SL-M',
       order_status: 'trigger pending',
-    })
+    }
+    push(stopLoss)
+    api.getOrders.mockResolvedValue(
+      orderBook({ ...EXIT_ORDER, order_status: 'complete' }, stopLoss)
+    )
     await pass(16_000)
+    await pass(31_000) // an order book read, had anything held it by its order
     expect(card()).not.toHaveTextContent('Exit order open')
     expect(await exitOffered(tap)).toBe(true)
   })
@@ -919,15 +925,17 @@ describe('o: an order book read that failed', () => {
 describe('p: an answer the app marks not confirmed, whatever its code', () => {
   it('a 2xx marked so holds the exit as not confirmed, in the app’s words', async () => {
     const tap = user()
+    const words =
+      'Upstox took this exit without naming its order: it may have gone through. Check Orders before sending it again.'
     api.closePosition.mockResolvedValueOnce({
       status: 'error',
-      message:
-        'This exit is not confirmed: it may have gone through. Check Orders before sending it again.',
+      message: words,
       not_confirmed: true,
     })
     await open(LONG, PUT)
     await exitOnce(tap)
     expect(card()).toHaveTextContent('Not confirmed: check Orders before sending again')
+    expect(toast.warning).toHaveBeenCalledWith(words, 'positions')
     expect(await exitOffered(tap)).toBe(false)
     expect(toast.error).not.toHaveBeenCalled()
   })
