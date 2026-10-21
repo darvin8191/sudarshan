@@ -46,24 +46,36 @@ Tests: `sudarshan/ops/tests/test_deploy_env.py`.
 
 Nobody edits the server's day files by hand either. `/etc/sudarshan/nse_holidays.txt` (days NSE is
 closed) and `/etc/sudarshan/nse_extra_trading_days.txt` (a session on a day that is otherwise
-closed, with its own `HH:MM-HH:MM` window once NSE gives one) drive the deploy tool's market gate,
+closed, with that session's own `HH:MM-HH:MM` window) drive the deploy tool's market gate,
 auto-login's trading days and the order alerts' window; the feed reads the holiday file. A release
-lists the lines it needs in `ops/deploy/nse-calendar.conf` (a `[FILE]` line, then `line TEXT` and
-`was EARLIER_TEXT`; the file's header gives the format). `sudarshan-deploy`:
+lists the lines it needs in `ops/deploy/nse-calendar.conf` (a `[FILE]` line, then `line TEXT`,
+`was EARLIER_TEXT` for the same date, and `drop TEXT`; the file's header gives the format).
+`sudarshan-deploy`:
 
-- reads the list from GitHub at the release tag, never from the server's copy of the code;
+- reads the list from GitHub at the release tag, never from the server's copy of the code, and
+  takes it only when it arrived whole; the installed release's list is fetched once and kept in
+  `/var/lib/sudarshan/calendar-lists`;
 - applies the list of the installed release on every run, also when it installs nothing and in
   market hours, because each reader picks up a changed file by itself; an install applies the
   list of the release it brings;
 - adds a shipped line whose date the file does not list yet, and replaces a line only while it is
-  one an earlier release shipped (a `was`); a date the owner wrote in his own words stays, and the
-  log says it was left alone;
-- never deletes a line, keeps every other byte and the file's owner, group and mode, creates a
-  missing file root:sudarshan 640, and renames the new file into place in one step;
-- logs one line per change; an install keeps the files it changes in its backup folder and puts
-  them back if it rolls back; a list or a write that fails is logged and never stops an install.
+  a version an earlier release shipped for that date (a `was`); a date the owner wrote in his own
+  words stays, and so does his removal of a line this tool added
+  (`/var/lib/sudarshan/calendar_applied` records those lines); a `drop` takes out only a line
+  this tool added;
+- never changes today in a way that could open the market gate: a holiday is added only before
+  its day; a run that installs nothing changes no line dated today or earlier (it only adds a
+  special session for today); and the gate holds a release if the day files say trading either
+  as the run found them or after its calendar step;
+- keeps every other byte and the file's owner, group and mode, creates a missing file
+  root:sudarshan 640 (and writes only while `/etc/sudarshan` is root's and closed to others), and
+  renames the new file into place in one step; a temporary file a killed run left is cleared;
+- logs a change once it is written and each note (a line left alone, a failure) once while it
+  holds; an install keeps the files it changes in its backup folder and puts them back if it rolls
+  back; a list or a write that fails never stops an install.
 
 The first release that carries the list is installed by the tool before it, which does not read
 the list; the tool that install puts in place applies it on its first run, the next timer tick.
-`sudarshan-deploy --check` shows what the latest release would change. Tests:
-`sudarshan/ops/tests/test_deploy_calendar.py`.
+The deploy tool also asks the market gate again right before it stops OpenAlgo, in case the
+window opened during the download. `sudarshan-deploy --check` shows what the latest release
+would change. Tests: `sudarshan/ops/tests/test_deploy_calendar.py`.
