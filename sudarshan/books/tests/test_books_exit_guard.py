@@ -656,6 +656,75 @@ def test_a_phone_exit_and_an_unattended_exit_all_released_together_never_overlap
         assert routes["placed"] == ["ALL"]
 
 
+class _SaysWhoHoldsIt:
+    """The guard's lock, saying which thread holds it right now."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self.holder = None
+
+    def __enter__(self):
+        self._lock.acquire()
+        self.holder = threading.get_ident()
+        return self
+
+    def __exit__(self, *exc):
+        self.holder = None
+        self._lock.release()
+        return False
+
+
+def _until(condition):
+    deadline = time.monotonic() + WAIT
+    while not condition():
+        assert time.monotonic() < deadline
+        time.sleep(0.01)
+
+
+def test_an_exit_all_waits_holding_no_lock_and_once_per_exit_that_ends(monkeypatch):
+    """Under eventlet the guard's lock is a real one, and a greenlet that waits while holding it
+    stops the whole worker the moment another request needs it (an exit tapped meanwhile, or the
+    exit in flight ending). So every wait starts with the lock let go, and the Exit all wakes only
+    when an exit ends, instead of spinning (which under eventlet starves every other request)."""
+    guard = ExitsInFlight()
+    guard._lock = lock = _SaysWhoHoldsIt()
+    holding = []  # one entry per wait: whether the waiting thread held the lock as it began
+    wait_for = exit_guard.real_threading.wait_for
+
+    def watched(event, timeout, *args, **kwargs):
+        holding.append(lock.holder == threading.get_ident())
+        return wait_for(event, timeout, *args, **kwargs)
+
+    monkeypatch.setattr(exit_guard.real_threading, "wait_for", watched)
+    ends = {kind: threading.Event() for kind in ("CE", "PE")}
+
+    def exit_in_flight(kind):
+        with guard.one("live", ("NFO", f"NIFTY27OCT2625900{kind}", "MIS")) as busy:
+            assert busy is None
+            assert ends[kind].wait(WAIT)
+
+    exits = [threading.Thread(target=exit_in_flight, args=(kind,)) for kind in ends]
+    for thread in exits:
+        thread.start()
+    _until(lambda: len(guard) == 2)
+
+    def exit_all():
+        with guard.every("live", wait_s=WAIT) as busy:
+            return busy
+
+    everything, answer = _in_background(exit_all)
+    _until(lambda: len(holding) == 1)  # waiting for both
+    ends["CE"].set()
+    _until(lambda: len(holding) == 2)  # woken by the first to end, waiting for the other
+    ends["PE"].set()
+    everything.join(WAIT)
+    for thread in exits:
+        thread.join(WAIT)
+    assert answer["result"] is None  # it went
+    assert holding == [False, False]
+    assert len(guard) == 0
+
+
 def test_an_exit_all_waits_long_enough_for_one_slow_upstox_call():
     """The wait covers one exit's broker call at its bound, and the order window's queue before it."""
     from utils.broker_backpressure import BROKER_MAX_ORDER_QUEUE_WAIT_SECONDS
