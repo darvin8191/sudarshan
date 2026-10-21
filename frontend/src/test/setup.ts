@@ -1,6 +1,14 @@
 import '@testing-library/jest-dom/vitest'
 import { cleanup } from '@testing-library/react'
-import { afterEach, vi } from 'vitest'
+import { afterEach, beforeEach, vi } from 'vitest'
+// SUDARSHAN (M6.9): the guard that makes a just-opened sheet or confirmation
+// ignore taps for half a second. Tests that are not about it tap at once.
+import { OPEN_GUARD } from '@/sudarshan/watchlist/openGuard'
+
+// SUDARSHAN (M6.9): off unless a test turns it on (openGuard.test.tsx does).
+beforeEach(() => {
+  OPEN_GUARD.ms = 0
+})
 
 // Cleanup after each test case
 afterEach(() => {

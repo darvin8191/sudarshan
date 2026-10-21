@@ -111,6 +111,8 @@ type Book = 'positions' | 'orderbook'
 /** The page as a fresh load of the app has it: every module evaluated again. */
 async function freshPage(book: Book): Promise<ReactElement> {
   vi.resetModules()
+  // The fresh module graph has its own tap guard; these tests tap at once.
+  ;(await import('@/sudarshan/watchlist/openGuard')).OPEN_GUARD.ms = 0
   if (book === 'positions') {
     const { default: Positions } = await import('@/pages/Positions')
     return <Positions />

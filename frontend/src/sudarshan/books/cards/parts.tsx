@@ -24,6 +24,7 @@ import type { TickDirection } from '@/sudarshan/books/prices'
 import { directionOf, formatPercent, formatPrice, formatRupees } from '@/sudarshan/dashboard/format'
 import { TREND_TEXT, TrendArrow } from '@/sudarshan/dashboard/Trend'
 import { PRODUCT_MEANING, type Product } from '@/sudarshan/ticket/productPref'
+import { useOpenGuard } from '@/sudarshan/watchlist/openGuard'
 import { priceDecimals } from '@/sudarshan/watchlist/rows'
 import { type OrderState, sideOf, signedUnits } from './format'
 
@@ -325,7 +326,10 @@ export function price(value: number | null, exchange: string): string {
  * A yes-or-no step before an order goes out, the watchlist's dialog with 48dp
  * buttons. Its action runs once however fast it is tapped: the dialog stays on
  * screen until Back has taken its entry away, and a second tap in that moment
- * must not send a second order.
+ * must not send a second order. For half a second after it opens it takes no
+ * tap at all (`useOpenGuard`), and its action shows as disabled: on a tall
+ * phone the sheet's Cancel and this dialog's "Cancel order" sit on the same
+ * spot, so the second tap of a double tap on the one lands on the other.
  */
 export function Confirm({
   open,
@@ -348,6 +352,7 @@ export function Confirm({
 }) {
   const [sent, setSent] = useState(false)
   const once = useRef(false)
+  const guard = useOpenGuard(open)
   useEffect(() => {
     if (open) {
       once.current = false
@@ -357,7 +362,12 @@ export function Confirm({
 
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
-      <DialogContent showCloseButton={false} className="rounded-[1.125rem] sm:max-w-sm">
+      <DialogContent
+        {...guard.handlers}
+        data-settling={guard.settling || undefined}
+        showCloseButton={false}
+        className="rounded-[1.125rem] sm:max-w-sm"
+      >
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
@@ -368,7 +378,7 @@ export function Confirm({
           </button>
           <button
             type="button"
-            disabled={sent}
+            disabled={sent || guard.settling}
             onClick={() => {
               if (once.current) return
               once.current = true
