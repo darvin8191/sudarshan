@@ -13,6 +13,9 @@ from services.orderbook_service import get_orderbook
 from services.place_smart_order_service import place_smart_order
 from services.positionbook_service import get_positionbook
 from services.tradebook_service import get_tradebook
+
+# SUDARSHAN M6.9: one exit at a time per position from the app's own screens.
+from sudarshan.books.exit_guard import one_exit_at_a_time
 from utils import runtime
 from utils.latency_monitor import track_latency
 from utils.logging import get_logger
@@ -532,6 +535,7 @@ def export_positions():
 @check_session_validity
 @limiter.limit(API_RATE_LIMIT)
 @track_latency("CLOSE")
+@one_exit_at_a_time()  # SUDARSHAN M6.9: 409 while this position's exit is still being placed
 def close_position():
     """Close a specific position - uses broker API in live mode, placesmartorder service in analyze mode"""
     try:
@@ -694,6 +698,7 @@ def close_position():
 @check_session_validity
 @limiter.limit(API_RATE_LIMIT)
 @track_latency("CLOSE")
+@one_exit_at_a_time(every=True)  # SUDARSHAN M6.9: 409 while any exit is still being placed
 def close_all_positions():
     """Close all open positions using the broker API"""
     try:
