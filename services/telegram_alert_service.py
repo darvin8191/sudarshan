@@ -26,6 +26,7 @@ from database.telegram_db import (
 # SUDARSHAN M6.9: titles and lines for an Exit all or a Cancel all that did not do it all.
 from sudarshan.books.telegram_words import (
     alert_template,
+    cancel_all_failed_line,
     cancel_all_unsure_line,
     close_failed_line,
 )
@@ -186,6 +187,9 @@ class TelegramAlertService:
                         details.append(unsure)
                     if canceled and len(canceled) <= 5:
                         details.append(f"Order IDs: {', '.join(canceled[:5])}")
+                else:
+                    # SUDARSHAN M6.9: why it did not go through (the orders could not be read, say).
+                    details.append(cancel_all_failed_line(response))
 
             elif order_type == "closeposition":
                 if response.get("status") == "success":

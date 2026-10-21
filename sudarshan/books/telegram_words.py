@@ -117,6 +117,13 @@ def close_failed_line(order_data: dict[str, Any], response: dict[str, Any]) -> s
     return markdown_safe(without_lead(message, EXIT_ALL_NOT_ALL_CLOSED) or EXIT_ALL_NOT_CONFIRMED)
 
 
+def cancel_all_failed_line(response: dict[str, Any]) -> str:
+    """The alert's line for a Cancel all that did not go through: the app's own reason."""
+    message = str(response.get("message") or "").strip()
+    reason = without_lead(message, CANCEL_ALL_NOT_ALL_CANCELLED) if message else ""
+    return markdown_safe(reason or "Nothing was cancelled. Check Orders and try again.")
+
+
 def cancel_all_unsure_line(response: dict[str, Any]) -> str | None:
     """A line for the cancels that got no usable answer, when there were any."""
     unsure = _count(response.get("not_confirmed_cancellations"))
