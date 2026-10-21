@@ -1,11 +1,16 @@
 import { AxiosError, AxiosHeaders } from 'axios'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DockOrder, DockPosition } from './blotter'
-import { cancelDockOrder, closeDockPosition, type OrderActionContext } from './orderActions'
+import {
+  cancelAllDockOrders,
+  cancelDockOrder,
+  closeDockPosition,
+  type OrderActionContext,
+} from './orderActions'
 
 const fake = vi.hoisted(() => ({
-  api: { cancelOrder: vi.fn(), closePosition: vi.fn() },
-  toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
+  api: { cancelOrder: vi.fn(), closePosition: vi.fn(), cancelAllOrders: vi.fn() },
+  toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() },
 }))
 vi.mock('@/api/trading', () => ({ tradingApi: fake.api }))
 vi.mock('@/utils/toast', () => ({ showToast: fake.toast }))
@@ -94,5 +99,16 @@ describe('the dock order actions', () => {
       'An exit for this position is still being placed. Wait for it, then check Orders.',
       'orders'
     )
+  })
+
+  it('says Cancel all found none open without calling it a failure', async () => {
+    // SUDARSHAN M6.9: the app answers "info" only when there were no open orders.
+    fake.api.cancelAllOrders.mockResolvedValueOnce({
+      status: 'info',
+      message: 'No open orders to cancel',
+    })
+    await cancelAllDockOrders(ctx())
+    expect(fake.toast.info).toHaveBeenCalledWith('No open orders to cancel', 'orders')
+    expect(fake.toast.error).not.toHaveBeenCalled()
   })
 })

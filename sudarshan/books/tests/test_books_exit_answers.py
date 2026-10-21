@@ -556,11 +556,16 @@ def test_cancel_all_that_was_refused_says_so(client, monkeypatch):
     assert "Of 2 open orders, 1 was cancelled and 1 was refused." in body["message"]
 
 
-def test_cancel_all_with_none_open_or_all_cancelled_answers_as_before(client, monkeypatch):
+def test_cancel_all_with_none_open_says_there_were_none(client, monkeypatch):
+    # 58422ca answered this "Successfully canceled 0 orders", and gave "No open orders to
+    # cancel" to a Cancel all whose every cancel had failed.
     assert _cancel_all(client, monkeypatch, []) == (
         200,
         {"status": "info", "message": "No open orders to cancel"},
     )
+
+
+def test_cancel_all_that_cancelled_every_order_answers_as_before(client, monkeypatch):
     code, body = _cancel_all(client, monkeypatch, [CANCELLED, CANCELLED])
     assert code == 200
     assert body["status"] == "success"

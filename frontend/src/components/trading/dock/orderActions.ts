@@ -106,7 +106,9 @@ export async function cancelAllDockOrders(ctx: OrderActionContext): Promise<void
   try {
     const res = await tradingApi.cancelAllOrders()
     if (res.status !== 'success' && ctx.appMode === 'live') {
-      showToast.error(res.message || 'Cancel all failed', 'orders')
+      // SUDARSHAN M6.9: none open is not a failure; one that failed answers a 4xx or 5xx.
+      if (res.status === 'info') showToast.info(res.message || 'No open orders to cancel', 'orders')
+      else showToast.error(res.message || 'Cancel all failed', 'orders')
     }
   } catch (e) {
     if (!handledGlobally(ctx, e)) sendFailed('cancelAll', e)
