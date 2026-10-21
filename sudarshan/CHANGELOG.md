@@ -40,6 +40,10 @@ v0.3.0, so it can be installed straight over v0.2.x.
     exit: when it was sent, how much filled, or that it was rejected or cancelled.
   - The server also refuses a second exit for a position, from any screen or phone, while the
     first is still being placed.
+  - Every Exit all takes its turn, whether it comes from the phone, TradingView, Telegram's
+    /closeall, a script or a Flow: while one is being placed, another is refused with "Exit
+    all is still being placed. Wait for it, then check Orders." and Telegram tells you. A
+    single exit from the phone waits the same way while an Exit all runs.
   - The wide Positions table's Close and Close all wait the same way.
 - **Exit all and Cancel all say what really happened.** "All Open Positions Squared Off" appears
   only when every position got an exit order. Otherwise you see how many were sent, refused
@@ -53,6 +57,11 @@ v0.3.0, so it can be installed straight over v0.2.x.
   instead of "rejected".
 - **No raw errors for orders.** An order, exit or cancel that may have reached Upstox is never
   shown as failed or as error text: it says it is not confirmed and to check Orders.
+- **Telegram says what really happened.** A failed or partial Exit all arrives as "Exit all did
+  not close every position" with the reason, a Cancel all with nothing open as "No open orders
+  to cancel", and a partial one as "Cancel all did not cancel every order". "Position Closed"
+  and "All Orders Cancelled" now mean exactly that. /closeall replies show the app's sentence
+  instead of "HTTP 424: ...".
 
 ### What you must do
 - **Analyze-mode check of the new buttons.** With Analyze mode on, on the phone:
@@ -68,10 +77,14 @@ v0.3.0, so it can be installed straight over v0.2.x.
   up to 2½ minutes with no answer, 15 seconds after an unconfirmed answer, and while its own
   exit order is open. A second Cancel of one order, the same way.
 - A tap in the first half second after a sheet, a question or an order ticket opens.
+- A second Exit all, from any surface, while one is being placed. While any Exit all runs (a
+  few seconds, or minutes when Upstox is slow) no other exit from the app, TradingView,
+  Telegram or a script goes through; the Upstox app still works.
 - **What API callers (TradingView, scripts, Flow) now get:**
   - `closeposition`: a failed positions read answers 424 "Nothing was sent" (it said 200 "No
     Open Positions Found"); a partial result answers 400, 429 or 502 with the counts (it said
-    200 "squared off"). Success is unchanged.
+    200 "squared off"); an Exit all while another exit is being placed answers 409 with the
+    sentence. Success is unchanged.
   - `cancelallorder`: an unreadable order book answers 424; failures answer 400 or 502 with the
     counts.
   - `cancelorder`: a timeout or an Upstox server error answers 502 "not confirmed" (it was 400
@@ -84,8 +97,15 @@ v0.3.0, so it can be installed straight over v0.2.x.
   update, and after a reload a working order shows its quantity alone. A stop order shows
   TRIGGER PENDING once Upstox's live update has said so, and OPEN after a reload until the next
   update.
-- **Telegram wording.** A failed Exit all still arrives under a "Position Closed" header, and a
-  Cancel all that cancelled nothing reads "Cancelled: 0".
+- **An Exit all that nobody is watching can be refused.** An Exit all from a TradingView alert,
+  a script or a Flow that arrives in the second the phone is placing a single exit gets 409,
+  and nothing sends it again: the other positions stay open. Telegram tells you ("Exit all did
+  not close every position"). The next release makes it wait for that exit instead.
+- **Telegram's alert for a Cancel all that could not read the order book** does not yet say
+  why.
+- **Other exits not yet held against an Exit all:** single-position orders from TradingView or
+  scripts, the strategy module's own exits, the scalping terminal's close buttons, and Flow's
+  order nodes.
 - **The trading screen's own Close** and the wide order table's Cancel do not show the held state
   yet (the server still refuses an overlapping exit). Modify after a timeout still reads as
   refused.

@@ -123,8 +123,9 @@ in brand. Icon "Mor": tile #0E5A73, ring #E3A21A, glyph #FFFFFF. Numbers via
     can take 120 s); an answer the app could not confirm holds 15 s after the answer or the
     last change; the exit's own open order (pinned by the order id in the answer) holds until
     a book read settles it. After that it asks again, saying what is known about the first.
-    The app's close routes also refuse an overlapping exit with 409
-    (`sudarshan/books/exit_guard.py`). Anything that may have reached the broker reads "not
+    The server refuses an overlapping exit with 409 (`sudarshan/books/exit_guard.py`): per
+    position for the app's exits, and one claim taken by every Exit all from any surface
+    (app, `/api/v1/closeposition`, Telegram, Flow) in `close_position_with_auth`. Anything that may have reached the broker reads "not
     confirmed", never a refusal or raw error text. A stranded hold costs a retry; a released
     one can reverse a position.
   - A sheet, a confirmation or an order ticket ignores taps for 500 ms after it opens
