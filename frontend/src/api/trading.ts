@@ -12,6 +12,13 @@ import type {
 } from '@/types/trading'
 import { apiClient, webClient } from './client'
 
+/**
+ * SUDARSHAN M6.9: how long an exit or a cancel waits for its answer. Past it the
+ * request is given up, and the phone reads that as "not confirmed"
+ * (src/sudarshan/books/sendOutcome.ts), never as failed: it may have gone.
+ */
+export const SEND_TIMEOUT_MS = 45_000
+
 export interface QuotesData {
   ask: number
   bid: number
@@ -247,9 +254,11 @@ export const tradingApi = {
    * Cancel order (uses session auth with CSRF)
    */
   cancelOrder: async (orderid: string): Promise<ApiResponse<{ orderid: string }>> => {
-    const response = await webClient.post<ApiResponse<{ orderid: string }>>('/cancel_order', {
-      orderid,
-    })
+    const response = await webClient.post<ApiResponse<{ orderid: string }>>(
+      '/cancel_order',
+      { orderid },
+      { timeout: SEND_TIMEOUT_MS } // SUDARSHAN M6.9
+    )
     return response.data
   },
 
@@ -262,11 +271,11 @@ export const tradingApi = {
     product: string
   ): Promise<ApiResponse<void>> => {
     // Uses the web route which handles session-based auth with CSRF
-    const response = await webClient.post<ApiResponse<void>>('/close_position', {
-      symbol,
-      exchange,
-      product,
-    })
+    const response = await webClient.post<ApiResponse<void>>(
+      '/close_position',
+      { symbol, exchange, product },
+      { timeout: SEND_TIMEOUT_MS } // SUDARSHAN M6.9
+    )
     return response.data
   },
 
@@ -274,7 +283,11 @@ export const tradingApi = {
    * Close all positions (uses session auth with CSRF)
    */
   closeAllPositions: async (): Promise<ApiResponse<void>> => {
-    const response = await webClient.post<ApiResponse<void>>('/close_all_positions', {})
+    const response = await webClient.post<ApiResponse<void>>(
+      '/close_all_positions',
+      {},
+      { timeout: SEND_TIMEOUT_MS } // SUDARSHAN M6.9
+    )
     return response.data
   },
 
@@ -282,7 +295,11 @@ export const tradingApi = {
    * Cancel all orders (uses session auth with CSRF)
    */
   cancelAllOrders: async (): Promise<ApiResponse<void>> => {
-    const response = await webClient.post<ApiResponse<void>>('/cancel_all_orders', {})
+    const response = await webClient.post<ApiResponse<void>>(
+      '/cancel_all_orders',
+      {},
+      { timeout: SEND_TIMEOUT_MS } // SUDARSHAN M6.9
+    )
     return response.data
   },
 
