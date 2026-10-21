@@ -154,6 +154,27 @@ def test_a_placed_exit_stays_placed_when_logging_it_fails(exit_route, monkeypatc
     assert body["orderid"] == "251021000000001"
 
 
+@pytest.mark.parametrize(
+    ("named", "orderids"),
+    [
+        (["251021000000001", "251021000000002", "251021000000003"], None),
+        (["251021000000001"], "absent"),
+        (None, "absent"),
+    ],
+    ids=["sliced", "one order", "no list"],
+)
+def test_an_exit_names_every_order_it_placed(exit_route, named, orderids):
+    """Upstox names one order per slice; the phone holds the exit until the last has ended."""
+    data = {"order_ids": named} if named is not None else {}
+    code, body = exit_route((Answer(200), {"status": "success", "data": data}, "251021000000001"))
+    assert code == 200
+    assert body["orderid"] == "251021000000001"
+    if orderids == "absent":
+        assert "orderids" not in body
+    else:
+        assert body["orderids"] == named
+
+
 def test_the_route_breaking_is_not_confirmed_without_the_exception_s_words(exit_route):
     code, body = exit_route(RuntimeError(SECRET_DETAIL))
     assert code == 500

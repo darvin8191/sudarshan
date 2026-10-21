@@ -385,6 +385,30 @@ describe('g: a cancel confirmation tapped once that order’s cancel is held', (
       'orders'
     )
   })
+
+  it('says no answer came, when that is what holds it', async () => {
+    const tap = user()
+    await open(WORKING)
+    await tap.click(orderCard())
+    await tap.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel order' })
+    )
+    const confirmation = screen.getByRole('dialog', { name: /^Cancel this order/ })
+
+    const sent = await import('@/sudarshan/books/sent')
+    act(() => {
+      sent.settleSends(sent.beginSends('cancel', false, [{ id: '1001' }]), 'unanswered')
+    })
+    await tap.click(within(confirmation).getByRole('button', { name: 'Cancel order' }))
+    await settle()
+    expect(api.cancelOrder).not.toHaveBeenCalled()
+    expect(toast.warning).toHaveBeenLastCalledWith(
+      expect.stringMatching(
+        /^A cancel for this order was sent at 10:42:\d\d and no answer has come yet: it may still be going through\. Wait for its status to change before cancelling again\.$/
+      ),
+      'orders'
+    )
+  })
 })
 
 describe('g: a cancel answer the app marks not confirmed, whatever its code', () => {

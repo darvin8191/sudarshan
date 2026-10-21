@@ -42,6 +42,9 @@ from database.telegram_db import (
     log_command,
     update_bot_config,
 )
+
+# SUDARSHAN M6.9: Exit all's result in the app's own words, never the SDK's "HTTP <code>: <body>".
+from sudarshan.books.telegram_words import exit_all_failed_line, exit_all_failed_reply
 from utils import real_threading
 from utils.constants import CRYPTO_BROKERS
 from utils.logging import get_logger
@@ -2491,10 +2494,9 @@ class TelegramBotService:
                         parse_mode=ParseMode.MARKDOWN,
                     )
                 else:
-                    error = response.get("message", "Unknown error") if response else "No response"
                     await context.bot.send_message(
                         chat_id=chat_id,
-                        text=f"*Failed to close positions*\n\n{error}",
+                        text=exit_all_failed_reply(response),  # SUDARSHAN M6.9
                         parse_mode=ParseMode.MARKDOWN,
                     )
             except Exception as e:
@@ -2526,8 +2528,7 @@ class TelegramBotService:
                 if response and response.get("status") == "success":
                     close_msg = f"{response.get('message', 'All positions closed')}"
                 else:
-                    err = response.get("message", "Unknown error") if response else "No response"
-                    close_msg = f"Failed to close positions: {err}"
+                    close_msg = exit_all_failed_line(response)  # SUDARSHAN M6.9
             except Exception as e:
                 logger.exception(f"Error in confirm_closeall_with_strategies (close): {e}")
                 close_msg = "Error closing positions. Check server logs."
