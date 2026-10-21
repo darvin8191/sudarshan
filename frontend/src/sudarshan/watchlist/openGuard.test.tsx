@@ -8,6 +8,24 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('@/stores/authStore', () => ({
+  useAuthStore: () => ({ apiKey: 'test-api-key' }),
+}))
+vi.mock('@/hooks/useLiveQuote', () => ({
+  useLiveQuote: () => ({
+    data: { ltp: 152.5, close: 131.45, depth: undefined },
+    isLive: false,
+    isConnected: false,
+    isLoading: false,
+    isPaused: false,
+    isFallbackMode: false,
+    dataSource: 'none',
+    refresh: async () => {},
+  }),
+}))
+
+import { PlaceOrderDialog } from '@/components/trading/PlaceOrderDialog'
 import { Confirm } from '@/sudarshan/books/cards/parts'
 import { BottomSheet } from './BottomSheet'
 import { OPEN_GUARD } from './openGuard'
@@ -188,5 +206,43 @@ describe('a confirmation that has just opened', () => {
     vi.resetModules()
     const fresh = await import('./openGuard')
     expect(fresh.OPEN_GUARD.ms).toBe(500)
+  })
+})
+
+describe('an order ticket that has just opened', () => {
+  it('keeps its side: a second tap on SELL does nothing for half a second', async () => {
+    // A double tap on a long position's Add, at 412x915, lands its second tap on SELL.
+    function Ticket() {
+      const [open, setOpen] = useState(false)
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>
+            Add
+          </button>
+          <PlaceOrderDialog
+            open={open}
+            onOpenChange={setOpen}
+            symbol="NIFTY27OCT2625900CE"
+            exchange="NFO"
+            action="BUY"
+            lotSize={65}
+            tickSize={0.05}
+            product="MIS"
+            strategy="Positions"
+          />
+        </>
+      )
+    }
+    render(<Ticket />)
+    tap(screen.getByRole('button', { name: 'Add' }))
+    const title = () => screen.getByRole('dialog').querySelector('h2')?.textContent
+    expect(title()).toContain('BUY')
+    tap(screen.getByRole('button', { name: 'SELL' }))
+    expect(title()).toContain('BUY')
+    expect(screen.getByRole('button', { name: /^Place BUY Order/ })).toBeDisabled()
+
+    await wait(500)
+    tap(screen.getByRole('button', { name: 'SELL' }))
+    expect(title()).toContain('SELL')
   })
 })

@@ -26,6 +26,8 @@ import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
 // SUDARSHAN: where the quote stands (Real-time, Reconnecting, Updated, Market closed).
 import { QuoteStatus } from '@/sudarshan/books/QuoteStatus'
+// SUDARSHAN M6.9: a ticket that has just opened takes no tap for half a second.
+import { useOpenGuard } from '@/sudarshan/watchlist/openGuard'
 import { showToast } from '@/utils/toast'
 import { MarketDepthPanel } from './MarketDepthPanel'
 import { QuoteHeader } from './QuoteHeader'
@@ -153,6 +155,9 @@ export function PlaceOrderDialog({
   onError,
 }: PlaceOrderDialogProps) {
   const { apiKey } = useAuthStore()
+  // SUDARSHAN M6.9: the second tap of a double tap on the Add, Buy more or Sell
+  // that opened the ticket lands on it (on SELL, at 412x915, after "Buy more").
+  const guard = useOpenGuard(open)
 
   // Form state
   const [formAction, setFormAction] = useState<'BUY' | 'SELL'>(initialAction)
@@ -379,6 +384,7 @@ export function PlaceOrderDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
+        {...guard.handlers}
         className="sm:max-w-[420px]"
         aria-describedby={undefined}
         container={container}
@@ -638,7 +644,7 @@ export function PlaceOrderDialog({
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={!isValid() || isSubmitting}
+            disabled={!isValid() || isSubmitting || guard.settling}
             className={cn(
               formAction === 'BUY'
                 ? 'bg-green-600 hover:bg-green-700'
