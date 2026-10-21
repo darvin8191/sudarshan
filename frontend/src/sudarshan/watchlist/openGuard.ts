@@ -8,11 +8,12 @@ import {
 } from 'react'
 
 /**
- * How long, after a sheet or a confirmation opens, its contents ignore a tap
- * (M6.9). The second tap of a double tap lands 20 to 250 ms after the first,
- * on whatever has just opened under the finger: a sheet's Chart, Add or
- * Cancel, or a confirmation's own button, which on a tall phone sits where
- * the sheet's Cancel was. Tests that are not about this set it to 0
+ * How long, after a sheet or a confirmation opens, a tap does nothing (M6.9).
+ * The second tap of a double tap lands 20 to 250 ms after the first, on
+ * whatever has just opened under the finger: a sheet's Chart, Add or Cancel,
+ * a confirmation's own button, which on a tall phone sits where the sheet's
+ * Cancel was, or the dim around a dialog smaller than the sheet it replaced,
+ * which would close it. Tests that are not about this set it to 0
  * (`src/test/setup.ts`).
  */
 export const OPEN_GUARD = { ms: 500 }
@@ -20,13 +21,14 @@ export const OPEN_GUARD = { ms: 500 }
 type Handler = (event: SyntheticEvent) => void
 
 export interface OpenGuard {
-  /** Inside the window: an action button may show as disabled. */
+  /** Inside the window: what it covers shows as disabled (`data-settling`, theme.css). */
   settling: boolean
-  /** For the element whose contents the window covers. */
+  /** For the dialog's content element (Radix's): inside it, and the tap outside it. */
   handlers: {
     onPointerDownCapture: Handler
     onClickCapture: Handler
     onKeyDownCapture: (event: KeyboardEvent) => void
+    onPointerDownOutside: (event: Event) => void
   }
 }
 
@@ -43,8 +45,8 @@ function typing(target: EventTarget | null): boolean {
  * For `OPEN_GUARD.ms` after `open` turns true: a pointer press, a click, Enter,
  * and Space anywhere but in a text field, inside the element given the
  * handlers, are swallowed before they reach it (Enter in a field can still
- * submit its form; Space there is only a space). Escape and a tap outside
- * still close: closing is always safe.
+ * submit its form; Space there is only a space), and a tap outside it does not
+ * close it. Escape still closes: a key is never the tail of a double tap.
  */
 export function useOpenGuard(open: boolean): OpenGuard {
   const until = useRef(0)
@@ -71,12 +73,18 @@ export function useOpenGuard(open: boolean): OpenGuard {
       event.preventDefault()
       event.stopPropagation()
     }
+    // Radix closes on a press outside unless its event is prevented. (Focus moving
+    // outside never closes a modal dialog, so that one needs nothing.)
+    const stay = (event: Event) => {
+      if (Date.now() < until.current) event.preventDefault()
+    }
     return {
       onPointerDownCapture: swallow,
       onClickCapture: swallow,
       onKeyDownCapture: (event: KeyboardEvent) => {
         if (event.key === 'Enter' || (event.key === ' ' && !typing(event.target))) swallow(event)
       },
+      onPointerDownOutside: stay,
     }
   }, [])
 

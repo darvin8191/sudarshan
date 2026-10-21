@@ -385,6 +385,7 @@ export function PlaceOrderDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         {...guard.handlers}
+        data-settling={guard.settling || undefined}
         className="sm:max-w-[420px]"
         aria-describedby={undefined}
         container={container}

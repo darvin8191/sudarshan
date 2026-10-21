@@ -11,9 +11,10 @@ import { useOpenGuard } from './openGuard'
  * sits centred at the bottom. It fades in over 160 ms and does not slide
  * (minimal motion); with reduced motion it simply appears.
  *
- * For half a second after it opens, its contents ignore a tap (`useOpenGuard`):
- * the second tap of a double tap on whatever opened it lands on the sheet, on
- * its Chart, its Add or its Cancel, and must not set off what sits there.
+ * For half a second after it opens, a tap on it or around it does nothing,
+ * and its controls look it (`useOpenGuard`): the second tap of a double tap on
+ * whatever opened it lands on the sheet, on its Chart, its Add or its Cancel,
+ * and must neither set off what sits there nor close the sheet.
  */
 export function BottomSheet({
   open,
