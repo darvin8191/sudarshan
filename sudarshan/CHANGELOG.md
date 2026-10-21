@@ -54,11 +54,21 @@ includes everything in v0.2.1, so you can skip v0.2.1.
     typed.
   - Trades: each fill as a card; tap it for the chart.
   - Exit, Exit all, Cancel and Cancel all ask first. After you confirm, the card says "Exit
-    sent" or "Cancel sent" and the button waits until Upstox's book shows it (at most 15
-    seconds), so a second tap cannot reverse a position.
+    sent" or "Cancel sent", and Exit waits until Upstox's book shows the position closed, so a
+    second tap cannot reverse it. A part close keeps it waiting and says what is left ("Exit
+    sent · 65 of 130 left").
+  - If no answer comes back (a weak network), the card says "Not confirmed: check Orders before
+    sending again" and Exit keeps waiting.
+  - If 15 seconds pass with no change in the book and no exit order working, Exit is offered
+    again, with a warning that names when the first one was sent.
+  - The wide Positions table's Close and Close all wait the same way.
+  - A sheet or question that has just opened ignores taps for half a second, so a double tap
+    cannot press a button that appeared under your finger.
   - In Analyze mode every exit, cancel and order button says the order goes to the sandbox.
   - The phone's Back button closes the open question or sheet first. Reopening the app never
     brings back a question you did not just ask for.
+- **Order tickets ignore taps for half a second after they open**, on every screen, so a double
+  tap cannot change the side or place the order.
 - **Order alerts on Telegram.**
   - You get a message for a fill, a part fill (how many of how many), a rejection with the
     broker's words, a cancellation and a stop order's trigger, once each.
@@ -102,8 +112,10 @@ includes everything in v0.2.1, so you can skip v0.2.1.
 - A screen that has taken nothing for 10 seconds while the server was free is disconnected. It
   reconnects by itself with fresh prices.
 - Prices are no longer re-read on a timer while the live feed works.
-- On the phone, a second Exit or Cancel for the same position or order while the first is on its
-  way (until Upstox's book shows it, at most 15 seconds).
+- A second Exit for a position while the first is on its way: until Upstox's book shows the
+  position closed, or 15 seconds with no change and no exit order working. The same holds for a
+  second Cancel of one order.
+- A tap in the first half second after a sheet, a question or an order ticket opens.
 
 ### Not in this release yet
 - **Filled quantity after a reload.** Upstox's order book, as OpenAlgo reads it, does not carry

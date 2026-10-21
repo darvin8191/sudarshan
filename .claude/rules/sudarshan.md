@@ -116,9 +116,15 @@ in brand. Icon "Mor": tile #0E5A73, ring #E3A21A, glyph #FFFFFF. Numbers via
     page's existing order handlers (exit, exit all, cancel, cancel all, modify), with no new
     order code, is a new entry point, not an order-path change. It ships without a flag and
     needs one Analyzer-mode use of each action from that screen after deploy.
-  - A destructive action on a phone (exit, exit all, cancel, cancel all) asks first, sends once
-    however it is tapped, and stays "sent" until the broker's book shows it, so a second tap
-    cannot send a second order.
+  - A destructive action (exit, exit all, cancel, cancel all) asks first, sends once however it
+    is tapped, and stays "sent" (`books/sent.ts`, app-wide, kept across a reload) until the
+    book shows the position flat, gone or flipped (an exit) or the order final (a cancel). A
+    part close keeps the hold; no answer holds it as "not confirmed"; it expires 15 s after
+    the answer or the last change only while no closing order it sent is working, and then
+    asks again with a warning. A stranded hold costs a retry; a released one can reverse a
+    position.
+  - A sheet, a confirmation or an order ticket ignores taps for 500 ms after it opens
+    (`watchlist/openGuard.ts`), so a double tap never presses what appeared under the finger.
   - Order alerts on Telegram (M6.8) are on by default (owner's broker-app benchmark, 20 Oct
     2026).
 - Fields added to what a broker's order or position book returns are checked against every
