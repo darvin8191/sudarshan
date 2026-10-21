@@ -1,10 +1,12 @@
 """M0.1: the NSE calendar lines a release ships, merged into /etc/sudarshan by sudarshan-deploy.
 
-``cal_sync`` and ``cal_restore`` are cut out of the deploy tool exactly as they ship (the pattern of
-``test_deploy_env.py``) and run under the script's own shell options. Every shipped line is read with
-the parsers of the readers of the day files. Then the whole tool runs on a fake server (fake curl,
-sudo, git, systemctl, uv, chown, sleep and date first on PATH): a run that installs nothing, a run in
-market hours, an install, an install whose list is broken, a rollback and ``--check``.
+``cal_sync``, ``cal_restore`` and their helpers are cut out of the deploy tool exactly as they ship
+(the pattern of ``test_deploy_env.py``) and run under the script's own shell options; the list fetch
+runs the real curl against a local server. Every shipped line is read with the parsers of the readers
+of the day files. Then the whole tool runs on a fake server (fake curl, sudo, git, systemctl, uv,
+chown, sleep and date first on PATH), with the review's scenarios: a holiday for today shipped in
+market hours (A), a line the owner took out (B), a list cut off in transit (T) and a special session
+moved during the session (X).
 """
 
 from __future__ import annotations
@@ -17,9 +19,12 @@ import os
 import pwd
 import re
 import shutil
+import socketserver
 import stat
 import subprocess
 import tarfile
+import threading
+import time
 from datetime import date, datetime
 from pathlib import Path
 
@@ -34,11 +39,21 @@ REPO = Path(__file__).resolve().parents[3]
 DEPLOY_TOOL = REPO / "sudarshan" / "ops" / "deploy" / "sudarshan-deploy"
 SHIPPED_LIST = REPO / "sudarshan" / "ops" / "deploy" / "nse-calendar.conf"
 EXTRA, HOLIDAYS = "nse_extra_trading_days.txt", "nse_holidays.txt"
+TODAY = "2026-10-21"  # the day the function tests run on: a Wednesday before every date below
 MUHURAT = b"2026-11-08  # Muhurat trading (NSE circular 212/2025); timings to follow"
 WINDOW = b"2026-11-08 18:00-19:15  # Muhurat trading (NSE circular 212/2025)"
 FIRST = b"[nse_extra_trading_days.txt]\nline " + MUHURAT + b"\n"  # the first release's list
 LATER = b"[nse_extra_trading_days.txt]\nline " + WINDOW + b"\nwas  " + MUHURAT + b"\n"  # the window
 BOTH = b"[nse_holidays.txt]\nline 2026-11-24  # Guru Nanak Jayanti\n\n" + LATER
+CAL_FUNCTIONS = (
+    "cal_day_ok",
+    "cal_dir_ok",
+    "cal_held",
+    "cal_note",
+    "cal_flush",
+    "cal_sync",
+    "cal_restore",
+)
 
 pytestmark = pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
 
@@ -65,7 +80,7 @@ def _snapshot(*roots: Path) -> dict[str, tuple]:
 
 
 class Server:
-    """A fake /etc/sudarshan with the day files, the private work dir and an install's backups."""
+    """A fake /etc/sudarshan with the day files, the tool's state, its private work dir and backups."""
 
     def __init__(
         self,
@@ -75,9 +90,9 @@ class Server:
         owner: str | None = None,
         path: Path | None = None,
     ):
-        self.root, self.etc, self.list = root, root / "etc", root / "list.conf"
-        self.work, self.backup = root / "work", root / "bk"
-        for folder in (self.etc, self.work, self.backup):
+        self.root, self.etc, self.state = root, root / "etc", root / "state"
+        self.work, self.backup, self.list = root / "work", root / "bk", root / "list.conf"
+        for folder in (self.etc, self.state, self.work, self.backup):
             folder.mkdir(parents=True)
         self.work.chmod(0o700)
         self.list.write_bytes(listing)
@@ -89,39 +104,44 @@ class Server:
     def day(self, name: str = EXTRA) -> Path:
         return self.etc / name
 
-    def run(self, *args: str) -> subprocess.CompletedProcess:
+    def run(self, *args: str, trace: Path | None = None) -> subprocess.CompletedProcess:
         # As the script calls them: set -Eeuo pipefail, from an if (errexit off inside, nounset on),
         # in the UTF-8 locale a systemd service gets on Ubuntu.
         script = (
             f'set -Eeuo pipefail\nlog() {{ echo "$*"; }}\nCAL_OWNER="{self.owner}"; CAL_MODE=640\n'
-            + _function("cal_day_ok")
-            + _function("cal_sync")
-            + _function("cal_restore")
+            f'CAL_RECORD="{self.state}/calendar_applied"; CAL_NOTES="{self.state}/calendar_notes"\n'
+            + "".join(_function(name) for name in CAL_FUNCTIONS)
             + 'if "$@"; then exit 0; else exit $?; fi\n'
         )
         env = {**os.environ, "LC_ALL": "C.UTF-8"}
         if self.path:
             env["PATH"] = f"{self.path}{os.pathsep}{env['PATH']}"
+        command = ["bash", "-c", script, "deploy", *args]
+        if trace:
+            command = ["strace", "-f", "-qq", "-o", str(trace), "-e",
+                       "trace=open,openat,creat,chown,lchown,fchownat", *command]  # fmt: skip
         return subprocess.run(
-            ["bash", "-c", script, "deploy", *args],
-            capture_output=True,
-            text=True,
-            errors="replace",
-            cwd=self.root,
-            env=env,
+            command, capture_output=True, text=True, errors="replace", cwd=self.root, env=env
         )
 
-    def sync(self, mode: str = "apply", backup: bool = True) -> subprocess.CompletedProcess:
-        extra = [str(self.backup)] if mode == "apply" and backup else []
-        return self.run("cal_sync", mode, str(self.list), str(self.etc), str(self.work), *extra)
+    def sync(self, mode: str = "install", today: str = TODAY, **kw) -> subprocess.CompletedProcess:
+        extra = [str(self.backup)] if mode == "install" else []
+        args = (str(self.list), str(self.etc), str(self.work), today, *extra)
+        return self.run("cal_sync", mode, *args, **kw)
 
     def restore(self) -> subprocess.CompletedProcess:
         return self.run("cal_restore", str(self.work), str(self.etc))
 
+    def record(self) -> set[str]:
+        path = self.state / "calendar_applied"
+        return set(path.read_text().splitlines()) if path.exists() else set()
 
-def _applied(tmp_path: Path, files: dict[str, bytes], listing: bytes = FIRST) -> tuple[Server, str]:
+
+def _applied(
+    tmp_path: Path, files: dict[str, bytes], listing: bytes = FIRST, mode: str = "install"
+) -> tuple[Server, str]:
     server = Server(tmp_path, files, listing)
-    done = server.sync()
+    done = server.sync(mode)
     assert done.returncode == 0, done.stdout + done.stderr
     return server, done.stdout
 
@@ -155,6 +175,7 @@ def test_a_missing_date_is_added_at_the_end(tmp_path, original, after):
     assert (
         f"calendar: {server.day()} updated; the previous one is in {server.backup / EXTRA}" in out
     )
+    assert server.record() == {f"{EXTRA}|{MUHURAT.decode()}"}  # what the tool put there
 
 
 @pytest.mark.parametrize(
@@ -170,6 +191,7 @@ def test_a_line_a_release_shipped_is_replaced_where_it_stands(tmp_path, before, 
     server, out = _applied(tmp_path, {EXTRA: before}, LATER)
     assert server.day().read_bytes() == after
     assert f'calendar: {EXTRA}: replaced "{MUHURAT.decode()}" with "{WINDOW.decode()}"' in out
+    assert server.record() == {f"{EXTRA}|{WINDOW.decode()}"}
 
 
 @pytest.mark.parametrize(
@@ -204,12 +226,11 @@ def test_the_owners_line_is_shown_safely(tmp_path):
 
 def test_a_second_run_changes_nothing_and_writes_nothing(tmp_path):
     server, _ = _applied(tmp_path, {EXTRA: b"# x\n" + MUHURAT + b"\n"}, BOTH)
-    before = {p.name: (p.stat().st_ino, p.stat().st_mtime_ns) for p in server.etc.iterdir()}
-    for mode, says in (("apply", f"calendar: nothing to change in {server.etc}\n"), ("quiet", "")):
-        again = server.sync(mode, backup=False)
-        assert (again.returncode, again.stdout) == (0, says)
-    after = {p.name: (p.stat().st_ino, p.stat().st_mtime_ns) for p in server.etc.iterdir()}
-    assert after == before
+    before = _snapshot(server.etc)
+    for mode, says in (("install", f"calendar: nothing to change in {server.etc}\n"), ("run", "")):
+        again = server.sync(mode)
+        assert (again.returncode, again.stdout, again.stderr) == (0, says, "")
+    assert _snapshot(server.etc) == before
 
 
 def test_a_missing_file_is_created_like_the_other_files_there(tmp_path):
@@ -231,10 +252,8 @@ def test_the_tool_creates_a_day_file_as_root_sudarshan_640():
     text = DEPLOY_TOOL.read_text()
     assert '\nCAL_DIR="/etc/sudarshan"\n' in text
     assert '\nCAL_OWNER="root:${SVC_USER}"; CAL_MODE=640\n' in text
-    assert (
-        "`/etc/sudarshan/<svc>.env` (root:sudarshan 640"
-        in (REPO / "sudarshan" / "README.md").read_text()
-    )
+    readme = (REPO / "sudarshan" / "README.md").read_text()
+    assert "`/etc/sudarshan/<svc>.env` (root:sudarshan 640" in readme
 
 
 def test_owner_group_and_mode_of_a_day_file_are_kept(tmp_path):
@@ -251,6 +270,16 @@ def test_owner_group_and_mode_of_a_day_file_are_kept(tmp_path):
     assert (server.backup / EXTRA).read_bytes() == original
 
 
+def _moves(log: Path, target: Path) -> list[Path]:
+    """The sources an mv shim renamed onto ``target``."""
+    found = []
+    for move in log.read_text().splitlines():
+        *_, source, dest = move.split()
+        if dest == str(target):
+            found.append(Path(source))
+    return found
+
+
 def test_the_new_file_replaces_the_old_in_one_rename(tmp_path):
     """Written next to the old file and renamed over it: a reader has the whole old file or the new."""
     shims = tmp_path / "shims"
@@ -259,15 +288,32 @@ def test_the_new_file_replaces_the_old_in_one_rename(tmp_path):
     original = b"# x\n" + MUHURAT + b"\n"
     server = Server(tmp_path / "server", {EXTRA: original}, LATER, path=shims)
     with server.day().open("rb") as reader:  # a reader that opened the file before the merge
-        done = server.sync(backup=False)
+        done = server.sync("run")
         assert done.returncode == 0, done.stdout + done.stderr
         assert reader.read() == original  # still the whole old file
-    (move,) = (tmp_path / "mv.log").read_text().splitlines()
-    *_, source, target = move.split()
-    assert target == str(server.day())
-    assert Path(source).parent == server.etc and Path(source).name.startswith(f".{EXTRA}.")
+    (source,) = _moves(tmp_path / "mv.log", server.day())
+    assert source.parent == server.etc and source.name.startswith(f".{EXTRA}.")
     assert sorted(p.name for p in server.etc.iterdir()) == [EXTRA]
     assert server.day().read_bytes() == b"# x\n" + WINDOW + b"\n"
+
+
+@pytest.mark.skipif(shutil.which("strace") is None, reason="needs strace")
+def test_the_new_file_is_written_through_one_descriptor(tmp_path):
+    """Each temporary file: created by mktemp, then opened once to write it; its owner is set
+    without following a symlink (chown -h)."""
+    server = Server(tmp_path, {EXTRA: b"# x\n" + MUHURAT + b"\n2026-03-07\n"}, BOTH)
+    done = server.sync(trace=tmp_path / "trace.log")
+    assert done.returncode == 0, done.stdout + done.stderr
+    calls = (tmp_path / "trace.log").read_text().splitlines()
+    temp = re.compile(rf'"({re.escape(str(server.etc))}/\.nse_[a-z_]+\.txt\.[A-Za-z0-9]{{6}})"')
+    paths = {m.group(1) for line in calls if (m := temp.search(line))}
+    assert len(paths) == 2  # one per day file: the holiday file is created, the other rewritten
+    for path in paths:
+        opens = [c for c in calls if f'"{path}"' in c and "open" in c]
+        assert len(opens) == 2, opens
+        assert "O_EXCL" in opens[0] and "O_WRONLY" in opens[1] and "O_TRUNC" in opens[1]
+        owners = [c for c in calls if f'"{path}"' in c and "chown" in c]
+        assert owners and all("AT_SYMLINK_NOFOLLOW" in c or "lchown(" in c for c in owners), owners
 
 
 @pytest.mark.parametrize(
@@ -289,9 +335,44 @@ def test_a_failed_write_leaves_the_old_file_in_place(tmp_path, command, body, sa
     done = server.sync()
     assert done.returncode == 1
     assert f"calendar: {says} {server.day()}, so it is left as it was" in done.stdout
+    assert "added" not in done.stdout  # a change is logged only once it is written
     assert server.day().read_bytes() == original and server.day().stat().st_ino == before.st_ino
     assert sorted(p.name for p in server.etc.iterdir()) == [EXTRA]  # no temporary file left
     assert list(server.work.iterdir()) == []  # nothing for a rollback to put back
+    assert server.record() == set()
+
+
+def test_a_write_that_keeps_failing_is_logged_once(tmp_path):
+    """A group that does not exist on the server: the first run says so, the next ones do not."""
+    server = Server(tmp_path, {}, FIRST, owner="root:sudarshan-zq-no-such-group")
+    first = server.sync("run")
+    assert first.returncode == 1 and first.stderr == ""
+    assert first.stdout == f"calendar: could not write {server.day()}, so it is left as it was\n"
+    again = server.sync("run")
+    assert (again.returncode, again.stdout, again.stderr) == (1, "", "")
+    assert sorted(p.name for p in server.etc.iterdir()) == []
+
+
+@pytest.mark.parametrize("change", ["group may write", "others may write", "someone else's"])
+def test_a_folder_others_can_write_is_left_alone(tmp_path, change):
+    server = Server(tmp_path, {EXTRA: b"# x\n"})
+    if change == "group may write":
+        server.etc.chmod(0o775)
+    elif change == "others may write":
+        server.etc.chmod(0o757)
+    elif os.geteuid() == 0:
+        os.chown(server.etc, 4242, os.getegid())
+    else:
+        pytest.skip("needs root to give the folder to someone else")
+    before = _snapshot(server.etc)
+    for mode in ("install", "run"):
+        done = server.sync(mode)
+        assert done.returncode == 1
+    assert _snapshot(server.etc) == before
+    assert (
+        f"calendar: {server.etc} is not a folder owned by root and closed to others"
+        in (server.state / "calendar_notes").read_text()
+    )
 
 
 def test_a_rollback_puts_the_previous_files_back(tmp_path):
@@ -300,17 +381,21 @@ def test_a_rollback_puts_the_previous_files_back(tmp_path):
     server = Server(tmp_path, {EXTRA: original, HOLIDAYS: holidays}, BOTH)
     os.chown(server.day(), uid, gid)
     server.day().chmod(0o640)
+    os.utime(server.day(), ns=(1_700_000_000_000_000_000, 1_700_000_000_000_000_000))
     assert server.sync().returncode == 0
     assert server.day().read_bytes() != original and server.day(HOLIDAYS).read_bytes() != holidays
     assert (server.backup / EXTRA).read_bytes() == original
     assert (server.backup / HOLIDAYS).read_bytes() == holidays
+    assert len(server.record()) == 2
     done = server.restore()
     assert done.returncode == 0, done.stdout + done.stderr
     assert server.day().read_bytes() == original and server.day(HOLIDAYS).read_bytes() == holidays
     got = server.day().stat()
     assert (got.st_uid, got.st_gid, stat.S_IMODE(got.st_mode)) == (uid, gid, 0o640)
+    assert got.st_mtime_ns == 1_700_000_000_000_000_000  # exactly as it was
     assert f"calendar: {server.day()} put back as it was before the deploy" in done.stdout
     assert sorted(p.name for p in server.etc.iterdir()) == [EXTRA, HOLIDAYS]
+    assert not (server.state / "calendar_applied").exists()  # the record goes back too
 
 
 def test_a_rollback_removes_a_file_the_install_created(tmp_path):
@@ -320,6 +405,26 @@ def test_a_rollback_removes_a_file_the_install_created(tmp_path):
     done = server.restore()
     assert done.returncode == 0 and not server.day().exists()
     assert f"calendar: {server.day()} removed: the deploy had created it" in done.stdout
+    assert server.record() == set()
+
+
+def test_the_rollback_renames_each_file_into_place(tmp_path):
+    """A reader holding the installed file still reads all of it while the old one goes back."""
+    shims = tmp_path / "shims"
+    shims.mkdir()
+    _shim(shims, "mv", f'echo "$*" >> "{tmp_path}/mv.log"\nexec {shutil.which("mv")} "$@"')
+    original = b"# x\n" + MUHURAT + b"\n"
+    server = Server(tmp_path / "server", {EXTRA: original}, LATER, path=shims)
+    assert server.sync().returncode == 0
+    installed = server.day().read_bytes()
+    with server.day().open("rb") as reader:
+        done = server.restore()
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert reader.read() == installed
+    assert server.day().read_bytes() == original
+    restores = _moves(tmp_path / "mv.log", server.day())
+    assert len(restores) == 2  # the install's rename, then the rollback's
+    assert all(p.parent == server.etc and p.name.startswith(f".{EXTRA}.") for p in restores)
 
 
 def test_a_rollback_without_a_calendar_step_changes_nothing(tmp_path):
@@ -330,18 +435,18 @@ def test_a_rollback_without_a_calendar_step_changes_nothing(tmp_path):
     assert _snapshot(server.etc) == before
 
 
-def test_a_run_without_a_backup_folder_keeps_nothing_for_a_rollback(tmp_path):
+def test_a_run_keeps_nothing_for_a_rollback(tmp_path):
     server = Server(tmp_path, {EXTRA: b"# x\n"})
-    assert server.sync(backup=False).returncode == 0
+    assert server.sync("run").returncode == 0
     assert list(server.work.iterdir()) == [] and list(server.backup.iterdir()) == []
 
 
 def test_check_changes_nothing(tmp_path):
     server = Server(tmp_path, {EXTRA: b"# x\n" + MUHURAT + b"\n"}, BOTH)
-    before = _snapshot(server.etc, server.backup)
+    before = _snapshot(server.etc, server.backup, server.state)
     done = server.sync("check")
     assert done.returncode == 0, done.stdout + done.stderr
-    assert _snapshot(server.etc, server.backup) == before
+    assert _snapshot(server.etc, server.backup, server.state) == before
     assert list(server.work.iterdir()) == []  # its private copies are gone again
     assert f'{EXTRA}: would replace "{MUHURAT.decode()}" with "{WINDOW.decode()}"' in done.stdout
     assert f'{HOLIDAYS}: would add "2026-11-24  # Guru Nanak Jayanti"' in done.stdout
@@ -352,15 +457,22 @@ def test_check_changes_nothing(tmp_path):
     ("listing", "says"),
     [
         (b"line 2026-11-08\n", "list line 1 comes before the first [FILE] line"),
-        (b"[nse_holidays.txt]\nadd 2026-11-08\n", "list line 2 is not a [FILE] line"),
+        (b"[nse_holidays.txt]\nadd 2026-11-08\n", "list line 2 is not a [FILE], line, was or drop line"),
         (b"[openalgo.env]\nline 2026-11-08\n", "list line 1 names a file other than"),
         (b"[../nse_holidays.txt]\n", "list line 1 names a file other than"),
         (b"[nse_holidays.txt]\n[nse_holidays.txt]\n", "list line 2 names nse_holidays.txt a second"),
         (b"[nse_holidays.txt]\nline 2026-02-29\n", "list line 2 has a date that does not exist"),
+        (b"[nse_holidays.txt]\nline 2026-11-31\n", "list line 2 has a date that does not exist"),
+        (b"[nse_holidays.txt]\nline 2026-04-31\n", "list line 2 has a date that does not exist"),
+        (b"[nse_holidays.txt]\nline 2026-06-31\n", "list line 2 has a date that does not exist"),
+        (b"[nse_holidays.txt]\nline 2026-09-31\n", "list line 2 has a date that does not exist"),
         (b"[nse_holidays.txt]\nline 08-11-2026\n", "list line 2 is not YYYY-MM-DD and"),
         (b"[nse_holidays.txt]\nline 2026-11-08 Diwali\n", "list line 2 is not YYYY-MM-DD and"),
         (b"[nse_holidays.txt]\nline 2026-11-08 18:00-19:15\n", "list line 2 is not YYYY-MM-DD and"),
+        (b"[nse_holidays.txt]\nline 2026-11-10 # \xe0\xa4\xae\n",
+         "list line 2 is not YYYY-MM-DD and an optional # comment, in plain ASCII"),
         (b"[nse_extra_trading_days.txt]\nline 2026-11-08 19:15-18:00\n", "list line 2 has a window"),
+        (b"[nse_extra_trading_days.txt]\nline 2026-11-08 18:00-18:00\n", "list line 2 has a window"),
         (b"[nse_extra_trading_days.txt]\nline 2026-11-08 18:00-24:00\n", "list line 2 has a window"),
         (b"[nse_extra_trading_days.txt]\nline 2026-11-08 6:00-7:00\n", "list line 2 is not YYYY-MM-DD,"),
         (b"[nse_extra_trading_days.txt]\nline 2026-11-08 # \xe0\xa4\xae\n",
@@ -369,10 +481,16 @@ def test_check_changes_nothing(tmp_path):
         (b"[nse_extra_trading_days.txt]\nline 2026-11-08\nline 2026-11-08 # x\n",
          "list line 3 is a second line for 2026-11-08"),
         (b"[nse_extra_trading_days.txt]\nwas 2026-11-08\n", "list line 2 is a was with no line above"),
-        (b"[nse_extra_trading_days.txt]\nline 2026-11-09\nwas 2026-11-08\nwas 2026-11-08\n",
-         "list line 4 repeats a was"),
-        (b"[nse_extra_trading_days.txt]\nline 2026-11-09\nwas 2026-11-08\nline 2026-11-08\n",
-         "list line 3 is also a line to keep"),
+        (b"[nse_extra_trading_days.txt]\nline 2026-11-09\nwas 2026-11-08\n",
+         "list line 3 is a was for another date than its line"),
+        (b"[nse_extra_trading_days.txt]\nline 2026-11-09\nwas 2026-11-09 # a\nwas 2026-11-09 # a\n",
+         "list line 4 repeats a line of nse_extra_trading_days.txt"),
+        (b"[nse_extra_trading_days.txt]\nline 2026-11-09 # a\nwas 2026-11-09\nline 2026-11-09\n",
+         "list line 4 repeats a line of nse_extra_trading_days.txt"),
+        (b"[nse_extra_trading_days.txt]\nline 2026-11-09\ndrop 2026-11-09\n",
+         "list line 3 repeats a line of nse_extra_trading_days.txt"),
+        (b"[nse_extra_trading_days.txt]\ndrop 2026-11-09\nwas 2026-11-09 # x\n",
+         "list line 3 is a was with no line above it"),
     ],
 )  # fmt: skip
 def test_a_bad_list_is_refused_and_changes_nothing(tmp_path, listing, says):
@@ -382,8 +500,8 @@ def test_a_bad_list_is_refused_and_changes_nothing(tmp_path, listing, says):
     assert done.returncode == 1
     assert f"calendar: {says}" in done.stdout
     assert _snapshot(server.etc) == before and list(server.backup.iterdir()) == []
-    quiet = server.sync("quiet")  # a run that has already reported this list
-    assert (quiet.returncode, quiet.stdout) == (1, "")
+    again = server.sync("run")  # the same list on the next run: said once already
+    assert (again.returncode, again.stdout) == (1, "")
 
 
 def test_a_symlinked_day_file_is_not_followed(tmp_path):
@@ -391,24 +509,150 @@ def test_a_symlinked_day_file_is_not_followed(tmp_path):
     elsewhere.write_bytes(b"# not a day file\n")
     server = Server(tmp_path / "server")
     server.day().symlink_to(elsewhere)
-    for mode in ("check", "apply"):
+    for mode in ("check", "install"):
+        (server.state / "calendar_notes").unlink(missing_ok=True)
         done = server.sync(mode)
         assert done.returncode == 0
-        assert (
-            f"WARNING: calendar: {server.day()} is not a plain file, so it is left alone"
-            in done.stdout
-        )
+        warning = f"WARNING: calendar: {server.day()} is not a plain file, so it is left alone"
+        assert warning in done.stdout
     assert server.day().is_symlink() and elsewhere.read_bytes() == b"# not a day file\n"
     assert list(server.backup.iterdir()) == []
 
 
+SUNDAY = "2026-11-08"  # Muhurat: the day the run-mode tests below take as today
+
+
+@pytest.mark.parametrize(
+    ("mode", "files", "listing", "after", "says"),
+    [
+        # A run that installs nothing adds no holiday for today: the gate would then let an install
+        # through in the middle of the session (scenario A).
+        ("run", {HOLIDAYS: b""}, b"[nse_holidays.txt]\nline 2026-11-08 # x\n", {HOLIDAYS: b""},
+         "2026-11-08 not added: a holiday is added only before its day"),
+        ("install", {HOLIDAYS: b""}, b"[nse_holidays.txt]\nline 2026-11-08 # x\n", {HOLIDAYS: b""},
+         "2026-11-08 not added: a holiday is added only before its day"),
+        ("run", {HOLIDAYS: b""}, b"[nse_holidays.txt]\nline 2026-11-09 # x\n",
+         {HOLIDAYS: b"2026-11-09 # x\n"}, 'added "2026-11-09 # x"'),
+        # ...but it adds a special session for today, which only makes the gate stricter.
+        ("run", {EXTRA: b""}, FIRST, {EXTRA: MUHURAT + b"\n"}, f'added "{MUHURAT.decode()}"'),
+        ("run", {EXTRA: b""}, b"[nse_extra_trading_days.txt]\nline 2026-11-07 # x\n", {EXTRA: b""},
+         "2026-11-07 kept as it is: a run that installs nothing changes no line dated today or earlier"),
+        # A special session for today keeps its line: no new window and no move during the day
+        # (scenario X); an install, outside market hours, may change it.
+        ("run", {EXTRA: MUHURAT + b"\n"}, LATER, {EXTRA: MUHURAT + b"\n"}, "2026-11-08 kept as it is"),
+        ("install", {EXTRA: MUHURAT + b"\n"}, LATER, {EXTRA: WINDOW + b"\n"}, "replaced"),
+        ("run", {EXTRA: MUHURAT + b"\n"}, b"[nse_extra_trading_days.txt]\ndrop " + MUHURAT + b"\n",
+         {EXTRA: MUHURAT + b"\n"}, "2026-11-08 kept as it is"),
+        ("install", {EXTRA: MUHURAT + b"\n"}, b"[nse_extra_trading_days.txt]\ndrop " + MUHURAT + b"\n",
+         {EXTRA: b""}, f'removed "{MUHURAT.decode()}"'),
+    ],
+)  # fmt: skip
+def test_what_may_change_on_the_day(tmp_path, mode, files, listing, after, says):
+    server = Server(tmp_path, files, listing)
+    if b"\ndrop " in listing:  # a release drops only a line this tool added
+        (server.state / "calendar_applied").write_text(f"{EXTRA}|{MUHURAT.decode()}\n")
+    done = server.sync(mode, today=SUNDAY)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert {name: server.day(name).read_bytes() for name in after} == after
+    assert says in done.stdout
+
+
+def test_a_line_the_owner_took_out_stays_out(tmp_path):
+    """Scenario B: the owner takes out a line this tool added; neither it nor a later version of it
+    comes back, and that is said once."""
+    server, _ = _applied(tmp_path, {EXTRA: b"# special sessions\n"})
+    taken_out = b"# special sessions\n# 2026-11-08 Muhurat: not trading it\n"
+    server.day().write_bytes(taken_out)
+    note = "calendar: nse_extra_trading_days.txt: 2026-11-08 not added again: this tool added it before"
+    first = server.sync("run")
+    assert first.returncode == 0 and note in first.stdout
+    assert server.sync("run").stdout == ""  # said once
+    server.list.write_bytes(LATER)  # a later release ships the window for that day: it stays out
+    later = server.sync("install")
+    assert (later.returncode, later.stdout) == (0, f"calendar: nothing to change in {server.etc}\n")
+    assert server.day().read_bytes() == taken_out
+
+
+@pytest.mark.parametrize(
+    ("recorded", "after", "says"),
+    [
+        (True, b"# x\n", f'removed "{MUHURAT.decode()}"'),
+        (False, b"# x\n" + MUHURAT + b"\n", "left alone: this tool did not add"),
+    ],
+)
+def test_a_drop_takes_out_only_a_line_this_tool_added(tmp_path, recorded, after, says):
+    server = Server(
+        tmp_path, {EXTRA: b"# x\n" + MUHURAT + b"\n"},
+        b"[nse_extra_trading_days.txt]\ndrop " + MUHURAT + b"\n",
+    )  # fmt: skip
+    if recorded:
+        (server.state / "calendar_applied").write_text(f"{EXTRA}|{MUHURAT.decode()}\n")
+    done = server.sync()
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert server.day().read_bytes() == after
+    assert says in done.stdout
+    assert server.record() == set()
+
+
+def test_a_refused_drop_leaves_the_owners_day_to_him(tmp_path):
+    """The owner wrote the very text a drop names: it stays, and the release's new line for that
+    day is not set beside it (in the extra-days file the later line's window would win)."""
+    mine = b"2026-11-08 17:45-19:30  # Muhurat"
+    listing = b"[nse_extra_trading_days.txt]\ndrop " + mine + b"\nline " + WINDOW + b"\n"
+    server = Server(tmp_path, {EXTRA: mine + b"\n"}, listing)
+    done = server.sync()
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert server.day().read_bytes() == mine + b"\n"
+    assert "this tool did not add" in done.stdout and "the owner wrote it as" in done.stdout
+
+
+def test_a_drop_and_a_line_move_a_day(tmp_path):
+    """A line shipped for the wrong day is taken out and the right one added, in one install."""
+    wrong, right = b"2026-11-07  # Muhurat", b"2026-11-08  # Muhurat"
+    listing = b"[nse_extra_trading_days.txt]\ndrop " + wrong + b"\nline " + right + b"\n"
+    server = Server(tmp_path, {EXTRA: b"# x\n" + wrong + b"\n"}, listing)
+    (server.state / "calendar_applied").write_text(f"{EXTRA}|{wrong.decode()}\n")
+    done = server.sync()
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert server.day().read_bytes() == b"# x\n" + right + b"\n"
+    assert server.record() == {f"{EXTRA}|{right.decode()}"}
+
+
+def test_a_note_is_logged_once_while_it_holds(tmp_path):
+    server = Server(tmp_path, {EXTRA: b"2026-11-08 # mine\n"})
+    assert "the owner wrote it as" in server.sync("run").stdout
+    assert server.sync("run").stdout == ""
+    server.day().write_bytes(b"2026-11-08 # mine, changed\n")  # a different note: said again
+    assert '"2026-11-08 # mine, changed"' in server.sync("run").stdout
+    server.day().write_bytes(b"")  # nothing to say any more: the note is forgotten
+    assert "added" in server.sync("run").stdout
+    assert (server.state / "calendar_notes").read_text() == ""
+
+
+def test_a_temporary_file_a_killed_run_left_is_cleared(tmp_path):
+    names = [".nse_holidays.txt.AbC123", ".nse_extra_trading_days.txt.XyZ789",
+             ".nse_holidays.txt.long-name", ".other.ABCDEF"]  # fmt: skip
+    server = Server(tmp_path, {EXTRA: MUHURAT + b"\n"})
+    for name in names:
+        (server.etc / name).write_bytes(b"half\n")
+    old = time.time() - 20 * 60
+    for name in (names[0], names[2], names[3]):
+        os.utime(server.etc / name, (old, old))
+    assert server.sync("check").returncode == 0
+    assert all((server.etc / name).exists() for name in names)  # check changes nothing
+    done = server.sync("run")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert done.stdout == f"calendar: removed {server.etc / names[0]}, left by an interrupted run\n"
+    assert sorted(p.name for p in server.etc.iterdir()) == sorted([EXTRA, *names[1:]])
+
+
 def _shipped(listing: str) -> list[tuple[str | None, str]]:
-    """(file, text) of every `line` and `was` in a list, read as the list's header describes."""
+    """(file, text) of every line, was and drop in a list, read as the list's header describes."""
     found, name = [], None
     for raw in listing.splitlines():
         if section := re.fullmatch(r"\s*\[(.+)\]\s*", raw):
             name = section.group(1)
-        elif entry := re.fullmatch(r"\s*(?:line|was)\s+(.*\S)\s*", raw):
+        elif entry := re.fullmatch(r"\s*(?:line|was|drop)\s+(.*\S)\s*", raw):
             found.append((name, entry.group(1)))
     return found
 
@@ -443,10 +687,33 @@ def _market_gate(etc: Path, now: str) -> int:
     text = DEPLOY_TOOL.read_text()
     start = text.index("listed() {")
     gate = text[start : text.index("\n}\n", text.index("market_open() {")) + 3]
+    script = f'date() {{ echo "{now}"; }}\n' + gate.replace("/etc/sudarshan", str(etc))
+    return subprocess.run(["bash", "-c", script + "market_open\n"]).returncode
+
+
+@pytest.mark.parametrize(
+    ("then", "now", "trading"),
+    [
+        (MUHURAT, b"", True),  # the session as the run found it holds, though the file lost it
+        (b"", MUHURAT, True),  # a session the run learned of holds too
+        (b"", b"", False),
+    ],
+)
+def test_the_gate_takes_the_stricter_of_the_two_views(tmp_path, then, now, trading):
+    """Sunday 8 Nov 18:30: the day files as the run found them (GATE_VIEW) and as they are now."""
+    for folder, extra in (("then", then), ("now", now)):
+        (tmp_path / folder).mkdir()
+        (tmp_path / folder / EXTRA).write_bytes(extra + b"\n")
+        (tmp_path / folder / HOLIDAYS).write_bytes(b"")
+    text = DEPLOY_TOOL.read_text()
+    gate = text[text.index("listed() {") : text.index("\n}\n", text.index("market_open() {")) + 3]
     script = (
-        f'date() {{ echo "{now}"; }}\n' + gate.replace("/etc/sudarshan", str(etc)) + "market_open\n"
+        'date() { echo "7 1830 2026-11-08"; }\n'
+        + f'GATE_VIEW="{tmp_path / "then"}"\n'
+        + gate.replace("/etc/sudarshan", str(tmp_path / "now"))
+        + "market_open\n"
     )
-    return subprocess.run(["bash", "-c", script]).returncode
+    assert (subprocess.run(["bash", "-c", script]).returncode == 0) is trading
 
 
 def test_the_shipped_list_on_the_server(tmp_path):
@@ -477,23 +744,101 @@ def test_the_shipped_list_on_the_server(tmp_path):
 
 def test_the_tool_runs_the_calendar_where_it_must():
     text = DEPLOY_TOOL.read_text()
-    every_run = text.index('\nif [[ "${MODE}" != "check" ]]; then cal_run ')
-    assert (
-        every_run < text.index("\njson=") < text.index("waiting for market close")
-    )  # before any exit
+    every_run = text.index("\n    if gate_view; then cal_run ")
+    assert every_run < text.index("\njson=") < text.index('waiting for market close"; exit 0')
     fetch = text.index('cal_conf_fetch "${tag}" "${cal_conf}"')
+    second_gate = text.index("the window opened during the download")
     stop = text.index('\nsystemctl stop "${SERVICE}"\n')
     env_apply = text.index("if ! env_sync apply ")
-    cal_apply = text.index('cal_sync apply "${cal_conf}" "${CAL_DIR}" "${tmp}/cal" "${bdir}"')
+    cal_apply = text.index('cal_sync install "${cal_conf}" "${CAL_DIR}" "${tmp}/cal"')
     migrations = text.index('migrate_all.py"; then')
     start = text.index('\nsystemctl start "${SERVICE}"\n')
-    assert fetch < stop < env_apply < cal_apply < migrations < start
+    assert fetch < second_gate < stop < env_apply < cal_apply < migrations < start
     begin = text.index("\nrollback() {")
     assert 'cal_restore "${tmp}/cal" "${CAL_DIR}"' in text[begin : text.index("\n}\n", begin)]
 
 
+LIST_BODY = b"[nse_extra_trading_days.txt]\nline 2026-11-08  # whole\n"
+
+
+@pytest.fixture
+def lists_server():
+    """A local stand-in for raw.githubusercontent.com; the tag in the path picks its answer."""
+    release = threading.Event()
+
+    class Answer(socketserver.BaseRequestHandler):
+        def handle(self):
+            path = self.request.recv(65536).decode(errors="replace").split(" ")[1]
+            tag = path.split("/")[3]
+            if tag == "hang":  # accepts and never answers
+                release.wait(30)
+                return
+            if tag in ("missing", "error"):
+                status = b"404 Not Found" if tag == "missing" else b"500 Internal Server Error"
+                self.request.sendall(b"HTTP/1.1 " + status + b"\r\nContent-Length: 0\r\n\r\n")
+                return
+            body = LIST_BODY[:-1] if tag == "nonl" else LIST_BODY
+            head = b"HTTP/1.1 200 OK\r\nContent-Length: %d\r\nConnection: close\r\n\r\n" % len(body)
+            self.request.sendall(head + (body[:20] if tag == "cut" else body))
+
+    class Server(socketserver.ThreadingTCPServer):
+        daemon_threads = True
+        allow_reuse_address = True
+
+    with Server(("127.0.0.1", 0), Answer) as server:
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        yield server.server_address[1]
+        release.set()
+        server.shutdown()
+
+
+@pytest.mark.skipif(shutil.which("curl") is None, reason="needs curl")
+@pytest.mark.parametrize("fetch", ["env_conf_fetch", "cal_conf_fetch"])
+@pytest.mark.parametrize(
+    ("tag", "code", "got"),
+    [
+        ("whole", 0, LIST_BODY),
+        ("missing", 0, b""),  # a release without the list
+        ("cut", 1, None),  # curl sees 200, then a body shorter than promised
+        ("nonl", 1, None),  # whole, but its last line has no newline
+        ("error", 1, None),
+        ("hang", 1, None),  # gives up after FETCH_TIMEOUT
+    ],
+)
+def test_a_list_is_taken_only_when_it_arrived_whole(tmp_path, lists_server, fetch, tag, code, got):
+    """The real curl, with the tool's own flags, against a local server."""
+    shims = tmp_path / "shims"
+    shims.mkdir()
+    real = shutil.which("curl")
+    _shim(
+        shims, "curl",
+        'args=()\nfor a in "$@"; do args+=("${a/https:\\/\\/raw.githubusercontent.com\\//'
+        f'http://127.0.0.1:{lists_server}/}}"); done\nexec {real} "${{args[@]}}"',
+    )  # fmt: skip
+    script = (
+        "set -Eeuo pipefail\nOWNER_REPO=owner/sudarshan; FETCH_TIMEOUT=2\n"
+        + _function("release_file")
+        + "".join(line + "\n" for line in DEPLOY_TOOL.read_text().splitlines()
+                  if line.startswith(("env_conf_fetch() {", "cal_conf_fetch() {")))
+        + f'if {fetch} "$1" "$2"; then exit 0; else exit 1; fi\n'
+    )  # fmt: skip
+    env = {k: v for k, v in os.environ.items() if not k.lower().endswith("_proxy")}
+    env["PATH"] = f"{shims}{os.pathsep}{env['PATH']}"
+    started = time.monotonic()
+    done = subprocess.run(
+        ["bash", "-c", script, "fetch", tag, str(tmp_path / "out")],
+        capture_output=True, env=env, timeout=30,
+    )  # fmt: skip
+    assert done.returncode == code, done.stderr
+    assert time.monotonic() - started < 15
+    if got is not None:
+        assert (tmp_path / "out").read_bytes() == got
+
+
 FAKE_CURL = r"""
-# A fake curl: the answer to a URL is web/KEY.code and web/KEY.body (KEY from the URL's sha256), else 404.
+# A fake curl: the answer to a URL is web/KEY.code and web/KEY.body (KEY from the URL's sha256), else
+# 404. web/KEY.cut: the body is cut off in transit (curl reports the code, then fails with 18).
+# web/KEY.later: serving that URL takes long enough for the clock to pass FAKE_NOW_LATER.
 out="" write="" url="" fail=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -507,6 +852,7 @@ while [[ $# -gt 0 ]]; do
 done
 echo "${url}" >> "${FAKE_WEB}/requests"
 key="$(printf '%s' "${url}" | sha256sum | cut -c1-16)"
+if [[ -f "${FAKE_WEB}/${key}.later" ]]; then : > "${FAKE_WEB}/later"; fi
 code=404
 if [[ -f "${FAKE_WEB}/${key}.code" ]]; then code="$(cat "${FAKE_WEB}/${key}.code")"; fi
 if [[ "${code}" == "000" ]]; then [[ -z "${write}" ]] || printf '000'; exit 7; fi
@@ -514,6 +860,7 @@ if [[ ${fail} -eq 1 && "${code}" != 2* ]]; then exit 22; fi
 body="${FAKE_WEB}/${key}.body"; [[ -f "${body}" ]] || body=/dev/null
 if [[ -n "${out}" ]]; then cat "${body}" > "${out}"; else cat "${body}"; fi
 [[ -z "${write}" ]] || printf '%s' "${code}"
+if [[ -f "${FAKE_WEB}/${key}.cut" ]]; then exit 18; fi
 exit 0
 """
 
@@ -521,12 +868,16 @@ FAKES = {
     "curl": FAKE_CURL,
     "sudo": 'while [[ $# -gt 0 && "$1" != "--" ]]; do shift; done\nshift\nexec "$@"',
     "git": 'if [[ " $* " == *" rev-parse "* ]]; then echo 0123456789abcdef0123456789abcdef01234567; fi',
-    "systemctl": 'if [[ "$1" == "is-active" ]]; then echo active; fi',
+    "systemctl": 'echo "$*" >> "${FAKE_WEB}/systemctl"\nif [[ "$1" == "is-active" ]]; then echo active; fi',
     "uv": "exit 0",
     "sleep": "exit 0",
     # chown -R of the app and backup folders needs root; any other chown is the real one
     "chown": 'if [[ "$1" == "-R" ]]; then exit 0; fi\nexec CHOWN "$@"',
-    "date": 'if [[ "$1" == "+%u %H%M %F" ]]; then echo "${FAKE_NOW}"; exit 0; fi\nexec DATE "$@"',
+    "date": (
+        'if [[ "$1" == "+%u %H%M %F" ]]; then\n'
+        '    if [[ -f "${FAKE_WEB}/later" ]]; then echo "${FAKE_NOW_LATER}"; else echo "${FAKE_NOW}"; fi\n'
+        '    exit 0\nfi\nexec DATE "$@"'
+    ),
 }
 
 
@@ -536,7 +887,7 @@ class Box:
     OWNER_REPO = "owner/sudarshan"
 
     def __init__(self, root: Path, *, latest: str = "v1.0.0", now: str = "6 1200 2026-10-24"):
-        self.root, self.now, self.migrations = root, now, "0"  # a Saturday noon: the market is shut
+        self.root, self.now, self.later, self.migrations = root, now, now, "0"
         self.etc, self.state, self.backups = root / "etc", root / "state", root / "backups"
         self.app, self.bin, self.web, self.tmp = (
             root / "app",
@@ -581,14 +932,28 @@ class Box:
         self.serve("https://example.invalid/s", f"{hashlib.sha256(dist).hexdigest()}  x\n".encode())
         self.serve("http://127.0.0.1:5000/", b"")  # the health check
 
-    def serve(self, url: str, body: bytes, code: str = "200") -> None:
-        key = hashlib.sha256(url.encode()).hexdigest()[:16]
+    def key(self, url: str) -> str:
+        return hashlib.sha256(url.encode()).hexdigest()[:16]
+
+    def serve(self, url: str, body: bytes, code: str = "200", cut: bool = False) -> None:
+        key = self.key(url)
         (self.web / f"{key}.code").write_text(code)
         (self.web / f"{key}.body").write_bytes(body)
+        (self.web / f"{key}.cut").unlink(missing_ok=True)
+        if cut:
+            (self.web / f"{key}.cut").write_text("")
 
-    def calendar(self, tag: str, listing: bytes, code: str = "200") -> None:
+    def list_url(self, tag: str) -> str:
         path = f"{tag}/sudarshan/ops/deploy/nse-calendar.conf"
-        self.serve(f"https://raw.githubusercontent.com/{self.OWNER_REPO}/{path}", listing, code)
+        return f"https://raw.githubusercontent.com/{self.OWNER_REPO}/{path}"
+
+    def calendar(self, tag: str, listing: bytes, code: str = "200", cut: bool = False) -> None:
+        self.serve(self.list_url(tag), listing, code, cut)
+
+    def clock_moves_on(self, url: str, later: str) -> None:
+        """While ``url`` is fetched the clock passes ``later``."""
+        (self.web / f"{self.key(url)}.later").write_text("")
+        self.later = later
 
     def day(self, name: str = EXTRA) -> Path:
         return self.etc / name
@@ -600,7 +965,7 @@ class Box:
         log = self.web / "requests"
         return log.read_text().splitlines() if log.exists() else []
 
-    def run(self, *args: str) -> subprocess.CompletedProcess:
+    def run(self, *args: str, timeout: float = 120) -> subprocess.CompletedProcess:
         script = (
             DEPLOY_TOOL.read_text()
             .replace("/etc/sudarshan", str(self.etc))
@@ -608,11 +973,13 @@ class Box:
             .replace("/opt/sudarshan/backups", str(self.backups))
             .replace("/usr/local/bin/uv", str(self.bin / "uv"))
         )
+        (self.web / "later").unlink(missing_ok=True)
         return subprocess.run(
             ["bash", "-c", script, "sudarshan-deploy", *args],
             capture_output=True,
             text=True,
             errors="replace",
+            timeout=timeout,
             env={
                 **os.environ,
                 "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}",
@@ -620,6 +987,7 @@ class Box:
                 "LC_ALL": "C.UTF-8",
                 "FAKE_WEB": str(self.web),
                 "FAKE_NOW": self.now,
+                "FAKE_NOW_LATER": self.later,
                 "FAKE_MIGRATIONS": self.migrations,
             },
         )
@@ -644,6 +1012,7 @@ def test_a_run_that_installs_nothing_applies_the_installed_list(tmp_path):
     again = box.run()  # the next run: nothing to change, nothing written, nothing logged
     assert (again.returncode, again.stdout) == (0, "")
     assert _snapshot(box.etc) == before
+    assert box.requests().count(box.list_url("v1.0.0")) == 1  # fetched once, then kept
 
 
 @whole_tool
@@ -672,6 +1041,163 @@ def test_a_run_in_market_hours_applies_the_installed_list_only(tmp_path):
 
 
 @whole_tool
+def test_scenario_a_a_holiday_for_today_never_opens_the_gate(tmp_path):
+    """Wednesday 10:00 IST, a session running. The installed release ships a holiday for today
+    that the file lacks, and a new release waits: the line is not added and nothing installs."""
+    box = Box(tmp_path, latest="v1.0.1", now="3 1000 2026-10-21")
+    shipped = b"[nse_holidays.txt]\nline 2026-10-21  # shipped by mistake\n"
+    box.calendar("v1.0.0", shipped)
+    box.calendar("v1.0.1", shipped)
+    done = box.run()
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "2026-10-21 not added: a holiday is added only before its day" in done.stdout
+    assert "release v1.0.1 waiting for market close" in done.stdout
+    assert box.day(HOLIDAYS).read_bytes() == b"2026-10-20  # Dussehra\n"
+    assert box.deployed() == "v1.0.0" and not (box.web / "systemctl").exists()  # nothing stopped
+
+
+@whole_tool
+@pytest.mark.parametrize(
+    "shipped",
+    [
+        # a was of another date: the list is refused
+        b"[nse_extra_trading_days.txt]\nline 2026-11-09  # moved\nwas  " + MUHURAT + b"\n",
+        # the same move as a valid list: the drop waits for an install
+        b"[nse_extra_trading_days.txt]\ndrop " + MUHURAT + b"\nline 2026-11-09  # moved\n",
+    ],
+)
+def test_scenario_x_a_session_is_not_moved_during_the_session(tmp_path, shipped):
+    """Sunday 8 Nov, 18:30 IST, during the special session: the installed release's list moves the
+    day to the 9th, and a new release waits. The day stays, and nothing installs."""
+    box = Box(tmp_path, latest="v1.0.1", now="7 1830 2026-11-08")
+    box.day().write_bytes(b"# special sessions\n" + MUHURAT + b"\n")
+    (box.state / "calendar_applied").write_text(f"{EXTRA}|{MUHURAT.decode()}\n")
+    box.calendar("v1.0.0", shipped)
+    box.calendar("v1.0.1", shipped)
+    done = box.run()
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert MUHURAT in box.day().read_bytes()
+    assert "release v1.0.1 waiting for market close" in done.stdout
+    assert box.deployed() == "v1.0.0" and not (box.web / "systemctl").exists()
+
+
+@whole_tool
+def test_scenario_y_a_session_learned_during_the_run_closes_its_gate(tmp_path):
+    """Sunday 8 Nov, 18:30 IST: the day file lacks the session, which this run's calendar step
+    adds. The gate takes the stricter of the files before and after that step: no install."""
+    box = Box(tmp_path, latest="v1.0.1", now="7 1830 2026-11-08")
+    box.calendar("v1.0.0", FIRST)
+    box.calendar("v1.0.1", FIRST)
+    done = box.run()
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert f'added "{MUHURAT.decode()}"' in done.stdout
+    assert "release v1.0.1 waiting for market close" in done.stdout
+    assert box.deployed() == "v1.0.0" and not (box.web / "systemctl").exists()
+
+
+@whole_tool
+def test_the_gate_reads_the_day_files_as_the_run_found_them(tmp_path):
+    """Sunday 8 Nov, 18:30 IST, during the session. Should the calendar step ever take the session
+    out of the file (here a fault does it while the step runs), the gate still holds the release."""
+    box = Box(tmp_path, latest="v1.0.1", now="7 1830 2026-11-08")
+    box.day().write_bytes(b"# special sessions\n" + MUHURAT + b"\n")
+    real = shutil.which("mktemp")
+    _shim(box.bin, "mktemp", f'if [[ "$1" == "-d" && ! -e "{box.root}/once" ]]; then : > "{box.root}/once"; '
+          f'printf "# special sessions\\n" > "{box.day()}"; fi\nexec {real} "$@"')  # fmt: skip
+    done = box.run()
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert box.day().read_bytes() == b"# special sessions\n"  # the fault happened
+    assert "release v1.0.1 waiting for market close" in done.stdout
+    assert box.deployed() == "v1.0.0" and not (box.web / "systemctl").exists()
+
+
+@whole_tool
+def test_scenario_b_a_line_the_owner_took_out_stays_out(tmp_path):
+    box = Box(tmp_path)
+    box.calendar("v1.0.0", FIRST)
+    assert "added" in box.run().stdout
+    taken_out = b"# special sessions\n# 2026-11-08 Muhurat: not trading it, owner\n"
+    box.day().write_bytes(taken_out)
+    first = box.run()
+    assert first.returncode == 0, first.stdout + first.stderr
+    assert "2026-11-08 not added again: this tool added it before" in first.stdout
+    assert box.run().stdout == ""  # said once
+    assert box.day().read_bytes() == taken_out
+
+
+@whole_tool
+def test_scenario_t_a_list_cut_off_in_transit_is_not_taken(tmp_path):
+    full = SHIPPED_LIST.read_bytes()
+    box = Box(tmp_path)
+    box.calendar("v1.0.0", full[: len(full) - 38], cut=True)  # curl reports 200, then fails
+    first = box.run()
+    assert first.returncode == 0, first.stdout + first.stderr
+    assert (
+        "calendar: could not fetch the list of v1.0.0 whole; the next run tries again"
+        in first.stdout
+    )
+    assert box.day().read_bytes() == b"# special sessions\n"
+    assert not (box.state / "calendar-lists" / "v1.0.0").exists()  # nothing kept
+    assert box.run().stdout == ""  # said once; fetched again
+    box.calendar("v1.0.0", full)
+    whole = box.run()
+    assert f'added "{MUHURAT.decode()}"' in whole.stdout
+    assert box.day().read_bytes() == b"# special sessions\n" + MUHURAT + b"\n"
+    assert box.requests().count(box.list_url("v1.0.0")) == 3
+    assert (box.state / "calendar-lists" / "v1.0.0").read_bytes() == full
+
+
+@whole_tool
+def test_the_gate_is_asked_again_before_the_stop(tmp_path):
+    """Wednesday 08:58 IST: the first gate lets v1.0.1 in, the download takes until 09:01, and the
+    install waits instead of stopping OpenAlgo in the pre-open."""
+    box = Box(tmp_path, latest="v1.0.1", now="3 0858 2026-10-21")
+    box.clock_moves_on("https://example.invalid/d", "3 0901 2026-10-21")
+    done = box.run()
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert (
+        "release v1.0.1 waiting for market close (the window opened during the download)"
+        in done.stdout
+    )
+    assert "stopping openalgo" not in done.stdout and not (box.web / "systemctl").exists()
+    assert box.deployed() == "v1.0.0" and list(box.backups.iterdir()) == []
+
+
+@whole_tool
+def test_a_fifo_in_place_of_a_day_file_never_hangs_the_tool(tmp_path):
+    box = Box(tmp_path, latest="v1.0.1")
+    box.day().unlink()
+    os.mkfifo(box.day())
+    box.calendar("v1.0.0", FIRST)
+    box.calendar("v1.0.1", FIRST)
+    try:
+        done = box.run(timeout=30)
+    finally:
+        try:  # free a reader a broken tool may have left waiting on the FIFO
+            os.close(os.open(box.day(), os.O_WRONLY | os.O_NONBLOCK))
+        except OSError:
+            pass
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert f"{box.day()} is not a plain file, so it is left alone" in done.stdout
+    assert box.deployed() == "v1.0.1"
+
+
+@whole_tool
+def test_a_calendar_step_that_fails_never_stops_the_run(tmp_path):
+    """The every-run step cannot make its private folder: logged, and the run still installs."""
+    box = Box(tmp_path, latest="v1.0.1")
+    real = shutil.which("mktemp")
+    _shim(box.bin, "mktemp", f'if [[ "$1" == "-d" && ! -e "{box.root}/once" ]]; then : > "{box.root}/once"; '
+          f'exit 1; fi\nexec {real} "$@"')  # fmt: skip
+    box.calendar("v1.0.0", FIRST)
+    box.calendar("v1.0.1", FIRST)
+    done = box.run()
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "WARNING: calendar: the day files could not be checked" in done.stdout
+    assert "deployed v1.0.1 OK" in done.stdout and box.deployed() == "v1.0.1"
+
+
+@whole_tool
 def test_an_install_applies_its_list_with_a_backup(tmp_path):
     box = Box(tmp_path, latest="v1.0.1")
     box.day().write_bytes(b"# special sessions\n" + MUHURAT + b"\n")  # v1.0.0's line is there
@@ -686,28 +1212,33 @@ def test_an_install_applies_its_list_with_a_backup(tmp_path):
     assert f"calendar: {box.day()} updated; the previous one is in {bdir / EXTRA}" in done.stdout
     (log,) = box.state.glob("deploy-*.log")
     assert f'replaced "{MUHURAT.decode()}" with "{WINDOW.decode()}"' in log.read_text()
-    again = box.run()  # v1.0.1 installed and its list applied: the next run has nothing to say
+    again = box.run()  # v1.0.1 installed and its list kept: the next run has nothing to say
     assert (again.returncode, again.stdout) == (0, "")
+    assert box.requests().count(box.list_url("v1.0.1")) == 1
+    assert sorted(p.name for p in (box.state / "calendar-lists").iterdir()) == ["v1.0.1"]
 
 
 @whole_tool
 @pytest.mark.parametrize(
-    ("code", "listing", "says"),
+    ("code", "listing", "cut", "says"),
     [
-        ("200", b"[nse_extra_trading_days.txt]\nline 2026-11-08 19:15-18:00\n", "list line 2 has a window"),
-        ("200", b"[/etc/passwd]\nline 2026-11-08\n", "list line 1 names a file other than"),
-        ("000", b"", "could not fetch the list of v1.0.1; the day files stay as they are"),
+        ("200", b"[nse_extra_trading_days.txt]\nline 2026-11-08 19:15-18:00\n", False, "list line 2 has a window"),
+        ("200", b"[/etc/passwd]\nline 2026-11-08\n", False, "list line 1 names a file other than"),
+        ("000", b"", False, "could not fetch the list of v1.0.1 whole; the day files stay as they are"),
+        ("200", FIRST, True, "could not fetch the list of v1.0.1 whole; the day files stay as they are"),
     ],
 )  # fmt: skip
-def test_a_broken_list_never_blocks_an_install(tmp_path, code, listing, says):
+def test_a_broken_list_never_blocks_an_install(tmp_path, code, listing, cut, says):
     box = Box(tmp_path, latest="v1.0.1")
-    box.calendar("v1.0.1", listing, code)
+    box.calendar("v1.0.1", listing, code, cut)
     before = _snapshot(box.etc)
     done = box.run()
     assert done.returncode == 0, done.stdout + done.stderr
     assert f"calendar: {says}" in done.stdout
     assert "deployed v1.0.1 OK" in done.stdout and box.deployed() == "v1.0.1"
     assert _snapshot(box.etc) == before
+    kept = box.state / "calendar-lists" / "v1.0.1"
+    assert kept.exists() is (code == "200" and not cut)  # only a list that arrived whole is kept
 
 
 @whole_tool
@@ -717,14 +1248,18 @@ def test_a_rollback_puts_the_day_files_back(tmp_path):
     box.day().write_bytes(b"# special sessions\n" + MUHURAT + b"\n")
     box.calendar("v1.0.0", FIRST)
     box.calendar("v1.0.1", BOTH)
-    before = _snapshot(box.etc)
-    done = box.run()
-    assert done.returncode == 1
-    assert "migrations failed" in done.stdout and "rolling back" in done.stdout
-    assert f'replaced "{MUHURAT.decode()}" with "{WINDOW.decode()}"' in done.stdout  # written...
-    assert f"calendar: {box.day()} put back as it was before the deploy" in done.stdout  # ...undone
-    assert f"calendar: {box.day(HOLIDAYS)} put back as it was before the deploy" in done.stdout
-    assert {k: v[0] for k, v in _snapshot(box.etc).items()} == {k: v[0] for k, v in before.items()}
+    first = box.run()  # no wait: the every-run step has nothing to do, the install is tried
+    assert first.returncode == 1
+    assert "migrations failed" in first.stdout and "rolling back" in first.stdout
+    assert f'replaced "{MUHURAT.decode()}" with "{WINDOW.decode()}"' in first.stdout  # written...
+    assert (
+        f"calendar: {box.day()} put back as it was before the deploy" in first.stdout
+    )  # ...undone
+    assert f"calendar: {box.day(HOLIDAYS)} put back as it was before the deploy" in first.stdout
+    assert box.day().read_bytes() == b"# special sessions\n" + MUHURAT + b"\n"
+    assert box.day(HOLIDAYS).read_bytes() == b"2026-10-20  # Dussehra\n"
+    assert not (box.state / "calendar_applied").exists()  # its record went back too
+    assert not (box.state / "calendar-lists" / "v1.0.1").exists()
     assert box.deployed() == "v1.0.0"
 
 
