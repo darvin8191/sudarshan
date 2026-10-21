@@ -4,10 +4,10 @@ Trading days come from auto-login's calendar (sudarshan/autologin/schedule.py): 
 ``/etc/sudarshan/nse_holidays.txt`` are closed, a date in ``nse_extra_trading_days.txt`` (a
 Muhurat session) is open; both files are read again when they change.
 
-A line of the extra-days file may give that day's own window after the date, for a session
-outside the usual hours::
+A line of the extra-days file may give that day's own window after the date, used that day
+instead of the usual hours (Muhurat 2026, as the deploy tool's calendar list ships it)::
 
-    2026-11-08 17:45-19:30  # Muhurat
+    2026-11-08 14:05-15:40  # Muhurat, NSE circular 149/2026 (F&O to 15:40)
 
 Auto-login reads only the first word of a line and the deploy tool only the date at its start,
 so both keep working with the window there (a test holds each to it).

@@ -22,6 +22,7 @@ import shutil
 import socketserver
 import stat
 import subprocess
+import sys
 import tarfile
 import threading
 import time
@@ -40,6 +41,9 @@ DEPLOY_TOOL = REPO / "sudarshan" / "ops" / "deploy" / "sudarshan-deploy"
 SHIPPED_LIST = REPO / "sudarshan" / "ops" / "deploy" / "nse-calendar.conf"
 EXTRA, HOLIDAYS = "nse_extra_trading_days.txt", "nse_holidays.txt"
 TODAY = "2026-10-21"  # the day the function tests run on: a Wednesday before every date below
+# The line the shipped list carries: Muhurat 2026 as NSE announced it (circular 149/2026).
+SHIPPED = b"2026-11-08 14:05-15:40  # Muhurat, NSE circular 149/2026 (F&O to 15:40)"
+# The lines the tests below ship themselves: an earlier version without a window, then a window.
 MUHURAT = b"2026-11-08  # Muhurat trading (NSE circular 212/2025); timings to follow"
 WINDOW = b"2026-11-08 18:00-19:15  # Muhurat trading (NSE circular 212/2025)"
 FIRST = b"[nse_extra_trading_days.txt]\nline " + MUHURAT + b"\n"  # the first release's list
@@ -665,21 +669,81 @@ def _deploy_gate_lists(folder: Path, day: str, text: str) -> bool:
 
 
 def test_every_shipped_line_is_read_by_every_reader(tmp_path, caplog):
-    """Auto-login and the alerts' calendar, the alerts' own window, the feed and the market gate."""
+    """Auto-login's calendar (the alerts use it too), the alerts' own window, the feed's parser and
+    the market gate; the OpenAlgo auto-login page is the next test."""
     caplog.set_level(logging.WARNING)
     shipped = _shipped(SHIPPED_LIST.read_text())
-    assert (EXTRA, MUHURAT.decode()) in shipped
+    assert (EXTRA, SHIPPED.decode()) in shipped
+    assert parse_day_windows(SHIPPED.decode()) == {date(2026, 11, 8): (14 * 60 + 5, 15 * 60 + 40)}
     for name, text in shipped:
         assert name in (HOLIDAYS, EXTRA)
         day = date.fromisoformat(text.split()[0])
         assert autologin_days(text) == ({day}, 0)
+        assert feed_days(text) == ({day}, 0)  # in use the feed reads only the holiday file
         assert _deploy_gate_lists(tmp_path, day.isoformat(), text)
-        if name == HOLIDAYS:
-            assert feed_days(text) == ({day}, 0)  # the feed reads only the holiday file
-        else:
+        if name == EXTRA:
             words = text.split("#", 1)[0].split()
             assert parse_day_windows(text) == ({day: parse_window(words[1])} if words[1:] else {})
     assert caplog.records == []  # no reader found a line it could not read
+
+
+# The page's own calendar, as the blueprint builds it from its settings (the auto-login tests'
+# conftest does the same before importing it): python-dotenv off, so no .env is read.
+PAGE = """
+import logging
+from datetime import date, datetime
+import dotenv
+dotenv.load_dotenv = lambda *args, **kwargs: False
+dotenv.main.load_dotenv = dotenv.load_dotenv
+import blueprints.sudarshan_autologin as page
+from sudarshan.autologin.schedule import IST
+notes = []
+class Keep(logging.Handler):
+    def emit(self, record):
+        notes.append(record.getMessage())
+reader = logging.getLogger("sudarshan.autologin")
+reader.setLevel(logging.WARNING)
+reader.addHandler(Keep())
+calendar = page._calendar()
+print("PAGE trading", calendar.is_trading_day(date(2026, 11, 8)))
+print("PAGE holiday", not calendar.is_trading_day(date(2026, 10, 20)))
+print("PAGE next", calendar.next_slot(datetime(2026, 11, 7, 20, 0, tzinfo=IST)).isoformat())
+print("PAGE notes", notes)
+"""
+
+
+def test_the_auto_login_page_reads_the_shipped_list(tmp_path):
+    """The OpenAlgo auto-login page builds its own calendar from the day files (its next run, and
+    when Test now is refused): the blueprint itself, with fake settings, over the shipped list."""
+    server, _ = _applied(
+        tmp_path, {HOLIDAYS: b"2026-10-20  # Dussehra\n"}, SHIPPED_LIST.read_bytes()
+    )
+    fake = tmp_path / "fake"
+    fake.mkdir()
+    env = {k: v for k, v in os.environ.items() if not k.lower().endswith("_proxy")}
+    env.update(
+        API_KEY_PEPPER="f" * 64,  # fake, test only
+        APP_KEY="test-only-app-key-" + "0" * 32,
+        DATABASE_URL=f"sqlite:///{fake}/openalgo.db",
+        LOG_DIR=str(fake / "log"),
+        REDIRECT_URL="http://127.0.0.1:5000/upstox/callback",
+        SUDARSHAN_VAULT_DB=str(fake / "vault.db"),
+        SUDARSHAN_AUTOLOGIN_ENV_FILE=str(fake / "autologin.env"),
+        SUDARSHAN_AUTOLOGIN_TEST_LOG=str(fake / "log" / "sudarshan_autologin.log"),
+        SUDARSHAN_NSE_HOLIDAYS_FILE=str(server.day(HOLIDAYS)),
+        SUDARSHAN_NSE_EXTRA_DAYS_FILE=str(server.day()),
+    )
+    done = subprocess.run(
+        [sys.executable, "-c", PAGE], cwd=REPO, env=env, capture_output=True, text=True, timeout=120
+    )
+    assert done.returncode == 0, done.stdout + done.stderr
+    said = dict(line.split(" ", 2)[1:] for line in done.stdout.splitlines() if line[:5] == "PAGE ")
+    assert said == {
+        "trading": "True",  # Sunday 8 November: the Muhurat session
+        "holiday": "True",  # the page reads the holiday file too
+        "next": "2026-11-08T08:35:00+05:30",  # the first wake-up that Sunday
+        "notes": "[]",  # no line it could not read
+    }, done.stdout + done.stderr
 
 
 def _market_gate(etc: Path, now: str) -> int:
@@ -717,25 +781,29 @@ def test_the_gate_takes_the_stricter_of_the_two_views(tmp_path, then, now, tradi
 
 
 def test_the_shipped_list_on_the_server(tmp_path):
-    """Over the holiday file the server has, the Muhurat Sunday becomes a trading day."""
+    """Over the holiday file the server has, the Muhurat Sunday becomes a trading day with the
+    afternoon session's own window."""
     holidays = b"# NSE trading holidays 2026\n2026-10-20  # Dussehra\n2026-11-10\n"
     server, out = _applied(tmp_path, {HOLIDAYS: holidays}, SHIPPED_LIST.read_bytes())
     assert server.day(HOLIDAYS).read_bytes() == holidays
-    assert server.day().read_bytes() == MUHURAT + b"\n"
+    assert server.day().read_bytes() == SHIPPED + b"\n"
     sunday = date(2026, 11, 8)
     calendar = TradingCalendar(server.day(HOLIDAYS), server.day())
     assert calendar.is_trading_day(sunday)
-    # auto-login: its usual morning wake-ups that Sunday
+    # auto-login: its usual morning wake-ups that Sunday; the token holds until 03:30 on Monday
     assert calendar.next_slot(datetime(2026, 11, 7, 20, 0, tzinfo=IST)) == datetime(
         2026, 11, 8, 8, 35, tzinfo=IST
     )
-    # the order alerts: no window of its own yet, so the usual 08:45-16:00
+    # the order alerts: connected from the pre-open at 14:05 to the F&O close at 15:40
     alerts = AlertWindow(calendar, parse_window("08:45-16:00"), False, server.day())
-    assert alerts.status(datetime(2026, 11, 8, 10, 0, tzinfo=IST))[0] is True
-    assert alerts.status(datetime(2026, 11, 8, 18, 30, tzinfo=IST)) == (
-        False,
-        "after the alert window",
-    )
+
+    def at(hour: int, minute: int) -> datetime:
+        return datetime(2026, 11, 8, hour, minute, tzinfo=IST)
+
+    assert alerts.status(at(10, 0)) == (False, "before the alert window")
+    assert alerts.status(at(14, 5))[0] is True and alerts.status(at(15, 39))[0] is True
+    assert alerts.status(at(15, 40)) == (False, "after the alert window")
+    assert alerts.next_open(at(9, 0)) == at(14, 5)
     # the deploy market gate: no install at any hour that Sunday
     for now in ("7 0300 2026-11-08", "7 1830 2026-11-08", "7 2330 2026-11-08"):
         assert _market_gate(server.etc, now) == 0
@@ -1141,8 +1209,8 @@ def test_scenario_t_a_list_cut_off_in_transit_is_not_taken(tmp_path):
     assert box.run().stdout == ""  # said once; fetched again
     box.calendar("v1.0.0", full)
     whole = box.run()
-    assert f'added "{MUHURAT.decode()}"' in whole.stdout
-    assert box.day().read_bytes() == b"# special sessions\n" + MUHURAT + b"\n"
+    assert f'added "{SHIPPED.decode()}"' in whole.stdout
+    assert box.day().read_bytes() == b"# special sessions\n" + SHIPPED + b"\n"
     assert box.requests().count(box.list_url("v1.0.0")) == 3
     assert (box.state / "calendar-lists" / "v1.0.0").read_bytes() == full
 

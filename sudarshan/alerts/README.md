@@ -99,17 +99,17 @@ are closed, a date in `/etc/sudarshan/nse_extra_trading_days.txt` is open. Both 
 again when they change. Outside the window the process stays up, disconnected, and connects again
 at the next opening. The MCX evening session is not covered.
 
-A special session outside the usual hours gets its own window after the date, which the alerts use
-for that day instead of 08:45-16:00 (include the pre-open):
+A special session gets its own window after the date, which the alerts use for that day instead of
+08:45-16:00 (include the pre-open). Muhurat 2026, as `nse-calendar.conf` ships it:
 
 ```
-2026-11-08 17:45-19:30  # Muhurat
+2026-11-08 14:05-15:40  # Muhurat, NSE circular 149/2026 (F&O to 15:40)
 ```
 
 Auto-login reads only the date of such a line, and the deploy tool only the date at its start, so
 both work as before (a test holds each to it). A release ships these lines in
 `sudarshan/ops/deploy/nse-calendar.conf` (see `sudarshan/README.md`). A listed day with no window
-keeps 08:45-16:00, so an evening session gets no alerts until its window is shipped.
+keeps 08:45-16:00, so a session outside those hours gets no alerts until its window is shipped.
 
 **Upstox connections.** OpenAlgo's proxy keeps one pooled Upstox market-data connection per user
 (the daily access token), opened when the first of the owner's clients signs in and kept while any
