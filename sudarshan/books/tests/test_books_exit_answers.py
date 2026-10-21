@@ -469,6 +469,28 @@ def test_exit_all_that_breaks_after_an_exit_went_is_not_confirmed(monkeypatch):
     assert SECRET_DETAIL not in body["message"]
 
 
+def test_exit_all_that_breaks_before_its_first_exit_is_not_flagged(monkeypatch):
+    def broken(token, exchange):
+        raise RuntimeError(SECRET_DETAIL)
+
+    monkeypatch.setattr(
+        upstox,
+        "get_positions",
+        lambda auth: {
+            "status": "success",
+            "data": [
+                {"quantity": 10, "instrument_token": "NSE_EQ|1", "exchange": "NSE", "product": "I"}
+            ],
+        },
+    )
+    monkeypatch.setattr(upstox, "get_symbol", broken)
+    monkeypatch.setattr(upstox, "place_order_api", lambda data, auth: PLACED)
+    assert upstox.close_all_positions("key", "token") == (
+        {"status": "error", "message": "Failed to close all positions"},
+        500,
+    )
+
+
 @pytest.mark.parametrize(
     ("answered", "status", "flagged"),
     [
