@@ -17,6 +17,7 @@ import {
   PUSH_HOLD_MS,
   type Pushed,
   pushedStatuses,
+  reasonOf,
   recentPush,
   rememberPushed,
   resetOrderMemoryForTests,
@@ -142,6 +143,19 @@ describe('foldOrderUpdate: the fill and the reason', () => {
       rejection_reason: 'RMS:Margin Exceeds',
     })
     expect(row).toMatchObject({ order_status: 'rejected', rejection_reason: 'RMS:Margin Exceeds' })
+  })
+
+  it('takes no reason from a frame whose reason is only the status word', () => {
+    const [row] = foldOrderUpdate([OPEN], {
+      orderid: ID,
+      order_status: 'rejected',
+      rejection_reason: 'rejected',
+    })
+    expect(row.order_status).toBe('rejected')
+    expect(row).not.toHaveProperty('rejection_reason')
+    expect(reasonOf('REJECTED')).toBe('')
+    expect(reasonOf(' cancelled ')).toBe('')
+    expect(reasonOf('RMS: rejected for margin')).toBe('RMS: rejected for margin')
   })
 })
 

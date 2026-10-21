@@ -501,6 +501,20 @@ describe('Order book on a phone: the sheet and its actions', () => {
     expect(reason()).toHaveTextContent('Broker says: RMS:Margin Exceeds')
   })
 
+  it('says no reason was given for a pushed rejection whose reason is only the status word', async () => {
+    const tap = user()
+    await renderPhone(UPSTOX_WORKING)
+    push({
+      orderid: '1001',
+      order_status: 'rejected',
+      filled_quantity: 0,
+      rejection_reason: 'rejected',
+    })
+    await tap.click(orderCard('1001'))
+    expect(screen.getByTestId('rejection-reason')).toHaveTextContent('The broker gave no reason.')
+    expect(screen.getByTestId('rejection-reason')).not.toHaveTextContent('Broker says')
+  })
+
   it('offers Modify and Cancel on a working order only: trigger pending yes, complete or cancelled no', async () => {
     const tap = user()
     await renderPhone(STOP, FILLED, CANCELLED)

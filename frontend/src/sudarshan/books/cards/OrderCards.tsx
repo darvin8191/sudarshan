@@ -3,7 +3,7 @@ import { memo, type ReactNode, useCallback, useEffect, useMemo, useRef, useState
 import { cn } from '@/lib/utils'
 import { useThemeStore } from '@/stores/themeStore'
 import { type FeedRow, useBookFeed } from '@/sudarshan/books/feed'
-import { type BookOrder, isFinalStatus } from '@/sudarshan/books/orderFold'
+import { type BookOrder, isFinalStatus, reasonOf } from '@/sudarshan/books/orderFold'
 import type { TickDirection } from '@/sudarshan/books/prices'
 import {
   cancelMark,
@@ -612,7 +612,7 @@ function OrderSheet({
 }) {
   const { symbol, exchange, product } = order
   const named = describe(symbol, exchange)
-  const reason = String(order.rejection_reason ?? '').trim()
+  const reason = reasonOf(order.rejection_reason)
   const pending = figure(order.pending_quantity)
   const average = figure(order.average_price)
   const meaning = PRODUCT_MEANING[product as Product]

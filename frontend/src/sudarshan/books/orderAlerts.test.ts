@@ -180,6 +180,14 @@ describe('describeOrderUpdate', () => {
     expect(
       describeOrderUpdate(frame({ order_status: 'rejected', filled_quantity: 0 }))?.description
     ).toBe('The broker gave no reason.')
+    // Only the status word where the reason goes is no reason either.
+    for (const word of ['rejected', 'REJECTED', ' Rejected ']) {
+      expect(
+        describeOrderUpdate(
+          frame({ order_status: 'rejected', filled_quantity: 0, rejection_reason: word })
+        )?.description
+      ).toBe('The broker gave no reason.')
+    }
   })
 
   it('says a cancel at the broker was not made from this app, and what had filled', () => {

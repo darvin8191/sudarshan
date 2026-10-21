@@ -63,6 +63,12 @@ GOLDEN = [
         id="rejected-without-reason",
     ),
     pytest.param(
+        # A feed that puts the status word where the reason goes: no reason, not "Broker says: rejected".
+        [update("1009", "rejected", rejection_reason="REJECTED")],
+        "Rejected: BUY 65 NIFTY 21 OCT 25900 CE (MIS, NFO). The broker gave no reason.",
+        id="rejected-with-only-the-status-word",
+    ),
+    pytest.param(
         [update("1005", "cancelled", pricetype="LIMIT", price=120.0)],
         "Cancelled: BUY 65 NIFTY 21 OCT 25900 CE, none filled (MIS, NFO)",
         id="cancelled",

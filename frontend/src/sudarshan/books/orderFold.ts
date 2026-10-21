@@ -88,6 +88,16 @@ export interface FillDetail {
   rejection_reason?: string
 }
 
+/**
+ * A rejection's reason as given, or '' when it is empty or only a status word
+ * ("rejected"): a feed that puts its status there has given no reason, and a
+ * screen saying "Broker says: rejected" would read as one.
+ */
+export function reasonOf(value: unknown): string {
+  const reason = text(value)
+  return bookStatus(reason) === null ? reason : ''
+}
+
 function fillOf(frame: OrderUpdateFrame): FillDetail {
   const out: FillDetail = {}
   const filled = count(frame.filled_quantity)
@@ -96,7 +106,7 @@ function fillOf(frame: OrderUpdateFrame): FillDetail {
   if (pending !== null) out.pending_quantity = pending
   const average = positive(frame.average_price)
   if (average !== null) out.average_price = average
-  const reason = text(frame.rejection_reason)
+  const reason = reasonOf(frame.rejection_reason)
   if (reason) out.rejection_reason = reason
   return out
 }
@@ -213,7 +223,7 @@ function missing(row: BookOrder, fill: FillDetail): FillDetail {
     if (fill.average_price !== undefined && positive(row.average_price) === null)
       out.average_price = fill.average_price
   }
-  if (fill.rejection_reason && !text(row.rejection_reason))
+  if (fill.rejection_reason && !reasonOf(row.rejection_reason))
     out.rejection_reason = fill.rejection_reason
   return out
 }
