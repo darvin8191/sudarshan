@@ -143,16 +143,24 @@ VECTORS = {
         ),
     ),
     "cancelled after a part fill": (
+        # Two lots of a 65-lot NIFTY option, one of them filled: fills come in whole lots.
         _raw(
             "251021000000104",
             product="D",
             price=140.0,
+            quantity=130,
             status="cancelled",
             average_price=139.95,
-            filled_quantity=30,
+            filled_quantity=65,
             pending_quantity=0,
         ),
-        _row("251021000000104", price=140.0, product="NRML", order_status="cancelled"),
+        _row(
+            "251021000000104",
+            price=140.0,
+            quantity=130,
+            product="NRML",
+            order_status="cancelled",
+        ),
     ),
     "trigger pending": (
         _raw(
