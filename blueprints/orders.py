@@ -53,6 +53,14 @@ def _not_confirmed(message):
     return {"status": "error", "message": message, "not_confirmed": True}
 
 
+def _placed_order_ids(response, orderid):
+    """SUDARSHAN M6.9: every order an exit placed; Upstox names one per slice of a sliced order."""
+    data = response.get("data") if isinstance(response, dict) else None
+    named = data.get("order_ids") if isinstance(data, dict) else None
+    ids = [str(each).strip() for each in named] if isinstance(named, (list, tuple)) else []
+    return [each for each in ids if each] or [str(orderid)]
+
+
 def _cancel_all_summary(answered):
     """SUDARSHAN M6.9: Cancel all's answer when not every cancel went through."""
     canceled = list(answered.get("canceled_orders") or [])
@@ -676,6 +684,10 @@ def close_position():
                 else "Position close order placed successfully.",
                 "orderid": orderid,
             }
+            # SUDARSHAN M6.9: the phone holds the exit until every slice of it has ended.
+            placed = _placed_order_ids(response, orderid)
+            if len(placed) > 1:
+                response_data["orderids"] = placed
             status_code = 200
 
             # SUDARSHAN M6.9: the order is placed and its id known, so a failure to log it
@@ -739,7 +751,7 @@ def close_position():
 @check_session_validity
 @limiter.limit(API_RATE_LIMIT)
 @track_latency("CLOSE")
-@one_exit_at_a_time(every=True)  # SUDARSHAN M6.9: 409 while any exit is still being placed
+# SUDARSHAN M6.9: its 409 comes from close_position_service, where every Exit all is claimed.
 def close_all_positions():
     """Close all open positions using the broker API"""
     try:

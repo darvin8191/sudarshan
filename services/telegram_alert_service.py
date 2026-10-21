@@ -22,6 +22,13 @@ from database.telegram_db import (
     get_bot_config,
     get_telegram_user_by_username,
 )
+
+# SUDARSHAN M6.9: titles and lines for an Exit all or a Cancel all that did not do it all.
+from sudarshan.books.telegram_words import (
+    alert_template,
+    cancel_all_unsure_line,
+    close_failed_line,
+)
 from utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -174,6 +181,9 @@ class TelegramAlertService:
                             f"Failed: {len(failed)} orders",
                         ]
                     )
+                    # SUDARSHAN M6.9: the failed ones that may have gone through anyway.
+                    if unsure := cancel_all_unsure_line(response):
+                        details.append(unsure)
                     if canceled and len(canceled) <= 5:
                         details.append(f"Order IDs: {', '.join(canceled[:5])}")
 
@@ -202,7 +212,8 @@ class TelegramAlertService:
                         else:
                             details.append("All positions closed successfully")
                 else:
-                    details.append(f"Error: {response.get('message', 'Failed')}")
+                    # SUDARSHAN M6.9: Exit all's own sentence under its own title, not "Error: ...".
+                    details.append(close_failed_line(order_data, response))
 
             elif order_type == "optionsorder":
                 details.append(f"Underlying: `{order_data.get('underlying', 'N/A')}`")
@@ -430,6 +441,8 @@ class TelegramAlertService:
 
             # Format message
             template = self.alert_templates.get(order_type, "*Order Update*\n{details}")
+            # SUDARSHAN M6.9: an Exit all or a Cancel all that did not do it all says so.
+            template = alert_template(order_type, order_data, response, template)
             details = self.format_order_details(order_type, order_data, response)
             message = template.format(details=details)
 

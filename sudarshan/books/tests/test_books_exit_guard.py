@@ -231,8 +231,7 @@ def test_the_claim_is_let_go_however_the_view_ends(routes, monkeypatch):
     assert len(exit_guard.EXITS) == 0
 
 
-@pytest.mark.parametrize("every", [False, True], ids=["exit", "exit all"])
-def test_a_view_that_raises_lets_its_claim_go(monkeypatch, every):
+def test_a_view_that_raises_lets_its_claim_go(monkeypatch):
     from flask import Flask
 
     monkeypatch.setattr(exit_guard, "EXITS", ExitsInFlight())
@@ -240,11 +239,22 @@ def test_a_view_that_raises_lets_its_claim_go(monkeypatch, every):
     app = Flask(__name__)
 
     @app.post("/boom")
-    @exit_guard.one_exit_at_a_time(every=every)
+    @exit_guard.one_exit_at_a_time()
     def boom():
         raise RuntimeError("the view broke")
 
     assert app.test_client().post("/boom", json=EXIT).status_code == 500
+    assert len(exit_guard.EXITS) == 0
+
+
+def test_a_close_all_that_raises_lets_its_claim_go(monkeypatch):
+    monkeypatch.setattr(exit_guard, "EXITS", ExitsInFlight())
+
+    def broken(api_key, auth):
+        raise RuntimeError("the broker module broke")
+
+    with pytest.raises(RuntimeError):
+        exit_guard.close_all_once("live", broken, "key", "token")
     assert len(exit_guard.EXITS) == 0
 
 
@@ -332,3 +342,162 @@ def test_two_threads_released_together_claim_once(claims):
     assert sorted(seen, key=str) == sorted([None, refused], key=str)
     guard._lock = threading.Lock()
     assert len(guard) == 0
+
+
+# -- Every Exit all, from every surface, takes the one claim -------------------------------------
+
+API_KEY = "test-only-api-key"
+
+
+def _api_client():
+    from flask import Flask
+    from flask_restx import Api
+
+    from restx_api import close_position as close_position_api
+
+    app = Flask(__name__)
+    app.config.update(TESTING=True, PROPAGATE_EXCEPTIONS=False)
+    Api(app).add_namespace(close_position_api.api, path="/api/v1/closeposition")
+    return app.test_client()
+
+
+@pytest.fixture
+def surfaces(routes, monkeypatch):
+    """Each way an Exit all reaches Upstox, answering (status code, the sentence or None)."""
+    import database.auth_db as auth_db
+    import services.close_position_service as close_service
+    from limiter import limiter
+
+    monkeypatch.setattr(limiter, "enabled", False)
+    monkeypatch.setattr(close_service, "get_auth_token_broker", lambda key: ("token", "upstox"))
+    monkeypatch.setattr(auth_db, "verify_api_key", lambda key: "owner")
+    monkeypatch.setattr(auth_db, "get_order_mode", lambda user: "auto")
+
+    def app_exit_all():
+        response = _client().post("/close_all_positions", json={})
+        return response.status_code, response.get_json().get("message")
+
+    def api_close_position():  # TradingView, scripts, and Telegram's /closeall through the SDK
+        body = {"apikey": API_KEY, "strategy": "TradingView"}
+        response = _api_client().post("/api/v1/closeposition", json=body)
+        return response.status_code, response.get_json().get("message")
+
+    def flow_close_all_node():
+        from services.flow_openalgo_client import FlowOpenAlgoClient
+
+        result = FlowOpenAlgoClient(API_KEY).close_all_positions()
+        if result["status"] == "success":
+            return 200, None
+        return result["code"], result["error"]
+
+    return {"app": app_exit_all, "api": api_close_position, "flow": flow_close_all_node}
+
+
+@pytest.mark.parametrize("surface", ["app", "api", "flow"])
+def test_every_exit_all_surface_waits_while_one_is_being_placed(routes, surfaces, surface):
+    with exit_guard.EXITS.every("live") as busy:  # an Exit all from elsewhere, still being placed
+        assert busy is None
+        assert surfaces[surface]() == (409, EXIT_ALL_BEING_PLACED)
+    with exit_guard.EXITS.one("live", ("NFO", EXIT["symbol"], "MIS")):  # one of the app's exits
+        assert surfaces[surface]() == (409, AN_EXIT_BEING_PLACED)
+    assert routes["placed"] == []
+    assert len(exit_guard.EXITS) == 0
+
+
+@pytest.mark.parametrize("surface", ["app", "api", "flow"])
+def test_an_exit_all_from_any_surface_goes_through_once(routes, surfaces, surface):
+    """The app's own route is not claimed twice: it does not refuse itself."""
+    routes["release"].set()
+    assert surfaces[surface]() == (
+        200,
+        "All Open Positions Squared Off" if surface != "flow" else None,
+    )
+    assert routes["placed"] == ["ALL"]
+    assert len(exit_guard.EXITS) == 0
+
+
+@pytest.mark.parametrize(
+    "pair",
+    [("app", "api"), ("api", "api"), ("api", "flow"), ("app", "flow")],
+    ids=[
+        "the phone and Telegram",
+        "TradingView twice",
+        "TradingView and Flow",
+        "the phone and Flow",
+    ],
+)
+def test_two_exit_alls_released_together_give_one_set_of_exits_and_one_409(routes, surfaces, pair):
+    """Barrier-synchronised: two surfaces' Exit alls on real threads (gthread) at once."""
+    start = threading.Barrier(2)
+    answers = []
+
+    def send(surface):
+        start.wait(WAIT)
+        answers.append(surfaces[surface]())
+
+    threads = [threading.Thread(target=send, args=(surface,)) for surface in pair]
+    for thread in threads:
+        thread.start()
+    assert routes["entered"].wait(WAIT)  # one is placing its exits, held at the broker
+    deadline = time.monotonic() + WAIT
+    while not answers and time.monotonic() < deadline:  # the other has its answer
+        time.sleep(0.01)
+    routes["release"].set()
+    for thread in threads:
+        thread.join(WAIT)
+    assert sorted(code for code, _ in answers) == [200, 409]
+    assert [words for code, words in answers if code == 409] == [EXIT_ALL_BEING_PLACED]
+    assert routes["placed"] == ["ALL"]
+
+
+def test_a_phone_exit_waits_while_an_exit_all_from_the_api_is_placed(routes, surfaces):
+    def api_exit_all():
+        surfaces["api"]()
+
+    everything = threading.Thread(target=api_exit_all)
+    everything.start()
+    assert routes["entered"].wait(WAIT)
+    single = _client().post("/close_position", json=EXIT)
+    assert (single.status_code, single.get_json()["message"]) == (409, EXIT_ALL_BEING_PLACED)
+    routes["release"].set()
+    everything.join(WAIT)
+    assert routes["placed"] == ["ALL"]
+
+
+def test_a_smart_order_from_the_api_is_never_held_up(monkeypatch):
+    """TradingView's entries go through /api/v1/placesmartorder: never refused by the guard."""
+    import services.place_smart_order_service as smart_service
+
+    monkeypatch.setattr(exit_guard, "EXITS", ExitsInFlight())
+    monkeypatch.setattr(smart_service, "get_analyze_mode", lambda: False)
+    placed = []
+
+    def place_smartorder_api(order_data, auth_token):
+        placed.append(order_data["symbol"])
+        return Answer(200), {"status": "success"}, "251021000000009"
+
+    monkeypatch.setattr(
+        smart_service,
+        "import_broker_module",
+        lambda broker: type(
+            "Upstox", (), {"place_smartorder_api": staticmethod(place_smartorder_api)}
+        ),
+    )
+    order = {
+        **EXIT,
+        "apikey": API_KEY,
+        "strategy": "TradingView",
+        "action": "BUY",
+        "quantity": "65",
+        "position_size": "65",
+        "pricetype": "MARKET",
+    }
+    with (
+        exit_guard.EXITS.every("live"),
+        exit_guard.EXITS.one("live", ("NFO", EXIT["symbol"], "MIS")),
+    ):
+        answer = smart_service.place_smart_order_with_auth(
+            dict(order), "token", "upstox", dict(order)
+        )
+    assert answer == (True, {"status": "success", "orderid": "251021000000009"}, 200)
+    assert placed == [EXIT["symbol"]]

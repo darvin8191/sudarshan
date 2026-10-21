@@ -67,7 +67,8 @@ import {
   EXIT_ALL_TOAST,
   heldText,
   refusalReason,
-  sentOrderId,
+  sentOrderIds,
+  stillPlacing,
   thrownOutcome,
 } from '@/sudarshan/books/sendOutcome'
 import type { SendOutcome, SentAnswer } from '@/sudarshan/books/sent'
@@ -473,8 +474,8 @@ export default function Positions() {
       if (response.status === 'success') {
         showToast.success(response.message || `Position closed for ${position.symbol}`, 'positions')
         fetchPositions(true)
-        // The order this placed is the exit's own, not any other on its side.
-        return { outcome: 'sent', orderid: sentOrderId(response) }
+        // The orders this placed are the exit's own, not any other on its side.
+        return { outcome: 'sent', orderids: sentOrderIds(response) }
       }
       const held = answeredHeld(response)
       if (held) {
@@ -491,6 +492,8 @@ export default function Positions() {
         return outcome
       }
       showToast.error(refusalReason(err) ?? 'Failed to close position', 'positions')
+      // An earlier exit for it is still being placed (the app's 409): that one holds the row.
+      if (stillPlacing(err)) return 'placing'
     }
     return 'refused'
   }
@@ -520,6 +523,7 @@ export default function Positions() {
         return outcome
       }
       showToast.error(refusalReason(err) ?? 'Failed to close all positions', 'positions', once)
+      if (stillPlacing(err)) return 'placing'
     }
     return 'refused'
   }

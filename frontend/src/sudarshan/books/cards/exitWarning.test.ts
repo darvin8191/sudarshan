@@ -20,7 +20,7 @@ import {
   sentMarksNow,
   settleSends,
 } from '@/sudarshan/books/sent'
-import { exitWarning, heldWhy } from './PositionCards'
+import { exitWarning, exitWords, heldWhy } from './PositionCards'
 
 const ID = 'NFO:NIFTY27OCT2625900CE:MIS'
 const LONG = { id: ID, was: 130, exchange: 'NFO', symbol: 'NIFTY27OCT2625900CE', product: 'MIS' }
@@ -161,5 +161,32 @@ describe('a tap on a held Exit says why it sends nothing', () => {
   ])('%s', (_, make, words) => {
     make()
     expect(heldWhy(mark())).toContain(`An exit for NIFTY 25900 CE ${words}`)
+  })
+})
+
+describe('an exit the app said was still being placed (its 409)', () => {
+  const STILL_PLACING =
+    'An exit for this position is still being placed. Wait for it, then check Orders.'
+
+  it('says so on its card and at a tap while it holds, in the app’s words', () => {
+    ranOut()
+    settleSends(beginSends('exit', false, [LONG]), 'placing')
+    expect(mark()).toMatchObject({ expired: false, placingAt: Date.now() })
+    expect(exitWords(mark())).toEqual({
+      chip: null,
+      note: 'Still being placed: wait for it, then check Orders',
+      button: 'Still being placed',
+    })
+    expect(heldWhy(mark())).toBe(STILL_PLACING)
+  })
+
+  it('offered again after its hold, says when the app was still placing it', () => {
+    ranOut()
+    vi.advanceTimersByTime(60_000) // 10:43:36
+    settleSends(beginSends('exit', false, [LONG]), 'placing')
+    vi.advanceTimersByTime(SENT_HOLD_MS)
+    expect(exitWarning(mark())).toBe(
+      'An exit for this position was still being placed at 10:43:36 and has not shown in the book yet. If that order is still open in Orders, this sends a second one.'
+    )
   })
 })

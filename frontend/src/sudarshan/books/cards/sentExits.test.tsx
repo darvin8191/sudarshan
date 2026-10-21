@@ -995,3 +995,127 @@ describe('r: the wide table’s question, once its position is held again', () =
     )
   })
 })
+
+const STILL_PLACING =
+  'An exit for this position is still being placed. Wait for it, then check Orders.'
+const EXIT_ALL_STILL_PLACING = 'Exit all is still being placed. Wait for it, then check Orders.'
+
+describe('s: the app is still placing an earlier exit (its 409)', () => {
+  it('holds the row again as that exit, says so, and warns at the next confirmation', async () => {
+    const tap = user()
+    // An exit answered without naming its order; its hold runs out with the book unchanged.
+    await open(LONG, PUT)
+    await exitOnce(tap)
+    await pass(16_000)
+    expect(await exitOffered(tap)).toBe(true)
+
+    api.closePosition.mockRejectedValueOnce(refusal(409, STILL_PLACING))
+    await exitOnce(tap)
+    expect(toast.error).toHaveBeenLastCalledWith(STILL_PLACING, 'positions')
+    expect(card()).toHaveTextContent('Still being placed: wait for it, then check Orders')
+    expect(await exitOffered(tap)).toBe(false)
+    expect(exitAll()).toBeDisabled()
+
+    // Its hold over, Exit is offered again with a warning that says what the app said.
+    await pass(16_000)
+    expect(await exitOffered(tap)).toBe(true)
+    await tap.click(card())
+    await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: /^Exit/ }))
+    expect(screen.getByRole('dialog', { name: 'Exit NIFTY 25900 CE?' })).toHaveTextContent(
+      /An exit for this position was still being placed at 10:42:\d\d and has not shown in the book yet\./
+    )
+    expect(api.closePosition).toHaveBeenCalledTimes(2)
+  })
+
+  it('holds every row again when Exit all is refused for one still being placed', async () => {
+    const tap = user()
+    api.closeAllPositions.mockRejectedValueOnce(
+      new AxiosError('Network Error', AxiosError.ERR_NETWORK)
+    )
+    await open(LONG, PUT)
+    const exitAllOnce = async () => {
+      await tap.click(exitAll())
+      await tap.click(
+        within(screen.getByRole('dialog', { name: 'Exit all positions?' })).getByRole('button', {
+          name: 'Exit all',
+        })
+      )
+      await settle()
+    }
+    await exitAllOnce()
+    await pass(151_000)
+    expect(exitAll()).toBeEnabled()
+
+    api.closeAllPositions.mockRejectedValueOnce(refusal(409, EXIT_ALL_STILL_PLACING))
+    await exitAllOnce()
+    expect(toast.error).toHaveBeenLastCalledWith(EXIT_ALL_STILL_PLACING, 'positions', {
+      id: 'sudarshan-exit-all-result',
+    })
+    expect(card()).toHaveTextContent('Still being placed')
+    expect(putCard()).toHaveTextContent('Still being placed')
+    expect(exitAll()).toBeDisabled()
+    await pass(16_000)
+    expect(exitAll()).toBeEnabled()
+    expect(api.closeAllPositions).toHaveBeenCalledTimes(2)
+  })
+
+  it('holds a row the app is placing an exit for, though this phone sent none', async () => {
+    const tap = user()
+    // Telegram's /closeall, say, is being placed when the phone's Exit arrives.
+    api.closePosition.mockRejectedValueOnce(refusal(409, EXIT_ALL_STILL_PLACING))
+    await open(LONG, PUT)
+    await exitOnce(tap)
+    expect(card()).toHaveTextContent('Still being placed')
+    expect(await exitOffered(tap)).toBe(false)
+    await pass(16_000)
+    expect(await exitOffered(tap)).toBe(true)
+  })
+
+  it('a refusal for another reason puts the earlier exit back as it was, warning and all', async () => {
+    const tap = user()
+    await open(LONG, PUT)
+    await exitOnce(tap)
+    await pass(16_000)
+
+    api.closePosition.mockRejectedValueOnce(refusal(400, 'Market is closed'))
+    await exitOnce(tap)
+    expect(toast.error).toHaveBeenLastCalledWith('Market is closed', 'positions')
+    expect(card()).not.toHaveTextContent('Still being placed')
+    expect(await exitOffered(tap)).toBe(true)
+    await tap.click(card())
+    await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: /^Exit/ }))
+    expect(screen.getByRole('dialog', { name: 'Exit NIFTY 25900 CE?' })).toHaveTextContent(
+      /The exit sent at 10:42:2\d has not shown in the book yet\./
+    )
+  })
+})
+
+describe('t: an exit the broker sliced', () => {
+  it('holds until the last of its orders has ended', async () => {
+    const tap = user()
+    const SLICE = { ...EXIT_ORDER, orderid: '251020000611112', quantity: 65 }
+    api.closePosition.mockResolvedValueOnce({
+      status: 'success',
+      message: 'Closed',
+      orderid: EXIT_ORDER.orderid,
+      orderids: [EXIT_ORDER.orderid, SLICE.orderid],
+    })
+    const { push } = await open(LONG, PUT)
+    await exitOnce(tap)
+    push({ ...EXIT_ORDER, quantity: 65, order_status: 'complete' })
+    push({ ...SLICE, order_status: 'open' })
+    api.getOrders.mockResolvedValue(
+      orderBook(
+        { ...EXIT_ORDER, quantity: 65, order_status: 'complete' },
+        { ...SLICE, order_status: 'open' }
+      )
+    )
+    await pass(16_000)
+    expect(card()).toHaveTextContent('Exit order open')
+    expect(await exitOffered(tap)).toBe(false)
+
+    push({ ...SLICE, order_status: 'complete' })
+    await settle()
+    expect(await exitOffered(tap)).toBe(true)
+  })
+})

@@ -66,6 +66,17 @@ export function answeredHeld(body: unknown): HeldOutcome | null {
   return notConfirmed(body) ? 'unconfirmed' : null
 }
 
+/**
+ * Whether the app refused because it is still placing an earlier exit for the
+ * same position, or an Exit all (its 409, sudarshan/books/exit_guard.py): the
+ * earlier one holds the row.
+ */
+export function stillPlacing(error: unknown): boolean {
+  return (
+    axios.isAxiosError(error) && error.response?.status === 409 && appAnswered(error.response.data)
+  )
+}
+
 /** The body of the answer a send threw with, if one came. */
 export function answerBody(error: unknown): unknown {
   return axios.isAxiosError(error) ? error.response?.data : undefined
@@ -80,12 +91,29 @@ export function refusalReason(error: unknown): string | null {
   return typeof message === 'string' && message.trim() ? message.trim() : null
 }
 
+/** An order id as the app names it, or null. */
+function orderIdText(id: unknown): string | null {
+  if (typeof id === 'number') return String(id)
+  return typeof id === 'string' && id.trim() ? id.trim() : null
+}
+
 /** The order an exit's answer says it placed, when it names one. */
 export function sentOrderId(body: unknown): string | null {
   if (typeof body !== 'object' || body === null) return null
-  const id = (body as { orderid?: unknown }).orderid
-  if (typeof id === 'number') return String(id)
-  return typeof id === 'string' && id.trim() ? id.trim() : null
+  return orderIdText((body as { orderid?: unknown }).orderid)
+}
+
+/**
+ * Every order an exit's answer says it placed: one per slice when the broker
+ * sliced it (`orderids`), else the one it names.
+ */
+export function sentOrderIds(body: unknown): string[] {
+  if (typeof body !== 'object' || body === null) return []
+  const all = (body as { orderids?: unknown }).orderids
+  const named = Array.isArray(all) ? all.map(orderIdText).filter((id) => id !== null) : []
+  if (named.length > 0) return named as string[]
+  const one = sentOrderId(body)
+  return one ? [one] : []
 }
 
 /** What the toast says when it is not confirmed and the app said nothing of its own. */
@@ -127,6 +155,10 @@ export function heldText(kind: SendKind, outcome: HeldOutcome, body?: unknown): 
   }
   return NOT_CONFIRMED[kind]
 }
+
+/** What the app says when an earlier exit for a position is still being placed (its 409). */
+export const EXIT_STILL_PLACING =
+  'An exit for this position is still being placed. Wait for it, then check Orders.'
 
 /**
  * The one toast an Exit all's result shows: the page's answer and the
