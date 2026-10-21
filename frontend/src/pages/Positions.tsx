@@ -55,7 +55,8 @@ import { cn, makeFormatCurrency, sanitizeCSV } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
 import { onModeChange } from '@/stores/themeStore'
 // SUDARSHAN M6.9: on a phone the positions are cards (src/sudarshan/books/cards).
-import { PositionCards, useTableExits } from '@/sudarshan/books/cards/PositionCards'
+import { PositionCards, usePositionExits } from '@/sudarshan/books/cards/PositionCards'
+import { WarningLine } from '@/sudarshan/books/cards/parts'
 // SUDARSHAN: the book re-read, status line and tick prices (src/sudarshan/books).
 import { useBookFeed } from '@/sudarshan/books/feed'
 import { TickPrice } from '@/sudarshan/books/LiveFigures'
@@ -514,9 +515,17 @@ export default function Positions() {
     return 'refused'
   }
 
-  // SUDARSHAN M6.9: the table's Close and Close All hold as the phone's Exit does:
-  // a phone turned on its side shows this table.
-  const tableExits = useTableExits(handleClosePosition, handleCloseAllPositions, positions)
+  // SUDARSHAN M6.9: the exit hold's side of this page: each book read is told to it, and
+  // the table's Close and Close All hold as the phone's Exit does (a phone turned on its
+  // side shows this table).
+  const tableExits = usePositionExits({
+    onClose: handleClosePosition,
+    onCloseAll: handleCloseAllPositions,
+    positions,
+    bookAt,
+    loading: isLoading,
+    apiKey,
+  })
 
   const exportToCSV = () => {
     if (filteredPositions.length === 0) {
@@ -815,6 +824,8 @@ export default function Positions() {
               <AlertDialogHeader>
                 <AlertDialogTitle>Close All Positions?</AlertDialogTitle>
                 <AlertDialogDescription>
+                  {/* SUDARSHAN M6.9: what became of an earlier exit whose time ran out. */}
+                  {tableExits.allWarning && <WarningLine text={tableExits.allWarning} />}
                   This will close all {stats.total} open positions at market price. This action
                   cannot be undone.
                 </AlertDialogDescription>
@@ -1156,6 +1167,8 @@ export default function Positions() {
           )}
         </CardContent>
       </Card>
+      {/* SUDARSHAN M6.9: Close offered again after an earlier exit's time ran out asks first. */}
+      {tableExits.dialog}
     </div>
   )
 }

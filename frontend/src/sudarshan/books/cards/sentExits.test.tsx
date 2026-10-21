@@ -20,6 +20,7 @@ vi.mock('@/lib/MarketDataManager', () => import('@/test/marketDataHarness'))
 
 const api = vi.hoisted(() => ({
   getPositions: vi.fn(),
+  getOrders: vi.fn(),
   getMultiQuotes: vi.fn(),
   closePosition: vi.fn(),
   closeAllPositions: vi.fn(),
@@ -28,6 +29,7 @@ const api = vi.hoisted(() => ({
 vi.mock('@/api/trading', () => ({
   tradingApi: {
     getPositions: (...args: unknown[]) => api.getPositions(...args),
+    getOrders: (...args: unknown[]) => api.getOrders(...args),
     getMultiQuotes: (...args: unknown[]) => api.getMultiQuotes(...args),
     closePosition: (...args: unknown[]) => api.closePosition(...args),
     closeAllPositions: (...args: unknown[]) => api.closeAllPositions(...args),
@@ -133,6 +135,24 @@ function notConfirmedAnswer(status: number, data: object) {
   })
 }
 
+/** The exit's own order, as the broker pushes it and its order book lists it. */
+const EXIT_ORDER = {
+  orderid: '251020000611111',
+  symbol: CALL,
+  exchange: 'NFO',
+  product: 'MIS',
+  action: 'SELL',
+  quantity: 130,
+  price: 0,
+  trigger_price: 0,
+  pricetype: 'MARKET',
+  timestamp: '20-Oct-2026 10:42:22',
+}
+const orderBook = (...orders: object[]) => ({
+  status: 'success',
+  data: { orders, statistics: {} },
+})
+
 /** An answer from something between the phone and the app: a gateway's page. */
 function gateway(status: number) {
   return new AxiosError('Request failed', 'ERR_BAD_RESPONSE', undefined, undefined, {
@@ -211,6 +231,7 @@ beforeEach(() => {
   api.getMultiQuotes.mockReset().mockResolvedValue({ status: 'success', results: [] })
   api.closePosition.mockReset().mockResolvedValue({ status: 'success', message: 'Closed' })
   api.closeAllPositions.mockReset().mockResolvedValue({ status: 'success' })
+  api.getOrders.mockReset().mockResolvedValue(orderBook())
   api.contractOf.mockReset().mockResolvedValue({ lotSize: 65, tickSize: 0.05 })
   for (const each of Object.values(toast)) each.mockReset()
 })
@@ -230,11 +251,20 @@ describe('a: the hold starts at the tap', () => {
         answer = resolve
       })
     )
-    await open(LONG, PUT)
+    const { push } = await open(LONG, PUT)
     await exitOnce(tap)
     expect(await exitOffered(tap)).toBe(false)
 
     await pass(25_000)
+    // News of another order 25 s after the tap: the exit in flight still holds.
+    push({
+      ...EXIT_ORDER,
+      orderid: '251020000699999',
+      symbol: 'SBIN',
+      exchange: 'NSE',
+      order_status: 'complete',
+    })
+    await settle()
     expect(await exitOffered(tap)).toBe(false)
     expect(exitAll()).toBeDisabled()
     expect(card()).toHaveTextContent('Sending exit')
@@ -355,29 +385,21 @@ describe('e: when its time runs out', () => {
     const tap = user()
     const { push } = await open(LONG, PUT)
     await exitOnce(tap)
-    const exitOrder = {
-      orderid: '251020000611111',
-      symbol: CALL,
-      exchange: 'NFO',
-      product: 'MIS',
-      action: 'SELL',
-      quantity: 130,
-      pricetype: 'MARKET',
-    }
-    push({ ...exitOrder, order_status: 'open' })
+    push({ ...EXIT_ORDER, order_status: 'open' })
+    api.getOrders.mockResolvedValue(orderBook({ ...EXIT_ORDER, order_status: 'open' }))
 
     await pass(16_000)
     expect(await exitOffered(tap)).toBe(false)
 
     // The order stops working (cancelled at the exchange): the hold has run its time.
-    push({ ...exitOrder, order_status: 'cancelled' })
+    push({ ...EXIT_ORDER, order_status: 'cancelled' })
     await settle()
     expect(await exitOffered(tap)).toBe(true)
 
     await tap.click(card())
     await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: /^Exit/ }))
     expect(screen.getByRole('dialog', { name: 'Exit NIFTY 25900 CE?' })).toHaveTextContent(
-      /The exit sent at 10:42:2\d has not shown in the book yet\. If that order is still open in Orders, this sends a second one\./
+      /Orders shows the exit sent at 10:42:2\d cancelled: it closed nothing\. This sends a new exit\./
     )
   })
 })
@@ -551,6 +573,13 @@ describe('the wide table on the same page', () => {
   })
 })
 
+/** The confirmation of the call's exit, opened from its sheet. */
+async function openExitConfirmation(tap: Tap): Promise<HTMLElement> {
+  await tap.click(card())
+  await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: /^Exit/ }))
+  return screen.getByRole('dialog', { name: 'Exit NIFTY 25900 CE?' })
+}
+
 const EXIT_NOT_CONFIRMED =
   'This exit is not confirmed: it may have gone through. Check Orders before sending it again.'
 
@@ -605,5 +634,222 @@ describe('i: an answer that may have reached the broker is not confirmed', () =>
     expect(card()).toHaveTextContent('Not confirmed: check Orders before sending again')
     expect(putCard()).toHaveTextContent('Not confirmed: check Orders before sending again')
     expect(toast.error).not.toHaveBeenCalled()
+  })
+})
+
+describe('j: a tab restored after the hold’s time', () => {
+  it('offers Exit at once, saying the earlier exit has not shown', async () => {
+    const tap = user()
+    const { view } = await open(LONG, PUT)
+    await exitOnce(tap)
+    await pass(2_000)
+    view.unmount()
+
+    // Discarded 2 s after the answer, restored 75 s later: no timer of the old page ran.
+    vi.setSystemTime(Date.now() + 75_000)
+    const reloaded = await load()
+    renderBook('/positions', reloaded.page)
+    await settle()
+    expect(card()).not.toHaveTextContent('Exit sent')
+    expect(exitAll()).toBeEnabled()
+    expect(await openExitConfirmation(tap)).toHaveTextContent(
+      /The exit sent at 10:42:2\d has not shown in the book yet\./
+    )
+    expect(api.closePosition).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps an exit its own order holds, until a read of the order book says how it stands', async () => {
+    const tap = user()
+    const { view, push } = await open(LONG, PUT)
+    await exitOnce(tap)
+    push({ ...EXIT_ORDER, order_status: 'open' })
+    await settle()
+    view.unmount()
+
+    vi.setSystemTime(Date.now() + 75_000)
+    let answer: (value: unknown) => void = () => {}
+    api.getOrders.mockReturnValue(
+      new Promise((resolve) => {
+        answer = resolve
+      })
+    )
+    const reloaded = await load()
+    renderBook('/positions', reloaded.page)
+    await settle()
+    // The reload forgot every push: until a read says otherwise, its order counts as working.
+    expect(card()).toHaveTextContent('Exit order open · check Orders')
+    expect(await exitOffered(tap)).toBe(false)
+    expect(api.getOrders).toHaveBeenCalledTimes(1)
+
+    await act(async () => answer(orderBook({ ...EXIT_ORDER, order_status: 'rejected' })))
+    await settle()
+    expect(card()).not.toHaveTextContent('Exit order open')
+    expect(await openExitConfirmation(tap)).toHaveTextContent(
+      /Orders shows the exit sent at 10:42:2\d rejected: it closed nothing\. This sends a new exit\./
+    )
+  })
+})
+
+describe('k: an exit held by its own order, still working', () => {
+  it('says so, reads the order book at 15 s and every 30 s, and a read settles it', async () => {
+    const tap = user()
+    const { push } = await open(LONG, PUT)
+    await exitOnce(tap)
+    push({ ...EXIT_ORDER, order_status: 'open' })
+    api.getOrders.mockResolvedValue(orderBook({ ...EXIT_ORDER, order_status: 'open' }))
+    await pass(14_000)
+    expect(card()).toHaveTextContent('Exit sent')
+    expect(api.getOrders).not.toHaveBeenCalled()
+
+    await pass(1_500)
+    expect(card()).toHaveTextContent('Exit order open · check Orders')
+    await tap.click(card())
+    const sheetExit = within(screen.getByRole('dialog')).getByRole('button', { name: /^Exit/ })
+    expect(sheetExit).toBeDisabled()
+    expect(sheetExit).toHaveTextContent('Exit order open · check Orders')
+    await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Close' }))
+    await settle()
+    expect(api.getOrders).toHaveBeenCalledTimes(1)
+    await pass(29_000)
+    expect(api.getOrders).toHaveBeenCalledTimes(1)
+    await pass(1_500)
+    expect(api.getOrders).toHaveBeenCalledTimes(2)
+
+    // A price-protected market order can rest unfilled: no clock cuts the hold short.
+    await pass(5 * 60_000)
+    expect(await exitOffered(tap)).toBe(false)
+    expect(exitAll()).toBeDisabled()
+    expect(card()).toHaveTextContent('Exit order open · check Orders')
+
+    // Its "rejected" push was lost in a reconnect; the next read has it.
+    api.getOrders.mockResolvedValue(orderBook({ ...EXIT_ORDER, order_status: 'rejected' }))
+    await pass(30_000)
+    expect(card()).not.toHaveTextContent('Exit order open')
+    expect(await exitOffered(tap)).toBe(true)
+    expect(api.closePosition).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('l: the wide table', () => {
+  const close = () => screen.getByRole('button', { name: `Close ${CALL} position` })
+
+  it('tells the hold every book it reads: Close All goes once a Close shows flat', async () => {
+    const tap = user()
+    fakeScreen('wide')
+    await open(LONG, PUT)
+    await tap.click(close())
+    await settle()
+    expect(api.closePosition).toHaveBeenCalledTimes(1)
+
+    api.getPositions.mockResolvedValue(book({ ...LONG, quantity: 0, pnl: 1300 } as Position, PUT))
+    await reread(tap)
+    await tap.click(screen.getByRole('button', { name: /Close All/ }))
+    await tap.click(screen.getByRole('button', { name: 'Close All' }))
+    await settle()
+    expect(api.closeAllPositions).toHaveBeenCalledTimes(1)
+    expect(toast.warning).not.toHaveBeenCalled()
+  })
+
+  it('offers Close again after a part close asks first, with the phone’s warning', async () => {
+    const tap = user()
+    fakeScreen('wide')
+    await open(LONG, PUT)
+    await tap.click(close())
+    await settle()
+    api.getPositions.mockResolvedValue(book({ ...LONG, quantity: 65, pnl: 650 } as Position, PUT))
+    await reread(tap)
+    await pass(16_000)
+
+    await tap.click(close())
+    await settle()
+    expect(api.closePosition).toHaveBeenCalledTimes(1)
+    const asked = screen.getByRole('dialog', { name: 'Close NIFTY 25900 CE?' })
+    expect(asked).toHaveTextContent(
+      /The exit sent at 10:42:2\d has closed 65 of 130 so far\. If the rest is still open in Orders, this sends a second order for it\./
+    )
+    expect(asked).toHaveTextContent(/Sells 65 \(MIS\) at market price/)
+    await tap.click(within(asked).getByRole('button', { name: 'Close' }))
+    await settle()
+    expect(api.closePosition).toHaveBeenCalledTimes(2)
+  })
+
+  it('shuts that question once the book shows the position closed, sending nothing', async () => {
+    const tap = user()
+    fakeScreen('wide')
+    await open(LONG, PUT)
+    await tap.click(close())
+    await settle()
+    await pass(16_000)
+    await tap.click(close())
+    await settle()
+    expect(screen.getByRole('dialog', { name: 'Close NIFTY 25900 CE?' })).toBeInTheDocument()
+
+    // The page's next read: the earlier exit filled after all.
+    api.getPositions.mockResolvedValue(book({ ...LONG, quantity: 0, pnl: 1300 } as Position, PUT))
+    await pass(46_000)
+    expect(screen.queryByRole('dialog', { name: 'Close NIFTY 25900 CE?' })).toBeNull()
+    expect(api.closePosition).toHaveBeenCalledTimes(1)
+  })
+
+  it('says in Close All’s confirmation what became of an exit whose time ran out', async () => {
+    const tap = user()
+    fakeScreen('wide')
+    await open(LONG, PUT)
+    await tap.click(close())
+    await settle()
+    await pass(16_000)
+    await tap.click(screen.getByRole('button', { name: /Close All/ }))
+    expect(screen.getByRole('dialog', { name: 'Close All Positions?' })).toHaveTextContent(
+      /The exit sent at 10:42:2\d has not shown in the book yet\. If that order is still open in Orders, this sends a second one\./
+    )
+  })
+})
+
+describe('m: a confirmation tapped once its position is held again', () => {
+  it('sends nothing, and says why', async () => {
+    const tap = user()
+    await open(LONG, PUT)
+    await exitOnce(tap)
+    await pass(16_000)
+    const confirmation = await openExitConfirmation(tap)
+    expect(confirmation).toHaveTextContent(/has not shown in the book yet/)
+
+    // While it is open, the page's next read shows the earlier exit working: held again.
+    api.getPositions.mockResolvedValue(book({ ...LONG, quantity: 65, pnl: 650 } as Position, PUT))
+    await pass(46_000)
+    // The card, behind the open confirmation.
+    expect(screen.getByRole('button', { name: /NIFTY 25900 CE/, hidden: true })).toHaveTextContent(
+      'Exit sent · 65 of 130 left'
+    )
+    await tap.click(within(confirmation).getByRole('button', { name: 'Exit' }))
+    await settle()
+    expect(api.closePosition).toHaveBeenCalledTimes(1)
+    expect(toast.warning).toHaveBeenLastCalledWith(
+      expect.stringMatching(
+        /^An exit for NIFTY 25900 CE was sent at 10:42:2\d and has closed 65 of 130 so far\. Check Orders before sending another\.$/
+      ),
+      'positions'
+    )
+  })
+})
+
+describe('m: Exit all’s confirmation tapped once an exit is held again', () => {
+  it('sends nothing, and says why', async () => {
+    const tap = user()
+    await open(LONG, PUT)
+    await exitOnce(tap)
+    await pass(16_000)
+    await tap.click(exitAll())
+    const confirmation = screen.getByRole('dialog', { name: 'Exit all positions?' })
+
+    api.getPositions.mockResolvedValue(book({ ...LONG, quantity: 65, pnl: 650 } as Position, PUT))
+    await pass(46_000)
+    await tap.click(within(confirmation).getByRole('button', { name: 'Exit all' }))
+    await settle()
+    expect(api.closeAllPositions).not.toHaveBeenCalled()
+    expect(toast.warning).toHaveBeenLastCalledWith(
+      expect.stringMatching(/^An exit for NIFTY 25900 CE was sent at 10:42:2\d and has closed 65/),
+      'positions'
+    )
   })
 })

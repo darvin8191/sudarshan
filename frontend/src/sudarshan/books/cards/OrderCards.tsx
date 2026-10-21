@@ -23,6 +23,7 @@ import { PRODUCT_MEANING, type Product } from '@/sudarshan/ticket/productPref'
 import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
 import { describe } from '@/sudarshan/watchlist/rows'
 import type { Order } from '@/types/trading'
+import { showToast } from '@/utils/toast'
 import { clockOf, figure, momentOf, type OrderState, orderState, units } from './format'
 import {
   ActionWords,
@@ -170,6 +171,15 @@ export function cancelWords(
 export function cancelWarning(mark: SentMark | undefined): string | null {
   if (!mark?.expired) return null
   return `A cancel was sent at ${istTime(mark.sentAt)} and the order still shows working.`
+}
+
+/** Why a tap on Cancel sends nothing: the order's cancel is still held. */
+export function cancelHeldWhy(mark: SentMark): string {
+  if (mark.state === 'sending') {
+    return 'A cancel for this order is still being sent. Wait for its answer before cancelling again.'
+  }
+  const where = mark.state === 'unconfirmed' ? 'is not confirmed' : 'has not shown in the book yet'
+  return `A cancel for this order was sent at ${istTime(mark.sentAt)} and ${where}. Check its status before cancelling again.`
 }
 
 export function OrderCards(props: OrderCardsProps) {
@@ -462,7 +472,9 @@ const OrderBoard = memo(function OrderBoard({
         onConfirm={() => {
           if (!cancelling) return
           const { orderid } = cancelling
-          if (isHeld(cancelMark(sentMarksNow(), sandbox, orderid))) return
+          const mark = cancelMark(sentMarksNow(), sandbox, orderid)
+          // Held since this opened: nothing is sent, and the toast says why.
+          if (isHeld(mark)) return void showToast.warning(cancelHeldWhy(mark), 'orders')
           void sendHeld('cancel', sandbox, [{ id: orderid }], () => onCancel(orderid))
         }}
         onClose={close}

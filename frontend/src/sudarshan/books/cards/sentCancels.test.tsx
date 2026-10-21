@@ -353,3 +353,29 @@ describe('g: a cancel that may have reached the broker', () => {
     expect(api.cancelOrder).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('g: a cancel confirmation tapped once that order’s cancel is held', () => {
+  it('sends nothing, and says why', async () => {
+    const tap = user()
+    await open(WORKING)
+    await tap.click(orderCard())
+    await tap.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel order' })
+    )
+    const confirmation = screen.getByRole('dialog', { name: /^Cancel this order/ })
+
+    // No path of the page sends one while its confirmation is open; the hold's own store does,
+    // as any other part of the app would.
+    const sent = await import('@/sudarshan/books/sent')
+    act(() => {
+      sent.beginSends('cancel', false, [{ id: '1001' }])
+    })
+    await tap.click(within(confirmation).getByRole('button', { name: 'Cancel order' }))
+    await settle()
+    expect(api.cancelOrder).not.toHaveBeenCalled()
+    expect(toast.warning).toHaveBeenLastCalledWith(
+      'A cancel for this order is still being sent. Wait for its answer before cancelling again.',
+      'orders'
+    )
+  })
+})

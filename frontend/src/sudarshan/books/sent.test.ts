@@ -10,9 +10,11 @@ import {
   beginSends,
   cancelMark,
   exitMark,
+  exitOrderStatuses,
   isHeld,
   noteCancelBook,
   noteExitBook,
+  noteExitOrders,
   outcomeOf,
   resetSentForTests,
   SENT_HOLD_MS,
@@ -63,6 +65,20 @@ describe('a send and its answer', () => {
     expect(exit()?.state).toBe('sending')
     wait(10 * 60_000)
     expect(held()).toBe(true)
+  })
+
+  it('never runs out while in flight, whatever news of orders comes after its time', () => {
+    beginSends('exit', false, [LONG])
+    wait(SENT_HOLD_MS + 1_000)
+    notePushedFrame({
+      mode: 'live',
+      orderid: 'Z9',
+      symbol: 'SBIN',
+      exchange: 'NSE',
+      order_status: 'complete',
+    })
+    noteOrderBook([])
+    expect(exit()).toMatchObject({ state: 'sending', expired: false })
   })
 
   it('lets go at once on a refusal; sent or not confirmed starts the clock', () => {
@@ -164,9 +180,41 @@ describe('an exit whose time is up', () => {
   it('waits while its own order works, pushed on the closing side since it was sent', () => {
     settleSends(beginSends('exit', false, [LONG]), 'sent')
     pushed('open')
-    wait(SENT_HOLD_MS + 5_000)
+    expect(exit()?.orders).toEqual([{ id: 'X1', at: Date.now() }])
+    wait(SENT_HOLD_MS - 1)
+    expect(exit()?.byOrder).toBeFalsy()
+    wait(1)
+    // Held by that order alone now: what the page says, and reads the order book for.
+    expect(exit()).toMatchObject({ byOrder: true, expired: false })
+    wait(5 * 60_000)
     expect(held()).toBe(true)
     pushed('cancelled')
+    expect(held()).toBe(false)
+    expect(exitOrderStatuses(exit() as NonNullable<ReturnType<typeof exit>>)).toEqual(['cancelled'])
+  })
+
+  it('starts its clock again when the book shows it working, and is no longer held by order', () => {
+    settleSends(beginSends('exit', false, [LONG]), 'sent')
+    pushed('open')
+    wait(SENT_HOLD_MS)
+    expect(exit()?.byOrder).toBe(true)
+    noteExitBook(false, [{ id: ID, quantity: 65 }], Date.now())
+    expect(exit()).toMatchObject({ byOrder: false, since: Date.now(), seen: 65 })
+  })
+
+  it('lets go when a read of its book, well after its order was pushed, no longer lists it', () => {
+    settleSends(beginSends('exit', false, [LONG]), 'sent')
+    pushed('open')
+    wait(SENT_HOLD_MS)
+    // A read asked too soon after the push may not list it yet: it says nothing.
+    noteExitOrders(false, [], Date.now() - SENT_HOLD_MS + 1_000)
+    expect(exit()?.byOrder).toBe(true)
+    // The other book's read says nothing of a Live exit.
+    noteExitOrders(true, [], Date.now())
+    expect(held()).toBe(true)
+    noteExitOrders(false, [{ orderid: 'X1' }], Date.now())
+    expect(held()).toBe(true)
+    noteExitOrders(false, [{ orderid: 'OTHER' }], Date.now())
     expect(held()).toBe(false)
   })
 
@@ -189,6 +237,34 @@ describe('an exit whose time is up', () => {
         timestamp: '',
       },
     ])
+    expect(held()).toBe(false)
+  })
+
+  it('takes no lagging read over a final status the broker pushed', () => {
+    settleSends(beginSends('exit', false, [LONG]), 'sent')
+    pushed('open')
+    pushed('rejected')
+    wait(10_000)
+    // A read of the order book asked now, still showing the order as it was.
+    noteOrderBook(
+      [
+        {
+          orderid: 'X1',
+          symbol: 'NIFTY27OCT2625900CE',
+          exchange: 'NFO',
+          action: 'SELL',
+          quantity: 130,
+          price: 0,
+          trigger_price: 0,
+          pricetype: 'MARKET',
+          product: 'MIS',
+          order_status: 'open',
+          timestamp: '',
+        },
+      ],
+      Date.now()
+    )
+    wait(SENT_HOLD_MS)
     expect(held()).toBe(false)
   })
 
@@ -279,6 +355,58 @@ describe('a reload', () => {
       state: 'unconfirmed',
       since: now,
     })
+    fresh.resetSentForTests()
+  })
+
+  it('settles at once what ran past its time while the tab was away', async () => {
+    settleSends(beginSends('exit', false, [LONG]), 'sent')
+    beginSends('cancel', false, [{ id: '1001' }])
+    settleSends(beginSends('cancel', false, [{ id: '1002' }]), 'sent')
+    wait(2_000)
+    // Discarded 2 s on, restored 75 s later: no timer of the old page ever ran.
+    vi.setSystemTime(Date.now() + 75_000)
+
+    const fresh = await reload()
+    const marks = fresh.sentMarksNow()
+    expect(fresh.exitMark(marks, false, ID)?.expired).toBe(true)
+    expect(fresh.cancelMark(marks, false, '1002')?.expired).toBe(true)
+    // The send in flight lost its answer: not confirmed, its clock from now.
+    expect(fresh.cancelMark(marks, false, '1001')).toMatchObject({
+      state: 'unconfirmed',
+      expired: false,
+    })
+    fresh.resetSentForTests()
+  })
+
+  it('keeps an exit its own order holds, until a read of the order book says how it stands', async () => {
+    settleSends(beginSends('exit', false, [LONG]), 'sent')
+    pushed('open')
+    vi.setSystemTime(Date.now() + 75_000)
+
+    const fresh = await reload()
+    const fold = await import('./orderFold')
+    const mark = () => fresh.exitMark(fresh.sentMarksNow(), false, ID)
+    // The reload forgot every push: until a read says otherwise, the order counts as working.
+    expect(mark()).toMatchObject({ byOrder: true, expired: false })
+    fold.noteOrderBook([
+      {
+        orderid: 'X1',
+        symbol: 'NIFTY27OCT2625900CE',
+        exchange: 'NFO',
+        action: 'SELL',
+        quantity: 130,
+        price: 0,
+        trigger_price: 0,
+        pricetype: 'MARKET',
+        product: 'MIS',
+        order_status: 'rejected',
+        timestamp: '',
+      },
+    ])
+    expect(mark()?.expired).toBe(true)
+    expect(fresh.exitOrderStatuses(mark() as NonNullable<ReturnType<typeof mark>>)).toEqual([
+      'rejected',
+    ])
     fresh.resetSentForTests()
   })
 
