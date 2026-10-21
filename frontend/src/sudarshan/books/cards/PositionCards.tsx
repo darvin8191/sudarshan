@@ -7,6 +7,7 @@ import { useExitOrderReads } from '@/sudarshan/books/exitOrders'
 import { type FeedRow, useBookFeed } from '@/sudarshan/books/feed'
 import { isFinalStatus } from '@/sudarshan/books/orderFold'
 import type { TickDirection } from '@/sudarshan/books/prices'
+import { EXIT_STILL_PLACING } from '@/sudarshan/books/sendOutcome'
 import {
   exitMark,
   exitOrderStatuses,
@@ -141,6 +142,14 @@ export function exitWords(
   if (mark.byOrder) {
     return { chip: EXIT_ORDER_OPEN, note: null, button: EXIT_ORDER_OPEN }
   }
+  // The app said an exit for it is still being placed (its 409): wait for that one.
+  if (mark.placingAt !== undefined) {
+    return {
+      chip: null,
+      note: 'Still being placed: wait for it, then check Orders',
+      button: 'Still being placed',
+    }
+  }
   if (mark.state === 'unconfirmed' && mark.noAnswer) {
     // The server may still be placing it: Orders may not show it yet.
     return {
@@ -188,11 +197,14 @@ export function exitWarning(mark: SentMark | undefined): string | null {
   if (statuses.includes('complete') && !working) {
     return `Orders shows the exit sent at ${at} filled, but the book still shows this position. Check Positions first: a second exit would turn it the other way.`
   }
-  const earlier = mark.noAnswer
-    ? `The exit sent at ${at} got no answer and has not shown in the book yet.`
-    : mark.state === 'unconfirmed'
-      ? `The exit sent at ${at} was not confirmed and has not shown in the book yet.`
-      : `The exit sent at ${at} has not shown in the book yet.`
+  let earlier = `The exit sent at ${at} has not shown in the book yet.`
+  if (mark.placingAt !== undefined) {
+    earlier = `An exit for this position was still being placed at ${istTime(mark.placingAt)} and has not shown in the book yet.`
+  } else if (mark.noAnswer) {
+    earlier = `The exit sent at ${at} got no answer and has not shown in the book yet.`
+  } else if (mark.state === 'unconfirmed') {
+    earlier = `The exit sent at ${at} was not confirmed and has not shown in the book yet.`
+  }
   return `${earlier} If that order is still open in Orders, this sends a second one.`
 }
 
@@ -203,6 +215,8 @@ export function heldWhy(mark: SentMark): string {
   if (mark.state === 'sending') {
     return `An exit for ${name} is still being sent. Wait for its answer before sending another.`
   }
+  // The app said an exit for it is still being placed (its 409): its own words.
+  if (mark.placingAt !== undefined && !mark.byOrder) return EXIT_STILL_PLACING
   const was = Math.abs(mark.was ?? 0)
   const left = Math.abs(mark.seen ?? was)
   let where = 'has not shown in the book yet'

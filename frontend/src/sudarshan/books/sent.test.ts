@@ -420,6 +420,91 @@ describe('a timer that ran late', () => {
   })
 })
 
+describe('an exit whose answer named every slice of it', () => {
+  it('holds until the last slice has ended, by those orders alone', () => {
+    settleSends(beginSends('exit', false, [LONG]), 'sent', Date.now(), ['X1', 'X2'])
+    expect(exit()?.orders?.map((order) => order.id)).toEqual(['X1', 'X2'])
+    pushed('complete') // X1
+    pushed('open', { orderid: 'X2' })
+    wait(SENT_HOLD_MS)
+    expect(exit()).toMatchObject({ byOrder: true, expired: false })
+    pushed('complete', { orderid: 'X2' })
+    expect(exit()).toMatchObject({ expired: true })
+  })
+
+  it('takes them from a handler that names them', async () => {
+    await sendHeld('exit', false, [LONG], async () => ({
+      outcome: 'sent',
+      orderid: 'X1',
+      orderids: ['X1', 'X2', 'X3'],
+    }))
+    expect(exit()?.orders?.map((order) => order.id)).toEqual(['X1', 'X2', 'X3'])
+    expect(exit()?.pinned).toBe(true)
+  })
+})
+
+describe('a send that sent nothing', () => {
+  /** An exit sent at 10:42:21 whose hold ran out with the book unchanged. */
+  function ranOut(outcome: 'sent' | 'unanswered' = 'sent') {
+    settleSends(beginSends('exit', false, [LONG]), outcome)
+    wait(outcome === 'sent' ? SENT_HOLD_MS : NO_ANSWER_HOLD_MS)
+    expect(exit()).toMatchObject({ expired: true })
+    return exit()
+  }
+
+  it('refused, puts back the exit it replaced, warning and all', () => {
+    const earlier = ranOut()
+    const batch = beginSends('exit', false, [LONG])
+    expect(exit()).toMatchObject({ state: 'sending', previous: earlier })
+    settleSends(batch, 'refused')
+    expect(exit()).toEqual(earlier)
+  })
+
+  it('refused with nothing before it, lets the row go', () => {
+    settleSends(beginSends('exit', false, [LONG]), 'refused')
+    expect(exit()).toBeUndefined()
+  })
+
+  it('refused because the app is still placing the earlier one, holds that one again from now', () => {
+    const earlier = ranOut('unanswered')
+    wait(2_000)
+    const now = Date.now()
+    settleSends(beginSends('exit', false, [LONG]), 'placing')
+    expect(exit()).toMatchObject({
+      sentAt: earlier.sentAt,
+      noAnswer: true,
+      expired: false,
+      since: now,
+      placingAt: now,
+    })
+    expect(exit()?.previous).toBeUndefined()
+    expect(held()).toBe(true)
+    wait(SENT_HOLD_MS - 1)
+    expect(held()).toBe(true)
+    wait(1)
+    expect(exit()).toMatchObject({ expired: true, placingAt: now })
+  })
+
+  it('refused because the app is placing one this phone did not send, holds the row too', () => {
+    const tap = Date.now()
+    settleSends(beginSends('exit', false, [LONG]), 'placing')
+    expect(exit()).toMatchObject({
+      state: 'unconfirmed',
+      sentAt: tap,
+      placingAt: tap,
+      expired: false,
+    })
+    wait(SENT_HOLD_MS)
+    expect(held()).toBe(false)
+  })
+
+  it('answered, forgets the exit it replaced', () => {
+    ranOut()
+    settleSends(beginSends('exit', false, [LONG]), 'sent')
+    expect(exit()?.previous).toBeUndefined()
+  })
+})
+
 describe('a reload', () => {
   async function reload() {
     vi.resetModules()
@@ -531,6 +616,32 @@ describe('a reload', () => {
     wait(SENT_HOLD_MS)
     expect(mark()?.orders?.map((order) => order.id)).toEqual(['X1'])
     expect(fresh.isHeld(mark())).toBe(false)
+    fresh.resetSentForTests()
+  })
+
+  it('keeps when the app said a row was still being placed', async () => {
+    settleSends(beginSends('exit', false, [LONG]), 'placing')
+    const placingAt = Date.now()
+    wait(1_000)
+
+    const fresh = await reload()
+    expect(fresh.exitMark(fresh.sentMarksNow(), false, ID)).toMatchObject({
+      placingAt,
+      expired: false,
+    })
+    fresh.resetSentForTests()
+  })
+
+  it('forgets what a send still in flight replaced: no answer came for that send', async () => {
+    settleSends(beginSends('exit', false, [LONG]), 'sent')
+    wait(SENT_HOLD_MS)
+    beginSends('exit', false, [LONG])
+    wait(1_000)
+
+    const fresh = await reload()
+    const mark = fresh.exitMark(fresh.sentMarksNow(), false, ID)
+    expect(mark).toMatchObject({ state: 'unconfirmed', noAnswer: true })
+    expect(mark?.previous).toBeUndefined()
     fresh.resetSentForTests()
   })
 

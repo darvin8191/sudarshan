@@ -68,14 +68,17 @@ export type SentKind = 'exit' | 'cancel'
 export type SentState = 'sending' | 'sent' | 'unconfirmed'
 /**
  * What became of a send: it went, the app could not confirm it, no answer came
- * at all, or the server said no.
+ * at all, or the server said no. `placing` is a no that says why: the app is
+ * still placing an earlier exit for the same row (its 409), which holds it.
  */
-export type SendOutcome = 'sent' | 'unconfirmed' | 'unanswered' | 'refused'
+export type SendOutcome = 'sent' | 'unconfirmed' | 'unanswered' | 'refused' | 'placing'
 
-/** A page's send handler's answer, with the order it placed when the server named one. */
+/** A page's send handler's answer, with the orders it placed when the server named them. */
 export interface SentAnswer {
   outcome: SendOutcome
   orderid?: string | null
+  /** Every order it placed: one per slice of a sliced order. */
+  orderids?: readonly string[]
 }
 
 /** An order the broker pushed on an exit's closing side since it was sent, and when first heard of. */
@@ -114,6 +117,10 @@ export interface SentMark {
   noAnswer?: boolean
   /** Its own order is the one the answer named; nothing else pushed on its side is. */
   pinned?: boolean
+  /** While in flight, the mark it replaced: a send that sent nothing puts that one back. */
+  previous?: SentMark
+  /** When the app last said an exit for this row was still being placed (its 409). */
+  placingAt?: number
 }
 
 export interface SendTarget {
@@ -213,6 +220,8 @@ function load(now: number): Map<string, SentMark> {
         byOrder: false,
         noAnswer: item.noAnswer === true,
         pinned: item.pinned === true,
+        previous: undefined,
+        placingAt: typeof item.placingAt === 'number' ? item.placingAt : undefined,
       }
       const mark: SentMark =
         kept.state === 'sending'
@@ -327,7 +336,11 @@ export function beginSends(
   const batch = `${LOAD}.${sends}`
   const next = new Map(marks)
   for (const target of targets) {
-    next.set(keyOf(kind, sandbox, target.id), {
+    const key = keyOf(kind, sandbox, target.id)
+    const before = marks.get(key)
+    next.set(key, {
+      // A send that sends nothing (refused) leaves the row as it was before the tap.
+      previous: before ? { ...before, previous: undefined } : undefined,
       kind,
       sandbox,
       id: target.id,
@@ -348,32 +361,53 @@ export function beginSends(
 }
 
 /**
- * The answer came: a refusal lets go at once; otherwise the clock starts. An
- * exit's answer that named its order pins the exit to that order.
+ * The answer came: a refusal lets go at once, back to what the row was before
+ * the tap; otherwise the clock starts. An exit's answer that named its order
+ * pins the exit to that order. `placing` (the app's 409: an earlier exit for
+ * the row is still being placed) holds the row again from now, as that earlier
+ * exit when this phone sent it, in the app's words.
  */
 export function settleSends(
   batch: string,
   outcome: SendOutcome,
   now = Date.now(),
-  orderid: string | null = null
+  placed: string | readonly string[] | null = null
 ): void {
+  const named = (typeof placed === 'string' ? [placed] : (placed ?? [])).filter(Boolean)
   let next: Map<string, SentMark> | null = null
   for (const [key, mark] of marks) {
     if (mark.batch !== batch || mark.state !== 'sending') continue
     next ??= new Map(marks)
     if (outcome === 'refused') {
-      next.delete(key)
+      if (mark.previous) next.set(key, mark.previous)
+      else next.delete(key)
+      continue
+    }
+    if (outcome === 'placing') {
+      const earlier = mark.previous ?? mark
+      next.set(key, {
+        ...earlier,
+        previous: undefined,
+        batch: mark.batch,
+        state: earlier.state === 'sending' ? 'unconfirmed' : earlier.state,
+        since: now,
+        expired: false,
+        byOrder: false,
+        placingAt: now,
+      })
       continue
     }
     const settled: SentMark = {
       ...mark,
+      previous: undefined,
       state: outcome === 'sent' ? 'sent' : 'unconfirmed',
       since: now,
       noAnswer: outcome === 'unanswered',
     }
-    if (orderid && mark.kind === 'exit') {
-      // Not whatever else was pushed on its side meanwhile (a stop-loss moved, say).
-      settled.orders = [{ id: orderid, at: now }]
+    if (named.length > 0 && mark.kind === 'exit') {
+      // Not whatever else was pushed on its side meanwhile (a stop-loss moved, say); every
+      // slice of a sliced order, so the hold lasts until the last of them has ended.
+      settled.orders = named.slice(0, ORDERS_KEPT).map((id) => ({ id, at: now }))
       settled.pinned = true
     }
     next.set(key, settled)
@@ -388,16 +422,18 @@ export function outcomeOf(result: unknown): SendOutcome {
       ? (result as SentAnswer).outcome
       : result
   if (said === 'refused' || said === false) return 'refused'
+  if (said === 'placing') return 'placing'
   if (said === 'unconfirmed') return 'unconfirmed'
   if (said === 'unanswered') return 'unanswered'
   return 'sent'
 }
 
-/** The order a handler's answer says the send placed, when it names one. */
-function orderIdOf(result: unknown): string | null {
-  if (typeof result !== 'object' || result === null) return null
-  const id = (result as SentAnswer).orderid
-  return typeof id === 'string' && id.trim() ? id.trim() : null
+/** The orders a handler's answer says the send placed, when it names them. */
+function orderIdsOf(result: unknown): string[] {
+  if (typeof result !== 'object' || result === null) return []
+  const { orderid, orderids } = result as SentAnswer
+  const named = Array.isArray(orderids) ? orderids : [orderid]
+  return named.filter((id): id is string => typeof id === 'string' && id.trim() !== '')
 }
 
 /** Hold `targets` while `send` runs and for as long as its outcome says. */
@@ -409,16 +445,16 @@ export async function sendHeld(
 ): Promise<SendOutcome> {
   const batch = beginSends(kind, sandbox, targets)
   let outcome: SendOutcome
-  let orderid: string | null = null
+  let placed: string[] = []
   try {
     const result = await send()
     outcome = outcomeOf(result)
-    if (outcome === 'sent') orderid = orderIdOf(result)
+    if (outcome === 'sent') placed = orderIdsOf(result)
   } catch {
     // The handler itself broke: whether the order went, or is still going, is not known.
     outcome = 'unanswered'
   }
-  settleSends(batch, outcome, Date.now(), orderid)
+  settleSends(batch, outcome, Date.now(), placed)
   return outcome
 }
 
