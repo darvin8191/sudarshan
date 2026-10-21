@@ -739,7 +739,7 @@ def close_position():
 @check_session_validity
 @limiter.limit(API_RATE_LIMIT)
 @track_latency("CLOSE")
-@one_exit_at_a_time(every=True)  # SUDARSHAN M6.9: 409 while any exit is still being placed
+# SUDARSHAN M6.9: its 409 comes from close_position_service, where every Exit all is claimed.
 def close_all_positions():
     """Close all open positions using the broker API"""
     try:

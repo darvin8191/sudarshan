@@ -1,4 +1,4 @@
-"""One exit at a time per position, from the app's own screens (M6.9).
+"""One exit at a time per position, and one Exit all at a time per book (M6.9).
 
 The phone gives up on an exit after 45 s, but the server does not: Flask runs
 the view to its end when the phone has stopped waiting, one Upstox call may take
@@ -8,19 +8,27 @@ that does not show the first fill yet, and reverses the position instead of
 closing it. The order the first one is placing does not show in Orders yet
 either, so the trader cannot check for it.
 
-So the app's own close routes (blueprints/orders.py, /close_position and
-/close_all_positions) claim what they close for as long as the view runs. A
-second request for the same position, or any exit while Exit all runs (and
-Exit all while any exit runs), is refused with 409 and a sentence saying why,
-which the phone reads as a refusal and shows. The /api/v1 routes are not
-guarded: their TradingView and SDK callers keep their behaviour.
+So what closes a position claims it for as long as it runs:
+
+- Exit all in the Live book, from every surface, where every close-all passes
+  once (``close_all_once``, called by services/close_position_service.py): the
+  app's Exit all, /api/v1/closeposition (TradingView, scripts, Telegram's
+  /closeall through the SDK) and Flow's close-all node. The sandbox's Exit all
+  answers in milliseconds and is not claimed.
+- One position's exit from the app's own screens (``one_exit_at_a_time`` on
+  blueprints/orders.py's /close_position). Single-position smart orders from
+  /api/v1 are not claimed: a TradingView entry must never be refused.
+
+A second Exit all, an exit while Exit all runs, or Exit all while one of the
+app's exits runs, is refused with 409 and a sentence saying why, which the phone
+reads as a refusal and shows; so is a second exit for the same position.
 
 The claims are per process, which is the whole app (gunicorn runs a single
 worker). They are kept under a real lock from utils.real_threading that is held
 for set work only, never across I/O: correct under the eventlet worker, where
 the only callers are greenlets that cannot be switched out inside it, under the
 gthread worker's real threads, and on the development server. A claim is let go
-in a ``finally``, however the view ends.
+in a ``finally``, however the view or the close-all ends.
 """
 
 from __future__ import annotations
@@ -44,7 +52,7 @@ Position = tuple[str, str, str]
 
 
 class ExitsInFlight:
-    """The exits this process is placing for the app's own screens, by book."""
+    """The exits this process is placing, by book."""
 
     def __init__(self) -> None:
         self._lock = real_threading.Lock()
@@ -117,11 +125,30 @@ def _book() -> str:
         return "live"
 
 
-def one_exit_at_a_time(*, every: bool = False) -> Callable:
-    """Decorate a close route so it refuses with 409 while the same exit is being placed.
+def close_all_once(book: str, close_all: Callable, *args):
+    """Run one Exit all in ``book`` while holding its claim, whichever surface it came from.
 
     Args:
-        every: The route closes every open position (Exit all).
+        book: "live" or "sandbox".
+        close_all: The broker's ``close_all_positions``, answering ``(body, status)``.
+        *args: What ``close_all`` takes.
+
+    Returns:
+        ``close_all``'s own answer; or, while an exit or an Exit all is still being placed in that
+        book, ``({"status": "error", "message": <why>}, 409)`` without calling it.
+    """
+    with EXITS.every(book) as busy:
+        if busy:
+            logger.warning(f"Exit all refused while an exit is still being placed ({book})")
+            return {"status": "error", "message": busy}, 409
+        return close_all(*args)
+
+
+def one_exit_at_a_time() -> Callable:
+    """Decorate the app's close route so it refuses with 409 while that exit is being placed.
+
+    The app's Exit all route is not decorated: its claim is taken where every close-all passes,
+    by ``close_all_once``, and a second claim would make it refuse itself.
     """
 
     def wrap(view: Callable) -> Callable:
@@ -130,17 +157,13 @@ def one_exit_at_a_time(*, every: bool = False) -> Callable:
             from flask import jsonify, request
 
             book = _book()
-            if every:
-                claim = EXITS.every(book)
-            else:
-                data = request.get_json(silent=True) or {}
-                position = (
-                    _word(data.get("exchange")),
-                    _word(data.get("symbol")),
-                    _word(data.get("product")),
-                )
-                claim = EXITS.one(book, position)
-            with claim as busy:
+            data = request.get_json(silent=True) or {}
+            position = (
+                _word(data.get("exchange")),
+                _word(data.get("symbol")),
+                _word(data.get("product")),
+            )
+            with EXITS.one(book, position) as busy:
                 if busy:
                     logger.warning(f"Exit refused while one is still being placed ({book})")
                     return jsonify({"status": "error", "message": busy}), 409
