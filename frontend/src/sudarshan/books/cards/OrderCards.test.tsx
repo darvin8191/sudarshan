@@ -80,7 +80,7 @@ vi.mock('@/components/socket/SocketProvider', () => ({
 import OrderBook from '@/pages/OrderBook'
 import { notePushedFrame, resetOrderMemoryForTests } from '@/sudarshan/books/orderFold'
 import { resetSentForTests } from '@/sudarshan/books/sent'
-import { back, pass, renderBook, settle, where } from '@/test/bookPages'
+import { back, openDialog, pass, renderBook, settle, where } from '@/test/bookPages'
 import { fakeClock, frames } from '@/test/frames'
 import { feed } from '@/test/marketDataHarness'
 import { fakeScreen } from '@/test/screenWidth'
@@ -506,7 +506,18 @@ describe('Order book on a phone: the sheet and its actions', () => {
 
   it('closes a cancel confirmation once the order has ended, sending nothing', async () => {
     const tap = user()
-    await renderPhone(WORKING)
+    // After every commit: never the confirmation open over an order that has ended.
+    const both: string[] = []
+    const ended = () =>
+      document.querySelector('li[data-order="1001"]')?.getAttribute('data-status') === 'COMPLETE'
+    api.getOrders.mockResolvedValue(book(WORKING))
+    fakeScreen('phone')
+    renderBook('/orderbook', <OrderBook />, undefined, {
+      onCommit: () => {
+        if (ended() && openDialog('Cancel this order?')) both.push(where())
+      },
+    })
+    await settle()
     await tap.click(orderCard('1001'))
     await tap.click(
       within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel order' })
@@ -519,6 +530,9 @@ describe('Order book on a phone: the sheet and its actions', () => {
     await waitFor(() =>
       expect(screen.queryByRole('dialog', { name: 'Cancel this order?' })).toBeNull()
     )
+    // The address leaves the step too: Back from here leaves the page.
+    expect(where()).toBe('/orderbook')
+    expect(both).toEqual([])
     expect(api.cancelOrder).not.toHaveBeenCalled()
   })
 

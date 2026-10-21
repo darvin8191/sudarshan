@@ -280,13 +280,23 @@ describe('a reload with a step open', () => {
     const restored = entryHere()
     first.unmount()
 
-    // The tab comes back on the step's entry, the cards' entry under it.
-    renderBook(path, await freshPage(book), ['/dashboard', path, restored])
+    // The tab comes back on the step's entry, the cards' entry under it. After
+    // every commit: nothing open, not even for one frame.
+    const shown: string[] = []
+    renderBook(path, await freshPage(book), ['/dashboard', path, restored], {
+      onCommit: () => {
+        const open =
+          document.querySelector('[role="dialog"][data-state="open"]') ??
+          document.querySelector('[aria-label="Order ticket"]')
+        if (open) shown.push(open.textContent?.slice(0, 40) ?? 'something')
+      },
+    })
     await settle()
     await act(async () => {
       await vi.advanceTimersByTimeAsync(100)
     })
     nothingOpen()
+    expect(shown).toEqual([])
     await waitFor(() => expect(where()).toBe(path))
     expect(card(book)).toBeInTheDocument()
     // Every Back closes something or leaves: here, nothing is open, so it leaves.

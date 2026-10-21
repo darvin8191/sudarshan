@@ -13,7 +13,7 @@
 
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, render } from '@testing-library/react'
-import { Profiler } from 'react'
+import { Profiler, useState } from 'react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Position } from '@/types/trading'
@@ -51,13 +51,24 @@ vi.mock('@/components/socket/SocketProvider', () => ({
   useSocketContext: () => ({ playAlertSound: () => {}, socket: null }),
 }))
 
-const count = vi.hoisted(() => ({ page: 0, cards: new Map<string, number>() }))
+const count = vi.hoisted(() => ({ page: 0, board: 0, cards: new Map<string, number>() }))
 vi.mock('@/hooks/useSupportedExchanges', () => ({
   useSupportedExchanges: () => {
     count.page += 1
     return { isCrypto: false }
   },
 }))
+// The board: counted by the one hook only a book's board calls, once a render.
+vi.mock('@/sudarshan/books/cards/useBookOverlay', async (importOriginal) => {
+  const real = await importOriginal<typeof import('@/sudarshan/books/cards/useBookOverlay')>()
+  return {
+    ...real,
+    useBookOverlay: (...args: Parameters<typeof real.useBookOverlay>) => {
+      count.board += 1
+      return real.useBookOverlay(...args)
+    },
+  }
+})
 vi.mock('@/sudarshan/watchlist/rows', async (importOriginal) => {
   const real = await importOriginal<typeof import('@/sudarshan/watchlist/rows')>()
   return {
@@ -77,6 +88,7 @@ import { frames } from '@/test/frames'
 import { feed } from '@/test/marketDataHarness'
 import { fakeScreen } from '@/test/screenWidth'
 import type { Order } from '@/types/trading'
+import { PositionCards } from './PositionCards'
 
 // Fifty renders of the wide table take a few seconds on a busy machine; nothing here is timed.
 vi.setConfig({ testTimeout: 30_000 })
@@ -92,6 +104,10 @@ const BOOK: Position[] = Array.from({ length: 20 }, (_, index) => ({
   pnl: 650,
   pnlpercent: 10,
 }))
+
+/** When the book above was asked for, and a market that is open. */
+const BOOK_AT = Date.UTC(2026, 9, 20, 5, 12, 0)
+const OPEN = () => true
 
 /** Five of them tick, ten times each, one tick per message. */
 const TICKING = BOOK.slice(0, 5).map((position) => position.symbol)
@@ -123,6 +139,7 @@ async function renderAt(width: 'phone' | 'wide', page = <Positions />) {
 function resetCounts() {
   commits = 0
   count.page = 0
+  count.board = 0
   count.cards.clear()
 }
 
@@ -185,6 +202,36 @@ describe('What a tick costs the Positions page', () => {
       vi.advanceTimersByTime(1_000)
     })
     expect(count.page).toBe(1)
+    expect(count.cards.size).toBe(0)
+  })
+
+  it('on a phone: a render of the page alone does not redraw the board', async () => {
+    // Upstream's page renders for reasons of its own and builds its handlers
+    // afresh each time; the board takes them through useLatest and is memoised,
+    // so only what it shows redraws it. A page that renders by itself:
+    const bump = { current: () => {} }
+    function Page() {
+      const [renders, setRenders] = useState(0)
+      bump.current = () => setRenders((n) => n + 1)
+      return (
+        <PositionCards
+          positions={BOOK}
+          bookAt={BOOK_AT}
+          loading={false}
+          error={null}
+          refreshing={false}
+          apiKey="test-api-key"
+          marketOpen={OPEN}
+          onRefresh={() => renders}
+          onExit={() => renders}
+          onExitAll={() => renders}
+        />
+      )
+    }
+    await renderAt('phone', <Page />)
+    resetCounts()
+    for (let i = 0; i < 3; i += 1) act(() => bump.current())
+    expect(count.board).toBe(0)
     expect(count.cards.size).toBe(0)
   })
 
