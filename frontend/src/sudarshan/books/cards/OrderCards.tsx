@@ -157,6 +157,13 @@ export function cancelWords(
   if (mark.state === 'sending') {
     return { chip: 'Sending cancel', note: null, button: 'Sending cancel' }
   }
+  if (mark.state === 'unconfirmed' && mark.noAnswer) {
+    return {
+      chip: null,
+      note: 'No answer yet: it may still be going through',
+      button: 'No answer yet',
+    }
+  }
   if (mark.state === 'unconfirmed') {
     return {
       chip: null,
@@ -177,6 +184,9 @@ export function cancelWarning(mark: SentMark | undefined): string | null {
 export function cancelHeldWhy(mark: SentMark): string {
   if (mark.state === 'sending') {
     return 'A cancel for this order is still being sent. Wait for its answer before cancelling again.'
+  }
+  if (mark.noAnswer) {
+    return `A cancel for this order was sent at ${istTime(mark.sentAt)} and no answer has come yet: it may still be going through. Wait for its status to change before cancelling again.`
   }
   const where = mark.state === 'unconfirmed' ? 'is not confirmed' : 'has not shown in the book yet'
   return `A cancel for this order was sent at ${istTime(mark.sentAt)} and ${where}. Check its status before cancelling again.`

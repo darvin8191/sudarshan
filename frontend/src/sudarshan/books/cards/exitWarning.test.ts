@@ -12,6 +12,7 @@ import { notePushedFrame, resetOrderMemoryForTests } from '@/sudarshan/books/ord
 import {
   beginSends,
   exitMark,
+  NO_ANSWER_HOLD_MS,
   noteExitBook,
   resetSentForTests,
   SENT_HOLD_MS,
@@ -106,6 +107,23 @@ describe('Exit offered again says what became of the earlier exit', () => {
     // Sent 15 s after the first.
     expect(exitWarning(mark())).toBe(
       'The exit sent at 10:42:36 was not confirmed and has not shown in the book yet. If that order is still open in Orders, this sends a second one.'
+    )
+  })
+})
+
+describe('an exit that got no answer at all', () => {
+  it('says so when offered again, after its longer hold', () => {
+    settleSends(beginSends('exit', false, [LONG]), 'unanswered')
+    vi.advanceTimersByTime(NO_ANSWER_HOLD_MS)
+    expect(exitWarning(mark())).toBe(
+      'The exit sent at 10:42:21 got no answer and has not shown in the book yet. If that order is still open in Orders, this sends a second one.'
+    )
+  })
+
+  it('a tap while it holds says to wait for it, not to look in Orders yet', () => {
+    settleSends(beginSends('exit', false, [LONG]), 'unanswered')
+    expect(heldWhy(mark())).toBe(
+      'An exit for NIFTY 25900 CE was sent at 10:42:21 and no answer has come yet: it may still be going through. Wait for Positions or Orders to show it before sending another.'
     )
   })
 })

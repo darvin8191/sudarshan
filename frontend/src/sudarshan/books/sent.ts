@@ -20,12 +20,15 @@ import {
  * a position's Exit (and Exit all) is held from the tap:
  *
  * - while the send is in flight, however long that takes;
- * - after it went, or when no answer came back (the order may have gone: "not
- *   confirmed"), until the book shows the position flat, gone or turned the
- *   other way. A part of it closing (130 becomes 65) is the exit working: the
- *   hold stays, and its clock starts again;
+ * - after it went, or when the app could not confirm it (the order may have
+ *   gone: "not confirmed"), until the book shows the position flat, gone or
+ *   turned the other way. A part of it closing (130 becomes 65) is the exit
+ *   working: the hold stays, and its clock starts again;
  * - and at most `SENT_HOLD_MS` after the answer or the last change the book
- *   showed, unless one of its own orders is still working: an order the broker
+ *   showed (`NO_ANSWER_HOLD_MS` after the tap when no answer came at all: the
+ *   server may still be placing it, and Orders does not show an order still
+ *   being placed), unless one of its own orders is still working: the order
+ *   the answer named, or else an order the broker
  *   pushed on the closing side since it was sent. Those are kept on the mark,
  *   so a reload keeps them too, and until a read of the order book says how
  *   they stand one counts as working. While only they hold it, the page reads
@@ -44,6 +47,12 @@ import {
 /** How long a sent exit or cancel holds its button after the answer or the book's last change. */
 export const SENT_HOLD_MS = 15_000
 
+/**
+ * How long, from the tap, one that got no answer at all holds: the phone gave
+ * up at 45 s, but one Upstox call may take 120 s on the server.
+ */
+export const NO_ANSWER_HOLD_MS = 150_000
+
 /** How long a mark whose time ran out is kept, for the warning in the next confirmation. */
 const KEEP_MS = 8 * 60 * 60_000
 
@@ -57,8 +66,17 @@ const STORAGE_KEY = 'sudarshan-sent-v1'
 
 export type SentKind = 'exit' | 'cancel'
 export type SentState = 'sending' | 'sent' | 'unconfirmed'
-/** What became of a send: it went, no answer came back, or the server said no. */
-export type SendOutcome = 'sent' | 'unconfirmed' | 'refused'
+/**
+ * What became of a send: it went, the app could not confirm it, no answer came
+ * at all, or the server said no.
+ */
+export type SendOutcome = 'sent' | 'unconfirmed' | 'unanswered' | 'refused'
+
+/** A page's send handler's answer, with the order it placed when the server named one. */
+export interface SentAnswer {
+  outcome: SendOutcome
+  orderid?: string | null
+}
 
 /** An order the broker pushed on an exit's closing side since it was sent, and when first heard of. */
 export interface ExitOrder {
@@ -92,6 +110,10 @@ export interface SentMark {
   orders?: ExitOrder[]
   /** Its time is up and one of its own orders still works (or has not been read since a reload). */
   byOrder?: boolean
+  /** No answer came at all (a timeout, a dropped connection, a reload in flight). */
+  noAnswer?: boolean
+  /** Its own order is the one the answer named; nothing else pushed on its side is. */
+  pinned?: boolean
 }
 
 export interface SendTarget {
@@ -185,9 +207,17 @@ function load(now: number): Map<string, SentMark> {
     if (!Array.isArray(list)) return out
     for (const item of list) {
       if (!valid(item) || now - item.sentAt > KEEP_MS) continue
-      const kept: SentMark = { ...item, orders: ordersOf(item.orders), byOrder: false }
+      const kept: SentMark = {
+        ...item,
+        orders: ordersOf(item.orders),
+        byOrder: false,
+        noAnswer: item.noAnswer === true,
+        pinned: item.pinned === true,
+      }
       const mark: SentMark =
-        kept.state === 'sending' ? { ...kept, state: 'unconfirmed', since: now } : kept
+        kept.state === 'sending'
+          ? { ...kept, state: 'unconfirmed', since: now, noAnswer: true }
+          : kept
       out.set(keyOf(mark.kind, mark.sandbox, mark.id), mark)
     }
   } catch {
@@ -207,7 +237,15 @@ function commit(next: Map<string, SentMark>): void {
 function due(mark: SentMark, now: number): boolean {
   if (mark.expired || mark.state === 'sending' || mark.since === null) return false
   if (now - mark.since < SENT_HOLD_MS) return false
+  // No answer came: the server may still be placing it.
+  if (mark.noAnswer && now - mark.sentAt < NO_ANSWER_HOLD_MS) return false
   return true
+}
+
+/** When a settled mark's own time is up. */
+function dueAt(mark: SentMark & { since: number }): number {
+  const at = mark.since + SENT_HOLD_MS
+  return mark.noAnswer ? Math.max(at, mark.sentAt + NO_ANSWER_HOLD_MS) : at
 }
 
 /** An exit's position and closing side, to tell its own orders by. */
@@ -265,7 +303,7 @@ function schedule(): void {
   for (const mark of marks.values()) {
     if (mark.expired) first = Math.min(first, mark.sentAt + KEEP_MS)
     else if (!mark.byOrder && mark.state !== 'sending' && mark.since !== null) {
-      first = Math.min(first, mark.since + SENT_HOLD_MS)
+      first = Math.min(first, dueAt({ ...mark, since: mark.since }))
     }
   }
   if (first === Number.POSITIVE_INFINITY) return
@@ -309,23 +347,57 @@ export function beginSends(
   return batch
 }
 
-/** The answer came: a refusal lets go at once; sent or not confirmed, the clock starts. */
-export function settleSends(batch: string, outcome: SendOutcome, now = Date.now()): void {
+/**
+ * The answer came: a refusal lets go at once; otherwise the clock starts. An
+ * exit's answer that named its order pins the exit to that order.
+ */
+export function settleSends(
+  batch: string,
+  outcome: SendOutcome,
+  now = Date.now(),
+  orderid: string | null = null
+): void {
   let next: Map<string, SentMark> | null = null
   for (const [key, mark] of marks) {
     if (mark.batch !== batch || mark.state !== 'sending') continue
     next ??= new Map(marks)
-    if (outcome === 'refused') next.delete(key)
-    else next.set(key, { ...mark, state: outcome, since: now })
+    if (outcome === 'refused') {
+      next.delete(key)
+      continue
+    }
+    const settled: SentMark = {
+      ...mark,
+      state: outcome === 'sent' ? 'sent' : 'unconfirmed',
+      since: now,
+      noAnswer: outcome === 'unanswered',
+    }
+    if (orderid && mark.kind === 'exit') {
+      // Not whatever else was pushed on its side meanwhile (a stop-loss moved, say).
+      settled.orders = [{ id: orderid, at: now }]
+      settled.pinned = true
+    }
+    next.set(key, settled)
   }
   if (next) commit(next)
 }
 
 /** What a page's send handler returned, as an outcome: true and nothing said count as sent. */
 export function outcomeOf(result: unknown): SendOutcome {
-  if (result === 'refused' || result === false) return 'refused'
-  if (result === 'unconfirmed') return 'unconfirmed'
+  const said =
+    typeof result === 'object' && result !== null && 'outcome' in result
+      ? (result as SentAnswer).outcome
+      : result
+  if (said === 'refused' || said === false) return 'refused'
+  if (said === 'unconfirmed') return 'unconfirmed'
+  if (said === 'unanswered') return 'unanswered'
   return 'sent'
+}
+
+/** The order a handler's answer says the send placed, when it names one. */
+function orderIdOf(result: unknown): string | null {
+  if (typeof result !== 'object' || result === null) return null
+  const id = (result as SentAnswer).orderid
+  return typeof id === 'string' && id.trim() ? id.trim() : null
 }
 
 /** Hold `targets` while `send` runs and for as long as its outcome says. */
@@ -337,13 +409,16 @@ export async function sendHeld(
 ): Promise<SendOutcome> {
   const batch = beginSends(kind, sandbox, targets)
   let outcome: SendOutcome
+  let orderid: string | null = null
   try {
-    outcome = outcomeOf(await send())
+    const result = await send()
+    outcome = outcomeOf(result)
+    if (outcome === 'sent') orderid = orderIdOf(result)
   } catch {
-    // The handler itself broke: whether the order went is not known.
-    outcome = 'unconfirmed'
+    // The handler itself broke: whether the order went, or is still going, is not known.
+    outcome = 'unanswered'
   }
-  settleSends(batch, outcome)
+  settleSends(batch, outcome, Date.now(), orderid)
   return outcome
 }
 
@@ -420,7 +495,7 @@ function onOrders(frame: OrderUpdateFrame | null): void {
   if (frame && orderid) {
     const now = Date.now()
     for (const [key, mark] of marks) {
-      const match = mark.expired ? null : matchOf(mark)
+      const match = mark.expired || mark.pinned ? null : matchOf(mark)
       if (!match || mark.orders?.some((order) => order.id === orderid)) continue
       if (!closingOrder(orderid, match)) continue
       next ??= new Map(marks)

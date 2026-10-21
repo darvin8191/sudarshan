@@ -141,6 +141,14 @@ export function exitWords(
   if (mark.byOrder) {
     return { chip: EXIT_ORDER_OPEN, note: null, button: EXIT_ORDER_OPEN }
   }
+  if (mark.state === 'unconfirmed' && mark.noAnswer) {
+    // The server may still be placing it: Orders may not show it yet.
+    return {
+      chip: null,
+      note: 'No answer yet: it may still be going through',
+      button: 'No answer yet',
+    }
+  }
   if (mark.state === 'unconfirmed') {
     return {
       chip: null,
@@ -180,8 +188,9 @@ export function exitWarning(mark: SentMark | undefined): string | null {
   if (statuses.includes('complete') && !working) {
     return `Orders shows the exit sent at ${at} filled, but the book still shows this position. Check Positions first: a second exit would turn it the other way.`
   }
-  const earlier =
-    mark.state === 'unconfirmed'
+  const earlier = mark.noAnswer
+    ? `The exit sent at ${at} got no answer and has not shown in the book yet.`
+    : mark.state === 'unconfirmed'
       ? `The exit sent at ${at} was not confirmed and has not shown in the book yet.`
       : `The exit sent at ${at} has not shown in the book yet.`
   return `${earlier} If that order is still open in Orders, this sends a second one.`
@@ -199,7 +208,9 @@ export function heldWhy(mark: SentMark): string {
   let where = 'has not shown in the book yet'
   if (mark.byOrder) where = 'its order is still open'
   else if (left > 0 && left < was) where = `has closed ${units(was - left)} of ${units(was)} so far`
-  else if (mark.state === 'unconfirmed') where = 'is not confirmed'
+  else if (mark.noAnswer) {
+    return `An exit for ${name} was sent at ${at} and no answer has come yet: it may still be going through. Wait for Positions or Orders to show it before sending another.`
+  } else if (mark.state === 'unconfirmed') where = 'is not confirmed'
   return `An exit for ${name} was sent at ${at} and ${where}. Check Orders before sending another.`
 }
 

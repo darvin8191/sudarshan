@@ -62,13 +62,15 @@ import { useBookFeed } from '@/sudarshan/books/feed'
 import { TickPrice } from '@/sudarshan/books/LiveFigures'
 // SUDARSHAN M6.9: what became of an exit: sent, refused, or not confirmed (it may have gone).
 import {
-  appAnswered,
-  NOT_CONFIRMED,
-  notConfirmed,
+  answerBody,
+  answeredHeld,
+  EXIT_ALL_TOAST,
+  heldText,
   refusalReason,
+  sentOrderId,
   thrownOutcome,
 } from '@/sudarshan/books/sendOutcome'
-import type { SendOutcome } from '@/sudarshan/books/sent'
+import type { SendOutcome, SentAnswer } from '@/sudarshan/books/sent'
 import { useBookSync, useLatestRead } from '@/sudarshan/books/useBookSync'
 // SUDARSHAN M4.15: on a phone, a symbol opens the phone chart (src/sudarshan/chart).
 import { BookSymbolLink } from '@/sudarshan/chart/BookSymbolLink'
@@ -461,7 +463,7 @@ export default function Positions() {
   // SUDARSHAN M6.9: each returns what became of the exit, so the phone holds its
   // Exit (src/sudarshan/books/sent.ts). An answer that may have reached the broker is
   // "not confirmed", never "failed": a second exit would reverse the position.
-  const handleClosePosition = async (position: Position): Promise<SendOutcome> => {
+  const handleClosePosition = async (position: Position): Promise<SendOutcome | SentAnswer> => {
     try {
       const response = await tradingApi.closePosition(
         position.symbol,
@@ -471,46 +473,53 @@ export default function Positions() {
       if (response.status === 'success') {
         showToast.success(response.message || `Position closed for ${position.symbol}`, 'positions')
         fetchPositions(true)
-        return 'sent'
-      } else if (!appAnswered(response) || notConfirmed(response)) {
-        showToast.warning(NOT_CONFIRMED.exit, 'positions')
-        fetchPositions(true)
-        return 'unconfirmed'
-      } else {
-        showToast.error(response.message || 'Failed to close position', 'positions')
+        // The order this placed is the exit's own, not any other on its side.
+        return { outcome: 'sent', orderid: sentOrderId(response) }
       }
-    } catch (err) {
-      if (thrownOutcome(err) === 'unconfirmed') {
-        showToast.warning(NOT_CONFIRMED.exit, 'positions')
+      const held = answeredHeld(response)
+      if (held) {
+        showToast.warning(heldText('exit', held, response), 'positions')
         fetchPositions(true)
-        return 'unconfirmed'
+        return held
+      }
+      showToast.error(response.message || 'Failed to close position', 'positions')
+    } catch (err) {
+      const outcome = thrownOutcome(err)
+      if (outcome !== 'refused') {
+        showToast.warning(heldText('exit', outcome, answerBody(err)), 'positions')
+        fetchPositions(true)
+        return outcome
       }
       showToast.error(refusalReason(err) ?? 'Failed to close position', 'positions')
     }
     return 'refused'
   }
 
+  // Its result shares one toast with the close_position_event the server sends for it.
   const handleCloseAllPositions = async (): Promise<SendOutcome> => {
+    const once = { id: EXIT_ALL_TOAST }
     try {
       const response = await tradingApi.closeAllPositions()
       if (response.status === 'success') {
         // Toast handled by close_position_event socket
         fetchPositions(true)
         return 'sent'
-      } else if (!appAnswered(response) || notConfirmed(response)) {
-        showToast.warning(NOT_CONFIRMED.exitAll, 'positions')
-        fetchPositions(true)
-        return 'unconfirmed'
-      } else {
-        showToast.error(response.message || 'Failed to close all positions', 'positions')
       }
+      const held = answeredHeld(response)
+      if (held) {
+        showToast.warning(heldText('exitAll', held, response), 'positions', once)
+        fetchPositions(true)
+        return held
+      }
+      showToast.error(response.message || 'Failed to close all positions', 'positions', once)
     } catch (err) {
-      if (thrownOutcome(err) === 'unconfirmed') {
-        showToast.warning(NOT_CONFIRMED.exitAll, 'positions')
+      const outcome = thrownOutcome(err)
+      if (outcome !== 'refused') {
+        showToast.warning(heldText('exitAll', outcome, answerBody(err)), 'positions', once)
         fetchPositions(true)
-        return 'unconfirmed'
+        return outcome
       }
-      showToast.error(refusalReason(err) ?? 'Failed to close all positions', 'positions')
+      showToast.error(refusalReason(err) ?? 'Failed to close all positions', 'positions', once)
     }
     return 'refused'
   }

@@ -54,15 +54,19 @@ describe('a send that threw', () => {
     expect(thrownOutcome(new Error('Failed to fetch CSRF token.'))).toBe('refused')
   })
 
-  it('is not confirmed when no answer of the app’s own came back', () => {
+  it('has no answer when none of the app’s own came back: the server may still be at it', () => {
     expect(thrownOutcome(new AxiosError('Network Error', AxiosError.ERR_NETWORK))).toBe(
-      'unconfirmed'
+      'unanswered'
     )
-    expect(thrownOutcome(new AxiosError('timeout', AxiosError.ECONNABORTED))).toBe('unconfirmed')
+    expect(thrownOutcome(new AxiosError('timeout', AxiosError.ECONNABORTED))).toBe('unanswered')
+    // A page from something in between (nginx gave up, or the app was restarting).
+    for (const status of [500, 502, 503, 504]) {
+      expect(thrownOutcome(answered(status, '<h1>Gateway Time-out</h1>'))).toBe('unanswered')
+    }
+    // The app's own 5xx: its view ended, and the order may have gone.
     for (const status of [502, 503, 504]) {
       expect(thrownOutcome(answered(status, { status: 'error', message: 'x' }))).toBe('unconfirmed')
     }
-    expect(thrownOutcome(answered(500, '<h1>Internal Server Error</h1>'))).toBe('unconfirmed')
   })
 })
 

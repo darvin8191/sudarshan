@@ -300,12 +300,15 @@ describe('b: a refusal from the server', () => {
   })
 })
 
-describe('c: no answer is "not confirmed"', () => {
+const NO_ANSWER_EXIT =
+  'No answer came for this exit: it may still be going through. Wait for Positions or Orders to show it before sending another.'
+
+describe('c: no answer at all', () => {
   it.each([
     ['the network dropped', () => new AxiosError('Network Error', AxiosError.ERR_NETWORK)],
     ['the request timed out', () => new AxiosError('timeout', AxiosError.ECONNABORTED)],
     ['a gateway answered', () => gateway(504)],
-  ])('%s: held as if sent, said on the card, and no toast says it failed', async (_, error) => {
+  ])('%s: held 150 s from the tap, said on the card, and no toast says it failed', async (_, error) => {
     const tap = user()
     api.closePosition.mockRejectedValueOnce(error())
     await open(LONG, PUT)
@@ -313,30 +316,42 @@ describe('c: no answer is "not confirmed"', () => {
 
     expect(await exitOffered(tap)).toBe(false)
     expect(exitAll()).toBeDisabled()
-    expect(card()).toHaveTextContent('Not confirmed: check Orders before sending again')
+    expect(card()).toHaveTextContent('No answer yet: it may still be going through')
     expect(toast.error).not.toHaveBeenCalled()
     expect(toast.warning).toHaveBeenCalledTimes(1)
-    const [said] = toast.warning.mock.calls[0]
-    expect(said).toMatch(/not confirmed/)
-    expect(said).not.toMatch(/fail/i)
+    expect(toast.warning).toHaveBeenCalledWith(NO_ANSWER_EXIT, 'positions')
 
-    // Held 15 s from the answer, like one that went.
-    await pass(14_000)
+    // Not 15 s: the server may still be placing it (one Upstox call can take 120 s).
+    await pass(60_000)
     expect(await exitOffered(tap)).toBe(false)
-    await pass(1_500)
+    await pass(88_000)
+    expect(await exitOffered(tap)).toBe(false)
+    await pass(2_500)
     expect(await exitOffered(tap)).toBe(true)
     expect(api.closePosition).toHaveBeenCalledTimes(1)
+  })
+
+  it('lets go sooner when the book shows the position closed', async () => {
+    const tap = user()
+    api.closePosition.mockRejectedValueOnce(new AxiosError('timeout', AxiosError.ECONNABORTED))
+    await open(LONG, PUT)
+    await exitOnce(tap)
+    await pass(20_000)
+    api.getPositions.mockResolvedValue(book({ ...LONG, quantity: 0, pnl: 1300 } as Position, PUT))
+    await reread(tap)
+    expect(screen.queryByText(/No answer yet/)).toBeNull()
+    expect(exitAll()).toBeEnabled()
   })
 })
 
 describe('c: an answer that is not the app’s own', () => {
-  it('(a page from something in between) leaves the exit not confirmed too', async () => {
+  it('(a page from something in between) holds as no answer too', async () => {
     const tap = user()
     api.closePosition.mockResolvedValueOnce('<html><body>Bad Gateway</body></html>')
     await open(LONG, PUT)
     await exitOnce(tap)
     expect(await exitOffered(tap)).toBe(false)
-    expect(card()).toHaveTextContent('Not confirmed: check Orders before sending again')
+    expect(card()).toHaveTextContent('No answer yet: it may still be going through')
     expect(toast.error).not.toHaveBeenCalled()
   })
 })
@@ -436,19 +451,22 @@ describe('f: the hold lives app-wide', () => {
     expect(await exitOffered(tap)).toBe(true)
   })
 
-  it('a reload with the exit still in flight brings it back as not confirmed', async () => {
+  it('a reload with the exit still in flight brings it back as no answer, 150 s from the tap', async () => {
     const tap = user()
     api.closePosition.mockReturnValue(new Promise(() => {}))
     const { view } = await open(LONG, PUT)
     await exitOnce(tap)
+    await pass(10_000)
     view.unmount()
 
     const reloaded = await load()
     renderBook('/positions', reloaded.page)
     await settle()
     expect(await exitOffered(tap)).toBe(false)
-    expect(card()).toHaveTextContent('Not confirmed: check Orders before sending again')
+    expect(card()).toHaveTextContent('No answer yet: it may still be going through')
     await pass(15_500)
+    expect(await exitOffered(tap)).toBe(false)
+    await pass(126_000)
     expect(await exitOffered(tap)).toBe(true)
   })
 
@@ -528,7 +546,7 @@ describe('h: Exit all', () => {
     expect(api.closeAllPositions).toHaveBeenCalledTimes(1)
   })
 
-  it('with no answer holds every one as not confirmed', async () => {
+  it('with no answer holds every one as no answer yet', async () => {
     const tap = user()
     api.closeAllPositions.mockRejectedValueOnce(
       new AxiosError('Network Error', AxiosError.ERR_NETWORK)
@@ -543,8 +561,8 @@ describe('h: Exit all', () => {
     await settle()
     expect(exitAll()).toBeDisabled()
     expect(toast.error).not.toHaveBeenCalled()
-    expect(card()).toHaveTextContent('Not confirmed: check Orders before sending again')
-    expect(putCard()).toHaveTextContent('Not confirmed: check Orders before sending again')
+    expect(card()).toHaveTextContent('No answer yet: it may still be going through')
+    expect(putCard()).toHaveTextContent('No answer yet: it may still be going through')
   })
 })
 
@@ -855,6 +873,116 @@ describe('m: Exit all’s confirmation tapped once an exit is held again', () =>
     expect(api.closeAllPositions).not.toHaveBeenCalled()
     expect(toast.warning).toHaveBeenLastCalledWith(
       expect.stringMatching(/^An exit for NIFTY 25900 CE was sent at 10:42:2\d and has closed 65/),
+      'positions'
+    )
+  })
+})
+
+describe('n: an exit whose answer named its order', () => {
+  it('is held by that order alone, not by a stop-loss moved on its side', async () => {
+    const tap = user()
+    api.closePosition.mockResolvedValueOnce({
+      status: 'success',
+      message: 'Closed',
+      orderid: EXIT_ORDER.orderid,
+    })
+    const { push } = await open(LONG, PUT)
+    await exitOnce(tap)
+    push({ ...EXIT_ORDER, order_status: 'complete' })
+    // The trader's stop-loss on the same contract, moved after the exit went.
+    push({
+      ...EXIT_ORDER,
+      orderid: '251020000699001',
+      pricetype: 'SL-M',
+      order_status: 'trigger pending',
+    })
+    await pass(16_000)
+    expect(card()).not.toHaveTextContent('Exit order open')
+    expect(await exitOffered(tap)).toBe(true)
+  })
+})
+
+describe('o: an order book read that failed', () => {
+  it('says nothing about the exit’s own order: it stays held', async () => {
+    const tap = user()
+    const { push } = await open(LONG, PUT)
+    await exitOnce(tap)
+    push({ ...EXIT_ORDER, order_status: 'open' })
+    api.getOrders.mockResolvedValue({ status: 'error', message: 'Could not read orders' })
+    await pass(16_000)
+    expect(api.getOrders).toHaveBeenCalled()
+    expect(card()).toHaveTextContent('Exit order open · check Orders')
+    expect(await exitOffered(tap)).toBe(false)
+  })
+})
+
+describe('p: an answer the app marks not confirmed, whatever its code', () => {
+  it('a 2xx marked so holds the exit as not confirmed, in the app’s words', async () => {
+    const tap = user()
+    api.closePosition.mockResolvedValueOnce({
+      status: 'error',
+      message:
+        'This exit is not confirmed: it may have gone through. Check Orders before sending it again.',
+      not_confirmed: true,
+    })
+    await open(LONG, PUT)
+    await exitOnce(tap)
+    expect(card()).toHaveTextContent('Not confirmed: check Orders before sending again')
+    expect(await exitOffered(tap)).toBe(false)
+    expect(toast.error).not.toHaveBeenCalled()
+  })
+})
+
+describe('q: Exit all’s result shows once', () => {
+  it('its refusal shares the toast the server’s close event shows for it', async () => {
+    const tap = user()
+    api.closeAllPositions.mockRejectedValueOnce(
+      notConfirmedAnswer(424, {
+        status: 'error',
+        message:
+          'Nothing was sent: the positions could not be read from Upstox. Check Positions and try again.',
+      })
+    )
+    await open(LONG, PUT)
+    await tap.click(exitAll())
+    await tap.click(
+      within(screen.getByRole('dialog', { name: 'Exit all positions?' })).getByRole('button', {
+        name: 'Exit all',
+      })
+    )
+    await settle()
+    expect(toast.error).toHaveBeenCalledWith(
+      'Nothing was sent: the positions could not be read from Upstox. Check Positions and try again.',
+      'positions',
+      { id: 'sudarshan-exit-all-result' }
+    )
+    expect(exitAll()).toBeEnabled()
+  })
+})
+
+describe('r: the wide table’s question, once its position is held again', () => {
+  it('sends nothing, and says why', async () => {
+    const tap = user()
+    fakeScreen('wide')
+    await open(LONG, PUT)
+    const close = () => screen.getByRole('button', { name: `Close ${CALL} position` })
+    await tap.click(close())
+    await settle()
+    await pass(16_000)
+    await tap.click(close())
+    await settle()
+    const asked = screen.getByRole('dialog', { name: 'Close NIFTY 25900 CE?' })
+
+    // While it asks, the page's next read shows the earlier exit working: held again.
+    api.getPositions.mockResolvedValue(book({ ...LONG, quantity: 65, pnl: 650 } as Position, PUT))
+    await pass(46_000)
+    await tap.click(within(asked).getByRole('button', { name: 'Close' }))
+    await settle()
+    expect(api.closePosition).toHaveBeenCalledTimes(1)
+    expect(toast.warning).toHaveBeenLastCalledWith(
+      expect.stringMatching(
+        /^An exit for NIFTY 25900 CE was sent at 10:42:2\d and has closed 65 of 130 so far\./
+      ),
       'positions'
     )
   })

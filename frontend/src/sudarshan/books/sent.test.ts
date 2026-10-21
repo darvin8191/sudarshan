@@ -12,6 +12,7 @@ import {
   exitMark,
   exitOrderStatuses,
   isHeld,
+  NO_ANSWER_HOLD_MS,
   noteCancelBook,
   noteExitBook,
   noteExitOrders,
@@ -113,12 +114,84 @@ describe('a send and its answer', () => {
     expect(outcomeOf(undefined)).toBe('sent')
   })
 
-  it('counts a handler that broke as not confirmed', async () => {
+  it('counts a handler that broke as having no answer: it may still be going', async () => {
     const outcome = await sendHeld('exit', false, [LONG], () => {
       throw new Error('handler broke')
     })
-    expect(outcome).toBe('unconfirmed')
-    expect(exit()?.state).toBe('unconfirmed')
+    expect(outcome).toBe('unanswered')
+    expect(exit()).toMatchObject({ state: 'unconfirmed', noAnswer: true })
+  })
+})
+
+describe('a send with no answer at all', () => {
+  it('holds until 150 s after the tap: the server may still be placing it', () => {
+    const batch = beginSends('exit', false, [LONG])
+    wait(45_000) // the phone gave up
+    settleSends(batch, 'unanswered')
+    expect(exit()).toMatchObject({ state: 'unconfirmed', noAnswer: true })
+    wait(NO_ANSWER_HOLD_MS - 45_000 - 1)
+    expect(held()).toBe(true)
+    wait(1)
+    expect(held()).toBe(false)
+  })
+
+  it('lets go sooner when the book shows the position closed', () => {
+    settleSends(beginSends('exit', false, [LONG]), 'unanswered')
+    wait(20_000)
+    noteExitBook(false, [{ id: ID, quantity: 0 }], Date.now())
+    expect(exit()).toBeUndefined()
+  })
+
+  it('holds a cancel the same way, until its order is final', () => {
+    settleSends(beginSends('cancel', false, [{ id: '1001' }]), 'unanswered')
+    wait(60_000)
+    expect(isHeld(cancelMark(sentMarksNow(), false, '1001'))).toBe(true)
+    notePushedFrame({ mode: 'live', orderid: '1001', order_status: 'cancelled' })
+    expect(cancelMark(sentMarksNow(), false, '1001')).toBeUndefined()
+  })
+
+  it('an answer the app could not confirm holds the usual 15 s', () => {
+    settleSends(beginSends('exit', false, [LONG]), 'unconfirmed')
+    expect(exit()?.noAnswer).toBe(false)
+    wait(SENT_HOLD_MS)
+    expect(held()).toBe(false)
+  })
+})
+
+describe('an exit whose answer named its order', () => {
+  it('is held by that order alone, not by another pushed on its side', () => {
+    const batch = beginSends('exit', false, [LONG])
+    pushed('open') // X1, its own, before the answer came
+    settleSends(batch, 'sent', Date.now(), 'X1')
+    expect(exit()).toMatchObject({ pinned: true, orders: [{ id: 'X1', at: Date.now() }] })
+    // A stop-loss on the closing side, moved after the exit was sent.
+    pushed('trigger pending', { orderid: 'SL9' })
+    expect(exit()?.orders?.map((order) => order.id)).toEqual(['X1'])
+    pushed('complete')
+    wait(SENT_HOLD_MS)
+    expect(held()).toBe(false)
+  })
+
+  it('waits on that order while a read has not said how it stands', () => {
+    settleSends(beginSends('exit', false, [LONG]), 'sent', Date.now(), 'X7')
+    wait(SENT_HOLD_MS)
+    expect(exit()).toMatchObject({ byOrder: true, expired: false })
+    noteOrderBook([
+      {
+        orderid: 'X7',
+        symbol: 'NIFTY27OCT2625900CE',
+        exchange: 'NFO',
+        action: 'SELL',
+        quantity: 130,
+        price: 0,
+        trigger_price: 0,
+        pricetype: 'MARKET',
+        product: 'MIS',
+        order_status: 'complete',
+        timestamp: '',
+      },
+    ])
+    expect(held()).toBe(false)
   })
 })
 
@@ -332,6 +405,18 @@ describe('a cancel', () => {
     notePushedFrame({ mode: 'live', orderid: '1001', order_status: 'open' })
     wait(SENT_HOLD_MS)
     expect(cancelMark(sentMarksNow(), false, '1001')?.expired).toBe(true)
+  })
+})
+
+describe('a timer that ran late', () => {
+  it('settles at once a mark it finds past its time', () => {
+    settleSends(beginSends('exit', false, [LONG]), 'sent')
+    // The page was busy: the clock passed the hold before its timer could run, and
+    // another send rescheduled first.
+    vi.setSystemTime(Date.now() + SENT_HOLD_MS + 1_000)
+    beginSends('cancel', false, [{ id: '1001' }])
+    wait(0)
+    expect(exit()?.expired).toBe(true)
   })
 })
 

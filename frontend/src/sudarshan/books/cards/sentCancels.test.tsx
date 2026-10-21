@@ -252,16 +252,23 @@ describe('g: a cancel sent', () => {
     expect((await sheetButtons(tap)).offered).toBe(true)
   })
 
-  it('with no answer is held as not confirmed, and no toast says it failed', async () => {
+  it('with no answer is held 150 s from the tap, and no toast says it failed', async () => {
     const tap = user()
     api.cancelOrder.mockRejectedValueOnce(new AxiosError('Network Error', AxiosError.ERR_NETWORK))
     await open(WORKING)
     await cancelOnce(tap)
     expect((await sheetButtons(tap)).offered).toBe(false)
-    expect(orderCard()).toHaveTextContent('Not confirmed: check its status before cancelling again')
+    expect(orderCard()).toHaveTextContent('No answer yet: it may still be going through')
     expect(toast.error).not.toHaveBeenCalled()
     expect(toast.warning).toHaveBeenCalledTimes(1)
-    expect(toast.warning.mock.calls[0][0]).not.toMatch(/fail/i)
+    expect(toast.warning).toHaveBeenCalledWith(
+      'No answer came for this cancel: it may still be going through. Wait for the order’s status to change before cancelling again.',
+      'orders'
+    )
+    await pass(60_000)
+    expect((await sheetButtons(tap)).offered).toBe(false)
+    await pass(91_000)
+    expect((await sheetButtons(tap)).offered).toBe(true)
   })
 
   it('after 15 s with the order still working offers "Cancel again", with a short warning', async () => {
@@ -377,5 +384,21 @@ describe('g: a cancel confirmation tapped once that order’s cancel is held', (
       'A cancel for this order is still being sent. Wait for its answer before cancelling again.',
       'orders'
     )
+  })
+})
+
+describe('g: a cancel answer the app marks not confirmed, whatever its code', () => {
+  it('a 2xx marked so holds the cancel as not confirmed', async () => {
+    const tap = user()
+    api.cancelOrder.mockResolvedValueOnce({
+      status: 'error',
+      message: CANCEL_NOT_CONFIRMED,
+      not_confirmed: true,
+    })
+    await open(WORKING)
+    await cancelOnce(tap)
+    expect(orderCard()).toHaveTextContent('Not confirmed: check its status before cancelling again')
+    expect((await sheetButtons(tap)).offered).toBe(false)
+    expect(toast.error).not.toHaveBeenCalled()
   })
 })

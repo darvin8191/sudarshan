@@ -31,9 +31,9 @@ describe('an exit or a cancel', () => {
     expect(SEND_TIMEOUT_MS).toBe(45_000)
   })
 
-  it('given up at 45 s, is not confirmed: it may have gone', () => {
+  it('given up at 45 s, has no answer: it may still be going through', () => {
     // What axios throws when its timeout runs out: no answer at all.
     const timedOut = new AxiosError('timeout of 45000ms exceeded', AxiosError.ECONNABORTED)
-    expect(thrownOutcome(timedOut)).toBe('unconfirmed')
+    expect(thrownOutcome(timedOut)).toBe('unanswered')
   })
 })
