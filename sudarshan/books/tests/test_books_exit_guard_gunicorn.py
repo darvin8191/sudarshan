@@ -37,10 +37,14 @@ APP = textwrap.dedent(
     from sudarshan.books import exit_guard
 
     exit_guard._book = lambda: "live"  # no settings database here
+    if os.environ.get("GUARD_WAIT_S"):
+        exit_guard.EXIT_ALL_WAITS_S = float(os.environ["GUARD_WAIT_S"])
 
     app = Flask(__name__)
+    closed = []  # for each Exit all that reached the broker: how many exits were being placed
 
     def slow_close_all(hold):
+        closed.append(len(exit_guard.EXITS._positions))
         time.sleep(hold)  # under eventlet a cooperative wait, as a slow Upstox call is
         return {"status": "success", "message": "All Open Positions SquaredOff"}, 200
 
@@ -54,7 +58,7 @@ APP = textwrap.dedent(
 
     @app.route("/claims")
     def claims():
-        return jsonify(held=len(exit_guard.EXITS), pid=os.getpid())
+        return jsonify(held=len(exit_guard.EXITS), pid=os.getpid(), closed=closed)
 
     @app.route("/close_position", methods=["POST"])
     @exit_guard.one_exit_at_a_time()
@@ -109,7 +113,7 @@ def _stop_process_group(proc: subprocess.Popen, grace_s: float = 5.0) -> None:
 
 
 class Server:
-    def __init__(self, tmp_path: Path, worker: str, timeout: int = 30):
+    def __init__(self, tmp_path: Path, worker: str, timeout: int = 30, wait_s: float | None = None):
         app_dir = tmp_path / "app"
         app_dir.mkdir()
         (app_dir / "guard_fixture_app.py").write_text(APP)
@@ -123,6 +127,8 @@ class Server:
             # gunicorn 25.1+ opens a control socket; this keeps it in the test's own folder.
             XDG_RUNTIME_DIR=str(tmp_path),
         )
+        if wait_s is not None:
+            env["GUARD_WAIT_S"] = str(wait_s)
         command = [
             sys.executable, "-m", "gunicorn", "--worker-class", worker, "--workers", "1",
             *(["--threads", "8"] if worker == "gthread" else []),
@@ -210,16 +216,77 @@ def test_a_second_exit_is_refused_at_once_while_the_first_is_placed(server):
     assert took < 1.0, f"the refusal waited {took:.2f}s"
     other_status, _, other_took = server.post("/close_position?hold=0.2", OTHER)
     assert other_status == 200 and other_took < 1.5, (other_status, other_took)
-    status, body, _ = server.post("/api/v1/closeposition", {})
-    assert (status, body["message"]) == (
-        409,
-        "An exit is still being placed. Wait for it, then check Orders.",
-    )
     assert server.get("/ping")[0] == 200  # the worker keeps serving meanwhile
     first.join(15)
     assert out["result"][0] == 200
     assert server.claims()["held"] == 0
     assert server.post("/close_position", EXIT)[0] == 200
+
+
+EXIT_ALL_BEING_PLACED = "Exit all is still being placed. Wait for it, then check Orders."
+
+
+def test_an_exit_all_waits_for_the_exit_in_flight_then_closes(server):
+    """A TradingView Exit all lands while the phone's exit is being placed: it waits, then closes."""
+    single, placed = _in_background(server.post, "/close_position?hold=3", EXIT)
+    time.sleep(0.7)
+    everything, closed = _in_background(server.post, "/api/v1/closeposition", {})
+    time.sleep(0.3)
+    # Meanwhile no new exit starts, a second Exit all is refused at once, and the worker serves.
+    status, body, took = server.post("/close_position", OTHER)
+    assert (status, body["message"], took < 1.0) == (409, EXIT_ALL_BEING_PLACED, True), took
+    status, body, took = server.post("/close_all_positions", {})
+    assert (status, body["message"], took < 1.0) == (409, EXIT_ALL_BEING_PLACED, True), took
+    ping_started = time.monotonic()
+    assert server.get("/ping")[0] == 200 and time.monotonic() - ping_started < 1.0
+    single.join(15)
+    everything.join(15)
+    assert placed["result"][0] == 200
+    status, body, took = closed["result"]
+    assert (status, body["status"]) == (200, "success")
+    assert took >= 1.5, f"it went after {took:.2f}s, before the exit had ended"
+    assert server.claims() | {"pid": 0} == {"held": 0, "pid": 0, "closed": [0]}
+
+
+def test_an_exit_all_whose_caller_gave_up_still_waits_and_closes(server):
+    """TradingView gives up on a webhook after 3 s; the view goes on, waits, and closes the rest."""
+    single, _ = _in_background(server.post, "/close_position?hold=3", EXIT)
+    time.sleep(0.5)
+    sock = socket.create_connection(("127.0.0.1", server.port))
+    sock.sendall(
+        b"POST /api/v1/closeposition HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\n"
+        b"Content-Length: 2\r\n\r\n{}"
+    )
+    time.sleep(0.5)
+    sock.close()  # the caller gave up while the Exit all was waiting
+    single.join(15)
+    deadline = time.monotonic() + 10
+    while not server.claims()["closed"] and time.monotonic() < deadline:
+        time.sleep(0.2)
+    assert server.claims()["closed"] == [0]  # it reached the broker, after the exit had ended
+    while server.claims()["held"] and time.monotonic() < deadline:
+        time.sleep(0.2)
+    assert server.claims()["held"] == 0
+
+
+@pytest.mark.parametrize("worker", ["eventlet", "gthread"])
+def test_an_exit_all_whose_wait_runs_out_is_refused(tmp_path, worker):
+    _needs(worker)
+    srv = Server(tmp_path, worker, wait_s=1.0)
+    try:
+        single, _ = _in_background(srv.post, "/close_position?hold=4", EXIT)
+        time.sleep(0.5)
+        status, body, took = srv.post("/api/v1/closeposition", {})
+        assert (status, body["message"]) == (
+            409,
+            "An exit is still being placed. Wait for it, then check Orders.",
+        )
+        assert 0.8 <= took < 3.0, f"it waited {took:.2f}s for a wait of 1 s"
+        assert srv.claims()["held"] == 1  # its own claim let go; the exit's still held
+        single.join(15)
+        assert srv.claims() | {"pid": 0} == {"held": 0, "pid": 0, "closed": []}
+    finally:
+        srv.stop()
 
 
 def test_two_exit_alls_from_two_surfaces_send_one(server):

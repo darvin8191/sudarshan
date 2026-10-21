@@ -62,16 +62,27 @@ def routes(monkeypatch):
     monkeypatch.setattr(close_service, "get_analyze_mode", lambda: False)
     monkeypatch.setattr(exit_guard, "EXITS", ExitsInFlight())
 
-    gate = {"entered": threading.Event(), "release": threading.Event(), "placed": []}
+    gate = {
+        "entered": threading.Event(),
+        "release": threading.Event(),
+        "placed": [],
+        "inside": 0,  # single exits inside the broker call right now
+        "overlaps": [],  # how many were, each time an Exit all reached the broker
+    }
 
     def place_smartorder_api(order_data, auth_token):
-        gate["placed"].append(order_data["symbol"])
-        if len(gate["placed"]) == 1:  # the first is held until told; any other goes straight on
-            gate["entered"].set()
-            assert gate["release"].wait(WAIT)
-        return Answer(200), {"status": "success"}, f"25102100000{len(gate['placed'])}"
+        gate["inside"] += 1
+        try:
+            gate["placed"].append(order_data["symbol"])
+            if len(gate["placed"]) == 1:  # the first is held until told; others go straight on
+                gate["entered"].set()
+                assert gate["release"].wait(WAIT)
+            return Answer(200), {"status": "success"}, f"25102100000{len(gate['placed'])}"
+        finally:
+            gate["inside"] -= 1
 
     def close_all_positions(api_key, auth):
+        gate["overlaps"].append(gate["inside"])
         gate["placed"].append("ALL")
         gate["entered"].set()
         assert gate["release"].wait(WAIT)
@@ -101,6 +112,17 @@ def _post_in_background(path, body):
     def run():
         response = _client().post(path, json=body)
         out["code"], out["body"] = response.status_code, response.get_json()
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    return thread, out
+
+
+def _in_background(fn):
+    out = {}
+
+    def run():
+        out["result"] = fn()
 
     thread = threading.Thread(target=run)
     thread.start()
@@ -206,15 +228,25 @@ def test_exit_all_and_a_single_exit_hold_each_other_off(routes):
 
 
 def test_exit_all_waits_for_a_single_exit_being_placed(routes):
+    """The exit in flight ends first, then Exit all closes the rest; no new exit starts meanwhile."""
     single, answer = _post_in_background("/close_position", EXIT)
     assert routes["entered"].wait(WAIT)
-    everything = _client().post("/close_all_positions", json={})
-    assert everything.status_code == 409
-    assert everything.get_json()["message"] == AN_EXIT_BEING_PLACED
+    everything, closed = _post_in_background("/close_all_positions", {})
+    time.sleep(0.3)
+    assert closed == {} and routes["placed"] == [EXIT["symbol"]]  # waiting; nothing sent yet
+
+    other = _client().post("/close_position", json={**EXIT, "symbol": "BANKNIFTY27OCT2657500PE"})
+    assert (other.status_code, other.get_json()["message"]) == (409, EXIT_ALL_BEING_PLACED)
+    again = _client().post("/close_all_positions", json={})
+    assert (again.status_code, again.get_json()["message"]) == (409, EXIT_ALL_BEING_PLACED)
+
     routes["release"].set()
     single.join(WAIT)
-    assert answer["code"] == 200
-    assert routes["placed"] == [EXIT["symbol"]]
+    everything.join(WAIT)
+    assert (answer["code"], closed["code"]) == (200, 200)
+    assert routes["placed"] == [EXIT["symbol"], "ALL"]
+    assert routes["overlaps"] == [0]  # Exit all reached the broker only after the exit ended
+    assert len(exit_guard.EXITS) == 0
 
 
 def test_the_claim_is_let_go_however_the_view_ends(routes, monkeypatch):
@@ -395,13 +427,63 @@ def surfaces(routes, monkeypatch):
 
 @pytest.mark.parametrize("surface", ["app", "api", "flow"])
 def test_every_exit_all_surface_waits_while_one_is_being_placed(routes, surfaces, surface):
-    with exit_guard.EXITS.every("live") as busy:  # an Exit all from elsewhere, still being placed
+    """Often unattended (a TradingView alert, a Flow node, a script): nothing would resend it.
+
+    While one of the app's exits is being placed it waits for that exit, then closes the rest;
+    while another Exit all runs it is refused at once.
+    """
+    routes["release"].set()  # the broker answers as soon as it is called
+    with exit_guard.EXITS.every("live") as busy:  # another Exit all is being placed
         assert busy is None
         assert surfaces[surface]() == (409, EXIT_ALL_BEING_PLACED)
-    with exit_guard.EXITS.one("live", ("NFO", EXIT["symbol"], "MIS")):  # one of the app's exits
+
+    exit_in_flight = exit_guard.EXITS.one("live", ("NFO", EXIT["symbol"], "MIS"))
+    assert exit_in_flight.__enter__() is None
+    try:
+        everything, answer = _in_background(surfaces[surface])
+        time.sleep(0.3)
+        assert answer == {} and routes["placed"] == []  # waiting; nothing sent yet
+        other = _client().post(
+            "/close_position", json={**EXIT, "symbol": "BANKNIFTY27OCT2657500PE"}
+        )
+        assert (other.status_code, other.get_json()["message"]) == (409, EXIT_ALL_BEING_PLACED)
+    finally:
+        exit_in_flight.__exit__(None, None, None)  # the exit ends
+    everything.join(WAIT)
+    closed = "All Open Positions Squared Off" if surface != "flow" else None
+    assert answer["result"] == (200, closed)
+    assert routes["placed"] == ["ALL"]
+    assert len(exit_guard.EXITS) == 0
+
+
+@pytest.mark.parametrize("surface", ["app", "api", "flow"])
+def test_an_exit_all_whose_wait_runs_out_is_refused(routes, surfaces, monkeypatch, surface):
+    monkeypatch.setattr(exit_guard, "EXIT_ALL_WAITS_S", 0.3)
+    with exit_guard.EXITS.one("live", ("NFO", EXIT["symbol"], "MIS")):  # an exit that does not end
+        started = time.monotonic()
         assert surfaces[surface]() == (409, AN_EXIT_BEING_PLACED)
+        assert time.monotonic() - started >= 0.3
+        assert len(exit_guard.EXITS) == 1  # its own claim let go; the exit's kept
     assert routes["placed"] == []
     assert len(exit_guard.EXITS) == 0
+
+
+@pytest.mark.parametrize("second", ["app", "api", "flow"])
+def test_a_second_exit_all_is_refused_at_once_while_the_first_waits(routes, surfaces, second):
+    routes["release"].set()
+    exit_in_flight = exit_guard.EXITS.one("live", ("NFO", EXIT["symbol"], "MIS"))
+    assert exit_in_flight.__enter__() is None
+    try:
+        first, answer = _in_background(surfaces["api"])  # TradingView's, waiting
+        time.sleep(0.3)
+        started = time.monotonic()
+        assert surfaces[second]() == (409, EXIT_ALL_BEING_PLACED)
+        assert time.monotonic() - started < 1.0
+    finally:
+        exit_in_flight.__exit__(None, None, None)
+    first.join(WAIT)
+    assert answer["result"][0] == 200
+    assert routes["placed"] == ["ALL"]
 
 
 @pytest.mark.parametrize("surface", ["app", "api", "flow"])
@@ -501,3 +583,74 @@ def test_a_smart_order_from_the_api_is_never_held_up(monkeypatch):
         )
     assert answer == (True, {"status": "success", "orderid": "251021000000009"}, 200)
     assert placed == [EXIT["symbol"]]
+
+
+@pytest.mark.parametrize("run", range(3))
+def test_an_exit_and_an_exit_all_released_together_never_overlap(run):
+    """Barrier-synchronised (gthread): the Exit all goes after the exit, or the exit is refused."""
+    guard = ExitsInFlight()
+    guard._lock = _MeetAfterTheFirstHold()
+    start = threading.Barrier(2)
+    seen = {}
+
+    def exit_one():
+        start.wait(WAIT)
+        with guard.one("live", ("NFO", EXIT["symbol"], "MIS")) as busy:
+            if busy is None:
+                began = time.monotonic()
+                time.sleep(0.2)  # the broker call
+                seen["exit"] = (began, time.monotonic())
+            else:
+                seen["exit refused"] = busy
+
+    def exit_all():
+        start.wait(WAIT)
+        with guard.every("live", wait_s=WAIT) as busy:
+            seen["exit all"] = time.monotonic() if busy is None else busy
+
+    threads = [threading.Thread(target=exit_one), threading.Thread(target=exit_all)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(WAIT)
+    assert isinstance(seen["exit all"], float)  # the Exit all always goes
+    if "exit" in seen:
+        assert seen["exit all"] >= seen["exit"][1]  # only once the exit had ended
+    else:
+        assert seen["exit refused"] == EXIT_ALL_BEING_PLACED
+    guard._lock = threading.Lock()
+    assert len(guard) == 0
+
+
+@pytest.mark.parametrize("surface", ["api", "flow"])
+def test_a_phone_exit_and_an_unattended_exit_all_released_together_never_overlap(
+    routes, surfaces, surface
+):
+    """Barrier-synchronised on real threads: one order for the position at a time, whichever wins."""
+    start = threading.Barrier(2)
+    answers = {}
+
+    def phone_exit():
+        start.wait(WAIT)
+        response = _client().post("/close_position", json=EXIT)
+        answers["exit"] = response.status_code, response.get_json().get("message")
+
+    def exit_all():
+        start.wait(WAIT)
+        answers["exit all"] = surfaces[surface]()
+
+    threads = [threading.Thread(target=phone_exit), threading.Thread(target=exit_all)]
+    for thread in threads:
+        thread.start()
+    assert routes["entered"].wait(WAIT)  # one of them reached the broker and is held there
+    time.sleep(0.3)  # the other has been refused, or is waiting
+    routes["release"].set()
+    for thread in threads:
+        thread.join(WAIT)
+    assert answers["exit all"][0] == 200  # the Exit all always goes
+    assert routes["overlaps"] == [0]  # never while the phone's exit was at the broker
+    if answers["exit"][0] == 200:
+        assert routes["placed"] == [EXIT["symbol"], "ALL"]
+    else:
+        assert answers["exit"] == (409, EXIT_ALL_BEING_PLACED)
+        assert routes["placed"] == ["ALL"]
