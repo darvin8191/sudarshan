@@ -72,6 +72,9 @@ export interface HoldingCardsProps {
   onOrderClose: () => void
 }
 
+/** The steps the page's own order ticket shows. */
+const TICKET_ACTS = ['buy', 'sell'] as const
+
 export function holdingId(holding: Pick<Holding, 'exchange' | 'symbol'>): string {
   return `${holding.exchange}:${holding.symbol}`
 }
@@ -145,7 +148,9 @@ const HoldingBoard = memo(function HoldingBoard({
     quotes: true,
   })
   const { line, now, stale } = useBookFeed(rows.map(feedRowOf), feed, marketOpen)
-  const { overlay, open, swap, close } = useBookOverlay()
+  const { overlay, open, swap, close } = useBookOverlay({
+    dialog: { open: orderOpen, acts: TICKET_ACTS },
+  })
   const openSheet = useCallback((id: string) => open({ act: 'sheet', row: id }), [open])
   const refresh = useCallback(() => void onRefresh(true), [onRefresh])
   const figuresStale = (line.kind === 'delayed' || line.kind === 'connecting') && line.stale

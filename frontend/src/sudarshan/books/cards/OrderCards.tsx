@@ -59,6 +59,9 @@ import { useHeld, useLatest } from './useLatest'
 
 export type OrderFilter = 'all' | 'open' | 'executed' | 'rejected' | 'cancelled'
 
+/** The step the page's own modify dialog shows. */
+const MODIFY_ACTS = ['modify'] as const
+
 const FILTERS: Array<{ value: OrderFilter; label: string; empty: string }> = [
   { value: 'all', label: 'All', empty: 'No orders today' },
   { value: 'open', label: 'Open', empty: 'No open orders' },
@@ -233,7 +236,9 @@ const OrderBoard = memo(function OrderBoard({
   const { line, now, stale } = useBookFeed(prices.map(feedRowOf), feed, marketOpen)
   const priceOf = new Map(prices.map((row) => [`${row.item.exchange}:${row.item.symbol}`, row]))
 
-  const { overlay, open, swap, close } = useBookOverlay()
+  const { overlay, open, swap, close } = useBookOverlay({
+    dialog: { open: modifyOpen, acts: MODIFY_ACTS },
+  })
   const openSheet = useCallback((orderid: string) => open({ act: 'sheet', row: orderid }), [open])
 
   // Analyze mode: the book is the sandbox's, and so is every cancel and modify from it.

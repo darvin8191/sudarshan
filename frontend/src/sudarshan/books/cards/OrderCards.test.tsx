@@ -707,6 +707,15 @@ describe('Order book on a phone: the sheet and its actions', () => {
     await settle()
     expect(document.querySelector('li[data-order="1001"]')).not.toBeNull()
     expect(priceBox()).toHaveValue(170)
+
+    // Back closes the dialog the trader sees, and the next Back leaves the page.
+    expect(where()).toBe('/orderbook?act=modify&row=1001')
+    back()
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /Modify Order/ })).toBeNull())
+    expect(where()).toBe('/orderbook')
+    back()
+    expect(await screen.findByText('Dashboard page')).toBeInTheDocument()
+    expect(api.modifyOrder).not.toHaveBeenCalled()
   })
 
   it('takes the entry away when the modify dialog closes itself', async () => {

@@ -21,7 +21,15 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router'
  * A sheet may open from the address (a reload keeps it). A step never does: a
  * confirmation, a ticket or a dialog opens only from a tap on this page, and
  * one met any other way (a reload, Forward to an entry the page has left) is
- * closed at once rather than shown.
+ * closed at once rather than shown. An entry this page pushed is closed by
+ * going back to the cards it was pushed over, so the next Back leaves the
+ * page: replacing it with the cards would leave two entries of cards, and a
+ * Back that changes nothing. Every Back closes something or leaves.
+ *
+ * One exception: a dialog of the page's own still open for the step (the
+ * phone was turned with the modify dialog or the order ticket open, and the
+ * page kept it with what was typed into it) takes the entry as this visit's,
+ * so Back closes that dialog.
  */
 export type BookAct =
   | 'exit'
@@ -133,7 +141,12 @@ interface Standing {
  * pushes one entry, a second close in the same moment goes back once, and a
  * tap made while a close is still going back waits for it to land.
  */
-export function useBookOverlay(): {
+export function useBookOverlay(
+  options: {
+    /** A dialog of the page's own (modify, the order ticket), open or not, and its steps. */
+    dialog?: { open: boolean; acts: readonly BookAct[] }
+  } = {}
+): {
   overlay: BookOverlay | null
   open: (next: BookOverlay) => void
   swap: (next: BookOverlay) => void
@@ -155,6 +168,13 @@ export function useBookOverlay(): {
   // A step shows only on an entry this visit made for it, and only until the page leaves it.
   const foreign = isStep(raw) && (entry === null || left.current.has(entry))
   const overlay = foreign ? null : raw
+  // A step of another visit that the page's own dialog still shows: this visit's now.
+  const adopt =
+    foreign &&
+    entry === null &&
+    raw !== null &&
+    options.dialog?.open === true &&
+    options.dialog.acts.includes(raw.act as BookAct)
 
   const standing = useRef<Standing>({
     params,
@@ -256,14 +276,34 @@ export function useBookOverlay(): {
     next?.()
   })
 
-  // A step met without a tap (a reload, Forward) is taken out of the address in
-  // place. Not one this page is already taking out (a close under way).
+  // A step met without a tap (a reload, Forward) is taken out of the address:
+  // gone back from when this page pushed it, else replaced in place. Not one
+  // this page is already taking out (a close under way), and back once only:
+  // a second dead entry straight after is replaced, so nothing can loop.
   const cleaned = useRef<string | null>(null)
+  const wentBack = useRef(0)
   useEffect(() => {
     if (!foreign || cleaned.current === location.key || standing.current.raw === null) return
     cleaned.current = location.key
+    if (adopt) {
+      go(standing.current.raw, true, pushed)
+      return
+    }
+    const first = (window.history.state as { idx?: unknown } | null)?.idx === 0
+    if (pushed && !first && Date.now() - wentBack.current > BACK_WAIT_MS) {
+      wentBack.current = Date.now()
+      standing.current = {
+        ...standing.current,
+        raw: null,
+        pushed: false,
+        entry: null,
+        backSince: Date.now(),
+      }
+      navigate(-1)
+      return
+    }
     go(null, true, false)
-  }, [foreign, location.key, go])
+  }, [foreign, adopt, pushed, location.key, go, navigate])
 
   return { overlay, open, swap, close }
 }
@@ -302,6 +342,8 @@ export function usePageDialog({
     if (!open) inherited.current = false
     if (entered) {
       awaiting.current = false
+      // An entry of its own now (taken over after a turn): Back closes it.
+      inherited.current = false
       if (open) {
         seen.current = true
       } else if (seen.current) {

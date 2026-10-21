@@ -57,6 +57,7 @@ function renderProbe(entries: Entry[] = ['/dashboard', '/positions'], hook = use
 
 const overlay = () => screen.queryByTestId('overlay')?.textContent
 const where = () => screen.queryByTestId('where')?.textContent ?? 'left the page'
+const leftThePage = () => screen.queryByText('Dashboard page') !== null
 const tap = (name: string) => screen.getByRole('button', { name })
 const back = () => act(() => nav.go(-1))
 const forward = () => act(() => nav.go(1))
@@ -79,24 +80,67 @@ describe('a step and a reload', () => {
     before.unmount()
 
     // Load 2: Chrome brings the tab back on that entry, its state intact, with
-    // the module (and every counter in it) loaded afresh.
+    // the module (and every counter in it) loaded afresh, and the cards'
+    // entry under it.
     vi.resetModules()
     const second = await import('./useBookOverlay')
-    renderProbe(['/dashboard', restored], second.useBookOverlay)
+    renderProbe(['/dashboard', '/positions', restored], second.useBookOverlay)
     await settle()
     expect(overlay()).toBe('none')
     expect(where()).toBe('/positions')
+    // The page went back to its cards: the next Back leaves the page.
+    back()
+    expect(leftThePage()).toBe(true)
   })
 
   it('a step restored with an entry from before this page was loaded is not shown', async () => {
     // The review's probe: the state a load before this one wrote.
     renderProbe([
       '/dashboard',
+      '/positions',
       { pathname: '/positions', search: '?act=exitall', state: { sdOverlay: true, sdVisit: 'v1' } },
     ])
     await settle()
     expect(overlay()).toBe('none')
     expect(where()).toBe('/positions')
+    back()
+    expect(leftThePage()).toBe(true)
+  })
+
+  it('a step the page did not push is replaced in place: Back then leaves the page', async () => {
+    // A link opened a sheet, and a step was taken from it: the entry is the page's first.
+    renderProbe([
+      '/dashboard',
+      { pathname: '/positions', search: '?act=exit&row=A', state: { sdOverlay: false } },
+    ])
+    await settle()
+    expect(overlay()).toBe('none')
+    expect(where()).toBe('/positions')
+    back()
+    expect(leftThePage()).toBe(true)
+  })
+
+  it('goes back once only: a second dead step under the first is replaced, not gone back from', async () => {
+    // Going back from both would leave the page, which no Back was pressed for.
+    const dead = { pathname: '/positions', search: '?act=exitall', state: { sdOverlay: true } }
+    renderProbe(['/dashboard', dead, dead])
+    await settle()
+    expect(leftThePage()).toBe(false)
+    expect(overlay()).toBe('none')
+    expect(where()).toBe('/positions')
+  })
+
+  it('never goes back from the first entry of the tab: it is replaced', async () => {
+    // The browser's router keeps each entry's place in the tab's history.
+    window.history.replaceState({ idx: 0 }, '')
+    try {
+      renderProbe([{ pathname: '/positions', search: '?act=exitall', state: { sdOverlay: true } }])
+      await settle()
+      expect(overlay()).toBe('none')
+      expect(where()).toBe('/positions')
+    } finally {
+      window.history.replaceState(null, '')
+    }
   })
 
   it('a sheet restored with the page opens again, and closes', async () => {
@@ -134,6 +178,9 @@ describe('Back and Forward', () => {
     await settle()
     expect(overlay()).toBe('none')
     expect(where()).toBe('/positions')
+    // Back from here leaves the page: no second entry of cards was left behind.
+    back()
+    expect(leftThePage()).toBe(true)
   })
 
   it('a confirmation closed by its button does not open again on Forward', async () => {
@@ -146,6 +193,8 @@ describe('Back and Forward', () => {
     await settle()
     expect(overlay()).toBe('none')
     expect(where()).toBe('/positions')
+    back()
+    expect(leftThePage()).toBe(true)
   })
 })
 

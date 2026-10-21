@@ -319,6 +319,14 @@ describe('Holdings on a phone', () => {
     expect(screen.getByRole('region', { name: 'Order ticket' })).toHaveTextContent(
       'SELL RELIANCE NSE qty 40'
     )
+
+    // Back closes the ticket the trader sees, and the next Back leaves the page.
+    expect(where()).toBe('/holdings?act=sell&row=NSE%3ARELIANCE')
+    back()
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Order ticket' })).toBeNull())
+    expect(where()).toBe('/holdings')
+    back()
+    expect(await screen.findByText('Dashboard page')).toBeInTheDocument()
   })
 
   it('says Buy more and Sell go to the sandbox when Analyze mode is on', async () => {
