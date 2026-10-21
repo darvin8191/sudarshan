@@ -118,14 +118,17 @@ def on_position_closed(event):
     if event.mode == "analyze":
         _emit_analyzer_update(event)
     else:
-        socketio.emit(
-            "close_position_event",
-            {
-                "status": "success",
-                "message": event.message or "All Open Positions Squared Off",
-                "mode": "live",
-            },
-        )
+        # SUDARSHAN M6.9: the event's own status, so a close that failed is not shown as a
+        # success (a trader who believes he is flat when he is not).
+        answered = event.response_data if isinstance(event.response_data, dict) else {}
+        payload = {
+            "status": "error" if answered.get("status") == "error" else "success",
+            "message": event.message or "All Open Positions Squared Off",
+            "mode": "live",
+        }
+        if answered.get("not_confirmed"):
+            payload["not_confirmed"] = True  # some exits may have gone through
+        socketio.emit("close_position_event", payload)
 
 
 def on_basket_completed(event):

@@ -505,19 +505,107 @@ def place_smartorder_api(data, auth):
         return None, dict(_SMART_NOT_SENT), None
 
 
+# SUDARSHAN M6.9: what Exit all answers. "All Open Positions SquaredOff" only when every exit
+# was placed with an order id; a positions read that failed sent nothing; anything else says how
+# many exits were sent, refused and not confirmed, and is marked not_confirmed when any went or
+# may have gone. A trader who believes he is flat when he is not is the worst outcome here.
+_CLOSE_ALL_NOT_READ = (
+    "Nothing was sent: the positions could not be read from Upstox. Check Positions and try again."
+)
+
+
+def _exit_answer(res, orderid):
+    """SUDARSHAN M6.9: "sent", "refused" or "unknown", from one exit's place_order_api answer."""
+    if res is None or isinstance(res, BusyResponse):
+        return "refused"  # refused before anything was sent
+    status = getattr(res, "status", None)
+    if isinstance(status, int) and 400 <= status < 500:
+        return "refused"
+    if isinstance(status, int) and status < 400 and orderid:
+        return "sent"
+    return "unknown"  # a 5xx, a failure after the send, or an answer naming no order
+
+
+def _counted(count, one, many):
+    return f"{count} {one if count == 1 else many}"
+
+
+def _close_all_summary(counts, unmatched, busy, reason):
+    """SUDARSHAN M6.9: Exit all's answer when not every exit was placed with an order id."""
+    sent, refused, unknown = counts["sent"], counts["refused"], counts["unknown"]
+    if busy and busy == refused and not unknown and not unmatched:
+        # Only the order window refused (gthread only): its own sentence, as before.
+        body = {
+            "status": "error",
+            "message": (
+                f"{refused} of {sent + refused} open positions were not squared off, because "
+                "Upstox allows only a limited number of orders per minute and their "
+                "turn was too far away. Check your positions and square off the rest "
+                "again."
+            ),
+        }
+        if sent:
+            body["not_confirmed"] = True
+        return body, 429
+    parts = []
+    if sent:
+        parts.append(_counted(sent, "was sent", "were sent"))
+    if refused:
+        parts.append(
+            _counted(refused, "was refused", "were refused") + (f" ({reason})" if reason else "")
+        )
+    if unmatched:
+        parts.append(
+            _counted(
+                unmatched,
+                "could not be sent, its contract not found",
+                "could not be sent, their contracts not found",
+            )
+        )
+    if unknown:
+        parts.append(
+            _counted(
+                unknown,
+                "is not confirmed and may have gone through",
+                "are not confirmed and may have gone through",
+            )
+        )
+    listed = parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
+    total = sent + refused + unknown + unmatched
+    body = {
+        "status": "error",
+        "message": (
+            f"Exit all did not close every position. Of {_counted(total, 'exit', 'exits')}, "
+            f"{listed}. Check Positions and Orders before sending again."
+        ),
+    }
+    if sent or unknown:
+        body["not_confirmed"] = True
+    if unknown:
+        return body, 502
+    return body, 429 if busy and busy == refused else 400
+
+
 def close_all_positions(current_api_key, auth):
     """
     Closes all open positions.
     """
     logger.debug("Attempting to close all open positions.")
+    counts = {"sent": 0, "refused": 0, "unknown": 0}  # SUDARSHAN M6.9
     try:
         positions_response = get_positions(auth)
-        if positions_response.get("status") != "success" or not positions_response.get("data"):
+        # SUDARSHAN M6.9: a read that failed is not an empty book, and nothing was sent.
+        if positions_response.get("status") != "success":
+            logger.error(f"Close all: positions could not be read: {positions_response}")
+            return {"status": "error", "message": _CLOSE_ALL_NOT_READ}, 424
+        if not positions_response.get("data"):
             logger.debug("No open positions found to close.")
             return {"message": "No Open Positions Found"}, 200
 
         refused = 0
         attempted = 0
+        unmatched = 0  # SUDARSHAN M6.9
+        reason = ""  # SUDARSHAN M6.9: the first refusal's own words
         for position in positions_response["data"]:
             if int(position.get("quantity", 0)) == 0:
                 continue
@@ -530,6 +618,7 @@ def close_all_positions(current_api_key, auth):
                 logger.warning(
                     f"Could not find symbol for instrument token {position['instrument_token']}. Skipping position."
                 )
+                unmatched += 1  # SUDARSHAN M6.9: not sent, so not squared off
                 continue
 
             place_order_payload = {
@@ -543,27 +632,23 @@ def close_all_positions(current_api_key, auth):
                 "quantity": str(quantity),
             }
             logger.debug(f"Closing position with payload: {place_order_payload}")
-            res, api_response, _ = place_order_api(place_order_payload, auth)
+            res, api_response, orderid = place_order_api(place_order_payload, auth)
             attempted += 1
             if isinstance(res, BusyResponse):
                 refused += 1
             logger.debug(f"Close position response for {symbol}: {api_response}")
+            # SUDARSHAN M6.9: count what this exit's own answer says.
+            answer = _exit_answer(res, orderid)
+            counts[answer] += 1
+            if answer == "refused" and not reason and not isinstance(res, BusyResponse):
+                reason = str((api_response or {}).get("message") or "").strip()
 
-        if refused:
-            # Only under the gthread worker, where the order window refuses a
-            # square-off whose turn is too far away instead of sending it late.
-            # Reporting success here would leave those positions unwatched.
-            return {
-                "status": "error",
-                "message": (
-                    f"{refused} of {attempted} open positions were not squared off, because "
-                    "Upstox allows only a limited number of orders per minute and their "
-                    "turn was too far away. Check your positions and square off the rest "
-                    "again."
-                ),
-                # SUDARSHAN M6.9: the rest were sent, so this 429 is not a plain refusal.
-                **({"not_confirmed": True} if refused < attempted else {}),
-            }, 429
+        # Only under the gthread worker does the order window refuse a square-off
+        # whose turn is too far away instead of sending it late (BusyResponse).
+        # SUDARSHAN M6.9: reporting success when not every exit was placed would leave
+        # those positions unwatched, whatever refused them.
+        if counts["sent"] < attempted or unmatched:
+            return _close_all_summary(counts, unmatched, refused, reason)
 
         logger.debug("Successfully initiated closing of all open positions.")
         return {"status": "success", "message": "All Open Positions SquaredOff"}, 200
@@ -574,6 +659,16 @@ def close_all_positions(current_api_key, auth):
         raise
     except Exception:
         logger.exception("An error occurred while closing all positions.")
+        # SUDARSHAN M6.9: it broke after some exits went: they may have gone through.
+        if sum(counts.values()):
+            return {
+                "status": "error",
+                "message": (
+                    "Exit all broke off before every position was closed: some exits may have "
+                    "gone through. Check Positions and Orders before sending again."
+                ),
+                "not_confirmed": True,
+            }, 500
         return {"status": "error", "message": "Failed to close all positions"}, 500
 
 
@@ -659,7 +754,9 @@ def cancel_all_orders_api(data, auth):
             logger.error(
                 f"Failed to retrieve order book to cancel orders: {order_book_response.get('message')}"
             )
-            return [], []
+            # SUDARSHAN M6.9: None says the orders could not be read, which is not "no open
+            # orders" (services/cancel_all_order_service.py answers that nothing was cancelled).
+            return [], [], None
 
         orders_to_cancel = [
             order
@@ -675,6 +772,7 @@ def cancel_all_orders_api(data, auth):
             f"Found {len(orders_to_cancel)} orders to cancel: {[o['order_id'] for o in orders_to_cancel]}"
         )
         canceled_orders, failed_cancellations = [], []
+        not_confirmed = []  # SUDARSHAN M6.9
 
         for order in orders_to_cancel:
             orderid = order["order_id"]
@@ -683,11 +781,16 @@ def cancel_all_orders_api(data, auth):
                 canceled_orders.append(orderid)
             else:
                 failed_cancellations.append(orderid)
+                # SUDARSHAN M6.9: a cancel with no usable answer may still have gone.
+                if isinstance(cancel_response, dict) and cancel_response.get("not_confirmed"):
+                    not_confirmed.append(orderid)
 
         logger.debug(
             f"Canceled {len(canceled_orders)} orders. Failed to cancel {len(failed_cancellations)} orders."
         )
-        return canceled_orders, failed_cancellations
+        # SUDARSHAN M6.9: which of the failed ones are not confirmed rather than refused
+        # (services/cancel_all_order_service.py reads a third list when a broker gives one).
+        return canceled_orders, failed_cancellations, not_confirmed
 
     except BrokerBusyError:
         # The order book read was refused (gthread only), so nothing was

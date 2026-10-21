@@ -324,3 +324,260 @@ def test_a_close_all_that_sent_nothing_stays_a_refusal(monkeypatch):
     success, body, code = _close_all(monkeypatch, [busy, busy])
     assert (success, code) == (False, 429)
     assert "not_confirmed" not in body
+
+
+# -- Exit all says what happened, never "squared off" when it did not -------------------------
+
+PLACED = (Answer(200), {"status": "success"}, "251021000000001")
+REFUSED = (Answer(400), {"status": "error", "message": "Quantity exceeds freeze limit"}, None)
+TIMED_OUT = (upstox._ErrorResponse(500), {"status": "error", "message": SECRET_DETAIL}, None)
+NO_ID = (Answer(200), {"status": "success", "data": {"order_ids": []}}, None)
+
+
+@pytest.fixture
+def published(monkeypatch):
+    import services.close_position_service as close_service
+
+    seen = []
+    monkeypatch.setattr(close_service.bus, "publish", lambda event: seen.append(event))
+    return seen
+
+
+@pytest.mark.parametrize(
+    "read",
+    [
+        {"status": "error", "message": SECRET_DETAIL, "not_confirmed": True},  # timed out
+        {"status": "error", "errors": [{"errorCode": "UDAPI100050", "message": "Invalid token"}]},
+    ],
+)
+def test_exit_all_whose_positions_read_failed_says_nothing_was_sent(
+    client, published, monkeypatch, read
+):
+    import services.close_position_service as close_service
+
+    placed = []
+    monkeypatch.setattr(upstox, "get_positions", lambda auth: read)
+    monkeypatch.setattr(upstox, "place_order_api", lambda data, auth: placed.append(data))
+    monkeypatch.setattr(close_service, "get_analyze_mode", lambda: False)
+    response = client.post("/close_all_positions", json={})
+    assert response.status_code == 424
+    assert response.get_json() == {"status": "error", "message": upstox._CLOSE_ALL_NOT_READ}
+    assert placed == []
+    assert [event.response_data["status"] for event in published] == ["error"]
+
+
+def test_exit_all_with_no_open_positions_is_still_a_success(monkeypatch):
+    monkeypatch.setattr(upstox, "get_positions", lambda auth: {"status": "success", "data": []})
+    assert upstox.close_all_positions("key", "token") == (
+        {"message": "No Open Positions Found"},
+        200,
+    )
+
+
+def test_exit_all_that_closed_everything_answers_as_before(published, monkeypatch):
+    success, body, code = _close_all(monkeypatch, [PLACED, PLACED])
+    assert (success, code) == (True, 200)
+    assert body == {"status": "success", "message": "All Open Positions Squared Off"}
+    assert published[0].response_data["status"] == "success"
+
+
+@pytest.mark.parametrize(
+    ("answers", "code", "flagged", "words"),
+    [
+        (
+            [REFUSED, TIMED_OUT],
+            502,
+            True,
+            "Of 2 exits, 1 was refused (Quantity exceeds freeze limit) and 1 is not confirmed "
+            "and may have gone through.",
+        ),
+        ([PLACED, NO_ID], 502, True, "Of 2 exits, 1 was sent and 1 is not confirmed"),
+        ([PLACED, REFUSED], 400, True, "Of 2 exits, 1 was sent and 1 was refused"),
+        ([REFUSED, REFUSED], 400, False, "Of 2 exits, 2 were refused"),
+    ],
+)
+def test_exit_all_that_did_not_close_everything_says_how_many_went(
+    published, monkeypatch, answers, code, flagged, words
+):
+    success, body, got = _close_all(monkeypatch, answers)
+    assert (success, got) == (False, code)
+    assert body["message"].startswith("Exit all did not close every position.")
+    assert words in body["message"]
+    assert SECRET_DETAIL not in body["message"]
+    assert body.get("not_confirmed", False) is flagged
+    [event] = published
+    assert event.response_data["status"] == "error"
+
+
+def test_exit_all_counts_a_position_it_could_not_match_as_not_sent(monkeypatch):
+    import services.close_position_service as close_service
+
+    monkeypatch.setattr(
+        upstox,
+        "get_positions",
+        lambda auth: {
+            "status": "success",
+            "data": [
+                {"quantity": 10, "instrument_token": "NSE_EQ|1", "exchange": "NSE", "product": "I"},
+                {"quantity": 10, "instrument_token": "NSE_EQ|2", "exchange": "NSE", "product": "I"},
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        upstox, "get_symbol", lambda token, exchange: "SBIN" if token.endswith("1") else None
+    )
+    monkeypatch.setattr(upstox, "place_order_api", lambda data, auth: PLACED)
+    monkeypatch.setattr(close_service, "get_analyze_mode", lambda: False)
+    success, body, code = close_service.close_position(
+        position_data={}, auth_token="token", broker="upstox"
+    )
+    assert (success, code) == (False, 400)
+    assert "1 was sent and 1 could not be sent, its contract not found" in body["message"]
+    assert body["not_confirmed"] is True
+
+
+def test_exit_all_that_breaks_after_an_exit_went_is_not_confirmed(monkeypatch):
+    calls = []
+
+    def symbol(token, exchange):
+        calls.append(token)
+        if len(calls) > 1:
+            raise RuntimeError(SECRET_DETAIL)
+        return "SBIN"
+
+    monkeypatch.setattr(
+        upstox,
+        "get_positions",
+        lambda auth: {
+            "status": "success",
+            "data": [
+                {
+                    "quantity": 10,
+                    "instrument_token": f"NSE_EQ|{n}",
+                    "exchange": "NSE",
+                    "product": "I",
+                }
+                for n in range(2)
+            ],
+        },
+    )
+    monkeypatch.setattr(upstox, "get_symbol", symbol)
+    monkeypatch.setattr(upstox, "place_order_api", lambda data, auth: PLACED)
+    body, code = upstox.close_all_positions("key", "token")
+    assert code == 500
+    assert body["not_confirmed"] is True
+    assert SECRET_DETAIL not in body["message"]
+
+
+@pytest.mark.parametrize(
+    ("answered", "status", "flagged"),
+    [
+        ({"status": "success", "message": "All Open Positions Squared Off"}, "success", False),
+        ({"status": "error", "message": "Exit all did not close every position."}, "error", False),
+        (
+            {"status": "error", "message": "Exit all did not ...", "not_confirmed": True},
+            "error",
+            True,
+        ),
+    ],
+)
+def test_the_close_event_carries_its_real_status(monkeypatch, answered, status, flagged):
+    import subscribers.socketio_subscriber as subscriber
+    from events import PositionClosedEvent
+
+    emitted = []
+    monkeypatch.setattr(
+        subscriber.socketio, "emit", lambda name, data: emitted.append((name, data))
+    )
+    subscriber.on_position_closed(
+        PositionClosedEvent(mode="live", message=answered["message"], response_data=answered)
+    )
+    [(name, data)] = emitted
+    assert name == "close_position_event"
+    assert data["status"] == status
+    assert data.get("not_confirmed", False) is flagged
+
+
+# -- Cancel all says what happened to each cancel ----------------------------------------------
+
+
+def _cancel_all(client, monkeypatch, replies, book_status="success"):
+    import services.cancel_all_order_service as cancel_all_service
+
+    monkeypatch.setattr(cancel_all_service, "get_analyze_mode", lambda: False, raising=False)
+    orders_ = [{"order_id": f"A{n}", "status": "open"} for n in range(len(replies))]
+    monkeypatch.setattr(
+        upstox, "get_order_book", lambda auth: {"status": book_status, "data": orders_}
+    )
+    answers = iter(replies)
+    monkeypatch.setattr(upstox, "cancel_order", lambda orderid, auth: next(answers))
+    response = client.post("/cancel_all_orders", json={})
+    return response.status_code, response.get_json()
+
+
+CANCELLED = ({"status": "success", "orderid": "A"}, 200)
+CANCEL_REFUSED = ({"status": "error", "message": "Order already completed"}, 400)
+CANCEL_UNSURE = ({"status": "error", "message": "x", "not_confirmed": True}, 502)
+
+
+def test_cancel_all_whose_every_cancel_timed_out_is_not_confirmed(client, monkeypatch):
+    code, body = _cancel_all(client, monkeypatch, [CANCEL_UNSURE, CANCEL_UNSURE])
+    assert code == 502
+    assert body["not_confirmed"] is True
+    assert "Of 2 open orders, 2 are not confirmed and may have gone through." in body["message"]
+
+
+def test_cancel_all_that_was_refused_says_so(client, monkeypatch):
+    code, body = _cancel_all(client, monkeypatch, [CANCELLED, CANCEL_REFUSED])
+    assert code == 400
+    assert "not_confirmed" not in body
+    assert "Of 2 open orders, 1 was cancelled and 1 was refused." in body["message"]
+
+
+def test_cancel_all_with_none_open_or_all_cancelled_answers_as_before(client, monkeypatch):
+    assert _cancel_all(client, monkeypatch, []) == (
+        200,
+        {"status": "info", "message": "No open orders to cancel"},
+    )
+    code, body = _cancel_all(client, monkeypatch, [CANCELLED, CANCELLED])
+    assert code == 200
+    assert body["status"] == "success"
+    assert body["message"] == "Successfully canceled 2 orders"
+
+
+def test_cancel_all_whose_order_book_could_not_be_read_says_nothing_was_cancelled(
+    client, monkeypatch
+):
+    code, body = _cancel_all(client, monkeypatch, [CANCELLED], book_status="error")
+    assert code == 424
+    assert body["message"].startswith("Nothing was cancelled: the orders could not be read")
+
+
+# -- The rest of what a send that broke says ---------------------------------------------------
+
+
+def test_a_cancel_that_breaks_after_its_answer_is_not_confirmed(upstox_answers, monkeypatch):
+    monkeypatch.setattr(upstox, "get_api_response", lambda *args, **kwargs: ["not", "a", "dict"])
+    body, code = upstox.cancel_order("251021000000001", "token")
+    assert code == 500
+    assert body == {
+        "status": "error",
+        "message": upstox._CANCEL_NOT_CONFIRMED,
+        "not_confirmed": True,
+    }
+
+
+def test_a_new_smart_order_that_breaks_after_its_send_is_not_confirmed(monkeypatch):
+    monkeypatch.setattr(upstox, "get_open_position", lambda *args: "0")
+    monkeypatch.setattr(upstox, "place_order_api", lambda data, auth: PLACED)
+
+    def broken(auth):
+        raise RuntimeError(SECRET_DETAIL)
+
+    monkeypatch.setattr(upstox, "_invalidate_position_cache", broken)
+    res, body, orderid = upstox.place_smartorder_api(
+        {**EXIT, "action": "BUY", "quantity": "65", "position_size": "0"}, "token"
+    )
+    assert res.status == 500
+    assert body["not_confirmed"] is True
+    assert SECRET_DETAIL not in body["message"]

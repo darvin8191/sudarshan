@@ -129,9 +129,12 @@ def cancel_all_orders_with_auth(
 
     try:
         # Use the dynamically imported module's function to cancel all orders
-        canceled_orders, failed_cancellations = broker_module.cancel_all_orders_api(
-            order_data, auth_token
-        )
+        answered = broker_module.cancel_all_orders_api(order_data, auth_token)
+        canceled_orders, failed_cancellations = answered[0], answered[1]
+        # SUDARSHAN M6.9: a broker that can tell lists the failed cancels that may still have
+        # gone (no usable answer); they stay among the failed for every other reader. None
+        # there says the orders could not be read at all, so nothing was cancelled.
+        not_confirmed = answered[2] if len(answered) > 2 else []
     except BrokerBusyError as e:
         # Refused before it was sent: the broker's request queue was longer
         # than a caller may wait under the gthread worker. Never raised under
@@ -163,6 +166,22 @@ def cancel_all_orders_with_auth(
         ))
         return False, error_response, 500
 
+    if not_confirmed is None:
+        error_response = {
+            "status": "error",
+            "message": (
+                "Nothing was cancelled: the orders could not be read from the broker. "
+                "Check Orders and try again."
+            ),
+        }
+        bus.publish(OrderFailedEvent(
+            mode="live", api_type=API_TYPE,
+            request_data=order_request_data, response_data=error_response,
+            api_key=original_data.get("apikey", ""),
+            error_message=error_response["message"],
+        ))
+        return False, error_response, 424
+
     # Prepare response data
     response_data = {
         "status": "success",
@@ -170,6 +189,8 @@ def cancel_all_orders_with_auth(
         "failed_cancellations": failed_cancellations,
         "message": f"Canceled {len(canceled_orders)} orders. Failed to cancel {len(failed_cancellations)} orders.",
     }
+    if not_confirmed:
+        response_data["not_confirmed_cancellations"] = not_confirmed  # SUDARSHAN M6.9
 
     bus.publish(AllOrdersCancelledEvent(
         mode="live", api_type=API_TYPE,

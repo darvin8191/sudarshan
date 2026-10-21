@@ -53,6 +53,47 @@ def _not_confirmed(message):
     return {"status": "error", "message": message, "not_confirmed": True}
 
 
+def _cancel_all_summary(answered):
+    """SUDARSHAN M6.9: Cancel all's answer when not every cancel went through."""
+    canceled = list(answered.get("canceled_orders") or [])
+    failed = list(answered.get("failed_cancellations") or [])
+    unsure = [
+        order for order in answered.get("not_confirmed_cancellations") or [] if order in failed
+    ]
+    refused = len(failed) - len(unsure)
+
+    def counted(count, one, many):
+        return f"{count} {one if count == 1 else many}"
+
+    parts = []
+    if canceled:
+        parts.append(counted(len(canceled), "was cancelled", "were cancelled"))
+    if refused:
+        parts.append(counted(refused, "was refused", "were refused"))
+    if unsure:
+        parts.append(
+            counted(
+                len(unsure),
+                "is not confirmed and may have gone through",
+                "are not confirmed and may have gone through",
+            )
+        )
+    listed = parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
+    total = len(canceled) + len(failed)
+    body = {
+        "status": "error",
+        "message": (
+            f"Cancel all did not cancel every order. Of {counted(total, 'open order', 'open orders')}, "
+            f"{listed}. Check the orders' status before cancelling again."
+        ),
+        "canceled_orders": canceled,
+        "failed_cancellations": failed,
+    }
+    if unsure:
+        body["not_confirmed"] = True
+    return body
+
+
 # Define the blueprint
 orders_bp = Blueprint("orders_bp", __name__, url_prefix="/")
 
@@ -776,20 +817,22 @@ def cancel_all_orders_ui():
             canceled_count = len(response_data.get("canceled_orders", []))
             failed_count = len(response_data.get("failed_cancellations", []))
 
-            if canceled_count > 0 or failed_count == 0:
-                message = f"Successfully canceled {canceled_count} orders"
-                if failed_count > 0:
-                    message += f" (Failed to cancel {failed_count} orders)"
-                return jsonify(
-                    {
-                        "status": "success",
-                        "message": message,
-                        "canceled_orders": response_data.get("canceled_orders", []),
-                        "failed_cancellations": response_data.get("failed_cancellations", []),
-                    }
-                ), 200
-            else:
+            # SUDARSHAN M6.9: say what happened. "No open orders" only when there were none;
+            # a cancel with no usable answer is not confirmed, never "failed" or "none".
+            if failed_count:
+                return jsonify(_cancel_all_summary(response_data)), (
+                    502 if response_data.get("not_confirmed_cancellations") else 400
+                )
+            if canceled_count == 0:
                 return jsonify({"status": "info", "message": "No open orders to cancel"}), 200
+            return jsonify(
+                {
+                    "status": "success",
+                    "message": f"Successfully canceled {canceled_count} orders",
+                    "canceled_orders": response_data.get("canceled_orders", []),
+                    "failed_cancellations": response_data.get("failed_cancellations", []),
+                }
+            ), 200
         else:
             return jsonify(response_data), status_code
 
