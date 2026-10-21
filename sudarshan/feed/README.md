@@ -33,6 +33,18 @@ journalctl -u sudarshan-feed -f
 `#` comment lines allowed. Keep each date alone on its line: `sudarshan-deploy` matches whole
 lines. A missing file means only weekends count as closed (logged, and shown in /health).
 
+`/etc/sudarshan/nse_extra_trading_days.txt` (optional; auto-login, the alerts and the deploy tool
+read it too): a day the exchange opens although it is a weekend or a holiday, such as a Muhurat
+session. Same format, the date first on its line. A session outside the usual hours gives its own
+window after the date, from the start of its pre-open to its close:
+
+```
+2026-11-08 17:45-19:30  # Muhurat
+```
+
+A missing file means no extra days (logged once). Neither file needs a restart: both are read
+again when they change.
+
 By hand from the repo root (a dev box, outside market hours):
 
 ```bash
@@ -52,7 +64,7 @@ header get 403). JSON in and out; use `127.0.0.1`, not `localhost` (which may re
 
 | request | answer |
 |---|---|
-| `GET /health` | state, detail, connected_since, socket_age_s, last_message_age_s, next_retry_in_s, token_file_readable, subscribed (counts by mode), keys_without_data, reconnects, last_error (+ hint), last_disconnect, market_window, market_status, stats, recorder |
+| `GET /health` | state, detail, connected_since, socket_age_s, last_message_age_s, next_retry_in_s, token_file_readable, subscribed (counts by mode), keys_without_data, reconnects, last_error (+ hint), last_disconnect, market_window (below), market_status, stats, recorder |
 | `GET /snapshot?keys=K1,K2` | `{"ticks": {key: tick or null}}`; URL-encode the keys (`|` is `%7C`, space `%20`) |
 | `GET /snapshot/all` | every key the service has a tick for (survives restarts and after-hours) |
 | `GET /subscriptions` | the desired set by mode |
@@ -62,6 +74,20 @@ header get 403). JSON in and out; use `127.0.0.1`, not `localhost` (which may re
 `last_error` and `last_disconnect` describe the most recent such event and stay after recovery
 (history, not current health): `state` says what is happening now, and comparing their `at` with
 `connected_since` tells whether they came before the current socket.
+
+`market_window` says whether the socket may be held now and why, the feed's hours today (`null`
+on a closed day), what the two calendar files gave (`missing`, `not readable`, or a count) and
+the next opening. On the Muhurat Sunday above, in the morning:
+
+```json
+{"open": false,
+ "reason": "before the market window: extra trading day, own window 17:45-19:30, feed 17:43-19:40",
+ "hours": "17:43-19:40", "holidays": "16 dates", "extra_days": "1 dates, 1 own windows",
+ "next_open": "2026-11-08T17:43:00+05:30"}
+```
+
+An extra day without its own window reads `market window: extra trading day, usual hours
+08:58-15:40`; an ordinary day reads `market window`, `weekend` or `NSE holiday` as before.
 
 ```bash
 curl -s 127.0.0.1:5580/health | python3 -m json.tool
@@ -105,9 +131,18 @@ shows its last non-zero value. Use REST quotes for circuit checks.
 ## Behaviour
 
 - **Market window**: the socket is held only on trading days from 08:58 to 15:40 IST
-  (`SUDARSHAN_FEED_WINDOW`), closed with a close frame at the end of it.
-  `SUDARSHAN_FEED_ALWAYS_ON=1` ignores the window (tests, special sessions such as Muhurat
-  trading). The holidays file is re-read when it changes.
+  (`SUDARSHAN_FEED_WINDOW`), closed with a close frame at the end of it. Those are margins around
+  NSE's session: 2 minutes before the 09:00 pre-open, so the socket is authorised, connected and
+  subscribed when the first data comes, and 10 minutes after the 15:30 close, so the updates that
+  follow the close still arrive. `SUDARSHAN_FEED_ALWAYS_ON=1` ignores the window and the calendar
+  (tests).
+- **Trading days** come from auto-login's calendar, the one the alerts use: weekends and the
+  holidays file are closed, a date in the extra-days file is open, even when the holidays file
+  lists it too (auto-login, the alerts and the deploy tool all read it that way). A day with its
+  own window gets the usual window moved onto it, margins and all (the margins
+  `SUDARSHAN_FEED_WINDOW` keeps around 09:00-15:30): `17:45-19:30` holds the socket from 17:43 to
+  19:40. A window that cannot be read leaves that day at the usual hours, with a warning in the
+  journal.
 - **Connect**: every attempt re-reads the token file, calls
   `GET /v3/feed/market-data-feed/authorize` and dials the returned single-use URI.
 - **Retry policy**:
@@ -118,7 +153,7 @@ shows its last non-zero value. Use REST quotes for circuit checks.
   | WebSocket upgrade refused (403/429) | as above but never sooner than 60 s, so a stale socket can expire at Upstox |
   | authorize 401 ("token rejected") | 10 min, 30 min, then hourly; at once when the token file changes |
   | token file missing, empty or malformed | 60 s; at once when the file changes |
-  | no data for 120 s during 09:15-15:30 | clean close and reconnect (stall watchdog) |
+  | no data for 120 s during 09:15-15:30 (on a day with its own window: from 15 minutes after its start, the pre-open's length, to its end) | clean close and reconnect (stall watchdog) |
 
 - **Subscriptions**: `default_keys.txt` (or `SUDARSHAN_FEED_KEYS`) is the base set, one
   `MODE KEY` per line, re-read at every start. API changes are stored as an overlay in
@@ -154,6 +189,7 @@ live service holds 5581):
 | `SUDARSHAN_FEED_KEYS` | `sudarshan/feed/default_keys.txt` |
 | `SUDARSHAN_FEED_STATE_DIR` | `$STATE_DIRECTORY` or `/var/lib/sudarshan-feed` |
 | `SUDARSHAN_NSE_HOLIDAYS_FILE` | `/etc/sudarshan/nse_holidays.txt` |
+| `SUDARSHAN_NSE_EXTRA_DAYS_FILE` | `/etc/sudarshan/nse_extra_trading_days.txt` |
 | `SUDARSHAN_FEED_ALWAYS_ON` | `0` |
 | `SUDARSHAN_FEED_WINDOW` | `08:58-15:40` (IST) |
 | `SUDARSHAN_FEED_HTTP_PORT` / `SUDARSHAN_FEED_ZMQ_PORT` | `5580` / `5581` (always 127.0.0.1) |
