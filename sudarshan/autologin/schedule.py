@@ -67,6 +67,31 @@ def parse_holidays(text: str) -> tuple[set[date], int]:
     return days, bad
 
 
+#: How a reader of the extra-days file reports a line whose window it cannot use.
+BAD_WINDOW = "extra trading day %r: the window is not HH:MM-HH:MM; usual hours"
+
+
+def day_windows(text: str) -> tuple[dict[date, tuple[int, int]], list[str]]:
+    """The extra-days lines that give the day's own window after the date, for a special session.
+
+    ``2026-11-08 17:45-19:30  # Muhurat`` gives {2026-11-08: (1065, 1170)}. Returns the windows
+    and the lines whose window cannot be read (that day keeps the usual hours; each reader logs
+    them). A line with the date alone is an extra day at the usual hours, in neither. Shared by the
+    alerts and the feed; auto-login itself reads only the date.
+    """
+    windows: dict[date, tuple[int, int]] = {}
+    bad: list[str] = []
+    for raw in text.splitlines():
+        words = raw.split("#", 1)[0].split()
+        if len(words) < 2:
+            continue
+        try:
+            windows[date.fromisoformat(words[0])] = parse_window(words[1])
+        except ValueError:
+            bad.append(raw)
+    return windows, bad
+
+
 def minute_of_day(at: datetime) -> int:
     local = at.astimezone(IST)
     return local.hour * 60 + local.minute
@@ -75,13 +100,18 @@ def minute_of_day(at: datetime) -> int:
 class _DayFile:
     """A list of dates in a file, read again only when the file changes."""
 
-    def __init__(self, path: Path | str, *, optional: bool, missing_note: str):
+    def __init__(
+        self, path: Path | str, *, optional: bool, missing_note: str, logger: logging.Logger = log
+    ):
         self.file = Path(path)
         self.optional = optional
         self.missing_note = missing_note
+        self.log = logger
         self._mtime: int | None = None
         self._days: set[date] = set()
         self._warned = False
+        #: What the last read found, for a status page: "15 dates", "missing", "not readable".
+        self.note = "not read yet"
 
     def days(self) -> set[date]:
         try:
@@ -89,18 +119,20 @@ class _DayFile:
             if mtime != self._mtime:
                 self._days, bad = parse_holidays(self.file.read_text(encoding="utf-8"))
                 self._mtime = mtime
+                unreadable = f", {bad} unreadable lines" if bad else ""
+                self.note = f"{len(self._days)} dates{unreadable}"
                 if bad:
-                    log.warning("%s: %d unreadable lines ignored", self.file, bad)
+                    self.log.warning("%s: %d unreadable lines ignored", self.file, bad)
         except FileNotFoundError:
             if not (self.optional or self._warned):
-                log.warning("%s not found: %s", self.file, self.missing_note)
+                self.log.warning("%s not found: %s", self.file, self.missing_note)
                 self._warned = True
-            self._mtime, self._days = None, set()
+            self._mtime, self._days, self.note = None, set(), "missing"
         except (OSError, UnicodeError):
             if not self._warned:
-                log.warning("%s not readable: %s", self.file, self.missing_note)
+                self.log.warning("%s not readable: %s", self.file, self.missing_note)
                 self._warned = True
-            self._mtime, self._days = None, set()
+            self._mtime, self._days, self.note = None, set(), "not readable"
         return self._days
 
 
@@ -108,19 +140,27 @@ class TradingCalendar:
     """Weekends and the NSE holiday file decide the trading days; the extra-days file reopens one.
 
     A missing or unreadable holiday file leaves only weekends closed (and is logged once): an
-    attempt on a holiday is harmless, a skipped trading day is not.
+    attempt on a holiday is harmless, a skipped trading day is not. ``logger`` lets another
+    service's journal carry these lines under its own name.
     """
 
     def __init__(
         self,
         holidays_file: Path | str = HOLIDAYS_FILE,
         extra_days_file: Path | str | None = None,
+        *,
+        logger: logging.Logger = log,
     ):
         self._holidays = _DayFile(
-            holidays_file, optional=False, missing_note="only weekends count as closed"
+            holidays_file,
+            optional=False,
+            missing_note="only weekends count as closed",
+            logger=logger,
         )
         self._extra = (
-            _DayFile(extra_days_file, optional=True, missing_note="no extra trading days")
+            _DayFile(
+                extra_days_file, optional=True, missing_note="no extra trading days", logger=logger
+            )
             if extra_days_file
             else None
         )
@@ -131,6 +171,18 @@ class TradingCalendar:
 
     def extra_days(self) -> set[date]:
         return self._extra.days() if self._extra else set()
+
+    def holidays_note(self) -> str:
+        """The holiday file as read now, for a status page: "15 dates", "missing", ..."""
+        self._holidays.days()
+        return self._holidays.note
+
+    def extra_days_note(self) -> str:
+        """The extra-days file as read now: "1 dates", "missing", "not readable" or "not set"."""
+        if self._extra is None:
+            return "not set"
+        self._extra.days()
+        return self._extra.note
 
     def is_trading_day(self, day: date) -> bool:
         if day in self.extra_days():

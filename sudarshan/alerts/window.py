@@ -20,22 +20,22 @@ from datetime import date, datetime, timedelta
 from datetime import time as dtime
 from pathlib import Path
 
-from sudarshan.autologin.schedule import IST, TradingCalendar, minute_of_day, parse_window
+from sudarshan.autologin.schedule import (
+    BAD_WINDOW,
+    IST,
+    TradingCalendar,
+    day_windows,
+    minute_of_day,
+)
 
 log = logging.getLogger("sudarshan.alerts")
 
 
 def parse_day_windows(text: str) -> dict[date, tuple[int, int]]:
     """{date: (start, end) minutes} for the lines of an extra-days file that give a window."""
-    windows: dict[date, tuple[int, int]] = {}
-    for raw in text.splitlines():
-        words = raw.split("#", 1)[0].split()
-        if len(words) < 2:
-            continue
-        try:
-            windows[date.fromisoformat(words[0])] = parse_window(words[1])
-        except ValueError:
-            log.warning("extra trading day %r: the window is not HH:MM-HH:MM; usual hours", raw)
+    windows, bad = day_windows(text)  # the parser the feed uses too
+    for raw in bad:
+        log.warning(BAD_WINDOW, raw)
     return windows
 
 
