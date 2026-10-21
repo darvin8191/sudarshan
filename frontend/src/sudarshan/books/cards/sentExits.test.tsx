@@ -789,6 +789,12 @@ describe('l: the wide table', () => {
     await pass(46_000)
     expect(screen.queryByRole('dialog', { name: 'Close NIFTY 25900 CE?' })).toBeNull()
     expect(api.closePosition).toHaveBeenCalledTimes(1)
+
+    // A new position in the same contract later: the question never comes back by itself.
+    api.getPositions.mockResolvedValue(book(LONG, PUT))
+    await pass(46_000)
+    expect(close()).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'Close NIFTY 25900 CE?' })).toBeNull()
   })
 
   it('says in Close All’s confirmation what became of an exit whose time ran out', async () => {
