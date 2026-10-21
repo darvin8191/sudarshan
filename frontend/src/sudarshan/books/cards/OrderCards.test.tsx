@@ -308,6 +308,21 @@ describe('Order book on a phone: the cards', () => {
     expect(screen.getByText('Real-time')).toBeInTheDocument()
   })
 
+  it('gives the Orders and GTT tabs 48dp targets on a phone, and leaves the wide ones be', async () => {
+    const view = await renderPhone(WORKING)
+    for (const name of ['Orders', 'GTT']) {
+      expect(screen.getByRole('tab', { name })).toHaveClass('h-12')
+    }
+    expect(screen.getByRole('tablist')).toHaveClass('h-auto')
+    view.unmount()
+
+    fakeScreen('wide')
+    renderBook('/orderbook', <OrderBook />)
+    await settle()
+    expect(screen.getByRole('tab', { name: 'Orders' })).not.toHaveClass('h-12')
+    expect(screen.getByRole('tablist')).toHaveClass('h-10')
+  })
+
   it('gives the feed line a row of its own, apart from Refresh and Cancel all', async () => {
     await renderPhone(WORKING, STOP)
     act(() => {

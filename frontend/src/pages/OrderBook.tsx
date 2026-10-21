@@ -540,11 +540,12 @@ export default function OrderBook() {
       </div>
 
       <Tabs defaultValue="orders" className="space-y-6">
-        <TabsList className="h-10">
-          <TabsTrigger value="orders" className="min-w-[110px] text-sm">
+        {/* SUDARSHAN M6.9: 48dp tabs on a phone; the list grows to hold them. */}
+        <TabsList className={phone ? 'h-auto' : 'h-10'}>
+          <TabsTrigger value="orders" className={cn('min-w-[110px] text-sm', phone && 'h-12')}>
             Orders
           </TabsTrigger>
-          <TabsTrigger value="gtt" className="min-w-[110px] text-sm">
+          <TabsTrigger value="gtt" className={cn('min-w-[110px] text-sm', phone && 'h-12')}>
             GTT
           </TabsTrigger>
         </TabsList>
