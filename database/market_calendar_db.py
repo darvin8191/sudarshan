@@ -437,14 +437,29 @@ def seed_holidays_2026():
             "holiday_type": "SPECIAL_SESSION",
             "closed": [],
             "open": [
-                # Muhurat Trading session — default 18:00 to 19:15 IST (exact timings via circular)
-                {"exchange": "NSE", "start_time": 1794141000000, "end_time": 1794145500000},
-                {"exchange": "BSE", "start_time": 1794141000000, "end_time": 1794145500000},
-                {"exchange": "NFO", "start_time": 1794141000000, "end_time": 1794145500000},
-                {"exchange": "BFO", "start_time": 1794141000000, "end_time": 1794145500000},
-                {"exchange": "CDS", "start_time": 1794141000000, "end_time": 1794145500000},
-                {"exchange": "BCD", "start_time": 1794141000000, "end_time": 1794145500000},
-                # MCX Muhurat — 18:00 to 00:15 (next day)
+                # Muhurat 2026 is an afternoon session. Each window runs from the
+                # normal market open to the normal market close, as a normal day
+                # does above (NSE 09:15-15:30, not the 09:00 pre-open; NFO to 15:40):
+                # - NSE: NSE circular 149/2026 (NSE/CMTR/76941, 19 Oct 2026), normal
+                #   market 14:20 to 15:30 (15:15 for closing-auction securities).
+                # - BSE, BFO, BCD: BSE's segment schedules of 19 Oct 2026 as reported
+                #   by Angel One (20 Oct 2026): equity 14:20-15:30, equity derivatives
+                #   14:20-15:40, currency derivatives 14:20-15:30.
+                # - CDS: NSE currency derivatives 14:20-15:30 as reported by Angel One
+                #   (20 Oct 2026); NSE's own currency circular was not found.
+                # - NFO: NSE's F&O circular for the day was not found. 14:20 is the
+                #   open every segment shares; 15:40 is BSE's published equity
+                #   derivatives close for this session and NSE's F&O close on every
+                #   day since 3 Aug 2026. Check it against NSE's F&O circular.
+                # upgrade/migrate_muhurat_nov_2026.py moves existing installs here.
+                {"exchange": "NSE", "start_time": 1794127800000, "end_time": 1794132000000},
+                {"exchange": "BSE", "start_time": 1794127800000, "end_time": 1794132000000},
+                {"exchange": "NFO", "start_time": 1794127800000, "end_time": 1794132600000},
+                {"exchange": "BFO", "start_time": 1794127800000, "end_time": 1794132600000},
+                {"exchange": "CDS", "start_time": 1794127800000, "end_time": 1794132000000},
+                {"exchange": "BCD", "start_time": 1794127800000, "end_time": 1794132000000},
+                # MCX's own Muhurat hours were not found by 21 Oct 2026, so this
+                # keeps the earlier placeholder, 18:00 to 00:15 (next day).
                 {"exchange": "MCX", "start_time": 1794141000000, "end_time": 1794163500000},
             ],
         },

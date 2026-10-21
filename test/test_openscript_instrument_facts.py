@@ -182,7 +182,7 @@ def test_a_special_session_day_keeps_the_regular_window_and_states_the_day_apart
         "date": "2026-11-08",
         "open": True,
         "isSpecial": True,
-        "session": {"start": "18:00", "end": "19:15", "days": [7]},
+        "session": {"start": "14:20", "end": "15:30", "days": [7]},
     }
 
 
