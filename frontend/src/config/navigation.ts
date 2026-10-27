@@ -25,6 +25,7 @@ import {
   MessageSquare,
   Search,
   Settings,
+  ShieldAlert,
   TrendingUp,
   User,
   Workflow,
@@ -91,6 +92,8 @@ export const profileMenuItems: NavItem[] = [
   { href: '/master-contract', label: 'Master Contract', icon: FileStack },
   // SUDARSHAN M2.20: Upstox auto-login (TOTP + PIN), shown unfiltered like the bots below.
   { href: '/autologin', label: 'Auto login', icon: KeyRound },
+  // SUDARSHAN M20.7: the kill switch and the risk guard.
+  { href: '/risk', label: 'Risk', icon: ShieldAlert },
   { href: '/telegram', label: 'Telegram Bot', icon: MessageSquare },
   { href: '/whatsapp', label: 'WhatsApp Bot', icon: MessageCircle },
   // SUDARSHAN M8.2: the watchlist, for a wide screen where the bottom bar is hidden.

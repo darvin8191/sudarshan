@@ -47,6 +47,7 @@ const MasterContract = lazy(() => import('@/pages/MasterContract'))
 const ActionCenter = lazy(() => import('@/pages/ActionCenter'))
 const AutoLogin = lazy(() => import('@/sudarshan/pages/AutoLogin')) // SUDARSHAN M2.20
 const Watchlist = lazy(() => import('@/sudarshan/pages/Watchlist')) // SUDARSHAN M8.2
+const Risk = lazy(() => import('@/sudarshan/pages/Risk')) // SUDARSHAN M20.7
 
 // Platform pages
 const Platforms = lazy(() => import('@/pages/Platforms'))
@@ -311,6 +312,8 @@ function App() {
                 <Route path="/action-center" element={<ActionCenter />} />
                 {/* SUDARSHAN M2.20: Upstox auto-login */}
                 <Route path="/autologin" element={<AutoLogin />} />
+                {/* SUDARSHAN M20.7: Settings > Risk, the kill switch */}
+                <Route path="/risk" element={<Risk />} />
               </Route>
 
               {/* Full-width protected routes */}

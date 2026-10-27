@@ -7,6 +7,8 @@ import { useAuthStore } from '@/stores/authStore'
 
 vi.mock('@/components/socket/SocketProvider', () => ({
   SocketProvider: ({ children }: { children: ReactNode }) => children,
+  // SUDARSHAN M20.7: the kill switch banner listens on the shell's connection.
+  useSocketContext: () => ({ socket: null, playAlertSound: () => {} }),
 }))
 
 import { FullWidthLayout } from './FullWidthLayout'

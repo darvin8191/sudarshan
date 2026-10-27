@@ -79,6 +79,7 @@ class Answer:
     status: int  # as the routes answer it: 200, 400, 409, 423 or 503
     message: str
     state: KillSwitchState | None = None
+    activated: bool = False  # this call turned it on (not "already on"), so its steps ran
 
 
 def phrase_matches(given: object, expected: str) -> bool:
@@ -123,7 +124,7 @@ def activate(owner: Owner, *, exit_all: bool, phrase: object = None, phrase_need
         if outcome == "already":
             return Answer(200, words.ks_already_on(_clock(current.since)), current)
         final = _clear_up(owner, state, in_flight, settings)
-        return Answer(200, words.ks_report_lead(final.report), final)
+        return Answer(200, words.ks_report_lead(final.report), final, activated=True)
     finally:
         with _running_lock:
             _running.discard(activation_id)

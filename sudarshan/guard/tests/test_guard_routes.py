@@ -31,6 +31,7 @@ from sudarshan.guard.store import KillSwitchState, utcnow
 REPO = Path(__file__).resolve().parents[3]
 JSON = {"Accept": "application/json"}
 OWNER_ROUTES = [
+    ("get", "/sudarshan/risk/state", None),
     ("get", "/sudarshan/risk/status", None),
     ("get", "/sudarshan/risk/preview", None),
     ("post", "/sudarshan/risk/killswitch", {"phrase": "STOP"}),
@@ -145,9 +146,10 @@ def test_turning_it_on_from_the_app(world, monkeypatch):
     assert body["message"] == words.ks_report_lead(store.state().report)
     assert body["data"]["on"] is True and body["data"]["surface"] == "app"
     assert body["data"]["exit_all"] is False and store.state().on
+    assert body["activated"] is True
 
     again = _owner_call(client, "post", "/sudarshan/risk/killswitch", {"phrase": "STOP"})
-    assert again.status_code == 200
+    assert again.status_code == 200 and again.get_json()["activated"] is False
     assert again.get_json()["message"].startswith("The kill switch is already on")
 
 
@@ -276,6 +278,22 @@ def test_status_shows_the_stage_switch_settings_and_timing_and_never_the_phrase(
     assert data["settings"]["phrase_set"] is True and "confirm_phrase" not in data["settings"]
     assert set(data["gate"]) == {"orders", "p50_ms", "p95_ms", "max_ms", "last_problem"}
     assert data["upstox_kill_switch"] is None  # no broker login in this session
+
+
+def test_the_banner_s_read_carries_the_switch_and_reads_no_broker(world, monkeypatch):
+    client, account, store = world
+    from sudarshan.guard import readers
+
+    def no_broker(*args, **kwargs):
+        raise AssertionError("the banner's read reached the broker")
+
+    monkeypatch.setattr(readers, "upstox_kill_switch", no_broker)
+    monkeypatch.setattr(killswitch, "owner_for", no_broker)
+    data = _owner_call(client, "get", "/sudarshan/risk/state").get_json()["data"]
+    assert data == {"stage": "sandbox", "kill_switch": killswitch.public_state(KillSwitchState())}
+    gate.GATE.set_state(KillSwitchState(on=True, since=utcnow(), surface="telegram"))
+    data = _owner_call(client, "get", "/sudarshan/risk/state").get_json()["data"]
+    assert data["kill_switch"]["on"] is True and data["kill_switch"]["surface"] == "telegram"
 
 
 def test_status_reads_upstox_s_own_kill_switch_when_logged_in_to_upstox(world, monkeypatch):

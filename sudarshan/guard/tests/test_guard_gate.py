@@ -22,6 +22,7 @@ TOKENS = {(CE, "NFO"): "NSE_FO|49213", (PE, "NFO"): "NSE_FO|49214", ("RELIANCE",
 SINCE = datetime(2026, 10, 27, 5, 12, tzinfo=UTC)  # 10:42 in India
 ON = KillSwitchState(on=True, since=SINCE, surface="app", actor="owner", activation_id="ks-1")
 WAIT = 10
+JOIN_S = 120  # threads' end: generous, as a commit can stall for seconds under load
 
 
 def row(symbol: str, quantity: int, product: str = "I") -> dict:
@@ -565,8 +566,8 @@ def _two_exits_together(the_gate, book) -> list[str]:
     for thread in threads:
         thread.start()
     for thread in threads:
-        thread.join(WAIT)
-    assert len(outcomes) == 2
+        thread.join(JOIN_S)
+    assert len(outcomes) == 2, "a send never ended"
     return sorted(outcomes)
 
 
@@ -674,7 +675,8 @@ def test_a_switch_turned_on_while_its_state_was_first_read_stays_on(
     assert reading.wait(WAIT)
     assert the_gate.turn_on(ON)[0] == "on"
     finish.set()
-    reader.join(WAIT)
+    reader.join(JOIN_S)
+    assert not reader.is_alive()
     assert the_gate.state() == ON
 
 

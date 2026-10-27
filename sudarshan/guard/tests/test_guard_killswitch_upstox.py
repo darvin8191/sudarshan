@@ -98,7 +98,7 @@ def test_exit_all_closes_a_position_whose_stop_loss_it_has_just_cancelled(upstox
     upstox.broker.rest(CE, "SELL", 65)  # the stop loss protecting the long
     upstox.broker.pending_reads = 2  # its cancel shows on the third read of the order book
     answer = killswitch.activate(OWNER, exit_all=True, phrase="STOP")
-    assert answer.status == 200
+    assert answer.status == 200 and answer.activated
     assert upstox.broker.true_qty(CE) == 0  # flat
     assert upstox.broker.working == []
     steps = _steps(answer)

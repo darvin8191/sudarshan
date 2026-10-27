@@ -262,6 +262,62 @@ html[data-cvd='1'] {
 }
 
 /* -----------------------------------------------------------------------------
+   Kill switch (M20.7)
+   -----------------------------------------------------------------------------
+   RiskBanner and the chip in the account controls: the loss ink on the loss
+   tint (4.98:1; 4.59:1 in colour-blind mode, which swaps both), a 1px top rule,
+   the words and an icon, so the state is never colour alone. The banner is the
+   way to Settings > Risk, so on a phone it is a 48dp target.
+   ----------------------------------------------------------------------------- */
+@layer components {
+  .sd-risk-banner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    min-height: 3rem;
+    padding: 0.25rem 1rem;
+    border-top: 1px solid var(--down);
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--down-tint);
+    color: var(--down);
+    text-align: center;
+    /* Semantic text: 14px and 600, never smaller or lighter, for sunlight. */
+    font-size: 0.875rem;
+    font-weight: 600;
+    line-height: 1.25rem;
+  }
+  .sd-risk-banner:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: -2px;
+  }
+  @media (min-width: 48rem) {
+    .sd-risk-banner {
+      min-height: 2rem;
+    }
+  }
+  .sd-risk-chip {
+    border-color: var(--down);
+    background: var(--down-tint);
+    color: var(--down);
+  }
+  /* A refusal or a warning inside the sheets: an icon and the sentence. */
+  .sd-risk-note {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    border: 1px solid var(--down);
+    border-radius: 0.75rem;
+    padding: 0.75rem;
+    background: var(--down-tint);
+    color: var(--down);
+    font-size: 0.875rem;
+    font-weight: 600;
+    line-height: 1.25rem;
+  }
+}
+
+/* -----------------------------------------------------------------------------
    Wordmark lockup (M1.1), the D look
    -----------------------------------------------------------------------------
    The Mor icon, सुदर्शन drawn from Tiro outlines (marks.ts) and SUDARSHAN in

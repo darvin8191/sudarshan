@@ -3,6 +3,7 @@
 The layer itself lives in ``sudarshan/guard/``. Owner routes (OpenAlgo session + CSRF, the owner
 account only, like the auto-login routes):
 
+    GET  /sudarshan/risk/state        the stage and the kill switch only: every page's banner
     GET  /sudarshan/risk/status       the stage, the kill switch, the settings, the gate's timing
     GET  /sudarshan/risk/preview      what turning it on would cancel, counted fresh (R1)
     POST /sudarshan/risk/killswitch   {"exit_all": bool, "phrase": "..."}: turn it on
@@ -92,6 +93,7 @@ def _answer(answer: killswitch.Answer):
         "status": "success" if answer.status == 200 else "error",
         "message": answer.message,
         "data": killswitch.public_state(answer.state),
+        "activated": answer.activated,  # the page settles its Exit all and cancel holds on it
     }
     return jsonify(body), answer.status
 
@@ -106,6 +108,24 @@ def _upstox_kill_switch(owner: killswitch.Owner) -> list[dict] | None:
         logger.exception("Upstox's own kill switch could not be read")
         return None
     return [{**row, "label": words.upstox_segment(row["segment"])} for row in rows]
+
+
+@sudarshan_risk_bp.route("/state", methods=["GET"])
+@check_session_validity
+@_owner_only
+@limiter.limit("120 per minute")
+def state():
+    """Every page's banner and chip: no broker call, no settings."""
+    killswitch.recover()
+    return jsonify(
+        {
+            "status": "success",
+            "data": {
+                "stage": flag.stage(),
+                "kill_switch": killswitch.public_state(risk_gate.GATE.state()),
+            },
+        }
+    )
 
 
 @sudarshan_risk_bp.route("/status", methods=["GET"])

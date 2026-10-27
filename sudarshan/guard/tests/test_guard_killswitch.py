@@ -22,6 +22,10 @@ from sudarshan.guard.store import KillSwitchState, utcnow
 
 REPO = Path(__file__).resolve().parents[3]
 WAIT = 10
+#: How long a test waits for its threads to end. Generous on purpose: under heavy disk writing a
+#: SQLite commit's fsync can stall for seconds, and a join that gives up early fails the test on
+#: the machine's speed, not on what the code did. A thread still alive after it is a failure.
+JOIN_S = 120
 
 
 @pytest.fixture
@@ -222,7 +226,7 @@ def test_a_send_on_its_way_is_waited_for_then_swept_again(account, monkeypatch):
     assert waiting is not None
 
 
-def test_two_activations_at_once_run_the_steps_once(account):
+def _two_activations(account):
     """Barrier-synchronised: both ask together; one turns it on, the other is told it is on."""
     start = threading.Barrier(2)
     answers = []
@@ -235,7 +239,8 @@ def test_two_activations_at_once_run_the_steps_once(account):
     for thread in threads:
         thread.start()
     for thread in threads:
-        thread.join(WAIT)
+        thread.join(JOIN_S)
+    assert not any(thread.is_alive() for thread in threads), "an activation never ended"
     statuses = sorted(a.status for a in answers)
     assert statuses in ([200, 200], [200, 409])
     assert account.calls.count("live_cancel_all") == 1
@@ -246,6 +251,25 @@ def test_two_activations_at_once_run_the_steps_once(account):
         )
         == 1
     )
+
+
+def test_two_activations_at_once_run_the_steps_once(account):
+    _two_activations(account)
+
+
+def test_two_activations_at_once_hold_however_slowly_the_switch_is_saved(
+    account, risk_store, monkeypatch
+):
+    """The same with each save taking a second and a half, as a commit's fsync can under heavy
+    disk writing (this test failed on a ten-second join while packages were being installed)."""
+    save = risk_store.save_state
+
+    def slow(**changes):
+        time.sleep(1.5)
+        return save(**changes)
+
+    monkeypatch.setattr(risk_store, "save_state", slow)
+    _two_activations(account)
 
 
 def test_it_never_touches_analyze_mode_or_the_order_mode(account, monkeypatch):
