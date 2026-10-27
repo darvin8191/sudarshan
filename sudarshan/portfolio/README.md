@@ -35,7 +35,7 @@ Absolute imports only: upstream owns a top-level `portfolio` package (the backte
 |---|---|---|
 | `core/kinds.py` | the contract: units, kinds, limits, sentences, op names | PF0 |
 | `../../frontend/src/sudarshan/portfolio/types.ts` | its twin on the phone, and every JSON shape | PF0 |
-| `core/money.py`, `core/words.py`, `core/model.py`, `core/ledger.py` | scales and rounding, the owner's words, the FIFO ledger | PA1 |
+| `core/days.py`, `core/money.py`, `core/words.py`, `core/model.py`, `core/ledger.py` | days, scales and rounding, the owner's words, the FIFO ledger | PA1 |
 | `core/ledger_actions.py` | splits, bonus, rights, transfers | PA2 |
 | `core/valuation.py`, `core/freshness.py` | value, Today, how old a price is | PA3 |
 | `core/performance.py`, `core/history.py` | XIRR, TWR, net money put in, daily series, benchmarks | PA4, PA5 |
@@ -299,9 +299,86 @@ generic format, so that exporting and importing into an empty tab gives the same
 
 ## Ledger, valuation, performance, allocation, imports
 
-Written with the PR that builds each (`PA1` to `PA8`): FIFO per (tab, account, asset), the day's
-order of events, refusals in words, rounding, the Today rule above in full, XIRR and TWR,
-benchmarks, allocation and filters, and the two file formats.
+The ledger is written (`PA1`); valuation, performance, allocation and the two file formats are
+written with the PR that builds each (`PA3` to `PA8`): the Today rule above in full, XIRR and
+TWR, benchmarks, allocation and filters.
+
+### The ledger
+
+A tab's ledger is its **posted entries replayed from the start**, never a running total
+(`core/ledger.py`, `replay`). An edit, a delete or an addition is checked by replaying the tab with
+the change, so the ledger can never disagree with the entries it is made of. Drafts count nowhere,
+and `as_of` (a day) stops the replay there.
+
+**FIFO is per account and asset within a tab.** A sale takes the lots of its own account first
+bought first: by the day the lot was acquired, and for lots of one day in the order they were
+made. A lot keeps its day when it moves (a transfer; `PA2`), so it counts as bought when it was
+bought. A sale beyond what the account holds on that day is refused; it never goes short or
+borrows from another account.
+
+**The day has its own order**, not the order the owner typed. A sale typed before the purchase of
+the same day is valid.
+
+| group | entries | why |
+|---|---|---|
+| 0 | splits, bonus | the ex-date, before trading |
+| 1 | purchases, rights, transfers in from outside | what was bought is there to sell |
+| 2 | transfers between two accounts of the tab | moved shares can be sold in the new account the same day |
+| 3 | sales, transfers out to outside | |
+| 4 | dividends, interest, fees | they touch no lot |
+
+Inside a group the entry's `seq` decides (an import keeps file order), then its `id`. Which
+handlers run: purchases, rights, sales, dividends, interest and fees today; splits, bonus and
+transfers join in `PA2` (`core/ledger_actions.py`).
+
+**Numbers.**
+
+- A purchase or rights lot costs `amount + charges`. The amount is what was typed; only when none
+  was typed does it come from `round(qty_u x price_u / 10^8)`.
+- A sale's gain is `amount - charges - cost of the lots it took`. A sale of part of a lot takes
+  `round(remaining cost x part / remaining quantity)` paise of its cost, half away from zero, and
+  taking a whole lot takes exactly what is left. Three sales of one unit from a 10,000 paise lot
+  of three cost 3,333, 3,334 and 3,333, so a lot's cost is used up to the paisa and never lost or
+  invented. Allocating from the original lot instead would give 3,333, 3,333 and 3,334.
+- Income (dividend, interest) is counted **gross**; the TDS is shown beside it, not taken off.
+  Fees are counted on their own. Neither changes a lot.
+- Every figure is an integer. Rounding happens in exactly one function, `money.round_div`
+  (half away from zero, so a loss mirrors a gain). Python's `round` and floats never touch a
+  figure; a test compares the code with Decimal's `ROUND_HALF_UP` on thousands of numbers.
+- Percentages are `money.pct(numerator, denominator)`: four decimals, half away from zero, a plain
+  minus, never `-0.0000`, and `None` when there is nothing to divide by.
+
+**Held more than a year** (`days.held_over_year`) means strictly after the first anniversary: a lot
+bought 5 Jan 2024 is over a year old from 6 Jan 2025, and one bought on 29 Feb 2024 has its
+anniversary on 28 Feb 2025. A figure for the screen, not tax advice. The financial year runs April
+to March (`days.financial_year`).
+
+**What a replay keeps.** `Ledger.positions` has one `Position` per (account, asset) with its lots,
+its units and cost, and its realised gain, income and fees; an asset-less position holds an
+account's own interest and fees. `Ledger.journal` has one `Move` per entry in the order applied: the
+units and cost it added or took, the gain, the gross money, and for a sale the lots it used with
+the cost given to each. Later numbers (Today, money put in, figures by financial year) are read
+from the journal, so none of them needs a "today" argument inside the replay.
+
+**Refusals are sentences for the owner.** `Refusal` carries `entry_id` (the entry that cannot
+stand, `None` for one not saved yet), `reason` and `facts` (the numbers behind the sentence), and
+its message is the sentence, for example "Zerodha holds 10 RELIANCE on 12 Mar 2025, so a sale of
+12 cannot be saved. Add the missing purchase first." (`core/words.py`). `words.knock_on` says what
+a delete, a change or an addition would break. An entry that is not well formed raises `BadEntry`
+with a sentence that says what to fix ("A purchase needs a quantity."). Nothing in `core/` shows a
+code, a class name or a field name to the owner.
+
+**Vectors** (`tests/vectors/ledger.json`, `money.json`): the design's F1 to F6 and its two dry-run
+sentences (D1, D2), plus cases for a half paisa of cost, four-decimal fund units, a purchase and
+its sale on one day, drafts, `as_of`, income and fees, FIFO by acquisition day and lots of one day.
+`make_pa1.py` next to them writes both files, works every number out with exact fractions and
+Decimal, and imports nothing from `sudarshan`. A naive second implementation of the same rules
+(`tests/portfolio_oracle.py`, plain dictionaries) is run on every vector and on hundreds of random
+tabs and must agree with the engine to the paisa.
+
+### Valuation, performance, allocation, imports
+
+Written with `PA3` to `PA8`.
 
 ## Storage
 
@@ -315,7 +392,8 @@ Written with `PB3`: the unit, its settings, the port, `/health`, the jobs.
 ## Tests
 
 `uv run pytest sudarshan/portfolio/tests` (nice it on the shared box). Golden vectors are JSON in
-`tests/vectors/`, computed independently of the code under test, and each carries the derivation
-that explains its expected value. `valuation.json` and `freshness.json` are also read by the
+`tests/vectors/`, written by the `make_*.py` generators beside them, which import nothing from
+`sudarshan` and are the only place a number changes; each case carries the derivation that
+explains its expected value. `valuation.json` and `freshness.json` are also read by the
 phone's tests, so the two languages cannot drift. Fixtures are typed from documented field lists
 and are synthetic: nothing is ever captured from an account.

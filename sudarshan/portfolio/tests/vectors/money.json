@@ -1,0 +1,519 @@
+{
+ "about": "Golden vectors for core/money.py (PA1). Every expected value is computed twice, with exact fractions and with Decimal ROUND_HALF_UP, by make_pa1.py, which imports nothing from sudarshan. Numbers stay below 2^53 so the phone's tests can read the same file.",
+ "round_div": [
+  {
+   "n": 0,
+   "d": 7,
+   "expect": 0
+  },
+  {
+   "n": 1,
+   "d": 2,
+   "expect": 1
+  },
+  {
+   "n": -1,
+   "d": 2,
+   "expect": -1
+  },
+  {
+   "n": 3,
+   "d": 2,
+   "expect": 2
+  },
+  {
+   "n": -3,
+   "d": 2,
+   "expect": -2
+  },
+  {
+   "n": 5,
+   "d": 10,
+   "expect": 1
+  },
+  {
+   "n": -5,
+   "d": 10,
+   "expect": -1
+  },
+  {
+   "n": 4,
+   "d": 10,
+   "expect": 0
+  },
+  {
+   "n": -4,
+   "d": 10,
+   "expect": 0
+  },
+  {
+   "n": 14,
+   "d": 10,
+   "expect": 1
+  },
+  {
+   "n": 15,
+   "d": 10,
+   "expect": 2
+  },
+  {
+   "n": 25,
+   "d": 10,
+   "expect": 3
+  },
+  {
+   "n": -25,
+   "d": 10,
+   "expect": -3
+  },
+  {
+   "n": 35,
+   "d": 10,
+   "expect": 4
+  },
+  {
+   "n": 7,
+   "d": 3,
+   "expect": 2
+  },
+  {
+   "n": -7,
+   "d": 3,
+   "expect": -2
+  },
+  {
+   "n": 8,
+   "d": 3,
+   "expect": 3
+  },
+  {
+   "n": 1,
+   "d": 3,
+   "expect": 0
+  },
+  {
+   "n": 2,
+   "d": 3,
+   "expect": 1
+  },
+  {
+   "n": 10005,
+   "d": 2,
+   "expect": 5003
+  },
+  {
+   "n": -10005,
+   "d": 2,
+   "expect": -5003
+  },
+  {
+   "n": 10005,
+   "d": -2,
+   "expect": -5003
+  },
+  {
+   "n": -10005,
+   "d": -2,
+   "expect": 5003
+  },
+  {
+   "n": 999999000000,
+   "d": 100000000,
+   "expect": 10000
+  },
+  {
+   "n": 9007199254740991,
+   "d": 2,
+   "expect": 4503599627370496
+  },
+  {
+   "n": -9007199254740991,
+   "d": 2,
+   "expect": -4503599627370496
+  }
+ ],
+ "value": [
+  {
+   "id": "VA1",
+   "qty_u": 10000000,
+   "price_u": 14282500,
+   "expect": 1428250,
+   "why": "10 x 1,428.25 = 14,282.50 rupees = 1,428,250 paise"
+  },
+  {
+   "id": "VA2",
+   "qty_u": 109459000,
+   "price_u": 456789,
+   "expect": 499997,
+   "why": "109.459 x 45.6789 = 4999.96671 rupees = 499996.67 paise -> 499997"
+  },
+  {
+   "id": "VA4",
+   "qty_u": 500000,
+   "price_u": 100,
+   "expect": 1,
+   "why": "0.5 x 0.01 rupees = 0.5 paise -> 1 (half away from zero)"
+  },
+  {
+   "id": "neg",
+   "qty_u": -500000,
+   "price_u": 100,
+   "expect": -1,
+   "why": "a loss of half a paisa mirrors the gain: -0.5 paise -> -1"
+  },
+  {
+   "id": "tiny",
+   "qty_u": 1,
+   "price_u": 1,
+   "expect": 0,
+   "why": "10^-8 paise -> 0"
+  },
+  {
+   "id": "zero",
+   "qty_u": 0,
+   "price_u": 123456,
+   "expect": 0,
+   "why": "no units"
+  },
+  {
+   "id": "F3",
+   "qty_u": 3000000,
+   "price_u": 333333,
+   "expect": 10000,
+   "why": "3 x 33.3333 = 99.9999 rupees = 9999.99 paise -> 10000"
+  },
+  {
+   "id": "cent",
+   "qty_u": 1000000,
+   "price_u": 1,
+   "expect": 0,
+   "why": "1 unit at 0.0001 rupees = 0.01 paise -> 0"
+  },
+  {
+   "id": "half1",
+   "qty_u": 1000000,
+   "price_u": 50,
+   "expect": 1,
+   "why": "1 unit at 0.0050 rupees = 0.5 paise -> 1"
+  },
+  {
+   "id": "half2",
+   "qty_u": 2000000,
+   "price_u": 25,
+   "expect": 1,
+   "why": "2 units at 0.0025 rupees = 0.5 paise -> 1"
+  },
+  {
+   "id": "big",
+   "qty_u": 1000000000000,
+   "price_u": 14282500,
+   "expect": 142825000000,
+   "why": "a million shares at 1,428.25"
+  }
+ ],
+ "unit_price": [
+  {
+   "cost_paise": 160000,
+   "qty_u": 15000000,
+   "expect": 1066667
+  },
+  {
+   "cost_paise": 10000,
+   "qty_u": 3000000,
+   "expect": 333333
+  },
+  {
+   "cost_paise": 5002,
+   "qty_u": 1000000,
+   "expect": 500200
+  },
+  {
+   "cost_paise": 0,
+   "qty_u": 5,
+   "expect": 0
+  },
+  {
+   "cost_paise": 1,
+   "qty_u": 3000000,
+   "expect": 33
+  },
+  {
+   "cost_paise": 999999,
+   "qty_u": 7000000,
+   "expect": 14285700
+  },
+  {
+   "cost_paise": 1,
+   "qty_u": 0,
+   "expect": null
+  }
+ ],
+ "share_of_cost": [
+  {
+   "cost_paise": 10000,
+   "part_qty_u": 1000000,
+   "whole_qty_u": 3000000,
+   "expect": 3333
+  },
+  {
+   "cost_paise": 6667,
+   "part_qty_u": 1000000,
+   "whole_qty_u": 2000000,
+   "expect": 3334
+  },
+  {
+   "cost_paise": 3333,
+   "part_qty_u": 1000000,
+   "whole_qty_u": 1000000,
+   "expect": 3333
+  },
+  {
+   "cost_paise": 120000,
+   "part_qty_u": 5000000,
+   "whole_qty_u": 10000000,
+   "expect": 60000
+  },
+  {
+   "cost_paise": 10005,
+   "part_qty_u": 1000000,
+   "whole_qty_u": 2000000,
+   "expect": 5003
+  },
+  {
+   "cost_paise": 0,
+   "part_qty_u": 1000000,
+   "whole_qty_u": 2000000,
+   "expect": 0
+  },
+  {
+   "cost_paise": 1,
+   "part_qty_u": 1000000,
+   "whole_qty_u": 3000000,
+   "expect": 0
+  },
+  {
+   "cost_paise": 2,
+   "part_qty_u": 1000000,
+   "whole_qty_u": 3000000,
+   "expect": 1
+  },
+  {
+   "cost_paise": 5,
+   "part_qty_u": 1000000,
+   "whole_qty_u": 2000000,
+   "expect": 3
+  },
+  {
+   "cost_paise": 499997,
+   "part_qty_u": 50250000,
+   "whole_qty_u": 109459000,
+   "expect": 229537
+  }
+ ],
+ "pct": [
+  {
+   "n": 800,
+   "d": 10000,
+   "expect": "8.0000"
+  },
+  {
+   "n": 1,
+   "d": 3,
+   "expect": "33.3333"
+  },
+  {
+   "n": 2,
+   "d": 3,
+   "expect": "66.6667"
+  },
+  {
+   "n": -1,
+   "d": 3,
+   "expect": "-33.3333"
+  },
+  {
+   "n": 0,
+   "d": 5,
+   "expect": "0.0000"
+  },
+  {
+   "n": 5,
+   "d": 1,
+   "expect": "500.0000"
+  },
+  {
+   "n": 1,
+   "d": 2000000,
+   "expect": "0.0001"
+  },
+  {
+   "n": -1,
+   "d": 2000000,
+   "expect": "-0.0001"
+  },
+  {
+   "n": 1,
+   "d": 4000000,
+   "expect": "0.0000"
+  },
+  {
+   "n": -1,
+   "d": 4000000,
+   "expect": "0.0000"
+  },
+  {
+   "n": -5,
+   "d": -100,
+   "expect": "5.0000"
+  },
+  {
+   "n": 5,
+   "d": -100,
+   "expect": "-5.0000"
+  },
+  {
+   "n": 35,
+   "d": 400,
+   "expect": "8.7500"
+  },
+  {
+   "n": 1,
+   "d": 8,
+   "expect": "12.5000"
+  },
+  {
+   "n": 1,
+   "d": 16,
+   "expect": "6.2500"
+  },
+  {
+   "n": 123456789,
+   "d": 1000,
+   "expect": "12345678.9000"
+  },
+  {
+   "n": -123456789,
+   "d": 1000,
+   "expect": "-12345678.9000"
+  },
+  {
+   "n": 7,
+   "d": 0,
+   "expect": null
+  }
+ ],
+ "pct_of_rate": [
+  {
+   "rate": "0.099714",
+   "expect": "9.9714"
+  },
+  {
+   "rate": "0.0997135905",
+   "expect": "9.9714"
+  },
+  {
+   "rate": "-0.00005",
+   "expect": "-0.0050"
+  },
+  {
+   "rate": "0.0000005",
+   "expect": "0.0001"
+  },
+  {
+   "rate": "-0.0000005",
+   "expect": "-0.0001"
+  },
+  {
+   "rate": "0.00000025",
+   "expect": "0.0000"
+  },
+  {
+   "rate": "-0.00000025",
+   "expect": "0.0000"
+  },
+  {
+   "rate": "0",
+   "expect": "0.0000"
+  },
+  {
+   "rate": "1.5",
+   "expect": "150.0000"
+  },
+  {
+   "rate": "-0.5",
+   "expect": "-50.0000"
+  }
+ ],
+ "feed_price_u": [
+  {
+   "v": 1428.25,
+   "expect": 14282500
+  },
+  {
+   "v": 249.98,
+   "expect": 2499800
+  },
+  {
+   "v": 25900.0,
+   "expect": 259000000
+  },
+  {
+   "v": 0.01,
+   "expect": 100
+  },
+  {
+   "v": 100,
+   "expect": 1000000
+  },
+  {
+   "v": 1,
+   "expect": 10000
+  },
+  {
+   "v": 0.05,
+   "expect": 500
+  },
+  {
+   "v": 25903.65,
+   "expect": 259036500
+  },
+  {
+   "v": 1000000.0,
+   "expect": 10000000000
+  },
+  {
+   "v": 0,
+   "expect": null
+  },
+  {
+   "v": -5,
+   "expect": null
+  },
+  {
+   "v": 0.004,
+   "expect": null
+  },
+  {
+   "v": 1e-09,
+   "expect": null
+  },
+  {
+   "v": null,
+   "expect": null
+  },
+  {
+   "v": true,
+   "expect": null
+  },
+  {
+   "v": "12",
+   "expect": null
+  },
+  {
+   "v": [
+    1
+   ],
+   "expect": null
+  }
+ ]
+}
