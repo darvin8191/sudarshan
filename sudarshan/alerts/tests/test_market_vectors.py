@@ -150,8 +150,8 @@ class World:
             if name in raw:
                 frame[name] = number(raw[name])
         ohlc = {name: number(raw[name]) for name in ("open", "high", "low") if name in raw}
-        if ohlc:
-            frame["ohlc"] = ohlc
+        if ohlc:  # the 1d candle, dated as the feed dates it: its day's IST midnight
+            frame["ohlc"] = ohlc | {"ts": ms(raw.get("ohlc_day", on), "00:00:00")}
         return frame
 
     def take(self, outcomes, now: int) -> None:

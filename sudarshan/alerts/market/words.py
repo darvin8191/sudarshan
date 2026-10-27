@@ -195,6 +195,7 @@ _NOTES = {
     conditions.WAITING_CLOSE: "Waiting for the previous close",
     conditions.WAITING_OPEN: "Waiting for today's open",
     conditions.WAITING_VWAP: "Waiting for the day's VWAP",
+    conditions.UNREACHABLE: "This fall would take the price below 0.01, so it cannot happen today",
     book.BASE_CHANGED: "The previous close changed, so the level was worked out again",
 }
 

@@ -168,10 +168,17 @@ def check(fields: Mapping[str, Any], now: int) -> dict[str, Any]:
         raise SpecError("instrument", "Pick the instrument again from the search.")
     grain = _grain(segment, fields.get("tick_size"))
     expiry = _date(fields.get("expiry"))
+    hours = sessions.hours(segment)
+    if expiry is not None and hours and sessions.epoch_ms(expiry, hours[1]) <= now:
+        raise SpecError(
+            "instrument",
+            f"This contract expired on {expiry.day} {expiry:%b}. Pick one that is still trading.",
+        )
     kind = KINDS.get(fields.get("kind", "price"))
     if kind is None:
         raise SpecError("kind", "This kind of alert is not available yet.")
     params = kind.check(fields.get("params"), segment, grain)
+    _reachable(kind, params, to_decimal(fields.get("price")), segment)
     frequency = fields.get("frequency") or kind.frequency
     if frequency not in FREQUENCIES:
         raise SpecError(
@@ -187,8 +194,8 @@ def check(fields: Mapping[str, Any], now: int) -> dict[str, Any]:
         )
     candle = _candle(fields, frequency, kind)
     wait = _wait(fields.get("cooldown_s", kind.wait_s))
-    if frequency == EVERY_TIME and kind.compile(params, grain, segment).mode == LEVEL:
-        if wait < MIN_LEVEL_WAIT_S:
+    if frequency == EVERY_TIME and kind.compile(params, grain, segment).mode in (LEVEL, BREAK):
+        if wait < MIN_LEVEL_WAIT_S:  # each uptick of a trending day is a new high
             raise SpecError(
                 "cooldown_s",
                 f"Every time on '{kind.words(params)}' needs at least 1 minute between alerts.",
@@ -335,6 +342,20 @@ KINDS: dict[str, Kind] = {
     ),
     "vwap": Kind(_check_vwap, _compile_vwap, lambda p: "Crosses VWAP", EVERY_TIME, wait_s=900),
 }
+
+
+def _reachable(kind: Kind, params: Mapping[str, Any], price, segment: str) -> None:
+    """A fall that would take ``price`` (the last price the form shows, when it sends one)
+    below 0.01 can never happen: down 99.9% on a ₹2 stock."""
+    if kind is not KINDS["move"] or params["direction"] != "down" or not price or price <= 0:
+        return
+    if edge_down(price * (1 - to_decimal(params["percent"]) / 100)) < 1:
+        sign = "" if segment in sessions.INDEX_SEGMENTS else "₹"
+        raise SpecError(
+            "percent",
+            f"A fall of {params['percent']}% from {sign}{price:.2f} would take the price below "
+            f"{sign}0.01, so it can never happen. Pick a smaller %.",
+        )
 
 
 def _minute(text) -> int | None:

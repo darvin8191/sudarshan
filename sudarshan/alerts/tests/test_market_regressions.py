@@ -8,7 +8,9 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from sudarshan.alerts.market import clock, engine, sessions, spec, words
+import pytest
+
+from sudarshan.alerts.market import clock, conditions, engine, sessions, spec, words
 from sudarshan.alerts.market.book import Book
 from sudarshan.alerts.market.engine import State
 from sudarshan.alerts.market.store import MarketStore
@@ -322,3 +324,62 @@ def test_F5b_an_opening_seen_only_after_a_pause_is_a_marked_crossing_not_a_first
     assert fire.opening and words.line(a, fire, WED) == (
         "Alert: SBIN opened above ₹100.00: first price ₹103.00 (previous ₹99.90) (NSE)"
     )
+
+
+# ---- the day's own candle, and every time on a day high --------------------------------------
+
+
+def test_F4a_yesterdays_day_high_in_the_first_frame_is_not_todays():
+    """The feed keeps a key's last 1d candle across days: today's first frame may still carry
+    yesterday's high (105). Today's first new high after 09:30 (100.50) must be told."""
+    book = Book()
+    a = make({"kind": "day_break", "params": {"side": "high", "after": "09:30"}})
+    book.put(a)
+    yesterday = {"open": 103.0, "high": 105.0, "low": 102.0, "ts": ms(TUE, 0, 0)}
+    t = ms(WED, 9, 15, 1)
+    book.on_tick(frame(ltp=100.0, at=t, ohlc=yesterday), t, market(WED, t, TUE))
+    today = {"open": 100.0, "high": 100.5, "low": 99.0, "ts": ms(WED, 0, 0)}
+    t = ms(WED, 9, 40)
+    (fire,) = fires(book.on_tick(frame(ltp=100.5, at=t, ohlc=today, ltq=2), t,
+                                 market(WED, t, TUE)))  # fmt: skip
+    assert words.describe(a, fire, WED) == ("SBIN broke today's high ₹100.00", "now ₹100.50")
+
+
+def test_F4b_yesterdays_open_in_the_first_frame_is_not_todays_open():
+    """'Up 2% from today's open' waits for today's candle: yesterday's open (98) made 100.00
+    look 2.04% up, and the alert fired once for the day at the first trade."""
+    book = Book()
+    book.put(make({"kind": "move", "params": {"base": "open", "direction": "up", "percent": "2"}}))
+    yesterday = {"open": 98.0, "high": 99.0, "low": 97.0, "ts": ms(TUE, 0, 0)}
+    t = ms(WED, 9, 15, 1)
+    out = book.on_tick(frame(ltp=100.0, at=t, ohlc=yesterday), t, market(WED, t, TUE))
+    assert fires(out) == [] and book.waiting(1) == conditions.WAITING_OPEN
+    today = {"open": 100.0, "high": 100.05, "low": 100.0, "ts": ms(WED, 0, 0)}
+    out = book.on_tick(frame(ltp=100.05, at=t + 1000, ohlc=today, ltq=2), t + 1000,
+                       market(WED, t + 1000, TUE))  # fmt: skip
+    assert fires(out) == [] and book.waiting(1) is None
+
+
+def test_F7_every_time_on_a_day_high_needs_a_minute_between_alerts():
+    """On a trending morning every uptick is a new high: with no wait, 50 fires went out in
+    under a minute and the alert paused itself."""
+    fields = {"kind": "day_break", "params": {"side": "high", "after": "09:30"},
+              "frequency": "every_time"}  # fmt: skip
+    with pytest.raises(spec.SpecError) as caught:
+        make(fields | {"cooldown_s": 0})
+    assert (caught.value.field, caught.value.message) == (
+        "cooldown_s",
+        "Every time on 'Breaks the day's high' needs at least 1 minute between alerts.",
+    )
+    book = Book()
+    book.put(make(fields | {"cooldown_s": 60}))
+    price, told, stops = 100.0, [], []
+    t = ms(WED, 9, 31)
+    book.on_tick(frame(ltp=price, at=t, ohlc={"high": price, "ts": t}), t, market(WED, t, TUE))
+    for i in range(120):
+        price, t = round(price + 0.05, 2), t + 1000
+        out = book.on_tick(frame(ltp=price, at=t, ohlc={"high": price, "ts": t}, ltq=i + 2), t,
+                           market(WED, t, TUE))  # fmt: skip
+        told += fires(out)
+        stops += [o.status for o in out.outcomes if o.status]
+    assert len(told) == 2 and stops == []  # 09:31:01 and 09:32:01

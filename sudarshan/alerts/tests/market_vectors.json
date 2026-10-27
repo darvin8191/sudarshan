@@ -5,6 +5,8 @@
     "form's level hint (the snap group). test_market_vectors.py runs every case.",
     "Times are IST on the defaults' day unless a step names its own day. A trade step's ltt is its",
     "'at' unless given; 'recv' (arrival) is 'at' unless given; 'NaN' and 'Infinity' are strings so",
+    "A step's open, high and low are the feed's 1d candle, dated that step's day unless",
+    "'ohlc_day' names another (the feed keeps yesterday's until today's arrives).",
     "JSON.parse can read the file. Prices in expectations are text with two decimals: the",
     "engine counts every price and level in paise, whatever the instrument's tick.",
     "The calendar is the vectors' own: weekdays trade except its holidays, and a day in its",
@@ -306,6 +308,27 @@
       "alert": {"params": {"op": "at_or_below", "level": "0.009"}},
       "field": "level",
       "message": "Enter a price level of at least 0.01."
+    },
+    {
+      "id": "X17",
+      "instrument": "future",
+      "instrument_fields": {"expiry": "2026-10-20"},
+      "alert": {"params": {"op": "crosses_above", "level": "26000"}},
+      "field": "instrument",
+      "message": "This contract expired on 20 Oct. Pick one that is still trading."
+    },
+    {
+      "id": "X18",
+      "alert": {"kind": "day_break", "params": {"side": "high"}, "frequency": "every_time"},
+      "field": "cooldown_s",
+      "message": "Every time on 'Breaks the day's high' needs at least 1 minute between alerts."
+    },
+    {
+      "id": "X19",
+      "instrument_fields": {"price": 2.0},
+      "alert": {"kind": "move", "params": {"direction": "down", "percent": "99.6"}},
+      "field": "percent",
+      "message": "A fall of 99.6% from ₹2.00 would take the price below ₹0.01, so it can never happen. Pick a smaller %."
     }
   ],
   "alerts": [
@@ -1087,6 +1110,18 @@
       "fires": [{"at": "10:00:00"}, {"at": "10:01:00"}]
     },
     {
+      "id": "%10",
+      "says": "up 2% from today's open: yesterday's open (98) in the first frame is not today's",
+      "alert": {"kind": "move", "params": {"base": "open", "direction": "up", "percent": "2"}},
+      "steps": [
+        {"at": "09:15:01", "ltp": 100.0, "open": 98.0, "ohlc_day": "2026-10-19"},
+        {"at": "09:15:02", "ltp": 100.05, "open": 100.0},
+        {"at": "09:20:00", "ltp": 102.0, "open": 100.0}
+      ],
+      "fires": [{"at": "09:20:00", "level": "102.00", "base": "100.00"}],
+      "notes": [{"at": "09:15:01", "note": "waiting_open"}]
+    },
+    {
       "id": "D1",
       "says": "breaks today's high 101.00 at 101.05, after 09:30",
       "alert": {"kind": "day_break", "params": {"side": "high", "after": "09:30"}},
@@ -1163,8 +1198,13 @@
     },
     {
       "id": "D7",
-      "says": "every time: each new high",
-      "alert": {"kind": "day_break", "params": {"side": "high", "after": "09:30"}, "frequency": "every_time"},
+      "says": "every time, with the 1-minute wait it needs: each new high",
+      "alert": {
+        "kind": "day_break",
+        "params": {"side": "high", "after": "09:30"},
+        "frequency": "every_time",
+        "cooldown_s": 60
+      },
       "steps": [
         {"at": "09:31:00", "ltp": 101.0, "high": 101.0},
         {"at": "09:32:00", "ltp": 101.05, "high": 101.05},
@@ -1342,7 +1382,7 @@
     {
       "id": "D12",
       "says": "new highs on both sides of a pause: the one after it is marked",
-      "alert": {"kind": "day_break", "params": {"side": "high"}, "frequency": "every_time"},
+      "alert": {"kind": "day_break", "params": {"side": "high"}, "frequency": "every_time", "cooldown_s": 60},
       "steps": [
         {"at": "09:31:00", "ltp": 101.0, "high": 101.0},
         {"at": "09:32:00", "ltp": 101.05, "high": 101.05},
@@ -1364,6 +1404,16 @@
         {"at": "09:33:00", "ltp": 98.95, "low": 98.95}
       ],
       "fires": [{"at": "09:33:00", "base": "99.00", "direction": "down"}]
+    },
+    {
+      "id": "D14",
+      "says": "yesterday's day candle in today's first frame: its high (105) is not today's",
+      "alert": {"kind": "day_break", "params": {"side": "high", "after": "09:30"}},
+      "steps": [
+        {"at": "09:15:01", "ltp": 100.0, "high": 105.0, "ohlc_day": "2026-10-19"},
+        {"at": "09:40:00", "ltp": 100.5, "high": 100.5}
+      ],
+      "fires": [{"at": "09:40:00", "value": "100.50", "base": "100.00"}]
     }
   ],
   "calendar": {"holidays": ["2026-10-20", "2026-11-10"], "windows": {"2026-11-08": "14:05-15:40"}},

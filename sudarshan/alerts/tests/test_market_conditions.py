@@ -119,6 +119,18 @@ def test_a_move_without_its_base_waits(params, extra, code):
     assert conditions.edges(a, State(), frame(101.0, **extra), 10100, T0, market(T0)) == code
 
 
+def test_a_fall_below_a_paisa_from_todays_base_cannot_fire_and_says_so():
+    a = alert("move", {"direction": "down", "percent": "99.9"})
+    got = conditions.edges(a, State(), frame(2.0, cp=2.0), 200, T0, market(T0))
+    assert got == conditions.UNREACHABLE  # 2.00 x 0.001 = 0.002: below the lowest price
+    either = alert("move", {"direction": "either", "percent": "99.9"})
+    assert conditions.edges(either, State(), frame(2.0, cp=2.0), 200, T0, market(T0)).up == 400
+    book = Book()
+    book.put(a)
+    out = book.on_tick(frame(2.0, T0, cp=2.0), T0, market(T0))
+    assert [o.note.code for o in out.outcomes] == [conditions.UNREACHABLE]
+
+
 def test_vwap_waits_for_the_average_price():
     a = alert("vwap", {"direction": "above"})
     assert (
@@ -137,12 +149,12 @@ def test_vwap_waits_for_the_average_price():
 def test_a_break_is_not_live_before_the_start_time_or_without_a_high():
     a = alert("day_break", {"side": "high", "after": "10:00"})
     seen = State(20261021, 0, 10100, T0 - 1000)
-    hi = {"high": 102.0}
+    hi = {"high": 102.0, "ts": T0}
     early = conditions.edges(a, seen, frame(102.0, ohlc=hi), 10200, T0 - 1, market(T0))
     assert early.up == conditions.NEVER and early.value == 10200
     live = conditions.edges(a, seen, frame(102.0, ohlc=hi), 10200, T0, market(T0))
     assert live.up == 10101 and live.base == 10100
-    hi = {"high": 102.5}
+    hi = {"high": 102.5, "ts": T0}
     fresh = conditions.edges(a, State(), frame(102.0, ohlc=hi), 10200, T0, market(T0))
     assert fresh.up == conditions.NEVER and fresh.value == 10250  # the first value seeds the high
     yesterday = conditions.edges(a, State(20261020, 0, 10500), frame(102.0), 10200, T0, market(T0))
@@ -186,7 +198,7 @@ def test_seed_sets_a_vwap_side_and_a_remembered_high():
     book.put(alert("vwap", {"direction": "above"}, 1))
     book.put(alert("day_break", {"side": "high"}, 2))
     book.put(alert("move", {"direction": "up", "percent": "1"}, 3))
-    snapshot = frame(100.0, T0 - 5000, atp=100.2, ohlc={"high": 100.5})
+    snapshot = frame(100.0, T0 - 5000, atp=100.2, ohlc={"high": 100.5, "ts": T0})
     assert book.seed(1, snapshot, market(T0)) and book.state(1).side == -1
     assert book.seed(2, snapshot, market(T0)) and book.state(2).ref == 10050
     assert not book.seed(3, snapshot, market(T0))  # a level check needs no side

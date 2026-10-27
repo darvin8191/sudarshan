@@ -175,6 +175,30 @@ def test_the_lowest_level_is_one_paisa_whatever_the_tick():
     assert (alert.cond.up, alert.cond.down) == (1, 1)
 
 
+def test_a_contract_is_refused_once_it_has_expired():
+    """An F&O contract trades until its segment's close on the expiry day."""
+    expiring = {**FUT, "expiry": "2026-10-21"}
+    assert spec.check(expiring | price(level="26000"), ms("2026-10-21T15:39"))["expiry"]
+    for now in ("2026-10-21T15:40", "2026-10-22T09:00"):
+        with pytest.raises(SpecError) as caught:
+            spec.check(expiring | price(level="26000"), ms(now))
+        assert (caught.value.field, caught.value.message) == (
+            "instrument",
+            "This contract expired on 21 Oct. Pick one that is still trading.",
+        )
+
+
+def test_a_fall_below_a_paisa_is_refused_when_the_form_sends_the_price():
+    move = {"kind": "move", "params": {"direction": "down", "percent": "99.5"}}
+    assert spec.check(SBIN | move | {"price": 2.0}, NOW)["params"]["percent"] == "99.5"  # 0.01
+    with pytest.raises(SpecError) as caught:
+        spec.check(SBIN | move | {"price": 1.98}, NOW)  # 0.0099
+    assert caught.value.field == "percent" and "below ₹0.01" in caught.value.message
+    assert spec.check(SBIN | move, NOW)  # no price sent: the engine notes it at run time
+    either = move | {"params": {"direction": "either", "percent": "99.9"}}
+    assert spec.check(SBIN | either | {"price": 2.0}, NOW)  # the rise can still happen
+
+
 def test_edits_that_change_the_condition():
     old = spec.check(SBIN | price(), NOW)
     assert not spec.changes_condition(old, old | {"note": "trail it", "cooldown_s": 300})

@@ -9,6 +9,11 @@ X%" base x (1 - X/100) rounded down, worked out in Decimal once a session and ag
 changes (Upstox can correct ``cp``). It is a level check, so a gap beyond it fires at the first
 trade.
 
+The feed keeps a key's last 1d candle (``ohlc``) across days, so the first frames of a session
+can carry yesterday's: its open and high are used only when the candle's own date (``ohlc.ts``,
+IST) is today, or yesterday's open (98) makes 100.00 look 2% up from today's open, and
+yesterday's high (105) hides every new high of today below it.
+
 Day high or low. A value breaks the high when it is above the day's high as the alert last saw
 it (equal is not a break), at or after the start time. The value judged is the higher of the trade
 and the feed's own day high, so a break between two ticks, or inside a pause, is still seen: the
@@ -31,11 +36,16 @@ from typing import NamedTuple
 from sudarshan.alerts.market.clock import Market
 from sudarshan.alerts.market.engine import State
 from sudarshan.alerts.market.grain import edge_down, edge_up, paise, to_decimal
-from sudarshan.alerts.market.spec import UP, Alert
+from sudarshan.alerts.market.spec import DOWN, UP, Alert
 
 WAITING_CLOSE = "waiting_close"
 WAITING_OPEN = "waiting_open"
 WAITING_VWAP = "waiting_vwap"
+#: A fall from today's base would go below 0.01 (down 99.9% on a ₹2 stock): it cannot fire.
+UNREACHABLE = "unreachable"
+#: IST is UTC+5:30 all year: (epoch ms + this) // a day numbers the IST date.
+IST_MS = 19_800_000
+DAY_MS = 86_400_000
 #: An edge no value reaches: the level is not live yet (before the start time, or unseeded).
 NEVER = 1 << 62
 
@@ -56,7 +66,7 @@ def edges(alert: Alert, state: State, frame: Mapping, value: int, at: int, marke
     """The Edges for this frame, or a waiting code when the feed has not sent what it needs."""
     kind = alert.kind
     if kind == "move":
-        return _move(alert, state, frame, value, market.today)
+        return _move(alert, state, frame, value, market)
     if kind == "day_break":
         return _break(alert, state, frame, value, at, market)
     atp = frame.get("atp")  # vwap
@@ -66,12 +76,25 @@ def edges(alert: Alert, state: State, frame: Mapping, value: int, at: int, marke
     return Edges(value, edge_up(vwap), edge_down(vwap))
 
 
-def _move(alert: Alert, state: State, frame: Mapping, value: int, today: int):
+def todays(frame: Mapping, market: Market, segment: str) -> Mapping | None:
+    """The frame's 1d candle when it is today's (its ``ts`` on today's IST date), else None."""
+    ohlc = frame.get("ohlc")
+    session = market.sessions.get(segment)
+    if not isinstance(ohlc, Mapping) or session is None:
+        return None
+    ts = ohlc.get("ts")
+    if ts.__class__ is not int and ts.__class__ is not float:
+        return None
+    return ohlc if (ts + IST_MS) // DAY_MS == (session.start + IST_MS) // DAY_MS else None
+
+
+def _move(alert: Alert, state: State, frame: Mapping, value: int, market: Market):
+    today = market.today
     if alert.params["base"] == "close":
         raw, waiting = frame.get("cp"), WAITING_CLOSE
     else:
-        ohlc = frame.get("ohlc")
-        raw, waiting = (ohlc.get("open") if isinstance(ohlc, Mapping) else None), WAITING_OPEN
+        ohlc = todays(frame, market, alert.segment)
+        raw, waiting = (ohlc.get("open") if ohlc is not None else None), WAITING_OPEN
     derived = state.derived
     if derived is not None and derived[0] == today and derived[1] == raw:
         return Edges(value, derived[3], derived[4], derived, derived[2])
@@ -81,13 +104,15 @@ def _move(alert: Alert, state: State, frame: Mapping, value: int, today: int):
     exact = to_decimal(raw)
     rise, fall = alert.cond.extra
     up, down = edge_up(exact * rise), edge_down(exact * fall)
+    if down < 1 and alert.cond.direction == DOWN:
+        return UNREACHABLE
     return Edges(value, up, down, (today, raw, base, up, down), base)
 
 
 def _break(alert: Alert, state: State, frame: Mapping, value: int, at: int, market: Market):
-    ohlc = frame.get("ohlc")
+    ohlc = todays(frame, market, alert.segment)
     high = alert.cond.direction == UP
-    day = paise(ohlc.get("high" if high else "low")) if isinstance(ohlc, Mapping) else None
+    day = paise(ohlc.get("high" if high else "low")) if ohlc is not None else None
     remembered = state.ref if state.session == market.today else None
     session = market.sessions[alert.segment]
     live = remembered is not None and at >= session.start + alert.cond.extra[0] * 60_000

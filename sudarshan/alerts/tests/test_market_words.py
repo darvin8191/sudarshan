@@ -132,6 +132,9 @@ def test_notes_on_an_alert():
         words.note_words(engine.Reason(conditions.WAITING_VWAP, 0)) == "Waiting for the day's VWAP"
     )
     assert words.note_words(engine.Reason(book.BASE_CHANGED, 0)).startswith("The previous close")
+    assert words.note_words(engine.Reason(conditions.UNREACHABLE, 0)) == (
+        "This fall would take the price below 0.01, so it cannot happen today"
+    )
 
 
 @pytest.mark.parametrize(
