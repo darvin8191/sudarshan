@@ -161,3 +161,33 @@ def test_on_clock_with_nothing_due():
     book.put(alert(frequency="at_close", candle=15))
     assert book.on_clock(T0, market(T0)) == []
     assert State() == book.state(1)
+
+
+def test_a_stopped_alerts_state_goes_after_the_flush_and_a_paused_ones_stays():
+    book = Book()
+    book.put(alert(1))  # once
+    book.put(alert(2, level="200"))
+    book.on_tick(tick(99.95), T0, market(T0))
+    book.on_tick(tick(100.0, at=T0 + 1000), T0 + 1000, market(T0 + 1000))  # 1 fires and stops
+    assert book.state(1).fires == 1  # kept until the flush has it
+    book.put(dataclasses.replace(alert(2, level="200"), status="paused"))  # paused by the owner
+    flushed = book.changed()
+    assert flushed[1].fires == 1 and book.state(1) is None
+    assert book.state(2) is not None and book.changed() == {}
+    book.put(dataclasses.replace(alert(3), status="stopped"))  # loaded stopped: nothing to keep
+    book.changed()
+    assert book.state(3) is None and book.alerts() == []
+
+
+def test_a_retired_alert_waits_for_nothing():
+    book = Book()
+    book.put(alert(1, op="crosses_above"))
+    move = spec.Alert.of(
+        spec.check(SBIN | {"kind": "move", "params": {"direction": "up", "percent": "2"}}, T0)
+        | {"id": 2, "version": 1, "status": "active"}
+    )
+    book.put(move)
+    book.on_tick(tick(101.0), T0, market(T0))
+    assert book.waiting(2) == "waiting_close"
+    book.put(dataclasses.replace(move, status="paused"))
+    assert book.waiting(2) is None

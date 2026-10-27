@@ -74,6 +74,9 @@ class Book:
         self._changed: dict[int, State] = {}
         #: Alert id -> what it waits for from the feed (conditions.WAITING_*), while it waits.
         self._waiting: dict[int, str] = {}
+        #: Stopped alerts: their state is kept only until ``changed`` has handed it over (a
+        #: Paused one keeps its state, which ``engine.resume`` needs).
+        self._stopped: set[int] = set()
 
     # ---- the alerts ------------------------------------------------------------------------
     def put(self, alert: Alert, state: State | None = None) -> None:
@@ -81,7 +84,7 @@ class Book:
         if state is not None:
             self._states[alert.id] = state
         self._states.setdefault(alert.id, State())
-        self._retire(alert.id)
+        self._retire(alert.id, alert.status)
         if alert.status == "active":
             self._active[alert.id] = alert
             self._groups.setdefault(alert.key, {})[alert.id] = alert
@@ -91,6 +94,7 @@ class Book:
         """Forget a deleted alert; returns its last state."""
         self._retire(alert_id)
         self._changed.pop(alert_id, None)
+        self._stopped.discard(alert_id)
         return self._states.pop(alert_id, None)
 
     def state(self, alert_id: int) -> State | None:
@@ -113,8 +117,12 @@ class Book:
         return modes
 
     def changed(self) -> dict[int, State]:
-        """The states changed since the last call, to save; the Book forgets the list."""
+        """The states changed since the last call, to save; the Book forgets the list, and the
+        states of the alerts that stopped (the store has them from here on)."""
         changed, self._changed = self._changed, {}
+        for alert_id in self._stopped:
+            self._states.pop(alert_id, None)
+        self._stopped.clear()
         return changed
 
     # ---- what happens ----------------------------------------------------------------------
@@ -183,7 +191,7 @@ class Book:
             if out.fire is not None or out.status is not None or out.note is not None:
                 outcomes.append(out)
                 if out.status is not None:  # it stopped or paused itself: judged no more
-                    self._retire(alert.id)
+                    self._retire(alert.id, out.status)
         if judged:
             return TickResult(OK, tuple(outcomes))
         check = BAD_VALUE if bad else next((c for c in (trade, quote) if c), NOTHING_NEW)
@@ -252,10 +260,15 @@ class Book:
         if out.fire is not None or out.status is not None or out.note is not None:
             outcomes.append(out)
         if out.status is not None:  # it stopped or paused itself: judged no more
-            self._retire(out.alert_id)
+            self._retire(out.alert_id, out.status)
 
-    def _retire(self, alert_id: int) -> None:
-        """Judge the alert no more (its state stays)."""
+    def _retire(self, alert_id: int, status: str | None = None) -> None:
+        """Judge the alert no more; its state stays (a stopped one's until the next flush)."""
+        self._waiting.pop(alert_id, None)
+        if status == "stopped":
+            self._stopped.add(alert_id)
+        elif status is not None:
+            self._stopped.discard(alert_id)
         alert = self._active.pop(alert_id, None)
         if alert is not None:
             self._groups[alert.key].pop(alert_id, None)
