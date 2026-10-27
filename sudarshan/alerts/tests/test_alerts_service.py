@@ -423,16 +423,20 @@ def test_an_unusable_alert_record_does_not_stop_the_alerts(settings_for, fast, t
 
 def test_a_muhurat_session_uses_its_own_window(settings_for, fast, tmp_path):
     async def scenario():
-        (tmp_path / "nse_extra_trading_days.txt").write_text("2026-11-08 17:45-19:30 # Muhurat\n")
+        line = "2026-11-08 14:05-15:40  # Muhurat, NSE circular 149/2026 (F&O to 15:40)\n"
+        (tmp_path / "nse_extra_trading_days.txt").write_text(line)
         async with FakeProxy() as proxy, FakeOpenAlgo() as notify:
             clock = Clock(ist(2026, 11, 8, 10, 0))  # that Sunday's usual hours: closed
             settings = settings_for(proxy, notify, SUDARSHAN_ALERTS_ALWAYS_ON="0")
             svc, task = await _start(settings, Keys(), clock)
             await asyncio.sleep(0.3)
             assert proxy.connections == 0 and svc.state == "closed"
-            clock.at = ist(2026, 11, 8, 18, 0)
+            clock.at = ist(2026, 11, 8, 13, 50)  # 15 minutes before the pre-open
             await wait_until(lambda: proxy.subscribed)
-            clock.at = ist(2026, 11, 8, 19, 30)
+            clock.at = ist(2026, 11, 8, 15, 59)  # the F&O close was at 15:40: still connected
+            await asyncio.sleep(0.3)
+            assert proxy.close_codes == []
+            clock.at = ist(2026, 11, 8, 16, 0)
             await wait_until(lambda: proxy.close_codes == [1000])
             await _stop(svc, task)
 

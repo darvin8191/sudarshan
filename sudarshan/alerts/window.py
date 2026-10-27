@@ -4,13 +4,16 @@ Trading days come from auto-login's calendar (sudarshan/autologin/schedule.py): 
 ``/etc/sudarshan/nse_holidays.txt`` are closed, a date in ``nse_extra_trading_days.txt`` (a
 Muhurat session) is open; both files are read again when they change.
 
-A line of the extra-days file may give that day's own window after the date, for a session
-outside the usual hours::
+A line of the extra-days file may give that day's own window after the date: the exchange's
+session from its pre-open to its F&O close, as the circular gives it::
 
-    2026-11-08 17:45-19:30  # Muhurat
+    2026-11-08 14:05-15:40  # Muhurat, NSE circular 149/2026 (F&O to 15:40)
 
-Auto-login reads only the first word of a line and the deploy tool only the date at its start,
-so both keep working with the window there (a test holds each to it).
+The alerts keep their usual margins around that session, as around 09:00-15:40 on any day (15
+minutes before, 20 after: 13:50-16:00 here), so an update that follows the close, such as the
+exchange cancelling an open order, is still told. On a weekday that trades anyway the window is
+added to the usual hours. Auto-login reads only the first word of a line and the deploy tool only
+the date at its start, so both keep working with the window there (a test holds each to it).
 """
 
 from __future__ import annotations
@@ -26,6 +29,8 @@ from sudarshan.autologin.schedule import (
     day_windows,
     minute_of_day,
     read_calendar_file,
+    union,
+    with_margins,
 )
 
 log = logging.getLogger("sudarshan.alerts")
@@ -73,9 +78,17 @@ class AlertWindow:
         self.always_on = always_on
         self._days = _DayWindows(extra_days_file)
 
-    def span(self, day: date) -> tuple[int, int]:
-        """The day's window in IST minutes: its own from the extra-days file, else the usual."""
-        return self._days.get(day) or self.default
+    def spans(self, day: date) -> tuple[tuple[int, int], ...]:
+        """When the alerts are connected on a trading day, in IST minutes: the usual window, or a
+        special session's own window with the usual margins, added to the usual window on a day
+        that trades anyway."""
+        own = self._days.get(day)
+        if own is None:
+            return (self.default,)
+        session = with_margins(own, self.default)
+        if self.calendar.trades_anyway(day):
+            return union([self.default, session])
+        return (session,)
 
     def status(self, now: datetime) -> tuple[bool, str]:
         if self.always_on:
@@ -83,29 +96,34 @@ class AlertWindow:
         local = now.astimezone(IST)
         if not self.calendar.is_trading_day(local.date()):
             return False, "not a trading day"
-        start, end = self.span(local.date())
+        spans = self.spans(local.date())
         minute = minute_of_day(local)
-        if minute < start:
+        if any(start <= minute < end for start, end in spans):
+            return True, "alert window"
+        if minute < spans[0][0]:
             return False, "before the alert window"
-        if minute >= end:
+        if minute >= spans[-1][1]:
             return False, "after the alert window"
-        return True, "alert window"
+        return False, "between the day's alert windows"
 
     def opened_at(self, now: datetime) -> datetime | None:
-        """When today's window opened (None when always on): a pause starts no earlier."""
+        """When the window first opened that day (None when always on): a pause starts no earlier,
+        so the hours between two windows of one day count as a pause."""
         if self.always_on:
             return None
         day = now.astimezone(IST).date()
-        start = self.span(day)[0]
+        start = self.spans(day)[0][0]
         return datetime.combine(day, dtime(start // 60, start % 60), IST)
 
     def next_open(self, now: datetime) -> datetime | None:
-        """The next start of the window strictly after ``now``, within two weeks."""
+        """The next start of a window strictly after ``now``, within two weeks."""
         today = now.astimezone(IST).date()
         for offset in range(15):
             day = today + timedelta(days=offset)
-            start = self.span(day)[0]
-            opens = datetime.combine(day, dtime(start // 60, start % 60), IST)
-            if opens > now and self.calendar.is_trading_day(day):
-                return opens
+            if not self.calendar.is_trading_day(day):
+                continue
+            for start, _ in self.spans(day):
+                opens = datetime.combine(day, dtime(start // 60, start % 60), IST)
+                if opens > now:
+                    return opens
         return None

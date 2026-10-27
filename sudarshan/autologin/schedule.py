@@ -48,8 +48,8 @@ HOLIDAYS_FILE = "/etc/sudarshan/nse_holidays.txt"
 #: Muhurat session, a special Saturday session). Same format; missing or empty means none.
 EXTRA_TRADING_DAYS_FILE = "/etc/sudarshan/nse_extra_trading_days.txt"
 #: NSE's usual session in IST minutes: the 09:00 pre-open to the 15:40 F&O close. A reader's usual
-#: hours keep their own margins around it (the feed 2 and 10 minutes, the alerts 15 and 20); the
-#: feed keeps the same margins around a special session's own window (with_margins).
+#: hours keep their own margins around it (the feed 2 and 10 minutes, the alerts 15 and 20), and
+#: keep the same margins around a special session's own window (with_margins).
 SESSION = (9 * 60, 15 * 60 + 40)
 
 

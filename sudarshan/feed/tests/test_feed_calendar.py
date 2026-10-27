@@ -199,8 +199,8 @@ def test_the_feed_and_the_alerts_read_the_same_days_and_windows(files):
     for offset in range(14):
         day = date(2026, 11, 2) + timedelta(days=offset)
         assert window.is_trading_day(day) is calendar.is_trading_day(day), day
-    # One line: the alerts take its window as it stands, the feed adds its 2 and 10 minutes.
-    assert alerts.span(date(2026, 11, 8)) == (14 * 60 + 5, 15 * 60 + 40)
+    # One line, each reader's own margins: the alerts 15 and 20 minutes, the feed 2 and 10.
+    assert alerts.spans(date(2026, 11, 8)) == ((13 * 60 + 50, 16 * 60),)
     assert window.describe(sunday(14, 30))["hours"] == "14:03-15:50"
     assert window.status(sunday(14, 30))[1].endswith(OWN)
     assert window.status(ff.ist(2026, 11, 14, 9))[1] == OPEN + USUAL

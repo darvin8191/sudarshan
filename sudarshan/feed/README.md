@@ -45,10 +45,10 @@ from 14:05, continuous trading from 14:20, equity derivatives to 15:40):
 ```
 
 That day the feed holds its socket from 14:03 to 15:50 (the usual margins, below) and the stall
-watchdog runs from 14:20 to 15:40. A date with no window (or one that cannot be read, which the
-journal reports) keeps the usual hours, and on a weekend or a holiday the watchdog then waits for
-the day's first trade: a closed market is quiet, and an afternoon session must not cost hours of
-reconnects before it starts.
+watchdog runs from 14:20 to 15:40; the alerts keep their own margins, 13:50-16:00. A date with
+no window (or one that cannot be read, which the journal reports) keeps the usual hours, and on a
+weekend or a holiday the watchdog then waits for the day's first trade: a closed market is quiet,
+and an afternoon session must not cost hours of reconnects before it starts.
 
 Every reader agrees with the deploy tool byte for byte: a byte-order mark is fine, words are
 separated by spaces or tabs, `#` starts a comment, a date is `YYYY-MM-DD`, and a stray byte spoils

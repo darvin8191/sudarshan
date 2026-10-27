@@ -99,12 +99,22 @@ are closed, a date in `/etc/sudarshan/nse_extra_trading_days.txt` is open. Both 
 again when they change. Outside the window the process stays up, disconnected, and connects again
 at the next opening. The MCX evening session is not covered.
 
-A special session outside the usual hours gets its own window after the date, which the alerts use
-for that day instead of 08:45-16:00 (include the pre-open):
+A special session gets its own window after the date: the exchange's session as its circular
+gives it, from the start of the pre-open to the F&O close. For the Muhurat session on Sunday
+8 Nov 2026 (NSE circular 149/2026) the line is:
 
 ```
-2026-11-08 17:45-19:30  # Muhurat
+2026-11-08 14:05-15:40  # Muhurat, NSE circular 149/2026 (F&O to 15:40)
 ```
+
+The alerts keep the margins 08:45-16:00 keeps around an ordinary session (09:00-15:40): 15 minutes
+before its start and 20 after its end, within the day. So that Sunday they are connected from
+13:50 to 16:00, and an update after the close, such as the exchange cancelling an open order, is
+told as on any day. On a weekday that trades anyway, the session's window is added to 08:45-16:00
+(an evening session gives a second window; the order book read when it opens covers the hours in
+between). The next trading day's catch-up counts its pause from that day's opening and reads the
+order book Upstox gives that day, so it is the margins, not the catch-up, that cover the special
+day's close.
 
 Auto-login reads only the date of such a line, and the deploy tool only the date at its start, so
 both work as before (a test holds each to it).
@@ -137,7 +147,7 @@ tool starts ring services again after each release.
 | `SUDARSHAN_ORDER_ALERTS` | `on` | `off`: the service exits; nothing is sent and OpenAlgo is not contacted |
 | `SUDARSHAN_ORDER_ALERTS_CANCELLED` | `all` | `part-filled`: only cancellations of an order that was part filled |
 | `SUDARSHAN_ORDER_ALERTS_SANDBOX` | `off` | `on`: Analyze-mode (sandbox) orders too, each line starting with "Sandbox" |
-| `SUDARSHAN_ALERTS_WINDOW` | `08:45-16:00` | IST, on trading days (a special day's own window wins) |
+| `SUDARSHAN_ALERTS_WINDOW` | `08:45-16:00` | IST, on trading days; a special day's own window gets the same margins around it |
 | `SUDARSHAN_ALERTS_ALWAYS_ON` | `0` | `1`: ignore the window and the calendar (tests, an evening sandbox check) |
 | `SUDARSHAN_ALERTS_STATE_DIR` | systemd's `$STATE_DIRECTORY` | `/var/lib/sudarshan-alerts` |
 | `SUDARSHAN_ALERTS_LOG_LEVEL` | `INFO` | |
