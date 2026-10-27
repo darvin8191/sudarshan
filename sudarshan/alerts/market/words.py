@@ -70,6 +70,8 @@ def describe(alert: Alert, fire: engine.Fire, today: date) -> tuple[str, str]:
     level, value = amount(alert, fire.level), amount(alert, fire.value)
     closed = alert.frequency == AT_CLOSE
     lead = _close_lead(alert, name) if closed else name
+    if fire.auction:  # the closing auction's print, never passed off as an ordinary trade
+        return _auction(alert, fire, name, way, level, value)
     if alert.kind == "move":
         rise = "up" if fire.direction == UP else "down"
         on, base = ("on the day", "previous close")
@@ -104,6 +106,35 @@ def describe(alert: Alert, fire: engine.Fire, today: date) -> tuple[str, str]:
         verb = way if alert.cond.mode == CROSS else f"at or {way}"
         return f"{lead} {verb} {level}", _close_detail(alert, fire, value)
     return f"{name} {source}{verb} {level}", f"now {value}"
+
+
+def _auction(alert: Alert, fire: engine.Fire, name: str, way: str, level: str, value: str):
+    """'SBIN crossed above ₹100.00 in the closing auction', 'closing auction price ₹100.20'.
+
+    At candle close the print is the last candle's close: 'SBIN 15-min candle closed above
+    ₹100.00 in the closing auction', and for the day 'SBIN auction close above ₹100.00'."""
+    detail, where = f"closing auction price {value}", " in the closing auction"
+    closed = alert.frequency == AT_CLOSE
+    if closed and alert.candle_min == DAY:
+        name, where = f"{name} auction close", ""
+    elif closed:
+        name = f"{name} {alert.candle_min}-min candle closed"
+        if fire.span is not None:
+            detail += f" ({_hm(fire.span[0])} to {_hm(fire.span[1])})"
+    if alert.kind == "move":
+        rise = "up" if fire.direction == UP else "down"
+        on, base = ("on the day", "previous close")
+        if alert.params["base"] == "open":
+            on, base = ("from today's open", "open")
+        if fire.base is None:
+            return f"{name} {rise} {alert.params['percent']}% {on}{where}", detail
+        title = f"{name} {rise} {_share(alert, fire)}% {on}{where}"
+        return title, f"{detail} ({base} {amount(alert, fire.base)})"
+    if closed:
+        verb = way if alert.cond.mode == CROSS else f"at or {way}"
+    else:
+        verb = f"crossed {way}" if alert.cond.mode == CROSS else f"closed at or {way}"
+    return f"{name} {verb} {level}{where}", detail
 
 
 def _close_lead(alert: Alert, name: str) -> str:
@@ -233,12 +264,19 @@ def check_words(
     opens_at: int | None = None,
     since: int | None = None,
     feed: clock.Feed | None = None,
+    auction: tuple[int, int] | None = None,
+    quotes: bool = False,
 ) -> str:
     """The page's status line for a segment (clock.status), never a trade's gate result.
 
     ``opens_at`` is the next session's start (sessions.next_session), ``since`` when the feed
     went down, ``feed`` its last health: a feed that is stopped or refused needs the owner, so
-    it is not called "reconnecting"."""
+    it is not called "reconnecting". ``auction`` is a CAS key's (from, until)
+    (sessions.auction_window), ``quotes`` an alert on its bid or ask."""
+    if code == clock.CLOSING_AUCTION and auction is not None:
+        if quotes:
+            return f"Closing auction · bid and ask are not checked after {_hm(auction[0])}"
+        return f"Closing auction · price at about {_hm(auction[1])}"
     then = f" · checks from {_when(opens_at, now)}" if opens_at is not None else ""
     if code == clock.CLOSED_TODAY:
         return f"Market closed today{then}"

@@ -31,6 +31,7 @@ def fire_of(alert: spec.Alert, given: dict) -> engine.Fire:
         ticks(given["value"]), ticks(given["level"]), spec.UP if given["direction"] == "up" else spec.DOWN,
         1, ticks(given.get("previous")), span(given.get("found_later")), given.get("opening", False),
         ticks(given.get("base")), ticks(given.get("price")), span(given.get("span")),
+        auction=given.get("auction", False),
     )  # fmt: skip
 
 
@@ -190,6 +191,20 @@ def test_the_status_line_says_why_the_feed_is_down(state, age_s, text):
     assert words.check_words(clock.FEED_DOWN, now=now, feed=feed) == f"Not checking · {text}"
     since = words.check_words(clock.FEED_DOWN, now=now, since=ms(DAY, "10:41:05"), feed=feed)
     assert since == f"Not checking since 10:41:05 · {text}"
+
+
+def test_the_closing_auction_line_names_the_print_time_never_real_time():
+    """Cross-design X6e: from 15:15 to the print, and A8 for an alert on the bid or ask."""
+    span = (ms(DAY, "15:15:00"), ms(DAY, "15:35:00"))
+    now = ms(DAY, "15:20:00")
+    assert (
+        words.check_words(clock.CLOSING_AUCTION, now=now, auction=span)
+        == "Closing auction · price at about 15:35"
+    )
+    assert (
+        words.check_words(clock.CLOSING_AUCTION, now=now, auction=span, quotes=True)
+        == "Closing auction · bid and ask are not checked after 15:15"
+    )
 
 
 @pytest.mark.parametrize(

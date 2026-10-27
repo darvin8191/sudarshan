@@ -49,10 +49,12 @@ def to_decimal(value) -> Decimal | None:
 
 
 def paise(value) -> int | None:
-    """A feed price in paise; None unless it is a finite number above 0."""
+    """A feed price in paise; None unless it is a finite number of at least one paisa (a value
+    under half a paisa, 0.004, is no price)."""
     kind = value.__class__  # exact: a bool is not a price
     if (kind is float or kind is int) and 0 < value < math.inf:
-        return round(value * PER_RUPEE)
+        count = round(value * PER_RUPEE)
+        return count if count else None
     return None
 
 

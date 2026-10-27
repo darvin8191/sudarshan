@@ -22,6 +22,9 @@ since, but its state and stop, ``set_status`` and each state the flush saves che
 version (and that it is still Active, for a stop): a fire recorded after the owner's edit never
 stops the new definition or writes over its reset state. The version counts the owner's edits
 only; the engine's own stops leave it, so editing an alert that stopped itself is no conflict.
+For the same reason the owner's pause, resume and restart are each accepted only from the status
+they are for (Active, Paused, Stopped), checked in their write transaction: a screen still
+showing Active cannot pause an alert that has just fired once and stopped.
 
 Principal: every public method takes ``principal`` and refuses one the store was not opened for;
 every owner-data table carries it and every read filters on it. A structural test holds each
@@ -37,6 +40,7 @@ import contextlib
 import json
 import uuid
 from collections.abc import Iterator, Mapping
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -62,13 +66,16 @@ from sqlalchemy.exc import SQLAlchemyError
 from database.engine_factory import create_db_engine
 from sudarshan.alerts.market import migrations, spec
 from sudarshan.alerts.market.clock import Pause
-from sudarshan.alerts.market.engine import Fire, State
+from sudarshan.alerts.market.engine import Fire, State, stop_reason
 from sudarshan.alerts.store import _cause, _private_file
 
 DB_FILENAME = "market.db"
 KEEP_DAYS, MIN_KEEP_DAYS, BASELINE_DAYS = 100, 90, 10
 DAY_MS = 86_400_000
 STATUSES = ("active", "paused", "stopped")
+#: The owner's own status changes: each is accepted from one status only (store._move).
+MOVES = {"pause": ("active", "paused"), "resume": ("paused", "active"),
+         "restart": ("stopped", "active")}  # fmt: skip
 DELIVERY = ("pending", "sent", "not_sent", "off")
 OFF_REASON = "Off in your alert settings"
 DEFINITION = (
@@ -143,8 +150,12 @@ class NotFound(StoreError):
 
 
 class VersionConflict(StoreError):
-    def __init__(self) -> None:
-        super().__init__("This alert was changed on another screen. Open it again, then edit it.")
+    def __init__(self, then: str = "edit it") -> None:
+        super().__init__(f"This alert was changed on another screen. Open it again, then {then}.")
+
+
+class Refused(StoreError):
+    """The owner's pause, resume or restart, refused by the status the alert has now."""
 
 
 class UnknownPrincipal(ValueError):
@@ -211,18 +222,14 @@ class MarketStore:
         fields: Mapping[str, Any],
         now: int,
         *,
-        status: str | None = None,
-        status_reason: str = "",
         reset_state: bool = False,
     ) -> dict[str, Any]:
-        """An edit, a pause or a resume by the owner, only from ``version`` (else a conflict).
+        """The owner's edit, only from ``version`` (else a conflict).
 
-        ``status`` None (an edit) keeps the status the alert has when the edit lands, except that
-        a changed condition makes a Stopped alert Active again (spec.status_after_edit), so a stop
-        the engine made a moment before is neither undone nor a conflict. ``reset_state``
+        The edit keeps the status the alert has when it lands, except that a changed condition
+        makes a Stopped alert Active again (spec.status_after_edit), so a stop the engine made a
+        moment before is neither undone nor a conflict. ``reset_state``
         (spec.changes_condition) forgets the alert's state in the same step."""
-        if status is not None:
-            _status(status)
         who = self._who(principal)
         mine = and_(alert.c.id == alert_id, alert.c.principal == who)
         with self._tx() as conn:
@@ -233,9 +240,8 @@ class MarketStore:
                 raise NotFound()
             if row.version != version:
                 raise VersionConflict()
-            if status is None:
-                status = spec.status_after_edit(row.status, reset_state)
-                status_reason = row.status_reason if status == row.status else ""
+            status = spec.status_after_edit(row.status, reset_state)
+            status_reason = row.status_reason if status == row.status else ""
             conn.execute(
                 update(alert)
                 .where(mine)
@@ -251,14 +257,39 @@ class MarketStore:
                 conn.execute(delete(alert_state).where(alert_state.c.alert_id == alert_id))
         return self.alert(principal, alert_id)
 
+    def pause(self, principal: str, alert_id: int, version: int, now: int) -> dict[str, Any]:
+        """The owner pauses an Active alert (only an Active one), from ``version``."""
+        return self._move(principal, alert_id, version, "pause", now)
+
+    def resume(self, principal: str, alert_id: int, version: int, now: int) -> dict[str, Any]:
+        """The owner resumes a Paused alert (only a Paused one), from ``version``."""
+        return self._move(principal, alert_id, version, "resume", now)
+
+    def restart(self, principal: str, alert_id: int, version: int, now: int) -> dict[str, Any]:
+        """The owner sets a Stopped alert going again (only a Stopped one whose end date and
+        contract have not passed), from ``version``. Its new version gives its fires new claims,
+        so a Once alert may fire once more."""
+        return self._move(principal, alert_id, version, "restart", now)
+
     def set_status(
-        self, principal: str, alert_id: int, status: str, reason: str, now: int, *, version: int
+        self,
+        principal: str,
+        alert_id: int,
+        status: str,
+        reason: str,
+        now: int,
+        *,
+        version: int,
+        was: str = "active",
     ) -> bool:
         """The engine stopped or paused an alert itself (ended, expired, 50 fires), judged at
-        ``version``. False when the owner changed the alert first: the owner's change stands."""
+        ``version`` while it was ``was`` (a Paused alert still stops at its end). False when the
+        owner changed the alert first: the owner's change stands."""
         _status(status)
+        _status(was)
         with self._tx() as conn:
-            return _set_status(conn, self._who(principal), alert_id, version, status, reason, now)
+            who = self._who(principal)
+            return _set_status(conn, who, alert_id, version, status, reason, now, was)
 
     def delete(self, principal: str, alert_id: int) -> bool:
         """The alert and its state go; its history stays in the log."""
@@ -541,6 +572,32 @@ class MarketStore:
         self.engine.dispose()
 
     # ---- inside ----------------------------------------------------------------------------
+    def _move(self, principal: str, alert_id: int, version: int, move: str, now: int) -> dict:
+        """A pause, resume or restart, accepted only from the status it is for, checked in the
+        write transaction: an engine stop keeps the version, so a screen still showing Active
+        holds a current version, and its Pause must not wipe "Fired once" for a Resume to undo
+        (a Once alert would fire twice). The status is checked before the version, so a stale
+        screen reads what the alert is now."""
+        who = self._who(principal)
+        mine = and_(alert.c.id == alert_id, alert.c.principal == who)
+        with self._tx() as conn:
+            row = conn.execute(select(alert).where(mine)).mappings().first()
+            if row is None:
+                raise NotFound()
+            why = _refusal(move, row, now)
+            if why is not None:
+                raise Refused(why)
+            if row["version"] != version:
+                raise VersionConflict("try again")
+            conn.execute(
+                update(alert)
+                .where(mine)
+                .values(
+                    status=MOVES[move][1], status_reason="", updated_at=now, version=version + 1
+                )  # fmt: skip
+            )
+        return self.alert(principal, alert_id)
+
     def _who(self, principal: str) -> str:
         if principal not in self.principals:
             raise UnknownPrincipal(f"this store does not serve {principal!r}")
@@ -602,6 +659,38 @@ def _status(status: str) -> str:
     return status
 
 
+def _refusal(move: str, row: Mapping[str, Any], now: int) -> str | None:
+    """Why the owner's ``move`` does not apply to the alert as it is now; None when it does."""
+    status, (start, end) = row["status"], MOVES[move]
+    if status == start:
+        return _ended(row, now) if move == "restart" else None
+    if status == end:
+        return (
+            "This alert is already paused." if end == "paused" else "This alert is already active."
+        )
+    if status == "paused":  # a restart
+        return "This alert is paused. Use Resume to check it again."
+    reason = row["status_reason"]
+    stopped = f"This alert has stopped ({reason})." if reason else "This alert has stopped."
+    if move == "pause":
+        return f"{stopped} There is nothing to pause."
+    return f"{stopped} Use Restart to check it again."
+
+
+def _ended(row: Mapping[str, Any], now: int) -> str | None:
+    """A Stopped alert cannot restart past its contract's expiry or its end date."""
+    stop = stop_reason(spec.Alert.of(_alert_row(row)), now)
+    if stop is None:
+        return None
+    if stop.code == "expired":
+        expiry = date.fromisoformat(row["expiry"])
+        return (
+            f"This alert's contract expired on {expiry.day} {expiry:%b}, so it cannot be checked "
+            "again. Set a new alert on a contract that is still trading."
+        )
+    return "This alert's end date has passed. Change the end date, then restart it."
+
+
 def _definition(fields: Mapping[str, Any]) -> dict[str, Any]:
     values = {name: fields.get(name) for name in DEFINITION}
     values["params"] = json.dumps(fields["params"], sort_keys=True, separators=(",", ":"))
@@ -620,10 +709,18 @@ def _alert_row(row) -> dict[str, Any]:
 
 
 def _set_status(
-    conn, who: str, alert_id: int, version: int, status: str, reason: str, now: int
+    conn,
+    who: str,
+    alert_id: int,
+    version: int,
+    status: str,
+    reason: str,
+    now: int,
+    was: str = "active",
 ) -> bool:
-    """The engine's own stop or pause, while the alert is Active at ``version``. The version
-    stays: it counts the owner's edits, and editing an alert that stopped itself is no conflict."""
+    """The engine's own stop or pause, while the alert is still ``was`` at ``version``. The
+    version stays: it counts the owner's edits, and editing an alert that stopped itself is no
+    conflict."""
     return bool(
         conn.execute(
             update(alert)
@@ -631,7 +728,7 @@ def _set_status(
                 alert.c.id == alert_id,
                 alert.c.principal == who,
                 alert.c.version == version,
-                alert.c.status == "active",
+                alert.c.status == was,
             )  # fmt: skip
             .values(status=status, status_reason=reason, updated_at=now)
         ).rowcount

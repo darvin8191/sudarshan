@@ -19,6 +19,14 @@ the page shows (words.py says it in the owner's words):
       health is no older than 12 s
     the value arrived within the last 5 s                      STALE (dropped and counted)
 
+A stock that closes by auction (a CAS key, sessions.py) has its own session, so its continuous
+trading ends before the auction, and its quotes after that (the auction's order book) never pass.
+The auction's print is no trade of that session: ``auction`` lets it through on its own terms
+(cross-design X6c: made from the continuous end up to ``Session.auction_until``, 15:35, arrived
+within the 5 s grace after it, on a healthy feed, fresh, whatever the exchange's status then
+says), so a crossing it alone makes is told as the closing auction's, never as an ordinary trade.
+Until the print, the page says so (``status``: CLOSING_AUCTION), never "Real-time" or "Stale".
+
 A pause is a stretch longer than GAP_S in which market alerts were not checking: the price feed
 reconnecting, or the service not running. A crossing first seen after one may have happened
 inside it, so its fire says so; a candle that held one is not judged at its close. Only the part
@@ -32,7 +40,7 @@ from collections.abc import Mapping
 from types import MappingProxyType
 from typing import NamedTuple
 
-from sudarshan.alerts.market.sessions import Session
+from sudarshan.alerts.market.sessions import AUCTION, Session
 
 OK = "ok"
 CLOSED_TODAY = "closed_today"
@@ -41,6 +49,10 @@ NOT_OPEN_YET = "not_open_yet"
 CLOSED_BY_EXCHANGE = "closed_by_exchange"
 FEED_DOWN = "feed_down"
 STALE = "stale"
+#: A trade that is the closing auction's print (``auction``), not one of the continuous session.
+AUCTION_PRINT = "auction"
+#: A CAS key between its continuous end and its auction's print (``status``).
+CLOSING_AUCTION = "closing_auction"
 #: A trade made before the session's end still counts when it arrives this soon after it.
 ARRIVAL_GRACE_MS = 5_000
 #: A value older than this when it is judged is dropped.
@@ -75,7 +87,8 @@ class Market(NamedTuple):
 
     #: Today's IST date as YYYYMMDD.
     today: int
-    #: Segment -> today's session; a segment missing here does not trade today.
+    #: Session key -> today's session (sessions.sessions_of: each segment, and ``NSE_EQ+auction``
+    #: for its stocks that close by auction); a key missing here does not trade today.
     sessions: Mapping[str, Session]
     #: The trading day before today (YYYYMMDD), which an opening gap compares with; 0: unknown.
     previous: int = 0
@@ -86,6 +99,9 @@ class Market(NamedTuple):
     pauses: tuple[Pause, ...] = ()
     #: Trust a replay's health (state "replay"): the replay check and its tests only.
     replay: bool = False
+    #: Instrument keys of the cash stocks that close by auction today (CAS keys): the runtime's
+    #: morning build, from the master contract (sessions.closes_by_auction).
+    auction: frozenset[str] = frozenset()
 
 
 def gate(market: Market, segment: str, at: int, recv: int, now: int, *, trade: bool) -> str:
@@ -99,9 +115,13 @@ def gate(market: Market, segment: str, at: int, recv: int, now: int, *, trade: b
         inside = session.start <= recv < session.end
     if not inside:
         return OUTSIDE_HOURS
-    status = market.status.get(segment)
+    status = market.status.get(segment.partition("+")[0])
     if status is not None and status != "NORMAL_OPEN":
         return NOT_OPEN_YET if status.startswith("PRE_OPEN") else CLOSED_BY_EXCHANGE
+    return _feed(market, recv, now)
+
+
+def _feed(market: Market, recv: int, now: int) -> str:
     feed = market.feed
     heard = feed.heard_at is not None and now - feed.heard_at <= HEALTH_MAX_AGE_MS
     up = feed.state == "connected" or (market.replay and feed.state == "replay")
@@ -112,10 +132,33 @@ def gate(market: Market, segment: str, at: int, recv: int, now: int, *, trade: b
     return OK
 
 
-def status(market: Market, segment: str, now: int) -> str:
+def auction(market: Market, segment: str, at: int, recv: int, now: int) -> str:
+    """AUCTION_PRINT when a trade of a stock that closes by auction is its closing auction's
+    print: made from its continuous end up to its auction's end (``Session.auction_until``) and
+    arrived no later than the arrival grace after that, on a healthy feed and fresh. Otherwise
+    the first check it fails. The exchange's status is not asked (cross-design X6c)."""
+    continuous = market.sessions.get(segment + AUCTION)
+    if continuous is None or continuous.auction_until is None:
+        return OUTSIDE_HOURS
+    until = continuous.auction_until
+    if not (continuous.end <= at <= until and recv <= until + ARRIVAL_GRACE_MS):
+        return OUTSIDE_HOURS
+    check = _feed(market, recv, now)
+    return AUCTION_PRINT if check == OK else check
+
+
+def status(market: Market, segment: str, now: int, *, printed: bool = False) -> str:
     """The segment's state at ``now`` for the page's status line: the gate's checks on the
     clock, the exchange and the feed, never on a trade. A tick's own check is not it: an
-    illiquid option whose last trade was yesterday fails the gate as OUTSIDE_HOURS all day."""
+    illiquid option whose last trade was yesterday fails the gate as OUTSIDE_HOURS all day.
+
+    A CAS key (``NSE_EQ+auction``) reads CLOSING_AUCTION from its continuous end until its
+    auction's print (``printed``: the runtime has seen it) or the print's last moment."""
+    session = market.sessions.get(segment)
+    until = session.auction_until if session is not None else None
+    if until is not None and not printed and session.end <= now <= until + ARRIVAL_GRACE_MS:
+        check = _feed(market, now, now)
+        return CLOSING_AUCTION if check == OK else check
     return gate(market, segment, now, now, now, trade=False)
 
 

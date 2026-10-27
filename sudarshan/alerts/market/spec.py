@@ -15,6 +15,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 
 from sudarshan.alerts.market import sessions
@@ -130,7 +131,7 @@ class Alert:
         segment = sessions.segment_of(row["instrument_key"])
         grain = _grain(segment, row.get("tick_size"))
         expiry = _date(row.get("expiry"))
-        hours = sessions.hours(segment)
+        index = sessions.index_derivative(row["symbol"])
         return cls(
             id=int(row["id"]),
             version=int(row["version"]),
@@ -149,7 +150,7 @@ class Alert:
             ends_at=row.get("ends_at"),
             note=row.get("note") or "",
             cond=KINDS[row["kind"]].compile(row["params"], grain, segment),
-            expires_at=sessions.epoch_ms(expiry, hours[1]) if expiry and hours else None,
+            expires_at=sessions.expiry_close(segment, expiry, index=index) if expiry else None,
         )
 
 
@@ -168,8 +169,9 @@ def check(fields: Mapping[str, Any], now: int) -> dict[str, Any]:
         raise SpecError("instrument", "Pick the instrument again from the search.")
     grain = _grain(segment, fields.get("tick_size"))
     expiry = _date(fields.get("expiry"))
-    hours = sessions.hours(segment)
-    if expiry is not None and hours and sessions.epoch_ms(expiry, hours[1]) <= now:
+    index = sessions.index_derivative(str(symbol))
+    closes = sessions.expiry_close(segment, expiry, index=index) if expiry else None
+    if closes is not None and closes <= now:
         raise SpecError(
             "instrument",
             f"This contract expired on {expiry.day} {expiry:%b}. Pick one that is still trading.",
@@ -247,8 +249,9 @@ def _check_price(params, segment: str, grain: Grain) -> dict[str, Any]:
     level = to_decimal(params.get("level"))
     if level is None or level <= 0:
         raise SpecError("level", "Enter the price level, a number above 0.")
-    if level < PAISA:  # nothing trades below a paisa: "at or below" could never fire
-        raise SpecError("level", "Enter a price level of at least 0.01.")
+    lowest = _lowest(segment, grain)
+    if level < lowest:  # nothing trades below it: "at or below" or "crosses" could never fire
+        raise SpecError("level", _too_low(segment, lowest))
     source = params.get("source", "ltp")
     if source not in SOURCES:
         raise SpecError("source", "Pick the price to watch: last price, bid or ask.")
@@ -370,6 +373,20 @@ def _minute(text) -> int | None:
 
 def _hhmm(minute: int) -> str:
     return f"{minute // 60:02d}:{minute % 60:02d}"
+
+
+def _lowest(segment: str, grain: Grain) -> Decimal:
+    """The lowest price the instrument can trade at: one tick for a derivative (an option never
+    trades under 0.05), one paisa in cash and indices (their tick moves with the price band)."""
+    return grain.step if segment in sessions.FO_SEGMENTS else PAISA
+
+
+def _too_low(segment: str, lowest: Decimal) -> str:
+    if segment in sessions.FO_SEGMENTS:
+        return (
+            f"Enter a price level of at least ₹{lowest}, the lowest price this contract trades at."
+        )
+    return f"Enter a price level of at least {lowest}."
 
 
 def _grain(segment: str, tick_size) -> Grain:

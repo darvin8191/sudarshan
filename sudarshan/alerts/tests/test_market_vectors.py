@@ -59,12 +59,10 @@ def window_of(day: date):
     return parse_window(text) if text else None
 
 
-def market(day: date, now: int, *, pauses=(), down=(), status=None, feed=None, replay=False):
-    found = {}
-    for segment in sessions.SEGMENTS:
-        span = sessions.session(segment, day, trading_day=trades(day), window=window_of(day))
-        if span is not None:
-            found[segment] = span
+def market(
+    day: date, now: int, *, pauses=(), down=(), status=None, feed=None, replay=False, auction=()
+):
+    found = sessions.sessions_of(day, trading_day=trades(day), window=window_of(day))
     previous = sessions.previous_trading_day(day, trades)
     if feed is None:
         out = any(start <= now < end for start, end in down)
@@ -76,7 +74,7 @@ def market(day: date, now: int, *, pauses=(), down=(), status=None, feed=None, r
     )
     key = sessions.day_key(day)
     prev = sessions.day_key(previous) if previous else 0
-    return clock.Market(key, found, prev, status or {}, feed, today, replay)
+    return clock.Market(key, found, prev, status or {}, feed, today, replay, frozenset(auction))
 
 
 def expand(steps: list[dict], day: str) -> list[dict]:
@@ -131,14 +129,20 @@ class World:
         self.store.save_states("owner", self.book.changed(), now)
         self.flushed_at = now
 
-    def owner(self, now: int, fields: dict, **change) -> None:
+    def owner(self, now: int, fields: dict | None = None, move: str = "", **change) -> None:
         """The owner's edit, pause or resume, written to market.db as the bridge writes it."""
-        self.row = self.store.update("owner", self.alert.id, self.row["version"], fields, now,
-                                     **change)  # fmt: skip
+        version = self.row["version"]
+        if move:
+            self.row = getattr(self.store, move)("owner", self.alert.id, version, now)
+        else:
+            self.row = self.store.update("owner", self.alert.id, version, fields, now, **change)
         self.alert = spec.Alert.of(self.row)
 
     def market(self, on: str, now: int) -> clock.Market:
-        return market(date.fromisoformat(on), now, pauses=self.pauses, down=self.down)
+        auction = (self.alert.key,) if self.vector.get("auction") else ()
+        return market(
+            date.fromisoformat(on), now, pauses=self.pauses, down=self.down, auction=auction
+        )
 
     def frame(self, raw: dict, on: str) -> dict:
         """A trade or quote step as the feed's frame: its fields, ltt and ts_recv in epoch ms."""
@@ -166,7 +170,7 @@ class World:
                                        status_reason=reason)  # fmt: skip
             elif out.status is not None:
                 self.store.set_status("owner", self.alert.id, out.status, out.reason.code, now,
-                                      version=self.alert.version)  # fmt: skip
+                                      version=self.alert.version, was=self.alert.status)  # fmt: skip
             if out.note is not None:
                 self.notes.append((now, out.note))
             if out.status is not None:
@@ -198,10 +202,10 @@ class World:
         if raw.get("clock"):
             self.take(self.book.on_clock(now, self.market(on, now)), now)
         elif raw.get("suspend"):
-            self.owner(now, self.row, status="paused")
+            self.owner(now, move="pause")
             self.book.put(self.alert)
         elif raw.get("resume"):
-            self.owner(now, self.row, status="active")
+            self.owner(now, move="resume")
             self.book.put(self.alert, engine.resume(self.book.state(self.alert.id)))
         elif "edit" in raw:
             self.fields |= raw["edit"]
@@ -240,6 +244,7 @@ def seen(alert: spec.Alert, fire: engine.Fire) -> dict:
         "found_later": None if found is None else [hms(found[0]), hms(found[1])],
         "base": None if fire.base is None else str(rupees(fire.base)),
         "price": None if fire.price is None else str(rupees(fire.price)),
+        "auction": fire.auction,
     }
 
 
@@ -251,7 +256,9 @@ def test_alert_vector(vector, tmp_path):
     world = World(vector, tmp_path / "market.db")
     for raw in expand(vector["steps"], world.day):
         world.run(raw)
+    stored = world.store.alert("owner", world.alert.id)
     world.store.close()
+    assert stored["status"] == world.alert.status  # market.db took every stop and pause
     fires = world.fires
     if "fire_count" in vector:
         assert len(fires) == vector["fire_count"]

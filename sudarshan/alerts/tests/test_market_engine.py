@@ -187,7 +187,11 @@ def test_an_alert_that_is_not_active_never_fires():
     a = dataclasses.replace(alert(op="at_or_above"), status="paused")
     out = engine.step(a, State(), obs(a, 101.0, T0), T0)
     assert out == engine.Outcome(9, State())
-    assert engine.timer(a, State(), T0 + 10**12, DAY) is None
+    assert engine.timer(a, State(), T0 + 1000, DAY) is None
+    later = engine.timer(a, State(), T0 + 10**12, DAY)  # a Paused alert still ends (review R4)
+    assert (later.status, later.reason.code, later.fire) == ("stopped", "ended", None)
+    stopped = dataclasses.replace(a, status="stopped")
+    assert engine.timer(stopped, State(), T0 + 10**12, DAY) is None
 
 
 def test_the_wait_counts_from_the_fire_inclusive():
