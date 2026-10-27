@@ -84,6 +84,36 @@ The deploy tool also asks the market gate again right before it stops OpenAlgo, 
 window opened during the download. `sudarshan-deploy --check` shows what the latest release
 would change. Tests: `sudarshan/ops/tests/test_deploy_calendar.py`.
 
+## The ring's databases in a deploy's backup (M18.11)
+
+Each ring service keeps its state in `/var/lib/sudarshan-<service>/` (`alerts.db`, `market.db`,
+later `portfolio.db` and `screener.db`), not in OpenAlgo's `db/` folder, so the deploy tool treats
+them apart from the databases it has always backed up:
+
+- the ring is stopped before an install; then every `*.db` in every `/var/lib/sudarshan-*/` folder
+  is copied with SQLite's online backup (rows still in the write-ahead log come with it; a plain
+  file copy would lose them) into `<backup>/ring/<folder>/<name>`. Never at the top of the backup
+  folder: a rollback puts every top-level `*.db` there into OpenAlgo's `db/` by name, and
+  `market.db` exists in both places;
+- a rollback puts each copy back in its own folder, owned by `sudarshan`, mode 600, through a
+  temporary name and with the old `-wal`, `-shm` and `-journal` files removed, before OpenAlgo or
+  any ring service starts again. A folder that is gone is not made up. A database that cannot be put
+  back is logged and left as it was found, and the rollback carries on;
+- the sealed owner vault (`db/sudarshan-vault/`) is in neither direction: the deploy backup does
+  not hold it, and a rollback never replaces what the owner saved after the backup was made;
+- only plain names are used (`sudarshan-<name>` folders, file names of letters, digits, `.`, `_`
+  and `-`) and no link is followed, so a file name cannot become a command or a path;
+- before a ring service starts, in an install and in a rollback, the tool logs what
+  `python -m sudarshan.<service>.migrate --status` says for each migrate module of that service
+  (run as `sudarshan`, 60 s at most, the first 30 lines, each cut at 300 characters). No module, no
+  line; a status that fails is one log line and never stops the install;
+- a failure in any of this costs the copy or the line, never the install or the rollback.
+
+The tool that does an install is the one already on the server (it updates itself from each
+release, so a new tool acts from the next run). The first install that brings these steps is made
+by the tool before them: it makes no ring copy, and a rollback of that install leaves the ring's
+databases as they are. Tests: `sudarshan/ops/tests/test_deploy_ring_databases.py`.
+
 ## Server notices on Telegram (M18.x)
 
 After an install, a rollback, a service file the unit policy refused, or a release that waits for

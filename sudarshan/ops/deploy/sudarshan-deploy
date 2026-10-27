@@ -36,6 +36,8 @@ STATE="/var/lib/sudarshan"; mkdir -p "${STATE}"
 exec 9> "${STATE}/deploy.lock"; flock -n 9 || { echo "another deploy is running"; exit 0; }
 OWNER_REPO="${REPO#https://github.com/}"
 as_svc() { sudo -u "${SVC_USER}" -H -- "$@"; }
+RING_USER="sudarshan"   # the user every ring service runs as (unit_ok insists on it)
+RING_VAR="/var/lib"     # where the ring services keep their state: ${RING_VAR}/sudarshan-<service>/
 log() { echo "[$(date '+%F %T %Z')] $*"; }
 listed() {   # 0 = date $1 starts a line of file $2 (a trailing comment is allowed, as auto-login reads
              # it). Only a regular file is read: grep would wait forever on a FIFO.
@@ -722,6 +724,74 @@ unit_ok() {   # $1 = downloaded unit file, $2 = unit name; 0 = acceptable
     fi
     return 0
 }
+# ---- the ring services' databases (X8): each ${RING_VAR}/sudarshan-*/*.db is copied with SQLite's online
+# backup while the ring is stopped, into ${bdir}/ring/<folder>/<name>, never at the top of ${bdir}: the
+# rollback puts every top-level *.db there back into OpenAlgo's db/ folder. A rollback puts each copy back in its
+# own folder (owned by the ring's user, mode 600) before the ring starts. The sealed vault in db/ is in
+# neither: it is not a top-level *.db, and what the owner typed after the backup must survive a rollback.
+# Both run in a subshell with their own error handling: a ring database that cannot be copied or put
+# back is logged and never stops an install or a rollback (trading does not depend on the ring).
+ring_name_ok() { [[ "$1" =~ ^sudarshan-[a-z0-9-]+$ && "$2" =~ ^[A-Za-z0-9._-]+\.db$ ]]; }   # $1 = folder, $2 = file
+ring_db_backup() {
+    (
+        set +eEu; trap - ERR
+        local dir folder f name dest
+        for dir in "${RING_VAR}"/sudarshan-*/; do
+            [[ -d "${dir}" && ! -L "${dir%/}" ]] || continue
+            folder="$(basename "${dir}")"
+            for f in "${dir}"*.db; do
+                [[ -f "${f}" && ! -L "${f}" ]] || continue
+                name="$(basename "${f}")"
+                ring_name_ok "${folder}" "${name}" || { log "ring: ${folder}/${name}: unusual name - not backed up"; continue; }
+                dest="${bdir}/ring/${folder}/${name}"
+                if mkdir -p "${bdir}/ring/${folder}" && rm -f "${dest}" && sqlite3 "${f}" ".backup '${dest}'" > /dev/null 2>&1 && [[ -f "${dest}" ]]; then
+                    log "ring: backed up ${folder}/${name}"
+                else
+                    rm -f "${dest}"; log "WARNING: ring: could not back up ${folder}/${name} - a rollback leaves it as it is"
+                fi
+            done
+        done
+    ) || true
+}
+ring_db_restore() {
+    (
+        set +eEu; trap - ERR
+        local f folder name dir dest
+        for f in "${bdir}"/ring/*/*.db; do
+            [[ -f "${f}" && ! -L "${f}" ]] || continue
+            folder="$(basename "$(dirname "${f}")")"; name="$(basename "${f}")"
+            ring_name_ok "${folder}" "${name}" || continue
+            dir="${RING_VAR}/${folder}"; dest="${dir}/${name}"
+            [[ -d "${dir}" && ! -L "${dir}" ]] || { log "ring: ${folder} is gone - ${name} not put back"; continue; }
+            # the copy is made and checked first, so a failure leaves the database and its journal as they were
+            if cp "${f}" "${dest}.restoring" && chown "${RING_USER}:${RING_USER}" "${dest}.restoring" && chmod 600 "${dest}.restoring"; then
+                rm -f "${dest}-wal" "${dest}-shm" "${dest}-journal"   # a stale journal must never meet a restored database
+                if mv -f "${dest}.restoring" "${dest}"; then log "ring: put back ${folder}/${name}"; continue; fi
+            fi
+            rm -f "${dest}.restoring"; log "WARNING: ring: could not put back ${folder}/${name}"
+        done
+    ) || true
+}
+ring_status() {   # $1 = a ring service (sudarshan-<service>.service): before it starts, log what every migrate module
+                  # it has says with --status (sudarshan/<service>/migrate.py, and one folder down). No module, no line.
+    (
+        set +eEu; trap - ERR
+        local svc="${1#sudarshan-}" m mod out rc
+        svc="${svc%.service}"
+        [[ "${svc}" =~ ^[a-z0-9_]+$ ]] || exit 0
+        cd "${APP_DIR}" || exit 0
+        for m in "sudarshan/${svc}/migrate.py" "sudarshan/${svc}"/*/migrate.py; do
+            [[ -f "${m}" && ! -L "${m}" ]] || continue
+            mod="${m%.py}"; mod="${mod//\//.}"
+            [[ "${mod}" =~ ^sudarshan(\.[a-z0-9_]+)+\.migrate$ ]] || continue
+            out="$(timeout 60 sudo -u "${RING_USER}" -H -- "${APP_DIR}/.venv/bin/python" -m "${mod}" --status 2>&1)"; rc=$?
+            if [[ -n "${out}" ]]; then
+                printf '%s\n' "${out}" | head -n 30 | while IFS= read -r line; do log "ring: ${mod} --status: ${line:0:300}"; done
+            fi
+            [[ ${rc} -eq 0 ]] || log "WARNING: ring: ${mod} --status did not finish cleanly (exit ${rc})"
+        done
+    ) || true
+}
 rollback() {
     trap - ERR; set +e
     log "!! rolling back to ${prev_ref}"
@@ -742,8 +812,9 @@ rollback() {
     env_restore "${tmp}/env" "${ENV_FILE}" || log "WARNING: could not put the previous ${ENV_FILE} back"
     cal_restore "${tmp}/cal" "${CAL_DIR}" || log "WARNING: calendar: could not put the previous day files back"
     chown -R "${SVC_USER}:${SVC_USER}" "${APP_DIR}/frontend/dist" "${APP_DIR}/db"
+    ring_db_restore   # the ring's databases go back with the code, before anything starts
     systemctl start "${SERVICE}"; log "rollback done (${SERVICE} $(systemctl is-active "${SERVICE}"))"
-    for u in $(ring_services); do systemctl start "${u}" || log "WARNING: ${u} did not start after rollback"; done
+    for u in $(ring_services); do ring_status "${u}"; systemctl start "${u}" || log "WARNING: ${u} did not start after rollback"; done
     # One notice per release, cause and outcome: the timer tries a release that failed again at its next
     # run, and each of those must not become another message.
     local up; up="$([[ "$(systemctl is-active "${SERVICE}" 2>/dev/null)" == active ]] && echo yes || echo no)"
@@ -778,6 +849,7 @@ for db in "${APP_DIR}"/db/*.db; do
     if [[ -f "${db}" ]]; then sqlite3 "${db}" ".backup '${bdir}/$(basename "${db}")'"; fi
 done
 if [[ -f "${APP_DIR}/db/historify.duckdb" ]]; then cp -a "${APP_DIR}/db/historify.duckdb" "${bdir}/"; fi
+ring_db_backup   # X8: the ring is stopped; its databases are copied under ${bdir}/ring, apart from db/
 tar -czf "${bdir}/frontend-dist-prev.tar.gz" -C "${APP_DIR}/frontend" dist
 chown -R "${SVC_USER}:${SVC_USER}" "${bdir}"; chmod -R go-rwx "${bdir}"
 # ---- code + dist + deps + migrations
@@ -846,6 +918,7 @@ ring_deploy() {
             systemctl enable --now "${n}" > /dev/null 2>&1 || log "ring: ${n} could not be enabled"
         else
             systemctl enable "${n}" > /dev/null 2>&1 || true
+            ring_status "${n}"   # X8: what the service's stores will do on this start, in the log
             systemctl restart "${n}" || log "ring: ${n} did not start"
         fi
     done

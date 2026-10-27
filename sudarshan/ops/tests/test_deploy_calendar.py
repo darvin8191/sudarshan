@@ -998,13 +998,21 @@ exit 0
 
 FAKES = {
     "curl": FAKE_CURL,
-    "sudo": 'while [[ $# -gt 0 && "$1" != "--" ]]; do shift; done\nshift\nexec "$@"',
+    # sudo runs the command as the caller; the whole line it was given is recorded first
+    "sudo": (
+        'echo "$*" >> "${FAKE_WEB}/sudo"\n'
+        'while [[ $# -gt 0 && "$1" != "--" ]]; do shift; done\nshift\nexec "$@"'
+    ),
     "git": 'if [[ " $* " == *" rev-parse "* ]]; then echo 0123456789abcdef0123456789abcdef01234567; fi',
     "systemctl": 'echo "$*" >> "${FAKE_WEB}/systemctl"\nif [[ "$1" == "is-active" ]]; then echo active; fi',
     "uv": "exit 0",
     "sleep": "exit 0",
-    # chown -R of the app and backup folders needs root; any other chown is the real one
-    "chown": 'if [[ "$1" == "-R" ]]; then exit 0; fi\nexec CHOWN "$@"',
+    # chown -R of the app and backup folders needs root, and the ring's user is not on this machine;
+    # both are only recorded. Any other chown is the real one.
+    "chown": (
+        'echo "$*" >> "${FAKE_WEB}/chown"\n'
+        'if [[ "$1" == "-R" || "$1" == "sudarshan:sudarshan" ]]; then exit 0; fi\nexec CHOWN "$@"'
+    ),
     "date": (
         'if [[ "$1" == "+%u %H%M %F" ]]; then\n'
         '    if [[ -f "${FAKE_WEB}/later" ]]; then echo "${FAKE_NOW_LATER}"; else echo "${FAKE_NOW}"; fi\n'
@@ -1028,6 +1036,7 @@ class Box:
             root / "tmp",
         )
         self.units = root / "units"  # where the ring's unit files would go (/etc/systemd/system)
+        self.ringvar = root / "ringvar"  # the ring's state folders (/var/lib/sudarshan-<service>/)
         for folder in (
             self.etc,
             self.state,
@@ -1036,6 +1045,7 @@ class Box:
             self.web,
             self.tmp,
             self.units,
+            self.ringvar,
         ):
             folder.mkdir()
         (self.app / "frontend" / "dist").mkdir(parents=True)
@@ -1114,6 +1124,7 @@ class Box:
             .replace("/opt/sudarshan/backups", str(self.backups))
             .replace("/usr/local/bin/uv", str(self.bin / "uv"))
             .replace('UNIT_DIR="/etc/systemd/system"', f'UNIT_DIR="{self.units}"')
+            .replace('RING_VAR="/var/lib"', f'RING_VAR="{self.ringvar}"')
         )
         (self.web / "later").unlink(missing_ok=True)
         return subprocess.run(
