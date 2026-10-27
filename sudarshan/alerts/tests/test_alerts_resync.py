@@ -335,6 +335,90 @@ def test_a_drop_during_the_tries_keeps_the_pause_for_the_next_connection(
     asyncio.run(scenario())
 
 
+async def _restart_at_the_close(proxy, openalgo, svc, clock, caplog) -> None:
+    """The day's first connection read its book at 15:55; OpenAlgo restarts at 15:56, the stream
+    is back at 15:58 with the book not answering, and the window closes at 16:00."""
+    await wait_until(lambda: "Nothing had changed." in caplog.text)
+    openalgo.book_status = 503
+    clock.at = ist(2026, 10, 27, 15, 56)
+    await proxy.outage(svc)
+    clock.at = ist(2026, 10, 27, 15, 58)
+    reads = openalgo.book_reads()
+    proxy.refusing = False
+    await wait_until(lambda: openalgo.book_reads() >= reads + 2)  # the tries have begun
+    clock.at = ist(2026, 10, 27, 16, 0, 1)
+    await wait_until(lambda: 1000 in proxy.close_codes)  # the window closed the stream
+
+
+@pytest.fixture
+def slow_tries(monkeypatch):
+    """Six more tries half a second apart: the window closes while they go on."""
+    monkeypatch.setattr(service, "RESYNC_RETRY_S", (0.5,) * 6)
+    return 1 + 6
+
+
+def test_the_days_last_pause_is_caught_up_after_the_window_closes(
+    settings_for, fast, slow_tries, tmp_path, caplog
+):
+    caplog.set_level(logging.INFO, logger="sudarshan.alerts")
+
+    async def scenario():
+        async with FakeProxy() as proxy, FakeOpenAlgo() as openalgo:
+            clock = Clock(ist(2026, 10, 27, 15, 55))
+            svc, task = await _start(_trading_day(settings_for, tmp_path, proxy, openalgo), clock)
+            await _restart_at_the_close(proxy, openalgo, svc, clock, caplog)
+            assert openalgo.bodies == []
+            # The exchange cancelled an open order at 15:57; the book answers after the close.
+            openalgo.orders = [book_row("x1", "cancelled", timestamp="27-Oct-2026 15:57:00")]
+            openalgo.book_status = 200
+            await wait_until(lambda: openalgo.bodies)
+            assert svc.state == "closed" and proxy.connections == 2  # no stream after 16:00
+            assert _lines(openalgo) == [
+                "Order alerts paused 15:56:00 to 15:58:00 IST; the order book was checked.",
+                "Cancelled: BUY 65 NIFTY 21 OCT 25900 CE, none filled (MIS, NFO)" + NOTE,
+            ]
+            await _stop(svc, task)
+
+    asyncio.run(scenario())
+
+
+def test_a_book_still_unread_after_the_close_is_told_with_what_to_do(
+    settings_for, fast, slow_tries, tmp_path, caplog
+):
+    caplog.set_level(logging.INFO, logger="sudarshan.alerts")
+
+    async def scenario():
+        async with FakeProxy() as proxy, FakeOpenAlgo() as openalgo:
+            clock = Clock(ist(2026, 10, 27, 15, 55))
+            svc, task = await _start(_trading_day(settings_for, tmp_path, proxy, openalgo), clock)
+            await _restart_at_the_close(proxy, openalgo, svc, clock, caplog)
+            await wait_until(lambda: openalgo.bodies, timeout=10)  # after every try
+            assert _lines(openalgo) == ["Order alerts paused 15:56:00 to 15:58:00 IST; " + UNREAD]
+            await _stop(svc, task)
+        told = [r for r in caplog.records if r.getMessage().startswith("Told the owner: ")]
+        assert [r.levelname for r in told] == ["WARNING"]
+
+    asyncio.run(scenario())
+
+
+def test_a_stop_during_the_tries_after_the_close_still_tells_the_pause(
+    settings_for, fast, slow_tries, tmp_path, caplog
+):
+    """A release installed at 16:00 stops the service while the book is still being tried."""
+    caplog.set_level(logging.INFO, logger="sudarshan.alerts")
+
+    async def scenario():
+        async with FakeProxy() as proxy, FakeOpenAlgo() as openalgo:
+            clock = Clock(ist(2026, 10, 27, 15, 55))
+            svc, task = await _start(_trading_day(settings_for, tmp_path, proxy, openalgo), clock)
+            await _restart_at_the_close(proxy, openalgo, svc, clock, caplog)
+            assert openalgo.bodies == []
+            await _stop(svc, task)  # the tries are cut short: the outbox still sends the pause
+            assert _lines(openalgo) == ["Order alerts paused 15:56:00 to 15:58:00 IST; " + UNREAD]
+
+    asyncio.run(scenario())
+
+
 def test_part_fills_and_rejections_found_later(settings_for, fast, quick_resync):
     async def scenario():
         async with FakeProxy() as proxy, FakeOpenAlgo() as openalgo:

@@ -89,9 +89,12 @@ stream stays up; that line says to open Orders in the app. A pause that ends bef
 start (the 09:00 pre-open, or a special session's own start) gets a line only when something was
 found: nothing trades before then, and a restart before the opening, such as a release being
 installed, is routine. Otherwise only the journal has it. A drop during the tries keeps the
-pause, so the next connection's line covers it from its start. The moment the stream was last up
-is kept in `alerts.db`, so a restart knows its pause; the first start of a day counts from the
-window's opening.
+pause, so the next connection's line covers it from its start. When the window closes during
+the tries they go on without the stream (they read only OpenAlgo's books), because nothing
+after the close looks for that pause again: the day's last pause is told like any other, and a
+stop during those tries sends it as not read. A message still on its way when the service
+stops is waited for (up to 5 s). The moment the stream was last up is kept in `alerts.db`, so a
+restart knows its pause; the first start of a day counts from the window's opening.
 - OpenAlgo's order book for Upstox carries no fill price or rejection reason: fills and prices
   come from the trade book, and a rejection found this way points to the Upstox app for the reason.
 - While OpenAlgo is in Analyze mode, its REST books answer from the sandbox, so the live book

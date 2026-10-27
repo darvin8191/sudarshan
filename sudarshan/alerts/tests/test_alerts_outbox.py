@@ -212,6 +212,29 @@ def test_flush_sends_without_the_burst_pause(fast, monkeypatch):
     asyncio.run(scenario())
 
 
+def test_flush_waits_for_the_message_on_its_way(fast):
+    """Stopping cancels the sender right after the flush: a message still being sent would be
+    cut off then, so the flush waits for its answer too."""
+
+    async def scenario():
+        delivered = []
+
+        async def slow_send(text: str) -> str:
+            await asyncio.sleep(0.3)
+            delivered.append(text)
+            return SENT
+
+        box = _box(slow_send)
+        task = asyncio.create_task(box.run())
+        box.add([alert("f")])
+        assert await box.flush(2.0) == 0
+        assert len(delivered) == 1  # answered before the flush returned
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(scenario())
+
+
 # -- the request to OpenAlgo ------------------------------------------------------------------
 
 
