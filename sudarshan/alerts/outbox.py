@@ -12,9 +12,14 @@ service's own user (loopback.py).
 
 Pace: Telegram asks for about one message per second per chat, and OpenAlgo allows /notify 30
 times a minute per address. So: at least MIN_GAP_S between two messages and at most PER_MINUTE a
-minute. A burst is merged: a message waits COALESCE_S after the first alert for the rest of the
-burst, then lists every order waiting (one line per order, its newest state; up to MAX_LINES
-lines and MAX_CHARS characters, the rest in the next message).
+minute, counted across every lane of the process by one Pacer (M10.5). The market alerts lane
+(market/lane.py) takes at most MARKET_PER_MINUTE of those and no slot while order alerts wait,
+so the order lane always keeps at least PER_MINUTE - MARKET_PER_MINUTE a minute, and a fill
+during a market storm waits at most the burst pause plus one gap. Each lane sends from its own
+task: a market message waiting on Telegram never holds a fill back. A burst is merged: a message
+waits COALESCE_S after the first alert for the rest of the burst, then lists every order waiting
+(one line per order, its newest state; up to MAX_LINES lines and MAX_CHARS characters, the rest
+in the next message).
 
 Bounded: at most MAX_PENDING orders wait. Beyond that the oldest are dropped, and the next message
 says how many could not be listed. Messages OpenAlgo could not take are tried again with a growing
@@ -43,6 +48,9 @@ NOTIFY_TIMEOUT_S = 40.0
 COALESCE_S = 0.3
 MIN_GAP_S = 1.1
 PER_MINUTE = 20
+#: The market alerts lane's share of PER_MINUTE (M10.5).
+MARKET_PER_MINUTE = 12
+MINUTE_S = 60.0
 MAX_LINES = 15
 MAX_CHARS = 3500
 MAX_PENDING = 300
@@ -66,6 +74,44 @@ DROP_REASONS = {
     404: "the owner's OpenAlgo account is not linked to a Telegram chat (OpenAlgo, Telegram Bot)",
     409: "OpenAlgo's Telegram bot is stopped (OpenAlgo, Telegram Bot, Start)",
 }
+#: A refusal that is neither of the above, in the owner's words.
+REFUSED = "OpenAlgo refused the message"
+
+# Lanes of the Pacer.
+ORDERS, MARKET = "orders", "market"
+
+
+class Pacer:
+    """Send slots for every lane of the process: one gap and one minute budget for them all.
+
+    The order lane is served first: the market lane takes no slot while order alerts wait, and
+    at most MARKET_PER_MINUTE a minute. Limits are read when asked, so tests can shrink them.
+    """
+
+    def __init__(self) -> None:
+        self._starts: deque[tuple[float, str]] = deque()  # (monotonic start, lane), last minute
+        self.orders_waiting: Callable[[], bool] = lambda: False
+
+    def allowed_at(self, lane: str) -> float:
+        """The earliest monotonic time a message of ``lane`` may start."""
+        starts = self._recent()
+        allowed = starts[-1][0] + MIN_GAP_S if starts else 0.0
+        if len(starts) >= PER_MINUTE:
+            allowed = max(allowed, starts[-PER_MINUTE][0] + MINUTE_S)
+        if lane == MARKET:
+            market = [at for at, which in starts if which == MARKET]
+            if len(market) >= MARKET_PER_MINUTE:
+                allowed = max(allowed, market[-MARKET_PER_MINUTE] + MINUTE_S)
+        return allowed
+
+    def took(self, lane: str) -> None:
+        self._starts.append((time.monotonic(), lane))
+
+    def _recent(self) -> deque[tuple[float, str]]:
+        cutoff = time.monotonic() - MINUTE_S
+        while self._starts and self._starts[0][0] <= cutoff:
+            self._starts.popleft()
+        return self._starts
 
 
 class Throttle:
@@ -103,26 +149,30 @@ class OpenAlgoTelegram:
         self.throttle = Throttle()
 
     async def send(self, text: str) -> str:
+        return (await self.send_with_reason(text))[0]
+
+    async def send_with_reason(self, text: str) -> tuple[str, str]:
+        """The outcome, and for DROP the reason in the owner's words (else "")."""
         owner = self.owner()
         if owner is None:
-            return RETRY
+            return RETRY, ""
         refused = loopback.refusal(self.url)
         if refused:
             self.throttle(logging.ERROR, "listener", "The API key is not sent to OpenAlgo: %s",
                           refused)  # fmt: skip
-            return RETRY
-        outcome = await self._post(owner, text)
+            return RETRY, ""
+        outcome, why = await self._post(owner, text)
         if outcome == KEY:
             fresh = self.reload_owner()
             if fresh is not None and fresh.api_key != owner.api_key:
                 log.info("OpenAlgo has a new API key; using it")
-                outcome = await self._post(fresh, text)
+                outcome, why = await self._post(fresh, text)
             if outcome == KEY:
                 self.throttle(logging.ERROR, "key", "OpenAlgo refused the stored API key")
                 outcome = RETRY
-        return outcome
+        return outcome, why
 
-    async def _post(self, owner, text: str) -> str:
+    async def _post(self, owner, text: str) -> tuple[str, str]:
         body = {
             "apikey": owner.api_key,
             "username": owner.username,
@@ -133,7 +183,7 @@ class OpenAlgoTelegram:
             answer = await self.client.post(self.url, json=body, timeout=NOTIFY_TIMEOUT_S)
         except httpx.HTTPError:
             self.throttle(logging.WARNING, "down", "OpenAlgo did not answer; the message waits")
-            return RETRY
+            return RETRY, ""
         status = answer.status_code
         if status == 200:
             try:
@@ -141,21 +191,21 @@ class OpenAlgoTelegram:
             except (ValueError, AttributeError):
                 said = ""
             if QUEUED not in said.lower():
-                return SENT
+                return SENT, ""
             self.throttle(logging.WARNING, "unconfirmed", "Telegram did not confirm a message")
-            return UNCONFIRMED
+            return UNCONFIRMED, ""
         if status in (401, 403):
-            return KEY
+            return KEY, ""
         if status in DROP_REASONS:
             reason = DROP_REASONS[status]
             self.throttle(logging.WARNING, f"drop-{status}", "No Telegram message: %s", reason)
-            return DROP
+            return DROP, reason
         if status == 429 or status >= 500:
             self.throttle(logging.WARNING, "busy", "OpenAlgo is busy or failing; the message waits")
-            return RETRY
+            return RETRY, ""
         self.throttle(logging.ERROR, "refused", "OpenAlgo refused a message; it is not sent again")
         log.debug("OpenAlgo answered %d to a message", status)
-        return DROP
+        return DROP, REFUSED
 
 
 class Outbox:
@@ -164,15 +214,22 @@ class Outbox:
     Args:
         send: Sends one text; returns SENT, RETRY, UNCONFIRMED or DROP.
         clock: The service clock (aware datetimes), for the age limit.
+        pacer: The process's shared send slots (a private one when not given).
     """
 
-    def __init__(self, send: Callable[[str], Awaitable[str]], clock: Callable[[], datetime]):
+    def __init__(
+        self,
+        send: Callable[[str], Awaitable[str]],
+        clock: Callable[[], datetime],
+        pacer: Pacer | None = None,
+    ):
         self.send = send
         self.clock = clock
         self._pending: OrderedDict[str, Alert] = OrderedDict()
         self._since: float | None = None  # monotonic time the oldest pending alert arrived
         self._dropped = 0
-        self._sent_at: deque[float] = deque(maxlen=PER_MINUTE)
+        self.pacer = pacer or Pacer()
+        self.pacer.orders_waiting = lambda: bool(self._pending)  # the market lane gives way
         self._wake = asyncio.Event()
         self._hurry = False
         self._in_flight = 0  # lines in the message being sent now
@@ -207,9 +264,9 @@ class Outbox:
                 continue
             if not self._hurry:
                 await self._sleep_until(self._since + COALESCE_S)
-            await self._sleep_until(self._allowed_at())
+            await self._sleep_until(self.pacer.allowed_at(ORDERS))
             batch, dropped = self._take()
-            self._sent_at.append(time.monotonic())
+            self.pacer.took(ORDERS)
             self._in_flight = len(batch)
             try:
                 outcome = await self.send(self._compose(batch, dropped))
@@ -252,14 +309,6 @@ class Outbox:
         return len(self._pending) + self._in_flight
 
     # -- internals ------------------------------------------------------------------------------
-
-    def _allowed_at(self) -> float:
-        if not self._sent_at:
-            return 0.0
-        allowed = self._sent_at[-1] + MIN_GAP_S
-        if len(self._sent_at) >= PER_MINUTE:
-            allowed = max(allowed, self._sent_at[0] + 60.0)
-        return allowed
 
     @staticmethod
     async def _sleep_until(when: float) -> None:

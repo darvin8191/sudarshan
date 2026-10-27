@@ -231,6 +231,14 @@ decrypting it with the Fernet key OpenAlgo derives from `API_KEY_PEPPER` and `FE
 - **Pace.** At least 1.1 s between messages and at most 20 a minute (Telegram asks for about one a
   second per chat; OpenAlgo allows `/notify` 30 times a minute). A message waits 0.3 s after the
   first alert of a burst, so the burst goes out as one.
+- **Lanes: fills first** (M10.5). Order alerts and market alerts share that pace through one
+  pacer, each lane sending from its own task. Market alerts take at most 12 messages a minute and
+  no slot while order alerts wait, so order alerts always keep at least 8 a minute, a fill during
+  a market storm waits at most the 0.3 s burst pause and one 1.1 s gap, and a market message slow
+  on Telegram never holds a fill back. A market alert that cannot go out within 5 minutes is not
+  sent late ("Not sent: OpenAlgo could not send it within 5 minutes; it is in the alert
+  history"); order alerts keep their 30 minutes. What became of each market message is written
+  to its alerts' history (sent, or not sent with the reason).
 - **Delivery.** OpenAlgo is asked to wait for Telegram's answer. Its "queued for delivery" answer
   means Telegram did not take the message (nothing in OpenAlgo sends that queue later), so it is
   tried up to 3 times; any other success counts as delivered. If OpenAlgo's wait had timed out
