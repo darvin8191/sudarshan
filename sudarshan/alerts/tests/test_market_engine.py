@@ -52,6 +52,7 @@ def test_once_per_candle_fires_once_in_each_candle():
     ])  # fmt: skip
     assert [f.at for f in fires] == [T0 + 1 * MIN, T0 + 17 * MIN]
     assert [f.claim for f in fires] == ["9:v4:20261021:c0", "9:v4:20261021:c1"]
+    assert [f.version for f in fires] == [4, 4]  # the definition each was decided on
     assert state.side == 0 and state.last_fired_candle == 1
 
 

@@ -10,6 +10,7 @@ from datetime import date, datetime
 
 from sudarshan.alerts.market import clock, engine, sessions, spec, words
 from sudarshan.alerts.market.book import Book
+from sudarshan.alerts.market.store import MarketStore
 from sudarshan.autologin.schedule import IST
 
 KEY = "NSE_EQ|INE062A01020"
@@ -93,3 +94,32 @@ def test_F2b_the_vwap_drifting_alone_moves_no_side():
     t += 1000
     out = book.on_tick(frame(ltp=100.23, at=t, atp=100.224, ltq=3), t, market(WED, t, TUE))
     assert [f.level for f in fires(out)] == [10023]  # above 100.224 from the next paisa
+
+
+# ---- M3: a decision applies only to the definition it was made on ---------------------------
+
+
+def test_F8_a_fire_recorded_after_an_edit_leaves_the_new_definition_alone(tmp_path):
+    """A 'Once' fire decided on version 1 is recorded after the owner's edit (version 2, a new
+    level, state reset). The fire happened while the alert said 100, so it is told; the new
+    definition stays Active and its reset stands."""
+    store = MarketStore(tmp_path / "market.db")
+    t = ms(WED, 10, 0)
+    level = {"kind": "price", "params": {"op": "crosses_above", "level": "100"}}
+    row = store.create("owner", spec.check(SBIN | level, t), t)
+    book = Book()
+    book.put(spec.Alert.of(row))
+    book.on_tick(frame(ltp=99.95, at=t), t, market(WED, t, TUE))
+    out = book.on_tick(frame(ltp=100.05, at=t + 500, ltq=2), t + 500, market(WED, t + 500, TUE))
+    (o,) = out.outcomes
+    assert o.status == "stopped"
+    new = spec.check(SBIN | {"kind": "price", "params": {"op": "crosses_above", "level": "110"}}, t)
+    store.update("owner", row["id"], 1, new, t + 600, status="active", reset_state=True)
+    event = store.record_fire("owner", o.fire, o.state, title="x", line="x", value="100.05",
+                              level="100.00", channels={"telegram": True, "app": True},
+                              status="stopped", status_reason="Fired once")  # fmt: skip
+    assert event is not None
+    after = store.alert("owner", row["id"])
+    assert (after["status"], after["version"], after["params"]["level"]) == ("active", 2, "110")
+    assert row["id"] not in store.states("owner")
+    store.close()

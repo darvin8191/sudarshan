@@ -9,11 +9,19 @@ migrates by PRAGMA user_version (migrations.py).
 The engine comes from OpenAlgo's database.engine_factory (NullPool: a connection per
 transaction, closed at once); WAL and synchronous=NORMAL come from the listener in
 database/__init__.py. This engine also emits its own BEGIN, so a migration's DDL and every write
-are whole transactions.
+are whole transactions, and a write begins IMMEDIATE: it holds the write lock from its first
+read, so two writers (two threads, or the service and a replay check) queue instead of one
+failing with "database is locked" on a snapshot the other's commit made stale.
 
 Once only: a fire is recorded under its claim (engine.claim), which is UNIQUE. A claim already
 there means the fire was told before, and ``record_fire`` says so instead of recording it twice;
 the fire's state and any stop it causes are written in the same transaction.
+
+A decision applies only to the definition it was made on. The fire is logged whatever happened
+since, but its state and stop, ``set_status`` and each state the flush saves check the alert's
+version (and that it is still Active, for a stop): a fire recorded after the owner's edit never
+stops the new definition or writes over its reset state. The version counts the owner's edits
+only; the engine's own stops leave it, so editing an alert that stopped itself is no conflict.
 
 Principal: every public method takes ``principal`` and refuses one the store was not opened for;
 every owner-data table carries it and every read filters on it. A structural test holds each
@@ -52,7 +60,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 from database.engine_factory import create_db_engine
-from sudarshan.alerts.market import migrations
+from sudarshan.alerts.market import migrations, spec
 from sudarshan.alerts.market.clock import Pause
 from sudarshan.alerts.market.engine import Fire, State
 from sudarshan.alerts.store import _cause, _private_file
@@ -119,7 +127,12 @@ meta_table = Table("meta", meta, Column("name", String, primary_key=True), Colum
 
 
 class StoreError(RuntimeError):
-    """The record refused; ``str()`` is a sentence for the owner."""
+    """The record refused; ``str()`` is a sentence for the owner, ``cause`` the system's own
+    words for the log (never shown: "database is locked" reads as the owner's fault)."""
+
+    def __init__(self, message: str, cause: str = ""):
+        super().__init__(message)
+        self.cause = cause
 
 
 class NotFound(StoreError):
@@ -139,7 +152,8 @@ class UnknownPrincipal(ValueError):
 
 
 def engine(path: Path) -> Engine:
-    """market.db's engine: NullPool from the factory, and a real BEGIN for every transaction."""
+    """market.db's engine: NullPool from the factory, and a real BEGIN for every transaction,
+    IMMEDIATE on a connection with the ``migrations.IMMEDIATE`` option (``writer``)."""
     made = create_db_engine(f"sqlite:///{path}")
 
     @event.listens_for(made, "connect")
@@ -148,9 +162,15 @@ def engine(path: Path) -> Engine:
 
     @event.listens_for(made, "begin")
     def _begin(conn):
-        conn.exec_driver_sql("BEGIN")
+        immediate = conn.get_execution_options().get(migrations.IMMEDIATE)
+        conn.exec_driver_sql("BEGIN IMMEDIATE" if immediate else "BEGIN")
 
     return made
+
+
+def writer(made: Engine) -> Engine:
+    """The same engine for writes: each transaction begins IMMEDIATE."""
+    return made.execution_options(**{migrations.IMMEDIATE: True})
 
 
 class MarketStore:
@@ -162,12 +182,13 @@ class MarketStore:
             _private_file(self.path)
             self.engine = engine(self.path)
         except OSError as exc:
-            raise StoreError(_words("opened", exc)) from exc
+            raise StoreError(WORDS["opened"], _cause(exc)) from exc
+        self.writer = writer(self.engine)
         try:
             self.applied = migrations.migrate(self.engine)
         except (OSError, SQLAlchemyError) as exc:
             self.engine.dispose()
-            raise StoreError(_words("opened", exc)) from exc
+            raise StoreError(WORDS["opened"], _cause(exc)) from exc
         except BaseException:  # SchemaTooNew, or a step's own failure: nothing is kept open
             self.engine.dispose()
             raise
@@ -190,20 +211,34 @@ class MarketStore:
         fields: Mapping[str, Any],
         now: int,
         *,
-        status: str,
+        status: str | None = None,
         status_reason: str = "",
         reset_state: bool = False,
     ) -> dict[str, Any]:
         """An edit, a pause or a resume by the owner, only from ``version`` (else a conflict).
 
-        ``reset_state`` (spec.changes_condition) forgets the alert's state in the same step."""
-        _status(status)
+        ``status`` None (an edit) keeps the status the alert has when the edit lands, except that
+        a changed condition makes a Stopped alert Active again (spec.status_after_edit), so a stop
+        the engine made a moment before is neither undone nor a conflict. ``reset_state``
+        (spec.changes_condition) forgets the alert's state in the same step."""
+        if status is not None:
+            _status(status)
         who = self._who(principal)
         mine = and_(alert.c.id == alert_id, alert.c.principal == who)
         with self._tx() as conn:
-            changed = conn.execute(
+            row = conn.execute(
+                select(alert.c.version, alert.c.status, alert.c.status_reason).where(mine)
+            ).first()
+            if row is None:
+                raise NotFound()
+            if row.version != version:
+                raise VersionConflict()
+            if status is None:
+                status = spec.status_after_edit(row.status, reset_state)
+                status_reason = row.status_reason if status == row.status else ""
+            conn.execute(
                 update(alert)
-                .where(mine, alert.c.version == version)
+                .where(mine)
                 .values(
                     **_definition(fields),
                     status=status,
@@ -211,19 +246,19 @@ class MarketStore:
                     updated_at=now,
                     version=version + 1,
                 )  # fmt: skip
-            ).rowcount
-            if not changed:
-                there = conn.execute(select(alert.c.id).where(mine)).first()
-                raise VersionConflict() if there else NotFound()
+            )
             if reset_state:
                 conn.execute(delete(alert_state).where(alert_state.c.alert_id == alert_id))
         return self.alert(principal, alert_id)
 
-    def set_status(self, principal: str, alert_id: int, status: str, reason: str, now: int) -> bool:
-        """The engine stopped or paused an alert itself (fired once, ended, 50 fires)."""
+    def set_status(
+        self, principal: str, alert_id: int, status: str, reason: str, now: int, *, version: int
+    ) -> bool:
+        """The engine stopped or paused an alert itself (ended, expired, 50 fires), judged at
+        ``version``. False when the owner changed the alert first: the owner's change stands."""
         _status(status)
         with self._tx() as conn:
-            return _set_status(conn, self._who(principal), alert_id, status, reason, now)
+            return _set_status(conn, self._who(principal), alert_id, version, status, reason, now)
 
     def delete(self, principal: str, alert_id: int) -> bool:
         """The alert and its state go; its history stays in the log."""
@@ -262,14 +297,17 @@ class MarketStore:
             rows = conn.execute(query).mappings().all()
         return {row["alert_id"]: State(*(row[name] for name in STATE_FIELDS)) for row in rows}
 
-    def save_states(self, principal: str, states: Mapping[int, State], now: int) -> int:
-        """The 1 s flush: each changed state, for the alerts that still exist."""
+    def save_states(self, principal: str, states: Mapping[int, tuple[int, State]], now: int) -> int:
+        """The 1 s flush (Book.changed): alert id -> (the version it was judged at, its state).
+        A state is saved only while the alert is at that version; one judged before an edit, or
+        for a deleted alert, is dropped."""
         who = self._who(principal)
         with self._tx() as conn:
-            known = set(conn.execute(select(alert.c.id).where(alert.c.principal == who)).scalars())
+            query = select(alert.c.id, alert.c.version).where(alert.c.principal == who)
+            versions = dict(conn.execute(query).tuples().all())
             saved = 0
-            for alert_id, state in states.items():
-                if alert_id in known:
+            for alert_id, (version, state) in states.items():
+                if versions.get(alert_id) == version:
                     _put_state(conn, who, alert_id, state, now)
                     saved += 1
         return saved
@@ -290,13 +328,16 @@ class MarketStore:
         status_reason: str = "",
     ) -> int | None:
         """One fire with its state (and its stop), once: the event id, or None when its claim
-        was already told."""
+        was already told. The state and the stop apply only while the alert is Active at the
+        version the fire was decided on (``fire.version``)."""
         who = self._who(principal)
+        if status is not None:
+            _status(status)
         with self._tx() as conn:
             row = conn.execute(
-                select(alert.c.symbol, alert.c.exchange, alert.c.kind).where(
-                    alert.c.id == fire.alert_id, alert.c.principal == who
-                )
+                select(
+                    alert.c.symbol, alert.c.exchange, alert.c.kind, alert.c.version, alert.c.status
+                ).where(alert.c.id == fire.alert_id, alert.c.principal == who)
             ).first()
             if row is None:
                 raise NotFound()
@@ -307,9 +348,12 @@ class MarketStore:
                 "found_later": int(fire.found_later is not None), "opening": int(fire.opening),
                 "test": 0,
             })  # fmt: skip
-            _put_state(conn, who, fire.alert_id, state, fire.at)
-            if status is not None:
-                _set_status(conn, who, fire.alert_id, _status(status), status_reason, fire.at)
+            if row.version == fire.version and row.status == "active":
+                _put_state(conn, who, fire.alert_id, state, fire.at)
+                if status is not None:
+                    _set_status(
+                        conn, who, fire.alert_id, fire.version, status, status_reason, fire.at
+                    )
         return event_id
 
     def record_test(
@@ -524,10 +568,10 @@ class MarketStore:
     @contextlib.contextmanager
     def _tx(self) -> Iterator:
         try:
-            with self.engine.begin() as conn:
+            with self.writer.begin() as conn:
                 yield conn
         except (OSError, SQLAlchemyError) as exc:
-            raise StoreError(_words("written", exc)) from exc
+            raise StoreError(WORDS["written"], _cause(exc)) from exc
 
     @contextlib.contextmanager
     def _read(self) -> Iterator:
@@ -535,14 +579,21 @@ class MarketStore:
             with self.engine.connect() as conn:
                 yield conn
         except (OSError, SQLAlchemyError) as exc:
-            raise StoreError(_words("read", exc)) from exc
+            raise StoreError(WORDS["read"], _cause(exc)) from exc
 
 
-def _words(done: str, exc: BaseException) -> str:
-    return (
-        f"The market alert record could not be {done} ({_cause(exc)}). Your alerts are still "
-        "checked; changes cannot be saved until this is fixed."
-    )
+#: What the owner reads when the record fails: what still works and what to check, never the
+#: system's own message (StoreError.cause keeps that for the log).
+WORDS = {
+    "opened": "Market alerts are off: their record could not be opened. Order alerts carry on. "
+    "Check that the server has free disk space.",
+    "written": "This could not be saved to the market alert record. Alerts already set are still "
+    "checked. Try again in a minute; if it keeps failing, check that the server has free disk "
+    "space.",
+    "read": "The market alert record could not be read just now. Alerts already set are still "
+    "checked. Try again in a minute; if it keeps failing, check that the server has free disk "
+    "space.",
+}
 
 
 def _status(status: str) -> str:
@@ -568,14 +619,21 @@ def _alert_row(row) -> dict[str, Any]:
     return out
 
 
-def _set_status(conn, who: str, alert_id: int, status: str, reason: str, now: int) -> bool:
+def _set_status(
+    conn, who: str, alert_id: int, version: int, status: str, reason: str, now: int
+) -> bool:
+    """The engine's own stop or pause, while the alert is Active at ``version``. The version
+    stays: it counts the owner's edits, and editing an alert that stopped itself is no conflict."""
     return bool(
         conn.execute(
             update(alert)
-            .where(alert.c.id == alert_id, alert.c.principal == who)
-            .values(
-                status=status, status_reason=reason, updated_at=now, version=alert.c.version + 1
+            .where(
+                alert.c.id == alert_id,
+                alert.c.principal == who,
+                alert.c.version == version,
+                alert.c.status == "active",
             )  # fmt: skip
+            .values(status=status, status_reason=reason, updated_at=now)
         ).rowcount
     )
 

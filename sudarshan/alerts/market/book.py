@@ -3,9 +3,10 @@
 The runtime hands each tick from the feed to ``on_tick`` with the time and what it knows about the
 market (clock.Market), and calls ``on_clock`` about once a second for what time alone decides: a
 candle's close, an end date, an expiry. Both return what happened. The Book keeps every alert's
-state in memory; ``changed`` hands over the states to save in the 1 s flush (a fire's state also
-rides in its outcome, for the transaction that records the fire). Nothing here reads a file, the
-clock or the network.
+state in memory; ``changed`` hands over the states to save in the 1 s flush, each with the
+alert's version it was judged at, so the store drops one an edit has overtaken (a fire's state
+also rides in its outcome, for the transaction that records the fire). Nothing here reads a
+file, the clock or the network.
 
 A tick is a feed frame as the bus carries it (sudarshan/feed/protocol.py): the key's full current
 state as a dict. The Book reads only the fields the alerts on that key need, and checks each where
@@ -72,7 +73,8 @@ class Book:
         self._groups: dict[str, dict[int, Alert]] = {}
         self._keys: dict[str, tuple[Alert, ...]] = {}
         self._trades: dict[str, tuple] = {}
-        self._changed: dict[int, State] = {}
+        #: Alert id -> (the version it was judged at, its state), to save in the next flush.
+        self._changed: dict[int, tuple[int, State]] = {}
         #: Alert id -> what it waits for from the feed (conditions.WAITING_*), while it waits.
         self._waiting: dict[int, str] = {}
         #: Stopped alerts: their state is kept only until ``changed`` has handed it over (a
@@ -117,9 +119,10 @@ class Book:
                 modes[alert.key] = alert.cond.feed
         return modes
 
-    def changed(self) -> dict[int, State]:
-        """The states changed since the last call, to save; the Book forgets the list, and the
-        states of the alerts that stopped (the store has them from here on)."""
+    def changed(self) -> dict[int, tuple[int, State]]:
+        """The states changed since the last call, to save: alert id -> (version, state). The
+        Book forgets the list, and the states of the alerts that stopped (the store has them from
+        here on)."""
         changed, self._changed = self._changed, {}
         for alert_id in self._stopped:
             self._states.pop(alert_id, None)
@@ -188,7 +191,8 @@ class Book:
             if got is not None:
                 out = _context(alert, old, out, got)
             if out.state is not old:
-                states[alert.id] = self._changed[alert.id] = out.state
+                states[alert.id] = out.state
+                self._changed[alert.id] = (alert.version, out.state)
             if out.fire is not None or out.status is not None or out.note is not None:
                 outcomes.append(out)
                 if out.status is not None:  # it stopped or paused itself: judged no more
@@ -208,7 +212,7 @@ class Book:
                 derived = state.derived
                 if out.fire is not None and alert.kind == "move" and derived is not None:
                     out = out._replace(fire=out.fire._replace(base=derived[2]))
-                self._apply(out, outcomes)
+                self._apply(alert, out, outcomes)
         return outcomes
 
     def seed(self, alert_id: int, frame: Mapping, market: Market) -> bool:
@@ -244,7 +248,7 @@ class Book:
             value, up, down = got.value, got.up, got.down
         side = 0 if alert.cond.mode == BREAK else (-1 if value < up else (1 if value > down else 0))
         self._states[alert_id] = state._replace(side=side, ref=value, seen_at=at)
-        self._changed[alert_id] = self._states[alert_id]
+        self._changed[alert_id] = (alert.version, self._states[alert_id])
         return True
 
     # ---- inside ----------------------------------------------------------------------------
@@ -254,10 +258,10 @@ class Book:
             self._waiting[alert_id] = code
             outcomes.append(Outcome(alert_id, self._states[alert_id], note=Reason(code, at)))
 
-    def _apply(self, out: Outcome, outcomes: list[Outcome]) -> None:
+    def _apply(self, alert: Alert, out: Outcome, outcomes: list[Outcome]) -> None:
         if out.state is not self._states.get(out.alert_id):
             self._states[out.alert_id] = out.state
-            self._changed[out.alert_id] = out.state
+            self._changed[out.alert_id] = (alert.version, out.state)
         if out.fire is not None or out.status is not None or out.note is not None:
             outcomes.append(out)
         if out.status is not None:  # it stopped or paused itself: judged no more

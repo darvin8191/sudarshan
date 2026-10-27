@@ -118,7 +118,8 @@ def test_changed_hands_over_each_state_once():
     book.put(alert(2, level="200"))
     book.on_tick(tick(99.95), T0, market(T0))
     changed = book.changed()
-    assert set(changed) == {1, 2} and changed[1].ref == 9995
+    assert set(changed) == {1, 2} and changed[1] == (1, book.state(1))  # the version judged at
+    assert changed[1][1].ref == 9995
     assert book.changed() == {}
 
 
@@ -173,7 +174,7 @@ def test_a_stopped_alerts_state_goes_after_the_flush_and_a_paused_ones_stays():
     assert book.state(1).fires == 1  # kept until the flush has it
     book.put(dataclasses.replace(alert(2, level="200"), status="paused"))  # paused by the owner
     flushed = book.changed()
-    assert flushed[1].fires == 1 and book.state(1) is None
+    assert flushed[1][1].fires == 1 and book.state(1) is None
     assert book.state(2) is not None and book.changed() == {}
     book.put(dataclasses.replace(alert(3), status="stopped"))  # loaded stopped: nothing to keep
     book.changed()

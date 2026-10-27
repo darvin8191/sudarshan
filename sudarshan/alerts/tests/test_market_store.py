@@ -6,23 +6,29 @@ import contextlib
 import inspect
 import os
 import sqlite3
+import threading
+import time
 from datetime import datetime
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
+from sqlalchemy.engine import Engine
 
+import database
 from sudarshan.alerts.market import migrations, spec
 from sudarshan.alerts.market.clock import Pause
 from sudarshan.alerts.market.engine import Fire, State
 from sudarshan.alerts.market.store import (
     DB_FILENAME,
     OFF_REASON,
+    WORDS,
     MarketStore,
     NotFound,
     StoreError,
     UnknownPrincipal,
     VersionConflict,
     meta,
+    writer,
 )
 from sudarshan.autologin.schedule import IST
 
@@ -53,7 +59,8 @@ def store(path):
 
 
 def fire(alert_id: int, claim: str, at: int = NOW, **more) -> Fire:
-    return Fire(alert_id, claim, 20261021, 0, at, at, 10005, 10000, 1, 1, **more)
+    """A fire decided on version 1 unless ``version`` says otherwise."""
+    return Fire(alert_id, claim, 20261021, 0, at, at, 10005, 10000, 1, 1, **{"version": 1} | more)
 
 
 def raw(path, sql: str):
@@ -91,7 +98,7 @@ def test_a_second_start_runs_nothing_and_keeps_everything(path, store):
 
 def test_a_populated_file_forced_back_to_version_0_migrates_without_loss(path, store):
     row = store.create("owner", FIELDS, NOW)
-    store.save_states("owner", {row["id"]: State(20261021, -1, 9995, NOW)}, NOW)
+    store.save_states("owner", {row["id"]: (1, State(20261021, -1, 9995, NOW))}, NOW)
     event_id = store.record_fire("owner", fire(row["id"], "1:v1:once"), State(20261021, 0),
                                  title="t", line="l", value="100.00", level="100.00",
                                  channels=BOTH)  # fmt: skip
@@ -115,7 +122,7 @@ def _step2(conn):
 def test_a_later_step_on_a_populated_old_copy_then_again_forced_back(path, store, monkeypatch):
     active = store.create("owner", FIELDS, NOW)
     stopped = store.create("owner", FIELDS, NOW)
-    store.set_status("owner", stopped["id"], "stopped", "Fired once at 10:00 on 21 Oct", NOW)
+    store.set_status("owner", stopped["id"], "stopped", "Fired once at 10:00", NOW, version=1)
     store.close()
     monkeypatch.setattr(migrations, "STEPS", (*migrations.STEPS, (2, _step2)))
     first = MarketStore(path)
@@ -153,6 +160,116 @@ def test_a_step_that_fails_leaves_the_file_as_it_was(path, store, monkeypatch):
     assert "colour" not in {row[1] for row in raw(path, "PRAGMA table_info(alert)")}
 
 
+def test_a_step_another_process_finished_first_is_not_run_again(path, store, monkeypatch):
+    """The version is read again under the write lock: pending() saw the step missing, but
+    another process ran it before this one held the lock. This step fails if it runs twice."""
+    store.close()
+    runs = []
+
+    def once(conn):
+        runs.append(conn)
+        conn.exec_driver_sql("CREATE TABLE once_only (x INTEGER)")
+
+    monkeypatch.setattr(migrations, "STEPS", (*migrations.STEPS, (2, once)))
+    MarketStore(path).close()
+    monkeypatch.setattr(migrations, "pending", lambda engine, steps=None: [2])  # a stale look
+    again = MarketStore(path)
+    assert again.applied == [] and len(runs) == 1
+    again.close()
+
+
+def _hold_first(statement_start: str, names: set[str], gate: threading.Barrier):
+    """A cursor hook: each named thread waits at ``gate`` before its first statement starting
+    ``statement_start``, so both have read before either writes (if the store lets them)."""
+    held = set()
+
+    def hold(conn, cursor, statement, parameters, context, executemany):
+        name = threading.current_thread().name
+        if name in names and name not in held and statement.startswith(statement_start):
+            held.add(name)
+            with contextlib.suppress(threading.BrokenBarrierError):
+                gate.wait(timeout=0.5)
+
+    return hold
+
+
+def _race(*calls) -> list:
+    """Run each call on its own thread at once; their results, or the StoreError raised."""
+    results: list = [None] * len(calls)
+
+    def run(n, call):
+        try:
+            results[n] = call()
+        except StoreError as exc:
+            results[n] = exc
+
+    threads = [
+        threading.Thread(target=run, args=(n, call), name=f"race-{n}")
+        for n, call in enumerate(calls)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+    return results
+
+
+def test_two_writers_at_once_queue_instead_of_failing(store, monkeypatch):
+    """The 1 s flush and a fire's record write at the same moment from two threads. Each write
+    begins IMMEDIATE, so the second waits for the first; with a deferred BEGIN both read first,
+    and the loser's write could only fail ("database is locked") after waiting it out."""
+    monkeypatch.setattr(database, "LOCK_RETRY_BUDGET_S", 3.0)
+    row = store.create("owner", FIELDS, NOW)
+    hook = _hold_first("INSERT", {"race-0", "race-1"}, threading.Barrier(2))
+    event.listen(store.engine, "before_cursor_execute", hook)
+    start = time.monotonic()
+    results = _race(
+        lambda: store.save_states("owner", {row["id"]: (1, State(20261021, -1, 9995, NOW))}, NOW),
+        lambda: store.record_fire("owner", fire(row["id"], "1:v1:20261021:1"), State(20261021, 1),
+                                  title="t", line="l", value="v", level="l", channels=BOTH),
+    )  # fmt: skip
+    event.remove(store.engine, "before_cursor_execute", hook)
+    assert not [r for r in results if isinstance(r, StoreError)], results
+    assert results[0] == 1 and isinstance(results[1], int)
+    assert time.monotonic() - start < 2.5  # one hold of 0.5 s, then a short queue
+
+
+def test_two_records_of_one_claim_at_once_tell_it_once(store, monkeypatch):
+    """The same fire recorded twice at the same moment: one event id, one "already told"
+    (None), never a failure, and one row in the log."""
+    monkeypatch.setattr(database, "LOCK_RETRY_BUDGET_S", 3.0)
+    row = store.create("owner", FIELDS, NOW)
+    hook = _hold_first("INSERT INTO alert_event", {"race-0", "race-1"}, threading.Barrier(2))
+    event.listen(store.engine, "before_cursor_execute", hook)
+
+    def record():
+        return store.record_fire("owner", fire(row["id"], "1:v1:once"), State(20261021, 1),
+                                 title="t", line="l", value="v", level="l", channels=BOTH,
+                                 status="stopped", status_reason="Fired once")  # fmt: skip
+
+    results = _race(record, record)
+    event.remove(store.engine, "before_cursor_execute", hook)
+    assert sorted(type(r).__name__ for r in results) == ["NoneType", "int"], results
+    assert len(store.events("owner")) == 1
+
+
+def test_two_processes_opening_a_new_file_at_once_both_start(path, monkeypatch):
+    """Both run the migrations at the same moment: the second waits for the first's step and
+    then finds it done. (Threads here; a process is the same to SQLite.)"""
+    monkeypatch.setattr(database, "LOCK_RETRY_BUDGET_S", 3.0)
+    hook = _hold_first("CREATE TABLE", {"race-0", "race-1"}, threading.Barrier(2))
+    event.listen(Engine, "before_cursor_execute", hook)
+    try:
+        results = _race(lambda: MarketStore(path), lambda: MarketStore(path))
+    finally:
+        event.remove(Engine, "before_cursor_execute", hook)
+    assert not [r for r in results if isinstance(r, StoreError)], results
+    assert sorted(len(r.applied) for r in results) == [0, 1]
+    for opened in results:
+        opened.close()
+    assert raw(path, "PRAGMA user_version") == [(migrations.LATEST,)]
+
+
 def test_a_file_newer_than_the_code_is_refused_and_left_alone(path, store):
     store.close()
     raw(path, "PRAGMA user_version = 99")
@@ -167,13 +284,36 @@ def test_a_file_newer_than_the_code_is_refused_and_left_alone(path, store):
 
 
 def test_a_record_that_cannot_be_written_says_so_in_words(store):
+    """What still works and what to check; the system's own words only in ``cause``."""
     store.engine = create_engine("sqlite:////nonexistent/dir/market.db")
+    store.writer = writer(store.engine)
     with pytest.raises(StoreError) as caught:
         store.create("owner", FIELDS, NOW)
-    assert str(caught.value).startswith("The market alert record could not be written (")
-    assert str(caught.value).endswith("changes cannot be saved until this is fixed.")
-    with pytest.raises(StoreError, match="could not be read"):
+    assert (
+        str(caught.value)
+        == WORDS["written"]
+        == (
+            "This could not be saved to the market alert record. Alerts already set are still "
+            "checked. Try again in a minute; if it keeps failing, check that the server has free "
+            "disk space."
+        )
+    )
+    assert caught.value.cause == "unable to open database file"
+    with pytest.raises(StoreError) as caught:
         store.alerts("owner")
+    assert str(caught.value) == WORDS["read"] and "(" not in str(caught.value)
+
+
+def test_a_record_that_cannot_be_opened_says_market_alerts_are_off(tmp_path):
+    """A failed open stops market alerts: the words must not say they are still checked."""
+    (tmp_path / "state").write_text("a file where the directory should be")
+    with pytest.raises(StoreError) as caught:
+        MarketStore(tmp_path / "state" / DB_FILENAME)
+    assert str(caught.value) == (
+        "Market alerts are off: their record could not be opened. Order alerts carry on. Check "
+        "that the server has free disk space."
+    )
+    assert "still checked" not in str(caught.value) and caught.value.cause
 
 
 # ---- definitions and state -----------------------------------------------------------------
@@ -192,7 +332,7 @@ def test_create_read_and_list(store):
 
 def test_update_needs_the_current_version(store):
     row = store.create("owner", FIELDS, NOW)
-    store.save_states("owner", {row["id"]: State(20261021, -1, 9995, NOW)}, NOW)
+    store.save_states("owner", {row["id"]: (1, State(20261021, -1, 9995, NOW))}, NOW)
     edited = store.update("owner", row["id"], 1, FIELDS | {"note": "new"}, NOW + 1, status="active")
     assert edited["version"] == 2 and edited["note"] == "new"
     assert store.states("owner")[row["id"]].side == -1  # a note edit keeps the state
@@ -213,12 +353,12 @@ def test_update_needs_the_current_version(store):
 
 def test_set_status_and_delete(store):
     row = store.create("owner", FIELDS, NOW)
-    assert store.set_status("owner", row["id"], "stopped", "Ended on 20 Dec", NOW + 5)
+    assert store.set_status("owner", row["id"], "stopped", "Ended on 20 Dec", NOW + 5, version=1)
     after = store.alert("owner", row["id"])
     assert (after["status"], after["status_reason"], after["version"]) == (
         "stopped",
         "Ended on 20 Dec",
-        2,
+        1,  # the version counts the owner's edits only
     )
     store.record_fire("owner", fire(row["id"], "1:v1:once"), State(20261021, 0),
                       title="t", line="l", value="1", level="1", channels=BOTH)  # fmt: skip
@@ -230,8 +370,44 @@ def test_set_status_and_delete(store):
 def test_states_are_saved_only_for_alerts_still_there(store):
     row = store.create("owner", FIELDS, NOW)
     full = State(20261021, 1, 10005, NOW, NOW - 5, 3, 7, 2, 1, forming=None, derived=("x",))
-    assert store.save_states("owner", {row["id"]: full, 999: State()}, NOW) == 1
+    assert store.save_states("owner", {row["id"]: (1, full), 999: (1, State())}, NOW) == 1
     assert store.states("owner") == {row["id"]: State(*full[:9])}  # memory-only fields drop
+
+
+def test_a_decision_applies_only_to_the_definition_it_was_judged_at(store):
+    """A state or a stop judged at version 1 does not reach version 2 (the owner's edit), and
+    an automatic stop does not reach an alert the owner paused."""
+    row = store.create("owner", FIELDS, NOW)
+    level = FIELDS | {"params": FIELDS["params"] | {"level": "110"}}
+    store.update("owner", row["id"], 1, level, NOW + 1, reset_state=True)
+    old = State(20261021, -1, 9995, NOW)
+    assert store.save_states("owner", {row["id"]: (1, old)}, NOW + 2) == 0
+    assert not store.set_status("owner", row["id"], "stopped", "Ended", NOW + 3, version=1)
+    assert store.states("owner") == {} and store.alert("owner", row["id"])["status"] == "active"
+    assert store.save_states("owner", {row["id"]: (2, State(20261021, -1))}, NOW + 4) == 1
+    store.update("owner", row["id"], 2, level, NOW + 5, status="paused")
+    assert not store.set_status("owner", row["id"], "stopped", "Ended", NOW + 6, version=3)
+    assert store.alert("owner", row["id"])["status"] == "paused"
+    late = store.record_fire("owner", fire(row["id"], "1:v3:once", version=3), State(20261021, 1),
+                             title="t", line="l", value="v", level="l", channels=BOTH,
+                             status="stopped", status_reason="Fired once")  # fmt: skip
+    assert late is not None  # told: it was decided while the alert was Active
+    assert store.alert("owner", row["id"])["status"] == "paused"  # the owner's pause stands
+    assert store.states("owner")[row["id"]] == State(20261021, -1)
+
+
+def test_an_alert_that_stopped_itself_takes_the_owners_next_edit_without_a_conflict(store):
+    row = store.create("owner", FIELDS, NOW)
+    assert store.set_status("owner", row["id"], "stopped", "Ended on 20 Dec", NOW + 1, version=1)
+    note = store.update("owner", row["id"], 1, FIELDS | {"note": "later"}, NOW + 2)
+    assert (note["status"], note["status_reason"], note["version"]) == (
+        "stopped",
+        "Ended on 20 Dec",
+        2,
+    )
+    level = FIELDS | {"params": FIELDS["params"] | {"level": "105"}}
+    again = store.update("owner", row["id"], 2, level, NOW + 3, reset_state=True)
+    assert (again["status"], again["status_reason"], again["version"]) == ("active", "", 3)
 
 
 # ---- the log -------------------------------------------------------------------------------
@@ -315,6 +491,21 @@ def test_baselines_pauses_and_the_last_moment_seen(store):
     assert store.seen("owner") == NOW + 10_000
 
 
+def test_pauses_reach_past_the_start_even_when_they_began_before_it(store):
+    """A pause still open from before ``since`` (the session's start) is today's too; one that
+    ended before it is not."""
+    since = NOW
+    ended = store.open_pause("owner", since - 7_200_000, "feed")
+    store.close_pause("owner", ended, since - 3_600_000)
+    across = store.open_pause("owner", since - 600_000, "service")
+    store.close_pause("owner", across, since + 60_000)
+    store.open_pause("owner", since - 300_000, "feed")  # still open
+    assert store.pauses("owner", since) == (
+        Pause(since - 600_000, since + 60_000, "service"),
+        Pause(since - 300_000, None, "feed"),
+    )
+
+
 def test_prune_keeps_100_days_never_fewer_than_90_and_every_definition(path):
     store = MarketStore(path, keep_days=30)
     assert store.keep_days == 90
@@ -360,8 +551,8 @@ def test_one_principal_never_reads_anothers_rows(path):
     store = MarketStore(path, principals=("owner", "family"))
     mine = store.create("owner", FIELDS, NOW)
     theirs = store.create("family", FIELDS, NOW)
-    store.save_states("owner", {mine["id"]: State(1), theirs["id"]: State(2)}, NOW)
-    store.save_states("family", {theirs["id"]: State(3)}, NOW)
+    store.save_states("owner", {mine["id"]: (1, State(1)), theirs["id"]: (1, State(2))}, NOW)
+    store.save_states("family", {theirs["id"]: (1, State(3))}, NOW)
     store.record_fire("family", fire(theirs["id"], "2:v1:once"), State(3), title="t", line="l",
                       value="v", level="l", channels=BOTH)  # fmt: skip
     store.set_prefs("family", telegram=False, app=False, now=NOW)

@@ -5,6 +5,12 @@ lacks it) and runs in one transaction with ``PRAGMA user_version = N``, so a ste
 leaves the file as it was. pysqlite issues no BEGIN before DDL on its own; the store's engine
 emits one (store.engine), and without it a failed step would keep its tables.
 
+Two processes may open a new file at once (the service and a replay check). Each step's
+transaction begins IMMEDIATE, taking the write lock before it reads user_version: the second
+waits for the first to commit, then finds the step done. A deferred BEGIN read the version on a
+snapshot the first one's commit made stale, and its write could then only fail ("database is
+locked") however long it waited.
+
 A file whose user_version is newer than this code (a release rolled back after a newer one had
 migrated it) is refused with one line in the owner's words, and market alerts stay off: an
 older release must not write to a schema it does not know.
@@ -17,6 +23,10 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 
 from sqlalchemy.engine import Connection, Engine
+
+#: An execution option the store's engine reads in its "begin" listener: this transaction
+#: writes, so it begins IMMEDIATE and holds the write lock from its first read.
+IMMEDIATE = "sudarshan_immediate"
 
 #: Every owner-data table carries ``principal`` ("owner" in this release).
 V1 = (
@@ -171,9 +181,10 @@ def migrate(engine: Engine, steps: Sequence[Step] | None = None) -> list[int]:
     """Run every step the file lacks, each in its own transaction; returns the steps run."""
     steps = STEPS if steps is None else steps
     done = []
+    writer = engine.execution_options(**{IMMEDIATE: True})
     for number in pending(engine, steps):
         step = dict(steps)[number]
-        with engine.begin() as conn:
+        with writer.begin() as conn:
             if version(conn) >= number:  # another process got here first
                 continue
             step(conn)

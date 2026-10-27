@@ -130,6 +130,9 @@ class Fire(NamedTuple):
     price: int | None = None
     #: At candle close: the candle's (start, end), epoch ms.
     span: tuple[int, int] | None = None
+    #: The alert's version the fire was decided on: the store applies its state and stop only
+    #: to that definition.
+    version: int = 0
 
 
 class Reason(NamedTuple):
@@ -282,7 +285,8 @@ def _fire(alert, state, obs, now, event, previous, found, opening) -> Outcome:
     n = s.fires_session + 1
     level = obs.up if event == UP else obs.down
     fire = Fire(alert.id, claim(alert, obs.session, obs.candle, n), obs.session, obs.candle, now,
-                obs.at, obs.value, level, event, n, previous, found, opening)  # fmt: skip
+                obs.at, obs.value, level, event, n, previous, found, opening,
+                version=alert.version)  # fmt: skip
     state = State(s.session, s.side, s.ref, s.seen_at, obs.at, obs.candle, s.fires + 1, n,
                   s.quota_base, s.forming, s.derived)  # fmt: skip
     if alert.frequency == ONCE:
