@@ -58,14 +58,56 @@ def test_every_vector_has_a_unique_id():
 
 
 def test_a_claim_that_breaks_a_cap_changes_nothing(tmp_path):
-    subs = subs_with(tmp_path, {NIFTY: "ltpc"}, {A: {REL: "full"}})
-    with pytest.raises(CapError, match="51 keys in full_d30"):
+    base = {NIFTY: "ltpc"} | {f"NSE_EQ|K{n}": "ltpc" for n in range(1300)}
+    subs = subs_with(tmp_path, base, {A: {REL: "full"}})
+    with pytest.raises(CapError, match="^sudarshan-screener: 51 keys in full_d30"):
         subs.put_claims(S, {f"NSE_FO|{n}": "full_d30" for n in range(51)}, NOW)
-    full = {f"NSE_FO|{n}": "full" for n in range(1500)}  # with ltpc in use: combined 1,500
-    with pytest.raises(CapError, match="combined cap of 1500"):
+    full = {f"NSE_FO|{n}": "full" for n in range(250)}  # with ltpc in use: combined 1,500
+    with pytest.raises(CapError, match="^sudarshan-alerts: 1551 keys .* combined cap of 1500"):
         subs.put_claims(A, full, NOW)
-    assert subs.desired() == {NIFTY: "ltpc", REL: "full"} and set(subs.claims) == {A}
+    assert subs.desired() == base | {REL: "full"} and set(subs.claims) == {A}
     assert not subs.state_file.exists()  # nothing was saved either
+
+
+def test_each_client_has_a_quota_and_the_ring_a_ceiling(tmp_path):
+    """Cross-design R1: screener 700, alerts 300, portfolio 200, any other 50; 1,400 in all,
+    a key two clients hold counting once. A refusal names the client and changes nothing."""
+    subs = subs_with(tmp_path, {NIFTY: "ltpc"})
+
+    def keys(prefix: str, n: int, start: int = 0) -> dict:
+        return {f"NSE_FO|{prefix}{i}": "ltpc" for i in range(start, start + n)}
+
+    with pytest.raises(CapError, match="^sudarshan-alerts may claim at most 300 keys; it "
+                                       "asked for 301$"):  # fmt: skip
+        subs.put_claims(A, keys("a", 301), NOW)
+    with pytest.raises(CapError, match="^sudarshan-x may claim at most 50 keys"):
+        subs.put_claims("sudarshan-x", keys("x", 51), NOW)
+    subs.put_claims(S, keys("s", 700), NOW)
+    subs.put_claims(A, keys("a", 300), NOW)
+    subs.put_claims("sudarshan-portfolio", keys("p", 200), NOW)
+    for n in range(4):
+        subs.put_claims(f"sudarshan-x{n}", keys(f"x{n}-", 50), NOW)
+    assert len(subs.desired()) == 1 + 1400
+    with pytest.raises(CapError, match="^sudarshan-x4: the claims of every client would hold "
+                                       "1401 keys; at most 1400 together$"):  # fmt: skip
+        subs.put_claims("sudarshan-x4", keys("x4-", 1), NOW)
+    assert "sudarshan-x4" not in subs.claims
+    subs.put_claims("sudarshan-x4", keys("s", 50), NOW)  # held by the screener already: no more
+    assert len(subs.desired()) == 1 + 1400 and subs.claim_counts()["sudarshan-x4"] == 50
+
+
+def test_a_stored_claim_over_its_quota_is_dropped_at_start(tmp_path, caplog):
+    keys, state = tmp_path / "keys.txt", tmp_path / "state" / "subscriptions.json"
+    keys.write_text(f"ltpc {NIFTY}\n")
+    state.parent.mkdir()
+    claims = {
+        A: {"renewed_at": int(NOW), "keys": {f"NSE_FO|{n}": "ltpc" for n in range(301)}},
+        S: {"renewed_at": int(NOW), "keys": {INFY: "ltpc"}},
+    }
+    state.write_text(json.dumps({"version": 2, "added": {}, "removed": [], "claims": claims}))
+    with caplog.at_level(logging.ERROR, logger="sudarshan.feed"):
+        subs = Subscriptions.load(keys, state, NOW)
+    assert subs.claim_counts() == {S: 1} and "over its quota of 300" in caplog.text
 
 
 def test_claims_persist_as_version_2_and_a_version_1_file_loads(tmp_path):

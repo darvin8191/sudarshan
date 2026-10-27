@@ -83,7 +83,7 @@ header get 403). JSON in and out; use `127.0.0.1`, not `localhost` (which may re
 | `GET /subscriptions` | the desired set by mode |
 | `POST /subscribe` `{"mode": "ltpc", "keys": [...]}` | 200 with counts; 400 bad mode or key; 409 over an Upstox cap |
 | `POST /unsubscribe` `{"keys": [...]}` | 200 with counts; a key a client claims stays on the socket |
-| `PUT /claims/<client>` `{"keys": {"NSE_EQ|INE002A01018": "full"}}` | replaces that client's whole set and renews it: 200 `{ok, claimed, subscribed, applied_live}`; 400 bad client id, key or mode; 409 over an Upstox cap (nothing changes; the message gives the numbers) |
+| `PUT /claims/<client>` `{"keys": {"NSE_EQ|INE002A01018": "full"}}` | replaces that client's whole set and renews it: 200 `{ok, claimed, subscribed, applied_live}`; 400 bad client id, key or mode; 409 over the client's quota, the ring's 1,400 or an Upstox cap (nothing changes; the message names the client and gives the numbers) |
 | `DELETE /claims/<client>` | drops the client's set |
 | `GET /claims` | every client: renewed_at, keys, by_mode |
 
@@ -190,9 +190,13 @@ shows its last non-zero value. Use REST quotes for circuit checks.
   key in the highest mode anyone holds it in (ltpc < option_greeks < full < full_d30), so no
   client downgrades or removes a key another one needs. On a change the socket is sent only the
   difference: `sub` for keys new to it, `change_mode` for keys whose mode changed, `unsub` for keys
-  nobody holds any more. Caps are checked on that effective set. A client that has not renewed its
-  claims for 7 days loses them (checked at start and at each day's close); claims that would break
-  a cap at start are dropped with an ERROR and the feed starts with its base and overlay.
+  nobody holds any more. Caps are checked on that effective set. Each client has a quota
+  (`sudarshan-screener` 700, `sudarshan-alerts` 300, `sudarshan-portfolio` 200, any other client
+  50) and every client's claims together hold at most 1,400 keys, a key two clients hold counting
+  once; a claim over either is refused with 409 and the message names the client. A client that
+  has not renewed its claims for 7 days loses them (checked at start and at each day's close); a
+  stored claim over its quota, or claims that would break a cap or the ceiling at start, are
+  dropped with an ERROR and the feed starts with its base and overlay.
 - **Every key is re-sent after a reconnect**, claims included,
   in batches of 100. Caps per connection (Upstox): ltpc 5,000, full 2,000, option_greeks 3,000,
   full_d30 50; once two modes are in use, the total may not exceed the smallest "combined"

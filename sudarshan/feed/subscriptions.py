@@ -11,8 +11,10 @@ in one step. The socket carries the union of the overlay and every client's clai
 the highest mode anyone holds it in (ltpc < option_greeks < full < full_d30), so a client never
 downgrades or removes a key another one needs, and ``/unsubscribe`` cannot take a claimed key
 away. Upstox's caps are checked on that effective set; a change that would break one changes
-nothing. A client that has not renewed its claims for 7 days loses them, so a removed service
-cannot hold keys forever. ``subscriptions.json`` is version 2 (``claims``); version 1 still loads.
+nothing. Each client also has a quota (cross-design R1: screener 700, alerts 300, portfolio 200,
+any other 50) and every claim together may hold at most 1,400 keys; a refusal names the client.
+A client that has not renewed its claims for 7 days loses them, so a removed service cannot hold
+keys forever. ``subscriptions.json`` is version 2 (``claims``); version 1 still loads.
 """
 
 from __future__ import annotations
@@ -36,6 +38,11 @@ RANK = {"ltpc": 0, "option_greeks": 1, "full": 2, "full_d30": 3}
 CLIENT_RE = re.compile(r"[a-z][a-z0-9-]{0,39}")
 #: Claims not renewed for this long are dropped.
 CLAIM_TTL_S = 7 * 86400
+#: Keys one client may claim (cross-design R1); a client not named here may claim OTHER_QUOTA.
+QUOTAS = {"sudarshan-screener": 700, "sudarshan-alerts": 300, "sudarshan-portfolio": 200}
+OTHER_QUOTA = 50
+#: Keys every client's claims may hold together; a key two clients hold counts once.
+RING_CEILING = 1_400
 # Upstox Feed V3 per-connection caps ("Individual" column of the limits table).
 CAPS = {"ltpc": 5000, "full": 2000, "option_greeks": 3000, "full_d30": 50}
 # The "Combined" column applies once more than one mode is live. Upstox does not define it more
@@ -165,6 +172,7 @@ class Subscriptions:
         subs.expire(time.time() if now is None else now)
         try:
             check_caps(subs.desired())
+            check_ring(subs.claims)
         except CapError as exc:  # the feed still starts with its base and overlay
             log.error(
                 "dropping every client's claims at start: %s (%s)", exc, ", ".join(subs.claims)
@@ -225,11 +233,19 @@ class Subscriptions:
         return gone, self._commit(added=added, removed=removed) if gone else Change({}, {}, ())
 
     def put_claims(self, client: str, keys: dict[str, str], now: float) -> Change:
-        """Replace ``client``'s whole set (and renew it). Raises CapError, changing nothing."""
+        """Replace ``client``'s whole set (and renew it). Raises CapError naming the client,
+        changing nothing, over its quota, the ring's ceiling or an Upstox cap."""
+        limit = quota(client)
+        if len(keys) > limit:
+            raise CapError(f"{client} may claim at most {limit} keys; it asked for {len(keys)}")
         claims = {c: v for c, v in self.claims.items() if c != client}
         if keys:
             claims[client] = {"renewed_at": int(now), "keys": dict(keys)}
-        return self._commit(claims=claims)
+        try:
+            check_ring(claims)
+            return self._commit(claims=claims)
+        except CapError as exc:
+            raise CapError(f"{client}: {exc}") from None
 
     def drop_claims(self, client: str) -> Change:
         if client not in self.claims:
@@ -269,8 +285,23 @@ class Subscriptions:
             log.error("could not persist subscriptions to %s: %s", self.state_file, exc)
 
 
+def check_ring(claims: dict[str, dict]) -> None:
+    """Every client's claims together hold at most RING_CEILING keys (a shared key once)."""
+    held = len(set().union(*(claim["keys"] for claim in claims.values())))
+    if held > RING_CEILING:
+        raise CapError(
+            f"the claims of every client would hold {held} keys; at most {RING_CEILING} together"
+        )
+
+
+def quota(client: str) -> int:
+    """How many keys ``client`` may claim (cross-design R1)."""
+    return QUOTAS.get(client, OTHER_QUOTA)
+
+
 def _read_claims(raw) -> dict[str, dict]:
-    """Version 2's claims, each one checked; a damaged entry is dropped, not the file."""
+    """Version 2's claims, each one checked; a damaged entry, or one over its client's quota,
+    is dropped, not the file."""
     claims: dict[str, dict] = {}
     for client, claim in raw.items() if isinstance(raw, dict) else ():
         try:
@@ -278,6 +309,8 @@ def _read_claims(raw) -> dict[str, dict]:
             renewed = claim["renewed_at"]
             if isinstance(renewed, bool) or not isinstance(renewed, int | float):
                 raise ValueError("renewed_at is not a time")
+            if len(keys) > quota(client):
+                raise ValueError(f"{len(keys)} keys, over its quota of {quota(client)}")
         except (ValueError, TypeError, KeyError) as exc:
             log.error("ignoring the stored claims of %r: %s", str(client)[:40], exc)
             continue
