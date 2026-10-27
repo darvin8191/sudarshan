@@ -1,0 +1,2122 @@
+{
+ "about": "Golden vectors for sudarshan/guard/rules.py (M5.13). Each book is a list of rows in the shape Upstox's GET /v2/portfolio/short-term-positions returns them (product I or D, the overnight quantity carried in, today's buys and sells); p is read from them by rules.upstox_position. Claims are exits already sent on a side that the book does not show yet.",
+ "rows": {
+  "nifty_ce_long_65_mis": {
+   "exchange": "NFO",
+   "multiplier": 1.0,
+   "value": -7800.0,
+   "pnl": 650.0,
+   "product": "I",
+   "instrument_token": "NSE_FO|49213",
+   "average_price": 120.0,
+   "buy_value": 7800.0,
+   "overnight_quantity": 0,
+   "day_buy_value": 7800.0,
+   "day_buy_price": 120.0,
+   "overnight_buy_amount": 0.0,
+   "overnight_buy_quantity": 0,
+   "day_buy_quantity": 65,
+   "day_sell_value": 0.0,
+   "day_sell_price": 0.0,
+   "overnight_sell_amount": 0.0,
+   "overnight_sell_quantity": 0,
+   "day_sell_quantity": 0,
+   "quantity": 65,
+   "last_price": 130.0,
+   "unrealised": 650.0,
+   "realised": 0.0,
+   "sell_value": 0.0,
+   "tradingsymbol": "NIFTY 25900 CE 27 OCT 26",
+   "trading_symbol": "NIFTY 25900 CE 27 OCT 26",
+   "close_price": 118.4,
+   "buy_price": 120.0,
+   "sell_price": 0.0
+  },
+  "nifty_ce_long_65_nrml": {
+   "exchange": "NFO",
+   "multiplier": 1.0,
+   "value": -7930.0,
+   "pnl": 520.0,
+   "product": "D",
+   "instrument_token": "NSE_FO|49213",
+   "average_price": 122.0,
+   "buy_value": 7930.0,
+   "overnight_quantity": 0,
+   "day_buy_value": 7930.0,
+   "day_buy_price": 122.0,
+   "overnight_buy_amount": 0.0,
+   "overnight_buy_quantity": 0,
+   "day_buy_quantity": 65,
+   "day_sell_value": 0.0,
+   "day_sell_price": 0.0,
+   "overnight_sell_amount": 0.0,
+   "overnight_sell_quantity": 0,
+   "day_sell_quantity": 0,
+   "quantity": 65,
+   "last_price": 130.0,
+   "unrealised": 520.0,
+   "realised": 0.0,
+   "sell_value": 0.0,
+   "tradingsymbol": "NIFTY 25900 CE 27 OCT 26",
+   "trading_symbol": "NIFTY 25900 CE 27 OCT 26",
+   "close_price": 118.4,
+   "buy_price": 122.0,
+   "sell_price": 0.0
+  },
+  "nifty_ce_part_exit_mis": {
+   "exchange": "NFO",
+   "multiplier": 1.0,
+   "value": -6500.0,
+   "pnl": 1950.0,
+   "product": "I",
+   "instrument_token": "NSE_FO|49213",
+   "average_price": 120.0,
+   "buy_value": 15600.0,
+   "overnight_quantity": 0,
+   "day_buy_value": 15600.0,
+   "day_buy_price": 120.0,
+   "overnight_buy_amount": 0.0,
+   "overnight_buy_quantity": 0,
+   "day_buy_quantity": 130,
+   "day_sell_value": 9100.0,
+   "day_sell_price": 140.0,
+   "overnight_sell_amount": 0.0,
+   "overnight_sell_quantity": 0,
+   "day_sell_quantity": 65,
+   "quantity": 65,
+   "last_price": 130.0,
+   "unrealised": 650.0,
+   "realised": 1300.0,
+   "sell_value": 9100.0,
+   "tradingsymbol": "NIFTY 25900 CE 27 OCT 26",
+   "trading_symbol": "NIFTY 25900 CE 27 OCT 26",
+   "close_price": 118.4,
+   "buy_price": 120.0,
+   "sell_price": 140.0
+  },
+  "nifty_ce_carried_65_nrml": {
+   "exchange": "NFO",
+   "multiplier": 1.0,
+   "value": -6500.0,
+   "pnl": 1950.0,
+   "product": "D",
+   "instrument_token": "NSE_FO|49213",
+   "average_price": 100.0,
+   "buy_value": 6500.0,
+   "overnight_quantity": 65,
+   "day_buy_value": 0.0,
+   "day_buy_price": 0.0,
+   "overnight_buy_amount": 6500.0,
+   "overnight_buy_quantity": 65,
+   "day_buy_quantity": 0,
+   "day_sell_value": 0.0,
+   "day_sell_price": 0.0,
+   "overnight_sell_amount": 0.0,
+   "overnight_sell_quantity": 0,
+   "day_sell_quantity": 0,
+   "quantity": 65,
+   "last_price": 130.0,
+   "unrealised": 754.0,
+   "realised": 0.0,
+   "sell_value": 0.0,
+   "tradingsymbol": "NIFTY 25900 CE 27 OCT 26",
+   "trading_symbol": "NIFTY 25900 CE 27 OCT 26",
+   "close_price": 118.4,
+   "buy_price": 100.0,
+   "sell_price": 0.0
+  },
+  "nifty_ce_crossed_short_65_mis": {
+   "exchange": "NFO",
+   "multiplier": 1.0,
+   "value": 8450.0,
+   "pnl": 0.0,
+   "product": "I",
+   "instrument_token": "NSE_FO|49213",
+   "average_price": 125.0,
+   "buy_value": 7800.0,
+   "overnight_quantity": 0,
+   "day_buy_value": 7800.0,
+   "day_buy_price": 120.0,
+   "overnight_buy_amount": 0.0,
+   "overnight_buy_quantity": 0,
+   "day_buy_quantity": 65,
+   "day_sell_value": 16250.0,
+   "day_sell_price": 125.0,
+   "overnight_sell_amount": 0.0,
+   "overnight_sell_quantity": 0,
+   "day_sell_quantity": 130,
+   "quantity": -65,
+   "last_price": 130.0,
+   "unrealised": -325.0,
+   "realised": 325.0,
+   "sell_value": 16250.0,
+   "tradingsymbol": "NIFTY 25900 CE 27 OCT 26",
+   "trading_symbol": "NIFTY 25900 CE 27 OCT 26",
+   "close_price": 118.4,
+   "buy_price": 120.0,
+   "sell_price": 125.0
+  },
+  "nifty_ce_closed_today_mis": {
+   "exchange": "NFO",
+   "multiplier": 1.0,
+   "value": 1300.0,
+   "pnl": 1300.0,
+   "product": "I",
+   "instrument_token": "NSE_FO|49213",
+   "average_price": 0.0,
+   "buy_value": 7800.0,
+   "overnight_quantity": 0,
+   "day_buy_value": 7800.0,
+   "day_buy_price": 120.0,
+   "overnight_buy_amount": 0.0,
+   "overnight_buy_quantity": 0,
+   "day_buy_quantity": 65,
+   "day_sell_value": 9100.0,
+   "day_sell_price": 140.0,
+   "overnight_sell_amount": 0.0,
+   "overnight_sell_quantity": 0,
+   "day_sell_quantity": 65,
+   "quantity": 0,
+   "last_price": 130.0,
+   "unrealised": 0.0,
+   "realised": 1300.0,
+   "sell_value": 9100.0,
+   "tradingsymbol": "NIFTY 25900 CE 27 OCT 26",
+   "trading_symbol": "NIFTY 25900 CE 27 OCT 26",
+   "close_price": 118.4,
+   "buy_price": 120.0,
+   "sell_price": 140.0
+  },
+  "nifty_pe_short_130_mis": {
+   "exchange": "NFO",
+   "multiplier": 1.0,
+   "value": 10400.0,
+   "pnl": 650.0,
+   "product": "I",
+   "instrument_token": "NSE_FO|49214",
+   "average_price": 80.0,
+   "buy_value": 0.0,
+   "overnight_quantity": 0,
+   "day_buy_value": 0.0,
+   "day_buy_price": 0.0,
+   "overnight_buy_amount": 0.0,
+   "overnight_buy_quantity": 0,
+   "day_buy_quantity": 0,
+   "day_sell_value": 10400.0,
+   "day_sell_price": 80.0,
+   "overnight_sell_amount": 0.0,
+   "overnight_sell_quantity": 0,
+   "day_sell_quantity": 130,
+   "quantity": -130,
+   "last_price": 75.0,
+   "unrealised": 650.0,
+   "realised": 0.0,
+   "sell_value": 10400.0,
+   "tradingsymbol": "NIFTY 25900 PE 27 OCT 26",
+   "trading_symbol": "NIFTY 25900 PE 27 OCT 26",
+   "close_price": 82.0,
+   "buy_price": 0.0,
+   "sell_price": 80.0
+  },
+  "banknifty_ce_carried_and_added_60_nrml": {
+   "exchange": "NFO",
+   "multiplier": 1.0,
+   "value": -18600.0,
+   "pnl": 1200.0,
+   "product": "D",
+   "instrument_token": "NSE_FO|51077",
+   "average_price": 310.0,
+   "buy_value": 18600.0,
+   "overnight_quantity": 30,
+   "day_buy_value": 9600.0,
+   "day_buy_price": 320.0,
+   "overnight_buy_amount": 9000.0,
+   "overnight_buy_quantity": 30,
+   "day_buy_quantity": 30,
+   "day_sell_value": 0.0,
+   "day_sell_price": 0.0,
+   "overnight_sell_amount": 0.0,
+   "overnight_sell_quantity": 0,
+   "day_sell_quantity": 0,
+   "quantity": 60,
+   "last_price": 330.0,
+   "unrealised": 900.0,
+   "realised": 0.0,
+   "sell_value": 0.0,
+   "tradingsymbol": "BANKNIFTY 58000 CE 27 OCT 26",
+   "trading_symbol": "BANKNIFTY 58000 CE 27 OCT 26",
+   "close_price": 310.0,
+   "buy_price": 310.0,
+   "sell_price": 0.0
+  },
+  "nifty_fut_short_65_nrml_carried": {
+   "exchange": "NFO",
+   "multiplier": 1.0,
+   "value": 1683500.0,
+   "pnl": -1300.0,
+   "product": "D",
+   "instrument_token": "NSE_FO|49229",
+   "average_price": 25900.0,
+   "buy_value": 0.0,
+   "overnight_quantity": -65,
+   "day_buy_value": 0.0,
+   "day_buy_price": 0.0,
+   "overnight_buy_amount": 0.0,
+   "overnight_buy_quantity": 0,
+   "day_buy_quantity": 0,
+   "day_sell_value": 0.0,
+   "day_sell_price": 0.0,
+   "overnight_sell_amount": 1683500.0,
+   "overnight_sell_quantity": 65,
+   "day_sell_quantity": 0,
+   "quantity": -65,
+   "last_price": 25920.0,
+   "unrealised": 1950.0,
+   "realised": 0.0,
+   "sell_value": 1683500.0,
+   "tradingsymbol": "NIFTY FUT 27 OCT 26",
+   "trading_symbol": "NIFTY FUT 27 OCT 26",
+   "close_price": 25950.0,
+   "buy_price": 0.0,
+   "sell_price": 25900.0
+  },
+  "reliance_cnc_bought_40": {
+   "exchange": "NSE",
+   "multiplier": 1.0,
+   "value": -58000.0,
+   "pnl": 94.0,
+   "product": "D",
+   "instrument_token": "NSE_EQ|INE002A01018",
+   "average_price": 1450.0,
+   "buy_value": 58000.0,
+   "overnight_quantity": 0,
+   "day_buy_value": 58000.0,
+   "day_buy_price": 1450.0,
+   "overnight_buy_amount": 0.0,
+   "overnight_buy_quantity": 0,
+   "day_buy_quantity": 40,
+   "day_sell_value": 0.0,
+   "day_sell_price": 0.0,
+   "overnight_sell_amount": 0.0,
+   "overnight_sell_quantity": 0,
+   "day_sell_quantity": 0,
+   "quantity": 40,
+   "last_price": 1452.35,
+   "unrealised": 94.0,
+   "realised": 0.0,
+   "sell_value": 0.0,
+   "tradingsymbol": "RELIANCE",
+   "trading_symbol": "RELIANCE",
+   "close_price": 1440.0,
+   "buy_price": 1450.0,
+   "sell_price": 0.0
+  },
+  "sbin_mis_short_100": {
+   "exchange": "NSE",
+   "multiplier": 1.0,
+   "value": 80000.0,
+   "pnl": 500.0,
+   "product": "I",
+   "instrument_token": "NSE_EQ|INE062A01020",
+   "average_price": 800.0,
+   "buy_value": 0.0,
+   "overnight_quantity": 0,
+   "day_buy_value": 0.0,
+   "day_buy_price": 0.0,
+   "overnight_buy_amount": 0.0,
+   "overnight_buy_quantity": 0,
+   "day_buy_quantity": 0,
+   "day_sell_value": 80000.0,
+   "day_sell_price": 800.0,
+   "overnight_sell_amount": 0.0,
+   "overnight_sell_quantity": 0,
+   "day_sell_quantity": 100,
+   "quantity": -100,
+   "last_price": 795.0,
+   "unrealised": 500.0,
+   "realised": 0.0,
+   "sell_value": 80000.0,
+   "tradingsymbol": "SBIN",
+   "trading_symbol": "SBIN",
+   "close_price": 801.0,
+   "buy_price": 0.0,
+   "sell_price": 800.0
+  }
+ },
+ "vectors": [
+  {
+   "name": "a buy on a flat book opens",
+   "kind": "order",
+   "book": [],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "action": "BUY",
+    "quantity": 65,
+    "product": "MIS"
+   },
+   "expect": {
+    "reducing": false,
+    "reason": "opens",
+    "position": 0,
+    "room": 0
+   }
+  },
+  {
+   "name": "a sell on a flat book opens a short",
+   "kind": "order",
+   "book": [],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "action": "SELL",
+    "quantity": 65,
+    "product": "MIS"
+   },
+   "expect": {
+    "reducing": false,
+    "reason": "opens",
+    "position": 0,
+    "room": 0
+   }
+  },
+  {
+   "name": "a buy on a long adds",
+   "kind": "order",
+   "book": [
+    "nifty_ce_long_65_mis"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "action": "BUY",
+    "quantity": 65,
+    "product": "MIS"
+   },
+   "expect": {
+    "reducing": false,
+    "reason": "adds",
+    "position": 65,
+    "room": 0
+   }
+  },
+  {
+   "name": "selling the whole long is an exit",
+   "kind": "order",
+   "book": [
+    "nifty_ce_long_65_mis"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "action": "SELL",
+    "quantity": 65,
+    "product": "MIS"
+   },
+   "expect": {
+    "reducing": true,
+    "reason": "exit",
+    "position": 65,
+    "room": 65
+   }
+  },
+  {
+   "name": "selling part of the long is an exit",
+   "kind": "order",
+   "book": [
+    "nifty_ce_long_65_mis"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "action": "SELL",
+    "quantity": 30,
+    "product": "MIS"
+   },
+   "expect": {
+    "reducing": true,
+    "reason": "exit",
+    "position": 65,
+    "room": 65
+   }
+  },
+  {
+   "name": "selling twice the long crosses",
+   "kind": "order",
+   "book": [
+    "nifty_ce_long_65_mis"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "action": "SELL",
+    "quantity": 130,
+    "product": "MIS"
+   },
+   "expect": {
+    "reducing": false,
+    "reason": "crosses",
+    "position": 65,
+    "room": 65
+   }
+  },
+  {
+   "name": "a part exit leaves the net to exit",
+   "kind": "order",
+   "book": [
+    "nifty_ce_part_exit_mis"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "action": "SELL",
+    "quantity": 65,
+    "product": "MIS"
+   },
+   "expect": {
+    "reducing": true,
+    "reason": "exit",
+    "position": 65,
+    "room": 65
+   }
+  },
+  {
+   "name": "a part exit: more than the rest crosses",
+   "kind": "order",
+   "book": [
+    "nifty_ce_part_exit_mis"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "action": "SELL",
+    "quantity": 130,
+    "product": "MIS"
+   },
+   "expect": {
+    "reducing": false,
+    "reason": "crosses",
+    "position": 65,
+    "room": 65
+   }
+  },
+  {
+   "name": "a carried position counts its overnight quantity",
+   "kind": "order",
+   "book": [
+    "nifty_ce_carried_65_nrml"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "action": "SELL",
+    "quantity": 65,
+    "product": "NRML"
+   },
+   "expect": {
+    "reducing": true,
+    "reason": "exit",
+    "position": 65,
+    "room": 65
+   }
+  },
+  {
+   "name": "an MIS sell against an NRML long opens an MIS short",
+   "kind": "order",
+   "book": [
+    "nifty_ce_carried_65_nrml"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "action": "SELL",
+    "quantity": 65,
+    "product": "MIS"
+   },
+   "expect": {
+    "reducing": false,
+    "reason": "opens",
+    "position": 0,
+    "room": 0
+   }
+  },
+  {
+   "name": "an NRML sell against an MIS long opens an NRML short",
+   "kind": "order",
+   "book": [
+    "nifty_ce_long_65_mis"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "action": "SELL",
+    "quantity": 65,
+    "product": "NRML"
+   },
+   "expect": {
+    "reducing": false,
+    "reason": "opens",
+    "position": 0,
+    "room": 0
+   }
+  },
+  {
+   "name": "with both products held only the order's product counts",
+   "kind": "order",
+   "book": [
+    "nifty_ce_long_65_mis",
+    "nifty_ce_long_65_nrml"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "action": "SELL",
+    "quantity": 130,
+    "product": "NRML"
+   },
+   "expect": {
+    "reducing": false,
+    "reason": "crosses",
+    "position": 65,
+    "room": 65
+   }
+  },
+  {
+   "name": "with both products held each exits its own",
+   "kind": "order",
+   "book": [
+    "nifty_ce_long_65_mis",
+    "nifty_ce_long_65_nrml"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "action": "SELL",
+    "quantity": 65,
+    "product": "MIS"
+   },
+   "expect": {
+    "reducing": true,
+    "reason": "exit",
+    "position": 65,
+    "room": 65
+   }
+  },
+  {
+   "name": "a short after a cross is exited by a buy",
+   "kind": "order",
+   "book": [
+    "nifty_ce_crossed_short_65_mis"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "action": "BUY",
+    "quantity": 65,
+    "product": "MIS"
+   },
+   "expect": {
+    "reducing": true,
+    "reason": "exit",
+    "position": -65,
+    "room": 65
+   }
+  },
+  {
+   "name": "a short after a cross: a sell adds",
+   "kind": "order",
+   "book": [
+    "nifty_ce_crossed_short_65_mis"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "action": "SELL",
+    "quantity": 65,
+    "product": "MIS"
+   },
+   "expect": {
+    "reducing": false,
+    "reason": "adds",
+    "position": -65,
+    "room": 0
+   }
+  },
+  {
+   "name": "a short after a cross: twice the short crosses back",
+   "kind": "order",
+   "book": [
+    "nifty_ce_crossed_short_65_mis"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "action": "BUY",
+    "quantity": 130,
+    "product": "MIS"
+   },
+   "expect": {
+    "reducing": false,
+    "reason": "crosses",
+    "position": -65,
+    "room": 65
+   }
+  },
+  {
+   "name": "closed today: a sell opens",
+   "kind": "order",
+   "book": [
+    "nifty_ce_closed_today_mis"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "action": "SELL",
+    "quantity": 65,
+    "product": "MIS"
+   },
+   "expect": {
+    "reducing": false,
+    "reason": "opens",
+    "position": 0,
+    "room": 0
+   }
+  },
+  {
+   "name": "closed today: a buy opens",
+   "kind": "order",
+   "book": [
+    "nifty_ce_closed_today_mis"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "action": "BUY",
+    "quantity": 65,
+    "product": "MIS"
+   },
+   "expect": {
+    "reducing": false,
+    "reason": "opens",
+    "position": 0,
+    "room": 0
+   }
+  },
+  {
+   "name": "half the short is an exit",
+   "kind": "order",
+   "book": [
+    "nifty_pe_short_130_mis"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49214",
+    "exchange": "NFO",
+    "action": "BUY",
+    "quantity": 65,
+    "product": "MIS"
+   },
+   "expect": {
+    "reducing": true,
+    "reason": "exit",
+    "position": -130,
+    "room": 130
+   }
+  },
+  {
+   "name": "the whole short is an exit",
+   "kind": "order",
+   "book": [
+    "nifty_pe_short_130_mis"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49214",
+    "exchange": "NFO",
+    "action": "BUY",
+    "quantity": 130,
+    "product": "MIS"
+   },
+   "expect": {
+    "reducing": true,
+    "reason": "exit",
+    "position": -130,
+    "room": 130
+   }
+  },
+  {
+   "name": "more than the short crosses",
+   "kind": "order",
+   "book": [
+    "nifty_pe_short_130_mis"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49214",
+    "exchange": "NFO",
+    "action": "BUY",
+    "quantity": 195,
+    "product": "MIS"
+   },
+   "expect": {
+    "reducing": false,
+    "reason": "crosses",
+    "position": -130,
+    "room": 130
+   }
+  },
+  {
+   "name": "carried and added: the whole is an exit",
+   "kind": "order",
+   "book": [
+    "banknifty_ce_carried_and_added_60_nrml"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|51077",
+    "exchange": "NFO",
+    "action": "SELL",
+    "quantity": 60,
+    "product": "NRML"
+   },
+   "expect": {
+    "reducing": true,
+    "reason": "exit",
+    "position": 60,
+    "room": 60
+   }
+  },
+  {
+   "name": "carried and added: half is an exit",
+   "kind": "order",
+   "book": [
+    "banknifty_ce_carried_and_added_60_nrml"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|51077",
+    "exchange": "NFO",
+    "action": "SELL",
+    "quantity": 30,
+    "product": "NRML"
+   },
+   "expect": {
+    "reducing": true,
+    "reason": "exit",
+    "position": 60,
+    "room": 60
+   }
+  },
+  {
+   "name": "a carried futures short is exited by a buy",
+   "kind": "order",
+   "book": [
+    "nifty_fut_short_65_nrml_carried"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49229",
+    "exchange": "NFO",
+    "action": "BUY",
+    "quantity": 65,
+    "product": "NRML"
+   },
+   "expect": {
+    "reducing": true,
+    "reason": "exit",
+    "position": -65,
+    "room": 65
+   }
+  },
+  {
+   "name": "an MIS buy against an NRML futures short opens",
+   "kind": "order",
+   "book": [
+    "nifty_fut_short_65_nrml_carried"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49229",
+    "exchange": "NFO",
+    "action": "BUY",
+    "quantity": 65,
+    "product": "MIS"
+   },
+   "expect": {
+    "reducing": false,
+    "reason": "opens",
+    "position": 0,
+    "room": 0
+   }
+  },
+  {
+   "name": "another instrument's position does not count",
+   "kind": "order",
+   "book": [
+    "banknifty_ce_carried_and_added_60_nrml"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "action": "SELL",
+    "quantity": 65,
+    "product": "NRML"
+   },
+   "expect": {
+    "reducing": false,
+    "reason": "opens",
+    "position": 0,
+    "room": 0
+   }
+  },
+  {
+   "name": "an intraday equity short is exited by a buy",
+   "kind": "order",
+   "book": [
+    "sbin_mis_short_100"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_EQ|INE062A01020",
+    "exchange": "NSE",
+    "action": "BUY",
+    "quantity": 100,
+    "product": "MIS"
+   },
+   "expect": {
+    "reducing": true,
+    "reason": "exit",
+    "position": -100,
+    "room": 100
+   }
+  },
+  {
+   "name": "an intraday equity short: a sell adds",
+   "kind": "order",
+   "book": [
+    "sbin_mis_short_100"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_EQ|INE062A01020",
+    "exchange": "NSE",
+    "action": "SELL",
+    "quantity": 100,
+    "product": "MIS"
+   },
+   "expect": {
+    "reducing": false,
+    "reason": "adds",
+    "position": -100,
+    "room": 0
+   }
+  },
+  {
+   "name": "the whole book: only this instrument and product count",
+   "kind": "order",
+   "book": [
+    "nifty_ce_long_65_mis",
+    "nifty_ce_long_65_nrml",
+    "nifty_pe_short_130_mis",
+    "banknifty_ce_carried_and_added_60_nrml",
+    "nifty_fut_short_65_nrml_carried",
+    "reliance_cnc_bought_40",
+    "sbin_mis_short_100"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49214",
+    "exchange": "NFO",
+    "action": "BUY",
+    "quantity": 130,
+    "product": "MIS"
+   },
+   "expect": {
+    "reducing": true,
+    "reason": "exit",
+    "position": -130,
+    "room": 130
+   }
+  },
+  {
+   "name": "an exit already sent covers the long",
+   "kind": "order",
+   "book": [
+    "nifty_ce_long_65_mis"
+   ],
+   "claims": [
+    {
+     "action": "SELL",
+     "quantity": 65
+    }
+   ],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "action": "SELL",
+    "quantity": 65,
+    "product": "MIS"
+   },
+   "expect": {
+    "reducing": false,
+    "reason": "on_its_way",
+    "position": 65,
+    "room": 0,
+    "claimed": 65
+   }
+  },
+  {
+   "name": "an exit already sent leaves the rest of the short",
+   "kind": "order",
+   "book": [
+    "nifty_pe_short_130_mis"
+   ],
+   "claims": [
+    {
+     "action": "BUY",
+     "quantity": 65
+    }
+   ],
+   "order": {
+    "instrument_token": "NSE_FO|49214",
+    "exchange": "NFO",
+    "action": "BUY",
+    "quantity": 65,
+    "product": "MIS"
+   },
+   "expect": {
+    "reducing": true,
+    "reason": "exit",
+    "position": -130,
+    "room": 65,
+    "claimed": 65
+   }
+  },
+  {
+   "name": "an exit already sent: more than the rest crosses",
+   "kind": "order",
+   "book": [
+    "nifty_pe_short_130_mis"
+   ],
+   "claims": [
+    {
+     "action": "BUY",
+     "quantity": 65
+    }
+   ],
+   "order": {
+    "instrument_token": "NSE_FO|49214",
+    "exchange": "NFO",
+    "action": "BUY",
+    "quantity": 130,
+    "product": "MIS"
+   },
+   "expect": {
+    "reducing": false,
+    "reason": "crosses",
+    "position": -130,
+    "room": 65,
+    "claimed": 65
+   }
+  },
+  {
+   "name": "a part already sent: the rest is an exit",
+   "kind": "order",
+   "book": [
+    "nifty_ce_long_65_mis"
+   ],
+   "claims": [
+    {
+     "action": "SELL",
+     "quantity": 30
+    }
+   ],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "action": "SELL",
+    "quantity": 35,
+    "product": "MIS"
+   },
+   "expect": {
+    "reducing": true,
+    "reason": "exit",
+    "position": 65,
+    "room": 35,
+    "claimed": 30
+   }
+  },
+  {
+   "name": "a claim on the other side does not count",
+   "kind": "order",
+   "book": [
+    "nifty_ce_long_65_mis"
+   ],
+   "claims": [
+    {
+     "action": "BUY",
+     "quantity": 65
+    }
+   ],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "action": "SELL",
+    "quantity": 65,
+    "product": "MIS"
+   },
+   "expect": {
+    "reducing": true,
+    "reason": "exit",
+    "position": 65,
+    "room": 65
+   }
+  },
+  {
+   "name": "claims beyond the position leave nothing",
+   "kind": "order",
+   "book": [
+    "nifty_ce_long_65_mis"
+   ],
+   "claims": [
+    {
+     "action": "SELL",
+     "quantity": 65
+    },
+    {
+     "action": "SELL",
+     "quantity": 65
+    }
+   ],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "action": "SELL",
+    "quantity": 1,
+    "product": "MIS"
+   },
+   "expect": {
+    "reducing": false,
+    "reason": "on_its_way",
+    "position": 65,
+    "room": 0,
+    "claimed": 130
+   }
+  },
+  {
+   "name": "a CNC sell of shares held is an exit (holdings are not in the book)",
+   "kind": "order",
+   "book": [],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_EQ|INE002A01018",
+    "exchange": "NSE",
+    "action": "SELL",
+    "quantity": 40,
+    "product": "CNC"
+   },
+   "expect": {
+    "reducing": true,
+    "reason": "cnc_sell",
+    "position": 0,
+    "room": 0
+   }
+  },
+  {
+   "name": "a CNC sell is not limited by claims",
+   "kind": "order",
+   "book": [
+    "reliance_cnc_bought_40"
+   ],
+   "claims": [
+    {
+     "action": "SELL",
+     "quantity": 40
+    }
+   ],
+   "order": {
+    "instrument_token": "NSE_EQ|INE002A01018",
+    "exchange": "NSE",
+    "action": "SELL",
+    "quantity": 40,
+    "product": "CNC"
+   },
+   "expect": {
+    "reducing": true,
+    "reason": "cnc_sell",
+    "position": 40,
+    "room": 0,
+    "claimed": 40
+   }
+  },
+  {
+   "name": "a CNC buy on a delivery position adds",
+   "kind": "order",
+   "book": [
+    "reliance_cnc_bought_40"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_EQ|INE002A01018",
+    "exchange": "NSE",
+    "action": "BUY",
+    "quantity": 10,
+    "product": "CNC"
+   },
+   "expect": {
+    "reducing": false,
+    "reason": "adds",
+    "position": 40,
+    "room": 0
+   }
+  },
+  {
+   "name": "a CNC buy on a flat book opens",
+   "kind": "order",
+   "book": [],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_EQ|INE002A01018",
+    "exchange": "NSE",
+    "action": "BUY",
+    "quantity": 40,
+    "product": "CNC"
+   },
+   "expect": {
+    "reducing": false,
+    "reason": "opens",
+    "position": 0,
+    "room": 0
+   }
+  },
+  {
+   "name": "CNC on a derivative is NRML at Upstox: no free pass",
+   "kind": "order",
+   "book": [],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "action": "SELL",
+    "quantity": 65,
+    "product": "CNC"
+   },
+   "expect": {
+    "reducing": false,
+    "reason": "opens",
+    "position": 0,
+    "room": 0
+   }
+  },
+  {
+   "name": "CNC on a derivative exits an NRML long",
+   "kind": "order",
+   "book": [
+    "nifty_ce_carried_65_nrml"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "action": "SELL",
+    "quantity": 65,
+    "product": "CNC"
+   },
+   "expect": {
+    "reducing": true,
+    "reason": "exit",
+    "position": 65,
+    "room": 65
+   }
+  },
+  {
+   "name": "a side that is not BUY or SELL",
+   "kind": "order",
+   "book": [
+    "nifty_ce_long_65_mis"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "action": "HOLD",
+    "quantity": 65,
+    "product": "MIS"
+   },
+   "expect": {
+    "reducing": false,
+    "reason": "unknown",
+    "position": 65,
+    "room": 0
+   }
+  },
+  {
+   "name": "a quantity of nothing",
+   "kind": "order",
+   "book": [
+    "nifty_ce_long_65_mis"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "action": "SELL",
+    "quantity": "0",
+    "product": "MIS"
+   },
+   "expect": {
+    "reducing": false,
+    "reason": "unknown",
+    "position": 65,
+    "room": 0
+   }
+  },
+  {
+   "name": "a quantity that is not a number",
+   "kind": "order",
+   "book": [
+    "nifty_ce_long_65_mis"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "action": "SELL",
+    "quantity": "65 lots",
+    "product": "MIS"
+   },
+   "expect": {
+    "reducing": false,
+    "reason": "unknown",
+    "position": 65,
+    "room": 0
+   }
+  },
+  {
+   "name": "a fractional quantity",
+   "kind": "order",
+   "book": [
+    "nifty_ce_long_65_mis"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "action": "SELL",
+    "quantity": "32.5",
+    "product": "MIS"
+   },
+   "expect": {
+    "reducing": false,
+    "reason": "unknown",
+    "position": 65,
+    "room": 0
+   }
+  },
+  {
+   "name": "to size 0 on a long sells it all",
+   "kind": "smart",
+   "book": [
+    "nifty_ce_long_65_mis"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "product": "MIS",
+    "position_size": 0,
+    "action": "BUY",
+    "quantity": 0
+   },
+   "expect": {
+    "reducing": true,
+    "reason": "exit",
+    "position": 65,
+    "room": 65,
+    "sends": {
+     "action": "SELL",
+     "quantity": 65
+    }
+   }
+  },
+  {
+   "name": "to a smaller long sells the difference",
+   "kind": "smart",
+   "book": [
+    "nifty_ce_long_65_mis"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "product": "MIS",
+    "position_size": 30,
+    "action": "BUY",
+    "quantity": 30
+   },
+   "expect": {
+    "reducing": true,
+    "reason": "exit",
+    "position": 65,
+    "room": 65,
+    "sends": {
+     "action": "SELL",
+     "quantity": 35
+    }
+   }
+  },
+  {
+   "name": "to the opposite side crosses",
+   "kind": "smart",
+   "book": [
+    "nifty_ce_long_65_mis"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "product": "MIS",
+    "position_size": -65,
+    "action": "SELL",
+    "quantity": 65
+   },
+   "expect": {
+    "reducing": false,
+    "reason": "crosses",
+    "position": 65,
+    "room": 65,
+    "sends": {
+     "action": "SELL",
+     "quantity": 130
+    }
+   }
+  },
+  {
+   "name": "to a larger long adds",
+   "kind": "smart",
+   "book": [
+    "nifty_ce_long_65_mis"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "product": "MIS",
+    "position_size": 130,
+    "action": "BUY",
+    "quantity": 130
+   },
+   "expect": {
+    "reducing": false,
+    "reason": "adds",
+    "position": 65,
+    "room": 0,
+    "sends": {
+     "action": "BUY",
+     "quantity": 65
+    }
+   }
+  },
+  {
+   "name": "to size 0 on a flat book with a quantity is a fresh order",
+   "kind": "smart",
+   "book": [],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "product": "MIS",
+    "position_size": 0,
+    "action": "BUY",
+    "quantity": 65
+   },
+   "expect": {
+    "reducing": false,
+    "reason": "opens",
+    "position": 0,
+    "room": 0,
+    "sends": {
+     "action": "BUY",
+     "quantity": 65
+    }
+   }
+  },
+  {
+   "name": "to size 0 on a short buys it back",
+   "kind": "smart",
+   "book": [
+    "nifty_pe_short_130_mis"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49214",
+    "exchange": "NFO",
+    "product": "MIS",
+    "position_size": 0,
+    "action": "SELL",
+    "quantity": 0
+   },
+   "expect": {
+    "reducing": true,
+    "reason": "exit",
+    "position": -130,
+    "room": 130,
+    "sends": {
+     "action": "BUY",
+     "quantity": 130
+    }
+   }
+  },
+  {
+   "name": "already at the target sends nothing",
+   "kind": "smart",
+   "book": [
+    "nifty_ce_long_65_mis"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "product": "MIS",
+    "position_size": 65,
+    "action": "BUY",
+    "quantity": 65
+   },
+   "expect": null
+  },
+  {
+   "name": "to size 0 on a carried NRML long sells it",
+   "kind": "smart",
+   "book": [
+    "nifty_ce_carried_65_nrml"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "product": "NRML",
+    "position_size": 0,
+    "action": "SELL",
+    "quantity": 0
+   },
+   "expect": {
+    "reducing": true,
+    "reason": "exit",
+    "position": 65,
+    "room": 65,
+    "sends": {
+     "action": "SELL",
+     "quantity": 65
+    }
+   }
+  },
+  {
+   "name": "an exit's limit moved is still an exit",
+   "kind": "modify",
+   "book": [
+    "nifty_ce_long_65_mis"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "product": "MIS",
+    "working": {
+     "action": "SELL",
+     "quantity": 65,
+     "filled": 0,
+     "pricetype": "LIMIT",
+     "price": 140.0,
+     "trigger_price": 0.0
+    },
+    "new": {
+     "quantity": 65,
+     "pricetype": "LIMIT",
+     "price": 135.0,
+     "trigger_price": 0.0
+    }
+   },
+   "expect": {
+    "reducing": true,
+    "reason": "exit",
+    "position": 65,
+    "room": 65
+   }
+  },
+  {
+   "name": "an exit raised past the position crosses",
+   "kind": "modify",
+   "book": [
+    "nifty_ce_long_65_mis"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "product": "MIS",
+    "working": {
+     "action": "SELL",
+     "quantity": 65,
+     "filled": 0,
+     "pricetype": "LIMIT",
+     "price": 140.0,
+     "trigger_price": 0.0
+    },
+    "new": {
+     "quantity": 130,
+     "pricetype": "LIMIT",
+     "price": 140.0,
+     "trigger_price": 0.0
+    }
+   },
+   "expect": {
+    "reducing": false,
+    "reason": "crosses",
+    "position": 65,
+    "room": 65
+   }
+  },
+  {
+   "name": "an entry made smaller and less marketable",
+   "kind": "modify",
+   "book": [],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "product": "MIS",
+    "working": {
+     "action": "BUY",
+     "quantity": 130,
+     "filled": 0,
+     "pricetype": "LIMIT",
+     "price": 100.0,
+     "trigger_price": 0.0
+    },
+    "new": {
+     "quantity": 65,
+     "pricetype": "LIMIT",
+     "price": 95.0,
+     "trigger_price": 0.0
+    }
+   },
+   "expect": {
+    "reducing": true,
+    "reason": "less_risk",
+    "position": 0,
+    "room": 0
+   }
+  },
+  {
+   "name": "an entry's buy limit raised",
+   "kind": "modify",
+   "book": [],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "product": "MIS",
+    "working": {
+     "action": "BUY",
+     "quantity": 65,
+     "filled": 0,
+     "pricetype": "LIMIT",
+     "price": 100.0,
+     "trigger_price": 0.0
+    },
+    "new": {
+     "quantity": 65,
+     "pricetype": "LIMIT",
+     "price": 105.0,
+     "trigger_price": 0.0
+    }
+   },
+   "expect": {
+    "reducing": false,
+    "reason": "opens",
+    "position": 0,
+    "room": 0
+   }
+  },
+  {
+   "name": "an entry turned to market",
+   "kind": "modify",
+   "book": [],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "product": "MIS",
+    "working": {
+     "action": "BUY",
+     "quantity": 65,
+     "filled": 0,
+     "pricetype": "LIMIT",
+     "price": 100.0,
+     "trigger_price": 0.0
+    },
+    "new": {
+     "quantity": 65,
+     "pricetype": "MARKET",
+     "price": 0.0,
+     "trigger_price": 0.0
+    }
+   },
+   "expect": {
+    "reducing": false,
+    "reason": "opens",
+    "position": 0,
+    "room": 0
+   }
+  },
+  {
+   "name": "an entry's sell limit lowered",
+   "kind": "modify",
+   "book": [],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "product": "MIS",
+    "working": {
+     "action": "SELL",
+     "quantity": 65,
+     "filled": 0,
+     "pricetype": "LIMIT",
+     "price": 100.0,
+     "trigger_price": 0.0
+    },
+    "new": {
+     "quantity": 65,
+     "pricetype": "LIMIT",
+     "price": 95.0,
+     "trigger_price": 0.0
+    }
+   },
+   "expect": {
+    "reducing": false,
+    "reason": "opens",
+    "position": 0,
+    "room": 0
+   }
+  },
+  {
+   "name": "an entry's sell stop moved toward the market",
+   "kind": "modify",
+   "book": [],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "product": "MIS",
+    "working": {
+     "action": "SELL",
+     "quantity": 65,
+     "filled": 0,
+     "pricetype": "SL",
+     "price": 95.0,
+     "trigger_price": 96.0
+    },
+    "new": {
+     "quantity": 65,
+     "pricetype": "SL",
+     "price": 95.0,
+     "trigger_price": 97.0
+    }
+   },
+   "expect": {
+    "reducing": false,
+    "reason": "opens",
+    "position": 0,
+    "room": 0
+   }
+  },
+  {
+   "name": "an entry's stop-limit buy limit raised",
+   "kind": "modify",
+   "book": [],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "product": "MIS",
+    "working": {
+     "action": "BUY",
+     "quantity": 65,
+     "filled": 0,
+     "pricetype": "SL",
+     "price": 112.0,
+     "trigger_price": 110.0
+    },
+    "new": {
+     "quantity": 65,
+     "pricetype": "SL",
+     "price": 114.0,
+     "trigger_price": 110.0
+    }
+   },
+   "expect": {
+    "reducing": false,
+    "reason": "opens",
+    "position": 0,
+    "room": 0
+   }
+  },
+  {
+   "name": "an entry's stop-limit buy limit lowered",
+   "kind": "modify",
+   "book": [],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "product": "MIS",
+    "working": {
+     "action": "BUY",
+     "quantity": 65,
+     "filled": 0,
+     "pricetype": "SL",
+     "price": 112.0,
+     "trigger_price": 110.0
+    },
+    "new": {
+     "quantity": 65,
+     "pricetype": "SL",
+     "price": 111.0,
+     "trigger_price": 110.0
+    }
+   },
+   "expect": {
+    "reducing": true,
+    "reason": "less_risk",
+    "position": 0,
+    "room": 0
+   }
+  },
+  {
+   "name": "an entry's buy stop moved away",
+   "kind": "modify",
+   "book": [],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "product": "MIS",
+    "working": {
+     "action": "BUY",
+     "quantity": 65,
+     "filled": 0,
+     "pricetype": "SL-M",
+     "price": 0.0,
+     "trigger_price": 110.0
+    },
+    "new": {
+     "quantity": 65,
+     "pricetype": "SL-M",
+     "price": 0.0,
+     "trigger_price": 115.0
+    }
+   },
+   "expect": {
+    "reducing": true,
+    "reason": "less_risk",
+    "position": 0,
+    "room": 0
+   }
+  },
+  {
+   "name": "an entry left as it was",
+   "kind": "modify",
+   "book": [],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "product": "MIS",
+    "working": {
+     "action": "BUY",
+     "quantity": 65,
+     "filled": 0,
+     "pricetype": "LIMIT",
+     "price": 100.0,
+     "trigger_price": 0.0
+    },
+    "new": {
+     "quantity": 65,
+     "pricetype": "LIMIT",
+     "price": 100.0,
+     "trigger_price": 0.0
+    }
+   },
+   "expect": {
+    "reducing": true,
+    "reason": "less_risk",
+    "position": 0,
+    "room": 0
+   }
+  },
+  {
+   "name": "a part-filled exit: the rest is judged",
+   "kind": "modify",
+   "book": [
+    "nifty_ce_long_65_mis"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "product": "MIS",
+    "working": {
+     "action": "SELL",
+     "quantity": 130,
+     "filled": 65,
+     "pricetype": "LIMIT",
+     "price": 140.0,
+     "trigger_price": 0.0
+    },
+    "new": {
+     "quantity": 130,
+     "pricetype": "LIMIT",
+     "price": 138.0,
+     "trigger_price": 0.0
+    }
+   },
+   "expect": {
+    "reducing": true,
+    "reason": "exit",
+    "position": 65,
+    "room": 65
+   }
+  },
+  {
+   "name": "a part-filled exit raised past what is held",
+   "kind": "modify",
+   "book": [
+    "nifty_ce_long_65_mis"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "product": "MIS",
+    "working": {
+     "action": "SELL",
+     "quantity": 130,
+     "filled": 65,
+     "pricetype": "LIMIT",
+     "price": 140.0,
+     "trigger_price": 0.0
+    },
+    "new": {
+     "quantity": 195,
+     "pricetype": "LIMIT",
+     "price": 140.0,
+     "trigger_price": 0.0
+    }
+   },
+   "expect": {
+    "reducing": false,
+    "reason": "crosses",
+    "position": 65,
+    "room": 65
+   }
+  },
+  {
+   "name": "a modify to no more than has filled",
+   "kind": "modify",
+   "book": [
+    "nifty_ce_long_65_mis"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "product": "MIS",
+    "working": {
+     "action": "SELL",
+     "quantity": 130,
+     "filled": 65,
+     "pricetype": "LIMIT",
+     "price": 140.0,
+     "trigger_price": 0.0
+    },
+    "new": {
+     "quantity": 65,
+     "pricetype": "LIMIT",
+     "price": 140.0,
+     "trigger_price": 0.0
+    }
+   },
+   "expect": {
+    "reducing": true,
+    "reason": "less_risk",
+    "position": 65,
+    "room": 0
+   }
+  },
+  {
+   "name": "an exit whose position another exit covers",
+   "kind": "modify",
+   "book": [
+    "nifty_ce_long_65_mis"
+   ],
+   "claims": [
+    {
+     "action": "SELL",
+     "quantity": 65
+    }
+   ],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "product": "MIS",
+    "working": {
+     "action": "SELL",
+     "quantity": 65,
+     "filled": 0,
+     "pricetype": "LIMIT",
+     "price": 140.0,
+     "trigger_price": 0.0
+    },
+    "new": {
+     "quantity": 65,
+     "pricetype": "LIMIT",
+     "price": 139.0,
+     "trigger_price": 0.0
+    }
+   },
+   "expect": {
+    "reducing": false,
+    "reason": "on_its_way",
+    "position": 65,
+    "room": 0,
+    "claimed": 65
+   }
+  },
+  {
+   "name": "a single stop on a long held is an exit",
+   "kind": "gtt",
+   "book": [
+    "nifty_ce_long_65_nrml"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "product": "NRML",
+    "trigger_type": "SINGLE",
+    "action": "SELL",
+    "quantity": 65
+   },
+   "expect": {
+    "reducing": true,
+    "reason": "exit",
+    "position": 65,
+    "room": 65
+   }
+  },
+  {
+   "name": "a single stop for more than is held crosses",
+   "kind": "gtt",
+   "book": [
+    "nifty_ce_long_65_nrml"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "product": "NRML",
+    "trigger_type": "SINGLE",
+    "action": "SELL",
+    "quantity": 130
+   },
+   "expect": {
+    "reducing": false,
+    "reason": "crosses",
+    "position": 65,
+    "room": 65
+   }
+  },
+  {
+   "name": "a two-leg GTT always opens at Upstox",
+   "kind": "gtt",
+   "book": [
+    "nifty_ce_long_65_nrml"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "product": "NRML",
+    "trigger_type": "OCO",
+    "action": "SELL",
+    "quantity": 65
+   },
+   "expect": {
+    "reducing": false,
+    "reason": "oco",
+    "position": 65,
+    "room": 0
+   }
+  },
+  {
+   "name": "a single entry on a flat book opens",
+   "kind": "gtt",
+   "book": [],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "product": "NRML",
+    "trigger_type": "SINGLE",
+    "action": "BUY",
+    "quantity": 65
+   },
+   "expect": {
+    "reducing": false,
+    "reason": "opens",
+    "position": 0,
+    "room": 0
+   }
+  },
+  {
+   "name": "a single CNC sell of shares held",
+   "kind": "gtt",
+   "book": [],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_EQ|INE002A01018",
+    "exchange": "NSE",
+    "product": "CNC",
+    "trigger_type": "SINGLE",
+    "action": "SELL",
+    "quantity": 40
+   },
+   "expect": {
+    "reducing": true,
+    "reason": "cnc_sell",
+    "position": 0,
+    "room": 0
+   }
+  }
+ ]
+}
