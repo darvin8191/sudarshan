@@ -25,6 +25,7 @@ from pathlib import Path
 
 from sudarshan.autologin.schedule import (
     IST,
+    SESSION,
     TradingCalendar,
     day_windows,
     minute_of_day,
@@ -113,6 +114,23 @@ class AlertWindow:
             return None
         day = now.astimezone(IST).date()
         start = self.spans(day)[0][0]
+        return datetime.combine(day, dtime(start // 60, start % 60), IST)
+
+    def market_opens(self, now: datetime) -> datetime | None:
+        """When the exchange's day starts, for the day of ``now`` (None when always on): the 09:00
+        pre-open, or a special session's own start (the earlier of the two on a day that trades
+        anyway). Nothing trades before it, so a pause that ends by then is told only when the
+        order book shows something."""
+        if self.always_on:
+            return None
+        day = now.astimezone(IST).date()
+        own = self._days.get(day)
+        if own is None:
+            start = SESSION[0]
+        elif self.calendar.trades_anyway(day):
+            start = min(SESSION[0], own[0])
+        else:
+            start = own[0]
         return datetime.combine(day, dtime(start // 60, start % 60), IST)
 
     def next_open(self, now: datetime) -> datetime | None:

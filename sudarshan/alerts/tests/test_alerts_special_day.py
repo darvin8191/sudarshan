@@ -146,3 +146,29 @@ def test_the_hours_between_two_windows_of_a_day_are_caught_up(special, fast, qui
             await _stop(svc, task)
 
     asyncio.run(scenario())
+
+
+def test_before_the_sessions_own_start_a_pause_is_told_only_if_it_finds_something(
+    special, fast, quick_resync
+):
+    """The market starts with the session's pre-open (14:05), not with 09:00 or the alerts' 13:50:
+    an unreadable book is only logged before it and told, with what to do, after it."""
+
+    async def scenario():
+        async with FakeProxy() as proxy, FakeOpenAlgo() as openalgo:
+            openalgo.book_status = 503
+            settings = special(proxy, openalgo)
+            svc, task = await _start(settings, Clock(ist(2026, 11, 8, 14, 4)))
+            await wait_until(lambda: openalgo.book_reads() == 3)  # every try fails
+            await asyncio.sleep(0.3)
+            assert openalgo.bodies == []
+            await _stop(svc, task)
+            svc, task = await _start(settings, Clock(ist(2026, 11, 8, 14, 10)))
+            await wait_until(lambda: openalgo.bodies)
+            assert _lines(openalgo) == [
+                "Order alerts paused 14:04:00 to 14:10:00 IST; the order book could not be read; "
+                "open Orders in the app to check."
+            ]
+            await _stop(svc, task)
+
+    asyncio.run(scenario())

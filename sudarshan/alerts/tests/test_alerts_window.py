@@ -116,3 +116,15 @@ def test_the_deploy_tool_still_reads_the_day(tmp_path):
     script = f'date() {{ echo "7 1830 2026-11-08"; }}\n{gate}\nmarket_open\n'
     done = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
     assert done.returncode == 0  # trading: no deploy that day
+
+
+def test_the_market_opens_with_the_pre_open_or_a_special_sessions_own_start(tmp_path):
+    """Where a pause stops being quiet (service.py): the exchange's start, not the alerts' own."""
+    extra = MUHURAT + "2026-11-10 08:00-08:30  # an early session\n2026-11-11 18:00-19:15\n"
+    window = _window(tmp_path, extra)
+    assert window.market_opens(ist(2026, 11, 6, 8, 50)) == ist(2026, 11, 6, 9, 0)  # a Friday
+    assert window.market_opens(ist(2026, 11, 8, 13, 55)) == ist(2026, 11, 8, 14, 5)  # Muhurat
+    assert window.market_opens(ist(2026, 11, 10, 7, 0)) == ist(2026, 11, 10, 8, 0)  # the earlier
+    assert window.market_opens(ist(2026, 11, 11, 7, 0)) == ist(2026, 11, 11, 9, 0)
+    always = AlertWindow(window.calendar, parse_window("08:45-16:00"), True, tmp_path / "extra.txt")
+    assert always.market_opens(ist(2026, 11, 6, 8, 50)) is None

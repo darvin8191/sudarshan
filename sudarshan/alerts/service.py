@@ -12,10 +12,12 @@ added to gunicorn). It holds the proxy connection only on trading days inside th
 (08:45-16:00 IST). While any client of the owner is signed in, the proxy keeps one pooled Upstox
 market-data connection for him open, so this service keeps it open through the window.
 
-The proxy replays nothing on connect. So after every subscription the order book is read once
+The proxy replays nothing on connect. So after every subscription the order book is read
 (resync.py) and what changed while nothing was listening is told, marked as found later; a pause
-longer than GAP_S inside the window is told too when anything was found or the book could not be
-read. The last moment the stream was up is kept in alerts.db, so a restart knows its pause.
+longer than GAP_S inside the window is told too when anything was found, or when the book could
+still not be read after the tries in RESYNC_RETRY_S, unless the pause ended before the market's
+start (nothing trades before the pre-open). The last moment the stream was up is kept in
+alerts.db, so a restart knows its pause.
 
 Reconnects: a fresh read of the API key from openalgo.db for every attempt (a regenerated key is
 picked up), then backoff with jitter (2 s doubling to 60 s), reset only after a connection stayed
@@ -40,7 +42,7 @@ import httpx
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed, InvalidHandshake, InvalidURI
 
-from sudarshan.autologin.schedule import IST, TradingCalendar
+from sudarshan.autologin.schedule import IST, TradingCalendar, hhmm
 
 from . import __version__, loopback, messages
 from .config import ConfigError, Settings, setup_logging, switched_off
@@ -67,7 +69,9 @@ ACK_TIMEOUT_S = 10.0
 STOP_FLUSH_S = 5.0
 SEEN_EVERY_S = 10.0  # how often the moment the stream was last up is written down
 GAP_S = 10.0  # a pause longer than this inside the window is told (see the module docstring)
-RESYNC_RETRY_S = (5.0, 15.0)  # pauses before reading the order book again after a failure
+#: Waits before reading the order book again after a failed read, while the stream stays up:
+#: about three minutes in all, as OpenAlgo can take that long to answer after a restart.
+RESYNC_RETRY_S = (5.0, 10.0, 20.0, 40.0, 60.0, 60.0)
 REQUEST_ID = "sudarshan-alerts"
 SEEN = "stream_seen"
 WS_OPTIONS = {
@@ -124,6 +128,7 @@ class AlertService:
         self._owner_problem: str | None = None
         self._close_reason: str | None = None
         self._last_session_s = 0.0
+        self._unchecked: datetime | None = None  # the start of a pause whose book read was cut off
         self._throttle = Throttle(300.0)
         self.stats = {"connects": 0, "updates": 0, "alerts": 0}
 
@@ -286,6 +291,7 @@ class AlertService:
                     self.stats["connects"] += 1
                     self._set_state("connected", "receiving order updates")
                     pause = self._pause(self.clock())
+                    self._unchecked = pause[0] if pause is not None else None
                     self._mark_seen()
                     resync = asyncio.create_task(self._resync(owner, pause))
                     async for raw in ws:
@@ -382,9 +388,13 @@ class AlertService:
 
     # ---- after a pause: the order book -------------------------------------------------------
     def _pause(self, now: datetime) -> tuple[datetime, datetime] | None:
-        """From when the stream was last known up (not before today's window opened) to now."""
+        """From when the stream was last known up, or from the start of a pause whose book read a
+        drop cut off, but not before today's window opened, to now."""
         seen = self.store.get_meta(SEEN)
-        starts = [datetime.fromtimestamp(seen, IST)] if seen is not None else []
+        known = [datetime.fromtimestamp(seen, IST)] if seen is not None else []
+        if self._unchecked is not None:
+            known.append(self._unchecked)
+        starts = [min(known)] if known else []
         opened = self.window.opened_at(now)
         if opened is not None:
             starts.append(opened)
@@ -397,16 +407,22 @@ class AlertService:
         self.store.set_meta(SEEN, self.clock().timestamp())
 
     async def _resync(self, owner: Owner, pause: tuple[datetime, datetime] | None) -> None:
-        """Tell what changed while nothing was listening; on failure, try twice more."""
+        """Tell what changed while nothing was listening. A book that cannot be read is tried
+        again while the stream stays up (RESYNC_RETRY_S); a drop ends the tries, and the pause
+        then carries into the next connection's."""
         books = None
-        for delay in (0.0, *RESYNC_RETRY_S):
+        tries = 1 + len(RESYNC_RETRY_S)
+        for attempt, delay in enumerate((0.0, *RESYNC_RETRY_S), 1):
             if delay:
                 await asyncio.sleep(delay)
             try:
                 books = await read_books(self.client, self.settings.openalgo_url, owner.api_key)
                 break
             except BookUnavailable as exc:
-                log.info("The order book could not be read after the pause: %s", exc)
+                log.info(
+                    "The order book could not be read after the pause (try %d of %d): %s",
+                    attempt, tries, exc,
+                )  # fmt: skip
             except Exception:
                 log.exception("reading the order book after the pause failed unexpectedly")
         # From here to the queue there is no await: a cancelled session (a drop) must not leave
@@ -416,17 +432,28 @@ class AlertService:
             now = self.clock()
             for message in books.messages:
                 found += self.tracker.on_update(message, now, found_later=True)
-        checked = books is not None and books.live
-        if books is not None and not books.live:
+        if books is None:
+            book = "unreadable"
+        elif books.live:
+            book = "checked"
+        else:
+            book = "sandbox"
             log.info("OpenAlgo is in Analyze mode, so its order book is the sandbox's")
         told = found
         if pause is not None and (pause[1] - pause[0]).total_seconds() > GAP_S:
-            text = messages.gap_line(pause[0], pause[1], checked)
-            if found or not checked:
+            text = messages.gap_line(pause[0], pause[1], book)
+            opens = self.window.market_opens(pause[1])
+            early = opens is not None and pause[1] <= opens  # nothing trades before the pre-open
+            if found or (book != "checked" and not early):
                 key = f"gap:{pause[1].timestamp():.0f}"
                 told = [Alert(key, "gap", 0, text, pause[1]), *found]
-            else:
+            elif book == "checked":
                 log.info("%s Nothing had changed.", text)
+            else:
+                log.info(
+                    "%s Not sent: it ended before the market's start at %s.", text, hhmm(opens)
+                )
+        self._unchecked = None
         self._queue(told)
 
     # ---- the data path -----------------------------------------------------------------------
