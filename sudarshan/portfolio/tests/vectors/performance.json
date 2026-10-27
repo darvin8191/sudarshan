@@ -1,0 +1,4023 @@
+{
+ "about": "Golden vectors for core/performance.py (PA4): the money flows of a replayed tab, the XIRR and its three states, the rate of dated cash on its own, the time-weighted return, net money put in and the figures by financial year. Rates are found by another route than the code's (see make_pa4.py) and every number is worked out by hand in the case's why. Python only: the phone is sent the figures.",
+ "flows": [
+  {
+   "id": "FL1",
+   "title": "A purchase is money in, its charges with it",
+   "why": "10 shares for 1,000.00 (100000 paise) with 20.00 (2000) of charges: 102000 paise went out of the owner's pocket on 10 Jan 2025.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250110,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000,
+     "charges_paise": 2000
+    }
+   ],
+   "expect": {
+    "flows": [
+     {
+      "day": 20250110,
+      "in_paise": 102000,
+      "out_paise": 0,
+      "fee_paise": 0
+     }
+    ],
+    "totals": {
+     "in_paise": 102000,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   }
+  },
+  {
+   "id": "FL2",
+   "title": "A sale is money out, net of its charges",
+   "why": "The purchase of FL1, then all 10 sold on 10 Feb for 1,100.00 (110000) with 15.00 (1500) of charges: 108500 came in. Nothing is counted twice: the purchase is money in and the sale is money out, and the gain is not a flow.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250110,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000,
+     "charges_paise": 2000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "SELL",
+     "trade_date": 20250210,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 110000,
+     "charges_paise": 1500
+    }
+   ],
+   "expect": {
+    "flows": [
+     {
+      "day": 20250110,
+      "in_paise": 102000,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20250210,
+      "in_paise": 0,
+      "out_paise": 108500,
+      "fee_paise": 0
+     }
+    ],
+    "totals": {
+     "in_paise": 102000,
+     "out_paise": 108500,
+     "fee_paise": 0
+    }
+   }
+  },
+  {
+   "id": "FL3",
+   "title": "A rights issue is a purchase",
+   "why": "2 shares taken up for 160.00 (16000) with 1.00 (100) of charges: 16100 in, on the day paid.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "RIGHTS",
+     "trade_date": 20250305,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 2000000,
+     "amount_paise": 16000,
+     "charges_paise": 100
+    }
+   ],
+   "expect": {
+    "flows": [
+     {
+      "day": 20250305,
+      "in_paise": 16100,
+      "out_paise": 0,
+      "fee_paise": 0
+     }
+    ],
+    "totals": {
+     "in_paise": 16100,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   }
+  },
+  {
+   "id": "FL4",
+   "title": "A dividend is its gross amount out; the tax withheld is not a loss",
+   "why": "A dividend of 50.00 (5000) with 5.00 (500) of TDS withheld: the flow is the gross 5000, as the tab's income is. (TDS is tax the owner paid, not money lost.)",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "DIVIDEND",
+     "trade_date": 20250601,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 5000,
+     "tds_paise": 500
+    }
+   ],
+   "expect": {
+    "flows": [
+     {
+      "day": 20250601,
+      "in_paise": 0,
+      "out_paise": 5000,
+      "fee_paise": 0
+     }
+    ],
+    "totals": {
+     "in_paise": 0,
+     "out_paise": 5000,
+     "fee_paise": 0
+    }
+   }
+  },
+  {
+   "id": "FL5",
+   "title": "Interest is money out, with or without a holding",
+   "why": "Interest of 12.00 (1200) credited to the account with no holding named, and of 30.00 (3000) on a deposit: both out, on their days.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "INTEREST",
+     "trade_date": 20250701,
+     "account_id": 1,
+     "amount_paise": 1200
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "INTEREST",
+     "trade_date": 20250702,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 3000
+    }
+   ],
+   "expect": {
+    "flows": [
+     {
+      "day": 20250701,
+      "in_paise": 0,
+      "out_paise": 1200,
+      "fee_paise": 0
+     },
+     {
+      "day": 20250702,
+      "in_paise": 0,
+      "out_paise": 3000,
+      "fee_paise": 0
+     }
+    ],
+    "totals": {
+     "in_paise": 0,
+     "out_paise": 4200,
+     "fee_paise": 0
+    }
+   }
+  },
+  {
+   "id": "FL6",
+   "title": "A fee on its own is a fee, neither in nor out",
+   "why": "A fee of 3.00 (300) charged on its own: a cost paid from outside the holdings, so it is neither money in nor money out but its own term.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "FEE",
+     "trade_date": 20250801,
+     "account_id": 1,
+     "amount_paise": 300
+    }
+   ],
+   "expect": {
+    "flows": [
+     {
+      "day": 20250801,
+      "in_paise": 0,
+      "out_paise": 0,
+      "fee_paise": 300
+     }
+    ],
+    "totals": {
+     "in_paise": 0,
+     "out_paise": 0,
+     "fee_paise": 300
+    }
+   }
+  },
+  {
+   "id": "FL7",
+   "title": "Shares brought in from outside are money in on the day of the transfer, at the value entered",
+   "why": "10 shares that cost 10,000.00 (1000000) when bought on 15 Jan 2023 were moved into the tab on 1 Jun 2025: the value counted is the cost, since none was given, and the day is the day of the transfer, not the day of the first purchase. 5 more, costing 5,000.00, moved in on 2 Jun with a value of 7,500.00 (750000): that is the money in.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "TRANSFER",
+     "trade_date": 20250601,
+     "account_id": null,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 1000000,
+     "to_account_id": 1,
+     "lot_date": 20230115
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "TRANSFER",
+     "trade_date": 20250602,
+     "account_id": null,
+     "asset_id": 1,
+     "qty_u": 5000000,
+     "amount_paise": 500000,
+     "to_account_id": 1,
+     "value_paise": 750000
+    }
+   ],
+   "expect": {
+    "flows": [
+     {
+      "day": 20250601,
+      "in_paise": 1000000,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20250602,
+      "in_paise": 750000,
+      "out_paise": 0,
+      "fee_paise": 0
+     }
+    ],
+    "totals": {
+     "in_paise": 1750000,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   }
+  },
+  {
+   "id": "FL8",
+   "title": "Shares taken out to outside are money out at the value entered, else at cost",
+   "why": "10 shares bought for 1,000.00 (100000). 4 are moved out with no value: they leave at their cost, 400.00 (40000), and that is the money out. 2 more are moved out with a value of 300.00 (30000): that is the money out, whatever they cost (20000).",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250110,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "TRANSFER",
+     "trade_date": 20250301,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 4000000
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "TRANSFER",
+     "trade_date": 20250302,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 2000000,
+     "value_paise": 30000
+    }
+   ],
+   "expect": {
+    "flows": [
+     {
+      "day": 20250110,
+      "in_paise": 100000,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20250301,
+      "in_paise": 0,
+      "out_paise": 40000,
+      "fee_paise": 0
+     },
+     {
+      "day": 20250302,
+      "in_paise": 0,
+      "out_paise": 30000,
+      "fee_paise": 0
+     }
+    ],
+    "totals": {
+     "in_paise": 100000,
+     "out_paise": 70000,
+     "fee_paise": 0
+    }
+   }
+  },
+  {
+   "id": "FL9",
+   "title": "Shares moved between accounts of the tab move no money (T5)",
+   "why": "10 shares bought in account 1 for 1,000.00 (100000) and moved to account 2 on 5 Mar. The transfer is neither money in nor out: only the purchase is a flow.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250110,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "TRANSFER",
+     "trade_date": 20250305,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "to_account_id": 2
+    }
+   ],
+   "expect": {
+    "flows": [
+     {
+      "day": 20250110,
+      "in_paise": 100000,
+      "out_paise": 0,
+      "fee_paise": 0
+     }
+    ],
+    "totals": {
+     "in_paise": 100000,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   }
+  },
+  {
+   "id": "FL10",
+   "title": "Splits and bonus shares move no money",
+   "why": "10 shares for 1,000.00 (100000), each becoming 5 on 1 Mar, and 10 bonus shares on 1 Apr: nothing but the purchase is a flow.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250110,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "SPLIT",
+     "trade_date": 20250301,
+     "account_id": null,
+     "asset_id": 1,
+     "ratio_num": 5,
+     "ratio_den": 1
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "BONUS",
+     "trade_date": 20250401,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000
+    }
+   ],
+   "expect": {
+    "flows": [
+     {
+      "day": 20250110,
+      "in_paise": 100000,
+      "out_paise": 0,
+      "fee_paise": 0
+     }
+    ],
+    "totals": {
+     "in_paise": 100000,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   }
+  },
+  {
+   "id": "FL11",
+   "title": "Everything on one day is one flow",
+   "why": "On 10 Mar: 5 shares for 500.00 (50000), 5 for 600.00 (60000) with 1.00 (100) of charges, 4 sold for 480.00 (48000) less 0.50 (50) of charges, a dividend of 10.00 (1000) and a fee of 2.00 (200). In: 50000 + 60100 = 110100. Out: 47950 + 1000 = 48950. Fee: 200. One flow.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250310,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 5000000,
+     "amount_paise": 50000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "BUY",
+     "trade_date": 20250310,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 5000000,
+     "amount_paise": 60000,
+     "charges_paise": 100
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "SELL",
+     "trade_date": 20250310,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 4000000,
+     "amount_paise": 48000,
+     "charges_paise": 50
+    },
+    {
+     "id": 4,
+     "seq": 4,
+     "kind": "DIVIDEND",
+     "trade_date": 20250310,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 1000
+    },
+    {
+     "id": 5,
+     "seq": 5,
+     "kind": "FEE",
+     "trade_date": 20250310,
+     "account_id": 1,
+     "amount_paise": 200
+    }
+   ],
+   "expect": {
+    "flows": [
+     {
+      "day": 20250310,
+      "in_paise": 110100,
+      "out_paise": 48950,
+      "fee_paise": 200
+     }
+    ],
+    "totals": {
+     "in_paise": 110100,
+     "out_paise": 48950,
+     "fee_paise": 200
+    }
+   }
+  },
+  {
+   "id": "FL12",
+   "title": "A draft and a day after the day asked for count nowhere",
+   "why": "The purchase of 1,000.00 on 10 Jan counts. The draft of 2,000.00 on 5 Feb counts nowhere. The purchase of 500.00 on 10 Mar is after the 1 Mar the tab is read up to.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250110,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "BUY",
+     "trade_date": 20250205,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 200000,
+     "status": "draft"
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "BUY",
+     "trade_date": 20250310,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 5000000,
+     "amount_paise": 50000
+    }
+   ],
+   "expect": {
+    "flows": [
+     {
+      "day": 20250110,
+      "in_paise": 100000,
+      "out_paise": 0,
+      "fee_paise": 0
+     }
+    ],
+    "totals": {
+     "in_paise": 100000,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   },
+   "as_of": 20250301
+  },
+  {
+   "id": "FL13",
+   "title": "A sale whose charges are above its amount is money in",
+   "why": "1 share for 100.00 (10000), sold for 10.00 (1000) with 15.00 (1500) of charges: 1000 - 1500 is -500, which is money in (the owner paid 5.00 to sell). Nothing is clamped.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250110,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 1000000,
+     "amount_paise": 10000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "SELL",
+     "trade_date": 20250210,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 1000000,
+     "amount_paise": 1000,
+     "charges_paise": 1500
+    }
+   ],
+   "expect": {
+    "flows": [
+     {
+      "day": 20250110,
+      "in_paise": 10000,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20250210,
+      "in_paise": 0,
+      "out_paise": -500,
+      "fee_paise": 0
+     }
+    ],
+    "totals": {
+     "in_paise": 10000,
+     "out_paise": -500,
+     "fee_paise": 0
+    }
+   }
+  },
+  {
+   "id": "FL14",
+   "title": "An entry that moves no money is no flow",
+   "why": "Free shares entered as a purchase with an amount of nothing, and a bonus: no flow at all.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250110,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 0
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "BONUS",
+     "trade_date": 20250401,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000
+    }
+   ],
+   "expect": {
+    "flows": [],
+    "totals": {
+     "in_paise": 0,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   }
+  },
+  {
+   "id": "FL15",
+   "title": "A valuable added by hand is a purchase",
+   "why": "12.5 grams of gold for 85,000.00 (8500000) entered as a purchase of a holding kept by hand: 8500000 in.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250110,
+     "account_id": 1,
+     "asset_id": 3,
+     "qty_u": 12500000,
+     "amount_paise": 8500000
+    }
+   ],
+   "expect": {
+    "flows": [
+     {
+      "day": 20250110,
+      "in_paise": 8500000,
+      "out_paise": 0,
+      "fee_paise": 0
+     }
+    ],
+    "totals": {
+     "in_paise": 8500000,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   }
+  },
+  {
+   "id": "FL16",
+   "title": "Flows come out oldest day first, whatever order the entries were made in",
+   "why": "Three entries made out of date order: the flows are on 10 Jan, 10 Feb and 10 Mar, in that order.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "SELL",
+     "trade_date": 20250210,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 5000000,
+     "amount_paise": 60000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "DIVIDEND",
+     "trade_date": 20250310,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 1000
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "BUY",
+     "trade_date": 20250110,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000
+    }
+   ],
+   "expect": {
+    "flows": [
+     {
+      "day": 20250110,
+      "in_paise": 100000,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20250210,
+      "in_paise": 0,
+      "out_paise": 60000,
+      "fee_paise": 0
+     },
+     {
+      "day": 20250310,
+      "in_paise": 0,
+      "out_paise": 1000,
+      "fee_paise": 0
+     }
+    ],
+    "totals": {
+     "in_paise": 100000,
+     "out_paise": 61000,
+     "fee_paise": 0
+    }
+   }
+  }
+ ],
+ "xirr": [
+  {
+   "id": "X1",
+   "title": "Ten thousand to eleven thousand over 366 days",
+   "why": "10,000.00 paid in on 1 Jan 2024 is worth 11,000.00 on 1 Jan 2025, 366 days later (2024 is a leap year). With Act/365 the rate r solves 10000 (1 + r) ^ (366 / 365) = 11000, so 1 + r = 1.1 ^ (365 / 366) = 1.099714, 9.9714%. The absolute return is 10.0000%.",
+   "flows": [
+    {
+     "day": 20240101,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "value_paise": 1100000,
+   "valuation_day": 20250101,
+   "expect": {
+    "valuation_day": 20250101,
+    "first_flow_day": 20240101,
+    "value_paise": 1100000,
+    "money_in_paise": 1000000,
+    "money_out_paise": 0,
+    "fee_paise": 0,
+    "net_put_in_paise": 1000000,
+    "total_gain_paise": 100000,
+    "absolute_return_pct": "10.0000",
+    "xirr": {
+     "state": "shown",
+     "pct": "9.9714",
+     "from_day": null,
+     "words": null
+    }
+   }
+  },
+  {
+   "id": "X2",
+   "title": "Two purchases, a dividend, a sale and a value",
+   "why": "50,000.00 paid in on 3 Apr 2023 and 25,000.00 on 16 Oct 2023; 1,200.00 of dividend on 14 Jun 2024 and 20,000.00 from a sale on 28 Mar 2025; worth 82,000.00 on 27 Oct 2026. No formula gives the rate; it is the one at which those cash flows (negative paid, positive received) add up to nothing: 11.0863%. Absolute return: (82000 + 21200 - 75000) / 75000 = 37.6000%.",
+   "flows": [
+    {
+     "day": 20230403,
+     "in_paise": 5000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20231016,
+     "in_paise": 2500000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20240614,
+     "in_paise": 0,
+     "out_paise": 120000,
+     "fee_paise": 0
+    },
+    {
+     "day": 20250328,
+     "in_paise": 0,
+     "out_paise": 2000000,
+     "fee_paise": 0
+    }
+   ],
+   "value_paise": 8200000,
+   "valuation_day": 20261027,
+   "expect": {
+    "valuation_day": 20261027,
+    "first_flow_day": 20230403,
+    "value_paise": 8200000,
+    "money_in_paise": 7500000,
+    "money_out_paise": 2120000,
+    "fee_paise": 0,
+    "net_put_in_paise": 5380000,
+    "total_gain_paise": 2820000,
+    "absolute_return_pct": "37.6000",
+    "xirr": {
+     "state": "shown",
+     "pct": "11.0863",
+     "from_day": null,
+     "words": null
+    }
+   }
+  },
+  {
+   "id": "X3",
+   "title": "Under a year: absolute return, and the date the XIRR appears",
+   "why": "10,000.00 paid in on 1 May 2026, worth 10,800.00 on 27 Oct 2026, 179 days later. The absolute return is 8.0000%. The XIRR would be 1.08 ^ (365 / 179) - 1, about 16.99%, but over so short a time it only says how the gain would compound: it is hidden until the first flow is 365 days old, which is 1 May 2027.",
+   "flows": [
+    {
+     "day": 20260501,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "value_paise": 1080000,
+   "valuation_day": 20261027,
+   "expect": {
+    "valuation_day": 20261027,
+    "first_flow_day": 20260501,
+    "value_paise": 1080000,
+    "money_in_paise": 1000000,
+    "money_out_paise": 0,
+    "fee_paise": 0,
+    "net_put_in_paise": 1000000,
+    "total_gain_paise": 80000,
+    "absolute_return_pct": "8.0000",
+    "xirr": {
+     "state": "later",
+     "pct": null,
+     "from_day": 20270501,
+     "words": "XIRR appears after one year (from 1 May 2027)."
+    }
+   }
+  },
+  {
+   "id": "X3b",
+   "title": "Exactly 365 days: the XIRR is shown",
+   "why": "The same payment and value, read on 1 May 2027, exactly 365 days after the first flow: the rule is 'at least 365 days', so the XIRR is shown, and with one year to the day it is the absolute return, 8.0000%.",
+   "flows": [
+    {
+     "day": 20260501,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "value_paise": 1080000,
+   "valuation_day": 20270501,
+   "expect": {
+    "valuation_day": 20270501,
+    "first_flow_day": 20260501,
+    "value_paise": 1080000,
+    "money_in_paise": 1000000,
+    "money_out_paise": 0,
+    "fee_paise": 0,
+    "net_put_in_paise": 1000000,
+    "total_gain_paise": 80000,
+    "absolute_return_pct": "8.0000",
+    "xirr": {
+     "state": "shown",
+     "pct": "8.0000",
+     "from_day": null,
+     "words": null
+    }
+   }
+  },
+  {
+   "id": "X3c",
+   "title": "364 days: not yet",
+   "why": "The same, read on 30 Apr 2027, 364 days after the first flow: still hidden, and it still says it appears on 1 May 2027.",
+   "flows": [
+    {
+     "day": 20260501,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "value_paise": 1080000,
+   "valuation_day": 20270430,
+   "expect": {
+    "valuation_day": 20270430,
+    "first_flow_day": 20260501,
+    "value_paise": 1080000,
+    "money_in_paise": 1000000,
+    "money_out_paise": 0,
+    "fee_paise": 0,
+    "net_put_in_paise": 1000000,
+    "total_gain_paise": 80000,
+    "absolute_return_pct": "8.0000",
+    "xirr": {
+     "state": "later",
+     "pct": null,
+     "from_day": 20270501,
+     "words": "XIRR appears after one year (from 1 May 2027)."
+    }
+   }
+  },
+  {
+   "id": "X3d",
+   "title": "The year is counted in days: across a 29 February it ends the day before the anniversary",
+   "why": "First flow 1 Mar 2027, read on 28 Feb 2028: 364 days (2028 is a leap year, so 1 Mar 2028 is 366 days on). The XIRR appears on 29 Feb 2028, 365 days after the first flow, not on the calendar anniversary.",
+   "flows": [
+    {
+     "day": 20270301,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "value_paise": 1050000,
+   "valuation_day": 20280228,
+   "expect": {
+    "valuation_day": 20280228,
+    "first_flow_day": 20270301,
+    "value_paise": 1050000,
+    "money_in_paise": 1000000,
+    "money_out_paise": 0,
+    "fee_paise": 0,
+    "net_put_in_paise": 1000000,
+    "total_gain_paise": 50000,
+    "absolute_return_pct": "5.0000",
+    "xirr": {
+     "state": "later",
+     "pct": null,
+     "from_day": 20280229,
+     "words": "XIRR appears after one year (from 29 Feb 2028)."
+    }
+   }
+  },
+  {
+   "id": "X3e",
+   "title": "... and it is shown on that day",
+   "why": "The same, read on 29 Feb 2028: 365 days, so shown. 10,500.00 on 10,000.00 over 365 days is 5.0000%.",
+   "flows": [
+    {
+     "day": 20270301,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "value_paise": 1050000,
+   "valuation_day": 20280229,
+   "expect": {
+    "valuation_day": 20280229,
+    "first_flow_day": 20270301,
+    "value_paise": 1050000,
+    "money_in_paise": 1000000,
+    "money_out_paise": 0,
+    "fee_paise": 0,
+    "net_put_in_paise": 1000000,
+    "total_gain_paise": 50000,
+    "absolute_return_pct": "5.0000",
+    "xirr": {
+     "state": "shown",
+     "pct": "5.0000",
+     "from_day": null,
+     "words": null
+    }
+   }
+  },
+  {
+   "id": "X4",
+   "title": "Only money in and nothing left: no return to show",
+   "why": "10,000.00 paid in and nothing now worth anything: the money was all lost and there is no yearly rate for that. The absolute return is -100.0000%.",
+   "flows": [
+    {
+     "day": 20240101,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "value_paise": 0,
+   "valuation_day": 20260101,
+   "expect": {
+    "valuation_day": 20260101,
+    "first_flow_day": 20240101,
+    "value_paise": 0,
+    "money_in_paise": 1000000,
+    "money_out_paise": 0,
+    "fee_paise": 0,
+    "net_put_in_paise": 1000000,
+    "total_gain_paise": -1000000,
+    "absolute_return_pct": "-100.0000",
+    "xirr": {
+     "state": "none",
+     "pct": null,
+     "from_day": null,
+     "words": "Return needs at least one purchase and a value."
+    }
+   }
+  },
+  {
+   "id": "X4b",
+   "title": "Nothing at all",
+   "why": "No flows and no value: no XIRR and no absolute return.",
+   "flows": [],
+   "value_paise": 0,
+   "valuation_day": 20260101,
+   "expect": {
+    "valuation_day": 20260101,
+    "first_flow_day": null,
+    "value_paise": 0,
+    "money_in_paise": 0,
+    "money_out_paise": 0,
+    "fee_paise": 0,
+    "net_put_in_paise": 0,
+    "total_gain_paise": 0,
+    "absolute_return_pct": null,
+    "xirr": {
+     "state": "none",
+     "pct": null,
+     "from_day": null,
+     "words": "Return needs at least one purchase and a value."
+    }
+   }
+  },
+  {
+   "id": "X4c",
+   "title": "A value and no purchase",
+   "why": "A value of 5,000.00 with no purchase recorded: nothing to compare it with, so no figure.",
+   "flows": [],
+   "value_paise": 500000,
+   "valuation_day": 20260101,
+   "expect": {
+    "valuation_day": 20260101,
+    "first_flow_day": null,
+    "value_paise": 500000,
+    "money_in_paise": 0,
+    "money_out_paise": 0,
+    "fee_paise": 0,
+    "net_put_in_paise": 0,
+    "total_gain_paise": 500000,
+    "absolute_return_pct": null,
+    "xirr": {
+     "state": "none",
+     "pct": null,
+     "from_day": null,
+     "words": "Return needs at least one purchase and a value."
+    }
+   }
+  },
+  {
+   "id": "X4d",
+   "title": "Under a year and nothing left: none, not 'later'",
+   "why": "10,000.00 paid in on 1 May 2026 and nothing worth anything on 27 Oct 2026. A year from now there would still be no XIRR, so it must not promise one: 'none', with the same sentence.",
+   "flows": [
+    {
+     "day": 20260501,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "value_paise": 0,
+   "valuation_day": 20261027,
+   "expect": {
+    "valuation_day": 20261027,
+    "first_flow_day": 20260501,
+    "value_paise": 0,
+    "money_in_paise": 1000000,
+    "money_out_paise": 0,
+    "fee_paise": 0,
+    "net_put_in_paise": 1000000,
+    "total_gain_paise": -1000000,
+    "absolute_return_pct": "-100.0000",
+    "xirr": {
+     "state": "none",
+     "pct": null,
+     "from_day": null,
+     "words": "Return needs at least one purchase and a value."
+    }
+   }
+  },
+  {
+   "id": "X5",
+   "title": "Everything sold: an XIRR from the flows alone",
+   "why": "10,000.00 paid in on 1 Jan 2025 and 10,500.00 received on 1 Jul 2025 (181 days), nothing held on 27 Oct 2026. The absolute return is 5.0000%. The XIRR does not need a final value: 1.05 ^ (365 / 181) - 1 = 10.3392%.",
+   "flows": [
+    {
+     "day": 20250101,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20250701,
+     "in_paise": 0,
+     "out_paise": 1050000,
+     "fee_paise": 0
+    }
+   ],
+   "value_paise": 0,
+   "valuation_day": 20261027,
+   "expect": {
+    "valuation_day": 20261027,
+    "first_flow_day": 20250101,
+    "value_paise": 0,
+    "money_in_paise": 1000000,
+    "money_out_paise": 1050000,
+    "fee_paise": 0,
+    "net_put_in_paise": -50000,
+    "total_gain_paise": 50000,
+    "absolute_return_pct": "5.0000",
+    "xirr": {
+     "state": "shown",
+     "pct": "10.3392",
+     "from_day": null,
+     "words": null
+    }
+   }
+  },
+  {
+   "id": "X5b",
+   "title": "Everything sold within a year: absolute return and the date",
+   "why": "The same flows read on 1 Aug 2025, 212 days after the first: the absolute return, 5.0000%, and the XIRR appears from 1 Jan 2026.",
+   "flows": [
+    {
+     "day": 20250101,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20250701,
+     "in_paise": 0,
+     "out_paise": 1050000,
+     "fee_paise": 0
+    }
+   ],
+   "value_paise": 0,
+   "valuation_day": 20250801,
+   "expect": {
+    "valuation_day": 20250801,
+    "first_flow_day": 20250101,
+    "value_paise": 0,
+    "money_in_paise": 1000000,
+    "money_out_paise": 1050000,
+    "fee_paise": 0,
+    "net_put_in_paise": -50000,
+    "total_gain_paise": 50000,
+    "absolute_return_pct": "5.0000",
+    "xirr": {
+     "state": "later",
+     "pct": null,
+     "from_day": 20260101,
+     "words": "XIRR appears after one year (from 1 Jan 2026)."
+    }
+   }
+  },
+  {
+   "id": "XA",
+   "title": "A loss over two years",
+   "why": "10,000.00 paid in on 1 Jan 2025 is worth 8,000.00 on 1 Jan 2027, 730 days (2 x 365) later: (1 + r) ^ 2 = 0.8, so r = sqrt(0.8) - 1 = -10.5573%.",
+   "flows": [
+    {
+     "day": 20250101,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "value_paise": 800000,
+   "valuation_day": 20270101,
+   "expect": {
+    "valuation_day": 20270101,
+    "first_flow_day": 20250101,
+    "value_paise": 800000,
+    "money_in_paise": 1000000,
+    "money_out_paise": 0,
+    "fee_paise": 0,
+    "net_put_in_paise": 1000000,
+    "total_gain_paise": -200000,
+    "absolute_return_pct": "-20.0000",
+    "xirr": {
+     "state": "shown",
+     "pct": "-10.5573",
+     "from_day": null,
+     "words": null
+    }
+   }
+  },
+  {
+   "id": "XB",
+   "title": "Four times the money in two years is 100% a year",
+   "why": "10,000.00 becomes 40,000.00 in 730 days: (1 + r) ^ 2 = 4, r = 100.0000% exactly.",
+   "flows": [
+    {
+     "day": 20250101,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "value_paise": 4000000,
+   "valuation_day": 20270101,
+   "expect": {
+    "valuation_day": 20270101,
+    "first_flow_day": 20250101,
+    "value_paise": 4000000,
+    "money_in_paise": 1000000,
+    "money_out_paise": 0,
+    "fee_paise": 0,
+    "net_put_in_paise": 1000000,
+    "total_gain_paise": 3000000,
+    "absolute_return_pct": "300.0000",
+    "xirr": {
+     "state": "shown",
+     "pct": "100.0000",
+     "from_day": null,
+     "words": null
+    }
+   }
+  },
+  {
+   "id": "XC",
+   "title": "No gain at all is 0.0000%, never -0.0000%",
+   "why": "10,000.00 in, 10,000.00 two years later: the rate is 0, and is written 0.0000.",
+   "flows": [
+    {
+     "day": 20250101,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "value_paise": 1000000,
+   "valuation_day": 20270101,
+   "expect": {
+    "valuation_day": 20270101,
+    "first_flow_day": 20250101,
+    "value_paise": 1000000,
+    "money_in_paise": 1000000,
+    "money_out_paise": 0,
+    "fee_paise": 0,
+    "net_put_in_paise": 1000000,
+    "total_gain_paise": 0,
+    "absolute_return_pct": "0.0000",
+    "xirr": {
+     "state": "shown",
+     "pct": "0.0000",
+     "from_day": null,
+     "words": null
+    }
+   }
+  },
+  {
+   "id": "XD",
+   "title": "A fee is a cost, not a flow of its own kind",
+   "why": "10,000.00 bought on 1 Jan 2025 with a fee of 200.00 (20000) the same day, worth 11,200.00 exactly 365 days later. The fee is paid in like the purchase: 10,200.00 became 11,200.00, so r = 11200 / 10200 - 1 = 9.8039%. The absolute return is the same: (11200 - 10200) / 10200.",
+   "flows": [
+    {
+     "day": 20250101,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 20000
+    }
+   ],
+   "value_paise": 1120000,
+   "valuation_day": 20260101,
+   "expect": {
+    "valuation_day": 20260101,
+    "first_flow_day": 20250101,
+    "value_paise": 1120000,
+    "money_in_paise": 1000000,
+    "money_out_paise": 0,
+    "fee_paise": 20000,
+    "net_put_in_paise": 1020000,
+    "total_gain_paise": 100000,
+    "absolute_return_pct": "9.8039",
+    "xirr": {
+     "state": "shown",
+     "pct": "9.8039",
+     "from_day": null,
+     "words": null
+    }
+   }
+  },
+  {
+   "id": "XE",
+   "title": "Two purchases on one day are one flow",
+   "why": "6,000.00 and 4,000.00 bought on 1 Jan 2025 are 10,000.00 in on that day: the same as one purchase of 10,000.00, worth 11,000.00 on 1 Jan 2026 (365 days): 10.0000%.",
+   "flows": [
+    {
+     "day": 20250101,
+     "in_paise": 600000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20250101,
+     "in_paise": 400000,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "value_paise": 1100000,
+   "valuation_day": 20260101,
+   "expect": {
+    "valuation_day": 20260101,
+    "first_flow_day": 20250101,
+    "value_paise": 1100000,
+    "money_in_paise": 1000000,
+    "money_out_paise": 0,
+    "fee_paise": 0,
+    "net_put_in_paise": 1000000,
+    "total_gain_paise": 100000,
+    "absolute_return_pct": "10.0000",
+    "xirr": {
+     "state": "shown",
+     "pct": "10.0000",
+     "from_day": null,
+     "words": null
+    }
+   }
+  },
+  {
+   "id": "XF",
+   "title": "A flow after the valuation day is not part of it",
+   "why": "10,000.00 in on 1 Jan 2025, worth 11,000.00 on 1 Jan 2026. A sale of 5,000.00 dated 1 Jan 2027 is after the day the tab is read on, so it counts for nothing: 10.0000%, and no money out.",
+   "flows": [
+    {
+     "day": 20250101,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20270101,
+     "in_paise": 0,
+     "out_paise": 500000,
+     "fee_paise": 0
+    }
+   ],
+   "value_paise": 1100000,
+   "valuation_day": 20260101,
+   "expect": {
+    "valuation_day": 20260101,
+    "first_flow_day": 20250101,
+    "value_paise": 1100000,
+    "money_in_paise": 1000000,
+    "money_out_paise": 0,
+    "fee_paise": 0,
+    "net_put_in_paise": 1000000,
+    "total_gain_paise": 100000,
+    "absolute_return_pct": "10.0000",
+    "xirr": {
+     "state": "shown",
+     "pct": "10.0000",
+     "from_day": null,
+     "words": null
+    }
+   }
+  },
+  {
+   "id": "XG",
+   "title": "Buying and selling the same amount on one day leaves no flow",
+   "why": "10,000.00 bought and 10,000.00 sold on 1 Jan 2025, nothing held two years on: the day's cash is nothing, and there is nothing to find a rate for. The flows still show money in and out.",
+   "flows": [
+    {
+     "day": 20250101,
+     "in_paise": 1000000,
+     "out_paise": 1000000,
+     "fee_paise": 0
+    }
+   ],
+   "value_paise": 0,
+   "valuation_day": 20270101,
+   "expect": {
+    "valuation_day": 20270101,
+    "first_flow_day": 20250101,
+    "value_paise": 0,
+    "money_in_paise": 1000000,
+    "money_out_paise": 1000000,
+    "fee_paise": 0,
+    "net_put_in_paise": 0,
+    "total_gain_paise": 0,
+    "absolute_return_pct": "0.0000",
+    "xirr": {
+     "state": "none",
+     "pct": null,
+     "from_day": null,
+     "words": "Return needs at least one purchase and a value."
+    }
+   }
+  },
+  {
+   "id": "XL",
+   "title": "A round trip on the first day starts nothing",
+   "why": "On 1 Jan 2025 10,000.00 is bought and 10,000.00 sold: the day's cash is nothing and it is no start. On 1 Feb 2026 1,000.00 is bought and on 2 Feb sold for 1,100.00; nothing is held on 1 Mar 2026. The cash spans one day and the year is counted from 1 Feb 2026, so the XIRR (1.1 ^ 365 - 1, a number with 18 digits) is not shown and appears from 1 Feb 2027. The absolute return counts the round trip too: in 10,000.00 + 1,000.00 = 11,000.00, out 10,000.00 + 1,100.00 = 11,100.00, so (0 + 11,100.00 - 11,000.00) / 11,000.00 = 0.9091%.",
+   "flows": [
+    {
+     "day": 20250101,
+     "in_paise": 1000000,
+     "out_paise": 1000000,
+     "fee_paise": 0
+    },
+    {
+     "day": 20260201,
+     "in_paise": 100000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20260202,
+     "in_paise": 0,
+     "out_paise": 110000,
+     "fee_paise": 0
+    }
+   ],
+   "value_paise": 0,
+   "valuation_day": 20260301,
+   "expect": {
+    "valuation_day": 20260301,
+    "first_flow_day": 20250101,
+    "value_paise": 0,
+    "money_in_paise": 1100000,
+    "money_out_paise": 1110000,
+    "fee_paise": 0,
+    "net_put_in_paise": -10000,
+    "total_gain_paise": 10000,
+    "absolute_return_pct": "0.9091",
+    "xirr": {
+     "state": "later",
+     "pct": null,
+     "from_day": 20270201,
+     "words": "XIRR appears after one year (from 1 Feb 2027)."
+    }
+   }
+  },
+  {
+   "id": "XH",
+   "title": "Thirteen monthly purchases and a value after a year",
+   "why": "5,000.00 paid in on the 1st of each month from 1 Jan 2025 to 1 Jan 2026 (thirteen payments, 65,000.00), worth 70,000.00 on 1 Jan 2026, 365 days after the first. The rate weights each payment by how long it has worked, about half a year on average, so it is about double the absolute return of 7.6923%: 15.6698%.",
+   "flows": [
+    {
+     "day": 20250101,
+     "in_paise": 500000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20250201,
+     "in_paise": 500000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20250301,
+     "in_paise": 500000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20250401,
+     "in_paise": 500000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20250501,
+     "in_paise": 500000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20250601,
+     "in_paise": 500000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20250701,
+     "in_paise": 500000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20250801,
+     "in_paise": 500000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20250901,
+     "in_paise": 500000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20251001,
+     "in_paise": 500000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20251101,
+     "in_paise": 500000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20251201,
+     "in_paise": 500000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20260101,
+     "in_paise": 500000,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "value_paise": 7000000,
+   "valuation_day": 20260101,
+   "expect": {
+    "valuation_day": 20260101,
+    "first_flow_day": 20250101,
+    "value_paise": 7000000,
+    "money_in_paise": 6500000,
+    "money_out_paise": 0,
+    "fee_paise": 0,
+    "net_put_in_paise": 6500000,
+    "total_gain_paise": 500000,
+    "absolute_return_pct": "7.6923",
+    "xirr": {
+     "state": "shown",
+     "pct": "15.6698",
+     "from_day": null,
+     "words": null
+    }
+   }
+  },
+  {
+   "id": "XI",
+   "title": "Ten thousand times the money in 400 days",
+   "why": "1.00 (100 paise) becomes 10,00,000.00 (100000000) in 400 days: r = 1000000 ^ (365 / 400) - 1, a rate in the hundreds of thousands of percent, written in full.",
+   "flows": [
+    {
+     "day": 20250101,
+     "in_paise": 100,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "value_paise": 100000000,
+   "valuation_day": 20260205,
+   "expect": {
+    "valuation_day": 20260205,
+    "first_flow_day": 20250101,
+    "value_paise": 100000000,
+    "money_in_paise": 100,
+    "money_out_paise": 0,
+    "fee_paise": 0,
+    "net_put_in_paise": 100,
+    "total_gain_paise": 99999900,
+    "absolute_return_pct": "99999900.0000",
+    "xirr": {
+     "state": "shown",
+     "pct": "29853726.1892",
+     "from_day": null,
+     "words": null
+    }
+   }
+  },
+  {
+   "id": "XJ",
+   "title": "Nearly everything lost",
+   "why": "10,00,000.00 (100000000) becomes 1.00 (100 paise) in 400 days: r = 1e-6 ^ (365 / 400) - 1, about -99.9997%, which is a loss and not an error.",
+   "flows": [
+    {
+     "day": 20250101,
+     "in_paise": 100000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "value_paise": 100,
+   "valuation_day": 20260205,
+   "expect": {
+    "valuation_day": 20260205,
+    "first_flow_day": 20250101,
+    "value_paise": 100,
+    "money_in_paise": 100000000,
+    "money_out_paise": 0,
+    "fee_paise": 0,
+    "net_put_in_paise": 100000000,
+    "total_gain_paise": -99999900,
+    "absolute_return_pct": "-99.9999",
+    "xirr": {
+     "state": "shown",
+     "pct": "-99.9997",
+     "from_day": null,
+     "words": null
+    }
+   }
+  },
+  {
+   "id": "XK",
+   "title": "Money in, money out at a profit, then a loss of everything: no single rate",
+   "why": "10,000.00 in on 1 Jan 2025, 12,000.00 out on 1 Jan 2026, 15,000.00 in on 1 Jan 2027, nothing held on 1 Jan 2027. With y = 1 / (1 + r) the cash is -10000 + 12000 y - 15000 y^2, whose discriminant 12000^2 - 4 x 10000 x 15000 is negative: no rate makes it add up to nothing. The absolute return is (12000 - 25000) / 25000 = -52.0000%.",
+   "flows": [
+    {
+     "day": 20250101,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20260101,
+     "in_paise": 0,
+     "out_paise": 1200000,
+     "fee_paise": 0
+    },
+    {
+     "day": 20270101,
+     "in_paise": 1500000,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "value_paise": 0,
+   "valuation_day": 20270101,
+   "expect": {
+    "valuation_day": 20270101,
+    "first_flow_day": 20250101,
+    "value_paise": 0,
+    "money_in_paise": 2500000,
+    "money_out_paise": 1200000,
+    "fee_paise": 0,
+    "net_put_in_paise": 1300000,
+    "total_gain_paise": -1300000,
+    "absolute_return_pct": "-52.0000",
+    "xirr": {
+     "state": "none",
+     "pct": null,
+     "from_day": null,
+     "words": "These purchases and sales do not give a single yearly return."
+    }
+   }
+  }
+ ],
+ "chain": [
+  {
+   "id": "CH1",
+   "title": "X2 from the entries of a ledger",
+   "why": "The entries behind X2 (two purchases, a dividend and a sale of 200 of the 750 shares), replayed, give X2's flows; with a value of 82,000.00 on 27 Oct 2026 the report is X2's.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20230403,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 500000000,
+     "amount_paise": 5000000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "BUY",
+     "trade_date": 20231016,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 250000000,
+     "amount_paise": 2500000
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "DIVIDEND",
+     "trade_date": 20240614,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 120000
+    },
+    {
+     "id": 4,
+     "seq": 4,
+     "kind": "SELL",
+     "trade_date": 20250328,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 200000000,
+     "amount_paise": 2000000
+    }
+   ],
+   "value_paise": 8200000,
+   "valuation_day": 20261027,
+   "expect": {
+    "valuation_day": 20261027,
+    "first_flow_day": 20230403,
+    "value_paise": 8200000,
+    "money_in_paise": 7500000,
+    "money_out_paise": 2120000,
+    "fee_paise": 0,
+    "net_put_in_paise": 5380000,
+    "total_gain_paise": 2820000,
+    "absolute_return_pct": "37.6000",
+    "xirr": {
+     "state": "shown",
+     "pct": "11.0863",
+     "from_day": null,
+     "words": null
+    }
+   }
+  }
+ ],
+ "rates": [
+  {
+   "id": "R1",
+   "title": "Three payments with an exact rate",
+   "why": "-10,000.00 on 1 Jan 2025, -10,000.00 on 1 Jan 2026 and +23,100.00 on 1 Jan 2027, in paise -1000000, -1000000 and 2310000. With y = 1 / (1 + r) the sum is -1000000 - 1000000 y + 2310000 y^2, and it is nothing at y = (1000000 + sqrt(1000000^2 + 4 x 2310000 x 1000000)) / (2 x 2310000) = (1000000 + 3200000) / 4620000 = 10 / 11, so 1 + r = 1.1 and r = 10.0000%. (The quadratic's other root is negative and is no rate.)",
+   "cash": [
+    [
+     20250101,
+     -1000000
+    ],
+    [
+     20260101,
+     -1000000
+    ],
+    [
+     20270101,
+     2310000
+    ]
+   ],
+   "expect": {
+    "pct": "10.0000",
+    "rate": "0.100000000000"
+   }
+  },
+  {
+   "id": "R2",
+   "title": "Two rates fit and one of them is 0%: zero",
+   "why": "+10,000.00, -25,000.00, +15,000.00 on three yearly dates: with y = 1 / (1 + r), 1000000 - 2500000 y + 1500000 y^2 = 0 gives y = 1 or y = 2/3, so r = 0% or 50%. The sum of the cash is 0, so the rate nearest zero is 0 itself: 0.0000.",
+   "cash": [
+    [
+     20250101,
+     1000000
+    ],
+    [
+     20260101,
+     -2500000
+    ],
+    [
+     20270101,
+     1500000
+    ]
+   ],
+   "expect": {
+    "pct": "0.0000",
+    "rate": "0.000000000000"
+   },
+   "roots": [
+    "0",
+    "1/2"
+   ]
+  },
+  {
+   "id": "R3",
+   "title": "Two rates fit, both gains: the smaller",
+   "why": "+4,000.00, -13,000.00, +10,000.00 on three yearly dates: 400000 - 1300000 y + 1000000 y^2 = 0, so y = (13 +- 3) / 20 = 0.8 or 0.5 and r = 25% or 100%. The one nearest zero, 25.0000.",
+   "cash": [
+    [
+     20250101,
+     400000
+    ],
+    [
+     20260101,
+     -1300000
+    ],
+    [
+     20270101,
+     1000000
+    ]
+   ],
+   "expect": {
+    "pct": "25.0000",
+    "rate": "0.250000000000"
+   },
+   "roots": [
+    "1/4",
+    "1"
+   ]
+  },
+  {
+   "id": "R4",
+   "title": "Two rates fit, a loss and a gain: the loss is nearer zero",
+   "why": "+5,000.00, -14,000.00, +8,000.00 on three yearly dates: 500000 - 1400000 y + 800000 y^2 = 0, so y = (14 +- 6) / 16 = 1.25 or 0.5, r = -20% or +100%. Nearest zero: -20.0000.",
+   "cash": [
+    [
+     20250101,
+     500000
+    ],
+    [
+     20260101,
+     -1400000
+    ],
+    [
+     20270101,
+     800000
+    ]
+   ],
+   "expect": {
+    "pct": "-20.0000",
+    "rate": "-0.200000000000"
+   },
+   "roots": [
+    "-1/5",
+    "1"
+   ]
+  },
+  {
+   "id": "R5",
+   "title": "Nearest zero is measured on the log scale, not in percent",
+   "why": "+1,000.00, -2,010.00, +989.00 on three yearly dates (100000, -201000, 98900 paise): 100000 - 201000 y + 98900 y^2 = 0, so y = (2010 +- 290) / 1978, 1 + r = 0.86 or 1.15: r = -14% or +15%. In percent -14% is nearer zero; on the log scale ln 1.15 = 0.1398 is nearer than |ln 0.86| = 0.1508, and that is the rule: +15.0000. (Gains and losses are weighed alike: a rate of +x and its mirror 1 / (1 + x) - 1 are equally far.)",
+   "cash": [
+    [
+     20250101,
+     100000
+    ],
+    [
+     20260101,
+     -201000
+    ],
+    [
+     20270101,
+     98900
+    ]
+   ],
+   "expect": {
+    "pct": "15.0000",
+    "rate": "0.150000000000"
+   },
+   "roots": [
+    "-7/50",
+    "3/20"
+   ]
+  },
+  {
+   "id": "R6",
+   "title": "Cash that changes sign twice but has no rate",
+   "why": "-10,000.00, +12,000.00, -15,000.00 on three yearly dates: -1000000 + 1200000 y - 1500000 y^2 has a negative discriminant, so no yearly rate makes it add up to nothing.",
+   "cash": [
+    [
+     20250101,
+     -1000000
+    ],
+    [
+     20260101,
+     1200000
+    ],
+    [
+     20270101,
+     -1500000
+    ]
+   ],
+   "expect": {
+    "pct": null,
+    "rate": null
+   }
+  },
+  {
+   "id": "R7",
+   "title": "One payment alone has no rate",
+   "why": "A single payment, however large, cannot be compared with anything.",
+   "cash": [
+    [
+     20250101,
+     -1000000
+    ]
+   ],
+   "expect": {
+    "pct": null,
+    "rate": null
+   }
+  },
+  {
+   "id": "R8",
+   "title": "Payments only, or receipts only, have no rate",
+   "why": "Cash that is all paid out (or all received) never adds up to nothing at any rate.",
+   "cash": [
+    [
+     20250101,
+     -1000000
+    ],
+    [
+     20260101,
+     -500000
+    ]
+   ],
+   "expect": {
+    "pct": null,
+    "rate": null
+   }
+  },
+  {
+   "id": "R9",
+   "title": "One day apart: the yearly rate of a day's gain",
+   "why": "-10,000.00 and +10,100.00 one day later: 1% a day, (1.01) ^ 365 - 1 = 3,678.3434% a year.",
+   "cash": [
+    [
+     20250101,
+     -1000000
+    ],
+    [
+     20250102,
+     1010000
+    ]
+   ],
+   "expect": {
+    "pct": "3678.3434",
+    "rate": "36.783434332887"
+   }
+  },
+  {
+   "id": "R10",
+   "title": "Cash given out of order, a day twice, and a day that nets to nothing",
+   "why": "The payments of R1 given latest first, the first split in two, and a day that pays and receives the same 777.00: the rate is R1's.",
+   "cash": [
+    [
+     20270101,
+     2310000
+    ],
+    [
+     20260101,
+     -1000000
+    ],
+    [
+     20250101,
+     -400000
+    ],
+    [
+     20250101,
+     -600000
+    ],
+    [
+     20260101,
+     77700
+    ],
+    [
+     20260101,
+     -77700
+    ]
+   ],
+   "expect": {
+    "pct": "10.0000",
+    "rate": "0.100000000000"
+   }
+  },
+  {
+   "id": "R11",
+   "title": "A rate that rounds the other way if it is computed in floats",
+   "why": "-10,000.00 and +10,000.01 a year (365 days) later: 0.0001% a year, 1 paisa on 10000.00 is (1000001 / 1000000) - 1 = 0.0001%.",
+   "cash": [
+    [
+     20250101,
+     -1000000
+    ],
+    [
+     20260101,
+     1000001
+    ]
+   ],
+   "expect": {
+    "pct": "0.0001",
+    "rate": "0.000001000000"
+   }
+  },
+  {
+   "id": "R12",
+   "title": "A loss too small to be a number of its own",
+   "why": "-10,000.00 and +9,999.99 a year later: -0.0001%.",
+   "cash": [
+    [
+     20250101,
+     -1000000
+    ],
+    [
+     20260101,
+     999999
+    ]
+   ],
+   "expect": {
+    "pct": "-0.0001",
+    "rate": "-0.000001000000"
+   }
+  },
+  {
+   "id": "R13",
+   "title": "Two rates equally near zero, found in the same step: the gain",
+   "why": "+4,200.00, -8,410.00, +4,200.00 on three yearly dates (420000, -841000, 420000 paise): with y = 1 / (1 + r) the sum is 420000 - 841000 y + 420000 y^2, and y = (841 +- 41) / 840 = 1.05 or 20/21, so r = -1/21 = -4.7619% or r = +1/20 = +5.0000%. The cash reads the same backwards, so the two rates are mirror images, ln(21/20) from zero on either side, and both lie in the first step the search takes. Equally near goes to the gain: 5.0000.",
+   "cash": [
+    [
+     20250101,
+     420000
+    ],
+    [
+     20260101,
+     -841000
+    ],
+    [
+     20270101,
+     420000
+    ]
+   ],
+   "expect": {
+    "pct": "5.0000",
+    "rate": "0.050000000000"
+   },
+   "roots": [
+    "-1/21",
+    "1/20"
+   ]
+  }
+ ],
+ "twr": [
+  {
+   "id": "T1",
+   "title": "Four days with money in on the first and third and money out on the fourth",
+   "why": "Amounts in paise. Day 1: 10,000.00 in, closing value 10,500.00: r = (1050000 - 0 - 1000000) / (0 + 1000000) = 5.0000%. Day 2: value 10,290.00, nothing moved: (1029000 - 1050000) / 1050000 = -2.0000%. Day 3: 10,000.00 in, value 20,790.00: (2079000 - 1029000 - 1000000) / (1029000 + 1000000) = 50000 / 2029000 = 2.4643%. Day 4: 5,000.00 out, value 16,000.00: (1600000 - 2079000 + 500000) / 2079000 = 21000 / 2079000 = 1.0101%. Money in works from the start of its day and money out leaves at the end of it. The product is 1.05 x 0.98 x (2079000 / 2029000) x (2100000 / 2079000) = 1.029 x 2100000 / 2029000 = 1.0650074: 6.5007%.",
+   "opening_paise": 0,
+   "points": [
+    {
+     "day": 20261103,
+     "value_paise": 1050000,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20261104,
+     "value_paise": 1029000,
+     "in_paise": 0,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20261105,
+     "value_paise": 2079000,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20261106,
+     "value_paise": 1600000,
+     "in_paise": 0,
+     "out_paise": 500000,
+     "fee_paise": 0
+    }
+   ],
+   "expect": {
+    "periods": [
+     {
+      "start": 20261103,
+      "day": 20261103,
+      "base": 1000000,
+      "grown": 1050000,
+      "pct": "5.0000"
+     },
+     {
+      "start": 20261103,
+      "day": 20261104,
+      "base": 1050000,
+      "grown": 1029000,
+      "pct": "-2.0000"
+     },
+     {
+      "start": 20261104,
+      "day": 20261105,
+      "base": 2029000,
+      "grown": 2079000,
+      "pct": "2.4643"
+     },
+     {
+      "start": 20261105,
+      "day": 20261106,
+      "base": 2079000,
+      "grown": 2100000,
+      "pct": "1.0101"
+     }
+    ],
+    "twr": {
+     "start_day": 20261103,
+     "pct": "6.5007",
+     "annualised_pct": null,
+     "words": "TWR since 3 Nov 2026"
+    }
+   }
+  },
+  {
+   "id": "T2",
+   "title": "A dividend paid out is part of the return",
+   "why": "Day 1: 10,000.00 in, value 10,000.00: 0.0000%. Day 2: a dividend of 100.00 paid out, value still 10,000.00: (1000000 - 1000000 + 10000) / 1000000 = 1.0000%.",
+   "opening_paise": 0,
+   "points": [
+    {
+     "day": 20261103,
+     "value_paise": 1000000,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20261104,
+     "value_paise": 1000000,
+     "in_paise": 0,
+     "out_paise": 10000,
+     "fee_paise": 0
+    }
+   ],
+   "expect": {
+    "periods": [
+     {
+      "start": 20261103,
+      "day": 20261103,
+      "base": 1000000,
+      "grown": 1000000,
+      "pct": "0.0000"
+     },
+     {
+      "start": 20261103,
+      "day": 20261104,
+      "base": 1000000,
+      "grown": 1010000,
+      "pct": "1.0000"
+     }
+    ],
+    "twr": {
+     "start_day": 20261103,
+     "pct": "1.0000",
+     "annualised_pct": null,
+     "words": "TWR since 3 Nov 2026"
+    }
+   }
+  },
+  {
+   "id": "T3",
+   "title": "A fee paid from outside lowers the return",
+   "why": "Day 1: 10,000.00 in, value 10,000.00. Day 2: a fee of 50.00 paid from outside, value still 10,000.00: (1000000 - 1000000 - 5000) / 1000000 = -0.5000%.",
+   "opening_paise": 0,
+   "points": [
+    {
+     "day": 20261103,
+     "value_paise": 1000000,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20261104,
+     "value_paise": 1000000,
+     "in_paise": 0,
+     "out_paise": 0,
+     "fee_paise": 5000
+    }
+   ],
+   "expect": {
+    "periods": [
+     {
+      "start": 20261103,
+      "day": 20261103,
+      "base": 1000000,
+      "grown": 1000000,
+      "pct": "0.0000"
+     },
+     {
+      "start": 20261103,
+      "day": 20261104,
+      "base": 1000000,
+      "grown": 995000,
+      "pct": "-0.5000"
+     }
+    ],
+    "twr": {
+     "start_day": 20261103,
+     "pct": "-0.5000",
+     "annualised_pct": null,
+     "words": "TWR since 3 Nov 2026"
+    }
+   }
+  },
+  {
+   "id": "T4",
+   "title": "An incomplete day joins the next complete day's period",
+   "why": "Day 1 closes at 10,000.00. Day 2 is not complete (a holding has no closing price) and 10,00.00 comes in on it. Day 3 closes at 11,550.00. One period from the close of day 1 to the close of day 3, the money in counted from its start: (1155000 - 1000000 - 100000) / (1000000 + 100000) = 55000 / 1100000 = 5.0000%. With no opening value the first complete day is where the return begins, so day 1's own return (and its money in) is not part of it.",
+   "opening_paise": null,
+   "points": [
+    {
+     "day": 20261103,
+     "value_paise": 1000000,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20261104,
+     "value_paise": null,
+     "in_paise": 100000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20261105,
+     "value_paise": 1155000,
+     "in_paise": 0,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "expect": {
+    "periods": [
+     {
+      "start": 20261103,
+      "day": 20261105,
+      "base": 1100000,
+      "grown": 1155000,
+      "pct": "5.0000"
+     }
+    ],
+    "twr": {
+     "start_day": 20261103,
+     "pct": "5.0000",
+     "annualised_pct": null,
+     "words": "TWR since 3 Nov 2026"
+    }
+   }
+  },
+  {
+   "id": "T5",
+   "title": "A transfer between accounts changes nothing",
+   "why": "FL9's tab: 10 shares bought on day 1 for 1,000.00 and moved to another account on day 2. The transfer is no flow and no change in value, so day 2's return is 0.0000% and the TWR is day 1's.",
+   "opening_paise": 0,
+   "points": [
+    {
+     "day": 20250110,
+     "value_paise": 100000,
+     "in_paise": 100000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20250305,
+     "value_paise": 100000,
+     "in_paise": 0,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "expect": {
+    "periods": [
+     {
+      "start": 20250110,
+      "day": 20250110,
+      "base": 100000,
+      "grown": 100000,
+      "pct": "0.0000"
+     },
+     {
+      "start": 20250110,
+      "day": 20250305,
+      "base": 100000,
+      "grown": 100000,
+      "pct": "0.0000"
+     }
+    ],
+    "twr": {
+     "start_day": 20250110,
+     "pct": "0.0000",
+     "annualised_pct": null,
+     "words": "TWR since 10 Jan 2025"
+    }
+   }
+  },
+  {
+   "id": "T6",
+   "title": "The first day's own return counts for a tab that was empty before it",
+   "why": "Day 1: 10,000.00 in, value 11,000.00; day 2 no change. With an opening value of 0 the first day's 10.0000% counts: TWR 10.0000% since day 1. With no opening value day 1 is the base and only day 2 is a period: 0.0000%, measured from the close of day 1.",
+   "opening_paise": 0,
+   "points": [
+    {
+     "day": 20261103,
+     "value_paise": 1100000,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20261104,
+     "value_paise": 1100000,
+     "in_paise": 0,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "expect": {
+    "periods": [
+     {
+      "start": 20261103,
+      "day": 20261103,
+      "base": 1000000,
+      "grown": 1100000,
+      "pct": "10.0000"
+     },
+     {
+      "start": 20261103,
+      "day": 20261104,
+      "base": 1100000,
+      "grown": 1100000,
+      "pct": "0.0000"
+     }
+    ],
+    "twr": {
+     "start_day": 20261103,
+     "pct": "10.0000",
+     "annualised_pct": null,
+     "words": "TWR since 3 Nov 2026"
+    }
+   }
+  },
+  {
+   "id": "T6b",
+   "title": "... and not for a tab with an unknown value before it",
+   "why": "The same two days with no opening value: day 1 is the base, day 2 the only period, 1100000 / 1100000 = 0.0000%, which began at the close of 3 Nov.",
+   "opening_paise": null,
+   "points": [
+    {
+     "day": 20261103,
+     "value_paise": 1100000,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20261104,
+     "value_paise": 1100000,
+     "in_paise": 0,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "expect": {
+    "periods": [
+     {
+      "start": 20261103,
+      "day": 20261104,
+      "base": 1100000,
+      "grown": 1100000,
+      "pct": "0.0000"
+     }
+    ],
+    "twr": {
+     "start_day": 20261103,
+     "pct": "0.0000",
+     "annualised_pct": null,
+     "words": "TWR since 3 Nov 2026"
+    }
+   }
+  },
+  {
+   "id": "T7",
+   "title": "A day with nothing at work is skipped",
+   "why": "Days 1 and 2 have a closing value of nothing and nothing moves: there is no money at work, so no return can be worked out and they are skipped. Day 3: 5,000.00 in, value 5,050.00: 1.0000%. Day 4: value 5,000.00: (500000 - 505000) / 505000 = -0.9901%. The first period began at the close of day 2.",
+   "opening_paise": 0,
+   "points": [
+    {
+     "day": 20261103,
+     "value_paise": 0,
+     "in_paise": 0,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20261104,
+     "value_paise": 0,
+     "in_paise": 0,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20261105,
+     "value_paise": 505000,
+     "in_paise": 500000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20261106,
+     "value_paise": 500000,
+     "in_paise": 0,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "expect": {
+    "periods": [
+     {
+      "start": 20261104,
+      "day": 20261105,
+      "base": 500000,
+      "grown": 505000,
+      "pct": "1.0000"
+     },
+     {
+      "start": 20261105,
+      "day": 20261106,
+      "base": 505000,
+      "grown": 500000,
+      "pct": "-0.9901"
+     }
+    ],
+    "twr": {
+     "start_day": 20261104,
+     "pct": "0.0000",
+     "annualised_pct": null,
+     "words": "TWR since 4 Nov 2026"
+    }
+   }
+  },
+  {
+   "id": "T8",
+   "title": "Sold out and bought again",
+   "why": "Day 1: 10,000.00 in, value 11,000.00 (10.0000%). Day 2: everything sold for 11,500.00, value 0: (0 - 1100000 + 1150000) / 1100000 = 4.5455%. Day 3: nothing held, nothing at work: skipped. Day 4: 5,000.00 in, value 5,100.00: 2.0000%. Product 1.1 x (1150000 / 1100000) x 1.02 = 1.17300: 17.3000%.",
+   "opening_paise": 0,
+   "points": [
+    {
+     "day": 20261103,
+     "value_paise": 1100000,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20261104,
+     "value_paise": 0,
+     "in_paise": 0,
+     "out_paise": 1150000,
+     "fee_paise": 0
+    },
+    {
+     "day": 20261105,
+     "value_paise": 0,
+     "in_paise": 0,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20261106,
+     "value_paise": 510000,
+     "in_paise": 500000,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "expect": {
+    "periods": [
+     {
+      "start": 20261103,
+      "day": 20261103,
+      "base": 1000000,
+      "grown": 1100000,
+      "pct": "10.0000"
+     },
+     {
+      "start": 20261103,
+      "day": 20261104,
+      "base": 1100000,
+      "grown": 1150000,
+      "pct": "4.5455"
+     },
+     {
+      "start": 20261105,
+      "day": 20261106,
+      "base": 500000,
+      "grown": 510000,
+      "pct": "2.0000"
+     }
+    ],
+    "twr": {
+     "start_day": 20261103,
+     "pct": "17.3000",
+     "annualised_pct": null,
+     "words": "TWR since 3 Nov 2026"
+    }
+   }
+  },
+  {
+   "id": "T9",
+   "title": "Several incomplete days, with money in, out and a fee, join one period",
+   "why": "Day 1 closes at 10,000.00. Days 2 and 3 are not complete: 1,000.00 in on day 2, and on day 3 200.00 out and a fee of 10.00. Day 4 closes at 11,500.00. One period: base 1000000 + 100000 = 1100000; grown 1150000 + 20000 - 1000 = 1169000; 69000 / 1100000 = 6.2727%.",
+   "opening_paise": null,
+   "points": [
+    {
+     "day": 20261103,
+     "value_paise": 1000000,
+     "in_paise": 0,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20261104,
+     "value_paise": null,
+     "in_paise": 100000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20261105,
+     "value_paise": null,
+     "in_paise": 0,
+     "out_paise": 20000,
+     "fee_paise": 1000
+    },
+    {
+     "day": 20261106,
+     "value_paise": 1150000,
+     "in_paise": 0,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "expect": {
+    "periods": [
+     {
+      "start": 20261103,
+      "day": 20261106,
+      "base": 1100000,
+      "grown": 1169000,
+      "pct": "6.2727"
+     }
+    ],
+    "twr": {
+     "start_day": 20261103,
+     "pct": "6.2727",
+     "annualised_pct": null,
+     "words": "TWR since 3 Nov 2026"
+    }
+   }
+  },
+  {
+   "id": "T10",
+   "title": "Days after the last complete day are not part of it",
+   "why": "Days 1 and 2 are complete, day 3 is not and has 500.00 in: there is no closing value for it, so the return ends at day 2. Day 2: (1030000 - 1000000) / 1000000 = 3.0000%.",
+   "opening_paise": null,
+   "points": [
+    {
+     "day": 20261103,
+     "value_paise": 1000000,
+     "in_paise": 0,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20261104,
+     "value_paise": 1030000,
+     "in_paise": 0,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20261105,
+     "value_paise": null,
+     "in_paise": 50000,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "expect": {
+    "periods": [
+     {
+      "start": 20261103,
+      "day": 20261104,
+      "base": 1000000,
+      "grown": 1030000,
+      "pct": "3.0000"
+     }
+    ],
+    "twr": {
+     "start_day": 20261103,
+     "pct": "3.0000",
+     "annualised_pct": null,
+     "words": "TWR since 3 Nov 2026"
+    }
+   }
+  },
+  {
+   "id": "T11",
+   "title": "Days before the first complete day: with an empty tab they join its period",
+   "why": "Day 1 is not complete and 10,000.00 is paid in on it. Day 2 closes at 10,100.00. Opening value 0: one period from day 1, base 1000000, 1.0000%. With no opening value there is nothing to measure from, and no period at all.",
+   "opening_paise": 0,
+   "points": [
+    {
+     "day": 20261103,
+     "value_paise": null,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20261104,
+     "value_paise": 1010000,
+     "in_paise": 0,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "expect": {
+    "periods": [
+     {
+      "start": 20261103,
+      "day": 20261104,
+      "base": 1000000,
+      "grown": 1010000,
+      "pct": "1.0000"
+     }
+    ],
+    "twr": {
+     "start_day": 20261103,
+     "pct": "1.0000",
+     "annualised_pct": null,
+     "words": "TWR since 3 Nov 2026"
+    }
+   }
+  },
+  {
+   "id": "T11b",
+   "title": "... and with no opening value there is no return yet",
+   "why": "The same two days, no opening value: day 2 is the first complete day and so only the base. No period: no figure and the sentence that says why.",
+   "opening_paise": null,
+   "points": [
+    {
+     "day": 20261103,
+     "value_paise": null,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20261104,
+     "value_paise": 1010000,
+     "in_paise": 0,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "expect": {
+    "periods": [],
+    "twr": {
+     "start_day": null,
+     "pct": null,
+     "annualised_pct": null,
+     "words": "TWR needs closing prices for at least two days."
+    }
+   }
+  },
+  {
+   "id": "T12",
+   "title": "A year and a day: annualised",
+   "why": "10,000.00 in on 1 Jan 2025, worth 10,000.00 that day and 11,000.00 on 2 Jan 2026. The first period began on 1 Jan 2025 and the last ends 366 days later: beyond 365, so the TWR of 10.0000% is also given as a yearly rate, 1.1 ^ (365 / 366) - 1 = 9.9714%.",
+   "opening_paise": 0,
+   "points": [
+    {
+     "day": 20250101,
+     "value_paise": 1000000,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20260102,
+     "value_paise": 1100000,
+     "in_paise": 0,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "expect": {
+    "periods": [
+     {
+      "start": 20250101,
+      "day": 20250101,
+      "base": 1000000,
+      "grown": 1000000,
+      "pct": "0.0000"
+     },
+     {
+      "start": 20250101,
+      "day": 20260102,
+      "base": 1000000,
+      "grown": 1100000,
+      "pct": "10.0000"
+     }
+    ],
+    "twr": {
+     "start_day": 20250101,
+     "pct": "10.0000",
+     "annualised_pct": "9.9714",
+     "words": "TWR since 1 Jan 2025"
+    }
+   }
+  },
+  {
+   "id": "T12b",
+   "title": "Exactly 365 days is not beyond a year",
+   "why": "The same series ending on 1 Jan 2026, 365 days after it began: not beyond 365 days, so no annualised figure.",
+   "opening_paise": 0,
+   "points": [
+    {
+     "day": 20250101,
+     "value_paise": 1000000,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20260101,
+     "value_paise": 1100000,
+     "in_paise": 0,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "expect": {
+    "periods": [
+     {
+      "start": 20250101,
+      "day": 20250101,
+      "base": 1000000,
+      "grown": 1000000,
+      "pct": "0.0000"
+     },
+     {
+      "start": 20250101,
+      "day": 20260101,
+      "base": 1000000,
+      "grown": 1100000,
+      "pct": "10.0000"
+     }
+    ],
+    "twr": {
+     "start_day": 20250101,
+     "pct": "10.0000",
+     "annualised_pct": null,
+     "words": "TWR since 1 Jan 2025"
+    }
+   }
+  },
+  {
+   "id": "T13",
+   "title": "A holding that goes to nothing loses everything, for good",
+   "why": "Day 1: 10,000.00 in, value 10,000.00. Day 2: the value is nothing and nothing was taken out: (0 - 1000000) / 1000000 = -100.0000%. Day 3: 1,000.00 in, value 1,100.00 is 10.0000%, but the product stays 0: a time-weighted return cannot come back from losing everything.",
+   "opening_paise": 0,
+   "points": [
+    {
+     "day": 20261103,
+     "value_paise": 1000000,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20261104,
+     "value_paise": 0,
+     "in_paise": 0,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20261105,
+     "value_paise": 110000,
+     "in_paise": 100000,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "expect": {
+    "periods": [
+     {
+      "start": 20261103,
+      "day": 20261103,
+      "base": 1000000,
+      "grown": 1000000,
+      "pct": "0.0000"
+     },
+     {
+      "start": 20261103,
+      "day": 20261104,
+      "base": 1000000,
+      "grown": 0,
+      "pct": "-100.0000"
+     },
+     {
+      "start": 20261104,
+      "day": 20261105,
+      "base": 100000,
+      "grown": 110000,
+      "pct": "10.0000"
+     }
+    ],
+    "twr": {
+     "start_day": 20261103,
+     "pct": "-100.0000",
+     "annualised_pct": null,
+     "words": "TWR since 3 Nov 2026"
+    }
+   }
+  },
+  {
+   "id": "T14",
+   "title": "A fee larger than everything at work cannot lose more than everything",
+   "why": "Day 1: 100.00 in, value 100.00. Day 2: a fee of 250.00 from outside, value still 100.00: the formula gives (10000 - 10000 - 25000) / 10000 = -250%, but a period cannot lose more than all it began with, so it counts as -100.0000%.",
+   "opening_paise": 0,
+   "points": [
+    {
+     "day": 20261103,
+     "value_paise": 10000,
+     "in_paise": 10000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20261104,
+     "value_paise": 10000,
+     "in_paise": 0,
+     "out_paise": 0,
+     "fee_paise": 25000
+    }
+   ],
+   "expect": {
+    "periods": [
+     {
+      "start": 20261103,
+      "day": 20261103,
+      "base": 10000,
+      "grown": 10000,
+      "pct": "0.0000"
+     },
+     {
+      "start": 20261103,
+      "day": 20261104,
+      "base": 10000,
+      "grown": 0,
+      "pct": "-100.0000"
+     }
+    ],
+    "twr": {
+     "start_day": 20261103,
+     "pct": "-100.0000",
+     "annualised_pct": null,
+     "words": "TWR since 3 Nov 2026"
+    }
+   }
+  },
+  {
+   "id": "T15",
+   "title": "Days out of order and a day twice",
+   "why": "T1's days given latest first, with day 3 split in two points (the money in on one, the value on the other): the same periods and the same 6.5007%.",
+   "opening_paise": 0,
+   "points": [
+    {
+     "day": 20261106,
+     "value_paise": 1600000,
+     "in_paise": 0,
+     "out_paise": 500000,
+     "fee_paise": 0
+    },
+    {
+     "day": 20261105,
+     "value_paise": null,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20261103,
+     "value_paise": 1050000,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20261105,
+     "value_paise": 2079000,
+     "in_paise": 0,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20261104,
+     "value_paise": 1029000,
+     "in_paise": 0,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "expect": {
+    "periods": [
+     {
+      "start": 20261103,
+      "day": 20261103,
+      "base": 1000000,
+      "grown": 1050000,
+      "pct": "5.0000"
+     },
+     {
+      "start": 20261103,
+      "day": 20261104,
+      "base": 1050000,
+      "grown": 1029000,
+      "pct": "-2.0000"
+     },
+     {
+      "start": 20261104,
+      "day": 20261105,
+      "base": 2029000,
+      "grown": 2079000,
+      "pct": "2.4643"
+     },
+     {
+      "start": 20261105,
+      "day": 20261106,
+      "base": 2079000,
+      "grown": 2100000,
+      "pct": "1.0101"
+     }
+    ],
+    "twr": {
+     "start_day": 20261103,
+     "pct": "6.5007",
+     "annualised_pct": null,
+     "words": "TWR since 3 Nov 2026"
+    }
+   }
+  },
+  {
+   "id": "T16",
+   "title": "A loss too small to show is 0.0000%, never -0.0000%",
+   "why": "1,00,00,000.00 (1000000000 paise) at work and a day's result of one paisa less: -1 / 1000000000 = -0.0000001%, which rounds to 0.0000.",
+   "opening_paise": 0,
+   "points": [
+    {
+     "day": 20261103,
+     "value_paise": 1000000000,
+     "in_paise": 1000000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20261104,
+     "value_paise": 999999999,
+     "in_paise": 0,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "expect": {
+    "periods": [
+     {
+      "start": 20261103,
+      "day": 20261103,
+      "base": 1000000000,
+      "grown": 1000000000,
+      "pct": "0.0000"
+     },
+     {
+      "start": 20261103,
+      "day": 20261104,
+      "base": 1000000000,
+      "grown": 999999999,
+      "pct": "0.0000"
+     }
+    ],
+    "twr": {
+     "start_day": 20261103,
+     "pct": "0.0000",
+     "annualised_pct": null,
+     "words": "TWR since 3 Nov 2026"
+    }
+   }
+  },
+  {
+   "id": "T17",
+   "title": "Nothing to measure",
+   "why": "No points, or only days with no closing value: no return, and the sentence that says so.",
+   "opening_paise": 0,
+   "points": [],
+   "expect": {
+    "periods": [],
+    "twr": {
+     "start_day": null,
+     "pct": null,
+     "annualised_pct": null,
+     "words": "TWR needs closing prices for at least two days."
+    }
+   }
+  },
+  {
+   "id": "T18",
+   "title": "Points far apart: 400 days, annualised",
+   "why": "10,000.00 in on 1 Jan 2025 and worth the same that day (0.0000%), 10,500.00 200 days later (5.0000%) and 11,000.00 200 days after that (4.7619%): a TWR of 10.0000% over 400 days, beyond a year, so also yearly: 1.1 ^ (365 / 400) - 1 = 9.0865%.",
+   "opening_paise": 0,
+   "points": [
+    {
+     "day": 20250101,
+     "value_paise": 1000000,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20250720,
+     "value_paise": 1050000,
+     "in_paise": 0,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20260205,
+     "value_paise": 1100000,
+     "in_paise": 0,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "expect": {
+    "periods": [
+     {
+      "start": 20250101,
+      "day": 20250101,
+      "base": 1000000,
+      "grown": 1000000,
+      "pct": "0.0000"
+     },
+     {
+      "start": 20250101,
+      "day": 20250720,
+      "base": 1000000,
+      "grown": 1050000,
+      "pct": "5.0000"
+     },
+     {
+      "start": 20250720,
+      "day": 20260205,
+      "base": 1050000,
+      "grown": 1100000,
+      "pct": "4.7619"
+     }
+    ],
+    "twr": {
+     "start_day": 20250101,
+     "pct": "10.0000",
+     "annualised_pct": "9.0865",
+     "words": "TWR since 1 Jan 2025"
+    }
+   }
+  }
+ ],
+ "net": [
+  {
+   "id": "N1",
+   "title": "T1 with a dividend and a fee: the money still put in",
+   "why": "T1's flows plus a dividend of 100.00 (10000) paid out and a fee of 50.00 (5000) on 4 Nov. Put in: 2000000 in + 5000 fee - 510000 out (the 500000 sale and the dividend) = 1495000, 14,950.00, and the tab is worth 16,000.00, so the gain is 1,050.00 (105000). The absolute return is the same gain over what was paid in, 2005000: 105000 / 2005000 = 5.2369%. Net money put in after each day is listed.",
+   "flows": [
+    {
+     "day": 20261103,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20261104,
+     "in_paise": 0,
+     "out_paise": 10000,
+     "fee_paise": 5000
+    },
+    {
+     "day": 20261105,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20261106,
+     "in_paise": 0,
+     "out_paise": 500000,
+     "fee_paise": 0
+    }
+   ],
+   "value_paise": 1600000,
+   "valuation_day": 20261106,
+   "expect": {
+    "valuation_day": 20261106,
+    "first_flow_day": 20261103,
+    "value_paise": 1600000,
+    "money_in_paise": 2000000,
+    "money_out_paise": 510000,
+    "fee_paise": 5000,
+    "net_put_in_paise": 1495000,
+    "total_gain_paise": 105000,
+    "absolute_return_pct": "5.2369",
+    "xirr": {
+     "state": "later",
+     "pct": null,
+     "from_day": 20271103,
+     "words": "XIRR appears after one year (from 3 Nov 2027)."
+    }
+   },
+   "running": [
+    {
+     "day": 20261103,
+     "net_put_in_paise": 1000000
+    },
+    {
+     "day": 20261104,
+     "net_put_in_paise": 995000
+    },
+    {
+     "day": 20261105,
+     "net_put_in_paise": 1995000
+    },
+    {
+     "day": 20261106,
+     "net_put_in_paise": 1495000
+    }
+   ]
+  }
+ ],
+ "years": [
+  {
+   "id": "FY1",
+   "title": "31 March and 1 April fall in different financial years",
+   "why": "10 shares bought for 1,000.00 (100000). 5 sold on 31 Mar 2025 for 700.00 (70000), cost 500.00: gain 200.00 (20000), FY 2024-25. 5 sold on 1 Apr 2025 for 450.00 (45000): loss 50.00 (-5000), FY 2025-26. Dividends of 10.00 on 31 Mar and 20.00 on 1 Apr 2025; fees of 3.00 and 4.00 on the same two days; interest of 1.50 on 31 Mar 2026 (FY 2025-26) and 2.50 on 1 Apr 2026 (FY 2026-27). Income is gross, and the sale's charges would be in its gain, not in the fees. Read on 27 Oct 2026 the last twelve months run from Nov 2025, so the two interest credits are in March and April 2026 and the 2025 income is in no month.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250310,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "SELL",
+     "trade_date": 20250331,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 5000000,
+     "amount_paise": 70000
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "SELL",
+     "trade_date": 20250401,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 5000000,
+     "amount_paise": 45000
+    },
+    {
+     "id": 4,
+     "seq": 4,
+     "kind": "DIVIDEND",
+     "trade_date": 20250331,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 1000
+    },
+    {
+     "id": 5,
+     "seq": 5,
+     "kind": "DIVIDEND",
+     "trade_date": 20250401,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 2000
+    },
+    {
+     "id": 6,
+     "seq": 6,
+     "kind": "FEE",
+     "trade_date": 20250331,
+     "account_id": 1,
+     "amount_paise": 300
+    },
+    {
+     "id": 7,
+     "seq": 7,
+     "kind": "FEE",
+     "trade_date": 20250401,
+     "account_id": 1,
+     "amount_paise": 400
+    },
+    {
+     "id": 8,
+     "seq": 8,
+     "kind": "INTEREST",
+     "trade_date": 20260331,
+     "account_id": 1,
+     "amount_paise": 150
+    },
+    {
+     "id": 9,
+     "seq": 9,
+     "kind": "INTEREST",
+     "trade_date": 20260401,
+     "account_id": 1,
+     "amount_paise": 250
+    }
+   ],
+   "as_of": 20261027,
+   "valuation_day": 20261027,
+   "expect": {
+    "by_fy": [
+     {
+      "fy": 2024,
+      "label": "FY 2024-25",
+      "realised_paise": 20000,
+      "income_paise": 1000,
+      "fees_paise": 300
+     },
+     {
+      "fy": 2025,
+      "label": "FY 2025-26",
+      "realised_paise": -5000,
+      "income_paise": 2150,
+      "fees_paise": 400
+     },
+     {
+      "fy": 2026,
+      "label": "FY 2026-27",
+      "realised_paise": 0,
+      "income_paise": 250,
+      "fees_paise": 0
+     }
+    ],
+    "income": {
+     "this_fy_paise": 250,
+     "by_month": [
+      {
+       "month": 202511,
+       "paise": 0
+      },
+      {
+       "month": 202512,
+       "paise": 0
+      },
+      {
+       "month": 202601,
+       "paise": 0
+      },
+      {
+       "month": 202602,
+       "paise": 0
+      },
+      {
+       "month": 202603,
+       "paise": 150
+      },
+      {
+       "month": 202604,
+       "paise": 250
+      },
+      {
+       "month": 202605,
+       "paise": 0
+      },
+      {
+       "month": 202606,
+       "paise": 0
+      },
+      {
+       "month": 202607,
+       "paise": 0
+      },
+      {
+       "month": 202608,
+       "paise": 0
+      },
+      {
+       "month": 202609,
+       "paise": 0
+      },
+      {
+       "month": 202610,
+       "paise": 0
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "FY2",
+   "title": "Income this financial year and in each of the last twelve months",
+   "why": "Read on 27 Oct 2026, the twelve months are Nov 2025 to Oct 2026. Income of 1,000.00 (31 Oct 2025, a month too early), 2,000.00 (1 Nov 2025, the first month), 3,000.00 (15 Mar 2026, last financial year), 4,000.00 (1 Apr 2026, the first day of this one), 5,000.00 (30 Sep 2026), 6,000.00 (27 Oct 2026, the day itself) and 7,000.00 (28 Oct 2026, after it). The ledger is replayed to 28 Oct here, on purpose: the year by year figures add up whatever was replayed (FY 2026-27: 4000 + 5000 + 6000 + 7000 = 22,000.00), while the income figures stop at the day asked for. This financial year (from 1 Apr 2026): 4000 + 5000 + 6000 = 15,000.00. Months with none are 0.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "DIVIDEND",
+     "trade_date": 20251031,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 100000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "DIVIDEND",
+     "trade_date": 20251101,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 200000
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "INTEREST",
+     "trade_date": 20260315,
+     "account_id": 1,
+     "amount_paise": 300000
+    },
+    {
+     "id": 4,
+     "seq": 4,
+     "kind": "DIVIDEND",
+     "trade_date": 20260401,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 400000
+    },
+    {
+     "id": 5,
+     "seq": 5,
+     "kind": "DIVIDEND",
+     "trade_date": 20260930,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 500000
+    },
+    {
+     "id": 6,
+     "seq": 6,
+     "kind": "DIVIDEND",
+     "trade_date": 20261027,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 600000
+    },
+    {
+     "id": 7,
+     "seq": 7,
+     "kind": "DIVIDEND",
+     "trade_date": 20261028,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 700000
+    }
+   ],
+   "as_of": 20261028,
+   "valuation_day": 20261027,
+   "expect": {
+    "by_fy": [
+     {
+      "fy": 2025,
+      "label": "FY 2025-26",
+      "realised_paise": 0,
+      "income_paise": 600000,
+      "fees_paise": 0
+     },
+     {
+      "fy": 2026,
+      "label": "FY 2026-27",
+      "realised_paise": 0,
+      "income_paise": 2200000,
+      "fees_paise": 0
+     }
+    ],
+    "income": {
+     "this_fy_paise": 1500000,
+     "by_month": [
+      {
+       "month": 202511,
+       "paise": 200000
+      },
+      {
+       "month": 202512,
+       "paise": 0
+      },
+      {
+       "month": 202601,
+       "paise": 0
+      },
+      {
+       "month": 202602,
+       "paise": 0
+      },
+      {
+       "month": 202603,
+       "paise": 300000
+      },
+      {
+       "month": 202604,
+       "paise": 400000
+      },
+      {
+       "month": 202605,
+       "paise": 0
+      },
+      {
+       "month": 202606,
+       "paise": 0
+      },
+      {
+       "month": 202607,
+       "paise": 0
+      },
+      {
+       "month": 202608,
+       "paise": 0
+      },
+      {
+       "month": 202609,
+       "paise": 500000
+      },
+      {
+       "month": 202610,
+       "paise": 600000
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "FY3",
+   "title": "A financial year with nothing in it has no row",
+   "why": "A dividend in FY 2022-23 and another in FY 2024-25: FY 2023-24 has nothing, and a sale at exactly its cost (no gain, no loss) in FY 2025-26 has nothing either.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20220401,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "DIVIDEND",
+     "trade_date": 20230115,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 1000
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "DIVIDEND",
+     "trade_date": 20250215,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 2000
+    },
+    {
+     "id": 4,
+     "seq": 4,
+     "kind": "SELL",
+     "trade_date": 20250601,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000
+    }
+   ],
+   "as_of": 20261027,
+   "valuation_day": 20261027,
+   "expect": {
+    "by_fy": [
+     {
+      "fy": 2022,
+      "label": "FY 2022-23",
+      "realised_paise": 0,
+      "income_paise": 1000,
+      "fees_paise": 0
+     },
+     {
+      "fy": 2024,
+      "label": "FY 2024-25",
+      "realised_paise": 0,
+      "income_paise": 2000,
+      "fees_paise": 0
+     }
+    ],
+    "income": {
+     "this_fy_paise": 0,
+     "by_month": [
+      {
+       "month": 202511,
+       "paise": 0
+      },
+      {
+       "month": 202512,
+       "paise": 0
+      },
+      {
+       "month": 202601,
+       "paise": 0
+      },
+      {
+       "month": 202602,
+       "paise": 0
+      },
+      {
+       "month": 202603,
+       "paise": 0
+      },
+      {
+       "month": 202604,
+       "paise": 0
+      },
+      {
+       "month": 202605,
+       "paise": 0
+      },
+      {
+       "month": 202606,
+       "paise": 0
+      },
+      {
+       "month": 202607,
+       "paise": 0
+      },
+      {
+       "month": 202608,
+       "paise": 0
+      },
+      {
+       "month": 202609,
+       "paise": 0
+      },
+      {
+       "month": 202610,
+       "paise": 0
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "FY4",
+   "title": "Charges are in a sale's gain, TDS is not taken off, a loss is a loss",
+   "why": "10 shares for 1,000.00 (100000) with 20.00 of charges (cost 102000). Sold for 900.00 (90000) with 15.00 of charges: 90000 - 1500 - 102000 = -13500, a realised loss of 135.00 in FY 2025-26. A dividend of 50.00 with 5.00 of TDS is income of 5000, gross.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250110,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000,
+     "charges_paise": 2000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "SELL",
+     "trade_date": 20250910,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 90000,
+     "charges_paise": 1500
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "DIVIDEND",
+     "trade_date": 20250915,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 5000,
+     "tds_paise": 500
+    }
+   ],
+   "as_of": 20261027,
+   "valuation_day": 20261027,
+   "expect": {
+    "by_fy": [
+     {
+      "fy": 2025,
+      "label": "FY 2025-26",
+      "realised_paise": -13500,
+      "income_paise": 5000,
+      "fees_paise": 0
+     }
+    ],
+    "income": {
+     "this_fy_paise": 0,
+     "by_month": [
+      {
+       "month": 202511,
+       "paise": 0
+      },
+      {
+       "month": 202512,
+       "paise": 0
+      },
+      {
+       "month": 202601,
+       "paise": 0
+      },
+      {
+       "month": 202602,
+       "paise": 0
+      },
+      {
+       "month": 202603,
+       "paise": 0
+      },
+      {
+       "month": 202604,
+       "paise": 0
+      },
+      {
+       "month": 202605,
+       "paise": 0
+      },
+      {
+       "month": 202606,
+       "paise": 0
+      },
+      {
+       "month": 202607,
+       "paise": 0
+      },
+      {
+       "month": 202608,
+       "paise": 0
+      },
+      {
+       "month": 202609,
+       "paise": 0
+      },
+      {
+       "month": 202610,
+       "paise": 0
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "FY5",
+   "title": "Transfers, splits and bonus shares have no gain, income or fee",
+   "why": "Shares moved between accounts, taken out at a value, split and given as bonus: none of it is a gain, income or a fee, so there is no row at all.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250110,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "TRANSFER",
+     "trade_date": 20250205,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 4000000,
+     "to_account_id": 2
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "TRANSFER",
+     "trade_date": 20250206,
+     "account_id": 2,
+     "asset_id": 1,
+     "qty_u": 2000000,
+     "value_paise": 30000
+    },
+    {
+     "id": 4,
+     "seq": 4,
+     "kind": "SPLIT",
+     "trade_date": 20250301,
+     "account_id": null,
+     "asset_id": 1,
+     "ratio_num": 2,
+     "ratio_den": 1
+    },
+    {
+     "id": 5,
+     "seq": 5,
+     "kind": "BONUS",
+     "trade_date": 20250401,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 3000000
+    }
+   ],
+   "as_of": 20261027,
+   "valuation_day": 20261027,
+   "expect": {
+    "by_fy": [],
+    "income": {
+     "this_fy_paise": 0,
+     "by_month": [
+      {
+       "month": 202511,
+       "paise": 0
+      },
+      {
+       "month": 202512,
+       "paise": 0
+      },
+      {
+       "month": 202601,
+       "paise": 0
+      },
+      {
+       "month": 202602,
+       "paise": 0
+      },
+      {
+       "month": 202603,
+       "paise": 0
+      },
+      {
+       "month": 202604,
+       "paise": 0
+      },
+      {
+       "month": 202605,
+       "paise": 0
+      },
+      {
+       "month": 202606,
+       "paise": 0
+      },
+      {
+       "month": 202607,
+       "paise": 0
+      },
+      {
+       "month": 202608,
+       "paise": 0
+      },
+      {
+       "month": 202609,
+       "paise": 0
+      },
+      {
+       "month": 202610,
+       "paise": 0
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "FY6",
+   "title": "Read in January: the twelve months and the financial year do not line up",
+   "why": "Read on 31 Jan 2026 the twelve months are Feb 2025 to Jan 2026, and the financial year is the one that began on 1 Apr 2025. Income of 1,000.00 (31 Jan 2025, a month too early), 2,000.00 (1 Feb 2025, the first month, and last financial year), 3,000.00 (31 Mar 2025, the last day of last financial year), 4,000.00 (1 Apr 2025, the first day of this one) and 5,000.00 (31 Jan 2026, the day itself). This financial year: 4000 + 5000 = 9,000.00; last year's three are 6,000.00 in the year by year figures.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "DIVIDEND",
+     "trade_date": 20250131,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 100000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "DIVIDEND",
+     "trade_date": 20250201,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 200000
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "INTEREST",
+     "trade_date": 20250331,
+     "account_id": 1,
+     "amount_paise": 300000
+    },
+    {
+     "id": 4,
+     "seq": 4,
+     "kind": "DIVIDEND",
+     "trade_date": 20250401,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 400000
+    },
+    {
+     "id": 5,
+     "seq": 5,
+     "kind": "DIVIDEND",
+     "trade_date": 20260131,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 500000
+    }
+   ],
+   "as_of": 20260131,
+   "valuation_day": 20260131,
+   "expect": {
+    "by_fy": [
+     {
+      "fy": 2024,
+      "label": "FY 2024-25",
+      "realised_paise": 0,
+      "income_paise": 600000,
+      "fees_paise": 0
+     },
+     {
+      "fy": 2025,
+      "label": "FY 2025-26",
+      "realised_paise": 0,
+      "income_paise": 900000,
+      "fees_paise": 0
+     }
+    ],
+    "income": {
+     "this_fy_paise": 900000,
+     "by_month": [
+      {
+       "month": 202502,
+       "paise": 200000
+      },
+      {
+       "month": 202503,
+       "paise": 300000
+      },
+      {
+       "month": 202504,
+       "paise": 400000
+      },
+      {
+       "month": 202505,
+       "paise": 0
+      },
+      {
+       "month": 202506,
+       "paise": 0
+      },
+      {
+       "month": 202507,
+       "paise": 0
+      },
+      {
+       "month": 202508,
+       "paise": 0
+      },
+      {
+       "month": 202509,
+       "paise": 0
+      },
+      {
+       "month": 202510,
+       "paise": 0
+      },
+      {
+       "month": 202511,
+       "paise": 0
+      },
+      {
+       "month": 202512,
+       "paise": 0
+      },
+      {
+       "month": 202601,
+       "paise": 500000
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "FY7",
+   "title": "The label writes the next year in two digits, to the end of the century",
+   "why": "Income on 15 Jun 2008 is in FY 2008-09 (not 2008-9) and on 15 Jun 2099 in FY 2099-00: the second part of the label is the next year's last two digits, with its zero.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "DIVIDEND",
+     "trade_date": 20080615,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 1000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "DIVIDEND",
+     "trade_date": 20990615,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 2000
+    }
+   ],
+   "as_of": 20991231,
+   "valuation_day": 20991231,
+   "expect": {
+    "by_fy": [
+     {
+      "fy": 2008,
+      "label": "FY 2008-09",
+      "realised_paise": 0,
+      "income_paise": 1000,
+      "fees_paise": 0
+     },
+     {
+      "fy": 2099,
+      "label": "FY 2099-00",
+      "realised_paise": 0,
+      "income_paise": 2000,
+      "fees_paise": 0
+     }
+    ],
+    "income": {
+     "this_fy_paise": 2000,
+     "by_month": [
+      {
+       "month": 209901,
+       "paise": 0
+      },
+      {
+       "month": 209902,
+       "paise": 0
+      },
+      {
+       "month": 209903,
+       "paise": 0
+      },
+      {
+       "month": 209904,
+       "paise": 0
+      },
+      {
+       "month": 209905,
+       "paise": 0
+      },
+      {
+       "month": 209906,
+       "paise": 2000
+      },
+      {
+       "month": 209907,
+       "paise": 0
+      },
+      {
+       "month": 209908,
+       "paise": 0
+      },
+      {
+       "month": 209909,
+       "paise": 0
+      },
+      {
+       "month": 209910,
+       "paise": 0
+      },
+      {
+       "month": 209911,
+       "paise": 0
+      },
+      {
+       "month": 209912,
+       "paise": 0
+      }
+     ]
+    }
+   }
+  }
+ ]
+}

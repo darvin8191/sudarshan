@@ -12,7 +12,9 @@ A row is the contract's ActivityInput as a dict (``id``, ``seq``, ``kind``, ``tr
 
 from __future__ import annotations
 
+import math
 from datetime import date, timedelta
+from decimal import Decimal, localcontext
 from fractions import Fraction
 
 
@@ -326,4 +328,217 @@ def day_lines(
     return {
         asset: sorted(found, key=lambda line: line["account_id"])
         for asset, found in sorted(lines.items())
+    }
+
+
+# ---------------------------------------------------------------- performance (PA4)
+
+
+def flows(rows: list[dict], as_of: int | None = None, decimals: dict | None = None) -> list[dict]:
+    """The money flows of a tab (design 4.7), read from the entries themselves one at a time.
+
+    A purchase or rights issue is money in with its charges; a sale is money out less its
+    charges; income is money out; a fee is its own term; shares brought in from outside are money
+    in at the value entered (their cost when none was), and shares taken out to outside are money
+    out at the value entered (the cost of the lots they took when none was). Only the replay
+    (``simulate``) is asked anything, and only for that cost.
+    """
+    ran = simulate(rows, as_of, decimals)
+    assert "refused" not in ran, ran
+    days: dict[int, list[int]] = {}
+    for r in rows:
+        if r.get("status", "posted") != "posted" or (as_of is not None and r["trade_date"] > as_of):
+            continue
+        kind = r["kind"]
+        paid = received = fee = 0
+        if kind in ("BUY", "RIGHTS"):
+            paid = amount_of(r) + r.get("charges_paise", 0)
+        elif kind == "SELL":
+            received = amount_of(r) - r.get("charges_paise", 0)
+        elif kind in ("DIVIDEND", "INTEREST"):
+            received = r["amount_paise"]
+        elif kind == "FEE":
+            fee = r["amount_paise"]
+        elif kind == "TRANSFER" and r.get("account_id") is None:
+            paid = r["amount_paise"] if r.get("value_paise") is None else r["value_paise"]
+        elif kind == "TRANSFER" and r.get("to_account_id") is None:
+            cost = sum(
+                piece[2] for m in ran["moves"] if m["entry"] == r["id"] for piece in m["used"]
+            )
+            received = cost if r.get("value_paise") is None else r["value_paise"]
+        if paid or received or fee:
+            total = days.setdefault(r["trade_date"], [0, 0, 0])
+            total[0] += paid
+            total[1] += received
+            total[2] += fee
+    return [
+        {"day": day, "in_paise": t[0], "out_paise": t[1], "fee_paise": t[2]}
+        for day, t in sorted(days.items())
+    ]
+
+
+def ordinal(day: int) -> int:
+    return date(day // 10000, day // 100 % 100, day % 100).toordinal()
+
+
+def xirr_roots(cash: list, step: float = 0.01) -> list[float]:
+    """Every yearly rate at which dated cash (``(YYYYMMDD, paise)``) adds up to nothing, nearest
+    zero first (on the log scale, a gain before the loss that is just as near), found in floats:
+    the sum is walked along x = ln(1 + rate) in steps and every sign change is halved down. Cash
+    that never pays, or never receives, has none.
+    """
+    by_day: dict[int, int] = {}
+    for day, paise in cash:
+        by_day[ordinal(day)] = by_day.get(ordinal(day), 0) + paise
+    items = sorted((d, p) for d, p in by_day.items() if p)
+    if not (any(p < 0 for _, p in items) and any(p > 0 for _, p in items)):
+        return []
+    years = [((d - items[0][0]) / 365, p) for d, p in items]
+    reach = min(23.0, 600 / years[-1][0])  # keep exp() inside what a float can hold
+
+    def total(x: float) -> float:
+        return sum(p * math.exp(-x * t) for t, p in years)
+
+    roots = []
+    count = int(2 * reach / step)
+    x_before, f_before = -reach, total(-reach)
+    for k in range(1, count + 1):
+        x = -reach + k * step
+        f = total(x)
+        if f == 0:
+            roots.append(x)
+        elif f_before != 0 and (f > 0) != (f_before > 0):
+            low, high = x_before, x
+            for _ in range(100):
+                mid = (low + high) / 2
+                if (total(mid) > 0) == (f_before > 0):
+                    low = mid
+                else:
+                    high = mid
+            roots.append((low + high) / 2)
+        x_before, f_before = x, f
+    ordered = sorted(roots, key=abs)
+    for i in range(len(ordered) - 1):  # two mirror images are equally near: the gain goes first
+        near, far = ordered[i], ordered[i + 1]
+        if near < 0 < far and abs(far) - abs(near) <= 1e-9 * abs(near):
+            ordered[i], ordered[i + 1] = far, near
+    return [math.exp(x) - 1 for x in ordered]
+
+
+def pct_text(growth: Fraction) -> str:
+    """A growth multiple less one as a percentage of four decimals, a tie away from zero."""
+    tenths = half_away((growth - 1) * 10**6)
+    return f"{'-' if tenths < 0 else ''}{abs(tenths) // 10**4}.{abs(tenths) % 10**4:04d}"
+
+
+def twr(points: list[dict], opening: int | None = None) -> dict:
+    """The time-weighted return of a daily series, in exact fractions.
+
+    ``points`` are ``{"day", "value_paise" or None, "in_paise", "out_paise", "fee_paise"}``. Money
+    in works from the start of its day and money out leaves at its end; a day with no closing
+    value hands its money on to the next one that has; a stretch with nothing at work is skipped
+    and one cannot lose more than everything it began with. Returns the stretches (start, day,
+    base, grown), their product, and the figure's percentages.
+    """
+    by_day: dict[int, dict] = {}
+    for p in sorted(points, key=lambda p: p["day"]):
+        got = by_day.setdefault(p["day"], {"v": None, "in": 0, "out": 0, "fee": 0})
+        if p.get("value_paise") is not None:
+            got["v"] = p["value_paise"]
+        got["in"] += p.get("in_paise", 0)
+        got["out"] += p.get("out_paise", 0)
+        got["fee"] += p.get("fee_paise", 0)
+    days = sorted(by_day)
+    stretches = []
+    before, began = opening, None  # the value at the last complete close, and the day it was
+    carry = {"in": 0, "out": 0, "fee": 0}
+    first_open = None
+    for d in days:
+        got = by_day[d]
+        if first_open is None:
+            first_open = d
+        for key in carry:
+            carry[key] += got[key]
+        if got["v"] is None:
+            continue
+        if before is not None and before + carry["in"] > 0:
+            base = before + carry["in"]
+            grown = max(0, got["v"] + carry["out"] - carry["fee"])
+            stretches.append((first_open if began is None else began, d, base, grown))
+        before, began, first_open = got["v"], d, None
+        carry = {"in": 0, "out": 0, "fee": 0}
+    growth = Fraction(1)
+    for _, _, base, grown in stretches:
+        growth *= Fraction(grown, base)
+    figure = {"pct": None, "annualised_pct": None, "start_day": None}
+    if stretches:
+        figure["start_day"] = stretches[0][0]
+        figure["pct"] = pct_text(growth)
+        span = ordinal(stretches[-1][1]) - ordinal(stretches[0][0])
+        if span > 365:
+            with localcontext() as ctx:
+                ctx.prec = 60
+                ratio = Decimal(growth.numerator) / Decimal(growth.denominator)
+                rate = ratio ** (Decimal(365) / Decimal(span)) - 1
+            figure["annualised_pct"] = pct_text(Fraction(rate + 1))
+    return {"stretches": stretches, "growth": growth, "figure": figure}
+
+
+def year_figures(
+    rows: list[dict], as_of: int | None = None, decimals: dict | None = None
+) -> list[dict]:
+    """Realised gain, gross income and fees for each financial year that has any, from the
+    replay's moves and the entries' own dates (a financial year runs April to March)."""
+    ran = simulate(rows, as_of, decimals)
+    assert "refused" not in ran, ran
+    by_id = {r["id"]: r for r in rows}
+    years: dict[int, list[int]] = {}
+    for m in ran["moves"]:
+        r = by_id[m["entry"]]
+        slot = {"SELL": 0, "DIVIDEND": 1, "INTEREST": 1, "FEE": 2}.get(r["kind"])
+        if slot is None:
+            continue
+        day = r["trade_date"]
+        fy = day // 10000 if day // 100 % 100 >= 4 else day // 10000 - 1
+        paise = m["gain_paise"] if slot == 0 else m["paise"]
+        years.setdefault(fy, [0, 0, 0])[slot] += paise
+    return [
+        {
+            "fy": fy,
+            "label": f"FY {fy}-{(fy + 1) % 100:02d}",
+            "realised_paise": t[0],
+            "income_paise": t[1],
+            "fees_paise": t[2],
+        }
+        for fy, t in sorted(years.items())
+        if any(t)
+    ]
+
+
+def income_by_month(rows: list[dict], valuation_day: int, decimals: dict | None = None) -> dict:
+    """Income this financial year and in each of the twelve months ending with the valuation
+    day's, from the entries (income dated after the valuation day is not counted)."""
+    ran = simulate(rows, None, decimals)
+    assert "refused" not in ran, ran
+    by_id = {r["id"]: r for r in rows}
+    year, month = valuation_day // 10000, valuation_day // 100 % 100
+    keys = []
+    for back in range(11, -1, -1):
+        n = year * 12 + (month - 1) - back
+        keys.append(n // 12 * 100 + n % 12 + 1)
+    start = year if month >= 4 else year - 1
+    this_fy = 0
+    by_month = dict.fromkeys(keys, 0)
+    for m in ran["moves"]:
+        r = by_id[m["entry"]]
+        day = r["trade_date"]
+        if r["kind"] not in ("DIVIDEND", "INTEREST") or day > valuation_day:
+            continue
+        if (day >= start * 10000 + 401) and (day <= (start + 1) * 10000 + 331):
+            this_fy += m["paise"]
+        if day // 100 in by_month:
+            by_month[day // 100] += m["paise"]
+    return {
+        "this_fy_paise": this_fy,
+        "by_month": [{"month": k, "paise": v} for k, v in by_month.items()],
     }

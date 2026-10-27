@@ -310,9 +310,9 @@ generic format, so that exporting and importing into an empty tab gives the same
 
 ## Ledger, valuation, performance, allocation, imports
 
-The ledger (`PA1`, `PA2`) and the valuation (`PA3`) are written; performance, allocation and the two
-file formats are written with the PR that builds each (`PA4` to `PA8`): XIRR and TWR, benchmarks,
-allocation and filters.
+The ledger (`PA1`, `PA2`), the valuation (`PA3`) and the performance figures (`PA4`) are written;
+the daily history and benchmarks, allocation and the two file formats are written with the PR that
+builds each (`PA5` to `PA8`).
 
 ### The ledger
 
@@ -533,9 +533,104 @@ dropped, not rounded). **Vectors** (`tests/vectors/freshness.json`): the design'
 edge of every rule, the business days between two days with and without holidays, and the
 instants around midnight, a leap day and the turn of a year.
 
-### Performance, allocation, imports
+### Performance
 
-Written with `PA4` to `PA8`.
+`core/performance.py` turns what moved in and out of a tab into the figures of the Performance
+view: the money put in, the absolute return, the XIRR, the time-weighted return and the year's
+figures. Money is paise and every percentage is text of four decimals (half away from zero); no
+float is ever written. The one number that cannot be exact, a yearly rate found by solving an
+equation, is found in `Decimal` to forty digits and shown to four.
+
+**Money flows.** `flows_of(ledger)` reads them from the replayed ledger, one `Flow` for each day on
+which any moved, oldest first (a day on which nothing moved has none):
+
+| entry | in | out | fee |
+|---|---|---|---|
+| purchase, rights issue | amount + charges | | |
+| sale | | amount - charges | |
+| dividend, interest | | the gross amount (TDS is tax paid, not a loss) | |
+| shares brought in from outside | the value entered, else the cost | | |
+| shares taken out to outside | | the value entered, else the cost of the lots | |
+| a fee on its own | | | the fee |
+| a transfer between accounts, a split, bonus shares | nothing | nothing | nothing |
+
+A sale whose charges are above its amount is a negative amount out (money in); nothing is clamped.
+Charges on a trade are inside its flow and never fees. **Money put in** up to a day is
+in + fees - out, **total gain** is the value less that, and the **absolute return** is the gain over
+(in + fees): the figure of "Totals", worked out here from the flows. A tab that took out more than
+it put in has a negative money put in. `summary(flows, value, day)` returns the money figures of
+the `PerformanceReport` (those up to `xirr`) for a valuation day; a flow dated after it counts for
+nothing.
+
+**XIRR** is the yearly rate r at which the cash of each day, out less in and fees, with the value now
+added on the valuation day, adds up to nothing when each amount is discounted by
+(1 + r) ^ (days / 365): actual days over 365, as Excel counts. With q = (1 + r) ^ (-1 / 365) the sum
+is a polynomial in q, so the solver (no package, no float) adds, multiplies and raises to whole
+powers of the gaps between days in `Decimal`, which Horner's rule makes cheap (3,000 flows take a
+third of a second). It walks outward from 0% on both sides together, in steps of a tenth of the log of
+the rate over the span (growing 3% a step once past thirty-three), takes the first sign change on
+each side and halves it to a bracket of 1e-17 of q. **When several rates fit, the one nearest zero on
+the log scale wins**, a gain and a loss of the same size being equally near (+100% and -50%) and the
+gain winning; cash that adds up to nothing has the rate 0 exactly.
+
+- `shown` when the valuation day is at least 365 days after the first day with cash (a day whose
+  purchases and sales cancel out starts nothing): 366 days of 1 Jan 2024 to 1 Jan 2025 and
+  `1.1 ^ (365 / 366) - 1 = 9.9714%`.
+- `later` before that: the view shows the absolute return and `from_day` with the sentence "XIRR
+  appears after one year (from 1 May 2027)". The year is counted in days, so across a 29 February
+  it arrives the day before the anniversary.
+- `none` with "Return needs at least one purchase and a value." when no day pays or no day
+  receives (only money in and nothing left; a value and no purchase), checked before the year so
+  that a tab that lost everything is never promised a figure it will not get. A tab that sold
+  everything still has an XIRR from its flows alone. `none` with "These purchases and sales do not
+  give a single yearly return." when the cash changes sign but no rate fits (money in, money out at
+  a profit, then in again and lost).
+
+**TWR** multiplies the returns of the periods between complete days (a day with a closing value for
+everything), each (value + out - fees) / (value before + in): money in works from the start of the
+period and money out leaves at its end. A day that is not complete joins the next complete day's
+period together with its money (Modified Dietz across the gap). A period with nothing at work is
+skipped, and none loses more than everything in it, so a period that reaches nothing makes the
+product nothing for good. The first period begins at the first complete day, or earlier when the
+tab was known to be empty before the series (`opening_paise` 0, so that the first day's own return
+counts). The product is exact (whole numbers, one division at the end) and the figure is labelled
+"TWR since 3 Nov 2026"; it is annualised, as the same rate over 365 days, only when it spans more
+than 365 days. With no period there is no figure, only "TWR needs closing prices for at least two
+days."
+
+**The year's figures.** `by_financial_year(ledger)` gives the realised gain, the gross income and the
+fees of each financial year (April to March; 2026 is FY 2026-27) that has any, oldest first, and
+`income_report(ledger, day)` the income of the financial year the day is in and of each of the
+twelve months ending with its own, none shown as 0 and nothing after the day counted.
+
+**What this does not model.**
+
+- Cash that changes sign several times can have several rates; the one nearest zero is shown. Two
+  rates closer together than one step of the walk are taken for none, and a rate beyond a loss of
+  99.99999999% or a gain of ten billion times a year is not looked for.
+- A dividend is its gross amount, whatever tax was withheld; charges on a trade are in its flow.
+- The time-weighted return starts when every holding had a closing price; nothing before it is
+  rebuilt.
+
+**Vectors** (`tests/vectors/performance.json`): the design's X1 to X5, N1 and T1 to T5 and the edges
+around them: the 365th day, a leap day, a round trip on the first day, a loss, a doubling, no gain
+at all, fees, a flow after the day asked for, thirteen monthly purchases, rates beyond a hundred
+thousand percent and a loss of nearly everything; rates of cash alone with two and three rates, a
+tie, a rate too small to round and a day of one percent; the flows of sixteen small ledgers; the
+periods of twenty-one daily series; the year's figures through 31 March and 1 April, a January
+reading, the turn of a century and an income dated after the day asked for. Each case has its
+derivation, and `make_pa4.py` finds every rate by another route than the code's (floats walked out
+from 0%, halved, then polished with Newton's method on `Decimal` exponentials and checked by
+substituting) and refuses to write a percentage that sits near a rounding tie. The tests also run
+the code on random tabs and random cash against the flows read from the entries
+(`portfolio_oracle.py`), a scan for every rate in floats and the periods multiplied as fractions,
+and check what must hold whatever the numbers are: money put in is what the positions cost less
+what was earned, scaling the money or moving the dates changes no rate, time read backwards
+inverts it, and deposits in proportion change no time-weighted return.
+
+### History, benchmarks, allocation, imports
+
+Written with `PA5` to `PA8`.
 
 ## Storage
 

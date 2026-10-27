@@ -116,6 +116,16 @@ def business_days(start: int, end: int, holidays=()) -> int:
     return count
 
 
+def plus_days(day: int, step: int) -> int:
+    """The day ``step`` days after ``day`` as YYYYMMDD (``step`` may be negative)."""
+    return _next_days(day, step)
+
+
+def days_apart(start: int, end: int) -> int:
+    """Whole days from ``start`` to ``end``."""
+    return civil_days(end) - civil_days(start)
+
+
 def _next_days(day: int, step: int) -> int:
     """The day ``step`` days after ``day`` as YYYYMMDD."""
     z = civil_days(day) + step + 719468

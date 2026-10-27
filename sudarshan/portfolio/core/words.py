@@ -143,6 +143,25 @@ def fraction_left(names: Names, account_id: int, asset_id: int, left_qty_u: int)
     )
 
 
+#: What the XIRR line says when it has no figure (design 4.7, X4): nothing was paid in or nothing is
+#: worth anything; or the money in and out has no single yearly rate (it paid in, took out at a
+#: profit and then lost the lot).
+XIRR_NEEDS_A_PURCHASE = "Return needs at least one purchase and a value."
+XIRR_NO_RATE = "These purchases and sales do not give a single yearly return."
+#: The time-weighted return waits for closing prices for two days.
+TWR_NEEDS_PRICES = "TWR needs closing prices for at least two days."
+
+
+def xirr_later(day: int) -> str:
+    """The XIRR is a year of money away: "XIRR appears after one year (from 1 May 2027)."."""
+    return f"XIRR appears after one year (from {date(day)})."
+
+
+def twr_since(day: int) -> str:
+    """The label of a time-weighted return: "TWR since 3 Nov 2026"."""
+    return f"TWR since {date(day)}"
+
+
 def knock_on(action: str, changed_kind: str, failing_kind: str, failing_day: int, unit: str) -> str:
     """Why a change is refused because of a later entry it would leave without units.
 
