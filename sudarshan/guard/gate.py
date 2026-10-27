@@ -36,6 +36,11 @@ book. A book that cannot be read leaves the order unjudged, so under the daily l
 goes, and that is noted (an exit must never be refused for a read that failed); a two-leg GTT,
 new risk whatever the book says, is refused instead.
 
+The price band (M20.7, band.py) holds a priced order that adds risk to the market: step 2 reads
+Upstox's quote for it (kept a second) only when the book shows the order adding risk, and step 3
+refuses a price too far on the aggressive side. Exits and MARKET orders are never held to it; no
+quote lets the order go, noted, with the exchange's own price check still behind it.
+
 The lock is a real one from utils.real_threading, held for dict work only: correct under the
 eventlet worker (no I/O, no logging and no wait inside it, so the hub never stalls on it), under
 gthread's real threads, and on the development server.
@@ -58,7 +63,7 @@ from utils.broker_backpressure import BusyResponse
 from utils.logging import get_logger
 from utils.thread_safe_cache import LockedTTLCache
 
-from . import daily, flag, readers, rules, words
+from . import band, daily, flag, readers, rules, words
 from . import store as risk_store
 from .store import IST, KillSwitchState
 
@@ -100,9 +105,12 @@ RISK_STATE_UNREADABLE = "RISK_STATE_UNREADABLE"
 GUARD_UNAVAILABLE = "GUARD_UNAVAILABLE"
 GUARD_ERROR = "GUARD_ERROR"
 DAILY_LOSS_LIMIT = "DAILY_LOSS_LIMIT"
+PRICE_BAND = "PRICE_BAND"
 
 PLACE, MODIFY, GTT_PLACE, GTT_MODIFY = "place", "modify", "gtt_place", "gtt_modify"
 _UNREAD = object()
+_NO_QUOTE = object()  # not read: the band did not need the market for this order
+BANDED_TYPES = ("LIMIT", "SL", "SL-M")
 REFUSED, ANSWERED = "refused", "answered"
 
 
@@ -121,6 +129,9 @@ class Order:
     ref: str | None = None  # the order or GTT a modify changes
     trigger_type: str = ""  # a GTT's: SINGLE or OCO
     terms: dict = field(default_factory=dict)  # a modify's new terms, as given
+    price_type: str = ""  # a place's: MARKET, LIMIT, SL or SL-M (a modify's are in its terms)
+    price: float = 0.0
+    trigger: float = 0.0
 
     @property
     def key(self) -> tuple[str, str, str, str]:
@@ -131,6 +142,16 @@ class Order:
             self.symbol,
             rules.position_product(self.pipe, self.product),
         )
+
+    @property
+    def priced(self) -> rules.OrderTerms | None:
+        """The price terms the band is checked on: a place's own, a modify's new ones (known
+        once the broker's copy is read). A GTT's are not: it is priced for when it triggers."""
+        if self.action == MODIFY:
+            return self.terms.get("new")
+        if self.action == PLACE:
+            return rules.OrderTerms(self.quantity or 0, self.price_type, self.price, self.trigger)
+        return None
 
     @property
     def cnc_sell(self) -> bool:
@@ -179,16 +200,43 @@ class Decision:
 
 
 @dataclass(frozen=True)
-class _Daily:
-    """The daily loss limit as it stands for one order's pipe today, read before deciding."""
+class _Guards:
+    """The owner's guards as they stand for one order, read before deciding."""
 
     day: str = ""  # India's date, YYYY-MM-DD
-    limit: float | None = None
+    settings: risk_store.RiskSettings | None = None  # None: they could not be read
     lock: risk_store.DayLock | None = None  # written today, so it holds whatever the limit is now
 
     @property
-    def active(self) -> bool:
+    def limit(self) -> float | None:
+        return None if self.settings is None else self.settings.daily_loss_limit
+
+    @property
+    def daily(self) -> bool:
+        """The daily loss limit is set, or has locked the day."""
         return self.lock is not None or self.limit is not None
+
+    def price_band(self, order: Order) -> band.Band | None:
+        """The band ``order``'s price is held to: None when the band is off, the order is not
+        priced, or its instrument takes no band."""
+        settings, terms = self.settings, order.priced
+        if settings is None or not settings.band_on or terms is None:
+            return None
+        if terms.price_type not in BANDED_TYPES:
+            return None
+        return band.band_for(band.segment_of(order.symbol, order.exchange), settings)
+
+    def judges(self, order: Order) -> bool:
+        """Whether a guard needs ``order`` judged, beyond the kill switch."""
+        return self.daily or self.price_band(order) is not None
+
+    def active(self, order: Order) -> bool:
+        """Whether to read anything for ``order``: a modify's instrument and new terms are known
+        only once the broker's copy of the order is read."""
+        if self.judges(order):
+            return True
+        settings = self.settings
+        return settings is not None and settings.band_on and order.action == MODIFY
 
 
 @dataclass(frozen=True)
@@ -362,30 +410,31 @@ class Gate:
 
     def _admit(self, order: Order) -> Decision:
         self._load_state()
-        day = self._daily(order)  # the limit and today's lock: reads, outside the lock
+        guards = self._guards(order)  # the settings and today's lock: reads, outside the lock
         with self._lock:
             now = time.monotonic()
             self._forget(now)
             refusing = self._refusing()
-            if refusing is None and not day.active:
+            if refusing is None and not guards.active(order):
                 return Decision(token=self._register(order, None, now))
         known, facts = self._facts(order, refusing)  # reads: outside the lock
-        lock, day_unread = None, False
-        if refusing is None:
-            lock, day_unread = self._day_facts(known, facts, day)  # the figure, and its lock
+        lock, day_unread, quote = None, False, _NO_QUOTE
+        if refusing is None and not facts.pass_through and not facts.unreadable:
+            lock, day_unread = self._day_facts(known, facts, guards)  # the figure, and its lock
+            quote = self._quote(known, facts, guards)  # the market, when the band needs it
         with self._lock:
             now = time.monotonic()
             refusing = self._refusing()  # it may have changed while the book was read
-            if lock is None and day.active:
-                lock = self._day_locks.get((known.pipe, day.day))  # another order's, meanwhile
-            if facts.pass_through or (
-                refusing is None and lock is None and not day_unread and not facts.unreadable
-            ):
+            if lock is None and guards.daily:
+                lock = self._day_locks.get((known.pipe, guards.day))  # another order's, meanwhile
+            if facts.pass_through:
                 return Decision(token=self._register(known, None, now))
             if facts.unreadable:
                 if refusing is not None:
                     return self._unreadable(known, refusing)
-                return self._day_unjudged(known, now)
+                return self._unjudged(known, guards, now)
+            if refusing is None and lock is None and not day_unread and not guards.judges(known):
+                return Decision(token=self._register(known, None, now))
             verdict, sent_at = self._judge(known, facts, now)
             if verdict.reducing:
                 return Decision(token=self._register(known, verdict, now))
@@ -393,10 +442,12 @@ class Gate:
                 return self._refuse(known, refusing, verdict, sent_at)
             if lock is not None:
                 return self._refuse_daily(known, lock, verdict)
-            detail = {"reason": verdict.reason, "position": verdict.position}
-            return Decision(
-                True, words.daily_unreadable(known.pipe), GUARD_UNAVAILABLE, detail=detail
-            )
+            if day_unread:
+                detail = {"reason": verdict.reason, "position": verdict.position}
+                return Decision(
+                    True, words.daily_unreadable(known.pipe), GUARD_UNAVAILABLE, detail=detail
+                )
+            return self._held_to_settings(known, guards, verdict, quote, now)
 
     def _refusing(self) -> _Refusing | None:
         """What refuses new risk now; call under the lock."""
@@ -512,15 +563,16 @@ class Gate:
 
     # -- the daily loss limit, outside the lock --------------------------------------------------
 
-    def _daily(self, order: Order) -> _Daily:
-        """The limit and today's lock for the order's pipe (cached reads)."""
+    def _guards(self, order: Order) -> _Guards:
+        """The owner's settings and today's lock for the order's pipe (cached reads). Settings
+        that cannot be read leave every guard but the kill switch and a written lock unchecked."""
         try:
-            limit = self._the_store().settings().daily_loss_limit
+            settings = self._the_store().settings()
         except Exception:
-            logger.exception("The risk guard could not read the daily loss limit")
-            limit = None
+            logger.exception("The risk guard could not read its settings")
+            settings = None
         day = daily.day_of(datetime.now(UTC)).isoformat()
-        return _Daily(day=day, limit=limit, lock=self._day_lock(order.pipe, day))
+        return _Guards(day=day, settings=settings, lock=self._day_lock(order.pipe, day))
 
     def _day_lock(self, pipe: str, day: str) -> risk_store.DayLock | None:
         """Today's lock for ``pipe``: read once a day from the risk database, then held here."""
@@ -539,7 +591,7 @@ class Gate:
             return self._day_locks.setdefault(key, lock)
 
     def _day_facts(
-        self, order: Order, facts: _Facts, day: _Daily
+        self, order: Order, facts: _Facts, day: _Guards
     ) -> tuple[risk_store.DayLock | None, bool]:
         """Today's lock: the one written, or one written now because the figure has reached the
         limit in the order's segment's session. ``(lock, True)`` when the figure is unreadable."""
@@ -602,7 +654,7 @@ class Gate:
             self._rows = (owner, time.monotonic(), rows)
         return rows
 
-    def _lock_day(self, pipe: str, day: _Daily, figure: daily.DayFigure) -> risk_store.DayLock:
+    def _lock_day(self, pipe: str, day: _Guards, figure: daily.DayFigure) -> risk_store.DayLock:
         """Write today's lock; the first order here to see the breach says so, once."""
         try:
             lock = self._the_store().lock_day(pipe, day.day, figure.total, float(day.limit))
@@ -657,6 +709,23 @@ class Gate:
             emit_from_any_thread("sudarshan_risk_day", {"pipe": lock.pipe, "locked": True})
         except Exception:
             logger.exception("Today's lock could not be told to the open screens")
+
+    def _quote(self, order: Order, facts: _Facts, guards: _Guards):
+        """The market for the band: read only when the band holds this order's price to it (a
+        stop-limit's limit is held to its own trigger) and the book shows the order adding risk.
+        An exit pays no read."""
+        terms = order.priced
+        if guards.price_band(order) is None or terms is None or terms.price_type == "SL":
+            return _NO_QUOTE
+        with self._lock:
+            verdict, _sent_at = self._judge(order, facts, time.monotonic())
+        if verdict.reducing:
+            return _NO_QUOTE
+        try:
+            return self._read.quote(order.pipe, order.owner, order.symbol, order.exchange)
+        except readers.Unreadable as exc:
+            logger.warning(f"The price band could not read the market: {exc}")
+            return None
 
     def day_lock(self, pipe: str) -> risk_store.DayLock | None:
         """Today's lock for ``pipe``, if the day has locked (the status routes)."""
@@ -785,14 +854,51 @@ class Gate:
         )
         return Decision(True, text, DAILY_LOSS_LIMIT, detail=detail)
 
-    def _day_unjudged(self, order: Order, now: float) -> Decision:
-        """Under the daily limit alone, an order whose book could not be read goes, noted: it
+    def _unjudged(self, order: Order, guards: _Guards, now: float) -> Decision:
+        """With nothing refusing new risk, an order whose book could not be read goes, noted: it
         may be an exit, and an exit is never refused for a read that failed."""
-        self._unchecked[order.pipe] = now
+        if guards.daily:
+            self._unchecked[order.pipe] = now
+            said = words.daily_not_checked(order.pipe)
+        else:
+            said = words.checks_not_run(order.pipe)
         token = self._register(order, None, now)
-        return Decision(
-            token=token, words=words.daily_not_checked(order.pipe), code=GUARD_UNAVAILABLE
-        )
+        return Decision(token=token, words=said, code=GUARD_UNAVAILABLE)
+
+    def _held_to_settings(
+        self, order: Order, guards: _Guards, verdict: rules.Verdict, quote: Any, now: float
+    ) -> Decision:
+        """An order adding risk, with nothing refusing new risk: the owner's own limits, each
+        only when he has turned it on. Call under the lock."""
+        held = guards.price_band(order)
+        terms = order.priced
+        if held is not None and terms is not None:
+            if quote is _NO_QUOTE:
+                quote = None  # judged as adding risk only now (or read under the kill switch)
+            breach = band.check(
+                order.side,
+                terms.price_type,
+                terms.price,
+                terms.trigger,
+                quote,
+                held,
+                both_sides=guards.settings.band_both_sides,
+            )
+            if breach is not None:
+                detail = {
+                    "reason": verdict.reason,
+                    "price": breach.price,
+                    "reference": breach.reference,
+                    "away_pct": breach.away_pct,
+                    "band_pct": breach.band_pct,
+                }
+                return Decision(True, words.band_refused(breach), PRICE_BAND, detail=detail)
+            if terms.price_type != "SL" and (
+                quote is None or band.reference(order.side, quote) <= 0
+            ):  # no market to hold it to: it goes, noted (the exchange's own check stands)
+                token = self._register(order, verdict, now)
+                return Decision(token=token, words=words.BAND_NOT_CHECKED, code=GUARD_UNAVAILABLE)
+        return Decision(token=self._register(order, verdict, now))
 
     def _unreadable(self, order: Order, refusing: _Refusing) -> Decision:
         since = None if refusing.state is None else _hhmm(refusing.state.since)
@@ -989,7 +1095,17 @@ def _upstox_place(data: dict, auth: str, *args, **kwargs) -> Order:
         side=rules.side_of(data.get("action")),
         quantity=rules.quantity_of(data.get("quantity")),
         owner=auth,
+        **_price_terms(data),
     )
+
+
+def _price_terms(data: dict) -> dict[str, Any]:
+    """An order request's price terms, as OpenAlgo names them."""
+    return {
+        "price_type": _word(data.get("pricetype")),
+        "price": rules.price_of(data.get("price")),
+        "trigger": rules.price_of(data.get("trigger_price")),
+    }
 
 
 def _upstox_modify(data: dict, auth: str, *args, **kwargs) -> Order:
@@ -1097,6 +1213,7 @@ def _sandbox_place(manager, order_data: dict, *args, **kwargs) -> Order:
         side=rules.side_of(order_data.get("action")),
         quantity=rules.quantity_of(order_data.get("quantity")),
         owner=str(manager.user_id),
+        **_price_terms(order_data),
     )
 
 

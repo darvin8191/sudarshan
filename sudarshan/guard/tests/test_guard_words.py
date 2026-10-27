@@ -11,7 +11,7 @@ import re
 
 import pytest
 
-from sudarshan.guard import rules, words
+from sudarshan.guard import band, rules, words
 
 POSITION = ("NFO", "NIFTY27OCT2625900CE", "MIS")
 SINCE = "10:42"
@@ -52,6 +52,19 @@ def every_sentence() -> list[str]:
         ]
     out += kill_switch_sentences()
     out += daily_sentences()
+    out += band_sentences()
+    return out
+
+
+def band_sentences() -> list[str]:
+    out = []
+    for what in ("price", "limit", "trigger"):
+        for above in (True, False):
+            for side in (rules.BUY, rules.SELL):
+                for pct, floor in ((20.0, 2.0), (1.0, 0.0), (2.5, 0.0)):
+                    breach = band.Breach(side, what, 25500.0, 150.1, 23.9, pct, floor, above)
+                    out.append(words.band_refused(breach))
+    out += [words.checks_not_run(pipe) for pipe in ("live", "sandbox")]
     return out
 
 
@@ -191,6 +204,14 @@ def test_the_preview_says_in_numbers_what_turning_it_on_cancels():
 )
 def test_rupees_are_grouped_the_indian_way(amount, shown):
     assert words.rupees(amount) == shown
+
+
+@pytest.mark.parametrize(
+    ("amount", "shown"),
+    [(186, "₹186.00"), (7.2, "₹7.20"), (25500, "₹25,500.00"), (0.05, "₹0.05"), (150.1, "₹150.10")],
+)
+def test_a_price_always_shows_its_paise(amount, shown):
+    assert words.price(amount) == shown
 
 
 def test_a_status_code_in_a_sentence_is_still_caught():

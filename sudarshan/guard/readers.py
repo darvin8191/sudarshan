@@ -207,6 +207,51 @@ def upstox_kill_switch(auth: str) -> list[dict]:
     return _upstox_kill_switch.get_or_load(key, load)
 
 
+#: A quote serves the price band this long: two orders in the same second share one read.
+QUOTE_KEPT_S = 1.0
+_quotes = LockedTTLCache(maxsize=256, ttl=QUOTE_KEPT_S)
+
+
+def quote(pipe: str, owner: str, symbol: str, exchange: str):
+    """The market for one instrument (band.py): Upstox's full quote, its last price and best bid
+    and ask, kept a second.
+
+    A Live order's owner is its broker session; a sandbox order's is the user, whose own Upstox
+    session prices it (the sandbox fills at Upstox's prices). A standard-budget read through the
+    Upstox module's shared client: no new connection, no thread.
+    """
+    from .band import Quote
+
+    auth = owner if pipe == "live" else _upstox_session_of(owner)
+
+    def load() -> Quote:
+        from broker.upstox.api.data import BrokerData
+
+        try:
+            data = BrokerData(auth).get_quotes(symbol, exchange)
+        except Exception as exc:
+            raise Unreadable(f"quote: {type(exc).__name__}") from exc
+        if not isinstance(data, dict):
+            raise Unreadable("the quote answer is not one")
+        return Quote(_number(data.get("ltp")), _number(data.get("bid")), _number(data.get("ask")))
+
+    key = (hashlib.sha256(auth.encode()).hexdigest(), exchange, symbol)  # never the token itself
+    return _quotes.get_or_load(key, load)
+
+
+def _upstox_session_of(user: str) -> str:
+    """The user's broker session, when it is Upstox's."""
+    from .killswitch import owner_for
+
+    try:
+        owner = owner_for(user, surface="app", actor=user)
+    except Exception as exc:
+        raise Unreadable(f"session: {type(exc).__name__}") from exc
+    if owner.broker != "upstox" or not owner.auth_token:
+        raise Unreadable("no Upstox session to price the order with")
+    return owner.auth_token
+
+
 # -- the sandbox: its own tables, read in the caller's session ------------------------------------
 
 

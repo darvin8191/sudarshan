@@ -520,6 +520,62 @@ def daily_not_checked(pipe: str) -> str:
     )
 
 
+# -- the limit price band (M20.7, band.py) -------------------------------------------------------
+
+
+def price(amount: float) -> str:
+    """A price as an order ticket shows it, paise always: ₹186.00, ₹1,234.50."""
+    shown = rupees(round(amount, 2))
+    return shown if "." in shown else f"{shown}.00"
+
+
+def _band_size(pct: float, floor: float) -> str:
+    return f"{pct:g}%, at least {rupees(floor)}" if floor else f"{pct:g}%"
+
+
+def band_refused(breach) -> str:
+    """Why a priced order too far from the market is refused (design section 6): the price, how
+    far it is from what, and the band, so the trader sees the mistake at once."""
+    side = "buy" if breach.side == rules.BUY else "sell"
+    where = "above" if breach.above else "below"
+    away = f"{breach.away_pct:g}%"
+    size = _band_size(breach.band_pct, breach.floor)
+    if breach.what == "limit":
+        said = (
+            f"Your stop-loss {side} price {price(breach.price)} is {away} {where} its trigger "
+            f"({price(breach.reference)}); the price band is {size} (Settings > Risk). Check the "
+            "price."
+        )
+    elif breach.what == "trigger":
+        said = (
+            f"Your stop-loss {side} trigger {price(breach.price)} is already {away} {where} the "
+            f"market ({price(breach.reference)}), so it would go at once; the price band is "
+            f"{size} (Settings > Risk). Check the trigger."
+        )
+    else:
+        said = (
+            f"Your {side} price {price(breach.price)} is {away} {where} the market "
+            f"({price(breach.reference)}); the price band is {size} (Settings > Risk). Check "
+            "the price."
+        )
+    return f"{said} Nothing was sent."
+
+
+#: The band could not be checked for an order, which went (the audit and the Risk page).
+BAND_NOT_CHECKED = (
+    "Price band not checked for one order: the market price could not be read from Upstox. The "
+    "order went; the exchange's own price check still applies."
+)
+
+
+def checks_not_run(pipe: str) -> str:
+    """The owner's limits could not be checked for an order, which went (the audit)."""
+    return (
+        f"Risk checks skipped for one order: positions cannot be read from {_where(pipe)}. An "
+        "order whose book cannot be read goes, because it may be an exit."
+    )
+
+
 #: Every fixed sentence, for the tests that scan them.
 FIXED = (
     RESUME_HOW,
@@ -568,4 +624,5 @@ FIXED = (
     SETTINGS_SAVED,
     SETTINGS_CHANGED_MEANWHILE,
     SETTINGS_NOT_SAVED,
+    BAND_NOT_CHECKED,
 )

@@ -26,7 +26,7 @@ from guard_world import (
 
 import blueprints.sudarshan_risk as risk_routes
 from sudarshan.guard import daily, flag, gate, killswitch, settings_rules, words
-from sudarshan.guard.store import KillSwitchState, utcnow
+from sudarshan.guard.store import KillSwitchState, RiskSettings, utcnow
 
 REPO = Path(__file__).resolve().parents[3]
 JSON = {"Accept": "application/json"}
@@ -311,7 +311,8 @@ def _lock_today(pipe: str, figure: float, limit: float, monkeypatch) -> None:
     import extensions
 
     monkeypatch.setattr(extensions, "emit_from_any_thread", lambda *args, **kwargs: None)
-    gate.GATE._lock_day(pipe, gate._Daily(_today(), limit), daily.DayFigure(figure, 0.0))
+    guards = gate._Guards(_today(), RiskSettings(daily_loss_limit=limit))
+    gate.GATE._lock_day(pipe, guards, daily.DayFigure(figure, 0.0))
 
 
 def test_the_banner_s_read_says_which_covered_book_the_day_has_locked(world, monkeypatch):
