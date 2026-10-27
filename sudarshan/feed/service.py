@@ -37,7 +37,7 @@ from .config import Settings, is_loopback_url, setup_logging
 from .http_api import start_http
 from .store import SnapshotStore, TickRecorder
 from .subscriptions import Subscriptions, validate
-from .window import MarketWindow, iso
+from .window import MarketWindow, iso, ist_date
 
 log = logging.getLogger("sudarshan.feed")
 
@@ -50,7 +50,7 @@ NO_TOKEN_S = 60.0
 TOKEN_POLL_S = 5.0  # how often a backoff checks whether the token file changed
 CLOSED_POLL_S = 30.0
 WATCH_EVERY_S = 1.0
-STALL_S = 120.0  # no message for this long inside 09:15-15:30 forces a reconnect
+STALL_S = 120.0  # no message for this long in continuous trading (09:15-15:40) forces a reconnect
 SNAPSHOT_EVERY_S, FLUSH_EVERY_S, HEALTH_EVERY_S = 30.0, 3.0, 5.0
 SNAPSHOT_KEEP_DAYS = 30  # an unsubscribed key's last tick is kept this long
 SUB_BATCH, SUB_PAUSE_S = 100, 0.1
@@ -114,7 +114,9 @@ def _age(start: float | None, now: float) -> float | None:
 class FeedService:
     def __init__(self, cfg: Settings, clock=time.time):
         self.cfg, self.clock = cfg, clock
-        self.window = MarketWindow(cfg.holidays_file, cfg.window, cfg.always_on)
+        self.window = MarketWindow(
+            cfg.holidays_file, cfg.window, cfg.always_on, cfg.extra_days_file
+        )
         self.subs = Subscriptions.load(cfg.keys_file, cfg.state_dir / "subscriptions.json")
         self.store = SnapshotStore(cfg.state_dir / "snapshot.json")
         self.recorder = None
@@ -142,6 +144,7 @@ class FeedService:
         self._next_retry_at: float | None = None
         self._seen: set[str] = set()  # keys that sent data on the current socket
         self._market_status: dict[str, str] = {}
+        self._traded_on = None  # the IST day of the last tick whose last trade was that day
         self._last_error: dict | None = None
         self._last_disconnect: dict | None = None
         self._stats = dict.fromkeys(STATS, 0)
@@ -402,6 +405,8 @@ class FeedService:
     def _stalled(self, now: float) -> bool:
         if not (self._live and self.subs.desired() and self.window.in_core_session(now)):
             return False  # quiet is normal outside continuous trading or with nothing subscribed
+        if self.window.waits_for_first_trade(now) and self._traded_on != ist_date(now):
+            return False  # a reopened day at the usual hours: until it trades, quiet is normal
         return time.monotonic() - self._last_msg > STALL_S
 
     async def _resubscribe(self, ws) -> None:
@@ -445,10 +450,18 @@ class FeedService:
             for key, partial in ticks.items():
                 if partial:
                     self._publish(key, self.store.update(key, partial, ts_recv, fresh))
+            if ticks and self._traded_on != ist_date(ts_recv / 1000):
+                self._note_trade(ticks, ts_recv)
         except Exception as exc:  # one bad frame must not take the socket down
             self._stats["decode_errors"] += 1
             what = f"bad feed frame ({len(message)} bytes): {exc!r}"
             self._throttle(logging.WARNING, "decode", what, exc_info=True)
+
+    def _note_trade(self, ticks: dict, ts_recv: int) -> None:
+        """A tick whose last trade time falls on today (IST) shows the exchange trading today."""
+        today = ist_date(ts_recv / 1000)
+        if any(ist_date(tick["ltt"] / 1000) == today for tick in ticks.values() if tick.get("ltt")):
+            self._traded_on = today
 
     def _publish(self, key: str, tick: dict) -> None:
         line = json.dumps(tick, separators=(",", ":"), ensure_ascii=False).encode()
@@ -496,7 +509,6 @@ class FeedService:
 
     def health(self) -> dict:
         now, mono = self.clock(), time.monotonic()
-        is_open, why = self.window.status(now)
         missing = [k for k in self.subs.desired() if k not in self._seen] if self._live else []
         retry = None if self._next_retry_at is None else max(0.0, self._next_retry_at - mono)
         stats = self._stats | {"snapshot_keys": len(self.store.ticks)}
@@ -516,12 +528,7 @@ class FeedService:
             "reconnects": max(0, self._stats["connects"] - 1),
             "last_error": self._last_error,
             "last_disconnect": self._last_disconnect,
-            "market_window": {
-                "open": is_open,
-                "reason": why,
-                "holidays": self.window.note,
-                "next_open": None if is_open else iso(self.window.next_open(now)),
-            },
+            "market_window": self.window.describe(now),
             "market_status": self._market_status,
             "stats": stats | {"zmq_dropped": self.pub.dropped if self.pub else 0},
             "recorder": self.recorder.status() if self.recorder else None,

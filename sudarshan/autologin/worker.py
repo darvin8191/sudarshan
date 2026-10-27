@@ -5,10 +5,10 @@ weekdays) and, for "Test now", by OpenAlgo as a child process (``--test``). Ever
 itself whether to act, so a deploy restarting the unit, a catch-up start after a boot, a weekend
 or an NSE holiday costs nothing:
 
-  scheduled  trading day, inside the window (08:30-15:30), switched on, not paused, and Upstox
+  scheduled  trading day, inside the window (08:30-15:40), switched on, not paused, and Upstox
              no longer accepts the login OpenAlgo holds (OpenAlgo checks it with one read-only
-             call); during market hours never without that check
-  test       any day and time, switch on or off, but not while paused; refused 09:00-15:30 on a
+             call); during market hours (to the 15:40 F&O close) never without that check
+  test       any day and time, switch on or off, but not while paused; refused 09:00-15:40 on a
              trading day while the stored login works (Test now replaces today's login)
 
 A pause begins when Upstox refuses the login for any reason other than "too many requests" and
@@ -259,7 +259,7 @@ class AutoLoginRun:
 
           scheduled  works: nothing to do. unknown: trust a fresh login; with none on record,
                      log in before 09:15 but never during market hours. dead or none: log in.
-          test       works or unknown, 09:00-15:30 on a trading day: refused, because Test now
+          test       works or unknown, 09:00-15:40 on a trading day: refused, because Test now
                      replaces today's login. Otherwise it goes ahead.
         """
         token = info.get("token", "unknown")

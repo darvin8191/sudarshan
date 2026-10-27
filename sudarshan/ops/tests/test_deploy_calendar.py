@@ -835,16 +835,18 @@ def test_the_shipped_list_on_the_server(tmp_path):
     assert calendar.next_slot(datetime(2026, 11, 7, 20, 0, tzinfo=IST)) == datetime(
         2026, 11, 8, 8, 35, tzinfo=IST
     )
-    # the order alerts: connected from the pre-open at 14:05 to the F&O close at 15:40
+    # the order alerts: connected 15 minutes before the pre-open at 14:05 until 20 minutes after the
+    # F&O close at 15:40, the margins of a normal day's 08:45-16:00 around 09:00-15:40
     alerts = AlertWindow(calendar, parse_window("08:45-16:00"), False, server.day())
 
     def at(hour: int, minute: int) -> datetime:
         return datetime(2026, 11, 8, hour, minute, tzinfo=IST)
 
     assert alerts.status(at(10, 0)) == (False, "before the alert window")
-    assert alerts.status(at(14, 5))[0] is True and alerts.status(at(15, 39))[0] is True
-    assert alerts.status(at(15, 40)) == (False, "after the alert window")
-    assert alerts.next_open(at(9, 0)) == at(14, 5)
+    assert alerts.status(at(13, 49))[0] is False and alerts.status(at(13, 50))[0] is True
+    assert alerts.status(at(15, 59))[0] is True
+    assert alerts.status(at(16, 0)) == (False, "after the alert window")
+    assert alerts.next_open(at(9, 0)) == at(13, 50)
     # the deploy market gate: no install at any hour that Sunday
     for now in ("7 0300 2026-11-08", "7 1830 2026-11-08", "7 2330 2026-11-08"):
         assert _market_gate(server.etc, now) == 0

@@ -4,8 +4,8 @@
 # that is not a trading day the worker stops at once. It also skips any day OpenAlgo already
 # holds a working login, so the first success ends the day's work. Mirrors SCHEDULE in
 # sudarshan/autologin/schedule.py (a test compares the two). Persistent: a wake-up missed while
-# the server was down runs at boot, and the worker ignores it unless it falls inside 08:30-15:30
-# IST on a trading day.
+# the server was down runs at boot, and the worker ignores it unless it falls inside 08:30-15:40
+# IST (to the F&O close) on a trading day.
 
 [Unit]
 Description=SUDARSHAN Upstox auto-login schedule (trading mornings, IST)

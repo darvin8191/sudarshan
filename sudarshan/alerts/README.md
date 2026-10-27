@@ -40,6 +40,7 @@ Filled: BUY 65 NIFTY 21 OCT 25900 CE at ₹123.45 (MIS, NFO)
 | stop triggered, not filled | `Triggered: SELL 65 NIFTY 21 OCT 25900 CE at trigger ₹120.00, not filled yet (SL, MIS, NFO)` |
 | found after a pause | `Filled: BUY 65 ... (MIS, NFO) (found after a pause in order alerts)` |
 | the pause itself | `Order alerts paused 10:42:05 to 10:44:10 IST; the order book was checked.` |
+| the pause, the book not readable | `Order alerts paused 10:42:05 to 10:44:10 IST; the order book could not be read; open Orders in the app to check.` |
 
 - Quantities are units, as the broker reports them; money and quantities use Indian grouping
   (₹1,23,456.50); currency contracts show four decimals.
@@ -83,13 +84,18 @@ connection) would never be told. So after every subscription, the day's first in
 service reads OpenAlgo's order book and trade book once and runs each order through the same
 rules, marked "(found after a pause in order alerts)" and timed when it was found. What was told
 before stays silent. A pause longer than 10 s inside the window gets its own line when anything
-was found, or when the book could not be read (three tries); otherwise only the journal has it.
-The moment the stream was last up is kept in `alerts.db`, so a restart knows its pause; the first
-start of a day counts from the window's opening.
+was found, or when the book still could not be read after about three minutes of tries while the
+stream stays up; that line says to open Orders in the app. A pause that ends before the market's
+start (the 09:00 pre-open, or a special session's own start) gets a line only when something was
+found: nothing trades before then, and a restart before the opening, such as a release being
+installed, is routine. Otherwise only the journal has it. A drop during the tries keeps the
+pause, so the next connection's line covers it from its start. The moment the stream was last up
+is kept in `alerts.db`, so a restart knows its pause; the first start of a day counts from the
+window's opening.
 - OpenAlgo's order book for Upstox carries no fill price or rejection reason: fills and prices
   come from the trade book, and a rejection found this way points to the Upstox app for the reason.
 - While OpenAlgo is in Analyze mode, its REST books answer from the sandbox, so the live book
-  cannot be checked from here; the pause line then says the book could not be checked.
+  cannot be checked from here; the pause line then says so and points to the Upstox app.
 
 ## When it runs
 
@@ -99,12 +105,22 @@ are closed, a date in `/etc/sudarshan/nse_extra_trading_days.txt` is open. Both 
 again when they change. Outside the window the process stays up, disconnected, and connects again
 at the next opening. The MCX evening session is not covered.
 
-A special session gets its own window after the date, which the alerts use for that day instead of
-08:45-16:00 (include the pre-open). Muhurat 2026, as `nse-calendar.conf` ships it:
+A special session gets its own window after the date: the exchange's session as its circulars
+give it, from the start of the pre-open to the F&O close. For the Muhurat session on Sunday
+8 Nov 2026 (NSE circulars 149/2026 and 142/2026), as `nse-calendar.conf` ships it:
 
 ```
 2026-11-08 14:05-15:40  # Muhurat, NSE circulars 149/2026 (cash) and 142/2026 (F&O to 15:40)
 ```
+
+The alerts keep the margins 08:45-16:00 keeps around an ordinary session (09:00-15:40): 15 minutes
+before its start and 20 after its end, within the day. So that Sunday they are connected from
+13:50 to 16:00, and an update after the close, such as the exchange cancelling an open order, is
+told as on any day. On a weekday that trades anyway, the session's window is added to 08:45-16:00
+(an evening session gives a second window; the order book read when it opens covers the hours in
+between). The next trading day's catch-up counts its pause from that day's opening and reads the
+order book Upstox gives that day, so it is the margins, not the catch-up, that cover the special
+day's close.
 
 Auto-login reads only the date of such a line, and the deploy tool only the date at its start, so
 both work as before (a test holds each to it). A release ships these lines in
@@ -139,7 +155,7 @@ tool starts ring services again after each release.
 | `SUDARSHAN_ORDER_ALERTS` | `on` | `off`: the service exits; nothing is sent and OpenAlgo is not contacted |
 | `SUDARSHAN_ORDER_ALERTS_CANCELLED` | `all` | `part-filled`: only cancellations of an order that was part filled |
 | `SUDARSHAN_ORDER_ALERTS_SANDBOX` | `off` | `on`: Analyze-mode (sandbox) orders too, each line starting with "Sandbox" |
-| `SUDARSHAN_ALERTS_WINDOW` | `08:45-16:00` | IST, on trading days (a special day's own window wins) |
+| `SUDARSHAN_ALERTS_WINDOW` | `08:45-16:00` | IST, on trading days; a special day's own window gets the same margins around it |
 | `SUDARSHAN_ALERTS_ALWAYS_ON` | `0` | `1`: ignore the window and the calendar (tests, an evening sandbox check) |
 | `SUDARSHAN_ALERTS_STATE_DIR` | systemd's `$STATE_DIRECTORY` | `/var/lib/sudarshan-alerts` |
 | `SUDARSHAN_ALERTS_LOG_LEVEL` | `INFO` | |

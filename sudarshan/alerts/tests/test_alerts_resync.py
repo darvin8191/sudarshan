@@ -28,6 +28,7 @@ from sudarshan.alerts.resync import as_update, fills_by_order, read_books
 from sudarshan.alerts.service import AlertService
 
 NOTE = " (found after a pause in order alerts)"
+UNREAD = "the order book could not be read; open Orders in the app to check."
 
 
 class Clock:
@@ -148,9 +149,7 @@ def test_a_book_that_cannot_be_read_gives_the_gap_line(settings_for, fast, quick
             clock.at += timedelta(seconds=30)  # a longer one: the owner is told
             proxy.refusing = False
             await wait_until(lambda: openalgo.bodies)
-            assert _lines(openalgo) == [
-                "Order alerts paused 10:00:08 to 10:00:38 IST; the order book could not be checked."
-            ]
+            assert _lines(openalgo) == ["Order alerts paused 10:00:08 to 10:00:38 IST; " + UNREAD]
             await _stop(svc, task)
         assert "The order book could not be read after the pause" in caplog.text
 
@@ -192,8 +191,145 @@ def test_an_analyze_mode_book_is_not_the_live_book(settings_for, fast, quick_res
             proxy.refusing = False
             await wait_until(lambda: openalgo.bodies)
             assert _lines(openalgo) == [
-                "Order alerts paused 10:00:00 to 10:00:40 IST; the order book could not be checked."
+                "Order alerts paused 10:00:00 to 10:00:40 IST; OpenAlgo is in Analyze mode, so "
+                "the Upstox order book could not be checked; open it in the Upstox app."
             ]
+            await _stop(svc, task)
+
+    asyncio.run(scenario())
+
+
+def test_the_tries_back_off_over_a_few_minutes():
+    """OpenAlgo can take a few minutes to answer after a restart: the tries outlast that."""
+    waits = service.RESYNC_RETRY_S
+    assert list(waits) == sorted(waits) and 120 <= sum(waits) <= 300, waits
+
+
+@pytest.fixture
+def tries(monkeypatch):
+    """Seven quick tries: the first read and six more, as in use but in milliseconds."""
+    monkeypatch.setattr(service, "RESYNC_RETRY_S", (0.05,) * 6)
+    return 1 + 6
+
+
+def _trading_day(settings_for, tmp_path, proxy, openalgo):
+    (tmp_path / "nse_holidays.txt").write_text("")
+    return settings_for(proxy, openalgo, SUDARSHAN_ALERTS_ALWAYS_ON="0")
+
+
+def test_an_install_before_the_pre_open_sends_nothing(settings_for, fast, tries, tmp_path, caplog):
+    """27 Oct 2026: an install restarted OpenAlgo at 08:42, the stream came up at 08:45:14 and the
+    book answered from 08:46. Nothing trades before the 09:00 pre-open, so nothing is sent."""
+    caplog.set_level(logging.INFO, logger="sudarshan.alerts")
+
+    async def scenario():
+        async with FakeProxy() as proxy, FakeOpenAlgo() as openalgo:
+            clock = Clock(ist(2026, 10, 27, 8, 42))
+            proxy.refusing, openalgo.book_status = True, 503  # OpenAlgo is starting
+            svc, task = await _start(_trading_day(settings_for, tmp_path, proxy, openalgo), clock)
+            await wait_until(lambda: svc.state == "closed")
+            clock.at = ist(2026, 10, 27, 8, 45)  # the window opens; the proxy is not up yet
+            await asyncio.sleep(0.3)  # refused, again and again
+            clock.at = ist(2026, 10, 27, 8, 45, 14)
+            proxy.refusing = False
+            await wait_until(lambda: openalgo.book_reads() >= 2)  # the book is not up yet either
+            clock.at = ist(2026, 10, 27, 8, 46)
+            reads, openalgo.book_status = openalgo.book_reads(), 200
+            await wait_until(lambda: openalgo.book_reads() > reads)
+            await asyncio.sleep(0.3)
+            assert openalgo.bodies == []
+            await _stop(svc, task)
+        assert "Order alerts paused 08:45:00 to 08:45:14 IST; the order book was checked. " \
+               "Nothing had changed." in caplog.text  # fmt: skip
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("minute", [(8, 59), (9, 0)])  # by 09:00, not only before it
+def test_before_the_pre_open_a_book_that_never_answers_is_only_logged(
+    settings_for, fast, tries, tmp_path, caplog, minute
+):
+    caplog.set_level(logging.INFO, logger="sudarshan.alerts")
+
+    async def scenario():
+        async with FakeProxy() as proxy, FakeOpenAlgo() as openalgo:
+            openalgo.book_status = 503
+            settings = _trading_day(settings_for, tmp_path, proxy, openalgo)
+            svc, task = await _start(settings, Clock(ist(2026, 10, 27, *minute)))
+            await wait_until(lambda: openalgo.book_reads() == tries)
+            await asyncio.sleep(0.3)
+            assert openalgo.bodies == []
+            await _stop(svc, task)
+        end = f"{minute[0]:02d}:{minute[1]:02d}:00"
+        assert f"Order alerts paused 08:45:00 to {end} IST; {UNREAD} Not sent: it ended before " \
+               "the market's start at 09:00." in caplog.text  # fmt: skip
+
+    asyncio.run(scenario())
+
+
+def test_a_pause_before_the_pre_open_that_finds_a_fill_tells_it(
+    settings_for, fast, tries, tmp_path
+):
+    async def scenario():
+        async with FakeProxy() as proxy, FakeOpenAlgo() as openalgo:
+            openalgo.orders = [book_row("e1", "complete", timestamp="27-Oct-2026 08:48:00")]
+            openalgo.trades = [trade_row("e1", 65, 10.0)]
+            settings = _trading_day(settings_for, tmp_path, proxy, openalgo)
+            svc, task = await _start(settings, Clock(ist(2026, 10, 27, 8, 50)))
+            await wait_until(lambda: openalgo.bodies)
+            assert _lines(openalgo) == [
+                "Order alerts paused 08:45:00 to 08:50:00 IST; the order book was checked.",
+                "Filled: BUY 65 NIFTY 21 OCT 25900 CE at ₹10.00 (MIS, NFO)" + NOTE,
+            ]
+            await _stop(svc, task)
+
+    asyncio.run(scenario())
+
+
+def test_a_pause_in_the_session_is_told_after_every_try_with_what_to_do(
+    settings_for, fast, tries, tmp_path, caplog
+):
+    caplog.set_level(logging.INFO, logger="sudarshan.alerts")
+
+    async def scenario():
+        async with FakeProxy() as proxy, FakeOpenAlgo() as openalgo:
+            clock = Clock(ist(2026, 10, 27, 10, 0))
+            svc, task = await _start(_trading_day(settings_for, tmp_path, proxy, openalgo), clock)
+            # The day's first connection: its book read to the end, nothing new (a drop before
+            # that would carry its pause, from 08:45, into the next one).
+            await wait_until(lambda: "Nothing had changed." in caplog.text)
+            openalgo.book_status = 500
+            await proxy.outage(svc)
+            clock.at = ist(2026, 10, 27, 10, 2)
+            proxy.refusing = False
+            await wait_until(lambda: openalgo.bodies)
+            assert openalgo.book_reads() == 1 + tries  # told only after the last try
+            assert _lines(openalgo) == ["Order alerts paused 10:00:00 to 10:02:00 IST; " + UNREAD]
+            await _stop(svc, task)
+
+    asyncio.run(scenario())
+
+
+def test_a_drop_during_the_tries_keeps_the_pause_for_the_next_connection(
+    settings_for, fast, monkeypatch
+):
+    monkeypatch.setattr(service, "RESYNC_RETRY_S", (0.3,) * 3)  # slow enough to drop in between
+
+    async def scenario():
+        async with FakeProxy() as proxy, FakeOpenAlgo() as openalgo:
+            clock = Clock(ist(2026, 10, 27, 10, 0))
+            svc, task = await _start(settings_for(proxy, openalgo), clock)
+            await wait_until(lambda: openalgo.book_reads() == 1)
+            openalgo.book_status = 500
+            await proxy.outage(svc)
+            clock.at = ist(2026, 10, 27, 10, 1)  # a real pause, from 10:00:00
+            proxy.refusing = False
+            await wait_until(lambda: openalgo.book_reads() == 2)  # its first try fails
+            await proxy.outage(svc)  # OpenAlgo restarts again before the tries are done
+            clock.at = ist(2026, 10, 27, 10, 1, 5)
+            proxy.refusing = False
+            await wait_until(lambda: openalgo.bodies, timeout=10)
+            assert _lines(openalgo) == ["Order alerts paused 10:00:00 to 10:01:05 IST; " + UNREAD]
             await _stop(svc, task)
 
     asyncio.run(scenario())

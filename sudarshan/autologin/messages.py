@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from .schedule import HAND_LOGIN_DEADLINE, hhmm
+from .schedule import HAND_LOGIN_DEADLINE, TEST_BLOCKED, hhmm
 
 BRAND = "सुदर्शन / SUDARSHAN"
 
@@ -68,8 +68,8 @@ MESSAGES = {
     ),
     "already_logged_in": "Upstox is already connected for today. Nothing to do.",
     "market_hours": (
-        "Not available from 09:00 to 15:30 on a trading day while Upstox is connected: Test now "
-        "replaces today's login, which would cut off the live session."
+        f"Not available from {TEST_BLOCKED[0]} to {TEST_BLOCKED[1]} on a trading day while Upstox "
+        "is connected: Test now replaces today's login, which would cut off the live session."
     ),
     "token_unchecked": (
         "Upstox could not confirm whether the stored login still works. No new login was made "

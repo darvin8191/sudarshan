@@ -19,7 +19,8 @@ from sudarshan.autologin.schedule import EXTRA_TRADING_DAYS_FILE, HOLIDAYS_FILE,
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 STATE_DIR = "/var/lib/sudarshan-alerts"
-#: Trading days only, from before the pre-open to after the close (IST).
+#: Trading days only, 15 minutes before the 09:00 pre-open to 20 minutes after the 15:40 F&O
+#: close (IST); a special session's own window gets the same margins (window.py).
 DEFAULT_WINDOW = "08:45-16:00"
 PROXY_URL = "ws://127.0.0.1:8765"
 OPENALGO_URL = "http://127.0.0.1:5000"

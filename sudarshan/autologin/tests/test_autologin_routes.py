@@ -264,7 +264,15 @@ def test_test_now_refuses_without_secrets(setup, monkeypatch):
 
 @pytest.mark.parametrize(
     ("hour", "minute", "refused"),
-    [(8, 59, False), (9, 0, True), (9, 5, True), (10, 0, True), (15, 29, True), (15, 30, False)],
+    [
+        (8, 59, False),
+        (9, 0, True),
+        (9, 5, True),
+        (10, 0, True),
+        (15, 30, True),  # the cash close: F&O trades to 15:40 (since 3 Aug 2026)
+        (15, 39, True),
+        (15, 40, False),
+    ],
 )
 def test_test_now_refuses_from_the_pre_open_to_the_close_when_connected(
     setup, monkeypatch, hour, minute, refused
@@ -288,7 +296,7 @@ def test_test_now_refuses_from_the_pre_open_to_the_close_when_connected(
     if refused:
         assert response.status_code == 409 and started == []
         message = response.get_json()["message"]
-        assert "Test now replaces today's login" in message and "09:00 to 15:30" in message
+        assert "Test now replaces today's login" in message and "09:00 to 15:40" in message
     else:
         assert started
 

@@ -151,11 +151,21 @@ def line(kind: str, update, today: date, *, found_later: bool = False) -> str:
     return f"{label}: {body}{FOUND_LATER if found_later else ''}"
 
 
-def gap_line(start: datetime, end: datetime, checked: bool) -> str:
-    """The pause in the stream, and whether the order book could cover it."""
+#: What the order book said about a pause, and what the owner can do when it could not say.
+BOOK_AFTER_PAUSE = {
+    "checked": "the order book was checked",
+    "unreadable": "the order book could not be read; open Orders in the app to check",
+    "sandbox": (
+        "OpenAlgo is in Analyze mode, so the Upstox order book could not be checked; "
+        "open it in the Upstox app"
+    ),
+}
+
+
+def gap_line(start: datetime, end: datetime, book: str) -> str:
+    """The pause in the stream, and what the order book said about it (BOOK_AFTER_PAUSE)."""
     start, end = start.astimezone(IST), end.astimezone(IST)
-    book = "the order book was checked" if checked else "the order book could not be checked"
-    return f"Order alerts paused {start:%H:%M:%S} to {end:%H:%M:%S} IST; {book}."
+    return f"Order alerts paused {start:%H:%M:%S} to {end:%H:%M:%S} IST; {BOOK_AFTER_PAUSE[book]}."
 
 
 def compose(lines: list[str], first: datetime, last: datetime, dropped: int = 0) -> str:
