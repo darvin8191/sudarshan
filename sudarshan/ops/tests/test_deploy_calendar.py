@@ -41,8 +41,11 @@ DEPLOY_TOOL = REPO / "sudarshan" / "ops" / "deploy" / "sudarshan-deploy"
 SHIPPED_LIST = REPO / "sudarshan" / "ops" / "deploy" / "nse-calendar.conf"
 EXTRA, HOLIDAYS = "nse_extra_trading_days.txt", "nse_holidays.txt"
 TODAY = "2026-10-21"  # the day the function tests run on: a Wednesday before every date below
-# The line the shipped list carries: Muhurat 2026 as NSE announced it (circular 149/2026).
-SHIPPED = b"2026-11-08 14:05-15:40  # Muhurat, NSE circular 149/2026 (F&O to 15:40)"
+# The line the shipped list carries: Muhurat 2026 as NSE announced it (circulars 149/2026, cash,
+# and 142/2026, F&O).
+SHIPPED = (
+    b"2026-11-08 14:05-15:40  # Muhurat, NSE circulars 149/2026 (cash) and 142/2026 (F&O to 15:40)"
+)
 # The lines the tests below ship themselves: an earlier version without a window, then a window.
 MUHURAT = b"2026-11-08  # Muhurat trading (NSE circular 212/2025); timings to follow"
 WINDOW = b"2026-11-08 18:00-19:15  # Muhurat trading (NSE circular 212/2025)"

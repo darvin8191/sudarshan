@@ -103,7 +103,7 @@ A special session gets its own window after the date, which the alerts use for t
 08:45-16:00 (include the pre-open). Muhurat 2026, as `nse-calendar.conf` ships it:
 
 ```
-2026-11-08 14:05-15:40  # Muhurat, NSE circular 149/2026 (F&O to 15:40)
+2026-11-08 14:05-15:40  # Muhurat, NSE circulars 149/2026 (cash) and 142/2026 (F&O to 15:40)
 ```
 
 Auto-login reads only the date of such a line, and the deploy tool only the date at its start, so
