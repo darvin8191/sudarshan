@@ -38,6 +38,7 @@ from __future__ import annotations
 import functools
 import itertools
 import time
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import datetime
@@ -73,6 +74,9 @@ STATE_RETRY_S = 2.0
 NOTE_EVERY_S = 2.0
 #: A count kept in memory this long without a refusal is written by the next note or flush.
 NOTE_KEPT_S = 60.0
+#: The gate's own time is kept for this many decisions, for its p50 and p95 on the status route
+#: (sessions S1 and G3 record them).
+TIMED_KEPT = 500
 
 # Machine codes, for the audit and SUDARSHAN's own endpoints, never for a sentence.
 KILL_SWITCH_ACTIVE = "KILL_SWITCH_ACTIVE"
@@ -184,6 +188,8 @@ class Gate:
         self._store = store
         self._read = read or readers
         self._notes: dict[str, _Note] = {}  # audit rows by key, with counts not yet written
+        self._timed: deque[float] = deque(maxlen=TIMED_KEPT)  # seconds per decision
+        self._problem: tuple[float, str, str] | None = None  # (epoch, kind, words): the last one
 
     def _the_store(self) -> risk_store.RiskStore:
         return self._store or risk_store.STORE
@@ -288,6 +294,7 @@ class Gate:
 
     def admit(self, kind: _Kind, args: tuple, kwargs: dict) -> Decision:
         """Decide on one call. Never raises: a broken check refuses only while new risk is."""
+        started = time.monotonic()
         order = None
         try:
             order = kind.describe(*args, **kwargs)
@@ -295,6 +302,9 @@ class Gate:
         except Exception:
             logger.exception("The risk check broke on an order")
             decision = self._broke(kind.pipe, order)
+        took = time.monotonic() - started
+        with self._lock:
+            self._timed.append(took)
         if decision.refused or decision.code:
             self._note(kind.pipe, order, decision)
         return decision
@@ -574,6 +584,8 @@ class Gate:
             detail = {"code": decision.code, "symbol": symbol, **decision.detail}
             now = time.monotonic()
             with self._lock:
+                if kind != "order_refused":
+                    self._problem = (time.time(), kind, said)
                 stale = self._take_stale(now)
                 note = self._notes.get(key)
                 if note is not None and now - note.written < NOTE_EVERY_S:
@@ -610,6 +622,35 @@ class Gate:
             merge_key=key,
             count=count,
         )
+
+    def timing(self) -> dict[str, Any]:
+        """The gate's own time per order over its last ``TIMED_KEPT`` decisions, in ms: what
+        checking adds to an order (the audit write of a refusal is not in it)."""
+        with self._lock:
+            taken = list(self._timed)
+        taken.sort()  # outside the lock
+        if not taken:
+            return {"orders": 0, "p50_ms": None, "p95_ms": None, "max_ms": None}
+
+        def nearest_rank(percent: int) -> float:
+            rank = -(-percent * len(taken) // 100)  # ceil(percent * n / 100), in integers
+            return round(taken[max(rank, 1) - 1] * 1000, 2)
+
+        return {
+            "orders": len(taken),
+            "p50_ms": nearest_rank(50),
+            "p95_ms": nearest_rank(95),
+            "max_ms": round(taken[-1] * 1000, 2),
+        }
+
+    def last_problem(self) -> dict[str, str] | None:
+        """When the check last broke or could not read a book, and what the order was told."""
+        with self._lock:
+            problem = self._problem
+        if problem is None:
+            return None
+        at, kind, said = problem
+        return {"at": datetime.fromtimestamp(at, IST).isoformat(), "kind": kind, "words": said}
 
     def flush_notes(self) -> None:
         """Write every count still kept in memory (before the audit is read)."""

@@ -280,6 +280,11 @@ def ks_resume_wait(seconds: int) -> str:
     )
 
 
+def ks_resume_refused(said: str) -> str:
+    """The audit's line for a resume that was refused, with what the owner was told."""
+    return f"Resume refused. {said}"
+
+
 def ks_report_lead(report: dict | None) -> str:
     """The first line of an activation's answer: on, and whether any step needs a look."""
     steps = (report or {}).get("steps") or []
@@ -333,6 +338,99 @@ def ks_preview(counts: dict | None, *, telegram: bool = False) -> str:
     return said[0].upper() + said[1:]
 
 
+# -- the routes and Telegram's /killswitch (blueprints/sudarshan_risk.py, telegram.py) ----------
+
+OWNER_ONLY = "Only the owner's account can do this."
+TOO_MANY_REQUESTS = "Too many requests. Wait a minute, then try again."
+API_KEY_NOT_VALID = "The API key is not valid, so nothing was changed."
+EXIT_ALL_NOT_UNDERSTOOD = "Exit all must be given as true or false. Nothing was changed."
+AUDIT_UNREADABLE = "The risk history could not be read. Try again in a few seconds."
+
+_UPSTOX_SEGMENTS = {
+    "NSE_EQ": "NSE cash",
+    "BSE_EQ": "BSE cash",
+    "NSE_FO": "NSE F&O",
+    "BSE_FO": "BSE F&O",
+    "NCD_FO": "NSE currency",
+    "BCD_FO": "BSE currency",
+    "MCX_FO": "MCX",
+    "NSE_COM": "NSE commodity",
+}
+
+
+def upstox_segment(code: str) -> str:
+    """A segment of Upstox's own kill switch, as a trader names it."""
+    return _UPSTOX_SEGMENTS.get(code, code.replace("_", " "))
+
+
+TG_ONLY_YOUR_CHAT = "This command works only in your own chat with the bot."
+TG_OFF = "The kill switch is off."
+TG_USAGE = (
+    "Send /killswitch on followed by your phrase to stop new orders and cancel open orders and "
+    "GTTs; /killswitch exit followed by your phrase to also exit every position; /killswitch off "
+    "followed by your phrase to resume."
+)
+TG_RESUME_HOW = (
+    "To resume, send /killswitch off followed by your phrase, a minute or more after it went on."
+)
+TG_STILL_WORKING = "Still working. Send /killswitch to see where it is."
+TG_BROKE = "The kill switch command could not finish. Check Settings > Risk in the app."
+
+# -- the risk settings (settings_rules.py) ---------------------------------------------------------
+
+SETTINGS_NOT_UNDERSTOOD = "These settings could not be read. Nothing was saved."
+PHRASE_INVALID = "The confirm phrase must be 1 to 40 letters, digits or spaces. Nothing was saved."
+SETTINGS_UNCHANGED = "Nothing to change."
+LOOSEN_NEEDS_PHRASE = "Loosening a limit needs your confirm phrase. Nothing was saved."
+SETTINGS_SAVED = "Saved."
+SETTINGS_CHANGED_MEANWHILE = (
+    "Your risk settings were changed from another screen just now, so nothing was saved. Check "
+    "them and try again."
+)
+SETTINGS_NOT_SAVED = "The risk settings could not be saved. Try again in a few seconds."
+
+_SETTING_LABELS = {
+    "daily_loss_limit": "the daily loss limit",
+    "band_on": "the price band",
+    "band_opt_pct": "the options band",
+    "band_opt_min_rs": "the options band's minimum",
+    "band_fut_pct": "the futures band",
+    "band_cash_pct": "the cash band",
+    "band_both_sides": "checking both sides",
+    "size_on": "the order size limit",
+    "max_lots_fo": "lots per F&O order",
+    "max_qty_cash": "shares per cash order",
+    "burst_on": "the burst brake",
+    "burst_n": "orders in a burst",
+    "burst_window_s": "the burst window",
+    "confirm_phrase": "the confirm phrase",
+    "revoke_mcp": "revoking remote MCP access",
+}
+_SETTING_RANGES = {
+    "daily_loss_limit": "The daily loss limit must be at least ₹1.",
+    "band_opt_pct": "The options band must be between 1 and 100%.",
+    "band_opt_min_rs": "The options band's minimum must be between ₹0 and ₹10,000.",
+    "band_fut_pct": "The futures band must be between 0.1 and 50%.",
+    "band_cash_pct": "The cash band must be between 0.1 and 50%.",
+    "max_lots_fo": "Lots per F&O order must be a whole number from 1 to 10,000.",
+    "max_qty_cash": "Shares per cash order must be a whole number from 1 to 1,00,00,000.",
+    "burst_n": "Orders in a burst must be a whole number from 1 to 10,000.",
+    "burst_window_s": "The burst window must be between 1 and 3,600 seconds.",
+}
+
+
+def setting_invalid(name: str) -> str:
+    """Why one setting cannot be saved."""
+    said = _SETTING_RANGES.get(name) or "A switch must be on or off."
+    return f"{said} Nothing was saved."
+
+
+def settings_changed(names: list[str], looser: bool) -> str:
+    """The audit's line for a change of settings (the phrase itself never)."""
+    listed = ", ".join(_SETTING_LABELS.get(name, name) for name in names)
+    return f"Risk settings changed{', loosened' if looser else ''}: {listed}."
+
+
 #: Every fixed sentence, for the tests that scan them.
 FIXED = (
     RESUME_HOW,
@@ -363,4 +461,22 @@ FIXED = (
     KS_CHANGED_MEANWHILE,
     KS_RESUMED,
     KS_RESTARTED,
+    OWNER_ONLY,
+    TOO_MANY_REQUESTS,
+    API_KEY_NOT_VALID,
+    EXIT_ALL_NOT_UNDERSTOOD,
+    AUDIT_UNREADABLE,
+    TG_ONLY_YOUR_CHAT,
+    TG_OFF,
+    TG_USAGE,
+    TG_RESUME_HOW,
+    TG_STILL_WORKING,
+    TG_BROKE,
+    SETTINGS_NOT_UNDERSTOOD,
+    PHRASE_INVALID,
+    SETTINGS_UNCHANGED,
+    LOOSEN_NEEDS_PHRASE,
+    SETTINGS_SAVED,
+    SETTINGS_CHANGED_MEANWHILE,
+    SETTINGS_NOT_SAVED,
 )

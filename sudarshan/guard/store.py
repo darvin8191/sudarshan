@@ -69,6 +69,13 @@ def _clip(value: Any, length: int) -> str | None:
     return None if value is None else str(value)[:length]
 
 
+_ANY = object()
+
+
+class SettingsChanged(Exception):
+    """The settings were saved by another change after this one was judged."""
+
+
 @dataclass(frozen=True)
 class RiskSettings:
     """The owner's risk settings, one whole version. Every guard is off by default."""
@@ -241,18 +248,36 @@ class RiskStore:
                 updated_by=row.updated_by,
             )
 
-    def save_settings(self, by: str, **changes: Any) -> RiskSettings:
-        """Change some settings; returns the version saved."""
+    def save_settings(self, by: str, *, since: Any = _ANY, **changes: Any) -> RiskSettings:
+        """Change some settings; returns the version saved.
+
+        ``since`` is the ``updated_at`` of the version a change was judged against (whether it
+        loosens anything). The change is then saved only while that is still the saved version,
+        checked in the one UPDATE that writes it, so two changes judged against the same version
+        cannot both be saved; the second raises ``SettingsChanged``.
+        """
         unknown = set(changes) - set(SETTING_FIELDS)
         if unknown:
             raise ValueError(f"not a risk setting: {sorted(unknown)}")
         values = {**changes, "updated_at": _to_db(utcnow()), "updated_by": _clip(by, 80)}
-        with self._session() as session:
-            done = session.execute(update(SettingsRow).where(SettingsRow.id == 1).values(**values))
-            if done.rowcount == 0:
-                session.add(SettingsRow(id=1, **values))
-            session.commit()
-        self._cache.invalidate("settings")  # after the commit, never before
+        statement = update(SettingsRow).where(SettingsRow.id == 1)
+        if since is not _ANY:
+            judged = _to_db(since)
+            statement = statement.where(
+                SettingsRow.updated_at.is_(None)
+                if judged is None
+                else SettingsRow.updated_at == judged
+            )
+        try:
+            with self._session() as session:
+                done = session.execute(statement.values(**values))
+                if done.rowcount == 0:
+                    if since is not _ANY and session.get(SettingsRow, 1) is not None:
+                        raise SettingsChanged
+                    session.add(SettingsRow(id=1, **values))
+                session.commit()
+        finally:
+            self._cache.invalidate("settings")  # after the commit, never before
         return self.settings()
 
     # -- the kill switch ----------------------------------------------------------------------

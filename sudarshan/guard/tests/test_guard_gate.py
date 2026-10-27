@@ -746,3 +746,46 @@ def test_a_count_kept_past_its_minute_is_written_by_the_next_refusal(the_gate, r
 )
 def test_what_a_sandbox_answer_says_was_placed(answer, outcome):
     assert gate._answer_in_the_sandbox(answer) == outcome
+
+
+# -- the gate's own time and its last problem, for the status route -------------------------------
+
+
+def test_the_gate_keeps_its_own_time_per_order(the_gate, book, clock):
+    upstox = broker()
+    assert the_gate.timing() == {"orders": 0, "p50_ms": None, "p95_ms": None, "max_ms": None}
+    original = book.live_rows
+
+    def slow_rows(auth):
+        clock.now += 0.25  # a positions read that took 250 ms
+        return original(auth)
+
+    book.live_rows = slow_rows
+    for _ in range(18):
+        upstox.place(order("BUY"), "token")  # nothing refusing: no read
+    the_gate.set_state(ON)
+    for _ in range(2):
+        upstox.place(order("BUY"), "token")  # refused after reading the book
+        clock.now += gate.BOOK_REUSE_S + 1  # so the next one reads it again
+    timing = the_gate.timing()
+    assert timing == {"orders": 20, "p50_ms": 0.0, "p95_ms": 250.0, "max_ms": 250.0}
+    assert len(upstox.reached) == 18
+    for _ in range(gate.TIMED_KEPT):
+        upstox.place(order("BUY"), "token")
+    assert the_gate.timing()["orders"] == gate.TIMED_KEPT  # bounded
+
+
+def test_the_last_problem_is_kept_for_the_status_route(the_gate, book, clock):
+    upstox = broker()
+    assert the_gate.last_problem() is None
+    the_gate.set_state(ON)
+    upstox.place(order("BUY"), "token")  # an ordinary refusal is not a problem
+    assert the_gate.last_problem() is None
+    clock.now += gate.BOOK_REUSE_S + 1  # the flat book read for it is no longer reused
+    book.fail.add("rows")
+    book.rows = [row(CE, 65)]
+    upstox.place(order("SELL"), "token")
+    problem = the_gate.last_problem()
+    assert problem["kind"] == "guard_unavailable"
+    assert problem["words"] == words.book_unreadable("live", "10:42")
+    assert problem["at"].endswith("+05:30")

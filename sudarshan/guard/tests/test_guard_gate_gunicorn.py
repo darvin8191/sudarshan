@@ -93,6 +93,45 @@ APP = textwrap.dedent(
     def calls():
         with COUNT:
             return jsonify(started=CALLS["started"], pid=os.getpid())
+
+    @app.route("/switch")
+    def switch():
+        return jsonify(on=gate.GATE.state().on)
+
+    # The real kill switch routes, for the owner's session; nothing they reach leaves the box.
+    from datetime import timedelta, timezone
+    from flask import session
+    from database import auth_db, user_db
+    from limiter import limiter
+    import blueprints.sudarshan_risk as risk_routes
+    from sudarshan.guard import killswitch
+
+    store.STORE = gate.GATE._the_store()
+    auth_db.init_db()
+    user_db.init_db()
+    if user_db.find_user_by_username() is None:
+        user_db.add_user("owner", "owner@example.invalid", "Fake-Pass-123!", is_admin=True)
+    user_db.db_session.remove()
+    killswitch._tell = lambda owner, text: (True, "told", {})
+    killswitch._announce = lambda state: None
+    killswitch._engage_agent = lambda: (True, "agent", {"engaged_by_us": False})
+    app.secret_key = "test-only-secret-key-" + "2" * 32  # pragma: allowlist secret
+    app.config.update(WTF_CSRF_ENABLED=False, RATELIMIT_ENABLED=False)
+    limiter.init_app(app)
+    app.register_blueprint(risk_routes.sudarshan_risk_bp)
+
+    @app.route("/login", methods=["POST"])
+    def login():
+        session["user"] = "owner"
+        session["logged_in"] = True
+        india = timezone(timedelta(hours=5, minutes=30))
+        session["login_time"] = datetime.now(india).isoformat()
+        return jsonify(ok=True)
+
+    @app.teardown_appcontext
+    def remove_sessions(exception=None):
+        auth_db.db_session.remove()
+        user_db.db_session.remove()
     """
 )
 
@@ -129,6 +168,7 @@ class Server:
         (app_dir / "risk_gate_fixture_app.py").write_text(APP)
         self.port = _free_port()
         self.log = tmp_path / "gunicorn.log"
+        self.last_cookie: str | None = None
         env = {k: v for k, v in os.environ.items() if not k.lower().endswith("_proxy")}
         env.pop("GUNICORN_CMD_ARGS", None)
         env.update(
@@ -173,18 +213,25 @@ class Server:
         finally:
             conn.close()
 
-    def post(self, path: str, body: dict, timeout: float = 60):
+    def post(self, path: str, body: dict, timeout: float = 60, cookie: str | None = None):
         conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=timeout)
+        headers = {"Content-Type": "application/json", "Accept": "application/json"}
+        if cookie:
+            headers["Cookie"] = cookie
         try:
             started = time.monotonic()
-            conn.request(
-                "POST", path, body=json.dumps(body), headers={"Content-Type": "application/json"}
-            )
+            conn.request("POST", path, body=json.dumps(body), headers=headers)
             reply = conn.getresponse()
             data = reply.read()
+            self.last_cookie = reply.getheader("Set-Cookie")
             return reply.status, json.loads(data or b"{}"), time.monotonic() - started
         finally:
             conn.close()
+
+    def login(self) -> str:
+        """The owner's session cookie, as the browser would hold it."""
+        assert self.post("/login", {})[0] == 200
+        return self.last_cookie.split(";", 1)[0]
 
     def stop(self) -> None:
         _stop_process_group(self.process)
@@ -256,3 +303,36 @@ def test_an_admission_racing_the_switch_is_never_lost(server):
     assert [out["result"][0] for _thread, out in late] == [403] * 5
     assert json.loads(server.get("/calls")[1])["started"] == let_go == flip["in_flight"]
     assert let_go >= 15  # not vacuous: most were let go, and every one of them was waited on
+
+
+def test_turning_the_switch_on_keeps_the_worker_answering_and_refuses_a_new_order(server):
+    """The real activation route waits up to ten seconds for an order already on its way. All
+    that time the worker answers, and an order arriving once the switch is on is refused at
+    once; the route answers when the order on its way has its answer."""
+    cookie = server.login()
+    sending, sent = _in_background(server.post, "/place", {**ENTRY, "hold": 3})
+    time.sleep(0.4)
+    turning, turned = _in_background(
+        server.post, "/sudarshan/risk/killswitch", {"phrase": "STOP"}, 60, cookie
+    )
+    deadline = time.monotonic() + 10
+    while not json.loads(server.get("/switch")[1])["on"]:
+        assert time.monotonic() < deadline, "the switch never went on"
+        time.sleep(0.05)
+    for _ in range(5):
+        started = time.monotonic()
+        assert server.get("/ping")[0] == 200
+        assert time.monotonic() - started < 1.0
+    status, body, took = server.post("/place", ENTRY)
+    assert status == 403 and body["body"]["message"].startswith("New orders are refused")
+    assert took < 1.0, f"the refusal waited {took:.2f}s"
+    assert turning.is_alive()  # still waiting for the order on its way
+    turning.join(30)
+    sending.join(30)
+    status, body, took = turned["result"]
+    assert status == 200, body
+    assert body["data"]["on"] is True and body["data"]["surface"] == "app"
+    drain = next(step for step in body["data"]["report"]["steps"] if step["step"] == "drain")
+    assert drain["detail"] == {"sent": 1, "waiting": 0}
+    assert took > 1.5  # it waited for that order, not for its ten seconds
+    assert sent["result"][0] == 200

@@ -494,7 +494,7 @@ def resume(owner: Owner, *, phrase: object) -> Answer:
     if settings is None:
         return Answer(503, words.KS_SETTINGS_UNREADABLE)
     if not phrase_matches(phrase, settings.confirm_phrase):
-        return Answer(400, words.PHRASE_WRONG)
+        return _refused(owner, Answer(400, words.PHRASE_WRONG, risk_gate.GATE.state()))
     recover()
     state = risk_gate.GATE.state()
     if state is None:
@@ -505,7 +505,7 @@ def resume(owner: Owner, *, phrase: object) -> Answer:
         return Answer(409, words.KS_BEING_TURNED_ON, state)
     held = RESUME_HOLD_S - (utcnow() - state.since).total_seconds() if state.since else 0
     if held > 0:
-        return Answer(423, words.ks_resume_wait(int(held) + 1), state)
+        return _refused(owner, Answer(423, words.ks_resume_wait(int(held) + 1), state))
     from sudarshan.books import exit_guard
 
     if exit_guard.exit_all_held("live"):
@@ -538,6 +538,22 @@ def resume(owner: Owner, *, phrase: object) -> Answer:
     _tell(owner, words.KS_RESUMED)
     _announce(off)
     return Answer(200, words.KS_RESUMED, off)
+
+
+def _refused(owner: Owner, answer: Answer) -> Answer:
+    """A resume refused for its phrase or its hold goes to the audit (one try, never fails it)."""
+    state = answer.state
+    try:
+        risk_store.STORE.audit(
+            "resume_refused",
+            words.ks_resume_refused(answer.message),
+            surface=owner.surface,
+            actor=owner.actor,
+            activation_id=None if state is None else state.activation_id,
+        )
+    except Exception:
+        logger.exception("A refused resume could not be audited")
+    return answer
 
 
 # -- shared ------------------------------------------------------------------------------------------

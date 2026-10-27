@@ -15,119 +15,13 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
+from guard_world import Account
 
 from sudarshan.guard import flag, gate, killswitch, words
 from sudarshan.guard.store import KillSwitchState, utcnow
 
 REPO = Path(__file__).resolve().parents[3]
 WAIT = 10
-
-
-class Account:
-    """Every service a kill switch step calls, recorded in order."""
-
-    def __init__(self, monkeypatch):
-        import database.oauth_db as oauth_db
-        import services.cancel_all_order_service as cancel_all
-        import services.cancel_gtt_order_service as cancel_gtt
-        import services.close_position_service as close
-        import services.gtt_orderbook_service as gtt_book
-        import services.sandbox_service as sandbox
-        from services.agent import settings as agent_settings
-
-        self.calls: list[str] = []
-        self.broken: set[str] = set()
-        self.exit_all_status = 200
-        self.agent_on = False
-        self.gtts = [{"trigger_id": "GTT-1"}, {"trigger_id": "GTT-2"}]
-
-        def record(name, answer):
-            def call(*args, **kwargs):
-                self.calls.append(name)
-                if name in self.broken:
-                    raise RuntimeError(f"{name} broke")
-                if name.startswith("live") and kwargs.get("force_live") is not True:
-                    raise AssertionError(f"{name} was not sent with force_live")
-                return answer() if callable(answer) else answer
-
-            return call
-
-        cancelled = {"status": "success", "canceled_orders": ["1", "2"], "failed_cancellations": []}
-        monkeypatch.setattr(
-            cancel_all,
-            "cancel_all_orders_with_auth",
-            record("live_cancel_all", (True, cancelled, 200)),
-        )
-        monkeypatch.setattr(
-            gtt_book,
-            "get_gtt_orderbook_with_auth",
-            record("gtt_book", lambda: (True, {"status": "success", "data": self.gtts}, 200)),
-        )
-        monkeypatch.setattr(
-            cancel_gtt,
-            "cancel_gtt_order_with_auth",
-            record("live_cancel_gtt", (True, {"status": "success"}, 200)),
-        )
-        monkeypatch.setattr(
-            close,
-            "close_position_with_auth",
-            record(
-                "live_exit_all",
-                lambda: (
-                    self.exit_all_status == 200,
-                    {"status": "success", "message": "All Open Positions Squared Off"},
-                    self.exit_all_status,
-                ),
-            ),
-        )
-        monkeypatch.setattr(
-            sandbox,
-            "sandbox_cancel_all_orders",
-            record("sandbox_cancel_all", (True, {"status": "success", "canceled_count": 1}, 200)),
-        )
-        monkeypatch.setattr(
-            sandbox,
-            "sandbox_gtt_orderbook",
-            record(
-                "sandbox_gtt_book",
-                (True, {"status": "success", "data": [{"trigger_id": "S1"}]}, 200),
-            ),
-        )
-        monkeypatch.setattr(
-            sandbox,
-            "sandbox_cancel_gtt_order",
-            record("sandbox_cancel_gtt", (True, {"status": "success"}, 200)),
-        )
-        monkeypatch.setattr(
-            sandbox,
-            "sandbox_close_position",
-            record(
-                "sandbox_exit_all",
-                (True, {"status": "success", "message": "Closed 1 positions"}, 200),
-            ),
-        )
-        monkeypatch.setattr(oauth_db, "revoke_all_tokens", record("mcp", 3))
-
-        def engaged(*args, **kwargs):
-            return self.agent_on
-
-        def set_agent(on):
-            self.calls.append(f"agent_{'on' if on else 'off'}")
-            self.agent_on = on
-            return on
-
-        monkeypatch.setattr(agent_settings, "is_kill_switch_engaged", engaged)
-        monkeypatch.setattr(agent_settings, "set_kill_switch", set_agent)
-        monkeypatch.setattr(killswitch, "preview_live", lambda owner, gtts=True: {
-            "orders": 2, "stops": 1, "protected": 1, "positions": 1})  # fmt: skip
-        monkeypatch.setattr(killswitch, "_tell", lambda owner, text: self.told(text))
-        monkeypatch.setattr(killswitch, "_announce", lambda state: None)
-        self.messages: list[str] = []
-
-    def told(self, text):
-        self.calls.append("telegram")
-        self.messages.append(text)
-        return True, words.KS_TELEGRAM_SENT, {}
 
 
 @pytest.fixture

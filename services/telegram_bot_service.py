@@ -858,6 +858,8 @@ class TelegramBotService:
                 self.application.add_handler(CommandHandler("stoppython", self.cmd_stoppython))
                 self.application.add_handler(CommandHandler("mode", self.cmd_mode))
                 self.application.add_handler(CommandHandler("menu", self.cmd_menu))
+                # SUDARSHAN M16.7: the kill switch, in the owner's own chat (sudarshan/guard)
+                self.application.add_handler(CommandHandler("killswitch", self.cmd_killswitch))
 
                 # Add callback query handler for inline buttons
                 self.application.add_handler(CallbackQueryHandler(self.button_callback))
@@ -2366,6 +2368,12 @@ class TelegramBotService:
             parse_mode=ParseMode.MARKDOWN,
         )
         log_command(user.id, "closeall", update.effective_chat.id)
+
+    async def cmd_killswitch(self, update, context) -> None:
+        """SUDARSHAN M16.7: /killswitch [on|exit|off] <phrase>; sudarshan/guard/telegram.py."""
+        from sudarshan.guard import telegram as risk_telegram
+
+        await risk_telegram.handle(self, update, context)
 
     async def cmd_stoppython(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /stoppython command — list running Python strategies and stop selected/all"""

@@ -13,7 +13,10 @@ imports the gate.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
+
+from utils.thread_safe_cache import LockedTTLCache
 
 from . import rules
 
@@ -169,6 +172,39 @@ def live_gtt(auth: str, trigger_id: object) -> Gtt | None:
             exchange=str(item.get("exchange") or ""),
         )
     return None
+
+
+#: Upstox's own kill switch is shown on the Risk page only, so a read is kept a minute.
+UPSTOX_KILL_SWITCH_KEPT_S = 60
+_upstox_kill_switch = LockedTTLCache(maxsize=2, ttl=UPSTOX_KILL_SWITCH_KEPT_S)
+
+
+def upstox_kill_switch(auth: str) -> list[dict]:
+    """Upstox's own kill switch per segment, for the owner to see; SUDARSHAN never changes it.
+
+    Turning it on at Upstox needs every position in the segment flat and then locks the segment
+    for 12 hours (design section 3.10), so it is only ever read here. A standard-budget read.
+    """
+
+    def load() -> list[dict]:
+        try:
+            answer = _upstox().get_api_response("/v2/user/kill-switch", auth)
+        except Exception as exc:
+            raise Unreadable(f"Upstox kill switch: {type(exc).__name__}") from exc
+        if not isinstance(answer, dict) or answer.get("status") != "success":
+            raise Unreadable("the Upstox kill switch answer is not a success")
+        return [
+            {
+                "segment": str(row.get("segment") or ""),
+                "on": row.get("kill_switch_enabled") is True,
+                "active": str(row.get("segment_status") or "").upper() == "ACTIVE",
+            }
+            for row in answer.get("data") or []
+            if isinstance(row, dict)
+        ]
+
+    key = hashlib.sha256(auth.encode()).hexdigest()  # never the token itself
+    return _upstox_kill_switch.get_or_load(key, load)
 
 
 # -- the sandbox: its own tables, read in the caller's session ------------------------------------

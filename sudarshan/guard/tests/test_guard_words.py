@@ -85,11 +85,17 @@ def kill_switch_sentences() -> list[str]:
     ]
     out += words.ks_report_message(report).split("\n")
     out += [words.ks_preview(c, telegram=t) for c in counts for t in (False, True)]
+    out += [words.setting_invalid(name) for name in (*words._SETTING_RANGES, "band_on")]
+    out += [words.settings_changed(["band_on", "max_lots_fo"], looser) for looser in (False, True)]
+    out += [
+        words.ks_resume_refused(words.PHRASE_WRONG),
+        words.ks_resume_refused(words.ks_resume_wait(12)),
+    ]
     return [line for line in out if line]
 
 
 FORBIDDEN = [
-    (r"\b[1-5]\d\d\b", "a status code"),
+    (r"(?<![₹,.])\b[1-5]\d\d\b(?!%|[,.]\d| seconds)", "a status code"),
     (r"\bHTTP\b|\bstatus code\b", "a protocol term"),
     (r"\b\w*(Error|Exception)\b|Traceback", "an exception's name"),
     (r"https?://|/api/|/v\d/|/sudarshan/|\.py\b", "an endpoint or a file"),
@@ -152,3 +158,13 @@ def test_the_preview_says_in_numbers_what_turning_it_on_cancels():
     assert words.ks_preview({"orders": 2, "gtts": 1, "stops": 0}) == (
         "2 open orders and 1 GTT will be cancelled."
     )
+
+
+def test_a_status_code_in_a_sentence_is_still_caught():
+    """The scan's code rule spares rupees, percentages and seconds, never a bare code."""
+    (pattern, _what) = FORBIDDEN[0]
+    assert re.search(pattern, "Upstox answered 403.")
+    assert re.search(pattern, "error 500 from the broker")
+    assert not re.search(pattern, "between 1 and 100%.")
+    assert not re.search(pattern, "between ₹0 and ₹10,000.")
+    assert not re.search(pattern, "between 1 and 3,600 seconds.")

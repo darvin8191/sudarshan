@@ -220,3 +220,81 @@ def test_a_real_thread_turns_the_switch_on_while_greenlets_are_sending(tmp_path)
     assert result["took"] < 0.5
     assert result["late"] == 403
     assert result["ticks"] >= result["elapsed"] * 10
+
+
+def test_telegram_s_killswitch_runs_on_the_hub_and_waits_for_an_order_on_its_way(tmp_path):
+    """/killswitch arrives on the bot's real thread. The whole command is handed to the hub
+    (TelegramBotService._in_app_world): the activation takes the gate's lock and waits,
+    cooperatively, for the order already on its way, while the hub keeps turning; the reply
+    comes back as soon as it is done, not at the timeout."""
+    result = run(
+        f"""
+        import asyncio, types
+        import services.telegram_bot_service as tg
+        import database.telegram_db as telegram_db
+        from utils import real_threading as rt
+
+        assert rt.start_hub_worker() is True
+        eventlet.sleep(0.05)
+        hub = rt._real_get_ident()
+        gate, place, on = gate_on_a_slow_broker({str(tmp_path)!r})
+        from sudarshan.guard import killswitch, store, telegram
+        store.STORE = gate.GATE._the_store()
+        ran_on = []
+        answer = telegram.answer
+
+        def recorded(*args):
+            ran_on.append(rt._real_get_ident())
+            return answer(*args)
+
+        telegram.answer = recorded
+        telegram.owner_of = lambda chat, user: "owner"
+        killswitch.owner_for = lambda username, **kw: killswitch.Owner(
+            username, kw["surface"], kw["actor"])  # no broker login, no API key: no I/O
+        killswitch._tell = lambda owner, text: (True, "told", {{}})
+        killswitch._announce = lambda state: None
+        killswitch._engage_agent = lambda: (True, "agent", {{"engaged_by_us": False}})
+        telegram_db.log_command = lambda *args, **kwargs: None
+
+        sending = eventlet.spawn(place, order(hold=1.5), "token")
+        eventlet.sleep(0.2)
+        replies, out = [], {{}}
+
+        class Message:
+            async def reply_text(self, text, **kwargs):
+                replies.append(text)
+
+        update = types.SimpleNamespace(
+            effective_chat=types.SimpleNamespace(type="private", id=7),
+            effective_user=types.SimpleNamespace(id=7),
+            effective_message=Message())
+        context = types.SimpleNamespace(args=["on", "STOP"])
+        svc = tg.TelegramBotService()
+
+        def bot_thread():
+            async def scenario():
+                started = time.monotonic()
+                await telegram.handle(svc, update, context)
+                out["took"] = time.monotonic() - started
+            asyncio.run(scenario())
+
+        start = time.monotonic()
+        t = _orig.Thread(target=bot_thread, daemon=True)
+        t.start()
+        assert rt.join(t, timeout=30), "the bot thread never finished"
+        end = time.monotonic()
+        sent = sending.wait()
+        state = gate.GATE.state()
+        drain = [s for s in state.report["steps"] if s["step"] == "drain"][0]
+        print(json.dumps({{"on_hub": ran_on == [hub], "on": state.on, "sent": sent[2],
+                           "drain": drain.get("detail"), "took": out["took"],
+                           "reply": replies[0].splitlines()[0],
+                           "ticks": ticks_between(start, end), "elapsed": end - start}}))
+        """,
+        tmp_path,
+    )
+    assert result["on_hub"] and result["on"] and result["sent"] == "OID"
+    assert result["drain"] == {"sent": 1, "waiting": 0}  # it waited for the order on its way
+    assert 1.0 < result["took"] < 5.0
+    assert result["reply"].startswith("Kill switch on: new orders are refused")
+    assert result["ticks"] >= result["elapsed"] * 10  # the hub never stalled
