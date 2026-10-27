@@ -145,6 +145,8 @@ def test_modes_are_the_highest_each_key_needs():
     assert book.modes() == {KEY: "full"}
     book.put(dataclasses.replace(alert(2), status="paused"))
     assert book.modes() == {KEY: "ltpc"}
+    assert book.modes(full=frozenset({KEY})) == {KEY: "full"}  # a CAS key's volume (X6i)
+    assert book.modes(full=frozenset({"NSE_EQ|OTHER"})) == {KEY: "ltpc"}
 
 
 def test_put_keeps_the_state_and_drop_forgets_it():

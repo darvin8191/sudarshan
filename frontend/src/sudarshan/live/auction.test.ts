@@ -1,14 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import { AUCTION_CLOSE, AUCTION_PRICE, auctionQuotes, auctionWaiting, inAuction } from './auction'
 
-// 21 Oct 2026, IST: 15:15 and 15:35 (UTC+05:30).
+// 21 Oct 2026, IST: 15:15, 15:30 and 15:35 (UTC+05:30).
 const FROM = Date.UTC(2026, 9, 21, 9, 45)
+const CLOSE = Date.UTC(2026, 9, 21, 10, 0)
 const UNTIL = Date.UTC(2026, 9, 21, 10, 5)
 
 describe('closing auction words', () => {
-  it('say when the price comes, never Real-time or Stale', () => {
-    expect(auctionWaiting(UNTIL)).toBe('Closing auction · price at about 15:35')
-    expect(auctionWaiting(UNTIL)).not.toMatch(/Real-time|Stale/)
+  it('say when the price comes (the random close, X6j), never Real-time or Stale', () => {
+    expect(auctionWaiting(CLOSE)).toBe('Closing auction · price at about 15:30')
+    expect(auctionWaiting(CLOSE)).not.toMatch(/Real-time|Stale/)
   })
 
   it('say why a bid or ask alert is not checked', () => {
