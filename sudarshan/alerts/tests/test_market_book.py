@@ -5,7 +5,7 @@ from __future__ import annotations
 import dataclasses
 from datetime import date, datetime
 
-from sudarshan.alerts.market import clock, sessions, spec
+from sudarshan.alerts.market import bench, clock, sessions, spec
 from sudarshan.alerts.market.book import BAD_VALUE, NOTHING_NEW, Book
 from sudarshan.alerts.market.engine import State
 from sudarshan.alerts.market.engine import resume as engine_resume
@@ -271,3 +271,9 @@ def test_a_snapshot_from_yesterday_never_takes_a_resumed_alert_back_a_day():
     yesterday = {"key": KEY, "ltp": 99.0, "ltt": T0 - 2 * 86_400_000, "ts_recv": T0}
     assert not book.seed(1, yesterday, market(T0))
     assert book.state(1).session == 20261021 and book.state(1).side is None
+
+
+def test_the_benchmark_still_builds_and_runs_its_mix():
+    """python -m sudarshan.alerts.market.bench: every alert in its mix must pass spec.check."""
+    per_tick, parse, fires = bench.run(keys=4, per_key=len(bench.MIX), count=400)
+    assert per_tick > 0 and parse > 0 and fires > 0

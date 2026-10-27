@@ -32,7 +32,12 @@ MIX = (
     {"params": {"op": "crosses_below", "level": "100"}, "frequency": "at_close", "candle": 15},
     {"params": {"op": "crosses", "level": "100", "source": "bid"}, "frequency": "every_time"},
     {"kind": "move", "params": {"direction": "either", "percent": "0.5"}},
-    {"kind": "day_break", "params": {"side": "high", "after": "09:15"}, "frequency": "every_time"},
+    {
+        "kind": "day_break",
+        "params": {"side": "high", "after": "09:15"},
+        "frequency": "every_time",
+        "cooldown_s": 60,
+    },
     {"kind": "vwap", "params": {"direction": "either"}, "cooldown_s": 0},
 )
 
