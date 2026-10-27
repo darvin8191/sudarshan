@@ -194,12 +194,13 @@ def test_the_status_line_says_why_the_feed_is_down(state, age_s, text):
 
 
 def test_the_closing_auction_line_names_the_print_time_never_real_time():
-    """Cross-design X6e: from 15:15 to the print, and A8 for an alert on the bid or ask."""
-    span = (ms(DAY, "15:15:00"), ms(DAY, "15:35:00"))
+    """Cross-design X6e: from 15:15 to the print, and A8 for an alert on the bid or ask; the
+    price at about the random close, 15:30 (X6j)."""
+    span = (ms(DAY, "15:15:00"), ms(DAY, "15:30:00"))
     now = ms(DAY, "15:20:00")
     assert (
         words.check_words(clock.CLOSING_AUCTION, now=now, auction=span)
-        == "Closing auction · price at about 15:35"
+        == "Closing auction · price at about 15:30"
     )
     assert (
         words.check_words(clock.CLOSING_AUCTION, now=now, auction=span, quotes=True)

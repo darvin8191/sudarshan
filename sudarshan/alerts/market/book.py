@@ -23,6 +23,14 @@ says it was the closing auction. It is the official close, so it belongs to the 
 on the cash session's grid (the 15:15-15:30 candle, the day): an alert at candle close judges
 that candle when the print arrives, or, with no print, when the print's time is over
 (cross-design X6c). A day high or low and a VWAP take continuous trades only.
+
+The print is a trade (X6i, the owner's probe of 27 Oct 2026): a frame of a CAS key counts as it
+only when its cumulative volume (``vtt``) rose against the key's last frame. From 15:20 Upstox
+sends such a key one frame a minute with its ltt on the minute, the last continuous price and the
+auction's crossed bid and ask; their volume does not move, so they are never a trade, a print or
+judged (NOT_A_TRADE). The volume comes in full mode only, so the runtime claims a CAS key in it
+(``modes(full=...)``); without a volume no frame is taken for the print, and an alert at candle
+close judges its last candle when the print's time is over.
 """
 
 from __future__ import annotations
@@ -68,6 +76,9 @@ CANDLED = frozenset({PER_CANDLE, AT_CLOSE})
 BASE_CHANGED = "base_changed"
 #: The kinds a closing auction's print is judged by (not at candle close).
 AUCTION_KINDS = frozenset({"price", "move"})
+#: A CAS key's frame in its auction's time whose volume did not rise: the auction's book, never
+#: a trade (X6i).
+NOT_A_TRADE = "not_a_trade"
 
 
 def _ms(value) -> int | None:
@@ -75,6 +86,12 @@ def _ms(value) -> int | None:
     if value.__class__ is int:
         return value
     return int(value) if value.__class__ is float and value - value == 0 else None
+
+
+def _volume(value) -> int | None:
+    """A frame's cumulative volume (vtt); None unless it is a finite number of at least 0."""
+    count = _ms(value)
+    return count if count is not None and count >= 0 else None
 
 
 class TickResult(NamedTuple):
@@ -104,6 +121,8 @@ class Book:
         self._paused: dict[int, Alert] = {}
         #: CAS key -> the day (YYYYMMDD) its closing auction's print was judged: once a day.
         self._printed: dict[str, int] = {}
+        #: Instrument key -> the cumulative volume of its last frame, when the feed sends one.
+        self._volumes: dict[str, int] = {}
 
     # ---- the alerts ------------------------------------------------------------------------
     def put(self, alert: Alert, state: State | None = None) -> None:
@@ -148,12 +167,14 @@ class Book:
         """The Active alerts, by id."""
         return sorted(self._active.values(), key=lambda alert: alert.id)
 
-    def modes(self) -> dict[str, str]:
-        """Instrument key -> the feed mode its Active alerts need: the alert service's claim."""
+    def modes(self, full: frozenset[str] = frozenset()) -> dict[str, str]:
+        """Instrument key -> the feed mode its Active alerts need: the alert service's claim.
+        A key in ``full`` (a CAS key: its print is known by its volume, X6i) is claimed in full
+        mode whatever its alerts need."""
         modes: dict[str, str] = {}
         for alert in self._active.values():
             if modes.get(alert.key) != "full":
-                modes[alert.key] = alert.cond.feed
+                modes[alert.key] = "full" if alert.key in full else alert.cond.feed
         return modes
 
     def changed(self) -> dict[int, tuple[int, State]]:
@@ -185,6 +206,9 @@ class Book:
         segment = alerts[0].segment
         cls = segment + AUCTION if key in market.auction else segment  # its session's key
         ltp, ltt = frame.get("ltp"), _ms(frame.get("ltt"))
+        volume, last = _volume(frame.get("vtt")), self._volumes.get(key)
+        if volume is not None:
+            self._volumes[key] = volume
         trade = quote = None
         if ltp is not None and ltt is not None:
             identity = (ltt, ltp, frame.get("ltq"))
@@ -192,6 +216,9 @@ class Book:
                 trade = gate(market, cls, ltt, recv, now, trade=True)
                 if trade != OK and cls != segment:  # the closing auction's print?
                     trade = auction(market, segment, ltt, recv, now)
+                    rose = volume is not None and last is not None and volume > last
+                    if trade == AUCTION_PRINT and not rose:
+                        trade = NOT_A_TRADE  # its volume did not move: the auction's book
                 if trade == OK or trade == AUCTION_PRINT:
                     self._trades[key] = identity
                 if trade == AUCTION_PRINT:
@@ -366,6 +393,7 @@ class Book:
             self._trades.pop(key, None)
             self._keys.pop(key, None)
             self._printed.pop(key, None)
+            self._volumes.pop(key, None)
 
 
 def _close_at_print(

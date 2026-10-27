@@ -288,8 +288,9 @@ def check_words(
 
     ``opens_at`` is the next session's start (sessions.next_session), ``since`` when the feed
     went down, ``feed`` its last health: a feed that is stopped or refused needs the owner, so
-    it is not called "reconnecting". ``auction`` is a CAS key's (from, until)
-    (sessions.auction_window), ``quotes`` an alert on its bid or ask."""
+    it is not called "reconnecting". ``auction`` is a CAS key's (from, close): its continuous
+    end and when its price is expected (Session.end, Session.auction_close: "price at about
+    15:30", X6j); ``quotes`` an alert on its bid or ask."""
     if code == clock.CLOSING_AUCTION and auction is not None:
         if quotes:
             return f"Closing auction · bid and ask are not checked after {_hm(auction[0])}"
