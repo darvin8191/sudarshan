@@ -6,6 +6,8 @@
 # Docs: sudarshan/alerts/README.md. Optional settings: /etc/sudarshan/alerts.env
 # (root:sudarshan 640); SUDARSHAN_ORDER_ALERTS=off there turns the alerts off (the service then
 # exits at once and stays stopped until the next restart).
+# Also tells the owner what the server did with a release (installed, rolled back, waiting) from the
+# files the deploy tool and the backup job record, at any hour: see "Server notices" in the README.
 # Installed, enabled and restarted by sudarshan-deploy from each release, like sudarshan-feed.
 
 [Unit]

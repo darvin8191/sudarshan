@@ -15,7 +15,8 @@ Upstox Portfolio Stream Feed -> OpenAlgo's order adapter (in gunicorn) -> event 
 ```
 
 A standalone asyncio process with its own unit, never inside the OpenAlgo app: no thread,
-scheduler or event loop is added to gunicorn, and nothing in OpenAlgo was changed for it.
+scheduler or event loop is added to gunicorn, and nothing in OpenAlgo was changed for it. The
+same service also carries the server's own notices to the owner's Telegram (below).
 
 **On by default: the owner's decision.** His rule 7 benchmark (Kite, Dhan, Upstox, Fyers) says a
 fill or a rejection must show at once, in the app and on Telegram. The switch below turns it off;
@@ -137,6 +138,53 @@ screen open. It is the same one the owner's real-time screens use, within the pr
 most 2. Before the day's Upstox login the proxy answers the sign-in with a broker error but still
 subscribes this service to orders; the updates start with the login.
 
+## Server notices (M18.x)
+
+The owner is told, in one short message, what the server did with a release: **installed** (and
+that a backup was taken), **could not be installed and was rolled back** (with the cause in plain
+words, and whether the earlier version is running), a background service file the unit policy
+**refused**, and a release that is **waiting** for the market to close. Examples:
+
+```
+सुदर्शन / SUDARSHAN
+v0.3.3 installed at 18:52 IST. A backup was taken.
+```
+
+```
+सुदर्शन / SUDARSHAN
+Could not install v0.3.3 at 18:52 IST: the app did not come up healthy, so v0.3.2 is back. Nothing for you to do; the release will be looked at.
+```
+
+The deploy tool runs as root and holds no Telegram or OpenAlgo secret, so it only **records** each
+fact as a line in `/var/lib/sudarshan/events.jsonl` (the format is in `sudarshan/ops/events.py`);
+`notices.py` here looks at that file (and `/var/lib/sudarshan-backup/events.jsonl`, where the
+nightly backup job records) every 20 seconds and sends through the same path as the order alerts.
+
+- **Once.** Each notice is claimed in `alerts.db` by its event id before the message goes out, and
+  marked sent after it; a restart, a second look, a second service on the same record or a
+  rewritten file never repeats it. A message that could not go out gives its claim back and is
+  tried again with growing pauses (30 s to 10 minutes); one Telegram did not confirm is given up
+  after three tries; one OpenAlgo refuses for good (its bot stopped, the chat not linked) is
+  dropped, not held back for later.
+- **One message for a run.** Nothing goes out until 45 seconds have passed without a new notice,
+  measured on this service's own clock, so an install and the service files it refused are one
+  message. Everything waiting at a look goes out together: a service that was down for hours
+  tells the owner once, in order, not once per notice (at most 20 notices a message).
+- **Not after downtime.** A notice more than 12 hours old is history: it is marked and never sent.
+- **A release that fails again** at each of the deploy timer's 10-minute runs is told once per
+  cause, not once per try (the event id names the release, the cause and whether the earlier
+  version is running).
+- **Any time of day.** Notices do not depend on the alert window or on the market: a release is
+  installed in the evening or at the weekend, so the owner's key is read when a notice is due.
+- **Words for a trader.** Only a release tag (`vA.B.C`) and a service file name from the deploy
+  tool's own pattern are ever repeated from a fact; nothing else in the file reaches the message,
+  and the Markdown characters Telegram would act on never do.
+
+`SUDARSHAN_ORDER_ALERTS=off` also turns these off (the service exits). `SUDARSHAN_NOTICE_SPOOLS`
+(below) names the files to read. The first run of the deploy tool that records notices also tells
+the install of the tool before it, which made no record, once, if it was within the last 12
+hours; so v0.3.3's own install is told by the next timer run after it.
+
 ## Turning it off
 
 To stop all messages:
@@ -161,6 +209,7 @@ tool starts ring services again after each release.
 | `SUDARSHAN_ALERTS_WINDOW` | `08:45-16:00` | IST, on trading days; a special day's own window gets the same margins around it. A value that is not HH:MM-HH:MM (the start first) logs a warning and the usual hours are used |
 | `SUDARSHAN_ALERTS_ALWAYS_ON` | `0` | `1`: ignore the window and the calendar (tests, an evening sandbox check) |
 | `SUDARSHAN_ALERTS_STATE_DIR` | systemd's `$STATE_DIRECTORY` | `/var/lib/sudarshan-alerts` |
+| `SUDARSHAN_NOTICE_SPOOLS` | the deploy tool's and the backup job's files | colon-separated files the server's notices are read from (`/var/lib/sudarshan/events.jsonl:/var/lib/sudarshan-backup/events.jsonl`) |
 | `SUDARSHAN_ALERTS_LOG_LEVEL` | `INFO` | |
 | `SUDARSHAN_NSE_HOLIDAYS_FILE` | `/etc/sudarshan/nse_holidays.txt` | shared with auto-login and the feed |
 | `SUDARSHAN_NSE_EXTRA_DAYS_FILE` | `/etc/sudarshan/nse_extra_trading_days.txt` | |

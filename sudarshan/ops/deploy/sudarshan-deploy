@@ -68,6 +68,50 @@ market_open() {   # 0 = trading hours (do not restart), 1 = safe. Trading when t
     fi
     day_trading "${today}" "${dow}" "${hhmm}" /etc/sudarshan/nse_holidays.txt /etc/sudarshan/nse_extra_trading_days.txt
 }
+# ---- Notices: what the owner is told on Telegram about a release (M18.x). This tool runs as root and
+# holds no Telegram or OpenAlgo secret, so it only records facts, one JSON line each, in ${EVENTS}.
+# sudarshan-alerts (user sudarshan, which can read the file) words each message and sends it once per
+# event id (sudarshan/alerts/notices.py; the line format is in sudarshan/ops/events.py). The facts of
+# one run share NOTICE_RUN and are told in one message. Recording is best effort and runs in a
+# subshell with its own error handling: a missing jq, a full disk or a read-only folder costs the
+# notice, never an install or a rollback. The file and ${STATE} are made readable for the ring (mode
+# 644, the folder traversable), as is deployed_tag, which the services' health shows.
+EVENTS="${STATE}/events.jsonl"
+NOTICE_RUN=""            # the id the facts of this run share
+NOTICE_AT=""             # when it happened, if not now
+ROLLBACK_WHY="error"     # why a rollback happens: health, migrations, settings or error
+notice() {   # $1 = kind, $2 = event id, then fact=value words. An id already recorded is not recorded again
+    (
+        set +eEu; trap - ERR
+        local id="$2" pair line
+        local -a args
+        args=(--arg v 1 --arg src deploy --arg kind "$1" --arg id "${id}" --arg at "${NOTICE_AT:-$(date +%s)}" --arg run "${NOTICE_RUN:-${id}}")
+        shift 2
+        for pair in "$@"; do args+=(--arg "${pair%%=*}" "${pair#*=}"); done
+        if [[ -f "${EVENTS}" ]] && grep -qF -- "\"id\":\"${id}\"" "${EVENTS}"; then exit 0; fi
+        line="$(jq -cn "${args[@]}" '$ARGS.named')" && [[ -n "${line}" ]] || exit 0
+        if [[ ! -e "${EVENTS}" ]]; then : > "${EVENTS}" && chmod 644 "${EVENTS}" || exit 0; fi
+        printf '%s\n' "${line}" >> "${EVENTS}" || exit 0
+        chmod o+x "${STATE}"
+        if (( $(wc -l < "${EVENTS}") > 400 )); then   # the newest 200 lines are kept
+            tail -n 200 "${EVENTS}" > "${EVENTS}.new" && chmod 644 "${EVENTS}.new" && mv -f "${EVENTS}.new" "${EVENTS}"
+        fi
+    ) > /dev/null 2>&1 || true
+}
+notice_catch_up() {   # the first run of a tool that records notices tells the install the tool before it made
+                      # without a word, if it was in the last 12 hours. Said once per tag (notice_announced)
+    local said made
+    [[ "${deployed}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 0
+    said="$(cat "${STATE}/notice_announced" 2>/dev/null || true)"
+    [[ "${said}" != "${deployed}" ]] || return 0
+    printf '%s\n' "${deployed}" > "${STATE}/notice_announced" 2>/dev/null || return 0
+    made="$(stat -c %Y "${STATE}/deployed_tag" 2>/dev/null)" || return 0
+    (( $(date +%s) - made <= 43200 )) || return 0
+    NOTICE_AT="${made}" NOTICE_RUN="catchup-${deployed}"
+    notice installed "deploy-catchup-${deployed}" tag="${deployed}" \
+        backup="$(compgen -G "/opt/sudarshan/backups/*-${deployed}" > /dev/null && echo yes || echo no)"
+    NOTICE_AT="" NOTICE_RUN=""
+}
 # ---- OpenAlgo .env settings a release needs: sudarshan/ops/deploy/openalgo-env.conf, whose header
 # gives the format. Read from GitHub at the release tag, like this tool and the unit files. A key is
 # added when missing and replaced only while it holds an old value listed for it, so a value the
@@ -583,6 +627,7 @@ deployed="$(cat "${STATE}/deployed_tag" 2>/dev/null || echo none)"
 if [[ "${MODE}" != "check" ]]; then
     if gate_view; then cal_run || log "WARNING: calendar: the day files could not be checked"
     else log "WARNING: calendar: the day files could not be kept for the market gate, so this run leaves them alone"; fi
+    notice_catch_up
 fi
 json="$(curl -fsSL -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${OWNER_REPO}/releases/latest" 2>/dev/null)" \
     || { [[ "${MODE}" == "check" ]] && echo "no GitHub Release found yet for ${OWNER_REPO} (or API unreachable)"; exit 0; }
@@ -604,10 +649,11 @@ fi
 [[ -n "${tag}" ]] || exit 0
 [[ "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { log "latest release '${tag}' is not a vA.B.C tag - ignored"; exit 0; }
 [[ "${tag}" != "${deployed}" || ${REDEPLOY} -eq 1 ]] || exit 0
-if market_open && [[ ${FORCE} -eq 0 ]]; then log "release ${tag} waiting for market close"; exit 0; fi
+if market_open && [[ ${FORCE} -eq 0 ]]; then notice waiting "deploy-wait-${tag}" tag="${tag}"; log "release ${tag} waiting for market close"; exit 0; fi
 [[ -n "${asset_url}" ]] || { log "release ${tag} has no ${ASSET} asset - not deploying"; exit 0; }
 sha_url="$(jq -r --arg a "${ASSET}.sha256" '.assets[]? | select(.name==$a) | .browser_download_url' <<< "${json}" | head -1)"
 ts="$(date +%Y%m%d-%H%M%S)"; bdir="/opt/sudarshan/backups/${ts}-${tag}"; mkdir -p "${bdir}"
+NOTICE_RUN="${ts}-${tag}"
 exec > >(tee -a "${STATE}/deploy-${ts}.log") 2>&1
 log "== deploy ${deployed} -> ${tag}"
 tmp="$(mktemp -d)"; trap 'rm -rf "${tmp}"' EXIT
@@ -698,6 +744,10 @@ rollback() {
     chown -R "${SVC_USER}:${SVC_USER}" "${APP_DIR}/frontend/dist" "${APP_DIR}/db"
     systemctl start "${SERVICE}"; log "rollback done (${SERVICE} $(systemctl is-active "${SERVICE}"))"
     for u in $(ring_services); do systemctl start "${u}" || log "WARNING: ${u} did not start after rollback"; done
+    # One notice per release, cause and outcome: the timer tries a release that failed again at its next
+    # run, and each of those must not become another message.
+    local up; up="$([[ "$(systemctl is-active "${SERVICE}" 2>/dev/null)" == active ]] && echo yes || echo no)"
+    notice rolled_back "deploy-rolledback-${tag}-${ROLLBACK_WHY}-${up}" tag="${tag}" was="${deployed}" why="${ROLLBACK_WHY}" up="${up}"
 }
 # ---- stop first: no requests, no DB writes and no half-old/half-new code during the update.
 # From here on ANY error rolls back and starts the service again (never leave openalgo stopped).
@@ -705,6 +755,7 @@ rollback() {
 # window opened meanwhile, the install waits as it would have at the first gate.
 if market_open && [[ ${FORCE} -eq 0 ]]; then
     log "release ${tag} waiting for market close (the window opened during the download)"
+    notice waiting "deploy-wait-${tag}" tag="${tag}"
     rm -f -- "${bdir}/prev_ref"; rmdir -- "${bdir}" 2>/dev/null || true
     exit 0
 fi
@@ -714,6 +765,7 @@ fi
 if [[ -n "${cal_conf}" && ${FORCE} -eq 0 ]] && cal_preview "${cal_conf}" "${tmp}/cal-gate" \
         && ( GATE_VIEW="${tmp}/cal-gate/etc"; market_open ); then
     log "release ${tag} waiting for market close (its calendar list makes today a trading day)"
+    notice waiting "deploy-wait-${tag}" tag="${tag}"
     rm -f -- "${bdir}/prev_ref"; rmdir -- "${bdir}" 2>/dev/null || true
     exit 0
 fi
@@ -737,7 +789,7 @@ if [[ -f "${APP_DIR}/sudarshan/requirements.txt" ]]; then
     as_svc env UV_PYTHON_DOWNLOADS=never /usr/local/bin/uv pip install --quiet --python "${APP_DIR}/.venv/bin/python" -r "${APP_DIR}/sudarshan/requirements.txt"
 fi
 # OpenAlgo's .env gets the settings this release lists (backed up first; a rollback puts it back)
-if ! env_sync apply "${env_conf}" "${ENV_FILE}" "${tmp}/env" "${bdir}/openalgo.env"; then log "updating ${ENV_FILE} failed"; rollback; exit 1; fi
+if ! env_sync apply "${env_conf}" "${ENV_FILE}" "${tmp}/env" "${bdir}/openalgo.env"; then log "updating ${ENV_FILE} failed"; ROLLBACK_WHY=settings; rollback; exit 1; fi
 # The day files get the calendar lines this release lists (the files it changes are backed up first,
 # and a rollback puts them back). A bad list or a failed write is logged; the install goes on.
 if [[ -n "${cal_conf}" ]]; then
@@ -746,7 +798,7 @@ if [[ -n "${cal_conf}" ]]; then
     fi
 fi
 # migrate_all.py runs each migration with sys.executable, so the venv python is enough (no 'uv run').
-if ! as_svc bash -c "cd '${APP_DIR}/upgrade' && '${APP_DIR}/.venv/bin/python' migrate_all.py"; then log "migrations failed"; rollback; exit 1; fi
+if ! as_svc bash -c "cd '${APP_DIR}/upgrade' && '${APP_DIR}/.venv/bin/python' migrate_all.py"; then log "migrations failed"; ROLLBACK_WHY=migrations; rollback; exit 1; fi
 # ---- start + health (this is our own service; TRINETRA is never touched)
 systemctl start "${SERVICE}"
 ok=0; code=""
@@ -754,10 +806,14 @@ for _ in $(seq 1 90); do sleep 2; code="$(curl -s -o /dev/null -w '%{http_code}'
 if [[ ${ok} -eq 1 ]]; then
     trap - ERR
     echo "${tag}" > "${STATE}/deployed_tag"; log "deployed ${tag} OK (http ${code}); backup in ${bdir}"
+    chmod 644 "${STATE}/deployed_tag" 2>/dev/null || true   # the ring's health shows the release (sudarshan/ops/release.py)
+    notice installed "deploy-${NOTICE_RUN}-installed" tag="${tag}" was="${deployed}" \
+        backup="$([[ -s "${bdir}/frontend-dist-prev.tar.gz" ]] && echo yes || echo no)"
+    printf '%s\n' "${tag}" > "${STATE}/notice_announced" 2>/dev/null || true
     # the list this install applied, fetched whole, is the one the next runs (cal_run) apply
     if [[ -n "${cal_conf}" ]]; then cal_keep "${tag}" "${cal_conf}" || true; fi
 else
-    log "health check failed after start (last http ${code:-none})"; rollback; exit 1
+    log "health check failed after start (last http ${code:-none})"; ROLLBACK_WHY=health; rollback; exit 1
 fi
 # ---- ring services: install the unit files of this release and (re)start them. A failing ring
 # service is reported but never rolls back OpenAlgo (trading does not depend on them).
@@ -769,7 +825,8 @@ ring_deploy() {
         [[ -n "${n}" ]] || continue
         f="${tmp}/units/${n}"
         if ! curl -fsSL "https://raw.githubusercontent.com/${OWNER_REPO}/${tag}/sudarshan/ops/systemd/${n}" -o "${f}"; then log "ring: download of ${n} failed - skipped"; continue; fi
-        if unit_ok "${f}" "${n}"; then names+=("${n}"); else log "ring: ${n} REFUSED by the unit policy"; fi
+        if unit_ok "${f}" "${n}"; then names+=("${n}")
+        else log "ring: ${n} REFUSED by the unit policy"; notice unit_refused "deploy-refused-${tag}-${n}" tag="${tag}" unit="${n}"; fi
     done < <(jq -r '.[]? | select(.type=="file") | .name | select(test("^sudarshan-[a-z0-9-]+\\.(service|timer)$"))' <<< "${list}")
     for n in "${names[@]}"; do
         if ! cmp -s "${tmp}/units/${n}" "${UNIT_DIR}/${n}"; then

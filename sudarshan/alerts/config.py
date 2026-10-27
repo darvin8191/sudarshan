@@ -16,6 +16,7 @@ from urllib.parse import unquote, urlsplit
 from dotenv import dotenv_values
 
 from sudarshan.autologin.schedule import EXTRA_TRADING_DAYS_FILE, HOLIDAYS_FILE, window_setting
+from sudarshan.ops.events import DEFAULT_SPOOLS
 
 log = logging.getLogger("sudarshan.alerts")
 
@@ -93,6 +94,8 @@ class Settings:
     openalgo_url: str
     window: tuple[int, int]  # IST minutes after midnight: [open, close)
     always_on: bool
+    #: The files the deploy tool and the backup job record their notices in (notices.py).
+    notice_spools: tuple[Path, ...] = DEFAULT_SPOOLS
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> Settings:
@@ -129,7 +132,13 @@ class Settings:
             openalgo_url=openalgo_url,
             window=window,
             always_on=_switch(env, "SUDARSHAN_ALERTS_ALWAYS_ON", False),
+            notice_spools=_paths(get("SUDARSHAN_NOTICE_SPOOLS")) or DEFAULT_SPOOLS,
         )
+
+
+def _paths(value: str | None) -> tuple[Path, ...]:
+    """A colon-separated list of files, empty entries skipped."""
+    return tuple(Path(part.strip()) for part in (value or "").split(":") if part.strip())
 
 
 def read_openalgo_env(path: Path) -> dict[str, str]:

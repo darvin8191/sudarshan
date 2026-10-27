@@ -11,13 +11,17 @@ Tables:
             order leaving trigger pending and to ignore anything after an order's final state.
     meta    ``stream_seen``: the last moment the order stream was known to be up, so the pause
             after a restart can be told (service.py).
+    notices one row per notice event (the deploy tool's and the backup job's, notices.py): its id,
+            claimed -> sent / dropped / stale. The primary key is the once-only rule; the claim is
+            made before the message goes out, and released when it could not be sent.
 
 Fail open: if the file cannot be opened or written (a full disk, a read-only state directory),
 the service keeps going on a bounded copy in memory of what this run wrote. Alerts are still
 sent and repeats within the run are still suppressed; only a restart may repeat earlier ones.
 The cause is logged at ERROR once.
 
-Rows older than KEEP are pruned when the service starts and whenever the trading window closes.
+Rows older than KEEP (notices: KEEP_NOTICES) are pruned when the service starts and whenever
+the trading window closes.
 Engines come from OpenAlgo's ``database.engine_factory`` (NullPool: a connection per transaction,
 closed at once), as the vault does. Only this process uses the file.
 """
@@ -29,7 +33,7 @@ import logging
 import os
 import time
 from collections import OrderedDict
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -42,6 +46,7 @@ from sqlalchemy import (
     MetaData,
     String,
     Table,
+    and_,
     delete,
     func,
     select,
@@ -55,9 +60,12 @@ log = logging.getLogger("sudarshan.alerts")
 
 DB_FILENAME = "alerts.db"
 KEEP = timedelta(days=7)
+#: Notice rows live longer: the spool they guard keeps its newest 200 lines, which can span weeks.
+KEEP_NOTICES = timedelta(days=60)
 #: The in-memory copy's bounds: far above a trading day's orders, so they only bound a failure.
 MEMORY_ORDERS = 10_000
 MEMORY_CLAIMS = 50_000
+MEMORY_NOTICES = 2_000
 
 metadata = MetaData()
 sent = Table(
@@ -84,6 +92,13 @@ meta = Table(
     Column("name", String(40), primary_key=True),
     Column("value", Float, nullable=False),
 )
+notices = Table(
+    "notices",
+    metadata,
+    Column("event_id", String(120), primary_key=True),
+    Column("state", String(10), nullable=False),
+    Column("at", Float, nullable=False, index=True),
+)
 
 
 @dataclass(frozen=True)
@@ -105,6 +120,7 @@ class _Memory:
         self.orders: OrderedDict[str, OrderState] = OrderedDict()
         self.claims: OrderedDict[tuple[str, str, int], None] = OrderedDict()
         self.meta: dict[str, float] = {}
+        self.notices: OrderedDict[str, tuple[str, float]] = OrderedDict()
 
     def save_order(self, key: str, state: OrderState) -> None:
         self.orders[key] = state
@@ -122,6 +138,12 @@ class _Memory:
 
     def most_filled(self, key: str, kind: str) -> int:
         return max((c[2] for c in self.claims if c[0] == key and c[1] == kind), default=0)
+
+    def set_notice(self, event_id: str, state: str, at: float) -> None:
+        self.notices[event_id] = (state, at)
+        self.notices.move_to_end(event_id)
+        while len(self.notices) > MEMORY_NOTICES:
+            self.notices.popitem(last=False)
 
 
 class _MemoryTx:
@@ -246,14 +268,105 @@ class Store:
         except (OSError, SQLAlchemyError) as exc:
             self._fail(exc)
 
+    # ---- notices (notices.py) -------------------------------------------------------------------
+    def notice_states(self, event_ids: Iterable[str]) -> dict[str, tuple[str, float]]:
+        """{event id: (state, when)} for the ids the record knows: claimed, sent, dropped, stale."""
+        ids = list(event_ids)
+        found = {i: self.memory.notices[i] for i in ids if i in self.memory.notices}
+        if self.engine is None or not ids:
+            return found
+        try:
+            with self.engine.begin() as conn:
+                for start in range(0, len(ids), 400):  # well inside SQLite's variable limit
+                    query = select(notices.c.event_id, notices.c.state, notices.c.at).where(
+                        notices.c.event_id.in_(ids[start : start + 400])
+                    )
+                    for row in conn.execute(query):
+                        found[row.event_id] = (row.state, row.at)
+        except (OSError, SQLAlchemyError) as exc:
+            self._fail(exc)
+        return found
+
+    def claim_notices(self, event_ids: Iterable[str], now: float, stale_after: float) -> list[str]:
+        """Claim ids before their message goes out; returns the ones this call claimed.
+
+        An id that was told or dropped is never claimed again, and one claimed less than
+        ``stale_after`` seconds ago is another sender's (a claim older than that was left by a
+        process that stopped, and is taken over).
+        """
+        return [i for i in event_ids if self._claim_notice(i, now, stale_after)]
+
+    def _claim_notice(self, event_id: str, now: float, stale_after: float) -> bool:
+        if self.engine is not None:
+            try:
+                with self.engine.begin() as conn:
+                    stmt = sqlite_insert(notices).values(event_id=event_id, state="claimed", at=now)
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=["event_id"],
+                        set_={"state": "claimed", "at": now},
+                        where=and_(notices.c.state == "claimed", notices.c.at < now - stale_after),
+                    )
+                    won = conn.execute(stmt).rowcount == 1
+            except (OSError, SQLAlchemyError) as exc:
+                self._fail(exc)
+            else:
+                if won:
+                    self.memory.set_notice(event_id, "claimed", now)
+                return won
+        held = self.memory.notices.get(event_id)
+        if held is not None and not (held[0] == "claimed" and held[1] < now - stale_after):
+            return False
+        self.memory.set_notice(event_id, "claimed", now)
+        return True
+
+    def settle_notices(self, event_ids: Iterable[str], state: str, now: float) -> None:
+        """Record how these notices ended: sent, dropped (it can never be sent) or stale."""
+        ids = list(event_ids)
+        for event_id in ids:
+            self.memory.set_notice(event_id, state, now)
+        if self.engine is None or not ids:
+            return
+        try:
+            with self.engine.begin() as conn:
+                for event_id in ids:
+                    stmt = sqlite_insert(notices).values(event_id=event_id, state=state, at=now)
+                    conn.execute(
+                        stmt.on_conflict_do_update(
+                            index_elements=["event_id"], set_={"state": state, "at": now}
+                        )
+                    )
+        except (OSError, SQLAlchemyError) as exc:
+            self._fail(exc)
+
+    def release_notices(self, event_ids: Iterable[str]) -> None:
+        """Give claims back after a message that could not go out, so the next try can claim them.
+        A notice already told stays told."""
+        ids = list(event_ids)
+        for event_id in ids:
+            held = self.memory.notices.get(event_id)
+            if held is not None and held[0] == "claimed":
+                del self.memory.notices[event_id]
+        if self.engine is None or not ids:
+            return
+        try:
+            with self.engine.begin() as conn:
+                conn.execute(
+                    delete(notices).where(notices.c.event_id.in_(ids), notices.c.state == "claimed")
+                )
+        except (OSError, SQLAlchemyError) as exc:
+            self._fail(exc)
+
     def prune(self, now: datetime | None = None) -> int:
         if self.engine is None:
             return 0
-        cutoff = (now.timestamp() if now else time.time()) - KEEP.total_seconds()
+        at = now.timestamp() if now else time.time()
+        cutoff = at - KEEP.total_seconds()
         try:
             with self.engine.begin() as conn:
                 removed = conn.execute(delete(sent).where(sent.c.at < cutoff)).rowcount
                 removed += conn.execute(delete(orders).where(orders.c.at < cutoff)).rowcount
+                old = at - KEEP_NOTICES.total_seconds()
+                removed += conn.execute(delete(notices).where(notices.c.at < old)).rowcount
         except (OSError, SQLAlchemyError) as exc:
             self._fail(exc)
             return 0

@@ -1027,7 +1027,16 @@ class Box:
             root / "web",
             root / "tmp",
         )
-        for folder in (self.etc, self.state, self.backups, self.bin, self.web, self.tmp):
+        self.units = root / "units"  # where the ring's unit files would go (/etc/systemd/system)
+        for folder in (
+            self.etc,
+            self.state,
+            self.backups,
+            self.bin,
+            self.web,
+            self.tmp,
+            self.units,
+        ):
             folder.mkdir()
         (self.app / "frontend" / "dist").mkdir(parents=True)
         (self.app / "frontend" / "dist" / "index.html").write_text("old")
@@ -1104,6 +1113,7 @@ class Box:
             .replace('STATE="/var/lib/sudarshan"', f'STATE="{self.state}"')
             .replace("/opt/sudarshan/backups", str(self.backups))
             .replace("/usr/local/bin/uv", str(self.bin / "uv"))
+            .replace('UNIT_DIR="/etc/systemd/system"', f'UNIT_DIR="{self.units}"')
         )
         (self.web / "later").unlink(missing_ok=True)
         return subprocess.run(

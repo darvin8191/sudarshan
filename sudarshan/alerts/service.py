@@ -46,6 +46,7 @@ from sudarshan.autologin.schedule import IST, TradingCalendar, hhmm
 
 from . import __version__, loopback, messages
 from .config import ConfigError, Settings, setup_logging, switched_off
+from .notices import NoticeDesk  # M18.x: the server's own notices (deploy, backup)
 from .orders import Alert, OrderTracker
 from .outbox import OpenAlgoTelegram, Outbox, Throttle
 from .owner import Owner, OwnerError, load_openalgo_modules, prepare_openalgo_env, read_owner
@@ -122,6 +123,7 @@ class AlertService:
         self.store: Store | None = None
         self.tracker: OrderTracker | None = None
         self.outbox: Outbox | None = None
+        self.notices: NoticeDesk | None = None  # M18.x
         self.client: httpx.AsyncClient | None = None
         self._stop = asyncio.Event()
         self._state, self._detail = "starting", ""
@@ -158,6 +160,16 @@ class AlertService:
             )  # fmt: skip
             sender = asyncio.create_task(self.outbox.run())
             ticker = asyncio.create_task(self._tick())
+            # M18.x: tells what the deploy tool and the backup job recorded (notices.py). It does
+            # not depend on the alert window or the order stream.
+            self.notices = NoticeDesk(
+                self.settings.notice_spools,
+                self.store,
+                telegram.send,
+                self._owner_ready,
+                self.clock,
+            )
+            notices = asyncio.create_task(self.notices.run())
             try:
                 await self._supervise()
             finally:
@@ -166,11 +178,14 @@ class AlertService:
                 for task in unfinished:  # a pause still unread is told as such (_resync)
                     task.cancel()
                 await asyncio.gather(*unfinished, return_exceptions=True)
-                left = await self.outbox.flush(STOP_FLUSH_S)
+                left, _ = await asyncio.gather(  # M18.x: a notice on its way gets the same grace
+                    self.outbox.flush(STOP_FLUSH_S), self.notices.close(STOP_FLUSH_S)
+                )
                 if left:
                     log.warning("%d order alerts were not sent before stopping", left)
                 sender.cancel()
-                await asyncio.gather(sender, ticker, return_exceptions=True)
+                notices.cancel()  # M18.x
+                await asyncio.gather(sender, ticker, notices, return_exceptions=True)
                 self.store.close()
                 self._set_state("stopped")
 
@@ -245,6 +260,11 @@ class AlertService:
             log.warning(OWNER_PROBLEMS[problem])
         self.owner, self._owner_problem = None, problem
         return None
+
+    def _owner_ready(self) -> bool:
+        """M18.x: True when the owner's key is loaded, read from OpenAlgo first when it is not (the
+        notices go out when the alert window is closed, when no connection has read it)."""
+        return self.owner is not None or self._load_owner() is not None
 
     def _use(self, owner: Owner) -> None:
         if self._owner_problem is not None or self.owner is None:

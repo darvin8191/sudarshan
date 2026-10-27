@@ -15,7 +15,7 @@ read-only Analytics Token (market data, portfolio reads) — never with an order
 | `family/` | `sudarshan-family` | View-only layer for family members: own users/sessions/TOTP, privacy mode, invitations, per-user watchlists/alerts, audit log, viewer UI variants, family Telegram bot. Backed by the Analytics-Token data plane only; every OpenAlgo write/admin/bot route must answer 401/403 to a viewer. |
 | `autologin/` | `sudarshan-autologin` (oneshot + timer) | The daily Upstox login with TOTP + PIN (Upstox's TOTP token API) at 08:35/08:45/08:55 IST on trading days, and "Test now" from the Auto login page. Fetches the token, then hands it to OpenAlgo, which stores it exactly as a manual login does (its in-memory caches only refresh in its own process); never ends a login Upstox still accepts, and pauses after any refusal until the key or PIN is saved again. The one ring process that receives an order-capable token: it passes it to OpenAlgo and never uses it. Result on the page and in Telegram. |
 | `vault/` | (library) | Owner vault `db/sudarshan-vault/sudarshan_vault.db` (directory 700, file 600; the auto-login unit may write only there): small secrets entered on the phone, Fernet under a key derived (HKDF) from OpenAlgo's pepper; write-only over HTTP. Also holds the auto-login status. |
-| `ops/deploy/` | `sudarshan-deploy` (root, timer) | The server's deploy tool: installs the latest release outside market hours (backup, checksum, migrations, the `.env` settings below, health check, rollback), keeps the NSE day files in step with the release's calendar lines (below) and updates itself from each release. |
+| `ops/deploy/` | `sudarshan-deploy` (root, timer) | The server's deploy tool: installs the latest release outside market hours (backup, checksum, migrations, the `.env` settings below, health check, rollback), keeps the NSE day files in step with the release's calendar lines (below), records what it did for the owner's Telegram (below) and updates itself from each release. |
 | `ops/` | `sudarshan-ops` (timers) | Daily-rollover guard (03:35 / 08:45 checks, TOTP token sidecar), backups to OCI Object Storage, health checks (healthchecks.io), EOD file jobs (bhavcopy, index constituents — once a day, outside the trading core), reports/digests (08:45 brief, 15:45 EOD, weekly, FY), kill switch. |
 
 Conventions: one package per service (`sudarshan/<svc>/`), `pyproject`-managed with the repo's `uv`
@@ -83,3 +83,26 @@ the list; the tool that install puts in place applies it on its first run, the n
 The deploy tool also asks the market gate again right before it stops OpenAlgo, in case the
 window opened during the download. `sudarshan-deploy --check` shows what the latest release
 would change. Tests: `sudarshan/ops/tests/test_deploy_calendar.py`.
+
+## Server notices on Telegram (M18.x)
+
+After an install, a rollback, a service file the unit policy refused, or a release that waits for
+the market to close, the owner gets one short message on Telegram in trader language (examples in
+`sudarshan/alerts/README.md`). The deploy tool runs as root, so it holds no Telegram or OpenAlgo
+secret and cannot be made to send anything:
+
+- it only **records** the fact, one JSON line, in `/var/lib/sudarshan/events.jsonl` (mode 644, the
+  folder made traversable; `ops/events.py` has the format and `ops/files.py` the safe reader);
+  `sudarshan-alerts` reads it, words it, and sends it once per event id (`alerts/notices.py`);
+- recording is best effort, in its own subshell with its own error handling: a missing `jq`, a full
+  disk or an unwritable folder costs the notice, never an install or a rollback; the file keeps its
+  newest 200 lines; `--check` records nothing;
+- a release that fails at every timer run is recorded once per release and cause; a release that
+  waits is recorded once; the facts of one run share a run id and are told in one message;
+- the tool of the release before this one made no record, so the first run of a tool that records
+  tells the install it finds (once, if the tag file is under 12 hours old, at the time it
+  happened). The tool that does the install acts from the *next* run (self-update), so a release's
+  own install is silent when the tool in place predates it.
+
+Tests: `sudarshan/ops/tests/test_deploy_notices.py` (the whole tool on a fake server),
+`test_ops_events.py`, and `sudarshan/alerts/tests/test_alerts_notices.py`.
