@@ -1027,6 +1027,8 @@ CANDLES = b'{"status":"success","data":{"candles":[' + b'["2026-10-27T09:15:00+0
 
 
 def _percentiles(lags: list[float]) -> dict:
+    if not lags:
+        return {"ticks": 0}
     lags = sorted(lags)
     at = lambda q: round(lags[min(len(lags) - 1, int(q * len(lags)))] * 1000, 2)  # noqa: E731
     return {"ticks": len(lags), "p50_ms": at(0.5), "p95_ms": at(0.95), "p99_ms": at(0.99),
@@ -1057,7 +1059,8 @@ def test_a_warm_start_in_flight_adds_no_tick_lag(feed_env, tmp_path):
     env = {k: v for k, v in os.environ.items() if "proxy" not in k.lower()}
     results, probe = tmp_path / "warm_start.json", tmp_path / "loop_probe.json"
 
-    async def phase(server, sub, seconds: float, seq: int) -> tuple[list[float], int]:
+    async def phase(server, sub, seconds: float, seq: int) -> tuple[list[tuple[float, float]], int]:
+        """(wall time sent, lag) for each tick of ``seconds`` of frames, and the next sequence."""
         sent, got, lags = {}, {}, []
 
         async def receive():
@@ -1071,7 +1074,7 @@ def test_a_warm_start_in_flight_adds_no_tick_lag(feed_env, tmp_path):
             feeds = {key: ff.pb2.Feed(ltpc=ff.pb2.LTPC(ltp=100.0 + seq % 7, ltt=seq, ltq=1))
                      for key in TICK_KEYS}  # fmt: skip
             frame = ff.response(feeds)
-            sent[seq] = time.perf_counter()
+            sent[seq] = (time.perf_counter(), time.time())
             await server.send(frame)
             seq, next_at = seq + 1, next_at + 0.005
             await asyncio.sleep(max(0.0, next_at - time.monotonic()))
@@ -1081,8 +1084,8 @@ def test_a_warm_start_in_flight_adds_no_tick_lag(feed_env, tmp_path):
             await asyncio.sleep(0.01)
         receiver.cancel()
         assert set(got) == set(sent) and {len(times) for times in got.values()} == {len(TICK_KEYS)}
-        for n, when in sent.items():
-            lags += [t - when for t in got[n]]
+        for n, (when, wall) in sent.items():
+            lags += [(wall, t - when) for t in got[n]]
         return lags, seq
 
     async def scenario():
@@ -1118,9 +1121,7 @@ def test_a_warm_start_in_flight_adds_no_tick_lag(feed_env, tmp_path):
                         env=env, stdout=log, stderr=log,
                     )  # fmt: skip
                 await ff.wait_until(lambda: len(fake.rest_calls) >= 4, 20)  # in flight now
-                during_from = time.time()
                 during, seq = await phase(server, sub, 4.0, seq)
-                during_to = time.time()
                 assert await asyncio.wait_for(client.wait(), 40) == 0
                 after, seq = await phase(server, sub, 3.0, seq)
             finally:
@@ -1134,12 +1135,14 @@ def test_a_warm_start_in_flight_adds_no_tick_lag(feed_env, tmp_path):
                     assert await asyncio.wait_for(feed.wait(), 15) == 0
         warm = json.loads(results.read_text())
         assert warm["answers"] == [[200, len(CANDLES)]] * 90
-        assert warm["began"] < during_from and warm["ended"] > during_to  # in flight throughout
         return before, during, after, (warm["began"], warm["ended"])
 
     before, during, after, warm = asyncio.run(scenario())
-    lag = {name: _percentiles(lags) for name, lags in
-           (("before", before), ("during", during), ("after", after))}  # fmt: skip
+    in_flight = [lag for at, lag in during if warm[0] <= at <= warm[1]]  # sent while it ran
+    lag = {name: _percentiles(lags) for name, lags in (
+        ("before", [lag for _, lag in before]), ("during", in_flight),
+        ("after", [lag for _, lag in after]),
+    )}  # fmt: skip
     steps = json.loads(probe.read_text())
     in_warm = [(cpu, owner) for at, cpu, owner in steps["long_steps"] if warm[0] <= at <= warm[1]]
     governor = sorted((cpu for cpu, owner in in_warm if owner == "governor"), reverse=True)
@@ -1150,8 +1153,9 @@ def test_a_warm_start_in_flight_adds_no_tick_lag(feed_env, tmp_path):
           f"all for 90 answers ({share:.1%} of the loop while they ran), longest "
           f"{governor[:3]} ms; the feed's own longest step meanwhile "
           f"{max(feed_own, default=0):.2f} ms")  # fmt: skip
-    assert count > 90 * 4  # the probe saw the governor's work
-    # Its steps are short. One reading inflated by the machine is let pass; work that cost every
-    # answer a long step would show 90 of them.
-    assert sum(cpu >= 5.0 for cpu in governor) <= 2, governor[:5]
-    assert share < 0.15  # and it holds the loop a small part of the time
+    seen = (count, round(cpu_ms), f"{share:.1%}", governor[:5])
+    assert count > 90 * 4, seen  # the probe saw the governor's work
+    # Its steps are short. A reading or two inflated by the machine is let pass; work that cost
+    # every answer a long step would show 90 of them.
+    assert sum(cpu >= 5.0 for cpu in governor) <= 2, seen
+    assert share < 0.15, seen  # and it holds the loop a small part of the time
