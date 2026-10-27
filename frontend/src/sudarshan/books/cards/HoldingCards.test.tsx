@@ -251,9 +251,12 @@ describe('Holdings on a phone', () => {
     expect(worth).toHaveClass(STALE)
   })
 
-  it('says plainly when there are no holdings', async () => {
+  it('says plainly when there are no holdings, and waits for no prices', async () => {
     await renderPhone()
     expect(screen.getByText('No holdings')).toBeInTheDocument()
+    await pass(60_000)
+    expect(document.querySelector('[data-feed]')).toBeNull()
+    expect(screen.queryByText('Waiting for prices')).toBeNull()
   })
 
   it('opens the page’s own ticket: Sell as its table’s Exit does, Buy more from one share', async () => {

@@ -72,7 +72,7 @@ vi.mock('@/components/socket/SocketProvider', () => ({
 }))
 vi.mock('@/components/trading/PlaceOrderDialog', () => ({ PlaceOrderDialog: () => null }))
 
-import { pass, renderBook, settle } from '@/test/bookPages'
+import { expectAvailable, expectUnavailable, pass, renderBook, settle } from '@/test/bookPages'
 import { fakeClock, frames } from '@/test/frames'
 import { fakeScreen } from '@/test/screenWidth'
 
@@ -266,7 +266,7 @@ describe('a: the hold starts at the tap', () => {
     })
     await settle()
     expect(await exitOffered(tap)).toBe(false)
-    expect(exitAll()).toBeDisabled()
+    expectUnavailable(exitAll())
     expect(card()).toHaveTextContent('Sending exit')
 
     // The answer, at last: the clock starts now, not at the tap.
@@ -290,7 +290,7 @@ describe('b: a refusal from the server', () => {
     expect(toast.error).toHaveBeenCalledWith('Exit is not allowed on this product now', 'positions')
     expect(card()).not.toHaveTextContent('Exit sent')
     expect(await exitOffered(tap)).toBe(true)
-    expect(exitAll()).toBeEnabled()
+    expectAvailable(exitAll())
 
     // Refused in the body of an answer, the same.
     api.closePosition.mockResolvedValueOnce({ status: 'error', message: 'Market is closed' })
@@ -315,7 +315,7 @@ describe('c: no answer at all', () => {
     await exitOnce(tap)
 
     expect(await exitOffered(tap)).toBe(false)
-    expect(exitAll()).toBeDisabled()
+    expectUnavailable(exitAll())
     expect(card()).toHaveTextContent('No answer yet: it may still be going through')
     expect(toast.error).not.toHaveBeenCalled()
     expect(toast.warning).toHaveBeenCalledTimes(1)
@@ -340,7 +340,7 @@ describe('c: no answer at all', () => {
     api.getPositions.mockResolvedValue(book({ ...LONG, quantity: 0, pnl: 1300 } as Position, PUT))
     await reread(tap)
     expect(screen.queryByText(/No answer yet/)).toBeNull()
-    expect(exitAll()).toBeEnabled()
+    expectAvailable(exitAll())
   })
 })
 
@@ -367,7 +367,7 @@ describe('d: after it went, only flat, gone or turned lets it go', () => {
     api.getPositions.mockResolvedValue(book({ ...LONG, quantity: 65, pnl: 650 } as Position, PUT))
     await reread(tap)
     expect(await exitOffered(tap)).toBe(false)
-    expect(exitAll()).toBeDisabled()
+    expectUnavailable(exitAll())
     expect(card()).toHaveTextContent('Exit sent · 65 of 130 left')
 
     // 23 s after the answer: still held, 13 s after the change.
@@ -391,7 +391,7 @@ describe('d: after it went, only flat, gone or turned lets it go', () => {
     api.getPositions.mockResolvedValue(book(...(after as Position[])))
     await reread(tap)
     expect(screen.queryByText(/Exit sent/)).toBeNull()
-    expect(exitAll()).toBeEnabled()
+    expectAvailable(exitAll())
   })
 })
 
@@ -444,7 +444,7 @@ describe('f: the hold lives app-wide', () => {
     await settle()
     expect(card()).toHaveTextContent('Exit sent')
     expect(await exitOffered(tap)).toBe(false)
-    expect(exitAll()).toBeDisabled()
+    expectUnavailable(exitAll())
 
     // Its clock is the answer's, not the reload's.
     await pass(15_500)
@@ -528,21 +528,21 @@ describe('h: Exit all', () => {
     expect(api.closeAllPositions).toHaveBeenCalledTimes(1)
     expect(card()).toHaveTextContent('Exit sent')
     expect(putCard()).toHaveTextContent('Exit sent')
-    expect(exitAll()).toBeDisabled()
+    expectUnavailable(exitAll())
 
     // Ten seconds on, half the call has closed and the put has not moved.
     await pass(10_000)
     api.getPositions.mockResolvedValue(book({ ...LONG, quantity: 65, pnl: 650 } as Position, PUT))
     await reread(tap)
-    expect(exitAll()).toBeDisabled()
+    expectUnavailable(exitAll())
 
     // The put's time is up; the call's clock started again at its change.
     await pass(6_000)
-    expect(exitAll()).toBeDisabled()
+    expectUnavailable(exitAll())
     expect(putCard()).not.toHaveTextContent('Exit sent')
     expect(card()).toHaveTextContent('Exit sent · 65 of 130 left')
     await pass(10_000)
-    expect(exitAll()).toBeEnabled()
+    expectAvailable(exitAll())
     expect(api.closeAllPositions).toHaveBeenCalledTimes(1)
   })
 
@@ -559,7 +559,7 @@ describe('h: Exit all', () => {
       })
     )
     await settle()
-    expect(exitAll()).toBeDisabled()
+    expectUnavailable(exitAll())
     expect(toast.error).not.toHaveBeenCalled()
     expect(card()).toHaveTextContent('No answer yet: it may still be going through')
     expect(putCard()).toHaveTextContent('No answer yet: it may still be going through')
@@ -624,7 +624,7 @@ describe('i: an answer that may have reached the broker is not confirmed', () =>
 
     expect(card()).toHaveTextContent('Not confirmed: check Orders before sending again')
     expect(await exitOffered(tap)).toBe(false)
-    expect(exitAll()).toBeDisabled()
+    expectUnavailable(exitAll())
     expect(toast.error).not.toHaveBeenCalled()
     expect(toast.warning).toHaveBeenCalledTimes(1)
     expect(toast.warning).toHaveBeenCalledWith(EXIT_NOT_CONFIRMED, 'positions')
@@ -648,7 +648,7 @@ describe('i: an answer that may have reached the broker is not confirmed', () =>
       })
     )
     await settle()
-    expect(exitAll()).toBeDisabled()
+    expectUnavailable(exitAll())
     expect(card()).toHaveTextContent('Not confirmed: check Orders before sending again')
     expect(putCard()).toHaveTextContent('Not confirmed: check Orders before sending again')
     expect(toast.error).not.toHaveBeenCalled()
@@ -669,7 +669,7 @@ describe('j: a tab restored after the hold’s time', () => {
     renderBook('/positions', reloaded.page)
     await settle()
     expect(card()).not.toHaveTextContent('Exit sent')
-    expect(exitAll()).toBeEnabled()
+    expectAvailable(exitAll())
     expect(await openExitConfirmation(tap)).toHaveTextContent(
       /The exit sent at 10:42:2\d has not shown in the book yet\./
     )
@@ -736,7 +736,7 @@ describe('k: an exit held by its own order, still working', () => {
     // A price-protected market order can rest unfilled: no clock cuts the hold short.
     await pass(5 * 60_000)
     expect(await exitOffered(tap)).toBe(false)
-    expect(exitAll()).toBeDisabled()
+    expectUnavailable(exitAll())
     expect(card()).toHaveTextContent('Exit order open · check Orders')
 
     // Its "rejected" push was lost in a reconnect; the next read has it.
@@ -964,7 +964,7 @@ describe('q: Exit all’s result shows once', () => {
       'positions',
       { id: 'sudarshan-exit-all-result' }
     )
-    expect(exitAll()).toBeEnabled()
+    expectAvailable(exitAll())
   })
 })
 
@@ -1014,7 +1014,7 @@ describe('s: the app is still placing an earlier exit (its 409)', () => {
     expect(toast.error).toHaveBeenLastCalledWith(STILL_PLACING, 'positions')
     expect(card()).toHaveTextContent('Still being placed: wait for it, then check Orders')
     expect(await exitOffered(tap)).toBe(false)
-    expect(exitAll()).toBeDisabled()
+    expectUnavailable(exitAll())
 
     // Its hold over, Exit is offered again with a warning that says what the app said.
     await pass(16_000)
@@ -1044,7 +1044,7 @@ describe('s: the app is still placing an earlier exit (its 409)', () => {
     }
     await exitAllOnce()
     await pass(151_000)
-    expect(exitAll()).toBeEnabled()
+    expectAvailable(exitAll())
 
     api.closeAllPositions.mockRejectedValueOnce(refusal(409, EXIT_ALL_STILL_PLACING))
     await exitAllOnce()
@@ -1053,9 +1053,9 @@ describe('s: the app is still placing an earlier exit (its 409)', () => {
     })
     expect(card()).toHaveTextContent('Still being placed')
     expect(putCard()).toHaveTextContent('Still being placed')
-    expect(exitAll()).toBeDisabled()
+    expectUnavailable(exitAll())
     await pass(16_000)
-    expect(exitAll()).toBeEnabled()
+    expectAvailable(exitAll())
     expect(api.closeAllPositions).toHaveBeenCalledTimes(2)
   })
 

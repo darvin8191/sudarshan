@@ -43,7 +43,10 @@ import {
   SideChip,
   StaleBookNote,
   StatusChip,
+  UNAVAILABLE,
+  useWhyNot,
   WarningLine,
+  WhyNot,
 } from './parts'
 import { useBookOverlay, usePageDialog } from './useBookOverlay'
 import { type PricedRow, useFramePrices } from './useFramePrices'
@@ -180,6 +183,19 @@ export function cancelWarning(mark: SentMark | undefined): string | null {
   return `A cancel was sent at ${istTime(mark.sentAt)} and the order still shows working.`
 }
 
+/** Why Cancel all sends nothing with no order open. */
+export const NOTHING_TO_CANCEL = 'Nothing is open to cancel.'
+
+/** Why Cancel all waits, before the order book has been read once. */
+export const READING_ORDERS = 'Reading the order book.'
+
+/** Why Cancel all sends nothing when the order book could not be read. */
+export const ORDERS_NOT_READ = 'The order book could not be read just now.'
+
+/** Why Cancel all sends nothing while every open order's cancel is still held. */
+export const EVERY_CANCEL_SENT =
+  'A cancel is already on its way for every open order. Wait for their status to change before cancelling again.'
+
 /** Why a tap on Cancel sends nothing: the order's cancel is still held. */
 export function cancelHeldWhy(mark: SentMark): string {
   if (mark.state === 'sending') {
@@ -291,6 +307,16 @@ const OrderBoard = memo(function OrderBoard({
     if (state.working && !isHeld(cancelOf(orderid))) cancellableIds.push(orderid)
   }
   const cancellable = cancellableIds.length
+  // Why Cancel all cannot be sent now, if it cannot: the book is not read yet (or
+  // could not be), no order is open, or every open order's cancel is still held.
+  const anyWorking = [...states.values()].some((state) => state.working)
+  let cancelAllWhy: string | null = null
+  if (cancellable === 0) {
+    if (orders.length === 0 && loading) cancelAllWhy = READING_ORDERS
+    else if (orders.length === 0 && error) cancelAllWhy = ORDERS_NOT_READ
+    else cancelAllWhy = anyWorking ? EVERY_CANCEL_SENT : NOTHING_TO_CANCEL
+  }
+  const cancelAll = useWhyNot(cancelAllWhy)
   const shown =
     filter === 'all'
       ? sorted
@@ -391,15 +417,20 @@ const OrderBoard = memo(function OrderBoard({
         <RefreshIcon refreshing={refreshing} onRefresh={refresh} />
         <button
           type="button"
-          disabled={cancellable === 0}
-          aria-haspopup="dialog"
-          onClick={() => open({ act: 'cancelall', row: null })}
-          className={cn(OUTLINED, 'shrink-0 whitespace-nowrap border-destructive text-destructive')}
+          {...cancelAll.button(() => open({ act: 'cancelall', row: null }))}
+          aria-haspopup={cancelAllWhy === null ? 'dialog' : undefined}
+          className={cn(
+            cancelAllWhy === null
+              ? cn(OUTLINED, 'border-destructive text-destructive')
+              : UNAVAILABLE,
+            'shrink-0 whitespace-nowrap'
+          )}
         >
           <X aria-hidden="true" className="size-4" />
           Cancel all{cancellable > 0 ? ` (${cancellable})` : ''}
         </button>
       </div>
+      <WhyNot why={cancelAll.why} id={cancelAll.id} told={cancelAll.told} />
       {/* The feed's line on a row of its own: "Reconnecting · updated 12s ago" needs the width. */}
       {working.length > 0 && (
         <p className="-mt-1 flex min-h-5 min-w-0 flex-wrap items-center gap-x-1.5 px-1">

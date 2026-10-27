@@ -14,8 +14,10 @@ from services.place_smart_order_service import place_smart_order
 from services.positionbook_service import get_positionbook
 from services.tradebook_service import get_tradebook
 
-# SUDARSHAN M6.9: one exit at a time per position from the app's own screens.
-from sudarshan.books.exit_guard import one_exit_at_a_time
+# SUDARSHAN M6.9: the app's Exit of one position, claimed in the book it goes to.
+from sudarshan.books import exit_guard
+from sudarshan.books.single_exit import EXIT_NOT_CONFIRMED, exit_live, exit_order
+from sudarshan.books.telegram_words import APP_EXIT_STRATEGY
 from utils import runtime
 from utils.latency_monitor import track_latency
 from utils.logging import get_logger
@@ -30,10 +32,8 @@ API_RATE_LIMIT = os.getenv("API_RATE_LIMIT", "50 per second")
 # never a refusal: a trader told it failed sends it again, and a second exit sized from a
 # book that has not caught up reverses the position instead of closing it. Such an answer
 # carries not_confirmed (the phone holds its Exit on it, and on any 5xx), and its words are
-# written for a trader, never an exception's.
-EXIT_NOT_CONFIRMED = (
-    "This exit is not confirmed: it may have gone through. Check Orders before sending it again."
-)
+# written for a trader, never an exception's. One position's (EXIT_NOT_CONFIRMED) is in
+# sudarshan/books/single_exit.py, with the rest of the app's Exit.
 EXIT_ALL_NOT_CONFIRMED = (
     "Exit all is not confirmed: some exits may have gone through. "
     "Check Orders before sending it again."
@@ -51,14 +51,6 @@ CANCEL_ALL_NOT_CONFIRMED = (
 def _not_confirmed(message):
     """SUDARSHAN M6.9: the body of an answer that may have reached the broker."""
     return {"status": "error", "message": message, "not_confirmed": True}
-
-
-def _placed_order_ids(response, orderid):
-    """SUDARSHAN M6.9: every order an exit placed; Upstox names one per slice of a sliced order."""
-    data = response.get("data") if isinstance(response, dict) else None
-    named = data.get("order_ids") if isinstance(data, dict) else None
-    ids = [str(each).strip() for each in named] if isinstance(named, (list, tuple)) else []
-    return [each for each in ids if each] or [str(orderid)]
 
 
 def _cancel_all_summary(answered):
@@ -584,7 +576,6 @@ def export_positions():
 @check_session_validity
 @limiter.limit(API_RATE_LIMIT)
 @track_latency("CLOSE")
-@one_exit_at_a_time()  # SUDARSHAN M6.9: 409 while this position's exit is still being placed
 def close_position():
     """Close a specific position - uses broker API in live mode, placesmartorder service in analyze mode"""
     try:
@@ -608,6 +599,8 @@ def close_position():
         broker_name = session.get("broker")
 
         # Check if in analyze mode
+        # SUDARSHAN M6.9: the pipe is decided here once: the exit is claimed in the book it is
+        # sent to, and sent there even if the mode is switched meanwhile.
         if get_analyze_mode():
             # In analyze mode, use placesmartorder service with quantity=0 and position_size=0
             api_key = get_api_key_for_tradingview(login_username)
@@ -635,10 +628,15 @@ def close_position():
             # Use placesmartorder service for analyze mode
             from services.place_smart_order_service import place_smart_order
 
-            # Pass api_key as a separate parameter for analyze mode
-            success, response_data, status_code = place_smart_order(
-                order_data=order_data, api_key=api_key
-            )
+            # SUDARSHAN M6.9: one exit at a time for the position in the sandbox's book.
+            with exit_guard.one_exit("sandbox", exchange, symbol, product) as busy:
+                if busy:
+                    logger.warning("Exit refused while one is still being placed (sandbox)")
+                    return jsonify({"status": "error", "message": busy}), 409
+                # Pass api_key as a separate parameter for analyze mode
+                success, response_data, status_code = place_smart_order(
+                    order_data=order_data, api_key=api_key, analyze=True
+                )
             return jsonify(response_data), status_code
 
         # Live mode - continue with existing logic
@@ -654,44 +652,25 @@ def close_position():
             logger.error(f"Error loading broker-specific modules for {broker_name}")
             return jsonify({"status": "error", "message": "Error loading broker modules"}), 500
 
-        # Get the functions we need
-        place_smartorder_api = api_funcs["place_smartorder_api"]
-
-        # Prepare order data for direct broker API call
-        order_data = {
-            "strategy": "UI Exit Position",
-            "exchange": exchange,
-            "symbol": symbol,
-            "action": "BUY",  # Will be determined by the smart order API based on current position
-            "product": product,
-            "pricetype": "MARKET",
-            "quantity": "0",
-            "price": "0",
-            "trigger_price": "0",
-            "disclosed_quantity": "0",
-            "position_size": "0",  # Setting to 0 to close the position
-        }
-
-        # Call the broker API directly
-        res, response, orderid = place_smartorder_api(order_data, auth_token)
-
-        # Format the response based on presence of orderid and broker's response
-        if orderid:
-            response_data = {
-                "status": "success",
-                "message": response.get("message")
-                if response and "message" in response
-                else "Position close order placed successfully.",
-                "orderid": orderid,
-            }
-            # SUDARSHAN M6.9: the phone holds the exit until every slice of it has ended.
-            placed = _placed_order_ids(response, orderid)
-            if len(placed) > 1:
-                response_data["orderids"] = placed
-            status_code = 200
-
+        # SUDARSHAN M6.9: the app's Exit (sudarshan/books/single_exit.py), refused in a sentence
+        # while the position is busy (at once here, and again where it is sized and sent,
+        # broker/upstox/api/order_api.py), and never a failure when it may have reached the broker.
+        busy = exit_guard.why_busy("live", exchange, symbol, product)
+        if busy:
+            logger.warning(f"Exit for {symbol} refused: an exit for it is on its way")
+            return jsonify({"status": "error", "message": busy}), 409
+        response_data, status_code, sent = exit_live(
+            api_funcs["place_smartorder_api"],
+            auth_token,
+            symbol=symbol,
+            exchange=exchange,
+            product=product,
+            strategy=APP_EXIT_STRATEGY,
+        )
+        if status_code == 200:
             # SUDARSHAN M6.9: the order is placed and its id known, so a failure to log it
             # must not turn the answer into an error.
+            orderid = response_data["orderid"]
             try:
                 # Publish event for logging, socketio, and telegram (fixes missing API log)
                 api_key = get_api_key_for_tradingview(login_username)
@@ -699,9 +678,13 @@ def close_position():
                     from events import PositionClosedEvent
                     from utils.event_bus import bus
 
-                    log_request = order_data.copy()
+                    log_request = exit_order(
+                        symbol=symbol,
+                        exchange=exchange,
+                        product=product,
+                        strategy=APP_EXIT_STRATEGY,
+                    )
                     log_request["api_type"] = "closeposition"
-
                     bus.publish(PositionClosedEvent(
                         mode="live",
                         api_type="closeposition",
@@ -711,33 +694,12 @@ def close_position():
                         orderid=str(orderid),
                         message="Position close order placed successfully.",
                         request_data=log_request,
-                        response_data=response_data,
+                        # The side and quantity it sent, for the alert only.
+                        response_data={**response_data, "sent": sent} if sent else response_data,
                         api_key=api_key,
                     ))
             except Exception:
                 logger.exception(f"Close position order {orderid} placed; logging it failed")
-        else:
-            # SUDARSHAN M6.9: an answer from the broker that names no order (a success
-            # without an id, an error carried by a 2xx, a broker 5xx, or a failure after the
-            # send) may still have placed one. Only a broker's refusal (a 4xx) or no send at
-            # all (no response) is a refusal.
-            sent_status = getattr(res, "status", None)
-            if isinstance(sent_status, int) and not 400 <= sent_status < 500:
-                logger.error(f"Close position for {symbol} not confirmed (status {sent_status})")
-                not_confirmed_code = sent_status if sent_status >= 500 else 502
-                return jsonify(_not_confirmed(EXIT_NOT_CONFIRMED)), not_confirmed_code
-
-            # No orderid, definite error
-            response_data = {
-                "status": "error",
-                "message": response.get("message")
-                if response and "message" in response
-                else "Failed to close position (broker did not return order ID).",
-            }
-            if res and hasattr(res, "status") and isinstance(res.status, int) and res.status >= 400:
-                status_code = res.status  # Use broker's HTTP error code if available
-            else:
-                status_code = 400  # Default to Bad Request
 
         return jsonify(response_data), status_code
 

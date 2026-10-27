@@ -61,8 +61,11 @@ import {
   SignedPercent,
   STALE,
   StaleBookNote,
+  UNAVAILABLE,
   useSandbox,
+  useWhyNot,
   WarningLine,
+  WhyNot,
 } from './parts'
 import { useBookOverlay } from './useBookOverlay'
 import { bookRow, type PricedRow, useFramePrices } from './useFramePrices'
@@ -317,6 +320,9 @@ function feedRowOf(row: PricedRow<Position>): FeedRow {
   }
 }
 
+/** Why Exit all sends nothing with no position open. */
+export const NOTHING_TO_EXIT = 'Nothing is open to exit.'
+
 function openCount(count: number): string {
   if (count === 0) return 'No open positions'
   return count === 1 ? '1 open position' : `${count} open positions`
@@ -368,6 +374,10 @@ const PositionBoard = memo(function PositionBoard({
   const exits = marksOf(marks, 'exit', sandbox)
 
   const total = rows.reduce((sum, row) => sum + (row.pnl ?? 0), 0)
+  // Why Exit all cannot be sent now, if it cannot: nothing is open, or an exit
+  // sent has not shown in the book yet (Exit all would size from that book too).
+  const heldExit = exits.find(isHeld)
+  const exitAllWhy = held.length === 0 ? NOTHING_TO_EXIT : heldExit ? heldWhy(heldExit) : null
   const figuresStale = (line.kind === 'delayed' || line.kind === 'connecting') && line.stale
   const target =
     overlay?.row != null ? (rows.find((row) => positionId(row.item) === overlay.row) ?? null) : null
@@ -404,7 +414,7 @@ const PositionBoard = memo(function PositionBoard({
           total={total}
           split={splitOf(rows)}
           open={held.length}
-          exitsSent={exits.some(isHeld)}
+          exitAllWhy={exitAllWhy}
           stale={figuresStale}
           line={line}
           now={now}
@@ -562,7 +572,7 @@ function Summary({
   total,
   split,
   open,
-  exitsSent,
+  exitAllWhy,
   stale,
   line,
   now,
@@ -571,14 +581,18 @@ function Summary({
   total: number
   split: { realised: number; unrealised: number } | null
   open: number
-  /** An exit went and the book has not caught up yet: Exit all would size from it too. */
-  exitsSent: boolean
+  /**
+   * Why Exit all cannot be sent just now (nothing open, or an exit sent that
+   * the book has not caught up with), or null when it can.
+   */
+  exitAllWhy: string | null
   stale: boolean
   line: FeedLine
   now: number
   onExitAll: () => void
 }) {
   const direction = directionOf(total)
+  const exitAll = useWhyNot(exitAllWhy)
   return (
     <section
       aria-labelledby="sd-positions-total"
@@ -620,15 +634,17 @@ function Summary({
         </p>
         <button
           type="button"
-          disabled={open === 0 || exitsSent}
-          onClick={onExitAll}
-          aria-haspopup="dialog"
-          className={cn(OUTLINED, 'border-destructive text-destructive')}
+          {...exitAll.button(onExitAll)}
+          aria-haspopup={exitAllWhy === null ? 'dialog' : undefined}
+          className={
+            exitAllWhy === null ? cn(OUTLINED, 'border-destructive text-destructive') : UNAVAILABLE
+          }
         >
           <LogOut aria-hidden="true" className="size-4" />
           Exit all
         </button>
       </div>
+      <WhyNot why={exitAll.why} id={exitAll.id} told={exitAll.told} />
     </section>
   )
 }

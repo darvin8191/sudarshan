@@ -27,6 +27,11 @@ describe('LiveLine', () => {
     expect(container.querySelector('[data-feed]')?.getAttribute('data-feed')).toBe('stale')
   })
 
+  it('draws nothing where nothing is held: there is no price to wait for', () => {
+    const { container } = render(<LiveLine line={{ kind: 'idle' }} now={NOW} />)
+    expect(container).toBeEmptyDOMElement()
+  })
+
   it('keeps the words it already had', () => {
     expect(feedWords({ kind: 'closed' }, NOW)).toBe('Market closed')
     expect(feedWords({ kind: 'waiting' }, NOW)).toBe('Waiting for prices')

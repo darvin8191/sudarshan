@@ -111,6 +111,7 @@ def place_smart_order_with_auth(
     auth_token: str,
     broker: str,
     original_data: dict[str, Any],
+    analyze: bool | None = None,
 ) -> tuple[bool, dict[str, Any], int]:
     """
     Place a smart order using provided auth token.
@@ -120,6 +121,8 @@ def place_smart_order_with_auth(
         auth_token: Authentication token for the broker API
         broker: Name of the broker
         original_data: Original request data for logging
+        analyze: SUDARSHAN M6.9: the pipe a caller has already decided (True: the sandbox,
+            False: the broker); None reads the Analyze mode toggle, as before.
 
     Returns:
         Tuple containing:
@@ -132,11 +135,13 @@ def place_smart_order_with_auth(
         order_request_data.pop("apikey", None)
 
     api_key = original_data.get("apikey", "")
+    # SUDARSHAN M6.9: read once, so a caller that claimed a book sends to that book.
+    in_analyze = get_analyze_mode() if analyze is None else analyze
 
     # Validate order data
     is_valid, error_message = validate_smart_order(order_data)
     if not is_valid:
-        if get_analyze_mode():
+        if in_analyze:
             return False, emit_analyzer_error(original_data, error_message), 400
         error_response = {"status": "error", "message": error_message}
         bus.publish(OrderFailedEvent(
@@ -147,7 +152,7 @@ def place_smart_order_with_auth(
         return False, error_response, 400
 
     # If in analyze mode, route to sandbox for sandbox trading
-    if get_analyze_mode():
+    if in_analyze:
         from services.sandbox_service import sandbox_place_smart_order
 
         if not api_key:
@@ -160,6 +165,9 @@ def place_smart_order_with_auth(
         success, response_data, status_code = sandbox_place_smart_order(
             order_data, api_key, original_data
         )
+        # SUDARSHAN M6.9: what it sent goes to the alert, not into the answer.
+        sent = response_data.pop("sent", None) if isinstance(response_data, dict) else None
+        reported = {**response_data, "sent": sent} if sent else response_data
 
         analyzer_request = order_request_data.copy()
         analyzer_request["api_type"] = "placesmartorder"
@@ -191,7 +199,7 @@ def place_smart_order_with_auth(
                 pricetype=order_data.get("pricetype", ""),
                 product=order_data.get("product", ""),
                 orderid=response_data.get("orderid", ""),
-                request_data=analyzer_request, response_data=response_data,
+                request_data=analyzer_request, response_data=reported,  # SUDARSHAN M6.9
                 api_key=api_key,
             ))
 
@@ -210,6 +218,8 @@ def place_smart_order_with_auth(
 
     try:
         res, response_data, order_id = broker_module.place_smartorder_api(order_data, auth_token)
+        # SUDARSHAN M6.9: what it sent goes to the alert, not into the answer.
+        sent = response_data.pop("sent", None) if isinstance(response_data, dict) else None
 
         # Handle case where position size matches current position
         if (
@@ -234,6 +244,7 @@ def place_smart_order_with_auth(
         # Log successful order immediately after placement
         if res and res.status == 200:
             order_response_data = {"status": "success", "orderid": order_id}
+            reported = {**order_response_data, "sent": sent} if sent else order_response_data
             bus.publish(OrderPlacedEvent(
                 mode="live", api_type="placesmartorder",
                 strategy=order_data.get("strategy", ""),
@@ -244,7 +255,7 @@ def place_smart_order_with_auth(
                 pricetype=order_data.get("pricetype", ""),
                 product=order_data.get("product", ""),
                 orderid=str(order_id),
-                request_data=order_request_data, response_data=order_response_data,
+                request_data=order_request_data, response_data=reported,  # SUDARSHAN M6.9
                 api_key=api_key,
             ))
 
@@ -301,6 +312,7 @@ def place_smart_order(
     api_key: str | None = None,
     auth_token: str | None = None,
     broker: str | None = None,
+    analyze: bool | None = None,
 ) -> tuple[bool, dict[str, Any], int]:
     """
     Place a smart order.
@@ -311,6 +323,7 @@ def place_smart_order(
         api_key: OpenAlgo API key (for API-based calls)
         auth_token: Direct broker authentication token (for internal calls)
         broker: Direct broker name (for internal calls)
+        analyze: SUDARSHAN M6.9: the pipe a caller has already decided; None reads the toggle.
 
     Returns:
         Tuple containing:
@@ -341,13 +354,13 @@ def place_smart_order(
             return False, error_response, 403
 
         return place_smart_order_with_auth(
-            order_data, AUTH_TOKEN, broker_name, original_data
+            order_data, AUTH_TOKEN, broker_name, original_data, analyze=analyze
         )
 
     # Case 2: Direct internal call with auth_token and broker
     elif auth_token and broker:
         return place_smart_order_with_auth(
-            order_data, auth_token, broker, original_data
+            order_data, auth_token, broker, original_data, analyze=analyze
         )
 
     # Case 3: Invalid parameters

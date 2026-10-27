@@ -20,6 +20,11 @@ from sudarshan.books.exit_guard import EXIT_ALL_BEING_PLACED
 NOT_READ = (
     "Nothing was sent: the positions could not be read from Upstox. Check Positions and try again."
 )
+NOT_CANCELLED = "Nothing was cancelled: the orders could not be read from the broker. Check Orders and try again."
+SEMI_AUTO = (
+    "Cancel all orders operation is not allowed in Semi-Auto mode. Please switch to Auto mode to "
+    "cancel orders."
+)
 PARTIAL = (
     "Exit all did not close every position. Of 3 exits, 2 were sent and 1 was refused "
     "(UDAPI1026_X: margin). Check Positions and Orders before sending again."
@@ -46,23 +51,48 @@ def _raise(error):
     return handler
 
 
+SKIPPED_ALL = (
+    "Exit all did not close every position. Of 1 exit, 1 was not sent. An exit for NIFTY 25900 CE "
+    "is already on its way (sent 10:52:13). Check Orders, and exit it again only if it is still "
+    "open."
+)
+SKIPPED_SOME = SKIPPED_ALL.replace(
+    "Of 1 exit, 1 was not sent", "Of 2 exits, 1 was sent and 1 was not sent"
+)
+
+
 @pytest.mark.parametrize(
     ("handler", "title", "sentence"),
     [
         (
             _json(424, {"status": "error", "message": NOT_READ}),
-            words.EXIT_ALL_NOT_ALL_CLOSED,
+            words.EXIT_ALL_NOT_SENT_TITLE,
             NOT_READ,
         ),
         (
             _json(409, {"status": "error", "message": EXIT_ALL_BEING_PLACED}),
-            words.EXIT_ALL_NOT_ALL_CLOSED,
+            words.EXIT_ALL_NOT_SENT_TITLE,
             EXIT_ALL_BEING_PLACED,
+        ),
+        (
+            _json(409, {"status": "error", "message": SKIPPED_ALL}),
+            words.EXIT_ALL_NOT_SENT_TITLE,
+            SKIPPED_ALL,
+        ),
+        (
+            _json(409, {"status": "error", "message": SKIPPED_SOME, "not_confirmed": True}),
+            words.EXIT_ALL_NOT_ALL_CLOSED,
+            SKIPPED_SOME,
         ),
         (
             _json(502, {"status": "error", "message": PARTIAL, "not_confirmed": True}),
             words.EXIT_ALL_NOT_ALL_CLOSED,
             PARTIAL,
+        ),
+        (
+            _json(500, {"status": "error", "message": "Failed to close all positions"}),
+            words.EXIT_ALL_NOT_CONFIRMED_TITLE,
+            "Failed to close all positions",
         ),
         (
             _json(200, {"status": "error", "message": "Upstox refused: market closed."}),
@@ -77,7 +107,18 @@ def _raise(error):
         (_raise(httpx.ReadTimeout), words.EXIT_ALL_NOT_CONFIRMED_TITLE, words.EXIT_ALL_NO_ANSWER),
         (_raise(httpx.ConnectError), words.EXIT_ALL_NOT_SENT_TITLE, words.EXIT_ALL_UNREACHABLE),
     ],
-    ids=["424", "409", "502 partial", "200 error", "gateway page", "timeout", "unreachable"],
+    ids=[
+        "424",
+        "409",
+        "409 every position busy",
+        "409 some sent",
+        "502 partial",
+        "500 that does not say",
+        "200 error",
+        "gateway page",
+        "timeout",
+        "unreachable",
+    ],
 )
 def test_the_sdk_s_answer_reads_as_the_app_s_own_sentence(handler, title, sentence):
     answer = _sdk_answer(handler)
@@ -104,8 +145,8 @@ def test_a_title_is_not_said_twice_and_markdown_stays_whole():
 @pytest.mark.parametrize(
     ("callback", "said"),
     [
-        ("confirm_closeall", f"*Exit all did not close every position*\n\n{NOT_READ}"),
-        ("confirm_closeall_with_strategies", f"Exit all did not close every position: {NOT_READ}"),
+        ("confirm_closeall", f"*Exit all not sent*\n\n{NOT_READ}"),
+        ("confirm_closeall_with_strategies", f"Exit all not sent: {NOT_READ}"),
     ],
     ids=["/closeall", "/closeall and stop strategies"],
 )
@@ -176,22 +217,97 @@ def alerts(monkeypatch):
         ),
         (
             {"status": "error", "message": EXIT_ALL_BEING_PLACED},
-            "*Exit all did not close every position*",
+            "*Exit all not sent*",
             EXIT_ALL_BEING_PLACED,
+        ),
+        (
+            {"status": "error", "message": SKIPPED_ALL},
+            "*Exit all not sent*",
+            "Of 1 exit, 1 was not sent. An exit for NIFTY 25900 CE is already on its way",
+        ),
+        (
+            {"status": "error", "message": SKIPPED_SOME, "not_confirmed": True},
+            "*Exit all did not close every position*",
+            "Of 2 exits, 1 was sent and 1 was not sent. An exit for NIFTY 25900 CE",
         ),
         (
             {"status": "success", "message": "All Open Positions Squared Off"},
             "*Position Closed*",
             "All positions closed successfully",
         ),
+        (
+            {
+                "status": "success",
+                "message": "All Open Positions Squared Off. The open orders could not be read.",
+                "note": "The open orders could not be read from Upstox, so an order already "
+                "working to close a position was not looked for. Check Orders.",
+            },
+            "*Position Closed*",
+            "All positions closed successfully\nThe open orders could not be read from Upstox, "
+            "so an order already working to close a position was not looked for. Check Orders.",
+        ),
     ],
-    ids=["partial", "refused while one is placed", "everything closed"],
+    ids=[
+        "partial",
+        "refused while one is placed",
+        "every position busy",
+        "some sent, one busy",
+        "everything closed",
+        "everything closed, the orders not read",
+    ],
 )
 def test_an_exit_all_alert_has_its_own_title(alerts, response, title, line):
     message = alerts("closeposition", response)
     assert message.startswith(title + "\n")
     assert line in message
     assert "Error:" not in message
+
+
+FLOW_CLOSE = {"strategy": "flow_workflow", "symbol": "SBIN", "exchange": "NSE", "product": "MIS"}
+
+
+@pytest.mark.parametrize(
+    ("response", "title", "lines"),
+    [
+        (
+            {"status": "success", "message": "Position close order placed.", "orderid": "1"},
+            "*Position Closed*",
+            "Symbol: `SBIN`\nExchange: NSE\nProduct: MIS\nOrder ID: `1`",
+        ),
+        (
+            {
+                "status": "error",
+                "message": "An exit for SBIN is already on its way (sent 10:52:13).",
+            },
+            "*Position not closed*",
+            "An exit for SBIN is already on its way (sent 10:52:13).",
+        ),
+        (
+            {
+                "status": "error",
+                "message": "This exit is not confirmed: it may have gone through.",
+                "not_confirmed": True,
+            },
+            "*Position close not confirmed*",
+            "This exit is not confirmed: it may have gone through.",
+        ),
+    ],
+    ids=["closed", "refused: on its way", "not confirmed"],
+)
+def test_flow_s_close_node_naming_a_position_does_not_speak_as_the_app_s_exit(
+    alerts, response, title, lines
+):
+    """A live Flow "Close Positions" node with a symbol used to read as the app's own Exit, and
+    said "No exit sent" over a close that had closed every position (the review's M5)."""
+    message = alerts("closeposition", response, order_data=FLOW_CLOSE)
+    assert message.startswith(title + "\n")
+    assert lines in message
+    assert "Exit sent" not in message and "No exit sent" not in message
+
+
+def test_a_cancel_all_reason_keeps_its_markdown_characters_whole(alerts):
+    message = alerts("cancelallorder", {"status": "error", "message": "order_id [A1] *gone*"})
+    assert "order\\_id \\[A1] \\*gone\\*" in message
 
 
 @pytest.mark.parametrize(
@@ -223,8 +339,25 @@ def test_an_exit_all_alert_has_its_own_title(alerts, response, title, line):
             "*All Orders Cancelled*",
             "Cancelled: 2 orders",
         ),
+        (
+            {"status": "error", "message": NOT_CANCELLED},
+            "*Cancel all did not cancel every order*",
+            NOT_CANCELLED,
+        ),
+        (
+            {"status": "error", "message": SEMI_AUTO},
+            "*Cancel all did not cancel every order*",
+            SEMI_AUTO,
+        ),
     ],
-    ids=["none open", "some not confirmed", "none cancelled", "all cancelled"],
+    ids=[
+        "none open",
+        "some not confirmed",
+        "none cancelled",
+        "all cancelled",
+        "orders not read",
+        "refused in semi-auto",
+    ],
 )
 def test_a_cancel_all_alert_says_what_it_did(alerts, response, title, line):
     message = alerts("cancelallorder", response)
