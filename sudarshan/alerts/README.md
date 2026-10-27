@@ -354,12 +354,13 @@ sudarshan-feed (one Upstox socket) -> ZMQ 127.0.0.1:5581 (ticks, __health__)
   login only. It forwards through OpenAlgo's shared HTTP client with explicit timeouts (3 s, 6 s
   for a change, 12 s for the test) after checking who listens on 5582, and learns whether market
   alerts are on from the service's `/health`. It holds no thread, loop or scheduler.
-- **The app** (M10.7). A fire, a card that changed, and the line under "Alerts" are pushed at once
-  to OpenAlgo's `/sudarshan/alerts/internal/push` (sealed under its own key, every 50 ms, at most
-  50 items and 128 KiB), which emits them to the Socket.IO room `sudarshan:alerts:owner` only: an
-  open app joins it when its session is the owner's. The answer is the room's size, recorded as
-  the app delivery ("Shown on 2 open screens", "No app was open"). A push is never retried; an app
-  that reconnects reads what it missed.
+- **The app** (M10.7). A fire, a card that changed, the line under "Alerts", and a fire's Telegram
+  delivery once it is sent or refused (for History) are pushed at once to OpenAlgo's
+  `/sudarshan/alerts/internal/push` (sealed under its own key, every 50 ms, at most 50 items and
+  128 KiB), which emits them to the Socket.IO room `sudarshan:alerts:owner` only: an open app joins
+  it when its session is the owner's. The answer is the room's size, recorded as the app delivery
+  ("Shown on 2 open screens", "No app was open"). A push is never retried; an app that reconnects
+  reads what it missed.
 
 | variable | default | meaning |
 |---|---|---|

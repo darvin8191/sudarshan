@@ -107,7 +107,9 @@ WORDS = {
 #: Every open app of the owner joins it (M10.7); nothing is broadcast.
 ROOM = "sudarshan:alerts:owner"
 NAMESPACE = "/"
-PUSH_EVENTS = frozenset({"sudarshan_market_alert", "sudarshan_market_alerts_state"})
+PUSH_EVENTS = frozenset(
+    {"sudarshan_market_alert", "sudarshan_market_alerts_state", "sudarshan_market_alert_delivery"}
+)
 #: The largest sealed push this route takes, and its items (cross-design X9).
 MAX_PUSH_BYTES = 128 * 1024
 MAX_PUSH_ITEMS = 50

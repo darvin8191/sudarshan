@@ -34,6 +34,8 @@ log = logging.getLogger("sudarshan.alerts.market")
 PUSH_PATH = "/sudarshan/alerts/internal/push"
 ALERT_EVENT = "sudarshan_market_alert"
 STATE_EVENT = "sudarshan_market_alerts_state"
+#: A fire's delivery that has settled (left pending), for History in the open apps.
+DELIVERY_EVENT = "sudarshan_market_alert_delivery"
 #: A batch waits this long for more items before it goes.
 BATCH_S = 0.05
 MAX_ITEMS = 50

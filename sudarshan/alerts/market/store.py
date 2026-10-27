@@ -474,6 +474,23 @@ class MarketStore:
                 ).rowcount
             )
 
+    def deliveries(self, principal: str, event_ids) -> dict[int, dict[str, dict[str, Any]]]:
+        """Event id -> channel -> its delivery, for these events (what a settled one became)."""
+        ids = sorted({int(event_id) for event_id in event_ids})
+        found: dict[int, dict[str, dict[str, Any]]] = {event_id: {} for event_id in ids}
+        if not ids:
+            return found
+        d = alert_delivery.c
+        query = select(alert_delivery).where(
+            d.event_id.in_(ids), d.principal == self._who(principal)
+        )
+        with self._read() as conn:
+            for row in conn.execute(query).mappings():
+                found[row["event_id"]][row["channel"]] = {
+                    name: row[name] for name in ("status", "reason", "attempts", "updated_at")
+                }
+        return found
+
     def events(
         self,
         principal: str,

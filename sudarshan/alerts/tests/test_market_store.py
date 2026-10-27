@@ -508,6 +508,10 @@ def test_deliveries_pages_and_catching_up(store):
     assert not store.set_delivery("owner", 12345, "telegram", "sent", "", NOW)
     with pytest.raises(ValueError):
         store.set_delivery("owner", ids[0], "telegram", "delivered", "", NOW)
+    settled = store.deliveries("owner", [ids[0], ids[1], 12345])  # as the push reads them back
+    assert settled[ids[0]]["telegram"] == {"status": "sent", "reason": "", "attempts": 1,
+                                           "updated_at": NOW + 10}  # fmt: skip
+    assert settled[ids[1]]["telegram"]["status"] == "pending" and settled[12345] == {}
     page = store.events("owner", limit=2)
     assert [e["id"] for e in page] == [test_id, ids[4]] and page[0]["test"]
     older = store.events("owner", before=page[-1]["id"], limit=2)
@@ -609,14 +613,15 @@ def test_one_principal_never_reads_anothers_rows(path):
     theirs = store.create("family", FIELDS, NOW)
     store.save_states("owner", {mine["id"]: (1, State(1)), theirs["id"]: (1, State(2))}, NOW)
     store.save_states("family", {theirs["id"]: (1, State(3))}, NOW)
-    store.record_fire("family", fire(theirs["id"], "2:v1:once"), State(3), title="t", line="l",
-                      value="v", level="l", channels=BOTH)  # fmt: skip
+    their_event = store.record_fire("family", fire(theirs["id"], "2:v1:once"), State(3),
+                                    title="t", line="l", value="v", level="l", channels=BOTH)  # fmt: skip
     store.set_prefs("family", telegram=False, app=False, now=NOW)
     assert [r["id"] for r in store.alerts("owner")] == [mine["id"]]
     assert store.alert("owner", theirs["id"]) is None
     assert store.states("owner") == {mine["id"]: State(1)}
     assert store.events("owner") == [] and store.events_since("owner", 0) == []
     assert store.pending("owner", "telegram") == []
+    assert store.deliveries("owner", [their_event]) == {their_event: {}}
     assert store.prefs("owner") == {"telegram": True, "app": True}
     assert not store.delete("owner", theirs["id"]) and store.alert("family", theirs["id"])
     with pytest.raises(NotFound):

@@ -17,7 +17,7 @@ from sudarshan.alerts.market import push, runtime
 from sudarshan.alerts.market.config import MarketSettings
 from sudarshan.alerts.market.desk import OwnerDesk
 from sudarshan.alerts.market.engine import Fire, State
-from sudarshan.alerts.market.push import ALERT_EVENT, STATE_EVENT, Pusher
+from sudarshan.alerts.market.push import ALERT_EVENT, DELIVERY_EVENT, STATE_EVENT, Pusher
 from sudarshan.alerts.market.runtime import MarketRuntime
 from sudarshan.alerts.outbox import Pacer
 from sudarshan.alerts.owner import Owner
@@ -146,6 +146,37 @@ def test_a_fire_reaches_the_open_apps_and_its_delivery_says_on_how_many_screens(
             await wait_until(lambda: len(record(settings, "events")) == 2 and record(
                 settings, "events")[0]["deliveries"]["app"]["status"] == "not_sent")  # fmt: skip
             assert record(settings, "events")[0]["deliveries"]["app"]["reason"] == "No app was open"
+            await closed(rt, task)
+
+    run(scenario)
+
+
+def test_a_telegram_delivery_that_settles_reaches_history_in_the_open_apps(alerts, quick):
+    """Contract v3: each fire's Telegram delivery, once it leaves pending, as market.db holds it;
+    a refused one too. The app delivery's own result is not pushed."""
+
+    async def scenario():
+        clock = Clock(ist(2026, 10, 21, 10, 0))
+        async with FakeFeed(clock) as feed, FakeOpenAlgo() as notify:
+            settings = alerts(notify)
+            office, rt, task = await started(settings, feed, clock)
+            await office.call("create", {"alert": draft(frequency="every_time")})
+            await following(rt)
+            await trade(feed, clock, 99.95)
+            await trade(feed, clock, 100.05, ltq=2)
+            await wait_until(lambda: items(notify, DELIVERY_EVENT))
+            [settled] = items(notify, DELIVERY_EVENT)
+            stored = record(settings, "events")[0]["deliveries"]["telegram"]
+            assert settled == {"event_id": 1, "channel": "telegram", "delivery": stored}
+            assert stored["status"] == "sent" and stored["reason"] == ""
+            notify.default = FakeOpenAlgo.STOPPED  # OpenAlgo's bot is stopped: not sent, in words
+            await trade(feed, clock, 99.9, ltq=3)
+            await trade(feed, clock, 100.2, ltq=4)
+            await wait_until(lambda: len(items(notify, DELIVERY_EVENT)) == 2)
+            refused = items(notify, DELIVERY_EVENT)[1]
+            assert refused["event_id"] == 2 and refused["delivery"]["status"] == "not_sent"
+            assert refused["delivery"]["reason"]
+            assert {i["channel"] for i in items(notify, DELIVERY_EVENT)} == {"telegram"}
             await closed(rt, task)
 
     run(scenario)

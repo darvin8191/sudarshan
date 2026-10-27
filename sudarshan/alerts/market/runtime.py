@@ -62,6 +62,7 @@ from sudarshan.alerts.market.feedlink import (
 from sudarshan.alerts.market.lane import Line, MarketLane
 from sudarshan.alerts.market.push import (
     ALERT_EVENT,
+    DELIVERY_EVENT,
     NONE_OPEN,
     NOT_ANSWERED,
     STATE_EVENT,
@@ -589,6 +590,24 @@ class MarketRuntime:
                 self._submit(self.store.set_delivery, OWNER, event_id, "telegram", status, reason,
                              now)  # fmt: skip
             self._resolve(event_id, "telegram", status)
+        self._push_settled([event_id for event_id in ids if event_id >= 0], "telegram")
+
+    def _push_settled(self, ids: list[int], channel: str) -> None:
+        """Deliveries that left pending, to the open apps' History, as market.db holds them: read
+        on the writer after their writes, so in order (contract v3). Never retried."""
+        if self.pusher is None or not ids:
+            return
+        read = self._submit(self.store.deliveries, OWNER, ids)
+        read.add_done_callback(lambda done: self._settled(done, channel))
+
+    def _settled(self, done: asyncio.Future, channel: str) -> None:
+        if done.cancelled() or done.exception() is not None or self.pusher is None:
+            return
+        for event_id, found in done.result().items():
+            delivery = found.get(channel)
+            if delivery is not None and delivery["status"] != "pending":
+                self.pusher.add(DELIVERY_EVENT, {"event_id": event_id, "channel": channel,
+                                                 "delivery": delivery})  # fmt: skip
 
     def _push_fire(self, event_id: int, alert: spec.Alert, fire: engine.Fire) -> None:
         """A recorded fire to the open apps (M10.7): the toast's words, and its marks."""

@@ -24,7 +24,7 @@ from bridge_app import OWNER, VIEWER, login_session, make_app, reset_users
 
 import blueprints.sudarshan_alerts as bp_module
 from extensions import socketio
-from sudarshan.alerts.market.push import ALERT_EVENT, STATE_EVENT, Pusher
+from sudarshan.alerts.market.push import ALERT_EVENT, DELIVERY_EVENT, STATE_EVENT, Pusher
 from sudarshan.autologin.handoff import NonceBook, seal
 from sudarshan.vault import ALERTS_API_INFO, ALERTS_PUSH_INFO, fernet_for
 from utils.thread_safe_cache import LockedTTLCache
@@ -78,14 +78,17 @@ def test_only_the_owner_s_sessions_join_and_a_push_reaches_only_them(room):
     _, quiet, _ = client(OWNER, join=False)  # the owner's, but it never joined
     state = {"engine": {"code": "ok", "line": "Watching · Real-time", "real_time": True},
              "alerts": [], "removed": [], "server_time": 1}  # fmt: skip
+    settled = {"event_id": 1, "channel": "telegram", "delivery": {
+        "status": "sent", "reason": "", "attempts": 0, "updated_at": 2}}  # fmt: skip
     answer = http.post(PUSH, data=sealed([{"event": ALERT_EVENT, "data": FIRE},
                                           {"event": STATE_EVENT, "data": state},
+                                          {"event": DELIVERY_EVENT, "data": settled},
                                           {"event": "order_update", "data": {"x": 1}}]))  # fmt: skip
     assert answer.status_code == 200
     assert answer.get_json() == {"status": "success", "screens": 1}
-    messages = owner.get_received()  # the two it may carry, never another event name
-    assert [(m["name"], m["args"][0]) for m in messages] == [(ALERT_EVENT, FIRE),
-                                                             (STATE_EVENT, state)]  # fmt: skip
+    messages = owner.get_received()  # the three it may carry, never another event name
+    assert [(m["name"], m["args"][0]) for m in messages] == [
+        (ALERT_EVENT, FIRE), (STATE_EVENT, state), (DELIVERY_EVENT, settled)]  # fmt: skip
     for other in (viewer, nobody, quiet):
         assert other.get_received() == []
 
