@@ -1,0 +1,993 @@
+{
+ "about": "Golden vectors for core/freshness.py and the calendar helpers under it (PA3). prices are of_price(price, today, last_session_day, old_days, holidays, noun); business_days and instants are the days.py helpers the phone repeats. Computed by make_pa3.py, which imports nothing from sudarshan; the instants are built from IST wall-clock times with its own calendar arithmetic.",
+ "prices": [
+  {
+   "id": "FR1",
+   "title": "A NAV of the last trading day is fresh",
+   "why": "Tuesday 27 Oct is the latest session and the NAV is dated that day: 0 business days behind.",
+   "price": {
+    "price_u": 456789,
+    "prev_close_u": 455000,
+    "day": 20261027,
+    "at": null,
+    "source": "amfi",
+    "basis": "nav",
+    "late": false
+   },
+   "context": {
+    "today": 20261027,
+    "last_session_day": 20261027
+   },
+   "expect": {
+    "state": "fresh",
+    "words": "NAV of 27 Oct"
+   }
+  },
+  {
+   "id": "FR1b",
+   "title": "Yesterday's NAV is fresh",
+   "why": "Monday 26 Oct against Tuesday 27 Oct: 1 business day behind.",
+   "price": {
+    "price_u": 456789,
+    "prev_close_u": 455000,
+    "day": 20261026,
+    "at": null,
+    "source": "amfi",
+    "basis": "nav",
+    "late": false
+   },
+   "context": {
+    "today": 20261027,
+    "last_session_day": 20261027
+   },
+   "expect": {
+    "state": "fresh",
+    "words": "NAV of 26 Oct"
+   }
+  },
+  {
+   "id": "FR2",
+   "title": "A NAV 4 business days behind is old",
+   "why": "Wednesday 21 Oct against Tuesday 27 Oct: Thu 22, Fri 23, Mon 26 and Tue 27 are 4 business days, more than 3.",
+   "price": {
+    "price_u": 456789,
+    "prev_close_u": 455000,
+    "day": 20261021,
+    "at": null,
+    "source": "amfi",
+    "basis": "nav",
+    "late": false
+   },
+   "context": {
+    "today": 20261027,
+    "last_session_day": 20261027
+   },
+   "expect": {
+    "state": "old",
+    "words": "NAV of 21 Oct; AMFI has not published a newer one."
+   }
+  },
+  {
+   "id": "FR2b",
+   "title": "3 business days behind is still fresh",
+   "why": "Thursday 22 Oct: Fri 23, Mon 26, Tue 27 are 3 business days, not more than 3.",
+   "price": {
+    "price_u": 456789,
+    "prev_close_u": 455000,
+    "day": 20261022,
+    "at": null,
+    "source": "amfi",
+    "basis": "nav",
+    "late": false
+   },
+   "context": {
+    "today": 20261027,
+    "last_session_day": 20261027
+   },
+   "expect": {
+    "state": "fresh",
+    "words": "NAV of 22 Oct"
+   }
+  },
+  {
+   "id": "FR2c",
+   "title": "A weekend is not business days",
+   "why": "Against Monday 26 Oct the Thursday 22 Oct NAV is only 2 business days behind (Fri 23, Mon 26) though it is 4 calendar days.",
+   "price": {
+    "price_u": 456789,
+    "prev_close_u": 455000,
+    "day": 20261022,
+    "at": null,
+    "source": "amfi",
+    "basis": "nav",
+    "late": false
+   },
+   "context": {
+    "today": 20261027,
+    "last_session_day": 20261026
+   },
+   "expect": {
+    "state": "fresh",
+    "words": "NAV of 22 Oct"
+   }
+  },
+  {
+   "id": "FR2d",
+   "title": "A holiday is not a business day",
+   "why": "Wednesday 21 Oct against Tuesday 27 Oct is 4 business days, but Thursday 22 Oct was a holiday: 3, so fresh.",
+   "price": {
+    "price_u": 456789,
+    "prev_close_u": 455000,
+    "day": 20261021,
+    "at": null,
+    "source": "amfi",
+    "basis": "nav",
+    "late": false
+   },
+   "context": {
+    "today": 20261027,
+    "last_session_day": 20261027,
+    "holidays": [
+     20261022
+    ]
+   },
+   "expect": {
+    "state": "fresh",
+    "words": "NAV of 21 Oct"
+   }
+  },
+  {
+   "id": "FR2e",
+   "title": "A holiday on a weekend changes nothing",
+   "why": "The same NAV with only Saturday 24 Oct a holiday: still 4 business days, old.",
+   "price": {
+    "price_u": 456789,
+    "prev_close_u": 455000,
+    "day": 20261021,
+    "at": null,
+    "source": "amfi",
+    "basis": "nav",
+    "late": false
+   },
+   "context": {
+    "today": 20261027,
+    "last_session_day": 20261027,
+    "holidays": [
+     20261024
+    ]
+   },
+   "expect": {
+    "state": "old",
+    "words": "NAV of 21 Oct; AMFI has not published a newer one."
+   }
+  },
+  {
+   "id": "FR2f",
+   "title": "A NAV from last year says the year",
+   "why": "30 Dec 2025 against 27 Oct 2026 is far more than 3 business days: old, and the year is said because it is not this year's.",
+   "price": {
+    "price_u": 456789,
+    "prev_close_u": 455000,
+    "day": 20251230,
+    "at": null,
+    "source": "amfi",
+    "basis": "nav",
+    "late": false
+   },
+   "context": {
+    "today": 20261027,
+    "last_session_day": 20261027
+   },
+   "expect": {
+    "state": "old",
+    "words": "NAV of 30 Dec 2025; AMFI has not published a newer one."
+   }
+  },
+  {
+   "id": "FR2g",
+   "title": "A NAV dated after the last session is not behind",
+   "why": "The NAV of Tuesday 27 Oct seen when the latest session is Monday 26 Oct: 0 days behind.",
+   "price": {
+    "price_u": 456789,
+    "prev_close_u": 455000,
+    "day": 20261027,
+    "at": null,
+    "source": "amfi",
+    "basis": "nav",
+    "late": false
+   },
+   "context": {
+    "today": 20261027,
+    "last_session_day": 20261026
+   },
+   "expect": {
+    "state": "fresh",
+    "words": "NAV of 27 Oct"
+   }
+  },
+  {
+   "id": "FR3",
+   "title": "A value 45 days old is old past 30 days",
+   "why": "12 Sep to 27 Oct is 18 + 27 = 45 days; the tab's limit is 30.",
+   "price": {
+    "price_u": 72505000,
+    "prev_close_u": null,
+    "day": 20260912,
+    "at": null,
+    "source": "manual",
+    "basis": "manual",
+    "late": false
+   },
+   "context": {
+    "today": 20261027,
+    "last_session_day": 20261027,
+    "old_days": 30
+   },
+   "expect": {
+    "state": "old",
+    "words": "Value from 12 Sep · 45 days old"
+   }
+  },
+  {
+   "id": "FR4",
+   "title": "A value 10 days old is fresh",
+   "why": "17 Oct to 27 Oct is 10 days.",
+   "price": {
+    "price_u": 72505000,
+    "prev_close_u": null,
+    "day": 20261017,
+    "at": null,
+    "source": "manual",
+    "basis": "manual",
+    "late": false
+   },
+   "context": {
+    "today": 20261027,
+    "last_session_day": 20261027,
+    "old_days": 30
+   },
+   "expect": {
+    "state": "fresh",
+    "words": "Value from 17 Oct · 10 days old"
+   }
+  },
+  {
+   "id": "FR4b",
+   "title": "Exactly the limit is not past it",
+   "why": "27 Sep to 27 Oct is 30 days, which is not more than 30.",
+   "price": {
+    "price_u": 72505000,
+    "prev_close_u": null,
+    "day": 20260927,
+    "at": null,
+    "source": "manual",
+    "basis": "manual",
+    "late": false
+   },
+   "context": {
+    "today": 20261027,
+    "last_session_day": 20261027,
+    "old_days": 30
+   },
+   "expect": {
+    "state": "fresh",
+    "words": "Value from 27 Sep · 30 days old"
+   }
+  },
+  {
+   "id": "FR4c",
+   "title": "One day past the limit is old",
+   "why": "26 Sep to 27 Oct is 31 days.",
+   "price": {
+    "price_u": 72505000,
+    "prev_close_u": null,
+    "day": 20260926,
+    "at": null,
+    "source": "manual",
+    "basis": "manual",
+    "late": false
+   },
+   "context": {
+    "today": 20261027,
+    "last_session_day": 20261027,
+    "old_days": 30
+   },
+   "expect": {
+    "state": "old",
+    "words": "Value from 26 Sep · 31 days old"
+   }
+  },
+  {
+   "id": "FR4d",
+   "title": "Entered today",
+   "why": "The age is 0 and the words say today.",
+   "price": {
+    "price_u": 72505000,
+    "prev_close_u": null,
+    "day": 20261027,
+    "at": null,
+    "source": "manual",
+    "basis": "manual",
+    "late": false
+   },
+   "context": {
+    "today": 20261027,
+    "last_session_day": 20261027,
+    "old_days": 30
+   },
+   "expect": {
+    "state": "fresh",
+    "words": "Value from 27 Oct · today"
+   }
+  },
+  {
+   "id": "FR4e",
+   "title": "One day old",
+   "why": "Singular: 1 day old.",
+   "price": {
+    "price_u": 72505000,
+    "prev_close_u": null,
+    "day": 20261026,
+    "at": null,
+    "source": "manual",
+    "basis": "manual",
+    "late": false
+   },
+   "context": {
+    "today": 20261027,
+    "last_session_day": 20261027,
+    "old_days": 30
+   },
+   "expect": {
+    "state": "fresh",
+    "words": "Value from 26 Oct · 1 day old"
+   }
+  },
+  {
+   "id": "FR4f",
+   "title": "A limit under a week is read as a week",
+   "why": "The limit is 7 to 365 days: 3 is read as 7. 20 Oct is 7 days old, not past 7.",
+   "price": {
+    "price_u": 72505000,
+    "prev_close_u": null,
+    "day": 20261020,
+    "at": null,
+    "source": "manual",
+    "basis": "manual",
+    "late": false
+   },
+   "context": {
+    "today": 20261027,
+    "last_session_day": 20261027,
+    "old_days": 3
+   },
+   "expect": {
+    "state": "fresh",
+    "words": "Value from 20 Oct · 7 days old"
+   }
+  },
+  {
+   "id": "FR4g",
+   "title": "...and 8 days is past it",
+   "why": "The same limit of 3 read as 7: 19 Oct is 8 days old.",
+   "price": {
+    "price_u": 72505000,
+    "prev_close_u": null,
+    "day": 20261019,
+    "at": null,
+    "source": "manual",
+    "basis": "manual",
+    "late": false
+   },
+   "context": {
+    "today": 20261027,
+    "last_session_day": 20261027,
+    "old_days": 3
+   },
+   "expect": {
+    "state": "old",
+    "words": "Value from 19 Oct · 8 days old"
+   }
+  },
+  {
+   "id": "FR4h",
+   "title": "A limit over a year is read as a year",
+   "why": "1000 is read as 365: 27 Oct 2025 is 365 days old (no leap day since), not past 365, and the year is said.",
+   "price": {
+    "price_u": 72505000,
+    "prev_close_u": null,
+    "day": 20251027,
+    "at": null,
+    "source": "manual",
+    "basis": "manual",
+    "late": false
+   },
+   "context": {
+    "today": 20261027,
+    "last_session_day": 20261027,
+    "old_days": 1000
+   },
+   "expect": {
+    "state": "fresh",
+    "words": "Value from 27 Oct 2025 · 365 days old"
+   }
+  },
+  {
+   "id": "FR4i",
+   "title": "...and 366 days is past it",
+   "why": "26 Oct 2025 is 366 days before 27 Oct 2026.",
+   "price": {
+    "price_u": 72505000,
+    "prev_close_u": null,
+    "day": 20251026,
+    "at": null,
+    "source": "manual",
+    "basis": "manual",
+    "late": false
+   },
+   "context": {
+    "today": 20261027,
+    "last_session_day": 20261027,
+    "old_days": 1000
+   },
+   "expect": {
+    "state": "old",
+    "words": "Value from 26 Oct 2025 · 366 days old"
+   }
+  },
+  {
+   "id": "FR4j",
+   "title": "A tab that keeps values 90 days",
+   "why": "45 days old against a limit of 90 is fresh.",
+   "price": {
+    "price_u": 72505000,
+    "prev_close_u": null,
+    "day": 20260912,
+    "at": null,
+    "source": "manual",
+    "basis": "manual",
+    "late": false
+   },
+   "context": {
+    "today": 20261027,
+    "last_session_day": 20261027,
+    "old_days": 90
+   },
+   "expect": {
+    "state": "fresh",
+    "words": "Value from 12 Sep · 45 days old"
+   }
+  },
+  {
+   "id": "FR4k",
+   "title": "A loan's balance says Balance",
+   "why": "The same 45 days on a liability: Balance, not Value.",
+   "price": {
+    "price_u": 72505000,
+    "prev_close_u": null,
+    "day": 20260912,
+    "at": null,
+    "source": "manual",
+    "basis": "manual",
+    "late": false
+   },
+   "context": {
+    "today": 20261027,
+    "last_session_day": 20261027,
+    "old_days": 30,
+    "noun": "Balance"
+   },
+   "expect": {
+    "state": "old",
+    "words": "Balance from 12 Sep · 45 days old"
+   }
+  },
+  {
+   "id": "FR4l",
+   "title": "A value dated after today is read as today's",
+   "why": "28 Oct seen on 27 Oct has no negative age: it says today.",
+   "price": {
+    "price_u": 72505000,
+    "prev_close_u": null,
+    "day": 20261028,
+    "at": null,
+    "source": "manual",
+    "basis": "manual",
+    "late": false
+   },
+   "context": {
+    "today": 20261027,
+    "last_session_day": 20261027,
+    "old_days": 30
+   },
+   "expect": {
+    "state": "fresh",
+    "words": "Value from 28 Oct · today"
+   }
+  },
+  {
+   "id": "FR4m",
+   "title": "A value from last year says the year",
+   "why": "10 Dec 2025 seen on 15 Jan 2026: 31 + 5 = 36 days, past 30.",
+   "price": {
+    "price_u": 72505000,
+    "prev_close_u": null,
+    "day": 20251210,
+    "at": null,
+    "source": "manual",
+    "basis": "manual",
+    "late": false
+   },
+   "context": {
+    "today": 20260115,
+    "last_session_day": 20260115,
+    "old_days": 30
+   },
+   "expect": {
+    "state": "old",
+    "words": "Value from 10 Dec 2025 · 36 days old"
+   }
+  },
+  {
+   "id": "FR5",
+   "title": "A tick says nothing: the feed line speaks",
+   "why": "A last trade of today from the feed has no sentence of its own.",
+   "price": {
+    "price_u": 14282500,
+    "prev_close_u": 14000000,
+    "day": 20261027,
+    "at": 1793077865000,
+    "source": "feed",
+    "basis": "last",
+    "late": false
+   },
+   "context": {
+    "today": 20261027,
+    "last_session_day": 20261027
+   },
+   "expect": {
+    "state": "fresh",
+    "words": null
+   }
+  },
+  {
+   "id": "FR5b",
+   "title": "No price yet",
+   "why": "Nothing has priced it: old, and the sentence says so.",
+   "price": {
+    "price_u": null,
+    "prev_close_u": null,
+    "day": null,
+    "at": null,
+    "source": null,
+    "basis": null,
+    "late": false
+   },
+   "context": {
+    "today": 20261027,
+    "last_session_day": 20261027
+   },
+   "expect": {
+    "state": "old",
+    "words": "No price yet"
+   }
+  },
+  {
+   "id": "FR5c",
+   "title": "A quote says so, with its time",
+   "why": "A quote taken at 10:41:05 IST today (the instant is that wall-clock time on 27 Oct 2026).",
+   "price": {
+    "price_u": 14282500,
+    "prev_close_u": 14000000,
+    "day": 20261027,
+    "at": 1793077865000,
+    "source": "quote",
+    "basis": "last",
+    "late": false
+   },
+   "context": {
+    "today": 20261027,
+    "last_session_day": 20261027
+   },
+   "expect": {
+    "state": "fresh",
+    "words": "Last price 10:41:05 (quote)"
+   }
+  },
+  {
+   "id": "FR5d",
+   "title": "A closing record read on the weekend says so, with the day",
+   "why": "Friday's last trade at 15:29:58, seen on Saturday 24 Oct (Friday was the latest session).",
+   "price": {
+    "price_u": 14000000,
+    "prev_close_u": null,
+    "day": 20261023,
+    "at": 1792749598000,
+    "source": "feed",
+    "basis": "last",
+    "late": false
+   },
+   "context": {
+    "today": 20261024,
+    "last_session_day": 20261023
+   },
+   "expect": {
+    "state": "fresh",
+    "words": "Last price 15:29:58, 23 Oct (closing record)"
+   }
+  },
+  {
+   "id": "FR5e",
+   "title": "A record taken late says so",
+   "why": "Today's closing record, taken at 17:00 after the service was down at 15:55, still holds the last trade of 15:29:58.",
+   "price": {
+    "price_u": 14000000,
+    "prev_close_u": null,
+    "day": 20261027,
+    "at": 1793095198000,
+    "source": "feed",
+    "basis": "last",
+    "late": true
+   },
+   "context": {
+    "today": 20261027,
+    "last_session_day": 20261027
+   },
+   "expect": {
+    "state": "fresh",
+    "words": "Last price 15:29:58 (closing record, taken late)"
+   }
+  },
+  {
+   "id": "FR5f",
+   "title": "The official close",
+   "why": "Friday's price settled to the official close, read on Saturday.",
+   "price": {
+    "price_u": 14000000,
+    "prev_close_u": null,
+    "day": 20261023,
+    "at": 1792749598000,
+    "source": "feed",
+    "basis": "close",
+    "late": false
+   },
+   "context": {
+    "today": 20261024,
+    "last_session_day": 20261023
+   },
+   "expect": {
+    "state": "fresh",
+    "words": "Close of 23 Oct"
+   }
+  },
+  {
+   "id": "FR5g",
+   "title": "A price from before the latest session is old",
+   "why": "A price of Thursday 22 Oct when Friday 23 Oct has been traded.",
+   "price": {
+    "price_u": 14000000,
+    "prev_close_u": null,
+    "day": 20261022,
+    "at": 1792663198000,
+    "source": "feed",
+    "basis": "last",
+    "late": false
+   },
+   "context": {
+    "today": 20261024,
+    "last_session_day": 20261023
+   },
+   "expect": {
+    "state": "old",
+    "words": "Price of 22 Oct; no newer price yet."
+   }
+  },
+  {
+   "id": "FR5h",
+   "title": "Before the open on a Monday Friday's record is fresh",
+   "why": "Monday 26 Oct before 09:15: the latest session is still Friday 23 Oct, so Friday's last trade is the price to show.",
+   "price": {
+    "price_u": 14000000,
+    "prev_close_u": null,
+    "day": 20261023,
+    "at": 1792749598000,
+    "source": "feed",
+    "basis": "last",
+    "late": false
+   },
+   "context": {
+    "today": 20261026,
+    "last_session_day": 20261023
+   },
+   "expect": {
+    "state": "fresh",
+    "words": "Last price 15:29:58, 23 Oct (closing record)"
+   }
+  },
+  {
+   "id": "FR5i",
+   "title": "A quote with no time",
+   "why": "No time was kept for the quote: the sentence leaves the time out.",
+   "price": {
+    "price_u": 14282500,
+    "prev_close_u": null,
+    "day": 20261027,
+    "at": null,
+    "source": "quote",
+    "basis": "last",
+    "late": false
+   },
+   "context": {
+    "today": 20261027,
+    "last_session_day": 20261027
+   },
+   "expect": {
+    "state": "fresh",
+    "words": "Last price (quote)"
+   }
+  },
+  {
+   "id": "FR5j",
+   "title": "A quote from the last session, no time",
+   "why": "A quote of Friday seen on Saturday, with no time: only the day.",
+   "price": {
+    "price_u": 14000000,
+    "prev_close_u": null,
+    "day": 20261023,
+    "at": null,
+    "source": "quote",
+    "basis": "last",
+    "late": false
+   },
+   "context": {
+    "today": 20261024,
+    "last_session_day": 20261023
+   },
+   "expect": {
+    "state": "fresh",
+    "words": "Last price 23 Oct (quote)"
+   }
+  },
+  {
+   "id": "FR5k",
+   "title": "An old price from last year says the year",
+   "why": "31 Dec 2025 when 2 Jan 2026 has traded.",
+   "price": {
+    "price_u": 14000000,
+    "prev_close_u": null,
+    "day": 20251231,
+    "at": 1767175198000,
+    "source": "feed",
+    "basis": "last",
+    "late": false
+   },
+   "context": {
+    "today": 20260102,
+    "last_session_day": 20260102
+   },
+   "expect": {
+    "state": "old",
+    "words": "Price of 31 Dec 2025; no newer price yet."
+   }
+  },
+  {
+   "id": "FR5l",
+   "title": "A fund with no NAV yet",
+   "why": "A fund that has no NAV: the same sentence as any holding with no price.",
+   "price": {
+    "price_u": null,
+    "prev_close_u": null,
+    "day": null,
+    "at": null,
+    "source": "amfi",
+    "basis": "nav",
+    "late": false
+   },
+   "context": {
+    "today": 20261027,
+    "last_session_day": 20261027
+   },
+   "expect": {
+    "state": "old",
+    "words": "No price yet"
+   }
+  }
+ ],
+ "business_days": [
+  {
+   "start": 20261027,
+   "end": 20261027,
+   "holidays": [],
+   "expect": 0,
+   "why": "The same day is 0 days behind."
+  },
+  {
+   "start": 20261026,
+   "end": 20261027,
+   "holidays": [],
+   "expect": 1,
+   "why": "Monday to Tuesday."
+  },
+  {
+   "start": 20261023,
+   "end": 20261026,
+   "holidays": [],
+   "expect": 1,
+   "why": "Friday to Monday is one business day."
+  },
+  {
+   "start": 20261024,
+   "end": 20261026,
+   "holidays": [],
+   "expect": 1,
+   "why": "From a Saturday: only Monday counts."
+  },
+  {
+   "start": 20261025,
+   "end": 20261026,
+   "holidays": [],
+   "expect": 1,
+   "why": "From a Sunday: only Monday counts."
+  },
+  {
+   "start": 20261023,
+   "end": 20261025,
+   "holidays": [],
+   "expect": 0,
+   "why": "Friday to Sunday: nothing in between is a business day."
+  },
+  {
+   "start": 20261024,
+   "end": 20261025,
+   "holidays": [],
+   "expect": 0,
+   "why": "Saturday to Sunday."
+  },
+  {
+   "start": 20261022,
+   "end": 20261027,
+   "holidays": [],
+   "expect": 3,
+   "why": "Thursday to the next Tuesday."
+  },
+  {
+   "start": 20261021,
+   "end": 20261027,
+   "holidays": [],
+   "expect": 4,
+   "why": "Wednesday to the next Tuesday."
+  },
+  {
+   "start": 20261021,
+   "end": 20261027,
+   "holidays": [
+    20261022
+   ],
+   "expect": 3,
+   "why": "A weekday holiday inside the range is left out."
+  },
+  {
+   "start": 20261021,
+   "end": 20261027,
+   "holidays": [
+    20261024
+   ],
+   "expect": 4,
+   "why": "A holiday on a Saturday changes nothing."
+  },
+  {
+   "start": 20261021,
+   "end": 20261027,
+   "holidays": [
+    20261021
+   ],
+   "expect": 4,
+   "why": "The start day itself is not counted, holiday or not."
+  },
+  {
+   "start": 20261021,
+   "end": 20261027,
+   "holidays": [
+    20261027
+   ],
+   "expect": 3,
+   "why": "A holiday on the end day takes it off."
+  },
+  {
+   "start": 20261021,
+   "end": 20261027,
+   "holidays": [
+    20261110
+   ],
+   "expect": 4,
+   "why": "A holiday after the range changes nothing."
+  },
+  {
+   "start": 20261021,
+   "end": 20261027,
+   "holidays": [
+    20261022,
+    20261022
+   ],
+   "expect": 3,
+   "why": "A holiday listed twice is one holiday."
+  },
+  {
+   "start": 20261027,
+   "end": 20261021,
+   "holidays": [],
+   "expect": 0,
+   "why": "End before start is 0, not negative."
+  },
+  {
+   "start": 20260101,
+   "end": 20261231,
+   "holidays": [],
+   "expect": 260,
+   "why": "The 364 days after 1 Jan 2026 are exactly 52 weeks: 260."
+  },
+  {
+   "start": 20240228,
+   "end": 20240301,
+   "holidays": [],
+   "expect": 2,
+   "why": "Over 29 February 2024 (Wed 28 Feb to Fri 1 Mar: Thu, Fri)."
+  }
+ ],
+ "instants": [
+  {
+   "at": 1793077865000,
+   "day": 20261027,
+   "clock": "10:41:05",
+   "why": "An ordinary morning."
+  },
+  {
+   "at": 1793125799999,
+   "day": 20261027,
+   "clock": "23:59:59",
+   "why": "The last millisecond of the IST day; the millisecond is dropped."
+  },
+  {
+   "at": 1793125800000,
+   "day": 20261028,
+   "clock": "00:00:00",
+   "why": "Midnight IST is 18:30 UTC the evening before."
+  },
+  {
+   "at": 1793039400000,
+   "day": 20261027,
+   "clock": "00:00:00",
+   "why": "The first instant of an IST day."
+  },
+  {
+   "at": 1793059199999,
+   "day": 20261027,
+   "clock": "05:29:59",
+   "why": "Just before 00:00 UTC, still the same IST day."
+  },
+  {
+   "at": 1835418600000,
+   "day": 20280229,
+   "clock": "12:00:00",
+   "why": "A leap day."
+  },
+  {
+   "at": 1798741799000,
+   "day": 20261231,
+   "clock": "23:59:59",
+   "why": "The last second of a year."
+  },
+  {
+   "at": 1798741800001,
+   "day": 20270101,
+   "clock": "00:00:00",
+   "why": "The first millisecond of a year."
+  },
+  {
+   "at": 0,
+   "day": 19700101,
+   "clock": "05:30:00",
+   "why": "The epoch itself is 05:30:00 in IST."
+  }
+ ]
+}

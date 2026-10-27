@@ -625,11 +625,14 @@ export interface HoldingLine {
   qty_u: QtyU
   /** The quantity at the open: after today's splits and bonuses, before today's trades. */
   open_qty_u: QtyU
-  /** Cost of the open lots, charges included. */
+  /** Cost of the lots held now (qty_u), charges included. */
   cost_paise: Paise
-  /** Today's acquisitions at their gross amounts; a transfer between accounts at the previous close. */
+  /**
+   * Money that came in today: acquisitions at their gross amounts, shares brought in from outside
+   * at the value entered, and shares moved in from another account at the previous close.
+   */
   in_today_paise: Paise
-  /** Today's disposals at their gross amounts. */
+  /** Money that went out today, counted the same ways: disposals, shares taken out, shares moved. */
   out_today_paise: Paise
   /** Units in lots held more than a year. */
   over_year_qty_u: QtyU
@@ -659,9 +662,11 @@ export interface TodayFigure {
   /** What the percentage is of: the open value plus today's money in. */
   base_paise: Paise
   pct: Pct | null
-  /** Rows in the figure; rows left out because their previous close or NAV is not known yet. */
+  /** Rows in the figure. */
   counted: number
+  /** Rows left out because a price or previous close they need is not known yet. */
   unknown: number
+  /** Funds left out because their NAV for today is not published yet. */
   pending: number
 }
 
@@ -672,7 +677,10 @@ export interface TabFixed {
   fees_paise: Paise
   money_in_paise: Paise
   money_out_paise: Paise
-  /** Today from holdings sold out today (hidden from the list); null when a previous close is unknown. */
+  /**
+   * Today from holdings sold out today (hidden from the list); null when one of them has no
+   * previous close, and the tab says a holding sold today is not in the figure.
+   */
   closed_today_paise: Paise | null
   closed_today_base_paise: Paise
   /** Outstanding liabilities (a tab with a loan shows net worth). */
@@ -687,6 +695,8 @@ export interface TabTotals {
   overall_gain_paise: Paise
   absolute_return_pct: Pct | null
   today: TodayFigure
+  /** Holdings with no price yet, counted at their cost; the screen says how many. */
+  unpriced: number
 }
 
 export interface TabLive {

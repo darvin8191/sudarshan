@@ -67,6 +67,69 @@ def day_text(day: int) -> str:
     return f"{day % 100} {MONTHS[day // 100 % 100 - 1]} {day // 10000}"
 
 
+def pct_text(scaled: int) -> str:
+    """A percentage counted in ten-thousandths of a percent as text: 80000 -> "8.0000"."""
+    whole, part = divmod(abs(scaled), 10_000)
+    return ("-" if scaled < 0 else "") + f"{whole}.{part:04d}"
+
+
+def pct4(numerator: int, denominator: int):
+    """``numerator / denominator`` as a percentage with 4 decimals (half away from zero), or None."""
+    if denominator == 0:
+        return None
+    return pct_text(rd(numerator * 100 * 10_000, denominator))
+
+
+# ---------------------------------------------------------------- the calendar, worked out again
+def days_from_civil(year: int, month: int, day: int) -> int:
+    """Days since 1 Jan 1970 (Howard Hinnant's civil-days algorithm)."""
+    year -= month <= 2
+    era = year // 400
+    yoe = year - era * 400
+    doy = (153 * (month + (-3 if month > 2 else 9)) + 2) // 5 + day - 1
+    doe = yoe * 365 + yoe // 4 - yoe // 100 + doy
+    return era * 146097 + doe - 719468
+
+
+def civil_days(day: int) -> int:
+    return days_from_civil(day // 10000, day // 100 % 100, day % 100)
+
+
+def weekday(day: int) -> int:
+    """0 for Monday to 6 for Sunday (1 Jan 1970 was a Thursday)."""
+    return (civil_days(day) + 3) % 7
+
+
+def epoch_ms(day: int, hour: int, minute: int, second: int, millis: int = 0) -> int:
+    """The instant of an IST wall-clock time on ``day``, in epoch milliseconds."""
+    seconds = civil_days(day) * 86400 + hour * 3600 + minute * 60 + second
+    return (seconds - 19800) * 1000 + millis
+
+
+def business_days(start: int, end: int, holidays=()) -> int:
+    """Weekdays after ``start`` up to and including ``end``, counted one day at a time."""
+    count = 0
+    for step in range(1, civil_days(end) - civil_days(start) + 1):
+        day = _next_days(start, step)
+        if weekday(day) < 5 and day not in holidays:
+            count += 1
+    return count
+
+
+def _next_days(day: int, step: int) -> int:
+    """The day ``step`` days after ``day`` as YYYYMMDD."""
+    z = civil_days(day) + step + 719468
+    era = z // 146097
+    doe = z - era * 146097
+    yoe = (doe - doe // 1460 + doe // 36524 - doe // 146096) // 365
+    doy = doe - (365 * yoe + yoe // 4 - yoe // 100)
+    mp = (5 * doy + 2) // 153
+    d = doy - (153 * mp + 2) // 5 + 1
+    m = mp + (3 if mp < 10 else -9)
+    y = yoe + era * 400 + (m <= 2)
+    return y * 10000 + m * 100 + d
+
+
 # ---------------------------------------------------------------- the shape of a ledger case
 def e(i, kind, day, account, asset, qty_u=None, amount=None, **more):
     """An entry row in the contract's names; ``seq`` is the id, so entry order is id order."""

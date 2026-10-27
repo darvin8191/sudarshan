@@ -1,0 +1,1045 @@
+{
+ "about": "Golden vectors for core/daylines.py (PA3): a tab's entries replayed up to 'today' and turned into the lines the screen prices, with the figures of each priced row. The numbers are worked out by hand in each case's why; make_pa3.py writes this file and imports nothing from sudarshan. Python only: the phone is sent the lines.",
+ "cases": [
+  {
+   "id": "DL1",
+   "title": "Today's purchase is money in at its gross amount, the charges are in the cost",
+   "why": "10 shares bought on 5 Jan for 1,300.00 each-way total 13,000.00 (1300000), and 5 more today for 7,100.00 (710000) with 20.00 (2000) charges. Now 15 held, 10 at the open. The new lot costs 712000 (the charges are part of the cost) but the money in today is 710000, the gross trade amount. Cost 1300000 + 712000 = 2012000. At 1,428.25 against a close of 1,400.00 this is VA3: value 2142375, Today 32375 on 2110000, unrealised 130375.",
+   "today": 20261027,
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260105,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 1300000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "BUY",
+     "trade_date": 20261027,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 5000000,
+     "amount_paise": 710000,
+     "charges_paise": 2000
+    }
+   ],
+   "prev_close_u": {
+    "1": 14000000
+   },
+   "price_u": {
+    "1": 14282500
+   },
+   "expect": {
+    "lines": {
+     "1": [
+      {
+       "account_id": 1,
+       "qty_u": 15000000,
+       "open_qty_u": 10000000,
+       "cost_paise": 2012000,
+       "in_today_paise": 710000,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    },
+    "rows": {
+     "1": {
+      "value_paise": 2142375,
+      "cost_paise": 2012000,
+      "unrealised_paise": 130375,
+      "gain_pct": "6.4799",
+      "priced": true,
+      "today": {
+       "state": "ok",
+       "paise": 32375,
+       "base_paise": 2110000,
+       "pct": "1.5344",
+       "counted": 1,
+       "unknown": 0,
+       "pending": 0
+      }
+     }
+    }
+   }
+  },
+  {
+   "id": "DL2",
+   "title": "Today's sale is money out at its gross amount",
+   "why": "10 shares for 900.00 (90000), then 4 sold today for 420.00 (42000) with 15.00 charges. The 4 take 4/10 of the cost, 36000, leaving 54000. Money out is the gross 42000. At 104.00 against 100.00 this is VA5: value 62400, Today 4400.",
+   "today": 20261027,
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260105,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 90000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "SELL",
+     "trade_date": 20261027,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 4000000,
+     "amount_paise": 42000,
+     "charges_paise": 1500
+    }
+   ],
+   "prev_close_u": {
+    "1": 1000000
+   },
+   "price_u": {
+    "1": 1040000
+   },
+   "expect": {
+    "lines": {
+     "1": [
+      {
+       "account_id": 1,
+       "qty_u": 6000000,
+       "open_qty_u": 10000000,
+       "cost_paise": 54000,
+       "in_today_paise": 0,
+       "out_today_paise": 42000,
+       "over_year_qty_u": 0
+      }
+     ]
+    },
+    "rows": {
+     "1": {
+      "value_paise": 62400,
+      "cost_paise": 54000,
+      "unrealised_paise": 8400,
+      "gain_pct": "15.5556",
+      "priced": true,
+      "today": {
+       "state": "ok",
+       "paise": 4400,
+       "base_paise": 100000,
+       "pct": "4.4000",
+       "counted": 1,
+       "unknown": 0,
+       "pending": 0
+      }
+     }
+    }
+   }
+  },
+  {
+   "id": "DL3",
+   "title": "A holding sold out today keeps its line",
+   "why": "10 shares sold today for 1,050.00 (105000): nothing is held now, 10 were at the open, 105000 went out. The line stays (the list hides it, the tab's Today needs it). At a previous close of 100.00 this is VA8: Today 5000 on 100000.",
+   "today": 20261027,
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260105,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 90000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "SELL",
+     "trade_date": 20261027,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 105000
+    }
+   ],
+   "prev_close_u": {
+    "1": 1000000
+   },
+   "price_u": {
+    "1": 1050000
+   },
+   "expect": {
+    "lines": {
+     "1": [
+      {
+       "account_id": 1,
+       "qty_u": 0,
+       "open_qty_u": 10000000,
+       "cost_paise": 0,
+       "in_today_paise": 0,
+       "out_today_paise": 105000,
+       "over_year_qty_u": 0
+      }
+     ]
+    },
+    "rows": {
+     "1": {
+      "value_paise": 0,
+      "cost_paise": 0,
+      "unrealised_paise": 0,
+      "gain_pct": null,
+      "priced": true,
+      "today": {
+       "state": "ok",
+       "paise": 5000,
+       "base_paise": 100000,
+       "pct": "5.0000",
+       "counted": 1,
+       "unknown": 0,
+       "pending": 0
+      }
+     }
+    }
+   }
+  },
+  {
+   "id": "DL4",
+   "title": "Bought and sold the same day, the sale entered first",
+   "why": "Nothing held before today. The sale of 10 for 1,010.00 (101000) is typed before the purchase for 1,000.00 (100000) but the day applies purchases first, so both stand: nothing at the open, nothing now, 100000 in and 101000 out. Today is +1000 on 100000 and needs no previous close.",
+   "today": 20261027,
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "SELL",
+     "trade_date": 20261027,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 101000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "BUY",
+     "trade_date": 20261027,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000
+    }
+   ],
+   "price_u": {
+    "1": 1010000
+   },
+   "expect": {
+    "lines": {
+     "1": [
+      {
+       "account_id": 1,
+       "qty_u": 0,
+       "open_qty_u": 0,
+       "cost_paise": 0,
+       "in_today_paise": 100000,
+       "out_today_paise": 101000,
+       "over_year_qty_u": 0
+      }
+     ]
+    },
+    "rows": {
+     "1": {
+      "value_paise": 0,
+      "cost_paise": 0,
+      "unrealised_paise": 0,
+      "gain_pct": null,
+      "priced": true,
+      "today": {
+       "state": "ok",
+       "paise": 1000,
+       "base_paise": 100000,
+       "pct": "1.0000",
+       "counted": 1,
+       "unknown": 0,
+       "pending": 0
+      }
+     }
+    }
+   }
+  },
+  {
+   "id": "DL5",
+   "title": "A split and a bonus today are in the open; the purchase is not",
+   "why": "10 shares cost 10,000.00 (1000000). Today they split 5 for 1 (50 shares), a bonus of 10 is allotted and 5 more are bought for 1,025.00 (102500). The split and the bonus take effect before trading: 60 at the open, 65 now, and the exchange's previous close is already adjusted (200.00). Cost 1000000 + 0 + 102500 = 1102500. At 210.00: value 65 x 210.00 = 13,650.00 (1365000); the open was 60 x 200.00 = 12,000.00 (1200000); Today = 1365000 - (1200000 + 102500) = 62500 (60 x 10.00 and 5 x 5.00).",
+   "today": 20261027,
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260105,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 1000000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "SPLIT",
+     "trade_date": 20261027,
+     "account_id": null,
+     "asset_id": 1,
+     "ratio_num": 5,
+     "ratio_den": 1
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "BONUS",
+     "trade_date": 20261027,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000
+    },
+    {
+     "id": 4,
+     "seq": 4,
+     "kind": "BUY",
+     "trade_date": 20261027,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 5000000,
+     "amount_paise": 102500
+    }
+   ],
+   "prev_close_u": {
+    "1": 2000000
+   },
+   "price_u": {
+    "1": 2100000
+   },
+   "expect": {
+    "lines": {
+     "1": [
+      {
+       "account_id": 1,
+       "qty_u": 65000000,
+       "open_qty_u": 60000000,
+       "cost_paise": 1102500,
+       "in_today_paise": 102500,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    },
+    "rows": {
+     "1": {
+      "value_paise": 1365000,
+      "cost_paise": 1102500,
+      "unrealised_paise": 262500,
+      "gain_pct": "23.8095",
+      "priced": true,
+      "today": {
+       "state": "ok",
+       "paise": 62500,
+       "base_paise": 1302500,
+       "pct": "4.7985",
+       "counted": 1,
+       "unknown": 0,
+       "pending": 0
+      }
+     }
+    }
+   }
+  },
+  {
+   "id": "DL6",
+   "title": "Shares moved between accounts today count at the previous close on both sides",
+   "why": "Account 1 holds 10 (cost 1300000), account 2 holds 4 (540000). Today 3 move from 1 to 2: the lot goes with its cost (390000), so the accounts now hold 7 for 910000 and 7 for 540000 + 390000 = 930000. At a previous close of 1,400.00 the 3 shares are 4,200.00 (420000): out of the first line, into the second. This is VA14: Today 39550 on 2380000, what 14 shares would have made.",
+   "today": 20261027,
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260105,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 1300000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "BUY",
+     "trade_date": 20260105,
+     "account_id": 2,
+     "asset_id": 1,
+     "qty_u": 4000000,
+     "amount_paise": 540000
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "TRANSFER",
+     "trade_date": 20261027,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 3000000,
+     "to_account_id": 2
+    }
+   ],
+   "prev_close_u": {
+    "1": 14000000
+   },
+   "price_u": {
+    "1": 14282500
+   },
+   "expect": {
+    "lines": {
+     "1": [
+      {
+       "account_id": 1,
+       "qty_u": 7000000,
+       "open_qty_u": 10000000,
+       "cost_paise": 910000,
+       "in_today_paise": 0,
+       "out_today_paise": 420000,
+       "over_year_qty_u": 0
+      },
+      {
+       "account_id": 2,
+       "qty_u": 7000000,
+       "open_qty_u": 4000000,
+       "cost_paise": 930000,
+       "in_today_paise": 420000,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    },
+    "rows": {
+     "1": {
+      "value_paise": 1999550,
+      "cost_paise": 1840000,
+      "unrealised_paise": 159550,
+      "gain_pct": "8.6712",
+      "priced": true,
+      "today": {
+       "state": "ok",
+       "paise": 39550,
+       "base_paise": 2380000,
+       "pct": "1.6618",
+       "counted": 1,
+       "unknown": 0,
+       "pending": 0
+      }
+     }
+    }
+   }
+  },
+  {
+   "id": "DL6b",
+   "title": "With no previous close a transfer between accounts counts as nothing, and Today is unknown",
+   "why": "The same entries without a previous close: the 3 shares cannot be valued, so no money moves on either line, and the holding's Today is not known anyway (units were held at the open).",
+   "today": 20261027,
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260105,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 1300000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "BUY",
+     "trade_date": 20260105,
+     "account_id": 2,
+     "asset_id": 1,
+     "qty_u": 4000000,
+     "amount_paise": 540000
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "TRANSFER",
+     "trade_date": 20261027,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 3000000,
+     "to_account_id": 2
+    }
+   ],
+   "price_u": {
+    "1": 14282500
+   },
+   "expect": {
+    "lines": {
+     "1": [
+      {
+       "account_id": 1,
+       "qty_u": 7000000,
+       "open_qty_u": 10000000,
+       "cost_paise": 910000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      },
+      {
+       "account_id": 2,
+       "qty_u": 7000000,
+       "open_qty_u": 4000000,
+       "cost_paise": 930000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    },
+    "rows": {
+     "1": {
+      "value_paise": 1999550,
+      "cost_paise": 1840000,
+      "unrealised_paise": 159550,
+      "gain_pct": "8.6712",
+      "priced": true,
+      "today": {
+       "state": "unknown",
+       "paise": null,
+       "base_paise": 0,
+       "pct": null,
+       "counted": 0,
+       "unknown": 1,
+       "pending": 0
+      }
+     }
+    }
+   }
+  },
+  {
+   "id": "DL7",
+   "title": "Shares brought in or taken out count at the value entered",
+   "why": "Asset 1: 10 shares brought in today from outside at a cost of 10,000.00 (1000000), first bought 1 Mar 2025 (so over a year old), valued 14,000.00 (1400000) today: 1400000 goes in, nothing was held at the open. At 1,428.25 Today is 1428250 - 1400000 = 28250. Asset 2: 5 shares for 4,000.00 (400000); today 2 are taken out to outside, valued 1,700.00 (170000): they leave at their cost 160000 (no gain), 3 remain for 240000, and 170000 counts as money out. At 800.00 against 790.00: value 240000, open 395000, Today 240000 - (395000 - 170000) = 15000 (3 x 10.00 and 2 x 60.00).",
+   "today": 20261027,
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "TRANSFER",
+     "trade_date": 20261027,
+     "account_id": null,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 1000000,
+     "to_account_id": 1,
+     "lot_date": 20250301,
+     "value_paise": 1400000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "BUY",
+     "trade_date": 20260105,
+     "account_id": 1,
+     "asset_id": 2,
+     "qty_u": 5000000,
+     "amount_paise": 400000
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "TRANSFER",
+     "trade_date": 20261027,
+     "account_id": 1,
+     "asset_id": 2,
+     "qty_u": 2000000,
+     "value_paise": 170000
+    }
+   ],
+   "prev_close_u": {
+    "1": 14000000,
+    "2": 7900000
+   },
+   "price_u": {
+    "1": 14282500,
+    "2": 8000000
+   },
+   "expect": {
+    "lines": {
+     "1": [
+      {
+       "account_id": 1,
+       "qty_u": 10000000,
+       "open_qty_u": 0,
+       "cost_paise": 1000000,
+       "in_today_paise": 1400000,
+       "out_today_paise": 0,
+       "over_year_qty_u": 10000000
+      }
+     ],
+     "2": [
+      {
+       "account_id": 1,
+       "qty_u": 3000000,
+       "open_qty_u": 5000000,
+       "cost_paise": 240000,
+       "in_today_paise": 0,
+       "out_today_paise": 170000,
+       "over_year_qty_u": 0
+      }
+     ]
+    },
+    "rows": {
+     "1": {
+      "value_paise": 1428250,
+      "cost_paise": 1000000,
+      "unrealised_paise": 428250,
+      "gain_pct": "42.8250",
+      "priced": true,
+      "today": {
+       "state": "ok",
+       "paise": 28250,
+       "base_paise": 1400000,
+       "pct": "2.0179",
+       "counted": 1,
+       "unknown": 0,
+       "pending": 0
+      }
+     },
+     "2": {
+      "value_paise": 240000,
+      "cost_paise": 240000,
+      "unrealised_paise": 0,
+      "gain_pct": "0.0000",
+      "priced": true,
+      "today": {
+       "state": "ok",
+       "paise": 15000,
+       "base_paise": 395000,
+       "pct": "3.7975",
+       "counted": 1,
+       "unknown": 0,
+       "pending": 0
+      }
+     }
+    }
+   }
+  },
+  {
+   "id": "DL8",
+   "title": "Income and fees today do not count",
+   "why": "A dividend of 50.00 and a fee of 3.00 today touch no units and are not money in or out of the holding: the line is the 10 shares as they were.",
+   "today": 20261027,
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260105,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 1300000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "DIVIDEND",
+     "trade_date": 20261027,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 5000
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "FEE",
+     "trade_date": 20261027,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 300
+    }
+   ],
+   "expect": {
+    "lines": {
+     "1": [
+      {
+       "account_id": 1,
+       "qty_u": 10000000,
+       "open_qty_u": 10000000,
+       "cost_paise": 1300000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "DL9",
+   "title": "Sold out earlier, drafts and tomorrow's entries leave no line",
+   "why": "Asset 1 was sold out on 1 Mar. Asset 2 has only a draft today and a purchase tomorrow, neither of which counts. Asset 3 was bought on 20 Oct and is held: its line is the only one.",
+   "today": 20261027,
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260105,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 1300000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "SELL",
+     "trade_date": 20260301,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 1400000
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "BUY",
+     "trade_date": 20261027,
+     "account_id": 1,
+     "asset_id": 2,
+     "qty_u": 5000000,
+     "amount_paise": 400000,
+     "status": "draft"
+    },
+    {
+     "id": 4,
+     "seq": 4,
+     "kind": "BUY",
+     "trade_date": 20261028,
+     "account_id": 1,
+     "asset_id": 2,
+     "qty_u": 5000000,
+     "amount_paise": 400000
+    },
+    {
+     "id": 5,
+     "seq": 5,
+     "kind": "BUY",
+     "trade_date": 20261020,
+     "account_id": 1,
+     "asset_id": 3,
+     "qty_u": 2000000,
+     "amount_paise": 160000
+    }
+   ],
+   "expect": {
+    "lines": {
+     "3": [
+      {
+       "account_id": 1,
+       "qty_u": 2000000,
+       "open_qty_u": 2000000,
+       "cost_paise": 160000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "DL10",
+   "title": "Units held for more than a year, lot by lot",
+   "why": "Today is 27 Oct 2026. The lot of 5 bought 1 Oct 2025 passed its anniversary on 1 Oct 2026: over a year. The lot of 3 bought 27 Oct 2025 is exactly a year old today: not yet. The lot of 5 bought 1 Feb 2026 is not. 5 units are held for more than a year.",
+   "today": 20261027,
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20251001,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 5000000,
+     "amount_paise": 500000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "BUY",
+     "trade_date": 20260201,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 5000000,
+     "amount_paise": 600000
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "BUY",
+     "trade_date": 20251027,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 3000000,
+     "amount_paise": 330000
+    }
+   ],
+   "expect": {
+    "lines": {
+     "1": [
+      {
+       "account_id": 1,
+       "qty_u": 13000000,
+       "open_qty_u": 13000000,
+       "cost_paise": 1430000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 5000000
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "DL11",
+   "title": "A rights issue paid for today is money in",
+   "why": "2 shares taken up today for 1,600.00 (160000): a new lot costing 160000, in today, not held at the open: 12 now, 10 at the open, cost 1300000 + 160000.",
+   "today": 20261027,
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260105,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 1300000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "RIGHTS",
+     "trade_date": 20261027,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 2000000,
+     "amount_paise": 160000
+    }
+   ],
+   "expect": {
+    "lines": {
+     "1": [
+      {
+       "account_id": 1,
+       "qty_u": 12000000,
+       "open_qty_u": 10000000,
+       "cost_paise": 1460000,
+       "in_today_paise": 160000,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "DL12",
+   "title": "Assets and accounts come out in order",
+   "why": "Four holdings entered in a scrambled order: the assets are numbered 1 and 2 and each has its lines lowest account first.",
+   "today": 20261027,
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20261020,
+     "account_id": 2,
+     "asset_id": 2,
+     "qty_u": 1000000,
+     "amount_paise": 20000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "BUY",
+     "trade_date": 20261020,
+     "account_id": 2,
+     "asset_id": 1,
+     "qty_u": 1000000,
+     "amount_paise": 10000
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "BUY",
+     "trade_date": 20261020,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 1000000,
+     "amount_paise": 10000
+    },
+    {
+     "id": 4,
+     "seq": 4,
+     "kind": "BUY",
+     "trade_date": 20261020,
+     "account_id": 1,
+     "asset_id": 2,
+     "qty_u": 1000000,
+     "amount_paise": 20000
+    }
+   ],
+   "expect": {
+    "lines": {
+     "1": [
+      {
+       "account_id": 1,
+       "qty_u": 1000000,
+       "open_qty_u": 1000000,
+       "cost_paise": 10000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      },
+      {
+       "account_id": 2,
+       "qty_u": 1000000,
+       "open_qty_u": 1000000,
+       "cost_paise": 10000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ],
+     "2": [
+      {
+       "account_id": 1,
+       "qty_u": 1000000,
+       "open_qty_u": 1000000,
+       "cost_paise": 20000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      },
+      {
+       "account_id": 2,
+       "qty_u": 1000000,
+       "open_qty_u": 1000000,
+       "cost_paise": 20000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "DL13",
+   "title": "A bonus today lifts the open and is not money in",
+   "why": "A bonus of 2 shares allotted today, with no purchase today: they are in the open (12 held at the open and now), cost nothing and are no money in.",
+   "today": 20261027,
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260105,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 1300000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "BONUS",
+     "trade_date": 20261027,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 2000000
+    }
+   ],
+   "expect": {
+    "lines": {
+     "1": [
+      {
+       "account_id": 1,
+       "qty_u": 12000000,
+       "open_qty_u": 12000000,
+       "cost_paise": 1300000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "DL14",
+   "title": "Assets are listed in their own order, whichever account holds them first",
+   "why": "Account 1 holds only the asset numbered 2 and account 2 only the asset numbered 1. The answer lists asset 1 first (and each asset's lines lowest account first), not the asset the lowest account happens to hold.",
+   "today": 20261027,
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20261020,
+     "account_id": 1,
+     "asset_id": 2,
+     "qty_u": 1000000,
+     "amount_paise": 20000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "BUY",
+     "trade_date": 20261020,
+     "account_id": 2,
+     "asset_id": 1,
+     "qty_u": 1000000,
+     "amount_paise": 10000
+    }
+   ],
+   "expect": {
+    "lines": {
+     "1": [
+      {
+       "account_id": 2,
+       "qty_u": 1000000,
+       "open_qty_u": 1000000,
+       "cost_paise": 10000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ],
+     "2": [
+      {
+       "account_id": 1,
+       "qty_u": 1000000,
+       "open_qty_u": 1000000,
+       "cost_paise": 20000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    }
+   }
+  }
+ ]
+}

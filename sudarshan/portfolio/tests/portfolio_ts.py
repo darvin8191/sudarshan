@@ -152,6 +152,11 @@ def interfaces(text: str) -> dict[str, str]:
     return found
 
 
+def members(body: str) -> list[str]:
+    """The names of an interface's own members, from the text ``interfaces`` returns for it."""
+    return re.findall(r"^  (\w+)\??:", body, re.M)
+
+
 def ops_map(text: str) -> dict[str, tuple[str, str]]:
     """Op name to (request type, answer type), from ``interface PortfolioOps``."""
     match = re.search(r"^export interface PortfolioOps\s*\{", text, re.M)

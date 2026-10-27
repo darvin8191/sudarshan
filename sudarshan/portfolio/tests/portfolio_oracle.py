@@ -12,7 +12,7 @@ A row is the contract's ActivityInput as a dict (``id``, ``seq``, ``kind``, ``tr
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from fractions import Fraction
 
 
@@ -53,6 +53,20 @@ def over_a_year(acquired: int, on: int) -> bool:
     except ValueError:
         later = start.replace(year=start.year + 1, day=28)
     return on > later.year * 10000 + later.month * 100 + later.day
+
+
+def business_days_walked(start: int, end: int, holidays=()) -> int:
+    """Business days after ``start`` up to and including ``end``, counted one calendar day at a
+    time: a Monday to Friday that is not one of ``holidays``."""
+    shut = set(holidays)
+    count = 0
+    when = date(start // 10000, start // 100 % 100, start % 100)
+    stop = date(end // 10000, end // 100 % 100, end % 100)
+    while when < stop:
+        when += timedelta(days=1)
+        key = when.year * 10000 + when.month * 100 + when.day
+        count += when.weekday() < 5 and key not in shut
+    return count
 
 
 def simulate(
@@ -229,4 +243,87 @@ def simulate(
             "income_paise": sum(p["income_paise"] for p in positions.values()),
             "fees_paise": sum(p["fees_paise"] for p in positions.values()),
         },
+    }
+
+
+def day_lines(
+    rows: list[dict],
+    today: int,
+    prev_close: dict | None = None,
+    decimals: dict | None = None,
+) -> dict:
+    """What each holding line says on ``today``, worked out from the entries themselves.
+
+    The quantity at the open is read from a replay of the entries without today's trades (today's
+    splits and bonus shares stay: they take effect before trading), the money in and out from
+    today's entries one by one, the rest from a replay up to today. Returns ``{asset: [line]}``,
+    a line being the contract's HoldingLine as a dict, lowest account first.
+    """
+    prev_close = prev_close or {}
+    after = simulate(rows, today, decimals, over_year_on=today)
+    assert "refused" not in after, after
+    before = simulate(
+        [
+            r
+            for r in rows
+            if r["trade_date"] < today
+            or (r["trade_date"] == today and r["kind"] in ("SPLIT", "BONUS"))
+        ],
+        today,
+        decimals,
+    )
+    assert "refused" not in before, before
+    money_in: dict = {}
+    money_out: dict = {}
+
+    def put(book, account, asset, paise):
+        book[(account, asset)] = book.get((account, asset), 0) + paise
+
+    for r in rows:
+        if r.get("status", "posted") != "posted" or r["trade_date"] != today:
+            continue
+        kind, asset = r["kind"], r.get("asset_id")
+        if kind in ("BUY", "RIGHTS"):
+            put(money_in, r["account_id"], asset, amount_of(r))
+        elif kind == "SELL":
+            put(money_out, r["account_id"], asset, amount_of(r))
+        elif kind == "TRANSFER":
+            source, target = r.get("account_id"), r.get("to_account_id")
+            if source is None:
+                value = r["amount_paise"] if r.get("value_paise") is None else r["value_paise"]
+                put(money_in, target, asset, value)
+            elif target is None:
+                cost = -sum(m["cost_paise"] for m in after["moves"] if m["entry"] == r["id"])
+                put(
+                    money_out,
+                    source,
+                    asset,
+                    cost if r.get("value_paise") is None else r["value_paise"],
+                )
+            else:
+                close = prev_close.get(asset)
+                value = 0 if close is None else half_away(Fraction(r["qty_u"] * close, 10**8))
+                put(money_out, source, asset, value)
+                put(money_in, target, asset, value)
+    lines: dict = {}
+    for name, position in after["positions"].items():
+        account, asset = name.split("/")
+        if asset == "-":
+            continue
+        account, asset = int(account), int(asset)
+        opened = before["positions"].get(name, {}).get("qty_u", 0)
+        line = {
+            "account_id": account,
+            "qty_u": position["qty_u"],
+            "open_qty_u": opened,
+            "cost_paise": position["cost_paise"],
+            "in_today_paise": money_in.get((account, asset), 0),
+            "out_today_paise": money_out.get((account, asset), 0),
+            "over_year_qty_u": position["over_year_qty_u"],
+        }
+        if any(line[key] for key in ("qty_u", "open_qty_u", "in_today_paise", "out_today_paise")):
+            lines.setdefault(asset, []).append(line)
+    return {
+        asset: sorted(found, key=lambda line: line["account_id"])
+        for asset, found in sorted(lines.items())
     }

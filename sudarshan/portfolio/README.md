@@ -37,7 +37,7 @@ Absolute imports only: upstream owns a top-level `portfolio` package (the backte
 | `../../frontend/src/sudarshan/portfolio/types.ts` | its twin on the phone, and every JSON shape | PF0 |
 | `core/days.py`, `core/money.py`, `core/words.py`, `core/model.py`, `core/ledger.py` | days, scales and rounding, the owner's words, the FIFO ledger | PA1 |
 | `core/ledger_actions.py` | splits, bonus shares, transfers | PA2 |
-| `core/valuation.py`, `core/freshness.py` | value, Today, how old a price is | PA3 |
+| `core/valuation.py`, `core/daylines.py`, `core/freshness.py` | value, Today and a tab's totals; one day's holding lines from the ledger; how old a price is | PA3 |
 | `core/performance.py`, `core/history.py` | XIRR, TWR, net money put in, daily series, benchmarks | PA4, PA5 |
 | `core/allocation.py`, `core/filters.py` | allocation by class, sector, cap, account, member, tag; filters | PA6 |
 | `imports/` | generic CSV, Zerodha tradebook | PA7, PA8 |
@@ -240,7 +240,8 @@ For a listed line the service sends `qty_u` (now), `open_qty_u`, `in_today_paise
 - `in_today_paise` and `out_today_paise` are today's acquisitions and disposals at their gross
   trade amounts, charges left out. A transfer between two accounts of the tab counts on both
   sides at the previous close, so it nets to nothing in the tab and moves no gain between
-  accounts. A transfer from or to outside counts at its `value_paise`.
+  accounts. A transfer from or to outside counts at its `value_paise`. Dividends, interest and
+  fees never count.
 - The previous close is the latest official close before today. When the price on hand is from
   an earlier session (the market has not opened, or it is a holiday), the price is that close,
   and Today is only the effect of today's trades.
@@ -253,17 +254,19 @@ Today.
 
 | `today_mode` | meaning | state of the figure |
 |---|---|---|
-| `ok` | a listed price | `ok`, or `unknown` when the previous close is not known: "Today: not known yet", never 0 |
+| `ok` | a listed price, or a fund whose NAV is dated today | `ok`, or `unknown` when a price it needs is not known: "Today: not known yet", never 0 |
 | `pending` | a mutual fund whose NAV is not dated today | `pending`: "NAV changes count when AMFI publishes them, around 9 PM." |
 | `none` | a value kept by hand | `none` |
 
-A tab's Today adds the lines that are `ok`; `counted`, `unknown` and `pending` say how many rows
-are in it and how many are left out.
+A tab's Today adds the rows that are `ok` and the holdings sold out today; `counted`, `unknown` and
+`pending` say how many listed rows are in it and how many are left out. The rules in full are
+under "Valuation and Today" below.
 
 ### Totals
 
 - value = the sum of line values; **invested** = the sum of open lot cost (charges included);
-  unrealised = value - invested.
+  unrealised = value - invested. A holding with no price yet is counted at its cost, and
+  `TabTotals.unpriced` says how many.
 - **overall gain** = unrealised + realised + income - fees. Realised is the sum of sale gains,
   income the dividends and interest (gross), fees the standalone fees.
 - **absolute return** = (value + money out - money in - fees) / (money in + fees), money in and out
@@ -307,9 +310,9 @@ generic format, so that exporting and importing into an empty tab gives the same
 
 ## Ledger, valuation, performance, allocation, imports
 
-The ledger is written (`PA1`, `PA2`); valuation, performance, allocation and the two file formats
-are written with the PR that builds each (`PA3` to `PA8`): the Today rule above in full, XIRR and
-TWR, benchmarks, allocation and filters.
+The ledger (`PA1`, `PA2`) and the valuation (`PA3`) are written; performance, allocation and the two
+file formats are written with the PR that builds each (`PA4` to `PA8`): XIRR and TWR, benchmarks,
+allocation and filters.
 
 ### The ledger
 
@@ -434,9 +437,105 @@ number out with exact fractions and Decimal, and import nothing from `sudarshan`
 (`tests/portfolio_oracle.py`, plain dictionaries) is run on every vector and on hundreds of random
 tabs and must agree with the engine to the paisa.
 
-### Valuation, performance, allocation, imports
+### Valuation and Today
 
-Written with `PA3` to `PA8`.
+Three small pieces, each pure. `daylines.lines_of(ledger, today, prev_close_u)` turns a ledger
+replayed to `today` into the lines a screen prices. `valuation` turns lines and the price of the
+moment into the figures of a holding (`row_figures`) and of the tab (`tab_totals`); the phone runs
+the same sums as ticks arrive (`valuation.ts`) on the same vectors. `freshness` says how old a price
+is (next section).
+
+**A holding's figures.** Value is the sum of its line values, each rounded on its own; cost is the
+sum of the lines' cost; unrealised is value less cost; the gain percentage is unrealised over cost,
+absent when nothing was paid (bonus shares). A holding with **no price yet** is counted at its cost,
+so that one missing price does not look like the loss of everything in it: it has no gain
+percentage, its Today is `unknown`, and the tab's `unpriced` says how many there are. The screen
+must say so ("2 holdings have no price yet and are counted at cost").
+
+**Today for a line** is `value now - (open value + in - out)`. Each of the two values is rounded to
+a whole paisa before they are subtracted, so Today is the difference of two figures on the screen
+and not a rounded difference (one share at 0.0050 is worth a paisa at the open and, at 0.0149,
+a paisa now: Today is 0, not the 0.99 of a paisa between the prices). It needs the previous
+close only when units were held at the open, and the price only when units are held now: a share
+bought today needs no previous close, a holding sold out today needs no price. A figure it needs
+and does not have is `unknown`, never 0, and one line that cannot be worked out makes the whole
+holding `unknown`. The percentage is Today over `open value + in`.
+
+**Which close.** `previous_close_u` is the close Today is measured from. A price dated an earlier
+day than today is itself the latest close (before the open, on a weekend or a holiday), so Today
+is only the effect of today's trades; any other price is measured from the close it carries.
+`today_mode` is `ok` for a listed stock, `ok` for a fund once a NAV dated today is in and `pending`
+until then, and `none` for a value kept by hand and for a loan.
+
+**The tab.** `tab_totals(rows, fixed)` adds the holdings held now (a row nobody holds is skipped, so
+passing every row is harmless) and reads the rest from `Fixed`. Overall gain, absolute return and the
+meaning of money in and out are as under "Totals". The tab's Today adds the rows that are `ok`
+and **the holdings sold out today**, whose figure comes from `Fixed.closed_today_*` and is worked out
+by `closed_today(rows)`: the sum of their Today and of their base, or `None` when one of them has
+units at the open and no previous close, because a sum with a holding missing from it would be wrong
+without saying so (the screen adds "not counting a holding sold today"). A fund still waiting for its
+NAV is left out of it, as it is from the list. The tab's state is `ok` as soon as one row or a
+closed holding is in the figure, else `unknown` when a row (or the closed figure) is not known,
+else `pending`, else `none`; with nothing in the figure there is no number at all.
+
+**Day lines.** The open is the quantity after today's splits and bonus shares and before today's
+trades (the exchange's previous close is already adjusted for the split). Money in and out are
+today's acquisitions and disposals at their gross trade amounts; shares brought in from or taken
+out to outside count at the value entered; shares moved between two accounts count in one and out
+of the other at the previous close, each side valued as a holding of that many shares would be, and
+at nothing when the close is not known (that holding's Today is then unknown anyway). A position
+that holds nothing and traded nothing today has no line. The units held more than a year are
+counted as of today.
+
+**What this does not model.**
+
+- A day shares move between two accounts: the rupee Today is exact, but the percentage's base
+  counts the moved shares once more (as money in on the receiving side), so the percentage is a
+  little lower than the holding's own change that day.
+- Today on the ex-date of a split or bonus takes the exchange's previous close to be adjusted. A
+  price kept by hand does not know the split, so that one day's Today is wrong.
+- Today uses the gross amount of a trade. Charges are in the cost and the gain, not in Today.
+
+**Vectors** (`tests/vectors/valuation.json`, `daylines.json`): the design's VA3 to VA8 and cases
+for every rule above (rounding line by line, the missing previous close or price, the fund that
+waits, the value kept by hand, the sold-out holding with and without a close, the tab's states in
+each order, the absolute return with fees, a loss, nothing put in), the close Today is measured from
+and the replays R1 to R3 (the frames of a morning's ticks, as the phone repeats them); fourteen
+ledgers turned into lines by hand in `daylines.json`. `make_pa3.py` writes them, works every number
+out again with exact fractions and imports nothing from `sudarshan`. The tests run the engine on
+every vector, run the generator's evaluator on thousands of random rows, and check identities
+(a dearer price never lowers a value or a Today, the counts add up, no float is ever written);
+`tests/portfolio_oracle.py` reads the lines from a naive replay on hundreds of random tabs.
+
+### Freshness
+
+Every price a holding is valued at carries the day it belongs to. `freshness.of_price` says
+whether it is `fresh` or `old` and gives a sentence where a number alone would mislead. `today` is
+the IST day now and `last_session_day` the latest trading day whose session has begun (the
+Friday, before the market opens on a Monday); the service works out both, since `core/` knows
+neither the clock nor the exchange's calendar.
+
+| price | old when | words |
+|---|---|---|
+| a fund's NAV | more than 3 business days behind `last_session_day` (weekdays less the exchange's holidays) | "NAV of 22 Oct", and "; AMFI has not published a newer one." when old |
+| a value kept by hand, a loan's balance | older than the tab's limit in days (30 unless the tab says; read as 7 to 365) | "Value from 12 Sep" or "Balance from 12 Sep", then "45 days old", "1 day old" or "today" |
+| a listed price | its day is before `last_session_day` | none for a tick (the feed line speaks); "Last price 10:41:05 (quote)"; "Last price 15:29:58, 23 Oct (closing record)", ", taken late" when the service was down; "Close of 23 Oct"; "Price of 22 Oct; no newer price yet." |
+| none yet | always | "No price yet" |
+
+A "business day" needs the exchange's holiday list, which only the server has: the phone repeats
+these rules on the same vectors (`freshness.ts`) for a value kept by hand and for a listed price,
+and shows the server's answer for a fund's NAV. A day is written "27 Oct", with the year ("30 Dec 2025") when it is not the year of the day it is
+compared with. The words say nothing about the feed ("Real-time" is for ticks arriving).
+`days.business_days_between(start, end, holidays)` counts the weekdays after `start` up to and
+including `end`, less the holidays that are weekdays in that range; `day_of_instant` and
+`clock_of_instant` turn epoch milliseconds into the IST day and `HH:MM:SS` (the milliseconds are
+dropped, not rounded). **Vectors** (`tests/vectors/freshness.json`): the design's FR1 to FR4, the
+edge of every rule, the business days between two days with and without holidays, and the
+instants around midnight, a leap day and the turn of a year.
+
+### Performance, allocation, imports
+
+Written with `PA4` to `PA8`.
 
 ## Storage
 

@@ -2,16 +2,22 @@
 
 A day is an IST calendar day, whether or not the exchange traded: a dividend can be credited on a
 Sunday and a deposit can mature on a holiday, so a date the owner types is a day in the same unit
-as a session (20261108). Nothing here knows the time of day or the trading calendar; "today" is
-always an argument.
+as a session (20261108). Nothing here reads the clock or knows the trading calendar: "today" is
+always an argument, and so are the holidays that business days leave out. An instant (epoch
+milliseconds) is turned into its IST day and time of day, never the other way round.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import date, timedelta
 
 FIRST_DAY = 19900101
 LAST_DAY = 22001231
+#: India keeps no daylight saving: IST is always five and a half hours ahead of UTC.
+IST_OFFSET_MS = 19_800_000
+MS_PER_DAY = 86_400_000
+EPOCH = date(1970, 1, 1)
 
 
 def is_day(value) -> bool:
@@ -71,3 +77,38 @@ def financial_year(day: int) -> int:
 def month_of(day: int) -> int:
     """YYYYMM."""
     return day // 100
+
+
+def is_weekday(day: int) -> bool:
+    """Monday to Friday; the exchange's holidays are for the caller to say."""
+    return to_date(day).weekday() < 5
+
+
+def _weekdays_through(ordinal: int) -> int:
+    """Weekdays among the calendar days numbered 1 to ``ordinal`` (day 1 is a Monday)."""
+    return ordinal // 7 * 5 + min(ordinal % 7, 5)
+
+
+def business_days_between(start: int, end: int, holidays: Iterable[int] = ()) -> int:
+    """Weekdays after ``start`` up to and including ``end``, less any of ``holidays`` among them.
+
+    How far behind ``end`` something dated ``start`` is; 0 when ``end`` is not after ``start``.
+    A holiday on a weekend, outside the range, or that is no real day is left out of the count.
+    """
+    first, last = to_date(start).toordinal(), to_date(end).toordinal()
+    if last <= first:
+        return 0
+    count = _weekdays_through(last) - _weekdays_through(first)
+    shut = {day for day in holidays if is_day(day) and start < day <= end and is_weekday(day)}
+    return count - len(shut)
+
+
+def day_of_instant(epoch_ms: int) -> int:
+    """The IST day an instant (epoch milliseconds) falls on."""
+    return from_date(EPOCH + timedelta(days=(epoch_ms + IST_OFFSET_MS) // MS_PER_DAY))
+
+
+def clock_of_instant(epoch_ms: int) -> str:
+    """The IST time of day of an instant as HH:MM:SS; the milliseconds are dropped, not rounded."""
+    seconds = (epoch_ms + IST_OFFSET_MS) % MS_PER_DAY // 1000
+    return f"{seconds // 3600:02d}:{seconds // 60 % 60:02d}:{seconds % 60:02d}"
