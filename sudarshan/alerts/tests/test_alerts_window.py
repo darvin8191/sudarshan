@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from alerts_fakes import ist
 
+from sudarshan.alerts.config import Settings
 from sudarshan.alerts.window import AlertWindow, parse_day_windows
 from sudarshan.autologin.schedule import TradingCalendar, parse_window
 
@@ -130,3 +131,17 @@ def test_the_market_opens_with_the_pre_open_or_a_special_sessions_own_start(tmp_
     assert window.market_opens(ist(2026, 11, 11, 7, 0)) == ist(2026, 11, 11, 9, 0)
     always = AlertWindow(window.calendar, parse_window("08:45-16:00"), True, tmp_path / "extra.txt")
     assert always.market_opens(ist(2026, 11, 6, 8, 50)) is None
+
+
+@pytest.mark.parametrize("value", ["16:00-08:45", "8:45-16:0", "08:45-16:00\u3000", "08:45"])
+def test_a_window_setting_that_is_not_a_window_keeps_the_usual_hours(caplog, value):
+    """The looser reading before took some of these: they cost a warning, never the start."""
+    caplog.set_level(logging.WARNING, logger="sudarshan.alerts")
+    assert Settings.from_env({"SUDARSHAN_ALERTS_WINDOW": value}).window == (8 * 60 + 45, 16 * 60)
+    assert [(record.levelname, record.getMessage()) for record in caplog.records] == [
+        (
+            "WARNING",
+            f"SUDARSHAN_ALERTS_WINDOW is set to {value!r}, which is not a time window "
+            "(HH:MM-HH:MM, the start before the end), so the usual 08:45-16:00 is used",
+        )
+    ]

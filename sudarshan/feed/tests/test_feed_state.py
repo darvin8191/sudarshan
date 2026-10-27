@@ -1,6 +1,7 @@
 """Settings, subscriptions and caps, snapshot persistence, recorder + replayer, market window."""
 
 import json
+import logging
 import os
 import re
 import time
@@ -41,8 +42,20 @@ def test_settings_defaults_and_guards():
     )
     with pytest.raises(ValueError, match="https"):  # the bearer token must not travel in clear
         Settings.from_env({"SUDARSHAN_UPSTOX_API_BASE": "http://api.upstox.com"})
-    with pytest.raises(ValueError):
-        Settings.from_env({"SUDARSHAN_FEED_WINDOW": "15:40-08:58"})
+
+
+@pytest.mark.parametrize("value", ["15:40-08:58", "08:58-15:500", "8:58-15:5", "08:58-15:50\u00a0"])
+def test_a_window_setting_that_is_not_a_window_keeps_the_usual_hours(caplog, value):
+    """The looser reading before took some of these: they cost a warning, never the start."""
+    caplog.set_level(logging.WARNING, logger="sudarshan.feed")
+    assert Settings.from_env({"SUDARSHAN_FEED_WINDOW": value}).window == (538, 950)
+    assert [(record.levelname, record.getMessage()) for record in caplog.records] == [
+        (
+            "WARNING",
+            f"SUDARSHAN_FEED_WINDOW is set to {value!r}, which is not a time window (HH:MM-HH:MM, "
+            "the start before the end), so the usual 08:58-15:50 is used",
+        )
+    ]
 
 
 def test_keys_file_format(tmp_path):

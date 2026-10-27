@@ -175,6 +175,7 @@ class Outbox:
         self._sent_at: deque[float] = deque(maxlen=PER_MINUTE)
         self._wake = asyncio.Event()
         self._hurry = False
+        self._in_flight = 0  # lines in the message being sent now
         self.throttle = Throttle()
         self.stats = {"messages": 0, "lines": 0, "dropped": 0, "failed": 0}
 
@@ -209,7 +210,11 @@ class Outbox:
             await self._sleep_until(self._allowed_at())
             batch, dropped = self._take()
             self._sent_at.append(time.monotonic())
-            outcome = await self.send(self._compose(batch, dropped))
+            self._in_flight = len(batch)
+            try:
+                outcome = await self.send(self._compose(batch, dropped))
+            finally:
+                self._in_flight = 0
             if outcome == SENT:
                 failures = unconfirmed = 0
                 self.stats["messages"] += 1
@@ -235,13 +240,16 @@ class Outbox:
             await asyncio.sleep(delay)
 
     async def flush(self, timeout: float = FLUSH_S) -> int:
-        """Send what waits without the burst pause, for at most ``timeout``; returns what is left."""
+        """Send what waits without the burst pause, for at most ``timeout``; returns what is left.
+
+        A message on its way counts as left until its answer: the caller cancels the sender next,
+        and that would cut it off."""
         self._hurry = True
         self._wake.set()
         deadline = time.monotonic() + timeout
-        while self._pending and time.monotonic() < deadline:
+        while (self._pending or self._in_flight) and time.monotonic() < deadline:
             await asyncio.sleep(0.05)
-        return len(self._pending)
+        return len(self._pending) + self._in_flight
 
     # -- internals ------------------------------------------------------------------------------
 

@@ -213,7 +213,7 @@ live service holds 5581):
 | `SUDARSHAN_NSE_HOLIDAYS_FILE` | `/etc/sudarshan/nse_holidays.txt` |
 | `SUDARSHAN_NSE_EXTRA_DAYS_FILE` | `/etc/sudarshan/nse_extra_trading_days.txt` |
 | `SUDARSHAN_FEED_ALWAYS_ON` | `0` |
-| `SUDARSHAN_FEED_WINDOW` | `08:58-15:50` (IST) |
+| `SUDARSHAN_FEED_WINDOW` | `08:58-15:50` (IST); a value that is not HH:MM-HH:MM (the start first) logs a warning and the usual hours are used |
 | `SUDARSHAN_FEED_HTTP_PORT` / `SUDARSHAN_FEED_ZMQ_PORT` | `5580` / `5581` (always 127.0.0.1) |
 | `SUDARSHAN_FEED_RECORD` | `1` |
 | `SUDARSHAN_FEED_RECORD_MAX_MB` / `SUDARSHAN_FEED_RECORD_KEEP_DAYS` | `512` / `10` |

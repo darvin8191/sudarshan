@@ -16,7 +16,8 @@ _TMP = tempfile.mkdtemp(prefix="sudarshan-autologin-tests-")
 os.environ.setdefault("API_KEY_PEPPER", "f" * 64)  # fake, test only
 os.environ.setdefault("APP_KEY", "test-only-app-key-" + "0" * 32)
 # Assigned, never defaulted: a test must not run against a real database.
-os.environ["DATABASE_URL"] = f"sqlite:///{_TMP}/openalgo-test.db"
+DATABASE_URL = f"sqlite:///{_TMP}/openalgo-test.db"
+os.environ["DATABASE_URL"] = DATABASE_URL
 os.environ["LOG_DIR"] = f"{_TMP}/log"
 os.environ["REDIRECT_URL"] = "http://127.0.0.1:5000/upstox/callback"
 os.environ["SUDARSHAN_VAULT_DB"] = f"{_TMP}/vault-unused.db"
@@ -33,6 +34,43 @@ import pytest  # noqa: E402
 from autologin_fakes import FAKE_API_KEY  # noqa: E402
 
 from sudarshan.vault import Vault  # noqa: E402
+
+_OWN_ENGINE = None
+
+
+@pytest.fixture(autouse=True)
+def _openalgo_tables_in_our_own_database():
+    """Every test here on this directory's own database file, whatever the import order.
+
+    OpenAlgo's database modules bind their engine when first imported. A run that also takes a
+    path under test/ loads test/conftest.py first, which imports them on the repository suite's
+    shared db/openalgo-test.db; that suite, and the threads and processes it leaves running,
+    write there too. A store in the end-to-end tests then queued behind those writers past the
+    worker's 20 s hand-off (it reported handoff_failed, not store_failed). So the tables are
+    bound here for each test and put back after it; in a run of this directory alone they
+    already are, and nothing changes.
+    """
+    global _OWN_ENGINE
+    from database import auth_db, user_db
+    from database.engine_factory import create_db_engine
+
+    moved = []
+    for module in (auth_db, user_db):
+        if str(module.engine.url) == DATABASE_URL:
+            continue
+        if _OWN_ENGINE is None:
+            _OWN_ENGINE = create_db_engine(DATABASE_URL)
+        moved.append((module, module.engine))
+        module.db_session.remove()
+        module.db_session.configure(bind=_OWN_ENGINE)
+        module.engine = _OWN_ENGINE
+    try:
+        yield
+    finally:
+        for module, engine in moved:
+            module.db_session.remove()
+            module.db_session.configure(bind=engine)
+            module.engine = engine
 
 
 @pytest.fixture(autouse=True)

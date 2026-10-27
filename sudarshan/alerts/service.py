@@ -49,7 +49,7 @@ from .config import ConfigError, Settings, setup_logging, switched_off
 from .orders import Alert, OrderTracker
 from .outbox import OpenAlgoTelegram, Outbox, Throttle
 from .owner import Owner, OwnerError, load_openalgo_modules, prepare_openalgo_env, read_owner
-from .resync import BookUnavailable, read_books
+from .resync import Books, BookUnavailable, read_books
 from .store import DB_FILENAME, Store
 from .window import AlertWindow
 
@@ -129,6 +129,7 @@ class AlertService:
         self._close_reason: str | None = None
         self._last_session_s = 0.0
         self._unchecked: datetime | None = None  # the start of a pause whose book read was cut off
+        self._after_close: set[asyncio.Task] = set()  # book reads the window's close let finish
         self._throttle = Throttle(300.0)
         self.stats = {"connects": 0, "updates": 0, "alerts": 0}
 
@@ -161,6 +162,10 @@ class AlertService:
                 await self._supervise()
             finally:
                 ticker.cancel()
+                unfinished = list(self._after_close)
+                for task in unfinished:  # a pause still unread is told as such (_resync)
+                    task.cancel()
+                await asyncio.gather(*unfinished, return_exceptions=True)
                 left = await self.outbox.flush(STOP_FLUSH_S)
                 if left:
                     log.warning("%d order alerts were not sent before stopping", left)
@@ -297,12 +302,15 @@ class AlertService:
                     async for raw in ws:
                         self._on_message(raw, owner)
                 finally:
-                    for task in (watchdog, resync):
-                        if task is not None:
-                            task.cancel()
-                    await asyncio.gather(
-                        *(t for t in (watchdog, resync) if t is not None), return_exceptions=True
-                    )
+                    tasks = [watchdog]
+                    if resync is not None:
+                        if self._close_reason == WINDOW_CLOSED and not resync.done():
+                            self._finish_after_close(resync)
+                        else:
+                            tasks.append(resync)
+                    for task in tasks:
+                        task.cancel()
+                    await asyncio.gather(*tasks, return_exceptions=True)
                 return self._ended("closed by OpenAlgo")
         except ConnectionClosed:
             return self._ended("dropped")
@@ -406,18 +414,33 @@ class AlertService:
     def _mark_seen(self) -> None:
         self.store.set_meta(SEEN, self.clock().timestamp())
 
+    def _finish_after_close(self, resync: asyncio.Task) -> None:
+        """The window closed while the book was still being read after a pause. The tries go on
+        without the stream (they only read OpenAlgo's REST books): nothing after the close would
+        look for that pause again, the next day's catch-up included."""
+        self._after_close.add(resync)
+        resync.add_done_callback(self._after_close.discard)
+
     async def _resync(self, owner: Owner, pause: tuple[datetime, datetime] | None) -> None:
         """Tell what changed while nothing was listening. A book that cannot be read is tried
-        again while the stream stays up (RESYNC_RETRY_S); a drop ends the tries, and the pause
-        then carries into the next connection's."""
-        books = None
+        again (RESYNC_RETRY_S) while the stream stays up, and on past the window's close; a drop
+        ends the tries, and the pause then carries into the next connection's."""
+        try:
+            books = await self._read_books_after_pause(owner)
+        except asyncio.CancelledError:
+            if self._stop.is_set() and asyncio.current_task() in self._after_close:
+                self._tell_pause(pause, None)  # stopping after the close: none will look again
+            raise
+        self._tell_pause(pause, books)
+
+    async def _read_books_after_pause(self, owner: Owner) -> Books | None:
+        """The order book, tried RESYNC_RETRY_S times more; None when every try failed."""
         tries = 1 + len(RESYNC_RETRY_S)
         for attempt, delay in enumerate((0.0, *RESYNC_RETRY_S), 1):
             if delay:
                 await asyncio.sleep(delay)
             try:
-                books = await read_books(self.client, self.settings.openalgo_url, owner.api_key)
-                break
+                return await read_books(self.client, self.settings.openalgo_url, owner.api_key)
             except BookUnavailable as exc:
                 log.info(
                     "The order book could not be read after the pause (try %d of %d): %s",
@@ -425,8 +448,12 @@ class AlertService:
                 )  # fmt: skip
             except Exception:
                 log.exception("reading the order book after the pause failed unexpectedly")
-        # From here to the queue there is no await: a cancelled session (a drop) must not leave
-        # alerts claimed in the store but never queued.
+        return None
+
+    def _tell_pause(self, pause: tuple[datetime, datetime] | None, books: Books | None) -> None:
+        """What the book showed, and the pause itself when it is worth a line. No await from here
+        to the queue: a cancelled session must not leave alerts claimed in the store but never
+        queued."""
         found: list[Alert] = []
         if books is not None:
             now = self.clock()
@@ -447,13 +474,16 @@ class AlertService:
             if found or (book != "checked" and not early):
                 key = f"gap:{pause[1].timestamp():.0f}"
                 told = [Alert(key, "gap", 0, text, pause[1]), *found]
+                if book == "unreadable":
+                    log.warning("Told the owner: %s", text)
             elif book == "checked":
                 log.info("%s Nothing had changed.", text)
             else:
                 log.info(
                     "%s Not sent: it ended before the market's start at %s.", text, hhmm(opens)
                 )
-        self._unchecked = None
+        if pause is not None and self._unchecked == pause[0]:
+            self._unchecked = None  # its pause is told; one a later connection began stays
         self._queue(told)
 
     # ---- the data path -----------------------------------------------------------------------

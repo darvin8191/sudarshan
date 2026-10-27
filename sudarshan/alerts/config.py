@@ -15,7 +15,9 @@ from urllib.parse import unquote, urlsplit
 
 from dotenv import dotenv_values
 
-from sudarshan.autologin.schedule import EXTRA_TRADING_DAYS_FILE, HOLIDAYS_FILE, parse_window
+from sudarshan.autologin.schedule import EXTRA_TRADING_DAYS_FILE, HOLIDAYS_FILE, window_setting
+
+log = logging.getLogger("sudarshan.alerts")
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 STATE_DIR = "/var/lib/sudarshan-alerts"
@@ -111,10 +113,9 @@ class Settings:
         app_dir = Path(get("SUDARSHAN_OPENALGO_DIR") or REPO_ROOT)
         # systemd's StateDirectory= may list several paths separated by ':'; the first is ours.
         state_dir = get("SUDARSHAN_ALERTS_STATE_DIR") or get("STATE_DIRECTORY") or STATE_DIR
-        try:
-            window = parse_window(get("SUDARSHAN_ALERTS_WINDOW") or DEFAULT_WINDOW)
-        except ValueError as exc:
-            raise ConfigError(f"SUDARSHAN_ALERTS_WINDOW: {exc}") from None
+        window = window_setting(
+            "SUDARSHAN_ALERTS_WINDOW", get("SUDARSHAN_ALERTS_WINDOW"), DEFAULT_WINDOW, log
+        )
         return cls(
             enabled=_switch(env, "SUDARSHAN_ORDER_ALERTS", True),
             cancelled=cancelled,
