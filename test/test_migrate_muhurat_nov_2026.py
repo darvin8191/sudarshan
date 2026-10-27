@@ -1,7 +1,8 @@
 """The published Muhurat hours of 8 November 2026 reach new and existing installs.
 
-The 2026 calendar shipped the session at placeholder hours, 18:00 to 19:15 IST.
-The startup hook seeds the holiday tables only when they are empty, so a revised
+The 2026 calendar shipped the session at placeholder hours, 18:00 to 19:15 IST
+(MCX 18:00 to 00:15 the next morning). The startup hook seeds the holiday
+tables only when they are empty, so a revised
 seed reaches a new install and nothing else. Without the migration an existing
 install kept calling every price closed during the real afternoon session and
 the empty 18:00 market open.
@@ -28,8 +29,7 @@ sys.path.insert(0, str(ROOT / "upgrade"))
 import migrate_muhurat_nov_2026 as migration  # noqa: E402
 
 PUBLISHED = {exchange: new for exchange, (_old, new) in migration.REVISION.items()}
-#: MCX keeps the shipped window, 18:00 to 00:15 the next morning.
-MCX_PLACEHOLDER = (1794141000000, 1794163500000)
+SHIPPED = {exchange: old for exchange, (old, _new) in migration.REVISION.items()}
 
 
 @pytest.fixture
@@ -105,7 +105,7 @@ def _set(engine, windows):
 
 def _placeholder(engine):
     """Force 8 November back to the hours earlier releases seeded."""
-    _set(engine, dict.fromkeys(migration.REVISION, migration.PLACEHOLDER))
+    _set(engine, SHIPPED)
 
 
 def test_the_seed_carries_the_published_hours(monkeypatch):
@@ -118,8 +118,7 @@ def test_the_seed_carries_the_published_hours(monkeypatch):
 
     assert muhurat["holiday_type"] == "SPECIAL_SESSION"
     assert muhurat["closed"] == []
-    assert {exchange: windows[exchange] for exchange in PUBLISHED} == PUBLISHED
-    assert windows["MCX"] == MCX_PLACEHOLDER
+    assert windows == PUBLISHED
 
     def clock(ms):
         return datetime.fromtimestamp(ms / 1000, mc.IST).strftime("%d %H:%M")
@@ -131,9 +130,10 @@ def test_the_seed_carries_the_published_hours(monkeypatch):
         "BFO": ("08 14:20", "08 15:40"),
         "CDS": ("08 14:20", "08 15:30"),
         "BCD": ("08 14:20", "08 15:30"),
-        "MCX": ("08 18:00", "09 00:15"),
+        "MCX": ("08 14:20", "08 15:30"),
     }
-    assert {clock(ms) for ms in migration.PLACEHOLDER} == {"08 18:00", "08 19:15"}
+    assert tuple(map(clock, migration.PLACEHOLDER)) == ("08 18:00", "08 19:15")
+    assert tuple(map(clock, migration.MCX_PLACEHOLDER)) == ("08 18:00", "09 00:15")
 
 
 def test_a_new_install_has_nothing_to_change(install, capsys):
@@ -149,9 +149,8 @@ def test_an_existing_install_moves_to_the_published_hours(install):
     after = _rows(install)
     windows = _windows(install)
 
-    assert {exchange: windows[exchange] for exchange in PUBLISHED} == PUBLISHED
-    assert windows["MCX"] == MCX_PLACEHOLDER
-    # Six rows moved; every other day and exchange is as it was.
+    assert windows == PUBLISHED
+    # Seven rows moved; every other day is as it was.
     moved = {row_id for row_id in before if before[row_id] != after[row_id]}
     assert len(moved) == len(PUBLISHED)
     assert {after[row_id][0] for row_id in moved} == set(PUBLISHED)
@@ -177,6 +176,7 @@ def test_a_window_an_admin_set_is_left_alone(install, capsys):
         "BFO": "update",
         "CDS": "absent",
         "BCD": "custom",
+        "MCX": "update",
     }
     assert migration.apply(install)
     windows = _windows(install)
@@ -185,9 +185,10 @@ def test_a_window_an_admin_set_is_left_alone(install, capsys):
     assert windows["BCD"] is None
     assert "CDS" not in windows  # nothing is inserted
     assert windows["NSE"] == PUBLISHED["NSE"]
+    assert windows["MCX"] == PUBLISHED["MCX"]
     out = capsys.readouterr().out
     assert "NFO  14:00-16:00    set by an admin, left alone (published 14:20-15:40)" in out
-    assert "Updated 3 row(s)" in out
+    assert "Updated 4 row(s)" in out
 
 
 def test_rerunning_changes_nothing(install):
@@ -206,8 +207,8 @@ def test_status_changes_nothing(install, capsys):
     assert _rows(install) == before
     out = capsys.readouterr().out
     assert "NFO  18:00-19:15 -> 14:20-15:40" in out
-    assert "MCX  kept at 18:00-00:15" in out
-    assert "Would change 6 row(s)." in out
+    assert "MCX  18:00-09 Nov 00:15 -> 14:20-15:30" in out
+    assert "Would change 7 row(s)." in out
 
 
 @pytest.mark.parametrize("make_tables", [True, False])
@@ -246,13 +247,13 @@ def test_the_script_reports_then_migrates_a_database_file(install):
 
     status = run("--status")
     assert status.returncode == 0, status.stderr
-    assert "Would change 6 row(s)." in status.stdout
-    assert _windows(install)["NSE"] == migration.PLACEHOLDER
+    assert "Would change 7 row(s)." in status.stdout
+    assert _windows(install) == SHIPPED
 
     applied = run()
     assert applied.returncode == 0, applied.stderr
-    assert "Updated 6 row(s)" in applied.stdout
-    assert _windows(install)["NFO"] == PUBLISHED["NFO"]
+    assert "Updated 7 row(s)" in applied.stdout
+    assert _windows(install) == PUBLISHED
 
     again = run()
     assert again.returncode == 0, again.stderr

@@ -233,9 +233,8 @@ The "session today" lookup uses the same calendar DB that powers `/api/v1/market
 
 | Exchange | Calendar says | Strategy behavior |
 |---|---|---|
-| NSE / BSE / CDS / BCD | SPECIAL_SESSION 14:20-15:30 | Strategy runs only inside that window, even though it's Sunday |
+| NSE / BSE / CDS / BCD / MCX | SPECIAL_SESSION 14:20-15:30 | Strategy runs only inside that window, even though it's Sunday |
 | NFO / BFO | SPECIAL_SESSION 14:20-15:40 | Same |
-| MCX | SPECIAL_SESSION 18:00-00:15 next day (placeholder until MCX's hours are known) | Same; user's `schedule_stop` should be 23:59 to honor most of the window |
 | CRYPTO | 24/7 | Unaffected |
 
 ## Safety Features

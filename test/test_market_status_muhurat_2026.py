@@ -1,8 +1,9 @@
 """On Muhurat Sunday, 8 November 2026, the market status follows the published session.
 
 SUDARSHAN's live screens, the strategy host and Flow decide "market closed" from
-the calendar. On the placeholder 18:00-19:15 session they greyed every price as
-closed during the real afternoon session and called the empty 18:00 market open.
+the calendar. On the placeholder 18:00-19:15 session (MCX to 00:15) they greyed
+every price as closed during the real afternoon session and called the empty
+18:00 market open.
 The exchanges' hours and their sources are in database/market_calendar_db.py.
 """
 
@@ -16,13 +17,13 @@ from database.engine_factory import create_db_engine
 from services import market_calendar_service
 
 MUHURAT = date(2026, 11, 8)
-UPDATED = ("NSE", "BSE", "NFO", "BFO", "CDS", "BCD")
+UPDATED = ("NSE", "BSE", "NFO", "BFO", "CDS", "BCD", "MCX")
 
 #: (hour, minute) IST on 8 November 2026 -> the exchanges open then.
 OPEN_AT = {
     (14, 30): set(UPDATED),
     (15, 35): {"NFO", "BFO"},  # equity derivatives trade to 15:40
-    (18, 30): set(),  # the placeholder's hours: nothing of these trades
+    (18, 30): set(),  # the placeholder's hours: nothing trades, MCX included
 }
 
 
@@ -98,6 +99,7 @@ def test_the_status_states_the_published_hours(calendar, clock):
         "BFO": ("14:20", "15:40"),
         "CDS": ("14:20", "15:30"),
         "BCD": ("14:20", "15:30"),
+        "MCX": ("14:20", "15:30"),
     }
 
 

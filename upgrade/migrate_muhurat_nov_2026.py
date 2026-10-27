@@ -2,25 +2,23 @@
 """Move the Muhurat session of 8 November 2026 to the hours the exchanges published.
 
 The 2026 calendar shipped the Diwali Muhurat session (Sunday 8 November 2026)
-with placeholder hours, 18:00 to 19:15 IST, because the exchanges had not yet
-announced it. It is an afternoon session:
+with placeholder hours, 18:00 to 19:15 IST (MCX 18:00 to 00:15 the next
+morning), because the exchanges had not yet announced it. It is an afternoon
+session:
 
-    Exchange  Placeholder   Published    Source
-    NSE       18:00-19:15   14:20-15:30  NSE circular 149/2026 (NSE/CMTR/76941, 19 Oct 2026)
-    BSE       18:00-19:15   14:20-15:30  BSE schedules of 19 Oct 2026, as reported by
-    BFO       18:00-19:15   14:20-15:40  Angel One on 20 Oct 2026 (equity, equity
-    BCD       18:00-19:15   14:20-15:30  derivatives, currency derivatives)
-    CDS       18:00-19:15   14:20-15:30  NSE currency derivatives, Angel One, 20 Oct 2026
-    NFO       18:00-19:15   14:20-15:40  see below
+    Exchange  Placeholder        Published    Source
+    NSE       18:00-19:15        14:20-15:30  NSE circular 149/2026 (NSE/CMTR/76941, 19 Oct 2026)
+    NFO       18:00-19:15        14:20-15:40  NSE circular 142/2026 (NSE/FAOP/76940, 19 Oct 2026)
+    BSE       18:00-19:15        14:20-15:30  BSE schedules of 19 Oct 2026, as reported by
+    BFO       18:00-19:15        14:20-15:40  Angel One on 20 Oct 2026 (equity, equity
+    BCD       18:00-19:15        14:20-15:30  derivatives, currency derivatives)
+    CDS       18:00-19:15        14:20-15:30  NSE currency derivatives, Angel One, 20 Oct 2026
+    MCX       18:00-00:15 (+1d)  14:20-15:30  MCX circular MCX/TRD/590/2026 (19 Oct 2026),
+                                              as summarised by TeamLease RegTech
 
 Each window runs from the normal market open to the normal market close, as the
-calendar encodes a normal day (NSE 09:15-15:30, not the 09:00 pre-open). NSE's
-own F&O circular for the day was not found: 14:20 is the open every segment
-shares, and 15:40 is BSE's published equity derivatives close for this session
-and NSE's F&O close on every day since 3 August 2026.
-
-MCX's own Muhurat hours were not found by 21 October 2026, so its row keeps the
-placeholder, 18:00 to 00:15, and this migration does not touch it.
+calendar encodes a normal day (NSE 09:15-15:30, not the 09:00 pre-open; MCX's
+special session from 14:05 is left out the same way).
 
 Anything that decides "market closed" from the calendar would otherwise call
 every price closed during the real session and the empty 18:00 market open.
@@ -63,13 +61,14 @@ SESSION_DATE = date(2026, 11, 8)
 IST = timezone(timedelta(hours=5, minutes=30))
 
 
-def _at(hour, minute):
-    """Epoch milliseconds of hour:minute IST on 8 November 2026."""
-    return int(datetime(2026, 11, 8, hour, minute, tzinfo=IST).timestamp() * 1000)
+def _at(hour, minute, day=8):
+    """Epoch milliseconds of hour:minute IST on ``day`` November 2026."""
+    return int(datetime(2026, 11, day, hour, minute, tzinfo=IST).timestamp() * 1000)
 
 
-#: The window the 2026 seed shipped for every exchange below.
+#: The windows the 2026 seed shipped: 18:00-19:15, and MCX to 00:15 the next morning.
 PLACEHOLDER = (_at(18, 0), _at(19, 15))
+MCX_PLACEHOLDER = (_at(18, 0), _at(0, 15, day=9))
 
 #: Exchange -> (window this revision replaces, published window).
 REVISION = {
@@ -79,9 +78,9 @@ REVISION = {
     "BFO": (PLACEHOLDER, (_at(14, 20), _at(15, 40))),
     "CDS": (PLACEHOLDER, (_at(14, 20), _at(15, 30))),
     "BCD": (PLACEHOLDER, (_at(14, 20), _at(15, 30))),
+    "MCX": (MCX_PLACEHOLDER, (_at(14, 20), _at(15, 30))),
 }
 
-MCX_NOTE = "  MCX  kept at 18:00-00:15 until MCX's own Muhurat hours are known."
 NO_CALENDAR = (
     "No market calendar stored yet. The app creates it at startup",
     "with the published Muhurat hours.",
@@ -257,7 +256,6 @@ def status(engine):
         return True
     for step in steps:
         print(describe(step))
-    print(MCX_NOTE)
     pending = sum(1 for step in steps if step[4] == "update")
     print(f"Would change {pending} row(s)." if pending else "Nothing to change.")
     return True
@@ -313,7 +311,6 @@ def apply(engine):
 
     for step in steps:
         print(describe(step))
-    print(MCX_NOTE)
     if changed:
         print(f"  [OK] Updated {changed} row(s). OpenAlgo shows them after a restart,")
         print("  or within the hour.")

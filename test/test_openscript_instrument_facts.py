@@ -22,7 +22,7 @@ and filled by its own seed functions. Only the master contract lookup is
 replaced, because it reads a broker's download.
 """
 
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 
 import pytest
 from flask import Blueprint, Flask
@@ -39,6 +39,31 @@ MUHURAT_SUNDAY = date(2026, 11, 8)  # SPECIAL_SESSION in the 2026 seed
 AMBEDKAR_JAYANTI = date(2026, 4, 14)  # equity closed, MCX evening in the seed
 GANDHI_JAYANTI = date(2026, 10, 2)  # every exchange closed in the seed
 HOLIDAY_FREE_WEEK = [date(2026, 9, 21) + timedelta(days=n) for n in range(7)]
+MADE_UP_SUNDAY = date(2026, 12, 13)  # no seed entry; the tests give it a session
+
+
+def add_overnight_session(calendar, day, exchange):
+    """A special session made up for a test: 18:00 to 00:15 the next morning."""
+    evening = calendar.IST.localize(datetime.combine(day, time(18, 0)))
+    holiday = calendar.Holiday(
+        holiday_date=day,
+        description="Overnight session made up for a test",
+        holiday_type="SPECIAL_SESSION",
+        year=day.year,
+    )
+    calendar.db_session.add(holiday)
+    calendar.db_session.flush()
+    calendar.db_session.add(
+        calendar.HolidayExchange(
+            holiday_id=holiday.id,
+            exchange_code=exchange,
+            is_open=True,
+            start_time=int(evening.timestamp() * 1000),
+            end_time=int((evening + timedelta(hours=6, minutes=15)).timestamp() * 1000),
+        )
+    )
+    calendar.db_session.commit()
+    calendar.clear_market_calendar_cache()
 
 
 @pytest.fixture
@@ -187,8 +212,9 @@ def test_a_special_session_day_keeps_the_regular_window_and_states_the_day_apart
 
 
 def test_a_window_that_runs_past_midnight_is_written_as_the_clock_reads_it(calendar, contracts):
-    """MCX Muhurat closes at 00:15 the next morning; the record reads end < start."""
-    today = facts("CRUDEOIL", "MCX", on_date=MUHURAT_SUNDAY)["today"]
+    """A session that closes at 00:15 the next morning reads end < start."""
+    add_overnight_session(calendar, MADE_UP_SUNDAY, "MCX")
+    today = facts("CRUDEOIL", "MCX", on_date=MADE_UP_SUNDAY)["today"]
     assert today["session"] == {"start": "18:00", "end": "00:15", "days": [7]}
     assert today["isSpecial"] is True
 

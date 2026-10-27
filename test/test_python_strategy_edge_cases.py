@@ -13,7 +13,7 @@ Run:
 import json
 import os
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -122,13 +122,48 @@ def test_nse_user_within_market_and_user_window(ps_module):
 
 
 # ---------------------------------------------------------------------------
-# Edge case 2: MCX Muhurat session crosses midnight (18:00 -> 00:15 next day)
+# Edge case 2: an MCX special session crosses midnight (18:00 -> 00:15 next day)
 # ---------------------------------------------------------------------------
 
+#: No seed entry; the fixture below gives it a session made up for these tests.
+MADE_UP_SUNDAY = date(2026, 12, 13)
 
-def test_mcx_muhurat_session_inside_window(calendar_db, ps_module):
-    """8-Nov-2026 22:00 (during Muhurat 18:00-00:15 next day): MCX in window."""
-    win = calendar_db.get_effective_session_window(date(2026, 11, 8), "MCX")
+
+@pytest.fixture()
+def overnight_session(calendar_db):
+    """MCX trades a made-up special session on MADE_UP_SUNDAY, 18:00 to 00:15."""
+    evening = IST.localize(datetime(2026, 12, 13, 18, 0))
+    holiday = calendar_db.Holiday(
+        holiday_date=MADE_UP_SUNDAY,
+        description="Overnight session made up for a test",
+        holiday_type="SPECIAL_SESSION",
+        year=2026,
+    )
+    calendar_db.db_session.add(holiday)
+    calendar_db.db_session.flush()
+    calendar_db.db_session.add(
+        calendar_db.HolidayExchange(
+            holiday_id=holiday.id,
+            exchange_code="MCX",
+            is_open=True,
+            start_time=int(evening.timestamp() * 1000),
+            end_time=int((evening + timedelta(hours=6, minutes=15)).timestamp() * 1000),
+        )
+    )
+    calendar_db.db_session.commit()
+    calendar_db.clear_market_calendar_cache()
+    try:
+        yield MADE_UP_SUNDAY
+    finally:
+        calendar_db.HolidayExchange.query.filter_by(holiday_id=holiday.id).delete()
+        calendar_db.db_session.delete(holiday)
+        calendar_db.db_session.commit()
+        calendar_db.clear_market_calendar_cache()
+
+
+def test_mcx_overnight_session_inside_window(calendar_db, ps_module, overnight_session):
+    """22:00 during a special session that runs 18:00-00:15 next day: MCX in window."""
+    win = calendar_db.get_effective_session_window(overnight_session, "MCX")
     assert win is not None and win["is_special"] is True
 
     ps_module.STRATEGY_CONFIGS["m"] = {
@@ -136,25 +171,25 @@ def test_mcx_muhurat_session_inside_window(calendar_db, ps_module):
         "schedule_start": "18:00",
         "schedule_stop": "23:59",
     }
-    p = _patch_now(date(2026, 11, 8), 22, 0)
+    p = _patch_now(overnight_session, 22, 0)
     try:
         assert ps_module.is_within_schedule_time("m") is True
     finally:
         p.stop()
 
 
-def test_mcx_muhurat_post_midnight_known_limitation(ps_module):
-    """At 00:10 Nov 9 the Muhurat MCX (ends 00:15 Nov 9) is technically still in
-    session. Our current implementation queries by date and Nov 9 has no special
-    session, so we fall back to Nov 9's default 09:00-23:55 — the strategy WILL
-    NOT be considered in window. This is a known limitation; documented here so
-    a future fix doesn't silently change behaviour."""
+def test_mcx_overnight_post_midnight_known_limitation(ps_module, overnight_session):
+    """At 00:10 the next morning the overnight session (ends 00:15) is technically
+    still on. Our current implementation queries by date and the next day has no
+    special session, so we fall back to its default 09:00-23:55 — the strategy
+    WILL NOT be considered in window. This is a known limitation; documented here
+    so a future fix doesn't silently change behaviour."""
     ps_module.STRATEGY_CONFIGS["m"] = {
         "exchange": "MCX",
         "schedule_start": "00:00",
         "schedule_stop": "23:59",
     }
-    p = _patch_now(date(2026, 11, 9), 0, 10)  # 00:10 Nov 9
+    p = _patch_now(overnight_session + timedelta(days=1), 0, 10)  # 00:10 the next morning
     try:
         # Documents current behavior; flip if a future patch handles cross-midnight.
         assert ps_module.is_within_schedule_time("m") is False
