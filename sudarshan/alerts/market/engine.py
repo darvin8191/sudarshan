@@ -72,6 +72,9 @@ class Forming(NamedTuple):
     down: int
     #: Judged already: kept so a trade for it that arrives later is not counted.
     judged: bool = False
+    #: When the timer judges it, if not at its end plus CLOSE_CHECK_MS: the last candle of a
+    #: stock that closes by auction waits for the auction's price (clock.auction).
+    due: int | None = None
 
 
 class State(NamedTuple):
@@ -112,6 +115,8 @@ class Obs(NamedTuple):
     candle: int = 0
     start: int = 0
     end: int = 0
+    #: At candle close: when the timer judges this candle, if not at its end plus the grace.
+    due: int | None = None
 
 
 class Fire(NamedTuple):
@@ -209,12 +214,13 @@ def timer(
         return None
     f = state.forming
     due = f is not None and not f.judged
+    when = (f.end + CLOSE_CHECK_MS if f.due is None else f.due) if due else 0
     stop = stop_reason(alert, now)
     if stop is not None:
-        if due and f.end <= stop.at and now < f.end + CLOSE_CHECK_MS:
+        if due and f.end <= stop.at and now < when:
             return None  # the candle that closed at the stop gets its grace first
         return _stop(alert, state, now, stop, pauses, today)
-    if due and now >= f.end + CLOSE_CHECK_MS:
+    if due and now >= when:
         if state.session != today:
             return _not_judged(alert, state)
         return close(alert, state, now, pauses)
@@ -366,7 +372,8 @@ def _at_close(alert, state, obs, now, previous, pauses) -> Outcome:
     if obs.session != state.session:
         state = new_session(state, obs.session, carries(alert, state, previous))
     s = state
-    forming = Forming(obs.candle, obs.start, obs.end, obs.value, obs.at, obs.up, obs.down)
+    forming = Forming(obs.candle, obs.start, obs.end, obs.value, obs.at, obs.up, obs.down,
+                      due=obs.due)  # fmt: skip
     state = State(s.session, s.side, s.ref, s.seen_at, s.last_fired_at, s.last_fired_candle,
                   s.fires, s.fires_session, s.quota_base, forming, s.derived)  # fmt: skip
     if done is None:

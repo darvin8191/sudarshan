@@ -8,15 +8,21 @@ Continuous trading in IST on a trading day, the end not included, in two regimes
                                                       orders 15:20-15:30, matched 15:30-15:35
       NSE_FO, BSE_FO                                 09:15-15:40
     from 7 Dec 2026 (SEBI HO/47/11/11(3)2025-MRD-POD2/I/23843/2026 of 15 Oct 2026):
-      cash, every stock, and indices                 09:15-15:30; the auction 15:30-15:40
+      cash, every stock, and indices                 09:15-15:30; every stock's auction
+                                                      15:30-15:40
       NSE_FO, BSE_FO                                 09:15-15:45; an expiring index contract
                                                       stops at 15:30 on its expiry day
 
-The auction's print and the post-close session's trades at the closing price (from 15:50) are not
-trades of the continuous session: the gate refuses them, and a stock that closes by auction has
-its own session (``auction=True``, key ``NSE_EQ+auction``). Which stocks close by auction is the
-runtime's to say each day (a stock with futures in the master contract); clock.auction judges the
-auction's print on its own terms.
+A stock that closes by auction (a CAS key, cross-design X6) has its own session, key
+``NSE_EQ+auction`` (``auction=True``): its continuous trading ends 15 minutes before the cash
+close, and after that its quotes are the auction's order book, never judged. The auction's print
+is no trade of that session: it may come from the continuous end until the auction is matched
+(``Session.auction_until``: the cash close plus 5 minutes, 15:35; from 7 Dec 2026 the auction's
+end, 15:40), and clock.auction judges it on its own terms. It is the official close: it belongs
+to the day's last candle on the cash session's grid (the 15:29 minute, the 15:15-15:30 candle,
+the day). Which stocks close by auction is the runtime's to say each morning
+(``closes_by_auction``: a stock with futures in the master contract; from 7 Dec 2026 every stock).
+Trades of the post-close session (15:50-16:00, at the closing price) are refused by the gate.
 
 It decides when a value is inside the session (the gate), where the last candle of a day ends,
 what "today" means for a % move or a day high, when a contract's alerts stop on its expiry day
@@ -27,9 +33,9 @@ announces the whole day: from the start of its pre-open to the F&O close, for ex
 ``2026-11-08 14:05-15:40``. That day each segment starts with normal trading, 15 minutes after the
 window opens, and ends as long before the window's end as it usually ends before the F&O close:
 cash and indices 10 minutes before it, a stock that closes by auction 25, F&O at it. So 8 Nov 2026
-trades 14:20-15:30 in cash (14:20-15:15 for such stocks, NSE/CMTR/76941) and 14:20-15:40 in F&O.
-From 7 Dec 2026 the derivatives close 5 minutes after the 10-minute auction: cash 15 minutes before
-the window's end.
+trades 14:20-15:30 in cash (14:20-15:15 for such stocks, NSE/CMTR/76941, their auction matched by
+15:35) and 14:20-15:40 in F&O. From 7 Dec 2026 the derivatives close 5 minutes after the
+10-minute auction: cash 15 minutes before the window's end.
 
 Pure: whether a day trades and its own window are arguments. The runtime reads both through
 sudarshan.autologin.schedule (``TradingCalendar.is_trading_day`` and ``day_windows``); nothing
@@ -61,14 +67,30 @@ AUCTION_SEGMENTS = frozenset({"NSE_EQ", "BSE_EQ"})
 AUCTION = "+auction"
 #: A special day's window starts with its pre-open; normal trading starts this much later.
 PRE_OPEN_MIN = 15
-#: Each regime from its first day: continuous trading per class, IST minutes, and when an
-#: expiring index contract stops on its expiry day. The first one also covers earlier days.
-REGIMES: tuple[tuple[date, dict[str, tuple[int, int]], int], ...] = (
-    (date(2026, 8, 3), {"cash": (555, 930), "auction": (555, 915), "fo": (555, 940)}, 940),
-    (date(2026, 12, 7), {"cash": (555, 930), "auction": (555, 930), "fo": (555, 945)}, 930),
+
+
+@dataclass(frozen=True, slots=True)
+class Regime:
+    """The exchange's timings from one day on, in IST minutes after midnight."""
+
+    since: date
+    cash: tuple[int, int]
+    #: Continuous trading of a stock that closes by auction.
+    auction: tuple[int, int]
+    fo: tuple[int, int]
+    #: An expiring index contract stops at this minute on its expiry day.
+    index_expiry_end: int
+    #: The auction's print may come until this many minutes after the cash close.
+    print_after_cash: int
+    #: Every cash stock closes by auction, not only those with derivatives.
+    every_stock: bool
+
+
+#: Each regime from its first day; the first one also covers earlier days.
+REGIMES: tuple[Regime, ...] = (
+    Regime(date(2026, 8, 3), (555, 930), (555, 915), (555, 940), 940, 5, False),
+    Regime(date(2026, 12, 7), (555, 930), (555, 930), (555, 945), 930, 10, True),
 )
-#: The post-close session (trades at the closing price) starts this long after the cash close.
-POST_CLOSE_AFTER_MIN = 20
 #: Underlyings of index derivatives: an OpenAlgo derivative symbol starts with one, then DDMMMYY.
 INDEX_UNDERLYINGS = ("NIFTYNXT50", "MIDCPNIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX50", "BANKEX",
                      "SENSEX", "NIFTY")  # fmt: skip
@@ -82,6 +104,8 @@ class Session:
     #: Epoch milliseconds; ``end`` is not part of the session.
     start: int
     end: int
+    #: A stock that closes by auction: its print may come from ``end`` up to this (epoch ms).
+    auction_until: int | None = None
 
 
 def segment_of(instrument_key: str) -> str:
@@ -103,13 +127,13 @@ def epoch_ms(day: date, minute: int) -> int:
     return int((midnight + timedelta(minutes=minute)).timestamp()) * 1000
 
 
-def _regime(day: date | None) -> tuple[date, dict[str, tuple[int, int]], int]:
+def _regime(day: date | None) -> Regime:
     """The regime in force on ``day``; the newest one when no day is given."""
     if day is None:
         return REGIMES[-1]
     found = REGIMES[0]
     for regime in REGIMES:
-        if regime[0] <= day:
+        if regime.since <= day:
             found = regime
     return found
 
@@ -128,16 +152,15 @@ def hours(
     """
     if segment not in SEGMENTS:
         return None
-    _, classes, _ = _regime(day)
-    kind = "fo" if segment in FO_SEGMENTS else "cash"
+    regime = _regime(day)
+    usual = regime.fo if segment in FO_SEGMENTS else regime.cash
     if auction and segment in AUCTION_SEGMENTS:
-        kind = "auction"
-    usual = classes[kind]
+        usual = regime.auction
     if window is None:
         return usual
     opens, closes = window
     start = opens + PRE_OPEN_MIN
-    end = min(closes, closes - (classes["fo"][1] - usual[1]))  # never past the window's end
+    end = min(closes, closes - (regime.fo[1] - usual[1]))  # never past the window's end
     return (start, end) if start < end else None
 
 
@@ -150,12 +173,16 @@ def session(
     auction: bool = False,
 ) -> Session | None:
     """The segment's session on ``day``, or None when it does not trade that day. A stock that
-    closes by auction gets the key ``<segment>+auction``."""
+    closes by auction gets the key ``<segment>+auction`` and the end of its auction's print."""
     span = hours(segment, window, day=day, auction=auction) if trading_day else None
     if span is None:
         return None
-    key = segment + AUCTION if auction and segment in AUCTION_SEGMENTS else segment
-    return Session(key, day_key(day), epoch_ms(day, span[0]), epoch_ms(day, span[1]))
+    start, end = epoch_ms(day, span[0]), epoch_ms(day, span[1])
+    if not (auction and segment in AUCTION_SEGMENTS):
+        return Session(segment, day_key(day), start, end)
+    cash = hours(segment, window, day=day)
+    until = epoch_ms(day, cash[1] + _regime(day).print_after_cash)
+    return Session(segment + AUCTION, day_key(day), start, end, until)
 
 
 def sessions_of(
@@ -173,6 +200,25 @@ def sessions_of(
             if span is not None:
                 found[segment + AUCTION] = span
     return found
+
+
+def closes_by_auction(segment: str, day: date, *, derivatives: bool) -> bool:
+    """Whether a cash stock closes by auction on ``day`` (a CAS key): one with derivatives in
+    the master contract since 3 Aug 2026, every stock from 7 Dec 2026. BSE's list is taken to be
+    NSE's until a check of BSE's says otherwise."""
+    return segment in AUCTION_SEGMENTS and (derivatives or _regime(day).every_stock)
+
+
+def auction_window(
+    segment: str, day: date, *, trading_day: bool, window: tuple[int, int] | None = None
+) -> tuple[int, int] | None:
+    """A CAS key's closing auction on ``day``, (from, until) in epoch ms: from its continuous
+    end until its print may come. What every row the phone gets for such a key carries
+    (``auction_from``, ``auction_until``); the phone never computes sessions."""
+    found = session(segment, day, trading_day=trading_day, window=window, auction=True)
+    if found is None or found.auction_until is None:
+        return None
+    return found.end, found.auction_until
 
 
 def index_derivative(symbol: str) -> bool:
@@ -195,7 +241,7 @@ def expiry_close(segment: str, expiry: date, *, index: bool = False) -> int | No
     span = hours(segment, day=expiry)
     if span is None:
         return None
-    end = _regime(expiry)[2] if index and segment in FO_SEGMENTS else span[1]
+    end = _regime(expiry).index_expiry_end if index and segment in FO_SEGMENTS else span[1]
     return epoch_ms(expiry, end)
 
 
