@@ -4,11 +4,21 @@ The schedule here is mirrored in ``sudarshan/ops/systemd/sudarshan-autologin.tim
 reads that file and fails if the two disagree. The timer only wakes the worker; the worker decides
 from this module whether a wake-up is a real attempt (so a deploy restarting the unit at 16:00, a
 weekend or an NSE holiday does nothing).
+
+The two calendar files are read here the way the deploy tool's ``listed()`` reads them, so every
+reader on the server agrees on every byte: a line ends at a newline only, a byte-order mark may
+start it, words are separated by ASCII spaces, tabs, \\v, \\f and \\r, ``#`` starts a comment, a
+date is YYYY-MM-DD in ASCII digits, and a stray byte spoils only its own line. A line of the
+extra-days file may give the day's own window after the date, for a special session (the NSE
+circular gives the times; the window runs from the start of the pre-open to the F&O close)::
+
+    2026-11-08 14:05-15:40  # Muhurat, NSE circular 149/2026 (F&O to 15:40)
 """
 
 from __future__ import annotations
 
 import logging
+import re
 from datetime import date, datetime, timedelta, timezone
 from datetime import time as dtime
 from pathlib import Path
@@ -37,18 +47,31 @@ HOLIDAYS_FILE = "/etc/sudarshan/nse_holidays.txt"
 #: Optional: days the exchange opens although they are a weekend or in the holiday file (a
 #: Muhurat session, a special Saturday session). Same format; missing or empty means none.
 EXTRA_TRADING_DAYS_FILE = "/etc/sudarshan/nse_extra_trading_days.txt"
+#: NSE's usual session in IST minutes: the 09:00 pre-open to the 15:40 F&O close. A reader's usual
+#: hours keep their own margins around it (the feed 2 and 10 minutes, the alerts 15 and 20); the
+#: feed keeps the same margins around a special session's own window (with_margins).
+SESSION = (9 * 60, 15 * 60 + 40)
+
+
+_HHMM = re.compile(r"(\d{1,2}):(\d{2})", re.ASCII)
+_ASCII_SPACE = " \t\n\v\f\r"
+#: A line's words, split as the deploy tool's grep splits them: ``[[:space:]]`` in the C locale.
+_WORD = re.compile(r"[^ \t\v\f\r]+")
+_ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}", re.ASCII)
 
 
 def minutes(hhmm: str) -> int:
-    """'08:35' -> 515."""
-    hours, mins = hhmm.strip().split(":")
-    value = int(hours) * 60 + int(mins)
-    if not 0 <= value <= 24 * 60:
-        raise ValueError(f"not a time of day: {hhmm!r}")
-    return value
+    """'08:35' -> 515: H:MM or HH:MM in ASCII digits, minutes below 60, 24 only as 24:00."""
+    match = _HHMM.fullmatch(hhmm.strip(_ASCII_SPACE))
+    if match:
+        hours, mins = int(match[1]), int(match[2])
+        if mins < 60 and (hours < 24 or (hours, mins) == (24, 0)):
+            return hours * 60 + mins
+    raise ValueError(f"not a time of day: {hhmm!r}")
 
 
 def parse_window(text: str) -> tuple[int, int]:
+    """'14:05-15:40' -> (845, 940); the start must come before the end, which may be 24:00."""
     start, _, end = text.partition("-")
     window = (minutes(start), minutes(end))
     if window[0] >= window[1]:
@@ -56,42 +79,108 @@ def parse_window(text: str) -> tuple[int, int]:
     return window
 
 
+def window_text(window: tuple[int, int]) -> str:
+    """(845, 940) -> '14:05-15:40'."""
+    return "-".join(f"{minute // 60:02d}:{minute % 60:02d}" for minute in window)
+
+
+def with_margins(own: tuple[int, int], usual: tuple[int, int]) -> tuple[int, int]:
+    """A special session's own window with the margins ``usual`` keeps around SESSION, clamped
+    to the day; the window as it stands when those margins would leave nothing of it."""
+    start = max(0, own[0] - (SESSION[0] - usual[0]))
+    end = min(24 * 60, own[1] + (usual[1] - SESSION[1]))
+    return (start, end) if start < end else own
+
+
+def union(spans: list[tuple[int, int]]) -> tuple[tuple[int, int], ...]:
+    """The spans in order, overlapping or touching ones merged, empty ones left out."""
+    merged: list[tuple[int, int]] = []
+    for start, end in sorted(span for span in spans if span[0] < span[1]):
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return tuple(merged)
+
+
+def read_calendar_file(path: Path) -> str:
+    """The file's text as the deploy tool's grep sees its lines: bytes, not universal newlines (a
+    lone \\r ends no line), a leading byte-order mark dropped, and a stray byte spoiling only its
+    own line. Raises OSError."""
+    return path.read_bytes().decode("utf-8-sig", errors="replace")
+
+
+def _words(line: str) -> list[str]:
+    """The words of one line before any ``#``, after a byte-order mark that may start it."""
+    return _WORD.findall(line.removeprefix("\ufeff").split("#", 1)[0])
+
+
+def _date(word: str) -> date | None:
+    """YYYY-MM-DD in ASCII digits. Python also takes 20261108 and 2026-W45-7 for the same day,
+    which the deploy tool would never match, so those are refused here."""
+    if _ISO_DATE.fullmatch(word):
+        try:
+            return date.fromisoformat(word)
+        except ValueError:
+            pass
+    return None
+
+
 def parse_holidays(text: str) -> tuple[set[date], int]:
-    """One YYYY-MM-DD per line, ``#`` comments allowed; returns (dates, unreadable line count)."""
+    """A date first on each line, ``#`` comments allowed; returns (dates, unreadable line count)."""
     days, bad = set(), 0
-    for raw in text.splitlines():
-        line = raw.split("#", 1)[0].strip()
-        if line:
-            try:
-                days.add(date.fromisoformat(line.split()[0]))
-            except ValueError:
+    for line in text.split("\n"):
+        words = _words(line)
+        if words:
+            day = _date(words[0])
+            if day is None:
                 bad += 1
+            else:
+                days.add(day)
     return days, bad
 
 
-#: How a reader of the extra-days file reports a line whose window it cannot use.
-BAD_WINDOW = "extra trading day %r: the window is not HH:MM-HH:MM; usual hours"
-
-
 def day_windows(text: str) -> tuple[dict[date, tuple[int, int]], list[str]]:
-    """The extra-days lines that give the day's own window after the date, for a special session.
+    """Each extra day's own window, given after its date, and what was left out.
 
-    ``2026-11-08 17:45-19:30  # Muhurat`` gives {2026-11-08: (1065, 1170)}. Returns the windows
-    and the lines whose window cannot be read (that day keeps the usual hours; each reader logs
-    them). A line with the date alone is an extra day at the usual hours, in neither. Shared by the
-    alerts and the feed; auto-login itself reads only the date.
+    ``2026-11-08 14:05-15:40  # Muhurat`` gives {2026-11-08: (845, 940)}. The date is read first:
+    a line whose date cannot be read is skipped here (the calendar counts it). A later line for
+    the same date replaces an earlier one. A line with the date alone is an extra day at the usual
+    hours. Returns the windows and one sentence per problem, worded by what then happens; each
+    reader logs them under its own name. Auto-login itself reads only the dates.
     """
     windows: dict[date, tuple[int, int]] = {}
-    bad: list[str] = []
-    for raw in text.splitlines():
-        words = raw.split("#", 1)[0].split()
-        if len(words) < 2:
+    unusable: list[tuple[date, str]] = []
+    repeated: set[date] = set()
+    for line in text.split("\n"):
+        words = _words(line)
+        if len(words) < 2 or (day := _date(words[0])) is None:
             continue
         try:
-            windows[date.fromisoformat(words[0])] = parse_window(words[1])
+            window = parse_window(words[1])
         except ValueError:
-            bad.append(raw)
-    return windows, bad
+            unusable.append((day, words[1]))
+            continue
+        if windows.get(day, window) != window:
+            repeated.add(day)
+        windows[day] = window
+    problems = []
+    for day, word in unusable:
+        then = (
+            f"{window_text(windows[day])} from another line applies"
+            if day in windows
+            else "the day keeps the usual hours"
+        )
+        problems.append(
+            f"extra trading day {day}: {word!r} is not a window (HH:MM-HH:MM, the start before "
+            f"the end), so {then}"
+        )
+    for day in sorted(repeated):
+        problems.append(
+            f"extra trading day {day} is given more than one window; the last one, "
+            f"{window_text(windows[day])}, applies"
+        )
+    return windows, problems
 
 
 def minute_of_day(at: datetime) -> int:
@@ -99,51 +188,106 @@ def minute_of_day(at: datetime) -> int:
     return local.hour * 60 + local.minute
 
 
+def _count(number: int, noun: str) -> str:
+    """_count(1, "date") -> '1 date', _count(2, "date") -> '2 dates'."""
+    return f"{number} {noun}{'' if number == 1 else 's'}"
+
+
 class _DayFile:
-    """A list of dates in a file, read again only when the file changes."""
+    """A calendar file's dates and, for the extra-days file, each day's own window, from one read
+    that happens again only when the file changes.
+
+    ``report`` (the feed): one INFO line per read saying what it found, a warning for every window
+    that cannot be used, and an INFO line when the optional file is missing.
+    """
 
     def __init__(
-        self, path: Path | str, *, optional: bool, missing_note: str, logger: logging.Logger = log
+        self,
+        path: Path | str,
+        *,
+        optional: bool,
+        missing_note: str,
+        logger: logging.Logger = log,
+        with_windows: bool = False,
+        report: bool = False,
     ):
         self.file = Path(path)
         self.optional = optional
         self.missing_note = missing_note
         self.log = logger
+        self.with_windows = with_windows
+        self.report = report
         self._mtime: int | None = None
         self._days: set[date] = set()
-        self._warned = False
+        self._windows: dict[date, tuple[int, int]] = {}
+        self._told: str | None = None  # the problem last logged; a good read clears it
         #: What the last read found, for a status page: "15 dates", "missing", "not readable".
         self.note = "not read yet"
 
     def days(self) -> set[date]:
+        self._refresh()
+        return self._days
+
+    def windows(self) -> dict[date, tuple[int, int]]:
+        self._refresh()
+        return self._windows
+
+    def _refresh(self) -> None:
         try:
             mtime = self.file.stat().st_mtime_ns
-            if mtime != self._mtime:
-                self._days, bad = parse_holidays(self.file.read_text(encoding="utf-8"))
-                self._mtime = mtime
-                unreadable = f", {bad} unreadable lines" if bad else ""
-                self.note = f"{len(self._days)} dates{unreadable}"
-                if bad:
-                    self.log.warning("%s: %d unreadable lines ignored", self.file, bad)
+            if mtime == self._mtime:
+                return
+            text = read_calendar_file(self.file)
         except FileNotFoundError:
-            if not (self.optional or self._warned):
-                self.log.warning("%s not found: %s", self.file, self.missing_note)
-                self._warned = True
-            self._mtime, self._days, self.note = None, set(), "missing"
-        except (OSError, UnicodeError):
-            if not self._warned:
+            if self._told != "missing" and (self.report or not self.optional):
+                level = logging.INFO if self.optional else logging.WARNING
+                self.log.log(level, "%s not found: %s", self.file, self.missing_note)
+                self._told = "missing"
+            self._forget("missing")
+            return
+        except OSError:
+            if self._told != "not readable":
                 self.log.warning("%s not readable: %s", self.file, self.missing_note)
-                self._warned = True
-            self._mtime, self._days, self.note = None, set(), "not readable"
-        return self._days
+                self._told = "not readable"
+            self._forget("not readable")
+            return
+        self._mtime, self._told = mtime, None
+        self._days, bad = parse_holidays(text)
+        self.note = _count(len(self._days), "date")
+        if bad:
+            self.note += f", {_count(bad, 'unreadable line')}"
+            self.log.warning("%s: %s ignored", self.file, _count(bad, "unreadable line"))
+        if self.with_windows:
+            self._windows, problems = day_windows(text)
+            if self._windows:
+                self.note += f", {_count(len(self._windows), 'own window')}"
+            if problems:
+                self.note += f", {_count(len(problems), 'window problem')}"
+            for problem in problems if self.report else ():
+                self.log.warning("%s: %s", self.file, problem)
+        if self.report:
+            self.log.info("%s read: %s", self.file, self._found())
+
+    def _forget(self, note: str) -> None:
+        self._mtime, self._days, self._windows, self.note = None, set(), {}, note
+
+    def _found(self) -> str:
+        if not self.with_windows:
+            return self.note
+        days = [
+            f"{day} {window_text(self._windows[day])}" if day in self._windows else f"{day} (usual)"
+            for day in sorted(self._days)
+        ]
+        return f"extra trading days {', '.join(days)}" if days else "no extra trading days"
 
 
 class TradingCalendar:
     """Weekends and the NSE holiday file decide the trading days; the extra-days file reopens one.
 
-    A missing or unreadable holiday file leaves only weekends closed (and is logged once): an
-    attempt on a holiday is harmless, a skipped trading day is not. ``logger`` lets another
-    service's journal carry these lines under its own name.
+    A missing or unreadable holiday file leaves only weekends closed (and is logged once until a
+    good read): an attempt on a holiday is harmless, a skipped trading day is not. The extra-days
+    file gives the dates and each day's own window from one read. ``logger`` lets another
+    service's journal carry these lines under its own name; ``report`` adds what the feed logs.
     """
 
     def __init__(
@@ -152,16 +296,23 @@ class TradingCalendar:
         extra_days_file: Path | str | None = None,
         *,
         logger: logging.Logger = log,
+        report: bool = False,
     ):
         self._holidays = _DayFile(
             holidays_file,
             optional=False,
             missing_note="only weekends count as closed",
             logger=logger,
+            report=report,
         )
         self._extra = (
             _DayFile(
-                extra_days_file, optional=True, missing_note="no extra trading days", logger=logger
+                extra_days_file,
+                optional=True,
+                missing_note="no extra trading days",
+                logger=logger,
+                with_windows=True,
+                report=report,
             )
             if extra_days_file
             else None
@@ -174,13 +325,22 @@ class TradingCalendar:
     def extra_days(self) -> set[date]:
         return self._extra.days() if self._extra else set()
 
+    def day_window(self, day: date) -> tuple[int, int] | None:
+        """The day's own window, when its line in the extra-days file gives a usable one."""
+        return self._extra.windows().get(day) if self._extra else None
+
+    def trades_anyway(self, day: date) -> bool:
+        """A weekday off the holiday file: it trades whether or not the extra-days file lists it,
+        so a window given for it is added to the usual hours, never put in their place."""
+        return day.weekday() < 5 and day not in self.holidays()
+
     def holidays_note(self) -> str:
         """The holiday file as read now, for a status page: "15 dates", "missing", ..."""
         self._holidays.days()
         return self._holidays.note
 
     def extra_days_note(self) -> str:
-        """The extra-days file as read now: "1 dates", "missing", "not readable" or "not set"."""
+        """The extra-days file as read now: "1 date", "missing", "not readable" or "not set"."""
         if self._extra is None:
             return "not set"
         self._extra.days()

@@ -34,7 +34,9 @@ OWNER_REPO="${REPO#https://github.com/}"
 as_svc() { sudo -u "${SVC_USER}" -H -- "$@"; }
 log() { echo "[$(date '+%F %T %Z')] $*"; }
 listed() {   # 0 = date $1 starts a line of file $2 (a trailing comment is allowed, as auto-login reads it)
-    grep -qE "^[[:space:]]*${1}([[:space:]#]|$)" "$2" 2>/dev/null
+    # As autologin/schedule.py reads it: ASCII spaces (C locale), NUL inside a line (-a), a BOM.
+    local bom=$'\xef\xbb\xbf'
+    LC_ALL=C grep -aqE "^(${bom})?[[:space:]]*${1}([[:space:]#]|$)" "$2" 2>/dev/null
 }
 market_open() {   # 0 = trading hours (do not restart), 1 = safe
     local now dow hhmm today

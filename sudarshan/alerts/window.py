@@ -21,11 +21,11 @@ from datetime import time as dtime
 from pathlib import Path
 
 from sudarshan.autologin.schedule import (
-    BAD_WINDOW,
     IST,
     TradingCalendar,
     day_windows,
     minute_of_day,
+    read_calendar_file,
 )
 
 log = logging.getLogger("sudarshan.alerts")
@@ -33,9 +33,9 @@ log = logging.getLogger("sudarshan.alerts")
 
 def parse_day_windows(text: str) -> dict[date, tuple[int, int]]:
     """{date: (start, end) minutes} for the lines of an extra-days file that give a window."""
-    windows, bad = day_windows(text)  # the parser the feed uses too
-    for raw in bad:
-        log.warning(BAD_WINDOW, raw)
+    windows, problems = day_windows(text)  # the parser the feed uses too
+    for problem in problems:
+        log.warning("%s", problem)
     return windows
 
 
@@ -53,9 +53,9 @@ class _DayWindows:
         try:
             mtime = self.path.stat().st_mtime_ns
             if mtime != self._mtime:
-                self._windows = parse_day_windows(self.path.read_text(encoding="utf-8"))
+                self._windows = parse_day_windows(read_calendar_file(self.path))
                 self._mtime = mtime
-        except (OSError, UnicodeError):
+        except OSError:
             self._mtime, self._windows = None, {}
         return self._windows.get(day)
 

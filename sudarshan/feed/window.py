@@ -1,38 +1,51 @@
-"""When the feed may hold its socket: NSE trading days, 08:58-15:40 IST by default.
+"""When the feed may hold its socket: NSE trading days, 08:58-15:50 IST by default.
 
 Trading days come from auto-login's calendar (sudarshan/autologin/schedule.py), the one the alerts
 use: weekends and ``/etc/sudarshan/nse_holidays.txt`` are closed, a date in
-``nse_extra_trading_days.txt`` is open, even one the holiday file lists. Both files are read again
-when they change.
+``nse_extra_trading_days.txt`` is open, even one the holiday file lists. Each file is read again,
+in one read, when it changes.
 
-The usual window keeps two margins around NSE's session (the pre-open from 09:00, continuous
-trading 09:15-15:30). It opens 2 minutes before the pre-open, so the socket is authorised,
-connected and subscribed when the session's first data comes, and it closes 10 minutes after the
-close, so the updates that follow the close still arrive. A line of the extra-days file may give a
-special session's own window after the date, from the start of its pre-open to its close::
+NSE's session starts with the 09:00 pre-open; continuous trading runs to 15:30 in the cash market
+and to 15:40 in equity derivatives (since 3 Aug 2026). The usual window keeps two margins around
+it: it opens 2 minutes before the pre-open, so the socket is authorised, connected and subscribed
+when the session's first data comes, and it closes 10 minutes after the F&O close, so the updates
+that follow the close still arrive. The stall watchdog runs only in continuous trading,
+09:15-15:40, where a quiet socket means a stalled one.
 
-    2026-11-08 17:45-19:30  # Muhurat
+A special session's line gives its own window, from the start of its pre-open to its F&O close::
 
-That day the usual window is moved onto it, margins and all: the feed holds 17:43-19:40, and the
-stall watchdog runs from 15 minutes after the start (the pre-open's length) to the close,
-18:00-19:30. A line whose window cannot be read keeps the usual hours, with a warning.
+    2026-11-08 14:05-15:40  # Muhurat, NSE circular 149/2026 (F&O to 15:40)
+
+- On a weekend or a holiday the usual day is moved onto that window, margins and all: the feed
+  holds 14:03-15:50 and the watchdog runs 14:20-15:40 (15 minutes in, the pre-open's length).
+- On a day that trades anyway, the window is added to the usual hours, never put in their place.
+- A reopened weekend or holiday with no usable window keeps the usual hours, and its watchdog
+  waits for the day's first trade: the session may come only in the afternoon, and a closed
+  market's silence is not a stall.
 """
 
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta, timezone
 from datetime import time as dtime
 from pathlib import Path
 
-from sudarshan.autologin.schedule import BAD_WINDOW, TradingCalendar, day_windows
+from sudarshan.autologin.schedule import (  # noqa: F401  parse_holidays: importable from here
+    SESSION,
+    TradingCalendar,
+    parse_holidays,
+    union,
+    window_text,
+    with_margins,
+)
 
 log = logging.getLogger("sudarshan.feed")
 
 IST = timezone(timedelta(hours=5, minutes=30), "IST")  # India keeps no daylight saving
-SESSION = (9 * 60, 15 * 60 + 30)  # NSE's usual session, from the 09:00 pre-open to the close
-CORE_SESSION = (9 * 60 + 15, 15 * 60 + 30)  # continuous trading, for the data-stall watchdog
-DAY_END = 24 * 60
+CORE_SESSION = (9 * 60 + 15, 15 * 60 + 40)  # continuous trading, F&O included: the stall watchdog
+Span = tuple[int, int]  # IST minutes after midnight, [start, end)
 
 
 def iso(epoch: float | None) -> str | None:
@@ -41,142 +54,124 @@ def iso(epoch: float | None) -> str | None:
     return datetime.fromtimestamp(epoch, IST).isoformat(timespec="seconds")
 
 
-def span(window: tuple[int, int]) -> str:
-    """(1063, 1180) -> '17:43-19:40'."""
-    return "-".join(f"{minute // 60:02d}:{minute % 60:02d}" for minute in window)
+def ist_date(epoch: float) -> date:
+    return datetime.fromtimestamp(epoch, IST).date()
 
 
-class _OwnWindows:
-    """The extra-days file's own windows, read again when the file changes (as the alerts do)."""
+def _spans_text(spans: tuple[Span, ...]) -> str:
+    return ", ".join(window_text(span) for span in spans)
 
-    def __init__(self, path: Path | None):
-        self.path = path
-        self._mtime: int | None = None
-        self._said_missing = False
-        self.windows: dict[date, tuple[int, int]] = {}
-        self.bad = 0  # lines whose window cannot be read
 
-    def get(self, day: date) -> tuple[int, int] | None:
-        self.refresh()
-        return self.windows.get(day)
+@dataclass(frozen=True)
+class DayPlan:
+    """What the feed does on one IST date."""
 
-    def refresh(self) -> None:
-        if self.path is None:
-            return
-        try:
-            mtime = self.path.stat().st_mtime_ns
-            if mtime != self._mtime:
-                self.windows, bad = day_windows(self.path.read_text(encoding="utf-8"))
-                self._mtime, self.bad, self._said_missing = mtime, len(bad), False
-                for raw in bad:
-                    log.warning(BAD_WINDOW, raw)
-        except FileNotFoundError:  # as shipped; the calendar keeps quiet about it, so say it once
-            if not self._said_missing:
-                log.info("%s not found: no extra trading days", self.path)
-                self._said_missing = True
-            self._mtime, self.windows, self.bad = None, {}, 0
-        except (OSError, UnicodeError):  # the calendar logs this once
-            self._mtime, self.windows, self.bad = None, {}, 0
+    closed: str = ""  # "weekend" or "NSE holiday": no socket that day
+    spans: tuple[Span, ...] = ()  # when the socket may be held
+    cores: tuple[Span, ...] = ()  # when a quiet socket counts as stalled
+    first_trade: bool = False  # the stall watchdog waits for the day's first trade
+    label: str = ""  # what a listed day adds to the reason
 
 
 class MarketWindow:
     def __init__(
         self,
         holidays_file: Path,
-        window: tuple[int, int] = (538, 940),
+        window: Span = (538, 950),
         always_on: bool = False,
         extra_days_file: Path | None = None,
     ):
-        self.calendar = TradingCalendar(holidays_file, extra_days_file, logger=log)
-        self._own = _OwnWindows(extra_days_file)
+        self.calendar = TradingCalendar(holidays_file, extra_days_file, logger=log, report=True)
         (self.start, self.end), self.always_on = window, always_on
 
     @property
     def note(self) -> str:
-        """The holiday file, for /health: "15 dates", "2 dates, 1 unreadable lines", "missing"."""
+        """The holiday file, for /health: "15 dates", "2 dates, 1 unreadable line", "missing"."""
         return self.calendar.holidays_note()
 
     @property
     def extra_note(self) -> str:
-        """The extra-days file, for /health: "1 dates, 1 own windows", "missing", ..."""
-        note = self.calendar.extra_days_note()
-        self._own.refresh()
-        if self._own.windows:
-            note += f", {len(self._own.windows)} own windows"
-        if self._own.bad:
-            note += f", {self._own.bad} unreadable windows"
-        return note
+        """The extra-days file, for /health: "1 date, 1 own window", "missing", ..."""
+        return self.calendar.extra_days_note()
 
     def is_trading_day(self, day: date) -> bool:
         return self.calendar.is_trading_day(day)
 
-    def hours(self, day: date) -> tuple[int, int]:
-        """The feed's window that day in IST minutes: the usual one, or moved onto the day's own."""
-        own = self._own.get(day)
-        if own is None:
-            return self.start, self.end
-        start = max(0, own[0] - (SESSION[0] - self.start))
-        end = min(DAY_END, own[1] + (self.end - SESSION[1]))
-        return (start, end) if start < end else own  # a usual window too narrow to move
+    def _moved(self, own: Span) -> tuple[Span, Span]:
+        """The usual window and watchdog span moved onto a day's own window (09:00-15:40 there)."""
+        core = (own[0] + CORE_SESSION[0] - SESSION[0], own[1] + CORE_SESSION[1] - SESSION[1])
+        return with_margins(own, (self.start, self.end)), core
 
-    def _core(self, day: date) -> tuple[int, int]:
-        own = self._own.get(day)
+    def plan(self, day: date) -> DayPlan:
+        calendar = self.calendar
+        if not calendar.is_trading_day(day):
+            return DayPlan(closed="weekend" if day.weekday() >= 5 else "NSE holiday")
+        usual = DayPlan(spans=((self.start, self.end),), cores=(CORE_SESSION,))
+        if day not in calendar.extra_days():
+            return usual
+        trades_anyway = calendar.trades_anyway(day)
+        own = calendar.day_window(day)
         if own is None:
-            return CORE_SESSION
-        return own[0] + CORE_SESSION[0] - SESSION[0], own[1] + CORE_SESSION[1] - SESSION[1]
-
-    def _extra(self, day: date, hours: tuple[int, int]) -> str:
-        """What a listed extra trading day adds to the reason; nothing on any other day."""
-        if day not in self.calendar.extra_days():
-            return ""
-        own = self._own.get(day)
-        if own is None:
-            return f": extra trading day, usual hours {span(hours)}"
-        return f": extra trading day, own window {span(own)}, feed {span(hours)}"
+            if trades_anyway:
+                return usual
+            hours = window_text(usual.spans[0])
+            label = f": extra trading day, usual hours {hours}, watchdog after the first trade"
+            return replace(usual, first_trade=True, label=label)
+        window, core = self._moved(own)
+        if trades_anyway:
+            spans = union([*usual.spans, window])
+            label = f": own window {window_text(own)} added to the usual hours, feed "
+            return DayPlan(
+                "", spans, union([CORE_SESSION, core]), False, label + _spans_text(spans)
+            )
+        label = f": extra trading day, own window {window_text(own)}, feed {window_text(window)}"
+        return DayPlan("", (window,), union([core]), False, label)
 
     def status(self, now: float) -> tuple[bool, str]:
         if self.always_on:
             return True, "always on (SUDARSHAN_FEED_ALWAYS_ON=1)"
         t = datetime.fromtimestamp(now, IST)
-        day = t.date()
-        if not self.calendar.is_trading_day(day):
-            return False, "weekend" if day.weekday() >= 5 else "NSE holiday"
-        start, end = self.hours(day)
+        plan = self.plan(t.date())
+        if plan.closed:
+            return False, plan.closed
         minute = t.hour * 60 + t.minute
-        if minute < start:
+        if any(start <= minute < end for start, end in plan.spans):
+            why = "market window"
+        elif minute < plan.spans[0][0]:
             why = "before the market window"
-        elif minute >= end:
+        elif minute >= plan.spans[-1][1]:
             why = "after the market window"
         else:
-            why = "market window"
-        return start <= minute < end, why + self._extra(day, (start, end))
+            why = "between the day's market windows"
+        return why == "market window", why + plan.label
 
     def in_core_session(self, now: float) -> bool:
         t = datetime.fromtimestamp(now, IST)
-        start, end = self._core(t.date())
-        return start <= t.hour * 60 + t.minute < end and self.calendar.is_trading_day(t.date())
+        minute = t.hour * 60 + t.minute
+        return any(start <= minute < end for start, end in self.plan(t.date()).cores)
+
+    def waits_for_first_trade(self, now: float) -> bool:
+        """A reopened day at the usual hours: its watchdog runs only once the exchange trades."""
+        return self.plan(ist_date(now)).first_trade
 
     def next_open(self, now: float) -> float:
-        today = datetime.fromtimestamp(now, IST).date()
+        today = ist_date(now)
         for offset in range(15):
             day = today + timedelta(days=offset)
-            if not self.calendar.is_trading_day(day):
-                continue
-            start = self.hours(day)[0]
-            opens = datetime.combine(day, dtime(start // 60, start % 60), IST).timestamp()
-            if opens > now:
-                return opens
+            for start, _ in self.plan(day).spans:
+                opens = datetime.combine(day, dtime(start // 60, start % 60), IST).timestamp()
+                if opens > now:
+                    return opens
         return now + 86400.0
 
     def describe(self, now: float) -> dict:
         """/health's market_window: open or not and why, the feed's hours today, both files."""
         is_open, why = self.status(now)
-        day = datetime.fromtimestamp(now, IST).date()
-        trading = not self.always_on and self.calendar.is_trading_day(day)
+        plan = self.plan(ist_date(now))
         return {
             "open": is_open,
             "reason": why,
-            "hours": span(self.hours(day)) if trading else None,
+            "hours": None if self.always_on or plan.closed else _spans_text(plan.spans),
             "holidays": self.note,
             "extra_days": self.extra_note,
             "next_open": None if is_open else iso(self.next_open(now)),

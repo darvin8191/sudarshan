@@ -35,15 +35,25 @@ lines. A missing file means only weekends count as closed (logged, and shown in 
 
 `/etc/sudarshan/nse_extra_trading_days.txt` (optional; auto-login, the alerts and the deploy tool
 read it too): a day the exchange opens although it is a weekend or a holiday, such as a Muhurat
-session. Same format, the date first on its line. A session outside the usual hours gives its own
-window after the date, from the start of its pre-open to its close:
+session. Same format, the date first on its line, then the session's own window from the
+exchange's circular: from the start of its pre-open to its F&O close. Give the window whenever the
+circular states one. For the Muhurat session on Sunday 8 Nov 2026 (NSE circular 149/2026: pre-open
+from 14:05, continuous trading from 14:20, equity derivatives to 15:40):
 
 ```
-2026-11-08 17:45-19:30  # Muhurat
+2026-11-08 14:05-15:40  # Muhurat, NSE circular 149/2026 (F&O to 15:40)
 ```
 
-A missing file means no extra days (logged once). Neither file needs a restart: both are read
-again when they change.
+That day the feed holds its socket from 14:03 to 15:50 (the usual margins, below) and the stall
+watchdog runs from 14:20 to 15:40. A date with no window (or one that cannot be read, which the
+journal reports) keeps the usual hours, and on a weekend or a holiday the watchdog then waits for
+the day's first trade: a closed market is quiet, and an afternoon session must not cost hours of
+reconnects before it starts.
+
+Every reader agrees with the deploy tool byte for byte: a byte-order mark is fine, words are
+separated by spaces or tabs, `#` starts a comment, a date is `YYYY-MM-DD`, and a stray byte spoils
+only its own line. A missing file means no extra days (logged once). Neither file needs a restart:
+each is read again when it changes, and every read is logged in one line.
 
 By hand from the repo root (a dev box, outside market hours):
 
@@ -81,13 +91,17 @@ the next opening. On the Muhurat Sunday above, in the morning:
 
 ```json
 {"open": false,
- "reason": "before the market window: extra trading day, own window 17:45-19:30, feed 17:43-19:40",
- "hours": "17:43-19:40", "holidays": "16 dates", "extra_days": "1 dates, 1 own windows",
- "next_open": "2026-11-08T17:43:00+05:30"}
+ "reason": "before the market window: extra trading day, own window 14:05-15:40, feed 14:03-15:50",
+ "hours": "14:03-15:50", "holidays": "16 dates", "extra_days": "1 date, 1 own window",
+ "next_open": "2026-11-08T14:03:00+05:30"}
 ```
 
-An extra day without its own window reads `market window: extra trading day, usual hours
-08:58-15:40`; an ordinary day reads `market window`, `weekend` or `NSE holiday` as before.
+A reopened day with no window of its own reads `market window: extra trading day, usual hours
+08:58-15:50, watchdog after the first trade`. A day that trades anyway and has a window of its own
+keeps its usual hours and adds the window, so `hours` may give two spans: `own window 18:00-19:00
+added to the usual hours, feed 08:58-15:50, 17:58-19:10`. An ordinary day reads `market window`,
+`weekend` or `NSE holiday` as before. `extra_days` counts a window that cannot be used as a window
+problem; the journal says which line and what the day does instead.
 
 ```bash
 curl -s 127.0.0.1:5580/health | python3 -m json.tool
@@ -130,19 +144,24 @@ shows its last non-zero value. Use REST quotes for circuit checks.
 
 ## Behaviour
 
-- **Market window**: the socket is held only on trading days from 08:58 to 15:40 IST
+- **Market window**: the socket is held only on trading days from 08:58 to 15:50 IST
   (`SUDARSHAN_FEED_WINDOW`), closed with a close frame at the end of it. Those are margins around
   NSE's session: 2 minutes before the 09:00 pre-open, so the socket is authorised, connected and
-  subscribed when the first data comes, and 10 minutes after the 15:30 close, so the updates that
-  follow the close still arrive. `SUDARSHAN_FEED_ALWAYS_ON=1` ignores the window and the calendar
-  (tests).
+  subscribed when the first data comes, and 10 minutes after the F&O close, so the updates that
+  follow the close still arrive. Equity derivatives trade to 15:40 since 3 Aug 2026 (the cash
+  market closes at 15:30), so the window ends at 15:50 and the stall watchdog runs 09:15-15:40.
+  `SUDARSHAN_FEED_ALWAYS_ON=1` ignores the window and the calendar (tests).
 - **Trading days** come from auto-login's calendar, the one the alerts use: weekends and the
   holidays file are closed, a date in the extra-days file is open, even when the holidays file
-  lists it too (auto-login, the alerts and the deploy tool all read it that way). A day with its
-  own window gets the usual window moved onto it, margins and all (the margins
-  `SUDARSHAN_FEED_WINDOW` keeps around 09:00-15:30): `17:45-19:30` holds the socket from 17:43 to
-  19:40. A window that cannot be read leaves that day at the usual hours, with a warning in the
-  journal.
+  lists it too (auto-login, the alerts and the deploy tool all read it that way).
+  - A reopened weekend or holiday with its own window gets the usual day moved onto it, margins
+    and all (those `SUDARSHAN_FEED_WINDOW` keeps around 09:00-15:40): `14:05-15:40` holds the
+    socket from 14:03 to 15:50, with the watchdog from 14:20 (15 minutes in, as 09:15 is) to 15:40.
+  - A day that trades anyway keeps its usual hours and adds its own window to them.
+  - A reopened day with no usable window keeps the usual hours; its watchdog starts with the day's
+    first trade (a tick whose last trade time is that day).
+  - A window that cannot be read leaves that day at the usual hours, with a warning in the
+    journal.
 - **Connect**: every attempt re-reads the token file, calls
   `GET /v3/feed/market-data-feed/authorize` and dials the returned single-use URI.
 - **Retry policy**:
@@ -153,7 +172,7 @@ shows its last non-zero value. Use REST quotes for circuit checks.
   | WebSocket upgrade refused (403/429) | as above but never sooner than 60 s, so a stale socket can expire at Upstox |
   | authorize 401 ("token rejected") | 10 min, 30 min, then hourly; at once when the token file changes |
   | token file missing, empty or malformed | 60 s; at once when the file changes |
-  | no data for 120 s during 09:15-15:30 (on a day with its own window: from 15 minutes after its start, the pre-open's length, to its end) | clean close and reconnect (stall watchdog) |
+  | no data for 120 s during 09:15-15:40 (on a day with its own window: from 15 minutes after its start, the pre-open's length, to its end; on a reopened day without one: only after its first trade) | clean close and reconnect (stall watchdog) |
 
 - **Subscriptions**: `default_keys.txt` (or `SUDARSHAN_FEED_KEYS`) is the base set, one
   `MODE KEY` per line, re-read at every start. API changes are stored as an overlay in
@@ -191,7 +210,7 @@ live service holds 5581):
 | `SUDARSHAN_NSE_HOLIDAYS_FILE` | `/etc/sudarshan/nse_holidays.txt` |
 | `SUDARSHAN_NSE_EXTRA_DAYS_FILE` | `/etc/sudarshan/nse_extra_trading_days.txt` |
 | `SUDARSHAN_FEED_ALWAYS_ON` | `0` |
-| `SUDARSHAN_FEED_WINDOW` | `08:58-15:40` (IST) |
+| `SUDARSHAN_FEED_WINDOW` | `08:58-15:50` (IST) |
 | `SUDARSHAN_FEED_HTTP_PORT` / `SUDARSHAN_FEED_ZMQ_PORT` | `5580` / `5581` (always 127.0.0.1) |
 | `SUDARSHAN_FEED_RECORD` | `1` |
 | `SUDARSHAN_FEED_RECORD_MAX_MB` / `SUDARSHAN_FEED_RECORD_KEEP_DAYS` | `512` / `10` |

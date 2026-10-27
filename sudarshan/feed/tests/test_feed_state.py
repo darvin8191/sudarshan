@@ -28,7 +28,7 @@ def test_settings_defaults_and_guards():
     assert (cfg.http_port, cfg.zmq_port, cfg.window, cfg.always_on) == (
         5580,
         5581,
-        (538, 940),
+        (538, 950),  # 08:58-15:50: the F&O close is 15:40
         False,
     )
     assert cfg.token_file == Path("/etc/sudarshan/upstox_analytics_token")
@@ -198,11 +198,11 @@ def test_market_window(tmp_path):
     window = MarketWindow(holidays)  # 21 Oct 2026 is a Wednesday
     assert window.status(ist(2026, 10, 21, 8, 57, 59)) == (False, "before the market window")
     assert window.status(ist(2026, 10, 21, 8, 58)) == (True, "market window")
-    assert window.status(ist(2026, 10, 21, 15, 39, 59))[0]
-    assert window.status(ist(2026, 10, 21, 15, 40)) == (False, "after the market window")
+    assert window.status(ist(2026, 10, 21, 15, 49, 59))[0]
+    assert window.status(ist(2026, 10, 21, 15, 50)) == (False, "after the market window")
     assert window.status(ist(2026, 10, 22, 10)) == (False, "NSE holiday")
     assert window.status(ist(2026, 10, 24, 10)) == (False, "weekend")
-    assert window.note == "2 dates, 1 unreadable lines"
+    assert window.note == "2 dates, 1 unreadable line"
     assert iso(window.next_open(ist(2026, 10, 21, 16))) == "2026-10-23T08:58:00+05:30"  # skips Thu
     assert (
         iso(window.next_open(ist(2026, 10, 23, 16))) == "2026-10-26T08:58:00+05:30"

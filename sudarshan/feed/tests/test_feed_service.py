@@ -178,7 +178,7 @@ def test_rejected_token_backs_off_long_and_retries_when_the_file_changes(feed_en
 
 
 def test_socket_is_held_only_inside_the_market_window(feed_env, fast):
-    now = [ff.ist(2026, 10, 21, 15, 39, 58)]  # a Wednesday, two seconds before 15:40
+    now = [ff.ist(2026, 10, 21, 15, 49, 58)]  # a Wednesday, two seconds before 15:50
 
     async def scenario():
         async with ff.FakeUpstox() as fake:
@@ -186,7 +186,7 @@ def test_socket_is_held_only_inside_the_market_window(feed_env, fast):
             svc = FeedService(Settings.from_env(env), clock=lambda: now[0])
             run = asyncio.create_task(svc.run())
             await ff.wait_until(lambda: svc.health()["state"] == "connected")
-            now[0] = ff.ist(2026, 10, 21, 15, 40, 1)
+            now[0] = ff.ist(2026, 10, 21, 15, 50, 1)
             await ff.wait_until(lambda: svc.health()["state"] == "closed")
             await ff.wait_until(lambda: fake.close_codes == [1000])
             health = svc.health()
