@@ -12,8 +12,8 @@ arrive while the first is still being placed.
 So in the Live book every exit decides on its own read of the book, and a
 position is busy while
 
-- an exit for it is being placed: claimed here from before its order is sent
-  until after it is noted (``one``);
+- an exit for it is being placed: claimed here from before the read it is
+  sized from until after it is noted, or until it has sent nothing (``one``);
 - an exit for it may have placed an order in the last ``EXIT_SHOWS_WITHIN_S``:
   noted here (``exit_placed``) by the app's Exit, by any smart order to a
   position size of 0, and by Exit all for each exit it sent;
@@ -28,11 +28,12 @@ position at once except the busy ones, each of which it reports as not sent in
 a sentence of its own. It never waits for anything, and it starts no Upstox
 call after ``EXIT_ALL_SENDS_FOR_S``.
 
-One position's exit is refused with that sentence (409) if its position is
-busy, or an Exit all holds the book, either before the read it is sized from
-(``why_busy``: a slow read can answer older than the exit that made it busy) or
-when it is claimed after that read. An entry (a smart order that opens or adds
-to a position) is never refused.
+One position's exit claims its position before the read it is sized from and
+holds it across that read, so an Exit all or another exit that starts during a
+slow read leaves the position to it: a read can answer older than an exit sent
+while it was on its way. It is refused with that sentence (409) if its position
+is busy, or an Exit all holds the book, when it claims. An entry (a smart order
+that opens or adds to a position) is never refused.
 
 The sandbox's book shows each exit the moment it is placed, so nothing is noted
 there; the app's Exit still claims its position in the sandbox's book while it
@@ -53,6 +54,7 @@ import re
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from utils import real_threading
@@ -66,11 +68,19 @@ EXIT_ALL_BEING_PLACED = "Exit all is still being placed. Wait for it, then check
 #: book to show it (frontend/src/sudarshan/books/sent.ts, SENT_HOLD_MS).
 EXIT_SHOWS_WITHIN_S = 15.0
 
-#: Exit all starts no Upstox call (its reads, then one exit per position) after this long. The
-#: one call running then may take 120 s (utils/httpx_client.REQUEST_TIMEOUT_SECONDS), after up to
-#: 10 s in the order window under gthread (utils/broker_backpressure), so an Exit all has ended
-#: within 145 s: inside the 150 s for which a phone that got no answer holds it
-#: (frontend/src/sudarshan/books/sent.ts, NO_ANSWER_HOLD_MS).
+#: Exit all reads the order book with a limit of its own and no retry: a read that takes longer
+#: counts as not read, and Exit all goes on without it and says so.
+EXIT_ALL_ORDERS_READ_S = 5.0
+
+#: Exit all sends no exit after this long from the end of its reads. Its positions read may take
+#: 120 s (utils/httpx_client.REQUEST_TIMEOUT_SECONDS) plus 7 s of Upstox's 429 back-off, the order
+#: book EXIT_ALL_ORDERS_READ_S, and the last exit 120 s after up to 10 s in the order window under
+#: gthread (utils/broker_backpressure): 277 s in all, inside the 300 s nginx gives a request
+#: (install/install.sh). A slow read never uses up the time for sending, so a slow Upstox, when
+#: Exit all matters most, still closes everything. Overlaps stay safe through the claims and
+#: notes here, not through the phone's hold: a tap that comes after the phone stopped holding an
+#: unanswered Exit all (frontend/src/sudarshan/books/sent.ts, NO_ANSWER_HOLD_MS) gets the server's
+#: 409 and its sentence.
 EXIT_ALL_SENDS_FOR_S = 15.0
 
 IST = timezone(timedelta(hours=5, minutes=30), "IST")  # India keeps no daylight saving
@@ -115,13 +125,55 @@ def on_its_way(position: Position, at: float) -> str:
     )
 
 
-def order_working(position: Position, placed: str) -> str:
-    """Why Exit all sent no exit for a position whose closing order still works in the book."""
-    when = f" (placed {placed})" if placed else ""
-    return (
-        f"{trader_name(position)} already has an order working to close it{when}, so no exit "
-        "was sent for it. Check Orders, and cancel that order first if you want to exit now."
-    )
+@dataclass(frozen=True)
+class WorkingOrder:
+    """An order still working at the broker on a position's closing side, as Exit all read it."""
+
+    side: str  # BUY or SELL
+    quantity: int  # still to fill; 0 when the broker did not say
+    kind: str = ""  # MARKET, LIMIT, SL or SL-M
+    price: float = 0.0
+    trigger: float = 0.0
+    order_id: str = ""
+    placed: str = ""  # HH:MM:SS, India's time, as the broker stamped it
+
+
+def order_working(position: Position, orders: list[WorkingOrder], held: int) -> str:
+    """Why Exit all sent no exit for a position with an order on its closing side still working.
+
+    A stop loss or a target left working after the position is closed can fill later and turn it
+    the other way, and with the broker's book lagging, sizing only the part not covered cannot be
+    trusted: so nothing is sent for the position, and the trader is told which order to cancel.
+    One that covers only part of the position stops the whole exit, and the sentence says so.
+
+    Args:
+        position: The position, as the app writes it.
+        orders: Every order working on its closing side; the first is named.
+        held: The position's quantity, unsigned.
+    """
+    first = orders[0]
+    what = " ".join(part for part in (first.side, str(first.quantity or ""), first.kind) if part)
+    details = []
+    if first.trigger > 0:
+        details.append(f"trigger {first.trigger:.2f}")
+    if first.price > 0 and first.kind not in ("MARKET", "SL-M"):
+        details.append(f"price {first.price:.2f}")
+    if first.order_id:
+        details.append(f"order ending {first.order_id[-4:]}")
+    if first.placed:
+        details.append(f"placed {first.placed}")
+    said = f"a {what} order" + (f" ({', '.join(details)})" if details else "")
+    more = len(orders) - 1
+    if more:
+        said += f" and {more} more {'order' if more == 1 else 'orders'}"
+    covered = sum(order.quantity for order in orders)
+    if 0 < covered < held:
+        working = f"working to close {covered} of the {held} held"
+        working += ", so no exit was sent for any of it"
+    else:
+        working = "working to close it, so no exit was sent for it"
+    them = "them" if more else "it"
+    return f"{trader_name(position)} has {said} {working}. Cancel {them} in Orders, then exit."
 
 
 class ExitsInFlight:
@@ -263,8 +315,8 @@ def why_busy(book: str, exchange: object, symbol: object, product: object) -> st
     """Why an exit for this position would be refused right now (``EXITS.why_busy``).
 
     The phone's Exit asks first, so a second tap is answered at once instead of waiting behind
-    the first for the broker's per-symbol lock; the claim itself is taken where the exit is
-    sized and sent (broker/upstox/api/order_api.py).
+    the first for the broker's per-symbol lock; the claim itself is taken under that lock,
+    before the read the exit is sized from (broker/upstox/api/order_api.py).
     """
     return EXITS.why_busy(book, position_of(exchange, symbol, product))
 

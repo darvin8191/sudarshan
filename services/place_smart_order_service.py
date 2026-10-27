@@ -298,9 +298,14 @@ def place_smart_order_with_auth(
             else "Failed to place smart order"
         )
         error_response = {"status": "error", "message": message}
+        # SUDARSHAN M6.8: an exit the guard sent nothing for (another for that position is on its
+        # way) is told on Telegram, which hears of no other failure
+        # (subscribers/telegram_subscriber.py).
+        heard = isinstance(response_data, dict) and response_data.get("nothing_sent") is True
         bus.publish(OrderFailedEvent(
             mode="live", api_type="placesmartorder",
-            request_data=order_request_data, response_data=error_response,
+            request_data=order_request_data,
+            response_data={**error_response, "nothing_sent": True} if heard else error_response,
             api_key=api_key, error_message=message,
         ))
         status_code = res.status if res and hasattr(res, "status") else 500

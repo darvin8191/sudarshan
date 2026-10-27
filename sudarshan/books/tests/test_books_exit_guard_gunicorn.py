@@ -43,6 +43,8 @@ APP = textwrap.dedent(
 
     if os.environ.get("SENDS_FOR_S"):
         exit_guard.EXIT_ALL_SENDS_FOR_S = float(os.environ["SENDS_FOR_S"])
+    if os.environ.get("NOTE_LASTS_S"):
+        exit_guard.EXIT_SHOWS_WITHIN_S = float(os.environ["NOTE_LASTS_S"])
 
     ROWS = {  # symbol: instrument token, exchange, Upstox product, quantity (never changes)
         "NIFTY27OCT2625900CE": ("NSE_FO|1001", "NFO", "I", 65),
@@ -80,6 +82,9 @@ APP = textwrap.dedent(
                  "tradingsymbol": symbol, "quantity": quantity}
                 for symbol, (token, exchange, product, quantity) in ROWS.items()
             ]
+            slow = STATE.setdefault("slow_reads", [])
+            if slow:
+                time.sleep(slow.pop(0))  # a slow positions read (cooperative under eventlet)
             return Reply(200, {"status": "success", "data": rows})
 
         def post(self, url, headers=None, content=None, **kwargs):
@@ -193,7 +198,12 @@ def _stop_process_group(proc: subprocess.Popen, grace_s: float = 5.0) -> None:
 
 class Server:
     def __init__(
-        self, tmp_path: Path, worker: str, timeout: int = 30, sends_for_s: float | None = None
+        self,
+        tmp_path: Path,
+        worker: str,
+        timeout: int = 30,
+        sends_for_s: float | None = None,
+        note_lasts_s: float | None = None,
     ):
         app_dir = tmp_path / "app"
         app_dir.mkdir()
@@ -210,6 +220,8 @@ class Server:
         )
         if sends_for_s is not None:
             env["SENDS_FOR_S"] = str(sends_for_s)
+        if note_lasts_s is not None:
+            env["NOTE_LASTS_S"] = str(note_lasts_s)
         command = [
             sys.executable, "-m", "gunicorn", "--worker-class", worker, "--workers", "1",
             *(["--threads", "8"] if worker == "gthread" else []),
@@ -386,6 +398,27 @@ def test_an_exit_all_that_runs_out_of_time_stops_sending_and_the_worker_serves(t
         assert srv.claims()["orders"] == [X["symbol"]]  # the only one started in time
         assert status == 409 and body["not_confirmed"] is True
         assert "Of 3 exits, 1 was sent and 2 were not sent in time." in body["message"]
+    finally:
+        srv.stop()
+
+
+@pytest.mark.parametrize("worker", ["eventlet", "gthread"])
+def test_an_exit_all_during_an_exit_s_slow_read_leaves_that_position_to_it(tmp_path, worker):
+    """The second review's G3: a 2 s positions read outlasting a 1 s note. The exit claimed its
+    position before that read, so the Exit all that starts during it closes the others only."""
+    _needs(worker)
+    srv = Server(tmp_path, worker, note_lasts_s=1.0)
+    try:
+        srv.setup(slow_reads=[2.0])  # the exit's read; the Exit all's own read is quick
+        first, exited = _in_background(srv.post, "/close_position", X)
+        time.sleep(0.5)
+        status, body, _took = srv.post("/api/v1/closeposition", {})
+        first.join(20)
+        assert exited["result"][0] == 200
+        assert sorted(srv.claims()["orders"]) == sorted([X["symbol"], Y["symbol"], "SBIN"])
+        assert status == 409 and body["not_confirmed"] is True
+        assert ON_ITS_WAY in body["message"]
+        assert srv.claims()["held"] == 0
     finally:
         srv.stop()
 

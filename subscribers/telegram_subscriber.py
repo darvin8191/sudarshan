@@ -29,7 +29,12 @@ def on_order_placed(event):
 
 def on_order_failed(event):
     # Original code does NOT send telegram on order failure — preserve that behavior
-    pass
+    # SUDARSHAN M6.8: except a refusal nobody else would hear of, marked where it is made: an
+    # exit the guard sent nothing for while another for that position is on its way, and a
+    # Cancel all whose orders could not be read. Its alert says nothing was sent, and why.
+    response = event.response_data
+    if isinstance(response, dict) and response.get("nothing_sent") is True:
+        _send_alert(event.api_type, event.request_data, response, event.api_key)
 
 
 def on_smart_order_no_action(event):

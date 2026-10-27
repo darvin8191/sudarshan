@@ -180,7 +180,9 @@ def cancel_all_orders_with_auth(
         }
         bus.publish(OrderFailedEvent(
             mode="live", api_type=API_TYPE,
-            request_data=order_request_data, response_data=error_response,
+            request_data=order_request_data,
+            # SUDARSHAN M6.8: told on Telegram with its reason (subscribers/telegram_subscriber.py).
+            response_data={**error_response, "nothing_sent": True},
             api_key=original_data.get("apikey", ""),
             error_message=error_response["message"],
         ))
