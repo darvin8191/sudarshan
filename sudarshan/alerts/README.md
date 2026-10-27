@@ -339,6 +339,14 @@ sudarshan-feed (one Upstox socket) -> ZMQ 127.0.0.1:5581 (ticks, __health__)
 - **Claims.** The service claims only what its Active alerts need, each key in the mode they need
   (bid and ask need full), renews every 10 minutes and again at once when the feed restarts. Off,
   it asks the feed to drop them.
+- **The Alerts page's local API.** OpenAlgo's bridge reaches market alerts only on
+  127.0.0.1:5582 (`market/api.py`): `GET /health` (counts, and whether market alerts are on: the
+  page says "Switched off on the server" from it) and `POST /v1/<op>`, each body sealed under a key
+  derived from OpenAlgo's pepper, good for 60 s and once, at most 64 KiB, for the owner only. A new
+  or changed alert is checked, kept within the limits and claimed at the feed before it is saved
+  (a refusal is said in words and nothing is saved), and reaches the engine only after market.db
+  took it (`market/desk.py`). The API runs whenever the service does, with market alerts off too;
+  a port that is taken keeps market alerts off, and order alerts carry on.
 
 | variable | default | meaning |
 |---|---|---|

@@ -44,6 +44,13 @@ def feed_url_of(env: Mapping[str, str] | None = None) -> str:
     return url if url.startswith("http://") and is_loopback_url(url) else FEED_URL
 
 
+def http_port_of(env: Mapping[str, str] | None = None) -> int:
+    """The local API's port with market alerts off, where nothing else is checked: the setting
+    when it is a port number, else the default (the bridge reads "off" there, cross-design R3)."""
+    raw = ((os.environ if env is None else env).get("SUDARSHAN_ALERTS_HTTP_PORT") or "").strip()
+    return int(raw) if raw.isdigit() and 0 < int(raw) < 65536 else HTTP_PORT
+
+
 def _number(env: Mapping[str, str], name: str, default: int, low: int, high: int) -> int:
     raw = (env.get(name) or "").strip()
     if not raw:

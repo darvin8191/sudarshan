@@ -115,7 +115,8 @@ class MarketRuntime:
         self._alerts: dict[int, spec.Alert] = {}
         self._channels: dict[int, dict | None] = {}
         self._prefs = {"telegram": True, "app": True}
-        self._notes: dict[int, engine.Reason] = {}
+        #: Alert id -> its latest note (a candle not checked, a base changed) and when it came.
+        self._notes: dict[int, tuple[engine.Reason, int]] = {}
         self._last: dict[str, dict] = {}
         self._to_seed: set[int] = set()
         self._tasks: set[asyncio.Task] = set()
@@ -136,6 +137,11 @@ class MarketRuntime:
         self._flushed = self._seen = 0
         self._pruned_on: date | None = None
         self._claims_wake = asyncio.Event()
+        #: Held while the claims are put at the feed, and by an owner's change from its claim to
+        #: its place in the Book, so a renewal never drops a key being added (desk.py).
+        self._claims_lock = asyncio.Lock()
+        #: Event id -> a future the market lane's answer resolves (the Settings sheet's test).
+        self._waiters: dict[int, asyncio.Future] = {}
         self._throttle = Throttle(300.0)
         self.market = Market(0, {})
 
@@ -147,7 +153,7 @@ class MarketRuntime:
                 await self._serve()
         except Exception:
             log.exception("market alerts stopped unexpectedly; order alerts carry on")
-            self._set_state("off", "stopped after an unexpected failure")
+            self._set_state("off", words.STOPPED_UNEXPECTEDLY)
         finally:
             if self.store is not None:
                 with contextlib.suppress(Exception):
@@ -222,7 +228,7 @@ class MarketRuntime:
             raise
         except Exception:
             log.exception("market alerts' %s job failed; market alerts stop", name)
-            self._set_state("off", "stopped after an unexpected failure")
+            self._set_state("off", words.STOPPED_UNEXPECTEDLY)
             self.stop(f"the {name} job failed")
 
     async def _shutdown(self) -> None:
@@ -255,6 +261,86 @@ class MarketRuntime:
         self.book.put(alert, state)
         if alert.status == "active":
             self._to_seed.add(alert.id)
+
+    # ---- the owner's changes, from the local API (desk.py, review A7.m) --------------------------
+    def owner_put(self, row: dict, *, reset: bool = False, resume: bool = False) -> spec.Alert:
+        """An owner's change the store has accepted, into the Book: its state starts again when
+        the condition changed (``reset``), resumes on a resume or restart, and is kept otherwise.
+        A new, reset or resumed Active alert takes its side from the latest snapshot, through the
+        claims job, which follows the change at once."""
+        alert = spec.Alert.of(row)
+        fresh = alert.id not in self._alerts
+        state = None
+        if reset:
+            state = engine.State()
+        elif resume:
+            state = engine.resume(self.book.state(alert.id) or engine.State())
+        self._alerts[alert.id], self._channels[alert.id] = alert, row.get("channels")
+        self._notes.pop(alert.id, None)
+        self.book.put(alert, state)
+        if alert.status == "active" and (fresh or reset or resume):
+            self._to_seed.add(alert.id)
+        self._claims_wake.set()
+        self._rebuild()
+        return alert
+
+    def owner_drop(self, alert_id: int) -> None:
+        """A deleted alert leaves the Book at once, and its key the claims."""
+        self.book.drop(alert_id)
+        for kept in (self._alerts, self._channels, self._notes):
+            kept.pop(alert_id, None)
+        self._to_seed.discard(alert_id)
+        self._claims_wake.set()
+        self._rebuild()
+
+    def wake_claims(self) -> None:
+        """Put the claims again now: a claim made for a change that was then refused goes."""
+        self._claims_wake.set()
+
+    @contextlib.asynccontextmanager
+    async def claims_held(self):
+        """No renewal puts the claims while an owner's change claims its key and takes its place
+        in the Book, so the new key is never dropped and claimed again a moment later."""
+        async with self._claims_lock:
+            yield
+
+    def use_prefs(self, prefs: dict[str, bool]) -> None:
+        self._prefs = {"telegram": bool(prefs["telegram"]), "app": bool(prefs["app"])}
+
+    def tell(self, event_id: int, text: str, at: int) -> asyncio.Future:
+        """One line on Telegram through the market lane (the Settings sheet's test); the future
+        is resolved with the lane's answer, once it is recorded."""
+        waiter = asyncio.get_running_loop().create_future()
+        self._waiters[event_id] = waiter
+        self.lane.add([Line(event_id, text, _at(at))])
+        return waiter
+
+    def forget_waiter(self, event_id: int) -> None:
+        self._waiters.pop(event_id, None)
+
+    # ---- what the owner's desk reads -----------------------------------------------------------
+    @property
+    def prefs(self) -> dict[str, bool]:
+        return dict(self._prefs)
+
+    @property
+    def down_since(self) -> int | None:
+        """Since when market alerts are not checking (the feed down, unheard or silent)."""
+        return self._down_since
+
+    def last_frame(self, key: str) -> dict | None:
+        return self._last.get(key)
+
+    def note_of(self, alert_id: int) -> tuple[engine.Reason, int] | None:
+        """The alert's latest note (a candle not checked, its base changed) and when it came."""
+        return self._notes.get(alert_id)
+
+    def now_ms(self) -> int:
+        return self._now()
+
+    async def write(self, fn, *args, **kwargs):
+        """One market.db call on the writer thread, in order with the fires (review A7.k)."""
+        return await self._db(fn, *args, **kwargs)
 
     def _channels_of(self, alert_id: int) -> dict[str, bool]:
         """Where a fire goes: the alert's own choice, else the settings (M10.14)."""
@@ -372,7 +458,7 @@ class MarketRuntime:
             if alert is None:
                 continue
             if out.note is not None:
-                self._notes[alert.id] = out.note
+                self._notes[alert.id] = (out.note, now)
             if out.fire is not None:
                 self._fire(alert, out, now)
             elif out.status is not None:
@@ -441,6 +527,9 @@ class MarketRuntime:
             if event_id >= 0:
                 self._submit(self.store.set_delivery, OWNER, event_id, "telegram", status, reason,
                              now)  # fmt: skip
+            waiter = self._waiters.pop(event_id, None)
+            if waiter is not None and not waiter.done():
+                waiter.set_result(status)  # after the write above: the writer runs in order
 
     def _tell_line(self, text: str, at: int) -> None:
         """A line that is no fire (a pause): no record, so no delivery to write."""
@@ -557,11 +646,12 @@ class MarketRuntime:
         failures = 0
         while True:
             self._claims_wake.clear()
-            keys = self.book.modes()
-            self.link.follow(keys)
-            self._last = {key: frame for key, frame in self._last.items() if key in keys}
             try:
-                answer = await self.link.put_claims(keys)
+                async with self._claims_lock:
+                    keys = self.book.modes()
+                    self.link.follow(keys)
+                    self._last = {key: frame for key, frame in self._last.items() if key in keys}
+                    answer = await self.link.put_claims(keys)
             except FeedRefused as exc:
                 log.error("The price feed refused market alerts' instruments: %s", exc)
             except FeedUnreachable:

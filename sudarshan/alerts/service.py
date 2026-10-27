@@ -32,6 +32,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import random
 import signal
 import time
@@ -46,7 +47,7 @@ from sudarshan.autologin.schedule import IST, TradingCalendar, hhmm
 
 from . import __version__, loopback, messages
 from .config import ConfigError, Settings, setup_logging, switched_off
-from .market.config import MarketSettings, feed_url_of, market_on  # M10.1
+from .market.config import MarketSettings, feed_url_of, http_port_of, market_on  # M10.1
 from .orders import Alert, OrderTracker
 from .outbox import OpenAlgoTelegram, Outbox, Pacer, Throttle
 from .owner import Owner, OwnerError, load_openalgo_modules, prepare_openalgo_env, read_owner
@@ -574,17 +575,59 @@ def _json(raw) -> dict | None:
     return message if isinstance(message, dict) else None
 
 
-async def _serve(service: AlertService, market=None) -> None:
+async def _serve(service: AlertService, market=None, api=None, port: int = 0) -> None:
     loop = asyncio.get_running_loop()
+    if api is not None:  # M10.1: the market alerts' sealed local API, before anything else
+        market, api = await _open_api(api, port, market)
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, _stop, service, market, f"signal {sig.name}")
-    await asyncio.gather(service.run(), *([market.run()] if market else []))  # M10.1
+    try:
+        await asyncio.gather(service.run(), *([market.run()] if market else []))  # M10.1
+    finally:
+        if api is not None:
+            await api.close()
+
+
+async def _open_api(api, port: int, market):
+    """M10.1: the API on 127.0.0.1:<port>. A port that is taken keeps market alerts off (their
+    claims are dropped at the feed) and order alerts carry on; no other port is tried."""
+    from .market.runtime import MarketRuntime, ReleasedClaims
+
+    try:
+        await api.start(port)
+    except OSError as exc:
+        log.error(
+            "Market alerts cannot open their local API: port %d on this server is taken (%s). "
+            "Market alerts stay off; order alerts carry on. Free the port, then restart "
+            "sudarshan-alerts.", port, exc.strerror or exc,
+        )  # fmt: skip
+        if isinstance(market, MarketRuntime):
+            market = ReleasedClaims(market.config.feed_url)
+        return market, None
+    return market, api
 
 
 def _stop(service: AlertService, market, reason: str) -> None:
     service.stop(reason)
     if market is not None:  # M10.1
         market.stop(reason)
+
+
+def _market(settings: Settings, market: MarketSettings | None, db_path, pacer: Pacer):
+    """M10.1: market alerts and their local API, or, switched off, the API saying so while the
+    feed drops the keys an earlier run claimed."""
+    from sudarshan.vault import ALERTS_API_INFO, fernet_for, pepper_from
+
+    from .market.api import MarketApi, OffDesk
+    from .market.desk import OwnerDesk
+    from .market.runtime import MarketRuntime, ReleasedClaims
+
+    fernet = fernet_for(pepper_from(os.environ), ALERTS_API_INFO)
+    if market is None:
+        return ReleasedClaims(feed_url_of()), MarketApi(OffDesk(), fernet), http_port_of()
+    runtime = MarketRuntime(settings, market, owner_reader=lambda: read_owner(db_path),
+                            pacer=pacer, openalgo_db=db_path)  # fmt: skip
+    return runtime, MarketApi(OwnerDesk(runtime), fernet), market.http_port
 
 
 def main() -> int:
@@ -607,15 +650,9 @@ def main() -> int:
         return 2
     pacer = Pacer()  # M10.5: fills first, market alerts in what is left
     service = AlertService(settings, owner_reader=lambda: read_owner(db_path), pacer=pacer)
-    from .market.runtime import MarketRuntime, ReleasedClaims  # M10.1
-
-    if market is not None:
-        runtime = MarketRuntime(settings, market, owner_reader=lambda: read_owner(db_path),
-                                pacer=pacer, openalgo_db=db_path)  # fmt: skip
-    else:  # off: the feed drops the keys an earlier run claimed
-        runtime = ReleasedClaims(feed_url_of())
+    runtime, api, port = _market(settings, market, db_path, pacer)  # M10.1
     try:
-        asyncio.run(_serve(service, runtime))
+        asyncio.run(_serve(service, runtime, api, port))
     except Exception:  # a bug: systemd restarts it
         log.exception("sudarshan-alerts stopped unexpectedly")
         return 1

@@ -39,31 +39,6 @@ class Clock:
         self.at += timedelta(seconds=seconds)
 
 
-@pytest.fixture
-def quick(monkeypatch):
-    monkeypatch.setattr(runtime, "TICK_S", 0.02)
-    monkeypatch.setattr(runtime, "RECORD_RETRY_S", (0.05, 0.05))
-    for name, value in {"COALESCE_S": 0.02, "POLL_S": 0.01, "RETRY_S": (0.05, 0.05)}.items():
-        monkeypatch.setattr(lane, name, value)
-    monkeypatch.setattr(outbox, "MIN_GAP_S", 0.02)
-
-
-@pytest.fixture
-def alerts(tmp_path):
-    def make(notify) -> Settings:
-        holidays = tmp_path / "nse_holidays.txt"
-        holidays.write_text("2026-10-20\n")
-        return Settings.from_env({
-            "SUDARSHAN_ALERTS_STATE_DIR": str(tmp_path / "state"),
-            "SUDARSHAN_NSE_HOLIDAYS_FILE": str(holidays),
-            "SUDARSHAN_NSE_EXTRA_DAYS_FILE": str(tmp_path / "nse_extra_trading_days.txt"),
-            "SUDARSHAN_OPENALGO_URL": notify.url,
-            "SUDARSHAN_ORDER_ALERTS": "off",
-        })  # fmt: skip
-
-    return make
-
-
 def market_of(feed: FakeFeed) -> MarketSettings:
     return MarketSettings.from_env({"SUDARSHAN_MARKET_ALERTS": "on", "SUDARSHAN_ALERTS_FEED_URL":
                                     feed.url, "SUDARSHAN_ALERTS_FEED_ZMQ": feed.endpoint})  # fmt: skip

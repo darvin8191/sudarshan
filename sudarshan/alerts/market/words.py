@@ -24,7 +24,17 @@ from decimal import ROUND_HALF_UP, Decimal
 from sudarshan.alerts.market import book, clock, conditions, engine
 from sudarshan.alerts.market.grain import edge_up, rupees, to_decimal
 from sudarshan.alerts.market.sessions import INDEX_SEGMENTS
-from sudarshan.alerts.market.spec import AT_CLOSE, CROSS, DAY, DOWN, UP, Alert
+from sudarshan.alerts.market.spec import (
+    AT_CLOSE,
+    CROSS,
+    DAY,
+    DOWN,
+    ONCE,
+    OP_WORDS,
+    PER_CANDLE,
+    UP,
+    Alert,
+)
 from sudarshan.alerts.messages import SAME_MOMENT, clean, instrument, quantity
 from sudarshan.autologin.messages import BRAND
 from sudarshan.autologin.schedule import IST
@@ -33,7 +43,14 @@ NOTE_MAX = 120
 #: A pause gets its Telegram lines only when it lasts longer than this inside the session.
 PAUSE_TELL_MS = 60_000
 TEST_LINE = "Test: market alerts reach this chat (sent from the Alerts page)."
+TEST_TITLE = "Test alert"
 WATCHING = "Watching · Real-time"
+STARTING = "Starting up"
+SWITCHED_OFF = "Switched off on the server"
+STOPPED_UNEXPECTEDLY = (
+    "Market alerts stopped after an unexpected failure. Order alerts carry on; restart "
+    "sudarshan-alerts to start them again."
+)
 _PAST = {"feed": "the price feed was reconnecting", "service": "market alerts were not running"}
 _NOW = {"feed": "the price feed is reconnecting", "service": "market alerts are not running"}
 
@@ -325,3 +342,86 @@ def checks_at(alert: Alert) -> str | None:
     if cond.direction == DOWN:
         return f"Checks at {down} (nearest tick)"
     return f"Checks at {up} going up and {down} going down (nearest ticks)"
+
+
+def condition(alert: Alert) -> str:
+    """The alert's check, for its card: 'Crosses above ₹1,428.25', 'Bid crosses below ₹99.50',
+    'Up 2% on the day', "Breaks today's high after 09:30", 'Crosses above VWAP'."""
+    p = alert.params
+    if alert.kind == "price":
+        check = OP_WORDS[p["op"]]
+        source = p.get("source", "ltp")
+        if source != "ltp":
+            check = f"{source.capitalize()} {check[0].lower()}{check[1:]}"
+        return f"{check} {level(alert)}"
+    if alert.kind == "move":
+        way = {"up": "Up", "down": "Down", "either": "Up or down"}[p["direction"]]
+        on = "from today's open" if p["base"] == "open" else "on the day"
+        return f"{way} {p['percent']}% {on}"
+    if alert.kind == "day_break":
+        return f"Breaks today's {p['side']} after {p['after']}"
+    return {"above": "Crosses above VWAP", "below": "Crosses below VWAP"}.get(
+        p["direction"], "Crosses VWAP"
+    )
+
+
+def level(alert: Alert) -> str:
+    """The level as the owner set it, grouped: '₹25,900.00', or '25,900.00' points for an index
+    (a level finer than a paisa keeps its digits; the "Checks at" hint says where it checks)."""
+    value = to_decimal(alert.params["level"])
+    if value.as_tuple().exponent >= -2:
+        value = value.quantize(Decimal("0.01"))
+    return _number(value, "" if alert.segment in INDEX_SEGMENTS else "₹")
+
+
+def meta(alert: Alert, today: date) -> str:
+    """How often, the wait between alerts and the end: 'Every time · wait 5 min · ends 20 Dec'."""
+    parts = [_how_often(alert)]
+    if alert.cooldown_ms:
+        parts.append(f"wait {_span(alert.cooldown_ms // 1000)}")
+    parts.append(_ending(alert, today))
+    return " · ".join(parts)
+
+
+def _how_often(alert: Alert) -> str:
+    candle = alert.candle_min
+    if alert.frequency == ONCE:
+        return "Once"
+    if alert.frequency == PER_CANDLE:
+        return "Once a day" if candle == DAY else f"Once per {candle}-min candle"
+    if alert.frequency == AT_CLOSE:
+        return "At the day's close" if candle == DAY else f"At {candle}-min candle close"
+    return "Every time"
+
+
+def _span(seconds: int) -> str:
+    """300 -> '5 min', 90 -> '1 min 30 s', 5400 -> '1 h 30 min'."""
+    hours, rest = divmod(seconds, 3600)
+    minutes, secs = divmod(rest, 60)
+    parts = (f"{hours} h" if hours else "", f"{minutes} min" if minutes else "",
+             f"{secs} s" if secs else "")  # fmt: skip
+    return " ".join(part for part in parts if part)
+
+
+def _ending(alert: Alert, today: date) -> str:
+    """'ends 20 Dec' (it works through that day), 'ends 20 Dec 14:30', 'until expiry 25 Nov' or
+    'no end date'."""
+    ends, expires = alert.ends_at, alert.expires_at
+    if ends is not None and (expires is None or ends < expires):
+        moment = datetime.fromtimestamp(ends / 1000, IST)
+        if (moment.hour, moment.minute, moment.second) == (0, 0, 0):
+            return f"ends {_on(moment.date() - timedelta(days=1), today)}"
+        return f"ends {_on(moment.date(), today)} {moment:%H:%M}"
+    if alert.expiry is not None:
+        return f"until expiry {_on(alert.expiry, today)}"
+    return "no end date"
+
+
+def _on(day: date, today: date) -> str:
+    """'20 Dec', with the year only when it is not this one."""
+    return f"{day.day} {day:%b}" + (f" {day.year}" if day.year != today.year else "")
+
+
+def quote_waiting(source: str) -> str:
+    """A bid or ask alert whose quote has not come yet (review A7.i)."""
+    return f"Waiting for the first {source} from the price feed"
