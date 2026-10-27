@@ -9,6 +9,7 @@ import type { AlertRow } from '@/api/marketAlerts'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
 import { AlertCard } from '@/sudarshan/alerts/AlertCard'
+import { AlertFormSheet } from '@/sudarshan/alerts/AlertForm'
 import { AlertSheet } from '@/sudarshan/alerts/AlertSheet'
 import { LineText } from '@/sudarshan/alerts/lines'
 import { needsQuote, segmentOpen } from '@/sudarshan/alerts/measure'
@@ -74,16 +75,23 @@ export default function MarketAlerts() {
     enabled: apiKey !== null,
   })
 
-  // An overlay that cannot be shown (an alert deleted meanwhile, a sheet this page does not have)
-  // is closed once the alerts are known, rather than left open over nothing.
-  const shownId = overlay?.kind === 'alert' ? overlay.id : null
+  // An overlay that cannot be shown (an alert deleted meanwhile, a new alert with market alerts
+  // off) is closed once the alerts are known, rather than left open over nothing.
+  const enabled = state?.enabled === true
+  const shownId = overlay?.kind === 'alert' || overlay?.kind === 'edit' ? overlay.id : null
   const selected = shownId === null ? null : (alerts.find((row) => row.id === shownId) ?? null)
-  const orphan = overlay !== null && state !== undefined && selected === null
+  const orphan =
+    overlay !== null &&
+    state !== undefined &&
+    (overlay.kind === 'new' ? !enabled : overlay.kind === 'settings' || selected === null)
   useEffect(() => {
     if (orphan) close()
   }, [orphan, close])
 
   const openAlert = useCallback((id: number) => open({ kind: 'alert', id }), [open])
+  const editAlert = useCallback((id: number) => open({ kind: 'edit', id }), [open])
+  // Saved: the alert's own sheet takes the form's place, so the owner sees what was saved.
+  const saved = useCallback((row: AlertRow) => open({ kind: 'alert', id: row.id }), [open])
   const live = (row: AlertRow) => ({
     line: lines.get(keyOf(row.symbol, row.exchange)),
     followed: apiKey !== null && followed.keys.has(keyOf(row.symbol, row.exchange)),
@@ -91,7 +99,6 @@ export default function MarketAlerts() {
     now,
     marketOpen: segmentOpen(state?.segments, row),
   })
-  const enabled = state?.enabled === true
   const problem = query.error
 
   return (
@@ -202,7 +209,16 @@ export default function MarketAlerts() {
         )}
       </section>
 
-      <AlertSheet row={selected} live={selected ? live(selected) : NO_LIVE} onClose={close} />
+      <AlertSheet
+        row={overlay?.kind === 'alert' ? selected : null}
+        live={selected ? live(selected) : NO_LIVE}
+        onClose={close}
+        onEdit={editAlert}
+      />
+      {overlay?.kind === 'new' && enabled && <AlertFormSheet onClose={close} onSaved={saved} />}
+      {overlay?.kind === 'edit' && selected && (
+        <AlertFormSheet key={selected.id} row={selected} onClose={close} onSaved={saved} />
+      )}
     </div>
   )
 }

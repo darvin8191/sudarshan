@@ -519,3 +519,48 @@ describe('an alert’s sheet', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 })
+
+describe('the form on the page', () => {
+  it('opens a new alert’s form from New, and Back closes it before leaving the page', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    renderPage()
+    await settle()
+
+    await user.click(screen.getByRole('button', { name: 'New' }))
+    expect(where()).toBe('/market-alerts?sheet=new')
+    expect(screen.getByRole('dialog', { name: 'New alert' })).toBeInTheDocument()
+
+    back()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(where()).toBe('/market-alerts')
+  })
+
+  it('edits from the sheet on the alert’s own settings, then shows what was saved', async () => {
+    api.change.mockResolvedValue(
+      alertRow({
+        version: 4,
+        words: { condition: 'Crosses above ₹101.00', meta: 'Once', checks_at: null },
+      })
+    )
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    renderPage()
+    await settle()
+
+    await user.click(card(12))
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Edit' }))
+    expect(where()).toBe('/market-alerts?alert=12&sheet=edit')
+    const form = screen.getByRole('dialog', { name: 'Edit alert' })
+    expect(within(form).getByLabelText('Price level')).toHaveValue('100')
+
+    await user.click(within(form).getByRole('button', { name: 'Save' }))
+    await settle()
+    expect(api.change.mock.calls[0][1]).toMatchObject({ version: 3, action: 'edit' })
+    await waitFor(() => expect(where()).toBe('/market-alerts?alert=12'))
+    expect(
+      within(screen.getByRole('dialog')).getByText('Crosses above ₹101.00')
+    ).toBeInTheDocument()
+
+    back()
+    expect(where()).toBe('/market-alerts')
+  })
+})

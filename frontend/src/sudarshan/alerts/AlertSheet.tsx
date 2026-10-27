@@ -1,5 +1,13 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { CandlestickChart, type LucideIcon, Pause, Play, RotateCcw, Trash2 } from 'lucide-react'
+import {
+  CandlestickChart,
+  type LucideIcon,
+  Pause,
+  Pencil,
+  Play,
+  RotateCcw,
+  Trash2,
+} from 'lucide-react'
 import { useState } from 'react'
 import { Link } from 'react-router'
 import type { AlertRow, AlertStatus } from '@/api/marketAlerts'
@@ -34,23 +42,35 @@ export interface SheetLive {
 
 /**
  * One alert's sheet (M10.3): its condition, where the price stands, why it stopped or paused,
- * its check, how often and until when, its note, and what can be done with it: Pause, Resume or
- * Restart as its status allows, Delete after a question, and its chart.
+ * its check, how often and until when, its note, and what can be done with it: Edit, Pause,
+ * Resume or Restart as its status allows, Delete after a question, and its chart.
  */
 export function AlertSheet({
   row,
   live,
   onClose,
+  onEdit,
 }: {
   row: AlertRow | null
   live: SheetLive
   onClose: () => void
+  onEdit: (id: number) => void
 }) {
   if (!row) return null
-  return <Sheet key={row.id} row={row} live={live} onClose={onClose} />
+  return <Sheet key={row.id} row={row} live={live} onClose={onClose} onEdit={onEdit} />
 }
 
-function Sheet({ row, live, onClose }: { row: AlertRow; live: SheetLive; onClose: () => void }) {
+function Sheet({
+  row,
+  live,
+  onClose,
+  onEdit,
+}: {
+  row: AlertRow
+  live: SheetLive
+  onClose: () => void
+  onEdit: (id: number) => void
+}) {
   const client = useQueryClient()
   const held = useHeld(row.id)
   const [confirming, setConfirming] = useState(false)
@@ -106,12 +126,21 @@ function Sheet({ row, live, onClose }: { row: AlertRow; live: SheetLive; onClose
 
         {held?.state === 'unconfirmed' && <SentNote text={NO_ANSWER[held.action]} />}
 
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-3 gap-2">
+          <button
+            type="button"
+            disabled={held !== undefined}
+            onClick={() => onEdit(row.id)}
+            className={cn(OUTLINED, 'px-2')}
+          >
+            <Pencil aria-hidden="true" className="size-5" />
+            Edit
+          </button>
           <button
             type="button"
             disabled={held !== undefined}
             onClick={() => void sendChange(client, row, move.action)}
-            className={OUTLINED}
+            className={cn(OUTLINED, 'px-2')}
           >
             <MoveIcon aria-hidden="true" className="size-5" />
             {sending(move.action) ? move.busy : move.label}
@@ -120,7 +149,7 @@ function Sheet({ row, live, onClose }: { row: AlertRow; live: SheetLive; onClose
             type="button"
             disabled={held !== undefined}
             onClick={() => setConfirming(true)}
-            className={cn(OUTLINED, 'text-[color:var(--down)]')}
+            className={cn(OUTLINED, 'px-2 text-[color:var(--down)]')}
           >
             <Trash2 aria-hidden="true" className="size-5" />
             {sending('delete') ? 'Deleting' : 'Delete'}
