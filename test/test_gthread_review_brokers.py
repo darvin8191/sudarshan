@@ -152,6 +152,9 @@ def test_upstox_close_all_unchanged_when_every_leg_is_sent(dev, monkeypatch):
         "place_order_api",
         lambda payload, auth: (Reply(200, {}), {"status": "success"}, "1"),
     )
+    # SUDARSHAN M6.9: Exit all reads the order book once (sudarshan/books/exit_guard.py); here
+    # it lists no order working to close a position.
+    monkeypatch.setattr(upstox, "get_order_book", lambda auth: {"status": "success", "data": []})
 
     assert upstox.close_all_positions("x", "tok") == (
         {"status": "success", "message": "All Open Positions SquaredOff"},

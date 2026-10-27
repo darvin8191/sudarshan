@@ -5,7 +5,8 @@ from typing import Any, Dict, Optional, Tuple
 from database.auth_db import get_auth_token_broker
 from database.settings_db import get_analyze_mode
 from events import AnalyzerErrorEvent, PositionClosedEvent
-from sudarshan.books.exit_guard import close_all_once, open_in_book  # SUDARSHAN M6.9
+from sudarshan.books.exit_guard import close_all_once, one_exit  # SUDARSHAN M6.9
+from sudarshan.books.single_exit import EXIT_NOT_CONFIRMED, exit_live, not_confirmed
 from utils.broker_backpressure import BrokerBusyError
 from utils.event_bus import bus
 from utils.logging import get_logger
@@ -108,7 +109,23 @@ def close_position_with_auth(
             "product": position_data.get("product_type") or position_data.get("product"),
         }
 
-        success, response, status_code = sandbox_close_position(close_data, api_key, original_data)
+        if close_data["symbol"]:
+            # SUDARSHAN M6.9: one position's close holds it in the sandbox's book, as the
+            # app's Exit does there, so the two never close it twice.
+            with one_exit(
+                "sandbox", close_data["exchange"], close_data["symbol"], close_data["product"]
+            ) as busy:
+                if busy:
+                    success, status_code = False, 409
+                    response = {"status": "error", "message": busy, "mode": "analyze"}
+                else:
+                    success, response, status_code = sandbox_close_position(
+                        close_data, api_key, original_data
+                    )
+        else:
+            success, response, status_code = sandbox_close_position(
+                close_data, api_key, original_data
+            )
 
         position_request_data["api_type"] = API_TYPE
         bus.publish(PositionClosedEvent(
@@ -137,18 +154,19 @@ def close_position_with_auth(
         ))
         return False, error_response, 404
 
+    # SUDARSHAN M6.9: a close that names a position (Flow's "Close Positions" node) closes that
+    # position only, as the app's Exit does; upstream closed every open position here.
+    if position_data.get("symbol"):
+        return _close_one_live(position_data, auth_token, broker_module, original_data)
+
     try:
         # Use the dynamically imported module's function to close all positions
         api_key = position_data.get("apikey", "")
         # SUDARSHAN M6.9: one Exit all at a time, whichever surface sent it (the app, the API,
-        # TradingView, Telegram, Flow, scripts); a second answers 409 while the first is placed,
-        # and none sizes its orders from a book that does not show an exit placed just before.
+        # TradingView, Telegram, Flow, scripts): a second answers 409 while the first is placed,
+        # and the close-all sends nothing for a position whose exit is already on its way.
         response_code, status_code = close_all_once(
-            "live",
-            broker_module.close_all_positions,
-            api_key,
-            auth_token,
-            still_open=open_in_book(auth_token, broker),
+            "live", broker_module.close_all_positions, api_key, auth_token
         )
     except BrokerBusyError as e:
         # Refused before it was sent: the broker's request queue was longer
@@ -189,11 +207,16 @@ def close_position_with_auth(
 
     if status_code == 200:
         response_data = {"status": "success", "message": "All Open Positions Squared Off"}
+        # SUDARSHAN M6.9: every exit went; what the close-all could not check is said too.
+        note = response_code.get("note") if isinstance(response_code, dict) else None
+        if note:
+            message = f"All Open Positions Squared Off. {note}"
+            response_data = {**response_data, "message": message, "note": note}
         bus.publish(PositionClosedEvent(
             mode="live", api_type=API_TYPE,
             symbol=position_data.get("symbol", ""), exchange=position_data.get("exchange", ""),
             product=position_data.get("product_type", "") or position_data.get("product", ""),
-            orderid="", message="All Open Positions Squared Off",
+            orderid="", message=response_data["message"],
             request_data=position_request_data, response_data=response_data,
             api_key=original_data.get("apikey", ""),
         ))
@@ -217,6 +240,62 @@ def close_position_with_auth(
             api_key=original_data.get("apikey", ""),
         ))
         return False, error_response, status_code
+
+
+def _close_one_live(
+    position_data: dict[str, Any],
+    auth_token: str,
+    broker_module: Any,
+    original_data: dict[str, Any],
+) -> tuple[bool, dict[str, Any], int]:
+    """SUDARSHAN M6.9: close the one live position a close names, through the app's Exit.
+
+    sudarshan/books/single_exit.py sends it as the phone's Exit does, and the broker sends
+    nothing while the position is busy, saying why (broker/upstox/api/order_api.py).
+    """
+    position_request_data = copy.deepcopy(original_data)
+    position_request_data.pop("apikey", None)
+    symbol = position_data.get("symbol")
+    exchange = position_data.get("exchange")
+    product = position_data.get("product_type") or position_data.get("product")
+    sent = None
+    if not exchange or not product:
+        body = {
+            "status": "error",
+            "message": "Missing required parameters (symbol, exchange, product)",
+        }
+        status_code = 400
+    else:
+        try:
+            body, status_code, sent = exit_live(
+                broker_module.place_smartorder_api,
+                auth_token,
+                symbol=symbol,
+                exchange=exchange,
+                product=product,
+                strategy=position_data.get("strategy") or "Squareoff",
+            )
+        except BrokerBusyError as e:
+            logger.warning(f"Close position for {symbol} not sent, broker busy: {e}")
+            body, status_code = {"status": "error", "message": str(e)}, 429
+        except Exception:
+            logger.exception(f"Error closing the position {symbol}")
+            body, status_code = not_confirmed(EXIT_NOT_CONFIRMED), 500  # it may have gone
+    bus.publish(
+        PositionClosedEvent(
+            mode="live",
+            api_type=API_TYPE,
+            symbol=symbol or "",
+            exchange=exchange or "",
+            product=product or "",
+            orderid=str(body.get("orderid") or ""),
+            message=str(body.get("message") or ""),
+            request_data=position_request_data,
+            response_data={**body, "sent": sent} if sent else body,  # what it sent: the alert only
+            api_key=original_data.get("apikey", ""),
+        )
+    )
+    return status_code == 200, body, status_code
 
 
 def close_position(

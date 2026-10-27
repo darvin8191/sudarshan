@@ -45,8 +45,20 @@ def _no_exit_claimed_or_placed_lately(monkeypatch):
     """Each test starts with no exit claimed and none placed lately (sudarshan/books/exit_guard.py).
 
     An exit one test placed would otherwise count as placed just now in the next, whose Exit all
-    would then read the position book before closing.
+    would then send nothing for that position.
     """
     from sudarshan.books import exit_guard
 
     monkeypatch.setattr(exit_guard, "EXITS", exit_guard.ExitsInFlight())
+
+
+@pytest.fixture(autouse=True)
+def _an_order_book_with_nothing_working(monkeypatch):
+    """Upstox's Exit all reads the order book once, for orders still working to close a position.
+
+    Unless a test says otherwise, it is read and lists none; the simulated Upstox of
+    books_upstox_world.py serves a real one.
+    """
+    import broker.upstox.api.order_api as upstox
+
+    monkeypatch.setattr(upstox, "get_order_book", lambda auth: {"status": "success", "data": []})

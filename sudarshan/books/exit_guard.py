@@ -1,218 +1,242 @@
-"""One exit at a time per position, and one Exit all at a time per book (M6.9).
+"""Exits that could close a position twice, and what keeps them apart (M6.9).
 
-The phone gives up on an exit after 45 s, but the server does not: Flask runs
-the view to its end when the phone has stopped waiting, one Upstox call may take
-up to 120 s, Exit all places one order per position, and nginx allows 300 s. A
-second exit sent while the first is still being placed is sized from a book
-that does not show the first fill yet, and reverses the position instead of
-closing it. The order the first one is placing does not show in Orders yet
-either, so the trader cannot check for it.
+Upstox's REST position book can say the old quantity for a second or more after
+an exit, and every exit is sized from that book: Exit all sends one order per
+open position, and a smart order to a position size of 0 (the app's Exit, a
+TradingView alert, a script, Flow) sends what takes the position to 0. Sized
+again before the book shows the first exit, a second one closes the position a
+second time, which reverses it. And the phone gives up after 45 s while the
+server goes on placing (one Upstox call may take 120 s), so a second tap can
+arrive while the first is still being placed.
 
-So what closes a position claims it for as long as it runs:
+So in the Live book every exit decides on its own read of the book, and a
+position is busy while
 
-- Exit all in the Live book, from every surface, where every close-all passes
-  once (``close_all_once``, called by services/close_position_service.py): the
-  app's Exit all, /api/v1/closeposition (TradingView, scripts, Telegram's
-  /closeall through the SDK) and Flow's close-all node. The sandbox's Exit all
-  answers in milliseconds and is not claimed.
-- One position's exit from the app's own screens (``one_exit_at_a_time`` on
-  blueprints/orders.py's /close_position). Single-position smart orders from
-  /api/v1 are not claimed: a TradingView entry must never be refused.
+- an exit for it is being placed: claimed here from before its order is sent
+  until after it is noted (``one``);
+- an exit for it may have placed an order in the last ``EXIT_SHOWS_WITHIN_S``:
+  noted here (``exit_placed``) by the app's Exit, by any smart order to a
+  position size of 0, and by Exit all for each exit it sent;
+- and, for Exit all, an order on its closing side is still working in Upstox's
+  order book (broker/upstox/api/order_api.py reads it once per Exit all).
 
-A second exit for the same position, an exit while Exit all runs and a second
-Exit all are refused at once with 409 and a sentence saying why, which the phone
-reads as a refusal and shows. An Exit all that arrives while one of the app's
-exits is being placed takes the book at once, so no new exit starts, then waits
-for the exits already in flight to end (``EXIT_ALL_WAITS_S``) and closes what is
-left: it is often sent by something that does not resend it (a TradingView
-alert, a Flow node, a script), and a refusal would leave every other position
-open. Only a wait that runs out is refused, as before.
+Exit all (``close_all_once``, which every surface passes: the app's, the one at
+/api/v1/closeposition that TradingView, scripts and Telegram's /closeall use,
+and Flow's close-all node) takes the whole book while it places its orders, so
+no other exit starts in it meanwhile (409, at once), and closes every open
+position at once except the busy ones, each of which it reports as not sent in
+a sentence of its own. It never waits for anything, and it starts no Upstox
+call after ``EXIT_ALL_SENDS_FOR_S``.
 
-Exit all sizes its orders from the position book, and Upstox's book can say the
-old quantity for a second or more after an exit: an Exit all that read it then
-would close that position a second time, which reverses it. So an exit placed in
-the last ``EXIT_SHOWS_WITHIN_S`` has to show in the book first: one of the app's
-own (one it waited for, or one that ended just before it), or one an earlier Exit
-all placed (a TradingView alert sent twice, a second surface a moment later).
-Exit all reads the book until it shows them, still holding the book, and is
-refused if it has not by then.
+One position's exit is refused with that sentence (409) while its position is
+busy or an Exit all holds the book. An entry (a smart order that opens or adds
+to a position) is never refused.
 
-The claims are per process, which is the whole app (gunicorn runs a single
-worker). They are kept under a real lock from utils.real_threading that is held
-for set work only, never across I/O or a wait: correct under the eventlet
-worker, where the only callers are greenlets that cannot be switched out inside
-it, under the gthread worker's real threads, and on the development server.
-Exit all's wait is on a real Event through ``real_threading.wait_for``, which
-polls with eventlet's sleep (the greenlet yields) and waits natively elsewhere;
-between its reads of the book it sleeps the same way, holding no lock.
-A claim is let go in a ``finally``, however the view or the close-all ends,
-whether or not its caller is still there to read the answer.
+The sandbox's book shows each exit the moment it is placed, so nothing is noted
+there; the app's Exit still claims its position in the sandbox's book while it
+is placed.
+
+The claims and notes are per process, which is the whole app (gunicorn runs a
+single worker). They are kept under a real lock from utils.real_threading that
+is held for dict work only, never across I/O or a wait: correct under the
+eventlet worker, under the gthread worker's real threads, and on the development
+server. A claim is let go in a ``finally``, after its exit has been noted, so no
+moment exists in which a position whose exit may have gone is neither claimed
+nor noted.
 """
 
 from __future__ import annotations
 
-import functools
+import re
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 
 from utils import real_threading
 from utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-EXIT_BEING_PLACED = (
-    "An exit for this position is still being placed. Wait for it, then check Orders."
-)
 EXIT_ALL_BEING_PLACED = "Exit all is still being placed. Wait for it, then check Orders."
-AN_EXIT_BEING_PLACED = "An exit is still being placed. Wait for it, then check Orders."
-EXIT_NOT_SHOWN_YET = (
-    "An exit placed just now does not show in Positions yet. Check Positions, then try Exit all"
-    " again."
-)
 
-#: How long an Exit all waits for the exits already being placed in its book. One exit is
-#: at most one Upstox call that can take long: the call is bounded at 120 s
-#: (utils/httpx_client.REQUEST_TIMEOUT_SECONDS), the order window may queue it for up to
-#: 10 s first under gthread (utils/broker_backpressure.BROKER_MAX_ORDER_QUEUE_WAIT_SECONDS),
-#: and the position read before it and the logging after it take well under a second;
-#: 5 s more is margin. An exit still running after that is not ending soon, and the Exit
-#: all is refused as before.
-EXIT_ALL_WAITS_S = 135.0
-
-#: How long an Exit all gives the position book to show an exit the app placed just before
-#: it, and how long such an exit counts as just placed: the time the phone holds a sent exit
-#: for the book to show it (frontend/src/sudarshan/books/sent.ts, SENT_HOLD_MS).
+#: How long an exit counts as placed just now: the time the phone holds a sent exit for the
+#: book to show it (frontend/src/sudarshan/books/sent.ts, SENT_HOLD_MS).
 EXIT_SHOWS_WITHIN_S = 15.0
-#: How often the book is read meanwhile; each read is one call to the broker.
-EXIT_SHOWS_POLL_S = 1.0
 
-Position = tuple[str, str, str]
+#: Exit all starts no Upstox call (its reads, then one exit per position) after this long. The
+#: one call running then may take 120 s (utils/httpx_client.REQUEST_TIMEOUT_SECONDS), after up to
+#: 10 s in the order window under gthread (utils/broker_backpressure), so an Exit all has ended
+#: within 145 s: inside the 150 s for which a phone that got no answer holds it
+#: (frontend/src/sudarshan/books/sent.ts, NO_ANSWER_HOLD_MS).
+EXIT_ALL_SENDS_FOR_S = 15.0
+
+IST = timezone(timedelta(hours=5, minutes=30), "IST")  # India keeps no daylight saving
+
+Position = tuple[str, str, str]  # (exchange, symbol, product), as the app writes them
+
+_MONTHS = "JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC"
+#: OpenAlgo's derivative symbol: base, expiry DDMMMYY, then FUT or a strike and CE/PE.
+_CONTRACT = re.compile(rf"^(.+?)\d{{2}}(?:{_MONTHS})\d{{2}}(?:(FUT)|(\d+(?:\.\d+)?)(CE|PE))$")
+_DERIVATIVE_EXCHANGES = {"NFO", "BFO", "MCX", "CDS", "BCD", "NCDEX", "NCO"}
+
+
+def _word(value: object) -> str:
+    return str(value or "").strip().upper()
+
+
+def position_of(exchange: object, symbol: object, product: object) -> Position:
+    """A position as the app writes it, however a caller spelled it."""
+    return (_word(exchange), _word(symbol), _word(product))
+
+
+def trader_name(position: Position) -> str:
+    """A position as the phone names it: "NIFTY 25900 CE", "BANKNIFTY FUT", "SBIN"."""
+    exchange, symbol, _product = position
+    parsed = _CONTRACT.match(symbol) if exchange in _DERIVATIVE_EXCHANGES else None
+    if parsed is None:
+        return symbol
+    base, future, strike, right = parsed.groups()
+    return f"{base} FUT" if future else f"{base} {strike} {right}"
+
+
+def clock(at: float) -> str:
+    """A moment as the trader's clock shows it (IST), to the second."""
+    return datetime.fromtimestamp(at, IST).strftime("%H:%M:%S")
+
+
+def on_its_way(position: Position, at: float) -> str:
+    """Why no exit was sent for a position whose earlier exit went at ``at``, or is going."""
+    return (
+        f"An exit for {trader_name(position)} is already on its way (sent {clock(at)}). Check "
+        "Orders, and exit it again only if it is still open."
+    )
+
+
+def order_working(position: Position, placed: str) -> str:
+    """Why Exit all sent no exit for a position whose closing order still works in the book."""
+    when = f" (placed {placed})" if placed else ""
+    return (
+        f"{trader_name(position)} already has an order working to close it{when}, so no exit "
+        "was sent for it. Check Orders, and cancel that order first if you want to exit now."
+    )
 
 
 class ExitsInFlight:
-    """The exits this process is placing, by book."""
+    """The exits this process is placing and has placed just now, by book."""
 
     def __init__(self) -> None:
         self._lock = real_threading.Lock()
-        self._positions: set[tuple[str, str, str, str]] = set()
+        # (book, *position) -> when its exit began (epoch seconds), while it is being placed.
+        self._positions: dict[tuple[str, str, str, str], float] = {}
         self._every: set[str] = set()
-        # Per book, set whenever one of its exits ends: what a waiting Exit all wakes on.
-        self._ended: dict[str, real_threading.Event] = {}
-        # Per book, the positions whose exit may have placed an order, and when it ended;
-        # kept for EXIT_SHOWS_WITHIN_S only.
-        self._placed: dict[str, dict[Position, float]] = {}
+        # Per book, the positions whose exit may have placed an order, and when (monotonic for
+        # the age, epoch for the sentence); kept for EXIT_SHOWS_WITHIN_S only.
+        self._placed: dict[str, dict[Position, tuple[float, float]]] = {}
 
-    def _placing(self, book: str) -> bool:
-        """Whether one of the app's exits is being placed in ``book``; call under the lock."""
-        return any(key[0] == book for key in self._positions)
+    def _since(self, book: str, position: Position, now: float) -> float | None:
+        """When the position's latest exit began or was noted, if it is busy; under the lock."""
+        self._forget_old(book, now)
+        times = []
+        began = self._positions.get((book, *position))
+        if began is not None:
+            times.append(began)
+        noted = self._placed.get(book, {}).get(position)
+        if noted is not None:
+            times.append(noted[1])
+        return max(times) if times else None
 
     @contextmanager
     def one(self, book: str, position: Position) -> Iterator[str | None]:
         """Claim one position's exit in ``book`` ("live" or "sandbox").
 
         Yields:
-            None while the claim is held; otherwise the sentence saying why the
-            exit cannot be sent now (the claim is then not taken).
+            None while the claim is held; otherwise the sentence saying why no exit is sent
+            for it now (the claim is then not taken): an Exit all holds the book, or the
+            position is busy.
         """
         key = (book, *position)
         with self._lock:
             if book in self._every:
-                busy = EXIT_ALL_BEING_PLACED
-            elif key in self._positions:
-                busy = EXIT_BEING_PLACED
+                busy, since = EXIT_ALL_BEING_PLACED, None
             else:
-                self._positions.add(key)
+                busy, since = None, self._since(book, position, time.monotonic())
+                if since is None:
+                    self._positions[key] = time.time()
+        if since is not None:
+            busy = on_its_way(position, since)  # words built outside the lock
+        try:
+            yield busy
+        finally:
+            if busy is None:
+                with self._lock:
+                    self._positions.pop(key, None)
+
+    @contextmanager
+    def every(self, book: str) -> Iterator[str | None]:
+        """Claim Exit all in ``book``: no other exit starts in it while the claim is held.
+
+        Yields:
+            None while the claim is held; otherwise the sentence saying another Exit all is
+            being placed (the claim is then not taken). It never waits.
+        """
+        with self._lock:
+            if book in self._every:
+                busy = EXIT_ALL_BEING_PLACED
+            else:
+                self._every.add(book)
                 busy = None
         try:
             yield busy
         finally:
             if busy is None:
                 with self._lock:
-                    self._positions.discard(key)
-                    ended = self._ended.get(book)
-                if ended is not None:
-                    ended.set()
+                    self._every.discard(book)
 
-    @contextmanager
-    def every(self, book: str, wait_s: float = 0.0) -> Iterator[str | None]:
-        """Claim Exit all in ``book``.
-
-        A second Exit all is refused at once. Otherwise the book is taken at once, so no new
-        exit starts in it, and the exits already being placed there are waited for, up to
-        ``wait_s``; when they have not ended by then the book is let go again and the Exit all
-        is refused. The wait holds no lock.
-
-        Yields:
-            None while the claim is held and nothing else is being placed in the book;
-            otherwise the sentence saying why the Exit all cannot be sent now.
-        """
+    def why_busy(self, book: str, position: Position) -> str | None:
+        """Why an exit for ``position`` would be refused right now, without claiming anything."""
         with self._lock:
             if book in self._every:
-                busy = EXIT_ALL_BEING_PLACED
-            elif wait_s <= 0 and self._placing(book):
-                busy = AN_EXIT_BEING_PLACED
-            else:
-                self._every.add(book)
-                busy = None
-        if busy is not None:
-            yield busy
-            return
-        try:
-            if not self._settled(book, wait_s):
-                busy = AN_EXIT_BEING_PLACED
-            yield busy
-        finally:
-            with self._lock:
-                self._every.discard(book)
+                return EXIT_ALL_BEING_PLACED
+            since = self._since(book, position, time.monotonic())
+        return None if since is None else on_its_way(position, since)
 
-    def _settled(self, book: str, wait_s: float) -> bool:
-        """Wait up to ``wait_s`` until no exit is being placed in ``book``; True once none is."""
-        deadline = time.monotonic() + wait_s
-        waited = False
-        while True:
-            with self._lock:
-                if not self._placing(book):
-                    break
-                ended = self._ended.setdefault(book, real_threading.Event())
-                ended.clear()
-            left = deadline - time.monotonic()
-            if left <= 0:
-                logger.warning(f"Exit all gave up waiting for an exit being placed ({book})")
-                return False
-            if not waited:
-                waited = True
-                logger.info(f"Exit all waiting for an exit being placed to end ({book})")
-            real_threading.wait_for(ended, left)
-        return True
+    def busy(self, book: str) -> dict[Position, str]:
+        """Every position busy in ``book`` now, each with the sentence that says why."""
+        now = time.monotonic()
+        with self._lock:
+            self._forget_old(book, now)
+            since = {position: at for position, (_age, at) in self._placed.get(book, {}).items()}
+            for (claimed_in, *position), began in self._positions.items():
+                if claimed_in == book:
+                    key = tuple(position)
+                    since[key] = max(began, since.get(key, began))
+        return {position: on_its_way(position, at) for position, at in since.items()}
 
     def placed(self, book: str, position: Position) -> None:
         """Note that an exit for ``position`` in ``book`` may have placed an order just now."""
         now = time.monotonic()
         with self._lock:
-            recent = self._placed.setdefault(book, {})
-            self._forget_old(recent, now)
-            recent[position] = now
+            self._forget_old(book, now)
+            self._placed.setdefault(book, {})[position] = (now, time.time())
 
     def placed_lately(self, book: str) -> set[Position]:
         """The positions whose exit may have placed an order in ``book`` in the last
         ``EXIT_SHOWS_WITHIN_S``."""
-        now = time.monotonic()
         with self._lock:
-            recent = self._placed.get(book)
-            if recent is None:
-                return set()
-            self._forget_old(recent, now)
-            if not recent:
-                del self._placed[book]
-            return set(recent)
+            self._forget_old(book, time.monotonic())
+            return set(self._placed.get(book, {}))
 
-    @staticmethod
-    def _forget_old(recent: dict[Position, float], now: float) -> None:
-        """Drop what is older than ``EXIT_SHOWS_WITHIN_S``; call under the lock."""
-        for position, at in list(recent.items()):
-            if now - at > EXIT_SHOWS_WITHIN_S:
+    def _forget_old(self, book: str, now: float) -> None:
+        """Drop what is older than ``EXIT_SHOWS_WITHIN_S`` in ``book``; call under the lock."""
+        recent = self._placed.get(book)
+        if recent is None:
+            return
+        for position, (age, _at) in list(recent.items()):
+            if now - age > EXIT_SHOWS_WITHIN_S:
                 del recent[position]
+        if not recent:
+            del self._placed[book]
 
     def __len__(self) -> int:
         """How many claims are held right now."""
@@ -223,164 +247,52 @@ class ExitsInFlight:
 EXITS = ExitsInFlight()
 
 
-def _word(value: object) -> str:
-    return str(value or "").strip().upper()
+def one_exit(book: str, exchange: object, symbol: object, product: object):
+    """``EXITS.one`` for a position however its caller spelled it."""
+    return EXITS.one(book, position_of(exchange, symbol, product))
 
 
-def _book() -> str:
-    """Which book an exit sent now goes to; Live when that cannot be read."""
-    try:
-        from database import settings_db
+def why_busy(book: str, exchange: object, symbol: object, product: object) -> str | None:
+    """Why an exit for this position would be refused right now (``EXITS.why_busy``).
 
-        return "sandbox" if settings_db.get_analyze_mode() else "live"
-    except Exception:
-        logger.exception("Could not read the analyze mode for the exit guard; keyed as Live")
-        return "live"
-
-
-def _quantity(value: object) -> float | None:
-    try:
-        return float(str(value).strip())
-    except ValueError:
-        return None
-
-
-def open_in_book(auth_token: str, broker: str) -> Callable[[set[Position]], set[Position] | None]:
-    """A reader of the live position book: which of some positions it still shows open.
-
-    The reader answers None when the book could not be read, and counts a quantity it
-    cannot read as open.
+    The phone's Exit asks first, so a second tap is answered at once instead of waiting behind
+    the first for the broker's per-symbol lock; the claim itself is taken where the exit is
+    sized and sent (broker/upstox/api/order_api.py).
     """
-
-    def still_open(positions: set[Position]) -> set[Position] | None:
-        from services.positionbook_service import get_positionbook_with_auth
-
-        ok, answer, _ = get_positionbook_with_auth(auth_token, broker)
-        if not ok:
-            return None
-        shown = set()
-        for row in answer.get("data") or []:
-            position = (
-                _word(row.get("exchange")),
-                _word(row.get("symbol")),
-                _word(row.get("product")),
-            )
-            if position in positions and _quantity(row.get("quantity")) != 0:
-                shown.add(position)
-        return shown
-
-    return still_open
-
-
-def _shown_in_book(positions: set[Position], still_open: Callable) -> bool:
-    """Read the book until it shows none of ``positions`` open, up to ``EXIT_SHOWS_WITHIN_S``.
-
-    Returns:
-        True once it shows them closed (at once when there are none); False when it still
-        shows one of them open, or could not be read, at the end.
-    """
-    if not positions:
-        return True
-    deadline = time.monotonic() + EXIT_SHOWS_WITHIN_S
-    while True:
-        try:
-            open_now = still_open(positions)
-        except Exception:
-            logger.exception("Exit all could not read the position book for the exits it waits on")
-            open_now = None
-        if open_now is not None and not open_now:
-            return True
-        left = deadline - time.monotonic()
-        if left <= 0:
-            return False
-        time.sleep(min(EXIT_SHOWS_POLL_S, left))  # eventlet's sleep under eventlet: it yields
-
-
-def close_all_once(book: str, close_all: Callable, *args, still_open: Callable | None = None):
-    """Run one Exit all in ``book`` while holding its claim, whichever surface it came from.
-
-    Args:
-        book: "live" or "sandbox".
-        close_all: The broker's ``close_all_positions``, answering ``(body, status)``.
-        *args: What ``close_all`` takes.
-        still_open: Reads which of some positions the book still shows open (``open_in_book``).
-            Without it the book is not checked for exits placed just before.
-
-    Returns:
-        ``close_all``'s own answer, once the app's exits already being placed in that book have
-        ended (waited for up to ``EXIT_ALL_WAITS_S``, no new one starting meanwhile) and the
-        book shows the exits that may have placed an order lately, the app's and an earlier Exit
-        all's (``EXIT_SHOWS_WITHIN_S``); or ``({"status": "error", "message": <why>}, 409)``
-        without calling it, at once while another Exit all runs in that book, or when either
-        wait runs out. ``close_all`` notes each exit it places (``exit_placed``) while the
-        book's claim is still held.
-    """
-    with EXITS.every(book, wait_s=EXIT_ALL_WAITS_S) as busy:
-        if busy:
-            logger.warning(f"Exit all refused while an exit is still being placed ({book})")
-            return {"status": "error", "message": busy}, 409
-        if still_open is not None and not _shown_in_book(EXITS.placed_lately(book), still_open):
-            logger.warning(
-                f"Exit all refused: an exit placed just now is not in the book yet ({book})"
-            )
-            return {"status": "error", "message": EXIT_NOT_SHOWN_YET}, 409
-        return close_all(*args)
+    return EXITS.why_busy(book, position_of(exchange, symbol, product))
 
 
 def exit_placed(book: str, exchange: object, symbol: object, product: object) -> None:
-    """Note that an Exit all placed (or may have placed) an exit for this position just now.
+    """Note that an exit for this position may have placed an order just now.
 
-    Called by the broker's close-all for each exit that was not refused, as it goes, so the
-    next Exit all reads the book until it shows them: a TradingView alert sent twice a second
-    apart would otherwise size from a book that does not show the first one's exits, and close
-    every position again.
+    Called by every exit in the Live book that was not refused, before its claim (or, for Exit
+    all, the book's) is let go: a second exit sized before the book shows this one would close
+    the position again.
     """
-    EXITS.placed(book, (_word(exchange), _word(symbol), _word(product)))
+    EXITS.placed(book, position_of(exchange, symbol, product))
 
 
-def _may_have_placed(answer: object) -> bool:
-    """Whether a close view's answer leaves open that an order went: all but a refusal (4xx)."""
-    if isinstance(answer, tuple) and len(answer) > 1:
-        status = answer[1]
-    else:
-        status = getattr(answer, "status_code", None)
-    return not (isinstance(status, int) and 400 <= status < 500)
+def busy_positions(book: str) -> dict[Position, str]:
+    """Every position busy in ``book`` now, each with the sentence that says why (``EXITS.busy``)."""
+    return EXITS.busy(book)
 
 
-def one_exit_at_a_time() -> Callable:
-    """Decorate the app's close route so it refuses with 409 while that exit is being placed.
+def close_all_once(book: str, close_all: Callable, *args):
+    """Run one Exit all in ``book`` while holding the whole book, whichever surface it came from.
 
-    An exit whose answer is not a refusal (4xx) may have placed an order, and is noted for
-    ``EXIT_SHOWS_WITHIN_S`` so an Exit all does not size its orders from a book that does not
-    show it yet. The app's Exit all route is not decorated: its claim is taken where every
-    close-all passes, by ``close_all_once``, and a second claim would make it refuse itself.
+    Args:
+        book: "live" or "sandbox".
+        close_all: The broker's ``close_all_positions``, answering ``(body, status)``. It skips
+            the busy positions (``busy_positions``) and notes each exit it sends
+            (``exit_placed``), while the book is still held.
+        *args: What ``close_all`` takes.
+
+    Returns:
+        ``close_all``'s own answer; or ``({"status": "error", "message": <why>}, 409)`` at once,
+        without calling it, while another Exit all runs in that book.
     """
-
-    def wrap(view: Callable) -> Callable:
-        @functools.wraps(view)
-        def guarded(*args, **kwargs):
-            from flask import jsonify, request
-
-            book = _book()
-            data = request.get_json(silent=True) or {}
-            position = (
-                _word(data.get("exchange")),
-                _word(data.get("symbol")),
-                _word(data.get("product")),
-            )
-            with EXITS.one(book, position) as busy:
-                if busy:
-                    logger.warning(f"Exit refused while one is still being placed ({book})")
-                    return jsonify({"status": "error", "message": busy}), 409
-                try:
-                    answer = view(*args, **kwargs)
-                except BaseException:
-                    EXITS.placed(book, position)  # it may have broken after the order went
-                    raise
-                if _may_have_placed(answer):
-                    EXITS.placed(book, position)
-                return answer
-
-        return guarded
-
-    return wrap
+    with EXITS.every(book) as busy:
+        if busy:
+            logger.warning(f"Exit all refused while another is being placed ({book})")
+            return {"status": "error", "message": busy}, 409
+        return close_all(*args)

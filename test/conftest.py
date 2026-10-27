@@ -143,11 +143,11 @@ def module_sleep(monkeypatch):
 
 # SUDARSHAN M6.9: an exit one test noted is not "placed just now" in the next.
 #
-# sudarshan/books/exit_guard.py remembers each exit placed in the last 15 s, and an Exit all
-# in that time reads the position book until it shows them. Upstox's close-all notes its own
-# exits, so its tests left notes in this one interpreter, and a later test's Exit all read the
-# book until it gave up and answered 409. Each test gets fresh claims and notes instead. Only
-# a guard already imported is replaced, so no test imports it because of this.
+# sudarshan/books/exit_guard.py remembers each exit placed in the last 15 s, and an exit or an
+# Exit all in that time sends nothing for that position. Upstox's close-all notes its own exits,
+# so its tests left notes in this one interpreter, and a later test's exit found its position
+# busy. Each test gets fresh claims and notes instead. Only a guard already imported is
+# replaced, so no test imports it because of this.
 @pytest.fixture(autouse=True)
 def _no_exit_placed_lately(monkeypatch):
     import sys

@@ -49,7 +49,11 @@ export const SENT_HOLD_MS = 15_000
 
 /**
  * How long, from the tap, one that got no answer at all holds: the phone gave
- * up at 45 s, but one Upstox call may take 120 s on the server.
+ * up at 45 s, but one Upstox call may take 120 s on the server (130 s with the
+ * order window's queue). Exit all starts none after its first 15 s
+ * (sudarshan/books/exit_guard.py, EXIT_ALL_SENDS_FOR_S), so it has ended within
+ * 145 s; sudarshan/books/tests/test_books_exit_guard.py checks the sum. While
+ * the server is still placing an exit, it answers a second one with 409.
  */
 export const NO_ANSWER_HOLD_MS = 150_000
 
