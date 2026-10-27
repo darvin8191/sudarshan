@@ -74,10 +74,13 @@ UPSTOX_HISTORY_DAYS = 400
 LOCAL_HOST = "127.0.0.1"
 DEFAULT_HTTP_PORT = 5583
 API_PREFIX = "/sudarshan/portfolio/api"
-#: One sealed request; the import's own limit is 1.25 MiB (the CSV text of up to 900,000 bytes).
+#: One sealed request. The seal is a Fernet token, which is base64, so it is a third larger than
+#: the JSON inside it: a file of IMPORT_MAX_FILE_BYTES sent as text seals to 1.5 to 1.9 MiB (rows
+#: plain, or every field quoted), and 1.25 MiB would hold only about 0.8 to 0.97 MB of file. The
+#: import route's limit is therefore 2 MiB. The service never reads more than this off the wire.
 API_MAX_BYTES = 64 * 1024
-IMPORT_MAX_BYTES = 1_310_720
-IMPORT_MAX_FILE_BYTES = 900_000
+IMPORT_MAX_BYTES = 2 * 1024 * 1024
+IMPORT_MAX_FILE_BYTES = 1_200_000
 IMPORT_MAX_ROWS = 5_000
 #: Requests a minute the bridge allows. The upstox ops count as reads; a dry run has its own.
 LIMITS_PER_MIN = {"read": 120, "write": 60, "import": 10, "dry_run": 120}
@@ -310,7 +313,7 @@ WORDS = {
     "future_date": "A date after today can be saved as a draft only.",
     "tab_limit": "A portfolio can have up to 50 tabs. Archive one you no longer use.",
     "import_too_big": (
-        "This file is larger than 900 KB. Download it in shorter date ranges and import each part."
+        "This file is larger than 1.2 MB. Download it in shorter date ranges and import each part."
     ),
     "whole_shares": "Shares are whole numbers.",
     "forbidden": "Only the account owner can use the portfolio.",

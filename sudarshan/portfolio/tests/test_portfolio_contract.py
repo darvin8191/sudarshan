@@ -264,15 +264,41 @@ def _sealed_size(args: dict) -> int:
     return len(Fernet(Fernet.generate_key()).encrypt(plain))
 
 
-def test_the_largest_import_fits_its_seal_as_text_and_would_not_as_base64():
-    row = '2026-03-12,BUY,RELIANCE,NSE,INE002A01018,10,1428.25,14282.50,20.00,"Demat",,,"note"\r\n'
-    text = (row * (kinds.IMPORT_MAX_FILE_BYTES // len(row) + 1)).encode("ascii")
-    text = text[: kinds.IMPORT_MAX_FILE_BYTES].decode("ascii")
-    assert len(text.encode("utf-8")) == kinds.IMPORT_MAX_FILE_BYTES
-    args = {"id": 1, "format": "generic", "filename": "t.csv", "account_id": 1}
-    assert _sealed_size({**args, "text": text}) <= kinds.IMPORT_MAX_BYTES
+#: Rows of the heaviest shapes a file can have once it is JSON inside a seal: plain, Windows line
+#: ends with some quotes, and every field quoted (each quote and line end costs a backslash).
+IMPORT_ROWS = {
+    "plain": "2026-03-12,BUY,RELIANCE,NSE,INE002A01018,10,1428.25,14282.50,20.00,Demat,,,note\n",
+    "crlf and some quotes": (
+        '2026-03-12,BUY,RELIANCE,NSE,INE002A01018,10,1428.25,14282.50,20.00,"Demat",,,"note"\r\n'
+    ),
+    "every field quoted": (
+        '"2026-03-12","BUY","RELIANCE","NSE","INE002A01018","10","1428.25","14282.50","20.00",'
+        '"Demat","","","note"\r\n'
+    ),
+}
+IMPORT_ARGS = {"id": 1, "format": "generic", "filename": "t.csv", "account_id": 1}
+
+
+def _file_of(row: str, size: int) -> str:
+    text = (row * (size // len(row) + 1)).encode("ascii")[:size].decode("ascii")
+    assert len(text.encode("utf-8")) == size
+    return text
+
+
+@pytest.mark.parametrize("shape", IMPORT_ROWS)
+def test_the_largest_import_fits_its_seal_as_text(shape):
+    text = _file_of(IMPORT_ROWS[shape], kinds.IMPORT_MAX_FILE_BYTES)
+    assert _sealed_size({**IMPORT_ARGS, "text": text}) <= kinds.IMPORT_MAX_BYTES
+
+
+def test_the_seal_is_base64_so_the_file_limit_cannot_be_the_seal_limit():
+    text = _file_of(IMPORT_ROWS["plain"], kinds.IMPORT_MAX_FILE_BYTES)
+    # A token is a third larger than its JSON, so 1.2 MB of file seals to over 1.5 MiB: the
+    # 1.25 MiB first planned for the route would refuse the owner's largest allowed file.
+    assert _sealed_size({**IMPORT_ARGS, "text": text}) > 1_310_720
+    # And the file goes as text: base64 inside the seal is a third larger again, and over 2 MiB.
     as_base64 = base64.b64encode(text.encode("utf-8")).decode("ascii")
-    assert _sealed_size({**args, "data": as_base64}) > kinds.IMPORT_MAX_BYTES
+    assert _sealed_size({**IMPORT_ARGS, "data": as_base64}) > kinds.IMPORT_MAX_BYTES
 
 
 def test_an_ordinary_request_is_far_below_the_api_limit():
@@ -317,7 +343,10 @@ def test_the_sentences_the_design_spells_out_are_kept_word_for_word():
     )
     assert kinds.WORDS["version_conflict"].startswith("This tab was changed on another screen. ")
     assert str(kinds.MAX_TABS) in kinds.WORDS["tab_limit"]
-    assert f"{kinds.IMPORT_MAX_FILE_BYTES // 1000} KB" in kinds.WORDS["import_too_big"]
+    assert f"{kinds.IMPORT_MAX_FILE_BYTES / 1_000_000:g} MB" in kinds.WORDS["import_too_big"]
+    assert kinds.WORDS["import_too_big"] == (
+        "This file is larger than 1.2 MB. Download it in shorter date ranges and import each part."
+    )
 
 
 #: Emoji, dingbats, symbols and arrows-as-icons, by code point: this file holds none itself.

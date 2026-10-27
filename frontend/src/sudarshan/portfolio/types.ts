@@ -60,7 +60,7 @@ export const IMPORT_PREVIEW_ROWS = 500
 export const UPSTOX_HISTORY_DAYS = 400
 export const NAV_OLD_BUSINESS_DAYS = 3
 export const XIRR_MIN_DAYS = 365
-export const IMPORT_MAX_FILE_BYTES = 900_000
+export const IMPORT_MAX_FILE_BYTES = 1_200_000
 export const IMPORT_MAX_ROWS = 5_000
 export const LAYOUT_VERSION = 1
 
@@ -307,7 +307,7 @@ export const WORDS = {
   future_date: 'A date after today can be saved as a draft only.',
   tab_limit: 'A portfolio can have up to 50 tabs. Archive one you no longer use.',
   import_too_big:
-    'This file is larger than 900 KB. Download it in shorter date ranges and import each part.',
+    'This file is larger than 1.2 MB. Download it in shorter date ranges and import each part.',
   whole_shares: 'Shares are whole numbers.',
   forbidden: 'Only the account owner can use the portfolio.',
   unauthorized: 'Your session has ended. Log in again.',
@@ -1215,7 +1215,7 @@ export interface MemberUpdateArgs extends Targets, Versioned {
   relation?: string | null
 }
 
-/** `id` is the tab. `text` is the file as UTF-8 text (at most 900,000 bytes, 5,000 rows). */
+/** `id` is the tab. `text` is the file as UTF-8 text (at most 1,200,000 bytes, 5,000 rows). */
 export interface ImportPreviewArgs extends Targets {
   format: ImportFormat
   filename: string
