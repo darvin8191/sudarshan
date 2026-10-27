@@ -615,15 +615,15 @@
     },
     {
       "id": "B3",
-      "says": "crosses above 100 at the 15-min close: judged at 10:15:02 on the 10:14:58 trade",
+      "says": "crosses above 100 at the 15-min close: judged at 10:15:05 on the 10:14:58 trade",
       "alert": {"params": {"op": "crosses_above", "level": "100"}, "frequency": "at_close", "candle": 15},
       "steps": [
         {"at": "09:59:00", "ltp": 99.95},
         {"at": "10:14:58", "ltp": 100.05},
-        {"at": "10:15:01.999", "clock": true},
-        {"at": "10:15:02", "clock": true}
+        {"at": "10:15:04.999", "clock": true},
+        {"at": "10:15:05", "clock": true}
       ],
-      "fires": [{"at": "10:15:02", "trade_time": "10:14:58", "value": "100.05", "candle": 3}]
+      "fires": [{"at": "10:15:05", "trade_time": "10:14:58", "value": "100.05", "candle": 3}]
     },
     {
       "id": "B4",
@@ -634,36 +634,36 @@
         {"at": "10:02:00", "ltp": 100.05},
         {"pause": ["10:05:00", "10:06:00"]},
         {"at": "10:10:00", "ltp": 100.1},
-        {"at": "10:15:02", "clock": true},
+        {"at": "10:15:05", "clock": true},
         {"at": "10:20:00", "ltp": 100.15},
-        {"at": "10:30:02", "clock": true}
+        {"at": "10:30:05", "clock": true}
       ],
-      "notes": [{"at": "10:15:02", "note": "not_checked", "candle": "10:00"}],
-      "fires": [{"at": "10:30:02", "trade_time": "10:20:00", "found_later": ["10:05:00", "10:06:00"]}]
+      "notes": [{"at": "10:15:05", "note": "not_checked", "candle": "10:00"}],
+      "fires": [{"at": "10:30:05", "trade_time": "10:20:00", "found_later": ["10:05:00", "10:06:00"]}]
     },
     {
       "id": "B5",
-      "says": "F&O's last 15-min candle is short, 15:30-15:40, judged at 15:40:02",
+      "says": "F&O's last 15-min candle is short, 15:30-15:40, judged at 15:40:05",
       "instrument": "future",
       "alert": {"params": {"op": "crosses_above", "level": "26000"}, "frequency": "at_close", "candle": 15},
       "steps": [
         {"at": "15:29:00", "ltp": 25999.9},
         {"at": "15:35:00", "ltp": 26000.5},
-        {"at": "15:40:01.999", "clock": true},
-        {"at": "15:40:02", "clock": true}
+        {"at": "15:40:04.999", "clock": true},
+        {"at": "15:40:05", "clock": true}
       ],
-      "fires": [{"at": "15:40:02", "trade_time": "15:35:00", "value": "26000.50", "candle": 25}]
+      "fires": [{"at": "15:40:05", "trade_time": "15:35:00", "value": "26000.50", "candle": 25}]
     },
     {
       "id": "B6",
-      "says": "cash's 15:15 candle is judged at 15:30:02",
+      "says": "cash's 15:15 candle is judged at 15:30:05",
       "alert": {"params": {"op": "crosses_above", "level": "100"}, "frequency": "at_close", "candle": 15},
       "steps": [
         {"at": "15:14:00", "ltp": 99.95},
         {"at": "15:20:00", "ltp": 100.05},
-        {"at": "15:30:02", "clock": true}
+        {"at": "15:30:05", "clock": true}
       ],
-      "fires": [{"at": "15:30:02", "trade_time": "15:20:00", "candle": 24}]
+      "fires": [{"at": "15:30:05", "trade_time": "15:20:00", "candle": 24}]
     },
     {
       "id": "B7",
@@ -1287,16 +1287,57 @@
     },
     {
       "id": "B8",
-      "says": "at the day's close: judged 2 s after the session ends, against yesterday's close",
+      "says": "at the day's close: judged 5 s after the session ends, against yesterday's close",
       "alert": {"params": {"op": "crosses_above", "level": "100"}, "frequency": "at_close", "candle": "day"},
       "steps": [
         {"at": "15:20:00", "ltp": 99.95},
-        {"at": "15:30:02", "clock": true},
+        {"at": "15:30:05", "clock": true},
         {"day": "2026-10-22", "at": "15:00:00", "ltp": 100.05},
-        {"day": "2026-10-22", "at": "15:30:01.999", "clock": true},
-        {"day": "2026-10-22", "at": "15:30:02", "clock": true}
+        {"day": "2026-10-22", "at": "15:30:04.999", "clock": true},
+        {"day": "2026-10-22", "at": "15:30:05", "clock": true}
       ],
-      "fires": [{"at": "15:30:02", "day": "2026-10-22", "trade_time": "15:00:00", "candle": 0}]
+      "fires": [{"at": "15:30:05", "day": "2026-10-22", "trade_time": "15:00:00", "candle": 0}]
+    },
+    {
+      "id": "B9",
+      "says": "a trade made at 10:14:59.9 arriving at 10:15:03 is in the 10:00 candle; one arriving after the 10:15:05 judging is not counted",
+      "alert": {
+        "params": {"op": "crosses_above", "level": "100"},
+        "frequency": "at_close",
+        "candle": 15,
+        "cooldown_s": 0
+      },
+      "steps": [
+        {"at": "09:59:00", "ltp": 99.95},
+        {"at": "10:00:05", "clock": true},
+        {"at": "10:14:00", "ltp": 100.05},
+        {"at": "10:15:03", "ltt": "10:14:59.900", "ltp": 99.9},
+        {"at": "10:15:05", "clock": true},
+        {"at": "10:15:06", "ltt": "10:14:59.950", "ltp": 100.2, "ltq": 2},
+        {"at": "10:15:07", "clock": true}
+      ],
+      "fires": [],
+      "side": "below"
+    },
+    {
+      "id": "B10",
+      "says": "yesterday's 15:15 candle, never judged at its close, is noted at today's first trade, not told",
+      "alert": {"params": {"op": "at_or_above", "level": "100"}, "frequency": "at_close", "candle": 15},
+      "steps": [{"at": "15:29:50", "ltp": 100.05}, {"day": "2026-10-22", "at": "09:15:01", "ltp": 99.0}],
+      "fires": [],
+      "notes": [{"at": "09:15:01", "note": "not_judged", "candle": "15:15"}]
+    },
+    {
+      "id": "B11",
+      "says": "the Day candle: yesterday's, never judged, is not merged into today's, which closes on today's trades",
+      "alert": {"params": {"op": "at_or_above", "level": "100"}, "frequency": "at_close", "candle": "day"},
+      "steps": [
+        {"at": "15:20:00", "ltp": 100.05},
+        {"day": "2026-10-22", "at": "10:00:00", "ltp": 99.0},
+        {"day": "2026-10-22", "at": "15:30:05", "clock": true}
+      ],
+      "fires": [],
+      "notes": [{"at": "10:00:00", "note": "not_judged", "candle": "09:15"}]
     },
     {
       "id": "D12",

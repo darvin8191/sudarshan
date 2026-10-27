@@ -195,3 +195,64 @@ def test_F8_a_fire_recorded_after_an_edit_leaves_the_new_definition_alone(tmp_pa
     assert (after["status"], after["version"], after["params"]["level"]) == ("active", 2, "110")
     assert row["id"] not in store.states("owner")
     store.close()
+
+
+# ---- M4: a candle is judged once, after the grace, and never a day late ---------------------
+
+
+def _at_close(op: str = "at_or_above", **more):
+    fields = {"kind": "price", "params": {"op": op, "level": "100"}, "frequency": "at_close",
+              "candle_min": 15} | more  # fmt: skip
+    return make(fields)
+
+
+def _clock(book: Book, t: int, day: date = WED, previous: date = TUE) -> list[engine.Fire]:
+    return [o.fire for o in book.on_clock(t, market(day, t, previous)) if o.fire is not None]
+
+
+def test_F9_a_candle_is_judged_once_after_the_grace_and_a_late_trade_never_reopens_it():
+    """A trade stamped 10:14:59.9 that arrives at 10:15:02.5 is the 10:00 candle's close: the
+    timer waits the gate's 5 s grace. One that arrives after the judging is not counted."""
+    book = Book()
+    book.put(_at_close("crosses", cooldown_s=0))
+    t = ms(WED, 9, 50)
+    book.on_tick(frame(ltp=99.0, at=t), t, market(WED, t, TUE))
+    assert _clock(book, ms(WED, 10, 0, 5)) == []  # the 09:45 candle closes below: seeds
+    t = ms(WED, 10, 14)
+    book.on_tick(frame(ltp=100.5, at=t, ltq=2), t, market(WED, t, TUE))
+    assert _clock(book, ms(WED, 10, 15, 2)) == []  # inside the grace: not judged yet
+    late, recv = ms(WED, 10, 14, 59.9), ms(WED, 10, 15, 2.5)
+    book.on_tick(frame(ltp=99.5, at=late, recv=recv, ltq=3), recv, market(WED, recv, TUE))
+    assert _clock(book, ms(WED, 10, 15, 5)) == []  # closed at 99.50: still below
+    later, recv = ms(WED, 10, 14, 59.95), ms(WED, 10, 15, 6)
+    book.on_tick(frame(ltp=100.8, at=later, recv=recv, ltq=4), recv, market(WED, recv, TUE))
+    assert _clock(book, ms(WED, 10, 15, 7)) == []  # judged once: never again
+
+
+def test_F10_yesterdays_last_candle_is_noted_not_told_at_todays_open():
+    """No timer ran at yesterday's 15:30 close. Today's first trade must not tell yesterday's
+    15:15 candle as a fire decided at 09:15; the alert's card notes it instead."""
+    book = Book()
+    book.put(_at_close())
+    t = ms(TUE, 15, 29, 50)
+    book.on_tick(frame(ltp=100.05, at=t), t, market(TUE, t, MON))
+    t = ms(WED, 9, 15, 1)
+    out = book.on_tick(frame(ltp=99.0, at=t, ltq=2), t, market(WED, t, TUE))
+    assert fires(out) == [] and [o.note.code for o in out.outcomes] == [engine.NOT_JUDGED]
+    assert words.note_words(out.outcomes[0].note) == (
+        "Not checked: the close of the 15:15 candle on 20 Oct"
+    )
+
+
+def test_F11_a_wait_as_long_as_the_candle_lets_consecutive_closes_fire():
+    """The wait is measured between candle ends (mutant e31 measured it from the last trade
+    inside each candle, and the second close fell inside the wait)."""
+    book = Book()
+    book.put(_at_close(cooldown_s=900))
+    told = []
+    for hh, mm, ss in ((10, 14, 58), (10, 29, 30)):
+        t = ms(WED, hh, mm, ss)
+        book.on_tick(frame(ltp=100.5, at=t, ltq=mm), t, market(WED, t, TUE))
+        told += _clock(book, ms(WED, hh, mm + 1, 5))
+    when = [datetime.fromtimestamp(f.at / 1000, IST).strftime("%H:%M:%S") for f in told]
+    assert when == ["10:15:05", "10:30:05"]

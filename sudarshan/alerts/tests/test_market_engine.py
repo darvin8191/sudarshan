@@ -71,15 +71,39 @@ def test_at_candle_close_judges_the_last_value_once_a_later_trade_comes():
     ]  # candle 2 closed at 100.10 after 99.00: crossed above, judged at the next trade
 
 
-def test_at_candle_close_by_the_timer_two_seconds_after_the_end():
+def test_at_candle_close_by_the_timer_five_seconds_after_the_end():
+    """The gate's grace: a trade made before the end may arrive up to 5 s after it."""
     a = alert(op="at_or_above", frequency="at_close", candle=5)
     end = T0 + 5 * MIN
     state, _, _ = feed(a, [(100.05, T0 + 4 * MIN + 58_000, 0, end)])
-    assert engine.timer(a, state, end + 1_999) is None
-    out = engine.timer(a, state, end + 2_000)
+    assert engine.timer(a, state, end + 4_999, DAY) is None
+    out = engine.timer(a, state, end + 5_000, DAY)
     assert out.fire.value == 10005 and out.fire.trade_time == T0 + 4 * MIN + 58_000
-    assert out.fire.at == end + 2_000 and out.state.forming is None
-    assert engine.timer(a, out.state, end + 60_000) is None  # judged once
+    assert out.fire.at == end + 5_000 and out.state.forming.judged
+    assert engine.timer(a, out.state, end + 60_000, DAY) is None  # judged once
+
+
+def test_a_trade_for_a_judged_candle_never_reopens_it():
+    a = alert(op="crosses", frequency="at_close", candle=5)
+    end = T0 + 5 * MIN
+    state, _, _ = feed(a, [(100.05, T0 + 4 * MIN, 0, end)])
+    state = engine.timer(a, state, end + 5_000, DAY).state  # judged: the first close seeds
+    late = engine.step(a, state, obs(a, 99.0, end - 100, candle=0, end=end), end + 6_000)
+    assert late.state == state and late.fire is None
+    assert engine.timer(a, late.state, end + 7_000, DAY) is None
+
+
+def test_a_candle_of_an_earlier_session_is_never_judged_late():
+    """No timer ran at yesterday's last close: today it is noted, not told a day late."""
+    a = alert(op="at_or_above", frequency="at_close", candle=15)
+    state, _, _ = feed(a, [(100.05, T0 + MIN, 0, T0 + 15 * MIN)])
+    tomorrow = T0 + 86_400_000
+    out = engine.timer(a, state, tomorrow, DAY + 1)
+    assert out.fire is None and out.note.code == engine.NOT_JUDGED
+    assert engine.timer(a, out.state, tomorrow + 1000, DAY + 1) is None
+    first = engine.step(a, state, obs(a, 99.0, tomorrow, candle=0, day=DAY + 1), tomorrow)
+    assert first.fire is None and first.note.code == engine.NOT_JUDGED
+    assert first.state.forming.value == 9900 and first.state.session == DAY + 1
 
 
 def test_a_value_older_than_the_forming_candle_is_ignored():
@@ -95,11 +119,13 @@ def test_an_end_judges_a_candle_that_closed_by_then_and_drops_one_that_did_not()
     ends = "2026-10-21T10:15:00+05:30"
     a = alert(op="at_or_above", frequency="at_close", candle=15, ends=ends)
     state, _, _ = feed(a, [(100.05, T0 + 14 * MIN, 0, T0 + 15 * MIN)])
-    out = engine.timer(a, state, T0 + 15 * MIN)  # the end, before the 2 s timer
+    assert engine.timer(a, state, T0 + 15 * MIN, DAY) is None  # the candle's grace first
+    out = engine.timer(a, state, T0 + 15 * MIN + 5_000, DAY)
     assert out.fire is not None and (out.status, out.reason.code) == ("stopped", "ended")
+    assert out.reason.at == T0 + 15 * MIN
     b = alert(op="at_or_above", frequency="at_close", candle=30, ends=ends)
     state, _, _ = feed(b, [(100.05, T0 + 14 * MIN, 0, T0 + 30 * MIN)])
-    out = engine.timer(b, state, T0 + 15 * MIN)
+    out = engine.timer(b, state, T0 + 15 * MIN, DAY)
     assert out.fire is None and out.status == "stopped"
 
 
@@ -107,7 +133,7 @@ def test_once_at_close_stops_when_its_close_fires():
     a = alert(op="at_or_above", frequency="at_close", candle=1, ends="2026-10-21T10:01:00+05:30")
     state, _, _ = feed(a, [(100.05, T0 + 30_000, 0, T0 + MIN)])
     a = dataclasses.replace(a, frequency=spec.ONCE)
-    out = engine.timer(a, state, T0 + MIN)
+    out = engine.timer(a, state, T0 + MIN + 5_000, DAY)
     assert out.reason.code == "fired_once" and out.fire is not None
 
 
@@ -150,7 +176,7 @@ def test_an_alert_that_is_not_active_never_fires():
     a = dataclasses.replace(alert(op="at_or_above"), status="paused")
     out = engine.step(a, State(), obs(a, 101.0, T0), T0)
     assert out == engine.Outcome(9, State())
-    assert engine.timer(a, State(), T0 + 10**12) is None
+    assert engine.timer(a, State(), T0 + 10**12, DAY) is None
 
 
 def test_the_wait_counts_from_the_fire_inclusive():

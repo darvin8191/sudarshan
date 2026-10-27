@@ -197,6 +197,6 @@ def test_an_at_close_move_told_by_the_timer_keeps_its_base():
     book = Book()
     book.put(alert("move", {"direction": "up", "percent": "2"}, frequency="at_close", candle=15))
     book.on_tick(frame(102.5, T0 + 60_000, cp=100.0), T0 + 60_000, market(T0 + 60_000))
-    due = T0 + 15 * 60_000 + 2000
+    due = T0 + 15 * 60_000 + 5000
     out = book.on_clock(due, market(due))
     assert out[0].fire.base == 10000 and out[0].fire.trade_time == T0 + 60_000

@@ -145,6 +145,40 @@ def test_put_keeps_the_state_and_drop_forgets_it():
     assert book.drop(1) is None
 
 
+def test_a_pre_open_snapshot_never_seeds_todays_side():
+    """The day's first snapshot carries the pre-open price (09:08): not a trade of today's
+    session, so the first trade seeds instead of firing on a move from the pre-open price."""
+    book = Book()
+    book.put(alert())
+    opening = T0 - 52 * 60_000  # 09:08
+    snapshot = {"key": KEY, "ts_recv": opening + 60_000, "ltp": 99.0, "ltt": opening}
+    assert not book.seed(1, snapshot, market(opening + 60_000))
+    first = T0 - 45 * 60_000 + 1000  # 09:15:01
+    out = book.on_tick(tick(101.0, at=first), first, market(first))
+    assert out.outcomes == () and book.state(1).side == 1
+
+
+def test_only_a_fixed_level_seeds_from_the_trading_day_before():
+    """Monday's start, Friday's last trade: a fixed level's side carries to the next session (a
+    gap fires as an opening); a day high or a VWAP starts again each session, so neither takes
+    a side from Friday."""
+    book = Book()
+    book.put(alert(1))
+    others = ((2, "day_break", {"side": "high"}), (3, "vwap", {"direction": "above"}))
+    for id_, kind, params in others:
+        row = spec.check(SBIN | {"kind": kind, "params": params}, T0 - 3_600_000)
+        book.put(spec.Alert.of(row | {"id": id_, "version": 1, "status": "active"}))
+    mon = date(2026, 10, 19)
+    found = {s: sessions.session(s, mon, trading_day=True) for s in sessions.SEGMENTS}
+    monday = clock.Market(20261019, found, 20261016, feed=clock.Feed("connected", True, T0))
+    friday = sessions.epoch_ms(date(2026, 10, 16), 15 * 60 + 29)
+    snapshot = {"key": KEY, "ts_recv": T0, "ltp": 99.0, "ltt": friday, "atp": 99.5,
+                "ohlc": {"high": 101.0}}  # fmt: skip
+    assert book.seed(1, snapshot, monday) and book.state(1).session == 20261016
+    assert not book.seed(2, snapshot, monday) and not book.seed(3, snapshot, monday)
+    assert book.state(2) == State() and book.state(3) == State()
+
+
 def test_seed_only_a_crossing_and_never_at_close():
     book = Book()
     book.put(alert(1, op="at_or_above"))

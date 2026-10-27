@@ -270,7 +270,7 @@ def test_alert_vector(vector, tmp_path):
     notes = []
     for at, note in world.notes:
         shown = {"at": hms(at), "note": note.code}
-        if note.code == engine.NOT_CHECKED:
+        if note.code in (engine.NOT_CHECKED, engine.NOT_JUDGED):
             shown["candle"] = hms(note.at)[:5]
         notes.append(shown)
     assert notes == vector.get("notes", [])

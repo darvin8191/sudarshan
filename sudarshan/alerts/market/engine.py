@@ -16,10 +16,13 @@ only seeds the side. A level check ("is at or above") fires on every value that 
 included, as its frequency allows.
 
 Frequency: once (then Stopped); once per candle (judged by the observation's candle); at candle
-close (the candle's last value, judged once a later trade or the timer shows the candle has ended;
-a crossing compares it with the previous close); every time. After any fire nothing fires until
-the wait between alerts is over, and a crossing inside the wait is used up. The 51st fire in a
-session pauses the alert instead; its end date or its contract's expiry stops it.
+close (the candle's last value, judged once a later trade shows the candle has ended, or by the
+timer 5 s after its end, the grace in which the gate still takes a trade made before it; a
+crossing compares it with the previous close); every time. A candle is judged once: a trade for
+it that arrives later is not counted, and a candle from an earlier session is never judged late
+(the page notes it instead). After any fire nothing fires until the wait between alerts is over,
+and a crossing inside the wait is used up. The 51st fire in a session pauses the alert instead;
+its end date or its contract's expiry stops it.
 
 Gaps (a fixed price level's crossing only). The side survives a session: the first value of the
 next one fires on a crossing as an opening ("opened above 100.00, previous 99.90"); a side from
@@ -31,7 +34,7 @@ from __future__ import annotations
 
 from typing import NamedTuple
 
-from sudarshan.alerts.market.clock import Pause, paused_between, paused_during
+from sudarshan.alerts.market.clock import ARRIVAL_GRACE_MS, Pause, paused_between, paused_during
 from sudarshan.alerts.market.spec import (
     AT_CLOSE,
     BREAK,
@@ -46,10 +49,13 @@ from sudarshan.alerts.market.spec import (
 
 #: An alert that would fire more often than this in one session is paused instead.
 FIRE_LIMIT = 50
-#: With no later trade, a timer judges a candle's close this long after the candle ends.
-CLOSE_CHECK_MS = 2000
+#: With no later trade, a timer judges a candle's close this long after the candle ends: the
+#: gate's grace for a trade made before the end, so a late one is in the candle, not after it.
+CLOSE_CHECK_MS = ARRIVAL_GRACE_MS
 #: A note on the alert for the page: its candle could not be judged (a pause touched it).
 NOT_CHECKED = "not_checked"
+#: A note: a candle of an earlier session was never judged at its close, and is not told late.
+NOT_JUDGED = "not_judged"
 
 
 class Forming(NamedTuple):
@@ -62,6 +68,8 @@ class Forming(NamedTuple):
     at: int
     up: int
     down: int
+    #: Judged already: kept so a trade for it that arrives later is not counted.
+    judged: bool = False
 
 
 class State(NamedTuple):
@@ -173,7 +181,7 @@ def step(
         return Outcome(alert.id, state)
     expires, ends = alert.expires_at, alert.ends_at
     if (expires is not None and obs.at >= expires) or (ends is not None and obs.at >= ends):
-        return _stop(alert, state, now, stop_reason(alert, obs.at), pauses)
+        return _stop(alert, state, now, stop_reason(alert, obs.at), pauses, obs.session)
     if alert.frequency == AT_CLOSE:
         return _at_close(alert, state, obs, now, previous, pauses)
     opening = False
@@ -183,14 +191,24 @@ def step(
     return judge(alert, state, obs, now, pauses, opening)
 
 
-def timer(alert: Alert, state: State, now: int, pauses: tuple[Pause, ...] = ()) -> Outcome | None:
-    """What the time alone decides: a candle to judge at its close, or an end. None: nothing."""
+def timer(
+    alert: Alert, state: State, now: int, today: int, pauses: tuple[Pause, ...] = ()
+) -> Outcome | None:
+    """What the time alone decides: a candle to judge at its close, or an end. None: nothing.
+
+    ``today`` is the session now (YYYYMMDD): a candle of an earlier one is not judged."""
     if alert.status != "active":
         return None
+    f = state.forming
+    due = f is not None and not f.judged
     stop = stop_reason(alert, now)
     if stop is not None:
-        return _stop(alert, state, now, stop, pauses)
-    if state.forming is not None and now >= state.forming.end + CLOSE_CHECK_MS:
+        if due and f.end <= stop.at and now < f.end + CLOSE_CHECK_MS:
+            return None  # the candle that closed at the stop gets its grace first
+        return _stop(alert, state, now, stop, pauses, today)
+    if due and now >= f.end + CLOSE_CHECK_MS:
+        if state.session != today:
+            return _not_judged(alert, state)
         return close(alert, state, now, pauses)
     return None
 
@@ -311,9 +329,9 @@ def close(alert: Alert, state: State, now: int, pauses: tuple[Pause, ...] = ()) 
     """Judge the forming candle at its close: its last value, timed at the candle's end.
 
     A candle that a pause touched is not judged: its close may not be its last trade, and the
-    side stays where the last judged close left it."""
+    side stays where the last judged close left it. Either way the candle is done."""
     f = state.forming
-    state = state._replace(forming=None)
+    state = state._replace(forming=f._replace(judged=True))
     if pauses and paused_during(pauses, f.start, f.end):
         return Outcome(alert.id, state, note=Reason(NOT_CHECKED, f.start))
     out = judge(alert, state, Obs(f.value, f.end, state.session, f.up, f.down, f.candle,
@@ -326,14 +344,17 @@ def close(alert: Alert, state: State, now: int, pauses: tuple[Pause, ...] = ()) 
 def _at_close(alert, state, obs, now, previous, pauses) -> Outcome:
     """A trade for an alert judged at candle close: it ends the forming candle or adds to it."""
     done = None
-    forming = state.forming
-    if forming is not None and obs.session == state.session and obs.candle < forming.candle:
-        return Outcome(alert.id, state)  # older than the forming candle: never reopen a candle
-    if forming is not None and (obs.session != state.session or obs.candle != forming.candle):
-        done = close(alert, state, now, pauses)
-        if done.status is not None:
-            return done
-        state = done.state
+    f = state.forming
+    if f is not None and obs.session == state.session:
+        if obs.candle < f.candle or (obs.candle == f.candle and f.judged):
+            return Outcome(alert.id, state)  # a candle judged already, or older: never reopened
+        if obs.candle != f.candle and not f.judged:
+            done = close(alert, state, now, pauses)
+            if done.status is not None:
+                return done
+            state = done.state
+    elif f is not None and not f.judged:  # an earlier session's candle, never judged at its end
+        done = _not_judged(alert, state)
     if obs.session != state.session:
         state = new_session(state, obs.session, carries(alert, state, previous))
     s = state
@@ -345,10 +366,21 @@ def _at_close(alert, state, obs, now, previous, pauses) -> Outcome:
     return Outcome(alert.id, state, done.fire, note=done.note)
 
 
-def _stop(alert, state, now, stop, pauses) -> Outcome:
-    """Stop at an end or an expiry; a forming candle that ended by then is judged first."""
-    if state.forming is not None and state.forming.end <= stop.at:
-        done = close(alert, state, now, pauses)
+def _not_judged(alert: Alert, state: State) -> Outcome:
+    f = state.forming
+    note = Reason(NOT_JUDGED, f.start)
+    return Outcome(alert.id, state._replace(forming=f._replace(judged=True)), note=note)
+
+
+def _stop(alert, state, now, stop, pauses, today: int) -> Outcome:
+    """Stop at an end or an expiry; a forming candle that ended by then is judged first, if it
+    is of this session (``today``), and noted as not judged if it is of an earlier one."""
+    f = state.forming
+    if f is not None and not f.judged and f.end <= stop.at:
+        if state.session == today:
+            done = close(alert, state, now, pauses)
+        else:
+            done = _not_judged(alert, state)
         if done.status is not None:
             return done
         return Outcome(alert.id, done.state, done.fire, "stopped", stop, done.note)

@@ -203,6 +203,8 @@ def note_words(reason: engine.Reason) -> str:
     """An alert's note for its card: what it waits for, or a candle it could not judge."""
     if reason.code == engine.NOT_CHECKED:
         return f"Not checked: the price feed paused during the {_hm(reason.at)} candle"
+    if reason.code == engine.NOT_JUDGED:
+        return f"Not checked: the close of the {_hm(reason.at)} candle on {_day(reason.at)}"
     return _NOTES[reason.code]
 
 

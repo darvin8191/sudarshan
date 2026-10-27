@@ -213,7 +213,7 @@ class Book:
         outcomes: list[Outcome] = []
         for alert in list(self._active.values()):
             state = self._states[alert.id]
-            out = timer(alert, state, now, market.pauses)
+            out = timer(alert, state, now, market.today, market.pauses)
             if out is not None:
                 derived = state.derived
                 if out.fire is not None and alert.kind == "move" and derived is not None:

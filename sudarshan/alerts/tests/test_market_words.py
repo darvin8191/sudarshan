@@ -121,6 +121,9 @@ def test_notes_on_an_alert():
     assert words.note_words(engine.Reason(engine.NOT_CHECKED, at_ten)) == (
         "Not checked: the price feed paused during the 10:00 candle"
     )
+    assert words.note_words(engine.Reason(engine.NOT_JUDGED, ms(DAY, "15:15:00"))) == (
+        "Not checked: the close of the 15:15 candle on 21 Oct"
+    )
     assert words.note_words(engine.Reason(conditions.WAITING_CLOSE, at_ten)) == (
         "Waiting for the previous close"
     )
