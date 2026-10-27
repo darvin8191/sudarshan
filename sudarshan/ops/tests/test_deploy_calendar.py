@@ -4,9 +4,10 @@
 (the pattern of ``test_deploy_env.py``) and run under the script's own shell options; the list fetch
 runs the real curl against a local server. Every shipped line is read with the parsers of the readers
 of the day files. Then the whole tool runs on a fake server (fake curl, sudo, git, systemctl, uv,
-chown, sleep and date first on PATH), with the review's scenarios: a holiday for today shipped in
-market hours (A), a line the owner took out (B), a list cut off in transit (T) and a special session
-moved during the session (X).
+chown, sleep and date first on PATH), with the reviews' scenarios: a holiday for today shipped in
+market hours (A), a line the owner took out (B), a list cut off in transit (T), a special session
+moved during the session (X), a list GitHub did not find once (S404), and a release that would make
+today a trading day.
 """
 
 from __future__ import annotations
@@ -34,7 +35,11 @@ import pytest
 from sudarshan.alerts.window import AlertWindow, parse_day_windows
 from sudarshan.autologin.schedule import IST, TradingCalendar, parse_window
 from sudarshan.autologin.schedule import parse_holidays as autologin_days
-from sudarshan.feed.window import parse_holidays as feed_days
+
+try:  # the feed's own parser of the holiday file
+    from sudarshan.feed.window import parse_holidays as feed_days
+except ImportError:  # a feed that reads the day files through auto-login's calendar has none
+    feed_days = autologin_days
 
 REPO = Path(__file__).resolve().parents[3]
 DEPLOY_TOOL = REPO / "sudarshan" / "ops" / "deploy" / "sudarshan-deploy"
@@ -636,6 +641,28 @@ def test_a_note_is_logged_once_while_it_holds(tmp_path):
     assert (server.state / "calendar_notes").read_text() == ""
 
 
+def test_an_empty_line_in_the_notes_is_read_past(tmp_path):
+    server = Server(tmp_path, {EXTRA: b"2026-11-08 # mine\n"})
+    (server.state / "calendar_notes").write_text("calendar: an old note\n\n")  # a hand edit
+    done = server.sync("run")
+    assert (done.returncode, done.stderr) == (0, ""), done.stdout + done.stderr
+    assert "the owner wrote it as" in done.stdout
+    assert (server.state / "calendar_notes").read_text().count("\n") == 1  # the note that holds
+
+
+def test_today_is_the_date_in_india(tmp_path):
+    """cal_today asks for the date in IST whatever the server's own zone: at 01:30 IST on Sunday
+    8 Nov it is still Saturday in UTC."""
+    if not Path("/usr/share/zoneinfo/Asia/Kolkata").exists():
+        pytest.skip("needs the time zone database")
+    instant = int(datetime(2026, 11, 8, 1, 30, tzinfo=IST).timestamp())
+    _shim(tmp_path, "date", f'exec {shutil.which("date")} -d @{instant} "$@"')
+    script = "set -Eeuo pipefail\n" + _function("cal_today") + "cal_today\n"
+    env = {**os.environ, "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}", "TZ": "UTC"}
+    done = subprocess.run(["bash", "-c", script], capture_output=True, text=True, env=env)
+    assert done.stdout == "2026-11-08\n", done.stderr
+
+
 def test_a_temporary_file_a_killed_run_left_is_cleared(tmp_path):
     names = [".nse_holidays.txt.AbC123", ".nse_extra_trading_days.txt.XyZ789",
              ".nse_holidays.txt.long-name", ".other.ABCDEF"]  # fmt: skip
@@ -688,6 +715,17 @@ def test_every_shipped_line_is_read_by_every_reader(tmp_path, caplog):
             words = text.split("#", 1)[0].split()
             assert parse_day_windows(text) == ({day: parse_window(words[1])} if words[1:] else {})
     assert caplog.records == []  # no reader found a line it could not read
+
+
+def test_the_shipped_list_is_whole_and_reads(tmp_path):
+    """CI: the list in the repo is not empty, ends with a newline (the tool takes a list only when
+    it arrived whole, so one without would never be taken) and reads with the tool's own parser."""
+    data = SHIPPED_LIST.read_bytes()
+    assert data.strip(), "the calendar list is empty"
+    assert data.endswith(b"\n"), "the calendar list does not end with a newline"
+    done = Server(tmp_path, {}, data).sync("check")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "list line" not in done.stdout
 
 
 # The page's own calendar, as the blueprint builds it from its settings (the auto-login tests'
@@ -848,7 +886,7 @@ def lists_server():
                 status = b"404 Not Found" if tag == "missing" else b"500 Internal Server Error"
                 self.request.sendall(b"HTTP/1.1 " + status + b"\r\nContent-Length: 0\r\n\r\n")
                 return
-            body = LIST_BODY[:-1] if tag == "nonl" else LIST_BODY
+            body = {"nonl": LIST_BODY[:-1], "empty": b""}.get(tag, LIST_BODY)
             head = b"HTTP/1.1 200 OK\r\nContent-Length: %d\r\nConnection: close\r\n\r\n" % len(body)
             self.request.sendall(head + (body[:20] if tag == "cut" else body))
 
@@ -869,7 +907,8 @@ def lists_server():
     ("tag", "code", "got"),
     [
         ("whole", 0, LIST_BODY),
-        ("missing", 0, b""),  # a release without the list
+        ("empty", 0, b""),  # a 200 with nothing in it: an empty list, whole
+        ("missing", 3, b""),  # 404: no list (the settings take it for an empty one)
         ("cut", 1, None),  # curl sees 200, then a body shorter than promised
         ("nonl", 1, None),  # whole, but its last line has no newline
         ("error", 1, None),
@@ -878,6 +917,8 @@ def lists_server():
 )
 def test_a_list_is_taken_only_when_it_arrived_whole(tmp_path, lists_server, fetch, tag, code, got):
     """The real curl, with the tool's own flags, against a local server."""
+    if fetch == "env_conf_fetch" and code == 3:
+        code = 0  # a release without a settings list sets nothing, and installs
     shims = tmp_path / "shims"
     shims.mkdir()
     real = shutil.which("curl")
@@ -891,7 +932,7 @@ def test_a_list_is_taken_only_when_it_arrived_whole(tmp_path, lists_server, fetc
         + _function("release_file")
         + "".join(line + "\n" for line in DEPLOY_TOOL.read_text().splitlines()
                   if line.startswith(("env_conf_fetch() {", "cal_conf_fetch() {")))
-        + f'if {fetch} "$1" "$2"; then exit 0; else exit 1; fi\n'
+        + f'if {fetch} "$1" "$2"; then exit 0; else exit $?; fi\n'
     )  # fmt: skip
     env = {k: v for k, v in os.environ.items() if not k.lower().endswith("_proxy")}
     env["PATH"] = f"{shims}{os.pathsep}{env['PATH']}"
@@ -1219,6 +1260,165 @@ def test_scenario_t_a_list_cut_off_in_transit_is_not_taken(tmp_path):
 
 
 @whole_tool
+def test_scenario_s404_a_list_not_found_is_asked_for_again(tmp_path):
+    """GitHub answers 404 for the installed release's list once, then serves it: nothing is kept
+    from the 404, and the next run, the next timer tick, adds the line."""
+    full = SHIPPED_LIST.read_bytes()
+    box = Box(tmp_path)
+    box.calendar("v1.0.0", b"", code="404")
+    first = box.run()
+    assert first.returncode == 0, first.stdout + first.stderr
+    assert "calendar: no list was found for v1.0.0; the next run asks again" in first.stdout
+    assert box.day().read_bytes() == b"# special sessions\n"
+    assert not (box.state / "calendar-lists").exists()  # nothing kept
+    assert box.run().stdout == ""  # said once while it holds; asked again
+    box.calendar("v1.0.0", full)
+    found = box.run()
+    assert f'calendar: {EXTRA}: added "{SHIPPED.decode()}"' in found.stdout
+    assert box.day().read_bytes() == b"# special sessions\n" + SHIPPED + b"\n"
+    assert (box.state / "calendar-lists" / "v1.0.0").read_bytes() == full
+    assert box.run().stdout == ""
+    assert box.requests().count(box.list_url("v1.0.0")) == 3  # then kept
+
+
+@whole_tool
+def test_an_install_whose_list_was_not_found_takes_it_on_the_next_run(tmp_path):
+    """The install's own fetch of the new release's list answers 404: the install goes on with the
+    day files as they are and keeps no list, and the next run fetches it and adds the line."""
+    full = SHIPPED_LIST.read_bytes()
+    box = Box(tmp_path, latest="v1.0.1")
+    box.calendar("v1.0.0", b"")  # the installed release's list: empty, and whole
+    box.calendar("v1.0.1", b"", code="404")
+    first = box.run()
+    assert first.returncode == 0, first.stdout + first.stderr
+    assert "calendar: no list was found for v1.0.1; the day files stay as they are" in first.stdout
+    assert "deployed v1.0.1 OK" in first.stdout and box.deployed() == "v1.0.1"
+    assert not (box.state / "calendar-lists" / "v1.0.1").exists()
+    box.calendar("v1.0.1", full)
+    second = box.run()
+    assert f'calendar: {EXTRA}: added "{SHIPPED.decode()}"' in second.stdout
+    assert box.day().read_bytes() == b"# special sessions\n" + SHIPPED + b"\n"
+    assert sorted(p.name for p in (box.state / "calendar-lists").iterdir()) == ["v1.0.1"]
+
+
+@whole_tool
+@pytest.mark.parametrize(
+    ("body", "installs"),
+    [(b"", True), (b"# settings\nWEBSOCKET_BROKER_LINGER_SECONDS  300  0", False)],
+)
+def test_an_empty_settings_list_is_an_empty_list(tmp_path, body, installs):
+    """A settings list that arrives empty with a 200 sets nothing, and the release installs; one
+    whose last line has no newline may have been cut off, and stops the install as before."""
+    box = Box(tmp_path, latest="v1.0.1")
+    path = "v1.0.1/sudarshan/ops/deploy/openalgo-env.conf"
+    box.serve(f"https://raw.githubusercontent.com/{box.OWNER_REPO}/{path}", body)
+    done = box.run()
+    assert done.returncode == (0 if installs else 1), done.stdout + done.stderr
+    assert box.deployed() == ("v1.0.1" if installs else "v1.0.0")
+    stopped = "could not fetch the settings list of v1.0.1 - not deploying" in done.stdout
+    assert stopped is not installs
+
+
+@whole_tool
+def test_an_empty_line_in_the_notes_never_stops_a_run(tmp_path):
+    box = Box(tmp_path, latest="v1.0.1")
+    box.calendar("v1.0.0", FIRST)
+    box.calendar("v1.0.1", FIRST)
+    (box.state / "calendar_notes").write_text("calendar: something\n\n")  # a hand edit
+    done = box.run()
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "bad array subscript" not in done.stderr
+    assert "deployed v1.0.1 OK" in done.stdout and box.deployed() == "v1.0.1"
+
+
+TODAYS_SESSION = b"[nse_extra_trading_days.txt]\nline 2026-10-24 09:00-15:30  # special session\n"
+WAITS = "release v1.0.1 waiting for market close (its calendar list makes today a trading day)"
+
+
+@whole_tool
+def test_a_release_that_adds_todays_session_waits(tmp_path):
+    """Saturday 24 Oct 12:00 IST: a release published during a special session announces it. Its
+    list would make today a trading day, so the release waits, as the gate will once the line is
+    in, instead of stopping OpenAlgo during the session."""
+    box = Box(tmp_path, latest="v1.0.1")  # Saturday 24 Oct, 12:00 IST
+    box.calendar("v1.0.0", b"")
+    box.calendar("v1.0.1", TODAYS_SESSION)
+    done = box.run()
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert WAITS in done.stdout
+    assert "stopping openalgo" not in done.stdout and not (box.web / "systemctl").exists()
+    assert box.deployed() == "v1.0.0" and list(box.backups.iterdir()) == []
+    assert box.day().read_bytes() == b"# special sessions\n"
+    forced = box.run("--force")  # the owner's override still installs, with the session
+    assert "deployed v1.0.1 OK" in forced.stdout, forced.stdout + forced.stderr
+    assert box.day().read_bytes() == b"# special sessions\n" + TODAYS_SESSION.split(b"line ")[1]
+
+
+@whole_tool
+@pytest.mark.parametrize(
+    ("now", "installs"), [("2 1100 2026-10-20", False), ("2 1600 2026-10-20", True)]
+)
+def test_a_release_that_takes_back_todays_holiday_waits_for_the_close(tmp_path, now, installs):
+    """Tuesday 20 Oct, a holiday this tool added; a release published that day drops it. At 11:00
+    today would be a trading day in its window, so the release waits; at 16:00 it installs and
+    takes the line out."""
+    box = Box(tmp_path, latest="v1.0.1", now=now)
+    (box.state / "calendar_applied").write_text(f"{HOLIDAYS}|2026-10-20  # Dussehra\n")
+    box.calendar("v1.0.0", b"")
+    box.calendar("v1.0.1", b"[nse_holidays.txt]\ndrop 2026-10-20  # Dussehra\n")
+    done = box.run()
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert (WAITS in done.stdout) is not installs
+    assert box.deployed() == ("v1.0.1" if installs else "v1.0.0")
+    assert box.day(HOLIDAYS).read_bytes() == (b"" if installs else b"2026-10-20  # Dussehra\n")
+
+
+@whole_tool
+def test_a_kept_list_that_is_a_symlink_is_not_used(tmp_path):
+    """The list kept for the installed release must be this tool's own file: a symlink there, to a
+    list someone planted, is passed over; the list is fetched again and kept as a plain file."""
+    box = Box(tmp_path)
+    planted = box.root / "planted.conf"
+    planted.write_bytes(b"[nse_holidays.txt]\nline 2026-11-24  # planted\n")
+    (box.state / "calendar-lists").mkdir()
+    (box.state / "calendar-lists" / "v1.0.0").symlink_to(planted)
+    box.calendar("v1.0.0", FIRST)
+    done = box.run()
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert box.day(HOLIDAYS).read_bytes() == b"2026-10-20  # Dussehra\n"  # nothing planted
+    assert box.day().read_bytes() == b"# special sessions\n" + MUHURAT + b"\n"
+    kept = box.state / "calendar-lists" / "v1.0.0"
+    assert not kept.is_symlink() and kept.read_bytes() == FIRST
+    assert planted.read_bytes() == b"[nse_holidays.txt]\nline 2026-11-24  # planted\n"
+
+
+@whole_tool
+def test_a_rollback_puts_the_record_back_as_it_was(tmp_path):
+    """The record held a line before the install; the install adds a holiday, then rolls back. The
+    record goes back to what it held, so the next try adds the holiday again and records it."""
+    box = Box(tmp_path, latest="v1.0.1")
+    box.day().write_bytes(b"# special sessions\n" + MUHURAT + b"\n")
+    record = box.state / "calendar_applied"
+    record.write_text(f"{EXTRA}|{MUHURAT.decode()}\n")
+    holiday = b"2026-11-24  # Guru Nanak Jayanti"
+    box.calendar("v1.0.0", FIRST)
+    box.calendar("v1.0.1", b"[nse_holidays.txt]\nline " + holiday + b"\n\n" + FIRST)
+    box.migrations = "1"
+    failed = box.run()
+    assert "rolling back" in failed.stdout and box.deployed() == "v1.0.0", failed.stdout
+    assert record.read_text() == f"{EXTRA}|{MUHURAT.decode()}\n"
+    assert box.day(HOLIDAYS).read_bytes() == b"2026-10-20  # Dussehra\n"
+    box.migrations = "0"
+    again = box.run()
+    assert "deployed v1.0.1 OK" in again.stdout, again.stdout + again.stderr
+    assert box.day(HOLIDAYS).read_bytes() == b"2026-10-20  # Dussehra\n" + holiday + b"\n"
+    assert set(record.read_text().splitlines()) == {
+        f"{EXTRA}|{MUHURAT.decode()}",
+        f"{HOLIDAYS}|{holiday.decode()}",
+    }
+
+
+@whole_tool
 def test_the_gate_is_asked_again_before_the_stop(tmp_path):
     """Wednesday 08:58 IST: the first gate lets v1.0.1 in, the download takes until 09:01, and the
     install waits instead of stopping OpenAlgo in the pre-open."""
@@ -1297,6 +1497,7 @@ def test_an_install_applies_its_list_with_a_backup(tmp_path):
         ("200", b"[/etc/passwd]\nline 2026-11-08\n", False, "list line 1 names a file other than"),
         ("000", b"", False, "could not fetch the list of v1.0.1 whole; the day files stay as they are"),
         ("200", FIRST, True, "could not fetch the list of v1.0.1 whole; the day files stay as they are"),
+        ("404", b"", False, "no list was found for v1.0.1; the day files stay as they are"),
     ],
 )  # fmt: skip
 def test_a_broken_list_never_blocks_an_install(tmp_path, code, listing, cut, says):
@@ -1346,3 +1547,13 @@ def test_the_check_option_shows_what_the_latest_list_would_change(tmp_path):
     assert _snapshot(box.etc) == before
     assert sorted(p.name for p in box.state.iterdir()) == ["deploy.lock", "deployed_tag"]
     assert list(box.tmp.iterdir()) == []
+
+
+@whole_tool
+def test_the_check_option_says_when_no_list_was_found(tmp_path):
+    box = Box(tmp_path, latest="v1.0.1")
+    box.calendar("v1.0.1", b"", code="404")
+    done = box.run("--check")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "calendar: no list was found for v1.0.1" in done.stdout
+    assert "could not fetch" not in done.stdout
