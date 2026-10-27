@@ -358,6 +358,16 @@ migrated by the service itself at start. To see its version without touching it:
 cd /opt/sudarshan/apps/openalgo && sudo -u sudarshan .venv/bin/python -m sudarshan.alerts.market.migrate --status
 ```
 
+Any evening, what market alerts would have told on a day the feed recorded, offline: it reads
+market.db and openalgo.db only, sends nothing, and prints each fire with its time and words. Its
+clock is the recording's, its gate the calendar's, and each alert starts the day fresh, so compare
+it with the day's History:
+
+```bash
+cd /opt/sudarshan/apps/openalgo && sudo -u sudarshan .venv/bin/python -m sudarshan.alerts.market.check \
+    /var/lib/sudarshan-feed/ticks/2026-10-21.jsonl.gz --openalgo-db db/openalgo.db
+```
+
 A record that cannot be opened turns market alerts off with a line in the journal; order alerts
 carry on. A record from a newer release (after a rollback) does the same until that release is
 back.
