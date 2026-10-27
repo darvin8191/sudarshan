@@ -18,7 +18,9 @@ import {
   type SentMark,
   sendHeld,
   sentMarksNow,
+  toldOf,
   useSentMarks,
+  useSentTold,
 } from '@/sudarshan/books/sent'
 import { istTime } from '@/sudarshan/books/time'
 import { SymbolChartLink } from '@/sudarshan/chart/SymbolChartLink'
@@ -372,6 +374,8 @@ const PositionBoard = memo(function PositionBoard({
   // the hold every book it reads (usePositionExits).
   const marks = useSentMarks()
   const exits = marksOf(marks, 'exit', sandbox)
+  // Why the last Exit all sent nothing for a position, shown on its card for a while.
+  const told = useSentTold()
 
   const total = rows.reduce((sum, row) => sum + (row.pnl ?? 0), 0)
   // Why Exit all cannot be sent now, if it cannot: nothing is open, or an exit
@@ -425,6 +429,7 @@ const PositionBoard = memo(function PositionBoard({
           <ul aria-label="Open positions" className="flex flex-col gap-2">
             {held.map((row) => {
               const words = exitWords(exitMark(marks, sandbox, positionId(row.item)))
+              const notSent = words ? null : toldOf(told, sandbox, positionId(row.item))
               return (
                 <PositionCard
                   key={positionId(row.item)}
@@ -441,6 +446,7 @@ const PositionBoard = memo(function PositionBoard({
                   stale={stale(feedRowOf(row))}
                   sentChip={words?.chip ?? null}
                   sentNote={words?.note ?? null}
+                  notSent={notSent}
                   onOpen={openSheet}
                 />
               )
@@ -664,6 +670,7 @@ const PositionCard = memo(function PositionCard({
   stale,
   sentChip,
   sentNote,
+  notSent,
   onOpen,
 }: {
   id: string
@@ -681,6 +688,8 @@ const PositionCard = memo(function PositionCard({
   sentChip: string | null
   /** Its exit got no answer: what to do before sending another. */
   sentNote: string | null
+  /** Exit all sent nothing for it just now: why, in the app's words. */
+  notSent: string | null
   onOpen: (id: string) => void
 }) {
   const named = describe(symbol, exchange)
@@ -711,6 +720,7 @@ const PositionCard = memo(function PositionCard({
           <SignedPercent value={pnlPercent} stale={stale} className="text-xs font-semibold" />
         </span>
         {sentNote && <SentNote text={sentNote} />}
+        {!sentNote && notSent && <SentNote text={notSent} state="not-sent" />}
       </button>
     </li>
   )

@@ -1,4 +1,5 @@
 import axios from 'axios'
+import type { EachAnswer } from './sent'
 
 /**
  * What the answer to an exit or a cancel says about the order (M6.9). Anything
@@ -114,6 +115,37 @@ export function sentOrderIds(body: unknown): string[] {
   if (named.length > 0) return named as string[]
   const one = sentOrderId(body)
   return one ? [one] : []
+}
+
+/**
+ * What an Exit all's answer says became of each position (its `positions`),
+ * by the row's id (`exchange:symbol:product`, as the cards key a position):
+ * sent with its orders, not confirmed (it may have gone), or nothing sent, with
+ * the app's reason. Null when the answer does not say (an older server, the
+ * sandbox's Exit all, or "Exit all is still being placed").
+ */
+export function exitAllEach(body: unknown): Record<string, EachAnswer> | null {
+  if (typeof body !== 'object' || body === null) return null
+  const positions = (body as { positions?: unknown }).positions
+  if (!Array.isArray(positions)) return null
+  const each: Record<string, EachAnswer> = {}
+  for (const item of positions) {
+    if (typeof item !== 'object' || item === null) continue
+    const { exchange, symbol, product, outcome, reason } = item as Record<string, unknown>
+    if (typeof exchange !== 'string' || typeof symbol !== 'string' || typeof product !== 'string') {
+      continue
+    }
+    const id = `${exchange}:${symbol}:${product}`
+    if (outcome === 'sent') each[id] = { outcome: 'sent', orderids: sentOrderIds(item) }
+    else if (outcome === 'not_confirmed') each[id] = { outcome: 'unconfirmed' }
+    else if (outcome === 'not_sent') {
+      each[id] = {
+        outcome: 'refused',
+        ...(typeof reason === 'string' && reason.trim() ? { reason: reason.trim() } : {}),
+      }
+    }
+  }
+  return Object.keys(each).length > 0 ? each : null
 }
 
 /** What the toast says when it is not confirmed and the app said nothing of its own. */

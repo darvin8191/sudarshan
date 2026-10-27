@@ -40,6 +40,11 @@ import {
  * became of the earlier exit, as far as it is known. A cancel is held the same
  * way, until its order shows a final status (pushed or read).
  *
+ * Exit all says what became of each position. One it sent nothing for (an
+ * order of the trader's still working to close it, an exit already on its way,
+ * no time left) lets go at once, and its row says why for a while
+ * (`TOLD_MS`); one sent, or not confirmed, is held as above.
+ *
  * Marks are keyed by book (Live or the sandbox), kind, and the position
  * (exchange, symbol, product) or the order id.
  */
@@ -62,6 +67,9 @@ export const NO_ANSWER_HOLD_MS = 150_000
 /** How long a mark whose time ran out is kept, for the warning in the next confirmation. */
 const KEEP_MS = 8 * 60 * 60_000
 
+/** How long a row says why a send of several sent nothing for it. */
+export const TOLD_MS = 60_000
+
 /** How far a read of the order book may lag an order the broker has pushed. */
 const BOOK_LAG_MS = 5_000
 
@@ -79,12 +87,29 @@ export type SentState = 'sending' | 'sent' | 'unconfirmed'
  */
 export type SendOutcome = 'sent' | 'unconfirmed' | 'unanswered' | 'refused' | 'placing'
 
+/** One row's own answer in a send of several: Exit all says what became of each position. */
+export interface EachAnswer {
+  outcome: SendOutcome
+  /** The orders placed for this row, when the server named them. */
+  orderids?: readonly string[]
+  /** Why nothing was sent for it, in the server's words. */
+  reason?: string
+}
+
 /** A page's send handler's answer, with the orders it placed when the server named them. */
 export interface SentAnswer {
   outcome: SendOutcome
   orderid?: string | null
   /** Every order it placed: one per slice of a sliced order. */
   orderids?: readonly string[]
+  /** Each row's own answer, by the row's id; a row not named takes `outcome`. */
+  each?: Readonly<Record<string, EachAnswer>>
+}
+
+/** Why a send of several sent nothing for a row, and when that was said. */
+export interface Told {
+  text: string
+  at: number
 }
 
 /** An order the broker pushed on an exit's closing side since it was sent, and when first heard of. */
@@ -140,6 +165,7 @@ export interface SendTarget {
 const LOAD = Math.random().toString(36).slice(2, 8)
 let sends = 0
 let marks: ReadonlyMap<string, SentMark> = new Map()
+let told: ReadonlyMap<string, Told> = new Map()
 const listeners = new Set<() => void>()
 let timer: ReturnType<typeof setTimeout> | null = null
 
@@ -158,6 +184,17 @@ export function exitMark(
   id: string
 ): SentMark | undefined {
   return all.get(keyOf('exit', sandbox, id))
+}
+
+/** Why the last Exit all sent nothing for this position, while that is recent. */
+export function toldOf(
+  all: ReadonlyMap<string, Told>,
+  sandbox: boolean,
+  id: string,
+  now = Date.now()
+): string | null {
+  const said = all.get(keyOf('exit', sandbox, id))
+  return said && now - said.at < TOLD_MS ? said.text : null
 }
 
 export function cancelMark(
@@ -241,8 +278,9 @@ function load(now: number): Map<string, SentMark> {
   return out
 }
 
-function commit(next: Map<string, SentMark>): void {
+function commit(next: Map<string, SentMark>, nextTold: ReadonlyMap<string, Told> = told): void {
   marks = next
+  told = nextTold
   save()
   schedule()
   for (const listener of [...listeners]) listener()
@@ -286,6 +324,8 @@ function heldByOrder(mark: SentMark): boolean {
 
 function expireDue(now = Date.now()): void {
   let next: Map<string, SentMark> | null = null
+  const kept = new Map([...told].filter(([, said]) => now - said.at < TOLD_MS))
+  if (kept.size !== told.size) next = new Map(marks)
   for (const [key, mark] of marks) {
     if (mark.expired && now - mark.sentAt > KEEP_MS) {
       next ??= new Map(marks)
@@ -301,7 +341,7 @@ function expireDue(now = Date.now()): void {
       }
     }
   }
-  if (next) commit(next)
+  if (next) commit(next, kept)
   else schedule()
 }
 
@@ -315,6 +355,7 @@ function schedule(): void {
   timer = null
   const now = Date.now()
   let first = Number.POSITIVE_INFINITY
+  for (const said of told.values()) first = Math.min(first, said.at + TOLD_MS)
   for (const mark of marks.values()) {
     if (mark.expired) first = Math.min(first, mark.sentAt + KEEP_MS)
     else if (!mark.byOrder && mark.state !== 'sending' && mark.since !== null) {
@@ -341,8 +382,10 @@ export function beginSends(
   sends += 1
   const batch = `${LOAD}.${sends}`
   const next = new Map(marks)
+  const nextTold = new Map(told)
   for (const target of targets) {
     const key = keyOf(kind, sandbox, target.id)
+    nextTold.delete(key) // a new tap: what an earlier one said is old news
     const before = marks.get(key)
     next.set(key, {
       // A send that sends nothing (refused) leaves the row as it was before the tap.
@@ -362,7 +405,7 @@ export function beginSends(
       batch,
     })
   }
-  commit(next)
+  commit(next, nextTold)
   return batch
 }
 
@@ -371,25 +414,32 @@ export function beginSends(
  * the tap; otherwise the clock starts. An exit's answer that named its order
  * pins the exit to that order. `placing` (the app's 409: an earlier exit for
  * the row is still being placed) holds the row again from now, as that earlier
- * exit when this phone sent it, in the app's words.
+ * exit when this phone sent it, in the app's words. With `each`, a row named
+ * there settles by its own answer, and one that sent nothing says why.
  */
 export function settleSends(
   batch: string,
   outcome: SendOutcome,
   now = Date.now(),
-  placed: string | readonly string[] | null = null
+  placed: string | readonly string[] | null = null,
+  each: Readonly<Record<string, EachAnswer>> | null = null
 ): void {
   const named = (typeof placed === 'string' ? [placed] : (placed ?? [])).filter(Boolean)
   let next: Map<string, SentMark> | null = null
+  const nextTold = new Map(told)
   for (const [key, mark] of marks) {
     if (mark.batch !== batch || mark.state !== 'sending') continue
     next ??= new Map(marks)
-    if (outcome === 'refused') {
+    const own = each?.[mark.id]
+    const rowOutcome = own?.outcome ?? outcome
+    const rowPlaced = own ? (own.orderids ?? []).filter(Boolean) : named
+    if (rowOutcome === 'refused') {
       if (mark.previous) next.set(key, mark.previous)
       else next.delete(key)
+      if (own?.reason) nextTold.set(key, { text: own.reason, at: now })
       continue
     }
-    if (outcome === 'placing') {
+    if (rowOutcome === 'placing') {
       const earlier = mark.previous ?? mark
       next.set(key, {
         ...earlier,
@@ -406,19 +456,19 @@ export function settleSends(
     const settled: SentMark = {
       ...mark,
       previous: undefined,
-      state: outcome === 'sent' ? 'sent' : 'unconfirmed',
+      state: rowOutcome === 'sent' ? 'sent' : 'unconfirmed',
       since: now,
-      noAnswer: outcome === 'unanswered',
+      noAnswer: rowOutcome === 'unanswered',
     }
-    if (named.length > 0 && mark.kind === 'exit') {
+    if (rowPlaced.length > 0 && mark.kind === 'exit') {
       // Not whatever else was pushed on its side meanwhile (a stop-loss moved, say); every
       // slice of a sliced order, so the hold lasts until the last of them has ended.
-      settled.orders = named.slice(0, ORDERS_KEPT).map((id) => ({ id, at: now }))
+      settled.orders = rowPlaced.slice(0, ORDERS_KEPT).map((id) => ({ id, at: now }))
       settled.pinned = true
     }
     next.set(key, settled)
   }
-  if (next) commit(next)
+  if (next) commit(next, nextTold)
 }
 
 /** What a page's send handler returned, as an outcome: true and nothing said count as sent. */
@@ -442,6 +492,13 @@ function orderIdsOf(result: unknown): string[] {
   return named.filter((id): id is string => typeof id === 'string' && id.trim() !== '')
 }
 
+/** Each row's own answer, when a handler's answer gives them. */
+function eachOf(result: unknown): Readonly<Record<string, EachAnswer>> | null {
+  if (typeof result !== 'object' || result === null) return null
+  const { each } = result as SentAnswer
+  return typeof each === 'object' && each !== null ? each : null
+}
+
 /** Hold `targets` while `send` runs and for as long as its outcome says. */
 export async function sendHeld(
   kind: SentKind,
@@ -452,15 +509,17 @@ export async function sendHeld(
   const batch = beginSends(kind, sandbox, targets)
   let outcome: SendOutcome
   let placed: string[] = []
+  let each: Readonly<Record<string, EachAnswer>> | null = null
   try {
     const result = await send()
     outcome = outcomeOf(result)
     if (outcome === 'sent') placed = orderIdsOf(result)
+    each = eachOf(result)
   } catch {
     // The handler itself broke: whether the order went, or is still going, is not known.
     outcome = 'unanswered'
   }
-  settleSends(batch, outcome, Date.now(), placed)
+  settleSends(batch, outcome, Date.now(), placed, each)
   return outcome
 }
 
@@ -619,11 +678,21 @@ export function useSentMarks(): ReadonlyMap<string, SentMark> {
   return useSyncExternalStore(subscribe, snapshot, snapshot)
 }
 
+function toldSnapshot(): ReadonlyMap<string, Told> {
+  return told
+}
+
+/** Why the last send of several sent nothing for each row it said so of; redraws when it changes. */
+export function useSentTold(): ReadonlyMap<string, Told> {
+  return useSyncExternalStore(subscribe, toldSnapshot, toldSnapshot)
+}
+
 /** Tests only: forget every mark, here and in the tab's storage. */
 export function resetSentForTests(): void {
   if (timer !== null) clearTimeout(timer)
   timer = null
   marks = new Map()
+  told = new Map()
   try {
     sessionStorage.removeItem(STORAGE_KEY)
   } catch {
