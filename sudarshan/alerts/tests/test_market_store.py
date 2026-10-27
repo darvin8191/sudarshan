@@ -24,6 +24,7 @@ from sudarshan.alerts.market.store import (
     WORDS,
     MarketStore,
     NotFound,
+    Refused,
     StoreError,
     UnknownPrincipal,
     VersionConflict,
@@ -333,22 +334,77 @@ def test_create_read_and_list(store):
 def test_update_needs_the_current_version(store):
     row = store.create("owner", FIELDS, NOW)
     store.save_states("owner", {row["id"]: (1, State(20261021, -1, 9995, NOW))}, NOW)
-    edited = store.update("owner", row["id"], 1, FIELDS | {"note": "new"}, NOW + 1, status="active")
+    edited = store.update("owner", row["id"], 1, FIELDS | {"note": "new"}, NOW + 1)
     assert edited["version"] == 2 and edited["note"] == "new"
     assert store.states("owner")[row["id"]].side == -1  # a note edit keeps the state
     with pytest.raises(VersionConflict) as caught:
-        store.update("owner", row["id"], 1, FIELDS, NOW + 2, status="paused")
+        store.update("owner", row["id"], 1, FIELDS, NOW + 2)
     assert (
         str(caught.value)
         == "This alert was changed on another screen. Open it again, then edit it."
     )
+    with pytest.raises(VersionConflict) as caught:
+        store.pause("owner", row["id"], 1, NOW + 2)
+    assert str(caught.value).endswith("Open it again, then try again.")
     with pytest.raises(NotFound):
-        store.update("owner", 999, 1, FIELDS, NOW, status="active")
+        store.update("owner", 999, 1, FIELDS, NOW)
+    with pytest.raises(NotFound):
+        store.resume("owner", 999, 1, NOW)
     level = FIELDS | {"params": FIELDS["params"] | {"level": "102"}}
-    store.update("owner", row["id"], 2, level, NOW + 3, status="active", reset_state=True)
+    store.update("owner", row["id"], 2, level, NOW + 3, reset_state=True)
     assert row["id"] not in store.states("owner")
-    with pytest.raises(ValueError):
-        store.update("owner", row["id"], 3, FIELDS, NOW, status="armed")
+
+
+def test_the_owners_moves_are_accepted_only_from_their_status(store):
+    """Pause only from Active, resume only from Paused, restart only from Stopped (review R3);
+    the status is read before the version, so a stale screen hears what the alert is now."""
+    row = store.create("owner", FIELDS, NOW)
+    assert store.pause("owner", row["id"], 1, NOW + 1)["status"] == "paused"
+    with pytest.raises(Refused, match=r"^This alert is already paused\.$"):
+        store.pause("owner", row["id"], 2, NOW + 2)
+    with pytest.raises(Refused, match=r"^This alert is paused\. Use Resume to check it again\.$"):
+        store.restart("owner", row["id"], 2, NOW + 2)
+    back = store.resume("owner", row["id"], 2, NOW + 3)
+    assert (back["status"], back["status_reason"], back["version"]) == ("active", "", 3)
+    for move in (store.resume, store.restart):
+        with pytest.raises(Refused, match=r"^This alert is already active\.$"):
+            move("owner", row["id"], 3, NOW + 4)
+    once = "Fired once at 10:42 on 21 Oct"
+    assert store.set_status("owner", row["id"], "stopped", once, NOW + 5, version=3)
+    with pytest.raises(Refused) as caught:
+        store.pause("owner", row["id"], 1, NOW + 6)  # stale too: the status speaks first
+    assert str(caught.value) == f"This alert has stopped ({once}). There is nothing to pause."
+    with pytest.raises(Refused) as caught:
+        store.resume("owner", row["id"], 3, NOW + 6)
+    assert str(caught.value) == f"This alert has stopped ({once}). Use Restart to check it again."
+    with pytest.raises(VersionConflict):
+        store.restart("owner", row["id"], 2, NOW + 7)
+    again = store.restart("owner", row["id"], 3, NOW + 7)
+    assert (again["status"], again["status_reason"], again["version"]) == ("active", "", 4)
+
+
+def test_a_restart_past_the_end_date_or_the_expiry_is_refused(store):
+    ends = SBIN | {"kind": "price", "params": {"op": "crosses_above", "level": "100"},
+                   "ends": "2026-10-21T11:00:00+05:30"}  # fmt: skip
+    row = store.create("owner", spec.check(ends, NOW), NOW)
+    store.set_status("owner", row["id"], "stopped", "Ended at 11:00 on 21 Oct", NOW, version=1)
+    with pytest.raises(Refused) as caught:
+        store.restart("owner", row["id"], 1, NOW + 3_600_000)
+    assert str(caught.value) == (
+        "This alert's end date has passed. Change the end date, then restart it."
+    )
+    option = {"instrument_key": "NSE_FO|49229", "symbol": "NIFTY25NOV2625900CE",
+              "exchange": "NFO", "tick_size": "0.05", "expiry": "2026-11-25", "kind": "price",
+              "params": {"op": "crosses_above", "level": "100"}}  # fmt: skip
+    row = store.create("owner", spec.check(option, NOW), NOW)
+    store.set_status("owner", row["id"], "stopped", "Contract expired on 25 Nov", NOW, version=1)
+    with pytest.raises(Refused) as caught:
+        store.restart("owner", row["id"], 1, NOW + 40 * DAY_MS)
+    assert str(caught.value) == (
+        "This alert's contract expired on 25 Nov, so it cannot be checked again. Set a new "
+        "alert on a contract that is still trading."
+    )
+    assert store.restart("owner", row["id"], 1, NOW + DAY_MS)["status"] == "active"
 
 
 def test_set_status_and_delete(store):
@@ -385,7 +441,7 @@ def test_a_decision_applies_only_to_the_definition_it_was_judged_at(store):
     assert not store.set_status("owner", row["id"], "stopped", "Ended", NOW + 3, version=1)
     assert store.states("owner") == {} and store.alert("owner", row["id"])["status"] == "active"
     assert store.save_states("owner", {row["id"]: (2, State(20261021, -1))}, NOW + 4) == 1
-    store.update("owner", row["id"], 2, level, NOW + 5, status="paused")
+    store.pause("owner", row["id"], 2, NOW + 5)
     assert not store.set_status("owner", row["id"], "stopped", "Ended", NOW + 6, version=3)
     assert store.alert("owner", row["id"])["status"] == "paused"
     late = store.record_fire("owner", fire(row["id"], "1:v3:once", version=3), State(20261021, 1),
@@ -564,7 +620,7 @@ def test_one_principal_never_reads_anothers_rows(path):
     assert store.prefs("owner") == {"telegram": True, "app": True}
     assert not store.delete("owner", theirs["id"]) and store.alert("family", theirs["id"])
     with pytest.raises(NotFound):
-        store.update("owner", theirs["id"], 1, FIELDS, NOW, status="paused")
+        store.pause("owner", theirs["id"], 1, NOW)
     with pytest.raises(NotFound):
         store.record_fire("owner", fire(theirs["id"], "x"), State(), title="t", line="l",
                           value="v", level="l", channels=BOTH)  # fmt: skip

@@ -131,7 +131,7 @@ def test_F1b_an_edit_before_the_flush_then_a_restart_fires_no_false_opening(tmp_
     t = ms(TUE, 14, 0)
     book.on_tick(frame(ltp=99.0, at=t), t, market(TUE, t, MON))
     new = spec.check(SBIN | {"kind": "price", "params": {"op": "crosses_above", "level": "98"}}, t)
-    row = store.update("owner", row["id"], row["version"], new, t + 400, status="active",
+    row = store.update("owner", row["id"], row["version"], new, t + 400,
                        reset_state=spec.changes_condition(row, new))  # fmt: skip
     book.put(spec.Alert.of(row), State())
     store.save_states("owner", book.changed(), t + 1000)  # the flush
@@ -156,10 +156,10 @@ def test_F1c_a_resume_reaches_market_db_so_a_restart_does_not_bring_back_the_old
     t = ms(TUE, 10, 15, 5)
     book.on_clock(t, market(TUE, t, MON))  # the 10:00 candle closes below: side -1
     store.save_states("owner", book.changed(), t)
-    row = store.update("owner", row["id"], row["version"], row, ms(TUE, 11, 0), status="paused")
+    row = store.pause("owner", row["id"], row["version"], ms(TUE, 11, 0))
     book.put(spec.Alert.of(row))
     store.save_states("owner", book.changed(), ms(TUE, 11, 0, 1))
-    row = store.update("owner", row["id"], row["version"], row, ms(TUE, 19, 0), status="active")
+    row = store.resume("owner", row["id"], row["version"], ms(TUE, 19, 0))
     book.put(spec.Alert.of(row), engine.resume(book.state(row["id"])))
     store.save_states("owner", book.changed(), ms(TUE, 19, 0, 1))
     again = _restart(store, row["id"])
@@ -188,7 +188,7 @@ def test_F8_a_fire_recorded_after_an_edit_leaves_the_new_definition_alone(tmp_pa
     (o,) = out.outcomes
     assert o.status == "stopped"
     new = spec.check(SBIN | {"kind": "price", "params": {"op": "crosses_above", "level": "110"}}, t)
-    store.update("owner", row["id"], 1, new, t + 600, status="active", reset_state=True)
+    store.update("owner", row["id"], 1, new, t + 600, reset_state=True)
     event = store.record_fire("owner", o.fire, o.state, title="x", line="x", value="100.05",
                               level="100.00", channels={"telegram": True, "app": True},
                               status="stopped", status_reason="Fired once")  # fmt: skip
@@ -467,3 +467,33 @@ def test_R2_a_level_under_an_options_lowest_price_is_refused(op):
         make({"kind": "price", "params": {"op": op, "level": "0.05"}}, inst=OPTION).cond.down == 5
     )
     assert make({"kind": "price", "params": {"op": op, "level": "0.01"}}).cond.down == 1  # cash
+
+
+def test_R3_a_stale_pause_cannot_undo_an_engine_stop_so_once_fires_once(tmp_path):
+    """A 'Once' alert fires and the engine stops it (the version stays 1). A phone still showing
+    it Active taps Pause, later Resume: both are refused in words, and it never fires again."""
+    from sudarshan.alerts.market.store import Refused
+
+    store = MarketStore(tmp_path / "market.db")
+    t = ms(WED, 10, 0)
+    fields = spec.check(SBIN | {"kind": "price", "params": {"op": "crosses_above",
+                                                            "level": "100"}}, t)  # fmt: skip
+    row = store.create("owner", fields, t)
+    book = Book()
+    book.put(spec.Alert.of(row))
+    book.on_tick(frame(ltp=99.95, at=t), t, market(WED, t, TUE))
+    (o,) = book.on_tick(frame(ltp=100.05, at=t + 500, ltq=2), t + 500,
+                        market(WED, t + 500, TUE)).outcomes  # fmt: skip
+    once = "Fired once at 10:00 on 21 Oct"
+    store.record_fire("owner", o.fire, o.state, title="x", line="x", value="1", level="1",
+                      channels={"telegram": True, "app": True}, status="stopped",
+                      status_reason=once)  # fmt: skip
+    with pytest.raises(Refused) as caught:
+        store.pause("owner", row["id"], 1, t + 2000)
+    assert str(caught.value) == f"This alert has stopped ({once}). There is nothing to pause."
+    with pytest.raises(Refused):
+        store.resume("owner", row["id"], 1, t + 9000)
+    after = store.alert("owner", row["id"])
+    assert (after["status"], after["status_reason"], after["version"]) == ("stopped", once, 1)
+    assert len(store.events("owner")) == 1
+    store.close()
