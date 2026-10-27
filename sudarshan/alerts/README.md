@@ -185,6 +185,30 @@ nightly backup job records) every 20 seconds and sends through the same path as 
 the install of the tool before it, which made no record, once, if it was within the last 12
 hours; so v0.3.3's own install is told by the next timer run after it.
 
+## Health page (M18.1)
+
+```bash
+curl -s 127.0.0.1:5582/health | python3 -m json.tool
+```
+
+Local clients only (bound to loopback; other peers and browser requests carrying an `Origin`
+header get 403); use `127.0.0.1`, not `localhost`. It is read-only and carries no key, user name or
+message text.
+
+| field | meaning |
+|---|---|
+| `release` | the release the deploy tool installed, such as `v0.3.3`, read from `/var/lib/sudarshan/deployed_tag` at every request; `null` when that file is missing or holds anything but a tag |
+| `version` | this service's own code version, not the release: it does not move with a release |
+| `state`, `detail` | what it is doing now: `closed` outside the alert window, `connected` while order updates arrive, `connecting`, `backoff` after a drop, `waiting` for the owner's key, `starting` |
+| `window` | the alert window (`08:45-16:00 IST`), or `always on` |
+| `owner_ready`, `owner_problem` | whether the owner's OpenAlgo key was found; if not, why: `no_user`, `no_key`, `unreadable_key` or `database` |
+| `stats` | connections, order updates and alerts of the day's window; counted again from zero when the window closes |
+| `telegram` | messages and lines sent, dropped and failed, over the same period; `null` before the sender starts |
+
+A port that is taken is logged ("The health page could not start ...") and the order alerts run
+without the page. `SUDARSHAN_ALERTS_HEALTH_PORT=off` switches it off; a different number moves it
+(the feed holds 5580 and 5581).
+
 ## Turning it off
 
 To stop all messages:
@@ -210,6 +234,8 @@ tool starts ring services again after each release.
 | `SUDARSHAN_ALERTS_ALWAYS_ON` | `0` | `1`: ignore the window and the calendar (tests, an evening sandbox check) |
 | `SUDARSHAN_ALERTS_STATE_DIR` | systemd's `$STATE_DIRECTORY` | `/var/lib/sudarshan-alerts` |
 | `SUDARSHAN_NOTICE_SPOOLS` | the deploy tool's and the backup job's files | colon-separated files the server's notices are read from (`/var/lib/sudarshan/events.jsonl:/var/lib/sudarshan-backup/events.jsonl`) |
+| `SUDARSHAN_ALERTS_HEALTH_PORT` | `5582` | the health page's port on 127.0.0.1; `off` switches the page off, `0` lets the system pick (tests) |
+| `SUDARSHAN_DEPLOYED_TAG_FILE` | `/var/lib/sudarshan/deployed_tag` | where the deploy tool records the installed release; the health page shows it as `release` |
 | `SUDARSHAN_ALERTS_LOG_LEVEL` | `INFO` | |
 | `SUDARSHAN_NSE_HOLIDAYS_FILE` | `/etc/sudarshan/nse_holidays.txt` | shared with auto-login and the feed |
 | `SUDARSHAN_NSE_EXTRA_DAYS_FILE` | `/etc/sudarshan/nse_extra_trading_days.txt` | |
@@ -324,6 +350,8 @@ shows `Sandbox cancelled: ...`. Remove both lines and restart afterwards.
 Logs: `journalctl -u sudarshan-alerts`. One line per state change (`state connecting -> connected`)
 and one per alert (`order <id>: filled`); repeated problems at most once per 5 or 10 minutes.
 
+- **`The health page could not start`**: another program holds port 5582. The alerts are not
+  affected; set `SUDARSHAN_ALERTS_HEALTH_PORT` to a free port, or `off`.
 - **`No OpenAlgo API key yet`**: generate one in OpenAlgo; the service picks it up within a minute.
 - **`OpenAlgo's WebSocket proxy refused the API key`**: the key was regenerated; it is read again.
 - **`OpenAlgo's WebSocket proxy is not reachable`**: OpenAlgo is starting or stopped; it retries.

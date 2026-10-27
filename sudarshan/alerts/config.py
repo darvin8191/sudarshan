@@ -17,6 +17,7 @@ from dotenv import dotenv_values
 
 from sudarshan.autologin.schedule import EXTRA_TRADING_DAYS_FILE, HOLIDAYS_FILE, window_setting
 from sudarshan.ops.events import DEFAULT_SPOOLS
+from sudarshan.ops.release import DEPLOYED_TAG_FILE
 
 log = logging.getLogger("sudarshan.alerts")
 
@@ -27,6 +28,8 @@ STATE_DIR = "/var/lib/sudarshan-alerts"
 DEFAULT_WINDOW = "08:45-16:00"
 PROXY_URL = "ws://127.0.0.1:8765"
 OPENALGO_URL = "http://127.0.0.1:5000"
+#: The health page (health.py) listens on this port of 127.0.0.1; the feed uses 5580 and 5581.
+HEALTH_PORT = 5582
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 #: Which cancellations are sent: every one, or only those of an order that was part filled.
 CANCELLED_CHOICES = ("all", "part-filled")
@@ -96,6 +99,10 @@ class Settings:
     always_on: bool
     #: The files the deploy tool and the backup job record their notices in (notices.py).
     notice_spools: tuple[Path, ...] = DEFAULT_SPOOLS
+    #: The health page's port on 127.0.0.1: None is off, 0 lets the system pick (tests).
+    health_port: int | None = HEALTH_PORT
+    #: Where the deploy tool records the installed release (shown on the health page).
+    deployed_tag_file: Path = DEPLOYED_TAG_FILE
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> Settings:
@@ -133,7 +140,21 @@ class Settings:
             window=window,
             always_on=_switch(env, "SUDARSHAN_ALERTS_ALWAYS_ON", False),
             notice_spools=_paths(get("SUDARSHAN_NOTICE_SPOOLS")) or DEFAULT_SPOOLS,
+            health_port=_port(get("SUDARSHAN_ALERTS_HEALTH_PORT")),
+            deployed_tag_file=Path(get("SUDARSHAN_DEPLOYED_TAG_FILE") or DEPLOYED_TAG_FILE),
         )
+
+
+def _port(value: str | None) -> int | None:
+    """The health page's port: unset is HEALTH_PORT, ``off`` is None, 0 is any free port."""
+    raw = (value or "").strip().lower()
+    if not raw:
+        return HEALTH_PORT
+    if raw in {"off", "false", "no"}:  # not "0": that is the system's pick, for the tests
+        return None
+    if raw.isascii() and raw.isdigit() and int(raw) <= 65535:
+        return int(raw)
+    raise ConfigError("SUDARSHAN_ALERTS_HEALTH_PORT must be a port number or off")
 
 
 def _paths(value: str | None) -> tuple[Path, ...]:

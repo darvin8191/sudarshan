@@ -8,6 +8,8 @@
 # exits at once and stays stopped until the next restart).
 # Also tells the owner what the server did with a release (installed, rolled back, waiting) from the
 # files the deploy tool and the backup job record, at any hour: see "Server notices" in the README.
+# GET /health on 127.0.0.1:5582 says which release is installed and what the service is doing
+# ("Health page" in the README); loopback only, so IPAddressAllow=localhost below covers it.
 # Installed, enabled and restarted by sudarshan-deploy from each release, like sudarshan-feed.
 
 [Unit]

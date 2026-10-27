@@ -46,6 +46,7 @@ from sudarshan.autologin.schedule import IST, TradingCalendar, hhmm
 
 from . import __version__, loopback, messages
 from .config import ConfigError, Settings, setup_logging, switched_off
+from .health import HealthPage  # M18.1: the health page
 from .notices import NoticeDesk  # M18.x: the server's own notices (deploy, backup)
 from .orders import Alert, OrderTracker
 from .outbox import OpenAlgoTelegram, Outbox, Throttle
@@ -124,6 +125,7 @@ class AlertService:
         self.tracker: OrderTracker | None = None
         self.outbox: Outbox | None = None
         self.notices: NoticeDesk | None = None  # M18.x
+        self.health_page: HealthPage | None = None  # M18.1
         self.client: httpx.AsyncClient | None = None
         self._stop = asyncio.Event()
         self._state, self._detail = "starting", ""
@@ -170,9 +172,13 @@ class AlertService:
                 self.clock,
             )
             notices = asyncio.create_task(self.notices.run())
+            # M18.1: GET /health on 127.0.0.1 (health.py); a port that is taken costs the page only
+            self.health_page = HealthPage(self)
+            await self.health_page.start(self.settings.health_port)
             try:
                 await self._supervise()
             finally:
+                await self.health_page.close()  # M18.1
                 ticker.cancel()
                 unfinished = list(self._after_close)
                 for task in unfinished:  # a pause still unread is told as such (_resync)

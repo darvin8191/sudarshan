@@ -53,6 +53,8 @@ def settings_for(tmp_path):
             "SUDARSHAN_OPENALGO_URL": notify.url if notify else "http://127.0.0.1:9",
             "SUDARSHAN_ALERTS_ALWAYS_ON": "1",
             "SUDARSHAN_NOTICE_SPOOLS": str(tmp_path / "notice-spool.jsonl"),  # never the machine's
+            "SUDARSHAN_DEPLOYED_TAG_FILE": str(tmp_path / "deployed_tag"),  # nor this one
+            "SUDARSHAN_ALERTS_HEALTH_PORT": "off",  # a test that wants the page asks for port 0
         }
         return Settings.from_env(env | overrides)
 

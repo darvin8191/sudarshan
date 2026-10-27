@@ -77,7 +77,7 @@ header get 403). JSON in and out; use `127.0.0.1`, not `localhost` (which may re
 
 | request | answer |
 |---|---|
-| `GET /health` | state, detail, connected_since, socket_age_s, last_message_age_s, next_retry_in_s, token_file_readable, subscribed (counts by mode), keys_without_data, reconnects, last_error (+ hint), last_disconnect, market_window (below), market_status, stats, recorder |
+| `GET /health` | service, release (the installed release tag, `v0.3.3`, from the deploy tool's record; `null` when that cannot be read), version (this service's own code version, not the release), state, detail, connected_since, socket_age_s, last_message_age_s, next_retry_in_s, token_file_readable, subscribed (counts by mode), keys_without_data, reconnects, last_error (+ hint), last_disconnect, market_window (below), market_status, stats, recorder |
 | `GET /snapshot?keys=K1,K2` | `{"ticks": {key: tick or null}}`; URL-encode the keys (`|` is `%7C`, space `%20`) |
 | `GET /snapshot/all` | every key the service has a tick for (survives restarts and after-hours) |
 | `GET /subscriptions` | the desired set by mode |
@@ -218,6 +218,7 @@ live service holds 5581):
 | `SUDARSHAN_FEED_RECORD` | `1` |
 | `SUDARSHAN_FEED_RECORD_MAX_MB` / `SUDARSHAN_FEED_RECORD_KEEP_DAYS` | `512` / `10` |
 | `SUDARSHAN_FEED_LOG_LEVEL` | `INFO` |
+| `SUDARSHAN_DEPLOYED_TAG_FILE` | `/var/lib/sudarshan/deployed_tag` (where the deploy tool records the installed release; `/health` shows it as `release`) |
 | `SUDARSHAN_UPSTOX_API_BASE` | `https://api.upstox.com` (tests point it at a local fake; https is required otherwise) |
 
 Put overrides in `/etc/sudarshan/feed.env` (root:sudarshan 640); the unit reads it if present.

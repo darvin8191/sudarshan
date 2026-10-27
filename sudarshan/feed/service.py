@@ -31,6 +31,8 @@ import websockets
 import zmq
 from websockets.exceptions import ConnectionClosed, InvalidHandshake, InvalidStatus, InvalidURI
 
+from sudarshan.ops.release import installed_release  # M18.1
+
 from . import __version__, protocol
 from .bus import HEALTH_TOPIC, Publisher
 from .config import Settings, is_loopback_url, setup_logging
@@ -514,6 +516,7 @@ class FeedService:
         stats = self._stats | {"snapshot_keys": len(self.store.ticks)}
         return {
             "service": "sudarshan-feed",
+            "release": installed_release(self.cfg.deployed_tag_file),  # M18.1: not "version"
             "version": __version__,
             "state": self._state,
             "detail": self._detail,

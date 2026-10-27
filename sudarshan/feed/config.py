@@ -10,6 +10,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from sudarshan.autologin.schedule import EXTRA_TRADING_DAYS_FILE, window_setting
+from sudarshan.ops.release import DEPLOYED_TAG_FILE  # M18.1
 
 log = logging.getLogger("sudarshan.feed")
 
@@ -54,6 +55,8 @@ class Settings:
     record: bool
     record_max_mb: int
     record_keep_days: int
+    #: M18.1: where the deploy tool records the installed release (shown in /health)
+    deployed_tag_file: Path = DEPLOYED_TAG_FILE
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> Settings:
@@ -82,4 +85,6 @@ class Settings:
             record=_flag(get("SUDARSHAN_FEED_RECORD", "1")),
             record_max_mb=int(get("SUDARSHAN_FEED_RECORD_MAX_MB", "512")),
             record_keep_days=int(get("SUDARSHAN_FEED_RECORD_KEEP_DAYS", "10")),
+            # M18.1
+            deployed_tag_file=Path(get("SUDARSHAN_DEPLOYED_TAG_FILE") or DEPLOYED_TAG_FILE),
         )

@@ -37,6 +37,7 @@ def feed_env(tmp_path):
             "SUDARSHAN_FEED_HTTP_PORT": "0",
             "SUDARSHAN_FEED_ZMQ_PORT": "0",
             "SUDARSHAN_FEED_ALWAYS_ON": "1",
+            "SUDARSHAN_DEPLOYED_TAG_FILE": str(tmp_path / "deployed_tag"),  # never the machine's
         }
         return env | overrides
 
