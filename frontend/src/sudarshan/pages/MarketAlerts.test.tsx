@@ -24,6 +24,7 @@ vi.mock('@/lib/MarketDataManager', () => import('@/test/marketDataHarness'))
 const api = vi.hoisted(() => ({
   state: vi.fn(),
   eventsSince: vi.fn(),
+  events: vi.fn(),
   create: vi.fn(),
   change: vi.fn(),
   remove: vi.fn(),
@@ -114,6 +115,7 @@ beforeEach(() => {
   resetAlertActionsForTests()
   for (const fn of [...Object.values(api), ...Object.values(toasts)]) fn.mockReset()
   api.state.mockResolvedValue(alertsState())
+  api.events.mockResolvedValue({ events: [], more: false })
   useAuthStore.setState({ apiKey: 'key' })
 })
 

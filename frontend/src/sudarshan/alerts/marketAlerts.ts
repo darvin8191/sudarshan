@@ -297,9 +297,11 @@ const DAY_MONTH = new Intl.DateTimeFormat('en-IN', {
 })
 
 /** "10:42:05", with its day before it when that is not today in India: "21 Oct 10:42:05". */
-function when(at: number, now = Date.now()): string {
+export function firedAt(at: number, now = Date.now()): string {
   return istDay(at) === istDay(now) ? istTime(at) : `${DAY_MONTH.format(at)} ${istTime(at)}`
 }
+
+const when = firedAt
 
 function described(at: number, detail: string, note: string): string {
   return [when(at), detail, note ? `Note: ${note}` : ''].filter(Boolean).join(' · ')

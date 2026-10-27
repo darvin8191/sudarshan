@@ -54,10 +54,10 @@ describe('the snap vectors', () => {
 
   it.each(levels)('$id: level $level on tick $tick', (vector) => {
     const edges = levelEdges(vector.level)
-    expect(edges && paiseText(edges.up)).toBe(vector.up)
-    expect(edges && paiseText(edges.down)).toBe(vector.down)
+    expect(edges ? paiseText(edges.up) : null).toBe(vector.up)
+    expect(edges ? paiseText(edges.down) : null).toBe(vector.down)
     const snapped = tickEdges(vector.level, vector.tick)
-    expect(snapped && snapped.map(paiseText)).toEqual(vector.checks_at)
+    expect(snapped ? snapped.map(paiseText) : null).toEqual(vector.checks_at)
   })
 
   it.each(prices)('$id: price $price', (vector) => {

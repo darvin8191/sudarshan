@@ -11,6 +11,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { AlertCard } from '@/sudarshan/alerts/AlertCard'
 import { AlertFormSheet } from '@/sudarshan/alerts/AlertForm'
 import { AlertSheet } from '@/sudarshan/alerts/AlertSheet'
+import { HistoryList } from '@/sudarshan/alerts/HistoryList'
 import { LineText } from '@/sudarshan/alerts/lines'
 import { needsQuote, segmentOpen } from '@/sudarshan/alerts/measure'
 import { type AlertTab, useAlertOverlay } from '@/sudarshan/alerts/useAlertOverlay'
@@ -174,7 +175,7 @@ export default function MarketAlerts() {
         className="flex flex-col gap-2"
       >
         {tab === 'history' ? (
-          <EmptyCard title="History" hint="The alerts that fired, and where each was sent." />
+          <HistoryList now={now} />
         ) : !state ? (
           query.isPending ? (
             <LoadingCards />

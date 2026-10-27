@@ -20,6 +20,7 @@ import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
 import { describe } from '@/sudarshan/watchlist/rows'
 import { firedWords, PriceLine } from './AlertCard'
 import { type AlertAction, NO_ANSWER, sendChange, useHeld } from './actions'
+import { RecentFires } from './HistoryList'
 import { AlertStatusChip, ConditionText, LineText } from './lines'
 
 /** The move each status allows, beside Edit and Delete (contract 1.4's button table). */
@@ -41,9 +42,10 @@ export interface SheetLive {
 }
 
 /**
- * One alert's sheet (M10.3): its condition, where the price stands, why it stopped or paused,
- * its check, how often and until when, its note, and what can be done with it: Edit, Pause,
- * Resume or Restart as its status allows, Delete after a question, and its chart.
+ * One alert's sheet (M10.3, M10.4): its condition, where the price stands, why it stopped or
+ * paused, its check, how often and until when, its note, what can be done with it (Edit; Pause,
+ * Resume or Restart as its status allows; Delete after a question; its chart), and its last five
+ * fires with their deliveries.
  */
 export function AlertSheet({
   row,
@@ -159,6 +161,8 @@ function Sheet({
           <CandlestickChart aria-hidden="true" className="size-5" />
           Chart
         </Link>
+
+        <RecentFires alertId={row.id} now={live.now} />
       </div>
 
       <Confirm
