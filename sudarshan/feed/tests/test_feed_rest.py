@@ -874,6 +874,86 @@ def test_a_client_that_stops_reading_loses_its_answer_and_holds_nothing(feed_env
     asyncio.run(scenario())
 
 
+def stuck_caller(svc, n: int) -> socket.socket:
+    """A caller that sends its request and then takes almost nothing of the answer."""
+    s = socket.socket()
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+    s.connect(("127.0.0.1", svc.http_port))
+    s.sendall(
+        f"GET /upstox{LTP[:-4]}{n:04d} HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Sudarshan-Client: "
+        "sudarshan-screener\r\nX-Sudarshan-Priority: interactive\r\n\r\n".encode()
+    )
+    return s
+
+
+def test_an_answer_keeps_its_place_until_its_caller_has_it(feed_env, monkeypatch):
+    """Review M3: a place in flight used to be given back when Upstox's answer arrived, while
+    the answer could wait 30 s more for its reader: 12 callers that did not read held 40 MiB of
+    6 MiB answers with nothing in flight. Now 4 answers at most wait in the feed."""
+    body, writers, serve = b"x" * (6 << 20), [], http_api._serve
+
+    async def tracking(service, reader, writer):
+        writers.append(writer)
+        await serve(service, reader, writer)
+
+    monkeypatch.setattr(http_api, "_serve", tracking)
+
+    async def big(path: str):
+        return 200, body, {}
+
+    async def scenario():
+        async with running(feed_env) as (svc, fake, http):
+            fake.rest_answer = big
+            stuck = [stuck_caller(svc, n) for n in range(12)]
+            await ff.wait_until(lambda: len(fake.rest_calls) >= 4, 10)
+            await asyncio.sleep(1.0)
+            buffered = sum(w.transport.get_write_buffer_size() for w in writers
+                           if not w.transport.is_closing())  # fmt: skip
+            health = svc.rest.health()
+            seen = (len(fake.rest_calls), health["in_flight"], health["waiting"], buffered)
+            for s in stuck:
+                s.close()
+            await ff.wait_until(lambda: svc.rest.health()["in_flight"] == 0, 5)
+            return seen
+
+    calls, in_flight, waiting, buffered = asyncio.run(scenario())
+    assert (calls, in_flight, waiting) == (4, 4, 8)
+    assert buffered <= 4 * len(body)
+
+
+def test_a_caller_that_hangs_up_while_waiting_never_reaches_upstox(feed_env):
+    """Review L2: a caller that gives up (its own timeout) while waiting for a place leaves the
+    queue at once; it used to spend a call and a place for nobody."""
+
+    def open_fds() -> int:
+        return len(os.listdir("/proc/self/fd"))
+
+    async def scenario():
+        async with running(feed_env) as (svc, fake, http):
+            held = Held(fake)
+            holders = [asyncio.create_task(ask(http, f"{LTP[:-4]}{n:04d}")) for n in range(4)]
+            try:
+                await ff.wait_until(lambda: len(held.arrived) == 4)
+                before = open_fds()
+                s = socket.create_connection(("127.0.0.1", svc.http_port))
+                s.sendall(
+                    f"GET /upstox{OHLC} HTTP/1.1\r\nHost: x\r\nX-Sudarshan-Client: "
+                    "sudarshan-alerts\r\nX-Sudarshan-Priority: interactive\r\n\r\n".encode()
+                )
+                await ff.wait_until(lambda: svc.rest.health()["waiting"] == 1)
+                s.close()
+                await ff.wait_until(lambda: svc.rest.health()["waiting"] == 0, 2)  # gone at once
+                await ff.wait_until(lambda: open_fds() == before, 2)  # its socket closed too
+            finally:
+                held.open()
+            got = await asyncio.gather(*holders)
+            await asyncio.sleep(0.3)
+            return [r.status_code for r in got], held.arrived
+
+    codes, arrived = asyncio.run(scenario())
+    assert codes == [200] * 4 and not any("ohlc" in path for path in arrived)
+
+
 # ---- G8: a warm start in flight adds no tick lag ------------------------------------------------
 WARM_START = r"""
 import json, socket, sys, time

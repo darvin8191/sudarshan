@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from functools import partial
 from urllib.parse import SplitResult, parse_qs, urlsplit
 
 from .subscriptions import CapError
@@ -50,16 +51,18 @@ async def start_http(service, port: int) -> asyncio.Server:
 
 
 async def _serve(service, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-    more: dict[str, str] = {}  # M18.9: the REST governor's headers
     try:
         if not is_local(writer.get_extra_info("peername")):  # defence in depth: bound to loopback
             raise HTTPError(403, "local clients only")
         # Only reading is time-limited: a subscribe that has started sending must finish.
         method, url, body, headers = await asyncio.wait_for(_read(reader, writer), READ_TIMEOUT_S)
-        if url.path.startswith(REST):  # M18.9: Upstox's own answer as bytes, or the governor's
-            status, payload, more = await service.rest.answer(method, url, headers)
-        else:
-            status, payload = 200, await _route(service, method, url, body)
+        if url.path.startswith(REST):  # M18.9: the governor answers, Upstox's bytes or its own
+            work = service.rest.serve(method, url, headers, partial(_answer, writer))
+            await _unless_gone(reader, work)
+            if not writer.is_closing():  # the caller hung up before its answer: nothing to send
+                writer.transport.abort()
+            return
+        status, payload = 200, await _route(service, method, url, body)
     except HTTPError as exc:
         status, payload = exc.status, {"error": str(exc)}
     except CapError as exc:
@@ -71,24 +74,67 @@ async def _serve(service, reader: asyncio.StreamReader, writer: asyncio.StreamWr
     except Exception:
         log.exception("HTTP request failed")
         status, payload = 500, {"error": "internal error"}
-    if isinstance(payload, bytes):  # M18.9: passed through as Upstox sent it
+    await _answer(writer, status, payload)
+
+
+async def _answer(writer: asyncio.StreamWriter, status: int, payload, more=None) -> None:
+    """Hand one answer to the client and close: JSON, or (M18.9) Upstox's bytes as they came,
+    with the governor's headers in ``more``. M18.9: a client that has not taken it within
+    WRITE_TIMEOUT_S, or has gone, is cut off, and neither its socket nor the body stays."""
+    if writer.is_closing():  # answered already
+        return
+    if isinstance(payload, bytes):
         data = payload
     else:
         data = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode()
-    fields = {"Content-Type": "application/json"} | more
+    fields = {"Content-Type": "application/json"} | (more or {})
     head = (
         f"HTTP/1.1 {status} {REASONS.get(status, 'Error')}\r\n"
         + "".join(f"{name}: {value}\r\n" for name, value in fields.items())
         + f"Content-Length: {len(data)}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n"
     )
+    handed = False
     try:
         writer.write(head.encode())
         writer.write(data)  # a body of up to 8 MiB is never copied into one with the head
-        await asyncio.wait_for(writer.drain(), WRITE_TIMEOUT_S)
-        writer.close()
-        await asyncio.wait_for(writer.wait_closed(), WRITE_TIMEOUT_S)
-    except (ConnectionError, TimeoutError):  # M18.9: a client that stops reading loses its answer
-        writer.transport.abort()  # and never holds the socket or the buffered body
+        async with asyncio.timeout(WRITE_TIMEOUT_S):
+            await writer.drain()
+            writer.close()
+            await writer.wait_closed()
+        handed = True
+    except (ConnectionError, TimeoutError):
+        pass
+    finally:
+        if not handed:  # timed out, the client went, or the request was cancelled
+            writer.transport.abort()
+
+
+async def _unless_gone(reader: asyncio.StreamReader, work) -> None:
+    """M18.9: run ``work`` (one governor request) unless its client hangs up first. A request
+    whose caller has gone stops there: it neither waits for a place nor holds one, and does not
+    reach Upstox if it has not yet. Any byte after the request ends the watch (one request per
+    connection: nothing more is read)."""
+    task, gone = asyncio.ensure_future(work), asyncio.ensure_future(_hang_up(reader))
+    try:
+        await asyncio.wait((task, gone), return_when=asyncio.FIRST_COMPLETED)
+        if gone.done() and gone.result():
+            task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            if asyncio.current_task().cancelling():  # this request itself is being cancelled
+                raise
+    finally:
+        gone.cancel()
+        task.cancel()  # done by now, unless this request itself was cancelled
+
+
+async def _hang_up(reader: asyncio.StreamReader) -> bool:
+    """True once the client has closed its side of the connection."""
+    try:
+        return await reader.read(1) == b""
+    except ConnectionError:
+        return True
 
 
 async def _read(reader, writer) -> tuple[str, SplitResult, bytes, dict[str, str]]:

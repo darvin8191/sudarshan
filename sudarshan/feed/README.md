@@ -192,6 +192,14 @@ hour ever holds more.
   401): every API stops until the token file changes, as the socket does.
 - Nothing is retried here: 4xx is final, 5xx and network errors are for the caller to retry.
   Callers should allow 70 s (30 s of waiting, 30 s for Upstox, the hand-over).
+- **Memory**: a place in flight is held until the caller has the answer (or the 30 s to hand it
+  over run out), so at most 4 answers wait in the feed at once: 32 MiB at most (4 x 8 MiB; an
+  answer is copied once as it is assembled, so never over 64 MiB even at that instant), plus
+  the kernel's socket buffers (4 MiB each at most with Ubuntu's defaults). A caller that does not
+  read holds a place for those 30 s, then loses its answer.
+- A caller that hangs up while it waits leaves the queue at once and never reaches Upstox; one
+  that hangs up while its call is with Upstox frees its place at once. Closing the connection
+  is what counts, so a caller must not half-close it after sending its request.
 - Every answer carries `X-Sudarshan-Waited-Ms`. Upstox's own answers come with its status,
   `Content-Type` and body. The governor's own answers are JSON `{"error": sentence}`, written
   for the owner, with `X-Sudarshan-Reason`:

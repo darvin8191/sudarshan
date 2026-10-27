@@ -302,19 +302,24 @@ class RestGovernor:
         self.since = self._load()  # epoch s; counting, the windows and a stop outlive a restart
 
     # ---- one request ---------------------------------------------------------------------------
-    async def answer(self, method: str, url: SplitResult, headers: dict[str, str]):
-        """(status, body bytes or the governor's JSON payload, headers) for one request."""
+    async def serve(self, method: str, url: SplitResult, headers: dict[str, str], respond) -> None:
+        """Answer one request: ``await respond(status, body bytes or the governor's JSON payload,
+        headers)`` hands the answer to its caller. M3: a place in flight is held until respond
+        returns (the caller has the answer, or the HTTP API's 30 s to hand it over ran out), so
+        at most MAX_IN_FLIGHT answers of at most MAX_BODY wait in the feed at once."""
         start, ticket, api, waited = time.monotonic(), None, None, None
         client = headers.get(CLIENT_HEADER, "").strip()
         try:
-            api, target, rank = self._check(method, url, client, headers)
-            self._refuse_at_once()
-            ticket = self._enter(api, client, rank, start)  # bulk in market hours: refused there
-            await self._turn(ticket)
-            waited = _ms(time.monotonic() - start)
-            return await self._call(ticket, target, waited)
-        except Refused as refused:
-            return self._refusal(refused, api, client, _ms(time.monotonic() - start), waited)
+            try:
+                api, target, rank = self._check(method, url, client, headers)
+                self._refuse_at_once()
+                ticket = self._enter(api, client, rank, start)  # bulk in market hours: refused
+                await self._turn(ticket)
+                waited = _ms(time.monotonic() - start)
+                answer = await self._call(ticket, target, waited)
+            except Refused as refused:
+                answer = self._refusal(refused, api, client, _ms(time.monotonic() - start), waited)
+            await respond(*answer)
         finally:
             if ticket is not None:
                 self._leave(ticket)

@@ -6,8 +6,9 @@ Each step is one callback of the loop. Its cost is the CPU time of the loop's th
 the operating system interrupts on a busy machine does not look longer than it was (on a shared
 virtual machine a single reading can still come out several times its cost). A step is the
 governor's when it runs one of the HTTP API's request tasks (http_api._serve: in these tests only
-the warm start's calls arrive there), the governor's timer or its save (whose disk work runs on
-the saver thread, outside the loop); every other step is the feed's.
+the warm start's calls arrive there), a governor request with its hand-over (RestGovernor.serve)
+or the watch for its caller hanging up (http_api._hang_up), the governor's timer or its save
+(whose disk work runs on the saver thread, outside the loop); every other step is the feed's.
 At exit OUT.json gets [wall time, CPU ms, owner] for each step over 0.2 ms, and for each owner the
 number of steps and their CPU in all.
 """
@@ -29,13 +30,14 @@ OUT = Path(sys.argv[1])
 long_steps: list[tuple[float, float, str]] = []
 totals: dict[str, list[float]] = {"governor": [0, 0.0], "feed": [0, 0.0]}
 _run = asyncio.events.Handle._run
+GOVERNOR_TASKS = {"_serve", "RestGovernor.serve", "_hang_up"}
 GOVERNOR_CALLBACKS = {"RestGovernor._pump", "RestGovernor.save"}
 
 
 def _owner(callback) -> str:
     task = getattr(callback, "__self__", None)
     if isinstance(task, asyncio.Task):
-        return "governor" if task.get_coro().__qualname__ == "_serve" else "feed"
+        return "governor" if task.get_coro().__qualname__ in GOVERNOR_TASKS else "feed"
     return "governor" if getattr(callback, "__qualname__", "") in GOVERNOR_CALLBACKS else "feed"
 
 
