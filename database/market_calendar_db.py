@@ -440,7 +440,7 @@ def seed_holidays_2026(commit: bool = True):  # SUDARSHAN M3.7: commit, see _see
                 # SUDARSHAN M3.7: the published Muhurat 2026 hours, an afternoon
                 # session. Each window runs from the normal market open to the normal
                 # market close, as a normal day does above (NSE 09:15-15:30, not the
-                # 09:00 pre-open; NFO to 15:40; MCX from 09:00, not a special session):
+                # 09:00 pre-open; NFO to 15:40; MCX 09:00-23:55):
                 # - NSE: NSE circular 149/2026 (NSE/CMTR/76941, 19 Oct 2026), normal
                 #   market 14:20 to 15:30 (15:15 for closing-auction securities).
                 # - NFO: NSE circular 142/2026 (NSE/FAOP/76940, 19 Oct 2026), normal
@@ -451,8 +451,8 @@ def seed_holidays_2026(commit: bool = True):  # SUDARSHAN M3.7: commit, see _see
                 # - CDS: NSE currency derivatives 14:20-15:30 as reported by Angel One
                 #   (20 Oct 2026); NSE's own currency circular was not read.
                 # - MCX: MCX circular MCX/TRD/590/2026 (19 Oct 2026) as summarised by
-                #   TeamLease RegTech: trading 14:20 to 15:30 after a special session
-                #   from 14:05, and no evening session.
+                #   TeamLease RegTech: trading 14:20 to 15:30, and no evening session.
+                #   Its special session from 14:05 is left out, as NSE's pre-open is.
                 # upgrade/migrate_muhurat_nov_2026.py moves existing installs here.
                 {"exchange": "NSE", "start_time": 1794127800000, "end_time": 1794132000000},
                 {"exchange": "BSE", "start_time": 1794127800000, "end_time": 1794132000000},
