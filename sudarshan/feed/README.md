@@ -216,6 +216,14 @@ URL, a query or the token. The counts run on across restarts (`rest_counts.json`
 `counted_since`: after the first week, `apis.<api>.429s` says whether SUDARSHAN's 40% met
 Upstox's limits on the account, which TRINETRA shares.
 
+A restart never grants a share twice: the same file keeps every send of the last 30 minutes per
+API and service, and any stop or half rate after a 429, so a deploy at 16:20 after a warm start
+does not open a second 600 for the screener, and a feed restarted inside a stop stays stopped.
+A change reaches the file within a second (a 429's stop at once), written on a thread of its
+own so the disk never holds the event loop the ticks use. After a crash or a kill the last
+second may be missing, so the next start counts that second as each service's whole
+per-second share on every API (15, 2 and 2 calls, in every window), and the journal says so.
+
 ## ZMQ bus: 127.0.0.1:5581
 
 The service **binds** a PUB socket; consumers connect SUB sockets. This is SUDARSHAN's own bus,
@@ -302,7 +310,7 @@ sent" apart from 0, so a 0 there keeps the previous value: a quantity that reall
 |---|---|
 | `snapshot.json` | last tick per key; written atomically every 30 s and at shutdown, loaded at start |
 | `subscriptions.json` | the API overlay on top of the keys file |
-| `rest_counts.json` | the REST governor's counters, saved within 30 s of a change and at every stop; delete it (feed stopped) to count afresh |
+| `rest_counts.json` | the REST governor's counters, each API's sends of the last 30 minutes per service and any stop or half rate (epoch ms), saved within 1 s of a change and at every stop; deleting it (feed stopped) counts afresh and forgets the windows, so do it at least 30 minutes after SUDARSHAN's last Upstox call |
 | `ticks/YYYY-MM-DD.jsonl.gz` | every published tick (IST date), one gzip member per 3 s flush; a day stops at the size cap; old days are deleted |
 
 Replay a recording to test a consumer offline (binds its own port; use another one while the

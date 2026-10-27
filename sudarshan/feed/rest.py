@@ -29,6 +29,8 @@ rules G1-G8 (27 Oct 2026):
   written for the owner, who may read them on a screen. /health shows calls, waits, refusals and
   429s per API and client, never a URL, a query or the token; $STATE_DIR/rest_counts.json keeps
   them across restarts, so a week of 429s can be read (whether TRINETRA's own calls meet ours).
+- M2 (review, 28 Oct): the same file keeps every send of the last 30 minutes and any stop or half
+  rate, so a restart (a deploy, or Restart=always after a crash) never grants a share twice.
 
 It shares the feed's event loop with the tick path, so it must never hold it: per request it
 does a few comparisons, and Upstox's bodies are copied, never decoded or decompressed.
@@ -45,9 +47,11 @@ import re
 import time
 from collections import deque
 from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 from datetime import time as dtime
+from itertools import chain
 from typing import NamedTuple
 from urllib.parse import SplitResult, parse_qsl, quote, unquote
 
@@ -77,7 +81,8 @@ MAX_BODY = 8 << 20
 UPSTREAM_TIMEOUT = httpx.Timeout(25.0, connect=5.0)  # each phase of a call to Upstox
 UPSTREAM_TOTAL_S = 30.0  # the whole call, body included
 RETRY_S = 60  # Retry-After when nothing better is known
-COUNTS_FILE, SAVE_AFTER_S = "rest_counts.json", 30.0  # G6: the counters outlive a restart
+COUNTS_FILE, STATE_VERSION = "rest_counts.json", 2  # G6, M2: what outlives a restart
+SAVE_AFTER_S = 1.0  # a change is on disk within a second (a stop at once)
 MAX_KEYS = 500  # Upstox's quote calls take at most 500 instrument keys
 RATE_LIMITED = re.compile(rb"UDAPI10005(?![0-9])")  # never UDAPI100050, the token error
 COUNTS = ("calls", "waits", "refusals", "429s")
@@ -290,7 +295,11 @@ class RestGovernor:
         self._refused_since: float | None = None
         self._file = service.cfg.state_dir / COUNTS_FILE
         self._save: asyncio.TimerHandle | None = None
-        self.since = self._load()  # when counting began: the counters outlive a restart
+        # L5: the disk work of a save runs here, one save at a time, never on the loop.
+        self._saver = ThreadPoolExecutor(1, thread_name_prefix="sudarshan-rest-save")
+        self._writing: Future | None = None
+        self._keep = False  # something to write at the stop
+        self.since = self._load()  # epoch s; counting, the windows and a stop outlive a restart
 
     # ---- one request ---------------------------------------------------------------------------
     async def answer(self, method: str, url: SplitResult, headers: dict[str, str]):
@@ -406,6 +415,7 @@ class RestGovernor:
                 api = self.apis[ticket.api]
                 api.sent.append(now)
                 api.by_client[ticket.client].append(now)
+                self._dirty()  # M2: a send is kept on disk, so a restart cannot grant it again
                 self._in_flight, ticket.slot = self._in_flight + 1, True
                 ticket.future.set_result(None)
         if soonest < math.inf and self._in_flight < MAX_IN_FLIGHT:
@@ -464,6 +474,7 @@ class RestGovernor:
             "for %.0f s, then at half rate for %.0f min",
             ticket.api, ticket.client, ticket.api, FREEZE_S, HALF_RATE_S / 60,
         )  # fmt: skip
+        self.save()  # M2: at once, so even a crash in the next second keeps the stop
         self._pump()  # the waiting calls of that API that cannot make it are told now
 
     def _token_refused(self, stamp: int, api: str) -> None:
@@ -492,7 +503,8 @@ class RestGovernor:
 
     # ---- service hooks -------------------------------------------------------------------------
     def close(self) -> None:
-        """The feed is stopping: waiting requests are answered now, never dropped."""
+        """The feed is stopping: waiting requests are answered now, never dropped, and what the
+        next start needs is written last, marked as a clean stop (M2)."""
         self._closing = True
         if self._timer is not None:
             self._timer.cancel()
@@ -501,50 +513,133 @@ class RestGovernor:
             if not ticket.future.done():
                 ticket.future.set_result(Refused(503, "restarting", RESTARTING, RETRY_S))
         self._waiting.clear()
-        if self._save is not None:  # counted since the last save: kept for the next start
-            self.save()
-
-    # ---- G6: counters that outlive a restart ---------------------------------------------------
-    def _count(self, api: str, client: str, key: str) -> None:
-        self.apis[api].counts[client][key] += 1
-        if self._save is None and not self._closing:
-            self._save = asyncio.get_running_loop().call_later(SAVE_AFTER_S, self.save)
-
-    def save(self) -> None:
-        """Write the counters to $STATE_DIR/rest_counts.json (atomically, a few hundred bytes)."""
         if self._save is not None:
             self._save.cancel()
             self._save = None
-        counts = {api: {client: dict(n) for client, n in a.counts.items() if any(n.values())}
-                  for api, a in self.apis.items()}  # fmt: skip
+        self._saver.shutdown(wait=True)  # a save already handed over lands first
+        if self._keep:
+            self._write(self._state(clean=True))  # on the loop: it is stopping, no tick waits
+
+    # ---- G6 and M2: what outlives a restart ----------------------------------------------------
+    def _count(self, api: str, client: str, key: str) -> None:
+        self.apis[api].counts[client][key] += 1
+        self._dirty()
+
+    def _dirty(self) -> None:
+        """A count, a send or a stop changed: it reaches the disk within SAVE_AFTER_S (at once
+        once the feed is stopping)."""
+        self._keep = True
+        if self._save is None:
+            wait = 0.0 if self._closing else SAVE_AFTER_S
+            self._save = asyncio.get_running_loop().call_later(wait, self.save)
+
+    def save(self) -> None:
+        """Hand a copy of the state to the saver thread (L5): the JSON, the write and the fsync
+        happen there. One save at a time: while the disk is slow the next copy waits a second
+        instead of queueing. After the stop's own save (a call still in flight when the feed
+        stops can still meet a 429), it is written here and now: the loop is stopping."""
+        if self._save is not None:
+            self._save.cancel()
+            self._save = None
+        if self._closing:
+            self._write(self._state(clean=True))
+            return
+        if self._writing is not None and not self._writing.done():
+            self._dirty()
+            return
+        self._writing = self._saver.submit(self._write, self._state(clean=False))
+
+    def _state(self, clean: bool) -> tuple:
+        """What the next start needs, as plain copies, with both clocks to place it in time."""
+        apis = {
+            name: ({client: list(sent) for client, sent in api.by_client.items()},
+                   api.frozen_until, api.half_until,
+                   {client: dict(n) for client, n in api.counts.items() if any(n.values())})
+            for name, api in self.apis.items()
+        }  # fmt: skip
+        return time.monotonic(), self.service.clock(), self.since, clean, apis
+
+    def _write(self, state: tuple) -> None:
+        """rest_counts.json, atomically: the counters, every send of the last 30 minutes per API
+        and client, and any stop or half rate, as epoch ms (the monotonic clock ends with the
+        process). ``clean`` is true only in the last save of a stop."""
+        now, wall, since, clean, apis = state
+        horizon = now - WINDOWS_S[-1]
+
+        def ms(t: float) -> int:
+            return round((wall + t - now) * 1000)
+
+        payload = {
+            "version": STATE_VERSION,
+            "since_ms": round(since * 1000),
+            "saved_ms": round(wall * 1000),
+            "clean": clean,
+            "counts": {name: counts for name, (_, _, _, counts) in apis.items() if counts},
+            "apis": {
+                name: {
+                    "sent_ms": {client: [ms(t) for t in times if t > horizon]
+                                for client, times in sent.items() if times},
+                    "frozen_until_ms": ms(frozen) if frozen > now else None,
+                    "half_rate_until_ms": ms(half) if half > now else None,
+                }
+                for name, (sent, frozen, half, _) in apis.items()
+            },
+        }  # fmt: skip
         try:
-            payload = {
-                "version": 1,
-                "since": self.since,
-                "counts": {k: v for k, v in counts.items() if v},
-            }
             atomic_write_json(self._file, payload)
         except OSError as exc:
-            log.warning("REST counters not saved to %s: %s", self._file, exc)
+            log.warning("REST counters and windows not saved to %s: %s", self._file, exc)
 
-    def _load(self) -> str:
-        """The counters of earlier runs and since when they count; afresh when there are none."""
+    def _load(self) -> float:
+        """Since when counting runs (epoch s), with the last run's counters, windows and any stop
+        put back (M2). A run that ended without the save of its stop (a crash or a kill) may have
+        sent in the second it had not saved yet, so that second counts as used in full: each
+        client's per-second share is taken as sent now, on every API."""
+        now, wall = time.monotonic(), self.service.clock()
         try:
             data = json.loads(self._file.read_text(encoding="utf-8"))
-            since, kept = data["since"], [
+            if data["version"] != STATE_VERSION:
+                raise ValueError(f"format {data['version']!r}")
+            since, saved = float(data["since_ms"]) / 1000, float(data["saved_ms"]) / 1000
+            clean = data["clean"] is True
+            counts = [
                 (self.apis[api].counts[client], {key: int(n.get(key, 0)) for key in COUNTS})
                 for api, clients in data["counts"].items() if api in self.apis
                 for client, n in clients.items() if client in CEILINGS
             ]  # fmt: skip
-            if not isinstance(since, str):
-                raise ValueError("no start time")
+            kept = [
+                (self.apis[name],
+                 {client: [now + float(t) / 1000 - wall for t in times]
+                  for client, times in entry["sent_ms"].items() if client in CEILINGS},
+                 [0.0 if entry[key] is None else now + float(entry[key]) / 1000 - wall
+                  for key in ("frozen_until_ms", "half_rate_until_ms")])
+                for name, entry in data["apis"].items() if name in self.apis
+            ]  # fmt: skip
         except FileNotFoundError:
-            return iso(self.service.clock())
+            return wall
         except (OSError, ValueError, LookupError, TypeError, AttributeError) as exc:
             log.warning("REST counters in %s cannot be read (%r): counting afresh", self._file, exc)
-            return iso(self.service.clock())
-        for counts, numbers in kept:
-            counts.update(numbers)
+            return wall
+        self._keep = True
+        for numbers, loaded in counts:
+            numbers.update(loaded)
+        horizon = now - WINDOWS_S[-1]
+        for api, sent, (frozen, half) in kept:
+            for client, times in sent.items():
+                api.by_client[client].extend(t for t in times if t > horizon)
+            api.frozen_until, api.half_until = frozen, half
+        if not clean:
+            log.warning(
+                "REST: the last run ended without saving its stop (after %s): its unsaved second "
+                "counts as every client's whole per-second share, on every API", iso(saved),
+            )  # fmt: skip
+            for api in self.apis.values():
+                for client, limits in CEILINGS.items():
+                    api.by_client[client].extend([now] * (limits[0] * math.ceil(SAVE_AFTER_S)))
+        for api in self.apis.values():  # the windows read their sends oldest first
+            for client, sent in api.by_client.items():
+                api.by_client[client] = deque(sorted(sent))
+            api.sent = deque(sorted(chain.from_iterable(api.by_client.values())))
         return since
 
     def health(self) -> dict:
@@ -566,7 +661,7 @@ class RestGovernor:
         bulk_end = self.hours.end_of(wall)
         return {
             "enabled": self.enabled,
-            "counted_since": self.since,  # counters run on across restarts (rest_counts.json)
+            "counted_since": iso(self.since),  # counts run on across restarts (rest_counts.json)
             "in_flight": self._in_flight,
             "waiting": len(self._waiting),
             "bulk_refused_until": iso(bulk_end) if bulk_end else None,
