@@ -77,7 +77,7 @@ header get 403). JSON in and out; use `127.0.0.1`, not `localhost` (which may re
 
 | request | answer |
 |---|---|
-| `GET /health` | state, detail, connected_since, socket_age_s, last_message_age_s, next_retry_in_s, token_file_readable, subscribed (counts by mode), keys_without_data, reconnects, last_error (+ hint), last_disconnect, market_window (below), market_status, stats, recorder |
+| `GET /health` | state, detail, connected_since, socket_age_s, last_message_age_s, next_retry_in_s, token_file_readable, subscribed (counts by mode), keys_without_data, reconnects, last_error (+ hint), last_disconnect, market_window (below), market_status, cas_status (below), stats, recorder |
 | `GET /snapshot?keys=K1,K2` | `{"ticks": {key: tick or null}}`; URL-encode the keys (`|` is `%7C`, space `%20`) |
 | `GET /snapshot/all` | every key the service has a tick for (survives restarts and after-hours) |
 | `GET /subscriptions` | the desired set by mode |
@@ -105,6 +105,22 @@ keeps its usual hours and adds the window, so `hours` may give two spans: `own w
 added to the usual hours, feed 08:58-15:50, 17:58-19:10`. An ordinary day reads `market window`,
 `weekend` or `NSE holiday` as before. `extra_days` counts a window that cannot be used as a window
 problem; the journal says which line and what the day does instead.
+
+`cas_status` is the closing-auction phase Upstox reports per segment (`casMarketStatus` in the
+feed's market info; NSE CMTR75479, from 3 Aug 2026: F&O stocks stop continuous trading at 15:15
+and close by auction). Upstox lists a segment only while its auction runs, so the map is `{}` the
+rest of the day, and each market info replaces it whole. A phase reads
+`{"status": "CAS_LM_START", "updated_ms": 1793094600250}`, `updated_ms` being when the phase began
+(Upstox's clock, epoch ms; `null` if it sent none). The phases Upstox documents are `CTS_CLOSE`
+(continuous trading over, about 15:15), `CAS_LM_START` (auction orders, about 15:20),
+`CAS_M_STOP` (limit orders only, about 15:25) and `CAS_STOP` (order entry closed, at a random time
+from 15:28 to 15:30); any other word is passed on as Upstox sends it. Whether Upstox fills this
+map at all is not yet known (on 27 Oct the segment status said nothing at 15:15 or 15:20), so the
+journal tells every session: the first market info on each socket is one line even when the map
+is empty (`closing auction status on connect: none`), and every later change is one line naming
+the segments that changed, `closing auction status: NSE_EQ CAS_LM_START at
+2026-10-27T15:20:00+05:30` (`NSE_EQ none` when it leaves the map). A change also goes out on the
+health topic at once.
 
 ```bash
 curl -s 127.0.0.1:5580/health | python3 -m json.tool
@@ -137,13 +153,16 @@ while True:
 
 Tick fields (present once Upstox has sent them): `key`, `ltp`, `ltt` (epoch ms), `ltq`, `cp`
 (previous close), `bid`, `bid_qty`, `ask`, `ask_qty` (best level), `ohlc` {open, high, low,
-close, vol, ts} (the 1d candle), `greeks` {delta, theta, gamma, vega, rho}, `iv`, `atp`, `vtt`
-(volume traded today), `oi`, `tbq`, `tsq`, and `ts_recv` (epoch ms, when the service received
-it). Each publish is the key's **full current state**: Upstox's initial_feed (after every
-(re)subscribe) starts a key afresh, and live packets merge into it, so a group a packet leaves
-out keeps its last value. Upstox's bare numeric fields cannot say "not sent" apart from 0, so a 0
-there keeps the previous value: a quantity that really drops to 0 (tsq at an upper circuit)
-shows its last non-zero value. Use REST quotes for circuit checks.
+close, vol, ts} (the 1d candle), `ohlc_1m` {the same fields} (Upstox's one-minute `I1` candle in
+full mode, stocks and indices alike, `ts` the minute's start; Upstox does not say whether it is
+the minute just completed or the one forming, so compare `ts` with the minute you want),
+`greeks` {delta, theta, gamma, vega, rho}, `iv`, `atp`, `vtt` (volume traded today), `oi`,
+`tbq`, `tsq`, and `ts_recv` (epoch ms, when the service received it). Each publish is the key's
+**full current state**: Upstox's initial_feed (after every (re)subscribe) starts a key afresh,
+and live packets merge into it, so a group a packet leaves out keeps its last value (a packet
+without the `I1` entry keeps the last `ohlc_1m`). Upstox's bare numeric fields cannot say "not
+sent" apart from 0, so a 0 there keeps the previous value: a quantity that really drops to 0
+(tsq at an upper circuit) shows its last non-zero value. Use REST quotes for circuit checks.
 
 ## Behaviour
 

@@ -14,6 +14,7 @@ import httpx
 import zmq
 import zmq.asyncio
 
+from sudarshan.feed import service
 from sudarshan.feed.config import Settings
 from sudarshan.feed.http_api import is_local
 from sudarshan.feed.replay import read_ticks
@@ -264,3 +265,73 @@ def test_error_logs_are_rate_limited(caplog):
 def test_only_local_peers_are_served():
     assert is_local(("127.0.0.1", 40000)) and is_local(("::1", 40000, 0, 0))
     assert not is_local(("10.1.2.3", 40000)) and not is_local(None)
+
+
+def test_closing_auction_status_in_health_one_line_per_change(feed_env, fast, monkeypatch, caplog):
+    """M18.1 (X6h): Upstox's casMarketStatus as cas_status, on the health topic at once, and in
+    the journal: the first market info on every socket (an empty map too) and every change."""
+    caplog.set_level(logging.INFO, logger="sudarshan.feed")
+    monkeypatch.setattr(service, "HEALTH_EVERY_S", 3600.0)  # so only a change publishes health
+    at_1515, at_1520 = 1_793_094_300_120, 1_793_094_600_250  # 27 Oct 2026 IST, epoch ms
+    open_ = {"NSE_EQ": "NORMAL_OPEN"}
+
+    def info(cas: dict | None, segments=open_) -> bytes:
+        return ff.response({}, "market_info", segments, cas)
+
+    def phase(status: str, at: int) -> dict:
+        return {"status": status, "updated_ms": at}
+
+    async def health_showing(sub, cas_status: dict) -> None:
+        while True:  # well inside the 2 s: the hourly publish never comes here
+            topic, payload = await asyncio.wait_for(sub.recv_multipart(), 2)
+            if topic == b"__health__" and json.loads(payload)["cas_status"] == cas_status:
+                return
+
+    async def scenario():
+        async with ff.FakeUpstox() as fake:
+            svc = FeedService(Settings.from_env(feed_env(fake)))
+            run = asyncio.create_task(svc.run())
+            await ff.wait_until(lambda: svc.health()["subscriptions_live"])
+            assert svc.health()["cas_status"] == {}
+            ctx = zmq.asyncio.Context()
+            sub = ctx.socket(zmq.SUB)
+            sub.connect(svc.pub.endpoint)
+            sub.subscribe(b"__health__")
+            await asyncio.sleep(0.3)  # a SUB misses what is sent before it has joined
+            try:
+                server = fake.sockets[0]
+                both = {"NSE_EQ": ("CTS_CLOSE", at_1515), "BSE_EQ": ("CTS_CLOSE", at_1515)}
+                await server.send(info(both))
+                await health_showing(sub, {s: phase("CTS_CLOSE", at_1515) for s in both})
+                await server.send(info(both))  # the same state again: no line
+                await server.send(info(both | {"NSE_EQ": ("CAS_LM_START", at_1520)}))
+                await health_showing(sub, {"NSE_EQ": phase("CAS_LM_START", at_1520),
+                                           "BSE_EQ": phase("CTS_CLOSE", at_1515)})  # fmt: skip
+                later = {"NSE_EQ": ("CAS_LM_START", at_1520), "BSE_EQ": ("CTS_CLOSE", at_1520)}
+                await server.send(info(later))  # only BSE_EQ's time moves
+                await health_showing(sub, {s: phase(p, at_1520) for s, (p, _) in later.items()})
+                await server.send(info(None, {"NSE_EQ": "NORMAL_CLOSE"}))
+                await health_showing(sub, {})  # Upstox lists no auction any more
+                server.transport.abort()  # the next socket's first market info is told too
+                await ff.wait_until(lambda: len(fake.requests) == 2 and len(fake.requests[1]) == 3)
+                await fake.sockets[1].send(info(None))
+                await fake.sockets[1].send(ff.response({NIFTY: ff.ltpc(25000.0)}))  # no info
+                await ff.wait_until(lambda: svc.health()["stats"]["ticks"] == 1)
+                health = svc.health()
+            finally:
+                sub.close(0)
+                ctx.term()
+            await _stop(svc, run)
+        assert health["cas_status"] == {} and health["market_status"] == {"NSE_EQ": "NORMAL_OPEN"}
+        told = [r for r in caplog.records if r.getMessage().startswith("closing auction status")]
+        at = "2026-10-27T15:15:00+05:30"
+        assert [(r.levelname, r.getMessage()) for r in told] == [
+            ("INFO", f"closing auction status on connect: BSE_EQ CTS_CLOSE at {at}, NSE_EQ "
+                     f"CTS_CLOSE at {at}"),
+            ("INFO", "closing auction status: NSE_EQ CAS_LM_START at 2026-10-27T15:20:00+05:30"),
+            ("INFO", "closing auction status: BSE_EQ CTS_CLOSE at 2026-10-27T15:20:00+05:30"),
+            ("INFO", "closing auction status: BSE_EQ none, NSE_EQ none"),
+            ("INFO", "closing auction status on connect: none"),
+        ]  # fmt: skip
+
+    asyncio.run(scenario())

@@ -9,14 +9,23 @@ Normalised tick fields (absent until Upstox has sent them):
     key, ltp, ltt (epoch ms), ltq, cp (previous close)   LTPC group
     bid, bid_qty, ask, ask_qty                           best level (full / option_greeks)
     ohlc {open, high, low, close, vol, ts}               the "1d" candle
+    ohlc_1m {open, high, low, close, vol, ts}            the "I1" candle (one minute, ts its start)
     greeks {delta, theta, gamma, vega, rho}, iv          options
     atp, vtt (volume traded today), oi, tbq, tsq         full mode
     ts_recv (epoch ms)                                   added by the service
 
 Presence rule: the message-typed groups above (LTPC, quote, greeks, OHLC) carry presence on the
-wire, so a group that is present replaces its fields whole. The bare proto3 scalars (atp, vtt, oi,
+wire, so a group that is present replaces its fields whole, each candle on its own: a packet
+without the "I1" entry keeps the last one-minute candle. The bare proto3 scalars (atp, vtt, oi,
 iv, tbq, tsq) cannot tell "not sent" from 0, so a 0 there is treated as "not sent" and the store
 keeps the previous value.
+
+The market info (Upstox's first message on a socket, and again on every change) gives each
+segment's market status and, while a segment's closing auction runs, its phase
+(``casMarketStatus``: CTS_CLOSE, CAS_LM_START, CAS_M_STOP, CAS_STOP, with the time it began in
+epoch ms). Upstox leaves a segment out of that map outside its auction, so every market info
+carries the whole auction state: decode() returns it as {segment: {"status", "updated_ms"}},
+empty when no auction runs, and None for a frame without market info.
 """
 
 from __future__ import annotations
@@ -44,6 +53,7 @@ pb2 = _load_pb2()
 _FULL_SCALARS = ("atp", "vtt", "oi", "iv", "tbq", "tsq")
 _GREEKS_SCALARS = ("vtt", "oi", "iv")
 _INTEGRAL = {"vtt", "oi", "tbq", "tsq"}  # quantities; oi/tbq/tsq are doubles on the wire
+_CANDLES = {"1d": "ohlc", "I1": "ohlc_1m"}  # Upstox's candle interval -> tick field
 
 
 def request(method: str, keys: list[str], mode: str | None = None) -> bytes:
@@ -61,18 +71,23 @@ def _enum_name(enum, value: int) -> str:
         return str(value)
 
 
-def decode(buf: bytes) -> tuple[str, dict[str, dict], dict[str, str]]:
-    """Parse one FeedResponse into (type, {key: partial tick}, {segment: market status})."""
+def decode(buf: bytes) -> tuple[str, dict[str, dict], dict[str, str], dict[str, dict] | None]:
+    """Parse one FeedResponse into (type, {key: partial tick}, {segment: market status},
+    {segment: closing-auction status}, or None when the frame carries no market info)."""
     resp = pb2.FeedResponse()
     resp.ParseFromString(buf)
-    status = {}
+    status, cas = {}, None
     if resp.HasField("marketInfo"):
+        info = resp.marketInfo
         status = {
-            seg: _enum_name(pb2.MarketStatus, value)
-            for seg, value in resp.marketInfo.segmentStatus.items()
+            seg: _enum_name(pb2.MarketStatus, value) for seg, value in info.segmentStatus.items()
+        }
+        cas = {
+            seg: {"status": phase.status, "updated_ms": phase.updatedTime or None}
+            for seg, phase in info.casMarketStatus.items()
         }
     ticks = {key: normalize(feed) for key, feed in resp.feeds.items()}
-    return _enum_name(pb2.Type, resp.type), ticks, status
+    return _enum_name(pb2.Type, resp.type), ticks, status, cas
 
 
 def normalize(feed) -> dict:
@@ -126,12 +141,12 @@ def _quote(out: dict, levels) -> None:
 
 def _ohlc(out: dict, m) -> None:
     for c in m.ohlc:
-        if c.interval == "1d":
-            out["ohlc"] = {
+        name = _CANDLES.get(c.interval)
+        if name and name not in out:  # the first entry of each interval counts
+            out[name] = {
                 "open": c.open, "high": c.high, "low": c.low, "close": c.close,
                 "vol": c.vol, "ts": c.ts,
             }  # fmt: skip
-            return
 
 
 def _greeks(out: dict, m) -> None:

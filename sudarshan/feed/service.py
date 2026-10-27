@@ -111,6 +111,14 @@ def _age(start: float | None, now: float) -> float | None:
     return None if start is None else round(now - start, 1)
 
 
+def _phase(segment: str, phase: dict | None) -> str:
+    """M18.1: "NSE_EQ CAS_LM_START at 2026-10-27T15:20:00+05:30", or "NSE_EQ none"."""
+    if phase is None:
+        return f"{segment} none"
+    at = phase["updated_ms"]
+    return f"{segment} {phase['status']}" + (f" at {iso(at / 1000)}" if at else "")
+
+
 class FeedService:
     def __init__(self, cfg: Settings, clock=time.time):
         self.cfg, self.clock = cfg, clock
@@ -144,6 +152,8 @@ class FeedService:
         self._next_retry_at: float | None = None
         self._seen: set[str] = set()  # keys that sent data on the current socket
         self._market_status: dict[str, str] = {}
+        self._cas_status: dict[str, dict] = {}  # M18.1: Upstox's closing-auction phase per segment
+        self._cas_socket: float | None = None  # M18.1: the socket whose first market info was told
         self._traded_on = None  # the IST day of the last tick whose last trade was that day
         self._last_error: dict | None = None
         self._last_disconnect: dict | None = None
@@ -441,7 +451,8 @@ class FeedService:
             self._throttle(logging.WARNING, "upstox-text", f"Upstox says: {text}")
             return
         try:
-            kind, ticks, status = protocol.decode(message)
+            kind, ticks, status, cas = protocol.decode(message)
+            self._note_cas(cas)  # M18.1: the closing-auction phase, logged on each change
             changed = {s: v for s, v in status.items() if self._market_status.get(s) != v}
             if changed:
                 log.info("market status: %s", ", ".join(f"{s} {v}" for s, v in changed.items()))
@@ -456,6 +467,30 @@ class FeedService:
             self._stats["decode_errors"] += 1
             what = f"bad feed frame ({len(message)} bytes): {exc!r}"
             self._throttle(logging.WARNING, "decode", what, exc_info=True)
+
+    def _note_cas(self, cas: dict[str, dict] | None) -> None:
+        """M18.1: a frame with market info carries the whole closing-auction state (protocol.py).
+
+        Whether Upstox fills casMarketStatus is not known yet (on 27 Oct segmentStatus said
+        nothing at 15:15 or 15:20), so the journal tells every session: the first market info on
+        each socket is one INFO line even when the map is empty, and every later change is one
+        INFO line naming the segments that changed, with Upstox's own time for each phase
+        (segments in name order: the wire's map has none). A change goes out on the health
+        topic at once.
+        """
+        first = self._cas_socket != self._connected_at  # the first market info on this socket
+        if cas is None or (cas == self._cas_status and not first):
+            return
+        old, self._cas_status, self._cas_socket = self._cas_status, cas, self._connected_at
+        changed = sorted(cas) if first else sorted(s for s in cas.keys() | old.keys()
+                                                   if cas.get(s) != old.get(s))  # fmt: skip
+        told = ", ".join(_phase(seg, cas.get(seg)) for seg in changed)
+        if first:
+            log.info("closing auction status on connect: %s", told or "none")
+        else:
+            log.info("closing auction status: %s", told)
+        if cas != old:
+            self._publish_health()
 
     def _note_trade(self, ticks: dict, ts_recv: int) -> None:
         """A tick whose last trade time falls on today (IST) shows the exchange trading today."""
@@ -530,6 +565,7 @@ class FeedService:
             "last_disconnect": self._last_disconnect,
             "market_window": self.window.describe(now),
             "market_status": self._market_status,
+            "cas_status": self._cas_status,  # M18.1: {} when no closing auction runs
             "stats": stats | {"zmq_dropped": self.pub.dropped if self.pub else 0},
             "recorder": self.recorder.status() if self.recorder else None,
             "zmq": self.pub.endpoint if self.pub else None,

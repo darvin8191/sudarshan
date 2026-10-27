@@ -37,12 +37,19 @@ async def wait_until(predicate, timeout: float = 5.0) -> None:
         await asyncio.sleep(0.02)
 
 
-def response(feeds: dict, kind: str = "live_feed", segments: dict | None = None) -> bytes:
+def response(
+    feeds: dict, kind: str = "live_feed", segments: dict | None = None, cas: dict | None = None
+) -> bytes:
+    """``cas``: {segment: (closing-auction phase, epoch ms it began)} in the market info."""
     resp = pb2.FeedResponse(type=pb2.Type.Value(kind), currentTs=LTT)
     for key, feed in feeds.items():
         resp.feeds[key].CopyFrom(feed)
     for segment, status in (segments or {}).items():
         resp.marketInfo.segmentStatus[segment] = pb2.MarketStatus.Value(status)
+    for segment, (phase, since_ms) in (cas or {}).items():
+        resp.marketInfo.casMarketStatus[segment].CopyFrom(
+            pb2.StatusInfo(status=phase, updatedTime=since_ms)
+        )
     return resp.SerializeToString()
 
 
