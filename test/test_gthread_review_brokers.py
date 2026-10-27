@@ -156,7 +156,18 @@ def test_upstox_close_all_unchanged_when_every_leg_is_sent(dev, monkeypatch):
     # it lists no order working to close a position.
     monkeypatch.setattr(upstox, "get_order_book", lambda auth: {"status": "success", "data": []})
 
-    assert upstox.close_all_positions("x", "tok") == (
+    body, status = upstox.close_all_positions("x", "tok")
+    # SUDARSHAN M6.9: the answer also says what became of each position, for the phone's hold.
+    assert body.pop("positions") == [
+        {
+            "exchange": "NFO",
+            "symbol": "SYM",
+            "product": "NRML",
+            "outcome": "sent",
+            "orderids": ["1"],
+        }
+    ]
+    assert (body, status) == (
         {"status": "success", "message": "All Open Positions SquaredOff"},
         200,
     )

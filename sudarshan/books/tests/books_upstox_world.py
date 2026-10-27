@@ -84,10 +84,22 @@ class Broker:
                 d for t, s, d in self.fills if s == symbol and t <= cutoff
             )
 
-    def rest(self, symbol: str, side: str, qty: int) -> None:
+    def rest(
+        self, symbol: str, side: str, qty: int, kind: str = "SL-M", trigger: float = 98.5
+    ) -> None:
         """An order placed elsewhere (a stop loss in Upstox's own app, say), still working."""
         with self.lock:
-            self.working.append({"symbol": symbol, "side": side, "qty": qty, "at": time.time()})
+            self.working.append(
+                {
+                    "symbol": symbol,
+                    "side": side,
+                    "qty": qty,
+                    "at": time.time(),
+                    "kind": kind,
+                    "trigger": trigger,
+                    "id": f"25102700001{len(self.working):04d}",
+                }
+            )
 
     def fill_working(self) -> None:
         """Every working remainder fills now (the market came back)."""
@@ -160,13 +172,16 @@ class Broker:
                 placed = datetime.fromtimestamp(order.get("at", time.time()), IST)
                 rows.append(
                     {
-                        "order_id": f"W{n}",
+                        "order_id": order.get("id", f"W{n}"),
                         "instrument_token": token,
                         "exchange": exchange,
                         "product": product,
                         "tradingsymbol": order["symbol"],
                         "transaction_type": order["side"],
-                        "status": "open",
+                        "status": "trigger pending" if order.get("trigger") else "open",
+                        "order_type": order.get("kind", "MARKET"),
+                        "trigger_price": order.get("trigger", 0),
+                        "price": 0,
                         "pending_quantity": order["qty"],
                         "order_timestamp": placed.strftime("%Y-%m-%d %H:%M:%S"),
                     }
@@ -191,10 +206,9 @@ class Broker:
                 filled = self.part.get(symbol, qty)
                 delta = filled if side == "BUY" else -filled
                 self.fills.append((now, symbol, delta))
-                if filled < qty:
-                    self.working.append(
-                        {"symbol": symbol, "side": side, "qty": qty - filled, "at": time.time()}
-                    )
+                if filled < qty:  # the rest of this market order, still working
+                    rest = {"symbol": symbol, "side": side, "qty": qty - filled, "kind": "MARKET"}
+                    self.working.append({**rest, "at": time.time(), "id": oid})
         return FakeResponse(200, {"status": "success", "data": {"order_ids": [oid]}})
 
 

@@ -54,6 +54,7 @@ import re
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from utils import real_threading
@@ -124,13 +125,55 @@ def on_its_way(position: Position, at: float) -> str:
     )
 
 
-def order_working(position: Position, placed: str) -> str:
-    """Why Exit all sent no exit for a position whose closing order still works in the book."""
-    when = f" (placed {placed})" if placed else ""
-    return (
-        f"{trader_name(position)} already has an order working to close it{when}, so no exit "
-        "was sent for it. Check Orders, and cancel that order first if you want to exit now."
-    )
+@dataclass(frozen=True)
+class WorkingOrder:
+    """An order still working at the broker on a position's closing side, as Exit all read it."""
+
+    side: str  # BUY or SELL
+    quantity: int  # still to fill; 0 when the broker did not say
+    kind: str = ""  # MARKET, LIMIT, SL or SL-M
+    price: float = 0.0
+    trigger: float = 0.0
+    order_id: str = ""
+    placed: str = ""  # HH:MM:SS, India's time, as the broker stamped it
+
+
+def order_working(position: Position, orders: list[WorkingOrder], held: int) -> str:
+    """Why Exit all sent no exit for a position with an order on its closing side still working.
+
+    A stop loss or a target left working after the position is closed can fill later and turn it
+    the other way, and with the broker's book lagging, sizing only the part not covered cannot be
+    trusted: so nothing is sent for the position, and the trader is told which order to cancel.
+    One that covers only part of the position stops the whole exit, and the sentence says so.
+
+    Args:
+        position: The position, as the app writes it.
+        orders: Every order working on its closing side; the first is named.
+        held: The position's quantity, unsigned.
+    """
+    first = orders[0]
+    what = " ".join(part for part in (first.side, str(first.quantity or ""), first.kind) if part)
+    details = []
+    if first.trigger > 0:
+        details.append(f"trigger {first.trigger:.2f}")
+    if first.price > 0 and first.kind not in ("MARKET", "SL-M"):
+        details.append(f"price {first.price:.2f}")
+    if first.order_id:
+        details.append(f"order ending {first.order_id[-4:]}")
+    if first.placed:
+        details.append(f"placed {first.placed}")
+    said = f"a {what} order" + (f" ({', '.join(details)})" if details else "")
+    more = len(orders) - 1
+    if more:
+        said += f" and {more} more {'order' if more == 1 else 'orders'}"
+    covered = sum(order.quantity for order in orders)
+    if 0 < covered < held:
+        working = f"working to close {covered} of the {held} held"
+        working += ", so no exit was sent for any of it"
+    else:
+        working = "working to close it, so no exit was sent for it"
+    them = "them" if more else "it"
+    return f"{trader_name(position)} has {said} {working}. Cancel {them} in Orders, then exit."
 
 
 class ExitsInFlight:

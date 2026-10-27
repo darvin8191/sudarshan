@@ -209,10 +209,33 @@ def test_s12_a_stop_loss_working_elsewhere_is_not_closed_twice(world):
     assert (world.broker.true_qty(Y), world.broker.true_qty(Z)) == (0, 0)
     assert [o["symbol"] for o in world.broker.orders] == [Y, Z]
     assert code == 409 and body["not_confirmed"] is True
-    assert "NIFTY 25900 CE already has an order working to close it (placed " in body["message"]
+    said = "NIFTY 25900 CE has a SELL 65 SL-M order (trigger 98.50, order ending 0000, placed "
+    assert said in body["message"]
+    assert (
+        ") working to close it, so no exit was sent for it. Cancel it in Orders, then exit."
+        in (body["message"])
+    )
+    [x] = [each for each in body["positions"] if each["symbol"] == X]
+    assert x["outcome"] == "not_sent" and x["reason"].startswith(said)
     world.broker.fill_working()
     assert never_reversed(world.broker, X)
     assert world.broker.order_book_reads == 1  # read once for the whole Exit all
+
+
+def test_s12c_a_stop_covering_part_of_a_position_holds_back_the_whole_exit(world):
+    """The second review's MEDIUM-3: kept, and said. Sizing only the part left uncovered cannot
+    be trusted from a book that lags, so nothing is sent for the position and the stop is named."""
+    world.broker.rest(X, "SELL", 35, kind="SL", trigger=98.5)
+    code, body = world.api_exit_all()
+    assert [o["symbol"] for o in world.broker.orders] == [Y, Z]
+    assert code == 409
+    assert (
+        "NIFTY 25900 CE has a SELL 35 SL order (trigger 98.50, order ending 0000, placed "
+    ) in body["message"]
+    assert (
+        ") working to close 35 of the 65 held, so no exit was sent for any of it. Cancel it in "
+        "Orders, then exit."
+    ) in body["message"]
 
 
 def test_s12_a_working_order_on_the_other_side_does_not_hold_the_position(world):
