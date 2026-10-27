@@ -28,8 +28,10 @@ STATE_DIR = "/var/lib/sudarshan-alerts"
 DEFAULT_WINDOW = "08:45-16:00"
 PROXY_URL = "ws://127.0.0.1:8765"
 OPENALGO_URL = "http://127.0.0.1:5000"
-#: The health page (health.py) listens on this port of 127.0.0.1; the feed uses 5580 and 5581.
-HEALTH_PORT = 5582
+#: The health page (health.py) listens on this port of 127.0.0.1. Not 5582: that is the market
+#: alerts' sealed local API in this same service (cross-design X2), which must always get it.
+#: The feed uses 5580 and 5581, the portfolio 5583 and the screener 5584.
+HEALTH_PORT = 5585
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 #: Which cancellations are sent: every one, or only those of an order that was part filled.
 CANCELLED_CHOICES = ("all", "part-filled")

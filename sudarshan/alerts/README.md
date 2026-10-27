@@ -199,7 +199,7 @@ hours; so v0.3.3's own install is told by the next timer run after it.
 ## Health page (M18.1)
 
 ```bash
-curl -s 127.0.0.1:5582/health | python3 -m json.tool
+curl -s 127.0.0.1:5585/health | python3 -m json.tool
 ```
 
 Local clients only (bound to loopback; other peers and browser requests carrying an `Origin`
@@ -218,7 +218,9 @@ message text.
 
 A port that is taken is logged ("The health page could not start ...") and the order alerts run
 without the page. `SUDARSHAN_ALERTS_HEALTH_PORT=off` switches it off; a different number moves it
-(the feed holds 5580 and 5581).
+(the feed holds 5580 and 5581, and 5582 to 5584 are the market alerts', the portfolio's and
+the screener's local APIs: the health page keeps clear of them, because the market alerts'
+API, which also answers `/health`, must always find its port free).
 
 ## Turning it off
 
@@ -245,7 +247,7 @@ tool starts ring services again after each release.
 | `SUDARSHAN_ALERTS_ALWAYS_ON` | `0` | `1`: ignore the window and the calendar (tests, an evening sandbox check) |
 | `SUDARSHAN_ALERTS_STATE_DIR` | systemd's `$STATE_DIRECTORY` | `/var/lib/sudarshan-alerts` |
 | `SUDARSHAN_NOTICE_SPOOLS` | the deploy tool's and the backup job's files | colon-separated files the server's notices are read from (`/var/lib/sudarshan/events.jsonl:/var/lib/sudarshan-backup/events.jsonl`) |
-| `SUDARSHAN_ALERTS_HEALTH_PORT` | `5582` | the health page's port on 127.0.0.1; `off` switches the page off, `0` lets the system pick (tests) |
+| `SUDARSHAN_ALERTS_HEALTH_PORT` | `5585` | the health page's port on 127.0.0.1; `off` switches the page off, `0` lets the system pick (tests) |
 | `SUDARSHAN_DEPLOYED_TAG_FILE` | `/var/lib/sudarshan/deployed_tag` | where the deploy tool records the installed release; the health page shows it as `release` |
 | `SUDARSHAN_ALERTS_LOG_LEVEL` | `INFO` | |
 | `SUDARSHAN_NSE_HOLIDAYS_FILE` | `/etc/sudarshan/nse_holidays.txt` | shared with auto-login and the feed |
@@ -361,7 +363,7 @@ shows `Sandbox cancelled: ...`. Remove both lines and restart afterwards.
 Logs: `journalctl -u sudarshan-alerts`. One line per state change (`state connecting -> connected`)
 and one per alert (`order <id>: filled`); repeated problems at most once per 5 or 10 minutes.
 
-- **`The health page could not start`**: another program holds port 5582. The alerts are not
+- **`The health page could not start`**: another program holds port 5585. The alerts are not
   affected; set `SUDARSHAN_ALERTS_HEALTH_PORT` to a free port, or `off`.
 - **`No OpenAlgo API key yet`**: generate one in OpenAlgo; the service picks it up within a minute.
 - **`OpenAlgo's WebSocket proxy refused the API key`**: the key was regenerated; it is read again.

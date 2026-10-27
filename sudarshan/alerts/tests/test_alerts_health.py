@@ -151,17 +151,25 @@ def test_the_page_is_a_copy_not_the_services_own_counters(settings_for):
 
 def test_the_port_setting(settings_for):
     assert settings_for().health_port is None  # the fixture switches the page off
-    assert Settings.from_env({}).health_port == HEALTH_PORT == 5582
-    for value, port in (("", 5582), ("  ", 5582), ("5599", 5599), ("0", 0), (" 5599 ", 5599)):
+    assert Settings.from_env({}).health_port == HEALTH_PORT == 5585
+    for value, port in (("", 5585), ("  ", 5585), ("5599", 5599), ("0", 0), (" 5599 ", 5599)):
         assert Settings.from_env({"SUDARSHAN_ALERTS_HEALTH_PORT": value}).health_port == port
     for value in ("off", "OFF", "no", "false"):
         assert Settings.from_env({"SUDARSHAN_ALERTS_HEALTH_PORT": value}).health_port is None
 
 
-@pytest.mark.parametrize("value", ["abc", "-1", "65536", "70000", "55.82", "5582x", "٥٥٨٢", "on"])
+@pytest.mark.parametrize("value", ["abc", "-1", "65536", "70000", "55.85", "5585x", "٥٥٨٥", "on"])
 def test_a_port_that_is_not_one_is_refused_in_plain_words(value):
     with pytest.raises(ConfigError, match="SUDARSHAN_ALERTS_HEALTH_PORT must be a port number"):
         Settings.from_env({"SUDARSHAN_ALERTS_HEALTH_PORT": value})
+
+
+def test_the_page_keeps_clear_of_every_port_the_ring_has_planned():
+    """5582 is the market alerts' sealed API in this very service: if the health page held it,
+    market alerts could not open theirs and would stay off. 5580 to 5584 are the feed's two, the
+    market alerts', the portfolio's and the screener's (the port table in the README)."""
+    assert HEALTH_PORT not in range(5580, 5585)
+    assert Settings.from_env({}).health_port not in range(5580, 5585)
 
 
 def test_the_record_setting(tmp_path):

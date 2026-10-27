@@ -1,6 +1,6 @@
 """A health page for sudarshan-alerts: GET /health on 127.0.0.1 (M18.1, M6.8).
 
-    curl -s 127.0.0.1:5582/health | python3 -m json.tool
+    curl -s 127.0.0.1:5585/health | python3 -m json.tool
 
 What a person at a terminal, or a later check, wants first: which release is installed (``release``,
 read from the deploy tool's record; ``version`` is this service's own code and is not the release),
