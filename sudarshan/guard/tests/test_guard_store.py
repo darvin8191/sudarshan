@@ -4,16 +4,20 @@ from __future__ import annotations
 
 import dataclasses
 import os
+import re
 import sqlite3
 import threading
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy import create_engine, event
+from sqlalchemy.pool import NullPool
 
 from sudarshan.guard import schema, store
 from sudarshan.guard.store import KillSwitchState, RiskSettings, RiskStore
 
 WAIT = 10
+JOIN_S = 120  # generous: a commit's fsync can stall for seconds while the disk is busy
 
 
 def test_a_new_file_has_every_guard_off_and_the_switch_off(risk_store):
@@ -183,10 +187,46 @@ def test_first_use_from_two_threads_at_once_builds_one_engine(tmp_path):
     for thread in threads:
         thread.start()
     for thread in threads:
-        thread.join(WAIT)
+        thread.join(JOIN_S)
+        assert not thread.is_alive()
     assert not errors and len(seen) == 4
     assert fresh._engine is not None
     fresh.dispose()
+
+
+def test_a_table_another_creator_makes_between_check_and_create_is_no_failure(
+    tmp_path, monkeypatch
+):
+    """Another first use (a thread here, or a service) makes each table just before this one's
+    CREATE reaches it. A check followed by a CREATE then fails on every table, and one retry
+    does not cover four; a statement that makes a table only when it is missing never fails.
+    (Seen once as "table daily_locks already exists" with four threads at once under load.)"""
+    path = tmp_path / "r.db"
+    other = create_engine(f"sqlite:///{path}", poolclass=NullPool)
+    made = []
+
+    def first_by_the_other(conn, cursor, statement, parameters, context, executemany):
+        named = re.match(r"\s*CREATE TABLE (?:IF NOT EXISTS )?(\w+)", statement)
+        if named and named.group(1) not in made:
+            made.append(named.group(1))
+            schema.Base.metadata.tables[named.group(1)].create(other, checkfirst=True)
+
+    real = store.create_db_engine
+
+    def watched(url):
+        engine = real(url)
+        event.listen(engine, "before_cursor_execute", first_by_the_other)
+        return engine
+
+    monkeypatch.setattr(store, "create_db_engine", watched)
+    fresh = RiskStore(path)
+    try:
+        assert fresh.settings() == RiskSettings()
+        assert fresh.state() == KillSwitchState()
+    finally:
+        fresh.dispose()
+        other.dispose()
+    assert sorted(made) == sorted(schema.Base.metadata.tables)  # it raced every table
 
 
 def test_many_operations_hold_no_file_open(risk_store):

@@ -148,8 +148,9 @@ def apply(path):
     engine = create_engine(f"sqlite:///{path}", poolclass=NullPool)
     try:
         absent = missing_tables(engine)
-        # checkfirst: a table that exists is skipped, so an interrupted run completes cleanly.
-        _schema().Base.metadata.create_all(bind=engine, checkfirst=True)
+        # Each only when missing: an interrupted run completes cleanly, and the app's own first
+        # use at the same moment is no failure.
+        _schema().create_missing(engine)
         for name in absent:
             print(f"  [OK] Created {name}")
         for table, column in missing_columns(engine):

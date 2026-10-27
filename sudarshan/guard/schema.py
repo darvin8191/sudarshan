@@ -17,6 +17,7 @@ from pathlib import Path
 
 from sqlalchemy import Boolean, Column, DateTime, Float, Index, Integer, String, Text
 from sqlalchemy.orm import declarative_base
+from sqlalchemy.schema import CreateIndex, CreateTable
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DB_FILENAME = "sudarshan_risk.db"
@@ -145,5 +146,18 @@ class AuditRow(Base):
 
 
 TABLES = tuple(Base.metadata.sorted_tables)
+
+
+def create_missing(engine) -> None:
+    """Every table and index in this file, each made only when it is missing, one statement
+    apiece. Two first uses at once (two threads, or the app and the migration) never trip over
+    each other: a check followed by a CREATE lets another creator in between, on any table."""
+    with engine.begin() as connection:
+        for table in TABLES:
+            connection.execute(CreateTable(table, if_not_exists=True))
+            for index in sorted(table.indexes, key=lambda index: index.name):
+                connection.execute(CreateIndex(index, if_not_exists=True))
+
+
 #: The tables that hold one row, id 1, which must exist for the app to read them.
 SINGLE_ROW_TABLES = (SettingsRow.__tablename__, StateRow.__tablename__)

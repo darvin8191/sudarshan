@@ -24,7 +24,7 @@ from typing import Any
 
 from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from database.engine_factory import create_db_engine
@@ -32,7 +32,15 @@ from utils import real_threading
 from utils.logging import get_logger
 from utils.thread_safe_cache import LockedTTLCache
 
-from .schema import DEFAULTS, AuditRow, Base, DailyLockRow, SettingsRow, StateRow, default_path
+from .schema import (
+    DEFAULTS,
+    AuditRow,
+    DailyLockRow,
+    SettingsRow,
+    StateRow,
+    create_missing,
+    default_path,
+)
 
 logger = get_logger(__name__)
 
@@ -204,11 +212,7 @@ class RiskStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         engine = create_db_engine(f"sqlite:///{path}")
         try:
-            try:
-                Base.metadata.create_all(engine)
-            except OperationalError:
-                # Another process created a table between the existence check and the CREATE.
-                Base.metadata.create_all(engine)
+            create_missing(engine)  # safe beside another first use (a thread, a process)
             factory = sessionmaker(bind=engine, expire_on_commit=False)
             with factory() as session:
                 for model in (SettingsRow, StateRow):
