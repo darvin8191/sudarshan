@@ -41,6 +41,7 @@ from broker.upstox.mapping.gtt_data import (
     transform_place_gtt,
 )
 from database.token_db import get_token
+from sudarshan.guard import gate as risk_gate  # SUDARSHAN M5.13: the risk gate
 from utils.broker_backpressure import BrokerBusyError
 from utils.httpx_client import get_httpx_client
 from utils.logging import get_logger
@@ -172,6 +173,7 @@ def _prepare(data, auth):
     return None, None
 
 
+@risk_gate.upstox_gtt_place  # SUDARSHAN M5.13: new risk refused while the kill switch is on
 def place_gtt_order(data, auth):
     """Create a GTT on Upstox. Returns ``(response, response_dict, trigger_id)``.
 
@@ -225,6 +227,7 @@ def place_gtt_order(data, auth):
     return response, response_data, trigger_id
 
 
+@risk_gate.upstox_gtt_modify  # SUDARSHAN M5.13: new risk refused while the kill switch is on
 def modify_gtt_order(data, auth):
     """Modify an active GTT on Upstox. Returns ``(response_dict, status_code)``.
 

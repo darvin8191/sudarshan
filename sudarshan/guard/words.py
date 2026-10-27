@@ -47,12 +47,13 @@ def kill_switch_on(
     The sentence says what would let the order go: for one that would cross through zero, the
     exit that fits; for one whose position is already being exited, that exit.
     """
+    on = f"on since {since}" if since else "on"
     if verdict.reason == rules.ON_ITS_WAY and claim_sent_at is not None:
         return (
-            f"{on_its_way(position, claim_sent_at)} The kill switch is on since {since}, so "
-            "nothing beyond the open position can be sent."
+            f"{on_its_way(position, claim_sent_at)} The kill switch is {on}, so nothing beyond "
+            "the open position can be sent."
         )
-    words = [f"New orders are refused: the kill switch is on since {since}."]
+    words = [f"New orders are refused: the kill switch is {on}."]
     if verdict.reason == rules.CROSSES:
         words.append(
             f"This order would close {trader_name(position)} and open it the other way; to "

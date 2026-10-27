@@ -22,6 +22,7 @@ from broker.upstox.mapping.transform_data import (
 from database.auth_db import get_auth_token
 from database.token_db import get_br_symbol, get_symbol, get_token
 from sudarshan.books import exit_guard  # SUDARSHAN M6.9: an Exit all's exits, noted
+from sudarshan.guard import gate as risk_gate  # SUDARSHAN M5.13: the risk gate
 from utils.broker_backpressure import (
     BrokerBusyError,
     BusyResponse,
@@ -348,6 +349,7 @@ def _extract_order_id(data):
     return data.get("order_id")
 
 
+@risk_gate.upstox_place  # SUDARSHAN M5.13: new risk refused while the kill switch is on
 def place_order_api(data, auth):
     """
     Places an order using the Upstox API.
@@ -874,6 +876,7 @@ def cancel_order(orderid, auth):
         return {"status": "error", "message": _CANCEL_NOT_CONFIRMED, "not_confirmed": True}, 500
 
 
+@risk_gate.upstox_modify  # SUDARSHAN M5.13: new risk refused while the kill switch is on
 def modify_order(data, auth):
     """
     Modifies an existing order.
