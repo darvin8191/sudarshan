@@ -497,3 +497,31 @@ def test_R3_a_stale_pause_cannot_undo_an_engine_stop_so_once_fires_once(tmp_path
     assert (after["status"], after["status_reason"], after["version"]) == ("stopped", once, 1)
     assert len(store.events("owner")) == 1
     store.close()
+
+
+def test_R4_a_paused_alert_is_stopped_at_its_expiry_with_the_reason(tmp_path):
+    """A paused F&O alert does not stay Paused past its contract's expiry: the clock stops it,
+    with the reason, and market.db takes the stop judged while it was Paused."""
+    a = make({"kind": "price", "params": {"op": "crosses_above", "level": "100"}}, inst=OPTION,
+             status="paused")  # fmt: skip
+    day = date(2026, 11, 26)
+    t = ms(day, 10, 0)
+    expired = engine.Reason("expired", a.expires_at)
+    assert engine.timer(a, State(), t, sessions.day_key(day)) == engine.Outcome(
+        a.id, State(), status="stopped", reason=expired
+    )
+    book = Book()
+    book.put(a)
+    (out,) = book.on_clock(t, market(day, t, date(2026, 11, 25)))
+    assert (out.status, out.reason) == ("stopped", expired) and out.fire is None
+    assert words.status_reason(out.reason) == "Contract expired on 25 Nov"
+    assert book.on_clock(t + 1000, market(day, t + 1000, date(2026, 11, 25))) == []  # once
+    store = MarketStore(tmp_path / "market.db")
+    row = store.create("owner", spec.check(OPTION | {"kind": "price", "params": {
+        "op": "crosses_above", "level": "100"}}, ms(MON, 8, 0)), ms(MON, 8, 0))  # fmt: skip
+    store.pause("owner", row["id"], 1, ms(MON, 9, 0))
+    assert not store.set_status("owner", row["id"], "stopped", "x", t, version=2)  # not Active
+    assert store.set_status("owner", row["id"], "stopped", "Contract expired on 25 Nov", t,
+                            version=2, was="paused")  # fmt: skip
+    assert store.alert("owner", row["id"])["status"] == "stopped"
+    store.close()
