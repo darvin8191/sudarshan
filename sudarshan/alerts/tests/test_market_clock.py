@@ -94,6 +94,7 @@ def test_a_pause_still_going_counts_to_the_value_judged():
         (("10:00:00", "10:01:00", "feed"), ("10:00:00", "10:01:00", "feed")),
         (("15:29:00", "15:45:00", "feed"), ("15:29:00", "15:30:00", "feed")),  # to the close
         (("15:31:00", None, "service"), None),  # after the close
+        (("09:05:00", "09:15:00", "feed"), None),  # ends as the session opens: wholly before
     ],
 )
 def test_only_the_part_of_a_pause_inside_the_session_counts(pause, inside):

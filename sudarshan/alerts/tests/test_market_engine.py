@@ -129,6 +129,17 @@ def test_an_end_judges_a_candle_that_closed_by_then_and_drops_one_that_did_not()
     assert out.fire is None and out.status == "stopped"
 
 
+def test_an_end_never_judges_a_candle_of_an_earlier_session():
+    """No timer ran at the 10:00 candle's close; the end date passes at midnight. The candle is
+    noted on the card, not told a day late with the stop."""
+    a = alert(op="at_or_above", frequency="at_close", candle=15, ends="2026-10-21")
+    state, _, _ = feed(a, [(100.05, T0 + MIN, 0, T0 + 15 * MIN)])
+    midnight = int(datetime(2026, 10, 22, tzinfo=IST).timestamp() * 1000)
+    out = engine.timer(a, state, midnight, DAY + 1)
+    assert (out.status, out.reason.code, out.fire) == ("stopped", "ended", None)
+    assert out.note.code == engine.NOT_JUDGED
+
+
 def test_once_at_close_stops_when_its_close_fires():
     a = alert(op="at_or_above", frequency="at_close", candle=1, ends="2026-10-21T10:01:00+05:30")
     state, _, _ = feed(a, [(100.05, T0 + 30_000, 0, T0 + MIN)])

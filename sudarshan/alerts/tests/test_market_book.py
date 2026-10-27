@@ -112,6 +112,20 @@ def test_alerts_on_a_key_are_judged_in_id_order():
     assert [o.alert_id for o in out.outcomes] == [2, 5, 9]
 
 
+def test_each_queued_state_carries_the_version_it_was_judged_at():
+    """The store saves a state only at the alert's current version: after an edit that keeps
+    the state, what a tick changes is queued under the new version. A stopped alert queues
+    nothing (its state is not judged again)."""
+    book = Book()
+    book.put(alert())
+    book.put(dataclasses.replace(alert(), version=2, note="later"))  # an edit: the state stays
+    assert book.changed() == {1: (2, State())}
+    book.on_tick(tick(99.95), T0, market(T0))
+    assert book.changed() == {1: (2, book.state(1))}
+    book.put(dataclasses.replace(alert(3), status="stopped"))
+    assert book.changed() == {}
+
+
 def test_changed_hands_over_each_state_once():
     book = Book()
     book.put(alert(1))
