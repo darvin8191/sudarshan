@@ -6,6 +6,8 @@
 # Docs: sudarshan/alerts/README.md. Optional settings: /etc/sudarshan/alerts.env
 # (root:sudarshan 640); SUDARSHAN_ORDER_ALERTS=off there turns the alerts off (the service then
 # exits at once and stays stopped until the next restart).
+# Market alerts (M10) run in the same process when SUDARSHAN_MARKET_ALERTS=on there (off by
+# default): ticks from sudarshan-feed on 127.0.0.1:5581/5580, the Alerts page's API on 5582.
 # Installed, enabled and restarted by sudarshan-deploy from each release, like sudarshan-feed.
 
 [Unit]
@@ -26,7 +28,8 @@ ExecStart=/opt/sudarshan/apps/openalgo/.venv/bin/python -m sudarshan.alerts
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONDONTWRITEBYTECODE=1
 EnvironmentFile=-/etc/sudarshan/alerts.env
-# The only place it writes: /var/lib/sudarshan-alerts (alerts.db, the once-only record).
+# The only place it writes: /var/lib/sudarshan-alerts (alerts.db, the once-only record, and
+# market.db, the market alerts' record).
 # openalgo.db is read without write access (see owner.py), so db/ stays read-only here.
 StateDirectory=sudarshan-alerts
 StateDirectoryMode=0700

@@ -501,6 +501,15 @@ class MarketStore:
         )
         return self._with_deliveries(principal, query)
 
+    def event_by_claim(self, principal: str, claim: str) -> dict[str, Any] | None:
+        """The event recorded under ``claim``, with its deliveries, or None. A write reported as
+        failed may still have committed: the runtime asks before it tells (review A7.l)."""
+        query = select(alert_event).where(
+            alert_event.c.principal == self._who(principal), alert_event.c.claim == claim
+        )
+        found = self._with_deliveries(principal, query)
+        return found[0] if found else None
+
     def pending(self, principal: str, channel: str) -> list[dict[str, Any]]:
         """Events whose delivery on ``channel`` is still pending (after a restart)."""
         who = self._who(principal)

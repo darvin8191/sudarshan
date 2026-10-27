@@ -53,7 +53,7 @@ class Days:
         window = cal.day_window(day)
         if window is not None and cal.trades_anyway(day):
             if day not in self._refused:
-                self._refused.add(day)
+                self._refused = {day}  # told once a day; only the latest day is kept
                 log.error(
                     "%s trades its usual hours and the extra-days file adds a window %s to it: "
                     "market alerts check the usual hours only and not the added window, until "

@@ -166,6 +166,13 @@ class Book:
         self._stopped.clear()
         return changed
 
+    def restore(self, changed: Mapping[int, tuple[int, State]]) -> None:
+        """States a flush could not save go back in the queue, unless a newer one is there or
+        the alert has gone."""
+        for alert_id, item in changed.items():
+            if alert_id in self._states and alert_id not in self._changed:
+                self._changed[alert_id] = item
+
     # ---- what happens ----------------------------------------------------------------------
     def on_tick(self, frame: Mapping, now: int, market: Market) -> TickResult:
         """One frame from the feed, judged at ``now`` (epoch ms)."""
@@ -358,6 +365,7 @@ class Book:
             self._groups.pop(key, None)
             self._trades.pop(key, None)
             self._keys.pop(key, None)
+            self._printed.pop(key, None)
 
 
 def _close_at_print(

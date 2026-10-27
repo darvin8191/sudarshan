@@ -46,8 +46,9 @@ from sudarshan.autologin.schedule import IST, TradingCalendar, hhmm
 
 from . import __version__, loopback, messages
 from .config import ConfigError, Settings, setup_logging, switched_off
+from .market.config import MarketSettings, feed_url_of, market_on  # M10.1
 from .orders import Alert, OrderTracker
-from .outbox import OpenAlgoTelegram, Outbox, Throttle
+from .outbox import OpenAlgoTelegram, Outbox, Pacer, Throttle
 from .owner import Owner, OwnerError, load_openalgo_modules, prepare_openalgo_env, read_owner
 from .resync import Books, BookUnavailable, read_books
 from .store import DB_FILENAME, Store
@@ -110,10 +111,12 @@ class AlertService:
         *,
         owner_reader: Callable[[], Owner],
         clock: Callable[[], datetime] | None = None,
+        pacer: Pacer | None = None,  # M10.5: one pace for every Telegram lane
     ):
         self.settings = settings
         self.read_owner = owner_reader
         self.clock = clock or (lambda: datetime.now(IST))
+        self.pacer = pacer
         calendar = TradingCalendar(settings.holidays_file, settings.extra_days_file)
         self.window = AlertWindow(
             calendar, settings.window, settings.always_on, settings.extra_days_file
@@ -150,7 +153,7 @@ class AlertService:
             telegram = OpenAlgoTelegram(
                 self.settings.openalgo_url, client, lambda: self.owner, self._reload_owner
             )
-            self.outbox = Outbox(telegram.send, self.clock)
+            self.outbox = Outbox(telegram.send, self.clock, self.pacer)
             log.info(
                 "sudarshan-alerts %s: window %s, cancellations %s, sandbox %s",
                 __version__, self._window_text(), self.settings.cancelled,
@@ -571,20 +574,28 @@ def _json(raw) -> dict | None:
     return message if isinstance(message, dict) else None
 
 
-async def _serve(service: AlertService) -> None:
+async def _serve(service: AlertService, market=None) -> None:
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, service.stop, f"signal {sig.name}")
-    await service.run()
+        loop.add_signal_handler(sig, _stop, service, market, f"signal {sig.name}")
+    await asyncio.gather(service.run(), *([market.run()] if market else []))  # M10.1
+
+
+def _stop(service: AlertService, market, reason: str) -> None:
+    service.stop(reason)
+    if market is not None:  # M10.1
+        market.stop(reason)
 
 
 def main() -> int:
     setup_logging()
     try:
-        if switched_off():
+        market_wanted = market_on()  # M10.1: the process ends only when both are off
+        if switched_off() and not market_wanted:
             log.info("Order alerts are off (SUDARSHAN_ORDER_ALERTS=off): nothing is sent")
             return 0  # the unit restarts on failure only, so it stays stopped
         settings = Settings.from_env()
+        market = MarketSettings.from_env() if market_wanted else None  # M10.1
         db_path = prepare_openalgo_env(settings.env_file, settings.app_dir)
         load_openalgo_modules()
         setup_logging()  # OpenAlgo's logging module replaced the handlers on import
@@ -594,9 +605,17 @@ def main() -> int:
     except Exception:  # OpenAlgo's modules refused their settings at import
         log.exception("sudarshan-alerts cannot load OpenAlgo's database modules")
         return 2
-    service = AlertService(settings, owner_reader=lambda: read_owner(db_path))
+    pacer = Pacer()  # M10.5: fills first, market alerts in what is left
+    service = AlertService(settings, owner_reader=lambda: read_owner(db_path), pacer=pacer)
+    from .market.runtime import MarketRuntime, ReleasedClaims  # M10.1
+
+    if market is not None:
+        runtime = MarketRuntime(settings, market, owner_reader=lambda: read_owner(db_path),
+                                pacer=pacer, openalgo_db=db_path)  # fmt: skip
+    else:  # off: the feed drops the keys an earlier run claimed
+        runtime = ReleasedClaims(feed_url_of())
     try:
-        asyncio.run(_serve(service))
+        asyncio.run(_serve(service, runtime))
     except Exception:  # a bug: systemd restarts it
         log.exception("sudarshan-alerts stopped unexpectedly")
         return 1
