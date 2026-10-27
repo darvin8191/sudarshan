@@ -420,6 +420,7 @@ def test_refusals_of_one_kind_share_an_audit_row(the_gate, risk_store):
     upstox = broker()
     for _ in range(3):
         upstox.place(order("BUY"), "token")
+    the_gate.flush_notes()
     (entry,) = risk_store.history()
     assert (entry.kind, entry.count, entry.pipe, entry.surface) == (
         "order_refused",
@@ -697,3 +698,51 @@ def test_a_flat_book_is_not_reused_for_a_position_something_was_sent_on(the_gate
     refused_message(upstox.place(order("BUY", symbol=PE), "token"))  # a flat read, kept
     book.rows = [row(CE, 65)]  # the entry has filled
     assert upstox.place(order("SELL"), "token")[2] == "OID1"
+
+
+def test_a_burst_of_refusals_writes_the_audit_at_most_every_two_seconds(
+    the_gate, risk_store, clock, monkeypatch
+):
+    """A SQLite write is disk work eventlet cannot make cooperative: a runaway script refused
+    eight times a second must not become eight writes a second."""
+    the_gate.set_state(ON)
+    writes = []
+    original = risk_store.audit
+    monkeypatch.setattr(
+        risk_store, "audit", lambda *a, **k: writes.append(k["count"]) or original(*a, **k)
+    )
+    upstox = broker()
+    for _ in range(40):  # five seconds at eight a second
+        upstox.place(order("BUY"), "token")
+        clock.now += 0.125
+    assert writes == [1, 16, 16]  # the first at once, then the counts every two seconds
+    the_gate.flush_notes()
+    assert writes == [1, 16, 16, 7]
+    assert sum(entry.count for entry in risk_store.history()) == 40
+    the_gate.flush_notes()
+    assert len(writes) == 4  # nothing left to write
+
+
+def test_a_count_kept_past_its_minute_is_written_by_the_next_refusal(the_gate, risk_store, clock):
+    the_gate.set_state(ON)
+    upstox = broker()
+    upstox.place(order("BUY"), "token")
+    upstox.place(order("BUY"), "token")  # counted in memory
+    clock.now += gate.NOTE_KEPT_S + 1
+    upstox.place(order("BUY", symbol=PE), "token")  # another kind: writes the old count too
+    counts = {entry.detail["symbol"]: entry.count for entry in risk_store.history()}
+    assert counts == {CE: 2, PE: 1}
+
+
+@pytest.mark.parametrize(
+    ("answer", "outcome"),
+    [
+        ((True, {"status": "success", "orderid": "S1"}, 200), (gate.ANSWERED, "S1")),
+        ((True, {"status": "success", "trigger_id": "G1"}, 200), (gate.ANSWERED, "G1")),
+        ((False, {"status": "error", "message": "no funds"}, 400), (gate.REFUSED, None)),
+        ((False, {"status": "error", "message": "busy"}, 409), (gate.REFUSED, None)),
+        ((False, {"status": "error", "message": "broke"}, 500), (gate.ANSWERED, None)),
+    ],
+)
+def test_what_a_sandbox_answer_says_was_placed(answer, outcome):
+    assert gate._answer_in_the_sandbox(answer) == outcome

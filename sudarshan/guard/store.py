@@ -320,9 +320,10 @@ class RiskStore:
         activation_id: str | None = None,
         detail: dict | None = None,
         merge_key: str | None = None,
+        count: int = 1,
     ) -> None:
-        """Append what the risk layer did. With ``merge_key``, a row written for the same key in
-        the last ``REFUSAL_MERGE_S`` seconds is counted up instead."""
+        """Append what the risk layer did, ``count`` times over. With ``merge_key``, a row written
+        for the same key in the last ``REFUSAL_MERGE_S`` seconds is counted up instead."""
         now = utcnow()
         with self._session() as session:
             row = None
@@ -335,7 +336,7 @@ class RiskStore:
                     .limit(1)
                 ).scalar_one_or_none()
             if row is not None:
-                row.count += 1
+                row.count += count
                 row.last_at = _to_db(now)
                 row.summary = summary
             else:
@@ -348,7 +349,7 @@ class RiskStore:
                         surface=_clip(surface, 120),
                         actor=_clip(actor, 80),
                         activation_id=activation_id,
-                        count=1,
+                        count=count,
                         merge_key=_clip(merge_key, 200),
                         summary=summary,
                         detail=None if detail is None else json.dumps(detail, default=str),

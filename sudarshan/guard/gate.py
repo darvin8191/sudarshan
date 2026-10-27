@@ -67,6 +67,12 @@ SEND_HELD_AT_MOST_S = 150.0
 BOOK_REUSE_S = 5.0
 #: How soon the kill switch's state is read again after a read failed.
 STATE_RETRY_S = 2.0
+#: Refusals of one kind are written to the audit at most this often; the rest are counted in
+#: memory and written with the next one. A SQLite commit is disk work eventlet cannot make
+#: cooperative, so a write per refusal would stall the worker under a runaway script.
+NOTE_EVERY_S = 2.0
+#: A count kept in memory this long without a refusal is written by the next note or flush.
+NOTE_KEPT_S = 60.0
 
 # Machine codes, for the audit and SUDARSHAN's own endpoints, never for a sentence.
 KILL_SWITCH_ACTIVE = "KILL_SWITCH_ACTIVE"
@@ -128,6 +134,19 @@ class Send:
     answered: float | None = None
 
 
+@dataclass
+class _Note:
+    """One kind of refusal, as last written to the audit, and how many came since."""
+
+    kind: str
+    words: str
+    pipe: str
+    surface: str
+    detail: dict
+    written: float  # monotonic
+    pending: int = 0
+
+
 @dataclass(frozen=True)
 class Decision:
     refused: bool = False
@@ -164,6 +183,7 @@ class Gate:
         self._rows: tuple[str, float, list] | None = None  # (owner, when, rows): Live only
         self._store = store
         self._read = read or readers
+        self._notes: dict[str, _Note] = {}  # audit rows by key, with counts not yet written
 
     def _the_store(self) -> risk_store.RiskStore:
         return self._store or risk_store.STORE
@@ -394,7 +414,7 @@ class Gate:
         return replace(
             order,
             exchange=gtt.exchange.upper() or order.exchange,
-            symbol=gtt.symbol.upper() or order.symbol,
+            symbol=gtt.symbol or order.symbol,
             product=gtt.product.upper() or order.product,
             side=gtt.side,
             trigger_type=gtt.trigger_type,
@@ -520,23 +540,70 @@ class Gate:
     # -- the audit, outside the lock ------------------------------------------------------------
 
     def _note(self, pipe: str, order: Order | None, decision: Decision) -> None:
-        """Write a refusal (merged per minute) or a check that broke. Never fails an order."""
+        """Audit a refusal or a check that broke: written now when its kind was not written in
+        the last ``NOTE_EVERY_S``, otherwise counted and written with the next. Never fails an
+        order."""
         try:
             surface = _surface()
             symbol = "" if order is None else order.symbol
             kind = "order_refused" if decision.refused else "guard_error"
             if decision.code == GUARD_UNAVAILABLE:
                 kind = "guard_unavailable"
-            self._the_store().audit(
-                kind,
-                decision.words or "The risk check broke on an order; it was let go.",
-                pipe=pipe,
-                surface=surface,
-                detail={"code": decision.code, "symbol": symbol, **decision.detail},
-                merge_key=f"{decision.code}|{surface}|{symbol}",
-            )
+            key = f"{decision.code}|{surface}|{symbol}"
+            said = decision.words or "The risk check broke on an order; it was let go."
+            detail = {"code": decision.code, "symbol": symbol, **decision.detail}
+            now = time.monotonic()
+            with self._lock:
+                stale = self._take_stale(now)
+                note = self._notes.get(key)
+                if note is not None and now - note.written < NOTE_EVERY_S:
+                    note.pending += 1
+                    note.words, note.detail = said, detail
+                    write = None
+                else:
+                    count = 1 + (note.pending if note is not None else 0)
+                    self._notes[key] = _Note(kind, said, pipe, surface, detail, now)
+                    write = (key, _Note(kind, said, pipe, surface, detail, now, count))
+            for item in [*stale, *([write] if write else [])]:
+                self._write_note(*item)
         except Exception:
             logger.exception("A risk refusal could not be written to the audit")
+
+    def _take_stale(self, now: float) -> list[tuple[str, _Note]]:
+        """Counts kept past ``NOTE_KEPT_S``, taken out to be written; call under the lock."""
+        stale = []
+        for key, note in list(self._notes.items()):
+            if now - note.written > NOTE_KEPT_S:
+                del self._notes[key]
+                if note.pending:
+                    stale.append((key, note))
+        return stale
+
+    def _write_note(self, key: str, note: _Note) -> None:
+        count = note.pending
+        self._the_store().audit(
+            note.kind,
+            note.words,
+            pipe=note.pipe,
+            surface=note.surface,
+            detail=note.detail,
+            merge_key=key,
+            count=count,
+        )
+
+    def flush_notes(self) -> None:
+        """Write every count still kept in memory (before the audit is read)."""
+        with self._lock:
+            pending = []
+            for key, note in self._notes.items():
+                if note.pending:
+                    pending.append((key, replace(note)))
+                    note.pending = 0
+        for key, note in pending:
+            try:
+                self._write_note(key, note)
+            except Exception:
+                logger.exception("A risk refusal count could not be written to the audit")
 
 
 def _hhmm(at: datetime | None) -> str:
@@ -709,6 +776,100 @@ upstox_gtt_place = _guarded(
 #: broker/upstox/api/gtt_api.modify_gtt_order(data, auth)
 upstox_gtt_modify = _guarded(
     _Kind(LIVE, _upstox_gtt(GTT_MODIFY), _refuse_with_body, _answer_of_change)
+)
+
+
+def _symbol(value: object) -> str:
+    """A sandbox symbol as the sandbox keeps it (its position rows use the order's own)."""
+    return str(value or "").strip()
+
+
+def _sandbox_place(manager, order_data: dict, *args, **kwargs) -> Order:
+    return Order(
+        pipe=SANDBOX,
+        action=PLACE,
+        exchange=_word(order_data.get("exchange")),
+        symbol=_symbol(order_data.get("symbol")),
+        product=_word(order_data.get("product")),
+        side=rules.side_of(order_data.get("action")),
+        quantity=rules.quantity_of(order_data.get("quantity")),
+        owner=str(manager.user_id),
+    )
+
+
+def _sandbox_modify(manager, orderid, new_data: dict, *args, **kwargs) -> Order:
+    """OrderManager.modify_order: the quantity when given, a price or trigger only when set."""
+    terms = {}
+    if "quantity" in new_data:
+        terms["quantity"] = new_data["quantity"]
+    if new_data.get("price"):
+        terms["price"] = new_data["price"]
+    if new_data.get("trigger_price"):
+        terms["trigger"] = new_data["trigger_price"]
+    return Order(
+        pipe=SANDBOX,
+        action=MODIFY,
+        exchange="",
+        symbol="",
+        product="",
+        side=None,
+        quantity=None,
+        owner=str(manager.user_id),
+        ref=str(orderid),
+        terms=terms,
+    )
+
+
+def _sandbox_gtt(action: str):
+    def describe(manager, *args, **kwargs) -> Order:
+        if action == GTT_PLACE:  # GTTManager.place_gtt(gtt_data, last_price)
+            data, ref = args[0], None
+        else:  # GTTManager.modify_gtt(trigger_id, gtt_data)
+            ref, data = str(args[0]), args[1]
+        return Order(
+            pipe=SANDBOX,
+            action=action,
+            exchange=_word(data.get("exchange")),
+            symbol=_symbol(data.get("symbol")),
+            product=_word(data.get("product")),
+            side=rules.side_of(data.get("action")),
+            quantity=rules.quantity_of(data.get("quantity")),
+            owner=str(manager.user_id),
+            ref=ref,
+            trigger_type=_word(data.get("trigger_type")),
+        )
+
+    return describe
+
+
+def _refuse_in_the_sandbox(text: str):
+    return False, {"status": "error", "message": text, "mode": "analyze"}, 403
+
+
+def _answer_in_the_sandbox(result) -> tuple[str, str | None]:
+    """A sandbox answer ``(ok, body, status)``: a 4xx placed nothing; anything else may have."""
+    ok, body, status = result
+    if not ok and isinstance(status, int) and status < 500:
+        return REFUSED, None
+    ref = (body.get("orderid") or body.get("trigger_id")) if isinstance(body, dict) else None
+    return ANSWERED, str(ref) if ref else None
+
+
+#: sandbox/order_manager.OrderManager.place_order, inside its position lock
+sandbox_place = _guarded(
+    _Kind(SANDBOX, _sandbox_place, _refuse_in_the_sandbox, _answer_in_the_sandbox)
+)
+#: sandbox/order_manager.OrderManager.modify_order
+sandbox_modify = _guarded(
+    _Kind(SANDBOX, _sandbox_modify, _refuse_in_the_sandbox, _answer_in_the_sandbox)
+)
+#: sandbox/gtt_manager.GTTManager.place_gtt
+sandbox_gtt_place = _guarded(
+    _Kind(SANDBOX, _sandbox_gtt(GTT_PLACE), _refuse_in_the_sandbox, _answer_in_the_sandbox)
+)
+#: sandbox/gtt_manager.GTTManager.modify_gtt
+sandbox_gtt_modify = _guarded(
+    _Kind(SANDBOX, _sandbox_gtt(GTT_MODIFY), _refuse_in_the_sandbox, _answer_in_the_sandbox)
 )
 
 GATE = Gate()

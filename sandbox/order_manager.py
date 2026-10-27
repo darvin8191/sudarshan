@@ -28,6 +28,7 @@ from database.symbol import SymToken
 from database.token_db import get_symbol_info
 from sandbox.fund_manager import FundManager
 from sandbox.position_locks import holds_position_lock
+from sudarshan.guard import gate as risk_gate  # SUDARSHAN M5.13: the risk gate
 from utils.constants import VALID_EXCHANGES
 from utils.logging import get_logger
 from utils.symbol_utils import is_future, is_option
@@ -64,6 +65,7 @@ class OrderManager:
     # netting) through the order's commit and any immediate fill, so a second
     # order on the same position decides on what this one left behind.
     @holds_position_lock(_order_position)
+    @risk_gate.sandbox_place  # SUDARSHAN M5.13: decided under the position's lock
     def place_order(self, order_data, prefetched_quote=None):
         """
         Place a new order in sandbox mode
@@ -818,6 +820,7 @@ class OrderManager:
                 500,
             )
 
+    @risk_gate.sandbox_modify  # SUDARSHAN M5.13: new risk refused while the kill switch is on
     def modify_order(self, orderid, new_data):
         """
         Modify an existing open order

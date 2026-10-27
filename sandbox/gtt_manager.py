@@ -43,6 +43,7 @@ from database.sandbox_db import (
 from sandbox.fund_manager import FundManager
 from sandbox.order_manager import OrderManager
 from sandbox.position_locks import try_position_lock
+from sudarshan.guard import gate as risk_gate  # SUDARSHAN M5.13: the risk gate
 from utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -178,6 +179,7 @@ class GTTManager:
             return None, error
         return Decimal(str(margin)), None
 
+    @risk_gate.sandbox_gtt_place  # SUDARSHAN M5.13: new risk refused while the kill switch is on
     def place_gtt(self, gtt_data: dict, last_price) -> tuple[bool, dict, int]:
         """Create a GTT and block its margin.
 
@@ -375,6 +377,7 @@ class GTTManager:
 
     # -- modify / cancel / list -------------------------------------------
 
+    @risk_gate.sandbox_gtt_modify  # SUDARSHAN M5.13: new risk refused while the kill switch is on
     def modify_gtt(self, trigger_id: str, gtt_data: dict) -> tuple[bool, dict, int]:
         """Re-price an active GTT, reconciling the margin difference."""
         try:

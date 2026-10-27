@@ -169,3 +169,81 @@ def live_gtt(auth: str, trigger_id: object) -> Gtt | None:
             exchange=str(item.get("exchange") or ""),
         )
     return None
+
+
+# -- the sandbox: its own tables, read in the caller's session ------------------------------------
+
+
+def _sandbox():
+    from database import sandbox_db
+
+    return sandbox_db
+
+
+def sandbox_position(user_id: str, symbol: str, exchange: str, product: str) -> int:
+    """p for one sandbox position. The place decorator runs inside the position's lock
+    (sandbox/position_locks.py), so this read is the one the order itself decides on."""
+    try:
+        row = (
+            _sandbox()
+            .SandboxPositions.query.filter_by(
+                user_id=user_id, symbol=symbol, exchange=exchange, product=product
+            )
+            .populate_existing()
+            .first()
+        )
+    except Exception as exc:
+        raise Unreadable(f"sandbox positions: {type(exc).__name__}") from exc
+    return 0 if row is None else int(row.quantity or 0)
+
+
+def sandbox_working_order(user_id: str, order_id: object) -> Working | None:
+    """The sandbox order ``order_id``, or None when it is not there."""
+    try:
+        row = (
+            _sandbox()
+            .SandboxOrders.query.filter_by(orderid=str(order_id), user_id=user_id)
+            .populate_existing()
+            .first()
+        )
+    except Exception as exc:
+        raise Unreadable(f"sandbox orders: {type(exc).__name__}") from exc
+    if row is None:
+        return None
+    terms = rules.OrderTerms(
+        quantity=int(row.quantity or 0),
+        price_type=str(row.price_type or "").upper(),
+        price=_number(row.price),
+        trigger=_number(row.trigger_price),
+    )
+    return Working(
+        order=rules.WorkingOrder(rules.side_of(row.action), int(row.filled_quantity or 0), terms),
+        exchange=str(row.exchange or "").upper(),
+        symbol=str(row.symbol or ""),
+        product=str(row.product or "").upper(),
+        instrument="",
+        final=str(row.order_status or "") not in ("open", "trigger pending"),
+    )
+
+
+def sandbox_gtt(user_id: str, trigger_id: object) -> Gtt | None:
+    """The active sandbox GTT ``trigger_id``, or None when it is not there."""
+    try:
+        gtt = (
+            _sandbox()
+            .SandboxGTT.query.filter_by(gtt_id=str(trigger_id), user_id=user_id)
+            .populate_existing()
+            .first()
+        )
+        legs = list(gtt.legs) if gtt is not None else []
+    except Exception as exc:
+        raise Unreadable(f"sandbox GTTs: {type(exc).__name__}") from exc
+    if gtt is None or gtt.gtt_status != "active":
+        return None
+    return Gtt(
+        trigger_type="OCO" if gtt.trigger_type == "two-leg" else "SINGLE",
+        side=rules.side_of(legs[0].action) if legs else None,
+        product=str(legs[0].product or "").upper() if legs else "",
+        symbol=str(gtt.symbol or ""),
+        exchange=str(gtt.exchange or "").upper(),
+    )
