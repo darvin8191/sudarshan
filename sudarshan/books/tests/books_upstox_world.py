@@ -69,6 +69,7 @@ class Broker:
         self.fresh_parity = 1  # which reads are fresh while read_flip is on
         self.orders_unreadable = False  # the order book read fails
         self.slow_read = 0.0  # seconds a positions read takes to answer, its rows as at its start
+        self.read_delay = None  # or callable(read number from 1) -> seconds, as slow_read
 
     # -- state ---------------------------------------------------------------
     def true_qty(self, symbol: str) -> int:
@@ -115,6 +116,7 @@ class Broker:
         now = time.monotonic()
         with self.lock:
             self.reads += 1
+            number = self.reads
             fresh = self.read_flip and self.reads % 2 == self.fresh_parity
         rows = []
         for symbol, (token, exchange, product, _oa) in INSTRUMENTS.items():
@@ -134,8 +136,9 @@ class Broker:
                     "sell_price": 0.0,
                 }
             )
-        if self.slow_read:
-            time.sleep(self.slow_read)
+        delay = self.read_delay(number) if self.read_delay is not None else self.slow_read
+        if delay:
+            time.sleep(delay)
         return FakeResponse(200, {"status": "success", "data": rows})
 
     def _order_book(self):

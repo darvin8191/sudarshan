@@ -12,8 +12,8 @@ arrive while the first is still being placed.
 So in the Live book every exit decides on its own read of the book, and a
 position is busy while
 
-- an exit for it is being placed: claimed here from before its order is sent
-  until after it is noted (``one``);
+- an exit for it is being placed: claimed here from before the read it is
+  sized from until after it is noted, or until it has sent nothing (``one``);
 - an exit for it may have placed an order in the last ``EXIT_SHOWS_WITHIN_S``:
   noted here (``exit_placed``) by the app's Exit, by any smart order to a
   position size of 0, and by Exit all for each exit it sent;
@@ -28,11 +28,12 @@ position at once except the busy ones, each of which it reports as not sent in
 a sentence of its own. It never waits for anything, and it starts no Upstox
 call after ``EXIT_ALL_SENDS_FOR_S``.
 
-One position's exit is refused with that sentence (409) if its position is
-busy, or an Exit all holds the book, either before the read it is sized from
-(``why_busy``: a slow read can answer older than the exit that made it busy) or
-when it is claimed after that read. An entry (a smart order that opens or adds
-to a position) is never refused.
+One position's exit claims its position before the read it is sized from and
+holds it across that read, so an Exit all or another exit that starts during a
+slow read leaves the position to it: a read can answer older than an exit sent
+while it was on its way. It is refused with that sentence (409) if its position
+is busy, or an Exit all holds the book, when it claims. An entry (a smart order
+that opens or adds to a position) is never refused.
 
 The sandbox's book shows each exit the moment it is placed, so nothing is noted
 there; the app's Exit still claims its position in the sandbox's book while it
@@ -258,8 +259,8 @@ def why_busy(book: str, exchange: object, symbol: object, product: object) -> st
     """Why an exit for this position would be refused right now (``EXITS.why_busy``).
 
     The phone's Exit asks first, so a second tap is answered at once instead of waiting behind
-    the first for the broker's per-symbol lock; the claim itself is taken where the exit is
-    sized and sent (broker/upstox/api/order_api.py).
+    the first for the broker's per-symbol lock; the claim itself is taken under that lock,
+    before the read the exit is sized from (broker/upstox/api/order_api.py).
     """
     return EXITS.why_busy(book, position_of(exchange, symbol, product))
 
