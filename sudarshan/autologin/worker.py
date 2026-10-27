@@ -11,6 +11,10 @@ or an NSE holiday costs nothing:
   test       any day and time, switch on or off, but not while paused; refused 09:00-15:40 on a
              trading day while the stored login works (Test now replaces today's login)
 
+Market hours are the usual ones on a usual day. A day listed in the extra-days file with its own
+window (a Muhurat or special Saturday session) trades in that window, so both rules above follow
+it: Test now is open that morning and refused through the session (schedule.market_spans).
+
 A pause begins when Upstox refuses the login for any reason other than "too many requests" and
 ends only when the owner saves the TOTP key or the PIN again: the same refused pair is never sent
 twice by a timer, a restart, the switch or Test now.

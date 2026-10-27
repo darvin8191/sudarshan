@@ -439,8 +439,8 @@ export default function AutoLogin() {
               </Button>
               <p className="text-sm text-muted-foreground">
                 One login now, at any time. Test now replaces today's login, so it is not available
-                from 09:00 to 15:40 on a trading day while Upstox is connected, or while auto-login
-                is paused.
+                during market hours while Upstox is connected (usually from 09:00 to 15:40 on a
+                trading day; a special session has its own hours), or while auto-login is paused.
               </p>
               {!data.test.allowed && data.test.reason && !test.isPending && (
                 <p className={`inline-flex items-start gap-1.5 text-sm ${WARNING}`}>

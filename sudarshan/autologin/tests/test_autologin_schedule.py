@@ -105,6 +105,133 @@ def test_windows(holidays_file, hhmm, market, test_blocked):
     assert not calendar.in_market_hours(saturday) and not calendar.blocks_test_now(saturday)
 
 
+def _calendar_with(holidays_file, extra_file, text: str) -> TradingCalendar:
+    extra_file.write_text(text)
+    return TradingCalendar(holidays_file, extra_file)
+
+
+def _at(day: date, hhmm: str) -> datetime:
+    hour, minute = map(int, hhmm.split(":"))
+    return datetime(day.year, day.month, day.day, hour, minute, 30, tzinfo=IST)
+
+
+@pytest.mark.parametrize(
+    ("hhmm", "market", "test_blocked"),
+    [
+        ("09:00", False, False),  # a usual pre-open, but the exchange is closed that morning
+        ("09:15", False, False),
+        ("10:00", False, False),  # Test now and a new login are fine until the session starts
+        ("14:04", False, False),
+        ("14:05", True, True),  # the session's own start, the pre-open included
+        ("15:00", True, True),
+        ("15:39", True, True),
+        ("15:40", False, False),  # its own F&O close
+        ("16:00", False, False),
+    ],
+)
+def test_a_special_session_trades_in_its_own_window(
+    holidays_file, extra_file, hhmm, market, test_blocked
+):
+    """Muhurat 2026, a Sunday: the guards follow the line's window, not 09:00-15:40."""
+    calendar = _calendar_with(holidays_file, extra_file, f"{MUHURAT} 14:05-15:40  # Muhurat\n")
+    at = _at(MUHURAT, hhmm)
+    assert calendar.in_market_hours(at) is market
+    assert calendar.blocks_test_now(at) is test_blocked
+
+
+@pytest.mark.parametrize(
+    ("hhmm", "market", "test_blocked"),
+    [
+        ("10:00", False, False),  # an NSE holiday: nothing trades but the listed session
+        ("17:59", False, False),
+        ("18:00", True, True),
+        ("18:59", True, True),
+        ("19:00", False, False),
+    ],
+)
+def test_a_listed_holiday_trades_only_in_its_own_window(
+    holidays_file, extra_file, hhmm, market, test_blocked
+):
+    calendar = _calendar_with(holidays_file, extra_file, f"{HOLIDAY} 18:00-19:00\n")
+    at = _at(HOLIDAY, hhmm)
+    assert calendar.in_market_hours(at) is market
+    assert calendar.blocks_test_now(at) is test_blocked
+
+
+@pytest.mark.parametrize(
+    ("hhmm", "market", "test_blocked"),
+    [
+        ("08:59", False, False),
+        ("09:00", False, True),  # the usual hours stay as they are on a day that trades anyway
+        ("09:15", True, True),
+        ("15:39", True, True),
+        ("15:40", False, False),
+        ("17:59", False, False),
+        ("18:00", True, True),  # and the listed session is added to them
+        ("18:59", True, True),
+        ("19:00", False, False),
+    ],
+)
+def test_a_session_on_a_weekday_that_trades_anyway_is_added_to_the_usual_hours(
+    holidays_file, extra_file, hhmm, market, test_blocked
+):
+    tuesday = date(2026, 10, 20)
+    calendar = _calendar_with(holidays_file, extra_file, f"{tuesday} 18:00-19:00\n")
+    at = _at(tuesday, hhmm)
+    assert calendar.in_market_hours(at) is market
+    assert calendar.blocks_test_now(at) is test_blocked
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        f"{MUHURAT}",  # listed with no window of its own
+        f"{MUHURAT}  # Muhurat, hours to follow",
+        f"{MUHURAT} 14:05-1540",  # a window that cannot be read
+        f"{MUHURAT} 15:40-14:05",  # the end before the start
+        f"{MUHURAT} soon",
+    ],
+)
+def test_a_listed_day_without_a_usable_window_keeps_the_usual_hours(
+    holidays_file, extra_file, line
+):
+    calendar = _calendar_with(holidays_file, extra_file, line + "\n")
+    assert not calendar.in_market_hours(_at(MUHURAT, "09:14"))
+    assert calendar.in_market_hours(_at(MUHURAT, "09:15"))
+    assert calendar.blocks_test_now(_at(MUHURAT, "09:00"))
+    assert calendar.in_market_hours(_at(MUHURAT, "15:39"))
+    assert not calendar.in_market_hours(_at(MUHURAT, "15:40"))
+
+
+def test_a_session_that_runs_to_midnight_is_open_to_its_last_minute(holidays_file, extra_file):
+    calendar = _calendar_with(holidays_file, extra_file, f"{MUHURAT} 18:00-24:00\n")
+    assert calendar.in_market_hours(_at(MUHURAT, "23:59"))
+    assert not calendar.in_market_hours(_at(MUHURAT, "17:59"))
+
+
+def test_other_days_are_not_touched_by_a_listed_day(holidays_file, extra_file):
+    calendar = _calendar_with(holidays_file, extra_file, f"{MUHURAT} 14:05-15:40\n")
+    # A usual Monday, and a Saturday nothing lists: as before.
+    assert calendar.in_market_hours(_at(MONDAY, "10:00")) and calendar.blocks_test_now(
+        _at(MONDAY, "09:00")
+    )
+    assert not calendar.in_market_hours(_at(SATURDAY, "10:00"))
+    assert not calendar.blocks_test_now(_at(SATURDAY, "10:00"))
+    assert calendar.market_spans(MONDAY, (555, 940)) == ((555, 940),)
+
+
+def test_a_changed_extra_days_file_is_followed_while_the_service_runs(holidays_file, extra_file):
+    calendar = _calendar_with(holidays_file, extra_file, f"{MUHURAT} 14:05-15:40\n")
+    assert not calendar.blocks_test_now(_at(MUHURAT, "10:00"))
+    extra_file.write_text(f"{MUHURAT}\n")  # the window is taken out: the usual hours apply
+    os.utime(extra_file, ns=(3, 4))
+    assert calendar.blocks_test_now(_at(MUHURAT, "10:00"))
+    extra_file.write_text("")  # and the day is taken out: it is not a trading day
+    os.utime(extra_file, ns=(5, 6))
+    assert not calendar.blocks_test_now(_at(MUHURAT, "10:00"))
+    assert not calendar.in_market_hours(_at(MUHURAT, "14:30"))
+
+
 @pytest.mark.parametrize(
     ("at", "since"),
     [
@@ -119,9 +246,13 @@ def test_the_last_upstox_token_expiry(at, since):
 
 
 def test_the_page_and_the_answer_give_the_hours_test_now_is_refused():
-    """F&O trades to 15:40 since 3 Aug 2026: the guards, the page and the answer all say so."""
+    """F&O trades to 15:40 since 3 Aug 2026: the guards, the page and the answer all say so, and
+    that a special session has its own hours (the guards follow a listed day's own window)."""
     assert MARKET_HOURS == ("09:15", "15:40") and TEST_BLOCKED == ("09:00", "15:40")
-    hours = f"from {TEST_BLOCKED[0]} to {TEST_BLOCKED[1]} on a trading day"
+    hours = (
+        f"(usually from {TEST_BLOCKED[0]} to {TEST_BLOCKED[1]} on a trading day; "
+        "a special session has its own hours)"
+    )
     page = REPO / "frontend" / "src" / "sudarshan" / "pages" / "AutoLogin.tsx"
     assert hours in " ".join(page.read_text(encoding="utf-8").split())
     assert hours in MESSAGES["market_hours"]

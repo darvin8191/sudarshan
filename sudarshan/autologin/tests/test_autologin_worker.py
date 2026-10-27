@@ -230,6 +230,8 @@ MONDAY_1000 = MONDAY_0835.replace(hour=10, minute=0, second=10)
         # (the stored token cannot be today's) but never during market hours.
         ("unknown", True, MONDAY_1000, False, "already_logged_in"),
         ("unknown", False, MONDAY_0835, True, "ok"),
+        ("unknown", False, MONDAY_0835.replace(hour=9, minute=5), True, "ok"),  # the pre-open
+        ("unknown", False, MONDAY_0835.replace(hour=9, minute=15), False, "token_unchecked"),
         ("unknown", False, MONDAY_1000, False, "token_unchecked"),
     ],
 )
@@ -268,6 +270,71 @@ def test_test_runs_follow_the_stored_login_check(ready_vault, calendar, token, a
     )
     run.execute()
     assert bool(upstox.calls) is allowed
+
+
+# -- a special session: the day's own window -------------------------------------------------------
+
+MUHURAT_DAY = datetime(2026, 11, 8, tzinfo=IST)  # a Sunday, listed with its own window
+
+
+@pytest.fixture
+def muhurat_calendar(holidays_file, tmp_path):
+    extra = tmp_path / "nse_extra_trading_days.txt"
+    extra.write_text("2026-11-08 14:05-15:40  # Muhurat\n")
+    return TradingCalendar(holidays_file, extra)
+
+
+def _muhurat_at(hour: int, minute: int, second: int = 10) -> datetime:
+    return MUHURAT_DAY.replace(hour=hour, minute=minute, second=second)
+
+
+@pytest.mark.parametrize(
+    ("at", "logs_in", "code"),
+    [
+        (_muhurat_at(8, 35), True, "ok"),
+        (_muhurat_at(10, 0), True, "ok"),  # the exchange is closed until the session: log in
+        (_muhurat_at(14, 4, 40), True, "ok"),
+        (_muhurat_at(14, 5), False, "token_unchecked"),  # the session's own start
+        (_muhurat_at(15, 39, 40), False, "token_unchecked"),
+        (_muhurat_at(15, 40), True, "ok"),  # its F&O close
+    ],
+)
+def test_a_scheduled_run_on_a_special_day_waits_only_for_the_sessions_own_hours(
+    ready_vault, muhurat_calendar, at, logs_in, code
+):
+    """The check of the stored login failed and no login since 03:30 is on record: a new login
+    would end a working one, so it is not made while the market trades - on a special day, in the
+    session's own window and not through the usual 09:15-15:40 of a day with no session."""
+    link, upstox = FakeLink(token="unknown"), FakeUpstoxCall()
+    make_run(ready_vault, muhurat_calendar, link=link, upstox=upstox, at=at).execute()
+    assert bool(upstox.calls) is logs_in
+    assert ready_vault.state().last_code == code
+
+
+@pytest.mark.parametrize(
+    ("at", "allowed"),
+    [
+        (_muhurat_at(9, 5), True),  # Test now is open that morning
+        (_muhurat_at(11, 0), True),
+        (_muhurat_at(14, 4, 40), True),
+        (_muhurat_at(14, 5), False),  # and refused through the session
+        (_muhurat_at(15, 39, 40), False),
+        (_muhurat_at(15, 40), True),
+    ],
+)
+def test_test_now_on_a_special_day_follows_the_days_own_window(
+    ready_vault, muhurat_calendar, at, allowed
+):
+    upstox = FakeUpstoxCall()
+    run = make_run(
+        ready_vault, muhurat_calendar, link=FakeLink(fresh=True), upstox=upstox, kind="test", at=at
+    )
+    assert run.execute() == EXIT_OK
+    assert bool(upstox.calls) is allowed
+    if not allowed:
+        state = ready_vault.state()
+        assert (state.last_outcome, state.last_code) == ("refused", "market_hours")
+        assert "a special session has its own hours" in state.last_message
 
 
 # -- Upstox says no -----------------------------------------------------------------------------

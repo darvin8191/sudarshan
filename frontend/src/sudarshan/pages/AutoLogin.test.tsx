@@ -88,7 +88,7 @@ describe('Auto login page', () => {
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
     // Before anyone presses it: Test now replaces today's login, hence its hours.
     expect(screen.getByText(/Test now replaces today's login/)).toHaveTextContent(
-      /from 09:00 to 15:40 on a trading day while Upstox is connected/
+      /during market hours while Upstox is connected \(usually from 09:00 to 15:40 on a trading day; a special session has its own hours\)/
     )
   })
 
@@ -273,15 +273,16 @@ describe('Auto login page', () => {
     )
     api.testNow.mockRejectedValue(
       new Error(
-        'Not available from 09:00 to 15:40 on a trading day while Upstox is connected: Test now ' +
-          "replaces today's login, which would cut off the live session."
+        'Not available during market hours while Upstox is connected (usually from 09:00 to ' +
+          '15:40 on a trading day; a special session has its own hours): Test now replaces ' +
+          "today's login, which would cut off the live session."
       )
     )
     renderPage()
     fireEvent.click(await screen.findByRole('button', { name: /Test now/ }))
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith(
-        expect.stringContaining('Not available from 09:00 to 15:40')
+        expect.stringContaining('Not available during market hours')
       )
     )
   })

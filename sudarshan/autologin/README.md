@@ -32,7 +32,8 @@ sudarshan-autologin.timer   08:35, 08:45, 08:55 IST, every day
 4. Press **Test now**. "Logged in" means everything works, including the Telegram message.
    Test now replaces today's login, so it is not available from 09:00 to 15:40 on a trading day
    while Upstox is connected (a new login would cut off the live session; equity derivatives
-   trade to 15:40 since 3 Aug 2026), nor while auto-login is paused.
+   trade to 15:40 since 3 Aug 2026), nor while auto-login is paused. On a special day listed with
+   its own window (below) the window takes the place of 09:00-15:40.
 5. Switch **Log in automatically on trading days** on.
 6. Make sure the Telegram bot is running and linked to the owner (OpenAlgo > Telegram Bot).
    Without it everything still works, but no message arrives.
@@ -85,6 +86,14 @@ worked)? Nothing happens that day: no new login, no message.
   tool adds the dates a release lists, see `sudarshan/README.md`) is a trading day even on a
   weekend or a holiday: a Muhurat session, a special Saturday session. The timer wakes every day
   for that reason; on a closed day the worker stops at once.
+- **A special session's own hours**: a line may give the day's window after its date
+  (`2026-11-08 14:05-15:40`, from the pre-open to the F&O close). Both market-hours rules below
+  (Test now refused, no new login while the stored one cannot be checked) then use that window
+  on that day, so Test now is open that morning and refused from 14:05 to 15:40. On a closed
+  day (a weekend, an NSE holiday) the window replaces 09:00-15:40; on a weekday that trades
+  anyway it is added to it, as the feed and the alerts treat the same line. A line with no
+  window, or one that cannot be read, leaves the usual hours (09:00-15:40 for Test now, 09:15-15:40
+  for the second rule). The morning wake-ups are unchanged: they log in before the session.
 - **Never end a login that still works**: every successful TOTP login revokes the token before it.
   So each wake-up first asks OpenAlgo, which checks the stored token with Upstox (one read-only
   call to the funds endpoint its own Upstox plugin uses): if Upstox still accepts it, nothing

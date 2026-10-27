@@ -12,6 +12,8 @@ from datetime import datetime
 from .schedule import HAND_LOGIN_DEADLINE, TEST_BLOCKED, hhmm
 
 BRAND = "सुदर्शन / SUDARSHAN"
+#: The hours Test now is refused on a usual trading day, as the Auto login page words them too.
+HOURS = f"from {TEST_BLOCKED[0]} to {TEST_BLOCKED[1]} on a trading day"
 
 #: Said once wherever a pause begins or is shown. Only a newly saved TOTP key or PIN ends a pause:
 #: switching auto-login off and on does not, so a refused key and PIN are not sent again by mistake.
@@ -68,8 +70,9 @@ MESSAGES = {
     ),
     "already_logged_in": "Upstox is already connected for today. Nothing to do.",
     "market_hours": (
-        f"Not available from {TEST_BLOCKED[0]} to {TEST_BLOCKED[1]} on a trading day while Upstox "
-        "is connected: Test now replaces today's login, which would cut off the live session."
+        f"Not available during market hours while Upstox is connected (usually {HOURS}; a special "
+        "session has its own hours): Test now replaces today's login, which would cut off the "
+        "live session."
     ),
     "token_unchecked": (
         "Upstox could not confirm whether the stored login still works. No new login was made "
