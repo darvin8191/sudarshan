@@ -126,6 +126,8 @@ def test_the_app_registers_the_blueprint_and_the_bot_its_command():
     bot = (REPO / "services" / "telegram_bot_service.py").read_text(encoding="utf-8")
     assert 'CommandHandler("killswitch", self.cmd_killswitch)' in bot
     assert "risk_telegram.handle(self, update, context)" in bot
+    help_text = bot[bot.index("async def cmd_help") : bot.index("async def cmd_link")]
+    assert "\n/killswitch on|exit|off STOP: stop all new orders (owner only)\n" in help_text
 
 
 # -- turning it on and off ----------------------------------------------------------------------

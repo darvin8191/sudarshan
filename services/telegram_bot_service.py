@@ -1188,6 +1188,7 @@ class TelegramBotService:
         """Handle /help command"""
         from telegram.constants import ParseMode
 
+        # SUDARSHAN M16.7: /killswitch is listed under Remote Actions below.
         help_text = """
 *Available Commands:*
 
@@ -1215,6 +1216,7 @@ class TelegramBotService:
 /closeall - Close all open positions (with confirmation)
 /stoppython - Stop running Python strategies (with confirmation)
 /mode - View or toggle trading mode (Live / Analyze)
+/killswitch on|exit|off STOP: stop all new orders (owner only)
 
 *Navigation:*
 /menu - Show interactive menu
