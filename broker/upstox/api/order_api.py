@@ -435,6 +435,23 @@ def place_order_api(data, auth):
         return _ErrorResponse(500), {"status": "error", "message": str(e)}, None
 
 
+def _with_sent(response, action, quantity, closes):
+    """SUDARSHAN M6.9: the side and quantity this smart order sent, beside the broker's answer.
+
+    The request's own side and quantity are placeholders for an exit (position size 0); the alert
+    that reports the order says what went (sudarshan/books/telegram_words.py). Callers that pass
+    the answer on take it out first, so no API answer changes.
+    """
+    if not isinstance(response, dict):
+        return response
+    try:  # never a failure of its own after the order went
+        quantity = int(quantity or 0)
+    except (TypeError, ValueError):
+        return response
+    sent = {"action": str(action or "").upper(), "quantity": quantity, "closes": closes}
+    return {**response, "sent": sent}
+
+
 @refuse_smart_order_on_read_failure
 def place_smartorder_api(data, auth):
     """
@@ -464,6 +481,8 @@ def place_smartorder_api(data, auth):
                 # Like every other placement here: the next smart order for this
                 # symbol must not read the book from before this one.
                 _invalidate_position_cache(auth)
+                # SUDARSHAN M6.9: a fresh order, as the request asked.
+                response = _with_sent(response, data.get("action"), data.get("quantity"), False)
                 return res, response, orderid
 
             if position_size == current_position:
@@ -488,7 +507,8 @@ def place_smartorder_api(data, auth):
             sent = True
             res, response, orderid = place_order_api(order_data, auth)
             _invalidate_position_cache(auth)
-            return res, response, orderid
+            # SUDARSHAN M6.9: sized from the book; to a position size of 0 it closes the position.
+            return res, _with_sent(response, action, quantity, position_size == 0), orderid
 
     except BrokerBusyError as exc:
         # The position read or the order was refused by the pacer (gthread
