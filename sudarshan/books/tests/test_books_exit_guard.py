@@ -302,6 +302,8 @@ def test_a_view_that_raises_lets_its_claim_go(monkeypatch):
 
     assert app.test_client().post("/boom", json=EXIT).status_code == 500
     assert len(exit_guard.EXITS) == 0
+    # It may have broken after the order went: an Exit all looks for it in the book first.
+    assert exit_guard.EXITS.placed_lately("live") == {("NFO", EXIT["symbol"], "MIS")}
 
 
 def test_a_close_all_that_raises_lets_its_claim_go(monkeypatch):
