@@ -59,12 +59,10 @@ def window_of(day: date):
     return parse_window(text) if text else None
 
 
-def market(day: date, now: int, *, pauses=(), down=(), status=None, feed=None, replay=False):
-    found = {}
-    for segment in sessions.SEGMENTS:
-        span = sessions.session(segment, day, trading_day=trades(day), window=window_of(day))
-        if span is not None:
-            found[segment] = span
+def market(
+    day: date, now: int, *, pauses=(), down=(), status=None, feed=None, replay=False, auction=()
+):
+    found = sessions.sessions_of(day, trading_day=trades(day), window=window_of(day))
     previous = sessions.previous_trading_day(day, trades)
     if feed is None:
         out = any(start <= now < end for start, end in down)
@@ -76,7 +74,7 @@ def market(day: date, now: int, *, pauses=(), down=(), status=None, feed=None, r
     )
     key = sessions.day_key(day)
     prev = sessions.day_key(previous) if previous else 0
-    return clock.Market(key, found, prev, status or {}, feed, today, replay)
+    return clock.Market(key, found, prev, status or {}, feed, today, replay, frozenset(auction))
 
 
 def expand(steps: list[dict], day: str) -> list[dict]:
@@ -138,7 +136,10 @@ class World:
         self.alert = spec.Alert.of(self.row)
 
     def market(self, on: str, now: int) -> clock.Market:
-        return market(date.fromisoformat(on), now, pauses=self.pauses, down=self.down)
+        auction = (self.alert.key,) if self.vector.get("auction") else ()
+        return market(
+            date.fromisoformat(on), now, pauses=self.pauses, down=self.down, auction=auction
+        )
 
     def frame(self, raw: dict, on: str) -> dict:
         """A trade or quote step as the feed's frame: its fields, ltt and ts_recv in epoch ms."""
@@ -240,6 +241,7 @@ def seen(alert: spec.Alert, fire: engine.Fire) -> dict:
         "found_later": None if found is None else [hms(found[0]), hms(found[1])],
         "base": None if fire.base is None else str(rupees(fire.base)),
         "price": None if fire.price is None else str(rupees(fire.price)),
+        "auction": fire.auction,
     }
 
 

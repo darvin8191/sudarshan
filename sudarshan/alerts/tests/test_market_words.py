@@ -31,6 +31,7 @@ def fire_of(alert: spec.Alert, given: dict) -> engine.Fire:
         ticks(given["value"]), ticks(given["level"]), spec.UP if given["direction"] == "up" else spec.DOWN,
         1, ticks(given.get("previous")), span(given.get("found_later")), given.get("opening", False),
         ticks(given.get("base")), ticks(given.get("price")), span(given.get("span")),
+        auction=given.get("auction", False),
     )  # fmt: skip
 
 
