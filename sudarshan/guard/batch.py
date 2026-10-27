@@ -49,7 +49,8 @@ def basket(basket_data: dict, auth_token: str, original_data: dict) -> Answer | 
     if found is None:
         return None
     index, decision = found
-    message = words.together_refused("basket", index + 1, decision.words)
+    part = None if index is None else index + 1  # None: the basket as a whole (the burst brake)
+    message = words.together_refused("basket", part, decision.words)
     return _refused(pipe, "basket_order_service", "basketorder", original_data, message)
 
 
@@ -126,7 +127,8 @@ def multi_leg(
     if found is None:
         return None
     index, decision = found
-    message = words.together_refused("multi_leg", numbers[index], decision.words)
+    part = None if index is None else numbers[index]
+    message = words.together_refused("multi_leg", part, decision.words)
     return _refused(pipe, "options_multiorder_service", "optionsmultiorder", original_data, message)
 
 

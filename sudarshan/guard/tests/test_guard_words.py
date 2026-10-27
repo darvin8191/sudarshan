@@ -54,6 +54,18 @@ def every_sentence() -> list[str]:
     out += daily_sentences()
     out += band_sentences()
     out += size_sentences()
+    out += burst_sentences()
+    return out
+
+
+def burst_sentences() -> list[str]:
+    out = []
+    for count, window in ((10, 60.0), (1, 60.0), (5, 90.0), (3, 3600.0), (2, 1.0)):
+        out.append(words.burst_refused(count, window, 1_761_541_925.0))
+        for pipe in ("live", "sandbox"):
+            out.append(words.burst_told(count, window, 1_761_541_925.0, pipe))
+    for what in ("basket", "multi_leg", "split"):
+        out.append(words.together_refused(what, None, out[0]))
     return out
 
 

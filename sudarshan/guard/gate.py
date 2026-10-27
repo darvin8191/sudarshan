@@ -46,6 +46,11 @@ cap, in lots on a derivatives exchange (the lot size read in step 2 from the mas
 and in shares in cash. A batch (batch.py) is held to the band and the size limit whole before
 any part of it is sent (check_together).
 
+The burst brake (M5.14) counts the orders that add risk in a rolling window, per pipe, and
+refuses the next one once the owner's number has gone in it; exits are never counted or
+refused, and a batch counts once. The counts live in memory, under the same lock, and are lost
+on a restart (design section 11).
+
 The lock is a real one from utils.real_threading, held for dict work only: correct under the
 eventlet worker (no I/O, no logging and no wait inside it, so the hub never stalls on it), under
 gthread's real threads, and on the development server.
@@ -103,6 +108,8 @@ DAY_BOOK_REUSE_S = 15.0
 SESSION_KEPT_S = 600.0
 #: The daily limit could not be checked this recently: the banner says so.
 UNCHECKED_SHOWN_S = 60.0
+#: A batch counts once in the burst brake: its parts, sent within this long, are not counted.
+BATCH_PARTS_WITHIN_S = 30.0
 
 # Machine codes, for the audit and SUDARSHAN's own endpoints, never for a sentence.
 KILL_SWITCH_ACTIVE = "KILL_SWITCH_ACTIVE"
@@ -112,6 +119,7 @@ GUARD_ERROR = "GUARD_ERROR"
 DAILY_LOSS_LIMIT = "DAILY_LOSS_LIMIT"
 PRICE_BAND = "PRICE_BAND"
 SIZE_LIMIT = "SIZE_LIMIT"
+BURST_BRAKE = "BURST_BRAKE"
 
 PLACE, MODIFY, GTT_PLACE, GTT_MODIFY = "place", "modify", "gtt_place", "gtt_modify"
 _UNREAD = object()
@@ -239,9 +247,14 @@ class _Guards:
             return False
         return size.unit_of(order.exchange) is not None
 
+    @property
+    def braking(self) -> bool:
+        """The burst brake is on."""
+        return self.settings is not None and self.settings.burst_on
+
     def judges(self, order: Order) -> bool:
         """Whether a guard needs ``order`` judged, beyond the kill switch."""
-        return self.daily or self.price_band(order) is not None or self.sized(order)
+        return self.daily or self.price_band(order) is not None or self.sized(order) or self.braking
 
     def active(self, order: Order) -> bool:
         """Whether to read anything for ``order``: a modify's instrument and new terms are known
@@ -252,6 +265,15 @@ class _Guards:
         if settings is None or order.action not in (MODIFY, GTT_MODIFY):
             return False
         return settings.size_on or (settings.band_on and order.action == MODIFY)
+
+
+@dataclass
+class _Burst:
+    """One pipe's admissions that added risk, newest last, and the batch parts not to count."""
+
+    admitted: deque = field(default_factory=deque)  # monotonic times
+    parts: list = field(default_factory=list)  # (until, count): batch parts already counted
+    told: float | None = None  # monotonic: when the owner was last told it engaged
 
 
 @dataclass(frozen=True)
@@ -296,6 +318,7 @@ class Gate:
         self._day_locks: dict[tuple[str, str], risk_store.DayLock | None] = {}
         self._sessions = LockedTTLCache(maxsize=32, ttl=SESSION_KEPT_S)
         self._unchecked: dict[str, float] = {}  # pipe -> monotonic: the daily limit unchecked
+        self._bursts: dict[str, _Burst] = {}  # pipe -> its admissions (the burst brake)
         self._problem: tuple[float, str, str] | None = None  # (epoch, kind, words): the last one
 
     def _the_store(self) -> risk_store.RiskStore:
@@ -414,6 +437,8 @@ class Gate:
             self._timed.append(took)
         if decision.refused or decision.code:
             self._note(kind.pipe, order, decision)
+        if decision.code == BURST_BRAKE and decision.detail.get("tell"):
+            _tell_owner(decision.detail["tell"])
         return decision
 
     def settle(self, token: int | None, answer: str, ref: str | None) -> None:
@@ -913,6 +938,10 @@ class Gate:
         refusal, unchecked = self._over_limits(order, guards, verdict, reads)
         if refusal is not None:
             return refusal
+        if guards.braking:
+            refusal = self._brake(order.pipe, guards.settings, now, parts=0)
+            if refusal is not None:
+                return refusal
         token = self._register(order, verdict, now)
         if unchecked:
             return Decision(token=token, words=unchecked, code=GUARD_UNAVAILABLE)
@@ -964,13 +993,41 @@ class Gate:
                 unchecked = unchecked or words.SIZE_NOT_CHECKED
         return None, unchecked
 
+    def _brake(self, pipe: str, settings, now: float, *, parts: int) -> Decision | None:
+        """The burst brake for one admission adding risk: a refusal when the owner's number of
+        them has gone in the window, else the admission counted (a batch's once, its ``parts``
+        then not counted as they are sent). Call under the lock."""
+        burst = self._bursts.setdefault(pipe, _Burst())
+        window = float(settings.burst_window_s)
+        while burst.admitted and now - burst.admitted[0] >= window:
+            burst.admitted.popleft()
+        burst.parts = [(until, count) for until, count in burst.parts if until > now and count]
+        if parts == 0 and burst.parts:
+            until, count = burst.parts[0]
+            burst.parts[0] = (until, count - 1)  # a part of a batch already counted
+            return None
+        if len(burst.admitted) >= int(settings.burst_n):
+            again = time.time() + window - (now - burst.admitted[0])
+            said = words.burst_refused(int(settings.burst_n), window, again)
+            detail = {"count": len(burst.admitted), "window_s": window}
+            if burst.told is None or now - burst.told >= window:
+                burst.told = now
+                detail["tell"] = words.burst_told(int(settings.burst_n), window, again, pipe)
+            return Decision(True, said, BURST_BRAKE, detail=detail)
+        burst.admitted.append(now)
+        if parts:
+            burst.parts.append((now + BATCH_PARTS_WITHIN_S, parts))
+        return None
+
     # -- a batch, held to the owner's limits whole -------------------------------------------------
 
-    def check_together(self, orders: list[Order]) -> tuple[int, Decision] | None:
+    def check_together(self, orders: list[Order]) -> tuple[int | None, Decision] | None:
         """The parts of a batch (batch.py) held to the owner's band and size limit before any is
-        sent: the first part over one, with the refusal a single order would get, or None.
+        sent: the first part over one, with the refusal a single order would get; or, with no
+        part over, the burst brake's refusal of the batch as a whole (index None); or None.
 
-        Nothing is recorded: each part is decided again as it is sent, kill switch and daily
+        Nothing is recorded but the brake's one admission for the batch, which its parts then
+        do not count again: each part is decided again as it is sent, kill switch and daily
         limit included. A part whose book cannot be read is left to that decision. The parts
         are judged in order, each against the book and the exits earlier parts would send, so
         two parts selling the same long take its room once.
@@ -980,12 +1037,14 @@ class Gate:
         self._load_state()
         guards = self._guards(orders[0])
         settings = guards.settings
-        if settings is None or not (settings.band_on or settings.size_on):
+        if settings is None or not (settings.band_on or settings.size_on or settings.burst_on):
             return None
         taken: dict[tuple, int] = {}  # (position, side): what earlier parts would exit
+        adding = 0  # the parts that add risk, which the burst brake counts as one admission
         for index, order in enumerate(orders):
             if guards.price_band(order) is None and not guards.sized(order):
-                continue
+                if not guards.braking:
+                    continue
             known, facts = self._facts(order, None)  # reads: outside the lock
             if facts.unreadable or facts.pass_through:
                 continue
@@ -1002,11 +1061,20 @@ class Gate:
             if verdict.reducing:
                 taken[mine] = taken.get(mine, 0) + (known.quantity or 0)
                 continue
+            adding += 1
             reads = self._limit_reads(known, facts, guards, adding=True)
             refusal, _unchecked = self._over_limits(known, guards, verdict, reads)
             if refusal is not None:
                 self._note(known.pipe, known, refusal)  # the risk history shows it
                 return index, refusal
+        if guards.braking and adding:
+            with self._lock:
+                refusal = self._brake(orders[0].pipe, settings, time.monotonic(), parts=adding)
+            if refusal is not None:
+                if refusal.detail.get("tell"):
+                    _tell_owner(refusal.detail["tell"])
+                self._note(orders[0].pipe, orders[0], refusal)
+                return None, refusal  # the batch as a whole, not one part
         return None
 
     def _unreadable(self, order: Order, refusing: _Refusing) -> Decision:
@@ -1122,6 +1190,20 @@ class Gate:
                 self._write_note(key, note)
             except Exception:
                 logger.exception("A risk refusal count could not be written to the audit")
+
+
+def _tell_owner(text: str) -> None:
+    """Queue a Telegram message to the owner (the admin account); never fails an order."""
+    try:
+        from database.user_db import find_user_by_username
+
+        from .killswitch import Owner, _tell
+
+        admin = find_user_by_username()
+        if admin is not None:
+            _tell(Owner(admin.username, "app", "risk guard"), text)
+    except Exception:
+        logger.exception("A risk message could not be told on Telegram")
 
 
 def _hhmm(at: datetime | None) -> str:

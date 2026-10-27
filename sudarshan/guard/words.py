@@ -8,7 +8,7 @@ Positions are named as the phone names them (sudarshan/books/exit_guard.trader_n
 
 from __future__ import annotations
 
-from sudarshan.books.exit_guard import on_its_way, trader_name
+from sudarshan.books.exit_guard import clock, on_its_way, trader_name
 
 from . import rules
 
@@ -627,8 +627,40 @@ def together_refused(what: str, part: int | None, said: str) -> str:
             f"is. {reason}"
         )
     where, name = ("this basket", "Order") if what == "basket" else ("this multi-leg order", "Leg")
+    if part is None:  # the batch as a whole: the burst brake counts it once
+        return f"Nothing in {where} was sent. {reason}"
     return (
         f"Nothing in {where} was sent, so no part goes without the others. {name} {part}: {reason}"
+    )
+
+
+# -- the burst brake (M5.14) --------------------------------------------------------------------------
+
+
+def _window(seconds: float) -> str:
+    """60 seconds as "1 minute", 90 as "90 seconds"."""
+    whole = int(seconds)
+    if whole == seconds and whole >= 60 and whole % 60 == 0:
+        return _many(whole // 60, "minute", "minutes")
+    return f"{seconds:g} seconds"
+
+
+def burst_refused(count: int, window_s: float, again_at: float) -> str:
+    """Why a new order is refused by the burst brake, and when new orders go again."""
+    return (
+        f"New orders are paused by your burst brake: {_many(count, 'new order', 'new orders')} "
+        f"went in the last {_window(window_s)}, the most it allows (Settings > Risk). {EXITS_GO} "
+        f"New orders go again at {clock(again_at)}."
+    )
+
+
+def burst_told(count: int, window_s: float, again_at: float, pipe: str) -> str:
+    """Telegram, once a window, when the burst brake engages."""
+    where = "" if pipe == "live" else " in the sandbox"
+    return (
+        f"Burst brake{where}: {_many(count, 'new order', 'new orders')} went in "
+        f"{_window(window_s)}, so new orders are paused until {clock(again_at)}. Exits and "
+        "cancels still go. Check what is sending them."
     )
 
 

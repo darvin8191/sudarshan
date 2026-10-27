@@ -139,6 +139,17 @@ def _daily_status(owner: killswitch.Owner, limit: float | None) -> dict:
     return shown
 
 
+def _pacing() -> dict | None:
+    """Order calls to Upstox per second at most, as this server paces them (M5.14)."""
+    try:
+        from broker.upstox.api.rate_limiter import ORDER_LIMITER
+
+        return {"per_second": ORDER_LIMITER.max_per_second}
+    except Exception:
+        logger.exception("The order pacing could not be read for the risk page")
+        return None
+
+
 def _upstox_kill_switch(owner: killswitch.Owner) -> list[dict] | None:
     """Upstox's own kill switch per segment, for the drill's check that it stays off."""
     if not owner.auth_token or owner.broker != "upstox":
@@ -200,6 +211,7 @@ def status():
                     "last_problem": risk_gate.GATE.last_problem(),
                 },
                 "daily": _daily_status(owner, limit),
+                "pacing": _pacing(),
                 "upstox_kill_switch": _upstox_kill_switch(owner),
                 "broker": session.get("broker"),
             },

@@ -375,6 +375,14 @@ def test_a_figure_that_cannot_be_read_is_shown_as_unknown(world, monkeypatch):
     assert (day["figure"], day["reached"]) == (None, False)
 
 
+def test_status_says_the_pace_this_server_sends_orders_at(world):
+    from broker.upstox.api import rate_limiter
+
+    client, account, store = world
+    data = _owner_call(client, "get", "/sudarshan/risk/status").get_json()["data"]
+    assert data["pacing"] == {"per_second": rate_limiter.ORDER_LIMITER.max_per_second}
+
+
 def test_status_reads_upstox_s_own_kill_switch_when_logged_in_to_upstox(world, monkeypatch):
     client, account, store = world
     from sudarshan.guard import readers

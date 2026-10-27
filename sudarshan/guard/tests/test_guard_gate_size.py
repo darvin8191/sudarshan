@@ -266,3 +266,12 @@ def test_an_analyze_mode_basket_is_held_whole_against_the_sandbox(services, size
     assert (ok, status) == (False, 403)
     assert analyzed and analyzed[0].startswith("Nothing in this basket was sent")
     assert "sandbox owner" in sized.book.calls  # judged on the sandbox's own book
+
+
+def test_a_batch_reads_nothing_for_a_part_no_limit_holds(sized):
+    """The band on and the size limit off: a MARKET part is held to neither, so its book is not
+    read for the batch (the gate reads it as the part is sent)."""
+    sized.store.save_settings("owner", size_on=False, band_on=True)
+    parts = [_part("BUY", 65, CE), _part("SELL", 65, PE)]
+    assert sized.gate.check_together(parts) is None
+    assert sized.book.calls == []

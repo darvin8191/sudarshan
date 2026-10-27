@@ -313,3 +313,26 @@ def test_a_sandbox_order_at_the_limit_locks_the_sandbox_s_day_only(day, monkeypa
     assert day.store.day_lock("sandbox", today()) is not None
     assert day.store.day_lock("live", today()) is None
     assert day.told == [words.daily_lock_told(-4500.0, LIMIT, "sandbox")]
+
+
+def test_an_order_that_read_the_book_just_before_another_locked_the_day_is_refused(day):
+    """A reads the book while the day is above the limit; B reads it at the limit and locks the
+    day before A decides. A, deciding after the lock, is refused too: the lock holds from the
+    moment it is written, not from the moment an order read the book."""
+    above = [day_row(CE, 65, -1000.0, 0.0)]
+    at_the_limit = [day_row(CE, 65, -4000.0, 0.0)]
+    day.book.rows = above
+    upstox = broker()
+    ran = []
+
+    def b_locks_the_day_first():
+        if ran:
+            return
+        ran.append("B")
+        day.book.rows = at_the_limit
+        refused_message(upstox.place(order("BUY", symbol=PE), "token"))  # B: the day locks
+        day.book.rows = above  # what A is about to read
+
+    day.book.before_rows = b_locks_the_day_first
+    refused_message(upstox.place(order("BUY", symbol=PE), "token"))  # A
+    assert ran == ["B"] and upstox.reached == []
