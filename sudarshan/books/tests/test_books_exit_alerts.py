@@ -12,6 +12,7 @@ else "to close the position".
 from __future__ import annotations
 
 from datetime import datetime
+from types import SimpleNamespace
 
 import pytest
 
@@ -385,6 +386,172 @@ def test_the_app_s_exit_that_broke_in_the_sandbox_says_the_app_s_sentence(alert,
     _, answer, _ = sandbox_service.sandbox_close_position({"symbol": "SBIN"}, "key", {})
     assert answer["message"] == NOT_CONFIRMED
     assert "sqlite3" not in str(answer)
+
+
+# The sandbox's managers catch their own errors and answer with the exception's words, which
+# passed straight on to the phone and Telegram: these drive those catches themselves.
+LOCKED = "(sqlite3.OperationalError) database is locked"
+POSITION_NOT_READ = (
+    "OpenAlgo could not read your open position from the sandbox, so no order was sent. Check "
+    "your positions and try again."
+)
+POSITIONS_NOT_READ = (
+    "Nothing was sent: the positions could not be read from the sandbox. Check Positions and "
+    "try again."
+)
+
+
+def _locked(*args, **kwargs):
+    raise RuntimeError(LOCKED)
+
+
+def _sandbox_holding(monkeypatch, *rows):
+    """The sandbox service for the owner, its positions read showing ``rows``."""
+    import services.sandbox_service as sandbox_service
+    from sandbox.position_manager import PositionManager
+
+    class Holding(PositionManager):
+        def get_open_positions(self, update_mtm=True):
+            return True, {"status": "success", "data": [dict(row) for row in rows]}, 200
+
+    monkeypatch.setattr(sandbox_service, "get_user_id_from_apikey", lambda key: "owner")
+    monkeypatch.setattr(sandbox_service, "PositionManager", Holding)
+    return sandbox_service
+
+
+RELIANCE_LONG_1 = {"symbol": "RELIANCE", "exchange": "NSE", "product": "CNC", "quantity": 1}
+
+
+def test_an_exit_the_sandbox_s_order_manager_broke_on_is_not_confirmed(alert, monkeypatch):
+    """Its catch answered "Error placing order: (sqlite3...)", and the order may have been saved
+    before it broke, so an Exit not sent was the wrong title as well as the wrong words."""
+    from sandbox.order_manager import OrderManager
+
+    sandbox_service = _sandbox_holding(monkeypatch, RELIANCE_LONG_1)
+    monkeypatch.setattr(OrderManager, "_validate_order", _locked)
+    ok, answer, code = sandbox_service.sandbox_place_smart_order(dict(ANALYZE_EXIT), "key", {})
+    assert (ok, code) == (False, 500)
+    assert answer == {
+        "status": "error",
+        "message": NOT_CONFIRMED,
+        "not_confirmed": True,
+        "mode": "analyze",
+        "sent": SOLD_1,
+    }
+    assert alert("placesmartorder", ANALYZE_EXIT, answer) == (
+        "*Exit not confirmed*\n"
+        + ANALYZE
+        + "RELIANCE (NSE, CNC), sell 1 to close\n"
+        + NOT_CONFIRMED
+        + "\nTime: 10:52:13"
+    )
+    # A smart order to another size is an order, not an exit.
+    _, answer, _ = sandbox_service.sandbox_place_smart_order(
+        {**ANALYZE_EXIT, "quantity": "5", "position_size": "5"}, "key", {}
+    )
+    assert answer["message"].startswith("This order is not confirmed: it may have gone through.")
+    assert answer["sent"] == {"action": "BUY", "quantity": 4, "closes": False}
+
+
+def test_a_fresh_order_at_position_size_0_the_sandbox_broke_on_is_an_order(monkeypatch):
+    """Flat, with a quantity: it opens a position, so it is not an exit that may have gone."""
+    from sandbox.order_manager import OrderManager
+
+    sandbox_service = _sandbox_holding(monkeypatch)
+    monkeypatch.setattr(OrderManager, "_validate_order", _locked)
+    _, answer, code = sandbox_service.sandbox_place_smart_order(
+        {**ANALYZE_EXIT, "quantity": "5"}, "key", {}
+    )
+    assert (code, answer["not_confirmed"]) == (500, True)
+    assert answer["message"].startswith("This order is not confirmed: it may have gone through.")
+    assert answer["sent"] == {"action": "BUY", "quantity": 5, "closes": False}
+
+
+def test_a_refusal_by_the_sandbox_s_order_manager_is_passed_on_as_it_is(monkeypatch):
+    """Its 4xx says the app's own reason, and nothing was saved: not marked, not reworded."""
+    from sandbox.order_manager import OrderManager
+
+    sandbox_service = _sandbox_holding(monkeypatch, RELIANCE_LONG_1)
+    reason = "Quantity must be in multiples of lot size 65"
+    monkeypatch.setattr(OrderManager, "_validate_order", lambda self, data: (False, reason))
+    ok, answer, code = sandbox_service.sandbox_place_smart_order(dict(ANALYZE_EXIT), "key", {})
+    assert (ok, code) == (False, 400)
+    assert answer == {"status": "error", "message": reason, "mode": "analyze"}
+
+
+def test_a_sandbox_positions_read_that_broke_sends_nothing_and_says_so(alert, monkeypatch):
+    """Its catch answered "Error getting positions: (sqlite3...)" with a 500, which the phone
+    holds as an exit that may have gone: nothing went, so it is a refusal in the app's words."""
+    import sandbox.position_manager as position_module
+    import services.sandbox_service as sandbox_service
+
+    monkeypatch.setattr(sandbox_service, "get_user_id_from_apikey", lambda key: "owner")
+    monkeypatch.setattr(position_module, "last_session_expiry_utc", _locked)
+    ok, answer, code = sandbox_service.sandbox_place_smart_order(dict(ANALYZE_EXIT), "key", {})
+    assert (ok, code) == (False, 424)
+    assert answer == {"status": "error", "message": POSITION_NOT_READ, "mode": "analyze"}
+    assert alert("placesmartorder", ANALYZE_EXIT, answer) == (
+        "*Exit not sent*\n"
+        + ANALYZE
+        + "RELIANCE (NSE, CNC)\n"
+        + POSITION_NOT_READ
+        + "\nTime: 10:52:13"
+    )
+    ok, answer, code = sandbox_service.sandbox_close_position({}, "key", {})
+    assert (ok, code) == (False, 424)
+    assert answer == {"status": "error", "message": POSITIONS_NOT_READ, "mode": "analyze"}
+    assert alert("closeposition", {"strategy": "TV"}, answer) == (
+        "*Exit all not sent*\nStrategy: *TV*\n" + ANALYZE + POSITIONS_NOT_READ + "\nTime: 10:52:13"
+    )
+
+
+def test_a_sandbox_close_of_one_position_that_broke_is_not_confirmed(monkeypatch):
+    """Flow's close node in Analyze mode (item 10): the close broke in the order manager's catch
+    or its own, possibly after the exit was saved. No position is still its own 404."""
+    import sandbox.position_manager as position_module
+    from sandbox.order_manager import OrderManager
+
+    sandbox_service = _sandbox_holding(monkeypatch)
+    held = {"row": SimpleNamespace(quantity=10), "read_breaks": False}
+
+    class Rows:  # SandboxPositions.query, for the one position asked for
+        def filter_by(self, **where):
+            if held["read_breaks"]:
+                _locked()
+            return self
+
+        def populate_existing(self):
+            return self
+
+        def first(self):
+            return held["row"]
+
+    monkeypatch.setattr(position_module, "SandboxPositions", SimpleNamespace(query=Rows()))
+    monkeypatch.setattr(OrderManager, "_validate_order", _locked)
+    close = {"symbol": "SBIN", "exchange": "NSE", "product": "MIS"}
+    unconfirmed = {
+        "status": "error",
+        "message": NOT_CONFIRMED,
+        "not_confirmed": True,
+        "mode": "analyze",
+    }
+    assert sandbox_service.sandbox_close_position(dict(close), "key", {}) == (
+        False,
+        unconfirmed,
+        500,
+    )
+    held["read_breaks"] = True  # its own catch: "Error closing position: (sqlite3...)"
+    assert sandbox_service.sandbox_close_position(dict(close), "key", {}) == (
+        False,
+        unconfirmed,
+        500,
+    )
+    held.update(row=None, read_breaks=False)
+    assert sandbox_service.sandbox_close_position(dict(close), "key", {}) == (
+        False,
+        {"status": "error", "message": "No open position found for SBIN", "mode": "analyze"},
+        404,
+    )
 
 
 def test_every_other_smart_order_keeps_its_layout(alert):

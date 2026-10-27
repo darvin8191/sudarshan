@@ -33,6 +33,26 @@ _EXIT_ALL_NOT_CONFIRMED = (
     "Exit all is not confirmed: some exits may have gone through. Check Orders before sending "
     "it again."
 )
+# SUDARSHAN M6.9: and when the positions an order is sized from could not be read: nothing went.
+_POSITION_NOT_READ = (
+    "OpenAlgo could not read your open position from the sandbox, so no order was sent. Check "
+    "your positions and try again."
+)
+_POSITIONS_NOT_READ = (
+    "Nothing was sent: the positions could not be read from the sandbox. Check Positions and "
+    "try again."
+)
+
+
+def _not_confirmed(message: str, **extra: Any) -> tuple[bool, dict[str, Any], int]:
+    """SUDARSHAN M6.9: the answer for an order or exit that may have been placed (a 500)."""
+    body = {"status": "error", "message": message, "not_confirmed": True, "mode": "analyze"}
+    return False, {**body, **extra}, 500
+
+
+def _not_sent(message: str) -> tuple[bool, dict[str, Any], int]:
+    """SUDARSHAN M6.9: a refusal before anything was sent: a 4xx, which the phone reads as one."""
+    return False, {"status": "error", "message": message, "mode": "analyze"}, 424
 
 
 def is_sandbox_mode() -> bool:
@@ -357,7 +377,9 @@ def sandbox_close_position(
             # Get all open positions
             success, positions_response, status_code = position_manager.get_open_positions()
             if not success:
-                return False, positions_response, status_code
+                # SUDARSHAN M6.9: the read broke, so nothing was sent (its answer carries an
+                # exception's words).
+                return _not_sent(_POSITIONS_NOT_READ)
 
             positions = positions_response.get("data", [])
 
@@ -410,23 +432,18 @@ def sandbox_close_position(
             success, response, status_code = position_manager.close_position(
                 symbol, exchange, product
             )
+            if not success and status_code >= 500:
+                # SUDARSHAN M6.9: it broke (its answer is an exception's words), possibly after
+                # its order was saved: the exit may have been placed.
+                return _not_confirmed(_EXIT_NOT_CONFIRMED)
             return success, response, status_code
 
     except Exception as e:
         logger.exception(f"Error in sandbox_close_position: {e}")
         # SUDARSHAN M6.9: it may have broken after an exit was placed, and a trader reads the
         # app's words, never an exception's (the log keeps those).
-        return (
-            False,
-            {
-                "status": "error",
-                "message": _EXIT_NOT_CONFIRMED
-                if position_data.get("symbol")
-                else _EXIT_ALL_NOT_CONFIRMED,
-                "not_confirmed": True,
-                "mode": "analyze",
-            },
-            500,
+        return _not_confirmed(
+            _EXIT_NOT_CONFIRMED if position_data.get("symbol") else _EXIT_ALL_NOT_CONFIRMED
         )
 
 
@@ -478,18 +495,8 @@ def sandbox_place_smart_order(
         logger.exception(f"Error in sandbox_place_smart_order: {e}")
         # SUDARSHAN M6.9: it may have broken after the order was placed, and a trader reads the
         # app's words, never an exception's (the log keeps those).
-        return (
-            False,
-            {
-                "status": "error",
-                "message": _EXIT_NOT_CONFIRMED
-                if str(order_data.get("position_size", "")).strip() == "0"
-                else _ORDER_NOT_CONFIRMED,
-                "not_confirmed": True,
-                "mode": "analyze",
-            },
-            500,
-        )
+        closing = str(order_data.get("position_size", "")).strip() == "0"
+        return _not_confirmed(_EXIT_NOT_CONFIRMED if closing else _ORDER_NOT_CONFIRMED)
 
 
 def _place_smart_order_locked(
@@ -508,7 +515,9 @@ def _place_smart_order_locked(
     # Get current position
     success, positions_response, status_code = position_manager.get_open_positions()
     if not success:
-        return False, positions_response, status_code
+        # SUDARSHAN M6.9: the read broke, so nothing was sent (its answer carries an exception's
+        # words).
+        return _not_sent(_POSITION_NOT_READ)
 
     positions = positions_response.get("data", [])
     current_quantity = 0
@@ -573,10 +582,14 @@ def _place_smart_order_locked(
     # SUDARSHAN M6.9: the side and quantity it sent, for the alert that reports it (an exit's
     # request carries placeholders); services/place_smart_order_service.py takes it out of the
     # answer before passing that on.
+    closes = target_quantity == 0 and current_quantity != 0
+    sent = {"action": str(action).upper(), "quantity": int(quantity), "closes": closes}
     if success and isinstance(response, dict):
-        closes = target_quantity == 0 and current_quantity != 0
-        sent = {"action": str(action).upper(), "quantity": int(quantity), "closes": closes}
         response = {**response, "sent": sent}
+    elif not success and status_code >= 500:
+        # The order manager broke (its answer is an exception's words), possibly after the
+        # order was saved: it may have been placed.
+        return _not_confirmed(_EXIT_NOT_CONFIRMED if closes else _ORDER_NOT_CONFIRMED, sent=sent)
 
     return success, response, status_code
 
