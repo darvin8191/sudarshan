@@ -160,12 +160,36 @@ def test_the_status_line(code, opens, text):
     assert words.check_words(code, now=now, opens_at=opens_at) == text
 
 
-def test_the_status_line_while_the_feed_reconnects():
-    text = words.check_words(clock.FEED_DOWN, now=0, since=ms(DAY, "10:41:05"))
-    assert text == "Not checking · the price feed is reconnecting (since 10:41:05)"
-    assert (
-        words.check_words(clock.FEED_DOWN, now=0) == "Not checking · the price feed is reconnecting"
-    )
+@pytest.mark.parametrize(
+    ("state", "age_s", "text"),
+    [
+        ("backoff", 1, "the price feed is reconnecting"),
+        ("connecting", 1, "the price feed is reconnecting"),
+        ("connected", 1, "the price feed is reconnecting"),  # its subscriptions are not live yet
+        (
+            "token_rejected",
+            1,
+            "Upstox refused the price feed's token: put the current Analytics Token in the "
+            "feed's token file",
+        ),
+        (
+            "no_token",
+            1,
+            "the price feed has no token: put the Analytics Token in the feed's token file",
+        ),  # fmt: skip
+        ("stopped", 1, "the price feed is stopped: start sudarshan-feed again"),
+        ("closed", 1, "the price feed's calendar says the market is closed"),
+        ("connected", 13, "the price feed is not answering: check that sudarshan-feed is running"),
+        (None, 0, "the price feed is not answering: check that sudarshan-feed is running"),
+    ],
+)
+def test_the_status_line_says_why_the_feed_is_down(state, age_s, text):
+    """A stopped or refused feed needs the owner: it is never called "reconnecting"."""
+    now = ms(DAY, "10:42:00")
+    feed = None if state is None else clock.Feed(state, False, now - age_s * 1000)
+    assert words.check_words(clock.FEED_DOWN, now=now, feed=feed) == f"Not checking · {text}"
+    since = words.check_words(clock.FEED_DOWN, now=now, since=ms(DAY, "10:41:05"), feed=feed)
+    assert since == f"Not checking since 10:41:05 · {text}"
 
 
 @pytest.mark.parametrize(

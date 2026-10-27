@@ -1687,7 +1687,7 @@
       "id": "W12",
       "alert": {"params": {"op": "at_or_above", "level": "100"}, "frequency": "at_close", "candle": "day"},
       "fire": {"value": "100.05", "level": "100", "direction": "up", "span": ["09:15:00", "15:30:00"]},
-      "line": "Alert: SBIN closed the day at or above ₹100.00: close ₹100.05 (09:15 to 15:30) (NSE)"
+      "line": "Alert: SBIN ended the day's trading at or above ₹100.00: last trade ₹100.05 (09:15 to 15:30) (NSE)"
     },
     {
       "id": "W13",
@@ -1756,6 +1756,25 @@
         "span": ["10:00:00", "10:15:00"]
       },
       "line": "Alert: SBIN 15-min candle closed up 2.00% on the day: close ₹102.00 (previous close ₹100.00) (NSE)"
+    },
+    {
+      "id": "W21",
+      "alert": {
+        "params": {"op": "crosses_above", "level": "100", "source": "bid"},
+        "frequency": "every_time"
+      },
+      "fire": {"value": "100.50", "level": "100", "direction": "up", "opening": true, "previous": "99.90"},
+      "title": "SBIN bid opened above ₹100.00",
+      "detail": "first bid ₹100.50 (previous ₹99.90)",
+      "line": "Alert: SBIN bid opened above ₹100.00: first bid ₹100.50 (previous ₹99.90) (NSE)"
+    },
+    {
+      "id": "W22",
+      "alert": {"params": {"op": "crosses_above", "level": "100"}, "frequency": "at_close", "candle": "day"},
+      "fire": {"value": "100.05", "level": "100", "direction": "up", "span": ["09:15:00", "15:30:00"]},
+      "title": "SBIN ended the day's trading above ₹100.00",
+      "detail": "last trade ₹100.05 (09:15 to 15:30)",
+      "line": "Alert: SBIN ended the day's trading above ₹100.00: last trade ₹100.05 (09:15 to 15:30) (NSE)"
     }
   ]
 }

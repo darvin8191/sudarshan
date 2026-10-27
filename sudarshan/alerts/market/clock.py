@@ -112,6 +112,13 @@ def gate(market: Market, segment: str, at: int, recv: int, now: int, *, trade: b
     return OK
 
 
+def status(market: Market, segment: str, now: int) -> str:
+    """The segment's state at ``now`` for the page's status line: the gate's checks on the
+    clock, the exchange and the feed, never on a trade. A tick's own check is not it: an
+    illiquid option whose last trade was yesterday fails the gate as OUTSIDE_HOURS all day."""
+    return gate(market, segment, now, now, now, trade=False)
+
+
 def candle(session: Session, minutes: int, at: int) -> tuple[int, int, int]:
     """(index, start, end) of the ``minutes`` candle holding ``at``; 0 minutes is the day."""
     if not minutes:

@@ -383,3 +383,59 @@ def test_F7_every_time_on_a_day_high_needs_a_minute_between_alerts():
         told += fires(out)
         stops += [o.status for o in out.outcomes if o.status]
     assert len(told) == 2 and stops == []  # 09:31:01 and 09:32:01
+
+
+# ---- words, and the page's status line -------------------------------------------------------
+
+
+def test_F6a_an_opening_on_the_bid_says_bid():
+    book = Book()
+    a = make({"kind": "price", "params": {"op": "crosses_above", "level": "100", "source": "bid"},
+              "frequency": "every_time"})  # fmt: skip
+    book.put(a)
+    t = ms(TUE, 15, 29)
+    book.on_tick(frame(at=t, bid=99.9), t, market(TUE, t, MON))
+    t = ms(WED, 9, 15, 1)
+    (fire,) = fires(book.on_tick(frame(at=t, bid=100.5), t, market(WED, t, TUE)))
+    assert words.line(a, fire, WED) == (
+        "Alert: SBIN bid opened above ₹100.00: first bid ₹100.50 (previous ₹99.90) (NSE)"
+    )
+
+
+def test_F6b_the_day_candle_reports_the_last_trade_never_the_close():
+    """The Day candle judges the last trade before 15:30; the exchange's closing price (the last
+    half hour's weighted average) can be on the other side of the level."""
+    book = Book()
+    a = make({"kind": "price", "params": {"op": "at_or_above", "level": "100"},
+              "frequency": "at_close", "candle_min": "day"})  # fmt: skip
+    book.put(a)
+    t = ms(WED, 15, 29, 59)
+    book.on_tick(frame(ltp=100.05, at=t), t, market(WED, t, TUE))
+    t = ms(WED, 15, 30, 5)
+    (out,) = book.on_clock(t, market(WED, t, TUE))
+    line = words.line(a, out.fire, WED)
+    assert line == (
+        "Alert: SBIN ended the day's trading at or above ₹100.00: last trade ₹100.05 "
+        "(09:15 to 15:30) (NSE)"
+    )
+    assert "close" not in line
+
+
+OPT = {"instrument_key": "NSE_FO|49229", "symbol": "NIFTY25NOV2625900CE", "exchange": "NFO",
+       "tick_size": "0.05", "expiry": "2026-11-25"}  # fmt: skip
+
+
+def test_F12_the_status_line_comes_from_the_clock_and_the_feed_never_a_trade():
+    """An illiquid option whose last trade was yesterday sends quotes all day: each frame's
+    trade fails the gate as outside hours, but the market is open at noon."""
+    book = Book()
+    book.put(make({"kind": "price", "params": {"op": "crosses_above", "level": "100"}}, inst=OPT))
+    t = ms(WED, 12, 0)
+    now = market(WED, t, TUE)
+    out = book.on_tick(frame(key=OPT["instrument_key"], ltp=95.0, at=ms(TUE, 15, 20), recv=t,
+                             bid=94.0, ask=96.0), t, now)  # fmt: skip
+    assert out.check == clock.OUTSIDE_HOURS  # the trade's own verdict, for the counters
+    status = clock.status(now, "NSE_FO", t)
+    assert status == clock.OK and words.check_words(status, now=t) == "Watching · Real-time"
+    evening = ms(WED, 15, 45)
+    assert clock.status(market(WED, evening, TUE), "NSE_FO", evening) == clock.OUTSIDE_HOURS

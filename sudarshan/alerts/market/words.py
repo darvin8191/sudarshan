@@ -79,7 +79,7 @@ def describe(alert: Alert, fire: engine.Fire, today: date) -> tuple[str, str]:
             return f"{lead} {rise} {alert.params['percent']}% {on}", f"now {value}"
         detail = f"{value} ({base} {amount(alert, fire.base)})"
         share = _share(alert, fire)
-        return f"{lead} {rise} {share}% {on}", ("close " + detail) if closed else detail
+        return f"{lead} {rise} {share}% {on}", (_closing(alert) + detail) if closed else detail
     if alert.kind == "day_break":
         side = "high" if fire.direction == UP else "low"
         broke = f"{name} broke today's {side} {amount(alert, fire.base)}"
@@ -91,31 +91,38 @@ def describe(alert: Alert, fire: engine.Fire, today: date) -> tuple[str, str]:
         return broke, f"now {value}"
     if alert.kind == "vwap":
         title = f"{lead} {way} VWAP {level}" if closed else f"{name} crossed {way} VWAP {level}"
-        return title, _close_detail(fire, value) if closed else f"now {value}"
+        return title, _close_detail(alert, fire, value) if closed else f"now {value}"
+    quote = alert.cond.source if alert.cond.source in ("bid", "ask") else ""
+    source = f"{quote} " if quote else ""
     if fire.opening:
         return (
-            f"{name} opened {way} {level}",
-            f"first price {value} (previous {amount(alert, fire.previous)})",
+            f"{name} {source}opened {way} {level}",
+            f"first {quote or 'price'} {value} (previous {amount(alert, fire.previous)})",
         )
-    source = {"bid": "bid ", "ask": "ask "}.get(alert.cond.source, "")
     verb = f"crossed {way}" if alert.cond.mode == CROSS else f"is at or {way}"
     if closed:
         verb = way if alert.cond.mode == CROSS else f"at or {way}"
-        return f"{lead} {verb} {level}", _close_detail(fire, value)
+        return f"{lead} {verb} {level}", _close_detail(alert, fire, value)
     return f"{name} {source}{verb} {level}", f"now {value}"
 
 
 def _close_lead(alert: Alert, name: str) -> str:
+    """The Day candle judges the session's last trade, which is not the exchange's closing
+    price (the last half hour's weighted average) and can be on the other side of the level."""
     if alert.candle_min == DAY:
-        return f"{name} closed the day"
+        return f"{name} ended the day's trading"
     return f"{name} {alert.candle_min}-min candle closed"
 
 
-def _close_detail(fire: engine.Fire, value: str) -> str:
+def _closing(alert: Alert) -> str:
+    return "last trade " if alert.candle_min == DAY else "close "
+
+
+def _close_detail(alert: Alert, fire: engine.Fire, value: str) -> str:
     if fire.span is None:
-        return f"close {value}"
+        return f"{_closing(alert)}{value}"
     start, end = fire.span
-    return f"close {value} ({_hm(start)} to {_hm(end)})"
+    return f"{_closing(alert)}{value} ({_hm(start)} to {_hm(end)})"
 
 
 def _share(alert: Alert, fire: engine.Fire) -> str:
@@ -209,13 +216,29 @@ def note_words(reason: engine.Reason) -> str:
     return _NOTES[reason.code]
 
 
+#: Why the feed is down, by the state its last health message gave, with what to check.
+_FEED_DOWN = {
+    "token_rejected": "Upstox refused the price feed's token: put the current Analytics Token "
+    "in the feed's token file",
+    "no_token": "the price feed has no token: put the Analytics Token in the feed's token file",
+    "stopped": "the price feed is stopped: start sudarshan-feed again",
+    "closed": "the price feed's calendar says the market is closed",
+}
+
+
 def check_words(
-    code: str, *, now: int, opens_at: int | None = None, since: int | None = None
+    code: str,
+    *,
+    now: int,
+    opens_at: int | None = None,
+    since: int | None = None,
+    feed: clock.Feed | None = None,
 ) -> str:
-    """The page's status line when the engine is not judging (clock.gate's first failure).
+    """The page's status line for a segment (clock.status), never a trade's gate result.
 
     ``opens_at`` is the next session's start (sessions.next_session), ``since`` when the feed
-    went down."""
+    went down, ``feed`` its last health: a feed that is stopped or refused needs the owner, so
+    it is not called "reconnecting"."""
     then = f" · checks from {_when(opens_at, now)}" if opens_at is not None else ""
     if code == clock.CLOSED_TODAY:
         return f"Market closed today{then}"
@@ -226,9 +249,16 @@ def check_words(
     if code == clock.CLOSED_BY_EXCHANGE:
         return "Closed by the exchange"
     if code == clock.FEED_DOWN:
-        tail = f" (since {_hms(since)})" if since is not None else ""
-        return f"Not checking · the price feed is reconnecting{tail}"
+        when = f" since {_hms(since)}" if since is not None else ""
+        return f"Not checking{when} · {_feed_down(feed, now)}"
     return WATCHING
+
+
+def _feed_down(feed: clock.Feed | None, now: int) -> str:
+    heard = feed is not None and feed.heard_at is not None
+    if not heard or now - feed.heard_at > clock.HEALTH_MAX_AGE_MS:
+        return "the price feed is not answering: check that sudarshan-feed is running"
+    return _FEED_DOWN.get(feed.state, "the price feed is reconnecting")
 
 
 def _when(at: int, now: int) -> str:
