@@ -15,8 +15,9 @@ from sudarshan.autologin.schedule import IST  # isort: skip
 
 
 def ms(day: str, clock_text: str) -> int:
-    """'2026-10-28', '10:00:00.300' -> epoch ms in IST."""
-    hh, mm, ss = clock_text.split(":")
+    """'2026-10-28', '10:00:00.300' (or '10:00') -> epoch ms in IST."""
+    hh, mm, *rest = clock_text.split(":")
+    ss = rest[0] if rest else "0"
     start = datetime.combine(date.fromisoformat(day), datetime.min.time(), IST)
     seconds = int(hh) * 3600 + int(mm) * 60
     return int(start.timestamp()) * 1000 + seconds * 1000 + round(float(ss) * 1000)
