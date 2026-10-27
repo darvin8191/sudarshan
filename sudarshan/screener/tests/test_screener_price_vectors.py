@@ -18,7 +18,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from screener_helpers import candle, day_key, ms, series
+from screener_helpers import assert_same, candle, day_key, ms, series, want
 
 from sudarshan.screener import catalog as cat
 from sudarshan.screener import patterns, price
@@ -59,31 +59,6 @@ def build(name: str) -> Series:
 
 def days_of(name: str | None) -> Series | None:
     return build(name) if name else None
-
-
-def want(raw):
-    """A vector's expected value: a Why, a Fraction (text), an int or None."""
-    if isinstance(raw, dict) and "why" in raw:
-        detail = tuple(ms(*item) if isinstance(item, list) else item for item in raw["detail"])
-        return Why(raw["why"], detail)
-    if isinstance(raw, str):
-        return Fraction(raw)
-    return raw
-
-
-def assert_same(got, raw) -> None:
-    """Equal in value and in kind: a percent is a Fraction, a price an int, never a float."""
-    expected = want(raw)
-    if isinstance(expected, Why):
-        assert got == expected
-    elif isinstance(raw, str):
-        assert type(got) is Fraction, f"{got!r} is not an exact fraction"
-        assert got == expected
-    elif expected is None:
-        assert got is None
-    else:
-        assert type(got) is int, f"{got!r} is not a whole number"
-        assert got == expected
 
 
 def ids(section: str) -> list[str]:

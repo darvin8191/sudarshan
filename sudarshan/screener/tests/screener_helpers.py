@@ -9,7 +9,9 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from fractions import Fraction
 
-from sudarshan.screener.types import Candle, Series, plain
+import pytest
+
+from sudarshan.screener.types import Candle, Series, Why, plain
 
 from sudarshan.autologin.schedule import IST  # isort: skip
 
@@ -131,3 +133,36 @@ def pointer(document, path: str):
     for part in path.split("/")[1:]:
         node = node[int(part)] if isinstance(node, list) else node[part]
     return node
+
+
+# ---- expected values in the hand-written vectors ------------------------------------------------
+def want(raw):
+    """A vector's expected value: a Why, a Fraction (text), a float, an int or None.
+
+    A ``{"why": code, "detail": [...]}`` object is a Why; a detail item that is a list
+    ``[day, clock]`` is a time (epoch ms).
+    """
+    if isinstance(raw, dict) and "why" in raw:
+        detail = tuple(ms(*item) if isinstance(item, list) else item for item in raw["detail"])
+        return Why(raw["why"], detail)
+    if isinstance(raw, str):
+        return Fraction(raw)
+    return raw
+
+
+def assert_same(got, raw) -> None:
+    """Equal in value and in kind: a percent is a Fraction, a price an int, an indicator a float."""
+    expected = want(raw)
+    if isinstance(expected, Why):
+        assert got == expected
+    elif isinstance(raw, str):
+        assert type(got) is Fraction, f"{got!r} is not an exact fraction"
+        assert got == expected
+    elif isinstance(raw, float):
+        assert type(got) is float, f"{got!r} is not a float"
+        assert got == pytest.approx(raw, rel=1e-12, abs=1e-12)
+    elif expected is None:
+        assert got is None
+    else:
+        assert type(got) is int, f"{got!r} is not a whole number"
+        assert got == expected
