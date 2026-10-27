@@ -9,6 +9,10 @@ to Telegram. Nothing secret is on it: no key, no user name, no message text.
 
 Stdlib asyncio, one request per connection, loopback only, read-only. It is a convenience and never
 the job: a port that cannot be had is logged and the order alerts carry on without the page.
+
+The document itself is ``health_document(service)``, a plain function: the page below serves it,
+and the market alerts' local API (which owns this service's port 5582 and answers ``/health`` too)
+serves the same document with its own fields added, after which this listener goes away.
 """
 
 from __future__ import annotations
@@ -34,8 +38,15 @@ REASONS = {
 }  # fmt: skip
 
 
-def snapshot(service) -> dict:
-    """The health document: plain facts from memory and one small file, nothing secret."""
+def health_document(service) -> dict:
+    """The health document: plain facts from memory and one small file, nothing secret.
+
+    Safe to call from anywhere in the service's process (the page below, the market alerts' API):
+    synchronous, it changes nothing, and its only I/O is reading the deploy tool's record of the
+    installed release. The values are copies, so a caller may add to or change the result. The
+    names are fixed; a caller adding its own fields must not reuse them (the market alerts name
+    theirs ``market_state`` and so on).
+    """
     outbox = service.outbox
     return {
         "service": "sudarshan-alerts",
@@ -131,7 +142,7 @@ class HealthPage:
         if method != "GET":
             return 405, {"error": "method not allowed"}
         try:
-            return 200, snapshot(self.service)
+            return 200, health_document(self.service)
         except Exception:  # a bug here costs the page, never the service
             log.exception("the health page could not be built")
             return 500, {"error": "internal error"}

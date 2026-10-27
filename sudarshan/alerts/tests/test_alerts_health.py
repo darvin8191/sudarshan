@@ -9,6 +9,7 @@ It is a convenience: whatever goes wrong with it must cost the page and nothing 
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import socket
@@ -29,7 +30,7 @@ from alerts_fakes import (
 
 from sudarshan.alerts import __version__, health
 from sudarshan.alerts.config import HEALTH_PORT, ConfigError, Settings
-from sudarshan.alerts.health import HealthPage, snapshot
+from sudarshan.alerts.health import HealthPage, health_document
 from sudarshan.alerts.owner import Owner
 from sudarshan.alerts.service import AlertService
 from sudarshan.ops.release import DEPLOYED_TAG_FILE
@@ -72,7 +73,7 @@ async def _raw(port: int, request: bytes, wait: float = 3.0) -> bytes:
 
 def test_the_document_before_the_service_has_run(settings_for):
     svc = _service(settings_for)
-    page = snapshot(svc)
+    page = health_document(svc)
     assert set(page) == KEYS
     assert page["service"] == "sudarshan-alerts" and page["version"] == __version__
     assert page["release"] is None  # no deploy record on this machine
@@ -88,13 +89,13 @@ def test_the_release_is_the_recorded_tag_and_not_the_services_version(settings_f
     svc = _service(settings_for)
     record = tmp_path / "deployed_tag"
     record.write_text("v0.3.3\n")
-    page = snapshot(svc)
+    page = health_document(svc)
     assert page["release"] == "v0.3.3" and page["version"] == __version__
     assert page["release"] != page["version"]
     keys = list(page)
     assert keys.index("release") == keys.index("version") - 1
     record.write_text("v0.3.4\n")  # an install while the service runs
-    assert snapshot(svc)["release"] == "v0.3.4"
+    assert health_document(svc)["release"] == "v0.3.4"
 
 
 @pytest.mark.parametrize(
@@ -103,7 +104,7 @@ def test_the_release_is_the_recorded_tag_and_not_the_services_version(settings_f
 def test_no_release_when_the_record_is_not_a_tag(settings_for, tmp_path, text):
     svc = _service(settings_for)
     (tmp_path / "deployed_tag").write_bytes(text.encode())
-    page = snapshot(svc)
+    page = health_document(svc)
     assert page["release"] is None
     assert page["service"] == "sudarshan-alerts" and page["state"] == "starting"
 
@@ -112,12 +113,12 @@ def test_no_release_when_the_record_is_a_folder_or_a_link(settings_for, tmp_path
     svc = _service(settings_for)
     record = tmp_path / "deployed_tag"
     record.mkdir()
-    assert snapshot(svc)["release"] is None
+    assert health_document(svc)["release"] is None
     record.rmdir()
     elsewhere = tmp_path / "elsewhere"
     elsewhere.write_text("v9.9.9\n")
     record.symlink_to(elsewhere)
-    assert snapshot(svc)["release"] is None  # a link is not followed
+    assert health_document(svc)["release"] is None  # a link is not followed
 
 
 def test_what_the_service_knows_shows_and_a_secret_does_not(settings_for):
@@ -128,13 +129,13 @@ def test_what_the_service_knows_shows_and_a_secret_does_not(settings_for):
     svc.outbox = type(
         "Outbox", (), {"stats": {"messages": 4, "lines": 5, "dropped": 0, "failed": 1}}
     )()
-    page = snapshot(svc)
+    page = health_document(svc)
     assert (page["state"], page["detail"]) == ("connected", "receiving order updates")
     assert page["owner_ready"] is True
     assert page["stats"] == {"connects": 2, "updates": 7, "alerts": 5}
     assert page["telegram"] == {"messages": 4, "lines": 5, "dropped": 0, "failed": 1}
     svc.owner, svc._owner_problem = None, "no_key"
-    page = snapshot(svc)
+    page = health_document(svc)
     assert (page["owner_ready"], page["owner_problem"]) == (False, "no_key")
     text = json.dumps(page)
     assert API_KEY not in text and NAME not in text
@@ -142,8 +143,21 @@ def test_what_the_service_knows_shows_and_a_secret_does_not(settings_for):
 
 def test_the_page_is_a_copy_not_the_services_own_counters(settings_for):
     svc = _service(settings_for)
-    snapshot(svc)["stats"]["updates"] = 99
+    health_document(svc)["stats"]["updates"] = 99
     assert svc.stats["updates"] == 0
+
+
+def test_the_document_is_a_plain_function_another_server_can_serve(settings_for):
+    """The market alerts' API answers /health with this document plus its own fields: it must be
+    callable from their handler (synchronous, no await), change nothing and be the same twice."""
+    assert not inspect.iscoroutinefunction(health_document)
+    svc = _service(settings_for)
+    before = (svc.state, dict(svc.stats), svc.owner, svc._owner_problem, svc.outbox)
+    first = health_document(svc)
+    merged = first | {"market_state": "running"}  # the other side adds fields beside these
+    assert health_document(svc) == first and "market_state" not in health_document(svc)
+    assert set(merged) == KEYS | {"market_state"}
+    assert (svc.state, dict(svc.stats), svc.owner, svc._owner_problem, svc.outbox) == before
 
 
 # ---- the settings --------------------------------------------------------------------------------
@@ -196,11 +210,11 @@ def test_the_page_answers_get_health_on_loopback_only(settings_for, tmp_path):
             assert answer.headers["content-type"] == "application/json"
             assert answer.headers["cache-control"] == "no-store"
             assert answer.headers["connection"] == "close"
-            assert answer.json() == snapshot(svc)
+            assert answer.json() == health_document(svc)
             assert answer.json()["release"] == "v0.3.3"
             # The same page with a trailing slash or a query string.
             for path in ("/health/", "/health?pretty=1"):
-                assert (await _get(page.port, path)).json() == snapshot(svc)
+                assert (await _get(page.port, path)).json() == health_document(svc)
             # Bound to 127.0.0.1 only: nothing listens on this machine's other addresses.
             (host, port) = page._server.sockets[0].getsockname()[:2]
             assert (host, port) == ("127.0.0.1", page.port)
@@ -294,7 +308,7 @@ def test_a_bug_while_building_the_page_costs_one_answer(settings_for, monkeypatc
                     raise error
                 return {"ok": True}
 
-            monkeypatch.setattr(health, "snapshot", flaky)
+            monkeypatch.setattr(health, "health_document", flaky)
             failed = await _get(page.port)
             assert failed.status_code == 500 and failed.json() == {"error": "internal error"}
             assert "boom" not in failed.text  # the detail goes to the log, not the wire

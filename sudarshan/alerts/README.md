@@ -232,6 +232,12 @@ without the page. `SUDARSHAN_ALERTS_HEALTH_PORT=off` switches it off; a differen
 the screener's local APIs: the health page keeps clear of them, because the market alerts'
 API, which also answers `/health`, must always find its port free).
 
+The document is built by one plain function, `health_document(service)` in `health.py`
+(synchronous, changes nothing, its only I/O is reading the release record). The market alerts' API
+serves the same document with its own fields beside it (its state is `market_state`, so no name is
+shared); once both are in, that API is the only listener on 5582 and this page and its port
+setting go away.
+
 ## Turning it off
 
 To stop all messages:
