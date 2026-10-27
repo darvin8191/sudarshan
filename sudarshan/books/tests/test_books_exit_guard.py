@@ -23,6 +23,7 @@ import broker.upstox.api.order_api as upstox
 import utils.session as session_utils
 from sudarshan.books import exit_guard
 from sudarshan.books.exit_guard import EXIT_ALL_BEING_PLACED, ExitsInFlight
+from sudarshan.books.single_exit import EXIT_NOT_CONFIRMED
 
 X = "NIFTY27OCT2625900CE"
 Y = "BANKNIFTY27OCT2657500PE"
@@ -769,6 +770,22 @@ def test_flow_s_close_node_with_a_symbol_closes_that_position_only_live(broker):
     assert broker["orders"] == [(X, "SELL", 65)]
     assert _flow_close(symbol="NIFTY27OCT2625800CE")[0] == 400  # nothing to close: nothing sent
     assert broker["orders"] == [(X, "SELL", 65)]
+
+
+def test_flow_s_close_of_one_position_that_breaks_is_not_confirmed(broker, monkeypatch):
+    """The second review's C3: whatever breaks once the exit is on its way to the broker may
+    have placed it, so the node is told "not confirmed" (a 500), never a refusal (a 4xx)."""
+    import services.close_position_service as close_service
+
+    def broken(data, auth):
+        raise RuntimeError("the broker module broke")
+
+    module = type("Broker", (), {"place_smartorder_api": staticmethod(broken)})
+    monkeypatch.setattr(close_service, "import_broker_module", lambda name: module)
+    code, body = _flow_close()
+    assert code == 500
+    assert body == {"status": "error", "message": EXIT_NOT_CONFIRMED, "not_confirmed": True}
+    assert broker["orders"] == []
 
 
 def test_flow_s_close_node_with_a_symbol_closes_that_position_only_in_the_sandbox(

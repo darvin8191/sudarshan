@@ -226,6 +226,15 @@ def test_an_exit_all_that_skipped_many_positions_fits_one_telegram_message(alert
     assert "30 more positions were not sent either. Check Positions." in message
 
 
+def test_the_note_on_an_exit_all_that_closed_everything_keeps_its_own_markdown(alerts):
+    """The second review's T6: the note line is escaped like every other line it did not write."""
+    message = alerts(
+        "closeposition",
+        {"status": "success", "message": "All Open Positions Squared Off", "note": "a_b *c* [d]"},
+    )
+    assert "All positions closed successfully\na\\_b \\*c\\* \\[d]\nTime: " in message
+
+
 @pytest.mark.parametrize(
     ("response", "title", "line"),
     [
