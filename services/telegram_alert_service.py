@@ -32,6 +32,7 @@ from sudarshan.books.telegram_words import (
     cancel_all_unsure_line,
     close_failed_line,
     is_app_exit,
+    markdown_safe,
     smart_order_action_lines,
 )
 from utils.logging import get_logger
@@ -225,6 +226,9 @@ class TelegramAlertService:
                             )
                         else:
                             details.append("All positions closed successfully")
+                        # SUDARSHAN M6.9: what Exit all could not check (the open orders, say).
+                        if response.get("note"):
+                            details.append(markdown_safe(str(response["note"])))
                 else:
                     # SUDARSHAN M6.9: Exit all's own sentence under its own title, not "Error: ...".
                     details.append(close_failed_line(order_data, response))

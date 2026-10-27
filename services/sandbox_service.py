@@ -18,10 +18,21 @@ from sandbox.holdings_manager import HoldingsManager
 from sandbox.order_manager import OrderManager
 from sandbox.position_locks import position_busy_response, position_lock
 from sandbox.position_manager import PositionManager
+from sudarshan.books.single_exit import EXIT_NOT_CONFIRMED  # SUDARSHAN M6.9
 from utils.keyed_locks import LockBusy
 from utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+# SUDARSHAN M6.9: what an order or an exit that broke in the sandbox says: it may have been placed.
+_ORDER_NOT_CONFIRMED = (
+    "This order is not confirmed: it may have gone through. Check Orders before sending it again."
+)
+_EXIT_NOT_CONFIRMED = EXIT_NOT_CONFIRMED
+_EXIT_ALL_NOT_CONFIRMED = (
+    "Exit all is not confirmed: some exits may have gone through. Check Orders before sending "
+    "it again."
+)
 
 
 def is_sandbox_mode() -> bool:
@@ -403,9 +414,18 @@ def sandbox_close_position(
 
     except Exception as e:
         logger.exception(f"Error in sandbox_close_position: {e}")
+        # SUDARSHAN M6.9: it may have broken after an exit was placed, and a trader reads the
+        # app's words, never an exception's (the log keeps those).
         return (
             False,
-            {"status": "error", "message": f"Error closing position: {str(e)}", "mode": "analyze"},
+            {
+                "status": "error",
+                "message": _EXIT_NOT_CONFIRMED
+                if position_data.get("symbol")
+                else _EXIT_ALL_NOT_CONFIRMED,
+                "not_confirmed": True,
+                "mode": "analyze",
+            },
             500,
         )
 
@@ -456,11 +476,16 @@ def sandbox_place_smart_order(
 
     except Exception as e:
         logger.exception(f"Error in sandbox_place_smart_order: {e}")
+        # SUDARSHAN M6.9: it may have broken after the order was placed, and a trader reads the
+        # app's words, never an exception's (the log keeps those).
         return (
             False,
             {
                 "status": "error",
-                "message": f"Error placing smart order: {str(e)}",
+                "message": _EXIT_NOT_CONFIRMED
+                if str(order_data.get("position_size", "")).strip() == "0"
+                else _ORDER_NOT_CONFIRMED,
+                "not_confirmed": True,
                 "mode": "analyze",
             },
             500,

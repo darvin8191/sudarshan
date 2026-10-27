@@ -10,7 +10,11 @@ An exit is a smart order to a position size of 0, and the request carries placeh
 side and quantity ("BUY", "0"): the order that went is sized from the book when it is sent. The
 alert says the side and quantity sent (``sent`` in the answer, written where the order is sized:
 broker/upstox/api/order_api.py and services/sandbox_service.py), or "to close the position" when
-that is not known, never the placeholders.
+that is not known, never the placeholders; and "nothing sent", with the app's reason, when nothing
+went. Only the app's own Exit (its strategy name) speaks in the app's Exit words.
+
+Every answer that is not a success either says some of it may have gone (``not_confirmed``) or is
+a refusal before anything was sent, and the titles say which ("not sent").
 """
 
 from __future__ import annotations
@@ -22,6 +26,9 @@ from typing import Any
 EXIT_ALL_NOT_ALL_CLOSED = "Exit all did not close every position"
 EXIT_ALL_NOT_CONFIRMED_TITLE = "Exit all not confirmed"
 EXIT_ALL_NOT_SENT_TITLE = "Exit all not sent"
+#: One position's close that is not the app's Exit (Flow's "Close Positions" node with a symbol).
+POSITION_NOT_CLOSED = "Position not closed"
+POSITION_CLOSE_NOT_CONFIRMED = "Position close not confirmed"
 CANCEL_ALL_NOT_ALL_CANCELLED = "Cancel all did not cancel every order"
 NO_OPEN_ORDERS = "No open orders to cancel"
 
@@ -46,7 +53,7 @@ EXIT_ALL_NOT_CONFIRMED = (
 )
 
 # The SDK's own shape for every answer that is not a 200: "HTTP <code>: <body>".
-_WRAPPED = re.compile(r"\AHTTP \d{3}: (.*)\Z", re.S)
+_WRAPPED = re.compile(r"\AHTTP (\d{3}): (.*)\Z", re.S)
 _MARKDOWN = re.compile(r"([_*`\[])")
 
 
@@ -81,12 +88,17 @@ def sdk_sentence(answer: Any) -> tuple[str, str]:
     wrapped = _WRAPPED.match(message)
     if wrapped:
         try:
-            body = json.loads(wrapped.group(1))
+            body = json.loads(wrapped.group(2))
         except ValueError:
             body = None
         inner = body.get("message") if isinstance(body, dict) else None
         if isinstance(inner, str) and inner.strip():
-            return EXIT_ALL_NOT_ALL_CLOSED, inner.strip()
+            # Some exits went (the app says so), none did (a refusal: a 4xx), or it is not known.
+            if body.get("not_confirmed"):
+                return EXIT_ALL_NOT_ALL_CLOSED, inner.strip()
+            if wrapped.group(1).startswith("4"):
+                return EXIT_ALL_NOT_SENT_TITLE, inner.strip()
+            return EXIT_ALL_NOT_CONFIRMED_TITLE, inner.strip()
         return EXIT_ALL_NOT_CONFIRMED_TITLE, EXIT_ALL_NOT_CONFIRMED
     if not message or kind in ("http_error", "json_error", "unknown_error"):
         return EXIT_ALL_NOT_CONFIRMED_TITLE, EXIT_ALL_NOT_CONFIRMED
@@ -116,8 +128,15 @@ def alert_template(
     succeeded = response.get("status") == "success"
     if is_app_exit(order_type, order_data):
         return f"*{app_exit_title(response)}*\n{{details}}"
-    if order_type == "closeposition" and not succeeded:  # an Exit all: one position's is above
-        return f"*{EXIT_ALL_NOT_ALL_CLOSED}*\n{{details}}"
+    if order_type == "closeposition" and not succeeded:
+        # Some exits may have gone (not_confirmed), or none did: every other answer that is
+        # not a success is a refusal before anything was sent.
+        went = bool(response.get("not_confirmed"))
+        if order_data.get("symbol"):  # one position, closed by another surface (Flow's node)
+            title = POSITION_CLOSE_NOT_CONFIRMED if went else POSITION_NOT_CLOSED
+        else:  # an Exit all
+            title = EXIT_ALL_NOT_ALL_CLOSED if went else EXIT_ALL_NOT_SENT_TITLE
+        return f"*{title}*\n{{details}}"
     if order_type == "cancelallorder":
         if not succeeded or _count(response.get("failed_cancellations")):
             return f"*{CANCEL_ALL_NOT_ALL_CANCELLED}*\n{{details}}"
@@ -156,13 +175,13 @@ def cancel_all_unsure_line(response: dict[str, Any]) -> str | None:
 def is_app_exit(order_type: str, order_data: dict[str, Any]) -> bool:
     """Whether an alert is for the app's own Exit of one position (live or Analyze mode).
 
-    Live, the close route publishes it as a ``closeposition`` naming the position (every other
-    ``closeposition`` is an Exit all); in Analyze mode it is the sandbox's smart order, under the
-    strategy name the route gives it.
+    Live, the close route publishes it as a ``closeposition``; in Analyze mode it is the
+    sandbox's smart order. Both carry the strategy name the route gives it, and only that
+    name: a ``closeposition`` from anything else is an Exit all, or Flow's close node.
     """
-    if order_type == "closeposition":
-        return bool(order_data.get("symbol"))
-    return order_type == "placesmartorder" and order_data.get("strategy") == APP_EXIT_STRATEGY
+    if order_data.get("strategy") != APP_EXIT_STRATEGY:
+        return False
+    return order_type in ("closeposition", "placesmartorder")
 
 
 def _sent(response: dict[str, Any]) -> dict[str, Any] | None:
@@ -235,11 +254,19 @@ def smart_order_action_lines(order_data: dict[str, Any], response: dict[str, Any
             f"Quantity: {order_data.get('quantity', 'N/A')}",
             f"Position Size: {order_data.get('position_size', 'N/A')}",
         ]
-    if response.get("status") == "success" and not response.get("orderid"):
-        reason = str(response.get("message") or "").strip()
-        return ["Action: nothing sent", *([markdown_safe(reason)] if reason else [])]
+    succeeded = response.get("status") == "success"
+    reason = str(response.get("message") or "").strip()
+    because = [markdown_safe(reason)] if reason else []
+    if (succeeded and not response.get("orderid")) or (
+        not succeeded and not response.get("not_confirmed")
+    ):
+        # Nothing was sent: no position to close, a refusal, or its exit already on its way.
+        return ["Action: nothing sent", *because]
     sent = _sent(response)
     if sent is None:
-        return [f"Action: {TO_CLOSE}"]
+        return [f"Action: {TO_CLOSE}", *([] if succeeded else because)]
     to_close = " to close" if sent["closes"] else ""
-    return [f"Action: {sent['action']} {sent['quantity']}{to_close}"]
+    return [
+        f"Action: {sent['action']} {sent['quantity']}{to_close}",
+        *([] if succeeded else because),
+    ]

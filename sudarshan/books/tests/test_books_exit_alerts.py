@@ -209,11 +209,11 @@ TV_EXIT = {
 }
 
 
-def _smart(lines: str, order_id: str | None = "251027000000456") -> str:
+def _smart(lines: str, order_id: str | None = "251027000000456", mode: str = LIVE) -> str:
     tail = f"\nOrder ID: `{order_id}`" if order_id else ""
     return (
         "*Smart Order Placed*\nStrategy: *Nifty breakout*\n"
-        + LIVE
+        + mode
         + "Symbol: `NIFTY27OCT2625900CE`\n"
         + lines
         + "\nExchange: NFO"
@@ -260,6 +260,131 @@ def test_a_smart_order_to_a_position_size_of_0_never_shows_the_placeholders(
     message = alert("placesmartorder", order_data, response)
     assert message == text
     assert "Action: BUY\n" not in message and "Quantity: 0" not in message
+
+
+@pytest.mark.parametrize(
+    ("response", "lines"),
+    [
+        (
+            {
+                "status": "error",
+                "mode": "analyze",
+                "message": "Cannot place MARKET order for NIFTY27OCT2625900CE - unable to fetch "
+                "current price.",
+            },
+            "Action: nothing sent\nCannot place MARKET order for NIFTY27OCT2625900CE - unable to "
+            "fetch current price.",
+        ),
+        (
+            {
+                "status": "error",
+                "message": "An exit for NIFTY 25900 CE is already on its way (sent 10:52:13).",
+            },
+            "Action: nothing sent\nAn exit for NIFTY 25900 CE is already on its way (sent "
+            "10:52:13).",
+        ),
+        (
+            {"status": "error", "message": NOT_CONFIRMED, "not_confirmed": True},
+            "Action: to close the position\n" + NOT_CONFIRMED,
+        ),
+        (
+            {"status": "error", "message": NOT_CONFIRMED, "not_confirmed": True, "sent": SOLD_1},
+            "Action: SELL 1 to close\n" + NOT_CONFIRMED,
+        ),
+    ],
+    ids=[
+        "refused by the sandbox",
+        "its exit already on its way",
+        "not confirmed",
+        "not confirmed, sent known",
+    ],
+)
+def test_a_smart_exit_that_sent_nothing_says_so_and_why(alert, response, lines):
+    """The review's LOW-4: a refused one read "Action: to close the position", with no reason."""
+    message = alert("placesmartorder", TV_EXIT, response)
+    mode = ANALYZE if response.get("mode") == "analyze" else LIVE
+    assert message == _smart(lines, order_id=None, mode=mode)
+
+
+def test_what_was_sent_with_no_quantity_reads_as_to_close(alert):
+    """An answer saying it sent 0 says nothing true about what went: never "SELL 0 to close"."""
+    response = {
+        "status": "success",
+        "orderid": "251027000000456",
+        "sent": {**SOLD_1, "quantity": 0},
+    }
+    assert alert("placesmartorder", TV_EXIT, response) == _smart("Action: to close the position")
+    response = {
+        "status": "success",
+        "orderid": "251027000000125",
+        "sent": {**SOLD_1, "quantity": 0},
+    }
+    message = alert("closeposition", LIVE_EXIT, response)
+    assert "RELIANCE (NSE, CNC), to close the position\n" in message
+
+
+def test_a_sliced_exit_names_its_first_five_orders(alert):
+    ids = [f"25102700000013{n}" for n in range(7)]
+    response = {"status": "success", "orderid": ids[0], "orderids": ids, "sent": SOLD_1}
+    message = alert("closeposition", LIVE_EXIT, response)
+    assert "Order IDs: " + ", ".join(f"`{each}`" for each in ids[:5]) + "\n" in message
+    assert ids[5] not in message and ids[6] not in message
+
+
+def test_a_short_target_is_not_an_exit(alert):
+    """Position size -65 goes short: upstream's lines, as for any other size."""
+    message = alert(
+        "placesmartorder",
+        {**TV_EXIT, "action": "SELL", "quantity": "65", "position_size": "-65"},
+        {"status": "success", "orderid": "251027000000458"},
+    )
+    assert "Action: SELL\nQuantity: 65\nPosition Size: -65\n" in message
+    assert "to close" not in message
+
+
+def test_markdown_in_a_reason_is_kept_whole(alert):
+    reason = "UDAPI100500 [order_type]: *invalid*"
+    message = alert("closeposition", LIVE_EXIT, {"status": "error", "message": reason})
+    assert "UDAPI100500 \\[order\\_type]: \\*invalid\\*" in message
+
+
+def test_the_app_s_exit_that_broke_in_the_sandbox_says_the_app_s_sentence(alert, monkeypatch):
+    """The review's LOW-4: it said "Error placing smart order: (sqlite3.OperationalError) ..."."""
+    import services.sandbox_service as sandbox_service
+
+    def broken(user_id):
+        raise RuntimeError("(sqlite3.OperationalError) database is locked")
+
+    monkeypatch.setattr(sandbox_service, "get_user_id_from_apikey", lambda key: "owner")
+    monkeypatch.setattr(sandbox_service, "PositionManager", broken)
+    ok, answer, code = sandbox_service.sandbox_place_smart_order(dict(ANALYZE_EXIT), "key", {})
+    assert (ok, code) == (False, 500)
+    assert answer == {
+        "status": "error",
+        "message": NOT_CONFIRMED,
+        "not_confirmed": True,
+        "mode": "analyze",
+    }
+    message = alert("placesmartorder", ANALYZE_EXIT, answer)
+    assert message == (
+        "*Exit not confirmed*\n"
+        + ANALYZE
+        + "RELIANCE (NSE, CNC), to close the position\n"
+        + NOT_CONFIRMED
+        + "\nTime: 10:52:13"
+    )
+    # Any other smart order says the order, not an exit; and a close-all that broke, Exit all.
+    _, answer, _ = sandbox_service.sandbox_place_smart_order(
+        {**ANALYZE_EXIT, "position_size": "5"}, "key", {}
+    )
+    assert answer["message"].startswith("This order is not confirmed: it may have gone through.")
+    monkeypatch.setattr(sandbox_service, "get_user_id_from_apikey", broken)
+    _, answer, code = sandbox_service.sandbox_close_position({}, "key", {})
+    assert (code, answer["not_confirmed"]) == (500, True)
+    assert answer["message"].startswith("Exit all is not confirmed: some exits may have gone")
+    _, answer, _ = sandbox_service.sandbox_close_position({"symbol": "SBIN"}, "key", {})
+    assert answer["message"] == NOT_CONFIRMED
+    assert "sqlite3" not in str(answer)
 
 
 def test_every_other_smart_order_keeps_its_layout(alert):
