@@ -112,9 +112,13 @@ def test_the_latest_of_a_claim_and_a_note_is_the_time_said(monkeypatch):
         clock.epoch += 2
         guard._positions[("live", *POSITION)] = clock.epoch  # an exit for it began at 10:52:19
         assert "(sent 10:52:19)" in guard.busy("live")[POSITION]
+        assert "(sent 10:52:19)" in guard.why_busy("live", POSITION)
+        with guard.one("live", POSITION) as busy:  # what a second phone is told
+            assert "(sent 10:52:19)" in busy
         assert "(sent 10:52:17)" in guard.busy("live")[("NFO", Y, "NRML")]
         del guard._positions[("live", *POSITION)]
     assert "(sent 10:52:13)" in guard.busy("live")[POSITION]
+    assert "(sent 10:52:13)" in guard.why_busy("live", POSITION)
 
 
 def test_the_books_are_apart():
@@ -179,7 +183,23 @@ def test_a_position_is_named_as_the_phone_names_it(position, name):
     assert exit_guard.trader_name(position) == name
 
 
-def test_the_time_said_is_india_s_whatever_the_server_s_zone():
+@pytest.fixture
+def server_zone(monkeypatch):
+    """Set the process's own time zone, as a server kept on UTC (or anywhere) has it."""
+    import time as process_time
+
+    def set_zone(name: str) -> None:
+        monkeypatch.setenv("TZ", name)
+        process_time.tzset()
+
+    yield set_zone
+    monkeypatch.undo()
+    process_time.tzset()
+
+
+@pytest.mark.parametrize("zone", ["UTC", "America/New_York", "Asia/Kolkata"])
+def test_the_time_said_is_india_s_whatever_the_server_s_zone(server_zone, zone):
+    server_zone(zone)
     assert exit_guard.clock(1793078533.0) == "10:52:13"
 
 
