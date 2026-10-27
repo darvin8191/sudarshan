@@ -236,6 +236,26 @@ class Gate:
             self._state = state
             return "on", state, [t for t, s in self._sends.items() if s.answered is None]
 
+    def turn_off(self, activation_id: str | None, state: KillSwitchState) -> bool:
+        """Turn the switch off, only if it is still the activation the owner resumed."""
+        with self._lock:
+            current = self._state
+            if current is None or not current.on or current.running:
+                return False
+            if current.activation_id != activation_id:
+                return False
+            self._state = state
+            return True
+
+    def settle_restart(self, activation_id: str | None, state: KillSwitchState) -> bool:
+        """An activation saved as running by a process that is gone: hold it as settled."""
+        with self._lock:
+            current = self._state
+            if current is None or not current.running or current.activation_id != activation_id:
+                return False
+            self._state = state
+            return True
+
     def unanswered(self, tokens: list[int]) -> list[int]:
         """Which of ``tokens`` are still waiting for their answer."""
         with self._lock:

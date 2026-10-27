@@ -63,7 +63,11 @@ def import_broker_module(broker_name: str) -> Any | None:
 
 
 def cancel_all_orders_with_auth(
-    order_data: dict[str, Any], auth_token: str, broker: str, original_data: dict[str, Any]
+    order_data: dict[str, Any],
+    auth_token: str,
+    broker: str,
+    original_data: dict[str, Any],
+    force_live: bool = False,  # SUDARSHAN M5.13: the kill switch's cancel is always Live
 ) -> tuple[bool, dict[str, Any], int]:
     """
     Cancel all orders using provided auth token.
@@ -85,7 +89,7 @@ def cancel_all_orders_with_auth(
         order_request_data.pop("apikey", None)
 
     # If in analyze mode, route to sandbox for sandbox trading
-    if get_analyze_mode():
+    if get_analyze_mode() and not force_live:  # SUDARSHAN M5.13
         from services.sandbox_service import sandbox_cancel_all_orders
 
         api_key = original_data.get("apikey")

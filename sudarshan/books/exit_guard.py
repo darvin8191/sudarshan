@@ -240,6 +240,11 @@ class ExitsInFlight:
         if not recent:
             del self._placed[book]
 
+    def every_held(self, book: str) -> bool:
+        """Whether an Exit all holds ``book`` now (M5.13: the kill switch's resume waits)."""
+        with self._lock:
+            return book in self._every
+
     def __len__(self) -> int:
         """How many claims are held right now."""
         with self._lock:
@@ -272,6 +277,11 @@ def exit_placed(book: str, exchange: object, symbol: object, product: object) ->
     the position again.
     """
     EXITS.placed(book, position_of(exchange, symbol, product))
+
+
+def exit_all_held(book: str) -> bool:
+    """Whether an Exit all is being placed in ``book`` now (``EXITS.every_held``)."""
+    return EXITS.every_held(book)
 
 
 def busy_positions(book: str) -> dict[Position, str]:

@@ -43,12 +43,13 @@ def cancel_gtt_order_with_auth(
     auth_token: str,
     broker: str,
     original_data: dict[str, Any],
+    force_live: bool = False,  # SUDARSHAN M5.13: the kill switch's cancel is always Live
 ) -> tuple[bool, dict[str, Any], int]:
     order_request_data = copy.deepcopy(original_data)
     order_request_data.pop("apikey", None)
     api_key = original_data.get("apikey", "")
 
-    if get_analyze_mode():
+    if get_analyze_mode() and not force_live:  # SUDARSHAN M5.13
         from services.sandbox_service import sandbox_cancel_gtt_order
 
         success, response, status_code = sandbox_cancel_gtt_order(trigger_id, api_key)

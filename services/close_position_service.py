@@ -65,7 +65,11 @@ def import_broker_module(broker_name: str) -> Any | None:
 
 
 def close_position_with_auth(
-    position_data: dict[str, Any], auth_token: str, broker: str, original_data: dict[str, Any]
+    position_data: dict[str, Any],
+    auth_token: str,
+    broker: str,
+    original_data: dict[str, Any],
+    force_live: bool = False,  # SUDARSHAN M5.13: the kill switch's Exit all is always Live
 ) -> tuple[bool, dict[str, Any], int]:
     """
     Close all positions using provided auth token.
@@ -87,7 +91,7 @@ def close_position_with_auth(
         position_request_data.pop("apikey", None)
 
     # If in analyze mode, route to sandbox for real position closing
-    if get_analyze_mode():
+    if get_analyze_mode() and not force_live:  # SUDARSHAN M5.13
         from services.sandbox_service import sandbox_close_position
 
         api_key = original_data.get("apikey")

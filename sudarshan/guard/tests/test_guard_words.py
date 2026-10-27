@@ -50,7 +50,42 @@ def every_sentence() -> list[str]:
             words.check_broke(pipe),
             words.order_not_found(pipe),
         ]
+    out += kill_switch_sentences()
     return out
+
+
+def kill_switch_sentences() -> list[str]:
+    steps = ["saved", "told", "drain", "live_orders", "live_gtts", "live_exit_all",
+             "live_orders_again", "sandbox_orders", "sandbox_gtts", "sandbox_exit_all", "mcp",
+             "agent", "unknown"]  # fmt: skip
+    counts = [
+        None,
+        {"orders": 0, "gtts": 0, "stops": 0, "protected": 0},
+        {"orders": 1, "gtts": None, "stops": 1, "protected": 1},
+        {"orders": 12, "gtts": 2, "stops": 3, "protected": 2},
+    ]
+    report = {"steps": [{"step": "live_orders", "ok": False, "words": words.KS_ORDERS_NOT_CONFIRMED},
+                        {"step": "agent", "ok": True, "words": words.KS_AGENT_STOPPED}]}  # fmt: skip
+    out = [words.ks_already_on(SINCE), words.ks_already_on("")]
+    out += [words.ks_turned_on(SINCE, s) for s in ("app", "telegram", "api", None)]
+    out += [words.ks_step_broke(step) for step in steps]
+    out += [words.ks_drained(*n) for n in ((0, 0), (1, 0), (2, 1), (5, 0))]
+    out += [words.ks_orders_cancelled(n, b) for n in (0, 1, 7) for b in counts[1:]]
+    out += [words.ks_gtts_cancelled(*n) for n in ((0, 0), (1, 0), (2, 1))]
+    out += [words.ks_exit_all("All Open Positions Squared Off"), words.ks_exit_all("")]
+    out += [words.ks_swept_again(words.ks_orders_cancelled(1, {}))]
+    out += [words.ks_sandbox_orders(n, ok) for n in (0, 1, 3) for ok in (True, False)]
+    out += [words.ks_sandbox_gtts(*n) for n in ((0, 0), (1, 0), (2, 1))]
+    out += [words.ks_sandbox_exit_all("Closed 1 positions"), words.ks_sandbox_exit_all("")]
+    out += [words.ks_mcp_revoked(n) for n in (0, 1, 4)]
+    out += [words.ks_resume_wait(n) for n in (1, 59)]
+    out += [
+        words.ks_report_lead(r)
+        for r in (None, {"steps": []}, report, {"restarted": words.KS_RESTARTED})
+    ]
+    out += words.ks_report_message(report).split("\n")
+    out += [words.ks_preview(c, telegram=t) for c in counts for t in (False, True)]
+    return [line for line in out if line]
 
 
 FORBIDDEN = [
@@ -99,3 +134,21 @@ def test_only_a_live_refusal_points_to_the_upstox_app():
     assert words.book_unreadable("live", SINCE).endswith("For an urgent exit, use the Upstox app.")
     assert "Upstox" not in words.book_unreadable("sandbox", SINCE)
     assert "Upstox" not in words.check_broke("sandbox")
+
+
+def test_the_preview_says_in_numbers_what_turning_it_on_cancels():
+    """Amendment R1, word for word where it gave the words."""
+    counts = {"orders": 12, "gtts": 2, "stops": 3, "protected": 3}
+    assert words.ks_preview(counts) == (
+        "12 open orders and 2 GTTs will be cancelled, including 3 stop-loss orders that protect "
+        "3 positions. Those positions stay open without a stop unless you also tick Exit all."
+    )
+    one = {"orders": 1, "gtts": 0, "stops": 1, "protected": 1}
+    assert words.ks_preview(one, telegram=True) == (
+        "1 open order and 0 GTTs will be cancelled, including 1 stop-loss order that protects 1 "
+        "position. That position stays open without a stop unless you send /killswitch exit "
+        "with your phrase."
+    )
+    assert words.ks_preview({"orders": 2, "gtts": 1, "stops": 0}) == (
+        "2 open orders and 1 GTT will be cancelled."
+    )
