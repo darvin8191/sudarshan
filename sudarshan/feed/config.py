@@ -9,7 +9,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from sudarshan.autologin.schedule import EXTRA_TRADING_DAYS_FILE, parse_window
+from sudarshan.autologin.schedule import EXTRA_TRADING_DAYS_FILE, window_setting
+
+log = logging.getLogger("sudarshan.feed")
 
 PKG_DIR = Path(__file__).resolve().parent
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
@@ -61,12 +63,9 @@ class Settings:
         # The bearer token travels to this base URL: plain http only to a local test server.
         if not api_base.startswith("https://") and not is_loopback_url(api_base):
             raise ValueError("SUDARSHAN_UPSTOX_API_BASE must use https://")
-        try:  # the calendar files' own reading of HH:MM-HH:MM
-            window = parse_window(get("SUDARSHAN_FEED_WINDOW", DEFAULT_WINDOW))
-        except ValueError:
-            raise ValueError(
-                "SUDARSHAN_FEED_WINDOW must be HH:MM-HH:MM with open before close"
-            ) from None
+        window = window_setting(
+            "SUDARSHAN_FEED_WINDOW", get("SUDARSHAN_FEED_WINDOW"), DEFAULT_WINDOW, log
+        )
         state_dir = get("SUDARSHAN_FEED_STATE_DIR") or get("STATE_DIRECTORY") or STATE_DIR
         return cls(
             token_file=Path(get("SUDARSHAN_UPSTOX_TOKEN_FILE", TOKEN_FILE)),

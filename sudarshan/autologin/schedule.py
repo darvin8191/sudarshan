@@ -81,6 +81,25 @@ def parse_window(text: str) -> tuple[int, int]:
     return window
 
 
+def window_setting(
+    name: str, value: str | None, default: str, logger: logging.Logger
+) -> tuple[int, int]:
+    """A service's own window from its setting, ``name=value``; the usual ``default`` when the
+    setting is empty or not a window. A value the looser reading before took (9:5, a space that is
+    not ASCII) then costs one warning, never the service's start."""
+    if value is None or not value.strip(_ASCII_SPACE):
+        return parse_window(default)
+    try:
+        return parse_window(value)
+    except ValueError:
+        logger.warning(
+            "%s is set to %r, which is not a time window (HH:MM-HH:MM, the start before the end), "
+            "so the usual %s is used",
+            name, value, default,
+        )  # fmt: skip
+        return parse_window(default)
+
+
 def window_text(window: tuple[int, int]) -> str:
     """(845, 940) -> '14:05-15:40'."""
     return "-".join(f"{minute // 60:02d}:{minute % 60:02d}" for minute in window)

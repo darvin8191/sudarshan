@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from sudarshan.autologin import schedule
+from sudarshan.autologin.config import Settings
 from sudarshan.autologin.messages import MESSAGES
 from sudarshan.autologin.schedule import (
     DEFAULT_WINDOW,
@@ -30,6 +31,7 @@ from sudarshan.autologin.schedule import (
     parse_window,
     trading_session_start,
     union,
+    window_setting,
 )
 
 REPO = Path(__file__).resolve().parents[3]
@@ -357,6 +359,30 @@ def test_only_a_reporting_calendar_logs_the_windows_it_cannot_use(tmp_path, capl
     TradingCalendar(tmp_path / "nse_holidays.txt", extra, report=True).extra_days()
     assert caplog.text.count("is not a window") == 1
     assert caplog.text.count(f"{extra} read: extra trading days 2026-11-08 (usual)") == 1
+
+
+def test_a_window_setting_is_read_strictly_and_never_stops_a_start(caplog):
+    caplog.set_level(logging.WARNING, logger="sudarshan.test")
+    quiet = logging.getLogger("sudarshan.test")
+    assert window_setting("X_WINDOW", "09:00-10:00", "08:30-15:40", quiet) == (540, 600)
+    for empty in (None, "", "  \t"):  # unset, as before
+        assert window_setting("X_WINDOW", empty, "08:30-15:40", quiet) == (510, 940)
+    assert caplog.records == []
+    assert window_setting("X_WINDOW", "9:5-15:40", "08:30-15:40", quiet) == (510, 940)
+    assert [record.getMessage() for record in caplog.records] == [
+        "X_WINDOW is set to '9:5-15:40', which is not a time window (HH:MM-HH:MM, the start "
+        "before the end), so the usual 08:30-15:40 is used"
+    ]
+
+
+@pytest.mark.parametrize("value", ["15:40-08:30", "08:30-15:300", "08:30-15:40\u00a0"])
+def test_auto_logins_window_setting_that_is_not_a_window_keeps_the_usual_hours(caplog, value):
+    caplog.set_level(logging.WARNING, logger="sudarshan.autologin")
+    assert Settings.from_env({"SUDARSHAN_AUTOLOGIN_WINDOW": value}).window == (510, 940)
+    assert [(record.levelname, record.name) for record in caplog.records] == [
+        ("WARNING", "sudarshan.autologin")
+    ]
+    assert "SUDARSHAN_AUTOLOGIN_WINDOW is set to" in caplog.records[0].getMessage()
 
 
 def test_a_second_thread_never_gets_the_old_dates_once_the_file_changed(tmp_path, monkeypatch):

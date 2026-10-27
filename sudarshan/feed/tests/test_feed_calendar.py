@@ -68,8 +68,6 @@ def test_settings_read_the_extra_days_file_the_others_read():
     assert Settings.from_env({"SUDARSHAN_NSE_EXTRA_DAYS_FILE": ""}).extra_days_file == default
     custom = {"SUDARSHAN_NSE_EXTRA_DAYS_FILE": "/srv/extra.txt"}
     assert Settings.from_env(custom).extra_days_file == Path("/srv/extra.txt")
-    with pytest.raises(ValueError, match="SUDARSHAN_FEED_WINDOW"):  # read as strictly as the files
-        Settings.from_env({"SUDARSHAN_FEED_WINDOW": "08:58-15:500"})
 
 
 def test_an_extra_sunday_without_a_window_keeps_the_usual_hours(files):

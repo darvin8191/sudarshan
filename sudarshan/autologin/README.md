@@ -188,7 +188,7 @@ again.
 | variable | default | meaning |
 |---|---|---|
 | `SUDARSHAN_OPENALGO_URL` | `http://127.0.0.1:5000` | OpenAlgo on this server (loopback only) |
-| `SUDARSHAN_AUTOLOGIN_WINDOW` | `08:30-15:40` | IST minutes in which a scheduled wake-up may log in |
+| `SUDARSHAN_AUTOLOGIN_WINDOW` | `08:30-15:40` | IST minutes in which a scheduled wake-up may log in; a value that is not HH:MM-HH:MM (the start first) logs a warning and the usual hours are used |
 | `SUDARSHAN_NSE_HOLIDAYS_FILE` | `/etc/sudarshan/nse_holidays.txt` | trading holidays |
 | `SUDARSHAN_NSE_EXTRA_DAYS_FILE` | `/etc/sudarshan/nse_extra_trading_days.txt` | sessions on otherwise closed days |
 | `SUDARSHAN_AUTOLOGIN_LOG_LEVEL` | `INFO` | worker log level |

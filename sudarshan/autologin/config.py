@@ -18,8 +18,10 @@ from dotenv import dotenv_values
 
 from sudarshan.vault.store import DB_FILENAME, VAULT_DIR
 
-from .schedule import DEFAULT_WINDOW, EXTRA_TRADING_DAYS_FILE, HOLIDAYS_FILE, parse_window
+from .schedule import DEFAULT_WINDOW, EXTRA_TRADING_DAYS_FILE, HOLIDAYS_FILE, window_setting
 from .upstox import UPSTOX_API_BASE
+
+log = logging.getLogger("sudarshan.autologin")
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
@@ -73,7 +75,9 @@ class Settings:
             extra_days_file=Path(get("SUDARSHAN_NSE_EXTRA_DAYS_FILE") or EXTRA_TRADING_DAYS_FILE),
             openalgo_url=openalgo_url,
             upstox_base=upstox_base,
-            window=parse_window(get("SUDARSHAN_AUTOLOGIN_WINDOW") or DEFAULT_WINDOW),
+            window=window_setting(
+                "SUDARSHAN_AUTOLOGIN_WINDOW", get("SUDARSHAN_AUTOLOGIN_WINDOW"), DEFAULT_WINDOW, log
+            ),
         )
 
 
