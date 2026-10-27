@@ -742,12 +742,14 @@ def close_all_positions():
 
         # Format the response for UI
         if success and status_code == 200:
-            return jsonify(
-                {
-                    "status": "success",
-                    "message": response_data.get("message", "All Open Positions Squared Off"),
-                }
-            ), 200
+            done = {
+                "status": "success",
+                "message": response_data.get("message", "All Open Positions Squared Off"),
+            }
+            # SUDARSHAN M6.9: each position's own orders, for the phone's hold.
+            if response_data.get("positions"):
+                done["positions"] = response_data["positions"]
+            return jsonify(done), 200
         else:
             return jsonify(response_data), status_code
 

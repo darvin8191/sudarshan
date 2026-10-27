@@ -123,11 +123,16 @@ in brand. Icon "Mor": tile #0E5A73, ring #E3A21A, glyph #FFFFFF. Numbers via
     can take 120 s); an answer the app could not confirm holds 15 s after the answer or the
     last change; the exit's own open order (pinned by the order id in the answer) holds until
     a book read settles it. After that it asks again, saying what is known about the first.
-    The server refuses an overlapping exit with 409 (`sudarshan/books/exit_guard.py`): per
-    position for the app's exits, and one claim taken by every Exit all from any surface
-    (app, `/api/v1/closeposition`, Telegram, Flow) in `close_position_with_auth`. Anything that may have reached the broker reads "not
-    confirmed", never a refusal or raw error text. A stranded hold costs a retry; a released
-    one can reverse a position.
+    The server keeps exits for one position to one at a time (`sudarshan/books/exit_guard.py`):
+    a claim while an exit is being placed and a 15 s note after it, for the app's Exit, a smart
+    order to position size 0 (TradingView, scripts; claimed before its positions read) and
+    Flow's close; an overlapping one gets 409 with a sentence, and an entry is never refused.
+    The scalping terminal's closes and the strategy module's exits are not covered yet. Every
+    Exit all takes one claim for the whole book in `close_position_with_auth`; in Live it reads
+    positions and the order book once and leaves out, with a sentence each, any position that
+    is busy or has a working order on its closing side; it never waits. Anything that may have reached the broker reads "not confirmed",
+    never a refusal or raw error text. A stranded hold costs a retry; a released one can
+    reverse a position.
   - A sheet, a confirmation or an order ticket ignores taps for 500 ms after it opens
     (`watchlist/openGuard.ts`), so a double tap never presses what appeared under the finger.
   - Order alerts on Telegram (M6.8) are on by default (owner's broker-app benchmark, 20 Oct

@@ -23,6 +23,7 @@ import broker.upstox.api.order_api as upstox
 import utils.session as session_utils
 from sudarshan.books import exit_guard
 from sudarshan.books.exit_guard import EXIT_ALL_BEING_PLACED, ExitsInFlight
+from sudarshan.books.single_exit import EXIT_NOT_CONFIRMED
 
 X = "NIFTY27OCT2625900CE"
 Y = "BANKNIFTY27OCT2657500PE"
@@ -183,6 +184,34 @@ def test_a_position_is_named_as_the_phone_names_it(position, name):
     assert exit_guard.trader_name(position) == name
 
 
+def test_a_working_order_is_named_with_what_to_do_and_the_rest_counted():
+    """The second review's MEDIUM-3: which order holds the position back, and the next step."""
+    from sudarshan.books.exit_guard import WorkingOrder, order_working
+
+    held = ("NFO", "NIFTY27OCT2625900CE", "MIS")
+    stop = WorkingOrder("SELL", 65, "SL-M", 97.0, 98.5, "251027000123456", "10:42:20")
+    assert order_working(held, [stop], 65) == (
+        "NIFTY 25900 CE has a SELL 65 SL-M order (trigger 98.50, order ending 3456, placed "
+        "10:42:20) working to close it, so no exit was sent for it. Cancel it in Orders, then exit."
+    )  # a stop-market order's price is not its own: not said
+    target = WorkingOrder("SELL", 30, "LIMIT", 180.0, 0.0, "251027000123457", "")
+    part = WorkingOrder("SELL", 20, "SL", 97.0, 98.5, "251027000123458", "10:42:21")
+    assert order_working(held, [target, part], 65) == (
+        "NIFTY 25900 CE has a SELL 30 LIMIT order (price 180.00, order ending 3457) and 1 more "
+        "order working to close 50 of the 65 held, so no exit was sent for any of it. Cancel them "
+        "in Orders, then exit."
+    )
+    assert order_working(held, [target, part, stop], 65).endswith(
+        "and 2 more orders working to close it, so no exit was sent for it. Cancel them in "
+        "Orders, then exit."
+    )
+    bare = WorkingOrder("BUY", 0)  # an order book that said little
+    assert order_working(("NSE", "SBIN", "MIS"), [bare], 10) == (
+        "SBIN has a BUY order working to close it, so no exit was sent for it. Cancel it in "
+        "Orders, then exit."
+    )
+
+
 @pytest.fixture
 def server_zone(monkeypatch):
     """Set the process's own time zone, as a server kept on UTC (or anywhere) has it."""
@@ -323,23 +352,39 @@ def test_an_exit_counts_as_placed_as_long_as_the_phone_holds_it():
     assert exit_guard.EXIT_SHOWS_WITHIN_S == hold_ms / 1000
 
 
-def test_an_unanswered_exit_all_is_held_on_the_phone_until_the_server_is_done():
-    """Exit all starts no Upstox call after EXIT_ALL_SENDS_FOR_S, and the one running then is
-    bounded; the phone holds an Exit all that got no answer at least that long (item 9)."""
+def _app_request_limit_s() -> int:
+    """The time nginx gives a request to the app (install/install.sh, the gunicorn location)."""
+    script = (REPO / "install/install.sh").read_text(encoding="utf-8")
+    block = re.search(r"location / \{\s*proxy_pass http://unix:[^}]*\}", script)
+    assert block, "the app's nginx location was not found"
+    return int(re.search(r"proxy_read_timeout (\d+)s;", block[0])[1])
+
+
+def test_an_exit_all_ends_inside_the_time_nginx_gives_its_request():
+    """Its reads (the positions with Upstox's 429 back-off, the order book cut off at its own
+    limit), then EXIT_ALL_SENDS_FOR_S for sending, and the last exit's own bound (item 2)."""
+    from broker.upstox.api.rate_limiter import BASE_BACKOFF, MAX_RETRIES
     from utils.broker_backpressure import BROKER_MAX_ORDER_QUEUE_WAIT_SECONDS
     from utils.httpx_client import REQUEST_TIMEOUT_SECONDS
 
+    back_off = sum(BASE_BACKOFF * 2**attempt for attempt in range(MAX_RETRIES))
+    reads = REQUEST_TIMEOUT_SECONDS + back_off + exit_guard.EXIT_ALL_ORDERS_READ_S
+    last_exit = REQUEST_TIMEOUT_SECONDS + BROKER_MAX_ORDER_QUEUE_WAIT_SECONDS
+    budget = reads + exit_guard.EXIT_ALL_SENDS_FOR_S + last_exit
+    assert budget <= _app_request_limit_s(), budget
+    assert exit_guard.EXIT_ALL_SENDS_FOR_S >= 5  # and it is not cut short in an ordinary day
+    assert exit_guard.EXIT_ALL_ORDERS_READ_S <= 5  # a slow order book costs a few seconds only
+
+
+def test_the_phone_s_hold_of_an_unanswered_exit_is_not_what_keeps_overlaps_safe():
+    """The hold ends before a slow Exit all may: the server answers a tap after it with 409."""
     sent = (REPO / "frontend/src/sudarshan/books/sent.ts").read_text(encoding="utf-8")
     hold_ms = int(
         re.search(r"export const NO_ANSWER_HOLD_MS = ([0-9_]+)", sent)[1].replace("_", "")
     )
-    budget = (
-        exit_guard.EXIT_ALL_SENDS_FOR_S
-        + REQUEST_TIMEOUT_SECONDS
-        + BROKER_MAX_ORDER_QUEUE_WAIT_SECONDS
-    )
-    assert budget <= hold_ms / 1000, (budget, hold_ms)
-    assert exit_guard.EXIT_ALL_SENDS_FOR_S >= 5  # and it is not cut short in an ordinary day
+    assert hold_ms / 1000 < _app_request_limit_s()
+    with exit_guard.EXITS.every("live"):
+        assert exit_guard.why_busy("live", "NFO", X, "MIS") == EXIT_ALL_BEING_PLACED
 
 
 # -- The app's routes and services, over the real Upstox module ---------------------------------
@@ -753,6 +798,22 @@ def test_flow_s_close_node_with_a_symbol_closes_that_position_only_live(broker):
     assert broker["orders"] == [(X, "SELL", 65)]
     assert _flow_close(symbol="NIFTY27OCT2625800CE")[0] == 400  # nothing to close: nothing sent
     assert broker["orders"] == [(X, "SELL", 65)]
+
+
+def test_flow_s_close_of_one_position_that_breaks_is_not_confirmed(broker, monkeypatch):
+    """The second review's C3: whatever breaks once the exit is on its way to the broker may
+    have placed it, so the node is told "not confirmed" (a 500), never a refusal (a 4xx)."""
+    import services.close_position_service as close_service
+
+    def broken(data, auth):
+        raise RuntimeError("the broker module broke")
+
+    module = type("Broker", (), {"place_smartorder_api": staticmethod(broken)})
+    monkeypatch.setattr(close_service, "import_broker_module", lambda name: module)
+    code, body = _flow_close()
+    assert code == 500
+    assert body == {"status": "error", "message": EXIT_NOT_CONFIRMED, "not_confirmed": True}
+    assert broker["orders"] == []
 
 
 def test_flow_s_close_node_with_a_symbol_closes_that_position_only_in_the_sandbox(

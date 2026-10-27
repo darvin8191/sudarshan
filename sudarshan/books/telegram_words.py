@@ -38,6 +38,8 @@ EXIT_SENT = "Exit sent"
 EXIT_NOT_SENT = "Exit not sent"
 EXIT_NOT_CONFIRMED_TITLE = "Exit not confirmed"
 NO_EXIT_SENT = "No exit sent"
+SMART_ORDER_NOT_SENT = "Smart order not sent"
+SMART_ORDER_NOT_CONFIRMED = "Smart order not confirmed"
 TO_CLOSE = "to close the position"
 NOTHING_WAS_OPEN = "no position was open, so nothing was sent."
 EXIT_NOT_SENT_REASON = "Nothing was sent. Check Positions and try again."
@@ -137,6 +139,10 @@ def alert_template(
         else:  # an Exit all
             title = EXIT_ALL_NOT_ALL_CLOSED if went else EXIT_ALL_NOT_SENT_TITLE
         return f"*{title}*\n{{details}}"
+    if order_type == "placesmartorder" and not succeeded and _position_size(order_data) == 0:
+        # Its lines say "nothing sent" with the reason, or what may have gone: never "Placed".
+        went = bool(response.get("not_confirmed"))
+        return f"*{SMART_ORDER_NOT_CONFIRMED if went else SMART_ORDER_NOT_SENT}*\n{{details}}"
     if order_type == "cancelallorder":
         if not succeeded or _count(response.get("failed_cancellations")):
             return f"*{CANCEL_ALL_NOT_ALL_CANCELLED}*\n{{details}}"
@@ -237,6 +243,14 @@ def app_exit_lines(order_data: dict[str, Any], response: dict[str, Any]) -> list
     return [f"{position}, {how}", markdown_safe(reason or EXIT_NOT_SENT_REASON)]
 
 
+def _position_size(order_data: dict[str, Any]) -> int | None:
+    """A smart order's target position size, or None when it does not say one."""
+    try:
+        return int(str(order_data.get("position_size", "")).strip())
+    except ValueError:
+        return None
+
+
 def smart_order_action_lines(order_data: dict[str, Any], response: dict[str, Any]) -> list[str]:
     """A smart order alert's lines for what it does, between its symbol and its exchange.
 
@@ -244,10 +258,7 @@ def smart_order_action_lines(order_data: dict[str, Any], response: dict[str, Any
     position" when that is not known, never the request's placeholders; nothing sent says so, with
     the app's reason. Every other smart order keeps upstream's three lines.
     """
-    try:
-        target = int(str(order_data.get("position_size", "")).strip())
-    except ValueError:
-        target = None
+    target = _position_size(order_data)
     if target != 0:
         return [
             f"Action: {order_data.get('action', 'N/A')}",

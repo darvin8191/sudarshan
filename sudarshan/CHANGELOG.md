@@ -5,7 +5,108 @@ publish. The owner publishes each release on GitHub. The server's deploy timer t
 outside 08:30-16:00 IST on trading days (09:00-15:45 until v0.3.1), keeps backups, and rolls
 back if the app does not come up healthy.
 
-## v0.3.2 (28 Oct 2026)
+## v0.3.3 (28 Oct 2026)
+
+An Exit all that never closes a position twice, and the phone and Telegram fixes from the
+Analyze-mode check on 27 Oct. It includes everything in v0.3.2. **Publish it by Friday 6 Nov, and
+publish nothing on Saturday 7 or Sunday 8 Nov.**
+
+### What changes for you
+- **Exit all closes what it can at once and says what it left.** It reads Upstox's positions and
+  orders once, then sends every exit together, except for a position that is busy:
+  - an exit for it is being placed, or was sent (or may have been) in the last 15 seconds, from any
+    screen, a TradingView alert, a script, Flow or an earlier Exit all; or
+  - an order on its closing side is still working at Upstox, such as a stop-loss or a target.
+    Exit all leaves that position and names the order, for example "NIFTY 25900 CE has a SELL 65
+    order (order ending 4821, placed 10:42:20) working to close it, so no exit was sent for it.
+    Cancel it in Orders, then exit." An order that covers part of the position holds back the
+    whole exit, and the sentence says so.
+  - Each position left out gets its own sentence, on the phone and on Telegram (Telegram names at
+    most 10, then a count). If Upstox's order book cannot be read, or does not answer in time
+    (about 5 seconds), Exit all goes ahead and says it could not check for working orders.
+  - Exit all no longer waits for another exit to finish.
+- **On the phone, each position settles by its own outcome.** A position whose exit was sent stays
+  held until Positions shows it closed, or until 15 seconds after its own order has ended, when
+  Exit is offered again with what is known; one that was left out lets go at once and shows why
+  for a minute.
+- **One position's exit is refused while that position is busy,** with the same kind of sentence:
+  the card's Exit, the wide table's Close, and an exit sent as a smart order to position size 0
+  (TradingView, scripts). An order that opens or adds to a position is never refused.
+- **Flow's "Close Positions" with a symbol closes only that position.** It closed every open
+  position in live.
+- **Telegram says what was sent.**
+  - An exit reads "Exit sent" over "RELIANCE (NSE, CNC), sell 1 to close" and its order id. It used
+    to say "Action: BUY, Quantity: 0".
+  - "Exit not sent" or "Exit not confirmed" comes with the reason, and "No exit sent" when nothing
+    was open.
+  - A smart order from TradingView or a script that the exit protection refused now gets a "Smart
+    order not sent" alert with the reason. It used to be silent.
+  - A Cancel all that could not read the orders says why.
+- **Nothing held, nothing waiting.** With no open position, the screens no longer show "Waiting
+  for prices".
+- **Exit all and Cancel all look unavailable when there is nothing to do,** and say why when
+  tapped: "Nothing is open to exit.", "Nothing is open to cancel.", "Reading the order book." or
+  "The order book could not be read just now."
+- **Analyze mode's own errors read as the app's sentences,** for example when the sandbox's
+  database is busy: "not confirmed" when the order may have been saved, a refusal when nothing was
+  sent.
+
+### What you must do
+- **Publish by Friday 6 Nov** (the link is in your task list). The server installs it outside
+  08:30-16:00 by itself.
+- **After it installs, one Analyze-mode session on the phone** (about 10 minutes, during market
+  hours). It also finishes v0.3.1's checks:
+  1. Take two positions and Exit one from its card: the card says "Exit sent", and Exit all is
+     unavailable (it says why when tapped) until Positions shows that one closed. Then Exit all
+     closes the other. Analyze mode fills at once and keeps no notes, so the "already on its way"
+     protection shows only in Live; it is proven on a real server worker in the tests.
+  2. Add 1 to a position: the ticket opens with the position's own product.
+  3. Place a LIMIT buy far below the price, change its price with Modify on the Orders card, then
+     Cancel it. Place another far LIMIT and use Cancel all.
+  4. On Telegram, the exit reads "sell ... to close".
+  5. Buy more on a holding. In Analyze mode a holding appears the day after a CNC buy, so buy one
+     share on the day before.
+
+### What is refused now
+- An exit for one position while that position is busy: the card's Exit, the table's Close, and a
+  smart order to position size 0 from TradingView or a script. It answers 409 with the sentence
+  and sends nothing.
+- Exit all no longer exits a busy position or one with a working order on its closing side; it
+  reports it instead.
+- **What API callers get:**
+  - Live `closeposition` answers carry a new `positions` list. Each position is either sent (with
+    its order ids), not confirmed, or not sent (with the reason). Analyze-mode answers have none.
+  - A refused smart order to position size 0 answers 409 with the sentence.
+
+### Not in this release yet
+- **A scale-out is not checked as an exit.** A smart order to a smaller non-zero size, for
+  example from TradingView, is treated as an entry. It is neither checked nor noted as an exit,
+  as in v0.3.2.
+- **A single exit does not read Upstox's order book.** After a part-filled exit, a second phone
+  or a TradingView alert more than 15 seconds later can send an exit for the rest while the first
+  is still working.
+- **A single exit leaves your own stop-loss or target working**, as Upstox's own exit does.
+  Cancel that order in Orders after you exit.
+- **A short entry sent right after an Exit all** can be sized from Upstox's lagging book
+  (upstream behaviour).
+- **Not covered by this protection:** the scalping terminal's close buttons and the strategy
+  module's exits.
+- **A GTT stop is not seen by Exit all.** Upstox keeps GTT orders out of its order book until they
+  trigger, so Exit all neither sees nor skips them, and a GTT stop can later fill against a closed
+  position. Cancel GTTs (Orders, GTT tab) before or after Exit all.
+- **A slow Upstox or a full order limiter** (500 orders in a minute or 2,000 in 30 minutes) can
+  make an Exit all outlast the phone's hold. The server still refuses an overlapping exit.
+- **While Exit all reads the order book**, another read from Upstox at that moment (a quote, a
+  screen's re-sync, a smart order's positions read) can fail and is refused safely; orders go
+  through a separate connection and are not affected.
+- **A smart order whose answer never came back** (a TradingView or script exit that may have gone
+  through) is still not told on Telegram; check Orders.
+- **"Already on its way (sent ...)"** can name an exit that, a moment later, found nothing to close;
+  the sentence's "exit it again only if it is still open" is the cue.
+- **Telegram lists at most 10 positions** an Exit all left out; when more were left out, open
+  Positions and Orders to see which ones need a working order cancelled.
+
+## v0.3.2 (27 Oct 2026)
 
 Muhurat trading on Sunday 8 Nov, and SUDARSHAN's own times moved to the F&O close at 15:40. It
 includes everything in v0.3.1. **Publish it by Friday 6 Nov, and publish nothing on Saturday 7

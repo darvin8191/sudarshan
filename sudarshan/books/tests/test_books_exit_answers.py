@@ -13,17 +13,21 @@ answer carries an exception's words, which belong in the log.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import httpx
 import pytest
 
 import blueprints.orders as orders
 import broker.upstox.api.order_api as upstox
 import utils.session as session_utils
+from sudarshan.books.single_exit import EXIT_NOT_CONFIRMED
 from utils.broker_backpressure import BusyResponse
 from utils.event_bus import bus
 
 EXIT = {"symbol": "SBIN", "exchange": "NSE", "product": "MIS"}
 SECRET_DETAIL = "The read operation timed out"
+GET_ORDER_BOOK = upstox.get_order_book  # the real one: the conftest stubs it in every test
 
 
 class Answer:
@@ -338,6 +342,37 @@ def test_a_close_all_that_sent_some_exits_is_not_a_plain_refusal(monkeypatch):
     success, body, code = _close_all(monkeypatch, [busy, placed])
     assert (success, code) == (False, 429)
     assert body["not_confirmed"] is True
+    refused, sent = body["positions"]
+    assert (refused["outcome"], sent["outcome"]) == ("not_sent", "sent")
+    assert refused["reason"] == (
+        "Upstox allows only a limited number of orders per minute and its turn was too far away, "
+        "so its exit was not sent. Exit it again."
+    )
+
+
+def test_the_app_s_exit_all_passes_on_what_became_of_each_position(client, monkeypatch):
+    """The phone settles each row by it (frontend/src/sudarshan/books/sent.ts)."""
+    import services.close_position_service as close_service
+
+    monkeypatch.setattr(close_service, "get_analyze_mode", lambda: False)
+    monkeypatch.setattr(upstox, "get_positions", lambda auth: _book_of(("NSE_EQ|1", 10, "I")))
+    monkeypatch.setattr(upstox, "get_symbol", lambda token, exchange: "SBIN")
+    monkeypatch.setattr(upstox, "place_order_api", lambda data, auth: PLACED)
+    response = client.post("/close_all_positions", json={})
+    assert response.status_code == 200
+    assert response.get_json() == {
+        "status": "success",
+        "message": "All Open Positions Squared Off",
+        "positions": [
+            {
+                "exchange": "NSE",
+                "symbol": "SBIN",
+                "product": "MIS",
+                "outcome": "sent",
+                "orderids": [PLACED[2]],
+            }
+        ],
+    }
 
 
 def test_a_close_all_that_sent_nothing_stays_a_refusal(monkeypatch):
@@ -396,8 +431,17 @@ def test_exit_all_with_no_open_positions_is_still_a_success(monkeypatch):
 
 
 def test_exit_all_that_closed_everything_answers_as_before(published, monkeypatch):
+    """With each position's orders added, for the phone's hold."""
     success, body, code = _close_all(monkeypatch, [PLACED, PLACED])
     assert (success, code) == (True, 200)
+    sent = {
+        "exchange": "NSE",
+        "symbol": "SBIN",
+        "product": "MIS",
+        "outcome": "sent",
+        "orderids": [PLACED[2]],
+    }
+    assert body.pop("positions") == [sent, sent]
     assert body == {"status": "success", "message": "All Open Positions Squared Off"}
     assert published[0].response_data["status"] == "success"
 
@@ -520,13 +564,22 @@ def test_exit_all_notes_each_position_whose_exit_went_or_may_have_gone(monkeypat
     body, code = upstox.close_all_positions("key", "token")
     assert code == 502 and body["not_confirmed"] is True
     assert exit_guard.EXITS.placed_lately("live") == {("NSE", "SBIN", "MIS"), ("NSE", "TCS", "MIS")}
-    # Every exit sent: noted too, and the answer is the one it always was.
+    # Each position's own outcome: the flat one had none, and one with no contract cannot be named.
+    assert [(each["symbol"], each["outcome"]) for each in body["positions"]] == [
+        ("SBIN", "sent"),
+        ("INFY", "not_sent"),
+        ("TCS", "not_confirmed"),
+    ]
+    assert (
+        body["positions"][1]["reason"] == "Upstox refused its exit: Quantity exceeds freeze limit"
+    )
+    assert body["positions"][2]["reason"] == EXIT_NOT_CONFIRMED
+    # Every exit sent: noted too, and the answer is the one it always was, with its orders.
     monkeypatch.setattr(upstox, "get_positions", lambda auth: _book_of(("NSE_EQ|2", -5, "D")))
     monkeypatch.setattr(upstox, "place_order_api", lambda data, auth: PLACED)
-    assert upstox.close_all_positions("key", "token") == (
-        {"status": "success", "message": "All Open Positions SquaredOff"},
-        200,
-    )
+    body, code = upstox.close_all_positions("key", "token")
+    assert [each["outcome"] for each in body.pop("positions")] == ["sent"]
+    assert (body, code) == ({"status": "success", "message": "All Open Positions SquaredOff"}, 200)
     assert ("NSE", "INFY", "CNC") in exit_guard.EXITS.placed_lately("live")
 
 
@@ -597,36 +650,54 @@ def test_a_tradingview_exit_all_sent_twice_through_upstox_sells_once(monkeypatch
 
 
 def test_exit_all_reads_every_order_still_working_by_what_it_would_close(monkeypatch):
+    from sudarshan.books.exit_guard import WorkingOrder
     from utils.broker_backpressure import BrokerBusyError
 
-    rows = [
-        ("NSE_EQ|1", "I", "SELL", "trigger pending", "2026-10-27 10:51:02"),  # a stop loss
-        ("NSE_EQ|2", "I", "SELL", "complete", "2026-10-27 10:51:03"),
-        ("NSE_EQ|3", "D", "BUY", "after market order req received", "?"),
-        ("NSE_EQ|4", "I", "SELL", "rejected", "2026-10-27 10:51:05"),
-        ("NSE_EQ|5", "I", "SELL", "cancelled", "2026-10-27 10:51:06"),
-        ("NSE_EQ|6", "i", "sell", "OPEN", "2026-10-27 10:51:07"),
+    rows = [  # token, product, side, status, placed, then the order's own details
+        ("NSE_EQ|1", "I", "SELL", "trigger pending", "2026-10-27 10:51:02", "SL-M", 0, 98.5, 65),
+        ("NSE_EQ|2", "I", "SELL", "complete", "2026-10-27 10:51:03", "MARKET", 0, 0, 0),
+        ("NSE_EQ|3", "D", "BUY", "after market order req received", "?", "LIMIT", 180, 0, 30),
+        ("NSE_EQ|4", "I", "SELL", "rejected", "2026-10-27 10:51:05", "MARKET", 0, 0, 0),
+        ("NSE_EQ|5", "I", "SELL", "cancelled", "2026-10-27 10:51:06", "MARKET", 0, 0, 0),
+        ("NSE_EQ|6", "i", "sell", "OPEN", "2026-10-27 10:51:07", "sl", 101, 100.5, "x"),
+        ("NSE_EQ|6", "I", "SELL", "open", "2026-10-27 10:51:08", "LIMIT", 120, None, 10),
     ]
     book = {
         "status": "success",
         "data": [
             {
+                "order_id": f"25102700000{n:04d}",
                 "instrument_token": token,
                 "product": product,
                 "transaction_type": side,
                 "status": status,
                 "order_timestamp": at,
+                "order_type": kind,
+                "price": price,
+                "trigger_price": trigger,
+                "pending_quantity": pending,
+                "quantity": 70,
             }
-            for token, product, side, status, at in rows
+            for n, (token, product, side, status, at, kind, price, trigger, pending) in enumerate(
+                rows
+            )
         ],
     }
     reads = []
     monkeypatch.setattr(upstox, "get_order_book", lambda auth: reads.append(auth) or book)
     assert upstox._working_exits("token") == (
         {
-            ("NSE_EQ|1", "I", "SELL"): "10:51:02",
-            ("NSE_EQ|3", "D", "BUY"): "",
-            ("NSE_EQ|6", "I", "SELL"): "10:51:07",
+            ("NSE_EQ|1", "I", "SELL"): [
+                WorkingOrder("SELL", 65, "SL-M", 0.0, 98.5, "251027000000000", "10:51:02")
+            ],
+            ("NSE_EQ|3", "D", "BUY"): [
+                WorkingOrder("BUY", 30, "LIMIT", 180.0, 0.0, "251027000000002", "")
+            ],
+            ("NSE_EQ|6", "I", "SELL"): [
+                # No pending quantity said: the order's own quantity.
+                WorkingOrder("SELL", 70, "SL", 101.0, 100.5, "251027000000005", "10:51:07"),
+                WorkingOrder("SELL", 10, "LIMIT", 120.0, 0.0, "251027000000006", "10:51:08"),
+            ],
         },
         True,
     )
@@ -640,6 +711,34 @@ def test_exit_all_reads_every_order_still_working_by_what_it_would_close(monkeyp
 
     monkeypatch.setattr(upstox, "get_order_book", refused)
     assert upstox._working_exits("token") == ({}, False)
+
+
+def test_exit_all_reads_the_order_book_with_a_limit_of_its_own_and_no_retry(monkeypatch):
+    """Cut off at EXIT_ALL_ORDERS_READ_S and never retried, so a slow or throttled order book
+    costs Exit all a few seconds; every other read keeps the client's own timeout and retries."""
+    import broker.upstox.api.rate_limiter as pacing
+    from sudarshan.books import exit_guard
+
+    gets = []
+
+    class Client:
+        def get(self, url, headers=None, **kwargs):
+            gets.append((url.rsplit("/", 1)[-1], kwargs.get("timeout")))
+            return httpx.Response(429, json={"status": "error"}, request=httpx.Request("GET", url))
+
+    slept = []
+    monkeypatch.setenv("BROKER_API_KEY", "fake")
+    monkeypatch.setattr(upstox, "get_httpx_client", lambda: Client())
+    monkeypatch.setattr(upstox, "apply_rate_limit", lambda category="standard": None)
+    clock = SimpleNamespace(sleep=slept.append, monotonic=upstox.time.monotonic)
+    monkeypatch.setattr(upstox, "time", clock)  # this module's back-off waits, recorded
+    monkeypatch.setattr(upstox, "get_order_book", GET_ORDER_BOOK)
+    assert upstox._working_exits("token") == ({}, False)
+    assert gets == [("retrieve-all", exit_guard.EXIT_ALL_ORDERS_READ_S)] and slept == []
+    gets.clear()
+    upstox.get_positions("token")  # the limit was the order book's only
+    assert gets == [("short-term-positions", None)] * (1 + pacing.MAX_RETRIES)
+    assert len(slept) == pacing.MAX_RETRIES
 
 
 def test_exit_all_s_answer_counts_each_kind_and_says_why_each_busy_one_was_not_sent():
@@ -662,6 +761,29 @@ def test_exit_all_s_answer_counts_each_kind_and_says_why_each_busy_one_was_not_s
         "before sending again. The open orders could not be read from Upstox, so an order already "
         "working to close a position was not looked for. Check Orders."
     )
+
+
+def test_exit_all_names_ten_positions_a_kind_and_counts_the_rest():
+    """The second review's LOW-4: a Telegram message holds 4096 characters. The message names the
+    first ten of each kind, and the answer's "positions" carries every one."""
+    skipped = [f"Position {n} was busy." for n in range(12)]
+    late = [("NSE", f"STOCK{n}", "MIS") for n in range(12)]
+    positions = [{"symbol": f"STOCK{n}", "outcome": "not_sent"} for n in range(24)]
+    body, code = upstox._close_all_summary(
+        {"sent": 0, "refused": 0, "unknown": 0}, 0, 0, "", skipped, late, True, positions
+    )
+    assert code == 409 and body["positions"] == positions
+    message = body["message"]
+    assert "Position 9 was busy. 2 more positions were not sent either. Check Positions." in message
+    assert "Position 10 was busy" not in message
+    assert "sent nothing for STOCK0, STOCK1" in message
+    assert "STOCK8, STOCK9 and 2 more. Check Positions, then send Exit all again." in message
+    assert "STOCK10" not in message
+    body, _ = upstox._close_all_summary(
+        {"sent": 0, "refused": 0, "unknown": 0}, 0, 0, "", skipped[:11], [], True, []
+    )
+    assert "1 more position was not sent either. Check Positions." in body["message"]
+    assert "positions" not in body
 
 
 @pytest.mark.parametrize(
@@ -690,7 +812,9 @@ def test_exit_all_whose_order_book_was_not_read_says_so_in_a_success_too(monkeyp
     monkeypatch.setattr(upstox, "get_symbol", lambda token, exchange: "SBIN")
     monkeypatch.setattr(upstox, "place_order_api", lambda data, auth: PLACED)
     monkeypatch.setattr(upstox, "get_order_book", lambda auth: {"status": "error"})
-    assert upstox.close_all_positions("key", "token") == (
+    body, code = upstox.close_all_positions("key", "token")
+    assert [each["outcome"] for each in body.pop("positions")] == ["sent"]
+    assert (body, code) == (
         {
             "status": "success",
             "message": "All Open Positions SquaredOff",
@@ -717,20 +841,24 @@ def test_exit_all_with_nothing_open_reads_no_order_book(monkeypatch):
     assert reads == []
 
 
-def test_exit_all_starts_no_read_and_no_exit_once_its_time_is_up(monkeypatch):
+def test_exit_all_reads_and_then_sends_no_exit_once_its_time_for_sending_is_up(monkeypatch):
+    """The time for sending starts once the reads are done (a slow read never uses it up)."""
     from sudarshan.books import exit_guard
 
-    monkeypatch.setattr(exit_guard, "EXIT_ALL_SENDS_FOR_S", 0.0)  # used up by the positions read
+    monkeypatch.setattr(exit_guard, "EXIT_ALL_SENDS_FOR_S", 0.0)  # no time at all for sending
     reads, sent = [], []
-    monkeypatch.setattr(upstox, "get_order_book", lambda auth: reads.append(auth))
+    nothing_working = {"status": "success", "data": []}
+    monkeypatch.setattr(
+        upstox, "get_order_book", lambda auth: reads.append(auth) or nothing_working
+    )
     monkeypatch.setattr(upstox, "get_positions", lambda auth: _book_of(("NSE_EQ|1", 10, "I")))
     monkeypatch.setattr(upstox, "get_symbol", lambda token, exchange: "SBIN")
     monkeypatch.setattr(upstox, "place_order_api", lambda data, auth: sent.append(data) or PLACED)
     body, code = upstox.close_all_positions("key", "token")
-    assert (reads, sent, code) == ([], [], 409)
+    assert (reads, sent, code) == (["token"], [], 409)
     assert "not_confirmed" not in body
     assert "stopped after 0 s and sent nothing for SBIN" in body["message"]
-    assert "could not be read" not in body["message"]  # not read, and not said to have failed
+    assert "could not be read" not in body["message"]
 
 
 def test_exit_all_that_breaks_before_its_first_exit_is_not_flagged(monkeypatch):
@@ -839,9 +967,23 @@ def test_cancel_all_that_cancelled_every_order_answers_as_before(client, monkeyp
 def test_cancel_all_whose_order_book_could_not_be_read_says_nothing_was_cancelled(
     client, monkeypatch
 ):
+    """And it is told on Telegram (the second review's LOW-1), which hears no other failure."""
+    import services.cancel_all_order_service as cancel_all_service
+    import subscribers.telegram_subscriber as subscriber
+
+    seen, told = [], []
+    monkeypatch.setattr(cancel_all_service.bus, "publish", seen.append)
+    monkeypatch.setattr(subscriber, "_send_alert", lambda *args: told.append(args))
     code, body = _cancel_all(client, monkeypatch, [CANCELLED], book_status="error")
     assert code == 424
     assert body["message"].startswith("Nothing was cancelled: the orders could not be read")
+    assert "nothing_sent" not in body
+    [event] = seen
+    assert event.response_data == {**body, "nothing_sent": True}
+    subscriber.on_order_failed(event)
+    assert [(api_type, response) for api_type, _data, response, _key in told] == [
+        ("cancelallorder", event.response_data)
+    ]
 
 
 # -- The rest of what a send that broke says ---------------------------------------------------
