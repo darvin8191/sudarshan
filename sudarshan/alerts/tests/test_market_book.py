@@ -1,0 +1,279 @@
+"""The Book: feed ticks to observations for every Active alert on a key, and what comes back."""
+
+from __future__ import annotations
+
+import dataclasses
+from datetime import date, datetime
+
+from sudarshan.alerts.market import bench, clock, sessions, spec
+from sudarshan.alerts.market.book import BAD_VALUE, NOTHING_NEW, Book
+from sudarshan.alerts.market.engine import State
+from sudarshan.alerts.market.engine import resume as engine_resume
+from sudarshan.autologin.schedule import IST
+
+DAY = date(2026, 10, 21)
+KEY = "NSE_EQ|INE062A01020"
+SBIN = {"instrument_key": KEY, "symbol": "SBIN", "exchange": "NSE", "tick_size": "0.05"}
+T0 = int(datetime(2026, 10, 21, 10, 0, tzinfo=IST).timestamp() * 1000)
+
+
+def alert(id_=1, op="crosses_above", level="100", **fields) -> spec.Alert:
+    params = {"op": op, "level": level} | fields.pop("params", {})
+    row = spec.check(SBIN | {"kind": "price", "params": params} | fields, T0 - 3_600_000)
+    return spec.Alert.of(row | {"id": id_, "version": 1, "status": "active"})
+
+
+def market(now: int, **more) -> clock.Market:
+    found = {s: sessions.session(s, DAY, trading_day=True) for s in sessions.SEGMENTS}
+    more.setdefault("feed", clock.Feed("connected", True, now))
+    return clock.Market(20261021, found, 20261019, **more)
+
+
+def tick(ltp=None, at=T0, recv=None, ltq=1, **more) -> dict:
+    """A feed frame as the bus carries it."""
+    frame = {"key": KEY, "ts_recv": at if recv is None else recv, "ltq": ltq} | more
+    if ltp is not None:
+        frame |= {"ltp": ltp, "ltt": at}
+    return frame
+
+
+def test_a_frame_with_junk_in_it_is_never_judged():
+    book = Book()
+    book.put(alert(op="at_or_above"))
+    book.put(alert(2, level="120", params={"source": "bid"}))
+    junk = {"key": KEY, "ltp": "812", "ltt": T0, "bid": float("nan"), "ts_recv": T0}
+    assert book.on_tick(junk, T0, market(T0)).check == BAD_VALUE
+    no_time = {"key": KEY, "ltp": 101.0, "ltt": True, "ts_recv": float("inf")}
+    assert book.on_tick(no_time, T0, market(T0)).check == NOTHING_NEW
+    assert book.state(1) == State()
+
+
+def test_one_trade_is_judged_once():
+    book = Book()
+    book.put(alert(op="at_or_above", frequency="every_time", cooldown_s=60))
+    first = book.on_tick(tick(100.05), T0, market(T0))
+    again = book.on_tick(tick(100.05), T0 + 61_000, market(T0 + 61_000))  # the same trade
+    assert first.check == clock.OK and len(first.outcomes) == 1
+    assert again == (NOTHING_NEW, ())
+    later = book.on_tick(tick(100.05, at=T0 + 61_000, ltq=3), T0 + 61_000, market(T0 + 61_000))
+    assert later.outcomes[0].fire.at == T0 + 61_000
+
+
+def test_a_trade_the_gate_held_back_is_judged_when_it_comes_again():
+    book = Book()
+    book.put(alert(op="at_or_above"))
+    down = market(T0, feed=clock.Feed("backoff", False, T0))
+    assert book.on_tick(tick(100.05), T0, down).check == clock.FEED_DOWN
+    out = book.on_tick(tick(100.05, recv=T0 + 2000), T0 + 2000, market(T0 + 2000))
+    assert out.outcomes[0].fire.value == 10005  # the feed's resend after reconnecting
+
+
+def test_a_quote_change_is_judged_only_by_bid_and_ask_alerts():
+    book = Book()
+    book.put(alert(1))
+    book.put(alert(2, level="120", params={"source": "bid"}))
+    book.put(alert(3, op="crosses_below", level="120", params={"source": "ask"}))
+    book.on_tick(tick(99.95, bid=119.95, ask=120.1), T0, market(T0))
+    out = book.on_tick(
+        tick(99.95, recv=T0 + 300, bid=120.0, ask=119.95), T0 + 300, market(T0 + 300)
+    )
+    assert [o.alert_id for o in out.outcomes] == [2, 3]
+    assert {o.fire.trade_time for o in out.outcomes} == {T0 + 300}  # timed by arrival
+    assert book.state(1).seen_at == T0  # the trade did not change: not judged again
+
+
+def test_an_alert_that_stops_itself_is_judged_no_more():
+    book = Book()
+    book.put(alert())
+    book.on_tick(tick(99.95), T0, market(T0))
+    stop = book.on_tick(tick(100.0, at=T0 + 1000), T0 + 1000, market(T0 + 1000))
+    assert stop.outcomes[0].status == "stopped" and book.alerts() == []
+    assert book.on_tick(tick(101.0, at=T0 + 2000), T0 + 2000, market(T0 + 2000)) == (
+        NOTHING_NEW,
+        (),
+    )
+    assert book.state(1).fires == 1
+
+
+def test_bad_values_are_counted_and_nothing_new_is_said():
+    book = Book()
+    book.put(alert())
+    assert book.on_tick(tick(0.0), T0, market(T0)).check == BAD_VALUE
+    other = {"key": "NSE_EQ|OTHER", "ltp": 5.0, "ltt": T0, "ts_recv": T0}
+    assert book.on_tick(other, T0, market(T0)).check == NOTHING_NEW
+    assert book.on_tick(tick(bid=100.0), T0, market(T0)).check == NOTHING_NEW  # no ltp alert's
+
+
+def test_alerts_on_a_key_are_judged_in_id_order():
+    book = Book()
+    for id_ in (5, 2, 9):
+        book.put(alert(id_, op="at_or_above"))
+    out = book.on_tick(tick(100.05), T0, market(T0))
+    assert [o.alert_id for o in out.outcomes] == [2, 5, 9]
+
+
+def test_each_queued_state_carries_the_version_it_was_judged_at():
+    """The store saves a state only at the alert's current version: after an edit that keeps
+    the state, what a tick changes is queued under the new version. A stopped alert queues
+    nothing (its state is not judged again)."""
+    book = Book()
+    book.put(alert())
+    book.put(dataclasses.replace(alert(), version=2, note="later"))  # an edit: the state stays
+    assert book.changed() == {1: (2, State())}
+    book.on_tick(tick(99.95), T0, market(T0))
+    assert book.changed() == {1: (2, book.state(1))}
+    book.put(dataclasses.replace(alert(3), status="stopped"))
+    assert book.changed() == {}
+
+
+def test_changed_hands_over_each_state_once():
+    book = Book()
+    book.put(alert(1))
+    book.put(alert(2, level="200"))
+    book.on_tick(tick(99.95), T0, market(T0))
+    changed = book.changed()
+    assert set(changed) == {1, 2} and changed[1] == (1, book.state(1))  # the version judged at
+    assert changed[1][1].ref == 9995
+    assert book.changed() == {}
+
+
+def test_modes_are_the_highest_each_key_needs():
+    book = Book()
+    book.put(alert(1))
+    assert book.modes() == {KEY: "ltpc"}
+    book.put(alert(2, level="120", params={"source": "bid"}))
+    assert book.modes() == {KEY: "full"}
+    book.put(dataclasses.replace(alert(2), status="paused"))
+    assert book.modes() == {KEY: "ltpc"}
+
+
+def test_put_keeps_the_state_and_drop_forgets_it():
+    book = Book()
+    book.put(alert())
+    book.on_tick(tick(99.95), T0, market(T0))
+    book.put(dataclasses.replace(alert(), status="paused"))  # paused by the owner
+    assert book.alerts() == [] and book.state(1).side == -1
+    book.put(alert())
+    assert book.state(1).side == -1  # kept unless the caller resets it
+    assert book.drop(1).side == -1 and book.state(1) is None and book.alerts() == []
+    assert book.drop(1) is None
+
+
+def test_a_pre_open_snapshot_never_seeds_todays_side():
+    """The day's first snapshot carries the pre-open price (09:08): not a trade of today's
+    session, so the first trade seeds instead of firing on a move from the pre-open price."""
+    book = Book()
+    book.put(alert())
+    opening = T0 - 52 * 60_000  # 09:08
+    snapshot = {"key": KEY, "ts_recv": opening + 60_000, "ltp": 99.0, "ltt": opening}
+    assert not book.seed(1, snapshot, market(opening + 60_000))
+    first = T0 - 45 * 60_000 + 1000  # 09:15:01
+    out = book.on_tick(tick(101.0, at=first), first, market(first))
+    assert out.outcomes == () and book.state(1).side == 1
+
+
+def test_only_a_fixed_level_seeds_from_the_trading_day_before():
+    """Monday's start, Friday's last trade: a fixed level's side carries to the next session (a
+    gap fires as an opening); a day high or a VWAP starts again each session, so neither takes
+    a side from Friday."""
+    book = Book()
+    book.put(alert(1))
+    others = ((2, "day_break", {"side": "high"}), (3, "vwap", {"direction": "above"}))
+    for id_, kind, params in others:
+        row = spec.check(SBIN | {"kind": kind, "params": params}, T0 - 3_600_000)
+        book.put(spec.Alert.of(row | {"id": id_, "version": 1, "status": "active"}))
+    mon = date(2026, 10, 19)
+    found = {s: sessions.session(s, mon, trading_day=True) for s in sessions.SEGMENTS}
+    monday = clock.Market(20261019, found, 20261016, feed=clock.Feed("connected", True, T0))
+    friday = sessions.epoch_ms(date(2026, 10, 16), 15 * 60 + 29)
+    snapshot = {"key": KEY, "ts_recv": T0, "ltp": 99.0, "ltt": friday, "atp": 99.5,
+                "ohlc": {"high": 101.0}}  # fmt: skip
+    assert book.seed(1, snapshot, monday) and book.state(1).session == 20261016
+    assert not book.seed(2, snapshot, monday) and not book.seed(3, snapshot, monday)
+    assert book.state(2) == State() and book.state(3) == State()
+
+
+def test_a_close_judged_by_the_timer_counts_only_pauses_inside_the_session():
+    """Yesterday's last close was below; a reconnect at 09:05-09:14 (before the open) must not
+    mark today's first close, which the timer judges."""
+    book = Book()
+    book.put(alert(frequency="at_close", candle=15))
+    yesterday = date(2026, 10, 19)  # the trading day before, as market() has it
+    found = {s: sessions.session(s, yesterday, trading_day=True) for s in sessions.SEGMENTS}
+    last = sessions.epoch_ms(yesterday, 15 * 60 + 20)
+    old = clock.Market(20261019, found, 20261016, feed=clock.Feed("connected", True, last))
+    book.on_tick(tick(99.0, at=last), last, old)
+    book.on_clock(last + 10 * 60_000 + 5000, old)  # the 15:15 close: below
+    reconnect = clock.Pause(T0 - 55 * 60_000, T0 - 46 * 60_000)  # 09:05 to 09:14
+    first = T0 - 40 * 60_000  # 09:20
+    book.on_tick(tick(101.0, at=first), first, market(first, pauses=(reconnect,)))
+    due = T0 - 30 * 60_000 + 5000  # 09:30:05
+    (out,) = book.on_clock(due, market(due, pauses=(reconnect,)))
+    assert out.fire.direction == 1 and out.fire.found_later is None
+
+
+def test_seed_only_a_crossing_and_never_at_close():
+    book = Book()
+    book.put(alert(1, op="at_or_above"))
+    book.put(alert(2, frequency="at_close", candle=15))
+    book.put(alert(3, level="120", params={"source": "ask"}))
+    snapshot = {"key": KEY, "ts_recv": T0, "ltp": 99.0, "ltt": T0 - 5000, "ask": 119.95}
+    assert not book.seed(1, snapshot, market(T0))
+    assert not book.seed(2, snapshot, market(T0))
+    assert book.seed(3, snapshot, market(T0)) and book.state(3).side == -1
+    assert book.state(3).seen_at == T0  # a quote's time is its arrival
+    assert not book.seed(4, snapshot, market(T0))  # not in the book
+
+
+def test_on_clock_with_nothing_due():
+    book = Book()
+    book.put(alert(frequency="at_close", candle=15))
+    assert book.on_clock(T0, market(T0)) == []
+    assert State() == book.state(1)
+
+
+def test_a_stopped_alerts_state_goes_after_the_flush_and_a_paused_ones_stays():
+    book = Book()
+    book.put(alert(1))  # once
+    book.put(alert(2, level="200"))
+    book.on_tick(tick(99.95), T0, market(T0))
+    book.on_tick(tick(100.0, at=T0 + 1000), T0 + 1000, market(T0 + 1000))  # 1 fires and stops
+    assert book.state(1).fires == 1  # kept until the flush has it
+    book.put(dataclasses.replace(alert(2, level="200"), status="paused"))  # paused by the owner
+    flushed = book.changed()
+    assert flushed[1][1].fires == 1 and book.state(1) is None
+    assert book.state(2) is not None and book.changed() == {}
+    book.put(dataclasses.replace(alert(3), status="stopped"))  # loaded stopped: nothing to keep
+    book.changed()
+    assert book.state(3) is None and book.alerts() == []
+
+
+def test_a_retired_alert_waits_for_nothing():
+    book = Book()
+    book.put(alert(1, op="crosses_above"))
+    move = spec.Alert.of(
+        spec.check(SBIN | {"kind": "move", "params": {"direction": "up", "percent": "2"}}, T0)
+        | {"id": 2, "version": 1, "status": "active"}
+    )
+    book.put(move)
+    book.on_tick(tick(101.0), T0, market(T0))
+    assert book.waiting(2) == "waiting_close"
+    book.put(dataclasses.replace(move, status="paused"))
+    assert book.waiting(2) is None
+
+
+def test_a_snapshot_from_yesterday_never_takes_a_resumed_alert_back_a_day():
+    book = Book()
+    book.put(alert())
+    book.on_tick(tick(99.95), T0, market(T0))
+    book.put(alert(), engine_resume(book.state(1)))  # resumed today: no side, today's session
+    # The trading day before (19 Oct: the 20th is a holiday), which a fixed level may seed from.
+    yesterday = {"key": KEY, "ltp": 99.0, "ltt": T0 - 2 * 86_400_000, "ts_recv": T0}
+    assert not book.seed(1, yesterday, market(T0))
+    assert book.state(1).session == 20261021 and book.state(1).side is None
+
+
+def test_the_benchmark_still_builds_and_runs_its_mix():
+    """python -m sudarshan.alerts.market.bench: every alert in its mix must pass spec.check."""
+    per_tick, parse, fires = bench.run(keys=4, per_key=len(bench.MIX), count=400)
+    assert per_tick > 0 and parse > 0 and fires > 0
