@@ -2,20 +2,26 @@ import { ArrowDown, ArrowUp } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
-import { setOrderSoundMuted, useOrderSoundMuted } from './books/chime'
+import {
+  setMarketSoundMuted,
+  setOrderSoundMuted,
+  useMarketSoundMuted,
+  useOrderSoundMuted,
+} from './books/chime'
 import { setCvdMode, useCvdMode } from './display'
 
 /**
  * Profile's Display tab, in place of upstream's theme picker. The theme and the
  * accent are stated here rather than offered (light only, one brand accent: a
  * control that cannot change anything is not shown as one). Colour-blind mode
- * and the order alert sound are the settings, both kept on this device only;
- * the preview under colour-blind mode is drawn in the live tokens, so it
- * changes the moment the switch does.
+ * and the order and market alert sounds are the settings, all kept on this
+ * device only; the preview under colour-blind mode is drawn in the live tokens,
+ * so it changes the moment the switch does.
  */
 export function DisplaySettings() {
   const cvd = useCvdMode()
   const soundMuted = useOrderSoundMuted()
+  const marketMuted = useMarketSoundMuted()
 
   return (
     <Card>
@@ -72,6 +78,25 @@ export function DisplaySettings() {
             id="sd-order-sound"
             checked={!soundMuted}
             onCheckedChange={(on) => setOrderSoundMuted(!on)}
+          />
+        </div>
+
+        {/* SUDARSHAN M10.7: market alerts sound on their own two notes. */}
+        <div
+          id="market-alert-sound"
+          className="flex items-start justify-between gap-4 rounded-lg border p-4"
+        >
+          <div className="space-y-1">
+            <Label htmlFor="sd-market-sound">Market alert sound</Label>
+            <p className="text-sm text-muted-foreground">
+              A short sound, higher than the order sounds, when a market alert you set fires. The
+              alert itself still shows when this is off. This device only.
+            </p>
+          </div>
+          <Switch
+            id="sd-market-sound"
+            checked={!marketMuted}
+            onCheckedChange={(on) => setMarketSoundMuted(!on)}
           />
         </div>
       </CardContent>

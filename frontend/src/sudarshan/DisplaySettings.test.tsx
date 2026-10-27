@@ -54,6 +54,23 @@ describe('Display settings', () => {
     expect(localStorage.getItem('sudarshan-order-sound')).toBeNull()
   })
 
+  // SUDARSHAN (M10.7): the market alert sound, its own switch on this device.
+  it('turns the market alert sound off and on for this device, apart from the order sound', async () => {
+    const user = userEvent.setup()
+    render(<DisplaySettings />)
+    const market = screen.getByRole('switch', { name: 'Market alert sound' })
+    expect(market).toBeChecked()
+
+    await user.click(market)
+    expect(market).not.toBeChecked()
+    expect(localStorage.getItem('sudarshan-market-sound')).toBe('off')
+    expect(screen.getByRole('switch', { name: 'Order alert sound' })).toBeChecked()
+
+    await user.click(market)
+    expect(market).toBeChecked()
+    expect(localStorage.getItem('sudarshan-market-sound')).toBeNull()
+  })
+
   it('still switches when storage is refused, for the rest of the visit', async () => {
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new DOMException('blocked', 'SecurityError')

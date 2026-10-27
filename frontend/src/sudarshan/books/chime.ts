@@ -19,17 +19,26 @@ import { useSyncExternalStore } from 'react'
  * The mute is a preference of this device, kept in this browser like the
  * colour-blind switch (src/sudarshan/display.ts), and it follows a change made
  * in another tab.
+ *
+ * A market alert (M10.7) has a sound of its own, higher than any order's, and
+ * a mute of its own; it shares the quiet window, so a fill and a market alert
+ * in the same moment sound once.
  */
 const STORAGE_KEY = 'sudarshan-order-sound'
+const MARKET_KEY = 'sudarshan-market-sound'
 
 export type ChimeKind = 'filled' | 'partial' | 'rejected' | 'cancelled'
 
+/** Every sound drawn here: an order's, or a market alert's. */
+export type SoundKind = ChimeKind | 'market'
+
 /** Two notes per kind, in hertz: rising for a fill, falling for a rejection. */
-const NOTES: Record<ChimeKind, [number, number]> = {
+const NOTES: Record<SoundKind, [number, number]> = {
   filled: [660, 880],
   partial: [660, 660],
   rejected: [494, 370],
   cancelled: [587, 523],
+  market: [988, 1319],
 }
 
 /** A burst of alerts (a basket, both legs of a spread) sounds once. */
@@ -37,33 +46,49 @@ const QUIET_MS = 700
 
 const listeners = new Set<() => void>()
 
-function stored(): boolean {
+function stored(key = STORAGE_KEY): boolean {
   try {
-    return localStorage.getItem(STORAGE_KEY) === 'off'
+    return localStorage.getItem(key) === 'off'
   } catch {
     return false
   }
 }
 
 let muted = stored()
+let marketMuted = stored(MARKET_KEY)
 
 function publish(): void {
   for (const listener of listeners) listener()
 }
 
-export function setOrderSoundMuted(on: boolean): void {
-  muted = on
+function keep(key: string, off: boolean): void {
   try {
-    if (on) localStorage.setItem(STORAGE_KEY, 'off')
-    else localStorage.removeItem(STORAGE_KEY)
+    if (off) localStorage.setItem(key, 'off')
+    else localStorage.removeItem(key)
   } catch {
     // Storage refused: the choice holds until the page is closed.
   }
+}
+
+export function setOrderSoundMuted(on: boolean): void {
+  muted = on
+  keep(STORAGE_KEY, on)
   publish()
 }
 
 export function orderSoundMuted(): boolean {
   return muted
+}
+
+/** The market alert sound's own switch on this device (M10.7). */
+export function setMarketSoundMuted(on: boolean): void {
+  marketMuted = on
+  keep(MARKET_KEY, on)
+  publish()
+}
+
+export function marketSoundMuted(): boolean {
+  return marketMuted
 }
 
 function subscribe(listener: () => void): () => void {
@@ -80,10 +105,20 @@ export function useOrderSoundMuted(): boolean {
   )
 }
 
+/** Whether the market alert sound is muted on this device, re-rendering when that changes. */
+export function useMarketSoundMuted(): boolean {
+  return useSyncExternalStore(
+    subscribe,
+    () => marketMuted,
+    () => false
+  )
+}
+
 if (typeof window !== 'undefined') {
   window.addEventListener('storage', (event) => {
-    if (event.key !== STORAGE_KEY && event.key !== null) return
+    if (event.key !== STORAGE_KEY && event.key !== MARKET_KEY && event.key !== null) return
     muted = stored()
+    marketMuted = stored(MARKET_KEY)
     publish()
   })
 }
@@ -164,9 +199,9 @@ export function claimOrderSound(now = Date.now()): boolean {
   return true
 }
 
-/** Play the alert sound for an order, unless muted, not yet unlocked, or just played. */
-export function playChime(kind: ChimeKind, now = Date.now()): boolean {
-  if (muted) return false
+/** Play the sound for an order or a market alert, unless muted, not yet unlocked, or just played. */
+export function playChime(kind: SoundKind, now = Date.now()): boolean {
+  if (kind === 'market' ? marketMuted : muted) return false
   if (!context || context.state !== 'running') {
     // Not started, or suspended since: the next tap starts it.
     watchTaps()

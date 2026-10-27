@@ -7,9 +7,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   claimOrderSound,
+  marketSoundMuted,
   orderSoundMuted,
   playChime,
   resetChimeForTests,
+  setMarketSoundMuted,
   setOrderSoundMuted,
   unlockSoundOnFirstTap,
 } from './chime'
@@ -162,5 +164,47 @@ describe('order alert sound', () => {
     unlockSoundOnFirstTap()
     document.dispatchEvent(new Event('pointerdown'))
     expect(playChime('filled', 30_000)).toBe(false)
+  })
+})
+
+// SUDARSHAN M10.7: the market alert's own two notes, mute and the shared quiet window.
+describe('market alert sound', () => {
+  beforeEach(() => {
+    setMarketSoundMuted(false)
+    unlockSoundOnFirstTap()
+    document.dispatchEvent(new Event('pointerdown'))
+  })
+
+  afterEach(() => setMarketSoundMuted(false))
+
+  it('plays on its own switch: the order mute does not silence it, its own mute does', () => {
+    setOrderSoundMuted(true)
+    expect(playChime('market', 70_000)).toBe(true)
+    expect(playChime('filled', 71_000)).toBe(false)
+
+    setOrderSoundMuted(false)
+    setMarketSoundMuted(true)
+    expect(marketSoundMuted()).toBe(true)
+    expect(localStorage.getItem('sudarshan-market-sound')).toBe('off')
+    expect(playChime('market', 72_000)).toBe(false)
+    expect(playChime('filled', 73_000)).toBe(true)
+
+    setMarketSoundMuted(false)
+    expect(localStorage.getItem('sudarshan-market-sound')).toBeNull()
+  })
+
+  it('shares the quiet window with the order sounds: a fill and an alert at once sound once', () => {
+    expect(playChime('filled', 80_000)).toBe(true)
+    expect(playChime('market', 80_300)).toBe(false)
+    expect(playChime('market', 81_000)).toBe(true)
+  })
+
+  it('reads its mute back when the app loads', async () => {
+    localStorage.setItem('sudarshan-market-sound', 'off')
+    vi.resetModules()
+    const fresh = await import('./chime')
+    expect(fresh.marketSoundMuted()).toBe(true)
+    expect(fresh.orderSoundMuted()).toBe(false)
+    localStorage.removeItem('sudarshan-market-sound')
   })
 })

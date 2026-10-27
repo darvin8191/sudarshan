@@ -47,6 +47,10 @@ const sio = vi.hoisted(() => {
     listenerCount(event: string) {
       return this.handlers.get(event)?.size ?? 0
     }
+
+    listeners(event: string) {
+      return [...(this.handlers.get(event) ?? [])]
+    }
   }
 
   /** Stands in for a socket.io-client Socket: records handlers and lifecycle. */
@@ -66,6 +70,11 @@ const sio = vi.hoisted(() => {
 
     emit() {
       return this
+    }
+
+    /** An emit that waits for its ack (the market alerts' join); the fake never answers. */
+    timeout() {
+      return { emit: () => this }
     }
 
     connect() {
@@ -148,6 +157,10 @@ const PROVIDER_EVENTS = [
   'order_notification',
   'active_sessions_update',
   'analyzer_update',
+  // SUDARSHAN M10.7: the market alerts, registered through the provider's recorder.
+  'sudarshan_market_alert',
+  'sudarshan_market_alerts_state',
+  'sudarshan_market_alert_delivery',
 ]
 
 function liveSockets() {
