@@ -80,6 +80,8 @@ class Compiled:
     #: Fixed edges in ticks (a price level); None when a condition derives them from the feed.
     up: int | None = None
     down: int | None = None
+    #: The feed mode the alert needs: "ltpc" (last price and previous close) or "full".
+    feed: str = "ltpc"
 
 
 @dataclass(frozen=True, slots=True)
@@ -238,9 +240,9 @@ def _check_price(params, segment: str, grain: Grain) -> dict[str, Any]:
 def _compile_price(params: Mapping[str, Any], grain: Grain) -> Compiled:
     mode, direction = PRICE_OPS[params["op"]]
     level = to_decimal(params["level"])
-    return Compiled(
-        mode, direction, params.get("source", "ltp"), grain.up(level), grain.down(level)
-    )
+    source = params.get("source", "ltp")
+    feed = "ltpc" if source == "ltp" else "full"  # the bid and ask come in full mode only
+    return Compiled(mode, direction, source, grain.up(level), grain.down(level), feed)
 
 
 KINDS: dict[str, Kind] = {

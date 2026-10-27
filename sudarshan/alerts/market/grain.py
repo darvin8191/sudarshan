@@ -60,9 +60,10 @@ class Grain:
 
     def ticks(self, value) -> int | None:
         """A feed price in whole ticks; None unless it is a finite number above 0."""
-        if not isinstance(value, int | float) or not 0 < value < math.inf:
-            return None
-        return round(value / self.size)
+        kind = value.__class__  # exact: a bool is not a price
+        if (kind is float or kind is int) and 0 < value < math.inf:
+            return round(value / self.size)
+        return None
 
     def price(self, ticks: int) -> Decimal:
         """Whole ticks back to the exact price, with the grain's decimals: 2001 -> 100.05."""

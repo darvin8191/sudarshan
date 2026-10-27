@@ -28,7 +28,7 @@ def alert(op="crosses_above", level="100", **fields) -> spec.Alert:
 
 
 def obs(a: spec.Alert, price: float, at: int, *, candle=0, end=0, day=DAY) -> Obs:
-    return Obs(a.grain.ticks(price), at, day, a.cond.up, a.cond.down, candle, end)
+    return Obs(a.grain.ticks(price), at, day, a.cond.up, a.cond.down, candle, end=end)
 
 
 def feed(a: spec.Alert, ticks, state=None):
@@ -73,11 +73,11 @@ def test_at_candle_close_by_the_timer_two_seconds_after_the_end():
     a = alert(op="at_or_above", frequency="at_close", candle=5)
     end = T0 + 5 * MIN
     state, _, _ = feed(a, [(100.05, T0 + 4 * MIN + 58_000, 0, end)])
-    assert engine.clock(a, state, end + 1_999) is None
-    out = engine.clock(a, state, end + 2_000)
+    assert engine.timer(a, state, end + 1_999) is None
+    out = engine.timer(a, state, end + 2_000)
     assert out.fire.value == 2001 and out.fire.trade_time == T0 + 4 * MIN + 58_000
     assert out.fire.at == end + 2_000 and out.state.forming is None
-    assert engine.clock(a, out.state, end + 60_000) is None  # judged once
+    assert engine.timer(a, out.state, end + 60_000) is None  # judged once
 
 
 def test_a_value_older_than_the_forming_candle_is_ignored():
@@ -93,11 +93,11 @@ def test_an_end_judges_a_candle_that_closed_by_then_and_drops_one_that_did_not()
     ends = "2026-10-21T10:15:00+05:30"
     a = alert(op="at_or_above", frequency="at_close", candle=15, ends=ends)
     state, _, _ = feed(a, [(100.05, T0 + 14 * MIN, 0, T0 + 15 * MIN)])
-    out = engine.clock(a, state, T0 + 15 * MIN)  # the end, before the 2 s timer
+    out = engine.timer(a, state, T0 + 15 * MIN)  # the end, before the 2 s timer
     assert out.fire is not None and (out.status, out.reason.code) == ("stopped", "ended")
     b = alert(op="at_or_above", frequency="at_close", candle=30, ends=ends)
     state, _, _ = feed(b, [(100.05, T0 + 14 * MIN, 0, T0 + 30 * MIN)])
-    out = engine.clock(b, state, T0 + 15 * MIN)
+    out = engine.timer(b, state, T0 + 15 * MIN)
     assert out.fire is None and out.status == "stopped"
 
 
@@ -105,7 +105,7 @@ def test_once_at_close_stops_when_its_close_fires():
     a = alert(op="at_or_above", frequency="at_close", candle=1, ends="2026-10-21T10:01:00+05:30")
     state, _, _ = feed(a, [(100.05, T0 + 30_000, 0, T0 + MIN)])
     a = dataclasses.replace(a, frequency=spec.ONCE)
-    out = engine.clock(a, state, T0 + MIN)
+    out = engine.timer(a, state, T0 + MIN)
     assert out.reason.code == "fired_once" and out.fire is not None
 
 
@@ -148,7 +148,7 @@ def test_an_alert_that_is_not_active_never_fires():
     a = dataclasses.replace(alert(op="at_or_above"), status="paused")
     out = engine.step(a, State(), obs(a, 101.0, T0), T0)
     assert out == engine.Outcome(9, State())
-    assert engine.clock(a, State(), T0 + 10**12) is None
+    assert engine.timer(a, State(), T0 + 10**12) is None
 
 
 def test_the_wait_counts_from_the_fire_inclusive():
