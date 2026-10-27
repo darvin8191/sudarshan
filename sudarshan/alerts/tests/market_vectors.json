@@ -1,0 +1,266 @@
+{
+  "about": [
+    "Golden vectors for SUDARSHAN market alerts (M10): the contract between the pure engine in",
+    "sudarshan/alerts/market and anything else that must decide the same thing, such as the Alerts",
+    "form's level snapping (the snap group). test_market_vectors.py runs every case.",
+    "Times are IST on the defaults' day unless a step names its own day. A trade step's ltt is its",
+    "'at' unless given; 'recv' (arrival) is 'at' unless given; 'NaN' and 'Infinity' are strings so",
+    "JSON.parse can read the file. Prices in expectations are text with the instrument's decimals."
+  ],
+  "defaults": {
+    "day": "2026-10-21",
+    "created": "09:00:00",
+    "instrument": {
+      "instrument_key": "NSE_EQ|INE062A01020",
+      "symbol": "SBIN",
+      "exchange": "NSE",
+      "tick_size": "0.05"
+    }
+  },
+  "instruments": {
+    "nifty": {"instrument_key": "NSE_INDEX|Nifty 50", "symbol": "NIFTY", "exchange": "NSE_INDEX", "tick_size": null},
+    "future": {
+      "instrument_key": "NSE_FO|51714",
+      "symbol": "NIFTY25NOV26FUT",
+      "exchange": "NFO",
+      "tick_size": "0.1",
+      "expiry": "2026-11-25"
+    },
+    "expiring": {
+      "instrument_key": "NSE_FO|49229",
+      "symbol": "NIFTY21OCT2625900CE",
+      "exchange": "NFO",
+      "tick_size": "0.05",
+      "expiry": "2026-10-21"
+    }
+  },
+  "snap": [
+    {"id": "N1", "tick": "0.05", "level": "100", "up": "100.00", "down": "100.00"},
+    {"id": "N2", "tick": "0.05", "level": "100.03", "up": "100.05", "down": "100.00"},
+    {"id": "N3", "tick": "0.05", "level": "0.15", "up": "0.15", "down": "0.15"},
+    {"id": "N4", "tick": "0.01", "level": "25900", "up": "25900.00", "down": "25900.00"},
+    {"id": "N5", "tick": "0.05", "level": "1420.797", "up": "1420.80", "down": "1420.75"},
+    {"id": "N6", "tick": "0.0025", "level": "83.1234", "up": "83.1250", "down": "83.1225"},
+    {"id": "N7", "tick": "0.1", "level": "250.05", "up": "250.10", "down": "250.00"},
+    {"id": "N8", "tick": "1", "level": "1234.5", "up": "1235.00", "down": "1234.00"},
+    {"id": "N9", "tick": "0.05", "level": "1,399.80", "up": "1399.80", "down": "1399.80"},
+    {"id": "N10", "tick": "0.05", "price": 100.04999999999999, "ticks": 2001, "shown": "100.05"},
+    {"id": "N11", "tick": "0.05", "price": 0.15, "ticks": 3, "shown": "0.15"},
+    {"id": "N12", "tick": "0.01", "price": 25903.15, "ticks": 2590315, "shown": "25903.15"},
+    {"id": "N13", "tick": "0.05", "price": 0.0, "ticks": null},
+    {"id": "N14", "tick": "0.05", "price": "NaN", "ticks": null}
+  ],
+  "sessions": [
+    {"id": "S1", "segment": "NSE_EQ", "day": "2026-10-21", "hours": ["09:15", "15:30"]},
+    {"id": "S2", "segment": "BSE_EQ", "day": "2026-10-21", "hours": ["09:15", "15:30"]},
+    {"id": "S3", "segment": "NSE_INDEX", "day": "2026-10-21", "hours": ["09:15", "15:30"]},
+    {"id": "S4", "segment": "BSE_INDEX", "day": "2026-10-21", "hours": ["09:15", "15:30"]},
+    {"id": "S5", "segment": "NSE_FO", "day": "2026-10-21", "hours": ["09:15", "15:40"]},
+    {"id": "S6", "segment": "BSE_FO", "day": "2026-10-21", "hours": ["09:15", "15:40"]},
+    {"id": "S7", "says": "Muhurat, Sunday 8 Nov 2026: line '2026-11-08 14:05-15:40'", "segment": "NSE_EQ", "day": "2026-11-08", "window": "14:05-15:40", "hours": ["14:20", "15:30"]},
+    {"id": "S8", "segment": "NSE_INDEX", "day": "2026-11-08", "window": "14:05-15:40", "hours": ["14:20", "15:30"]},
+    {"id": "S9", "segment": "NSE_FO", "day": "2026-11-08", "window": "14:05-15:40", "hours": ["14:20", "15:40"]},
+    {"id": "S10", "segment": "BSE_FO", "day": "2026-11-08", "window": "14:05-15:40", "hours": ["14:20", "15:40"]},
+    {"id": "S11", "says": "an evening window keeps the offsets", "segment": "NSE_EQ", "day": "2026-11-08", "window": "17:45-19:30", "hours": ["18:00", "19:20"]},
+    {"id": "S12", "segment": "NSE_FO", "day": "2026-11-08", "window": "17:45-19:30", "hours": ["18:00", "19:30"]},
+    {"id": "S13", "says": "a window too short for cash", "segment": "NSE_EQ", "day": "2026-11-08", "window": "14:00-14:20", "hours": null},
+    {"id": "S14", "says": "not a trading day", "segment": "NSE_EQ", "day": "2026-10-20", "trading_day": false, "hours": null}
+  ],
+  "refused": [
+    {"id": "X1", "alert": {"params": {"op": "at_or_above", "level": "100"}, "frequency": "every_time"}, "field": "cooldown_s", "message": "Every time on 'Is at or above' needs at least 1 minute between alerts."},
+    {"id": "X2", "instrument": "nifty", "alert": {"params": {"op": "crosses_above", "level": "25900", "source": "bid"}}, "field": "source", "message": "An index has no bid or ask. Watch its last price instead."},
+    {"id": "X3", "alert": {"params": {"op": "crosses_above", "level": "0"}}, "field": "level", "message": "Enter the price level, a number above 0."},
+    {"id": "X4", "alert": {"params": {"op": "crosses_above", "level": "100"}, "frequency": "per_candle"}, "field": "candle", "message": "Pick a candle of 1, 5, 15, 30 or 60 minutes, or Day."},
+    {"id": "X5", "alert": {"params": {"op": "crosses_above", "level": "100"}, "ends": "2026-10-20"}, "field": "ends", "message": "That end date has already passed. Pick a later one, or no end."},
+    {"id": "X6", "instrument_fields": {"exchange": "MCX", "instrument_key": "MCX_FO|442451"}, "alert": {"params": {"op": "crosses_above", "level": "100"}}, "field": "instrument", "message": "Market alerts work on NSE, BSE, NFO and BFO instruments and their indices for now."}
+  ],
+  "alerts": [
+    {
+      "id": "P1", "says": "crosses above 100: touching the level counts",
+      "alert": {"params": {"op": "crosses_above", "level": "100"}},
+      "steps": [{"at": "10:00:00", "ltp": 99.95}, {"at": "10:00:01", "ltp": 100.0}],
+      "fires": [{"at": "10:00:01", "value": "100.00", "level": "100.00", "direction": "up"}],
+      "status": "stopped", "reason": "fired_once"
+    },
+    {
+      "id": "P2", "says": "the first price only seeds the side",
+      "alert": {"params": {"op": "crosses_above", "level": "100"}},
+      "steps": [{"at": "10:00:00", "ltp": 100.0}, {"at": "10:00:01", "ltp": 100.05}],
+      "fires": [], "status": "active"
+    },
+    {
+      "id": "P3", "says": "every time, no wait: each crossing fires",
+      "alert": {"params": {"op": "crosses_above", "level": "100"}, "frequency": "every_time"},
+      "steps": [
+        {"at": "10:00:00", "ltp": 99.95}, {"at": "10:00:01", "ltp": 100.0},
+        {"at": "10:00:02", "ltp": 99.95}, {"at": "10:00:03", "ltp": 100.0}
+      ],
+      "fires": [{"at": "10:00:01", "n": 1}, {"at": "10:00:03", "n": 2}], "status": "active"
+    },
+    {
+      "id": "P4", "says": "once: one fire, then Stopped",
+      "alert": {"params": {"op": "crosses_above", "level": "100"}, "frequency": "once"},
+      "steps": [
+        {"at": "10:00:00", "ltp": 99.95}, {"at": "10:00:01", "ltp": 100.05},
+        {"at": "10:00:02", "ltp": 99.9}, {"at": "10:00:03", "ltp": 100.1}
+      ],
+      "fires": [{"at": "10:00:01", "value": "100.05"}], "status": "stopped", "reason": "fired_once", "reason_at": "10:00:01"
+    },
+    {
+      "id": "P5", "says": "crosses below 100",
+      "alert": {"params": {"op": "crosses_below", "level": "100"}},
+      "steps": [{"at": "10:00:00", "ltp": 100.05}, {"at": "10:00:01", "ltp": 100.0}],
+      "fires": [{"at": "10:00:01", "value": "100.00", "level": "100.00", "direction": "down"}], "status": "stopped"
+    },
+    {
+      "id": "P6", "says": "crosses either way: up at 100.00, down at 100.00; moving off 'at' does not fire",
+      "alert": {"params": {"op": "crosses", "level": "100"}, "frequency": "every_time"},
+      "steps": [
+        {"at": "10:00:00", "ltp": 99.95}, {"at": "10:00:01", "ltp": 100.0}, {"at": "10:00:02", "ltp": 100.05},
+        {"at": "10:00:03", "ltp": 100.0}, {"at": "10:00:04", "ltp": 99.95}
+      ],
+      "fires": [
+        {"at": "10:00:01", "value": "100.00", "direction": "up"},
+        {"at": "10:00:03", "value": "100.00", "direction": "down"}
+      ],
+      "status": "active"
+    },
+    {
+      "id": "P7", "says": "a level check fires on the first trade after it is set",
+      "alert": {"params": {"op": "at_or_above", "level": "100"}, "frequency": "once"},
+      "steps": [{"at": "10:00:00", "ltp": 100.05}],
+      "fires": [{"at": "10:00:00", "value": "100.05", "level": "100.00"}], "status": "stopped"
+    },
+    {
+      "id": "P8", "says": "at or below 100.03 checks at 100.00",
+      "alert": {"params": {"op": "at_or_below", "level": "100.03"}},
+      "steps": [{"at": "10:00:00", "ltp": 100.05}, {"at": "10:00:01", "ltp": 100.0}],
+      "fires": [{"at": "10:00:01", "value": "100.00", "level": "100.00", "direction": "down"}]
+    },
+    {
+      "id": "P9", "says": "crosses above 100.03 checks at 100.05",
+      "alert": {"params": {"op": "crosses_above", "level": "100.03"}},
+      "steps": [{"at": "10:00:00", "ltp": 100.0}, {"at": "10:00:01", "ltp": 100.05}],
+      "fires": [{"at": "10:00:01", "value": "100.05", "level": "100.05"}]
+    },
+    {
+      "id": "P10", "says": "crosses above 0.15: Decimal makes it exactly 3 ticks",
+      "alert": {"params": {"op": "crosses_above", "level": "0.15"}},
+      "steps": [{"at": "10:00:00", "ltp": 0.1}, {"at": "10:00:01", "ltp": 0.15}],
+      "fires": [{"at": "10:00:01", "value": "0.15", "level": "0.15"}]
+    },
+    {
+      "id": "P11", "says": "an index in hundredths", "instrument": "nifty",
+      "alert": {"params": {"op": "crosses_above", "level": "25900"}},
+      "steps": [{"at": "10:00:00", "ltp": 25899.99}, {"at": "10:00:01", "ltp": 25900.0}],
+      "fires": [{"at": "10:00:01", "value": "25900.00", "level": "25900.00"}]
+    },
+    {
+      "id": "P12", "says": "float noise snaps to the tick",
+      "alert": {"params": {"op": "crosses_above", "level": "100"}},
+      "steps": [{"at": "10:00:00", "ltp": 99.95}, {"at": "10:00:01", "ltp": 100.04999999999999}],
+      "fires": [{"at": "10:00:01", "value": "100.05"}]
+    },
+    {
+      "id": "P13", "says": "0 and NaN are not prices: ignored",
+      "alert": {"params": {"op": "crosses_above", "level": "100"}},
+      "steps": [
+        {"at": "10:00:00", "ltp": 99.95}, {"at": "10:00:01", "ltp": 0.0},
+        {"at": "10:00:02", "ltp": "NaN"}, {"at": "10:00:03", "ltp": 100.05}
+      ],
+      "fires": [{"at": "10:00:03", "value": "100.05", "n": 1}]
+    },
+    {
+      "id": "P14", "says": "either way on a level off the grid: up at 100.05, down at 100.00",
+      "alert": {"params": {"op": "crosses", "level": "100.03"}, "frequency": "every_time"},
+      "steps": [{"at": "10:00:00", "ltp": 100.0}, {"at": "10:00:01", "ltp": 100.05}, {"at": "10:00:02", "ltp": 100.0}],
+      "fires": [
+        {"at": "10:00:01", "value": "100.05", "level": "100.05", "direction": "up"},
+        {"at": "10:00:02", "value": "100.00", "level": "100.00", "direction": "down"}
+      ]
+    },
+    {
+      "id": "P15", "says": "seeded above, then down and back up: fires",
+      "alert": {"params": {"op": "crosses_above", "level": "100"}},
+      "steps": [{"at": "10:00:00", "ltp": 100.05}, {"at": "10:00:01", "ltp": 99.95}, {"at": "10:00:02", "ltp": 100.0}],
+      "fires": [{"at": "10:00:02", "value": "100.00"}]
+    },
+    {
+      "id": "P16", "says": "a big move through the level in one trade",
+      "alert": {"params": {"op": "crosses_below", "level": "100"}},
+      "steps": [{"at": "10:00:00", "ltp": 104.0}, {"at": "10:00:01", "ltp": 96.5}],
+      "fires": [{"at": "10:00:01", "value": "96.50", "level": "100.00", "direction": "down"}]
+    },
+    {
+      "id": "Q1", "says": "bid crosses above 120 while the last trade stays put: timed by arrival",
+      "alert": {"params": {"op": "crosses_above", "level": "120", "source": "bid"}},
+      "steps": [
+        {"at": "10:00:00", "ltp": 120.5, "ltt": "09:59:00", "bid": 119.95},
+        {"at": "10:00:00.300", "ltp": 120.5, "ltt": "09:59:00", "bid": 120.0}
+      ],
+      "fires": [{"at": "10:00:00.300", "trade_time": "10:00:00.300", "value": "120.00"}]
+    },
+    {
+      "id": "Q2", "says": "ask crosses below 120",
+      "alert": {"params": {"op": "crosses_below", "level": "120", "source": "ask"}},
+      "steps": [{"at": "10:00:00", "ask": 120.1}, {"at": "10:00:01", "ask": 119.95}],
+      "fires": [{"at": "10:00:01", "value": "119.95", "direction": "down"}]
+    },
+    {
+      "id": "C1", "says": "every time, wait 5 min: the 10:03 crossing is inside the wait",
+      "alert": {"params": {"op": "crosses_above", "level": "100"}, "frequency": "every_time", "cooldown_s": 300},
+      "steps": [
+        {"at": "09:59:00", "ltp": 99.95}, {"at": "10:00:00", "ltp": 100.0},
+        {"at": "10:02:00", "ltp": 99.95}, {"at": "10:03:00", "ltp": 100.0},
+        {"at": "10:05:00", "ltp": 99.95}, {"at": "10:06:00", "ltp": 100.0}
+      ],
+      "fires": [{"at": "10:00:00"}, {"at": "10:06:00"}]
+    },
+    {
+      "id": "C2", "says": "at or above, every time, wait 1 min: one fire a minute while it holds",
+      "alert": {"params": {"op": "at_or_above", "level": "100"}, "frequency": "every_time", "cooldown_s": 60},
+      "steps": [{"cycle": {"from": "10:00:00", "every_ms": 1000, "times": 181, "ltp": [100.05]}}],
+      "fires": [{"at": "10:00:00"}, {"at": "10:01:00"}, {"at": "10:02:00"}, {"at": "10:03:00"}]
+    },
+    {
+      "id": "C3", "says": "a crossing inside the wait is used up: it never fires later",
+      "alert": {"params": {"op": "crosses_above", "level": "100"}, "frequency": "every_time", "cooldown_s": 300},
+      "steps": [
+        {"at": "10:00:00", "ltp": 99.95}, {"at": "10:01:00", "ltp": 100.0},
+        {"at": "10:02:00", "ltp": 99.95}, {"at": "10:03:00", "ltp": 100.0},
+        {"at": "10:07:00", "ltp": 100.05}
+      ],
+      "fires": [{"at": "10:01:00"}]
+    },
+    {
+      "id": "E1", "says": "ends 10:30:00: a crossing at 10:29:59.9 fires, then Stopped as ended",
+      "alert": {"params": {"op": "crosses_above", "level": "100"}, "frequency": "every_time", "ends": "2026-10-21T10:30:00+05:30"},
+      "steps": [{"at": "10:29:00", "ltp": 99.95}, {"at": "10:29:59.900", "ltp": 100.0}, {"at": "10:30:00", "clock": true}],
+      "fires": [{"at": "10:29:59.900"}], "status": "stopped", "reason": "ended", "reason_at": "10:30:00"
+    },
+    {
+      "id": "E2", "says": "a trade after the end stops it instead of firing",
+      "alert": {"params": {"op": "crosses_above", "level": "100"}, "frequency": "every_time", "ends": "2026-10-21T10:30:00+05:30"},
+      "steps": [{"at": "10:29:00", "ltp": 99.95}, {"at": "10:30:00", "ltp": 100.0}],
+      "fires": [], "status": "stopped", "reason": "ended", "reason_at": "10:30:00"
+    },
+    {
+      "id": "E3", "says": "an F&O alert stops when its contract expires, after its segment's close", "instrument": "expiring",
+      "alert": {"params": {"op": "crosses_above", "level": "100"}, "frequency": "every_time"},
+      "steps": [{"at": "15:39:59", "clock": true}, {"at": "15:40:00", "clock": true}],
+      "fires": [], "status": "stopped", "reason": "expired", "reason_at": "15:40:00"
+    },
+    {
+      "id": "R1", "says": "every time, no wait: the 51st crossing in a session pauses it",
+      "alert": {"params": {"op": "crosses_above", "level": "100"}, "frequency": "every_time"},
+      "steps": [{"cycle": {"from": "10:00:00", "every_ms": 1000, "times": 51, "ltp": [99.95, 100.0]}}],
+      "fire_count": 50, "status": "paused", "reason": "fire_limit", "reason_at": "10:01:41"
+    },
+    {
+      "id": "R2", "says": "exactly 50 fires leaves it Active",
+      "alert": {"params": {"op": "crosses_above", "level": "100"}, "frequency": "every_time"},
+      "steps": [{"cycle": {"from": "10:00:00", "every_ms": 1000, "times": 50, "ltp": [99.95, 100.0]}}],
+      "fire_count": 50, "status": "active"
+    }
+  ]
+}
