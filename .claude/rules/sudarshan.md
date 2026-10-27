@@ -183,7 +183,7 @@ in brand. Icon "Mor": tile #0E5A73, ring #E3A21A, glyph #FFFFFF. Numbers via
   him the pre-filled link `https://github.com/<owner>/sudarshan/releases/new?tag=vA.B.C&target=sudarshan&title=SUDARSHAN%20vA.B.C`
   and he taps Publish. `sudarshan-build.yml` then builds `frontend-dist.tar.gz` (+ `.sha256`),
   attaches them and marks the release latest (a failed build is demoted to pre-release). The
-  server's `sudarshan-deploy.timer` installs the latest release only outside 09:00–15:45 IST on
+  server's `sudarshan-deploy.timer` installs the latest release only outside 08:30–16:00 IST on
   trading days and rolls back on a failed health check.
 - Before finishing a task: run the relevant tests, `npm run lint` for frontend changes, and update
   the feature's row in `sudarshan/STATUS.md` (M-id → done/partial + PR).

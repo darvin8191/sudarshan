@@ -797,6 +797,24 @@ def _market_gate(etc: Path, now: str) -> int:
 
 
 @pytest.mark.parametrize(
+    ("now", "trading"),
+    [
+        ("3 0829 2026-10-21", False),
+        ("3 0830 2026-10-21", True),  # clear of auto-login's 08:35 and the alerts' 08:45
+        ("3 1545 2026-10-21", True),
+        ("3 1600 2026-10-21", True),  # through the alerts' 16:00 close, after F&O at 15:40
+        ("3 1601 2026-10-21", False),
+        ("6 1000 2026-10-24", False),  # a Saturday
+    ],
+)
+def test_the_install_window_on_an_ordinary_trading_day(tmp_path, now, trading):
+    """Wednesday 21 Oct 2026, an ordinary trading day: no install from 08:30 to 16:00 IST."""
+    (tmp_path / EXTRA).write_bytes(b"")
+    (tmp_path / HOLIDAYS).write_bytes(b"")
+    assert (_market_gate(tmp_path, now) == 0) is trading
+
+
+@pytest.mark.parametrize(
     ("then", "now", "trading"),
     [
         (MUHURAT, b"", True),  # the session as the run found it holds, though the file lost it
@@ -1358,11 +1376,11 @@ def test_a_release_that_adds_todays_session_waits(tmp_path):
 
 @whole_tool
 @pytest.mark.parametrize(
-    ("now", "installs"), [("2 1100 2026-10-20", False), ("2 1600 2026-10-20", True)]
+    ("now", "installs"), [("2 1100 2026-10-20", False), ("2 1601 2026-10-20", True)]
 )
 def test_a_release_that_takes_back_todays_holiday_waits_for_the_close(tmp_path, now, installs):
     """Tuesday 20 Oct, a holiday this tool added; a release published that day drops it. At 11:00
-    today would be a trading day in its window, so the release waits; at 16:00 it installs and
+    today would be a trading day in its window, so the release waits; at 16:01 it installs and
     takes the line out."""
     box = Box(tmp_path, latest="v1.0.1", now=now)
     (box.state / "calendar_applied").write_text(f"{HOLIDAYS}|2026-10-20  # Dussehra\n")
@@ -1422,10 +1440,10 @@ def test_a_rollback_puts_the_record_back_as_it_was(tmp_path):
 
 @whole_tool
 def test_the_gate_is_asked_again_before_the_stop(tmp_path):
-    """Wednesday 08:58 IST: the first gate lets v1.0.1 in, the download takes until 09:01, and the
-    install waits instead of stopping OpenAlgo in the pre-open."""
-    box = Box(tmp_path, latest="v1.0.1", now="3 0858 2026-10-21")
-    box.clock_moves_on("https://example.invalid/d", "3 0901 2026-10-21")
+    """Wednesday 08:28 IST: the first gate lets v1.0.1 in, the download takes until 08:31, and the
+    install waits instead of stopping OpenAlgo as the trading morning starts."""
+    box = Box(tmp_path, latest="v1.0.1", now="3 0828 2026-10-21")
+    box.clock_moves_on("https://example.invalid/d", "3 0831 2026-10-21")
     done = box.run()
     assert done.returncode == 0, done.stdout + done.stderr
     assert (

@@ -52,7 +52,10 @@ day_trading() {   # $1 = date, $2 = ISO weekday, $3 = HHMM, $4 = holiday file, $
     listed "$1" "$4" && return 1
     # 10# forces decimal: "0930" would otherwise be read as an invalid octal number
     local t=$((10#$3))
-    (( t >= 900 && t <= 1545 ))
+    # 08:30-16:00 (SUDARSHAN M0.1): clear of auto-login's wake-ups, the alerts' 08:45 opening and
+    # the feed's 08:58; until the alerts' 16:00 close, after the F&O close at 15:40 and the feed's
+    # tail to 15:50
+    (( t >= 830 && t <= 1600 ))
 }
 market_open() {   # 0 = trading hours (do not restart), 1 = safe. Trading when the day files say so as
                   # they are, or as they stood before this run's calendar step (GATE_VIEW, kept by

@@ -2,8 +2,8 @@
 
 Releases of the `sudarshan` branch, newest first, written for the owner deciding whether to
 publish. The owner publishes each release on GitHub. The server's deploy timer then installs it
-outside 09:00-15:45 IST on trading days, keeps backups, and rolls back if the app does not come up
-healthy.
+outside 08:30-16:00 IST on trading days (09:00-15:45 until v0.3.1), keeps backups, and rolls
+back if the app does not come up healthy.
 
 ## v0.3.1 (21 Oct 2026)
 

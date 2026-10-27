@@ -49,7 +49,7 @@ Tests: `sudarshan/ops/tests/test_deploy_env.py`.
 Nobody edits the server's day files by hand either. `/etc/sudarshan/nse_holidays.txt` (days NSE is
 closed) and `/etc/sudarshan/nse_extra_trading_days.txt` (a session on a day that is otherwise
 closed, with that session's own `HH:MM-HH:MM` window) drive the deploy tool's market gate,
-auto-login's trading days and the order alerts' window; the feed reads the holiday file. A release
+auto-login's trading days, the order alerts' window and the feed's hours. A release
 lists the lines it needs in `ops/deploy/nse-calendar.conf` (a `[FILE]` line, then `line TEXT`,
 `was EARLIER_TEXT` for the same date, and `drop TEXT`; the file's header gives the format).
 `sudarshan-deploy`:

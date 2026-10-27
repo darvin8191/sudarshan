@@ -32,8 +32,8 @@ journalctl -u sudarshan-feed -f
 `/etc/sudarshan/nse_holidays.txt`: one `YYYY-MM-DD` per line from the NSE holiday circular,
 `#` comments allowed, also after the date. `sudarshan-deploy` adds the dates a release lists (see
 `sudarshan/README.md`). A missing file means only weekends count as closed (logged, and shown in
-/health). The feed does not read `nse_extra_trading_days.txt`: a special session on a weekend or a
-holiday counts as closed here.
+/health). A special session listed in `nse_extra_trading_days.txt` (below) opens the feed that day,
+also on a weekend or a holiday.
 
 `/etc/sudarshan/nse_extra_trading_days.txt` (optional; auto-login, the alerts and the deploy tool
 read it too): a day the exchange opens although it is a weekend or a holiday, such as a Muhurat
