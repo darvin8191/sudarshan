@@ -88,14 +88,14 @@ def test_the_closing_auction_and_the_7_december_timings(segment, day, auction, h
 
 
 @pytest.mark.parametrize(
-    ("day", "window", "expected"),
+    ("day", "window", "expected", "close"),
     [
-        (WED, None, ("15:15", "15:35")),  # NSE/CMTR/75479: matched 15:30-15:35
-        (MUHURAT, "14:05-15:40", ("15:15", "15:35")),  # also on 8 Nov 2026 (X6b)
-        (DEC7, None, ("15:30", "15:40")),  # every stock's auction 15:30-15:40
+        (WED, None, ("15:15", "15:35"), "15:30"),  # 27 Oct 2026: printed at 15:28:09 (X6j)
+        (MUHURAT, "14:05-15:40", ("15:15", "15:35"), "15:30"),  # also on 8 Nov 2026 (X6b)
+        (DEC7, None, ("15:30", "15:40"), "15:40"),  # every stock's auction 15:30-15:40
     ],
 )
-def test_the_auction_window_a_cas_key_carries(day, window, expected):
+def test_the_auction_window_a_cas_key_carries(day, window, expected, close):
     span = sessions.auction_window(
         "NSE_EQ", day, trading_day=True, window=parse_window(window) if window else None
     )
@@ -103,9 +103,16 @@ def test_the_auction_window_a_cas_key_carries(day, window, expected):
     found = sessions.session("NSE_EQ", day, trading_day=True, auction=True,
                              window=parse_window(window) if window else None)  # fmt: skip
     assert (found.end, found.auction_until) == span
+    expected_close = sessions.auction_close(
+        "NSE_EQ", day, trading_day=True, window=parse_window(window) if window else None
+    )
+    assert clock(expected_close)[11:] == close == clock(found.auction_close)[11:]
     assert sessions.auction_window("NSE_INDEX", day, trading_day=True) is None
+    assert sessions.auction_close("NSE_INDEX", day, trading_day=True) is None  # X6k
     assert sessions.auction_window("NSE_EQ", day, trading_day=False) is None
-    assert sessions.session("NSE_EQ", day, trading_day=True).auction_until is None
+    assert sessions.auction_close("NSE_EQ", day, trading_day=False) is None
+    plain = sessions.session("NSE_EQ", day, trading_day=True)
+    assert (plain.auction_until, plain.auction_close) == (None, None)
 
 
 @pytest.mark.parametrize(
