@@ -640,10 +640,15 @@ export interface HoldingRow {
   price: PriceInfo
   fresh: Freshness
   today_mode: TodayMode
-  /** A stock that closes by auction: its price waits for the auction from `auction_from`. */
+  /**
+   * A stock that closes by auction: its price waits for the auction from `auction_from`, may come
+   * until `auction_until` and is expected at `auction_close` ("price at about 15:30"). All three
+   * are null for a stock that does not close by auction; the phone never computes sessions.
+   */
   cas: boolean
   auction_from: EpochMs | null
   auction_until: EpochMs | null
+  auction_close: EpochMs | null
   lines: HoldingLine[]
 }
 
@@ -943,6 +948,7 @@ export interface UpstoxHolding {
   cas: boolean
   auction_from: EpochMs | null
   auction_until: EpochMs | null
+  auction_close: EpochMs | null
 }
 
 export interface UpstoxPosition {
@@ -969,6 +975,7 @@ export interface UpstoxPosition {
   cas: boolean
   auction_from: EpochMs | null
   auction_until: EpochMs | null
+  auction_close: EpochMs | null
 }
 
 export interface FundsLine {

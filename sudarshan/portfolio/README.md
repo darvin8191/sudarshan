@@ -274,9 +274,12 @@ are in it and how many are left out.
 ### Closing auction
 
 A stock that closes by auction (`cas`) stops continuous trading before the cash close. Every
-listed row in `tab_get`, `summary` and `upstox_book` carries `cas`, `auction_from` and
-`auction_until` (epoch ms, from `sessions.auction_window`); the phone never computes sessions. Its
-words are `frontend/src/sudarshan/live/auction.ts`.
+listed row in `tab_get`, `summary` and `upstox_book` carries `cas` and three moments in epoch ms:
+`auction_from` (continuous trading has ended), `auction_until` (the latest the auction's price may
+come) and `auction_close` (when it is expected, for "price at about 15:30"), from
+`sessions.auction_window` and `sessions.auction_close`. All three are null for a stock that does not
+close by auction. The phone never computes sessions; its words are
+`frontend/src/sudarshan/live/auction.ts`.
 
 ### The Upstox tab
 

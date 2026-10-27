@@ -144,6 +144,14 @@ def _balanced(text: str, start: int) -> str:
     raise TsError("unbalanced braces")
 
 
+def interfaces(text: str) -> dict[str, str]:
+    """Interface name to the text of its own members (not those it extends)."""
+    found = {}
+    for match in re.finditer(r"^export interface (\w+)(?: extends [\w, ]+?)?\s*\{", text, re.M):
+        found[match.group(1)] = _balanced(text, match.end() - 1)
+    return found
+
+
 def ops_map(text: str) -> dict[str, tuple[str, str]]:
     """Op name to (request type, answer type), from ``interface PortfolioOps``."""
     match = re.search(r"^export interface PortfolioOps\s*\{", text, re.M)

@@ -21,6 +21,7 @@ from portfolio_ts import (
     exported_consts,
     exported_types,
     includes,
+    interfaces,
     ops_map,
     read_const,
 )
@@ -158,6 +159,31 @@ def test_the_readme_error_table_gives_the_statuses_the_bridge_gives(readme):
     errors = {row[0].strip("`"): int(row[1]) for row in rows if len(row) == 4 and row[1].isdigit()}
     assert errors == kinds.ERROR_STATUS
     assert set(errors) == set(kinds.ERROR_CODES)
+
+
+AUCTION_MOMENTS = ("auction_from", "auction_until", "auction_close")
+
+
+def test_every_row_for_a_stock_that_closes_by_auction_carries_its_three_moments(ts_text):
+    rows = {
+        name: body
+        for name, body in interfaces(ts_text).items()
+        if re.search(r"^\s*cas: boolean$", body, re.M)
+    }
+    assert {"HoldingRow", "UpstoxHolding", "UpstoxPosition"} <= set(rows)
+    for name, body in rows.items():
+        for moment in AUCTION_MOMENTS:
+            assert re.search(rf"^\s*{moment}: EpochMs \| null$", body, re.M), (name, moment)
+    for name, body in interfaces(ts_text).items():  # and no moment without the flag
+        if any(moment in body for moment in AUCTION_MOMENTS):
+            assert name in rows, name
+
+
+def test_the_readme_names_the_three_moments(readme):
+    text = _flat(readme)
+    for moment in AUCTION_MOMENTS:
+        assert f"`{moment}`" in text
+    assert "`sessions.auction_close`" in text
 
 
 def test_the_readme_states_the_limits_the_bridge_enforces(readme):
