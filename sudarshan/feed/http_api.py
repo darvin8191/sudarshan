@@ -6,6 +6,9 @@ GET  /snapshot/all                  every key the service has a tick for
 GET  /subscriptions                 desired subscription set by mode
 POST /subscribe   {"mode": M, "keys": [...]}    400 bad request, 409 over an Upstox cap
 POST /unsubscribe {"keys": [...]}
+GET    /claims                      every client's claims (M18.1)
+PUT    /claims/<client> {"keys": {KEY: MODE}}   replace and renew; 400 bad request, 409 over a cap
+DELETE /claims/<client>
 """
 
 from __future__ import annotations
@@ -23,7 +26,9 @@ log = logging.getLogger("sudarshan.feed.http")
 MAX_BODY = 1 << 20
 READ_TIMEOUT_S = 10.0
 LOCAL_PEERS = {"127.0.0.1", "::1", "::ffff:127.0.0.1"}
-PATHS = {"/health", "/snapshot", "/snapshot/all", "/subscriptions", "/subscribe", "/unsubscribe"}
+PATHS = {"/health", "/snapshot", "/snapshot/all", "/subscriptions", "/subscribe", "/unsubscribe",
+         "/claims"}  # fmt: skip
+CLAIMS = "/claims/"
 REASONS = {
     200: "OK", 400: "Bad Request", 403: "Forbidden", 404: "Not Found", 405: "Method Not Allowed",
     408: "Request Timeout", 409: "Conflict", 413: "Content Too Large", 500: "Internal Server Error",
@@ -102,6 +107,16 @@ async def _read(reader, writer) -> tuple[str, SplitResult, bytes]:
     return method, urlsplit(target), body
 
 
+def _json_object(body: bytes, example: str) -> dict:
+    try:
+        payload = json.loads(body or b"{}")
+    except ValueError:
+        raise HTTPError(400, "body must be JSON") from None
+    if not isinstance(payload, dict):
+        raise HTTPError(400, f"body must be a JSON object like {example}")
+    return payload
+
+
 async def _route(service, method: str, url: SplitResult, body: bytes) -> dict:
     path = url.path.rstrip("/") or "/"
     if method == "GET" and path == "/health":
@@ -117,15 +132,18 @@ async def _route(service, method: str, url: SplitResult, body: bytes) -> dict:
     if method == "GET" and path == "/subscriptions":
         return service.subscriptions()
     if method == "POST" and path in ("/subscribe", "/unsubscribe"):
-        try:
-            payload = json.loads(body or b"{}")
-        except ValueError:
-            raise HTTPError(400, "body must be JSON") from None
-        if not isinstance(payload, dict):
-            raise HTTPError(400, 'body must be a JSON object like {"mode": "ltpc", "keys": [...]}')
+        payload = _json_object(body, '{"mode": "ltpc", "keys": [...]}')
         if path == "/subscribe":
             return await service.subscribe(payload.get("mode"), payload.get("keys"))
         return await service.unsubscribe(payload.get("keys"))
-    if path in PATHS:
+    if method == "GET" and path == "/claims":
+        return service.claims_view()
+    if path.startswith(CLAIMS) and method in ("PUT", "DELETE"):
+        client = path[len(CLAIMS) :]
+        if method == "DELETE":
+            return await service.drop_claims(client)
+        payload = _json_object(body, '{"keys": {"NSE_EQ|INE002A01018": "full"}}')
+        return await service.put_claims(client, payload.get("keys"))
+    if path in PATHS or path.startswith(CLAIMS):
         raise HTTPError(405, "method not allowed")
     raise HTTPError(404, "not found")

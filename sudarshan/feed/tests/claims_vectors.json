@@ -1,0 +1,131 @@
+{
+  "about": [
+    "Golden vectors for the feed's subscription claims (M18.1): what the socket is told when",
+    "the effective set changes. base is the keys file (with the API overlay empty), claims",
+    "each client's set before, do one operation; send lists the (method, mode, keys) the",
+    "socket receives in order (sub, change_mode, unsub; mode null for unsub) and effective",
+    "the set it carries afterwards. test_feed_claims.py runs every case."
+  ],
+  "cases": [
+    {
+      "id": "C1",
+      "says": "a claim adds keys new to the socket",
+      "base": {"NSE_INDEX|Nifty 50": "ltpc"},
+      "do": {"put": "sudarshan-alerts", "keys": {"NSE_EQ|INE002A01018": "full", "NSE_FO|49229": "ltpc"}},
+      "send": [["sub", "ltpc", ["NSE_FO|49229"]], ["sub", "full", ["NSE_EQ|INE002A01018"]]],
+      "effective": {"NSE_INDEX|Nifty 50": "ltpc", "NSE_EQ|INE002A01018": "full", "NSE_FO|49229": "ltpc"}
+    },
+    {
+      "id": "C2",
+      "says": "a claim in a higher mode moves a base key up",
+      "base": {"NSE_INDEX|Nifty 50": "ltpc"},
+      "do": {"put": "sudarshan-alerts", "keys": {"NSE_INDEX|Nifty 50": "full"}},
+      "send": [["change_mode", "full", ["NSE_INDEX|Nifty 50"]]],
+      "effective": {"NSE_INDEX|Nifty 50": "full"}
+    },
+    {
+      "id": "C3",
+      "says": "a claim in a lower mode never downgrades a key",
+      "base": {"NSE_EQ|INE002A01018": "full"},
+      "do": {"put": "sudarshan-alerts", "keys": {"NSE_EQ|INE002A01018": "ltpc"}},
+      "send": [],
+      "effective": {"NSE_EQ|INE002A01018": "full"}
+    },
+    {
+      "id": "C4",
+      "says": "two clients on one key: the highest mode; dropping it moves the key down",
+      "base": {},
+      "claims": {
+        "sudarshan-alerts": {"NSE_EQ|INE002A01018": "full"},
+        "sudarshan-screener": {"NSE_EQ|INE002A01018": "ltpc"}
+      },
+      "do": {"drop": "sudarshan-alerts"},
+      "send": [["change_mode", "ltpc", ["NSE_EQ|INE002A01018"]]],
+      "effective": {"NSE_EQ|INE002A01018": "ltpc"}
+    },
+    {
+      "id": "C5",
+      "says": "a new set for a client: what nobody else holds is unsubscribed",
+      "base": {"NSE_INDEX|Nifty 50": "ltpc"},
+      "claims": {
+        "sudarshan-alerts": {"NSE_EQ|INE002A01018": "full", "NSE_INDEX|Nifty 50": "ltpc", "NSE_EQ|INE009A01021": "ltpc"}
+      },
+      "do": {
+        "put": "sudarshan-alerts",
+        "keys": {"NSE_EQ|INE009A01021": "full", "NSE_EQ|INE467B01029": "ltpc"}
+      },
+      "send": [
+        ["sub", "ltpc", ["NSE_EQ|INE467B01029"]],
+        ["change_mode", "full", ["NSE_EQ|INE009A01021"]],
+        ["unsub", null, ["NSE_EQ|INE002A01018"]]
+      ],
+      "effective": {"NSE_INDEX|Nifty 50": "ltpc", "NSE_EQ|INE009A01021": "full", "NSE_EQ|INE467B01029": "ltpc"}
+    },
+    {
+      "id": "C6",
+      "says": "a client dropped: its own keys go, keys others hold stay",
+      "base": {"NSE_INDEX|Nifty 50": "ltpc"},
+      "claims": {
+        "sudarshan-alerts": {"NSE_EQ|INE002A01018": "full", "NSE_INDEX|Nifty 50": "full"},
+        "sudarshan-screener": {"NSE_EQ|INE009A01021": "ltpc"}
+      },
+      "do": {"drop": "sudarshan-alerts"},
+      "send": [["change_mode", "ltpc", ["NSE_INDEX|Nifty 50"]], ["unsub", null, ["NSE_EQ|INE002A01018"]]],
+      "effective": {"NSE_INDEX|Nifty 50": "ltpc", "NSE_EQ|INE009A01021": "ltpc"}
+    },
+    {
+      "id": "C7",
+      "says": "/unsubscribe cannot take a claimed key away, only its higher mode",
+      "base": {"NSE_EQ|INE002A01018": "full"},
+      "claims": {"sudarshan-alerts": {"NSE_EQ|INE002A01018": "ltpc"}},
+      "do": {"unsubscribe": ["NSE_EQ|INE002A01018"]},
+      "send": [["change_mode", "ltpc", ["NSE_EQ|INE002A01018"]]],
+      "effective": {"NSE_EQ|INE002A01018": "ltpc"}
+    },
+    {
+      "id": "C8",
+      "says": "/subscribe in a lower mode than a claim changes nothing on the socket",
+      "base": {},
+      "claims": {"sudarshan-alerts": {"NSE_EQ|INE002A01018": "full"}},
+      "do": {"subscribe": "ltpc", "keys": ["NSE_EQ|INE002A01018"]},
+      "send": [],
+      "effective": {"NSE_EQ|INE002A01018": "full"}
+    },
+    {
+      "id": "C9",
+      "says": "an empty set drops the client",
+      "base": {},
+      "claims": {"sudarshan-alerts": {"NSE_EQ|INE002A01018": "full"}},
+      "do": {"put": "sudarshan-alerts", "keys": {}},
+      "send": [["unsub", null, ["NSE_EQ|INE002A01018"]]],
+      "effective": {}
+    },
+    {
+      "id": "C10",
+      "says": "renewing the same set changes nothing on the socket",
+      "base": {"NSE_INDEX|Nifty 50": "ltpc"},
+      "claims": {"sudarshan-alerts": {"NSE_EQ|INE002A01018": "full"}},
+      "do": {"put": "sudarshan-alerts", "keys": {"NSE_EQ|INE002A01018": "full"}},
+      "send": [],
+      "effective": {"NSE_INDEX|Nifty 50": "ltpc", "NSE_EQ|INE002A01018": "full"}
+    },
+    {
+      "id": "C11",
+      "says": "/unsubscribe of a key only the overlay held still unsubscribes it",
+      "base": {"NSE_INDEX|Nifty 50": "ltpc", "NSE_INDEX|Nifty Bank": "ltpc"},
+      "claims": {"sudarshan-alerts": {"NSE_EQ|INE002A01018": "full"}},
+      "do": {"unsubscribe": ["NSE_INDEX|Nifty Bank"]},
+      "send": [["unsub", null, ["NSE_INDEX|Nifty Bank"]]],
+      "effective": {"NSE_INDEX|Nifty 50": "ltpc", "NSE_EQ|INE002A01018": "full"}
+    },
+    {
+      "id": "C12",
+      "says": "a client's key in option_greeks sits between ltpc and full",
+      "base": {"NSE_FO|49229": "ltpc"},
+      "claims": {"sudarshan-screener": {"NSE_FO|49229": "full"}},
+      "do": {"put": "sudarshan-alerts", "keys": {"NSE_FO|49229": "option_greeks"}},
+      "send": [],
+      "effective": {"NSE_FO|49229": "full"}
+    }
+  ]
+}
