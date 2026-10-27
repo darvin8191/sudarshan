@@ -439,3 +439,31 @@ def test_F12_the_status_line_comes_from_the_clock_and_the_feed_never_a_trade():
     assert status == clock.OK and words.check_words(status, now=t) == "Watching · Real-time"
     evening = ms(WED, 15, 45)
     assert clock.status(market(WED, evening, TUE), "NSE_FO", evening) == clock.OUTSIDE_HOURS
+
+
+# ---- review round 2 ---------------------------------------------------------------------
+
+
+OPTION = {"instrument_key": "NSE_FO|49229", "symbol": "NIFTY25NOV2625900CE", "exchange": "NFO",
+          "tick_size": "0.05", "expiry": "2026-11-25"}  # fmt: skip
+
+
+def test_R1_a_value_under_half_a_paisa_is_no_price():
+    from sudarshan.alerts.market.grain import paise
+
+    assert paise(0.004) is None and paise(0.006) == 1 and paise(0.01) == 1
+
+
+@pytest.mark.parametrize("op", ["at_or_below", "crosses_below", "crosses"])
+def test_R2_a_level_under_an_options_lowest_price_is_refused(op):
+    """An option never trades under one tick (0.05): "at or below 0.03" could never fire."""
+    with pytest.raises(spec.SpecError) as caught:
+        make({"kind": "price", "params": {"op": op, "level": "0.03"}}, inst=OPTION)
+    assert (caught.value.field, caught.value.message) == (
+        "level",
+        "Enter a price level of at least ₹0.05, the lowest price this contract trades at.",
+    )
+    assert (
+        make({"kind": "price", "params": {"op": op, "level": "0.05"}}, inst=OPTION).cond.down == 5
+    )
+    assert make({"kind": "price", "params": {"op": op, "level": "0.01"}}).cond.down == 1  # cash
