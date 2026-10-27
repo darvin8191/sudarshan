@@ -40,7 +40,7 @@ DEPLOY_SPOOL = Path("/var/lib/sudarshan/events.jsonl")
 BACKUP_SPOOL = Path("/var/lib/sudarshan-backup/events.jsonl")
 DEFAULT_SPOOLS = (DEPLOY_SPOOL, BACKUP_SPOOL)
 #: What a notice can be about. Each has its words in ``sudarshan/alerts/notices.py``.
-KINDS = frozenset({"installed", "rolled_back", "unit_refused", "waiting"})
+KINDS = frozenset({"installed", "rolled_back", "unit_refused", "waiting", "backup_failed"})
 FORMAT = "1"
 SOURCES = frozenset({"deploy", "backup"})
 ID = re.compile(r"[A-Za-z0-9._-]{1,120}")

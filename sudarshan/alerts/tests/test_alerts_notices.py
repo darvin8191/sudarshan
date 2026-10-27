@@ -230,6 +230,149 @@ def test_no_message_carries_a_status_code_a_tool_name_or_a_symbol():
     assert text.splitlines()[0] == BRAND
 
 
+# ---- the nightly backup's words ---------------------------------------------------------------
+
+AGAIN = "It tries again at its next scheduled time."
+LOOK = "if it is incomplete again, have the server looked at."
+
+
+@pytest.mark.parametrize(
+    ("facts", "text"),
+    [
+        (
+            {"why": "space", "free_gb": "0.40", "need_gb": "1.20"},
+            "The nightly backup was not made: the server's disk does not have enough free space "
+            f"(0.40 GB free, about 1.20 GB needed). Free some space on it. {AGAIN}",
+        ),
+        (
+            {"why": "space"},
+            "The nightly backup was not made: the server's disk does not have enough free space. "
+            f"Free some space on it. {AGAIN}",
+        ),
+        (
+            {"why": "cap", "cap_gb": "10.0", "used_gb": "12.0"},
+            "The nightly backup was not made: the backups already take the 10.0 GB they are "
+            f"allowed. Raise that limit or remove old backups. {AGAIN}",
+        ),
+        (
+            {"why": "cap"},
+            "The nightly backup was not made: the backups already take the space they are "
+            f"allowed. Raise that limit or remove old backups. {AGAIN}",
+        ),
+        (
+            {"why": "write"},
+            "The nightly backup could not be written to the server's disk. "
+            f"Earlier backups are untouched. {AGAIN}",
+        ),
+        (
+            {"why": "source", "names": "junk.db, feed.env"},
+            "The nightly backup is incomplete: junk.db, feed.env could not be saved. "
+            f"Everything else was saved. {AGAIN[:-1]}; {LOOK}",
+        ),
+        (
+            {"why": "source"},
+            "The nightly backup is incomplete: some files could not be saved. "
+            f"Everything else was saved. {AGAIN[:-1]}; {LOOK}",
+        ),
+        (
+            {"why": "integrity", "names": "broken.db"},
+            "The nightly backup was made, but broken.db failed its safety check, so that copy may "
+            "be damaged. Earlier backups are kept. Have the server looked at soon.",
+        ),
+        (
+            {"why": "integrity"},
+            "The nightly backup was made, but a database failed its safety check, so that copy "
+            "may be damaged. Earlier backups are kept. Have the server looked at soon.",
+        ),
+        (
+            {"why": "offsite"},
+            "The nightly backup is safe on the server, but copying it offsite did not work. "
+            "It tries again with the next backup.",
+        ),
+        (
+            {"why": "settings"},
+            "The nightly backup was not made: its settings on the server cannot be used. "
+            "Have the backup settings fixed.",
+        ),
+        (
+            {"why": "other"},
+            f"The nightly backup could not be completed. Earlier backups are untouched. {AGAIN}",
+        ),
+        (
+            {"why": "a cause nobody wrote words for"},
+            f"The nightly backup could not be completed. Earlier backups are untouched. {AGAIN}",
+        ),
+        (
+            {},
+            f"The nightly backup could not be completed. Earlier backups are untouched. {AGAIN}",
+        ),
+    ],
+)
+def test_a_failed_backup_names_the_cause_and_the_next_step(facts, text):
+    failed = event("backup_failed", **facts)
+    assert compose([failed], T0 + timedelta(minutes=1)) == f"{BRAND}\n{text}"
+
+
+def test_a_figure_or_a_file_name_that_is_not_plain_is_left_out_not_quoted():
+    hostile = {
+        "figures": {"why": "space", "free_gb": "1e9", "need_gb": "12.3456"},
+        "negative": {"why": "space", "free_gb": "-4", "need_gb": "`x`"},
+        "cap": {"why": "cap", "cap_gb": "*10*"},
+        "markup": {"why": "source", "names": "junk.db`, [x](http://y)"},
+        "long": {"why": "source", "names": "a" * 61},
+        "many": {"why": "source", "names": ", ".join(f"f{n}.db" for n in range(11))},
+        "newline": {"why": "integrity", "names": "bad\nname.db"},
+    }
+    said = {
+        label: compose([event("backup_failed", **facts)], T0) for label, facts in hostile.items()
+    }
+    for label, text in said.items():
+        assert not set("*_`[]\x1b") & set(text), label
+        assert "http" not in text and "junk.db" not in text and "bad" not in text, label
+    assert "(" not in said["figures"] and "(" not in said["negative"]  # no figures, no bracket
+    assert "free space. Free some space" in said["figures"]
+    assert "the space they are allowed" in said["cap"]
+    assert "some files could not be saved" in said["markup"]
+    assert "some files could not be saved" in said["long"]
+    assert "some files could not be saved" in said["many"]
+    assert "a database failed" in said["newline"]
+
+
+def test_a_failed_backup_is_told_with_the_rest_of_its_run_after_the_install_facts():
+    run = "backup-20261027-163102"
+    found = [
+        event("waiting", T0, "w1", "run-w", tag="v0.3.4"),
+        event("backup_failed", T0, "b2", run, why="offsite"),
+        event("installed", T0, "i1", run, tag="v0.3.3", backup="yes"),
+        event("backup_failed", T0 + timedelta(seconds=1), "b1", run, why="source", names="junk.db"),
+    ]
+    lines = compose(found, T0 + timedelta(minutes=2)).splitlines()
+    assert lines[0] == BRAND
+    assert lines[1].startswith("v0.3.3 installed")
+    assert lines[2].startswith("The nightly backup is safe on the server")  # in the order recorded
+    assert lines[3].startswith("The nightly backup is incomplete: junk.db")
+    assert lines[4].startswith("v0.3.4 is ready")
+
+
+def test_no_backup_message_carries_a_status_code_a_tool_name_or_a_symbol():
+    found = [
+        event("backup_failed", event_id=f"b{n}", why=why, names="junk.db", free_gb="0.40",
+              need_gb="1.20", cap_gb="10.0")
+        for n, why in enumerate(
+            ("space", "cap", "write", "source", "integrity", "offsite", "settings", "other")
+        )
+    ]  # fmt: skip
+    text = compose(found, T0)
+    assert not re.search(r"\b[1-5]\d\d\b", text)
+    for word in (
+        "traceback", "exception", "http", "errno", "exit", "systemd", "json", "sqlite", "tar",
+        "rclone", "env", "status", "wal", "lock", "timer", "service",
+    ):  # fmt: skip
+        assert word not in text.lower(), word
+    assert all(ord(ch) < 0x2000 for ch in text)  # no emoji or symbols
+    assert "arm" not in re.findall(r"[a-z]+", text.lower())  # the platform's banned word
+
+
 # ---- told once, as one message ----------------------------------------------------------------
 
 
@@ -860,6 +1003,7 @@ def test_in_market_hours_only_a_failure_is_told_and_the_rest_waits_for_the_close
     [
         ("rolled_back", {"tag": "v0.3.3", "why": "health", "up": "yes"}, True),
         ("unit_refused", {"tag": "v0.3.3", "unit": "sudarshan-x.service"}, True),
+        ("backup_failed", {"why": "space", "free_gb": "0.40", "need_gb": "1.20"}, True),
         ("installed", {"tag": "v0.3.3", "backup": "yes"}, False),
         ("waiting", {"tag": "v0.3.3"}, False),
     ],

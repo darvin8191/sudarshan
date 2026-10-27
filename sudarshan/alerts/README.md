@@ -143,7 +143,8 @@ subscribes this service to orders; the updates start with the login.
 The owner is told, in one short message, what the server did with a release: **installed** (and
 that a backup was taken), **could not be installed and was rolled back** (with the cause in plain
 words, and whether the earlier version is running), a background service file the unit policy
-**refused**, and a release that is **waiting** for the market to close. Examples:
+**refused**, a release that is **waiting** for the market to close, and a **nightly backup that
+failed** or came out incomplete. Examples:
 
 ```
 सुदर्शन / SUDARSHAN
@@ -153,6 +154,11 @@ v0.3.3 installed at 18:52 IST. A backup was taken.
 ```
 सुदर्शन / SUDARSHAN
 Could not install v0.3.3 at 18:52 IST: the app did not come up healthy, so v0.3.2 is back. Nothing for you to do; the release will be looked at.
+```
+
+```
+सुदर्शन / SUDARSHAN
+The nightly backup was not made: the server's disk does not have enough free space (0.40 GB free, about 1.20 GB needed). Free some space on it. It tries again at its next scheduled time.
 ```
 
 The deploy tool runs as root and holds no Telegram or OpenAlgo secret, so it only **records** each
@@ -175,10 +181,10 @@ nightly backup job records) every 20 seconds and sends through the same path as 
   cause, not once per try (the event id names the release, the cause and whether the earlier
   version is running).
 - **Quiet while the market trades.** From 09:15 to 15:40 (a listed day's own window instead, on a
-  special session) only a failure is told: a release that could not be installed, or a service
-  file the safety check refused. A release that is ready, or installed, waits for the close and
-  goes out then, in one message, if it is still under 12 hours old. The phone is for fills and
-  rejections while the market runs.
+  special session) only a failure is told: a release that could not be installed, a service
+  file the safety check refused, or a backup that failed. A release that is ready, or installed,
+  waits for the close and goes out then, in one message, if it is still under 12 hours old. The
+  phone is for fills and rejections while the market runs.
 - **Paced like the order alerts.** A notice never jumps the queue for Telegram: at least 1.1
   seconds after the last message (the order alerts' own gap) and at most one message a minute, so
   a long pile goes out a minute apart. The slot is taken when the send starts, so a retry also
@@ -187,9 +193,13 @@ nightly backup job records) every 20 seconds and sends through the same path as 
   `notices.py`, wired where `service.py` builds the desk).
 - **Any time of day otherwise.** Notices do not depend on the alert window: a release is
   installed in the evening or at the weekend, so the owner's key is read when a notice is due.
-- **Words for a trader.** Only a release tag (`vA.B.C`) and a service file name from the deploy
-  tool's own pattern are ever repeated from a fact; nothing else in the file reaches the message,
-  and the Markdown characters Telegram would act on never do.
+- **Words for a trader.** Only a release tag (`vA.B.C`), a service file name from the deploy
+  tool's own pattern and, for a failed backup, a figure in gigabytes (at most two decimals) and
+  the names of up to ten files that could not be saved (letters, digits, `.`, `_` and `-`) are
+  ever repeated from a fact; nothing else in the file reaches the message, and the Markdown
+  characters Telegram would act on never do. A backup's cause is one of space, cap, write,
+  source, integrity, offsite, settings or other (`ops/backup.py`); any other word reads as
+  "could not be completed".
 
 `SUDARSHAN_ORDER_ALERTS=off` also turns these off (the service exits). `SUDARSHAN_NOTICE_SPOOLS`
 (below) names the files to read. The first run of the deploy tool that records notices also tells

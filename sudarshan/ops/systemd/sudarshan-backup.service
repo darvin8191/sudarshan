@@ -1,0 +1,67 @@
+# सुदर्शन / SUDARSHAN nightly backup (M18.11): one archive a day of OpenAlgo's databases (SQLite
+# online backups), SUDARSHAN's own databases and the sealed vault, the ring's databases,
+# /etc/sudarshan and OpenAlgo's .env, under /var/lib/sudarshan-backup/archive (mode 700).
+# Started by sudarshan-backup.timer (16:30 and 22:30 IST). The program decides for itself: it does
+# nothing from 08:30 to 16:00 on a trading day (nor in a listed day's own session), when an archive
+# under 8 hours old exists, or while the deploy tool is installing (it waits for the tool's lock),
+# so the deploy tool restarting this unit after an install is harmless.
+# Docs: sudarshan/README.md ("Nightly backups"). Optional settings: /etc/sudarshan/backup.env
+# (root:sudarshan 640): the size cap, the counts kept, and the offsite command, which does nothing
+# until it is set.
+# A failure is told to the owner on Telegram by sudarshan-alerts, from events.jsonl in the state
+# folder (the unit cannot write root's).
+# Type=exec, not oneshot: the deploy tool restarts every service it installs and waits for the
+# restart to return; a oneshot would hold it for the whole of a backup.
+
+[Unit]
+Description=SUDARSHAN nightly backup (local archive)
+After=network-online.target
+
+[Service]
+Type=exec
+User=sudarshan
+Group=sudarshan
+Slice=sudarshan.slice
+WorkingDirectory=/opt/sudarshan/apps/openalgo
+ExecStart=/opt/sudarshan/apps/openalgo/.venv/bin/python -m sudarshan.ops.backup
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+EnvironmentFile=-/etc/sudarshan/backup.env
+# The archive, the work folder, the lock, status.json and events.jsonl.
+StateDirectory=sudarshan-backup
+StateDirectoryMode=0700
+# A run is minutes. Stopped after 3 hours whatever it is waiting for (an upload that hangs).
+RuntimeMaxSec=10800
+TimeoutStopSec=30
+# Behind everything else on a server that also runs the market: it reads and compresses.
+Nice=19
+CPUWeight=10
+IOWeight=10
+MemoryMax=512M
+UMask=0077
+LimitCORE=0
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectProc=invisible
+ProtectSystem=strict
+ProtectHome=yes
+# SQLite opens a database it only reads with the right to make its -shm file beside it, so the
+# folders it reads are writable here: db/ (OpenAlgo's and the vault's) and the ring's state
+# folders in /var/lib. The program opens every source read-only and writes only to its own state.
+ReadWritePaths=-/opt/sudarshan/apps/openalgo/db -/var/lib
+ReadOnlyPaths=-/etc/sudarshan
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+RestrictNamespaces=yes
+# The network is for the offsite command, once the owner sets one.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+SystemCallArchitectures=native

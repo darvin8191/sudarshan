@@ -156,6 +156,24 @@ def test_record_writes_one_private_line_the_reader_reads(tmp_path):
     assert event.fact("tag") == "v0.3.3"
 
 
+def test_a_failed_backup_is_a_kind_the_reader_knows_and_has_its_own_file():
+    assert "backup_failed" in events.KINDS
+    assert events.BACKUP_SPOOL in events.DEFAULT_SPOOLS
+    assert events.DEPLOY_SPOOL in events.DEFAULT_SPOOLS
+    event = parse_line(
+        line(
+            kind="backup_failed", src="backup", id="backup-failed-20261027-space",
+            run="backup-20261027-163102", why="space", free_gb="0.40", need_gb="1.20",
+        )
+    )  # fmt: skip
+    assert (event.kind, event.src, event.run) == (
+        "backup_failed", "backup", "backup-20261027-163102",
+    )  # fmt: skip
+    assert (event.fact("why"), event.fact("free_gb"), event.fact("need_gb")) == (
+        "space", "0.40", "1.20",
+    )  # fmt: skip
+
+
 def test_record_does_not_write_an_id_twice(tmp_path):
     path = tmp_path / "events.jsonl"
     for _ in range(3):

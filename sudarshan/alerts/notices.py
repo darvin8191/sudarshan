@@ -75,11 +75,11 @@ NOTICES_PER_MINUTE = 1  # messages; the gap between two is outbox.MIN_GAP_S
 MINUTE_S = 60.0
 GIVE_WAY_S = 1.0  # LanePace: look again this soon when order alerts are waiting
 #: The kinds that are told at once, in market hours too. Everything else waits for the close.
-FAILURES = frozenset({"rolled_back", "unit_refused"})
+FAILURES = frozenset({"rolled_back", "unit_refused", "backup_failed"})
 MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 UNIT = re.compile(r"sudarshan-[a-z0-9-]+\.(?:service|timer)")
 #: The order the facts of one run are told in.
-KIND_ORDER = ("installed", "rolled_back", "unit_refused", "waiting")
+KIND_ORDER = ("installed", "rolled_back", "unit_refused", "backup_failed", "waiting")
 
 #: Why an install was undone, in the owner's words (the cause only; ``rolled_back`` adds the rest).
 ROLLBACK_CAUSES = {
@@ -88,6 +88,13 @@ ROLLBACK_CAUSES = {
     "settings": "a settings update did not finish",
 }
 ROLLBACK_OTHER = "the update stopped unexpectedly"
+
+#: The nightly backup (ops/backup.py) names the cause of a failed run in ``why``: the words for
+#: each are in ``_backup_failed``. A figure or a file name in the event that is not plain is left
+#: out of the sentence rather than quoted.
+BACKUP_AGAIN = "It tries again at its next scheduled time."
+_AMOUNT = re.compile(r"[0-9]{1,6}(?:\.[0-9]{1,2})?")
+_FILE_LIST = re.compile(r"[A-Za-z0-9._-]{1,60}(?:, [A-Za-z0-9._-]{1,60}){0,9}")
 
 
 def _release(value: str) -> str | None:
@@ -144,6 +151,58 @@ def _refused(events: list[Event]) -> list[str]:
     ]
 
 
+def _backup_failed(event: Event) -> list[str]:
+    """One line for one failed run of the nightly backup."""
+    why = event.fact("why")
+    free, need, cap = (
+        value if _AMOUNT.fullmatch(value) else ""
+        for value in (event.fact("free_gb"), event.fact("need_gb"), event.fact("cap_gb"))
+    )
+    names = event.fact("names")
+    names = names if _FILE_LIST.fullmatch(names) else ""
+    start = "The nightly backup was not made:"
+    if why == "space":
+        detail = f" ({free} GB free, about {need} GB needed)" if free and need else ""
+        text = (
+            f"{start} the server's disk does not have enough free space{detail}. "
+            "Free some space on it."
+        )
+    elif why == "cap":
+        room = f"the {cap} GB" if cap else "the space"
+        text = (
+            f"{start} the backups already take {room} they are allowed. "
+            "Raise that limit or remove old backups."
+        )
+    elif why == "write":
+        text = (
+            "The nightly backup could not be written to the server's disk. "
+            "Earlier backups are untouched."
+        )
+    elif why == "source":
+        return [
+            f"The nightly backup is incomplete: {names or 'some files'} could not be saved. "
+            "Everything else was saved. It tries again at its next scheduled time; "
+            "if it is incomplete again, have the server looked at."
+        ]
+    elif why == "integrity":
+        return [
+            f"The nightly backup was made, but {names or 'a database'} failed its safety check, "
+            "so that copy may be damaged. Earlier backups are kept. Have the server looked at soon."
+        ]
+    elif why == "offsite":
+        return [
+            "The nightly backup is safe on the server, but copying it offsite did not work. "
+            "It tries again with the next backup."
+        ]
+    elif why == "settings":
+        return [
+            f"{start} its settings on the server cannot be used. Have the backup settings fixed."
+        ]
+    else:
+        text = "The nightly backup could not be completed. Earlier backups are untouched."
+    return [f"{text} {BACKUP_AGAIN}"]
+
+
 def _waiting(event: Event, now: datetime) -> list[str]:
     tag = _release(event.fact("tag")) or "A new release"
     return [
@@ -160,6 +219,9 @@ def run_lines(events: list[Event], now: datetime) -> list[str]:
             continue
         if kind == "unit_refused":
             lines += _refused(of_kind)
+            continue
+        if kind == "backup_failed":
+            lines += [line for event in of_kind for line in _backup_failed(event)]
             continue
         make = {"installed": _installed, "rolled_back": _rolled_back, "waiting": _waiting}[kind]
         for event in of_kind:

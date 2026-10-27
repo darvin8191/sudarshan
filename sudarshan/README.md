@@ -114,24 +114,170 @@ release, so a new tool acts from the next run). The first install that brings th
 by the tool before them: it makes no ring copy, and a rollback of that install leaves the ring's
 databases as they are. Tests: `sudarshan/ops/tests/test_deploy_ring_databases.py`.
 
+## Nightly backups (M18.11)
+
+`sudarshan-backup.timer` starts `sudarshan-backup.service` at 16:30 and 22:30 IST, every day. The
+program (`python -m sudarshan.ops.backup`; code in `ops/backup.py`, the keeping rules in
+`ops/retention.py`) decides for itself whether anything is to be done. It makes one archive a night
+of what the server cannot rebuild:
+
+| In the archive | What it is |
+| --- | --- |
+| `db/*.db` | OpenAlgo's databases (`openalgo.db`, `sandbox.db`, `logs.db`, ...) |
+| `db/sudarshan-*/` | SUDARSHAN's own folders under `db/`, the sealed owner vault included, with their modes kept (folder 700, files 600) |
+| `ring/sudarshan-*/*.db` | the ring's databases from `/var/lib` (alerts, market state, later portfolio and screener) |
+| `etc/sudarshan/` | the machine keys, the settings and the NSE day files |
+| `app/openalgo.env` | OpenAlgo's `.env`: without its keys a restored `openalgo.db` and the vault cannot be read |
+| `MANIFEST.json` | written last: every file with its size and SHA-256, the release installed, anything that could not be saved |
+
+Left out on purpose: `historify.duckdb` (market history, fetched again; DuckDB has no online
+backup), nginx and the certificates (root's, issued again in minutes), and links, which are never
+followed (a link could lead into another system's files). The archive holds the keys that protect
+it (the `.env` is in it), so keep it as private as the `.env` itself and encrypt it before it
+leaves the server (the offsite step below does).
+
+**Never left out quietly.** Inside the places the job takes whole (`/etc/sudarshan`, the sealed
+folders under `db/`, the `.env`), and for a database, what it does not take is named, not skipped:
+a name with anything but letters, digits, `.`, `_` and `-` (or over 128 characters), a file over
+32 MB (the `.env`: over 1 MB), more than 64 MB of files in `/etc/sudarshan` in all, folders nested
+more than four deep (or any folder inside a sealed one). The archive is then called partial and
+says so in its record, and the owner is told (cause `source`), so a key file with a stray space in
+its name is found on the first night, not on the day it is needed. `--check` lists them under "not
+taken". An editor's leftover (`feed.env~`) is such a file: remove it, or the backup stays partial.
+
+**Copied safely.** A database is copied with SQLite's own online backup, from a read-only
+connection (the source is never written), into a private work folder, checked with SQLite's
+quick check and only then packed. A plain copy of a live file can be caught half written and loses
+the rows still in the write-ahead log (a test shows that). Any other file is copied to the work
+folder first and packed from there, so a file that changes while it is read cannot damage the
+archive. The archive is written under a temporary name, read back against its manifest and only
+then renamed into place: a stop or a full disk leaves nothing that looks like an archive.
+
+**When it runs, and when it does not:**
+
+- Never from 08:30 to 16:00 on a trading day, nor in a listed special day's own session (the hours
+  the deploy tool installs outside of). A run the timer or a boot starts earlier stops quietly; one
+  still going when the market opens cleans up and leaves it for the next time.
+- Once a night: a complete archive less than 8 hours old ends a run at once, so the 22:30 timer
+  is a second chance after a failure and nothing more, and the restart the deploy tool gives the
+  service after an install costs nothing. A partial archive does not count as a night done.
+- Not with an install. The deploy tool holds `/var/lib/sudarshan/deploy.lock` for the whole of an
+  install; the job takes the same lock shared for as long as it copies, waits up to 20 minutes for
+  an install to end, and steps aside after that. A migration therefore never meets an open copy
+  of the database it is changing, and an install that finds a backup running waits for the next
+  timer tick (10 minutes) with the tool's usual "another deploy is running" line.
+- Never twice at once (its own lock). A stop by the system (a deploy restarting the unit) cleans up
+  and is not a failure.
+
+**Where the archives are, and who owns them.** In the unit's own state folder,
+`/var/lib/sudarshan-backup/archive/` (folder 700, files 600, owner `sudarshan`), as
+`sudarshan-backup-YYYYMMDD-HHMMSS.tar.gz` (`-partial` before the extension when something could
+not be saved). Not under `/opt/sudarshan/backups`: the deploy tool keeps the newest 10 there and
+removes the rest. **Not root-owned.** The deploy tool's unit policy refuses any unit that runs as
+root, on purpose (nothing in the ring may be able to ask root for anything), so the job runs as
+`sudarshan`. That keeps the archives from every other user on the server but not from a process
+running as `sudarshan`: OpenAlgo and the ring do, and a compromise of the app could delete them.
+The protection against that is the offsite copy; a root-side step in the deploy tool that moves
+each night's archive into a root-owned folder is possible later and is the owner's decision.
+
+**Keeping them.** 30 daily and 12 monthly archives: the newest of each of the 30 most recent
+nights that have one, and the newest of each of the 12 most recent months, so a month is still
+represented a year after its nights are gone. A night is represented by its newest *complete*
+archive. The newest complete archive is never removed, whatever else is true: a run of partial
+archives cannot push the last good one out. Then a size cap (10 GB for all of them):
+
+- before anything is written, what is outside the counts goes, and then the oldest nights, never a
+  month's archive, never the three newest and never the newest complete one, until the new
+  archive (estimated at 60% of the size of what is saved) fits. If it cannot fit, nothing more is
+  removed, nothing is written and the owner is told (cause `cap`);
+- then the disk is checked: room for that estimate, for the largest database staged beside the
+  archive, and 2 GB left over. If not, nothing is written and the owner is told (cause `space`);
+- after the write, the real size is held to the cap too; an archive bigger than its estimate that
+  breaks the cap is kept and the owner is told.
+
+**When something goes wrong,** the owner is told on Telegram once a day per cause (the notice
+path above; a backup failure is told even while the market trades), in words like "The nightly
+backup is incomplete: junk.db could not be saved. Everything else was saved. It tries again at
+its next scheduled time; if it is incomplete again, have the server looked at." The message names
+up to ten files, all or none (a longer list says "some files" and the archive's record has every
+one). The causes: `source` (a file could not be copied, or was not taken for the reasons above: a
+partial archive is made without it; a database that fails SQLite's check is kept, called out and
+also makes the archive partial, cause `integrity`),
+`space`, `cap`, `write` (the disk refused the archive or it did not read back whole), `offsite`
+(the offsite command failed; the archive is safe on the server) and `settings` (a setting in
+`backup.env` cannot be used: the job exits with status 2 and changes nothing). The job runs as
+`sudarshan` and cannot write root's notice file, so it records in
+`/var/lib/sudarshan-backup/events.jsonl`; `sudarshan-alerts` reads both files. `status.json`
+beside it says how the last run that did something went.
+
+**Settings** (optional, `/etc/sudarshan/backup.env`, owner `root`, group `sudarshan`, mode 640; a
+value that cannot be used is refused by name and the owner is told):
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `SUDARSHAN_BACKUP_KEEP_DAILY` | 30 | nights kept (1 to 366) |
+| `SUDARSHAN_BACKUP_KEEP_MONTHLY` | 12 | months kept (0 to 120) |
+| `SUDARSHAN_BACKUP_MAX_GB` | 10 | size cap for all archives (0.01 and up) |
+| `SUDARSHAN_BACKUP_MIN_FREE_GB` | 2 | free space to leave beyond the archive (0 and up) |
+| `SUDARSHAN_BACKUP_MIN_GAP_HOURS` | 8 | a complete archive newer than this ends a run (0 to 72) |
+| `SUDARSHAN_BACKUP_DEPLOY_WAIT_MIN` | 20 | how long to wait for an install to end (0 to 600) |
+| `SUDARSHAN_BACKUP_OFFSITE_CMD` | empty | the offsite command (below); empty does nothing |
+| `SUDARSHAN_BACKUP_OFFSITE_TIMEOUT_MIN` | 60 | the offsite command is stopped after this (1 to 720) |
+
+**Offsite (needs the owner's keys; does nothing until set).** The plan is `rclone` to OCI Object
+Storage through an rclone `crypt` remote, so that only encrypted files leave the server. The hook
+is `SUDARSHAN_BACKUP_OFFSITE_CMD`: a command line, run without a shell after each good archive
+with `{archive}` (the file's full path), `{name}` and `{dir}` (the folder of archives) replaced in
+it, and it must name `{archive}` or `{dir}`. It runs as `sudarshan` with nothing from the job's
+environment but `PATH`, `HOME` (the state folder) and `LANG`, in the state folder, after the
+deploy lock is let go; its output goes to `offsite.log` there (mode 600) and a failure is told to
+the owner. Two shapes: `rclone copyto {archive} remote:bucket/{name}` sends that file only;
+`rclone copy --immutable {dir} remote:bucket` sends whatever is not there yet, so an upload that
+failed or was stopped is made up on the next night. Not exercised against a real remote: the
+keys do not exist yet.
+
+**Looking at them.** `python -m sudarshan.ops.backup --check` says what a run would do now and
+changes nothing. `--verify FILE` reads an archive back against the record it carries (0 sound, 1
+something wrong, 2 not an archive) and says whether it is complete. `--force` makes an archive
+although a recent one exists.
+
+**Restoring** is a manual step, done with care and not by a rollback (a rollback uses the deploy
+tool's own backup, and never puts the vault back):
+
+1. `--verify` the archive, then unpack it into an empty private folder, not over live files.
+2. Stop SUDARSHAN's services that use the files (never TRINETRA's).
+3. Put each file back where its name says: `db/...` into OpenAlgo's `db/`, `ring/<folder>/<name>`
+   into `/var/lib/<folder>/`, `etc/sudarshan/...` into `/etc/sudarshan/`, `app/openalgo.env` as
+   OpenAlgo's `.env`; owner and modes as in the archive; remove the old `-wal` and `-shm` files
+   beside each restored database first.
+4. Restore the vault and `openalgo.env` of the same archive together (the vault's key comes from
+   the `.env`), start the services and look at `/health`.
+
+Tests: `sudarshan/ops/tests/test_backup_retention.py`, `test_backup_run.py`,
+`test_backup_policy.py`, `test_backup_command.py` and `test_backup_unit.py`, with the notice
+wording in `sudarshan/alerts/tests/test_alerts_notices.py`.
+
 ## Server notices on Telegram (M18.x)
 
-After an install, a rollback, a service file the unit policy refused, or a release that waits for
-the market to close, the owner gets one short message on Telegram in trader language (examples in
-`sudarshan/alerts/README.md`). The deploy tool runs as root, so it holds no Telegram or OpenAlgo
-secret and cannot be made to send anything:
+After an install, a rollback, a service file the unit policy refused, a release that waits for
+the market to close, or a nightly backup that failed, the owner gets one short message on Telegram
+in trader language (examples in `sudarshan/alerts/README.md`). The deploy tool runs as root, so it
+holds no Telegram or OpenAlgo secret and cannot be made to send anything:
 
 - it only **records** the fact, one JSON line, in `/var/lib/sudarshan/events.jsonl` (mode 644, the
   folder made traversable; `ops/events.py` has the format and `ops/files.py` the safe reader);
   `sudarshan-alerts` reads it, words it, and sends it once per event id (`alerts/notices.py`);
+- the nightly backup runs as `sudarshan` and cannot write root's file, so it records its failures
+  the same way in `/var/lib/sudarshan-backup/events.jsonl` (`ops/events.py` `record()`); both
+  files are read;
 - recording is best effort, in its own subshell with its own error handling: a missing `jq`, a full
   disk or an unwritable folder costs the notice, never an install or a rollback; the file keeps its
   newest 200 lines; `--check` records nothing;
 - a release that fails at every timer run is recorded once per release and cause; a release that
   waits is recorded once; the facts of one run share a run id and are told in one message;
 - the owner's phone stays quiet while the market trades: from 09:15 to 15:40 only a failure
-  (a rollback, a refused service file) is told, the rest goes out after the close, and no more than
-  one message a minute ever goes out;
+  (a rollback, a refused service file, a failed backup) is told, the rest goes out after the close,
+  and no more than one message a minute ever goes out;
 - the tool of the release before this one made no record, so the first run of a tool that records
   tells the install it finds (once, if the tag file is under 12 hours old, at the time it
   happened). The tool that does the install acts from the *next* run (self-update), so a release's
