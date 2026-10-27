@@ -5,9 +5,9 @@ Trading days come from auto-login's calendar (sudarshan/autologin/schedule.py): 
 Muhurat session) is open; both files are read again when they change.
 
 A line of the extra-days file may give that day's own window after the date: the exchange's
-session from its pre-open to its F&O close, as the circular gives it::
+session from its pre-open to its F&O close, as its circulars give it::
 
-    2026-11-08 14:05-15:40  # Muhurat, NSE circular 149/2026 (F&O to 15:40)
+    2026-11-08 14:05-15:40  # Muhurat, NSE circulars 149/2026 (cash) and 142/2026 (F&O to 15:40)
 
 The alerts keep their usual margins around that session, as around 09:00-15:40 on any day (15
 minutes before, 20 after: 13:50-16:00 here), so an update that follows the close, such as the

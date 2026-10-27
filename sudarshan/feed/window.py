@@ -14,7 +14,7 @@ that follow the close still arrive. The stall watchdog runs only in continuous t
 
 A special session's line gives its own window, from the start of its pre-open to its F&O close::
 
-    2026-11-08 14:05-15:40  # Muhurat, NSE circular 149/2026 (F&O to 15:40)
+    2026-11-08 14:05-15:40  # Muhurat, NSE circulars 149/2026 (cash) and 142/2026 (F&O to 15:40)
 
 - On a weekend or a holiday the usual day is moved onto that window, margins and all: the feed
   holds 14:03-15:50 and the watchdog runs 14:20-15:40 (15 minutes in, the pre-open's length).

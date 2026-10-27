@@ -423,7 +423,7 @@ def test_an_unusable_alert_record_does_not_stop_the_alerts(settings_for, fast, t
 
 def test_a_muhurat_session_uses_its_own_window(settings_for, fast, tmp_path):
     async def scenario():
-        line = "2026-11-08 14:05-15:40  # Muhurat, NSE circular 149/2026 (F&O to 15:40)\n"
+        line = "2026-11-08 14:05-15:40  # Muhurat, NSE circulars 149/2026 (cash) and 142/2026 (F&O to 15:40)\n"
         (tmp_path / "nse_extra_trading_days.txt").write_text(line)
         async with FakeProxy() as proxy, FakeOpenAlgo() as notify:
             clock = Clock(ist(2026, 11, 8, 10, 0))  # that Sunday's usual hours: closed

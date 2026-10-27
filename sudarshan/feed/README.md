@@ -36,12 +36,13 @@ lines. A missing file means only weekends count as closed (logged, and shown in 
 `/etc/sudarshan/nse_extra_trading_days.txt` (optional; auto-login, the alerts and the deploy tool
 read it too): a day the exchange opens although it is a weekend or a holiday, such as a Muhurat
 session. Same format, the date first on its line, then the session's own window from the
-exchange's circular: from the start of its pre-open to its F&O close. Give the window whenever the
-circular states one. For the Muhurat session on Sunday 8 Nov 2026 (NSE circular 149/2026: pre-open
-from 14:05, continuous trading from 14:20, equity derivatives to 15:40):
+exchange's circulars: from the start of its pre-open to its F&O close. Give the window whenever
+they state one. For the Muhurat session on Sunday 8 Nov 2026 (NSE circular 149/2026 for the cash
+market: pre-open from 14:05, continuous trading from 14:20; circular 142/2026 for equity
+derivatives: to 15:40):
 
 ```
-2026-11-08 14:05-15:40  # Muhurat, NSE circular 149/2026 (F&O to 15:40)
+2026-11-08 14:05-15:40  # Muhurat, NSE circulars 149/2026 (cash) and 142/2026 (F&O to 15:40)
 ```
 
 That day the feed holds its socket from 14:03 to 15:50 (the usual margins, below) and the stall

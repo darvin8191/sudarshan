@@ -9,10 +9,10 @@ The two calendar files are read here the way the deploy tool's ``listed()`` read
 reader on the server agrees on every byte: a line ends at a newline only, a byte-order mark may
 start it, words are separated by ASCII spaces, tabs, \\v, \\f and \\r, ``#`` starts a comment, a
 date is YYYY-MM-DD in ASCII digits, and a stray byte spoils only its own line. A line of the
-extra-days file may give the day's own window after the date, for a special session (the NSE
-circular gives the times; the window runs from the start of the pre-open to the F&O close)::
+extra-days file may give the day's own window after the date, for a special session (NSE's
+circulars give the times; the window runs from the start of the pre-open to the F&O close)::
 
-    2026-11-08 14:05-15:40  # Muhurat, NSE circular 149/2026 (F&O to 15:40)
+    2026-11-08 14:05-15:40  # Muhurat, NSE circulars 149/2026 (cash) and 142/2026 (F&O to 15:40)
 """
 
 from __future__ import annotations

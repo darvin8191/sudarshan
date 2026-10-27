@@ -1,8 +1,9 @@
 """The feed's trading days: auto-login's calendar, extra trading days and a day's own window.
 
-Sunday 8 Nov 2026 is NSE's Muhurat session (circular 149/2026: pre-open 14:05, continuous trading
-from 14:20, equity derivatives to 15:40). Auto-login and the alerts read the same two files; their
-own tests (test_autologin_schedule.py, test_alerts_window.py) pin how they read them.
+Sunday 8 Nov 2026 is NSE's Muhurat session (circulars 149/2026 and 142/2026: pre-open 14:05,
+continuous trading from 14:20, equity derivatives to 15:40). Auto-login and the alerts read the
+same two files; their own tests (test_autologin_schedule.py, test_alerts_window.py) pin how they
+read them.
 """
 
 from __future__ import annotations
@@ -25,7 +26,9 @@ from sudarshan.feed.protocol import pb2
 from sudarshan.feed.service import FeedService
 from sudarshan.feed.window import MarketWindow, iso
 
-MUHURAT = "2026-11-08 14:05-15:40  # Muhurat, NSE circular 149/2026 (F&O to 15:40)\n"
+MUHURAT = (
+    "2026-11-08 14:05-15:40  # Muhurat, NSE circulars 149/2026 (cash) and 142/2026 (F&O to 15:40)\n"
+)
 BEFORE, OPEN, AFTER = "before the market window", "market window", "after the market window"
 OWN = ": extra trading day, own window 14:05-15:40, feed 14:03-15:50"
 USUAL = ": extra trading day, usual hours 08:58-15:50, watchdog after the first trade"

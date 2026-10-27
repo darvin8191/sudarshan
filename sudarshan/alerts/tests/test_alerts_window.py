@@ -15,7 +15,9 @@ from sudarshan.autologin.schedule import TradingCalendar, parse_window
 
 REPO = Path(__file__).resolve().parents[3]
 DEPLOY_TOOL = REPO / "sudarshan" / "ops" / "deploy" / "sudarshan-deploy"
-MUHURAT = "2026-11-08 14:05-15:40  # Muhurat, NSE circular 149/2026 (F&O to 15:40)\n"
+MUHURAT = (
+    "2026-11-08 14:05-15:40  # Muhurat, NSE circulars 149/2026 (cash) and 142/2026 (F&O to 15:40)\n"
+)
 
 
 def _window(tmp_path, extra: str) -> AlertWindow:

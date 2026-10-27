@@ -1,8 +1,8 @@
 """Order alerts on a special session's day: the usual margins around its own window, so the
 exchange's cancellations after the close are told, and the order book read after any pause.
 
-Sunday 8 Nov 2026 is NSE's Muhurat session (circular 149/2026: pre-open 14:05, equity derivatives
-to 15:40). The alerts keep 08:45-16:00's margins around it: 13:50 to 16:00.
+Sunday 8 Nov 2026 is NSE's Muhurat session (circulars 149/2026 and 142/2026: pre-open 14:05,
+equity derivatives to 15:40). The alerts keep 08:45-16:00's margins around it: 13:50 to 16:00.
 """
 
 from __future__ import annotations
@@ -17,7 +17,9 @@ from sudarshan.alerts import service
 from sudarshan.alerts.owner import Owner
 from sudarshan.alerts.service import AlertService
 
-MUHURAT = "2026-11-08 14:05-15:40  # Muhurat, NSE circular 149/2026 (F&O to 15:40)\n"
+MUHURAT = (
+    "2026-11-08 14:05-15:40  # Muhurat, NSE circulars 149/2026 (cash) and 142/2026 (F&O to 15:40)\n"
+)
 NOTE = " (found after a pause in order alerts)"
 CANCELLED = "Cancelled: BUY 65 NIFTY 21 OCT 25900 CE, none filled (MIS, NFO)"
 

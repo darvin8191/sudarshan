@@ -105,12 +105,12 @@ are closed, a date in `/etc/sudarshan/nse_extra_trading_days.txt` is open. Both 
 again when they change. Outside the window the process stays up, disconnected, and connects again
 at the next opening. The MCX evening session is not covered.
 
-A special session gets its own window after the date: the exchange's session as its circular
-gives it, from the start of the pre-open to the F&O close. For the Muhurat session on Sunday
-8 Nov 2026 (NSE circular 149/2026) the line is:
+A special session gets its own window after the date: the exchange's session as its circulars
+give it, from the start of the pre-open to the F&O close. For the Muhurat session on Sunday
+8 Nov 2026 (NSE circulars 149/2026 and 142/2026) the line is:
 
 ```
-2026-11-08 14:05-15:40  # Muhurat, NSE circular 149/2026 (F&O to 15:40)
+2026-11-08 14:05-15:40  # Muhurat, NSE circulars 149/2026 (cash) and 142/2026 (F&O to 15:40)
 ```
 
 The alerts keep the margins 08:45-16:00 keeps around an ordinary session (09:00-15:40): 15 minutes
