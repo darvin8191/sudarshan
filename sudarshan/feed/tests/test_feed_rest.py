@@ -199,10 +199,12 @@ def test_bulk_waits_for_the_end_of_market_hours(tmp_path, extra, at, ends):
 # ---- the running feed ---------------------------------------------------------------------------
 @contextlib.asynccontextmanager
 async def running(feed_env, now: list[float] | None = None, token: str = ff.TOKEN, **env):
-    """The feed and its governor against the fake Upstox, an HTTP client on the feed's port."""
+    """The feed and its governor (switched on: off by default) against the fake Upstox, an HTTP
+    client on the feed's port."""
     now = now or [EVENING]
     async with ff.FakeUpstox(token=token) as fake:
-        svc = FeedService(Settings.from_env(feed_env(fake, **env)), clock=lambda: now[0])
+        settings = Settings.from_env(feed_env(fake, **{"SUDARSHAN_FEED_REST": "on"} | env))
+        svc = FeedService(settings, clock=lambda: now[0])
         run = asyncio.create_task(svc.run())
         try:
             await ff.wait_until(lambda: svc._client is not None)
@@ -851,7 +853,8 @@ def test_a_save_does_its_disk_work_off_the_event_loop(feed_env, monkeypatch):
 
 
 def test_switched_off_it_says_so_and_a_stopping_feed_answers_every_waiting_call(feed_env):
-    assert Settings.from_env({}).rest is True  # on unless the owner turns it off
+    assert Settings.from_env({}).rest is False  # a feature flag: off until the owner turns it on
+    assert Settings.from_env({"SUDARSHAN_FEED_REST": "on"}).rest is True
 
     async def scenario():
         async with running(feed_env, SUDARSHAN_FEED_REST="off") as (svc, fake, http):
@@ -1089,7 +1092,7 @@ def test_a_warm_start_in_flight_adds_no_tick_lag(feed_env, tmp_path):
                 return 200, CANDLES, {}
 
             fake.rest_answer = candles
-            run_env = env | feed_env(fake) | {
+            run_env = env | feed_env(fake, SUDARSHAN_FEED_REST="on") | {
                 "SUDARSHAN_FEED_HTTP_PORT": str(http_port),
                 "SUDARSHAN_FEED_ZMQ_PORT": str(zmq_port),
                 "SUDARSHAN_NSE_HOLIDAYS_FILE": str(holidays),

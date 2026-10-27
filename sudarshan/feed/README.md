@@ -141,7 +141,8 @@ quotes for a first snapshot, the option chain) asks the feed, which holds the An
 `GET http://127.0.0.1:5580/upstox` followed by Upstox's own path and query. The feed adds the
 token, keeps SUDARSHAN inside one share of Upstox's limits, and hands back Upstox's status and
 body as bytes, never parsed (cross-design rules G1-G8; the code is `rest.py`). Nobody else in
-SUDARSHAN calls these APIs with the Analytics Token.
+SUDARSHAN calls these APIs with the Analytics Token. It is a feature flag and ships **off**: until
+the owner sets `SUDARSHAN_FEED_REST=on` (G7), every request below is answered 503 `off`.
 
 ```bash
 curl -s -H 'X-Sudarshan-Client: sudarshan-portfolio' -H 'X-Sudarshan-Priority: interactive' \
@@ -212,7 +213,7 @@ hour ever holds more.
 | 503 | `busy` | the last of 64 waiting, or no turn within 30 s: "SUDARSHAN's share of Upstox requests is in use; try again in a minute." | 60, or when a window opens |
 | 503 | `rate-limited` | the API is stopped after a 429 for longer than the 30 s a request may wait | when it starts again |
 | 503 | `token` | Upstox refused the token (until the file changes), or there is no usable token | 60 |
-| 503 | `restarting`, `off` | the feed is stopping; the governor is switched off (`SUDARSHAN_FEED_REST=off`) | 60 |
+| 503 | `restarting`, `off` | the feed is stopping; the governor is switched off (the default, until `SUDARSHAN_FEED_REST=on`) | 60 |
 | 502 | `too-large` | Upstox's answer is over 8 MiB | - |
 | 502, 504 | `no-answer` | Upstox could not be reached, or did not answer within 30 s | - |
 | 403 | `client`, `not-allowed` | an unknown `X-Sudarshan-Client`; a path or method outside the list | - |
@@ -343,7 +344,7 @@ live service holds 5581):
 | `SUDARSHAN_FEED_RECORD` | `1` |
 | `SUDARSHAN_FEED_RECORD_MAX_MB` / `SUDARSHAN_FEED_RECORD_KEEP_DAYS` | `512` / `10` |
 | `SUDARSHAN_FEED_LOG_LEVEL` | `INFO` |
-| `SUDARSHAN_FEED_REST` | `on` (`off` answers every `/upstox/` request with 503 `off`) |
+| `SUDARSHAN_FEED_REST` | `off`: every `/upstox/` request is answered 503 `off`; the owner sets `on` in `/etc/sudarshan/feed.env` at G7, when the ring's REST callers start |
 | `SUDARSHAN_UPSTOX_API_BASE` | `https://api.upstox.com` (tests point it at a local fake; https is required otherwise) |
 
 Put overrides in `/etc/sudarshan/feed.env` (root:sudarshan 640); the unit reads it if present.
