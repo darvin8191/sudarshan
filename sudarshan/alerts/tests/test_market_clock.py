@@ -152,7 +152,9 @@ def auction_market(now: int, **more) -> Market:
         ("15:31:10", "15:31:10", "15:31:10", "connected", clock.AUCTION_PRINT),
         ("15:15:00", "15:15:01", "15:15:01", "connected", clock.AUCTION_PRINT),  # from 15:15
         ("15:14:59", "15:15:01", "15:15:01", "connected", clock.OUTSIDE_HOURS),  # continuous
-        ("15:49:59", "15:49:59", "15:49:59", "connected", clock.AUCTION_PRINT),
+        ("15:35:00", "15:35:05", "15:35:05", "connected", clock.AUCTION_PRINT),  # X6c: the edges
+        ("15:35:01", "15:35:01", "15:35:01", "connected", clock.OUTSIDE_HOURS),
+        ("15:35:00", "15:35:06", "15:35:06", "connected", clock.OUTSIDE_HOURS),  # arrived late
         ("15:50:00", "15:50:00", "15:50:00", "connected", clock.OUTSIDE_HOURS),  # post-close
         ("15:31:10", "15:31:10", "15:31:10", "backoff", clock.FEED_DOWN),
         ("15:31:10", "15:31:10", "15:31:16", "connected", clock.STALE),
@@ -175,6 +177,25 @@ def test_a_stock_that_closes_by_auction_is_gated_on_its_own_session():
                       clock_ms("09:15:01"), trade=True) == clock.NOT_OPEN_YET  # fmt: skip
     plain = Market(20261021, AUCTION_DAY, 20261019, feed=Feed("connected", True, now))
     assert clock.auction(plain, "NSE_INDEX", now, now, now) == clock.OUTSIDE_HOURS
+
+
+@pytest.mark.parametrize(
+    ("now", "feed", "printed", "check"),
+    [
+        ("15:14:59", "connected", False, clock.OK),
+        ("15:15:00", "connected", False, clock.CLOSING_AUCTION),  # never "Real-time" or "Stale"
+        ("15:35:05", "connected", False, clock.CLOSING_AUCTION),
+        ("15:35:06", "connected", False, clock.OUTSIDE_HOURS),
+        ("15:31:30", "connected", True, clock.OUTSIDE_HOURS),  # the print has come
+        ("15:20:00", "backoff", False, clock.FEED_DOWN),  # the print may be missed: say so
+    ],
+)
+def test_a_cas_key_reads_closing_auction_until_its_print(now, feed, printed, check):
+    moment = clock_ms(now)
+    market = auction_market(moment, feed=Feed(feed, feed == "connected", moment),
+                            status={"NSE_EQ": "NORMAL_OPEN"})  # fmt: skip
+    assert clock.status(market, "NSE_EQ+auction", moment, printed=printed) == check
+    assert clock.status(market, "NSE_EQ", clock_ms("15:20:00")) in (clock.OK, clock.FEED_DOWN)
 
 
 def clock_ms(text: str) -> int:

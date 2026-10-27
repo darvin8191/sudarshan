@@ -16,10 +16,13 @@ Which values an alert judges: one on the last price judges a new trade only (its
 quantity changed), at the trade's own time; one on the bid or ask judges every tick that carries
 it, at the tick's arrival (``ts_recv``). A tick is judged only when the gate lets it through.
 
-A stock that closes by auction (``Market.auction``) is judged on its own session, which ends
-before the auction. The auction's print is judged once, as itself (clock.auction): by price-level
-and % move alerts that are not judged at candle close, and their fire says it was the closing
-auction. A day high or low, a VWAP and a candle close take continuous trades only.
+A stock that closes by auction (``Market.auction``, a CAS key) is judged on its own session,
+which ends before the auction; after it its quotes are never judged. The auction's print
+(clock.auction) is judged once a day, as itself, by price-level and % move alerts, and their fire
+says it was the closing auction. It is the official close, so it belongs to the day's last candle
+on the cash session's grid (the 15:15-15:30 candle, the day): an alert at candle close judges
+that candle when the print arrives, or, with no print, when the print's time is over
+(cross-design X6c). A day high or low and a VWAP take continuous trades only.
 """
 
 from __future__ import annotations
@@ -39,17 +42,19 @@ from sudarshan.alerts.market.clock import (
     within,
 )
 from sudarshan.alerts.market.engine import (
+    CLOSE_CHECK_MS,
     Obs,
     Outcome,
     Reason,
     State,
     carries,
+    close,
     new_session,
     step,
     timer,
 )
 from sudarshan.alerts.market.grain import paise
-from sudarshan.alerts.market.sessions import AUCTION, POST_CLOSE_AFTER_MIN, Session, day_key
+from sudarshan.alerts.market.sessions import AUCTION, day_key
 from sudarshan.alerts.market.spec import AT_CLOSE, BREAK, CROSS, PER_CANDLE, Alert
 from sudarshan.autologin.schedule import IST
 
@@ -97,6 +102,8 @@ class Book:
         self._stopped: set[int] = set()
         #: Paused alerts with an end date or a contract's expiry: ``on_clock`` stops them at it.
         self._paused: dict[int, Alert] = {}
+        #: CAS key -> the day (YYYYMMDD) its closing auction's print was judged: once a day.
+        self._printed: dict[str, int] = {}
 
     # ---- the alerts ------------------------------------------------------------------------
     def put(self, alert: Alert, state: State | None = None) -> None:
@@ -132,6 +139,10 @@ class Book:
     def waiting(self, alert_id: int) -> str | None:
         """What the alert waits for from the feed ("Waiting for the previous close"), if any."""
         return self._waiting.get(alert_id)
+
+    def printed(self, key: str, today: int) -> bool:
+        """Whether today's closing auction print of ``key`` has come (the page's words)."""
+        return self._printed.get(key) == today
 
     def alerts(self) -> list[Alert]:
         """The Active alerts, by id."""
@@ -172,10 +183,15 @@ class Book:
             identity = (ltt, ltp, frame.get("ltq"))
             if identity != self._trades.get(key):
                 trade = gate(market, cls, ltt, recv, now, trade=True)
-                if trade != OK and cls is not segment:  # the closing auction's print?
+                if trade != OK and cls != segment:  # the closing auction's print?
                     trade = auction(market, segment, ltt, recv, now)
                 if trade == OK or trade == AUCTION_PRINT:
                     self._trades[key] = identity
+                if trade == AUCTION_PRINT:
+                    if self._printed.get(key) == market.today:
+                        trade = None  # the day's print is judged once
+                    else:
+                        self._printed[key] = market.today
         outcomes: list[Outcome] = []
         judged = bad = False
         states, today = self._states, market.today
@@ -183,14 +199,11 @@ class Book:
         for alert in alerts:
             cond = alert.cond
             source = cond.source
+            printed = False
             if source == "ltp":
-                if trade != OK and (
-                    trade != AUCTION_PRINT
-                    or alert.kind not in AUCTION_KINDS
-                    or alert.frequency == AT_CLOSE
-                ):
+                if trade != OK and (trade != AUCTION_PRINT or alert.kind not in AUCTION_KINDS):
                     continue
-                raw, at = ltp, ltt
+                raw, at, printed = ltp, ltt, trade == AUCTION_PRINT
             else:
                 raw = frame.get(source)  # "bid" or "ask"
                 if raw is None:
@@ -217,26 +230,31 @@ class Book:
                 if got.derived is not old.derived:
                     start_state = old._replace(derived=got.derived)
             if alert.frequency in CANDLED:
-                session = market.sessions[cls]
-                if trade == AUCTION_PRINT and source == "ltp":
-                    k, start, end = _after(session, alert.candle_min)
-                else:
-                    k, start, end = candle(session, alert.candle_min, at)
-                obs = Obs(value, at, today, up, down, k, start, end)
+                grid = market.sessions[segment]  # the cash grid, a CAS key's too
+                k, start, end = candle(grid, alert.candle_min, grid.end - 1 if printed else at)
+                due = None
+                if cls != segment and end == grid.end and alert.kind in AUCTION_KINDS:
+                    due = market.sessions[cls].auction_until + CLOSE_CHECK_MS  # waits for it
+                obs = Obs(value, at, today, up, down, k, start, end, due)
             else:
                 obs = Obs(value, at, today, up, down)
             out = step(alert, start_state, obs, now, market.previous, pauses)
             if got is not None:
                 out = _context(alert, old, out, got)
-            if out.fire is not None and trade == AUCTION_PRINT and source == "ltp":
+            done = None
+            if printed and alert.frequency == AT_CLOSE:
+                done = _close_at_print(alert, out, obs.candle, now, pauses)
+            elif printed and out.fire is not None:
                 out = out._replace(fire=out.fire._replace(auction=True))
-            if out.state is not old:
-                states[alert.id] = out.state
-                self._changed[alert.id] = (alert.version, out.state)
-            if out.fire is not None or out.status is not None or out.note is not None:
-                outcomes.append(out)
-                if out.status is not None:  # it stopped or paused itself: judged no more
-                    self._retire(alert.id, out.status)
+            final = (out if done is None else done).state
+            if final is not old:
+                states[alert.id] = final
+                self._changed[alert.id] = (alert.version, final)
+            for told in (out,) if done is None else (out, done):
+                if told.fire is not None or told.status is not None or told.note is not None:
+                    outcomes.append(told)
+                    if told.status is not None:  # it stopped or paused itself: judged no more
+                        self._retire(alert.id, told.status)
         if judged:
             return TickResult(OK, tuple(outcomes))
         check = BAD_VALUE if bad else next((c for c in (trade, quote) if c), NOTHING_NEW)
@@ -256,10 +274,7 @@ class Book:
                     pauses = clipped[alert.segment] = _session_pauses(market, alert.segment)
             out = timer(alert, state, now, market.today, pauses)
             if out is not None:
-                derived = state.derived
-                if out.fire is not None and alert.kind == "move" and derived is not None:
-                    out = out._replace(fire=out.fire._replace(base=derived[2]))
-                self._apply(alert, out, outcomes)
+                self._apply(alert, _with_base(alert, state, out), outcomes)
         return outcomes
 
     def seed(self, alert_id: int, frame: Mapping, market: Market) -> bool:
@@ -282,7 +297,14 @@ class Book:
         day = day_key(datetime.fromtimestamp(at / 1000, IST).date())
         cls = alert.segment + AUCTION if alert.key in market.auction else alert.segment
         session = market.sessions.get(cls)
-        today = day == market.today and session is not None and session.start <= at < session.end
+        today = (
+            day == market.today
+            and session is not None
+            and (
+                session.start <= at < session.end
+                or (source == "ltp" and session.end <= at <= (session.auction_until or 0))
+            )
+        )  # a CAS key's print (the official close) seeds too
         before = day == market.previous and carries(alert, State(day, 0), market.previous)
         if not (today or before) or day < state.session:
             return False
@@ -338,14 +360,26 @@ class Book:
             self._keys.pop(key, None)
 
 
-def _after(session: Session, minutes: int) -> tuple[int, int, int]:
-    """The closing auction's own candle: the one after the session's last (the day's for a Day
-    candle), so a per-candle alert may tell the auction once."""
-    if not minutes:
-        return 0, session.start, session.end
-    size = minutes * 60_000
-    k = -(-(session.end - session.start) // size)  # the last candle's index plus one
-    return k, session.end, session.end + POST_CLOSE_AFTER_MIN * 60_000
+def _close_at_print(
+    alert: Alert, out: Outcome, last: int, now: int, pauses: tuple
+) -> Outcome | None:
+    """At candle close: the closing auction's price is the day's last candle's close, so that
+    candle is judged as the print arrives (cross-design X6c), its fire marked as the auction's."""
+    f = out.state.forming
+    if out.status is not None or f is None or f.judged or f.candle != last:
+        return None
+    done = _with_base(alert, out.state, close(alert, out.state, now, pauses))
+    if done.fire is not None:
+        done = done._replace(fire=done.fire._replace(auction=True))
+    return done
+
+
+def _with_base(alert: Alert, state: State, out: Outcome) -> Outcome:
+    """A % move judged at a candle's close says its base, as one judged on a trade does."""
+    derived = state.derived
+    if out.fire is not None and alert.kind == "move" and derived is not None:
+        out = out._replace(fire=out.fire._replace(base=derived[2]))
+    return out
 
 
 def _session_pauses(market: Market, segment: str) -> tuple:

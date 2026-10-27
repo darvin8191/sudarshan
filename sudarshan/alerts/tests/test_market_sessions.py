@@ -87,6 +87,42 @@ def test_the_closing_auction_and_the_7_december_timings(segment, day, auction, h
     assert found.segment == (segment + "+auction" if stock else segment)
 
 
+@pytest.mark.parametrize(
+    ("day", "window", "expected"),
+    [
+        (WED, None, ("15:15", "15:35")),  # NSE/CMTR/75479: matched 15:30-15:35
+        (MUHURAT, "14:05-15:40", ("15:15", "15:35")),  # also on 8 Nov 2026 (X6b)
+        (DEC7, None, ("15:30", "15:40")),  # every stock's auction 15:30-15:40
+    ],
+)
+def test_the_auction_window_a_cas_key_carries(day, window, expected):
+    span = sessions.auction_window(
+        "NSE_EQ", day, trading_day=True, window=parse_window(window) if window else None
+    )
+    assert (clock(span[0])[11:], clock(span[1])[11:]) == expected
+    found = sessions.session("NSE_EQ", day, trading_day=True, auction=True,
+                             window=parse_window(window) if window else None)  # fmt: skip
+    assert (found.end, found.auction_until) == span
+    assert sessions.auction_window("NSE_INDEX", day, trading_day=True) is None
+    assert sessions.auction_window("NSE_EQ", day, trading_day=False) is None
+    assert sessions.session("NSE_EQ", day, trading_day=True).auction_until is None
+
+
+@pytest.mark.parametrize(
+    ("segment", "day", "derivatives", "expected"),
+    [
+        ("NSE_EQ", WED, True, True),
+        ("NSE_EQ", WED, False, False),  # no futures: trades on to 15:30
+        ("BSE_EQ", WED, True, True),  # BSE taken as NSE's list until a BSE check
+        ("NSE_EQ", DEC7, False, True),  # from 7 Dec 2026 every stock
+        ("NSE_INDEX", WED, True, False),
+        ("NSE_FO", DEC7, True, False),
+    ],
+)
+def test_which_stocks_close_by_auction(segment, day, derivatives, expected):
+    assert sessions.closes_by_auction(segment, day, derivatives=derivatives) is expected
+
+
 def test_the_muhurat_session_of_a_stock_that_closes_by_auction():
     """NSE/CMTR/76941 (8 Nov 2026): normal market 14:20; CAS securities close 15:15; others 15:30."""
     window = parse_window("14:05-15:40")
