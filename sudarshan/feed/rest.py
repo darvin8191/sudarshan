@@ -19,7 +19,8 @@ rules G1-G8 (27 Oct 2026):
   (warm starts, backfills, the 16:10 option chains) is refused at once from 08:30 to 16:00 IST on
   a trading day, and around a special day's own window with the same margins. A request waits at
   most 30 s, at most 64 wait and 4 are in flight to Upstox; a request that cannot go within its
-  30 s is told so at once, with Retry-After.
+  30 s is told so at once, with Retry-After. When 64 wait, the last of them in that order is the
+  one told it is busy, which is the newcomer unless it outranks it.
 - G5: a 429 or UDAPI10005 stops that API for every client for 60 s, then halves its rates for 10
   minutes; a 401 stops every API until the token file changes. Nothing is retried here. Upstox's
   status and body come back as bytes, never parsed (with its Content-Type and Content-Encoding);
@@ -365,13 +366,14 @@ class RestGovernor:
         )
         bisect.insort(self._waiting, ticket, key=lambda t: t.order)
         self._pump()
+        if len(self._waiting) > MAX_WAITING:  # M4: the last in G4's order gives way, so a full
+            last = self._waiting.pop()  # queue of bulk calls never turns away a repair
+            last.future.set_result(Refused(503, "busy", BUSY, RETRY_S))
         return ticket
 
     async def _turn(self, ticket: _Ticket) -> None:
         if not ticket.future.done():
             ticket.waited = True
-            if len(self._waiting) > MAX_WAITING:
-                raise Refused(503, "busy", BUSY, RETRY_S)
             await asyncio.wait((ticket.future,), timeout=ticket.deadline - time.monotonic())
             if not ticket.future.done():  # its 30 s are up
                 raise Refused(503, "busy", BUSY, RETRY_S)

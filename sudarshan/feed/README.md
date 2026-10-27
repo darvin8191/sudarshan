@@ -183,7 +183,9 @@ hour ever holds more.
 | `sudarshan-alerts` (5%) | 2 | 25 | 100 |
 
 - **Order of service**: repair, then interactive, then bulk; first come first served within a
-  class. At most 4 calls are in flight to Upstox and 64 wait; a request waits at most 30 s.
+  class. At most 4 calls are in flight to Upstox and 64 wait; a request waits at most 30 s. When
+  64 wait, the last of them in that order is told it is busy: the newcomer, unless it outranks
+  that one (a full queue of warm-start calls never turns away a repair or a quote).
 - **Bulk waits for the market to close**: from 08:30 to 16:00 IST on a trading day (around a
   special session's own window with the same margins, 13:35-16:00 for Muhurat 14:05-15:40) a bulk
   request is answered at once, never held.
@@ -207,7 +209,7 @@ hour ever holds more.
 | status | `X-Sudarshan-Reason` | when | `Retry-After` |
 |---|---|---|---|
 | 503 | `bulk-hours` | bulk in market hours: "History downloads wait for the market to close (after 16:00)." | seconds to the end of market hours |
-| 503 | `busy` | 64 waiting, or no turn within 30 s: "SUDARSHAN's share of Upstox requests is in use; try again in a minute." | 60, or when a window opens |
+| 503 | `busy` | the last of 64 waiting, or no turn within 30 s: "SUDARSHAN's share of Upstox requests is in use; try again in a minute." | 60, or when a window opens |
 | 503 | `rate-limited` | the API is stopped after a 429 for longer than the 30 s a request may wait | when it starts again |
 | 503 | `token` | Upstox refused the token (until the file changes), or there is no usable token | 60 |
 | 503 | `restarting`, `off` | the feed is stopping; the governor is switched off (`SUDARSHAN_FEED_REST=off`) | 60 |

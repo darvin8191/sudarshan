@@ -484,6 +484,46 @@ def test_a_request_waits_at_most_30_s_and_at_most_64_wait(feed_env, monkeypatch)
     asyncio.run(scenario())
 
 
+def test_a_full_queue_turns_away_its_last_bulk_call_never_a_repair(feed_env):
+    """Review M4: after 16:00 a warm start can keep 64 bulk calls waiting; an alerts repair then
+    got 503 at once for as long as the queue stayed full. Now the last waiting call in G4's
+    order gives way, and a newcomer that ranks last is still the one refused."""
+
+    def days(n: int) -> str:
+        return f"/v3/historical-candle/NSE_EQ%7CINE{n:09d}/days/1/2026-10-27"
+
+    async def scenario():
+        async with running(feed_env) as (svc, fake, http):  # 20:00: bulk is served
+            held = Held(fake)
+            holders = [asyncio.create_task(ask(http, f"{LTP[:-4]}{n:04d}")) for n in range(4)]
+            try:
+                await ff.wait_until(lambda: len(held.arrived) == 4)
+                bulk = []
+                for n in range(64):  # one by one, so the arrival order is known
+                    bulk.append(asyncio.create_task(ask(http, days(n), priority="bulk")))
+                    await ff.wait_until(lambda n=n: svc.rest.health()["waiting"] == n + 1, 5)
+                repair = asyncio.create_task(
+                    ask(http, OHLC, client="sudarshan-alerts", priority="repair")
+                )
+                last = await asyncio.wait_for(bulk[-1], 5)  # the last bulk call gives way
+                full = svc.rest.health()["waiting"]
+                newcomer = await ask(http, days(64), priority="bulk")  # ranks last: refused
+                held.release()  # one place frees: the repair takes it
+                await ff.wait_until(lambda: len(held.arrived) == 5)
+            finally:
+                held.open()
+            rest_of_them = await asyncio.gather(repair, *holders, *bulk[:-1])
+            return last, full, newcomer, held.arrived[4], rest_of_them, len(fake.rest_calls)
+
+    last, full, newcomer, fifth, rest_of_them, sent = asyncio.run(scenario())
+    for r in (last, newcomer):
+        assert (r.status_code, r.json(), r.headers["X-Sudarshan-Reason"]) == (
+            503, {"error": rest.BUSY}, "busy",
+        )  # fmt: skip
+    assert full == 64 and fifth == OHLC
+    assert {r.status_code for r in rest_of_them} == {200} and sent == 4 + 1 + 63
+
+
 TOO_MANY = {"status": "error", "errors": [{"errorCode": "UDAPI10005", "message": "Too Many Request Sent"}]}  # fmt: skip
 
 
