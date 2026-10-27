@@ -8,6 +8,7 @@ install kept calling every price closed during the real afternoon session and
 the empty 18:00 market open.
 """
 
+import json
 import os
 import subprocess
 import sys
@@ -72,16 +73,41 @@ def _rows(engine):
         }
 
 
-def _windows(engine):
-    """8 November's windows: exchange -> (start, end), None when closed."""
+def _day(engine):
+    """8 November's rows: exchange -> (open, start, end)."""
     with Session(engine) as session:
         rows = session.query(mc.HolidayExchange).filter(
             mc.HolidayExchange.holiday_id == _muhurat(session).id
         )
-        return {
-            row.exchange_code: (row.start_time, row.end_time) if row.is_open else None
-            for row in rows
-        }
+        return {row.exchange_code: (row.is_open, row.start_time, row.end_time) for row in rows}
+
+
+def _windows(engine):
+    """8 November's windows: exchange -> (start, end), None when closed."""
+    return {
+        exchange: (start, end) if is_open else None
+        for exchange, (is_open, start, end) in _day(engine).items()
+    }
+
+
+def _close(engine, *exchanges):
+    """Close ``exchanges`` on 8 November, keeping the times their rows hold."""
+    with Session(engine) as session:
+        session.query(mc.HolidayExchange).filter(
+            mc.HolidayExchange.holiday_id == _muhurat(session).id,
+            mc.HolidayExchange.exchange_code.in_(exchanges),
+        ).update({mc.HolidayExchange.is_open: False}, synchronize_session=False)
+        session.commit()
+
+
+def _delete(engine, exchange):
+    """Delete ``exchange``'s row for 8 November."""
+    with Session(engine) as session:
+        session.query(mc.HolidayExchange).filter(
+            mc.HolidayExchange.holiday_id == _muhurat(session).id,
+            mc.HolidayExchange.exchange_code == exchange,
+        ).delete(synchronize_session=False)
+        session.commit()
 
 
 def _set(engine, windows):
@@ -160,13 +186,9 @@ def test_an_existing_install_moves_to_the_published_hours(install):
 def test_a_window_an_admin_set_is_left_alone(install, capsys):
     _placeholder(install)
     own = (migration._at(14, 0), migration._at(16, 0))
-    _set(install, {"NFO": own, "BCD": None})  # an admin's NFO hours; BCD closed
-    with Session(install) as session:  # and the CDS row deleted
-        session.query(mc.HolidayExchange).filter(
-            mc.HolidayExchange.holiday_id == _muhurat(session).id,
-            mc.HolidayExchange.exchange_code == "CDS",
-        ).delete()
-        session.commit()
+    _set(install, {"NFO": own})  # an admin's NFO hours
+    _close(install, "BCD")  # BCD closed, its row still holding the placeholder times
+    _delete(install, "CDS")  # and the CDS row deleted
 
     actions = {step[0]: step[4] for step in migration.plan(install)}
     assert actions == {
@@ -182,13 +204,51 @@ def test_a_window_an_admin_set_is_left_alone(install, capsys):
     windows = _windows(install)
 
     assert windows["NFO"] == own
-    assert windows["BCD"] is None
+    assert _day(install)["BCD"] == (False, *migration.PLACEHOLDER)
     assert "CDS" not in windows  # nothing is inserted
     assert windows["NSE"] == PUBLISHED["NSE"]
     assert windows["MCX"] == PUBLISHED["MCX"]
     out = capsys.readouterr().out
     assert "NFO  14:00-16:00    set by an admin, left alone (published 14:20-15:40)" in out
+    assert "BCD  closed    set by an admin, left alone (published 14:20-15:30)" in out
     assert "Updated 4 row(s)" in out
+
+
+def test_a_row_changed_while_the_migration_runs_is_left_alone(install, monkeypatch, capsys):
+    """A change landing after plan() read the rows and before apply() writes them wins.
+
+    Each change leaves one clause of the write's guard to notice it: a new start
+    only, a new end only, a row closed with its times kept, a row deleted.
+    """
+    _placeholder(install)
+    start, end = migration.PLACEHOLDER
+    read_rows = migration.plan
+
+    def read_then_an_admin_edits(engine):
+        steps = read_rows(engine)
+        _set(install, {"NSE": (migration._at(14, 15), end), "BSE": (start, migration._at(19, 30))})
+        _close(install, "NFO")
+        _delete(install, "CDS")
+        return steps
+
+    monkeypatch.setattr(migration, "plan", read_then_an_admin_edits)
+    assert migration.apply(install)
+    day = _day(install)
+
+    assert day["NSE"] == (True, migration._at(14, 15), end)
+    assert day["BSE"] == (True, start, migration._at(19, 30))
+    assert day["NFO"] == (False, start, end)
+    assert "CDS" not in day
+    for exchange in ("BFO", "BCD", "MCX"):
+        assert day[exchange] == (True, *PUBLISHED[exchange]), exchange
+    # Each line says what happened, not what plan() expected.
+    out = capsys.readouterr().out
+    assert "NSE  changed while this ran, left alone (now 14:15-19:15, published 14:20-15:30)" in out
+    assert "BSE  changed while this ran, left alone (now 18:00-19:30, published 14:20-15:30)" in out
+    assert "NFO  changed while this ran, left alone (now closed, published 14:20-15:40)" in out
+    assert "CDS  changed while this ran, left alone (removed, published 14:20-15:30)" in out
+    assert "NSE  18:00-19:15 -> 14:20-15:30" not in out
+    assert "Updated 3 row(s)" in out
 
 
 def test_rerunning_changes_nothing(install):
@@ -258,6 +318,55 @@ def test_the_script_reports_then_migrates_a_database_file(install):
     again = run()
     assert again.returncode == 0, again.stderr
     assert "Nothing to change." in again.stdout
+
+
+@pytest.mark.parametrize("args", [(), ("--status",)])
+def test_a_database_that_cannot_be_read_fails_in_plain_words(tmp_path, args):
+    """Exit 1 with a sentence on screen; the traceback goes to log/errors.jsonl only."""
+    broken = tmp_path / "openalgo.db"
+    broken.write_bytes(b"this file is not a database " * 512)
+    env = {
+        **os.environ,
+        "DATABASE_URL": f"sqlite:///{broken.as_posix()}",
+        "LOG_DIR": str(tmp_path / "log"),
+    }
+    run = subprocess.run(
+        [sys.executable, str(SCRIPT), *args],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+    assert run.returncode == 1, run.stdout + run.stderr
+    assert "[FAIL] Could not read the market calendar, so nothing was changed." in run.stdout
+    assert "The details are in log/errors.jsonl." in run.stdout
+    for detail in ("Traceback", "DatabaseError", "sqlite3.", "SELECT"):
+        assert detail not in run.stdout + run.stderr, detail
+    records = [
+        json.loads(line)
+        for line in (tmp_path / "log" / "errors.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert [
+        record
+        for record in records
+        if record["message"] == "Muhurat 2026 migration: the market calendar could not be read"
+        and "DatabaseError" in "".join(record["exception"])
+    ]
+
+
+@pytest.mark.parametrize("args", [[], ["--status"]])
+def test_a_database_file_that_is_not_there_is_reported_and_not_created(
+    tmp_path, monkeypatch, capsys, args
+):
+    missing = tmp_path / "openalgo.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{missing.as_posix()}")
+    monkeypatch.setattr(sys, "argv", ["migrate_muhurat_nov_2026.py", *args])
+
+    assert migration.main() == 0
+    assert "No market calendar stored yet." in capsys.readouterr().out
+    assert not missing.exists()
 
 
 def test_the_migration_is_registered():

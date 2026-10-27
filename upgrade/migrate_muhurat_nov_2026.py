@@ -23,8 +23,9 @@ special session from 14:05 is left out the same way).
 Anything that decides "market closed" from the calendar would otherwise call
 every price closed during the real session and the empty 18:00 market open.
 
-Only a row that still holds the placeholder is changed, so a window an admin set
-for that day is left alone and reported. Nothing is inserted: a missing row
+Only a row that still holds the placeholder when it is written is changed, so a
+window an admin set for that day, before or during the run, is left alone and
+reported. Nothing is inserted: a missing row
 stays missing, and an empty or missing calendar is left for the app, which seeds
 it at startup from database/market_calendar_db.py with the published hours.
 
@@ -41,6 +42,7 @@ Usage:
 """
 
 import argparse
+import logging
 import os
 import sys
 from datetime import date, datetime, timedelta, timezone
@@ -85,6 +87,48 @@ NO_CALENDAR = (
     "No market calendar stored yet. The app creates it at startup",
     "with the published Muhurat hours.",
 )
+READ_FAILED = (
+    "Could not read the market calendar, so nothing was changed.",
+    "The details are in log/errors.jsonl.",
+)
+SAVE_FAILED = (
+    "Could not save the published hours, so nothing was changed.",
+    "The details are in log/errors.jsonl.",
+)
+
+
+def _error_log():
+    """This script's logger, writing to log/errors.jsonl and not to the screen.
+
+    utils.logging also gives the root logger a console handler, which would print
+    the traceback under the plain line this script shows for a failure. The
+    detail belongs in the error log, the first place anyone debugging looks.
+    """
+    from utils.logging import JSONErrorFormatter, get_logger
+
+    log = get_logger(__name__)
+    error_log = [
+        handler
+        for handler in logging.getLogger().handlers
+        if isinstance(handler.formatter, JSONErrorFormatter)
+    ]
+    if error_log:
+        log.handlers = error_log
+        log.propagate = False
+    return log
+
+
+def _fail(lines, what):
+    """Say in plain words what failed, and keep the detail in the error log.
+
+    Called from an ``except`` block, so the traceback goes with the record.
+    """
+    try:
+        _error_log().exception(f"Muhurat 2026 migration: {what}")
+    except Exception:
+        pass  # the lines below still say what happened
+    for line in ("[FAIL] " + lines[0], *lines[1:]):
+        print(f"  {line}")
 
 
 def resolve_sqlite_path(db_url):
@@ -248,8 +292,8 @@ def status(engine):
     print("-" * 62)
     try:
         steps = plan(engine) if engine is not None else None
-    except Exception as exc:
-        print(f"[FAIL] Could not read the market calendar: {type(exc).__name__}: {exc}")
+    except Exception:
+        _fail(READ_FAILED, "the market calendar could not be read")
         return False
     if steps is None:
         print("\n".join(NO_CALENDAR))
@@ -264,6 +308,9 @@ def status(engine):
 def apply(engine):
     """Write the published window to every row that still holds the placeholder.
 
+    Each write is guarded on the placeholder again, so a row changed after
+    plan() read it is left alone, and its line says what it holds now.
+
     Args:
         engine: An engine bound to the target database.
 
@@ -272,15 +319,15 @@ def apply(engine):
     """
     try:
         steps = plan(engine)
-    except Exception as exc:
-        print(f"  [FAIL] Could not read the market calendar: {type(exc).__name__}: {exc}")
+    except Exception:
+        _fail(READ_FAILED, "the market calendar could not be read")
         return False
 
     if steps is None:
         print("\n".join(f"  {line}" for line in NO_CALENDAR))
         return True
 
-    changed = 0
+    moved, changed_meanwhile = set(), {}
     try:
         from database.market_calendar_db import HolidayExchange
 
@@ -288,9 +335,7 @@ def apply(engine):
             for exchange, row_id, old, new, action in steps:
                 if action != "update":
                     continue
-                # Guarded on the placeholder, so a window an admin set since
-                # plan() read the row is not overwritten.
-                changed += (
+                written = (
                     session.query(HolidayExchange)
                     .filter(
                         HolidayExchange.id == row_id,
@@ -304,15 +349,29 @@ def apply(engine):
                         synchronize_session=False,
                     )
                 )
+                if written:
+                    moved.add(row_id)
+                    continue
+                row = session.get(HolidayExchange, row_id)
+                changed_meanwhile[row_id] = (
+                    "removed" if row is None else f"now {_span(_window(row))}"
+                )
             session.commit()
-    except Exception as exc:
-        print(f"  [FAIL] Could not update the market calendar: {type(exc).__name__}: {exc}")
+    except Exception:
+        _fail(SAVE_FAILED, "the published hours could not be saved")
         return False
 
     for step in steps:
-        print(describe(step))
-    if changed:
-        print(f"  [OK] Updated {changed} row(s). OpenAlgo shows them after a restart,")
+        exchange, row_id, _then, new, _action = step
+        if row_id in changed_meanwhile:
+            print(
+                f"  {exchange:<4} changed while this ran, left alone "
+                f"({changed_meanwhile[row_id]}, published {_span(new)})"
+            )
+        else:
+            print(describe(step))
+    if moved:
+        print(f"  [OK] Updated {len(moved)} row(s). OpenAlgo shows them after a restart,")
         print("  or within the hour.")
     else:
         print("  [OK] Nothing to change.")
