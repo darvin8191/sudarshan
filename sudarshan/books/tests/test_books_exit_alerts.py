@@ -331,6 +331,17 @@ def test_upstox_s_fresh_order_from_flat_says_it_opened(upstox_book, monkeypatch)
     assert answer["sent"] == {"action": "BUY", "quantity": 5, "closes": False}
 
 
+def test_upstox_s_smart_order_to_a_new_size_is_no_close(upstox_book, monkeypatch):
+    upstox, placed = upstox_book
+    monkeypatch.setattr(upstox, "get_open_position", lambda *args: "0")
+    order = {"symbol": "RELIANCE", "exchange": "NSE", "product": "CNC", "action": "BUY"}
+    _, answer, _ = upstox.place_smartorder_api(
+        {**order, "quantity": "0", "position_size": "5"}, "t"
+    )
+    assert placed == [("BUY", "5")]
+    assert answer["sent"] == {"action": "BUY", "quantity": 5, "closes": False}
+
+
 def test_the_sandbox_s_smart_order_says_what_it_sent():
     from services.sandbox_service import _place_smart_order_locked
 
@@ -353,6 +364,12 @@ def test_the_sandbox_s_smart_order_says_what_it_sent():
     )
     assert (ok, code, orders_.placed) == (True, 200, [("SELL", 1)])
     assert answer["sent"] == {"action": "SELL", "quantity": 1, "closes": True}
+    # To a new size it adds, and says it closes nothing.
+    ok, answer, code = _place_smart_order_locked(
+        Book(), orders_, {**ANALYZE_EXIT, "position_size": "3"}, "RELIANCE", "NSE", "CNC", 3, 0
+    )
+    assert orders_.placed[-1] == ("BUY", 2)
+    assert answer["sent"] == {"action": "BUY", "quantity": 2, "closes": False}
 
 
 @pytest.fixture
