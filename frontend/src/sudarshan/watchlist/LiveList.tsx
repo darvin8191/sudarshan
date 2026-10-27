@@ -1,5 +1,6 @@
 import { memo } from 'react'
 import type { WatchlistItem } from '@/api/watchlist'
+import type { AlertPrefill } from '@/sudarshan/alerts/AlertForm'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
 import type { MarketOpen } from '@/sudarshan/dashboard/live'
 import { type OrderRequest, SymbolSheet } from './SymbolSheet'
@@ -28,6 +29,7 @@ export const LiveList = memo(function LiveList({
   onAdd,
   onCloseSheet,
   onOrder,
+  onAlert,
 }: {
   items: WatchlistItem[]
   apiKey: string | null
@@ -46,6 +48,7 @@ export const LiveList = memo(function LiveList({
   onAdd?: () => void
   onCloseSheet: () => void
   onOrder: (order: OrderRequest) => void
+  onAlert: (alert: AlertPrefill) => void
 }) {
   const live = useLiveRows({ items, apiKey, marketOpen: isOpen })
   const sheetRow =
@@ -96,6 +99,7 @@ export const LiveList = memo(function LiveList({
         now={live.now}
         onClose={onCloseSheet}
         onOrder={onOrder}
+        onAlert={onAlert}
         onRemove={onRemove}
       />
     </>

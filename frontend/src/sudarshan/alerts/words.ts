@@ -107,7 +107,10 @@ export function wayOfOp(op: PriceOp): Way {
   return 'either'
 }
 
-/** "Checks at ₹100.05 (nearest tick)"; on the tick, the level as it will be read. */
+/**
+ * "Checks at ₹100.05 (nearest tick)"; on the tick, or with the tick not known (a contract still
+ * being read), the level as it will be read.
+ */
 export function checksAtWords(
   exchange: string,
   op: PriceOp,
@@ -116,7 +119,7 @@ export function checksAtWords(
 ): string | null {
   const edges = levelEdges(level)
   if (!edges) return null
-  const snapped = tickEdges(level, tick)
+  const snapped = tick === null ? null : tickEdges(level, tick)
   const way = wayOfOp(op)
   if (!snapped) return `Checks at ${priced(exchange, way === 'down' ? edges.down : edges.up)}`
   const [above, below] = snapped.map((paise) => priced(exchange, paise))

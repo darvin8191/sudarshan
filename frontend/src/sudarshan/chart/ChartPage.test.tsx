@@ -103,6 +103,23 @@ vi.mock('@/components/trading/SymbolSearchDialog', () => ({
     ) : null,
 }))
 
+// SUDARSHAN M10.2: the market alert form the bell opens: its own price stream and its save.
+vi.mock('@/lib/MarketDataManager', () => import('@/test/marketDataHarness'))
+const alerting = vi.hoisted(() => ({
+  create: vi.fn(),
+  toasts: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() },
+}))
+vi.mock('@/api/marketAlerts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/api/marketAlerts')>()),
+  marketAlertsApi: { create: alerting.create },
+}))
+vi.mock('@/utils/toast', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/utils/toast')>()),
+  toast: alerting.toasts,
+}))
+
+import { QueryClientProvider } from '@tanstack/react-query'
+import { createQueryClient } from '@/app/providers'
 import ChartPage from './ChartPage'
 
 function Where() {
@@ -122,15 +139,17 @@ function PhoneBack() {
 
 function renderAt(path: string, before: string[] = []) {
   return render(
-    <MemoryRouter initialEntries={[...before, path]}>
-      <Routes>
-        <Route path="/chart" element={<ChartPage />} />
-        <Route path="/chart/:exchange/:symbol" element={<ChartPage />} />
-        <Route path="*" element={<p>Elsewhere</p>} />
-      </Routes>
-      <Where />
-      <PhoneBack />
-    </MemoryRouter>
+    <QueryClientProvider client={createQueryClient()}>
+      <MemoryRouter initialEntries={[...before, path]}>
+        <Routes>
+          <Route path="/chart" element={<ChartPage />} />
+          <Route path="/chart/:exchange/:symbol" element={<ChartPage />} />
+          <Route path="*" element={<p>Elsewhere</p>} />
+        </Routes>
+        <Where />
+        <PhoneBack />
+      </MemoryRouter>
+    </QueryClientProvider>
   )
 }
 
@@ -495,5 +514,65 @@ describe('the phone chart page at 390 px', () => {
     const { unmount } = await opened()
     unmount()
     expect(chart().destroy).toHaveBeenCalled()
+  })
+})
+
+describe('a market alert from the phone chart (M10.2)', () => {
+  const tick = (ltp: number) =>
+    emit((cb) => cb.onTick({ ltp, time: null, tradeTime: null, at: Date.now(), polled: false }))
+
+  it('opens the alert form from the bell, at the last price, and Back closes it first', async () => {
+    await opened('/chart/NSE/SBIN', ['/dashboard'])
+    tick(812.4)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Set alert' }))
+    const form = screen.getByRole('dialog', { name: 'New alert' })
+    expect(within(form).getByLabelText('Price level')).toHaveValue('812.40')
+
+    // The open sheet hides the page around it, so the phone's Back is pressed as the phone would.
+    fireEvent.click(screen.getByRole('button', { name: 'Phone back', hidden: true }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(screen.getByRole('status', { name: 'Location' })).toHaveTextContent('/chart/NSE/SBIN')
+    await userEvent.click(screen.getByRole('button', { name: 'Phone back' }))
+    expect(screen.getByText('Elsewhere')).toBeInTheDocument()
+  })
+
+  it('says the alert is set, with View to it, and closes the form', async () => {
+    alerting.create.mockReset().mockResolvedValue({
+      id: 77,
+      symbol: 'SBIN',
+      exchange: 'NSE',
+      words: { condition: 'Crosses above ₹812.40', meta: 'Once', checks_at: null },
+    })
+    alerting.toasts.success.mockReset()
+    await opened('/chart/NSE/SBIN', ['/dashboard'])
+    tick(812.4)
+    await userEvent.click(screen.getByRole('button', { name: 'Set alert' }))
+    await userEvent.click(
+      within(screen.getByRole('dialog', { name: 'New alert' })).getByRole('button', {
+        name: 'Save',
+      })
+    )
+
+    await waitFor(() => expect(alerting.toasts.success).toHaveBeenCalledTimes(1))
+    expect(alerting.create.mock.calls[0][0]).toMatchObject({
+      symbol: 'SBIN',
+      exchange: 'NSE',
+      params: { op: 'crosses_above', level: '812.40', source: 'ltp' },
+      price: 812.4,
+    })
+    expect(alerting.toasts.success.mock.calls[0][0]).toBe('Alert set: SBIN')
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(screen.getByRole('status', { name: 'Location' })).toHaveTextContent('/chart/NSE/SBIN')
+
+    act(() => alerting.toasts.success.mock.calls[0][1].action.onClick())
+    expect(screen.getByRole('status', { name: 'Location' })).toHaveTextContent(
+      '/market-alerts?alert=77'
+    )
+  })
+
+  it('offers no bell where market alerts do not reach', async () => {
+    await opened('/chart/MCX/GOLDM')
+    expect(screen.queryByRole('button', { name: 'Set alert' })).toBeNull()
   })
 })

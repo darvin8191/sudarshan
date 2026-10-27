@@ -35,6 +35,7 @@ import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
 import { describe, isIndex } from '@/sudarshan/watchlist/rows'
 import { toast } from '@/utils/toast'
 import { PriceLine } from './AlertCard'
+import { ALERTS_PATH } from './marketAlerts'
 import { needsQuote, segmentOpen } from './measure'
 import { dropRow, putRow, STATE_KEY } from './stateCache'
 import {
@@ -848,6 +849,19 @@ export function AlertFormSheet({
       />
     </BottomSheet>
   )
+}
+
+/**
+ * A save made away from the Alerts page (a watchlist symbol, the chart): "Alert set: NIFTY", the
+ * condition in the server's words, and View to the alert's sheet.
+ */
+export function toastAlertSet(row: AlertRow, go: (to: string) => void): void {
+  toast.success(`Alert set: ${describe(row.symbol, row.exchange).title}`, {
+    description: row.words.condition,
+    duration: 6_000,
+    classNames: { actionButton: 'min-h-12 min-w-12' },
+    action: { label: 'View', onClick: () => go(`${ALERTS_PATH}?alert=${row.id}`) },
+  })
 }
 
 /** A kind as it starts: its own frequency, candle and wait (contract 1.3). */

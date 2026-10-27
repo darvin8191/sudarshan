@@ -19,7 +19,7 @@
  * This file is layout and wiring only. A tick re-renders the price header and
  * nothing else: the price lives in a small store outside React's tree.
  */
-import { ArrowLeft, Search, SunMedium, X } from 'lucide-react'
+import { ArrowLeft, BellPlus, Search, SunMedium, X } from 'lucide-react'
 import type { Bar } from 'openalgo-charts'
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { Link, Navigate, useLocation, useNavigate, useParams } from 'react-router'
@@ -32,6 +32,8 @@ import { priceDp } from '@/lib/trading/format'
 import type { LiveStatus } from '@/lib/trading/liveStatus'
 import { cn } from '@/lib/utils'
 import { useThemeStore } from '@/stores/themeStore'
+import { AlertFormSheet, toastAlertSet } from '@/sudarshan/alerts/AlertForm' // SUDARSHAN M10.2
+import { isCovered } from '@/sudarshan/alerts/words'
 import { directionOf, formatPercent, formatPrice, formatRupees } from '@/sudarshan/dashboard/format'
 import { useNow } from '@/sudarshan/dashboard/hooks'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
@@ -113,13 +115,14 @@ export default function ChartPage() {
 
 type Inspect = { bar: Bar; x: number | null; y: number }
 
-/** A sheet over the chart, as the browser history entry it is. */
-type Sheet = { sheet: 'ticket'; side: 'BUY' | 'SELL' } | { sheet: 'search' }
+/** A sheet over the chart, as the browser history entry it is; `alert` is a market alert's form (M10.2). */
+type Sheet = { sheet: 'ticket'; side: 'BUY' | 'SELL' } | { sheet: 'search' } | { sheet: 'alert' }
 
 function readSheet(state: unknown): Sheet | null {
   if (!state || typeof state !== 'object') return null
   const value = state as { sheet?: unknown; side?: unknown }
   if (value.sheet === 'search') return { sheet: 'search' }
+  if (value.sheet === 'alert') return { sheet: 'alert' }
   if (value.sheet === 'ticket' && (value.side === 'BUY' || value.side === 'SELL'))
     return { sheet: 'ticket', side: value.side }
   return null
@@ -322,6 +325,7 @@ function PhoneChartScreen({
         name={info?.name}
         onBack={back}
         onSearch={() => openSheet({ sheet: 'search' })}
+        onAlert={isCovered(exchange) ? () => openSheet({ sheet: 'alert' }) : undefined}
       />
 
       <PriceHeader
@@ -439,6 +443,21 @@ function PhoneChartScreen({
           strategy={STRATEGY}
         />
       )}
+      {sheet?.sheet === 'alert' && (
+        <AlertFormSheet
+          prefill={{
+            symbol,
+            exchange,
+            tick: info?.tickSize ?? null,
+            price: prices.get().tick?.ltp ?? null,
+          }}
+          onClose={closeSheet}
+          onSaved={(saved) => {
+            closeSheet()
+            toastAlertSet(saved, navigate)
+          }}
+        />
+      )}
       <SymbolSearchDialog
         open={searching}
         onOpenChange={(open) => !open && closeSheet()}
@@ -472,12 +491,15 @@ function AppBar({
   name,
   onBack,
   onSearch,
+  onAlert,
 }: {
   symbol: string
   exchange: string
   name?: string
   onBack(): void
   onSearch?(): void
+  /** A market alert on this instrument (M10.2); absent where market alerts do not reach. */
+  onAlert?(): void
 }) {
   const title = (
     <span className="flex min-w-0 flex-col">
@@ -520,6 +542,16 @@ function AppBar({
           className="inline-flex size-12 shrink-0 items-center justify-center rounded-full hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <Search aria-hidden="true" className="size-5" />
+        </button>
+      )}
+      {onAlert && (
+        <button
+          type="button"
+          onClick={onAlert}
+          aria-label="Set alert"
+          className="inline-flex size-12 shrink-0 items-center justify-center rounded-full hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <BellPlus aria-hidden="true" className="size-5" />
         </button>
       )}
     </header>
