@@ -18,7 +18,7 @@ import { cn } from '@/lib/utils'
 import { feedWords } from '@/sudarshan/dashboard/LiveLine'
 import type { FeedLine } from '@/sudarshan/dashboard/live'
 
-type Quiet = Exclude<FeedLine, { kind: 'live' }>
+type Quiet = Exclude<FeedLine, { kind: 'live' } | { kind: 'idle' }>
 
 function isStale(line: Quiet): boolean {
   return 'stale' in line && line.stale
@@ -55,7 +55,7 @@ export function LiveStatusMarker({
 }) {
   const shown = status !== null && needsMarker(status.line)
   const now = useSecond(shown)
-  if (!status || !shown || status.line.kind === 'live') return null
+  if (!status || !shown || status.line.kind === 'live' || status.line.kind === 'idle') return null
   const line = status.line
   const detail = liveDetail(status, now)
   return (

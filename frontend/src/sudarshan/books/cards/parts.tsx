@@ -4,10 +4,11 @@ import {
   CheckCircle2,
   Clock,
   Hourglass,
+  Info,
   RefreshCw,
   XCircle,
 } from 'lucide-react'
-import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useId, useRef, useState } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -46,6 +47,64 @@ export const OUTLINED = cn(ACTION, 'border border-input bg-card text-foreground 
 export const BUY_FILL = 'bg-[color:var(--buy-solid)] text-white hover:opacity-90'
 export const SELL_FILL = 'bg-[color:var(--sell-solid)] text-white hover:opacity-90'
 export const DANGER_FILL = 'bg-destructive text-white hover:bg-destructive/90'
+
+/**
+ * An action that cannot be taken just now: grey, with a dashed edge and none
+ * of its own colour, so it does not look like one that can (a pale red Exit
+ * all beside "No open positions" did).
+ */
+export const UNAVAILABLE = cn(
+  ACTION,
+  'cursor-not-allowed border border-dashed border-[color:var(--border-strong)] bg-card text-[color:var(--text-tertiary)]'
+)
+
+/**
+ * An action that cannot be taken just now, and why (`why`), or null when it
+ * can. Its button stays reachable and reads as unavailable (aria-disabled,
+ * described by the reason), and a tap or focus shows the reason beside it
+ * (`WhyNot`) instead of doing nothing at all.
+ */
+export function useWhyNot(why: string | null) {
+  const id = useId()
+  // The reason shown, until focus leaves; a new or no reason hides it again.
+  const [told, setTold] = useState<string | null>(null)
+  const tell = () => setTold(why)
+  return {
+    why,
+    id,
+    told: why !== null && told === why,
+    /** What the button takes: `act` when the action can be taken, else the reason. */
+    button: (act: () => void) =>
+      why === null
+        ? { onClick: act }
+        : {
+            onClick: tell,
+            onFocus: tell,
+            onBlur: () => setTold(null),
+            'aria-disabled': true as const,
+            'aria-describedby': id,
+          },
+  }
+}
+
+/** Why an action cannot be taken: read with its button, and shown once it is tapped or focused. */
+export function WhyNot({ why, id, told }: { why: string | null; id: string; told: boolean }) {
+  if (why === null) return null
+  return (
+    <p
+      id={id}
+      data-testid="why-not"
+      className={
+        told
+          ? 'flex items-start gap-1.5 text-[0.8125rem] font-medium text-[color:var(--text-secondary)]'
+          : 'sr-only'
+      }
+    >
+      {told && <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />}
+      {why}
+    </p>
+  )
+}
 
 /** The white card one row of a book sits on. */
 export const CARD =

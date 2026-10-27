@@ -80,10 +80,20 @@ vi.mock('@/components/socket/SocketProvider', () => ({
 import OrderBook from '@/pages/OrderBook'
 import { notePushedFrame, resetOrderMemoryForTests } from '@/sudarshan/books/orderFold'
 import { resetSentForTests } from '@/sudarshan/books/sent'
-import { back, openDialog, pass, renderBook, settle, where } from '@/test/bookPages'
+import {
+  back,
+  expectAvailable,
+  expectUnavailable,
+  openDialog,
+  pass,
+  renderBook,
+  settle,
+  where,
+} from '@/test/bookPages'
 import { fakeClock, frames } from '@/test/frames'
 import { feed } from '@/test/marketDataHarness'
 import { fakeScreen } from '@/test/screenWidth'
+import { EVERY_CANCEL_SENT, NOTHING_TO_CANCEL } from './OrderCards'
 
 vi.setConfig({ testTimeout: 15_000 })
 
@@ -372,7 +382,7 @@ describe('Order book on a phone: the cards', () => {
 
   it('counts only working orders in Cancel all: a cancelled one is not', async () => {
     await renderPhone(WORKING, CANCELLED, FILLED, REFUSED)
-    expect(screen.getByRole('button', { name: 'Cancel all (1)' })).toBeEnabled()
+    expectAvailable(screen.getByRole('button', { name: 'Cancel all (1)' }))
   })
 
   it('filters by Open, Executed, Rejected and Cancelled, with counts', async () => {
@@ -406,7 +416,28 @@ describe('Order book on a phone: the cards', () => {
   it('says plainly when there are no orders', async () => {
     await renderPhone()
     expect(screen.getByText('No orders today')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Cancel all/ })).toBeDisabled()
+    expectUnavailable(screen.getByRole('button', { name: /Cancel all/ }))
+  })
+
+  it('shows Cancel all as unavailable with no open order, and says why when tapped or focused', async () => {
+    const tap = user()
+    await renderPhone(FILLED)
+    const all = screen.getByRole('button', { name: 'Cancel all' })
+    expectUnavailable(all)
+    expect(all).toHaveAccessibleDescription(NOTHING_TO_CANCEL)
+    expect(all).toHaveClass('border-dashed', 'text-[color:var(--text-tertiary)]')
+    expect(all).not.toHaveClass('border-destructive')
+    const why = screen.getByTestId('why-not')
+    expect(why).toHaveClass('sr-only')
+    await tap.click(all)
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(why).not.toHaveClass('sr-only')
+    expect(why).toHaveTextContent(NOTHING_TO_CANCEL)
+    act(() => all.blur())
+    expect(why).toHaveClass('sr-only')
+    act(() => all.focus())
+    expect(why).not.toHaveClass('sr-only')
+    expect(api.cancelAllOrders).not.toHaveBeenCalled()
   })
 
   it('changes a card the moment the broker pushes a fill', async () => {
@@ -618,7 +649,7 @@ describe('Order book on a phone: the sheet and its actions', () => {
     expect(orderCard('1001')).toHaveTextContent('Cancel sent')
     expect(orderCard('1002')).not.toHaveTextContent('Cancel sent')
     // Cancel all now counts only the order whose cancel has not gone.
-    expect(screen.getByRole('button', { name: 'Cancel all (1)' })).toBeEnabled()
+    expectAvailable(screen.getByRole('button', { name: 'Cancel all (1)' }))
     await tap.click(orderCard('1001'))
     const sheet = screen.getByRole('dialog')
     expect(within(sheet).getByRole('button', { name: 'Cancel sent' })).toBeDisabled()
@@ -647,7 +678,7 @@ describe('Order book on a phone: the sheet and its actions', () => {
     expect(orderCard('1001')).toHaveTextContent('Cancel sent')
     await pass(15_500)
     expect(orderCard('1001')).not.toHaveTextContent('Cancel sent')
-    expect(screen.getByRole('button', { name: 'Cancel all (1)' })).toBeEnabled()
+    expectAvailable(screen.getByRole('button', { name: 'Cancel all (1)' }))
   })
 
   it('holds nothing when the cancel was refused', async () => {
@@ -677,7 +708,9 @@ describe('Order book on a phone: the sheet and its actions', () => {
     expect(orderCard('1001')).toHaveTextContent('Cancel sent')
     expect(orderCard('1002')).toHaveTextContent('Cancel sent')
     expect(orderCard('1003')).not.toHaveTextContent('Cancel sent')
-    expect(screen.getByRole('button', { name: 'Cancel all' })).toBeDisabled()
+    const all = screen.getByRole('button', { name: 'Cancel all' })
+    expectUnavailable(all)
+    expect(all).toHaveAccessibleDescription(EVERY_CANCEL_SENT)
   })
 
   it('says a cancel or a modify goes to the sandbox when Analyze mode is on', async () => {

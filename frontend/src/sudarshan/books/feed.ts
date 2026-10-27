@@ -15,7 +15,8 @@ import {
  * (src/sudarshan/dashboard/live.ts): "Real-time" only while WebSocket ticks
  * arrive; otherwise "Connecting" or "Reconnecting" while the market-data
  * socket is down, the age of the figures, "Stale" once ticks are due and have
- * stopped for 10 seconds, or "Market closed".
+ * stopped for 10 seconds, or "Market closed". With nothing open or held there
+ * is no line at all: no price is coming, so there is nothing to wait for.
  */
 
 /** What a table knows about its feed (useLivePrice's `feed`, or a page's own). */
@@ -89,6 +90,8 @@ export function useBookFeed(
     lastTickAt: feed.lastTickAt,
     lastUpdateAt: latest(feed.lastTickAt, feed.lastUpdateAt),
     ticksDue: feed.due > 0,
+    // Nothing open or held (every position closed, no holding): nothing to wait for.
+    held: feed.due > 0,
     connected: feed.connected,
   })
   // The feed is alive while any instrument ticks, not only this table's.

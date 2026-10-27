@@ -115,10 +115,21 @@ vi.mock('@/components/trading/PlaceOrderDialog', async () => {
 
 import Positions from '@/pages/Positions'
 import { resetSentForTests } from '@/sudarshan/books/sent'
-import { back, frame, openDialog, pass, renderBook, settle, where } from '@/test/bookPages'
+import {
+  back,
+  expectAvailable,
+  expectUnavailable,
+  frame,
+  openDialog,
+  pass,
+  renderBook,
+  settle,
+  where,
+} from '@/test/bookPages'
 import { fakeClock, frames } from '@/test/frames'
 import { feed } from '@/test/marketDataHarness'
 import { fakeScreen } from '@/test/screenWidth'
+import { NOTHING_TO_EXIT } from './PositionCards'
 import { STALE } from './parts'
 
 vi.setConfig({ testTimeout: 15_000 })
@@ -414,6 +425,44 @@ describe('Positions on a phone: the cards', () => {
     expect(screen.getByText('No open positions')).toBeInTheDocument()
   })
 
+  it.each([
+    ['live', 'live'],
+    ['analyze', 'analyzer'],
+  ])('waits for no prices in %s mode when every position is closed: the summary has no feed line', async (_mode, appMode) => {
+    theme.appMode = appMode
+    await renderPhone(CLOSED, CLOSED_CARRIED)
+    const summary = screen.getByRole('region', { name: 'Total P&L' })
+    expect(summary).toHaveTextContent('No open positions')
+    expect(summary.querySelector('[data-feed]')).toBeNull()
+    await pass(60_000)
+    expect(summary.querySelector('[data-feed]')).toBeNull()
+    expect(summary).not.toHaveTextContent('Waiting for prices')
+  })
+
+  it('shows Exit all as unavailable with nothing open, and says why when tapped or focused', async () => {
+    const tap = user()
+    await renderPhone(CLOSED)
+    const all = screen.getByRole('button', { name: 'Exit all' })
+    expectUnavailable(all)
+    expect(all).toHaveAccessibleDescription(NOTHING_TO_EXIT)
+    // Grey with a dashed edge: not the danger colour of an Exit all that can be sent.
+    expect(all).toHaveClass('border-dashed', 'text-[color:var(--text-tertiary)]')
+    expect(all).not.toHaveClass('border-destructive')
+    expect(all).not.toHaveClass('text-destructive')
+    const why = screen.getByTestId('why-not')
+    expect(why).toHaveClass('sr-only')
+
+    await tap.click(all)
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(why).not.toHaveClass('sr-only')
+    expect(why).toHaveTextContent(NOTHING_TO_EXIT)
+    act(() => all.blur())
+    expect(why).toHaveClass('sr-only')
+    act(() => all.focus())
+    expect(why).not.toHaveClass('sr-only')
+    expect(api.closeAllPositions).not.toHaveBeenCalled()
+  })
+
   it('shows every position, whatever filters the wide table saved on this device', async () => {
     localStorage.setItem(
       'openalgo_positions_prefs',
@@ -463,7 +512,15 @@ describe('Positions on a phone: the sheet and its actions', () => {
     // The broker's book lags the order: the re-read after it still says 65.
     expect(card(/NIFTY 25900 CE/)).toHaveTextContent('Exit sent')
     expect(card(/BANKNIFTY 57500 PE/)).not.toHaveTextContent('Exit sent')
-    expect(screen.getByRole('button', { name: 'Exit all' })).toBeDisabled()
+    const all = screen.getByRole('button', { name: 'Exit all' })
+    expectUnavailable(all)
+    // Exit all would size from the same book: it says which exit it waits for.
+    expect(all).toHaveAccessibleDescription(
+      /^An exit for NIFTY 25900 CE was sent at \d\d:\d\d:\d\d and has not shown in the book yet\. Check Orders before sending another\.$/
+    )
+    await tap.click(all)
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.getByTestId('why-not')).toHaveTextContent('An exit for NIFTY 25900 CE was sent')
     await tap.click(card(/NIFTY 25900 CE/))
     const exit = within(screen.getByRole('dialog')).getByRole('button', { name: /^Exit/ })
     expect(exit).toBeDisabled()
@@ -475,7 +532,7 @@ describe('Positions on a phone: the sheet and its actions', () => {
     await tap.click(screen.getByRole('button', { name: 'Refresh' }))
     await settle()
     expect(screen.queryByText('Exit sent')).toBeNull()
-    expect(screen.getByRole('button', { name: 'Exit all' })).toBeEnabled()
+    expectAvailable(screen.getByRole('button', { name: 'Exit all' }))
   })
 
   it('offers Exit again 15 s after an exit the book never showed', async () => {
@@ -505,7 +562,7 @@ describe('Positions on a phone: the sheet and its actions', () => {
     await settle()
     expect(api.closePosition).toHaveBeenCalledTimes(1)
     expect(card(/NIFTY 25900 CE/)).not.toHaveTextContent('Exit sent')
-    expect(screen.getByRole('button', { name: 'Exit all' })).toBeEnabled()
+    expectAvailable(screen.getByRole('button', { name: 'Exit all' }))
   })
 
   it('marks every open position "Exit sent" after Exit all', async () => {
@@ -517,7 +574,7 @@ describe('Positions on a phone: the sheet and its actions', () => {
     expect(api.closeAllPositions).toHaveBeenCalledTimes(1)
     expect(card(/NIFTY 25900 CE/)).toHaveTextContent('Exit sent')
     expect(card(/BANKNIFTY 57500 PE/)).toHaveTextContent('Exit sent')
-    expect(screen.getByRole('button', { name: 'Exit all' })).toBeDisabled()
+    expectUnavailable(screen.getByRole('button', { name: 'Exit all' }))
     await pass(15_500)
     expect(screen.queryByText('Exit sent')).toBeNull()
   })
@@ -689,7 +746,7 @@ describe('Positions on a phone: the sheet and its actions', () => {
   it('offers no Exit all and no Exit when every position is closed', async () => {
     const tap = user()
     await renderPhone(CLOSED)
-    expect(screen.getByRole('button', { name: 'Exit all' })).toBeDisabled()
+    expectUnavailable(screen.getByRole('button', { name: 'Exit all' }))
     await tap.click(card(/NIFTY FUT/))
     const sheet = screen.getByRole('dialog', { name: 'NIFTY FUT' })
     expect(within(sheet).queryByRole('button', { name: /^Exit/ })).toBeNull()

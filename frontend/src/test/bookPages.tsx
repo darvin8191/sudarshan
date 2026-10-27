@@ -16,7 +16,7 @@ import {
   useNavigate,
   useParams,
 } from 'react-router'
-import { vi } from 'vitest'
+import { expect, vi } from 'vitest'
 import { createQueryClient } from '@/app/providers'
 import { frames } from './frames'
 
@@ -128,4 +128,20 @@ export function entryHere(): InitialEntry {
   const probe = document.querySelector('[data-testid="where"]')
   const [pathname, search = ''] = (probe?.textContent ?? '').split(/(?=\?)/)
   return { pathname, search, state: JSON.parse(probe?.getAttribute('data-state') ?? 'null') }
+}
+
+/**
+ * An action that cannot be taken just now (books/cards/parts.tsx, `useWhyNot`):
+ * still reachable, so a tap or focus can say why, and read as unavailable.
+ */
+export function expectUnavailable(button: HTMLElement): void {
+  expect(button).toHaveAttribute('aria-disabled', 'true')
+  expect(button).not.toHaveAttribute('aria-haspopup')
+  expect(button).toHaveAccessibleDescription()
+}
+
+/** An action that can be taken. */
+export function expectAvailable(button: HTMLElement): void {
+  expect(button).toBeEnabled()
+  expect(button).not.toHaveAttribute('aria-disabled')
 }
