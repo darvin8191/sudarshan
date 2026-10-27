@@ -111,9 +111,12 @@ problem; the journal says which line and what the day does instead.
 `cas_status` is the closing-auction phase Upstox reports per segment (`casMarketStatus` in the
 feed's market info; NSE CMTR75479, from 3 Aug 2026: F&O stocks stop continuous trading at 15:15
 and close by auction). Upstox lists a segment only while its auction runs, so the map is `{}` the
-rest of the day, and each market info replaces it whole. A phase reads
+rest of the day, and each market info replaces it whole. It is also `{}` while no socket is open:
+a phase is known only from the open socket's own market info. A phase reads
 `{"status": "CAS_LM_START", "updated_ms": 1793094600250}`, `updated_ms` being when the phase began
-(Upstox's clock, epoch ms; `null` if it sent none). The phases Upstox documents are `CTS_CLOSE`
+(Upstox's clock, epoch ms; `null` if it sent none; a number that is no epoch-ms instant is passed on
+and logged as it came, and the frame's segment status is still recorded). A market info that
+changes both maps goes out as one health copy carrying both. The phases Upstox documents are `CTS_CLOSE`
 (continuous trading over, about 15:15), `CAS_LM_START` (auction orders, about 15:20),
 `CAS_M_STOP` (limit orders only, about 15:25) and `CAS_STOP` (order entry closed, at a random time
 from 15:28 to 15:30); any other word is passed on as Upstox sends it. Whether Upstox fills this

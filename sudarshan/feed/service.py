@@ -113,11 +113,18 @@ def _age(start: float | None, now: float) -> float | None:
 
 
 def _phase(segment: str, phase: dict | None) -> str:
-    """M18.1: "NSE_EQ CAS_LM_START at 2026-10-27T15:20:00+05:30", or "NSE_EQ none"."""
+    """M18.1: "NSE_EQ CAS_LM_START at 2026-10-27T15:20:00+05:30", or "NSE_EQ none". A time that is
+    no epoch-ms instant (the unit is Upstox's, not ours) is shown as it came, never an error."""
     if phase is None:
         return f"{segment} none"
     at = phase["updated_ms"]
-    return f"{segment} {phase['status']}" + (f" at {iso(at / 1000)}" if at else "")
+    if not at:
+        return f"{segment} {phase['status']}"
+    try:
+        when = iso(at / 1000)
+    except (ValueError, OverflowError, OSError):
+        when = str(at)
+    return f"{segment} {phase['status']} at {when}"
 
 
 class FeedService:
@@ -375,6 +382,7 @@ class FeedService:
             return self._fail("network", f"{type(exc).__name__}: {exc}")
         finally:
             self._ws, self._live = None, False
+            self._cas_status = {}  # M18.1: known only from a socket's own market info
             if self._connected_at is not None:
                 self._last_session_s = time.monotonic() - self._connected_at
             self._connected_at = self._connected_since = None
@@ -455,11 +463,12 @@ class FeedService:
             return
         try:
             kind, ticks, status, cas = protocol.decode(message)
-            self._note_cas(cas)  # M18.1: the closing-auction phase, logged on each change
             changed = {s: v for s, v in status.items() if self._market_status.get(s) != v}
             if changed:
                 log.info("market status: %s", ", ".join(f"{s} {v}" for s, v in changed.items()))
                 self._market_status.update(changed)
+            if self._note_cas(cas):  # M18.1: after the segment status, so one health copy has both
+                self._publish_health()
             ts_recv, fresh = int(self.clock() * 1000), kind == "initial_feed"
             for key, partial in ticks.items():
                 if partial:
@@ -471,19 +480,19 @@ class FeedService:
             what = f"bad feed frame ({len(message)} bytes): {exc!r}"
             self._throttle(logging.WARNING, "decode", what, exc_info=True)
 
-    def _note_cas(self, cas: dict[str, dict] | None) -> None:
+    def _note_cas(self, cas: dict[str, dict] | None) -> bool:
         """M18.1: a frame with market info carries the whole closing-auction state (protocol.py).
 
         Whether Upstox fills casMarketStatus is not known yet (on 27 Oct segmentStatus said
         nothing at 15:15 or 15:20), so the journal tells every session: the first market info on
         each socket is one INFO line even when the map is empty, and every later change is one
         INFO line naming the segments that changed, with Upstox's own time for each phase
-        (segments in name order: the wire's map has none). A change goes out on the health
-        topic at once.
+        (segments in name order: the wire's map has none). True when the map changed: the
+        caller publishes health once for the whole frame.
         """
         first = self._cas_socket != self._connected_at  # the first market info on this socket
         if cas is None or (cas == self._cas_status and not first):
-            return
+            return False
         old, self._cas_status, self._cas_socket = self._cas_status, cas, self._connected_at
         changed = sorted(cas) if first else sorted(s for s in cas.keys() | old.keys()
                                                    if cas.get(s) != old.get(s))  # fmt: skip
@@ -492,8 +501,7 @@ class FeedService:
             log.info("closing auction status on connect: %s", told or "none")
         else:
             log.info("closing auction status: %s", told)
-        if cas != old:
-            self._publish_health()
+        return cas != old
 
     def _note_trade(self, ticks: dict, ts_recv: int) -> None:
         """A tick whose last trade time falls on today (IST) shows the exchange trading today."""
