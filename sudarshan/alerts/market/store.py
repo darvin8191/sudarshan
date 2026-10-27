@@ -32,6 +32,13 @@ public method to this.
 
 Retention: events with their deliveries, and pauses, older than ``keep_days`` (100, never under
 90) go at start and after each session; baselines after 10 days; definitions never.
+
+Read-only (cross-design X7, A7p): ``MarketStore(path, read_only=True)`` is for the replay check
+and anything else that only reads. It never creates the file, never migrates it and never
+writes: every write raises StoreError, and a file at another version than this code's is refused
+in words (an older one waits for the service to migrate it; a newer one keeps market alerts off).
+It opens the file read-only, or as immutable when no write-ahead log is beside it, as the order
+alerts read openalgo.db (owner.database_urls).
 """
 
 from __future__ import annotations
@@ -67,6 +74,7 @@ from database.engine_factory import create_db_engine
 from sudarshan.alerts.market import migrations, spec
 from sudarshan.alerts.market.clock import Pause
 from sudarshan.alerts.market.engine import Fire, State, stop_reason
+from sudarshan.alerts.owner import database_urls
 from sudarshan.alerts.store import _cause, _private_file
 
 DB_FILENAME = "market.db"
@@ -184,11 +192,48 @@ def writer(made: Engine) -> Engine:
     return made.execution_options(**{migrations.IMMEDIATE: True})
 
 
+def open_read_only(path: Path) -> Engine:
+    """market.db for reading only: never created, migrated or written. Raises StoreError in the
+    owner's words (SchemaTooNew for a file from a newer release)."""
+    if not path.exists():
+        raise StoreError(WORDS["missing"])
+    failure: Exception | None = None
+    for url in database_urls(path):  # -wal beside it: mode=ro; none: immutable=1
+        made = create_db_engine(url)
+        try:
+            with made.connect() as conn:
+                found = migrations.version(conn)
+        except SQLAlchemyError as exc:
+            made.dispose()
+            failure = exc
+            continue
+        if found > migrations.LATEST:
+            made.dispose()
+            raise migrations.SchemaTooNew(found, migrations.LATEST)
+        if found < migrations.LATEST:
+            made.dispose()
+            raise StoreError(WORDS["older"].format(found=found, known=migrations.LATEST))
+        return made
+    raise StoreError(WORDS["read"], _cause(failure))
+
+
 class MarketStore:
-    def __init__(self, path: Path | str, principals=("owner",), keep_days: int = KEEP_DAYS):
+    def __init__(
+        self,
+        path: Path | str,
+        principals=("owner",),
+        keep_days: int = KEEP_DAYS,
+        *,
+        read_only: bool = False,
+    ):
         self.path = Path(path)
         self.principals = frozenset(principals)
         self.keep_days = max(MIN_KEEP_DAYS, int(keep_days))
+        self.read_only = read_only
+        if read_only:
+            self.engine = open_read_only(self.path)
+            self.writer, self.applied = None, []
+            return
         try:
             _private_file(self.path)
             self.engine = engine(self.path)
@@ -624,6 +669,8 @@ class MarketStore:
 
     @contextlib.contextmanager
     def _tx(self) -> Iterator:
+        if self.read_only:
+            raise StoreError(WORDS["read_only"], "opened read-only")
         try:
             with self.writer.begin() as conn:
                 yield conn
@@ -650,6 +697,11 @@ WORDS = {
     "read": "The market alert record could not be read just now. Alerts already set are still "
     "checked. Try again in a minute; if it keeps failing, check that the server has free disk "
     "space.",
+    "missing": "There is no market alert record yet: sudarshan-alerts makes it when market "
+    "alerts first start.",
+    "older": "The market alert record is from an older release (version {found}; this one reads "
+    "version {known}). Start sudarshan-alerts once to bring it up to date, then try again.",
+    "read_only": "The market alert record was opened only to read: nothing can be saved here.",
 }
 
 
