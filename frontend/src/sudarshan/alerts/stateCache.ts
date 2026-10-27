@@ -64,7 +64,7 @@ export function applyDeliveries<T>(data: T, news: ReadonlyMap<number, Deliveries
     return pages.every((page, index) => page === paged.pages[index]) ? data : { ...paged, pages }
   }
   if ('events' in data && Array.isArray((data as { events: unknown }).events)) {
-    return settledPage(data as EventsPage, news) as T
+    return settledPage(data as unknown as EventsPage, news) as T
   }
   return data
 }

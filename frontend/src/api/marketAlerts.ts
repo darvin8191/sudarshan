@@ -271,8 +271,6 @@ export function problemOf(error: unknown): AlertsProblem {
 const READ_MS = 15_000
 /** A change waits this long: the bridge gives the service 6 s. */
 const CHANGE_MS = 20_000
-/** The test waits this long: the service waits up to 10 s for Telegram, the bridge 12 s. */
-const TEST_MS = 30_000
 
 async function call<T>(request: Promise<{ data: Envelope<T> }>): Promise<T> {
   let body: Envelope<T>
@@ -296,6 +294,10 @@ export const marketAlertsApi = {
     call<EventsPage>(
       webClient.get(`${BASE}/events/since`, { params: { after, limit }, timeout: READ_MS })
     ),
+  create: (alert: AlertDraft) =>
+    call<AlertRow>(webClient.post(`${BASE}/alerts`, { alert }, { timeout: CHANGE_MS })),
+  change: (id: number, change: Change) =>
+    call<AlertRow>(webClient.patch(`${BASE}/alerts/${id}`, change, { timeout: CHANGE_MS })),
+  remove: (id: number) =>
+    call<{ deleted: boolean }>(webClient.delete(`${BASE}/alerts/${id}`, { timeout: CHANGE_MS })),
 }
-
-export const ALERTS_TIMEOUTS = { READ_MS, CHANGE_MS, TEST_MS } as const
