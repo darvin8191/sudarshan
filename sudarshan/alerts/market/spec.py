@@ -179,6 +179,12 @@ def check(fields: Mapping[str, Any], now: int) -> dict[str, Any]:
         )
     if frequency == AT_CLOSE and kind.no_close:
         raise SpecError("frequency", kind.no_close)
+    if frequency == AT_CLOSE and params.get("source", "ltp") != "ltp":
+        raise SpecError(
+            "frequency",
+            "'At candle close' judges the last trade price. For the bid or ask, pick another "
+            "frequency.",
+        )
     candle = _candle(fields, frequency, kind)
     wait = _wait(fields.get("cooldown_s", kind.wait_s))
     if frequency == EVERY_TIME and kind.compile(params, grain, segment).mode == LEVEL:

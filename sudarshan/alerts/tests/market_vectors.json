@@ -10,7 +10,9 @@
     "windows trades in that window (the extra-days file's line, e.g. 2026-11-08 14:05-15:40).",
     "Alert steps: a trade or quote, {clock}, {pause: [from, to]} (the feed reconnecting),",
     "{restart: [from, to]} (the service down; only market.db's fields survive), {suspend},",
-    "{resume}, {edit: fields}, {seed: snapshot tick}. A step's 'check' is the gate's verdict."
+    "{resume}, {edit: fields}, {seed: snapshot tick}. A step's 'check' is the gate's verdict.",
+    "Words: a fire's golden texts, the app's title and detail and the Telegram line; prices in a",
+    "fire are text and the times IST on the defaults' day."
   ],
   "defaults": {
     "day": "2026-10-21",
@@ -37,6 +39,19 @@
       "expiry": "2026-11-25"
     },
     "expiring": {
+      "instrument_key": "NSE_FO|49229",
+      "symbol": "NIFTY21OCT2625900CE",
+      "exchange": "NFO",
+      "tick_size": "0.05",
+      "expiry": "2026-10-21"
+    },
+    "reliance": {
+      "instrument_key": "NSE_EQ|INE002A01018",
+      "symbol": "RELIANCE",
+      "exchange": "NSE",
+      "tick_size": "0.05"
+    },
+    "option": {
       "instrument_key": "NSE_FO|49229",
       "symbol": "NIFTY21OCT2625900CE",
       "exchange": "NFO",
@@ -216,6 +231,16 @@
       "alert": {"kind": "day_break", "params": {"side": "low", "after": "15:40"}},
       "field": "after",
       "message": "Pick a start time between 09:15 and 15:40."
+    },
+    {
+      "id": "X15",
+      "alert": {
+        "params": {"op": "crosses_above", "level": "120", "source": "bid"},
+        "frequency": "at_close",
+        "candle": 15
+      },
+      "field": "frequency",
+      "message": "'At candle close' judges the last trade price. For the bid or ask, pick another frequency."
     }
   ],
   "alerts": [
@@ -1308,6 +1333,177 @@
       "status_of": "NSE_EQ",
       "status": "NORMAL_CLOSE",
       "check": "ok"
+    }
+  ],
+  "words": [
+    {
+      "id": "W1",
+      "instrument": "nifty",
+      "alert": {"params": {"op": "crosses_above", "level": "25900"}},
+      "fire": {"value": "25903.15", "level": "25900", "direction": "up"},
+      "title": "NIFTY crossed above 25,900.00",
+      "detail": "now 25,903.15",
+      "line": "Alert: NIFTY crossed above 25,900.00: now 25,903.15 (index)"
+    },
+    {
+      "id": "W2",
+      "instrument": "reliance",
+      "alert": {"kind": "move", "params": {"direction": "up", "percent": "2"}},
+      "fire": {"value": "1428.25", "level": "1427.80", "direction": "up", "base": "1399.80"},
+      "line": "Alert: RELIANCE up 2.03% on the day: ₹1,428.25 (previous close ₹1,399.80) (NSE)"
+    },
+    {
+      "id": "W3",
+      "alert": {"kind": "day_break", "params": {"side": "high"}, "note": "book half"},
+      "fire": {"value": "812.55", "level": "812.45", "direction": "up", "base": "812.40", "price": "812.55"},
+      "line": "Alert: SBIN broke today's high ₹812.40: now ₹812.55 (NSE) · Note: book half"
+    },
+    {
+      "id": "W4",
+      "instrument": "nifty",
+      "alert": {"params": {"op": "crosses_above", "level": "25900"}},
+      "fire": {
+        "value": "25932.10",
+        "level": "25900",
+        "direction": "up",
+        "opening": true,
+        "previous": "25861.40"
+      },
+      "title": "NIFTY opened above 25,900.00",
+      "detail": "first price 25,932.10 (previous 25,861.40)",
+      "line": "Alert: NIFTY opened above 25,900.00: first price 25,932.10 (previous 25,861.40) (index)"
+    },
+    {
+      "id": "W5",
+      "instrument": "nifty",
+      "alert": {"params": {"op": "crosses_above", "level": "25900"}},
+      "fire": {
+        "value": "25903.15",
+        "level": "25900",
+        "direction": "up",
+        "found_later": ["10:41:05", "10:44:10"]
+      },
+      "line": "Alert: NIFTY crossed above 25,900.00: now 25,903.15 (index) (seen after a pause in market alerts, 10:41 to 10:44)"
+    },
+    {
+      "id": "W6",
+      "alert": {"kind": "day_break", "params": {"side": "high"}},
+      "fire": {
+        "value": "101.40",
+        "level": "101.05",
+        "direction": "up",
+        "base": "101.00",
+        "price": "100.50",
+        "found_later": ["10:00:10", "10:01:00"]
+      },
+      "line": "Alert: SBIN broke today's high ₹101.00 while market alerts were paused: today's high is now ₹101.40 (NSE)"
+    },
+    {
+      "id": "W7",
+      "alert": {"kind": "day_break", "params": {"side": "high"}},
+      "fire": {"value": "101.20", "level": "101.05", "direction": "up", "base": "101.00", "price": "100.90"},
+      "line": "Alert: SBIN broke today's high ₹101.00: today's high is now ₹101.20, last trade ₹100.90 (NSE)"
+    },
+    {
+      "id": "W8",
+      "instrument": "reliance",
+      "alert": {"kind": "vwap", "params": {"direction": "above"}},
+      "fire": {"value": "1423.00", "level": "1422.30", "direction": "up", "base": "1422.30"},
+      "line": "Alert: RELIANCE crossed above VWAP ₹1,422.30: now ₹1,423.00 (NSE)"
+    },
+    {
+      "id": "W9",
+      "alert": {"params": {"op": "crosses_above", "level": "120", "source": "bid"}},
+      "fire": {"value": "120.00", "level": "120", "direction": "up"},
+      "line": "Alert: SBIN bid crossed above ₹120.00: now ₹120.00 (NSE)"
+    },
+    {
+      "id": "W10",
+      "alert": {"params": {"op": "at_or_below", "level": "100"}},
+      "fire": {"value": "99.95", "level": "100", "direction": "down"},
+      "line": "Alert: SBIN is at or below ₹100.00: now ₹99.95 (NSE)"
+    },
+    {
+      "id": "W11",
+      "alert": {"params": {"op": "crosses_above", "level": "100"}, "frequency": "at_close", "candle": 15},
+      "fire": {"value": "100.05", "level": "100", "direction": "up", "span": ["10:00:00", "10:15:00"]},
+      "title": "SBIN 15-min candle closed above ₹100.00",
+      "detail": "close ₹100.05 (10:00 to 10:15)",
+      "line": "Alert: SBIN 15-min candle closed above ₹100.00: close ₹100.05 (10:00 to 10:15) (NSE)"
+    },
+    {
+      "id": "W12",
+      "alert": {"params": {"op": "at_or_above", "level": "100"}, "frequency": "at_close", "candle": "day"},
+      "fire": {"value": "100.05", "level": "100", "direction": "up", "span": ["09:15:00", "15:30:00"]},
+      "line": "Alert: SBIN closed the day at or above ₹100.00: close ₹100.05 (09:15 to 15:30) (NSE)"
+    },
+    {
+      "id": "W13",
+      "instrument": "option",
+      "alert": {"params": {"op": "crosses_above", "level": "120"}},
+      "fire": {"value": "120.05", "level": "120", "direction": "up"},
+      "line": "Alert: NIFTY 21 OCT 25900 CE crossed above ₹120.00: now ₹120.05 (NFO)"
+    },
+    {
+      "id": "W14",
+      "alert": {"kind": "move", "params": {"direction": "down", "percent": "2"}},
+      "fire": {"value": "98.00", "level": "98.00", "direction": "down", "base": "100.00"},
+      "line": "Alert: SBIN down 2.00% on the day: ₹98.00 (previous close ₹100.00) (NSE)"
+    },
+    {
+      "id": "W15",
+      "alert": {"kind": "move", "params": {"base": "open", "direction": "up", "percent": "1"}},
+      "fire": {"value": "202.00", "level": "202.00", "direction": "up", "base": "200.00"},
+      "line": "Alert: SBIN up 1.00% from today's open: ₹202.00 (open ₹200.00) (NSE)"
+    },
+    {
+      "id": "W16",
+      "alert": {"params": {"op": "crosses_above", "level": "100"}, "note": "*book* _half_ [now] `x`"},
+      "fire": {"value": "100.05", "level": "100", "direction": "up"},
+      "line": "Alert: SBIN crossed above ₹100.00: now ₹100.05 (NSE) · Note: book half (now) 'x'"
+    },
+    {
+      "id": "W17",
+      "instrument": "future",
+      "alert": {"params": {"op": "crosses_above", "level": "26000"}},
+      "fire": {"value": "26000.10", "level": "26000", "direction": "up"},
+      "line": "Alert: NIFTY 25 NOV FUT crossed above ₹26,000.00: now ₹26,000.10 (NFO)"
+    },
+    {
+      "id": "W18",
+      "alert": {"params": {"op": "crosses_below", "level": "123456.80"}},
+      "fire": {"value": "123456.75", "level": "123456.80", "direction": "down"},
+      "line": "Alert: SBIN crossed below ₹1,23,456.80: now ₹1,23,456.75 (NSE)"
+    },
+    {
+      "id": "W19",
+      "instrument": "reliance",
+      "alert": {"kind": "vwap", "params": {"direction": "below"}, "frequency": "at_close", "candle": 5},
+      "fire": {
+        "value": "1421.00",
+        "level": "1422.30",
+        "direction": "down",
+        "base": "1422.30",
+        "span": ["10:00:00", "10:05:00"]
+      },
+      "line": "Alert: RELIANCE 5-min candle closed below VWAP ₹1,422.30: close ₹1,421.00 (10:00 to 10:05) (NSE)"
+    },
+    {
+      "id": "W20",
+      "alert": {
+        "kind": "move",
+        "params": {"direction": "up", "percent": "2"},
+        "frequency": "at_close",
+        "candle": 15
+      },
+      "fire": {
+        "value": "102.00",
+        "level": "102.00",
+        "direction": "up",
+        "base": "100.00",
+        "span": ["10:00:00", "10:15:00"]
+      },
+      "line": "Alert: SBIN 15-min candle closed up 2.00% on the day: close ₹102.00 (previous close ₹100.00) (NSE)"
     }
   ]
 }

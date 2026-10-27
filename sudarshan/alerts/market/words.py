@@ -1,0 +1,250 @@
+"""What the owner reads about market alerts (M10.5): Telegram lines and the app's words. Pure.
+
+English under the सुदर्शन / SUDARSHAN header, as order alerts are: no icons, no emojis, no codes.
+A price carries its instrument's decimals (the tick's own, at least two) with Indian grouping; a
+traded instrument's prices are in rupees (₹1,428.25), an index's are plain points (25,903.15).
+The owner's note is cleaned of Markdown characters (messages.clean): OpenAlgo sends with
+parse_mode Markdown and does not escape.
+
+    सुदर्शन / SUDARSHAN
+    Alert: NIFTY crossed above 25,900.00: now 25,903.15 (index)
+    Alert: RELIANCE up 2.03% on the day: ₹1,428.25 (previous close ₹1,399.80) (NSE)
+    Alert: SBIN broke today's high ₹812.40: now ₹812.55 (NSE) · Note: book half
+    10:42:05 IST
+
+A fire's words come in two halves, ``describe`` -> (title, detail): the app's toast shows them,
+and ``line`` joins them for Telegram with the exchange, the pause mark and the note.
+"""
+
+from __future__ import annotations
+
+from datetime import date, datetime, timedelta
+from decimal import ROUND_HALF_UP, Decimal
+
+from sudarshan.alerts.market import book, clock, conditions, engine
+from sudarshan.alerts.market.sessions import INDEX_SEGMENTS
+from sudarshan.alerts.market.spec import AT_CLOSE, CROSS, DAY, UP, Alert
+from sudarshan.alerts.messages import SAME_MOMENT, clean, instrument, quantity
+from sudarshan.autologin.messages import BRAND
+from sudarshan.autologin.schedule import IST
+
+NOTE_MAX = 120
+#: A pause gets its Telegram lines only when it lasts longer than this inside the session.
+PAUSE_TELL_MS = 60_000
+TEST_LINE = "Test: market alerts reach this chat (sent from the Alerts page)."
+WATCHING = "Watching · Real-time"
+_PAST = {"feed": "the price feed was reconnecting", "service": "market alerts were not running"}
+_NOW = {"feed": "the price feed is reconnecting", "service": "market alerts are not running"}
+
+
+def amount(alert: Alert, ticks: int) -> str:
+    """'₹1,428.25' for a traded instrument, '25,903.15' (points) for an index."""
+    return _number(alert.grain.price(ticks), "" if alert.segment in INDEX_SEGMENTS else "₹")
+
+
+def _number(value: Decimal, sign: str = "") -> str:
+    whole, _, frac = str(abs(value)).partition(".")
+    text = quantity(int(whole)) + (f".{frac}" if frac else "")
+    return f"{'-' if value < 0 else ''}{sign}{text}"
+
+
+def _hm(at: int) -> str:
+    return datetime.fromtimestamp(at / 1000, IST).strftime("%H:%M")
+
+
+def _hms(at: int) -> str:
+    return datetime.fromtimestamp(at / 1000, IST).strftime("%H:%M:%S")
+
+
+def _day(at: int) -> str:
+    moment = datetime.fromtimestamp(at / 1000, IST)
+    return f"{moment.day} {moment:%b}"
+
+
+def describe(alert: Alert, fire: engine.Fire, today: date) -> tuple[str, str]:
+    """The fire's two halves: (title, detail), e.g. ('NIFTY crossed above 25,900.00',
+    'now 25,903.15')."""
+    name = instrument(alert.symbol, today)
+    way = "above" if fire.direction == UP else "below"
+    level, value = amount(alert, fire.level), amount(alert, fire.value)
+    closed = alert.frequency == AT_CLOSE
+    lead = _close_lead(alert, name) if closed else name
+    if alert.kind == "move":
+        rise = "up" if fire.direction == UP else "down"
+        on, base = ("on the day", "previous close")
+        if alert.params["base"] == "open":
+            on, base = ("from today's open", "open")
+        if fire.base is None:  # not known: say the alert's own threshold
+            return f"{lead} {rise} {alert.params['percent']}% {on}", f"now {value}"
+        detail = f"{value} ({base} {amount(alert, fire.base)})"
+        share = _share(alert, fire)
+        return f"{lead} {rise} {share}% {on}", ("close " + detail) if closed else detail
+    if alert.kind == "day_break":
+        side = "high" if fire.direction == UP else "low"
+        broke = f"{name} broke today's {side} {amount(alert, fire.base)}"
+        if fire.found_later is not None:
+            return f"{broke} while market alerts were paused", f"today's {side} is now {value}"
+        if fire.price is not None and fire.price != fire.value:
+            last = amount(alert, fire.price)
+            return broke, f"today's {side} is now {value}, last trade {last}"
+        return broke, f"now {value}"
+    if alert.kind == "vwap":
+        title = f"{lead} {way} VWAP {level}" if closed else f"{name} crossed {way} VWAP {level}"
+        return title, _close_detail(fire, value) if closed else f"now {value}"
+    if fire.opening:
+        return (
+            f"{name} opened {way} {level}",
+            f"first price {value} (previous {amount(alert, fire.previous)})",
+        )
+    source = {"bid": "bid ", "ask": "ask "}.get(alert.cond.source, "")
+    verb = f"crossed {way}" if alert.cond.mode == CROSS else f"is at or {way}"
+    if closed:
+        verb = way if alert.cond.mode == CROSS else f"at or {way}"
+        return f"{lead} {verb} {level}", _close_detail(fire, value)
+    return f"{name} {source}{verb} {level}", f"now {value}"
+
+
+def _close_lead(alert: Alert, name: str) -> str:
+    if alert.candle_min == DAY:
+        return f"{name} closed the day"
+    return f"{name} {alert.candle_min}-min candle closed"
+
+
+def _close_detail(fire: engine.Fire, value: str) -> str:
+    if fire.span is None:
+        return f"close {value}"
+    start, end = fire.span
+    return f"close {value} ({_hm(start)} to {_hm(end)})"
+
+
+def _share(alert: Alert, fire: engine.Fire) -> str:
+    """The move from the base in percent, two decimals: 1428.25 on 1399.80 -> '2.03'."""
+    base = alert.grain.price(fire.base)
+    move = abs(alert.grain.price(fire.value) - base) / base * 100
+    return _number(move.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+
+def line(alert: Alert, fire: engine.Fire, today: date) -> str:
+    """One fire on Telegram: 'Alert: NIFTY crossed above 25,900.00: now 25,903.15 (index)'."""
+    title, detail = describe(alert, fire, today)
+    tag = "index" if alert.segment in INDEX_SEGMENTS else clean(alert.exchange, 12).upper()
+    mark = ""
+    if fire.found_later is not None and alert.kind != "day_break":
+        start, end = fire.found_later
+        mark = f" (seen after a pause in market alerts, {_hm(start)} to {_hm(end)})"
+    return f"Alert: {title}: {detail} ({tag}){mark}{note(alert)}"
+
+
+def note(alert: Alert) -> str:
+    """' · Note: book half', or '' without a note."""
+    text = clean(alert.note, NOTE_MAX)
+    return f" · Note: {text}" if text else ""
+
+
+def message(lines: list[str], first: datetime, last: datetime, dropped: int = 0) -> str:
+    """The market lane's Telegram message: the header, its lines, then the IST time or range."""
+    first, last = first.astimezone(IST), last.astimezone(IST)
+    when = f"{first:%H:%M:%S}"
+    if last - first >= SAME_MOMENT:
+        when = f"{first:%H:%M:%S} to {last:%H:%M:%S}"
+    parts = [BRAND, *lines]
+    if dropped:
+        parts.append(
+            f"{quantity(dropped)} more market alerts could not be listed here. "
+            "The Alerts page has them."
+        )
+    parts.append(f"{when} IST")
+    return "\n".join(parts)
+
+
+def tells_pause(start: int, end: int, active: int) -> bool:
+    """A pause in checking gets its two Telegram lines only when it is long and alerts wait."""
+    return active > 0 and end - start > PAUSE_TELL_MS
+
+
+def pause_started(start: int, cause: str = "feed") -> str:
+    return f"Market alerts paused since {_hms(start)} IST: {_NOW.get(cause, _NOW['feed'])}."
+
+
+def pause_ended(start: int, end: int, cause: str = "feed") -> str:
+    why = _PAST.get(cause, _PAST["feed"])
+    return (
+        f"Market alerts paused {_hms(start)} to {_hms(end)} IST: {why}. A level crossed and "
+        "crossed back inside that time was not seen."
+    )
+
+
+def status_reason(reason: engine.Reason) -> str:
+    """Why an alert stopped or paused itself, as its card says it."""
+    if reason.code == "fired_once":
+        return f"Fired once at {_hm(reason.at)} on {_day(reason.at)}"
+    if reason.code == "ended":
+        last = reason.at - 1
+        if _hm(reason.at) == "00:00":
+            return f"Ended on {_day(last)}"
+        return f"Ended at {_hm(reason.at)} on {_day(reason.at)}"
+    if reason.code == "expired":
+        return f"Contract expired on {_day(reason.at)}"
+    if reason.code == "fire_limit":
+        return f"Fired {engine.FIRE_LIMIT} times today; paused so Telegram is not flooded"
+    raise ValueError(f"not a stop reason: {reason.code!r}")
+
+
+_NOTES = {
+    conditions.WAITING_CLOSE: "Waiting for the previous close",
+    conditions.WAITING_OPEN: "Waiting for today's open",
+    conditions.WAITING_VWAP: "Waiting for the day's VWAP",
+    book.BASE_CHANGED: "The previous close changed, so the level was worked out again",
+}
+
+
+def note_words(reason: engine.Reason) -> str:
+    """An alert's note for its card: what it waits for, or a candle it could not judge."""
+    if reason.code == engine.NOT_CHECKED:
+        return f"Not checked: the price feed paused during the {_hm(reason.at)} candle"
+    return _NOTES[reason.code]
+
+
+def check_words(
+    code: str, *, now: int, opens_at: int | None = None, since: int | None = None
+) -> str:
+    """The page's status line when the engine is not judging (clock.gate's first failure).
+
+    ``opens_at`` is the next session's start (sessions.next_session), ``since`` when the feed
+    went down."""
+    then = f" · checks from {_when(opens_at, now)}" if opens_at is not None else ""
+    if code == clock.CLOSED_TODAY:
+        return f"Market closed today{then}"
+    if code == clock.OUTSIDE_HOURS:
+        return f"Market closed{then}"
+    if code == clock.NOT_OPEN_YET:
+        return "The exchange has not opened this segment yet"
+    if code == clock.CLOSED_BY_EXCHANGE:
+        return "Closed by the exchange"
+    if code == clock.FEED_DOWN:
+        tail = f" (since {_hms(since)})" if since is not None else ""
+        return f"Not checking · the price feed is reconnecting{tail}"
+    return WATCHING
+
+
+def _when(at: int, now: int) -> str:
+    """'14:20' later today, 'Mon 09:15' within a week, '9 Nov 09:15' further on."""
+    moment, today = datetime.fromtimestamp(at / 1000, IST), datetime.fromtimestamp(now / 1000, IST)
+    if moment.date() == today.date():
+        return f"{moment:%H:%M}"
+    if moment.date() - today.date() < timedelta(days=7):
+        return f"{moment:%a %H:%M}"
+    return f"{moment.day} {moment:%b %H:%M}"
+
+
+def checks_at(alert: Alert) -> str | None:
+    """'Checks at ₹100.05 (nearest tick)' when a fixed level is off the tick grid; None on it."""
+    cond = alert.cond
+    if cond.up is None or cond.up == cond.down:
+        return None
+    up, down = amount(alert, cond.up), amount(alert, cond.down)
+    if cond.direction == UP:
+        return f"Checks at {up} (nearest tick)"
+    if cond.direction == -1:
+        return f"Checks at {down} (nearest tick)"
+    return f"Checks at {up} going up and {down} going down (nearest ticks)"

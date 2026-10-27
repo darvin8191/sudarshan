@@ -301,7 +301,7 @@ def test_refused_vector(vector):
 
 
 def test_every_vector_has_a_unique_id():
-    groups = ("snap", "sessions", "refused", "gate", "alerts")
+    groups = ("snap", "sessions", "refused", "gate", "alerts", "words")
     ids = [v["id"] for group in groups for v in VECTORS[group]]
     assert len(ids) == len(set(ids))
 

@@ -128,6 +128,8 @@ class Fire(NamedTuple):
     base: int | None = None
     #: The last trade when ``value`` is not it (a day high taken from the feed's own high).
     price: int | None = None
+    #: At candle close: the candle's (start, end), epoch ms.
+    span: tuple[int, int] | None = None
 
 
 class Reason(NamedTuple):
@@ -313,7 +315,7 @@ def close(alert: Alert, state: State, now: int, pauses: tuple[Pause, ...] = ()) 
     out = judge(alert, state, Obs(f.value, f.end, state.session, f.up, f.down, f.candle,
                 f.start, f.end), now, pauses)  # fmt: skip
     if out.fire is not None:
-        out = out._replace(fire=out.fire._replace(trade_time=f.at))
+        out = out._replace(fire=out.fire._replace(trade_time=f.at, span=(f.start, f.end)))
     return out
 
 
