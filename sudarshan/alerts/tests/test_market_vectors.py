@@ -170,7 +170,7 @@ class World:
                                        status_reason=reason)  # fmt: skip
             elif out.status is not None:
                 self.store.set_status("owner", self.alert.id, out.status, out.reason.code, now,
-                                      version=self.alert.version)  # fmt: skip
+                                      version=self.alert.version, was=self.alert.status)  # fmt: skip
             if out.note is not None:
                 self.notes.append((now, out.note))
             if out.status is not None:
@@ -256,7 +256,9 @@ def test_alert_vector(vector, tmp_path):
     world = World(vector, tmp_path / "market.db")
     for raw in expand(vector["steps"], world.day):
         world.run(raw)
+    stored = world.store.alert("owner", world.alert.id)
     world.store.close()
+    assert stored["status"] == world.alert.status  # market.db took every stop and pause
     fires = world.fires
     if "fire_count" in vector:
         assert len(fires) == vector["fire_count"]

@@ -200,7 +200,11 @@ def timer(
 ) -> Outcome | None:
     """What the time alone decides: a candle to judge at its close, or an end. None: nothing.
 
-    ``today`` is the session now (YYYYMMDD): a candle of an earlier one is not judged."""
+    ``today`` is the session now (YYYYMMDD): a candle of an earlier one is not judged. A Paused
+    alert judges nothing, but its end date or its contract's expiry still stops it."""
+    if alert.status == "paused":
+        stop = stop_reason(alert, now)
+        return None if stop is None else Outcome(alert.id, state, status="stopped", reason=stop)
     if alert.status != "active":
         return None
     f = state.forming

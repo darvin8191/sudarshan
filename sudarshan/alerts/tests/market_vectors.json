@@ -609,6 +609,40 @@
       "reason_at": "15:40:00"
     },
     {
+      "id": "E4",
+      "says": "paused by the owner, then its end date passes: stopped as ended, not left paused",
+      "alert": {
+        "params": {"op": "crosses_above", "level": "100"},
+        "frequency": "every_time",
+        "ends": "2026-10-21T10:30:00+05:30"
+      },
+      "steps": [
+        {"at": "10:00:00", "ltp": 99.95},
+        {"at": "10:10:00", "suspend": true},
+        {"at": "10:29:59", "clock": true},
+        {"at": "10:30:00", "clock": true}
+      ],
+      "fires": [],
+      "status": "stopped",
+      "reason": "ended",
+      "reason_at": "10:30:00"
+    },
+    {
+      "id": "E5",
+      "says": "paused, then its contract expires: stopped as expired at its segment's close",
+      "instrument": "expiring",
+      "alert": {"params": {"op": "crosses_above", "level": "100"}, "frequency": "every_time"},
+      "steps": [
+        {"at": "11:00:00", "suspend": true},
+        {"at": "15:39:59", "clock": true},
+        {"at": "15:40:00", "clock": true}
+      ],
+      "fires": [],
+      "status": "stopped",
+      "reason": "expired",
+      "reason_at": "15:40:00"
+    },
+    {
       "id": "R1",
       "says": "every time, no wait: the 51st crossing in a session pauses it",
       "alert": {"params": {"op": "crosses_above", "level": "100"}, "frequency": "every_time"},

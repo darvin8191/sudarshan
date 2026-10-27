@@ -2,7 +2,7 @@
 
 The runtime hands each tick from the feed to ``on_tick`` with the time and what it knows about the
 market (clock.Market), and calls ``on_clock`` about once a second for what time alone decides: a
-candle's close, an end date, an expiry. Both return what happened. The Book keeps every alert's
+candle's close, an end date, an expiry (a Paused alert's too: it stops at its end). Both return what happened. The Book keeps every alert's
 state in memory; ``changed`` hands over the states to save in the 1 s flush, each with the
 alert's version it was judged at, so the store drops one an edit has overtaken (a fire's state
 also rides in its outcome, for the transaction that records the fire). Nothing here reads a
@@ -95,10 +95,13 @@ class Book:
         #: Stopped alerts: their state is kept only until ``changed`` has handed it over (a
         #: Paused one keeps its state, which ``engine.resume`` needs).
         self._stopped: set[int] = set()
+        #: Paused alerts with an end date or a contract's expiry: ``on_clock`` stops them at it.
+        self._paused: dict[int, Alert] = {}
 
     # ---- the alerts ------------------------------------------------------------------------
     def put(self, alert: Alert, state: State | None = None) -> None:
-        """Judge ``alert`` from now on if it is Active, with ``state`` (default: the one kept).
+        """Judge ``alert`` from now on if it is Active, with ``state`` (default: the one kept);
+        a Paused one is only watched for its end date and its contract's expiry.
 
         The alert's state, given or kept, is queued for the next flush under this version, in
         place of anything queued before: an edit's reset or a resume reaches market.db even
@@ -113,6 +116,8 @@ class Book:
             self._active[alert.id] = alert
             self._groups.setdefault(alert.key, {})[alert.id] = alert
             self._index(alert.key)
+        elif alert.status == "paused" and (alert.ends_at, alert.expires_at) != (None, None):
+            self._paused[alert.id] = alert
 
     def drop(self, alert_id: int) -> State | None:
         """Forget a deleted alert; returns its last state."""
@@ -238,10 +243,11 @@ class Book:
         return TickResult(check, tuple(outcomes))
 
     def on_clock(self, now: int, market: Market) -> list[Outcome]:
-        """Candles due at their close, ends and expiries; call it about once a second."""
+        """Candles due at their close, ends and expiries (a Paused alert's too); call it about
+        once a second."""
         outcomes: list[Outcome] = []
         clipped: dict[str, tuple] = {}
-        for alert in list(self._active.values()):
+        for alert in [*self._active.values(), *self._paused.values()]:
             state = self._states[alert.id]
             pauses = market.pauses
             if pauses:
@@ -312,6 +318,7 @@ class Book:
     def _retire(self, alert_id: int, status: str | None = None) -> None:
         """Judge the alert no more; its state stays (a stopped one's until the next flush)."""
         self._waiting.pop(alert_id, None)
+        self._paused.pop(alert_id, None)
         if status == "stopped":
             self._stopped.add(alert_id)
         elif status is not None:

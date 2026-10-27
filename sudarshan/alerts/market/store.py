@@ -272,13 +272,24 @@ class MarketStore:
         return self._move(principal, alert_id, version, "restart", now)
 
     def set_status(
-        self, principal: str, alert_id: int, status: str, reason: str, now: int, *, version: int
+        self,
+        principal: str,
+        alert_id: int,
+        status: str,
+        reason: str,
+        now: int,
+        *,
+        version: int,
+        was: str = "active",
     ) -> bool:
         """The engine stopped or paused an alert itself (ended, expired, 50 fires), judged at
-        ``version``. False when the owner changed the alert first: the owner's change stands."""
+        ``version`` while it was ``was`` (a Paused alert still stops at its end). False when the
+        owner changed the alert first: the owner's change stands."""
         _status(status)
+        _status(was)
         with self._tx() as conn:
-            return _set_status(conn, self._who(principal), alert_id, version, status, reason, now)
+            who = self._who(principal)
+            return _set_status(conn, who, alert_id, version, status, reason, now, was)
 
     def delete(self, principal: str, alert_id: int) -> bool:
         """The alert and its state go; its history stays in the log."""
@@ -698,10 +709,18 @@ def _alert_row(row) -> dict[str, Any]:
 
 
 def _set_status(
-    conn, who: str, alert_id: int, version: int, status: str, reason: str, now: int
+    conn,
+    who: str,
+    alert_id: int,
+    version: int,
+    status: str,
+    reason: str,
+    now: int,
+    was: str = "active",
 ) -> bool:
-    """The engine's own stop or pause, while the alert is Active at ``version``. The version
-    stays: it counts the owner's edits, and editing an alert that stopped itself is no conflict."""
+    """The engine's own stop or pause, while the alert is still ``was`` at ``version``. The
+    version stays: it counts the owner's edits, and editing an alert that stopped itself is no
+    conflict."""
     return bool(
         conn.execute(
             update(alert)
@@ -709,7 +728,7 @@ def _set_status(
                 alert.c.id == alert_id,
                 alert.c.principal == who,
                 alert.c.version == version,
-                alert.c.status == "active",
+                alert.c.status == was,
             )  # fmt: skip
             .values(status=status, status_reason=reason, updated_at=now)
         ).rowcount
