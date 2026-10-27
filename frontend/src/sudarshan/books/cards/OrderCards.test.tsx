@@ -419,7 +419,7 @@ describe('Order book on a phone: the cards', () => {
     expectUnavailable(screen.getByRole('button', { name: /Cancel all/ }))
   })
 
-  it('says Cancel all waits for the book before it is read, and why when it could not be', async () => {
+  it('says Cancel all waits for the book before it is read', async () => {
     api.getOrders.mockReturnValue(new Promise(() => {}))
     fakeScreen('phone')
     renderBook('/orderbook', <OrderBook />)
