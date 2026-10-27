@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from datetime import time as dtime
 from pathlib import Path
@@ -193,6 +195,17 @@ def _count(number: int, noun: str) -> str:
     return f"{number} {noun}{'' if number == 1 else 's'}"
 
 
+@dataclass(frozen=True)
+class _Read:
+    """What one read of a calendar file found, published whole (``_DayFile._read``): a reader on
+    another thread gets this read or the next one, never one's stamp with another's dates."""
+
+    mtime: int | None = None  # the file's stamp when read; None: not read, missing or unreadable
+    days: frozenset[date] = frozenset()
+    windows: Mapping[date, tuple[int, int]] = field(default_factory=dict)
+    note: str = "not read yet"  # for a status page: "15 dates", "missing", "not readable"
+
+
 class _DayFile:
     """A calendar file's dates and, for the extra-days file, each day's own window, from one read
     that happens again only when the file changes.
@@ -217,66 +230,71 @@ class _DayFile:
         self.log = logger
         self.with_windows = with_windows
         self.report = report
-        self._mtime: int | None = None
-        self._days: set[date] = set()
-        self._windows: dict[date, tuple[int, int]] = {}
+        self._read = _Read()
         self._told: str | None = None  # the problem last logged; a good read clears it
-        #: What the last read found, for a status page: "15 dates", "missing", "not readable".
-        self.note = "not read yet"
 
-    def days(self) -> set[date]:
-        self._refresh()
-        return self._days
+    @property
+    def note(self) -> str:
+        """What the last read found, for a status page: "15 dates", "missing", "not readable"."""
+        return self._read.note
 
-    def windows(self) -> dict[date, tuple[int, int]]:
-        self._refresh()
-        return self._windows
+    def days(self) -> frozenset[date]:
+        return self.current().days
 
-    def _refresh(self) -> None:
+    def windows(self) -> Mapping[date, tuple[int, int]]:
+        return self.current().windows
+
+    def current(self) -> _Read:
+        """The file as it is now: the last read while the file is unchanged, else a new one."""
+        last = self._read
         try:
             mtime = self.file.stat().st_mtime_ns
-            if mtime == self._mtime:
-                return
+            if mtime == last.mtime:
+                return last
             text = read_calendar_file(self.file)
         except FileNotFoundError:
             if self._told != "missing" and (self.report or not self.optional):
                 level = logging.INFO if self.optional else logging.WARNING
                 self.log.log(level, "%s not found: %s", self.file, self.missing_note)
                 self._told = "missing"
-            self._forget("missing")
-            return
+            return self._publish(_Read(note="missing"))
         except OSError:
             if self._told != "not readable":
                 self.log.warning("%s not readable: %s", self.file, self.missing_note)
                 self._told = "not readable"
-            self._forget("not readable")
-            return
-        self._mtime, self._told = mtime, None
-        self._days, bad = parse_holidays(text)
-        self.note = _count(len(self._days), "date")
+            return self._publish(_Read(note="not readable"))
+        # Everything from the text first, published after in one assignment, the stamp with it:
+        # a second thread that sees this stamp also sees these dates (it rereads until then).
+        days, bad = parse_holidays(text)
+        note = _count(len(days), "date")
         if bad:
-            self.note += f", {_count(bad, 'unreadable line')}"
+            note += f", {_count(bad, 'unreadable line')}"
             self.log.warning("%s: %s ignored", self.file, _count(bad, "unreadable line"))
+        windows: dict[date, tuple[int, int]] = {}
         if self.with_windows:
-            self._windows, problems = day_windows(text)
-            if self._windows:
-                self.note += f", {_count(len(self._windows), 'own window')}"
+            windows, problems = day_windows(text)
+            if windows:
+                note += f", {_count(len(windows), 'own window')}"
             if problems:
-                self.note += f", {_count(len(problems), 'window problem')}"
+                note += f", {_count(len(problems), 'window problem')}"
             for problem in problems if self.report else ():
                 self.log.warning("%s: %s", self.file, problem)
+        read = self._publish(_Read(mtime, frozenset(days), windows, note))
+        self._told = None
         if self.report:
-            self.log.info("%s read: %s", self.file, self._found())
+            self.log.info("%s read: %s", self.file, self._found(read))
+        return read
 
-    def _forget(self, note: str) -> None:
-        self._mtime, self._days, self._windows, self.note = None, set(), {}, note
+    def _publish(self, read: _Read) -> _Read:
+        self._read = read
+        return read
 
-    def _found(self) -> str:
+    def _found(self, read: _Read) -> str:
         if not self.with_windows:
-            return self.note
+            return read.note
         days = [
-            f"{day} {window_text(self._windows[day])}" if day in self._windows else f"{day} (usual)"
-            for day in sorted(self._days)
+            f"{day} {window_text(read.windows[day])}" if day in read.windows else f"{day} (usual)"
+            for day in sorted(read.days)
         ]
         return f"extra trading days {', '.join(days)}" if days else "no extra trading days"
 
@@ -319,11 +337,11 @@ class TradingCalendar:
         )
         self.file = self._holidays.file
 
-    def holidays(self) -> set[date]:
+    def holidays(self) -> frozenset[date]:
         return self._holidays.days()
 
-    def extra_days(self) -> set[date]:
-        return self._extra.days() if self._extra else set()
+    def extra_days(self) -> frozenset[date]:
+        return self._extra.days() if self._extra else frozenset()
 
     def day_window(self, day: date) -> tuple[int, int] | None:
         """The day's own window, when its line in the extra-days file gives a usable one."""
@@ -336,15 +354,13 @@ class TradingCalendar:
 
     def holidays_note(self) -> str:
         """The holiday file as read now, for a status page: "15 dates", "missing", ..."""
-        self._holidays.days()
-        return self._holidays.note
+        return self._holidays.current().note
 
     def extra_days_note(self) -> str:
         """The extra-days file as read now: "1 date", "missing", "not readable" or "not set"."""
         if self._extra is None:
             return "not set"
-        self._extra.days()
-        return self._extra.note
+        return self._extra.current().note
 
     def is_trading_day(self, day: date) -> bool:
         if day in self.extra_days():

@@ -10,11 +10,13 @@ import logging
 import os
 import shutil
 import subprocess
+import threading
 from datetime import date, datetime
 from pathlib import Path
 
 import pytest
 
+from sudarshan.autologin import schedule
 from sudarshan.autologin.messages import MESSAGES
 from sudarshan.autologin.schedule import (
     DEFAULT_WINDOW,
@@ -355,3 +357,38 @@ def test_only_a_reporting_calendar_logs_the_windows_it_cannot_use(tmp_path, capl
     TradingCalendar(tmp_path / "nse_holidays.txt", extra, report=True).extra_days()
     assert caplog.text.count("is not a window") == 1
     assert caplog.text.count(f"{extra} read: extra trading days 2026-11-08 (usual)") == 1
+
+
+def test_a_second_thread_never_gets_the_old_dates_once_the_file_changed(tmp_path, monkeypatch):
+    """Under gthread two requests can read one calendar at once. A reads the changed file; B,
+    arriving while A is still parsing it, must get the new dates and windows, never the old ones
+    under the new stamp (the stamp was once published before the dates)."""
+    extra = tmp_path / "extra.txt"
+    extra.write_text("2026-11-08 14:05-15:40\n")
+    calendar = TradingCalendar(tmp_path / "holidays.txt", extra)
+    assert calendar.extra_days() == {MUHURAT}
+    extra.write_text("2026-11-14 09:00-12:00\n")
+    stamp = extra.stat().st_mtime_ns + 10**9  # a new stamp even where timestamps are coarse
+    os.utime(extra, ns=(stamp, stamp))
+    parsing, answered = threading.Event(), threading.Event()
+    real_parse = schedule.parse_holidays
+
+    def a_parse_that_waits_for_b(text):
+        if threading.current_thread() is reader_a:
+            parsing.set()
+            assert answered.wait(5), "B never answered"
+        return real_parse(text)
+
+    monkeypatch.setattr(schedule, "parse_holidays", a_parse_that_waits_for_b)
+    seen_by_a = []
+    reader_a = threading.Thread(target=lambda: seen_by_a.append(calendar.extra_days()))
+    reader_a.start()
+    try:
+        assert parsing.wait(5), "A never read the changed file"
+        seen_by_b = (calendar.extra_days(), calendar.day_window(date(2026, 11, 14)))
+    finally:
+        answered.set()
+        reader_a.join(5)
+    assert seen_by_b == ({date(2026, 11, 14)}, (540, 720))
+    assert seen_by_a == [{date(2026, 11, 14)}]
+    assert calendar.extra_days() == {date(2026, 11, 14)} and calendar.day_window(MUHURAT) is None
