@@ -49,7 +49,7 @@ def cancel_gtt_order_with_auth(
     order_request_data.pop("apikey", None)
     api_key = original_data.get("apikey", "")
 
-    if get_analyze_mode() and not force_live:  # SUDARSHAN M5.13
+    if not force_live and get_analyze_mode():  # SUDARSHAN M5.13
         from services.sandbox_service import sandbox_cancel_gtt_order
 
         success, response, status_code = sandbox_cancel_gtt_order(trigger_id, api_key)

@@ -89,7 +89,7 @@ def cancel_all_orders_with_auth(
         order_request_data.pop("apikey", None)
 
     # If in analyze mode, route to sandbox for sandbox trading
-    if get_analyze_mode() and not force_live:  # SUDARSHAN M5.13
+    if not force_live and get_analyze_mode():  # SUDARSHAN M5.13
         from services.sandbox_service import sandbox_cancel_all_orders
 
         api_key = original_data.get("apikey")

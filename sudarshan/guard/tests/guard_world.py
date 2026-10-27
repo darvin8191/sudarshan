@@ -22,6 +22,7 @@ class Account:
     """Every service a kill switch step calls, recorded in order."""
 
     def __init__(self, monkeypatch):
+        import broker.upstox.api.order_api as order_api
         import database.oauth_db as oauth_db
         import services.cancel_all_order_service as cancel_all
         import services.cancel_gtt_order_service as cancel_gtt
@@ -35,10 +36,18 @@ class Account:
         self.exit_all_status = 200
         self.agent_on = False
         self.gtts = [{"trigger_id": "GTT-1"}, {"trigger_id": "GTT-2"}]
+        self.exit_all_body = {"status": "success", "message": "All Open Positions Squared Off"}
+        # Upstox's order book as the kill switch reads it after cancelling, one per read (the
+        # last repeats); by default both cancelled orders already show as cancelled.
+        self.order_books: list[list[dict]] = []
+        self.book_reads = 0
+        self.reads_before_exit: int | None = None
 
         def record(name, answer):
             def call(*args, **kwargs):
                 self.calls.append(name)
+                if name == "live_exit_all":
+                    self.reads_before_exit = self.book_reads
                 if name in self.broken:
                     raise RuntimeError(f"{name} broke")
                 if name.startswith("live") and kwargs.get("force_live") is not True:
@@ -68,11 +77,7 @@ class Account:
             "close_position_with_auth",
             record(
                 "live_exit_all",
-                lambda: (
-                    self.exit_all_status == 200,
-                    {"status": "success", "message": "All Open Positions Squared Off"},
-                    self.exit_all_status,
-                ),
+                lambda: (self.exit_all_status == 200, self.exit_all_body, self.exit_all_status),
             ),
         )
         monkeypatch.setattr(
@@ -102,6 +107,22 @@ class Account:
             ),
         )
         monkeypatch.setattr(oauth_db, "revoke_all_tokens", record("mcp", 3))
+
+        def order_book(auth):
+            self.book_reads += 1
+            rows = (
+                self.order_books[0]
+                if self.order_books
+                else [
+                    {"order_id": "1", "status": "cancelled"},
+                    {"order_id": "2", "status": "cancelled"},
+                ]
+            )
+            if len(self.order_books) > 1:
+                self.order_books.pop(0)
+            return {"status": "success", "data": rows}
+
+        monkeypatch.setattr(order_api, "get_order_book", order_book)
 
         def engaged(*args, **kwargs):
             return self.agent_on

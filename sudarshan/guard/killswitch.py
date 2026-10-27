@@ -51,6 +51,12 @@ RESUME_HOLD_S = 60.0  # amendment R3
 DRAIN_S = 10.0
 POLL_S = 0.05
 SECOND_SWEEP_AFTER_S = 2.0
+#: Exit all leaves out a position whose closing order still shows working (M6.9, order_working),
+#: and Upstox's book shows a cancelled order "cancel pending", which reads as working, for a
+#: moment. So the kill switch's Exit all first waits, at most this long, for the orders it
+#: cancelled to show as ended; then it goes regardless, and Exit all says which it left out.
+CANCELS_SHOW_WITHIN_S = 5.0
+CANCELS_POLL_S = 0.5
 
 _running_lock = real_threading.Lock()
 _running: set[str] = set()  # activations whose steps are running in this process
@@ -158,7 +164,8 @@ def _clear_up(
             cancelled = steps.run("live_orders", lambda: _cancel_live_orders(owner, before))
             steps.run("live_gtts", lambda: _cancel_live_gtts(owner))
             if state.exit_all:
-                steps.run("live_exit_all", lambda: _exit_all_live(owner))
+                ids = (cancelled.get("detail") or {}).get("cancelled_ids") or []
+                steps.run("live_exit_all", lambda: _exit_all_live(owner, ids))
             if not drained["ok"] or not cancelled["ok"]:
                 steps.run("live_orders_again", lambda: _sweep_again(owner))
         else:
@@ -249,6 +256,8 @@ def _cancel_live_orders(owner: Owner, before: dict) -> tuple[bool, str, dict]:
     cancelled = list(body.get("canceled_orders") or []) if isinstance(body, dict) else []
     failed = list(body.get("failed_cancellations") or []) if isinstance(body, dict) else []
     detail = {"cancelled": len(cancelled), "failed": len(failed), "status": status}
+    if cancelled:
+        detail["cancelled_ids"] = [str(orderid) for orderid in cancelled]
     if ok and not failed:
         return True, words.ks_orders_cancelled(len(cancelled), before), detail
     if isinstance(body, dict) and failed:
@@ -281,17 +290,59 @@ def _cancel_live_gtts(owner: Owner) -> tuple[bool, str, dict]:
     )
 
 
-def _exit_all_live(owner: Owner) -> tuple[bool, str, dict]:
-    """Exit all through the one claim every Exit all takes (round nine's path, never a second)."""
+def _cancels_shown(owner: Owner, cancelled: list[str]) -> bool:
+    """Wait, at most ``CANCELS_SHOW_WITHIN_S``, until no order the switch cancelled shows as
+    working in Upstox's order book; a cooperative wait, and only for those orders."""
+    if not cancelled:
+        return True
+    from broker.upstox.api import order_api
+    from broker.upstox.mapping.order_data import normalize_order_status
+
+    from .readers import FINAL_STATUSES
+
+    waiting = {str(orderid) for orderid in cancelled}
+    deadline = time.monotonic() + CANCELS_SHOW_WITHIN_S
+    while True:
+        try:
+            book = order_api.get_order_book(owner.auth_token)
+        except Exception:  # a read refused or failed: looked at again until the time is up
+            logger.exception("The kill switch could not read the order book after cancelling")
+            book = None
+        if isinstance(book, dict) and book.get("status") == "success":
+            working = {
+                str(order.get("order_id"))
+                for order in book.get("data") or []
+                if isinstance(order, dict)
+                and normalize_order_status(order.get("status")) not in FINAL_STATUSES
+            }
+            if not waiting & working:
+                return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(CANCELS_POLL_S)
+
+
+def _exit_all_live(owner: Owner, cancelled: list[str]) -> tuple[bool, str, dict]:
+    """Exit all through the one claim every Exit all takes (round nine's path, never a second),
+    once the orders just cancelled show as ended, so it leaves no position out for them."""
     from services.close_position_service import close_position_with_auth
 
+    shown = _cancels_shown(owner, cancelled)
     ok, body, status = close_position_with_auth(
         {}, owner.auth_token, owner.broker, {}, force_live=True
     )
-    message = str((body or {}).get("message") or "")
+    body = body if isinstance(body, dict) else {}
+    detail: dict[str, Any] = {"status": status, "cancels_shown": shown}
+    each = body.get("positions")
+    if isinstance(each, list):
+        # What became of each position (sent, not_confirmed, not_sent with its reason): the
+        # phone settles its holds on it as after its own Exit all.
+        detail["positions"] = each
+        outcomes = [str(item.get("outcome")) for item in each if isinstance(item, dict)]
+        detail["counts"] = {name: outcomes.count(name) for name in sorted(set(outcomes))}
     if status == 409:
-        return False, words.KS_EXIT_ALL_BUSY, {"status": status}
-    return bool(ok), words.ks_exit_all(message), {"status": status}
+        return False, words.KS_EXIT_ALL_BUSY, detail
+    return bool(ok), words.ks_exit_all(str(body.get("message") or "")), detail
 
 
 def _sweep_again(owner: Owner) -> tuple[bool, str, dict]:

@@ -91,7 +91,7 @@ def close_position_with_auth(
         position_request_data.pop("apikey", None)
 
     # If in analyze mode, route to sandbox for real position closing
-    if get_analyze_mode() and not force_live:  # SUDARSHAN M5.13
+    if not force_live and get_analyze_mode():  # SUDARSHAN M5.13
         from services.sandbox_service import sandbox_close_position
 
         api_key = original_data.get("apikey")

@@ -109,9 +109,73 @@ def test_exit_all_goes_through_the_one_claim_and_is_never_retried(account, risk_
         "step": "live_exit_all",
         "ok": False,
         "words": words.KS_EXIT_ALL_BUSY,
-        "detail": {"status": 409},
+        "detail": {"status": 409, "cancels_shown": True},
     }
     assert "sandbox_exit_all" in account.calls
+
+
+# -- Exit all after the cancel: Upstox's book shows a cancelled order working for a moment -------
+
+
+def test_exit_all_waits_until_the_orders_it_cancelled_show_ended(account, monkeypatch):
+    """Exit all leaves out a position whose closing order still shows working (M6.9). A stop loss
+    just cancelled reads "cancel pending" for a moment, so Exit all waits for it to end."""
+    monkeypatch.setattr(killswitch, "CANCELS_POLL_S", 0.01)
+    pending = [
+        {"order_id": "1", "status": "cancel pending"},
+        {"order_id": "2", "status": "cancelled"},
+    ]
+    ended = [{"order_id": "1", "status": "cancelled"}, {"order_id": "2", "status": "cancelled"}]
+    account.order_books = [pending, pending, ended]
+    answer = _on(exit_all=True)
+    assert account.reads_before_exit == 3 and account.calls.count("live_exit_all") == 1
+    step = next(s for s in answer.state.report["steps"] if s["step"] == "live_exit_all")
+    assert step["ok"] and step["detail"]["cancels_shown"] is True
+
+
+def test_exit_all_goes_regardless_once_the_wait_is_up(account, monkeypatch):
+    monkeypatch.setattr(killswitch, "CANCELS_POLL_S", 0.01)
+    monkeypatch.setattr(killswitch, "CANCELS_SHOW_WITHIN_S", 0.05)
+    account.order_books = [[{"order_id": "2", "status": "open"}]]  # its cancel never shows
+    started = time.monotonic()
+    answer = _on(exit_all=True)
+    assert time.monotonic() - started < 2
+    assert account.calls.count("live_exit_all") == 1 and account.reads_before_exit >= 2
+    step = next(s for s in answer.state.report["steps"] if s["step"] == "live_exit_all")
+    assert step["detail"]["cancels_shown"] is False
+
+
+def test_only_the_orders_it_cancelled_are_waited_for(account, monkeypatch):
+    monkeypatch.setattr(killswitch, "CANCELS_SHOW_WITHIN_S", 5)
+    # Order 9 was not cancelled by the switch (a cancel of it failed, or it came later).
+    account.order_books = [[{"order_id": "9", "status": "open"}]]
+    _on(exit_all=True)
+    assert account.reads_before_exit == 1
+
+
+def test_without_exit_all_nothing_is_waited_for(account):
+    _on(exit_all=False)
+    assert account.book_reads == 0 and "live_exit_all" not in account.calls
+
+
+def test_the_report_carries_what_became_of_each_position(account):
+    each = [
+        {"exchange": "NFO", "symbol": "CE", "product": "MIS", "outcome": "sent", "orderids": ["7"]},
+        {"exchange": "NSE", "symbol": "SBIN", "product": "CNC", "outcome": "not_sent",
+         "reason": "SBIN has a SELL 10 LIMIT order working to close it, so no exit was sent."},
+    ]  # fmt: skip
+    account.exit_all_status = 400
+    account.exit_all_body = {
+        "status": "error",
+        "message": "Exit all did not close every position. Of 1 exit, 1 sent.",
+        "positions": each,
+    }
+    answer = _on(exit_all=True)
+    step = next(s for s in answer.state.report["steps"] if s["step"] == "live_exit_all")
+    assert step["ok"] is False
+    assert step["words"] == "Exit all: Exit all did not close every position. Of 1 exit, 1 sent."
+    assert step["detail"]["positions"] == each
+    assert step["detail"]["counts"] == {"not_sent": 1, "sent": 1}
 
 
 def test_every_step_is_tried_whatever_broke_before_it(account, risk_store):
