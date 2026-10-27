@@ -15,6 +15,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 
 from sudarshan.alerts.market import sessions
@@ -248,8 +249,9 @@ def _check_price(params, segment: str, grain: Grain) -> dict[str, Any]:
     level = to_decimal(params.get("level"))
     if level is None or level <= 0:
         raise SpecError("level", "Enter the price level, a number above 0.")
-    if level < PAISA:  # nothing trades below a paisa: "at or below" could never fire
-        raise SpecError("level", "Enter a price level of at least 0.01.")
+    lowest = _lowest(segment, grain)
+    if level < lowest:  # nothing trades below it: "at or below" or "crosses" could never fire
+        raise SpecError("level", _too_low(segment, lowest))
     source = params.get("source", "ltp")
     if source not in SOURCES:
         raise SpecError("source", "Pick the price to watch: last price, bid or ask.")
@@ -371,6 +373,20 @@ def _minute(text) -> int | None:
 
 def _hhmm(minute: int) -> str:
     return f"{minute // 60:02d}:{minute % 60:02d}"
+
+
+def _lowest(segment: str, grain: Grain) -> Decimal:
+    """The lowest price the instrument can trade at: one tick for a derivative (an option never
+    trades under 0.05), one paisa in cash and indices (their tick moves with the price band)."""
+    return grain.step if segment in sessions.FO_SEGMENTS else PAISA
+
+
+def _too_low(segment: str, lowest: Decimal) -> str:
+    if segment in sessions.FO_SEGMENTS:
+        return (
+            f"Enter a price level of at least ₹{lowest}, the lowest price this contract trades at."
+        )
+    return f"Enter a price level of at least {lowest}."
 
 
 def _grain(segment: str, tick_size) -> Grain:
