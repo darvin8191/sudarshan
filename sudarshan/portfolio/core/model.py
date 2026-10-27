@@ -280,6 +280,12 @@ class Position:
                 self.lots.pop(0)
         return pieces
 
+    def rescale(self, quantities: list[int]) -> None:
+        """Give each lot, oldest first, a new quantity (a split); cost and day stay."""
+        for lot, qty_u in zip(self.lots, quantities, strict=True):
+            lot.qty_u = qty_u
+        self.qty_u = sum(quantities)
+
     def over_year_qty_u(self, on: int) -> int:
         """Units in lots held for more than a year on ``on``."""
         return sum(lot.qty_u for lot in self.lots if held_over_year(lot.day, on))
@@ -289,8 +295,10 @@ class Move(NamedTuple):
     """What one entry did to one account's position.
 
     ``qty_u`` and ``cost_paise`` are the change to the position (a sale is negative); ``paise`` is
-    the money of the entry (a trade's gross amount, an income, a fee; None for a transfer between
-    accounts); ``used`` is the lots a sale took, with the cost allocated to each.
+    the money of the entry (a trade's gross amount, an income, a fee, the value of shares moved to
+    or from outside; None where no money moves); ``used`` is the lots a sale or a transfer took,
+    with the cost given to each, or for a split the lots as they stand after it. A transfer between
+    two accounts makes two moves, one in each account.
     """
 
     entry: Entry
@@ -314,10 +322,11 @@ class Move(NamedTuple):
 class Ledger:
     """Every position of a tab after a replay, and the moves that made them, in order."""
 
-    __slots__ = ("names", "positions", "journal", "_orders")
+    __slots__ = ("names", "decimals", "positions", "journal", "_orders")
 
-    def __init__(self, names: Names | None = None):
+    def __init__(self, names: Names | None = None, decimals: Mapping[int, int] | None = None):
         self.names = names or Names()
+        self.decimals = decimals or {}
         self.positions: dict[tuple[int | None, int | None], Position] = {}
         self.journal: list[Move] = []
         self._orders = 0
@@ -327,6 +336,10 @@ class Ledger:
         if key not in self.positions:
             self.positions[key] = Position(account_id, asset_id)
         return self.positions[key]
+
+    def decimals_of(self, asset_id: int | None) -> int:
+        """The decimals a quantity of this asset may have; shares unless told otherwise."""
+        return self.decimals.get(asset_id, 0)
 
     def next_order(self) -> int:
         """The next number to tell lots of one day apart; the order they were made in."""

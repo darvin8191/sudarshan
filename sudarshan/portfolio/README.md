@@ -36,7 +36,7 @@ Absolute imports only: upstream owns a top-level `portfolio` package (the backte
 | `core/kinds.py` | the contract: units, kinds, limits, sentences, op names | PF0 |
 | `../../frontend/src/sudarshan/portfolio/types.ts` | its twin on the phone, and every JSON shape | PF0 |
 | `core/days.py`, `core/money.py`, `core/words.py`, `core/model.py`, `core/ledger.py` | days, scales and rounding, the owner's words, the FIFO ledger | PA1 |
-| `core/ledger_actions.py` | splits, bonus, rights, transfers | PA2 |
+| `core/ledger_actions.py` | splits, bonus shares, transfers | PA2 |
 | `core/valuation.py`, `core/freshness.py` | value, Today, how old a price is | PA3 |
 | `core/performance.py`, `core/history.py` | XIRR, TWR, net money put in, daily series, benchmarks | PA4, PA5 |
 | `core/allocation.py`, `core/filters.py` | allocation by class, sector, cap, account, member, tag; filters | PA6 |
@@ -307,8 +307,8 @@ generic format, so that exporting and importing into an empty tab gives the same
 
 ## Ledger, valuation, performance, allocation, imports
 
-The ledger is written (`PA1`); valuation, performance, allocation and the two file formats are
-written with the PR that builds each (`PA3` to `PA8`): the Today rule above in full, XIRR and
+The ledger is written (`PA1`, `PA2`); valuation, performance, allocation and the two file formats
+are written with the PR that builds each (`PA3` to `PA8`): the Today rule above in full, XIRR and
 TWR, benchmarks, allocation and filters.
 
 ### The ledger
@@ -320,7 +320,7 @@ and `as_of` (a day) stops the replay there.
 
 **FIFO is per account and asset within a tab.** A sale takes the lots of its own account first
 bought first: by the day the lot was acquired, and for lots of one day in the order they were
-made. A lot keeps its day when it moves (a transfer; `PA2`), so it counts as bought when it was
+made. A lot keeps its day when it moves (a transfer), so it counts as bought when it was
 bought. A sale beyond what the account holds on that day is refused; it never goes short or
 borrows from another account.
 
@@ -335,9 +335,9 @@ the same day is valid.
 | 3 | sales, transfers out to outside | |
 | 4 | dividends, interest, fees | they touch no lot |
 
-Inside a group the entry's `seq` decides (an import keeps file order), then its `id`. Which
-handlers run: purchases, rights, sales, dividends, interest and fees today; splits, bonus and
-transfers join in `PA2` (`core/ledger_actions.py`).
+Inside a group the entry's `seq` decides (an import keeps file order), then its `id`. Purchases,
+rights, sales, dividends, interest and fees are handled in `core/ledger.py`; splits, bonus shares
+and transfers in `core/ledger_actions.py`, which joins the same table of handlers.
 
 **Numbers.**
 
@@ -361,6 +361,54 @@ bought 5 Jan 2024 is over a year old from 6 Jan 2025, and one bought on 29 Feb 2
 anniversary on 28 Feb 2025. A figure for the screen, not tax advice. The financial year runs April
 to March (`days.financial_year`).
 
+**Splits.** `SPLIT` multiplies every lot of an asset by `ratio_num / ratio_den` (each share
+becomes 5 is 5 over 1; one new share for every 10 old is 1 over 10). The lots keep their cost and
+their day, so the cost of a unit changes and the cost of the holding does not, and a later sale
+makes the gain it would have made had nothing happened to the shares. A split without an account
+applies to every account of the tab that holds the asset that day, with one move for each, lowest
+account first; with an account, to that account only. It is decided for every account before any
+is changed, so an account that cannot take it refuses the split for all, and the lowest such
+account is named. A split on an asset that nobody (or that account) holds that day is refused: "No
+account holds RELIANCE on 12 Mar 2025, so a split cannot be saved. Check the date, or add the
+missing purchase first." A split dated before the first purchase or after the last sale is almost
+always a wrong date, and the sentence says to check the date first.
+
+**What a split may leave.** The new quantity of a position must be exact and must fit the asset.
+`replay(..., decimals={asset_id: places})` says how many decimals a quantity of each asset may
+have (shares 0, fund units 4, grams 3); an asset left out is counted in whole units. A split that
+would leave 1.5 shares is refused: "This split would leave 1.5 shares in Zerodha. Record the sale
+of the fraction first, then the split." (the unit word is the asset's own: shares, units, grams).
+A ratio that the total does not divide evenly (10 units by 1 over 3) is refused too, for any number
+of decimals, because the ledger never invents the end of a repeating decimal. The lots themselves
+may be fractions of a share when the total is whole: 5 + 5 shares consolidated 1 for 10 are two
+lots of half a share, which together are one. They are rounded on the running total (the first
+lot's share of the new total, then the first two lots', and so on) so that they always add up to
+the new quantity: three lots of 1 share split 1 for 3 become 0.333333, 0.333334 and 0.333333, one
+share together, where rounding each lot alone would make 0.999999. A split that would round a lot
+to nothing (lots of a millionth of a unit) is refused with the same sentence, since a lot cannot
+hold a cost and no quantity. Nothing re-checks the 100 crore unit limit of an entry after a split.
+
+**Bonus shares.** `BONUS` adds a lot of `qty_u` at no cost, dated the allotment, to an account
+that holds the asset that day, and is refused otherwise (same sentence as a split, "bonus"). A
+bonus and a split dated the same day are applied in the order they were entered: a bonus entered
+first is split with the rest, one entered after it is not. **Rights** are a purchase (`RIGHTS`): a
+lot at the price paid, dated the day it was paid.
+
+**Transfers** say which accounts they join. Between two accounts of the tab, the oldest lots move
+with their cost and their acquisition day, in the account that receives them each lot queues by
+that day (behind the lots it already has for the same day), so the units held over a year and the
+order of a later sale are what they would have been had the shares always been there. Part of a
+lot moves at `share_of_cost`, exactly as a sale takes it: moving 1 unit twice out of a 10,000 paise
+lot of three costs 3,333 and then 3,334, and nothing is lost between the accounts. A transfer makes
+no gain or loss and moves no money; its journal has two moves, one leaving and one reaching. *From
+outside* (`to_account_id` only: the shares come from an account the tab does not track) opens one
+lot at the cost entered, dated `lot_date` (the first purchase, if the owner knows it) or else the
+transfer, so that it sorts with the other lots by the day it was really bought; `value_paise` is
+what counts as money put in on that day (the value then) and defaults to the cost; the lot's cost
+is always the cost entered. *To outside* (`account_id` only) takes the oldest lots out at their
+cost with no gain or loss; `value_paise` says what counts as money taken out and defaults to the
+cost.
+
 **What a replay keeps.** `Ledger.positions` has one `Position` per (account, asset) with its lots,
 its units and cost, and its realised gain, income and fees; an asset-less position holds an
 account's own interest and fees. `Ledger.journal` has one `Move` per entry in the order applied: the
@@ -376,11 +424,13 @@ a delete, a change or an addition would break. An entry that is not well formed 
 with a sentence that says what to fix ("A purchase needs a quantity."). Nothing in `core/` shows a
 code, a class name or a field name to the owner.
 
-**Vectors** (`tests/vectors/ledger.json`, `money.json`): the design's F1 to F6 and its two dry-run
-sentences (D1, D2), plus cases for a half paisa of cost, four-decimal fund units, a purchase and
-its sale on one day, drafts, `as_of`, income and fees, FIFO by acquisition day and lots of one day.
-`make_pa1.py` next to them writes both files, works every number out with exact fractions and
-Decimal, and imports nothing from `sudarshan`. A naive second implementation of the same rules
+**Vectors** (`tests/vectors/ledger.json`, `money.json`, `actions.json`): the design's F1 to F7,
+C1 to C5 and its two dry-run sentences (D1, D2), plus cases for a half paisa of cost,
+four-decimal fund units, a purchase and its sale on one day, drafts, `as_of`, income and fees,
+FIFO by acquisition day and lots of one day; and for splits (lots that do not divide, a fraction,
+every account or one, the day's order), bonus shares, rights and each way of transferring
+(C1 to C9, TF1 to TF8). `make_pa1.py` and `make_pa2.py` next to them write the files, work every
+number out with exact fractions and Decimal, and import nothing from `sudarshan`. A naive second implementation of the same rules
 (`tests/portfolio_oracle.py`, plain dictionaries) is run on every vector and on hundreds of random
 tabs and must agree with the engine to the paisa.
 

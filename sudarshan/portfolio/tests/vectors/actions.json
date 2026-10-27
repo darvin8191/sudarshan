@@ -1,0 +1,3111 @@
+{
+ "about": "Golden vectors for splits, bonus shares, rights and transfers (PA2: F7, C1-C9, TF1-TF8). The numbers are derived by hand in each case's 'why'; make_pa2.py writes this file, imports nothing from sudarshan, and the tests hold the engine and a naive second implementation to it. Synthetic data only. A case's 'decimals' says how many decimals a quantity of the asset may have (shares 0) and 'over_year_on' asks each position for the units held for more than a year on that day.",
+ "names": {
+  "accounts": {
+   "1": "Zerodha",
+   "2": "Account B"
+  },
+  "assets": {
+   "1": "RELIANCE"
+  },
+  "units": {}
+ },
+ "cases": [
+  {
+   "id": "F7",
+   "title": "A transfer between accounts keeps the lot's cost and day",
+   "why": "Account 1 buys 10 on 5 Jan 2024 for 1,000.00 (100000 paise). On 1 Jun 2025 all 10 move to account 2: the one lot goes whole, so it takes its whole cost 100000 and keeps its day (5 Jan 2024). Account 2 sells 10 on 1 Jul 2025 for 1,500.00 (150000): that lot costs 100000, gain 150000 - 100000 = 50000 (500.00). A transfer is no sale: it makes no gain.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20240105,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "TRANSFER",
+     "trade_date": 20250601,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "to_account_id": 2
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "SELL",
+     "trade_date": 20250701,
+     "account_id": 2,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 150000
+    }
+   ],
+   "expect": {
+    "positions": {
+     "1/1": {
+      "qty_u": 0,
+      "cost_paise": 0,
+      "realised_paise": 0,
+      "income_paise": 0,
+      "fees_paise": 0,
+      "lots": []
+     },
+     "2/1": {
+      "qty_u": 0,
+      "cost_paise": 0,
+      "realised_paise": 50000,
+      "income_paise": 0,
+      "fees_paise": 0,
+      "lots": []
+     }
+    },
+    "moves": [
+     {
+      "entry": 1,
+      "account": 1,
+      "qty_u": 10000000,
+      "cost_paise": 100000,
+      "gain_paise": 0,
+      "paise": 100000,
+      "used": []
+     },
+     {
+      "entry": 2,
+      "account": 1,
+      "qty_u": -10000000,
+      "cost_paise": -100000,
+      "gain_paise": 0,
+      "paise": null,
+      "used": [
+       [
+        20240105,
+        10000000,
+        100000
+       ]
+      ]
+     },
+     {
+      "entry": 2,
+      "account": 2,
+      "qty_u": 10000000,
+      "cost_paise": 100000,
+      "gain_paise": 0,
+      "paise": null,
+      "used": [
+       [
+        20240105,
+        10000000,
+        100000
+       ]
+      ]
+     },
+     {
+      "entry": 3,
+      "account": 2,
+      "qty_u": -10000000,
+      "cost_paise": -100000,
+      "gain_paise": 50000,
+      "paise": 150000,
+      "used": [
+       [
+        20240105,
+        10000000,
+        100000
+       ]
+      ]
+     }
+    ],
+    "totals": {
+     "realised_paise": 50000,
+     "income_paise": 0,
+     "fees_paise": 0
+    },
+    "words": {
+     "2": "From 5 Jan 2024: 10 at ₹100.00 · cost and dates kept",
+     "3": "From 5 Jan 2024: 10 at ₹100.00 · gain ₹500.00"
+    }
+   },
+   "names": {
+    "accounts": {
+     "1": "Zerodha",
+     "2": "Account B"
+    },
+    "assets": {
+     "1": "RELIANCE"
+    },
+    "units": {}
+   }
+  },
+  {
+   "id": "F7b",
+   "title": "A lot moved to another account is still held for more than a year from its first day",
+   "why": "The same entries up to the transfer (as of 1 Jun 2025). The lot is account 2's now, dated 5 Jan 2024. Its first anniversary was 5 Jan 2025, and 1 Jun 2025 is after it: all 10 units have been held for more than a year. Account 1 holds nothing.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20240105,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "TRANSFER",
+     "trade_date": 20250601,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "to_account_id": 2
+    }
+   ],
+   "expect": {
+    "positions": {
+     "1/1": {
+      "qty_u": 0,
+      "cost_paise": 0,
+      "realised_paise": 0,
+      "income_paise": 0,
+      "fees_paise": 0,
+      "lots": [],
+      "over_year_qty_u": 0
+     },
+     "2/1": {
+      "qty_u": 10000000,
+      "cost_paise": 100000,
+      "realised_paise": 0,
+      "income_paise": 0,
+      "fees_paise": 0,
+      "lots": [
+       [
+        20240105,
+        10000000,
+        100000
+       ]
+      ],
+      "over_year_qty_u": 10000000
+     }
+    },
+    "moves": [
+     {
+      "entry": 1,
+      "account": 1,
+      "qty_u": 10000000,
+      "cost_paise": 100000,
+      "gain_paise": 0,
+      "paise": 100000,
+      "used": []
+     },
+     {
+      "entry": 2,
+      "account": 1,
+      "qty_u": -10000000,
+      "cost_paise": -100000,
+      "gain_paise": 0,
+      "paise": null,
+      "used": [
+       [
+        20240105,
+        10000000,
+        100000
+       ]
+      ]
+     },
+     {
+      "entry": 2,
+      "account": 2,
+      "qty_u": 10000000,
+      "cost_paise": 100000,
+      "gain_paise": 0,
+      "paise": null,
+      "used": [
+       [
+        20240105,
+        10000000,
+        100000
+       ]
+      ]
+     }
+    ],
+    "totals": {
+     "realised_paise": 0,
+     "income_paise": 0,
+     "fees_paise": 0
+    }
+   },
+   "names": {
+    "accounts": {
+     "1": "Zerodha",
+     "2": "Account B"
+    },
+    "assets": {
+     "1": "RELIANCE"
+    },
+    "units": {}
+   },
+   "as_of": 20250601,
+   "over_year_on": 20250601
+  },
+  {
+   "id": "F7c",
+   "title": "On the first anniversary itself a lot is not yet held for more than a year",
+   "why": "The same position looked at on 5 Jan 2025, the first anniversary of the 5 Jan 2024 purchase: it has been held for exactly a year, not more than a year, so 0 units count.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20240105,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "TRANSFER",
+     "trade_date": 20250601,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "to_account_id": 2
+    }
+   ],
+   "expect": {
+    "positions": {
+     "1/1": {
+      "qty_u": 0,
+      "cost_paise": 0,
+      "realised_paise": 0,
+      "income_paise": 0,
+      "fees_paise": 0,
+      "lots": [],
+      "over_year_qty_u": 0
+     },
+     "2/1": {
+      "qty_u": 10000000,
+      "cost_paise": 100000,
+      "realised_paise": 0,
+      "income_paise": 0,
+      "fees_paise": 0,
+      "lots": [
+       [
+        20240105,
+        10000000,
+        100000
+       ]
+      ],
+      "over_year_qty_u": 0
+     }
+    },
+    "moves": [
+     {
+      "entry": 1,
+      "account": 1,
+      "qty_u": 10000000,
+      "cost_paise": 100000,
+      "gain_paise": 0,
+      "paise": 100000,
+      "used": []
+     },
+     {
+      "entry": 2,
+      "account": 1,
+      "qty_u": -10000000,
+      "cost_paise": -100000,
+      "gain_paise": 0,
+      "paise": null,
+      "used": [
+       [
+        20240105,
+        10000000,
+        100000
+       ]
+      ]
+     },
+     {
+      "entry": 2,
+      "account": 2,
+      "qty_u": 10000000,
+      "cost_paise": 100000,
+      "gain_paise": 0,
+      "paise": null,
+      "used": [
+       [
+        20240105,
+        10000000,
+        100000
+       ]
+      ]
+     }
+    ],
+    "totals": {
+     "realised_paise": 0,
+     "income_paise": 0,
+     "fees_paise": 0
+    }
+   },
+   "names": {
+    "accounts": {
+     "1": "Zerodha",
+     "2": "Account B"
+    },
+    "assets": {
+     "1": "RELIANCE"
+    },
+    "units": {}
+   },
+   "as_of": 20250601,
+   "over_year_on": 20250105
+  },
+  {
+   "id": "C1",
+   "title": "A split keeps the cost and the day: each share becomes 5",
+   "why": "Buy 10 on 1 May 2023 for 10,000.00 (1,000,000 paise). On 10 Mar 2025 each share becomes 5: 10 x 5 = 50 units. The lot keeps its cost 1,000,000 and its day, so a unit now costs 1,000,000 / 50 = 20,000 paise (200.00).",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20230501,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 1000000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "SPLIT",
+     "trade_date": 20250310,
+     "account_id": null,
+     "asset_id": 1,
+     "ratio_num": 5,
+     "ratio_den": 1
+    }
+   ],
+   "expect": {
+    "positions": {
+     "1/1": {
+      "qty_u": 50000000,
+      "cost_paise": 1000000,
+      "realised_paise": 0,
+      "income_paise": 0,
+      "fees_paise": 0,
+      "lots": [
+       [
+        20230501,
+        50000000,
+        1000000
+       ]
+      ]
+     }
+    },
+    "moves": [
+     {
+      "entry": 1,
+      "account": 1,
+      "qty_u": 10000000,
+      "cost_paise": 1000000,
+      "gain_paise": 0,
+      "paise": 1000000,
+      "used": []
+     },
+     {
+      "entry": 2,
+      "account": 1,
+      "qty_u": 40000000,
+      "cost_paise": 0,
+      "gain_paise": 0,
+      "paise": null,
+      "used": [
+       [
+        20230501,
+        50000000,
+        1000000
+       ]
+      ]
+     }
+    ],
+    "totals": {
+     "realised_paise": 0,
+     "income_paise": 0,
+     "fees_paise": 0
+    },
+    "words": {
+     "2": "Each share becomes 5 · 10 become 50 · cost and dates kept"
+    }
+   },
+   "names": {
+    "accounts": {
+     "1": "Zerodha",
+     "2": "Account B"
+    },
+    "assets": {
+     "1": "RELIANCE"
+    },
+    "units": {}
+   },
+   "decimals": {
+    "1": 0
+   }
+  },
+  {
+   "id": "C9",
+   "title": "A sale after a split takes its cost at the new unit cost",
+   "why": "After C1 the lot is 50 units costing 1,000,000. A sale of 20 on 1 Apr 2025 for 4,500.00 (450000) takes 1,000,000 x 20/50 = 400,000 of the cost (200.00 a unit); gain 450000 - 400000 = 50000 (500.00). Left: 30 units costing 600,000, still dated 1 May 2023.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20230501,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 1000000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "SPLIT",
+     "trade_date": 20250310,
+     "account_id": null,
+     "asset_id": 1,
+     "ratio_num": 5,
+     "ratio_den": 1
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "SELL",
+     "trade_date": 20250401,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 20000000,
+     "amount_paise": 450000
+    }
+   ],
+   "expect": {
+    "positions": {
+     "1/1": {
+      "qty_u": 30000000,
+      "cost_paise": 600000,
+      "realised_paise": 50000,
+      "income_paise": 0,
+      "fees_paise": 0,
+      "lots": [
+       [
+        20230501,
+        30000000,
+        600000
+       ]
+      ]
+     }
+    },
+    "moves": [
+     {
+      "entry": 1,
+      "account": 1,
+      "qty_u": 10000000,
+      "cost_paise": 1000000,
+      "gain_paise": 0,
+      "paise": 1000000,
+      "used": []
+     },
+     {
+      "entry": 2,
+      "account": 1,
+      "qty_u": 40000000,
+      "cost_paise": 0,
+      "gain_paise": 0,
+      "paise": null,
+      "used": [
+       [
+        20230501,
+        50000000,
+        1000000
+       ]
+      ]
+     },
+     {
+      "entry": 3,
+      "account": 1,
+      "qty_u": -20000000,
+      "cost_paise": -400000,
+      "gain_paise": 50000,
+      "paise": 450000,
+      "used": [
+       [
+        20230501,
+        20000000,
+        400000
+       ]
+      ]
+     }
+    ],
+    "totals": {
+     "realised_paise": 50000,
+     "income_paise": 0,
+     "fees_paise": 0
+    },
+    "words": {
+     "3": "From 1 May 2023: 20 at ₹200.00 · gain ₹500.00"
+    }
+   },
+   "names": {
+    "accounts": {
+     "1": "Zerodha",
+     "2": "Account B"
+    },
+    "assets": {
+     "1": "RELIANCE"
+    },
+    "units": {}
+   },
+   "decimals": {
+    "1": 0
+   }
+  },
+  {
+   "id": "C2",
+   "title": "A consolidation that would leave part of a share is refused",
+   "why": "Buy 15 shares. A split of 1 new for every 10 old would leave 15 x 1/10 = 1.5 shares, and shares are whole numbers (0 decimals). The split is entry 2 and is the one named, with the account it fails in.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250110,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 15000000,
+     "amount_paise": 150000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "SPLIT",
+     "trade_date": 20250312,
+     "account_id": null,
+     "asset_id": 1,
+     "ratio_num": 1,
+     "ratio_den": 10
+    }
+   ],
+   "expect": {
+    "refused": {
+     "entry": 2,
+     "reason": "fraction",
+     "message": "This split would leave 1.5 shares in Zerodha. Record the sale of the fraction first, then the split.",
+     "facts": {
+      "kind": "SPLIT",
+      "day": 20250312,
+      "account_id": 1,
+      "asset_id": 1,
+      "have_qty_u": 15000000,
+      "left_qty_u": 1500000,
+      "ratio_num": 1,
+      "ratio_den": 10
+     }
+    }
+   },
+   "names": {
+    "accounts": {
+     "1": "Zerodha",
+     "2": "Account B"
+    },
+    "assets": {
+     "1": "RELIANCE"
+    },
+    "units": {}
+   },
+   "decimals": {
+    "1": 0
+   }
+  },
+  {
+   "id": "C2b",
+   "title": "The same consolidation is fine for fund units, which have four decimals",
+   "why": "15 units, 1 new for every 10 old: 1.5 units, which four decimals can hold (1.5000). The lot keeps its cost 150000 and its day.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250106,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 15000000,
+     "amount_paise": 150000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "SPLIT",
+     "trade_date": 20250312,
+     "account_id": null,
+     "asset_id": 1,
+     "ratio_num": 1,
+     "ratio_den": 10
+    }
+   ],
+   "expect": {
+    "positions": {
+     "1/1": {
+      "qty_u": 1500000,
+      "cost_paise": 150000,
+      "realised_paise": 0,
+      "income_paise": 0,
+      "fees_paise": 0,
+      "lots": [
+       [
+        20250106,
+        1500000,
+        150000
+       ]
+      ]
+     }
+    },
+    "moves": [
+     {
+      "entry": 1,
+      "account": 1,
+      "qty_u": 15000000,
+      "cost_paise": 150000,
+      "gain_paise": 0,
+      "paise": 150000,
+      "used": []
+     },
+     {
+      "entry": 2,
+      "account": 1,
+      "qty_u": -13500000,
+      "cost_paise": 0,
+      "gain_paise": 0,
+      "paise": null,
+      "used": [
+       [
+        20250106,
+        1500000,
+        150000
+       ]
+      ]
+     }
+    ],
+    "totals": {
+     "realised_paise": 0,
+     "income_paise": 0,
+     "fees_paise": 0
+    },
+    "words": {
+     "2": "1 new for every 10 old · 15 become 1.5 · cost and dates kept"
+    }
+   },
+   "names": {
+    "accounts": {
+     "1": "Folio"
+    },
+    "assets": {
+     "1": "Example Fund"
+    },
+    "units": {
+     "1": "units"
+    }
+   },
+   "decimals": {
+    "1": 4
+   }
+  },
+  {
+   "id": "C2d",
+   "title": "Two lots of 5 consolidated 1 for 10 are two lots of half a share that make one share",
+   "why": "Buy 5 for 500.00 (50000) on 6 Jan 2025 and 5 for 600.00 (60000) on 10 Feb. A split of 1 new for every 10 old: 10 x 1/10 = 1 share, whole. The lots become 0.5 and 0.5 (500000 each) with their cost and day. Selling the 1 share for 200.00 (20000) takes both: cost 50000 + 60000 = 110000, loss 20000 - 110000 = -90000 (900.00).",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250106,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 5000000,
+     "amount_paise": 50000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "BUY",
+     "trade_date": 20250210,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 5000000,
+     "amount_paise": 60000
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "SPLIT",
+     "trade_date": 20250310,
+     "account_id": null,
+     "asset_id": 1,
+     "ratio_num": 1,
+     "ratio_den": 10
+    },
+    {
+     "id": 4,
+     "seq": 4,
+     "kind": "SELL",
+     "trade_date": 20250401,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 1000000,
+     "amount_paise": 20000
+    }
+   ],
+   "expect": {
+    "positions": {
+     "1/1": {
+      "qty_u": 0,
+      "cost_paise": 0,
+      "realised_paise": -90000,
+      "income_paise": 0,
+      "fees_paise": 0,
+      "lots": []
+     }
+    },
+    "moves": [
+     {
+      "entry": 1,
+      "account": 1,
+      "qty_u": 5000000,
+      "cost_paise": 50000,
+      "gain_paise": 0,
+      "paise": 50000,
+      "used": []
+     },
+     {
+      "entry": 2,
+      "account": 1,
+      "qty_u": 5000000,
+      "cost_paise": 60000,
+      "gain_paise": 0,
+      "paise": 60000,
+      "used": []
+     },
+     {
+      "entry": 3,
+      "account": 1,
+      "qty_u": -9000000,
+      "cost_paise": 0,
+      "gain_paise": 0,
+      "paise": null,
+      "used": [
+       [
+        20250106,
+        500000,
+        50000
+       ],
+       [
+        20250210,
+        500000,
+        60000
+       ]
+      ]
+     },
+     {
+      "entry": 4,
+      "account": 1,
+      "qty_u": -1000000,
+      "cost_paise": -110000,
+      "gain_paise": -90000,
+      "paise": 20000,
+      "used": [
+       [
+        20250106,
+        500000,
+        50000
+       ],
+       [
+        20250210,
+        500000,
+        60000
+       ]
+      ]
+     }
+    ],
+    "totals": {
+     "realised_paise": -90000,
+     "income_paise": 0,
+     "fees_paise": 0
+    },
+    "words": {
+     "3": "1 new for every 10 old · 10 become 1 · cost and dates kept",
+     "4": "From 6 Jan 2025: 0.5 at ₹1,000.00; from 10 Feb 2025: 0.5 at ₹1,200.00 · loss ₹900.00"
+    }
+   },
+   "names": {
+    "accounts": {
+     "1": "Zerodha",
+     "2": "Account B"
+    },
+    "assets": {
+     "1": "RELIANCE"
+    },
+    "units": {}
+   },
+   "decimals": {
+    "1": 0
+   }
+  },
+  {
+   "id": "C2e",
+   "title": "Lots that do not divide are rounded on the running total, so the share count is exact",
+   "why": "Buy 7 (70000) and 8 (96000). A split of 1 new for every 3 old: 15 x 1/3 = 5 shares, whole. The first lot alone would be 7/3 = 2.333333 (2,333,333 in millionths, rounded); the two together are exactly 5,000,000, so the second lot is 5,000,000 - 2,333,333 = 2,666,667. Lots 2,333,333 + 2,666,667 = 5,000,000, cost kept: 70000 and 96000.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250106,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 7000000,
+     "amount_paise": 70000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "BUY",
+     "trade_date": 20250210,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 8000000,
+     "amount_paise": 96000
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "SPLIT",
+     "trade_date": 20250310,
+     "account_id": null,
+     "asset_id": 1,
+     "ratio_num": 1,
+     "ratio_den": 3
+    }
+   ],
+   "expect": {
+    "positions": {
+     "1/1": {
+      "qty_u": 5000000,
+      "cost_paise": 166000,
+      "realised_paise": 0,
+      "income_paise": 0,
+      "fees_paise": 0,
+      "lots": [
+       [
+        20250106,
+        2333333,
+        70000
+       ],
+       [
+        20250210,
+        2666667,
+        96000
+       ]
+      ]
+     }
+    },
+    "moves": [
+     {
+      "entry": 1,
+      "account": 1,
+      "qty_u": 7000000,
+      "cost_paise": 70000,
+      "gain_paise": 0,
+      "paise": 70000,
+      "used": []
+     },
+     {
+      "entry": 2,
+      "account": 1,
+      "qty_u": 8000000,
+      "cost_paise": 96000,
+      "gain_paise": 0,
+      "paise": 96000,
+      "used": []
+     },
+     {
+      "entry": 3,
+      "account": 1,
+      "qty_u": -10000000,
+      "cost_paise": 0,
+      "gain_paise": 0,
+      "paise": null,
+      "used": [
+       [
+        20250106,
+        2333333,
+        70000
+       ],
+       [
+        20250210,
+        2666667,
+        96000
+       ]
+      ]
+     }
+    ],
+    "totals": {
+     "realised_paise": 0,
+     "income_paise": 0,
+     "fees_paise": 0
+    },
+    "words": {
+     "3": "1 new for every 3 old · 15 become 5 · cost and dates kept"
+    }
+   },
+   "names": {
+    "accounts": {
+     "1": "Zerodha",
+     "2": "Account B"
+    },
+    "assets": {
+     "1": "RELIANCE"
+    },
+    "units": {}
+   },
+   "decimals": {
+    "1": 0
+   }
+  },
+  {
+   "id": "C2f",
+   "title": "Three lots that each round down would make less than a whole share, so the running total is used",
+   "why": "Three lots of 1 share cost 100.00, 110.00 and 120.00 (10000, 11000, 12000). One new share for every 3 old: 3 x 1/3 = 1 share, whole. Each lot alone would be 1/3 = 0.333333 (333,333 millionths), and three of those make 999,999, not 1,000,000. Rounding the running total instead: 1,000,000 x 1/3 = 333,333 after the first lot, 2,000,000 x 1/3 = 666,667 after the second (so the second takes 333,334), 3,000,000 x 1/3 = 1,000,000 after the third (333,333). The lots add up to exactly 1 share and keep their cost and day. Selling that share for 400.00 (40000) takes all three: cost 10000 + 11000 + 12000 = 33000, gain 40000 - 33000 = 7000.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250106,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 1000000,
+     "amount_paise": 10000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "BUY",
+     "trade_date": 20250107,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 1000000,
+     "amount_paise": 11000
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "BUY",
+     "trade_date": 20250108,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 1000000,
+     "amount_paise": 12000
+    },
+    {
+     "id": 4,
+     "seq": 4,
+     "kind": "SPLIT",
+     "trade_date": 20250310,
+     "account_id": null,
+     "asset_id": 1,
+     "ratio_num": 1,
+     "ratio_den": 3
+    },
+    {
+     "id": 5,
+     "seq": 5,
+     "kind": "SELL",
+     "trade_date": 20250401,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 1000000,
+     "amount_paise": 40000
+    }
+   ],
+   "expect": {
+    "positions": {
+     "1/1": {
+      "qty_u": 0,
+      "cost_paise": 0,
+      "realised_paise": 7000,
+      "income_paise": 0,
+      "fees_paise": 0,
+      "lots": []
+     }
+    },
+    "moves": [
+     {
+      "entry": 1,
+      "account": 1,
+      "qty_u": 1000000,
+      "cost_paise": 10000,
+      "gain_paise": 0,
+      "paise": 10000,
+      "used": []
+     },
+     {
+      "entry": 2,
+      "account": 1,
+      "qty_u": 1000000,
+      "cost_paise": 11000,
+      "gain_paise": 0,
+      "paise": 11000,
+      "used": []
+     },
+     {
+      "entry": 3,
+      "account": 1,
+      "qty_u": 1000000,
+      "cost_paise": 12000,
+      "gain_paise": 0,
+      "paise": 12000,
+      "used": []
+     },
+     {
+      "entry": 4,
+      "account": 1,
+      "qty_u": -2000000,
+      "cost_paise": 0,
+      "gain_paise": 0,
+      "paise": null,
+      "used": [
+       [
+        20250106,
+        333333,
+        10000
+       ],
+       [
+        20250107,
+        333334,
+        11000
+       ],
+       [
+        20250108,
+        333333,
+        12000
+       ]
+      ]
+     },
+     {
+      "entry": 5,
+      "account": 1,
+      "qty_u": -1000000,
+      "cost_paise": -33000,
+      "gain_paise": 7000,
+      "paise": 40000,
+      "used": [
+       [
+        20250106,
+        333333,
+        10000
+       ],
+       [
+        20250107,
+        333334,
+        11000
+       ],
+       [
+        20250108,
+        333333,
+        12000
+       ]
+      ]
+     }
+    ],
+    "totals": {
+     "realised_paise": 7000,
+     "income_paise": 0,
+     "fees_paise": 0
+    },
+    "words": {
+     "4": "1 new for every 3 old · 3 become 1 · cost and dates kept",
+     "5": "From 6 Jan 2025: 0.333333 at ₹300.0003; from 7 Jan 2025: 0.333334 at ₹329.9993; from 8 Jan 2025: 0.333333 at ₹360.0004 · gain ₹70.00"
+    }
+   },
+   "names": {
+    "accounts": {
+     "1": "Zerodha",
+     "2": "Account B"
+    },
+    "assets": {
+     "1": "RELIANCE"
+    },
+    "units": {}
+   },
+   "decimals": {
+    "1": 0
+   }
+  },
+  {
+   "id": "C6",
+   "title": "A split without an account applies to every account that holds the asset",
+   "why": "Account 1 holds 10 (100000), account 2 holds 4 (44000). Each share becomes 2 on 10 Mar 2025, for every account: 20 and 8 units, each lot keeping its cost and day. One move for each account, the lower account number first.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250106,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "BUY",
+     "trade_date": 20250107,
+     "account_id": 2,
+     "asset_id": 1,
+     "qty_u": 4000000,
+     "amount_paise": 44000
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "SPLIT",
+     "trade_date": 20250310,
+     "account_id": null,
+     "asset_id": 1,
+     "ratio_num": 2,
+     "ratio_den": 1
+    }
+   ],
+   "expect": {
+    "positions": {
+     "1/1": {
+      "qty_u": 20000000,
+      "cost_paise": 100000,
+      "realised_paise": 0,
+      "income_paise": 0,
+      "fees_paise": 0,
+      "lots": [
+       [
+        20250106,
+        20000000,
+        100000
+       ]
+      ]
+     },
+     "2/1": {
+      "qty_u": 8000000,
+      "cost_paise": 44000,
+      "realised_paise": 0,
+      "income_paise": 0,
+      "fees_paise": 0,
+      "lots": [
+       [
+        20250107,
+        8000000,
+        44000
+       ]
+      ]
+     }
+    },
+    "moves": [
+     {
+      "entry": 1,
+      "account": 1,
+      "qty_u": 10000000,
+      "cost_paise": 100000,
+      "gain_paise": 0,
+      "paise": 100000,
+      "used": []
+     },
+     {
+      "entry": 2,
+      "account": 2,
+      "qty_u": 4000000,
+      "cost_paise": 44000,
+      "gain_paise": 0,
+      "paise": 44000,
+      "used": []
+     },
+     {
+      "entry": 3,
+      "account": 1,
+      "qty_u": 10000000,
+      "cost_paise": 0,
+      "gain_paise": 0,
+      "paise": null,
+      "used": [
+       [
+        20250106,
+        20000000,
+        100000
+       ]
+      ]
+     },
+     {
+      "entry": 3,
+      "account": 2,
+      "qty_u": 4000000,
+      "cost_paise": 0,
+      "gain_paise": 0,
+      "paise": null,
+      "used": [
+       [
+        20250107,
+        8000000,
+        44000
+       ]
+      ]
+     }
+    ],
+    "totals": {
+     "realised_paise": 0,
+     "income_paise": 0,
+     "fees_paise": 0
+    },
+    "words": {
+     "3": "Each share becomes 2 · 10 become 20 · cost and dates kept"
+    }
+   },
+   "names": {
+    "accounts": {
+     "1": "Zerodha",
+     "2": "Account B"
+    },
+    "assets": {
+     "1": "RELIANCE"
+    },
+    "units": {}
+   },
+   "decimals": {
+    "1": 0
+   }
+  },
+  {
+   "id": "C6b",
+   "title": "A split for one account leaves the others alone",
+   "why": "The same holdings, but the split names account 1: it goes to 20 units, account 2 keeps its 4 units and 44000.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250106,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "BUY",
+     "trade_date": 20250107,
+     "account_id": 2,
+     "asset_id": 1,
+     "qty_u": 4000000,
+     "amount_paise": 44000
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "SPLIT",
+     "trade_date": 20250310,
+     "account_id": 1,
+     "asset_id": 1,
+     "ratio_num": 2,
+     "ratio_den": 1
+    }
+   ],
+   "expect": {
+    "positions": {
+     "1/1": {
+      "qty_u": 20000000,
+      "cost_paise": 100000,
+      "realised_paise": 0,
+      "income_paise": 0,
+      "fees_paise": 0,
+      "lots": [
+       [
+        20250106,
+        20000000,
+        100000
+       ]
+      ]
+     },
+     "2/1": {
+      "qty_u": 4000000,
+      "cost_paise": 44000,
+      "realised_paise": 0,
+      "income_paise": 0,
+      "fees_paise": 0,
+      "lots": [
+       [
+        20250107,
+        4000000,
+        44000
+       ]
+      ]
+     }
+    },
+    "moves": [
+     {
+      "entry": 1,
+      "account": 1,
+      "qty_u": 10000000,
+      "cost_paise": 100000,
+      "gain_paise": 0,
+      "paise": 100000,
+      "used": []
+     },
+     {
+      "entry": 2,
+      "account": 2,
+      "qty_u": 4000000,
+      "cost_paise": 44000,
+      "gain_paise": 0,
+      "paise": 44000,
+      "used": []
+     },
+     {
+      "entry": 3,
+      "account": 1,
+      "qty_u": 10000000,
+      "cost_paise": 0,
+      "gain_paise": 0,
+      "paise": null,
+      "used": [
+       [
+        20250106,
+        20000000,
+        100000
+       ]
+      ]
+     }
+    ],
+    "totals": {
+     "realised_paise": 0,
+     "income_paise": 0,
+     "fees_paise": 0
+    }
+   },
+   "names": {
+    "accounts": {
+     "1": "Zerodha",
+     "2": "Account B"
+    },
+    "assets": {
+     "1": "RELIANCE"
+    },
+    "units": {}
+   },
+   "decimals": {
+    "1": 0
+   }
+  },
+  {
+   "id": "C6c",
+   "title": "A split for every account is refused for the account that cannot take it",
+   "why": "Account 1 holds 10 shares, account 2 holds 3. One new share for every 5 old: account 1 would hold 10 x 1/5 = 2, which is whole, but account 2 would hold 3 x 1/5 = 0.6. The split is refused for the account it fails in (Account B), and no account changes.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250106,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "BUY",
+     "trade_date": 20250107,
+     "account_id": 2,
+     "asset_id": 1,
+     "qty_u": 3000000,
+     "amount_paise": 33000
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "SPLIT",
+     "trade_date": 20250310,
+     "account_id": null,
+     "asset_id": 1,
+     "ratio_num": 1,
+     "ratio_den": 5
+    }
+   ],
+   "expect": {
+    "refused": {
+     "entry": 3,
+     "reason": "fraction",
+     "message": "This split would leave 0.6 shares in Account B. Record the sale of the fraction first, then the split.",
+     "facts": {
+      "kind": "SPLIT",
+      "day": 20250310,
+      "account_id": 2,
+      "asset_id": 1,
+      "have_qty_u": 3000000,
+      "left_qty_u": 600000,
+      "ratio_num": 1,
+      "ratio_den": 5
+     }
+    }
+   },
+   "names": {
+    "accounts": {
+     "1": "Zerodha",
+     "2": "Account B"
+    },
+    "assets": {
+     "1": "RELIANCE"
+    },
+    "units": {}
+   },
+   "decimals": {
+    "1": 0
+   }
+  },
+  {
+   "id": "C7a",
+   "title": "A split in an account that holds none of the asset is refused",
+   "why": "Only account 2 bought. A split named for account 1 on 12 Mar 2025 has nothing to split.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250110,
+     "account_id": 2,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "SPLIT",
+     "trade_date": 20250312,
+     "account_id": 1,
+     "asset_id": 1,
+     "ratio_num": 2,
+     "ratio_den": 1
+    }
+   ],
+   "expect": {
+    "refused": {
+     "entry": 2,
+     "reason": "not_held",
+     "message": "Zerodha holds no RELIANCE on 12 Mar 2025, so a split cannot be saved. Check the date, or add the missing purchase first.",
+     "facts": {
+      "kind": "SPLIT",
+      "day": 20250312,
+      "account_id": 1,
+      "asset_id": 1
+     }
+    }
+   },
+   "names": {
+    "accounts": {
+     "1": "Zerodha",
+     "2": "Account B"
+    },
+    "assets": {
+     "1": "RELIANCE"
+    },
+    "units": {}
+   }
+  },
+  {
+   "id": "C7b",
+   "title": "A split for every account is refused when no account holds the asset",
+   "why": "Nothing was bought, so a split for every account has nothing to split.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "SPLIT",
+     "trade_date": 20250312,
+     "account_id": null,
+     "asset_id": 1,
+     "ratio_num": 2,
+     "ratio_den": 1
+    }
+   ],
+   "expect": {
+    "refused": {
+     "entry": 1,
+     "reason": "not_held",
+     "message": "No account holds RELIANCE on 12 Mar 2025, so a split cannot be saved. Check the date, or add the missing purchase first.",
+     "facts": {
+      "kind": "SPLIT",
+      "day": 20250312,
+      "account_id": null,
+      "asset_id": 1
+     }
+    }
+   },
+   "names": {
+    "accounts": {
+     "1": "Zerodha",
+     "2": "Account B"
+    },
+    "assets": {
+     "1": "RELIANCE"
+    },
+    "units": {}
+   }
+  },
+  {
+   "id": "C7c",
+   "title": "A bonus in an account that holds none of the asset is refused",
+   "why": "Only account 2 bought; account 1 cannot receive bonus shares on shares it never held.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250110,
+     "account_id": 2,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "BONUS",
+     "trade_date": 20250312,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 5000000
+    }
+   ],
+   "expect": {
+    "refused": {
+     "entry": 2,
+     "reason": "not_held",
+     "message": "Zerodha holds no RELIANCE on 12 Mar 2025, so a bonus cannot be saved. Check the date, or add the missing purchase first.",
+     "facts": {
+      "kind": "BONUS",
+      "day": 20250312,
+      "account_id": 1,
+      "asset_id": 1
+     }
+    }
+   },
+   "names": {
+    "accounts": {
+     "1": "Zerodha",
+     "2": "Account B"
+    },
+    "assets": {
+     "1": "RELIANCE"
+    },
+    "units": {}
+   }
+  },
+  {
+   "id": "C7d",
+   "title": "A bonus dated after the account sold out is refused",
+   "why": "Buy 10 on 10 Jan, sell all 10 on 1 Mar: on 12 Mar the account holds none, so a bonus dated 12 Mar is refused (the sentence asks the owner to check the date).",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250110,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "SELL",
+     "trade_date": 20250301,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 120000
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "BONUS",
+     "trade_date": 20250312,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 5000000
+    }
+   ],
+   "expect": {
+    "refused": {
+     "entry": 3,
+     "reason": "not_held",
+     "message": "Zerodha holds no RELIANCE on 12 Mar 2025, so a bonus cannot be saved. Check the date, or add the missing purchase first.",
+     "facts": {
+      "kind": "BONUS",
+      "day": 20250312,
+      "account_id": 1,
+      "asset_id": 1
+     }
+    }
+   },
+   "names": {
+    "accounts": {
+     "1": "Zerodha",
+     "2": "Account B"
+    },
+    "assets": {
+     "1": "RELIANCE"
+    },
+    "units": {}
+   }
+  },
+  {
+   "id": "C3",
+   "title": "Bonus shares are a new lot at nil cost, dated the allotment",
+   "why": "Buy 10 on 1 May 2023 for 1,000.00 (100000). Bonus of 10 allotted on 15 Sep 2025: a new lot of 10 costing 0, dated 15 Sep 2025. 20 units, cost still 100000.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20230501,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "BONUS",
+     "trade_date": 20250915,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000
+    }
+   ],
+   "expect": {
+    "positions": {
+     "1/1": {
+      "qty_u": 20000000,
+      "cost_paise": 100000,
+      "realised_paise": 0,
+      "income_paise": 0,
+      "fees_paise": 0,
+      "lots": [
+       [
+        20230501,
+        10000000,
+        100000
+       ],
+       [
+        20250915,
+        10000000,
+        0
+       ]
+      ]
+     }
+    },
+    "moves": [
+     {
+      "entry": 1,
+      "account": 1,
+      "qty_u": 10000000,
+      "cost_paise": 100000,
+      "gain_paise": 0,
+      "paise": 100000,
+      "used": []
+     },
+     {
+      "entry": 2,
+      "account": 1,
+      "qty_u": 10000000,
+      "cost_paise": 0,
+      "gain_paise": 0,
+      "paise": null,
+      "used": []
+     }
+    ],
+    "totals": {
+     "realised_paise": 0,
+     "income_paise": 0,
+     "fees_paise": 0
+    },
+    "words": {
+     "2": "Bonus 10 at no cost"
+    }
+   },
+   "names": {
+    "accounts": {
+     "1": "Zerodha",
+     "2": "Account B"
+    },
+    "assets": {
+     "1": "RELIANCE"
+    },
+    "units": {}
+   }
+  },
+  {
+   "id": "C5",
+   "title": "A sale after a bonus takes the older lot first, then the nil-cost bonus lot",
+   "why": "After C3, sell 15 on 20 Oct 2025 for 1,050.00 (105000). FIFO: the whole 1 May 2023 lot (10 units, 100000), then 5 of the bonus lot, whose cost is 0 x 5/10 = 0. Cost 100000, gain 105000 - 100000 = 5000 (50.00). Left: 5 bonus units at no cost.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20230501,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "BONUS",
+     "trade_date": 20250915,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "SELL",
+     "trade_date": 20251020,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 15000000,
+     "amount_paise": 105000
+    }
+   ],
+   "expect": {
+    "positions": {
+     "1/1": {
+      "qty_u": 5000000,
+      "cost_paise": 0,
+      "realised_paise": 5000,
+      "income_paise": 0,
+      "fees_paise": 0,
+      "lots": [
+       [
+        20250915,
+        5000000,
+        0
+       ]
+      ]
+     }
+    },
+    "moves": [
+     {
+      "entry": 1,
+      "account": 1,
+      "qty_u": 10000000,
+      "cost_paise": 100000,
+      "gain_paise": 0,
+      "paise": 100000,
+      "used": []
+     },
+     {
+      "entry": 2,
+      "account": 1,
+      "qty_u": 10000000,
+      "cost_paise": 0,
+      "gain_paise": 0,
+      "paise": null,
+      "used": []
+     },
+     {
+      "entry": 3,
+      "account": 1,
+      "qty_u": -15000000,
+      "cost_paise": -100000,
+      "gain_paise": 5000,
+      "paise": 105000,
+      "used": [
+       [
+        20230501,
+        10000000,
+        100000
+       ],
+       [
+        20250915,
+        5000000,
+        0
+       ]
+      ]
+     }
+    ],
+    "totals": {
+     "realised_paise": 5000,
+     "income_paise": 0,
+     "fees_paise": 0
+    },
+    "words": {
+     "3": "From 1 May 2023: 10 at ₹100.00; from 15 Sep 2025: 5 at ₹0.00 · gain ₹50.00"
+    }
+   },
+   "names": {
+    "accounts": {
+     "1": "Zerodha",
+     "2": "Account B"
+    },
+    "assets": {
+     "1": "RELIANCE"
+    },
+    "units": {}
+   }
+  },
+  {
+   "id": "C4",
+   "title": "A rights issue is a purchase: a new lot at the price paid",
+   "why": "Buy 10 (100000). Rights of 2 at 80.00 on 1 Jun 2025 cost 160.00 (16000): a new lot of 2 costing 16000, dated 1 Jun 2025. 12 units, cost 116000.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20230501,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "RIGHTS",
+     "trade_date": 20250601,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 2000000,
+     "amount_paise": 16000
+    }
+   ],
+   "expect": {
+    "positions": {
+     "1/1": {
+      "qty_u": 12000000,
+      "cost_paise": 116000,
+      "realised_paise": 0,
+      "income_paise": 0,
+      "fees_paise": 0,
+      "lots": [
+       [
+        20230501,
+        10000000,
+        100000
+       ],
+       [
+        20250601,
+        2000000,
+        16000
+       ]
+      ]
+     }
+    },
+    "moves": [
+     {
+      "entry": 1,
+      "account": 1,
+      "qty_u": 10000000,
+      "cost_paise": 100000,
+      "gain_paise": 0,
+      "paise": 100000,
+      "used": []
+     },
+     {
+      "entry": 2,
+      "account": 1,
+      "qty_u": 2000000,
+      "cost_paise": 16000,
+      "gain_paise": 0,
+      "paise": 16000,
+      "used": []
+     }
+    ],
+    "totals": {
+     "realised_paise": 0,
+     "income_paise": 0,
+     "fees_paise": 0
+    },
+    "words": {
+     "2": "Cost ₹160.00"
+    }
+   },
+   "names": {
+    "accounts": {
+     "1": "Zerodha",
+     "2": "Account B"
+    },
+    "assets": {
+     "1": "RELIANCE"
+    },
+    "units": {}
+   }
+  },
+  {
+   "id": "C8",
+   "title": "On the day of a split the split is applied first, whatever was typed first",
+   "why": "Buy 10 on 6 Jan (100000). On 10 Mar a purchase of 4 for 600.00 (60000) is typed before the split (each share becomes 2) that takes effect that morning. The split goes first: 10 -> 20, then the 4 are bought: 24 units, cost 160000. Applying the split after the purchase would double the 4 as well (28).",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250106,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "BUY",
+     "trade_date": 20250310,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 4000000,
+     "amount_paise": 60000
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "SPLIT",
+     "trade_date": 20250310,
+     "account_id": null,
+     "asset_id": 1,
+     "ratio_num": 2,
+     "ratio_den": 1
+    }
+   ],
+   "expect": {
+    "positions": {
+     "1/1": {
+      "qty_u": 24000000,
+      "cost_paise": 160000,
+      "realised_paise": 0,
+      "income_paise": 0,
+      "fees_paise": 0,
+      "lots": [
+       [
+        20250106,
+        20000000,
+        100000
+       ],
+       [
+        20250310,
+        4000000,
+        60000
+       ]
+      ]
+     }
+    },
+    "moves": [
+     {
+      "entry": 1,
+      "account": 1,
+      "qty_u": 10000000,
+      "cost_paise": 100000,
+      "gain_paise": 0,
+      "paise": 100000,
+      "used": []
+     },
+     {
+      "entry": 3,
+      "account": 1,
+      "qty_u": 10000000,
+      "cost_paise": 0,
+      "gain_paise": 0,
+      "paise": null,
+      "used": [
+       [
+        20250106,
+        20000000,
+        100000
+       ]
+      ]
+     },
+     {
+      "entry": 2,
+      "account": 1,
+      "qty_u": 4000000,
+      "cost_paise": 60000,
+      "gain_paise": 0,
+      "paise": 60000,
+      "used": []
+     }
+    ],
+    "totals": {
+     "realised_paise": 0,
+     "income_paise": 0,
+     "fees_paise": 0
+    }
+   },
+   "names": {
+    "accounts": {
+     "1": "Zerodha",
+     "2": "Account B"
+    },
+    "assets": {
+     "1": "RELIANCE"
+    },
+    "units": {}
+   },
+   "decimals": {
+    "1": 0
+   }
+  },
+  {
+   "id": "TF1",
+   "title": "A lot moved in parts gives the new account its share of the cost, rounded as a sale is",
+   "why": "Account 1 buys 3 for 100.00 (10000) on 6 Jan 2025. Moving 1 unit takes 10000 x 1/3 = 3333.33 -> 3333 (account 1 keeps 2 units and 6667). Moving 1 more takes 6667 x 1/2 = 3333.5 -> 3334 (half away from zero; account 1 keeps 1 unit and 3333). Account 2 now holds two lots dated 6 Jan, 3333 and 3334, in the order they arrived. Selling both for 90.00 (9000) uses 3333 + 3334 = 6667; gain 9000 - 6667 = 2333. Cost is never lost: 3333 + 6667 = 10000.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250106,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 3000000,
+     "amount_paise": 10000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "TRANSFER",
+     "trade_date": 20250210,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 1000000,
+     "to_account_id": 2
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "TRANSFER",
+     "trade_date": 20250211,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 1000000,
+     "to_account_id": 2
+    },
+    {
+     "id": 4,
+     "seq": 4,
+     "kind": "SELL",
+     "trade_date": 20250310,
+     "account_id": 2,
+     "asset_id": 1,
+     "qty_u": 2000000,
+     "amount_paise": 9000
+    }
+   ],
+   "expect": {
+    "positions": {
+     "1/1": {
+      "qty_u": 1000000,
+      "cost_paise": 3333,
+      "realised_paise": 0,
+      "income_paise": 0,
+      "fees_paise": 0,
+      "lots": [
+       [
+        20250106,
+        1000000,
+        3333
+       ]
+      ]
+     },
+     "2/1": {
+      "qty_u": 0,
+      "cost_paise": 0,
+      "realised_paise": 2333,
+      "income_paise": 0,
+      "fees_paise": 0,
+      "lots": []
+     }
+    },
+    "moves": [
+     {
+      "entry": 1,
+      "account": 1,
+      "qty_u": 3000000,
+      "cost_paise": 10000,
+      "gain_paise": 0,
+      "paise": 10000,
+      "used": []
+     },
+     {
+      "entry": 2,
+      "account": 1,
+      "qty_u": -1000000,
+      "cost_paise": -3333,
+      "gain_paise": 0,
+      "paise": null,
+      "used": [
+       [
+        20250106,
+        1000000,
+        3333
+       ]
+      ]
+     },
+     {
+      "entry": 2,
+      "account": 2,
+      "qty_u": 1000000,
+      "cost_paise": 3333,
+      "gain_paise": 0,
+      "paise": null,
+      "used": [
+       [
+        20250106,
+        1000000,
+        3333
+       ]
+      ]
+     },
+     {
+      "entry": 3,
+      "account": 1,
+      "qty_u": -1000000,
+      "cost_paise": -3334,
+      "gain_paise": 0,
+      "paise": null,
+      "used": [
+       [
+        20250106,
+        1000000,
+        3334
+       ]
+      ]
+     },
+     {
+      "entry": 3,
+      "account": 2,
+      "qty_u": 1000000,
+      "cost_paise": 3334,
+      "gain_paise": 0,
+      "paise": null,
+      "used": [
+       [
+        20250106,
+        1000000,
+        3334
+       ]
+      ]
+     },
+     {
+      "entry": 4,
+      "account": 2,
+      "qty_u": -2000000,
+      "cost_paise": -6667,
+      "gain_paise": 2333,
+      "paise": 9000,
+      "used": [
+       [
+        20250106,
+        1000000,
+        3333
+       ],
+       [
+        20250106,
+        1000000,
+        3334
+       ]
+      ]
+     }
+    ],
+    "totals": {
+     "realised_paise": 2333,
+     "income_paise": 0,
+     "fees_paise": 0
+    },
+    "words": {
+     "2": "From 6 Jan 2025: 1 at ₹33.33 · cost and dates kept",
+     "4": "From 6 Jan 2025: 1 at ₹33.33; from 6 Jan 2025: 1 at ₹33.34 · gain ₹23.33"
+    }
+   },
+   "names": {
+    "accounts": {
+     "1": "Zerodha",
+     "2": "Account B"
+    },
+    "assets": {
+     "1": "RELIANCE"
+    },
+    "units": {}
+   }
+  },
+  {
+   "id": "TF2",
+   "title": "Shares brought in from outside open a lot at the cost entered, dated their first purchase",
+   "why": "Account 1 is given 10 shares from outside on 1 Apr 2026: cost 1,000.00 (100000), first bought 15 Aug 2023, worth 1,500.00 that day (150000, which is what counts as money in; the lot's cost stays 100000). Selling 4 on 15 Sep 2026 for 700.00 (70000) takes 100000 x 4/10 = 40000; gain 70000 - 40000 = 30000 (300.00). Left: 6 units, 60000, still dated 15 Aug 2023.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "TRANSFER",
+     "trade_date": 20260401,
+     "account_id": null,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000,
+     "to_account_id": 1,
+     "lot_date": 20230815,
+     "value_paise": 150000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "SELL",
+     "trade_date": 20260915,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 4000000,
+     "amount_paise": 70000
+    }
+   ],
+   "expect": {
+    "positions": {
+     "1/1": {
+      "qty_u": 6000000,
+      "cost_paise": 60000,
+      "realised_paise": 30000,
+      "income_paise": 0,
+      "fees_paise": 0,
+      "lots": [
+       [
+        20230815,
+        6000000,
+        60000
+       ]
+      ]
+     }
+    },
+    "moves": [
+     {
+      "entry": 1,
+      "account": 1,
+      "qty_u": 10000000,
+      "cost_paise": 100000,
+      "gain_paise": 0,
+      "paise": 150000,
+      "used": []
+     },
+     {
+      "entry": 2,
+      "account": 1,
+      "qty_u": -4000000,
+      "cost_paise": -40000,
+      "gain_paise": 30000,
+      "paise": 70000,
+      "used": [
+       [
+        20230815,
+        4000000,
+        40000
+       ]
+      ]
+     }
+    ],
+    "totals": {
+     "realised_paise": 30000,
+     "income_paise": 0,
+     "fees_paise": 0
+    },
+    "words": {
+     "1": "Cost ₹1,000.00 · bought 15 Aug 2023 · valued at ₹1,500.00",
+     "2": "From 15 Aug 2023: 4 at ₹100.00 · gain ₹300.00"
+    }
+   },
+   "names": {
+    "accounts": {
+     "1": "Zerodha",
+     "2": "Account B"
+    },
+    "assets": {
+     "1": "RELIANCE"
+    },
+    "units": {}
+   }
+  },
+  {
+   "id": "TF2b",
+   "title": "Without a first-purchase date or a value, the lot is dated the transfer and worth its cost",
+   "why": "10 shares come in from outside on 1 Apr 2026 at a cost of 1,000.00 (100000), with no original date and no value: the lot is dated 1 Apr 2026 and the money counted in is its cost, 100000.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "TRANSFER",
+     "trade_date": 20260401,
+     "account_id": null,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000,
+     "to_account_id": 1
+    }
+   ],
+   "expect": {
+    "positions": {
+     "1/1": {
+      "qty_u": 10000000,
+      "cost_paise": 100000,
+      "realised_paise": 0,
+      "income_paise": 0,
+      "fees_paise": 0,
+      "lots": [
+       [
+        20260401,
+        10000000,
+        100000
+       ]
+      ]
+     }
+    },
+    "moves": [
+     {
+      "entry": 1,
+      "account": 1,
+      "qty_u": 10000000,
+      "cost_paise": 100000,
+      "gain_paise": 0,
+      "paise": 100000,
+      "used": []
+     }
+    ],
+    "totals": {
+     "realised_paise": 0,
+     "income_paise": 0,
+     "fees_paise": 0
+    },
+    "words": {
+     "1": "Cost ₹1,000.00"
+    }
+   },
+   "names": {
+    "accounts": {
+     "1": "Zerodha",
+     "2": "Account B"
+    },
+    "assets": {
+     "1": "RELIANCE"
+    },
+    "units": {}
+   }
+  },
+  {
+   "id": "TF8",
+   "title": "An opening lot with an earlier first-purchase date is sold before a lot bought after it",
+   "why": "Account 1 buys 5 on 1 Mar 2025 (50000). On 1 Apr 2025 5 more come in from outside at a cost of 400.00 (40000), first bought 15 Jan 2024. FIFO goes by the day a lot was bought, so a sale of 5 on 15 Apr 2025 for 700.00 (70000) takes the 15 Jan 2024 lot: cost 40000, gain 30000. The 1 Mar lot is left whole.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250301,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 5000000,
+     "amount_paise": 50000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "TRANSFER",
+     "trade_date": 20250401,
+     "account_id": null,
+     "asset_id": 1,
+     "qty_u": 5000000,
+     "amount_paise": 40000,
+     "to_account_id": 1,
+     "lot_date": 20240115
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "SELL",
+     "trade_date": 20250415,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 5000000,
+     "amount_paise": 70000
+    }
+   ],
+   "expect": {
+    "positions": {
+     "1/1": {
+      "qty_u": 5000000,
+      "cost_paise": 50000,
+      "realised_paise": 30000,
+      "income_paise": 0,
+      "fees_paise": 0,
+      "lots": [
+       [
+        20250301,
+        5000000,
+        50000
+       ]
+      ]
+     }
+    },
+    "moves": [
+     {
+      "entry": 1,
+      "account": 1,
+      "qty_u": 5000000,
+      "cost_paise": 50000,
+      "gain_paise": 0,
+      "paise": 50000,
+      "used": []
+     },
+     {
+      "entry": 2,
+      "account": 1,
+      "qty_u": 5000000,
+      "cost_paise": 40000,
+      "gain_paise": 0,
+      "paise": 40000,
+      "used": []
+     },
+     {
+      "entry": 3,
+      "account": 1,
+      "qty_u": -5000000,
+      "cost_paise": -40000,
+      "gain_paise": 30000,
+      "paise": 70000,
+      "used": [
+       [
+        20240115,
+        5000000,
+        40000
+       ]
+      ]
+     }
+    ],
+    "totals": {
+     "realised_paise": 30000,
+     "income_paise": 0,
+     "fees_paise": 0
+    },
+    "words": {
+     "3": "From 15 Jan 2024: 5 at ₹80.00 · gain ₹300.00"
+    }
+   },
+   "names": {
+    "accounts": {
+     "1": "Zerodha",
+     "2": "Account B"
+    },
+    "assets": {
+     "1": "RELIANCE"
+    },
+    "units": {}
+   }
+  },
+  {
+   "id": "TF3",
+   "title": "Shares taken out to outside leave at their cost, with no gain or loss",
+   "why": "Buy 10 (100000) on 10 Jan and 10 (120000) on 10 Feb 2025. On 10 Mar 15 shares leave the tab: the whole 10 Jan lot (100000) and 5 of the 10 Feb lot (120000 x 5/10 = 60000). Cost 160000 leaves with them; there is no gain or loss, and with no value entered the money counted out is that cost. Left: 5 units, 60000.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250110,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "BUY",
+     "trade_date": 20250210,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 120000
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "TRANSFER",
+     "trade_date": 20250310,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 15000000
+    }
+   ],
+   "expect": {
+    "positions": {
+     "1/1": {
+      "qty_u": 5000000,
+      "cost_paise": 60000,
+      "realised_paise": 0,
+      "income_paise": 0,
+      "fees_paise": 0,
+      "lots": [
+       [
+        20250210,
+        5000000,
+        60000
+       ]
+      ]
+     }
+    },
+    "moves": [
+     {
+      "entry": 1,
+      "account": 1,
+      "qty_u": 10000000,
+      "cost_paise": 100000,
+      "gain_paise": 0,
+      "paise": 100000,
+      "used": []
+     },
+     {
+      "entry": 2,
+      "account": 1,
+      "qty_u": 10000000,
+      "cost_paise": 120000,
+      "gain_paise": 0,
+      "paise": 120000,
+      "used": []
+     },
+     {
+      "entry": 3,
+      "account": 1,
+      "qty_u": -15000000,
+      "cost_paise": -160000,
+      "gain_paise": 0,
+      "paise": 160000,
+      "used": [
+       [
+        20250110,
+        10000000,
+        100000
+       ],
+       [
+        20250210,
+        5000000,
+        60000
+       ]
+      ]
+     }
+    ],
+    "totals": {
+     "realised_paise": 0,
+     "income_paise": 0,
+     "fees_paise": 0
+    },
+    "words": {
+     "3": "From 10 Jan 2025: 10 at ₹100.00; from 10 Feb 2025: 5 at ₹120.00 · left at cost, no gain or loss"
+    }
+   },
+   "names": {
+    "accounts": {
+     "1": "Zerodha",
+     "2": "Account B"
+    },
+    "assets": {
+     "1": "RELIANCE"
+    },
+    "units": {}
+   }
+  },
+  {
+   "id": "TF3b",
+   "title": "A value entered for shares taken out changes the money counted out, not the gain",
+   "why": "The same transfer out, entered with a value of 1,950.00 (195000): that is the money counted out, but the lots still leave at their cost 160000 and the gain stays 0.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250110,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "BUY",
+     "trade_date": 20250210,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 120000
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "TRANSFER",
+     "trade_date": 20250310,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 15000000,
+     "value_paise": 195000
+    }
+   ],
+   "expect": {
+    "positions": {
+     "1/1": {
+      "qty_u": 5000000,
+      "cost_paise": 60000,
+      "realised_paise": 0,
+      "income_paise": 0,
+      "fees_paise": 0,
+      "lots": [
+       [
+        20250210,
+        5000000,
+        60000
+       ]
+      ]
+     }
+    },
+    "moves": [
+     {
+      "entry": 1,
+      "account": 1,
+      "qty_u": 10000000,
+      "cost_paise": 100000,
+      "gain_paise": 0,
+      "paise": 100000,
+      "used": []
+     },
+     {
+      "entry": 2,
+      "account": 1,
+      "qty_u": 10000000,
+      "cost_paise": 120000,
+      "gain_paise": 0,
+      "paise": 120000,
+      "used": []
+     },
+     {
+      "entry": 3,
+      "account": 1,
+      "qty_u": -15000000,
+      "cost_paise": -160000,
+      "gain_paise": 0,
+      "paise": 195000,
+      "used": [
+       [
+        20250110,
+        10000000,
+        100000
+       ],
+       [
+        20250210,
+        5000000,
+        60000
+       ]
+      ]
+     }
+    ],
+    "totals": {
+     "realised_paise": 0,
+     "income_paise": 0,
+     "fees_paise": 0
+    }
+   },
+   "names": {
+    "accounts": {
+     "1": "Zerodha",
+     "2": "Account B"
+    },
+    "assets": {
+     "1": "RELIANCE"
+    },
+    "units": {}
+   }
+  },
+  {
+   "id": "TF4",
+   "title": "Moving more than the account holds is refused, in words",
+   "why": "Account 1 holds 10 on 12 Mar 2025; a transfer of 12 is 2 short. The transfer is entry 2.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250110,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "TRANSFER",
+     "trade_date": 20250312,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 12000000,
+     "to_account_id": 2
+    }
+   ],
+   "expect": {
+    "refused": {
+     "entry": 2,
+     "reason": "short",
+     "message": "Zerodha holds 10 RELIANCE on 12 Mar 2025, so a transfer of 12 cannot be saved. Add the missing purchase first.",
+     "facts": {
+      "kind": "TRANSFER",
+      "day": 20250312,
+      "account_id": 1,
+      "asset_id": 1,
+      "have_qty_u": 10000000,
+      "want_qty_u": 12000000
+     }
+    }
+   },
+   "names": {
+    "accounts": {
+     "1": "Zerodha",
+     "2": "Account B"
+    },
+    "assets": {
+     "1": "RELIANCE"
+    },
+    "units": {}
+   }
+  },
+  {
+   "id": "TF5",
+   "title": "On one day a purchase, then the move, then the sale of the moved shares",
+   "why": "On 10 Mar 2025, typed in the opposite order: sell 5 in account 2 (600.00, 60000), move 10 from account 1 to 2, buy 10 in account 1 (1,000.00, 100000). The day applies the purchase, then the move, then the sale, so it stands: account 2 holds the 10 at 100000 and the sale takes 100000 x 5/10 = 50000; gain 60000 - 50000 = 10000. Account 2 is left with 5 units and 50000.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "SELL",
+     "trade_date": 20250310,
+     "account_id": 2,
+     "asset_id": 1,
+     "qty_u": 5000000,
+     "amount_paise": 60000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "TRANSFER",
+     "trade_date": 20250310,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "to_account_id": 2
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "BUY",
+     "trade_date": 20250310,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000
+    }
+   ],
+   "expect": {
+    "positions": {
+     "1/1": {
+      "qty_u": 0,
+      "cost_paise": 0,
+      "realised_paise": 0,
+      "income_paise": 0,
+      "fees_paise": 0,
+      "lots": []
+     },
+     "2/1": {
+      "qty_u": 5000000,
+      "cost_paise": 50000,
+      "realised_paise": 10000,
+      "income_paise": 0,
+      "fees_paise": 0,
+      "lots": [
+       [
+        20250310,
+        5000000,
+        50000
+       ]
+      ]
+     }
+    },
+    "moves": [
+     {
+      "entry": 3,
+      "account": 1,
+      "qty_u": 10000000,
+      "cost_paise": 100000,
+      "gain_paise": 0,
+      "paise": 100000,
+      "used": []
+     },
+     {
+      "entry": 2,
+      "account": 1,
+      "qty_u": -10000000,
+      "cost_paise": -100000,
+      "gain_paise": 0,
+      "paise": null,
+      "used": [
+       [
+        20250310,
+        10000000,
+        100000
+       ]
+      ]
+     },
+     {
+      "entry": 2,
+      "account": 2,
+      "qty_u": 10000000,
+      "cost_paise": 100000,
+      "gain_paise": 0,
+      "paise": null,
+      "used": [
+       [
+        20250310,
+        10000000,
+        100000
+       ]
+      ]
+     },
+     {
+      "entry": 1,
+      "account": 2,
+      "qty_u": -5000000,
+      "cost_paise": -50000,
+      "gain_paise": 10000,
+      "paise": 60000,
+      "used": [
+       [
+        20250310,
+        5000000,
+        50000
+       ]
+      ]
+     }
+    ],
+    "totals": {
+     "realised_paise": 10000,
+     "income_paise": 0,
+     "fees_paise": 0
+    }
+   },
+   "names": {
+    "accounts": {
+     "1": "Zerodha",
+     "2": "Account B"
+    },
+    "assets": {
+     "1": "RELIANCE"
+    },
+    "units": {}
+   }
+  },
+  {
+   "id": "TF6",
+   "title": "A moved lot takes its place in the new account by the day it was bought",
+   "why": "Account 1 buys 2 on 6 Jan 2025 (20000); account 2 buys 2 on 1 Mar 2025 (30000). On 1 Apr the 6 Jan lot moves to account 2, where it goes ahead of the 1 Mar lot because it is older. A sale of 1 on 15 Apr for 180.00 (18000) takes the 6 Jan lot: 20000 x 1/2 = 10000, gain 8000. Left in account 2: 1 unit at 10000 (6 Jan) and 2 at 30000 (1 Mar).",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250106,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 2000000,
+     "amount_paise": 20000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "BUY",
+     "trade_date": 20250301,
+     "account_id": 2,
+     "asset_id": 1,
+     "qty_u": 2000000,
+     "amount_paise": 30000
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "TRANSFER",
+     "trade_date": 20250401,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 2000000,
+     "to_account_id": 2
+    },
+    {
+     "id": 4,
+     "seq": 4,
+     "kind": "SELL",
+     "trade_date": 20250415,
+     "account_id": 2,
+     "asset_id": 1,
+     "qty_u": 1000000,
+     "amount_paise": 18000
+    }
+   ],
+   "expect": {
+    "positions": {
+     "1/1": {
+      "qty_u": 0,
+      "cost_paise": 0,
+      "realised_paise": 0,
+      "income_paise": 0,
+      "fees_paise": 0,
+      "lots": []
+     },
+     "2/1": {
+      "qty_u": 3000000,
+      "cost_paise": 40000,
+      "realised_paise": 8000,
+      "income_paise": 0,
+      "fees_paise": 0,
+      "lots": [
+       [
+        20250106,
+        1000000,
+        10000
+       ],
+       [
+        20250301,
+        2000000,
+        30000
+       ]
+      ]
+     }
+    },
+    "moves": [
+     {
+      "entry": 1,
+      "account": 1,
+      "qty_u": 2000000,
+      "cost_paise": 20000,
+      "gain_paise": 0,
+      "paise": 20000,
+      "used": []
+     },
+     {
+      "entry": 2,
+      "account": 2,
+      "qty_u": 2000000,
+      "cost_paise": 30000,
+      "gain_paise": 0,
+      "paise": 30000,
+      "used": []
+     },
+     {
+      "entry": 3,
+      "account": 1,
+      "qty_u": -2000000,
+      "cost_paise": -20000,
+      "gain_paise": 0,
+      "paise": null,
+      "used": [
+       [
+        20250106,
+        2000000,
+        20000
+       ]
+      ]
+     },
+     {
+      "entry": 3,
+      "account": 2,
+      "qty_u": 2000000,
+      "cost_paise": 20000,
+      "gain_paise": 0,
+      "paise": null,
+      "used": [
+       [
+        20250106,
+        2000000,
+        20000
+       ]
+      ]
+     },
+     {
+      "entry": 4,
+      "account": 2,
+      "qty_u": -1000000,
+      "cost_paise": -10000,
+      "gain_paise": 8000,
+      "paise": 18000,
+      "used": [
+       [
+        20250106,
+        1000000,
+        10000
+       ]
+      ]
+     }
+    ],
+    "totals": {
+     "realised_paise": 8000,
+     "income_paise": 0,
+     "fees_paise": 0
+    },
+    "words": {
+     "4": "From 6 Jan 2025: 1 at ₹100.00 · gain ₹80.00"
+    }
+   },
+   "names": {
+    "accounts": {
+     "1": "Zerodha",
+     "2": "Account B"
+    },
+    "assets": {
+     "1": "RELIANCE"
+    },
+    "units": {}
+   }
+  }
+ ]
+}

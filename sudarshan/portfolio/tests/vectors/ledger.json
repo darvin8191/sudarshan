@@ -67,6 +67,7 @@
     "moves": [
      {
       "entry": 1,
+      "account": 1,
       "qty_u": 10000000,
       "cost_paise": 100000,
       "gain_paise": 0,
@@ -75,6 +76,7 @@
      },
      {
       "entry": 2,
+      "account": 1,
       "qty_u": 10000000,
       "cost_paise": 120000,
       "gain_paise": 0,
@@ -83,6 +85,7 @@
      },
      {
       "entry": 3,
+      "account": 1,
       "qty_u": -15000000,
       "cost_paise": -160000,
       "gain_paise": 35000,
@@ -165,6 +168,7 @@
     "moves": [
      {
       "entry": 1,
+      "account": 1,
       "qty_u": 10000000,
       "cost_paise": 102000,
       "gain_paise": 0,
@@ -173,6 +177,7 @@
      },
      {
       "entry": 2,
+      "account": 1,
       "qty_u": -10000000,
       "cost_paise": -102000,
       "gain_paise": 6500,
@@ -267,6 +272,7 @@
     "moves": [
      {
       "entry": 1,
+      "account": 1,
       "qty_u": 3000000,
       "cost_paise": 10000,
       "gain_paise": 0,
@@ -275,6 +281,7 @@
      },
      {
       "entry": 2,
+      "account": 1,
       "qty_u": -1000000,
       "cost_paise": -3333,
       "gain_paise": 667,
@@ -289,6 +296,7 @@
      },
      {
       "entry": 3,
+      "account": 1,
       "qty_u": -1000000,
       "cost_paise": -3334,
       "gain_paise": 666,
@@ -303,6 +311,7 @@
      },
      {
       "entry": 4,
+      "account": 1,
       "qty_u": -1000000,
       "cost_paise": -3333,
       "gain_paise": 667,
@@ -375,6 +384,7 @@
     "moves": [
      {
       "entry": 1,
+      "account": 1,
       "qty_u": 3000000,
       "cost_paise": 10000,
       "gain_paise": 0,
@@ -429,7 +439,15 @@
     "refused": {
      "entry": 2,
      "reason": "short",
-     "message": "Zerodha holds 10 RELIANCE on 12 Mar 2025, so a sale of 12 cannot be saved. Add the missing purchase first."
+     "message": "Zerodha holds 10 RELIANCE on 12 Mar 2025, so a sale of 12 cannot be saved. Add the missing purchase first.",
+     "facts": {
+      "kind": "SELL",
+      "day": 20250312,
+      "account_id": 1,
+      "asset_id": 1,
+      "have_qty_u": 10000000,
+      "want_qty_u": 12000000
+     }
     }
    },
    "names": {
@@ -463,7 +481,15 @@
     "refused": {
      "entry": 1,
      "reason": "short",
-     "message": "Zerodha holds no RELIANCE on 12 Mar 2025, so a sale of 5 cannot be saved. Add the missing purchase first."
+     "message": "Zerodha holds no RELIANCE on 12 Mar 2025, so a sale of 5 cannot be saved. Add the missing purchase first.",
+     "facts": {
+      "kind": "SELL",
+      "day": 20250312,
+      "account_id": 1,
+      "asset_id": 1,
+      "have_qty_u": 0,
+      "want_qty_u": 5000000
+     }
     }
    },
    "names": {
@@ -517,7 +543,15 @@
     "refused": {
      "entry": 3,
      "reason": "short",
-     "message": "Zerodha holds 4 RELIANCE on 12 Mar 2025, so a sale of 6 cannot be saved. Add the missing purchase first."
+     "message": "Zerodha holds 4 RELIANCE on 12 Mar 2025, so a sale of 6 cannot be saved. Add the missing purchase first.",
+     "facts": {
+      "kind": "SELL",
+      "day": 20250312,
+      "account_id": 1,
+      "asset_id": 1,
+      "have_qty_u": 4000000,
+      "want_qty_u": 6000000
+     }
     }
    },
    "names": {
@@ -595,6 +629,7 @@
     "moves": [
      {
       "entry": 1,
+      "account": 1,
       "qty_u": 10000000,
       "cost_paise": 100000,
       "gain_paise": 0,
@@ -603,6 +638,7 @@
      },
      {
       "entry": 2,
+      "account": 2,
       "qty_u": 10000000,
       "cost_paise": 200000,
       "gain_paise": 0,
@@ -611,6 +647,7 @@
      },
      {
       "entry": 3,
+      "account": 2,
       "qty_u": -10000000,
       "cost_paise": -200000,
       "gain_paise": -50000,
@@ -690,6 +727,7 @@
     "moves": [
      {
       "entry": 2,
+      "account": 1,
       "qty_u": 10000000,
       "cost_paise": 100000,
       "gain_paise": 0,
@@ -698,6 +736,7 @@
      },
      {
       "entry": 1,
+      "account": 1,
       "qty_u": -5000000,
       "cost_paise": -50000,
       "gain_paise": 5000,
@@ -758,7 +797,15 @@
     "refused": {
      "entry": 1,
      "reason": "short",
-     "message": "Zerodha holds no RELIANCE on 9 Jan 2025, so a sale of 5 cannot be saved. Add the missing purchase first."
+     "message": "Zerodha holds no RELIANCE on 9 Jan 2025, so a sale of 5 cannot be saved. Add the missing purchase first.",
+     "facts": {
+      "kind": "SELL",
+      "day": 20250109,
+      "account_id": 1,
+      "asset_id": 1,
+      "have_qty_u": 0,
+      "want_qty_u": 5000000
+     }
     }
    },
    "names": {
@@ -822,6 +869,7 @@
     "moves": [
      {
       "entry": 1,
+      "account": 1,
       "qty_u": 2000000,
       "cost_paise": 10005,
       "gain_paise": 0,
@@ -830,6 +878,7 @@
      },
      {
       "entry": 2,
+      "account": 1,
       "qty_u": -1000000,
       "cost_paise": -5003,
       "gain_paise": 997,
@@ -844,6 +893,7 @@
      },
      {
       "entry": 3,
+      "account": 1,
       "qty_u": -1000000,
       "cost_paise": -5002,
       "gain_paise": 998,
@@ -920,6 +970,7 @@
     "moves": [
      {
       "entry": 1,
+      "account": 1,
       "qty_u": 109459000,
       "cost_paise": 499997,
       "gain_paise": 0,
@@ -928,6 +979,7 @@
      },
      {
       "entry": 2,
+      "account": 1,
       "qty_u": -50250000,
       "cost_paise": -229537,
       "gain_paise": 5463,
@@ -1003,6 +1055,7 @@
     "moves": [
      {
       "entry": 1,
+      "account": 1,
       "qty_u": 10000000,
       "cost_paise": 100000,
       "gain_paise": 0,
@@ -1011,6 +1064,7 @@
      },
      {
       "entry": 2,
+      "account": 1,
       "qty_u": -10000000,
       "cost_paise": -100000,
       "gain_paise": 5000,
@@ -1113,6 +1167,7 @@
     "moves": [
      {
       "entry": 1,
+      "account": 1,
       "qty_u": 10000000,
       "cost_paise": 100000,
       "gain_paise": 0,
@@ -1121,6 +1176,7 @@
      },
      {
       "entry": 2,
+      "account": 1,
       "qty_u": -4000000,
       "cost_paise": -40000,
       "gain_paise": 4000,
@@ -1135,6 +1191,7 @@
      },
      {
       "entry": 4,
+      "account": 1,
       "qty_u": 5000000,
       "cost_paise": 60000,
       "gain_paise": 0,
@@ -1226,6 +1283,7 @@
     "moves": [
      {
       "entry": 1,
+      "account": 1,
       "qty_u": 10000000,
       "cost_paise": 100000,
       "gain_paise": 0,
@@ -1234,6 +1292,7 @@
      },
      {
       "entry": 2,
+      "account": 1,
       "qty_u": -4000000,
       "cost_paise": -40000,
       "gain_paise": 4000,
@@ -1344,6 +1403,7 @@
     "moves": [
      {
       "entry": 1,
+      "account": 1,
       "qty_u": 10000000,
       "cost_paise": 100000,
       "gain_paise": 0,
@@ -1352,6 +1412,7 @@
      },
      {
       "entry": 2,
+      "account": 1,
       "qty_u": 0,
       "cost_paise": 0,
       "gain_paise": 0,
@@ -1360,6 +1421,7 @@
      },
      {
       "entry": 3,
+      "account": 1,
       "qty_u": 0,
       "cost_paise": 0,
       "gain_paise": 0,
@@ -1368,6 +1430,7 @@
      },
      {
       "entry": 4,
+      "account": 1,
       "qty_u": 0,
       "cost_paise": 0,
       "gain_paise": 0,
@@ -1376,6 +1439,7 @@
      },
      {
       "entry": 5,
+      "account": 1,
       "qty_u": 0,
       "cost_paise": 0,
       "gain_paise": 0,
@@ -1462,6 +1526,7 @@
     "moves": [
      {
       "entry": 2,
+      "account": 1,
       "qty_u": 10000000,
       "cost_paise": 100000,
       "gain_paise": 0,
@@ -1470,6 +1535,7 @@
      },
      {
       "entry": 1,
+      "account": 1,
       "qty_u": 10000000,
       "cost_paise": 120000,
       "gain_paise": 0,
@@ -1478,6 +1544,7 @@
      },
      {
       "entry": 3,
+      "account": 1,
       "qty_u": -10000000,
       "cost_paise": -100000,
       "gain_paise": 50000,
@@ -1564,6 +1631,7 @@
     "moves": [
      {
       "entry": 1,
+      "account": 1,
       "qty_u": 3000000,
       "cost_paise": 3001,
       "gain_paise": 0,
@@ -1572,6 +1640,7 @@
      },
      {
       "entry": 2,
+      "account": 1,
       "qty_u": 3000000,
       "cost_paise": 3302,
       "gain_paise": 0,
@@ -1580,6 +1649,7 @@
      },
      {
       "entry": 3,
+      "account": 1,
       "qty_u": -4000000,
       "cost_paise": -4102,
       "gain_paise": 898,
@@ -1652,6 +1722,7 @@
     "moves": [
      {
       "entry": 1,
+      "account": 1,
       "qty_u": 10000000,
       "cost_paise": 1430250,
       "gain_paise": 0,
@@ -1735,6 +1806,7 @@
     "moves": [
      {
       "entry": 1,
+      "account": 1,
       "qty_u": 10000000,
       "cost_paise": 1428250,
       "gain_paise": 0,
@@ -1743,6 +1815,7 @@
      },
      {
       "entry": 2,
+      "account": 1,
       "qty_u": 10000000,
       "cost_paise": 1510000,
       "gain_paise": 0,
@@ -1751,6 +1824,7 @@
      },
      {
       "entry": 3,
+      "account": 1,
       "qty_u": -15000000,
       "cost_paise": -2183250,
       "gain_paise": 123400,

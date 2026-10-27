@@ -126,6 +126,23 @@ def short_of_units(
     )
 
 
+def not_held(names: Names, kind: str, account_id: int | None, asset_id: int, day: int) -> str:
+    """A split or a bonus on a holding that the account does not hold on that day."""
+    who = "No account holds" if account_id is None else f"{names.account(account_id)} holds no"
+    return (
+        f"{who} {names.asset(asset_id)} on {date(day)}, so a {NOUNS[kind]} cannot be saved. "
+        "Check the date, or add the missing purchase first."
+    )
+
+
+def fraction_left(names: Names, account_id: int, asset_id: int, left_qty_u: int) -> str:
+    """A split that would leave part of a share (or less than the asset's smallest unit)."""
+    return (
+        f"This split would leave {quantity(left_qty_u)} {names.unit(asset_id)} in "
+        f"{names.account(account_id)}. Record the sale of the fraction first, then the split."
+    )
+
+
 def knock_on(action: str, changed_kind: str, failing_kind: str, failing_day: int, unit: str) -> str:
     """Why a change is refused because of a later entry it would leave without units.
 
@@ -137,6 +154,15 @@ def knock_on(action: str, changed_kind: str, failing_kind: str, failing_day: int
     return (
         f"{verb} this {NOUNS[changed_kind]} would leave the {later} on {date(failing_day)} "
         f"without {unit}. {fix} that {later} first."
+    )
+
+
+def _lots(pieces) -> str:
+    """The lots a sale or a transfer took: "From 10 Jan 2025: 10 at ₹1,428.25; from ..."."""
+    return "; ".join(
+        f"{'from' if n else 'From'} {date(piece.day)}: {quantity(piece.qty_u)} at "
+        f"{price(unit_price_u(piece.cost_paise, piece.qty_u))}"
+        for n, piece in enumerate(pieces)
     )
 
 
@@ -152,20 +178,32 @@ def describe(move) -> str:
             f" with {rupees(entry.charges_paise)} charges" if entry.charges_paise else ""
         )
     if kind == "SELL":
-        lots = [
-            f"{'from' if n else 'From'} {date(piece.day)}: {quantity(piece.qty_u)} at "
-            f"{price(unit_price_u(piece.cost_paise, piece.qty_u))}"
-            for n, piece in enumerate(move.used)
-        ]
         gain = move.gain_paise
         if gain:
             result = f"gain {rupees(gain)}" if gain > 0 else f"loss {rupees(-gain)}"
         else:
             result = "no gain or loss"
-        return "; ".join(lots) + DOT + result
+        return _lots(move.used) + DOT + result
     if kind in ("DIVIDEND", "INTEREST"):
         text = f"Income {rupees(move.paise)}"
         return text + (f" before {rupees(entry.tds_paise)} TDS" if entry.tds_paise else "")
     if kind == "FEE":
         return f"Fee {rupees(move.paise)}"
-    return NOUNS[kind].capitalize()
+    if kind == "SPLIT":
+        after = sum(piece.qty_u for piece in move.used)
+        num, den = entry.ratio_num, entry.ratio_den
+        ratio = f"Each share becomes {num}" if den == 1 else f"{num} new for every {den} old"
+        became = f"{quantity(after - move.qty_u)} become {quantity(after)}"
+        return f"{ratio}{DOT}{became}{DOT}cost and dates kept"
+    if kind == "BONUS":
+        return f"Bonus {quantity(entry.qty_u)} at no cost"
+    if entry.account_id is None:  # shares brought in from outside
+        text = f"Cost {rupees(move.cost_paise)}"
+        if entry.lot_date and entry.lot_date != entry.trade_date:
+            text += f"{DOT}bought {date(entry.lot_date)}"
+        if entry.value_paise is not None and entry.value_paise != move.cost_paise:
+            text += f"{DOT}valued at {rupees(entry.value_paise)}"
+        return text
+    if entry.to_account_id is None:  # shares taken out
+        return _lots(move.used) + DOT + "left at cost, no gain or loss"
+    return _lots(move.used) + DOT + "cost and dates kept"

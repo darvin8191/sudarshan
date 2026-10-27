@@ -11,18 +11,26 @@ from __future__ import annotations
 import ast
 import importlib.util
 import json
+import sys
 from pathlib import Path
 
 import pytest
 
 VECTORS = Path(__file__).parent / "vectors"
 GENERATORS = sorted(path.name for path in VECTORS.glob("make_*.py"))
+#: What the generators share; it is held to the same independence.
+TOOLS = "portfolio_vector_tools.py"
 
 
 def load(name: str):
+    """Run a generator's file as a module (it finds its tools next to it, as it does as a script)."""
     spec = importlib.util.spec_from_file_location(f"portfolio_vectors_{name[:-3]}", VECTORS / name)
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    sys.path.insert(0, str(VECTORS))
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.path.remove(str(VECTORS))
     return module
 
 
@@ -39,7 +47,7 @@ def test_the_committed_vectors_are_what_the_generator_writes(name):
         assert written == data, f"{filename} is not what {name} writes: run it and commit both"
 
 
-@pytest.mark.parametrize("name", GENERATORS)
+@pytest.mark.parametrize("name", [*GENERATORS, TOOLS])
 def test_a_generator_imports_nothing_from_the_code_it_checks(name):
     tree = ast.parse((VECTORS / name).read_text(encoding="utf-8"))
     imported = set()
@@ -48,7 +56,16 @@ def test_a_generator_imports_nothing_from_the_code_it_checks(name):
             imported |= {alias.name.split(".")[0] for alias in node.names}
         elif isinstance(node, ast.ImportFrom):
             imported.add((node.module or "").split(".")[0])
-    assert imported <= {"__future__", "json", "re", "decimal", "fractions", "pathlib"}, imported
+    allowed = {
+        "__future__",
+        "json",
+        "re",
+        "decimal",
+        "fractions",
+        "pathlib",
+        "portfolio_vector_tools",
+    }
+    assert imported <= allowed, imported
 
 
 def test_every_vector_file_has_a_generator_that_writes_it():

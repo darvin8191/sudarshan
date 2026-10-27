@@ -10,119 +10,33 @@ or not at all.
 Run: python3 make_pa1.py
 """
 
-import json
-import re
-from decimal import ROUND_HALF_UP, Decimal, getcontext
-from fractions import Fraction
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
-getcontext().prec = 80
-RUPEE = chr(0x20B9)
-DOT = " " + chr(0xB7) + " "
-MONTHS = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split()
+from portfolio_vector_tools import (
+    DOT,
+    NAMES,
+    RUPEE,
+    U,
+    add_case,
+    day_text,
+    e,
+    inr,
+    mv,
+    pos,
+    price_text,
+    qty_text,
+    rd,
+    refused,
+    totals,
+    write_all,
+)
 
-
-# ---------------------------------------------------------------- exact rounding, two ways
-def half_away_fraction(x: Fraction) -> int:
-    s = -1 if x < 0 else 1
-    return s * int((abs(x) + Fraction(1, 2)) // 1)
-
-
-def half_away_decimal(n: int, d: int) -> int:
-    q = (Decimal(n) / Decimal(d)).quantize(Decimal(1), rounding=ROUND_HALF_UP)
-    return int(q)
-
-
-def rd(n: int, d: int) -> int:
-    a, b = half_away_fraction(Fraction(n, d)), half_away_decimal(n, d)
-    assert a == b, (n, d, a, b)
-    return a
-
-
-# ---------------------------------------------------------------- independent words
-def group_in(n: int) -> str:
-    s = str(abs(n))
-    if len(s) > 3:
-        head = re.sub(r"(\d)(?=(\d\d)+$)", r"\1,", s[:-3])
-        s = head + "," + s[-3:]
-    return ("-" if n < 0 else "") + s
-
-
-def inr(paise: int) -> str:
-    r, p = divmod(abs(paise), 100)
-    return ("-" if paise < 0 else "") + RUPEE + group_in(r) + "." + f"{p:02d}"
-
-
-def price_text(price_u: int) -> str:
-    r, p = divmod(price_u, 10000)
-    frac = f"{p:04d}".rstrip("0")
-    frac = frac + "0" * (2 - len(frac)) if len(frac) < 2 else frac
-    return RUPEE + group_in(r) + "." + frac
-
-
-def qty_text(qty_u: int) -> str:
-    r, p = divmod(qty_u, 10**6)
-    frac = f"{p:06d}".rstrip("0")
-    return group_in(r) + ("." + frac if frac else "")
-
-
-def day_text(day: int) -> str:
-    return f"{day % 100} {MONTHS[day // 100 % 100 - 1]} {day // 10000}"
-
-
-def e(i, kind, day, account, asset, qty_u=None, amount=None, **more):
-    row = {"id": i, "seq": i, "kind": kind, "trade_date": day, "account_id": account}
-    if asset is not None:
-        row["asset_id"] = asset
-    if qty_u is not None:
-        row["qty_u"] = qty_u
-    if amount is not None:
-        row["amount_paise"] = amount
-    row.update(more)
-    return row
-
-
-U = 10**6  # one unit
-
-NAMES = {"accounts": {"1": "Zerodha", "2": "Account B"}, "assets": {"1": "RELIANCE"}, "units": {}}
 CASES = []
 
 
-def case(cid, title, why, entries, expect, names=None, as_of=None, words=None):
-    if words and "refused" not in expect:
-        expect = {**expect, "words": {str(k): v for k, v in words.items()}}
-    c = {"id": cid, "title": title, "why": why, "entries": entries, "expect": expect}
-    if names:
-        c["names"] = names
-    if as_of:
-        c["as_of"] = as_of
-    CASES.append(c)
-
-
-def mv(entry, qty_u, cost, gain, paise, used=()):
-    return {
-        "entry": entry,
-        "qty_u": qty_u,
-        "cost_paise": cost,
-        "gain_paise": gain,
-        "paise": paise,
-        "used": [list(u) for u in used],
-    }
-
-
-def pos(qty_u, cost, lots, realised=0, income=0, fees=0):
-    return {
-        "qty_u": qty_u,
-        "cost_paise": cost,
-        "realised_paise": realised,
-        "income_paise": income,
-        "fees_paise": fees,
-        "lots": [list(lot) for lot in lots],
-    }
-
-
-def totals(realised=0, income=0, fees=0):
-    return {"realised_paise": realised, "income_paise": income, "fees_paise": fees}
+def case(*args, **kwargs):
+    add_case(CASES, *args, **kwargs)
 
 
 # F1 ---------------------------------------------------------------------------------------
@@ -249,7 +163,17 @@ case(
     "Buy 10 on 10 Jan 2025; on 12 Mar 2025 the account holds 10 and a sale of 12 is 2 short. The "
     "sale is entry 2 and is the one named.",
     [e(1, "BUY", 20250110, 1, 1, 10 * U, 100000), e(2, "SELL", 20250312, 1, 1, 12 * U, 150000)],
-    {"refused": {"entry": 2, "reason": "short", "message": MSG4}},
+    refused(
+        2,
+        "short",
+        MSG4,
+        kind="SELL",
+        day=20250312,
+        account_id=1,
+        asset_id=1,
+        have_qty_u=10 * U,
+        want_qty_u=12 * U,
+    ),
     names=NAMES,
 )
 case(
@@ -257,13 +181,17 @@ case(
     "A sale with nothing bought says so",
     "Nothing is held on 12 Mar 2025, so a sale of 5 is refused and the sentence says 'no'.",
     [e(1, "SELL", 20250312, 1, 1, 5 * U, 70000)],
-    {
-        "refused": {
-            "entry": 1,
-            "reason": "short",
-            "message": "Zerodha holds no RELIANCE on 12 Mar 2025, so a sale of 5 cannot be saved. Add the missing purchase first.",
-        }
-    },
+    refused(
+        1,
+        "short",
+        "Zerodha holds no RELIANCE on 12 Mar 2025, so a sale of 5 cannot be saved. Add the missing purchase first.",
+        kind="SELL",
+        day=20250312,
+        account_id=1,
+        asset_id=1,
+        have_qty_u=0,
+        want_qty_u=5 * U,
+    ),
     names=NAMES,
 )
 case(
@@ -275,13 +203,17 @@ case(
         e(2, "SELL", 20250312, 1, 1, 6 * U, 90000),
         e(3, "SELL", 20250312, 1, 1, 6 * U, 90000),
     ],
-    {
-        "refused": {
-            "entry": 3,
-            "reason": "short",
-            "message": "Zerodha holds 4 RELIANCE on 12 Mar 2025, so a sale of 6 cannot be saved. Add the missing purchase first.",
-        }
-    },
+    refused(
+        3,
+        "short",
+        "Zerodha holds 4 RELIANCE on 12 Mar 2025, so a sale of 6 cannot be saved. Add the missing purchase first.",
+        kind="SELL",
+        day=20250312,
+        account_id=1,
+        asset_id=1,
+        have_qty_u=4 * U,
+        want_qty_u=6 * U,
+    ),
     names=NAMES,
 )
 
@@ -339,13 +271,17 @@ case(
     "The same two entries, but the sale is dated 9 Jan 2025, the day before the purchase: "
     "nothing is held on 9 Jan.",
     [e(1, "SELL", 20250109, 1, 1, 5 * U, 55000), e(2, "BUY", 20250110, 1, 1, 10 * U, 100000)],
-    {
-        "refused": {
-            "entry": 1,
-            "reason": "short",
-            "message": "Zerodha holds no RELIANCE on 9 Jan 2025, so a sale of 5 cannot be saved. Add the missing purchase first.",
-        }
-    },
+    refused(
+        1,
+        "short",
+        "Zerodha holds no RELIANCE on 9 Jan 2025, so a sale of 5 cannot be saved. Add the missing purchase first.",
+        kind="SELL",
+        day=20250109,
+        account_id=1,
+        asset_id=1,
+        have_qty_u=0,
+        want_qty_u=5 * U,
+    ),
     names=NAMES,
 )
 
@@ -769,10 +705,7 @@ def build() -> dict:
 
 
 def main() -> None:
-    here = Path(__file__).parent
-    for name, data in build().items():
-        text = json.dumps(data, indent=1, ensure_ascii=False) + "\n"
-        (here / name).write_text(text, encoding="utf-8")
+    write_all(build(), Path(__file__).parent)
 
 
 if __name__ == "__main__":

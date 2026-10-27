@@ -1,14 +1,16 @@
-"""core/model.py and core/ledger.py (PA1): FIFO per account and asset, the day's order, refusals.
+"""core/model.py and core/ledger.py (PA1, PA2): FIFO per account and asset, the day's order,
+splits, bonus shares, transfers and the refusals.
 
-Three witnesses to the same rules: the golden vectors (vectors/ledger.json, numbers derived by
-hand), a naive second implementation (portfolio_oracle.py, no code shared with the engine) run on
-the same entries, and identities that must hold whatever the entries are.
+Three witnesses to the same rules: the golden vectors (vectors/ledger.json and actions.json,
+numbers derived by hand), a naive second implementation (portfolio_oracle.py, no code shared with
+the engine) run on the same entries, and identities that must hold whatever the entries are.
 """
 
 from __future__ import annotations
 
 import json
 import random
+from collections import Counter
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -30,11 +32,17 @@ from sudarshan.portfolio.core.ledger import (
 )
 from sudarshan.portfolio.core.model import FIELDS, MAX_RATIO, BadEntry, Entry, Refusal
 
-VECTORS = json.loads(
-    (Path(__file__).parent / "vectors" / "ledger.json").read_text(encoding="utf-8")
-)
-CASES = VECTORS["cases"]
+VECTOR_FILES = ("ledger.json", "actions.json")
+CASES = [
+    case
+    for name in VECTOR_FILES
+    for case in json.loads((Path(__file__).parent / "vectors" / name).read_text(encoding="utf-8"))[
+        "cases"
+    ]
+]
 U = kinds.QTY_SCALE
+#: How many decimals a quantity of each asset may have in the random tabs: shares, then units.
+DECIMALS = {1: 0, 2: 4}
 
 
 GOOD = {
@@ -50,17 +58,29 @@ GOOD = {
 }
 
 
+def decimals_of(case):
+    """The decimals a case gives each asset (JSON keys are text); shares unless it says."""
+    return {int(asset): places for asset, places in case.get("decimals", {}).items()}
+
+
 def run(case):
     entries = [Entry.of(row) for row in case["entries"]]
-    return replay(entries, as_of=case.get("as_of"), names=names_of(case.get("names")))
+    return replay(
+        entries,
+        as_of=case.get("as_of"),
+        names=names_of(case.get("names")),
+        decimals=decimals_of(case),
+    )
 
 
 # -- the golden vectors ---------------------------------------------------------------------
 
 
 def test_the_designs_vectors_are_all_there():
-    assert {"F1", "F2", "F3", "F4", "F5", "F6"} <= {case["id"] for case in CASES}
-    assert len({case["id"] for case in CASES}) == len(CASES)
+    ids = {case["id"] for case in CASES}
+    assert {"F1", "F2", "F3", "F4", "F5", "F6", "F7"} <= ids
+    assert {"C1", "C2", "C3", "C4", "C5"} <= ids
+    assert len(ids) == len(CASES)
     for case in CASES:
         assert len(case["why"]) > 60, case["id"]  # each carries its derivation
         assert case["title"] and case["entries"]
@@ -72,13 +92,15 @@ def test_the_engine_gives_the_vectors_numbers(case):
     if "refused" in expect:
         with pytest.raises(Refusal) as caught:
             run(case)
-        assert caught.value.entry_id == expect["refused"]["entry"]
-        assert caught.value.reason == expect["refused"]["reason"]
-        assert caught.value.message == expect["refused"]["message"]
+        want = expect["refused"]
+        assert caught.value.entry_id == want["entry"]
+        assert caught.value.reason == want["reason"]
+        assert caught.value.message == want["message"]
+        assert caught.value.facts == want["facts"]
         assert str(caught.value) == caught.value.message
         return
     ledger = run(case)
-    got = snapshot(ledger)
+    got = snapshot(ledger, case.get("over_year_on"))
     assert got["positions"] == expect["positions"]
     assert got["moves"] == expect["moves"]
     assert got["totals"] == expect["totals"]
@@ -89,10 +111,11 @@ def test_the_engine_gives_the_vectors_numbers(case):
 
 @pytest.mark.parametrize("case", CASES, ids=lambda case: case["id"])
 def test_the_naive_oracle_gives_the_same_numbers(case):
-    got = simulate(case["entries"], case.get("as_of"))
+    got = simulate(case["entries"], case.get("as_of"), decimals_of(case), case.get("over_year_on"))
     expect = case["expect"]
     if "refused" in expect:
         assert got["refused"]["entry"] == expect["refused"]["entry"]
+        assert got["refused"]["reason"] == expect["refused"]["reason"]
         return
     assert got["positions"] == expect["positions"]
     assert got["moves"] == expect["moves"]
@@ -103,14 +126,44 @@ def test_the_naive_oracle_gives_the_same_numbers(case):
 
 DAYS = [from_date(date(2025, 1, 1) + timedelta(days=n)) for n in range(0, 140, 3)]
 UNITS = [U, U, U, U, 250_000]
+#: Days before every day above, for the first purchase of shares brought in from outside.
+EARLIER = [20230615, 20240229, 20241105]
+RATIOS = [(2, 1), (5, 1), (3, 2), (1, 2), (1, 5), (1, 10), (10, 1), (7, 3)]
+KINDS = ["BUY", "RIGHTS", "SELL", "DIVIDEND", "INTEREST", "FEE", "TRANSFER", "SPLIT", "BONUS"]
+WEIGHTS = [9, 2, 6, 2, 1, 1, 4, 2, 2]
+
+
+def shape(row: dict) -> str:
+    """What a row is, finer than its kind: the three ways to transfer are three different entries."""
+    if row["kind"] != "TRANSFER":
+        return row["kind"]
+    if row.get("account_id") is None:
+        return "TRANSFER_IN"
+    return "TRANSFER_OUT" if row.get("to_account_id") is None else "TRANSFER_BETWEEN"
+
+
+def transfer_row(rng: random.Random, row: dict) -> None:
+    """Turn ``row`` (with an account) into a transfer between accounts, in or out."""
+    row["asset_id"] = rng.choice([1, 2])
+    row["qty_u"] = rng.randint(1, 6) * rng.choice(UNITS)
+    way = rng.random()
+    if way < 0.6:
+        row["to_account_id"] = 3 - row["account_id"]
+    elif way < 0.8:  # shares brought in from outside
+        row["to_account_id"], row["account_id"] = row["account_id"], None
+        row["amount_paise"] = rng.randint(100, 300_000)
+        if rng.random() < 0.6:
+            row["lot_date"] = rng.choice([*EARLIER, row["trade_date"]])
+        if rng.random() < 0.5:
+            row["value_paise"] = rng.randint(100, 400_000)
+    elif rng.random() < 0.5:  # shares taken out to outside
+        row["value_paise"] = rng.randint(100, 400_000)
 
 
 def random_rows(rng: random.Random, count: int) -> list[dict]:
     rows = []
     for number in range(1, count + 1):
-        kind = rng.choices(
-            ["BUY", "RIGHTS", "SELL", "DIVIDEND", "INTEREST", "FEE"], [9, 2, 6, 2, 1, 1]
-        )[0]
+        kind = rng.choices(KINDS, WEIGHTS)[0]
         row = {"id": number, "seq": number, "kind": kind, "account_id": rng.choice([1, 2])}
         row["trade_date"] = rng.choice(DAYS)
         if kind in ("BUY", "RIGHTS", "SELL"):
@@ -122,6 +175,16 @@ def random_rows(rng: random.Random, count: int) -> list[dict]:
                 row["price_u"] = rng.randint(10_000, 5_000_000)
             if rng.random() < 0.4:
                 row["charges_paise"] = rng.randint(0, 3_000)
+        elif kind == "TRANSFER":
+            transfer_row(rng, row)
+        elif kind == "SPLIT":
+            row["asset_id"] = rng.choice([1, 2])
+            row["ratio_num"], row["ratio_den"] = rng.choice(RATIOS)
+            if rng.random() < 0.6:
+                row["account_id"] = None  # every account that holds the asset
+        elif kind == "BONUS":
+            row["asset_id"] = rng.choice([1, 2])
+            row["qty_u"] = rng.randint(1, 5) * U
         else:
             row["amount_paise"] = rng.randint(1, 100_000)
             if kind == "DIVIDEND":
@@ -138,53 +201,86 @@ def random_rows(rng: random.Random, count: int) -> list[dict]:
 
 def compare(rows, as_of=None):
     """Run the engine and the oracle on ``rows``; return the oracle's answer."""
-    want = simulate(rows, as_of)
+    want = simulate(rows, as_of, DECIMALS)
     entries = [Entry.of(row) for row in rows]
     if "refused" in want:
         with pytest.raises(Refusal) as caught:
-            replay(entries, as_of=as_of)
-        assert caught.value.entry_id == want["refused"]["entry"]
-        assert caught.value.facts["have_qty_u"] == want["refused"]["have"]
-        assert caught.value.facts["want_qty_u"] == want["refused"]["want"]
+            replay(entries, as_of=as_of, decimals=DECIMALS)
+        refusal, said = caught.value, want["refused"]
+        assert (refusal.entry_id, refusal.reason) == (said["entry"], said["reason"])
+        if said["reason"] == "short":
+            assert refusal.facts["have_qty_u"] == said["have"]
+            assert refusal.facts["want_qty_u"] == said["want"]
+        elif said["reason"] == "fraction":
+            assert refusal.facts["have_qty_u"] == said["have"]
+            assert refusal.facts["left_qty_u"] == said["left"]
+            assert refusal.facts["account_id"] == said["account"]
         return want
-    ledger = replay(entries, as_of=as_of)
+    ledger = replay(entries, as_of=as_of, decimals=DECIMALS)
     assert snapshot(ledger) == want
     return want
 
 
-def repaired(rows):
-    """``rows`` with every entry the ledger would refuse taken out, one at a time."""
+def repaired(rows, keep=()):
+    """``rows`` with every entry the ledger would refuse taken out, one at a time.
+
+    A refusal for a reason in ``keep`` stays: the tab is returned with that entry in it, for a
+    test of the refusal itself once everything before it is sound.
+    """
     rows = list(rows)
     while True:
-        answer = simulate(rows)
-        if "refused" not in answer:
+        answer = simulate(rows, None, DECIMALS)
+        if "refused" not in answer or answer["refused"]["reason"] in keep:
             return rows
         rows = [row for row in rows if row["id"] != answer["refused"]["entry"]]
 
 
 def test_the_engine_and_the_oracle_agree_on_random_tabs():
     rng = random.Random(20261027)
-    refused = valid = multi_lot = 0
+    refused, applied = Counter(), Counter()
+    multi_lot = both_accounts = 0
     for _ in range(250):
         rows = random_rows(rng, rng.randint(2, 40))
-        refused += "refused" in compare(rows)
+        answer = compare(rows)
+        if "refused" in answer:
+            refused[answer["refused"]["reason"]] += 1
+        answer = compare(repaired(rows, keep=("fraction",)))
+        if "refused" in answer:
+            refused["fraction_kept"] += 1
         good = repaired(rows)
         answer = compare(good)
-        valid += 1
+        by_id = {row["id"]: row for row in good}
         for move in answer["moves"]:
             multi_lot += len(move["used"]) > 1
+            applied[shape(by_id[move["entry"]])] += 1
+        both_accounts += any(
+            by_id[entry]["kind"] == "SPLIT"
+            and by_id[entry].get("account_id") is None
+            and {m["account"] for m in answer["moves"] if m["entry"] == entry} == {1, 2}
+            for entry in {m["entry"] for m in answer["moves"]}
+        )
         compare(good, as_of=rng.choice(DAYS))
     # The generator must exercise what it is there for, or the comparison proves nothing.
-    assert refused >= 100
-    assert valid == 250
+    assert sum(refused.values()) >= 100
     assert multi_lot >= 150
+    assert all(refused[reason] >= 10 for reason in ("short", "not_held", "fraction_kept"))
+    wanted = {
+        "SPLIT": 100,
+        "BONUS": 100,
+        "TRANSFER_BETWEEN": 200,
+        "TRANSFER_IN": 80,
+        "TRANSFER_OUT": 40,
+    }
+    for name, at_least in wanted.items():
+        assert applied[name] >= at_least, name
+    assert both_accounts >= 20
 
 
 def test_cost_and_units_are_conserved_whatever_the_entries():
     rng = random.Random(99)
     for _ in range(150):
         good = repaired(random_rows(rng, rng.randint(2, 40)))
-        ledger = replay([Entry.of(row) for row in good])
+        ledger = replay([Entry.of(row) for row in good], decimals=DECIMALS)
         for position in ledger.positions.values():
             moves = [
                 m
@@ -209,13 +305,55 @@ def test_cost_and_units_are_conserved_whatever_the_entries():
                 assert move.gain_paise == net + move.cost_paise
 
 
+def test_splits_and_transfers_never_make_or_lose_cost():
+    rng = random.Random(7)
+    seen = Counter()
+    for _ in range(150):
+        good = repaired(random_rows(rng, rng.randint(2, 40)))
+        ledger = replay([Entry.of(row) for row in good], decimals=DECIMALS)
+        running: dict = {}
+        by_entry: dict = {}
+        for move in ledger.journal:
+            by_entry.setdefault(move.entry.id, []).append(move)
+            key = (move.account_id, move.asset_id)
+            qty, cost = running.get(key, (0, 0))
+            running[key] = qty, cost = qty + move.qty_u, cost + move.cost_paise
+            if move.kind == "SPLIT":
+                # Cost and days stay: the lots after a split hold what the position held before.
+                seen["split"] += 1
+                assert move.cost_paise == 0
+                assert move.gain_paise == 0
+                assert sum(piece.qty_u for piece in move.used) == qty
+                assert sum(piece.cost_paise for piece in move.used) == cost
+                assert all(piece.qty_u > 0 for piece in move.used)
+            if move.kind == "BONUS":
+                seen["bonus"] += 1
+                assert move.cost_paise == 0
+                assert move.qty_u == move.entry.qty_u
+        for moves in by_entry.values():
+            entry = moves[0].entry
+            if entry.kind != "TRANSFER" or None in (entry.account_id, entry.to_account_id):
+                continue
+            seen["between"] += 1
+            out, into = moves
+            # The same lots leave one account and reach the other, and no gain is made.
+            assert (out.account_id, into.account_id) == (entry.account_id, entry.to_account_id)
+            assert out.qty_u == -into.qty_u == -entry.qty_u
+            assert out.cost_paise == -into.cost_paise
+            assert out.used == into.used
+            assert sum(piece.cost_paise for piece in out.used) == -out.cost_paise
+            assert out.gain_paise == into.gain_paise == 0
+            assert out.paise is None and into.paise is None
+    assert seen["split"] >= 100 and seen["bonus"] >= 100 and seen["between"] >= 100
+
+
 def test_replaying_the_same_entries_in_any_list_order_gives_the_same_ledger():
     rng = random.Random(5)
     for _ in range(40):
         good = repaired(random_rows(rng, 30))
-        first = snapshot(replay([Entry.of(row) for row in good]))
+        first = snapshot(replay([Entry.of(row) for row in good], decimals=DECIMALS))
         rng.shuffle(good)
-        assert snapshot(replay([Entry.of(row) for row in good])) == first
+        assert snapshot(replay([Entry.of(row) for row in good], decimals=DECIMALS)) == first
 
 
 # -- the day's order -------------------------------------------------------------------------
@@ -446,6 +584,11 @@ BAD_OTHER = [
     ("FEE", {"qty_u": U}, "A fee does not take a quantity."),
     ("SELL", {"tds_paise": 5}, "A sale does not take TDS."),
     ("BONUS", {"price_u": 5}, "A bonus does not take a price."),
+    ("BONUS", {"amount_paise": 5}, "A bonus does not take an amount."),
+    ("BONUS", {"account_id": None}, "A bonus needs an account."),
+    ("SPLIT", {"qty_u": U}, "A split does not take a quantity."),
+    ("SPLIT", {"to_account_id": 2}, "A split does not take a second account."),
+    ("SPLIT", {"asset_id": None}, "A split needs an asset."),
     ("SPLIT", {"ratio_num": 0}, "A split needs a ratio of whole numbers above zero."),
     ("SPLIT", {"ratio_den": MAX_RATIO + 1}, "A split needs a ratio of whole numbers above zero."),
     ("SPLIT", {"ratio_num": 1, "ratio_den": 1}, "A split must change the number of shares."),

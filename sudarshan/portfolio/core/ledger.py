@@ -14,12 +14,16 @@ and inside a group the entry's ``seq`` (an import keeps file order). So a sale t
 purchase of the same day is valid, and shares moved to another account that day can be sold there.
 FIFO takes the oldest acquisition first; the lot keeps its day through a transfer, so it counts as
 bought when it was bought. Sales and cost are exact integers (money.share_of_cost).
+
+Purchases, rights, sales, dividends, interest and fees are here; splits, bonus shares and
+transfers are in ledger_actions.py and join the same table of handlers.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
+from .ledger_actions import ACTIONS
 from .model import Entry, Ledger, Move, check, short_of
 from .words import Names
 
@@ -100,23 +104,28 @@ HANDLERS = {
     "DIVIDEND": _income,
     "INTEREST": _income,
     "FEE": _fee,
+    **ACTIONS,
 }
 
 
 def replay(
-    entries: Iterable[Entry], *, as_of: int | None = None, names: Names | None = None
+    entries: Iterable[Entry],
+    *,
+    as_of: int | None = None,
+    names: Names | None = None,
+    decimals: Mapping[int, int] | None = None,
 ) -> Ledger:
     """The tab's ledger after its posted entries up to ``as_of``.
 
     Raises ``Refusal`` for the first entry that cannot stand (a sale of units the account does not
-    hold on its day), naming it, and ``BadEntry`` for one that is not well formed. Drafts count
-    nowhere. ``names`` only gives the sentences the owner's words for accounts and holdings.
+    hold on its day, a split that would leave a fraction), naming it, and ``BadEntry`` for one
+    that is not well formed. Drafts count nowhere. ``names`` only gives the sentences the owner's
+    words for accounts and holdings. ``decimals`` says how many decimals a quantity of an asset
+    may have (0 for shares, which is also what an asset left out gets), so that a split cannot
+    leave part of a share.
     """
-    ledger = Ledger(names)
+    ledger = Ledger(names, decimals)
     for entry in ordered(entries, as_of):
         check(entry)
-        handler = HANDLERS.get(entry.kind)
-        if handler is None:
-            raise NotImplementedError(entry.kind)
-        handler(ledger, entry)
+        HANDLERS[entry.kind](ledger, entry)
     return ledger

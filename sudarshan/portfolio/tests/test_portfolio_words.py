@@ -155,3 +155,66 @@ def test_an_income_a_fee_and_a_purchase_without_charges_are_said_plainly():
     assert words.describe(_move([fee], 1)) == f"Fee {RUPEE}3.00"
     buy = base | {"id": 1, "kind": "BUY", "asset_id": 1, "qty_u": 1_000_000, "amount_paise": 5000}
     assert words.describe(_move([buy], 1)) == f"Cost {RUPEE}50.00"
+
+
+def test_a_split_and_a_bonus_are_said_in_the_owners_words():
+    buy = {"id": 1, "seq": 1, "kind": "BUY", "trade_date": 20250106, "account_id": 1}
+    buy |= {"asset_id": 1, "qty_u": 10_000_000, "amount_paise": 100000}
+    day = {"seq": 2, "trade_date": 20250310, "asset_id": 1}
+    each = day | {"id": 2, "kind": "SPLIT", "ratio_num": 5, "ratio_den": 1}
+    assert words.describe(_move([buy, each], 2)) == (
+        f"Each share becomes 5{DOT}10 become 50{DOT}cost and dates kept"
+    )
+    part = day | {"id": 2, "kind": "SPLIT", "account_id": 1, "ratio_num": 1, "ratio_den": 10}
+    fund = buy | {"qty_u": 15_000_000}
+    with_decimals = replay([Entry.of(r) for r in [fund, part]], names=NAMES, decimals={1: 4})
+    assert words.describe(with_decimals.journal[-1]) == (
+        f"1 new for every 10 old{DOT}15 become 1.5{DOT}cost and dates kept"
+    )
+    bonus = day | {"id": 2, "kind": "BONUS", "account_id": 1, "qty_u": 2_500_000}
+    assert words.describe(_move([buy, bonus], 2)) == "Bonus 2.5 at no cost"
+
+
+def test_shares_moved_are_said_with_their_lots_and_shares_from_outside_with_their_cost():
+    buy = {"id": 1, "seq": 1, "kind": "BUY", "trade_date": 20240105, "account_id": 1}
+    buy |= {"asset_id": 1, "qty_u": 10_000_000, "amount_paise": 100000}
+    move = {"id": 2, "seq": 2, "kind": "TRANSFER", "trade_date": 20250601, "asset_id": 1}
+    move |= {"account_id": 1, "qty_u": 4_000_000}
+    between = words.describe(_move([buy, move | {"to_account_id": 2}], 2))
+    assert between == f"From 5 Jan 2024: 4 at {RUPEE}100.00{DOT}cost and dates kept"
+    leaving = words.describe(_move([buy, move], 2))
+    assert leaving == f"From 5 Jan 2024: 4 at {RUPEE}100.00{DOT}left at cost, no gain or loss"
+    coming = move | {"account_id": None, "to_account_id": 1, "amount_paise": 40000}
+    assert words.describe(_move([coming], 2)) == f"Cost {RUPEE}400.00"
+    # The day it was first bought and a value equal to the cost say nothing new.
+    same = coming | {"lot_date": 20250601, "value_paise": 40000}
+    assert words.describe(_move([same], 2)) == f"Cost {RUPEE}400.00"
+    told = coming | {"lot_date": 20230815, "value_paise": 55000}
+    assert words.describe(_move([told], 2)) == (
+        f"Cost {RUPEE}400.00{DOT}bought 15 Aug 2023{DOT}valued at {RUPEE}550.00"
+    )
+
+
+def test_a_split_or_bonus_on_nothing_held_says_who_holds_nothing():
+    assert words.not_held(NAMES, "SPLIT", 1, 1, 20250312) == (
+        "Zerodha holds no RELIANCE on 12 Mar 2025, so a split cannot be saved. "
+        "Check the date, or add the missing purchase first."
+    )
+    assert words.not_held(NAMES, "SPLIT", None, 1, 20250312) == (
+        "No account holds RELIANCE on 12 Mar 2025, so a split cannot be saved. "
+        "Check the date, or add the missing purchase first."
+    )
+    assert words.not_held(Names(), "BONUS", 3, 4, 20250312).startswith(
+        "The account holds no this holding on 12 Mar 2025, so a bonus cannot be saved."
+    )
+
+
+def test_a_split_that_would_leave_a_fraction_says_how_much_and_where():
+    assert words.fraction_left(NAMES, 1, 1, 1_500_000) == (
+        "This split would leave 1.5 shares in Zerodha. "
+        "Record the sale of the fraction first, then the split."
+    )
+    grams = Names(accounts={1: "Locker"}, units={4: "grams"})
+    assert words.fraction_left(grams, 1, 4, 12_340_000).startswith(
+        "This split would leave 12.34 grams in Locker."
+    )

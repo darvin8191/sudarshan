@@ -6,9 +6,10 @@ from sudarshan.portfolio.core.model import Ledger
 from sudarshan.portfolio.core.words import Names
 
 
-def snapshot(ledger: Ledger) -> dict:
+def snapshot(ledger: Ledger, over_year_on: int | None = None) -> dict:
     """``{"positions", "moves", "totals"}``; a position is keyed ``"<account>/<asset>"`` ("-" for
-    the account's own income and fees), a lot is ``[day, qty_u, cost_paise]``."""
+    the account's own income and fees), a lot is ``[day, qty_u, cost_paise]``. With a day in
+    ``over_year_on`` each position also says how many units were held for more than a year."""
     positions = {
         f"{p.account_id}/{'-' if p.asset_id is None else p.asset_id}": {
             "qty_u": p.qty_u,
@@ -17,12 +18,16 @@ def snapshot(ledger: Ledger) -> dict:
             "income_paise": p.income_paise,
             "fees_paise": p.fees_paise,
             "lots": [[lot.day, lot.qty_u, lot.cost_paise] for lot in p.lots],
+            **(
+                {} if over_year_on is None else {"over_year_qty_u": p.over_year_qty_u(over_year_on)}
+            ),
         }
         for p in ledger.positions.values()
     }
     moves = [
         {
             "entry": m.entry.id,
+            "account": m.account_id,
             "qty_u": m.qty_u,
             "cost_paise": m.cost_paise,
             "gain_paise": m.gain_paise,
