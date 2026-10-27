@@ -52,7 +52,7 @@ NO_TOKEN_S = 60.0
 TOKEN_POLL_S = 5.0  # how often a backoff checks whether the token file changed
 CLOSED_POLL_S = 30.0
 WATCH_EVERY_S = 1.0
-STALL_S = 120.0  # no message for this long in continuous trading (09:15-15:40) forces a reconnect
+STALL_S = 120.0  # silence this long in continuous trading, from its open (09:15), reconnects
 SNAPSHOT_EVERY_S, FLUSH_EVERY_S, HEALTH_EVERY_S = 30.0, 3.0, 5.0
 SNAPSHOT_KEEP_DAYS = 30  # an unsubscribed key's last tick is kept this long
 SUB_BATCH, SUB_PAUSE_S = 100, 0.1
@@ -405,11 +405,13 @@ class FeedService:
             return
 
     def _stalled(self, now: float) -> bool:
-        if not (self._live and self.subs.desired() and self.window.in_core_session(now)):
+        opened = self.window.core_age(now)  # M18.1: seconds since continuous trading began
+        if not (self._live and self.subs.desired() and opened is not None):
             return False  # quiet is normal outside continuous trading or with nothing subscribed
         if self.window.waits_for_first_trade(now) and self._traded_on != ist_date(now):
             return False  # a reopened day at the usual hours: until it trades, quiet is normal
-        return time.monotonic() - self._last_msg > STALL_S
+        # M18.1: silence counts from the open, never from before it (a quiet pre-open is no stall)
+        return min(time.monotonic() - self._last_msg, opened) > STALL_S
 
     async def _resubscribe(self, ws) -> None:
         """Upstox forgets every subscription when a socket closes: send the whole set again."""

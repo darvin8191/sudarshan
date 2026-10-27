@@ -153,6 +153,9 @@ shows its last non-zero value. Use REST quotes for circuit checks.
   subscribed when the first data comes, and 10 minutes after the F&O close, so the updates that
   follow the close still arrive. Equity derivatives trade to 15:40 since 3 Aug 2026 (the cash
   market closes at 15:30), so the window ends at 15:50 and the stall watchdog runs 09:15-15:40.
+  Its 120 seconds are counted from the open and never from before it: a socket that heard nothing
+  in the minutes before 09:15 is not reconnected at 09:15:00, only when the open itself brings
+  nothing for 120 seconds.
   `SUDARSHAN_FEED_ALWAYS_ON=1` ignores the window and the calendar (tests).
 - **Trading days** come from auto-login's calendar, the one the alerts use: weekends and the
   holidays file are closed, a date in the extra-days file is open, even when the holidays file
@@ -175,7 +178,7 @@ shows its last non-zero value. Use REST quotes for circuit checks.
   | WebSocket upgrade refused (403/429) | as above but never sooner than 60 s, so a stale socket can expire at Upstox |
   | authorize 401 ("token rejected") | 10 min, 30 min, then hourly; at once when the token file changes |
   | token file missing, empty or malformed | 60 s; at once when the file changes |
-  | no data for 120 s during 09:15-15:40 (on a day with its own window: from 15 minutes after its start, the pre-open's length, to its end; on a reopened day without one: only after its first trade) | clean close and reconnect (stall watchdog) |
+  | no data for 120 s during 09:15-15:40, counted from the open (on a day with its own window: from 15 minutes after its start, the pre-open's length, to its end; on a reopened day without one: only after its first trade) | clean close and reconnect (stall watchdog) |
 
 - **Subscriptions**: `default_keys.txt` (or `SUDARSHAN_FEED_KEYS`) is the base set, one
   `MODE KEY` per line, re-read at every start. API changes are stored as an overlay in

@@ -10,7 +10,8 @@ and to 15:40 in equity derivatives (since 3 Aug 2026). The usual window keeps tw
 it: it opens 2 minutes before the pre-open, so the socket is authorised, connected and subscribed
 when the session's first data comes, and it closes 10 minutes after the F&O close, so the updates
 that follow the close still arrive. The stall watchdog runs only in continuous trading,
-09:15-15:40, where a quiet socket means a stalled one.
+09:15-15:40, where a quiet socket means a stalled one. Its clock starts at the open: a socket that
+heard nothing in the minutes before 09:15 gets the full stall time after it, not none.
 
 A special session's line gives its own window, from the start of its pre-open to its F&O close::
 
@@ -146,9 +147,22 @@ class MarketWindow:
         return why == "market window", why + plan.label
 
     def in_core_session(self, now: float) -> bool:
+        return self.core_age(now) is not None
+
+    def core_age(self, now: float) -> float | None:
+        """Seconds since the watchdog span that holds ``now`` began; None when no span does.
+
+        The span begins at 09:15 on a usual day and, on a special day, 15 minutes after the day's
+        own start (see ``_moved``). The stall clock counts from there and never from before it, so
+        a quiet pre-open is not a stall (M18.1).
+        """
         t = datetime.fromtimestamp(now, IST)
         minute = t.hour * 60 + t.minute
-        return any(start <= minute < end for start, end in self.plan(t.date()).cores)
+        for start, end in self.plan(t.date()).cores:
+            if start <= minute < end:
+                opened = datetime.combine(t.date(), dtime(start // 60, start % 60), IST)
+                return now - opened.timestamp()
+        return None
 
     def waits_for_first_trade(self, now: float) -> bool:
         """A reopened day at the usual hours: its watchdog runs only once the exchange trades."""
