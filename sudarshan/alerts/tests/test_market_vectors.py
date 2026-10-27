@@ -205,6 +205,8 @@ def seen(alert: spec.Alert, fire: engine.Fire) -> dict:
         "opening": fire.opening,
         "previous": None if fire.previous is None else str(alert.grain.price(fire.previous)),
         "found_later": None if found is None else [hms(found[0]), hms(found[1])],
+        "base": None if fire.base is None else str(alert.grain.price(fire.base)),
+        "price": None if fire.price is None else str(alert.grain.price(fire.price)),
     }
 
 
@@ -231,9 +233,12 @@ def test_alert_vector(vector):
         assert hms(world.stop.reason.at) == vector["reason_at"]
     if "side" in vector:
         assert SIDES[world.book.state(world.alert.id).side] == vector["side"]
-    notes = [
-        {"at": hms(at), "note": note.code, "candle": hms(note.at)[:5]} for at, note in world.notes
-    ]
+    notes = []
+    for at, note in world.notes:
+        shown = {"at": hms(at), "note": note.code}
+        if note.code == engine.NOT_CHECKED:
+            shown["candle"] = hms(note.at)[:5]
+        notes.append(shown)
     assert notes == vector.get("notes", [])
 
 

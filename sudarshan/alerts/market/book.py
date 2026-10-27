@@ -22,10 +22,20 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import NamedTuple
 
+from sudarshan.alerts.market import conditions
 from sudarshan.alerts.market.clock import OK, Market, candle, gate
-from sudarshan.alerts.market.engine import Obs, Outcome, State, carries, new_session, step, timer
+from sudarshan.alerts.market.engine import (
+    Obs,
+    Outcome,
+    Reason,
+    State,
+    carries,
+    new_session,
+    step,
+    timer,
+)
 from sudarshan.alerts.market.sessions import day_key
-from sudarshan.alerts.market.spec import AT_CLOSE, CROSS, PER_CANDLE, Alert
+from sudarshan.alerts.market.spec import AT_CLOSE, BREAK, CROSS, PER_CANDLE, Alert
 from sudarshan.autologin.schedule import IST
 
 #: A tick with nothing new for any alert on its key: no new trade, no quote one watches.
@@ -34,6 +44,8 @@ NOTHING_NEW = "nothing_new"
 BAD_VALUE = "bad_value"
 #: The frequencies judged by candle.
 CANDLED = frozenset({PER_CANDLE, AT_CLOSE})
+#: A note: a % move's base changed inside the session, so its level was worked out again.
+BASE_CHANGED = "base_changed"
 
 
 def _ms(value) -> int | None:
@@ -60,6 +72,8 @@ class Book:
         self._keys: dict[str, tuple[Alert, ...]] = {}
         self._trades: dict[str, tuple] = {}
         self._changed: dict[int, State] = {}
+        #: Alert id -> what it waits for from the feed (conditions.WAITING_*), while it waits.
+        self._waiting: dict[int, str] = {}
 
     # ---- the alerts ------------------------------------------------------------------------
     def put(self, alert: Alert, state: State | None = None) -> None:
@@ -81,6 +95,10 @@ class Book:
 
     def state(self, alert_id: int) -> State | None:
         return self._states.get(alert_id)
+
+    def waiting(self, alert_id: int) -> str | None:
+        """What the alert waits for from the feed ("Waiting for the previous close"), if any."""
+        return self._waiting.get(alert_id)
 
     def alerts(self) -> list[Alert]:
         """The Active alerts, by id."""
@@ -141,13 +159,25 @@ class Book:
                 bad = True
                 continue
             judged = True
+            old = start_state = states[alert.id]
+            up, down, got = cond.up, cond.down, None
+            if up is None:  # a level taken from the feed (conditions.py)
+                got = conditions.edges(alert, old, frame, value, at, market)
+                if got.__class__ is str:
+                    self._wait(alert.id, got, at, outcomes)
+                    continue
+                self._waiting.pop(alert.id, None)
+                value, up, down = got.value, got.up, got.down
+                if got.derived is not old.derived:
+                    start_state = old._replace(derived=got.derived)
             if alert.frequency in CANDLED:
                 k, start, end = candle(market.sessions[segment], alert.candle_min, at)
-                obs = Obs(value, at, today, cond.up, cond.down, k, start, end)
+                obs = Obs(value, at, today, up, down, k, start, end)
             else:
-                obs = Obs(value, at, today, cond.up, cond.down)
-            old = states[alert.id]
-            out = step(alert, old, obs, now, market.previous, market.pauses)
+                obs = Obs(value, at, today, up, down)
+            out = step(alert, start_state, obs, now, market.previous, market.pauses)
+            if got is not None:
+                out = _context(alert, old, out, got)
             if out.state is not old:
                 states[alert.id] = self._changed[alert.id] = out.state
             if out.fire is not None or out.status is not None or out.note is not None:
@@ -163,8 +193,12 @@ class Book:
         """Candles due at their close, ends and expiries; call it about once a second."""
         outcomes: list[Outcome] = []
         for alert in list(self._active.values()):
-            out = timer(alert, self._states[alert.id], now, market.pauses)
+            state = self._states[alert.id]
+            out = timer(alert, state, now, market.pauses)
             if out is not None:
+                derived = state.derived
+                if out.fire is not None and alert.kind == "move" and derived is not None:
+                    out = out._replace(fire=out.fire._replace(base=derived[2]))
                 self._apply(out, outcomes)
         return outcomes
 
@@ -178,7 +212,7 @@ class Book:
         alert, state = self._active.get(alert_id), self._states.get(alert_id)
         if alert is None or state.side is not None or alert.frequency == AT_CLOSE:
             return False
-        if alert.cond.mode != CROSS or alert.cond.up is None:
+        if alert.cond.mode not in (CROSS, BREAK):
             return False
         source = alert.cond.source
         value = alert.grain.ticks(frame.get(source))
@@ -194,12 +228,23 @@ class Book:
         if day != state.session:
             state = new_session(state, day)
         up, down = alert.cond.up, alert.cond.down
-        side = -1 if value < up else (1 if value > down else 0)
+        if up is None:  # VWAP, or a day high or low: their level comes from today's frame
+            got = conditions.edges(alert, state, frame, value, at, market)
+            if got.__class__ is str:
+                return False
+            value, up, down = got.value, got.up, got.down
+        side = 0 if alert.cond.mode == BREAK else (-1 if value < up else (1 if value > down else 0))
         self._states[alert_id] = state._replace(side=side, ref=value, seen_at=at)
         self._changed[alert_id] = self._states[alert_id]
         return True
 
     # ---- inside ----------------------------------------------------------------------------
+    def _wait(self, alert_id: int, code: str, at: int, outcomes: list[Outcome]) -> None:
+        """The feed has not sent what the alert needs; the page says so once it starts."""
+        if self._waiting.get(alert_id) != code:
+            self._waiting[alert_id] = code
+            outcomes.append(Outcome(alert_id, self._states[alert_id], note=Reason(code, at)))
+
     def _apply(self, out: Outcome, outcomes: list[Outcome]) -> None:
         if out.state is not self._states.get(out.alert_id):
             self._states[out.alert_id] = out.state
@@ -224,3 +269,19 @@ class Book:
             self._groups.pop(key, None)
             self._trades.pop(key, None)
             self._keys.pop(key, None)
+
+
+def _context(alert: Alert, old: State, out: Outcome, got: conditions.Edges) -> Outcome:
+    """A condition's words on its fire (a % move's base, the high broken), and its notes."""
+    if out.fire is not None and (got.base is not None or got.price is not None):
+        out = out._replace(fire=out.fire._replace(base=got.base, price=got.price))
+    derived = old.derived
+    if (
+        alert.kind == "move"
+        and derived is not None
+        and got.derived is not derived
+        and derived[0] == got.derived[0]
+        and out.note is None
+    ):
+        out = out._replace(note=Reason(BASE_CHANGED, out.state.seen_at or 0))
+    return out

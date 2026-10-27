@@ -31,6 +31,9 @@ MIX = (
     {"params": {"op": "at_or_above", "level": "100"}, "frequency": "per_candle", "candle": 5},
     {"params": {"op": "crosses_below", "level": "100"}, "frequency": "at_close", "candle": 15},
     {"params": {"op": "crosses", "level": "100", "source": "bid"}, "frequency": "every_time"},
+    {"kind": "move", "params": {"direction": "either", "percent": "0.5"}},
+    {"kind": "day_break", "params": {"side": "high", "after": "09:15"}, "frequency": "every_time"},
+    {"kind": "vwap", "params": {"direction": "either"}, "cooldown_s": 0},
 )
 
 

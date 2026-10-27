@@ -166,6 +166,56 @@
       "alert": {"params": {"op": "crosses_above", "level": "100"}},
       "field": "instrument",
       "message": "Market alerts work on NSE, BSE, NFO and BFO instruments and their indices for now."
+    },
+    {
+      "id": "X7",
+      "instrument": "nifty",
+      "alert": {"kind": "vwap", "params": {"direction": "above"}},
+      "field": "kind",
+      "message": "An index has no traded volume, so it has no VWAP. Use its future."
+    },
+    {
+      "id": "X8",
+      "alert": {"kind": "day_break", "params": {"side": "high"}, "frequency": "at_close", "candle": 15},
+      "field": "frequency",
+      "message": "A day high or low alert checks every trade, so 'At candle close' is not available for it."
+    },
+    {
+      "id": "X9",
+      "alert": {"kind": "move", "params": {"direction": "up", "percent": "2"}, "frequency": "every_time"},
+      "field": "cooldown_s",
+      "message": "Every time on '% move' needs at least 1 minute between alerts."
+    },
+    {
+      "id": "X10",
+      "alert": {"kind": "move", "params": {"direction": "up", "percent": "0"}},
+      "field": "percent",
+      "message": "Enter the % move, a number above 0."
+    },
+    {
+      "id": "X11",
+      "alert": {"kind": "move", "params": {"direction": "down", "percent": "100"}},
+      "field": "percent",
+      "message": "A fall can be at most 99.99%."
+    },
+    {
+      "id": "X12",
+      "alert": {"kind": "day_break", "params": {"side": "high", "after": "08:00"}},
+      "field": "after",
+      "message": "Pick a start time between 09:15 and 15:30."
+    },
+    {
+      "id": "X13",
+      "alert": {"kind": "move", "params": {"base": "high", "direction": "up", "percent": "1"}},
+      "field": "base",
+      "message": "Pick the base: the previous close or today's open."
+    },
+    {
+      "id": "X14",
+      "instrument": "future",
+      "alert": {"kind": "day_break", "params": {"side": "low", "after": "15:40"}},
+      "field": "after",
+      "message": "Pick a start time between 09:15 and 15:40."
     }
   ],
   "alerts": [
@@ -814,6 +864,307 @@
         {"day": "2026-11-08", "at": "15:30:00", "ltp": 25901.0, "check": "outside_hours"}
       ],
       "fires": [{"at": "14:30:00", "day": "2026-11-08"}]
+    },
+    {
+      "id": "%1",
+      "says": "up 2% on the previous close: float maths would wrongly check at 102.05",
+      "alert": {"kind": "move", "params": {"base": "close", "direction": "up", "percent": "2"}},
+      "steps": [
+        {"at": "10:00:00", "ltp": 101.95, "cp": 100.0},
+        {"at": "10:00:01", "ltp": 102.0, "cp": 100.0}
+      ],
+      "fires": [
+        {
+          "at": "10:00:01",
+          "value": "102.00",
+          "level": "102.00",
+          "base": "100.00",
+          "direction": "up"
+        }
+      ]
+    },
+    {
+      "id": "%2",
+      "says": "up 1.5% on 1,399.80: the level 1,420.797 snaps up to 1,420.80",
+      "alert": {"kind": "move", "params": {"base": "close", "direction": "up", "percent": "1.5"}},
+      "steps": [
+        {"at": "10:00:00", "ltp": 1420.75, "cp": 1399.8},
+        {"at": "10:00:01", "ltp": 1420.8, "cp": 1399.8}
+      ],
+      "fires": [{"at": "10:00:01", "value": "1420.80", "level": "1420.80", "base": "1399.80"}]
+    },
+    {
+      "id": "%3",
+      "says": "down 2% on 100",
+      "alert": {"kind": "move", "params": {"base": "close", "direction": "down", "percent": "2"}},
+      "steps": [{"at": "10:00:00", "ltp": 98.05, "cp": 100.0}, {"at": "10:00:01", "ltp": 98.0, "cp": 100.0}],
+      "fires": [{"at": "10:00:01", "value": "98.00", "level": "98.00", "direction": "down"}]
+    },
+    {
+      "id": "%4",
+      "says": "a gap beyond the level fires at the first trade",
+      "alert": {"kind": "move", "params": {"base": "close", "direction": "up", "percent": "2"}},
+      "steps": [{"at": "09:15:00.400", "ltp": 102.5, "cp": 100.0}],
+      "fires": [{"at": "09:15:00.400", "value": "102.50", "base": "100.00"}]
+    },
+    {
+      "id": "%5",
+      "says": "either way 1%, once per day: one fire, then again next session on its close",
+      "alert": {"kind": "move", "params": {"base": "close", "direction": "either", "percent": "1"}},
+      "steps": [
+        {"at": "10:00:00", "ltp": 101.0, "cp": 100.0},
+        {"at": "11:00:00", "ltp": 98.9, "cp": 100.0},
+        {"day": "2026-10-22", "at": "10:00:00", "ltp": 99.85, "cp": 98.9},
+        {"day": "2026-10-22", "at": "10:01:00", "ltp": 99.9, "cp": 98.9}
+      ],
+      "fires": [
+        {"at": "10:00:00", "day": "2026-10-21", "direction": "up"},
+        {"at": "10:01:00", "day": "2026-10-22", "level": "99.90", "base": "98.90"}
+      ]
+    },
+    {
+      "id": "%6",
+      "says": "no previous close yet: waits, then checks",
+      "alert": {"kind": "move", "params": {"base": "close", "direction": "up", "percent": "2"}},
+      "steps": [{"at": "10:00:00", "ltp": 102.5}, {"at": "10:00:01", "ltp": 102.5, "cp": 100.0}],
+      "notes": [{"at": "10:00:00", "note": "waiting_close"}],
+      "fires": [{"at": "10:00:01"}]
+    },
+    {
+      "id": "%7",
+      "says": "the previous close corrected mid-session: the level is worked out again",
+      "alert": {"kind": "move", "params": {"base": "close", "direction": "up", "percent": "2"}},
+      "steps": [
+        {"at": "10:00:00", "ltp": 101.95, "cp": 100.0},
+        {"at": "10:00:01", "ltp": 101.95, "cp": 99.9}
+      ],
+      "notes": [{"at": "10:00:01", "note": "base_changed"}],
+      "fires": [{"at": "10:00:01", "level": "101.90", "base": "99.90"}]
+    },
+    {
+      "id": "%8",
+      "says": "up 1% from today's open",
+      "alert": {"kind": "move", "params": {"base": "open", "direction": "up", "percent": "1"}},
+      "steps": [
+        {"at": "10:00:00", "ltp": 201.95, "open": 200.0},
+        {"at": "10:00:01", "ltp": 202.0, "open": 200.0}
+      ],
+      "fires": [{"at": "10:00:01", "level": "202.00", "base": "200.00"}]
+    },
+    {
+      "id": "%9",
+      "says": "every time with a minute's wait: once a minute while it holds",
+      "alert": {
+        "kind": "move",
+        "params": {"base": "close", "direction": "up", "percent": "2"},
+        "frequency": "every_time",
+        "cooldown_s": 60
+      },
+      "steps": [
+        {"at": "10:00:00", "ltp": 102.0, "cp": 100.0},
+        {"at": "10:00:30", "ltp": 102.05, "cp": 100.0},
+        {"at": "10:01:00", "ltp": 102.0, "cp": 100.0}
+      ],
+      "fires": [{"at": "10:00:00"}, {"at": "10:01:00"}]
+    },
+    {
+      "id": "D1",
+      "says": "breaks today's high 101.00 at 101.05, after 09:30",
+      "alert": {"kind": "day_break", "params": {"side": "high", "after": "09:30"}},
+      "steps": [
+        {"at": "09:30:30", "ltp": 101.0, "high": 101.0},
+        {"at": "09:31:00", "ltp": 101.05, "high": 101.05}
+      ],
+      "fires": [
+        {
+          "at": "09:31:00",
+          "value": "101.05",
+          "base": "101.00",
+          "price": "101.05",
+          "direction": "up"
+        }
+      ]
+    },
+    {
+      "id": "D2",
+      "says": "equal is not a break",
+      "alert": {"kind": "day_break", "params": {"side": "high", "after": "09:30"}},
+      "steps": [
+        {"at": "09:31:00", "ltp": 101.0, "high": 101.0},
+        {"at": "09:32:00", "ltp": 101.0, "high": 101.0}
+      ],
+      "fires": []
+    },
+    {
+      "id": "D3",
+      "says": "a new high before the start time is remembered, not told",
+      "alert": {"kind": "day_break", "params": {"side": "high", "after": "09:30"}},
+      "steps": [
+        {"at": "09:16:00", "ltp": 101.5, "high": 101.5},
+        {"at": "09:20:00", "ltp": 102.0, "high": 102.0},
+        {"at": "09:31:00", "ltp": 102.05, "high": 102.05}
+      ],
+      "fires": [{"at": "09:31:00", "base": "102.00"}]
+    },
+    {
+      "id": "D4",
+      "says": "the day's low, the mirror image",
+      "alert": {"kind": "day_break", "params": {"side": "low", "after": "09:30"}},
+      "steps": [{"at": "09:31:00", "ltp": 99.0, "low": 99.0}, {"at": "09:32:00", "ltp": 98.95, "low": 98.95}],
+      "fires": [{"at": "09:32:00", "value": "98.95", "base": "99.00", "direction": "down"}]
+    },
+    {
+      "id": "D5",
+      "says": "remembered 101.00; after a pause the feed's high is 101.40: found later",
+      "alert": {"kind": "day_break", "params": {"side": "high", "after": "09:30"}},
+      "steps": [
+        {"at": "10:00:00", "ltp": 101.0, "high": 101.0},
+        {"pause": ["10:00:10", "10:01:00"]},
+        {"at": "10:01:05", "ltp": 100.5, "high": 101.4}
+      ],
+      "fires": [
+        {
+          "at": "10:01:05",
+          "value": "101.40",
+          "base": "101.00",
+          "price": "100.50",
+          "found_later": ["10:00:10", "10:01:00"]
+        }
+      ]
+    },
+    {
+      "id": "D6",
+      "says": "a high made between two ticks is still a break",
+      "alert": {"kind": "day_break", "params": {"side": "high", "after": "09:30"}},
+      "steps": [
+        {"at": "10:00:00", "ltp": 101.0, "high": 101.0},
+        {"at": "10:00:01", "ltp": 100.9, "high": 101.2}
+      ],
+      "fires": [{"at": "10:00:01", "value": "101.20", "price": "100.90", "found_later": null}]
+    },
+    {
+      "id": "D7",
+      "says": "every time: each new high",
+      "alert": {"kind": "day_break", "params": {"side": "high", "after": "09:30"}, "frequency": "every_time"},
+      "steps": [
+        {"at": "09:31:00", "ltp": 101.0, "high": 101.0},
+        {"at": "09:32:00", "ltp": 101.05, "high": 101.05},
+        {"at": "09:33:00", "ltp": 101.1, "high": 101.1},
+        {"at": "09:34:00", "ltp": 101.1, "high": 101.1}
+      ],
+      "fires": [{"at": "09:32:00", "base": "101.00"}, {"at": "09:33:00", "base": "101.05"}]
+    },
+    {
+      "id": "D8",
+      "says": "the remembered high survives a restart",
+      "alert": {"kind": "day_break", "params": {"side": "high", "after": "09:30"}},
+      "steps": [
+        {"at": "10:00:00", "ltp": 101.0, "high": 101.0},
+        {"restart": ["10:00:00", "10:05:00"]},
+        {"at": "10:05:03", "ltp": 101.0, "high": 101.2}
+      ],
+      "fires": [
+        {
+          "at": "10:05:03",
+          "value": "101.20",
+          "base": "101.00",
+          "found_later": ["10:00:00", "10:05:00"]
+        }
+      ]
+    },
+    {
+      "id": "D9",
+      "says": "8 Nov 2026: 'after 09:30' is 15 minutes after that day's 14:20 open",
+      "day": "2026-11-06",
+      "created": "16:00:00",
+      "alert": {"kind": "day_break", "params": {"side": "high", "after": "09:30"}},
+      "steps": [
+        {"day": "2026-11-08", "at": "14:21:00", "ltp": 101.0, "high": 101.0},
+        {"day": "2026-11-08", "at": "14:30:00", "ltp": 101.05, "high": 101.05},
+        {"day": "2026-11-08", "at": "14:36:00", "ltp": 101.1, "high": 101.1}
+      ],
+      "fires": [{"at": "14:36:00", "day": "2026-11-08", "base": "101.05"}]
+    },
+    {
+      "id": "D10",
+      "says": "a new session forgets yesterday's high",
+      "alert": {"kind": "day_break", "params": {"side": "high", "after": "09:30"}},
+      "steps": [
+        {"at": "10:00:00", "ltp": 101.0, "high": 101.0},
+        {"at": "10:01:00", "ltp": 101.05, "high": 101.05},
+        {"day": "2026-10-22", "at": "09:31:00", "ltp": 100.5, "high": 100.5},
+        {"day": "2026-10-22", "at": "09:32:00", "ltp": 100.55, "high": 100.55}
+      ],
+      "fires": [
+        {"at": "10:01:00", "day": "2026-10-21"},
+        {"at": "09:32:00", "day": "2026-10-22", "base": "100.50"}
+      ]
+    },
+    {
+      "id": "D11",
+      "says": "a lower high from the feed never lowers the one remembered",
+      "alert": {"kind": "day_break", "params": {"side": "high", "after": "09:30"}},
+      "steps": [
+        {"at": "10:00:00", "ltp": 101.0, "high": 101.0},
+        {"at": "10:00:01", "ltp": 100.9, "high": 100.95},
+        {"at": "10:00:02", "ltp": 100.98, "high": 100.98}
+      ],
+      "fires": []
+    },
+    {
+      "id": "V1",
+      "says": "crosses above the day's VWAP",
+      "alert": {"kind": "vwap", "params": {"direction": "above"}},
+      "steps": [
+        {"at": "10:00:00", "ltp": 100.0, "atp": 100.2},
+        {"at": "10:00:01", "ltp": 100.25, "atp": 100.21}
+      ],
+      "fires": [{"at": "10:00:01", "value": "100.25", "level": "100.20", "direction": "up"}]
+    },
+    {
+      "id": "V2",
+      "says": "crosses below the day's VWAP",
+      "alert": {"kind": "vwap", "params": {"direction": "below"}},
+      "steps": [
+        {"at": "10:00:00", "ltp": 100.3, "atp": 100.2},
+        {"at": "10:00:01", "ltp": 100.15, "atp": 100.18}
+      ],
+      "fires": [{"at": "10:00:01", "value": "100.15", "level": "100.20", "direction": "down"}]
+    },
+    {
+      "id": "V3",
+      "says": "no VWAP from the feed yet: waits",
+      "alert": {"kind": "vwap", "params": {"direction": "above"}},
+      "steps": [
+        {"at": "10:00:00", "ltp": 100.0},
+        {"at": "10:00:01", "ltp": 100.0, "atp": 100.2},
+        {"at": "10:00:02", "ltp": 100.25, "atp": 100.2}
+      ],
+      "notes": [{"at": "10:00:00", "note": "waiting_vwap"}],
+      "fires": [{"at": "10:00:02"}]
+    },
+    {
+      "id": "V4",
+      "says": "the VWAP side starts again each session: no opening line",
+      "alert": {"kind": "vwap", "params": {"direction": "above"}},
+      "steps": [
+        {"at": "15:29:00", "ltp": 100.0, "atp": 100.2},
+        {"day": "2026-10-22", "at": "09:15:01", "ltp": 100.5, "atp": 100.4}
+      ],
+      "fires": [],
+      "side": "above"
+    },
+    {
+      "id": "V5",
+      "says": "every time, waiting 15 minutes by default",
+      "alert": {"kind": "vwap", "params": {"direction": "either"}},
+      "steps": [
+        {"at": "10:00:00", "ltp": 99.9, "atp": 100.0},
+        {"at": "10:00:01", "ltp": 100.1, "atp": 100.0},
+        {"at": "10:03:00", "ltp": 99.9, "atp": 100.0},
+        {"at": "10:16:00", "ltp": 100.1, "atp": 100.0}
+      ],
+      "fires": [{"at": "10:00:01", "direction": "up"}, {"at": "10:16:00", "direction": "up"}]
     }
   ],
   "calendar": {"holidays": ["2026-10-20", "2026-11-10"], "windows": {"2026-11-08": "14:05-15:40"}},

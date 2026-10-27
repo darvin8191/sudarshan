@@ -21,8 +21,9 @@ from sudarshan.alerts.market import sessions
 from sudarshan.alerts.market.grain import INDEX_TICK, Grain, to_decimal
 from sudarshan.autologin.schedule import IST
 
-#: How a condition fires: on a move across its level, or on every value that meets it.
-CROSS, LEVEL = "cross", "level"
+#: How a condition fires: on a move across its level, on every value that meets it, or on each
+#: new break of a day high or low (a level check whose every hit is a new event).
+CROSS, LEVEL, BREAK = "cross", "level", "break"
 #: Which way, matching the engine's sides (-1 below, 0 at, 1 above).
 UP, DOWN, EITHER = 1, -1, 0
 ONCE, PER_CANDLE, AT_CLOSE, EVERY_TIME = "once", "per_candle", "at_close", "every_time"
@@ -82,17 +83,21 @@ class Compiled:
     down: int | None = None
     #: The feed mode the alert needs: "ltpc" (last price and previous close) or "full".
     feed: str = "ltpc"
+    #: A kind's own numbers (conditions.py): a % move's factors, a day break's start offset.
+    extra: tuple = ()
 
 
 @dataclass(frozen=True, slots=True)
 class Kind:
     check: Callable[[Any, str, Grain], dict[str, Any]]
-    compile: Callable[[Mapping[str, Any], Grain], Compiled]
+    compile: Callable[[Mapping[str, Any], Grain, str], Compiled]
     #: Words for this kind's check in a sentence ("Every time on '% move' needs ...").
     words: Callable[[Mapping[str, Any]], str]
     frequency: str
     candle: int | None = None
     wait_s: int = 0
+    #: Why "At candle close" makes no sense for the kind, when it does not.
+    no_close: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,7 +148,7 @@ class Alert:
             cooldown_ms=int(row.get("cooldown_s") or 0) * 1000,
             ends_at=row.get("ends_at"),
             note=row.get("note") or "",
-            cond=KINDS[row["kind"]].compile(row["params"], grain),
+            cond=KINDS[row["kind"]].compile(row["params"], grain, segment),
             expires_at=sessions.epoch_ms(expiry, hours[1]) if expiry and hours else None,
         )
 
@@ -172,9 +177,11 @@ def check(fields: Mapping[str, Any], now: int) -> dict[str, Any]:
         raise SpecError(
             "frequency", "Pick how often: once, once per candle, at candle close or every time."
         )
+    if frequency == AT_CLOSE and kind.no_close:
+        raise SpecError("frequency", kind.no_close)
     candle = _candle(fields, frequency, kind)
     wait = _wait(fields.get("cooldown_s", kind.wait_s))
-    if frequency == EVERY_TIME and kind.compile(params, grain).mode == LEVEL:
+    if frequency == EVERY_TIME and kind.compile(params, grain, segment).mode == LEVEL:
         if wait < MIN_LEVEL_WAIT_S:
             raise SpecError(
                 "cooldown_s",
@@ -237,7 +244,7 @@ def _check_price(params, segment: str, grain: Grain) -> dict[str, Any]:
     return {"op": op, "level": str(level), "source": source}
 
 
-def _compile_price(params: Mapping[str, Any], grain: Grain) -> Compiled:
+def _compile_price(params: Mapping[str, Any], grain: Grain, segment: str) -> Compiled:
     mode, direction = PRICE_OPS[params["op"]]
     level = to_decimal(params["level"])
     source = params.get("source", "ltp")
@@ -245,9 +252,97 @@ def _compile_price(params: Mapping[str, Any], grain: Grain) -> Compiled:
     return Compiled(mode, direction, source, grain.up(level), grain.down(level), feed)
 
 
+MOVE_DIRECTIONS = {"up": UP, "down": DOWN, "either": EITHER}
+VWAP_DIRECTIONS = {"above": UP, "below": DOWN, "either": EITHER}
+MAX_RISE = 1000
+
+
+def _check_move(params, segment: str, grain: Grain) -> dict[str, Any]:
+    params = params if isinstance(params, Mapping) else {}
+    base = params.get("base", "close")
+    if base not in ("close", "open"):
+        raise SpecError("base", "Pick the base: the previous close or today's open.")
+    direction = params.get("direction")
+    if direction not in MOVE_DIRECTIONS:
+        raise SpecError("direction", "Pick the way: up, down or either way.")
+    percent = to_decimal(params.get("percent"))
+    if percent is None or percent <= 0:
+        raise SpecError("percent", "Enter the % move, a number above 0.")
+    if direction != "up" and percent >= 100:
+        raise SpecError("percent", "A fall can be at most 99.99%.")
+    if percent > MAX_RISE:
+        raise SpecError("percent", "A rise can be at most 1,000%.")
+    return {"base": base, "direction": direction, "percent": str(percent)}
+
+
+def _compile_move(params: Mapping[str, Any], grain: Grain, segment: str) -> Compiled:
+    share = to_decimal(params["percent"]) / 100
+    feed = "ltpc" if params["base"] == "close" else "full"  # the open comes with the day's OHLC
+    direction = MOVE_DIRECTIONS[params["direction"]]
+    return Compiled(LEVEL, direction, feed=feed, extra=(1 + share, 1 - share))
+
+
+def _check_break(params, segment: str, grain: Grain) -> dict[str, Any]:
+    params = params if isinstance(params, Mapping) else {}
+    side = params.get("side")
+    if side not in ("high", "low"):
+        raise SpecError("side", "Pick the break: the day's high or the day's low.")
+    after = params.get("after", "09:30")
+    start, end = sessions.SEGMENTS[segment]
+    minute = _minute(after)
+    if minute is None or not start <= minute < end:
+        raise SpecError("after", f"Pick a start time between {_hhmm(start)} and {_hhmm(end)}.")
+    return {"side": side, "after": _hhmm(minute)}
+
+
+def _compile_break(params: Mapping[str, Any], grain: Grain, segment: str) -> Compiled:
+    direction = UP if params["side"] == "high" else DOWN
+    offset = _minute(params["after"]) - sessions.SEGMENTS[segment][0]
+    return Compiled(BREAK, direction, feed="full", extra=(offset,))
+
+
+def _check_vwap(params, segment: str, grain: Grain) -> dict[str, Any]:
+    params = params if isinstance(params, Mapping) else {}
+    if segment in sessions.INDEX_SEGMENTS:
+        raise SpecError("kind", "An index has no traded volume, so it has no VWAP. Use its future.")
+    direction = params.get("direction")
+    if direction not in VWAP_DIRECTIONS:
+        raise SpecError("direction", "Pick the way: crosses above, crosses below or either way.")
+    return {"direction": direction}
+
+
+def _compile_vwap(params: Mapping[str, Any], grain: Grain, segment: str) -> Compiled:
+    return Compiled(CROSS, VWAP_DIRECTIONS[params["direction"]], feed="full")
+
+
 KINDS: dict[str, Kind] = {
     "price": Kind(_check_price, _compile_price, lambda p: OP_WORDS[p["op"]], ONCE),
+    "move": Kind(_check_move, _compile_move, lambda p: "% move", PER_CANDLE, DAY),
+    "day_break": Kind(
+        _check_break,
+        _compile_break,
+        lambda p: f"Breaks the day's {p['side']}",
+        PER_CANDLE,
+        DAY,
+        no_close="A day high or low alert checks every trade, so 'At candle close' is not "
+        "available for it.",
+    ),
+    "vwap": Kind(_check_vwap, _compile_vwap, lambda p: "Crosses VWAP", EVERY_TIME, wait_s=900),
 }
+
+
+def _minute(text) -> int | None:
+    """'09:30' -> 570; None unless it is HH:MM."""
+    if not isinstance(text, str) or len(text.strip()) != 5 or text.strip()[2] != ":":
+        return None
+    hours, minutes = text.strip().split(":")
+    if not (hours.isdigit() and minutes.isdigit()) or int(minutes) > 59:
+        return None
+    return int(hours) * 60 + int(minutes)
+
+
+def _hhmm(minute: int) -> str:
+    return f"{minute // 60:02d}:{minute % 60:02d}"
 
 
 def _grain(segment: str, tick_size) -> Grain:

@@ -34,6 +34,7 @@ from typing import NamedTuple
 from sudarshan.alerts.market.clock import Pause, paused_between, paused_during
 from sudarshan.alerts.market.spec import (
     AT_CLOSE,
+    BREAK,
     CROSS,
     DOWN,
     EITHER,
@@ -123,6 +124,10 @@ class Fire(NamedTuple):
     #: The pause (start, end) this was seen after, when it may have happened inside it.
     found_later: tuple[int, int] | None = None
     opening: bool = False
+    #: A condition's reference for the words: a % move's base, the day's high or low it broke.
+    base: int | None = None
+    #: The last trade when ``value`` is not it (a day high taken from the feed's own high).
+    price: int | None = None
 
 
 class Reason(NamedTuple):
@@ -207,9 +212,11 @@ def carries(alert: Alert, state: State, previous: int) -> bool:
 
 def new_session(state: State, session: int, keep_side: bool = False) -> State:
     """A session's first observation: the session's counts start at 0, and the side seeds
-    again unless it carries (``carries``)."""
-    side = state.side if keep_side else None
-    return State(session, side, state.ref, state.seen_at, state.last_fired_at, None, state.fires)
+    again unless it carries (``carries``). ``derived`` stays: conditions key it by session."""
+    s = state
+    side = s.side if keep_side else None
+    return State(session, side, s.ref, s.seen_at, s.last_fired_at, None, s.fires, 0, 0, None,
+                 s.derived)  # fmt: skip
 
 
 def resume(state: State) -> State:
@@ -242,7 +249,7 @@ def judge(
             if direction != EITHER and event != direction:
                 event = 0
         changed = True
-    else:
+    else:  # a level check, or a day high or low break (each hit a new event)
         if value >= up and direction != DOWN:
             side = UP
         elif value <= down and direction != UP:
@@ -250,7 +257,7 @@ def judge(
         else:
             side = 0
         event = side
-        changed = before != side
+        changed = before != side or alert.cond.mode == BREAK
     s = state
     state = State(s.session, side, value, obs.at, s.last_fired_at, s.last_fired_candle, s.fires,
                   s.fires_session, s.quota_base, s.forming, s.derived)  # fmt: skip
