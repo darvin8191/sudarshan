@@ -2,7 +2,7 @@
 // holds them (blueprints/sudarshan_alerts.py, contract 1.1), kept current by what it pushes
 // (src/sudarshan/alerts/marketAlerts.ts), with each card's price from the tab's own tick stream.
 // At /market-alerts because upstream owns /alerts, for the /trading chart's own alerts.
-import { AlertTriangle, KeyRound, LoaderCircle, Plus, RefreshCw } from 'lucide-react'
+import { AlertTriangle, KeyRound, LoaderCircle, Plus, RefreshCw, Settings2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo } from 'react'
 import { Link } from 'react-router'
 import type { AlertRow } from '@/api/marketAlerts'
@@ -14,6 +14,7 @@ import { AlertSheet } from '@/sudarshan/alerts/AlertSheet'
 import { HistoryList } from '@/sudarshan/alerts/HistoryList'
 import { LineText } from '@/sudarshan/alerts/lines'
 import { needsQuote, segmentOpen } from '@/sudarshan/alerts/measure'
+import { SettingsSheet } from '@/sudarshan/alerts/SettingsSheet'
 import { type AlertTab, useAlertOverlay } from '@/sudarshan/alerts/useAlertOverlay'
 import { useMarketAlertsState } from '@/sudarshan/alerts/useMarketAlertsState'
 import { EmptyCard, LoadingCards, OUTLINED, StaleBookNote } from '@/sudarshan/books/cards/parts'
@@ -84,7 +85,7 @@ export default function MarketAlerts() {
   const orphan =
     overlay !== null &&
     state !== undefined &&
-    (overlay.kind === 'new' ? !enabled : overlay.kind === 'settings' || selected === null)
+    (overlay.kind === 'new' ? !enabled : overlay.kind !== 'settings' && selected === null)
   useEffect(() => {
     if (orphan) close()
   }, [orphan, close])
@@ -106,16 +107,26 @@ export default function MarketAlerts() {
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between gap-3">
         <h1 className="sd-display text-[1.75rem] leading-none font-bold md:text-[2rem]">Alerts</h1>
-        <button
-          type="button"
-          disabled={!enabled}
-          aria-describedby="sd-alerts-line"
-          onClick={() => open({ kind: 'new' })}
-          className={cn(HEADER_BUTTON, 'bg-primary text-primary-foreground hover:bg-primary/90')}
-        >
-          <Plus aria-hidden="true" className="size-5" />
-          New
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            aria-label="Alert settings"
+            onClick={() => open({ kind: 'settings' })}
+            className={cn(OUTLINED, 'w-12 shrink-0 px-0')}
+          >
+            <Settings2 aria-hidden="true" className="size-5" />
+          </button>
+          <button
+            type="button"
+            disabled={!enabled}
+            aria-describedby="sd-alerts-line"
+            onClick={() => open({ kind: 'new' })}
+            className={cn(HEADER_BUTTON, 'bg-primary text-primary-foreground hover:bg-primary/90')}
+          >
+            <Plus aria-hidden="true" className="size-5" />
+            New
+          </button>
+        </div>
       </div>
 
       <div id="sd-alerts-line" className="flex min-h-8 flex-wrap items-center gap-x-3 gap-y-1 px-1">
@@ -217,6 +228,7 @@ export default function MarketAlerts() {
         onEdit={editAlert}
       />
       {overlay?.kind === 'new' && enabled && <AlertFormSheet onClose={close} onSaved={saved} />}
+      {overlay?.kind === 'settings' && <SettingsSheet onClose={close} />}
       {overlay?.kind === 'edit' && selected && (
         <AlertFormSheet key={selected.id} row={selected} onClose={close} onSaved={saved} />
       )}

@@ -679,10 +679,15 @@ describe('the Alerts page’s cache', () => {
       channel: 'telegram',
       delivery: sent,
     })
+    socket.fire('sudarshan_market_alert_delivery', {
+      event_id: 345,
+      channel: 'sms',
+      delivery: sent,
+    })
 
     const history = client.getQueryData<InfiniteData<EventsPage>>(HISTORY_KEY)
     expect(history?.pages[0].events).toHaveLength(1)
-    expect(history?.pages[0].events[0].deliveries.telegram).toEqual(sent)
+    expect(history?.pages[0].events[0].deliveries).toEqual({ telegram: sent })
     expect(withRecentDeliveries(page([pending])).events[0].deliveries.telegram).toEqual(sent)
   })
 })

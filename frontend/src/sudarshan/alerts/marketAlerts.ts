@@ -465,6 +465,7 @@ function onState(push: MarketAlertsStatePush): void {
 
 function onDelivery(push: MarketAlertDeliveryPush): void {
   if (!push || typeof push.event_id !== 'number' || !push.delivery) return
+  if (push.channel !== 'telegram' && push.channel !== 'app') return
   rememberDelivery(push)
   const news = new Map([[push.event_id, { [push.channel]: push.delivery } as Deliveries]])
   cache?.setQueriesData({ queryKey: EVENTS_KEY }, (data: unknown) => applyDeliveries(data, news))

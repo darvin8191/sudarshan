@@ -26,17 +26,29 @@ export const EVENTS_KEY = ['sudarshan', 'market-alerts', 'events'] as const
 export const HISTORY_KEY = [...EVENTS_KEY, 'list'] as const
 /** One alert's latest fires, in its sheet. */
 export const firesKey = (alertId: number) => [...EVENTS_KEY, 'alert', alertId] as const
+/** The last test from the settings, kept as a page of one so its deliveries settle by push too. */
+export const TEST_KEY = [...EVENTS_KEY, 'test'] as const
+/** Where alerts go by default (contract 1.7). */
+export const PREFS_KEY = ['sudarshan', 'market-alerts', 'prefs'] as const
 
 export type Deliveries = Partial<Record<Channel, Delivery>>
 
-/** An event with the settled deliveries given, each where it is newer than the one it holds. */
+const same = (a: Delivery, b: Delivery) =>
+  a.status === b.status &&
+  a.reason === b.reason &&
+  a.attempts === b.attempts &&
+  a.updated_at === b.updated_at
+
+/**
+ * An event with the settled deliveries given in place of the ones it holds (contract 2.4), except
+ * where it holds a later one: a read that crossed the push already has what settled.
+ */
 function settled(event: AlertEvent, news: Deliveries | undefined): AlertEvent {
   if (!news) return event
   let deliveries = event.deliveries
   for (const [channel, delivery] of Object.entries(news) as Array<[Channel, Delivery]>) {
     const held = deliveries[channel]
-    if (held && held.updated_at > delivery.updated_at) continue
-    if (held && held.updated_at === delivery.updated_at && held.status === delivery.status) continue
+    if (held && (held.updated_at > delivery.updated_at || same(held, delivery))) continue
     deliveries = { ...deliveries, [channel]: delivery }
   }
   return deliveries === event.deliveries ? event : { ...event, deliveries }

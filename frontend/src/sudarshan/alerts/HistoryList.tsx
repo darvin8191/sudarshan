@@ -34,7 +34,7 @@ import { firesKey, HISTORY_KEY } from './stateCache'
 
 const PAGE = 50
 
-const CHANNELS: Array<[Channel, string]> = [
+export const CHANNELS: Array<[Channel, string]> = [
   ['telegram', 'Telegram'],
   ['app', 'App'],
 ]
@@ -67,7 +67,7 @@ const CHIP =
   'inline-flex h-6 shrink-0 items-center gap-1 rounded-md px-2 text-[0.71875rem] leading-none font-bold tracking-wide'
 
 /** One channel's delivery: its word and icon on a tint, its time once sent, and why below. */
-function DeliveryChip({ name, delivery }: { name: string; delivery: Delivery }) {
+export function DeliveryChip({ name, delivery }: { name: string; delivery: Delivery }) {
   const look = DELIVERY[delivery.status] ?? DELIVERY.pending
   const Icon = look.icon
   const when = delivery.status === 'sent' ? ` ${istTime(delivery.updated_at)}` : ''

@@ -271,6 +271,8 @@ export function problemOf(error: unknown): AlertsProblem {
 const READ_MS = 15_000
 /** A change waits this long: the bridge gives the service 6 s. */
 const CHANGE_MS = 20_000
+/** The test waits this long: the service waits up to 10 s for Telegram, the bridge 12 s. */
+const TEST_MS = 30_000
 
 async function call<T>(request: Promise<{ data: Envelope<T> }>): Promise<T> {
   let body: Envelope<T>
@@ -312,4 +314,16 @@ export const marketAlertsApi = {
     call<AlertRow>(webClient.patch(`${BASE}/alerts/${id}`, change, { timeout: CHANGE_MS })),
   remove: (id: number) =>
     call<{ deleted: boolean }>(webClient.delete(`${BASE}/alerts/${id}`, { timeout: CHANGE_MS })),
+  /** Where alerts go when an alert does not say: the default for every alert, on every device. */
+  prefs: () => call<Prefs>(webClient.get(`${BASE}/prefs`, { timeout: READ_MS })),
+  setPrefs: (prefs: Prefs) =>
+    call<Prefs>(
+      webClient.put(
+        `${BASE}/prefs`,
+        { telegram: prefs.telegram, app: prefs.app },
+        { timeout: CHANGE_MS }
+      )
+    ),
+  /** One test through each channel that is on; Telegram's answer is waited for up to 10 s. */
+  test: () => call<TestResult>(webClient.post(`${BASE}/test`, {}, { timeout: TEST_MS })),
 }

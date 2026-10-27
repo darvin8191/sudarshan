@@ -25,6 +25,9 @@ const api = vi.hoisted(() => ({
   state: vi.fn(),
   eventsSince: vi.fn(),
   events: vi.fn(),
+  prefs: vi.fn(),
+  setPrefs: vi.fn(),
+  test: vi.fn(),
   create: vi.fn(),
   change: vi.fn(),
   remove: vi.fn(),
@@ -116,6 +119,7 @@ beforeEach(() => {
   for (const fn of [...Object.values(api), ...Object.values(toasts)]) fn.mockReset()
   api.state.mockResolvedValue(alertsState())
   api.events.mockResolvedValue({ events: [], more: false })
+  api.prefs.mockResolvedValue({ telegram: true, app: true })
   useAuthStore.setState({ apiKey: 'key' })
 })
 
@@ -427,8 +431,7 @@ describe('an alert’s sheet', () => {
     expect(api.change).toHaveBeenCalledWith(12, { version: 3, action: 'pause' })
 
     await act(async () => answer(alertRow({ version: 4, status: 'paused' })))
-    await settle()
-    expect(within(sheet).getByRole('button', { name: 'Resume' })).toBeEnabled()
+    expect(await within(sheet).findByRole('button', { name: 'Resume' })).toBeEnabled()
     expect(card(12).querySelector('[data-status]')?.textContent).toBe('Paused')
   })
 
@@ -450,7 +453,7 @@ describe('an alert’s sheet', () => {
 
     expect(api.remove).toHaveBeenCalledTimes(1)
     expect(api.remove).toHaveBeenCalledWith(12)
-    expect(card(12)).toBeNull()
+    await waitFor(() => expect(card(12)).toBeNull())
     expect(toasts.success).toHaveBeenCalledWith('Alert deleted. Its history stays.')
     await waitFor(() => expect(where()).toBe('/market-alerts'))
   })
@@ -468,7 +471,7 @@ describe('an alert’s sheet', () => {
     await settle()
 
     expect(toasts.error).toHaveBeenCalledWith(sentence)
-    expect(api.state.mock.calls.length).toBe(reads + 1)
+    await waitFor(() => expect(api.state.mock.calls.length).toBe(reads + 1))
     expect(within(sheet).getByRole('button', { name: 'Pause' })).toBeEnabled()
   })
 
@@ -483,7 +486,7 @@ describe('an alert’s sheet', () => {
     await settle()
 
     expect(toasts.info).toHaveBeenCalledWith('This alert has been deleted.')
-    expect(card(12)).toBeNull()
+    await waitFor(() => expect(card(12)).toBeNull())
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   })
 
@@ -504,7 +507,7 @@ describe('an alert’s sheet', () => {
     await settle()
 
     expect(toasts.warning).toHaveBeenCalledTimes(1)
-    expect(api.state.mock.calls.length).toBe(reads + 1)
+    await waitFor(() => expect(api.state.mock.calls.length).toBe(reads + 1))
     expect(within(sheet).getByText(/No answer came for this delete/)).toBeInTheDocument()
     expect(within(sheet).getByRole('button', { name: 'Delete' })).toBeDisabled()
 
@@ -559,10 +562,29 @@ describe('the form on the page', () => {
     expect(api.change.mock.calls[0][1]).toMatchObject({ version: 3, action: 'edit' })
     await waitFor(() => expect(where()).toBe('/market-alerts?alert=12'))
     expect(
-      within(screen.getByRole('dialog')).getByText('Crosses above ₹101.00')
+      await within(screen.getByRole('dialog')).findByText('Crosses above ₹101.00')
     ).toBeInTheDocument()
 
     back()
+    expect(where()).toBe('/market-alerts')
+  })
+})
+
+describe('the settings on the page', () => {
+  it('opens from its button beside New, and Back closes it before leaving the page', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    renderPage()
+    await settle()
+
+    await user.click(screen.getByRole('button', { name: 'Alert settings' }))
+    expect(where()).toBe('/market-alerts?sheet=settings')
+    const sheet = screen.getByRole('dialog', { name: 'Alert settings' })
+    await waitFor(() =>
+      expect(within(sheet).getByRole('switch', { name: 'Telegram' })).toBeChecked()
+    )
+
+    back()
+    expect(screen.queryByRole('dialog')).toBeNull()
     expect(where()).toBe('/market-alerts')
   })
 })

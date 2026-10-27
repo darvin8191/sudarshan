@@ -25,7 +25,7 @@ import {
   XCircle,
 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
-import { Link } from 'react-router'
+import { Link, useSearchParams } from 'react-router'
 import { webClient } from '@/api/client'
 import TwoFactorEnforcement from '@/components/auth/TwoFactorEnforcement'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -235,7 +235,11 @@ const ALERT_CATEGORIES_ADMIN: {
 export default function ProfilePage() {
   const user = useAuthStore((s) => s.user)
   const alertStore = useAlertStore()
-  const [activeTab, setActiveTab] = useState('account')
+  // SUDARSHAN M10.14: /profile?tab=theme opens Display, where this device's alert sounds are.
+  const [searchParams] = useSearchParams()
+  const [activeTab, setActiveTab] = useState(() =>
+    searchParams.get('tab') === 'theme' ? 'theme' : 'account'
+  )
   const [isLoading, setIsLoading] = useState(true)
   const [profileData, setProfileData] = useState<ProfileData | null>(null)
 

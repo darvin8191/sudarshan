@@ -71,7 +71,7 @@ describe('the cached History', () => {
     expect(kept).toBe(page)
   })
 
-  it('applies to every page of the History tab, and leaves the same object when nothing changed', () => {
+  it('replaces what every page of the History tab holds, and leaves the same object when nothing changed', () => {
     const sent = {
       status: 'sent' as const,
       reason: 'Shown on 1 open screen',
@@ -83,6 +83,9 @@ describe('the cached History', () => {
     const next = applyDeliveries(data, new Map([[7, { app: sent }]]))
     expect(next.pages[0].events[0].deliveries.app).toEqual(sent)
     expect(applyDeliveries(next, new Map([[7, { app: sent }]]))).toBe(next)
+    const later = { ...sent, reason: 'Shown on 2 open screens' }
+    const replaced = applyDeliveries(next, new Map([[7, { app: later }]]))
+    expect(replaced.pages[0].events[0].deliveries.app).toEqual(later)
     expect(applyDeliveries(data, new Map([[8, { app: sent }]]))).toBe(data)
   })
 })
