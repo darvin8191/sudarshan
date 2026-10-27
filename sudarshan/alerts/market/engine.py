@@ -28,6 +28,8 @@ Gaps (a fixed price level's crossing only). The side survives a session: the fir
 next one fires on a crossing as an opening ("opened above 100.00, previous 99.90"); a side from
 any older session only seeds. Inside a session, a change first seen after a pause in checking
 (clock.py) fires marked with that pause, and a candle the pause touched is not judged at its close.
+An opening first seen after a pause inside the session is not told as one: the open was not
+seen, so it fires as a crossing marked with the pause, never calling a later price the first.
 """
 
 from __future__ import annotations
@@ -175,7 +177,7 @@ def step(
     """Judge one observation for one alert, at ``now`` (epoch ms).
 
     ``previous`` is the trading day before today (YYYYMMDD) and ``pauses`` today's pauses in
-    checking: clock.Market carries both.
+    checking inside the alert's session (clock.within): the Book passes them so.
     """
     if alert.status != "active":
         return Outcome(alert.id, state)
@@ -286,9 +288,9 @@ def judge(
                   s.fires_session, s.quota_base, s.forming, s.derived)  # fmt: skip
     if not event:
         return Outcome(alert.id, state)
-    if opening:
-        return _fire(alert, state, obs, now, event, s.ref, None, True)
     found = paused_between(pauses, s.seen_at, obs.at) if pauses and changed else None
+    if opening and found is None:
+        return _fire(alert, state, obs, now, event, s.ref, None, True)
     return _fire(alert, state, obs, now, event, None, found, False)
 
 

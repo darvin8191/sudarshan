@@ -256,3 +256,69 @@ def test_F11_a_wait_as_long_as_the_candle_lets_consecutive_closes_fire():
         told += _clock(book, ms(WED, hh, mm + 1, 5))
     when = [datetime.fromtimestamp(f.at / 1000, IST).strftime("%H:%M:%S") for f in told]
     assert when == ["10:15:05", "10:30:05"]
+
+
+# ---- M5: openings and first fires after a pause -------------------------------------------
+
+
+def _move(book: Book) -> spec.Alert:
+    a = make({"kind": "move", "params": {"base": "close", "direction": "up", "percent": "2"}})
+    book.put(a)
+    t = ms(TUE, 15, 29)
+    book.on_tick(frame(ltp=100.0, at=t, cp=100.0), t, market(TUE, t, MON))
+    return a
+
+
+def test_F5a_a_pause_before_the_open_marks_nothing():
+    """A feed reconnect at 09:05-09:14 (nothing trades then): the 09:15 fire is plain."""
+    book = Book()
+    a = _move(book)
+    pause = clock.Pause(ms(WED, 9, 5), ms(WED, 9, 14), "feed")
+    t = ms(WED, 9, 15, 1)
+    (fire,) = fires(book.on_tick(frame(ltp=102.5, at=t, cp=100.0), t,
+                                 market(WED, t, TUE, [pause])))  # fmt: skip
+    assert fire.found_later is None
+    assert words.line(a, fire, WED) == (
+        "Alert: SBIN up 2.50% on the day: ₹102.50 (previous close ₹100.00) (NSE)"
+    )
+
+
+def test_F5c_a_pause_across_the_open_is_told_from_the_open():
+    """The service down from 08:00 to 09:20: the condition could only have held from 09:15."""
+    book = Book()
+    a = _move(book)
+    pause = clock.Pause(ms(WED, 8, 0), ms(WED, 9, 20), "service")
+    t = ms(WED, 9, 20, 1)
+    (fire,) = fires(book.on_tick(frame(ltp=102.5, at=t, cp=100.0), t,
+                                 market(WED, t, TUE, [pause])))  # fmt: skip
+    assert words.line(a, fire, WED).endswith(
+        "(seen after a pause in market alerts, 09:15 to 09:20)"
+    )
+
+
+def test_F5b_an_opening_seen_only_after_a_pause_is_a_marked_crossing_not_a_first_price():
+    """Market alerts were down from before the open to 09:40. The first trade they see (103.00)
+    is not the opening price, and the crossing may have happened at any time since 09:15."""
+    book = Book()
+    a = make({"kind": "price", "params": {"op": "crosses_above", "level": "100"},
+              "frequency": "every_time"})  # fmt: skip
+    book.put(a)
+    t = ms(TUE, 15, 29)
+    book.on_tick(frame(ltp=99.9, at=t), t, market(TUE, t, MON))
+    pause = clock.Pause(ms(WED, 8, 0), ms(WED, 9, 40), "service")
+    t = ms(WED, 9, 40, 1)
+    (fire,) = fires(book.on_tick(frame(ltp=103.0, at=t), t, market(WED, t, TUE, [pause])))
+    assert not fire.opening and fire.found_later == (ms(WED, 9, 15), ms(WED, 9, 40))
+    assert words.line(a, fire, WED) == (
+        "Alert: SBIN crossed above ₹100.00: now ₹103.00 (NSE) "
+        "(seen after a pause in market alerts, 09:15 to 09:40)"
+    )
+    unpaused = Book()
+    unpaused.put(a)
+    t = ms(TUE, 15, 29)
+    unpaused.on_tick(frame(ltp=99.9, at=t), t, market(TUE, t, MON))
+    t = ms(WED, 9, 40, 1)  # an illiquid stock's first trade at 09:40, nothing missed
+    (fire,) = fires(unpaused.on_tick(frame(ltp=103.0, at=t), t, market(WED, t, TUE)))
+    assert fire.opening and words.line(a, fire, WED) == (
+        "Alert: SBIN opened above ₹100.00: first price ₹103.00 (previous ₹99.90) (NSE)"
+    )

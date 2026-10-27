@@ -86,6 +86,28 @@ def test_a_pause_still_going_counts_to_the_value_judged():
 
 
 @pytest.mark.parametrize(
+    ("pause", "inside"),
+    [
+        (("09:05:00", "09:14:00", "feed"), None),  # before the open: nothing trades then
+        (("08:00:00", "09:20:00", "service"), ("09:15:00", "09:20:00", "service")),
+        (("09:10:00", None, "feed"), ("09:15:00", None, "feed")),  # still going
+        (("10:00:00", "10:01:00", "feed"), ("10:00:00", "10:01:00", "feed")),
+        (("15:29:00", "15:45:00", "feed"), ("15:29:00", "15:30:00", "feed")),  # to the close
+        (("15:31:00", None, "service"), None),  # after the close
+    ],
+)
+def test_only_the_part_of_a_pause_inside_the_session_counts(pause, inside):
+    start, end, cause = pause
+    given = Pause(at(start), at(end) if end else None, cause)
+    found = clock.within((given,), CASH.start, CASH.end)
+    if inside is None:
+        assert found == ()
+    else:
+        begin, stop, why = inside
+        assert found == (Pause(at(begin), at(stop) if stop else None, why),)
+
+
+@pytest.mark.parametrize(
     ("pause", "touches"),
     [
         (("10:05:00", "10:06:00"), True),

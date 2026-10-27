@@ -24,7 +24,7 @@ from datetime import datetime
 from typing import NamedTuple
 
 from sudarshan.alerts.market import conditions
-from sudarshan.alerts.market.clock import OK, Market, candle, gate
+from sudarshan.alerts.market.clock import OK, Market, candle, gate, within
 from sudarshan.alerts.market.engine import (
     Obs,
     Outcome,
@@ -156,6 +156,7 @@ class Book:
         outcomes: list[Outcome] = []
         judged = bad = False
         states, today = self._states, market.today
+        pauses = market.pauses and _session_pauses(market, segment)
         for alert in alerts:
             cond = alert.cond
             source = cond.source
@@ -193,7 +194,7 @@ class Book:
                 obs = Obs(value, at, today, up, down, k, start, end)
             else:
                 obs = Obs(value, at, today, up, down)
-            out = step(alert, start_state, obs, now, market.previous, market.pauses)
+            out = step(alert, start_state, obs, now, market.previous, pauses)
             if got is not None:
                 out = _context(alert, old, out, got)
             if out.state is not old:
@@ -211,9 +212,15 @@ class Book:
     def on_clock(self, now: int, market: Market) -> list[Outcome]:
         """Candles due at their close, ends and expiries; call it about once a second."""
         outcomes: list[Outcome] = []
+        clipped: dict[str, tuple] = {}
         for alert in list(self._active.values()):
             state = self._states[alert.id]
-            out = timer(alert, state, now, market.today, market.pauses)
+            pauses = market.pauses
+            if pauses:
+                pauses = clipped.get(alert.segment)
+                if pauses is None:
+                    pauses = clipped[alert.segment] = _session_pauses(market, alert.segment)
+            out = timer(alert, state, now, market.today, pauses)
             if out is not None:
                 derived = state.derived
                 if out.fire is not None and alert.kind == "move" and derived is not None:
@@ -293,6 +300,12 @@ class Book:
             self._groups.pop(key, None)
             self._trades.pop(key, None)
             self._keys.pop(key, None)
+
+
+def _session_pauses(market: Market, segment: str) -> tuple:
+    """Today's pauses as they fall inside the segment's session (clock.within)."""
+    session = market.sessions.get(segment)
+    return within(market.pauses, session.start, session.end) if session is not None else ()
 
 
 def _context(alert: Alert, old: State, out: Outcome, got: conditions.Edges) -> Outcome:

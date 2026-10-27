@@ -21,7 +21,9 @@ the page shows (words.py says it in the owner's words):
 
 A pause is a stretch longer than GAP_S in which market alerts were not checking: the price feed
 reconnecting, or the service not running. A crossing first seen after one may have happened
-inside it, so its fire says so; a candle that held one is not judged at its close.
+inside it, so its fire says so; a candle that held one is not judged at its close. Only the part
+of a pause inside the alert's session counts (``within``): nothing trades before the open, so a
+reconnect at 09:05 marks nothing, and a stop from 08:00 to 09:20 is told as 09:15 to 09:20.
 """
 
 from __future__ import annotations
@@ -136,6 +138,18 @@ def paused_between(
         if end - pause.start > GAP_MS and pause.start < until and end > after:
             span = (pause.start if span is None else span[0], end)
     return span
+
+
+def within(pauses: tuple[Pause, ...], start: int, end: int) -> tuple[Pause, ...]:
+    """The pauses as they fall inside [start, end) (a session): one from before the open
+    counts from the open, one after the close until it, and one wholly outside is dropped."""
+    inside = []
+    for pause in pauses:
+        begin = max(pause.start, start)
+        stop = None if pause.end is None else min(pause.end, end)
+        if begin < (end if stop is None else stop):
+            inside.append(Pause(begin, stop, pause.cause))
+    return tuple(inside)
 
 
 def paused_during(pauses: tuple[Pause, ...], start: int, end: int) -> bool:

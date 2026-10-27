@@ -179,6 +179,25 @@ def test_only_a_fixed_level_seeds_from_the_trading_day_before():
     assert book.state(2) == State() and book.state(3) == State()
 
 
+def test_a_close_judged_by_the_timer_counts_only_pauses_inside_the_session():
+    """Yesterday's last close was below; a reconnect at 09:05-09:14 (before the open) must not
+    mark today's first close, which the timer judges."""
+    book = Book()
+    book.put(alert(frequency="at_close", candle=15))
+    yesterday = date(2026, 10, 19)  # the trading day before, as market() has it
+    found = {s: sessions.session(s, yesterday, trading_day=True) for s in sessions.SEGMENTS}
+    last = sessions.epoch_ms(yesterday, 15 * 60 + 20)
+    old = clock.Market(20261019, found, 20261016, feed=clock.Feed("connected", True, last))
+    book.on_tick(tick(99.0, at=last), last, old)
+    book.on_clock(last + 10 * 60_000 + 5000, old)  # the 15:15 close: below
+    reconnect = clock.Pause(T0 - 55 * 60_000, T0 - 46 * 60_000)  # 09:05 to 09:14
+    first = T0 - 40 * 60_000  # 09:20
+    book.on_tick(tick(101.0, at=first), first, market(first, pauses=(reconnect,)))
+    due = T0 - 30 * 60_000 + 5000  # 09:30:05
+    (out,) = book.on_clock(due, market(due, pauses=(reconnect,)))
+    assert out.fire.direction == 1 and out.fire.found_later is None
+
+
 def test_seed_only_a_crossing_and_never_at_close():
     book = Book()
     book.put(alert(1, op="at_or_above"))
