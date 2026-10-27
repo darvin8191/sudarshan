@@ -30,7 +30,9 @@ Nobody edits the server's OpenAlgo `.env` by hand. A release that needs a settin
 gives the format). On every deploy, after the release is checked out and before OpenAlgo starts,
 `sudarshan-deploy`:
 
-- reads the list from GitHub at the release tag, never from the server's copy of the code;
+- reads the list from GitHub at the release tag, never from the server's copy of the code, and
+  only whole: a list cut off in transit stops the deploy before anything is touched, while an
+  empty list, or none at all, sets nothing;
 - copies `.env` into that deploy's backup folder as `openalgo.env` (mode 600, same owner);
 - adds a missing key as `KEY='VALUE'`, and replaces a value only while it is one of the
   `OLD_VALUE`s (a default an earlier release shipped), so a value the owner chose stays;
@@ -53,8 +55,9 @@ lists the lines it needs in `ops/deploy/nse-calendar.conf` (a `[FILE]` line, the
 `sudarshan-deploy`:
 
 - reads the list from GitHub at the release tag, never from the server's copy of the code, and
-  takes it only when it arrived whole; the installed release's list is fetched once and kept in
-  `/var/lib/sudarshan/calendar-lists`;
+  takes it only when it arrived whole; the installed release's list is kept in
+  `/var/lib/sudarshan/calendar-lists` once it arrived whole, and one GitHub did not find or that
+  did not arrive whole keeps nothing and is asked for again on the next run;
 - applies the list of the installed release on every run, also when it installs nothing and in
   market hours, because each reader picks up a changed file by itself; an install applies the
   list of the release it brings;
@@ -65,8 +68,9 @@ lists the lines it needs in `ops/deploy/nse-calendar.conf` (a `[FILE]` line, the
   this tool added;
 - never changes today in a way that could open the market gate: a holiday is added only before
   its day; a run that installs nothing changes no line dated today or earlier (it only adds a
-  special session for today); and the gate holds a release if the day files say trading either
-  as the run found them or after its calendar step;
+  special session for today); and the gate holds a release if the day files say trading as the
+  run found them, after its calendar step, or as the release's own list would leave them (a
+  release that announces today's session, or takes back today's holiday, waits);
 - keeps every other byte and the file's owner, group and mode, creates a missing file
   root:sudarshan 640 (and writes only while `/etc/sudarshan` is root's and closed to others), and
   renames the new file into place in one step; a temporary file a killed run left is cleared;
