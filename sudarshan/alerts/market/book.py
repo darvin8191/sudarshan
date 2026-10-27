@@ -15,6 +15,11 @@ it uses it, so a frame is never converted whole.
 Which values an alert judges: one on the last price judges a new trade only (its time, price or
 quantity changed), at the trade's own time; one on the bid or ask judges every tick that carries
 it, at the tick's arrival (``ts_recv``). A tick is judged only when the gate lets it through.
+
+A stock that closes by auction (``Market.auction``) is judged on its own session, which ends
+before the auction. The auction's print is judged once, as itself (clock.auction): by price-level
+and % move alerts that are not judged at candle close, and their fire says it was the closing
+auction. A day high or low, a VWAP and a candle close take continuous trades only.
 """
 
 from __future__ import annotations
@@ -24,7 +29,15 @@ from datetime import datetime
 from typing import NamedTuple
 
 from sudarshan.alerts.market import conditions
-from sudarshan.alerts.market.clock import OK, Market, candle, gate, within
+from sudarshan.alerts.market.clock import (
+    AUCTION_PRINT,
+    OK,
+    Market,
+    auction,
+    candle,
+    gate,
+    within,
+)
 from sudarshan.alerts.market.engine import (
     Obs,
     Outcome,
@@ -36,7 +49,7 @@ from sudarshan.alerts.market.engine import (
     timer,
 )
 from sudarshan.alerts.market.grain import paise
-from sudarshan.alerts.market.sessions import day_key
+from sudarshan.alerts.market.sessions import AUCTION, POST_CLOSE_AFTER_MIN, Session, day_key
 from sudarshan.alerts.market.spec import AT_CLOSE, BREAK, CROSS, PER_CANDLE, Alert
 from sudarshan.autologin.schedule import IST
 
@@ -48,6 +61,8 @@ BAD_VALUE = "bad_value"
 CANDLED = frozenset({PER_CANDLE, AT_CLOSE})
 #: A note: a % move's base changed inside the session, so its level was worked out again.
 BASE_CHANGED = "base_changed"
+#: The kinds a closing auction's print is judged by (not at candle close).
+AUCTION_KINDS = frozenset({"price", "move"})
 
 
 def _ms(value) -> int | None:
@@ -145,23 +160,30 @@ class Book:
         recv = _ms(frame.get("ts_recv"))
         recv = now if recv is None else recv
         segment = alerts[0].segment
+        cls = segment + AUCTION if key in market.auction else segment  # its session's key
         ltp, ltt = frame.get("ltp"), _ms(frame.get("ltt"))
         trade = quote = None
         if ltp is not None and ltt is not None:
             identity = (ltt, ltp, frame.get("ltq"))
             if identity != self._trades.get(key):
-                trade = gate(market, segment, ltt, recv, now, trade=True)
-                if trade == OK:
+                trade = gate(market, cls, ltt, recv, now, trade=True)
+                if trade != OK and cls is not segment:  # the closing auction's print?
+                    trade = auction(market, segment, ltt, recv, now)
+                if trade == OK or trade == AUCTION_PRINT:
                     self._trades[key] = identity
         outcomes: list[Outcome] = []
         judged = bad = False
         states, today = self._states, market.today
-        pauses = market.pauses and _session_pauses(market, segment)
+        pauses = market.pauses and _session_pauses(market, cls)
         for alert in alerts:
             cond = alert.cond
             source = cond.source
             if source == "ltp":
-                if trade != OK:
+                if trade != OK and (
+                    trade != AUCTION_PRINT
+                    or alert.kind not in AUCTION_KINDS
+                    or alert.frequency == AT_CLOSE
+                ):
                     continue
                 raw, at = ltp, ltt
             else:
@@ -169,7 +191,7 @@ class Book:
                 if raw is None:
                     continue
                 if quote is None:
-                    quote = gate(market, segment, recv, recv, now, trade=False)
+                    quote = gate(market, cls, recv, recv, now, trade=False)
                 if quote != OK:
                     continue
                 at = recv
@@ -190,13 +212,19 @@ class Book:
                 if got.derived is not old.derived:
                     start_state = old._replace(derived=got.derived)
             if alert.frequency in CANDLED:
-                k, start, end = candle(market.sessions[segment], alert.candle_min, at)
+                session = market.sessions[cls]
+                if trade == AUCTION_PRINT and source == "ltp":
+                    k, start, end = _after(session, alert.candle_min)
+                else:
+                    k, start, end = candle(session, alert.candle_min, at)
                 obs = Obs(value, at, today, up, down, k, start, end)
             else:
                 obs = Obs(value, at, today, up, down)
             out = step(alert, start_state, obs, now, market.previous, pauses)
             if got is not None:
                 out = _context(alert, old, out, got)
+            if out.fire is not None and trade == AUCTION_PRINT and source == "ltp":
+                out = out._replace(fire=out.fire._replace(auction=True))
             if out.state is not old:
                 states[alert.id] = out.state
                 self._changed[alert.id] = (alert.version, out.state)
@@ -246,7 +274,8 @@ class Book:
         if value is None or at is None:
             return False
         day = day_key(datetime.fromtimestamp(at / 1000, IST).date())
-        session = market.sessions.get(alert.segment)
+        cls = alert.segment + AUCTION if alert.key in market.auction else alert.segment
+        session = market.sessions.get(cls)
         today = day == market.today and session is not None and session.start <= at < session.end
         before = day == market.previous and carries(alert, State(day, 0), market.previous)
         if not (today or before) or day < state.session:
@@ -300,6 +329,16 @@ class Book:
             self._groups.pop(key, None)
             self._trades.pop(key, None)
             self._keys.pop(key, None)
+
+
+def _after(session: Session, minutes: int) -> tuple[int, int, int]:
+    """The closing auction's own candle: the one after the session's last (the day's for a Day
+    candle), so a per-candle alert may tell the auction once."""
+    if not minutes:
+        return 0, session.start, session.end
+    size = minutes * 60_000
+    k = -(-(session.end - session.start) // size)  # the last candle's index plus one
+    return k, session.end, session.end + POST_CLOSE_AFTER_MIN * 60_000
 
 
 def _session_pauses(market: Market, segment: str) -> tuple:

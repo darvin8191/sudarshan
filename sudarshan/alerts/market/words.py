@@ -70,6 +70,8 @@ def describe(alert: Alert, fire: engine.Fire, today: date) -> tuple[str, str]:
     level, value = amount(alert, fire.level), amount(alert, fire.value)
     closed = alert.frequency == AT_CLOSE
     lead = _close_lead(alert, name) if closed else name
+    if fire.auction:  # the closing auction's print, never passed off as an ordinary trade
+        return _auction(alert, fire, name, way, level, value)
     if alert.kind == "move":
         rise = "up" if fire.direction == UP else "down"
         on, base = ("on the day", "previous close")
@@ -104,6 +106,24 @@ def describe(alert: Alert, fire: engine.Fire, today: date) -> tuple[str, str]:
         verb = way if alert.cond.mode == CROSS else f"at or {way}"
         return f"{lead} {verb} {level}", _close_detail(alert, fire, value)
     return f"{name} {source}{verb} {level}", f"now {value}"
+
+
+def _auction(alert: Alert, fire: engine.Fire, name: str, way: str, level: str, value: str):
+    """'SBIN crossed above ₹100.00 in the closing auction', 'closing price ₹100.20'."""
+    detail = f"closing price {value}"
+    if alert.kind == "move":
+        rise = "up" if fire.direction == UP else "down"
+        on, base = ("on the day", "previous close")
+        if alert.params["base"] == "open":
+            on, base = ("from today's open", "open")
+        if fire.base is None:
+            return f"{name} {rise} {alert.params['percent']}% {on} in the closing auction", detail
+        share = _share(alert, fire)
+        title = f"{name} {rise} {share}% {on} in the closing auction"
+        return title, f"{detail} ({base} {amount(alert, fire.base)})"
+    if alert.cond.mode == CROSS:
+        return f"{name} crossed {way} {level} in the closing auction", detail
+    return f"{name} closed at or {way} {level} in the closing auction", detail
 
 
 def _close_lead(alert: Alert, name: str) -> str:

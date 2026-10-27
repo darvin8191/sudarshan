@@ -15,6 +15,8 @@
     "{restart: [from, to]} (a clean stop at 'from', then only what market.db holds comes",
     "back), {suspend}, {resume}, {edit: fields}, {seed: snapshot tick}. A step's 'check' is",
     "the gate's verdict. The runner keeps a real market.db and flushes it once a second.",
+    "A vector with 'auction': true is on a stock that closes by auction (it has derivatives):",
+    "its continuous session ends at 15:15 until 6 Dec 2026, and its auction's print is told as such.",
     "Words: a fire's golden texts, the app's title and detail and the Telegram line; prices in a",
     "fire are text and the times IST on the defaults' day."
   ],
@@ -61,6 +63,20 @@
       "exchange": "NFO",
       "tick_size": "0.05",
       "expiry": "2026-10-21"
+    },
+    "dec_option": {
+      "instrument_key": "NSE_FO|61234",
+      "symbol": "NIFTY08DEC2625900CE",
+      "exchange": "NFO",
+      "tick_size": "0.05",
+      "expiry": "2026-12-08"
+    },
+    "dec_future": {
+      "instrument_key": "NSE_FO|61200",
+      "symbol": "NIFTY29DEC26FUT",
+      "exchange": "NFO",
+      "tick_size": "0.1",
+      "expiry": "2026-12-29"
     }
   },
   "snap": [
@@ -1414,6 +1430,104 @@
         {"at": "09:40:00", "ltp": 100.5, "high": 100.5}
       ],
       "fires": [{"at": "09:40:00", "value": "100.50", "base": "100.00"}]
+    },
+    {
+      "id": "AU1",
+      "says": "a stock that closes by auction crosses 100 only in the auction: told as the auction's",
+      "auction": true,
+      "alert": {"params": {"op": "crosses_above", "level": "100"}},
+      "steps": [{"at": "15:14:00", "ltp": 99.95}, {"at": "15:31:10", "ltp": 100.2, "check": "ok"}],
+      "fires": [{"at": "15:31:10", "value": "100.20", "auction": true}],
+      "status": "stopped"
+    },
+    {
+      "id": "AU2",
+      "says": "a stock without derivatives trades to 15:30; a print at 15:31 is no trade",
+      "alert": {"params": {"op": "crosses_above", "level": "100"}, "frequency": "every_time"},
+      "steps": [
+        {"at": "15:29:00", "ltp": 99.95},
+        {"at": "15:29:59", "ltp": 100.05},
+        {"at": "15:31:10", "ltp": 99.9, "check": "outside_hours"}
+      ],
+      "fires": [{"at": "15:29:59", "auction": false}]
+    },
+    {
+      "id": "AU3",
+      "says": "a stock that closes by auction: a trade stamped 15:16 is not continuous trading",
+      "auction": true,
+      "alert": {"params": {"op": "crosses_above", "level": "100"}, "frequency": "every_time"},
+      "steps": [{"at": "15:14:00", "ltp": 99.95}, {"at": "15:16:00", "ltp": 100.1}],
+      "fires": [{"at": "15:16:00", "auction": true}]
+    },
+    {
+      "id": "AU4",
+      "says": "a day high is broken by continuous trades only, never by the auction's print",
+      "auction": true,
+      "alert": {"kind": "day_break", "params": {"side": "high", "after": "09:30"}},
+      "steps": [
+        {"at": "15:14:00", "ltp": 101.0, "high": 101.0},
+        {"at": "15:31:10", "ltp": 102.0, "high": 102.0, "check": "auction"}
+      ],
+      "fires": []
+    },
+    {
+      "id": "AU5",
+      "says": "at the 15-min close, the last candle of a stock that closes by auction is 15:00-15:15",
+      "auction": true,
+      "alert": {"params": {"op": "at_or_above", "level": "100"}, "frequency": "at_close", "candle": 15},
+      "steps": [
+        {"at": "15:10:00", "ltp": 100.05},
+        {"at": "15:15:05", "clock": true},
+        {"at": "15:31:10", "ltp": 99.0, "check": "auction"},
+        {"at": "15:31:20", "clock": true}
+      ],
+      "fires": [{"at": "15:15:05", "trade_time": "15:10:00", "candle": 23}]
+    },
+    {
+      "id": "AU6",
+      "says": "a % move made only in the closing auction says so",
+      "auction": true,
+      "alert": {"kind": "move", "params": {"base": "close", "direction": "up", "percent": "2"}},
+      "steps": [{"at": "15:14:00", "ltp": 101.0, "cp": 100.0}, {"at": "15:31:10", "ltp": 102.1, "cp": 100.0}],
+      "fires": [{"at": "15:31:10", "value": "102.10", "base": "100.00", "auction": true}]
+    },
+    {
+      "id": "AU7",
+      "says": "from 7 Dec 2026: continuous trading to 15:30 for every stock, the auction's print after it",
+      "day": "2026-12-07",
+      "auction": true,
+      "alert": {"params": {"op": "crosses_above", "level": "100"}, "frequency": "every_time"},
+      "steps": [
+        {"at": "15:29:00", "ltp": 99.95},
+        {"at": "15:29:30", "ltp": 99.9},
+        {"at": "15:39:40", "ltp": 100.2}
+      ],
+      "fires": [{"at": "15:39:40", "auction": true}]
+    },
+    {
+      "id": "AU8",
+      "says": "from 7 Dec 2026: derivatives trade to 15:45",
+      "day": "2026-12-07",
+      "instrument": "dec_future",
+      "alert": {"params": {"op": "crosses_above", "level": "26000"}, "frequency": "every_time"},
+      "steps": [
+        {"at": "15:40:30", "ltp": 25999.9},
+        {"at": "15:44:59", "ltp": 26000.5},
+        {"at": "15:45:00", "ltp": 25990.0, "check": "outside_hours"}
+      ],
+      "fires": [{"at": "15:44:59"}]
+    },
+    {
+      "id": "AU9",
+      "says": "from 7 Dec 2026: an expiring index option stops at 15:30 on its expiry day",
+      "day": "2026-12-08",
+      "instrument": "dec_option",
+      "alert": {"params": {"op": "crosses_above", "level": "120"}, "frequency": "every_time"},
+      "steps": [{"at": "15:29:59", "clock": true}, {"at": "15:30:00", "clock": true}],
+      "fires": [],
+      "status": "stopped",
+      "reason": "expired",
+      "reason_at": "15:30:00"
     }
   ],
   "calendar": {"holidays": ["2026-10-20", "2026-11-10"], "windows": {"2026-11-08": "14:05-15:40"}},
@@ -1775,6 +1889,26 @@
       "title": "SBIN ended the day's trading above ₹100.00",
       "detail": "last trade ₹100.05 (09:15 to 15:30)",
       "line": "Alert: SBIN ended the day's trading above ₹100.00: last trade ₹100.05 (09:15 to 15:30) (NSE)"
+    },
+    {
+      "id": "W23",
+      "alert": {"params": {"op": "crosses_above", "level": "100"}},
+      "fire": {"value": "100.20", "level": "100", "direction": "up", "auction": true},
+      "title": "SBIN crossed above ₹100.00 in the closing auction",
+      "detail": "closing price ₹100.20",
+      "line": "Alert: SBIN crossed above ₹100.00 in the closing auction: closing price ₹100.20 (NSE)"
+    },
+    {
+      "id": "W24",
+      "alert": {"params": {"op": "at_or_below", "level": "100"}, "frequency": "every_time", "cooldown_s": 60},
+      "fire": {"value": "99.80", "level": "100", "direction": "down", "auction": true},
+      "line": "Alert: SBIN closed at or below ₹100.00 in the closing auction: closing price ₹99.80 (NSE)"
+    },
+    {
+      "id": "W25",
+      "alert": {"kind": "move", "params": {"direction": "up", "percent": "2"}},
+      "fire": {"value": "102.10", "level": "102.00", "direction": "up", "base": "100.00", "auction": true},
+      "line": "Alert: SBIN up 2.10% on the day in the closing auction: closing price ₹102.10 (previous close ₹100.00) (NSE)"
     }
   ]
 }

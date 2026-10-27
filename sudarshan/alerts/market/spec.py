@@ -130,7 +130,7 @@ class Alert:
         segment = sessions.segment_of(row["instrument_key"])
         grain = _grain(segment, row.get("tick_size"))
         expiry = _date(row.get("expiry"))
-        hours = sessions.hours(segment)
+        index = sessions.index_derivative(row["symbol"])
         return cls(
             id=int(row["id"]),
             version=int(row["version"]),
@@ -149,7 +149,7 @@ class Alert:
             ends_at=row.get("ends_at"),
             note=row.get("note") or "",
             cond=KINDS[row["kind"]].compile(row["params"], grain, segment),
-            expires_at=sessions.epoch_ms(expiry, hours[1]) if expiry and hours else None,
+            expires_at=sessions.expiry_close(segment, expiry, index=index) if expiry else None,
         )
 
 
@@ -168,8 +168,9 @@ def check(fields: Mapping[str, Any], now: int) -> dict[str, Any]:
         raise SpecError("instrument", "Pick the instrument again from the search.")
     grain = _grain(segment, fields.get("tick_size"))
     expiry = _date(fields.get("expiry"))
-    hours = sessions.hours(segment)
-    if expiry is not None and hours and sessions.epoch_ms(expiry, hours[1]) <= now:
+    index = sessions.index_derivative(str(symbol))
+    closes = sessions.expiry_close(segment, expiry, index=index) if expiry else None
+    if closes is not None and closes <= now:
         raise SpecError(
             "instrument",
             f"This contract expired on {expiry.day} {expiry:%b}. Pick one that is still trading.",

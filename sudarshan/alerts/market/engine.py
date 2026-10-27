@@ -143,6 +143,8 @@ class Fire(NamedTuple):
     #: The alert's version the fire was decided on: the store applies its state and stop only
     #: to that definition.
     version: int = 0
+    #: The value was the closing auction's print, not a trade of the continuous session.
+    auction: bool = False
 
 
 class Reason(NamedTuple):

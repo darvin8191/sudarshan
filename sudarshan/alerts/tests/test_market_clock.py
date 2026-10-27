@@ -136,3 +136,46 @@ def test_gate_without_health_yet_is_feed_down():
     world = Market(20261021, {"NSE_EQ": CASH})
     moment = at("10:00:00")
     assert clock.gate(world, "NSE_EQ", moment, moment, moment, trade=True) == clock.FEED_DOWN
+
+
+AUCTION_DAY = sessions.sessions_of(DAY, trading_day=True)
+
+
+def auction_market(now: int, **more) -> Market:
+    more.setdefault("feed", Feed("connected", True, now))
+    return Market(20261021, AUCTION_DAY, 20261019, auction=frozenset({"NSE_EQ|X"}), **more)
+
+
+@pytest.mark.parametrize(
+    ("at", "recv", "now", "feed", "check"),
+    [
+        ("15:31:10", "15:31:10", "15:31:10", "connected", clock.AUCTION_PRINT),
+        ("15:15:00", "15:15:01", "15:15:01", "connected", clock.AUCTION_PRINT),  # from 15:15
+        ("15:14:59", "15:15:01", "15:15:01", "connected", clock.OUTSIDE_HOURS),  # continuous
+        ("15:49:59", "15:49:59", "15:49:59", "connected", clock.AUCTION_PRINT),
+        ("15:50:00", "15:50:00", "15:50:00", "connected", clock.OUTSIDE_HOURS),  # post-close
+        ("15:31:10", "15:31:10", "15:31:10", "backoff", clock.FEED_DOWN),
+        ("15:31:10", "15:31:10", "15:31:16", "connected", clock.STALE),
+    ],
+)
+def test_the_closing_auctions_print_has_its_own_gate(at, recv, now, feed, check):
+    market = auction_market(clock_ms(now), feed=Feed(feed, feed == "connected", clock_ms(now)),
+                            status={"NSE_EQ": "NORMAL_CLOSE"})  # fmt: skip
+    assert clock.auction(market, "NSE_EQ", clock_ms(at), clock_ms(recv), clock_ms(now)) == check
+
+
+def test_a_stock_that_closes_by_auction_is_gated_on_its_own_session():
+    now = clock_ms("15:16:00")
+    market = auction_market(now, status={"NSE_EQ": "NORMAL_OPEN"})
+    assert clock.gate(market, "NSE_EQ+auction", now, now, now, trade=True) == clock.OUTSIDE_HOURS
+    assert clock.gate(market, "NSE_EQ", now, now, now, trade=True) == clock.OK
+    early = clock_ms("09:14:00")
+    pre = auction_market(early, status={"NSE_EQ": "PRE_OPEN_START"})
+    assert clock.gate(pre, "NSE_EQ+auction", clock_ms("09:15:01"), clock_ms("09:15:01"),
+                      clock_ms("09:15:01"), trade=True) == clock.NOT_OPEN_YET  # fmt: skip
+    plain = Market(20261021, AUCTION_DAY, 20261019, feed=Feed("connected", True, now))
+    assert clock.auction(plain, "NSE_INDEX", now, now, now) == clock.OUTSIDE_HOURS
+
+
+def clock_ms(text: str) -> int:
+    return at(text)
