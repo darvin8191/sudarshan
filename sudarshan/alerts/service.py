@@ -44,6 +44,7 @@ from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed, InvalidHandshake, InvalidURI
 
 from sudarshan.autologin.schedule import IST, TradingCalendar, hhmm
+from sudarshan.tasks import cancel_and_wait
 
 from . import __version__, loopback, messages
 from .config import ConfigError, Settings, setup_logging, switched_off
@@ -160,8 +161,8 @@ class AlertService:
                 __version__, self._window_text(), self.settings.cancelled,
                 "on" if self.settings.sandbox else "off",
             )  # fmt: skip
-            sender = asyncio.create_task(self.outbox.run())
-            ticker = asyncio.create_task(self._tick())
+            sender = asyncio.create_task(self.outbox.run(), name="order alerts: Telegram")
+            ticker = asyncio.create_task(self._tick(), name="order alerts: clock")
             try:
                 await self._supervise()
             finally:
@@ -173,8 +174,7 @@ class AlertService:
                 left = await self.outbox.flush(STOP_FLUSH_S)
                 if left:
                     log.warning("%d order alerts were not sent before stopping", left)
-                sender.cancel()
-                await asyncio.gather(sender, ticker, return_exceptions=True)
+                await cancel_and_wait(sender, ticker)  # a cancel lost in httpx is sent again
                 self.store.close()
                 self._set_state("stopped")
 

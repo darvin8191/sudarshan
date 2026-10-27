@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 
 import httpx
 import pytest
@@ -13,7 +14,7 @@ from market_fakes import FakeFeed, ms
 from test_market_desk import closed, draft, following
 from test_market_runtime import SBIN, Clock, record, trade
 
-from sudarshan.alerts.market import push, runtime
+from sudarshan.alerts.market import lane, push, runtime
 from sudarshan.alerts.market.config import MarketSettings
 from sudarshan.alerts.market.desk import OwnerDesk
 from sudarshan.alerts.market.engine import Fire, State
@@ -276,6 +277,41 @@ def test_an_app_delivery_left_pending_at_a_restart_is_never_sent_late(alerts, qu
             )
             assert items(notify, ALERT_EVENT) == []
             await closed(rt, task)
+
+    run(scenario)
+
+
+def swallowing(job):
+    """``job`` as a lost cancel leaves it (sudarshan/tasks.py): its first cancel swallowed, as
+    anyio's connect_tcp can inside httpx, and then parked."""
+
+    async def carries_on(self) -> None:
+        try:
+            await job(self)
+        except asyncio.CancelledError:
+            pass
+        await asyncio.Event().wait()
+
+    return carries_on
+
+
+@pytest.mark.parametrize(
+    "owner, name",
+    [(push.Pusher, "run"), (lane.MarketLane, "run"), (runtime.MarketRuntime, "_claims")],
+    ids=["app push", "Telegram", "claims"],
+)
+def test_a_stop_ends_even_when_a_task_swallows_its_cancel(alerts, quick, monkeypatch, owner, name):
+    """Each task the stop cancels may be inside an httpx request, where a cancel can be lost:
+    the stop used to wait for ever (two 10 s timeouts in 8 runs of this file, one hang)."""
+    monkeypatch.setattr(owner, name, swallowing(getattr(owner, name)))
+
+    async def scenario():
+        clock = Clock(ist(2026, 10, 21, 10, 0))
+        async with FakeFeed(clock) as feed, FakeOpenAlgo() as notify:
+            office, rt, task = await started(alerts(notify), feed, clock)
+            began = time.monotonic()
+            await closed(rt, task)
+            assert time.monotonic() - began < 5 and rt.state == "stopped"
 
     run(scenario)
 

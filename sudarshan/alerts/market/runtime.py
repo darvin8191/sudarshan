@@ -73,6 +73,7 @@ from sudarshan.alerts.market.store import DB_FILENAME, MarketStore, NotFound, St
 from sudarshan.alerts.outbox import OpenAlgoTelegram, Pacer, Throttle
 from sudarshan.alerts.owner import Owner, OwnerError
 from sudarshan.autologin.schedule import IST, TradingCalendar
+from sudarshan.tasks import cancel_and_wait
 
 log = logging.getLogger("sudarshan.alerts.market")
 
@@ -218,13 +219,15 @@ class MarketRuntime:
             )
             self.lane = MarketLane(telegram.send_with_reason, self.clock, self.pacer,
                                    self._delivered)  # fmt: skip
-            sender = asyncio.create_task(self._guard("telegram", self.lane.run()))
+            sender = asyncio.create_task(self._guard("telegram", self.lane.run()),
+                                         name="market alerts: Telegram")  # fmt: skip
             pushing = None
             if self.push_fernet is not None:  # M10.7: the app's owner room
                 self.pusher = Pusher(self.settings.openalgo_url, client, self.push_fernet,
                                      self._shown)  # fmt: skip
                 self.push = self._push_fire
-                pushing = asyncio.create_task(self._guard("push", self.pusher.run()))
+                pushing = asyncio.create_task(self._guard("push", self.pusher.run()),
+                                              name="market alerts: app push")  # fmt: skip
             jobs: list[asyncio.Task] = []
             try:
                 await self._resend_pending(now)
@@ -233,20 +236,17 @@ class MarketRuntime:
                 self._set_state("running", f"{len(self.book.alerts())} alerts checking")
                 for name, job in (("ticks", self._frames()), ("clock", self._ticks()),
                                   ("claims", self._claims())):  # fmt: skip
-                    jobs.append(asyncio.create_task(self._guard(name, job)))
+                    jobs.append(asyncio.create_task(self._guard(name, job),
+                                                    name=f"market alerts: {name}"))  # fmt: skip
                 await self._stop.wait()
             finally:
-                for task in jobs:
-                    task.cancel()
-                await asyncio.gather(*jobs, return_exceptions=True)
+                # A cancel can be lost inside httpx (sudarshan/tasks.py): sent again until each
+                # task has ended, or the stop would wait for ever.
                 try:
+                    await cancel_and_wait(*jobs)
                     await self._shutdown()  # Telegram's queue goes while its sender still runs
                 finally:
-                    for task in (sender, pushing):
-                        if task is not None:
-                            task.cancel()
-                    await asyncio.gather(sender, *([pushing] if pushing else []),
-                                         return_exceptions=True)  # fmt: skip
+                    await cancel_and_wait(sender, pushing)
 
     async def _guard(self, name: str, job) -> None:
         """A job that fails stops market alerts in words; order alerts carry on."""

@@ -6,6 +6,7 @@ import asyncio
 import logging
 import subprocess
 import sys
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from alerts_fakes import (
     wait_until,
 )
 
+from sudarshan.alerts.outbox import Outbox
 from sudarshan.alerts.owner import Owner, OwnerError
 from sudarshan.alerts.service import AlertService
 
@@ -500,3 +502,34 @@ def test_switched_off_it_exits_at_once_whatever_else_is_set(tmp_path):
     )  # fmt: skip
     assert done.returncode == 0
     assert "Order alerts are off" in done.stderr
+
+
+@pytest.mark.parametrize(
+    "owner, name", [(Outbox, "run"), (AlertService, "_tick")], ids=["Telegram", "clock"]
+)
+def test_a_stop_ends_even_when_a_task_swallows_its_cancel(
+    settings_for, fast, monkeypatch, owner, name
+):
+    """The Telegram sender may be inside an httpx request when the stop cancels it, where a
+    cancel can be lost (sudarshan/tasks.py): the stop used to wait for ever. Here each task
+    swallows its first cancel, as anyio's connect_tcp can, and then parks."""
+    job = getattr(owner, name)
+
+    async def carries_on(self) -> None:
+        try:
+            await job(self)
+        except asyncio.CancelledError:
+            pass
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(owner, name, carries_on)
+
+    async def scenario():
+        async with FakeProxy() as proxy, FakeOpenAlgo() as notify:
+            svc, task = await _start(settings_for(proxy, notify))
+            await wait_until(lambda: proxy.subscribed)
+            began = time.monotonic()
+            await _stop(svc, task)
+            assert time.monotonic() - began < 5 and svc.state == "stopped"
+
+    asyncio.run(scenario())
