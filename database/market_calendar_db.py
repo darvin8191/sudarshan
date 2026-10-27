@@ -141,7 +141,7 @@ def init_db():
         logger.debug(f"Market Calendar DB: Holiday seeding may have race condition: {e}")
 
 
-def seed_holidays_2025():
+def seed_holidays_2025(commit: bool = True):  # SUDARSHAN M3.7: commit, see _seed_holidays
     """
     Seed 2025 market holidays based on NSE/BSE/MCX official calendar
     Includes Muhurat Trading session for Diwali
@@ -296,10 +296,10 @@ def seed_holidays_2025():
         },
     ]
 
-    _seed_holidays(holidays_2025, 2025)
+    _seed_holidays(holidays_2025, 2025, commit=commit)
 
 
-def seed_holidays_2026():
+def seed_holidays_2026(commit: bool = True):  # SUDARSHAN M3.7: commit, see _seed_holidays
     """
     Seed 2026 market holidays based on official NSE and MCX calendars.
     Source: NSE Circular & MCX Circular for Calendar Year 2026.
@@ -491,11 +491,16 @@ def seed_holidays_2026():
         },
     ]
 
-    _seed_holidays(holidays_2026, 2026)
+    _seed_holidays(holidays_2026, 2026, commit=commit)
 
 
-def _seed_holidays(holidays_data: list[dict], year: int):
-    """Internal function to seed holidays for a specific year"""
+def _seed_holidays(holidays_data: list[dict], year: int, commit: bool = True):
+    """Internal function to seed holidays for a specific year
+
+    SUDARSHAN M3.7: ``commit=False`` leaves the rows in the caller's open
+    transaction, so reset_holiday_data() commits its delete and both years
+    as one.
+    """
     try:
         for holiday_info in holidays_data:
             holiday_date = datetime.strptime(holiday_info["date"], "%Y-%m-%d").date()
@@ -532,7 +537,8 @@ def _seed_holidays(holidays_data: list[dict], year: int):
                 )
                 db_session.add(exchange_entry)
 
-        db_session.commit()
+        if commit:  # SUDARSHAN M3.7
+            db_session.commit()
     except Exception as e:
         db_session.rollback()
         raise e
@@ -1001,19 +1007,24 @@ def reset_holiday_data():
     """
     Reset and re-seed all holiday data.
     Use this when holiday data structure changes or needs to be refreshed.
+
+    SUDARSHAN M3.7: the delete and both years' seeds are one transaction, so a
+    failure part-way leaves the calendar as it was. Committed one by one, a
+    failure after the delete left the years not yet seeded empty until the next
+    good run, and upgrade/migrate_market_holidays.py runs this on every deploy.
     """
     try:
         # Clear existing data
         HolidayExchange.query.delete()
         Holiday.query.delete()
+
+        # Re-seed, in the delete's transaction
+        seed_holidays_2025(commit=False)
+        seed_holidays_2026(commit=False)
         db_session.commit()
 
         # Clear cache
         clear_market_calendar_cache()
-
-        # Re-seed
-        seed_holidays_2025()
-        seed_holidays_2026()
 
         logger.info("Market Calendar DB: Holiday data reset and re-seeded successfully")
         return True

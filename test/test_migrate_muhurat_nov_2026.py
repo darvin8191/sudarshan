@@ -137,7 +137,7 @@ def _placeholder(engine):
 def test_the_seed_carries_the_published_hours(monkeypatch):
     """A new install and a migrated one end up with the same windows."""
     seeded = {}
-    monkeypatch.setattr(mc, "_seed_holidays", lambda data, year: seeded.update(data=data))
+    monkeypatch.setattr(mc, "_seed_holidays", lambda data, year, **_: seeded.update(data=data))
     mc.seed_holidays_2026()
     muhurat = next(day for day in seeded["data"] if day["date"] == "2026-11-08")
     windows = {row["exchange"]: (row["start_time"], row["end_time"]) for row in muhurat["open"]}
