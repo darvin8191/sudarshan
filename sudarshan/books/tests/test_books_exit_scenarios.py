@@ -323,3 +323,17 @@ def test_s19_two_phones_and_tradingview_exiting_one_position_together_send_one(w
     assert world.broker.history(X) == [65, 0]
     refused = [body["message"] for w, code, body, *_ in world.answers if code == 409]
     assert len(refused) == 2 and all("already on its way" in words for words in refused)
+
+
+def test_s20_a_tradingview_exit_whose_read_outlasts_the_note_is_not_sent(world, monkeypatch):
+    """Busy when it began sizing the close: its read answered after the note ran out, still
+    showing the position as it was before the phone's exit, and would have sold it again."""
+    monkeypatch.setattr(exit_guard, "EXIT_SHOWS_WITHIN_S", 1.0)
+    world.phone_exit(X)
+    world.broker.slow_read = 1.3  # answers after the note has run out, rows as at its start
+    code, body = world.tv_smart_exit(X)
+    world.broker.slow_read = 0.0
+    assert code == 409, summary(world, X)
+    assert body["message"].startswith("An exit for NIFTY 25900 CE is already on its way (sent ")
+    assert [(o["symbol"], o["side"]) for o in world.broker.orders] == [(X, "SELL")]
+    assert never_reversed(world.broker, X)

@@ -471,6 +471,12 @@ def place_smartorder_api(data, auth):
             if not symbol_lock:
                 return SymbolLocks.busy(symbol)
             position_size = int(data.get("position_size", "0"))
+            # SUDARSHAN M6.9: whether its position is busy before the read it is sized from. A
+            # read slower than a note lasts can come back older than the exit that made it busy,
+            # so a close is not sent then, however late the read answers (an entry still is).
+            busy_before = None
+            if position_size == 0:
+                busy_before = exit_guard.why_busy("live", exchange, symbol, product)
 
             current_position = int(get_open_position(symbol, exchange, map_product_type(product), auth))
             logger.debug(
@@ -513,9 +519,11 @@ def place_smartorder_api(data, auth):
                 _invalidate_position_cache(auth)
                 return res, _with_sent(response, action, quantity, False), orderid
             # SUDARSHAN M6.9: a close, sized from a book that may not show an exit placed just
-            # before: not sent while its position is busy (sudarshan/books/exit_guard.py), and
-            # noted, before the claim is let go, whenever it may have gone.
+            # before: not sent if its position was busy before that read or is busy now
+            # (sudarshan/books/exit_guard.py), and noted, before the claim is let go, whenever it
+            # may have gone.
             with exit_guard.one_exit("live", exchange, symbol, product) as busy:
+                busy = busy or busy_before
                 if busy:
                     logger.warning(f"Exit for {symbol} not sent: an exit for it is on its way")
                     return _ErrorResponse(409), {"status": "error", "message": busy}, None

@@ -68,6 +68,7 @@ class Broker:
         self.read_flip = False  # alternate fresh and lagging reads (two replicas)
         self.fresh_parity = 1  # which reads are fresh while read_flip is on
         self.orders_unreadable = False  # the order book read fails
+        self.slow_read = 0.0  # seconds a positions read takes to answer, its rows as at its start
 
     # -- state ---------------------------------------------------------------
     def true_qty(self, symbol: str) -> int:
@@ -133,6 +134,8 @@ class Broker:
                     "sell_price": 0.0,
                 }
             )
+        if self.slow_read:
+            time.sleep(self.slow_read)
         return FakeResponse(200, {"status": "success", "data": rows})
 
     def _order_book(self):

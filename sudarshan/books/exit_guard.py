@@ -28,8 +28,10 @@ position at once except the busy ones, each of which it reports as not sent in
 a sentence of its own. It never waits for anything, and it starts no Upstox
 call after ``EXIT_ALL_SENDS_FOR_S``.
 
-One position's exit is refused with that sentence (409) while its position is
-busy or an Exit all holds the book. An entry (a smart order that opens or adds
+One position's exit is refused with that sentence (409) if its position is
+busy, or an Exit all holds the book, either before the read it is sized from
+(``why_busy``: a slow read can answer older than the exit that made it busy) or
+when it is claimed after that read. An entry (a smart order that opens or adds
 to a position) is never refused.
 
 The sandbox's book shows each exit the moment it is placed, so nothing is noted
