@@ -9,7 +9,7 @@ and PIN the owner saves once from his phone.
 ```
 sudarshan-autologin.timer   08:35, 08:45, 08:55 IST, every day
   -> sudarshan-autologin.service (oneshot, user sudarshan)   python -m sudarshan.autologin
-       1. trading day? inside 08:30-15:30? switched on?               (otherwise: nothing)
+       1. trading day? inside 08:30-15:40? switched on?               (otherwise: nothing)
        2. ask OpenAlgo (sealed, 127.0.0.1): owner, broker, a login since 03:30, and does Upstox
           still accept the stored token? (OpenAlgo asks Upstox with one read-only call)
        3. not paused? TOTP code (RFC 6238) from the vault key -> Upstox token endpoint
@@ -30,9 +30,9 @@ sudarshan-autologin.timer   08:35, 08:45, 08:55 IST, every day
    Both are stored encrypted on the server and are never shown again; they can only be replaced
    or removed.
 4. Press **Test now**. "Logged in" means everything works, including the Telegram message.
-   Test now replaces today's login, so it is not available from 09:00 to 15:30 on a trading day
-   while Upstox is connected (a new login would cut off the live session), nor while auto-login
-   is paused.
+   Test now replaces today's login, so it is not available from 09:00 to 15:40 on a trading day
+   while Upstox is connected (a new login would cut off the live session; equity derivatives
+   trade to 15:40 since 3 Aug 2026), nor while auto-login is paused.
 5. Switch **Log in automatically on trading days** on.
 6. Make sure the Telegram bot is running and linked to the owner (OpenAlgo > Telegram Bot).
    Without it everything still works, but no message arrives.
@@ -69,7 +69,7 @@ please log in by hand before 09:15." or "Please log in by hand before 09:15."
 | OpenAlgo broker is not Upstox / no user / no API key | plain sentence for each | told once per day |
 | OpenAlgo starting (a boot, a deploy) or busy | none, if it answers within 75 s | the worker asks again every 5 s for up to 75 s (10 s for Test now) |
 | OpenAlgo not running | (no Telegram: messages go through OpenAlgo) | Upstox is **not** asked, so no working token is revoked; next slot tries again. Shown on the page and in the journal. |
-| the stored login could not be checked, during 09:15-15:30, with no login since 03:30 | Upstox could not confirm whether the stored login still works. No new login was made during market hours | told once; nothing is replaced while the market is open. Log in by hand. |
+| the stored login could not be checked, during 09:15-15:40, with no login since 03:30 | Upstox could not confirm whether the stored login still works. No new login was made during market hours | told once; nothing is replaced while the market is open. Log in by hand. |
 | Upstox gave a token but OpenAlgo did not answer | ... it was not saved | 3 tries over 7 s, then recorded as failed; next slot tries again |
 | OpenAlgo answered but could not store it | ... OpenAlgo could not save it | no login is left on record, so the next slot tries again |
 | Test now took longer than 150 s | Upstox may have ended today's login without the new one being saved. Check the Upstox connection, and log in again if it is not working | the child is stopped; nothing else runs |
@@ -90,12 +90,12 @@ worked)? Nothing happens that day: no new login, no message.
   call to the funds endpoint its own Upstox plugin uses): if Upstox still accepts it, nothing
   happens. If it does not, the worker logs in. If the check cannot tell, a login since 03:30 IST
   counts as working; without one the worker logs in before 09:15 (the stored token cannot be
-  today's) but never from 09:15 to 15:30, when it tells the owner instead.
+  today's) but never from 09:15 to 15:40 (the F&O close), when it tells the owner instead.
 - **03:30, not 03:00**: Upstox's daily tokens stop working at 03:30 IST, while OpenAlgo's own
   session rollover is 03:00. Only a login since 03:30 counts as today's here.
 - **Its own pace**: at most one Upstox call per 60 s and 10 per 30 min (Upstox allows 1/s, 10/min,
   60/30 min). It never logs in "just in case".
-- **Window**: a wake-up outside 08:30-15:30 IST does nothing. The deploy tool restarts ring units
+- **Window**: a wake-up outside 08:30-15:40 IST does nothing. The deploy tool restarts ring units
   after every deploy, and `Persistent=true` replays a missed wake-up after a boot; both are safe.
 - **One attempt at a time**: a lease row in the vault (300 s, longer than any run may take); a
   second start exits with status 75.
@@ -188,7 +188,7 @@ again.
 | variable | default | meaning |
 |---|---|---|
 | `SUDARSHAN_OPENALGO_URL` | `http://127.0.0.1:5000` | OpenAlgo on this server (loopback only) |
-| `SUDARSHAN_AUTOLOGIN_WINDOW` | `08:30-15:30` | IST minutes in which a scheduled wake-up may log in |
+| `SUDARSHAN_AUTOLOGIN_WINDOW` | `08:30-15:40` | IST minutes in which a scheduled wake-up may log in |
 | `SUDARSHAN_NSE_HOLIDAYS_FILE` | `/etc/sudarshan/nse_holidays.txt` | trading holidays |
 | `SUDARSHAN_NSE_EXTRA_DAYS_FILE` | `/etc/sudarshan/nse_extra_trading_days.txt` | sessions on otherwise closed days |
 | `SUDARSHAN_AUTOLOGIN_LOG_LEVEL` | `INFO` | worker log level |

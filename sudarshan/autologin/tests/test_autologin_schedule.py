@@ -5,16 +5,23 @@ from __future__ import annotations
 import logging
 import os
 from datetime import date, datetime
+from pathlib import Path
 
 import pytest
 
+from sudarshan.autologin.messages import MESSAGES
 from sudarshan.autologin.schedule import (
+    DEFAULT_WINDOW,
     IST,
+    MARKET_HOURS,
+    TEST_BLOCKED,
     UPSTOX_TOKEN_EXPIRY,
     TradingCalendar,
+    parse_window,
     trading_session_start,
 )
 
+REPO = Path(__file__).resolve().parents[3]
 MONDAY = date(2026, 10, 19)
 SATURDAY = date(2026, 10, 24)
 HOLIDAY = date(2026, 11, 9)  # in the fake holiday file
@@ -68,7 +75,9 @@ def test_a_missing_holiday_file_warns_once(tmp_path, caplog):
         ("09:14", False, True),
         ("09:15", True, True),
         ("15:29", True, True),
-        ("15:30", False, False),
+        ("15:30", True, True),  # the cash close: F&O trades to 15:40 (since 3 Aug 2026)
+        ("15:39", True, True),
+        ("15:40", False, False),
     ],
 )
 def test_windows(holidays_file, hhmm, market, test_blocked):
@@ -79,6 +88,19 @@ def test_windows(holidays_file, hhmm, market, test_blocked):
     assert calendar.blocks_test_now(at) is test_blocked
     saturday = at.replace(day=24)
     assert not calendar.in_market_hours(saturday) and not calendar.blocks_test_now(saturday)
+
+
+def test_the_page_and_the_answer_give_the_hours_test_now_is_refused():
+    """F&O trades to 15:40 since 3 Aug 2026: the guards, the page and the answer all say so."""
+    assert MARKET_HOURS == ("09:15", "15:40") and TEST_BLOCKED == ("09:00", "15:40")
+    hours = f"from {TEST_BLOCKED[0]} to {TEST_BLOCKED[1]} on a trading day"
+    page = REPO / "frontend" / "src" / "sudarshan" / "pages" / "AutoLogin.tsx"
+    assert hours in " ".join(page.read_text(encoding="utf-8").split())
+    assert hours in MESSAGES["market_hours"]
+
+
+def test_auto_login_may_start_until_the_f_and_o_close():
+    assert parse_window(DEFAULT_WINDOW) == (8 * 60 + 30, 15 * 60 + 40)
 
 
 @pytest.mark.parametrize(

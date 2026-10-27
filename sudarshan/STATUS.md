@@ -22,7 +22,7 @@ One row per feature id from the (private) feature list. Status: `todo` → `part
 | M1.16 | About page `/about` | partial | v0.2.0 | server check pending |
 | M1.18 | Hard-coded colour audit | partial | v0.2.0 | Order Book done; other pages still carry upstream's greens and reds |
 | M1.21 | Motion: no tick flash, no pulsing dot, `prefers-reduced-motion` | partial | v0.2.0, v0.3.0 | v0.3.0 removes the flash from the option chain legs and the books |
-| M2.20 | Upstox auto-login (TOTP + PIN, owner vault, timer 08:35/08:45/08:55 IST, Auto login page with Test now, Telegram result); accepts the Upstox QR code's text | partial | v0.2.0, v0.2.1 | live test pending: Test now outside market hours, then one scheduled morning |
+| M2.20 | Upstox auto-login (TOTP + PIN, owner vault, timer 08:35/08:45/08:55 IST, Auto login page with Test now, Telegram result); accepts the Upstox QR code's text; market hours to the 15:40 F&O close | partial | v0.2.0, v0.2.1 | live test pending: Test now outside market hours, then one scheduled morning; Test now refused to 15:40 (not 15:30) from the next release (`feat/feed-extra-days`) |
 | M3.1 | Funds & margin card, re-read with the P&L | partial | v0.2.0 | Analytics Token path still to do |
 | M3.3 | Day P&L live from the broker figure plus tick moves; NIFTY 50 / NIFTY BANK / INDIA VIX tick by tick; previous close from the tick when it carries one | partial | v0.2.0, v0.3.0 | market-hours check pending |
 | M3.7 | Freshness lines everywhere: Real-time, Stale · updated Ns ago, Reconnecting, Delayed (REST fallback), Market closed; stale figures greyed | partial | v0.3.0 | dashboard, books, option chain, scalping, PnL Tracker, ticket, modify dialog, watchlist, charts |

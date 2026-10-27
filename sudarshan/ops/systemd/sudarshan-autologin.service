@@ -1,7 +1,7 @@
 # सुदर्शन / SUDARSHAN auto-login: one Upstox login attempt with TOTP + PIN (M2.20).
 # Started by sudarshan-autologin.timer (08:35, 08:45, 08:55 IST). The worker decides for itself:
 # it does nothing on a day that is not a trading day (weekends and /etc/sudarshan/nse_holidays.txt,
-# except a day in /etc/sudarshan/nse_extra_trading_days.txt), outside 08:30-15:30 IST, when
+# except a day in /etc/sudarshan/nse_extra_trading_days.txt), outside 08:30-15:40 IST, when
 # switched off or paused, or when Upstox still accepts the login OpenAlgo holds, so the deploy
 # tool restarting this unit is harmless. "Test now" runs the same program from OpenAlgo, with the
 # same settings.

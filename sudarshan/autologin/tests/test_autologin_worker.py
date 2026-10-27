@@ -194,7 +194,9 @@ def test_already_logged_in_today_is_left_alone(ready_vault, calendar):
         (datetime(2026, 10, 19, 9, 15, tzinfo=IST), False),
         (datetime(2026, 10, 19, 12, 0, tzinfo=IST), False),
         (datetime(2026, 10, 19, 15, 29, 40, tzinfo=IST), False),
-        (datetime(2026, 10, 19, 15, 30, 10, tzinfo=IST), True),
+        (datetime(2026, 10, 19, 15, 30, 10, tzinfo=IST), False),  # cash closed, F&O trades on
+        (datetime(2026, 10, 19, 15, 39, 40, tzinfo=IST), False),
+        (datetime(2026, 10, 19, 15, 40, 10, tzinfo=IST), True),  # the F&O close (since 3 Aug 2026)
         (datetime(2026, 10, 19, 8, 59, 10, tzinfo=IST), True),
         (datetime(2026, 10, 18, 11, 0, 10, tzinfo=IST), True),  # Sunday
         (datetime(2026, 11, 9, 11, 0, 10, tzinfo=IST), True),  # holiday in the fake file
@@ -592,7 +594,7 @@ def _entry_env(tmp_path, openalgo_env_file, holidays_file, **extra):
         datetime(2026, 10, 18, 8, 35, tzinfo=IST),  # Sunday
         datetime(2026, 11, 9, 8, 35, tzinfo=IST),  # NSE holiday (fake file)
         datetime(2026, 10, 19, 8, 29, tzinfo=IST),  # before the window
-        datetime(2026, 10, 19, 15, 30, tzinfo=IST),  # after it
+        datetime(2026, 10, 19, 15, 40, tzinfo=IST),  # after it (the F&O close)
         datetime(2026, 10, 19, 16, 5, tzinfo=IST),  # a deploy restarting the unit after close
         datetime(2026, 10, 19, 2, 0, tzinfo=IST),  # Persistent= catching up at night
     ],

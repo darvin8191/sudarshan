@@ -18,17 +18,19 @@ log = logging.getLogger("sudarshan.autologin")
 IST = timezone(timedelta(hours=5, minutes=30), "IST")  # India keeps no daylight saving
 #: The timer's three wake-ups on weekdays; the first that succeeds ends the day's work.
 SCHEDULE = ("08:35", "08:45", "08:55")
-#: Continuous trading session; a new login then would cut off a live session.
-MARKET_HOURS = ("09:15", "15:30")
-#: From the pre-open to the close: Test now, which replaces today's login, is refused then while
-#: the login works.
-TEST_BLOCKED = ("09:00", "15:30")
+#: Continuous trading, to the F&O close: NSE's equity derivatives trade to 15:40 since
+#: 3 Aug 2026 (the cash market closes at 15:30). A new login then would cut off a live session.
+MARKET_HOURS = ("09:15", "15:40")
+#: From the pre-open to the F&O close: Test now, which replaces today's login, is refused then
+#: while the login works.
+TEST_BLOCKED = ("09:00", "15:40")
 #: Upstox's daily access tokens stop working at 03:30 IST. OpenAlgo's own session rollover is
 #: 03:00, so a login between the two is on record as today's while its token is already dead.
 UPSTOX_TOKEN_EXPIRY = "03:30"
-#: When a scheduled wake-up may log in. A wake-up outside it (a deploy restart in the evening,
-#: Persistent= catching up after a night-time boot) is ignored.
-DEFAULT_WINDOW = "08:30-15:30"
+#: When a scheduled wake-up may log in: from before the first wake-up to the F&O close. A wake-up
+#: outside it (a deploy restart in the evening, Persistent= catching up after a night-time boot)
+#: is ignored.
+DEFAULT_WINDOW = "08:30-15:40"
 #: When the owner should have logged in by hand if auto-login could not.
 HAND_LOGIN_DEADLINE = "09:15"
 HOLIDAYS_FILE = "/etc/sudarshan/nse_holidays.txt"
@@ -198,7 +200,7 @@ class TradingCalendar:
         return self._within(at, MARKET_HOURS)
 
     def blocks_test_now(self, at: datetime) -> bool:
-        """09:00-15:30 on a trading day: Test now must not replace a working login then."""
+        """09:00-15:40 on a trading day: Test now must not replace a working login then."""
         return self._within(at, TEST_BLOCKED)
 
     def slots(self, day: date) -> list[datetime]:
