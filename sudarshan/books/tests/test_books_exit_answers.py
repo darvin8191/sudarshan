@@ -566,6 +566,46 @@ def test_exit_all_whose_exits_were_all_refused_notes_nothing(monkeypatch):
     assert exit_guard.EXITS.placed_lately("live") == set()
 
 
+def test_a_tradingview_exit_all_sent_twice_through_upstox_sells_once(monkeypatch):
+    """Upstox's own close-all, twice a second apart: the second waits for the book to show the
+    first one's exit, then finds nothing left to close, instead of selling a second time."""
+    import time
+
+    import services.close_position_service as close_service
+    import services.positionbook_service as positionbook_service
+    from sudarshan.books import exit_guard
+
+    monkeypatch.setattr(exit_guard, "EXIT_SHOWS_POLL_S", 0.05)
+    held = {"quantity": 10}  # SBIN long 10, until the book shows the exit
+    monkeypatch.setattr(
+        upstox,
+        "get_positions",
+        lambda auth: _book_of(("NSE_EQ|1", held["quantity"], "I")),
+    )
+    monkeypatch.setattr(upstox, "get_symbol", lambda token, exchange: "SBIN")
+    sold = []
+    monkeypatch.setattr(
+        upstox, "place_order_api", lambda data, auth: sold.append(data["quantity"]) or PLACED
+    )
+    reads = []
+
+    def live_book(auth_token, broker, original_data=None):  # what the app reads between them
+        if len(reads) == 2:
+            held["quantity"] = 0  # at the third read the first one's exit shows at last
+        reads.append(held["quantity"])
+        row = {"symbol": "SBIN", "exchange": "NSE", "product": "MIS", "quantity": held["quantity"]}
+        return True, {"status": "success", "data": [row]}, 200
+
+    monkeypatch.setattr(positionbook_service, "get_positionbook_with_auth", live_book)
+    monkeypatch.setattr(close_service, "get_analyze_mode", lambda: False)
+    first = close_service.close_position(position_data={}, auth_token="token", broker="upstox")
+    time.sleep(1.0)
+    second = close_service.close_position(position_data={}, auth_token="token", broker="upstox")
+    assert (first[2], second[2]) == (200, 200)
+    assert sold == ["10"]  # one exit, not a second that would turn the position short
+    assert reads == [10, 10, 0]
+
+
 def test_exit_all_that_breaks_before_its_first_exit_is_not_flagged(monkeypatch):
     def broken(token, exchange):
         raise RuntimeError(SECRET_DETAIL)
