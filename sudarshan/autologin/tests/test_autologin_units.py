@@ -194,10 +194,12 @@ def _market_gate_says(
 @pytest.mark.parametrize(
     ("now", "holidays", "extra", "trading"),
     [
+        # An ordinary trading day: no install from 08:30 to 16:00 (09:00-15:45 until v0.3.1).
         ("3 1000 2026-10-21", "", None, True),
-        ("3 0859 2026-10-21", "", None, False),
-        ("3 1545 2026-10-21", "", None, True),
-        ("3 1546 2026-10-21", "", None, False),
+        ("3 0829 2026-10-21", "", None, False),
+        ("3 0830 2026-10-21", "", None, True),
+        ("3 1600 2026-10-21", "", None, True),
+        ("3 1601 2026-10-21", "", None, False),
         ("2 1000 2026-10-20", "2026-10-20  # Dussehra\n", None, False),
         ("2 1000 2026-10-20", "2026-10-20\n", None, False),
         ("2 1000 2026-10-20", "# 2026-10-20\n", None, True),
