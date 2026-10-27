@@ -5,6 +5,66 @@ publish. The owner publishes each release on GitHub. The server's deploy timer t
 outside 08:30-16:00 IST on trading days (09:00-15:45 until v0.3.1), keeps backups, and rolls
 back if the app does not come up healthy.
 
+## v0.3.2 (28 Oct 2026)
+
+Muhurat trading on Sunday 8 Nov, and SUDARSHAN's own times moved to the F&O close at 15:40. It
+includes everything in v0.3.1. **Publish it by Friday 6 Nov, and publish nothing on Saturday 7
+or Sunday 8 Nov.**
+
+### What changes for you
+- **Muhurat, Sunday 8 Nov 2026.** SUDARSHAN treats that afternoon as a trading session, as the
+  exchanges announced it: pre-open 14:05, trading 14:20 to 15:30 for shares, to 15:40 for F&O
+  (NSE circulars 149/2026 and 142/2026), MCX 14:20 to 15:30.
+  - The server learns the date by itself. This release carries the line, and the first run after
+    the install adds it to the server's calendar. Nothing to type on the server.
+  - That day: auto-login logs in at 08:35 as on any trading day, the price feed connects at 14:03
+    and stays until 15:50, order alerts on Telegram run from 13:50 to 16:00, and the screens show
+    the market open (not "Market closed") during the session.
+  - No release installs on that Sunday at any hour.
+- **F&O closes at 15:40 every day (NSE, since 3 Aug 2026).** SUDARSHAN's own times follow it:
+  - The price feed stays until 15:50 (it closed at 15:40), and reconnects by itself if prices
+    stop between 09:15 and 15:40.
+  - Test now on the Auto login page is refused until 15:40, so it never replaces your login while
+    F&O trades. A scheduled auto-login never replaces a working login before 15:40 either.
+- **Releases install outside 08:30-16:00 on trading days** (it was 09:00-15:45). A release you
+  publish during the day installs after 16:00; one published before 08:30 installs before the
+  morning's logins and alerts start.
+- **Calmer order-alert notices.** "Order alerts paused ..." no longer comes before the market
+  opens (the one on 27 Oct at 08:45 came from v0.3.1's install). A pause during the session is
+  still told; when the order book cannot be read, SUDARSHAN keeps trying for about 3 minutes and
+  then tells you to open Orders in the app. The day's last pause is caught up after 16:00 too.
+- **A mistyped time window in a server setting** now costs a warning in the log and the usual
+  hours, never a service that does not start.
+
+### What you must do
+- **Publish by Friday 6 Nov** (the link is in your task list). The server installs it outside
+  trading hours by itself.
+- **After it installs**, paste the v0.3.2 check from your task list into the "SUDARSHAN server"
+  session. It changes nothing; it confirms the Muhurat line reached the server's calendar and
+  that the services run.
+
+### What is refused now
+- An install between 08:30 and 09:00 or between 15:45 and 16:00 on a trading day, and all day on
+  8 Nov.
+- Test now on the Auto login page between 15:30 and 15:40.
+
+### Not in this release yet
+- **The Exit all and phone-screen fixes found on 27 Oct** move to the next release, v0.3.3: an
+  Exit all that never closes a position twice when it follows another exit within seconds, the
+  Exit message on Telegram ("Action: BUY, Quantity: 0" for a sell), "Waiting for prices" with
+  nothing open, and Exit all and Cancel all that look tappable with nothing to exit or cancel.
+  Until then, after an exit, wait until Positions shows it closed before you tap Exit all.
+- **A message when a release installs.** For now the v0.3.2 check in the server session confirms
+  it.
+- **An evening special session** (none is planned) would still allow Test now during it:
+  auto-login's guard reads the clock, not that day's own hours.
+- **MCX's Muhurat hours** come from a published summary of MCX's circular; MCX's own page could
+  not be read.
+- **Holidays changed on OpenAlgo's admin Holidays page** go back to the built-in list at the next
+  install, as they always have.
+- **The feed may reconnect once at 09:15** if Upstox sends nothing in the minutes before the
+  open. It did not happen on 27 Oct (no reconnects all day).
+
 ## v0.3.1 (21 Oct 2026)
 
 Phone cards for the books, and exits and cancels that cannot go twice. It includes everything in
