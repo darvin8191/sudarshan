@@ -706,15 +706,15 @@ export default function PythonStrategyGuide() {
                       <br />
                       <span className="text-xs">Sunday Diwali Muhurat</span>
                     </td>
-                    <td className="py-2 pr-3">NSE / BSE / NFO</td>
+                    <td className="py-2 pr-3">NSE / BSE / MCX</td>
                     <td className="py-2">
-                      SPECIAL_SESSION 18:00&ndash;19:15. Runs only inside that window, despite being
+                      SPECIAL_SESSION 14:20&ndash;15:30. Runs only inside that window, despite being
                       Sunday
                     </td>
                   </tr>
                   <tr className="border-b">
-                    <td className="py-2 pr-3">MCX</td>
-                    <td className="py-2">SPECIAL_SESSION 18:00&ndash;00:15 next day</td>
+                    <td className="py-2 pr-3">NFO / BFO</td>
+                    <td className="py-2">SPECIAL_SESSION 14:20&ndash;15:40</td>
                   </tr>
                   <tr className="border-b">
                     <td className="py-2 pr-3">CRYPTO</td>

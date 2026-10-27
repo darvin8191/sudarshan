@@ -112,7 +112,7 @@ def _clock(offset_ms: int, *, closing: bool) -> str:
     A close the calendar states to the second, which is how it writes the
     crypto day (to 23:59:59), is rounded up to the next minute, so that day ends
     at ``"24:00"``, the record's spelling of midnight at the end of the day. A
-    close past midnight (MCX Muhurat runs to 00:15 the next morning) is written
+    close past midnight (a special session that runs to 00:15 the next morning) is written
     as the clock reads it, and the record takes an end before its start as a
     window that crosses midnight.
     """
