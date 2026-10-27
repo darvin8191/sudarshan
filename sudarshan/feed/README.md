@@ -192,7 +192,10 @@ hour ever holds more.
   request is answered at once, never held.
 - **Upstox says slow down** (a 429, or `UDAPI10005` in any answer): that API stops for every
   service for 60 s, then runs at half its rates for 10 minutes. **Upstox refuses the token** (a
-  401): every API stops until the token file changes, as the socket does.
+  401): every API stops until the token file changes, as the socket does. A 401 for a call sent
+  with the token the file held before (the owner has just replaced it) stops nothing: it says
+  nothing about the new token. A failure to reach Upstox is one journal line per API at most
+  every 5 minutes.
 - Nothing is retried here: 4xx is final, 5xx and network errors are for the caller to retry.
   Callers should allow 70 s (30 s of waiting, 30 s for Upstox, the hand-over).
 - **Memory**: a place in flight is held until the caller has the answer (or the 30 s to hand it
@@ -219,12 +222,19 @@ hour ever holds more.
 | 403 | `client`, `not-allowed` | an unknown `X-Sudarshan-Client`; a path or method outside the list | - |
 | 400 | `bad-request` | a missing priority, a bad key, a missing or extra query parameter | - |
 
-`/health` shows the governor as `rest`: `enabled`, `counted_since`, `in_flight`, `waiting`,
-`bulk_refused_until` (the end of today's market hours while bulk is refused), `token_refused_since`,
-`not_allowed`, and per API (`apis`) `calls`, `waits`, `refusals`, `429s`, `frozen_until` and
-`half_rate_until`, with the same counts per service (`clients`, services with any count). Never a
+A caller's mistake (the 403 and 400 rows) is a fault in SUDARSHAN, not in the owner's settings,
+so its sentence says so in plain words, for example "The price feed could not read this request
+for Upstox. This is a fault in SUDARSHAN itself; nothing in your settings needs changing." What
+was wrong (which header or parameter) is in the feed's journal at DEBUG
+(`SUDARSHAN_FEED_LOG_LEVEL=DEBUG`), never in the answer.
+
+`/health` shows the governor as `rest`: `enabled`, `counted_since_ms`, `in_flight`, `waiting`,
+`bulk_refused_until_ms` (the end of today's market hours while bulk is refused),
+`token_refused_since_ms`, `not_allowed`, and per API (`apis`) `calls`, `waits`, `refusals`,
+`429s`, `frozen_until_ms` and `half_rate_until_ms`, with the same counts per service (`clients`,
+services with any count). Instants are epoch ms (cross-design X3), `null` when not set. Never a
 URL, a query or the token. The counts run on across restarts (`rest_counts.json`, below), from
-`counted_since`: after the first week, `apis.<api>.429s` says whether SUDARSHAN's 40% met
+`counted_since_ms`: after the first week, `apis.<api>.429s` says whether SUDARSHAN's 40% met
 Upstox's limits on the account, which TRINETRA shares.
 
 A restart never grants a share twice: the same file keeps every send of the last 30 minutes per
@@ -269,6 +279,15 @@ and live packets merge into it, so a group a packet leaves out keeps its last va
 without the `I1` entry keeps the last `ohlc_1m`). Upstox's bare numeric fields cannot say "not
 sent" apart from 0, so a 0 there keeps the previous value: a quantity that really drops to 0
 (tsq at an upper circuit) shows its last non-zero value. Use REST quotes for circuit checks.
+
+The one-minute candle costs the tick recorder (measured 28 Oct 2026 on synthetic full ticks
+through the real decode, merge and gzip): a full tick's line grows from about 315 to 413 bytes,
+but compressed from about 56 to 65-69 bytes (+16-22%). Today's base set (about 23 ticks a second)
+records about 30 MB a day, 35 MB with the candle, against the 512 MB cap: no risk. At ring scale
+the cap holds up to about 386 keys in full mode at one tick a second each, 316 with the candle;
+the ring's 732 keys at worst would reach it after about 3.4 hours of trading (2.8 with the
+candle). So the cap needs a decision (raise it, or record fewer keys) before the claims pass
+about 300 full keys, with or without the candle.
 
 ## Behaviour
 

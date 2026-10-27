@@ -297,7 +297,7 @@ def test_only_allowed_calls_reach_upstox_with_the_token_and_every_answer_says_it
                 "not-allowed", "not-allowed", "client", "client", "client", "bad-request",
             ]  # fmt: skip
             assert bad[2].json() == {"error": rest.UNKNOWN_CLIENT}
-            assert bad[5].json() == {"error": rest.BAD_PRIORITY}
+            assert bad[5].json() == {"error": rest.BAD_REQUEST}
             assert len(fake.rest_calls) == len(PASSES)  # nothing refused reached Upstox
             health = svc.health()["rest"]
             assert health["not_allowed"] == len(REFUSED) + len(bad)
@@ -413,13 +413,14 @@ def test_bulk_is_refused_at_once_in_market_hours_and_served_after(feed_env, tmp_
             )
             assert r.headers["X-Sudarshan-Reason"] == "bulk-hours" and waited(r) < 200
             assert r.headers["Retry-After"] == str(6 * 3600)
-            assert svc.health()["rest"]["bulk_refused_until"] == "2026-10-27T16:00:00+05:30"
+            sixteen = round(ff.ist(2026, 10, 27, 16, 0) * 1000)  # epoch ms (X3)
+            assert svc.health()["rest"]["bulk_refused_until_ms"] == sixteen
             assert fake.rest_calls == []  # never held, never sent
             for priority in ("repair", "interactive"):  # market hours are theirs
                 assert (await ask(http, INTRADAY, priority=priority)).status_code == 200
             now[0] = ff.ist(2026, 10, 27, 16, 0)
             assert (await ask(http, DAYS, priority="bulk")).status_code == 200
-            assert svc.health()["rest"]["bulk_refused_until"] is None
+            assert svc.health()["rest"]["bulk_refused_until_ms"] is None
             # A bulk call still waiting for a place when market hours begin is refused then.
             now[0] = ff.ist(2026, 10, 28, 8, 29, 59)
             held = Held(fake)
@@ -551,7 +552,9 @@ def test_a_429_stops_that_api_for_every_client_then_halves_its_rates(feed_env, m
             r = await ask(http, LTP, "sudarshan-portfolio")
             assert (r.status_code, r.json()) == (429, TOO_MANY)  # Upstox's answer, passed on
             ltp = svc.health()["rest"]["apis"]["ltp"]
-            assert ltp["frozen_until"] and ltp["half_rate_until"] and ltp["429s"] == 1
+            frozen_ms, half_ms = ltp["frozen_until_ms"], ltp["half_rate_until_ms"]  # epoch ms
+            assert 450 <= frozen_ms - EVENING * 1000 <= 600 and abs(half_ms - frozen_ms - 2500) <= 1
+            assert ltp["429s"] == 1
             assert ltp["clients"]["sudarshan-portfolio"]["429s"] == 1
             other, same = await asyncio.gather(
                 ask(http, OHLC, "sudarshan-alerts"), ask(http, LTP, "sudarshan-alerts")
@@ -566,7 +569,9 @@ def test_a_429_stops_that_api_for_every_client_then_halves_its_rates(feed_env, m
             got = await asyncio.gather(*(ask(http, LTP, "sudarshan-portfolio") for _ in range(2)))
             assert all(waited(r) < 500 for r in got)  # full rate again
             ltp = svc.health()["rest"]["apis"]["ltp"]
-            assert (ltp["frozen_until"], ltp["half_rate_until"], ltp["calls"]) == (None, None, 6)
+            assert (ltp["frozen_until_ms"], ltp["half_rate_until_ms"], ltp["calls"]) == (
+                None, None, 6,
+            )  # fmt: skip
 
     asyncio.run(scenario())
 
@@ -594,7 +599,7 @@ def test_udapi10005_in_any_answer_stops_the_api_and_a_call_that_cannot_wait_is_t
             assert (await ask(http, OHLC)).status_code == 400
             assert (await ask(http, OHLC)).status_code == 200  # never stopped
             apis = svc.health()["rest"]["apis"]
-            assert apis["full-quote"]["frozen_until"] and apis["ohlc"]["frozen_until"] is None
+            assert apis["full-quote"]["frozen_until_ms"] and apis["ohlc"]["frozen_until_ms"] is None
             quote = apis["full-quote"]["clients"]
             assert quote["sudarshan-portfolio"]["429s"] == 1
             assert quote["sudarshan-screener"] == {"calls": 0, "waits": 0, "refusals": 1, "429s": 0}
@@ -628,7 +633,7 @@ def test_a_401_stops_every_api_until_the_token_file_changes(feed_env, caplog):
                 r = await ask(http, path, "sudarshan-portfolio")
                 assert (r.status_code, r.headers["Retry-After"]) == (503, "60")
             assert len(fake.rest_calls) == sent  # nothing more went to Upstox
-            assert svc.health()["rest"]["token_refused_since"] == "2026-10-27T20:00:00+05:30"
+            assert svc.health()["rest"]["token_refused_since_ms"] == round(EVENING * 1000)
             held.open()
             assert {r.status_code for r in await asyncio.gather(*holders[1:])} == {200}
             # The owner puts the new token in the file: the next call goes, with it.
@@ -636,12 +641,92 @@ def test_a_401_stops_every_api_until_the_token_file_changes(feed_env, caplog):
             bump(svc.cfg.token_file, new_token + "\n")
             r = await ask(http, LTP)
             assert r.status_code == 200 and fake.rest_calls[-1][1] == f"Bearer {new_token}"
-            assert svc.health()["rest"]["token_refused_since"] is None
+            assert svc.health()["rest"]["token_refused_since_ms"] is None
         told = [r.getMessage() for r in caplog.records if r.name == "sudarshan.feed.rest"]
         assert len([m for m in told if "refused the Analytics Token" in m]) == 1
         assert "the token file changed: Upstox requests through the governor resume" in told
 
     asyncio.run(scenario())
+
+
+def test_a_401_for_the_token_just_replaced_stops_nothing(feed_env, caplog):
+    """Review L1: calls sent with the old token can come back 401 after the owner has put the
+    new one in the file. That 401 says nothing about the new token, so nothing stops and the
+    waiting call goes with the new one."""
+    caplog.set_level(logging.INFO, logger="sudarshan.feed")
+    new_token = "the-next-analytics-token-9876543210"
+
+    async def revoked(path: str):  # Upstox refuses the old token on the calls that carried it
+        return (401, ff.token_error(), {}) if "ltp" in path else await ff.rest_ok(path)
+
+    async def scenario():
+        async with running(feed_env) as (svc, fake, http):
+            held = Held(fake)
+            holders = [asyncio.create_task(ask(http, f"{LTP[:-4]}{n:04d}")) for n in range(4)]
+            try:
+                await ff.wait_until(lambda: len(held.arrived) == 4)
+                queued = asyncio.create_task(ask(http, OHLC, "sudarshan-alerts"))
+                await ff.wait_until(lambda: svc.rest.health()["waiting"] == 1)
+                fake.token = new_token  # the owner replaces the token while 4 calls are out
+                bump(svc.cfg.token_file, new_token + "\n")
+                held.answer = revoked
+            finally:
+                held.open()
+            old = [r.status_code for r in await asyncio.gather(*holders)]
+            r = await queued
+            return old, r, fake.rest_calls[-1], svc.health()["rest"]["token_refused_since_ms"]
+
+    old, r, last, refused_since = asyncio.run(scenario())
+    assert old == [401] * 4  # Upstox's answers, passed on
+    assert r.status_code == 200 and last == (OHLC, f"Bearer {new_token}")
+    assert refused_since is None
+    assert caplog.text.count("for the token the file held before is ignored") == 4
+
+
+def test_each_api_keeps_its_own_failure_line_in_the_journal(feed_env, caplog):
+    """Review L3: one log throttle for every API let one API's failure hide another's for five
+    minutes; within one API the throttle still holds."""
+    caplog.set_level(logging.WARNING, logger="sudarshan.feed")
+
+    async def scenario():
+        async with running(feed_env) as (svc, fake, http):
+            fake._server.close()  # Upstox cannot be reached
+            return [(await ask(http, path)).status_code for path in (CHAIN, LTP, CHAIN)]
+
+    assert asyncio.run(scenario()) == [502] * 3
+    told = [r.getMessage().split(" failed")[0] for r in caplog.records if "REST:" in r.getMessage()]
+    assert told == ["REST: option-chain", "REST: ltp"]
+
+
+PROTOCOL_WORDS = ("X-Sudarshan", "header", "query", "path", "parameter", "instrument", "expiry",
+                  "interval", "GET", "HTTP", "V2", "V3", "/v", "400", "403")  # fmt: skip
+
+
+def test_a_callers_mistake_reads_as_a_fault_in_sudarshan_never_in_protocol_terms(feed_env, caplog):
+    """Review L10: the owner may read these sentences on a screen. A caller's mistake (an
+    unknown service, a request off the list, a malformed one) is SUDARSHAN's own fault, said in
+    plain words; what was wrong goes to the DEBUG log for whoever fixes the caller."""
+    caplog.set_level(logging.DEBUG, logger="sudarshan.feed.rest")
+
+    async def scenario():
+        async with running(feed_env) as (svc, fake, http):
+            bodies = [
+                (await raw(svc, "/upstox" + asked))[1].partition(b"\r\n\r\n")[2]
+                for asked, _ in REFUSED
+            ]
+            for r in (ask(http, LTP, method="POST"), ask(http, LTP, client="sudarshan-feed"),
+                      ask(http, LTP, priority="urgent")):  # fmt: skip
+                bodies.append((await r).content)
+            return {json.loads(body)["error"] for body in bodies}
+
+    sentences = asyncio.run(scenario())
+    assert sentences == {rest.NOT_ALLOWED, rest.UNKNOWN_CLIENT, rest.BAD_REQUEST}
+    for sentence in sentences:
+        assert sentence.endswith(rest.FAULT)
+        assert [word for word in PROTOCOL_WORDS if word in sentence] == [], sentence
+    for detail in ("ltp takes exactly: instrument_key", "X-Sudarshan-Priority is none of",
+                   "X-Sudarshan-Client is none of", "a method other than GET"):  # fmt: skip
+        assert detail in caplog.text
 
 
 def test_the_token_and_queries_never_reach_the_logs_or_health(feed_env, caplog):
@@ -692,20 +777,20 @@ def test_the_counters_outlive_a_restart_so_a_week_of_429s_can_be_read(
             assert (await ask(http, OHLC, "sudarshan-alerts")).status_code == 200
             await ff.wait_until(kept.exists)  # saved while running, not only at a stop
             assert (await ask(http, OHLC, "sudarshan-alerts")).status_code == 200  # saved at stop
-            since = svc.health()["rest"]["counted_since"]
-        assert since == "2026-10-27T20:00:00+05:30"
+            since = svc.health()["rest"]["counted_since_ms"]
+        assert since == round(EVENING * 1000)
         async with running(feed_env, [EVENING + 86400]) as (svc, fake, http):  # the next day
             rest_health = svc.health()["rest"]
-            assert rest_health["counted_since"] == since
+            assert rest_health["counted_since_ms"] == since
             assert (ltp_of(svc)["429s"], ltp_of(svc)["calls"]) == (1, 1)
             assert ltp_of(svc)["clients"]["sudarshan-portfolio"]["429s"] == 1
             assert rest_health["apis"]["ohlc"]["clients"]["sudarshan-alerts"]["calls"] == 2
-            assert ltp_of(svc)["frozen_until"] is None  # a stop of 60 s is over by the next day
+            assert ltp_of(svc)["frozen_until_ms"] is None  # a 60 s stop is over the next day
             assert (await ask(http, LTP, "sudarshan-portfolio")).status_code == 200
             assert ltp_of(svc)["calls"] == 2  # counting goes on
         kept.write_text("{damaged")
         async with running(feed_env, [EVENING + 2 * 86400]) as (svc, fake, http):
-            assert svc.health()["rest"]["counted_since"] == "2026-10-29T20:00:00+05:30"  # afresh
+            assert svc.health()["rest"]["counted_since_ms"] == round((EVENING + 2 * 86400) * 1000)
             assert ltp_of(svc)["calls"] == 0 and ltp_of(svc)["clients"] == {}
         assert "REST counters in" in caplog.text and "counting afresh" in caplog.text
 
@@ -743,7 +828,7 @@ def test_a_restart_keeps_every_window_and_any_stop_so_no_share_is_granted_twice(
                 await ask(http, QUOTES, "sudarshan-screener"),  # full quotes still stopped
                 await ask(http, LTP, "sudarshan-screener"),  # its own windows: free
             ]
-            frozen = svc.health()["rest"]["apis"]["full-quote"]["frozen_until"]
+            frozen = svc.health()["rest"]["apis"]["full-quote"]["frozen_until_ms"]
             sent = list(fake.rest_calls)
         now[0] += 31 * 60  # half an hour on: every window, the stop and the half rate are over
         async with running(feed_env, now) as (svc, fake, http):

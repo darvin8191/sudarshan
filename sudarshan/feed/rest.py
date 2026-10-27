@@ -27,8 +27,10 @@ rules G1-G8 (27 Oct 2026):
   a body over 8 MiB is 502.
 - G6: every answer carries X-Sudarshan-Waited-Ms. The governor's own answers are JSON
   {"error": sentence} with X-Sudarshan-Reason and, for a 503, Retry-After; the sentences are
-  written for the owner, who may read them on a screen. /health shows calls, waits, refusals and
-  429s per API and client, never a URL, a query or the token; $STATE_DIR/rest_counts.json keeps
+  written for the owner, who may read them on a screen, so a caller's mistake reads as a fault in
+  SUDARSHAN and its detail goes to the DEBUG log (L10). /health shows calls, waits, refusals and
+  429s per API and client (instants in epoch ms, cross-design X3), never a URL, a query or the
+  token; $STATE_DIR/rest_counts.json keeps
   them across restarts, so a week of 429s can be read (whether TRINETRA's own calls meet ours).
 - M2 (review, 28 Oct): the same file keeps every send of the last 30 minutes and any stop or half
   rate, so a restart (a deploy, or Restart=always after a crash) never grants a share twice.
@@ -106,22 +108,27 @@ TOO_LARGE = (
     "fewer instruments."
 )
 NO_ANSWER = "Upstox could not be reached or did not answer in time; try again in a minute."
+# L10: a caller's mistake is SUDARSHAN's own; the owner has nothing to change. What was wrong
+# goes to the DEBUG log (Refused.detail), never into the sentence.
+FAULT = "This is a fault in SUDARSHAN itself; nothing in your settings needs changing."
 NOT_ALLOWED = (
-    "The price feed passes only Upstox's market-data reads: historical and intraday candles V3, "
-    "full quotes, LTP and OHLC V3, and the option chain."
+    f"The price feed passes only market-data requests to Upstox, and this was not one. {FAULT}"
 )
-UNKNOWN_CLIENT = (
-    "X-Sudarshan-Client must be sudarshan-screener, sudarshan-portfolio or sudarshan-alerts."
-)
-BAD_PRIORITY = "X-Sudarshan-Priority must be repair, interactive or bulk."
+UNKNOWN_CLIENT = f"The price feed did not recognise which part of SUDARSHAN was asking. {FAULT}"
+BAD_REQUEST = f"The price feed could not read this request for Upstox. {FAULT}"
 
 
 class Refused(Exception):
-    """The governor's own answer: HTTP status, X-Sudarshan-Reason, sentence, Retry-After."""
+    """The governor's own answer: HTTP status, X-Sudarshan-Reason, sentence, Retry-After, and
+    for a caller's mistake what was wrong (the DEBUG log's, never the answer's)."""
 
-    def __init__(self, status: int, reason: str, sentence: str, retry_after: float | None = None):
+    def __init__(
+        self, status: int, reason: str, sentence: str, retry_after: float | None = None,
+        detail: str | None = None,
+    ):  # fmt: skip
         super().__init__(sentence)
         self.status, self.reason, self.retry_after = status, reason, retry_after
+        self.detail = detail
 
 
 # ---- G2: what passes, in one canonical spelling ------------------------------------------------
@@ -145,6 +152,8 @@ class Route(NamedTuple):
 _KEY, _N, _DAY = "(?P<key>[^/]+)", "[1-9][0-9]{0,2}", "[0-9]{4}-[0-9]{2}-[0-9]{2}"
 _ANY_KEYS, _ONE_KEY = _keys(MAX_KEYS), _keys(1)
 _INTERVAL = re.compile(r"1d|I1|I30").fullmatch
+# Upstox's option-chain page: "Accepts either a date in YYYY-MM-DD format or a relative expiry
+# keyword" (current_week, next_week, far_week, current_month, next_month, far_month).
 _EXPIRY = re.compile(rf"{_DAY}|(?:current|next|far)_(?:week|month)").fullmatch
 #: G2's allow-list, each line one page under upstox.com/developer/api-documentation/:
 #: v3/get-intra-day-candle-data, v3/get-historical-candle-data, get-full-market-quote-v3,
@@ -168,23 +177,25 @@ def resolve(path: str, query: str) -> tuple[str, str]:
         if match := re.fullmatch(route.path, path):
             break
     else:
-        raise Refused(403, "not-allowed", NOT_ALLOWED)
+        raise Refused(403, "not-allowed", NOT_ALLOWED, detail="not a market-data read on the list")
     if "key" in match.re.groupindex:  # one segment, sent percent-encoded whatever came in
         key = unquote(match["key"])
         if not KEY_RE.fullmatch(key) or "/" in key or "\\" in key:
-            raise Refused(400, "bad-request", "The path must carry one Upstox instrument key.")
+            raise Refused(400, "bad-request", BAD_REQUEST, detail="the path's key is no key")
         path = path[: match.start("key")] + quote(key, safe="") + path[match.end("key") :]
     try:
         pairs = parse_qsl(query, keep_blank_values=True, strict_parsing=True) if query else []
     except ValueError:
-        raise Refused(400, "bad-request", "The query is not well formed.") from None
+        raise Refused(400, "bad-request", BAD_REQUEST, detail="query not well formed") from None
     given, names = dict(pairs), [name for name, _ in route.params]
     if len(given) != len(pairs) or sorted(given) != sorted(names):
         wanted = ", ".join(names) or "no query"
-        raise Refused(400, "bad-request", f"This Upstox call takes exactly: {wanted}.")
+        raise Refused(
+            400, "bad-request", BAD_REQUEST, detail=f"{route.api} takes exactly: {wanted}"
+        )
     for name, valid in route.params:
         if not valid(given[name]):
-            raise Refused(400, "bad-request", f"{name} is not valid for this Upstox call.")
+            raise Refused(400, "bad-request", BAD_REQUEST, detail=f"{route.api}: {name} not valid")
     if names:
         path += "?" + "&".join(f"{name}={quote(given[name], safe='')}" for name in names)
     return route.api, path
@@ -327,12 +338,14 @@ class RestGovernor:
 
     def _check(self, method: str, url: SplitResult, client: str, headers) -> tuple[str, str, int]:
         if client not in CEILINGS:
-            raise Refused(403, "client", UNKNOWN_CLIENT)
+            detail = "X-Sudarshan-Client is none of " + ", ".join(CEILINGS)
+            raise Refused(403, "client", UNKNOWN_CLIENT, detail=detail)
         if method != "GET":
-            raise Refused(403, "not-allowed", NOT_ALLOWED)
+            raise Refused(403, "not-allowed", NOT_ALLOWED, detail="a method other than GET")
         priority = headers.get(PRIORITY_HEADER, "").strip().lower()
         if priority not in PRIORITIES:
-            raise Refused(400, "bad-request", BAD_PRIORITY)
+            detail = "X-Sudarshan-Priority is none of " + ", ".join(PRIORITIES)
+            raise Refused(400, "bad-request", BAD_REQUEST, detail=detail)
         api, target = resolve(url.path[len(PREFIX) :], url.query)
         return api, target, PRIORITIES.index(priority)
 
@@ -458,11 +471,19 @@ class RestGovernor:
             raise Refused(502, "too-large", TOO_LARGE) from None
         except (TimeoutError, httpx.HTTPError) as exc:
             what = self.service._scrub(f"{type(exc).__name__}: {exc}")
-            self.service._throttle(logging.WARNING, "rest", f"REST: {ticket.api} failed: {what}")
+            # L3: one throttle per API, so one API's failures never hide another's for 5 minutes
+            self.service._throttle(
+                logging.WARNING, f"rest-{ticket.api}", f"REST: {ticket.api} failed: {what}"
+            )
             timed_out = isinstance(exc, TimeoutError | httpx.TimeoutException)
             raise Refused(504 if timed_out else 502, "no-answer", NO_ANSWER) from None
         if status == 401:
-            self._token_refused(stamp, ticket.api)
+            if stamp == self.service._token_mtime():
+                self._token_refused(stamp, ticket.api)
+            else:  # L1: refused the token the file held before; the one there now is untried
+                log.info(
+                    "REST: a 401 on %s for the token the file held before is ignored", ticket.api
+                )
         elif status == 429 or (status >= 400 and RATE_LIMITED.search(body)):
             self._freeze(ticket)
         log.debug("REST %s %s: %d, %d bytes, waited %d ms",
@@ -505,7 +526,8 @@ class RestGovernor:
                    "X-Sudarshan-Waited-Ms": str(elapsed if waited is None else waited)}  # fmt: skip
         if refused.retry_after is not None:
             headers["Retry-After"] = str(max(1, math.ceil(refused.retry_after)))
-        log.debug("REST %s %s: %d %s", client or "-", api or "-", refused.status, refused.reason)
+        log.debug("REST %s %s: %d %s%s", client or "-", api or "-", refused.status, refused.reason,
+                  f" ({refused.detail})" if refused.detail else "")  # fmt: skip
         return refused.status, {"error": str(refused)}, headers
 
     # ---- service hooks -------------------------------------------------------------------------
@@ -650,29 +672,31 @@ class RestGovernor:
         return since
 
     def health(self) -> dict:
-        """G6: per API and client, never a URL, a query or the token."""
+        """G6: per API and client, never a URL, a query or the token; instants in epoch ms (X3)."""
         now, wall = time.monotonic(), self.service.clock()
 
-        def until(t: float) -> str | None:
-            return iso(wall + t - now) if t > now else None
+        def ms(at: float | None) -> int | None:
+            return None if at is None else round(at * 1000)
+
+        def until(t: float) -> int | None:
+            return ms(wall + t - now) if t > now else None
 
         apis = {}
         for name, api in self.apis.items():
             totals = {key: sum(count[key] for count in api.counts.values()) for key in COUNTS}
             clients = {c: dict(n) for c, n in api.counts.items() if any(n.values())}
             apis[name] = totals | {
-                "frozen_until": until(api.frozen_until),
-                "half_rate_until": until(api.half_until),
+                "frozen_until_ms": until(api.frozen_until),
+                "half_rate_until_ms": until(api.half_until),
                 "clients": clients,
             }
-        bulk_end = self.hours.end_of(wall)
         return {
             "enabled": self.enabled,
-            "counted_since": iso(self.since),  # counts run on across restarts (rest_counts.json)
+            "counted_since_ms": ms(self.since),  # counts run on across restarts (rest_counts.json)
             "in_flight": self._in_flight,
             "waiting": len(self._waiting),
-            "bulk_refused_until": iso(bulk_end) if bulk_end else None,
-            "token_refused_since": iso(self._refused_since),
+            "bulk_refused_until_ms": ms(self.hours.end_of(wall)),
+            "token_refused_since_ms": ms(self._refused_since),
             "not_allowed": self._not_allowed,
             "apis": apis,
         }
