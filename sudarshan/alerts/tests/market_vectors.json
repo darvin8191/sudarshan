@@ -18,7 +18,9 @@
     "A vector with 'auction': true is on a stock that closes by auction (a CAS key, cross-design",
     "X6): its continuous session ends at 15:15 until 6 Dec 2026 (15:30 from 7 Dec), its quotes are",
     "not judged after that, and its auction's print (from then to 15:35, 15:40 from 7 Dec) is told",
-    "as such; it is the official close, the close of the day's last candle on the cash grid.",
+    "as such; it is the official close, the close of the day's last candle on the cash grid. A",
+    "frame is the print only when its volume (vtt) rose against the key's last frame (X6i): the",
+    "auction book's frames, one a minute from 15:20 at the last continuous price, are no trades.",
     "Words: a fire's golden texts, the app's title and detail and the Telegram line; prices in a",
     "fire are text and the times IST on the defaults' day."
   ],
@@ -1472,7 +1474,10 @@
       "says": "a stock that closes by auction crosses 100 only in the auction: told as the auction's",
       "auction": true,
       "alert": {"params": {"op": "crosses_above", "level": "100"}},
-      "steps": [{"at": "15:14:00", "ltp": 99.95}, {"at": "15:31:10", "ltp": 100.2, "check": "ok"}],
+      "steps": [
+        {"at": "15:14:00", "ltp": 99.95, "vtt": 1000},
+        {"at": "15:31:10", "ltp": 100.2, "vtt": 3000, "check": "ok"}
+      ],
       "fires": [{"at": "15:31:10", "value": "100.20", "auction": true}],
       "status": "stopped"
     },
@@ -1492,7 +1497,7 @@
       "says": "a stock that closes by auction: a trade stamped 15:16 is not continuous trading",
       "auction": true,
       "alert": {"params": {"op": "crosses_above", "level": "100"}, "frequency": "every_time"},
-      "steps": [{"at": "15:14:00", "ltp": 99.95}, {"at": "15:16:00", "ltp": 100.1}],
+      "steps": [{"at": "15:14:00", "ltp": 99.95, "vtt": 1000}, {"at": "15:16:00", "ltp": 100.1, "vtt": 1500}],
       "fires": [{"at": "15:16:00", "auction": true}]
     },
     {
@@ -1501,8 +1506,8 @@
       "auction": true,
       "alert": {"kind": "day_break", "params": {"side": "high", "after": "09:30"}},
       "steps": [
-        {"at": "15:14:00", "ltp": 101.0, "high": 101.0},
-        {"at": "15:31:10", "ltp": 102.0, "high": 102.0, "check": "auction"}
+        {"at": "15:14:00", "ltp": 101.0, "high": 101.0, "vtt": 1000},
+        {"at": "15:31:10", "ltp": 102.0, "high": 102.0, "vtt": 3000, "check": "auction"}
       ],
       "fires": []
     },
@@ -1512,10 +1517,10 @@
       "auction": true,
       "alert": {"params": {"op": "at_or_above", "level": "100"}, "frequency": "at_close", "candle": 15},
       "steps": [
-        {"at": "15:10:00", "ltp": 99.0},
+        {"at": "15:10:00", "ltp": 99.0, "vtt": 1000},
         {"at": "15:15:05", "clock": true},
         {"at": "15:30:06", "clock": true},
-        {"at": "15:31:10", "ltp": 100.2, "check": "ok"},
+        {"at": "15:31:10", "ltp": 100.2, "vtt": 3000, "check": "ok"},
         {"at": "15:35:06", "clock": true}
       ],
       "fires": [
@@ -1527,7 +1532,10 @@
       "says": "a % move made only in the closing auction says so",
       "auction": true,
       "alert": {"kind": "move", "params": {"base": "close", "direction": "up", "percent": "2"}},
-      "steps": [{"at": "15:14:00", "ltp": 101.0, "cp": 100.0}, {"at": "15:31:10", "ltp": 102.1, "cp": 100.0}],
+      "steps": [
+        {"at": "15:14:00", "ltp": 101.0, "cp": 100.0, "vtt": 1000},
+        {"at": "15:31:10", "ltp": 102.1, "cp": 100.0, "vtt": 3000}
+      ],
       "fires": [{"at": "15:31:10", "value": "102.10", "base": "100.00", "auction": true}]
     },
     {
@@ -1537,9 +1545,9 @@
       "auction": true,
       "alert": {"params": {"op": "crosses_above", "level": "100"}, "frequency": "every_time"},
       "steps": [
-        {"at": "15:29:00", "ltp": 99.95},
-        {"at": "15:29:30", "ltp": 99.9},
-        {"at": "15:39:40", "ltp": 100.2}
+        {"at": "15:29:00", "ltp": 99.95, "vtt": 1000},
+        {"at": "15:29:30", "ltp": 99.9, "vtt": 1100},
+        {"at": "15:39:40", "ltp": 100.2, "vtt": 3000}
       ],
       "fires": [{"at": "15:39:40", "auction": true}]
     },
@@ -1599,9 +1607,9 @@
       "auction": true,
       "alert": {"params": {"op": "crosses_above", "level": "100"}, "frequency": "every_time"},
       "steps": [
-        {"at": "15:14:00", "ltp": 99.95},
-        {"at": "15:35:01", "ltp": 100.2, "check": "outside_hours"},
-        {"at": "15:35:00", "recv": "15:35:06", "ltp": 100.3, "ltq": 7, "check": "outside_hours"}
+        {"at": "15:14:00", "ltp": 99.95, "vtt": 1000},
+        {"at": "15:35:01", "ltp": 100.2, "vtt": 2000, "check": "outside_hours"},
+        {"at": "15:35:00", "recv": "15:35:06", "ltp": 100.3, "ltq": 7, "vtt": 3000, "check": "outside_hours"}
       ],
       "fires": []
     },
@@ -1611,9 +1619,9 @@
       "auction": true,
       "alert": {"params": {"op": "at_or_above", "level": "100"}, "frequency": "every_time", "cooldown_s": 60},
       "steps": [
-        {"at": "15:14:00", "ltp": 99.95},
-        {"at": "15:31:10", "ltp": 100.2, "check": "ok"},
-        {"at": "15:33:20", "ltp": 100.2, "ltq": 9, "check": "nothing_new"}
+        {"at": "15:14:00", "ltp": 99.95, "vtt": 1000},
+        {"at": "15:31:10", "ltp": 100.2, "vtt": 3000, "check": "ok"},
+        {"at": "15:33:20", "ltp": 100.2, "ltq": 9, "vtt": 3100, "check": "nothing_new"}
       ],
       "fires": [{"at": "15:31:10", "auction": true}]
     },
@@ -1623,8 +1631,8 @@
       "auction": true,
       "alert": {"params": {"op": "at_or_above", "level": "100"}, "frequency": "per_candle", "candle": 15},
       "steps": [
-        {"at": "15:14:00", "ltp": 100.05},
-        {"at": "15:31:10", "ltp": 100.2}
+        {"at": "15:14:00", "ltp": 100.05, "vtt": 1000},
+        {"at": "15:31:10", "ltp": 100.2, "vtt": 3000}
       ],
       "fires": [{"at": "15:14:00", "candle": 23}, {"at": "15:31:10", "candle": 24, "auction": true}]
     },
@@ -1634,12 +1642,102 @@
       "auction": true,
       "alert": {"params": {"op": "crosses_above", "level": "100"}, "frequency": "at_close", "candle": "day"},
       "steps": [
-        {"day": "2026-10-19", "at": "15:14:00", "ltp": 99.5},
-        {"day": "2026-10-19", "at": "15:31:00", "ltp": 99.6},
-        {"at": "15:14:00", "ltp": 99.9},
-        {"at": "15:32:00", "ltp": 100.4}
+        {"day": "2026-10-19", "at": "15:14:00", "ltp": 99.5, "vtt": 1000},
+        {"day": "2026-10-19", "at": "15:31:00", "ltp": 99.6, "vtt": 3000},
+        {"at": "15:14:00", "ltp": 99.9, "vtt": 500},
+        {"at": "15:32:00", "ltp": 100.4, "vtt": 2500}
       ],
       "fires": [{"at": "15:32:00", "trade_time": "15:32:00", "value": "100.40", "candle": 0, "auction": true}]
+    },
+    {
+      "id": "AU16",
+      "says": "27 Oct 2026, RELIANCE: the auction book's frames, one a minute at the last price, are no trades; the print at 15:28:09.183 is judged as it arrives",
+      "day": "2026-10-27",
+      "instrument": "reliance",
+      "auction": true,
+      "alert": {"params": {"op": "crosses_below", "level": "1200"}, "frequency": "every_time"},
+      "steps": [
+        {"at": "15:14:59.942", "ltp": 1202.1, "vtt": 11064086, "check": "ok"},
+        {"at": "15:20:00", "ltp": 1202.1, "vtt": 11064086, "bid": 1233.7, "ask": 1161.9, "check": "not_a_trade"},
+        {"at": "15:21:00", "ltp": 1202.1, "vtt": 11064086, "bid": 1233.7, "ask": 1161.9, "check": "not_a_trade"},
+        {"at": "15:22:00", "ltp": 1202.1, "vtt": 11064086, "bid": 1233.7, "ask": 1161.9, "check": "not_a_trade"},
+        {"at": "15:23:00", "ltp": 1202.1, "vtt": 11064086, "bid": 1233.7, "ask": 1161.9, "check": "not_a_trade"},
+        {"at": "15:24:00", "ltp": 1202.1, "vtt": 11064086, "bid": 1233.7, "ask": 1161.9, "check": "not_a_trade"},
+        {"at": "15:25:00", "ltp": 1202.1, "vtt": 11064086, "bid": 1233.7, "ask": 1161.9, "check": "not_a_trade"},
+        {"at": "15:26:00", "ltp": 1202.1, "vtt": 11064086, "bid": 1233.7, "ask": 1161.9, "check": "not_a_trade"},
+        {"at": "15:27:00", "ltp": 1202.1, "vtt": 11064086, "bid": 1233.7, "ask": 1161.9, "check": "not_a_trade"},
+        {"at": "15:28:09.845", "ltt": "15:28:09.183", "ltp": 1196.2, "vtt": 13064086, "check": "ok"}
+      ],
+      "fires": [{"at": "15:28:09.845", "trade_time": "15:28:09.183", "value": "1196.20", "auction": true}]
+    },
+    {
+      "id": "AU17",
+      "says": "27 Oct 2026, SBIN at the 15-min close: the book's frames leave the last candle alone; the print at 15:28:09.205 closes it",
+      "day": "2026-10-27",
+      "auction": true,
+      "alert": {"params": {"op": "at_or_below", "level": "950"}, "frequency": "at_close", "candle": 15},
+      "steps": [
+        {"at": "15:14:59.950", "ltp": 953.0, "vtt": 25000000},
+        {"at": "15:15:05", "clock": true},
+        {"at": "15:20:00", "ltp": 953.0, "vtt": 25000000, "bid": 980.95, "ask": 923.85, "check": "not_a_trade"},
+        {"at": "15:21:00", "ltp": 953.0, "vtt": 25000000, "bid": 980.95, "ask": 923.85, "check": "not_a_trade"},
+        {"at": "15:22:00", "ltp": 953.0, "vtt": 25000000, "bid": 980.95, "ask": 923.85, "check": "not_a_trade"},
+        {"at": "15:23:00", "ltp": 953.0, "vtt": 25000000, "bid": 980.95, "ask": 923.85, "check": "not_a_trade"},
+        {"at": "15:24:00", "ltp": 953.0, "vtt": 25000000, "bid": 980.95, "ask": 923.85, "check": "not_a_trade"},
+        {"at": "15:25:00", "ltp": 953.0, "vtt": 25000000, "bid": 980.95, "ask": 923.85, "check": "not_a_trade"},
+        {"at": "15:26:00", "ltp": 953.0, "vtt": 25000000, "bid": 980.95, "ask": 923.85, "check": "not_a_trade"},
+        {"at": "15:27:00", "ltp": 953.0, "vtt": 25000000, "bid": 980.95, "ask": 923.85, "check": "not_a_trade"},
+        {"at": "15:28:09.900", "ltt": "15:28:09.205", "ltp": 945.1, "vtt": 26000000, "check": "ok"},
+        {"at": "15:35:06", "clock": true}
+      ],
+      "fires": [{"at": "15:28:09.900", "trade_time": "15:28:09.205", "value": "945.10", "candle": 24, "auction": true}]
+    },
+    {
+      "id": "AU18",
+      "says": "the 27 Oct shape on a stock without derivatives: no auction print; its 15:28:09 trade is an ordinary one of its session to 15:30",
+      "day": "2026-10-27",
+      "instrument": "reliance",
+      "alert": {"params": {"op": "crosses_below", "level": "1200"}, "frequency": "every_time"},
+      "steps": [
+        {"at": "15:14:59.942", "ltp": 1202.1, "vtt": 11064086},
+        {"at": "15:20:00", "ltp": 1202.1, "vtt": 11064086, "bid": 1233.7, "ask": 1161.9},
+        {"at": "15:28:09.845", "ltt": "15:28:09.183", "ltp": 1196.2, "vtt": 13064086, "check": "ok"},
+        {"at": "15:31:09", "ltp": 1195.0, "vtt": 13100000, "check": "outside_hours"}
+      ],
+      "fires": [{"at": "15:28:09.845", "trade_time": "15:28:09.183", "value": "1196.20", "auction": false}]
+    },
+    {
+      "id": "AU19",
+      "says": "a print-time frame with no volume before it (market alerts started in the auction) is not taken for the print",
+      "day": "2026-10-27",
+      "auction": true,
+      "alert": {"params": {"op": "at_or_below", "level": "950"}, "frequency": "every_time", "cooldown_s": 60},
+      "steps": [
+        {"at": "15:28:09.900", "ltt": "15:28:09.205", "ltp": 945.1, "vtt": 26000000, "check": "not_a_trade"},
+        {"at": "15:35:06", "clock": true}
+      ],
+      "fires": []
+    },
+    {
+      "id": "AU20",
+      "says": "without a volume (the last price only), no frame is taken for the print",
+      "auction": true,
+      "alert": {"params": {"op": "crosses_above", "level": "100"}, "frequency": "every_time"},
+      "steps": [{"at": "15:14:00", "ltp": 99.95}, {"at": "15:31:10", "ltp": 100.2, "check": "not_a_trade"}],
+      "fires": []
+    },
+    {
+      "id": "AU21",
+      "says": "an index has no auction window (X6k): NIFTY 50 settles with the prints, and a value after 15:30 is not judged",
+      "day": "2026-10-27",
+      "instrument": "nifty",
+      "alert": {"params": {"op": "crosses_above", "level": "22750"}, "frequency": "every_time"},
+      "steps": [
+        {"at": "15:28:09.535", "ltp": 22749.75},
+        {"at": "15:31:00", "ltp": 22749.75, "check": "outside_hours"},
+        {"at": "15:39:59", "ltp": 22751.0, "check": "outside_hours"}
+      ],
+      "fires": []
     }
   ],
   "calendar": {"holidays": ["2026-10-20", "2026-11-10"], "windows": {"2026-11-08": "14:05-15:40"}},

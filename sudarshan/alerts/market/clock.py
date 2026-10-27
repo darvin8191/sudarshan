@@ -25,7 +25,10 @@ The auction's print is no trade of that session: ``auction`` lets it through on 
 (cross-design X6c: made from the continuous end up to ``Session.auction_until``, 15:35, arrived
 within the 5 s grace after it, on a healthy feed, fresh, whatever the exchange's status then
 says), so a crossing it alone makes is told as the closing auction's, never as an ordinary trade.
-Until the print, the page says so (``status``: CLOSING_AUCTION), never "Real-time" or "Stale".
+Only a trade can be the print: the Book passes a frame here only when its volume rose (X6i); the
+auction book's frames of one a minute are not. The window comes from the clock alone, never from
+the exchange's status, which does not show the auction (X6l). Until the print, the page says so
+(``status``: CLOSING_AUCTION, "price at about 15:30"), never "Real-time" or "Stale".
 
 A pause is a stretch longer than GAP_S in which market alerts were not checking: the price feed
 reconnecting, or the service not running. A crossing first seen after one may have happened
