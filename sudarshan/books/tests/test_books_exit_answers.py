@@ -342,6 +342,37 @@ def test_a_close_all_that_sent_some_exits_is_not_a_plain_refusal(monkeypatch):
     success, body, code = _close_all(monkeypatch, [busy, placed])
     assert (success, code) == (False, 429)
     assert body["not_confirmed"] is True
+    refused, sent = body["positions"]
+    assert (refused["outcome"], sent["outcome"]) == ("not_sent", "sent")
+    assert refused["reason"] == (
+        "Upstox allows only a limited number of orders per minute and its turn was too far away, "
+        "so its exit was not sent. Exit it again."
+    )
+
+
+def test_the_app_s_exit_all_passes_on_what_became_of_each_position(client, monkeypatch):
+    """The phone settles each row by it (frontend/src/sudarshan/books/sent.ts)."""
+    import services.close_position_service as close_service
+
+    monkeypatch.setattr(close_service, "get_analyze_mode", lambda: False)
+    monkeypatch.setattr(upstox, "get_positions", lambda auth: _book_of(("NSE_EQ|1", 10, "I")))
+    monkeypatch.setattr(upstox, "get_symbol", lambda token, exchange: "SBIN")
+    monkeypatch.setattr(upstox, "place_order_api", lambda data, auth: PLACED)
+    response = client.post("/close_all_positions", json={})
+    assert response.status_code == 200
+    assert response.get_json() == {
+        "status": "success",
+        "message": "All Open Positions Squared Off",
+        "positions": [
+            {
+                "exchange": "NSE",
+                "symbol": "SBIN",
+                "product": "MIS",
+                "outcome": "sent",
+                "orderids": [PLACED[2]],
+            }
+        ],
+    }
 
 
 def test_a_close_all_that_sent_nothing_stays_a_refusal(monkeypatch):

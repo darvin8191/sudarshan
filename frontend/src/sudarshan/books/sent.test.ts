@@ -22,6 +22,8 @@ import {
   sendHeld,
   sentMarksNow,
   settleSends,
+  TOLD_MS,
+  toldOf,
 } from './sent'
 
 const ID = 'NFO:NIFTY27OCT2625900CE:MIS'
@@ -502,6 +504,29 @@ describe('a send that sent nothing', () => {
     ranOut()
     settleSends(beginSends('exit', false, [LONG]), 'sent')
     expect(exit()?.previous).toBeUndefined()
+  })
+})
+
+describe('a send of several that says what became of each row', () => {
+  it('settles each row by its own answer, and says why of one that sent nothing, for a while', () => {
+    const PUT = { id: 'NFO:BANKNIFTY27OCT2657500PE:NRML', was: -30 }
+    const batch = beginSends('exit', false, [LONG, PUT])
+    const each = {
+      [ID]: { outcome: 'sent' as const, orderids: ['251020000611111'] },
+      [PUT.id]: { outcome: 'refused' as const, reason: 'An order is working to close it.' },
+    }
+    settleSends(batch, 'unconfirmed', Date.now(), null, each)
+    expect(exit()?.state).toBe('sent')
+    expect(exit()?.orders?.map((order) => order.id)).toEqual(['251020000611111'])
+    expect(exitMark(sentMarksNow(), false, PUT.id)).toBeUndefined()
+    const told = (now = Date.now()) =>
+      toldOf(
+        new Map([[`live:exit:${PUT.id}`, { text: 'old', at: now - TOLD_MS }]]),
+        false,
+        PUT.id,
+        now
+      )
+    expect(told()).toBeNull() // a reason as old as TOLD_MS is not shown, whatever is kept
   })
 })
 

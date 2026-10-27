@@ -1224,6 +1224,19 @@ describe('u: Exit all says what became of each position', () => {
     expect(card()).not.toHaveTextContent(CALL_LATE)
     expect(card()).toHaveTextContent('Exit sent')
     expect(putCard()).toHaveTextContent(PUT_STOP)
+
+    // A tap the app refuses lets go too, and what Exit all said of that row does not come back.
+    api.closePosition.mockRejectedValueOnce(refusal(400, 'Market is closed'))
+    await tap.click(putCard())
+    await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: /^Exit/ }))
+    await tap.click(
+      within(screen.getByRole('dialog', { name: 'Exit BANKNIFTY 57500 PE?' })).getByRole('button', {
+        name: 'Exit',
+      })
+    )
+    await settle()
+    expect(toast.error).toHaveBeenLastCalledWith('Market is closed', 'positions')
+    expect(putCard()).not.toHaveTextContent(PUT_STOP)
   })
 
   it('a success names each position’s orders: each is held by its own', async () => {
@@ -1246,6 +1259,35 @@ describe('u: Exit all says what became of each position', () => {
     await pass(16_000)
     expect(card()).toHaveTextContent('Exit order open')
     expect(putCard()).not.toHaveTextContent('Exit')
+  })
+
+  it('a success pins each position to its own order: a stop moved on its side holds nothing', async () => {
+    const tap = user()
+    api.closeAllPositions.mockResolvedValueOnce({
+      status: 'success',
+      message: 'All Open Positions Squared Off',
+      positions: each(
+        { outcome: 'sent', orderids: [EXIT_ORDER.orderid] },
+        { outcome: 'sent', orderids: ['251020000622222'] }
+      ),
+    })
+    const { push } = await open(LONG, PUT)
+    await exitAllTap(tap)
+    push({ ...EXIT_ORDER, order_status: 'complete' })
+    const stopLoss = {
+      ...EXIT_ORDER,
+      orderid: '251020000699001',
+      pricetype: 'SL-M',
+      order_status: 'trigger pending',
+    }
+    push(stopLoss)
+    api.getOrders.mockResolvedValue(
+      orderBook({ ...EXIT_ORDER, order_status: 'complete' }, stopLoss)
+    )
+    await pass(16_000)
+    await pass(31_000)
+    expect(card()).not.toHaveTextContent('Exit order open')
+    expect(await exitOffered(tap)).toBe(true)
   })
 
   it('one not confirmed holds as not confirmed, the other as sent', async () => {

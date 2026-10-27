@@ -301,6 +301,17 @@ def test_s16_an_exit_all_that_runs_out_of_time_says_which_it_did_not_send(world,
         "Upstox was slow to answer, so Exit all stopped after 0.5 s and sent nothing for "
         "BANKNIFTY 57500 PE and SBIN. Check Positions, then send Exit all again."
     ) in body["message"]
+    late = (
+        "Upstox was slow to answer, so Exit all stopped before sending an exit for it. Exit it "
+        "again."
+    )
+    assert [
+        (each["symbol"], each["outcome"], each.get("reason")) for each in body["positions"]
+    ] == [
+        (X, "sent", None),
+        (Y, "not_sent", late),
+        (Z, "not_sent", late),
+    ]
     world.broker.hang.clear()
     world.api_exit_all()  # sent again: the first one's exit is on its way, the rest go now
     assert [world.broker.true_qty(s) for s in (X, Y, Z)] == [0, 0, 0]

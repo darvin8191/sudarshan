@@ -184,6 +184,34 @@ def test_a_position_is_named_as_the_phone_names_it(position, name):
     assert exit_guard.trader_name(position) == name
 
 
+def test_a_working_order_is_named_with_what_to_do_and_the_rest_counted():
+    """The second review's MEDIUM-3: which order holds the position back, and the next step."""
+    from sudarshan.books.exit_guard import WorkingOrder, order_working
+
+    held = ("NFO", "NIFTY27OCT2625900CE", "MIS")
+    stop = WorkingOrder("SELL", 65, "SL-M", 97.0, 98.5, "251027000123456", "10:42:20")
+    assert order_working(held, [stop], 65) == (
+        "NIFTY 25900 CE has a SELL 65 SL-M order (trigger 98.50, order ending 3456, placed "
+        "10:42:20) working to close it, so no exit was sent for it. Cancel it in Orders, then exit."
+    )  # a stop-market order's price is not its own: not said
+    target = WorkingOrder("SELL", 30, "LIMIT", 180.0, 0.0, "251027000123457", "")
+    part = WorkingOrder("SELL", 20, "SL", 97.0, 98.5, "251027000123458", "10:42:21")
+    assert order_working(held, [target, part], 65) == (
+        "NIFTY 25900 CE has a SELL 30 LIMIT order (price 180.00, order ending 3457) and 1 more "
+        "order working to close 50 of the 65 held, so no exit was sent for any of it. Cancel them "
+        "in Orders, then exit."
+    )
+    assert order_working(held, [target, part, stop], 65).endswith(
+        "and 2 more orders working to close it, so no exit was sent for it. Cancel them in "
+        "Orders, then exit."
+    )
+    bare = WorkingOrder("BUY", 0)  # an order book that said little
+    assert order_working(("NSE", "SBIN", "MIS"), [bare], 10) == (
+        "SBIN has a BUY order working to close it, so no exit was sent for it. Cancel it in "
+        "Orders, then exit."
+    )
+
+
 @pytest.fixture
 def server_zone(monkeypatch):
     """Set the process's own time zone, as a server kept on UTC (or anywhere) has it."""
