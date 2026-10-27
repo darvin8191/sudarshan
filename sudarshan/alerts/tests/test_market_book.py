@@ -8,6 +8,7 @@ from datetime import date, datetime
 from sudarshan.alerts.market import clock, sessions, spec
 from sudarshan.alerts.market.book import BAD_VALUE, NOTHING_NEW, Book
 from sudarshan.alerts.market.engine import State
+from sudarshan.alerts.market.engine import resume as engine_resume
 from sudarshan.autologin.schedule import IST
 
 DAY = date(2026, 10, 21)
@@ -191,3 +192,14 @@ def test_a_retired_alert_waits_for_nothing():
     assert book.waiting(2) == "waiting_close"
     book.put(dataclasses.replace(move, status="paused"))
     assert book.waiting(2) is None
+
+
+def test_a_snapshot_from_yesterday_never_takes_a_resumed_alert_back_a_day():
+    book = Book()
+    book.put(alert())
+    book.on_tick(tick(99.95), T0, market(T0))
+    book.put(alert(), engine_resume(book.state(1)))  # resumed today: no side, today's session
+    # The trading day before (19 Oct: the 20th is a holiday), which a fixed level may seed from.
+    yesterday = {"key": KEY, "ltp": 99.0, "ltt": T0 - 2 * 86_400_000, "ts_recv": T0}
+    assert not book.seed(1, yesterday, market(T0))
+    assert book.state(1).session == 20261021 and book.state(1).side is None

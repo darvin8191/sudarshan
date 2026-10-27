@@ -1190,6 +1190,45 @@
         {"at": "10:16:00", "ltp": 100.1, "atp": 100.0}
       ],
       "fires": [{"at": "10:00:01", "direction": "up"}, {"at": "10:16:00", "direction": "up"}]
+    },
+    {
+      "id": "B8",
+      "says": "at the day's close: judged 2 s after the session ends, against yesterday's close",
+      "alert": {"params": {"op": "crosses_above", "level": "100"}, "frequency": "at_close", "candle": "day"},
+      "steps": [
+        {"at": "15:20:00", "ltp": 99.95},
+        {"at": "15:30:02", "clock": true},
+        {"day": "2026-10-22", "at": "15:00:00", "ltp": 100.05},
+        {"day": "2026-10-22", "at": "15:30:01.999", "clock": true},
+        {"day": "2026-10-22", "at": "15:30:02", "clock": true}
+      ],
+      "fires": [{"at": "15:30:02", "day": "2026-10-22", "trade_time": "15:00:00", "candle": 0}]
+    },
+    {
+      "id": "D12",
+      "says": "new highs on both sides of a pause: the one after it is marked",
+      "alert": {"kind": "day_break", "params": {"side": "high"}, "frequency": "every_time"},
+      "steps": [
+        {"at": "09:31:00", "ltp": 101.0, "high": 101.0},
+        {"at": "09:32:00", "ltp": 101.05, "high": 101.05},
+        {"pause": ["09:32:10", "09:33:00"]},
+        {"at": "09:33:05", "ltp": 101.1, "high": 101.1}
+      ],
+      "fires": [
+        {"at": "09:32:00", "found_later": null},
+        {"at": "09:33:05", "found_later": ["09:32:10", "09:33:00"]}
+      ]
+    },
+    {
+      "id": "D13",
+      "says": "an equal low is not a break either",
+      "alert": {"kind": "day_break", "params": {"side": "low"}},
+      "steps": [
+        {"at": "09:31:00", "ltp": 99.0, "low": 99.0},
+        {"at": "09:32:00", "ltp": 99.0, "low": 99.0},
+        {"at": "09:33:00", "ltp": 98.95, "low": 98.95}
+      ],
+      "fires": [{"at": "09:33:00", "base": "99.00", "direction": "down"}]
     }
   ],
   "calendar": {"holidays": ["2026-10-20", "2026-11-10"], "windows": {"2026-11-08": "14:05-15:40"}},
@@ -1332,6 +1371,34 @@
       "at": "10:00:00",
       "status_of": "NSE_EQ",
       "status": "NORMAL_CLOSE",
+      "check": "ok"
+    },
+    {
+      "id": "GT27",
+      "says": "a value judged 5 s after it arrived is still fresh",
+      "at": "10:00:00",
+      "now": "10:00:05",
+      "check": "ok"
+    },
+    {
+      "id": "GT28",
+      "says": "feed health 12 s old is still heard",
+      "at": "10:00:00",
+      "feed": {"age_s": 12},
+      "check": "ok"
+    },
+    {
+      "id": "GT29",
+      "says": "a quote arriving at the cash close is outside",
+      "quote": true,
+      "at": "15:30:00",
+      "check": "outside_hours"
+    },
+    {
+      "id": "GT30",
+      "says": "a quote a moment before the close is inside",
+      "quote": true,
+      "at": "15:29:59.999",
       "check": "ok"
     }
   ],
