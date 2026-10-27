@@ -2,16 +2,18 @@
  * Words for a stock's closing auction (cross-design X6e), one source for every screen.
  *
  * Since 3 Aug 2026 (NSE/CMTR/75479) a stock with derivatives stops continuous
- * trading at 15:15 and closes by auction: orders 15:20-15:30, matched
- * 15:30-15:35. Until its auction's price comes, its last price is not
- * "Real-time" and not "Stale": it is waiting for the auction. The price that
- * comes is the closing auction price, and the stock's close for the day is the
- * auction close.
+ * trading at 15:15 and closes by auction: orders from 15:20, a random close in
+ * 15:28-15:30, and the price at once (27 Oct 2026: every stock at 15:28:09).
+ * Until its auction's price comes, its last price is not "Real-time" and not
+ * "Stale": it is waiting for the auction. The price that comes is the closing
+ * auction price, and the stock's close for the day is the auction close.
  *
  * The phone never computes sessions. Every row the server sends for such a
- * stock carries `auction_from` and `auction_until` (epoch ms, from
- * sudarshan/alerts/market/sessions.py); these words take them as they come.
- * The Python side says the same in sudarshan/alerts/market/words.py.
+ * stock carries `auction_from`, `auction_close` and `auction_until` (epoch ms,
+ * from sudarshan/alerts/market/sessions.py): continuous trading ends at
+ * `auction_from`, the price is expected about `auction_close`, and it may come
+ * until `auction_until`. These words take them as they come. The Python side
+ * says the same in sudarshan/alerts/market/words.py.
  */
 
 const IST_MINUTE = new Intl.DateTimeFormat('en-IN', {
@@ -21,7 +23,7 @@ const IST_MINUTE = new Intl.DateTimeFormat('en-IN', {
   hourCycle: 'h23',
 })
 
-/** "15:35": a moment as the clock in India shows it, to the minute. */
+/** "15:30": a moment as the clock in India shows it, to the minute. */
 function istMinute(at: number): string {
   return IST_MINUTE.format(at)
 }
@@ -32,9 +34,9 @@ export const AUCTION_PRICE = 'closing auction price'
 /** A stock's close for the day when it closes by auction. */
 export const AUCTION_CLOSE = 'auction close'
 
-/** From the end of continuous trading until the print: "Closing auction · price at about 15:35". */
-export function auctionWaiting(auctionUntil: number): string {
-  return `Closing auction · price at about ${istMinute(auctionUntil)}`
+/** From the end of continuous trading until the print: "Closing auction · price at about 15:30". */
+export function auctionWaiting(auctionClose: number): string {
+  return `Closing auction · price at about ${istMinute(auctionClose)}`
 }
 
 /** An alert on the bid or ask after continuous trading ends: the book is the auction's. */

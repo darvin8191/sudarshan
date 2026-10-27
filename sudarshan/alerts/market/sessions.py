@@ -5,7 +5,8 @@ Continuous trading in IST on a trading day, the end not included, in two regimes
     from 3 Aug 2026 (SEBI's closing auction, NSE/CMTR/73362 and 75479):
       NSE_EQ, BSE_EQ, NSE_INDEX, BSE_INDEX           09:15-15:30
       a stock with derivatives ("closes by auction")  09:15-15:15, then the closing auction:
-                                                      orders 15:20-15:30, matched 15:30-15:35
+                                                      orders from 15:20, a random close in
+                                                      15:28-15:30, the price at once
       NSE_FO, BSE_FO                                 09:15-15:40
     from 7 Dec 2026 (SEBI HO/47/11/11(3)2025-MRD-POD2/I/23843/2026 of 15 Oct 2026):
       cash, every stock, and indices                 09:15-15:30; every stock's auction
@@ -16,13 +17,17 @@ Continuous trading in IST on a trading day, the end not included, in two regimes
 A stock that closes by auction (a CAS key, cross-design X6) has its own session, key
 ``NSE_EQ+auction`` (``auction=True``): its continuous trading ends 15 minutes before the cash
 close, and after that its quotes are the auction's order book, never judged. The auction's print
-is no trade of that session: it may come from the continuous end until the auction is matched
-(``Session.auction_until``: the cash close plus 5 minutes, 15:35; from 7 Dec 2026 the auction's
-end, 15:40), and clock.auction judges it on its own terms. It is the official close: it belongs
-to the day's last candle on the cash session's grid (the 15:29 minute, the 15:15-15:30 candle,
-the day). Which stocks close by auction is the runtime's to say each morning
-(``closes_by_auction``: a stock with futures in the master contract; from 7 Dec 2026 every stock).
-Trades of the post-close session (15:50-16:00, at the closing price) are refused by the gate.
+is no trade of that session: it may come from the continuous end until ``Session.auction_until``
+(the cash close plus 5 minutes, 15:35; from 7 Dec 2026 the auction's end, 15:40), and
+clock.auction judges it on its own terms. The price is expected at ``Session.auction_close``, the
+auction's random close (the owner's probe of 27 Oct 2026, X6j: every stock printed at 15:28:09, so
+"price at about 15:30"; from 7 Dec 2026 the auction's end, 15:40, until a circular says
+otherwise). It is the official close: it belongs to the day's last candle on the cash session's
+grid (the 15:29 minute, the 15:15-15:30 candle, the day). Which stocks close by auction is the
+runtime's to say each morning (``closes_by_auction``: a stock with futures in the master
+contract; from 7 Dec 2026 every stock). Indices have no auction window (X6k): their value settles
+with the prints and their session ends with the cash close. Trades of the post-close session
+(15:50-16:00, at the closing price) are refused by the gate.
 
 It decides when a value is inside the session (the gate), where the last candle of a day ends,
 what "today" means for a % move or a day high, when a contract's alerts stop on its expiry day
@@ -82,14 +87,16 @@ class Regime:
     index_expiry_end: int
     #: The auction's print may come until this many minutes after the cash close.
     print_after_cash: int
+    #: The auction's price is expected this many minutes after the cash close (X6j).
+    close_after_cash: int
     #: Every cash stock closes by auction, not only those with derivatives.
     every_stock: bool
 
 
 #: Each regime from its first day; the first one also covers earlier days.
 REGIMES: tuple[Regime, ...] = (
-    Regime(date(2026, 8, 3), (555, 930), (555, 915), (555, 940), 940, 5, False),
-    Regime(date(2026, 12, 7), (555, 930), (555, 930), (555, 945), 930, 10, True),
+    Regime(date(2026, 8, 3), (555, 930), (555, 915), (555, 940), 940, 5, 0, False),
+    Regime(date(2026, 12, 7), (555, 930), (555, 930), (555, 945), 930, 10, 10, True),
 )
 #: Underlyings of index derivatives: an OpenAlgo derivative symbol starts with one, then DDMMMYY.
 INDEX_UNDERLYINGS = ("NIFTYNXT50", "MIDCPNIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX50", "BANKEX",
@@ -106,6 +113,8 @@ class Session:
     end: int
     #: A stock that closes by auction: its print may come from ``end`` up to this (epoch ms).
     auction_until: int | None = None
+    #: ... and is expected about this moment, its auction's random close (epoch ms, X6j).
+    auction_close: int | None = None
 
 
 def segment_of(instrument_key: str) -> str:
@@ -180,9 +189,10 @@ def session(
     start, end = epoch_ms(day, span[0]), epoch_ms(day, span[1])
     if not (auction and segment in AUCTION_SEGMENTS):
         return Session(segment, day_key(day), start, end)
-    cash = hours(segment, window, day=day)
-    until = epoch_ms(day, cash[1] + _regime(day).print_after_cash)
-    return Session(segment + AUCTION, day_key(day), start, end, until)
+    cash, regime = hours(segment, window, day=day), _regime(day)
+    until = epoch_ms(day, cash[1] + regime.print_after_cash)
+    close = epoch_ms(day, cash[1] + regime.close_after_cash)
+    return Session(segment + AUCTION, day_key(day), start, end, until, close)
 
 
 def sessions_of(
@@ -219,6 +229,16 @@ def auction_window(
     if found is None or found.auction_until is None:
         return None
     return found.end, found.auction_until
+
+
+def auction_close(
+    segment: str, day: date, *, trading_day: bool, window: tuple[int, int] | None = None
+) -> int | None:
+    """When a CAS key's closing auction price is expected on ``day`` (epoch ms): the auction's
+    random close (15:30; from 7 Dec 2026 15:40). Rows for such a key carry it beside the window
+    (``auction_close``) for the words "price at about 15:30" (X6j)."""
+    found = session(segment, day, trading_day=trading_day, window=window, auction=True)
+    return None if found is None else found.auction_close
 
 
 def index_derivative(symbol: str) -> bool:
