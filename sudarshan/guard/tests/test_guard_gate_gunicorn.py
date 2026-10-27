@@ -52,6 +52,8 @@ APP = textwrap.dedent(
             return list(BOOK["rows"])
         def instrument_token(self, symbol, exchange):
             return "NSE_FO|" + symbol
+        def lot_size(self, symbol, exchange):
+            return 65.0
 
     gate.GATE = gate.Gate(store=store.RiskStore(os.environ["SUDARSHAN_RISK_DB"]), read=Book())
     gate.GATE.set_state(KillSwitchState())
@@ -88,6 +90,23 @@ APP = textwrap.dedent(
         state = KillSwitchState(on=True, since=datetime.now(UTC), running=True)
         outcome, _state, tokens = gate.GATE.turn_on(state)
         return jsonify(outcome=outcome, in_flight=len(tokens))
+
+    @app.route("/limits", methods=["POST"])
+    def limits():
+        gate.GATE._the_store().save_settings("test", **request.get_json())
+        return jsonify(ok=True)
+
+    @app.route("/basket", methods=["POST"])
+    def basket():
+        from sudarshan.guard import words
+        orders = request.get_json()["orders"]
+        found = gate.GATE.check_together([gate._upstox_place(o, "token") for o in orders])
+        if found is not None:
+            index, decision = found
+            said = words.together_refused("basket", index + 1, decision.words)
+            return jsonify(status="error", message=said), 403
+        answers = [slow_place(o, "token")[0].status for o in orders]
+        return jsonify(status="success", answers=answers)
 
     @app.route("/calls")
     def calls():
@@ -336,3 +355,27 @@ def test_turning_the_switch_on_keeps_the_worker_answering_and_refuses_a_new_orde
     assert drain["detail"] == {"sent": 1, "waiting": 0}
     assert took > 1.5  # it waited for that order, not for its ten seconds
     assert sent["result"][0] == 200
+
+
+def test_a_basket_over_the_cap_sends_nothing_and_the_worker_keeps_answering(server):
+    """The basket is held to the size limit whole before any order is sent (M20.7): refused at
+    once, nothing started, while an order already on its way keeps going and /ping answers."""
+    assert server.post("/limits", {"size_on": True, "max_lots_fo": 2})[0] == 200
+    sending, sent = _in_background(server.post, "/place", {**ENTRY, "hold": 3})
+    time.sleep(0.4)
+    hedge = {"orders": [ENTRY, {**ENTRY, "symbol": "PE", "quantity": "195"}]}
+    status, body, took = server.post("/basket", hedge)
+    assert status == 403 and body["message"].startswith("Nothing in this basket was sent")
+    assert "Order 2: This order is 3 lots" in body["message"]
+    assert took < 1.0, f"the refusal waited {took:.2f}s"
+    for _ in range(3):
+        started = time.monotonic()
+        assert server.get("/ping")[0] == 200
+        assert time.monotonic() - started < 1.0
+    assert json.loads(server.get("/calls")[1])["started"] == 1  # only the order on its way
+    sending.join(15)
+    assert sent["result"][0] == 200
+    within = {"orders": [ENTRY, {**ENTRY, "symbol": "PE", "quantity": "130"}]}
+    status, body, _took = server.post("/basket", within)
+    assert status == 200 and body["answers"] == [200, 200]
+    assert json.loads(server.get("/calls")[1])["started"] == 3

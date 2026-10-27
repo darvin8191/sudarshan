@@ -24,6 +24,7 @@ from services.option_symbol_service import (
 )
 from services.place_order_service import place_order
 from services.quotes_service import get_quotes
+from sudarshan.guard import batch as risk_batch  # SUDARSHAN M20.7: legs held whole
 from utils.broker_backpressure import BrokerBusyError
 from utils.event_bus import bus
 from utils.logging import get_logger
@@ -608,6 +609,13 @@ def process_multiorder_with_auth(
             logger.info(f"Using single LTP fetch for all legs: {underlying_ltp}")
         else:
             logger.warning(f"Failed to fetch underlying LTP: {error_msg}. Will retry per leg.")
+
+    # SUDARSHAN M20.7: every leg held to the owner's limits before any is sent (sudarshan/guard)
+    held = risk_batch.multi_leg(
+        multiorder_data, common_data, auth_token, api_key, underlying_ltp, original_data
+    )
+    if held:
+        return held
 
     # Check if any leg has splitsize > 0 (requires delay between orders)
     has_split_orders = any(leg.get("splitsize", 0) > 0 for _, leg in buy_legs + sell_legs)

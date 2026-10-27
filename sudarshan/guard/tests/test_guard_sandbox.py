@@ -164,10 +164,12 @@ def test_a_sandbox_exit_goes_and_closes_the_position(sandbox):
 def test_the_sandbox_s_own_exits_and_square_off_pass(sandbox):
     from sandbox.position_manager import PositionManager
 
-    assert _place("BUY", 10)[0]
+    placed = _place("BUY", 10)
+    assert placed[0], placed
     sandbox.set_state(ON)
     ok, body, status = PositionManager(USER).close_position("SBIN", "NSE", "MIS")
-    assert ok, body
+    # Failed once in seven full runs, not reproduced since: say everything if it fails again.
+    assert ok, (status, body, sandbox.last_problem(), _position())
     assert _position() == 0
 
 

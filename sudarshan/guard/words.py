@@ -576,6 +576,62 @@ def checks_not_run(pipe: str) -> str:
     )
 
 
+# -- the order size limit (M20.7, size.py) and batches held whole (batch.py) ----------------------
+
+
+def _grouped(count: float) -> str:
+    """A count the Indian way: 1,500 shares, 1,00,000 shares; a part lot as it is: 2.31 lots."""
+    if count != int(count):
+        return f"{count:g}"
+    return rupees(int(count)).removeprefix("₹")
+
+
+def _amount(unit: str, count: float) -> str:
+    one = "lot" if unit == "lots" else "share"
+    return f"{_grouped(count)} {one if count == 1 else unit}"
+
+
+def size_refused(excess, verdict: rules.Verdict, *, position: tuple[str, str, str], side) -> str:
+    """Why an order is refused for its size: what it adds and the owner's cap."""
+    cap = (
+        f"{_amount('lots', excess.cap)} per F&O order"
+        if excess.unit == "lots"
+        else f"{_amount('shares', excess.cap)} per cash order"
+    )
+    if verdict.reason in (rules.CROSSES, rules.ON_ITS_WAY) and verdict.room:
+        return (
+            f"This order would close {trader_name(position)} and open "
+            f"{_amount(excess.unit, excess.amount)} the other way; your limit is {cap} (Settings > "
+            f"Risk). To exit, {_verb(side)} {verdict.room}. Nothing was sent."
+        )
+    return (
+        f"This order is {_amount(excess.unit, excess.amount)} of {trader_name(position)}; your "
+        f"limit is {cap} (Settings > Risk). Check the quantity. Nothing was sent."
+    )
+
+
+#: The size limit could not be checked for an order, which went (the audit and the Risk page).
+SIZE_NOT_CHECKED = (
+    "Order size not checked for one order: its lot size could not be read from the master "
+    "contract. The order went."
+)
+
+
+def together_refused(what: str, part: int | None, said: str) -> str:
+    """Why a whole batch is refused: one part is over a limit, and nothing of it was sent, so no
+    part of a hedge goes without the others; a split, as the one order it was asked as."""
+    reason = said.removesuffix(" Nothing was sent.")
+    if what == "split":
+        return (
+            "Nothing of this split order was sent: it is held to your limits as the one order it "
+            f"is. {reason}"
+        )
+    where, name = ("this basket", "Order") if what == "basket" else ("this multi-leg order", "Leg")
+    return (
+        f"Nothing in {where} was sent, so no part goes without the others. {name} {part}: {reason}"
+    )
+
+
 #: Every fixed sentence, for the tests that scan them.
 FIXED = (
     RESUME_HOW,
@@ -625,4 +681,5 @@ FIXED = (
     SETTINGS_CHANGED_MEANWHILE,
     SETTINGS_NOT_SAVED,
     BAND_NOT_CHECKED,
+    SIZE_NOT_CHECKED,
 )

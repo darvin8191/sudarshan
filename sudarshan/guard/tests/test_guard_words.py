@@ -11,7 +11,7 @@ import re
 
 import pytest
 
-from sudarshan.guard import band, rules, words
+from sudarshan.guard import band, rules, size, words
 
 POSITION = ("NFO", "NIFTY27OCT2625900CE", "MIS")
 SINCE = "10:42"
@@ -53,6 +53,29 @@ def every_sentence() -> list[str]:
     out += kill_switch_sentences()
     out += daily_sentences()
     out += band_sentences()
+    out += size_sentences()
+    return out
+
+
+def size_sentences() -> list[str]:
+    out = []
+    excesses = [("lots", 3, 2), ("lots", 2.31, 2), ("lots", 2, 1), ("shares", 1500, 1000),
+                ("shares", 100001, 100000)]  # fmt: skip
+    for unit, amount, cap in excesses:
+        for reason, room in ((rules.OPENS, 0), (rules.ADDS, 0), (rules.CROSSES, 65),
+                             (rules.ON_ITS_WAY, 0)):  # fmt: skip
+            for side in (rules.BUY, rules.SELL):
+                out.append(
+                    words.size_refused(
+                        size.Excess(unit, amount, cap),
+                        _verdict(reason, room),
+                        position=POSITION,
+                        side=side,
+                    )
+                )
+    leg = out[0]
+    for what, part in (("basket", 2), ("multi_leg", 1), ("split", None)):
+        out.append(words.together_refused(what, part, leg))
     return out
 
 

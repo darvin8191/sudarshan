@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from database.auth_db import get_auth_token_broker
 from database.settings_db import get_analyze_mode
 from events import AnalyzerErrorEvent, BasketCompletedEvent, OrderFailedEvent
+from sudarshan.guard import batch as risk_batch  # SUDARSHAN M20.7: a basket held whole
 from utils.broker_backpressure import BrokerBusyError
 from utils.constants import (
     REQUIRED_ORDER_FIELDS,
@@ -199,6 +200,11 @@ def process_basket_order_with_auth(
         basket_request_data.pop("apikey", None)
 
     api_key = basket_data.get("apikey")
+
+    # SUDARSHAN M20.7: held to the owner's limits whole before any order is sent (sudarshan/guard)
+    held = risk_batch.basket(basket_data, auth_token, original_data)
+    if held:
+        return held
 
     # If in analyze mode, route each order to sandbox
     if get_analyze_mode():

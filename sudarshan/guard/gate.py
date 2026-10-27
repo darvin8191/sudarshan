@@ -41,6 +41,11 @@ Upstox's quote for it (kept a second) only when the book shows the order adding 
 refuses a price too far on the aggressive side. Exits and MARKET orders are never held to it; no
 quote lets the order go, noted, with the exchange's own price check still behind it.
 
+The order size limit (M20.7, size.py) holds the part of an order that adds risk to the owner's
+cap, in lots on a derivatives exchange (the lot size read in step 2 from the master contract)
+and in shares in cash. A batch (batch.py) is held to the band and the size limit whole before
+any part of it is sent (check_together).
+
 The lock is a real one from utils.real_threading, held for dict work only: correct under the
 eventlet worker (no I/O, no logging and no wait inside it, so the hub never stalls on it), under
 gthread's real threads, and on the development server.
@@ -63,7 +68,7 @@ from utils.broker_backpressure import BusyResponse
 from utils.logging import get_logger
 from utils.thread_safe_cache import LockedTTLCache
 
-from . import band, daily, flag, readers, rules, words
+from . import band, daily, flag, readers, rules, size, words
 from . import store as risk_store
 from .store import IST, KillSwitchState
 
@@ -106,6 +111,7 @@ GUARD_UNAVAILABLE = "GUARD_UNAVAILABLE"
 GUARD_ERROR = "GUARD_ERROR"
 DAILY_LOSS_LIMIT = "DAILY_LOSS_LIMIT"
 PRICE_BAND = "PRICE_BAND"
+SIZE_LIMIT = "SIZE_LIMIT"
 
 PLACE, MODIFY, GTT_PLACE, GTT_MODIFY = "place", "modify", "gtt_place", "gtt_modify"
 _UNREAD = object()
@@ -226,9 +232,16 @@ class _Guards:
             return None
         return band.band_for(band.segment_of(order.symbol, order.exchange), settings)
 
+    def sized(self, order: Order) -> bool:
+        """Whether the order size limit holds ``order``."""
+        settings = self.settings
+        if settings is None or not settings.size_on:
+            return False
+        return size.unit_of(order.exchange) is not None
+
     def judges(self, order: Order) -> bool:
         """Whether a guard needs ``order`` judged, beyond the kill switch."""
-        return self.daily or self.price_band(order) is not None
+        return self.daily or self.price_band(order) is not None or self.sized(order)
 
     def active(self, order: Order) -> bool:
         """Whether to read anything for ``order``: a modify's instrument and new terms are known
@@ -236,7 +249,17 @@ class _Guards:
         if self.judges(order):
             return True
         settings = self.settings
-        return settings is not None and settings.band_on and order.action == MODIFY
+        if settings is None or order.action not in (MODIFY, GTT_MODIFY):
+            return False
+        return settings.size_on or (settings.band_on and order.action == MODIFY)
+
+
+@dataclass(frozen=True)
+class _Reads:
+    """What the owner's limits read for an order adding risk: the market and the lot size."""
+
+    quote: Any = None  # band.Quote; _NO_QUOTE when the band did not need it; None: unreadable
+    lot_size: float | None = None
 
 
 @dataclass(frozen=True)
@@ -418,10 +441,10 @@ class Gate:
             if refusing is None and not guards.active(order):
                 return Decision(token=self._register(order, None, now))
         known, facts = self._facts(order, refusing)  # reads: outside the lock
-        lock, day_unread, quote = None, False, _NO_QUOTE
+        lock, day_unread, reads = None, False, _Reads(_NO_QUOTE)
         if refusing is None and not facts.pass_through and not facts.unreadable:
             lock, day_unread = self._day_facts(known, facts, guards)  # the figure, and its lock
-            quote = self._quote(known, facts, guards)  # the market, when the band needs it
+            reads = self._limit_reads(known, facts, guards)  # the market and the lot size
         with self._lock:
             now = time.monotonic()
             refusing = self._refusing()  # it may have changed while the book was read
@@ -447,7 +470,7 @@ class Gate:
                 return Decision(
                     True, words.daily_unreadable(known.pipe), GUARD_UNAVAILABLE, detail=detail
                 )
-            return self._held_to_settings(known, guards, verdict, quote, now)
+            return self._held_to_settings(known, guards, verdict, reads, now)
 
     def _refusing(self) -> _Refusing | None:
         """What refuses new risk now; call under the lock."""
@@ -710,22 +733,39 @@ class Gate:
         except Exception:
             logger.exception("Today's lock could not be told to the open screens")
 
-    def _quote(self, order: Order, facts: _Facts, guards: _Guards):
-        """The market for the band: read only when the band holds this order's price to it (a
-        stop-limit's limit is held to its own trigger) and the book shows the order adding risk.
-        An exit pays no read."""
+    def _limit_reads(
+        self, order: Order, facts: _Facts, guards: _Guards, *, adding: bool | None = None
+    ) -> _Reads:
+        """What the owner's limits need read for this order, read only when it adds risk (an
+        exit pays no read): the market for the band, unless it is a stop-limit, whose limit is
+        held to its own trigger; the lot size for a cap in lots. ``adding`` None: judged here
+        from the book."""
         terms = order.priced
-        if guards.price_band(order) is None or terms is None or terms.price_type == "SL":
-            return _NO_QUOTE
-        with self._lock:
-            verdict, _sent_at = self._judge(order, facts, time.monotonic())
-        if verdict.reducing:
-            return _NO_QUOTE
-        try:
-            return self._read.quote(order.pipe, order.owner, order.symbol, order.exchange)
-        except readers.Unreadable as exc:
-            logger.warning(f"The price band could not read the market: {exc}")
-            return None
+        banded = guards.price_band(order) is not None and terms is not None
+        banded = banded and terms.price_type != "SL"
+        in_lots = guards.sized(order) and size.unit_of(order.exchange) == size.LOTS
+        if not banded and not in_lots:
+            return _Reads(_NO_QUOTE)
+        if adding is None:
+            with self._lock:
+                verdict, _sent_at = self._judge(order, facts, time.monotonic())
+            adding = not verdict.reducing
+        if not adding:
+            return _Reads(_NO_QUOTE)
+        quote = _NO_QUOTE
+        if banded:
+            try:
+                quote = self._read.quote(order.pipe, order.owner, order.symbol, order.exchange)
+            except readers.Unreadable as exc:
+                logger.warning(f"The price band could not read the market: {exc}")
+                quote = None
+        lot_size = None
+        if in_lots:
+            try:
+                lot_size = self._read.lot_size(order.symbol, order.exchange)
+            except readers.Unreadable as exc:
+                logger.warning(f"The size limit could not read the lot size: {exc}")
+        return _Reads(quote, lot_size)
 
     def day_lock(self, pipe: str) -> risk_store.DayLock | None:
         """Today's lock for ``pipe``, if the day has locked (the status routes)."""
@@ -866,15 +906,30 @@ class Gate:
         return Decision(token=token, words=said, code=GUARD_UNAVAILABLE)
 
     def _held_to_settings(
-        self, order: Order, guards: _Guards, verdict: rules.Verdict, quote: Any, now: float
+        self, order: Order, guards: _Guards, verdict: rules.Verdict, reads: _Reads, now: float
     ) -> Decision:
         """An order adding risk, with nothing refusing new risk: the owner's own limits, each
         only when he has turned it on. Call under the lock."""
+        refusal, unchecked = self._over_limits(order, guards, verdict, reads)
+        if refusal is not None:
+            return refusal
+        token = self._register(order, verdict, now)
+        if unchecked:
+            return Decision(token=token, words=unchecked, code=GUARD_UNAVAILABLE)
+        return Decision(token=token)
+
+    def _over_limits(
+        self, order: Order, guards: _Guards, verdict: rules.Verdict, reads: _Reads
+    ) -> tuple[Decision | None, str | None]:
+        """The owner's band and size limit on an order adding risk: its refusal, or None and,
+        when a limit could not be checked, the sentence that says so. No I/O and nothing
+        recorded."""
+        unchecked = None
         held = guards.price_band(order)
         terms = order.priced
         if held is not None and terms is not None:
-            if quote is _NO_QUOTE:
-                quote = None  # judged as adding risk only now (or read under the kill switch)
+            quote = None if reads.quote is _NO_QUOTE else reads.quote  # _NO_QUOTE: judged as
+            # adding risk only now, or read while the kill switch was on
             breach = band.check(
                 order.side,
                 terms.price_type,
@@ -892,13 +947,67 @@ class Gate:
                     "away_pct": breach.away_pct,
                     "band_pct": breach.band_pct,
                 }
-                return Decision(True, words.band_refused(breach), PRICE_BAND, detail=detail)
+                return Decision(True, words.band_refused(breach), PRICE_BAND, detail=detail), None
             if terms.price_type != "SL" and (
                 quote is None or band.reference(order.side, quote) <= 0
             ):  # no market to hold it to: it goes, noted (the exchange's own check stands)
-                token = self._register(order, verdict, now)
-                return Decision(token=token, words=words.BAND_NOT_CHECKED, code=GUARD_UNAVAILABLE)
-        return Decision(token=self._register(order, verdict, now))
+                unchecked = words.BAND_NOT_CHECKED
+        if guards.sized(order):
+            adding = size.adding(verdict, order.quantity)
+            excess = size.check(order.exchange, adding, reads.lot_size, guards.settings)
+            if excess is not None:
+                detail = {"reason": verdict.reason, "adding": adding, "unit": excess.unit,
+                          "amount": excess.amount, "cap": excess.cap}  # fmt: skip
+                said = words.size_refused(excess, verdict, position=order.name, side=order.side)
+                return Decision(True, said, SIZE_LIMIT, detail=detail), None
+            if adding and size.unit_of(order.exchange) == size.LOTS and not reads.lot_size:
+                unchecked = unchecked or words.SIZE_NOT_CHECKED
+        return None, unchecked
+
+    # -- a batch, held to the owner's limits whole -------------------------------------------------
+
+    def check_together(self, orders: list[Order]) -> tuple[int, Decision] | None:
+        """The parts of a batch (batch.py) held to the owner's band and size limit before any is
+        sent: the first part over one, with the refusal a single order would get, or None.
+
+        Nothing is recorded: each part is decided again as it is sent, kill switch and daily
+        limit included. A part whose book cannot be read is left to that decision. The parts
+        are judged in order, each against the book and the exits earlier parts would send, so
+        two parts selling the same long take its room once.
+        """
+        if not orders:
+            return None
+        self._load_state()
+        guards = self._guards(orders[0])
+        settings = guards.settings
+        if settings is None or not (settings.band_on or settings.size_on):
+            return None
+        taken: dict[tuple, int] = {}  # (position, side): what earlier parts would exit
+        for index, order in enumerate(orders):
+            if guards.price_band(order) is None and not guards.sized(order):
+                continue
+            known, facts = self._facts(order, None)  # reads: outside the lock
+            if facts.unreadable or facts.pass_through:
+                continue
+            mine = (known.key, known.side)
+            with self._lock:
+                claimed, _sent_at = self._claimed(known, facts.position, time.monotonic())
+            verdict = rules.classify(
+                known.side,
+                known.quantity,
+                facts.position,
+                claimed + taken.get(mine, 0),
+                cnc_sell=known.cnc_sell,
+            )
+            if verdict.reducing:
+                taken[mine] = taken.get(mine, 0) + (known.quantity or 0)
+                continue
+            reads = self._limit_reads(known, facts, guards, adding=True)
+            refusal, _unchecked = self._over_limits(known, guards, verdict, reads)
+            if refusal is not None:
+                self._note(known.pipe, known, refusal)  # the risk history shows it
+                return index, refusal
+        return None
 
     def _unreadable(self, order: Order, refusing: _Refusing) -> Decision:
         since = None if refusing.state is None else _hhmm(refusing.state.since)

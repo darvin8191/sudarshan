@@ -239,6 +239,19 @@ def quote(pipe: str, owner: str, symbol: str, exchange: str):
     return _quotes.get_or_load(key, load)
 
 
+def lot_size(symbol: str, exchange: str) -> float | None:
+    """The instrument's lot size from the master contract (database/token_db_enhanced, its
+    in-memory cache first), or None when it is not there."""
+    from database.token_db_enhanced import get_symbol_info
+
+    try:
+        info = get_symbol_info(symbol, exchange)
+    except Exception as exc:
+        raise Unreadable(f"lot size: {type(exc).__name__}") from exc
+    lot = _number(getattr(info, "lotsize", 0)) if info is not None else 0.0
+    return lot if lot > 0 else None
+
+
 def _upstox_session_of(user: str) -> str:
     """The user's broker session, when it is Upstox's."""
     from .killswitch import owner_for
