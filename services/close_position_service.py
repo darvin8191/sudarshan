@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional, Tuple
 from database.auth_db import get_auth_token_broker
 from database.settings_db import get_analyze_mode
 from events import AnalyzerErrorEvent, PositionClosedEvent
-from sudarshan.books.exit_guard import close_all_once  # SUDARSHAN M6.9
+from sudarshan.books.exit_guard import close_all_once, open_in_book  # SUDARSHAN M6.9
 from utils.broker_backpressure import BrokerBusyError
 from utils.event_bus import bus
 from utils.logging import get_logger
@@ -141,9 +141,14 @@ def close_position_with_auth(
         # Use the dynamically imported module's function to close all positions
         api_key = position_data.get("apikey", "")
         # SUDARSHAN M6.9: one Exit all at a time, whichever surface sent it (the app, the API,
-        # TradingView, Telegram, Flow, scripts); a second answers 409 while the first is placed.
+        # TradingView, Telegram, Flow, scripts); a second answers 409 while the first is placed,
+        # and none sizes its orders from a book that does not show an exit placed just before.
         response_code, status_code = close_all_once(
-            "live", broker_module.close_all_positions, api_key, auth_token
+            "live",
+            broker_module.close_all_positions,
+            api_key,
+            auth_token,
+            still_open=open_in_book(auth_token, broker),
         )
     except BrokerBusyError as e:
         # Refused before it was sent: the broker's request queue was longer

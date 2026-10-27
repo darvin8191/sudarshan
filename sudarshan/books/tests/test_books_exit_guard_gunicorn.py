@@ -3,7 +3,8 @@
 A small Flask app carries the real claims from sudarshan/books/exit_guard.py: the app's close route
 decorated with ``one_exit_at_a_time``, and two Exit all surfaces (the app's and the API's) that pass
 through ``close_all_once`` as services/close_position_service.py does. Its broker call is a sleep,
-which under eventlet is a cooperative wait like a slow Upstox call.
+which under eventlet is a cooperative wait like a slow Upstox call. An Exit all sent with
+``shows_after`` reads a book that shows an exit placed just before it only after that many seconds.
 
 Adopted from the re-check's probe of 76462c9. The server runs in a process group of its own, and
 the teardown stops the whole group (see sudarshan/autologin/tests/test_autologin_gunicorn.py: an
@@ -42,11 +43,31 @@ APP = textwrap.dedent(
 
     app = Flask(__name__)
     closed = []  # for each Exit all that reached the broker: how many exits were being placed
+    reads = []  # each read of the book for an exit placed just before an Exit all
 
     def slow_close_all(hold):
         closed.append(len(exit_guard.EXITS._positions))
         time.sleep(hold)  # under eventlet a cooperative wait, as a slow Upstox call is
         return {"status": "success", "message": "All Open Positions SquaredOff"}, 200
+
+    def book_showing_exits_after(seconds):
+        first = []
+
+        def still_open(positions):
+            now = time.monotonic()
+            first[:] = first or [now]
+            reads.append(now)
+            return set() if now - first[0] >= seconds else set(positions)
+
+        return still_open
+
+    def exit_all():
+        hold = float(request.args.get("hold", "0"))
+        shows_after = request.args.get("shows_after")
+        still_open = book_showing_exits_after(float(shows_after)) if shows_after else None
+        return answered(
+            exit_guard.close_all_once("live", slow_close_all, hold, still_open=still_open)
+        )
 
     def answered(body_and_code):
         body, code = body_and_code
@@ -59,6 +80,10 @@ APP = textwrap.dedent(
     @app.route("/claims")
     def claims():
         return jsonify(held=len(exit_guard.EXITS), pid=os.getpid(), closed=closed)
+
+    @app.route("/reads")
+    def book_reads():
+        return jsonify(reads=len(reads))
 
     @app.route("/close_position", methods=["POST"])
     @exit_guard.one_exit_at_a_time()
@@ -75,13 +100,11 @@ APP = textwrap.dedent(
 
     @app.route("/close_all_positions", methods=["POST"])  # the app's Exit all
     def close_all_positions():
-        hold = float(request.args.get("hold", "0"))
-        return answered(exit_guard.close_all_once("live", slow_close_all, hold))
+        return exit_all()
 
     @app.route("/api/v1/closeposition", methods=["POST"])  # TradingView, scripts, Telegram
     def api_close_position():
-        hold = float(request.args.get("hold", "0"))
-        return answered(exit_guard.close_all_once("live", slow_close_all, hold))
+        return exit_all()
     """
 )
 
@@ -304,6 +327,24 @@ def test_an_exit_all_whose_wait_runs_out_is_refused(tmp_path, worker):
         assert srv.claims() | {"pid": 0} == {"held": 0, "pid": 0, "closed": []}
     finally:
         srv.stop()
+
+
+def test_an_exit_all_reading_the_book_for_an_exit_placed_just_now_keeps_the_worker_serving(server):
+    """Upstox's book can say the old quantity for a moment after an exit: the Exit all reads it
+    until it shows the exit, keeping the book taken, and yields between the reads."""
+    assert server.post("/close_position", EXIT)[0] == 200  # placed just now
+    everything, closed = _in_background(server.post, "/api/v1/closeposition?shows_after=1.5", {})
+    time.sleep(0.5)
+    status, body, took = server.post("/close_position", OTHER)
+    assert (status, body["message"], took < 1.0) == (409, EXIT_ALL_BEING_PLACED, True), took
+    started = time.monotonic()
+    assert server.get("/ping")[0] == 200 and time.monotonic() - started < 1.0
+    everything.join(15)
+    status, body, took = closed["result"]
+    assert (status, body["status"]) == (200, "success")
+    assert took >= 1.5, f"it went after {took:.2f}s, before the book showed the exit"
+    assert json.loads(server.get("/reads")[1])["reads"] >= 2
+    assert server.claims() | {"pid": 0} == {"held": 0, "pid": 0, "closed": [0]}
 
 
 def test_two_exit_alls_from_two_surfaces_send_one(server):

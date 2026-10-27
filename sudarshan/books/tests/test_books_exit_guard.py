@@ -8,8 +8,10 @@ for the same position, or any Exit all, is still running in this process.
 
 from __future__ import annotations
 
+import re
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -20,6 +22,7 @@ from sudarshan.books.exit_guard import (
     AN_EXIT_BEING_PLACED,
     EXIT_ALL_BEING_PLACED,
     EXIT_BEING_PLACED,
+    EXIT_NOT_SHOWN_YET,
     ExitsInFlight,
 )
 
@@ -51,6 +54,7 @@ def routes(monkeypatch):
     """The live close routes, each with its own test client; the broker held until told."""
     import database.settings_db as settings_db
     import services.close_position_service as close_service
+    import services.positionbook_service as positionbook_service
     from database.latency_db import init_latency_db
 
     init_latency_db()
@@ -68,7 +72,27 @@ def routes(monkeypatch):
         "placed": [],
         "inside": 0,  # single exits inside the broker call right now
         "overlaps": [],  # how many were, each time an Exit all reached the broker
+        # The live position book's rows, or a function of how many reads there have been.
+        "book": [],
+        "book_reads": 0,
+        "reads_before_close": [],  # book reads, each time an Exit all reached the broker
     }
+
+    def get_positionbook_with_auth(auth_token, broker, original_data=None):
+        assert (auth_token, broker, original_data) == (
+            "token",
+            "upstox",
+            None,
+        )  # live, never sandbox
+        gate["book_reads"] += 1
+        book = gate["book"]
+        rows = book(gate["book_reads"]) if callable(book) else book
+        return True, {"status": "success", "data": rows}, 200
+
+    monkeypatch.setattr(
+        positionbook_service, "get_positionbook_with_auth", get_positionbook_with_auth
+    )
+    monkeypatch.setattr(exit_guard, "EXIT_SHOWS_POLL_S", 0.05)
 
     def place_smartorder_api(order_data, auth_token):
         gate["inside"] += 1
@@ -83,6 +107,7 @@ def routes(monkeypatch):
 
     def close_all_positions(api_key, auth):
         gate["overlaps"].append(gate["inside"])
+        gate["reads_before_close"].append(gate["book_reads"])
         gate["placed"].append("ALL")
         gate["entered"].set()
         assert gate["release"].wait(WAIT)
@@ -733,5 +758,185 @@ def test_an_exit_all_waits_long_enough_for_one_slow_upstox_call():
     assert (
         exit_guard.EXIT_ALL_WAITS_S >= REQUEST_TIMEOUT_SECONDS + BROKER_MAX_ORDER_QUEUE_WAIT_SECONDS
     )
-    # And not much longer: nginx gives the request 300 s, and the closes still follow the wait.
-    assert exit_guard.EXIT_ALL_WAITS_S <= 150
+    # And not much longer: nginx gives the request 300 s, and the closes still follow the waits
+    # (for the exits in flight, then for the book to show them).
+    assert exit_guard.EXIT_ALL_WAITS_S + exit_guard.EXIT_SHOWS_WITHIN_S <= 150
+
+
+# -- Exit all does not size its orders from a book that does not show an exit yet -----------------
+
+STILL_OPEN = {**EXIT, "quantity": 65}  # EXIT's row in the book until its exit shows there
+REPO = Path(__file__).resolve().parents[3]
+
+
+@pytest.mark.parametrize("surface", ["app", "api", "flow"])
+def test_an_exit_all_that_waited_for_an_exit_reads_the_book_until_it_shows_it(
+    routes, surfaces, surface
+):
+    """Upstox's book can say the old quantity for a moment after an exit, and Exit all sizes its
+    orders from that book: read then, it would close the position a second time and reverse it."""
+    routes["book"] = lambda reads: [STILL_OPEN] if reads < 3 else []  # shows it at the third read
+    single, answer = _post_in_background("/close_position", EXIT)
+    assert routes["entered"].wait(WAIT)
+    everything, result = _in_background(surfaces[surface])
+    time.sleep(0.3)
+    routes["release"].set()  # the exit is placed; the book does not show it yet
+    single.join(WAIT)
+    everything.join(WAIT)
+    assert answer["code"] == 200
+    assert result["result"][0] == 200
+    assert routes["placed"] == [EXIT["symbol"], "ALL"]
+    assert routes["reads_before_close"] == [3]  # not before the book showed the exit
+    assert len(exit_guard.EXITS) == 0
+
+
+def test_an_exit_all_just_after_an_exit_reads_the_book_until_it_shows_it(routes, surfaces):
+    routes["release"].set()
+    routes["book"] = lambda reads: [STILL_OPEN] if reads < 2 else []
+    assert _client().post("/close_position", json=EXIT).status_code == 200
+    assert surfaces["api"]() == (200, "All Open Positions Squared Off")
+    assert routes["reads_before_close"] == [2]
+
+
+@pytest.mark.parametrize("surface", ["app", "api", "flow"])
+def test_an_exit_all_is_refused_when_the_book_does_not_show_the_exit_in_time(
+    routes, surfaces, monkeypatch, surface
+):
+    monkeypatch.setattr(exit_guard, "EXIT_SHOWS_WITHIN_S", 1.0)
+    routes["release"].set()
+    routes["book"] = [STILL_OPEN]  # a book that lags that long, or an exit rejected once placed
+    assert _client().post("/close_position", json=EXIT).status_code == 200
+    started = time.monotonic()
+    assert surfaces[surface]() == (409, EXIT_NOT_SHOWN_YET)
+    assert time.monotonic() - started >= 1.0
+    assert routes["placed"] == [EXIT["symbol"]]  # nothing more was sent
+    assert len(exit_guard.EXITS) == 0
+
+
+@pytest.mark.parametrize(
+    ("reply", "code", "reads"),
+    [
+        ((Answer(200), {"status": "success"}, "251021000000001"), 200, [1]),
+        ((Answer(503), {"status": "error", "message": "?"}, None), 503, [1]),  # may have gone
+        (
+            (Answer(400), {"status": "error", "message": "Quantity exceeds freeze limit"}, None),
+            400,
+            [0],
+        ),
+    ],
+    ids=["placed", "not confirmed", "refused"],
+)
+def test_only_an_exit_that_may_have_placed_an_order_is_looked_for_in_the_book(
+    routes, surfaces, monkeypatch, reply, code, reads
+):
+    monkeypatch.setattr(
+        orders,
+        "dynamic_import",
+        lambda broker, module, names: {
+            "place_smartorder_api": lambda order_data, auth_token: reply,
+            "get_open_position": lambda *args: "0",
+        },
+    )
+    routes["release"].set()
+    assert _client().post("/close_position", json=EXIT).status_code == code
+    assert surfaces["api"]()[0] == 200
+    assert routes["reads_before_close"] == reads
+
+
+def test_an_exit_is_noted_before_its_claim_is_let_go(routes, surfaces, monkeypatch):
+    """A waiting Exit all wakes when the exit's claim is let go. Noted only after that, the exit
+    would be missed, and the Exit all would read a book that does not show it yet."""
+    note = ExitsInFlight.placed
+
+    def slow_to_note(self, book, position):
+        time.sleep(0.3)
+        note(self, book, position)
+
+    monkeypatch.setattr(ExitsInFlight, "placed", slow_to_note)
+    routes["book"] = lambda reads: [STILL_OPEN] if reads < 2 else []
+    single, _ = _post_in_background("/close_position", EXIT)
+    assert routes["entered"].wait(WAIT)
+    everything, result = _in_background(surfaces["api"])
+    time.sleep(0.3)
+    routes["release"].set()
+    single.join(WAIT)
+    everything.join(WAIT)
+    assert result["result"][0] == 200
+    assert routes["reads_before_close"] == [2]
+
+
+def test_an_exit_counts_as_placed_just_now_for_a_while_only(monkeypatch):
+    """Nothing is kept past its time: the worker never restarts."""
+    guard = ExitsInFlight()
+    position = ("NFO", EXIT["symbol"], "MIS")
+    other = ("NFO", "BANKNIFTY27OCT2657500PE", "NRML")
+    guard.placed("live", position)
+    assert guard.placed_lately("live") == {position}
+    assert guard.placed_lately("sandbox") == set()  # the books are apart
+    monkeypatch.setattr(exit_guard, "EXIT_SHOWS_WITHIN_S", 0.05)
+    time.sleep(0.1)
+    assert guard.placed_lately("live") == set()
+    guard.placed("sandbox", position)
+    time.sleep(0.1)
+    guard.placed("sandbox", other)
+    assert {book: set(placed) for book, placed in guard._placed.items()} == {"sandbox": {other}}
+
+
+def test_the_book_is_read_live_and_a_quantity_it_cannot_read_counts_as_open(monkeypatch):
+    import services.positionbook_service as positionbook_service
+
+    calls = []
+    rows = [
+        {"symbol": EXIT["symbol"], "exchange": "NFO", "product": "MIS", "quantity": 0},
+        {
+            "symbol": "BANKNIFTY27OCT2657500PE",
+            "exchange": "nfo",
+            "product": "nrml",
+            "quantity": "-30",
+        },
+        {"symbol": "NIFTY27OCT2625800PE", "exchange": "NFO", "product": "MIS", "quantity": "?"},
+        {"symbol": "SBIN", "exchange": "NSE", "product": "CNC", "quantity": 10},  # not asked about
+    ]
+
+    def read(auth_token, broker, original_data=None):
+        calls.append((auth_token, broker, original_data))
+        return True, {"status": "success", "data": rows}, 200
+
+    monkeypatch.setattr(positionbook_service, "get_positionbook_with_auth", read)
+    still_open = exit_guard.open_in_book("token", "upstox")
+    shown = ("NFO", EXIT["symbol"], "MIS")
+    short = ("NFO", "BANKNIFTY27OCT2657500PE", "NRML")
+    unreadable = ("NFO", "NIFTY27OCT2625800PE", "MIS")
+    assert still_open({shown, short, unreadable}) == {short, unreadable}
+    assert calls == [("token", "upstox", None)]  # no request data: the live book, never the sandbox
+    monkeypatch.setattr(
+        positionbook_service,
+        "get_positionbook_with_auth",
+        lambda *args, **kwargs: (False, {"status": "error", "message": "?"}, 500),
+    )
+    assert still_open({shown}) is None
+
+
+def test_a_book_that_cannot_be_read_does_not_show_an_exit(monkeypatch):
+    monkeypatch.setattr(exit_guard, "EXIT_SHOWS_WITHIN_S", 0.2)
+    monkeypatch.setattr(exit_guard, "EXIT_SHOWS_POLL_S", 0.05)
+    position = ("NFO", EXIT["symbol"], "MIS")
+
+    def broken(positions):
+        raise RuntimeError("read broke")
+
+    assert exit_guard._shown_in_book({position}, broken) is False
+    assert exit_guard._shown_in_book({position}, lambda positions: None) is False
+    assert exit_guard._shown_in_book({position}, lambda positions: set()) is True
+    assert exit_guard._shown_in_book(set(), broken) is True  # nothing placed lately: no read
+
+
+def test_an_exit_all_gives_the_book_as_long_to_show_an_exit_as_the_phone_does():
+    sent = (REPO / "frontend/src/sudarshan/books/sent.ts").read_text(encoding="utf-8")
+    hold_ms = int(
+        re.search(r"export const SENT_HOLD_MS = ([0-9_]+)", sent).group(1).replace("_", "")
+    )
+    assert exit_guard.EXIT_SHOWS_WITHIN_S == hold_ms / 1000
+    # About one read a second: soon enough, and at most 30 broker calls, far inside Upstox's
+    # 500 a minute.
+    assert 0.5 <= exit_guard.EXIT_SHOWS_POLL_S <= 1.0
