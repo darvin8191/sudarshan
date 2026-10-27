@@ -279,7 +279,13 @@ def put_settings():
     )
     data = settings_rules.public(saved) if saved is not None else None
     return jsonify(
-        {"status": "success" if status == 200 else "error", "message": message, "data": data}
+        {
+            "status": "success" if status == 200 else "error",
+            "message": message,
+            "data": data,
+            # The page asks for the phrase and sends the same change again (M20.7).
+            "needs_phrase": message in (words.LOOSEN_NEEDS_PHRASE, words.PHRASE_WRONG),
+        }
     ), status
 
 

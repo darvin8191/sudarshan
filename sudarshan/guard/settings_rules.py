@@ -139,7 +139,8 @@ def change(values: dict, *, phrase: object, by: str) -> tuple[int, str, RiskSett
         return 200, words.SETTINGS_UNCHANGED, settings
     looser = loosens(settings, changes)
     if looser and not phrase_matches(phrase, settings.confirm_phrase):
-        return 400, words.LOOSEN_NEEDS_PHRASE, settings
+        given = str(phrase or "").strip()
+        return 400, words.PHRASE_WRONG if given else words.LOOSEN_NEEDS_PHRASE, settings
     try:
         saved = risk_store.STORE.save_settings(by, since=settings.updated_at, **changes)
     except risk_store.SettingsChanged:

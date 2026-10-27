@@ -7,8 +7,11 @@ import {
   Activity,
   CircleCheck,
   CircleMinus,
+  Crosshair,
   FlaskConical,
+  Gauge,
   History,
+  KeyRound,
   Loader2,
   Lock,
   OctagonX,
@@ -17,6 +20,7 @@ import {
   ShieldCheck,
   ShieldOff,
   TriangleAlert,
+  Weight,
 } from 'lucide-react'
 import { type ReactNode, useEffect, useState } from 'react'
 import { type AuditRow, type RiskStage, type RiskStatus, riskApi } from '@/api/risk'
@@ -33,6 +37,13 @@ import {
   surfaceOf,
 } from '@/sudarshan/risk/parts'
 import { ResumeSheet } from '@/sudarshan/risk/ResumeSheet'
+import {
+  BandCard,
+  DailyLimitEditor,
+  PacingCard,
+  PhraseCard,
+  SizeCard,
+} from '@/sudarshan/risk/SettingsCards'
 import { TurnOnSheet } from '@/sudarshan/risk/TurnOnSheet'
 
 const CARD = 'rounded-[1.125rem] border bg-card px-4 py-4 shadow-[var(--shadow-card)] md:px-5'
@@ -328,7 +339,7 @@ export default function Risk() {
           Risk
         </h1>
         <p className="text-[0.9375rem] text-[color:var(--text-secondary)]">
-          One switch that stops every new order, and what the guard did.
+          One switch that stops every new order, your own limits, and what the guard did.
         </p>
       </div>
       <KillSwitchCard
@@ -338,7 +349,30 @@ export default function Risk() {
       />
       <Card title="Daily loss limit" icon={<Lock aria-hidden="true" className="size-5" />}>
         <DailyCard status={data} />
+        {data.settings && <DailyLimitEditor settings={data.settings} />}
       </Card>
+      {data.settings ? (
+        <>
+          <Card title="Price band" icon={<Crosshair aria-hidden="true" className="size-5" />}>
+            <BandCard settings={data.settings} />
+          </Card>
+          <Card title="Order size" icon={<Weight aria-hidden="true" className="size-5" />}>
+            <SizeCard settings={data.settings} />
+          </Card>
+          <Card title="Orders per second" icon={<Gauge aria-hidden="true" className="size-5" />}>
+            <PacingCard settings={data.settings} perSecond={data.pacing?.per_second ?? null} />
+          </Card>
+          <Card title="Confirm phrase" icon={<KeyRound aria-hidden="true" className="size-5" />}>
+            <PhraseCard />
+          </Card>
+        </>
+      ) : (
+        <p role="alert" className="sd-risk-note">
+          <TriangleAlert aria-hidden="true" className="size-5 shrink-0" />
+          Your limits could not be read just now, so they cannot be changed here. Try again in a few
+          seconds.
+        </p>
+      )}
       <ChecksCard status={data} />
       <HistoryCard rows={audit.data} loading={audit.isPending} />
       <TurnOnSheet

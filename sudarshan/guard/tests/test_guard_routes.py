@@ -476,9 +476,12 @@ def test_tightening_needs_no_phrase_and_loosening_does(world):
 
     looser = _put(client, {"max_lots_fo": 5})
     assert (looser.status_code, looser.get_json()["message"]) == (400, words.LOOSEN_NEEDS_PHRASE)
+    assert looser.get_json()["needs_phrase"] is True  # the page asks for it and sends it again
+    assert on.get_json()["needs_phrase"] is False
     assert store.settings().max_lots_fo == 2
     off = _put(client, {"size_on": False}, phrase="nope")
     assert off.status_code == 400 and store.settings().size_on is True
+    assert (off.get_json()["message"], off.get_json()["needs_phrase"]) == (words.PHRASE_WRONG, True)
 
     done = _put(client, {"max_lots_fo": 5, "size_on": False}, phrase="Stop")
     assert done.status_code == 200

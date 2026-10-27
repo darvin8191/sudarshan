@@ -100,6 +100,8 @@ export interface RiskSettings {
 export interface RiskStatus extends Omit<RiskState, 'daily'> {
   settings: RiskSettings | null
   daily?: Partial<Record<RiskPipe, DailyStatus>>
+  /** Orders a second this server sends to Upstox at most (UPSTOX_ORDER_MAX_PER_SECOND). */
+  pacing?: { per_second: number } | null
   gate: GateTiming
   upstox_kill_switch: UpstoxSegment[] | null
   broker: string | null
@@ -126,6 +128,22 @@ export interface AuditRow {
   surface: string | null
   count: number
   summary: string
+}
+
+/** The settings a card changes: numbers, switches, the limit off (null), or a new phrase. A
+ * field that is not a number is sent as typed, so the server's sentence says what it takes. */
+export type SettingsChange = Partial<
+  Record<Exclude<keyof RiskSettings, 'phrase_set' | 'updated_at' | 'updated_by'>, unknown>
+> & { confirm_phrase?: string }
+
+/** What saving settings answered, whatever its status. */
+export interface SettingsAnswer {
+  code: number
+  ok: boolean
+  message: string
+  settings: RiskSettings | null
+  /** It loosens a limit: send it again with the confirm phrase. */
+  needsPhrase: boolean
 }
 
 /** What turning the switch on or off answered, whatever its status. */
@@ -192,6 +210,24 @@ export const riskApi = {
   turnOn: (exitAll: boolean, phrase: string): Promise<SwitchAnswer> =>
     switchCall('/killswitch', { exit_all: exitAll, phrase }),
   resume: (phrase: string): Promise<SwitchAnswer> => switchCall('/resume', { phrase }),
+  /** Save what changed; the server says when loosening needs the confirm phrase. */
+  saveSettings: async (settings: SettingsChange, phrase?: string): Promise<SettingsAnswer> => {
+    const response = await webClient.put<
+      Envelope<RiskSettings | null> & { needs_phrase?: boolean }
+    >(`${BASE}/settings`, phrase === undefined ? { settings } : { settings, phrase }, {
+      validateStatus: (status) => status !== 401,
+    })
+    const envelope = response.data
+    const message =
+      typeof envelope?.message === 'string' && envelope.message ? envelope.message : ''
+    return {
+      code: response.status,
+      ok: response.status === 200,
+      message: message || FALLBACK,
+      settings: envelope?.data && typeof envelope.data === 'object' ? envelope.data : null,
+      needsPhrase: envelope?.needs_phrase === true,
+    }
+  },
   audit: async (limit = 50): Promise<AuditRow[]> => {
     const response = await webClient.get<Envelope<AuditRow[]>>(`${BASE}/audit`, {
       params: { limit },
