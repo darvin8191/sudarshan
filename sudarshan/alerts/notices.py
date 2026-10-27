@@ -1,15 +1,15 @@
 """The server's own notices on Telegram: what the deploy tool recorded about a release (M18.x).
 
-    sudarshan-deploy (root, a timer)  -> /var/lib/sudarshan/events.jsonl      the facts, as JSON lines
+    sudarshan-deploy (root, a timer)  -> /var/lib/sudarshan/events.jsonl    the facts, JSON lines
       -> NoticeDesk (this file, inside sudarshan-alerts): looks at the file, picks what is new
       -> one message in the owner's words, claimed in alerts.db before it goes out
       -> OpenAlgoTelegram.send: the path the order alerts take to the owner's chat
 
 The deploy tool never holds a Telegram or OpenAlgo secret (it runs as root); it only records what
 happened (sudarshan/ops/events.py has the format). This service owns the words, the pacing and
-the once-only rule. Nothing here depends on the alert window or on the market: a release is
-installed in the evening or at the weekend, so the owner's key is read when a notice is due and
-none is loaded.
+the once-only rule. Nothing here depends on the alert window, and the market matters only for the
+quiet hours below: a release is installed in the evening or at the weekend, so the owner's key is
+read when a notice is due and none is loaded.
 
   Once. A notice is claimed by its event id in alerts.db before the message goes out, and marked
         sent after it. A restart, a second look at the file or a rewritten file never repeats it. A
@@ -26,6 +26,15 @@ none is loaded.
         notice that cannot go out is retried with a growing pause until it ages out.
   Dropped when sending cannot work (OpenAlgo's bot stopped, the owner's chat not linked): the same
         rule as the order alerts, they are never held back for later.
+  Paced. A notice never jumps the queue for Telegram: at least outbox.MIN_GAP_S between two
+        messages and at most NOTICES_PER_MINUTE a minute (NoticePace). The slot is taken just
+        before the send, after the claim is known to be ours.
+  Quiet in market hours. While the market trades (09:15-15:40, or a listed day's own window) only
+        a run that holds a failure (FAILURES) goes out; the rest wait for the close, still inside
+        MAX_AGE_S. The owner's phone is for fills and rejections then.
+
+M10.5 hook: once the process has one outbox.Pacer for every lane, pass ``pace=LanePace(pacer)``
+where AlertService builds the desk (marked there); a notice is then the lowest priority in it.
 
 SUDARSHAN_ORDER_ALERTS=off stops this service and so the notices with it.
 """
@@ -36,15 +45,18 @@ import asyncio
 import logging
 import re
 import time
+from collections import deque
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import datetime
 from pathlib import Path
+from typing import Protocol
 
 from sudarshan.autologin.messages import BRAND
 from sudarshan.autologin.schedule import IST
 from sudarshan.ops.events import Event, read_events
 from sudarshan.ops.release import TAG
 
+from . import outbox
 from .outbox import DROP, RETRY, SENT, UNCONFIRMED
 from .store import Store
 
@@ -59,6 +71,11 @@ CLAIM_S = 300.0  # a claim older than this was left by a process that stopped
 RETRY_S = (30.0, 60.0, 120.0, 300.0, 600.0)
 UNCONFIRMED_TRIES = 3  # Telegram did not confirm the message (OpenAlgo answered "queued")
 MAX_EVENTS = 20  # facts in one message
+NOTICES_PER_MINUTE = 1  # messages; the gap between two is outbox.MIN_GAP_S
+MINUTE_S = 60.0
+GIVE_WAY_S = 1.0  # LanePace: look again this soon when order alerts are waiting
+#: The kinds that are told at once, in market hours too. Everything else waits for the close.
+FAILURES = frozenset({"rolled_back", "unit_refused"})
 MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 UNIT = re.compile(r"sudarshan-[a-z0-9-]+\.(?:service|timer)")
 #: The order the facts of one run are told in.
@@ -161,6 +178,69 @@ def compose(events: Sequence[Event], now: datetime) -> str:
     return "\n".join([BRAND, *lines])
 
 
+class Pace(Protocol):
+    """What the desk asks before a send, and tells it after: when the next may start.
+
+    ``now`` is the service clock in seconds; a pace that keeps its own time may ignore it.
+    """
+
+    def wait(self, now: float) -> float:
+        """Seconds until the next message may start; 0 when it may start now."""
+
+    def took(self, now: float) -> None:
+        """A message is starting now."""
+
+
+class NoticePace:
+    """The notices' own pace, until they share the process's Telegram slots (see LanePace).
+
+    At least outbox.MIN_GAP_S between two messages and at most NOTICES_PER_MINUTE in any minute.
+    The limits are read when asked, so the tests can shrink them. Time is the service clock's,
+    which the desk already keeps its settle times and claims on.
+    """
+
+    def __init__(self) -> None:
+        self._starts: deque[float] = deque()
+
+    def wait(self, now: float) -> float:
+        starts = self._recent(now)
+        allowed = starts[-1] + outbox.MIN_GAP_S if starts else 0.0
+        if len(starts) >= NOTICES_PER_MINUTE:
+            allowed = max(allowed, starts[-NOTICES_PER_MINUTE] + MINUTE_S)
+        return min(max(0.0, allowed - now), MINUTE_S)  # a clock set back holds it a minute at most
+
+    def took(self, now: float) -> None:
+        self._recent(now).append(now)
+
+    def _recent(self, now: float) -> deque[float]:
+        while self._starts and self._starts[0] <= now - MINUTE_S:
+            self._starts.popleft()
+        return self._starts
+
+
+class LanePace:
+    """M10.5 hook, not wired yet: the notices' place in the one outbox.Pacer of the process.
+
+    The Pacer (alerts/outbox.py, with the market alerts lanes) hands out the send slots of every
+    lane: one gap and one minute budget for all, so a notice can make a fill wait one gap and no
+    more. A notice is the lowest priority there: it takes no slot while order alerts wait. Wire
+    it where AlertService builds the desk: ``pace=LanePace(outbox.pacer)``.
+    """
+
+    LANE = "notices"
+
+    def __init__(self, pacer, lane: str = LANE) -> None:
+        self.pacer, self.lane = pacer, lane
+
+    def wait(self, now: float) -> float:
+        if self.pacer.orders_waiting():
+            return GIVE_WAY_S
+        return max(0.0, self.pacer.allowed_at(self.lane) - time.monotonic())
+
+    def took(self, now: float) -> None:
+        self.pacer.took(self.lane)
+
+
 class NoticeDesk:
     """Looks at the notice files and tells the owner what is new, once.
 
@@ -170,6 +250,9 @@ class NoticeDesk:
         send: Sends one text; returns SENT, RETRY, UNCONFIRMED, KEY or DROP (OpenAlgoTelegram.send).
         owner_ready: True when the owner's key is loaded, reading it first if need be.
         clock: The service clock (aware datetimes).
+        market_open: True while the market trades (the trading calendar's in_market_hours); in
+            market hours only the failures go out. None: no quiet hours.
+        pace: When the next message may start (NoticePace; LanePace once the Pacer is merged).
     """
 
     def __init__(
@@ -179,13 +262,20 @@ class NoticeDesk:
         send: Callable[[str], Awaitable[str]],
         owner_ready: Callable[[], bool],
         clock: Callable[[], datetime],
+        *,
+        market_open: Callable[[datetime], bool] | None = None,
+        pace: Pace | None = None,
     ):
         self.spools = tuple(spools)
         self.store = store
         self.send = send
         self.owner_ready = owner_ready
         self.clock = clock
+        self.market_open = market_open
+        self.pace: Pace = pace if pace is not None else NoticePace()
         self.stats = {"messages": 0, "notices": 0, "dropped": 0, "stale": 0}
+        self._held: set[str] = set()  # notice ids waiting for the market to close
+        self._market_error = False
         self._first_seen: dict[str, float] = {}  # notice id -> when this service first saw it
         self._failures = 0  # looks in a row that could not send
         self._unconfirmed = 0  # tries in a row Telegram did not confirm
@@ -214,12 +304,14 @@ class NoticeDesk:
     async def sweep(self) -> float:
         """One look. Returns how many seconds to wait before the next."""
         now = self.clock().timestamp()
-        events = self._unsent(now)
+        events = self._due(self._unsent(now))
         if (wait := self._settling(events, now)) > 0:
             return wait + 0.5
         if not events:
             self._failures = self._unconfirmed = 0
             return POLL_S
+        if (wait := self.pace.wait(now)) > 0:  # before the claim: a notice held back is not ours
+            return wait + 0.05
         batch = events[:MAX_EVENTS]
         claimed = set(self.store.claim_notices([e.id for e in batch], now, CLAIM_S))
         batch = [e for e in batch if e.id in claimed]
@@ -231,6 +323,7 @@ class NoticeDesk:
                 self.store.release_notices(ids)
                 return self._try_later("there is no OpenAlgo API key to send with yet")
             text = compose(batch, self.clock())
+            self.pace.took(now)
             self._sending = True
             outcome = await self.send(text)
         except asyncio.CancelledError:
@@ -269,6 +362,30 @@ class NoticeDesk:
                 len(old), MAX_AGE_S // 3600,
             )  # fmt: skip
         return fresh
+
+    def _due(self, events: list[Event]) -> list[Event]:
+        """What may go now: in market hours only the runs that hold a failure; the rest wait."""
+        if not events or not self._trading():
+            self._held.clear()
+            return events
+        urgent = {e.run for e in events if e.kind in FAILURES}
+        due = [e for e in events if e.run in urgent]
+        held = {e.id for e in events if e.run not in urgent}
+        if held and held != self._held:
+            log.info("%d server notice(s) wait for the market to close", len(held))
+        self._held = held
+        return due
+
+    def _trading(self) -> bool:
+        if self.market_open is None:
+            return False
+        try:
+            return bool(self.market_open(self.clock()))
+        except Exception:  # the calendar failing must not keep a notice from the owner
+            if not self._market_error:
+                log.exception("the market hours could not be read; notices are not held back")
+                self._market_error = True
+            return False
 
     def _settling(self, events: list[Event], now: float) -> float:
         """Seconds still to wait for the rest of a run, 0 when nothing new has appeared for

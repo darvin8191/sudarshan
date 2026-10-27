@@ -3,9 +3,11 @@
 The deploy tool runs as root and holds no Telegram or OpenAlgo secret, so it records facts in a file
 (``sudarshan/ops/events.py``) and ``NoticeDesk`` words and sends them through the path the order
 alerts take. Here: the wording (a trader's words, never the tool's), the once-only rule across looks,
-restarts and two services on one record, the pace (one message for a run, one for a pile-up after
-downtime, nothing for what is history), what happens when sending fails, and the service telling a
-notice while the alert window is closed.
+restarts and two services on one record, the grouping (one message for a run, one for a pile-up
+after downtime, nothing for what is history), what happens when sending fails, the pace on
+Telegram (no faster than the order alerts' own, one message a minute), the quiet while the market
+trades (only failures go out then), and the service telling a notice while the alert window is
+closed.
 """
 
 from __future__ import annotations
@@ -22,15 +24,15 @@ from pathlib import Path
 import pytest
 from alerts_fakes import API_KEY, OWNER, FakeOpenAlgo, RunningClock, ist, wait_until
 
-from sudarshan.alerts import notices
+from sudarshan.alerts import notices, outbox
 from sudarshan.alerts.config import Settings
-from sudarshan.alerts.notices import NoticeDesk, compose
+from sudarshan.alerts.notices import LanePace, NoticeDesk, NoticePace, compose
 from sudarshan.alerts.outbox import DROP, RETRY, SENT, UNCONFIRMED
 from sudarshan.alerts.owner import Owner
 from sudarshan.alerts.service import AlertService
 from sudarshan.alerts.store import Store
 from sudarshan.autologin.messages import BRAND
-from sudarshan.autologin.schedule import IST
+from sudarshan.autologin.schedule import IST, TradingCalendar
 from sudarshan.ops.events import DEFAULT_SPOOLS, Event, record
 
 T0 = ist(2026, 10, 24, 18, 52)  # a Saturday evening: the owner's server installs a release
@@ -75,11 +77,19 @@ def note(path: Path, kind: str, event_id: str, at: datetime = T0, run: str | Non
     )  # fmt: skip
 
 
-def desk(tmp_path: Path, clock: Clock, send=None, ready=None, spools=None, store=None):
+def desk(tmp_path: Path, clock: Clock, send=None, ready=None, spools=None, store=None, **kwargs):
     send = send if send is not None else Send()
     store = store if store is not None else Store(tmp_path / "alerts.db")
     spools = spools if spools is not None else [tmp_path / "events.jsonl"]
-    return NoticeDesk(spools, store, send, ready or Ready(), clock), send
+    return NoticeDesk(spools, store, send, ready or Ready(), clock, **kwargs), send
+
+
+@pytest.fixture(autouse=True)
+def _unpaced(monkeypatch):
+    """Most tests are about words, claims and retries: the pace is out of their way. The tests
+    of the pace itself (below) put it back."""
+    monkeypatch.setattr(notices, "NOTICES_PER_MINUTE", 1000)
+    monkeypatch.setattr(outbox, "MIN_GAP_S", 0.0)
 
 
 def event(
@@ -601,6 +611,380 @@ def test_a_send_that_is_cancelled_gives_the_claim_back(tmp_path):
     asyncio.run(scenario())
 
 
+# ---- the pace on Telegram ---------------------------------------------------------------------
+
+
+@pytest.fixture
+def paced(monkeypatch):
+    """The real limits: the order alerts' gap between two messages, and one message a minute."""
+    monkeypatch.setattr(notices, "NOTICES_PER_MINUTE", 1)
+    monkeypatch.setattr(outbox, "MIN_GAP_S", 1.1)
+
+
+def test_two_messages_are_never_closer_than_the_order_alerts_gap(monkeypatch):
+    monkeypatch.setattr(notices, "NOTICES_PER_MINUTE", 1000)  # the gap alone
+    monkeypatch.setattr(outbox, "MIN_GAP_S", 1.1)
+    pace = NoticePace()
+    assert pace.wait(100.0) == 0.0
+    pace.took(100.0)
+    assert pace.wait(100.0) == pytest.approx(1.1)
+    assert pace.wait(100.5) == pytest.approx(0.6)
+    assert pace.wait(101.1) == 0.0
+    monkeypatch.setattr(outbox, "MIN_GAP_S", 2.0)  # it follows the order alerts' own constant
+    assert pace.wait(101.1) == pytest.approx(0.9)
+
+
+def test_at_most_one_message_a_minute(paced):
+    pace = NoticePace()
+    pace.took(100.0)
+    assert pace.wait(101.2) == pytest.approx(58.8)  # the gap is over, the minute is not
+    assert pace.wait(159.9) == pytest.approx(0.1)
+    assert pace.wait(160.0) == 0.0
+    pace.took(160.0)
+    assert pace.wait(161.0) == pytest.approx(59.0)
+
+
+def test_the_minute_budget_counts_every_message_in_it(monkeypatch):
+    monkeypatch.setattr(notices, "NOTICES_PER_MINUTE", 3)
+    monkeypatch.setattr(outbox, "MIN_GAP_S", 1.1)
+    pace = NoticePace()
+    for at in (0.0, 2.0, 4.0):
+        assert pace.wait(at) == 0.0
+        pace.took(at)
+    assert pace.wait(5.0) == pytest.approx(55.0)  # the first one leaves the minute at 60
+    assert pace.wait(60.0) == 0.0
+    pace.took(60.0)
+    assert pace.wait(61.0) == pytest.approx(1.0)  # now the one from 2.0 is the oldest in the minute
+
+
+def test_a_clock_set_back_holds_the_notices_a_minute_at_most(paced):
+    pace = NoticePace()
+    pace.took(10_000.0)
+    assert pace.wait(100.0) == 60.0
+
+
+def test_a_second_message_waits_for_its_minute_and_is_not_claimed_meanwhile(tmp_path, paced):
+    clock = Clock(T0)
+    spool = tmp_path / "events.jsonl"
+    note(spool, "installed", "i1", tag="v0.3.3")
+    d, send = desk(tmp_path, clock)
+
+    async def scenario():
+        await settle(d, clock)
+        await d.sweep()  # the first message starts at T0 + 46 s
+        assert len(send.texts) == 1
+        assert await d.sweep() == notices.POLL_S  # nothing is due, so the pace is not in it
+        note(spool, "waiting", "w1", clock(), tag="v0.3.4")
+        await settle(d, clock)  # the run is complete 46 s later: the minute is not over
+        assert await d.sweep() == pytest.approx(14.05)
+        assert len(send.texts) == 1 and d.store.notice_states(["w1"]) == {}
+        clock.advance(14.1)
+        assert await d.sweep() == notices.POLL_S
+        assert len(send.texts) == 2 and "v0.3.4 is ready" in send.texts[1]
+
+    asyncio.run(scenario())
+
+
+def test_a_long_pile_goes_out_a_message_a_minute(tmp_path, paced, monkeypatch):
+    monkeypatch.setattr(notices, "MAX_EVENTS", 3)
+    clock = Clock(T0)
+    spool = tmp_path / "events.jsonl"
+    for n in range(7):
+        note(spool, "waiting", f"w{n}", T0 - timedelta(minutes=10 - n), tag=f"v0.3.{n}")
+    d, send = desk(tmp_path, clock)
+
+    async def scenario():
+        await settle(d, clock)
+        await d.sweep()
+        assert len(send.texts) == 1
+        for sent in (2, 3):
+            wait = await d.sweep()
+            assert wait == pytest.approx(60.05) and len(send.texts) == sent - 1
+            clock.advance(wait)
+            await d.sweep()
+            assert len(send.texts) == sent
+        assert [t.count("is ready") for t in send.texts] == [3, 3, 1]
+
+    asyncio.run(scenario())
+
+
+def test_a_retry_cannot_come_sooner_than_the_minute(tmp_path, paced):
+    """The attempt took the slot, as an order alert's does: the first pause of the ladder (30 s)
+    is stretched to the minute, the later ones are longer than it already."""
+    clock = Clock(T0)
+    note(tmp_path / "events.jsonl", "installed", "i1", tag="v0.3.3")
+    d, send = desk(tmp_path, clock, Send(RETRY, SENT))
+
+    async def scenario():
+        await settle(d, clock)
+        assert await d.sweep() == notices.RETRY_S[0]
+        clock.advance(notices.RETRY_S[0])
+        assert await d.sweep() == pytest.approx(30.05) and len(send.texts) == 1
+        clock.advance(30.1)
+        await d.sweep()
+        assert len(send.texts) == 2 and d.store.notice_states(["i1"])["i1"][0] == "sent"
+
+    asyncio.run(scenario())
+
+
+def test_a_notice_without_the_owners_key_does_not_use_up_the_minute(tmp_path, paced):
+    clock = Clock(T0)
+    note(tmp_path / "events.jsonl", "installed", "i1", tag="v0.3.3")
+    ready = Ready(False)
+    d, send = desk(tmp_path, clock, ready=ready)
+
+    async def scenario():
+        await settle(d, clock)
+        assert await d.sweep() == notices.RETRY_S[0]  # nothing was sent
+        ready.value = True
+        clock.advance(notices.RETRY_S[0])
+        await d.sweep()
+        assert len(send.texts) == 1
+
+    asyncio.run(scenario())
+
+
+# ---- the Pacer hook (M10.5) -------------------------------------------------------------------
+
+
+class FakePacer:
+    """The shape outbox.Pacer has in the market alerts lanes: slots by lane, and order alerts that
+    can be waiting."""
+
+    def __init__(self):
+        self.waiting, self.free_at, self.took_lanes = False, 0.0, []
+
+    def orders_waiting(self) -> bool:
+        return self.waiting
+
+    def allowed_at(self, lane: str) -> float:
+        return self.free_at
+
+    def took(self, lane: str) -> None:
+        self.took_lanes.append(lane)
+
+
+def test_the_lane_pace_gives_way_to_order_alerts_and_takes_its_own_lane():
+    pacer = FakePacer()
+    pace = LanePace(pacer)
+    assert pace.wait(0.0) == 0.0
+    pacer.waiting = True
+    assert pace.wait(0.0) == notices.GIVE_WAY_S  # a fill is waiting: a notice is not first
+    pacer.waiting, pacer.free_at = False, time.monotonic() + 5.0
+    assert 4.0 < pace.wait(0.0) <= 5.0  # the Pacer's gap and minute budget decide
+    pace.took(0.0)
+    assert pacer.took_lanes == ["notices"]
+
+
+def test_the_desk_takes_its_slot_from_a_shared_pacer(tmp_path):
+    clock = Clock(T0)
+    note(tmp_path / "events.jsonl", "installed", "i1", tag="v0.3.3")
+    pacer = FakePacer()
+    pacer.waiting = True
+    d, send = desk(tmp_path, clock, pace=LanePace(pacer))
+
+    async def scenario():
+        await settle(d, clock)
+        assert await d.sweep() == pytest.approx(notices.GIVE_WAY_S + 0.05)
+        assert send.texts == [] and d.store.notice_states(["i1"]) == {}
+        pacer.waiting = False
+        await d.sweep()
+        assert len(send.texts) == 1 and pacer.took_lanes == ["notices"]
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.skipif(
+    not hasattr(outbox, "Pacer"), reason="outbox.Pacer arrives with the market alerts lanes"
+)
+def test_the_lane_pace_against_the_real_pacer(paced):
+    pacer = outbox.Pacer()
+    pace = LanePace(pacer)
+    assert pace.wait(0.0) == 0.0
+    pacer.took(outbox.ORDERS)
+    assert 0.0 < pace.wait(0.0) <= outbox.MIN_GAP_S  # a notice follows an order alert by one gap
+    pacer.orders_waiting = lambda: True
+    assert pace.wait(0.0) == notices.GIVE_WAY_S
+    pacer.orders_waiting = lambda: False
+    pace.took(0.0)
+    gap = pacer.allowed_at(outbox.ORDERS) - time.monotonic()
+    assert 0.0 < gap <= outbox.MIN_GAP_S  # and an order alert follows a notice by one gap
+
+
+# ---- quiet while the market trades ------------------------------------------------------------
+
+WEDNESDAY = ist(2026, 10, 21, 10, 0)  # the market trades
+
+
+class Market:
+    """A market_open that the test opens and closes."""
+
+    def __init__(self, open_: bool):
+        self.open = open_
+
+    def __call__(self, at: datetime) -> bool:
+        return self.open
+
+
+def test_in_market_hours_only_a_failure_is_told_and_the_rest_waits_for_the_close(tmp_path):
+    clock, market = Clock(WEDNESDAY), Market(True)
+    spool = tmp_path / "events.jsonl"
+    note(spool, "waiting", "w1", WEDNESDAY, run="run-w", tag="v0.3.4")
+    note(spool, "installed", "i1", WEDNESDAY, run="run-i", tag="v0.3.3", backup="yes")
+    d, send = desk(tmp_path, clock, market_open=market)
+
+    async def scenario():
+        await settle(d, clock)
+        assert await d.sweep() == notices.POLL_S  # nothing is due
+        assert send.texts == [] and d.store.notice_states(["w1", "i1"]) == {}
+        note(spool, "rolled_back", "r1", clock(), "run-r", tag="v0.3.5", was="v0.3.3",
+             why="health", up="yes")  # fmt: skip
+        await settle(d, clock)
+        await d.sweep()
+        assert len(send.texts) == 1 and "Could not install v0.3.5" in send.texts[0]
+        assert "v0.3.4" not in send.texts[0] and "v0.3.3 installed" not in send.texts[0]
+        market.open = False  # 15:40: what waited goes, in one message, after the usual settle
+        await d.sweep()
+        assert len(send.texts) == 1
+        clock.advance(notices.SETTLE_S + 1)
+        await d.sweep()
+        assert len(send.texts) == 2
+        assert "v0.3.4 is ready" in send.texts[1] and "v0.3.3 installed" in send.texts[1]
+        assert "Could not install" not in send.texts[1]
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    ("kind", "facts", "goes"),
+    [
+        ("rolled_back", {"tag": "v0.3.3", "why": "health", "up": "yes"}, True),
+        ("unit_refused", {"tag": "v0.3.3", "unit": "sudarshan-x.service"}, True),
+        ("installed", {"tag": "v0.3.3", "backup": "yes"}, False),
+        ("waiting", {"tag": "v0.3.3"}, False),
+    ],
+)
+def test_which_notices_are_told_in_market_hours(tmp_path, kind, facts, goes):
+    clock = Clock(WEDNESDAY)
+    note(tmp_path / "events.jsonl", kind, "n1", WEDNESDAY, **facts)
+    d, send = desk(tmp_path, clock, market_open=Market(True))
+
+    async def scenario():
+        await settle(d, clock)
+        await d.sweep()
+        assert bool(send.texts) is goes
+
+    asyncio.run(scenario())
+
+
+def test_a_failures_whole_run_is_told_with_it(tmp_path):
+    clock = Clock(WEDNESDAY)
+    spool = tmp_path / "events.jsonl"
+    note(spool, "installed", "i1", WEDNESDAY, "run-1", tag="v0.3.3", backup="yes")
+    note(spool, "unit_refused", "u1", WEDNESDAY, "run-1", tag="v0.3.3", unit="sudarshan-x.service")
+    note(spool, "waiting", "w1", WEDNESDAY, "run-2", tag="v0.3.4")
+    d, send = desk(tmp_path, clock, market_open=Market(True))
+
+    async def scenario():
+        await settle(d, clock)
+        await d.sweep()
+        assert len(send.texts) == 1
+        assert "v0.3.3 installed" in send.texts[0] and "sudarshan-x.service" in send.texts[0]
+        assert "v0.3.4" not in send.texts[0]
+
+    asyncio.run(scenario())
+
+
+def test_a_notice_held_for_the_close_still_ages_out(tmp_path):
+    clock, market = Clock(T0), Market(True)
+    note(tmp_path / "events.jsonl", "waiting", "w1", T0 - timedelta(hours=11, minutes=50),
+         tag="v0.3.4")  # fmt: skip
+    d, send = desk(tmp_path, clock, market_open=market)
+
+    async def scenario():
+        await settle(d, clock)
+        await d.sweep()
+        assert d.store.notice_states(["w1"]) == {}  # held, not claimed, not told
+        clock.advance(20 * 60)  # the market is still open, and the notice is now history
+        await d.sweep()
+        assert d.store.notice_states(["w1"])["w1"][0] == "stale"
+        market.open = False
+        clock.advance(notices.SETTLE_S + 1)
+        await d.sweep()
+        assert send.texts == []
+
+    asyncio.run(scenario())
+
+
+def test_the_hold_is_logged_once_not_at_every_look(tmp_path, caplog):
+    caplog.set_level(logging.INFO, logger="sudarshan.alerts")
+    clock = Clock(WEDNESDAY)
+    note(tmp_path / "events.jsonl", "waiting", "w1", WEDNESDAY, tag="v0.3.4")
+    d, _ = desk(tmp_path, clock, market_open=Market(True))
+
+    async def scenario():
+        for _ in range(4):
+            await d.sweep()
+            clock.advance(20)
+
+    asyncio.run(scenario())
+    assert caplog.text.count("wait for the market to close") == 1
+
+
+def test_a_market_that_cannot_be_read_does_not_hold_a_notice_back(tmp_path, caplog):
+    clock = Clock(WEDNESDAY)
+    note(tmp_path / "events.jsonl", "installed", "i1", WEDNESDAY, tag="v0.3.3")
+    note(tmp_path / "events.jsonl", "waiting", "w1", WEDNESDAY + timedelta(seconds=1), tag="v0.3.4")
+
+    def broken(at: datetime) -> bool:
+        raise RuntimeError("the calendar was locked")
+
+    d, send = desk(tmp_path, clock, market_open=broken)
+
+    async def scenario():
+        await settle(d, clock)
+        await d.sweep()
+        assert len(send.texts) == 1
+        note(tmp_path / "events.jsonl", "waiting", "w2", clock(), tag="v0.3.5")
+        await settle(d, clock)
+        await d.sweep()
+        assert len(send.texts) == 2
+
+    asyncio.run(scenario())
+    assert caplog.text.count("market hours could not be read") == 1  # once, not at every look
+
+
+@pytest.mark.parametrize(
+    ("at", "quiet"),
+    [
+        (ist(2026, 10, 21, 9, 14), False),
+        (ist(2026, 10, 21, 9, 15), True),
+        (ist(2026, 10, 21, 15, 39), True),
+        (ist(2026, 10, 21, 15, 40), False),
+        (ist(2026, 10, 24, 10, 0), False),  # a Saturday
+        (ist(2026, 11, 8, 13, 0), False),  # Muhurat Sunday, before its window
+        (ist(2026, 11, 8, 14, 30), True),  # in the window the day's line gives
+        (ist(2026, 11, 8, 15, 40), False),
+    ],
+)
+def test_the_trading_calendar_decides_the_quiet_hours_a_special_days_own_included(
+    tmp_path, at, quiet
+):
+    holidays, extra = tmp_path / "nse_holidays.txt", tmp_path / "nse_extra_trading_days.txt"
+    holidays.write_text("2026-11-09\n")
+    extra.write_text("2026-11-08 14:05-15:40  # Muhurat\n")
+    clock = Clock(at)
+    note(tmp_path / "events.jsonl", "waiting", "w1", at, tag="v0.3.4")
+    d, send = desk(tmp_path, clock, market_open=TradingCalendar(holidays, extra).in_market_hours)
+
+    async def scenario():
+        await settle(d, clock)
+        await d.sweep()
+        assert bool(send.texts) is not quiet
+
+    asyncio.run(scenario())
+
+
 # ---- the files --------------------------------------------------------------------------------
 
 
@@ -902,3 +1286,38 @@ def test_the_spool_list_comes_from_the_settings(settings_for):
     )  # fmt: skip
     assert settings_for(SUDARSHAN_NOTICE_SPOOLS="").notice_spools == DEFAULT_SPOOLS
     assert isinstance(settings_for(), Settings)
+
+
+class MovableClock(RunningClock):
+    """Real time's pace from a start the test can move on, as the day goes by."""
+
+    def jump_to(self, at: datetime) -> None:
+        self.start, self._began = at, time.monotonic()
+
+
+def test_the_service_keeps_a_notice_for_the_close_but_tells_a_failure_at_once(
+    settings_for, quick_service, tmp_path
+):
+    spool = tmp_path / "notice-spool.jsonl"
+    clock = MovableClock(ist(2026, 10, 21, 10, 0))  # a Wednesday: the market trades
+
+    async def scenario():
+        async with FakeOpenAlgo() as notify:
+            settings = settings_for(None, notify, SUDARSHAN_ALERTS_ALWAYS_ON="0")
+            svc = AlertService(settings, owner_reader=Keys(), clock=clock)
+            note(spool, "waiting", "w1", clock(), tag="v0.3.4")
+            task = asyncio.create_task(svc.run())
+            await asyncio.sleep(0.6)  # a dozen looks at this fixture's timings
+            assert notify.bodies == []
+            note(spool, "rolled_back", "r1", clock(), "run-r", tag="v0.3.5", was="v0.3.3",
+                 why="health", up="yes")  # fmt: skip
+            await wait_until(lambda: len(notify.bodies) == 1, 10)
+            first = notify.bodies[0]["message"]
+            assert "Could not install v0.3.5" in first and "v0.3.4" not in first
+            clock.jump_to(ist(2026, 10, 21, 15, 41))  # the market has closed
+            await wait_until(lambda: len(notify.bodies) == 2, 10)
+            assert "v0.3.4 is ready" in notify.bodies[1]["message"]
+            svc.stop("test")
+            await asyncio.wait_for(task, 10)
+
+    asyncio.run(scenario())

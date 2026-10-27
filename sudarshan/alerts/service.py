@@ -170,6 +170,9 @@ class AlertService:
                 telegram.send,
                 self._owner_ready,
                 self.clock,
+                # Quiet while the market trades (failures excepted). M10.5 hook: add
+                # pace=LanePace(outbox.pacer) once outbox.Pacer is merged (notices.py).
+                market_open=self.window.calendar.in_market_hours,
             )
             notices = asyncio.create_task(self.notices.run())
             # M18.1: GET /health on 127.0.0.1 (health.py); a port that is taken costs the page only

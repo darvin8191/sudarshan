@@ -174,7 +174,18 @@ nightly backup job records) every 20 seconds and sends through the same path as 
 - **A release that fails again** at each of the deploy timer's 10-minute runs is told once per
   cause, not once per try (the event id names the release, the cause and whether the earlier
   version is running).
-- **Any time of day.** Notices do not depend on the alert window or on the market: a release is
+- **Quiet while the market trades.** From 09:15 to 15:40 (a listed day's own window instead, on a
+  special session) only a failure is told: a release that could not be installed, or a service
+  file the safety check refused. A release that is ready, or installed, waits for the close and
+  goes out then, in one message, if it is still under 12 hours old. The phone is for fills and
+  rejections while the market runs.
+- **Paced like the order alerts.** A notice never jumps the queue for Telegram: at least 1.1
+  seconds after the last message (the order alerts' own gap) and at most one message a minute, so
+  a long pile goes out a minute apart. The slot is taken when the send starts, so a retry also
+  waits for the minute. Once the order, market and notice lanes share one pacer (M10.5), a notice
+  is the lowest priority in it and gives way while an order alert waits (`LanePace` in
+  `notices.py`, wired where `service.py` builds the desk).
+- **Any time of day otherwise.** Notices do not depend on the alert window: a release is
   installed in the evening or at the weekend, so the owner's key is read when a notice is due.
 - **Words for a trader.** Only a release tag (`vA.B.C`) and a service file name from the deploy
   tool's own pattern are ever repeated from a fact; nothing else in the file reaches the message,

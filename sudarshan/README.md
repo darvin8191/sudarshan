@@ -99,6 +99,9 @@ secret and cannot be made to send anything:
   newest 200 lines; `--check` records nothing;
 - a release that fails at every timer run is recorded once per release and cause; a release that
   waits is recorded once; the facts of one run share a run id and are told in one message;
+- the owner's phone stays quiet while the market trades: from 09:15 to 15:40 only a failure
+  (a rollback, a refused service file) is told, the rest goes out after the close, and no more than
+  one message a minute ever goes out;
 - the tool of the release before this one made no record, so the first run of a tool that records
   tells the install it finds (once, if the tag file is under 12 hours old, at the time it
   happened). The tool that does the install acts from the *next* run (self-update), so a release's
