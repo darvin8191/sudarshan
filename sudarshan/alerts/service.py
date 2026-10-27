@@ -616,17 +616,19 @@ def _stop(service: AlertService, market, reason: str) -> None:
 def _market(settings: Settings, market: MarketSettings | None, db_path, pacer: Pacer):
     """M10.1: market alerts and their local API, or, switched off, the API saying so while the
     feed drops the keys an earlier run claimed."""
-    from sudarshan.vault import ALERTS_API_INFO, fernet_for, pepper_from
+    from sudarshan.vault import ALERTS_API_INFO, ALERTS_PUSH_INFO, fernet_for, pepper_from
 
     from .market.api import MarketApi, OffDesk
     from .market.desk import OwnerDesk
     from .market.runtime import MarketRuntime, ReleasedClaims
 
-    fernet = fernet_for(pepper_from(os.environ), ALERTS_API_INFO)
+    pepper = pepper_from(os.environ)
+    fernet = fernet_for(pepper, ALERTS_API_INFO)
     if market is None:
         return ReleasedClaims(feed_url_of()), MarketApi(OffDesk(), fernet), http_port_of()
     runtime = MarketRuntime(settings, market, owner_reader=lambda: read_owner(db_path),
-                            pacer=pacer, openalgo_db=db_path)  # fmt: skip
+                            pacer=pacer, openalgo_db=db_path,
+                            push_fernet=fernet_for(pepper, ALERTS_PUSH_INFO))  # fmt: skip
     return runtime, MarketApi(OwnerDesk(runtime), fernet), market.http_port
 
 

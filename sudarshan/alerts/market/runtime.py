@@ -42,6 +42,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 import httpx
+from cryptography.fernet import Fernet
 
 from sudarshan.alerts.config import Settings
 from sudarshan.alerts.market import engine, sessions, spec, words
@@ -59,6 +60,14 @@ from sudarshan.alerts.market.feedlink import (
     parse_health,
 )
 from sudarshan.alerts.market.lane import Line, MarketLane
+from sudarshan.alerts.market.push import (
+    ALERT_EVENT,
+    NONE_OPEN,
+    NOT_ANSWERED,
+    STATE_EVENT,
+    Pusher,
+    shown,
+)
 from sudarshan.alerts.market.store import DB_FILENAME, MarketStore, NotFound, StoreError
 from sudarshan.alerts.outbox import OpenAlgoTelegram, Pacer, Throttle
 from sudarshan.alerts.owner import Owner, OwnerError
@@ -77,6 +86,7 @@ RECORD_RETRY_S = (0.5, 1.0, 2.0)
 #: A delivery still pending this long after its event when the service starts is not sent.
 LATE_MS = 5 * 60_000
 STOP_FLUSH_S = 5.0
+PUSH_FLUSH_S = 1.0
 RESTARTED = "The alert service restarted before it was sent; it is in the alert history"
 
 
@@ -92,8 +102,11 @@ class MarketRuntime:
         pacer: Pacer,
         openalgo_db: Path | None = None,
         clock: Callable[[], datetime] | None = None,
+        push_fernet: Fernet | None = None,
     ):
         self.settings, self.config = alerts, market
+        #: The key that seals pushes to OpenAlgo's owner room (M10.7); None: no app channel.
+        self.push_fernet = push_fernet
         self.read_owner, self.pacer, self.openalgo_db = owner_reader, pacer, openalgo_db
         #: A replay (tests and the evening check only) runs on its ticks' own clock.
         self._replayed = TickClock() if market.replay and clock is None else None
@@ -108,6 +121,11 @@ class MarketRuntime:
         self.owner: Owner | None = None
         #: Called with each recorded fire for the app's owner room (M10.7); None until then.
         self.push: Callable | None = None
+        self.pusher: Pusher | None = None
+        #: The owner's desk listens here (desk.py): an alert that stopped or paused itself, with
+        #: its reason, and every second, for the page's line (both pushed to the open apps).
+        self.on_change: Callable[[int, str], None] | None = None
+        self.on_second: Callable[[int], None] | None = None
         self.state, self.detail = "starting", ""
         self.stats = {"frames": 0, "judged": 0, "fires": 0}
         self._stop = asyncio.Event()
@@ -140,8 +158,8 @@ class MarketRuntime:
         #: Held while the claims are put at the feed, and by an owner's change from its claim to
         #: its place in the Book, so a renewal never drops a key being added (desk.py).
         self._claims_lock = asyncio.Lock()
-        #: Event id -> a future the market lane's answer resolves (the Settings sheet's test).
-        self._waiters: dict[int, asyncio.Future] = {}
+        #: (event id, channel) -> a future its answer resolves (the Settings sheet's test).
+        self._waiters: dict[tuple[int, str], asyncio.Future] = {}
         self._throttle = Throttle(300.0)
         self.market = Market(0, {})
 
@@ -200,6 +218,12 @@ class MarketRuntime:
             self.lane = MarketLane(telegram.send_with_reason, self.clock, self.pacer,
                                    self._delivered)  # fmt: skip
             sender = asyncio.create_task(self._guard("telegram", self.lane.run()))
+            pushing = None
+            if self.push_fernet is not None:  # M10.7: the app's owner room
+                self.pusher = Pusher(self.settings.openalgo_url, client, self.push_fernet,
+                                     self._shown)  # fmt: skip
+                self.push = self._push_fire
+                pushing = asyncio.create_task(self._guard("push", self.pusher.run()))
             jobs: list[asyncio.Task] = []
             try:
                 await self._resend_pending(now)
@@ -217,8 +241,11 @@ class MarketRuntime:
                 try:
                     await self._shutdown()  # Telegram's queue goes while its sender still runs
                 finally:
-                    sender.cancel()
-                    await asyncio.gather(sender, return_exceptions=True)
+                    for task in (sender, pushing):
+                        if task is not None:
+                            task.cancel()
+                    await asyncio.gather(sender, *([pushing] if pushing else []),
+                                         return_exceptions=True)  # fmt: skip
 
     async def _guard(self, name: str, job) -> None:
         """A job that fails stops market alerts in words; order alerts carry on."""
@@ -244,6 +271,8 @@ class MarketRuntime:
                 await asyncio.wait(pending, timeout=STOP_FLUSH_S)
             if self.lane is not None and (left := await self.lane.flush(STOP_FLUSH_S)):
                 log.warning("%d market alerts were not sent to Telegram before stopping", left)
+            if self.pusher is not None and (left := await self.pusher.flush(PUSH_FLUSH_S)):
+                log.info("%d market alert pushes to the app were left at the stop", left)
         finally:
             if self.link is not None:
                 self.link.close()
@@ -310,18 +339,48 @@ class MarketRuntime:
     def tell(self, event_id: int, text: str, at: int) -> asyncio.Future:
         """One line on Telegram through the market lane (the Settings sheet's test); the future
         is resolved with the lane's answer, once it is recorded."""
-        waiter = asyncio.get_running_loop().create_future()
-        self._waiters[event_id] = waiter
+        waiter = self._waiter(event_id, "telegram")
         self.lane.add([Line(event_id, text, _at(at))])
         return waiter
 
+    def push_test(self, event_id: int, at: int) -> asyncio.Future:
+        """The test in the open apps (M10.7); the future is resolved with the push's answer."""
+        waiter = self._waiter(event_id, "app")
+        self.pusher.add(ALERT_EVENT, {
+            "event_id": event_id, "alert_id": 0, "symbol": "", "exchange": "",
+            "title": words.TEST_TITLE, "detail": words.TEST_DETAIL, "note": "",
+            "at": _at(at).isoformat(timespec="seconds"), "at_ms": at, "found_later": False,
+            "opening": False, "auction": False, "test": True,
+        }, event_id)  # fmt: skip
+        return waiter
+
+    def push_state(self, data: dict) -> None:
+        """A change the open apps apply to their Alerts page (the desk builds it)."""
+        if self.pusher is not None:
+            self.pusher.add(STATE_EVENT, data)
+
     def forget_waiter(self, event_id: int) -> None:
-        self._waiters.pop(event_id, None)
+        for channel in ("telegram", "app"):
+            self._waiters.pop((event_id, channel), None)
+
+    def _waiter(self, event_id: int, channel: str) -> asyncio.Future:
+        waiter = asyncio.get_running_loop().create_future()
+        self._waiters[(event_id, channel)] = waiter
+        return waiter
+
+    def _resolve(self, event_id: int, channel: str, status: str) -> None:
+        waiter = self._waiters.pop((event_id, channel), None)
+        if waiter is not None and not waiter.done():
+            waiter.set_result(status)  # after its write: the writer runs in order
 
     # ---- what the owner's desk reads -----------------------------------------------------------
     @property
     def prefs(self) -> dict[str, bool]:
         return dict(self._prefs)
+
+    def alert(self, alert_id: int) -> spec.Alert | None:
+        """The alert as the runtime holds it now (its status follows the engine's own stops)."""
+        return self._alerts.get(alert_id)
 
     @property
     def down_since(self) -> int | None:
@@ -470,6 +529,8 @@ class MarketRuntime:
                 self._alerts[alert.id] = dataclasses.replace(alert, status=out.status)
                 self._claims_wake.set()
                 self._rebuild()
+                if self.on_change is not None:  # the open apps' cards (M10.7)
+                    self.on_change(alert.id, words.status_reason(out.reason))
 
     def _fire(self, alert: spec.Alert, out: engine.Outcome, now: int) -> None:
         fire, today = out.fire, self._today
@@ -527,9 +588,29 @@ class MarketRuntime:
             if event_id >= 0:
                 self._submit(self.store.set_delivery, OWNER, event_id, "telegram", status, reason,
                              now)  # fmt: skip
-            waiter = self._waiters.pop(event_id, None)
-            if waiter is not None and not waiter.done():
-                waiter.set_result(status)  # after the write above: the writer runs in order
+            self._resolve(event_id, "telegram", status)
+
+    def _push_fire(self, event_id: int, alert: spec.Alert, fire: engine.Fire) -> None:
+        """A recorded fire to the open apps (M10.7): the toast's words, and its marks."""
+        title, detail = words.describe(alert, fire, self._today)
+        self.pusher.add(ALERT_EVENT, {
+            "event_id": event_id, "alert_id": alert.id, "symbol": alert.symbol,
+            "exchange": alert.exchange, "title": title, "detail": detail, "note": alert.note,
+            "at": _at(fire.at).isoformat(timespec="seconds"), "at_ms": fire.at,
+            "found_later": fire.found_later is not None, "opening": fire.opening,
+            "auction": fire.auction, "test": False,
+        }, event_id if event_id >= 0 else None)  # fmt: skip
+
+    def _shown(self, ids: list[int], screens: int | None) -> None:
+        """The app delivery of each fire a push carried: the screens it was shown on (M10.7)."""
+        now = self._now()
+        if screens:
+            status, reason = "sent", shown(screens)
+        else:
+            status, reason = "not_sent", NONE_OPEN if screens == 0 else NOT_ANSWERED
+        for event_id in ids:
+            self._submit(self.store.set_delivery, OWNER, event_id, "app", status, reason, now)
+            self._resolve(event_id, "app", status)
 
     def _tell_line(self, text: str, at: int) -> None:
         """A line that is no fire (a pause): no record, so no delivery to write."""
@@ -549,6 +630,8 @@ class MarketRuntime:
             outcomes = self.book.on_clock(now, self.market)
             if outcomes:
                 self._handle(outcomes, now)
+            if self.on_second is not None:
+                self.on_second(now)
             if now - self._flushed >= FLUSH_MS:
                 await self._flush(now)
             if now - self._seen >= SEEN_EVERY_MS:
@@ -741,13 +824,17 @@ class MarketRuntime:
         return closed
 
     async def _resend_pending(self, now: int) -> None:
-        """Telegram lines a stop left pending: sent if fresh, else not sent (A7.o)."""
+        """Telegram lines a stop left pending: sent if fresh, else not sent (A7.o). A push to
+        the app is never sent late: the app reads what it missed when it reconnects."""
         for event in await self._db(self.store.pending, OWNER, "telegram"):
             if now - event["fired_at"] > LATE_MS:
                 self._submit(self.store.set_delivery, OWNER, event["id"], "telegram",
                              "not_sent", RESTARTED, now)  # fmt: skip
             else:
                 self.lane.add([Line(event["id"], event["line"], _at(event["fired_at"]))])
+        for event in await self._db(self.store.pending, OWNER, "app"):
+            self._submit(self.store.set_delivery, OWNER, event["id"], "app", "not_sent",
+                         RESTARTED, now)  # fmt: skip
 
     # ---- small pieces ------------------------------------------------------------------------
     def _owner(self) -> Owner | None:

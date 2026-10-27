@@ -161,6 +161,25 @@ class MarketApi:
         self.server = None
 
     async def _serve(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        """One request, one answer, and the connection closed on every path (a cancelled
+        request's too, when the service stops)."""
+        try:
+            status, payload = await self._answer(reader, writer)
+            data = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode()
+            head = (
+                f"HTTP/1.1 {status} {REASONS.get(status, 'Error')}\r\n"
+                f"Content-Type: application/json; charset=utf-8\r\nContent-Length: {len(data)}"
+                "\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n"
+            )
+            with contextlib.suppress(ConnectionError):
+                writer.write(head.encode() + data)
+                await writer.drain()
+        finally:
+            writer.close()
+        with contextlib.suppress(ConnectionError):
+            await writer.wait_closed()
+
+    async def _answer(self, reader, writer) -> tuple[int, Any]:
         try:
             peer = writer.get_extra_info("peername")
             if not peer or peer[0] not in LOCAL_PEERS:  # defence in depth: bound to loopback
@@ -168,26 +187,14 @@ class MarketApi:
             method, path, body = await asyncio.wait_for(
                 _read(reader, writer, self.max_bytes), READ_TIMEOUT_S
             )
-            status, payload = 200, await self._route(method, path, body)
+            return 200, await self._route(method, path, body)
         except ApiError as exc:
-            status, payload = exc.status, exc.body()
+            return exc.status, exc.body()
         except TimeoutError:
-            status, payload = 408, ApiError(408, "timeout", WORDS["failed"]).body()
+            return 408, ApiError(408, "timeout", WORDS["failed"]).body()
         except Exception:
             log.exception("a request to the market alerts' API failed")
-            status, payload = 500, ApiError(500, "failed", WORDS["failed"]).body()
-        data = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode()
-        head = (
-            f"HTTP/1.1 {status} {REASONS.get(status, 'Error')}\r\n"
-            f"Content-Type: application/json; charset=utf-8\r\nContent-Length: {len(data)}\r\n"
-            "Cache-Control: no-store\r\nConnection: close\r\n\r\n"
-        )
-        with contextlib.suppress(ConnectionError):
-            writer.write(head.encode() + data)
-            await writer.drain()
-        writer.close()
-        with contextlib.suppress(ConnectionError):
-            await writer.wait_closed()
+            return 500, ApiError(500, "failed", WORDS["failed"]).body()
 
     async def _route(self, method: str, path: str, body: bytes) -> Any:
         if path == HEALTH_PATH:

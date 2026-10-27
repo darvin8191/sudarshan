@@ -44,6 +44,7 @@ NOTE_MAX = 120
 PAUSE_TELL_MS = 60_000
 TEST_LINE = "Test: market alerts reach this chat (sent from the Alerts page)."
 TEST_TITLE = "Test alert"
+TEST_DETAIL = "sent from the Alerts page"
 WATCHING = "Watching · Real-time"
 STARTING = "Starting up"
 SWITCHED_OFF = "Switched off on the server"

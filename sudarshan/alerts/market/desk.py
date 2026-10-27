@@ -27,7 +27,6 @@ paused (the feed down, unheard or silent), every line inside a session says so.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 from collections.abc import Mapping
 from datetime import datetime
@@ -63,6 +62,8 @@ ORDER = (
 )  # fmt: skip
 #: The sessions the engine's line follows while no alert is Active.
 MAIN = ("NSE_EQ", "NSE_FO", "NSE_INDEX")
+#: What a pushed card carries: enough to apply a change, or to know the page must be read again.
+BRIEF = ("id", "version", "status", "status_reason", "check", "fired_today")
 #: Notes worth a line on the card; one that waits for the feed comes from the Book while it lasts.
 NOTED = frozenset({NOT_CHECKED, NOT_JUDGED, BASE_CHANGED})
 WORDS = {
@@ -89,6 +90,8 @@ class OwnerDesk:
     def __init__(self, runtime):
         self.rt = runtime
         self._changes = asyncio.Lock()
+        self._line: dict | None = None  # the page's line as last pushed to the open apps
+        runtime.on_change, runtime.on_second = self._changed, self._second
 
     def health(self) -> dict[str, Any]:
         rt = self.rt
@@ -154,7 +157,7 @@ class OwnerDesk:
                     rt.wake_claims()  # a claim made for a refused change goes at once
                 rt.owner_put(row)
         log.info("market alert %d set by the owner", row["id"])
-        return self._view(row, now)
+        return self._pushed(self._view(row, now), now)
 
     async def _update(self, message) -> dict[str, Any]:
         rt = self._running()
@@ -172,7 +175,7 @@ class OwnerDesk:
             else:
                 row = await self._move(current, version, action, now)
         log.info("market alert %d: %s by the owner", alert_id, action)
-        return self._view(row, now)
+        return self._pushed(self._view(row, now), now)
 
     async def _edit(self, current: dict, version: int, fields: dict, now: int) -> dict:
         rt = self.rt
@@ -221,6 +224,7 @@ class OwnerDesk:
                 raise ApiError(404, "gone", str(NotFound()))
             rt.owner_drop(alert_id)
         log.info("market alert %d deleted by the owner", alert_id)
+        self._push(rt.now_ms(), removed=[alert_id])
         return {"deleted": True}
 
     async def _prefs_set(self, message) -> dict[str, bool]:
@@ -235,24 +239,67 @@ class OwnerDesk:
         return prefs
 
     async def _test(self, message) -> dict[str, Any]:
-        """One test line through each channel that is on in the settings (M10.14), logged like a
-        fire so History shows its deliveries; Telegram's answer is waited for up to 10 s."""
+        """One test through each channel that is on in the settings (M10.14): a line on
+        Telegram and a toast in the open apps, logged like a fire so History shows each delivery;
+        their answers are waited for up to 10 s."""
         rt = self._running()
         now = rt.now_ms()
         prefs = rt.prefs
         channels = {"telegram": prefs["telegram"]}
+        if rt.pusher is not None:  # the app's channel (M10.7)
+            channels["app"] = prefs["app"]
         event_id = await self._write(rt.store.record_test, OWNER, words.TEST_TITLE,
                                      words.TEST_LINE, now, channels)  # fmt: skip
-        if channels["telegram"]:
-            try:
-                with contextlib.suppress(TimeoutError):
-                    await asyncio.wait_for(rt.tell(event_id, words.TEST_LINE, now), TEST_WAIT_S)
-            finally:
-                rt.forget_waiter(event_id)
+        try:
+            waiters = []
+            if channels.get("app"):
+                waiters.append(rt.push_test(event_id, now))
+            if channels["telegram"]:
+                waiters.append(rt.tell(event_id, words.TEST_LINE, now))
+            if waiters:
+                await asyncio.wait(waiters, timeout=TEST_WAIT_S)
+        finally:
+            rt.forget_waiter(event_id)
         found = await self._write(rt.store.events, OWNER, before=event_id + 1, limit=1)
         deliveries = found[0]["deliveries"] if found and found[0]["id"] == event_id else {}
         log.info("a market alert test was sent from the Alerts page")
         return {"event_id": event_id, "deliveries": deliveries}
+
+    # ---- what the open apps are told at once (M10.7) ---------------------------------------
+    def _changed(self, alert_id: int, reason: str) -> None:
+        """An alert stopped or paused itself: every open app's card follows at once."""
+        rt = self.rt
+        alert = rt.alert(alert_id)
+        if alert is None:
+            return
+        now = rt.now_ms()
+        brief = {"id": alert.id, "version": alert.version, "status": alert.status,
+                 "status_reason": reason, "check": None,
+                 "fired_today": _fired_today(rt.book.state(alert.id), rt.market.today)}  # fmt: skip
+        self._push(now, [brief])
+
+    def _second(self, now: int) -> None:
+        """Every second: a new line under "Alerts" (the market opened or closed, the feed went
+        down or came back) reaches the open apps, which then read the page again."""
+        if self.rt.pusher is None:
+            return
+        line = self.engine_line(now)
+        if line != self._line:
+            self._line = line
+            self._push(now, engine=line)
+
+    def _pushed(self, view: dict | None, now: int) -> dict | None:
+        """An owner's change, for the owner's other screens: the card's status and version (a
+        version newer than one a screen holds sends it to read the page again)."""
+        if view is not None:
+            self._push(now, [{name: view[name] for name in BRIEF}])
+        return view
+
+    def _push(self, now: int, alerts=(), *, removed=(), engine=None) -> None:
+        if self.rt.pusher is None:
+            return
+        self.rt.push_state({"engine": engine or self.engine_line(now), "alerts": list(alerts),
+                            "removed": list(removed), "server_time": now})  # fmt: skip
 
     # ---- the page's lines ----------------------------------------------------------------
     def engine_line(self, now: int) -> dict[str, Any]:
@@ -348,7 +395,7 @@ class OwnerDesk:
                 "checks_at": words.checks_at(alert),
             },
             "check": self.check(alert, now) if alert.status == "active" else None,
-            "fired_today": state.fires_session if state and state.session == today else 0,
+            "fired_today": _fired_today(state, today),
             "auction": auction,
         }  # fmt: skip
 
@@ -414,6 +461,10 @@ class OwnerDesk:
         if rt.state == "off":
             raise ApiError(503, "stopped", rt.detail or words.STOPPED_UNEXPECTEDLY)
         raise ApiError(503, "stopping", WORDS["stopping"])
+
+
+def _fired_today(state, today: int) -> int:
+    return state.fires_session if state is not None and state.session == today else 0
 
 
 def _line(code: str, text: str, real_time: bool = False) -> dict[str, Any]:

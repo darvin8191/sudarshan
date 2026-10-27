@@ -311,11 +311,12 @@ def test_every_route_is_the_contract_s(bridge):
              if rule.rule.startswith("/sudarshan/alerts")}  # fmt: skip
     expected = {(re.sub(r"/1$", "/<int:alert_id>", path.split("?")[0]), method.upper())
                 for method, path, _ in ROUTES}  # fmt: skip
-    assert rules == expected
+    assert rules == expected | {("/sudarshan/alerts/internal/push", "POST")}  # the service's
 
 
 def test_the_bridge_holds_no_loop_thread_or_scheduler():
     """sudarshan.md: nothing of the kind is added inside the OpenAlgo app."""
     source = (REPO / "blueprints" / "sudarshan_alerts.py").read_text(encoding="utf-8")
-    for banned in ("asyncio", "threading", "Thread(", "APScheduler", "BackgroundScheduler"):
+    for banned in ("asyncio", "import threading", "Thread(", "ThreadPoolExecutor", "APScheduler",
+                   "BackgroundScheduler", "submit_to_hub("):  # fmt: skip
         assert banned not in source

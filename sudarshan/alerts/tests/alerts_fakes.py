@@ -221,7 +221,9 @@ class FakeOpenAlgo:
 
     ``/api/v1/telegram/notify`` records each body in ``bodies`` and answers as configured;
     ``/api/v1/orderbook`` and ``/api/v1/tradebook`` serve ``orders`` and ``trades`` (with
-    ``"mode": "analyze"`` when ``analyze``), or fail with ``book_status``.
+    ``"mode": "analyze"`` when ``analyze``), or fail with ``book_status``. The market alerts'
+    push (M10.7) is opened with the push key, its items recorded in ``pushes``, and answered
+    with ``screens`` (or ``push_status``).
     """
 
     SENT = (200, {"status": "success", "message": "Notification sent successfully"})
@@ -241,6 +243,9 @@ class FakeOpenAlgo:
         self.trades: list[dict] = []
         self.analyze = False
         self.book_status = 200
+        self.pushes: list[list[dict]] = []
+        self.screens = 1
+        self.push_status = 200
         self._writers: set = set()
 
     async def __aenter__(self) -> FakeOpenAlgo:
@@ -292,6 +297,22 @@ class FakeOpenAlgo:
             return self.BAD_KEY
         return status, answer
 
+    def _push(self, body: bytes) -> tuple[int, dict]:
+        import os
+
+        from sudarshan.autologin.handoff import HandoffRejected, open_sealed
+        from sudarshan.vault import ALERTS_PUSH_INFO, fernet_for
+
+        fernet = fernet_for(os.environ["API_KEY_PEPPER"], ALERTS_PUSH_INFO)
+        try:
+            message = open_sealed(fernet, body, op="push", seen={}, max_bytes=128 * 1024)
+        except HandoffRejected:
+            return 403, {"status": "error", "message": "Forbidden"}
+        self.pushes.append(message["items"])
+        if self.push_status != 200:
+            return self.push_status, {"status": "error", "message": "refused"}
+        return 200, {"status": "success", "screens": self.screens}
+
     async def _serve(self, reader, writer) -> None:
         self._writers.add(writer)
         try:
@@ -313,7 +334,10 @@ class FakeOpenAlgo:
             return
         path = request_line.split(" ")[1]
         self.paths.append(path)
-        status, answer = self._answer(path, json.loads(body))
+        if path == "/sudarshan/alerts/internal/push":
+            status, answer = self._push(body)
+        else:
+            status, answer = self._answer(path, json.loads(body))
         data = json.dumps(answer).encode()
         try:
             writer.write(

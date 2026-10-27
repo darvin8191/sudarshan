@@ -15,6 +15,16 @@ Owner routes (OpenAlgo session, CSRF, the owner himself, and a limiter on each):
     GET    /sudarshan/alerts/api/prefs                 PUT {"telegram": bool, "app": bool}
     POST   /sudarshan/alerts/api/test
 
+The service's route (no session and no CSRF cookie: its body is sealed under ALERTS_PUSH_INFO,
+which only a process that can read OpenAlgo's .env can make; 404 to anything that came through
+nginx; no rate limit, as at the auto-login's hand-off):
+    POST   /sudarshan/alerts/internal/push             {"items": [{"event", "data"}]} sealed
+
+The owner's room (M10.7): each open app of the owner emits ``sudarshan_alerts_join`` and joins
+``sudarshan:alerts:owner`` when its session is the owner's; a push's items are emitted to that room
+only, never broadcast, and the answer is how many screens are in it, which the service records as
+the app delivery ("Shown on 2 open screens", "No app was open").
+
 How it forwards:
 - A new or edited alert gets its instrument key, tick size and expiry from the master contract
   (``get_symbol_info``), never from the page, and only with an Upstox login: the feed is
@@ -37,20 +47,30 @@ from functools import wraps
 
 import httpx
 from flask import Blueprint, jsonify, request, session
+from flask_socketio import join_room
 
 from database.token_db_enhanced import get_symbol_info
 from database.user_db import find_user_by_username
+from extensions import emit_from_any_thread, socketio
 from limiter import limiter
 from sudarshan.alerts import loopback
 from sudarshan.alerts.market.api import off_state
 from sudarshan.autologin.config import is_loopback_url
-from sudarshan.autologin.handoff import seal
+from sudarshan.autologin.handoff import (
+    SEAL_TTL_S,
+    HandoffRejected,
+    NonceBook,
+    NoncesFull,
+    open_sealed,
+    seal,
+)
 from sudarshan.feed.subscriptions import KEY_RE
-from sudarshan.vault import ALERTS_API_INFO, fernet_for, pepper_from
+from sudarshan.vault import ALERTS_API_INFO, ALERTS_PUSH_INFO, fernet_for, pepper_from
+from utils import real_threading
 from utils.httpx_client import get_httpx_client
 from utils.lazy import LazyInit
 from utils.logging import get_logger
-from utils.session import check_session_validity
+from utils.session import check_session_validity, is_session_valid
 from utils.thread_safe_cache import MISSING, LockedTTLCache
 
 logger = get_logger(__name__)
@@ -84,15 +104,42 @@ WORDS = {
     "busy": "Too many requests. Wait a minute, then try again.",
 }
 
+#: Every open app of the owner joins it (M10.7); nothing is broadcast.
+ROOM = "sudarshan:alerts:owner"
+NAMESPACE = "/"
+PUSH_EVENTS = frozenset({"sudarshan_market_alert", "sudarshan_market_alerts_state"})
+#: The largest sealed push this route takes, and its items (cross-design X9).
+MAX_PUSH_BYTES = 128 * 1024
+MAX_PUSH_ITEMS = 50
+#: Set by nginx on every proxied location: a request carrying any of them did not come from this
+#: server's sudarshan-alerts, which calls 127.0.0.1:5000 directly.
+PROXY_HEADERS = (
+    "X-Forwarded-For",
+    "X-Real-IP",
+    "Forwarded",
+    "X-Forwarded-Proto",
+    "X-Forwarded-Host",
+)
+
 _fernet_lazy = LazyInit(
     lambda: fernet_for(pepper_from(os.environ), ALERTS_API_INFO), "sudarshan-alerts-seal"
 )
+_push_fernet_lazy = LazyInit(
+    lambda: fernet_for(pepper_from(os.environ), ALERTS_PUSH_INFO), "sudarshan-alerts-push"
+)
+# Pushes come at most every 50 ms: the book holds 2 x 60 s of twice that (X9) and answers 503
+# past it rather than forget a nonce that could still be replayed.
+_push_nonces = NonceBook(2 * SEAL_TTL_S * 40, lock=real_threading.RLock())
 # Which problems have been logged in the last 10 minutes: one line each, not one per request.
 _warned = LockedTTLCache(maxsize=8, ttl=600)
 
 
 def _fernet():
     return _fernet_lazy.get()
+
+
+def _push_fernet():
+    return _push_fernet_lazy.get()
 
 
 def _service_url() -> str:
@@ -338,3 +385,79 @@ def set_prefs():
 @limiter.limit("6 per minute")
 def send_test():
     return _call("test")
+
+
+# -- the service's push and the owner's room (M10.7) ------------------------------------------
+
+
+def _screens() -> int:
+    """How many open apps are in the owner's room. One worker and no message queue, so every
+    client of this instance is in this process's manager and the count is exact (as
+    services/strategy_module/broadcast.py reads it)."""
+    server = getattr(socketio, "server", None)
+    rooms = getattr(getattr(server, "manager", None), "rooms", None)
+    if not isinstance(rooms, dict):
+        return 0
+    members = rooms.get(NAMESPACE, {}).get(ROOM)
+    try:
+        return len(members) if members is not None else 0
+    except TypeError:
+        return 0
+
+
+def _refused(status: int, message: str):
+    return jsonify({"status": "error", "message": message}), status
+
+
+@sudarshan_alerts_bp.route("/internal/push", methods=["POST"])
+def internal_push():
+    """sudarshan-alerts' items for the open apps: each emitted to the owner's room only, inside
+    this request, which is safe in every runtime (extensions.emit_from_any_thread); the answer is
+    the room's size. Never retried by the service: a late toast is no use."""
+    if any(header in request.headers for header in PROXY_HEADERS):
+        return _refused(404, "Not found")
+    length = request.content_length
+    if length is None:
+        return _refused(411, "Length required")
+    if length > MAX_PUSH_BYTES:
+        return _refused(413, "Too large")
+    try:
+        message = open_sealed(_push_fernet(), request.get_data(cache=False), op="push",
+                              seen=_push_nonces, max_bytes=MAX_PUSH_BYTES)  # fmt: skip
+    except NoncesFull:
+        _warn_once("push-busy", "Market alerts: too many pushes in the last two minutes")
+        return _refused(503, "Busy")
+    except HandoffRejected as exc:
+        _warn_once("push-refused", "Market alerts: refused a push that was not sealed by this "
+                   "server's sudarshan-alerts (%s)", exc)  # fmt: skip
+        return _refused(403, "Forbidden")
+    items = message.get("items")
+    if not isinstance(items, list) or len(items) > MAX_PUSH_ITEMS:
+        return _refused(400, "Bad push")
+    screens = _screens()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        event, data = item.get("event"), item.get("data")
+        if event in PUSH_EVENTS and isinstance(data, dict):
+            emit_from_any_thread(event, data, to=ROOM, namespace=NAMESPACE)
+    return jsonify({"status": "success", "screens": screens})
+
+
+@socketio.on("sudarshan_alerts_join")
+def _join_owner_room(data=None):
+    """An open app joins the owner's room, if its session is the owner's (the default namespace
+    has no connect-time check, so the join is where it is made)."""
+    owner = find_user_by_username()
+    if not is_session_valid() or owner is None or session.get("user") != owner.username:
+        return {"ok": False, "message": WORDS["owner_only"]}
+    join_room(ROOM)
+    return {"ok": True}
+
+
+@sudarshan_alerts_bp.record_once
+def _exempt_the_push_from_csrf(state):
+    """The service has no browser session to forge; its push is authenticated by the seal."""
+    csrf = state.app.extensions.get("csrf") or getattr(state.app, "csrf", None)
+    if csrf is not None:
+        csrf.exempt(internal_push)
