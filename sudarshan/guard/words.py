@@ -431,6 +431,95 @@ def settings_changed(names: list[str], looser: bool) -> str:
     return f"Risk settings changed{', loosened' if looser else ''}: {listed}."
 
 
+# -- the daily loss limit (M5.14, daily.py) ------------------------------------------------------
+
+
+def rupees(amount: float) -> str:
+    """₹4,000 or ₹1,23,456.50: India's grouping, paise only when there are some."""
+    sign = "-" if amount < 0 else ""
+    paise = round(abs(amount) * 100)
+    whole, part = divmod(paise, 100)
+    digits = str(whole)
+    if len(digits) > 3:
+        head, tail = digits[:-3], digits[-3:]
+        groups = []
+        while len(head) > 2:
+            groups.insert(0, head[-2:])
+            head = head[:-2]
+        if head:
+            groups.insert(0, head)
+        digits = ",".join([*groups, tail])
+    return f"{sign}₹{digits}" + (f".{part:02d}" if part else "")
+
+
+def daily_locked(
+    loss: float,
+    limit: float,
+    verdict: rules.Verdict,
+    *,
+    position: tuple[str, str, str],
+    side: int | None,
+) -> str:
+    """Why a new order is refused once the day's loss has reached the limit (amendment R5)."""
+    words = [
+        f"New orders are refused for today: the day's loss of {rupees(abs(loss))} has reached "
+        f"your daily limit of {rupees(abs(limit))} (Settings > Risk)."
+    ]
+    if verdict.reason == rules.CROSSES:
+        words.append(
+            f"This order would close {trader_name(position)} and open it the other way; to "
+            f"exit, {_verb(side)} {verdict.room}."
+        )
+    elif verdict.reason == rules.OCO:
+        words.append(
+            "A two-leg GTT opens a position at Upstox, so it counts as a new order; for a stop "
+            "or a target on a position you hold, place a single GTT."
+        )
+    words += [EXITS_GO, "New orders open again tomorrow."]
+    return " ".join(words)
+
+
+def daily_unreadable(pipe: str) -> str:
+    """Why an order is refused while the day's P&L cannot be read (a two-leg GTT: new risk
+    whatever the book says)."""
+    return (
+        f"New orders are paused: today's P&L could not be read from {_where(pipe)}, so the daily "
+        f"loss limit cannot be checked. {EXITS_GO} Try again in a few seconds."
+    )
+
+
+def daily_lock_told(loss: float, limit: float, pipe: str) -> str:
+    """Telegram, once, when the day locks."""
+    where = "" if pipe == "live" else " in the sandbox"
+    return (
+        f"Daily loss limit reached{where}: the day's loss is {rupees(abs(loss))} against your "
+        f"limit of {rupees(abs(limit))}. New orders are refused until tomorrow; exits and "
+        "cancels still go."
+    )
+
+
+def daily_loosened_told(before: float, after: float | None) -> str:
+    """Telegram, when the daily limit is loosened (raised or turned off) on a day it has
+    locked."""
+    if after is None:
+        return (
+            f"The daily loss limit of {rupees(before)} was turned off after it locked today. "
+            "Today's lock stays: new orders open again tomorrow."
+        )
+    return (
+        f"The daily loss limit was raised from {rupees(before)} to {rupees(after)} after it "
+        "locked today. Today's lock stays: new orders open again tomorrow, under the new limit."
+    )
+
+
+def daily_not_checked(pipe: str) -> str:
+    """The daily limit could not be checked for an order, which went (the audit and banner)."""
+    return (
+        f"Daily loss limit not being checked: positions cannot be read from {_where(pipe)}. "
+        "An order whose book cannot be read goes, because it may be an exit."
+    )
+
+
 #: Every fixed sentence, for the tests that scan them.
 FIXED = (
     RESUME_HOW,

@@ -29,6 +29,7 @@ vi.mock('@/components/socket/SocketProvider', () => ({
   useSocketContext: () => ({ socket, playAlertSound: () => {} }),
 }))
 
+import { useThemeStore } from '@/stores/themeStore'
 import { resetKillSwitchForTests } from './killSwitch'
 import { KillSwitchNote, RiskBanner, RiskChip } from './RiskBanner'
 
@@ -73,6 +74,7 @@ function renderShell() {
 beforeEach(() => {
   resetKillSwitchForTests()
   socket.handlers.clear()
+  useThemeStore.setState({ appMode: 'live' })
 })
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -138,11 +140,67 @@ describe('the kill switch banner and chip', () => {
   })
 })
 
+describe("the daily loss limit's lock", () => {
+  const LIVE_LOCKED = { live: { locked: true }, sandbox: { locked: false } }
+
+  it('is said in words and a lock, for the book the page trades', async () => {
+    serve({ status: 200, body: { data: { stage: 'on', kill_switch: OFF, daily: LIVE_LOCKED } } })
+    renderShell()
+    const banner = await screen.findByTestId('risk-banner')
+    expect(banner).toHaveTextContent(
+      'Daily loss limit reached · new orders refused until tomorrow · exits and cancels work'
+    )
+    expect(banner.querySelector('a')).toHaveClass('sd-risk-banner--day')
+    expect(banner.querySelector('svg')).toHaveAttribute('aria-hidden', 'true')
+    expect(screen.getByRole('link')).toHaveAttribute('href', '/risk')
+    expect(screen.getByTestId('risk-chip')).toHaveTextContent('Day locked')
+    expect(screen.getByTestId('kill-switch-note')).toHaveTextContent(
+      'Daily loss limit reached: a new order is refused until tomorrow. An order that closes a position you hold still goes.'
+    )
+  })
+
+  it("in Analyze mode is the sandbox's lock, not Live's", async () => {
+    useThemeStore.setState({ appMode: 'analyzer' })
+    const fetch = serve(
+      { status: 200, body: { data: { stage: 'on', kill_switch: OFF, daily: LIVE_LOCKED } } },
+      {
+        status: 200,
+        body: {
+          data: { stage: 'on', kill_switch: OFF, daily: { sandbox: { locked: true } } },
+        },
+      }
+    )
+    renderShell()
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1))
+    expect(screen.queryByTestId('risk-banner')).toBeNull()
+    act(() => emit('sudarshan_risk_day', { pipe: 'sandbox', locked: true }))
+    expect(await screen.findByTestId('risk-banner')).toHaveTextContent('Daily loss limit reached')
+    expect(fetch).toHaveBeenCalledTimes(2) // the day locking is read again, then shown
+  })
+
+  it('gives way to the kill switch when both hold', async () => {
+    serve({ status: 200, body: { data: { stage: 'on', kill_switch: ON, daily: LIVE_LOCKED } } })
+    renderShell()
+    expect(await screen.findByTestId('risk-banner')).toHaveTextContent('Kill switch on')
+    expect(screen.getByTestId('risk-chip')).toHaveTextContent('Kill switch on')
+    act(() => emit('sudarshan_risk', OFF)) // resumed: the day's lock still holds
+    await waitFor(() =>
+      expect(screen.getByTestId('risk-banner')).toHaveTextContent('Daily loss limit reached')
+    )
+  })
+})
+
 describe('the D look', () => {
   const RISK = join(process.cwd(), 'src', 'sudarshan', 'risk')
 
   it('has no dark styles in the risk layer', () => {
-    for (const file of ['RiskBanner.tsx', 'TurnOnSheet.tsx', 'ResumeSheet.tsx', 'parts.tsx']) {
+    for (const file of [
+      'RiskBanner.tsx',
+      'TurnOnSheet.tsx',
+      'ResumeSheet.tsx',
+      'parts.tsx',
+      'DailyCard.tsx',
+    ]) {
       expect(readFileSync(join(RISK, file), 'utf8')).not.toMatch(/\bdark:/)
     }
     const page = readFileSync(join(process.cwd(), 'src', 'sudarshan', 'pages', 'Risk.tsx'), 'utf8')
@@ -158,5 +216,13 @@ describe('the D look', () => {
     expect(banner).toContain('background: var(--down-tint)')
     expect(banner).toContain('color: var(--down)')
     expect(banner).toContain('min-height: 3rem') // a 48dp target on a phone
+  })
+
+  it("draws the day's lock from the attention tint with its own ink", () => {
+    const css = readFileSync(join(process.cwd(), 'src', 'sudarshan', 'theme.css'), 'utf8')
+    const start = css.indexOf('.sd-risk-banner--day,')
+    const day = css.slice(start, css.indexOf('}', start))
+    expect(day).toContain('background: var(--gold-tint)')
+    expect(day).toContain('color: var(--warning-text)')
   })
 })

@@ -51,6 +51,23 @@ def every_sentence() -> list[str]:
             words.order_not_found(pipe),
         ]
     out += kill_switch_sentences()
+    out += daily_sentences()
+    return out
+
+
+def daily_sentences() -> list[str]:
+    out = []
+    for reason in (rules.OPENS, rules.ADDS, rules.CROSSES, rules.OCO, rules.UNKNOWN):
+        for side in (rules.BUY, rules.SELL, None):
+            verdict = _verdict(reason, 65 if reason == rules.CROSSES else 0)
+            out.append(words.daily_locked(-4125.5, 4000.0, verdict, position=POSITION, side=side))
+    for pipe in ("live", "sandbox"):
+        out += [
+            words.daily_unreadable(pipe),
+            words.daily_lock_told(-4125.5, 4000.0, pipe),
+            words.daily_not_checked(pipe),
+        ]
+    out += [words.daily_loosened_told(4000.0, after) for after in (6000.0, None)]
     return out
 
 
@@ -158,6 +175,22 @@ def test_the_preview_says_in_numbers_what_turning_it_on_cancels():
     assert words.ks_preview({"orders": 2, "gtts": 1, "stops": 0}) == (
         "2 open orders and 1 GTT will be cancelled."
     )
+
+
+@pytest.mark.parametrize(
+    ("amount", "shown"),
+    [
+        (4000, "₹4,000"),
+        (4125.5, "₹4,125.50"),
+        (123456.5, "₹1,23,456.50"),
+        (10_000_000, "₹1,00,00,000"),
+        (0.5, "₹0.50"),
+        (999, "₹999"),
+        (-4000, "-₹4,000"),
+    ],
+)
+def test_rupees_are_grouped_the_indian_way(amount, shown):
+    assert words.rupees(amount) == shown
 
 
 def test_a_status_code_in_a_sentence_is_still_caught():

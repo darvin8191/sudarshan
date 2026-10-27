@@ -28,6 +28,14 @@ If the gate itself breaks, an order passes only when nothing is refusing new ris
 switch is on, or its state could not be read, it is refused (fail closed); a read of the book
 that failed refuses too, with a sentence pointing at the Upstox app for an urgent exit.
 
+The daily loss limit (M5.14, daily.py) refuses new risk the same way once the day's loss has
+reached it: the first order to see the figure at the limit writes the day's lock, and the lock
+holds every new order in that pipe until India's date changes, whatever the figure does after.
+While a limit is set, each order's step 2 also yields the day's figure, from the same read of the
+book. A book that cannot be read leaves the order unjudged, so under the daily limit alone it
+goes, and that is noted (an exit must never be refused for a read that failed); a two-leg GTT,
+new risk whatever the book says, is refused instead.
+
 The lock is a real one from utils.real_threading, held for dict work only: correct under the
 eventlet worker (no I/O, no logging and no wait inside it, so the hub never stalls on it), under
 gthread's real threads, and on the development server.
@@ -41,15 +49,16 @@ import time
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from sudarshan.books.exit_guard import EXIT_SHOWS_WITHIN_S
 from utils import real_threading
 from utils.broker_backpressure import BusyResponse
 from utils.logging import get_logger
+from utils.thread_safe_cache import LockedTTLCache
 
-from . import flag, readers, rules, words
+from . import daily, flag, readers, rules, words
 from . import store as risk_store
 from .store import IST, KillSwitchState
 
@@ -77,14 +86,23 @@ NOTE_KEPT_S = 60.0
 #: The gate's own time is kept for this many decisions, for its p50 and p95 on the status route
 #: (sessions S1 and G3 record them).
 TIMED_KEPT = 500
+#: The day's figure may come from a book read this long ago when Upstox cannot be read just now
+#: (design section 5); an order is never judged on one that old.
+DAY_BOOK_REUSE_S = 15.0
+#: A segment's session window, read from the market calendar, is kept this long.
+SESSION_KEPT_S = 600.0
+#: The daily limit could not be checked this recently: the banner says so.
+UNCHECKED_SHOWN_S = 60.0
 
 # Machine codes, for the audit and SUDARSHAN's own endpoints, never for a sentence.
 KILL_SWITCH_ACTIVE = "KILL_SWITCH_ACTIVE"
 RISK_STATE_UNREADABLE = "RISK_STATE_UNREADABLE"
 GUARD_UNAVAILABLE = "GUARD_UNAVAILABLE"
 GUARD_ERROR = "GUARD_ERROR"
+DAILY_LOSS_LIMIT = "DAILY_LOSS_LIMIT"
 
 PLACE, MODIFY, GTT_PLACE, GTT_MODIFY = "place", "modify", "gtt_place", "gtt_modify"
+_UNREAD = object()
 REFUSED, ANSWERED = "refused", "answered"
 
 
@@ -161,6 +179,19 @@ class Decision:
 
 
 @dataclass(frozen=True)
+class _Daily:
+    """The daily loss limit as it stands for one order's pipe today, read before deciding."""
+
+    day: str = ""  # India's date, YYYY-MM-DD
+    limit: float | None = None
+    lock: risk_store.DayLock | None = None  # written today, so it holds whatever the limit is now
+
+    @property
+    def active(self) -> bool:
+        return self.lock is not None or self.limit is not None
+
+
+@dataclass(frozen=True)
 class _Refusing:
     """What refuses new risk right now."""
 
@@ -189,6 +220,11 @@ class Gate:
         self._read = read or readers
         self._notes: dict[str, _Note] = {}  # audit rows by key, with counts not yet written
         self._timed: deque[float] = deque(maxlen=TIMED_KEPT)  # seconds per decision
+        # Today's lock per pipe: (pipe, day) -> the lock, or None when read and not there. Only
+        # this process writes locks (one worker), so a None read once stays true until it does.
+        self._day_locks: dict[tuple[str, str], risk_store.DayLock | None] = {}
+        self._sessions = LockedTTLCache(maxsize=32, ttl=SESSION_KEPT_S)
+        self._unchecked: dict[str, float] = {}  # pipe -> monotonic: the daily limit unchecked
         self._problem: tuple[float, str, str] | None = None  # (epoch, kind, words): the last one
 
     def _the_store(self) -> risk_store.RiskStore:
@@ -326,24 +362,41 @@ class Gate:
 
     def _admit(self, order: Order) -> Decision:
         self._load_state()
+        day = self._daily(order)  # the limit and today's lock: reads, outside the lock
         with self._lock:
             now = time.monotonic()
             self._forget(now)
             refusing = self._refusing()
-            if refusing is None:
+            if refusing is None and not day.active:
                 return Decision(token=self._register(order, None, now))
         known, facts = self._facts(order, refusing)  # reads: outside the lock
+        lock, day_unread = None, False
+        if refusing is None:
+            lock, day_unread = self._day_facts(known, facts, day)  # the figure, and its lock
         with self._lock:
             now = time.monotonic()
             refusing = self._refusing()  # it may have changed while the book was read
-            if refusing is None or facts.pass_through:
+            if lock is None and day.active:
+                lock = self._day_locks.get((known.pipe, day.day))  # another order's, meanwhile
+            if facts.pass_through or (
+                refusing is None and lock is None and not day_unread and not facts.unreadable
+            ):
                 return Decision(token=self._register(known, None, now))
             if facts.unreadable:
-                return self._unreadable(known, refusing)
+                if refusing is not None:
+                    return self._unreadable(known, refusing)
+                return self._day_unjudged(known, now)
             verdict, sent_at = self._judge(known, facts, now)
             if verdict.reducing:
                 return Decision(token=self._register(known, verdict, now))
-            return self._refuse(known, refusing, verdict, sent_at)
+            if refusing is not None:
+                return self._refuse(known, refusing, verdict, sent_at)
+            if lock is not None:
+                return self._refuse_daily(known, lock, verdict)
+            detail = {"reason": verdict.reason, "position": verdict.position}
+            return Decision(
+                True, words.daily_unreadable(known.pipe), GUARD_UNAVAILABLE, detail=detail
+            )
 
     def _refusing(self) -> _Refusing | None:
         """What refuses new risk now; call under the lock."""
@@ -354,7 +407,7 @@ class Gate:
 
     # -- reading what an order does, outside the lock ---------------------------------------------
 
-    def _facts(self, order: Order, refusing: _Refusing) -> tuple[Order, _Facts]:
+    def _facts(self, order: Order, refusing: _Refusing | None) -> tuple[Order, _Facts]:
         try:
             if order.action == MODIFY:
                 return self._modify_facts(order, refusing)
@@ -367,7 +420,7 @@ class Gate:
             logger.warning(f"The risk check could not read what an order does: {exc}")
             return order, _Facts(unreadable=True)
 
-    def _position(self, order: Order, refusing: _Refusing) -> int:
+    def _position(self, order: Order, refusing: _Refusing | None) -> int:
         """p for the order's position, from the broker's own book."""
         if order.pipe == SANDBOX:
             return self._read.sandbox_position(
@@ -378,7 +431,12 @@ class Gate:
             return 0  # no instrument: nothing can be held in it, and the broker sends nothing
         product = rules.position_product(LIVE, order.product)
         rows = self._read.live_cached_rows(order.owner)
-        if rows is None and refusing.state is not None and refusing.state.on:
+        if (
+            rows is None
+            and refusing is not None
+            and refusing.state is not None
+            and refusing.state.on
+        ):
             recent = self._recent_rows(order.owner)
             if recent is not None and rules.upstox_position(recent, instrument, product) == 0:
                 if not self._has_sends(order.key):
@@ -400,7 +458,7 @@ class Gate:
         with self._lock:
             return any(send.order.key == key for send in self._sends.values())
 
-    def _modify_facts(self, order: Order, refusing: _Refusing) -> tuple[Order, _Facts]:
+    def _modify_facts(self, order: Order, refusing: _Refusing | None) -> tuple[Order, _Facts]:
         """The order a modify changes, as the broker has it, and the position it acts on."""
         if order.pipe == LIVE:
             working = self._read.live_working_order(order.owner, order.ref)
@@ -426,6 +484,8 @@ class Gate:
             rows = self._read.live_cached_rows(order.owner)
             if rows is None:
                 rows = self._read.live_rows(order.owner)
+            with self._lock:
+                self._rows = (order.owner, time.monotonic(), rows)
             position = rules.upstox_position(rows, working.instrument, working.product)
         else:
             position = self._read.sandbox_position(
@@ -449,6 +509,164 @@ class Gate:
             side=gtt.side,
             trigger_type=gtt.trigger_type,
         )
+
+    # -- the daily loss limit, outside the lock --------------------------------------------------
+
+    def _daily(self, order: Order) -> _Daily:
+        """The limit and today's lock for the order's pipe (cached reads)."""
+        try:
+            limit = self._the_store().settings().daily_loss_limit
+        except Exception:
+            logger.exception("The risk guard could not read the daily loss limit")
+            limit = None
+        day = daily.day_of(datetime.now(UTC)).isoformat()
+        return _Daily(day=day, limit=limit, lock=self._day_lock(order.pipe, day))
+
+    def _day_lock(self, pipe: str, day: str) -> risk_store.DayLock | None:
+        """Today's lock for ``pipe``: read once a day from the risk database, then held here."""
+        key = (pipe, day)
+        with self._lock:
+            if key in self._day_locks:
+                return self._day_locks[key]
+        try:
+            lock = self._the_store().day_lock(pipe, day)
+        except Exception:
+            logger.exception("The risk guard could not read today's lock")
+            return None  # read again next time
+        with self._lock:
+            for other in [k for k in self._day_locks if k[1] != day]:
+                del self._day_locks[other]  # an earlier day's
+            return self._day_locks.setdefault(key, lock)
+
+    def _day_facts(
+        self, order: Order, facts: _Facts, day: _Daily
+    ) -> tuple[risk_store.DayLock | None, bool]:
+        """Today's lock: the one written, or one written now because the figure has reached the
+        limit in the order's segment's session. ``(lock, True)`` when the figure is unreadable."""
+        if day.lock is not None or day.limit is None or facts.pass_through or facts.unreadable:
+            return day.lock, False
+        at = datetime.now(UTC)
+        if not self._in_session(order.exchange, at):
+            return None, False
+        try:
+            figure = self._day_figure(order)
+        except readers.Unreadable as exc:
+            logger.warning(f"The daily loss limit could not be checked: {exc}")
+            with self._lock:
+                self._unchecked[order.pipe] = time.monotonic()
+            return None, True
+        if not daily.reached(day.limit, figure):
+            return None, False
+        return self._lock_day(order.pipe, day, figure), False
+
+    def _in_session(self, exchange: str, at: datetime) -> bool:
+        """Whether the segment is in session now, by the exchange's own hours (R11)."""
+        today = at.astimezone(IST).date()
+        key = (exchange, today.isoformat())
+        window = self._sessions.get(key, _UNREAD)
+        if window is _UNREAD:
+            try:
+                from database.market_calendar_db import get_effective_session_window
+
+                window = get_effective_session_window(today, exchange)
+            except Exception:
+                logger.exception("The market calendar could not be read for the daily limit")
+                # Looked at from India's morning on: never in the hours after midnight, when
+                # Upstox's book can still show the day before.
+                return at.astimezone(IST).hour >= 9
+            if window is not None:  # "closed" is asked again: a read that failed says the same
+                self._sessions[key] = window
+        return daily.in_session(window, at)
+
+    def _day_figure(self, order: Order) -> daily.DayFigure:
+        if order.pipe == SANDBOX:
+            return self._read.sandbox_day(order.owner)
+        return daily.live_figure(self._rows_for_day(order.owner))
+
+    def _rows_for_day(self, owner: str) -> list:
+        """The book the order was just judged on; else a read, else one up to 15 s old."""
+        with self._lock:
+            kept = self._rows
+        mine = kept is not None and kept[0] == owner
+        if mine and time.monotonic() - kept[1] <= 1.0:
+            return kept[2]
+        try:
+            rows = self._read.live_cached_rows(owner)
+            if rows is None:
+                rows = self._read.live_rows(owner)
+        except readers.Unreadable:
+            if mine and time.monotonic() - kept[1] <= DAY_BOOK_REUSE_S:
+                return kept[2]
+            raise
+        with self._lock:
+            self._rows = (owner, time.monotonic(), rows)
+        return rows
+
+    def _lock_day(self, pipe: str, day: _Daily, figure: daily.DayFigure) -> risk_store.DayLock:
+        """Write today's lock; the first order here to see the breach says so, once."""
+        try:
+            lock = self._the_store().lock_day(pipe, day.day, figure.total, float(day.limit))
+        except Exception:
+            logger.exception("Today's lock could not be saved; it holds in this process")
+            lock = None
+        if lock is None:
+            lock = risk_store.DayLock(
+                pipe, day.day, datetime.now(UTC), figure.total, float(day.limit)
+            )
+        with self._lock:
+            kept = self._day_locks.get((pipe, day.day))
+            first = kept is None
+            if first:
+                self._day_locks[(pipe, day.day)] = lock
+            else:
+                lock = kept
+        if first:
+            self._announce_day(lock, figure)
+        return lock
+
+    def _announce_day(self, lock: risk_store.DayLock, figure: daily.DayFigure) -> None:
+        """The day locked: the audit, Telegram and every open screen (never fails an order)."""
+        said = words.daily_lock_told(lock.figure, lock.loss_limit, lock.pipe)
+        try:
+            self._the_store().audit(
+                "daily_lock",
+                said,
+                pipe=lock.pipe,
+                surface=_surface(),
+                detail={
+                    "figure": lock.figure,
+                    "limit": lock.loss_limit,
+                    "approximate": figure.approximate,
+                },
+            )
+        except Exception:
+            logger.exception("Today's lock could not be written to the audit")
+        try:
+            from database.user_db import find_user_by_username
+
+            from .killswitch import Owner, _tell
+
+            admin = find_user_by_username()
+            if admin is not None:
+                _tell(Owner(admin.username, "app", "risk guard"), said)
+        except Exception:
+            logger.exception("Today's lock could not be told on Telegram")
+        try:
+            from extensions import emit_from_any_thread
+
+            emit_from_any_thread("sudarshan_risk_day", {"pipe": lock.pipe, "locked": True})
+        except Exception:
+            logger.exception("Today's lock could not be told to the open screens")
+
+    def day_lock(self, pipe: str) -> risk_store.DayLock | None:
+        """Today's lock for ``pipe``, if the day has locked (the status routes)."""
+        return self._day_lock(pipe, daily.day_of(datetime.now(UTC)).isoformat())
+
+    def day_unchecked(self, pipe: str) -> bool:
+        """Whether the daily limit could not be checked in the last minute (the banner)."""
+        with self._lock:
+            at = self._unchecked.get(pipe)
+        return at is not None and time.monotonic() - at <= UNCHECKED_SHOWN_S
 
     # -- deciding, under the lock -------------------------------------------------------------------
 
@@ -551,6 +769,30 @@ class Gate:
             claim_sent_at=sent_at,
         )
         return Decision(True, text, KILL_SWITCH_ACTIVE, detail=detail)
+
+    def _refuse_daily(
+        self, order: Order, lock: risk_store.DayLock, verdict: rules.Verdict
+    ) -> Decision:
+        detail = {
+            "reason": verdict.reason,
+            "position": verdict.position,
+            "room": verdict.room,
+            "figure": lock.figure,
+            "limit": lock.loss_limit,
+        }
+        text = words.daily_locked(
+            lock.figure, lock.loss_limit, verdict, position=order.name, side=order.side
+        )
+        return Decision(True, text, DAILY_LOSS_LIMIT, detail=detail)
+
+    def _day_unjudged(self, order: Order, now: float) -> Decision:
+        """Under the daily limit alone, an order whose book could not be read goes, noted: it
+        may be an exit, and an exit is never refused for a read that failed."""
+        self._unchecked[order.pipe] = now
+        token = self._register(order, None, now)
+        return Decision(
+            token=token, words=words.daily_not_checked(order.pipe), code=GUARD_UNAVAILABLE
+        )
 
     def _unreadable(self, order: Order, refusing: _Refusing) -> Decision:
         since = None if refusing.state is None else _hhmm(refusing.state.since)

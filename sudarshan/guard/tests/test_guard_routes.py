@@ -25,7 +25,7 @@ from guard_world import (
 )
 
 import blueprints.sudarshan_risk as risk_routes
-from sudarshan.guard import flag, gate, killswitch, settings_rules, words
+from sudarshan.guard import daily, flag, gate, killswitch, settings_rules, words
 from sudarshan.guard.store import KillSwitchState, utcnow
 
 REPO = Path(__file__).resolve().parents[3]
@@ -290,10 +290,88 @@ def test_the_banner_s_read_carries_the_switch_and_reads_no_broker(world, monkeyp
     monkeypatch.setattr(readers, "upstox_kill_switch", no_broker)
     monkeypatch.setattr(killswitch, "owner_for", no_broker)
     data = _owner_call(client, "get", "/sudarshan/risk/state").get_json()["data"]
-    assert data == {"stage": "sandbox", "kill_switch": killswitch.public_state(KillSwitchState())}
+    assert data == {
+        "stage": "sandbox",
+        "kill_switch": killswitch.public_state(KillSwitchState()),
+        "daily": {"sandbox": {"locked": False}},
+    }
     gate.GATE.set_state(KillSwitchState(on=True, since=utcnow(), surface="telegram"))
     data = _owner_call(client, "get", "/sudarshan/risk/state").get_json()["data"]
     assert data["kill_switch"]["on"] is True and data["kill_switch"]["surface"] == "telegram"
+
+
+def _today() -> str:
+    from datetime import UTC, datetime
+
+    return daily.day_of(datetime.now(UTC)).isoformat()
+
+
+def _lock_today(pipe: str, figure: float, limit: float, monkeypatch) -> None:
+    """Lock the day as an order at the limit does: the gate writes it and keeps it."""
+    import extensions
+
+    monkeypatch.setattr(extensions, "emit_from_any_thread", lambda *args, **kwargs: None)
+    gate.GATE._lock_day(pipe, gate._Daily(_today(), limit), daily.DayFigure(figure, 0.0))
+
+
+def test_the_banner_s_read_says_which_covered_book_the_day_has_locked(world, monkeypatch):
+    client, account, store = world
+    store.lock_day("sandbox", _today(), -4100.0, 4000.0)  # before a restart: read at first use
+    data = _owner_call(client, "get", "/sudarshan/risk/state").get_json()["data"]
+    assert data["daily"] == {"sandbox": {"locked": True}}  # "sandbox": Live is not covered
+    monkeypatch.setenv(flag.ENV, "on")
+    data = _owner_call(client, "get", "/sudarshan/risk/state").get_json()["data"]
+    assert data["daily"] == {"live": {"locked": False}, "sandbox": {"locked": True}}
+
+
+def test_status_shows_today_s_figure_the_limit_and_the_lock(world, monkeypatch):
+    client, account, store = world
+    from sudarshan.guard import readers
+
+    monkeypatch.setattr(readers, "sandbox_day", lambda user: daily.DayFigure(-3000.0, -250.5))
+    store.save_settings("test", daily_loss_limit=4000.0)
+    shown = _owner_call(client, "get", "/sudarshan/risk/status").get_json()["data"]["daily"]
+    assert set(shown) == {"sandbox"}
+    day = shown["sandbox"]
+    assert (day["figure"], day["approximate"], day["reached"]) == (-3250.5, False, False)
+    assert (day["lock"], day["unchecked"]) == (None, False) and day["as_of"]
+
+    monkeypatch.setattr(readers, "sandbox_day", lambda user: daily.DayFigure(-4000.0, 0.0))
+    _lock_today("sandbox", -4000.0, 4000.0, monkeypatch)
+    day = _owner_call(client, "get", "/sudarshan/risk/status").get_json()["data"]["daily"]
+    day = day["sandbox"]
+    assert day["reached"] is True
+    assert (day["lock"]["figure"], day["lock"]["limit"]) == (-4000.0, 4000.0)
+
+
+def test_status_reads_the_live_figure_from_upstox_s_rows(world, monkeypatch):
+    client, account, store = world
+    from sudarshan.guard import readers
+
+    monkeypatch.setenv(flag.ENV, "on")
+    owner = killswitch.Owner(OWNER, "app", OWNER, auth_token="token", broker="upstox")
+    monkeypatch.setattr(killswitch, "owner_for", lambda *args, **kwargs: owner)
+    monkeypatch.setattr(readers, "upstox_kill_switch", lambda auth: [])
+    monkeypatch.setattr(readers, "sandbox_day", lambda user: daily.DayFigure(0.0, 0.0))
+    monkeypatch.setattr(readers, "live_cached_rows", lambda auth: None)
+    rows = [{"realised": -1200.0, "unrealised": 200.0}, {"pnl": -50.0}]  # one has no day figures
+    monkeypatch.setattr(readers, "live_rows", lambda auth: rows)
+    live = _owner_call(client, "get", "/sudarshan/risk/status").get_json()["data"]["daily"]["live"]
+    assert (live["figure"], live["approximate"], live["reached"]) == (-1050.0, True, False)
+
+
+def test_a_figure_that_cannot_be_read_is_shown_as_unknown(world, monkeypatch):
+    client, account, store = world
+    from sudarshan.guard import readers
+
+    def unreadable(user):
+        raise readers.Unreadable("sandbox day")
+
+    monkeypatch.setattr(readers, "sandbox_day", unreadable)
+    answer = _owner_call(client, "get", "/sudarshan/risk/status")
+    assert answer.status_code == 200
+    day = answer.get_json()["data"]["daily"]["sandbox"]
+    assert (day["figure"], day["reached"]) == (None, False)
 
 
 def test_status_reads_upstox_s_own_kill_switch_when_logged_in_to_upstox(world, monkeypatch):
@@ -437,6 +515,25 @@ def test_a_new_phrase_needs_the_old_one_and_is_never_shown(world):
         "kesari"
         not in _owner_call(client, "get", "/sudarshan/risk/settings").get_data(as_text=True).lower()
     )
+
+
+def test_loosening_the_daily_limit_on_a_locked_day_is_told_and_the_lock_stays(world, monkeypatch):
+    client, account, store = world
+    told = []
+    monkeypatch.setattr(killswitch, "_tell", lambda owner, text: told.append((owner.user, text)))
+    assert _put(client, {"daily_loss_limit": 4000.0}).status_code == 200
+    assert _put(client, {"daily_loss_limit": 5000.0}, phrase="STOP").status_code == 200
+    assert told == []  # not locked: a change like any other
+    _lock_today("sandbox", -5000.0, 5000.0, monkeypatch)
+    assert _put(client, {"daily_loss_limit": 3000.0}).status_code == 200  # tighter: nothing told
+    assert _put(client, {"daily_loss_limit": 6000.0}, phrase="STOP").status_code == 200
+    assert _put(client, {"daily_loss_limit": None}, phrase="STOP").status_code == 200
+    assert told == [
+        (OWNER, words.daily_lock_told(-5000.0, 5000.0, "sandbox")),
+        (OWNER, words.daily_loosened_told(3000.0, 6000.0)),
+        (OWNER, words.daily_loosened_told(6000.0, None)),
+    ]
+    assert gate.GATE.day_lock("sandbox") is not None
 
 
 def test_the_settings_screen_reads_every_setting_but_the_phrase(world):

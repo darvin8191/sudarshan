@@ -1,0 +1,83 @@
+{
+  "about": "Today's P&L from Upstox's raw short-term position rows (M5.14, sudarshan/guard/daily.py). Rows as GET /v2/portfolio/short-term-positions returns them; figures in rupees, gross.",
+  "figures": [
+    {
+      "name": "intraday long, open",
+      "rows": [
+        {"instrument_token": "NSE_FO|49213", "exchange": "NFO", "product": "I", "quantity": 65,
+         "overnight_quantity": 0, "day_buy_quantity": 65, "day_sell_quantity": 0,
+         "average_price": 120.0, "last_price": 99.99, "realised": 0.0, "unrealised": -1300.65,
+         "pnl": -1300.65}
+      ],
+      "realised": 0.0, "unrealised": -1300.65, "approximate": false
+    },
+    {
+      "name": "closed today: what was booked stays in the day",
+      "rows": [
+        {"instrument_token": "NSE_FO|49214", "exchange": "NFO", "product": "I", "quantity": 0,
+         "overnight_quantity": 0, "day_buy_quantity": 65, "day_sell_quantity": 65,
+         "average_price": 0.0, "last_price": 150.0, "realised": 2210.0, "unrealised": 0.0,
+         "pnl": 2210.0}
+      ],
+      "realised": 2210.0, "unrealised": 0.0, "approximate": false
+    },
+    {
+      "name": "carried from an earlier day: the day's move, not the position's net",
+      "rows": [
+        {"instrument_token": "NSE_FO|50001", "exchange": "NFO", "product": "D", "quantity": 30,
+         "overnight_quantity": 30, "day_buy_quantity": 0, "day_sell_quantity": 0,
+         "average_price": 500.0, "last_price": 440.0, "close_price": 455.0, "realised": 0.0,
+         "unrealised": -450.0, "pnl": -1800.0}
+      ],
+      "realised": 0.0, "unrealised": -450.0, "approximate": false
+    },
+    {
+      "name": "carried, part closed today",
+      "rows": [
+        {"instrument_token": "NSE_FO|50001", "exchange": "NFO", "product": "D", "quantity": 15,
+         "overnight_quantity": 30, "day_buy_quantity": 0, "day_sell_quantity": 15,
+         "average_price": 500.0, "last_price": 441.0, "realised": 300.0, "unrealised": -210.0,
+         "pnl": -1650.0}
+      ],
+      "realised": 300.0, "unrealised": -210.0, "approximate": false
+    },
+    {
+      "name": "a row without the day's figures: its net, and the figure is approximate",
+      "rows": [
+        {"instrument_token": "NSE_EQ|INE062A01020", "exchange": "NSE", "product": "I",
+         "quantity": 10, "average_price": 800.0, "last_price": 750.0, "pnl": -500.0},
+        {"instrument_token": "NSE_FO|49213", "exchange": "NFO", "product": "I", "quantity": 65,
+         "realised": 100.0, "unrealised": -50.0, "pnl": 50.0}
+      ],
+      "realised": 100.0, "unrealised": -550.0, "approximate": true
+    },
+    {
+      "name": "figures as strings, a missing one as nothing, and rows that are not rows",
+      "rows": [
+        {"instrument_token": "NSE_FO|49213", "exchange": "NFO", "product": "I", "quantity": 65,
+         "realised": "120.5", "unrealised": "-20", "pnl": "100.5"},
+        {"instrument_token": "NSE_FO|49214", "exchange": "NFO", "product": "I", "quantity": 0,
+         "realised": "-75.25", "unrealised": null, "pnl": "-75.25"},
+        {"instrument_token": "NSE_FO|49215", "exchange": "NFO", "product": "I", "quantity": 0,
+         "realised": "NaN", "unrealised": "", "pnl": 0},
+        "not a row",
+        null
+      ],
+      "realised": 45.25, "unrealised": -20.0, "approximate": false
+    },
+    {
+      "name": "an empty book",
+      "rows": [],
+      "realised": 0.0, "unrealised": 0.0, "approximate": false
+    }
+  ],
+  "limits": [
+    {"name": "exactly at the limit counts as reached", "limit": 4000, "realised": -3000, "unrealised": -1000, "reached": true},
+    {"name": "a paisa short of it is not", "limit": 4000, "realised": -3000, "unrealised": -999.99, "reached": false},
+    {"name": "past it", "limit": 4000, "realised": -4200.5, "unrealised": 0, "reached": true},
+    {"name": "a limit written as a loss means the same", "limit": -4000, "realised": 0, "unrealised": -4000, "reached": true},
+    {"name": "a profit never reaches it", "limit": 4000, "realised": 5000, "unrealised": 0, "reached": false},
+    {"name": "booked loss offset by open profit", "limit": 4000, "realised": -6000, "unrealised": 2500, "reached": false},
+    {"name": "no limit set", "limit": null, "realised": -100000, "unrealised": 0, "reached": false}
+  ]
+}

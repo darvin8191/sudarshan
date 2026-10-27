@@ -315,6 +315,22 @@ html[data-cvd='1'] {
     font-weight: 600;
     line-height: 1.25rem;
   }
+  /* The daily loss limit's lock (M5.14): a lock icon, ink on the attention tint (5.37:1). */
+  .sd-risk-banner--day,
+  .sd-risk-chip--day,
+  .sd-risk-note--day,
+  .sd-day-chip {
+    background: var(--gold-tint);
+    color: var(--warning-text);
+  }
+  .sd-risk-chip--day,
+  .sd-risk-note--day,
+  .sd-day-chip {
+    border-color: var(--warning-text);
+  }
+  .sd-risk-banner--day {
+    border-top-color: var(--warning-text);
+  }
 }
 
 /* -----------------------------------------------------------------------------

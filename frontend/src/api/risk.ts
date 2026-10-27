@@ -37,10 +37,27 @@ export interface KillSwitchState {
   report?: KillSwitchReport | null
 }
 
+export type RiskPipe = 'live' | 'sandbox'
+
 /** The banner's read: no broker call behind it. */
 export interface RiskState {
   stage: RiskStage
   kill_switch: KillSwitchState
+  /** Each pipe the guard covers: whether the daily loss limit has locked it today. */
+  daily?: Partial<Record<RiskPipe, { locked: boolean }>>
+}
+
+/** The daily loss card's figures for one pipe (M5.14). */
+export interface DailyStatus {
+  /** Today's P&L, gross; null when it could not be read just now. */
+  figure: number | null
+  approximate: boolean
+  as_of: string
+  /** The figure has reached the limit (the next new order locks the day). */
+  reached: boolean
+  lock: { at: string; figure: number; limit: number } | null
+  /** The limit could not be checked in the last minute: orders went unchecked. */
+  unchecked: boolean
 }
 
 export interface GateTiming {
@@ -80,8 +97,9 @@ export interface RiskSettings {
   updated_by: string | null
 }
 
-export interface RiskStatus extends RiskState {
+export interface RiskStatus extends Omit<RiskState, 'daily'> {
   settings: RiskSettings | null
+  daily?: Partial<Record<RiskPipe, DailyStatus>>
   gate: GateTiming
   upstox_kill_switch: UpstoxSegment[] | null
   broker: string | null

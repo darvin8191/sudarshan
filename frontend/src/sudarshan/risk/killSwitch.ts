@@ -1,6 +1,6 @@
 import { useEffect, useSyncExternalStore } from 'react'
 import type { Socket } from 'socket.io-client'
-import type { KillSwitchState, RiskStage, RiskState } from '@/api/risk'
+import type { KillSwitchState, RiskPipe, RiskStage, RiskState } from '@/api/risk'
 
 /**
  * The kill switch as every page shows it (M20.7): the banner in both shells and the chip in
@@ -43,12 +43,28 @@ export function parseKillSwitch(value: unknown): KillSwitchState | null {
 
 const STAGES: readonly RiskStage[] = ['off', 'sandbox', 'on']
 
+function parseDaily(value: unknown): RiskState['daily'] {
+  if (typeof value !== 'object' || value === null) return undefined
+  const daily: NonNullable<RiskState['daily']> = {}
+  for (const pipe of ['live', 'sandbox'] as RiskPipe[]) {
+    const day = (value as Record<string, unknown>)[pipe]
+    if (typeof day === 'object' && day !== null) {
+      daily[pipe] = { locked: (day as { locked?: unknown }).locked === true }
+    }
+  }
+  return daily
+}
+
 function parseState(value: unknown): RiskState | null {
   if (typeof value !== 'object' || value === null) return null
-  const { stage, kill_switch } = value as { stage?: unknown; kill_switch?: unknown }
+  const { stage, kill_switch, daily } = value as {
+    stage?: unknown
+    kill_switch?: unknown
+    daily?: unknown
+  }
   const killSwitch = parseKillSwitch(kill_switch)
   if (!killSwitch || !STAGES.includes(stage as RiskStage)) return null
-  return { stage: stage as RiskStage, kill_switch: killSwitch }
+  return { stage: stage as RiskStage, kill_switch: killSwitch, daily: parseDaily(daily) }
 }
 
 /** Read the switch from the server; one read at a time. */
@@ -76,7 +92,11 @@ export function readKillSwitch(): Promise<void> {
 
 /** The switch as the server just announced it, or as a page has just read it. */
 export function noteKillSwitch(killSwitch: KillSwitchState, stage?: RiskStage): void {
-  publish({ stage: stage ?? current?.stage ?? 'off', kill_switch: killSwitch })
+  publish({
+    stage: stage ?? current?.stage ?? 'off',
+    kill_switch: killSwitch,
+    daily: current?.daily,
+  })
 }
 
 function subscribe(listener: () => void): () => void {
@@ -100,6 +120,11 @@ export function killSwitchOn(state: RiskState | null): boolean {
   return state?.kill_switch.known === true && state.kill_switch.on === true
 }
 
+/** True while the daily loss limit has locked the book the page shows (M5.14). */
+export function dayLocked(state: RiskState | null, sandbox: boolean): boolean {
+  return state?.daily?.[sandbox ? 'sandbox' : 'live']?.locked === true
+}
+
 /**
  * Keeps the app-wide copy in step with the server. Rendered once per shell (the banner):
  * a read on mount, every `sudarshan_risk` event, a read on reconnect and on coming back.
@@ -119,9 +144,11 @@ export function useKillSwitchSync(socket: Socket | null): void {
       void readKillSwitch()
     }
     socket.on('sudarshan_risk', onRisk)
+    socket.on('sudarshan_risk_day', onConnect) // the day locked: read the state again
     socket.on('connect', onConnect)
     return () => {
       socket.off('sudarshan_risk', onRisk)
+      socket.off('sudarshan_risk_day', onConnect)
       socket.off('connect', onConnect)
     }
   }, [socket])

@@ -100,6 +100,19 @@ def loosens(old: RiskSettings, changes: dict[str, Any]) -> list[str]:
     return looser
 
 
+def _told_if_locked(before: float | None, after: float | None, by: str) -> None:
+    """Loosening the daily limit on a day it has locked is told on Telegram: the lock stays,
+    and the new limit counts from tomorrow (M5.14)."""
+    from . import gate
+    from .killswitch import Owner, _tell
+
+    try:
+        if any(gate.GATE.day_lock(pipe) is not None for pipe in ("live", "sandbox")):
+            _tell(Owner(by, "app", by), words.daily_loosened_told(before, after))
+    except Exception:
+        logger.exception("A loosened daily limit could not be told on Telegram")
+
+
 def change(values: dict, *, phrase: object, by: str) -> tuple[int, str, RiskSettings | None]:
     """Save the changes asked for; loosening needs the confirm phrase.
 
@@ -135,6 +148,8 @@ def change(values: dict, *, phrase: object, by: str) -> tuple[int, str, RiskSett
         logger.exception("The risk settings could not be saved")
         return 503, words.SETTINGS_NOT_SAVED, None
     shown = {k: ("(changed)" if k == "confirm_phrase" else v) for k, v in changes.items()}
+    if "daily_loss_limit" in looser:
+        _told_if_locked(settings.daily_loss_limit, saved.daily_loss_limit, by)
     try:
         risk_store.STORE.audit(
             "settings_changed",

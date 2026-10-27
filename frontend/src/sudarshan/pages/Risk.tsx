@@ -1,6 +1,7 @@
-// SUDARSHAN (M5.13, M20.7): Settings > Risk. The kill switch: where it stands, turning it on and
-// resuming, what its last activation did; where the guard checks orders; Upstox's own kill
-// switch, which SUDARSHAN only reads; and the history. Server: blueprints/sudarshan_risk.py.
+// SUDARSHAN (M5.13, M5.14, M20.7): Settings > Risk. The kill switch: where it stands, turning it
+// on and resuming, what its last activation did; the daily loss limit and today's figure; where
+// the guard checks orders; Upstox's own kill switch, which SUDARSHAN only reads; and the
+// history. Server: blueprints/sudarshan_risk.py.
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Activity,
@@ -9,6 +10,7 @@ import {
   FlaskConical,
   History,
   Loader2,
+  Lock,
   OctagonX,
   Play,
   ShieldAlert,
@@ -20,6 +22,7 @@ import { type ReactNode, useEffect, useState } from 'react'
 import { type AuditRow, type RiskStage, type RiskStatus, riskApi } from '@/api/risk'
 import { useSocketContext } from '@/components/socket/SocketProvider'
 import { Button } from '@/components/ui/button'
+import { DailyCard } from '@/sudarshan/risk/DailyCard'
 import { noteKillSwitch } from '@/sudarshan/risk/killSwitch'
 import {
   clockOf,
@@ -287,8 +290,10 @@ export default function Risk() {
       void queryClient.invalidateQueries({ queryKey: RISK_AUDIT_KEY })
     }
     socket.on('sudarshan_risk', onRisk)
+    socket.on('sudarshan_risk_day', onRisk) // the daily loss limit locked the day
     return () => {
       socket.off('sudarshan_risk', onRisk)
+      socket.off('sudarshan_risk_day', onRisk)
     }
   }, [socket, queryClient])
 
@@ -331,6 +336,9 @@ export default function Risk() {
         onTurnOn={() => setSheet('on')}
         onResume={() => setSheet('resume')}
       />
+      <Card title="Daily loss limit" icon={<Lock aria-hidden="true" className="size-5" />}>
+        <DailyCard status={data} />
+      </Card>
       <ChecksCard status={data} />
       <HistoryCard rows={audit.data} loading={audit.isPending} />
       <TurnOnSheet

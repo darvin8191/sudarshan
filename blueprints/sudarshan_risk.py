@@ -24,13 +24,14 @@ anything, for the family layer's test that a viewer is refused each one.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from functools import wraps
 
 from flask import Blueprint, jsonify, request, session
 
 from database.user_db import find_user_by_username
 from limiter import limiter
-from sudarshan.guard import flag, killswitch, readers, settings_rules, words
+from sudarshan.guard import daily, flag, killswitch, readers, settings_rules, words
 from sudarshan.guard import gate as risk_gate
 from sudarshan.guard import store as risk_store
 from utils.logging import get_logger
@@ -98,6 +99,46 @@ def _answer(answer: killswitch.Answer):
     return jsonify(body), answer.status
 
 
+_PIPES = ("live", "sandbox")
+
+
+def _day_figure(pipe: str, owner: killswitch.Owner):
+    """Today's figure in ``pipe``, read for the page (the order path reads its own)."""
+    if pipe == "sandbox":
+        return readers.sandbox_day(owner.user)
+    if not owner.auth_token or owner.broker != "upstox":
+        return None
+    rows = readers.live_cached_rows(owner.auth_token)
+    if rows is None:
+        rows = readers.live_rows(owner.auth_token)
+    return daily.live_figure(rows)
+
+
+def _daily_status(owner: killswitch.Owner, limit: float | None) -> dict:
+    """The daily loss card: per pipe the guard covers, today's figure, the limit and the lock."""
+    shown = {}
+    for pipe in _PIPES:
+        if not flag.covers(pipe):
+            continue
+        try:
+            figure = _day_figure(pipe, owner)
+        except Exception:
+            logger.exception(f"Today's figure could not be read for the risk page ({pipe})")
+            figure = None
+        lock = risk_gate.GATE.day_lock(pipe)
+        shown[pipe] = {
+            "figure": None if figure is None else round(figure.total, 2),
+            "approximate": bool(figure is not None and figure.approximate),
+            "as_of": datetime.now(UTC).isoformat(),
+            "reached": figure is not None and daily.reached(limit, figure),
+            "lock": None
+            if lock is None
+            else {"at": lock.at.isoformat(), "figure": lock.figure, "limit": lock.loss_limit},
+            "unchecked": risk_gate.GATE.day_unchecked(pipe),
+        }
+    return shown
+
+
 def _upstox_kill_switch(owner: killswitch.Owner) -> list[dict] | None:
     """Upstox's own kill switch per segment, for the drill's check that it stays off."""
     if not owner.auth_token or owner.broker != "upstox":
@@ -123,6 +164,11 @@ def state():
             "data": {
                 "stage": flag.stage(),
                 "kill_switch": killswitch.public_state(risk_gate.GATE.state()),
+                "daily": {
+                    pipe: {"locked": risk_gate.GATE.day_lock(pipe) is not None}
+                    for pipe in _PIPES
+                    if flag.covers(pipe)
+                },
             },
         }
     )
@@ -135,10 +181,13 @@ def state():
 def status():
     killswitch.recover()
     try:
-        settings = settings_rules.public(risk_store.STORE.settings())
+        saved = risk_store.STORE.settings()
+        settings = settings_rules.public(saved)
     except Exception:
         logger.exception("The risk settings could not be read for the status")
-        settings = None
+        saved = settings = None
+    owner = _session_owner()
+    limit = saved.daily_loss_limit if saved is not None else None
     return jsonify(
         {
             "status": "success",
@@ -150,7 +199,8 @@ def status():
                     **risk_gate.GATE.timing(),
                     "last_problem": risk_gate.GATE.last_problem(),
                 },
-                "upstox_kill_switch": _upstox_kill_switch(_session_owner()),
+                "daily": _daily_status(owner, limit),
+                "upstox_kill_switch": _upstox_kill_switch(owner),
                 "broker": session.get("broker"),
             },
         }

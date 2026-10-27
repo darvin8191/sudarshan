@@ -233,6 +233,28 @@ def sandbox_position(user_id: str, symbol: str, exchange: str, product: str) -> 
     return 0 if row is None else int(row.quantity or 0)
 
 
+def sandbox_day(user_id: str):
+    """Today's P&L in the sandbox (M5.14): its funds' realised P&L for today, and its open
+    positions' P&L as the sandbox marks them. A position carried in from an earlier day counts
+    from its entry, the sandbox keeping no day's figure for it."""
+    from .daily import DayFigure
+
+    try:
+        db = _sandbox()
+        funds = db.SandboxFunds.query.filter_by(user_id=user_id).populate_existing().first()
+        open_rows = (
+            db.SandboxPositions.query.filter(
+                db.SandboxPositions.user_id == user_id, db.SandboxPositions.quantity != 0
+            )
+            .populate_existing()
+            .all()
+        )
+    except Exception as exc:
+        raise Unreadable(f"sandbox day: {type(exc).__name__}") from exc
+    realised = _number(funds.today_realized_pnl) if funds is not None else 0.0
+    return DayFigure(realised, sum(_number(row.pnl) for row in open_rows))
+
+
 def sandbox_working_order(user_id: str, order_id: object) -> Working | None:
     """The sandbox order ``order_id``, or None when it is not there."""
     try:
