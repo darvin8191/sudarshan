@@ -67,11 +67,19 @@ EXIT_ALL_BEING_PLACED = "Exit all is still being placed. Wait for it, then check
 #: book to show it (frontend/src/sudarshan/books/sent.ts, SENT_HOLD_MS).
 EXIT_SHOWS_WITHIN_S = 15.0
 
-#: Exit all starts no Upstox call (its reads, then one exit per position) after this long. The
-#: one call running then may take 120 s (utils/httpx_client.REQUEST_TIMEOUT_SECONDS), after up to
-#: 10 s in the order window under gthread (utils/broker_backpressure), so an Exit all has ended
-#: within 145 s: inside the 150 s for which a phone that got no answer holds it
-#: (frontend/src/sudarshan/books/sent.ts, NO_ANSWER_HOLD_MS).
+#: Exit all reads the order book with a limit of its own and no retry: a read that takes longer
+#: counts as not read, and Exit all goes on without it and says so.
+EXIT_ALL_ORDERS_READ_S = 5.0
+
+#: Exit all sends no exit after this long from the end of its reads. Its positions read may take
+#: 120 s (utils/httpx_client.REQUEST_TIMEOUT_SECONDS) plus 7 s of Upstox's 429 back-off, the order
+#: book EXIT_ALL_ORDERS_READ_S, and the last exit 120 s after up to 10 s in the order window under
+#: gthread (utils/broker_backpressure): 277 s in all, inside the 300 s nginx gives a request
+#: (install/install.sh). A slow read never uses up the time for sending, so a slow Upstox, when
+#: Exit all matters most, still closes everything. Overlaps stay safe through the claims and
+#: notes here, not through the phone's hold: a tap that comes after the phone stopped holding an
+#: unanswered Exit all (frontend/src/sudarshan/books/sent.ts, NO_ANSWER_HOLD_MS) gets the server's
+#: 409 and its sentence.
 EXIT_ALL_SENDS_FOR_S = 15.0
 
 IST = timezone(timedelta(hours=5, minutes=30), "IST")  # India keeps no daylight saving

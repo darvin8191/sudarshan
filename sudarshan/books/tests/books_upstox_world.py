@@ -70,6 +70,7 @@ class Broker:
         self.orders_unreadable = False  # the order book read fails
         self.slow_read = 0.0  # seconds a positions read takes to answer, its rows as at its start
         self.read_delay = None  # or callable(read number from 1) -> seconds, as slow_read
+        self.order_book_delay = 0.0  # seconds the order book takes; past the read's limit, cut off
 
     # -- state ---------------------------------------------------------------
     def true_qty(self, symbol: str) -> int:
@@ -111,7 +112,7 @@ class Broker:
     # -- HTTP ----------------------------------------------------------------
     def get(self, url, headers=None, **kwargs):
         if url.endswith(ORDERS_URL):
-            return self._order_book()
+            return self._order_book(kwargs.get("timeout"))
         assert url.endswith(POSITIONS_URL), url
         now = time.monotonic()
         with self.lock:
@@ -141,7 +142,14 @@ class Broker:
             time.sleep(delay)
         return FakeResponse(200, {"status": "success", "data": rows})
 
-    def _order_book(self):
+    def _order_book(self, timeout=None):
+        """The order book; one slower than the read's own limit is cut off there, as httpx does."""
+        delay = self.order_book_delay
+        if delay and timeout is not None and delay > timeout:
+            time.sleep(timeout)
+            raise httpx.ReadTimeout("The read operation timed out")
+        if delay:
+            time.sleep(delay)
         with self.lock:
             self.order_book_reads += 1
             if self.orders_unreadable:

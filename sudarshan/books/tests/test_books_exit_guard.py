@@ -323,23 +323,39 @@ def test_an_exit_counts_as_placed_as_long_as_the_phone_holds_it():
     assert exit_guard.EXIT_SHOWS_WITHIN_S == hold_ms / 1000
 
 
-def test_an_unanswered_exit_all_is_held_on_the_phone_until_the_server_is_done():
-    """Exit all starts no Upstox call after EXIT_ALL_SENDS_FOR_S, and the one running then is
-    bounded; the phone holds an Exit all that got no answer at least that long (item 9)."""
+def _app_request_limit_s() -> int:
+    """The time nginx gives a request to the app (install/install.sh, the gunicorn location)."""
+    script = (REPO / "install/install.sh").read_text(encoding="utf-8")
+    block = re.search(r"location / \{\s*proxy_pass http://unix:[^}]*\}", script)
+    assert block, "the app's nginx location was not found"
+    return int(re.search(r"proxy_read_timeout (\d+)s;", block[0])[1])
+
+
+def test_an_exit_all_ends_inside_the_time_nginx_gives_its_request():
+    """Its reads (the positions with Upstox's 429 back-off, the order book cut off at its own
+    limit), then EXIT_ALL_SENDS_FOR_S for sending, and the last exit's own bound (item 2)."""
+    from broker.upstox.api.rate_limiter import BASE_BACKOFF, MAX_RETRIES
     from utils.broker_backpressure import BROKER_MAX_ORDER_QUEUE_WAIT_SECONDS
     from utils.httpx_client import REQUEST_TIMEOUT_SECONDS
 
+    back_off = sum(BASE_BACKOFF * 2**attempt for attempt in range(MAX_RETRIES))
+    reads = REQUEST_TIMEOUT_SECONDS + back_off + exit_guard.EXIT_ALL_ORDERS_READ_S
+    last_exit = REQUEST_TIMEOUT_SECONDS + BROKER_MAX_ORDER_QUEUE_WAIT_SECONDS
+    budget = reads + exit_guard.EXIT_ALL_SENDS_FOR_S + last_exit
+    assert budget <= _app_request_limit_s(), budget
+    assert exit_guard.EXIT_ALL_SENDS_FOR_S >= 5  # and it is not cut short in an ordinary day
+    assert exit_guard.EXIT_ALL_ORDERS_READ_S <= 5  # a slow order book costs a few seconds only
+
+
+def test_the_phone_s_hold_of_an_unanswered_exit_is_not_what_keeps_overlaps_safe():
+    """The hold ends before a slow Exit all may: the server answers a tap after it with 409."""
     sent = (REPO / "frontend/src/sudarshan/books/sent.ts").read_text(encoding="utf-8")
     hold_ms = int(
         re.search(r"export const NO_ANSWER_HOLD_MS = ([0-9_]+)", sent)[1].replace("_", "")
     )
-    budget = (
-        exit_guard.EXIT_ALL_SENDS_FOR_S
-        + REQUEST_TIMEOUT_SECONDS
-        + BROKER_MAX_ORDER_QUEUE_WAIT_SECONDS
-    )
-    assert budget <= hold_ms / 1000, (budget, hold_ms)
-    assert exit_guard.EXIT_ALL_SENDS_FOR_S >= 5  # and it is not cut short in an ordinary day
+    assert hold_ms / 1000 < _app_request_limit_s()
+    with exit_guard.EXITS.every("live"):
+        assert exit_guard.why_busy("live", "NFO", X, "MIS") == EXIT_ALL_BEING_PLACED
 
 
 # -- The app's routes and services, over the real Upstox module ---------------------------------

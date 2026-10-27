@@ -400,3 +400,36 @@ def test_s23_a_claim_taken_for_a_read_that_finds_nothing_to_close_is_let_go(worl
     upstox._POSITION_BOOK.invalidate("token")  # the read just made is cached for a second
     world.phone_exit(X)  # the position is free: nothing stranded a claim on it
     assert [o["symbol"] for o in world.broker.orders] == [X]
+
+
+# -- the second review's slow reads (its N4 and N5) ----------------------------------------------
+
+
+def test_s24_an_exit_all_whose_order_book_is_too_slow_goes_on_without_it(world, monkeypatch):
+    """The order book's read is cut off at its own limit: not read, said, and everything sent."""
+    monkeypatch.setattr(exit_guard, "EXIT_ALL_ORDERS_READ_S", 0.3)
+    monkeypatch.setattr(exit_guard, "EXIT_ALL_SENDS_FOR_S", 0.5)
+    world.broker.order_book_delay = 2.0
+    code, body = world.api_exit_all()
+    took = world.answers[-1][4] - world.answers[-1][3]
+    assert [world.broker.true_qty(s) for s in (X, Y, Z)] == [0, 0, 0], summary(world, X, Y, Z)
+    assert code == 200 and body["note"].startswith("The open orders could not be read from")
+    assert took < 1.5, f"it took {took:.2f}s"  # cut off at its limit, not waited out
+
+
+def test_s24b_an_order_book_slower_than_the_time_for_sending_still_leaves_it(world, monkeypatch):
+    """The review's N4: the time for sending starts once the reads are done."""
+    monkeypatch.setattr(exit_guard, "EXIT_ALL_SENDS_FOR_S", 0.5)
+    world.broker.order_book_delay = 0.6
+    code, body = world.api_exit_all()
+    assert [world.broker.true_qty(s) for s in (X, Y, Z)] == [0, 0, 0], summary(world, X, Y, Z)
+    assert code == 200 and "note" not in body
+
+
+def test_s25_an_exit_all_whose_positions_read_is_slow_still_closes_everything(world, monkeypatch):
+    """The review's N5."""
+    monkeypatch.setattr(exit_guard, "EXIT_ALL_SENDS_FOR_S", 0.5)
+    _slow_first_read(world, 0.6)
+    code, _body = world.api_exit_all()
+    assert [world.broker.true_qty(s) for s in (X, Y, Z)] == [0, 0, 0], summary(world, X, Y, Z)
+    assert code == 200

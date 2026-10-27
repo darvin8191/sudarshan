@@ -1,3 +1,4 @@
+import contextvars  # SUDARSHAN M6.9
 import json
 import os
 import re
@@ -77,6 +78,11 @@ def _rate_limit_category(endpoint, base_url):
     return "standard"
 
 
+# SUDARSHAN M6.9: a limit of its own for the reads made while it is set (Exit all's order book,
+# sudarshan/books/exit_guard.EXIT_ALL_ORDERS_READ_S): cut off there and never retried.
+_READ_LIMIT = contextvars.ContextVar("upstox_read_limit", default=None)
+
+
 def get_api_response(
     endpoint, auth, method="GET", payload="", base_url=UPSTOX_BASE_URL, retry_count=0
 ):
@@ -110,7 +116,8 @@ def get_api_response(
         url = f"{base_url}{endpoint}"
 
         if method == "GET":
-            response = client.get(url, headers=headers)
+            limit = _READ_LIMIT.get()  # SUDARSHAN M6.9
+            response = client.get(url, headers=headers, **({"timeout": limit} if limit else {}))
         elif method == "POST":
             response = client.post(url, headers=headers, content=payload)
         elif method == "PUT":
@@ -135,7 +142,9 @@ def get_api_response(
         # proactive pacer is what is meant to keep mutations out of this branch.
         if is_rate_limited(e.response.status_code):
             delay = None
-            if category == "standard" and retry_count < MAX_RETRIES:
+            # SUDARSHAN M6.9: a read with a limit of its own is answered as it is.
+            retries = category == "standard" and retry_count < MAX_RETRIES and not _READ_LIMIT.get()
+            if retries:
                 # Under gthread a delay past the data ceiling is not slept out.
                 delay = cap_server_delay(
                     retry_delay_from_headers(e.response.headers, retry_count), "data"
@@ -149,7 +158,7 @@ def get_api_response(
                 return get_api_response(
                     endpoint, auth, method, payload, base_url, retry_count + 1
                 )
-            if category == "standard" and retry_count < MAX_RETRIES:
+            if retries:
                 # gthread only (cap_server_delay never answers None elsewhere):
                 # Upstox asked for a wait past the ceiling. Handing its throttle
                 # body back as data would read as an empty book, and an empty
@@ -595,11 +604,14 @@ def _working_exits(auth):
         ``({(instrument_token, product, side): "HH:MM:SS" placed, or ""}, True)``, or
         ``({}, False)`` when the order book could not be read.
     """
+    limit = _READ_LIMIT.set(exit_guard.EXIT_ALL_ORDERS_READ_S)  # cut off, never retried
     try:
         book = get_order_book(auth)
     except Exception:  # BrokerBusyError included: the read was refused, which is not "none"
         logger.exception("Exit all could not read the order book")
         return {}, False
+    finally:
+        _READ_LIMIT.reset(limit)
     if not isinstance(book, dict) or book.get("status") != "success":
         logger.error("Exit all could not read the order book")
         return {}, False
@@ -620,7 +632,7 @@ def _working_exits(auth):
 
 
 def _in_time(started):
-    """SUDARSHAN M6.9: whether Exit all may still start an Upstox call."""
+    """SUDARSHAN M6.9: whether Exit all may still send an exit (its reads are done)."""
     return time.monotonic() - started < exit_guard.EXIT_ALL_SENDS_FOR_S
 
 
@@ -711,8 +723,7 @@ def close_all_positions(current_api_key, auth):
     # SUDARSHAN M6.9: every exit is decided on this Exit all's own reads. A busy position (an
     # exit for it being placed or placed lately, sudarshan/books/exit_guard.py, or an order on
     # its closing side still working) is not sent, and says why; the rest are sent at once, and
-    # no Upstox call starts after exit_guard.EXIT_ALL_SENDS_FOR_S.
-    started = time.monotonic()
+    # no exit is sent after exit_guard.EXIT_ALL_SENDS_FOR_S from the end of the reads.
     busy = exit_guard.busy_positions("live")  # nothing new starts while the book is held
     counts = {"sent": 0, "refused": 0, "unknown": 0}  # SUDARSHAN M6.9
     sending = None  # SUDARSHAN M6.9: the position whose exit is being sent, until answered
@@ -733,10 +744,10 @@ def close_all_positions(current_api_key, auth):
         skipped = []  # SUDARSHAN M6.9: why each busy position was not sent, in its own sentence
         late = []  # SUDARSHAN M6.9: the positions no time was left for
         working, orders_read = {}, None  # SUDARSHAN M6.9: the order book, read once
-        if _in_time(started) and any(
-            int(position.get("quantity", 0)) != 0 for position in positions_response["data"]
-        ):
+        if any(int(position.get("quantity", 0)) != 0 for position in positions_response["data"]):
             working, orders_read = _working_exits(auth)
+        # SUDARSHAN M6.9: the time for sending starts now, so a slow read never uses it up.
+        started = time.monotonic()
         for position in positions_response["data"]:
             if int(position.get("quantity", 0)) == 0:
                 continue

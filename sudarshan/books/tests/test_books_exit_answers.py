@@ -13,6 +13,8 @@ answer carries an exception's words, which belong in the log.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import httpx
 import pytest
 
@@ -24,6 +26,7 @@ from utils.event_bus import bus
 
 EXIT = {"symbol": "SBIN", "exchange": "NSE", "product": "MIS"}
 SECRET_DETAIL = "The read operation timed out"
+GET_ORDER_BOOK = upstox.get_order_book  # the real one: the conftest stubs it in every test
 
 
 class Answer:
@@ -642,6 +645,34 @@ def test_exit_all_reads_every_order_still_working_by_what_it_would_close(monkeyp
     assert upstox._working_exits("token") == ({}, False)
 
 
+def test_exit_all_reads_the_order_book_with_a_limit_of_its_own_and_no_retry(monkeypatch):
+    """Cut off at EXIT_ALL_ORDERS_READ_S and never retried, so a slow or throttled order book
+    costs Exit all a few seconds; every other read keeps the client's own timeout and retries."""
+    import broker.upstox.api.rate_limiter as pacing
+    from sudarshan.books import exit_guard
+
+    gets = []
+
+    class Client:
+        def get(self, url, headers=None, **kwargs):
+            gets.append((url.rsplit("/", 1)[-1], kwargs.get("timeout")))
+            return httpx.Response(429, json={"status": "error"}, request=httpx.Request("GET", url))
+
+    slept = []
+    monkeypatch.setenv("BROKER_API_KEY", "fake")
+    monkeypatch.setattr(upstox, "get_httpx_client", lambda: Client())
+    monkeypatch.setattr(upstox, "apply_rate_limit", lambda category="standard": None)
+    clock = SimpleNamespace(sleep=slept.append, monotonic=upstox.time.monotonic)
+    monkeypatch.setattr(upstox, "time", clock)  # this module's back-off waits, recorded
+    monkeypatch.setattr(upstox, "get_order_book", GET_ORDER_BOOK)
+    assert upstox._working_exits("token") == ({}, False)
+    assert gets == [("retrieve-all", exit_guard.EXIT_ALL_ORDERS_READ_S)] and slept == []
+    gets.clear()
+    upstox.get_positions("token")  # the limit was the order book's only
+    assert gets == [("short-term-positions", None)] * (1 + pacing.MAX_RETRIES)
+    assert len(slept) == pacing.MAX_RETRIES
+
+
 def test_exit_all_s_answer_counts_each_kind_and_says_why_each_busy_one_was_not_sent():
     body, code = upstox._close_all_summary(
         {"sent": 1, "refused": 1, "unknown": 0},
@@ -717,20 +748,24 @@ def test_exit_all_with_nothing_open_reads_no_order_book(monkeypatch):
     assert reads == []
 
 
-def test_exit_all_starts_no_read_and_no_exit_once_its_time_is_up(monkeypatch):
+def test_exit_all_reads_and_then_sends_no_exit_once_its_time_for_sending_is_up(monkeypatch):
+    """The time for sending starts once the reads are done (a slow read never uses it up)."""
     from sudarshan.books import exit_guard
 
-    monkeypatch.setattr(exit_guard, "EXIT_ALL_SENDS_FOR_S", 0.0)  # used up by the positions read
+    monkeypatch.setattr(exit_guard, "EXIT_ALL_SENDS_FOR_S", 0.0)  # no time at all for sending
     reads, sent = [], []
-    monkeypatch.setattr(upstox, "get_order_book", lambda auth: reads.append(auth))
+    nothing_working = {"status": "success", "data": []}
+    monkeypatch.setattr(
+        upstox, "get_order_book", lambda auth: reads.append(auth) or nothing_working
+    )
     monkeypatch.setattr(upstox, "get_positions", lambda auth: _book_of(("NSE_EQ|1", 10, "I")))
     monkeypatch.setattr(upstox, "get_symbol", lambda token, exchange: "SBIN")
     monkeypatch.setattr(upstox, "place_order_api", lambda data, auth: sent.append(data) or PLACED)
     body, code = upstox.close_all_positions("key", "token")
-    assert (reads, sent, code) == ([], [], 409)
+    assert (reads, sent, code) == (["token"], [], 409)
     assert "not_confirmed" not in body
     assert "stopped after 0 s and sent nothing for SBIN" in body["message"]
-    assert "could not be read" not in body["message"]  # not read, and not said to have failed
+    assert "could not be read" not in body["message"]
 
 
 def test_exit_all_that_breaks_before_its_first_exit_is_not_flagged(monkeypatch):
