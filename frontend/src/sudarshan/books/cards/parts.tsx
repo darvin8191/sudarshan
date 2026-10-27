@@ -87,20 +87,21 @@ export function useWhyNot(why: string | null) {
   }
 }
 
-/** Why an action cannot be taken: read with its button, and shown once it is tapped or focused. */
+/**
+ * Why an action cannot be taken: read with its button (its description), and shown once it is
+ * tapped or focused. Hidden until then, so a screen reader reading the page through does not
+ * read it twice.
+ */
 export function WhyNot({ why, id, told }: { why: string | null; id: string; told: boolean }) {
   if (why === null) return null
   return (
     <p
       id={id}
       data-testid="why-not"
-      className={
-        told
-          ? 'flex items-start gap-1.5 text-[0.8125rem] font-medium text-[color:var(--text-secondary)]'
-          : 'sr-only'
-      }
+      hidden={!told}
+      className="flex items-start gap-1.5 text-[0.8125rem] font-medium text-[color:var(--text-secondary)]"
     >
-      {told && <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />}
+      <Info aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
       {why}
     </p>
   )

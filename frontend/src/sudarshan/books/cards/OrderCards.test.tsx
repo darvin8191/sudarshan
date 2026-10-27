@@ -93,7 +93,7 @@ import {
 import { fakeClock, frames } from '@/test/frames'
 import { feed } from '@/test/marketDataHarness'
 import { fakeScreen } from '@/test/screenWidth'
-import { EVERY_CANCEL_SENT, NOTHING_TO_CANCEL } from './OrderCards'
+import { EVERY_CANCEL_SENT, NOTHING_TO_CANCEL, ORDERS_NOT_READ, READING_ORDERS } from './OrderCards'
 
 vi.setConfig({ testTimeout: 15_000 })
 
@@ -419,6 +419,27 @@ describe('Order book on a phone: the cards', () => {
     expectUnavailable(screen.getByRole('button', { name: /Cancel all/ }))
   })
 
+  it('says Cancel all waits for the book before it is read, and why when it could not be', async () => {
+    api.getOrders.mockReturnValue(new Promise(() => {}))
+    fakeScreen('phone')
+    renderBook('/orderbook', <OrderBook />)
+    expectUnavailable(screen.getByRole('button', { name: 'Cancel all' }))
+    expect(screen.getByRole('button', { name: 'Cancel all' })).toHaveAccessibleDescription(
+      READING_ORDERS
+    )
+  })
+
+  it('says why Cancel all is off when the order book could not be read', async () => {
+    api.getOrders.mockRejectedValue(new Error('network'))
+    fakeScreen('phone')
+    renderBook('/orderbook', <OrderBook />)
+    await settle()
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
+    const all = screen.getByRole('button', { name: 'Cancel all' })
+    expectUnavailable(all)
+    expect(all).toHaveAccessibleDescription(ORDERS_NOT_READ)
+  })
+
   it('shows Cancel all as unavailable with no open order, and says why when tapped or focused', async () => {
     const tap = user()
     await renderPhone(FILLED)
@@ -428,22 +449,22 @@ describe('Order book on a phone: the cards', () => {
     expect(all).toHaveClass('border-dashed', 'text-[color:var(--text-tertiary)]')
     expect(all).not.toHaveClass('border-destructive')
     const why = screen.getByTestId('why-not')
-    expect(why).toHaveClass('sr-only')
+    expect(why).not.toBeVisible()
     await tap.click(all)
     expect(screen.queryByRole('dialog')).toBeNull()
-    expect(why).not.toHaveClass('sr-only')
+    expect(why).toBeVisible()
     expect(why).toHaveTextContent(NOTHING_TO_CANCEL)
     act(() => all.blur())
-    expect(why).toHaveClass('sr-only')
+    expect(why).not.toBeVisible()
     // A tap that does not move focus (a browser that does not focus buttons) still says why.
     fireEvent.click(all)
-    expect(why).not.toHaveClass('sr-only')
+    expect(why).toBeVisible()
     expect(screen.queryByRole('dialog')).toBeNull()
     act(() => all.focus())
     act(() => all.blur())
-    expect(why).toHaveClass('sr-only')
+    expect(why).not.toBeVisible()
     act(() => all.focus())
-    expect(why).not.toHaveClass('sr-only')
+    expect(why).toBeVisible()
     expect(api.cancelAllOrders).not.toHaveBeenCalled()
   })
 

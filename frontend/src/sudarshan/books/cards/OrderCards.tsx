@@ -186,6 +186,12 @@ export function cancelWarning(mark: SentMark | undefined): string | null {
 /** Why Cancel all sends nothing with no order open. */
 export const NOTHING_TO_CANCEL = 'Nothing is open to cancel.'
 
+/** Why Cancel all waits, before the order book has been read once. */
+export const READING_ORDERS = 'Reading the order book.'
+
+/** Why Cancel all sends nothing when the order book could not be read. */
+export const ORDERS_NOT_READ = 'The order book could not be read just now.'
+
 /** Why Cancel all sends nothing while every open order's cancel is still held. */
 export const EVERY_CANCEL_SENT =
   'A cancel is already on its way for every open order. Wait for their status to change before cancelling again.'
@@ -301,10 +307,15 @@ const OrderBoard = memo(function OrderBoard({
     if (state.working && !isHeld(cancelOf(orderid))) cancellableIds.push(orderid)
   }
   const cancellable = cancellableIds.length
-  // Why Cancel all cannot be sent now, if it cannot: no order is open, or every
-  // open order's cancel is still held.
+  // Why Cancel all cannot be sent now, if it cannot: the book is not read yet (or
+  // could not be), no order is open, or every open order's cancel is still held.
   const anyWorking = [...states.values()].some((state) => state.working)
-  const cancelAllWhy = cancellable > 0 ? null : anyWorking ? EVERY_CANCEL_SENT : NOTHING_TO_CANCEL
+  let cancelAllWhy: string | null = null
+  if (cancellable === 0) {
+    if (orders.length === 0 && loading) cancelAllWhy = READING_ORDERS
+    else if (orders.length === 0 && error) cancelAllWhy = ORDERS_NOT_READ
+    else cancelAllWhy = anyWorking ? EVERY_CANCEL_SENT : NOTHING_TO_CANCEL
+  }
   const cancelAll = useWhyNot(cancelAllWhy)
   const shown =
     filter === 'all'
