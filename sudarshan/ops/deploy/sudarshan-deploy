@@ -12,9 +12,13 @@
 # root, no privileged exec prefixes, capabilities or realtime scheduling), installed and restarted.
 # And OpenAlgo's .env gets the settings the release lists in sudarshan/ops/deploy/openalgo-env.conf
 # (added when missing, replaced only while they hold a default an earlier release shipped).
+# And the NSE day files in /etc/sudarshan get the calendar lines the release lists in
+# sudarshan/ops/deploy/nse-calendar.conf, on every run, also when nothing is installed and in market
+# hours (a shipped date is added when missing; only a line an earlier release shipped is replaced,
+# and nothing that could open the market gate on the day changes outside an install).
 # Usage: sudarshan-deploy [--check | --redeploy | --force]
-#   --check     show latest Release / deployed tag / market state and the .env settings that
-#               release would change, change nothing
+#   --check     show latest Release / deployed tag / market state and the .env settings and
+#               calendar lines that release would change, change nothing
 #   --redeploy  install the latest Release again even if it is already deployed (still gated)
 #   --force     like --redeploy but ALSO ignores the market-hours gate (root only, emergencies)
 set -Eeuo pipefail
@@ -33,20 +37,31 @@ exec 9> "${STATE}/deploy.lock"; flock -n 9 || { echo "another deploy is running"
 OWNER_REPO="${REPO#https://github.com/}"
 as_svc() { sudo -u "${SVC_USER}" -H -- "$@"; }
 log() { echo "[$(date '+%F %T %Z')] $*"; }
-listed() {   # 0 = date $1 starts a line of file $2 (a trailing comment is allowed, as auto-login reads it)
-    grep -qE "^[[:space:]]*${1}([[:space:]#]|$)" "$2" 2>/dev/null
+listed() {   # 0 = date $1 starts a line of file $2 (a trailing comment is allowed, as auto-login reads
+             # it). Only a regular file is read: grep would wait forever on a FIFO.
+    [[ -f "$2" ]] && grep -qE "^[[:space:]]*${1}([[:space:]#]|$)" "$2" 2>/dev/null
 }
-market_open() {   # 0 = trading hours (do not restart), 1 = safe
-    local now dow hhmm today
-    now="$(TZ=Asia/Kolkata date '+%u %H%M %F')"; read -r dow hhmm today <<< "${now}"
+day_trading() {   # $1 = date, $2 = ISO weekday, $3 = HHMM, $4 = holiday file, $5 = extra-days file;
+                  # 0 = within trading hours by those files
     # A special session (a weekend or holiday session the exchange announces, such as Muhurat
     # trading) keeps its own hours, so nothing is restarted at any time that day.
-    listed "${today}" /etc/sudarshan/nse_extra_trading_days.txt && return 0
-    [[ "${dow}" -ge 6 ]] && return 1
-    listed "${today}" /etc/sudarshan/nse_holidays.txt && return 1
+    listed "$1" "$5" && return 0
+    [[ "$2" -ge 6 ]] && return 1
+    listed "$1" "$4" && return 1
     # 10# forces decimal: "0930" would otherwise be read as an invalid octal number
-    local t=$((10#${hhmm}))
-    (( t >= 900 && t <= 1545 )) && return 0 || return 1
+    local t=$((10#$3))
+    (( t >= 900 && t <= 1545 ))
+}
+market_open() {   # 0 = trading hours (do not restart), 1 = safe. Trading when the day files say so as
+                  # they are, or as they stood before this run's calendar step (GATE_VIEW, kept by
+                  # gate_view): that step can make a day a trading day, never take one away.
+    local now dow hhmm today
+    now="$(TZ=Asia/Kolkata date '+%u %H%M %F')"; read -r dow hhmm today <<< "${now}"
+    if [[ -n "${GATE_VIEW:-}" ]] && day_trading "${today}" "${dow}" "${hhmm}" \
+            "${GATE_VIEW}/nse_holidays.txt" "${GATE_VIEW}/nse_extra_trading_days.txt"; then
+        return 0
+    fi
+    day_trading "${today}" "${dow}" "${hhmm}" /etc/sudarshan/nse_holidays.txt /etc/sudarshan/nse_extra_trading_days.txt
 }
 # ---- OpenAlgo .env settings a release needs: sudarshan/ops/deploy/openalgo-env.conf, whose header
 # gives the format. Read from GitHub at the release tag, like this tool and the unit files. A key is
@@ -55,15 +70,21 @@ market_open() {   # 0 = trading hours (do not restart), 1 = safe
 # the values the release sets. Root works on a private copy and moves the result into place, so a
 # symlink planted in APP_DIR or in the backup folder is never followed.
 ENV_FILE="${APP_DIR}/.env"
-env_conf_fetch() {   # $1 = tag, $2 = output; 1 = not fetched (a release without the list gets an empty one)
+FETCH_TIMEOUT=60   # seconds one list from GitHub may take
+release_file() {   # $1 = file in sudarshan/ops/deploy, $2 = tag, $3 = output. 0 = fetched whole, with a 200
+                   # (an empty file is an empty list); 3 = the release has no such file (404: $3 is left
+                   # empty); 1 = not fetched: no answer, an error, or a body cut off in transit (curl then
+                   # fails although it saw 200) or not ending in a newline
     local code
-    code="$(curl -sSL -o "$2" -w '%{http_code}' "https://raw.githubusercontent.com/${OWNER_REPO}/$1/sudarshan/ops/deploy/openalgo-env.conf" 2>/dev/null || true)"
+    code="$(curl -sSL --max-time "${FETCH_TIMEOUT}" -o "$3" -w '%{http_code}' "https://raw.githubusercontent.com/${OWNER_REPO}/$2/sudarshan/ops/deploy/$1" 2>/dev/null)" || return 1
     case "${code}" in
-        200) return 0 ;;
-        404) : > "$2" ;;
+        200) [[ ! -s "$3" || "$(tail -c 1 -- "$3"; printf x)" == $'\nx' ]] ;;
+        404) : > "$3"; return 3 ;;
         *) return 1 ;;
     esac
 }
+env_conf_fetch() { release_file openalgo-env.conf "$1" "$2" || [[ $? -eq 3 ]]; }   # $1 = tag, $2 = output;
+                                                                                    # no list: an empty one
 env_sync() {   # $1 = check|apply, $2 = settings list, $3 = .env, $4 = private work dir (root only),
                # $5 = backup to write (apply). 0 = done or nothing to do, 1 = bad list or I/O error.
     local mode="$1" conf="$2" env="$3" work="$4" backup="${5:-}"
@@ -168,17 +189,410 @@ env_restore() {   # $1 = env_sync's work dir, $2 = .env: put back the copy env_s
     cp -a -- "$1/env.orig" "$1/env.restore" && mv -fT -- "$1/env.restore" "$2" || return 1
     log "settings: ${2} put back as it was before the deploy"
 }
+# ---- NSE calendar lines a release ships: sudarshan/ops/deploy/nse-calendar.conf, whose header gives
+# the format, merged into the day files the market gate above, auto-login and the order alerts read.
+# They read a changed file again by themselves, so every run applies the list of the installed release
+# (cal_run) and an install the list of the release it brings (backed up, put back on a rollback).
+# A missing shipped date is added; a line is replaced only while it is a version a release shipped
+# for that date, and dropped only when this tool added it; a line the owner wrote stays, and a line
+# he took out stays out. A run that installs nothing changes no line dated today or earlier (except
+# that it adds a special session for today) and never decides its own market gate. A holiday is never
+# added on or after its day, and an install whose list would make today a trading day waits
+# (cal_preview). Notes are logged once while they hold, changes once written. A failure is logged and
+# never stops an install or a rollback.
+CAL_DIR="/etc/sudarshan"
+# A day file the list creates gets the owner and mode of the other files there (sudarshan/README.md).
+CAL_OWNER="root:${SVC_USER}"; CAL_MODE=640
+CAL_RECORD="${STATE}/calendar_applied"   # each line this tool put in a day file and has not dropped
+CAL_NOTES="${STATE}/calendar_notes"      # the notes logged so far, each once while it holds
+CAL_LISTS="${STATE}/calendar-lists"      # the installed release's list, once fetched whole
+GATE_VIEW=""                             # the day files as this run found them (gate_view)
+cal_conf_fetch() { release_file nse-calendar.conf "$1" "$2"; }   # $1 = tag, $2 = output
+cal_today() {   # today's date in IST, from the clock the market gate reads
+    local now
+    now="$(TZ=Asia/Kolkata date '+%u %H%M %F')" && printf '%s\n' "${now##* }"
+}
+cal_day_ok() {   # 0 = $1 is a date that exists, written YYYY-MM-DD (the form the market gate matches)
+    local y m d last=31
+    [[ "$1" =~ ^([0-9]{4})-([0-9]{2})-([0-9]{2})$ ]] || return 1
+    y=$((10#${BASH_REMATCH[1]})); m=$((10#${BASH_REMATCH[2]})); d=$((10#${BASH_REMATCH[3]}))
+    case "${m}" in
+        4|6|9|11) last=30 ;;
+        2) last=28; if (( y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) )); then last=29; fi ;;
+    esac
+    (( y >= 1 && m >= 1 && m <= 12 && d >= 1 && d <= last ))
+}
+cal_dir_ok() {   # 0 = $1 is a real folder owned by the user this tool runs as, writable by no one else
+    local st
+    [[ -d "$1" && ! -L "$1" ]] && st="$(stat -c '%u %a' -- "$1")" || return 1
+    [[ "${st% *}" == "${EUID}" ]] && (( (8#${st#* } & 8#022) == 0 ))
+}
+cal_held() {   # $1 = check|run|install, $2 = today, $3 = file, $4 = date, $5 = add|replace|drop.
+               # 0, with the reason on stdout, when that change must not be made now; 1 when it may
+    if [[ "$3" == "nse_holidays.txt" && "$5" == "add" && ! "$4" > "$2" ]]; then
+        echo "not added: a holiday is added only before its day"; return 0
+    fi
+    if [[ "$1" == "run" && ! "$4" > "$2" ]] \
+            && [[ "$3" != "nse_extra_trading_days.txt" || "$5" != "add" || "$4" != "$2" ]]; then
+        echo "kept as it is: a run that installs nothing changes no line dated today or earlier (an install does)"
+        return 0
+    fi
+    return 1
+}
+cal_note() {   # $1 = a note: logged once while it holds (cal_flush keeps the notes that do)
+    if [[ -f "${CAL_NOTES}" ]] && grep -qxF -- "$1" "${CAL_NOTES}"; then return 0; fi
+    log "$1"; printf '%s\n' "$1" 2>/dev/null >> "${CAL_NOTES}" || true
+}
+cal_flush() {   # $1 = check|run|install, then the notes of one cal_sync. check logs them all; else
+                # each is logged once while it holds, and the notes kept are the ones that hold now.
+    local mode="$1" w
+    local -A had=()
+    shift
+    if [[ "${mode}" == "check" ]]; then for w in "$@"; do log "${w}"; done; return 0; fi
+    if [[ -f "${CAL_NOTES}" ]]; then while IFS= read -r w; do if [[ -n "${w}" ]]; then had[${w}]=1; fi; done < "${CAL_NOTES}"; fi
+    for w in "$@"; do if [[ -z "${had[${w}]+set}" ]]; then log "${w}"; fi; done
+    { if [[ $# -gt 0 ]]; then printf '%s\n' "$@"; fi; } 2>/dev/null > "${CAL_NOTES}.new" && mv -fT -- "${CAL_NOTES}.new" "${CAL_NOTES}" 2>/dev/null
+}
+cal_sync() {   # $1 = check|run|install, $2 = calendar list, $3 = folder of the day files, $4 = private
+               # work dir (root only), $5 = today (YYYY-MM-DD, IST), $6 = the install's backup folder:
+               # a file the install changes is copied there first and kept in $4 for cal_restore.
+               # run: every run (see cal_held); check: as install, writing nothing.
+               # 0 = done or nothing to do, 1 = a bad list or a file not written.
+    local mode="$1" conf="$2" dir="$3" work="$4" today="$5" backup="${6:-}"
+    local LC_ALL=C   # bytes, not characters, as in env_sync
+    local t=$'\t' cr=$'\r' nl=$'\n' line kw text day key name="" re form bad="" why n=0 k=-1 i r w
+    local path snap tmpf eol prev ok exists present ours bare rc=0 told=0 recnew=0
+    local grow="added" swap="replaced" cut="removed"
+    local re_skip='^[[:space:]]*(#|$)' re_file='^[[:blank:]]*\[([^]]*)\][[:space:]]*$'
+    local re_kw='^[[:blank:]]*(line|was|drop)[[:blank:]]+(.*[^[:space:]])[[:space:]]*$'
+    local re_hol="^([0-9]{4}-[0-9]{2}-[0-9]{2})([ ${t}]+#[ -~${t}]*)?\$"
+    local re_xtra="^([0-9]{4}-[0-9]{2}-[0-9]{2})([ ${t}]+([0-9]{2}):([0-9]{2})-([0-9]{2}):([0-9]{2}))?([ ${t}]+#[ -~${t}]*)?\$"
+    local -a names=() e_file=() e_kind=() e_text=() e_day=() e_olds=() sec=() lines=() trim=() lday=()
+    local -a oldof=() dropof=() done_=() repl=() gone=() edit=() adds=() found=() owners=() notes=()
+    local -a said=() tally=()
+    local -A files=() days=() texts=() rec=()
+    if [[ "${mode}" == "check" ]]; then grow="would add"; swap="would replace"; cut="would remove"; fi
+    [[ -f "${conf}" && -r "${conf}" ]] || { log "calendar: the list ${conf} is missing"; return 1; }
+    while IFS= read -r line || [[ -n "${line}" ]]; do
+        n=$((n + 1))
+        if [[ "${line}" =~ ${re_skip} ]]; then
+            continue
+        elif [[ "${line}" =~ ${re_file} ]]; then
+            name="${BASH_REMATCH[1]}"; k=-1
+            if [[ "${name}" != "nse_holidays.txt" && "${name}" != "nse_extra_trading_days.txt" ]]; then
+                bad="list line ${n} names a file other than nse_holidays.txt and nse_extra_trading_days.txt"; break
+            elif [[ -n "${files[${name}]+set}" ]]; then
+                bad="list line ${n} names ${name} a second time"; break
+            fi
+            files[${name}]=1; names+=("${name}"); continue
+        elif [[ ! "${line}" =~ ${re_kw} ]]; then
+            bad="list line ${n} is not a [FILE], line, was or drop line"; break
+        fi
+        kw="${BASH_REMATCH[1]}"; text="${BASH_REMATCH[2]}"
+        if [[ -z "${name}" ]]; then bad="list line ${n} comes before the first [FILE] line"; break; fi
+        if [[ "${name}" == "nse_holidays.txt" ]]; then re="${re_hol}"; form="YYYY-MM-DD"
+        else re="${re_xtra}"; form="YYYY-MM-DD, an optional HH:MM-HH:MM window"; fi
+        if [[ ! "${text}" =~ ${re} ]]; then
+            bad="list line ${n} is not ${form} and an optional # comment, in plain ASCII"; break
+        fi
+        day="${BASH_REMATCH[1]}"
+        if [[ -n "${BASH_REMATCH[3]:-}" ]] && ! (( 10#${BASH_REMATCH[3]} < 24 && 10#${BASH_REMATCH[4]} < 60
+                && 10#${BASH_REMATCH[5]} < 24 && 10#${BASH_REMATCH[6]} < 60 && 10#${BASH_REMATCH[3]} * 60
+                + 10#${BASH_REMATCH[4]} < 10#${BASH_REMATCH[5]} * 60 + 10#${BASH_REMATCH[6]} )); then
+            bad="list line ${n} has a window that is not HH:MM-HH:MM with the start before the end"; break
+        fi
+        if ! cal_day_ok "${day}"; then bad="list line ${n} has a date that does not exist"; break; fi
+        key="${name}|${text}"
+        if [[ -n "${texts[${key}]+set}" ]]; then bad="list line ${n} repeats a line of ${name}"; break; fi
+        texts[${key}]=${n}
+        if [[ "${kw}" == "was" ]]; then
+            if [[ ${k} -lt 0 ]]; then bad="list line ${n} is a was with no line above it"; break; fi
+            if [[ "${day}" != "${e_day[k]}" ]]; then bad="list line ${n} is a was for another date than its line"; break; fi
+            e_olds[k]+="${text}${nl}"; continue
+        fi
+        if [[ "${kw}" == "line" ]]; then
+            if [[ -n "${days[${name}/${day}]+set}" ]]; then bad="list line ${n} is a second line for ${day}"; break; fi
+            days[${name}/${day}]=1
+        fi
+        k=${#e_text[@]}; e_file+=("${name}"); e_kind+=("${kw}"); e_text+=("${text}"); e_day+=("${day}"); e_olds+=("")
+        if [[ "${kw}" == "drop" ]]; then k=-1; fi   # a was belongs to a line
+    done < "${conf}"
+    if [[ -n "${bad}" ]]; then cal_flush "${mode}" "calendar: ${bad}"; return 1; fi
+    if [[ ${#e_text[@]} -eq 0 ]]; then   # a release without calendar lines
+        cal_flush "${mode}" || true
+        if [[ "${mode}" != "run" ]]; then log "calendar: nothing to change in ${dir}"; fi
+        return 0
+    fi
+    if [[ ! "${today}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+        cal_flush "${mode}" "calendar: the date today is not known, so the day files are left alone"; return 1
+    fi
+    if ! cal_dir_ok "${dir}"; then
+        notes+=("calendar: ${dir} is not a folder owned by root and closed to others, so the day files are left alone")
+        if [[ "${mode}" != "check" ]]; then cal_flush "${mode}" "${notes[@]}"; return 1; fi
+    elif [[ "${mode}" != "check" ]]; then
+        while IFS= read -r -d '' w; do   # a temporary file a killed run left behind
+            if rm -f -- "${w}"; then log "calendar: removed ${w}, left by an interrupted run"; fi
+        done < <(find "${dir}" -maxdepth 1 -type f \( -name '.nse_holidays.txt.??????' \
+            -o -name '.nse_extra_trading_days.txt.??????' \) -mmin +10 -print0 2>/dev/null)
+    fi
+    if [[ -f "${CAL_RECORD}" ]]; then while IFS= read -r w; do if [[ -n "${w}" ]]; then rec[${w}]=1; fi; done < "${CAL_RECORD}"; fi
+    for name in "${names[@]}"; do
+        path="${dir}/${name}"; snap="${work}/${name}.snap"; exists=0
+        sec=(); lines=(); trim=(); lday=(); oldof=(); dropof=(); done_=(); repl=(); gone=(); edit=()
+        adds=(); said=(); tally=()
+        for k in "${!e_file[@]}"; do if [[ "${e_file[k]}" == "${name}" ]]; then sec+=("${k}"); fi; done
+        [[ ${#sec[@]} -gt 0 ]] || continue
+        if [[ -L "${path}" ]] || [[ -e "${path}" && ! -f "${path}" ]]; then
+            notes+=("WARNING: calendar: ${path} is not a plain file, so it is left alone"); continue
+        elif [[ -e "${path}" ]]; then   # read from a private copy (cp -a never follows a symlink)
+            if ! { rm -f -- "${snap}" && cp -a -- "${path}" "${snap}" && mapfile -t lines < "${snap}"; } 2>/dev/null; then
+                notes+=("calendar: could not read ${path}, so it is left as it was"); rc=1; continue
+            fi
+            exists=1
+        fi
+        for i in "${!lines[@]}"; do   # each line as the readers see it: its text and the date it lists
+            line="${lines[i]}"; trim[i]="${line%"${line##*[![:space:]]}"}"
+            line="${line%%#*}"; line="${line#"${line%%[![:space:]]*}"}"; lday[i]="${line%%[[:space:]]*}"
+            [[ -n "${trim[i]}" ]] || continue
+            for k in "${sec[@]}"; do
+                if [[ "${e_kind[k]}" == "drop" ]]; then
+                    if [[ "${trim[i]}" == "${e_text[k]}" ]]; then dropof[i]=${k}; fi
+                elif [[ "${nl}${e_olds[k]}" == *"${nl}${trim[i]}${nl}"* ]]; then oldof[i]=${k}; fi
+            done
+        done
+        # Drops, then replacements, then additions: a line a release takes out never counts as the
+        # owner's, and a date a drop frees can take the new line.
+        for r in 0 1 2; do
+            for k in "${sec[@]}"; do
+                [[ -z "${done_[k]:-}" ]] || continue
+                if [[ "${e_kind[k]}" == "drop" ]]; then
+                    done_[k]=1; found=()
+                    for i in "${!trim[@]}"; do if [[ -z "${gone[i]:-}" && "${dropof[i]:-}" == "${k}" ]]; then found+=("${i}"); fi; done
+                    if [[ ${#found[@]} -eq 0 ]]; then
+                        :
+                    elif [[ "${rec[${name}|${e_text[k]}]:-}" != 1 ]]; then
+                        notes+=("calendar: ${name}: ${e_day[k]} left alone: this tool did not add \"${e_text[k]}\", so the owner did (a release drops only lines it added)")
+                    elif why="$(cal_held "${mode}" "${today}" "${name}" "${e_day[k]}" drop)"; then
+                        notes+=("calendar: ${name}: ${e_day[k]} ${why}")
+                    else
+                        for i in "${found[@]}"; do gone[i]=1; edit[i+1]=1; done
+                        said+=("calendar: ${name}: ${cut} \"${e_text[k]}\""); tally+=("-${name}|${e_text[k]}")
+                    fi
+                    continue
+                fi
+                [[ ${r} -ge 1 ]] || continue
+                present=0; found=(); owners=()
+                for i in "${!trim[@]}"; do
+                    [[ -z "${gone[i]:-}" ]] || continue
+                    if [[ "${trim[i]}" == "${e_text[k]}" ]]; then present=1
+                    elif [[ "${oldof[i]:-}" == "${k}" ]]; then found+=("${i}")
+                    elif [[ -z "${oldof[i]:-}" && "${lday[i]}" == "${e_day[k]}" ]]; then owners+=("${i}"); fi
+                done
+                if [[ ${present} -eq 1 ]]; then
+                    done_[k]=1
+                elif [[ ${#found[@]} -eq 1 && ${#owners[@]} -eq 0 ]]; then
+                    done_[k]=1; i=${found[0]}
+                    if why="$(cal_held "${mode}" "${today}" "${name}" "${e_day[k]}" replace)"; then
+                        notes+=("calendar: ${name}: ${e_day[k]} ${why}")
+                    else
+                        said+=("calendar: ${name}: ${swap} \"${trim[i]}\" with \"${e_text[k]}\""); tally+=("+${name}|${e_text[k]}")
+                        repl[i+1]="${e_text[k]}"; edit[i+1]=1; trim[i]="${e_text[k]}"; lday[i]="${e_day[k]}"; unset 'oldof[i]'
+                    fi
+                elif [[ ${r} -eq 2 ]]; then
+                    done_[k]=1; ours=0
+                    while IFS= read -r w; do
+                        if [[ -n "${w}" && "${rec[${name}|${w}]:-}" == 1 ]]; then ours=1; fi
+                    done <<< "${e_text[k]}${nl}${e_olds[k]}"
+                    if [[ $(( ${#found[@]} + ${#owners[@]} )) -gt 1 ]]; then
+                        notes+=("calendar: ${name}: ${e_day[k]} left alone: the file lists it $(( ${#found[@]} + ${#owners[@]} )) times")
+                    elif [[ ${#owners[@]} -eq 1 ]]; then
+                        w="${trim[${owners[0]}]//[^ -~]/?}"
+                        notes+=("calendar: ${name}: ${e_day[k]} left alone: the owner wrote it as \"${w:0:100}\" (this release ships \"${e_text[k]}\")")
+                    elif [[ ${ours} -eq 1 ]]; then
+                        notes+=("calendar: ${name}: ${e_day[k]} not added again: this tool added it before, and it was taken out by hand")
+                    elif why="$(cal_held "${mode}" "${today}" "${name}" "${e_day[k]}" add)"; then
+                        notes+=("calendar: ${name}: ${e_day[k]} ${why}")
+                    else
+                        said+=("calendar: ${name}: ${grow} \"${e_text[k]}\""); tally+=("+${name}|${e_text[k]}")
+                        adds+=("${e_text[k]}"); trim+=("${e_text[k]}"); lday+=("${e_day[k]}")
+                    fi
+                fi
+            done
+        done
+        [[ ${#said[@]} -gt 0 ]] || continue
+        if [[ "${mode}" == "check" ]]; then
+            for w in "${said[@]}"; do log "${w}"; done
+            if [[ ${exists} -eq 0 ]]; then log "calendar: would create ${path} (${CAL_OWNER} ${CAL_MODE})"; fi
+            told=1; continue
+        fi
+        if [[ "${mode}" == "install" ]]; then   # the previous file, before any change
+            ok=0
+            if [[ ${exists} -eq 0 ]]; then
+                : > "${work}/${name}.absent" && ok=1
+            elif { cp -a -- "${snap}" "${work}/${name}.orig" && cp -a -- "${snap}" "${work}/${name}.bak" \
+                    && mv -fT -- "${work}/${name}.bak" "${backup}/${name}"; } 2>/dev/null; then
+                ok=1
+            fi
+            if [[ ${ok} -eq 0 ]]; then
+                rm -f -- "${work}/${name}.orig" "${work}/${name}.absent" "${work}/${name}.bak"
+                notes+=("calendar: could not back up ${path}, so it is left as it was"); rc=1; continue
+            fi
+        fi
+        # The new file gets the old one's owner, group and mode (or those of a new day file), is
+        # written next to it through one descriptor and renamed over it: a reader sees the old file
+        # or the new one, never half of one.
+        eol="${nl}"; if [[ ${exists} -eq 1 ]] && grep -q "${cr}\$" "${snap}"; then eol="${cr}${nl}"; fi
+        bare=0   # the kept text ends with no newline, so an addition starts a line of its own first
+        if [[ ${exists} -eq 1 && -s "${snap}" && -z "${edit[${#lines[@]}]+set}" \
+                && "$(tail -c 1 "${snap}"; printf x)" != "${nl}x" ]]; then bare=1; fi
+        ok=0
+        if tmpf="$(mktemp -p "${dir}" ".${name}.XXXXXX" 2>/dev/null)"; then
+            ok=1
+            if [[ ${exists} -eq 1 ]]; then
+                { chown -h --reference="${snap}" -- "${tmpf}" && chmod --reference="${snap}" -- "${tmpf}"; } 2>/dev/null || ok=0
+            else
+                { chown -h -- "${CAL_OWNER}" "${tmpf}" && chmod -- "${CAL_MODE}" "${tmpf}"; } 2>/dev/null || ok=0
+            fi
+            if [[ ${ok} -eq 1 ]]; then
+                {
+                    prev=0
+                    for i in "${!edit[@]}"; do   # every other byte comes from sed/tail, as in env_sync
+                        if [[ ${i} -gt $((prev + 1)) ]]; then sed -n "$((prev + 1)),$((i - 1))p" "${snap}" || ok=0; fi
+                        if [[ -n "${repl[i]+set}" ]]; then   # a line in gone is left out
+                            w="${nl}"; if [[ "${lines[i - 1]}" == *"${cr}" ]]; then w="${cr}${nl}"; fi
+                            printf '%s%s' "${repl[i]}" "${w}" || ok=0
+                        fi
+                        prev=${i}
+                    done
+                    if [[ ${exists} -eq 1 ]]; then tail -n "+$((prev + 1))" "${snap}" || ok=0; fi
+                    if [[ ${bare} -eq 1 && ${#adds[@]} -gt 0 ]]; then printf '%s' "${eol}" || ok=0; fi
+                    for w in "${adds[@]}"; do printf '%s%s' "${w}" "${eol}" || ok=0; done
+                } 2>/dev/null > "${tmpf}" || ok=0
+            fi
+            if [[ ${ok} -eq 0 ]] || ! mv -fT -- "${tmpf}" "${path}" 2>/dev/null; then rm -f -- "${tmpf}"; ok=0; fi
+        fi
+        if [[ ${ok} -eq 0 ]]; then
+            rm -f -- "${work}/${name}.orig" "${work}/${name}.absent"
+            notes+=("calendar: could not write ${path}, so it is left as it was"); rc=1; continue
+        fi
+        for w in "${said[@]}"; do log "${w}"; done
+        if [[ ${exists} -eq 0 ]]; then log "calendar: ${path} created (${CAL_OWNER} ${CAL_MODE})"
+        elif [[ -n "${backup}" ]]; then log "calendar: ${path} updated; the previous one is in ${backup}/${name}"
+        else log "calendar: ${path} updated"; fi
+        for w in "${tally[@]}"; do   # what this tool put in that file, and took out
+            if [[ "${w}" == +* ]]; then rec[${w#+}]=1; else rec[${w#-}]=0; fi
+        done
+        told=1; recnew=1
+    done
+    rm -f -- "${work}"/*.snap
+    if [[ ${recnew} -eq 1 ]]; then   # an install keeps the previous record in $4 for cal_restore
+        if [[ "${mode}" == "install" && ! -e "${work}/calendar_applied.orig" && ! -e "${work}/calendar_applied.absent" ]]; then
+            if [[ -f "${CAL_RECORD}" ]]; then cp -a -- "${CAL_RECORD}" "${work}/calendar_applied.orig" 2>/dev/null || rc=1
+            else : > "${work}/calendar_applied.absent" || rc=1; fi
+        fi
+        if ! { for w in "${!rec[@]}"; do if [[ "${rec[${w}]}" == 1 ]]; then printf '%s\n' "${w}"; fi; done; } 2>/dev/null > "${CAL_RECORD}.new" \
+                || ! mv -fT -- "${CAL_RECORD}.new" "${CAL_RECORD}" 2>/dev/null; then
+            notes+=("calendar: could not save ${CAL_RECORD}"); rc=1
+        fi
+    fi
+    cal_flush "${mode}" "${notes[@]}" || true
+    if [[ ${told} -eq 0 && ${rc} -eq 0 && "${mode}" != "run" ]]; then log "calendar: nothing to change in ${dir}"; fi
+    return "${rc}"
+}
+cal_restore() {   # $1 = cal_sync's work dir, $2 = folder of the day files: undo what an install changed,
+                  # each file renamed into place whole, as it was (owner, group, mode and time)
+    local name tmpf rc=0
+    for name in nse_holidays.txt nse_extra_trading_days.txt; do
+        if [[ -f "$1/${name}.absent" ]]; then
+            if rm -f -- "$2/${name}"; then log "calendar: $2/${name} removed: the deploy had created it"; else rc=1; fi
+        elif [[ -f "$1/${name}.orig" ]]; then
+            tmpf=""
+            if tmpf="$(mktemp -p "$2" ".${name}.XXXXXX")" && cp -a -- "$1/${name}.orig" "${tmpf}" \
+                    && mv -fT -- "${tmpf}" "$2/${name}"; then
+                log "calendar: $2/${name} put back as it was before the deploy"
+            else
+                if [[ -n "${tmpf}" ]]; then rm -f -- "${tmpf}"; fi
+                rc=1
+            fi
+        fi
+    done
+    # the record of the lines this tool put in goes back with them
+    if [[ -f "$1/calendar_applied.absent" ]]; then
+        rm -f -- "${CAL_RECORD}" || rc=1
+    elif [[ -f "$1/calendar_applied.orig" ]]; then
+        { cp -a -- "$1/calendar_applied.orig" "${CAL_RECORD}.new" && mv -fT -- "${CAL_RECORD}.new" "${CAL_RECORD}"; } || rc=1
+    fi
+    return "${rc}"
+}
+cal_keep() {   # $1 = tag, $2 = its list, fetched whole: kept in CAL_LISTS, the only one there
+    local f
+    { mkdir -p -- "${CAL_LISTS}" && cp -- "$2" "${CAL_LISTS}/.$1.new" && mv -fT -- "${CAL_LISTS}/.$1.new" "${CAL_LISTS}/$1"; } 2>/dev/null || return 1
+    for f in "${CAL_LISTS}"/v*; do if [[ "${f}" != "${CAL_LISTS}/$1" ]]; then rm -f -- "${f}"; fi; done
+}
+cal_list() {   # $1 = tag, $2 = output: that release's list from CAL_LISTS, else fetched and kept there.
+               # Only a list that arrived whole with a 200 is kept: 3 = no list was found (404), 1 = not
+               # fetched; neither keeps anything, so the next run asks again
+    if [[ -f "${CAL_LISTS}/$1" && ! -L "${CAL_LISTS}/$1" ]]; then cp -- "${CAL_LISTS}/$1" "$2"; return; fi
+    cal_conf_fetch "$1" "$2" || return
+    cal_keep "$1" "$2" || true
+}
+cal_run() {   # every run, at any hour: the installed release's list, with the rules of a run (cal_held)
+    local d got=0
+    [[ "${deployed}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 0
+    d="$(mktemp -d)" || return 1
+    cal_list "${deployed}" "${d}/nse-calendar.conf" || got=$?
+    if [[ ${got} -eq 0 ]]; then
+        cal_sync run "${d}/nse-calendar.conf" "${CAL_DIR}" "${d}" "$(cal_today)" || true
+    elif [[ ${got} -eq 3 ]]; then
+        cal_note "calendar: no list was found for ${deployed}; the next run asks again"
+    else
+        cal_note "calendar: could not fetch the list of ${deployed} whole; the next run tries again"
+    fi
+    rm -rf -- "${d}"
+}
+gate_view() {   # keep the day files as this run found them, for market_open, before cal_run changes any
+    local f d="${STATE}/calendar-gate"
+    mkdir -p -- "${d}" || return 1
+    for f in nse_holidays.txt nse_extra_trading_days.txt; do
+        rm -f -- "${d}/${f}" || return 1
+        if [[ -f "${CAL_DIR}/${f}" ]]; then cp -- "${CAL_DIR}/${f}" "${d}/${f}" || return 1; fi
+    done
+    GATE_VIEW="${d}"
+}
+cal_preview() {   # $1 = the list a release brings, $2 = a new private folder. In $2/etc: the day files as
+                  # that release's install would leave them, for market_open (GATE_VIEW). Made on copies,
+                  # in a subshell that writes nothing outside $2 and logs nothing
+    (
+        mkdir -m 700 -- "$2" "$2/etc" "$2/work" "$2/bk" || exit 1
+        for f in nse_holidays.txt nse_extra_trading_days.txt; do
+            if [[ -f "${CAL_DIR}/${f}" && ! -L "${CAL_DIR}/${f}" ]]; then cp -p -- "${CAL_DIR}/${f}" "$2/etc/" || exit 1; fi
+        done
+        if [[ -f "${CAL_RECORD}" ]]; then cp -- "${CAL_RECORD}" "$2/calendar_applied" || exit 1; fi
+        CAL_RECORD="$2/calendar_applied"; CAL_NOTES="$2/calendar_notes"
+        cal_sync install "$1" "$2/etc" "$2/work" "$(cal_today)" "$2/bk" || true
+    ) > /dev/null 2>&1
+}
+deployed="$(cat "${STATE}/deployed_tag" 2>/dev/null || echo none)"
+# ---- every run, also one that installs nothing or runs in market hours: keep the day files as they
+# are for the market gate (gate_view), then apply the installed release's calendar list (cal_run).
+if [[ "${MODE}" != "check" ]]; then
+    if gate_view; then cal_run || log "WARNING: calendar: the day files could not be checked"
+    else log "WARNING: calendar: the day files could not be kept for the market gate, so this run leaves them alone"; fi
+fi
 json="$(curl -fsSL -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${OWNER_REPO}/releases/latest" 2>/dev/null)" \
     || { [[ "${MODE}" == "check" ]] && echo "no GitHub Release found yet for ${OWNER_REPO} (or API unreachable)"; exit 0; }
 tag="$(jq -r '.tag_name // empty' <<< "${json}")"
 asset_url="$(jq -r --arg a "${ASSET}" '.assets[]? | select(.name==$a) | .browser_download_url' <<< "${json}" | head -1)"
-deployed="$(cat "${STATE}/deployed_tag" 2>/dev/null || echo none)"
 if [[ "${MODE}" == "check" ]]; then
     echo "latest release: ${tag:-none} | deployed: ${deployed} | asset: ${asset_url:-MISSING} | market_open: $(market_open && echo yes || echo no)"
-    if [[ "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then   # what that release would change in .env
+    if [[ "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then   # what that release would change in .env and the day files
         ck="$(mktemp -d)"; trap 'rm -rf "${ck}"' EXIT
         if ! env_conf_fetch "${tag}" "${ck}/openalgo-env.conf"; then echo "settings: could not fetch the list of ${tag}"
         elif ! env_sync check "${ck}/openalgo-env.conf" "${ENV_FILE}" "${ck}"; then echo "settings: the list of ${tag} is not valid"; fi
+        got=0; cal_conf_fetch "${tag}" "${ck}/nse-calendar.conf" || got=$?
+        if [[ ${got} -eq 3 ]]; then echo "calendar: no list was found for ${tag}"
+        elif [[ ${got} -ne 0 ]]; then echo "calendar: could not fetch the list of ${tag}"
+        elif ! cal_sync check "${ck}/nse-calendar.conf" "${CAL_DIR}" "${ck}" "$(cal_today)"; then echo "calendar: the list of ${tag} could not be checked"; fi
     fi
     exit 0
 fi
@@ -205,9 +619,16 @@ fi
 tar -tzf "${tmp}/${ASSET}" | grep -x 'dist/index.html' > /dev/null || { log "${ASSET} has no dist/index.html - not deploying"; exit 1; }
 # ---- the .env settings of this release, fetched and checked while OpenAlgo still runs: a list that
 # cannot be fetched or read stops the deploy before anything is touched.
-env_conf="${tmp}/openalgo-env.conf"; mkdir -m 700 "${tmp}/env-plan" "${tmp}/env"
+env_conf="${tmp}/openalgo-env.conf"; mkdir -m 700 "${tmp}/env-plan" "${tmp}/env" "${tmp}/cal"
 env_conf_fetch "${tag}" "${env_conf}" || { log "could not fetch the settings list of ${tag} - not deploying"; exit 1; }
 env_sync check "${env_conf}" "${ENV_FILE}" "${tmp}/env-plan" || { log "the settings list of ${tag} is not valid - not deploying"; exit 1; }
+# ---- the calendar lines of this release, fetched while OpenAlgo still runs. Unlike the settings, a
+# list that cannot be fetched or read never stops the deploy: the day files then stay as they are,
+# nothing is kept, and the runs after the install fetch the list again (cal_run).
+cal_conf="${tmp}/nse-calendar.conf"; got=0
+cal_conf_fetch "${tag}" "${cal_conf}" || got=$?
+if [[ ${got} -eq 3 ]]; then log "calendar: no list was found for ${tag}; the day files stay as they are"; cal_conf=""
+elif [[ ${got} -ne 0 ]]; then log "calendar: could not fetch the list of ${tag} whole; the day files stay as they are"; cal_conf=""; fi
 # ---- self-update: a release may carry a newer version of this tool. It is read straight from
 # GitHub at the release tag (never from APP_DIR, which the service user can write), checked, and
 # used from the NEXT run on - so a fixed tool arrives even when this run's deploy fails.
@@ -268,12 +689,29 @@ rollback() {
     fi
     # .env goes back with the databases: a start may have rewritten it (OpenAlgo saves FERNET_SALT)
     env_restore "${tmp}/env" "${ENV_FILE}" || log "WARNING: could not put the previous ${ENV_FILE} back"
+    cal_restore "${tmp}/cal" "${CAL_DIR}" || log "WARNING: calendar: could not put the previous day files back"
     chown -R "${SVC_USER}:${SVC_USER}" "${APP_DIR}/frontend/dist" "${APP_DIR}/db"
     systemctl start "${SERVICE}"; log "rollback done (${SERVICE} $(systemctl is-active "${SERVICE}"))"
     for u in $(ring_services); do systemctl start "${u}" || log "WARNING: ${u} did not start after rollback"; done
 }
 # ---- stop first: no requests, no DB writes and no half-old/half-new code during the update.
 # From here on ANY error rolls back and starts the service again (never leave openalgo stopped).
+# The downloads take time, so the market gate is asked once more right before the stop: if the
+# window opened meanwhile, the install waits as it would have at the first gate.
+if market_open && [[ ${FORCE} -eq 0 ]]; then
+    log "release ${tag} waiting for market close (the window opened during the download)"
+    rm -f -- "${bdir}/prev_ref"; rmdir -- "${bdir}" 2>/dev/null || true
+    exit 0
+fi
+# The calendar list this release brings may make today a trading day (a special session for today,
+# or today's holiday taken back): the gate is also asked of the day files as the install would leave
+# them, so such a release waits as it will once the list is in place.
+if [[ -n "${cal_conf}" && ${FORCE} -eq 0 ]] && cal_preview "${cal_conf}" "${tmp}/cal-gate" \
+        && ( GATE_VIEW="${tmp}/cal-gate/etc"; market_open ); then
+    log "release ${tag} waiting for market close (its calendar list makes today a trading day)"
+    rm -f -- "${bdir}/prev_ref"; rmdir -- "${bdir}" 2>/dev/null || true
+    exit 0
+fi
 log "stopping ${SERVICE} for the update"
 for u in $(ring_services); do systemctl stop "${u}" || true; done   # same code tree, so same window
 systemctl stop "${SERVICE}"
@@ -295,6 +733,13 @@ if [[ -f "${APP_DIR}/sudarshan/requirements.txt" ]]; then
 fi
 # OpenAlgo's .env gets the settings this release lists (backed up first; a rollback puts it back)
 if ! env_sync apply "${env_conf}" "${ENV_FILE}" "${tmp}/env" "${bdir}/openalgo.env"; then log "updating ${ENV_FILE} failed"; rollback; exit 1; fi
+# The day files get the calendar lines this release lists (the files it changes are backed up first,
+# and a rollback puts them back). A bad list or a failed write is logged; the install goes on.
+if [[ -n "${cal_conf}" ]]; then
+    if ! cal_sync install "${cal_conf}" "${CAL_DIR}" "${tmp}/cal" "$(cal_today)" "${bdir}"; then
+        log "WARNING: calendar: the day files did not take every line of ${tag}; the install goes on"
+    fi
+fi
 # migrate_all.py runs each migration with sys.executable, so the venv python is enough (no 'uv run').
 if ! as_svc bash -c "cd '${APP_DIR}/upgrade' && '${APP_DIR}/.venv/bin/python' migrate_all.py"; then log "migrations failed"; rollback; exit 1; fi
 # ---- start + health (this is our own service; TRINETRA is never touched)
@@ -304,6 +749,8 @@ for _ in $(seq 1 90); do sleep 2; code="$(curl -s -o /dev/null -w '%{http_code}'
 if [[ ${ok} -eq 1 ]]; then
     trap - ERR
     echo "${tag}" > "${STATE}/deployed_tag"; log "deployed ${tag} OK (http ${code}); backup in ${bdir}"
+    # the list this install applied, fetched whole, is the one the next runs (cal_run) apply
+    if [[ -n "${cal_conf}" ]]; then cal_keep "${tag}" "${cal_conf}" || true; fi
 else
     log "health check failed after start (last http ${code:-none})"; rollback; exit 1
 fi

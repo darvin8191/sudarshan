@@ -321,6 +321,25 @@ def test_the_shipped_list_on_a_fresh_install(tmp_path):
     assert "left alone" not in out
 
 
+def test_the_shipped_list_is_whole_and_reads(tmp_path):
+    """CI: the list in the repo is not empty, ends with a newline (the deploy tool takes a list
+    only when it arrived whole, and one it cannot take stops every install of the release) and
+    reads with the tool's own parser."""
+    data = SHIPPED_LIST.read_bytes()
+    assert data.strip(), "the settings list is empty"
+    assert data.endswith(b"\n"), "the settings list does not end with a newline"
+    done = Server(tmp_path, (REPO / ".sample.env").read_bytes(), data).sync("check")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "list line" not in done.stdout
+
+
+def test_an_empty_list_changes_nothing(tmp_path):
+    """A release whose settings list is empty (or missing) sets nothing."""
+    env, out = _applied(tmp_path, b"MAX_WEBSOCKET_CONNECTIONS='3'\n", b"")
+    assert env == b"MAX_WEBSOCKET_CONNECTIONS='3'\n"
+    assert out.startswith("settings: nothing to change in "), out
+
+
 def test_the_deploy_applies_it_between_checkout_and_start():
     text = DEPLOY_TOOL.read_text()
     begin = text.index("\nrollback() {")

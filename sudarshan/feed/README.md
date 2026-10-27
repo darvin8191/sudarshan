@@ -30,8 +30,10 @@ journalctl -u sudarshan-feed -f
 ```
 
 `/etc/sudarshan/nse_holidays.txt`: one `YYYY-MM-DD` per line from the NSE holiday circular,
-`#` comment lines allowed. Keep each date alone on its line: `sudarshan-deploy` matches whole
-lines. A missing file means only weekends count as closed (logged, and shown in /health).
+`#` comments allowed, also after the date. `sudarshan-deploy` adds the dates a release lists (see
+`sudarshan/README.md`). A missing file means only weekends count as closed (logged, and shown in
+/health). The feed does not read `nse_extra_trading_days.txt`: a special session on a weekend or a
+holiday counts as closed here.
 
 By hand from the repo root (a dev box, outside market hours):
 
