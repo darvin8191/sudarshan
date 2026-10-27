@@ -35,6 +35,7 @@ from . import __version__, protocol
 from .bus import HEALTH_TOPIC, Publisher
 from .config import Settings, is_loopback_url, setup_logging
 from .http_api import start_http
+from .rest import RestGovernor  # M18.9: the REST governor
 from .store import SnapshotStore, TickRecorder
 from .subscriptions import Subscriptions, validate
 from .window import MarketWindow, iso, ist_date
@@ -158,6 +159,7 @@ class FeedService:
         self._last_error: dict | None = None
         self._last_disconnect: dict | None = None
         self._stats = dict.fromkeys(STATS, 0)
+        self.rest = RestGovernor(self)  # M18.9: GET /upstox/... on the HTTP port (rest.py)
 
     # ---- lifecycle -------------------------------------------------------------------------
     async def run(self) -> None:
@@ -183,6 +185,7 @@ class FeedService:
             try:
                 await self._supervise()
             finally:
+                self.rest.close()  # M18.9: waiting REST calls are answered, never dropped
                 for task in tasks:
                     task.cancel()
                 await asyncio.gather(*tasks, return_exceptions=True)
@@ -569,6 +572,7 @@ class FeedService:
             "stats": stats | {"zmq_dropped": self.pub.dropped if self.pub else 0},
             "recorder": self.recorder.status() if self.recorder else None,
             "zmq": self.pub.endpoint if self.pub else None,
+            "rest": self.rest.health(),  # M18.9: the REST governor, per API and client
         }
 
     # ---- local API ------------------------------------------------------------------------------

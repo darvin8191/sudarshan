@@ -7,9 +7,12 @@ import json
 import socket
 import time
 from datetime import datetime
+from http import HTTPStatus
 
 from websockets.asyncio.server import serve
+from websockets.datastructures import Headers
 from websockets.exceptions import ConnectionClosed
+from websockets.http11 import Response
 
 from sudarshan.feed.protocol import pb2
 from sudarshan.feed.window import IST
@@ -80,11 +83,23 @@ def full_stock(ltp: float = 1400.5, with_ltpc: bool = True):
     )
 
 
+async def rest_ok(path: str) -> tuple[int, bytes, dict]:
+    return 200, b'{"status":"success","data":{}}', {}
+
+
+def token_error() -> bytes:
+    error = {"errorCode": "UDAPI100050", "message": "Invalid token used to access API"}
+    return json.dumps({"status": "error", "errors": [error]}).encode()
+
+
 class FakeUpstox:
-    """One local websockets server playing both Upstox endpoints.
+    """One local websockets server playing the Upstox endpoints the feed uses.
 
     GET /v3/feed/market-data-feed/authorize answers like Upstox (401 unless the bearer token
-    matches); /feed is the market-data socket, refused with ``upgrade_status`` when set.
+    matches); /feed is the market-data socket, refused with ``upgrade_status`` when set. Any other
+    /v2/ or /v3/ GET is a REST call (the governor's): 401 with Upstox's token error unless the
+    bearer token matches, else ``rest_answer(path)`` -> (status, body, headers); a header given
+    as None is left out (Content-Length too: the body then ends with the connection).
     """
 
     def __init__(self, token: str = TOKEN):
@@ -94,9 +109,13 @@ class FakeUpstox:
         self.sockets: list = []  # server side of each accepted socket
         self.requests: list[list[dict]] = []  # JSON requests received, per socket
         self.close_codes: list = []  # close code the server saw, per socket
+        self.rest_answer = rest_ok
+        self.rest_calls: list[tuple[str, str | None]] = []  # (path with query, Authorization)
 
     async def __aenter__(self) -> FakeUpstox:
-        self._server = await serve(self._handler, "127.0.0.1", 0, process_request=self._process)
+        self._server = await serve(
+            self._handler, "127.0.0.1", 0, process_request=self._process, open_timeout=60
+        )
         self.port = self._server.sockets[0].getsockname()[1]
         return self
 
@@ -116,9 +135,24 @@ class FakeUpstox:
                 return connection.respond(401, json.dumps({"status": "error", "errors": [error]}))
             uri = f"ws://127.0.0.1:{self.port}/feed?requestId=r{self.authorize_calls}&code={CODE}"
             return connection.respond(200, json.dumps({"data": {"authorized_redirect_uri": uri}}))
+        if request.path.startswith(("/v2/", "/v3/")):
+            return self._rest(request)
         if self.upgrade_status:
             return connection.respond(self.upgrade_status, "Forbidden")
         return None  # go on with the WebSocket handshake
+
+    async def _rest(self, request) -> Response:
+        auth = request.headers.get("Authorization")
+        self.rest_calls.append((request.path, auth))
+        if auth != f"Bearer {self.token}":
+            status, body, extra = 401, token_error(), {}
+        else:
+            status, body, extra = await self.rest_answer(request.path)
+        fields = {"Content-Type": "application/json", "Content-Length": str(len(body)),
+                  "Connection": "close"} | extra  # fmt: skip
+        reason = HTTPStatus(status).phrase if status in HTTPStatus._value2member_map_ else "Error"
+        headers = Headers([(k, v) for k, v in fields.items() if v is not None])
+        return Response(status, reason, headers, body)
 
     async def _handler(self, ws) -> None:
         received: list[dict] = []
