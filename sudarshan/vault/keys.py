@@ -29,6 +29,30 @@ HKDF_SALT = b"sudarshan/hkdf-salt/v1"
 VAULT_INFO = b"sudarshan/vault/secrets/v1"
 #: Seals the worker's loopback calls to OpenAlgo (authenticates them and hides the token).
 HANDOFF_INFO = b"sudarshan/autologin/handoff/v1"
+#: Seals OpenAlgo's bridge to the market alerts' local API (sudarshan-alerts, 127.0.0.1:5582).
+ALERTS_API_INFO = b"sudarshan/alerts/api/v1"
+#: Seals the market alerts' pushes to OpenAlgo's owner room (sudarshan-alerts to OpenAlgo).
+ALERTS_PUSH_INFO = b"sudarshan/alerts/push/v1"
+#: Seals the screener's digests to the market alerts: their own purpose, so the alerts API
+#: refuses a digest under the bridge's seal and a bridge op under this one.
+ALERTS_SCREENER_DIGEST_INFO = b"sudarshan/alerts/screener-digest/v1"
+#: Seals OpenAlgo's bridge to the portfolio's local API (sudarshan-portfolio, 127.0.0.1:5583).
+PORTFOLIO_API_INFO = b"sudarshan/portfolio/api/v1"
+#: Seals OpenAlgo's bridge to the screener's local API (sudarshan-screener, 127.0.0.1:5584).
+SCREENER_API_INFO = b"sudarshan/screener/api/v1"
+#: Seals the screener's calls into OpenAlgo (its watchlist and push routes).
+SCREENER_INTERNAL_INFO = b"sudarshan/screener/internal/v1"
+#: Every purpose: a key derived for one never opens another's seal (a test holds them apart).
+PURPOSES = (
+    VAULT_INFO,
+    HANDOFF_INFO,
+    ALERTS_API_INFO,
+    ALERTS_PUSH_INFO,
+    ALERTS_SCREENER_DIGEST_INFO,
+    PORTFOLIO_API_INFO,
+    SCREENER_API_INFO,
+    SCREENER_INTERNAL_INFO,
+)
 _FINGERPRINT_LABEL = b"sudarshan/vault/key-fingerprint/v1"
 
 

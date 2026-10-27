@@ -19,13 +19,15 @@ from __future__ import annotations
 import contextlib
 import json
 import secrets
+import threading
 import time
-from collections.abc import MutableMapping
+from collections.abc import Iterator, MutableMapping
 
 import httpx
 from cryptography.fernet import Fernet, InvalidToken
 
 SEAL_TTL_S = 60
+#: The default size limit of one sealed request; a route may give its own (cross-design X9).
 MAX_SEALED_BYTES = 16_384
 PREFLIGHT_PATH = "/sudarshan/autologin/internal/preflight"
 REPORT_PATH = "/sudarshan/autologin/internal/report"
@@ -44,6 +46,57 @@ def call_max_s(op: str) -> float:
 
 class HandoffRejected(Exception):
     """A sealed request that is not genuine, has expired, or was already used."""
+
+
+class NoncesFull(Exception):
+    """A NonceBook holds as many nonces still valid as it may: the route answers 503 (busy),
+    never forgets a nonce that could still be replayed."""
+
+
+class NonceBook(MutableMapping):
+    """The nonces of sealed requests, each kept until it can no longer be replayed.
+
+    For ``open_sealed``'s ``seen``. A full book refuses a new nonce (NoncesFull) instead of
+    dropping one still valid, as a full TTL cache would (cross-design X9). Size it at least
+    ``2 * SEAL_TTL_S`` times the route's peak requests a second. ``lock`` guards it for callers
+    on several threads: in OpenAlgo, a real lock from ``utils.real_threading``.
+    """
+
+    def __init__(self, maxsize: int, ttl_s: float = 2 * SEAL_TTL_S, *, lock=None,
+                 clock=time.monotonic):  # fmt: skip
+        if maxsize < 1:
+            raise ValueError("a nonce book holds at least one nonce")
+        self.maxsize, self.ttl_s, self._clock = maxsize, ttl_s, clock
+        self.lock = lock if lock is not None else threading.RLock()
+        self._until: dict[str, float] = {}
+
+    def __contains__(self, nonce) -> bool:
+        until = self._until.get(nonce)
+        return until is not None and until > self._clock()
+
+    def __getitem__(self, nonce) -> bool:
+        if nonce not in self:
+            raise KeyError(nonce)
+        return True
+
+    def __setitem__(self, nonce, _value) -> None:
+        now = self._clock()
+        if nonce not in self._until and len(self._until) >= self.maxsize:
+            self._until = {seen: until for seen, until in self._until.items() if until > now}
+            if len(self._until) >= self.maxsize:
+                raise NoncesFull()
+        self._until[nonce] = now + self.ttl_s
+
+    def __delitem__(self, nonce) -> None:
+        del self._until[nonce]
+
+    def __iter__(self) -> Iterator[str]:
+        now = self._clock()
+        return iter([seen for seen, until in self._until.items() if until > now])
+
+    def __len__(self) -> int:
+        now = self._clock()
+        return sum(1 for until in self._until.values() if until > now)
 
 
 class LinkError(Exception):
@@ -70,13 +123,17 @@ def open_sealed(
     seen: MutableMapping,
     now: float | None = None,
     ttl: int = SEAL_TTL_S,
+    max_bytes: int = MAX_SEALED_BYTES,
 ) -> dict:
     """Verify and decrypt one sealed request for ``op``; record its nonce in ``seen``.
 
+    ``max_bytes`` is the route's limit on the sealed request (cross-design X9).
+
     Raises:
         HandoffRejected: wrong key, tampered, expired (or from the future), wrong op, or replayed.
+        NoncesFull: ``seen`` is a full NonceBook: answer busy, the request was not used.
     """
-    if not blob or len(blob) > MAX_SEALED_BYTES:
+    if not blob or len(blob) > max_bytes:
         raise HandoffRejected("size")
     try:
         plain = fernet.decrypt_at_time(blob, ttl, int(now if now is not None else time.time()))

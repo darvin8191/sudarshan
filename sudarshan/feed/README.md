@@ -3,7 +3,8 @@
 The **single** Upstox Market Data Feed V3 WebSocket for all of सुदर्शन / SUDARSHAN. It uses the
 read-only Analytics Token, subscribes once, and fans the ticks out on 127.0.0.1 to the other
 SUDARSHAN services (alerts, watchlists, screener, portfolio). Nothing else in SUDARSHAN opens an
-Upstox socket: the Basic plan allows 2 sockets per user and TRINETRA holds one (Plus allows 5).
+Upstox socket: the owner's Plus plan allows 5 per user, shared with TRINETRA and OpenAlgo's own
+proxy (the budget table is in `sudarshan/README.md`).
 
 ```
 Upstox Feed V3 (wss, 1 socket) -> sudarshan-feed -> ZMQ PUB 127.0.0.1:5581  (ticks + __health__)
@@ -233,7 +234,7 @@ authorize URI's query string (a one-time code) are never logged or shown.
   Check who holds them: TRINETRA (one), and OpenAlgo's own WebSocket proxy, which opens a second
   Upstox socket with the trading token whenever a page streams (M18.2). A socket left behind by
   a crash counts until Upstox times it out; the service waits at least 60 s between such
-  attempts and connects on its own once a slot frees. On the Plus plan the limit is 5.
+  attempts and connects on its own once a slot frees. The Plus plan's limit is 5 sockets.
 - **`token_rejected`**: the Analytics Token was refused (expired, regenerated, or wrong file).
   Put the current token in the file; the service retries within 5 s of the change.
 - **`keys_without_data.count > 0`** a minute after `connected`: those keys sent nothing. Upstox
