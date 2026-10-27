@@ -10,6 +10,7 @@ from datetime import date, datetime
 
 from sudarshan.alerts.market import clock, engine, sessions, spec, words
 from sudarshan.alerts.market.book import Book
+from sudarshan.alerts.market.engine import State
 from sudarshan.alerts.market.store import MarketStore
 from sudarshan.autologin.schedule import IST
 
@@ -94,6 +95,77 @@ def test_F2b_the_vwap_drifting_alone_moves_no_side():
     t += 1000
     out = book.on_tick(frame(ltp=100.23, at=t, atp=100.224, ltq=3), t, market(WED, t, TUE))
     assert [f.level for f in fires(out)] == [10023]  # above 100.224 from the next paisa
+
+
+# ---- M1: the state put() is given is the state the flush saves -------------------------------
+
+
+def test_F1a_an_edit_with_a_reset_queues_the_reset_not_the_state_before_it():
+    book = Book()
+    book.put(make({"kind": "price", "params": {"op": "crosses_above", "level": "100"}}))
+    t = ms(WED, 10, 0)
+    book.on_tick(frame(ltp=99.0, at=t), t, market(WED, t, TUE))  # side below, queued
+    edited = make({"kind": "price", "params": {"op": "crosses_above", "level": "98"}}, version=2)
+    book.put(edited, State())  # what the runtime does after store.update(reset_state=True)
+    assert book.changed() == {1: (2, State())}
+
+
+def _restart(store: MarketStore, alert_id: int) -> Book:
+    """A new Book from what market.db holds, as the service builds it at start."""
+    book = Book()
+    book.put(spec.Alert.of(store.alert("owner", alert_id)), store.states("owner").get(alert_id))
+    return book
+
+
+def test_F1b_an_edit_before_the_flush_then_a_restart_fires_no_false_opening(tmp_path):
+    """Edit 'crosses above 100' to 'above 98' while the price is 99 (already above the new level),
+    before the 1 s flush; restart in the evening. The next open at 99.50 only seeds: the price
+    never went below 98."""
+    store = MarketStore(tmp_path / "market.db")
+    level = {"kind": "price", "params": {"op": "crosses_above", "level": "100"}}
+    row = store.create("owner", spec.check(SBIN | level, ms(MON, 8, 0)), ms(MON, 8, 0))
+    book = Book()
+    book.put(spec.Alert.of(row))
+    t = ms(TUE, 14, 0)
+    book.on_tick(frame(ltp=99.0, at=t), t, market(TUE, t, MON))
+    new = spec.check(SBIN | {"kind": "price", "params": {"op": "crosses_above", "level": "98"}}, t)
+    row = store.update("owner", row["id"], row["version"], new, t + 400, status="active",
+                       reset_state=spec.changes_condition(row, new))  # fmt: skip
+    book.put(spec.Alert.of(row), State())
+    store.save_states("owner", book.changed(), t + 1000)  # the flush
+    again = _restart(store, row["id"])
+    t2 = ms(WED, 9, 15, 1)
+    assert fires(again.on_tick(frame(ltp=99.5, at=t2), t2, market(WED, t2, TUE))) == []
+    store.close()
+
+
+def test_F1c_a_resume_reaches_market_db_so_a_restart_does_not_bring_back_the_old_side(tmp_path):
+    """An at-close crossing closes below, is paused, resumed (the next close only seeds) and the
+    service restarts that evening. The next day's close above must seed, not fire on a move made
+    while the alert was paused."""
+    store = MarketStore(tmp_path / "market.db")
+    fields = {"kind": "price", "params": {"op": "crosses_above", "level": "100"},
+              "frequency": "at_close", "candle_min": 15}  # fmt: skip
+    row = store.create("owner", spec.check(SBIN | fields, ms(MON, 8, 0)), ms(MON, 8, 0))
+    book = Book()
+    book.put(spec.Alert.of(row))
+    t = ms(TUE, 10, 1)
+    book.on_tick(frame(ltp=99.0, at=t), t, market(TUE, t, MON))
+    t = ms(TUE, 10, 15, 5)
+    book.on_clock(t, market(TUE, t, MON))  # the 10:00 candle closes below: side -1
+    store.save_states("owner", book.changed(), t)
+    row = store.update("owner", row["id"], row["version"], row, ms(TUE, 11, 0), status="paused")
+    book.put(spec.Alert.of(row))
+    store.save_states("owner", book.changed(), ms(TUE, 11, 0, 1))
+    row = store.update("owner", row["id"], row["version"], row, ms(TUE, 19, 0), status="active")
+    book.put(spec.Alert.of(row), engine.resume(book.state(row["id"])))
+    store.save_states("owner", book.changed(), ms(TUE, 19, 0, 1))
+    again = _restart(store, row["id"])
+    t = ms(WED, 9, 16)
+    again.on_tick(frame(ltp=101.0, at=t), t, market(WED, t, TUE))
+    t = ms(WED, 9, 30, 5)
+    assert [o.fire for o in again.on_clock(t, market(WED, t, TUE)) if o.fire] == []
+    store.close()
 
 
 # ---- M3: a decision applies only to the definition it was made on ---------------------------

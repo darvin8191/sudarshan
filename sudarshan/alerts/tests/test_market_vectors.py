@@ -2,7 +2,9 @@
 
 Alert vectors run through the Book, the runtime's own path: feed ticks in, the gate, candles, the
 engine's decisions out. ``World`` plays the runtime: the vectors' calendar, the feed's health,
-pauses, restarts (only market.db's fields survive one) and the owner's pause, resume and edits.
+pauses, and a real market.db: fires recorded with their state, a flush once a second, the
+owner's pause, resume and edits written as the bridge writes them, and a restart that rebuilds
+the Book from what the file holds (a clean stop flushes first).
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ import pytest
 from sudarshan.alerts.market import clock, engine, sessions, spec
 from sudarshan.alerts.market.book import Book
 from sudarshan.alerts.market.grain import Grain, edge_down, edge_up, paise, rupees, to_decimal
+from sudarshan.alerts.market.store import MarketStore
 from sudarshan.autologin.schedule import IST, parse_window
 
 VECTORS = json.loads(Path(__file__).with_name("market_vectors.json").read_text(encoding="utf-8"))
@@ -24,7 +27,9 @@ DEFAULTS = VECTORS["defaults"]
 CALENDAR = VECTORS["calendar"]
 DIRECTIONS = {spec.UP: "up", spec.DOWN: "down"}
 SIDES = {-1: "below", 0: "at", 1: "above", None: None}
-PERSISTED = 9  # State's fields that market.db keeps
+#: The flush that saves the Book's changed states runs once a second.
+FLUSH_MS = 1000
+BOTH = {"telegram": True, "app": True}
 
 
 def ms(day: str, clock_text: str) -> int:
@@ -104,19 +109,33 @@ def make_row(vector: dict, fields: dict, version: int = 1) -> dict:
 class World:
     """The runtime around the Book, as far as the vectors need one."""
 
-    def __init__(self, vector: dict):
+    def __init__(self, vector: dict, path: Path):
         self.vector = vector
         self.day = vector.get("day", DEFAULTS["day"])
+        self.created = ms(self.day, vector.get("created", DEFAULTS["created"]))
         self.fields = fields_of(vector)
-        self.row = make_row(vector, self.fields)
+        self.path = path
+        self.store = MarketStore(path)
+        self.row = self.store.create("owner", spec.check(self.fields, self.created), self.created)
         self.alert = spec.Alert.of(self.row)
         self.book = Book()
         self.book.put(self.alert)
+        self.flushed_at = self.created
         self.pauses: list[tuple[int, int, str]] = []
         self.down: list[tuple[int, int]] = []
         self.fires: list[engine.Fire] = []
         self.notes: list[tuple[int, engine.Reason]] = []
         self.stop: engine.Outcome | None = None
+
+    def flush(self, now: int) -> None:
+        self.store.save_states("owner", self.book.changed(), now)
+        self.flushed_at = now
+
+    def owner(self, now: int, fields: dict, **change) -> None:
+        """The owner's edit, pause or resume, written to market.db as the bridge writes it."""
+        self.row = self.store.update("owner", self.alert.id, self.row["version"], fields, now,
+                                     **change)  # fmt: skip
+        self.alert = spec.Alert.of(self.row)
 
     def market(self, on: str, now: int) -> clock.Market:
         return market(date.fromisoformat(on), now, pauses=self.pauses, down=self.down)
@@ -136,9 +155,18 @@ class World:
         return frame
 
     def take(self, outcomes, now: int) -> None:
+        """Each outcome as the runtime writes it: a fire with its state and stop in one
+        transaction, an automatic stop or pause on the version it was judged at."""
         for out in outcomes:
             if out.fire is not None:
                 self.fires.append(out.fire)
+                reason = out.reason.code if out.reason else ""
+                self.store.record_fire("owner", out.fire, out.state, title="t", line="l",
+                                       value="v", level="l", channels=BOTH, status=out.status,
+                                       status_reason=reason)  # fmt: skip
+            elif out.status is not None:
+                self.store.set_status("owner", self.alert.id, out.status, out.reason.code, now,
+                                      version=self.alert.version)  # fmt: skip
             if out.note is not None:
                 self.notes.append((now, out.note))
             if out.status is not None:
@@ -155,26 +183,31 @@ class World:
         if "restart" in raw:
             start, end = (ms(on, t) for t in raw["restart"])
             self.pauses.append((start, end, "service"))
-            kept = engine.State(*self.book.state(self.alert.id)[:PERSISTED])
+            self.flush(start)  # a clean stop
+            self.store.close()
+            self.store = MarketStore(self.path)  # only what market.db holds comes back
+            self.row = self.store.alert("owner", self.alert.id)
+            self.alert = spec.Alert.of(self.row)
             self.book = Book()
-            self.book.put(self.alert, kept)
+            self.book.put(self.alert, self.store.states("owner").get(self.alert.id))
+            self.flushed_at = end
             return
         now = ms(on, raw["at"])
+        if now - self.flushed_at >= FLUSH_MS:
+            self.flush(now)
         if raw.get("clock"):
             self.take(self.book.on_clock(now, self.market(on, now)), now)
         elif raw.get("suspend"):
-            self.alert = dataclasses.replace(self.alert, status="paused")
+            self.owner(now, self.row, status="paused")
             self.book.put(self.alert)
         elif raw.get("resume"):
-            self.alert = dataclasses.replace(self.alert, status="active")
+            self.owner(now, self.row, status="active")
             self.book.put(self.alert, engine.resume(self.book.state(self.alert.id)))
         elif "edit" in raw:
-            fields = self.fields | raw["edit"]
-            row = make_row(self.vector, fields, self.row["version"] + 1)
-            reset = spec.changes_condition(self.row, row)
-            status = spec.status_after_edit(self.alert.status, reset)
-            self.fields, self.row = fields, row | {"status": status}
-            self.alert = spec.Alert.of(self.row)
+            self.fields |= raw["edit"]
+            fields = spec.check(self.fields, self.created)
+            reset = spec.changes_condition(self.row, fields)
+            self.owner(now, fields, reset_state=reset)
             self.book.put(self.alert, engine.State() if reset else None)
         elif "seed" in raw:
             snap = raw["seed"]
@@ -214,10 +247,11 @@ ALERTS = VECTORS["alerts"]
 
 
 @pytest.mark.parametrize("vector", ALERTS, ids=[v["id"] for v in ALERTS])
-def test_alert_vector(vector):
-    world = World(vector)
+def test_alert_vector(vector, tmp_path):
+    world = World(vector, tmp_path / "market.db")
     for raw in expand(vector["steps"], world.day):
         world.run(raw)
+    world.store.close()
     fires = world.fires
     if "fire_count" in vector:
         assert len(fires) == vector["fire_count"]

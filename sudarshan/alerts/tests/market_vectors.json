@@ -10,8 +10,9 @@
     "The calendar is the vectors' own: weekdays trade except its holidays, and a day in its",
     "windows trades in that window (the extra-days file's line, e.g. 2026-11-08 14:05-15:40).",
     "Alert steps: a trade or quote, {clock}, {pause: [from, to]} (the feed reconnecting),",
-    "{restart: [from, to]} (the service down; only market.db's fields survive), {suspend},",
-    "{resume}, {edit: fields}, {seed: snapshot tick}. A step's 'check' is the gate's verdict.",
+    "{restart: [from, to]} (a clean stop at 'from', then only what market.db holds comes",
+    "back), {suspend}, {resume}, {edit: fields}, {seed: snapshot tick}. A step's 'check' is",
+    "the gate's verdict. The runner keeps a real market.db and flushes it once a second.",
     "Words: a fire's golden texts, the app's title and detail and the Telegram line; prices in a",
     "fire are text and the times IST on the defaults' day."
   ],
@@ -843,6 +844,35 @@
         {"at": "10:05:03", "ltp": 100.1}
       ],
       "fires": [{"at": "10:05:03", "found_later": ["10:00:00", "10:05:00"]}]
+    },
+    {
+      "id": "G16",
+      "says": "edited to 98 at 99, then a restart: the next open at 99.50 seeds, no 'opened above'",
+      "alert": {"params": {"op": "crosses_above", "level": "100"}},
+      "steps": [
+        {"at": "14:00:00", "ltp": 99.0},
+        {"at": "14:00:00.400", "edit": {"params": {"op": "crosses_above", "level": "98"}}},
+        {"restart": ["14:00:00.500", "20:00:00"]},
+        {"day": "2026-10-22", "at": "09:15:01", "ltp": 99.5}
+      ],
+      "fires": [],
+      "side": "above"
+    },
+    {
+      "id": "G17",
+      "says": "at candle close, paused below and resumed: a restart keeps the resume, the next close seeds",
+      "alert": {"params": {"op": "crosses_above", "level": "100"}, "frequency": "at_close", "candle": 15},
+      "steps": [
+        {"at": "10:01:00", "ltp": 99.0},
+        {"at": "10:15:05", "clock": true},
+        {"at": "11:00:00", "suspend": true},
+        {"at": "19:00:00", "resume": true},
+        {"restart": ["21:00:00", "21:05:00"]},
+        {"day": "2026-10-22", "at": "09:16:00", "ltp": 101.0},
+        {"day": "2026-10-22", "at": "09:30:05", "clock": true}
+      ],
+      "fires": [],
+      "side": "above"
     },
     {
       "id": "G15",

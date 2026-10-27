@@ -83,10 +83,16 @@ class Book:
 
     # ---- the alerts ------------------------------------------------------------------------
     def put(self, alert: Alert, state: State | None = None) -> None:
-        """Judge ``alert`` from now on if it is Active, with ``state`` (default: the one kept)."""
+        """Judge ``alert`` from now on if it is Active, with ``state`` (default: the one kept).
+
+        The alert's state, given or kept, is queued for the next flush under this version, in
+        place of anything queued before: an edit's reset or a resume reaches market.db even
+        when no tick follows, and a state judged under the old version never overwrites it."""
         if state is not None:
             self._states[alert.id] = state
-        self._states.setdefault(alert.id, State())
+        kept = self._states.setdefault(alert.id, State())
+        if alert.status != "stopped":
+            self._changed[alert.id] = (alert.version, kept)
         self._retire(alert.id, alert.status)
         if alert.status == "active":
             self._active[alert.id] = alert
