@@ -936,9 +936,23 @@ def test_cancel_all_that_cancelled_every_order_answers_as_before(client, monkeyp
 def test_cancel_all_whose_order_book_could_not_be_read_says_nothing_was_cancelled(
     client, monkeypatch
 ):
+    """And it is told on Telegram (the second review's LOW-1), which hears no other failure."""
+    import services.cancel_all_order_service as cancel_all_service
+    import subscribers.telegram_subscriber as subscriber
+
+    seen, told = [], []
+    monkeypatch.setattr(cancel_all_service.bus, "publish", seen.append)
+    monkeypatch.setattr(subscriber, "_send_alert", lambda *args: told.append(args))
     code, body = _cancel_all(client, monkeypatch, [CANCELLED], book_status="error")
     assert code == 424
     assert body["message"].startswith("Nothing was cancelled: the orders could not be read")
+    assert "nothing_sent" not in body
+    [event] = seen
+    assert event.response_data == {**body, "nothing_sent": True}
+    subscriber.on_order_failed(event)
+    assert [(api_type, response) for api_type, _data, response, _key in told] == [
+        ("cancelallorder", event.response_data)
+    ]
 
 
 # -- The rest of what a send that broke says ---------------------------------------------------

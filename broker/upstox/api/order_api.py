@@ -536,7 +536,9 @@ def place_smartorder_api(data, auth):
             # go, whenever it may have gone.
             if busy:
                 logger.warning(f"Exit for {symbol} not sent: an exit for it is on its way")
-                return _ErrorResponse(409), {"status": "error", "message": busy}, None
+                # nothing_sent: the services tell Telegram, which hears no other refusal.
+                refusal = {"status": "error", "message": busy, "nothing_sent": True}
+                return _ErrorResponse(409), refusal, None
             sent = True
             answered = None
             try:
