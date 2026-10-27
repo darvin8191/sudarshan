@@ -5,7 +5,7 @@ feed, no clock and no logging. Every input arrives as an argument and every deci
 return value. The runtime around it (the feed link, the gate's health, the timers, market.db and
 delivery) is the service's, and it translates; it never decides what fires.
 
-    grain     tick sizes: feed prices in whole ticks, levels snapped once with Decimal
+    grain     prices in paise: feed prices and levels as integers, levels converted with Decimal
     sessions  each segment's trading session, special days included
     spec      alert definitions and their checks, in the owner's words
     clock     candles on the exchange clock, the gate, pauses in checking

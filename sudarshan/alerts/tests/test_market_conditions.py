@@ -88,14 +88,14 @@ def test_at_candle_close_is_allowed_for_a_move_and_vwap():
 
 def test_a_moves_level_is_worked_out_once_a_session():
     a = alert("move", {"direction": "either", "percent": "1.5"})
-    got = conditions.edges(a, State(), frame(1420.0, cp=1399.8), 28400, T0, market(T0))
-    assert (got.up, got.down, got.base) == (28416, 27576, 27996)  # 1420.80 and 1378.80
+    got = conditions.edges(a, State(), frame(1420.0, cp=1399.8), 142000, T0, market(T0))
+    assert (got.up, got.down, got.base) == (142080, 137880, 139980)  # 1420.797 and 1378.803
     again = conditions.edges(
-        a, State(derived=got.derived), frame(1421.0, cp=1399.8), 28420, T0, market(T0)
+        a, State(derived=got.derived), frame(1421.0, cp=1399.8), 142100, T0, market(T0)
     )
-    assert again.derived is got.derived and again.value == 28420
+    assert again.derived is got.derived and again.value == 142100
     tomorrow = conditions.edges(
-        a, State(derived=got.derived), frame(1421.0, cp=1399.8), 28420, T0, market(T0, 20261022)
+        a, State(derived=got.derived), frame(1421.0, cp=1399.8), 142100, T0, market(T0, 20261022)
     )
     assert tomorrow.derived is not got.derived and tomorrow.derived[0] == 20261022
 
@@ -116,32 +116,36 @@ def test_a_moves_level_is_worked_out_once_a_session():
 )
 def test_a_move_without_its_base_waits(params, extra, code):
     a = alert("move", params)
-    assert conditions.edges(a, State(), frame(101.0, **extra), 2020, T0, market(T0)) == code
+    assert conditions.edges(a, State(), frame(101.0, **extra), 10100, T0, market(T0)) == code
 
 
 def test_vwap_waits_for_the_average_price():
     a = alert("vwap", {"direction": "above"})
     assert (
-        conditions.edges(a, State(), frame(100.0), 2000, T0, market(T0)) == conditions.WAITING_VWAP
+        conditions.edges(a, State(), frame(100.0), 10000, T0, market(T0)) == conditions.WAITING_VWAP
     )
     assert (
-        conditions.edges(a, State(), frame(100.0, atp=0.0), 2000, T0, market(T0))
+        conditions.edges(a, State(), frame(100.0, atp=0.0), 10000, T0, market(T0))
         == conditions.WAITING_VWAP
     )
-    got = conditions.edges(a, State(), frame(100.0, atp=100.21), 2000, T0, market(T0))
-    assert (got.up, got.down, got.base) == (2004, 2004, 2004)
+    got = conditions.edges(a, State(), frame(100.0, atp=100.21), 10000, T0, market(T0))
+    assert (got.up, got.down) == (10021, 10021)  # on a 0.05 tick this was 100.20, below it
+    got = conditions.edges(a, State(), frame(100.0, atp=100.226), 10000, T0, market(T0))
+    assert (got.up, got.down) == (10023, 10022)  # off the paisa: above from 100.23, below 100.22
 
 
 def test_a_break_is_not_live_before_the_start_time_or_without_a_high():
     a = alert("day_break", {"side": "high", "after": "10:00"})
-    seen = State(20261021, 0, 2020, T0 - 1000)
-    early = conditions.edges(a, seen, frame(102.0, ohlc={"high": 102.0}), 2040, T0 - 1, market(T0))
-    assert early.up == conditions.NEVER and early.value == 2040
-    live = conditions.edges(a, seen, frame(102.0, ohlc={"high": 102.0}), 2040, T0, market(T0))
-    assert live.up == 2021 and live.base == 2020
-    fresh = conditions.edges(a, State(), frame(102.0, ohlc={"high": 102.5}), 2040, T0, market(T0))
-    assert fresh.up == conditions.NEVER and fresh.value == 2050  # the first value seeds the high
-    yesterday = conditions.edges(a, State(20261020, 0, 2100), frame(102.0), 2040, T0, market(T0))
+    seen = State(20261021, 0, 10100, T0 - 1000)
+    hi = {"high": 102.0}
+    early = conditions.edges(a, seen, frame(102.0, ohlc=hi), 10200, T0 - 1, market(T0))
+    assert early.up == conditions.NEVER and early.value == 10200
+    live = conditions.edges(a, seen, frame(102.0, ohlc=hi), 10200, T0, market(T0))
+    assert live.up == 10101 and live.base == 10100
+    hi = {"high": 102.5}
+    fresh = conditions.edges(a, State(), frame(102.0, ohlc=hi), 10200, T0, market(T0))
+    assert fresh.up == conditions.NEVER and fresh.value == 10250  # the first value seeds the high
+    yesterday = conditions.edges(a, State(20261020, 0, 10500), frame(102.0), 10200, T0, market(T0))
     assert yesterday.up == conditions.NEVER and yesterday.base is None
 
 
@@ -184,7 +188,7 @@ def test_seed_sets_a_vwap_side_and_a_remembered_high():
     book.put(alert("move", {"direction": "up", "percent": "1"}, 3))
     snapshot = frame(100.0, T0 - 5000, atp=100.2, ohlc={"high": 100.5})
     assert book.seed(1, snapshot, market(T0)) and book.state(1).side == -1
-    assert book.seed(2, snapshot, market(T0)) and book.state(2).ref == 2010
+    assert book.seed(2, snapshot, market(T0)) and book.state(2).ref == 10050
     assert not book.seed(3, snapshot, market(T0))  # a level check needs no side
     assert not book.seed(1, frame(100.0, T0 - 5000), market(T0))  # already seeded
 
@@ -195,4 +199,4 @@ def test_an_at_close_move_told_by_the_timer_keeps_its_base():
     book.on_tick(frame(102.5, T0 + 60_000, cp=100.0), T0 + 60_000, market(T0 + 60_000))
     due = T0 + 15 * 60_000 + 2000
     out = book.on_clock(due, market(due))
-    assert out[0].fire.base == 2000 and out[0].fire.trade_time == T0 + 60_000
+    assert out[0].fire.base == 10000 and out[0].fire.trade_time == T0 + 60_000

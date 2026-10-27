@@ -34,6 +34,7 @@ from sudarshan.alerts.market.engine import (
     step,
     timer,
 )
+from sudarshan.alerts.market.grain import paise
 from sudarshan.alerts.market.sessions import day_key
 from sudarshan.alerts.market.spec import AT_CLOSE, BREAK, CROSS, PER_CANDLE, Alert
 from sudarshan.autologin.schedule import IST
@@ -162,7 +163,7 @@ class Book:
                 if quote != OK:
                     continue
                 at = recv
-            value = alert.grain.ticks(raw)
+            value = paise(raw)
             if value is None:
                 bad = True
                 continue
@@ -223,7 +224,7 @@ class Book:
         if alert.cond.mode not in (CROSS, BREAK):
             return False
         source = alert.cond.source
-        value = alert.grain.ticks(frame.get(source))
+        value = paise(frame.get(source))
         at = _ms(frame.get("ltt" if source == "ltp" else "ts_recv"))
         if value is None or at is None:
             return False

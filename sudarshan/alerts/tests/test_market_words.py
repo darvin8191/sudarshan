@@ -20,8 +20,8 @@ def alert_of(vector: dict) -> spec.Alert:
 
 
 def fire_of(alert: spec.Alert, given: dict) -> engine.Fire:
-    def ticks(text):
-        return None if text is None else int(Decimal(text) / alert.grain.step)
+    def ticks(text):  # the vectors' prices in paise
+        return None if text is None else int(Decimal(text) * 100)
 
     def span(pair):
         return None if pair is None else (ms(DAY, pair[0]), ms(DAY, pair[1]))

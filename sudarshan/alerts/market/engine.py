@@ -4,7 +4,7 @@ No I/O of any kind, like services/risk/: no database, no feed, no clock, no logg
 arrives as an argument and every decision leaves as a return value, so the service, the replay
 check and the golden vectors (sudarshan/alerts/tests/market_vectors.json) run the same code.
 
-An observation is one value in whole ticks at one moment: a new trade at its own time, or a quote
+An observation is one value in paise at one moment: a new trade at its own time, or a quote
 at the time it arrived, with the edges of the alert's level (grain.py). ``step`` judges it against
 what the alert remembered from the previous observation and returns the new state with what
 happened: a fire, an automatic stop, or nothing.
@@ -75,7 +75,7 @@ class State(NamedTuple):
     session: int = 0
     #: Where the last value stood: -1 below, 0 at, 1 above (a level check: the way it was met).
     side: int | None = None
-    #: The last value in ticks (a day high or low break keeps that high or low here).
+    #: The last value in paise (a day high or low break keeps that high or low here).
     ref: int | None = None
     seen_at: int | None = None
     last_fired_at: int | None = None
@@ -114,7 +114,7 @@ class Fire(NamedTuple):
     at: int
     trade_time: int
     value: int
-    #: The edge the value met, in ticks, and the way: UP or DOWN.
+    #: The edge the value met, in paise, and the way: UP or DOWN.
     level: int
     direction: int
     #: The fire's number in its session, from 1.

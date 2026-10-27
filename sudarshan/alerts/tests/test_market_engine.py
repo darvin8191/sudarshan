@@ -7,6 +7,7 @@ from datetime import datetime
 
 from sudarshan.alerts.market import engine, spec
 from sudarshan.alerts.market.engine import Obs, State
+from sudarshan.alerts.market.grain import paise
 from sudarshan.autologin.schedule import IST
 
 DAY = 20261021
@@ -28,7 +29,7 @@ def alert(op="crosses_above", level="100", **fields) -> spec.Alert:
 
 
 def obs(a: spec.Alert, price: float, at: int, *, candle=0, end=0, day=DAY) -> Obs:
-    return Obs(a.grain.ticks(price), at, day, a.cond.up, a.cond.down, candle, end=end)
+    return Obs(paise(price), at, day, a.cond.up, a.cond.down, candle, end=end)
 
 
 def feed(a: spec.Alert, ticks, state=None):
@@ -65,7 +66,7 @@ def test_at_candle_close_judges_the_last_value_once_a_later_trade_comes():
     assert not fires and state.side == -1  # candle 1 closed at 99.00: below, a fall
     state, fires, _ = feed(a, [(99.5, T0 + 46 * MIN, 3, T0 + 60 * MIN)], state)
     assert [(f.value, f.at, f.trade_time, f.claim) for f in fires] == [
-        (2002, T0 + 46 * MIN, T0 + 31 * MIN, "9:v4:20261021:x2")
+        (10010, T0 + 46 * MIN, T0 + 31 * MIN, "9:v4:20261021:x2")
     ]  # candle 2 closed at 100.10 after 99.00: crossed above, judged at the next trade
 
 
@@ -75,7 +76,7 @@ def test_at_candle_close_by_the_timer_two_seconds_after_the_end():
     state, _, _ = feed(a, [(100.05, T0 + 4 * MIN + 58_000, 0, end)])
     assert engine.timer(a, state, end + 1_999) is None
     out = engine.timer(a, state, end + 2_000)
-    assert out.fire.value == 2001 and out.fire.trade_time == T0 + 4 * MIN + 58_000
+    assert out.fire.value == 10005 and out.fire.trade_time == T0 + 4 * MIN + 58_000
     assert out.fire.at == end + 2_000 and out.state.forming is None
     assert engine.timer(a, out.state, end + 60_000) is None  # judged once
 
@@ -116,12 +117,12 @@ def test_a_new_session_seeds_again_and_starts_the_counts():
     out = engine.step(a, state, obs(a, 100.05, T0 + 86_400_000, day=DAY + 1), T0 + 86_400_000)
     assert out.fire is None and out.state.side == 1  # seeded, not fired
     assert (out.state.session, out.state.fires_session, out.state.fires) == (DAY + 1, 0, 1)
-    assert out.state.last_fired_candle is None and out.state.ref == 2001
+    assert out.state.last_fired_candle is None and out.state.ref == 10005
 
 
 def test_resume_seeds_and_gives_a_new_allowance():
     a = alert(frequency="every_time")
-    state = State(DAY, -1, 1999, T0, T0, 0, 60, 50, 0)
+    state = State(DAY, -1, 9995, T0, T0, 0, 60, 50, 0)
     paused = engine.step(a, state, obs(a, 100.0, T0 + 1000), T0 + 1000)
     assert (paused.status, paused.reason.code, paused.fire) == ("paused", "fire_limit", None)
     resumed = engine.resume(paused.state)

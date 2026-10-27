@@ -87,11 +87,12 @@ def test_end_dates(ends, expected):
         ({**SBIN, "instrument_key": "MCX_FO|1"} | price(), "instrument", "Market alerts work on"),
         ({**SBIN, "symbol": " "} | price(), "instrument", "Pick the instrument again"),
         ({**SBIN, "tick_size": None} | price(), "instrument", "has no tick size in the master"),
+        ({**FUT, "tick_size": "0.0025"} | price(), "instrument", "steps smaller than a paisa"),
         (SBIN | {"kind": "volume"}, "kind", "This kind of alert is not available yet."),
         (SBIN | price(op="touches"), "op", "Pick the check: crosses above"),
         (SBIN | price(level="0"), "level", "Enter the price level, a number above 0."),
         (SBIN | price(level="-5"), "level", "Enter the price level"),
-        (SBIN | price(level="0.01"), "level", "at least one tick, 0.05."),
+        (SBIN | price(level="0.009"), "level", "Enter a price level of at least 0.01."),
         (SBIN | price(level="abc"), "level", "Enter the price level"),
         (SBIN | price(params={"source": "mid"}), "source", "Pick the price to watch"),
         (NIFTY | price(params={"source": "bid"}), "source", "An index has no bid or ask."),
@@ -150,7 +151,12 @@ def test_alert_of_compiles_the_edges_once():
     row = spec.check(SBIN | price(op="crosses", level="100.03"), NOW)
     alert = spec.Alert.of(row | {"id": 7, "version": 2, "status": "active"})
     assert (alert.cond.mode, alert.cond.direction) == (spec.CROSS, spec.EITHER)
-    assert (alert.cond.up, alert.cond.down) == (2001, 2000)
+    assert (alert.cond.up, alert.cond.down) == (10003, 10003)  # in paise, whatever the tick
+    off = spec.Alert.of(
+        spec.check(SBIN | price(op="crosses", level="100.033"), NOW)
+        | {"id": 7, "version": 2, "status": "active"}
+    )
+    assert (off.cond.up, off.cond.down) == (10004, 10003)  # off the paisa: each way's next one
     assert alert.segment == "NSE_EQ" and alert.cooldown_ms == 0 and alert.expires_at is None
     level = spec.Alert.of(
         spec.check(SBIN | price(op="at_or_below", level="25,900"), NOW)
@@ -159,8 +165,14 @@ def test_alert_of_compiles_the_edges_once():
     assert (level.cond.mode, level.cond.direction, level.cond.down) == (
         spec.LEVEL,
         spec.DOWN,
-        518000,
+        2590000,
     )
+
+
+def test_the_lowest_level_is_one_paisa_whatever_the_tick():
+    row = spec.check(SBIN | price(op="at_or_below", level="0.01"), NOW)
+    alert = spec.Alert.of(row | {"id": 1, "version": 1, "status": "active"})
+    assert (alert.cond.up, alert.cond.down) == (1, 1)
 
 
 def test_edits_that_change_the_condition():

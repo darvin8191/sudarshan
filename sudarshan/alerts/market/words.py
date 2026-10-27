@@ -1,8 +1,8 @@
 """What the owner reads about market alerts (M10.5): Telegram lines and the app's words. Pure.
 
 English under the सुदर्शन / SUDARSHAN header, as order alerts are: no icons, no emojis, no codes.
-A price carries its instrument's decimals (the tick's own, at least two) with Indian grouping; a
-traded instrument's prices are in rupees (₹1,428.25), an index's are plain points (25,903.15).
+A price has two decimals (the engine counts in paise) with Indian grouping; a traded instrument's
+prices are in rupees (₹1,428.25), an index's are plain points (25,903.15).
 The owner's note is cleaned of Markdown characters (messages.clean): OpenAlgo sends with
 parse_mode Markdown and does not escape.
 
@@ -22,8 +22,9 @@ from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
 from sudarshan.alerts.market import book, clock, conditions, engine
+from sudarshan.alerts.market.grain import edge_up, rupees, to_decimal
 from sudarshan.alerts.market.sessions import INDEX_SEGMENTS
-from sudarshan.alerts.market.spec import AT_CLOSE, CROSS, DAY, UP, Alert
+from sudarshan.alerts.market.spec import AT_CLOSE, CROSS, DAY, DOWN, UP, Alert
 from sudarshan.alerts.messages import SAME_MOMENT, clean, instrument, quantity
 from sudarshan.autologin.messages import BRAND
 from sudarshan.autologin.schedule import IST
@@ -37,9 +38,9 @@ _PAST = {"feed": "the price feed was reconnecting", "service": "market alerts we
 _NOW = {"feed": "the price feed is reconnecting", "service": "market alerts are not running"}
 
 
-def amount(alert: Alert, ticks: int) -> str:
+def amount(alert: Alert, paise: int) -> str:
     """'₹1,428.25' for a traded instrument, '25,903.15' (points) for an index."""
-    return _number(alert.grain.price(ticks), "" if alert.segment in INDEX_SEGMENTS else "₹")
+    return _number(rupees(paise), "" if alert.segment in INDEX_SEGMENTS else "₹")
 
 
 def _number(value: Decimal, sign: str = "") -> str:
@@ -119,8 +120,8 @@ def _close_detail(fire: engine.Fire, value: str) -> str:
 
 def _share(alert: Alert, fire: engine.Fire) -> str:
     """The move from the base in percent, two decimals: 1428.25 on 1399.80 -> '2.03'."""
-    base = alert.grain.price(fire.base)
-    move = abs(alert.grain.price(fire.value) - base) / base * 100
+    base = rupees(fire.base)
+    move = abs(rupees(fire.value) - base) / base * 100
     return _number(move.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 
@@ -238,13 +239,18 @@ def _when(at: int, now: int) -> str:
 
 
 def checks_at(alert: Alert) -> str | None:
-    """'Checks at ₹100.05 (nearest tick)' when a fixed level is off the tick grid; None on it."""
+    """'Checks at ₹100.05 (nearest tick)' when a fixed level is off the tick the master gave
+    when the alert was set; None on it. A hint only: the engine checks the level itself."""
     cond = alert.cond
-    if cond.up is None or cond.up == cond.down:
+    if cond.up is None:
         return None
-    up, down = amount(alert, cond.up), amount(alert, cond.down)
+    level = to_decimal(alert.params["level"])
+    up, down = alert.grain.up(level), alert.grain.down(level)
+    if up == down:
+        return None
+    up, down = amount(alert, edge_up(up)), amount(alert, edge_up(down))
     if cond.direction == UP:
         return f"Checks at {up} (nearest tick)"
-    if cond.direction == -1:
+    if cond.direction == DOWN:
         return f"Checks at {down} (nearest tick)"
     return f"Checks at {up} going up and {down} going down (nearest ticks)"

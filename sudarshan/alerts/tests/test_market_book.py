@@ -65,7 +65,7 @@ def test_a_trade_the_gate_held_back_is_judged_when_it_comes_again():
     down = market(T0, feed=clock.Feed("backoff", False, T0))
     assert book.on_tick(tick(100.05), T0, down).check == clock.FEED_DOWN
     out = book.on_tick(tick(100.05, recv=T0 + 2000), T0 + 2000, market(T0 + 2000))
-    assert out.outcomes[0].fire.value == 2001  # the feed's resend after reconnecting
+    assert out.outcomes[0].fire.value == 10005  # the feed's resend after reconnecting
 
 
 def test_a_quote_change_is_judged_only_by_bid_and_ask_alerts():
@@ -118,7 +118,7 @@ def test_changed_hands_over_each_state_once():
     book.put(alert(2, level="200"))
     book.on_tick(tick(99.95), T0, market(T0))
     changed = book.changed()
-    assert set(changed) == {1, 2} and changed[1].ref == 1999
+    assert set(changed) == {1, 2} and changed[1].ref == 9995
     assert book.changed() == {}
 
 

@@ -4,7 +4,7 @@
 size and expiry from the master contract) and returns the fields as market.db stores them, with
 the defaults filled in. Anything it cannot use raises ``SpecError``: the field, and one sentence
 saying what to change. ``Alert.of(row)`` turns a stored row into what the engine runs, with a
-fixed level converted to whole ticks once (grain.py).
+fixed level converted to paise once (grain.py).
 
 Defaults: a price level fires once; an alert ends 60 days after the day it was set (it works
 through that day), and an F&O alert when its contract expires.
@@ -18,7 +18,7 @@ from datetime import date, datetime, timedelta
 from typing import Any
 
 from sudarshan.alerts.market import sessions
-from sudarshan.alerts.market.grain import INDEX_TICK, Grain, to_decimal
+from sudarshan.alerts.market.grain import INDEX_TICK, PAISA, Grain, edge_down, edge_up, to_decimal
 from sudarshan.autologin.schedule import IST
 
 #: How a condition fires: on a move across its level, on every value that meets it, or on each
@@ -78,7 +78,7 @@ class Compiled:
     mode: str
     direction: int
     source: str = "ltp"
-    #: Fixed edges in ticks (a price level); None when a condition derives them from the feed.
+    #: Fixed edges in paise (a price level); None when a condition derives them from the feed.
     up: int | None = None
     down: int | None = None
     #: The feed mode the alert needs: "ltpc" (last price and previous close) or "full".
@@ -240,8 +240,8 @@ def _check_price(params, segment: str, grain: Grain) -> dict[str, Any]:
     level = to_decimal(params.get("level"))
     if level is None or level <= 0:
         raise SpecError("level", "Enter the price level, a number above 0.")
-    if level < grain.step:  # nothing trades below one tick: "at or below" could never fire
-        raise SpecError("level", f"Enter a price level of at least one tick, {grain.price(1)}.")
+    if level < PAISA:  # nothing trades below a paisa: "at or below" could never fire
+        raise SpecError("level", "Enter a price level of at least 0.01.")
     source = params.get("source", "ltp")
     if source not in SOURCES:
         raise SpecError("source", "Pick the price to watch: last price, bid or ask.")
@@ -255,7 +255,7 @@ def _compile_price(params: Mapping[str, Any], grain: Grain, segment: str) -> Com
     level = to_decimal(params["level"])
     source = params.get("source", "ltp")
     feed = "ltpc" if source == "ltp" else "full"  # the bid and ask come in full mode only
-    return Compiled(mode, direction, source, grain.up(level), grain.down(level), feed)
+    return Compiled(mode, direction, source, edge_up(level), edge_down(level), feed)
 
 
 MOVE_DIRECTIONS = {"up": UP, "down": DOWN, "either": EITHER}
@@ -355,6 +355,12 @@ def _grain(segment: str, tick_size) -> Grain:
     grain = Grain.of(tick_size)
     if grain is None and segment in sessions.INDEX_SEGMENTS:
         grain = Grain.of(INDEX_TICK)
+    if grain is not None and not grain.whole_paise:  # currency derivatives (0.0025): see grain.py
+        raise SpecError(
+            "instrument",
+            "This instrument's prices move in steps smaller than a paisa, which market alerts do "
+            "not cover yet.",
+        )
     if grain is None:
         raise SpecError(
             "instrument",

@@ -16,7 +16,7 @@ import pytest
 
 from sudarshan.alerts.market import clock, engine, sessions, spec
 from sudarshan.alerts.market.book import Book
-from sudarshan.alerts.market.grain import Grain, to_decimal
+from sudarshan.alerts.market.grain import Grain, edge_down, edge_up, paise, rupees, to_decimal
 from sudarshan.autologin.schedule import IST, parse_window
 
 VECTORS = json.loads(Path(__file__).with_name("market_vectors.json").read_text(encoding="utf-8"))
@@ -196,17 +196,17 @@ def seen(alert: spec.Alert, fire: engine.Fire) -> dict:
         "at": hms(fire.at),
         "day": sessions.key_day(fire.session).isoformat(),
         "trade_time": hms(fire.trade_time),
-        "value": str(alert.grain.price(fire.value)),
-        "level": str(alert.grain.price(fire.level)),
+        "value": str(rupees(fire.value)),
+        "level": str(rupees(fire.level)),
         "direction": DIRECTIONS[fire.direction],
         "n": fire.n,
         "candle": fire.candle,
         "claim": fire.claim,
         "opening": fire.opening,
-        "previous": None if fire.previous is None else str(alert.grain.price(fire.previous)),
+        "previous": None if fire.previous is None else str(rupees(fire.previous)),
         "found_later": None if found is None else [hms(found[0]), hms(found[1])],
-        "base": None if fire.base is None else str(alert.grain.price(fire.base)),
-        "price": None if fire.price is None else str(alert.grain.price(fire.price)),
+        "base": None if fire.base is None else str(rupees(fire.base)),
+        "price": None if fire.price is None else str(rupees(fire.price)),
     }
 
 
@@ -267,16 +267,23 @@ def test_gate_vector(vector):
 
 @pytest.mark.parametrize("vector", VECTORS["snap"], ids=[v["id"] for v in VECTORS["snap"]])
 def test_snap_vector(vector):
-    grain = Grain.of(vector["tick"])
+    """A level's edges in paise, and the tick hint ("Checks at ₹100.05") when it is off the
+    tick; a feed price in paise."""
     if "level" in vector:
         level = to_decimal(vector["level"])
-        assert str(grain.price(grain.up(level))) == vector["up"]
-        assert str(grain.price(grain.down(level))) == vector["down"]
+        assert [str(rupees(edge_up(level))), str(rupees(edge_down(level)))] == [
+            vector["up"],
+            vector["down"],
+        ]
+        grain = Grain.of(vector["tick"])
+        up, down = grain.up(level), grain.down(level)
+        hint = None if up == down else [str(rupees(edge_up(up))), str(rupees(edge_up(down)))]
+        assert hint == vector["checks_at"]
     else:
-        ticks = grain.ticks(number(vector["price"]))
-        assert ticks == vector["ticks"]
-        if ticks is not None:
-            assert str(grain.price(ticks)) == vector["shown"]
+        count = paise(number(vector["price"]))
+        assert count == vector["paise"]
+        if count is not None:
+            assert str(rupees(count)) == vector["shown"]
 
 
 @pytest.mark.parametrize("vector", VECTORS["sessions"], ids=[v["id"] for v in VECTORS["sessions"]])

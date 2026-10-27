@@ -2,10 +2,11 @@
   "about": [
     "Golden vectors for SUDARSHAN market alerts (M10): the contract between the pure engine in",
     "sudarshan/alerts/market and anything else that must decide the same thing, such as the Alerts",
-    "form's level snapping (the snap group). test_market_vectors.py runs every case.",
+    "form's level hint (the snap group). test_market_vectors.py runs every case.",
     "Times are IST on the defaults' day unless a step names its own day. A trade step's ltt is its",
     "'at' unless given; 'recv' (arrival) is 'at' unless given; 'NaN' and 'Infinity' are strings so",
-    "JSON.parse can read the file. Prices in expectations are text with the instrument's decimals.",
+    "JSON.parse can read the file. Prices in expectations are text with two decimals: the",
+    "engine counts every price and level in paise, whatever the instrument's tick.",
     "The calendar is the vectors' own: weekdays trade except its holidays, and a day in its",
     "windows trades in that window (the extra-days file's line, e.g. 2026-11-08 14:05-15:40).",
     "Alert steps: a trade or quote, {clock}, {pause: [from, to]} (the feed reconnecting),",
@@ -60,20 +61,69 @@
     }
   },
   "snap": [
-    {"id": "N1", "tick": "0.05", "level": "100", "up": "100.00", "down": "100.00"},
-    {"id": "N2", "tick": "0.05", "level": "100.03", "up": "100.05", "down": "100.00"},
-    {"id": "N3", "tick": "0.05", "level": "0.15", "up": "0.15", "down": "0.15"},
-    {"id": "N4", "tick": "0.01", "level": "25900", "up": "25900.00", "down": "25900.00"},
-    {"id": "N5", "tick": "0.05", "level": "1420.797", "up": "1420.80", "down": "1420.75"},
-    {"id": "N6", "tick": "0.0025", "level": "83.1234", "up": "83.1250", "down": "83.1225"},
-    {"id": "N7", "tick": "0.1", "level": "250.05", "up": "250.10", "down": "250.00"},
-    {"id": "N8", "tick": "1", "level": "1234.5", "up": "1235.00", "down": "1234.00"},
-    {"id": "N9", "tick": "0.05", "level": "1,399.80", "up": "1399.80", "down": "1399.80"},
-    {"id": "N10", "tick": "0.05", "price": 100.04999999999998, "ticks": 2001, "shown": "100.05"},
-    {"id": "N11", "tick": "0.05", "price": 0.15, "ticks": 3, "shown": "0.15"},
-    {"id": "N12", "tick": "0.01", "price": 25903.15, "ticks": 2590315, "shown": "25903.15"},
-    {"id": "N13", "tick": "0.05", "price": 0.0, "ticks": null},
-    {"id": "N14", "tick": "0.05", "price": "NaN", "ticks": null}
+    {
+      "id": "N1",
+      "tick": "0.05",
+      "level": "100",
+      "up": "100.00",
+      "down": "100.00",
+      "checks_at": null
+    },
+    {
+      "id": "N2",
+      "tick": "0.05",
+      "level": "100.03",
+      "up": "100.03",
+      "down": "100.03",
+      "checks_at": ["100.05", "100.00"]
+    },
+    {"id": "N3", "tick": "0.05", "level": "0.15", "up": "0.15", "down": "0.15", "checks_at": null},
+    {
+      "id": "N4",
+      "tick": "0.01",
+      "level": "25900",
+      "up": "25900.00",
+      "down": "25900.00",
+      "checks_at": null
+    },
+    {
+      "id": "N5",
+      "tick": "0.05",
+      "level": "1420.797",
+      "up": "1420.80",
+      "down": "1420.79",
+      "checks_at": ["1420.80", "1420.75"]
+    },
+    {
+      "id": "N7",
+      "tick": "0.1",
+      "level": "250.05",
+      "up": "250.05",
+      "down": "250.05",
+      "checks_at": ["250.10", "250.00"]
+    },
+    {
+      "id": "N8",
+      "tick": "1",
+      "level": "1234.5",
+      "up": "1234.50",
+      "down": "1234.50",
+      "checks_at": ["1235.00", "1234.00"]
+    },
+    {
+      "id": "N9",
+      "tick": "0.05",
+      "level": "1,399.80",
+      "up": "1399.80",
+      "down": "1399.80",
+      "checks_at": null
+    },
+    {"id": "N10", "price": 100.04999999999998, "paise": 10005, "shown": "100.05"},
+    {"id": "N11", "price": 0.15, "paise": 15, "shown": "0.15"},
+    {"id": "N12", "price": 25903.15, "paise": 2590315, "shown": "25903.15"},
+    {"id": "N13", "price": 0.0, "paise": null},
+    {"id": "N14", "price": "NaN", "paise": null},
+    {"id": "N15", "price": 249.98, "paise": 24998, "shown": "249.98"}
   ],
   "sessions": [
     {"id": "S1", "segment": "NSE_EQ", "day": "2026-10-21", "hours": ["09:15", "15:30"]},
@@ -241,6 +291,20 @@
       },
       "field": "frequency",
       "message": "'At candle close' judges the last trade price. For the bid or ask, pick another frequency."
+    },
+    {
+      "id": "N6",
+      "instrument": "future",
+      "instrument_fields": {"tick_size": "0.0025"},
+      "alert": {"params": {"op": "crosses_above", "level": "83.1234"}},
+      "field": "instrument",
+      "message": "This instrument's prices move in steps smaller than a paisa, which market alerts do not cover yet."
+    },
+    {
+      "id": "X16",
+      "alert": {"params": {"op": "at_or_below", "level": "0.009"}},
+      "field": "level",
+      "message": "Enter a price level of at least 0.01."
     }
   ],
   "alerts": [
@@ -324,17 +388,17 @@
     },
     {
       "id": "P8",
-      "says": "at or below 100.03 checks at 100.00",
+      "says": "at or below 100.03 on a 0.05 tick: the first trade at or below it is 100.00",
       "alert": {"params": {"op": "at_or_below", "level": "100.03"}},
       "steps": [{"at": "10:00:00", "ltp": 100.05}, {"at": "10:00:01", "ltp": 100.0}],
-      "fires": [{"at": "10:00:01", "value": "100.00", "level": "100.00", "direction": "down"}]
+      "fires": [{"at": "10:00:01", "value": "100.00", "level": "100.03", "direction": "down"}]
     },
     {
       "id": "P9",
-      "says": "crosses above 100.03 checks at 100.05",
+      "says": "crosses above 100.03 on a 0.05 tick: fires at the first trade at or above it",
       "alert": {"params": {"op": "crosses_above", "level": "100.03"}},
       "steps": [{"at": "10:00:00", "ltp": 100.0}, {"at": "10:00:01", "ltp": 100.05}],
-      "fires": [{"at": "10:00:01", "value": "100.05", "level": "100.05"}]
+      "fires": [{"at": "10:00:01", "value": "100.05", "level": "100.03"}]
     },
     {
       "id": "P10",
@@ -372,7 +436,7 @@
     },
     {
       "id": "P14",
-      "says": "either way on a level off the grid: up at 100.05, down at 100.00",
+      "says": "either way on a level off the tick: up at 100.05, down at 100.00",
       "alert": {"params": {"op": "crosses", "level": "100.03"}, "frequency": "every_time"},
       "steps": [
         {"at": "10:00:00", "ltp": 100.0},
@@ -380,8 +444,8 @@
         {"at": "10:00:02", "ltp": 100.0}
       ],
       "fires": [
-        {"at": "10:00:01", "value": "100.05", "level": "100.05", "direction": "up"},
-        {"at": "10:00:02", "value": "100.00", "level": "100.00", "direction": "down"}
+        {"at": "10:00:01", "value": "100.05", "level": "100.03", "direction": "up"},
+        {"at": "10:00:02", "value": "100.00", "level": "100.03", "direction": "down"}
       ]
     },
     {
@@ -944,7 +1008,7 @@
       ],
       "fires": [
         {"at": "10:00:00", "day": "2026-10-21", "direction": "up"},
-        {"at": "10:01:00", "day": "2026-10-22", "level": "99.90", "base": "98.90"}
+        {"at": "10:01:00", "day": "2026-10-22", "level": "99.89", "base": "98.90"}
       ]
     },
     {
@@ -1144,7 +1208,7 @@
         {"at": "10:00:00", "ltp": 100.0, "atp": 100.2},
         {"at": "10:00:01", "ltp": 100.25, "atp": 100.21}
       ],
-      "fires": [{"at": "10:00:01", "value": "100.25", "level": "100.20", "direction": "up"}]
+      "fires": [{"at": "10:00:01", "value": "100.25", "level": "100.21", "direction": "up"}]
     },
     {
       "id": "V2",
@@ -1154,7 +1218,7 @@
         {"at": "10:00:00", "ltp": 100.3, "atp": 100.2},
         {"at": "10:00:01", "ltp": 100.15, "atp": 100.18}
       ],
-      "fires": [{"at": "10:00:01", "value": "100.15", "level": "100.20", "direction": "down"}]
+      "fires": [{"at": "10:00:01", "value": "100.15", "level": "100.18", "direction": "down"}]
     },
     {
       "id": "V3",

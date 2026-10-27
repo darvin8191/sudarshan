@@ -53,7 +53,7 @@ def store(path):
 
 
 def fire(alert_id: int, claim: str, at: int = NOW, **more) -> Fire:
-    return Fire(alert_id, claim, 20261021, 0, at, at, 2001, 2000, 1, 1, **more)
+    return Fire(alert_id, claim, 20261021, 0, at, at, 10005, 10000, 1, 1, **more)
 
 
 def raw(path, sql: str):
@@ -91,7 +91,7 @@ def test_a_second_start_runs_nothing_and_keeps_everything(path, store):
 
 def test_a_populated_file_forced_back_to_version_0_migrates_without_loss(path, store):
     row = store.create("owner", FIELDS, NOW)
-    store.save_states("owner", {row["id"]: State(20261021, -1, 1999, NOW)}, NOW)
+    store.save_states("owner", {row["id"]: State(20261021, -1, 9995, NOW)}, NOW)
     event_id = store.record_fire("owner", fire(row["id"], "1:v1:once"), State(20261021, 0),
                                  title="t", line="l", value="100.00", level="100.00",
                                  channels=BOTH)  # fmt: skip
@@ -183,7 +183,7 @@ def test_create_read_and_list(store):
     row = store.create("owner", FIELDS | {"note": "book half"}, NOW)
     assert row["status"] == "active" and row["version"] == 1 and row["note"] == "book half"
     assert row["params"] == FIELDS["params"] and row["channels"] is None
-    assert spec.Alert.of(row).cond.up == 2000  # what the engine runs
+    assert spec.Alert.of(row).cond.up == 10000  # what the engine runs, in paise
     second = store.create("owner", FIELDS | {"channels": {"telegram": False, "app": True}}, NOW)
     assert [r["id"] for r in store.alerts("owner")] == [row["id"], second["id"]]
     assert second["channels"] == {"telegram": False, "app": True}
@@ -192,7 +192,7 @@ def test_create_read_and_list(store):
 
 def test_update_needs_the_current_version(store):
     row = store.create("owner", FIELDS, NOW)
-    store.save_states("owner", {row["id"]: State(20261021, -1, 1999, NOW)}, NOW)
+    store.save_states("owner", {row["id"]: State(20261021, -1, 9995, NOW)}, NOW)
     edited = store.update("owner", row["id"], 1, FIELDS | {"note": "new"}, NOW + 1, status="active")
     assert edited["version"] == 2 and edited["note"] == "new"
     assert store.states("owner")[row["id"]].side == -1  # a note edit keeps the state
@@ -229,7 +229,7 @@ def test_set_status_and_delete(store):
 
 def test_states_are_saved_only_for_alerts_still_there(store):
     row = store.create("owner", FIELDS, NOW)
-    full = State(20261021, 1, 2001, NOW, NOW - 5, 3, 7, 2, 1, forming=None, derived=("x",))
+    full = State(20261021, 1, 10005, NOW, NOW - 5, 3, 7, 2, 1, forming=None, derived=("x",))
     assert store.save_states("owner", {row["id"]: full, 999: State()}, NOW) == 1
     assert store.states("owner") == {row["id"]: State(*full[:9])}  # memory-only fields drop
 
@@ -239,7 +239,7 @@ def test_states_are_saved_only_for_alerts_still_there(store):
 
 def test_a_fire_is_recorded_once_with_its_state_and_stop(store):
     row = store.create("owner", FIELDS, NOW)
-    state = State(20261021, 0, 2001, NOW, NOW, 0, 1, 1)
+    state = State(20261021, 0, 10005, NOW, NOW, 0, 1, 1)
     channels = {"telegram": True, "app": False}
     first = store.record_fire("owner", fire(row["id"], "1:v1:once", found_later=(NOW - 60_000, NOW)),
                               state, title="SBIN crossed above ₹100.00", line="Alert: ...",
