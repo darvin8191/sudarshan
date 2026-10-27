@@ -246,3 +246,17 @@ def test_a_sandbox_modify_that_raises_the_quantity_is_refused(sandbox):
     sandbox.set_state(ON)
     ok, answer, status = OrderManager(USER).modify_order(body["orderid"], {"quantity": 20})
     assert (ok, status) == (False, 403) and answer["message"] == ENTRY
+
+
+def test_a_sandbox_limit_far_from_the_market_is_held_to_the_band(sandbox, risk_store, monkeypatch):
+    """The real order manager, whose orders name the type price_type: the band sees it."""
+    from sudarshan.guard import band
+
+    risk_store.save_settings("owner", band_on=True)  # cash: 5% of the price
+    market = band.Quote(ltp=800.0, bid=799.95, ask=800.05)
+    monkeypatch.setattr(readers, "quote", lambda pipe, owner, symbol, exchange: market)
+    ok, body, status = _place("BUY", 10, "LIMIT", 900)
+    assert (ok, status) == (False, 403)
+    assert body["message"].startswith("Your buy price ₹900.00 is 12.5% above the market (₹800.05)")
+    ok, body, status = _place("BUY", 10, "LIMIT", 820)
+    assert ok, body

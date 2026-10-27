@@ -198,8 +198,9 @@ def test_a_sandbox_order_is_held_to_the_band_too(banded, monkeypatch):
     kind = gate._Kind(
         gate.SANDBOX, gate._sandbox_place, gate._refuse_in_the_sandbox, gate._answer_in_the_sandbox
     )
+    # price_type: the sandbox's own key (services/sandbox_service.py renames pricetype)
     data = {"symbol": PE, "exchange": "NFO", "product": "MIS", "action": "BUY", "quantity": 65,
-            "pricetype": "LIMIT", "price": 186}  # fmt: skip
+            "price_type": "LIMIT", "price": 186}  # fmt: skip
     decision = fresh.admit(kind, (SimpleNamespace(user_id="owner"), data), {})
     assert decision.refused and decision.code == gate.PRICE_BAND
     assert book.calls == ["position", "quote sandbox owner"]

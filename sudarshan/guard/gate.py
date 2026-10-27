@@ -1209,9 +1209,10 @@ def _upstox_place(data: dict, auth: str, *args, **kwargs) -> Order:
 
 
 def _price_terms(data: dict) -> dict[str, Any]:
-    """An order request's price terms, as OpenAlgo names them."""
+    """An order's price terms: OpenAlgo's requests name the type ``pricetype``, the sandbox's
+    order manager ``price_type`` (services/sandbox_service.py renames it)."""
     return {
-        "price_type": _word(data.get("pricetype")),
+        "price_type": _word(data.get("pricetype") or data.get("price_type")),
         "price": rules.price_of(data.get("price")),
         "trigger": rules.price_of(data.get("trigger_price")),
     }
