@@ -104,6 +104,7 @@ from blueprints.straddle_chart import straddle_bp  # Import the straddle chart b
 from blueprints.strategy_chart import strategy_chart_bp  # Import the strategy chart blueprint
 from blueprints.strategy_module import strategy_module_bp  # Multi-leg options strategies with RMS
 from blueprints.strategy_portfolio import strategy_portfolio_bp  # Strategy Builder portfolio
+from blueprints.sudarshan_alerts import sudarshan_alerts_bp  # SUDARSHAN M10 market alerts
 from blueprints.sudarshan_autologin import sudarshan_autologin_bp  # SUDARSHAN M2.20 auto-login
 from blueprints.system_permissions import (
     system_permissions_bp,  # Import the system permissions blueprint
@@ -353,6 +354,7 @@ def create_app():
     app.register_blueprint(strategy_portfolio_bp)  # Register Strategy Portfolio blueprint
     app.register_blueprint(postback_bp)  # Register broker postback (order-update webhook) blueprint
     app.register_blueprint(sudarshan_autologin_bp)  # SUDARSHAN M2.20: sudarshan/autologin/README.md
+    app.register_blueprint(sudarshan_alerts_bp)  # SUDARSHAN M10: sudarshan/alerts/README.md
 
     # Remote MCP (HTTP + OAuth) — opt-in via MCP_HTTP_ENABLED. Off by default.
     # Pre-flight refusal: must NEVER coexist with FLASK_DEBUG=True (debug-mode

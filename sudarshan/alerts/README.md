@@ -347,6 +347,13 @@ sudarshan-feed (one Upstox socket) -> ZMQ 127.0.0.1:5581 (ticks, __health__)
   (a refusal is said in words and nothing is saved), and reaches the engine only after market.db
   took it (`market/desk.py`). The API runs whenever the service does, with market alerts off too;
   a port that is taken keeps market alerts off, and order alerts carry on.
+- **The bridge in OpenAlgo** (`blueprints/sudarshan_alerts.py`, two marked lines in `app.py`):
+  `/sudarshan/alerts/api/*` for the Alerts page, each route behind the session, CSRF, the owner
+  himself (a family viewer gets 403 everywhere, reads included) and a limiter. A new or edited
+  alert takes its instrument key, tick size and expiry from the master contract, with an Upstox
+  login only. It forwards through OpenAlgo's shared HTTP client with explicit timeouts (3 s, 6 s
+  for a change, 12 s for the test) after checking who listens on 5582, and learns whether market
+  alerts are on from the service's `/health`. It holds no thread, loop or scheduler.
 
 | variable | default | meaning |
 |---|---|---|
