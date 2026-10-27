@@ -1,0 +1,469 @@
+{
+  "about": "Golden vectors for screener.spec: what a screen is stored as, what the engine is given, and the words the owner reads when a screen cannot run. Hand-written: the stored forms and the messages are the contract the phone's builder (UI2, UI3) reads. A case is the base screen with 'screen' laid over it ('drop' removes keys first). 'stored' and 'plan' are [json pointer, value] pairs read from the stored form and from a plain-JSON view of the plan; 'error' is the SpecError.",
+  "base": {
+    "name": "t",
+    "universe": {"kind": "fno_stocks"},
+    "run": {"on": "close", "tf": 15},
+    "where": {"all": [{"left": {"field": "close"}, "op": "gt", "right": {"num": "1"}}]}
+  },
+  "cases": [
+    {
+      "id": "SP1",
+      "note": "the design's example screen (3.2): defaults filled in, the off line kept but not in the plan",
+      "screen": {
+        "schema": 1,
+        "name": "15-min EMA cross",
+        "universe": {"kind": "fno_stocks"},
+        "run": {"on": "close", "tf": 15},
+        "where": {"all": [
+          {"id": "c1", "on": true, "left": {"ind": "ema", "p": {"length": 20}, "tf": 15},
+           "op": "crosses_above", "right": {"ind": "ema", "p": {"length": 50}, "tf": 15}},
+          {"id": "c2", "on": true, "left": {"ind": "rsi", "p": {"length": 14}, "tf": 15},
+           "op": "gt", "right": {"num": "50"}},
+          {"any": [
+            {"id": "c3", "on": true, "left": {"field": "close", "tf": 15}, "op": "gt",
+             "right": {"field": "vwap", "tf": 15}},
+            {"id": "c4", "on": false, "left": {"field": "volume", "tf": 15}, "op": "gt",
+             "right": {"math": "mul", "args": [{"num": "1.5"},
+                       {"ind": "sma", "p": {"length": 20, "source": "volume"}, "tf": 15}]}}
+          ]}
+        ]},
+        "rank": {"by": {"field": "change_pct", "tf": "D"}, "order": "desc"},
+        "target": {"list_id": null, "create_name": "Screener: 15-min EMA cross",
+                   "grace": {"mode": "runs", "n": 2}, "max_adds_per_run": 10},
+        "alerts": {"on": true, "min_matches": 1, "unique_per_day": true, "skip_zero": true,
+                   "tell_exits": false, "after_trigger": "continue", "cooldown_runs": 0,
+                   "max_per_day_per_symbol": 3, "channels": null, "columns": ["ltp", "change_pct"]}
+      },
+      "stored": [
+        ["", {
+          "schema": 1,
+          "name": "15-min EMA cross",
+          "universe": {"kind": "fno_stocks"},
+          "run": {"on": "close", "tf": 15},
+          "where": {"all": [
+            {"id": "c1", "on": true,
+             "left": {"ind": "ema", "p": {"length": 20, "source": "close"}, "out": "value", "tf": 15, "at": 0},
+             "op": "crosses_above",
+             "right": {"ind": "ema", "p": {"length": 50, "source": "close"}, "out": "value", "tf": 15, "at": 0}},
+            {"id": "c2", "on": true,
+             "left": {"ind": "rsi", "p": {"length": 14}, "out": "value", "tf": 15, "at": 0},
+             "op": "gt", "right": {"num": "50"}},
+            {"any": [
+              {"id": "c3", "on": true, "left": {"field": "close", "tf": 15, "at": 0}, "op": "gt",
+               "right": {"field": "vwap", "tf": 15, "at": 0}},
+              {"id": "c4", "on": false, "left": {"field": "volume", "tf": 15, "at": 0}, "op": "gt",
+               "right": {"math": "mul", "args": [{"num": "1.5"},
+                         {"ind": "sma", "p": {"length": 20, "source": "volume"}, "out": "value", "tf": 15, "at": 0}]}}
+            ]}
+          ]},
+          "rank": {"by": {"field": "change_pct", "tf": "D", "at": 0}, "order": "desc"},
+          "target": {"list_id": null, "create_name": "Screener: 15-min EMA cross",
+                     "grace": {"mode": "runs", "n": 2}, "max_adds_per_run": 10},
+          "alerts": {"on": true, "min_matches": 1, "unique_per_day": true, "skip_zero": true,
+                     "tell_exits": false, "after_trigger": "continue", "cooldown_runs": 0,
+                     "max_per_day_per_symbol": 3, "channels": null, "columns": ["ltp", "change_pct"]}
+        }]
+      ],
+      "plan": [
+        ["/need", {"15": 151, "D": 1}],
+        ["/instances", [["ema", {"length": 20, "source": "close"}, 15],
+                        ["ema", {"length": 50, "source": "close"}, 15],
+                        ["rsi", {"length": 14}, 15]]],
+        ["/uses", []],
+        ["/ids", ["c1", "c2", "c3"]]
+      ]
+    },
+    {
+      "id": "SP2",
+      "note": "a bare minimum screen: everything not said takes its default",
+      "drop": ["run"],
+      "screen": {"where": {"all": [{"left": {"field": "close"}, "op": "gt", "right": {"num": "100"}}]}},
+      "stored": [
+        ["/run", {"on": "close", "tf": 15}],
+        ["/where/all/0", {"id": "c1", "on": true, "left": {"field": "close", "tf": 15, "at": 0},
+                          "op": "gt", "right": {"num": "100"}}],
+        ["/rank", {"by": {"field": "change_pct", "tf": "D", "at": 0}, "order": "desc"}],
+        ["/target", {"list_id": null, "create_name": "Screener: t",
+                     "grace": {"mode": "runs", "n": 2}, "max_adds_per_run": 10}],
+        ["/alerts", {"on": true, "min_matches": 1, "unique_per_day": true, "skip_zero": true,
+                     "tell_exits": false, "after_trigger": "continue", "cooldown_runs": 0,
+                     "max_per_day_per_symbol": 3, "channels": null, "columns": ["ltp", "change_pct"]}]
+      ],
+      "plan": [
+        ["/need", {"15": 1, "D": 1}],
+        ["/instances", []],
+        ["/rank_order", "desc"],
+        ["/clauses/0/right", {"num": "100", "value": "10000", "unit": "paise"}]
+      ]
+    },
+    {
+      "id": "SP3",
+      "note": "a price is typed in rupees and compared in paise (E8's level, 250003)",
+      "screen": {"where": {"all": [{"left": {"field": "close"}, "op": "gt", "right": {"num": "2,500.03"}}]}},
+      "stored": [["/where/all/0/right", {"num": "2500.03"}]],
+      "plan": [["/clauses/0/right", {"num": "2500.03", "value": "250003", "unit": "paise"}]]
+    },
+    {
+      "id": "SP4",
+      "note": "a percent is typed as a percent (E9: change_pct >= 2)",
+      "screen": {"where": {"all": [{"left": {"field": "change_pct", "tf": "D"}, "op": "gte", "right": {"num": "2"}}]}},
+      "plan": [
+        ["/clauses/0/left", {"field": "change_pct", "tf": "D", "at": 0, "unit": "pct"}],
+        ["/clauses/0/right", {"num": "2", "value": "2", "unit": "pct"}],
+        ["/need", {"D": 1}]
+      ]
+    },
+    {
+      "id": "SP5",
+      "note": "a quantity keeps its unit; Indian digit grouping is read",
+      "screen": {"where": {"all": [{"left": {"field": "volume"}, "op": "gt", "right": {"num": "1,50,000"}}]}},
+      "stored": [["/where/all/0/right", {"num": "150000"}]],
+      "plan": [["/clauses/0/right", {"num": "150000", "value": "150000", "unit": "qty"}]]
+    },
+    {
+      "id": "SP6",
+      "note": "offsets: n candles ago, today's first candle, yesterday's last candle",
+      "screen": {"where": {"all": [
+        {"left": {"field": "close", "at": 3}, "op": "gt", "right": {"num": "1"}},
+        {"left": {"field": "close", "at": {"ago": 0}}, "op": "gt", "right": {"num": "1"}},
+        {"left": {"field": "close", "at": "first_today"}, "op": "gt", "right": {"num": "1"}},
+        {"left": {"field": "close", "at": "last_prev_day"}, "op": "gt", "right": {"num": "1"}}
+      ]}},
+      "stored": [
+        ["/where/all/0/left/at", {"ago": 3}],
+        ["/where/all/1/left/at", 0],
+        ["/where/all/2/left/at", "first_today"],
+        ["/where/all/3/left/at", "last_prev_day"]
+      ],
+      "plan": [["/need", {"15": 4, "D": 1}]]
+    },
+    {
+      "id": "SP7",
+      "note": "a level of the session has no timeframe and no offset",
+      "screen": {"where": {"all": [{"left": {"field": "prev_close", "tf": 5, "at": 2}, "op": "gt", "right": {"field": "day_high"}}]}},
+      "stored": [
+        ["/where/all/0/left", {"field": "prev_close"}],
+        ["/where/all/0/right", {"field": "day_high"}]
+      ],
+      "plan": [
+        ["/clauses/0/left", {"field": "prev_close", "tf": null, "at": 0, "unit": "paise"}],
+        ["/need", {"D": 1}]
+      ]
+    },
+    {
+      "id": "SP8",
+      "note": "a line that is off stays in the stored screen and adds nothing to the plan",
+      "screen": {"where": {"all": [
+        {"id": "a", "left": {"field": "close"}, "op": "gt", "right": {"num": "1"}},
+        {"id": "b", "on": false, "left": {"ind": "sma", "p": {"length": 30}}, "op": "gt", "right": {"num": "1"}}
+      ]}},
+      "stored": [
+        ["/where/all/1/on", false],
+        ["/where/all/1/left", {"ind": "sma", "p": {"length": 30, "source": "close"}, "out": "value", "tf": 15, "at": 0}]
+      ],
+      "plan": [
+        ["/instances", []],
+        ["/need", {"15": 1, "D": 1}],
+        ["/ids", ["a"]]
+      ]
+    },
+    {
+      "id": "SP9",
+      "note": "a line without an id gets the next free one, never an id a later line names",
+      "screen": {"where": {"all": [
+        {"left": {"field": "close"}, "op": "gt", "right": {"num": "1"}},
+        {"id": "c1", "left": {"field": "close"}, "op": "gt", "right": {"num": "2"}},
+        {"left": {"field": "close"}, "op": "gt", "right": {"num": "3"}}
+      ]}},
+      "stored": [
+        ["/where/all/0/id", "c2"],
+        ["/where/all/1/id", "c1"],
+        ["/where/all/2/id", "c3"]
+      ]
+    },
+    {
+      "id": "SP10",
+      "note": "between: both ends are typed in the unit of what is checked",
+      "screen": {"where": {"all": [{"left": {"field": "close"}, "op": "between", "args": {"low": "100", "high": "200.5"}}]}},
+      "stored": [["/where/all/0/args", {"low": "100", "high": "200.5"}]],
+      "plan": [["/clauses/0/args", {"high": "20050", "low": "10000"}]]
+    },
+    {
+      "id": "SP11",
+      "note": "rising and falling: one candle unless said, and the cross of n needs n more candles",
+      "screen": {"where": {"all": [
+        {"left": {"ind": "rsi", "p": {"length": 14}}, "op": "rising"},
+        {"left": {"ind": "rsi", "p": {"length": 14}}, "op": "falling", "args": {"n": 3}}
+      ]}},
+      "stored": [
+        ["/where/all/0/args", {"n": 1}],
+        ["/where/all/1/args", {"n": 3}]
+      ],
+      "plan": [["/need", {"15": 101, "D": 1}]]
+    },
+    {
+      "id": "SP12",
+      "note": "pivot levels come from the day candle whatever timeframe is asked for",
+      "screen": {"where": {"all": [{"left": {"field": "close"}, "op": "crosses_above",
+        "right": {"ind": "pivot", "p": {"kind": "classic"}, "out": "R1", "tf": 15, "at": 4}}]}},
+      "stored": [["/where/all/0/right", {"ind": "pivot", "p": {"kind": "classic"}, "out": "R1", "tf": "D"}]],
+      "plan": [
+        ["/clauses/0/right", {"ind": "pivot", "p": {"kind": "classic"}, "out": "R1", "tf": "D", "at": 0, "unit": "paise"}],
+        ["/need", {"15": 2, "D": 2}]
+      ]
+    },
+    {
+      "id": "SP13",
+      "note": "arithmetic: a number added to a price is in rupees; a number that multiplies is a plain factor",
+      "screen": {"where": {"all": [
+        {"left": {"field": "close"}, "op": "gt", "right": {"math": "add", "args": [{"field": "prev_close"}, {"num": "0.5"}]}},
+        {"left": {"field": "volume"}, "op": "gt", "right": {"math": "mul", "args": [{"num": "1.5"}, {"ind": "sma", "p": {"length": 20, "source": "volume"}}]}}
+      ]}},
+      "stored": [
+        ["/where/all/0/right", {"math": "add", "args": [{"field": "prev_close"}, {"num": "0.5"}]}]
+      ],
+      "plan": [
+        ["/clauses/0/right", {"math": "add", "unit": "paise", "args": [
+          {"field": "prev_close", "tf": null, "at": 0, "unit": "paise"},
+          {"num": "0.5", "value": "50", "unit": "paise"}]}],
+        ["/clauses/1/right", {"math": "mul", "unit": "qty", "args": [
+          {"num": "1.5", "value": "1.5", "unit": "num"},
+          {"ind": "sma", "p": {"length": 20, "source": "volume"}, "out": "value", "tf": 15, "at": 0, "unit": "qty"}]}]
+      ]
+    },
+    {
+      "id": "SP14",
+      "note": "open interest build-up: the day so far, and the change over three 5-minute candles",
+      "screen": {
+        "universe": {"kind": "fno_futures"},
+        "where": {"all": [
+          {"left": {"oi": "buildup", "window": {"kind": "day"}}, "op": "is", "args": {"name": "long_buildup"}},
+          {"left": {"oi": "oi_change_pct", "window": {"kind": "candles", "n": 3}, "tf": 5}, "op": "gte", "right": {"num": "2"}}
+        ]}
+      },
+      "stored": [
+        ["/where/all/0/left", {"oi": "buildup", "window": {"kind": "day"}, "min_price_pct": "0", "min_oi_pct": "0"}],
+        ["/where/all/0/args", {"name": "long_buildup"}],
+        ["/where/all/1/left", {"oi": "oi_change_pct", "window": {"kind": "candles", "n": 3}, "tf": 5}]
+      ],
+      "plan": [
+        ["/uses", ["oi"]],
+        ["/need", {"15": 1, "5": 4, "D": 1}],
+        ["/clauses/1/right", {"num": "2", "value": "2", "unit": "pct"}]
+      ]
+    },
+    {
+      "id": "SP15",
+      "note": "a candle pattern is checked with Is",
+      "screen": {"where": {"all": [{"left": {"ind": "pattern", "tf": 5}, "op": "is", "args": {"name": "doji"}}]}},
+      "stored": [["/where/all/0/left", {"ind": "pattern", "p": {}, "out": "state", "tf": 5, "at": 0}]],
+      "plan": [["/clauses/0/args", {"name": "doji"}], ["/need", {"5": 1, "D": 1}]]
+    },
+    {
+      "id": "SP16",
+      "note": "no list and no ranking can be asked for",
+      "screen": {"target": null, "rank": null, "where": {"all": [{"left": {"field": "close"}, "op": "gt", "right": {"num": "1"}}]}},
+      "stored": [
+        ["/target", null],
+        ["/rank", {"by": null, "order": "desc"}]
+      ],
+      "plan": [["/rank", null], ["/need", {"15": 1}]]
+    },
+    {
+      "id": "SP17",
+      "note": "a check after the close reads day candles, whatever else came with it",
+      "screen": {
+        "run": {"on": "after_close", "tf": 5},
+        "where": {"all": [{"left": {"field": "close"}, "op": "gt", "right": {"field": "prev_day_high"}}]}
+      },
+      "stored": [
+        ["/run", {"on": "after_close"}],
+        ["/where/all/0/left", {"field": "close", "tf": "D", "at": 0}]
+      ],
+      "plan": [["/on", "after_close"], ["/tf", "D"], ["/need", {"D": 2}]]
+    },
+    {
+      "id": "SP18",
+      "note": "NIFTY 50 is followed tick by tick, so it can be checked at a candle close",
+      "screen": {"universe": {"kind": "index_list", "id": "NIFTY50"}, "run": {"on": "close", "tf": 5},
+                 "where": {"all": [{"left": {"field": "close"}, "op": "gt", "right": {"num": "1"}}]}},
+      "stored": [["/universe", {"kind": "index_list", "id": "NIFTY50"}]]
+    },
+    {
+      "id": "SP19",
+      "note": "week candles",
+      "screen": {"where": {"all": [{"left": {"field": "close", "tf": "W"}, "op": "gt", "right": {"field": "close", "tf": "W", "at": 1}}]}},
+      "plan": [["/need", {"W": 2, "D": 1}]]
+    },
+    {
+      "id": "SP20",
+      "note": "option measures: PCR of the row's own underlying, the change in IV over a candle",
+      "screen": {
+        "universe": {"kind": "indices"}, "run": {"on": "after_close"},
+        "where": {"all": [
+          {"left": {"opt": "iv_change"}, "op": "gt", "right": {"num": "1"}},
+          {"left": {"opt": "pcr"}, "op": "gt", "right": {"num": "1.2"}}
+        ]}
+      },
+      "stored": [
+        ["/where/all/0/left", {"opt": "iv_change", "underlying": "self", "tf": "D"}],
+        ["/where/all/1/left", {"opt": "pcr", "underlying": "self"}]
+      ],
+      "plan": [
+        ["/uses", ["options"]],
+        ["/clauses/1/left", {"opt": "pcr", "underlying": "self", "tf": null, "unit": "num"}],
+        ["/clauses/1/right", {"num": "1.2", "value": "1.2", "unit": "num"}],
+        ["/clauses/0/left", {"opt": "iv_change", "underlying": "self", "tf": "D", "unit": "pct"}]
+      ]
+    },
+    {
+      "id": "SP21",
+      "note": "on-balance volume can be crossed with its own average",
+      "screen": {"where": {"all": [{"left": {"ind": "obv"}, "op": "crosses_above",
+        "right": {"ind": "sma", "p": {"length": 20, "source": "obv"}}}]}},
+      "plan": [
+        ["/instances", [["obv", {}, 15], ["sma", {"length": 20, "source": "obv"}, 15]]],
+        ["/clauses/0/left/unit", "qty"]
+      ]
+    },
+    {
+      "id": "SP22",
+      "note": "an opening range of 15 minutes is built from 5-minute candles",
+      "screen": {"run": {"on": "close", "tf": 5}, "where": {"all": [{"left": {"field": "close"}, "op": "crosses_above",
+        "right": {"ind": "orb_high", "p": {"minutes": 15}}}]}},
+      "stored": [["/where/all/0/right", {"ind": "orb_high", "p": {"minutes": 15}, "out": "value", "tf": 5, "at": 0}]],
+      "plan": [["/instances", []]]
+    },
+    {
+      "id": "SP23",
+      "note": "the 60-minute history is 441 candles: EMA 147 needs exactly that, EMA 148 does not fit",
+      "screen": {"run": {"on": "close", "tf": 60}, "rank": null,
+                 "where": {"all": [{"left": {"ind": "ema", "p": {"length": 147}}, "op": "gt", "right": {"field": "close"}}]}},
+      "plan": [["/need", {"60": 441}]]
+    },
+    {
+      "id": "SP24",
+      "note": "a pattern needs the candles that define it: NR7 seven, engulfing two, a hammer one (and two more to look back at it)",
+      "screen": {"rank": null, "where": {"all": [
+        {"left": {"ind": "pattern", "tf": 15}, "op": "is", "args": {"name": "nr7"}},
+        {"left": {"ind": "pattern", "tf": 5}, "op": "is", "args": {"name": "bullish_engulfing"}},
+        {"left": {"ind": "pattern", "tf": 3, "at": 2}, "op": "is", "args": {"name": "hammer"}}
+      ]}},
+      "plan": [["/need", {"15": 7, "5": 2, "3": 3}], ["/counts", {"instances": 0, "clauses": 3}]]
+    },
+    {
+      "id": "SP25",
+      "note": "12 different indicators are allowed; the same settings used again are the same indicator",
+      "screen": {"rank": null, "where": {"all": [
+        {"left": {"ind": "sma", "p": {"length": 2}}, "op": "gt", "right": {"num": "1"}},
+        {"left": {"ind": "sma", "p": {"length": 3}}, "op": "gt", "right": {"num": "1"}},
+        {"left": {"ind": "sma", "p": {"length": 4}}, "op": "gt", "right": {"num": "1"}},
+        {"left": {"ind": "sma", "p": {"length": 5}}, "op": "gt", "right": {"num": "1"}},
+        {"left": {"ind": "sma", "p": {"length": 6}}, "op": "gt", "right": {"num": "1"}},
+        {"left": {"ind": "sma", "p": {"length": 7}}, "op": "gt", "right": {"num": "1"}},
+        {"left": {"ind": "sma", "p": {"length": 8}}, "op": "gt", "right": {"num": "1"}},
+        {"left": {"ind": "sma", "p": {"length": 9}}, "op": "gt", "right": {"num": "1"}},
+        {"left": {"ind": "sma", "p": {"length": 10}}, "op": "gt", "right": {"num": "1"}},
+        {"left": {"ind": "sma", "p": {"length": 11}}, "op": "gt", "right": {"num": "1"}},
+        {"left": {"ind": "sma", "p": {"length": 12}}, "op": "gt", "right": {"num": "1"}},
+        {"left": {"ind": "sma", "p": {"length": 13}}, "op": "gt", "right": {"num": "1"}},
+        {"left": {"ind": "sma", "p": {"length": 2, "source": "close"}, "tf": 15, "at": 0}, "op": "lt", "right": {"num": "9"}},
+        {"left": {"ind": "sma", "p": {"length": 13}}, "op": "lt", "right": {"num": "9"}},
+        {"left": {"ind": "sma", "p": {"length": 2}, "tf": 15}, "op": "lt", "right": {"num": "99"}}
+      ]}},
+      "plan": [["/counts", {"instances": 12, "clauses": 15}], ["/need", {"15": 13}]]
+    },
+    {
+      "id": "SP26",
+      "note": "the same average on another timeframe is another indicator",
+      "screen": {"rank": null, "where": {"all": [
+        {"left": {"ind": "sma", "p": {"length": 2}, "tf": 15}, "op": "gt", "right": {"num": "1"}},
+        {"left": {"ind": "sma", "p": {"length": 2}, "tf": 5}, "op": "gt", "right": {"num": "1"}}
+      ]}},
+      "plan": [["/counts", {"instances": 2, "clauses": 2}], ["/need", {"15": 2, "5": 2}]]
+    },
+    {"id": "SW1", "note": "warm-up: SMA, WMA, VWMA = length", "screen": {"rank": null, "where": {"all": [{"left": {"ind": "sma", "p": {"length": 20}}, "op": "gt", "right": {"num": "1"}}]}}, "plan": [["/need", {"15": 20}]]},
+    {"id": "SW2", "note": "warm-up: EMA = 3 x length", "screen": {"rank": null, "where": {"all": [{"left": {"ind": "ema", "p": {"length": 20}}, "op": "gt", "right": {"num": "1"}}]}}, "plan": [["/need", {"15": 60}]]},
+    {"id": "SW3", "note": "warm-up: HMA = length + ceil(sqrt(length)) = 25", "screen": {"rank": null, "where": {"all": [{"left": {"ind": "hma", "p": {"length": 20}}, "op": "gt", "right": {"num": "1"}}]}}, "plan": [["/need", {"15": 25}]]},
+    {"id": "SW4", "note": "warm-up: TEMA = 9 x length", "screen": {"rank": null, "where": {"all": [{"left": {"ind": "tema", "p": {"length": 20}}, "op": "gt", "right": {"num": "1"}}]}}, "plan": [["/need", {"15": 180}]]},
+    {"id": "SW5", "note": "warm-up: RSI = 7 x length", "screen": {"rank": null, "where": {"all": [{"left": {"ind": "rsi", "p": {"length": 14}}, "op": "gt", "right": {"num": "1"}}]}}, "plan": [["/need", {"15": 98}]]},
+    {"id": "SW6", "note": "warm-up: MACD = 3 x slow + 3 x signal", "screen": {"rank": null, "where": {"all": [{"left": {"ind": "macd"}, "op": "gt", "right": {"num": "0"}}]}}, "plan": [["/need", {"15": 105}]]},
+    {"id": "SW7", "note": "warm-up: stochastic = k + d + smooth", "screen": {"rank": null, "where": {"all": [{"left": {"ind": "stochastic"}, "op": "gt", "right": {"num": "80"}}]}}, "plan": [["/need", {"15": 20}]]},
+    {"id": "SW8", "note": "warm-up: Supertrend = 7 x ATR length", "screen": {"rank": null, "where": {"all": [{"left": {"ind": "supertrend"}, "op": "lt", "right": {"field": "close"}}]}}, "plan": [["/need", {"15": 70}]]},
+    {"id": "SW9", "note": "warm-up: ADX = 10 x length", "screen": {"rank": null, "where": {"all": [{"left": {"ind": "adx"}, "op": "gt", "right": {"num": "25"}}]}}, "plan": [["/need", {"15": 140}]]},
+    {"id": "SW10", "note": "warm-up: ATR = 7 x length", "screen": {"rank": null, "where": {"all": [{"left": {"ind": "atr"}, "op": "gt", "right": {"num": "1"}}]}}, "plan": [["/need", {"15": 98}]]},
+    {"id": "SW11", "note": "warm-up: CCI, MFI, CMF, Williams %R = length + 1", "screen": {"rank": null, "where": {"all": [{"left": {"ind": "cci"}, "op": "gt", "right": {"num": "100"}}]}}, "plan": [["/need", {"15": 21}]]},
+    {"id": "SW12", "note": "warm-up: Bollinger Bands, Donchian, relative volume = length", "screen": {"rank": null, "where": {"all": [{"left": {"ind": "bbands"}, "op": "lt", "right": {"field": "close"}}]}}, "plan": [["/need", {"15": 20}]]},
+    {"id": "SW13", "note": "warm-up: Keltner is the longer of 3 x length and 7 x ATR length (70 here, the design says 3 x length)", "screen": {"rank": null, "where": {"all": [{"left": {"ind": "keltner"}, "op": "lt", "right": {"field": "close"}}]}}, "plan": [["/need", {"15": 70}]]},
+    {"id": "SW14", "note": "warm-up: OBV is ready at once, rising needs one more candle", "screen": {"rank": null, "where": {"all": [{"left": {"ind": "obv"}, "op": "rising"}]}}, "plan": [["/need", {"15": 2}]]},
+
+    {"id": "SE1", "note": "design 3.2: a screen with every line off", "screen": {"where": {"all": [{"on": false, "left": {"field": "close"}, "op": "gt", "right": {"num": "1"}}]}}, "error": {"field": "where", "message": "Turn on at least one condition."}},
+    {"id": "SE2", "note": "no conditions at all", "drop": ["where"], "screen": {}, "error": {"field": "where", "message": "Turn on at least one condition."}},
+    {"id": "SE3", "note": "design 3.2: a cross on two timeframes", "screen": {"where": {"all": [{"left": {"ind": "ema", "p": {"length": 20}, "tf": 15}, "op": "crosses_above", "right": {"ind": "ema", "p": {"length": 50}, "tf": 5}}]}}, "error": {"field": "c1.right", "message": "A cross compares two lines on the same candles. Pick the same timeframe on both sides."}},
+    {"id": "SE4", "note": "design 3.2: today's first candle on day candles", "screen": {"where": {"all": [{"left": {"field": "close", "tf": "D", "at": "first_today"}, "op": "gt", "right": {"num": "1"}}]}}, "error": {"field": "c1.left.at", "message": "Today's first candle is for minute candles. For day candles, use 1 candle ago."}},
+    {"id": "SE4b", "note": "yesterday's last candle on week candles", "screen": {"where": {"all": [{"left": {"field": "close", "tf": "W", "at": "last_prev_day"}, "op": "gt", "right": {"num": "1"}}]}}, "error": {"field": "c1.left.at", "message": "Yesterday's last candle is for minute candles. For week candles, use 1 candle ago."}},
+    {"id": "SE5", "note": "design 3.2: groups four deep", "screen": {"where": {"all": [{"all": [{"all": [{"all": [{"left": {"field": "close"}, "op": "gt", "right": {"num": "1"}}]}]}]}]}}, "error": {"field": "where", "message": "Groups can go three levels deep."}},
+    {"id": "SE6", "note": "design 3.2: NIFTY 500 at each candle close", "screen": {"universe": {"kind": "index_list", "id": "NIFTY500"}, "where": {"all": [{"left": {"field": "close"}, "op": "gt", "right": {"num": "1"}}]}}, "error": {"field": "run", "message": "NIFTY 500 is checked after the close (16:05). Checks at each candle close cover the F&O stocks, NIFTY 50, NIFTY BANK and the NIFTY and BANKNIFTY option strikes."}},
+    {"id": "SE7", "note": "design 3.2: EMA 200 on 60-minute candles", "screen": {"run": {"on": "close", "tf": 60}, "where": {"all": [{"left": {"ind": "ema", "p": {"length": 200}}, "op": "gt", "right": {"field": "close"}}]}}, "error": {"field": "c1.left", "message": "EMA 200 on 60-min candles needs 600 candles of history before it is ready; the screener keeps 441. Use a shorter length or a smaller timeframe."}},
+    {"id": "SE7b", "note": "one more candle for a cross", "screen": {"run": {"on": "close", "tf": 60}, "rank": null, "where": {"all": [{"left": {"ind": "ema", "p": {"length": 147}}, "op": "crosses_above", "right": {"ind": "ema", "p": {"length": 20}}}]}}, "error": {"field": "c1.left", "message": "EMA 147 on 60-min candles needs 442 candles of history before it is ready; the screener keeps 441. Use a shorter length or a smaller timeframe."}},
+    {"id": "SE7c", "note": "looking back further than the screener keeps", "screen": {"run": {"on": "close", "tf": 30}, "where": {"all": [{"left": {"ind": "sma", "p": {"length": 270}, "tf": 30, "at": 4}, "op": "gt", "right": {"num": "1"}}]}}, "error": {"field": "c1.left", "message": "SMA 270 on 30-min candles needs 274 candles of history before it is ready; the screener keeps 273. Use a shorter length or a smaller timeframe."}},
+    {"id": "SE8", "note": "21 lines", "screen": {"where": {"all": [
+      {"left": {"field": "close"}, "op": "gt", "right": {"num": "1"}}, {"left": {"field": "close"}, "op": "gt", "right": {"num": "2"}}, {"left": {"field": "close"}, "op": "gt", "right": {"num": "3"}}, {"left": {"field": "close"}, "op": "gt", "right": {"num": "4"}}, {"left": {"field": "close"}, "op": "gt", "right": {"num": "5"}},
+      {"left": {"field": "close"}, "op": "gt", "right": {"num": "6"}}, {"left": {"field": "close"}, "op": "gt", "right": {"num": "7"}}, {"left": {"field": "close"}, "op": "gt", "right": {"num": "8"}}, {"left": {"field": "close"}, "op": "gt", "right": {"num": "9"}}, {"left": {"field": "close"}, "op": "gt", "right": {"num": "10"}},
+      {"left": {"field": "close"}, "op": "gt", "right": {"num": "11"}}, {"left": {"field": "close"}, "op": "gt", "right": {"num": "12"}}, {"left": {"field": "close"}, "op": "gt", "right": {"num": "13"}}, {"left": {"field": "close"}, "op": "gt", "right": {"num": "14"}}, {"left": {"field": "close"}, "op": "gt", "right": {"num": "15"}},
+      {"left": {"field": "close"}, "op": "gt", "right": {"num": "16"}}, {"left": {"field": "close"}, "op": "gt", "right": {"num": "17"}}, {"left": {"field": "close"}, "op": "gt", "right": {"num": "18"}}, {"left": {"field": "close"}, "op": "gt", "right": {"num": "19"}}, {"left": {"field": "close"}, "op": "gt", "right": {"num": "20"}},
+      {"left": {"field": "close"}, "op": "gt", "right": {"num": "21"}}
+    ]}}, "error": {"field": "where", "message": "A screen can hold 20 conditions at most. Delete some."}},
+    {"id": "SE9", "note": "13 different indicators", "screen": {"where": {"all": [
+      {"left": {"ind": "sma", "p": {"length": 2}}, "op": "gt", "right": {"num": "1"}}, {"left": {"ind": "sma", "p": {"length": 3}}, "op": "gt", "right": {"num": "1"}}, {"left": {"ind": "sma", "p": {"length": 4}}, "op": "gt", "right": {"num": "1"}}, {"left": {"ind": "sma", "p": {"length": 5}}, "op": "gt", "right": {"num": "1"}},
+      {"left": {"ind": "sma", "p": {"length": 6}}, "op": "gt", "right": {"num": "1"}}, {"left": {"ind": "sma", "p": {"length": 7}}, "op": "gt", "right": {"num": "1"}}, {"left": {"ind": "sma", "p": {"length": 8}}, "op": "gt", "right": {"num": "1"}}, {"left": {"ind": "sma", "p": {"length": 9}}, "op": "gt", "right": {"num": "1"}},
+      {"left": {"ind": "sma", "p": {"length": 10}}, "op": "gt", "right": {"num": "1"}}, {"left": {"ind": "sma", "p": {"length": 11}}, "op": "gt", "right": {"num": "1"}}, {"left": {"ind": "sma", "p": {"length": 12}}, "op": "gt", "right": {"num": "1"}}, {"left": {"ind": "sma", "p": {"length": 13}}, "op": "gt", "right": {"num": "1"}},
+      {"left": {"ind": "sma", "p": {"length": 14}}, "op": "gt", "right": {"num": "1"}}
+    ]}}, "error": {"field": "where", "message": "A screen can use 12 different indicators at most. Remove one, or use the same settings in two places."}},
+    {"id": "SE10", "note": "two lines with one id", "screen": {"where": {"all": [{"id": "a", "left": {"field": "close"}, "op": "gt", "right": {"num": "1"}}, {"id": "a", "left": {"field": "close"}, "op": "gt", "right": {"num": "2"}}]}}, "error": {"field": "where", "message": "Two conditions share the same id. Open the screen again."}},
+    {"id": "SE11", "note": "a group whose lines are all off", "screen": {"where": {"all": [{"left": {"field": "close"}, "op": "gt", "right": {"num": "1"}}, {"any": [{"on": false, "left": {"field": "close"}, "op": "gt", "right": {"num": "1"}}]}]}}, "error": {"field": "where", "message": "Turn on at least one condition in this group, or delete the group."}},
+    {"id": "SE12", "note": "no way to compare", "screen": {"where": {"all": [{"left": {"field": "close"}, "op": "zzz", "right": {"num": "1"}}]}}, "error": {"field": "c1.op", "message": "Pick how to compare."}},
+    {"id": "SE13", "note": "nothing to compare with", "screen": {"where": {"all": [{"left": {"field": "close"}, "op": "gt"}]}}, "error": {"field": "c1.right", "message": "Pick what to compare it with."}},
+    {"id": "SE14", "note": "two plain numbers", "screen": {"where": {"all": [{"left": {"num": "1"}, "op": "gt", "right": {"num": "2"}}]}}, "error": {"field": "c1.right", "message": "Compare a value with a number, not two numbers."}},
+    {"id": "SE15", "note": "a price against an RSI", "screen": {"where": {"all": [{"left": {"field": "close"}, "op": "gt", "right": {"ind": "rsi", "p": {"length": 14}}}]}}, "error": {"field": "c1.right", "message": "Compare like with like: a price with a price, a volume with a volume, a % with a %."}},
+    {"id": "SE16", "note": "on-balance volume against a number", "screen": {"where": {"all": [{"left": {"ind": "obv"}, "op": "gt", "right": {"num": "100"}}]}}, "error": {"field": "c1.right", "message": "On-balance volume starts from the first candle the screener holds, so its level means nothing. Compare it with its own average, or use rising or falling."}},
+    {"id": "SE17", "note": "a cross against the day's high", "screen": {"where": {"all": [{"left": {"field": "close"}, "op": "crosses_above", "right": {"field": "day_high"}}]}}, "error": {"field": "c1.right", "message": "The day's open, high and low move with every candle, so a cross against them can never happen. Use 'Is above' or 'Is below'."}},
+    {"id": "SE18", "note": "open interest of cash stocks", "screen": {"where": {"all": [{"left": {"field": "oi"}, "op": "gt", "right": {"num": "100"}}]}}, "error": {"field": "c1.left", "message": "Open interest exists for futures and options. Pick F&O futures, index futures or option strikes."}},
+    {"id": "SE19", "note": "Is on a price", "screen": {"where": {"all": [{"left": {"field": "close"}, "op": "is", "args": {"name": "doji"}}]}}, "error": {"field": "c1.left", "message": "'Is' works on a build-up or a candle pattern. Pick one of those."}},
+    {"id": "SE20", "note": "a pattern that is not one", "screen": {"where": {"all": [{"left": {"ind": "pattern"}, "op": "is", "args": {"name": "zzz"}}]}}, "error": {"field": "c1.args.name", "message": "Pick one of: bullish_engulfing, bearish_engulfing, doji, hammer, shooting_star, inside_bar, nr7."}},
+    {"id": "SE21", "note": "between with the ends the wrong way round", "screen": {"where": {"all": [{"left": {"field": "close"}, "op": "between", "args": {"low": "10", "high": "5"}}]}}, "error": {"field": "c1.args.low", "message": "The lower number must not be above the higher one."}},
+    {"id": "SE22", "note": "dividing by a typed zero", "screen": {"where": {"all": [{"left": {"field": "close"}, "op": "gt", "right": {"math": "div", "args": [{"field": "close"}, {"num": "0"}]}}]}}, "error": {"field": "c1.right.args.1", "message": "You cannot divide by zero."}},
+    {"id": "SE23", "note": "minute candles in a check after the close", "screen": {"run": {"on": "after_close"}, "where": {"all": [{"left": {"field": "close", "tf": 15}, "op": "gt", "right": {"num": "1"}}]}}, "error": {"field": "c1.left.tf", "message": "A check after the close can only read day and week candles. Pick Day or Week."}},
+    {"id": "SE24", "note": "an opening range the candles cannot make", "screen": {"where": {"all": [{"left": {"field": "close"}, "op": "gt", "right": {"ind": "orb_high", "p": {"minutes": 10}}}]}}, "error": {"field": "c1.right.p.minutes", "message": "An opening range of 10 minutes cannot be built from 15-min candles. Use whole steps of 5 minutes and candles that divide it."}},
+    {"id": "SE25", "note": "MACD fast above slow", "screen": {"where": {"all": [{"left": {"ind": "macd", "p": {"fast": 26, "slow": 12}}, "op": "gt", "right": {"num": "0"}}]}}, "error": {"field": "c1.left.p.fast", "message": "MACD fast length must be shorter than its slow length."}},
+    {"id": "SE26", "note": "a screen from a newer SUDARSHAN", "screen": {"schema": 2}, "error": {"field": "schema", "message": "This screen needs a newer SUDARSHAN. Update, then open it again."}},
+    {"id": "SE27", "note": "no name", "screen": {"name": null}, "error": {"field": "name", "message": "Give the screen a name."}},
+    {"id": "SE28", "note": "a field nobody knows", "screen": {"colour": "red"}, "error": {"field": "colour", "message": "This screen has a field the screener does not know: 'colour'."}},
+    {"id": "SE29", "note": "Telegram only half said", "screen": {"alerts": {"channels": {"telegram": true}}}, "error": {"field": "alerts", "message": "Pick where to send it: Telegram, the app, or both."}},
+    {"id": "SE30", "note": "neither a watchlist nor a name for a new one", "screen": {"target": {"create_name": null}}, "error": {"field": "target", "message": "Pick a watchlist, or give the new one a name."}},
+    {"id": "SE31", "note": "a cross needs candles behind it", "screen": {"universe": {"kind": "indices"}, "where": {"all": [{"left": {"opt": "pcr"}, "op": "crosses_above", "right": {"num": "1"}}]}}, "error": {"field": "c1.left", "message": "A cross needs a line with candles behind it. Use 'Is above' or 'Is below' for this one."}},
+    {"id": "SE32", "note": "volume against price", "screen": {"where": {"all": [{"left": {"field": "volume"}, "op": "gt", "right": {"field": "close"}}]}}, "error": {"field": "c1.right", "message": "Compare like with like: a price with a price, a volume with a volume, a % with a %."}},
+    {"id": "SE33", "note": "within 0 percent", "screen": {"where": {"all": [{"left": {"field": "close"}, "op": "within_pct", "right": {"field": "vwap"}, "args": {"pct": "0"}}]}}, "error": {"field": "c1.args.pct", "message": "The distance must be above 0% and at most 100%."}},
+    {"id": "SE34", "note": "rising for 21 candles", "screen": {"where": {"all": [{"left": {"ind": "rsi", "p": {"length": 14}}, "op": "rising", "args": {"n": 21}}]}}, "error": {"field": "c1.args.n", "message": "The number of candles must be a whole number from 1 to 20."}},
+    {"id": "SE35", "note": "101 candles ago", "screen": {"where": {"all": [{"left": {"field": "close", "at": 101}, "op": "gt", "right": {"num": "1"}}]}}, "error": {"field": "c1.left.at", "message": "You can look back 100 candles at most."}},
+    {"id": "SE36", "note": "a build-up compared like a number", "screen": {"universe": {"kind": "fno_futures"}, "where": {"all": [{"left": {"oi": "buildup"}, "op": "gt", "right": {"num": "1"}}]}}, "error": {"field": "c1.op", "message": "A state like a build-up or a pattern is checked with 'Is', not compared."}},
+    {"id": "SE37", "note": "a number that is not one", "screen": {"where": {"all": [{"left": {"field": "close"}, "op": "gt", "right": {"num": "abc"}}]}}, "error": {"field": "c1.right", "message": "Type a number, like 55 or 2500.50."}},
+    {"id": "SE38", "note": "a field that does not exist", "screen": {"where": {"all": [{"left": {"field": "zzz"}, "op": "gt", "right": {"num": "1"}}]}}, "error": {"field": "c1.left", "message": "Pick a price, volume or level from the list."}},
+    {"id": "SE39", "note": "an indicator that does not exist", "screen": {"where": {"all": [{"left": {"ind": "zzz"}, "op": "gt", "right": {"num": "1"}}]}}, "error": {"field": "c1.left", "message": "Pick an indicator from the list."}},
+    {"id": "SE40", "note": "RSI of length 1", "screen": {"where": {"all": [{"left": {"ind": "rsi", "p": {"length": 1}}, "op": "gt", "right": {"num": "1"}}]}}, "error": {"field": "c1.left.p.length", "message": "RSI length must be a whole number from 2 to 200."}},
+    {"id": "SE41", "note": "a source that is not one", "screen": {"where": {"all": [{"left": {"ind": "sma", "p": {"source": "zzz"}}, "op": "gt", "right": {"num": "1"}}]}}, "error": {"field": "c1.left.p.source", "message": "SMA source must be one of: close, open, high, low, hl2, hlc3, ohlc4, volume, oi, obv."}},
+    {"id": "SE42", "note": "a setting an indicator does not have", "screen": {"where": {"all": [{"left": {"ind": "sma", "p": {"zzz": 1}}, "op": "gt", "right": {"num": "1"}}]}}, "error": {"field": "c1.left.p", "message": "SMA has no setting called 'zzz'."}},
+    {"id": "SE43", "note": "the opening range on day candles", "screen": {"where": {"all": [{"left": {"ind": "orb_high", "tf": "D"}, "op": "gt", "right": {"num": "1"}}]}}, "error": {"field": "c1.left.tf", "message": "Opening range high can only be read on minute candles."}},
+    {"id": "SE44", "note": "a universe that is not one", "screen": {"universe": {"kind": "zzz"}}, "error": {"field": "universe", "message": "Pick where to look: F&O stocks, futures, a NIFTY list, option strikes or a watchlist."}},
+    {"id": "SE45", "note": "option strikes of nothing", "screen": {"universe": {"kind": "options"}}, "error": {"field": "universe", "message": "Pick NIFTY or BANKNIFTY for the option strikes."}},
+    {"id": "SE46", "note": "a name of 61 characters", "screen": {"name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}, "error": {"field": "name", "message": "Use a shorter name (60 characters at most)."}},
+    {"id": "SE47", "note": "an alert setting nobody knows", "screen": {"alerts": {"zzz": 1}}, "error": {"field": "alerts", "message": "This part of the screen has a field the screener does not know: 'zzz'."}},
+    {"id": "SE48", "note": "a group that is two groups", "screen": {"where": {"all": [{"left": {"field": "close"}, "op": "gt", "right": {"num": "1"}}], "any": [{"left": {"field": "close"}, "op": "gt", "right": {"num": "1"}}]}}, "error": {"field": "where", "message": "A group is either match all, match any, match none or not. Pick one."}},
+    {"id": "SE49", "note": "a group with nothing in it", "screen": {"where": {"all": []}}, "error": {"field": "where", "message": "A group needs at least one condition."}},
+    {"id": "SE50", "note": "a time to check that is not one", "screen": {"run": {"on": "zzz"}}, "error": {"field": "run", "message": "Pick when to check: at each candle close, or after the close."}},
+    {"id": "SE51", "note": "a candle size that is not one", "screen": {"run": {"on": "close", "tf": 7}}, "error": {"field": "run", "message": "Check at the close of 1, 3, 5, 15, 30 or 60-minute candles."}},
+    {"id": "SE52", "note": "a Supertrend factor out of range", "screen": {"where": {"all": [{"left": {"ind": "supertrend", "p": {"factor": 20}}, "op": "lt", "right": {"field": "close"}}]}}, "error": {"field": "c1.left.p.factor", "message": "Supertrend factor must be a number from 0.5 to 10."}},
+    {"id": "SE53", "note": "a build-up in a screen over cash stocks", "screen": {"where": {"all": [{"left": {"oi": "buildup"}, "op": "is", "args": {"name": "long_buildup"}}]}}, "error": {"field": "c1.left", "message": "Open interest exists for futures and options. Pick F&O futures, index futures or option strikes."}}
+  ]
+}
