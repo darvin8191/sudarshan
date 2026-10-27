@@ -14,7 +14,14 @@ import pytest
 from cryptography.fernet import Fernet, InvalidToken
 
 from sudarshan.vault import (
+    ALERTS_API_INFO,
+    ALERTS_PUSH_INFO,
+    ALERTS_SCREENER_DIGEST_INFO,
     HANDOFF_INFO,
+    PORTFOLIO_API_INFO,
+    PURPOSES,
+    SCREENER_API_INFO,
+    SCREENER_INTERNAL_INFO,
     VAULT_INFO,
     SecretUnreadable,
     Vault,
@@ -127,6 +134,30 @@ def test_keys_are_deterministic_and_purpose_separated():
     assert derive_key(OTHER_PEPPER, VAULT_INFO) != vault_key
     assert vault_key not in PEPPER.encode() and PEPPER.encode()[:32] != vault_key
     assert key_fingerprint(PEPPER, VAULT_INFO) != key_fingerprint(PEPPER, HANDOFF_INFO)
+
+
+def test_every_purpose_is_its_own_and_none_opens_anothers_seal():
+    """Cross-design X0: one purpose per sealed route; no two equal, no two keys equal, and a
+    token sealed for one purpose never opens under another."""
+    import sudarshan.vault.keys as keys
+
+    declared = {name: value for name, value in vars(keys).items() if name.endswith("_INFO")}
+    assert set(declared.values()) == set(PURPOSES) and len(PURPOSES) == len(set(PURPOSES)) == 8
+    assert all(info.startswith(b"sudarshan/") and info.endswith(b"/v1") for info in PURPOSES)
+    derived = {derive_key(PEPPER, info) for info in PURPOSES}
+    assert len(derived) == len(PURPOSES)
+    for info in PURPOSES:
+        token = fernet_for(PEPPER, info).encrypt(b"fake")
+        for other in PURPOSES:
+            if other != info:
+                with pytest.raises(InvalidToken):
+                    fernet_for(PEPPER, other).decrypt(token)
+    assert ALERTS_API_INFO == b"sudarshan/alerts/api/v1"  # named in the designs; never renamed
+    assert ALERTS_PUSH_INFO == b"sudarshan/alerts/push/v1"
+    assert ALERTS_SCREENER_DIGEST_INFO == b"sudarshan/alerts/screener-digest/v1"
+    assert PORTFOLIO_API_INFO == b"sudarshan/portfolio/api/v1"
+    assert SCREENER_API_INFO == b"sudarshan/screener/api/v1"
+    assert SCREENER_INTERNAL_INFO == b"sudarshan/screener/internal/v1"
 
 
 def test_vault_key_is_not_openalgos_broker_token_key(monkeypatch):
