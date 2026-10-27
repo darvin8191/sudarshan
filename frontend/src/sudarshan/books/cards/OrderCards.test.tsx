@@ -5,7 +5,7 @@
  * tick, filter chips, and a sheet whose Modify, Cancel and Cancel all are the
  * page's own. A rejection says the broker's reason. Back closes what is open.
  */
-import { act, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Order } from '@/types/trading'
@@ -433,6 +433,13 @@ describe('Order book on a phone: the cards', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(why).not.toHaveClass('sr-only')
     expect(why).toHaveTextContent(NOTHING_TO_CANCEL)
+    act(() => all.blur())
+    expect(why).toHaveClass('sr-only')
+    // A tap that does not move focus (a browser that does not focus buttons) still says why.
+    fireEvent.click(all)
+    expect(why).not.toHaveClass('sr-only')
+    expect(screen.queryByRole('dialog')).toBeNull()
+    act(() => all.focus())
     act(() => all.blur())
     expect(why).toHaveClass('sr-only')
     act(() => all.focus())

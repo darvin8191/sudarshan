@@ -158,6 +158,13 @@ def alert(monkeypatch):
             "*Exit not sent*\n" + ANALYZE + "RELIANCE (NSE, CNC)\n" + BUSY + "\nTime: 10:52:13",
         ),
         (
+            "closeposition",
+            LIVE_EXIT,
+            {"status": "error", "message": "UDAPI100500: order_type is invalid"},
+            "*Exit not sent*\n" + LIVE + "RELIANCE (NSE, CNC)\nUDAPI100500: order\\_type is invalid"
+            "\nTime: 10:52:13",
+        ),
+        (
             "placesmartorder",
             ANALYZE_EXIT,
             {
@@ -177,6 +184,7 @@ def alert(monkeypatch):
         "sliced",
         "not confirmed",
         "refused",
+        "refused, its reason kept whole in Markdown",
         "nothing was open",
     ],
 )
