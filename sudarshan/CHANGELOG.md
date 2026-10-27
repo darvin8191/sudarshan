@@ -5,6 +5,85 @@ publish. The owner publishes each release on GitHub. The server's deploy timer t
 outside 08:30-16:00 IST on trading days (09:00-15:45 until v0.3.1), keeps backups, and rolls
 back if the app does not come up healthy.
 
+## v0.3.2 (28 Oct 2026)
+
+Muhurat trading on Sunday 8 Nov, the F&O close at 15:40, and an Exit all that waits instead of
+closing anything twice. It includes everything in v0.3.1. **Publish it by Friday 6 Nov, and
+publish nothing on Saturday 7 or Sunday 8 Nov.**
+
+### What changes for you
+- **Muhurat, Sunday 8 Nov 2026.** SUDARSHAN treats that afternoon as a trading session, as the
+  exchanges announced it: pre-open 14:05, trading 14:20 to 15:30 for shares, to 15:40 for F&O
+  (NSE circulars 149/2026 and 142/2026), MCX 14:20 to 15:30.
+  - The server learns the date by itself. This release carries the line, and the first run after
+    the install adds it to the server's calendar. Nothing to type on the server.
+  - That day: auto-login logs in at 08:35 as on any trading day, the price feed connects at 14:03
+    and stays until 15:50, order alerts on Telegram run from 13:50 to 16:00, and the screens show
+    the market open (not "Market closed") during the session.
+  - No release installs on that Sunday at any hour.
+- **F&O closes at 15:40 every day (NSE, since 3 Aug 2026).** SUDARSHAN's own times follow it:
+  - The price feed stays until 15:50 (it closed at 15:40), and reconnects by itself if prices
+    stop between 09:15 and 15:40.
+  - Test now on the Auto login page is refused until 15:40, so it never replaces your login while
+    F&O trades. A scheduled auto-login never replaces a working login before 15:40 either.
+- **Releases install outside 08:30-16:00 on trading days** (it was 09:00-15:45). A release you
+  publish during the day installs after 16:00; one published before 08:30 installs before the
+  morning's logins and alerts start.
+- **Exit all never closes a position twice.**
+  - An Exit all from the phone, TradingView, a script, Flow or Telegram that arrives while the
+    phone is placing a single exit now waits for that exit (up to about 2 minutes), then closes
+    the rest. It used to be refused, and nothing sent it again.
+  - Right after an exit, Upstox takes a few seconds to show it in Positions. An Exit all in those
+    seconds reads Positions until the exit shows (up to 15 seconds) before it sends anything, so
+    it never sells what was already sold. The same holds for an Exit all sent twice in a row, for
+    example a TradingView alert that fires twice.
+- **Telegram says what was sent.** The app's Exit reads "Exit sent / RELIANCE (NSE, CNC), sell 1
+  to close" with the order id (it said "Action: BUY, Quantity: 0"), or "Exit not sent" with the
+  reason, or "Exit not confirmed". A Cancel all that failed says why.
+- **Calmer order-alert notices.** "Order alerts paused ..." no longer comes before the market
+  opens (the one on 27 Oct at 08:45 came from v0.3.1's install). A pause during the session is
+  still told; when the order book cannot be read, SUDARSHAN keeps trying for about 3 minutes and
+  then tells you to open Orders in the app. The day's last pause is caught up after 16:00 too.
+- **Screens with nothing open.** Positions no longer says "Waiting for prices" when nothing is
+  open. Exit all and Cancel all turn grey when there is nothing to exit or cancel, and a tap
+  says why instead of sending anything.
+
+### What you must do
+- **Publish by Friday 6 Nov** (the link is in your task list). The server installs it outside
+  trading hours by itself.
+- **After it installs**, paste the v0.3.2 check from your task list into the "SUDARSHAN server"
+  session. It changes nothing; it confirms the Muhurat line reached the server's calendar and
+  that the services run.
+- **Analyze-mode check, 5 minutes on any trading day after the install:** exit one sandbox
+  position from its card; Telegram should say "Exit sent ... sell ... to close". With nothing
+  open, Positions should show no "Waiting for prices", and Exit all should be grey and say why
+  when tapped.
+
+### What is refused now
+- An install between 08:30 and 09:00 or between 15:45 and 16:00 on a trading day, and all day on
+  8 Nov.
+- Test now on the Auto login page between 15:30 and 15:40.
+- An Exit all within 15 seconds of an exit, until Positions shows that exit. If Upstox's
+  Positions does not show it in time, the answer is 409 "An exit placed just now does not show
+  in Positions yet. Check Positions, then try Exit all again."
+- **What API callers (TradingView, scripts, Flow) now get:** `closeposition` while a single exit
+  is being placed waits up to about 2 minutes and then answers as before (it answered 409 at
+  once); the 409 above when Positions lags. Nothing else changes.
+
+### Not in this release yet
+- **Exits outside the guard:** the scalping terminal's close buttons, the strategy module's own
+  exits and single-position orders from TradingView or scripts are not waited for by an Exit all.
+- **A message when a release installs.** For now the v0.3.2 check in the server session confirms
+  it.
+- **An evening special session** (none is planned) would still allow Test now during it:
+  auto-login's guard reads the clock, not that day's own hours.
+- **MCX's Muhurat hours** come from a published summary of MCX's circular; MCX's own page could
+  not be read.
+- **Holidays changed on OpenAlgo's admin Holidays page** go back to the built-in list at the next
+  install, as they always have.
+- **The feed may reconnect once at 09:15** if Upstox sends nothing in the minutes before the
+  open. It did not happen on 27 Oct (no reconnects all day).
+
 ## v0.3.1 (21 Oct 2026)
 
 Phone cards for the books, and exits and cancels that cannot go twice. It includes everything in
