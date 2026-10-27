@@ -1,0 +1,343 @@
+{
+  "note": "The library's presets as the owner reads them. Typed from design 5.3, never produced by the code: the checked form of each screen, the words on its card, and what the engine is told to keep (history per timeframe, indicators, extra data). Every preset stores these defaults beside the lines below.",
+  "defaults": {
+    "target": {
+      "list_id": null,
+      "grace": {"mode": "runs", "n": 2},
+      "max_adds_per_run": 10
+    },
+    "alerts": {
+      "on": true,
+      "min_matches": 1,
+      "unique_per_day": true,
+      "skip_zero": true,
+      "tell_exits": false,
+      "after_trigger": "continue",
+      "cooldown_runs": 0,
+      "max_per_day_per_symbol": 3,
+      "channels": null,
+      "columns": ["ltp", "change_pct"]
+    },
+    "rank": {
+      "by": {"field": "change_pct", "tf": "D", "at": 0},
+      "order": "desc"
+    }
+  },
+  "presets": [
+    {
+      "key": "long_buildup",
+      "name": "Long build-up",
+      "about": "Stock futures with the price up and open interest up 2% or more since yesterday's close.",
+      "line": "F&O stock futures · after the close",
+      "columns": ["ltp", "change_pct", "value"],
+      "screen": {
+        "universe": {"kind": "fno_futures"},
+        "run": {"on": "after_close"},
+        "where": {
+          "all": [
+            {
+              "id": "c1", "on": true,
+              "left": {"oi": "buildup", "window": {"kind": "day"}, "min_price_pct": "0", "min_oi_pct": "0"},
+              "op": "is", "args": {"name": "long_buildup"}
+            },
+            {
+              "id": "c2", "on": true,
+              "left": {"oi": "oi_change_pct", "window": {"kind": "day"}},
+              "op": "gte", "right": {"num": "2"}
+            }
+          ]
+        },
+        "rank": {"by": {"oi": "oi_change_pct", "window": {"kind": "day"}}, "order": "desc"}
+      },
+      "plan": {
+        "on": "after_close", "tf": "D", "need": {"D": 1}, "instances": [], "uses": ["oi"],
+        "ids": ["c1", "c2"], "rank_order": "desc"
+      },
+      "followed": {
+        "run": {"on": "close", "tf": 15},
+        "line": "F&O stock futures · 15-min",
+        "plan": {
+          "on": "close", "tf": 15, "need": {"15": 1}, "instances": [], "uses": ["oi"],
+          "ids": ["c1", "c2"], "rank_order": "desc"
+        }
+      }
+    },
+    {
+      "key": "short_buildup",
+      "name": "Short build-up",
+      "about": "Stock futures with the price down and open interest up 2% or more since yesterday's close.",
+      "line": "F&O stock futures · after the close",
+      "columns": ["ltp", "change_pct", "value"],
+      "screen": {
+        "universe": {"kind": "fno_futures"},
+        "run": {"on": "after_close"},
+        "where": {
+          "all": [
+            {
+              "id": "c1", "on": true,
+              "left": {"oi": "buildup", "window": {"kind": "day"}, "min_price_pct": "0", "min_oi_pct": "0"},
+              "op": "is", "args": {"name": "short_buildup"}
+            },
+            {
+              "id": "c2", "on": true,
+              "left": {"oi": "oi_change_pct", "window": {"kind": "day"}},
+              "op": "gte", "right": {"num": "2"}
+            }
+          ]
+        },
+        "rank": {"by": {"oi": "oi_change_pct", "window": {"kind": "day"}}, "order": "desc"}
+      },
+      "plan": {
+        "on": "after_close", "tf": "D", "need": {"D": 1}, "instances": [], "uses": ["oi"],
+        "ids": ["c1", "c2"], "rank_order": "desc"
+      },
+      "followed": {
+        "run": {"on": "close", "tf": 15},
+        "line": "F&O stock futures · 15-min",
+        "plan": {
+          "on": "close", "tf": 15, "need": {"15": 1}, "instances": [], "uses": ["oi"],
+          "ids": ["c1", "c2"], "rank_order": "desc"
+        }
+      }
+    },
+    {
+      "key": "short_covering",
+      "name": "Short covering",
+      "about": "Stock futures with the price up and open interest down 2% or more since yesterday's close.",
+      "line": "F&O stock futures · after the close",
+      "columns": ["ltp", "change_pct", "value"],
+      "screen": {
+        "universe": {"kind": "fno_futures"},
+        "run": {"on": "after_close"},
+        "where": {
+          "all": [
+            {
+              "id": "c1", "on": true,
+              "left": {"oi": "buildup", "window": {"kind": "day"}, "min_price_pct": "0", "min_oi_pct": "0"},
+              "op": "is", "args": {"name": "short_covering"}
+            },
+            {
+              "id": "c2", "on": true,
+              "left": {"oi": "oi_change_pct", "window": {"kind": "day"}},
+              "op": "lte", "right": {"num": "-2"}
+            }
+          ]
+        },
+        "rank": {"by": {"oi": "oi_change_pct", "window": {"kind": "day"}}, "order": "asc"}
+      },
+      "plan": {
+        "on": "after_close", "tf": "D", "need": {"D": 1}, "instances": [], "uses": ["oi"],
+        "ids": ["c1", "c2"], "rank_order": "asc"
+      },
+      "followed": {
+        "run": {"on": "close", "tf": 15},
+        "line": "F&O stock futures · 15-min",
+        "plan": {
+          "on": "close", "tf": 15, "need": {"15": 1}, "instances": [], "uses": ["oi"],
+          "ids": ["c1", "c2"], "rank_order": "asc"
+        }
+      }
+    },
+    {
+      "key": "iv_extremes",
+      "name": "IV extremes",
+      "about": "NIFTY 50 and NIFTY BANK when implied volatility is at its 80th percentile or higher, or at its 20th or lower. India VIX itself is not checked.",
+      "line": "Indices · after the close",
+      "columns": ["ltp", "change_pct", "value"],
+      "screen": {
+        "universe": {"kind": "indices"},
+        "run": {"on": "after_close"},
+        "where": {
+          "any": [
+            {
+              "id": "c1", "on": true,
+              "left": {"opt": "iv_pct", "underlying": "self"},
+              "op": "gte", "right": {"num": "80"}
+            },
+            {
+              "id": "c2", "on": true,
+              "left": {"opt": "iv_pct", "underlying": "self"},
+              "op": "lte", "right": {"num": "20"}
+            }
+          ]
+        },
+        "rank": {"by": {"opt": "iv_pct", "underlying": "self"}, "order": "desc"}
+      },
+      "plan": {
+        "on": "after_close", "tf": "D", "need": {}, "instances": [], "uses": ["options"],
+        "ids": ["c1", "c2"], "rank_order": "desc"
+      }
+    },
+    {
+      "key": "orb_breakout",
+      "name": "ORB breakout",
+      "about": "Stocks whose 5-min close crosses above the high of the first 15 minutes, on volume above 1.5 times its 20-candle average. Nothing shows before 09:30, when that range is complete.",
+      "line": "F&O stocks · 5-min",
+      "screen": {
+        "universe": {"kind": "fno_stocks"},
+        "run": {"on": "close", "tf": 5},
+        "where": {
+          "all": [
+            {
+              "id": "c1", "on": true,
+              "left": {"field": "close", "tf": 5, "at": 0},
+              "op": "crosses_above",
+              "right": {"ind": "orb_high", "p": {"minutes": 15}, "out": "value", "tf": 5, "at": 0}
+            },
+            {
+              "id": "c2", "on": true,
+              "left": {"field": "volume", "tf": 5, "at": 0},
+              "op": "gt",
+              "right": {
+                "math": "mul",
+                "args": [
+                  {"ind": "sma", "p": {"length": 20, "source": "volume"}, "out": "value", "tf": 5, "at": 0},
+                  {"num": "1.5"}
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "plan": {
+        "on": "close", "tf": 5, "need": {"5": 20, "D": 1},
+        "instances": [["sma", {"length": 20, "source": "volume"}, 5]], "uses": [],
+        "ids": ["c1", "c2"], "rank_order": "desc"
+      }
+    },
+    {
+      "key": "ema_cross_15",
+      "name": "15-min EMA cross",
+      "about": "Stocks where the 15-min EMA 20 crosses above EMA 50 while RSI 14 is above 50 and the price is above VWAP.",
+      "line": "F&O stocks · 15-min",
+      "screen": {
+        "universe": {"kind": "fno_stocks"},
+        "run": {"on": "close", "tf": 15},
+        "where": {
+          "all": [
+            {
+              "id": "c1", "on": true,
+              "left": {"ind": "ema", "p": {"length": 20, "source": "close"}, "out": "value", "tf": 15, "at": 0},
+              "op": "crosses_above",
+              "right": {"ind": "ema", "p": {"length": 50, "source": "close"}, "out": "value", "tf": 15, "at": 0}
+            },
+            {
+              "id": "c2", "on": true,
+              "left": {"ind": "rsi", "p": {"length": 14}, "out": "value", "tf": 15, "at": 0},
+              "op": "gt", "right": {"num": "50"}
+            },
+            {
+              "id": "c3", "on": true,
+              "left": {"field": "close", "tf": 15, "at": 0},
+              "op": "gt", "right": {"field": "vwap", "tf": 15, "at": 0}
+            }
+          ]
+        }
+      },
+      "plan": {
+        "on": "close", "tf": 15, "need": {"15": 151, "D": 1},
+        "instances": [
+          ["ema", {"length": 20, "source": "close"}, 15],
+          ["ema", {"length": 50, "source": "close"}, 15],
+          ["rsi", {"length": 14}, 15]
+        ],
+        "uses": [], "ids": ["c1", "c2", "c3"], "rank_order": "desc"
+      }
+    },
+    {
+      "key": "vwap_reclaim",
+      "name": "VWAP reclaim",
+      "about": "Stocks whose 5-min close crosses above VWAP on volume above its 20-candle average.",
+      "line": "F&O stocks · 5-min",
+      "screen": {
+        "universe": {"kind": "fno_stocks"},
+        "run": {"on": "close", "tf": 5},
+        "where": {
+          "all": [
+            {
+              "id": "c1", "on": true,
+              "left": {"field": "close", "tf": 5, "at": 0},
+              "op": "crosses_above", "right": {"field": "vwap", "tf": 5, "at": 0}
+            },
+            {
+              "id": "c2", "on": true,
+              "left": {"field": "volume", "tf": 5, "at": 0},
+              "op": "gt",
+              "right": {"ind": "sma", "p": {"length": 20, "source": "volume"}, "out": "value", "tf": 5, "at": 0}
+            }
+          ]
+        }
+      },
+      "plan": {
+        "on": "close", "tf": 5, "need": {"5": 20, "D": 1},
+        "instances": [["sma", {"length": 20, "source": "volume"}, 5]], "uses": [],
+        "ids": ["c1", "c2"], "rank_order": "desc"
+      }
+    },
+    {
+      "key": "delivery_spike",
+      "name": "Delivery spike",
+      "about": "Stocks where the share of shares taken for delivery jumps well above its usual level.",
+      "reason": "Needs the daily delivery file, not set up yet. Volume spike does the same on volume."
+    },
+    {
+      "key": "volume_spike",
+      "name": "Volume spike",
+      "about": "NIFTY 500 stocks whose volume for the day is at least twice its 20-day average and that closed above the previous close. Checked after the close.",
+      "line": "NIFTY 500 · after the close",
+      "columns": ["ltp", "change_pct", "value"],
+      "screen": {
+        "universe": {"kind": "index_list", "id": "NIFTY500"},
+        "run": {"on": "after_close"},
+        "where": {
+          "all": [
+            {
+              "id": "c1", "on": true,
+              "left": {"field": "volume", "tf": "D", "at": 0},
+              "op": "gte",
+              "right": {
+                "math": "mul",
+                "args": [
+                  {"ind": "sma", "p": {"length": 20, "source": "volume"}, "out": "value", "tf": "D", "at": 0},
+                  {"num": "2"}
+                ]
+              }
+            },
+            {
+              "id": "c2", "on": true,
+              "left": {"field": "close", "tf": "D", "at": 0},
+              "op": "gt", "right": {"field": "prev_close"}
+            }
+          ]
+        },
+        "rank": {"by": {"ind": "rvol", "p": {"length": 20}, "out": "value", "tf": "D", "at": 0}, "order": "desc"}
+      },
+      "plan": {
+        "on": "after_close", "tf": "D", "need": {"D": 20},
+        "instances": [
+          ["rvol", {"length": 20}, "D"],
+          ["sma", {"length": 20, "source": "volume"}, "D"]
+        ],
+        "uses": [], "ids": ["c1", "c2"], "rank_order": "desc"
+      }
+    }
+  ],
+  "lines": [
+    {"id": "P1", "universe": {"kind": "fno_stocks"}, "run": {"on": "close", "tf": 15}, "line": "F&O stocks · 15-min"},
+    {"id": "P2", "universe": {"kind": "fno_stocks"}, "run": {"on": "close", "tf": 1}, "line": "F&O stocks · 1-min"},
+    {"id": "P3", "universe": {"kind": "fno_stocks"}, "run": {"on": "close", "tf": 3}, "line": "F&O stocks · 3-min"},
+    {"id": "P4", "universe": {"kind": "fno_stocks"}, "run": {"on": "close", "tf": 30}, "line": "F&O stocks · 30-min"},
+    {"id": "P5", "universe": {"kind": "fno_stocks"}, "run": {"on": "close", "tf": 60}, "line": "F&O stocks · 60-min"},
+    {"id": "P6", "universe": {"kind": "fno_futures"}, "run": {"on": "after_close"}, "line": "F&O stock futures · after the close"},
+    {"id": "P7", "universe": {"kind": "index_futures"}, "run": {"on": "close", "tf": 5}, "line": "Index futures · 5-min"},
+    {"id": "P8", "universe": {"kind": "indices"}, "run": {"on": "after_close"}, "line": "Indices · after the close"},
+    {"id": "P9", "universe": {"kind": "options", "underlying": "NIFTY"}, "run": {"on": "close", "tf": 5}, "line": "NIFTY option strikes · 5-min"},
+    {"id": "P10", "universe": {"kind": "options", "underlying": "BANKNIFTY"}, "run": {"on": "close", "tf": 15}, "line": "BANKNIFTY option strikes · 15-min"},
+    {"id": "P11", "universe": {"kind": "watchlist", "list_id": 7}, "run": {"on": "close", "tf": 15}, "line": "A watchlist · 15-min"},
+    {"id": "P12", "universe": {"kind": "index_list", "id": "NIFTY50"}, "run": {"on": "close", "tf": 15}, "line": "NIFTY 50 · 15-min"},
+    {"id": "P13", "universe": {"kind": "index_list", "id": "NIFTYBANK"}, "run": {"on": "close", "tf": 15}, "line": "NIFTY BANK · 15-min"},
+    {"id": "P14", "universe": {"kind": "index_list", "id": "NIFTY100"}, "run": {"on": "after_close"}, "line": "NIFTY 100 · after the close"},
+    {"id": "P15", "universe": {"kind": "index_list", "id": "NIFTY200"}, "run": {"on": "after_close"}, "line": "NIFTY 200 · after the close"},
+    {"id": "P16", "universe": {"kind": "index_list", "id": "NIFTY500"}, "run": {"on": "after_close"}, "line": "NIFTY 500 · after the close"}
+  ]
+}
