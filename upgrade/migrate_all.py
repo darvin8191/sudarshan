@@ -94,6 +94,8 @@ MIGRATIONS = [
     ("migrate_alert_log.py", "Chart Alert Log (/trading alerts history)"),
     ("migrate_qty_freeze_oct_2026.py", "NSE Index Freeze Limits (5 October 2026)"),
     ("migrate_muhurat_nov_2026.py", "Muhurat Trading Hours (8 November 2026)"),
+    # SUDARSHAN M5.13: the risk layer's own file, db/sudarshan_risk.db
+    ("migrate_sudarshan_risk.py", "SUDARSHAN Risk Layer (kill switch and order guards)"),
 ]
 
 # Legacy migrations historically used non-zero exits for best-effort warnings,
@@ -101,7 +103,13 @@ MIGRATIONS = [
 # required schema migrations are listed explicitly: their failure must reach
 # this runner's summary and process exit code instead of being reported as a
 # successful warning.
-REQUIRED_MIGRATIONS = frozenset({"migrate_strategy_module.py", "migrate_strategy_universe_tab.py"})
+REQUIRED_MIGRATIONS = frozenset(
+    {
+        "migrate_strategy_module.py",
+        "migrate_strategy_universe_tab.py",
+        "migrate_sudarshan_risk.py",  # SUDARSHAN M5.13
+    }
+)
 
 
 def run_migration(script_name, description):
