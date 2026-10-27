@@ -111,6 +111,7 @@ class FakeUpstox:
         self.close_codes: list = []  # close code the server saw, per socket
         self.rest_answer = rest_ok
         self.rest_calls: list[tuple[str, str | None]] = []  # (path with query, Authorization)
+        self.rest_headers: list[dict[str, str]] = []  # each REST call's headers, names lowercased
 
     async def __aenter__(self) -> FakeUpstox:
         self._server = await serve(
@@ -144,6 +145,7 @@ class FakeUpstox:
     async def _rest(self, request) -> Response:
         auth = request.headers.get("Authorization")
         self.rest_calls.append((request.path, auth))
+        self.rest_headers.append({k.lower(): v for k, v in request.headers.raw_items()})
         if auth != f"Bearer {self.token}":
             status, body, extra = 401, token_error(), {}
         else:

@@ -88,6 +88,7 @@ REFUSED = [
     ("/v3/historical-candle/..%2F..%2Fv2%2Fportfolio%2Flong-term-holdings/days/1/2026-10-27", 400),
     ("/v3/historical-candle/NSE_EQ%7CINE002A01018%2F..%2F..%2Fv2/days/1/2026-10-27", 400),
     ("/v3/historical-candle/intraday/RELIANCE/minutes/1", 400),
+    ("/v3/historical-candle/intraday/NSE_EQ%7CINE002A01018/weeks/1", 403),  # minutes, hours, days
     # the query: every parameter required, nothing else, each once, keys checked
     ("/v3/market-quote/ltp", 400),
     ("/v3/market-quote/ltp?instrument_key=NSE_EQ%7CINE002A01018&extra=1", 400),
@@ -277,6 +278,8 @@ def test_only_allowed_calls_reach_upstox_with_the_token_and_every_answer_says_it
             assert fake.rest_calls == [
                 (sent or asked, f"Bearer {ff.TOKEN}") for asked, _, sent in PASSES
             ]
+            # Upstox's bytes are copied, never inflated on the feed's loop: ask for none packed.
+            assert {h.get("accept-encoding") for h in fake.rest_headers} == {"identity"}
             for asked, status in REFUSED:
                 got, answer = await raw(svc, "/upstox" + asked)
                 assert got == status, asked
@@ -322,6 +325,7 @@ def test_upstox_status_and_bytes_pass_through_never_parsed_and_8_mib_at_most(fee
         5: (200, b"x" * 1001, {}),
         6: (200, b"y" * 1001, {"Content-Length": None}),  # no length given: counted as it comes
         7: (200, b"z" * 999, {"Content-Length": None}),
+        8: (200, b"z" * 10, {"Content-Length": "1001"}),  # declared over the cap: never read
     }
 
     async def answer(path: str):
@@ -343,7 +347,7 @@ def test_upstox_status_and_bytes_pass_through_never_parsed_and_8_mib_at_most(fee
             assert got[3].json() == {"status": "success", "data": {"ltp": 1}}
             assert (got[4].status_code, len(got[4].content)) == (200, 1000)
             assert (got[7].status_code, got[7].content) == (200, b"z" * 999)
-            for n in (5, 6):
+            for n in (5, 6, 8):
                 assert got[n].status_code == 502 and got[n].json() == {"error": rest.TOO_LARGE}
                 assert got[n].headers["X-Sudarshan-Reason"] == "too-large"
             assert len(fake.rest_calls) == len(answers)  # 4xx and 5xx are never tried again here
@@ -613,7 +617,8 @@ def test_a_401_stops_every_api_until_the_token_file_changes(feed_env, caplog):
     new_token = "the-next-analytics-token-9876543210"
 
     async def revoked(path: str):  # Upstox stops taking the token while calls are in flight
-        return (401, ff.token_error(), {}) if path.endswith("0000") else await ff.rest_ok(path)
+        refused = path.endswith(("0000", "0001"))
+        return (401, ff.token_error(), {}) if refused else await ff.rest_ok(path)
 
     async def scenario():
         async with running(feed_env) as (svc, fake, http):
@@ -634,8 +639,8 @@ def test_a_401_stops_every_api_until_the_token_file_changes(feed_env, caplog):
                 assert (r.status_code, r.headers["Retry-After"]) == (503, "60")
             assert len(fake.rest_calls) == sent  # nothing more went to Upstox
             assert svc.health()["rest"]["token_refused_since_ms"] == round(EVENING * 1000)
-            held.open()
-            assert {r.status_code for r in await asyncio.gather(*holders[1:])} == {200}
+            held.open()  # the second 401 for the same token is not told again
+            assert [r.status_code for r in await asyncio.gather(*holders[1:])] == [401, 200, 200]
             # The owner puts the new token in the file: the next call goes, with it.
             fake.token = new_token
             bump(svc.cfg.token_file, new_token + "\n")
@@ -698,6 +703,26 @@ def test_each_api_keeps_its_own_failure_line_in_the_journal(feed_env, caplog):
     assert told == ["REST: option-chain", "REST: ltp"]
 
 
+def test_sudarshans_40_percent_also_outlives_a_restart(feed_env, monkeypatch):
+    """Mutation run after the review: the total's window is rebuilt at a start from every
+    service's sends, so a restart keeps SUDARSHAN's 20 a "second" (stretched to 3 s) also when
+    the ceilings sum above it."""
+    monkeypatch.setattr(rest, "CEILINGS", rest.CEILINGS | {"sudarshan-portfolio": (15, 150, 600)})
+    monkeypatch.setattr(rest, "WINDOWS_S", (3.0, 60.0, 1800.0))
+
+    async def scenario():
+        now = [EVENING]
+        async with running(feed_env, now) as (svc, fake, http):
+            clients = ("sudarshan-screener", "sudarshan-portfolio")
+            first = await asyncio.gather(*(ask(http, LTP, c) for c in clients for _ in range(10)))
+        async with running(feed_env, now) as (svc, fake, http):  # restarted at once
+            return first, await ask(http, LTP, "sudarshan-portfolio")  # 10 of its own 15 used
+
+    first, after = asyncio.run(scenario())
+    assert {r.status_code for r in first} == {200} and all(waited(r) < 1000 for r in first)
+    assert after.status_code == 200 and waited(after) > 1000  # SUDARSHAN's 20 were used
+
+
 PROTOCOL_WORDS = ("X-Sudarshan", "header", "query", "path", "parameter", "instrument", "expiry",
                   "interval", "GET", "HTTP", "V2", "V3", "/v", "400", "403")  # fmt: skip
 
@@ -727,6 +752,101 @@ def test_a_callers_mistake_reads_as_a_fault_in_sudarshan_never_in_protocol_terms
     for detail in ("ltp takes exactly: instrument_key", "X-Sudarshan-Priority is none of",
                    "X-Sudarshan-Client is none of", "a method other than GET"):  # fmt: skip
         assert detail in caplog.text
+
+
+def test_a_429_stops_its_api_whatever_its_body_and_a_good_answer_never_does(feed_env):
+    """Mutation survivors #22 and #24: a 429 without Upstox's code in its body (a plain page from
+    a proxy) still stops the API; an answer that succeeded is never read as a slow-down, even
+    when its data happens to hold the code."""
+    answers = {
+        LTP: (429, b"<html>Too Many Requests</html>", {"Content-Type": "text/html"}),
+        OHLC: (200, b'{"status":"success","data":{"note":"UDAPI10005"}}', {}),
+    }
+
+    async def answer(path: str):
+        return answers.pop(path, None) or await ff.rest_ok(path)
+
+    async def scenario():
+        async with running(feed_env) as (svc, fake, http):
+            fake.rest_answer = answer
+            codes = [(await ask(http, LTP)).status_code, (await ask(http, OHLC)).status_code]
+            return codes, svc.health()["rest"]["apis"]
+
+    codes, apis = asyncio.run(scenario())
+    assert codes == [429, 200]
+    assert apis["ltp"]["frozen_until_ms"] and apis["ltp"]["429s"] == 1
+    assert apis["ohlc"]["frozen_until_ms"] is None and apis["ohlc"]["429s"] == 0
+
+
+def test_a_401_answers_a_call_waiting_for_its_own_window_at_once(feed_env, monkeypatch):
+    """Mutation survivor #26: a 401 answers every waiting call at once, also one that waits for
+    its own window rather than for a place (the "second" stretched to 5 s here)."""
+    monkeypatch.setattr(rest, "WINDOWS_S", (5.0, 60.0, 1800.0))
+
+    async def scenario():
+        async with running(feed_env) as (svc, fake, http):
+            for _ in range(2):  # the alerts' whole "second" on ltp
+                assert (await ask(http, LTP, "sudarshan-alerts")).status_code == 200
+            waiting = asyncio.create_task(ask(http, LTP, "sudarshan-alerts"))
+            await ff.wait_until(lambda: svc.rest.health()["waiting"] == 1)
+            fake.token = "another-token-0123456789abcdef"  # Upstox stops taking ours
+            assert (await ask(http, OHLC)).status_code == 401
+            return await waiting
+
+    r = asyncio.run(scenario())
+    assert (r.status_code, r.headers["X-Sudarshan-Reason"]) == (503, "token")
+    assert waited(r) < 2000  # not at the end of its window, 5 s on
+
+
+def test_retry_after_is_never_under_one_second(feed_env):
+    """Mutation survivor #41: a Retry-After of 0 would send a caller straight back."""
+    svc = FeedService(Settings.from_env(feed_env()))
+
+    def retry_after(seconds: float) -> str:
+        refused = Refused(503, "busy", rest.BUSY, seconds)
+        return svc.rest._refusal(refused, None, "sudarshan-screener", 0, None)[2]["Retry-After"]
+
+    assert [retry_after(s) for s in (0.0, 0.0004, -3.0, 1.0, 59.2)] == ["1", "1", "1", "1", "60"]
+
+
+def test_the_whole_call_has_its_own_limit_beyond_each_phases(feed_env, monkeypatch):
+    """Mutation survivor #53: each phase of a call to Upstox has its own limit (25 s), so an
+    answer that keeps coming slowly would never end on those alone; the whole call has 30 s
+    (0.5 s here, with no phase limit short enough to end it first)."""
+    monkeypatch.setattr(rest, "UPSTREAM_TOTAL_S", 0.5)
+    monkeypatch.setattr(rest, "UPSTREAM_TIMEOUT", httpx.Timeout(60.0))
+
+    async def scenario():
+        async with running(feed_env) as (svc, fake, http):
+            held = Held(fake)  # Upstox never answers
+            start = time.monotonic()
+            try:
+                r = await asyncio.wait_for(ask(http, LTP), 10)
+            finally:
+                held.open()
+            return r, time.monotonic() - start, svc.rest.health()["in_flight"]
+
+    r, took, in_flight = asyncio.run(scenario())
+    assert (r.status_code, r.headers["X-Sudarshan-Reason"]) == (504, "no-answer")
+    assert took < 5 and in_flight == 0
+
+
+def test_sudarshans_40_percent_holds_even_if_the_ceilings_sum_above_it(feed_env, monkeypatch):
+    """Mutation survivors #7 and #12: the ceilings as shipped sum to the 40% total at most, so
+    the total never binds by itself. It is kept as the guard should a ceiling be raised: here
+    two services may each send 15 a "second" (stretched to 3 s) on one API, and SUDARSHAN's 20
+    holds."""
+    monkeypatch.setattr(rest, "CEILINGS", rest.CEILINGS | {"sudarshan-portfolio": (15, 150, 600)})
+    monkeypatch.setattr(rest, "WINDOWS_S", (3.0, 60.0, 1800.0))
+
+    async def scenario():
+        async with running(feed_env) as (svc, fake, http):
+            clients = ("sudarshan-screener", "sudarshan-portfolio")
+            return await asyncio.gather(*(ask(http, LTP, c) for c in clients for _ in range(15)))
+
+    got = asyncio.run(scenario())
+    assert {r.status_code for r in got} == {200}
+    assert sorted(waited(r) > 1500 for r in got) == [False] * 20 + [True] * 10
 
 
 def test_the_token_and_queries_never_reach_the_logs_or_health(feed_env, caplog):
@@ -883,6 +1003,28 @@ def test_a_crash_counts_its_unsaved_second_as_used_and_keeps_a_stop(feed_env, mo
     assert (stopped.status_code, stopped.headers["X-Sudarshan-Reason"]) == (503, "rate-limited")
     assert sent == []
     assert "the last run ended without saving its stop" in caplog.text
+
+
+def test_a_slow_disk_never_queues_saves(feed_env, monkeypatch):
+    """Mutation run after the review: while one save is still being written, the next waits a
+    second instead of queueing a copy of the state behind it."""
+    monkeypatch.setattr(rest, "SAVE_AFTER_S", 0.01)
+    started, write = [], rest.atomic_write_json
+
+    def slow(path, obj):
+        started.append(time.monotonic())
+        time.sleep(0.3)
+        write(path, obj)
+
+    monkeypatch.setattr(rest, "atomic_write_json", slow)
+
+    async def scenario():
+        async with running(feed_env) as (svc, fake, http):
+            for _ in range(20):  # a change every few milliseconds for about half a second
+                assert (await ask(http, LTP)).status_code == 200
+
+    asyncio.run(scenario())
+    assert len(started) <= 8, len(started)  # a copy queued per change would be 20 or more
 
 
 def test_a_429_that_comes_back_while_the_feed_stops_is_still_kept(feed_env, monkeypatch):
@@ -1049,9 +1191,20 @@ def test_an_answer_keeps_its_place_until_its_caller_has_it(feed_env, monkeypatch
     assert buffered <= 4 * len(body)
 
 
-def test_a_caller_that_hangs_up_while_waiting_never_reaches_upstox(feed_env):
+def test_a_caller_that_hangs_up_while_waiting_never_reaches_upstox(feed_env, monkeypatch):
     """Review L2: a caller that gives up (its own timeout) while waiting for a place leaves the
-    queue at once; it used to spend a call and a place for nobody."""
+    queue at once; it used to spend a call and a place for nobody. Its socket is closed by the
+    HTTP API itself, never left to the garbage collector (which would close it too, late and
+    with a warning)."""
+    closed, serve = [], http_api._serve
+
+    async def tracking(service, reader, writer):
+        try:
+            await serve(service, reader, writer)
+        finally:
+            closed.append(writer.transport.is_closing())
+
+    monkeypatch.setattr(http_api, "_serve", tracking)
 
     def open_fds() -> int:
         return len(os.listdir("/proc/self/fd"))
@@ -1080,6 +1233,35 @@ def test_a_caller_that_hangs_up_while_waiting_never_reaches_upstox(feed_env):
 
     codes, arrived = asyncio.run(scenario())
     assert codes == [200] * 4 and not any("ohlc" in path for path in arrived)
+    assert len(closed) == 5 and all(closed), closed  # 4 answered, 1 hung up: each closed
+
+
+def test_a_hand_over_that_runs_out_of_time_closes_its_socket_on_any_route(monkeypatch):
+    """Mutation run after the review: the hand-over itself aborts a socket whose answer was not
+    taken in time, on every route of the HTTP API, not only behind the governor."""
+    monkeypatch.setattr(http_api, "WRITE_TIMEOUT_S", 0.3)
+
+    async def scenario():
+        states = []
+
+        async def handler(reader, writer):
+            await http_api._answer(writer, 200, b"x" * (16 << 20))  # more than socket buffers
+            states.append(writer.transport.is_closing())
+
+        server = await asyncio.start_server(handler, "127.0.0.1", 0)
+        stuck = socket.socket()
+        stuck.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+        stuck.connect(("127.0.0.1", server.sockets[0].getsockname()[1]))
+        try:
+            await ff.wait_until(lambda: states, 5)
+        finally:
+            stuck.close()
+            server.close()
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(server.wait_closed(), 2)
+        return states
+
+    assert asyncio.run(scenario()) == [True]
 
 
 # ---- G8: a warm start in flight adds no tick lag ------------------------------------------------
