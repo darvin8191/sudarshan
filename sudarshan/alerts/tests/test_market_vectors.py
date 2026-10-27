@@ -129,10 +129,13 @@ class World:
         self.store.save_states("owner", self.book.changed(), now)
         self.flushed_at = now
 
-    def owner(self, now: int, fields: dict, **change) -> None:
+    def owner(self, now: int, fields: dict | None = None, move: str = "", **change) -> None:
         """The owner's edit, pause or resume, written to market.db as the bridge writes it."""
-        self.row = self.store.update("owner", self.alert.id, self.row["version"], fields, now,
-                                     **change)  # fmt: skip
+        version = self.row["version"]
+        if move:
+            self.row = getattr(self.store, move)("owner", self.alert.id, version, now)
+        else:
+            self.row = self.store.update("owner", self.alert.id, version, fields, now, **change)
         self.alert = spec.Alert.of(self.row)
 
     def market(self, on: str, now: int) -> clock.Market:
@@ -199,10 +202,10 @@ class World:
         if raw.get("clock"):
             self.take(self.book.on_clock(now, self.market(on, now)), now)
         elif raw.get("suspend"):
-            self.owner(now, self.row, status="paused")
+            self.owner(now, move="pause")
             self.book.put(self.alert)
         elif raw.get("resume"):
-            self.owner(now, self.row, status="active")
+            self.owner(now, move="resume")
             self.book.put(self.alert, engine.resume(self.book.state(self.alert.id)))
         elif "edit" in raw:
             self.fields |= raw["edit"]
