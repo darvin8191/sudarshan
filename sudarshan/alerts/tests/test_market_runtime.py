@@ -295,7 +295,8 @@ def test_a_fire_for_an_alert_deleted_meanwhile_is_never_told(alerts, quick, capl
 
 def test_a_cas_stocks_quiet_before_its_auction_is_no_pause(alerts, quick):
     """Cross-design X6g: SBIN closes by auction; nothing trades 15:15-15:31 while the rest of the
-    socket ticks; its print at 15:31:10 is told as the auction's, not as seen after a pause."""
+    socket ticks; its print at 15:31:10 is told as the auction's, not as seen after a pause. Its
+    key is claimed in full mode, for the volume that tells the print (X6i)."""
 
     async def scenario():
         clock = Clock(ist(2026, 10, 21, 15, 14))
@@ -303,15 +304,17 @@ def test_a_cas_stocks_quiet_before_its_auction_is_no_pause(alerts, quick):
             settings = alerts(notify)
             create(settings, clock())
             rt, task = await started(settings, feed, clock)
+            assert feed.keys == {SBIN: "ltpc"}
             rt._fno = frozenset({"SBIN"})  # the master's stock futures, as the morning read gives
             rt._rebuild()
-            await trade(feed, clock, 99.95, step=0)
+            await wait_until(lambda: feed.keys == {SBIN: "full"})
+            await trade(feed, clock, 99.95, step=0, vtt=1000)
             await wait_until(lambda: rt.stats["judged"] == 1)
             while clock() < ist(2026, 10, 21, 15, 31, 10):
                 clock.advance(10)
                 await wait_until(lambda: rt._health.heard_at == ms(clock()))
             assert rt._open is None
-            await trade(feed, clock, 100.2, step=0, ltq=2)
+            await trade(feed, clock, 100.2, step=0, ltq=2, vtt=3000)
             await wait_until(lambda: len(notify.bodies) == 1)
             assert notify.messages[0].split("\n")[1] == (
                 "Alert: SBIN crossed above ₹100.00 in the closing auction: closing auction price "

@@ -583,6 +583,11 @@ class MarketRuntime:
         pauses = tuple(self._pauses)
         if self._open is not None:
             pauses += (Paused(self._open[1], None, self._open[2]),)
+        auction = (
+            cas_keys(self.book.alerts(), self._today, self._fno) if self._today else frozenset()
+        )
+        if auction != self.market.auction:  # a CAS key is claimed in full mode: its volume (X6i)
+            self._claims_wake.set()
         self.market = Market(
             sessions.day_key(self._today) if self._today else 0,
             self._sessions,
@@ -591,8 +596,13 @@ class MarketRuntime:
             feed,
             pauses,
             self.config.replay,
-            cas_keys(self.book.alerts(), self._today, self._fno) if self._today else frozenset(),
+            auction,
         )
+
+    def closes_by_auction(self, alert: spec.Alert) -> bool:
+        """Whether ``alert``'s stock closes by auction today (a CAS key), as the Market will say
+        once it is in the Book: the desk claims such a key in full mode before it saves."""
+        return bool(self._today) and alert.key in cas_keys([alert], self._today, self._fno)
 
     def _read_master(self, now: int) -> None:
         """The CAS keys' source, read at start and each day at 09:00 (X6a)."""
@@ -648,7 +658,7 @@ class MarketRuntime:
             self._claims_wake.clear()
             try:
                 async with self._claims_lock:
-                    keys = self.book.modes()
+                    keys = self.book.modes(full=self.market.auction)  # a CAS key's volume (X6i)
                     self.link.follow(keys)
                     self._last = {key: frame for key, frame in self._last.items() if key in keys}
                     answer = await self.link.put_claims(keys)

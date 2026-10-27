@@ -461,6 +461,37 @@ def test_a_card_says_what_its_alert_waits_for(alerts, quick):
     run(scenario)
 
 
+def test_a_stock_that_closes_by_auction_is_claimed_in_full_and_says_when_its_price_comes(
+    alerts, quick
+):
+    """Cross-design X6i, X6j, X6m: its print is known by its volume, which comes in full mode
+    only; until the print its line says when the price comes, and its card carries the times."""
+
+    async def scenario():
+        clock = Clock(ist(2026, 10, 21, 15, 20))
+        async with FakeFeed(clock) as feed, FakeOpenAlgo() as notify:
+            settings = alerts(notify)
+            office, rt, task = await opened(settings, feed, clock)
+            rt._fno = frozenset({"SBIN"})  # the master's stock futures, as the morning read gives
+            card = await office.call("create", {"alert": draft()})
+            assert feed.claims[1]["keys"] == {SBIN: "full"}  # the desk's claim, before the save
+            waiting = {"code": "closing_auction", "real_time": False,
+                       "line": "Closing auction · price at about 15:30"}  # fmt: skip
+            assert card["check"] == waiting
+            assert card["auction"] == {"from": ms(ist(2026, 10, 21, 15, 15)),
+                                       "close": ms(ist(2026, 10, 21, 15, 30)),
+                                       "until": ms(ist(2026, 10, 21, 15, 35))}  # fmt: skip
+            assert (await office.call("state", {}))["engine"] == waiting
+            quotes = await office.call("create", {"alert": draft(params={
+                "op": "crosses_above", "level": "100", "source": "bid"})})  # fmt: skip
+            assert quotes["check"]["line"] == (
+                "Closing auction · bid and ask are not checked after 15:15"
+            )
+            await closed(rt, task)
+
+    run(scenario)
+
+
 def test_while_starting_or_stopped_the_desk_answers_in_words(alerts, quick, tmp_path):
     async def scenario():
         clock = Clock(ist(2026, 10, 21, 10, 0))

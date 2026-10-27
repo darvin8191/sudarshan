@@ -283,9 +283,9 @@ class OwnerDesk:
         opens = auction = None
         if code in (clock.CLOSED_TODAY, clock.OUTSIDE_HOURS):
             opens = self._opens(cls, now)
-        if code == clock.CLOSING_AUCTION:
+        if code == clock.CLOSING_AUCTION:  # "price at about 15:30" (X6j)
             session = market.sessions[cls]
-            auction = (session.end, session.auction_until)
+            auction = (session.end, session.auction_close)
         text = words.check_words(code, now=now, opens_at=opens, since=rt.down_since,
                                  feed=market.feed, auction=auction, quotes=quotes)  # fmt: skip
         return _line(code, text, code == clock.OK)
@@ -332,8 +332,9 @@ class OwnerDesk:
         today = rt.market.today
         session = rt.market.sessions.get(alert.segment + AUCTION)
         auction = None
-        if alert.key in rt.market.auction and session is not None:
-            auction = {"from": session.end, "until": session.auction_until}
+        if alert.key in rt.market.auction and session is not None:  # X6m
+            auction = {"from": session.end, "close": session.auction_close,
+                       "until": session.auction_until}  # fmt: skip
         return {
             **{name: row[name] for name in (
                 "id", "version", "status", "kind", "symbol", "exchange", "instrument_key",
@@ -371,10 +372,12 @@ class OwnerDesk:
                 raise ApiError(409, "limit", WORDS["instruments"].format(n=n))
 
     async def _claim(self, alert: spec.Alert) -> None:
-        """The alert's key at the feed, in the mode it needs, before the alert is saved."""
+        """The alert's key at the feed, in the mode it needs, before the alert is saved: full for
+        a stock that closes by auction, whose print is known by its volume (X6i)."""
         rt = self.rt
-        modes = rt.book.modes()
-        held, need = modes.get(alert.key), alert.cond.feed
+        modes = rt.book.modes(full=rt.market.auction)
+        held = modes.get(alert.key)
+        need = "full" if rt.closes_by_auction(alert) else alert.cond.feed
         if held in ("full", need):
             return
         modes[alert.key] = "full" if "full" in (held, need) else need
