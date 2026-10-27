@@ -30,10 +30,12 @@ open. Only a wait that runs out is refused, as before.
 
 Exit all sizes its orders from the position book, and Upstox's book can say the
 old quantity for a second or more after an exit: an Exit all that read it then
-would close that position a second time, which reverses it. So an exit the app
-may have placed in the last ``EXIT_SHOWS_WITHIN_S`` (one it waited for, or one
-that ended just before it) has to show in the book first: Exit all reads the book
-until it does, still holding the book, and is refused if it has not by then.
+would close that position a second time, which reverses it. So an exit placed in
+the last ``EXIT_SHOWS_WITHIN_S`` has to show in the book first: one of the app's
+own (one it waited for, or one that ended just before it), or one an earlier Exit
+all placed (a TradingView alert sent twice, a second surface a moment later).
+Exit all reads the book until it shows them, still holding the book, and is
+refused if it has not by then.
 
 The claims are per process, which is the whole app (gunicorn runs a single
 worker). They are kept under a real lock from utils.real_threading that is held
@@ -307,9 +309,11 @@ def close_all_once(book: str, close_all: Callable, *args, still_open: Callable |
     Returns:
         ``close_all``'s own answer, once the app's exits already being placed in that book have
         ended (waited for up to ``EXIT_ALL_WAITS_S``, no new one starting meanwhile) and the
-        book shows the ones that may have placed an order lately (``EXIT_SHOWS_WITHIN_S``); or
-        ``({"status": "error", "message": <why>}, 409)`` without calling it, at once while
-        another Exit all runs in that book, or when either wait runs out.
+        book shows the exits that may have placed an order lately, the app's and an earlier Exit
+        all's (``EXIT_SHOWS_WITHIN_S``); or ``({"status": "error", "message": <why>}, 409)``
+        without calling it, at once while another Exit all runs in that book, or when either
+        wait runs out. ``close_all`` notes each exit it places (``exit_placed``) while the
+        book's claim is still held.
     """
     with EXITS.every(book, wait_s=EXIT_ALL_WAITS_S) as busy:
         if busy:
@@ -321,6 +325,17 @@ def close_all_once(book: str, close_all: Callable, *args, still_open: Callable |
             )
             return {"status": "error", "message": EXIT_NOT_SHOWN_YET}, 409
         return close_all(*args)
+
+
+def exit_placed(book: str, exchange: object, symbol: object, product: object) -> None:
+    """Note that an Exit all placed (or may have placed) an exit for this position just now.
+
+    Called by the broker's close-all for each exit that was not refused, as it goes, so the
+    next Exit all reads the book until it shows them: a TradingView alert sent twice a second
+    apart would otherwise size from a book that does not show the first one's exits, and close
+    every position again.
+    """
+    EXITS.placed(book, (_word(exchange), _word(symbol), _word(product)))
 
 
 def _may_have_placed(answer: object) -> bool:

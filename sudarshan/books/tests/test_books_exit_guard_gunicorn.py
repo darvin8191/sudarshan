@@ -4,7 +4,9 @@ A small Flask app carries the real claims from sudarshan/books/exit_guard.py: th
 decorated with ``one_exit_at_a_time``, and two Exit all surfaces (the app's and the API's) that pass
 through ``close_all_once`` as services/close_position_service.py does. Its broker call is a sleep,
 which under eventlet is a cooperative wait like a slow Upstox call. An Exit all sent with
-``shows_after`` reads a book that shows an exit placed just before it only after that many seconds.
+``shows_after`` reads a book that shows an exit placed just before it only after that many seconds;
+one sent with ``placed`` says it placed an exit, as Upstox's does, and with ``refused`` that its
+exits were refused.
 
 Adopted from the re-check's probe of 76462c9. The server runs in a process group of its own, and
 the teardown stops the whole group (see sudarshan/autologin/tests/test_autologin_gunicorn.py: an
@@ -48,6 +50,10 @@ APP = textwrap.dedent(
     def slow_close_all(hold):
         closed.append(len(exit_guard.EXITS._positions))
         time.sleep(hold)  # under eventlet a cooperative wait, as a slow Upstox call is
+        if request.args.get("refused"):
+            return {"status": "error", "message": "Of 1 exit, 1 was refused (margin)."}, 400
+        if request.args.get("placed"):  # as Upstox's close-all notes each exit it places
+            exit_guard.exit_placed("live", "NFO", "NIFTY27OCT2625900CE", "MIS")
         return {"status": "success", "message": "All Open Positions SquaredOff"}, 200
 
     def book_showing_exits_after(seconds):
@@ -345,6 +351,36 @@ def test_an_exit_all_reading_the_book_for_an_exit_placed_just_now_keeps_the_work
     assert took >= 1.5, f"it went after {took:.2f}s, before the book showed the exit"
     assert json.loads(server.get("/reads")[1])["reads"] >= 2
     assert server.claims() | {"pid": 0} == {"held": 0, "pid": 0, "closed": [0]}
+
+
+def test_a_tradingview_exit_all_sent_twice_a_second_apart_waits_for_the_book(server):
+    """The second reads the book until it shows the first one's exits, keeping the book taken
+    and the worker serving; sized from a book that did not, it would reverse every position."""
+    assert server.post("/api/v1/closeposition?placed=1", {})[0] == 200
+    time.sleep(1.0)
+    second, closed = _in_background(
+        server.post, "/api/v1/closeposition?placed=1&shows_after=1.5", {}
+    )
+    time.sleep(0.5)
+    status, body, took = server.post("/close_position", OTHER)
+    assert (status, body["message"], took < 1.0) == (409, EXIT_ALL_BEING_PLACED, True), took
+    started = time.monotonic()
+    assert server.get("/ping")[0] == 200 and time.monotonic() - started < 1.0
+    second.join(15)
+    status, body, took = closed["result"]
+    assert (status, body["status"]) == (200, "success")
+    assert took >= 1.5, f"it went after {took:.2f}s, before the book showed the first one's exits"
+    assert json.loads(server.get("/reads")[1])["reads"] >= 2
+    assert server.claims() | {"pid": 0} == {"held": 0, "pid": 0, "closed": [0, 0]}
+
+
+def test_an_exit_all_after_one_whose_exits_were_refused_goes_at_once(server):
+    assert server.post("/api/v1/closeposition?refused=1", {})[0] == 400
+    time.sleep(1.0)
+    status, body, took = server.post("/close_all_positions?shows_after=5", {})
+    assert (status, body["status"]) == (200, "success")
+    assert took < 1.0, f"it waited {took:.2f}s on a book it had no reason to read"
+    assert json.loads(server.get("/reads")[1])["reads"] == 0
 
 
 def test_two_exit_alls_from_two_surfaces_send_one(server):
