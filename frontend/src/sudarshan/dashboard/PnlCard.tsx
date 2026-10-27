@@ -120,6 +120,7 @@ export function PnlCard({
     lastTickAt: move.lastTickAt,
     lastUpdateAt: latest(move.lastTickAt, syncedAt),
     ticksDue: held.length > 0,
+    held: held.length > 0,
     connected: isAuthenticated && !isPaused,
   })
   // Figures that ticks should be moving and are not: greyed, keeping sign and

@@ -194,7 +194,13 @@ export type FeedLine =
   | { kind: 'polling'; at: number; stale: boolean }
   /** The socket is not up: on first load, after the phone wakes, or while the feed is down. */
   | { kind: 'connecting'; at: number | null; stale: boolean; again: boolean }
+  /** Prices are due and none has come yet: the first moments of a visit. */
   | { kind: 'waiting' }
+  /**
+   * Nothing on the screen is held, so no price is coming and nothing can be
+   * late: no line at all. "Waiting for prices" there would never end.
+   */
+  | { kind: 'idle' }
   | { kind: 'closed' }
 
 /**
@@ -211,6 +217,7 @@ export function feedLine({
   lastTickAt,
   lastUpdateAt,
   ticksDue = true,
+  held = true,
   connected = true,
   polling = false,
   staleMs = STALE_MS,
@@ -221,6 +228,13 @@ export function feedLine({
   lastUpdateAt: number | null
   /** False when nothing is held, so nothing should tick and nothing can go stale. */
   ticksDue?: boolean
+  /**
+   * False when nothing on the screen is held (no open position, no holding):
+   * with no figure known the line is `idle`, never a wait for prices that are
+   * not coming. A screen that holds things but lets them go quiet (the
+   * watchlist, through `ticksDue`) still waits for its first price.
+   */
+  held?: boolean
   /** Whether the market-data socket is up and signed in. */
   connected?: boolean
   /**
@@ -251,7 +265,7 @@ export function feedLine({
   }
   if (lastTickAt !== null && now - lastTickAt <= staleMs) return { kind: 'live' }
   if (lastUpdateAt !== null) return { kind: 'delayed', at: lastUpdateAt, stale: old(lastUpdateAt) }
-  return { kind: 'waiting' }
+  return held ? { kind: 'waiting' } : { kind: 'idle' }
 }
 
 /**

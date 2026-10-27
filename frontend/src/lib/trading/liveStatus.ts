@@ -73,6 +73,7 @@ export function needsMarker(line: FeedLine): boolean {
   switch (line.kind) {
     case 'live':
     case 'waiting':
+    case 'idle':
       return false
     case 'delayed':
       // Fresh from history and waiting for the first tick is the normal half
@@ -116,6 +117,8 @@ export function liveDetail(status: LiveStatus, now = Date.now()): string {
       return 'Prices are arriving in real time.'
     case 'waiting':
       return 'Waiting for the first price.'
+    case 'idle':
+      return 'Nothing here is priced.'
     case 'polling':
       return line.stale
         ? `No price since ${clockSeconds.format(new Date(line.at))}. The real-time feed is reconnecting and the quotes standing in for it have stopped too.`

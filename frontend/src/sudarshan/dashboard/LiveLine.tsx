@@ -9,7 +9,10 @@ const TEXT = 'inline-flex items-center gap-1.5 text-xs font-semibold whitespace-
  * where it has one. Shared with the chart's own marker, which draws them
  * beside its own glyph.
  */
-export function feedWords(line: Exclude<FeedLine, { kind: 'live' }>, now: number): string {
+export function feedWords(
+  line: Exclude<FeedLine, { kind: 'live' } | { kind: 'idle' }>,
+  now: number
+): string {
   switch (line.kind) {
     case 'closed':
       return 'Market closed'
@@ -32,7 +35,8 @@ export function feedWords(line: Exclude<FeedLine, { kind: 'live' }>, now: number
  * ("Stale" when ticks are due and have stopped), or that the market is closed.
  * Always a word, with a mark beside it, never a coloured dot alone. Not a live
  * region: the age changes every second, and announcing that would drown
- * everything else.
+ * everything else. Nothing at all where nothing is held (`idle`): no price is
+ * coming there, so there is nothing to wait for.
  */
 export function LiveLine({
   line,
@@ -43,6 +47,7 @@ export function LiveLine({
   now: number
   className?: string
 }) {
+  if (line.kind === 'idle') return null
   if (line.kind === 'live') {
     return (
       <span data-feed="live" className={cn(TEXT, 'text-[color:var(--live-ink)]', className)}>

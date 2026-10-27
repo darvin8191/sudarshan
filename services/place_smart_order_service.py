@@ -160,6 +160,9 @@ def place_smart_order_with_auth(
         success, response_data, status_code = sandbox_place_smart_order(
             order_data, api_key, original_data
         )
+        # SUDARSHAN M6.9: what it sent goes to the alert, not into the answer.
+        sent = response_data.pop("sent", None) if isinstance(response_data, dict) else None
+        reported = {**response_data, "sent": sent} if sent else response_data
 
         analyzer_request = order_request_data.copy()
         analyzer_request["api_type"] = "placesmartorder"
@@ -191,7 +194,7 @@ def place_smart_order_with_auth(
                 pricetype=order_data.get("pricetype", ""),
                 product=order_data.get("product", ""),
                 orderid=response_data.get("orderid", ""),
-                request_data=analyzer_request, response_data=response_data,
+                request_data=analyzer_request, response_data=reported,  # SUDARSHAN M6.9
                 api_key=api_key,
             ))
 
@@ -210,6 +213,8 @@ def place_smart_order_with_auth(
 
     try:
         res, response_data, order_id = broker_module.place_smartorder_api(order_data, auth_token)
+        # SUDARSHAN M6.9: what it sent goes to the alert, not into the answer.
+        sent = response_data.pop("sent", None) if isinstance(response_data, dict) else None
 
         # Handle case where position size matches current position
         if (
@@ -234,6 +239,7 @@ def place_smart_order_with_auth(
         # Log successful order immediately after placement
         if res and res.status == 200:
             order_response_data = {"status": "success", "orderid": order_id}
+            reported = {**order_response_data, "sent": sent} if sent else order_response_data
             bus.publish(OrderPlacedEvent(
                 mode="live", api_type="placesmartorder",
                 strategy=order_data.get("strategy", ""),
@@ -244,7 +250,7 @@ def place_smart_order_with_auth(
                 pricetype=order_data.get("pricetype", ""),
                 product=order_data.get("product", ""),
                 orderid=str(order_id),
-                request_data=order_request_data, response_data=order_response_data,
+                request_data=order_request_data, response_data=reported,  # SUDARSHAN M6.9
                 api_key=api_key,
             ))
 

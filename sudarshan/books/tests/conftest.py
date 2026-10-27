@@ -18,6 +18,7 @@ import os
 import tempfile
 
 import dotenv
+import pytest
 
 _TMP = tempfile.mkdtemp(prefix="sudarshan-books-tests-")
 _TEMP_ROOT = tempfile.gettempdir()
@@ -37,3 +38,15 @@ _isolate("LOG_DIR", f"{_TMP}/log", _TEMP_ROOT)
 
 dotenv.load_dotenv = lambda *args, **kwargs: False
 dotenv.main.load_dotenv = dotenv.load_dotenv
+
+
+@pytest.fixture(autouse=True)
+def _no_exit_claimed_or_placed_lately(monkeypatch):
+    """Each test starts with no exit claimed and none placed lately (sudarshan/books/exit_guard.py).
+
+    An exit one test placed would otherwise count as placed just now in the next, whose Exit all
+    would then read the position book before closing.
+    """
+    from sudarshan.books import exit_guard
+
+    monkeypatch.setattr(exit_guard, "EXITS", exit_guard.ExitsInFlight())

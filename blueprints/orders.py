@@ -702,6 +702,8 @@ def close_position():
                     log_request = order_data.copy()
                     log_request["api_type"] = "closeposition"
 
+                    # SUDARSHAN M6.9: the side and quantity it sent, for the alert only.
+                    sent = response.get("sent") if isinstance(response, dict) else None
                     bus.publish(PositionClosedEvent(
                         mode="live",
                         api_type="closeposition",
@@ -711,7 +713,7 @@ def close_position():
                         orderid=str(orderid),
                         message="Position close order placed successfully.",
                         request_data=log_request,
-                        response_data=response_data,
+                        response_data={**response_data, "sent": sent} if sent else response_data,
                         api_key=api_key,
                     ))
             except Exception:

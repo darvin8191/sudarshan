@@ -470,6 +470,39 @@ describe('feedLine', () => {
     expect(sameFeedState({ kind: 'live' }, { kind: 'live' })).toBe(true)
   })
 
+  it('never waits for prices on a screen with nothing held: no line, the market closed, or an age', () => {
+    const nothingHeld = { lastTickAt: null, ticksDue: false, held: false }
+    expect(feedLine({ ...nothingHeld, now: READ, marketOpen: true, lastUpdateAt: null })).toEqual({
+      kind: 'idle',
+    })
+    // The socket being down changes nothing: no price is coming for this screen anyway.
+    expect(
+      feedLine({
+        ...nothingHeld,
+        now: READ,
+        marketOpen: true,
+        lastUpdateAt: null,
+        connected: false,
+      })
+    ).toEqual({ kind: 'idle' })
+    expect(feedLine({ ...nothingHeld, now: READ, marketOpen: false, lastUpdateAt: null })).toEqual({
+      kind: 'closed',
+    })
+    expect(
+      feedLine({ ...nothingHeld, now: READ + 3000, marketOpen: true, lastUpdateAt: READ })
+    ).toEqual({ kind: 'delayed', at: READ, stale: false })
+    // A screen that holds things and lets them go quiet (the watchlist) still waits for its first.
+    expect(
+      feedLine({
+        now: READ,
+        marketOpen: true,
+        lastTickAt: null,
+        lastUpdateAt: null,
+        ticksDue: false,
+      })
+    ).toEqual({ kind: 'waiting' })
+  })
+
   it('says the market is closed when it is known to be, and waits when there is nothing yet', () => {
     expect(
       feedLine({ now: READ, marketOpen: false, lastTickAt: READ, lastUpdateAt: READ })

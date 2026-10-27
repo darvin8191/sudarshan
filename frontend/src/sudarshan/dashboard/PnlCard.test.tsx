@@ -199,6 +199,21 @@ describe('PnlCard, live', () => {
     expect(line(container)).toHaveTextContent(/^Updated \ds ago$/)
   })
 
+  it('waits for no prices when flat and the read time is not known: no line at all', () => {
+    const { container } = render(
+      <PnlCard
+        funds={funds({ m2mrealized: '1800.00', m2munrealized: '0.00' })}
+        loading={false}
+        positions={{ positions: [position({ quantity: 0, average_price: 0 })], at: Date.now() }}
+        syncedAt={null}
+        marketOpen={OPEN}
+      />
+    )
+    expect(screen.getByText('No open positions')).toBeInTheDocument()
+    expect(line(container)).toBeNull()
+    expect(screen.queryByText('Waiting for prices')).toBeNull()
+  })
+
   it('ignores a tick older than the book, which already counts it', () => {
     render(card([position()]))
     act(() => feed.push(CALL, 'NFO', { ltp: 200 }, 'websocket', Date.now() - 5000))

@@ -19,6 +19,7 @@ from broker.upstox.mapping.transform_data import (
 )
 from database.auth_db import get_auth_token
 from database.token_db import get_br_symbol, get_symbol, get_token
+from sudarshan.books import exit_guard  # SUDARSHAN M6.9: an Exit all's exits, noted
 from utils.broker_backpressure import (
     BrokerBusyError,
     BusyResponse,
@@ -435,6 +436,23 @@ def place_order_api(data, auth):
         return _ErrorResponse(500), {"status": "error", "message": str(e)}, None
 
 
+def _with_sent(response, action, quantity, closes):
+    """SUDARSHAN M6.9: the side and quantity this smart order sent, beside the broker's answer.
+
+    The request's own side and quantity are placeholders for an exit (position size 0); the alert
+    that reports the order says what went (sudarshan/books/telegram_words.py). Callers that pass
+    the answer on take it out first, so no API answer changes.
+    """
+    if not isinstance(response, dict):
+        return response
+    try:  # never a failure of its own after the order went
+        quantity = int(quantity or 0)
+    except (TypeError, ValueError):
+        return response
+    sent = {"action": str(action or "").upper(), "quantity": quantity, "closes": closes}
+    return {**response, "sent": sent}
+
+
 @refuse_smart_order_on_read_failure
 def place_smartorder_api(data, auth):
     """
@@ -464,6 +482,8 @@ def place_smartorder_api(data, auth):
                 # Like every other placement here: the next smart order for this
                 # symbol must not read the book from before this one.
                 _invalidate_position_cache(auth)
+                # SUDARSHAN M6.9: a fresh order, as the request asked.
+                response = _with_sent(response, data.get("action"), data.get("quantity"), False)
                 return res, response, orderid
 
             if position_size == current_position:
@@ -488,7 +508,8 @@ def place_smartorder_api(data, auth):
             sent = True
             res, response, orderid = place_order_api(order_data, auth)
             _invalidate_position_cache(auth)
-            return res, response, orderid
+            # SUDARSHAN M6.9: sized from the book; to a position size of 0 it closes the position.
+            return res, _with_sent(response, action, quantity, position_size == 0), orderid
 
     except BrokerBusyError as exc:
         # The position read or the order was refused by the pacer (gthread
@@ -592,6 +613,7 @@ def close_all_positions(current_api_key, auth):
     """
     logger.debug("Attempting to close all open positions.")
     counts = {"sent": 0, "refused": 0, "unknown": 0}  # SUDARSHAN M6.9
+    sending = None  # SUDARSHAN M6.9: the position whose exit is being sent, until answered
     try:
         positions_response = get_positions(auth)
         # SUDARSHAN M6.9: a read that failed is not an empty book, and nothing was sent.
@@ -632,6 +654,7 @@ def close_all_positions(current_api_key, auth):
                 "quantity": str(quantity),
             }
             logger.debug(f"Closing position with payload: {place_order_payload}")
+            sending = [position["exchange"], symbol, place_order_payload["product"]]
             res, api_response, orderid = place_order_api(place_order_payload, auth)
             attempted += 1
             if isinstance(res, BusyResponse):
@@ -640,6 +663,10 @@ def close_all_positions(current_api_key, auth):
             # SUDARSHAN M6.9: count what this exit's own answer says.
             answer = _exit_answer(res, orderid)
             counts[answer] += 1
+            if answer != "refused":
+                # SUDARSHAN M6.9: the next Exit all waits for the book to show it.
+                exit_guard.exit_placed("live", *sending)
+            sending = None
             if answer == "refused" and not reason and not isinstance(res, BusyResponse):
                 reason = str((api_response or {}).get("message") or "").strip()
 
@@ -659,6 +686,8 @@ def close_all_positions(current_api_key, auth):
         raise
     except Exception:
         logger.exception("An error occurred while closing all positions.")
+        if sending is not None:  # SUDARSHAN M6.9: it broke while that exit was being sent
+            exit_guard.exit_placed("live", *sending)
         # SUDARSHAN M6.9: it broke after some exits went: they may have gone through.
         if sum(counts.values()):
             return {

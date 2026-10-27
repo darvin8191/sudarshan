@@ -20,6 +20,11 @@ from sudarshan.books.exit_guard import EXIT_ALL_BEING_PLACED
 NOT_READ = (
     "Nothing was sent: the positions could not be read from Upstox. Check Positions and try again."
 )
+NOT_CANCELLED = "Nothing was cancelled: the orders could not be read from the broker. Check Orders and try again."
+SEMI_AUTO = (
+    "Cancel all orders operation is not allowed in Semi-Auto mode. Please switch to Auto mode to "
+    "cancel orders."
+)
 PARTIAL = (
     "Exit all did not close every position. Of 3 exits, 2 were sent and 1 was refused "
     "(UDAPI1026_X: margin). Check Positions and Orders before sending again."
@@ -223,8 +228,25 @@ def test_an_exit_all_alert_has_its_own_title(alerts, response, title, line):
             "*All Orders Cancelled*",
             "Cancelled: 2 orders",
         ),
+        (
+            {"status": "error", "message": NOT_CANCELLED},
+            "*Cancel all did not cancel every order*",
+            NOT_CANCELLED,
+        ),
+        (
+            {"status": "error", "message": SEMI_AUTO},
+            "*Cancel all did not cancel every order*",
+            SEMI_AUTO,
+        ),
     ],
-    ids=["none open", "some not confirmed", "none cancelled", "all cancelled"],
+    ids=[
+        "none open",
+        "some not confirmed",
+        "none cancelled",
+        "all cancelled",
+        "orders not read",
+        "refused in semi-auto",
+    ],
 )
 def test_a_cancel_all_alert_says_what_it_did(alerts, response, title, line):
     message = alerts("cancelallorder", response)

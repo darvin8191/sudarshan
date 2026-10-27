@@ -545,6 +545,13 @@ def _place_smart_order_locked(
     }
 
     success, response, status_code = order_manager.place_order(sandbox_order_data)
+    # SUDARSHAN M6.9: the side and quantity it sent, for the alert that reports it (an exit's
+    # request carries placeholders); services/place_smart_order_service.py takes it out of the
+    # answer before passing that on.
+    if success and isinstance(response, dict):
+        closes = target_quantity == 0 and current_quantity != 0
+        sent = {"action": str(action).upper(), "quantity": int(quantity), "closes": closes}
+        response = {**response, "sent": sent}
 
     return success, response, status_code
 

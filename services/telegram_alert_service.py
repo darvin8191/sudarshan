@@ -23,11 +23,16 @@ from database.telegram_db import (
     get_telegram_user_by_username,
 )
 
-# SUDARSHAN M6.9: titles and lines for an Exit all or a Cancel all that did not do it all.
+# SUDARSHAN M6.9: titles and lines for an exit, and an Exit all or a Cancel all that did not do
+# it all.
 from sudarshan.books.telegram_words import (
     alert_template,
+    app_exit_lines,
+    cancel_all_failed_line,
     cancel_all_unsure_line,
     close_failed_line,
+    is_app_exit,
+    smart_order_action_lines,
 )
 from utils.logging import get_logger
 
@@ -77,6 +82,12 @@ class TelegramAlertService:
                 details.append("*LIVE MODE - Real Order*")
                 details.append("─────────────────────")
 
+            # SUDARSHAN M6.9: the app's own Exit says what it sent, in both modes, in its words.
+            if is_app_exit(order_type, order_data):
+                details.extend(app_exit_lines(order_data, response))
+                details.append(f"Time: {timestamp}")
+                return "\n".join(details)
+
             if order_type == "placeorder":
                 details.extend(
                     [
@@ -97,9 +108,9 @@ class TelegramAlertService:
                 details.extend(
                     [
                         f"Symbol: `{order_data.get('symbol', 'N/A')}`",
-                        f"Action: {order_data.get('action', 'N/A')}",
-                        f"Quantity: {order_data.get('quantity', 'N/A')}",
-                        f"Position Size: {order_data.get('position_size', 'N/A')}",
+                        # SUDARSHAN M6.9: a position size of 0 says what it sent, not the
+                        # request's placeholder side and quantity.
+                        *smart_order_action_lines(order_data, response),
                         f"Exchange: {order_data.get('exchange', 'N/A')}",
                     ]
                 )
@@ -186,6 +197,9 @@ class TelegramAlertService:
                         details.append(unsure)
                     if canceled and len(canceled) <= 5:
                         details.append(f"Order IDs: {', '.join(canceled[:5])}")
+                else:
+                    # SUDARSHAN M6.9: why it did not go through (the orders could not be read, say).
+                    details.append(cancel_all_failed_line(response))
 
             elif order_type == "closeposition":
                 if response.get("status") == "success":
