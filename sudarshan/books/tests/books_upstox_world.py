@@ -69,6 +69,8 @@ class Broker:
         self.fresh_parity = 1  # which reads are fresh while read_flip is on
         self.orders_unreadable = False  # the order book read fails
         self.slow_read = 0.0  # seconds a positions read takes to answer, its rows as at its start
+        self.read_delay = None  # or callable(read number from 1) -> seconds, as slow_read
+        self.order_book_delay = 0.0  # seconds the order book takes; past the read's limit, cut off
 
     # -- state ---------------------------------------------------------------
     def true_qty(self, symbol: str) -> int:
@@ -82,10 +84,22 @@ class Broker:
                 d for t, s, d in self.fills if s == symbol and t <= cutoff
             )
 
-    def rest(self, symbol: str, side: str, qty: int) -> None:
+    def rest(
+        self, symbol: str, side: str, qty: int, kind: str = "SL-M", trigger: float = 98.5
+    ) -> None:
         """An order placed elsewhere (a stop loss in Upstox's own app, say), still working."""
         with self.lock:
-            self.working.append({"symbol": symbol, "side": side, "qty": qty, "at": time.time()})
+            self.working.append(
+                {
+                    "symbol": symbol,
+                    "side": side,
+                    "qty": qty,
+                    "at": time.time(),
+                    "kind": kind,
+                    "trigger": trigger,
+                    "id": f"25102700001{len(self.working):04d}",
+                }
+            )
 
     def fill_working(self) -> None:
         """Every working remainder fills now (the market came back)."""
@@ -110,11 +124,12 @@ class Broker:
     # -- HTTP ----------------------------------------------------------------
     def get(self, url, headers=None, **kwargs):
         if url.endswith(ORDERS_URL):
-            return self._order_book()
+            return self._order_book(kwargs.get("timeout"))
         assert url.endswith(POSITIONS_URL), url
         now = time.monotonic()
         with self.lock:
             self.reads += 1
+            number = self.reads
             fresh = self.read_flip and self.reads % 2 == self.fresh_parity
         rows = []
         for symbol, (token, exchange, product, _oa) in INSTRUMENTS.items():
@@ -134,11 +149,19 @@ class Broker:
                     "sell_price": 0.0,
                 }
             )
-        if self.slow_read:
-            time.sleep(self.slow_read)
+        delay = self.read_delay(number) if self.read_delay is not None else self.slow_read
+        if delay:
+            time.sleep(delay)
         return FakeResponse(200, {"status": "success", "data": rows})
 
-    def _order_book(self):
+    def _order_book(self, timeout=None):
+        """The order book; one slower than the read's own limit is cut off there, as httpx does."""
+        delay = self.order_book_delay
+        if delay and timeout is not None and delay > timeout:
+            time.sleep(timeout)
+            raise httpx.ReadTimeout("The read operation timed out")
+        if delay:
+            time.sleep(delay)
         with self.lock:
             self.order_book_reads += 1
             if self.orders_unreadable:
@@ -149,13 +172,16 @@ class Broker:
                 placed = datetime.fromtimestamp(order.get("at", time.time()), IST)
                 rows.append(
                     {
-                        "order_id": f"W{n}",
+                        "order_id": order.get("id", f"W{n}"),
                         "instrument_token": token,
                         "exchange": exchange,
                         "product": product,
                         "tradingsymbol": order["symbol"],
                         "transaction_type": order["side"],
-                        "status": "open",
+                        "status": "trigger pending" if order.get("trigger") else "open",
+                        "order_type": order.get("kind", "MARKET"),
+                        "trigger_price": order.get("trigger", 0),
+                        "price": 0,
                         "pending_quantity": order["qty"],
                         "order_timestamp": placed.strftime("%Y-%m-%d %H:%M:%S"),
                     }
@@ -180,10 +206,9 @@ class Broker:
                 filled = self.part.get(symbol, qty)
                 delta = filled if side == "BUY" else -filled
                 self.fills.append((now, symbol, delta))
-                if filled < qty:
-                    self.working.append(
-                        {"symbol": symbol, "side": side, "qty": qty - filled, "at": time.time()}
-                    )
+                if filled < qty:  # the rest of this market order, still working
+                    rest = {"symbol": symbol, "side": side, "qty": qty - filled, "kind": "MARKET"}
+                    self.working.append({**rest, "at": time.time(), "id": oid})
         return FakeResponse(200, {"status": "success", "data": {"order_ids": [oid]}})
 
 
