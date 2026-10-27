@@ -136,6 +136,9 @@ def test_a_fire_reaches_the_open_apps_and_its_delivery_says_on_how_many_screens(
                 "at_ms": ms(ist(2026, 10, 21, 10, 0, 2)), "found_later": False, "opening": False,
                 "auction": False, "test": False,
             }  # fmt: skip
+            missed = (await office.call("events_since", {"after": 0}))["events"][0]
+            said = ("title", "detail", "note")  # a toast built from History reads the same
+            assert {k: missed[k] for k in said} == {k: shown[k] for k in said}
             await wait_until(lambda: record(settings, "events")[0]["deliveries"]["app"]["status"]
                              == "sent")  # fmt: skip
             app = record(settings, "events")[0]["deliveries"]["app"]

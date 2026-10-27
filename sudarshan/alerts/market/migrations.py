@@ -80,6 +80,8 @@ V1 = (
         kind TEXT NOT NULL,
         title TEXT NOT NULL,
         line TEXT NOT NULL,
+        detail TEXT NOT NULL DEFAULT '',
+        note TEXT NOT NULL DEFAULT '',
         value TEXT,
         level TEXT,
         found_later INTEGER NOT NULL DEFAULT 0,

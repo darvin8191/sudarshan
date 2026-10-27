@@ -475,14 +475,16 @@ def test_a_fire_is_recorded_once_with_its_state_and_stop(store):
     channels = {"telegram": True, "app": False}
     first = store.record_fire("owner", fire(row["id"], "1:v1:once", found_later=(NOW - 60_000, NOW)),
                               state, title="SBIN crossed above ₹100.00", line="Alert: ...",
-                              value="100.05", level="100.00", channels=channels,
-                              status="stopped", status_reason="Fired once at 10:00 on 21 Oct")  # fmt: skip
+                              detail="now ₹100.05", note="book half", value="100.05",
+                              level="100.00", channels=channels, status="stopped",
+                              status_reason="Fired once at 10:00 on 21 Oct")  # fmt: skip
     again = store.record_fire("owner", fire(row["id"], "1:v1:once"), state, title="t", line="l",
                               value="v", level="l", channels=channels)  # fmt: skip
     assert first is not None and again is None
     [event] = store.events("owner")
     assert event["found_later"] and not event["opening"] and not event["test"]
     assert event["title"] == "SBIN crossed above ₹100.00" and event["value"] == "100.05"
+    assert (event["detail"], event["note"]) == ("now ₹100.05", "book half")
     assert event["deliveries"] == {
         "telegram": {"status": "pending", "reason": "", "attempts": 0, "updated_at": NOW},
         "app": {"status": "off", "reason": OFF_REASON, "attempts": 0, "updated_at": NOW},
@@ -501,9 +503,8 @@ def test_deliveries_pages_and_catching_up(store):
                           title=f"t{n}", line="l", value="v", level="l", channels=BOTH)
         for n in range(1, 6)
     ]  # fmt: skip
-    test_id = store.record_test(
-        "owner", "Test", "Test: market alerts reach this chat", NOW + 9, BOTH
-    )
+    test_id = store.record_test("owner", "Test", "Test: market alerts reach this chat", NOW + 9,
+                                BOTH, detail="sent from the Alerts page")  # fmt: skip
     assert store.set_delivery("owner", ids[0], "telegram", "sent", "", NOW + 10, attempts=1)
     assert not store.set_delivery("owner", 12345, "telegram", "sent", "", NOW)
     with pytest.raises(ValueError):
@@ -514,6 +515,8 @@ def test_deliveries_pages_and_catching_up(store):
     assert settled[ids[1]]["telegram"]["status"] == "pending" and settled[12345] == {}
     page = store.events("owner", limit=2)
     assert [e["id"] for e in page] == [test_id, ids[4]] and page[0]["test"]
+    assert (page[0]["detail"], page[0]["note"]) == ("sent from the Alerts page", "")
+    assert page[1]["detail"] == page[1]["note"] == ""  # a fire recorded without them
     older = store.events("owner", before=page[-1]["id"], limit=2)
     assert [e["id"] for e in older] == [ids[3], ids[2]]
     assert [e["id"] for e in store.events("owner", alert_id=row["id"])] == ids[::-1]

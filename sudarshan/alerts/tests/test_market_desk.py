@@ -377,7 +377,7 @@ def test_history_pages_and_what_fired_since_are_read_in_order(alerts, quick):
         async with FakeFeed(clock) as feed, FakeOpenAlgo() as notify:
             settings = alerts(notify)
             office, rt, task = await opened(settings, feed, clock)
-            await office.call("create", {"alert": draft(frequency="every_time")})
+            await office.call("create", {"alert": draft(frequency="every_time", note="book half")})
             await following(rt)
             for n, price in enumerate((99.9, 100.1, 99.8, 100.2, 99.7, 100.3)):
                 await trade(feed, clock, price, ltq=n + 1)
@@ -390,8 +390,14 @@ def test_history_pages_and_what_fired_since_are_read_in_order(alerts, quick):
             assert [e["id"] for e in since["events"]] == [2, 3] and since["more"] is False
             event = since["events"][0]
             assert event["title"] == "SBIN crossed above ₹100.00" and event["alert_id"] == 1
+            assert (event["detail"], event["note"]) == ("now ₹100.20", "book half")
             assert event["trade_time"] <= event["at"] and event["test"] is False
             assert set(event["deliveries"]) == {"telegram"}
+            await office.call("update", {"id": 1, "version": 1, "action": "edit", "alert": draft(
+                frequency="every_time", note="sold half")})  # fmt: skip
+            again = (await office.call("events_since", {"after": 1}))["events"][0]
+            said = ("title", "detail", "note", "line")  # as they were at the fire
+            assert {k: again[k] for k in said} == {k: event[k] for k in said}
             bad = await refused(office.call("events_since", {}))
             assert bad.status == 400
             await closed(rt, task)
@@ -420,6 +426,8 @@ def test_the_settings_and_the_test_go_through_the_channels_they_name(alerts, qui
             assert (bad.status, bad.field) == (400, "channels")
             history = await office.call("events", {})
             assert [e["test"] for e in history["events"]] == [True, True]
+            assert {(e["title"], e["detail"], e["note"]) for e in history["events"]} == {
+                ("Test alert", "sent from the Alerts page", "")}  # fmt: skip
             await closed(rt, task)
 
     run(scenario)

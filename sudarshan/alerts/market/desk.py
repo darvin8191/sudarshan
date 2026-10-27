@@ -249,7 +249,8 @@ class OwnerDesk:
         if rt.pusher is not None:  # the app's channel (M10.7)
             channels["app"] = prefs["app"]
         event_id = await self._write(rt.store.record_test, OWNER, words.TEST_TITLE,
-                                     words.TEST_LINE, now, channels)  # fmt: skip
+                                     words.TEST_LINE, now, channels,
+                                     detail=words.TEST_DETAIL)  # fmt: skip
         try:
             waiters = []
             if channels.get("app"):
@@ -511,7 +512,8 @@ def _event(row: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "id": row["id"], "alert_id": row["alert_id"], "at": row["fired_at"],
         "trade_time": row["trade_time"], "symbol": row["symbol"], "exchange": row["exchange"],
-        "kind": row["kind"], "title": row["title"], "line": row["line"], "value": row["value"],
+        "kind": row["kind"], "title": row["title"], "detail": row["detail"], "note": row["note"],
+        "line": row["line"], "value": row["value"],
         "level": row["level"], "found_later": row["found_later"], "opening": row["opening"],
         "test": row["test"], "deliveries": row["deliveries"],
     }  # fmt: skip

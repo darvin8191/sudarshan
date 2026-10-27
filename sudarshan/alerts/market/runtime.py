@@ -535,12 +535,13 @@ class MarketRuntime:
 
     def _fire(self, alert: spec.Alert, out: engine.Outcome, now: int) -> None:
         fire, today = out.fire, self._today
-        title, _ = words.describe(alert, fire, today)
+        title, detail = words.describe(alert, fire, today)
         line = words.line(alert, fire, today)
         reason = words.status_reason(out.reason) if out.status else ""
         channels = self._channels_of(alert.id)
         record = (self.store.record_fire, OWNER, fire, out.state)
-        options = {"title": title, "line": line, "value": words.amount(alert, fire.value),
+        options = {"title": title, "detail": detail, "note": alert.note, "line": line,
+                   "value": words.amount(alert, fire.value),
                    "level": words.amount(alert, fire.level), "channels": channels,
                    "status": out.status, "status_reason": reason}  # fmt: skip
         future = self._submit(*record, **options)  # in the order decided: before any flush
@@ -562,7 +563,7 @@ class MarketRuntime:
         if channels.get("telegram"):
             self.lane.add([Line(event_id, line, _at(fire.at))])
         if self.push is not None and channels.get("app"):
-            self.push(event_id, alert, fire)
+            self.push(event_id, alert, fire, options)
 
     async def _recover(self, record, options, fire) -> int | None:
         """After a failed write: the claim's record if it committed after all, else the fire
@@ -609,12 +610,13 @@ class MarketRuntime:
                 self.pusher.add(DELIVERY_EVENT, {"event_id": event_id, "channel": channel,
                                                  "delivery": delivery})  # fmt: skip
 
-    def _push_fire(self, event_id: int, alert: spec.Alert, fire: engine.Fire) -> None:
-        """A recorded fire to the open apps (M10.7): the toast's words, and its marks."""
-        title, detail = words.describe(alert, fire, self._today)
+    def _push_fire(self, event_id: int, alert: spec.Alert, fire: engine.Fire, said: dict) -> None:
+        """A recorded fire to the open apps (M10.7): the toast's words as the event keeps them
+        (``said``, the record's options), and its marks."""
         self.pusher.add(ALERT_EVENT, {
             "event_id": event_id, "alert_id": alert.id, "symbol": alert.symbol,
-            "exchange": alert.exchange, "title": title, "detail": detail, "note": alert.note,
+            "exchange": alert.exchange, "title": said["title"], "detail": said["detail"],
+            "note": said["note"],
             "at": _at(fire.at).isoformat(timespec="seconds"), "at_ms": fire.at,
             "found_later": fire.found_later is not None, "opening": fire.opening,
             "auction": fire.auction, "test": False,

@@ -113,7 +113,8 @@ alert_event = Table(
     Column("id", Integer, primary_key=True, autoincrement=True), Column("principal", String),
     Column("alert_id", Integer), Column("session", Integer), Column("fired_at", Integer),
     Column("trade_time", Integer),
-    *(Column(n, String) for n in ("symbol", "exchange", "kind", "title", "line", "value", "level")),
+    *(Column(n, String) for n in ("symbol", "exchange", "kind", "title", "line", "detail", "note",
+                                  "value", "level")),
     Column("found_later", Integer), Column("opening", Integer), Column("test", Integer),
     Column("claim", String, unique=True),
 )  # fmt: skip
@@ -402,10 +403,13 @@ class MarketStore:
         channels: Mapping[str, bool],
         status: str | None = None,
         status_reason: str = "",
+        detail: str = "",
+        note: str = "",
     ) -> int | None:
         """One fire with its state (and its stop), once: the event id, or None when its claim
         was already told. The state and the stop apply only while the alert is Active at the
-        version the fire was decided on (``fire.version``)."""
+        version the fire was decided on (``fire.version``). ``title``, ``detail`` and ``note`` are
+        the toast's words and ``line`` the Telegram line, all frozen as they were at the fire."""
         who = self._who(principal)
         if status is not None:
             _status(status)
@@ -420,7 +424,8 @@ class MarketStore:
             event_id = _log(conn, who, fire.claim, channels, fire.at, {
                 "alert_id": fire.alert_id, "session": fire.session, "fired_at": fire.at,
                 "trade_time": fire.trade_time, "symbol": row.symbol, "exchange": row.exchange,
-                "kind": row.kind, "title": title, "line": line, "value": value, "level": level,
+                "kind": row.kind, "title": title, "line": line, "detail": detail, "note": note,
+                "value": value, "level": level,
                 "found_later": int(fire.found_later is not None), "opening": int(fire.opening),
                 "test": 0,
             })  # fmt: skip
@@ -433,7 +438,13 @@ class MarketStore:
         return event_id
 
     def record_test(
-        self, principal: str, title: str, line: str, now: int, channels: Mapping[str, bool]
+        self,
+        principal: str,
+        title: str,
+        line: str,
+        now: int,
+        channels: Mapping[str, bool],
+        detail: str = "",
     ) -> int:
         """A test from the Settings sheet, logged like a fire so its deliveries show."""
         who = self._who(principal)
@@ -441,7 +452,8 @@ class MarketStore:
             return _log(conn, who, f"test:{uuid.uuid4().hex}", channels, now, {
                 "alert_id": 0, "session": 0, "fired_at": now, "trade_time": None,
                 "symbol": "", "exchange": "", "kind": "test", "title": title, "line": line,
-                "value": None, "level": None, "found_later": 0, "opening": 0, "test": 1,
+                "detail": detail, "note": "", "value": None, "level": None, "found_later": 0,
+                "opening": 0, "test": 1,
             })  # fmt: skip
 
     def set_delivery(
@@ -476,20 +488,10 @@ class MarketStore:
 
     def deliveries(self, principal: str, event_ids) -> dict[int, dict[str, dict[str, Any]]]:
         """Event id -> channel -> its delivery, for these events (what a settled one became)."""
+        who = self._who(principal)
         ids = sorted({int(event_id) for event_id in event_ids})
-        found: dict[int, dict[str, dict[str, Any]]] = {event_id: {} for event_id in ids}
-        if not ids:
-            return found
-        d = alert_delivery.c
-        query = select(alert_delivery).where(
-            d.event_id.in_(ids), d.principal == self._who(principal)
-        )
         with self._read() as conn:
-            for row in conn.execute(query).mappings():
-                found[row["event_id"]][row["channel"]] = {
-                    name: row[name] for name in ("status", "reason", "attempts", "updated_at")
-                }
-        return found
+            return _deliveries_of(conn, who, ids)
 
     def events(
         self,
@@ -678,15 +680,7 @@ class MarketStore:
         who = self._who(principal)
         with self._read() as conn:
             rows = [dict(row) for row in conn.execute(query).mappings().all()]
-            ids = [row["id"] for row in rows]
-            found: dict[int, dict] = {i: {} for i in ids}
-            if ids:
-                d = alert_delivery.c
-                query = select(alert_delivery).where(d.event_id.in_(ids), d.principal == who)
-                for row in conn.execute(query).mappings():
-                    found[row["event_id"]][row["channel"]] = {
-                        name: row[name] for name in ("status", "reason", "attempts", "updated_at")
-                    }
+            found = _deliveries_of(conn, who, [row["id"] for row in rows])
         for row in rows:
             for flag in ("found_later", "opening", "test"):
                 row[flag] = bool(row[flag])
@@ -811,6 +805,19 @@ def _set_status(
             .values(status=status, status_reason=reason, updated_at=now)
         ).rowcount
     )
+
+
+def _deliveries_of(conn, who: str, ids: list[int]) -> dict[int, dict[str, dict[str, Any]]]:
+    """Event id -> channel -> its delivery, an empty map for an event with none."""
+    found: dict[int, dict[str, dict[str, Any]]] = {event_id: {} for event_id in ids}
+    if ids:
+        d = alert_delivery.c
+        query = select(alert_delivery).where(d.event_id.in_(ids), d.principal == who)
+        for row in conn.execute(query).mappings():
+            found[row["event_id"]][row["channel"]] = {
+                name: row[name] for name in ("status", "reason", "attempts", "updated_at")
+            }
+    return found
 
 
 def _put_state(conn, who: str, alert_id: int, state: State, now: int) -> None:
