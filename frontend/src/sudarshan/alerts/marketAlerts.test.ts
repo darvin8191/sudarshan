@@ -10,7 +10,7 @@
 import { type InfiniteData, QueryClient } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const toasts = vi.hoisted(() => ({ info: vi.fn() }))
+const toasts = vi.hoisted(() => ({ info: vi.fn(), dismiss: vi.fn() }))
 vi.mock('@/utils/toast', () => ({ toast: toasts }))
 
 const chime = vi.hoisted(() => ({ played: [] as string[] }))
@@ -269,6 +269,7 @@ beforeEach(() => {
   setTabChannelForTests(channel)
   navigate = vi.fn()
   toasts.info.mockReset()
+  toasts.dismiss.mockReset()
   chime.played.length = 0
   api.state.mockReset().mockResolvedValue(state())
   api.eventsSince.mockReset().mockResolvedValue(page([]))
@@ -425,11 +426,15 @@ describe('what fired while the app was away', () => {
     expect(navigate).toHaveBeenCalledWith(`${ALERTS_PATH}?alert=12`)
   })
 
-  it('sounds a missed alert that fired in the last minute', async () => {
+  it.each([
+    [59_000, ['market']],
+    [60_000, ['market']],
+    [61_000, []],
+  ])('sounds a missed alert only when it fired in the last minute: %i ms ago', async (age, played) => {
     const socket = await joinedSocket()
-    api.eventsSince.mockResolvedValue(page([event({ at: NOW - 20_000 })]))
+    api.eventsSince.mockResolvedValue(page([event({ at: NOW - age })]))
     await reconnect(socket)
-    expect(chime.played).toEqual(['market'])
+    expect(chime.played).toEqual(played)
   })
 
   it('says the day of a missed alert from an earlier day', async () => {
@@ -743,11 +748,13 @@ describe('a pushed alert', () => {
     expect(navigate).toHaveBeenCalledWith(`${ALERTS_PATH}?tab=history`)
   })
 
-  it('makes no sound for an alert that fired more than a minute ago', async () => {
+  it('sounds a pushed alert whatever the phone’s clock says of its time', async () => {
     const socket = await joinedSocket()
-    socket.fire('sudarshan_market_alert', push({ at_ms: NOW - 61_000 }))
+    // A phone clock 61 s fast: the alert fired now, by the server.
+    vi.setSystemTime(NOW + 61_000)
+    socket.fire('sudarshan_market_alert', push({ at_ms: NOW }))
     expect(toasts.info).toHaveBeenCalledTimes(1)
-    expect(chime.played).toEqual([])
+    expect(chime.played).toEqual(['market'])
   })
 
   it('follows the app’s master switches: no sound with sounds off, nothing with alerts off', async () => {
@@ -760,24 +767,61 @@ describe('a pushed alert', () => {
     useAlertStore.getState().setToastsEnabled(false)
     socket.fire('sudarshan_market_alert', push({ event_id: 347 }))
     expect(toasts.info).toHaveBeenCalledTimes(1)
+
+    // Alerts off with sounds on: still no sound.
+    useAlertStore.getState().setSoundEnabled(true)
+    socket.fire('sudarshan_market_alert', push({ event_id: 348 }))
+    expect(chime.played).toEqual([])
   })
 
-  it('shows the first three of a burst and one toast for the rest', async () => {
+  it('shows three of a burst each, then one toast for the whole burst in their place', async () => {
     const socket = await joinedSocket()
-    for (const id of [351, 352, 353, 354, 355]) {
+    for (const id of [351, 352, 353]) {
       socket.fire('sudarshan_market_alert', push({ event_id: id, title: `Alert ${id}` }))
     }
-
-    const titles = shown().map(([title]) => title)
-    expect(titles.slice(0, 3)).toEqual([
+    expect(shown().map(([title]) => title)).toEqual([
       'Alert · Alert 351',
       'Alert · Alert 352',
       'Alert · Alert 353',
     ])
-    expect(titles.slice(3)).toEqual(['1 more alert fired', '2 more alerts fired'])
+    expect(toasts.dismiss).not.toHaveBeenCalled()
+
+    socket.fire('sudarshan_market_alert', push({ event_id: 354, title: 'Alert 354' }))
+    socket.fire('sudarshan_market_alert', push({ event_id: 355, title: 'Alert 355' }))
+
+    // The toaster draws three: the fourth would hide the first, so one toast says them all.
+    expect(toasts.dismiss.mock.calls.map(([id]) => id)).toEqual(['e:351', 'e:352', 'e:353'])
+    expect(shown().slice(3)).toEqual([
+      ['4 alerts fired', 'Latest 10:42:29 · Alert 354'],
+      ['5 alerts fired', 'Latest 10:42:29 · Alert 355'],
+    ])
     const ids = toasts.info.mock.calls.map(([, options]) => options.id)
     expect(ids[3]).toBe(ids[4])
-    expect(shown()[4][1]).toBe('Latest 10:42:29 · Alert 355')
+    toasts.info.mock.calls[4][1].action.onClick()
+    expect(navigate).toHaveBeenCalledWith(`${ALERTS_PATH}?tab=history`)
+  })
+
+  /** Four alerts, `gap` ms apart: whether they made one burst (one toast for all four). */
+  async function oneBurst(gap: number) {
+    const socket = await joinedSocket()
+    for (const [index, id] of [361, 362, 363, 364].entries()) {
+      vi.setSystemTime(NOW + index * gap)
+      socket.fire('sudarshan_market_alert', push({ event_id: id, title: `Alert ${id}` }))
+    }
+    return shown().some(([title]) => title === '4 alerts fired')
+  }
+
+  it('takes alerts 100 ms apart as one burst', async () => {
+    expect(await oneBurst(100)).toBe(true)
+  })
+
+  it('takes alerts exactly 300 ms apart as one burst: the window slides with each alert', async () => {
+    expect(await oneBurst(300)).toBe(true)
+  })
+
+  it('takes alerts 301 ms apart as separate alerts, each with its own toast', async () => {
+    expect(await oneBurst(301)).toBe(false)
+    expect(toasts.info).toHaveBeenCalledTimes(4)
   })
 })
 

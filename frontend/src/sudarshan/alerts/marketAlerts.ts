@@ -52,15 +52,16 @@ import {
  *
  * Each event is announced once across the app's tabs, by the order alerts' rule
  * (books/orderAlerts.ts) on a channel of its own: the tab in use shows it at once and tells the
- * others, and a tab not in use waits a moment for that word. In a burst the first three show and
- * the rest share one toast. The sound obeys the app's master sound switch, this device's "Market
- * alert sound" switch and the quiet window it shares with order sounds (chime.ts); an alert that
- * fired more than a minute ago is shown without it.
+ * others, and a tab not in use waits a moment for that word. In a burst the first three show
+ * each, and a fourth turns them into one toast for the whole burst, so none sits unseen behind
+ * the toaster's three. The sound obeys the app's master sound switch, this device's "Market alert
+ * sound" switch and the quiet window it shares with order sounds (chime.ts). A pushed alert may
+ * always sound; one a catch-up tells sounds only when it fired in the last minute.
  */
 
 /** Where the Alerts page lives (upstream owns /alerts, for the /trading chart's alerts). */
 export const ALERTS_PATH = '/market-alerts'
-/** An alert that fired longer ago than this makes no sound. */
+/** A missed alert that fired longer ago than this makes no sound (a pushed one always may). */
 export const SOUND_AGE_MS = 60_000
 /** How long a join waits for its ack; without one, the next connect tries again. */
 export const JOIN_WAIT_MS = 10_000
@@ -367,20 +368,37 @@ function show(id: string, title: string, description: string, view: string): voi
   })
 }
 
-let burst = { last: Number.NEGATIVE_INFINITY, shown: 0, more: 0, id: '' }
+interface Burst {
+  /** When its newest alert came: the next within `BURST_MS` of it joins (the window slides). */
+  last: number
+  count: number
+  /** Its alerts' own toasts, while they are still up. */
+  singles: string[]
+  /** Its one toast, once it has more than three. */
+  id: string
+}
+
+function newBurst(now: number): Burst {
+  return { last: now, count: 0, singles: [], id: `burst:${now}` }
+}
+
+let burst = newBurst(Number.NEGATIVE_INFINITY)
 
 function showLive(alert: Announcement, now: number): void {
-  if (now - burst.last > BURST_MS) burst = { last: now, shown: 0, more: 0, id: `burst:${now}` }
+  if (now - burst.last > BURST_MS) burst = newBurst(now)
   burst.last = now
-  if (burst.shown < BURST_SHOWN) {
-    burst.shown += 1
+  burst.count += 1
+  if (burst.count <= BURST_SHOWN) {
+    burst.singles.push(alert.key)
     show(alert.key, alert.title, alert.description, alert.view)
     return
   }
-  burst.more += 1
-  const title = `${burst.more} more ${burst.more === 1 ? 'alert' : 'alerts'} fired`
+  // More than three: one toast for the whole burst in place of the three (design 5.2). The
+  // toaster draws three, so a fourth single would hide the first; History has every one.
+  for (const key of burst.singles) toast.dismiss(key)
+  burst.singles = []
   const description = `Latest ${when(alert.at, now)} · ${alert.headline}`
-  show(burst.id, title, description, `${ALERTS_PATH}?tab=history`)
+  show(burst.id, `${burst.count} alerts fired`, description, `${ALERTS_PATH}?tab=history`)
 }
 
 /** Show it in this tab now, tell the other tabs, and sound it if it is fresh. */
@@ -394,7 +412,10 @@ function announce(alert: Announcement): void {
   const now = Date.now()
   if (alert.live) showLive(alert, now)
   else show(alert.key, alert.title, alert.description, alert.view)
-  if (now - alert.at <= SOUND_AGE_MS && settings.shouldPlaySound()) playChime('market', now)
+  // A pushed alert is news now, whatever the phone's clock says of its time; a missed one is old
+  // news after a minute.
+  const fresh = alert.live || now - alert.at <= SOUND_AGE_MS
+  if (fresh && settings.shouldPlaySound()) playChime('market', now)
 }
 
 function deliver(alert: Announcement): void {
@@ -687,6 +708,6 @@ export function resetMarketAlertsForTests(): void {
   hearing = 'unknown'
   for (const timer of retries) clearTimeout(timer)
   retries.clear()
-  burst = { last: Number.NEGATIVE_INFINITY, shown: 0, more: 0, id: '' }
+  burst = newBurst(Number.NEGATIVE_INFINITY)
   go = (to) => window.location.assign(to)
 }
