@@ -412,6 +412,21 @@ describe('an alert’s sheet', () => {
     )
   })
 
+  it.each([
+    ['active', 'Pause', 'pause'],
+    ['paused', 'Resume', 'resume'],
+    ['stopped', 'Restart', 'restart'],
+  ] as const)('sends a %s alert’s %s as %s', async (status, move, action) => {
+    api.state.mockResolvedValue(alertsState({ alerts: [alertRow({ status })] }))
+    api.change.mockReturnValue(new Promise(() => {}))
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    renderPage(['/market-alerts?alert=12'])
+    await settle()
+
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: move }))
+    expect(api.change).toHaveBeenCalledWith(12, { version: 3, action })
+  })
+
   it('pauses once however fast it is tapped, and shows the answer', async () => {
     let answer: (row: AlertRow) => void = () => {}
     api.change.mockReturnValue(
@@ -426,6 +441,8 @@ describe('an alert’s sheet', () => {
 
     await user.click(within(sheet).getByRole('button', { name: 'Pause' }))
     expect(within(sheet).getByRole('button', { name: 'Pausing' })).toBeDisabled()
+    expect(within(sheet).getByRole('button', { name: 'Edit' })).toBeDisabled()
+    expect(within(sheet).getByRole('button', { name: 'Delete' })).toBeDisabled()
     await user.click(within(sheet).getByRole('button', { name: 'Pausing' }))
     expect(api.change).toHaveBeenCalledTimes(1)
     expect(api.change).toHaveBeenCalledWith(12, { version: 3, action: 'pause' })
@@ -443,7 +460,10 @@ describe('an alert’s sheet', () => {
     const sheet = await openSheet(user)
 
     await user.click(within(sheet).getByRole('button', { name: 'Delete' }))
-    const ask = screen.getByRole('dialog', { name: 'Delete this alert?' })
+    // The question names the alert, so a list that moved cannot put another card under the tap.
+    const ask = screen.getByRole('dialog', {
+      name: 'Delete the SBIN alert, Crosses above ₹100.00?',
+    })
     expect(within(ask).getByText('Its history stays.')).toBeInTheDocument()
     expect(api.remove).not.toHaveBeenCalled()
 
@@ -500,7 +520,9 @@ describe('an alert’s sheet', () => {
 
     await user.click(within(sheet).getByRole('button', { name: 'Delete' }))
     await user.click(
-      within(screen.getByRole('dialog', { name: 'Delete this alert?' })).getByRole('button', {
+      within(
+        screen.getByRole('dialog', { name: 'Delete the SBIN alert, Crosses above ₹100.00?' })
+      ).getByRole('button', {
         name: 'Delete',
       })
     )

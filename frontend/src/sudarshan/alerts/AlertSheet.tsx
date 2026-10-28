@@ -8,7 +8,7 @@ import {
   RotateCcw,
   Trash2,
 } from 'lucide-react'
-import { useState } from 'react'
+import { type ReactNode, useState } from 'react'
 import { Link } from 'react-router'
 import type { AlertRow, AlertStatus } from '@/api/marketAlerts'
 import type { SymbolData } from '@/lib/MarketDataManager'
@@ -17,11 +17,12 @@ import { Confirm, Details, OUTLINED, SentNote } from '@/sudarshan/books/cards/pa
 import { chartPath } from '@/sudarshan/chart/prefs'
 import type { FeedState } from '@/sudarshan/live/useFrameLines'
 import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
+import { useOpenGuard } from '@/sudarshan/watchlist/openGuard'
 import { describe } from '@/sudarshan/watchlist/rows'
 import { firedWords, PriceLine } from './AlertCard'
 import { type AlertAction, NO_ANSWER, sendChange, useHeld } from './actions'
 import { RecentFires } from './HistoryList'
-import { AlertStatusChip, ConditionText, LineText } from './lines'
+import { AlertStatusChip, BusyIcon, ConditionText, HELD, LineText } from './lines'
 
 /** The move each status allows, beside Edit and Delete (contract 1.4's button table). */
 const MOVE: Record<
@@ -128,12 +129,15 @@ function Sheet({
 
         {held?.state === 'unconfirmed' && <SentNote text={NO_ANSWER[held.action]} />}
 
-        <div className="grid grid-cols-3 gap-2">
+        {/* A status the server changed while the sheet is open (fired once, paused after 50
+            fires) changes what the middle button does under the finger: the row takes no tap
+            for the same half second a sheet does when it opens. */}
+        <Settling key={row.status} className="grid grid-cols-3 gap-2">
           <button
             type="button"
             disabled={held !== undefined}
             onClick={() => onEdit(row.id)}
-            className={cn(OUTLINED, 'px-2')}
+            className={cn(OUTLINED, 'px-2', HELD)}
           >
             <Pencil aria-hidden="true" className="size-5" />
             Edit
@@ -142,21 +146,25 @@ function Sheet({
             type="button"
             disabled={held !== undefined}
             onClick={() => void sendChange(client, row, move.action)}
-            className={cn(OUTLINED, 'px-2')}
+            className={cn(OUTLINED, 'px-2', HELD)}
           >
-            <MoveIcon aria-hidden="true" className="size-5" />
+            {sending(move.action) ? (
+              <BusyIcon />
+            ) : (
+              <MoveIcon aria-hidden="true" className="size-5" />
+            )}
             {sending(move.action) ? move.busy : move.label}
           </button>
           <button
             type="button"
             disabled={held !== undefined}
             onClick={() => setConfirming(true)}
-            className={cn(OUTLINED, 'px-2 text-[color:var(--down)]')}
+            className={cn(OUTLINED, 'px-2 text-[color:var(--down)]', HELD)}
           >
-            <Trash2 aria-hidden="true" className="size-5" />
+            {sending('delete') ? <BusyIcon /> : <Trash2 aria-hidden="true" className="size-5" />}
             {sending('delete') ? 'Deleting' : 'Delete'}
           </button>
-        </div>
+        </Settling>
         <Link to={chartPath(row.symbol, row.exchange)} className={OUTLINED}>
           <CandlestickChart aria-hidden="true" className="size-5" />
           Chart
@@ -167,12 +175,29 @@ function Sheet({
 
       <Confirm
         open={confirming}
-        title="Delete this alert?"
+        title={`Delete the ${named.title} alert, ${row.words.condition}?`}
         description="Its history stays."
         confirmLabel="Delete"
         onConfirm={() => void sendChange(client, row, 'delete')}
         onClose={() => setConfirming(false)}
       />
     </BottomSheet>
+  )
+}
+
+/** What it holds takes no tap for `OPEN_GUARD.ms` after it mounts: key it to re-arm. */
+function Settling({ className, children }: { className: string; children: ReactNode }) {
+  const guard = useOpenGuard(true)
+  const { onPointerDownCapture, onClickCapture, onKeyDownCapture } = guard.handlers
+  return (
+    <div
+      onPointerDownCapture={onPointerDownCapture}
+      onClickCapture={onClickCapture}
+      onKeyDownCapture={onKeyDownCapture}
+      data-settling={guard.settling || undefined}
+      className={className}
+    >
+      {children}
+    </div>
   )
 }
