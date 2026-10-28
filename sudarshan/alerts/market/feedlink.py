@@ -161,5 +161,10 @@ class FeedLink:
         return payload
 
     def close(self) -> None:
-        self.sock.close(0)
-        self.ctx.term()
+        """The socket, then its context; twice is harmless. A context left open can hang the
+        process at exit, when garbage collection terms it with its socket still open (review
+        L7)."""
+        if not self.sock.closed:
+            self.sock.close(0)
+        if not self.ctx.closed:
+            self.ctx.term()

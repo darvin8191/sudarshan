@@ -184,6 +184,8 @@ class MarketRuntime:
             log.exception("market alerts stopped unexpectedly; order alerts carry on")
             self._set_state("off", words.STOPPED_UNEXPECTEDLY)
         finally:
+            if self.link is not None:  # however the run ended, a cancel too (review L7)
+                self.link.close()
             if self.store is not None:
                 with contextlib.suppress(Exception):
                     await self._db(self.store.close)
@@ -276,17 +278,13 @@ class MarketRuntime:
             await self._flush(now, wait=True)
             self._close_pause(now)
             await self._db(self.store.set_seen, OWNER, now)
-        try:
-            pending = [task for task in self._tasks if not task.done()]
-            if pending:
-                await asyncio.wait(pending, timeout=STOP_FLUSH_S)
-            if self.lane is not None and (left := await self.lane.flush(STOP_FLUSH_S)):
-                log.warning("%d market alerts were not sent to Telegram before stopping", left)
-            if self.pusher is not None and (left := await self.pusher.flush(PUSH_FLUSH_S)):
-                log.info("%d market alert pushes to the app were left at the stop", left)
-        finally:
-            if self.link is not None:
-                self.link.close()
+        pending = [task for task in self._tasks if not task.done()]
+        if pending:
+            await asyncio.wait(pending, timeout=STOP_FLUSH_S)
+        if self.lane is not None and (left := await self.lane.flush(STOP_FLUSH_S)):
+            log.warning("%d market alerts were not sent to Telegram before stopping", left)
+        if self.pusher is not None and (left := await self.pusher.flush(PUSH_FLUSH_S)):
+            log.info("%d market alert pushes to the app were left at the stop", left)
         if self.state != "off":
             self._set_state("stopped")
 

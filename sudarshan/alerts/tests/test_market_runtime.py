@@ -752,3 +752,34 @@ def test_states_a_failed_flush_could_not_save_are_saved_by_the_next(alerts, quic
             await stopped(rt, task)
 
     asyncio.run(scenario())
+
+
+def test_a_runtime_cancelled_in_its_stop_still_closes_its_feed_link(alerts, quick):
+    """Review L7: the link was closed only at the end of a clean stop, so a cancel that landed
+    in the stop's flush left its ZMQ context open, and garbage collection could hang the
+    process at exit terming it."""
+
+    async def scenario():
+        clock = Clock(ist(2026, 10, 21, 10, 0))
+        async with FakeFeed(clock) as feed, FakeOpenAlgo() as notify:
+            settings = alerts(notify)
+            create(settings, clock())
+            rt, task = await started(settings, feed, clock)
+            link, flush, held = rt.link, rt._flush, asyncio.Event()
+
+            async def stuck(now, wait=False):  # the stop's own flush never returns
+                if not wait:
+                    return await flush(now, wait)
+                held.set()
+                await asyncio.Event().wait()
+
+            rt._flush = stuck
+            rt.stop("test")
+            await asyncio.wait_for(held.wait(), 5)
+            task.cancel()  # as a stop that took too long, or asyncio.run's own teardown, does
+            await asyncio.gather(task, return_exceptions=True)
+            closed = (link.sock.closed, link.ctx.closed)
+            link.close()  # never left open: the old code must not hang this process at exit
+            assert task.cancelled() and closed == (True, True)
+
+    asyncio.run(scenario())
