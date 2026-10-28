@@ -139,6 +139,26 @@ def live_working_order(auth: str, order_id: object) -> Working | None:
     return None
 
 
+def live_order_statuses(auth: str) -> dict[str, str]:
+    """Every order in Upstox's order book today and its status as OpenAlgo names it
+    (broker/upstox/mapping/order_data.normalize_order_status: complete, rejected, cancelled,
+    open, or Upstox's own word lowered): what tells whether a claim has ended (gate.py)."""
+    order_api = _upstox()
+    try:
+        book = order_api.get_order_book(auth)
+    except Exception as exc:
+        raise Unreadable(f"orders: {type(exc).__name__}") from exc
+    if not isinstance(book, dict) or book.get("status") != "success":
+        raise Unreadable("the orders answer is not a success")
+    from broker.upstox.mapping.order_data import normalize_order_status
+
+    return {
+        str(row.get("order_id")): normalize_order_status(row.get("status"))
+        for row in book.get("data") or []
+        if isinstance(row, dict) and row.get("order_id")
+    }
+
+
 @dataclass(frozen=True)
 class Gtt:
     """A GTT as the broker has it: what a modify cannot change."""
@@ -357,6 +377,21 @@ def sandbox_working_order(user_id: str, order_id: object) -> Working | None:
         instrument="",
         final=str(row.order_status or "") not in ("open", "trigger pending"),
     )
+
+
+def sandbox_order_statuses(user_id: str, order_ids: list[str]) -> dict[str, str]:
+    """The sandbox's status for each of ``order_ids`` it has (complete, rejected, cancelled,
+    open, trigger pending)."""
+    try:
+        orders = _sandbox().SandboxOrders
+        rows = (
+            orders.query.filter(orders.user_id == user_id, orders.orderid.in_(order_ids))
+            .populate_existing()
+            .all()
+        )
+    except Exception as exc:
+        raise Unreadable(f"sandbox orders: {type(exc).__name__}") from exc
+    return {str(row.orderid): str(row.order_status or "") for row in rows}
 
 
 def sandbox_gtt(user_id: str, trigger_id: object) -> Gtt | None:

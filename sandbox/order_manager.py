@@ -1170,6 +1170,7 @@ class OrderManager:
                 logger.info(release_note)
 
             logger.info(f"Order cancelled: {orderid}")
+            risk_gate.cancelled(orderid, risk_gate.SANDBOX)  # SUDARSHAN M5.13: claims end
 
             self._publish_order_update_event(order, order_status="cancelled")
 

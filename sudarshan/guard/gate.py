@@ -24,6 +24,14 @@ function is called. Each send stays recorded until its answer says nothing was s
 ``SHOWS_WITHIN_S`` after it was answered or the book shows it, or ``SEND_HELD_AT_MOST_S`` at the
 latest. The records are the in-flight registry the kill switch waits on when it is turned on.
 
+A claim ends with its order. A send let go while nothing was judging it counts against its
+position only while it waits for its answer. A cancel that went through (Upstox's or the
+sandbox's ``cancel_order``, Cancel all included) drops the claims on that order at once
+(``cancelled``). And before an order is refused only because of claims, the broker's order book
+is read once: a claim whose order shows cancelled, rejected or still resting is dropped, and the
+order judged again; a claim whose order shows complete, or is not in the book yet, stays its 15
+seconds.
+
 If the gate itself breaks, an order passes only when nothing is refusing new risk. While the kill
 switch is on, or its state could not be read, it is refused (fail closed). Under the kill switch
 or on a locked day, a positions read that fails is answered from the book read in the last
@@ -313,6 +321,13 @@ class _Reads:
 
 
 @dataclass(frozen=True)
+class _CheckClaims:
+    """The order would be refused only for claims on these broker orders: read their status."""
+
+    refs: frozenset
+
+
+@dataclass(frozen=True)
 class _Refusing:
     """What refuses new risk right now."""
 
@@ -502,34 +517,96 @@ class Gate:
         if refusing is None and not facts.pass_through and not facts.unreadable:
             lock, day_unread = self._day_facts(known, facts, guards)  # the figure, and its lock
             reads = self._limit_reads(known, facts, guards)  # the market and the lot size
-        with self._lock:
-            now = time.monotonic()
-            refusing = self._refusing()  # it may have changed while the book was read
-            if lock is None and guards.daily:
-                lock = self._day_locks.get((known.pipe, guards.day))  # another order's, meanwhile
-            if facts.pass_through:
-                return Decision(token=self._register(known, None, now))
-            if facts.unreadable:
-                if refusing is not None or lock is not None:
-                    return self._unreadable(known, refusing, lock)
-                return self._unjudged(known, guards, now)
-            if facts.stale and refusing is None and lock is None:
-                return self._unjudged(known, guards, now)  # a kept book judges refusals only
-            if refusing is None and lock is None and not day_unread and not guards.judges(known):
-                return Decision(token=self._register(known, None, now))
-            verdict, sent_at = self._judge(known, facts, now)
-            if verdict.reducing:
-                return Decision(token=self._register(known, verdict, now))
-            if refusing is not None:
-                return self._refuse(known, refusing, verdict, sent_at)
-            if lock is not None:
-                return self._refuse_daily(known, lock, verdict)
-            if day_unread:
-                detail = {"reason": verdict.reason, "position": verdict.position}
-                return Decision(
-                    True, words.daily_unreadable(known.pipe), GUARD_UNAVAILABLE, detail=detail
+        checked = False  # the order book read for claims, at most once per order
+        while True:
+            with self._lock:
+                now = time.monotonic()
+                refusing = self._refusing()  # it may have changed while the book was read
+                if lock is None and guards.daily:
+                    lock = self._day_locks.get((known.pipe, guards.day))  # another order's
+                decided = self._decide(
+                    known, facts, guards, refusing, lock, day_unread, reads, now, checked
                 )
-            return self._held_to_settings(known, guards, verdict, reads, now)
+            if not isinstance(decided, _CheckClaims):
+                return decided
+            checked = True
+            ended = self._ended_orders(known, decided.refs)  # a read: outside the lock
+            if ended:
+                with self._lock:
+                    self._drop_claims(known.pipe, ended)
+
+    def _decide(
+        self,
+        known: Order,
+        facts: _Facts,
+        guards: _Guards,
+        refusing: _Refusing | None,
+        lock: risk_store.DayLock | None,
+        day_unread: bool,
+        reads: _Reads,
+        now: float,
+        checked: bool,
+    ) -> Decision | _CheckClaims:
+        """Step 3: judge and decide, under the lock. ``_CheckClaims`` when the order would be
+        refused only because of claims the order book has not been read for yet."""
+        if facts.pass_through:
+            return Decision(token=self._register(known, None, now))
+        if facts.unreadable:
+            if refusing is not None or lock is not None:
+                return self._unreadable(known, refusing, lock)
+            return self._unjudged(known, guards, now)
+        if facts.stale and refusing is None and lock is None:
+            return self._unjudged(known, guards, now)  # a kept book judges refusals only
+        if refusing is None and lock is None and not day_unread and not guards.judges(known):
+            return Decision(token=self._register(known, None, now))
+        verdict, sent_at = self._judge(known, facts, now)
+        if verdict.reducing:
+            return Decision(token=self._register(known, verdict, now))
+        if not checked:
+            refs = self._claims_in_the_way(known, facts, verdict)
+            if refs:
+                return _CheckClaims(refs)
+        if refusing is not None:
+            return self._refuse(known, refusing, verdict, sent_at)
+        if lock is not None:
+            return self._refuse_daily(known, lock, verdict)
+        if day_unread:
+            detail = {"reason": verdict.reason, "position": verdict.position}
+            return Decision(
+                True, words.daily_unreadable(known.pipe), GUARD_UNAVAILABLE, detail=detail
+            )
+        return self._held_to_settings(known, guards, verdict, reads, now)
+
+    def _claims_in_the_way(self, order: Order, facts: _Facts, verdict: rules.Verdict) -> frozenset:
+        """The broker orders whose claims alone stop this order being an exit: none when it adds
+        risk whatever was sent before it. Call under the lock (after ``_judge``)."""
+        if verdict.claimed <= 0 or not self._verdict(order, facts, 0).reducing:
+            return frozenset()
+        return frozenset(send.ref for send in self._counted(order, facts.position) if send.ref)
+
+    def _ended_orders(self, order: Order, refs: frozenset) -> set[str]:
+        """Of ``refs``, the orders the broker shows cancelled, rejected or still resting: their
+        claims stand for nothing on its way to the positions book. A read that fails ends none."""
+        try:
+            if order.pipe == LIVE:
+                statuses = self._read.live_order_statuses(order.owner)
+            else:
+                statuses = self._read.sandbox_order_statuses(order.owner, sorted(refs))
+        except readers.Unreadable as exc:
+            logger.warning(f"The risk check could not read the order book for claims: {exc}")
+            return set()
+        return {ref for ref in refs if ref in statuses and statuses[ref] != "complete"}
+
+    def _drop_claims(self, pipe: str, refs: set[str]) -> None:
+        """What was sent on these broker orders stops counting; call under the lock."""
+        for token, send in list(self._sends.items()):
+            if send.order.pipe == pipe and send.ref in refs:
+                del self._sends[token]
+
+    def release(self, pipe: str, ref: str) -> None:
+        """An order the broker cancelled: its claims end (``cancelled``)."""
+        with self._lock:
+            self._drop_claims(pipe, {ref})
 
     def _refusing(self) -> _Refusing | None:
         """What refuses new risk now; call under the lock."""
@@ -875,6 +952,10 @@ class Gate:
 
     def _judge(self, order: Order, facts: _Facts, now: float) -> tuple[rules.Verdict, float | None]:
         claimed, sent_at = self._claimed(order, facts.position, now)
+        return self._verdict(order, facts, claimed), sent_at
+
+    def _verdict(self, order: Order, facts: _Facts, claimed: int) -> rules.Verdict:
+        """What the order does to its position, with ``claimed`` already on its way."""
         if order.action == MODIFY:
             verdict = rules.classify_modify(
                 facts.working,
@@ -896,19 +977,31 @@ class Gate:
             verdict = rules.classify(
                 order.side, order.quantity, facts.position, claimed, cnc_sell=order.cnc_sell
             )
-        return verdict, sent_at
+        return verdict
 
     def _claimed(self, order: Order, position: int, now: float) -> tuple[int, float | None]:
-        """c: what was sent on the order's position and side that the book does not show yet.
+        """c: what was sent on the order's position and side that the book does not show yet,
+        and when the latest of it was sent."""
+        counted = self._counted(order, position)
+        total = sum(send.quantity for send in counted)
+        latest = max((send.sent_at for send in counted), default=None)
+        return total, latest
 
-        An exit the book now shows is dropped here. Of the sends naming one broker order (an
-        order and its modifies), only the newest counts, and a modify leaves out its own order.
+    def _counted(self, order: Order, position: int) -> list[Send]:
+        """The sends that count as claims against ``order``: on its position and side, not yet
+        shown by the book. Call under the lock.
+
+        An exit the book now shows is dropped here. A send let go while nothing judged it counts
+        only until it is answered. Of the sends naming one broker order (an order and its
+        modifies), only the newest counts, and a modify leaves out its own order.
         """
         newest: dict[str, int] = {}
         counted: list[tuple[int, Send]] = []
         for token, send in list(self._sends.items()):
             if send.order.key != order.key or send.order.action not in (PLACE, MODIFY):
                 continue
+            if send.reducing is None and send.answered is not None:
+                continue  # never judged: a claim only while it is on its way
             if send.expect is not None and rules.exit_shown(
                 position, send.position_then, send.expect
             ):
@@ -921,14 +1014,11 @@ class Gate:
                     continue
                 newest[send.ref] = token
             counted.append((token, send))
-        total, latest = 0, None
-        for token, send in counted:
-            if send.ref and newest.get(send.ref) != token:
-                continue
-            if send.order.side == order.side:
-                total += send.quantity
-                latest = send.sent_at if latest is None else max(latest, send.sent_at)
-        return total, latest
+        return [
+            send
+            for token, send in counted
+            if not (send.ref and newest.get(send.ref) != token) and send.order.side == order.side
+        ]
 
     def _register(self, order: Order, verdict: rules.Verdict | None, now: float) -> int:
         """Record a send let go; call under the lock."""
@@ -1309,6 +1399,18 @@ def _tell_owner(text: str) -> None:
             _tell(Owner(admin.username, "app", "risk guard"), text)
     except Exception:
         logger.exception("A risk message could not be told on Telegram")
+
+
+def cancelled(orderid: object, pipe: str = LIVE) -> None:
+    """A cancel the broker confirmed (broker/upstox/api/order_api.cancel_order, the sandbox's
+    OrderManager.cancel_order): what this process sent on that order stops counting against its
+    position. One environment lookup while the guard does not cover the pipe; never raises."""
+    if not flag.covers(pipe):
+        return
+    try:
+        GATE.release(pipe, str(orderid))
+    except Exception:
+        logger.exception("A cancelled order's claims could not be let go")
 
 
 def _announce_unchecked(pipe: str) -> None:

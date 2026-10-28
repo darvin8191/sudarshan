@@ -36,6 +36,7 @@ class Book:
         self.rows: list[dict] = []
         self.cached: list[dict] | None = None
         self.orders: dict[str, readers.Working] = {}
+        self.statuses: dict[str, str] = {}  # order id -> status, as the order book shows it
         self.gtts: dict[str, readers.Gtt] = {}
         self.calls: list[str] = []
         self.fail: set[str] = set()
@@ -67,6 +68,10 @@ class Book:
     def live_gtt(self, auth, ref):
         self._read("gtts")
         return self.gtts.get(ref)
+
+    def live_order_statuses(self, auth):
+        self._read("statuses")
+        return dict(self.statuses)
 
 
 class Clock:

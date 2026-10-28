@@ -952,6 +952,7 @@ def cancel_order(orderid, auth):
         if response_data.get("status") == "success":
             canceled_id = _extract_order_id(response_data.get("data"))
             logger.debug(f"Successfully canceled order ID: {canceled_id}")
+            risk_gate.cancelled(orderid)  # SUDARSHAN M5.13: its claims end with it
             return {"status": "success", "orderid": canceled_id}, 200
         elif response_data.get("not_confirmed"):
             # SUDARSHAN M6.9: no usable answer (a timeout, a dropped connection, an Upstox
