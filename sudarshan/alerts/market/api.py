@@ -106,7 +106,12 @@ class Desk(Protocol):
 
 
 class OffDesk:
-    """Market alerts are switched off on the server (SUDARSHAN_MARKET_ALERTS is not on)."""
+    """Market alerts are off on the server: switched off (SUDARSHAN_MARKET_ALERTS is not on), or
+    kept off because a market setting could not be used, which ``reason`` says in the owner's
+    words with what to do (review H2: order alerts carry on either way)."""
+
+    def __init__(self, reason: str | None = None) -> None:
+        self.reason = reason
 
     def health(self) -> dict[str, Any]:
         return {"service": SERVICE, "market_alerts": "off", "state": "off", "alerts_active": 0,
@@ -114,15 +119,19 @@ class OffDesk:
 
     async def call(self, op: str, message: Mapping[str, Any]) -> Any:
         if op == "state":
-            return off_state(int(time.time() * 1000))
-        raise ApiError(409, "off", WORDS["off"])
+            return off_state(int(time.time() * 1000), self.reason)
+        raise ApiError(409, "off", self.reason or WORDS["off"])
 
 
-def off_state(now: int) -> dict[str, Any]:
-    """The page's state while market alerts are switched off: the line, and nothing else."""
+def off_state(now: int, reason: str | None = None) -> dict[str, Any]:
+    """The page's state while market alerts are off: the line, and nothing else."""
     return {
         "enabled": False,
-        "engine": {"code": "off", "line": "Switched off on the server", "real_time": False},
+        "engine": {
+            "code": "off",
+            "line": reason or "Switched off on the server",
+            "real_time": False,
+        },  # fmt: skip
         "segments": {},
         "limits": {"instruments": 0, "instruments_used": 0, "active": 0, "active_used": 0},
         "prefs": {"telegram": True, "app": True},

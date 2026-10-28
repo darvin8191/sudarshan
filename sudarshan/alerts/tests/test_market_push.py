@@ -343,3 +343,31 @@ def test_the_service_builds_market_alerts_with_their_api_and_their_push(alerts, 
             on._writer.shutdown()
 
     run(scenario)
+
+
+def test_market_alerts_that_cannot_start_say_so_and_never_stop_order_alerts(
+    alerts, tmp_path, monkeypatch, caplog
+):
+    """Review H2: service._market raised into main(), and the process then exited. Now market
+    alerts stay off with the page saying so, and the feed drops their keys."""
+    from sudarshan.alerts import service
+    from sudarshan.alerts.market import runtime as runtime_module
+    from sudarshan.alerts.market.api import OffDesk
+    from sudarshan.alerts.market.runtime import ReleasedClaims
+
+    def refuses(*args, **kwargs):
+        raise RuntimeError("a bug at start")
+
+    monkeypatch.setattr(runtime_module, "MarketRuntime", refuses)
+
+    async def scenario():
+        async with FakeOpenAlgo() as notify:
+            settings = alerts(notify)
+            market = MarketSettings.from_env({"SUDARSHAN_MARKET_ALERTS": "on"})
+            off, api, port = service._market(settings, market, tmp_path / "openalgo.db", Pacer())
+            assert isinstance(off, ReleasedClaims) and isinstance(api.desk, OffDesk)
+            line = (await api.desk.call("state", {}))["engine"]["line"]
+            assert line == service.NOT_STARTED and port == 5582
+
+    run(scenario)
+    assert "Market alerts could not start; order alerts carry on" in caplog.text

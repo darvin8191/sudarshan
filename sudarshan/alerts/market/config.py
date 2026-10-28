@@ -3,6 +3,8 @@
 The unit reads ``/etc/sudarshan/alerts.env`` (cross-design R3: the release ships the default the
 deploy writes when the key is absent; the owner's value is kept). Market alerts are off unless
 ``SUDARSHAN_MARKET_ALERTS=on``; the process exits only when they and order alerts are both off.
+A value here the service cannot use keeps market alerts off and never stops order alerts
+(service._market_settings): the Alerts page says which setting to correct.
 
 | setting | default |
 |---|---|

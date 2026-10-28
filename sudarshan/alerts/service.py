@@ -613,9 +613,54 @@ def _stop(service: AlertService, market, reason: str) -> None:
         market.stop(reason)
 
 
-def _market(settings: Settings, market: MarketSettings | None, db_path, pacer: Pacer):
-    """M10.1: market alerts and their local API, or, switched off, the API saying so while the
-    feed drops the keys an earlier run claimed."""
+#: Where the owner corrects a market setting: the unit's environment file (M10.1).
+ALERTS_ENV = "/etc/sudarshan/alerts.env"
+#: The Alerts page's line when market alerts could not start for a reason no setting explains.
+NOT_STARTED = (
+    "Market alerts could not start on the server; order alerts carry on. Restart "
+    "sudarshan-alerts; if this stays, its journal says why."
+)
+
+
+def _market_settings() -> tuple[bool, MarketSettings | None, str | None]:
+    """M10.1: whether market alerts are wanted, their settings, and why they are off when one
+    cannot be used. Never raises: a market setting never stops order alerts (review H2), and
+    a mistyped switch counts as wanted, so the Alerts page can say what to correct."""
+    try:
+        if not market_on():
+            return False, None, None
+        return True, MarketSettings.from_env(), None
+    except ConfigError as exc:
+        reason = (
+            f"Market alerts are off: {exc}. Correct it in {ALERTS_ENV}, then restart "
+            "sudarshan-alerts."
+        )
+        log.error("%s Order alerts carry on.", reason)
+        return True, None, reason
+
+
+def _market(
+    settings: Settings,
+    market: MarketSettings | None,
+    db_path,
+    pacer: Pacer,
+    off: str | None = None,
+):
+    """M10.1: market alerts and their local API, or, off, the API saying so (``off``: why) while
+    the feed drops the keys an earlier run claimed. Never raises: a failure here keeps market
+    alerts off with the page saying so, and order alerts carry on (review H2)."""
+    try:
+        return _market_parts(settings, market, db_path, pacer, off)
+    except Exception:
+        log.exception("Market alerts could not start; order alerts carry on")
+    try:
+        return _market_parts(settings, None, db_path, pacer, NOT_STARTED)
+    except Exception:
+        log.exception("Market alerts' local API could not start either")
+        return None, None, 0
+
+
+def _market_parts(settings, market, db_path, pacer, off):
     from sudarshan.vault import ALERTS_API_INFO, ALERTS_PUSH_INFO, fernet_for, pepper_from
 
     from .market.api import MarketApi, OffDesk
@@ -625,7 +670,7 @@ def _market(settings: Settings, market: MarketSettings | None, db_path, pacer: P
     pepper = pepper_from(os.environ)
     fernet = fernet_for(pepper, ALERTS_API_INFO)
     if market is None:
-        return ReleasedClaims(feed_url_of()), MarketApi(OffDesk(), fernet), http_port_of()
+        return ReleasedClaims(feed_url_of()), MarketApi(OffDesk(off), fernet), http_port_of()
     runtime = MarketRuntime(settings, market, owner_reader=lambda: read_owner(db_path),
                             pacer=pacer, openalgo_db=db_path,
                             push_fernet=fernet_for(pepper, ALERTS_PUSH_INFO))  # fmt: skip
@@ -634,13 +679,12 @@ def _market(settings: Settings, market: MarketSettings | None, db_path, pacer: P
 
 def main() -> int:
     setup_logging()
+    market_wanted, market, market_off = _market_settings()  # M10.1: never stops order alerts
     try:
-        market_wanted = market_on()  # M10.1: the process ends only when both are off
         if switched_off() and not market_wanted:
             log.info("Order alerts are off (SUDARSHAN_ORDER_ALERTS=off): nothing is sent")
             return 0  # the unit restarts on failure only, so it stays stopped
         settings = Settings.from_env()
-        market = MarketSettings.from_env() if market_wanted else None  # M10.1
         db_path = prepare_openalgo_env(settings.env_file, settings.app_dir)
         load_openalgo_modules()
         setup_logging()  # OpenAlgo's logging module replaced the handlers on import
@@ -652,7 +696,7 @@ def main() -> int:
         return 2
     pacer = Pacer()  # M10.5: fills first, market alerts in what is left
     service = AlertService(settings, owner_reader=lambda: read_owner(db_path), pacer=pacer)
-    runtime, api, port = _market(settings, market, db_path, pacer)  # M10.1
+    runtime, api, port = _market(settings, market, db_path, pacer, market_off)  # M10.1
     try:
         asyncio.run(_serve(service, runtime, api, port))
     except Exception:  # a bug: systemd restarts it

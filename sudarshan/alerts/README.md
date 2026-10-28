@@ -170,9 +170,11 @@ tool starts ring services again after each release.
 | `SUDARSHAN_OPENALGO_WS_URL` | `ws://127.0.0.1:8765` | loopback only |
 
 Settings go in `/etc/sudarshan/alerts.env` (root:sudarshan 640); a missing file means the
-defaults; a change needs `sudo systemctl restart sudarshan-alerts`. A value the service cannot
-use stops it with a plain line in the journal and exit status 2, which systemd does not retry:
-fix the file, then restart. After a crash systemd restarts it every 10 s.
+defaults; a change needs `sudo systemctl restart sudarshan-alerts`. An order-alert value the
+service cannot use stops it with a plain line in the journal and exit status 2, which systemd
+does not retry: fix the file, then restart. A market-alert value it cannot use never stops it:
+market alerts stay off, the journal and the Alerts page say which setting to correct, and order
+alerts carry on. After a crash systemd restarts it every 10 s.
 
 ## The API key and the trust boundary
 
@@ -315,7 +317,9 @@ and one per alert (`order <id>: filled`); repeated problems at most once per 5 o
 Price, % move, day high or low and VWAP alerts the owner sets on the Alerts page, judged tick by
 tick on the price feed in this same service, and told on Telegram (and, with M10.7, in the app).
 Off until `SUDARSHAN_MARKET_ALERTS=on`; with it on, `SUDARSHAN_ORDER_ALERTS=off` stops only order
-alerts, and the service exits only when both are off.
+alerts, and the service exits only when both are off. A market setting it cannot use (a mistyped
+switch, a limit out of range) keeps market alerts off with the reason on the Alerts page, and
+never stops order alerts.
 
 ```
 sudarshan-feed (one Upstox socket) -> ZMQ 127.0.0.1:5581 (ticks, __health__)
