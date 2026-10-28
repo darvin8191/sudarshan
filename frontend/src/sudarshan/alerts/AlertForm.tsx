@@ -1,11 +1,12 @@
-import { useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Info, Search } from 'lucide-react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { AlertTriangle, Info, LoaderCircle, Search } from 'lucide-react'
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import {
   type AlertDraft,
   type AlertExchange,
   type AlertKind,
   type AlertRow,
+  type AlertsError,
   type BreakParams,
   type Candle,
   type Frequency,
@@ -37,7 +38,7 @@ import { toast } from '@/utils/toast'
 import { PriceLine } from './AlertCard'
 import { ALERTS_PATH } from './marketAlerts'
 import { needsQuote, segmentOpen } from './measure'
-import { dropRow, putRow, STATE_KEY } from './stateCache'
+import { dropRow, PREFS_KEY, putRow, STATE_KEY } from './stateCache'
 import {
   checksAtWords,
   isCovered,
@@ -429,8 +430,21 @@ export function AlertFormSheet({
     instrument && form.kind === 'price'
       ? priceNote(name, instrument.exchange, form.op, form.level, watched)
       : null
-  const prefs = state?.prefs ?? { telegram: true, app: true }
-  const channels = form.channels ?? prefs
+  // Where alerts go by default, read from the server each time the form opens: the switches
+  // take a tap only once that read has answered (/state's copy only fills in meanwhile).
+  const settings = useQuery<Prefs, AlertsError>({
+    queryKey: PREFS_KEY,
+    queryFn: marketAlertsApi.prefs,
+    placeholderData: state?.prefs,
+    staleTime: 0,
+    retry: false,
+  })
+  const settled =
+    settings.data !== undefined &&
+    !settings.isPlaceholderData &&
+    !settings.isFetching &&
+    !settings.isError
+  const channels = form.channels ?? settings.data ?? null
   const atClose =
     form.kind === 'day_break'
       ? NOT_FOR.breakAtClose
@@ -794,24 +808,26 @@ export function AlertFormSheet({
 
         <fieldset className={FIELD}>
           <legend className={LEGEND}>Send to</legend>
-          {(['telegram', 'app'] as const).map((channel) => (
-            <label
-              key={channel}
-              className="flex min-h-12 items-center justify-between gap-3 rounded-[0.875rem] border px-3"
-            >
-              <span className="text-sm font-semibold">
-                {channel === 'telegram' ? 'Telegram' : 'App'}
-              </span>
-              <Switch
-                checked={channels[channel]}
-                onCheckedChange={(on) =>
-                  set({ channels: { ...channels, [channel]: on } }, 'channels')
-                }
-              />
-            </label>
-          ))}
+          {channels &&
+            (['telegram', 'app'] as const).map((channel) => (
+              <label
+                key={channel}
+                className="flex min-h-12 items-center justify-between gap-3 rounded-[0.875rem] border px-3"
+              >
+                <span className="text-sm font-semibold">
+                  {channel === 'telegram' ? 'Telegram' : 'App'}
+                </span>
+                <Switch
+                  checked={channels[channel]}
+                  disabled={form.channels === null && !settled}
+                  onCheckedChange={(on) =>
+                    set({ channels: { ...channels, [channel]: on } }, 'channels')
+                  }
+                />
+              </label>
+            ))}
           {form.channels === null ? (
-            <p className="text-xs font-medium text-muted-foreground">As in your alert settings.</p>
+            <SettingsWords settled={settled} error={settings.error} />
           ) : (
             <button
               type="button"
@@ -901,6 +917,27 @@ function shownFields(form: Form): Set<string> {
   const candle = form.frequency === 'per_candle' || form.frequency === 'at_close' ? ['candle'] : []
   const common = ['instrument', 'kind', 'frequency', 'cooldown_s', 'ends', 'channels', 'note']
   return new Set([...common, ...kind, ...candle])
+}
+
+/** What "Send to" follows when the alert has no channels of its own, and whether it is known yet. */
+function SettingsWords({ settled, error }: { settled: boolean; error: AlertsError | null }) {
+  if (settled) {
+    return <p className="text-xs font-medium text-muted-foreground">As in your alert settings.</p>
+  }
+  if (error) {
+    return (
+      <p className="flex items-start gap-1.5 text-xs font-medium text-[color:var(--warning-text)]">
+        <AlertTriangle aria-hidden="true" className="mt-px size-3.5 shrink-0" />
+        {`${error.message} This alert follows your alert settings.`}
+      </p>
+    )
+  }
+  return (
+    <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+      <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" />
+      Reading your alert settings
+    </p>
+  )
 }
 
 /** The form's price line, its age moved on every second by itself, not by the whole form. */

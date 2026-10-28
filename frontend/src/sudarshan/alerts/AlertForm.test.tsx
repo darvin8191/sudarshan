@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/lib/MarketDataManager', () => import('@/test/marketDataHarness'))
 
-const api = vi.hoisted(() => ({ create: vi.fn(), change: vi.fn() }))
+const api = vi.hoisted(() => ({ create: vi.fn(), change: vi.fn(), prefs: vi.fn(), state: vi.fn() }))
 vi.mock('@/api/marketAlerts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/api/marketAlerts')>()),
   marketAlertsApi: api,
@@ -80,9 +80,10 @@ const SBIN: AlertPrefill = { symbol: 'SBIN', exchange: 'NSE', tick: 0.05, price:
 
 type FormProps = Partial<Parameters<typeof AlertFormSheet>[0]>
 
-function renderForm(props: FormProps = {}) {
+/** The form as a host draws it; `cached` false for one away from the Alerts page (no /state). */
+function renderForm(props: FormProps = {}, cached = true) {
   const client = createQueryClient()
-  client.setQueryData(STATE_KEY, alertsState())
+  if (cached) client.setQueryData(STATE_KEY, alertsState())
   const onSaved = vi.fn()
   const onClose = vi.fn()
   const tree = (given: FormProps) => (
@@ -111,8 +112,8 @@ const pressed = (sheet: HTMLElement, legend: string) =>
 
 beforeEach(() => {
   feed.reset()
-  api.create.mockReset()
-  api.change.mockReset()
+  for (const fn of Object.values(api)) fn.mockReset()
+  api.prefs.mockResolvedValue({ telegram: true, app: true })
   for (const fn of Object.values(toasts)) fn.mockReset()
   useAuthStore.setState({ apiKey: 'key' })
 })
@@ -122,7 +123,7 @@ afterEach(() => {
 })
 
 describe('a new alert', () => {
-  it('opens on the contract’s defaults, its level the live price snapped to the paisa', () => {
+  it('opens on the contract’s defaults, its level the live price snapped to the paisa', async () => {
     const { sheet } = renderForm({ prefill: NIFTY })
 
     expect(within(sheet).getByRole('heading', { name: 'New alert' })).toBeInTheDocument()
@@ -132,7 +133,60 @@ describe('a new alert', () => {
     expect(pressed(sheet, 'How often')).toEqual(['Once'])
     expect(within(sheet).getByLabelText('Wait between alerts')).toHaveValue('0')
     expect(pressed(sheet, 'Ends')).toEqual(['In 60 days'])
-    expect(within(sheet).getByText('As in your alert settings.')).toBeInTheDocument()
+    expect(await within(sheet).findByText('As in your alert settings.')).toBeInTheDocument()
+  })
+
+  it('reads where alerts go from the server, and takes no tap on Send to before it answers', async () => {
+    let answer: (prefs: { telegram: boolean; app: boolean }) => void = () => {}
+    api.prefs.mockReturnValue(
+      new Promise((resolve) => {
+        answer = resolve
+      })
+    )
+    const { sheet } = renderForm({ prefill: SBIN }, false)
+
+    expect(within(sheet).getByText('Reading your alert settings')).toBeInTheDocument()
+    expect(within(sheet).queryByRole('switch')).toBeNull()
+    expect(within(sheet).queryByText('As in your alert settings.')).toBeNull()
+
+    answer({ telegram: false, app: true })
+    expect(await within(sheet).findByText('As in your alert settings.')).toBeInTheDocument()
+    expect(within(sheet).getByRole('switch', { name: 'Telegram' })).not.toBeChecked()
+    expect(within(sheet).getByRole('switch', { name: 'App' })).toBeChecked()
+    expect(within(sheet).getByRole('switch', { name: 'App' })).toBeEnabled()
+    expect(api.prefs).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows the settings /state holds while it reads them, without taking a tap', async () => {
+    let answer: (prefs: { telegram: boolean; app: boolean }) => void = () => {}
+    api.prefs.mockReturnValue(
+      new Promise((resolve) => {
+        answer = resolve
+      })
+    )
+    const { sheet } = renderForm({ prefill: SBIN })
+
+    expect(within(sheet).getByRole('switch', { name: 'Telegram' })).toBeDisabled()
+    expect(within(sheet).getByText('Reading your alert settings')).toBeInTheDocument()
+    answer({ telegram: true, app: true })
+    await waitFor(() =>
+      expect(within(sheet).getByRole('switch', { name: 'Telegram' })).toBeEnabled()
+    )
+  })
+
+  it('says the settings could not be read, in the server’s words, and still saves', async () => {
+    const sentence =
+      'The alert service is not answering. Your alerts are kept; checking resumes when it is back.'
+    api.prefs.mockRejectedValue(
+      new AlertsError({ code: 'not_answering', message: sentence, field: null })
+    )
+    const { sheet } = renderForm({ prefill: SBIN }, false)
+
+    expect(
+      await within(sheet).findByText(`${sentence} This alert follows your alert settings.`)
+    ).toBeInTheDocument()
+    expect(within(sheet).queryByRole('switch')).toBeNull()
+    expect(within(sheet).getByRole('button', { name: 'Save' })).toBeEnabled()
   })
 
   it('runs a derivative to its expiry unless told otherwise', () => {

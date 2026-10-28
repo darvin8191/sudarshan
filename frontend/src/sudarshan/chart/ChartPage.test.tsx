@@ -107,11 +107,12 @@ vi.mock('@/components/trading/SymbolSearchDialog', () => ({
 vi.mock('@/lib/MarketDataManager', () => import('@/test/marketDataHarness'))
 const alerting = vi.hoisted(() => ({
   create: vi.fn(),
+  prefs: vi.fn(async () => ({ telegram: true, app: true })),
   toasts: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() },
 }))
 vi.mock('@/api/marketAlerts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/api/marketAlerts')>()),
-  marketAlertsApi: { create: alerting.create },
+  marketAlertsApi: { create: alerting.create, prefs: alerting.prefs },
 }))
 vi.mock('@/utils/toast', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/utils/toast')>()),
