@@ -19,7 +19,7 @@ import type { FeedState } from '@/sudarshan/live/useFrameLines'
 import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
 import { useOpenGuard } from '@/sudarshan/watchlist/openGuard'
 import { describe } from '@/sudarshan/watchlist/rows'
-import { firedWords, PriceLine } from './AlertCard'
+import { auctionShown, firedWords, PriceLine } from './AlertCard'
 import { type AlertAction, NO_ANSWER, sendChange, useHeld } from './actions'
 import { RecentFires } from './HistoryList'
 import { AlertStatusChip, BusyIcon, ConditionText, HELD, LineText } from './lines'
@@ -81,6 +81,8 @@ function Sheet({
   const move = MOVE[row.status] ?? MOVE.stopped
   const MoveIcon = move.icon
   const sending = (action: AlertAction) => held?.action === action && held.state === 'sending'
+  // The price line already shows the check in the auction window: once is enough.
+  const shownInPrice = live.followed && auctionShown(row, live.feed, live.now) !== null
 
   return (
     <BottomSheet
@@ -117,7 +119,7 @@ function Sheet({
             {row.status_reason}
           </p>
         )}
-        {row.check && <LineText line={row.check} />}
+        {row.check && !shownInPrice && <LineText line={row.check} />}
 
         <Details
           rows={[

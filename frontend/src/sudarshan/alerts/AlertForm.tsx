@@ -394,16 +394,27 @@ export function AlertFormSheet({
 
   const { instrument } = form
   const index = instrument !== null && isIndex(instrument.exchange)
+  // A stock in its closing auction says so, not "Delayed": the auction is known from the alert
+  // being edited, or from any alert the page holds on the same instrument.
+  const known = useMemo(() => {
+    if (!instrument) return null
+    const same = (each: AlertRow | null): each is AlertRow =>
+      each !== null &&
+      each.symbol === instrument.symbol &&
+      each.exchange === instrument.exchange &&
+      each.auction !== null
+    return [row, ...(state?.alerts ?? [])].find(same) ?? null
+  }, [instrument, row, state])
   const draftRow = useMemo(
     () =>
       ({
         kind: form.kind,
         params: paramsOf(form),
         exchange: instrument?.exchange ?? 'NSE',
-        auction: null,
-        check: null,
+        auction: known?.auction ?? null,
+        check: known?.check?.code === 'closing_auction' ? known.check : null,
       }) as unknown as AlertRow,
-    [form, instrument]
+    [form, instrument, known]
   )
   const instruments = useMemo(
     () => (instrument ? [{ symbol: instrument.symbol, exchange: instrument.exchange }] : []),

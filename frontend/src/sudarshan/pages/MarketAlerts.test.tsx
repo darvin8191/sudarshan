@@ -45,6 +45,30 @@ const toasts = vi.hoisted(() => ({
 }))
 vi.mock('@/utils/toast', () => ({ toast: toasts, showToast: toasts }))
 
+/** The app's connection to OpenAlgo, as the socket provider hands it out; none unless a test sets one. */
+const sockets = vi.hoisted(() => {
+  const handlers = new Map<string, Set<() => void>>()
+  const socket = {
+    connected: true,
+    on(event: string, handler: () => void) {
+      if (!handlers.has(event)) handlers.set(event, new Set())
+      handlers.get(event)?.add(handler)
+    },
+    off(event: string, handler: () => void) {
+      handlers.get(event)?.delete(handler)
+    },
+    /** Drop or restore the connection, telling whoever listens. */
+    set(up: boolean) {
+      socket.connected = up
+      for (const handler of handlers.get(up ? 'connect' : 'disconnect') ?? []) handler()
+    },
+  }
+  return { current: null as typeof socket | null, socket, handlers }
+})
+vi.mock('@/components/socket/SocketProvider', () => ({
+  useSocketContext: () => ({ socket: sockets.current, playAlertSound: () => {} }),
+}))
+
 import { type AlertRow, AlertsError, type LineCode } from '@/api/marketAlerts'
 import { createQueryClient } from '@/app/providers'
 import { useAuthStore } from '@/stores/authStore'
@@ -53,7 +77,7 @@ import { LineText } from '@/sudarshan/alerts/lines'
 import { resetMarketAlertsForTests } from '@/sudarshan/alerts/marketAlerts'
 import { STALE_MS } from '@/sudarshan/dashboard/live'
 import { fakeClock, frames } from '@/test/frames'
-import { alertRow, alertsState, NOW } from '@/test/marketAlerts'
+import { alertRow, alertsState, NOW, WATCHING } from '@/test/marketAlerts'
 import { feed } from '@/test/marketDataHarness'
 import MarketAlerts, { LIVE_CAP } from './MarketAlerts'
 
@@ -121,6 +145,9 @@ beforeEach(() => {
   api.events.mockResolvedValue({ events: [], more: false })
   api.prefs.mockResolvedValue({ telegram: true, app: true })
   useAuthStore.setState({ apiKey: 'key' })
+  sockets.current = null
+  sockets.socket.connected = true
+  sockets.handlers.clear()
 })
 
 afterEach(() => {
@@ -279,6 +306,50 @@ describe('the Alerts page', () => {
   })
 })
 
+describe('the line under the title', () => {
+  const header = () => document.getElementById('sd-alerts-line') as HTMLElement
+
+  it('greys the server’s line, as last read, while the page’s own feed is down', async () => {
+    renderPage()
+    await settle()
+    tick('SBIN', 'NSE', { ltp: 100.25 })
+    expect(header().querySelector('[data-heard]')).toHaveAttribute('data-heard', 'yes')
+    expect(header().textContent).not.toContain('as last read')
+
+    act(() =>
+      feed.setState({ connectionState: 'disconnected', isConnected: false, isAuthenticated: false })
+    )
+    expect(header().querySelector('[data-heard]')).toHaveAttribute('data-heard', 'no')
+    expect(header().textContent).toBe('Watching · Real-time· as last read')
+
+    act(() =>
+      feed.setState({ connectionState: 'authenticated', isConnected: true, isAuthenticated: true })
+    )
+    expect(header().textContent).not.toContain('as last read')
+  })
+
+  it('greys it too while the app’s connection to OpenAlgo is down, so no push can arrive', async () => {
+    sockets.current = sockets.socket
+    renderPage()
+    await settle()
+    expect(header().textContent).not.toContain('as last read')
+
+    act(() => sockets.socket.set(false))
+    expect(header().querySelector('[data-heard]')).toHaveAttribute('data-heard', 'no')
+    expect(header().textContent).toContain('as last read')
+
+    act(() => sockets.socket.set(true))
+    expect(header().textContent).not.toContain('as last read')
+  })
+
+  it('draws a tab’s count in its own ink, not faded below 4.5:1', async () => {
+    renderPage()
+    await settle()
+    const count = within(screen.getByRole('tab', { name: 'Active (1)' })).getByText('(1)')
+    expect(count.className).not.toMatch(/opacity/)
+  })
+})
+
 describe('live prices on the cards', () => {
   it('shows the figure the alert watches and its distance, Real-time while ticks come', async () => {
     renderPage()
@@ -353,6 +424,138 @@ describe('live prices on the cards', () => {
 
     expect(card(12).querySelector('[data-feed]')).toBeNull()
     expect(within(card(12)).getAllByText('Closing auction · price at about 15:30')).toHaveLength(1)
+  })
+
+  it('marks a dropped feed in the auction window too, and greys the price, instead of the auction line', async () => {
+    const auction = { from: NOW - 60_000, close: NOW + 14 * 60_000, until: NOW + 19 * 60_000 }
+    const check = {
+      code: 'closing_auction' as const,
+      line: 'Closing auction · price at about 15:30',
+      real_time: false,
+    }
+    api.state.mockResolvedValue(alertsState({ alerts: [alertRow({ auction, check })] }))
+    renderPage()
+    await settle()
+    tick('SBIN', 'NSE', { ltp: 100.25 })
+    act(() =>
+      feed.setState({ connectionState: 'disconnected', isConnected: false, isAuthenticated: false })
+    )
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(STALE_MS + 2_000)
+    })
+    act(() => frames.flush())
+
+    expect(card(12).querySelector('[data-feed="connecting"]')?.textContent).toMatch(
+      /^Reconnecting · updated \d+s ago$/
+    )
+    expect(card(12).querySelector('[data-stale]')).not.toBeNull()
+    // The auction still shows, once, as the card's check.
+    expect(within(card(12)).getAllByText('Closing auction · price at about 15:30')).toHaveLength(1)
+  })
+
+  it('keeps the auction window through its last moment, and leaves it after', async () => {
+    const check = {
+      code: 'closing_auction' as const,
+      line: 'Closing auction · price at about 15:30',
+      real_time: false,
+    }
+    api.state.mockResolvedValue(
+      alertsState({
+        alerts: [
+          alertRow({ id: 1, auction: { from: NOW - 60_000, close: NOW, until: NOW }, check }),
+          alertRow({ id: 2, auction: { from: NOW - 60_000, close: NOW - 2, until: NOW - 1 } }),
+        ],
+      })
+    )
+    vi.useFakeTimers({
+      toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'],
+    })
+    vi.setSystemTime(NOW)
+    renderPage()
+    await settle()
+
+    expect(card(1).querySelector('[data-line="closing_auction"]')).not.toBeNull()
+    expect(card(1).querySelector('[data-feed]')).toBeNull()
+    expect(card(2).querySelector('[data-feed]')).not.toBeNull()
+  })
+
+  it('never calls a price from the REST fallback Real-time', async () => {
+    renderPage()
+    await settle()
+    act(() => {
+      feed.push('SBIN', 'NSE', { ltp: 100.25 }, 'rest')
+      frames.flush()
+    })
+
+    expect(within(card(12)).getByText('₹100.25')).toBeInTheDocument()
+    expect(card(12).textContent).not.toContain('Real-time')
+    expect(card(12).querySelector('[data-feed]')?.getAttribute('data-feed')).toBe('delayed')
+  })
+
+  it('leaves out a card’s check where it repeats the line under the title, and shows any other', async () => {
+    const closed = {
+      code: 'outside_hours' as const,
+      line: 'Market closed · checks from Thu 09:15',
+      real_time: false,
+    }
+    const waiting = { code: 'waiting' as const, line: "Waiting for today's open", real_time: true }
+    api.state.mockResolvedValue(
+      alertsState({
+        engine: closed,
+        segments: { NSE_EQ: closed },
+        alerts: [alertRow({ id: 1, check: closed }), alertRow({ id: 2, check: waiting })],
+      })
+    )
+    renderPage()
+    await settle()
+
+    expect(within(card(1)).queryByText('Market closed · checks from Thu 09:15')).toBeNull()
+    expect(within(card(2)).getByText("Waiting for today's open")).toBeInTheDocument()
+  })
+
+  it('reads each alert’s session from its own segment: a future under NSE_FO', async () => {
+    const closed = { code: 'outside_hours' as const, line: 'Market closed', real_time: false }
+    api.state.mockResolvedValue(
+      alertsState({
+        segments: { NSE_EQ: WATCHING, NSE_FO: closed },
+        alerts: [
+          alertRow({
+            id: 5,
+            symbol: 'NIFTY25NOV26FUT',
+            exchange: 'NFO',
+            instrument_key: 'NSE_FO|51714',
+            tick_size: '0.1',
+            expiry: '2026-11-25',
+          }),
+        ],
+      })
+    )
+    renderPage()
+    await settle()
+    tick('NIFTY25NOV26FUT', 'NFO', { ltp: 26010.1 })
+
+    expect(card(5).querySelector('[data-feed="closed"]')?.textContent).toBe('Market closed')
+  })
+
+  it('takes a segment whose price feed is down on the server as open, so a dropped page feed greys', async () => {
+    const down = {
+      code: 'feed_down' as const,
+      line: 'Not checking since 10:41:05 · the price feed is reconnecting',
+      real_time: false,
+    }
+    api.state.mockResolvedValue(alertsState({ segments: { NSE_EQ: down } }))
+    renderPage()
+    await settle()
+    tick('SBIN', 'NSE', { ltp: 100.25 })
+    act(() =>
+      feed.setState({ connectionState: 'disconnected', isConnected: false, isAuthenticated: false })
+    )
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(STALE_MS + 2_000)
+    })
+    act(() => frames.flush())
+
+    expect(card(12).querySelector('[data-stale]')).not.toBeNull()
   })
 
   it('follows at most 100 instruments, and says so', async () => {
@@ -441,6 +644,10 @@ describe('an alert’s sheet', () => {
 
     await user.click(within(sheet).getByRole('button', { name: 'Pause' }))
     expect(within(sheet).getByRole('button', { name: 'Pausing' })).toBeDisabled()
+    // Busy says so with a turning mark, not by fading its words.
+    expect(
+      within(sheet).getByRole('button', { name: 'Pausing' }).querySelector('.animate-spin')
+    ).not.toBeNull()
     expect(within(sheet).getByRole('button', { name: 'Edit' })).toBeDisabled()
     expect(within(sheet).getByRole('button', { name: 'Delete' })).toBeDisabled()
     await user.click(within(sheet).getByRole('button', { name: 'Pausing' }))
@@ -537,6 +744,22 @@ describe('an alert’s sheet', () => {
       await vi.advanceTimersByTimeAsync(NO_ANSWER_HOLD_MS)
     })
     expect(within(sheet).getByRole('button', { name: 'Delete' })).toBeEnabled()
+  })
+
+  it('shows the auction line once in the sheet, in its price line', async () => {
+    const auction = { from: NOW - 60_000, close: NOW + 14 * 60_000, until: NOW + 19 * 60_000 }
+    const check = {
+      code: 'closing_auction' as const,
+      line: 'Closing auction · price at about 15:30',
+      real_time: false,
+    }
+    api.state.mockResolvedValue(alertsState({ alerts: [alertRow({ auction, check })] }))
+    renderPage(['/market-alerts?alert=12'])
+    await settle()
+
+    expect(
+      within(screen.getByRole('dialog')).getAllByText('Closing auction · price at about 15:30')
+    ).toHaveLength(1)
   })
 
   it('closes when the alert it names is not there', async () => {

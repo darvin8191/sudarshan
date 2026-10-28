@@ -638,6 +638,17 @@ describe('an edit', () => {
     expect(api.change.mock.calls[0][1].version).toBe(3)
   })
 
+  it('says the auction line for a stock in its closing auction, not Delayed', () => {
+    const now = Date.now()
+    const auction = { from: now - 60_000, close: now + 10 * 60_000, until: now + 15 * 60_000 }
+    const { sheet } = renderForm({ row: { ...held, auction } })
+
+    expect(
+      within(sheet).getByText(/^Closing auction · price at about \d\d:\d\d$/)
+    ).toBeInTheDocument()
+    expect(sheet.querySelector('[data-feed]')).toBeNull()
+  })
+
   it('drops an alert already gone, in the server’s words', async () => {
     api.change.mockRejectedValue(
       new AlertsError({ code: 'gone', message: 'This alert has been deleted.', field: null })

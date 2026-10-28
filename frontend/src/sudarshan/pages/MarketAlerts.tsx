@@ -17,7 +17,14 @@ import { needsQuote, segmentOpen } from '@/sudarshan/alerts/measure'
 import { SettingsSheet } from '@/sudarshan/alerts/SettingsSheet'
 import { type AlertTab, useAlertOverlay } from '@/sudarshan/alerts/useAlertOverlay'
 import { useMarketAlertsState } from '@/sudarshan/alerts/useMarketAlertsState'
-import { EmptyCard, LoadingCards, OUTLINED, StaleBookNote } from '@/sudarshan/books/cards/parts'
+import { useSocketUp } from '@/sudarshan/alerts/useSocketUp'
+import {
+  EmptyCard,
+  LoadingCards,
+  OUTLINED,
+  STALE,
+  StaleBookNote,
+} from '@/sudarshan/books/cards/parts'
 import { useNow } from '@/sudarshan/dashboard/hooks'
 import { keyOf } from '@/sudarshan/dashboard/live'
 import { type Instrument, useFrameLines } from '@/sudarshan/live/useFrameLines'
@@ -102,6 +109,13 @@ export default function MarketAlerts() {
     marketOpen: segmentOpen(state?.segments, row),
   })
   const problem = query.error
+  // The engine line is as current as the page can hear: with the app's connection down no push
+  // arrives, and with the page's own feed down its cards say Reconnecting. Either way the line
+  // stays, grey, "as last read", rather than claim Real-time.
+  const socketUp = useSocketUp()
+  const deaf =
+    socketUp === false ||
+    (followed.list.length > 0 && apiKey !== null && feed.epoch > 0 && !feed.connected)
 
   return (
     <div className="flex flex-col gap-2">
@@ -136,7 +150,17 @@ export default function MarketAlerts() {
             {problem.message}
           </span>
         ) : state ? (
-          <LineText line={state.engine} />
+          <span
+            data-heard={deaf ? 'no' : 'yes'}
+            className="inline-flex flex-wrap items-start gap-x-1.5"
+          >
+            <LineText line={state.engine} className={deaf ? STALE : undefined} />
+            {deaf && (
+              <span className="text-[0.8125rem] font-semibold text-[color:var(--stale)]">
+                · as last read
+              </span>
+            )}
+          </span>
         ) : (
           <span className="inline-flex items-center gap-1.5 text-[0.8125rem] font-semibold text-[color:var(--text-secondary)]">
             <LoaderCircle aria-hidden="true" className="size-4 animate-spin" />
@@ -287,7 +311,7 @@ function Tabs({
               {count !== null && (
                 <>
                   {' '}
-                  <span className="text-xs font-semibold opacity-80">({count})</span>
+                  <span className="text-xs font-semibold">({count})</span>
                 </>
               )}
             </span>

@@ -5,15 +5,18 @@ import { cn } from '@/lib/utils'
 import { CARD, STALE } from '@/sudarshan/books/cards/parts'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
 import { priceOf } from '@/sudarshan/dashboard/live'
-import { auctionWaiting } from '@/sudarshan/live/auction'
+import { auctionWaiting, inAuction } from '@/sudarshan/live/auction'
 import type { FeedState } from '@/sudarshan/live/useFrameLines'
 import { describe, statusLine } from '@/sudarshan/watchlist/rows'
 import { AlertStatusChip, ConditionText, LineText } from './lines'
 import { measure, money } from './measure'
 
-/** Inside its closing auction (from the end of continuous trading until the last print): no trades are due. */
+/**
+ * Inside its closing auction, from the end of continuous trading to the last moment a print is
+ * taken (`until` included), by the one rule every screen uses (live/auction.ts): no trades due.
+ */
 export function inAuctionWindow(row: Pick<AlertRow, 'auction'>, now: number): boolean {
-  return row.auction !== null && row.auction.from <= now && now < row.auction.until
+  return inAuction(now, row.auction?.from, row.auction?.until)
 }
 
 /** The line a card shows in its auction window in place of the freshness mark: the server's. */
@@ -26,6 +29,19 @@ export function auctionLine(row: Pick<AlertRow, 'auction' | 'check'>): StatusLin
       real_time: false,
     }
   )
+}
+
+/**
+ * The auction line a price line shows in place of its freshness mark: in the auction window, and
+ * only while the page's feed is up. With the feed down the mark says so and the price greys, as
+ * anywhere else; the auction does not make a dropped feed look fine.
+ */
+export function auctionShown(
+  row: Pick<AlertRow, 'auction' | 'check'>,
+  feed: FeedState,
+  now: number
+): StatusLine | null {
+  return feed.connected && inAuctionWindow(row, now) ? auctionLine(row) : null
 }
 
 /** "Fired 2 times today"; nothing before the first. */
@@ -55,7 +71,7 @@ export function PriceLine({
 }) {
   const figure = measure(row, line?.data)
   const tick = priceOf(line)
-  const auction = inAuctionWindow(row, now) ? auctionLine(row) : null
+  const auction = auctionShown(row, feed, now)
   const fresh = statusLine({
     now,
     marketOpen,
@@ -120,7 +136,7 @@ export const AlertCard = memo(function AlertCard({
 }) {
   const named = describe(row.symbol, row.exchange)
   const meta = [row.words.meta, firedWords(row.fired_today)].filter(Boolean).join(' · ')
-  const shownInPrice = followed && inAuctionWindow(row, now)
+  const shownInPrice = followed && auctionShown(row, feed, now) !== null
   const check =
     row.check &&
     !shownInPrice &&
