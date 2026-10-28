@@ -80,7 +80,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
-from sudarshan.books.exit_guard import EXIT_SHOWS_WITHIN_S
+from sudarshan.books.exit_guard import EXIT_SHOWS_WITHIN_S, trader_name
 from utils import real_threading
 from utils.broker_backpressure import BusyResponse
 from utils.logging import get_logger
@@ -1401,6 +1401,16 @@ def _tell_owner(text: str) -> None:
         logger.exception("A risk message could not be told on Telegram")
 
 
+def gtt_refused(symbol: str, exchange: str) -> None:
+    """A sandbox GTT whose order the gate refused when it triggered is rejected for good
+    (sandbox/gtt_manager.py): the owner is told once; never raises."""
+    try:
+        name = trader_name((str(exchange or "").upper(), str(symbol or ""), ""))
+        _tell_owner(words.sandbox_gtt_refused(name))
+    except Exception:
+        logger.exception("A refused sandbox GTT could not be told on Telegram")
+
+
 def cancelled(orderid: object, pipe: str = LIVE) -> None:
     """A cancel the broker confirmed (broker/upstox/api/order_api.cancel_order, the sandbox's
     OrderManager.cancel_order): what this process sent on that order stops counting against its
@@ -1676,7 +1686,8 @@ def _sandbox_gtt(action: str):
 
 
 def _refuse_in_the_sandbox(text: str):
-    return False, {"status": "error", "message": text, "mode": "analyze"}, 403
+    # risk_refused: a GTT leg the gate refuses is rejected for good (sandbox/gtt_manager.py)
+    return False, {"status": "error", "message": text, "mode": "analyze", "risk_refused": True}, 403
 
 
 def _answer_in_the_sandbox(result) -> tuple[str, str | None]:

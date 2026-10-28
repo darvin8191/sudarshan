@@ -120,6 +120,7 @@ def daily_sentences() -> list[str]:
             words.daily_not_checked(pipe),
         ]
     out += [words.daily_loosened_told(4000.0, after) for after in (6000.0, None)]
+    out += [words.sandbox_gtt_refused(name) for name in ("SBIN", "NIFTY 25900 CE")]
     return out
 
 

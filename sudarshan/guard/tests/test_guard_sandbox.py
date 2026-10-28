@@ -142,7 +142,7 @@ def test_with_the_switch_on_a_sandbox_entry_is_refused_and_nothing_is_stored(san
     sandbox.set_state(ON)
     assert _place("BUY", 10) == (
         False,
-        {"status": "error", "message": ENTRY, "mode": "analyze"},
+        {"status": "error", "message": ENTRY, "mode": "analyze", "risk_refused": True},
         403,
     )
     from database.sandbox_db import SandboxOrders
@@ -260,3 +260,42 @@ def test_a_sandbox_limit_far_from_the_market_is_held_to_the_band(sandbox, risk_s
     assert body["message"].startswith("Your buy price ₹900.00 is 12.5% above the market (₹800.05)")
     ok, body, status = _place("BUY", 10, "LIMIT", 820)
     assert ok, body
+
+
+def test_a_gtt_leg_the_gate_refuses_is_rejected_once_never_fired_again(
+    sandbox, monkeypatch, caplog
+):
+    """The gate review's M3: a sandbox GTT whose order the gate refuses as it triggers (a stop
+    left after its position closed, under the switch) was put back and fired, and refused, on
+    every tick. It is rejected for good, its legs cancelled, and the owner told once."""
+    import logging
+
+    from database.sandbox_db import SandboxGTT, SandboxGTTLeg, db_session
+    from sandbox import gtt_manager
+    from sandbox.gtt_manager import GTTManager
+
+    told = []
+    monkeypatch.setattr(gate, "_tell_owner", told.append)
+    base = {"symbol": "SBIN", "exchange": "NSE", "action": "SELL", "quantity": 10,
+            "product": "MIS", "pricetype": "LIMIT", "price": 780}  # fmt: skip
+    ok, body, status = GTTManager(USER).place_gtt(
+        {**base, "trigger_type": "SINGLE", "triggerprice_sl": 790}, 800
+    )
+    assert ok, body  # a flat book, nothing refusing yet
+    sandbox.set_state(ON)
+    db_session.remove()
+    leg_id = SandboxGTTLeg.query.filter_by(gtt_id=body["trigger_id"]).first().id
+    caplog.set_level(logging.ERROR)
+    fired = 0
+    for _tick in range(5):  # five ticks below the trigger
+        if gtt_manager.try_claim_trigger(leg_id):
+            fired += 1
+            assert gtt_manager.fire_leg(leg_id, execution_price=789.0) is False
+    assert fired == 1
+    db_session.remove()
+    gtt = SandboxGTT.query.filter_by(gtt_id=body["trigger_id"]).first()
+    assert gtt.gtt_status == "rejected"
+    assert {leg.leg_status for leg in gtt.legs} == {"cancelled"}
+    assert told == [words.sandbox_gtt_refused("SBIN")]
+    assert not [r for r in caplog.records if "order rejected" in r.getMessage()]
+    assert _position() == 0  # nothing was placed

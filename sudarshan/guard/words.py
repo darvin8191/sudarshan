@@ -682,6 +682,16 @@ def burst_told(count: int, window_s: float, again_at: float, pipe: str) -> str:
     )
 
 
+def sandbox_gtt_refused(name: str) -> str:
+    """Telegram, once, when a sandbox GTT's order is refused as it triggers: the GTT is
+    rejected rather than tried again on every tick."""
+    return (
+        f"Sandbox GTT on {name} rejected: when it triggered, its order was refused by your risk "
+        "settings (the kill switch, the daily loss limit or another limit). It will not fire "
+        "again; place it again if you still want it. Check Settings > Risk."
+    )
+
+
 #: Every fixed sentence, for the tests that scan them.
 FIXED = (
     RESUME_HOW,

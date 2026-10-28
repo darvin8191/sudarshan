@@ -1046,6 +1046,11 @@ def _fire_claimed_leg(leg, gtt, leg_id: int, execution_price) -> bool:
 
         if not success:
             message = response.get("message") if isinstance(response, dict) else response
+            # SUDARSHAN M5.13: the risk gate's refusal is final for this GTT (sudarshan/guard):
+            # put back, it would fire and be refused again on every tick.
+            if isinstance(response, dict) and response.get("risk_refused") is True:
+                _reject_after_risk_refusal(gtt, leg_id, released if released_ok else None)
+                return False
             logger.error(f"GTT leg {leg_id} order rejected: {message}")
             _compensate_failed_fire(
                 gtt, leg_id, released if released_ok else Decimal("0.00"), order_committed=False
@@ -1096,6 +1101,35 @@ def _fire_claimed_leg(leg, gtt, leg_id: int, execution_price) -> bool:
             order_committed=bool(locals().get("orderid")),
         )
         return False
+
+
+def _reject_after_risk_refusal(gtt, leg_id: int, released) -> None:
+    """SUDARSHAN M5.13: a leg the risk gate refused ends its GTT: rejected, its legs cancelled,
+    the owner told once (sudarshan/guard/gate.py). Its reservation was released before the
+    order was tried, which is right for a GTT that will not fire again. When that cannot be
+    saved, the fire is undone as any other failure is."""
+    try:
+        db_session.execute(
+            update(SandboxGTTLeg)
+            .where(
+                SandboxGTTLeg.gtt_id == gtt.gtt_id,
+                SandboxGTTLeg.leg_status.in_(["pending", "triggering"]),
+            )
+            .values(leg_status="cancelled", claimed_at=None)
+        )
+        db_session.execute(
+            update(SandboxGTT).where(SandboxGTT.gtt_id == gtt.gtt_id).values(gtt_status="rejected")
+        )
+        db_session.commit()
+    except Exception:
+        db_session.rollback()
+        logger.exception(f"GTT {gtt.gtt_id}: could not be rejected after the risk guard refused it")
+        _compensate_failed_fire(
+            gtt, leg_id, released if released is not None else Decimal("0.00"), False
+        )
+        return
+    logger.info(f"Sandbox GTT {gtt.gtt_id} rejected: the risk guard refused its order")
+    risk_gate.gtt_refused(gtt.symbol, gtt.exchange)
 
 
 def _notify_websocket_engine(gtt: SandboxGTT) -> None:
