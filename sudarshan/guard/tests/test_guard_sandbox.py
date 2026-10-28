@@ -299,3 +299,15 @@ def test_a_gtt_leg_the_gate_refuses_is_rejected_once_never_fired_again(
     assert told == [words.sandbox_gtt_refused("SBIN")]
     assert not [r for r in caplog.records if "order rejected" in r.getMessage()]
     assert _position() == 0  # nothing was placed
+
+
+def test_a_sandbox_reversal_under_the_switch_sends_only_its_exit(sandbox):
+    """The coordinator's decision a in the sandbox: SELL 20 on a long of 10 sells the 10 and
+    refuses the 10 beyond."""
+    assert _place("BUY", 10)[0] and _position() == 10
+    sandbox.set_state(ON)
+    ok, body, status = _place("SELL", 20)
+    assert ok and status == 200, body
+    assert body["sent_quantity"] == 10
+    assert body["risk_note"].startswith("Only the exit was sent: sell 10 to close SBIN.")
+    assert _position() == 0

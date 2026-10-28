@@ -460,6 +460,8 @@ def _with_sent(response, action, quantity, closes):
     """
     if not isinstance(response, dict):
         return response
+    # SUDARSHAN M5.13: a reversal the risk gate cut to its exit sent only that.
+    quantity = response.get("sent_quantity", quantity)
     try:  # never a failure of its own after the order went
         quantity = int(quantity or 0)
     except (TypeError, ValueError):

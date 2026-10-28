@@ -244,6 +244,9 @@ def place_smart_order_with_auth(
         # Log successful order immediately after placement
         if res and res.status == 200:
             order_response_data = {"status": "success", "orderid": order_id}
+            # SUDARSHAN M5.13: a reversal the risk gate cut to its exit says so in the answer.
+            if isinstance(response_data, dict) and response_data.get("risk_note"):
+                order_response_data["message"] = response_data["risk_note"]
             reported = {**order_response_data, "sent": sent} if sent else order_response_data
             bus.publish(OrderPlacedEvent(
                 mode="live", api_type="placesmartorder",

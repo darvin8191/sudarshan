@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from sudarshan.guard import flag, gate, readers, rules, words
+from sudarshan.guard import band, flag, gate, readers, rules, words
 from sudarshan.guard.store import KillSwitchState
 
 CE = "NIFTY27OCT2625900CE"
@@ -281,14 +281,16 @@ def test_an_exit_goes_and_a_second_one_for_the_same_quantity_does_not(the_gate, 
 
 
 def test_exits_already_sent_leave_what_is_left_to_exit(the_gate, book):
+    """130 short, 65 bought back and on its way: a buy of 130 is cut to the 65 left to exit
+    (decision a), and nothing is left for another."""
     the_gate.set_state(ON)
     book.rows = [row(PE, -130)]
     upstox = broker()
     upstox.place(order("BUY", 65, PE), "token")
-    crossing = refused_message(upstox.place(order("BUY", 130, PE), "token"))
-    assert "to exit, buy 65." in crossing
-    assert upstox.place(order("BUY", 65, PE), "token")[2] == "OID1"
+    res, body, ref = upstox.place(order("BUY", 130, PE), "token")
+    assert ref == "OID1" and body["risk_note"].startswith("Only the exit was sent: buy 65 to")
     assert [d["quantity"] for _, d in upstox.reached] == ["65", "65"]
+    assert "already on its way" in refused_message(upstox.place(order("BUY", 65, PE), "token"))
 
 
 def test_an_exit_the_book_shows_no_longer_counts(the_gate, book):
@@ -871,3 +873,53 @@ def test_the_audit_keeps_the_route_never_a_webhook_s_token(the_gate, book, risk_
     rows = risk_store.history()
     assert sorted(row.surface for row in rows) == ["/strategy/webhook/<webhook_id>", "request"]
     assert not any("SECRET" in str(row.__dict__) for row in rows)
+
+
+# -- a reversal under a refusing state: its exit goes, the rest is refused (decision a) -------------
+
+
+def test_under_the_switch_a_reversal_sends_its_exit_and_refuses_the_rest(
+    the_gate, book, risk_store
+):
+    the_gate.set_state(ON)
+    book.rows = [row(CE, 65)]
+    upstox = broker()
+    data = order("SELL", 130)
+    res, body, ref = upstox.place(data, "token")
+    assert (res.status, ref) == (200, "OID0")
+    assert [(what, sent["quantity"]) for what, sent in upstox.reached] == [("place", "65")]
+    assert data["quantity"] == "130"  # the caller's own data untouched
+    assert body["sent_quantity"] == 65
+    assert body["risk_note"] == words.reversal_cut(
+        ("NFO", CE, "MIS"), rules.SELL, 65, 65, since="10:42"
+    )
+    the_gate.flush_notes()
+    (note,) = [entry for entry in risk_store.history() if entry.kind == "order_refused"]
+    assert note.detail["sent"] == 65 and note.detail["refused"] == 65
+    # The exit is claimed as one: a second reversal finds nothing left to exit.
+    assert "already on its way" in refused_message(upstox.place(order("SELL", 130), "token"))
+
+
+def test_a_change_or_a_gtt_that_reverses_is_refused_whole(the_gate, book):
+    the_gate.set_state(ON)
+    book.rows = [row(CE, 65)]
+    book.orders = {"X1": working(rules.SELL, 65, price=140.0)}
+    upstox = broker()
+    body, status = upstox.modify(change("X1", 130, 140), "token")
+    assert status == 403 and "to exit, sell 65" in body["message"]
+    refused_message(upstox.gtt_place(order("SELL", 130, trigger_type="SINGLE"), "token"))
+    assert [what for what, _ in upstox.reached] == []
+
+
+def test_a_reversal_with_nothing_refusing_is_judged_whole_by_the_limits(the_gate, book):
+    """Only the kill switch and the day's lock cut a reversal; the price band holds it whole and
+    names the exit that fits, which is never held to the band."""
+    the_gate._store.save_settings("owner", band_on=True)
+    book.rows = [row(CE, 65)]
+    the_gate._read.quote = lambda *args: band.Quote(150.0, 149.9, 150.1)
+    upstox = broker()
+    said = refused_message(upstox.place(order("SELL", 130, pricetype="LIMIT", price="80"), "token"))
+    assert said.endswith(
+        "This order would close NIFTY 25900 CE and open it the other way; to exit, sell 65: an "
+        "exit is never held to the band. Nothing was sent."
+    )

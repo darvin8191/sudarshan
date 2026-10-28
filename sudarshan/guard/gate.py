@@ -39,6 +39,11 @@ or on a locked day, a positions read that fails is answered from the book read i
 pointing at the Upstox app for an urgent exit. In every other state an unreadable book lets the
 order go, noted, because it may be an exit.
 
+A reversing order (one that would close a position and open it the other way) under the kill
+switch or the day's lock is cut to its exit: the exit to 0 is sent and only the part beyond it is
+refused, with a sentence that says so in the answer (the coordinator's decision a). Anywhere
+else a reversing order is judged whole, as before.
+
 The daily loss limit (M5.14, daily.py) refuses new risk the same way once the day's loss has
 reached it: the first order to see the figure at the limit writes the day's lock, and the lock
 holds every new order in that pipe until India's date changes, whatever the figure does after.
@@ -226,6 +231,7 @@ class Decision:
     code: str = ""
     token: int | None = None
     detail: dict = field(default_factory=dict)
+    clip: int | None = None  # send only this much (the exit of a reversal), refuse the rest
 
 
 @dataclass(frozen=True)
@@ -454,6 +460,8 @@ class Gate:
         decision = self.admit(kind, args, kwargs)
         if decision.refused:
             return kind.refusal(decision.words)
+        if decision.clip is not None:
+            args, kwargs = kind.clip(args, kwargs, decision.clip)
         try:
             result = fn(*args, **kwargs)
         except BaseException:
@@ -464,6 +472,8 @@ class Gate:
         except Exception:
             answer, ref = ANSWERED, None
         self.settle(decision.token, answer, ref)
+        if decision.clip is not None:
+            result = _noted(result, decision.words, decision.clip)
         return result
 
     def admit(self, kind: _Kind, args: tuple, kwargs: dict) -> Decision:
@@ -566,16 +576,53 @@ class Gate:
             refs = self._claims_in_the_way(known, facts, verdict)
             if refs:
                 return _CheckClaims(refs)
+        if (refusing is not None or lock is not None) and self._clippable(known, verdict):
+            return self._clip(known, refusing, lock, verdict, now)
         if refusing is not None:
             return self._refuse(known, refusing, verdict, sent_at)
         if lock is not None:
-            return self._refuse_daily(known, lock, verdict)
+            return self._refuse_daily(known, lock, verdict, sent_at)
         if day_unread:
             detail = {"reason": verdict.reason, "position": verdict.position}
             return Decision(
                 True, words.daily_unreadable(known.pipe), GUARD_UNAVAILABLE, detail=detail
             )
-        return self._held_to_settings(known, guards, verdict, reads, now)
+        return self._held_to_settings(known, guards, verdict, reads, now, sent_at)
+
+    @staticmethod
+    def _clippable(order: Order, verdict: rules.Verdict) -> bool:
+        """A new order that would close its position and open it the other way: its exit can
+        be sent alone (a change to an order or a GTT is judged whole)."""
+        return order.action == PLACE and verdict.reason == rules.CROSSES and verdict.room > 0
+
+    def _clip(
+        self,
+        order: Order,
+        refusing: _Refusing | None,
+        lock: risk_store.DayLock | None,
+        verdict: rules.Verdict,
+        now: float,
+    ) -> Decision:
+        """The coordinator's decision a: under the kill switch or the day's lock a reversal
+        sends its exit to 0 and only the part beyond is refused. The exit is recorded as one;
+        call under the lock."""
+        room = verdict.room
+        exit_part = replace(order, quantity=room)
+        exited = rules.Verdict(True, rules.EXIT, verdict.position, verdict.claimed, room)
+        token = self._register(exit_part, exited, now)
+        beyond = (order.quantity or 0) - room
+        if refusing is not None:
+            since = None if refusing.state is None else _hhmm(refusing.state.since)
+            said = words.reversal_cut(order.name, order.side, room, beyond, since=since)
+            code = KILL_SWITCH_ACTIVE if refusing.state is not None else RISK_STATE_UNREADABLE
+        else:
+            said = words.reversal_cut(
+                order.name, order.side, room, beyond, locked=(lock.figure, lock.loss_limit)
+            )
+            code = DAILY_LOSS_LIMIT
+        detail = {"reason": verdict.reason, "position": verdict.position, "sent": room,
+                  "refused": beyond}  # fmt: skip
+        return Decision(words=said, code=code, token=token, detail=detail, clip=room)
 
     def _claims_in_the_way(self, order: Order, facts: _Facts, verdict: rules.Verdict) -> frozenset:
         """The broker orders whose claims alone stop this order being an exit: none when it adds
@@ -1064,7 +1111,11 @@ class Gate:
         return Decision(True, text, KILL_SWITCH_ACTIVE, detail=detail)
 
     def _refuse_daily(
-        self, order: Order, lock: risk_store.DayLock, verdict: rules.Verdict
+        self,
+        order: Order,
+        lock: risk_store.DayLock,
+        verdict: rules.Verdict,
+        sent_at: float | None = None,
     ) -> Decision:
         detail = {
             "reason": verdict.reason,
@@ -1074,7 +1125,12 @@ class Gate:
             "limit": lock.loss_limit,
         }
         text = words.daily_locked(
-            lock.figure, lock.loss_limit, verdict, position=order.name, side=order.side
+            lock.figure,
+            lock.loss_limit,
+            verdict,
+            position=order.name,
+            side=order.side,
+            claim_sent_at=sent_at,
         )
         return Decision(True, text, DAILY_LOSS_LIMIT, detail=detail)
 
@@ -1092,11 +1148,17 @@ class Gate:
         return Decision(token=token, words=said, code=GUARD_UNAVAILABLE, detail=detail)
 
     def _held_to_settings(
-        self, order: Order, guards: _Guards, verdict: rules.Verdict, reads: _Reads, now: float
+        self,
+        order: Order,
+        guards: _Guards,
+        verdict: rules.Verdict,
+        reads: _Reads,
+        now: float,
+        sent_at: float | None = None,
     ) -> Decision:
         """An order adding risk, with nothing refusing new risk: the owner's own limits, each
         only when he has turned it on. Call under the lock."""
-        refusal, unchecked = self._over_limits(order, guards, verdict, reads)
+        refusal, unchecked = self._over_limits(order, guards, verdict, reads, sent_at)
         if refusal is not None:
             return refusal
         if guards.braked(order):
@@ -1109,7 +1171,12 @@ class Gate:
         return Decision(token=token)
 
     def _over_limits(
-        self, order: Order, guards: _Guards, verdict: rules.Verdict, reads: _Reads
+        self,
+        order: Order,
+        guards: _Guards,
+        verdict: rules.Verdict,
+        reads: _Reads,
+        sent_at: float | None = None,
     ) -> tuple[Decision | None, str | None]:
         """The owner's band and size limit on an order adding risk: its refusal, or None and,
         when a limit could not be checked, the sentence that says so. No I/O and nothing
@@ -1137,7 +1204,8 @@ class Gate:
                     "away_pct": breach.away_pct,
                     "band_pct": breach.band_pct,
                 }
-                return Decision(True, words.band_refused(breach), PRICE_BAND, detail=detail), None
+                said = words.band_refused(breach, verdict, position=order.name)
+                return Decision(True, said, PRICE_BAND, detail=detail), None
             if terms.price_type != "SL" and (
                 quote is None or band.reference(order.side, quote) <= 0
             ):  # no market to hold it to: it goes, noted (the exchange's own check stands)
@@ -1148,7 +1216,9 @@ class Gate:
             if excess is not None:
                 detail = {"reason": verdict.reason, "adding": adding, "unit": excess.unit,
                           "amount": excess.amount, "cap": excess.cap}  # fmt: skip
-                said = words.size_refused(excess, verdict, position=order.name, side=order.side)
+                said = words.size_refused(
+                    excess, verdict, position=order.name, side=order.side, claim_sent_at=sent_at
+                )
                 return Decision(True, said, SIZE_LIMIT, detail=detail), None
             if adding and size.unit_of(order.exchange) == size.LOTS and not reads.lot_size:
                 unchecked = unchecked or words.SIZE_NOT_CHECKED
@@ -1296,7 +1366,8 @@ class Gate:
         try:
             surface = _surface()
             symbol = "" if order is None else order.symbol
-            kind = "order_refused" if decision.refused else "guard_error"
+            refused = decision.refused or decision.clip is not None  # a cut: the rest refused
+            kind = "order_refused" if refused else "guard_error"
             if decision.code == GUARD_UNAVAILABLE:
                 kind = "guard_unavailable"
             key = f"{decision.code}|{surface}|{symbol}"
@@ -1490,6 +1561,28 @@ class _Kind:
     describe: Callable[..., Order]
     refusal: Callable[[str], Any]
     outcome: Callable[[Any], tuple[str, str | None]]
+    at: int = 0  # where a place's order data is in the call's arguments
+
+    def clip(self, args: tuple, kwargs: dict, quantity: int) -> tuple[tuple, dict]:
+        """The call's arguments with the order's quantity cut (a reversal's exit): its data
+        copied, never changed in place."""
+        data = args[self.at]
+        given = data.get("quantity")
+        cut = {**data, "quantity": quantity if isinstance(given, int) else str(quantity)}
+        return (*args[: self.at], cut, *args[self.at + 1 :]), kwargs
+
+
+def _noted(result, said: str, quantity: int):
+    """A reversal cut to its exit: the answer's body carries the sentence (``risk_note``) and
+    what went (``sent_quantity``), for the services to pass on; the answer is the broker's."""
+    try:
+        if isinstance(result, tuple) and len(result) == 3:
+            first, body, last = result
+            if isinstance(body, dict):
+                return first, {**body, "risk_note": said, "sent_quantity": quantity}, last
+    except Exception:
+        logger.exception("A reversal's note could not be added to its answer")
+    return result
 
 
 class RefusedResponse:
@@ -1701,7 +1794,7 @@ def _answer_in_the_sandbox(result) -> tuple[str, str | None]:
 
 #: sandbox/order_manager.OrderManager.place_order, inside its position lock
 sandbox_place = _guarded(
-    _Kind(SANDBOX, _sandbox_place, _refuse_in_the_sandbox, _answer_in_the_sandbox)
+    _Kind(SANDBOX, _sandbox_place, _refuse_in_the_sandbox, _answer_in_the_sandbox, at=1)
 )
 #: sandbox/order_manager.OrderManager.modify_order
 sandbox_modify = _guarded(

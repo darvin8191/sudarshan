@@ -129,16 +129,32 @@ def test_a_split_entry_sends_no_slice(upstox, monkeypatch):
     assert upstox.broker.orders == []
 
 
-def test_a_sell_beyond_the_position_names_the_exit_that_fits(upstox):
+def test_a_sell_beyond_the_position_sends_its_exit_and_refuses_the_rest(upstox):
+    """The coordinator's decision a: under the switch a reversal is cut to its exit."""
     from services.place_order_service import place_order
 
     ok, body, code = place_order(_order(CE, "SELL", 130), auth_token="token", broker="upstox")
-    assert code == 403
-    assert (
-        "would close NIFTY 25900 CE and open it the other way; to exit, sell 65."
-        in (body["message"])
+    assert (ok, code) == (True, 200) and body["orderid"]
+    assert body["message"] == (
+        "Only the exit was sent: sell 65 to close NIFTY 25900 CE. The other 65, which would have "
+        "opened it the other way, were refused: the kill switch is on since 10:42. To trade "
+        "again, resume from Settings > Risk or send /killswitch in Telegram."
     )
-    assert upstox.broker.orders == []
+    assert [o["qty"] for o in upstox.broker.orders] == [65]
+    assert upstox.broker.true_qty(CE) == 0
+
+
+def test_a_tradingview_flip_under_the_switch_closes_the_long_and_opens_nothing(upstox):
+    """The gate review's M4: placesmartorder to position size -65 on +65 (a strategy flipping)
+    becomes SELL 130 at the broker; its exit goes, the short it would open does not."""
+    from services.place_smart_order_service import place_smart_order
+
+    ok, body, code = place_smart_order(
+        _order(CE, "SELL", 65, position_size="-65"), auth_token="token", broker="upstox"
+    )
+    assert (ok, code) == (True, 200)
+    assert body["message"].startswith("Only the exit was sent: sell 65 to close NIFTY 25900 CE.")
+    assert upstox.broker.true_qty(CE) == 0
 
 
 def test_with_the_guard_off_an_entry_goes_as_before(upstox, monkeypatch):

@@ -477,12 +477,20 @@ def daily_locked(
     *,
     position: tuple[str, str, str],
     side: int | None,
+    claim_sent_at: float | None = None,
 ) -> str:
-    """Why a new order is refused once the day's loss has reached the limit (amendment R5)."""
-    words = [
-        f"New orders are refused for today: the day's loss of {rupees(abs(loss))} has reached "
-        f"your daily limit of {rupees(abs(limit))} (Settings > Risk)."
-    ]
+    """Why a new order is refused once the day's loss has reached the limit (amendment R5); for
+    one whose position is already being exited, that exit."""
+    reached = (
+        f"the day's loss of {rupees(abs(loss))} has reached your daily limit of "
+        f"{rupees(abs(limit))} (Settings > Risk)"
+    )
+    if verdict.reason == rules.ON_ITS_WAY and claim_sent_at is not None:
+        return (
+            f"{on_its_way(position, claim_sent_at)} New orders are refused for today: {reached}, "
+            "so nothing beyond the open position can be sent."
+        )
+    words = [f"New orders are refused for today: {reached}."]
     if verdict.reason == rules.CROSSES:
         words.append(
             f"This order would close {trader_name(position)} and open it the other way; to "
@@ -551,9 +559,12 @@ def _band_size(pct: float, floor: float) -> str:
     return f"{pct:g}%, at least {rupees(floor)}" if floor else f"{pct:g}%"
 
 
-def band_refused(breach) -> str:
+def band_refused(
+    breach, verdict: rules.Verdict | None = None, *, position: tuple[str, str, str] | None = None
+) -> str:
     """Why a priced order too far from the market is refused (design section 6): the price, how
-    far it is from what, and the band, so the trader sees the mistake at once."""
+    far it is from what, and the band, so the trader sees the mistake at once; for one that would
+    close a position and open it the other way, the exit that fits, which is never held to it."""
     side = "buy" if breach.side == rules.BUY else "sell"
     where = "above" if breach.above else "below"
     away = f"{breach.away_pct:g}%"
@@ -576,6 +587,12 @@ def band_refused(breach) -> str:
             f"({price(breach.reference)}); the price band is {size} (Settings > Risk). Check "
             "the price."
         )
+    if verdict is not None and position is not None and verdict.reason == rules.CROSSES:
+        if verdict.room:
+            said += (
+                f" This order would close {trader_name(position)} and open it the other way; "
+                f"to exit, {side} {verdict.room}: an exit is never held to the band."
+            )
     return f"{said} Nothing was sent."
 
 
@@ -609,13 +626,27 @@ def _amount(unit: str, count: float) -> str:
     return f"{_grouped(count)} {one if count == 1 else unit}"
 
 
-def size_refused(excess, verdict: rules.Verdict, *, position: tuple[str, str, str], side) -> str:
-    """Why an order is refused for its size: what it adds and the owner's cap."""
+def size_refused(
+    excess,
+    verdict: rules.Verdict,
+    *,
+    position: tuple[str, str, str],
+    side,
+    claim_sent_at: float | None = None,
+) -> str:
+    """Why an order is refused for its size: what it adds and the owner's cap; for one whose
+    position is already being exited, that exit."""
     cap = (
         f"{_amount('lots', excess.cap)} per F&O order"
         if excess.unit == "lots"
         else f"{_amount('shares', excess.cap)} per cash order"
     )
+    if verdict.reason == rules.ON_ITS_WAY and claim_sent_at is not None:
+        return (
+            f"{on_its_way(position, claim_sent_at)} Beyond it, this order would open "
+            f"{_amount(excess.unit, excess.amount)} the other way; your limit is {cap} (Settings > "
+            "Risk). Nothing was sent."
+        )
     if verdict.reason in (rules.CROSSES, rules.ON_ITS_WAY) and verdict.room:
         return (
             f"This order would close {trader_name(position)} and open "
@@ -661,6 +692,36 @@ def _window(seconds: float) -> str:
     if whole == seconds and whole >= 60 and whole % 60 == 0:
         return _many(whole // 60, "minute", "minutes")
     return f"{seconds:g} seconds"
+
+
+def reversal_cut(
+    position: tuple[str, str, str],
+    side: int | None,
+    sent: int,
+    beyond: int,
+    *,
+    since: str | None = "",
+    locked: tuple[float, float] | None = None,
+) -> str:
+    """A reversing order under the kill switch or the day's lock: its exit was sent, the part
+    beyond it refused (the coordinator's decision a)."""
+    name = trader_name(position)
+    were = "was" if beyond == 1 else "were"
+    if locked is not None:
+        loss, limit = locked
+        why = (
+            f"the day's loss of {rupees(abs(loss))} has reached your daily limit of "
+            f"{rupees(abs(limit))} (Settings > Risk). New orders open again tomorrow."
+        )
+    elif since is None:
+        why = f"SUDARSHAN could not read whether the kill switch is on. {RESUME_HOW}"
+    else:
+        on = f"on since {since}" if since else "on"
+        why = f"the kill switch is {on}. {RESUME_HOW}"
+    return (
+        f"Only the exit was sent: {_verb(side)} {sent} to close {name}. The other {beyond}, which "
+        f"would have opened it the other way, {were} refused: {why}"
+    )
 
 
 def burst_refused(count: int, window_s: float, again_at: float) -> str:

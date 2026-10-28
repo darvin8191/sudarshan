@@ -76,6 +76,19 @@ def test_crossing_counts_only_the_part_beyond_closing(sized):
     assert upstox.place(order("SELL", 195), "token")[2] == "OID0"  # 1 closes, 2 open: the cap
 
 
+def test_an_exit_refused_for_its_claims_is_told_of_the_exit_on_its_way(sized):
+    """The gate review's L2: the size cap's refusal of what was an exit names that exit."""
+    sized.book.rows = [row(CE, 195)]
+    upstox = broker()
+    assert upstox.place(order("SELL", 195), "token")[2] == "OID0"  # the exit: never limited
+    said = refused_message(upstox.place(order("SELL", 195), "token"))
+    assert said.startswith("An exit for NIFTY 25900 CE is already on its way (sent ")
+    assert said.endswith(
+        "Beyond it, this order would open 3 lots the other way; your limit is 2 lots per F&O "
+        "order (Settings > Risk). Nothing was sent."
+    )
+
+
 def test_cash_is_held_in_shares(sized):
     upstox = broker()
     big = order("BUY", 1500, symbol="RELIANCE", exchange="NSE", product="CNC")

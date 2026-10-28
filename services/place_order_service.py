@@ -260,6 +260,11 @@ def place_order_with_auth(
 
     if res.status == 200:
         order_response_data = {"status": "success", "orderid": order_id}
+        # SUDARSHAN M5.13: a reversal the risk gate cut to its exit says so, and sent only that.
+        sent_quantity = order_data.get("quantity", 0)
+        if isinstance(response_data, dict) and response_data.get("risk_note"):
+            order_response_data["message"] = response_data["risk_note"]
+            sent_quantity = response_data.get("sent_quantity", sent_quantity)
 
         if emit_event:
             bus.publish(
@@ -270,7 +275,7 @@ def place_order_with_auth(
                     symbol=order_data.get("symbol", ""),
                     exchange=order_data.get("exchange", ""),
                     action=order_data.get("action", ""),
-                    quantity=int(order_data.get("quantity", 0)),
+                    quantity=int(sent_quantity),  # SUDARSHAN M5.13
                     pricetype=order_data.get("pricetype", ""),
                     product=order_data.get("product", ""),
                     orderid=str(order_id),

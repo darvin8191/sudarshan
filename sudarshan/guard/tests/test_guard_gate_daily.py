@@ -315,6 +315,36 @@ def test_a_lock_that_cannot_be_saved_holds_once_with_the_first_figure(day, monke
     assert len(day.told) == 1
 
 
+def test_on_a_locked_day_a_reversal_sends_its_exit_and_refuses_the_rest(day):
+    """The coordinator's decision a, under the day's lock."""
+    day.store.lock_day("live", today(), -5200.0, LIMIT)
+    day.book.rows = [day_row(CE, 65, -5200.0, 0.0)]
+    upstox = broker()
+    res, body, ref = upstox.place(order("SELL", 100), "token")
+    assert (res.status, ref) == (200, "OID0")
+    assert [sent["quantity"] for _what, sent in upstox.reached] == ["65"]
+    assert body["risk_note"] == (
+        "Only the exit was sent: sell 65 to close NIFTY 25900 CE. The other 35, which would have "
+        "opened it the other way, were refused: the day's loss of ₹5,200 has reached your daily "
+        "limit of ₹4,000 (Settings > Risk). New orders open again tomorrow."
+    )
+
+
+def test_on_a_locked_day_an_exit_already_on_its_way_is_named(day, clock):  # noqa: F811
+    """The gate review's L2: refused for its claims, an exit is told about the exit on its way,
+    not that it is a new order."""
+    day.store.lock_day("live", today(), -5200.0, LIMIT)
+    day.book.rows = [day_row(CE, 65, -5200.0, 0.0)]
+    upstox = broker()
+    assert upstox.place(order("SELL", 65), "token")[2] == "OID0"
+    said = refused_message(upstox.place(order("SELL", 65), "token"))
+    assert said.startswith("An exit for NIFTY 25900 CE is already on its way (sent ")
+    assert said.endswith(
+        "New orders are refused for today: the day's loss of ₹5,200 has reached your daily limit "
+        "of ₹4,000 (Settings > Risk), so nothing beyond the open position can be sent."
+    )
+
+
 def test_a_delivery_dip_never_locks_the_day(day):
     """Shares bought today to hold (CNC, product D in cash) are not in the day's figure."""
     day.book.rows = [
