@@ -207,6 +207,18 @@ function istToday(): string {
   return new Date(Date.now() + 5.5 * 3_600_000).toISOString().slice(0, 10)
 }
 
+const DAY_MONTH = new Intl.DateTimeFormat('en-IN', {
+  timeZone: 'Asia/Kolkata',
+  day: 'numeric',
+  month: 'short',
+})
+
+/** An edit's end as it is now: the last day it works, or none of its own. */
+function endWords(endsAt: number | null): string {
+  // The end is the moment it stops, the midnight after its last day.
+  return endsAt === null ? 'No end date' : `Works through ${DAY_MONTH.format(endsAt - 1)}`
+}
+
 const FIELD = 'flex flex-col gap-1.5'
 const LEGEND = 'pb-1 text-xs font-semibold text-[color:var(--text-secondary)]'
 const BOX = 'h-12 text-base'
@@ -392,7 +404,10 @@ export function AlertFormSheet({
     setForm((now) => ({ ...now, ...patch }))
     if (!field || problem?.field === field || problem?.field === null) setProblem(null)
   }
-  const pickKind = (kind: AlertKind) => set(kindDefaults(kind), 'kind')
+  // A kind brings its own defaults only when it changes: the one already pressed keeps the rest.
+  const pickKind = (kind: AlertKind) => {
+    if (kind !== form.kind) set(kindDefaults(kind), 'kind')
+  }
   // A refusal marks its field where the field is on screen, and shows above Save otherwise.
   const shown = shownFields(form)
   const marked = problem?.field && shown.has(problem.field) ? problem.field : null
@@ -758,6 +773,11 @@ export function AlertFormSheet({
           onPick={(ends) => set({ ends }, 'ends')}
           error={form.ends === 'date' ? null : errorOf('ends')}
         />
+        {row && form.ends === 'keep' && (
+          <p className="-mt-2 text-sm font-medium text-[color:var(--text-secondary)]">
+            {endWords(row.ends_at)}
+          </p>
+        )}
         {form.ends === 'date' && (
           <Field id={inputId('ends')} label="Works through" after={errorOf('ends')}>
             <Input

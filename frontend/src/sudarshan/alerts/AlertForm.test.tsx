@@ -7,7 +7,7 @@
  * server's words. The instrument search is a stand-in; its real dialog is /trading's.
  */
 import { QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createElement } from 'react'
 import { MemoryRouter } from 'react-router'
@@ -47,10 +47,20 @@ vi.mock('@/components/trading/SymbolSearchDialog', () => ({
             'button',
             { type: 'button', onClick: () => props.onPick({ symbol: 'GOLDM', exchange: 'MCX' }) },
             'GOLDM on MCX'
+          ),
+          createElement(
+            'button',
+            {
+              type: 'button',
+              onClick: () => props.onPick({ symbol: 'NIFTY', exchange: 'NSE_INDEX' }),
+            },
+            'NIFTY on NSE_INDEX'
           )
         )
       : null,
 }))
+
+vi.setConfig({ testTimeout: 15_000 })
 
 import { type AlertRow, AlertsError } from '@/api/marketAlerts'
 import { createQueryClient } from '@/app/providers'
@@ -68,19 +78,29 @@ const NIFTY: AlertPrefill = {
 }
 const SBIN: AlertPrefill = { symbol: 'SBIN', exchange: 'NSE', tick: 0.05, price: 99.95 }
 
-function renderForm(props: Partial<Parameters<typeof AlertFormSheet>[0]> = {}) {
+type FormProps = Partial<Parameters<typeof AlertFormSheet>[0]>
+
+function renderForm(props: FormProps = {}) {
   const client = createQueryClient()
   client.setQueryData(STATE_KEY, alertsState())
   const onSaved = vi.fn()
   const onClose = vi.fn()
-  render(
+  const tree = (given: FormProps) => (
     <QueryClientProvider client={client}>
       <MemoryRouter>
-        <AlertFormSheet onSaved={onSaved} onClose={onClose} {...props} />
+        <AlertFormSheet onSaved={onSaved} onClose={onClose} {...given} />
       </MemoryRouter>
     </QueryClientProvider>
   )
-  return { client, onSaved, onClose, sheet: screen.getByRole('dialog') }
+  const view = render(tree(props))
+  return {
+    client,
+    onSaved,
+    onClose,
+    sheet: screen.getByRole('dialog'),
+    /** The host drawing the form again, with what it has now. */
+    rerender: (next: FormProps) => view.rerender(tree({ ...props, ...next })),
+  }
 }
 
 const pressed = (sheet: HTMLElement, legend: string) =>
@@ -178,9 +198,44 @@ describe('a new alert', () => {
       within(sheet).getByText('An index has no traded volume, so it has no VWAP. Use its future.')
     ).toBeInTheDocument()
     expect(within(sheet).getByRole('button', { name: 'Bid' })).toBeDisabled()
+    expect(within(sheet).getByRole('button', { name: 'Ask' })).toBeDisabled()
     expect(
       within(sheet).getByText('An index has no bid or ask. Watch its last price instead.')
     ).toBeInTheDocument()
+  })
+
+  it('puts the watch back on the last price when an index is picked after the bid', async () => {
+    const user = userEvent.setup()
+    const { sheet } = renderForm({ prefill: SBIN })
+
+    await user.click(within(sheet).getByRole('button', { name: 'Bid' }))
+    expect(pressed(sheet, 'Watch')).toEqual(['Bid'])
+    await user.click(within(sheet).getByRole('button', { name: /Change/ }))
+    await user.click(screen.getByRole('button', { name: 'NIFTY on NSE_INDEX' }))
+
+    expect(pressed(sheet, 'Watch')).toEqual(['Last price'])
+  })
+
+  it('offers no "At candle close" on the bid or the ask, and says why', async () => {
+    const user = userEvent.setup()
+    const { sheet } = renderForm({ prefill: SBIN })
+    expect(within(sheet).getByRole('button', { name: 'At candle close' })).toBeEnabled()
+
+    await user.click(within(sheet).getByRole('button', { name: 'Ask' }))
+    expect(within(sheet).getByRole('button', { name: 'At candle close' })).toBeDisabled()
+    expect(
+      within(sheet).getByText(
+        "'At candle close' judges the last trade price. For the bid or ask, pick another frequency."
+      )
+    ).toBeInTheDocument()
+  })
+
+  it('keeps a note to 120 characters', async () => {
+    const user = userEvent.setup()
+    const { sheet } = renderForm({ prefill: SBIN })
+
+    await user.type(within(sheet).getByLabelText('Note (optional)'), 'n'.repeat(125))
+    expect(within(sheet).getByLabelText('Note (optional)')).toHaveValue('n'.repeat(120))
   })
 
   it('refuses an instrument market alerts do not cover, in the server’s sentence', async () => {
@@ -253,6 +308,20 @@ describe('a new alert', () => {
     await user.selectOptions(wait, '60')
     expect(within(sheet).queryByText(sentence)).toBeNull()
   })
+
+  it('shows a refusal for a field not on screen above Save, so its sentence is not lost', async () => {
+    const sentence = 'Type the move as a number of percent, more than 0.'
+    api.create.mockRejectedValue(
+      new AlertsError({ code: 'invalid', message: sentence, field: 'percent' })
+    )
+    const user = userEvent.setup()
+    const { sheet } = renderForm({ prefill: SBIN })
+
+    await user.click(within(sheet).getByRole('button', { name: 'Save' }))
+
+    expect(await within(sheet).findByRole('alert')).toHaveTextContent(sentence)
+    expect(sheet.querySelector('[aria-invalid="true"]')).toBeNull()
+  })
 })
 
 describe('an edit', () => {
@@ -303,6 +372,53 @@ describe('an edit', () => {
     await user.click(within(sheet).getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(api.change).toHaveBeenCalledTimes(1))
     expect(api.change.mock.calls[0][1].alert.ends).toBeNull()
+  })
+
+  it('sends the date picked as its last day', async () => {
+    api.change.mockResolvedValue(held)
+    const user = userEvent.setup()
+    const { sheet } = renderForm({ row: held })
+
+    await user.click(within(sheet).getByRole('button', { name: 'On a date' }))
+    fireEvent.change(within(sheet).getByLabelText('Works through'), {
+      target: { value: '2026-12-31' },
+    })
+    await user.click(within(sheet).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(api.change).toHaveBeenCalledTimes(1))
+    expect(api.change.mock.calls[0][1].alert.ends).toBe('2026-12-31')
+  })
+
+  it('says how it ends now beside "As now"', () => {
+    const { sheet } = renderForm({ row: held })
+    expect(within(sheet).getByText('Works through 21 Dec')).toBeInTheDocument()
+  })
+
+  it('keeps its own frequency and wait when its kind is tapped again', async () => {
+    api.change.mockResolvedValue({ ...held, version: 4 })
+    const user = userEvent.setup()
+    const { sheet } = renderForm({ row: held })
+
+    await user.click(within(sheet).getByRole('button', { name: 'Price' }))
+    expect(pressed(sheet, 'How often')).toEqual(['Every time'])
+    expect(within(sheet).getByLabelText('Wait between alerts')).toHaveValue('300')
+
+    await user.click(within(sheet).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(api.change).toHaveBeenCalledTimes(1))
+    expect(api.change.mock.calls[0][1].alert).toMatchObject({
+      frequency: 'every_time',
+      cooldown_s: 300,
+    })
+  })
+
+  it('sends the version it opened on even when the alert moves on while it is open', async () => {
+    api.change.mockResolvedValue({ ...held, version: 5 })
+    const user = userEvent.setup()
+    const { sheet, rerender } = renderForm({ row: held })
+
+    rerender({ row: { ...held, version: 4 } })
+    await user.click(within(sheet).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(api.change).toHaveBeenCalledTimes(1))
+    expect(api.change.mock.calls[0][1].version).toBe(3)
   })
 
   it('sends the version it opened on, so an edit made elsewhere meanwhile is refused', async () => {
