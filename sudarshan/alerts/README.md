@@ -385,7 +385,9 @@ cd /opt/sudarshan/apps/openalgo && sudo -u sudarshan .venv/bin/python -m sudarsh
 ```
 
 Any evening, what market alerts would have told on a day the feed recorded, offline: it reads
-market.db and openalgo.db only, sends nothing, and prints each fire with its time and words. Its
+market.db and openalgo.db only, sends nothing, and prints each fire with its time and words. It
+writes nothing in OpenAlgo's directory either: OpenAlgo's database module it reads the master
+contract with loads no .env and logs to its own temporary directory, as the service's does. Its
 clock is the recording's, its gate the calendar's, and each alert starts the day fresh, so compare
 it with the day's History:
 

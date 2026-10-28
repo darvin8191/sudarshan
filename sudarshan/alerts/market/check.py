@@ -130,6 +130,19 @@ def read_recording(path: Path) -> Iterable[tuple[str, int, dict]]:
             yield key, ts_recv, frame
 
 
+def master_stocks(db_path: Path, fno_stocks) -> frozenset[str]:
+    """The stocks with futures, read as the service reads them (review M5): OpenAlgo's database
+    modules imported with this process's settings only, so the check stays read-only when run
+    from OpenAlgo's directory. Without them, importing database.symbol loaded OpenAlgo's .env,
+    created and trimmed its log/errors.jsonl, wrote its rotating log, and crashed without a
+    DATABASE_URL. Raises MasterUnavailable."""
+    from sudarshan.alerts.owner import prepare_master_read, without_openalgo_dotenv
+
+    prepare_master_read(db_path)
+    with without_openalgo_dotenv():
+        return fno_stocks(db_path)
+
+
 def day_of(path: Path) -> date:
     """The day a recording is named for: ticks/YYYY-MM-DD.jsonl.gz."""
     return date.fromisoformat(path.name[:10])
@@ -177,9 +190,12 @@ def main(argv: list[str] | None = None) -> int:
     fno = frozenset()
     if args.openalgo_db is not None:
         try:
-            fno = fno_stocks(args.openalgo_db)
+            fno = master_stocks(args.openalgo_db, fno_stocks)
         except MasterUnavailable:
             err.write("openalgo.db could not be read; no stock is taken to close by auction\n")
+        except Exception:  # OpenAlgo's modules refused at import: words, not a traceback
+            err.write("OpenAlgo's master contract could not be read with OpenAlgo's own modules; "
+                      "no stock is taken to close by auction\n")  # fmt: skip
     cas = cas_keys(alerts, day, fno)
     try:
         told, counts = judge_day(

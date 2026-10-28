@@ -59,6 +59,57 @@ def test_the_check_prints_what_would_have_fired_and_writes_nothing(tmp_path, cap
     assert hashlib.sha256(db.read_bytes()).hexdigest() == before  # read-only
 
 
+def test_the_check_run_in_openalgos_directory_writes_nothing_there(tmp_path):
+    """Review M5: run as the README says, from OpenAlgo's directory with --openalgo-db, the master
+    read imported database.symbol, whose logging module created log/errors.jsonl in the current
+    directory (and loaded OpenAlgo's .env); with no DATABASE_URL it crashed with a traceback."""
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    from sqlalchemy.orm import Session
+
+    from database.engine_factory import create_db_engine
+    from database.symbol import Base, SymToken
+
+    app = tmp_path / "openalgo"
+    (app / "db").mkdir(parents=True)
+    master = app / "db" / "openalgo.db"
+    engine = create_db_engine(f"sqlite:///{master}")
+    Base.metadata.create_all(engine, tables=[SymToken.__table__])
+    with Session(engine) as session:
+        session.add(SymToken(symbol="SBIN30DEC26FUT", brsymbol="x", exchange="NFO", token="1"))
+        session.commit()
+    engine.dispose()
+    db = tmp_path / "market.db"
+    store = MarketStore(db)
+    created = ms("2026-10-21", "08:00:00")
+    fields = {"instrument_key": SBIN, "symbol": "SBIN", "exchange": "NSE", "tick_size": "0.05",
+              "kind": "price", "params": {"op": "crosses_above", "level": "100"}}  # fmt: skip
+    store.create("owner", spec.check(fields, created), created)
+    store.close()
+    day = tmp_path / "2026-10-21.jsonl.gz"
+    at = ms("2026-10-21", "09:20:00")
+    recording(day, [{"key": SBIN, "ltp": 99.9, "ltt": at, "ltq": 1, "ts_recv": at + 15}])
+    (tmp_path / "tmp").mkdir()
+    holidays = tmp_path / "holidays.txt"
+    holidays.write_text("2026-10-20\n")
+    root = Path(__file__).resolve().parents[3]
+    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "TMPDIR": str(tmp_path / "tmp"),
+           "PYTHONPATH": str(root)}  # fmt: skip
+    done = subprocess.run(
+        [sys.executable, "-m", "sudarshan.alerts.market.check", str(day), "--db", str(db),
+         "--openalgo-db", str(master), "--holidays", str(holidays),
+         "--extra-days", str(tmp_path / "none.txt")],
+        cwd=app, env=env, capture_output=True, text=True, timeout=120,
+    )  # fmt: skip
+    assert done.returncode == 0 and "Traceback" not in done.stderr, done.stderr
+    assert done.stdout.splitlines()[-1].endswith("0 would have fired.")
+    assert sorted(path.name for path in app.iterdir()) == ["db"]  # no log/ in OpenAlgo's
+    assert (tmp_path / "tmp" / "sudarshan-alerts-openalgo-log").is_dir()  # its own instead
+
+
 def test_the_check_refuses_what_it_cannot_read(tmp_path, capsys):
     day = tmp_path / "2026-10-21.jsonl.gz"
     recording(day, [])

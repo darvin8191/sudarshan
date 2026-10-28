@@ -89,14 +89,30 @@ def load_openalgo_modules() -> None:
     imported (broker secrets included). This process needs three values from it, so that load is
     skipped here. The import also replaces the root log handlers: call setup_logging() after it.
     """
+    with without_openalgo_dotenv():
+        from database import auth_db, user_db  # noqa: F401
+
+
+@contextlib.contextmanager
+def without_openalgo_dotenv():
+    """OpenAlgo's modules imported inside do not load OpenAlgo's .env (load_openalgo_modules)."""
     import dotenv
 
     load = dotenv.load_dotenv
     dotenv.load_dotenv = lambda *args, **kwargs: False
     try:
-        from database import auth_db, user_db  # noqa: F401
+        yield
     finally:
         dotenv.load_dotenv = load
+
+
+def prepare_master_read(db_path: Path) -> None:
+    """What OpenAlgo's ``database.symbol`` reads at import, for a process that reads only the
+    master contract (the replay check): a read-only ``DATABASE_URL``, and its logging module's
+    files in this process's private temporary directory, never in OpenAlgo's ``log/``."""
+    os.environ["DATABASE_URL"] = database_urls(db_path)[0]
+    os.environ["LOG_DIR"] = str(Path(tempfile.gettempdir()) / "sudarshan-alerts-openalgo-log")
+    os.environ["LOG_TO_FILE"] = "False"
 
 
 @contextlib.contextmanager
