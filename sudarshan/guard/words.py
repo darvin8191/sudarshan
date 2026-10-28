@@ -68,18 +68,30 @@ def kill_switch_on(
     return " ".join(words)
 
 
-def book_unreadable(pipe: str, since: str | None) -> str:
-    """Why an order is refused when the switch is on (or its state unknown) and the positions,
-    which tell an exit from a new order, could not be read."""
-    why = (
-        f"the kill switch is on since {since}"
-        if since
-        else "SUDARSHAN could not read whether the kill switch is on"
-    )
+def _refusing_why(since: str | None, locked: tuple[float, float] | None) -> str:
+    """What refuses new risk now, in a clause: the day's lock, or the kill switch (``since``:
+    "HH:MM", "" when on at an unknown time, None when its state could not be read)."""
+    if locked is not None:
+        loss, limit = locked
+        return (
+            f"new orders are refused for today, the day's loss of {rupees(abs(loss))} having "
+            f"reached your daily limit of {rupees(abs(limit))}"
+        )
+    if since is None:
+        return "SUDARSHAN could not read whether the kill switch is on"
+    return f"the kill switch is on since {since}" if since else "the kill switch is on"
+
+
+def book_unreadable(
+    pipe: str, since: str | None, *, locked: tuple[float, float] | None = None
+) -> str:
+    """Why an order is refused when the switch is on (or its state unknown), or the day is
+    ``locked`` (its loss and limit), and the positions, which tell an exit from a new order,
+    could not be read, not even in the last few seconds."""
     return (
-        f"This order was refused: {why}, and your positions could not be read from "
-        f"{_where(pipe)}, so SUDARSHAN cannot tell whether it is an exit. Try again in a few "
-        f"seconds.{_urgent(pipe)}"
+        f"This order was refused: {_refusing_why(since, locked)}, and your positions could not "
+        f"be read from {_where(pipe)}, so SUDARSHAN cannot tell whether it is an exit. Try again "
+        f"in a few seconds.{_urgent(pipe)}"
     )
 
 
@@ -91,12 +103,15 @@ def check_broke(pipe: str) -> str:
     )
 
 
-def order_not_found(pipe: str) -> str:
-    """Why a modify is refused while the switch is on when its order cannot be found or read."""
+def order_not_found(
+    pipe: str, since: str | None = "", *, locked: tuple[float, float] | None = None
+) -> str:
+    """Why a modify is refused while the switch is on, or the day is ``locked``, when its order
+    or the positions it acts on cannot be found or read."""
     return (
-        "This change was refused: the kill switch is on and the order could not be read from "
-        f"{_where(pipe)}, so SUDARSHAN cannot tell whether the change adds risk. Check Orders and "
-        f"try again in a few seconds.{_urgent(pipe)}"
+        f"This change was refused: {_refusing_why(since, locked)}, and the order could not be "
+        f"read from {_where(pipe)}, so SUDARSHAN cannot tell whether the change adds risk. Check "
+        f"Orders and try again in a few seconds.{_urgent(pipe)}"
     )
 
 

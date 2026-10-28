@@ -25,8 +25,11 @@ function is called. Each send stays recorded until its answer says nothing was s
 latest. The records are the in-flight registry the kill switch waits on when it is turned on.
 
 If the gate itself breaks, an order passes only when nothing is refusing new risk. While the kill
-switch is on, or its state could not be read, it is refused (fail closed); a read of the book
-that failed refuses too, with a sentence pointing at the Upstox app for an urgent exit.
+switch is on, or its state could not be read, it is refused (fail closed). Under the kill switch
+or on a locked day, a positions read that fails is answered from the book read in the last
+``DAY_BOOK_REUSE_S``; with none, an order that cannot be judged is refused, with a sentence
+pointing at the Upstox app for an urgent exit. In every other state an unreadable book lets the
+order go, noted, because it may be an exit.
 
 The daily loss limit (M5.14, daily.py) refuses new risk the same way once the day's loss has
 reached it: the first order to see the figure at the limit writes the day's lock, and the lock
@@ -89,9 +92,6 @@ SHOWS_WITHIN_S = EXIT_SHOWS_WITHIN_S
 #: A send counts this long at most, answered or not: the phone's no-answer hold
 #: (frontend/src/sudarshan/books/sent.ts).
 SEND_HELD_AT_MOST_S = 150.0
-#: While the kill switch is on, a position book read this recently that shows a position flat,
-#: with nothing sent on it, is enough to refuse an order on it without reading again.
-BOOK_REUSE_S = 5.0
 #: How soon the kill switch's state is read again after a read failed.
 STATE_RETRY_S = 2.0
 #: Refusals of one kind are written to the audit at most this often; the rest are counted in
@@ -103,8 +103,9 @@ NOTE_KEPT_S = 60.0
 #: The gate's own time is kept for this many decisions, for its p50 and p95 on the status route
 #: (sessions S1 and G3 record them).
 TIMED_KEPT = 500
-#: The day's figure may come from a book read this long ago when Upstox cannot be read just now
-#: (design section 5); an order is never judged on one that old.
+#: When Upstox's positions cannot be read just now, the book read this recently serves: for the
+#: day's figure (design section 5), and, under the kill switch or on a locked day only, to judge
+#: an order (the coordinator's decision d). With none, such an order is refused.
 DAY_BOOK_REUSE_S = 15.0
 #: A segment's session window, read from the market calendar, is kept this long.
 SESSION_KEPT_S = 600.0
@@ -321,6 +322,7 @@ class _Facts:
     working: rules.WorkingOrder | None = None
     unreadable: bool = False
     pass_through: bool = False  # nothing to judge: the broker answers it (a final order)
+    stale: bool = False  # judged on a book kept from before: only while new risk is refused
 
 
 class Gate:
@@ -489,7 +491,8 @@ class Gate:
             refusing = self._refusing()
             if refusing is None and not guards.active(order):
                 return Decision(token=self._register(order, None, now))
-        known, facts = self._facts(order, refusing)  # reads: outside the lock
+        fallback = refusing is not None or guards.lock is not None
+        known, facts = self._facts(order, fallback)  # reads: outside the lock
         lock, day_unread, reads = None, False, _Reads(_NO_QUOTE)
         if refusing is None and not facts.pass_through and not facts.unreadable:
             lock, day_unread = self._day_facts(known, facts, guards)  # the figure, and its lock
@@ -502,9 +505,11 @@ class Gate:
             if facts.pass_through:
                 return Decision(token=self._register(known, None, now))
             if facts.unreadable:
-                if refusing is not None:
-                    return self._unreadable(known, refusing)
+                if refusing is not None or lock is not None:
+                    return self._unreadable(known, refusing, lock)
                 return self._unjudged(known, guards, now)
+            if facts.stale and refusing is None and lock is None:
+                return self._unjudged(known, guards, now)  # a kept book judges refusals only
             if refusing is None and lock is None and not day_unread and not guards.judges(known):
                 return Decision(token=self._register(known, None, now))
             verdict, sent_at = self._judge(known, facts, now)
@@ -530,58 +535,66 @@ class Gate:
 
     # -- reading what an order does, outside the lock ---------------------------------------------
 
-    def _facts(self, order: Order, refusing: _Refusing | None) -> tuple[Order, _Facts]:
+    def _facts(self, order: Order, fallback: bool = False) -> tuple[Order, _Facts]:
+        """What the order does, read from the broker's books. ``fallback``: new risk is refused
+        now, so a positions book kept from the last ``DAY_BOOK_REUSE_S`` may judge it."""
         try:
             if order.action == MODIFY:
-                return self._modify_facts(order, refusing)
+                return self._modify_facts(order, fallback)
             if order.action == GTT_MODIFY:
                 order = self._gtt_modify_order(order)
             if order.cnc_sell or (order.action != PLACE and order.trigger_type == "OCO"):
                 return order, _Facts()  # judged without the book
-            return order, _Facts(position=self._position(order, refusing))
+            position, stale = self._position(order, fallback)
+            return order, _Facts(position=position, stale=stale)
         except (readers.Unreadable, ValueError) as exc:
             logger.warning(f"The risk check could not read what an order does: {exc}")
             return order, _Facts(unreadable=True)
 
-    def _position(self, order: Order, refusing: _Refusing | None) -> int:
-        """p for the order's position, from the broker's own book."""
+    def _position(self, order: Order, fallback: bool = False) -> tuple[int, bool]:
+        """p for the order's position, from the broker's own book, and whether that book was
+        kept from before (``_live_rows``). Every order is judged on a read of its own: a
+        position opened since an earlier read (a fill, a GTT, a trade in Upstox's app) is
+        never mistaken for flat."""
         if order.pipe == SANDBOX:
-            return self._read.sandbox_position(
+            position = self._read.sandbox_position(
                 order.owner, order.symbol, order.exchange, order.product
             )
+            return position, False
         instrument = self._read.instrument_token(order.symbol, order.exchange)
         if instrument is None:
-            return 0  # no instrument: nothing can be held in it, and the broker sends nothing
+            return 0, False  # no instrument: nothing can be held in it, and nothing is sent
         product = rules.position_product(LIVE, order.product)
-        rows = self._read.live_cached_rows(order.owner)
-        if (
-            rows is None
-            and refusing is not None
-            and refusing.state is not None
-            and refusing.state.on
-        ):
-            recent = self._recent_rows(order.owner)
-            if recent is not None and rules.upstox_position(recent, instrument, product) == 0:
-                if not self._has_sends(order.key):
-                    return 0
-        if rows is None:
-            rows = self._read.live_rows(order.owner)
-        with self._lock:
-            self._rows = (order.owner, time.monotonic(), rows)
-        return rules.upstox_position(rows, instrument, product)
+        rows, stale = self._live_rows(order.owner, fallback)
+        return rules.upstox_position(rows, instrument, product), stale
 
-    def _recent_rows(self, owner: str) -> list | None:
+    def _live_rows(self, owner: str, fallback: bool = False) -> tuple[list, bool]:
+        """Upstox's positions for ``owner``, kept with the time the read began. When they cannot
+        be read and ``fallback`` allows it, the book read in the last ``DAY_BOOK_REUSE_S``,
+        with True; else Unreadable."""
+        started = time.monotonic()
+        try:
+            rows = self._read.live_cached_rows(owner)
+            if rows is None:
+                rows = self._read.live_rows(owner)
+        except readers.Unreadable:
+            kept = self._kept_rows(owner, DAY_BOOK_REUSE_S) if fallback else None
+            if kept is None:
+                raise
+            return kept, True
+        with self._lock:
+            self._rows = (owner, started, rows)
+        return rows, False
+
+    def _kept_rows(self, owner: str, within: float) -> list | None:
+        """The book last read for ``owner``, if that read began at most ``within`` ago."""
         with self._lock:
             kept = self._rows
-        if kept is None or kept[0] != owner or time.monotonic() - kept[1] > BOOK_REUSE_S:
+        if kept is None or kept[0] != owner or time.monotonic() - kept[1] > within:
             return None
         return kept[2]
 
-    def _has_sends(self, key: tuple) -> bool:
-        with self._lock:
-            return any(send.order.key == key for send in self._sends.values())
-
-    def _modify_facts(self, order: Order, refusing: _Refusing | None) -> tuple[Order, _Facts]:
+    def _modify_facts(self, order: Order, fallback: bool = False) -> tuple[Order, _Facts]:
         """The order a modify changes, as the broker has it, and the position it acts on."""
         if order.pipe == LIVE:
             working = self._read.live_working_order(order.owner, order.ref)
@@ -603,18 +616,15 @@ class Gate:
         )
         if known.cnc_sell:
             return known, _Facts(working=working.order)
+        stale = False
         if order.pipe == LIVE:
-            rows = self._read.live_cached_rows(order.owner)
-            if rows is None:
-                rows = self._read.live_rows(order.owner)
-            with self._lock:
-                self._rows = (order.owner, time.monotonic(), rows)
+            rows, stale = self._live_rows(order.owner, fallback)
             position = rules.upstox_position(rows, working.instrument, working.product)
         else:
             position = self._read.sandbox_position(
                 order.owner, known.symbol, known.exchange, known.product
             )
-        return known, _Facts(position=position, working=working.order)
+        return known, _Facts(position=position, working=working.order, stale=stale)
 
     def _gtt_modify_order(self, order: Order) -> Order:
         """A GTT modify judged as the GTT will be: its side, product and kind are the broker's."""
@@ -709,22 +719,10 @@ class Gate:
 
     def _rows_for_day(self, owner: str) -> list:
         """The book the order was just judged on; else a read, else one up to 15 s old."""
-        with self._lock:
-            kept = self._rows
-        mine = kept is not None and kept[0] == owner
-        if mine and time.monotonic() - kept[1] <= 1.0:
-            return kept[2]
-        try:
-            rows = self._read.live_cached_rows(owner)
-            if rows is None:
-                rows = self._read.live_rows(owner)
-        except readers.Unreadable:
-            if mine and time.monotonic() - kept[1] <= DAY_BOOK_REUSE_S:
-                return kept[2]
-            raise
-        with self._lock:
-            self._rows = (owner, time.monotonic(), rows)
-        return rows
+        kept = self._kept_rows(owner, 1.0)
+        if kept is not None:
+            return kept
+        return self._live_rows(owner, fallback=True)[0]
 
     def _lock_day(self, pipe: str, day: _Guards, figure: daily.DayFigure) -> risk_store.DayLock:
         """Write today's lock; the first order here to see the breach says so, once."""
@@ -1088,7 +1086,7 @@ class Gate:
             if guards.price_band(order) is None and not guards.sized(order):
                 if not guards.braking:
                     continue
-            known, facts = self._facts(order, None)  # reads: outside the lock
+            known, facts = self._facts(order)  # reads: outside the lock
             if facts.unreadable or facts.pass_through:
                 continue
             mine = (known.key, known.side)
@@ -1125,11 +1123,21 @@ class Gate:
                 return None, refusal  # the batch as a whole, not one part
         return None
 
-    def _unreadable(self, order: Order, refusing: _Refusing) -> Decision:
-        since = None if refusing.state is None else _hhmm(refusing.state.since)
+    def _unreadable(
+        self, order: Order, refusing: _Refusing | None, lock: risk_store.DayLock | None = None
+    ) -> Decision:
+        """New risk is refused now and the order cannot be judged: no book, not even one kept
+        from the last ``DAY_BOOK_REUSE_S``, so it is refused with the way to an urgent exit."""
+        since, locked = None, None
+        if refusing is not None:
+            since = None if refusing.state is None else _hhmm(refusing.state.since)
+        elif lock is not None:
+            locked = (lock.figure, lock.loss_limit)
         if order.action in (MODIFY, GTT_MODIFY):
-            return Decision(True, words.order_not_found(order.pipe), GUARD_UNAVAILABLE)
-        return Decision(True, words.book_unreadable(order.pipe, since), GUARD_UNAVAILABLE)
+            said = words.order_not_found(order.pipe, since, locked=locked)
+        else:
+            said = words.book_unreadable(order.pipe, since, locked=locked)
+        return Decision(True, said, GUARD_UNAVAILABLE, detail={"reason": "unreadable"})
 
     def _broke(self, pipe: str, order: Order | None) -> Decision:
         """The check failed: refuse only while new risk is refused, else let it go."""

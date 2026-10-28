@@ -47,8 +47,12 @@ def every_sentence() -> list[str]:
         out += [
             words.book_unreadable(pipe, SINCE),
             words.book_unreadable(pipe, None),
+            words.book_unreadable(pipe, ""),
+            words.book_unreadable(pipe, None, locked=(-4125.5, 4000.0)),
             words.check_broke(pipe),
             words.order_not_found(pipe),
+            words.order_not_found(pipe, SINCE),
+            words.order_not_found(pipe, None, locked=(-4125.5, 4000.0)),
         ]
     out += kill_switch_sentences()
     out += daily_sentences()

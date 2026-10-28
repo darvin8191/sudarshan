@@ -368,7 +368,6 @@ def test_cnc_on_a_derivative_is_judged_like_nrml(the_gate, book, clock):
     upstox = broker()
     refused_message(upstox.place(order("SELL", product="CNC"), "token"))
     book.rows = [row(CE, 65, "D")]
-    clock.now += gate.BOOK_REUSE_S + 1
     assert upstox.place(order("SELL", product="CNC"), "token")[2] == "OID0"
 
 
@@ -383,6 +382,42 @@ def test_a_book_that_cannot_be_read_refuses_while_the_switch_is_on(the_gate, boo
     assert message == words.book_unreadable("live", "10:42")
     assert "For an urgent exit, use the Upstox app." in message
     assert risk_store.history()[0].kind == "guard_unavailable"
+
+
+def test_under_the_switch_a_book_read_in_the_last_fifteen_seconds_judges_an_order(
+    the_gate, book, clock
+):
+    """Decision d: Upstox's positions cannot be read just now, so the book read for an order a
+    moment ago judges this one: its exit goes and a new order is refused as ever. Once that
+    book is older than 15 s, an order it cannot judge is refused."""
+    the_gate.set_state(ON)
+    book.rows = [row(CE, 65)]
+    upstox = broker()
+    refused_message(upstox.place(order("BUY", symbol=PE), "token"))  # reads the book
+    book.fail.add("rows")
+    clock.now += gate.DAY_BOOK_REUSE_S - 1
+    assert upstox.place(order("SELL"), "token")[2] == "OID0"  # the CE exit, on that book
+    refused = refused_message(upstox.place(order("BUY", symbol=PE), "token"))
+    assert refused.startswith("New orders are refused: the kill switch is on since 10:42.")
+    clock.now += 2
+    message = refused_message(upstox.place(order("SELL", symbol=PE), "token"))
+    assert message == words.book_unreadable("live", "10:42")
+
+
+def test_a_kept_book_never_judges_an_order_once_nothing_refuses(the_gate, book, clock):
+    """The switch went off while this order's read was failing: it is not judged on the book
+    kept from before but goes unjudged, noted, as any order whose book cannot be read."""
+    the_gate.set_state(ON)
+    upstox = broker()
+    refused_message(upstox.place(order("BUY"), "token"))  # read: flat
+
+    def resumed_meanwhile(auth):
+        the_gate.set_state(KillSwitchState())
+        raise readers.Unreadable("rows")
+
+    book.live_rows = resumed_meanwhile
+    assert upstox.place(order("BUY"), "token")[2] == "OID0"
+    assert the_gate.last_problem()["kind"] == "guard_unavailable"
 
 
 def test_a_state_that_cannot_be_read_refuses_new_risk_and_lets_exits_go(
@@ -466,7 +501,7 @@ def test_a_modify_is_judged_as_the_order_the_broker_has(the_gate, book):
     assert upstox.modify(change("X1", 65, 135, action="BUY"), "token")[1] == 200  # side: broker's
     assert upstox.modify(change("D1", 130, 120), "token")[1] == 200  # done: the broker answers
     body, status = upstox.modify(change("NOPE", 65, 1), "token")
-    assert status == 403 and body["message"] == words.order_not_found("live")
+    assert status == 403 and body["message"] == words.order_not_found("live", "10:42")
 
 
 def test_a_modify_of_an_exit_this_process_sent_leaves_its_own_claim_out(the_gate, book):
@@ -496,24 +531,45 @@ def test_a_gtt_modify_is_judged_as_the_gtt_the_broker_has(the_gate, book):
     assert upstox.gtt_modify({"trigger_id": "S1", "quantity": "130"}, "token")[1] == 403
     assert upstox.gtt_modify({"trigger_id": "M1", "quantity": "65"}, "token")[1] == 403
     body, status = upstox.gtt_modify({"trigger_id": "GONE", "quantity": "65"}, "token")
-    assert status == 403 and body["message"] == words.order_not_found("live")
+    assert status == 403 and body["message"] == words.order_not_found("live", "10:42")
 
 
 # -- reads under the switch ------------------------------------------------------------------------
 
 
-def test_a_flat_book_read_a_moment_ago_refuses_without_reading_again(the_gate, book, clock):
+def test_a_flat_book_read_a_moment_ago_never_refuses_the_exit_of_a_position_opened_since(
+    the_gate, book, clock
+):
+    """Gate review H2: a resting entry filled before the cancel landed, a GTT fired, a trade in
+    Upstox's app. Every order under the switch is judged on a read of its own."""
     the_gate.set_state(ON)
     upstox = broker()
-    refused_message(upstox.place(order("BUY"), "token"))
-    assert book.calls.count("rows") == 1
-    clock.now += gate.BOOK_REUSE_S - 1
-    for _ in range(5):
-        refused_message(upstox.place(order("BUY"), "token"))
-    assert book.calls.count("rows") == 1
-    clock.now += 2
-    refused_message(upstox.place(order("BUY"), "token"))
+    refused_message(upstox.place(order("SELL"), "token"))  # flat: a SELL would open a short
+    book.rows = [row(CE, 65)]  # the long appears at Upstox
+    clock.now += 1
+    assert upstox.place(order("SELL"), "token")[2] == "OID0"  # its exit goes
     assert book.calls.count("rows") == 2
+
+
+def test_a_book_kept_for_judging_carries_the_time_its_read_began(the_gate, book, clock):
+    """Gate review L6: a read that took 10 s is 10 s old when it answers."""
+    the_gate.set_state(ON)
+    book.rows = [row(CE, 65)]
+    original = book.live_rows
+
+    def slow(auth):
+        clock.now += 10
+        return original(auth)
+
+    book.live_rows = slow
+    upstox = broker()
+    refused_message(upstox.place(order("BUY", symbol=PE), "token"))  # read from 1000 to 1010
+    book.live_rows = original
+    book.fail.add("rows")
+    clock.now += gate.DAY_BOOK_REUSE_S - 9  # 16 s after the read began, 6 s after it answered
+    assert refused_message(upstox.place(order("SELL"), "token")) == words.book_unreadable(
+        "live", "10:42"
+    )
 
 
 def test_the_broker_s_own_fresh_book_is_always_preferred(the_gate, book):
@@ -768,7 +824,6 @@ def test_the_gate_keeps_its_own_time_per_order(the_gate, book, clock):
     the_gate.set_state(ON)
     for _ in range(2):
         upstox.place(order("BUY"), "token")  # refused after reading the book
-        clock.now += gate.BOOK_REUSE_S + 1  # so the next one reads it again
     timing = the_gate.timing()
     assert timing == {"orders": 20, "p50_ms": 0.0, "p95_ms": 250.0, "max_ms": 250.0}
     assert len(upstox.reached) == 18
@@ -783,7 +838,7 @@ def test_the_last_problem_is_kept_for_the_status_route(the_gate, book, clock):
     the_gate.set_state(ON)
     upstox.place(order("BUY"), "token")  # an ordinary refusal is not a problem
     assert the_gate.last_problem() is None
-    clock.now += gate.BOOK_REUSE_S + 1  # the flat book read for it is no longer reused
+    clock.now += gate.DAY_BOOK_REUSE_S + 1  # the book read for it no longer serves
     book.fail.add("rows")
     book.rows = [row(CE, 65)]
     upstox.place(order("SELL"), "token")

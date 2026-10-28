@@ -12,7 +12,20 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
-from test_guard_gate import CE, JOIN_S, ON, PE, WAIT, Book, broker, order, refused_message, row
+from test_guard_gate import (  # noqa: F401 - clock: the fake clock fixture
+    CE,
+    JOIN_S,
+    ON,
+    PE,
+    WAIT,
+    Book,
+    broker,
+    change,
+    clock,
+    order,
+    refused_message,
+    row,
+)
 
 from sudarshan.guard import daily, flag, gate, readers, words
 from sudarshan.guard.store import KillSwitchState
@@ -149,20 +162,135 @@ def test_a_two_leg_gtt_is_refused_when_the_figure_cannot_be_read(day):
     assert refused_message(answer) == words.daily_unreadable("live")
 
 
-def test_a_book_up_to_fifteen_seconds_old_serves_the_figure(day, monkeypatch):
-    clock = {"now": 1000.0}
-    monkeypatch.setattr(
-        gate, "time", SimpleNamespace(monotonic=lambda: clock["now"], time=lambda: clock["now"])
-    )
+def test_a_book_up_to_fifteen_seconds_old_serves_the_figure(day, clock):  # noqa: F811
     day.book.rows = [day_row(CE, 65, -100.0, 0.0)]
     upstox = broker()
     assert upstox.place(order("BUY", symbol=PE), "token")[2] == "OID0"  # the book is read
     day.book.fail.add("rows")
-    clock["now"] += 10
+    clock.now += 10
     gtt = order("BUY", symbol=PE, trigger_type="OCO")
     assert upstox.gtt_place(gtt, "token")[2] == "GTT-1"  # the figure from the 10 s old book
-    clock["now"] += 6
+    clock.now += 6
     assert refused_message(upstox.gtt_place(gtt, "token")) == words.daily_unreadable("live")
+
+
+def test_on_a_locked_day_an_order_whose_book_cannot_be_read_is_refused(day):
+    """Decision d (limits review M3): no positions, not even a book from the last 15 s, so what
+    the gate cannot judge is refused, with the way to an urgent exit."""
+    day.store.lock_day("live", today(), -5200.0, LIMIT)
+    day.book.fail.add("rows")
+    upstox = broker()
+    message = refused_message(upstox.place(order("BUY", symbol=PE), "token"))
+    assert message == words.book_unreadable("live", None, locked=(-5200.0, LIMIT))
+    assert message.startswith(
+        "This order was refused: new orders are refused for today, the day's loss of ₹5,200 "
+        "having reached your daily limit of ₹4,000, and your positions could not be read from "
+        "Upstox, so SUDARSHAN cannot tell whether it is an exit."
+    )
+    assert message.endswith("For an urgent exit, use the Upstox app.")
+    assert upstox.reached == []
+
+
+def test_on_a_locked_day_a_book_read_in_the_last_fifteen_seconds_judges_an_order(
+    day,
+    clock,  # noqa: F811
+):
+    day.store.lock_day("live", today(), -5200.0, LIMIT)
+    day.book.rows = [day_row(CE, 65, -5200.0, 0.0)]
+    upstox = broker()
+    refused_message(upstox.place(order("BUY", symbol=PE), "token"))  # reads the book
+    day.book.fail.add("rows")
+    clock.now += gate.DAY_BOOK_REUSE_S - 1
+    assert upstox.place(order("SELL"), "token")[2] == "OID0"  # the CE exit, on that book
+    message = refused_message(upstox.place(order("BUY", symbol=PE), "token"))
+    assert message.startswith("New orders are refused for today: the day's loss of ₹5,200")
+
+
+def test_on_a_locked_day_a_change_whose_order_cannot_be_read_is_refused(day):
+    day.store.lock_day("live", today(), -5200.0, LIMIT)
+    day.book.fail.add("orders")
+    body, status = broker().modify(change("E1", 65, 101), "token")
+    assert status == 403
+    assert body["message"] == words.order_not_found("live", None, locked=(-5200.0, LIMIT))
+
+
+def test_the_figure_for_an_order_judged_without_the_book_is_read_afresh(
+    day,
+    clock,  # noqa: F811
+):
+    """A two-leg GTT reads no book to be judged, so its figure comes from a read of its own,
+    never from a book another order read seconds ago (mutant G4)."""
+    day.book.rows = [day_row(CE, 65, -1000.0, 0.0)]
+    upstox = broker()
+    assert upstox.place(order("BUY", symbol=PE), "token")[2] == "OID0"  # read: -1,000
+    day.book.rows = [day_row(CE, 65, -4500.0, 0.0)]
+    clock.now += 5
+    oco = refused_message(upstox.gtt_place(order("BUY", symbol=PE, trigger_type="OCO"), "token"))
+    assert oco.startswith("New orders are refused for today: the day's loss of ₹4,500")
+
+
+def test_a_book_kept_for_the_figure_is_as_old_as_its_read(day, clock):  # noqa: F811
+    """Gate review L6: a read that took 10 s, kept, is 16 s old 6 s after it answered, too old
+    to serve the figure."""
+    day.book.rows = [day_row(CE, 65, -3000.0, 0.0)]
+    original = day.book.live_rows
+
+    def slow(auth):
+        clock.now += 10
+        return original(auth)
+
+    day.book.live_rows = slow
+    upstox = broker()
+    assert upstox.place(order("BUY", symbol=PE), "token")[2] == "OID0"  # read from 1000 to 1010
+    day.book.live_rows = original
+    day.book.fail.add("rows")
+    clock.now += 6
+    gtt = order("BUY", symbol=PE, trigger_type="OCO")
+    assert refused_message(upstox.gtt_place(gtt, "token")) == words.daily_unreadable("live")
+
+
+class TwoReads(Book):
+    """Two orders reading the book at once, each its own answer (the barrier tests)."""
+
+    def __init__(self, first: list, second: list):
+        super().__init__()
+        self.answers = [first, second]
+        self.both_read = threading.Barrier(2)
+        self.taking = threading.Lock()
+
+    def live_rows(self, auth):
+        self._read("rows")
+        with self.taking:
+            rows = self.answers.pop(0)
+        self.both_read.wait(WAIT)
+        return rows
+
+
+def test_a_lock_that_cannot_be_saved_holds_once_with_the_first_figure(day, monkeypatch):
+    """The risk database will not take the lock: it holds in this process, and the order that
+    finds it written meanwhile names that lock's figure, not the one it read (mutant G14)."""
+    reads = TwoReads([day_row(CE, 65, -4000.0, 0.0)], [day_row(CE, 65, -5000.0, 0.0)])
+    monkeypatch.setattr(day.gate, "_read", reads)
+
+    def no_disk(*args):
+        raise OSError("disk")
+
+    monkeypatch.setattr(day.store, "lock_day", no_disk)
+    upstox = broker()
+    said = []
+
+    def send():
+        gtt = order("BUY", symbol=PE, trigger_type="OCO")  # judged without the book
+        said.append(refused_message(upstox.gtt_place(gtt, "token")))
+
+    threads = [threading.Thread(target=send) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(JOIN_S)
+    assert not any(thread.is_alive() for thread in threads)
+    assert len(said) == 2 and said[0] == said[1]  # one lock, one figure
+    assert len(day.told) == 1
 
 
 def test_a_delivery_dip_never_locks_the_day(day):
