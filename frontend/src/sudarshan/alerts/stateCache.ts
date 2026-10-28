@@ -85,6 +85,10 @@ export function applyStatePush(
   state: MarketAlertsState,
   push: MarketAlertsStatePush
 ): { state: MarketAlertsState; reread: boolean } {
+  // Sent before the read the cache holds (and delivered after it): the read already says more.
+  if (typeof push.server_time === 'number' && push.server_time < state.server_time) {
+    return { state, reread: false }
+  }
   const removed = new Set(push.removed ?? [])
   const changed = new Map((push.alerts ?? []).map((row) => [row.id, row]))
   let reread = changed.size === 0 && removed.size === 0
@@ -116,18 +120,26 @@ export function applyStatePush(
   }
 }
 
-/** One more fire today on the alert a push names; `held` false when the cache lacks it. */
+/**
+ * One more fire today on the alert a push names, when the cache holds it as Active; `held` false
+ * when the cache lacks it. The state push's count wins (contract 2.2): the server sends the state
+ * push for a fire that stops a Once alert before that fire's alert push, so the row it names is
+ * no longer Active and is not counted twice.
+ */
 export function countFired(
   state: MarketAlertsState,
   push: Pick<MarketAlertPush, 'alert_id'>
 ): { state: MarketAlertsState; held: boolean } {
   let held = false
+  let counted = false
   const alerts = state.alerts.map((row) => {
     if (row.id !== push.alert_id) return row
     held = true
+    if (row.status !== 'active') return row
+    counted = true
     return { ...row, fired_today: row.fired_today + 1 }
   })
-  return { state: held ? { ...state, alerts } : state, held }
+  return { state: counted ? { ...state, alerts } : state, held }
 }
 
 /** The server's answer to a create or a change, in place of what the cache held. */

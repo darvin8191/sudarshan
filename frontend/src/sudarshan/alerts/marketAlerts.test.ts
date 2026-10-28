@@ -7,7 +7,7 @@
  * and the Alerts page's cache kept current by the state and delivery pushes. The sound itself is
  * chime.test.ts's.
  */
-import { type InfiniteData, QueryClient } from '@tanstack/react-query'
+import { type InfiniteData, QueryClient, QueryObserver } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const toasts = vi.hoisted(() => ({ info: vi.fn(), dismiss: vi.fn() }))
@@ -927,8 +927,8 @@ describe('the Alerts page’s cache', () => {
     expect(cached()?.alerts[0]).toMatchObject({ status: 'stopped', version: 3 })
   })
 
-  it('drops an alert deleted on another screen', async () => {
-    const { socket, cached } = await bound(state({ alerts: [row(), row({ id: 13 })] }))
+  it('drops an alert deleted on another screen, without reading the state again', async () => {
+    const { socket, cached, invalidate } = await bound(state({ alerts: [row(), row({ id: 13 })] }))
     socket.fire('sudarshan_market_alerts_state', {
       engine: state().engine,
       alerts: [],
@@ -936,15 +936,87 @@ describe('the Alerts page’s cache', () => {
       server_time: NOW,
     })
     expect(cached()?.alerts.map((each) => each.id)).toEqual([13])
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: STATE_KEY })
   })
 
   it('counts each pushed alert once toward its fires today, and a test never', async () => {
     const { socket, cached } = await bound()
     socket.fire('sudarshan_market_alert', push())
     socket.fire('sudarshan_market_alert', push())
-    socket.fire('sudarshan_market_alert', push({ event_id: 346, alert_id: 0, test: true }))
+    // A test names no alert of its own; even one naming a real alert is never counted.
+    socket.fire('sudarshan_market_alert', push({ event_id: 346, alert_id: 12, test: true }))
 
     expect(cached()?.alerts[0].fired_today).toBe(3)
+  })
+
+  it('counts the fire that stops a Once alert once: the state push before it already did', async () => {
+    const { socket, cached } = await bound(
+      state({ alerts: [row({ frequency: 'once', fired_today: 0 })] })
+    )
+    // The server sends the state push for that fire before the fire's own push.
+    socket.fire('sudarshan_market_alerts_state', {
+      engine: state().engine,
+      alerts: [{ ...stopped, fired_today: 1 }],
+      removed: [],
+      server_time: NOW,
+    })
+    socket.fire('sudarshan_market_alert', push({ event_id: 345 }))
+
+    expect(cached()?.alerts[0]).toMatchObject({ status: 'stopped', fired_today: 1 })
+  })
+
+  it('reads the state again for a fire on an alert it does not hold', async () => {
+    const { socket, invalidate } = await bound()
+    socket.fire('sudarshan_market_alert', push({ event_id: 346, alert_id: 99 }))
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: STATE_KEY })
+  })
+
+  it('keeps a fire counted while a read of the state is on its way that predates it', async () => {
+    const { client, socket, cached } = await bound(state({ alerts: [row({ fired_today: 2 })] }))
+    const observer = new QueryObserver(client, {
+      queryKey: STATE_KEY,
+      queryFn: () => api.state(),
+      staleTime: Number.POSITIVE_INFINITY,
+    })
+    const unsubscribe = observer.subscribe(() => {})
+    let answer: (value: MarketAlertsState) => void = () => {}
+    // Read again, the server counts the third fire too.
+    api.state.mockResolvedValue(state({ alerts: [row({ fired_today: 3 })] }))
+    api.state.mockReturnValueOnce(
+      new Promise<MarketAlertsState>((resolve) => {
+        answer = resolve
+      })
+    )
+    const reading = observer.refetch()
+    socket.fire('sudarshan_market_alert', push({ event_id: 360 })) // the third fire today
+    answer(state({ alerts: [row({ fired_today: 2 })] }))
+    await reading
+    await flush()
+    await flush()
+    unsubscribe()
+
+    expect(cached()?.alerts[0].fired_today).toBe(3)
+  })
+
+  it('does not let a state push older than the read the cache holds undo it', async () => {
+    const { socket, cached } = await bound(
+      state({ server_time: NOW, alerts: [row({ fired_today: 3 })] })
+    )
+    socket.fire('sudarshan_market_alerts_state', {
+      engine: {
+        code: 'outside_hours',
+        line: 'Market closed · checks from 09:15',
+        real_time: false,
+      },
+      alerts: [
+        { id: 12, version: 3, status: 'active', status_reason: '', check: null, fired_today: 2 },
+      ],
+      removed: [],
+      server_time: NOW - 2_000,
+    })
+
+    expect(cached()?.alerts[0].fired_today).toBe(3)
+    expect(cached()?.engine.code).toBe('ok')
   })
 
   it('applies a settled delivery to the cached History, and to a page whose read crossed it', async () => {

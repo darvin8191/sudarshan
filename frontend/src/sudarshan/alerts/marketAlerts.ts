@@ -466,7 +466,11 @@ function countInCache(push: MarketAlertPush): void {
   if (!cache || !state) return
   const result = countFired(state, push)
   if (result.held) cache.setQueryData(STATE_KEY, result.state)
-  else void cache.invalidateQueries({ queryKey: STATE_KEY })
+  // Not held (set on another screen), or a /state read on its way whose answer may predate this
+  // fire and would take the count away: read again.
+  if (!result.held || cache.isFetching({ queryKey: STATE_KEY }) > 0) {
+    void cache.invalidateQueries({ queryKey: STATE_KEY })
+  }
 }
 
 function onState(push: MarketAlertsStatePush): void {
