@@ -37,10 +37,12 @@ const WHAT: Record<Channel, string> = {
 export function SettingsSheet({ onClose }: { onClose: () => void }) {
   const client = useQueryClient()
   const state = client.getQueryData<MarketAlertsState>(STATE_KEY)
+  // Read each time the sheet opens: another screen may have changed them, and nothing pushes it.
   const prefs = useQuery<Prefs, AlertsError>({
     queryKey: PREFS_KEY,
     queryFn: marketAlertsApi.prefs,
     placeholderData: state?.prefs,
+    staleTime: 0,
     retry: false,
   })
   const tested = useQuery<EventsPage | null>({
@@ -52,15 +54,18 @@ export function SettingsSheet({ onClose }: { onClose: () => void }) {
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
   const [problem, setProblem] = useState<string | null>(null)
-  const once = useRef(false)
+  const sending = useRef(false)
   const tappedAt = useRef(Number.NEGATIVE_INFINITY)
 
-  // A read that failed shows the settings as /state last had them, not as both off; a change
-  // waits for a read that answered.
-  const current = prefs.data
-  const shown = current ?? state?.prefs
+  // A change is sent whole (both channels), so it waits for a read that answered: /state's copy,
+  // shown meanwhile, may be older than a change made on another screen. A read that failed shows
+  // the settings as /state last had them, not as both off.
+  const settled = prefs.data !== undefined && !prefs.isPlaceholderData && !prefs.isFetching
+  const current = settled ? prefs.data : undefined
+  const shown = prefs.data ?? state?.prefs
   const save = async (channel: Channel, on: boolean) => {
-    if (!current || saving) return
+    if (!current || sending.current) return
+    sending.current = true
     setSaving(true)
     setProblem(null)
     try {
@@ -73,14 +78,15 @@ export function SettingsSheet({ onClose }: { onClose: () => void }) {
       setProblem(problemOf(error).message)
       void prefs.refetch()
     } finally {
+      sending.current = false
       setSaving(false)
     }
   }
 
   const test = async () => {
-    // One test a tap: none while one is on its way, nor for the second tap of a double tap.
-    if (once.current || Date.now() - tappedAt.current < TAP_GAP_MS) return
-    once.current = true
+    // One test a tap: none for the second tap of a double tap (the button is off while one is
+    // on its way).
+    if (Date.now() - tappedAt.current < TAP_GAP_MS) return
     tappedAt.current = Date.now()
     setTesting(true)
     setProblem(null)
@@ -94,7 +100,6 @@ export function SettingsSheet({ onClose }: { onClose: () => void }) {
     } catch (error) {
       setProblem(problemOf(error).message)
     } finally {
-      once.current = false
       setTesting(false)
     }
   }

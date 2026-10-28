@@ -123,6 +123,36 @@ describe('where alerts go', () => {
   })
 })
 
+describe('a change before the settings are read', () => {
+  it('takes no change while it shows /state’s copy and the server has not answered yet', async () => {
+    api.prefs.mockReturnValue(new Promise(() => {})) // GET /prefs still on its way
+    api.setPrefs.mockResolvedValue({ telegram: true, app: false })
+    const user = userEvent.setup()
+    // This screen's /state was read before Telegram was turned off on another screen.
+    const { sheet } = renderSheet(alertsState({ prefs: { telegram: true, app: true } }))
+    const app = within(sheet).getByRole('switch', { name: 'App' })
+
+    expect(app).toBeChecked()
+    expect(app).toBeDisabled()
+    await user.click(app)
+    expect(api.setPrefs).not.toHaveBeenCalled()
+  })
+
+  it('sends one change at a time, however close together two switches are tapped', async () => {
+    api.setPrefs.mockReturnValue(new Promise(() => {}))
+    const { sheet } = renderSheet()
+    const telegram = within(sheet).getByRole('switch', { name: 'Telegram' })
+    const app = within(sheet).getByRole('switch', { name: 'App' })
+    await waitFor(() => expect(app).toBeEnabled())
+
+    act(() => {
+      telegram.click()
+      app.click()
+    })
+    expect(api.setPrefs).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('the test', () => {
   it('sends once, shows each channel’s result, and a delivery still sending settles by push', async () => {
     api.test.mockResolvedValue({
@@ -150,6 +180,42 @@ describe('the test', () => {
         delivery: { status: 'sent', reason: '', attempts: 1, updated_at: NOW + 2_000 },
       })
     )
+    await waitFor(() =>
+      expect(chips(sheet)).toEqual(['Telegram · Sent 10:42:33', 'App · Sent 10:42:31'])
+    )
+  })
+
+  it('shows a delivery that settled before the test’s own answer came, as settled', async () => {
+    let answer: (result: unknown) => void = () => {}
+    api.test.mockReturnValue(
+      new Promise((resolve) => {
+        answer = resolve
+      })
+    )
+    const handlers = new Map<string, (...args: unknown[]) => void>()
+    const socket = { connected: false, listeners: () => [] }
+    installMarketAlerts(socket as never, (event, handler) => handlers.set(event, handler))
+    const user = userEvent.setup()
+    const { sheet } = renderSheet()
+
+    await user.click(within(sheet).getByRole('button', { name: 'Send a test' }))
+    act(() =>
+      handlers.get('sudarshan_market_alert_delivery')?.({
+        event_id: 400,
+        channel: 'telegram',
+        delivery: { status: 'sent', reason: '', attempts: 1, updated_at: NOW + 2_000 },
+      })
+    )
+    await act(async () =>
+      answer({
+        event_id: 400,
+        deliveries: {
+          telegram: { status: 'pending', reason: '', attempts: 1, updated_at: NOW },
+          app: { status: 'sent', reason: 'Shown on 1 open screen', attempts: 1, updated_at: NOW },
+        },
+      })
+    )
+
     await waitFor(() =>
       expect(chips(sheet)).toEqual(['Telegram · Sent 10:42:33', 'App · Sent 10:42:31'])
     )
