@@ -82,7 +82,9 @@ def cas_keys(alerts, day: date, fno: frozenset[str]) -> frozenset[str]:
 
 def fno_stocks(db_path: Path) -> frozenset[str]:
     """The companies with stock futures in OpenAlgo's master contract (NFO, ``...FUT``), read
-    read-only; index futures are left out. Raises MasterUnavailable."""
+    read-only; index futures are left out. Raises MasterUnavailable, also when the master holds
+    none: OpenAlgo's download empties the table and commits before it inserts the new rows, and
+    "no stock closes by auction" read in that moment would hold for the whole day (review M4)."""
     from sqlalchemy import select
     from sqlalchemy.exc import SQLAlchemyError
 
@@ -101,5 +103,8 @@ def fno_stocks(db_path: Path) -> frozenset[str]:
         finally:
             engine.dispose()
         bases = {match["base"] for s in symbols if (match := _FUTURE.fullmatch(s or ""))}
-        return frozenset(bases - set(sessions.INDEX_UNDERLYINGS))
+        stocks = frozenset(bases - set(sessions.INDEX_UNDERLYINGS))
+        if not stocks:
+            raise MasterUnavailable(f"{db_path}: no stock futures in the master contract")
+        return stocks
     raise MasterUnavailable(str(db_path))

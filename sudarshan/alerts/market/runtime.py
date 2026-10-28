@@ -89,6 +89,8 @@ RECORD_RETRY_S = (0.5, 1.0, 2.0)
 LATE_MS = 5 * 60_000
 STOP_FLUSH_S = 5.0
 PUSH_FLUSH_S = 1.0
+#: How long after a failed or empty read of OpenAlgo's master contract it is read again.
+MASTER_RETRY_S = 300.0
 RESTARTED = "The alert service restarted before it was sent; it is in the alert history"
 
 
@@ -148,7 +150,10 @@ class MarketRuntime:
         self._sessions: dict = {}
         self._previous = 0
         self._fno: frozenset[str] = frozenset()
-        self._master_on: date | None = None
+        #: The day of the last good read of the master, and whether it was at or after 09:00.
+        self._master_read: tuple[date, bool] | None = None
+        self._master_reading = False
+        self._master_retry_at = 0.0
         self._health: Health | None = None
         self._feed_started: str | None = None
         self._pauses: list[Paused] = []
@@ -715,23 +720,36 @@ class MarketRuntime:
         return bool(self._today) and alert.key in cas_keys([alert], self._today, self._fno)
 
     def _read_master(self, now: int) -> None:
-        """The CAS keys' source, read at start and each day at 09:00 (X6a)."""
-        if self.openalgo_db is None or self._master_on == self._today:
+        """The CAS keys' source (X6a): read at start, and again at or after 09:00, once the day's
+        login has downloaded the master. Only a read that finds stock futures counts; a failed
+        or empty one keeps the list there was and is tried again every 5 minutes (review M4: a
+        start before 09:00 stood for the whole day, and an empty table read mid-download made
+        every F&O stock an ordinary one until the close)."""
+        if self.openalgo_db is None or self._today is None or self._master_reading:
             return
         moment = datetime.fromtimestamp(now / 1000, IST)
-        if self._master_on is not None and moment.hour * 60 + moment.minute < MASTER_AT:
+        after_nine = moment.hour * 60 + moment.minute >= MASTER_AT
+        read = self._master_read
+        if read is not None and read[0] == self._today and (read[1] or not after_nine):
             return
-        self._master_on = self._today
-        self._spawn(self._load_master())
+        if time.monotonic() < self._master_retry_at:
+            return
+        self._master_reading = True
+        self._spawn(self._load_master(self._today, after_nine))
 
-    async def _load_master(self) -> None:
+    async def _load_master(self, day: date, after_nine: bool) -> None:
         try:
-            self._fno = await asyncio.to_thread(fno_stocks, self.openalgo_db)
+            found = await asyncio.to_thread(fno_stocks, self.openalgo_db)
         except MasterUnavailable:
-            log.warning("OpenAlgo's master contract could not be read; stocks keep yesterday's "
-                        "closing-auction list")  # fmt: skip
+            self._master_retry_at = time.monotonic() + MASTER_RETRY_S
+            self._throttle(logging.WARNING, "master", "OpenAlgo's master contract could not be "
+                           "read, or holds no stock futures yet; stocks keep the closing-auction "
+                           "list they had, and it is read again in 5 minutes")  # fmt: skip
             return
-        log.info("%d companies with stock futures close by auction today", len(self._fno))
+        finally:
+            self._master_reading = False
+        self._master_read, self._fno = (day, after_nine), found
+        log.info("%d companies with stock futures close by auction today", len(found))
         self._rebuild()
 
     async def _flush(self, now: int, wait: bool = False) -> None:

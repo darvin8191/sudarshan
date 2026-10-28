@@ -187,3 +187,17 @@ def test_the_master_gives_the_companies_with_stock_futures(tmp_path):
     assert days.fno_stocks(path) == {"SBIN", "M&M"}
     with pytest.raises(days.MasterUnavailable):
         days.fno_stocks(tmp_path / "missing" / "openalgo.db")
+
+
+def test_an_empty_master_is_unavailable_not_a_day_without_auctions(tmp_path):
+    """Review M4: OpenAlgo's Upstox download empties symtoken and commits before it inserts; read
+    in that moment, "no stock closes by auction" stood for the whole day."""
+    from database.engine_factory import create_db_engine
+    from database.symbol import Base, SymToken
+
+    path = tmp_path / "openalgo.db"
+    engine = create_db_engine(f"sqlite:///{path}")
+    Base.metadata.create_all(engine, tables=[SymToken.__table__])
+    engine.dispose()
+    with pytest.raises(days.MasterUnavailable, match="no stock futures"):
+        days.fno_stocks(path)

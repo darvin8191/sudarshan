@@ -412,3 +412,51 @@ def test_a_recorded_day_replayed_through_the_feed_tool_fires(alerts, quick, tmp_
             await stopped(rt, task)
 
     asyncio.run(scenario())
+
+
+def test_the_master_is_read_again_at_9_and_a_bad_read_keeps_the_list(alerts, monkeypatch, tmp_path):
+    """Review M4: a start before 09:00 stood for the whole day, so the list the day's login
+    downloads at 08:45 was never read; a failed read was not tried again that day."""
+    from sudarshan.alerts.market.days import MasterUnavailable
+
+    answers = [frozenset({"SBIN"}), MasterUnavailable("busy"), frozenset({"SBIN", "INFY"})]
+    reads = []
+
+    def fno_stocks(path):
+        reads.append(path)
+        answer = answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    monkeypatch.setattr(runtime, "fno_stocks", fno_stocks)
+    monkeypatch.setattr(runtime, "MASTER_RETRY_S", 0.2)
+
+    async def scenario():
+        clock = Clock(ist(2026, 10, 21, 8, 40))
+        async with FakeOpenAlgo() as notify:
+            rt = MarketRuntime(alerts(notify), MarketSettings(enabled=True),
+                               owner_reader=lambda: Owner(OWNER, API_KEY), pacer=Pacer(),
+                               openalgo_db=tmp_path / "openalgo.db", clock=clock)  # fmt: skip
+
+            async def at(moment):
+                clock.at = moment
+                rt._roll(ms(moment), force=True)
+                rt._read_master(ms(moment))
+                await asyncio.sleep(0.05)
+
+            await at(ist(2026, 10, 21, 8, 40))
+            await at(ist(2026, 10, 21, 8, 50))  # still before 09:00: the 08:40 read stands
+            assert len(reads) == 1 and rt._fno == {"SBIN"}
+            await at(ist(2026, 10, 21, 9, 5))  # the day's download: read again, refused
+            assert len(reads) == 2 and rt._fno == {"SBIN"}  # the list it had is kept
+            await at(ist(2026, 10, 21, 9, 5, 1))  # not at once
+            assert len(reads) == 2
+            await asyncio.sleep(0.25)
+            await at(ist(2026, 10, 21, 9, 10))
+            assert len(reads) == 3 and rt._fno == {"SBIN", "INFY"}
+            await at(ist(2026, 10, 21, 14, 0))  # settled for the day
+            assert len(reads) == 3
+            rt._writer.shutdown()
+
+    asyncio.run(scenario())
