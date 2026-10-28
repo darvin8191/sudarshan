@@ -348,8 +348,8 @@ export default function Risk() {
         onResume={() => setSheet('resume')}
       />
       <Card title="Daily loss limit" icon={<Lock aria-hidden="true" className="size-5" />}>
-        <DailyCard status={data} />
-        {data.settings && <DailyLimitEditor settings={data.settings} />}
+        <DailyCard status={data} receivedAt={status.dataUpdatedAt} />
+        {data.settings && <DailyLimitEditor settings={data.settings} days={data.daily} />}
       </Card>
       {data.settings ? (
         <>

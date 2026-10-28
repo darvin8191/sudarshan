@@ -69,7 +69,7 @@ import time
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from sudarshan.books.exit_guard import EXIT_SHOWS_WITHIN_S
@@ -109,6 +109,8 @@ TIMED_KEPT = 500
 DAY_BOOK_REUSE_S = 15.0
 #: A segment's session window, read from the market calendar, is kept this long.
 SESSION_KEPT_S = 600.0
+#: How far ahead the daily card looks for the next session (a long holiday weekend fits).
+SESSION_LOOKAHEAD_DAYS = 10
 #: The daily limit could not be checked this recently: the banner says so.
 UNCHECKED_SHOWN_S = 60.0
 #: A batch counts once in the burst brake: the orders it sends within this long, each on the
@@ -693,24 +695,48 @@ class Gate:
             return None, False
         return self._lock_day(order.pipe, day, figure), False
 
-    def _in_session(self, exchange: str, at: datetime) -> bool:
-        """Whether the segment is in session now, by the exchange's own hours (R11)."""
-        today = at.astimezone(IST).date()
-        key = (exchange, today.isoformat())
+    def _window(self, exchange: str, day: date) -> dict | None:
+        """The segment's session window on ``day`` (market_calendar_db), kept a while; None on
+        a day it is closed. Raises when the calendar cannot be read."""
+        key = (exchange, day.isoformat())
         window = self._sessions.get(key, _UNREAD)
         if window is _UNREAD:
-            try:
-                from database.market_calendar_db import get_effective_session_window
+            from database.market_calendar_db import get_effective_session_window
 
-                window = get_effective_session_window(today, exchange)
-            except Exception:
-                logger.exception("The market calendar could not be read for the daily limit")
-                # Looked at from India's morning on: never in the hours after midnight, when
-                # Upstox's book can still show the day before.
-                return at.astimezone(IST).hour >= 9
+            window = get_effective_session_window(day, exchange)
             if window is not None:  # "closed" is asked again: a read that failed says the same
                 self._sessions[key] = window
+        return window
+
+    def _in_session(self, exchange: str, at: datetime) -> bool:
+        """Whether the segment is in session now, by the exchange's own hours (R11)."""
+        try:
+            window = self._window(exchange, at.astimezone(IST).date())
+        except Exception:
+            logger.exception("The market calendar could not be read for the daily limit")
+            # Looked at from India's morning on: never in the hours after midnight, when
+            # Upstox's book can still show the day before.
+            return at.astimezone(IST).hour >= 9
         return daily.in_session(window, at)
+
+    def session(self, exchange: str, at: datetime) -> dict[str, Any]:
+        """Whether the figure is looked at for ``exchange`` at ``at``, and when its session next
+        opens (ISO, India's time), for the daily card. ``opens_at`` is None while in session or
+        when the calendar cannot say."""
+        if self._in_session(exchange, at):
+            return {"in_session": True, "opens_at": None}
+        start_ms = None
+        try:
+            today = at.astimezone(IST).date()
+            for ahead in range(SESSION_LOOKAHEAD_DAYS):
+                window = self._window(exchange, today + timedelta(days=ahead))
+                if window is not None and int(window["start_ms"]) > at.timestamp() * 1000:
+                    start_ms = int(window["start_ms"])
+                    break
+        except Exception:
+            logger.exception("The market calendar could not be read for the daily card")
+        opens = None if start_ms is None else datetime.fromtimestamp(start_ms / 1000, IST)
+        return {"in_session": False, "opens_at": None if opens is None else opens.isoformat()}
 
     def _day_figure(self, order: Order) -> daily.DayFigure:
         if order.pipe == SANDBOX:

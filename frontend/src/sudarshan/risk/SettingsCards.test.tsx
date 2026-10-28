@@ -8,7 +8,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { RiskSettings, SettingsAnswer } from '@/api/risk'
+import type { DailyStatus, RiskSettings, SettingsAnswer } from '@/api/risk'
 
 const saveSettings = vi.hoisted(() => vi.fn())
 
@@ -20,6 +20,7 @@ vi.mock('@/api/risk', async (original) => {
 import {
   BandCard,
   DailyLimitEditor,
+  locksTodayWords,
   PacingCard,
   PHRASE_FOR_LOOSENING,
   PhraseCard,
@@ -208,5 +209,72 @@ describe('orders per second and the phrase', () => {
       expect(saveSettings).toHaveBeenLastCalledWith({ confirm_phrase: 'Kesari' }, 'STOP')
     )
     await waitFor(() => expect(screen.getByLabelText('New phrase')).toHaveValue(''))
+  })
+})
+
+describe("the daily limit, typed at or below the day's loss", () => {
+  function today(over: Partial<DailyStatus>): DailyStatus {
+    return {
+      figure: -4100,
+      approximate: false,
+      read_at: '2026-10-28T05:12:07+00:00',
+      in_session: true,
+      opens_at: null,
+      reached: false,
+      lock: null,
+      unchecked: false,
+      ...over,
+    }
+  }
+
+  it('says saving locks new orders until tomorrow, and saves on a second tap only', async () => {
+    saveSettings.mockResolvedValue(answer())
+    wrap(
+      <DailyLimitEditor
+        settings={{ ...SETTINGS, daily_loss_limit: 6000 }}
+        days={{ live: today({}), sandbox: today({ figure: -500 }) }}
+      />
+    )
+    fireEvent.change(screen.getByLabelText('Limit for the day'), { target: { value: '4000' } })
+    expect(screen.getByTestId('daily-locks-today')).toHaveTextContent(locksTodayWords(4100))
+    expect(locksTodayWords(4100)).toBe(
+      "Today's loss is already ₹4,100: saving locks new orders until tomorrow."
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Save the daily limit' }))
+    expect(saveSettings).not.toHaveBeenCalled() // the first tap only asks
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Save, and lock new orders until tomorrow' })
+    )
+    await waitFor(() =>
+      expect(saveSettings).toHaveBeenCalledWith({ daily_loss_limit: 4000 }, undefined)
+    )
+  })
+
+  it('asks nothing above the loss, outside the session, or once the day is locked', async () => {
+    saveSettings.mockResolvedValue(answer())
+    const { unmount } = wrap(
+      <DailyLimitEditor
+        settings={{ ...SETTINGS, daily_loss_limit: 6000 }}
+        days={{
+          live: today({ in_session: false }),
+          sandbox: today({ lock: { at: '2026-10-28T05:00:00+00:00', figure: -4100, limit: 4000 } }),
+        }}
+      />
+    )
+    fireEvent.change(screen.getByLabelText('Limit for the day'), { target: { value: '3000' } })
+    expect(screen.queryByTestId('daily-locks-today')).toBeNull()
+    unmount()
+    wrap(
+      <DailyLimitEditor
+        settings={{ ...SETTINGS, daily_loss_limit: 6000 }}
+        days={{ live: today({}) }}
+      />
+    )
+    fireEvent.change(screen.getByLabelText('Limit for the day'), { target: { value: '5000' } })
+    expect(screen.queryByTestId('daily-locks-today')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Save the daily limit' }))
+    await waitFor(() =>
+      expect(saveSettings).toHaveBeenCalledWith({ daily_loss_limit: 5000 }, undefined)
+    )
   })
 })

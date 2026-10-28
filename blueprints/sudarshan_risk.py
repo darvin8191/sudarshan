@@ -100,6 +100,9 @@ def _answer(answer: killswitch.Answer):
 
 
 _PIPES = ("live", "sandbox")
+#: The segment whose session the daily card follows: the limit is set for F&O (R4), whose
+#: session (09:15 to 15:40) is when an order's figure is looked at (R11).
+_CARD_SEGMENT = "NFO"
 
 
 def _day_figure(pipe: str, owner: killswitch.Owner):
@@ -115,22 +118,31 @@ def _day_figure(pipe: str, owner: killswitch.Owner):
 
 
 def _daily_status(owner: killswitch.Owner, limit: float | None) -> dict:
-    """The daily loss card: per pipe the guard covers, today's figure, the limit and the lock."""
+    """The daily loss card: per pipe the guard covers, today's figure as read now (``read_at``,
+    never live: Upstox updates its positions about once a minute), whether the F&O session is
+    on and when it opens next, the limit's state and the lock. Outside the session the figure
+    is not looked at by any order, so it is never said to have reached the limit."""
     shown = {}
     for pipe in _PIPES:
         if not flag.covers(pipe):
             continue
+        read_at = datetime.now(UTC)
         try:
             figure = _day_figure(pipe, owner)
         except Exception:
             logger.exception(f"Today's figure could not be read for the risk page ({pipe})")
             figure = None
+        session = risk_gate.GATE.session(_CARD_SEGMENT, read_at)
         lock = risk_gate.GATE.day_lock(pipe)
         shown[pipe] = {
             "figure": None if figure is None else round(figure.total, 2),
             "approximate": bool(figure is not None and figure.approximate),
-            "as_of": datetime.now(UTC).isoformat(),
-            "reached": figure is not None and daily.reached(limit, figure),
+            "read_at": read_at.isoformat(),
+            "in_session": session["in_session"],
+            "opens_at": session["opens_at"],
+            "reached": figure is not None
+            and session["in_session"]
+            and daily.reached(limit, figure),
             "lock": None
             if lock is None
             else {"at": lock.at.isoformat(), "figure": lock.figure, "limit": lock.loss_limit},

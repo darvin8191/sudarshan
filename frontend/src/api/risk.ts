@@ -52,8 +52,14 @@ export interface DailyStatus {
   /** Today's P&L, gross; null when it could not be read just now. */
   figure: number | null
   approximate: boolean
-  as_of: string
-  /** The figure has reached the limit (the next new order locks the day). */
+  /** When SUDARSHAN read the figure: a snapshot, never live (Upstox updates it about once a
+   * minute). */
+  read_at: string
+  /** The F&O session is on, so an order's figure is looked at now. */
+  in_session: boolean
+  /** Outside the session: when it next opens (India's time), or null when not known. */
+  opens_at: string | null
+  /** In session, the figure has reached the limit (the next new order locks the day). */
   reached: boolean
   lock: { at: string; figure: number; limit: number } | null
   /** The limit could not be checked in the last minute: orders went unchecked. */

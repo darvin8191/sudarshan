@@ -1,7 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { CircleCheck, Loader2, TriangleAlert } from 'lucide-react'
 import { type ReactNode, useEffect, useId, useRef, useState } from 'react'
-import { type RiskSettings, riskApi, type SettingsChange } from '@/api/risk'
+import { type RiskSettings, type RiskStatus, riskApi, type SettingsChange } from '@/api/risk'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -251,16 +251,55 @@ function changed<T extends Record<string, string | boolean>>(
 
 // -- the cards' bodies ---------------------------------------------------------------------------
 
+/**
+ * Today's loss in a book the limit would lock at the next new order: one in session, not
+ * locked yet (outside the session no order looks at the figure). The largest, or null.
+ */
+export function lossToday(days: RiskStatus['daily']): number | null {
+  let largest: number | null = null
+  for (const day of Object.values(days ?? {})) {
+    if (!day || day.lock || !day.in_session || day.figure === null || day.figure >= 0) continue
+    largest = Math.max(largest ?? 0, -day.figure)
+  }
+  return largest
+}
+
+/** Limits review M4: a limit at or below today's loss locks the day at the next new order. */
+export function locksTodayWords(loss: number): string {
+  return `Today's loss is already ${wholeRupees.format(loss)}: saving locks new orders until tomorrow.`
+}
+
 /** The daily loss limit: set, change or turn off (the card above shows today's figure). */
-export function DailyLimitEditor({ settings }: { settings: RiskSettings }) {
+export function DailyLimitEditor({
+  settings,
+  days,
+}: {
+  settings: RiskSettings
+  days?: RiskStatus['daily']
+}) {
   const saver = useSaveSettings()
   const current = settings.daily_loss_limit
   const [text, setText] = useState(current === null ? '' : String(current))
+  // The limit the lock warning was confirmed for: a second tap on the same figure saves it.
+  const [confirmed, setConfirmed] = useState<number | null>(null)
   // biome-ignore lint/correctness/useExhaustiveDependencies: refilled per saved version only
   useEffect(() => {
     setText(current === null ? '' : String(current))
+    setConfirmed(null)
   }, [settings.updated_at])
   const typed = numberOf(text)
+  const loss = lossToday(days)
+  const locks = !Number.isNaN(typed) && typed > 0 && loss !== null && typed <= loss
+  const asking = locks && confirmed === typed
+  const save = () => {
+    if (locks && !asking) {
+      setConfirmed(typed) // the first tap: the card says what saving does, the second saves
+      return
+    }
+    void saver.save({ daily_loss_limit: typed })
+  }
+  let label = current === null ? 'Turn the daily limit on' : 'Save the daily limit'
+  if (asking) label = 'Save, and lock new orders until tomorrow'
   return (
     <div className="flex flex-col gap-3 border-t border-[color:var(--divider)] pt-3">
       <NumberField
@@ -270,10 +309,16 @@ export function DailyLimitEditor({ settings }: { settings: RiskSettings }) {
         onChange={setText}
         whole
       />
+      {locks && loss !== null && (
+        <p role="alert" className="sd-risk-note sd-risk-note--day" data-testid="daily-locks-today">
+          <TriangleAlert aria-hidden="true" className="size-5 shrink-0" />
+          {locksTodayWords(loss)}
+        </p>
+      )}
       <SaveRow
         saver={saver}
-        label={current === null ? 'Turn the daily limit on' : 'Save the daily limit'}
-        onSave={() => void saver.save({ daily_loss_limit: typed })}
+        label={label}
+        onSave={save}
         disabled={Number.isNaN(typed) || typed === current}
       />
       {current !== null && (

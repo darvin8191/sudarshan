@@ -329,20 +329,55 @@ def test_status_shows_today_s_figure_the_limit_and_the_lock(world, monkeypatch):
     client, account, store = world
     from sudarshan.guard import readers
 
+    monkeypatch.setattr(gate.GATE, "_in_session", lambda exchange, at: True)
     monkeypatch.setattr(readers, "sandbox_day", lambda user: daily.DayFigure(-3000.0, -250.5))
     store.save_settings("test", daily_loss_limit=4000.0)
     shown = _owner_call(client, "get", "/sudarshan/risk/status").get_json()["data"]["daily"]
     assert set(shown) == {"sandbox"}
     day = shown["sandbox"]
     assert (day["figure"], day["approximate"], day["reached"]) == (-3250.5, False, False)
-    assert (day["lock"], day["unchecked"]) == (None, False) and day["as_of"]
+    assert (day["lock"], day["unchecked"]) == (None, False)
+    assert (day["in_session"], day["opens_at"]) == (True, None) and day["read_at"]
 
     monkeypatch.setattr(readers, "sandbox_day", lambda user: daily.DayFigure(-4000.0, 0.0))
-    _lock_today("sandbox", -4000.0, 4000.0, monkeypatch)
+    _lock_today("sandbox", -4000.0, 4000.0, monkeypatch)  # in session (patched above)
     day = _owner_call(client, "get", "/sudarshan/risk/status").get_json()["data"]["daily"]
     day = day["sandbox"]
     assert day["reached"] is True
     assert (day["lock"]["figure"], day["lock"]["limit"]) == (-4000.0, 4000.0)
+
+
+def test_outside_the_session_the_status_never_says_reached_and_says_when_it_opens(
+    world, monkeypatch
+):
+    """Limits review M5: before 09:15 or after the close the figure is not looked at by any
+    order, so it is never said to have reached the limit; the card says when it is next."""
+    from datetime import UTC, date, datetime, timedelta
+
+    import database.market_calendar_db as calendar
+
+    client, account, store = world
+    from sudarshan.guard import readers
+
+    monkeypatch.setattr(gate.GATE, "_in_session", lambda exchange, at: False)
+    tomorrow = datetime.now(UTC).astimezone(daily.IST).date() + timedelta(days=1)
+    asked = []
+
+    def window(day: date, exchange: str):
+        asked.append((day, exchange))
+        if day != tomorrow:
+            return None  # closed
+        opens = datetime(day.year, day.month, day.day, 9, 15, tzinfo=daily.IST)
+        return {"start_ms": int(opens.timestamp() * 1000), "end_ms": 0, "is_special": False}
+
+    monkeypatch.setattr(calendar, "get_effective_session_window", window)
+    monkeypatch.setattr(readers, "sandbox_day", lambda user: daily.DayFigure(-6000.0, 0.0))
+    store.save_settings("test", daily_loss_limit=4000.0)
+    day = _owner_call(client, "get", "/sudarshan/risk/status").get_json()["data"]["daily"]
+    day = day["sandbox"]
+    assert (day["figure"], day["reached"], day["in_session"]) == (-6000.0, False, False)
+    assert day["opens_at"] == f"{tomorrow.isoformat()}T09:15:00+05:30"
+    assert {exchange for _day, exchange in asked} == {"NFO"}
 
 
 def test_status_reads_the_live_figure_from_upstox_s_rows(world, monkeypatch):
