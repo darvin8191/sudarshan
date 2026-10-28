@@ -162,6 +162,33 @@ def twr_since(day: int) -> str:
     return f"TWR since {date(day)}"
 
 
+#: The daily value chart waits for closing prices (design 5.6).
+SERIES_WAITING = "Daily history starts once every holding here has a closing price."
+
+
+def series_from(day: int) -> str:
+    """Where the daily history begins when it cannot begin with the tab (design 5.6)."""
+    return f"Daily history from {date(day)}, the first day every holding here had a closing price."
+
+
+#: What goes with every index comparison, and what goes with one that is only approximate (design
+#: 4.7): the index is a price index, and it may not have been able to pay every withdrawal.
+DIVIDENDS_NOT_INCLUDED = "Dividends not included"
+INDEX_COULD_NOT_PAY = (
+    "The index could not have paid every withdrawal; the comparison is approximate."
+)
+
+
+def index_starts(label: str, day: int) -> str:
+    """The index has no closing price for the day of some entry or for the start of the TWR."""
+    return f"{label} prices start {date(day)}; this comparison needs every entry after that."
+
+
+def index_missing(label: str) -> str:
+    """No closing price of the index has been downloaded yet."""
+    return f"{label} prices are not available yet; the comparison appears when they are."
+
+
 def knock_on(action: str, changed_kind: str, failing_kind: str, failing_day: int, unit: str) -> str:
     """Why a change is refused because of a later entry it would leave without units.
 

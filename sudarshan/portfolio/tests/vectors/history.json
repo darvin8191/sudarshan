@@ -1,0 +1,3188 @@
+{
+ "about": "Golden vectors for core/history.py (PA5): the price a day may use, a tab's daily series and time-weighted return from its entries and closing prices (the design's T4 is S1), the same money put into an index (the design's B1 and B2 are B1 and B2) and whole reports. The evaluator in make_pa5.py replays the entries for every day and shares no method with the code; every number is worked out by hand in the case's why. Python only: the phone is sent the figures.",
+ "quotes": [
+  {
+   "id": "Q1",
+   "title": "A listed asset is valued at that day's own close and no other",
+   "why": "Closing prices of 100.00 and 105.00 (1000000 and 1050000 in price_u) on Mon 5 Jan 2026 and Wed 7 Jan. Monday and Wednesday have their prices. Tuesday and Thursday have none: a close of another day is not that day's. Sunday 4 Jan is before the first price.",
+   "kind": "listed",
+   "prices": [
+    [
+     20260105,
+     1000000
+    ],
+    [
+     20260107,
+     1050000
+    ]
+   ],
+   "asks": [
+    [
+     20260104,
+     null
+    ],
+    [
+     20260105,
+     1000000
+    ],
+    [
+     20260106,
+     null
+    ],
+    [
+     20260107,
+     1050000
+    ],
+    [
+     20260108,
+     null
+    ]
+   ]
+  },
+  {
+   "id": "Q2",
+   "title": "A fund's NAV serves for three business days",
+   "why": "One NAV of 45.0000 (450000 in price_u) on Mon 5 Jan. Business days after Monday: Tuesday 1, Wednesday 2, Thursday 3, Friday 4, Saturday and Sunday still 4, Monday 12 Jan 5. A NAV no more than 3 business days old is used: through Thursday.",
+   "kind": "mf",
+   "prices": [
+    [
+     20260105,
+     450000
+    ]
+   ],
+   "asks": [
+    [
+     20260105,
+     450000
+    ],
+    [
+     20260106,
+     450000
+    ],
+    [
+     20260107,
+     450000
+    ],
+    [
+     20260108,
+     450000
+    ],
+    [
+     20260109,
+     null
+    ],
+    [
+     20260110,
+     null
+    ],
+    [
+     20260112,
+     null
+    ]
+   ]
+  },
+  {
+   "id": "Q3",
+   "title": "A holiday does not age a NAV",
+   "why": "The same NAV with Wed 7 Jan a holiday of the exchange: Tue 1, Thu 2, Fri 3 business days after Monday, so Friday is still good, and so are Saturday and Sunday (3). Monday 12 Jan is the 4th and is not.",
+   "kind": "mf",
+   "prices": [
+    [
+     20260105,
+     450000
+    ]
+   ],
+   "asks": [
+    [
+     20260108,
+     450000
+    ],
+    [
+     20260109,
+     450000
+    ],
+    [
+     20260110,
+     450000
+    ],
+    [
+     20260111,
+     450000
+    ],
+    [
+     20260112,
+     null
+    ]
+   ],
+   "holidays": [
+    20260107
+   ]
+  },
+  {
+   "id": "Q4",
+   "title": "A value kept by hand serves until the next one, however old",
+   "why": "A value of 500.00 on Sat 10 Jan and 520.00 on Thu 15 Jan 2026 (5000000 and 5200000 in price_u). Before the first there is none; from it each serves until the next is entered, and the newest serves for ever (it is the freshness notes that say how old it is).",
+   "kind": "manual",
+   "prices": [
+    [
+     20260110,
+     5000000
+    ],
+    [
+     20260115,
+     5200000
+    ]
+   ],
+   "asks": [
+    [
+     20260109,
+     null
+    ],
+    [
+     20260110,
+     5000000
+    ],
+    [
+     20260114,
+     5000000
+    ],
+    [
+     20260115,
+     5200000
+    ],
+    [
+     20270115,
+     5200000
+    ]
+   ]
+  },
+  {
+   "id": "Q5",
+   "title": "Two prices for one day: the later entered",
+   "why": "A price corrected on the same day: the list gives 100.00 and then 101.00 for Mon 5 Jan, and the second is the one used. The list may come in any order.",
+   "kind": "listed",
+   "prices": [
+    [
+     20260106,
+     1020000
+    ],
+    [
+     20260105,
+     1000000
+    ],
+    [
+     20260105,
+     1010000
+    ]
+   ],
+   "asks": [
+    [
+     20260105,
+     1010000
+    ],
+    [
+     20260106,
+     1020000
+    ]
+   ]
+  },
+  {
+   "id": "Q6",
+   "title": "A price of nothing is a gap in the data, not a price",
+   "why": "A listed close of 0 on Tue 6 Jan 2026 between real ones of 100.00 and 102.00 on Monday and Wednesday: Tuesday has no close (a holding would otherwise show as lost that day).",
+   "kind": "listed",
+   "prices": [
+    [
+     20260105,
+     1000000
+    ],
+    [
+     20260106,
+     0
+    ],
+    [
+     20260107,
+     1020000
+    ]
+   ],
+   "asks": [
+    [
+     20260105,
+     1000000
+    ],
+    [
+     20260106,
+     null
+    ],
+    [
+     20260107,
+     1020000
+    ]
+   ]
+  },
+  {
+   "id": "Q7",
+   "title": "A fund's NAV of nothing leaves the last real one to serve",
+   "why": "A NAV of 45.0000 on Mon 5 Jan 2026 and 0 on Tue 6 Jan: Tuesday takes Monday's, one business day old; Friday is still the 4th business day after Monday, so too old.",
+   "kind": "mf",
+   "prices": [
+    [
+     20260105,
+     450000
+    ],
+    [
+     20260106,
+     0
+    ]
+   ],
+   "asks": [
+    [
+     20260105,
+     450000
+    ],
+    [
+     20260106,
+     450000
+    ],
+    [
+     20260108,
+     450000
+    ],
+    [
+     20260109,
+     null
+    ]
+   ]
+  },
+  {
+   "id": "Q8",
+   "title": "A value kept by hand at nothing leaves the last real one to serve",
+   "why": "500.00 on Sat 10 Jan 2026 and 0 on Wed 14 Jan: Wednesday and every day after take the 500.00.",
+   "kind": "manual",
+   "prices": [
+    [
+     20260110,
+     5000000
+    ],
+    [
+     20260114,
+     0
+    ]
+   ],
+   "asks": [
+    [
+     20260110,
+     5000000
+    ],
+    [
+     20260114,
+     5000000
+    ],
+    [
+     20270101,
+     5000000
+    ]
+   ]
+  },
+  {
+   "id": "Q9",
+   "title": "A negative price is a gap in the data too",
+   "why": "A listed close of -102.00 (a bad row) on Tue 6 Jan 2026 between real ones of 100.00 on Monday and 102.00 on Wednesday: it is not a price, and Tuesday has no close.",
+   "kind": "listed",
+   "prices": [
+    [
+     20260105,
+     1000000
+    ],
+    [
+     20260106,
+     -1020000
+    ],
+    [
+     20260107,
+     1020000
+    ]
+   ],
+   "asks": [
+    [
+     20260105,
+     1000000
+    ],
+    [
+     20260106,
+     null
+    ],
+    [
+     20260107,
+     1020000
+    ]
+   ]
+  },
+  {
+   "id": "Q10",
+   "title": "A fund's negative NAV leaves the last real one to serve",
+   "why": "A NAV of 45.0000 on Mon 5 Jan 2026 and -45.0000 on Tue 6 Jan: Tuesday takes Monday's, one business day old, and so do Wednesday and Thursday (2 and 3); Friday is the 4th and is too old.",
+   "kind": "mf",
+   "prices": [
+    [
+     20260105,
+     450000
+    ],
+    [
+     20260106,
+     -450000
+    ]
+   ],
+   "asks": [
+    [
+     20260105,
+     450000
+    ],
+    [
+     20260106,
+     450000
+    ],
+    [
+     20260107,
+     450000
+    ],
+    [
+     20260108,
+     450000
+    ],
+    [
+     20260109,
+     null
+    ]
+   ]
+  },
+  {
+   "id": "Q11",
+   "title": "The holidays may be given in any order",
+   "why": "One NAV of 45.0000 on Mon 5 Jan 2026 and three holidays of the exchange, given out of order: Tue 6 Jan, Mon 26 Jan and Wed 7 Jan. Monday 12 Jan is the 5th business day after the NAV (Tuesday, Wednesday, Thursday, Friday, Monday) less the two holidays among them (Tuesday and Wednesday): the 3rd, so the NAV is still good. The holiday of 26 Jan is later than the day and counts for nothing. Tue 13 Jan is the 6th less two: the 4th, too old.",
+   "kind": "mf",
+   "prices": [
+    [
+     20260105,
+     450000
+    ]
+   ],
+   "asks": [
+    [
+     20260109,
+     450000
+    ],
+    [
+     20260112,
+     450000
+    ],
+    [
+     20260113,
+     null
+    ]
+   ],
+   "holidays": [
+    20260106,
+    20260126,
+    20260107
+   ]
+  }
+ ],
+ "series": [
+  {
+   "id": "S1",
+   "title": "The design's T4 from the entries up: a day without a price joins the next",
+   "why": "Mon 5 Jan 2026: 100 shares for 10,000.00. Tue 6 Jan: 10 more for 1,000.00, but no closing price that day. Wed 7 Jan: closing price 105.00. Complete days: Monday (100 x 100.00 = 10,000.00) and Wednesday (110 x 105.00 = 11,550.00); Tuesday has no value, so its 1,000.00 joins Wednesday's period. Net money put in: 10,000.00, then 11,000.00. Time-weighted: the tab began empty on a complete day, so Monday's own return counts (10,000.00 in at the start, 10,000.00 at the close: 0%), and Wednesday's period is 11,550.00 over 10,000.00 + 1,000.00 = 1.05: 5.0000%. The time-weighted return runs from Monday to Wednesday.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260105,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 100000000,
+     "amount_paise": 1000000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "BUY",
+     "trade_date": 20260106,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000
+    }
+   ],
+   "quotes": [
+    {
+     "asset_id": 1,
+     "kind": "listed",
+     "prices": [
+      [
+       20260105,
+       1000000
+      ],
+      [
+       20260107,
+       1050000
+      ]
+     ]
+    }
+   ],
+   "last_day": 20260107,
+   "expect": {
+    "series": [
+     {
+      "day": 20260105,
+      "value_paise": 1000000,
+      "net_put_in_paise": 1000000
+     },
+     {
+      "day": 20260107,
+      "value_paise": 1155000,
+      "net_put_in_paise": 1100000
+     }
+    ],
+    "points": [
+     {
+      "day": 20260105,
+      "value_paise": 1000000,
+      "in_paise": 1000000,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260106,
+      "value_paise": null,
+      "in_paise": 100000,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260107,
+      "value_paise": 1155000,
+      "in_paise": 0,
+      "out_paise": 0,
+      "fee_paise": 0
+     }
+    ],
+    "opening_paise": 0,
+    "words": null,
+    "twr": {
+     "start_day": 20260105,
+     "pct": "5.0000",
+     "annualised_pct": null,
+     "words": "TWR since 5 Jan 2026"
+    },
+    "span": [
+     20260105,
+     20260107
+    ]
+   }
+  },
+  {
+   "id": "S2",
+   "title": "A tab that began on a complete day counts its first day's own return",
+   "why": "10 shares for 1,000.00 on Mon 5 Jan 2026, closing prices 102.00, 104.04 and 104.04 on Monday, Tuesday and Wednesday. Values 1,020.00, 1,040.40, 1,040.40; net money put in 1,000.00 throughout. The tab was empty before Monday, so Monday's return counts, from the 1,000.00 paid in: 1.02; Tuesday 1,040.40 / 1,020.00 = 1.02; Wednesday 1. Product 1.0404: 4.0400%. It runs from Monday to Wednesday.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260105,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000
+    }
+   ],
+   "quotes": [
+    {
+     "asset_id": 1,
+     "kind": "listed",
+     "prices": [
+      [
+       20260105,
+       1020000
+      ],
+      [
+       20260106,
+       1040400
+      ],
+      [
+       20260107,
+       1040400
+      ]
+     ]
+    }
+   ],
+   "last_day": 20260107,
+   "expect": {
+    "series": [
+     {
+      "day": 20260105,
+      "value_paise": 102000,
+      "net_put_in_paise": 100000
+     },
+     {
+      "day": 20260106,
+      "value_paise": 104040,
+      "net_put_in_paise": 100000
+     },
+     {
+      "day": 20260107,
+      "value_paise": 104040,
+      "net_put_in_paise": 100000
+     }
+    ],
+    "points": [
+     {
+      "day": 20260105,
+      "value_paise": 102000,
+      "in_paise": 100000,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260106,
+      "value_paise": 104040,
+      "in_paise": 0,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260107,
+      "value_paise": 104040,
+      "in_paise": 0,
+      "out_paise": 0,
+      "fee_paise": 0
+     }
+    ],
+    "opening_paise": 0,
+    "words": null,
+    "twr": {
+     "start_day": 20260105,
+     "pct": "4.0400",
+     "annualised_pct": null,
+     "words": "TWR since 5 Jan 2026"
+    },
+    "span": [
+     20260105,
+     20260107
+    ]
+   }
+  },
+  {
+   "id": "S3",
+   "title": "A back-dated entry: the series begins when the prices do, and says so",
+   "why": "10 shares bought for 1,000.00 on Mon 1 Dec 2025, but the first closing prices are those of Mon 5 Jan 2026 (110.00), then 111.10 and 111.10. Every day before 5 Jan holds a share with no price, so the series begins on 5 Jan: values 1,100.00, 1,111.00, 1,111.00 against net money put in of 1,000.00. The words say where it begins. The tab was not empty before 5 Jan, so the time-weighted return begins at 5 Jan's close and nothing earlier is in it: 1,111.00 / 1,100.00 = 1.01, then 1: 1.0000%. It runs from Monday 5 Jan to Wednesday 7 Jan.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20251201,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000
+    }
+   ],
+   "quotes": [
+    {
+     "asset_id": 1,
+     "kind": "listed",
+     "prices": [
+      [
+       20260105,
+       1100000
+      ],
+      [
+       20260106,
+       1111000
+      ],
+      [
+       20260107,
+       1111000
+      ]
+     ]
+    }
+   ],
+   "last_day": 20260107,
+   "expect": {
+    "series": [
+     {
+      "day": 20260105,
+      "value_paise": 110000,
+      "net_put_in_paise": 100000
+     },
+     {
+      "day": 20260106,
+      "value_paise": 111100,
+      "net_put_in_paise": 100000
+     },
+     {
+      "day": 20260107,
+      "value_paise": 111100,
+      "net_put_in_paise": 100000
+     }
+    ],
+    "points": [
+     {
+      "day": 20251201,
+      "value_paise": null,
+      "in_paise": 100000,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260105,
+      "value_paise": 110000,
+      "in_paise": 0,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260106,
+      "value_paise": 111100,
+      "in_paise": 0,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260107,
+      "value_paise": 111100,
+      "in_paise": 0,
+      "out_paise": 0,
+      "fee_paise": 0
+     }
+    ],
+    "opening_paise": null,
+    "words": "Daily history from 5 Jan 2026, the first day every holding here had a closing price.",
+    "twr": {
+     "start_day": 20260105,
+     "pct": "1.0000",
+     "annualised_pct": null,
+     "words": "TWR since 5 Jan 2026"
+    },
+    "span": [
+     20260105,
+     20260107
+    ]
+   }
+  },
+  {
+   "id": "S4",
+   "title": "A fund is complete every day, weekends too",
+   "why": "100.1234 units bought for 4,500.00 on Mon 5 Jan 2026. NAVs: 45.0000 on Mon 5 Jan, 46.0000 on Thu 8 Jan. Every day from Monday 5 to Monday 12 Jan has a NAV no more than 3 business days old (Saturday and Sunday use Thursday's, Monday 12th is 2 business days after it). Value = units x NAV: 100.1234 x 45 = 4,505.553, which is 450,555 paise; 100.1234 x 46 = 4,605.6764, which is 460,568 paise. Eight days. Time-weighted: 450,555 / 450,000 on the first day, 1 until Thursday's 460,568 / 450,555, then 1: 460,568 / 450,000 = 1.0234844: 2.3484%.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260105,
+     "account_id": 1,
+     "asset_id": 2,
+     "qty_u": 100123400,
+     "amount_paise": 450000
+    }
+   ],
+   "quotes": [
+    {
+     "asset_id": 2,
+     "kind": "mf",
+     "prices": [
+      [
+       20260105,
+       450000
+      ],
+      [
+       20260108,
+       460000
+      ]
+     ]
+    }
+   ],
+   "last_day": 20260112,
+   "decimals": {
+    "2": 4
+   },
+   "expect": {
+    "series": [
+     {
+      "day": 20260105,
+      "value_paise": 450555,
+      "net_put_in_paise": 450000
+     },
+     {
+      "day": 20260106,
+      "value_paise": 450555,
+      "net_put_in_paise": 450000
+     },
+     {
+      "day": 20260107,
+      "value_paise": 450555,
+      "net_put_in_paise": 450000
+     },
+     {
+      "day": 20260108,
+      "value_paise": 460568,
+      "net_put_in_paise": 450000
+     },
+     {
+      "day": 20260109,
+      "value_paise": 460568,
+      "net_put_in_paise": 450000
+     },
+     {
+      "day": 20260110,
+      "value_paise": 460568,
+      "net_put_in_paise": 450000
+     },
+     {
+      "day": 20260111,
+      "value_paise": 460568,
+      "net_put_in_paise": 450000
+     },
+     {
+      "day": 20260112,
+      "value_paise": 460568,
+      "net_put_in_paise": 450000
+     }
+    ],
+    "points": [
+     {
+      "day": 20260105,
+      "value_paise": 450555,
+      "in_paise": 450000,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260106,
+      "value_paise": 450555,
+      "in_paise": 0,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260107,
+      "value_paise": 450555,
+      "in_paise": 0,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260108,
+      "value_paise": 460568,
+      "in_paise": 0,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260109,
+      "value_paise": 460568,
+      "in_paise": 0,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260110,
+      "value_paise": 460568,
+      "in_paise": 0,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260111,
+      "value_paise": 460568,
+      "in_paise": 0,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260112,
+      "value_paise": 460568,
+      "in_paise": 0,
+      "out_paise": 0,
+      "fee_paise": 0
+     }
+    ],
+    "opening_paise": 0,
+    "words": null,
+    "twr": {
+     "start_day": 20260105,
+     "pct": "2.3484",
+     "annualised_pct": null,
+     "words": "TWR since 5 Jan 2026"
+    },
+    "span": [
+     20260105,
+     20260112
+    ]
+   }
+  },
+  {
+   "id": "S5",
+   "title": "A NAV that is too old leaves the day out",
+   "why": "The same units with one NAV, 45.0000 of Mon 5 Jan. Tuesday, Wednesday and Thursday are 1, 2 and 3 business days after it and are complete; Friday is the 4th, so Friday, the weekend and Monday 12th are not. Four points, all 450,555 paise. Time-weighted: only Monday's own return, 450,555 / 450,000 = 0.1233%.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260105,
+     "account_id": 1,
+     "asset_id": 2,
+     "qty_u": 100123400,
+     "amount_paise": 450000
+    }
+   ],
+   "quotes": [
+    {
+     "asset_id": 2,
+     "kind": "mf",
+     "prices": [
+      [
+       20260105,
+       450000
+      ]
+     ]
+    }
+   ],
+   "last_day": 20260112,
+   "decimals": {
+    "2": 4
+   },
+   "expect": {
+    "series": [
+     {
+      "day": 20260105,
+      "value_paise": 450555,
+      "net_put_in_paise": 450000
+     },
+     {
+      "day": 20260106,
+      "value_paise": 450555,
+      "net_put_in_paise": 450000
+     },
+     {
+      "day": 20260107,
+      "value_paise": 450555,
+      "net_put_in_paise": 450000
+     },
+     {
+      "day": 20260108,
+      "value_paise": 450555,
+      "net_put_in_paise": 450000
+     }
+    ],
+    "points": [
+     {
+      "day": 20260105,
+      "value_paise": 450555,
+      "in_paise": 450000,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260106,
+      "value_paise": 450555,
+      "in_paise": 0,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260107,
+      "value_paise": 450555,
+      "in_paise": 0,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260108,
+      "value_paise": 450555,
+      "in_paise": 0,
+      "out_paise": 0,
+      "fee_paise": 0
+     }
+    ],
+    "opening_paise": 0,
+    "words": null,
+    "twr": {
+     "start_day": 20260105,
+     "pct": "0.1233",
+     "annualised_pct": null,
+     "words": "TWR since 5 Jan 2026"
+    },
+    "span": [
+     20260105,
+     20260108
+    ]
+   }
+  },
+  {
+   "id": "S6",
+   "title": "A holiday keeps a NAV good for one more day",
+   "why": "As S5, with Wed 7 Jan a holiday of the exchange: Friday 9th is only the 3rd business day after the NAV (Tue, Thu, Fri), so it is complete, and so are Saturday and Sunday. Monday 12th is the 4th and is not. Seven points.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260105,
+     "account_id": 1,
+     "asset_id": 2,
+     "qty_u": 100123400,
+     "amount_paise": 450000
+    }
+   ],
+   "quotes": [
+    {
+     "asset_id": 2,
+     "kind": "mf",
+     "prices": [
+      [
+       20260105,
+       450000
+      ]
+     ]
+    }
+   ],
+   "last_day": 20260112,
+   "holidays": [
+    20260107
+   ],
+   "decimals": {
+    "2": 4
+   },
+   "expect": {
+    "series": [
+     {
+      "day": 20260105,
+      "value_paise": 450555,
+      "net_put_in_paise": 450000
+     },
+     {
+      "day": 20260106,
+      "value_paise": 450555,
+      "net_put_in_paise": 450000
+     },
+     {
+      "day": 20260107,
+      "value_paise": 450555,
+      "net_put_in_paise": 450000
+     },
+     {
+      "day": 20260108,
+      "value_paise": 450555,
+      "net_put_in_paise": 450000
+     },
+     {
+      "day": 20260109,
+      "value_paise": 450555,
+      "net_put_in_paise": 450000
+     },
+     {
+      "day": 20260110,
+      "value_paise": 450555,
+      "net_put_in_paise": 450000
+     },
+     {
+      "day": 20260111,
+      "value_paise": 450555,
+      "net_put_in_paise": 450000
+     }
+    ],
+    "points": [
+     {
+      "day": 20260105,
+      "value_paise": 450555,
+      "in_paise": 450000,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260106,
+      "value_paise": 450555,
+      "in_paise": 0,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260107,
+      "value_paise": 450555,
+      "in_paise": 0,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260108,
+      "value_paise": 450555,
+      "in_paise": 0,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260109,
+      "value_paise": 450555,
+      "in_paise": 0,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260110,
+      "value_paise": 450555,
+      "in_paise": 0,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260111,
+      "value_paise": 450555,
+      "in_paise": 0,
+      "out_paise": 0,
+      "fee_paise": 0
+     }
+    ],
+    "opening_paise": 0,
+    "words": null,
+    "twr": {
+     "start_day": 20260105,
+     "pct": "0.1233",
+     "annualised_pct": null,
+     "words": "TWR since 5 Jan 2026"
+    },
+    "span": [
+     20260105,
+     20260111
+    ]
+   }
+  },
+  {
+   "id": "S7",
+   "title": "A value kept by hand rides on from the day it was entered",
+   "why": "2 units of something kept by hand bought for 1,000.00 on Sat 10 Jan 2026, valued at 500.00 that day and at 520.00 from Thu 15 Jan. Every day from Saturday 10th to Friday 16th is complete: 2 x 500.00 = 1,000.00 (100,000 paise) until Wednesday 14th, 2 x 520.00 = 1,040.00 (104,000 paise) on Thursday and Friday. Time-weighted since Saturday: 1.04, 4.0000%.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260110,
+     "account_id": 1,
+     "asset_id": 3,
+     "qty_u": 2000000,
+     "amount_paise": 100000
+    }
+   ],
+   "quotes": [
+    {
+     "asset_id": 3,
+     "kind": "manual",
+     "prices": [
+      [
+       20260110,
+       5000000
+      ],
+      [
+       20260115,
+       5200000
+      ]
+     ]
+    }
+   ],
+   "last_day": 20260116,
+   "expect": {
+    "series": [
+     {
+      "day": 20260110,
+      "value_paise": 100000,
+      "net_put_in_paise": 100000
+     },
+     {
+      "day": 20260111,
+      "value_paise": 100000,
+      "net_put_in_paise": 100000
+     },
+     {
+      "day": 20260112,
+      "value_paise": 100000,
+      "net_put_in_paise": 100000
+     },
+     {
+      "day": 20260113,
+      "value_paise": 100000,
+      "net_put_in_paise": 100000
+     },
+     {
+      "day": 20260114,
+      "value_paise": 100000,
+      "net_put_in_paise": 100000
+     },
+     {
+      "day": 20260115,
+      "value_paise": 104000,
+      "net_put_in_paise": 100000
+     },
+     {
+      "day": 20260116,
+      "value_paise": 104000,
+      "net_put_in_paise": 100000
+     }
+    ],
+    "points": [
+     {
+      "day": 20260110,
+      "value_paise": 100000,
+      "in_paise": 100000,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260111,
+      "value_paise": 100000,
+      "in_paise": 0,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260112,
+      "value_paise": 100000,
+      "in_paise": 0,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260113,
+      "value_paise": 100000,
+      "in_paise": 0,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260114,
+      "value_paise": 100000,
+      "in_paise": 0,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260115,
+      "value_paise": 104000,
+      "in_paise": 0,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260116,
+      "value_paise": 104000,
+      "in_paise": 0,
+      "out_paise": 0,
+      "fee_paise": 0
+     }
+    ],
+    "opening_paise": 0,
+    "words": null,
+    "twr": {
+     "start_day": 20260110,
+     "pct": "4.0000",
+     "annualised_pct": null,
+     "words": "TWR since 10 Jan 2026"
+    },
+    "span": [
+     20260110,
+     20260116
+    ]
+   }
+  },
+  {
+   "id": "S8",
+   "title": "Once everything is sold the tab is worth nothing, and needs no price to say so",
+   "why": "10 shares for 1,000.00 on Mon 5 Jan 2026, all sold for 1,100.00 on Wed 7 Jan. Closing prices exist only for Monday (100.00) and Tuesday (105.00). Monday 1,000.00, Tuesday 1,050.00. On Wednesday and Thursday nothing is held, so both days are complete without a price, worth nothing, with net money put in of 1,000.00 - 1,100.00 = -100.00. Time-weighted: Monday 1,000 / 1,000, Tuesday 1,050 / 1,000, Wednesday (0 + 1,100 out) / 1,050; Thursday has nothing at work and is skipped. 1.05 x 1,100 / 1,050 = 1.10: 10.0000%.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260105,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "SELL",
+     "trade_date": 20260107,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 110000
+    }
+   ],
+   "quotes": [
+    {
+     "asset_id": 1,
+     "kind": "listed",
+     "prices": [
+      [
+       20260105,
+       1000000
+      ],
+      [
+       20260106,
+       1050000
+      ]
+     ]
+    }
+   ],
+   "last_day": 20260108,
+   "expect": {
+    "series": [
+     {
+      "day": 20260105,
+      "value_paise": 100000,
+      "net_put_in_paise": 100000
+     },
+     {
+      "day": 20260106,
+      "value_paise": 105000,
+      "net_put_in_paise": 100000
+     },
+     {
+      "day": 20260107,
+      "value_paise": 0,
+      "net_put_in_paise": -10000
+     },
+     {
+      "day": 20260108,
+      "value_paise": 0,
+      "net_put_in_paise": -10000
+     }
+    ],
+    "points": [
+     {
+      "day": 20260105,
+      "value_paise": 100000,
+      "in_paise": 100000,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260106,
+      "value_paise": 105000,
+      "in_paise": 0,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260107,
+      "value_paise": 0,
+      "in_paise": 0,
+      "out_paise": 110000,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260108,
+      "value_paise": 0,
+      "in_paise": 0,
+      "out_paise": 0,
+      "fee_paise": 0
+     }
+    ],
+    "opening_paise": 0,
+    "words": null,
+    "twr": {
+     "start_day": 20260105,
+     "pct": "10.0000",
+     "annualised_pct": null,
+     "words": "TWR since 5 Jan 2026"
+    },
+    "span": [
+     20260105,
+     20260107
+    ]
+   }
+  },
+  {
+   "id": "S9",
+   "title": "Each account's line is rounded on its own, as the screen's is",
+   "why": "Two accounts each hold 0.005 unit of a fund (5,000 in units of a millionth) bought for 1 paisa, and its NAV is 1.0000 (10,000 in price_u). One line is worth 0.005 x 1.00 rupees = 0.5 paisa, which rounds half away from zero to 1 paisa. Two lines: 2 paise. (Rounding the whole holding, 0.01 x 1.00 = 1 paisa, would give 1.) Net money put in 2 paise. The tab began on this one complete day, so its own return counts and the return runs over that one day, from Monday to Monday.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260105,
+     "account_id": 1,
+     "asset_id": 2,
+     "qty_u": 5000,
+     "amount_paise": 1
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "BUY",
+     "trade_date": 20260105,
+     "account_id": 2,
+     "asset_id": 2,
+     "qty_u": 5000,
+     "amount_paise": 1
+    }
+   ],
+   "quotes": [
+    {
+     "asset_id": 2,
+     "kind": "mf",
+     "prices": [
+      [
+       20260105,
+       10000
+      ]
+     ]
+    }
+   ],
+   "last_day": 20260105,
+   "decimals": {
+    "2": 4
+   },
+   "expect": {
+    "series": [
+     {
+      "day": 20260105,
+      "value_paise": 2,
+      "net_put_in_paise": 2
+     }
+    ],
+    "points": [
+     {
+      "day": 20260105,
+      "value_paise": 2,
+      "in_paise": 2,
+      "out_paise": 0,
+      "fee_paise": 0
+     }
+    ],
+    "opening_paise": 0,
+    "words": null,
+    "twr": {
+     "start_day": 20260105,
+     "pct": "0.0000",
+     "annualised_pct": null,
+     "words": "TWR since 5 Jan 2026"
+    },
+    "span": [
+     20260105,
+     20260105
+    ]
+   }
+  },
+  {
+   "id": "S10",
+   "title": "A split changes the units on its day and the price with them",
+   "why": "10 shares for 10,000.00 on Mon 5 Jan 2026; on Wed 7 Jan each share becomes 5. Closing prices 1,000.00 and 1,000.00 (Mon, Tue), then 200.00 and 210.00 after the split (Wed, Thu). Units 10, 10, 50, 50: values 10,000.00, 10,000.00, 50 x 200.00 = 10,000.00 and 50 x 210.00 = 10,500.00. Time-weighted: 1 x 1 x 1 x 1.05 = 5.0000%.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260105,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 1000000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "SPLIT",
+     "trade_date": 20260107,
+     "account_id": null,
+     "asset_id": 1,
+     "ratio_num": 5,
+     "ratio_den": 1
+    }
+   ],
+   "quotes": [
+    {
+     "asset_id": 1,
+     "kind": "listed",
+     "prices": [
+      [
+       20260105,
+       10000000
+      ],
+      [
+       20260106,
+       10000000
+      ],
+      [
+       20260107,
+       2000000
+      ],
+      [
+       20260108,
+       2100000
+      ]
+     ]
+    }
+   ],
+   "last_day": 20260108,
+   "expect": {
+    "series": [
+     {
+      "day": 20260105,
+      "value_paise": 1000000,
+      "net_put_in_paise": 1000000
+     },
+     {
+      "day": 20260106,
+      "value_paise": 1000000,
+      "net_put_in_paise": 1000000
+     },
+     {
+      "day": 20260107,
+      "value_paise": 1000000,
+      "net_put_in_paise": 1000000
+     },
+     {
+      "day": 20260108,
+      "value_paise": 1050000,
+      "net_put_in_paise": 1000000
+     }
+    ],
+    "points": [
+     {
+      "day": 20260105,
+      "value_paise": 1000000,
+      "in_paise": 1000000,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260106,
+      "value_paise": 1000000,
+      "in_paise": 0,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260107,
+      "value_paise": 1000000,
+      "in_paise": 0,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260108,
+      "value_paise": 1050000,
+      "in_paise": 0,
+      "out_paise": 0,
+      "fee_paise": 0
+     }
+    ],
+    "opening_paise": 0,
+    "words": null,
+    "twr": {
+     "start_day": 20260105,
+     "pct": "5.0000",
+     "annualised_pct": null,
+     "words": "TWR since 5 Jan 2026"
+    },
+    "span": [
+     20260105,
+     20260108
+    ]
+   }
+  },
+  {
+   "id": "S11",
+   "title": "Shares moved between two accounts change nothing",
+   "why": "10 shares for 1,000.00 on Mon 5 Jan 2026 in the first account, moved to the second on Tue 6 Jan. Closing prices 100.00, 101.00, 102.00. Values 1,000.00, 1,010.00, 1,020.00 whoever holds them; no money moved on Tuesday, so there is a point for the day but no money in it. Time-weighted 1.01 x (102 / 101) = 1.02: 2.0000%.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260105,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "TRANSFER",
+     "trade_date": 20260106,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "to_account_id": 2
+    }
+   ],
+   "quotes": [
+    {
+     "asset_id": 1,
+     "kind": "listed",
+     "prices": [
+      [
+       20260105,
+       1000000
+      ],
+      [
+       20260106,
+       1010000
+      ],
+      [
+       20260107,
+       1020000
+      ]
+     ]
+    }
+   ],
+   "last_day": 20260107,
+   "expect": {
+    "series": [
+     {
+      "day": 20260105,
+      "value_paise": 100000,
+      "net_put_in_paise": 100000
+     },
+     {
+      "day": 20260106,
+      "value_paise": 101000,
+      "net_put_in_paise": 100000
+     },
+     {
+      "day": 20260107,
+      "value_paise": 102000,
+      "net_put_in_paise": 100000
+     }
+    ],
+    "points": [
+     {
+      "day": 20260105,
+      "value_paise": 100000,
+      "in_paise": 100000,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260106,
+      "value_paise": 101000,
+      "in_paise": 0,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260107,
+      "value_paise": 102000,
+      "in_paise": 0,
+      "out_paise": 0,
+      "fee_paise": 0
+     }
+    ],
+    "opening_paise": 0,
+    "words": null,
+    "twr": {
+     "start_day": 20260105,
+     "pct": "2.0000",
+     "annualised_pct": null,
+     "words": "TWR since 5 Jan 2026"
+    },
+    "span": [
+     20260105,
+     20260107
+    ]
+   }
+  },
+  {
+   "id": "S12",
+   "title": "No closing price at all: no series, and it says why",
+   "why": "10 shares bought on Mon 5 Jan 2026 and no closing price for them yet. No day is complete: no series, the sentence that says it starts once every holding has a closing price, and the time-weighted return waits for two days of prices.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260105,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000
+    }
+   ],
+   "quotes": [],
+   "last_day": 20260107,
+   "expect": {
+    "series": [],
+    "points": [
+     {
+      "day": 20260105,
+      "value_paise": null,
+      "in_paise": 100000,
+      "out_paise": 0,
+      "fee_paise": 0
+     }
+    ],
+    "opening_paise": null,
+    "words": "Daily history starts once every holding here has a closing price.",
+    "twr": {
+     "start_day": null,
+     "pct": null,
+     "annualised_pct": null,
+     "words": "TWR needs closing prices for at least two days."
+    },
+    "span": null
+   }
+  },
+  {
+   "id": "S13",
+   "title": "A dividend on a day with no price joins the next day's period",
+   "why": "10 shares for 1,000.00 on Fri 9 Jan 2026, a dividend of 50.00 credited on Sat 10 Jan, closing prices of 100.00 on Friday and on Mon 12 Jan (a listed share has no close on a Saturday). Complete: Friday and Monday, both worth 1,000.00; net money put in 1,000.00, then 950.00 after the dividend. Saturday is not complete, so the 50.00 paid out is in Monday's period: (1,000 + 50) / 1,000 = 1.05, Friday's own return being 1: 5.0000%.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260109,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "DIVIDEND",
+     "trade_date": 20260110,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 5000
+    }
+   ],
+   "quotes": [
+    {
+     "asset_id": 1,
+     "kind": "listed",
+     "prices": [
+      [
+       20260109,
+       1000000
+      ],
+      [
+       20260112,
+       1000000
+      ]
+     ]
+    }
+   ],
+   "last_day": 20260112,
+   "expect": {
+    "series": [
+     {
+      "day": 20260109,
+      "value_paise": 100000,
+      "net_put_in_paise": 100000
+     },
+     {
+      "day": 20260112,
+      "value_paise": 100000,
+      "net_put_in_paise": 95000
+     }
+    ],
+    "points": [
+     {
+      "day": 20260109,
+      "value_paise": 100000,
+      "in_paise": 100000,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260110,
+      "value_paise": null,
+      "in_paise": 0,
+      "out_paise": 5000,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260112,
+      "value_paise": 100000,
+      "in_paise": 0,
+      "out_paise": 0,
+      "fee_paise": 0
+     }
+    ],
+    "opening_paise": 0,
+    "words": null,
+    "twr": {
+     "start_day": 20260109,
+     "pct": "5.0000",
+     "annualised_pct": null,
+     "words": "TWR since 9 Jan 2026"
+    },
+    "span": [
+     20260109,
+     20260112
+    ]
+   }
+  },
+  {
+   "id": "S14",
+   "title": "Entries after the day asked for are not in it",
+   "why": "10 shares for 1,000.00 on Mon 5 Jan 2026 and 10 more on Wed 7 Jan, asked for Tue 6 Jan. Prices 100.00, 101.00, 102.00. Two points, 1,000.00 and 1,010.00, net money put in 1,000.00; Wednesday's purchase is not seen. Time-weighted 1.01: 1.0000%.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260105,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "BUY",
+     "trade_date": 20260107,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 102000
+    }
+   ],
+   "quotes": [
+    {
+     "asset_id": 1,
+     "kind": "listed",
+     "prices": [
+      [
+       20260105,
+       1000000
+      ],
+      [
+       20260106,
+       1010000
+      ],
+      [
+       20260107,
+       1020000
+      ]
+     ]
+    }
+   ],
+   "last_day": 20260106,
+   "expect": {
+    "series": [
+     {
+      "day": 20260105,
+      "value_paise": 100000,
+      "net_put_in_paise": 100000
+     },
+     {
+      "day": 20260106,
+      "value_paise": 101000,
+      "net_put_in_paise": 100000
+     }
+    ],
+    "points": [
+     {
+      "day": 20260105,
+      "value_paise": 100000,
+      "in_paise": 100000,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260106,
+      "value_paise": 101000,
+      "in_paise": 0,
+      "out_paise": 0,
+      "fee_paise": 0
+     }
+    ],
+    "opening_paise": 0,
+    "words": null,
+    "twr": {
+     "start_day": 20260105,
+     "pct": "1.0000",
+     "annualised_pct": null,
+     "words": "TWR since 5 Jan 2026"
+    },
+    "span": [
+     20260105,
+     20260106
+    ]
+   }
+  },
+  {
+   "id": "S15",
+   "title": "A tab of three kinds is complete when each has its price",
+   "why": "On Mon 5 Jan 2026: 10 shares (100.00 each), 3 units kept by hand (100.00 each) and 10 fund units (NAV 20.0000), bought for 1,000.00, 300.00 and 200.00. The shares have a close on Monday (100.00) and Tuesday (110.00), none after; the value kept by hand and the NAV are entered once and ride on. Monday: 1,000 + 300 + 200 = 1,500.00; Tuesday: 1,100 + 300 + 200 = 1,600.00. Wednesday and Thursday hold shares without a price and are not complete. Time-weighted 1,600 / 1,500 = 6.6667%.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260105,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "BUY",
+     "trade_date": 20260105,
+     "account_id": 1,
+     "asset_id": 3,
+     "qty_u": 3000000,
+     "amount_paise": 30000
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "BUY",
+     "trade_date": 20260105,
+     "account_id": 1,
+     "asset_id": 2,
+     "qty_u": 10000000,
+     "amount_paise": 20000
+    }
+   ],
+   "quotes": [
+    {
+     "asset_id": 1,
+     "kind": "listed",
+     "prices": [
+      [
+       20260105,
+       1000000
+      ],
+      [
+       20260106,
+       1100000
+      ]
+     ]
+    },
+    {
+     "asset_id": 2,
+     "kind": "mf",
+     "prices": [
+      [
+       20260105,
+       200000
+      ]
+     ]
+    },
+    {
+     "asset_id": 3,
+     "kind": "manual",
+     "prices": [
+      [
+       20260105,
+       1000000
+      ]
+     ]
+    }
+   ],
+   "last_day": 20260108,
+   "decimals": {
+    "2": 4
+   },
+   "expect": {
+    "series": [
+     {
+      "day": 20260105,
+      "value_paise": 150000,
+      "net_put_in_paise": 150000
+     },
+     {
+      "day": 20260106,
+      "value_paise": 160000,
+      "net_put_in_paise": 150000
+     }
+    ],
+    "points": [
+     {
+      "day": 20260105,
+      "value_paise": 150000,
+      "in_paise": 150000,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260106,
+      "value_paise": 160000,
+      "in_paise": 0,
+      "out_paise": 0,
+      "fee_paise": 0
+     }
+    ],
+    "opening_paise": 0,
+    "words": null,
+    "twr": {
+     "start_day": 20260105,
+     "pct": "6.6667",
+     "annualised_pct": null,
+     "words": "TWR since 5 Jan 2026"
+    },
+    "span": [
+     20260105,
+     20260106
+    ]
+   }
+  },
+  {
+   "id": "S16",
+   "title": "A fee and a dividend on a priced day",
+   "why": "10 shares for 1,000.00 on Mon 5 Jan 2026; on Tue 6 Jan a fee of 5.00 paid from outside and a dividend of 10.00. Closing price 100.00 both days: 1,000.00. Net money put in: 1,000.00, then 1,000.00 + 5.00 - 10.00 = 995.00. Tuesday's period: 1,000.00 at work, and (1,000.00 + 10.00 paid out - 5.00 fee) / 1,000.00 = 1.005: 0.5000%.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260105,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "FEE",
+     "trade_date": 20260106,
+     "account_id": 1,
+     "amount_paise": 500
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "DIVIDEND",
+     "trade_date": 20260106,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 1000
+    }
+   ],
+   "quotes": [
+    {
+     "asset_id": 1,
+     "kind": "listed",
+     "prices": [
+      [
+       20260105,
+       1000000
+      ],
+      [
+       20260106,
+       1000000
+      ]
+     ]
+    }
+   ],
+   "last_day": 20260106,
+   "expect": {
+    "series": [
+     {
+      "day": 20260105,
+      "value_paise": 100000,
+      "net_put_in_paise": 100000
+     },
+     {
+      "day": 20260106,
+      "value_paise": 100000,
+      "net_put_in_paise": 99500
+     }
+    ],
+    "points": [
+     {
+      "day": 20260105,
+      "value_paise": 100000,
+      "in_paise": 100000,
+      "out_paise": 0,
+      "fee_paise": 0
+     },
+     {
+      "day": 20260106,
+      "value_paise": 100000,
+      "in_paise": 0,
+      "out_paise": 1000,
+      "fee_paise": 500
+     }
+    ],
+    "opening_paise": 0,
+    "words": null,
+    "twr": {
+     "start_day": 20260105,
+     "pct": "0.5000",
+     "annualised_pct": null,
+     "words": "TWR since 5 Jan 2026"
+    },
+    "span": [
+     20260105,
+     20260106
+    ]
+   }
+  }
+ ],
+ "benchmarks": [
+  {
+   "id": "B1",
+   "title": "The design's B1: X2's money put into NIFTY 50",
+   "why": "X2's flows (50,000.00 and 25,000.00 in; 1,200.00 and 20,000.00 out) with the index at 17,398.05, 19,731.75, 23,465.60 and 23,519.35 on those days and 25,900.00 on 27 Oct 2026; the other closes given are other days' and are not used. Index units (money in rupees over the level): 50,000 / 17,398.05 + 25,000 / 19,731.75 - 1,200 / 23,465.60 - 20,000 / 23,519.35 = 2.8739... + 1.2670... - 0.0511... - 0.8504... = 3.2393765. Worth 3.2393765 x 25,900.00 = 83,899.85. The XIRR of the same flows with 83,899.85 at the end: 11.7347%. The index's own return from 3 Apr 2023 to 27 Oct 2026: 25,900.00 / 17,398.05 - 1 = 48.8673%.",
+   "benchmark": "nifty50",
+   "flows": [
+    {
+     "day": 20230403,
+     "in_paise": 5000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20231016,
+     "in_paise": 2500000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20240614,
+     "in_paise": 0,
+     "out_paise": 120000,
+     "fee_paise": 0
+    },
+    {
+     "day": 20250328,
+     "in_paise": 0,
+     "out_paise": 2000000,
+     "fee_paise": 0
+    }
+   ],
+   "closes": [
+    [
+     20230331,
+     170000000
+    ],
+    [
+     20230403,
+     173980500
+    ],
+    [
+     20230404,
+     175000000
+    ],
+    [
+     20231013,
+     196000000
+    ],
+    [
+     20231016,
+     197317500
+    ],
+    [
+     20240613,
+     233000000
+    ],
+    [
+     20240614,
+     234656000
+    ],
+    [
+     20250327,
+     230000000
+    ],
+    [
+     20250328,
+     235193500
+    ],
+    [
+     20261027,
+     259000000
+    ]
+   ],
+   "valuation_day": 20261027,
+   "span": [
+    20230403,
+    20261027
+   ],
+   "expect": {
+    "benchmark": "nifty50",
+    "label": "NIFTY 50",
+    "value_paise": 8389985,
+    "xirr_pct": "11.7347",
+    "twr_pct": "48.8673",
+    "flagged": false,
+    "words": [
+     "Dividends not included"
+    ]
+   }
+  },
+  {
+   "id": "B2",
+   "title": "The design's B2: withdrawals the index could not have paid",
+   "why": "10,000.00 put in on Mon 5 Jan 2026 and 15,000.00 taken out on Tue 6 Jan, the index at 20,000.00 both days and 21,000.00 on Wed 7 Jan. Units: 10,000 / 20,000 - 15,000 / 20,000 = 0.5 - 0.75 = -0.25 of the index. Kept as they are: worth -0.25 x 21,000.00 = -5,250.00. Flagged, with the sentence. Less than a year old, so no rate.",
+   "benchmark": "nifty50",
+   "flows": [
+    {
+     "day": 20260105,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20260106,
+     "in_paise": 0,
+     "out_paise": 1500000,
+     "fee_paise": 0
+    }
+   ],
+   "closes": [
+    [
+     20260105,
+     200000000
+    ],
+    [
+     20260106,
+     200000000
+    ],
+    [
+     20260107,
+     210000000
+    ]
+   ],
+   "valuation_day": 20260107,
+   "expect": {
+    "benchmark": "nifty50",
+    "label": "NIFTY 50",
+    "value_paise": -525000,
+    "xirr_pct": null,
+    "twr_pct": null,
+    "flagged": true,
+    "words": [
+     "Dividends not included",
+     "The index could not have paid every withdrawal; the comparison is approximate."
+    ]
+   }
+  },
+  {
+   "id": "B3",
+   "title": "Negative units still have a rate when the money is old enough",
+   "why": "As B2 a year apart: 10,000.00 in on 5 Jan 2025, 15,000.00 out on 5 Jan 2026, the index at 20,000.00 on both days and 21,000.00 on 5 Jan 2027, so -5,250.00 at the end. With y = 1 / (1 + r) the cash is -10,000 + 15,000 y - 5,250 y^2 = 0, so y = (15 +- sqrt 15) / 10.5 = 1.05972 or 1.79743 and r = -5.6351% or -44.3649%. The one nearest zero is shown.",
+   "benchmark": "nifty50",
+   "flows": [
+    {
+     "day": 20250105,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20260105,
+     "in_paise": 0,
+     "out_paise": 1500000,
+     "fee_paise": 0
+    }
+   ],
+   "closes": [
+    [
+     20250105,
+     200000000
+    ],
+    [
+     20260105,
+     200000000
+    ],
+    [
+     20270105,
+     210000000
+    ]
+   ],
+   "valuation_day": 20270105,
+   "expect": {
+    "benchmark": "nifty50",
+    "label": "NIFTY 50",
+    "value_paise": -525000,
+    "xirr_pct": "-5.6351",
+    "twr_pct": null,
+    "flagged": true,
+    "words": [
+     "Dividends not included",
+     "The index could not have paid every withdrawal; the comparison is approximate."
+    ]
+   }
+  },
+  {
+   "id": "B4",
+   "title": "Money that went in before the index prices start",
+   "why": "1,000.00 put in on Thu 1 Jan 2026, and the index prices we have begin on Fri 2 Jan: there is no close for the first day, so there is no honest comparison. No value, no rate, flagged with the day the prices start.",
+   "benchmark": "nifty500",
+   "flows": [
+    {
+     "day": 20260101,
+     "in_paise": 100000,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "closes": [
+    [
+     20260102,
+     200000000
+    ],
+    [
+     20260105,
+     205000000
+    ]
+   ],
+   "valuation_day": 20260105,
+   "expect": {
+    "benchmark": "nifty500",
+    "label": "NIFTY 500",
+    "value_paise": null,
+    "xirr_pct": null,
+    "twr_pct": null,
+    "flagged": true,
+    "words": [
+     "Dividends not included",
+     "NIFTY 500 prices start 2 Jan 2026; this comparison needs every entry after that."
+    ]
+   }
+  },
+  {
+   "id": "B5",
+   "title": "No index prices at all",
+   "why": "The index has not been downloaded yet: nothing to compare with, and the sentence says it will appear.",
+   "benchmark": "nifty50",
+   "flows": [
+    {
+     "day": 20260105,
+     "in_paise": 100000,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "closes": [],
+   "valuation_day": 20260107,
+   "expect": {
+    "benchmark": "nifty50",
+    "label": "NIFTY 50",
+    "value_paise": null,
+    "xirr_pct": null,
+    "twr_pct": null,
+    "flagged": true,
+    "words": [
+     "Dividends not included",
+     "NIFTY 50 prices are not available yet; the comparison appears when they are."
+    ]
+   }
+  },
+  {
+   "id": "B6",
+   "title": "Money on a day the market was shut buys at the last close",
+   "why": "10,000.00 put in on Sat 10 Jan 2026, when there is no close: the last one before it is Friday's, 20,000.00 (the Monday close of 22,000.00 is after the day and is not used). Units 10,000 / 20,000 = 0.5; at Monday 12 Jan's close of 22,000.00 they are worth 11,000.00.",
+   "benchmark": "nifty50",
+   "flows": [
+    {
+     "day": 20260110,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "closes": [
+    [
+     20260109,
+     200000000
+    ],
+    [
+     20260112,
+     220000000
+    ]
+   ],
+   "valuation_day": 20260112,
+   "expect": {
+    "benchmark": "nifty50",
+    "label": "NIFTY 50",
+    "value_paise": 1100000,
+    "xirr_pct": null,
+    "twr_pct": null,
+    "flagged": false,
+    "words": [
+     "Dividends not included"
+    ]
+   }
+  },
+  {
+   "id": "B7",
+   "title": "The index can be valued at a level given, not the last close",
+   "why": "As B6 with the index now at 23,000.00 (a live level): 0.5 units are worth 11,500.00.",
+   "benchmark": "nifty50",
+   "flows": [
+    {
+     "day": 20260110,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "closes": [
+    [
+     20260109,
+     200000000
+    ],
+    [
+     20260112,
+     220000000
+    ]
+   ],
+   "valuation_day": 20260112,
+   "now_u": 230000000,
+   "expect": {
+    "benchmark": "nifty50",
+    "label": "NIFTY 50",
+    "value_paise": 1150000,
+    "xirr_pct": null,
+    "twr_pct": null,
+    "flagged": false,
+    "words": [
+     "Dividends not included"
+    ]
+   }
+  },
+  {
+   "id": "B8",
+   "title": "A fee is money put in",
+   "why": "10,000.00 bought and a fee of 200.00 on Mon 5 Jan 2026: 10,200.00 went into the index at 20,000.00, and at 21,000.00 on Wed 7 Jan it is worth 10,200 x 21,000 / 20,000 = 10,710.00.",
+   "benchmark": "nifty50",
+   "flows": [
+    {
+     "day": 20260105,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 20000
+    }
+   ],
+   "closes": [
+    [
+     20260105,
+     200000000
+    ],
+    [
+     20260106,
+     205000000
+    ],
+    [
+     20260107,
+     210000000
+    ]
+   ],
+   "valuation_day": 20260107,
+   "expect": {
+    "benchmark": "nifty50",
+    "label": "NIFTY 50",
+    "value_paise": 1071000,
+    "xirr_pct": null,
+    "twr_pct": null,
+    "flagged": false,
+    "words": [
+     "Dividends not included"
+    ]
+   }
+  },
+  {
+   "id": "B9",
+   "title": "Units that dip below nothing and recover are still flagged",
+   "why": "10,000.00 in on Mon 5 Jan 2026, 15,000.00 out on Tue 6 Jan, 20,000.00 in on Wed 7 Jan, the index at 20,000.00 on all three days and 21,000.00 on Thu 8 Jan. Units: 0.5, then -0.25, then 0.75. Worth 0.75 x 21,000.00 = 15,750.00 in the end, but the index could not have paid the withdrawal on Tuesday.",
+   "benchmark": "nifty50",
+   "flows": [
+    {
+     "day": 20260105,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20260106,
+     "in_paise": 0,
+     "out_paise": 1500000,
+     "fee_paise": 0
+    },
+    {
+     "day": 20260107,
+     "in_paise": 2000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "closes": [
+    [
+     20260105,
+     200000000
+    ],
+    [
+     20260106,
+     200000000
+    ],
+    [
+     20260107,
+     200000000
+    ],
+    [
+     20260108,
+     210000000
+    ]
+   ],
+   "valuation_day": 20260108,
+   "expect": {
+    "benchmark": "nifty50",
+    "label": "NIFTY 50",
+    "value_paise": 1575000,
+    "xirr_pct": null,
+    "twr_pct": null,
+    "flagged": true,
+    "words": [
+     "Dividends not included",
+     "The index could not have paid every withdrawal; the comparison is approximate."
+    ]
+   }
+  },
+  {
+   "id": "B10",
+   "title": "Money after the valuation day is not in it",
+   "why": "B1 with a further 100,000.00 put in on 28 Oct 2026, the day after the day asked for, and an index close for that day: neither is seen.",
+   "benchmark": "nifty50",
+   "flows": [
+    {
+     "day": 20230403,
+     "in_paise": 5000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20231016,
+     "in_paise": 2500000,
+     "out_paise": 0,
+     "fee_paise": 0
+    },
+    {
+     "day": 20240614,
+     "in_paise": 0,
+     "out_paise": 120000,
+     "fee_paise": 0
+    },
+    {
+     "day": 20250328,
+     "in_paise": 0,
+     "out_paise": 2000000,
+     "fee_paise": 0
+    },
+    {
+     "day": 20261028,
+     "in_paise": 10000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "closes": [
+    [
+     20230331,
+     170000000
+    ],
+    [
+     20230403,
+     173980500
+    ],
+    [
+     20230404,
+     175000000
+    ],
+    [
+     20231013,
+     196000000
+    ],
+    [
+     20231016,
+     197317500
+    ],
+    [
+     20240613,
+     233000000
+    ],
+    [
+     20240614,
+     234656000
+    ],
+    [
+     20250327,
+     230000000
+    ],
+    [
+     20250328,
+     235193500
+    ],
+    [
+     20261027,
+     259000000
+    ],
+    [
+     20261028,
+     300000000
+    ]
+   ],
+   "valuation_day": 20261027,
+   "expect": {
+    "benchmark": "nifty50",
+    "label": "NIFTY 50",
+    "value_paise": 8389985,
+    "xirr_pct": "11.7347",
+    "twr_pct": null,
+    "flagged": false,
+    "words": [
+     "Dividends not included"
+    ]
+   }
+  },
+  {
+   "id": "B11",
+   "title": "The index's own return over the days of the time-weighted return",
+   "why": "The index at 20,000.00 on Mon 5 Jan 2026 and 22,000.00 on Mon 12 Jan, over the days the tab's time-weighted return runs: 22,000 / 20,000 - 1 = 10.0000%.",
+   "benchmark": "nifty50",
+   "flows": [
+    {
+     "day": 20260105,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "closes": [
+    [
+     20260105,
+     200000000
+    ],
+    [
+     20260107,
+     210000000
+    ],
+    [
+     20260112,
+     220000000
+    ]
+   ],
+   "valuation_day": 20260112,
+   "span": [
+    20260105,
+    20260112
+   ],
+   "expect": {
+    "benchmark": "nifty50",
+    "label": "NIFTY 50",
+    "value_paise": 1100000,
+    "xirr_pct": null,
+    "twr_pct": "10.0000",
+    "flagged": false,
+    "words": [
+     "Dividends not included"
+    ]
+   }
+  },
+  {
+   "id": "B12",
+   "title": "No money, nothing to compare",
+   "why": "A tab with no flows: nothing was put into the index, so there is no value and no rate, and nothing to flag.",
+   "benchmark": "nifty50",
+   "flows": [],
+   "closes": [
+    [
+     20260105,
+     200000000
+    ]
+   ],
+   "valuation_day": 20260105,
+   "expect": {
+    "benchmark": "nifty50",
+    "label": "NIFTY 50",
+    "value_paise": null,
+    "xirr_pct": null,
+    "twr_pct": null,
+    "flagged": false,
+    "words": [
+     "Dividends not included"
+    ]
+   }
+  },
+  {
+   "id": "B13",
+   "title": "Money in and out on one day that cancel buys nothing",
+   "why": "5,000.00 in and 5,000.00 out on Mon 5 Jan 2026: no net money, no units, so no close is needed even though the index prices start on Tue 6 Jan. Worth nothing.",
+   "benchmark": "nifty50",
+   "flows": [
+    {
+     "day": 20260105,
+     "in_paise": 500000,
+     "out_paise": 500000,
+     "fee_paise": 0
+    }
+   ],
+   "closes": [
+    [
+     20260106,
+     200000000
+    ]
+   ],
+   "valuation_day": 20260106,
+   "expect": {
+    "benchmark": "nifty50",
+    "label": "NIFTY 50",
+    "value_paise": 0,
+    "xirr_pct": null,
+    "twr_pct": null,
+    "flagged": false,
+    "words": [
+     "Dividends not included"
+    ]
+   }
+  },
+  {
+   "id": "B14",
+   "title": "Two closes for one day: the later in the list",
+   "why": "The index is given at 20,000.00 and then 20,500.00 for Mon 5 Jan 2026 (a corrected close) and 21,000.00 for Wed 7 Jan, in any order. 10,000.00 put in on Monday buys at the later one, 20,500.00: 10,000 / 20,500 = 0.487805... of the index, worth 0.487805... x 21,000.00 = 10,243.90 on Wednesday. The index's own return from Monday: 21,000 / 20,500 - 1 = 2.4390%.",
+   "benchmark": "nifty50",
+   "flows": [
+    {
+     "day": 20260105,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "closes": [
+    [
+     20260107,
+     210000000
+    ],
+    [
+     20260105,
+     200000000
+    ],
+    [
+     20260105,
+     205000000
+    ]
+   ],
+   "valuation_day": 20260107,
+   "span": [
+    20260105,
+    20260107
+   ],
+   "expect": {
+    "benchmark": "nifty50",
+    "label": "NIFTY 50",
+    "value_paise": 1024390,
+    "xirr_pct": null,
+    "twr_pct": "2.4390",
+    "flagged": false,
+    "words": [
+     "Dividends not included"
+    ]
+   }
+  },
+  {
+   "id": "B15",
+   "title": "A close of nothing is a gap in the data",
+   "why": "The index is given at 20,000.00 on Mon 5 Jan 2026, 0 on Tue 6 Jan and 21,000.00 on Wed 7 Jan. 10,000.00 put in on Tuesday buys at Monday's close (the 0 is no close): 0.5 of the index, worth 0.5 x 21,000.00 = 10,500.00 on Wednesday. The index's own return from Tue to Wed is taken from Monday's close: 21,000 / 20,000 - 1 = 5.0000%. A level of nothing given as the level now is no level: the Wednesday close is used.",
+   "benchmark": "nifty50",
+   "flows": [
+    {
+     "day": 20260106,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "closes": [
+    [
+     20260105,
+     200000000
+    ],
+    [
+     20260106,
+     0
+    ],
+    [
+     20260107,
+     210000000
+    ]
+   ],
+   "valuation_day": 20260107,
+   "now_u": 0,
+   "span": [
+    20260106,
+    20260107
+   ],
+   "expect": {
+    "benchmark": "nifty50",
+    "label": "NIFTY 50",
+    "value_paise": 1050000,
+    "xirr_pct": null,
+    "twr_pct": "5.0000",
+    "flagged": false,
+    "words": [
+     "Dividends not included"
+    ]
+   }
+  },
+  {
+   "id": "B16",
+   "title": "Only closes of nothing is no index at all",
+   "why": "Every close given is 0: the index might as well not have been downloaded.",
+   "benchmark": "nifty500",
+   "flows": [
+    {
+     "day": 20260105,
+     "in_paise": 100000,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "closes": [
+    [
+     20260105,
+     0
+    ],
+    [
+     20260106,
+     0
+    ]
+   ],
+   "valuation_day": 20260107,
+   "expect": {
+    "benchmark": "nifty500",
+    "label": "NIFTY 500",
+    "value_paise": null,
+    "xirr_pct": null,
+    "twr_pct": null,
+    "flagged": true,
+    "words": [
+     "Dividends not included",
+     "NIFTY 500 prices are not available yet; the comparison appears when they are."
+    ]
+   }
+  },
+  {
+   "id": "B17",
+   "title": "Two closes for one day: the later in the list, even when it is lower",
+   "why": "The index is given at 20,500.00 and then 20,000.00 for Mon 5 Jan 2026 (a close corrected downwards) and 21,000.00 for Wed 7 Jan. 10,000.00 put in on Monday buys at the later one, 20,000.00: 0.5 of the index, worth 0.5 x 21,000.00 = 10,500.00 on Wednesday. The index's own return from Monday: 21,000 / 20,000 - 1 = 5.0000%.",
+   "benchmark": "nifty50",
+   "flows": [
+    {
+     "day": 20260105,
+     "in_paise": 1000000,
+     "out_paise": 0,
+     "fee_paise": 0
+    }
+   ],
+   "closes": [
+    [
+     20260107,
+     210000000
+    ],
+    [
+     20260105,
+     205000000
+    ],
+    [
+     20260105,
+     200000000
+    ]
+   ],
+   "valuation_day": 20260107,
+   "span": [
+    20260105,
+    20260107
+   ],
+   "expect": {
+    "benchmark": "nifty50",
+    "label": "NIFTY 50",
+    "value_paise": 1050000,
+    "xirr_pct": null,
+    "twr_pct": "5.0000",
+    "flagged": false,
+    "words": [
+     "Dividends not included"
+    ]
+   }
+  }
+ ],
+ "reports": [
+  {
+   "id": "RP1",
+   "title": "X2's tab, three closing records old, against NIFTY 50",
+   "why": "The entries of X2 (two purchases, a dividend and a sale of 200 of the 750 shares: 550 are left) on 27 Oct 2026, with closing prices of the share only from Fri 23 Oct (149.00), Mon 26 Oct (149.50) and Tue 27 Oct (149.09): the first three complete days, the weekend between them not. Values 550 x 149.00 = 81,950.00, 550 x 149.50 = 82,225.00 and 550 x 149.09 = 81,999.50, against net money put in of 50,000 + 25,000 - 1,200 - 20,000 = 53,800.00. The tab was not empty before the 23rd, so its time-weighted return begins at that close: (82,225.00 / 81,950.00) x (81,999.50 / 82,225.00) = 81,999.50 / 81,950.00 = 0.0604%, since 23 Oct 2026. The words say where the history begins. NIFTY 50 is B1's: 83,899.85 and 11.7347%, and its own return over the same days 25,900 / 25,700 - 1 = 0.7782%. NIFTY 500 has no prices yet.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20230403,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 500000000,
+     "amount_paise": 5000000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "BUY",
+     "trade_date": 20231016,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 250000000,
+     "amount_paise": 2500000
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "DIVIDEND",
+     "trade_date": 20240614,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 120000
+    },
+    {
+     "id": 4,
+     "seq": 4,
+     "kind": "SELL",
+     "trade_date": 20250328,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 200000000,
+     "amount_paise": 2000000
+    }
+   ],
+   "quotes": [
+    {
+     "asset_id": 1,
+     "kind": "listed",
+     "prices": [
+      [
+       20261023,
+       1490000
+      ],
+      [
+       20261026,
+       1495000
+      ],
+      [
+       20261027,
+       1490900
+      ]
+     ]
+    }
+   ],
+   "closes": {
+    "nifty50": [
+     [
+      20230331,
+      170000000
+     ],
+     [
+      20230403,
+      173980500
+     ],
+     [
+      20230404,
+      175000000
+     ],
+     [
+      20231013,
+      196000000
+     ],
+     [
+      20231016,
+      197317500
+     ],
+     [
+      20240613,
+      233000000
+     ],
+     [
+      20240614,
+      234656000
+     ],
+     [
+      20250327,
+      230000000
+     ],
+     [
+      20250328,
+      235193500
+     ],
+     [
+      20261027,
+      259000000
+     ],
+     [
+      20261023,
+      257000000
+     ],
+     [
+      20261026,
+      258500000
+     ]
+    ]
+   },
+   "valuation_day": 20261027,
+   "value_paise": 8200000,
+   "expect": {
+    "twr": {
+     "start_day": 20261023,
+     "pct": "0.0604",
+     "annualised_pct": null,
+     "words": "TWR since 23 Oct 2026"
+    },
+    "benchmarks": [
+     {
+      "benchmark": "nifty50",
+      "label": "NIFTY 50",
+      "value_paise": 8389985,
+      "xirr_pct": "11.7347",
+      "twr_pct": "0.7782",
+      "flagged": false,
+      "words": [
+       "Dividends not included"
+      ]
+     },
+     {
+      "benchmark": "nifty500",
+      "label": "NIFTY 500",
+      "value_paise": null,
+      "xirr_pct": null,
+      "twr_pct": null,
+      "flagged": true,
+      "words": [
+       "Dividends not included",
+       "NIFTY 500 prices are not available yet; the comparison appears when they are."
+      ]
+     }
+    ],
+    "series": [
+     {
+      "day": 20261023,
+      "value_paise": 8195000,
+      "net_put_in_paise": 5380000
+     },
+     {
+      "day": 20261026,
+      "value_paise": 8222500,
+      "net_put_in_paise": 5380000
+     },
+     {
+      "day": 20261027,
+      "value_paise": 8199950,
+      "net_put_in_paise": 5380000
+     }
+    ],
+    "series_words": "Daily history from 23 Oct 2026, the first day every holding here had a closing price."
+   }
+  },
+  {
+   "id": "RP2",
+   "title": "A tab that began on a complete day, against a live level of NIFTY 500",
+   "why": "S2's tab (10 shares for 1,000.00 on Mon 5 Jan 2026, closes 102.00, 104.04, 104.04) asked for Wed 7 Jan with 1,040.40 as its value now. NIFTY 500 closed at 20,000.00, 20,100.00 and 20,200.00 and stands at 20,250.00 now: the same 1,000.00 bought at 20,000.00 is worth 1,000 x 20,250 / 20,000 = 1,012.50. Its own return over the tab's days: 20,200 / 20,000 - 1 = 1.0000%. The tab is a few days old, so neither has a yearly rate. NIFTY 50 has no prices.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260105,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000
+    }
+   ],
+   "quotes": [
+    {
+     "asset_id": 1,
+     "kind": "listed",
+     "prices": [
+      [
+       20260105,
+       1020000
+      ],
+      [
+       20260106,
+       1040400
+      ],
+      [
+       20260107,
+       1040400
+      ]
+     ]
+    }
+   ],
+   "closes": {
+    "nifty500": [
+     [
+      20260105,
+      200000000
+     ],
+     [
+      20260106,
+      201000000
+     ],
+     [
+      20260107,
+      202000000
+     ]
+    ]
+   },
+   "valuation_day": 20260107,
+   "value_paise": 104040,
+   "now_u": {
+    "nifty500": 202500000
+   },
+   "expect": {
+    "twr": {
+     "start_day": 20260105,
+     "pct": "4.0400",
+     "annualised_pct": null,
+     "words": "TWR since 5 Jan 2026"
+    },
+    "benchmarks": [
+     {
+      "benchmark": "nifty50",
+      "label": "NIFTY 50",
+      "value_paise": null,
+      "xirr_pct": null,
+      "twr_pct": null,
+      "flagged": true,
+      "words": [
+       "Dividends not included",
+       "NIFTY 50 prices are not available yet; the comparison appears when they are."
+      ]
+     },
+     {
+      "benchmark": "nifty500",
+      "label": "NIFTY 500",
+      "value_paise": 101250,
+      "xirr_pct": null,
+      "twr_pct": "1.0000",
+      "flagged": false,
+      "words": [
+       "Dividends not included"
+      ]
+     }
+    ],
+    "series": [
+     {
+      "day": 20260105,
+      "value_paise": 102000,
+      "net_put_in_paise": 100000
+     },
+     {
+      "day": 20260106,
+      "value_paise": 104040,
+      "net_put_in_paise": 100000
+     },
+     {
+      "day": 20260107,
+      "value_paise": 104040,
+      "net_put_in_paise": 100000
+     }
+    ],
+    "series_words": null
+   }
+  },
+  {
+   "id": "RP3",
+   "title": "A tab bought today: the index has not had a day to move yet",
+   "why": "10 shares for 1,000.00 on Mon 5 Jan 2026, closing at 101.00 that day, so 1,010.00 now. The tab began on a complete day, so its own return counts: 1,010.00 over 1,000.00, 1.0000%, over the one day, Monday to Monday. NIFTY 50 closed at 20,000.00 and the same 1,000.00 is worth 1,000.00 at the same level. Its own return over that one day is 20,000 / 20,000 - 1 = 0.0000%: the index money is bought at the close, so what the index did during the day is not counted. NIFTY 500 has no prices yet.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260105,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 100000
+    }
+   ],
+   "quotes": [
+    {
+     "asset_id": 1,
+     "kind": "listed",
+     "prices": [
+      [
+       20260105,
+       1010000
+      ]
+     ]
+    }
+   ],
+   "closes": {
+    "nifty50": [
+     [
+      20260105,
+      200000000
+     ]
+    ]
+   },
+   "valuation_day": 20260105,
+   "value_paise": 101000,
+   "expect": {
+    "twr": {
+     "start_day": 20260105,
+     "pct": "1.0000",
+     "annualised_pct": null,
+     "words": "TWR since 5 Jan 2026"
+    },
+    "benchmarks": [
+     {
+      "benchmark": "nifty50",
+      "label": "NIFTY 50",
+      "value_paise": 100000,
+      "xirr_pct": null,
+      "twr_pct": "0.0000",
+      "flagged": false,
+      "words": [
+       "Dividends not included"
+      ]
+     },
+     {
+      "benchmark": "nifty500",
+      "label": "NIFTY 500",
+      "value_paise": null,
+      "xirr_pct": null,
+      "twr_pct": null,
+      "flagged": true,
+      "words": [
+       "Dividends not included",
+       "NIFTY 500 prices are not available yet; the comparison appears when they are."
+      ]
+     }
+    ],
+    "series": [
+     {
+      "day": 20260105,
+      "value_paise": 101000,
+      "net_put_in_paise": 100000
+     }
+    ],
+    "series_words": null
+   }
+  }
+ ]
+}

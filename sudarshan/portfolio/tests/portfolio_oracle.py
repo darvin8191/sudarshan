@@ -542,3 +542,178 @@ def income_by_month(rows: list[dict], valuation_day: int, decimals: dict | None 
         "this_fy_paise": this_fy,
         "by_month": [{"month": k, "paise": v} for k, v in by_month.items()],
     }
+
+
+# ---------------------------------------------------------------- history (PA5)
+
+
+def shift(day: int, n: int) -> int:
+    """The day ``n`` calendar days after ``day`` (before it, if negative), as YYYYMMDD."""
+    when = date.fromordinal(ordinal(day) + n)
+    return when.year * 10000 + when.month * 100 + when.day
+
+
+def price_of(kind: str, prices: list, day: int, holidays=()) -> int | None:
+    """The price a holding of this kind of asset is valued at on ``day``, or None.
+
+    The newest of the ``(day, price_u)`` pairs not after the day, found by reading every one of
+    them (of two for one day, the one later in the list). A listed share is valued at that day's
+    own close and no other; a fund's NAV is good for 3 business days, counted a day at a time; a
+    value kept by hand serves until the next one, however old.
+    """
+    best = None
+    for priced, price in prices:
+        if price > 0 and priced <= day and (best is None or priced >= best[0]):
+            best = (priced, price)
+    if best is None:
+        return None
+    if kind == "listed":
+        return best[1] if best[0] == day else None
+    if kind == "mf":
+        return best[1] if business_days_walked(best[0], day, holidays) <= 3 else None
+    return best[1]
+
+
+def history(
+    rows: list[dict],
+    quotes: dict,
+    last_day: int,
+    holidays=(),
+    decimals: dict | None = None,
+) -> dict:
+    """A tab day by day, from its first money to ``last_day``, read from the entries each time.
+
+    ``quotes`` is ``{asset: (kind, [(day, price_u), ...])}``. A day is complete when every
+    (account, asset) line held at its end has a price for it (a line sold out needs none), and its
+    value is those lines added up, each rounded half away from zero on its own. Returns the
+    complete days with the net money put in by then (``series``), the days the time-weighted
+    return reads (a complete day, or any day money moved on) and the value before the first of
+    them: 0 when the first complete day is the first with money, else None (``opening``).
+    """
+    money = flows(rows, last_day, decimals)
+    if not money:
+        return {"first": None, "series": [], "points": [], "opening": None}
+    by_day = {m["day"]: m for m in money}
+    first = money[0]["day"]
+    dates = sorted({r["trade_date"] for r in rows if r["trade_date"] <= last_day})
+    held: dict[int, list] = {}
+
+    def lines_on(day: int) -> list:
+        """The lines held at the end of ``day``: what the last entry day not after it left."""
+        last = max(d for d in dates if d <= day)
+        if last not in held:
+            ran = simulate(rows, last, decimals)
+            assert "refused" not in ran, ran
+            held[last] = []
+            for name, pos in ran["positions"].items():
+                account, asset = name.split("/")
+                if asset != "-" and pos["qty_u"]:
+                    held[last].append((int(account), int(asset), pos["qty_u"]))
+        return held[last]
+
+    series, points, net = [], [], 0
+    for step in range(ordinal(last_day) - ordinal(first) + 1):
+        day = shift(first, step)
+        m = by_day.get(day)
+        if m:
+            net += m["in_paise"] + m["fee_paise"] - m["out_paise"]
+        value = 0
+        for _, asset, qty in lines_on(day):
+            kind, prices = quotes.get(asset, ("listed", []))
+            price = price_of(kind, prices, day, holidays)
+            if price is None:
+                value = None
+                break
+            value += half_away(Fraction(qty * price, 10**8))
+        if value is not None:
+            series.append({"day": day, "value_paise": value, "net_put_in_paise": net})
+        if m or value is not None:
+            points.append(
+                {
+                    "day": day,
+                    "value_paise": value,
+                    "in_paise": m["in_paise"] if m else 0,
+                    "out_paise": m["out_paise"] if m else 0,
+                    "fee_paise": m["fee_paise"] if m else 0,
+                }
+            )
+    opening = 0 if series and series[0]["day"] == first else None
+    return {"first": first, "series": series, "points": points, "opening": opening}
+
+
+def index_comparison(
+    money: list[dict],
+    closes: list,
+    valuation_day: int,
+    now_u: int | None = None,
+    span: tuple | None = None,
+) -> dict:
+    """The same money put into an index, worked in exact fractions; the rate is found by scanning.
+
+    ``money`` are the tab's flows (``day``, ``in_paise``, ``out_paise``, ``fee_paise``) and
+    ``closes`` the index's ``(day, level_u)``. Each day's net money put in (in + fees - out) buys or
+    sells units of the index at its close on that day or the last one before it, and the units are
+    valued at ``now_u`` (the last close not after the valuation day when None). Returns the value,
+    every yearly rate that fits as a float, nearest zero first, with the cash they were found from
+    (``roots`` and ``cash``; None and [] until a year has passed since the first cash), the
+    index's own return over ``span`` as text, whether some day with money has no close at all
+    (``early``), whether the units were ever less than nothing (``short``), and the units.
+    """
+
+    def close_on(day: int) -> int | None:
+        best = None
+        for d, c in closes:
+            if c > 0 and d <= day and (best is None or d >= best[0]):
+                best = (d, c)
+        return None if best is None else best[1]
+
+    out = {
+        "value_paise": None,
+        "roots": None,
+        "cash": [],
+        "twr_pct": None,
+        "early": False,
+        "short": False,
+        "units": Fraction(0),
+    }
+    if not any(c > 0 for _, c in closes):
+        return out
+    units = Fraction(0)
+    live = sorted(
+        (
+            m
+            for m in money
+            if m["day"] <= valuation_day and (m["in_paise"] or m["out_paise"] or m["fee_paise"])
+        ),
+        key=lambda m: m["day"],
+    )
+    for m in live:
+        net = m["in_paise"] + m["fee_paise"] - m["out_paise"]
+        if not net:
+            continue
+        close = close_on(m["day"])
+        if close is None:
+            out["early"] = True
+            break
+        units += Fraction(net, close)
+        out["short"] = out["short"] or units < 0
+    out["units"] = units
+    level = close_on(valuation_day) if now_u is None or now_u <= 0 else now_u
+    if live and not out["early"] and level is not None:
+        value = half_away(units * level)
+        out["value_paise"] = value
+        cash = [(m["day"], m["out_paise"] - m["in_paise"] - m["fee_paise"]) for m in live]
+        if value:
+            cash.append((valuation_day, value))
+        merged: dict[int, int] = {}
+        for day, paise in cash:
+            merged[day] = merged.get(day, 0) + paise
+        paying = sorted(day for day, paise in merged.items() if paise)
+        if paying and ordinal(valuation_day) - ordinal(paying[0]) >= 365:
+            out["roots"] = xirr_roots(cash)
+            out["cash"] = sorted((day, paise) for day, paise in merged.items() if paise)
+    if span is not None:
+        start, end = close_on(span[0]), close_on(span[1])
+        if start is not None and end is not None:
+            out["twr_pct"] = pct_text(Fraction(end, start))
+    return out

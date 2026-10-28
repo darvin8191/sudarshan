@@ -428,6 +428,19 @@ class Twr:
         return asdict(self)
 
 
+def _ratio(top: int, bottom: int) -> Decimal:
+    """``top / bottom`` as a Decimal of the solver's precision, for whole numbers of any size.
+
+    The product of a long series has tens of thousands of digits, and turning a whole number that
+    long into a Decimal takes time that grows with its square: fifteen years of daily returns
+    cost a second and thirty cost half a minute. So the quotient is taken in whole numbers first,
+    to ninety digits or more (a power of two as the scale, which a Decimal holds exactly), and
+    only that short number becomes a Decimal.
+    """
+    shift = max(0, 300 - (top.bit_length() - bottom.bit_length()))
+    return Decimal((top << shift) // bottom) / Decimal(1 << shift)
+
+
 def twr(points: Iterable[Point], opening_paise: int | None = None) -> Twr:
     """The product of the periods' growth, less one, with its start; annualised only when it spans
     more than 365 days. Nothing until there is a period."""
@@ -443,7 +456,7 @@ def twr(points: Iterable[Point], opening_paise: int | None = None) -> Twr:
     annual = None
     if span > _YEAR:
         with localcontext(_CONTEXT):
-            rate = (Decimal(grown) / Decimal(base)) ** (Decimal(_YEAR) / Decimal(span)) - 1
+            rate = _ratio(grown, base) ** (Decimal(_YEAR) / Decimal(span)) - 1
             annual = pct_of_rate(rate)
     return Twr(start, pct(grown - base, base), annual, words.twr_since(start))
 

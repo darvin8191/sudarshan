@@ -310,9 +310,9 @@ generic format, so that exporting and importing into an empty tab gives the same
 
 ## Ledger, valuation, performance, allocation, imports
 
-The ledger (`PA1`, `PA2`), the valuation (`PA3`) and the performance figures (`PA4`) are written;
-the daily history and benchmarks, allocation and the two file formats are written with the PR that
-builds each (`PA5` to `PA8`).
+The ledger (`PA1`, `PA2`), the valuation (`PA3`), the performance figures (`PA4`) and the daily
+history with its benchmarks (`PA5`) are written; allocation and the two file formats are written
+with the PR that builds each (`PA6` to `PA8`).
 
 ### The ledger
 
@@ -628,9 +628,110 @@ and check what must hold whatever the numbers are: money put in is what the posi
 what was earned, scaling the money or moving the dates changes no rate, time read backwards
 inverts it, and deposits in proportion change no time-weighted return.
 
-### History, benchmarks, allocation, imports
+### History and benchmarks
 
-Written with `PA5` to `PA8`.
+`core/history.py` draws what a tab was worth on each day, reads its time-weighted return from that
+and compares its money with the same money put into an index. Nothing here is stored: it is worked
+out on demand from the entries and the closing prices, so a back-dated entry corrects history
+wherever there are prices.
+
+**Prices.** `Quotes.of({"kind": ..., "prices": [[day, price_u], ...]})` holds one asset's closing
+prices in any order (of two for one day the later wins). A price that is not above nothing is a gap
+in the data and is left out, or the holding would show as lost on that day; a kind that holds no
+value (a liability) is refused, because its price would be read by some other kind's rule.
+`price_on(quotes, day, holidays)` says what a day may use:
+
+| kind | the price of a day |
+|---|---|
+| listed | that very day's close and no other: no close that day, no price |
+| mf | the newest NAV, if it is no more than 3 business days behind the day (weekends and the exchange's holidays do not age it) |
+| manual | the newest value on or before the day, however old (the freshness note says how old) |
+
+**The series.** `daily(ledger, quotes, last_day, holidays)` walks every calendar day from the first
+day money moved to `last_day`, with the units each account held at the end of the day (the journal's
+moves, so a split, a bonus and a transfer are in).
+
+- A day is **complete** when every (account, asset) line held at its end has a price. Its value is
+  the lines added up, each rounded half away from zero on its own (the module of "Valuation and
+  Today" does the same, so the last day of a series is the number on the screen). A line sold out
+  needs no price: a tab that sold everything is worth nothing on the days after, priced or not.
+- `series` has a point (`day`, `value_paise`, `net_put_in_paise`) for each complete day and none for
+  any other: a weekend with a listed share in it is not complete, and a day with an unpriced
+  holding is a gap, never the holding at cost (the totals do that; a history that guessed would
+  draw a false jump).
+- `points` are what the time-weighted return reads: each complete day and each day money moved on,
+  whether priced or not. A day that is not complete joins the next complete day's period together
+  with its money (see "Performance").
+- The series starts at the first complete day. When that is the first day with money, the tab was
+  empty before it and its first day's own return counts (`opening_paise` 0). When it is later, the
+  time-weighted return begins at that close and `words` says "Daily history from 3 Nov 2026, the first
+  day every holding here had a closing price."; with no complete day yet it says "Daily history
+  starts once every holding here has a closing price."
+- Prices must be the closes as traded, not adjusted for splits: the quantity the ledger holds on a
+  day is in that day's units, and a split is applied by the ledger itself.
+- A loan is not subtracted: the series is the value of the holdings, as the Performance view is.
+
+**The index.** `benchmark(name, flows, closes, valuation_day, now_u, span)` puts the same money into
+NIFTY 50 or NIFTY 500. Each day's net money put in (in + fees - out) buys or sells units of the index
+at its close on that day, or on the last day before it (money on a Saturday buys at Friday's close).
+Units are kept exactly, as fractions. They are worth units x level now, rounded to a paisa: the
+level is the last close on or before the valuation day, or `now_u` when given. The XIRR of the same
+money with that value is the benchmark's, shown once a year has passed as for the tab itself. The
+index's own return is close(end) / close(start) - 1 over the days the tab's time-weighted return
+runs (`Daily.span()`). Both are price indices, so every figure carries "Dividends not included".
+
+- Units that go below nothing (a withdrawal the index could not have paid) are kept, negative, and
+  the figure is flagged with "The index could not have paid every withdrawal; the comparison is
+  approximate."; units that dip and recover are flagged too, and units of exactly nothing are not.
+- Money on a day before the index has any close has no honest comparison: no value, no rate,
+  flagged, "NIFTY 50 prices start 3 Apr 2023; this comparison needs every entry after that."
+- With no closes at all: "NIFTY 50 prices are not available yet; the comparison appears when they
+  are."
+- Money and closes dated after the valuation day are not seen. A close not above nothing is a gap.
+
+`report(ledger, valuation_day, value_now_paise, quotes, closes, now_u, holidays)` is the whole
+`PerformanceReport`: the money figures of "Performance", then `twr`, one `benchmarks` entry for each
+index (always both, in the order of `BENCHMARKS`), `series`, `by_fy`, `income` and `series_words`,
+in the order of `types.ts`.
+
+**What this does not model.**
+
+- Dividends: both indices are price indices, and the tab's own dividends are money out, so the
+  comparison is of prices only (the label says so). A total-return index is not modelled.
+- A holding's value on a day is its close of that day. Nothing intraday, and a stock that traded but
+  has no close in the records leaves the day out instead of borrowing another day's.
+- A fund whose NAV is more than 3 business days old, or an exchange holiday missing from the
+  holiday list, leaves days out rather than guess; a NAV published late fills in its days when it
+  arrives.
+- For a tab that began empty, the time-weighted return counts its first day (money in from the
+  start of the day, at the price paid); the index's return starts at that day's close, since the
+  index units are bought at the close. The two begin at the same place and the index's move during
+  the first day is not counted.
+- The index return ends on the tab's last complete day, not on the day asked for, so that the two
+  cover the same days; when today's close is missing for some holding, both end yesterday.
+
+**Vectors** (`tests/vectors/history.json`): the prices of a day by kind (a share's own close, a NAV's
+three business days with and without a holiday, holidays given in any order, a value kept by hand,
+two prices for a day, prices of nothing and below nothing); sixteen small tabs day by day with the
+days their time-weighted return runs over, among them the design's T4 from the entries up, a
+back-dated entry whose prices start later, a fund over a weekend, a NAV too old, a holiday that
+keeps one good, a split, a transfer between accounts, a sale of everything, a dividend on a day
+without a price and each account's line rounded on its own; the design's B1 and B2 and the edges
+around them (a Saturday, a fee, units that recover, a level now, a close of nothing, an index
+whose prices start late or are missing, money after the valuation day, two closes for a day, the
+later of them the lower); and three whole reports (a tab bought today among them). `make_pa5.py` replays the entries again for every single day, reads each price
+list from the back, keeps the index units as fractions and finds a rate by walking out from zero,
+and refuses to write a number it does not agree with. The tests also run the code on random tabs
+with random prices against it and against `portfolio_oracle.py`, and check what must hold whatever
+the numbers are: the last day of a series is what the valuation module adds up, its net money put
+in is what the performance module counts, more prices only ever add days, an index fund bought at
+the index's own close is worth what the same money in the index is worth (exactly, in whole units
+at whole-rupee closes), and moving every date, scaling the money or reordering the lists changes no
+figure.
+
+### Allocation, filters, imports
+
+Written with `PA6` to `PA8`.
 
 ## Storage
 
