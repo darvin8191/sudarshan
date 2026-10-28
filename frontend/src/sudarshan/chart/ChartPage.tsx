@@ -285,6 +285,15 @@ function PhoneChartScreen({
     closing.current = false
   }, [location.key])
 
+  // SUDARSHAN M10.2: an alert form restored with the page (a reload, the phone bringing the app
+  // back) is not reopened: it opens only from a tap, as the watchlist's does.
+  const restoredAlert = useRef(sheet?.sheet === 'alert')
+  useEffect(() => {
+    if (!restoredAlert.current) return
+    restoredAlert.current = false
+    closeSheet()
+  }, [closeSheet])
+
   // The search's entry is gone: the instrument picked takes the chart's own.
   const sheetKind = sheet?.sheet ?? null
   useEffect(() => {

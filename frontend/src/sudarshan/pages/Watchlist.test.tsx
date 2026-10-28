@@ -1305,6 +1305,43 @@ describe('Watchlist market alerts (M10.2)', () => {
     expect(await screen.findByText('Dashboard page')).toBeInTheDocument()
   })
 
+  it('gives the form the contract’s tick, so a level off it says where it is met', async () => {
+    const user = userEvent.setup()
+    renderPage(['/dashboard', '/watchlist'])
+    const sheet = await openSheet(user, /^SBIN/, 'SBIN')
+    await waitFor(() => expect(remote.contractOf).toHaveBeenCalled())
+    await user.click(within(sheet).getByRole('button', { name: 'Set alert' }))
+    const form = await screen.findByRole('dialog', { name: 'New alert' })
+
+    await user.clear(within(form).getByLabelText('Price level'))
+    await user.type(within(form).getByLabelText('Price level'), '812.43')
+    expect(within(form).getByText('Checks at ₹812.45 (nearest tick)')).toBeInTheDocument()
+  })
+
+  it('offers no alert on an exchange market alerts do not cover, and says why', async () => {
+    server.state.lists.push({
+      id: 3,
+      name: 'FX',
+      position: 2,
+      items: [{ id: 31, symbol: 'USDINR28OCT26FUT', exchange: 'CDS', position: 0 }],
+    })
+    localStorage.setItem(OPEN_LIST_KEY, '3')
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: /^USDINR FUT/ }))
+    const sheet = screen.getByRole('dialog')
+
+    const set = within(sheet).getByRole('button', { name: 'Set alert' })
+    expect(set).toHaveAttribute('aria-disabled', 'true')
+    await user.click(set)
+    expect(screen.queryByRole('dialog', { name: 'New alert' })).toBeNull()
+    expect(
+      within(sheet).getByText(
+        'Market alerts work on NSE, BSE, NFO and BFO instruments and their indices for now.'
+      )
+    ).toBeVisible()
+  })
+
   it('saves once, then says the alert is set, with View to it', async () => {
     alerting.create.mockReset().mockResolvedValue({
       id: 77,

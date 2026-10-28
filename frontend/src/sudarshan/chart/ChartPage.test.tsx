@@ -1,6 +1,13 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router'
+import {
+  type InitialEntry,
+  MemoryRouter,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+} from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChartStateView } from '@/lib/trading/chartState'
 import type { LiveStatus } from '@/lib/trading/liveStatus'
@@ -138,7 +145,7 @@ function PhoneBack() {
   )
 }
 
-function renderAt(path: string, before: string[] = []) {
+function renderAt(path: InitialEntry, before: InitialEntry[] = []) {
   return render(
     <QueryClientProvider client={createQueryClient()}>
       <MemoryRouter initialEntries={[...before, path]}>
@@ -173,7 +180,7 @@ function emit(fn: (callbacks: PhoneChartCallbacks) => void) {
   act(() => fn(chart().opts.callbacks))
 }
 
-async function opened(path = '/chart/NSE/SBIN', before: string[] = []) {
+async function opened(path: InitialEntry = '/chart/NSE/SBIN', before: InitialEntry[] = []) {
   const view = renderAt(path, before)
   await waitFor(() => expect(fakes.charts.length).toBeGreaterThan(0))
   await waitFor(() => expect(chart().load).toHaveBeenCalled())
@@ -590,6 +597,13 @@ describe('a market alert from the phone chart (M10.2)', () => {
     expect(within(form).getByRole('button', { name: /RELIANCE/ })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Phone back', hidden: true }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'New alert' })).toBeNull())
+    expect(screen.getByRole('status', { name: 'Location' })).toHaveTextContent('/chart/NSE/SBIN')
+  })
+
+  it('does not reopen an alert form with the page: it opens only from a tap', async () => {
+    await opened({ pathname: '/chart/NSE/SBIN', state: { sheet: 'alert' } }, ['/chart/NSE/SBIN'])
+
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'New alert' })).toBeNull())
     expect(screen.getByRole('status', { name: 'Location' })).toHaveTextContent('/chart/NSE/SBIN')
   })
