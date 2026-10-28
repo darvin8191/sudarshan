@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect } from 'react'
+import { useEffect, useSyncExternalStore } from 'react'
 import { type AlertsError, type MarketAlertsState, marketAlertsApi } from '@/api/marketAlerts'
-import { bindMarketAlertsCache } from './marketAlerts'
+import { bindMarketAlertsCache, type Hearing, hearingNow, onHearing } from './marketAlerts'
 import { STATE_KEY } from './stateCache'
 
 /**
@@ -19,4 +19,13 @@ export function useMarketAlertsState() {
     staleTime: 30_000,
     retry: false,
   })
+}
+
+/**
+ * Whether this screen hears the owner's room, where the alert service pushes (marketAlerts.ts):
+ * `joined` from the join's ack until the connection drops; `unknown` before the app has a
+ * connection at all.
+ */
+export function useAlertsHearing(): Hearing {
+  return useSyncExternalStore(onHearing, hearingNow, () => 'unknown')
 }

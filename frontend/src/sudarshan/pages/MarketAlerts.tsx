@@ -17,8 +17,7 @@ import { LineText } from '@/sudarshan/alerts/lines'
 import { needsQuote, segmentOpen } from '@/sudarshan/alerts/measure'
 import { SettingsSheet } from '@/sudarshan/alerts/SettingsSheet'
 import { type AlertTab, useAlertOverlay } from '@/sudarshan/alerts/useAlertOverlay'
-import { useMarketAlertsState } from '@/sudarshan/alerts/useMarketAlertsState'
-import { useSocketUp } from '@/sudarshan/alerts/useSocketUp'
+import { useAlertsHearing, useMarketAlertsState } from '@/sudarshan/alerts/useMarketAlertsState'
 import {
   EmptyCard,
   LoadingCards,
@@ -35,6 +34,13 @@ import { toast } from '@/utils/toast'
 export const LIVE_CAP = 100
 
 const NO_ROWS: AlertRow[] = []
+
+/** In place of the engine line while this screen is not in the owner's room. */
+const NOT_RECEIVING = {
+  code: 'feed_down',
+  line: 'Not receiving alerts on this screen · reconnecting',
+  real_time: false,
+} as const
 
 /** An alert whose sheet or form is open went on another screen. */
 const GONE = 'This alert was deleted.'
@@ -154,13 +160,12 @@ export default function MarketAlerts() {
     marketOpen: segmentOpen(state?.segments, row),
   })
   const problem = query.error
-  // The engine line is as current as the page can hear: with the app's connection down no push
-  // arrives, and with the page's own feed down its cards say Reconnecting. Either way the line
-  // stays, grey, "as last read", rather than claim Real-time.
-  const socketUp = useSocketUp()
-  const deaf =
-    socketUp === false ||
-    (followed.keys.size > 0 && apiKey !== null && feed.epoch > 0 && !feed.connected)
+  // The engine line is as current as the page can hear. Not in the owner's room (the connection
+  // is down, or the join has no answer yet), no push reaches this screen: it says so in place of
+  // the line. With the page's own feed down its cards say Reconnecting, so the line stays, grey,
+  // "as last read". Either way it never claims Real-time.
+  const hearing = useAlertsHearing()
+  const deaf = followed.keys.size > 0 && apiKey !== null && feed.epoch > 0 && !feed.connected
 
   return (
     <div className="flex flex-col gap-2">
@@ -193,6 +198,10 @@ export default function MarketAlerts() {
           <span className="inline-flex items-start gap-1.5 text-[0.8125rem] font-semibold text-[color:var(--warning-text)]">
             <AlertTriangle aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
             {problem.message}
+          </span>
+        ) : state && hearing === 'not_joined' ? (
+          <span data-heard="no" className="inline-flex">
+            <LineText line={NOT_RECEIVING} />
           </span>
         ) : state ? (
           <span

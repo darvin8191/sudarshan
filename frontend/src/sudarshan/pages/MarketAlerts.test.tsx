@@ -45,30 +45,6 @@ const toasts = vi.hoisted(() => ({
 }))
 vi.mock('@/utils/toast', () => ({ toast: toasts, showToast: toasts }))
 
-/** The app's connection to OpenAlgo, as the socket provider hands it out; none unless a test sets one. */
-const sockets = vi.hoisted(() => {
-  const handlers = new Map<string, Set<() => void>>()
-  const socket = {
-    connected: true,
-    on(event: string, handler: () => void) {
-      if (!handlers.has(event)) handlers.set(event, new Set())
-      handlers.get(event)?.add(handler)
-    },
-    off(event: string, handler: () => void) {
-      handlers.get(event)?.delete(handler)
-    },
-    /** Drop or restore the connection, telling whoever listens. */
-    set(up: boolean) {
-      socket.connected = up
-      for (const handler of handlers.get(up ? 'connect' : 'disconnect') ?? []) handler()
-    },
-  }
-  return { current: null as typeof socket | null, socket, handlers }
-})
-vi.mock('@/components/socket/SocketProvider', () => ({
-  useSocketContext: () => ({ socket: sockets.current, playAlertSound: () => {} }),
-}))
-
 import {
   type AlertRow,
   AlertsError,
@@ -79,7 +55,7 @@ import { createQueryClient } from '@/app/providers'
 import { useAuthStore } from '@/stores/authStore'
 import { NO_ANSWER_HOLD_MS, resetAlertActionsForTests } from '@/sudarshan/alerts/actions'
 import { LineText } from '@/sudarshan/alerts/lines'
-import { resetMarketAlertsForTests } from '@/sudarshan/alerts/marketAlerts'
+import { installMarketAlerts, resetMarketAlertsForTests } from '@/sudarshan/alerts/marketAlerts'
 import { applyStatePush, STATE_KEY } from '@/sudarshan/alerts/stateCache'
 import { STALE_MS } from '@/sudarshan/dashboard/live'
 import { fakeClock, frames } from '@/test/frames'
@@ -130,6 +106,42 @@ async function settle() {
   act(() => frames.flush())
 }
 
+type Handler = (...args: any[]) => void
+
+/** The app's connection to OpenAlgo as market alerts listen on it: connects, acks and drops by hand. */
+function alertSocket() {
+  const handlers = new Map<string, Set<Handler>>()
+  const acks: Handler[] = []
+  const socket = {
+    connected: false,
+    on(event: string, handler: Handler) {
+      handlers.set(event, (handlers.get(event) ?? new Set()).add(handler))
+      return socket
+    },
+    off(event: string, handler: Handler) {
+      handlers.get(event)?.delete(handler)
+      return socket
+    },
+    listeners: (event: string) => [...(handlers.get(event) ?? [])],
+    timeout: () => ({ emit: (_event: string, ack: Handler) => acks.push(ack) }),
+    fire(event: string) {
+      for (const handler of [...(handlers.get(event) ?? [])]) handler()
+    },
+    connect() {
+      socket.connected = true
+      socket.fire('connect')
+    },
+    drop() {
+      socket.connected = false
+      socket.fire('disconnect')
+    },
+    ack(answer: unknown) {
+      acks.shift()?.(null, answer)
+    },
+  }
+  return socket
+}
+
 function tick(symbol: string, exchange: string, data: Record<string, unknown>) {
   act(() => {
     feed.push(symbol, exchange, data)
@@ -151,9 +163,6 @@ beforeEach(() => {
   api.events.mockResolvedValue({ events: [], more: false })
   api.prefs.mockResolvedValue({ telegram: true, app: true })
   useAuthStore.setState({ apiKey: 'key' })
-  sockets.current = null
-  sockets.socket.connected = true
-  sockets.handlers.clear()
 })
 
 afterEach(() => {
@@ -334,18 +343,25 @@ describe('the line under the title', () => {
     expect(header().textContent).not.toContain('as last read')
   })
 
-  it('greys it too while the app’s connection to OpenAlgo is down, so no push can arrive', async () => {
-    sockets.current = sockets.socket
+  it('says this screen is not receiving alerts while it is out of the owner’s room', async () => {
+    api.eventsSince.mockResolvedValue({ events: [], more: false })
+    const socket = alertSocket()
+    installMarketAlerts(socket as never, (name, handler) => socket.on(name, handler))
+    socket.connect()
+    socket.ack({ ok: true })
     renderPage()
     await settle()
-    expect(header().textContent).not.toContain('as last read')
+    expect(header().textContent).toBe('Watching · Real-time')
 
-    act(() => sockets.socket.set(false))
+    act(() => socket.drop())
     expect(header().querySelector('[data-heard]')).toHaveAttribute('data-heard', 'no')
-    expect(header().textContent).toContain('as last read')
+    expect(header().textContent).toBe('Not receiving alerts on this screen · reconnecting')
+    expect(header().textContent).not.toContain('Real-time')
 
-    act(() => sockets.socket.set(true))
-    expect(header().textContent).not.toContain('as last read')
+    act(() => socket.connect())
+    expect(header().textContent).toBe('Not receiving alerts on this screen · reconnecting')
+    act(() => socket.ack({ ok: true }))
+    expect(header().textContent).toBe('Watching · Real-time')
   })
 
   it('draws a tab’s count in its own ink, not faded below 4.5:1', async () => {

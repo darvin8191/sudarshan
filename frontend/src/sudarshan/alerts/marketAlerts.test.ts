@@ -1,9 +1,11 @@
 /**
- * Market alerts in the open app (M10.7): the join on every connect with its ack, what fired
- * while the app was away (one toast for one, one toast for several, from the newest when the
- * device has seen none), the pushed alert's toast and sound (none for one a minute old, none with
- * the master switch off), one announcement across the app's tabs, a burst, and the Alerts page's
- * cache kept current by the state and delivery pushes. The sound itself is chime.test.ts's.
+ * Market alerts in the open app (M10.7): the join on every connect with its ack, tried again
+ * while no ack comes; a new page load starting from the newest event and telling nothing from
+ * before it; what fired while the connection was down (one toast for one, one toast for several),
+ * never lost to a push heard before the catch-up read it, a read that failed or a connection that
+ * dropped; the pushed alert's toast and sound; one announcement across the app's tabs, a burst,
+ * and the Alerts page's cache kept current by the state and delivery pushes. The sound itself is
+ * chime.test.ts's.
  */
 import { type InfiniteData, QueryClient } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -41,7 +43,9 @@ import { useAlertStore } from '@/stores/alertStore'
 import {
   ALERTS_PATH,
   bindMarketAlertsCache,
+  hearingNow,
   installMarketAlerts,
+  RETRY_MS,
   resetMarketAlertsForTests,
   setTabChannelForTests,
   TAB_DEFER_MS,
@@ -116,7 +120,6 @@ function fakeChannel() {
 
 /** 10:42:31 in India on 28 Oct 2026. */
 const NOW = Date.UTC(2026, 9, 28, 5, 12, 31)
-const SEEN_KEY = 'sudarshan-market-alerts-seen'
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
 
@@ -223,13 +226,34 @@ function install(socket = fakeSocket()) {
   return socket
 }
 
-/** Connected, joined, and caught up. */
+/** Connected, joined, and started from the newest event /state names (340). */
 async function joinedSocket() {
   const socket = install()
   socket.connect()
   socket.ack({ ok: true })
   await flush()
   return socket
+}
+
+/** The connection drops and comes back, the join is acked, and the catch-up has run. */
+async function reconnect(socket: ReturnType<typeof fakeSocket>) {
+  socket.drop()
+  socket.connect()
+  socket.ack({ ok: true })
+  await flush()
+  await flush()
+}
+
+/** What fired while the phone was off the network: 341 to 349. */
+const GAP = Array.from({ length: 9 }, (_, index) => event({ id: 341 + index }))
+const sinceGap = async (after: number) => page(GAP.filter((each) => each.id > after))
+
+/** How many events the toasts tell of: one each, or N for "N alerts fired while the app was away". */
+function told(): number {
+  return shown().reduce((sum, [title]) => {
+    const many = /^(\d+) alerts fired while the app was away$/.exec(title)
+    return sum + (many ? Number(many[1]) : 1)
+  }, 0)
 }
 
 /** The toasts shown, as [title, description]. */
@@ -246,10 +270,9 @@ beforeEach(() => {
   navigate = vi.fn()
   toasts.info.mockReset()
   chime.played.length = 0
-  api.state.mockReset()
+  api.state.mockReset().mockResolvedValue(state())
   api.eventsSince.mockReset().mockResolvedValue(page([]))
   localStorage.clear()
-  localStorage.setItem(SEEN_KEY, '340')
   useAlertStore.getState().resetToDefaults()
   vi.spyOn(document, 'hasFocus').mockReturnValue(true)
 })
@@ -261,15 +284,22 @@ afterEach(() => {
 })
 
 describe('joining the owner’s room', () => {
-  it('joins on connect, and asks for what fired after the last alert seen here once acked', async () => {
+  it('joins on connect and, once acked, starts a new page load from the newest event, telling nothing', async () => {
+    // A device that last had the app open days ago keeps nothing from then: Telegram had it.
+    localStorage.setItem('sudarshan-market-alerts-seen', '12')
     const socket = install()
     socket.connect()
 
     expect(socket.joins).toBe(1)
-    expect(api.eventsSince).not.toHaveBeenCalled()
+    expect(api.state).not.toHaveBeenCalled()
     socket.ack({ ok: true })
     await flush()
 
+    expect(api.state).toHaveBeenCalledTimes(1)
+    expect(api.eventsSince).not.toHaveBeenCalled()
+    expect(toasts.info).not.toHaveBeenCalled()
+
+    await reconnect(socket)
     expect(api.eventsSince).toHaveBeenCalledWith(340, 200)
   })
 
@@ -281,13 +311,10 @@ describe('joining the owner’s room', () => {
     const socket = await joinedSocket()
     expect(invalidate).not.toHaveBeenCalled()
 
-    socket.drop()
-    socket.connect()
-    socket.ack({ ok: true })
-    await flush()
+    await reconnect(socket)
 
     expect(socket.joins).toBe(2)
-    expect(api.eventsSince).toHaveBeenCalledTimes(2)
+    expect(api.eventsSince).toHaveBeenCalledTimes(1)
     const keys = invalidate.mock.calls.map(([filters]) => filters?.queryKey)
     expect(keys).toContainEqual(STATE_KEY)
     expect(keys).toContainEqual(['sudarshan', 'market-alerts', 'events'])
@@ -302,7 +329,22 @@ describe('joining the owner’s room', () => {
     socket.ack(undefined, new Error('operation has timed out'))
     await flush()
 
+    expect(api.state).not.toHaveBeenCalled()
     expect(api.eventsSince).not.toHaveBeenCalled()
+  })
+
+  it('asks to join again while no ack comes, and catches up once one does', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] })
+    vi.setSystemTime(NOW)
+    const socket = install()
+    socket.connect()
+    socket.ack(undefined, new Error('operation has timed out'))
+    await vi.advanceTimersByTimeAsync(RETRY_MS[0])
+    expect(socket.joins).toBe(2)
+
+    socket.ack({ ok: true })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(api.state).toHaveBeenCalledTimes(1)
   })
 
   it('does not join twice when installed again on a connection already joined', async () => {
@@ -311,21 +353,47 @@ describe('joining the owner’s room', () => {
     installMarketAlerts(socket as never, (name, handler) => socket.on(name, handler), navigate)
     expect(socket.joins).toBe(1)
   })
+
+  it('joins when installed on a connection already up that has not joined', async () => {
+    const socket = fakeSocket()
+    socket.connected = true
+    socket.count = 1
+    install(socket)
+    expect(socket.joins).toBe(1)
+  })
+
+  it('leaves nothing listening once the app’s provider takes its handlers off', () => {
+    const socket = fakeSocket()
+    const taken: Array<[string, Handler]> = []
+    installMarketAlerts(
+      socket as never,
+      (name, handler) => {
+        taken.push([name, handler])
+        socket.on(name, handler)
+      },
+      navigate
+    )
+    for (const [name, handler] of taken) socket.off(name, handler)
+
+    socket.connect()
+    expect(socket.joins).toBe(0)
+  })
+
+  it('says whether this screen hears the owner’s room: joined only from the ack to a drop', async () => {
+    expect(hearingNow()).toBe('unknown')
+    const socket = install()
+    expect(hearingNow()).toBe('not_joined')
+    socket.connect()
+    expect(hearingNow()).toBe('not_joined')
+    socket.ack({ ok: true })
+    expect(hearingNow()).toBe('joined')
+    socket.drop()
+    expect(hearingNow()).toBe('not_joined')
+  })
 })
 
 describe('what fired while the app was away', () => {
-  it('starts from the newest on a device that has seen none, telling nothing', async () => {
-    localStorage.clear()
-    api.state.mockResolvedValue(state({ last_event_id: 341 }))
-    await joinedSocket()
-
-    expect(localStorage.getItem(SEEN_KEY)).toBe('341')
-    expect(api.eventsSince).not.toHaveBeenCalled()
-    expect(toasts.info).not.toHaveBeenCalled()
-  })
-
-  it('does not start from a state that is switched off or starting', async () => {
-    localStorage.clear()
+  it('does not start from a state that is switched off', async () => {
     api.state.mockResolvedValue(
       state({
         enabled: false,
@@ -334,38 +402,45 @@ describe('what fired while the app was away', () => {
         engine: { code: 'off', line: 'Switched off on the server', real_time: false },
       })
     )
-    await joinedSocket()
+    const socket = await joinedSocket()
+    api.state.mockResolvedValue(state({ last_event_id: 341 }))
 
-    expect(localStorage.getItem(SEEN_KEY)).toBeNull()
+    await reconnect(socket)
+    expect(api.eventsSince).not.toHaveBeenCalled()
+    await reconnect(socket)
+    expect(api.eventsSince).toHaveBeenCalledWith(341, 200)
   })
 
   it('gives one missed alert the toast a pushed one gets, silent once a minute old', async () => {
+    const socket = await joinedSocket()
     api.eventsSince.mockResolvedValue(page([event({ note: 'book half' })]))
-    await joinedSocket()
+    await reconnect(socket)
 
     expect(shown()).toEqual([
       ['Alert · SBIN crossed above ₹100.00', '10:37:31 · now ₹100.05 · Note: book half'],
     ])
     expect(chime.played).toEqual([])
-    expect(localStorage.getItem(SEEN_KEY)).toBe('341')
 
     toasts.info.mock.calls[0][1].action.onClick()
     expect(navigate).toHaveBeenCalledWith(`${ALERTS_PATH}?alert=12`)
   })
 
   it('sounds a missed alert that fired in the last minute', async () => {
+    const socket = await joinedSocket()
     api.eventsSince.mockResolvedValue(page([event({ at: NOW - 20_000 })]))
-    await joinedSocket()
+    await reconnect(socket)
     expect(chime.played).toEqual(['market'])
   })
 
   it('says the day of a missed alert from an earlier day', async () => {
+    const socket = await joinedSocket()
     api.eventsSince.mockResolvedValue(page([event({ at: NOW - 86_400_000 })]))
-    await joinedSocket()
+    await reconnect(socket)
     expect(shown()[0][1]).toBe('27 Oct 10:42:31 · now ₹100.05')
   })
 
   it('gives several one toast, with View to History, leaving out tests and the app turned off', async () => {
+    const socket = await joinedSocket()
     api.eventsSince.mockResolvedValue(
       page([
         event({ id: 341 }),
@@ -384,22 +459,26 @@ describe('what fired while the app was away', () => {
         event({ id: 344, alert_id: 13, title: 'NIFTY crossed below 25,800.00', at: NOW - 120_000 }),
       ])
     )
-    await joinedSocket()
+    await reconnect(socket)
 
     expect(shown()).toEqual([
       ['2 alerts fired while the app was away', 'Latest 10:40:31 · NIFTY crossed below 25,800.00'],
     ])
     expect(chime.played).toEqual([])
-    expect(localStorage.getItem(SEEN_KEY)).toBe('344')
     toasts.info.mock.calls[0][1].action.onClick()
     expect(navigate).toHaveBeenCalledWith(`${ALERTS_PATH}?tab=history`)
+
+    api.eventsSince.mockClear()
+    await reconnect(socket)
+    expect(api.eventsSince).toHaveBeenCalledWith(344, 200)
   })
 
   it('reads page after page while the server says there is more', async () => {
+    const socket = await joinedSocket()
     api.eventsSince
       .mockResolvedValueOnce(page([event({ id: 341 }), event({ id: 342 })], true))
       .mockResolvedValueOnce(page([event({ id: 343 })]))
-    await joinedSocket()
+    await reconnect(socket)
 
     expect(api.eventsSince.mock.calls).toEqual([
       [340, 200],
@@ -414,50 +493,220 @@ describe('what fired while the app was away', () => {
     toasts.info.mockReset()
     api.eventsSince.mockResolvedValue(page([event({ id: 341 })]))
 
-    socket.drop()
-    socket.connect()
-    socket.ack({ ok: true })
-    await flush()
-
+    await reconnect(socket)
     expect(toasts.info).not.toHaveBeenCalled()
   })
 
-  it('notes nothing when the connection drops during the read, so the next connect tells it', async () => {
+  it('tells once an alert pushed while the catch-up that also brings it is on its way', async () => {
+    const socket = await joinedSocket()
     let answer: (value: EventsPage) => void = () => {}
     api.eventsSince.mockReturnValueOnce(
       new Promise<EventsPage>((resolve) => {
         answer = resolve
       })
     )
-    const socket = install()
+    socket.drop()
+    socket.connect()
+    socket.ack({ ok: true })
+    socket.fire('sudarshan_market_alert', push({ event_id: 345 }))
+    answer(page([event({ id: 344 }), event({ id: 345 })]))
+    await flush()
+
+    expect(told()).toBe(2)
+  })
+
+  it('tells once an alert pushed while a later page of the catch-up is on its way', async () => {
+    const socket = await joinedSocket()
+    let second: (value: EventsPage) => void = () => {}
+    api.eventsSince
+      .mockResolvedValueOnce(page([event({ id: 344 }), event({ id: 345 })], true))
+      .mockReturnValueOnce(
+        new Promise<EventsPage>((resolve) => {
+          second = resolve
+        })
+      )
+    socket.drop()
+    socket.connect()
+    socket.ack({ ok: true })
+    await flush()
+    socket.fire('sudarshan_market_alert', push({ event_id: 345 }))
+    second(page([]))
+    await flush()
+
+    expect(told()).toBe(2)
+  })
+
+  it('tells once, on a hidden screen, an alert pushed while the catch-up that brings it is on its way', async () => {
+    const socket = await joinedSocket()
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
+    let answer: (value: EventsPage) => void = () => {}
+    api.eventsSince.mockReturnValueOnce(
+      new Promise<EventsPage>((resolve) => {
+        answer = resolve
+      })
+    )
+    socket.drop()
+    socket.connect()
+    socket.ack({ ok: true })
+    socket.fire('sudarshan_market_alert', push({ event_id: 344 })) // waits for another tab
+    answer(page([event({ id: 341 }), event({ id: 342 }), event({ id: 343 }), event({ id: 344 })]))
+    await flush()
+    await new Promise((resolve) => setTimeout(resolve, TAB_DEFER_MS + 100))
+    visibility.mockRestore()
+
+    expect(told()).toBe(4)
+  })
+
+  it('marks the events a summary told, so a push for one of them is not told again', async () => {
+    const socket = await joinedSocket()
+    api.eventsSince.mockResolvedValue(page([event({ id: 341 }), event({ id: 342 })]))
+    await reconnect(socket)
+    expect(told()).toBe(2)
+
+    socket.fire('sudarshan_market_alert', push({ event_id: 342 }))
+    expect(toasts.info).toHaveBeenCalledTimes(1)
+  })
+
+  it('notes nothing when the connection drops during the read, so the next connect tells it', async () => {
+    const socket = await joinedSocket()
+    let answer: (value: EventsPage) => void = () => {}
+    api.eventsSince.mockReturnValueOnce(
+      new Promise<EventsPage>((resolve) => {
+        answer = resolve
+      })
+    )
+    socket.drop()
     socket.connect()
     socket.ack({ ok: true })
     socket.drop()
     answer(page([event()]))
     await flush()
     expect(toasts.info).not.toHaveBeenCalled()
-    expect(localStorage.getItem(SEEN_KEY)).toBe('340')
 
     api.eventsSince.mockResolvedValue(page([event()]))
     socket.connect()
     socket.ack({ ok: true })
     await flush()
+    expect(api.eventsSince).toHaveBeenLastCalledWith(340, 200)
     expect(toasts.info).toHaveBeenCalledTimes(1)
   })
 
-  it('stays quiet when the read fails, and asks again on the next connect', async () => {
-    api.eventsSince.mockRejectedValueOnce(new Error('The alert service is not answering.'))
-    const socket = await joinedSocket()
+  it('reads again while connected when a read fails, and tells what it finds', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] })
+    vi.setSystemTime(NOW)
+    const socket = install()
+    socket.connect()
+    socket.ack({ ok: true })
+    await vi.advanceTimersByTimeAsync(0)
+    api.eventsSince
+      .mockRejectedValueOnce(new Error('The alert service is not answering.'))
+      .mockResolvedValue(page([event()]))
+    socket.drop()
+    socket.connect()
+    socket.ack({ ok: true })
+    await vi.advanceTimersByTimeAsync(0)
     expect(toasts.info).not.toHaveBeenCalled()
 
-    api.eventsSince.mockResolvedValue(page([event()]))
+    await vi.advanceTimersByTimeAsync(RETRY_MS[0])
+    expect(api.eventsSince).toHaveBeenCalledTimes(2)
+    expect(api.eventsSince).toHaveBeenLastCalledWith(340, 200)
+    expect(toasts.info).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('nothing missed is lost for good (review H1)', () => {
+  it('a push heard while a newer catch-up waits behind a slow one does not skip the gap', async () => {
+    const socket = await joinedSocket()
+    let answer: (value: EventsPage) => void = () => {}
+    api.eventsSince.mockReturnValueOnce(
+      new Promise<EventsPage>((resolve) => {
+        answer = resolve
+      })
+    )
+    socket.drop()
+    socket.connect()
+    socket.ack({ ok: true }) // catch-up A reads since 340, slowly
+    socket.drop() // 341 to 349 fire while the phone is off the network
+    socket.connect()
+    socket.ack({ ok: true }) // catch-up B waits behind A
+    expect(api.eventsSince).toHaveBeenCalledTimes(1)
+    socket.fire('sudarshan_market_alert', push({ event_id: 350 })) // pushed after the rejoin
+    api.eventsSince.mockImplementation(sinceGap)
+    answer(page([])) // A read before anything fired
+    await flush()
+    await flush()
+
+    expect(api.eventsSince.mock.calls.map(([after]) => after)).toEqual([340, 340])
+    expect(told()).toBe(1 + 9)
+  })
+
+  it('a read that failed, then a push, then a reconnect: the gap is still told', async () => {
+    const socket = await joinedSocket()
+    api.eventsSince.mockRejectedValueOnce(new Error('The alert service is not answering.'))
     socket.drop()
     socket.connect()
     socket.ack({ ok: true })
     await flush()
+    socket.fire('sudarshan_market_alert', push({ event_id: 350 }))
+    api.eventsSince.mockImplementation(sinceGap)
 
-    expect(api.eventsSince).toHaveBeenLastCalledWith(340, 200)
-    expect(toasts.info).toHaveBeenCalledTimes(1)
+    await reconnect(socket)
+    expect(api.eventsSince.mock.calls.at(-1)?.[0]).toBe(340)
+    expect(told()).toBe(1 + 9)
+  })
+
+  it('a join whose ack came too late (the room was joined): the gap is still told', async () => {
+    const socket = await joinedSocket()
+    socket.drop()
+    socket.connect()
+    socket.ack(undefined, new Error('operation has timed out'))
+    await flush()
+    socket.fire('sudarshan_market_alert', push({ event_id: 350 })) // the server had joined it
+    api.eventsSince.mockImplementation(sinceGap)
+
+    await reconnect(socket)
+    expect(told()).toBe(1 + 9)
+  })
+
+  it('the connection drops during the catch-up read after a push: the gap is still told', async () => {
+    const socket = await joinedSocket()
+    let answer: (value: EventsPage) => void = () => {}
+    api.eventsSince.mockReturnValueOnce(
+      new Promise<EventsPage>((resolve) => {
+        answer = resolve
+      })
+    )
+    socket.drop()
+    socket.connect()
+    socket.ack({ ok: true })
+    socket.fire('sudarshan_market_alert', push({ event_id: 350 }))
+    socket.drop()
+    answer(page(GAP))
+    await flush()
+    api.eventsSince.mockImplementation(sinceGap)
+
+    socket.connect()
+    socket.ack({ ok: true })
+    await flush()
+    expect(told()).toBe(1 + 9)
+  })
+
+  it('a push heard before a new page load has started counts once the start is read', async () => {
+    let answer: (value: MarketAlertsState) => void = () => {}
+    api.state.mockReturnValueOnce(
+      new Promise<MarketAlertsState>((resolve) => {
+        answer = resolve
+      })
+    )
+    const socket = install()
+    socket.connect()
+    socket.ack({ ok: true })
+    socket.fire('sudarshan_market_alert', push({ event_id: 352 }))
+    answer(state({ last_event_id: 351 }))
+    await flush()
+
+    await reconnect(socket)
+    expect(api.eventsSince).toHaveBeenCalledWith(352, 200)
   })
 })
 
@@ -471,7 +720,9 @@ describe('a pushed alert', () => {
     ])
     expect(toasts.info.mock.calls[0][1]).toMatchObject({ id: 'e:345', duration: 8000 })
     expect(chime.played).toEqual(['market'])
-    expect(localStorage.getItem(SEEN_KEY)).toBe('345')
+
+    await reconnect(socket)
+    expect(api.eventsSince).toHaveBeenCalledWith(345, 200)
   })
 
   it('opens History from a test’s View', async () => {
@@ -544,10 +795,7 @@ describe('one announcement across the app’s tabs', () => {
 
     channel.say({ key: 'm:350', ids: [349, 350] })
     api.eventsSince.mockResolvedValue(page([event({ id: 349 }), event({ id: 350 })]))
-    socket.drop()
-    socket.connect()
-    socket.ack({ ok: true })
-    await flush()
+    await reconnect(socket)
 
     expect(toasts.info).not.toHaveBeenCalled()
   })

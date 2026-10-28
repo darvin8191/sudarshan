@@ -38,10 +38,17 @@ import {
  *
  * After every connect, the first and each reconnect, it joins the room with an ack (a session
  * that is not the owner's is not joined, and hears nothing), then asks for what fired after the
- * last event this device has seen, which this browser keeps. One missed alert gets the toast a
- * pushed one gets; several get one toast, with View. A device that has seen none starts from the
- * newest, so it does not announce the past. A reconnect also reads the page's state and an open
- * History again: whatever was pushed meanwhile went to nobody.
+ * last event this page has seen. A new page load starts from the newest event the server holds
+ * and announces nothing from before it (contract 2.2: Telegram covers a closed app, History has
+ * the rest); after that, every reconnect asks for what fired while the connection was down. One
+ * missed alert gets the toast a pushed one gets; several get one toast, with View. A reconnect
+ * also reads the page's state and an open History again: whatever was pushed meanwhile went to
+ * nobody.
+ *
+ * Nothing missed is lost for good. From each connect until that connection's catch-up has read
+ * what fired meanwhile, a push is shown but does not move the last id seen, so the catch-up
+ * still asks from before the gap. A join without an ack and a read that failed are tried again
+ * while the connection lasts, and failing that the next connect asks from the same place.
  *
  * Each event is announced once across the app's tabs, by the order alerts' rule
  * (books/orderAlerts.ts) on a channel of its own: the tab in use shows it at once and tells the
@@ -67,8 +74,8 @@ export const TAB_DEFER_MS = 400
 const SINCE_LIMIT = 200
 /** At most this many pages of missed alerts are read on one connect. */
 const SINCE_PAGES = 25
-/** The newest event this device has seen. */
-const SEEN_KEY = 'sudarshan-market-alerts-seen'
+/** How long a join without an ack, or a catch-up read that failed, waits before it is tried again. */
+export const RETRY_MS = [2_000, 5_000, 10_000] as const
 
 type Handler = (...args: any[]) => void
 type On = (event: string, handler: Handler) => unknown
@@ -105,30 +112,19 @@ const counted = new Keys()
 
 const eventKey = (id: number) => `e:${id}`
 
-let memorySeen: number | null = null
-
-function readSeen(): number | null {
-  try {
-    const raw = localStorage.getItem(SEEN_KEY)
-    const id = raw === null ? Number.NaN : Number(raw)
-    if (Number.isInteger(id) && id >= 0) return Math.max(id, memorySeen ?? 0)
-  } catch {
-    // Storage refused: what this tab has seen still counts.
-  }
-  return memorySeen
-}
+/** The newest event this page load has seen; null until its first catch-up starts it. */
+let seen: number | null = null
 
 function noteSeen(id: unknown): void {
   if (typeof id !== 'number' || !Number.isInteger(id) || id < 0) return
-  const held = readSeen()
-  if (held !== null && held >= id) return
-  memorySeen = id
-  try {
-    localStorage.setItem(SEEN_KEY, String(id))
-  } catch {
-    // Storage refused: this tab remembers it.
-  }
+  if (seen === null || id > seen) seen = id
 }
+
+/**
+ * Open from each connect until that connection's catch-up has read what fired meanwhile: a push
+ * heard inside it is shown, and only its id is kept here, so the read still asks from before it.
+ */
+let gap: { connection: number; pushed: number } | null = null
 
 let cache: QueryClient | null = null
 
@@ -422,7 +418,8 @@ function deliver(alert: Announcement): void {
 
 function onAlert(push: MarketAlertPush): void {
   if (!push || typeof push.event_id !== 'number') return
-  noteSeen(push.event_id)
+  if (gap) gap.pushed = Math.max(gap.pushed, push.event_id)
+  else noteSeen(push.event_id)
   if (counted.add(eventKey(push.event_id))) {
     if (!push.test) countInCache(push)
     if (cache) {
@@ -479,6 +476,45 @@ const joined = new WeakMap<Socket, number>()
 
 let listening: { socket: Socket; onConnect: Handler } | null = null
 
+/** Whether this screen hears the owner's room: unknown before the app has a connection at all. */
+export type Hearing = 'unknown' | 'joined' | 'not_joined'
+
+let hearing: Hearing = 'unknown'
+const hearingListeners = new Set<() => void>()
+
+function hear(next: Hearing): void {
+  if (hearing === next) return
+  hearing = next
+  for (const listener of [...hearingListeners]) listener()
+}
+
+/** Whether this screen hears the owner's room now (M10.7). */
+export function hearingNow(): Hearing {
+  return hearing
+}
+
+/** Be told when that changes; the answer stops it. */
+export function onHearing(listener: () => void): () => void {
+  hearingListeners.add(listener)
+  return () => {
+    hearingListeners.delete(listener)
+  }
+}
+
+/** Retries waiting, so a reset (tests) or a newer connection can forget them. */
+const retries = new Set<ReturnType<typeof setTimeout>>()
+
+/** Run `again` after the `attempt`th wait, unless every wait is spent. */
+function retryLater(attempt: number, again: () => void): void {
+  const wait = RETRY_MS[attempt]
+  if (wait === undefined) return
+  const timer = setTimeout(() => {
+    retries.delete(timer)
+    again()
+  }, wait)
+  retries.add(timer)
+}
+
 /** Still connected, and this page's handlers still on the socket (not signed out, not left). */
 function stillListening(socket: Socket): boolean {
   const own = listening
@@ -486,31 +522,65 @@ function stillListening(socket: Socket): boolean {
   return socket.listeners('connect').includes(own.onConnect)
 }
 
-function join(socket: Socket, count: number): void {
+/** The connection a socket is on now, by its connect count. */
+const connectionOf = (socket: Socket) => connectionCount(socket) ?? 1
+
+/** Still on the connection that asked: a newer one joins and catches up on its own. */
+const sameConnection = (socket: Socket, connection: number) =>
+  stillListening(socket) && connectionOf(socket) === connection
+
+function join(socket: Socket, connection: number, attempt = 0): void {
   socket
     .timeout(JOIN_WAIT_MS)
     .emit('sudarshan_alerts_join', (error: unknown, ack?: { ok?: unknown }) => {
-      if (error || ack?.ok !== true) return
-      joined.set(socket, count)
-      if (count > 1 && cache) {
-        void cache.invalidateQueries({ queryKey: STATE_KEY })
-        void cache.invalidateQueries({ queryKey: EVENTS_KEY })
+      if (!sameConnection(socket, connection)) return
+      if (error) {
+        // No ack in time: the room may or may not be joined. Ask again while this connection lasts.
+        retryLater(attempt, () => {
+          if (sameConnection(socket, connection) && joined.get(socket) !== connection) {
+            join(socket, connection, attempt + 1)
+          }
+        })
+        return
       }
-      void catchUp(socket)
+      if (ack?.ok !== true) return
+      joined.set(socket, connection)
+      hear('joined')
+      if (connection > 1 && cache) {
+        void cache.invalidateQueries({ queryKey: STATE_KEY })
+        // A History page on its way (Show older) is not cut short: it is read again after.
+        void cache.invalidateQueries({ queryKey: EVENTS_KEY }, { cancelRefetch: false })
+      }
+      void catchUp(socket, connection)
     })
 }
 
+/** Not a test, and not an alert sent with the app turned off. */
 function worthTelling(event: AlertEvent): boolean {
-  return !event.test && event.deliveries?.app?.status !== 'off' && !shown.has(eventKey(event.id))
+  return !event.test && event.deliveries?.app?.status !== 'off'
 }
 
-async function catchUpOnce(socket: Socket): Promise<void> {
-  const seen = readSeen()
+/** The connection's gap is read: what was pushed inside it counts as seen, and it closes. */
+function closeGap(connection: number): void {
+  if (gap?.connection !== connection) return
+  noteSeen(gap.pushed || null)
+  gap = null
+}
+
+/**
+ * Read what fired since the last event seen, and tell it. A new page load reads /state instead
+ * and starts from the newest event there, telling nothing. Throws when a read fails.
+ */
+async function catchUpOnce(socket: Socket, connection: number): Promise<void> {
   if (seen === null) {
-    // Nothing seen on this device yet: start from the newest, rather than announce the past.
     const state = await marketAlertsApi.state()
+    if (!stillListening(socket)) return
     const running = state.engine.code !== 'starting' && state.engine.code !== 'off'
-    if (state.enabled && running) noteSeen(state.last_event_id)
+    if (!state.enabled || state.engine.code === 'off') return
+    // Starting up: its newest event is not settled yet; ask again in a moment.
+    if (!running) throw new Error('starting')
+    noteSeen(state.last_event_id)
+    if (connectionOf(socket) === connection) closeGap(connection)
     return
   }
   let after = seen
@@ -527,26 +597,41 @@ async function catchUpOnce(socket: Socket): Promise<void> {
   // Dropped meanwhile, or signed out: nothing told, so nothing noted; the next connect asks again.
   if (!stillListening(socket)) return
   noteSeen(after)
-  const told = missedOf(missed.filter((event) => !shown.has(eventKey(event.id))))
+  // Only this connection's own read closes its gap: an older one read before the gap began.
+  if (connectionOf(socket) === connection) closeGap(connection)
+  // Shown here or in another tab meanwhile, or about to be: told once.
+  const fresh = missed.filter(
+    (event) => !shown.has(eventKey(event.id)) && !deferred.has(eventKey(event.id))
+  )
+  const told = missedOf(fresh)
   if (told) deliver(told)
 }
 
 let catching: Promise<void> | null = null
 /** The connection a catch-up is asked for next. */
-let next: Socket | null = null
+let next: { socket: Socket; connection: number; attempt: number } | null = null
 
-/** One catch-up at a time; a connect during one runs it once more after, on that connection. */
-function catchUp(socket: Socket): Promise<void> {
-  next = socket
+/**
+ * One catch-up at a time; a connect during one runs it once more after, on that connection. A
+ * read that fails is tried again while its connection lasts.
+ */
+function catchUp(socket: Socket, connection: number, attempt = 0): Promise<void> {
+  next = { socket, connection, attempt }
   if (catching) return catching
   catching = (async () => {
     while (next) {
       const current = next
       next = null
       try {
-        await catchUpOnce(current)
+        await catchUpOnce(current.socket, current.connection)
       } catch {
-        // Not read (the service is down, alerts are off): the next connect asks again.
+        // Not read (the service is starting or not answering): again in a while, on this
+        // connection; failing that, the next connect asks from the same place.
+        retryLater(current.attempt, () => {
+          if (sameConnection(current.socket, current.connection)) {
+            void catchUp(current.socket, current.connection, current.attempt + 1)
+          }
+        })
       }
     }
   })().finally(() => {
@@ -565,15 +650,24 @@ export function installMarketAlerts(socket: Socket, on: On, navigate?: Navigate)
   unlockSoundOnFirstTap()
   tabChannel()
   watchUse()
-  const onConnect = () => join(socket, connectionCount(socket) ?? 1)
+  const onConnect = () => {
+    const connection = connectionOf(socket)
+    // What is pushed from here until this connection's catch-up has read the gap stays above it.
+    gap = { connection, pushed: gap?.pushed ?? 0 }
+    hear('not_joined')
+    join(socket, connection)
+  }
   on('connect', onConnect)
+  on('disconnect', () => hear('not_joined'))
   on('sudarshan_market_alert', onAlert)
   on('sudarshan_market_alerts_state', onState)
   on('sudarshan_market_alert_delivery', onDelivery)
   listening = { socket, onConnect }
   // Installed again on a connection already up (a layout swap): joined already, unless not.
-  const count = connectionCount(socket) ?? 1
-  if (socket.connected && joined.get(socket) !== count) join(socket, count)
+  const connection = connectionOf(socket)
+  if (!socket.connected) hear('not_joined')
+  else if (joined.get(socket) === connection) hear('joined')
+  else onConnect()
 }
 
 /** Tests only: forget every alert shown, counted and seen, and the bound cache. */
@@ -588,7 +682,11 @@ export function resetMarketAlertsForTests(): void {
   listening = null
   catching = null
   next = null
-  memorySeen = null
+  seen = null
+  gap = null
+  hearing = 'unknown'
+  for (const timer of retries) clearTimeout(timer)
+  retries.clear()
   burst = { last: Number.NEGATIVE_INFINITY, shown: 0, more: 0, id: '' }
   go = (to) => window.location.assign(to)
 }
