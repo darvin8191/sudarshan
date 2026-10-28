@@ -165,6 +165,17 @@ def test_a_book_up_to_fifteen_seconds_old_serves_the_figure(day, monkeypatch):
     assert refused_message(upstox.gtt_place(gtt, "token")) == words.daily_unreadable("live")
 
 
+def test_a_delivery_dip_never_locks_the_day(day):
+    """Shares bought today to hold (CNC, product D in cash) are not in the day's figure."""
+    day.book.rows = [
+        {"instrument_token": "NSE_EQ|R", "exchange": "NSE", "product": "D", "quantity": 400,
+         "realised": 0.0, "unrealised": -4000.0},
+        day_row(CE, 65, 0.0, -100.0),
+    ]  # fmt: skip
+    assert broker().place(order("BUY", symbol=PE), "token")[2] == "OID0"
+    assert day.store.day_lock("live", today()) is None
+
+
 def test_the_kill_switch_is_said_before_the_daily_limit(day):
     day.book.rows = [day_row(CE, 65, -5000.0, 0.0)]
     upstox = broker()
@@ -198,7 +209,8 @@ def test_the_figure_is_read_from_the_same_book_the_order_is_judged_on(day):
 
 
 def test_readers_sandbox_day_is_its_funds_and_open_positions(monkeypatch):
-    """The sandbox's figure: today's realised P&L in its funds and its open positions' P&L."""
+    """The sandbox's figure: today's realised P&L in its funds and its open positions' P&L, its
+    delivery (CNC in cash) left out of both (the owner's decision)."""
     from decimal import Decimal
 
     class Query:
@@ -225,13 +237,26 @@ def test_readers_sandbox_day_is_its_funds_and_open_positions(monkeypatch):
             self.query = Query(rows)
             self.user_id = self.quantity = 0  # compared, never used
 
+    def position(product, exchange, quantity, pnl, booked):
+        return SimpleNamespace(
+            product=product, exchange=exchange, quantity=quantity, pnl=pnl,
+            today_realized_pnl=booked,
+        )  # fmt: skip
+
     db = SimpleNamespace(
         SandboxFunds=Model([SimpleNamespace(today_realized_pnl=Decimal("-1250.50"))]),
-        SandboxPositions=Model([SimpleNamespace(pnl=Decimal("-300")), SimpleNamespace(pnl=None)]),
+        SandboxPositions=Model(
+            [
+                position("MIS", "NFO", 65, Decimal("-300"), Decimal("0")),
+                position("NRML", "NFO", 0, None, None),  # closed: nothing open
+                position("CNC", "NSE", 400, Decimal("-4000"), Decimal("-250")),  # delivery
+                position("CNC", "BSE", 0, Decimal("0"), Decimal("-100")),  # delivery, sold today
+            ]
+        ),
     )
     monkeypatch.setattr(readers, "_sandbox", lambda: db)
     figure = readers.sandbox_day("owner")
-    assert (figure.realised, figure.unrealised) == (-1250.5, -300.0)
+    assert (figure.realised, figure.unrealised) == (-900.5, -300.0)
 
 
 def test_a_segment_s_window_is_kept_and_a_closed_day_is_asked_again(risk_store, monkeypatch):

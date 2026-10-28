@@ -69,6 +69,96 @@
       "name": "an empty book",
       "rows": [],
       "realised": 0.0, "unrealised": 0.0, "approximate": false
+    },
+    {
+      "name": "intraday, the books' own row: Upstox's figures agree with its trades and prices",
+      "rows": [
+        {"exchange": "NFO", "multiplier": 1.0, "value": -6500.0, "pnl": 1950.0, "product": "I",
+         "instrument_token": "NSE_FO|49213", "average_price": 120.0, "buy_value": 15600.0,
+         "overnight_quantity": 0, "day_buy_value": 15600.0, "day_buy_price": 120.0,
+         "overnight_buy_amount": 0.0, "overnight_buy_quantity": 0, "day_buy_quantity": 130,
+         "day_sell_value": 9100.0, "day_sell_price": 140.0, "overnight_sell_amount": 0.0,
+         "overnight_sell_quantity": 0, "day_sell_quantity": 65, "quantity": 65,
+         "last_price": 130.0, "unrealised": 650.0, "realised": 1300.0, "sell_value": 9100.0,
+         "tradingsymbol": "NIFTY27OCT2625900CE", "close_price": 118.4, "buy_price": 120.0,
+         "sell_price": 140.0}
+      ],
+      "realised": 1300.0, "unrealised": 650.0, "approximate": false
+    },
+    {
+      "name": "carried NRML, the books' own row: the day's move, 754, agrees",
+      "rows": [
+        {"exchange": "NFO", "multiplier": 1.0, "value": -6500.0, "pnl": 1950.0, "product": "D",
+         "instrument_token": "NSE_FO|49213", "average_price": 100.0, "buy_value": 6500.0,
+         "overnight_quantity": 65, "day_buy_value": 0.0, "day_buy_price": 0.0,
+         "overnight_buy_amount": 6500.0, "overnight_buy_quantity": 65, "day_buy_quantity": 0,
+         "day_sell_value": 0.0, "day_sell_price": 0.0, "overnight_sell_amount": 0.0,
+         "overnight_sell_quantity": 0, "day_sell_quantity": 0, "quantity": 65,
+         "last_price": 130.0, "unrealised": 754.0, "realised": 0.0, "sell_value": 0.0,
+         "tradingsymbol": "NIFTY27OCT2625900CE", "close_price": 118.4, "buy_price": 100.0,
+         "sell_price": 0.0}
+      ],
+      "realised": 0.0, "unrealised": 754.0, "approximate": false
+    },
+    {
+      "name": "carried, an absurd unrealised from Upstox (community thread 1281): its own trades and prices, approximate",
+      "rows": [
+        {"instrument_token": "NSE_FO|50001", "exchange": "NFO", "product": "D", "multiplier": 1.0,
+         "quantity": 25, "overnight_quantity": 25, "day_buy_value": 0.0, "day_sell_value": 0.0,
+         "last_price": 96.5, "close_price": 100.0, "realised": 0.0, "unrealised": -969387.5,
+         "pnl": -1312.5}
+      ],
+      "realised": 0.0, "unrealised": -87.5, "approximate": true
+    },
+    {
+      "name": "closed F&O row with its P&L fields zeroed (community thread 9316): the day's trades, approximate",
+      "rows": [
+        {"instrument_token": "", "product": "I", "quantity": 0, "multiplier": 0.0,
+         "day_buy_value": 32471.25, "day_sell_value": 30465.0,
+         "pnl": 0.0, "realised": 0.0, "unrealised": 0.0}
+      ],
+      "realised": -2006.25, "unrealised": 0.0, "approximate": true
+    },
+    {
+      "name": "an open row missing one of the day's figures: its net, approximate, never 0",
+      "rows": [
+        {"instrument_token": "NSE_FO|1", "exchange": "NFO", "product": "I", "quantity": 65,
+         "realised": 0.0, "unrealised": null, "pnl": -5000.0}
+      ],
+      "realised": 0.0, "unrealised": -5000.0, "approximate": true
+    },
+    {
+      "name": "delivery (CNC, product D in cash) is not counted; NRML on F&O is",
+      "rows": [
+        {"instrument_token": "NSE_EQ|INE002A01018", "exchange": "NSE", "product": "D",
+         "quantity": 400, "realised": 0.0, "unrealised": -4000.0, "pnl": -4000.0},
+        {"instrument_token": "BSE_EQ|INE002A01018", "exchange": "BSE", "product": "D",
+         "quantity": 0, "realised": -300.0, "unrealised": 0.0, "pnl": -300.0},
+        {"exchange": "NSE", "product": "D", "quantity": 10, "realised": 0.0,
+         "unrealised": -90.0, "pnl": -90.0},
+        {"instrument_token": "NSE_FO|50001", "exchange": "NFO", "product": "D", "quantity": 30,
+         "realised": 0.0, "unrealised": -450.0, "pnl": -1800.0},
+        {"instrument_token": "NSE_EQ|INE062A01020", "exchange": "NSE", "product": "I",
+         "quantity": 10, "realised": 0.0, "unrealised": -500.0, "pnl": -500.0}
+      ],
+      "realised": 0.0, "unrealised": -950.0, "approximate": false
+    },
+    {
+      "name": "rows that are not rows, first: the rows after them still count",
+      "rows": [
+        "not a row", null,
+        {"instrument_token": "NSE_FO|49213", "exchange": "NFO", "product": "I", "quantity": 65,
+         "realised": -100.0, "unrealised": -50.0, "pnl": -150.0}
+      ],
+      "realised": -100.0, "unrealised": -50.0, "approximate": false
+    },
+    {
+      "name": "true or false is not a figure",
+      "rows": [
+        {"instrument_token": "NSE_FO|49213", "exchange": "NFO", "product": "I", "quantity": 0,
+         "realised": true, "unrealised": 0.0, "pnl": -300.0}
+      ],
+      "realised": 0.0, "unrealised": -300.0, "approximate": true
     }
   ],
   "limits": [

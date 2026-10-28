@@ -20,6 +20,9 @@ const PIPES: Record<string, string> = { live: 'Live', sandbox: 'Sandbox' }
 export const DAILY_SUGGESTION =
   'A common choice is about 2% of the money you trade F&O with, for example ₹4,000 on ₹2,00,000.'
 
+/** The owner's decision: shares bought to hold are not in the day's figure (daily.py). */
+export const DELIVERY_NOT_COUNTED = 'Delivery (CNC) is not counted.'
+
 const FIGURE_LOOK = {
   loss: { Icon: TrendingDown, sign: '−', word: 'loss today', ink: 'text-[color:var(--down)]' },
   profit: { Icon: TrendingUp, sign: '+', word: 'profit today', ink: 'text-[color:var(--up)]' },
@@ -76,8 +79,8 @@ export function DailyCard({ status }: { status: RiskStatus }) {
     <div className="flex flex-col gap-3" data-testid="daily-card">
       <p className="text-[0.9375rem] leading-snug">
         {limit === null
-          ? `Off. When it is on, new orders are refused for the rest of the day once the day's loss reaches it; exits and cancels always go. ${DAILY_SUGGESTION}`
-          : `Limit ${wholeRupees.format(limit)} a day. Once the day's loss reaches it, new orders are refused until tomorrow; exits and cancels always go.`}
+          ? `Off. When it is on, new orders are refused for the rest of the day once the day's loss reaches it; exits and cancels always go. ${DELIVERY_NOT_COUNTED} ${DAILY_SUGGESTION}`
+          : `Limit ${wholeRupees.format(limit)} a day. Once the day's loss reaches it, new orders are refused until tomorrow; exits and cancels always go. ${DELIVERY_NOT_COUNTED}`}
       </p>
       {days.map(([pipe, day]) => (
         <section

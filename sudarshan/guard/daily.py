@@ -2,13 +2,22 @@
 
 The figure, live: Upstox's short-term positions, as the Upstox module's own cache returns them
 (the read the gate makes anyway to tell an exit from a new order). Each row's ``realised`` plus
-``unrealised`` is the day's P&L as Upstox documents it; its ``pnl`` is the position's net, which
-differs on a position carried in from an earlier day, so it is used only for a row that has
-neither, and the figure is then marked approximate. Holdings are not in it. It is gross, before
-charges, like services/risk.
+``unrealised`` is the day's P&L as Upstox documents it, but Upstox has been seen to return an
+absurd ``unrealised`` on a carried row and zeroed P&L fields on a closed one, so each row's
+figure is checked against the day's P&L from its own trades and prices:
 
-The figure, sandbox: the sandbox's own book, today's realised P&L and its open positions' P&L
-(readers.sandbox_day).
+    (day_sell_value - day_buy_value)
+        + (quantity x last_price - overnight_quantity x close_price) x multiplier
+
+When the two disagree, the row's own trades and prices are used and the figure is marked
+approximate; so it is when a row lacks one of Upstox's two figures and that formula cannot be
+worked out either (its ``pnl``, the position's net, is used then). Holdings are not in it, and
+neither is delivery: a CNC row in cash (product D on NSE or BSE) is left out, so a dip in shares
+bought to hold never locks F&O (the owner's decision). It is gross, before charges, like
+services/risk.
+
+The figure, sandbox: the sandbox's own book, today's realised P&L and its open positions' P&L,
+its CNC cash positions left out the same way (readers.sandbox_day).
 
 The decision is services.risk.evaluate_aggregate's combined stop, reused and never
 reimplemented (CLAUDE.md "Risk rules live in services/risk/"): reaching the limit exactly counts.
@@ -56,22 +65,91 @@ def _number(value: object) -> float | None:
     return number if math.isfinite(number) else None
 
 
+#: Upstox's own figures for a row stand when they agree with its trades and prices to within a
+#: rupee or a hundredth of the figure, whichever is more.
+AGREE_RS = 1.0
+AGREE_SHARE = 0.01
+#: Upstox's cash segments: a product D row there is delivery (CNC).
+CASH_SEGMENTS = frozenset({"NSE_EQ", "BSE_EQ"})
+CASH_EXCHANGES = frozenset({"NSE", "BSE"})
+
+
+def is_delivery(row: dict) -> bool:
+    """A delivery (CNC) row: product D in cash, which the day's figure leaves out."""
+    if str(row.get("product") or "").strip().upper() != "D":
+        return False
+    segment = str(row.get("instrument_token") or "").split("|", 1)[0].strip().upper()
+    if segment:
+        return segment in CASH_SEGMENTS
+    return str(row.get("exchange") or "").strip().upper() in CASH_EXCHANGES
+
+
+def day_from_trades(row: dict) -> float | None:
+    """The row's P&L for the day from its own trades and prices, or None when a field the
+    formula needs is missing. An intraday row (product I) carries nothing overnight."""
+    sold, bought = _number(row.get("day_sell_value")), _number(row.get("day_buy_value"))
+    quantity = _number(row.get("quantity"))
+    overnight = _number(row.get("overnight_quantity"))
+    if overnight is None and str(row.get("product") or "").strip().upper() == "I":
+        overnight = 0.0
+    if sold is None or bought is None or quantity is None or overnight is None:
+        return None
+    held = 0.0
+    if quantity:
+        last = _number(row.get("last_price"))
+        if last is None:
+            return None
+        held += quantity * last
+    if overnight:
+        close = _number(row.get("close_price"))
+        if close is None:
+            return None
+        held -= overnight * close
+    multiplier = _number(row.get("multiplier"))
+    if multiplier is None or multiplier <= 0:
+        multiplier = 1.0  # NSE's F&O and cash rows are 1; a zeroed row says nothing else
+    return round(sold - bought + held * multiplier, 2)
+
+
+def _agrees(own: float, computed: float) -> bool:
+    return abs(own - computed) <= max(AGREE_RS, AGREE_SHARE * max(abs(own), abs(computed)))
+
+
+def _row_figure(row: dict) -> tuple[float, float, bool] | None:
+    """One row's ``(realised, unrealised, approximate)``, or None when it says nothing."""
+    realised, unrealised = _number(row.get("realised")), _number(row.get("unrealised"))
+    closed = _number(row.get("quantity")) == 0
+    if closed and realised is not None and unrealised is None:
+        unrealised = 0.0  # a closed row holds nothing open
+    computed = day_from_trades(row)
+    if realised is not None and unrealised is not None:
+        if computed is None or _agrees(realised + unrealised, computed):
+            return realised, unrealised, False
+    if computed is not None:
+        return (computed, 0.0, True) if closed else (0.0, computed, True)
+    net = _number(row.get("pnl"))
+    if net is not None and net != 0:
+        return 0.0, net, True
+    if realised:
+        return realised, 0.0, True
+    if unrealised:
+        return 0.0, unrealised, True
+    return None
+
+
 def live_figure(rows: list) -> DayFigure:
     """Today's P&L from Upstox's raw short-term position rows."""
     realised = unrealised = 0.0
     approximate = False
     for row in rows:
-        if not isinstance(row, dict):
+        if not isinstance(row, dict) or is_delivery(row):
             continue
-        day_realised, day_unrealised = _number(row.get("realised")), _number(row.get("unrealised"))
-        if day_realised is None and day_unrealised is None:
-            net = _number(row.get("pnl"))
-            if net is not None and net != 0:
-                unrealised += net
-                approximate = True
+        figure = _row_figure(row)
+        if figure is None:
             continue
-        realised += day_realised or 0.0
-        unrealised += day_unrealised or 0.0
+        realised += figure[0]
+        unrealised += figure[1]
+        approximate = approximate or figure[2]
     return DayFigure(realised, unrealised, approximate)
 
 

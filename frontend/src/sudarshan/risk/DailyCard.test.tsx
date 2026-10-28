@@ -8,7 +8,7 @@
 import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { DailyStatus, RiskStatus } from '@/api/risk'
-import { DAILY_SUGGESTION, DailyCard } from './DailyCard'
+import { DAILY_SUGGESTION, DailyCard, DELIVERY_NOT_COUNTED } from './DailyCard'
 
 const AS_OF = '2026-10-28T05:12:07+00:00' // 10:42:07 in India
 
@@ -83,6 +83,14 @@ describe('the daily loss card', () => {
     expect(screen.getByRole('region', { name: 'Sandbox today' })).toHaveTextContent(
       'Reached: the next new order locks the day'
     )
+  })
+
+  it('says delivery (CNC) is not counted, with a limit and without one', () => {
+    const { unmount } = render(<DailyCard status={status(4000, { live: day() })} />)
+    expect(screen.getByTestId('daily-card')).toHaveTextContent('Delivery (CNC) is not counted.')
+    unmount()
+    render(<DailyCard status={status(null, { live: day() })} />)
+    expect(screen.getByTestId('daily-card')).toHaveTextContent(DELIVERY_NOT_COUNTED)
   })
 
   it('suggests how to pick a limit when there is none, and never picks one', () => {
