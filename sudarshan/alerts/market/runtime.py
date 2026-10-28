@@ -137,7 +137,11 @@ class MarketRuntime:
         self._prefs = {"telegram": True, "app": True}
         #: Alert id -> its latest note (a candle not checked, a base changed) and when it came.
         self._notes: dict[int, tuple[engine.Reason, int]] = {}
+        #: Each followed key's latest frame, as received while it was followed.
         self._last: dict[str, dict] = {}
+        #: Each claimed key -> the moment the feed first answered a claim holding it: a snapshot
+        #: frame received since then is current (review H1).
+        self._claimed_at: dict[str, int] = {}
         self._to_seed: set[int] = set()
         self._tasks: set[asyncio.Task] = set()
         self._today: date | None = None
@@ -296,8 +300,8 @@ class MarketRuntime:
     def owner_put(self, row: dict, *, reset: bool = False, resume: bool = False) -> spec.Alert:
         """An owner's change the store has accepted, into the Book: its state starts again when
         the condition changed (``reset``), resumes on a resume or restart, and is kept otherwise.
-        A new, reset or resumed Active alert takes its side from the latest snapshot, through the
-        claims job, which follows the change at once."""
+        A new, reset or resumed Active alert takes its side from a current frame (``_seed``),
+        through the claims job, which follows the change at once."""
         alert = spec.Alert.of(row)
         fresh = alert.id not in self._alerts
         state = None
@@ -430,6 +434,8 @@ class MarketRuntime:
                     continue
                 self.stats["frames"] += 1
                 self._last[topic] = frame
+                if self._to_seed:
+                    self._seed_from(topic, frame)
                 try:
                     result = self.book.on_tick(frame, now, self.market)
                     if result.check == "ok":
@@ -777,6 +783,8 @@ class MarketRuntime:
                 continue
             else:
                 failures = 0
+                now = self._now()
+                self._claimed_at = {key: self._claimed_at.get(key, now) for key in keys}
                 log.debug(
                     "claimed %d instruments (live: %s)", len(keys), answer.get("applied_live")
                 )
@@ -786,21 +794,46 @@ class MarketRuntime:
             await asyncio.sleep(0.2)  # a burst of changes is one claim
 
     async def _seed(self) -> None:
-        """New and resumed alerts take their side from the latest snapshot (design 2.3)."""
-        if not self._to_seed:
+        """New and resumed alerts take their side from a current frame (design 2.3): one this
+        runtime received while it followed the key, or the feed's snapshot of the key taken
+        after the key's claim was answered. The feed keeps a key's last tick for 30 days after
+        it leaves the socket, and a side seeded from that tells a crossing the price made while
+        nobody looked, such as a pause's (review H1). An alert with no current frame waits for
+        its key's first one (``_seed_from``), which after a subscribe is the price now."""
+        pending = set(self._to_seed)  # one added while the snapshot is read waits (review L2)
+        if not pending:
             return
-        wanted = {self._alerts[i].key for i in self._to_seed if i in self._alerts}
+        wanted = {self._alerts[i].key for i in pending if i in self._alerts}
         missing = sorted(key for key in wanted if key not in self._last)
-        frames = dict(self._last)
+        snapshot: dict[str, dict] = {}
         if missing:
             with contextlib.suppress(FeedUnreachable, FeedRefused):
-                frames |= await self.link.snapshot(missing)
-        for alert_id in sorted(self._to_seed):
+                snapshot = await self.link.snapshot(missing)
+        for alert_id in sorted(pending):
             alert = self._alerts.get(alert_id)
-            frame = frames.get(alert.key) if alert else None
+            if alert is None:
+                self._to_seed.discard(alert_id)
+                continue
+            frame = self._last.get(alert.key)
+            if frame is None and self._current(alert.key, snapshot.get(alert.key)):
+                frame = snapshot[alert.key]
             if frame is not None:
                 self.book.seed(alert_id, frame, self.market)
-        self._to_seed.clear()
+                self._to_seed.discard(alert_id)
+
+    def _current(self, key: str, frame: dict | None) -> bool:
+        """A snapshot frame the feed received after this key's claim was answered."""
+        claimed = self._claimed_at.get(key)
+        recv = frame.get("ts_recv") if isinstance(frame, dict) else None
+        return claimed is not None and isinstance(recv, int) and recv >= claimed
+
+    def _seed_from(self, key: str, frame: dict) -> None:
+        """An alert still waiting for a current frame takes its side from its key's first one,
+        before that frame is judged (so it never fires on it)."""
+        for alert_id in [i for i in self._to_seed if getattr(self._alerts.get(i), "key", None)
+                         == key]:  # fmt: skip
+            self.book.seed(alert_id, frame, self.market)
+            self._to_seed.discard(alert_id)
 
     # ---- pauses ------------------------------------------------------------------------------
     async def _service_pause(self, now: int) -> None:

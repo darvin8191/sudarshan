@@ -163,8 +163,11 @@ def test_a_new_alert_is_claimed_at_the_feed_before_it_is_saved_and_never_fires_a
         async with FakeFeed(clock) as feed, FakeOpenAlgo() as notify:
             settings = alerts(notify)
             office, rt, task = await opened(settings, feed, clock)
+            # The snapshot the feed takes once the claim subscribes the key: received at or
+            # after the claim's answer, so it is the price now (one from before would not seed:
+            # review H1, the feed keeps a key's last tick long after it leaves the socket).
             feed.snapshot[SBIN] = {"ltp": 100.4, "ltt": ms(clock()) - 2000, "ltq": 7,
-                                   "ts_recv": ms(clock()) - 2000}  # fmt: skip
+                                   "ts_recv": ms(clock())}  # fmt: skip
             card = await office.call("create", {"alert": draft(frequency="every_time")})
             assert card["id"] == 1 and card["status"] == "active"
             assert feed.claims[1]["keys"] == {SBIN: "ltpc"}  # the desk's claim, before the save
@@ -654,3 +657,113 @@ def test_every_op_is_answered_and_every_message_is_the_owner_s(alerts, quick):
 
 def test_a_moment_s_day_is_ist():
     assert desk._day(ms(datetime(2026, 10, 21, 0, 10, tzinfo=ist(2026, 1, 1).tzinfo))).day == 21
+
+
+async def elapse(rt: MarketRuntime, clock: Clock, seconds: int, step: int = 5) -> None:
+    """Time passing with the feed's health heard all along: no pause."""
+    for _ in range(seconds // step):
+        clock.advance(step)
+        await wait_until(lambda: rt._health.heard_at == ms(clock()))
+
+
+def test_a_resumed_alert_never_takes_its_side_from_a_stale_snapshot(alerts, quick):
+    """Review H1 (vector G6: paused while below, resumed while above, no fire). The feed keeps a
+    key's last tick after it leaves the socket; seeded from that, the first live trade told a
+    crossing nobody saw. The alert now waits for a current frame."""
+
+    async def scenario():
+        clock = Clock(ist(2026, 10, 21, 10, 0))
+        async with FakeFeed(clock) as feed, FakeOpenAlgo() as notify:
+            office, rt, task = await opened(alerts(notify), feed, clock)
+            await office.call("create", {"alert": draft(frequency="every_time")})
+            await following(rt)
+            stale = await feed.tick(SBIN, 99.95)  # 10:00:00, below
+            await wait_until(lambda: rt.stats["judged"] == 1)
+            await office.call("update", {"id": 1, "version": 1, "action": "pause"})
+            await wait_until(lambda: feed.keys == {})  # the key leaves the socket
+            feed.snapshot[SBIN] = stale  # what the feed keeps for a key no longer subscribed
+            await elapse(rt, clock, 60)
+            asked = len(feed.snapshot_asks)
+            await office.call("update", {"id": 1, "version": 2, "action": "resume"})
+            await wait_until(lambda: len(feed.snapshot_asks) > asked)  # read, and not used
+            await following(rt)
+            assert rt.book.state(1).side is None
+            await trade(feed, clock, 100.3, ltq=2)  # the first live trade: the price now
+            await wait_until(lambda: rt.book.state(1).side == 1)
+            await asyncio.sleep(0.3)
+            assert notify.messages == []
+            await closed(rt, task)
+
+    run(scenario)
+
+
+@pytest.mark.parametrize("close", [101.0, 99.8])
+def test_an_evening_resume_takes_its_side_from_the_first_frame_after_its_subscribe(
+    alerts, quick, close
+):
+    """Review H1: resumed at 19:00 after a pause at 10:00 (99.95), the morning's tick no longer
+    seeds it. Upstox's first frame after the subscribe, the day's last trade, does: from a close
+    above, an open above tells nothing; from a close below it is a real gap."""
+
+    async def scenario():
+        clock = Clock(ist(2026, 10, 21, 10, 0))
+        async with FakeFeed(clock) as feed, FakeOpenAlgo() as notify:
+            office, rt, task = await opened(alerts(notify), feed, clock)
+            await office.call("create", {"alert": draft(frequency="every_time")})
+            await following(rt)
+            stale = await feed.tick(SBIN, 99.95)
+            await wait_until(lambda: rt.stats["judged"] == 1)
+            await office.call("update", {"id": 1, "version": 1, "action": "pause"})
+            await wait_until(lambda: feed.keys == {})
+            feed.snapshot[SBIN] = stale
+            clock.at = ist(2026, 10, 21, 19, 0)
+            await wait_until(lambda: rt._health.heard_at == ms(clock()))
+            await office.call("update", {"id": 1, "version": 2, "action": "resume"})
+            await wait_until(lambda: SBIN in feed.keys)
+            await following(rt)
+            assert rt.book.state(1).side is None
+            await feed.tick(SBIN, close, ltt=ist(2026, 10, 21, 15, 29, 58))
+            await wait_until(lambda: rt.book.state(1).side == (1 if close > 100 else -1))
+            clock.at = ist(2026, 10, 22, 9, 15, 1)
+            await wait_until(lambda: rt._health.heard_at == ms(clock()) and rt._today.day == 22)
+            await feed.tick(SBIN, 101.5)
+            if close < 100:
+                await wait_until(lambda: notify.messages)
+            await asyncio.sleep(0.3)
+            told = "\n".join(notify.messages)
+            await closed(rt, task)
+        if close > 100:
+            assert told == ""
+        else:
+            assert "opened above ₹100.00: first price ₹101.50 (previous ₹99.80)" in told
+
+    run(scenario)
+
+
+def test_an_alert_added_while_the_snapshot_is_read_is_seeded_too(alerts, quick, monkeypatch):
+    """Review L2: the seeding cleared every alert waiting, including one added while it awaited
+    the feed's snapshot, which was then never seeded."""
+
+    async def scenario():
+        clock = Clock(ist(2026, 10, 21, 10, 0))
+        async with FakeFeed(clock) as feed, FakeOpenAlgo() as notify:
+            office, rt, task = await opened(alerts(notify), feed, clock)
+            gate, reading, real = asyncio.Event(), asyncio.Event(), rt.link.snapshot
+
+            async def slow(keys):
+                reading.set()
+                await gate.wait()
+                return await real(keys)
+
+            monkeypatch.setattr(rt.link, "snapshot", slow)
+            await office.call("create", {"alert": draft()})  # SBIN: its snapshot is slow
+            await asyncio.wait_for(reading.wait(), 5)  # the seeding waits on it now
+            reliance = draft(symbol="RELIANCE", instrument_key=RELIANCE)
+            await office.call("create", {"alert": reliance})
+            feed.snapshot[RELIANCE] = {"key": RELIANCE, "ts_recv": ms(clock()) + 60_000,
+                                       "ltp": 99.95, "ltt": ms(clock()), "ltq": 1}  # fmt: skip
+            gate.set()
+            await wait_until(lambda: rt.book.state(2).side == -1)  # from its current snapshot
+            await closed(rt, task)
+
+    run(scenario)

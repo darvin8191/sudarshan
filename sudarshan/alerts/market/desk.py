@@ -9,7 +9,8 @@ store has accepted them (A7.m):
   pause, resume or restart is accepted only from the status it is for;
 - then the Book (runtime.owner_put): a fresh state when the condition changed, the state resumed
   on a resume or restart, the kept one otherwise. A new, changed or resumed alert takes its side
-  from the latest snapshot, so it fires on nothing it did not see happen;
+  from a current frame (runtime._seed: never a snapshot from before its claim), so it fires on
+  nothing it did not see happen;
 - a key the feed does not hold yet (or not in the mode needed) is claimed before the alert is
   saved, while no renewal can drop it. The feed's refusal (its quota) or silence is said in
   words, and nothing is saved.
