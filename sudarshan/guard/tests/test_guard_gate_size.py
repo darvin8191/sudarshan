@@ -249,6 +249,41 @@ def test_a_multi_leg_order_with_one_leg_over_the_cap_sends_nothing(services, mon
     assert services.reached == []
 
 
+def _options_order(services, monkeypatch, quantity, splitsize):
+    """/api/v1/optionsorder (Flow's options node and Action Center approvals too), resolved to
+    the PE, Live."""
+    import services.place_options_order_service as options_service
+
+    monkeypatch.setattr(options_service, "get_analyze_mode", lambda: False)
+    monkeypatch.setattr(options_service, "get_order_rate_limit", lambda: 0)
+    resolved = {"symbol": PE, "exchange": "NFO", "underlying_ltp": 25900.0}
+    monkeypatch.setattr(options_service, "get_option_symbol", lambda **kw: (True, resolved, 200))
+    data = {"apikey": "key", "strategy": "s", "underlying": "NIFTY", "exchange": "NSE_INDEX",
+            "expiry_date": "27OCT26", "offset": "ATM", "option_type": "PE", "action": "BUY",
+            "quantity": quantity, "splitsize": splitsize, "pricetype": "MARKET",
+            "product": "MIS"}  # fmt: skip
+    return options_service.place_options_order(
+        data, api_key="key", auth_token="token", broker="upstox"
+    )
+
+
+def test_an_options_order_in_slices_over_the_cap_sends_no_slice(services, monkeypatch):
+    """The gate review's M1: 10 lots in 1-lot slices against a 2-lot cap, as one order."""
+    ok, body, status = _options_order(services, monkeypatch, 650, 65)
+    assert (ok, status) == (False, 403)
+    assert body["message"].startswith(
+        "Nothing of this split order was sent: it is held to your limits as the one order it is. "
+        "This order is 10 lots of NIFTY 25900 PE"
+    )
+    assert services.reached == []
+
+
+def test_an_options_order_in_slices_within_the_cap_sends_every_slice(services, monkeypatch):
+    ok, _body, status = _options_order(services, monkeypatch, 130, 65)
+    assert (ok, status) == (True, 200)
+    assert [int(part["quantity"]) for _, part in services.reached] == [65, 65]
+
+
 def test_with_the_guard_off_a_batch_is_not_looked_at(services, monkeypatch):
     monkeypatch.delenv(flag.ENV)
     monkeypatch.setattr(gate.Gate, "check_together", lambda *args: pytest.fail("looked at"))

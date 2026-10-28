@@ -1,4 +1,5 @@
-"""All or nothing for orders sent together (M20.7): a basket, a multi-leg options order, a split.
+"""All or nothing for orders sent together (M20.7): a basket, a multi-leg options order, a split
+(a split order, or an options order given a split size).
 
 Each part goes through the gate as it is sent, like any order; that alone could leave a hedged
 basket half placed, one leg sent and the next refused by the price band or the size limit. So
@@ -76,6 +77,39 @@ def split(split_data: dict, auth_token: str, original_data: dict) -> Answer | No
     _index, decision = found
     message = words.together_refused("split", None, decision.words)
     return _refused(pipe, "split_order_service", "splitorder", original_data, message)
+
+
+def options_split(
+    order_data: dict, auth_token: str | None, api_key: str | None, original_data: dict
+) -> Answer | None:
+    """services/place_options_order_service.place_options_order with a split size, once the
+    option is resolved and before any slice is sent: the resolved option at its whole quantity,
+    as the one order it was asked as (the gate review's M1)."""
+    pipe = _pipe()
+    if pipe is None:
+        return None
+    try:
+        token = auth_token
+        if pipe == gate.LIVE and not token and api_key:
+            from database.auth_db import get_auth_token_broker
+
+            token, _broker = get_auth_token_broker(api_key)
+        owner = _owner(pipe, token, api_key)
+        if owner is None:
+            return None
+        whole = _described(pipe, order_data, owner)
+        found = gate.GATE.check_together([whole], [_slices(order_data)])
+    except Exception:
+        logger.exception(
+            "An options order in slices could not be checked as a whole; its slices are "
+            "checked one by one"
+        )
+        return None
+    if found is None:
+        return None
+    _index, decision = found
+    message = words.together_refused("split", None, decision.words)
+    return _refused(pipe, None, "optionsorder", original_data, message)
 
 
 def multi_leg(
@@ -179,6 +213,26 @@ def _described(pipe: str, data: dict, owner: str) -> gate.Order:
     return gate._sandbox_place(_SandboxUser(owner), data)
 
 
+def _analyzer_error(api_type: str, original_data: dict, message: str) -> dict[str, Any]:
+    """An analyzer error event for ``api_type``, as the services' own emitters publish one."""
+    from events import AnalyzerErrorEvent
+    from utils.event_bus import bus
+
+    response = {"mode": "analyze", "status": "error", "message": message}
+    request = {key: value for key, value in original_data.items() if key != "apikey"}
+    request["api_type"] = api_type
+    bus.publish(
+        AnalyzerErrorEvent(
+            mode="analyze",
+            api_type=api_type,
+            request_data=request,
+            response_data=response,
+            error_message=message,
+        )
+    )
+    return response
+
+
 class _SandboxUser:
     """What the sandbox's description reads of its order manager: the user."""
 
@@ -187,14 +241,17 @@ class _SandboxUser:
 
 
 def _refused(
-    pipe: str, service_name: str, api_type: str, original_data: dict, message: str
+    pipe: str, service_name: str | None, api_type: str, original_data: dict, message: str
 ) -> Answer:
-    """The service's own error answer for a batch refused whole: 403, nothing sent."""
+    """The service's own error answer for a batch refused whole: 403, nothing sent. In Analyze
+    mode, its analyzer event (the service's own emitter, or one for ``api_type``)."""
     import importlib
 
     if pipe == gate.SANDBOX:
-        service = importlib.import_module(f"services.{service_name}")
-        return False, service.emit_analyzer_error(original_data, message), 403
+        if service_name is not None:
+            service = importlib.import_module(f"services.{service_name}")
+            return False, service.emit_analyzer_error(original_data, message), 403
+        return False, _analyzer_error(api_type, original_data, message), 403
     from events import OrderFailedEvent
     from utils.event_bus import bus
 
