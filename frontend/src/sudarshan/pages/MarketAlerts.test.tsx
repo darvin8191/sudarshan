@@ -540,6 +540,25 @@ describe('the form on the page', () => {
     expect(where()).toBe('/market-alerts')
   })
 
+  it('closes the instrument search first when Back is pressed in the form', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    renderPage()
+    await settle()
+    await user.click(screen.getByRole('button', { name: 'New' }))
+    const form = screen.getByRole('dialog', { name: 'New alert' })
+    await user.click(within(form).getByRole('button', { name: /Pick an instrument/ }))
+    expect(screen.getByRole('dialog', { name: 'Instrument' })).toBeInTheDocument()
+
+    back()
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Instrument' })).toBeNull())
+    expect(screen.getByRole('dialog', { name: 'New alert' })).toBeInTheDocument()
+    expect(where()).toBe('/market-alerts?sheet=new')
+
+    back()
+    expect(screen.queryByRole('dialog', { name: 'New alert' })).toBeNull()
+    expect(where()).toBe('/market-alerts')
+  })
+
   it('edits from the sheet on the alert’s own settings, then shows what was saved', async () => {
     api.change.mockResolvedValue(
       alertRow({

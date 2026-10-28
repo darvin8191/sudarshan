@@ -1,7 +1,7 @@
 import { type QueryClient, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Info, LoaderCircle, Search } from 'lucide-react'
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router'
+import { useLocation, useNavigate } from 'react-router'
 import {
   type AlertDraft,
   type AlertExchange,
@@ -353,7 +353,6 @@ export function AlertFormSheet({
   const [problem, setProblem] = useState<{ field: string | null; text: string } | null>(() =>
     prefill && !isCovered(prefill.exchange) ? { field: 'instrument', text: NOT_FOR.exchange } : null
   )
-  const [searching, setSearching] = useState(false)
   // `sending` from the tap until the answer; `held` while an answer that never came is looked
   // for in the alerts, Save off meanwhile so a second tap cannot make a second alert.
   const [saving, setSaving] = useState<'sending' | 'held' | null>(null)
@@ -369,6 +368,25 @@ export function AlertFormSheet({
     }
   }, [])
   const navigate = useNavigate()
+
+  // The instrument search is a history entry of its own over the form's, so the phone's Back
+  // closes the search before the form. The entry keeps the host's state (its overlay's mark,
+  // a watchlist symbol, the chart's sheet) and adds its own.
+  const location = useLocation()
+  const searching = (location.state as { sdAlertSearch?: unknown } | null)?.sdAlertSearch === true
+  const searchClosedFor = useRef<string | null>(null)
+  const openSearch = () => {
+    if (searching) return
+    const { pathname, search, hash } = location
+    const held = location.state !== null && typeof location.state === 'object' ? location.state : {}
+    navigate({ pathname, search, hash }, { state: { ...held, sdAlertSearch: true } })
+  }
+  // A pick closes the search and the dialog then says it closed: one step back for both.
+  const closeSearch = () => {
+    if (!searching || searchClosedFor.current === location.key) return
+    searchClosedFor.current = location.key
+    navigate(-1)
+  }
   const typedLevel = useRef(form.level !== '')
   const ids = useId()
   const fieldId = (field: string) => `${ids}-${field}`
@@ -479,7 +497,7 @@ export function AlertFormSheet({
     : [...WAITS, form.cooldown].sort((a, b) => a - b)
 
   const pick = (found: SearchRow) => {
-    setSearching(false)
+    closeSearch()
     const exchange = String(found.exchange ?? '').toUpperCase()
     if (!isCovered(exchange)) {
       setProblem({ field: 'instrument', text: NOT_FOR.exchange })
@@ -589,7 +607,7 @@ export function AlertFormSheet({
         <section className={FIELD} aria-label="Instrument">
           <button
             type="button"
-            onClick={() => setSearching(true)}
+            onClick={openSearch}
             aria-describedby={marked === 'instrument' ? fieldId('instrument') : undefined}
             className={cn(OUTLINED, 'justify-between')}
           >
@@ -925,7 +943,9 @@ export function AlertFormSheet({
 
       <SymbolSearchDialog
         open={searching}
-        onOpenChange={(open) => setSearching(open)}
+        onOpenChange={(open) => {
+          if (!open) closeSearch()
+        }}
         search={search}
         initialQuery={instrument?.symbol ?? ''}
         onPick={pick}

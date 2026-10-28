@@ -572,6 +572,28 @@ describe('a market alert from the phone chart (M10.2)', () => {
     )
   })
 
+  it('closes the form’s instrument search first on Back, and a pick goes back once', async () => {
+    await opened('/chart/NSE/SBIN', ['/dashboard'])
+    tick(812.4)
+    await userEvent.click(screen.getByRole('button', { name: 'Set alert' }))
+    const form = screen.getByRole('dialog', { name: 'New alert' })
+
+    fireEvent.click(within(form).getByRole('button', { name: /Change/ }))
+    expect(screen.getByRole('dialog', { name: 'Symbol Search' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Phone back', hidden: true }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Symbol Search' })).toBeNull())
+    expect(screen.getByRole('dialog', { name: 'New alert' })).toBeInTheDocument()
+
+    fireEvent.click(within(form).getByRole('button', { name: /Change/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'RELIANCE' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Symbol Search' })).toBeNull())
+    expect(within(form).getByRole('button', { name: /RELIANCE/ })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Phone back', hidden: true }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'New alert' })).toBeNull())
+    expect(screen.getByRole('status', { name: 'Location' })).toHaveTextContent('/chart/NSE/SBIN')
+  })
+
   it('offers no bell where market alerts do not reach', async () => {
     await opened('/chart/MCX/GOLDM')
     expect(screen.queryByRole('button', { name: 'Set alert' })).toBeNull()
