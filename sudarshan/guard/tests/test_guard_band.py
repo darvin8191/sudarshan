@@ -9,14 +9,30 @@ from types import SimpleNamespace
 
 import pytest
 
-from sudarshan.guard import band, rules
+from sudarshan.guard import band, readers, rules
 
-VECTORS = json.loads((Path(__file__).parent / "band_vectors.json").read_text())["cases"]
+ALL = json.loads((Path(__file__).parent / "band_vectors.json").read_text())
+VECTORS = ALL["cases"]
+RAW = ALL["raw_cases"]
 
 
 @pytest.mark.parametrize("case", VECTORS, ids=lambda case: case["name"])
 def test_the_band(case):
     quote = None if case["quote"] is None else band.Quote(**case["quote"])
+    _expect(case, quote)
+
+
+@pytest.mark.parametrize("case", RAW, ids=lambda case: case["name"])
+def test_the_band_on_upstox_s_own_quote(case):
+    """Limits review L7: Upstox's raw full quote, through the Upstox module's own mapping and
+    the reader the gate uses, never a quote shaped by hand."""
+    from broker.upstox.api.data import BrokerData
+
+    mapped = BrokerData._quote_from_full_v3(None, case["upstox_quote"])
+    _expect(case, readers.quote_of(mapped))
+
+
+def _expect(case: dict, quote) -> None:
     breach = band.check(
         rules.BUY if case["side"] == 1 else rules.SELL,
         case["type"],

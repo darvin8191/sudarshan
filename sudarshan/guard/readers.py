@@ -207,6 +207,14 @@ def upstox_kill_switch(auth: str) -> list[dict]:
     return _upstox_kill_switch.get_or_load(key, load)
 
 
+def quote_of(data: dict):
+    """The market the band reads from OpenAlgo's quote (Upstox's full quote as
+    broker/upstox/api/data.BrokerData maps it): the last price and the best bid and ask."""
+    from .band import Quote
+
+    return Quote(_number(data.get("ltp")), _number(data.get("bid")), _number(data.get("ask")))
+
+
 #: A quote serves the price band this long: two orders in the same second share one read.
 QUOTE_KEPT_S = 1.0
 _quotes = LockedTTLCache(maxsize=256, ttl=QUOTE_KEPT_S)
@@ -220,11 +228,9 @@ def quote(pipe: str, owner: str, symbol: str, exchange: str):
     session prices it (the sandbox fills at Upstox's prices). A standard-budget read through the
     Upstox module's shared client: no new connection, no thread.
     """
-    from .band import Quote
-
     auth = owner if pipe == "live" else _upstox_session_of(owner)
 
-    def load() -> Quote:
+    def load():
         from broker.upstox.api.data import BrokerData
 
         try:
@@ -233,7 +239,7 @@ def quote(pipe: str, owner: str, symbol: str, exchange: str):
             raise Unreadable(f"quote: {type(exc).__name__}") from exc
         if not isinstance(data, dict):
             raise Unreadable("the quote answer is not one")
-        return Quote(_number(data.get("ltp")), _number(data.get("bid")), _number(data.get("ask")))
+        return quote_of(data)
 
     key = (hashlib.sha256(auth.encode()).hexdigest(), exchange, symbol)  # never the token itself
     return _quotes.get_or_load(key, load)
