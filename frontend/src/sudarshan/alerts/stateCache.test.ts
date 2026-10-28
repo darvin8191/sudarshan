@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import type { AlertEvent, AlertRow, MarketAlertsState } from '@/api/marketAlerts'
-import { applyDeliveries, applyStatePush, dropRow, putRow } from './stateCache'
+import { applyDeliveries, applyStatePush, dropRow, mergeFirstPage, putRow } from './stateCache'
 
 const row = (patch: Partial<AlertRow> = {}): AlertRow =>
   ({
@@ -87,5 +87,50 @@ describe('the cached History', () => {
     const replaced = applyDeliveries(next, new Map([[7, { app: later }]]))
     expect(replaced.pages[0].events[0].deliveries.app).toEqual(later)
     expect(applyDeliveries(data, new Map([[8, { app: sent }]]))).toBe(data)
+  })
+})
+
+describe('History’s newest page read again', () => {
+  const event = (id: number, deliveries: AlertEvent['deliveries'] = {}) =>
+    ({ id, deliveries }) as AlertEvent
+  const ids = (data: { pages: Array<{ events: AlertEvent[] }> } | null) =>
+    data?.pages.map((page) => page.events.map((each) => each.id)) ?? null
+
+  it('takes the fresh copies and what is newer, keeping the older pages as they are', () => {
+    const held = {
+      pages: [
+        { events: [event(5), event(4)], more: true },
+        { events: [event(3)], more: false },
+      ],
+      pageParams: [null, 4],
+    }
+    const sent = { status: 'sent' as const, reason: '', attempts: 1, updated_at: 9 }
+    const merged = mergeFirstPage(held, {
+      events: [event(7), event(6), event(5, { app: sent })],
+      more: true,
+    })
+
+    expect(ids(merged)).toEqual([[7, 6, 5, 4], [3]])
+    expect(merged?.pages[0].events[2].deliveries.app).toEqual(sent)
+    expect(merged?.pages[1]).toBe(held.pages[1])
+    expect(merged?.pageParams).toEqual([null, 4])
+  })
+
+  it('takes out of the older pages what the fresh page now holds', () => {
+    const held = {
+      pages: [
+        { events: [event(5)], more: true },
+        { events: [event(4), event(3)], more: false },
+      ],
+      pageParams: [null, 5],
+    }
+    expect(
+      ids(mergeFirstPage(held, { events: [event(6), event(5), event(4)], more: true }))
+    ).toEqual([[6, 5, 4], [3]])
+  })
+
+  it('asks for the whole list when more fired since than one page holds', () => {
+    const held = { pages: [{ events: [event(5)], more: false }], pageParams: [null] }
+    expect(mergeFirstPage(held, { events: [event(60), event(11)], more: true })).toBeNull()
   })
 })

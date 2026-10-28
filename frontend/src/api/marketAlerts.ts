@@ -292,7 +292,10 @@ const BASE = '/sudarshan/alerts/api'
 export const marketAlertsApi = {
   state: () => call<MarketAlertsState>(webClient.get(`${BASE}/state`, { timeout: READ_MS })),
   /** History, newest first, one page at a time: `before` the last id of the page before. */
-  events: (query: { before?: number | null; limit?: number; alert?: number }) =>
+  events: (
+    query: { before?: number | null; limit?: number; alert?: number },
+    signal?: AbortSignal
+  ) =>
     call<EventsPage>(
       webClient.get(`${BASE}/events`, {
         params: {
@@ -301,6 +304,8 @@ export const marketAlertsApi = {
           ...(query.alert ? { alert: query.alert } : {}),
         },
         timeout: READ_MS,
+        // A read React Query no longer wants (a page left, a newer read) stops on the wire too.
+        signal,
       })
     ),
   /** What fired after event `after`, oldest first. */

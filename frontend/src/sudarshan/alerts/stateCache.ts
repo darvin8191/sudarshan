@@ -31,7 +31,36 @@ export const TEST_KEY = [...EVENTS_KEY, 'test'] as const
 /** Where alerts go by default (contract 1.7). */
 export const PREFS_KEY = ['sudarshan', 'market-alerts', 'prefs'] as const
 
+/** How many events a History page holds. */
+export const HISTORY_PAGE = 50
+
 export type Deliveries = Partial<Record<Channel, Delivery>>
+
+/** The History tab's pages as React Query holds them. */
+export interface HistoryPages {
+  pages: EventsPage[]
+  pageParams: unknown[]
+}
+
+/**
+ * The History tab's pages with its newest page read again in place of what the first page held,
+ * the older pages left as they are; null when more fired since than one page holds, so the pages
+ * in between are not known and the whole list must be read again.
+ */
+export function mergeFirstPage(held: HistoryPages, first: EventsPage): HistoryPages | null {
+  const head = held.pages[0]
+  if (!head) return null
+  const newestHeld = head.events[0]?.id ?? 0
+  const oldestFresh = first.events.at(-1)?.id ?? Number.POSITIVE_INFINITY
+  if (first.more && oldestFresh > newestHeld) return null
+  const fresh = new Set(first.events.map((event) => event.id))
+  const pages = held.pages.map((page, index) => {
+    const kept = page.events.filter((event) => !fresh.has(event.id))
+    if (index === 0) return { ...page, events: [...first.events, ...kept] }
+    return kept.length === page.events.length ? page : { ...page, events: kept }
+  })
+  return { ...held, pages }
+}
 
 const same = (a: Delivery, b: Delivery) =>
   a.status === b.status &&

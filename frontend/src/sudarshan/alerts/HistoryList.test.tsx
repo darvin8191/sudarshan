@@ -4,8 +4,8 @@
  * reason under it); older pages a page at a time by `before`; an alert's last five fires in its
  * sheet; a failed read in the server's words.
  */
-import { QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { type QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -15,14 +15,36 @@ vi.mock('@/api/marketAlerts', async (importOriginal) => ({
   marketAlertsApi: api,
 }))
 
-import { AlertsError } from '@/api/marketAlerts'
+import { AlertsError, type EventsPage } from '@/api/marketAlerts'
 import { createQueryClient } from '@/app/providers'
 import { alertEvent, NOW } from '@/test/marketAlerts'
 import { HistoryList, RecentFires } from './HistoryList'
-import { resetMarketAlertsForTests } from './marketAlerts'
+import { installMarketAlerts, resetMarketAlertsForTests } from './marketAlerts'
+import { HISTORY_KEY } from './stateCache'
 
-function renderIn(node: React.ReactNode) {
-  render(<QueryClientProvider client={createQueryClient()}>{node}</QueryClientProvider>)
+function renderIn(node: React.ReactNode, client: QueryClient = createQueryClient()) {
+  render(<QueryClientProvider client={client}>{node}</QueryClientProvider>)
+  return client
+}
+
+/** What the alert service pushes, heard as the app hears it. */
+function pushes() {
+  const handlers = new Map<string, (...args: unknown[]) => void>()
+  const socket = { connected: false, listeners: () => [] }
+  installMarketAlerts(socket as never, (event, handler) => handlers.set(event, handler))
+  return (event: string, data: unknown) => act(() => handlers.get(event)?.(data))
+}
+
+const pending = { status: 'pending' as const, reason: '', attempts: 1, updated_at: NOW }
+const sent = { status: 'sent' as const, reason: '', attempts: 1, updated_at: NOW + 2_000 }
+
+/** A read the test answers by hand. */
+function held() {
+  let answer: (value: EventsPage) => void = () => {}
+  const promise = new Promise<EventsPage>((resolve) => {
+    answer = resolve
+  })
+  return { promise, answer: (value: EventsPage) => act(() => answer(value)) }
 }
 
 const item = (id: number) => document.querySelector(`[data-event="${id}"]`) as HTMLElement
@@ -142,11 +164,13 @@ describe('History', () => {
     const user = userEvent.setup()
     renderIn(<HistoryList now={NOW} />)
     await waitFor(() => expect(item(344)).not.toBeNull())
-    expect(api.events).toHaveBeenLastCalledWith({ before: null, limit: 50 })
+    expect(api.events.mock.lastCall?.[0]).toEqual({ before: null, limit: 50 })
+    // React Query's signal goes with it, so a read no longer wanted stops on the wire.
+    expect(api.events.mock.lastCall?.[1]).toBeInstanceOf(AbortSignal)
 
     await user.click(screen.getByRole('button', { name: 'Show older' }))
     await waitFor(() => expect(item(300)).not.toBeNull())
-    expect(api.events).toHaveBeenLastCalledWith({ before: 344, limit: 50 })
+    expect(api.events.mock.lastCall?.[0]).toEqual({ before: 344, limit: 50 })
     expect(screen.queryByRole('button', { name: 'Show older' })).toBeNull()
   })
 
@@ -173,13 +197,78 @@ describe('History', () => {
   })
 })
 
+describe('a read that crosses a delivery’s push', () => {
+  it('shows History with the delivery that settled while the read was on its way', async () => {
+    const push = pushes()
+    const read = held()
+    api.events.mockReturnValue(read.promise)
+    renderIn(<HistoryList now={NOW} />)
+
+    push('sudarshan_market_alert_delivery', { event_id: 341, channel: 'telegram', delivery: sent })
+    read.answer({
+      events: [alertEvent({ id: 341, deliveries: { telegram: pending } })],
+      more: false,
+    })
+    await waitFor(() => expect(item(341)).not.toBeNull())
+
+    expect(item(341).querySelector('[data-delivery]')?.textContent).toBe('Telegram · Sent 10:42:33')
+  })
+
+  it('shows an alert’s last fires with it too', async () => {
+    const push = pushes()
+    const read = held()
+    api.events.mockReturnValue(read.promise)
+    renderIn(<RecentFires alertId={12} now={NOW} />)
+
+    push('sudarshan_market_alert_delivery', { event_id: 341, channel: 'telegram', delivery: sent })
+    read.answer({
+      events: [alertEvent({ id: 341, deliveries: { telegram: pending } })],
+      more: false,
+    })
+    await waitFor(() => expect(item(341)).not.toBeNull())
+
+    expect(item(341).querySelector('[data-delivery]')?.textContent).toBe('Telegram · Sent 10:42:33')
+  })
+})
+
+describe('a read again that fails', () => {
+  it('keeps the list, marked as last read, says why, and reads again on request', async () => {
+    const sentence =
+      'The alert service is not answering. Your alerts are kept; checking resumes when it is back.'
+    api.events.mockResolvedValueOnce({ events: [alertEvent({ id: 341 })], more: false })
+    const user = userEvent.setup()
+    const client = renderIn(<HistoryList now={NOW} />)
+    await waitFor(() => expect(item(341)).not.toBeNull())
+
+    api.events.mockRejectedValueOnce(
+      new AlertsError({ code: 'not_answering', message: sentence, field: null })
+    )
+    await act(async () => {
+      await client.refetchQueries({ queryKey: HISTORY_KEY })
+    })
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(sentence)
+    expect(screen.getByText('These fires are as last read.')).toBeInTheDocument()
+    expect(item(341)).not.toBeNull()
+
+    api.events.mockResolvedValue({
+      events: [alertEvent({ id: 342 }), alertEvent({ id: 341 })],
+      more: false,
+    })
+    await user.click(screen.getByRole('button', { name: 'Try again' }))
+    await waitFor(() => expect(item(342)).not.toBeNull())
+    expect(screen.queryByText('These fires are as last read.')).toBeNull()
+  })
+})
+
 describe('an alert’s last fires', () => {
   it('reads its own five, newest first', async () => {
     api.events.mockResolvedValue({ events: [alertEvent({ id: 345 })], more: true })
     renderIn(<RecentFires alertId={12} now={NOW} />)
 
     await waitFor(() => expect(item(345)).not.toBeNull())
-    expect(api.events).toHaveBeenCalledWith({ alert: 12, limit: 5 })
+    expect(api.events.mock.lastCall?.[0]).toEqual({ alert: 12, limit: 5 })
+    expect(api.events.mock.lastCall?.[1]).toBeInstanceOf(AbortSignal)
     expect(screen.getByRole('heading', { name: 'Last fires' })).toBeInTheDocument()
   })
 

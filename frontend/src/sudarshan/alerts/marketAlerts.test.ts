@@ -7,7 +7,12 @@
  * and the Alerts page's cache kept current by the state and delivery pushes. The sound itself is
  * chime.test.ts's.
  */
-import { type InfiniteData, QueryClient, QueryObserver } from '@tanstack/react-query'
+import {
+  type InfiniteData,
+  InfiniteQueryObserver,
+  QueryClient,
+  QueryObserver,
+} from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const toasts = vi.hoisted(() => ({ info: vi.fn(), dismiss: vi.fn() }))
@@ -26,7 +31,7 @@ vi.mock('@/sudarshan/books/sharedSocket', () => ({
   connectionCount: (socket: { count?: number }) => socket.count,
 }))
 
-const api = vi.hoisted(() => ({ state: vi.fn(), eventsSince: vi.fn() }))
+const api = vi.hoisted(() => ({ state: vi.fn(), eventsSince: vi.fn(), events: vi.fn() }))
 vi.mock('@/api/marketAlerts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/api/marketAlerts')>()),
   marketAlertsApi: api,
@@ -43,6 +48,7 @@ import { useAlertStore } from '@/stores/alertStore'
 import {
   ALERTS_PATH,
   bindMarketAlertsCache,
+  HISTORY_SETTLE_MS,
   hearingNow,
   installMarketAlerts,
   RETRY_MS,
@@ -52,7 +58,7 @@ import {
   type TabChannel,
   withRecentDeliveries,
 } from './marketAlerts'
-import { HISTORY_KEY, STATE_KEY } from './stateCache'
+import { firesKey, HISTORY_KEY, STATE_KEY, TEST_KEY } from './stateCache'
 
 type Handler = (...args: any[]) => void
 
@@ -273,6 +279,7 @@ beforeEach(() => {
   chime.played.length = 0
   api.state.mockReset().mockResolvedValue(state())
   api.eventsSince.mockReset().mockResolvedValue(page([]))
+  api.events.mockReset()
   localStorage.clear()
   useAlertStore.getState().resetToDefaults()
   vi.spyOn(document, 'hasFocus').mockReturnValue(true)
@@ -1053,5 +1060,172 @@ describe('the Alerts page’s cache', () => {
     expect(history?.pages[0].events).toHaveLength(1)
     expect(history?.pages[0].events[0].deliveries).toEqual({ telegram: sent })
     expect(withRecentDeliveries(page([pending])).events[0].deliveries.telegram).toEqual(sent)
+  })
+})
+
+describe('History after fires (review M4)', () => {
+  /**
+   * The History tab open on `pages` pages of one event each, newest first from id 1000; `older`
+   * when the server has more beyond them.
+   */
+  async function historyOpen(client: QueryClient, pages: number, older = false) {
+    api.events.mockImplementation(async ({ before }: { before?: number | null }) => {
+      const id = (before ?? 1001) - 1
+      return page([event({ id })], id > 1001 - pages || older)
+    })
+    const observer = new InfiniteQueryObserver<
+      EventsPage,
+      Error,
+      InfiniteData<EventsPage>,
+      readonly unknown[],
+      number | null
+    >(client, {
+      queryKey: HISTORY_KEY,
+      queryFn: ({ pageParam }) => api.events({ before: pageParam }),
+      initialPageParam: null,
+      getNextPageParam: (last) => (last.more ? (last.events.at(-1)?.id ?? null) : null),
+      staleTime: 30_000,
+    })
+    const unsubscribe = observer.subscribe(() => {})
+    await vi.waitFor(() => expect(observer.getCurrentResult().isSuccess).toBe(true))
+    for (let more = 1; more < pages; more += 1) await observer.fetchNextPage()
+    return { observer, unsubscribe }
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'], shouldAdvanceTime: true })
+    vi.setSystemTime(NOW)
+  })
+
+  it('reads only the newest page, once for a burst, and keeps the older pages', async () => {
+    const client = new QueryClient()
+    bindMarketAlertsCache(client)
+    const { observer, unsubscribe } = await historyOpen(client, 3)
+    expect(observer.getCurrentResult().data?.pages).toHaveLength(3)
+    const socket = await joinedSocket()
+    api.events.mockClear()
+    api.events.mockResolvedValue(page([event({ id: 1005 }), event({ id: 1000 })], true))
+
+    // A burst spread over 400 ms: each fire inside the settle time of the one before.
+    for (const id of [1001, 1002, 1003, 1004, 1005]) {
+      socket.fire('sudarshan_market_alert', push({ event_id: id }))
+      await vi.advanceTimersByTimeAsync(100)
+    }
+    await vi.advanceTimersByTimeAsync(HISTORY_SETTLE_MS + 10)
+
+    expect(api.events).toHaveBeenCalledTimes(1)
+    expect(api.events.mock.calls[0][0]).toEqual({ limit: 50 })
+    const pages = observer.getCurrentResult().data?.pages ?? []
+    expect(pages.map((each) => each.events.map((one) => one.id))).toEqual([
+      [1005, 1000],
+      [999],
+      [998],
+    ])
+    unsubscribe()
+  })
+
+  it('never cuts short a Show older on its way, and reads the newest page after it', async () => {
+    const client = new QueryClient()
+    bindMarketAlertsCache(client)
+    const { observer, unsubscribe } = await historyOpen(client, 1, true)
+    const socket = await joinedSocket()
+    let older: (value: EventsPage) => void = () => {}
+    api.events.mockImplementation(({ before }: { before?: number | null }) =>
+      before
+        ? new Promise<EventsPage>((resolve) => {
+            older = resolve
+          })
+        : Promise.resolve(page([event({ id: 1001 }), event({ id: 1000 })], true))
+    )
+
+    const tapped = observer.fetchNextPage() // the owner taps Show older
+    socket.fire('sudarshan_market_alert', push({ event_id: 1001 }))
+    await vi.advanceTimersByTimeAsync(HISTORY_SETTLE_MS + 10)
+    older(page([event({ id: 999 })]))
+    await tapped
+    await vi.advanceTimersByTimeAsync(HISTORY_SETTLE_MS + 10)
+
+    const pages = observer.getCurrentResult().data?.pages ?? []
+    expect(pages.map((each) => each.events.map((one) => one.id))).toEqual([[1001, 1000], [999]])
+    unsubscribe()
+  })
+
+  it('reads the fired alert’s last fires again, once for a burst', async () => {
+    const client = new QueryClient()
+    bindMarketAlertsCache(client)
+    api.events.mockResolvedValue(page([event({ id: 900 })]))
+    const fires = new QueryObserver(client, {
+      queryKey: firesKey(12),
+      queryFn: () => api.events({ alert: 12, limit: 5 }),
+      staleTime: 30_000,
+    })
+    const unsubscribe = fires.subscribe(() => {})
+    await vi.waitFor(() => expect(fires.getCurrentResult().isSuccess).toBe(true))
+    const socket = await joinedSocket()
+    api.events.mockClear()
+
+    socket.fire('sudarshan_market_alert', push({ event_id: 901 }))
+    socket.fire('sudarshan_market_alert', push({ event_id: 902 }))
+    await vi.advanceTimersByTimeAsync(HISTORY_SETTLE_MS + 10)
+
+    expect(api.events).toHaveBeenCalledTimes(1)
+    expect(api.events).toHaveBeenCalledWith({ alert: 12, limit: 5 })
+    unsubscribe()
+  })
+})
+
+describe('the test from the settings (review L5)', () => {
+  const sending = { status: 'pending' as const, reason: '', attempts: 1, updated_at: NOW }
+  const shownOn = {
+    status: 'sent' as const,
+    reason: 'Shown on 1 open screen',
+    attempts: 1,
+    updated_at: NOW + 1_000,
+  }
+  const sent = { status: 'sent' as const, reason: '', attempts: 1, updated_at: NOW + 2_000 }
+
+  function tested(client: QueryClient) {
+    client.setQueryData(
+      TEST_KEY,
+      page([event({ id: 400, deliveries: { telegram: sending, app: sending } })])
+    )
+    bindMarketAlertsCache(client)
+  }
+
+  it('reads a result still sending again after a reconnect', async () => {
+    const client = new QueryClient()
+    tested(client)
+    const socket = await joinedSocket()
+    api.eventsSince.mockResolvedValue(
+      page([event({ id: 400, deliveries: { telegram: sent, app: shownOn } })])
+    )
+
+    await reconnect(socket)
+    expect(api.eventsSince).toHaveBeenCalledWith(399, 1)
+    await vi.waitFor(() =>
+      expect(client.getQueryData<EventsPage>(TEST_KEY)?.events[0].deliveries).toEqual({
+        telegram: sent,
+        app: shownOn,
+      })
+    )
+  })
+
+  it('reads it again when Telegram’s delivery settles by push and the app’s is still sending', async () => {
+    const client = new QueryClient()
+    tested(client)
+    const socket = await joinedSocket()
+    api.eventsSince.mockResolvedValue(
+      page([event({ id: 400, deliveries: { telegram: sent, app: shownOn } })])
+    )
+
+    socket.fire('sudarshan_market_alert_delivery', {
+      event_id: 400,
+      channel: 'telegram',
+      delivery: sent,
+    })
+    expect(api.eventsSince).toHaveBeenCalledWith(399, 1)
+    await vi.waitFor(() =>
+      expect(client.getQueryData<EventsPage>(TEST_KEY)?.events[0].deliveries.app).toEqual(shownOn)
+    )
   })
 })

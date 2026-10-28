@@ -22,7 +22,11 @@ import {
   EVENTS_KEY,
   firesKey,
   HISTORY_KEY,
+  HISTORY_PAGE,
+  type HistoryPages,
+  mergeFirstPage,
   STATE_KEY,
+  TEST_KEY,
 } from './stateCache'
 
 /**
@@ -72,6 +76,8 @@ export const BURST_SHOWN = 3
 export const TOAST_MS = 8_000
 /** How long a tab not in use waits for the tab in use to show an alert. */
 export const TAB_DEFER_MS = 400
+/** A burst of fires reads History again once, this long after its last fire. */
+export const HISTORY_SETTLE_MS = 500
 const SINCE_LIMIT = 200
 /** At most this many pages of missed alerts are read on one connect. */
 const SINCE_PAGES = 25
@@ -443,10 +449,7 @@ function onAlert(push: MarketAlertPush): void {
   else noteSeen(push.event_id)
   if (counted.add(eventKey(push.event_id))) {
     if (!push.test) countInCache(push)
-    if (cache) {
-      void cache.invalidateQueries({ queryKey: HISTORY_KEY })
-      if (push.alert_id > 0) void cache.invalidateQueries({ queryKey: firesKey(push.alert_id) })
-    }
+    refreshLater(push.alert_id)
   }
   deliver(
     single({
@@ -459,6 +462,90 @@ function onAlert(push: MarketAlertPush): void {
       live: true,
     })
   )
+}
+
+// ---------------------------------------------------------------------------
+// History read again after fires: once per burst, the newest page only, never cutting short a
+// Show older on its way.
+
+const refresh: { timer: ReturnType<typeof setTimeout> | null; alerts: Set<number> } = {
+  timer: null,
+  alerts: new Set(),
+}
+
+/** Read History's newest page and the fired alerts' last fires once the burst has settled. */
+function refreshLater(alertId: number): void {
+  if (!cache) return
+  if (alertId > 0) refresh.alerts.add(alertId)
+  if (refresh.timer) clearTimeout(refresh.timer)
+  refresh.timer = setTimeout(() => {
+    refresh.timer = null
+    const alerts = [...refresh.alerts]
+    refresh.alerts.clear()
+    void refreshHistory()
+    for (const id of alerts) {
+      void cache?.invalidateQueries({ queryKey: firesKey(id) }, { cancelRefetch: false })
+    }
+  }, HISTORY_SETTLE_MS)
+}
+
+/** History's newest page read again in place of the one held; the older pages stay as they are. */
+async function refreshHistory(): Promise<void> {
+  const client = cache
+  const query = client?.getQueryCache().find({ queryKey: HISTORY_KEY, exact: true })
+  if (!client || !query?.state.data) return
+  // Not on screen: it is read when it is next opened.
+  if (query.getObserversCount() === 0) {
+    void client.invalidateQueries({ queryKey: HISTORY_KEY, exact: true, refetchType: 'none' })
+    return
+  }
+  // Show older on its way: never cut short; read again once it settles.
+  if (query.state.fetchStatus === 'fetching') {
+    refreshLater(0)
+    return
+  }
+  try {
+    const first = withRecentDeliveries(await marketAlertsApi.events({ limit: HISTORY_PAGE }))
+    let whole = false
+    client.setQueryData<HistoryPages>(HISTORY_KEY, (held) => {
+      if (!held) return held
+      const merged = mergeFirstPage(held, first)
+      whole = merged === null
+      return merged ?? held
+    })
+    // More fired than one page holds: the pages in between are read with the rest.
+    if (whole)
+      void client.refetchQueries({ queryKey: HISTORY_KEY, exact: true }, { cancelRefetch: false })
+  } catch {
+    // Not read: the whole list is read again, and a failure there shows on the list.
+    void client.refetchQueries({ queryKey: HISTORY_KEY, exact: true }, { cancelRefetch: false })
+  }
+}
+
+/**
+ * The last test from the settings, read again while a delivery is still sending: its event, the
+ * one after the id before it (events/since), with how each channel delivered it.
+ */
+function rereadTest(): void {
+  const client = cache
+  const held = client?.getQueryData<EventsPage>(TEST_KEY)?.events[0]
+  if (!client || !held) return
+  const sending = Object.values(held.deliveries ?? {}).some((each) => each?.status === 'pending')
+  if (!sending) return
+  void marketAlertsApi
+    .eventsSince(held.id - 1, 1)
+    .then((page) => {
+      const fresh = page.events.find((each) => each.id === held.id)
+      if (!fresh) return
+      client.setQueryData<EventsPage>(TEST_KEY, (now) =>
+        now?.events[0]?.id === held.id
+          ? withRecentDeliveries({ events: [fresh], more: false })
+          : now
+      )
+    })
+    .catch(() => {
+      // Not read: it stays as it is until the next push or reconnect.
+    })
 }
 
 function countInCache(push: MarketAlertPush): void {
@@ -491,6 +578,8 @@ function onDelivery(push: MarketAlertDeliveryPush): void {
   rememberDelivery(push)
   const news = new Map([[push.event_id, { [push.channel]: push.delivery } as Deliveries]])
   cache?.setQueriesData({ queryKey: EVENTS_KEY }, (data: unknown) => applyDeliveries(data, news))
+  // The test's other channel is not pushed (contract 2.4): read it if it is still sending.
+  if (cache?.getQueryData<EventsPage>(TEST_KEY)?.events[0]?.id === push.event_id) rereadTest()
 }
 
 // ---------------------------------------------------------------------------
@@ -575,6 +664,7 @@ function join(socket: Socket, connection: number, attempt = 0): void {
         void cache.invalidateQueries({ queryKey: STATE_KEY })
         // A History page on its way (Show older) is not cut short: it is read again after.
         void cache.invalidateQueries({ queryKey: EVENTS_KEY }, { cancelRefetch: false })
+        rereadTest()
       }
       void catchUp(socket, connection)
     })
@@ -712,6 +802,9 @@ export function resetMarketAlertsForTests(): void {
   hearing = 'unknown'
   for (const timer of retries) clearTimeout(timer)
   retries.clear()
+  if (refresh.timer) clearTimeout(refresh.timer)
+  refresh.timer = null
+  refresh.alerts.clear()
   burst = newBurst(Number.NEGATIVE_INFINITY)
   go = (to) => window.location.assign(to)
 }

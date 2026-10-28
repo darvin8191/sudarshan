@@ -7,6 +7,7 @@ import {
   FlaskConical,
   type LucideIcon,
   PauseCircle,
+  RefreshCw,
   Sunrise,
   XCircle,
 } from 'lucide-react'
@@ -19,20 +20,25 @@ import {
   marketAlertsApi,
 } from '@/api/marketAlerts'
 import { cn } from '@/lib/utils'
-import { EmptyCard, LoadingCards, OUTLINED, ProblemCard } from '@/sudarshan/books/cards/parts'
+import {
+  EmptyCard,
+  LoadingCards,
+  OUTLINED,
+  ProblemCard,
+  StaleBookNote,
+} from '@/sudarshan/books/cards/parts'
 import { istTime } from '@/sudarshan/books/time'
 import { describe } from '@/sudarshan/watchlist/rows'
 import { firedAt, withRecentDeliveries } from './marketAlerts'
-import { firesKey, HISTORY_KEY } from './stateCache'
+import { firesKey, HISTORY_KEY, HISTORY_PAGE } from './stateCache'
 
 /**
  * What fired (M10.4): each event with its time in India, the server's words and value as they
  * were frozen when it fired, its marks, and how each channel delivered it. Newest first, a page
  * at a time; a page read while a delivery settled takes that delivery (withRecentDeliveries),
- * and later ones arrive by push (marketAlerts.ts), never by reading again on a timer.
+ * and later ones arrive by push (marketAlerts.ts), never by reading again on a timer. A fire
+ * reads the newest page again (marketAlerts.ts), once per burst.
  */
-
-const PAGE = 50
 
 export const CHANNELS: Array<[Channel, string]> = [
   ['telegram', 'Telegram'],
@@ -157,9 +163,9 @@ export function EventItem({ event, now }: { event: AlertEvent; now: number }) {
 export function HistoryList({ now }: { now: number }) {
   const history = useInfiniteQuery<EventsPage, AlertsError>({
     queryKey: HISTORY_KEY,
-    queryFn: ({ pageParam }) =>
+    queryFn: ({ pageParam, signal }) =>
       marketAlertsApi
-        .events({ before: pageParam as number | null, limit: PAGE })
+        .events({ before: pageParam as number | null, limit: HISTORY_PAGE }, signal)
         .then(withRecentDeliveries),
     initialPageParam: null,
     getNextPageParam: (last) => (last.more ? (last.events.at(-1)?.id ?? null) : null),
@@ -167,10 +173,14 @@ export function HistoryList({ now }: { now: number }) {
     retry: false,
   })
   if (history.isPending) return <LoadingCards />
-  if (history.isError && !history.data) {
-    return <ProblemCard message={history.error.message} onRetry={() => void history.refetch()} />
-  }
   const events = history.data?.pages.flatMap((page) => page.events) ?? []
+  // A read that failed: with nothing held, in its place; after a fire or a reconnect, above the
+  // list it keeps, marked as last read.
+  const failed = history.isError && !history.isFetchNextPageError
+  const retry = () => void history.refetch()
+  if (failed && events.length === 0) {
+    return <ProblemCard message={history.error.message} onRetry={retry} />
+  }
   if (events.length === 0) {
     return (
       <EmptyCard
@@ -181,6 +191,23 @@ export function HistoryList({ now }: { now: number }) {
   }
   return (
     <div className="flex flex-col gap-2">
+      {failed && (
+        <div className="flex flex-col gap-1.5">
+          <p role="alert" className="px-1 text-sm font-semibold text-[color:var(--down)]">
+            {history.error.message}
+          </p>
+          <StaleBookNote text="These fires are as last read." />
+          <button
+            type="button"
+            disabled={history.isFetching}
+            onClick={retry}
+            className={cn(OUTLINED, 'self-start')}
+          >
+            <RefreshCw aria-hidden="true" className="size-4" />
+            Try again
+          </button>
+        </div>
+      )}
       <ol className="flex flex-col gap-2">
         {events.map((event) => (
           <li key={event.id}>
@@ -212,7 +239,8 @@ export function HistoryList({ now }: { now: number }) {
 export function RecentFires({ alertId, now }: { alertId: number; now: number }) {
   const fires = useQuery<EventsPage, AlertsError>({
     queryKey: firesKey(alertId),
-    queryFn: () => marketAlertsApi.events({ alert: alertId, limit: 5 }).then(withRecentDeliveries),
+    queryFn: ({ signal }) =>
+      marketAlertsApi.events({ alert: alertId, limit: 5 }, signal).then(withRecentDeliveries),
     staleTime: 30_000,
     retry: false,
   })
