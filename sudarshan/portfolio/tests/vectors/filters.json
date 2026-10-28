@@ -1,0 +1,3055 @@
+{
+ "about": "Golden vectors for core/filters.py (PA6): how a filter is read (and refused), and which holding lines a filter leaves, with the lots held over or under a year. Positions are given as lots [day, qty_u, cost_paise]; a case's world is described in its why.",
+ "parse": [
+  {
+   "id": "FP1",
+   "title": "A filter is read into one order whoever wrote it",
+   "why": "Accounts 3, 1, 3 are the accounts 1 and 3, once each and lowest first. Classes are in the order of the kinds of asset (equity before gold), once each. Tags lose the spaces round them, are once each and sorted. held and as_of stay as they were written.",
+   "raw": {
+    "accounts": [
+     3,
+     1,
+     3
+    ],
+    "classes": [
+     "gold",
+     "equity",
+     "gold"
+    ],
+    "tags": [
+     " income ",
+     "core",
+     "core"
+    ],
+    "held": "over",
+    "as_of": 20261027
+   },
+   "expect": {
+    "accounts": [
+     1,
+     3
+    ],
+    "classes": [
+     "equity",
+     "gold"
+    ],
+    "tags": [
+     "core",
+     "income"
+    ],
+    "held": "over",
+    "as_of": 20261027
+   }
+  },
+  {
+   "id": "FP2",
+   "title": "Nothing chosen is nothing",
+   "why": "A filter with no key at all chooses nothing, and so shows everything: no account, no kind of asset, no tag, no held, no day.",
+   "raw": {},
+   "expect": {
+    "accounts": [],
+    "classes": [],
+    "tags": [],
+    "held": null,
+    "as_of": null
+   }
+  },
+  {
+   "id": "FP3",
+   "title": "A key it does not know is dropped and a null is nothing",
+   "why": "A saved view carries a sort and a number of its own, and a null where nothing was chosen. Those are not part of the filter: it comes out as the empty filter.",
+   "raw": {
+    "accounts": null,
+    "tags": null,
+    "view": 7,
+    "sort": "value",
+    "held": null
+   },
+   "expect": {
+    "accounts": [],
+    "classes": [],
+    "tags": [],
+    "held": null,
+    "as_of": null
+   }
+  },
+  {
+   "id": "FP4",
+   "title": "Ten tags of up to thirty characters are the most",
+   "why": "Nine short tags and one of exactly 30 characters, which is the longest a tag may be: all ten are kept and sorted as text (t0 to t8, then the long one, because x comes after t).",
+   "raw": {
+    "tags": [
+     "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+     "t0",
+     "t1",
+     "t2",
+     "t3",
+     "t4",
+     "t5",
+     "t6",
+     "t7",
+     "t8"
+    ]
+   },
+   "expect": {
+    "accounts": [],
+    "classes": [],
+    "tags": [
+     "t0",
+     "t1",
+     "t2",
+     "t3",
+     "t4",
+     "t5",
+     "t6",
+     "t7",
+     "t8",
+     "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    ],
+    "held": null,
+    "as_of": null
+   }
+  },
+  {
+   "id": "FP5",
+   "title": "A tag is exact: capitals count and spaces inside stay",
+   "why": "Core and core are two tags, and the sort puts the capital first (code point order). The space inside 'high growth' stays; the ones round it go. Written twice, it is one.",
+   "raw": {
+    "tags": [
+     "core",
+     " Core",
+     "high growth ",
+     "high growth"
+    ]
+   },
+   "expect": {
+    "accounts": [],
+    "classes": [],
+    "tags": [
+     "Core",
+     "core",
+     "high growth"
+    ],
+    "held": null,
+    "as_of": null
+   }
+  },
+  {
+   "id": "FP6",
+   "title": "Accounts are sorted as numbers, whatever order a set would give them",
+   "why": "8, 2, 16 and 1 come out as 1, 2, 8, 16. A set of these numbers does not come back in this order (its order follows how the numbers hash), so the result must be sorted on purpose.",
+   "raw": {
+    "accounts": [
+     8,
+     2,
+     16,
+     1
+    ]
+   },
+   "expect": {
+    "accounts": [
+     1,
+     2,
+     8,
+     16
+    ],
+    "classes": [],
+    "tags": [],
+    "held": null,
+    "as_of": null
+   }
+  },
+  {
+   "id": "FE1",
+   "title": "An account is a number above nothing",
+   "why": "0 is no account: the numbers are those the store gave, from 1.",
+   "raw": {
+    "accounts": [
+     0
+    ]
+   },
+   "expect": {
+    "error": "Choose the accounts from the list."
+   }
+  },
+  {
+   "id": "FE2",
+   "title": "An account is not text",
+   "why": "'1' is text and not an account number: the phone sends numbers.",
+   "raw": {
+    "accounts": [
+     "1"
+    ]
+   },
+   "expect": {
+    "error": "Choose the accounts from the list."
+   }
+  },
+  {
+   "id": "FE3",
+   "title": "An account is not true or false",
+   "why": "True is 1 to a program but it is not an account: a true or false is never taken for a number.",
+   "raw": {
+    "accounts": [
+     true
+    ]
+   },
+   "expect": {
+    "error": "Choose the accounts from the list."
+   }
+  },
+  {
+   "id": "FE4",
+   "title": "A kind of asset the tab does not have",
+   "why": "'shares' is not on the list of kinds (equity, MF equity, gold and so on): the owner chooses kinds from a list, so this is a view saved by something else.",
+   "raw": {
+    "classes": [
+     "shares"
+    ]
+   },
+   "expect": {
+    "error": "Choose the kinds of asset from the list."
+   }
+  },
+  {
+   "id": "FE5",
+   "title": "A list that is not a list",
+   "why": "'equity' where a list of kinds was meant is not read as one kind: it could be one letter at a time. The filter as a whole is the thing that cannot be read.",
+   "raw": {
+    "classes": "equity"
+   },
+   "expect": {
+    "error": "This filter cannot be read. Choose accounts, kinds of asset and tags from the lists."
+   }
+  },
+  {
+   "id": "FE6",
+   "title": "A tag with a comma",
+   "why": "A tab is asked for with its tags in one list separated by commas, so a tag with a comma in it could never be asked for again. It is refused when it is chosen.",
+   "raw": {
+    "tags": [
+     "a,b"
+    ]
+   },
+   "expect": {
+    "error": "A tag is 1 to 30 characters with no comma, and a filter takes at most 10 tags."
+   }
+  },
+  {
+   "id": "FE7",
+   "title": "A tag of 31 characters",
+   "why": "One more than the longest a tag may be (30).",
+   "raw": {
+    "tags": [
+     "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    ]
+   },
+   "expect": {
+    "error": "A tag is 1 to 30 characters with no comma, and a filter takes at most 10 tags."
+   }
+  },
+  {
+   "id": "FE8",
+   "title": "Eleven tags",
+   "why": "Eleven different tags: one more than a filter takes (10).",
+   "raw": {
+    "tags": [
+     "t0",
+     "t1",
+     "t2",
+     "t3",
+     "t4",
+     "t5",
+     "t6",
+     "t7",
+     "t8",
+     "t9",
+     "t10"
+    ]
+   },
+   "expect": {
+    "error": "A tag is 1 to 30 characters with no comma, and a filter takes at most 10 tags."
+   }
+  },
+  {
+   "id": "FE9",
+   "title": "A blank tag",
+   "why": "Nothing but spaces is no tag at all: after the spaces go, it is empty.",
+   "raw": {
+    "tags": [
+     "  "
+    ]
+   },
+   "expect": {
+    "error": "A tag is 1 to 30 characters with no comma, and a filter takes at most 10 tags."
+   }
+  },
+  {
+   "id": "FE10",
+   "title": "A tag that is a number",
+   "why": "5 is not text, so it is not a tag and the list cannot be read.",
+   "raw": {
+    "tags": [
+     5
+    ]
+   },
+   "expect": {
+    "error": "This filter cannot be read. Choose accounts, kinds of asset and tags from the lists."
+   }
+  },
+  {
+   "id": "FE11",
+   "title": "Held for neither over nor under",
+   "why": "'sideways' is neither held over a year nor held under a year.",
+   "raw": {
+    "held": "sideways"
+   },
+   "expect": {
+    "error": "Choose held over a year or held under a year."
+   }
+  },
+  {
+   "id": "FE12",
+   "title": "A day that is not a day",
+   "why": "20261331 has a thirty-first month: it is not a date.",
+   "raw": {
+    "as_of": 20261331
+   },
+   "expect": {
+    "error": "Enter a valid date."
+   }
+  },
+  {
+   "id": "FE13",
+   "title": "A day written as text",
+   "why": "'20261027' is text: a day is a whole number written year, month, day.",
+   "raw": {
+    "as_of": "20261027"
+   },
+   "expect": {
+    "error": "Enter a valid date."
+   }
+  },
+  {
+   "id": "FE14",
+   "title": "Something that is not a filter",
+   "why": "A list where an object was meant: it has no keys to read.",
+   "raw": [
+    1,
+    2
+   ],
+   "expect": {
+    "error": "This filter cannot be read. Choose accounts, kinds of asset and tags from the lists."
+   }
+  },
+  {
+   "id": "FE15",
+   "title": "Nothing at all",
+   "why": "null where an object was meant is not an empty filter: a filter is always sent, so a missing one is a fault of the sender.",
+   "raw": null,
+   "expect": {
+    "error": "This filter cannot be read. Choose accounts, kinds of asset and tags from the lists."
+   }
+  },
+  {
+   "id": "FE16",
+   "title": "The first thing wrong is the one said",
+   "why": "The accounts are wrong (0) and the classes are not even a list. The accounts are read first, so it is the accounts that are named; the trader mends one thing and is told the next.",
+   "raw": {
+    "accounts": [
+     0
+    ],
+    "classes": "equity"
+   },
+   "expect": {
+    "error": "Choose the accounts from the list."
+   }
+  }
+ ],
+ "select": [
+  {
+   "id": "FS1",
+   "title": "No filter leaves every line as it is",
+   "why": "The world of these cases is Tuesday 27 Oct 2026 and six lines. Asset 1 (equity, core) is held in account 1 in four lots and in account 2 in one; asset 2 (equity, income) in account 1 in one lot bought today; asset 3 (gold) in account 2; asset 4 (MF equity, core and income) in both. Nothing chosen: all six lines, untouched, and Today still means something.",
+   "today": 20261027,
+   "filters": {},
+   "facts": {
+    "1": {
+     "id": 1,
+     "asset_class": "equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "core"
+     ]
+    },
+    "2": {
+     "id": 2,
+     "asset_class": "equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "income"
+     ]
+    },
+    "3": {
+     "id": 3,
+     "asset_class": "gold",
+     "sector": null,
+     "mcap": null,
+     "tags": []
+    },
+    "4": {
+     "id": 4,
+     "asset_class": "mf_equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "core",
+      "income"
+     ]
+    }
+   },
+   "lines": {
+    "1": [
+     {
+      "account_id": 1,
+      "qty_u": 10000000,
+      "open_qty_u": 10000000,
+      "cost_paise": 1100000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     },
+     {
+      "account_id": 2,
+      "qty_u": 5000000,
+      "open_qty_u": 5000000,
+      "cost_paise": 500000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ],
+    "2": [
+     {
+      "account_id": 1,
+      "qty_u": 20000000,
+      "open_qty_u": 0,
+      "cost_paise": 2000000,
+      "in_today_paise": 2000000,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ],
+    "3": [
+     {
+      "account_id": 2,
+      "qty_u": 3000000,
+      "open_qty_u": 3000000,
+      "cost_paise": 90000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ],
+    "4": [
+     {
+      "account_id": 1,
+      "qty_u": 100000000,
+      "open_qty_u": 100000000,
+      "cost_paise": 1000000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     },
+     {
+      "account_id": 2,
+      "qty_u": 50000000,
+      "open_qty_u": 50000000,
+      "cost_paise": 500000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ]
+   },
+   "positions": {
+    "1/1": [
+     [
+      20240229,
+      4000000,
+      400000
+     ],
+     [
+      20251026,
+      3000000,
+      330000
+     ],
+     [
+      20251027,
+      2000000,
+      240000
+     ],
+     [
+      20251101,
+      1000000,
+      130000
+     ]
+    ],
+    "2/1": [
+     [
+      20250105,
+      5000000,
+      500000
+     ]
+    ],
+    "1/2": [
+     [
+      20261027,
+      20000000,
+      2000000
+     ]
+    ],
+    "2/3": [
+     [
+      20260101,
+      3000000,
+      90000
+     ]
+    ],
+    "1/4": [
+     [
+      20250301,
+      60000000,
+      600000
+     ],
+     [
+      20260301,
+      40000000,
+      400000
+     ]
+    ],
+    "2/4": [
+     [
+      20240102,
+      50000000,
+      500000
+     ]
+    ]
+   },
+   "expect": {
+    "lines": {
+     "1": [
+      {
+       "account_id": 1,
+       "qty_u": 10000000,
+       "open_qty_u": 10000000,
+       "cost_paise": 1100000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      },
+      {
+       "account_id": 2,
+       "qty_u": 5000000,
+       "open_qty_u": 5000000,
+       "cost_paise": 500000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ],
+     "2": [
+      {
+       "account_id": 1,
+       "qty_u": 20000000,
+       "open_qty_u": 0,
+       "cost_paise": 2000000,
+       "in_today_paise": 2000000,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ],
+     "3": [
+      {
+       "account_id": 2,
+       "qty_u": 3000000,
+       "open_qty_u": 3000000,
+       "cost_paise": 90000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ],
+     "4": [
+      {
+       "account_id": 1,
+       "qty_u": 100000000,
+       "open_qty_u": 100000000,
+       "cost_paise": 1000000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      },
+      {
+       "account_id": 2,
+       "qty_u": 50000000,
+       "open_qty_u": 50000000,
+       "cost_paise": 500000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    },
+    "today_off": false
+   }
+  },
+  {
+   "id": "FS2",
+   "title": "An account keeps the lines of that account",
+   "why": "The world of these cases is Tuesday 27 Oct 2026 and six lines. Asset 1 (equity, core) is held in account 1 in four lots and in account 2 in one; asset 2 (equity, income) in account 1 in one lot bought today; asset 3 (gold) in account 2; asset 4 (MF equity, core and income) in both. Account 2: its lines of assets 1, 3 and 4. Asset 2 had no line there and is gone.",
+   "today": 20261027,
+   "filters": {
+    "accounts": [
+     2
+    ]
+   },
+   "facts": {
+    "1": {
+     "id": 1,
+     "asset_class": "equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "core"
+     ]
+    },
+    "2": {
+     "id": 2,
+     "asset_class": "equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "income"
+     ]
+    },
+    "3": {
+     "id": 3,
+     "asset_class": "gold",
+     "sector": null,
+     "mcap": null,
+     "tags": []
+    },
+    "4": {
+     "id": 4,
+     "asset_class": "mf_equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "core",
+      "income"
+     ]
+    }
+   },
+   "lines": {
+    "1": [
+     {
+      "account_id": 1,
+      "qty_u": 10000000,
+      "open_qty_u": 10000000,
+      "cost_paise": 1100000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     },
+     {
+      "account_id": 2,
+      "qty_u": 5000000,
+      "open_qty_u": 5000000,
+      "cost_paise": 500000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ],
+    "2": [
+     {
+      "account_id": 1,
+      "qty_u": 20000000,
+      "open_qty_u": 0,
+      "cost_paise": 2000000,
+      "in_today_paise": 2000000,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ],
+    "3": [
+     {
+      "account_id": 2,
+      "qty_u": 3000000,
+      "open_qty_u": 3000000,
+      "cost_paise": 90000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ],
+    "4": [
+     {
+      "account_id": 1,
+      "qty_u": 100000000,
+      "open_qty_u": 100000000,
+      "cost_paise": 1000000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     },
+     {
+      "account_id": 2,
+      "qty_u": 50000000,
+      "open_qty_u": 50000000,
+      "cost_paise": 500000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ]
+   },
+   "positions": {
+    "1/1": [
+     [
+      20240229,
+      4000000,
+      400000
+     ],
+     [
+      20251026,
+      3000000,
+      330000
+     ],
+     [
+      20251027,
+      2000000,
+      240000
+     ],
+     [
+      20251101,
+      1000000,
+      130000
+     ]
+    ],
+    "2/1": [
+     [
+      20250105,
+      5000000,
+      500000
+     ]
+    ],
+    "1/2": [
+     [
+      20261027,
+      20000000,
+      2000000
+     ]
+    ],
+    "2/3": [
+     [
+      20260101,
+      3000000,
+      90000
+     ]
+    ],
+    "1/4": [
+     [
+      20250301,
+      60000000,
+      600000
+     ],
+     [
+      20260301,
+      40000000,
+      400000
+     ]
+    ],
+    "2/4": [
+     [
+      20240102,
+      50000000,
+      500000
+     ]
+    ]
+   },
+   "expect": {
+    "lines": {
+     "1": [
+      {
+       "account_id": 2,
+       "qty_u": 5000000,
+       "open_qty_u": 5000000,
+       "cost_paise": 500000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ],
+     "3": [
+      {
+       "account_id": 2,
+       "qty_u": 3000000,
+       "open_qty_u": 3000000,
+       "cost_paise": 90000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ],
+     "4": [
+      {
+       "account_id": 2,
+       "qty_u": 50000000,
+       "open_qty_u": 50000000,
+       "cost_paise": 500000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    },
+    "today_off": false
+   }
+  },
+  {
+   "id": "FS3",
+   "title": "Kinds of asset are alternatives",
+   "why": "The world of these cases is Tuesday 27 Oct 2026 and six lines. Asset 1 (equity, core) is held in account 1 in four lots and in account 2 in one; asset 2 (equity, income) in account 1 in one lot bought today; asset 3 (gold) in account 2; asset 4 (MF equity, core and income) in both. Gold or MF equity: assets 3 and 4, every account.",
+   "today": 20261027,
+   "filters": {
+    "classes": [
+     "gold",
+     "mf_equity"
+    ]
+   },
+   "facts": {
+    "1": {
+     "id": 1,
+     "asset_class": "equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "core"
+     ]
+    },
+    "2": {
+     "id": 2,
+     "asset_class": "equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "income"
+     ]
+    },
+    "3": {
+     "id": 3,
+     "asset_class": "gold",
+     "sector": null,
+     "mcap": null,
+     "tags": []
+    },
+    "4": {
+     "id": 4,
+     "asset_class": "mf_equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "core",
+      "income"
+     ]
+    }
+   },
+   "lines": {
+    "1": [
+     {
+      "account_id": 1,
+      "qty_u": 10000000,
+      "open_qty_u": 10000000,
+      "cost_paise": 1100000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     },
+     {
+      "account_id": 2,
+      "qty_u": 5000000,
+      "open_qty_u": 5000000,
+      "cost_paise": 500000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ],
+    "2": [
+     {
+      "account_id": 1,
+      "qty_u": 20000000,
+      "open_qty_u": 0,
+      "cost_paise": 2000000,
+      "in_today_paise": 2000000,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ],
+    "3": [
+     {
+      "account_id": 2,
+      "qty_u": 3000000,
+      "open_qty_u": 3000000,
+      "cost_paise": 90000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ],
+    "4": [
+     {
+      "account_id": 1,
+      "qty_u": 100000000,
+      "open_qty_u": 100000000,
+      "cost_paise": 1000000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     },
+     {
+      "account_id": 2,
+      "qty_u": 50000000,
+      "open_qty_u": 50000000,
+      "cost_paise": 500000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ]
+   },
+   "positions": {
+    "1/1": [
+     [
+      20240229,
+      4000000,
+      400000
+     ],
+     [
+      20251026,
+      3000000,
+      330000
+     ],
+     [
+      20251027,
+      2000000,
+      240000
+     ],
+     [
+      20251101,
+      1000000,
+      130000
+     ]
+    ],
+    "2/1": [
+     [
+      20250105,
+      5000000,
+      500000
+     ]
+    ],
+    "1/2": [
+     [
+      20261027,
+      20000000,
+      2000000
+     ]
+    ],
+    "2/3": [
+     [
+      20260101,
+      3000000,
+      90000
+     ]
+    ],
+    "1/4": [
+     [
+      20250301,
+      60000000,
+      600000
+     ],
+     [
+      20260301,
+      40000000,
+      400000
+     ]
+    ],
+    "2/4": [
+     [
+      20240102,
+      50000000,
+      500000
+     ]
+    ]
+   },
+   "expect": {
+    "lines": {
+     "3": [
+      {
+       "account_id": 2,
+       "qty_u": 3000000,
+       "open_qty_u": 3000000,
+       "cost_paise": 90000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ],
+     "4": [
+      {
+       "account_id": 1,
+       "qty_u": 100000000,
+       "open_qty_u": 100000000,
+       "cost_paise": 1000000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      },
+      {
+       "account_id": 2,
+       "qty_u": 50000000,
+       "open_qty_u": 50000000,
+       "cost_paise": 500000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    },
+    "today_off": false
+   }
+  },
+  {
+   "id": "FS4",
+   "title": "Tags are alternatives too",
+   "why": "The world of these cases is Tuesday 27 Oct 2026 and six lines. Asset 1 (equity, core) is held in account 1 in four lots and in account 2 in one; asset 2 (equity, income) in account 1 in one lot bought today; asset 3 (gold) in account 2; asset 4 (MF equity, core and income) in both. income or core: assets 1 (core), 2 (income) and 4 (both). Gold has no tag.",
+   "today": 20261027,
+   "filters": {
+    "tags": [
+     "core",
+     "income"
+    ]
+   },
+   "facts": {
+    "1": {
+     "id": 1,
+     "asset_class": "equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "core"
+     ]
+    },
+    "2": {
+     "id": 2,
+     "asset_class": "equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "income"
+     ]
+    },
+    "3": {
+     "id": 3,
+     "asset_class": "gold",
+     "sector": null,
+     "mcap": null,
+     "tags": []
+    },
+    "4": {
+     "id": 4,
+     "asset_class": "mf_equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "core",
+      "income"
+     ]
+    }
+   },
+   "lines": {
+    "1": [
+     {
+      "account_id": 1,
+      "qty_u": 10000000,
+      "open_qty_u": 10000000,
+      "cost_paise": 1100000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     },
+     {
+      "account_id": 2,
+      "qty_u": 5000000,
+      "open_qty_u": 5000000,
+      "cost_paise": 500000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ],
+    "2": [
+     {
+      "account_id": 1,
+      "qty_u": 20000000,
+      "open_qty_u": 0,
+      "cost_paise": 2000000,
+      "in_today_paise": 2000000,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ],
+    "3": [
+     {
+      "account_id": 2,
+      "qty_u": 3000000,
+      "open_qty_u": 3000000,
+      "cost_paise": 90000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ],
+    "4": [
+     {
+      "account_id": 1,
+      "qty_u": 100000000,
+      "open_qty_u": 100000000,
+      "cost_paise": 1000000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     },
+     {
+      "account_id": 2,
+      "qty_u": 50000000,
+      "open_qty_u": 50000000,
+      "cost_paise": 500000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ]
+   },
+   "positions": {
+    "1/1": [
+     [
+      20240229,
+      4000000,
+      400000
+     ],
+     [
+      20251026,
+      3000000,
+      330000
+     ],
+     [
+      20251027,
+      2000000,
+      240000
+     ],
+     [
+      20251101,
+      1000000,
+      130000
+     ]
+    ],
+    "2/1": [
+     [
+      20250105,
+      5000000,
+      500000
+     ]
+    ],
+    "1/2": [
+     [
+      20261027,
+      20000000,
+      2000000
+     ]
+    ],
+    "2/3": [
+     [
+      20260101,
+      3000000,
+      90000
+     ]
+    ],
+    "1/4": [
+     [
+      20250301,
+      60000000,
+      600000
+     ],
+     [
+      20260301,
+      40000000,
+      400000
+     ]
+    ],
+    "2/4": [
+     [
+      20240102,
+      50000000,
+      500000
+     ]
+    ]
+   },
+   "expect": {
+    "lines": {
+     "1": [
+      {
+       "account_id": 1,
+       "qty_u": 10000000,
+       "open_qty_u": 10000000,
+       "cost_paise": 1100000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      },
+      {
+       "account_id": 2,
+       "qty_u": 5000000,
+       "open_qty_u": 5000000,
+       "cost_paise": 500000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ],
+     "2": [
+      {
+       "account_id": 1,
+       "qty_u": 20000000,
+       "open_qty_u": 0,
+       "cost_paise": 2000000,
+       "in_today_paise": 2000000,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ],
+     "4": [
+      {
+       "account_id": 1,
+       "qty_u": 100000000,
+       "open_qty_u": 100000000,
+       "cost_paise": 1000000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      },
+      {
+       "account_id": 2,
+       "qty_u": 50000000,
+       "open_qty_u": 50000000,
+       "cost_paise": 500000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    },
+    "today_off": false
+   }
+  },
+  {
+   "id": "FS5",
+   "title": "Different kinds of choice all have to hold",
+   "why": "The world of these cases is Tuesday 27 Oct 2026 and six lines. Asset 1 (equity, core) is held in account 1 in four lots and in account 2 in one; asset 2 (equity, income) in account 1 in one lot bought today; asset 3 (gold) in account 2; asset 4 (MF equity, core and income) in both. Equity and tagged core: asset 1 only. Asset 2 is equity but not core; asset 4 is core but not equity.",
+   "today": 20261027,
+   "filters": {
+    "classes": [
+     "equity"
+    ],
+    "tags": [
+     "core"
+    ]
+   },
+   "facts": {
+    "1": {
+     "id": 1,
+     "asset_class": "equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "core"
+     ]
+    },
+    "2": {
+     "id": 2,
+     "asset_class": "equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "income"
+     ]
+    },
+    "3": {
+     "id": 3,
+     "asset_class": "gold",
+     "sector": null,
+     "mcap": null,
+     "tags": []
+    },
+    "4": {
+     "id": 4,
+     "asset_class": "mf_equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "core",
+      "income"
+     ]
+    }
+   },
+   "lines": {
+    "1": [
+     {
+      "account_id": 1,
+      "qty_u": 10000000,
+      "open_qty_u": 10000000,
+      "cost_paise": 1100000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     },
+     {
+      "account_id": 2,
+      "qty_u": 5000000,
+      "open_qty_u": 5000000,
+      "cost_paise": 500000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ],
+    "2": [
+     {
+      "account_id": 1,
+      "qty_u": 20000000,
+      "open_qty_u": 0,
+      "cost_paise": 2000000,
+      "in_today_paise": 2000000,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ],
+    "3": [
+     {
+      "account_id": 2,
+      "qty_u": 3000000,
+      "open_qty_u": 3000000,
+      "cost_paise": 90000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ],
+    "4": [
+     {
+      "account_id": 1,
+      "qty_u": 100000000,
+      "open_qty_u": 100000000,
+      "cost_paise": 1000000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     },
+     {
+      "account_id": 2,
+      "qty_u": 50000000,
+      "open_qty_u": 50000000,
+      "cost_paise": 500000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ]
+   },
+   "positions": {
+    "1/1": [
+     [
+      20240229,
+      4000000,
+      400000
+     ],
+     [
+      20251026,
+      3000000,
+      330000
+     ],
+     [
+      20251027,
+      2000000,
+      240000
+     ],
+     [
+      20251101,
+      1000000,
+      130000
+     ]
+    ],
+    "2/1": [
+     [
+      20250105,
+      5000000,
+      500000
+     ]
+    ],
+    "1/2": [
+     [
+      20261027,
+      20000000,
+      2000000
+     ]
+    ],
+    "2/3": [
+     [
+      20260101,
+      3000000,
+      90000
+     ]
+    ],
+    "1/4": [
+     [
+      20250301,
+      60000000,
+      600000
+     ],
+     [
+      20260301,
+      40000000,
+      400000
+     ]
+    ],
+    "2/4": [
+     [
+      20240102,
+      50000000,
+      500000
+     ]
+    ]
+   },
+   "expect": {
+    "lines": {
+     "1": [
+      {
+       "account_id": 1,
+       "qty_u": 10000000,
+       "open_qty_u": 10000000,
+       "cost_paise": 1100000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      },
+      {
+       "account_id": 2,
+       "qty_u": 5000000,
+       "open_qty_u": 5000000,
+       "cost_paise": 500000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    },
+    "today_off": false
+   }
+  },
+  {
+   "id": "FS6",
+   "title": "Account, kind and tag together",
+   "why": "The world of these cases is Tuesday 27 Oct 2026 and six lines. Asset 1 (equity, core) is held in account 1 in four lots and in account 2 in one; asset 2 (equity, income) in account 1 in one lot bought today; asset 3 (gold) in account 2; asset 4 (MF equity, core and income) in both. Account 1, equity, core: the one line of asset 1 in account 1.",
+   "today": 20261027,
+   "filters": {
+    "accounts": [
+     1
+    ],
+    "classes": [
+     "equity"
+    ],
+    "tags": [
+     "core"
+    ]
+   },
+   "facts": {
+    "1": {
+     "id": 1,
+     "asset_class": "equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "core"
+     ]
+    },
+    "2": {
+     "id": 2,
+     "asset_class": "equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "income"
+     ]
+    },
+    "3": {
+     "id": 3,
+     "asset_class": "gold",
+     "sector": null,
+     "mcap": null,
+     "tags": []
+    },
+    "4": {
+     "id": 4,
+     "asset_class": "mf_equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "core",
+      "income"
+     ]
+    }
+   },
+   "lines": {
+    "1": [
+     {
+      "account_id": 1,
+      "qty_u": 10000000,
+      "open_qty_u": 10000000,
+      "cost_paise": 1100000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     },
+     {
+      "account_id": 2,
+      "qty_u": 5000000,
+      "open_qty_u": 5000000,
+      "cost_paise": 500000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ],
+    "2": [
+     {
+      "account_id": 1,
+      "qty_u": 20000000,
+      "open_qty_u": 0,
+      "cost_paise": 2000000,
+      "in_today_paise": 2000000,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ],
+    "3": [
+     {
+      "account_id": 2,
+      "qty_u": 3000000,
+      "open_qty_u": 3000000,
+      "cost_paise": 90000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ],
+    "4": [
+     {
+      "account_id": 1,
+      "qty_u": 100000000,
+      "open_qty_u": 100000000,
+      "cost_paise": 1000000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     },
+     {
+      "account_id": 2,
+      "qty_u": 50000000,
+      "open_qty_u": 50000000,
+      "cost_paise": 500000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ]
+   },
+   "positions": {
+    "1/1": [
+     [
+      20240229,
+      4000000,
+      400000
+     ],
+     [
+      20251026,
+      3000000,
+      330000
+     ],
+     [
+      20251027,
+      2000000,
+      240000
+     ],
+     [
+      20251101,
+      1000000,
+      130000
+     ]
+    ],
+    "2/1": [
+     [
+      20250105,
+      5000000,
+      500000
+     ]
+    ],
+    "1/2": [
+     [
+      20261027,
+      20000000,
+      2000000
+     ]
+    ],
+    "2/3": [
+     [
+      20260101,
+      3000000,
+      90000
+     ]
+    ],
+    "1/4": [
+     [
+      20250301,
+      60000000,
+      600000
+     ],
+     [
+      20260301,
+      40000000,
+      400000
+     ]
+    ],
+    "2/4": [
+     [
+      20240102,
+      50000000,
+      500000
+     ]
+    ]
+   },
+   "expect": {
+    "lines": {
+     "1": [
+      {
+       "account_id": 1,
+       "qty_u": 10000000,
+       "open_qty_u": 10000000,
+       "cost_paise": 1100000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    },
+    "today_off": false
+   }
+  },
+  {
+   "id": "FS7",
+   "title": "Held over a year keeps the lots bought more than a year ago, with their cost",
+   "why": "The world of these cases is Tuesday 27 Oct 2026 and six lines. Asset 1 (equity, core) is held in account 1 in four lots and in account 2 in one; asset 2 (equity, income) in account 1 in one lot bought today; asset 3 (gold) in account 2; asset 4 (MF equity, core and income) in both. Over a year on 27 Oct 2026 means bought before 27 Oct 2025. Account 1's asset 1: the lot of 29 Feb 2024 (4 units, cost 4,000.00, anniversary 28 Feb 2025) and the lot of 26 Oct 2025 (3 units, 3,300.00, anniversary 26 Oct 2026) are over; the lot of 27 Oct 2025 is exactly a year old today, which is not more than a year, and the lot of 1 Nov 2025 is under. So 7 units at a cost of 730,000 paise. Account 2's lot of 5 Jan 2025 is over. Asset 2 was bought today and asset 3 on 1 Jan 2026: nothing over. Asset 4: the lot of 1 Mar 2025 (60 units, 6,000.00) and account 2's lot of 2 Jan 2024 (50 units, 5,000.00). Today is off.",
+   "today": 20261027,
+   "filters": {
+    "held": "over"
+   },
+   "facts": {
+    "1": {
+     "id": 1,
+     "asset_class": "equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "core"
+     ]
+    },
+    "2": {
+     "id": 2,
+     "asset_class": "equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "income"
+     ]
+    },
+    "3": {
+     "id": 3,
+     "asset_class": "gold",
+     "sector": null,
+     "mcap": null,
+     "tags": []
+    },
+    "4": {
+     "id": 4,
+     "asset_class": "mf_equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "core",
+      "income"
+     ]
+    }
+   },
+   "lines": {
+    "1": [
+     {
+      "account_id": 1,
+      "qty_u": 10000000,
+      "open_qty_u": 10000000,
+      "cost_paise": 1100000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     },
+     {
+      "account_id": 2,
+      "qty_u": 5000000,
+      "open_qty_u": 5000000,
+      "cost_paise": 500000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ],
+    "2": [
+     {
+      "account_id": 1,
+      "qty_u": 20000000,
+      "open_qty_u": 0,
+      "cost_paise": 2000000,
+      "in_today_paise": 2000000,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ],
+    "3": [
+     {
+      "account_id": 2,
+      "qty_u": 3000000,
+      "open_qty_u": 3000000,
+      "cost_paise": 90000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ],
+    "4": [
+     {
+      "account_id": 1,
+      "qty_u": 100000000,
+      "open_qty_u": 100000000,
+      "cost_paise": 1000000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     },
+     {
+      "account_id": 2,
+      "qty_u": 50000000,
+      "open_qty_u": 50000000,
+      "cost_paise": 500000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ]
+   },
+   "positions": {
+    "1/1": [
+     [
+      20240229,
+      4000000,
+      400000
+     ],
+     [
+      20251026,
+      3000000,
+      330000
+     ],
+     [
+      20251027,
+      2000000,
+      240000
+     ],
+     [
+      20251101,
+      1000000,
+      130000
+     ]
+    ],
+    "2/1": [
+     [
+      20250105,
+      5000000,
+      500000
+     ]
+    ],
+    "1/2": [
+     [
+      20261027,
+      20000000,
+      2000000
+     ]
+    ],
+    "2/3": [
+     [
+      20260101,
+      3000000,
+      90000
+     ]
+    ],
+    "1/4": [
+     [
+      20250301,
+      60000000,
+      600000
+     ],
+     [
+      20260301,
+      40000000,
+      400000
+     ]
+    ],
+    "2/4": [
+     [
+      20240102,
+      50000000,
+      500000
+     ]
+    ]
+   },
+   "expect": {
+    "lines": {
+     "1": [
+      {
+       "account_id": 1,
+       "qty_u": 7000000,
+       "open_qty_u": 7000000,
+       "cost_paise": 730000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 7000000
+      },
+      {
+       "account_id": 2,
+       "qty_u": 5000000,
+       "open_qty_u": 5000000,
+       "cost_paise": 500000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 5000000
+      }
+     ],
+     "4": [
+      {
+       "account_id": 1,
+       "qty_u": 60000000,
+       "open_qty_u": 60000000,
+       "cost_paise": 600000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 60000000
+      },
+      {
+       "account_id": 2,
+       "qty_u": 50000000,
+       "open_qty_u": 50000000,
+       "cost_paise": 500000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 50000000
+      }
+     ]
+    },
+    "today_off": true
+   }
+  },
+  {
+   "id": "FS8",
+   "title": "Held under a year keeps the rest",
+   "why": "The world of these cases is Tuesday 27 Oct 2026 and six lines. Asset 1 (equity, core) is held in account 1 in four lots and in account 2 in one; asset 2 (equity, income) in account 1 in one lot bought today; asset 3 (gold) in account 2; asset 4 (MF equity, core and income) in both. The lots left by FS7: account 1's asset 1 has the lots of 27 Oct 2025 and 1 Nov 2025 (2 + 1 units, cost 2,400.00 + 1,300.00 = 3,700.00 = 370,000 paise); asset 2's lot bought today (20 units, 20,000.00); asset 3's lot (3 units, 900.00); asset 4's lot of 1 Mar 2026 (40 units, 4,000.00). Account 2 has nothing under in assets 1 and 4. No lot is counted in both views: the units of FS7 and FS8 together are the whole line.",
+   "today": 20261027,
+   "filters": {
+    "held": "under"
+   },
+   "facts": {
+    "1": {
+     "id": 1,
+     "asset_class": "equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "core"
+     ]
+    },
+    "2": {
+     "id": 2,
+     "asset_class": "equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "income"
+     ]
+    },
+    "3": {
+     "id": 3,
+     "asset_class": "gold",
+     "sector": null,
+     "mcap": null,
+     "tags": []
+    },
+    "4": {
+     "id": 4,
+     "asset_class": "mf_equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "core",
+      "income"
+     ]
+    }
+   },
+   "lines": {
+    "1": [
+     {
+      "account_id": 1,
+      "qty_u": 10000000,
+      "open_qty_u": 10000000,
+      "cost_paise": 1100000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     },
+     {
+      "account_id": 2,
+      "qty_u": 5000000,
+      "open_qty_u": 5000000,
+      "cost_paise": 500000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ],
+    "2": [
+     {
+      "account_id": 1,
+      "qty_u": 20000000,
+      "open_qty_u": 0,
+      "cost_paise": 2000000,
+      "in_today_paise": 2000000,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ],
+    "3": [
+     {
+      "account_id": 2,
+      "qty_u": 3000000,
+      "open_qty_u": 3000000,
+      "cost_paise": 90000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ],
+    "4": [
+     {
+      "account_id": 1,
+      "qty_u": 100000000,
+      "open_qty_u": 100000000,
+      "cost_paise": 1000000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     },
+     {
+      "account_id": 2,
+      "qty_u": 50000000,
+      "open_qty_u": 50000000,
+      "cost_paise": 500000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ]
+   },
+   "positions": {
+    "1/1": [
+     [
+      20240229,
+      4000000,
+      400000
+     ],
+     [
+      20251026,
+      3000000,
+      330000
+     ],
+     [
+      20251027,
+      2000000,
+      240000
+     ],
+     [
+      20251101,
+      1000000,
+      130000
+     ]
+    ],
+    "2/1": [
+     [
+      20250105,
+      5000000,
+      500000
+     ]
+    ],
+    "1/2": [
+     [
+      20261027,
+      20000000,
+      2000000
+     ]
+    ],
+    "2/3": [
+     [
+      20260101,
+      3000000,
+      90000
+     ]
+    ],
+    "1/4": [
+     [
+      20250301,
+      60000000,
+      600000
+     ],
+     [
+      20260301,
+      40000000,
+      400000
+     ]
+    ],
+    "2/4": [
+     [
+      20240102,
+      50000000,
+      500000
+     ]
+    ]
+   },
+   "expect": {
+    "lines": {
+     "1": [
+      {
+       "account_id": 1,
+       "qty_u": 3000000,
+       "open_qty_u": 3000000,
+       "cost_paise": 370000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ],
+     "2": [
+      {
+       "account_id": 1,
+       "qty_u": 20000000,
+       "open_qty_u": 20000000,
+       "cost_paise": 2000000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ],
+     "3": [
+      {
+       "account_id": 2,
+       "qty_u": 3000000,
+       "open_qty_u": 3000000,
+       "cost_paise": 90000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ],
+     "4": [
+      {
+       "account_id": 1,
+       "qty_u": 40000000,
+       "open_qty_u": 40000000,
+       "cost_paise": 400000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    },
+    "today_off": true
+   }
+  },
+  {
+   "id": "FS9",
+   "title": "Held and the other choices together",
+   "why": "The world of these cases is Tuesday 27 Oct 2026 and six lines. Asset 1 (equity, core) is held in account 1 in four lots and in account 2 in one; asset 2 (equity, income) in account 1 in one lot bought today; asset 3 (gold) in account 2; asset 4 (MF equity, core and income) in both. Over a year, account 2, tagged core: asset 1 (account 2: 5 units, 5,000.00) and asset 4 (account 2: 50 units, 5,000.00). Gold is not tagged.",
+   "today": 20261027,
+   "filters": {
+    "held": "over",
+    "accounts": [
+     2
+    ],
+    "tags": [
+     "core"
+    ]
+   },
+   "facts": {
+    "1": {
+     "id": 1,
+     "asset_class": "equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "core"
+     ]
+    },
+    "2": {
+     "id": 2,
+     "asset_class": "equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "income"
+     ]
+    },
+    "3": {
+     "id": 3,
+     "asset_class": "gold",
+     "sector": null,
+     "mcap": null,
+     "tags": []
+    },
+    "4": {
+     "id": 4,
+     "asset_class": "mf_equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "core",
+      "income"
+     ]
+    }
+   },
+   "lines": {
+    "1": [
+     {
+      "account_id": 1,
+      "qty_u": 10000000,
+      "open_qty_u": 10000000,
+      "cost_paise": 1100000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     },
+     {
+      "account_id": 2,
+      "qty_u": 5000000,
+      "open_qty_u": 5000000,
+      "cost_paise": 500000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ],
+    "2": [
+     {
+      "account_id": 1,
+      "qty_u": 20000000,
+      "open_qty_u": 0,
+      "cost_paise": 2000000,
+      "in_today_paise": 2000000,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ],
+    "3": [
+     {
+      "account_id": 2,
+      "qty_u": 3000000,
+      "open_qty_u": 3000000,
+      "cost_paise": 90000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ],
+    "4": [
+     {
+      "account_id": 1,
+      "qty_u": 100000000,
+      "open_qty_u": 100000000,
+      "cost_paise": 1000000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     },
+     {
+      "account_id": 2,
+      "qty_u": 50000000,
+      "open_qty_u": 50000000,
+      "cost_paise": 500000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ]
+   },
+   "positions": {
+    "1/1": [
+     [
+      20240229,
+      4000000,
+      400000
+     ],
+     [
+      20251026,
+      3000000,
+      330000
+     ],
+     [
+      20251027,
+      2000000,
+      240000
+     ],
+     [
+      20251101,
+      1000000,
+      130000
+     ]
+    ],
+    "2/1": [
+     [
+      20250105,
+      5000000,
+      500000
+     ]
+    ],
+    "1/2": [
+     [
+      20261027,
+      20000000,
+      2000000
+     ]
+    ],
+    "2/3": [
+     [
+      20260101,
+      3000000,
+      90000
+     ]
+    ],
+    "1/4": [
+     [
+      20250301,
+      60000000,
+      600000
+     ],
+     [
+      20260301,
+      40000000,
+      400000
+     ]
+    ],
+    "2/4": [
+     [
+      20240102,
+      50000000,
+      500000
+     ]
+    ]
+   },
+   "expect": {
+    "lines": {
+     "1": [
+      {
+       "account_id": 2,
+       "qty_u": 5000000,
+       "open_qty_u": 5000000,
+       "cost_paise": 500000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 5000000
+      }
+     ],
+     "4": [
+      {
+       "account_id": 2,
+       "qty_u": 50000000,
+       "open_qty_u": 50000000,
+       "cost_paise": 500000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 50000000
+      }
+     ]
+    },
+    "today_off": true
+   }
+  },
+  {
+   "id": "FS10",
+   "title": "The leap day: the first anniversary is not yet more than a year",
+   "why": "A lot bought on 29 Feb 2024 has its anniversary on 28 Feb 2025. As at 28 Feb 2025 the lot has been held exactly a year, so nothing is over and all 6 units (cost 6,000.00) are under; the other lot is bought on 2 Jan 2025.",
+   "today": 20250228,
+   "filters": {
+    "held": "under",
+    "as_of": 20250228
+   },
+   "facts": {
+    "1": {
+     "id": 1,
+     "asset_class": "equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "core"
+     ]
+    },
+    "2": {
+     "id": 2,
+     "asset_class": "equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "income"
+     ]
+    },
+    "3": {
+     "id": 3,
+     "asset_class": "gold",
+     "sector": null,
+     "mcap": null,
+     "tags": []
+    },
+    "4": {
+     "id": 4,
+     "asset_class": "mf_equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "core",
+      "income"
+     ]
+    }
+   },
+   "lines": {
+    "1": [
+     {
+      "account_id": 1,
+      "qty_u": 6000000,
+      "open_qty_u": 6000000,
+      "cost_paise": 600000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ]
+   },
+   "positions": {
+    "1/1": [
+     [
+      20240229,
+      4000000,
+      400000
+     ],
+     [
+      20250102,
+      2000000,
+      200000
+     ]
+    ]
+   },
+   "expect": {
+    "lines": {
+     "1": [
+      {
+       "account_id": 1,
+       "qty_u": 6000000,
+       "open_qty_u": 6000000,
+       "cost_paise": 600000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    },
+    "today_off": true
+   }
+  },
+  {
+   "id": "FS11",
+   "title": "The day after, the lot is over a year",
+   "why": "As FS10 on 1 Mar 2025: the lot of 29 Feb 2024 (4 units, 4,000.00) is over; the other (2 units, 2,000.00) is under. Asked over, the first.",
+   "today": 20250301,
+   "filters": {
+    "held": "over",
+    "as_of": 20250301
+   },
+   "facts": {
+    "1": {
+     "id": 1,
+     "asset_class": "equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "core"
+     ]
+    },
+    "2": {
+     "id": 2,
+     "asset_class": "equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "income"
+     ]
+    },
+    "3": {
+     "id": 3,
+     "asset_class": "gold",
+     "sector": null,
+     "mcap": null,
+     "tags": []
+    },
+    "4": {
+     "id": 4,
+     "asset_class": "mf_equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "core",
+      "income"
+     ]
+    }
+   },
+   "lines": {
+    "1": [
+     {
+      "account_id": 1,
+      "qty_u": 6000000,
+      "open_qty_u": 6000000,
+      "cost_paise": 600000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ]
+   },
+   "positions": {
+    "1/1": [
+     [
+      20240229,
+      4000000,
+      400000
+     ],
+     [
+      20250102,
+      2000000,
+      200000
+     ]
+    ]
+   },
+   "expect": {
+    "lines": {
+     "1": [
+      {
+       "account_id": 1,
+       "qty_u": 4000000,
+       "open_qty_u": 4000000,
+       "cost_paise": 400000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 4000000
+      }
+     ]
+    },
+    "today_off": true
+   }
+  },
+  {
+   "id": "FS12",
+   "title": "The lots are judged on the day the filter gives, not on today",
+   "why": "As FS11, but the day passed in as today is 27 Oct 2026: the filter says 1 Mar 2025 and that is the day the lots are judged on. Asked under, the lot of 2 Jan 2025 only (2 units, 2,000.00).",
+   "today": 20261027,
+   "filters": {
+    "held": "under",
+    "as_of": 20250301
+   },
+   "facts": {
+    "1": {
+     "id": 1,
+     "asset_class": "equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "core"
+     ]
+    },
+    "2": {
+     "id": 2,
+     "asset_class": "equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "income"
+     ]
+    },
+    "3": {
+     "id": 3,
+     "asset_class": "gold",
+     "sector": null,
+     "mcap": null,
+     "tags": []
+    },
+    "4": {
+     "id": 4,
+     "asset_class": "mf_equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "core",
+      "income"
+     ]
+    }
+   },
+   "lines": {
+    "1": [
+     {
+      "account_id": 1,
+      "qty_u": 6000000,
+      "open_qty_u": 6000000,
+      "cost_paise": 600000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ]
+   },
+   "positions": {
+    "1/1": [
+     [
+      20240229,
+      4000000,
+      400000
+     ],
+     [
+      20250102,
+      2000000,
+      200000
+     ]
+    ]
+   },
+   "expect": {
+    "lines": {
+     "1": [
+      {
+       "account_id": 1,
+       "qty_u": 2000000,
+       "open_qty_u": 2000000,
+       "cost_paise": 200000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    },
+    "today_off": true
+   }
+  },
+  {
+   "id": "FS13",
+   "title": "A day on its own changes no line, and switches Today off",
+   "why": "The world of these cases is Tuesday 27 Oct 2026 and six lines. Asset 1 (equity, core) is held in account 1 in four lots and in account 2 in one; asset 2 (equity, income) in account 1 in one lot bought today; asset 3 (gold) in account 2; asset 4 (MF equity, core and income) in both. As at a day gone by: the caller replays the entries up to it and prices the lines then, so the lines here are the ones given. Nothing is dropped; Today is off.",
+   "today": 20261027,
+   "filters": {
+    "as_of": 20260630
+   },
+   "facts": {
+    "1": {
+     "id": 1,
+     "asset_class": "equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "core"
+     ]
+    },
+    "2": {
+     "id": 2,
+     "asset_class": "equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "income"
+     ]
+    },
+    "3": {
+     "id": 3,
+     "asset_class": "gold",
+     "sector": null,
+     "mcap": null,
+     "tags": []
+    },
+    "4": {
+     "id": 4,
+     "asset_class": "mf_equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "core",
+      "income"
+     ]
+    }
+   },
+   "lines": {
+    "1": [
+     {
+      "account_id": 1,
+      "qty_u": 10000000,
+      "open_qty_u": 10000000,
+      "cost_paise": 1100000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     },
+     {
+      "account_id": 2,
+      "qty_u": 5000000,
+      "open_qty_u": 5000000,
+      "cost_paise": 500000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ],
+    "2": [
+     {
+      "account_id": 1,
+      "qty_u": 20000000,
+      "open_qty_u": 0,
+      "cost_paise": 2000000,
+      "in_today_paise": 2000000,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ],
+    "3": [
+     {
+      "account_id": 2,
+      "qty_u": 3000000,
+      "open_qty_u": 3000000,
+      "cost_paise": 90000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ],
+    "4": [
+     {
+      "account_id": 1,
+      "qty_u": 100000000,
+      "open_qty_u": 100000000,
+      "cost_paise": 1000000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     },
+     {
+      "account_id": 2,
+      "qty_u": 50000000,
+      "open_qty_u": 50000000,
+      "cost_paise": 500000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ]
+   },
+   "positions": {
+    "1/1": [
+     [
+      20240229,
+      4000000,
+      400000
+     ],
+     [
+      20251026,
+      3000000,
+      330000
+     ],
+     [
+      20251027,
+      2000000,
+      240000
+     ],
+     [
+      20251101,
+      1000000,
+      130000
+     ]
+    ],
+    "2/1": [
+     [
+      20250105,
+      5000000,
+      500000
+     ]
+    ],
+    "1/2": [
+     [
+      20261027,
+      20000000,
+      2000000
+     ]
+    ],
+    "2/3": [
+     [
+      20260101,
+      3000000,
+      90000
+     ]
+    ],
+    "1/4": [
+     [
+      20250301,
+      60000000,
+      600000
+     ],
+     [
+      20260301,
+      40000000,
+      400000
+     ]
+    ],
+    "2/4": [
+     [
+      20240102,
+      50000000,
+      500000
+     ]
+    ]
+   },
+   "expect": {
+    "lines": {
+     "1": [
+      {
+       "account_id": 1,
+       "qty_u": 10000000,
+       "open_qty_u": 10000000,
+       "cost_paise": 1100000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      },
+      {
+       "account_id": 2,
+       "qty_u": 5000000,
+       "open_qty_u": 5000000,
+       "cost_paise": 500000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ],
+     "2": [
+      {
+       "account_id": 1,
+       "qty_u": 20000000,
+       "open_qty_u": 0,
+       "cost_paise": 2000000,
+       "in_today_paise": 2000000,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ],
+     "3": [
+      {
+       "account_id": 2,
+       "qty_u": 3000000,
+       "open_qty_u": 3000000,
+       "cost_paise": 90000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ],
+     "4": [
+      {
+       "account_id": 1,
+       "qty_u": 100000000,
+       "open_qty_u": 100000000,
+       "cost_paise": 1000000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      },
+      {
+       "account_id": 2,
+       "qty_u": 50000000,
+       "open_qty_u": 50000000,
+       "cost_paise": 500000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    },
+    "today_off": true
+   }
+  },
+  {
+   "id": "FS14",
+   "title": "A line with no lots is not there when lots are asked for",
+   "why": "A position the replay does not have (or one whose lots are all gone) cannot be over or under a year: its line is dropped.",
+   "today": 20261027,
+   "filters": {
+    "held": "over"
+   },
+   "facts": {
+    "1": {
+     "id": 1,
+     "asset_class": "equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "core"
+     ]
+    },
+    "2": {
+     "id": 2,
+     "asset_class": "equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "income"
+     ]
+    },
+    "3": {
+     "id": 3,
+     "asset_class": "gold",
+     "sector": null,
+     "mcap": null,
+     "tags": []
+    },
+    "4": {
+     "id": 4,
+     "asset_class": "mf_equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "core",
+      "income"
+     ]
+    }
+   },
+   "lines": {
+    "1": [
+     {
+      "account_id": 1,
+      "qty_u": 5000000,
+      "open_qty_u": 5000000,
+      "cost_paise": 500000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ]
+   },
+   "positions": {},
+   "expect": {
+    "lines": {},
+    "today_off": true
+   }
+  },
+  {
+   "id": "FS15",
+   "title": "Lines keep their order",
+   "why": "Asset 4's lines are given account 2 first; they stay in that order.",
+   "today": 20261027,
+   "filters": {
+    "classes": [
+     "mf_equity"
+    ]
+   },
+   "facts": {
+    "1": {
+     "id": 1,
+     "asset_class": "equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "core"
+     ]
+    },
+    "2": {
+     "id": 2,
+     "asset_class": "equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "income"
+     ]
+    },
+    "3": {
+     "id": 3,
+     "asset_class": "gold",
+     "sector": null,
+     "mcap": null,
+     "tags": []
+    },
+    "4": {
+     "id": 4,
+     "asset_class": "mf_equity",
+     "sector": null,
+     "mcap": null,
+     "tags": [
+      "core",
+      "income"
+     ]
+    }
+   },
+   "lines": {
+    "4": [
+     {
+      "account_id": 2,
+      "qty_u": 50000000,
+      "open_qty_u": 50000000,
+      "cost_paise": 500000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     },
+     {
+      "account_id": 1,
+      "qty_u": 100000000,
+      "open_qty_u": 100000000,
+      "cost_paise": 1000000,
+      "in_today_paise": 0,
+      "out_today_paise": 0,
+      "over_year_qty_u": 0
+     }
+    ]
+   },
+   "positions": {
+    "1/1": [
+     [
+      20240229,
+      4000000,
+      400000
+     ],
+     [
+      20251026,
+      3000000,
+      330000
+     ],
+     [
+      20251027,
+      2000000,
+      240000
+     ],
+     [
+      20251101,
+      1000000,
+      130000
+     ]
+    ],
+    "2/1": [
+     [
+      20250105,
+      5000000,
+      500000
+     ]
+    ],
+    "1/2": [
+     [
+      20261027,
+      20000000,
+      2000000
+     ]
+    ],
+    "2/3": [
+     [
+      20260101,
+      3000000,
+      90000
+     ]
+    ],
+    "1/4": [
+     [
+      20250301,
+      60000000,
+      600000
+     ],
+     [
+      20260301,
+      40000000,
+      400000
+     ]
+    ],
+    "2/4": [
+     [
+      20240102,
+      50000000,
+      500000
+     ]
+    ]
+   },
+   "expect": {
+    "lines": {
+     "4": [
+      {
+       "account_id": 2,
+       "qty_u": 50000000,
+       "open_qty_u": 50000000,
+       "cost_paise": 500000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      },
+      {
+       "account_id": 1,
+       "qty_u": 100000000,
+       "open_qty_u": 100000000,
+       "cost_paise": 1000000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    },
+    "today_off": false
+   }
+  }
+ ]
+}

@@ -717,3 +717,138 @@ def index_comparison(
         if start is not None and end is not None:
             out["twr_pct"] = pct_text(Fraction(end, start))
     return out
+
+
+# ---------------------------------------------------------------- allocation and filters (PA6)
+
+CLASS_NAMES = {
+    "equity": "Equity",
+    "mf_equity": "MF equity",
+    "mf_debt": "MF debt",
+    "mf_hybrid": "MF hybrid",
+    "mf_other": "MF other",
+    "gold": "Gold and silver",
+    "cash": "FD and cash",
+    "bonds": "Bonds",
+    "real_estate": "Real estate",
+    "esop": "ESOP and unlisted",
+    "crypto": "Crypto",
+    "other": "Other",
+}
+CAP_NAMES = {"large": "Large cap", "mid": "Mid cap", "small": "Small cap"}
+
+
+def worth(line: dict, price_u: int | None) -> int:
+    """What a line is worth on the screen: its units at the price, each line rounded on its own, or
+    its cost while the holding has no price."""
+    if price_u is None:
+        return line["cost_paise"]
+    return half_away(Fraction(line["qty_u"] * price_u, 10**8))
+
+
+def share_text(part: int, whole: int) -> str:
+    """``part`` of ``whole`` as a percentage of four decimals, a tie away from zero."""
+    if whole == 0:
+        return "0.0000"
+    scaled = half_away(Fraction(part * 100 * 10**4, whole))
+    return f"{'-' if scaled < 0 else ''}{abs(scaled) // 10**4}.{abs(scaled) % 10**4:04d}"
+
+
+def bars_of_line(by: str, asset: dict, line: dict, accounts: dict, members: dict) -> list:
+    """The ``(key, label)`` of every bar of this kind a held line is in."""
+    if by == "class":
+        return [(asset["asset_class"], CLASS_NAMES[asset["asset_class"]])]
+    if by == "sector":
+        sector = asset.get("sector")
+        return [(sector, sector)] if sector else [("", "No sector set")]
+    if by == "mcap":
+        cap = asset.get("mcap")
+        return [(cap, CAP_NAMES[cap])] if cap else [("", "No cap size set")]
+    if by == "account":
+        return [(str(line["account_id"]), accounts[str(line["account_id"])]["name"])]
+    if by == "member":
+        member = str(accounts[str(line["account_id"])]["member_id"])
+        return [(member, members[member])]
+    tags = set(asset.get("tags") or [])
+    return [(tag, tag) for tag in tags] or [("", "No tag")]
+
+
+def allocation(by: str, rows: list, accounts: dict, members: dict) -> list:
+    """The bars of one kind, worked out the long way.
+
+    ``rows`` are the tab's HoldingRows as dicts, ``accounts`` map an account's id (as text) to its
+    ``name`` and ``member_id`` and ``members`` a member's id (as text) to a name. A record is made
+    for every held line and every bar it is in; the bars are the distinct keys of the records and
+    each adds up the records that carry its key. One sort puts them in order.
+    """
+    records, total = [], 0
+    for row in rows:
+        price = row["price"]["price_u"]
+        for line in row["lines"]:
+            if line["qty_u"] == 0:
+                continue
+            value = worth(line, price)
+            total += value
+            for key, label in bars_of_line(by, row["asset"], line, accounts, members):
+                records.append((key, label, row["asset"]["id"], value))
+    bars = []
+    for key in {record[0] for record in records}:
+        mine = [record for record in records if record[0] == key]
+        value = sum(record[3] for record in mine)
+        bars.append(
+            {
+                "key": key,
+                "label": mine[0][1],
+                "value_paise": value,
+                "pct": share_text(value, total),
+                "holdings": len({record[2] for record in mine}),
+            }
+        )
+    return sorted(bars, key=lambda bar: (-bar["value_paise"], bar["label"], bar["key"]))
+
+
+def filtered_lines(raw: dict, lines: dict, positions: dict, facts: dict, today: int) -> dict:
+    """The lines a filter leaves, worked out one line and one lot at a time.
+
+    ``lines`` is ``{asset: [HoldingLine dicts]}``; ``positions`` are ``simulate``'s (its lots are
+    ``[day, qty_u, cost_paise]``) and ``facts`` map an asset to its ``asset_class`` and ``tags``.
+    Held over (or under) a year takes the lots bought more than a year before the day the filter
+    gives, or before ``today`` when it gives none.
+    """
+    accounts = set(raw.get("accounts") or [])
+    classes = set(raw.get("classes") or [])
+    tags = {tag.strip() for tag in raw.get("tags") or []}
+    held, as_of = raw.get("held"), raw.get("as_of")
+    on = today if as_of is None else as_of
+    left: dict = {}
+    for asset, found in lines.items():
+        what = facts[asset]
+        if classes and what["asset_class"] not in classes:
+            continue
+        if tags and not tags & set(what.get("tags") or []):
+            continue
+        kept = []
+        for line in found:
+            if accounts and line["account_id"] not in accounts:
+                continue
+            if held is None:
+                kept.append(line)
+                continue
+            lots = positions.get(f"{line['account_id']}/{asset}", {}).get("lots", [])
+            chosen = [lot for lot in lots if over_a_year(lot[0], on) == (held == "over")]
+            qty = sum(lot[1] for lot in chosen)
+            if qty:
+                kept.append(
+                    {
+                        "account_id": line["account_id"],
+                        "qty_u": qty,
+                        "open_qty_u": qty,
+                        "cost_paise": sum(lot[2] for lot in chosen),
+                        "in_today_paise": 0,
+                        "out_today_paise": 0,
+                        "over_year_qty_u": qty if held == "over" else 0,
+                    }
+                )
+        if kept:
+            left[asset] = kept
+    return {"lines": left, "today_off": held is not None or as_of is not None}

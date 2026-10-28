@@ -729,9 +729,93 @@ the index's own close is worth what the same money in the index is worth (exactl
 at whole-rupee closes), and moving every date, scaling the money or reordering the lists changes no
 figure.
 
-### Allocation, filters, imports
+### Allocation and filters
 
-Written with `PA6` to `PA8`.
+`core/allocation.py` says how a tab's value divides and `core/filters.py` which holdings a view
+shows. Both are pure and read the same lines the holdings list is made of.
+
+**Bars.** `allocate(by, holdings, accounts, members)` gives the bars of one kind and
+`allocate_all(...)` all six (`ALLOCATION_BY`: class, sector, cap size, account, member, tag) in the
+shape of `TabView.allocation`. `holdings` are `(Facts, Row)` pairs (`Holding.of(row_json)` makes
+one from a `HoldingRow`), `accounts` map an account's id to `Owner(name, member_id)` and `members`
+a member's id to a name.
+
+- A line is worth what the holdings list says: its units at the price, each line rounded half away
+  from zero on its own, or its cost while the holding has no price (`valuation.line_value`). So the
+  bars of class, sector, cap size, account and member add up to the tab's value to the paisa, and a
+  holding without a price does not make its class look empty. A line sold out is not counted.
+- A share is the bar's value over the tab's value, rounded on its own to four decimals, half away
+  from zero ("99.2188"), by `money.pct` as everywhere else. Shares are not adjusted to make a
+  hundred (three equal thirds say 33.3333 three times); a tab worth nothing says "0.0000".
+- A holding with several tags is in every tag's bar with all its value, so the tag bars add up to
+  more than the tab; a tag written twice on one asset counts once. A holding with no sector, no cap
+  size or no tag is in a bar of its own with the key `""` ("No sector set", "No cap size set", "No
+  tag"), so that a tapped bar can always be matched to its holdings.
+- `holdings` is how many different assets are in the bar: one share held in two accounts of one
+  member is one holding in the class bar and in the member's bar, and one in each account's bar.
+- Largest value first. Bars of equal value go by name and then by key (as text, so account 10
+  comes before account 2), so the order never depends on the order the holdings arrived in.
+- `mf_class(header)` gives a mutual fund the class its AMFI section header names: the words before
+  the first dash inside the outermost brackets, compared without regard to case or spacing. "Equity
+  Scheme" is MF equity, "Debt Scheme" MF debt and "Hybrid Scheme" MF hybrid. Anything else (a
+  solution oriented scheme, an index fund, a bracket never closed, no brackets, no header) is MF
+  other: a guess would put the fund in a bar it does not belong to, and the owner can set the class
+  of any asset himself.
+
+**Filters.** `Filters.of(raw)` reads the choices of a view: `accounts`, `classes`, `tags`, `held`
+("over" or "under") and `as_of`. A key it does not know is dropped and a null is nothing. An account
+is a whole number above nothing. A tag is 1 to 30 characters with no comma (a tab is asked for with
+its tags in one comma-separated list), at most 10 different tags, compared exactly once the spaces
+round them are trimmed. The day is a real day. The result is in one order whoever wrote it:
+accounts sorted, classes in the order of the kinds, tags sorted. A value that cannot be used is
+refused with `BadFilter`, whose message is the trader's sentence; the first thing wrong is the one
+said, taking accounts, kinds, tags, held and the day in that order.
+
+`select(filters, lines, positions, facts, today)` returns the lines that pass, by asset, with the
+order of both kept. Choices of one kind are alternatives and different kinds all have to hold:
+accounts 1 and 2, kind equity, tag income is the equity holdings tagged income in either account.
+Nothing chosen is everything, and `facts` and `positions` are read only when a kind, a tag or the
+lots are asked for.
+
+- `held` works on the lots, not on the holding. "Over" keeps the units in lots bought more than a
+  year before the day, with the cost of exactly those lots, and "under" the rest. A holding with
+  some of each is in both views, in part, and the two together are the whole line. The first
+  anniversary itself is not yet more than a year (`days.held_over_year`; 29 February becomes 28
+  February): the rule of `over_year_qty_u` on a line. The day the lots are judged on is the
+  filter's `as_of`, else today.
+- A filtered line is the chosen lots and nothing else: its open is its units, nothing came in or
+  went out today, and its over-year units are all its units for "over" and none for "under".
+- A line with no lots (a position the replay does not have, or one sold out) is not in a lots view.
+- `as_of` alone changes no line: the caller replays the entries up to that day and prices the lines
+  at that day's closes.
+- A selection with `today_off` set (lots, or a day gone by) says so, and its rows go out with
+  `today_mode` "none": Today is not worked out for lots or for a past day.
+
+**What this does not model.** The sums beside the holdings (realised gain, income, fees, money in
+and money out) belong to a tab and its accounts, not to a lot or a kind of asset, so what a
+filtered view's totals say is for the tab service (`PB10`) to decide; this module filters lines.
+The bars have no twin on the phone yet; the vectors are plain JSON, so one can be written to them.
+
+**Vectors** (`tests/vectors/allocation.json`, `filters.json`): bars by every kind for equal thirds
+and the 99.9999 they make, a tag shared by two holdings, one share in three accounts of two
+members, a holding without a price, lines sold out, half a paisa on two lines, nothing held, a tab
+worth nothing, a share exactly between two numbers (1 of 128), equal values ordered by name and
+then by key, the three cap sizes, and bars whose names order differently from their keys; fourteen
+mutual fund headers; a filter read into one order with its unknown keys, ten tags and capitals, and
+sixteen refusals; and the filters applied to six lines in two accounts (alternatives, the lot
+exactly a year old, the leap day on the days it turns, a day given against the day the lots are
+judged on, a line without lots, line order). `make_pa6.py` builds the bars from scratch for each
+kind and orders them by three stable passes, applies the filters one kind at a time and works out
+each lot's anniversary again, and refuses to write a number it does not agree with. The tests also
+run the code on random tabs replayed from random entries against it and against
+`portfolio_oracle.py`, and check what must hold whatever the numbers are: the bars of five kinds add
+up to the tab's value, a share is the exact rounding of its bar, the lots over a year and under it
+are the whole line, a choice of one kind only adds lines and a choice of another kind only takes
+them away, and moving or repeating the holdings changes no bar.
+
+### Imports
+
+Written with `PA7` and `PA8`.
 
 ## Storage
 

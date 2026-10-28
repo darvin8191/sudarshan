@@ -189,6 +189,30 @@ def index_missing(label: str) -> str:
     return f"{label} prices are not available yet; the comparison appears when they are."
 
 
+#: The names of the bars that hold what has no sector, no cap size or no tag (design 4.8), and the
+#: cap sizes an asset can carry.
+MCAP_LABELS = {"large": "Large cap", "mid": "Mid cap", "small": "Small cap"}
+NO_SECTOR = "No sector set"
+NO_CAP = "No cap size set"
+NO_TAG = "No tag"
+
+#: A filter that cannot be read (design 4.8). The phone offers only choices, so these are for a
+#: view saved by an older release or a request made by hand.
+FILTER_SHAPE = (
+    "This filter cannot be read. Choose accounts, kinds of asset and tags from the lists."
+)
+FILTER_ACCOUNT = "Choose the accounts from the list."
+FILTER_CLASS = "Choose the kinds of asset from the list."
+FILTER_HELD = "Choose held over a year or held under a year."
+FILTER_DAY = "Enter a valid date."
+
+
+def filter_tags(longest: int, most: int) -> str:
+    return (
+        f"A tag is 1 to {longest} characters with no comma, and a filter takes at most {most} tags."
+    )
+
+
 def knock_on(action: str, changed_kind: str, failing_kind: str, failing_day: int, unit: str) -> str:
     """Why a change is refused because of a later entry it would leave without units.
 

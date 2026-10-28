@@ -26,6 +26,7 @@ from sudarshan.portfolio.core.valuation import (
     Row,
     Today,
     closed_today,
+    line_value,
     previous_close_u,
     row_figures,
     row_today,
@@ -67,6 +68,23 @@ def test_a_rows_figures_are_the_vectors(case):
 def test_a_tabs_totals_are_the_vectors(case):
     got = tab_totals(rows_of(case["rows"]), Fixed.of(case["fixed"]))
     assert got.as_dict() == case["expect"]
+
+
+def test_a_lines_value_is_its_units_at_the_price_or_its_cost_while_it_has_none():
+    line = Line(1, 2 * U, 2 * U, 500, 0, 0)
+    assert line_value(line, None) == 500
+    assert line_value(line, 12_345) == 247  # 2 units at 1.2345 is 246.9 paise
+    assert line_value(line, 0) == 0  # a price of nothing is a price, not a missing one
+    assert line_value(Line(1, 0, 0, 0, 0, 0), 12_345) == 0
+
+
+def test_a_holding_priced_at_nothing_is_worth_nothing_and_says_it_is_priced():
+    row = Row("ok", 0, None, (Line(1, 2 * U, 2 * U, 500, 0, 0),))
+    got = row_figures(row)
+    assert (got.value_paise, got.priced, got.unrealised_paise) == (0, True, -500)
+    assert got.gain_pct == "-100.0000"
+    unpriced = row_figures(Row("ok", None, None, (Line(1, 2 * U, 2 * U, 500, 0, 0),)))
+    assert (unpriced.value_paise, unpriced.priced, unpriced.gain_pct) == (500, False, None)
 
 
 @pytest.mark.parametrize("case", FILE["closed"], ids=lambda case: case["id"])

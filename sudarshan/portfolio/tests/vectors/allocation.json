@@ -1,0 +1,1760 @@
+{
+ "about": "Golden vectors for core/allocation.py (PA6): the class AMFI's section header gives a fund, and the bars of a tab's value by class, sector, cap size, account, member and tag. Inputs are the contract's JSON (a HoldingRow's asset, price and lines, the accounts and the members), so the phone can run the same file. Every number is worked out by hand in the case's why; the evaluator in make_pa6.py builds the groups again from scratch.",
+ "mf_classes": [
+  {
+   "id": "MF1",
+   "title": "An equity scheme is MF equity",
+   "why": "The words before the dash inside the brackets are the scheme's headline: Equity Scheme.",
+   "header": "Open Ended Schemes(Equity Scheme - Large Cap Fund)",
+   "expect": "mf_equity"
+  },
+  {
+   "id": "MF2",
+   "title": "A tax-saving fund is an equity scheme too",
+   "why": "Close ended or open ended makes no difference; the headline is Equity Scheme.",
+   "header": "Close Ended Schemes(Equity Scheme - ELSS)",
+   "expect": "mf_equity"
+  },
+  {
+   "id": "MF3",
+   "title": "A debt scheme is MF debt",
+   "why": "The words before the dash inside the brackets are Debt Scheme, the headline of a debt fund.",
+   "header": "Open Ended Schemes(Debt Scheme - Liquid Fund)",
+   "expect": "mf_debt"
+  },
+  {
+   "id": "MF4",
+   "title": "A hybrid scheme is MF hybrid",
+   "why": "The words before the dash inside the brackets are Hybrid Scheme, the headline of a hybrid fund.",
+   "header": "Open Ended Schemes(Hybrid Scheme - Aggressive Hybrid Fund)",
+   "expect": "mf_hybrid"
+  },
+  {
+   "id": "MF5",
+   "title": "A solution oriented scheme is MF other",
+   "why": "The headline is Solution Oriented Scheme: not equity, debt or hybrid.",
+   "header": "Open Ended Schemes(Solution Oriented Scheme - Retirement Fund)",
+   "expect": "mf_other"
+  },
+  {
+   "id": "MF6",
+   "title": "An index fund is MF other, whatever it follows",
+   "why": "The headline is Other Scheme. What the index holds is not in the header, so no guess is made; the owner can set the class of the fund.",
+   "header": "Open Ended Schemes(Other Scheme - Index Funds)",
+   "expect": "mf_other"
+  },
+  {
+   "id": "MF7",
+   "title": "Case and spaces do not matter",
+   "why": "'equity   scheme' with extra spaces and capitals, and no space after the dash.",
+   "header": "open ended schemes( EQUITY   Scheme -Large Cap Fund )",
+   "expect": "mf_equity"
+  },
+  {
+   "id": "MF8",
+   "title": "Brackets inside the brackets",
+   "why": "The headline is taken from the outermost brackets: Equity Scheme, with a bracket of its own further on.",
+   "header": "Open Ended Schemes(Equity Scheme - Sectoral/Thematic (Banking))",
+   "expect": "mf_equity"
+  },
+  {
+   "id": "MF9",
+   "title": "A header without a dash is MF other",
+   "why": "Close Ended Schemes(Income): Income is not a headline we know.",
+   "header": "Close Ended Schemes(Income)",
+   "expect": "mf_other"
+  },
+  {
+   "id": "MF10",
+   "title": "A header without brackets is MF other",
+   "why": "There are no brackets to read a headline from, so the fund is not put in a class it may not belong to.",
+   "header": "Mutual fund",
+   "expect": "mf_other"
+  },
+  {
+   "id": "MF11",
+   "title": "An empty header is MF other",
+   "why": "A fund whose section header is not known (empty text) has no headline to read.",
+   "header": "",
+   "expect": "mf_other"
+  },
+  {
+   "id": "MF12",
+   "title": "No header at all is MF other",
+   "why": "A fund with no header (null) has no headline to read either; this must not be an error.",
+   "header": null,
+   "expect": "mf_other"
+  },
+  {
+   "id": "MF13",
+   "title": "A bracket that is never closed is MF other",
+   "why": "The headline is read from between the brackets; with no closing bracket there is nothing between them, and the words after the opening one are not taken for it.",
+   "header": "Open Ended Schemes(Equity Scheme - Large Cap Fund",
+   "expect": "mf_other"
+  },
+  {
+   "id": "MF14",
+   "title": "Only the first dash ends the headline",
+   "why": "The headline is what comes before the first dash inside the brackets: Equity Scheme. A second dash further on (Large - Mid) is part of the fund's own description and changes nothing.",
+   "header": "Open Ended Schemes(Equity Scheme - Large - Mid Cap Fund)",
+   "expect": "mf_equity"
+  }
+ ],
+ "allocations": [
+  {
+   "id": "AL1",
+   "title": "Three equal parts: each share is its own rounding, so they need not add to 100",
+   "why": "Account 1 holds 10 shares at 100.00 (1,000.00 = 100,000 paise, sector IT, large cap, tag core) and 2 grams of gold at 500.00 (100,000 paise); account 2 holds 50 fund units at 20.0000 (100,000 paise). The tab is worth 300,000 paise and each part is a third: 33.3333, three times, which is 99.9999 and not 100 (each share is rounded alone). By class the three are level, so the order is by name: Equity, Gold and silver, MF equity. By sector the 200,000 paise with no sector comes first (66.6667, two holdings), then IT. Likewise cap size and tag. Account 1 holds two assets (200,000 paise, 66.6667), account 2 one; one member holds it all (100.0000, three holdings).",
+   "members": {
+    "1": "Me"
+   },
+   "accounts": {
+    "1": {
+     "name": "Demat A",
+     "member_id": 1
+    },
+    "2": {
+     "name": "Fund folio",
+     "member_id": 1
+    }
+   },
+   "rows": [
+    {
+     "asset": {
+      "id": 1,
+      "asset_class": "equity",
+      "sector": "IT",
+      "mcap": "large",
+      "tags": [
+       "core"
+      ]
+     },
+     "today_mode": "ok",
+     "price": {
+      "price_u": 1000000,
+      "prev_close_u": null
+     },
+     "lines": [
+      {
+       "account_id": 1,
+       "qty_u": 10000000,
+       "open_qty_u": 10000000,
+       "cost_paise": 90000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    },
+    {
+     "asset": {
+      "id": 2,
+      "asset_class": "mf_equity",
+      "sector": null,
+      "mcap": null,
+      "tags": []
+     },
+     "today_mode": "ok",
+     "price": {
+      "price_u": 200000,
+      "prev_close_u": null
+     },
+     "lines": [
+      {
+       "account_id": 2,
+       "qty_u": 50000000,
+       "open_qty_u": 50000000,
+       "cost_paise": 90000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    },
+    {
+     "asset": {
+      "id": 3,
+      "asset_class": "gold",
+      "sector": null,
+      "mcap": null,
+      "tags": []
+     },
+     "today_mode": "ok",
+     "price": {
+      "price_u": 5000000,
+      "prev_close_u": null
+     },
+     "lines": [
+      {
+       "account_id": 1,
+       "qty_u": 2000000,
+       "open_qty_u": 2000000,
+       "cost_paise": 90000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "class": [
+     {
+      "key": "equity",
+      "label": "Equity",
+      "value_paise": 100000,
+      "pct": "33.3333",
+      "holdings": 1
+     },
+     {
+      "key": "gold",
+      "label": "Gold and silver",
+      "value_paise": 100000,
+      "pct": "33.3333",
+      "holdings": 1
+     },
+     {
+      "key": "mf_equity",
+      "label": "MF equity",
+      "value_paise": 100000,
+      "pct": "33.3333",
+      "holdings": 1
+     }
+    ],
+    "sector": [
+     {
+      "key": "",
+      "label": "No sector set",
+      "value_paise": 200000,
+      "pct": "66.6667",
+      "holdings": 2
+     },
+     {
+      "key": "IT",
+      "label": "IT",
+      "value_paise": 100000,
+      "pct": "33.3333",
+      "holdings": 1
+     }
+    ],
+    "mcap": [
+     {
+      "key": "",
+      "label": "No cap size set",
+      "value_paise": 200000,
+      "pct": "66.6667",
+      "holdings": 2
+     },
+     {
+      "key": "large",
+      "label": "Large cap",
+      "value_paise": 100000,
+      "pct": "33.3333",
+      "holdings": 1
+     }
+    ],
+    "account": [
+     {
+      "key": "1",
+      "label": "Demat A",
+      "value_paise": 200000,
+      "pct": "66.6667",
+      "holdings": 2
+     },
+     {
+      "key": "2",
+      "label": "Fund folio",
+      "value_paise": 100000,
+      "pct": "33.3333",
+      "holdings": 1
+     }
+    ],
+    "member": [
+     {
+      "key": "1",
+      "label": "Me",
+      "value_paise": 300000,
+      "pct": "100.0000",
+      "holdings": 3
+     }
+    ],
+    "tag": [
+     {
+      "key": "",
+      "label": "No tag",
+      "value_paise": 200000,
+      "pct": "66.6667",
+      "holdings": 2
+     },
+     {
+      "key": "core",
+      "label": "core",
+      "value_paise": 100000,
+      "pct": "33.3333",
+      "holdings": 1
+     }
+    ]
+   }
+  },
+  {
+   "id": "AL2",
+   "title": "A holding with several tags is in each tag's bar, with all its value",
+   "why": "6 shares at 100.00 tagged income and core (60,000 paise), 3 shares tagged core, written twice (30,000: a tag written twice is one), and 1 share with no tag (10,000). The tab is worth 100,000. core is 60,000 + 30,000 = 90,000 (90.0000, two holdings), income 60,000 (60.0000), no tag 10,000 (10.0000): 160 per cent between them, because the first holding is in two bars. By class the same three are one bar of 100,000.",
+   "members": {
+    "1": "Me"
+   },
+   "accounts": {
+    "1": {
+     "name": "Demat A",
+     "member_id": 1
+    }
+   },
+   "rows": [
+    {
+     "asset": {
+      "id": 1,
+      "asset_class": "equity",
+      "sector": null,
+      "mcap": null,
+      "tags": [
+       "income",
+       "core"
+      ]
+     },
+     "today_mode": "ok",
+     "price": {
+      "price_u": 1000000,
+      "prev_close_u": null
+     },
+     "lines": [
+      {
+       "account_id": 1,
+       "qty_u": 6000000,
+       "open_qty_u": 6000000,
+       "cost_paise": 0,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    },
+    {
+     "asset": {
+      "id": 2,
+      "asset_class": "equity",
+      "sector": null,
+      "mcap": null,
+      "tags": [
+       "core",
+       "core"
+      ]
+     },
+     "today_mode": "ok",
+     "price": {
+      "price_u": 1000000,
+      "prev_close_u": null
+     },
+     "lines": [
+      {
+       "account_id": 1,
+       "qty_u": 3000000,
+       "open_qty_u": 3000000,
+       "cost_paise": 0,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    },
+    {
+     "asset": {
+      "id": 3,
+      "asset_class": "equity",
+      "sector": null,
+      "mcap": null,
+      "tags": []
+     },
+     "today_mode": "ok",
+     "price": {
+      "price_u": 1000000,
+      "prev_close_u": null
+     },
+     "lines": [
+      {
+       "account_id": 1,
+       "qty_u": 1000000,
+       "open_qty_u": 1000000,
+       "cost_paise": 0,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "class": [
+     {
+      "key": "equity",
+      "label": "Equity",
+      "value_paise": 100000,
+      "pct": "100.0000",
+      "holdings": 3
+     }
+    ],
+    "sector": [
+     {
+      "key": "",
+      "label": "No sector set",
+      "value_paise": 100000,
+      "pct": "100.0000",
+      "holdings": 3
+     }
+    ],
+    "mcap": [
+     {
+      "key": "",
+      "label": "No cap size set",
+      "value_paise": 100000,
+      "pct": "100.0000",
+      "holdings": 3
+     }
+    ],
+    "account": [
+     {
+      "key": "1",
+      "label": "Demat A",
+      "value_paise": 100000,
+      "pct": "100.0000",
+      "holdings": 3
+     }
+    ],
+    "member": [
+     {
+      "key": "1",
+      "label": "Me",
+      "value_paise": 100000,
+      "pct": "100.0000",
+      "holdings": 3
+     }
+    ],
+    "tag": [
+     {
+      "key": "core",
+      "label": "core",
+      "value_paise": 90000,
+      "pct": "90.0000",
+      "holdings": 2
+     },
+     {
+      "key": "income",
+      "label": "income",
+      "value_paise": 60000,
+      "pct": "60.0000",
+      "holdings": 1
+     },
+     {
+      "key": "",
+      "label": "No tag",
+      "value_paise": 10000,
+      "pct": "10.0000",
+      "holdings": 1
+     }
+    ]
+   }
+  },
+  {
+   "id": "AL3",
+   "title": "The same share in three accounts of two members",
+   "why": "10 shares at 200.00 in one account of the second member (2,000.00 = 200,000 paise) and 5 and 5 in two accounts of the first (100,000 each): 400,000 paise. One share, so one holding in the class bar and in each member's bar, and one in each account's. The second member's account is largest (50.0000); the other two are level, so Demat A comes before Demat B. The members are level at 200,000, so by name: Me before Member B.",
+   "members": {
+    "1": "Me",
+    "2": "Member B"
+   },
+   "accounts": {
+    "1": {
+     "name": "Demat A",
+     "member_id": 1
+    },
+    "2": {
+     "name": "Demat B",
+     "member_id": 1
+    },
+    "3": {
+     "name": "Demat C",
+     "member_id": 2
+    }
+   },
+   "rows": [
+    {
+     "asset": {
+      "id": 1,
+      "asset_class": "equity",
+      "sector": null,
+      "mcap": null,
+      "tags": []
+     },
+     "today_mode": "ok",
+     "price": {
+      "price_u": 2000000,
+      "prev_close_u": null
+     },
+     "lines": [
+      {
+       "account_id": 1,
+       "qty_u": 5000000,
+       "open_qty_u": 5000000,
+       "cost_paise": 0,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      },
+      {
+       "account_id": 2,
+       "qty_u": 5000000,
+       "open_qty_u": 5000000,
+       "cost_paise": 0,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      },
+      {
+       "account_id": 3,
+       "qty_u": 10000000,
+       "open_qty_u": 10000000,
+       "cost_paise": 0,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "class": [
+     {
+      "key": "equity",
+      "label": "Equity",
+      "value_paise": 400000,
+      "pct": "100.0000",
+      "holdings": 1
+     }
+    ],
+    "sector": [
+     {
+      "key": "",
+      "label": "No sector set",
+      "value_paise": 400000,
+      "pct": "100.0000",
+      "holdings": 1
+     }
+    ],
+    "mcap": [
+     {
+      "key": "",
+      "label": "No cap size set",
+      "value_paise": 400000,
+      "pct": "100.0000",
+      "holdings": 1
+     }
+    ],
+    "account": [
+     {
+      "key": "3",
+      "label": "Demat C",
+      "value_paise": 200000,
+      "pct": "50.0000",
+      "holdings": 1
+     },
+     {
+      "key": "1",
+      "label": "Demat A",
+      "value_paise": 100000,
+      "pct": "25.0000",
+      "holdings": 1
+     },
+     {
+      "key": "2",
+      "label": "Demat B",
+      "value_paise": 100000,
+      "pct": "25.0000",
+      "holdings": 1
+     }
+    ],
+    "member": [
+     {
+      "key": "1",
+      "label": "Me",
+      "value_paise": 200000,
+      "pct": "50.0000",
+      "holdings": 1
+     },
+     {
+      "key": "2",
+      "label": "Member B",
+      "value_paise": 200000,
+      "pct": "50.0000",
+      "holdings": 1
+     }
+    ],
+    "tag": [
+     {
+      "key": "",
+      "label": "No tag",
+      "value_paise": 400000,
+      "pct": "100.0000",
+      "holdings": 1
+     }
+    ]
+   }
+  },
+  {
+   "id": "AL4",
+   "title": "A holding with no price is counted at its cost",
+   "why": "10 shares at 100.00 are worth 100,000 paise; 5 units of something with no price yet cost 50,000 and count at that, so it does not look as if it had been lost. The tab is 150,000: 66.6667 and 33.3333.",
+   "members": {
+    "1": "Me"
+   },
+   "accounts": {
+    "1": {
+     "name": "Demat A",
+     "member_id": 1
+    }
+   },
+   "rows": [
+    {
+     "asset": {
+      "id": 1,
+      "asset_class": "equity",
+      "sector": null,
+      "mcap": null,
+      "tags": []
+     },
+     "today_mode": "ok",
+     "price": {
+      "price_u": 1000000,
+      "prev_close_u": null
+     },
+     "lines": [
+      {
+       "account_id": 1,
+       "qty_u": 10000000,
+       "open_qty_u": 10000000,
+       "cost_paise": 80000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    },
+    {
+     "asset": {
+      "id": 2,
+      "asset_class": "other",
+      "sector": null,
+      "mcap": null,
+      "tags": []
+     },
+     "today_mode": "ok",
+     "price": {
+      "price_u": null,
+      "prev_close_u": null
+     },
+     "lines": [
+      {
+       "account_id": 1,
+       "qty_u": 5000000,
+       "open_qty_u": 5000000,
+       "cost_paise": 50000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "class": [
+     {
+      "key": "equity",
+      "label": "Equity",
+      "value_paise": 100000,
+      "pct": "66.6667",
+      "holdings": 1
+     },
+     {
+      "key": "other",
+      "label": "Other",
+      "value_paise": 50000,
+      "pct": "33.3333",
+      "holdings": 1
+     }
+    ],
+    "sector": [
+     {
+      "key": "",
+      "label": "No sector set",
+      "value_paise": 150000,
+      "pct": "100.0000",
+      "holdings": 2
+     }
+    ],
+    "mcap": [
+     {
+      "key": "",
+      "label": "No cap size set",
+      "value_paise": 150000,
+      "pct": "100.0000",
+      "holdings": 2
+     }
+    ],
+    "account": [
+     {
+      "key": "1",
+      "label": "Demat A",
+      "value_paise": 150000,
+      "pct": "100.0000",
+      "holdings": 2
+     }
+    ],
+    "member": [
+     {
+      "key": "1",
+      "label": "Me",
+      "value_paise": 150000,
+      "pct": "100.0000",
+      "holdings": 2
+     }
+    ],
+    "tag": [
+     {
+      "key": "",
+      "label": "No tag",
+      "value_paise": 150000,
+      "pct": "100.0000",
+      "holdings": 2
+     }
+    ]
+   }
+  },
+  {
+   "id": "AL5",
+   "title": "A line sold out is not a holding",
+   "why": "10 shares at 100.00 held in account 1 and a line of the same share in account 2 that was sold out today (nothing held now); and a gold holding whose only line was sold out. Only the 100,000 paise in account 1 is there: no gold bar, no bar for account 2, one holding.",
+   "members": {
+    "1": "Me"
+   },
+   "accounts": {
+    "1": {
+     "name": "Demat A",
+     "member_id": 1
+    },
+    "2": {
+     "name": "Fund folio",
+     "member_id": 1
+    }
+   },
+   "rows": [
+    {
+     "asset": {
+      "id": 1,
+      "asset_class": "equity",
+      "sector": null,
+      "mcap": null,
+      "tags": []
+     },
+     "today_mode": "ok",
+     "price": {
+      "price_u": 1000000,
+      "prev_close_u": null
+     },
+     "lines": [
+      {
+       "account_id": 1,
+       "qty_u": 10000000,
+       "open_qty_u": 10000000,
+       "cost_paise": 80000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      },
+      {
+       "account_id": 2,
+       "qty_u": 0,
+       "open_qty_u": 10000000,
+       "cost_paise": 0,
+       "in_today_paise": 0,
+       "out_today_paise": 105000,
+       "over_year_qty_u": 0
+      }
+     ]
+    },
+    {
+     "asset": {
+      "id": 3,
+      "asset_class": "gold",
+      "sector": null,
+      "mcap": null,
+      "tags": []
+     },
+     "today_mode": "ok",
+     "price": {
+      "price_u": 5000000,
+      "prev_close_u": null
+     },
+     "lines": [
+      {
+       "account_id": 1,
+       "qty_u": 0,
+       "open_qty_u": 2000000,
+       "cost_paise": 0,
+       "in_today_paise": 0,
+       "out_today_paise": 100000,
+       "over_year_qty_u": 0
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "class": [
+     {
+      "key": "equity",
+      "label": "Equity",
+      "value_paise": 100000,
+      "pct": "100.0000",
+      "holdings": 1
+     }
+    ],
+    "sector": [
+     {
+      "key": "",
+      "label": "No sector set",
+      "value_paise": 100000,
+      "pct": "100.0000",
+      "holdings": 1
+     }
+    ],
+    "mcap": [
+     {
+      "key": "",
+      "label": "No cap size set",
+      "value_paise": 100000,
+      "pct": "100.0000",
+      "holdings": 1
+     }
+    ],
+    "account": [
+     {
+      "key": "1",
+      "label": "Demat A",
+      "value_paise": 100000,
+      "pct": "100.0000",
+      "holdings": 1
+     }
+    ],
+    "member": [
+     {
+      "key": "1",
+      "label": "Me",
+      "value_paise": 100000,
+      "pct": "100.0000",
+      "holdings": 1
+     }
+    ],
+    "tag": [
+     {
+      "key": "",
+      "label": "No tag",
+      "value_paise": 100000,
+      "pct": "100.0000",
+      "holdings": 1
+     }
+    ]
+   }
+  },
+  {
+   "id": "AL6",
+   "title": "Each line is rounded on its own, as the holdings list is",
+   "why": "Two accounts each hold 0.005 unit of a fund at 1.0000: half a paisa each, which rounds half away from zero to 1 paisa. The class bar is 1 + 1 = 2 paise (rounding the whole holding would say 1). Each account is 1 of 2: 50.0000.",
+   "members": {
+    "1": "Me"
+   },
+   "accounts": {
+    "1": {
+     "name": "Demat A",
+     "member_id": 1
+    },
+    "2": {
+     "name": "Fund folio",
+     "member_id": 1
+    }
+   },
+   "rows": [
+    {
+     "asset": {
+      "id": 1,
+      "asset_class": "mf_other",
+      "sector": null,
+      "mcap": null,
+      "tags": []
+     },
+     "today_mode": "ok",
+     "price": {
+      "price_u": 10000,
+      "prev_close_u": null
+     },
+     "lines": [
+      {
+       "account_id": 1,
+       "qty_u": 5000,
+       "open_qty_u": 5000,
+       "cost_paise": 0,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      },
+      {
+       "account_id": 2,
+       "qty_u": 5000,
+       "open_qty_u": 5000,
+       "cost_paise": 0,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "class": [
+     {
+      "key": "mf_other",
+      "label": "MF other",
+      "value_paise": 2,
+      "pct": "100.0000",
+      "holdings": 1
+     }
+    ],
+    "sector": [
+     {
+      "key": "",
+      "label": "No sector set",
+      "value_paise": 2,
+      "pct": "100.0000",
+      "holdings": 1
+     }
+    ],
+    "mcap": [
+     {
+      "key": "",
+      "label": "No cap size set",
+      "value_paise": 2,
+      "pct": "100.0000",
+      "holdings": 1
+     }
+    ],
+    "account": [
+     {
+      "key": "1",
+      "label": "Demat A",
+      "value_paise": 1,
+      "pct": "50.0000",
+      "holdings": 1
+     },
+     {
+      "key": "2",
+      "label": "Fund folio",
+      "value_paise": 1,
+      "pct": "50.0000",
+      "holdings": 1
+     }
+    ],
+    "member": [
+     {
+      "key": "1",
+      "label": "Me",
+      "value_paise": 2,
+      "pct": "100.0000",
+      "holdings": 1
+     }
+    ],
+    "tag": [
+     {
+      "key": "",
+      "label": "No tag",
+      "value_paise": 2,
+      "pct": "100.0000",
+      "holdings": 1
+     }
+    ]
+   }
+  },
+  {
+   "id": "AL7",
+   "title": "Nothing held: no bars of any kind",
+   "why": "Every line is sold out. No bar, whatever the kind.",
+   "members": {
+    "1": "Me"
+   },
+   "accounts": {
+    "1": {
+     "name": "Demat A",
+     "member_id": 1
+    },
+    "2": {
+     "name": "Fund folio",
+     "member_id": 1
+    }
+   },
+   "rows": [
+    {
+     "asset": {
+      "id": 1,
+      "asset_class": "equity",
+      "sector": null,
+      "mcap": null,
+      "tags": []
+     },
+     "today_mode": "ok",
+     "price": {
+      "price_u": 1000000,
+      "prev_close_u": null
+     },
+     "lines": [
+      {
+       "account_id": 1,
+       "qty_u": 0,
+       "open_qty_u": 10000000,
+       "cost_paise": 0,
+       "in_today_paise": 0,
+       "out_today_paise": 100000,
+       "over_year_qty_u": 0
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "class": [],
+    "sector": [],
+    "mcap": [],
+    "account": [],
+    "member": [],
+    "tag": []
+   }
+  },
+  {
+   "id": "AL8",
+   "title": "A tab worth nothing: the bar is there and its share is 0.0000",
+   "why": "One millionth of a unit at 1.0000 is worth 0.0001 of a paisa, which rounds to nothing. The tab is worth 0 paise, so there is nothing to divide by: the share is 0.0000 and the holding is still counted.",
+   "members": {
+    "1": "Me"
+   },
+   "accounts": {
+    "1": {
+     "name": "Demat A",
+     "member_id": 1
+    }
+   },
+   "rows": [
+    {
+     "asset": {
+      "id": 1,
+      "asset_class": "equity",
+      "sector": null,
+      "mcap": null,
+      "tags": []
+     },
+     "today_mode": "ok",
+     "price": {
+      "price_u": 10000,
+      "prev_close_u": null
+     },
+     "lines": [
+      {
+       "account_id": 1,
+       "qty_u": 1,
+       "open_qty_u": 1,
+       "cost_paise": 0,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "class": [
+     {
+      "key": "equity",
+      "label": "Equity",
+      "value_paise": 0,
+      "pct": "0.0000",
+      "holdings": 1
+     }
+    ],
+    "sector": [
+     {
+      "key": "",
+      "label": "No sector set",
+      "value_paise": 0,
+      "pct": "0.0000",
+      "holdings": 1
+     }
+    ],
+    "mcap": [
+     {
+      "key": "",
+      "label": "No cap size set",
+      "value_paise": 0,
+      "pct": "0.0000",
+      "holdings": 1
+     }
+    ],
+    "account": [
+     {
+      "key": "1",
+      "label": "Demat A",
+      "value_paise": 0,
+      "pct": "0.0000",
+      "holdings": 1
+     }
+    ],
+    "member": [
+     {
+      "key": "1",
+      "label": "Me",
+      "value_paise": 0,
+      "pct": "0.0000",
+      "holdings": 1
+     }
+    ],
+    "tag": [
+     {
+      "key": "",
+      "label": "No tag",
+      "value_paise": 0,
+      "pct": "0.0000",
+      "holdings": 1
+     }
+    ]
+   }
+  },
+  {
+   "id": "AL9",
+   "title": "A share exactly between two numbers goes away from zero",
+   "why": "1 unit at 0.01 is 1 paisa and 127 units at 0.01 are 127 paise: the tab is 128 paise. 1 / 128 is 0.78125 per cent, exactly between 0.7812 and 0.7813, which rounds to 0.7813; 127 / 128 is 99.21875 per cent, which rounds to 99.2188 (half to even would say 0.7812).",
+   "members": {
+    "1": "Me"
+   },
+   "accounts": {
+    "1": {
+     "name": "Demat A",
+     "member_id": 1
+    }
+   },
+   "rows": [
+    {
+     "asset": {
+      "id": 1,
+      "asset_class": "equity",
+      "sector": null,
+      "mcap": null,
+      "tags": []
+     },
+     "today_mode": "ok",
+     "price": {
+      "price_u": 100,
+      "prev_close_u": null
+     },
+     "lines": [
+      {
+       "account_id": 1,
+       "qty_u": 1000000,
+       "open_qty_u": 1000000,
+       "cost_paise": 0,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    },
+    {
+     "asset": {
+      "id": 2,
+      "asset_class": "gold",
+      "sector": null,
+      "mcap": null,
+      "tags": []
+     },
+     "today_mode": "ok",
+     "price": {
+      "price_u": 100,
+      "prev_close_u": null
+     },
+     "lines": [
+      {
+       "account_id": 1,
+       "qty_u": 127000000,
+       "open_qty_u": 127000000,
+       "cost_paise": 0,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "class": [
+     {
+      "key": "gold",
+      "label": "Gold and silver",
+      "value_paise": 127,
+      "pct": "99.2188",
+      "holdings": 1
+     },
+     {
+      "key": "equity",
+      "label": "Equity",
+      "value_paise": 1,
+      "pct": "0.7813",
+      "holdings": 1
+     }
+    ],
+    "sector": [
+     {
+      "key": "",
+      "label": "No sector set",
+      "value_paise": 128,
+      "pct": "100.0000",
+      "holdings": 2
+     }
+    ],
+    "mcap": [
+     {
+      "key": "",
+      "label": "No cap size set",
+      "value_paise": 128,
+      "pct": "100.0000",
+      "holdings": 2
+     }
+    ],
+    "account": [
+     {
+      "key": "1",
+      "label": "Demat A",
+      "value_paise": 128,
+      "pct": "100.0000",
+      "holdings": 2
+     }
+    ],
+    "member": [
+     {
+      "key": "1",
+      "label": "Me",
+      "value_paise": 128,
+      "pct": "100.0000",
+      "holdings": 2
+     }
+    ],
+    "tag": [
+     {
+      "key": "",
+      "label": "No tag",
+      "value_paise": 128,
+      "pct": "100.0000",
+      "holdings": 2
+     }
+    ]
+   }
+  },
+  {
+   "id": "AL10",
+   "title": "Bars of equal value are ordered by name and then key, not by arrival",
+   "why": "Banks (500.00) arrives before Auto (500.00): level, so Auto comes first. The two accounts are both called Demat and hold the same value, so the order falls to the key as text: '10' comes before '2'.",
+   "members": {
+    "1": "Me"
+   },
+   "accounts": {
+    "2": {
+     "name": "Demat",
+     "member_id": 1
+    },
+    "10": {
+     "name": "Demat",
+     "member_id": 1
+    }
+   },
+   "rows": [
+    {
+     "asset": {
+      "id": 1,
+      "asset_class": "equity",
+      "sector": "Banks",
+      "mcap": null,
+      "tags": []
+     },
+     "today_mode": "ok",
+     "price": {
+      "price_u": 1000000,
+      "prev_close_u": null
+     },
+     "lines": [
+      {
+       "account_id": 2,
+       "qty_u": 5000000,
+       "open_qty_u": 5000000,
+       "cost_paise": 0,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    },
+    {
+     "asset": {
+      "id": 2,
+      "asset_class": "equity",
+      "sector": "Auto",
+      "mcap": null,
+      "tags": []
+     },
+     "today_mode": "ok",
+     "price": {
+      "price_u": 1000000,
+      "prev_close_u": null
+     },
+     "lines": [
+      {
+       "account_id": 10,
+       "qty_u": 5000000,
+       "open_qty_u": 5000000,
+       "cost_paise": 0,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "class": [
+     {
+      "key": "equity",
+      "label": "Equity",
+      "value_paise": 100000,
+      "pct": "100.0000",
+      "holdings": 2
+     }
+    ],
+    "sector": [
+     {
+      "key": "Auto",
+      "label": "Auto",
+      "value_paise": 50000,
+      "pct": "50.0000",
+      "holdings": 1
+     },
+     {
+      "key": "Banks",
+      "label": "Banks",
+      "value_paise": 50000,
+      "pct": "50.0000",
+      "holdings": 1
+     }
+    ],
+    "mcap": [
+     {
+      "key": "",
+      "label": "No cap size set",
+      "value_paise": 100000,
+      "pct": "100.0000",
+      "holdings": 2
+     }
+    ],
+    "account": [
+     {
+      "key": "10",
+      "label": "Demat",
+      "value_paise": 50000,
+      "pct": "50.0000",
+      "holdings": 1
+     },
+     {
+      "key": "2",
+      "label": "Demat",
+      "value_paise": 50000,
+      "pct": "50.0000",
+      "holdings": 1
+     }
+    ],
+    "member": [
+     {
+      "key": "1",
+      "label": "Me",
+      "value_paise": 100000,
+      "pct": "100.0000",
+      "holdings": 2
+     }
+    ],
+    "tag": [
+     {
+      "key": "",
+      "label": "No tag",
+      "value_paise": 100000,
+      "pct": "100.0000",
+      "holdings": 2
+     }
+    ]
+   }
+  },
+  {
+   "id": "AL11",
+   "title": "The three cap sizes and the holdings with none",
+   "why": "4, 3, 2 and 1 shares at 100.00 (40,000, 30,000, 20,000 and 10,000 paise) of large, mid, small and no cap size: 40.0000, 30.0000, 20.0000 and 10.0000 per cent, in that order. The sectors come out level: A is the first and the fourth share (40,000 + 10,000), B the second and the third (30,000 + 20,000), 50,000 paise each, so by name A comes first.",
+   "members": {
+    "1": "Me"
+   },
+   "accounts": {
+    "1": {
+     "name": "Demat A",
+     "member_id": 1
+    }
+   },
+   "rows": [
+    {
+     "asset": {
+      "id": 1,
+      "asset_class": "equity",
+      "sector": "A",
+      "mcap": "large",
+      "tags": []
+     },
+     "today_mode": "ok",
+     "price": {
+      "price_u": 1000000,
+      "prev_close_u": null
+     },
+     "lines": [
+      {
+       "account_id": 1,
+       "qty_u": 4000000,
+       "open_qty_u": 4000000,
+       "cost_paise": 0,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    },
+    {
+     "asset": {
+      "id": 2,
+      "asset_class": "equity",
+      "sector": "B",
+      "mcap": "mid",
+      "tags": []
+     },
+     "today_mode": "ok",
+     "price": {
+      "price_u": 1000000,
+      "prev_close_u": null
+     },
+     "lines": [
+      {
+       "account_id": 1,
+       "qty_u": 3000000,
+       "open_qty_u": 3000000,
+       "cost_paise": 0,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    },
+    {
+     "asset": {
+      "id": 3,
+      "asset_class": "equity",
+      "sector": "B",
+      "mcap": "small",
+      "tags": []
+     },
+     "today_mode": "ok",
+     "price": {
+      "price_u": 1000000,
+      "prev_close_u": null
+     },
+     "lines": [
+      {
+       "account_id": 1,
+       "qty_u": 2000000,
+       "open_qty_u": 2000000,
+       "cost_paise": 0,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    },
+    {
+     "asset": {
+      "id": 4,
+      "asset_class": "equity",
+      "sector": "A",
+      "mcap": null,
+      "tags": []
+     },
+     "today_mode": "ok",
+     "price": {
+      "price_u": 1000000,
+      "prev_close_u": null
+     },
+     "lines": [
+      {
+       "account_id": 1,
+       "qty_u": 1000000,
+       "open_qty_u": 1000000,
+       "cost_paise": 0,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "class": [
+     {
+      "key": "equity",
+      "label": "Equity",
+      "value_paise": 100000,
+      "pct": "100.0000",
+      "holdings": 4
+     }
+    ],
+    "sector": [
+     {
+      "key": "A",
+      "label": "A",
+      "value_paise": 50000,
+      "pct": "50.0000",
+      "holdings": 2
+     },
+     {
+      "key": "B",
+      "label": "B",
+      "value_paise": 50000,
+      "pct": "50.0000",
+      "holdings": 2
+     }
+    ],
+    "mcap": [
+     {
+      "key": "large",
+      "label": "Large cap",
+      "value_paise": 40000,
+      "pct": "40.0000",
+      "holdings": 1
+     },
+     {
+      "key": "mid",
+      "label": "Mid cap",
+      "value_paise": 30000,
+      "pct": "30.0000",
+      "holdings": 1
+     },
+     {
+      "key": "small",
+      "label": "Small cap",
+      "value_paise": 20000,
+      "pct": "20.0000",
+      "holdings": 1
+     },
+     {
+      "key": "",
+      "label": "No cap size set",
+      "value_paise": 10000,
+      "pct": "10.0000",
+      "holdings": 1
+     }
+    ],
+    "account": [
+     {
+      "key": "1",
+      "label": "Demat A",
+      "value_paise": 100000,
+      "pct": "100.0000",
+      "holdings": 4
+     }
+    ],
+    "member": [
+     {
+      "key": "1",
+      "label": "Me",
+      "value_paise": 100000,
+      "pct": "100.0000",
+      "holdings": 4
+     }
+    ],
+    "tag": [
+     {
+      "key": "",
+      "label": "No tag",
+      "value_paise": 100000,
+      "pct": "100.0000",
+      "holdings": 4
+     }
+    ]
+   }
+  },
+  {
+   "id": "AL12",
+   "title": "Bars of equal value are ordered by what they are called, not by their key",
+   "why": "Two holdings of 500.00 (50,000 paise each). Cash is held in the account called Zeta (key 1, member key 1 called Member B) and crypto in the account called Alpha (key 2, member key 2 called Me). Every bar is level, so each kind goes by name: Crypto before FD and cash although the key cash comes before crypto; Alpha before Zeta although key 1 comes before key 2; Me before Member B although key 1 comes before key 2. Sector, cap size and tag are one bar of both holdings each.",
+   "members": {
+    "1": "Member B",
+    "2": "Me"
+   },
+   "accounts": {
+    "1": {
+     "name": "Zeta",
+     "member_id": 1
+    },
+    "2": {
+     "name": "Alpha",
+     "member_id": 2
+    }
+   },
+   "rows": [
+    {
+     "asset": {
+      "id": 1,
+      "asset_class": "cash",
+      "sector": null,
+      "mcap": null,
+      "tags": []
+     },
+     "today_mode": "ok",
+     "price": {
+      "price_u": 1000000,
+      "prev_close_u": null
+     },
+     "lines": [
+      {
+       "account_id": 1,
+       "qty_u": 5000000,
+       "open_qty_u": 5000000,
+       "cost_paise": 0,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    },
+    {
+     "asset": {
+      "id": 2,
+      "asset_class": "crypto",
+      "sector": null,
+      "mcap": null,
+      "tags": []
+     },
+     "today_mode": "ok",
+     "price": {
+      "price_u": 1000000,
+      "prev_close_u": null
+     },
+     "lines": [
+      {
+       "account_id": 2,
+       "qty_u": 5000000,
+       "open_qty_u": 5000000,
+       "cost_paise": 0,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "class": [
+     {
+      "key": "crypto",
+      "label": "Crypto",
+      "value_paise": 50000,
+      "pct": "50.0000",
+      "holdings": 1
+     },
+     {
+      "key": "cash",
+      "label": "FD and cash",
+      "value_paise": 50000,
+      "pct": "50.0000",
+      "holdings": 1
+     }
+    ],
+    "sector": [
+     {
+      "key": "",
+      "label": "No sector set",
+      "value_paise": 100000,
+      "pct": "100.0000",
+      "holdings": 2
+     }
+    ],
+    "mcap": [
+     {
+      "key": "",
+      "label": "No cap size set",
+      "value_paise": 100000,
+      "pct": "100.0000",
+      "holdings": 2
+     }
+    ],
+    "account": [
+     {
+      "key": "2",
+      "label": "Alpha",
+      "value_paise": 50000,
+      "pct": "50.0000",
+      "holdings": 1
+     },
+     {
+      "key": "1",
+      "label": "Zeta",
+      "value_paise": 50000,
+      "pct": "50.0000",
+      "holdings": 1
+     }
+    ],
+    "member": [
+     {
+      "key": "2",
+      "label": "Me",
+      "value_paise": 50000,
+      "pct": "50.0000",
+      "holdings": 1
+     },
+     {
+      "key": "1",
+      "label": "Member B",
+      "value_paise": 50000,
+      "pct": "50.0000",
+      "holdings": 1
+     }
+    ],
+    "tag": [
+     {
+      "key": "",
+      "label": "No tag",
+      "value_paise": 100000,
+      "pct": "100.0000",
+      "holdings": 2
+     }
+    ]
+   }
+  }
+ ]
+}

@@ -236,13 +236,16 @@ def row_today(row: Row) -> Today:
     return Today(OK, paise, base, pct(paise, base), counted=1)
 
 
+def line_value(line: Line, price_u: int | None) -> int:
+    """What one line is worth: its units at the price, or its cost while there is no price. Every
+    figure that divides a tab's value (a row, the totals, the allocation) adds these up."""
+    return line.cost_paise if price_u is None else value_paise(line.qty_u, price_u)
+
+
 def row_figures(row: Row) -> RowFigures:
     cost = sum(line.cost_paise for line in row.lines)
     priced = row.price_u is not None
-    if priced:
-        value = sum(value_paise(line.qty_u, row.price_u) for line in row.lines)
-    else:
-        value = cost
+    value = sum(line_value(line, row.price_u) for line in row.lines)
     gain = value - cost
     return RowFigures(
         value, cost, gain, pct(gain, cost) if priced else None, priced, row_today(row)
