@@ -215,6 +215,48 @@ describe('a new alert', () => {
     ).toBeInTheDocument()
   })
 
+  it('refuses a level or a move typed as anything but plain digits, in its own words', async () => {
+    const user = userEvent.setup()
+    const { sheet } = renderForm({ prefill: SBIN })
+    const level = within(sheet).getByLabelText('Price level')
+    const sentence =
+      "Type the level in plain digits, with one '.' before any decimals, like 25900 or 100.05."
+
+    for (const text of ['1e3', '१०००', '1_000']) {
+      await user.clear(level)
+      await user.type(level, text)
+      expect(level).toHaveAttribute('aria-invalid', 'true')
+      expect(within(sheet).getByRole('alert')).toHaveTextContent(sentence)
+      expect(within(sheet).queryByText(/Checks at/)).toBeNull()
+      await user.click(within(sheet).getByRole('button', { name: 'Save' }))
+      expect(api.create).not.toHaveBeenCalled()
+    }
+
+    await user.clear(level)
+    await user.type(level, '1,000')
+    expect(level).not.toHaveAttribute('aria-invalid')
+    expect(within(sheet).getByText('Checks at ₹1,000.00')).toBeInTheDocument()
+
+    await user.click(within(sheet).getByRole('button', { name: '% move' }))
+    await user.type(within(sheet).getByLabelText('Move, in %'), '2e1')
+    expect(within(sheet).getByRole('alert')).toHaveTextContent(
+      "Type the move in plain digits, with one '.' before any decimals, like 2 or 1.5."
+    )
+    await user.click(within(sheet).getByRole('button', { name: 'Save' }))
+    expect(api.create).not.toHaveBeenCalled()
+  })
+
+  it('refuses an edit whose stored level is not plain digits until it is typed again', async () => {
+    const user = userEvent.setup()
+    const { sheet } = renderForm({
+      row: alertRow({ params: { op: 'crosses_above', level: '1E+3', source: 'ltp' } }),
+    })
+
+    await user.click(within(sheet).getByRole('button', { name: 'Save' }))
+    expect(api.change).not.toHaveBeenCalled()
+    expect(within(sheet).getByLabelText('Price level')).toHaveAttribute('aria-invalid', 'true')
+  })
+
   it('says where a level off the tick is met', async () => {
     const user = userEvent.setup()
     const { sheet } = renderForm({ prefill: SBIN })

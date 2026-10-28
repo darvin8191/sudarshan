@@ -13,6 +13,7 @@ import {
   levelFrom,
   paiseOf,
   paiseText,
+  plainNumber,
   priceNote,
   tickEdges,
   tickOf,
@@ -87,6 +88,32 @@ describe('what the form says about a level', () => {
     )
   })
 
+  it('reads a level with the tick not known yet as it will be read, never "nearest tick"', () => {
+    expect(checksAtWords('NSE', 'crosses_above', '100.005', null)).toBe('Checks at ₹100.01')
+    expect(checksAtWords('NSE', 'crosses_below', '100.005', null)).toBe('Checks at ₹100.00')
+  })
+
+  it('takes plain digits only: commas and one point, nothing a parser might read differently', () => {
+    for (const text of ['25900', '1,00,000.50', '100.', '.5', ' 812.40 ', '']) {
+      expect(plainNumber(text)).toBe(true)
+    }
+    for (const text of [
+      '1e3',
+      '1E3',
+      '1_000',
+      '१२३',
+      '૧૨૩',
+      '٣',
+      '1.2.3',
+      '-5',
+      '+5',
+      '.',
+      '0x10',
+    ]) {
+      expect(plainNumber(text)).toBe(false)
+    }
+  })
+
   it('says nothing for a level that is not a number above 0', () => {
     for (const level of ['', '0', 'abc', '1.2.3', '-5']) {
       expect(checksAtWords('NSE', 'crosses_above', level, '0.05')).toBeNull()
@@ -100,6 +127,10 @@ describe('what the form says about a level', () => {
     })
     expect(priceNote('SBIN', 'NSE', 'crosses_below', '100', 99.95)?.warn).toBe(true)
     expect(priceNote('SBIN', 'NSE', 'crosses_above', '100', 99.95)).toBeNull()
+    // At the level itself a crossing waits too: the price must leave it first.
+    expect(priceNote('SBIN', 'NSE', 'crosses_above', '100', 100)?.warn).toBe(true)
+    expect(priceNote('SBIN', 'NSE', 'crosses_below', '100', 100)?.warn).toBe(true)
+    expect(priceNote('SBIN', 'NSE', 'crosses_below', '100', 100.05)).toBeNull()
     expect(priceNote('SBIN', 'NSE', 'crosses', '100', 100.05)).toBeNull()
   })
 

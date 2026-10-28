@@ -46,7 +46,9 @@ import {
   KIND_DEFAULTS,
   levelFrom,
   NOT_FOR,
+  NOT_PLAIN,
   OP_WORDS,
+  plainNumber,
   priceNote,
   tickOf,
 } from './words'
@@ -405,6 +407,11 @@ export function AlertFormSheet({
     setForm((now) => ({ ...now, ...patch }))
     if (!field || problem?.field === field || problem?.field === null) setProblem(null)
   }
+  // A number typed as anything but plain digits is refused at once, in the form's own words.
+  const setText = (field: 'level' | 'percent', text: string) => {
+    set(field === 'level' ? { level: text } : { percent: text }, field)
+    if (!plainNumber(text)) setProblem({ field, text: NOT_PLAIN[field] })
+  }
   // A kind brings its own defaults only when it changes: the one already pressed keeps the rest.
   const pickKind = (kind: AlertKind) => {
     if (kind !== form.kind) set(kindDefaults(kind), 'kind')
@@ -486,6 +493,11 @@ export function AlertFormSheet({
 
   const save = async () => {
     if (!instrument || once.current) return
+    const typed = form.kind === 'price' ? 'level' : form.kind === 'move' ? 'percent' : null
+    if (typed && !plainNumber(form[typed])) {
+      setProblem({ field: typed, text: NOT_PLAIN[typed] })
+      return
+    }
     once.current = true
     setSaving(true)
     setProblem(null)
@@ -614,7 +626,7 @@ export function AlertFormSheet({
                 value={form.level}
                 onChange={(event) => {
                   typedLevel.current = true
-                  set({ level: event.target.value }, 'level')
+                  setText('level', event.target.value)
                 }}
                 className={BOX}
                 {...invalid('level')}
@@ -677,7 +689,7 @@ export function AlertFormSheet({
                 inputMode="decimal"
                 autoComplete="off"
                 value={form.percent}
-                onChange={(event) => set({ percent: event.target.value }, 'percent')}
+                onChange={(event) => setText('percent', event.target.value)}
                 className={BOX}
                 {...invalid('percent')}
               />

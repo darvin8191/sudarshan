@@ -31,6 +31,16 @@ function exact(text: string | null | undefined): Exact | null {
   return { units: BigInt(`${match[1] || '0'}${fraction}`), scale: fraction.length }
 }
 
+/**
+ * Whether typed text is a plain number the form may send: ASCII digits, Indian commas and at
+ * most one '.', nothing else (no exponent, no '_', no digits of another script), or nothing at
+ * all, which the server answers for. The server reads levels just as strictly.
+ */
+export function plainNumber(text: string): boolean {
+  const clean = text.trim().replace(/,/g, '')
+  return clean === '' || (/^[0-9]*\.?[0-9]*$/.test(clean) && /[0-9]/.test(clean))
+}
+
 const TEN = BigInt(10)
 const HUNDRED = BigInt(100)
 const ZERO = BigInt(0)
@@ -206,6 +216,12 @@ export const NOT_FOR = {
   quoteAtClose:
     "'At candle close' judges the last trade price. For the bid or ask, pick another frequency.",
   exchange: 'Market alerts work on NSE, BSE, NFO and BFO instruments and their indices for now.',
+} as const
+
+/** The form's own sentences for text that is not a plain number (`plainNumber`). */
+export const NOT_PLAIN = {
+  level: "Type the level in plain digits, with one '.' before any decimals, like 25900 or 100.05.",
+  percent: "Type the move in plain digits, with one '.' before any decimals, like 2 or 1.5.",
 } as const
 
 /** The tick an instrument is checked on: an index moves in hundredths. */
