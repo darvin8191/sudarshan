@@ -190,14 +190,18 @@ shows its last non-zero value. Use REST quotes for circuit checks.
   `PUT /claims/<client>`. The socket carries the overlay united with every client's claims, each
   key in the highest mode anyone holds it in (ltpc < option_greeks < full < full_d30), so no
   client downgrades or removes a key another one needs. On a change the socket is sent only the
-  difference: `sub` for keys new to it, `change_mode` for keys whose mode changed, `unsub` for keys
-  nobody holds any more. Caps are checked on that effective set. Each client has a quota
-  (`sudarshan-screener` 700, `sudarshan-alerts` 300, `sudarshan-portfolio` 200, any other client
-  50) and every client's claims together hold at most 1,400 keys, a key two clients hold counting
-  once; a claim over either is refused with 409 and the message names the client. A client that
-  has not renewed its claims for 7 days loses them (checked at start and at each day's close); a
-  stored claim over its quota, or claims that would break a cap or the ceiling at start, are
-  dropped with an ERROR and the feed starts with its base and overlay.
+  difference, in an order that never holds more than the end state: `unsub` for keys nobody
+  holds any more, then `change_mode` for keys whose mode went down, then for those that went
+  up, then `sub` for keys new to it. Caps are checked on that effective set when a change adds
+  a key or raises a mode; a change that only takes keys away or lowers modes is never refused,
+  so a client can always let go of its keys. Each client has a quota (`sudarshan-screener` 700,
+  `sudarshan-alerts` 300, `sudarshan-portfolio` 200, any other client 50), at most 4 other
+  clients hold claims at once (their 200 keys are the ring's headroom over the named quotas),
+  and every client's claims together hold at most 1,400 keys, a key two clients hold counting
+  once; a claim over any of these is refused with 409 and the message names the client. A
+  client that has not renewed its claims for 7 days loses them (checked at start and at each
+  day's close); a stored claim over its quota, or claims that would break a cap or the ceiling
+  at start, are dropped with an ERROR and the feed starts with its base and overlay.
 - **Every key is re-sent after a reconnect**, claims included,
   in batches of 100. Caps per connection (Upstox): ltpc 5,000, full 2,000, option_greeks 3,000,
   full_d30 50; once two modes are in use, the total may not exceed the smallest "combined"

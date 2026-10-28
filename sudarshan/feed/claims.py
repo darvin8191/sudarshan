@@ -3,10 +3,11 @@
 PUT /claims/<client> {"keys": {KEY: MODE}} replaces that client's whole set in one step and
 renews it; DELETE /claims/<client> drops it; GET /claims lists every client. The effective set
 is computed in subscriptions.py; this sends Upstox only what changed, on the live socket, under
-the same lock as /subscribe and the resubscribe after a connect: ``sub`` for keys new to the
-socket, ``change_mode`` (and a fresh snapshot entry) for keys whose effective mode changed, and
-``unsub`` for keys nobody holds any more. Without a live socket the change applies at the next
-connect, which sends the whole effective set.
+the same lock as /subscribe and the resubscribe after a connect, and commits the change under
+that lock too: ``unsub`` for keys nobody holds any more, ``change_mode`` (and a fresh snapshot
+entry) for keys whose effective mode changed, lowered ones first, and ``sub`` for keys new to
+the socket. Without a live socket the change applies at the next connect, which sends the whole
+effective set.
 """
 
 from __future__ import annotations

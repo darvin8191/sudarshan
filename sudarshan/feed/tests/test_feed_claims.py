@@ -14,12 +14,16 @@ import zmq
 import zmq.asyncio
 
 from sudarshan.feed.bus import HEALTH_TOPIC
+from sudarshan.feed.claims import ClaimsMixin
 from sudarshan.feed.config import Settings
 from sudarshan.feed.service import FeedService
 from sudarshan.feed.subscriptions import (
     CLAIM_TTL_S,
+    COMBINED_CAPS,
+    MAX_OTHER_CLIENTS,
     CapError,
     Subscriptions,
+    check_ring,
     validate_claims,
 )
 
@@ -85,15 +89,20 @@ def test_each_client_has_a_quota_and_the_ring_a_ceiling(tmp_path):
     subs.put_claims(S, keys("s", 700), NOW)
     subs.put_claims(A, keys("a", 300), NOW)
     subs.put_claims("sudarshan-portfolio", keys("p", 200), NOW)
+    assert MAX_OTHER_CLIENTS == 4  # 50 each fills the ring's headroom over the named quotas
     for n in range(4):
         subs.put_claims(f"sudarshan-x{n}", keys(f"x{n}-", 50), NOW)
     assert len(subs.desired()) == 1 + 1400
-    with pytest.raises(CapError, match="^sudarshan-x4: the claims of every client would hold "
-                                       "1401 keys; at most 1400 together$"):  # fmt: skip
-        subs.put_claims("sudarshan-x4", keys("x4-", 1), NOW)
+    with pytest.raises(CapError, match="^sudarshan-x4: at most 4 clients other than "
+                                       "sudarshan-alerts, sudarshan-portfolio, "
+                                       "sudarshan-screener may hold claims at once$"):  # fmt: skip
+        subs.put_claims("sudarshan-x4", keys("s", 1), NOW)  # review L6: ids are bounded
     assert "sudarshan-x4" not in subs.claims
-    subs.put_claims("sudarshan-x4", keys("s", 50), NOW)  # held by the screener already: no more
-    assert len(subs.desired()) == 1 + 1400 and subs.claim_counts()["sudarshan-x4"] == 50
+    subs.put_claims("sudarshan-x0", keys("s", 50), NOW)  # one of the four may change its set
+    subs.put_claims("sudarshan-x1", {}, NOW)  # and a slot frees when one lets go
+    subs.put_claims("sudarshan-x4", keys("x4-", 50), NOW)
+    with pytest.raises(CapError, match="at most 1400 together$"):  # the ring, as at a start
+        check_ring(subs.claims | {"sudarshan-y": {"keys": keys("y", 51)}})
 
 
 def test_a_stored_claim_over_its_quota_is_dropped_at_start(tmp_path, caplog):
@@ -163,11 +172,14 @@ def test_a_damaged_claim_is_dropped_not_the_file(tmp_path, caplog):
         "Bad Client": {"renewed_at": int(NOW), "keys": {INFY: "ltpc"}},
         S: {"renewed_at": "yesterday", "keys": {INFY: "ltpc"}},
         "sudarshan-x": {"renewed_at": int(NOW), "keys": {INFY: "depth"}},
+        "sudarshan-y": {"renewed_at": True, "keys": {INFY: "ltpc"}},  # JSON true is not a time
+        "sudarshan-portfolio": {"renewed_at": int(NOW), "keys": {}},  # nothing held: no entry
     }
     state.write_text(json.dumps({"version": 2, "added": {}, "removed": [], "claims": claims}))
     with caplog.at_level(logging.ERROR, logger="sudarshan.feed"):
         subs = Subscriptions.load(keys, state, NOW)
-    assert subs.claim_counts() == {A: 1} and caplog.text.count("ignoring the stored claims") == 3
+    assert subs.claim_counts() == {A: 1} and caplog.text.count("ignoring the stored claims") == 4
+    assert "sudarshan-portfolio" not in subs.claims and NIFTY in subs.desired()
 
 
 @pytest.mark.parametrize(
@@ -207,7 +219,7 @@ def test_claims_reach_the_socket_and_a_reconnect_resubscribes_them(feed_env, fas
                 await ff.wait_until(lambda: len(fake.requests[0]) == sent + 2)
                 got = [(r["method"], r["data"].get("mode"), r["data"]["instrumentKeys"])
                        for r in fake.requests[0][sent:]]  # fmt: skip
-                assert got == [("sub", "full", [INFY]), ("change_mode", "full", [NIFTY])]
+                assert got == [("change_mode", "full", [NIFTY]), ("sub", "full", [INFY])]
                 over = await http.put(f"/claims/{S}", json={"keys": {
                     f"NSE_FO|{n}": "full_d30" for n in range(51)}})  # fmt: skip
                 assert over.status_code == 409 and "51 keys in full_d30" in over.json()["error"]
@@ -228,7 +240,7 @@ def test_claims_reach_the_socket_and_a_reconnect_resubscribes_them(feed_env, fas
                 await ff.wait_until(lambda: len(fake.requests[1]) == sent + 2)
                 got = [(r["method"], r["data"].get("mode"), r["data"]["instrumentKeys"])
                        for r in fake.requests[1][sent:]]  # fmt: skip
-                assert got == [("change_mode", "ltpc", [NIFTY]), ("unsub", None, [INFY])]
+                assert got == [("unsub", None, [INFY]), ("change_mode", "ltpc", [NIFTY])]
             svc.stop("test")
             await asyncio.wait_for(run, 10)
 
@@ -265,5 +277,147 @@ def test_a_market_status_change_is_published_at_once(feed_env, fast, monkeypatch
                 ctx.term()
             svc.stop("test")
             await asyncio.wait_for(run, 10)
+
+    asyncio.run(scenario())
+
+
+# ---- review of feat/market-alerts-runtime: M2, M3, L1 and the claims' survivors -------------
+
+
+def test_stale_claims_at_start_expire_even_with_the_rest_over_a_cap(tmp_path):
+    """Review M2: claims over a cap at load are dropped and the feed starts; an expiry before
+    that check was refused by the cap and stopped the feed (exit 2, a restart loop)."""
+    keys, state = tmp_path / "keys.txt", tmp_path / "state" / "subscriptions.json"
+    keys.write_text("".join(f"full NSE_EQ|K{n}\n" for n in range(1400)))
+    state.parent.mkdir()
+    claims = {
+        A: {"renewed_at": int(NOW - CLAIM_TTL_S - 60), "keys": {"NSE_FO|1": "ltpc"}},
+        S: {"renewed_at": int(NOW), "keys": {f"NSE_FO|S{n}": "ltpc" for n in range(200)}},
+    }
+    state.write_text(json.dumps({"version": 2, "added": {}, "removed": [], "claims": claims}))
+    subs = Subscriptions.load(keys, state, NOW)
+    assert subs.claims == {} and len(subs.desired()) == 1400
+
+
+def test_a_swap_at_the_combined_cap_never_holds_both_sets_on_the_socket(tmp_path):
+    """Review M3: caps are checked on the end state, but the socket was told sub, change_mode,
+    unsub: a 700-key swap at 1,500 keys held 2,200 for a moment."""
+    base = {NIFTY: "ltpc"} | {f"NSE_EQ|B{n}": "full" for n in range(799)}
+    subs = Subscriptions(dict(base), tmp_path / "s.json")
+    subs.put_claims(S, {f"NSE_FO|A{n}": "full" for n in range(700)}, NOW)
+    assert len(subs.desired()) == 1500 == COMBINED_CAPS["full"]
+    change = subs.put_claims(S, {f"NSE_FO|Z{n}": "full" for n in range(700)}, NOW)
+    held = peak = len(subs.desired()) - len(change.new) + len(change.gone)
+    for method, batch, _ in change.batches():
+        held += len(batch) if method == "sub" else -len(batch) if method == "unsub" else 0
+        peak = max(peak, held)
+    assert peak == 1500 and held == len(subs.desired())
+
+
+def test_a_client_can_always_let_go_of_its_keys(tmp_path):
+    """Review L1: a release that lowers a key's mode brings the combined cap in, and was refused:
+    a client could not drop its claims, and an expiry at the close would stop the feed."""
+    subs = Subscriptions({f"NSE_EQ|B{n}": "full" for n in range(1600)}, tmp_path / "s.json")
+    subs.put_claims(A, {REL: "full"}, NOW)
+    subs.subscribe("ltpc", [REL])  # the overlay's own mode, hidden by the claim
+    change = subs.drop_claims(A)
+    assert change.moved == {REL: "ltpc"} and subs.claims == {}
+    subs.put_claims(A, {REL: "full"}, NOW)
+    assert subs.put_claims(A, {}, NOW).moved == {REL: "ltpc"}  # an empty set, the same
+    subs.put_claims(A, {REL: "full"}, NOW)
+    assert subs.expire(NOW + CLAIM_TTL_S + 1).moved == {REL: "ltpc"} and subs.claims == {}
+
+
+class Socket:
+    """What the feed's socket was told, applied as Upstox would: the keys it holds now."""
+
+    def __init__(self, hold_s: float = 0.0):
+        self.hold_s, self.told, self.keys = hold_s, [], set()
+
+    async def send(self, method, keys, mode):
+        self.told.append((method, mode, list(keys)))
+        if method == "sub":
+            self.keys |= set(keys)
+        elif method == "unsub":
+            self.keys -= set(keys)
+        await asyncio.sleep(self.hold_s)
+
+
+class Host(ClaimsMixin):
+    """FeedService's part the claims use: the subscriptions, the store, the socket and its
+    lock, the clock."""
+
+    def __init__(self, tmp_path, socket: Socket | None = None, live: bool = True):
+        self.subs = Subscriptions({NIFTY: "ltpc"}, tmp_path / "s.json")
+        self.store, self.socket = Store(), socket or Socket()
+        self._send_lock = asyncio.Lock()
+        self._ws, self._live = object(), live
+        self.clock = lambda: NOW
+
+    async def _send(self, ws, method, keys, mode=None):
+        await self.socket.send(method, keys, mode)
+
+
+class Store:
+    def __init__(self):
+        self.reset_keys: list[str] = []
+
+    def reset(self, key: str) -> None:
+        self.reset_keys.append(key)
+
+
+def test_a_mode_change_starts_the_keys_snapshot_again(tmp_path):
+    """Mutant C1: the old mode's fields would be carried into the new one."""
+
+    async def scenario():
+        host = Host(tmp_path)
+        await host.put_claims(A, {REL: "ltpc", NIFTY: "full"})
+        assert host.store.reset_keys == [NIFTY]
+
+    asyncio.run(scenario())
+
+
+def test_nothing_is_sent_before_the_socket_is_live(tmp_path):
+    """Mutant C2: while the socket is being subscribed after a connect, a change waits for that
+    resubscribe, which sends the whole set."""
+
+    async def scenario():
+        host = Host(tmp_path, live=False)
+        answer = await host.put_claims(A, {REL: "full"})
+        assert answer["applied_live"] is False and host.socket.told == []
+
+    asyncio.run(scenario())
+
+
+def test_a_closed_socket_is_never_reported_as_applied(tmp_path):
+    """Mutant C4."""
+    from websockets.exceptions import ConnectionClosed
+    from websockets.frames import Close
+
+    class Closed(Socket):
+        async def send(self, method, keys, mode):
+            raise ConnectionClosed(Close(1006, "gone"), None)
+
+    async def scenario():
+        host = Host(tmp_path, Closed())
+        answer = await host.put_claims(A, {REL: "full"})
+        assert answer["applied_live"] is False and host.subs.claim_counts() == {A: 1}
+
+    asyncio.run(scenario())
+
+
+def test_a_change_is_committed_only_once_the_socket_is_free(tmp_path):
+    """Mutant C3: committed outside the send lock, a change shows in the effective set (GET
+    /claims, /health) while the socket is still being told the one before."""
+
+    async def scenario():
+        host = Host(tmp_path, Socket(hold_s=0.2))
+        first = asyncio.create_task(host.put_claims(A, {REL: "full"}))
+        await asyncio.sleep(0.05)  # the first is on the socket now
+        second = asyncio.create_task(host.put_claims(S, {INFY: "ltpc"}))
+        await asyncio.sleep(0.05)
+        assert S not in host.subs.claims  # it waits for the socket
+        await asyncio.gather(first, second)
+        assert host.socket.keys == {REL, INFY} and S in host.subs.claims
 
     asyncio.run(scenario())

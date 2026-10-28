@@ -84,7 +84,7 @@ def test_fan_out_http_api_and_clean_close(feed_env, fast, caplog):
                     ok = (await http.post("/subscribe", json=body)).json()
                     assert (ok["new"], ok["mode_changed"], ok["applied_live"]) == (1, 1, True)
                     await ff.wait_until(lambda: len(fake.requests[0]) == 5)
-                    assert [r["method"] for r in fake.requests[0][3:]] == ["sub", "change_mode"]
+                    assert [r["method"] for r in fake.requests[0][3:]] == ["change_mode", "sub"]
                     body = {"mode": "full_d30", "keys": [f"NSE_FO|{n}" for n in range(51)]}
                     over = await http.post("/subscribe", json=body)
                     assert over.status_code == 409 and "cap" in over.json()["error"]

@@ -11,10 +11,18 @@ in one step. The socket carries the union of the overlay and every client's clai
 the highest mode anyone holds it in (ltpc < option_greeks < full < full_d30), so a client never
 downgrades or removes a key another one needs, and ``/unsubscribe`` cannot take a claimed key
 away. Upstox's caps are checked on that effective set; a change that would break one changes
-nothing. Each client also has a quota (cross-design R1: screener 700, alerts 300, portfolio 200,
-any other 50) and every claim together may hold at most 1,400 keys; a refusal names the client.
-A client that has not renewed its claims for 7 days loses them, so a removed service cannot hold
-keys forever. ``subscriptions.json`` is version 2 (``claims``); version 1 still loads.
+nothing, but a change that only takes keys away or lowers modes is never refused, so a client
+can always let go of its keys. Each client also has a quota (cross-design R1: screener 700,
+alerts 300, portfolio 200, any other 50), at most MAX_OTHER_CLIENTS clients not named there may
+hold claims at once (their 50 keys each fill the ring's headroom over the named quotas, so a
+named service always reaches its own), and every claim together may hold at most 1,400 keys; a
+refusal names the client. A client that has not renewed its claims for 7 days loses them, so a
+removed service cannot hold keys forever. ``subscriptions.json`` is version 2 (``claims``);
+version 1 still loads.
+
+The socket is told a change in the order that keeps it within the end state on the way there:
+``unsub`` first, then ``change_mode`` for keys whose mode goes down, then for those going up,
+then ``sub`` (review M3: a client swapping its keys near a cap held both sets for a moment).
 """
 
 from __future__ import annotations
@@ -43,6 +51,9 @@ QUOTAS = {"sudarshan-screener": 700, "sudarshan-alerts": 300, "sudarshan-portfol
 OTHER_QUOTA = 50
 #: Keys every client's claims may hold together; a key two clients hold counts once.
 RING_CEILING = 1_400
+#: Clients not named in QUOTAS that may hold claims at once (review L6): their quotas together
+#: are the ring's headroom over the named ones.
+MAX_OTHER_CLIENTS = (RING_CEILING - sum(QUOTAS.values())) // OTHER_QUOTA
 # Upstox Feed V3 per-connection caps ("Individual" column of the limits table).
 CAPS = {"ltpc": 5000, "full": 2000, "option_greeks": 3000, "full_d30": 50}
 # The "Combined" column applies once more than one mode is live. Upstox does not define it more
@@ -63,24 +74,29 @@ class Change(NamedTuple):
     new: dict[str, str]  # key -> mode, for keys new to the socket
     moved: dict[str, str]  # key -> its new mode, for keys whose effective mode changed
     gone: tuple[str, ...]  # keys nobody holds any more
+    lowered: frozenset[str] = frozenset()  # the keys among ``moved`` whose mode goes down
 
     def batches(self) -> list[tuple[str, list[str], str | None]]:
-        """(method, keys, mode) in sending order: sub, change_mode, then unsub."""
-        out = []
-        for method, keys in (("sub", self.new), ("change_mode", self.moved)):
+        """(method, keys, mode) in sending order: unsub, change_mode down, change_mode up, then
+        sub, so the socket never holds more than the end state on its way there (review M3)."""
+        out: list[tuple[str, list[str], str | None]] = []
+        if self.gone:
+            out.append(("unsub", list(self.gone), None))
+        down = {k: m for k, m in self.moved.items() if k in self.lowered}
+        up = {k: m for k, m in self.moved.items() if k not in self.lowered}
+        for method, keys in (("change_mode", down), ("change_mode", up), ("sub", self.new)):
             for mode in MODES:
                 group = [key for key, m in keys.items() if m == mode]
                 if group:
                     out.append((method, group, mode))
-        if self.gone:
-            out.append(("unsub", list(self.gone), None))
         return out
 
 
 def diff(before: dict[str, str], after: dict[str, str]) -> Change:
     new = {k: m for k, m in after.items() if k not in before}
     moved = {k: m for k, m in after.items() if k in before and before[k] != m}
-    return Change(new, moved, tuple(k for k in before if k not in after))
+    lowered = frozenset(k for k, m in moved.items() if RANK[m] < RANK[before[k]])
+    return Change(new, moved, tuple(k for k in before if k not in after), lowered)
 
 
 def check_caps(desired: dict[str, str]) -> None:
@@ -238,6 +254,12 @@ class Subscriptions:
         limit = quota(client)
         if len(keys) > limit:
             raise CapError(f"{client} may claim at most {limit} keys; it asked for {len(keys)}")
+        others = sum(1 for c in self.claims if c not in QUOTAS and c != client)
+        if keys and client not in QUOTAS and others >= MAX_OTHER_CLIENTS:
+            raise CapError(
+                f"{client}: at most {MAX_OTHER_CLIENTS} clients other than "
+                f"{', '.join(sorted(QUOTAS))} may hold claims at once"
+            )
         claims = {c: v for c, v in self.claims.items() if c != client}
         if keys:
             claims[client] = {"renewed_at": int(now), "keys": dict(keys)}
@@ -261,14 +283,21 @@ class Subscriptions:
         return self._commit(claims={c: v for c, v in self.claims.items() if c not in stale})
 
     def _commit(self, **parts) -> Change:
-        """Apply new parts if the effective set stays within the caps; returns the change."""
+        """Apply new parts if the effective set stays within the caps; returns the change. A
+        change that adds no key and raises no mode is never refused: a client can always let go
+        of its keys, and stale claims always expire, even where a lower mode brings a combined
+        cap in (review L1, M2: an expiry at start refused that way stopped the feed)."""
         before = self.desired()
         kept = {name: getattr(self, name) for name in parts}
         for name, value in parts.items():
             setattr(self, name, value)
         after = self.desired()
+        adds = any(
+            key not in before or RANK[mode] > RANK[before[key]] for key, mode in after.items()
+        )
         try:
-            check_caps(after)
+            if adds:
+                check_caps(after)
         except CapError:
             for name, value in kept.items():
                 setattr(self, name, value)

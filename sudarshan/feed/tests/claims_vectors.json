@@ -3,7 +3,8 @@
     "Golden vectors for the feed's subscription claims (M18.1): what the socket is told when",
     "the effective set changes. base is the keys file (with the API overlay empty), claims",
     "each client's set before, do one operation; send lists the (method, mode, keys) the",
-    "socket receives in order (sub, change_mode, unsub; mode null for unsub) and effective",
+    "socket receives in order (unsub, change_mode down, change_mode up, sub; mode null for",
+    "unsub, so the socket never holds more than the end state on its way there) and effective",
     "the set it carries afterwards. test_feed_claims.py runs every case."
   ],
   "cases": [
@@ -55,9 +56,9 @@
         "keys": {"NSE_EQ|INE009A01021": "full", "NSE_EQ|INE467B01029": "ltpc"}
       },
       "send": [
-        ["sub", "ltpc", ["NSE_EQ|INE467B01029"]],
+        ["unsub", null, ["NSE_EQ|INE002A01018"]],
         ["change_mode", "full", ["NSE_EQ|INE009A01021"]],
-        ["unsub", null, ["NSE_EQ|INE002A01018"]]
+        ["sub", "ltpc", ["NSE_EQ|INE467B01029"]]
       ],
       "effective": {"NSE_INDEX|Nifty 50": "ltpc", "NSE_EQ|INE009A01021": "full", "NSE_EQ|INE467B01029": "ltpc"}
     },
@@ -70,7 +71,7 @@
         "sudarshan-screener": {"NSE_EQ|INE009A01021": "ltpc"}
       },
       "do": {"drop": "sudarshan-alerts"},
-      "send": [["change_mode", "ltpc", ["NSE_INDEX|Nifty 50"]], ["unsub", null, ["NSE_EQ|INE002A01018"]]],
+      "send": [["unsub", null, ["NSE_EQ|INE002A01018"]], ["change_mode", "ltpc", ["NSE_INDEX|Nifty 50"]]],
       "effective": {"NSE_INDEX|Nifty 50": "ltpc", "NSE_EQ|INE009A01021": "ltpc"}
     },
     {
@@ -126,6 +127,25 @@
       "do": {"put": "sudarshan-alerts", "keys": {"NSE_FO|49229": "option_greeks"}},
       "send": [],
       "effective": {"NSE_FO|49229": "full"}
+    },
+    {
+      "id": "C13",
+      "says": "a client's new set takes away first, lowers before it raises, and adds last",
+      "base": {"NSE_INDEX|Nifty 50": "ltpc"},
+      "claims": {
+        "sudarshan-screener": {"NSE_EQ|INE002A01018": "ltpc", "NSE_EQ|INE009A01021": "full", "NSE_EQ|INE467B01029": "ltpc"}
+      },
+      "do": {
+        "put": "sudarshan-screener",
+        "keys": {"NSE_EQ|INE009A01021": "ltpc", "NSE_EQ|INE467B01029": "full", "NSE_FO|49229": "ltpc"}
+      },
+      "send": [
+        ["unsub", null, ["NSE_EQ|INE002A01018"]],
+        ["change_mode", "ltpc", ["NSE_EQ|INE009A01021"]],
+        ["change_mode", "full", ["NSE_EQ|INE467B01029"]],
+        ["sub", "ltpc", ["NSE_FO|49229"]]
+      ],
+      "effective": {"NSE_INDEX|Nifty 50": "ltpc", "NSE_EQ|INE009A01021": "ltpc", "NSE_EQ|INE467B01029": "full", "NSE_FO|49229": "ltpc"}
     }
   ]
 }
