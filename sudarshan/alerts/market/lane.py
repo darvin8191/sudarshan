@@ -121,6 +121,7 @@ class MarketLane:
             if not self._hurry:
                 await _sleep_until(self._since + COALESCE_S)
             await self._slot()
+            self._expire()
             if not self._pending:  # given away while waiting (too old)
                 continue
             batch, dropped = self._take()
@@ -166,8 +167,12 @@ class MarketLane:
     # -- internals ------------------------------------------------------------------------------
 
     async def _slot(self) -> None:
-        """Wait for a market slot: never while order alerts wait, never over the lane's budget."""
+        """Wait for a market slot: never while order alerts wait, never over the lane's budget.
+        A line that turns MAX_AGE old meanwhile is told not sent at once (review M1)."""
         while True:
+            self._expire()
+            if not self._pending:
+                return
             if self.pacer.orders_waiting():
                 await asyncio.sleep(POLL_S)
                 continue
@@ -175,6 +180,23 @@ class MarketLane:
             if wait <= 0:
                 return
             await asyncio.sleep(min(wait, 4 * POLL_S))  # an order may arrive meanwhile
+
+    def _expire(self) -> None:
+        """Lines older than MAX_AGE are never sent late (design 6): each is told not sent, with
+        the words History shows, and dropped. Lines waited behind the order lane's retries or
+        the minute budget with no check of their age, and went out 12 minutes late (review
+        M1)."""
+        oldest_kept = self.clock() - MAX_AGE
+        old = [event_id for event_id, line in self._pending.items() if line.at < oldest_kept]
+        if not old:
+            return
+        for event_id in old:
+            del self._pending[event_id]
+        if not self._pending:
+            self._since = None
+        self.stats["failed"] += len(old)
+        self.throttle(logging.ERROR, "too-old", "Market alerts could not be sent for 5 minutes")
+        self._result(old, NOT_SENT, TOO_OLD)
 
     def _take(self) -> tuple[list[Line], int]:
         batch: list[Line] = []

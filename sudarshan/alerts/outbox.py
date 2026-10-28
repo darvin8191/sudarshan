@@ -51,6 +51,8 @@ PER_MINUTE = 20
 #: The market alerts lane's share of PER_MINUTE (M10.5).
 MARKET_PER_MINUTE = 12
 MINUTE_S = 60.0
+#: How often the order lane looks again while it waits for a slot.
+SLOT_POLL_S = 0.2
 MAX_LINES = 15
 MAX_CHARS = 3500
 MAX_PENDING = 300
@@ -91,13 +93,17 @@ class Pacer:
     def __init__(self) -> None:
         self._starts: deque[tuple[float, str]] = deque()  # (monotonic start, lane), last minute
         self.orders_waiting: Callable[[], bool] = lambda: False
+        #: Set while order alerts are flushed at a stop: what the market lane sent in the last
+        #: minute no longer counts against them, so they never lose to its share (review L10).
+        self.flushing_orders = False
 
     def allowed_at(self, lane: str) -> float:
         """The earliest monotonic time a message of ``lane`` may start."""
         starts = self._recent()
         allowed = starts[-1][0] + MIN_GAP_S if starts else 0.0
-        if len(starts) >= PER_MINUTE:
-            allowed = max(allowed, starts[-PER_MINUTE][0] + MINUTE_S)
+        counted = [at for at, which in starts if not (self.flushing_orders and which == MARKET)]
+        if len(counted) >= PER_MINUTE:
+            allowed = max(allowed, counted[-PER_MINUTE] + MINUTE_S)
         if lane == MARKET:
             market = [at for at, which in starts if which == MARKET]
             if len(market) >= MARKET_PER_MINUTE:
@@ -264,7 +270,7 @@ class Outbox:
                 continue
             if not self._hurry:
                 await self._sleep_until(self._since + COALESCE_S)
-            await self._sleep_until(self.pacer.allowed_at(ORDERS))
+            await self._slot()
             batch, dropped = self._take()
             self.pacer.took(ORDERS)
             self._in_flight = len(batch)
@@ -298,17 +304,28 @@ class Outbox:
 
     async def flush(self, timeout: float = FLUSH_S) -> int:
         """Send what waits without the burst pause, for at most ``timeout``; returns what is left.
+        Order alerts go first, and the market lane's share of the minute does not hold them.
 
         A message on its way counts as left until its answer: the caller cancels the sender next,
         and that would cut it off."""
         self._hurry = True
+        self.pacer.flushing_orders = True
         self._wake.set()
         deadline = time.monotonic() + timeout
-        while (self._pending or self._in_flight) and time.monotonic() < deadline:
-            await asyncio.sleep(0.05)
+        try:
+            while (self._pending or self._in_flight) and time.monotonic() < deadline:
+                await asyncio.sleep(0.05)
+        finally:
+            self.pacer.flushing_orders = False
         return len(self._pending) + self._in_flight
 
     # -- internals ------------------------------------------------------------------------------
+
+    async def _slot(self) -> None:
+        """Until the pacer gives the order lane a slot, looking again often enough to take one a
+        stop's flush frees (Pacer.flushing_orders)."""
+        while (wait := self.pacer.allowed_at(ORDERS) - time.monotonic()) > 0:
+            await asyncio.sleep(min(wait, SLOT_POLL_S))
 
     @staticmethod
     async def _sleep_until(when: float) -> None:

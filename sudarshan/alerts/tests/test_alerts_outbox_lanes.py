@@ -218,3 +218,115 @@ def test_the_order_lane_alone_keeps_its_pace(quick):
     assert pacer.allowed_at(ORDERS) == 0.0
     pacer.took(ORDERS)
     assert pacer.allowed_at(MARKET) >= time.monotonic() + outbox.MIN_GAP_S - 0.05
+
+
+def test_a_market_line_waiting_behind_order_alerts_is_never_sent_late(quick):
+    """Review M1: the age limit was checked only when a failed message was put back, so a line
+    held by the order lane's retries went out 12 minutes late. While orders wait the market lane
+    sends nothing, even with its sender idle (mutant L1); after 5 minutes the line is told not
+    sent instead (mutant L4: 30 minutes)."""
+
+    async def scenario():
+        now, sender, results, pacer = {"t": AT}, Sender(), Results(), Pacer()
+        waiting = {"orders": True}  # the order lane retrying, OpenAlgo busy
+        pacer.orders_waiting = lambda: waiting["orders"]
+        market = MarketLane(sender.lane(MARKET), lambda: now["t"], pacer, results)
+        market.add([line(1)])
+        tasks = await _running(market)
+        try:
+            await asyncio.sleep(0.3)
+            assert sender.sent == [] and results.got == []  # fills first
+            now["t"] = AT + timedelta(minutes=12)
+            await wait_until(lambda: results.got, 3)
+            waiting["orders"] = False
+            await asyncio.sleep(0.2)
+        finally:
+            await _cancel(tasks)
+        assert results.got == [([1], "not_sent", lane.TOO_OLD)] and sender.sent == []
+
+    asyncio.run(scenario())
+
+
+def test_a_market_line_put_back_at_4_59_is_not_sent_at_6_minutes(quick):
+    """Review M1: put back before the limit, it went out after it on the next try."""
+
+    async def scenario():
+        now = {"t": AT + timedelta(minutes=4, seconds=59)}
+        results = Results()
+
+        async def send(text):
+            if now["t"] < AT + timedelta(minutes=5):  # put back while still young enough
+                passes = {"t": AT + timedelta(minutes=6)}  # and the retry's wait passes 5:00
+                asyncio.get_running_loop().call_later(0.01, now.update, passes)
+                return RETRY, ""
+            return SENT, ""
+
+        market = MarketLane(send, lambda: now["t"], Pacer(), results)
+        market.add([line(1)])
+        tasks = await _running(market)
+        try:
+            await wait_until(lambda: results.got, 3)
+        finally:
+            await _cancel(tasks)
+        assert results.got == [([1], "not_sent", lane.TOO_OLD)]
+
+    asyncio.run(scenario())
+
+
+def test_a_market_line_four_minutes_old_is_still_sent(quick):
+    async def scenario():
+        sender, results = Sender(), Results()
+        later = AT + timedelta(minutes=4)
+        market = MarketLane(sender.lane(MARKET), lambda: later, Pacer(), results)
+        market.add([line(1)])
+        tasks = await _running(market)
+        try:
+            await wait_until(lambda: results.got, 3)
+        finally:
+            await _cancel(tasks)
+        assert results.got == [([1], "sent", "")]
+
+    asyncio.run(scenario())
+
+
+def test_the_market_lane_takes_at_most_12_starts_a_minute_and_never_holds_an_order():
+    """The real shares (M10.5): 12 market starts in the last minute stop a 13th, while the order
+    lane only keeps the gap (mutant O6: a share of 20)."""
+    pacer, now = Pacer(), time.monotonic()
+    first = now - 50
+    pacer._starts.extend((first + 2 * n, MARKET) for n in range(12))
+    assert pacer.allowed_at(MARKET) == pytest.approx(first + outbox.MINUTE_S)
+    assert pacer.allowed_at(ORDERS) == pytest.approx(first + 22 + outbox.MIN_GAP_S)
+    pacer._starts.popleft()
+    assert pacer.allowed_at(MARKET) == pytest.approx(first + 22 + outbox.MIN_GAP_S)
+
+
+def test_an_order_alert_is_tried_again_for_30_minutes_then_dropped():
+    """M6.8's age limit for a fill OpenAlgo could not take (mutant O7: 5 minutes)."""
+    now = AT + timedelta(minutes=40)
+    box = Outbox(lambda text: None, lambda: now, Pacer())
+    young = Alert("young", "filled", 65, "Filled: young", now - timedelta(minutes=29))
+    old = Alert("old", "filled", 65, "Filled: old", now - timedelta(minutes=31))
+    box._put_back([young, old], 0)
+    assert list(box._pending) == ["young"] and box.stats["failed"] == 1
+
+
+def test_a_stop_flushes_order_alerts_past_the_market_lanes_share(quick):
+    """Review L10: at a stop, order alerts get 5 s. With the minute's budget filled by 12 market
+    and 8 order messages, they waited for the window and were lost."""
+
+    async def scenario():
+        sender, pacer, now = Sender(), Pacer(), time.monotonic()
+        pacer._starts.extend((now - 50 + n, MARKET) for n in range(12))
+        pacer._starts.extend((now - 30 + n, ORDERS) for n in range(8))
+        orders = Outbox(sender.lane(ORDERS), lambda: AT, pacer)
+        orders.add([fill("f1")])
+        tasks = await _running(orders)
+        try:
+            assert await orders.flush(2.0) == 0
+        finally:
+            await _cancel(tasks)
+        assert [name for _, name, _ in sender.sent] == [ORDERS]
+        assert not pacer.flushing_orders  # the market lane's share counts again after it
+
+    asyncio.run(scenario())
