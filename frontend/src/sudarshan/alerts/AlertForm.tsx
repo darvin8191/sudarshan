@@ -1,6 +1,7 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { type QueryClient, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Info, LoaderCircle, Search } from 'lucide-react'
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router'
 import {
   type AlertDraft,
   type AlertExchange,
@@ -36,6 +37,8 @@ import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
 import { describe, isIndex } from '@/sudarshan/watchlist/rows'
 import { toast } from '@/utils/toast'
 import { PriceLine } from './AlertCard'
+import { NO_ANSWER_HOLD_MS } from './actions'
+import { BusyIcon, HELD } from './lines'
 import { ALERTS_PATH } from './marketAlerts'
 import { needsQuote, segmentOpen } from './measure'
 import { dropRow, PREFS_KEY, putRow, STATE_KEY } from './stateCache'
@@ -351,8 +354,21 @@ export function AlertFormSheet({
     prefill && !isCovered(prefill.exchange) ? { field: 'instrument', text: NOT_FOR.exchange } : null
   )
   const [searching, setSearching] = useState(false)
-  const [saving, setSaving] = useState(false)
+  // `sending` from the tap until the answer; `held` while an answer that never came is looked
+  // for in the alerts, Save off meanwhile so a second tap cannot make a second alert.
+  const [saving, setSaving] = useState<'sending' | 'held' | null>(null)
   const once = useRef(false)
+  // Whether the form is still open: an answer that comes after it closed opens nothing.
+  const isOpen = useRef(true)
+  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    isOpen.current = true
+    return () => {
+      isOpen.current = false
+      if (holdTimer.current) clearTimeout(holdTimer.current)
+    }
+  }, [])
+  const navigate = useNavigate()
   const typedLevel = useRef(form.level !== '')
   const ids = useId()
   const fieldId = (field: string) => `${ids}-${field}`
@@ -499,9 +515,16 @@ export function AlertFormSheet({
       return
     }
     once.current = true
-    setSaving(true)
+    setSaving('sending')
     setProblem(null)
     const draft = draftOf(form, instrument, ltp)
+    // The alerts as they stood before the tap: one there afterwards and not before is this one.
+    const before = client.getQueryData<MarketAlertsState>(STATE_KEY)
+    const done = (saved: AlertRow) => {
+      if (isOpen.current) onSaved(saved, !row)
+      // Closed meanwhile: say it was saved, and open nothing over what the owner went back to.
+      else toastAlertSet(saved, navigate, !row)
+    }
     try {
       const saved = row
         ? await marketAlertsApi.change(row.id, { version, action: 'edit', alert: draft })
@@ -509,26 +532,38 @@ export function AlertFormSheet({
       client.setQueryData<MarketAlertsState>(STATE_KEY, (held) =>
         held ? putRow(held, saved) : held
       )
-      onSaved(saved, !row)
+      done(saved)
     } catch (error) {
       const found = problemOf(error)
+      if (found.code === 'unanswered') {
+        // It may have been saved. Save stays off while the alerts are read again, and the
+        // form closes onto the alert if it is there; otherwise Save works again after a while.
+        if (isOpen.current) {
+          setSaving('held')
+          setProblem({ field: null, text: NO_ANSWER_SAVE })
+        }
+        holdTimer.current = setTimeout(() => {
+          holdTimer.current = null
+          once.current = false
+          if (isOpen.current) setSaving(null)
+        }, NO_ANSWER_HOLD_MS)
+        const landed = await savedMeanwhile(client, draft, row, version, before)
+        if (landed) done(landed)
+        return
+      }
       once.current = false
-      setSaving(false)
+      if (isOpen.current) setSaving(null)
       if (found.code === 'gone' && row) {
         client.setQueryData<MarketAlertsState>(STATE_KEY, (held) =>
           held ? dropRow(held, row.id) : held
         )
-        toast.info(found.message)
+        if (isOpen.current) toast.info(found.message)
         return
       }
-      const text =
-        found.code === 'unanswered'
-          ? 'No answer came, so this alert may or may not be saved. Your alerts are read again; look there before saving it again.'
-          : found.message
-      setProblem({ field: found.field, text })
-      if (['conflict', 'refused', 'unanswered'].includes(found.code)) {
+      if (found.code === 'conflict' || found.code === 'refused') {
         void client.invalidateQueries({ queryKey: STATE_KEY })
       }
+      if (isOpen.current) setProblem({ field: found.field, text: found.message })
     }
   }
 
@@ -879,10 +914,11 @@ export function AlertFormSheet({
           </button>
           <button
             type="submit"
-            disabled={!instrument || saving}
-            className={cn(ACTION, 'bg-primary text-primary-foreground hover:bg-primary/90')}
+            disabled={!instrument || saving !== null}
+            className={cn(ACTION, 'bg-primary text-primary-foreground hover:bg-primary/90', HELD)}
           >
-            {saving ? 'Saving' : 'Save'}
+            {saving === 'sending' && <BusyIcon />}
+            {saving === 'sending' ? 'Saving' : 'Save'}
           </button>
         </div>
       </form>
@@ -900,16 +936,73 @@ export function AlertFormSheet({
 }
 
 /**
- * A save made away from the Alerts page (a watchlist symbol, the chart): "Alert set: NIFTY", the
- * condition in the server's words, and View to the alert's sheet.
+ * A save made away from the Alerts page (a watchlist symbol, the chart), or one whose answer came
+ * after the form closed: "Alert set: NIFTY" ("Alert saved" for an edit), the condition in the
+ * server's words, and View to the alert's sheet.
  */
-export function toastAlertSet(row: AlertRow, go: (to: string) => void): void {
-  toast.success(`Alert set: ${describe(row.symbol, row.exchange).title}`, {
+export function toastAlertSet(row: AlertRow, go: (to: string) => void, created = true): void {
+  const done = created ? 'Alert set' : 'Alert saved'
+  toast.success(`${done}: ${describe(row.symbol, row.exchange).title}`, {
     description: row.words.condition,
     duration: 6_000,
     classNames: { actionButton: 'min-h-12 min-w-12' },
     action: { label: 'View', onClick: () => go(`${ALERTS_PATH}?alert=${row.id}`) },
   })
+}
+
+const NO_ANSWER_SAVE =
+  'No answer came, so this alert may or may not be saved. Your alerts are read again; look there before saving it again.'
+
+/** How recent a new alert must be to be this form's, when the alerts before the tap are not known. */
+const RECENT_MS = 120_000
+
+/** The same level or move, however it was written: "1,000" is "1000.00". */
+function sameParams(a: Params, b: Params): boolean {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)])
+  for (const key of keys) {
+    const x = (a as unknown as Record<string, unknown>)[key]
+    const y = (b as unknown as Record<string, unknown>)[key]
+    if (key === 'level' || key === 'percent') {
+      const number = (value: unknown) => Number(String(value).replace(/,/g, ''))
+      if (number(x) !== number(y)) return false
+    } else if (x !== y) {
+      return false
+    }
+  }
+  return true
+}
+
+/**
+ * After a save that got no answer, the alert it made or changed, if the alerts read again hold
+ * it: a new one on the same instrument, kind and params that was not there before the tap (or,
+ * not knowing what was, one made in the last two minutes), or the edited one on a later version
+ * with the same kind and params. Null when it is not there or the read fails.
+ */
+async function savedMeanwhile(
+  client: QueryClient,
+  draft: AlertDraft,
+  row: AlertRow | null,
+  version: number,
+  before: MarketAlertsState | undefined
+): Promise<AlertRow | null> {
+  try {
+    const fresh = await client.fetchQuery({
+      queryKey: STATE_KEY,
+      queryFn: marketAlertsApi.state,
+      staleTime: 0,
+    })
+    const held = new Set(before?.alerts.map((each) => each.id) ?? [])
+    return (
+      fresh.alerts.find((each) => {
+        if (each.kind !== draft.kind || !sameParams(each.params, draft.params)) return false
+        if (row) return each.id === row.id && each.version > version
+        if (each.symbol !== draft.symbol || each.exchange !== draft.exchange) return false
+        return before ? !held.has(each.id) : fresh.server_time - each.created_at <= RECENT_MS
+      }) ?? null
+    )
+  } catch {
+    return null
+  }
 }
 
 /** A kind as it starts: its own frequency, candle and wait (contract 1.3). */

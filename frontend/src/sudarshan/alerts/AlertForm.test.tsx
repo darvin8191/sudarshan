@@ -7,7 +7,7 @@
  * server's words. The instrument search is a stand-in; its real dialog is /trading's.
  */
 import { QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createElement } from 'react'
 import { MemoryRouter } from 'react-router'
@@ -67,6 +67,7 @@ import { createQueryClient } from '@/app/providers'
 import { useAuthStore } from '@/stores/authStore'
 import { alertRow, alertsState } from '@/test/marketAlerts'
 import { feed } from '@/test/marketDataHarness'
+import { NO_ANSWER_HOLD_MS } from './actions'
 import { AlertFormSheet, type AlertPrefill } from './AlertForm'
 import { STATE_KEY } from './stateCache'
 
@@ -119,8 +120,12 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.unstubAllGlobals()
 })
+
+const unanswered = () =>
+  new AlertsError({ code: 'unanswered', message: 'No answer came from OpenAlgo.', field: null })
 
 describe('a new alert', () => {
   it('opens on the contract’s defaults, its level the live price snapped to the paisa', async () => {
@@ -420,6 +425,122 @@ describe('a new alert', () => {
   })
 })
 
+describe('Save', () => {
+  it('sends once even when the form is sent twice before it redraws', async () => {
+    api.create.mockReturnValue(new Promise(() => {}))
+    const { sheet } = renderForm({ prefill: SBIN })
+    const form = sheet.querySelector('form') as HTMLFormElement
+
+    act(() => {
+      fireEvent.submit(form)
+      fireEvent.submit(form)
+    })
+    expect(api.create).toHaveBeenCalledTimes(1)
+    expect(within(sheet).getByRole('button', { name: 'Saving' })).toBeDisabled()
+  })
+
+  it('holds Save after no answer, so a second tap cannot make a second alert, then lets it go', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ['setTimeout', 'clearTimeout'] })
+    api.create.mockRejectedValueOnce(unanswered()).mockResolvedValueOnce(alertRow({ id: 78 }))
+    api.state.mockResolvedValue(alertsState())
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    const { sheet } = renderForm({ prefill: SBIN })
+
+    await user.click(within(sheet).getByRole('button', { name: 'Save' }))
+    expect(await within(sheet).findByRole('alert')).toHaveTextContent(/may or may not be saved/)
+    await waitFor(() => expect(api.state).toHaveBeenCalledTimes(1))
+    const save = within(sheet).getByRole('button', { name: 'Save' })
+    expect(save).toBeDisabled()
+    await user.click(save)
+    expect(api.create).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(NO_ANSWER_HOLD_MS)
+    })
+    expect(within(sheet).getByRole('button', { name: 'Save' })).toBeEnabled()
+  })
+
+  it('closes onto the alert when the alerts read again show it was made after all', async () => {
+    api.create.mockRejectedValue(unanswered())
+    const made = alertRow({
+      id: 78,
+      params: { op: 'crosses_above', level: '99.95', source: 'ltp' },
+    })
+    api.state.mockResolvedValue(alertsState({ alerts: [alertRow(), made] }))
+    const user = userEvent.setup()
+    const { sheet, onSaved } = renderForm({ prefill: SBIN })
+
+    await user.click(within(sheet).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(made, true))
+    expect(api.create).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not take an alert that was there before the tap for the one it made', async () => {
+    api.create.mockRejectedValue(unanswered())
+    const twin = alertRow({
+      id: 12,
+      params: { op: 'crosses_above', level: '99.95', source: 'ltp' },
+    })
+    const client = createQueryClient()
+    api.state.mockResolvedValue(alertsState({ alerts: [twin] }))
+    client.setQueryData(STATE_KEY, alertsState({ alerts: [twin] }))
+    const onSaved = vi.fn()
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <AlertFormSheet prefill={SBIN} onSaved={onSaved} onClose={() => {}} />
+        </MemoryRouter>
+      </QueryClientProvider>
+    )
+    const user = userEvent.setup()
+
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(api.state).toHaveBeenCalledTimes(1))
+    expect(onSaved).not.toHaveBeenCalled()
+  })
+
+  it('reads the alerts again after a refusal, as after a conflict', async () => {
+    const sentence =
+      'This alert has stopped (Fired once at 10:42 on 21 Oct). Use Restart to check it again.'
+    api.create.mockRejectedValue(
+      new AlertsError({ code: 'refused', message: sentence, field: null })
+    )
+    const user = userEvent.setup()
+    const { sheet, client } = renderForm({ prefill: SBIN })
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+
+    await user.click(within(sheet).getByRole('button', { name: 'Save' }))
+    expect(await within(sheet).findByRole('alert')).toHaveTextContent(sentence)
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: STATE_KEY })
+  })
+
+  it('says a save that answered after the form closed was made, and opens nothing', async () => {
+    let answer: (row: AlertRow) => void = () => {}
+    api.create.mockReturnValue(
+      new Promise<AlertRow>((resolve) => {
+        answer = resolve
+      })
+    )
+    const user = userEvent.setup()
+    const client = createQueryClient()
+    const onSaved = vi.fn()
+    const view = render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <AlertFormSheet prefill={SBIN} onSaved={onSaved} onClose={() => {}} />
+        </MemoryRouter>
+      </QueryClientProvider>
+    )
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Save' }))
+    view.unmount()
+
+    await act(async () => answer(alertRow({ id: 78 })))
+    expect(onSaved).not.toHaveBeenCalled()
+    expect(toasts.success).toHaveBeenCalledTimes(1)
+    expect(toasts.success.mock.calls[0][0]).toBe('Alert set: SBIN')
+  })
+})
+
 describe('an edit', () => {
   const held = alertRow({
     params: { op: 'at_or_above', level: '100', source: 'ltp' },
@@ -515,6 +636,31 @@ describe('an edit', () => {
     await user.click(within(sheet).getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(api.change).toHaveBeenCalledTimes(1))
     expect(api.change.mock.calls[0][1].version).toBe(3)
+  })
+
+  it('drops an alert already gone, in the server’s words', async () => {
+    api.change.mockRejectedValue(
+      new AlertsError({ code: 'gone', message: 'This alert has been deleted.', field: null })
+    )
+    const user = userEvent.setup()
+    const { sheet, client } = renderForm({ row: held })
+
+    await user.click(within(sheet).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(toasts.info).toHaveBeenCalledWith('This alert has been deleted.'))
+    expect(
+      client.getQueryData<{ alerts: AlertRow[] }>(STATE_KEY)?.alerts.map((each) => each.id)
+    ).not.toContain(12)
+  })
+
+  it('closes onto the edit when the alerts read again show it landed after all', async () => {
+    api.change.mockRejectedValue(unanswered())
+    const landed = { ...held, version: 4 }
+    api.state.mockResolvedValue(alertsState({ alerts: [landed] }))
+    const user = userEvent.setup()
+    const { sheet, onSaved } = renderForm({ row: held })
+
+    await user.click(within(sheet).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(landed, false))
   })
 
   it('sends the version it opened on, so an edit made elsewhere meanwhile is refused', async () => {

@@ -570,6 +570,32 @@ describe('the form on the page', () => {
   })
 })
 
+describe('a save that answers late', () => {
+  it('opens nothing once the owner has closed the form, and says the alert was saved', async () => {
+    let answer: (row: AlertRow) => void = () => {}
+    api.change.mockReturnValue(
+      new Promise<AlertRow>((resolve) => {
+        answer = resolve
+      })
+    )
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    renderPage()
+    await settle()
+    await user.click(card(12))
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Edit' }))
+    const form = screen.getByRole('dialog', { name: 'Edit alert' })
+    await user.click(within(form).getByRole('button', { name: 'Save' }))
+    await user.click(within(form).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(where()).toBe('/market-alerts'))
+
+    await act(async () => answer(alertRow({ version: 4 })))
+    await settle()
+    expect(where()).toBe('/market-alerts')
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(toasts.success.mock.calls.at(-1)?.[0]).toBe('Alert saved: SBIN')
+  })
+})
+
 describe('the settings on the page', () => {
   it('opens from its button beside New, and Back closes it before leaving the page', async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })

@@ -54,6 +54,19 @@ const LINE_ICON: Record<LineCode, LucideIcon> = {
   off: PowerOff,
 }
 
+/**
+ * A button that cannot be pressed while a change is on its way. A faded one read at 2.4:1 to
+ * 3.4:1, too little in sunlight; this keeps its words at full contrast on white, grey with a
+ * dashed edge. The one being sent carries `BusyIcon` and its busy word too.
+ */
+export const HELD =
+  'disabled:cursor-not-allowed disabled:border disabled:border-dashed disabled:border-[color:var(--border-strong)] disabled:bg-card disabled:text-[color:var(--text-secondary)] disabled:opacity-100 disabled:shadow-none'
+
+/** The turning mark beside a busy word: "Saving", "Pausing". */
+export function BusyIcon() {
+  return <LoaderCircle aria-hidden="true" className="size-5 animate-spin" />
+}
+
 const LINE_TONE: Partial<Record<LineCode, string>> = {
   ok: 'text-[color:var(--live-ink)]',
   feed_down: 'text-[color:var(--warning-text)]',
