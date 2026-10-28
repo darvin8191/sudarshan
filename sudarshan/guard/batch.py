@@ -65,7 +65,7 @@ def split(split_data: dict, auth_token: str, original_data: dict) -> Answer | No
         if owner is None:
             return None
         whole = _described(pipe, split_data, owner)
-        found = gate.GATE.check_together([whole])
+        found = gate.GATE.check_together([whole], [_slices(split_data)])
     except Exception:
         logger.exception(
             "A split order could not be checked as a whole; its parts are checked one by one"
@@ -99,7 +99,7 @@ def multi_leg(
         owner = _owner(pipe, auth_token, api_key)
         if owner is None:
             return None
-        described, numbers = [], []
+        described, numbers, slices = [], [], []
         for number, leg in enumerate(multiorder_data.get("legs") or [], start=1):
             ok, resolved, _status = service.resolve_leg_symbol(
                 leg, common_data, api_key, underlying_ltp
@@ -118,7 +118,8 @@ def multi_leg(
             }
             described.append(_described(pipe, order, owner))
             numbers.append(number)
-        found = gate.GATE.check_together(described)
+            slices.append(_slices(leg))
+        found = gate.GATE.check_together(described, slices)
     except Exception:
         logger.exception(
             "A multi-leg order could not be checked as a whole; its legs are checked one by one"
@@ -144,6 +145,18 @@ def _pipe() -> str | None:
 
     pipe = gate.SANDBOX if get_analyze_mode() else gate.LIVE
     return pipe if flag.covers(pipe) else None
+
+
+def _slices(data: dict) -> list[int] | None:
+    """The quantities a part is sent as: its split size for each full slice, then what is left
+    (as services/split_order_service.py sends them); None when it is not split."""
+    try:
+        quantity, size = int(data.get("quantity") or 0), int(data.get("splitsize") or 0)
+    except (TypeError, ValueError):
+        return None
+    if quantity <= 0 or size <= 0:
+        return None
+    return [size] * (quantity // size) + ([quantity % size] if quantity % size else [])
 
 
 def _owner(pipe: str, auth_token: str, api_key: str | None) -> str | None:

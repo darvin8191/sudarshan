@@ -165,11 +165,21 @@ def services(sized, monkeypatch):
     call carries the real gate."""
     import database.settings_db as settings_db
     import restx_api  # noqa: F401 - imported first, as the app does, to settle its import cycle
-    from services import basket_order_service, options_multiorder_service, split_order_service
+    from services import (
+        basket_order_service,
+        options_multiorder_service,
+        place_order_service,
+        split_order_service,
+    )
 
     upstox = broker()
     module = SimpleNamespace(place_order_api=upstox.place)
-    for service in (basket_order_service, options_multiorder_service, split_order_service):
+    for service in (
+        basket_order_service,
+        options_multiorder_service,
+        split_order_service,
+        place_order_service,  # a multi-leg order's split legs go through place_order
+    ):
         monkeypatch.setattr(service, "get_analyze_mode", lambda: False)
         if hasattr(service, "import_broker_module"):
             monkeypatch.setattr(service, "import_broker_module", lambda name: module)
