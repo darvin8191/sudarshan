@@ -19,8 +19,31 @@ import { RISK_AUDIT_KEY, RISK_STATUS_KEY } from './parts'
  */
 
 const NOT_SAVED = 'The risk settings could not be saved. Try again in a few seconds.'
-export const PHRASE_FOR_LOOSENING =
-  'This lets more risk through, so it needs your confirm phrase. It is STOP unless you changed it.'
+/** Limits review L5: what the phrase is asked for, never the phrase itself. */
+export const PHRASE_FOR_LOOSENING = 'This lets more risk through, so it needs your confirm phrase.'
+export const PHRASE_FOR_CHANGE = 'Changing the phrase needs the one it replaces.'
+/** What the burst brake counts (M5.14), as the gate counts it. */
+export const BRAKE_COUNTS =
+  'It counts new orders that add risk; a basket, a split or a multi-leg order counts as one. Changes to an order and exits are never counted or paused.'
+/** Upstox's own limit on orders a second: a pace above 9 is warned about. */
+const UPSTOX_PER_SECOND = 10
+
+/** The pace this server sends orders to Upstox at, in words (a warning at 10 or more). */
+export function paceWords(perSecond: number | null): { said: string; warn: boolean } {
+  if (perSecond === null) {
+    return { said: 'Orders go to Upstox at the pace this server sets.', warn: false }
+  }
+  if (perSecond < UPSTOX_PER_SECOND) {
+    return {
+      said: `Orders go to Upstox at most ${perSecond} a second, below the ${UPSTOX_PER_SECOND} Upstox allows. This is set on the server.`,
+      warn: false,
+    }
+  }
+  return {
+    said: `Orders go to Upstox at up to ${perSecond} a second, and Upstox allows ${UPSTOX_PER_SECOND}: in a burst Upstox refuses the orders past its limit. Set the pace to 9 or less on the server.`,
+    warn: true,
+  }
+}
 
 const wholeRupees = new Intl.NumberFormat('en-IN', {
   style: 'currency',
@@ -93,11 +116,13 @@ function SaveRow({
   label,
   onSave,
   disabled,
+  phraseHint = PHRASE_FOR_LOOSENING,
 }: {
   saver: Saver
   label: string
   onSave: () => void
   disabled?: boolean
+  phraseHint?: string
 }) {
   const id = useId()
   return (
@@ -111,9 +136,7 @@ function SaveRow({
           <Label htmlFor={`${id}-phrase`} className="text-[0.875rem] font-semibold">
             Confirm phrase
           </Label>
-          <p className="text-[0.8125rem] text-[color:var(--text-secondary)]">
-            {PHRASE_FOR_LOOSENING}
-          </p>
+          <p className="text-[0.8125rem] text-[color:var(--text-secondary)]">{phraseHint}</p>
           <Input
             id={`${id}-phrase`}
             className="h-12 text-base"
@@ -220,16 +243,22 @@ function numberOf(text: string): number {
   return cleaned === '' ? Number.NaN : Number(cleaned)
 }
 
-/** The fields as the settings were saved, again whenever they are saved anew. */
+/**
+ * The fields as the settings were saved, again whenever they are saved anew, except while a
+ * change waits for the confirm phrase (``holding``): the card then keeps showing the change
+ * the phrase will confirm, never a version saved meanwhile from another card or screen, and
+ * is refilled once that change is answered (limits review L5).
+ */
 function useFields<T extends Record<string, string | boolean>>(
   settings: RiskSettings,
-  from: (settings: RiskSettings) => T
+  from: (settings: RiskSettings) => T,
+  holding: boolean
 ): [T, (patch: Partial<T>) => void] {
   const [fields, setFields] = useState<T>(() => from(settings))
   // biome-ignore lint/correctness/useExhaustiveDependencies: refilled per saved version only
   useEffect(() => {
-    setFields(from(settings))
-  }, [settings.updated_at])
+    if (!holding) setFields(from(settings))
+  }, [settings.updated_at, holding])
   return [fields, (patch) => setFields((current) => ({ ...current, ...patch }))]
 }
 
@@ -284,9 +313,10 @@ export function DailyLimitEditor({
   const [confirmed, setConfirmed] = useState<number | null>(null)
   // biome-ignore lint/correctness/useExhaustiveDependencies: refilled per saved version only
   useEffect(() => {
+    if (saver.phraseNeeded) return // the change waiting for the phrase stays on the card
     setText(current === null ? '' : String(current))
     setConfirmed(null)
-  }, [settings.updated_at])
+  }, [settings.updated_at, saver.phraseNeeded])
   const typed = numberOf(text)
   const loss = lossToday(days)
   const locks = !Number.isNaN(typed) && typed > 0 && loss !== null && typed <= loss
@@ -338,14 +368,18 @@ export function DailyLimitEditor({
 /** The price band (design section 6). */
 export function BandCard({ settings }: { settings: RiskSettings }) {
   const saver = useSaveSettings()
-  const [fields, set] = useFields(settings, (s) => ({
-    band_on: s.band_on,
-    band_opt_pct: String(s.band_opt_pct),
-    band_opt_min_rs: String(s.band_opt_min_rs),
-    band_fut_pct: String(s.band_fut_pct),
-    band_cash_pct: String(s.band_cash_pct),
-    band_both_sides: s.band_both_sides,
-  }))
+  const [fields, set] = useFields(
+    settings,
+    (s) => ({
+      band_on: s.band_on,
+      band_opt_pct: String(s.band_opt_pct),
+      band_opt_min_rs: String(s.band_opt_min_rs),
+      band_fut_pct: String(s.band_fut_pct),
+      band_cash_pct: String(s.band_cash_pct),
+      band_both_sides: s.band_both_sides,
+    }),
+    saver.phraseNeeded
+  )
   const changes = changed(settings, fields)
   return (
     <div className="flex flex-col gap-3" data-testid="band-card">
@@ -402,11 +436,15 @@ export function BandCard({ settings }: { settings: RiskSettings }) {
 /** The order size limit. */
 export function SizeCard({ settings }: { settings: RiskSettings }) {
   const saver = useSaveSettings()
-  const [fields, set] = useFields(settings, (s) => ({
-    size_on: s.size_on,
-    max_lots_fo: String(s.max_lots_fo),
-    max_qty_cash: String(s.max_qty_cash),
-  }))
+  const [fields, set] = useFields(
+    settings,
+    (s) => ({
+      size_on: s.size_on,
+      max_lots_fo: String(s.max_lots_fo),
+      max_qty_cash: String(s.max_qty_cash),
+    }),
+    saver.phraseNeeded
+  )
   const changes = changed(settings, fields)
   return (
     <div className="flex flex-col gap-3" data-testid="size-card">
@@ -454,19 +492,29 @@ export function PacingCard({
   perSecond: number | null
 }) {
   const saver = useSaveSettings()
-  const [fields, set] = useFields(settings, (s) => ({
-    burst_on: s.burst_on,
-    burst_n: String(s.burst_n),
-    burst_window_s: String(s.burst_window_s),
-  }))
+  const [fields, set] = useFields(
+    settings,
+    (s) => ({
+      burst_on: s.burst_on,
+      burst_n: String(s.burst_n),
+      burst_window_s: String(s.burst_window_s),
+    }),
+    saver.phraseNeeded
+  )
   const changes = changed(settings, fields)
+  const pace = paceWords(perSecond)
   return (
     <div className="flex flex-col gap-3" data-testid="pacing-card">
-      <p className="text-[0.9375rem] leading-snug" data-testid="pacing">
-        {perSecond === null
-          ? 'Orders go to Upstox at the pace this server sets.'
-          : `Orders go to Upstox at most ${perSecond} a second, below the 10 Upstox allows. This is set on the server.`}
-      </p>
+      {pace.warn ? (
+        <p role="alert" className="sd-risk-note sd-risk-note--day" data-testid="pacing">
+          <TriangleAlert aria-hidden="true" className="size-5 shrink-0" />
+          {pace.said}
+        </p>
+      ) : (
+        <p className="text-[0.9375rem] leading-snug" data-testid="pacing">
+          {pace.said}
+        </p>
+      )}
       <OnOff
         label="Pause new orders after a burst"
         checked={fields.burst_on}
@@ -488,9 +536,7 @@ export function PacingCard({
           whole
         />
       </div>
-      <p className="text-[0.8125rem] text-[color:var(--text-secondary)]">
-        Exits are never paused; a basket counts once.
-      </p>
+      <p className="text-[0.8125rem] text-[color:var(--text-secondary)]">{BRAKE_COUNTS}</p>
       <SaveRow
         saver={saver}
         label="Save the burst brake"
@@ -520,6 +566,7 @@ export function PhraseCard() {
         label="Change the phrase"
         onSave={() => void saver.save({ confirm_phrase: next.trim() })}
         disabled={next.trim() === ''}
+        phraseHint={PHRASE_FOR_CHANGE}
       />
     </div>
   )

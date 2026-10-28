@@ -397,6 +397,9 @@ SETTINGS_NOT_UNDERSTOOD = "These settings could not be read. Nothing was saved."
 PHRASE_INVALID = "The confirm phrase must be 1 to 40 letters, digits or spaces. Nothing was saved."
 SETTINGS_UNCHANGED = "Nothing to change."
 LOOSEN_NEEDS_PHRASE = "Loosening a limit needs your confirm phrase. Nothing was saved."
+PHRASE_CHANGE_NEEDS_PHRASE = (
+    "Changing the confirm phrase needs the phrase it replaces. Nothing was saved."
+)
 SETTINGS_SAVED = "Saved."
 SETTINGS_CHANGED_MEANWHILE = (
     "Your risk settings were changed from another screen just now, so nothing was saved. Check "
@@ -724,6 +727,7 @@ FIXED = (
     PHRASE_INVALID,
     SETTINGS_UNCHANGED,
     LOOSEN_NEEDS_PHRASE,
+    PHRASE_CHANGE_NEEDS_PHRASE,
     SETTINGS_SAVED,
     SETTINGS_CHANGED_MEANWHILE,
     SETTINGS_NOT_SAVED,

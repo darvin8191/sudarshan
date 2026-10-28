@@ -543,6 +543,23 @@ def test_tightening_needs_no_phrase_and_loosening_does(world):
     ]
 
 
+def test_changing_the_phrase_asks_for_the_one_it_replaces_in_its_own_words(world):
+    """Limits review L5: a phrase change is not "loosening a limit"."""
+    client, account, store = world
+    asked = _put(client, {"confirm_phrase": "Kesari"})
+    assert (asked.status_code, asked.get_json()["message"]) == (
+        400,
+        words.PHRASE_CHANGE_NEEDS_PHRASE,
+    )
+    assert asked.get_json()["needs_phrase"] is True
+    assert _put(client, {"size_on": True}).status_code == 200  # tightening: no phrase
+    both = _put(client, {"confirm_phrase": "Kesari", "size_on": False})
+    assert both.get_json()["message"] == words.LOOSEN_NEEDS_PHRASE  # a limit loosened too
+    done = _put(client, {"confirm_phrase": "Kesari"}, phrase="stop")
+    assert done.status_code == 200 and store.settings().confirm_phrase == "Kesari"
+    assert "Kesari" not in str(done.get_json())  # never read back
+
+
 @pytest.mark.parametrize(
     ("settings", "message"),
     [

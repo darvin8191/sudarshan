@@ -19,9 +19,11 @@ vi.mock('@/api/risk', async (original) => {
 
 import {
   BandCard,
+  BRAKE_COUNTS,
   DailyLimitEditor,
   locksTodayWords,
   PacingCard,
+  PHRASE_FOR_CHANGE,
   PHRASE_FOR_LOOSENING,
   PhraseCard,
   SizeCard,
@@ -189,7 +191,55 @@ describe('orders per second and the phrase', () => {
     )
   })
 
+  it('warns when the server paces orders at or above what Upstox allows', () => {
+    wrap(<PacingCard settings={SETTINGS} perSecond={12} />)
+    const pace = screen.getByTestId('pacing')
+    expect(pace).toHaveAttribute('role', 'alert')
+    expect(pace).toHaveTextContent(
+      'Orders go to Upstox at up to 12 a second, and Upstox allows 10: in a burst Upstox refuses the orders past its limit. Set the pace to 9 or less on the server.'
+    )
+    expect(pace).not.toHaveTextContent('below')
+    expect(pace.querySelector('svg')).toHaveAttribute('aria-hidden', 'true')
+  })
+
+  it('says what the burst brake counts', () => {
+    wrap(<PacingCard settings={SETTINGS} perSecond={9} />)
+    expect(screen.getByTestId('pacing')).not.toHaveAttribute('role', 'alert')
+    expect(screen.getByTestId('pacing-card')).toHaveTextContent(BRAKE_COUNTS)
+    expect(BRAKE_COUNTS).toBe(
+      'It counts new orders that add risk; a basket, a split or a multi-leg order counts as one. Changes to an order and exits are never counted or paused.'
+    )
+  })
+
   it('changes the phrase and never shows one', async () => {
+    saveSettings
+      .mockResolvedValueOnce(
+        answer({
+          code: 400,
+          ok: false,
+          needsPhrase: true,
+          message: 'Changing the confirm phrase needs the phrase it replaces. Nothing was saved.',
+        })
+      )
+      .mockResolvedValueOnce(answer())
+    wrap(<PhraseCard />)
+    fireEvent.change(screen.getByLabelText('New phrase'), { target: { value: ' Kesari ' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Change the phrase' }))
+    expect(await screen.findByText(PHRASE_FOR_CHANGE)).toBeInTheDocument()
+    expect(screen.queryByText(PHRASE_FOR_LOOSENING)).toBeNull() // not "more risk"
+    expect(screen.getByTestId('phrase-card')).not.toHaveTextContent('STOP') // never the phrase
+    fireEvent.change(await screen.findByLabelText('Confirm phrase'), { target: { value: 'STOP' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm with your phrase' }))
+    await waitFor(() =>
+      expect(saveSettings).toHaveBeenLastCalledWith({ confirm_phrase: 'Kesari' }, 'STOP')
+    )
+    await waitFor(() => expect(screen.getByLabelText('New phrase')).toHaveValue(''))
+  })
+})
+
+describe('a change waiting for the phrase', () => {
+  it('stays on the card when another card saves meanwhile, so what is confirmed is what is shown', async () => {
+    const on = { ...SETTINGS, band_on: true }
     saveSettings
       .mockResolvedValueOnce(
         answer({
@@ -200,15 +250,25 @@ describe('orders per second and the phrase', () => {
         })
       )
       .mockResolvedValueOnce(answer())
-    wrap(<PhraseCard />)
-    fireEvent.change(screen.getByLabelText('New phrase'), { target: { value: ' Kesari ' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Change the phrase' }))
-    fireEvent.change(await screen.findByLabelText('Confirm phrase'), { target: { value: 'STOP' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm with your phrase' }))
-    await waitFor(() =>
-      expect(saveSettings).toHaveBeenLastCalledWith({ confirm_phrase: 'Kesari' }, 'STOP')
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const view = render(
+      <QueryClientProvider client={client}>
+        <BandCard settings={on} />
+      </QueryClientProvider>
     )
-    await waitFor(() => expect(screen.getByLabelText('New phrase')).toHaveValue(''))
+    fireEvent.click(screen.getByRole('switch', { name: 'Check prices against the market' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save the price band' }))
+    expect(await screen.findByLabelText('Confirm phrase')).toBeInTheDocument()
+    // Another card saved: a newer version comes in, the band still on.
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <BandCard settings={{ ...on, size_on: true, updated_at: '2026-10-28T05:01:00+00:00' }} />
+      </QueryClientProvider>
+    )
+    expect(screen.getByTestId('band-card')).toHaveTextContent('Check prices against the marketOff')
+    fireEvent.change(screen.getByLabelText('Confirm phrase'), { target: { value: 'stop' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm with your phrase' }))
+    await waitFor(() => expect(saveSettings).toHaveBeenLastCalledWith({ band_on: false }, 'stop'))
   })
 })
 

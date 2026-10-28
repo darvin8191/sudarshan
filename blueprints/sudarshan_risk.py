@@ -303,7 +303,8 @@ def put_settings():
             "message": message,
             "data": data,
             # The page asks for the phrase and sends the same change again (M20.7).
-            "needs_phrase": message in (words.LOOSEN_NEEDS_PHRASE, words.PHRASE_WRONG),
+            "needs_phrase": message
+            in (words.LOOSEN_NEEDS_PHRASE, words.PHRASE_CHANGE_NEEDS_PHRASE, words.PHRASE_WRONG),
         }
     ), status
 
