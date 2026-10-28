@@ -620,3 +620,135 @@ def test_a_pause_open_at_the_close_ends_at_the_close(alerts, quick):
         assert pause.end == ms(ist(2026, 10, 21, 15, 30))
 
     asyncio.run(scenario())
+
+
+def failing_record(monkeypatch, *, commit: bool, then=None):
+    """MarketStore.record_fire failing once: after it committed (``commit``), or before."""
+    from sudarshan.alerts.market.store import StoreError
+
+    real, calls = MarketStore.record_fire, []
+
+    def record_fire(self, *args, **kwargs):
+        calls.append(args)
+        if len(calls) > 1:
+            return real(self, *args, **kwargs)
+        if commit:
+            event_id = real(self, *args, **kwargs)
+            if then is not None:
+                then(self, event_id)
+        raise StoreError("This could not be saved.", "disk I/O error")
+
+    monkeypatch.setattr(MarketStore, "record_fire", record_fire)
+    return calls
+
+
+def test_a_fire_that_committed_despite_an_error_still_reaches_the_app(alerts, quick, monkeypatch):
+    """Review L9: found with Telegram off, a fire that committed returned nothing, so its push
+    to the open apps was skipped too."""
+    import os
+
+    from sudarshan.alerts.market.push import ALERT_EVENT
+    from sudarshan.vault import ALERTS_PUSH_INFO, fernet_for
+
+    failing_record(monkeypatch, commit=True)
+
+    def pushed(notify) -> list[int]:
+        return [
+            i["data"]["event_id"] for b in notify.pushes for i in b if i["event"] == ALERT_EVENT
+        ]
+
+    async def scenario():
+        clock = Clock(ist(2026, 10, 21, 10, 0))
+        async with FakeFeed(clock) as feed, FakeOpenAlgo() as notify:
+            settings = alerts(notify)
+            create(settings, clock(), channels={"telegram": False, "app": True})
+            fernet = fernet_for(os.environ["API_KEY_PEPPER"], ALERTS_PUSH_INFO)
+            rt, task = await started(settings, feed, clock, push_fernet=fernet)
+            await trade(feed, clock, 99.95)
+            await trade(feed, clock, 100.05, ltq=2)
+            await wait_until(lambda: pushed(notify))
+            await asyncio.sleep(0.3)
+            assert pushed(notify) == [1] and notify.bodies == []
+            await stopped(rt, task)
+
+    asyncio.run(scenario())
+
+
+def test_a_fire_found_already_told_is_never_told_again(alerts, quick, monkeypatch):
+    """Mutant R11: a committed fire whose Telegram delivery is settled is not told twice."""
+
+    def sent(store, event_id):
+        store.set_delivery("owner", event_id, "telegram", "sent", "", 0)
+
+    failing_record(monkeypatch, commit=True, then=sent)
+
+    async def scenario():
+        clock = Clock(ist(2026, 10, 21, 10, 0))
+        async with FakeFeed(clock) as feed, FakeOpenAlgo() as notify:
+            settings = alerts(notify)
+            create(settings, clock())
+            rt, task = await started(settings, feed, clock)
+            await trade(feed, clock, 99.95)
+            await trade(feed, clock, 100.05, ltq=2)
+            await wait_until(lambda: record(settings, "events"))
+            await asyncio.sleep(0.5)
+            assert notify.bodies == []
+            await stopped(rt, task)
+
+    asyncio.run(scenario())
+
+
+def test_a_fire_recorded_again_keeps_the_newer_state(alerts, quick, monkeypatch):
+    """Review L9: the fire recorded again after a failed write wrote its state as it was at the
+    fire over the newer one the Book had saved meanwhile."""
+    monkeypatch.setattr(runtime, "RECORD_RETRY_S", (1.0,))
+    calls = failing_record(monkeypatch, commit=False)
+
+    async def scenario():
+        clock = Clock(ist(2026, 10, 21, 10, 0))
+        async with FakeFeed(clock) as feed, FakeOpenAlgo() as notify:
+            settings = alerts(notify)
+            create(settings, clock(), frequency="every_time")
+            rt, task = await started(settings, feed, clock)
+            await trade(feed, clock, 99.95)
+            await trade(feed, clock, 100.05, ltq=2)  # fires; its record fails
+            await wait_until(lambda: calls)
+            await trade(feed, clock, 99.9, ltq=3)  # below again: the Book's newer state
+            clock.advance(2)
+            await wait_until(lambda: record(settings, "states").get(1, State()).side == -1)
+            await wait_until(lambda: len(calls) == 2 and record(settings, "events"))
+            assert record(settings, "states")[1].side == -1  # not the fire's +1
+            await stopped(rt, task)
+
+    asyncio.run(scenario())
+
+
+def test_states_a_failed_flush_could_not_save_are_saved_by_the_next(alerts, quick, monkeypatch):
+    """Mutant R12: a flush that fails puts what it held back, for the next flush."""
+    from sudarshan.alerts.market.store import StoreError
+
+    real, calls = MarketStore.save_states, []
+
+    def save_states(self, principal, states, now):
+        below = any(state.side == -1 for _, state in states.values())
+        if below and not calls:  # the flush that holds the trade's state: refused once
+            calls.append(states)
+            raise StoreError("This could not be saved.", "disk I/O error")
+        return real(self, principal, states, now)
+
+    monkeypatch.setattr(MarketStore, "save_states", save_states)
+
+    async def scenario():
+        clock = Clock(ist(2026, 10, 21, 10, 0))
+        async with FakeFeed(clock) as feed, FakeOpenAlgo() as notify:
+            settings = alerts(notify)
+            create(settings, clock())
+            rt, task = await started(settings, feed, clock)
+            await trade(feed, clock, 99.95)
+            clock.advance(2)
+            await wait_until(lambda: calls)  # the first flush, refused
+            clock.advance(2)
+            await wait_until(lambda: record(settings, "states").get(1, State()).side == -1)
+            await stopped(rt, task)
+
+    asyncio.run(scenario())

@@ -583,7 +583,10 @@ class MarketRuntime:
             return
         except StoreError as exc:
             log.error("a market alert's fire could not be recorded (%s); checking", exc.cause)
-            event_id = await self._recover(record, options, fire)
+            recovered = await self._recover(record, options, fire)
+            if recovered is None:  # told before (its claim is recorded)
+                return
+            event_id, channels = recovered
         if event_id is None:  # told before (its claim is recorded)
             return
         self.stats["fires"] += 1
@@ -593,23 +596,31 @@ class MarketRuntime:
         if self.push is not None and channels.get("app"):
             self.push(event_id, alert, fire, options)
 
-    async def _recover(self, record, options, fire) -> int | None:
-        """After a failed write: the claim's record if it committed after all, else the fire
-        recorded again; a negative id when it never could be (told on Telegram, never twice)."""
+    async def _recover(self, record, options, fire) -> tuple[int, dict[str, bool]] | None:
+        """After a failed write: (event id, the channels still to tell) of the claim's record if
+        it committed after all, each channel whose delivery is still pending; else the fire
+        recorded again, its state left to the Book's flush, which has the newer one; a negative
+        id when it never could be (told, never twice); None when there is nothing to tell
+        (review L9: a committed fire with Telegram off skipped its app push too, and a fire
+        recorded again wrote its older state over a newer one)."""
+        channels = options["channels"]
         for delay in RECORD_RETRY_S:
             await asyncio.sleep(delay)
             try:
                 event = await self._db(self.store.event_by_claim, OWNER, fire.claim)
                 if event is not None:
-                    delivery = event["deliveries"].get("telegram", {})
-                    return event["id"] if delivery.get("status") == "pending" else None
-                return await self._db(*record, **options)
+                    pending = {name: delivery.get("status") == "pending"
+                               for name, delivery in event["deliveries"].items()}  # fmt: skip
+                    return (event["id"], pending) if any(pending.values()) else None
+                fn, principal, _, _ = record
+                event_id = await self._db(fn, principal, fire, None, **options)
+                return (event_id, channels) if event_id is not None else None
             except NotFound:
                 return None
             except StoreError:
                 continue
         log.error("a market alert's fire could not be recorded; it is sent without a record")
-        return self._next_line_id()
+        return self._next_line_id(), channels
 
     def _delivered(self, ids: list[int], status: str, reason: str) -> None:
         """The market lane's answer for each message's fires (M10.5)."""

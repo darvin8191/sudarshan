@@ -394,7 +394,7 @@ class MarketStore:
         self,
         principal: str,
         fire: Fire,
-        state: State,
+        state: State | None,
         *,
         title: str,
         line: str,
@@ -408,8 +408,10 @@ class MarketStore:
     ) -> int | None:
         """One fire with its state (and its stop), once: the event id, or None when its claim
         was already told. The state and the stop apply only while the alert is Active at the
-        version the fire was decided on (``fire.version``). ``title``, ``detail`` and ``note`` are
-        the toast's words and ``line`` the Telegram line, all frozen as they were at the fire."""
+        version the fire was decided on (``fire.version``); ``state`` None keeps the saved one
+        (a fire recorded again later, whose state the Book has saved since). ``title``,
+        ``detail`` and ``note`` are the toast's words and ``line`` the Telegram line, all frozen
+        as they were at the fire."""
         who = self._who(principal)
         if status is not None:
             _status(status)
@@ -430,7 +432,8 @@ class MarketStore:
                 "test": 0,
             })  # fmt: skip
             if row.version == fire.version and row.status == "active":
-                _put_state(conn, who, fire.alert_id, state, fire.at)
+                if state is not None:
+                    _put_state(conn, who, fire.alert_id, state, fire.at)
                 if status is not None:
                     _set_status(
                         conn, who, fire.alert_id, fire.version, status, status_reason, fire.at
