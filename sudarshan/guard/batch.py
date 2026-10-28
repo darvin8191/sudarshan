@@ -7,9 +7,10 @@ before any part is sent, every part that adds risk is held to those two limits, 
 over, nothing is sent and the sentence names the part. A split is held to the size limit as the
 one order it was asked as, so splitting an order never gets round the cap.
 
-The kill switch and the daily loss limit stay with the gate, part by part: under them every part
-adding risk is refused and an exit still goes, so neither can leave a batch half placed with
-more risk than before.
+The kill switch and the daily loss limit hold a batch whole too (the coordinator's decision c):
+a wing roll that closes one wing and buys a further one is either sent whole or not at all, never
+half, and its refusal names the exits it carried, so the owner can send them on their own; an
+exit sent on its own always goes.
 
 Each service carries one marked call to this module, which answers with the service's own error
 answer (its analyzer event in Analyze mode, its failure event in Live) or None when the batch may
@@ -51,7 +52,8 @@ def basket(basket_data: dict, auth_token: str, original_data: dict) -> Answer | 
         return None
     index, decision = found
     part = None if index is None else index + 1  # None: the basket as a whole (the burst brake)
-    message = words.together_refused("basket", part, decision.words)
+    exits = _exits(decision, described, "Order", [n + 1 for n in range(len(described))])
+    message = words.together_refused("basket", part, decision.words, exits)
     return _refused(pipe, "basket_order_service", "basketorder", original_data, message)
 
 
@@ -163,7 +165,8 @@ def multi_leg(
         return None
     index, decision = found
     part = None if index is None else numbers[index]
-    message = words.together_refused("multi_leg", part, decision.words)
+    exits = _exits(decision, described, "Leg", numbers)
+    message = words.together_refused("multi_leg", part, decision.words, exits)
     return _refused(pipe, "options_multiorder_service", "optionsmultiorder", original_data, message)
 
 
@@ -179,6 +182,18 @@ def _pipe() -> str | None:
 
     pipe = gate.SANDBOX if get_analyze_mode() else gate.LIVE
     return pipe if flag.covers(pipe) else None
+
+
+def _exits(decision, described: list, label: str, numbers: list[int]) -> list[str]:
+    """The exits a refused batch carried, named for the owner to send on their own."""
+    named = []
+    for index in decision.detail.get("exits") or []:
+        if 0 <= index < len(described):
+            order = described[index]
+            named.append(
+                words.batch_exit(label, numbers[index], order.side, order.quantity, order.name)
+            )
+    return named
 
 
 def _slices(data: dict) -> list[int] | None:

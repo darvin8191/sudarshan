@@ -1270,37 +1270,57 @@ class Gate:
     def check_together(
         self, orders: list[Order], slices: list[list[int]] | None = None
     ) -> tuple[int | None, Decision] | None:
-        """The parts of a batch (batch.py) held to the owner's band and size limit before any is
-        sent: the first part over one, with the refusal a single order would get; or, with no
-        part over, the burst brake's refusal of the batch as a whole (index None); or None.
+        """A batch (batch.py) judged whole before any part is sent: all or nothing in every state
+        (the coordinator's decision c). It is refused when any part adding risk would be refused
+        alone: under the kill switch, on a locked day (the day's figure read for it when a limit
+        is set), over the band or the size limit; then by the burst brake as a whole (index
+        None). Returns the first such part's index and the refusal a single order would get,
+        its detail naming the batch's exits (``exits``: their indexes), which are not sent
+        either; or None. A batch of exits only always goes.
 
         Nothing is recorded but the brake's one admission for the batch and its credits: one
         for each order a part adding risk will send (``slices``: the quantities each part goes
         as, its own quantity unless it is split), under that order's instrument, side and
-        quantity, so those orders are not counted again and no other order uses them. Each part is decided again as it is sent, kill switch and
-        daily limit included. A part whose book cannot be read is left to that decision. The
-        parts are judged in order, each against the book and the exits earlier parts would
-        send, so two parts selling the same long take its room once.
+        quantity, so those orders are not counted again and no other order uses them. The
+        kill switch, the day's lock and the limits are judged before the brake, so a batch
+        refused anyway takes no admission. Each part is decided again as it is sent. The parts
+        are judged in order, each against the book and the exits earlier parts would send, so
+        two parts selling the same long take its room once. A part whose book cannot be read is
+        left to that decision while nothing refuses new risk; under the kill switch or on a
+        locked day the batch is refused (decision d).
         """
         if not orders:
             return None
         self._load_state()
         guards = self._guards(orders[0])
         settings = guards.settings
-        if settings is None or not (settings.band_on or settings.size_on or settings.burst_on):
+        with self._lock:
+            refusing = self._refusing()
+        lock = guards.lock
+        limits = settings is not None and (
+            settings.band_on or settings.size_on or settings.burst_on
+        )
+        if refusing is None and lock is None and not guards.daily and not limits:
             return None
+        every = refusing is not None or lock is not None or guards.daily  # read every part
+        fallback = refusing is not None or lock is not None
         taken: dict[tuple, int] = {}  # (position, side): what earlier parts would exit
-        credits: dict[tuple, int] = {}  # the orders the parts adding risk will send
+        judged: list[tuple] = []  # (index, order, facts, verdict, sent_at): parts adding risk
+        exits: list[int] = []
+        unreadable = None  # the first part whose book could not be read
         for index, order in enumerate(orders):
-            if guards.price_band(order) is None and not guards.sized(order):
-                if not guards.braking:
+            if not every and not guards.braking:
+                if guards.price_band(order) is None and not guards.sized(order):
                     continue
-            known, facts = self._facts(order)  # reads: outside the lock
-            if facts.unreadable or facts.pass_through:
+            known, facts = self._facts(order, fallback)  # reads: outside the lock
+            if facts.pass_through:
+                continue
+            if facts.unreadable:
+                unreadable = unreadable or (index, known)
                 continue
             mine = (known.key, known.side)
             with self._lock:
-                claimed, _sent_at = self._claimed(known, facts.position, time.monotonic())
+                claimed, sent_at = self._claimed(known, facts.position, time.monotonic())
             verdict = rules.classify(
                 known.side,
                 known.quantity,
@@ -1310,27 +1330,73 @@ class Gate:
             )
             if verdict.reducing:
                 taken[mine] = taken.get(mine, 0) + (known.quantity or 0)
+                exits.append(index)
                 continue
+            judged.append((index, known, facts, verdict, sent_at))
+        found = self._batch_refusal(orders, guards, refusing, lock, judged, unreadable, slices)
+        if found is None:
+            return None
+        index, refusal = found
+        return index, replace(refusal, detail={**refusal.detail, "exits": exits})
+
+    def _batch_refusal(
+        self,
+        orders: list[Order],
+        guards: _Guards,
+        refusing: _Refusing | None,
+        lock: risk_store.DayLock | None,
+        judged: list[tuple],
+        unreadable: tuple[int, Order] | None,
+        slices: list[list[int]] | None,
+    ) -> tuple[int | None, Decision] | None:
+        """``check_together``'s decision, in the gate's order: what refuses new risk, the day,
+        the owner's limits, then the burst brake. Each refusal goes to the risk history."""
+        if unreadable is not None and (refusing is not None or lock is not None):
+            index, known = unreadable
+            return self._noted_batch(index, known, self._unreadable(known, refusing, lock))
+        if not judged:
+            return None  # exits only: an exit always goes
+        index, known, facts, verdict, sent_at = judged[0]
+        if refusing is not None:
+            refusal = self._refuse(known, refusing, verdict, sent_at)
+            return self._noted_batch(index, known, refusal)
+        if lock is None and guards.daily:
+            lock, day_unread = self._day_facts(known, facts, guards)  # may lock the day now
+            if lock is None and day_unread:
+                detail = {"reason": verdict.reason, "position": verdict.position}
+                refusal = Decision(
+                    True, words.daily_unreadable(known.pipe), GUARD_UNAVAILABLE, detail=detail
+                )
+                return self._noted_batch(index, known, refusal)
+        if lock is not None:
+            refusal = self._refuse_daily(known, lock, verdict, sent_at)
+            return self._noted_batch(index, known, refusal)
+        credits: dict[tuple, int] = {}  # the orders the parts adding risk will send
+        for index, known, facts, verdict, sent_at in judged:
             sent_as = slices[index] if slices is not None and index < len(slices) else None
             for quantity in sent_as or [known.quantity]:
                 held = _credit_key(known, quantity)
                 credits[held] = credits.get(held, 0) + 1
             reads = self._limit_reads(known, facts, guards, adding=True)
-            refusal, _unchecked = self._over_limits(known, guards, verdict, reads)
+            refusal, _unchecked = self._over_limits(known, guards, verdict, reads, sent_at)
             if refusal is not None:
-                self._note(known.pipe, known, refusal)  # the risk history shows it
-                return index, refusal
+                return self._noted_batch(index, known, refusal)
         if guards.braking and credits:
             with self._lock:
                 refusal = self._brake(
-                    orders[0].pipe, settings, time.monotonic(), credits=list(credits.items())
+                    orders[0].pipe, guards.settings, time.monotonic(), credits=list(credits.items())
                 )
             if refusal is not None:
                 if refusal.detail.get("tell"):
                     _tell_owner(refusal.detail["tell"])
-                self._note(orders[0].pipe, orders[0], refusal)
-                return None, refusal  # the batch as a whole, not one part
+                return self._noted_batch(None, orders[0], refusal)  # the batch as a whole
         return None
+
+    def _noted_batch(
+        self, index: int | None, order: Order, refusal: Decision
+    ) -> tuple[int | None, Decision]:
+        self._note(order.pipe, order, refusal)  # the risk history shows it
+        return index, refusal
 
     def _unreadable(
         self, order: Order, refusing: _Refusing | None, lock: risk_store.DayLock | None = None

@@ -345,6 +345,36 @@ def test_on_a_locked_day_an_exit_already_on_its_way_is_named(day, clock):  # noq
     )
 
 
+def test_on_a_locked_day_a_wing_roll_is_sent_whole_or_not_at_all(day):
+    """The gate review's M6: [sell the long PE wing, buy a further wing] sent leg by leg sold
+    the wing and refused the new one, leaving the short PE uncovered. The batch is refused
+    whole; its exit is named."""
+    day.store.lock_day("live", today(), -5200.0, LIMIT)
+    day.book.rows = [day_row(PE, 65, -5200.0, 0.0)]
+    legs = [
+        gate._upstox_place(order("SELL", 65, symbol=PE), "token"),  # closes the wing
+        gate._upstox_place(order("BUY", 65, symbol=CE), "token"),  # a further wing: new risk
+    ]
+    found = day.gate.check_together(legs)
+    assert found is not None
+    index, decision = found
+    assert index == 1 and decision.code == gate.DAILY_LOSS_LIMIT
+    assert decision.detail["exits"] == [0]
+    assert day.gate.check_together(legs[:1]) is None  # the exit alone goes
+
+
+def test_a_batch_that_reaches_the_limit_locks_the_day_and_is_refused_whole(day):
+    day.book.rows = [day_row(PE, 65, -4100.0, 0.0)]
+    legs = [
+        gate._upstox_place(order("SELL", 65, symbol=PE), "token"),
+        gate._upstox_place(order("BUY", 65, symbol=CE), "token"),
+    ]
+    found = day.gate.check_together(legs)
+    assert found is not None and found[1].code == gate.DAILY_LOSS_LIMIT
+    assert day.store.day_lock("live", today()) is not None
+    assert len(day.told) == 1
+
+
 def test_a_delivery_dip_never_locks_the_day(day):
     """Shares bought today to hold (CNC, product D in cash) are not in the day's figure."""
     day.book.rows = [

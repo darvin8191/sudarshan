@@ -104,7 +104,9 @@ def test_the_app_s_exit_and_exit_all_go(upstox):
     assert upstox.broker.true_qty(CE) == 0
 
 
-def test_a_basket_sends_its_exit_and_refuses_its_entry(upstox):
+def test_a_basket_with_an_entry_is_refused_whole_and_names_its_exit(upstox):
+    """The coordinator's decision c: all or nothing under the kill switch too. A hedge is never
+    left half placed, and the exit it carried is named so it can be sent on its own."""
     from services.basket_order_service import process_basket_order_with_auth
 
     basket = {
@@ -113,10 +115,28 @@ def test_a_basket_sends_its_exit_and_refuses_its_entry(upstox):
         "orders": [_order(CE, "SELL", 65), _order(SBIN, "BUY", 1)],
     }
     ok, body, code = process_basket_order_with_auth(basket, "token", "upstox", basket)
-    results = {r["symbol"]: r for r in body["results"]}
-    assert results[CE]["status"] == "success"
-    assert results[SBIN] == {"symbol": SBIN, "status": "error", "message": ENTRY}
-    assert [o["symbol"] for o in upstox.broker.orders] == [CE]
+    assert (ok, code) == (False, 403)
+    assert body["message"] == (
+        "Nothing in this basket was sent, so no part goes without the others. Order 2: "
+        + ENTRY
+        + " Its exit was not sent either: Order 1 (sell 65 NIFTY 25900 CE). An exit sent on its "
+        "own always goes."
+    )
+    assert upstox.broker.orders == []
+    from services.place_order_service import place_order
+
+    ok, body, code = place_order(_order(CE, "SELL", 65), auth_token="token", broker="upstox")
+    assert (ok, code) == (True, 200)  # the exit on its own goes
+
+
+def test_a_basket_of_exits_goes_under_the_switch(upstox):
+    from services.basket_order_service import process_basket_order_with_auth
+
+    basket = {"apikey": "KEY", "strategy": "Test",
+              "orders": [_order(CE, "SELL", 65), _order(PE, "BUY", 30)]}  # fmt: skip
+    ok, body, code = process_basket_order_with_auth(basket, "token", "upstox", basket)
+    assert (ok, code) == (True, 200)
+    assert upstox.broker.true_qty(CE) == 0 and upstox.broker.true_qty(PE) == 0
 
 
 def test_a_split_entry_sends_no_slice(upstox, monkeypatch):
@@ -125,7 +145,11 @@ def test_a_split_entry_sends_no_slice(upstox, monkeypatch):
     monkeypatch.setattr(split_service, "get_order_rate_limit", lambda: 0)
     split = {**_order(SBIN, "BUY", 3), "splitsize": "1"}
     ok, body, code = split_service.split_order_with_auth(split, "token", "upstox", split)
-    assert [r["message"] for r in body["results"]] == [ENTRY] * 3
+    assert (ok, code) == (False, 403)  # refused whole, before any slice (decision c)
+    assert body["message"] == (
+        "Nothing of this split order was sent: it is held to your limits as the one order it "
+        "is. " + ENTRY
+    )
     assert upstox.broker.orders == []
 
 

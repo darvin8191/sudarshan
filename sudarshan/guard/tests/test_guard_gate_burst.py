@@ -228,3 +228,18 @@ def test_a_multi_leg_order_s_split_legs_count_once(services, sized, clock, monke
     )
     assert (ok, status) == (True, 200)
     assert len(services.reached) == 5  # every slice of both legs
+
+
+def test_a_batch_refused_by_the_kill_switch_takes_no_count(braked):
+    """Limits review L6: the kill switch is judged before the brake, so a refused batch takes
+    no admission from the window."""
+    braked.gate.set_state(KillSwitchState(on=True, since=None))
+    parts = [gate._upstox_place(order("BUY", 65, symbol=s), "token") for s in (CE, PE)]
+    for _ in range(3):
+        found = braked.gate.check_together(parts)
+        assert found is not None and found[1].code == gate.KILL_SWITCH_ACTIVE
+    braked.gate.set_state(KillSwitchState())
+    upstox = broker()
+    for _ in range(3):
+        assert _new(upstox)[0].status == 200
+    refused_message(_new(upstox))

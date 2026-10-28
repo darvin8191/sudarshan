@@ -666,9 +666,11 @@ SIZE_NOT_CHECKED = (
 )
 
 
-def together_refused(what: str, part: int | None, said: str) -> str:
-    """Why a whole batch is refused: one part is over a limit, and nothing of it was sent, so no
-    part of a hedge goes without the others; a split, as the one order it was asked as."""
+def together_refused(what: str, part: int | None, said: str, exits: list[str] = ()) -> str:
+    """Why a whole batch is refused: one part would be refused alone, and nothing of it was
+    sent, so no part of a hedge goes without the others; a split, as the one order it was asked
+    as. The exits the batch carried are named (they were not sent either), so the owner can
+    send them on their own (the coordinator's decisions b and c)."""
     reason = said.removesuffix(" Nothing was sent.")
     if what == "split":
         return (
@@ -677,10 +679,23 @@ def together_refused(what: str, part: int | None, said: str) -> str:
         )
     where, name = ("this basket", "Order") if what == "basket" else ("this multi-leg order", "Leg")
     if part is None:  # the batch as a whole: the burst brake counts it once
-        return f"Nothing in {where} was sent. {reason}"
-    return (
-        f"Nothing in {where} was sent, so no part goes without the others. {name} {part}: {reason}"
-    )
+        said = f"Nothing in {where} was sent. {reason}"
+    else:
+        said = (
+            f"Nothing in {where} was sent, so no part goes without the others. {name} {part}: "
+            f"{reason}"
+        )
+    if exits:
+        which = "Its exit was" if len(exits) == 1 else "Its exits were"
+        said += (
+            f" {which} not sent either: {', '.join(exits)}. An exit sent on its own always goes."
+        )
+    return said
+
+
+def batch_exit(label: str, number: int, side: int | None, quantity: int | None, position) -> str:
+    """One exit a refused batch carried: "Order 1 (sell 65 NIFTY 25900 CE)"."""
+    return f"{label} {number} ({_verb(side)} {quantity or 0} {trader_name(position)})"
 
 
 # -- the burst brake (M5.14) --------------------------------------------------------------------------
