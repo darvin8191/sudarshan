@@ -111,7 +111,8 @@ DAY_BOOK_REUSE_S = 15.0
 SESSION_KEPT_S = 600.0
 #: How far ahead the daily card looks for the next session (a long holiday weekend fits).
 SESSION_LOOKAHEAD_DAYS = 10
-#: The daily limit could not be checked this recently: the banner says so.
+#: The daily limit could not be checked this recently: the banner says so. Its first failure
+#: after a quiet spell is announced to every open screen (``sudarshan_risk_day``).
 UNCHECKED_SHOWN_S = 60.0
 #: A batch counts once in the burst brake: the orders it sends within this long, each on the
 #: instrument, side and quantity the batch named, are not counted again.
@@ -467,6 +468,8 @@ class Gate:
             self._note(kind.pipe, order, decision)
         if decision.code == BURST_BRAKE and decision.detail.get("tell"):
             _tell_owner(decision.detail["tell"])
+        if decision.detail.get("unchecked_now"):
+            _announce_unchecked(kind.pipe)
         return decision
 
     def settle(self, token: int | None, answer: str, ref: str | None) -> None:
@@ -689,7 +692,9 @@ class Gate:
         except readers.Unreadable as exc:
             logger.warning(f"The daily loss limit could not be checked: {exc}")
             with self._lock:
-                self._unchecked[order.pipe] = time.monotonic()
+                now_shown = self._mark_unchecked(order.pipe, time.monotonic())
+            if now_shown:
+                _announce_unchecked(order.pipe)
             return None, True
         if not daily.reached(day.limit, figure):
             return None, False
@@ -846,9 +851,25 @@ class Gate:
 
     def day_unchecked(self, pipe: str) -> bool:
         """Whether the daily limit could not be checked in the last minute (the banner)."""
+        return self.day_unchecked_left(pipe) is not None
+
+    def day_unchecked_left(self, pipe: str) -> float | None:
+        """How many more seconds the banner says the daily limit is not being checked; None
+        when it is being checked. Seconds, not a time of day, so a phone whose clock is a
+        little off still shows it for as long."""
         with self._lock:
             at = self._unchecked.get(pipe)
-        return at is not None and time.monotonic() - at <= UNCHECKED_SHOWN_S
+        if at is None:
+            return None
+        left = at + UNCHECKED_SHOWN_S - time.monotonic()
+        return round(left, 1) if left >= 0 else None
+
+    def _mark_unchecked(self, pipe: str, now: float) -> bool:
+        """The daily limit could not be checked in ``pipe`` just now; True when the banner was
+        not already saying so (the screens are told). Call under the lock."""
+        at = self._unchecked.get(pipe)
+        self._unchecked[pipe] = now
+        return at is None or now - at > UNCHECKED_SHOWN_S
 
     # -- deciding, under the lock -------------------------------------------------------------------
 
@@ -970,13 +991,15 @@ class Gate:
     def _unjudged(self, order: Order, guards: _Guards, now: float) -> Decision:
         """With nothing refusing new risk, an order whose book could not be read goes, noted: it
         may be an exit, and an exit is never refused for a read that failed."""
+        detail = {}
         if guards.daily:
-            self._unchecked[order.pipe] = now
+            if self._mark_unchecked(order.pipe, now):
+                detail["unchecked_now"] = True  # admit() tells the screens, outside the lock
             said = words.daily_not_checked(order.pipe)
         else:
             said = words.checks_not_run(order.pipe)
         token = self._register(order, None, now)
-        return Decision(token=token, words=said, code=GUARD_UNAVAILABLE)
+        return Decision(token=token, words=said, code=GUARD_UNAVAILABLE, detail=detail)
 
     def _held_to_settings(
         self, order: Order, guards: _Guards, verdict: rules.Verdict, reads: _Reads, now: float
@@ -1286,6 +1309,17 @@ def _tell_owner(text: str) -> None:
             _tell(Owner(admin.username, "app", "risk guard"), text)
     except Exception:
         logger.exception("A risk message could not be told on Telegram")
+
+
+def _announce_unchecked(pipe: str) -> None:
+    """Every open screen hears the daily limit is not being checked (its banner reads /state
+    again, which says until when); never fails an order."""
+    try:
+        from extensions import emit_from_any_thread
+
+        emit_from_any_thread("sudarshan_risk_day", {"pipe": pipe, "unchecked": True})
+    except Exception:
+        logger.exception("An unchecked daily limit could not be told to the open screens")
 
 
 def _hhmm(at: datetime | None) -> str:

@@ -154,6 +154,28 @@ def test_an_unreadable_book_never_refuses_an_order_it_cannot_judge(day):
     assert audit and audit[0].summary == words.daily_not_checked("live")
 
 
+def test_the_screens_hear_once_that_the_daily_limit_is_not_being_checked(
+    day,
+    clock,  # noqa: F811
+):
+    """Limits review M7: the banner says it while the owner trades, not on a reload."""
+    day.book.fail.add("rows")
+    upstox = broker()
+    told = ("sudarshan_risk_day", {"pipe": "live", "unchecked": True})
+    assert upstox.place(order("SELL"), "token")[2] == "OID0"  # goes, unjudged
+    assert day.shown == [told]
+    clock.now += 30
+    assert upstox.place(order("SELL"), "token")[2] == "OID1"
+    oco = order("BUY", symbol=PE, trigger_type="OCO")
+    refused_message(upstox.gtt_place(oco, "token"))  # its figure cannot be read either
+    assert day.shown == [told]  # still being said: not told again
+    clock.now += gate.UNCHECKED_SHOWN_S + 1
+    assert not day.gate.day_unchecked("live")
+    refused_message(upstox.gtt_place(oco, "token"))
+    assert day.shown == [told, told]
+    assert day.gate.day_unchecked("live")
+
+
 def test_a_two_leg_gtt_is_refused_when_the_figure_cannot_be_read(day):
     """New risk whatever the book says, so the figure decides, and it cannot be read."""
     day.book.fail.add("rows")

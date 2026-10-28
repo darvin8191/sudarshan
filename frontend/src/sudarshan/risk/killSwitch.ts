@@ -49,7 +49,14 @@ function parseDaily(value: unknown): RiskState['daily'] {
   for (const pipe of ['live', 'sandbox'] as RiskPipe[]) {
     const day = (value as Record<string, unknown>)[pipe]
     if (typeof day === 'object' && day !== null) {
-      daily[pipe] = { locked: (day as { locked?: unknown }).locked === true }
+      const { locked, unchecked, unchecked_left_s: left } = day as Record<string, unknown>
+      const shown = unchecked === true && typeof left === 'number' && left > 0
+      daily[pipe] = {
+        locked: locked === true,
+        unchecked: shown,
+        unchecked_left_s: shown ? left : null,
+        unchecked_until: shown ? Date.now() + left * 1000 : null,
+      }
     }
   }
   return daily
@@ -126,6 +133,16 @@ export function dayLocked(state: RiskState | null, sandbox: boolean): boolean {
 }
 
 /**
+ * Until when the daily loss limit is said to be not being checked in the book the page shows
+ * (its positions could not be read), as a time in ms; null when it is being checked.
+ */
+export function dayUncheckedUntil(state: RiskState | null, sandbox: boolean): number | null {
+  const day = state?.daily?.[sandbox ? 'sandbox' : 'live']
+  if (!day?.unchecked || typeof day.unchecked_until !== 'number') return null
+  return day.unchecked_until
+}
+
+/**
  * Keeps the app-wide copy in step with the server. Rendered once per shell (the banner):
  * a read on mount, every `sudarshan_risk` event, a read on reconnect and on coming back.
  */
@@ -144,7 +161,8 @@ export function useKillSwitchSync(socket: Socket | null): void {
       void readKillSwitch()
     }
     socket.on('sudarshan_risk', onRisk)
-    socket.on('sudarshan_risk_day', onConnect) // the day locked: read the state again
+    // The day locked, or the limit could not be checked: read the state again.
+    socket.on('sudarshan_risk_day', onConnect)
     socket.on('connect', onConnect)
     return () => {
       socket.off('sudarshan_risk', onRisk)

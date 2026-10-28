@@ -174,6 +174,17 @@ def _upstox_kill_switch(owner: killswitch.Owner) -> list[dict] | None:
     return [{**row, "label": words.upstox_segment(row["segment"])} for row in rows]
 
 
+def _day_state(pipe: str) -> dict:
+    """The banner's daily line for ``pipe``: locked today, or not being checked (for how many
+    more seconds the banner says so)."""
+    left = risk_gate.GATE.day_unchecked_left(pipe)
+    return {
+        "locked": risk_gate.GATE.day_lock(pipe) is not None,
+        "unchecked": left is not None,
+        "unchecked_left_s": left,
+    }
+
+
 @sudarshan_risk_bp.route("/state", methods=["GET"])
 @check_session_validity
 @_owner_only
@@ -187,11 +198,7 @@ def state():
             "data": {
                 "stage": flag.stage(),
                 "kill_switch": killswitch.public_state(risk_gate.GATE.state()),
-                "daily": {
-                    pipe: {"locked": risk_gate.GATE.day_lock(pipe) is not None}
-                    for pipe in _PIPES
-                    if flag.covers(pipe)
-                },
+                "daily": {pipe: _day_state(pipe) for pipe in _PIPES if flag.covers(pipe)},
             },
         }
     )

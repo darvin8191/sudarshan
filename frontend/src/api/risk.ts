@@ -39,12 +39,24 @@ export interface KillSwitchState {
 
 export type RiskPipe = 'live' | 'sandbox'
 
+/** The banner's daily line for one pipe (M5.14). */
+export interface DayState {
+  locked: boolean
+  /** The limit could not be checked lately: orders go unchecked meanwhile. */
+  unchecked?: boolean
+  /** For how many more seconds the banner says so (seconds, not a time: phone clocks drift). */
+  unchecked_left_s?: number | null
+  /** When that ends, by this phone's clock (ms): set as the state is read. */
+  unchecked_until?: number | null
+}
+
 /** The banner's read: no broker call behind it. */
 export interface RiskState {
   stage: RiskStage
   kill_switch: KillSwitchState
-  /** Each pipe the guard covers: whether the daily loss limit has locked it today. */
-  daily?: Partial<Record<RiskPipe, { locked: boolean }>>
+  /** Each pipe the guard covers: whether the daily loss limit has locked it today, and whether
+   * it could not be checked just now (positions unreadable), until when the banner says so. */
+  daily?: Partial<Record<RiskPipe, DayState>>
 }
 
 /** The daily loss card's figures for one pipe (M5.14). */

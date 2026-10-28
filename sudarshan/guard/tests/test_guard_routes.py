@@ -293,7 +293,7 @@ def test_the_banner_s_read_carries_the_switch_and_reads_no_broker(world, monkeyp
     assert data == {
         "stage": "sandbox",
         "kill_switch": killswitch.public_state(KillSwitchState()),
-        "daily": {"sandbox": {"locked": False}},
+        "daily": {"sandbox": {"locked": False, "unchecked": False, "unchecked_left_s": None}},
     }
     gate.GATE.set_state(KillSwitchState(on=True, since=utcnow(), surface="telegram"))
     data = _owner_call(client, "get", "/sudarshan/risk/state").get_json()["data"]
@@ -318,11 +318,26 @@ def _lock_today(pipe: str, figure: float, limit: float, monkeypatch) -> None:
 def test_the_banner_s_read_says_which_covered_book_the_day_has_locked(world, monkeypatch):
     client, account, store = world
     store.lock_day("sandbox", _today(), -4100.0, 4000.0)  # before a restart: read at first use
+    quiet = {"unchecked": False, "unchecked_left_s": None}
     data = _owner_call(client, "get", "/sudarshan/risk/state").get_json()["data"]
-    assert data["daily"] == {"sandbox": {"locked": True}}  # "sandbox": Live is not covered
+    assert data["daily"] == {"sandbox": {"locked": True, **quiet}}  # Live is not covered
     monkeypatch.setenv(flag.ENV, "on")
     data = _owner_call(client, "get", "/sudarshan/risk/state").get_json()["data"]
-    assert data["daily"] == {"live": {"locked": False}, "sandbox": {"locked": True}}
+    assert data["daily"] == {
+        "live": {"locked": False, **quiet},
+        "sandbox": {"locked": True, **quiet},
+    }
+
+
+def test_the_banner_s_read_says_how_long_the_daily_limit_is_not_being_checked(world):
+    """Limits review M7: while the limit cannot be checked the banner says so, for a minute."""
+    client, account, store = world
+    with gate.GATE._lock:
+        gate.GATE._mark_unchecked("sandbox", gate.time.monotonic())
+    data = _owner_call(client, "get", "/sudarshan/risk/state").get_json()["data"]
+    day = data["daily"]["sandbox"]
+    assert day["unchecked"] is True and day["locked"] is False
+    assert 50 <= day["unchecked_left_s"] <= gate.UNCHECKED_SHOWN_S
 
 
 def test_status_shows_today_s_figure_the_limit_and_the_lock(world, monkeypatch):

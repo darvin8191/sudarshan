@@ -190,6 +190,50 @@ describe("the daily loss limit's lock", () => {
   })
 })
 
+describe('the daily loss limit, not being checked', () => {
+  const UNCHECKED = { live: { locked: false, unchecked: true, unchecked_left_s: 30 } }
+
+  it('is said in words and a warning sign while the owner trades, for as long as the server says', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const fetch = serve(
+        { status: 200, body: { data: { stage: 'on', kill_switch: OFF, daily: {} } } },
+        { status: 200, body: { data: { stage: 'on', kill_switch: OFF, daily: UNCHECKED } } }
+      )
+      renderShell()
+      await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1))
+      expect(screen.queryByTestId('risk-banner')).toBeNull()
+      act(() => emit('sudarshan_risk_day', { pipe: 'live', unchecked: true }))
+      const banner = await screen.findByTestId('risk-banner')
+      expect(banner).toHaveTextContent(
+        'Daily loss limit not being checked · positions cannot be read · orders go meanwhile'
+      )
+      expect(banner.querySelector('svg')).toHaveAttribute('aria-hidden', 'true')
+      expect(screen.getByTestId('risk-chip')).toHaveTextContent('Limit not checked')
+      act(() => vi.advanceTimersByTime(31_000))
+      await waitFor(() => expect(screen.queryByTestId('risk-banner')).toBeNull())
+      expect(screen.queryByTestId('risk-chip')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("gives way to the day's lock and to the kill switch", async () => {
+    serve({
+      status: 200,
+      body: {
+        data: {
+          stage: 'on',
+          kill_switch: OFF,
+          daily: { live: { locked: true, unchecked: true, unchecked_left_s: 30 } },
+        },
+      },
+    })
+    renderShell()
+    expect(await screen.findByTestId('risk-banner')).toHaveTextContent('Daily loss limit reached')
+  })
+})
+
 describe('the D look', () => {
   const RISK = join(process.cwd(), 'src', 'sudarshan', 'risk')
 

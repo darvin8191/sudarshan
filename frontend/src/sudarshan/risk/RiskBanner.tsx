@@ -1,15 +1,43 @@
-import { Lock, OctagonX } from 'lucide-react'
+import { Lock, OctagonX, TriangleAlert } from 'lucide-react'
+import { useEffect, useReducer } from 'react'
 import { Link } from 'react-router'
 import { useSocketContext } from '@/components/socket/SocketProvider'
 import { cn } from '@/lib/utils'
 import { useThemeStore } from '@/stores/themeStore'
-import { dayLocked, killSwitchOn, useKillSwitch, useKillSwitchSync } from './killSwitch'
+import {
+  dayLocked,
+  dayUncheckedUntil,
+  killSwitchOn,
+  useKillSwitch,
+  useKillSwitchSync,
+} from './killSwitch'
 
 /** Which book's lock a page shows: Analyze mode's orders go to the sandbox. */
 function useDayLocked(): boolean {
   const state = useKillSwitch()
   const analyzer = useThemeStore((store) => store.appMode === 'analyzer')
   return !killSwitchOn(state) && dayLocked(state, analyzer)
+}
+
+/**
+ * Whether the daily loss limit is not being checked just now in the book the page shows (its
+ * positions could not be read, so orders go unchecked). The line goes when the server's minute
+ * is up: a timer for the words only, nothing is read.
+ */
+function useDayUnchecked(): boolean {
+  const state = useKillSwitch()
+  const analyzer = useThemeStore((store) => store.appMode === 'analyzer')
+  const until = dayUncheckedUntil(state, analyzer)
+  const [, render] = useReducer((count: number) => count + 1, 0)
+  useEffect(() => {
+    if (until === null) return
+    const left = until - Date.now()
+    if (left <= 0) return
+    const timer = setTimeout(render, left + 50)
+    return () => clearTimeout(timer)
+  }, [until])
+  if (killSwitchOn(state) || dayLocked(state, analyzer)) return false
+  return until !== null && until > Date.now()
 }
 
 /**
@@ -20,7 +48,8 @@ function useDayLocked(): boolean {
  *
  * When the daily loss limit has locked the day in the book the page trades (M5.14), the same
  * banner says that instead, with a lock on the attention tint; the kill switch, when both hold,
- * is the one said.
+ * is the one said. While the limit cannot be checked (positions unreadable, so orders go
+ * unchecked), it says that, with a warning sign, for as long as the server does.
  *
  * It also keeps the app-wide copy of the switch in step (useKillSwitchSync), so the chip in the
  * account controls and every page read the same state.
@@ -30,6 +59,7 @@ export function RiskBanner() {
   useKillSwitchSync(socket)
   const state = useKillSwitch()
   const locked = useDayLocked()
+  const unchecked = useDayUnchecked()
   if (killSwitchOn(state)) {
     return (
       // <output> is a status region, so the switch going on is announced.
@@ -39,6 +69,19 @@ export function RiskBanner() {
           <span>
             Kill switch on <span aria-hidden="true">·</span> new orders refused{' '}
             <span aria-hidden="true">·</span> exits and cancels work
+          </span>
+        </Link>
+      </output>
+    )
+  }
+  if (unchecked) {
+    return (
+      <output className="block" data-testid="risk-banner">
+        <Link to="/risk" className="sd-risk-banner sd-risk-banner--day">
+          <TriangleAlert aria-hidden="true" className="size-4 shrink-0" />
+          <span>
+            Daily loss limit not being checked <span aria-hidden="true">·</span> positions cannot be
+            read <span aria-hidden="true">·</span> orders go meanwhile
           </span>
         </Link>
       </output>
@@ -66,18 +109,20 @@ export function RiskBanner() {
 export function RiskChip({ variant = 'navbar' }: { variant?: 'navbar' | 'toolbar' }) {
   const state = useKillSwitch()
   const locked = useDayLocked()
+  const unchecked = useDayUnchecked()
   const on = killSwitchOn(state)
-  if (!on && !locked) return null
+  if (!on && !locked && !unchecked) return null
   const toolbar = variant === 'toolbar'
-  const Icon = on ? OctagonX : Lock
+  const Icon = on ? OctagonX : locked ? Lock : TriangleAlert
+  const title = on
+    ? 'Kill switch on: new orders are refused'
+    : locked
+      ? 'Daily loss limit reached: new orders are refused until tomorrow'
+      : 'Daily loss limit not being checked: positions cannot be read'
   return (
     <span
       data-testid="risk-chip"
-      title={
-        on
-          ? 'Kill switch on: new orders are refused'
-          : 'Daily loss limit reached: new orders are refused until tomorrow'
-      }
+      title={title}
       className={cn(
         'sd-risk-chip inline-flex shrink-0 items-center gap-1.5 rounded-full border font-bold uppercase tracking-[0.06em]',
         !on && 'sd-risk-chip--day',
@@ -86,7 +131,7 @@ export function RiskChip({ variant = 'navbar' }: { variant?: 'navbar' | 'toolbar
     >
       <Icon aria-hidden="true" className={toolbar ? 'size-3.5' : 'size-4'} />
       <span className={toolbar ? 'sr-only min-[1800px]:not-sr-only' : 'sr-only sm:not-sr-only'}>
-        {on ? 'Kill switch on' : 'Day locked'}
+        {on ? 'Kill switch on' : locked ? 'Day locked' : 'Limit not checked'}
       </span>
     </span>
   )
