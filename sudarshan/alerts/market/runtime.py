@@ -240,6 +240,7 @@ class MarketRuntime:
             jobs: list[asyncio.Task] = []
             try:
                 await self._resend_pending(now)
+                await self._restore_pauses(now)
                 await self._service_pause(now)
                 self.link = FeedLink(self.config.feed_zmq, self.config.feed_url, client)
                 self._set_state("running", f"{len(self.book.alerts())} alerts checking")
@@ -491,13 +492,17 @@ class MarketRuntime:
                 self._down_since = since if since is not None else now
         else:
             self._down_since = None
-        inside = self._inside(now)
+        watched = self._watched()
+        inside = self._inside(now, watched)
         if self._down_since is not None and inside and self._open is None:
-            start = max(self._down_since, min(s.start for s in self._sessions.values()))
-            self._open_pause(start, "feed")
+            start = max(self._down_since, min(s.start for s in watched))
+            if start < max(s.end for s in watched):  # it began before the session ended
+                self._open_pause(start, "feed")
         elif self._open is not None and (self._down_since is None or not inside):
-            ends = [s.end for s in self._sessions.values()]
-            self._close_pause(now if inside or not ends else min(now, max(ends)))
+            ends = [s.end for s in watched]
+            self._close_pause(
+                now if inside or not ends else max(self._open[1], min(now, max(ends)))
+            )
         if self._open is not None and not self._told_open:
             _, start, cause = self._open
             if words.tells_pause(start, now, len(self.book.alerts())):
@@ -519,8 +524,20 @@ class MarketRuntime:
         """Subscriptions live; a replay's health does not say so, and its ticks are all there is."""
         return health.live or (self.config.replay and health.state == "replay")
 
-    def _inside(self, now: int) -> bool:
-        return any(s.start <= now < s.end + ARRIVAL_GRACE_MS for s in self._sessions.values())
+    def _watched(self) -> list:
+        """The sessions market alerts check now: those of the segments their Active alerts are
+        in, a closing-auction stock's its own. A pause opens only inside one of them (review L3:
+        with only cash alerts, the F&O session's 15:40 end made a 15:35 outage a told pause)."""
+        auction = self.market.auction
+        classes = {
+            alert.segment + sessions.AUCTION if alert.key in auction else alert.segment
+            for alert in self.book.alerts()
+        }
+        return [session for key, session in self._sessions.items() if key in classes]
+
+    @staticmethod
+    def _inside(now: int, watched: list) -> bool:
+        return any(s.start <= now < s.end + ARRIVAL_GRACE_MS for s in watched)
 
     # ---- what the engine decided -------------------------------------------------------------
     def _handle(self, outcomes, now: int) -> None:
@@ -854,13 +871,32 @@ class MarketRuntime:
             self._to_seed.discard(alert_id)
 
     # ---- pauses ------------------------------------------------------------------------------
-    async def _service_pause(self, now: int) -> None:
-        """From the last moment market alerts were known checking to now (A7.f)."""
+    async def _restore_pauses(self, now: int) -> None:
+        """Today's pauses, as the Book needs them after a restart (A7.f, review M6): a candle
+        that held one is not judged at its close. A pause the previous run left open (it
+        stopped while the feed was down) ends at the last moment that run was known running,
+        market_seen, with its closing line; the service pause from there to now follows."""
         seen = await self._db(self.store.seen, OWNER)
-        if seen is None or now - seen <= GAP_S * 1000 or not self._sessions:
+        for pause_id, start, cause in await self._db(self.store.open_pauses, OWNER):
+            end = max(start, seen or start)
+            await self._db(self.store.close_pause, OWNER, pause_id, end)
+            log.info("a pause left open by the last run: %s to %s", _hms(start), _hms(end))
+            if words.tells_pause(start, end, len(self.book.alerts())):
+                self._tell_line(words.pause_ended(start, end, cause), now)
+        if self._sessions:
+            since = min(s.start for s in self._sessions.values())
+            self._pauses = list(await self._db(self.store.pauses, OWNER, since))
+            self._rebuild()
+
+    async def _service_pause(self, now: int) -> None:
+        """From the last moment market alerts were known running to now (A7.f), inside the
+        sessions their alerts are in."""
+        seen = await self._db(self.store.seen, OWNER)
+        watched = self._watched()
+        if seen is None or now - seen <= GAP_S * 1000 or not watched:
             return
-        start = max(seen, min(s.start for s in self._sessions.values()))
-        end = min(now, max(s.end for s in self._sessions.values()))
+        start = max(seen, min(s.start for s in watched))
+        end = min(now, max(s.end for s in watched))
         if end - start <= GAP_S * 1000:
             return
         pause_id = await self._db(self.store.open_pause, OWNER, start, "service")

@@ -606,6 +606,14 @@ class MarketStore:
             rows = conn.execute(query.order_by(p.started_at, p.id)).all()
         return tuple(Pause(row.started_at, row.ended_at, row.cause) for row in rows)
 
+    def open_pauses(self, principal: str) -> list[tuple[int, int, str]]:
+        """(row id, start, cause) of each pause never closed: a run that stopped inside it."""
+        self._who(principal)
+        p = pause_table.c
+        query = select(p.id, p.started_at, p.cause).where(p.ended_at.is_(None)).order_by(p.id)
+        with self._read() as conn:
+            return [(row.id, row.started_at, row.cause) for row in conn.execute(query)]
+
     def seen(self, principal: str) -> int | None:
         """The last moment market alerts were known to be checking (written every 10 s)."""
         self._who(principal)

@@ -460,3 +460,163 @@ def test_the_master_is_read_again_at_9_and_a_bad_read_keeps_the_list(alerts, mon
             rt._writer.shutdown()
 
     asyncio.run(scenario())
+
+
+async def heard(rt, feed, clock, seconds: int, step: int = 10) -> None:
+    """Time passing with the feed's health heard at each step."""
+    for _ in range(seconds // step):
+        clock.advance(step)
+        await wait_until(lambda: rt._health.heard_at == ms(clock()))
+
+
+def test_a_restart_inside_a_feed_pause_closes_it_and_keeps_the_days_pauses(
+    alerts, quick, monkeypatch
+):
+    """Review M6 (A7.f): the run that stops while the feed is down leaves its pause open; the
+    next one never read it, so the "paused since" line got no closing line, the pause stayed open
+    for ever, and the next fire spoke of 10:03 to 10:04 only."""
+
+    async def scenario():
+        clock = Clock(ist(2026, 10, 21, 10, 0))
+        async with FakeFeed(clock) as feed, FakeOpenAlgo() as notify:
+            settings = alerts(notify)
+            create(settings, clock(), frequency="every_time")
+            rt, task = await started(settings, feed, clock)
+            await trade(feed, clock, 99.95)
+            await wait_until(lambda: rt.stats["judged"] == 1)
+            feed.health |= {"state": "backoff", "subscriptions_live": False}
+            await wait_until(lambda: rt._open is not None)
+            await heard(rt, feed, clock, 180)  # three minutes down
+            await asyncio.sleep(0.2)
+
+            async def dies(self):  # the process dies: nothing is flushed or closed
+                self.link.close()
+
+            monkeypatch.setattr(MarketRuntime, "_shutdown", dies)
+            await stopped(rt, task)
+            monkeypatch.undo()
+            clock.advance(60)  # back up a minute later, the feed with it
+            feed.health |= {"state": "connected", "subscriptions_live": True}
+            rt, task = await started(settings, feed, clock)
+            assert [(p.start, p.end is not None) for p in rt.market.pauses][0] == (
+                ms(ist(2026, 10, 21, 10, 0, 1)), True)  # fmt: skip
+            await trade(feed, clock, 100.1, ltq=2)
+            await wait_until(lambda: "now ₹100.10" in "\n".join(notify.messages))
+            told = "\n".join(notify.messages)
+            await stopped(rt, task)
+        assert [p for p in record(settings, "pauses", 0) if p.end is None] == []
+        assert "Market alerts paused 10:00:01 to 10:03:01 IST: the price feed was" in told
+        assert "(seen after a pause in market alerts, 10:00 to 10:04)" in told
+
+    asyncio.run(scenario())
+
+
+def test_an_outage_after_the_sessions_its_alerts_are_in_is_no_pause(alerts, quick):
+    """Review L3: with only cash alerts, the F&O session (to 15:40) made a 15:31 outage a pause
+    told on Telegram; and outside every session (mutant R6) nothing is a pause."""
+
+    async def scenario():
+        clock = Clock(ist(2026, 10, 21, 15, 31))
+        async with FakeFeed(clock) as feed, FakeOpenAlgo() as notify:
+            settings = alerts(notify)
+            create(settings, clock())
+            rt, task = await started(settings, feed, clock)
+            feed.health |= {"state": "backoff", "subscriptions_live": False}
+            await heard(rt, feed, clock, 120)
+            clock.at = ist(2026, 10, 21, 18, 0)
+            await heard(rt, feed, clock, 120)
+            assert rt._open is None
+            await stopped(rt, task)
+        assert notify.messages == [] and record(settings, "pauses", 0) == ()
+
+    asyncio.run(scenario())
+
+
+def test_a_feed_down_before_the_session_is_a_pause_from_its_start(alerts, quick):
+    """Mutant R16: the pause starts when the session does, not when the feed went down."""
+
+    async def scenario():
+        clock = Clock(ist(2026, 10, 21, 9, 5))
+        async with FakeFeed(clock) as feed, FakeOpenAlgo() as notify:
+            settings = alerts(notify)
+            create(settings, clock())
+            feed.health |= {"state": "backoff", "subscriptions_live": False}
+            rt, task = await started(settings, feed, clock)
+            await heard(rt, feed, clock, 600)  # 09:15: the session opens, the feed still down
+            await wait_until(lambda: rt._open is not None)
+            assert rt._open[1] == ms(ist(2026, 10, 21, 9, 15))
+            await stopped(rt, task)
+
+    asyncio.run(scenario())
+
+
+def test_a_pause_lasts_until_the_feed_is_back_inside_the_arrival_grace(alerts, quick):
+    """Mutant R19: a trade made before the close may arrive up to 5 s after it, so a feed back
+    within that grace ends the pause when it came back, not at the close."""
+
+    async def scenario():
+        clock = Clock(ist(2026, 10, 21, 15, 28, 30))
+        async with FakeFeed(clock) as feed, FakeOpenAlgo() as notify:
+            settings = alerts(notify)
+            create(settings, clock())
+            rt, task = await started(settings, feed, clock)
+            feed.health |= {"state": "backoff", "subscriptions_live": False}
+            await wait_until(lambda: rt._open is not None)
+            await heard(rt, feed, clock, 90)  # 15:30:00
+            clock.advance(3)  # 15:30:03, inside the grace
+            feed.health |= {"state": "connected", "subscriptions_live": True}
+            await wait_until(lambda: rt._open is None)
+            await stopped(rt, task)
+        [pause] = record(settings, "pauses", 0)
+        assert pause.end == ms(ist(2026, 10, 21, 15, 30, 3))
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "health",
+    [
+        {"state": "backoff"},  # mutant R2: the feed's state ignored
+        {"subscriptions_live": False},  # mutant R3: its subscriptions ignored
+        "silent",  # mutant R1: overdue health taken as heard
+    ],
+    ids=["state", "subscriptions", "no health"],
+)
+def test_each_sign_of_a_feed_down_is_a_pause_on_its_own(alerts, quick, health):
+    async def scenario():
+        clock = Clock(ist(2026, 10, 21, 11, 0))
+        beat = 3600 if health == "silent" else 0.05
+        async with FakeFeed(clock, beat_s=beat) as feed, FakeOpenAlgo() as notify:
+            settings = alerts(notify)
+            create(settings, clock())
+            await feed.send_health()
+            rt, task = await started(settings, feed, clock)
+            if health == "silent":  # no health for longer than it may be overdue
+                clock.advance(13)
+            else:
+                feed.health |= health
+            await wait_until(lambda: rt._open is not None)
+            await stopped(rt, task)
+
+    asyncio.run(scenario())
+
+
+def test_a_pause_open_at_the_close_ends_at_the_close(alerts, quick):
+    """Mutant R6: outside the session nothing is a pause; one that runs past the close ends
+    there, though the feed is still down."""
+
+    async def scenario():
+        clock = Clock(ist(2026, 10, 21, 15, 29))
+        async with FakeFeed(clock) as feed, FakeOpenAlgo() as notify:
+            settings = alerts(notify)
+            create(settings, clock())
+            rt, task = await started(settings, feed, clock)
+            feed.health |= {"state": "backoff", "subscriptions_live": False}
+            await wait_until(lambda: rt._open is not None)
+            await heard(rt, feed, clock, 120)  # 15:31, still down
+            await wait_until(lambda: rt._open is None)
+            await stopped(rt, task)
+        [pause] = record(settings, "pauses", 0)
+        assert pause.end == ms(ist(2026, 10, 21, 15, 30))
+
+    asyncio.run(scenario())
