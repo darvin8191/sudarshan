@@ -558,6 +558,96 @@ describe('live prices on the cards', () => {
     expect(card(12).querySelector('[data-stale]')).not.toBeNull()
   })
 
+  it('follows only the instruments that need the bid, ask, open, high, low or VWAP on the Quote stream', async () => {
+    api.state.mockResolvedValue(
+      alertsState({
+        alerts: [
+          alertRow({ id: 1, symbol: 'SBIN' }),
+          alertRow({ id: 2, symbol: 'INFY' }),
+          alertRow({
+            id: 3,
+            symbol: 'TCS',
+            params: { op: 'crosses_below', level: '99.50', source: 'bid' },
+          }),
+        ],
+      })
+    )
+    renderPage()
+    await settle()
+
+    expect(feed.live().sort()).toEqual(['NSE:INFY:LTP', 'NSE:SBIN:LTP', 'NSE:TCS:Quote'])
+  })
+
+  it('follows nothing on the History tab, again on Active, and nothing once the page is left', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    renderPage()
+    await settle()
+    expect(feed.live()).toEqual(['NSE:SBIN:LTP'])
+
+    await user.click(screen.getByRole('tab', { name: 'History' }))
+    await settle()
+    expect(feed.live()).toEqual([])
+    await user.click(screen.getByRole('tab', { name: /Active/ }))
+    await settle()
+    expect(feed.live()).toEqual(['NSE:SBIN:LTP'])
+
+    back()
+    await settle()
+    expect(where()).toBe('/elsewhere')
+    expect(feed.live()).toEqual([])
+  })
+
+  it('follows nothing without an API key, and says why', async () => {
+    useAuthStore.setState({ apiKey: null })
+    renderPage()
+    await settle()
+
+    expect(feed.live()).toEqual([])
+    expect(screen.getByText('Prices and search need an API key.')).toBeInTheDocument()
+  })
+
+  it('follows the alert a link opens from another tab, so its sheet has a price', async () => {
+    api.state.mockResolvedValue(
+      alertsState({
+        alerts: [alertRow({ id: 12 }), alertRow({ id: 3, symbol: 'INFY', status: 'stopped' })],
+      })
+    )
+    renderPage(['/elsewhere', '/market-alerts?alert=3'])
+    await settle()
+    tick('INFY', 'NSE', { ltp: 1428.25 })
+
+    expect(feed.live().sort()).toEqual(['NSE:INFY:LTP', 'NSE:SBIN:LTP'])
+    expect(within(screen.getByRole('dialog')).getByText('₹1,428.25')).toBeInTheDocument()
+  })
+
+  it('keeps to 100 instruments with a form open, its own stream included', async () => {
+    const alerts: AlertRow[] = Array.from({ length: LIVE_CAP + 1 }, (_, index) =>
+      alertRow({ id: index + 1, symbol: `STOCK${index}` })
+    )
+    api.state.mockResolvedValue(alertsState({ alerts }))
+    const instruments = () =>
+      new Set(feed.live().map((key) => key.split(':').slice(0, 2).join(':'))).size
+    // The form for the 101st card, the one the cap leaves out of the tab.
+    renderPage(['/elsewhere', '/market-alerts?alert=1&sheet=edit'])
+    await settle()
+
+    expect(screen.getByRole('dialog', { name: 'Edit alert' })).toBeInTheDocument()
+    expect(feed.live()).toContain('NSE:STOCK0:LTP')
+    expect(instruments()).toBeLessThanOrEqual(LIVE_CAP)
+  })
+
+  it('keeps a place free for a new alert’s form', async () => {
+    const alerts: AlertRow[] = Array.from({ length: LIVE_CAP + 1 }, (_, index) =>
+      alertRow({ id: index + 1, symbol: `STOCK${index}` })
+    )
+    api.state.mockResolvedValue(alertsState({ alerts }))
+    renderPage(['/elsewhere', '/market-alerts?sheet=new'])
+    await settle()
+
+    expect(screen.getByRole('dialog', { name: 'New alert' })).toBeInTheDocument()
+    expect(feed.live()).toHaveLength(LIVE_CAP - 1)
+  })
+
   it('follows at most 100 instruments, and says so', async () => {
     const alerts: AlertRow[] = Array.from({ length: LIVE_CAP + 1 }, (_, index) =>
       alertRow({ id: index + 1, symbol: `STOCK${index}` })

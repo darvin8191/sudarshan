@@ -49,22 +49,43 @@ function tabsOf(alerts: AlertRow[]): Record<'active' | 'stopped', AlertRow[]> {
   return { active: [...active, ...paused], stopped }
 }
 
-/** The tab's instruments, each once, in card order, up to the cap. */
-function followedOf(rows: AlertRow[]): { list: Instrument[]; keys: Set<string>; capped: boolean } {
-  const keys = new Set<string>()
-  const list: Instrument[] = []
+interface Followed {
+  /** Instruments whose alerts need the bid, ask, open, high, low or VWAP: the Quote stream. */
+  quote: Instrument[]
+  /** The rest, on the lighter LTP stream. */
+  ltp: Instrument[]
+  keys: Set<string>
+  /** Some cards' instruments are left out, over the cap. */
+  capped: boolean
+}
+
+/**
+ * The instruments the page follows, each once, in the order given, up to `cap`; each on the
+ * Quote stream only when one of its alerts needs a figure the LTP stream does not carry.
+ */
+function followedOf(rows: AlertRow[], cap: number): Followed {
+  const byKey = new Map<string, { instrument: Instrument; quote: boolean }>()
   let capped = false
   for (const row of rows) {
     const key = keyOf(row.symbol, row.exchange)
-    if (keys.has(key)) continue
-    if (keys.size >= LIVE_CAP) {
+    const held = byKey.get(key)
+    if (held) {
+      held.quote ||= needsQuote(row)
+      continue
+    }
+    if (byKey.size >= cap) {
       capped = true
       continue
     }
-    keys.add(key)
-    list.push({ symbol: row.symbol, exchange: row.exchange })
+    byKey.set(key, {
+      instrument: { symbol: row.symbol, exchange: row.exchange },
+      quote: needsQuote(row),
+    })
   }
-  return { list, keys, capped }
+  const quote: Instrument[] = []
+  const ltp: Instrument[] = []
+  for (const each of byKey.values()) (each.quote ? quote : ltp).push(each.instrument)
+  return { quote, ltp, keys: new Set(byKey.keys()), capped }
 }
 
 export default function MarketAlerts() {
@@ -77,18 +98,34 @@ export default function MarketAlerts() {
   const alerts = state?.alerts ?? NO_ROWS
   const tabs = useMemo(() => tabsOf(alerts), [alerts])
   const rows = tab === 'history' ? NO_ROWS : tabs[tab]
-  const followed = useMemo(() => followedOf(rows), [rows])
-  const { lines, feed } = useFrameLines({
-    instruments: followed.list,
-    mode: rows.some(needsQuote) ? 'Quote' : 'LTP',
+  const shownId = overlay?.kind === 'alert' || overlay?.kind === 'edit' ? overlay.id : null
+  const selected = shownId === null ? null : (alerts.find((row) => row.id === shownId) ?? null)
+
+  // What the page follows (cross-design R4): the open sheet's alert first, which a link can open
+  // from another tab, then the tab's cards in order. 100 instruments in all: an open form follows
+  // its own instrument, so the page keeps one place free for it.
+  const formOpen = overlay?.kind === 'new' || overlay?.kind === 'edit'
+  const cap = formOpen ? LIVE_CAP - 1 : LIVE_CAP
+  const followed = useMemo(
+    () => followedOf(selected ? [selected, ...rows] : rows, cap),
+    [selected, rows, cap]
+  )
+  const quoted = useFrameLines({
+    instruments: followed.quote,
+    mode: 'Quote',
     enabled: apiKey !== null,
   })
+  const plain = useFrameLines({ instruments: followed.ltp, mode: 'LTP', enabled: apiKey !== null })
+  const lines = useMemo(
+    () => new Map([...plain.lines, ...quoted.lines]),
+    [plain.lines, quoted.lines]
+  )
+  // One manager behind both streams: one feed.
+  const feed = plain.feed
 
   // An overlay that cannot be shown (an alert deleted meanwhile, a new alert with market alerts
   // off) is closed once the alerts are known, rather than left open over nothing.
   const enabled = state?.enabled === true
-  const shownId = overlay?.kind === 'alert' || overlay?.kind === 'edit' ? overlay.id : null
-  const selected = shownId === null ? null : (alerts.find((row) => row.id === shownId) ?? null)
   const orphan =
     overlay !== null &&
     state !== undefined &&
@@ -115,7 +152,7 @@ export default function MarketAlerts() {
   const socketUp = useSocketUp()
   const deaf =
     socketUp === false ||
-    (followed.list.length > 0 && apiKey !== null && feed.epoch > 0 && !feed.connected)
+    (followed.keys.size > 0 && apiKey !== null && feed.epoch > 0 && !feed.connected)
 
   return (
     <div className="flex flex-col gap-2">
@@ -240,7 +277,7 @@ export default function MarketAlerts() {
         )}
         {followed.capped && (
           <p className="px-1 text-xs font-medium text-muted-foreground">
-            Prices follow the first {LIVE_CAP} instruments on this tab.
+            Prices follow the first {cap} instruments on this tab.
           </p>
         )}
       </section>
