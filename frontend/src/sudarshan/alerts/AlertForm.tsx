@@ -37,7 +37,7 @@ import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
 import { describe, isIndex } from '@/sudarshan/watchlist/rows'
 import { toast } from '@/utils/toast'
 import { PriceLine } from './AlertCard'
-import { NO_ANSWER_HOLD_MS } from './actions'
+import { NO_ANSWER_HOLD_MS, noteDropped } from './actions'
 import { BusyIcon, HELD } from './lines'
 import { ALERTS_PATH } from './marketAlerts'
 import { needsQuote, segmentOpen } from './measure'
@@ -583,6 +583,7 @@ export function AlertFormSheet({
       once.current = false
       if (isOpen.current) setSaving(null)
       if (found.code === 'gone' && row) {
+        noteDropped(row.id)
         client.setQueryData<MarketAlertsState>(STATE_KEY, (held) =>
           held ? dropRow(held, row.id) : held
         )

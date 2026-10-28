@@ -69,12 +69,18 @@ vi.mock('@/components/socket/SocketProvider', () => ({
   useSocketContext: () => ({ socket: sockets.current, playAlertSound: () => {} }),
 }))
 
-import { type AlertRow, AlertsError, type LineCode } from '@/api/marketAlerts'
+import {
+  type AlertRow,
+  AlertsError,
+  type LineCode,
+  type MarketAlertsState,
+} from '@/api/marketAlerts'
 import { createQueryClient } from '@/app/providers'
 import { useAuthStore } from '@/stores/authStore'
 import { NO_ANSWER_HOLD_MS, resetAlertActionsForTests } from '@/sudarshan/alerts/actions'
 import { LineText } from '@/sudarshan/alerts/lines'
 import { resetMarketAlertsForTests } from '@/sudarshan/alerts/marketAlerts'
+import { applyStatePush, STATE_KEY } from '@/sudarshan/alerts/stateCache'
 import { STALE_MS } from '@/sudarshan/dashboard/live'
 import { fakeClock, frames } from '@/test/frames'
 import { alertRow, alertsState, NOW, WATCHING } from '@/test/marketAlerts'
@@ -773,6 +779,8 @@ describe('an alert’s sheet', () => {
     await waitFor(() => expect(card(12)).toBeNull())
     expect(toasts.success).toHaveBeenCalledWith('Alert deleted. Its history stays.')
     await waitFor(() => expect(where()).toBe('/market-alerts'))
+    // Deleted here: said once, not again as a delete from elsewhere.
+    expect(toasts.info).not.toHaveBeenCalled()
   })
 
   it('shows a refusal’s sentence as it came, and reads the alerts again', async () => {
@@ -805,6 +813,7 @@ describe('an alert’s sheet', () => {
     expect(toasts.info).toHaveBeenCalledWith('This alert has been deleted.')
     await waitFor(() => expect(card(12)).toBeNull())
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(toasts.info).toHaveBeenCalledTimes(1)
   })
 
   it('holds a delete that got no answer, and reads the alerts again to see where it stands', async () => {
@@ -852,11 +861,80 @@ describe('an alert’s sheet', () => {
     ).toHaveLength(1)
   })
 
-  it('closes when the alert it names is not there', async () => {
+  it('closes when the alert it names is not there, and says so', async () => {
     renderPage(['/elsewhere', '/market-alerts?alert=99'])
     await settle()
     await waitFor(() => expect(where()).toBe('/market-alerts'))
     expect(screen.queryByRole('dialog')).toBeNull()
+    expect(toasts.info).toHaveBeenCalledWith('This alert was deleted.')
+  })
+
+  it('closes the sheet of an alert deleted on another screen, and says so', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    const client = renderPage()
+    await settle()
+    await user.click(card(12))
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+
+    // The state push for a delete made on another screen (contract 2.3).
+    act(() => {
+      const held = client.getQueryData<MarketAlertsState>(STATE_KEY)
+      if (!held) throw new Error('no state')
+      client.setQueryData(
+        STATE_KEY,
+        applyStatePush(held, { engine: held.engine, alerts: [], removed: [12], server_time: NOW })
+          .state
+      )
+    })
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(where()).toBe('/market-alerts')
+    expect(toasts.info).toHaveBeenCalledWith('This alert was deleted.')
+  })
+
+  it('closes the form of an alert deleted on another screen too, and says so', async () => {
+    const client = renderPage(['/elsewhere', '/market-alerts?alert=12&sheet=edit'])
+    await settle()
+    expect(screen.getByRole('dialog', { name: 'Edit alert' })).toBeInTheDocument()
+
+    act(() => {
+      const held = client.getQueryData<MarketAlertsState>(STATE_KEY)
+      if (!held) throw new Error('no state')
+      client.setQueryData(
+        STATE_KEY,
+        applyStatePush(held, { engine: held.engine, alerts: [], removed: [12], server_time: NOW })
+          .state
+      )
+    })
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(toasts.info).toHaveBeenCalledWith('This alert was deleted.')
+  })
+
+  it('says only the server’s sentence when an edit finds the alert already gone', async () => {
+    api.change.mockRejectedValue(refused('gone', 'This alert has been deleted.'))
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    renderPage(['/elsewhere', '/market-alerts?alert=12&sheet=edit'])
+    await settle()
+
+    await user.click(
+      within(screen.getByRole('dialog', { name: 'Edit alert' })).getByRole('button', {
+        name: 'Save',
+      })
+    )
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(toasts.info).toHaveBeenCalledTimes(1)
+    expect(toasts.info).toHaveBeenCalledWith('This alert has been deleted.')
+  })
+
+  it('closes with the close button the way Back does, so Back then leaves the page', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    renderPage()
+    await settle()
+    await user.click(card(12))
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(where()).toBe('/market-alerts'))
+
+    back()
+    expect(where()).toBe('/elsewhere')
   })
 })
 

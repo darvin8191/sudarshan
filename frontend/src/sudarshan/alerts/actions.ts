@@ -39,6 +39,23 @@ export const NO_ANSWER: Record<AlertAction, string> = {
     'No answer came for this delete: it may have gone through. Your alerts are read again to show whether it did.',
 }
 
+/** Alerts this app dropped itself (deleted here, or found gone): their sheets close in silence. */
+const dropped = new Set<number>()
+
+/** An alert this app has dropped from its list, deleted here or found gone. */
+export function noteDropped(id: number): void {
+  dropped.add(id)
+  if (dropped.size > 200) {
+    const oldest = dropped.values().next().value
+    if (oldest !== undefined) dropped.delete(oldest)
+  }
+}
+
+/** Whether this app dropped the alert itself; otherwise it went on another screen. */
+export function droppedHere(id: number): boolean {
+  return dropped.has(id)
+}
+
 let holds: ReadonlyMap<number, Held> = new Map()
 const listeners = new Set<() => void>()
 
@@ -89,6 +106,7 @@ export async function sendChange(
   try {
     if (action === 'delete') {
       await marketAlertsApi.remove(row.id)
+      noteDropped(row.id)
       update(client, (state) => dropRow(state, row.id))
       toast.success('Alert deleted. Its history stays.')
     } else {
@@ -108,6 +126,7 @@ export async function sendChange(
     }
     release(row.id)
     if (problem.code === 'gone') {
+      noteDropped(row.id)
       update(client, (state) => dropRow(state, row.id))
       toast.info(problem.message)
       return
@@ -119,7 +138,8 @@ export async function sendChange(
   }
 }
 
-/** Tests only: forget every hold. */
+/** Tests only: forget every hold, and every alert dropped. */
 export function resetAlertActionsForTests(): void {
+  dropped.clear()
   commit(new Map())
 }

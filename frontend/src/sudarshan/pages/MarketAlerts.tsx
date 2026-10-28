@@ -8,6 +8,7 @@ import { Link } from 'react-router'
 import type { AlertRow } from '@/api/marketAlerts'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
+import { droppedHere } from '@/sudarshan/alerts/actions'
 import { AlertCard } from '@/sudarshan/alerts/AlertCard'
 import { AlertFormSheet } from '@/sudarshan/alerts/AlertForm'
 import { AlertSheet } from '@/sudarshan/alerts/AlertSheet'
@@ -28,11 +29,15 @@ import {
 import { useNow } from '@/sudarshan/dashboard/hooks'
 import { keyOf } from '@/sudarshan/dashboard/live'
 import { type Instrument, useFrameLines } from '@/sudarshan/live/useFrameLines'
+import { toast } from '@/utils/toast'
 
 /** The most instruments the page follows tick by tick (cross-design R4). */
 export const LIVE_CAP = 100
 
 const NO_ROWS: AlertRow[] = []
+
+/** An alert whose sheet or form is open went on another screen. */
+const GONE = 'This alert was deleted.'
 
 const HEADER_BUTTON =
   'inline-flex min-h-12 items-center gap-1.5 rounded-[0.875rem] px-4 text-[0.9375rem] font-semibold outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50'
@@ -124,15 +129,18 @@ export default function MarketAlerts() {
   const feed = plain.feed
 
   // An overlay that cannot be shown (an alert deleted meanwhile, a new alert with market alerts
-  // off) is closed once the alerts are known, rather than left open over nothing.
+  // off) is closed once the alerts are known, rather than left open over nothing. An alert that
+  // went on another screen says so; one deleted here has said so already.
   const enabled = state?.enabled === true
   const orphan =
     overlay !== null &&
     state !== undefined &&
     (overlay.kind === 'new' ? !enabled : overlay.kind !== 'settings' && selected === null)
   useEffect(() => {
-    if (orphan) close()
-  }, [orphan, close])
+    if (!orphan) return
+    if (shownId !== null && !droppedHere(shownId)) toast.info(GONE)
+    close()
+  }, [orphan, close, shownId])
 
   const openAlert = useCallback((id: number) => open({ kind: 'alert', id }), [open])
   const editAlert = useCallback((id: number) => open({ kind: 'edit', id }), [open])
