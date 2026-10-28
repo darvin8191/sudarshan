@@ -1429,12 +1429,15 @@ def _hhmm(at: datetime | None) -> str:
 
 
 def _surface() -> str:
-    """Where the order came from: the request's path, or background work."""
+    """Where the order came from: the route's pattern, or background work. Never the path
+    itself: a webhook's token is in its path (/strategy/webhook/<token>, /flow/webhook/<token>),
+    and the audit is shown on the Risk page and kept 90 days."""
     try:
         from flask import has_request_context, request
 
         if has_request_context():
-            return request.path
+            rule = request.url_rule
+            return rule.rule if rule is not None else "request"
     except Exception:  # noqa: S110 - only a label for the audit
         pass
     return "background"

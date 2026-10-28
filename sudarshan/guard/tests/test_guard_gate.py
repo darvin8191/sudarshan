@@ -851,3 +851,23 @@ def test_the_last_problem_is_kept_for_the_status_route(the_gate, book, clock):
     assert problem["kind"] == "guard_unavailable"
     assert problem["words"] == words.book_unreadable("live", "10:42")
     assert problem["at"].endswith("+05:30")
+
+
+def test_the_audit_keeps_the_route_never_a_webhook_s_token(the_gate, book, risk_store):
+    """Gate review M2: /strategy/webhook/<token> and /flow/webhook/<token> carry their
+    credential in the path; the audit, shown on the Risk page, keeps the route's pattern."""
+    from flask import Flask
+
+    the_gate.set_state(ON)
+    app = Flask("webhooks")
+    app.add_url_rule(
+        "/strategy/webhook/<webhook_id>", "hook", lambda webhook_id: "", methods=["POST"]
+    )
+    with app.test_request_context("/strategy/webhook/SECRET-TOKEN-0123456789", method="POST"):
+        refused_message(broker().place(order("BUY"), "token"))
+    with app.test_request_context("/no/such/route/SECRET-TOKEN-2", method="POST"):
+        refused_message(broker().place(order("BUY", symbol=PE), "token"))
+    the_gate.flush_notes()
+    rows = risk_store.history()
+    assert sorted(row.surface for row in rows) == ["/strategy/webhook/<webhook_id>", "request"]
+    assert not any("SECRET" in str(row.__dict__) for row in rows)
