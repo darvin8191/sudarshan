@@ -998,10 +998,16 @@ exit 0
 
 FAKES = {
     "curl": FAKE_CURL,
-    # sudo runs the command as the caller; the whole line it was given is recorded first
+    # sudo runs the command as the caller; the whole line it was given is recorded first, and the
+    # user it was asked for is named to the command in FAKE_SUDO_USER (root when run without sudo:
+    # the variable is not set then), so a test can tell what was run on a user's behalf
     "sudo": (
-        'echo "$*" >> "${FAKE_WEB}/sudo"\n'
-        'while [[ $# -gt 0 && "$1" != "--" ]]; do shift; done\nshift\nexec "$@"'
+        'echo "${*//$\'\\n\'/ }" >> "${FAKE_WEB}/sudo"\n'
+        "who=root\n"
+        'while [[ $# -gt 0 && "$1" != "--" ]]; do\n'
+        '    if [[ "$1" == -u ]]; then who="$2"; shift; fi\n'
+        "    shift\n"
+        'done\nshift\nFAKE_SUDO_USER="${who}" exec "$@"'
     ),
     "git": 'if [[ " $* " == *" rev-parse "* ]]; then echo 0123456789abcdef0123456789abcdef01234567; fi',
     "systemctl": 'echo "$*" >> "${FAKE_WEB}/systemctl"\nif [[ "$1" == "is-active" ]]; then echo active; fi',

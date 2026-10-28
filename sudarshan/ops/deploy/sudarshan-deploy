@@ -34,6 +34,11 @@ esac
 source /etc/sudarshan/deploy.env
 STATE="/var/lib/sudarshan"; mkdir -p "${STATE}"
 exec 9> "${STATE}/deploy.lock"; flock -n 9 || { echo "another deploy is running"; exit 0; }
+# The nightly backup runs as the ring's user and opens this lock to wait for an install: a lock it cannot
+# open, or a folder it cannot walk into, is read as "no tool here" and lets the backup run in the middle
+# of an install. So both are made readable, on every run, whatever umask the unit has.
+chmod 644 "${STATE}/deploy.lock" 2>/dev/null || true
+chmod o+x "${STATE}" 2>/dev/null || true
 OWNER_REPO="${REPO#https://github.com/}"
 as_svc() { sudo -u "${SVC_USER}" -H -- "$@"; }
 RING_USER="sudarshan"   # the user every ring service runs as (unit_ok insists on it)
@@ -90,9 +95,12 @@ notice() {   # $1 = kind, $2 = event id, then fact=value words. An id already re
         args=(--arg v 1 --arg src deploy --arg kind "$1" --arg id "${id}" --arg at "${NOTICE_AT:-$(date +%s)}" --arg run "${NOTICE_RUN:-${id}}")
         shift 2
         for pair in "$@"; do args+=(--arg "${pair%%=*}" "${pair#*=}"); done
-        if [[ -f "${EVENTS}" ]] && grep -qF -- "\"id\":\"${id}\"" "${EVENTS}"; then exit 0; fi
+        # already recorded: a whole line (it ends in the closing brace) holds the id. A line cut off by a crash does not count
+        if [[ -f "${EVENTS}" ]] && grep -F -- "\"id\":\"${id}\"" "${EVENTS}" | grep -q '}$'; then exit 0; fi
         line="$(jq -cn "${args[@]}" '$ARGS.named')" && [[ -n "${line}" ]] || exit 0
         if [[ ! -e "${EVENTS}" ]]; then : > "${EVENTS}" && chmod 644 "${EVENTS}" || exit 0; fi
+        # a last line a crash left without its newline is ended first, or this record would be glued to it and lost
+        if [[ -s "${EVENTS}" && "$(tail -c 1 -- "${EVENTS}"; printf x)" != $'\nx' ]]; then printf '\n' >> "${EVENTS}" || exit 0; fi
         printf '%s\n' "${line}" >> "${EVENTS}" || exit 0
         chmod o+x "${STATE}"
         if (( $(wc -l < "${EVENTS}") > 400 )); then   # the newest 200 lines are kept
@@ -121,7 +129,9 @@ notice_catch_up() {   # the first run of a tool that records notices tells the i
 # the values the release sets. Root works on a private copy and moves the result into place, so a
 # symlink planted in APP_DIR or in the backup folder is never followed.
 ENV_FILE="${APP_DIR}/.env"
-FETCH_TIMEOUT=60   # seconds one list from GitHub may take
+FETCH_TIMEOUT=60        # seconds one list from GitHub may take
+DOWNLOAD_TIMEOUT=900    # seconds the release's frontend may take
+GIT_TIMEOUT=600         # seconds the fetch of the code may take
 release_file() {   # $1 = file in sudarshan/ops/deploy, $2 = tag, $3 = output. 0 = fetched whole, with a 200
                    # (an empty file is an empty list); 3 = the release has no such file (404: $3 is left
                    # empty); 1 = not fetched: no answer, an error, or a body cut off in transit (curl then
@@ -631,7 +641,7 @@ if [[ "${MODE}" != "check" ]]; then
     else log "WARNING: calendar: the day files could not be kept for the market gate, so this run leaves them alone"; fi
     notice_catch_up
 fi
-json="$(curl -fsSL -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${OWNER_REPO}/releases/latest" 2>/dev/null)" \
+json="$(curl -fsSL --max-time "${FETCH_TIMEOUT}" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${OWNER_REPO}/releases/latest" 2>/dev/null)" \
     || { [[ "${MODE}" == "check" ]] && echo "no GitHub Release found yet for ${OWNER_REPO} (or API unreachable)"; exit 0; }
 tag="$(jq -r '.tag_name // empty' <<< "${json}")"
 asset_url="$(jq -r --arg a "${ASSET}" '.assets[]? | select(.name==$a) | .browser_download_url' <<< "${json}" | head -1)"
@@ -654,14 +664,15 @@ fi
 if market_open && [[ ${FORCE} -eq 0 ]]; then notice waiting "deploy-wait-${tag}" tag="${tag}"; log "release ${tag} waiting for market close"; exit 0; fi
 [[ -n "${asset_url}" ]] || { log "release ${tag} has no ${ASSET} asset - not deploying"; exit 0; }
 sha_url="$(jq -r --arg a "${ASSET}.sha256" '.assets[]? | select(.name==$a) | .browser_download_url' <<< "${json}" | head -1)"
-ts="$(date +%Y%m%d-%H%M%S)"; bdir="/opt/sudarshan/backups/${ts}-${tag}"; mkdir -p "${bdir}"
+ts="$(date +%Y%m%d-%H%M%S)"; bdir="/opt/sudarshan/backups/${ts}-${tag}"; mkdir -p "${bdir}"; chmod 700 "${bdir}"
 NOTICE_RUN="${ts}-${tag}"
-exec > >(tee -a "${STATE}/deploy-${ts}.log") 2>&1
+exec 8>&1   # where the output went before: kept for on_signal
+exec > >(exec 9>&- 8>&-; tee -a "${STATE}/deploy-${ts}.log") 2>&1   # the writer must not hold the lock (it can outlive this tool)
 log "== deploy ${deployed} -> ${tag}"
 tmp="$(mktemp -d)"; trap 'rm -rf "${tmp}"' EXIT
-curl -fsSL "${asset_url}" -o "${tmp}/${ASSET}"
+curl -fsSL --max-time "${DOWNLOAD_TIMEOUT}" "${asset_url}" -o "${tmp}/${ASSET}"
 if [[ -n "${sha_url}" ]]; then
-    want="$(curl -fsSL "${sha_url}" | awk '{print $1; exit}')"
+    want="$(curl -fsSL --max-time "${FETCH_TIMEOUT}" "${sha_url}" | awk '{print $1; exit}')"
     have="$(sha256sum "${tmp}/${ASSET}" | awk '{print $1}')"
     [[ -n "${want}" && "${want}" == "${have}" ]] || { log "checksum mismatch for ${ASSET} - not deploying"; exit 1; }
     log "checksum OK (${have:0:12}...)"
@@ -689,7 +700,7 @@ self_update() {
     local url="https://raw.githubusercontent.com/${OWNER_REPO}/${tag}/sudarshan/ops/deploy/sudarshan-deploy"
     local new="${tmp}/sudarshan-deploy.new" me
     me="$(readlink -f "$0")"
-    curl -fsSL "${url}" -o "${new}" 2>/dev/null || return 0      # this release carries no tool
+    curl -fsSL --max-time "${FETCH_TIMEOUT}" "${url}" -o "${new}" 2>/dev/null || return 0      # this release carries no tool
     cmp -s "${new}" "${me}" && return 0                            # already current
     if bash -n "${new}" 2>/dev/null && grep -q '^# sudarshan-deploy' "${new}"; then
         cp -a "${me}" "${me}.prev" 2>/dev/null || true
@@ -700,9 +711,9 @@ self_update() {
     fi
 }
 self_update
-as_svc git -C "${APP_DIR}" fetch --tags --quiet sudarshan
+as_svc timeout "${GIT_TIMEOUT}" git -C "${APP_DIR}" fetch --tags --quiet sudarshan
 as_svc git -C "${APP_DIR}" rev-parse -q --verify "refs/tags/${tag}^{commit}" > /dev/null || { log "tag ${tag} not found after fetch"; exit 1; }
-prev_ref="$(as_svc git -C "${APP_DIR}" rev-parse HEAD)"; echo "${prev_ref}" > "${bdir}/prev_ref"
+prev_ref="$(as_svc git -C "${APP_DIR}" rev-parse HEAD)"
 UV=(env UV_PYTHON_DOWNLOADS=never /usr/local/bin/uv pip install --quiet --python "${APP_DIR}/.venv/bin/python" -r "${APP_DIR}/requirements-nginx.txt")
 UNIT_DIR="/etc/systemd/system"; MANAGED="${STATE}/managed_units"
 managed_units() { [[ -f "${MANAGED}" ]] && grep -E '^sudarshan-[a-z0-9-]+\.(service|timer)$' "${MANAGED}" || true; }
@@ -724,6 +735,65 @@ unit_ok() {   # $1 = downloaded unit file, $2 = unit name; 0 = acceptable
     fi
     return 0
 }
+# ---- Databases, and files that live where their owner can write (review H1). A database sits in a folder
+# its own user owns: OpenAlgo's db/ folder, a ring service's state folder. That user can
+# plant a link or swap a name there at any moment, and a link that root follows is a write anywhere
+# (cp, chown and chmod as root on a planted <db>.restoring overwrote and re-owned any file, for
+# instance the settings root sources every ten minutes). So root never opens, copies, renames or
+# chowns anything by a path in such a folder. The owner's user does the work, through a pipe:
+#   db_copy_out USER DB COPY   USER runs SQLite's online backup of DB into a private temporary folder
+#                              beside it and streams the copy out; root writes the stream into COPY, a
+#                              new file in the backup folder, checks that it is a SQLite file and
+#                              renames it into place.
+#   db_copy_in USER COPY DB    root streams COPY (in the backup folder) in; USER writes it as a new
+#                              file beside DB, removes DB's old journal files and renames the new file
+#                              over DB. A rename replaces a link and follows none, so it ends at
+#                              the database, never at what a link led to.
+# The backup folder stays root's alone (mode 700): what root restores from cannot be changed.
+read -r -d '' DB_OUT_SCRIPT <<'SH' || true
+umask 077
+d="$(mktemp -d -p "$(dirname -- "$1")" .backup.XXXXXX)" || exit 1
+trap 'rm -rf -- "$d"' EXIT
+sqlite3 "$1" ".backup '$d/copy'" > /dev/null 2>&1 && cat -- "$d/copy"
+SH
+read -r -d '' DB_IN_SCRIPT <<'SH' || true
+umask 077
+dest="$1"; dir="$2"; name="$3"; shift 3
+t="$(mktemp -p "${dir}" ".${name}.XXXXXX")" || exit 1
+if cat > "${t}" && rm -f -- "$@" && mv -fT -- "${t}" "${dest}"; then exit 0; fi
+rm -f -- "${t}"
+exit 1
+SH
+db_copy_out() {   # $1 = the database's user, $2 = the database, $3 = the copy to make. 0 = made
+    local part="$3.partial"
+    rm -f -- "${part}"
+    # shellcheck disable=SC2024  # the redirect is root's on purpose: the stream lands in the backup folder
+    if sudo -u "$1" -H -- sh -c "${DB_OUT_SCRIPT}" _ "$2" < /dev/null > "${part}" \
+            && [[ "$(head -c 15 -- "${part}")" == "SQLite format 3" ]] && mv -fT -- "${part}" "$3"; then
+        return 0
+    fi
+    rm -f -- "${part}"; return 1
+}
+file_copy_out() {   # $1 = the file's user, $2 = the file, $3 = the copy to make (a file as it is, for DuckDB)
+    local part="$3.partial"
+    rm -f -- "${part}"
+    # shellcheck disable=SC2024  # the redirect is root's on purpose: the stream lands in the backup folder
+    if sudo -u "$1" -H -- cat -- "$2" < /dev/null > "${part}" && mv -fT -- "${part}" "$3"; then return 0; fi
+    rm -f -- "${part}"; return 1
+}
+file_copy_in() {   # $1 = the user, $2 = the copy, $3 = where it goes, then the files that must not meet it
+                   # (a database's journal files). 0 = put back
+    local user="$1" copy="$2" dest="$3"
+    shift 3
+    # shellcheck disable=SC2024  # root reads the copy from its own folder and feeds it in: the user never opens it
+    sudo -u "${user}" -H -- sh -c "${DB_IN_SCRIPT}" _ "${dest}" "${dest%/*}" "${dest##*/}" "$@" < "${copy}"
+}
+db_copy_in() { file_copy_in "$1" "$2" "$3" "$3-wal" "$3-shm" "$3-journal"; }   # a stale journal must never meet a restored database
+dist_put() {   # $1 = a tarball (root's) holding dist/: it replaces frontend/dist, written by the service user,
+               # because the folder is the service user's to plant links in
+    # shellcheck disable=SC2024  # root reads the tarball from its own folder and feeds it in
+    sudo -u "${SVC_USER}" -H -- sh -c 'rm -rf -- "$1/dist" && tar -xzf - -C "$1"' _ "${APP_DIR}/frontend" < "$1"
+}
 # ---- the ring services' databases (X8): each ${RING_VAR}/sudarshan-*/*.db is copied with SQLite's online
 # backup while the ring is stopped, into ${bdir}/ring/<folder>/<name>, never at the top of ${bdir}: the
 # rollback puts every top-level *.db there back into OpenAlgo's db/ folder. A rollback puts each copy back in its
@@ -744,7 +814,7 @@ ring_db_backup() {
                 name="$(basename "${f}")"
                 ring_name_ok "${folder}" "${name}" || { log "ring: ${folder}/${name}: unusual name - not backed up"; continue; }
                 dest="${bdir}/ring/${folder}/${name}"
-                if mkdir -p "${bdir}/ring/${folder}" && rm -f "${dest}" && sqlite3 "${f}" ".backup '${dest}'" > /dev/null 2>&1 && [[ -f "${dest}" ]]; then
+                if mkdir -p "${bdir}/ring/${folder}" && rm -f "${dest}" && db_copy_out "${RING_USER}" "${f}" "${dest}"; then
                     log "ring: backed up ${folder}/${name}"
                 else
                     rm -f "${dest}"; log "WARNING: ring: could not back up ${folder}/${name} - a rollback leaves it as it is"
@@ -763,12 +833,9 @@ ring_db_restore() {
             ring_name_ok "${folder}" "${name}" || continue
             dir="${RING_VAR}/${folder}"; dest="${dir}/${name}"
             [[ -d "${dir}" && ! -L "${dir}" ]] || { log "ring: ${folder} is gone - ${name} not put back"; continue; }
-            # the copy is made and checked first, so a failure leaves the database and its journal as they were
-            if cp "${f}" "${dest}.restoring" && chown "${RING_USER}:${RING_USER}" "${dest}.restoring" && chmod 600 "${dest}.restoring"; then
-                rm -f "${dest}-wal" "${dest}-shm" "${dest}-journal"   # a stale journal must never meet a restored database
-                if mv -f "${dest}.restoring" "${dest}"; then log "ring: put back ${folder}/${name}"; continue; fi
-            fi
-            rm -f "${dest}.restoring"; log "WARNING: ring: could not put back ${folder}/${name}"
+            # the copy is written whole beside the database first, so a failure leaves the database and its journal as they were
+            if db_copy_in "${RING_USER}" "${f}" "${dest}"; then log "ring: put back ${folder}/${name}"
+            else log "WARNING: ring: could not put back ${folder}/${name}"; fi
         done
     ) || true
 }
@@ -794,19 +861,20 @@ ring_status() {   # $1 = a ring service (sudarshan-<service>.service): before it
 }
 rollback() {
     trap - ERR; set +e
+    trap '' TERM INT HUP   # a second signal does not cut the rollback short
     log "!! rolling back to ${prev_ref}"
     systemctl stop "${SERVICE}"
     as_svc git -C "${APP_DIR}" checkout -f --detach "${prev_ref}"
     as_svc "${UV[@]}" || log "WARNING: re-installing the previous Python packages failed"
-    rm -rf "${APP_DIR}/frontend/dist"; tar -xzf "${bdir}/frontend-dist-prev.tar.gz" -C "${APP_DIR}/frontend"
+    dist_put "${bdir}/frontend-dist-prev.tar.gz" || log "WARNING: the previous frontend could not be put back"
     for b in "${bdir}"/*.db; do
         [[ -f "${b}" ]] || continue
         n="$(basename "${b}")"
-        rm -f "${APP_DIR}/db/${n}-wal" "${APP_DIR}/db/${n}-shm"   # stale WAL must never meet a restored DB
-        cp -a "${b}" "${APP_DIR}/db/${n}"
+        db_copy_in "${SVC_USER}" "${b}" "${APP_DIR}/db/${n}" || log "WARNING: ${n} could not be put back"
     done
     if [[ -f "${bdir}/historify.duckdb" ]]; then
-        rm -f "${APP_DIR}/db/historify.duckdb.wal"; cp -a "${bdir}/historify.duckdb" "${APP_DIR}/db/"
+        file_copy_in "${SVC_USER}" "${bdir}/historify.duckdb" "${APP_DIR}/db/historify.duckdb" "${APP_DIR}/db/historify.duckdb.wal" \
+            || log "WARNING: historify.duckdb could not be put back"
     fi
     # .env goes back with the databases: a start may have rewritten it (OpenAlgo saves FERNET_SALT)
     env_restore "${tmp}/env" "${ENV_FILE}" || log "WARNING: could not put the previous ${ENV_FILE} back"
@@ -844,18 +912,32 @@ log "stopping ${SERVICE} for the update"
 for u in $(ring_services); do systemctl stop "${u}" || true; done   # same code tree, so same window
 systemctl stop "${SERVICE}"
 trap 'log "unexpected error at line ${LINENO}"; rollback; exit 1' ERR
-# ---- backups (SQLite online backup API, DuckDB copy while stopped, previous dist, previous ref)
+on_signal() {   # a stop by the system, ^C or a hangup in the middle of an install is a failure like any other
+    trap '' TERM INT HUP PIPE
+    # the log writer was stopped with us, and its pipe with it: a new one, to the same two places
+    exec > >(exec 9>&-; exec tee -a "${STATE}/deploy-${ts}.log" >&8 8>&-) 2>&1
+    log "stopped by a signal"
+    ROLLBACK_WHY="error"; rollback; exit 1
+}
+trap on_signal TERM INT HUP
+# ---- backups (SQLite online backup API, DuckDB copy while stopped, previous dist, previous ref). Each
+# database is copied by the user who owns it (db_copy_out), and the folder stays root's alone, mode 700:
+# nobody who can write OpenAlgo's folders can change what a rollback restores from. Nothing in it is
+# readable by others, not even for a moment (umask 077).
+old_umask="$(umask)"; umask 077
+echo "${prev_ref}" > "${bdir}/prev_ref"
 for db in "${APP_DIR}"/db/*.db; do
-    if [[ -f "${db}" ]]; then sqlite3 "${db}" ".backup '${bdir}/$(basename "${db}")'"; fi
+    if [[ -f "${db}" ]]; then db_copy_out "${SVC_USER}" "${db}" "${bdir}/$(basename "${db}")"; fi
 done
-if [[ -f "${APP_DIR}/db/historify.duckdb" ]]; then cp -a "${APP_DIR}/db/historify.duckdb" "${bdir}/"; fi
+if [[ -f "${APP_DIR}/db/historify.duckdb" ]]; then file_copy_out "${SVC_USER}" "${APP_DIR}/db/historify.duckdb" "${bdir}/historify.duckdb"; fi
 ring_db_backup   # X8: the ring is stopped; its databases are copied under ${bdir}/ring, apart from db/
-tar -czf "${bdir}/frontend-dist-prev.tar.gz" -C "${APP_DIR}/frontend" dist
-chown -R "${SVC_USER}:${SVC_USER}" "${bdir}"; chmod -R go-rwx "${bdir}"
+tar -czf "${bdir}/frontend-dist-prev.tar.gz.partial" -C "${APP_DIR}/frontend" dist
+mv -f "${bdir}/frontend-dist-prev.tar.gz.partial" "${bdir}/frontend-dist-prev.tar.gz"
+chmod -R go-rwx "${bdir}"
+umask "${old_umask}"
 # ---- code + dist + deps + migrations
 as_svc git -C "${APP_DIR}" checkout -f --detach "refs/tags/${tag}"
-rm -rf "${APP_DIR}/frontend/dist"; tar -xzf "${tmp}/${ASSET}" -C "${APP_DIR}/frontend"
-chown -R "${SVC_USER}:${SVC_USER}" "${APP_DIR}/frontend/dist"
+dist_put "${tmp}/${ASSET}"
 as_svc "${UV[@]}"
 if [[ -f "${APP_DIR}/sudarshan/requirements.txt" ]]; then
     as_svc env UV_PYTHON_DOWNLOADS=never /usr/local/bin/uv pip install --quiet --python "${APP_DIR}/.venv/bin/python" -r "${APP_DIR}/sudarshan/requirements.txt"
@@ -874,9 +956,9 @@ if ! as_svc bash -c "cd '${APP_DIR}/upgrade' && '${APP_DIR}/.venv/bin/python' mi
 # ---- start + health (this is our own service; TRINETRA is never touched)
 systemctl start "${SERVICE}"
 ok=0; code=""
-for _ in $(seq 1 90); do sleep 2; code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:5000/ || true)"; [[ "${code}" == "200" || "${code}" == "302" ]] && { ok=1; break; }; done
+for _ in $(seq 1 90); do sleep 2; code="$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' http://127.0.0.1:5000/ || true)"; [[ "${code}" == "200" || "${code}" == "302" ]] && { ok=1; break; }; done
 if [[ ${ok} -eq 1 ]]; then
-    trap - ERR
+    trap - ERR TERM INT HUP
     echo "${tag}" > "${STATE}/deployed_tag"; log "deployed ${tag} OK (http ${code}); backup in ${bdir}"
     chmod 644 "${STATE}/deployed_tag" 2>/dev/null || true   # the ring's health shows the release (sudarshan/ops/release.py)
     notice installed "deploy-${NOTICE_RUN}-installed" tag="${tag}" was="${deployed}" \
@@ -891,12 +973,12 @@ fi
 # service is reported but never rolls back OpenAlgo (trading does not depend on them).
 ring_deploy() {
     local list n f names=() changed=0 old
-    list="$(curl -fsSL -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${OWNER_REPO}/contents/sudarshan/ops/systemd?ref=${tag}" 2>/dev/null)" || list='[]'
+    list="$(curl -fsSL --max-time "${FETCH_TIMEOUT}" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${OWNER_REPO}/contents/sudarshan/ops/systemd?ref=${tag}" 2>/dev/null)" || list='[]'
     mkdir -p "${tmp}/units"
     while IFS= read -r n; do
         [[ -n "${n}" ]] || continue
         f="${tmp}/units/${n}"
-        if ! curl -fsSL "https://raw.githubusercontent.com/${OWNER_REPO}/${tag}/sudarshan/ops/systemd/${n}" -o "${f}"; then log "ring: download of ${n} failed - skipped"; continue; fi
+        if ! curl -fsSL --max-time "${FETCH_TIMEOUT}" "https://raw.githubusercontent.com/${OWNER_REPO}/${tag}/sudarshan/ops/systemd/${n}" -o "${f}"; then log "ring: download of ${n} failed - skipped"; continue; fi
         if unit_ok "${f}" "${n}"; then names+=("${n}")
         else log "ring: ${n} REFUSED by the unit policy"; notice unit_refused "deploy-refused-${tag}-${n}" tag="${tag}" unit="${n}"; fi
     done < <(jq -r '.[]? | select(.type=="file") | .name | select(test("^sudarshan-[a-z0-9-]+\\.(service|timer)$"))' <<< "${list}")
@@ -928,5 +1010,14 @@ ring_deploy() {
     fi
 }
 ring_deploy || log "WARNING: ring service step failed - OpenAlgo itself is deployed"
-# keep the 10 newest backups
-{ ls -1dt /opt/sudarshan/backups/*/ 2>/dev/null | tail -n +11 | xargs -r rm -rf; } || true
+# keep the 10 newest backups: the folders this tool makes (<date>-<time>-<tag>), by their names, which
+# sort by time; whatever else is in the folder is not the tool's to remove
+prune_backups() {
+    local name n=0
+    while IFS= read -r -d '' name; do
+        n=$((n + 1))
+        if (( n > 10 )); then rm -rf -- "/opt/sudarshan/backups/${name}"; fi
+    done < <(find /opt/sudarshan/backups -mindepth 1 -maxdepth 1 -type d -regextype posix-extended \
+        -regex '.*/[0-9]{8}-[0-9]{6}-v[0-9]+\.[0-9]+\.[0-9]+' -printf '%f\0' | sort -z -r)
+}
+prune_backups || true

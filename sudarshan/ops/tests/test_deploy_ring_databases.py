@@ -20,13 +20,14 @@ from __future__ import annotations
 
 import json
 import os
+import pwd
 import shutil
 import sqlite3
 import stat
 from pathlib import Path
 
 import pytest
-from test_deploy_calendar import Box, _shim, whole_tool
+from test_deploy_calendar import FAKES, Box, _shim, whole_tool
 from test_deploy_notices import UNIT, install_box
 
 pytestmark = [
@@ -133,7 +134,7 @@ def test_the_ring_is_stopped_before_its_databases_are_copied(tmp_path):
     _shim(
         box.bin,
         "sqlite3",
-        '[[ "$*" == */ring/* ]] && cp "${FAKE_WEB}/systemctl" "${FAKE_WEB}/systemctl_at_copy"\n'
+        '[[ "$*" == *sudarshan-alerts* ]] && cp "${FAKE_WEB}/systemctl" "${FAKE_WEB}/systemctl_at_copy"\n'
         f'exec {real} "$@"',
     )
     done = box.run()
@@ -256,9 +257,16 @@ def test_a_rollback_puts_each_ring_database_back_in_its_own_folder(tmp_path):
     # the stale journal files are gone and nothing of the restore is left
     assert sorted(p.name for p in (box.ringvar / ALERTS).iterdir()) == ["alerts.db", "market.db"]
     assert sorted(p.name for p in (box.ringvar / PORTFOLIO).iterdir()) == ["portfolio.db"]
-    # the ring's user owns them (the fake chown only records it: that user is not on this machine)
-    asked = (box.web / "chown").read_text().splitlines()
-    assert f"sudarshan:sudarshan {box.ringvar / ALERTS / 'alerts.db'}.restoring" in asked
+    # the ring's user wrote them (the fake sudo only records it: that user is not on this machine),
+    # and root gave nothing to anybody
+    asked = (box.web / "sudo").read_text().splitlines()
+    mine = [
+        line
+        for line in asked
+        if str(box.ringvar / ALERTS / "alerts.db") in line and "mv -fT" in line
+    ]
+    assert len(mine) == 1 and mine[0].startswith("-u sudarshan -H -- sh -c ")
+    assert str(box.ringvar) not in (box.web / "chown").read_text()
 
 
 @whole_tool
@@ -365,19 +373,23 @@ def test_a_database_that_cannot_be_put_back_is_logged_and_the_rollback_finishes(
     box = ring_box(tmp_path)
     box.migrations = "1"
     migration_that(box, touch_the_ring(box, journal=False))
-    # the ring's user cannot be given the copy: nothing is replaced, and the rest of the rollback runs
+    # the ring's user cannot write the copy: nothing is replaced, and the rest of the rollback runs
     _shim(
         box.bin,
-        "chown",
-        'echo "$*" >> "${FAKE_WEB}/chown"\n'
-        'if [[ "$1" == sudarshan:sudarshan ]]; then exit 1; fi\nexit 0',
+        "sudo",
+        'if [[ " $* " == *" -u sudarshan "* && "$*" == *"mv -fT"* ]]; then exit 1; fi\n'
+        + FAKES["sudo"],
     )
     done = box.run()
     assert done.returncode == 1 and "rollback done" in done.stdout, done.stdout + done.stderr
     assert f"WARNING: ring: could not put back {ALERTS}/alerts.db" in done.stdout
     assert rows_of(box.ringvar / ALERTS / "alerts.db") == [1, 2, 3, 999]  # left as it was found
-    assert not list(box.ringvar.rglob("*.restoring"))
-    assert (box.ringvar / ALERTS / "alerts.db-wal").exists()  # and its journal files untouched
+    assert sorted(p.name for p in (box.ringvar / ALERTS).iterdir()) == [
+        "alerts.db",
+        "alerts.db-shm",
+        "alerts.db-wal",
+        "market.db",
+    ]  # no half-written copy beside them, and the journal files untouched
     assert rows_of(box.app / "db" / "openalgo.db") == [10, 11]  # OpenAlgo's own went back
 
 
@@ -391,6 +403,156 @@ def test_a_rollback_with_no_ring_state_is_the_rollback_it_was(tmp_path):
     assert done.returncode == 1 and "rollback done" in done.stdout, done.stdout + done.stderr
     assert rows_of(box.app / "db" / "openalgo.db") == [10, 11]
     assert "ring: put back" not in done.stdout and not (the_backup(box) / "ring").exists()
+
+
+# ---- nothing root writes goes through a path the ring can plant a link in (review H1) ---------
+
+
+def sentinel(tmp_path: Path) -> tuple[Path, tuple]:
+    """A file that stands for one only root may write (``/etc/sudarshan/deploy.env`` is sourced by
+    root every ten minutes), and what it looks like now."""
+    path = tmp_path / "root-file"
+    path.write_text("only root writes this\n")
+    path.chmod(0o640)
+    return path, as_found(path)
+
+
+def as_found(path: Path) -> tuple:
+    info = path.stat()
+    return path.read_bytes(), stat.S_IMODE(info.st_mode), info.st_uid, info.st_gid
+
+
+@whole_tool
+def test_a_link_planted_at_the_restore_name_is_never_written_through(tmp_path):
+    """The rollback used to run cp, chown and chmod as root on ``<db>.restoring``, a name inside
+    the ring's own folder: a link planted there made root overwrite the link's target with the
+    database and hand it to the ring's user. Proven on the tool as it was in v0.3.3."""
+    box = ring_box(tmp_path)
+    target, before = sentinel(tmp_path)
+    plant = f'ln -s "{target}" "{box.ringvar / ALERTS / "alerts.db.restoring"}"'
+    box.migrations = "1"  # the ring's user makes the install fail, and plants the link meanwhile
+    migration_that(box, touch_the_ring(box) + "\n" + plant)
+    done = box.run()
+    assert done.returncode == 1 and "rolling back" in done.stdout, done.stdout + done.stderr
+    assert as_found(target) == before  # untouched: content, mode and owner
+    assert rows_of(box.ringvar / ALERTS / "alerts.db") == [1, 2, 3]  # and the database is back
+    assert f"ring: put back {ALERTS}/alerts.db\n" in done.stdout
+
+
+@whole_tool
+def test_a_link_planted_before_the_install_is_just_as_harmless(tmp_path):
+    box = ring_box(tmp_path)
+    target, before = sentinel(tmp_path)
+    (box.ringvar / ALERTS / "alerts.db.restoring").symlink_to(target)  # planted days ago
+    box.migrations = "1"
+    migration_that(box, touch_the_ring(box))
+    done = box.run()
+    assert done.returncode == 1 and "rolling back" in done.stdout, done.stdout + done.stderr
+    assert as_found(target) == before
+    assert rows_of(box.ringvar / ALERTS / "alerts.db") == [1, 2, 3]
+
+
+@whole_tool
+def test_a_link_at_the_databases_own_name_is_replaced_and_leads_nowhere(tmp_path):
+    """``mv`` onto a link to a folder moves the file into the folder: the restore renames over the
+    link instead (``mv -T``), so the folder it led to gets nothing."""
+    box = ring_box(tmp_path)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    db = box.ringvar / ALERTS / "alerts.db"
+    box.migrations = "1"
+    migration_that(box, f'rm -f "{db}"\nln -s "{elsewhere}" "{db}"')
+    done = box.run()
+    assert done.returncode == 1 and "rolling back" in done.stdout, done.stdout + done.stderr
+    assert list(elsewhere.iterdir()) == []
+    assert not db.is_symlink() and rows_of(db) == [1, 2, 3]
+
+
+@whole_tool
+def test_a_link_planted_in_openalgos_db_folder_is_never_written_through(tmp_path):
+    """The same hole in the code that was there before the ring's databases: ``cp -a`` as root onto
+    ``db/openalgo.db``. Present in v0.3.2 and v0.3.3."""
+    box = ring_box(tmp_path)
+    target, before = sentinel(tmp_path)
+    db = box.app / "db" / "openalgo.db"
+    box.migrations = "1"
+    migration_that(box, f'rm -f "{db}"\nln -s "{target}" "{db}"')
+    done = box.run()
+    assert done.returncode == 1 and "rolling back" in done.stdout, done.stdout + done.stderr
+    assert as_found(target) == before
+    assert not db.is_symlink() and rows_of(db) == [10, 11]
+
+
+@whole_tool
+def test_a_link_in_place_of_the_history_database_is_replaced_not_followed(tmp_path):
+    box = ring_box(tmp_path)
+    duck = box.app / "db" / "historify.duckdb"
+    duck.write_bytes(b"market history")
+    target, before = sentinel(tmp_path)
+    box.migrations = "1"
+    migration_that(box, f'rm -f "{duck}"\nln -s "{target}" "{duck}"')
+    done = box.run()
+    assert done.returncode == 1 and "rolling back" in done.stdout, done.stdout + done.stderr
+    assert as_found(target) == before
+    assert not duck.is_symlink() and duck.read_bytes() == b"market history"
+
+
+@whole_tool
+def test_the_install_backup_stays_the_tools_own_and_is_never_handed_to_the_service_user(
+    tmp_path,
+):
+    """Whoever owns the copies a rollback restores from can change what root restores: the folder
+    was handed to the service user with ``chown -R`` once the copies were made."""
+    box = ring_box(tmp_path)
+    done = box.run()
+    assert done.returncode == 0, done.stdout + done.stderr
+    bdir = the_backup(box)
+    chowns = (box.web / "chown").read_text() if (box.web / "chown").exists() else ""
+    assert str(bdir) not in chowns
+    assert all(
+        stat.S_IMODE(p.stat().st_mode) & 0o077 == 0 and p.stat().st_uid == os.geteuid()
+        for p in [bdir, *bdir.rglob("*")]
+    )  # nobody else can read or change a copy, and the files are the tool's own
+
+
+@whole_tool
+def test_every_database_is_copied_and_put_back_as_the_user_who_owns_it(tmp_path):
+    """Root opens nothing by a path in a folder its owner can write: the owner's user runs SQLite's
+    backup, and the owner's user writes the restored file."""
+    box = ring_box(tmp_path)
+    real = shutil.which("sqlite3") or "sqlite3"
+    _shim(
+        box.bin,
+        "sqlite3",
+        f'echo "${{FAKE_SUDO_USER:-root}} $*" >> "${{FAKE_WEB}}/sqlite3"\nexec {real} "$@"',
+    )
+    box.migrations = "1"  # an install that is rolled back: every copy made is put back
+    done = box.run()
+    assert done.returncode == 1 and "rollback done" in done.stdout, done.stdout + done.stderr
+    me = pwd.getpwuid(os.geteuid()).pw_name  # the service user of the fake server
+    calls = (box.web / "sqlite3").read_text().splitlines()
+    ring = [c for c in calls if str(box.ringvar) in c]
+    openalgo = [c for c in calls if str(box.app / "db") in c]
+    assert len(ring) == 3 and all(c.startswith("sudarshan ") for c in ring)
+    assert len(openalgo) == 2 and all(c.startswith(f"{me} ") for c in openalgo)
+    asked = (box.web / "sudo").read_text().splitlines()
+    restores = [line for line in asked if "mv -fT" in line]
+    assert sorted(line.split(" -H ")[0] for line in restores) == sorted(
+        ["-u sudarshan"] * 3 + [f"-u {me}"] * 2
+    )  # three ring databases, two of OpenAlgo's
+    for folder, name in ((ALERTS, "alerts.db"), (ALERTS, "market.db"), (PORTFOLIO, "portfolio.db")):
+        assert sum(f"{box.ringvar / folder / name}" in line for line in restores) == 1
+
+
+@whole_tool
+def test_no_copy_or_temporary_file_is_left_beside_a_database(tmp_path):
+    box = ring_box(tmp_path)
+    box.migrations = "1"
+    done = box.run()
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert sorted(p.name for p in (box.ringvar / ALERTS).iterdir()) == ["alerts.db", "market.db"]
+    assert sorted(p.name for p in (box.app / "db").iterdir()) == ["market.db", "openalgo.db"]
+    assert not list(the_backup(box).rglob("*.partial"))
 
 
 # ---- the migration status before a ring service starts ----------------------------------------
@@ -433,7 +595,7 @@ def status_box(tmp_path: Path) -> Box:
         '    exit "$(cat "${FAKE_WEB}/status_rc" 2>/dev/null || echo 0)"\n'
         'fi\nexit "${FAKE_MIGRATIONS}"',
     )
-    _shim(box.bin, "timeout", 'echo "$1" >> "${FAKE_WEB}/timeout"\nshift\nexec "$@"')
+    _shim(box.bin, "timeout", 'echo "$*" >> "${FAKE_WEB}/timeout"\nshift\nexec "$@"')
     service = UNIT.format(user="sudarshan")
     names = ("sudarshan-alerts", "sudarshan-portfolio", "sudarshan-feed")
     serve_units(box, "v1.0.1", {f"{name}.service": service for name in names})
@@ -460,7 +622,12 @@ def test_each_services_migration_status_is_logged_before_it_starts(tmp_path):
             "sudarshan.portfolio.migrate",
         )
     )  # as the tool's own code tree, from the app folder
-    assert set((box.web / "timeout").read_text().split()) == {"60"}  # none can hold the deploy up
+    limits = [  # every limit the tool set, with what it ran (the fetch of the code has its own)
+        line.split()[0]
+        for line in (box.web / "timeout").read_text().splitlines()
+        if "--status" in line
+    ]
+    assert limits == ["60"] * 3  # none can hold the deploy up
     # as the ring's own user, never as root: a migrate module is the release's code, not the tool's
     asked = (box.web / "sudo").read_text().splitlines()
     for module in (
