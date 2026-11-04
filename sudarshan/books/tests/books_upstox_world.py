@@ -183,6 +183,8 @@ class Broker:
                         "trigger_price": order.get("trigger", 0),
                         "price": 0,
                         "pending_quantity": order["qty"],
+                        "quantity": order.get("ordered", order["qty"]),
+                        "filled_quantity": order.get("filled", 0),
                         "order_timestamp": placed.strftime("%Y-%m-%d %H:%M:%S"),
                     }
                 )
@@ -207,7 +209,8 @@ class Broker:
                 delta = filled if side == "BUY" else -filled
                 self.fills.append((now, symbol, delta))
                 if filled < qty:  # the rest of this market order, still working
-                    rest = {"symbol": symbol, "side": side, "qty": qty - filled, "kind": "MARKET"}
+                    rest = {"symbol": symbol, "side": side, "qty": qty - filled, "kind": "MARKET",
+                            "ordered": qty, "filled": filled}  # fmt: skip
                     self.working.append({**rest, "at": time.time(), "id": oid})
         return FakeResponse(200, {"status": "success", "data": {"order_ids": [oid]}})
 

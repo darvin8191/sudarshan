@@ -506,6 +506,12 @@ def place_smartorder_api(data, auth):
                 busy = held.enter_context(exit_guard.one_exit("live", exchange, symbol, product))
 
             current_position = int(get_open_position(symbol, exchange, map_product_type(product), auth))
+            if position_size == 0:
+                # SUDARSHAN M5.13: an exit the kill switch cancelled after it part-filled: the
+                # positions book may not show that fill yet, so size from what is still held.
+                current_position = exit_guard.exit_sized(
+                    "live", exchange, symbol, product, current_position
+                )
             logger.debug(
                 f"Desired position size: {position_size}, Current position: {current_position}"
             )
@@ -861,6 +867,17 @@ def close_all_positions(current_api_key, auth):
                 unmatched += 1  # SUDARSHAN M6.9: not sent, so not squared off
                 continue
 
+            if symbol:
+                # SUDARSHAN M5.13: size from what a cancelled, part-filled exit left held.
+                quantity = abs(
+                    exit_guard.exit_sized(
+                        "live",
+                        position["exchange"],
+                        symbol,
+                        reverse_map_product_type(position["exchange"], position["product"]),
+                        int(position["quantity"]),
+                    )
+                )
             place_order_payload = {
                 "apikey": current_api_key,
                 "strategy": "Squareoff",

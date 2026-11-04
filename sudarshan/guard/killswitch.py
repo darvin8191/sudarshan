@@ -426,10 +426,20 @@ def _cancels_shown(owner: Owner, cancelled: list[str], seen: dict[str, dict]) ->
         time.sleep(CANCELS_POLL_S)
 
 
+def _count(value: object) -> int:
+    """A quantity from an order row, 0 when it is missing or not a number."""
+    try:
+        return max(int(float(value or 0)), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _forget_cancelled_exits(owner: Owner, ended: set[str], seen: dict[str, dict]) -> None:
     """A closing order the switch cancelled is no exit on its way: the exit guard's note that
     one was placed lately (sudarshan/books/exit_guard.py) is dropped for its position, or Exit
-    all would skip the position for an order that no longer exists."""
+    all would skip the position for an order that no longer exists. An order that part-filled
+    is dropped the same way, but the next exit is sized from what the order book says is still
+    held (the order's quantity less its fills), for the positions book may lag the fill."""
     from broker.upstox.mapping.transform_data import reverse_map_product_type
     from sudarshan.books import exit_guard
 
@@ -460,6 +470,16 @@ def _forget_cancelled_exits(owner: Owner, ended: set[str], seen: dict[str, dict]
                 symbol = order_api.get_symbol(position["instrument_token"], exchange)
                 if symbol:
                     product = reverse_map_product_type(exchange, position["product"])
+                    filled = _count(row.get("filled_quantity"))
+                    if filled:
+                        # Part of it filled, and the positions book may not show that yet: the
+                        # next exit is sized from what the order book says is still held.
+                        ordered = _count(row.get("quantity"))
+                        if ordered <= filled:
+                            continue  # filled whole (or not told): it stays an exit on its way
+                        exit_guard.exit_part_filled(
+                            "live", exchange, symbol, product, ordered - filled
+                        )
                     exit_guard.exit_cancelled("live", exchange, symbol, product)
 
 

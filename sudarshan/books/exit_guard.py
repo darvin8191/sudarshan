@@ -187,6 +187,11 @@ class ExitsInFlight:
         # Per book, the positions whose exit may have placed an order, and when (monotonic for
         # the age, epoch for the sentence); kept for EXIT_SHOWS_WITHIN_S only.
         self._placed: dict[str, dict[Position, tuple[float, float]]] = {}
+        # Per book, a position whose cancelled exit part-filled: the most it can still hold
+        # (the order's quantity less what the order book shows it filled), and when (monotonic).
+        # Upstox's positions book may not show that fill for a while, so a new exit is sized
+        # no larger than this; kept for EXIT_SHOWS_WITHIN_S only.
+        self._caps: dict[str, dict[Position, tuple[float, int]]] = {}
 
     def _since(self, book: str, position: Position, now: float) -> float | None:
         """When the position's latest exit began or was noted, if it is busy; under the lock."""
@@ -273,6 +278,7 @@ class ExitsInFlight:
         with self._lock:
             self._forget_old(book, now)
             self._placed.setdefault(book, {})[position] = (now, time.time())
+            self._caps.get(book, {}).pop(position, None)  # a newer exit: its own note rules
 
     def unplaced(self, book: str, position: Position) -> None:
         """Forget the note that an exit for ``position`` placed an order: that order was
@@ -283,6 +289,27 @@ class ExitsInFlight:
                 recent.pop(position, None)
                 if not recent:
                     del self._placed[book]
+
+    def part_filled(self, book: str, position: Position, still_held: int) -> None:
+        """The exit order for ``position`` was cancelled after it part-filled (M5.13): no exit
+        is on its way, but the positions book may still show the quantity from before the fill,
+        so the next exit is sized to no more than ``still_held`` for ``EXIT_SHOWS_WITHIN_S``."""
+        with self._lock:
+            self._caps.setdefault(book, {})[position] = (time.monotonic(), max(int(still_held), 0))
+
+    def capped(self, book: str, position: Position, shown: int) -> int:
+        """The quantity an exit of ``position`` should be sized from: ``shown`` (the positions
+        book's signed quantity), cut to what a part-filled, cancelled exit left held."""
+        now = time.monotonic()
+        with self._lock:
+            caps = self._caps.get(book, {})
+            noted = caps.get(position)
+            if noted is not None and now - noted[0] > EXIT_SHOWS_WITHIN_S:
+                del caps[position]
+                noted = None
+        if noted is None or abs(shown) <= noted[1]:
+            return shown
+        return noted[1] if shown > 0 else -noted[1]
 
     def placed_lately(self, book: str) -> set[Position]:
         """The positions whose exit may have placed an order in ``book`` in the last
@@ -345,6 +372,20 @@ def exit_cancelled(book: str, exchange: object, symbol: object, product: object)
     """The order an exit for this position placed was cancelled: it no longer counts as on its
     way (``EXITS.unplaced``)."""
     EXITS.unplaced(book, position_of(exchange, symbol, product))
+
+
+def exit_part_filled(
+    book: str, exchange: object, symbol: object, product: object, still_held: int
+) -> None:
+    """A cancelled exit order part-filled: the next exit is sized to at most ``still_held``
+    (``EXITS.part_filled``)."""
+    EXITS.part_filled(book, position_of(exchange, symbol, product), still_held)
+
+
+def exit_sized(book: str, exchange: object, symbol: object, product: object, shown: int) -> int:
+    """``shown``, the positions book's signed quantity, cut to what a part-filled, cancelled
+    exit left held (``EXITS.capped``)."""
+    return EXITS.capped(book, position_of(exchange, symbol, product), shown)
 
 
 def exit_all_held(book: str) -> bool:
