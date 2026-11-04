@@ -4,13 +4,13 @@
 # Connected only on trading days 08:45-16:00 IST (weekends and /etc/sudarshan/nse_holidays.txt are
 # closed, a day in /etc/sudarshan/nse_extra_trading_days.txt is open); idle otherwise.
 # Docs: sudarshan/alerts/README.md. Optional settings: /etc/sudarshan/alerts.env
-# (root:sudarshan 640); SUDARSHAN_ORDER_ALERTS=off there turns the alerts off (the service then
-# exits at once and stays stopped until the next restart).
+# (root:sudarshan 640); SUDARSHAN_ORDER_ALERTS=off there turns order alerts off; the service exits at once
+# (and stays stopped until the next restart) only when SUDARSHAN_MARKET_ALERTS is off too.
 # Market alerts (M10) run in the same process when SUDARSHAN_MARKET_ALERTS=on there (off by
 # default): ticks from sudarshan-feed on 127.0.0.1:5581/5580, the Alerts page's API on 5582.
 # Also tells the owner what the server did with a release (installed, rolled back, waiting) from the
 # files the deploy tool and the backup job record, at any hour: see "Server notices" in the README.
-# GET /health on 127.0.0.1:5582 (the market alerts' API listens there, always) says which release is
+# GET /health on 127.0.0.1:5582 (the market alerts' API listens there whenever OpenAlgo's pepper can be read) says which release is
 # installed and what the service is doing ("Health page" in the README); loopback only.
 # Installed, enabled and restarted by sudarshan-deploy from each release, like sudarshan-feed.
 

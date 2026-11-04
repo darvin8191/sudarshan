@@ -20,7 +20,7 @@ from pathlib import Path
 
 import httpx
 import pytest
-from bridge_app import OWNER, VIEWER, login_session, make_app, reset_users
+from bridge_app import OWNER, VIEWER, csrf_headers, login_session, make_app, reset_users
 
 import blueprints.sudarshan_alerts as bp_module
 from extensions import socketio
@@ -126,6 +126,54 @@ def test_the_push_needs_no_csrf_token_and_the_owner_routes_still_do(room):
     http, _, _ = client()
     assert http.post(PUSH, data=sealed([])).status_code == 200  # no X-CSRFToken: the seal is
     assert http.post("/sudarshan/alerts/api/test", json={}).status_code == 400  # CSRF
+
+
+# -- the room closes when the owner's session ends ---------------------------------------------
+
+
+def test_dropping_the_room_stops_a_joined_socket_and_is_safe_with_none(room):
+    app, client = room
+    http, owner, _ = client()
+    bp_module.drop_owner_room()
+    assert not owner.is_connected()
+    assert http.post(PUSH, data=sealed([{"event": ALERT_EVENT, "data": FIRE}])).get_json() == {
+        "status": "success", "screens": 0}  # fmt: skip
+    bp_module.drop_owner_room()  # no socket left, and no room at all: nothing happens
+
+
+def test_logout_closes_the_room_and_still_works_without_one(room, monkeypatch):
+    import blueprints.auth as auth_module
+    import database.auth_db as auth_db
+
+    monkeypatch.setattr(auth_module, "upsert_auth", lambda *a, **k: 1)
+    monkeypatch.setattr(auth_db, "clear_user_sessions", lambda *a, **k: None)
+    app, client = room
+    app.register_blueprint(auth_module.auth_bp)
+    http, joined, _ = client()
+    assert http.post("/auth/logout", headers=csrf_headers(http)).status_code == 200
+    assert not joined.is_connected()
+    after = app.test_client()
+    login_session(after, OWNER)
+    assert (
+        after.post("/auth/logout", headers=csrf_headers(after)).status_code == 200
+    )  # no socket in the room now
+
+
+def test_the_daily_revoke_closes_the_room(room, monkeypatch):
+    import database.auth_db as auth_db
+    from utils import session as session_utils
+
+    monkeypatch.setattr(auth_db, "upsert_auth", lambda *a, **k: 1)
+    monkeypatch.setattr(auth_db, "clear_user_sessions", lambda *a, **k: None)
+    monkeypatch.setattr(session_utils, "_has_fresher_session", lambda *a, **k: False)
+    app, client = room
+    http, joined, _ = client()
+    with app.test_request_context():
+        from flask import session
+
+        session["user"] = OWNER
+        session_utils.revoke_user_tokens(revoke_db_tokens=True)
+    assert not joined.is_connected()
 
 
 # -- under a real gunicorn worker -----------------------------------------------------------
