@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import signal
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -97,10 +98,20 @@ class Service:
         self.off_reason: str | None = None
         self._jobs = JOBS if jobs is None else jobs
         self._opener, self._closer, self._retry_s = opener, closer, port_retry_s
+        #: The clock the ops read (epoch milliseconds); a test sets its own.
+        self.clock: Callable[[], int] = lambda: int(time.time() * 1000)
+        self._parts: dict[str, Any] = {}
         self._state = "starting"
         self._tasks: dict[str, asyncio.Task] = {}
         self._stop = asyncio.Event()
         self._stop_reason = ""
+
+    def part(self, name: str, make: Callable[[Any], Any]) -> Any:
+        """The service object ``name`` (a Book, an Importer) built once for the open store."""
+        have = self._parts.get(name)
+        if have is None or have[0] is not self.store:
+            have = self._parts[name] = (self.store, make(self.store))
+        return have[1]
 
     # ---- what /health shows ---------------------------------------------------------------
     @property

@@ -46,6 +46,7 @@ from sudarshan.autologin.handoff import (
 
 from . import ops as ops_module
 from .core import kinds
+from .errors import ApiError
 
 log = logging.getLogger("sudarshan.portfolio")
 
@@ -82,20 +83,6 @@ WORDS = {
     "not_ready": "This part of the portfolio is not ready yet.",
     "size": "That is too large for the portfolio service. Send a smaller file.",
 }
-
-
-class ApiError(Exception):
-    """An answer other than success: HTTP status, a code the page acts on, the owner's words."""
-
-    def __init__(self, status: int, code: str, message: str, field: str | None = None):
-        super().__init__(message)
-        self.status, self.code, self.message, self.field = status, code, message, field
-
-    def body(self) -> dict[str, Any]:
-        body = {"status": "error", "code": self.code, "message": self.message}
-        if self.field is not None:
-            body["field"] = self.field
-        return body
 
 
 class Desk(Protocol):
