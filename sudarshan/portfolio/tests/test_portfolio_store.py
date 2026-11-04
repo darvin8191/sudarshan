@@ -408,3 +408,21 @@ def test_a_retried_create_is_found_by_its_request_id(made):
     assert "request_id" not in row and "principal" not in row
     with pytest.raises(StoreError):  # the unique index is the net under the check
         made.write(OWNER, lambda tx: tx.insert("tab", _tab("T"), NOW, request_id="r-1"))
+
+
+# ---- descriptors ---------------------------------------------------------------------------
+def test_opening_using_and_closing_leaks_no_descriptors(path):
+    def open_files() -> int:
+        return len(os.listdir("/proc/self/fd"))
+
+    PortfolioStore(path, now=NOW).close()  # warm: the thread, imports, the file itself
+    base = open_files()
+    for _ in range(15):
+        opened = PortfolioStore(path, now=NOW)
+        opened.write(OWNER, lambda tx: tx.rows("tab"))
+        opened.read(OWNER, lambda tx: tx.count("tab"))
+        opened.close()
+        migrate.file_version(path)
+    assert open_files() <= base + 1
+    store.stop()
+    assert not [t for t in threading.enumerate() if t.name.startswith(store.THREAD_PREFIX)]
