@@ -520,6 +520,15 @@ class Gate:
             send = self._sends.get(token)
             if send is not None and send.reducing is True:
                 return None
+        if send is not None and send.reducing is None and self._is_exit_by_last_read(token, send):
+            return None  # decision c: a lone exit always goes
+        with self._lock:
+            refusing = self._refusing()
+            if refusing is None:
+                return None
+            send = self._sends.get(token)
+            if send is not None and send.reducing is True:
+                return None
             since = "" if refusing.state is None else _hhmm(refusing.state.since)
             self._sends.pop(token, None)
             self._withdrawn[token] = time.monotonic()
@@ -531,6 +540,42 @@ class Gate:
             Decision(True, said, KILL_SWITCH_ACTIVE, detail={"reason": "waiting_to_be_sent"}),
         )
         return said
+
+    def _is_exit_by_last_read(self, token: int, send: Send) -> bool:
+        """A send let through without being judged (every limit was off), now waiting while the
+        switch is on: judged against the last positions read, from the book kept by the last
+        check or Upstox's own kept copy, never a new read while it waits. An exit goes; with no
+        book to judge it by, or an order that adds risk, it is withdrawn. A yes is recorded on
+        the send, so it counts as the exit it is."""
+        order = send.order
+        if order.pipe != LIVE or order.action != PLACE or order.cnc_sell:
+            return False
+        try:
+            rows = self._kept_rows(order.owner, DAY_BOOK_REUSE_S)
+            if rows is None:
+                rows = self._read.live_cached_rows(order.owner)
+            instrument = self._read.instrument_token(order.symbol, order.exchange)
+        except readers.Unreadable:
+            return False
+        if rows is None or instrument is None:
+            return False
+        position = rules.upstox_position(
+            rows, instrument, rules.position_product(LIVE, order.product)
+        )
+        with self._lock:
+            if self._sends.get(token) is not send:
+                return False
+            # only the sends already judged count: another waiting unjudged send is judged in
+            # its own turn, and the first judged to be an exit holds the position
+            others = [o for o in self._counted(order, position) if o.reducing is not None]
+            verdict = self._verdict(order, _Facts(position=position), sum(o.quantity for o in others))
+            if not verdict.reducing:
+                return False
+            send.reducing = True
+            send.position_then = verdict.position
+            if verdict.reason == rules.EXIT:
+                send.expect = rules.exit_expectation(verdict.position, verdict.claimed, send.quantity)
+            return True
 
     def sends(self) -> int:
         """How many sends count now (diagnostics and tests)."""
