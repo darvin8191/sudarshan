@@ -17,6 +17,7 @@ later parts read, and the pepper is returned by ``read_pepper`` and kept out of 
 | ``SUDARSHAN_PORTFOLIO_EOD_AFTER_MIN`` | ``15`` (minutes after the close; the record is at 15:55 on a normal day) |
 | ``SUDARSHAN_PORTFOLIO_SETTLE_AT`` | ``09:20`` (IST) |
 | ``SUDARSHAN_UPSTOX_TOKEN_FILE`` | ``/etc/sudarshan/upstox_analytics_token`` |
+| ``SUDARSHAN_NSE_HOLIDAYS_FILE`` / ``SUDARSHAN_NSE_EXTRA_DAYS_FILE`` | the calendar files the other services read |
 | ``SUDARSHAN_PORTFOLIO_LOG_LEVEL`` | ``INFO`` |
 """
 
@@ -31,6 +32,8 @@ from urllib.parse import urlsplit
 
 from dotenv import dotenv_values
 
+from sudarshan.alerts.config import sqlite_path
+from sudarshan.autologin.schedule import EXTRA_TRADING_DAYS_FILE, HOLIDAYS_FILE
 from sudarshan.ops.release import DEPLOYED_TAG_FILE
 from sudarshan.vault import VaultKeyError, pepper_from
 
@@ -145,6 +148,9 @@ class Settings:
     env_file: Path = REPO_ROOT / ".env"
     state_dir: Path = Path(STATE_DIR)
     deployed_tag_file: Path = DEPLOYED_TAG_FILE
+    openalgo_db: Path | None = None
+    holidays_file: Path = Path(HOLIDAYS_FILE)
+    extra_days_file: Path = Path(EXTRA_TRADING_DAYS_FILE)
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> Settings:
@@ -175,4 +181,7 @@ class Settings:
             env_file=Path(get("SUDARSHAN_OPENALGO_ENV_FILE") or app_dir / ".env"),
             state_dir=Path(state_dir.split(":")[0]),
             deployed_tag_file=Path(get("SUDARSHAN_DEPLOYED_TAG_FILE") or DEPLOYED_TAG_FILE),
+            openalgo_db=sqlite_path(get("DATABASE_URL") or "sqlite:///db/openalgo.db", app_dir),
+            holidays_file=Path(get("SUDARSHAN_NSE_HOLIDAYS_FILE") or HOLIDAYS_FILE),
+            extra_days_file=Path(get("SUDARSHAN_NSE_EXTRA_DAYS_FILE") or EXTRA_TRADING_DAYS_FILE),
         )
