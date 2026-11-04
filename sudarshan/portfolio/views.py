@@ -103,14 +103,8 @@ class Prices:
         return found
 
     def index_closes(self, tx: Tx) -> dict[str, list[tuple[int, int]]]:
-        t = tx._t("benchmark_close")
-        out: dict[str, list[tuple[int, int]]] = {name: [] for name in BENCHMARKS}
-        for key, day, close in tx.conn.execute(
-            select(t.c.index_key, t.c.day, t.c.close_u).order_by(t.c.day)
-        ):
-            if key in out:
-                out[key].append((day, close))
-        return out
+        found = tx.index_closes()
+        return {name: found.get(name, []) for name in BENCHMARKS}
 
     def last_session_day(self, today: int) -> int:
         """The latest trading day whose session has begun. Without the exchange's calendar, the
@@ -129,17 +123,7 @@ class Prices:
 
     def stamp(self, tx: Tx) -> tuple:
         """Changes whenever a price the history reads does."""
-        parts: list[Any] = []
-        for table in ("price_point", "price_eod"):
-            t = tx._t(table)
-            parts.append(
-                tx.conn.execute(
-                    select(func.count(), func.max(t.c.updated_at)).where(tx._mine(t))
-                ).one()
-            )
-        t = tx._t("benchmark_close")
-        parts.append(tx.conn.execute(select(func.count(), func.max(t.c.day))).one())
-        return tuple(tuple(p) for p in parts)
+        return tx.price_stamp()
 
 
 class SeriesCache:
@@ -421,22 +405,14 @@ class Views:
     # ---- state and summary ----------------------------------------------------------------------
     def state(self, scope: Scope, *, now: int, version: str) -> dict:
         def run(tx: Tx):
-            jobs = {}
-            t = tx._t("job_run")
-            for name, day, status, detail, at in tx.conn.execute(
-                select(t.c.name, t.c.day, t.c.status, t.c.detail, t.c.at).order_by(t.c.day, t.c.at)
-            ):
-                jobs[name] = {
-                    "name": name,
-                    "day": day,
-                    "status": status,
-                    "detail": detail,
-                    "at": at,
-                }
-            nav = tx.conn.execute(select(func.max(tx._t("mf_scheme").c.nav_date))).scalar()
+            jobs = {
+                r["name"]: {k: r[k] for k in ("name", "day", "status", "detail", "at")}
+                for r in tx.job_runs()
+            }
+            nav = tx.nav_day()
             return {
                 "service_version": version,
-                "schema_version": int(tx.conn.exec_driver_sql("PRAGMA user_version").scalar() or 0),
+                "schema_version": tx.user_version(),
                 "now": now,
                 "today": day_of_instant(now),
                 "tabs": [serialize.tab(r) for r in tx.rows("tab", "position,id")],

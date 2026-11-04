@@ -119,7 +119,7 @@ async def layout_set(ctx, message):
             if wanted is None
             else layout.clean_spec(wanted, tab["kind"])
         )
-        layout.save_layout(tx, tab, version, spec, now)
+        tx.layout_save(tab["id"], version, spec, now)
         return layout.layout_state(tx, tab)
 
     return await answer(lambda: book.store.write(OWNER, run))

@@ -5,8 +5,8 @@ the group; a saved view is a name plus filters, sort, group and columns. Both ar
 sends, so each is read here: a key we do not know is dropped, a value we cannot use is refused in a
 sentence. Nothing here knows the clock or a price.
 
-The store has no accessor for ``tab_layout`` (its key is the tab, not an id), so its two rows are
-read and written through the transaction's connection, scoped to the principal as every query is.
+The layout row is read and written through the store's ``Tx.layout_row`` and ``Tx.layout_save``
+(its key is the tab, not an id).
 """
 
 from __future__ import annotations
@@ -14,11 +14,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from sqlalchemy import insert, select, update
-
 from .core.filters import BadFilter, Filters
 from .core.kinds import GROUPS, HOLDING_COLUMNS, LAYOUT_VERSION, NAME_MAX, SORTS, WIDGETS
-from .store import Invalid, NotFound, Tx, VersionConflict
+from .store import Invalid, NotFound, Tx
 
 WORDS = {
     "spec": "The layout could not be read. Reload the page and change it again.",
@@ -106,17 +104,10 @@ def view_name(raw: Any) -> str:
     return raw.strip()
 
 
-# ---- the layout row (keyed by the tab) --------------------------------------------------------
-def layout_row(tx: Tx, tab_id: int) -> dict[str, Any] | None:
-    t = tx._t("tab_layout")
-    row = tx.conn.execute(select(t).where(t.c.tab_id == tab_id, tx._mine(t))).mappings().first()
-    return tx._out(row)
-
-
 def layout_state(tx: Tx, tab: Mapping[str, Any]) -> dict[str, Any]:
     """types.ts ``LayoutState``: the stored layout (version 0 when none was ever saved)."""
     defaults = defaults_for(tab["kind"])
-    row = layout_row(tx, tab["id"])
+    row = tx.layout_row(tab["id"])
     if row is None:
         return {"tab_id": tab["id"], "version": 0, "spec": defaults, "defaults": defaults}
     try:
@@ -124,30 +115,6 @@ def layout_state(tx: Tx, tab: Mapping[str, Any]) -> dict[str, Any]:
     except Invalid:  # a spec an older release wrote that no longer reads: the defaults
         spec = defaults
     return {"tab_id": tab["id"], "version": row["version"], "spec": spec, "defaults": defaults}
-
-
-def save_layout(tx: Tx, tab: Mapping[str, Any], version: int, spec: dict, now: int) -> None:
-    """Write the layout only from the version it was decided on (0: none saved yet)."""
-    t = tx._t("tab_layout")
-    row = layout_row(tx, tab["id"])
-    if row is None:
-        if version != 0:
-            raise VersionConflict("version_conflict_item")
-        values = tx._in({"spec": spec})
-        tx.conn.execute(
-            insert(t).values(
-                tab_id=tab["id"], principal=tx.who, created_at=now, updated_at=now, version=1,
-                **values,
-            )
-        )  # fmt: skip
-        return
-    done = tx.conn.execute(
-        update(t)
-        .where(t.c.tab_id == tab["id"], tx._mine(t), t.c.version == version)
-        .values(**tx._in({"spec": spec}), updated_at=now, version=version + 1)
-    ).rowcount
-    if not done:
-        raise VersionConflict("version_conflict_item")
 
 
 # ---- saved views --------------------------------------------------------------------------------

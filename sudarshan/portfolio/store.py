@@ -427,6 +427,71 @@ class Tx:
             )
         )
 
+    # ---- a tab's layout (keyed by the tab, not by an id) ----
+    def layout_row(self, tab_id: int) -> dict[str, Any] | None:
+        t = self._t("tab_layout")
+        row = self.conn.execute(select(t).where(t.c.tab_id == tab_id, self._mine(t))).mappings()
+        return self._out(row.first())
+
+    def layout_save(self, tab_id: int, version: int, spec: Mapping[str, Any], now: int) -> None:
+        """Write a layout only from the version it was decided on (0: none saved yet);
+        VersionConflict otherwise."""
+        t = self._t("tab_layout")
+        if self.layout_row(tab_id) is None:
+            if version != 0:
+                raise VersionConflict("version_conflict_item")
+            self.conn.execute(
+                insert(t).values(
+                    tab_id=tab_id, principal=self.who, created_at=now, updated_at=now, version=1,
+                    **self._in({"spec": spec}),
+                )
+            )  # fmt: skip
+            return
+        done = self.conn.execute(
+            update(t)
+            .where(t.c.tab_id == tab_id, self._mine(t), t.c.version == version)
+            .values(**self._in({"spec": spec}), updated_at=now, version=version + 1)
+        ).rowcount
+        if not done:
+            raise VersionConflict("version_conflict_item")
+
+    # ---- prices and the job log (readers; shared tables carry no principal) ----
+    def index_closes(self) -> dict[str, list[tuple[int, int]]]:
+        t = self._t("benchmark_close")
+        out: dict[str, list[tuple[int, int]]] = {}
+        for key, day, close in self.conn.execute(
+            select(t.c.index_key, t.c.day, t.c.close_u).order_by(t.c.day)
+        ):
+            out.setdefault(key, []).append((day, close))
+        return out
+
+    def price_stamp(self) -> tuple:
+        """Changes whenever a price a history reads does (counts and newest stamps)."""
+        parts: list[Any] = []
+        for table in ("price_point", "price_eod"):
+            t = self._t(table)
+            parts.append(
+                tuple(
+                    self.conn.execute(
+                        select(func.count(), func.max(t.c.updated_at)).where(self._mine(t))
+                    ).one()
+                )
+            )
+        t = self._t("benchmark_close")
+        parts.append(tuple(self.conn.execute(select(func.count(), func.max(t.c.day))).one()))
+        return tuple(parts)
+
+    def job_runs(self) -> list[dict[str, Any]]:
+        t = self._t("job_run")
+        found = self.conn.execute(select(t).order_by(t.c.day, t.c.at)).mappings()
+        return [dict(row) for row in found]
+
+    def nav_day(self) -> int | None:
+        return self.conn.execute(select(func.max(self._t("mf_scheme").c.nav_date))).scalar()
+
+    def user_version(self) -> int:
+        return int(self.conn.exec_driver_sql("PRAGMA user_version").scalar() or 0)
+
 
 # ---- the store -----------------------------------------------------------------------------
 class PortfolioStore:
