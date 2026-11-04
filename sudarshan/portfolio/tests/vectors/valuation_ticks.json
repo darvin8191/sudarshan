@@ -1,0 +1,928 @@
+{
+ "about": "Golden vectors for the phone's tab, moved by ticks frame by frame (PD2). make_pd2.py writes this file; the totals come from the evaluator in portfolio_vector_tools, which imports nothing from sudarshan. liveTab.ts reads it, and so does test_portfolio_ticks.py against core/valuation.py.",
+ "replays": [
+  {
+   "id": "T1",
+   "title": "A morning of ticks over five holdings",
+   "why": "Frame 0 is the service's own figures. The newest valid tick of a symbol stands: a price of nothing leaves the last good one. A tick moves a row only when it is a WebSocket tick newer than the read: one stamped before the read, and one the REST fallback brought, change nothing. A tick with no previous close moves the price but keeps the service's close (and a row with none stays 'not known yet'). 10.125 is exactly 1012.5 paise and Python rounds that to 1012 (half to even), not 1013: the phone has to do the same. The fund has no tick.",
+   "read_at": 1793075400000,
+   "cap": 200,
+   "rows": [
+    {
+     "asset": {
+      "kind": "listed",
+      "exchange": "NSE",
+      "symbol": "ALPHA"
+     },
+     "today_mode": "ok",
+     "price": {
+      "price_u": 14000000,
+      "prev_close_u": 14000000
+     },
+     "lines": [
+      {
+       "account_id": 1,
+       "qty_u": 15000000,
+       "open_qty_u": 10000000,
+       "cost_paise": 2010000,
+       "in_today_paise": 710000,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    },
+    {
+     "asset": {
+      "kind": "listed",
+      "exchange": "NSE",
+      "symbol": "BRAVO"
+     },
+     "today_mode": "ok",
+     "price": {
+      "price_u": 1000000,
+      "prev_close_u": 1000000
+     },
+     "lines": [
+      {
+       "account_id": 1,
+       "qty_u": 6000000,
+       "open_qty_u": 10000000,
+       "cost_paise": 54000,
+       "in_today_paise": 0,
+       "out_today_paise": 42000,
+       "over_year_qty_u": 0
+      }
+     ]
+    },
+    {
+     "asset": {
+      "kind": "listed",
+      "exchange": "BSE",
+      "symbol": "CHARLIE"
+     },
+     "today_mode": "ok",
+     "price": {
+      "price_u": 15000000,
+      "prev_close_u": null
+     },
+     "lines": [
+      {
+       "account_id": 1,
+       "qty_u": 2000000,
+       "open_qty_u": 2000000,
+       "cost_paise": 280000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    },
+    {
+     "asset": {
+      "kind": "listed",
+      "exchange": "NSE",
+      "symbol": "DELTA"
+     },
+     "today_mode": "ok",
+     "price": {
+      "price_u": 100000,
+      "prev_close_u": 100000
+     },
+     "lines": [
+      {
+       "account_id": 1,
+       "qty_u": 1000000000,
+       "open_qty_u": 1000000000,
+       "cost_paise": 1000000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    },
+    {
+     "asset": {
+      "kind": "mf",
+      "exchange": null,
+      "symbol": "ECHO"
+     },
+     "today_mode": "pending",
+     "price": {
+      "price_u": 456789,
+      "prev_close_u": 455000
+     },
+     "lines": [
+      {
+       "account_id": 1,
+       "qty_u": 109459000,
+       "open_qty_u": 109459000,
+       "cost_paise": 480000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    }
+   ],
+   "fixed": {
+    "realised_paise": 6000,
+    "income_paise": 0,
+    "fees_paise": 0,
+    "money_in_paise": 2100000,
+    "money_out_paise": 42000,
+    "closed_today_paise": 0,
+    "closed_today_base_paise": 0
+   },
+   "frames": [
+    {
+     "note": "before any tick",
+     "ticks": [],
+     "expect": {
+      "totals": {
+       "value_paise": 3959997,
+       "cost_paise": 3824000,
+       "unrealised_paise": 135997,
+       "overall_gain_paise": 141997,
+       "absolute_return_pct": "90.5713",
+       "today": {
+        "state": "ok",
+        "paise": -8000,
+        "base_paise": 3210000,
+        "pct": "-0.2492",
+        "counted": 3,
+        "unknown": 1,
+        "pending": 1
+       },
+       "unpriced": 0
+      },
+      "price_u": [
+       14000000,
+       1000000,
+       15000000,
+       100000,
+       456789
+      ],
+      "prev_close_u": [
+       14000000,
+       1000000,
+       null,
+       100000,
+       455000
+      ],
+      "moved": [
+       false,
+       false,
+       false,
+       false,
+       false
+      ]
+     }
+    },
+    {
+     "note": "ALPHA ticks; BRAVO's tick is older than the read",
+     "ticks": [
+      {
+       "key": "NSE:ALPHA",
+       "ltp": 1428.25,
+       "prev_close": 1400.0,
+       "at": 1793075401000,
+       "live": true
+      },
+      {
+       "key": "NSE:BRAVO",
+       "ltp": 104.0,
+       "prev_close": 100.0,
+       "at": 1793075395000,
+       "live": true
+      }
+     ],
+     "expect": {
+      "totals": {
+       "value_paise": 4002372,
+       "cost_paise": 3824000,
+       "unrealised_paise": 178372,
+       "overall_gain_paise": 184372,
+       "absolute_return_pct": "92.5891",
+       "today": {
+        "state": "ok",
+        "paise": 34375,
+        "base_paise": 3210000,
+        "pct": "1.0709",
+        "counted": 3,
+        "unknown": 1,
+        "pending": 1
+       },
+       "unpriced": 0
+      },
+      "price_u": [
+       14282500,
+       1000000,
+       15000000,
+       100000,
+       456789
+      ],
+      "prev_close_u": [
+       14000000,
+       1000000,
+       null,
+       100000,
+       455000
+      ],
+      "moved": [
+       true,
+       false,
+       false,
+       false,
+       false
+      ]
+     }
+    },
+    {
+     "note": "BRAVO arrives by the REST fallback, not a tick",
+     "ticks": [
+      {
+       "key": "NSE:BRAVO",
+       "ltp": 104.0,
+       "prev_close": 100.0,
+       "at": 1793075402000,
+       "live": false
+      }
+     ],
+     "expect": {
+      "totals": {
+       "value_paise": 4002372,
+       "cost_paise": 3824000,
+       "unrealised_paise": 178372,
+       "overall_gain_paise": 184372,
+       "absolute_return_pct": "92.5891",
+       "today": {
+        "state": "ok",
+        "paise": 34375,
+        "base_paise": 3210000,
+        "pct": "1.0709",
+        "counted": 3,
+        "unknown": 1,
+        "pending": 1
+       },
+       "unpriced": 0
+      },
+      "price_u": [
+       14282500,
+       1000000,
+       15000000,
+       100000,
+       456789
+      ],
+      "prev_close_u": [
+       14000000,
+       1000000,
+       null,
+       100000,
+       455000
+      ],
+      "moved": [
+       true,
+       false,
+       false,
+       false,
+       false
+      ]
+     }
+    },
+    {
+     "note": "CHARLIE ticks without a previous close",
+     "ticks": [
+      {
+       "key": "BSE:CHARLIE",
+       "ltp": 1510.5,
+       "prev_close": null,
+       "at": 1793075403000,
+       "live": true
+      }
+     ],
+     "expect": {
+      "totals": {
+       "value_paise": 4004472,
+       "cost_paise": 3824000,
+       "unrealised_paise": 180472,
+       "overall_gain_paise": 186472,
+       "absolute_return_pct": "92.6891",
+       "today": {
+        "state": "ok",
+        "paise": 34375,
+        "base_paise": 3210000,
+        "pct": "1.0709",
+        "counted": 3,
+        "unknown": 1,
+        "pending": 1
+       },
+       "unpriced": 0
+      },
+      "price_u": [
+       14282500,
+       1000000,
+       15105000,
+       100000,
+       456789
+      ],
+      "prev_close_u": [
+       14000000,
+       1000000,
+       null,
+       100000,
+       455000
+      ],
+      "moved": [
+       true,
+       false,
+       true,
+       false,
+       false
+      ]
+     }
+    },
+    {
+     "note": "CHARLIE's tick now carries one",
+     "ticks": [
+      {
+       "key": "BSE:CHARLIE",
+       "ltp": 1512.0,
+       "prev_close": 1500.0,
+       "at": 1793075404000,
+       "live": true
+      }
+     ],
+     "expect": {
+      "totals": {
+       "value_paise": 4004772,
+       "cost_paise": 3824000,
+       "unrealised_paise": 180772,
+       "overall_gain_paise": 186772,
+       "absolute_return_pct": "92.7034",
+       "today": {
+        "state": "ok",
+        "paise": 36775,
+        "base_paise": 3510000,
+        "pct": "1.0477",
+        "counted": 4,
+        "unknown": 0,
+        "pending": 1
+       },
+       "unpriced": 0
+      },
+      "price_u": [
+       14282500,
+       1000000,
+       15120000,
+       100000,
+       456789
+      ],
+      "prev_close_u": [
+       14000000,
+       1000000,
+       15000000,
+       100000,
+       455000
+      ],
+      "moved": [
+       true,
+       false,
+       true,
+       false,
+       false
+      ]
+     }
+    },
+    {
+     "note": "BRAVO, and a cheap share at a half paisa",
+     "ticks": [
+      {
+       "key": "NSE:BRAVO",
+       "ltp": 104.0,
+       "prev_close": 100.0,
+       "at": 1793075405000,
+       "live": true
+      },
+      {
+       "key": "NSE:DELTA",
+       "ltp": 10.125,
+       "prev_close": 10.0,
+       "at": 1793075405000,
+       "live": true
+      }
+     ],
+     "expect": {
+      "totals": {
+       "value_paise": 4019172,
+       "cost_paise": 3824000,
+       "unrealised_paise": 195172,
+       "overall_gain_paise": 201172,
+       "absolute_return_pct": "93.3891",
+       "today": {
+        "state": "ok",
+        "paise": 51175,
+        "base_paise": 3510000,
+        "pct": "1.4580",
+        "counted": 4,
+        "unknown": 0,
+        "pending": 1
+       },
+       "unpriced": 0
+      },
+      "price_u": [
+       14282500,
+       1040000,
+       15120000,
+       101200,
+       456789
+      ],
+      "prev_close_u": [
+       14000000,
+       1000000,
+       15000000,
+       100000,
+       455000
+      ],
+      "moved": [
+       true,
+       true,
+       true,
+       true,
+       false
+      ]
+     }
+    },
+    {
+     "note": "a tick for a symbol the tab does not hold, and a bad price",
+     "ticks": [
+      {
+       "key": "NSE:ZULU",
+       "ltp": 5.0,
+       "prev_close": null,
+       "at": 1793075406000,
+       "live": true
+      },
+      {
+       "key": "NSE:ALPHA",
+       "ltp": 0,
+       "prev_close": null,
+       "at": 1793075406000,
+       "live": true
+      }
+     ],
+     "expect": {
+      "totals": {
+       "value_paise": 4019172,
+       "cost_paise": 3824000,
+       "unrealised_paise": 195172,
+       "overall_gain_paise": 201172,
+       "absolute_return_pct": "93.3891",
+       "today": {
+        "state": "ok",
+        "paise": 51175,
+        "base_paise": 3510000,
+        "pct": "1.4580",
+        "counted": 4,
+        "unknown": 0,
+        "pending": 1
+       },
+       "unpriced": 0
+      },
+      "price_u": [
+       14282500,
+       1040000,
+       15120000,
+       101200,
+       456789
+      ],
+      "prev_close_u": [
+       14000000,
+       1000000,
+       15000000,
+       100000,
+       455000
+      ],
+      "moved": [
+       true,
+       true,
+       true,
+       true,
+       false
+      ]
+     }
+    },
+    {
+     "note": "ALPHA falls below the close",
+     "ticks": [
+      {
+       "key": "NSE:ALPHA",
+       "ltp": 1390.4,
+       "prev_close": 1400.0,
+       "at": 1793075407000,
+       "live": true
+      }
+     ],
+     "expect": {
+      "totals": {
+       "value_paise": 3962397,
+       "cost_paise": 3824000,
+       "unrealised_paise": 138397,
+       "overall_gain_paise": 144397,
+       "absolute_return_pct": "90.6856",
+       "today": {
+        "state": "ok",
+        "paise": -5600,
+        "base_paise": 3510000,
+        "pct": "-0.1595",
+        "counted": 4,
+        "unknown": 0,
+        "pending": 1
+       },
+       "unpriced": 0
+      },
+      "price_u": [
+       13904000,
+       1040000,
+       15120000,
+       101200,
+       456789
+      ],
+      "prev_close_u": [
+       14000000,
+       1000000,
+       15000000,
+       100000,
+       455000
+      ],
+      "moved": [
+       true,
+       true,
+       true,
+       true,
+       false
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "T2",
+   "title": "Only the first rows move when there are more than the cap",
+   "why": "With a cap of 2 the first two held listed rows (ALPHA, BRAVO) are priced from ticks; CHARLIE and DELTA keep the service's price however their ticks go. The fund is never in the count.",
+   "read_at": 1793075400000,
+   "cap": 2,
+   "rows": [
+    {
+     "asset": {
+      "kind": "listed",
+      "exchange": "NSE",
+      "symbol": "ALPHA"
+     },
+     "today_mode": "ok",
+     "price": {
+      "price_u": 14000000,
+      "prev_close_u": 14000000
+     },
+     "lines": [
+      {
+       "account_id": 1,
+       "qty_u": 15000000,
+       "open_qty_u": 10000000,
+       "cost_paise": 2010000,
+       "in_today_paise": 710000,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    },
+    {
+     "asset": {
+      "kind": "listed",
+      "exchange": "NSE",
+      "symbol": "BRAVO"
+     },
+     "today_mode": "ok",
+     "price": {
+      "price_u": 1000000,
+      "prev_close_u": 1000000
+     },
+     "lines": [
+      {
+       "account_id": 1,
+       "qty_u": 6000000,
+       "open_qty_u": 10000000,
+       "cost_paise": 54000,
+       "in_today_paise": 0,
+       "out_today_paise": 42000,
+       "over_year_qty_u": 0
+      }
+     ]
+    },
+    {
+     "asset": {
+      "kind": "listed",
+      "exchange": "BSE",
+      "symbol": "CHARLIE"
+     },
+     "today_mode": "ok",
+     "price": {
+      "price_u": 15000000,
+      "prev_close_u": null
+     },
+     "lines": [
+      {
+       "account_id": 1,
+       "qty_u": 2000000,
+       "open_qty_u": 2000000,
+       "cost_paise": 280000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    },
+    {
+     "asset": {
+      "kind": "listed",
+      "exchange": "NSE",
+      "symbol": "DELTA"
+     },
+     "today_mode": "ok",
+     "price": {
+      "price_u": 100000,
+      "prev_close_u": 100000
+     },
+     "lines": [
+      {
+       "account_id": 1,
+       "qty_u": 1000000000,
+       "open_qty_u": 1000000000,
+       "cost_paise": 1000000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    },
+    {
+     "asset": {
+      "kind": "mf",
+      "exchange": null,
+      "symbol": "ECHO"
+     },
+     "today_mode": "pending",
+     "price": {
+      "price_u": 456789,
+      "prev_close_u": 455000
+     },
+     "lines": [
+      {
+       "account_id": 1,
+       "qty_u": 109459000,
+       "open_qty_u": 109459000,
+       "cost_paise": 480000,
+       "in_today_paise": 0,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    }
+   ],
+   "fixed": {
+    "realised_paise": 6000,
+    "income_paise": 0,
+    "fees_paise": 0,
+    "money_in_paise": 2100000,
+    "money_out_paise": 42000,
+    "closed_today_paise": 0,
+    "closed_today_base_paise": 0
+   },
+   "frames": [
+    {
+     "note": "all four tick",
+     "ticks": [
+      {
+       "key": "NSE:ALPHA",
+       "ltp": 1428.25,
+       "prev_close": 1400.0,
+       "at": 1793075401000,
+       "live": true
+      },
+      {
+       "key": "NSE:BRAVO",
+       "ltp": 104.0,
+       "prev_close": 100.0,
+       "at": 1793075401000,
+       "live": true
+      },
+      {
+       "key": "BSE:CHARLIE",
+       "ltp": 1512.0,
+       "prev_close": 1500.0,
+       "at": 1793075401000,
+       "live": true
+      },
+      {
+       "key": "NSE:DELTA",
+       "ltp": 10.125,
+       "prev_close": 10.0,
+       "at": 1793075401000,
+       "live": true
+      }
+     ],
+     "expect": {
+      "totals": {
+       "value_paise": 4004772,
+       "cost_paise": 3824000,
+       "unrealised_paise": 180772,
+       "overall_gain_paise": 186772,
+       "absolute_return_pct": "92.7034",
+       "today": {
+        "state": "ok",
+        "paise": 36775,
+        "base_paise": 3210000,
+        "pct": "1.1456",
+        "counted": 3,
+        "unknown": 1,
+        "pending": 1
+       },
+       "unpriced": 0
+      },
+      "price_u": [
+       14282500,
+       1040000,
+       15000000,
+       100000,
+       456789
+      ],
+      "prev_close_u": [
+       14000000,
+       1000000,
+       null,
+       100000,
+       455000
+      ],
+      "moved": [
+       true,
+       true,
+       false,
+       false,
+       false
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "T3",
+   "title": "A holding sold out today stays in Today and does not take a tick",
+   "why": "BRAVO was sold out today (+50.00 on a base of 1,000.00 comes from the fixed sums), so it is not held and takes no tick; ALPHA does.",
+   "read_at": 1793075400000,
+   "cap": 200,
+   "rows": [
+    {
+     "asset": {
+      "kind": "listed",
+      "exchange": "NSE",
+      "symbol": "ALPHA"
+     },
+     "today_mode": "ok",
+     "price": {
+      "price_u": 14000000,
+      "prev_close_u": 14000000
+     },
+     "lines": [
+      {
+       "account_id": 1,
+       "qty_u": 15000000,
+       "open_qty_u": 10000000,
+       "cost_paise": 2010000,
+       "in_today_paise": 710000,
+       "out_today_paise": 0,
+       "over_year_qty_u": 0
+      }
+     ]
+    },
+    {
+     "asset": {
+      "kind": "listed",
+      "exchange": "NSE",
+      "symbol": "BRAVO"
+     },
+     "today_mode": "ok",
+     "price": {
+      "price_u": null,
+      "prev_close_u": 1000000
+     },
+     "lines": [
+      {
+       "account_id": 1,
+       "qty_u": 0,
+       "open_qty_u": 10000000,
+       "cost_paise": 0,
+       "in_today_paise": 0,
+       "out_today_paise": 1050000,
+       "over_year_qty_u": 0
+      }
+     ]
+    }
+   ],
+   "fixed": {
+    "realised_paise": 6000,
+    "income_paise": 0,
+    "fees_paise": 0,
+    "money_in_paise": 2100000,
+    "money_out_paise": 42000,
+    "closed_today_paise": 50000,
+    "closed_today_base_paise": 1000000
+   },
+   "frames": [
+    {
+     "note": "before any tick",
+     "ticks": [],
+     "expect": {
+      "totals": {
+       "value_paise": 2100000,
+       "cost_paise": 2010000,
+       "unrealised_paise": 90000,
+       "overall_gain_paise": 96000,
+       "absolute_return_pct": "2.0000",
+       "today": {
+        "state": "ok",
+        "paise": 40000,
+        "base_paise": 3110000,
+        "pct": "1.2862",
+        "counted": 1,
+        "unknown": 0,
+        "pending": 0
+       },
+       "unpriced": 0
+      },
+      "price_u": [
+       14000000,
+       null
+      ],
+      "prev_close_u": [
+       14000000,
+       1000000
+      ],
+      "moved": [
+       false,
+       false
+      ]
+     }
+    },
+    {
+     "note": "both tick; only ALPHA moves",
+     "ticks": [
+      {
+       "key": "NSE:ALPHA",
+       "ltp": 1428.25,
+       "prev_close": 1400.0,
+       "at": 1793075401000,
+       "live": true
+      },
+      {
+       "key": "NSE:BRAVO",
+       "ltp": 120.0,
+       "prev_close": 100.0,
+       "at": 1793075401000,
+       "live": true
+      }
+     ],
+     "expect": {
+      "totals": {
+       "value_paise": 2142375,
+       "cost_paise": 2010000,
+       "unrealised_paise": 132375,
+       "overall_gain_paise": 138375,
+       "absolute_return_pct": "4.0179",
+       "today": {
+        "state": "ok",
+        "paise": 82375,
+        "base_paise": 3110000,
+        "pct": "2.6487",
+        "counted": 1,
+        "unknown": 0,
+        "pending": 0
+       },
+       "unpriced": 0
+      },
+      "price_u": [
+       14282500,
+       null
+      ],
+      "prev_close_u": [
+       14000000,
+       1000000
+      ],
+      "moved": [
+       true,
+       false
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}

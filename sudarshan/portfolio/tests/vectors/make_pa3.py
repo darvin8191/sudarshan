@@ -18,9 +18,15 @@ from portfolio_vector_tools import (
     business_days,
     e,
     epoch_ms,
+    figure,
+    figures_of,
+    held,
     inr,
     pct4,
     rd,
+    today_of,
+    totals_of,
+    val,
     write_all,
 )
 
@@ -58,92 +64,6 @@ def fixed(realised=0, income=0, fees=0, money_in=0, money_out=0, closed=0, close
         "money_out_paise": money_out,
         "closed_today_paise": closed,
         "closed_today_base_paise": closed_base,
-    }
-
-
-def figure(state, paise=None, base=0, pct=None, counted=0, unknown=0, pending=0):
-    return {
-        "state": state,
-        "paise": paise,
-        "base_paise": base,
-        "pct": pct,
-        "counted": counted,
-        "unknown": unknown,
-        "pending": pending,
-    }
-
-
-def val(qty_u, price_u):
-    return rd(qty_u * price_u, 10**8)
-
-
-def held(r):
-    return any(ln["qty_u"] for ln in r["lines"])
-
-
-def today_of(r):
-    """Today for one row, line by line."""
-    mode = r["today_mode"]
-    price, prev = r["price"]["price_u"], r["price"]["prev_close_u"]
-    if mode == "none":
-        return figure("none")
-    if mode == "pending":
-        return figure("pending", pending=1)
-    paise = base = 0
-    for ln in r["lines"]:
-        if (ln["qty_u"] and price is None) or (ln["open_qty_u"] and prev is None):
-            return figure("unknown", unknown=1)
-        now = val(ln["qty_u"], price) if ln["qty_u"] else 0
-        opened = val(ln["open_qty_u"], prev) if ln["open_qty_u"] else 0
-        paise += now - (opened + ln["in_today_paise"] - ln["out_today_paise"])
-        base += opened + ln["in_today_paise"]
-    return figure("ok", paise, base, pct4(paise, base), counted=1)
-
-
-def figures_of(r):
-    cost = sum(ln["cost_paise"] for ln in r["lines"])
-    price = r["price"]["price_u"]
-    value = sum(val(ln["qty_u"], price) for ln in r["lines"]) if price is not None else cost
-    return {
-        "value_paise": value,
-        "cost_paise": cost,
-        "unrealised_paise": value - cost,
-        "gain_pct": pct4(value - cost, cost) if price is not None else None,
-        "priced": price is not None,
-        "today": today_of(r),
-    }
-
-
-def totals_of(rows, fx):
-    parts = [figures_of(r) for r in rows if held(r)]
-    value = sum(p["value_paise"] for p in parts)
-    cost = sum(p["cost_paise"] for p in parts)
-    todays = [p["today"] for p in parts]
-    ok = [t for t in todays if t["state"] == "ok"]
-    closed, closed_base = fx["closed_today_paise"], fx["closed_today_base_paise"]
-    with_closed = closed is not None and (closed != 0 or closed_base != 0)
-    paise = sum(t["paise"] for t in ok) + (closed if with_closed else 0)
-    base = sum(t["base_paise"] for t in ok) + (closed_base if with_closed else 0)
-    unknown = sum(t["state"] == "unknown" for t in todays)
-    pending = sum(t["state"] == "pending" for t in todays)
-    if ok or with_closed:
-        today = figure("ok", paise, base, pct4(paise, base), len(ok), unknown, pending)
-    else:
-        state = "unknown" if (unknown or closed is None) else ("pending" if pending else "none")
-        today = figure(state, None, 0, None, 0, unknown, pending)
-    put_in = fx["money_in_paise"] + fx["fees_paise"]
-    unrealised = value - cost
-    return {
-        "value_paise": value,
-        "cost_paise": cost,
-        "unrealised_paise": unrealised,
-        "overall_gain_paise": unrealised
-        + fx["realised_paise"]
-        + fx["income_paise"]
-        - fx["fees_paise"],
-        "absolute_return_pct": pct4(value + fx["money_out_paise"] - put_in, put_in),
-        "today": today,
-        "unpriced": sum(not p["priced"] for p in parts),
     }
 
 
