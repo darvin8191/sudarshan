@@ -65,6 +65,7 @@ import {
   answerBody,
   answeredHeld,
   EXIT_ALL_TOAST,
+  exitAllEach,
   heldText,
   refusalReason,
   sentOrderIds,
@@ -499,30 +500,40 @@ export default function Positions() {
   }
 
   // Its result shares one toast with the close_position_event the server sends for it.
-  const handleCloseAllPositions = async (): Promise<SendOutcome> => {
+  // SUDARSHAN M6.9: and each position settles by what became of it (the answer's
+  // `positions`): one Exit all sent nothing for lets go and says why on its card.
+  const handleCloseAllPositions = async (): Promise<SendOutcome | SentAnswer> => {
     const once = { id: EXIT_ALL_TOAST }
+    const withEach = (outcome: SendOutcome, body: unknown): SendOutcome | SentAnswer => {
+      const each = exitAllEach(body)
+      return each ? { outcome, each } : outcome
+    }
     try {
       const response = await tradingApi.closeAllPositions()
       if (response.status === 'success') {
         // Toast handled by close_position_event socket
         fetchPositions(true)
-        return 'sent'
+        return withEach('sent', response)
       }
       const held = answeredHeld(response)
       if (held) {
         showToast.warning(heldText('exitAll', held, response), 'positions', once)
         fetchPositions(true)
-        return held
+        return withEach(held, response)
       }
       showToast.error(response.message || 'Failed to close all positions', 'positions', once)
+      return withEach('refused', response)
     } catch (err) {
       const outcome = thrownOutcome(err)
       if (outcome !== 'refused') {
         showToast.warning(heldText('exitAll', outcome, answerBody(err)), 'positions', once)
         fetchPositions(true)
-        return outcome
+        return withEach(outcome, answerBody(err))
       }
       showToast.error(refusalReason(err) ?? 'Failed to close all positions', 'positions', once)
+      // Each position said for itself (nothing went, each with its reason); else one still
+      // being placed (the app's 409 with no positions) holds every row.
+      if (exitAllEach(answerBody(err))) return withEach('refused', answerBody(err))
       if (stillPlacing(err)) return 'placing'
     }
     return 'refused'

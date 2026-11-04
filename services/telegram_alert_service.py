@@ -33,6 +33,7 @@ from sudarshan.books.telegram_words import (
     close_failed_line,
     is_app_exit,
     markdown_safe,
+    not_sent_lines,
     smart_order_action_lines,
 )
 from utils.logging import get_logger
@@ -86,6 +87,13 @@ class TelegramAlertService:
             # SUDARSHAN M6.9: the app's own Exit says what it sent, in both modes, in its words.
             if is_app_exit(order_type, order_data):
                 details.extend(app_exit_lines(order_data, response))
+                details.append(f"Time: {timestamp}")
+                return "\n".join(details)
+
+            # SUDARSHAN M5.13: refused by the risk settings, nothing sent: what and why.
+            refused = not_sent_lines(order_type, order_data, response)
+            if refused is not None:
+                details.extend(refused)
                 details.append(f"Time: {timestamp}")
                 return "\n".join(details)
 

@@ -2,6 +2,8 @@ import { CandlestickChart } from 'lucide-react'
 import { memo, type ReactNode, useCallback, useMemo } from 'react'
 import { Link } from 'react-router'
 import { cn } from '@/lib/utils'
+import { AccessNotice } from '@/sudarshan/AccessNotice'
+import { usePriceAccess, useReadWhenReady } from '@/sudarshan/access'
 import { chartPath } from '@/sudarshan/chart/prefs'
 import { formatRupees } from '@/sudarshan/dashboard/format'
 import { describe } from '@/sudarshan/watchlist/rows'
@@ -46,6 +48,10 @@ const TradeBoard = memo(function TradeBoard({
   onRefresh,
 }: TradeCardsProps) {
   const refresh = useCallback(() => void onRefresh(true), [onRefresh])
+  // The trade book is read with the key too: without it or the Upstox login,
+  // the notice says which, never "No trades today".
+  const access = usePriceAccess()
+  useReadWhenReady(access.state, error !== null, refresh)
   const sorted = useMemo(
     () => [...trades].sort((a, b) => momentOf(b.timestamp) - momentOf(a.timestamp)),
     [trades]
@@ -53,7 +59,9 @@ const TradeBoard = memo(function TradeBoard({
   const buys = trades.filter((trade) => String(trade.action).toUpperCase() === 'BUY').length
 
   let content: ReactNode
-  if (trades.length === 0 && loading) {
+  if (access.state !== 'ready') {
+    content = <AccessNotice access={access} />
+  } else if (trades.length === 0 && loading) {
     content = <LoadingCards />
   } else if (trades.length === 0 && error) {
     content = <ProblemCard message="The trade book could not be read just now." onRetry={refresh} />

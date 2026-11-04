@@ -17,6 +17,7 @@ import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
 import { useThemeStore } from '@/stores/themeStore'
 import { MODE_CHIP, MODE_CHIP_BASE, MODE_DOT } from '@/sudarshan/modeChip'
+import { RiskChip } from '@/sudarshan/risk/RiskBanner' // SUDARSHAN M20.7
 import { showToast } from '@/utils/toast'
 
 /**
@@ -99,6 +100,9 @@ export function AccountControls({ variant = 'navbar' }: { variant?: 'navbar' | '
           {user.broker}
         </Badge>
       )}
+
+      {/* SUDARSHAN M20.7: the kill switch, when it is on */}
+      <RiskChip variant={variant} />
 
       {/* Mode Badge: the Live and Analyze status chips */}
       <Badge

@@ -1119,3 +1119,239 @@ describe('t: an exit the broker sliced', () => {
     expect(await exitOffered(tap)).toBe(true)
   })
 })
+
+describe('u: Exit all says what became of each position', () => {
+  const PUT_STOP =
+    'BANKNIFTY 57500 PE has a BUY 30 SL-M order (trigger 240.00, order ending 3456, placed 10:42:20) working to close it, so no exit was sent for it. Cancel it in Orders, then exit.'
+  const CALL_LATE =
+    'Upstox was slow to answer, so Exit all stopped before sending an exit for it. Exit it again.'
+  const each = (call: object, put: object) => [
+    { exchange: 'NFO', symbol: CALL, product: 'MIS', ...call },
+    { exchange: 'NFO', symbol: PUT.symbol, product: 'NRML', ...put },
+  ]
+
+  async function exitAllTap(tap: Tap) {
+    await tap.click(exitAll())
+    await tap.click(
+      within(screen.getByRole('dialog', { name: 'Exit all positions?' })).getByRole('button', {
+        name: 'Exit all',
+      })
+    )
+    await settle()
+  }
+
+  /** Whether a card's sheet offers Exit now (the sheet is opened and shut again). */
+  async function offered(tap: Tap, which: () => HTMLElement): Promise<boolean> {
+    await tap.click(which())
+    const exit = within(screen.getByRole('dialog')).getByRole('button', { name: /^Exit/ })
+    const free = !(exit as HTMLButtonElement).disabled
+    await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Close' }))
+    await settle()
+    return free
+  }
+
+  it('one held back by a working order lets go and says why; the one sent holds', async () => {
+    const tap = user()
+    const message = `Exit all did not close every position. Of 2 exits, 1 was sent and 1 was not sent. ${PUT_STOP}`
+    api.closeAllPositions.mockRejectedValueOnce(
+      notConfirmedAnswer(409, {
+        status: 'error',
+        message,
+        not_confirmed: true,
+        positions: each(
+          { outcome: 'sent', orderids: [EXIT_ORDER.orderid] },
+          { outcome: 'not_sent', reason: PUT_STOP }
+        ),
+      })
+    )
+    await open(LONG, PUT)
+    await exitAllTap(tap)
+    expect(toast.warning).toHaveBeenLastCalledWith(message, 'positions', {
+      id: 'sudarshan-exit-all-result',
+    })
+    expect(card()).toHaveTextContent('Exit sent')
+    expect(putCard()).toHaveTextContent(PUT_STOP)
+    expect(putCard()).not.toHaveTextContent('Still being placed')
+    expect(putCard().querySelector('[data-sent="not-sent"]')).not.toBeNull()
+    expect(await offered(tap, putCard)).toBe(true)
+    expect(await exitOffered(tap)).toBe(false)
+    expectUnavailable(exitAll()) // the call's exit holds it
+  })
+
+  it('nothing sent for any lets every one go, each with its own reason', async () => {
+    const tap = user()
+    api.closeAllPositions.mockRejectedValueOnce(
+      refusalWith(409, {
+        status: 'error',
+        message: `Exit all did not close every position. Of 2 exits, 1 was not sent and 1 was not sent in time. ${PUT_STOP}`,
+        positions: each(
+          { outcome: 'not_sent', reason: CALL_LATE },
+          { outcome: 'not_sent', reason: PUT_STOP }
+        ),
+      })
+    )
+    await open(LONG, PUT)
+    await exitAllTap(tap)
+    expect(card()).toHaveTextContent(CALL_LATE)
+    expect(putCard()).toHaveTextContent(PUT_STOP)
+    expect(card()).not.toHaveTextContent('Still being placed')
+    expect(putCard()).not.toHaveTextContent('Still being placed')
+    expectAvailable(exitAll())
+    expect(await exitOffered(tap)).toBe(true)
+    expect(await offered(tap, putCard)).toBe(true)
+
+    // The reasons are for a while: a minute on, the cards are as before.
+    await pass(61_000)
+    expect(card()).not.toHaveTextContent(CALL_LATE)
+    expect(putCard()).not.toHaveTextContent(PUT_STOP)
+  })
+
+  it('a new tap on a position replaces what Exit all said of it', async () => {
+    const tap = user()
+    api.closeAllPositions.mockRejectedValueOnce(
+      refusalWith(409, {
+        status: 'error',
+        message: 'Exit all did not close every position.',
+        positions: each(
+          { outcome: 'not_sent', reason: CALL_LATE },
+          { outcome: 'not_sent', reason: PUT_STOP }
+        ),
+      })
+    )
+    await open(LONG, PUT)
+    await exitAllTap(tap)
+    await exitOnce(tap)
+    expect(card()).not.toHaveTextContent(CALL_LATE)
+    expect(card()).toHaveTextContent('Exit sent')
+    expect(putCard()).toHaveTextContent(PUT_STOP)
+
+    // A tap the app refuses lets go too, and what Exit all said of that row does not come back.
+    api.closePosition.mockRejectedValueOnce(refusal(400, 'Market is closed'))
+    await tap.click(putCard())
+    await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: /^Exit/ }))
+    await tap.click(
+      within(screen.getByRole('dialog', { name: 'Exit BANKNIFTY 57500 PE?' })).getByRole('button', {
+        name: 'Exit',
+      })
+    )
+    await settle()
+    expect(toast.error).toHaveBeenLastCalledWith('Market is closed', 'positions')
+    expect(putCard()).not.toHaveTextContent(PUT_STOP)
+  })
+
+  it('a success names each position’s orders: each is held by its own', async () => {
+    const tap = user()
+    api.closeAllPositions.mockResolvedValueOnce({
+      status: 'success',
+      message: 'All Open Positions Squared Off',
+      positions: each(
+        { outcome: 'sent', orderids: [EXIT_ORDER.orderid] },
+        { outcome: 'sent', orderids: ['251020000622222'] }
+      ),
+    })
+    const { push } = await open(LONG, PUT)
+    await exitAllTap(tap)
+    expect(card()).toHaveTextContent('Exit sent')
+    expect(putCard()).toHaveTextContent('Exit sent')
+    // The call's own order is still open when its time is up: it holds the call alone.
+    push({ ...EXIT_ORDER, order_status: 'open' })
+    api.getOrders.mockResolvedValue(orderBook({ ...EXIT_ORDER, order_status: 'open' }))
+    await pass(16_000)
+    expect(card()).toHaveTextContent('Exit order open')
+    expect(putCard()).not.toHaveTextContent('Exit')
+  })
+
+  it('a success pins each position to its own order: a stop moved on its side holds nothing', async () => {
+    const tap = user()
+    api.closeAllPositions.mockResolvedValueOnce({
+      status: 'success',
+      message: 'All Open Positions Squared Off',
+      positions: each(
+        { outcome: 'sent', orderids: [EXIT_ORDER.orderid] },
+        { outcome: 'sent', orderids: ['251020000622222'] }
+      ),
+    })
+    const { push } = await open(LONG, PUT)
+    await exitAllTap(tap)
+    push({ ...EXIT_ORDER, order_status: 'complete' })
+    const stopLoss = {
+      ...EXIT_ORDER,
+      orderid: '251020000699001',
+      pricetype: 'SL-M',
+      order_status: 'trigger pending',
+    }
+    push(stopLoss)
+    api.getOrders.mockResolvedValue(
+      orderBook({ ...EXIT_ORDER, order_status: 'complete' }, stopLoss)
+    )
+    await pass(16_000)
+    await pass(31_000)
+    expect(card()).not.toHaveTextContent('Exit order open')
+    expect(await exitOffered(tap)).toBe(true)
+  })
+
+  it('one not confirmed holds as not confirmed, the other as sent', async () => {
+    const tap = user()
+    api.closeAllPositions.mockRejectedValueOnce(
+      notConfirmedAnswer(502, {
+        status: 'error',
+        message:
+          'Exit all did not close every position. Of 2 exits, 1 was sent and 1 is not confirmed and may have gone through.',
+        not_confirmed: true,
+        positions: each(
+          { outcome: 'not_confirmed', reason: EXIT_NOT_CONFIRMED },
+          { outcome: 'sent', orderids: ['251020000622222'] }
+        ),
+      })
+    )
+    await open(LONG, PUT)
+    await exitAllTap(tap)
+    expect(card()).toHaveTextContent('Not confirmed: check Orders before sending again')
+    expect(putCard()).toHaveTextContent('Exit sent')
+    expectUnavailable(exitAll())
+  })
+
+  it('a position the answer does not name settles by the answer as a whole', async () => {
+    const tap = user()
+    api.closeAllPositions.mockRejectedValueOnce(
+      refusalWith(409, {
+        status: 'error',
+        message: 'Exit all did not close every position.',
+        positions: [{ exchange: 'NFO', symbol: CALL, product: 'MIS', outcome: 'not_sent' }],
+      })
+    )
+    await open(LONG, PUT)
+    await exitAllTap(tap)
+    // Nothing went: both let go; the call had no reason given, so none is shown.
+    expectAvailable(exitAll())
+    expect(card().querySelector('[data-sent="not-sent"]')).toBeNull()
+    expect(putCard().querySelector('[data-sent]')).toBeNull()
+  })
+
+  it('a tap after an unanswered Exit all’s hold, while the server still places it, says so', async () => {
+    const tap = user()
+    api.closeAllPositions.mockRejectedValueOnce(
+      new AxiosError('Network Error', AxiosError.ERR_NETWORK)
+    )
+    await open(LONG, PUT)
+    await exitAllTap(tap)
+    await pass(151_000) // the phone holds an unanswered Exit all 150 s; the server may run 277 s
+    expect(await exitOffered(tap)).toBe(true)
+    api.closePosition.mockRejectedValueOnce(refusal(409, EXIT_ALL_STILL_PLACING))
+    await exitOnce(tap)
+    expect(toast.error).toHaveBeenLastCalledWith(EXIT_ALL_STILL_PLACING, 'positions')
+    expect(card()).toHaveTextContent('Still being placed')
+    expect(api.closePosition).toHaveBeenCalledTimes(1)
+  })
+})
+
+/** A refusal from the app with a body of its own (Exit all's answer). */
+function refusalWith(status: number, data: object) {
+  return new AxiosError('Request failed', 'ERR_BAD_REQUEST', undefined, undefined, {
+    status,
+    statusText: '',
+    headers: {},
+    config: { headers: new AxiosHeaders() },
+    data,
+  })
+}

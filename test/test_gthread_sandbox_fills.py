@@ -15,8 +15,10 @@ price land after a modify had changed it.
 
 from __future__ import annotations
 
+import itertools
 import threading
 from datetime import datetime as RealDatetime
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
@@ -39,13 +41,29 @@ LIMIT = Decimal("2500.00")
 def _allow_mis_orders(monkeypatch):
     from sandbox import order_manager
 
+    # SUDARSHAN: the clock moves on a microsecond at each call. A sandbox order id is the
+    # microsecond plus two random digits, so a clock frozen to one instant gave two orders the
+    # same id one time in a hundred, and the second order failed on the unique order id.
+    ticks = itertools.count()
+
     class MarketHoursDatetime(RealDatetime):
         @classmethod
         def now(cls, tz=None):
-            fixed = RealDatetime(2026, 10, 12, 14, 0)
+            fixed = RealDatetime(2026, 10, 12, 14, 0) + timedelta(microseconds=next(ticks))
             return tz.localize(fixed) if tz else fixed
 
     monkeypatch.setattr(order_manager, "datetime", MarketHoursDatetime)
+
+
+def test_market_hours_clock_gives_each_order_its_own_id(monkeypatch):
+    """101 ids under the market-hours clock are all different. With the clock frozen to one
+    instant there are only 100 possible ids, so two of them had to be the same."""
+    from sandbox.order_manager import OrderManager
+
+    _allow_mis_orders(monkeypatch)
+    manager = OrderManager(USER)
+    ids = [manager._generate_order_id() for _ in range(101)]
+    assert len(set(ids)) == len(ids)
 
 
 @pytest.fixture(autouse=True)

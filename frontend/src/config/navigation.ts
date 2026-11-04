@@ -1,6 +1,7 @@
 import {
   BarChart3,
   Bell,
+  BellRing,
   Bookmark,
   BookOpen,
   Bot,
@@ -25,6 +26,7 @@ import {
   MessageSquare,
   Search,
   Settings,
+  ShieldAlert,
   TrendingUp,
   User,
   Workflow,
@@ -83,6 +85,8 @@ export const profileMenuItems: NavItem[] = [
   { href: '/action-center', label: 'Action Center', icon: Bell },
   // SUDARSHAN M4.15: the phone chart, one instrument real-time; /chart opens the last one.
   { href: '/chart', label: 'Chart', icon: ChartCandlestick },
+  // SUDARSHAN M10.3: market alerts, at /market-alerts (upstream owns /alerts).
+  { href: '/market-alerts', label: 'Alerts', icon: BellRing },
   // Agent Config is NOT here. It lives under /admin with the other
   // configuration surfaces. The chat header carries its own settings control,
   // so a configured /agent still has a route back to its settings without this
@@ -91,6 +95,8 @@ export const profileMenuItems: NavItem[] = [
   { href: '/master-contract', label: 'Master Contract', icon: FileStack },
   // SUDARSHAN M2.20: Upstox auto-login (TOTP + PIN), shown unfiltered like the bots below.
   { href: '/autologin', label: 'Auto login', icon: KeyRound },
+  // SUDARSHAN M20.7: the kill switch and the risk guard.
+  { href: '/risk', label: 'Risk', icon: ShieldAlert },
   { href: '/telegram', label: 'Telegram Bot', icon: MessageSquare },
   { href: '/whatsapp', label: 'WhatsApp Bot', icon: MessageCircle },
   // SUDARSHAN M8.2: the watchlist, for a wide screen where the bottom bar is hidden.

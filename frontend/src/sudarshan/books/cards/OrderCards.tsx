@@ -2,6 +2,8 @@ import { CandlestickChart, Pencil, X, XCircle } from 'lucide-react'
 import { memo, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { useThemeStore } from '@/stores/themeStore'
+import { AccessNotice } from '@/sudarshan/AccessNotice'
+import { usePriceAccess, useReadWhenReady } from '@/sudarshan/access'
 import { type FeedRow, useBookFeed } from '@/sudarshan/books/feed'
 import { type BookOrder, isFinalStatus, reasonOf } from '@/sudarshan/books/orderFold'
 import type { TickDirection } from '@/sudarshan/books/prices'
@@ -243,6 +245,9 @@ const OrderBoard = memo(function OrderBoard({
   const appMode = useThemeStore((state) => state.appMode)
   const [filter, setFilter] = useState<OrderFilter>('all')
   const refresh = useCallback(() => void onRefresh(true), [onRefresh])
+  // No key or no Upstox login: the notice says which, never "No orders today".
+  const access = usePriceAccess()
+  useReadWhenReady(access.state, error !== null, refresh)
 
   // Newest first, as the wide book opens.
   const sorted = useMemo(
@@ -361,7 +366,9 @@ const OrderBoard = memo(function OrderBoard({
   )
 
   let content: ReactNode
-  if (orders.length === 0 && loading) {
+  if (access.state !== 'ready') {
+    content = <AccessNotice access={access} />
+  } else if (orders.length === 0 && loading) {
     content = <LoadingCards />
   } else if (orders.length === 0 && error) {
     content = <ProblemCard message="The order book could not be read just now." onRetry={refresh} />

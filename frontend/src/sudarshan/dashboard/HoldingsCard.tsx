@@ -48,7 +48,8 @@ const NOT_KNOWN: MarketOpen = () => null
  * coming back after 15 seconds and every 45 seconds while a market is open;
  * between reads the value and P&L move with every tick, as on the Holdings
  * page (useLivePrice). Nothing is shown when there are no holdings, when the
- * broker has none to give (crypto), when there is no API key to ask with, or
+ * broker has none to give (crypto), when there is no key to ask with (the
+ * dashboard's notice says why: no API key, or Upstox not logged in today), or
  * when the call fails: the Holdings page has the detail, and its own errors.
  * There is no "today" figure, because the holdings call carries no day change.
  */

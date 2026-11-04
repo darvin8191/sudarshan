@@ -559,16 +559,17 @@ class OrdersToolkit(OpenAlgoToolkit):
                 example ``INFY`` or ``NIFTY28MAR2420800CE``.
             exchange: Exchange code the symbol trades on, for example ``NSE`` or
                 ``NFO``. Index codes are quote-only and cannot be traded.
-            action: ``BUY`` or ``SELL``. It is used only when the account holds
-                no position in this symbol and the target is zero; otherwise the
-                direction is derived from the difference.
-            quantity: Whole number of units to send when there is no position
-                and no target, for example ``50``. Not lots. Pass 0 when only
-                ``position_size`` matters.
+            action: ``BUY`` or ``SELL``. The direction is derived from the
+                difference between the target and the position held, so it only
+                matters to the risk check.
+            quantity: Whole number of units, for example ``50``. Not lots. It
+                does not open a position: to open one give ``position_size``.
+                Pass 0 when only ``position_size`` matters.
             position_size: The position to end up holding, in units and signed:
-                ``150`` for long 150, ``-75`` for short 75, ``0`` for flat. To
-                flatten an existing position use the ``close_position`` tool
-                instead, which is built for it.
+                ``150`` for long 150, ``-75`` for short 75. ``0`` closes the
+                position, and sends nothing when the account is already flat; it
+                never opens one. To flatten an existing position use the
+                ``close_position`` tool instead, which is built for it.
             product: Required, with no default: ``CNC``, ``NRML`` or ``MIS``.
                 The position is matched within this product, so it must be the
                 product the position is held under, and MIS is squared off

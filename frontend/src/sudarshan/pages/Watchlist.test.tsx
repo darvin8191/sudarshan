@@ -110,6 +110,21 @@ const calendar = vi.hoisted(() => {
 })
 vi.mock('@/hooks/useMarketStatus', () => ({ useMarketStatus: () => calendar.value }))
 
+// SUDARSHAN M10.2: the market alert form the sheet's Set alert opens, and its toast.
+const alerting = vi.hoisted(() => ({
+  create: vi.fn(),
+  prefs: vi.fn(async () => ({ telegram: true, app: true })),
+  toasts: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() },
+}))
+vi.mock('@/api/marketAlerts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/api/marketAlerts')>()),
+  marketAlertsApi: { create: alerting.create, prefs: alerting.prefs },
+}))
+vi.mock('@/utils/toast', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/utils/toast')>()),
+  toast: alerting.toasts,
+}))
+
 const remote = vi.hoisted(() => ({
   getMultiQuotes: vi.fn(),
   searchSymbols: vi.fn(),
@@ -178,6 +193,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { STALE_MS } from '@/sudarshan/dashboard/live'
 import { STORAGE_KEY as PRODUCT_KEY } from '@/sudarshan/ticket/productPref'
 import { LISTS_FULL } from '@/sudarshan/watchlist/ListTabs'
+import { OPEN_GUARD } from '@/sudarshan/watchlist/openGuard'
 import { fakeClock, frames } from '@/test/frames'
 import { feed } from '@/test/marketDataHarness'
 import Watchlist, { LIST_FULL, OPEN_LIST_KEY } from './Watchlist'
@@ -1265,5 +1281,166 @@ describe('Watchlist and the Back button', () => {
     await screen.findByRole('tab', { name: /Main/ })
     await waitFor(() => expect(where()).toHaveTextContent(/^\/watchlist$/))
     expect(screen.queryByRole('region', { name: 'Order ticket' })).toBeNull()
+  })
+})
+
+describe('Watchlist access to prices', () => {
+  afterEach(() => {
+    useAuthStore.setState({ apiKey: 'key', sessionChecked: true, brokerSessionExpired: false })
+  })
+
+  it('still checking: a quiet line, never the API key message', async () => {
+    useAuthStore.setState({ apiKey: null, sessionChecked: false, brokerSessionExpired: false })
+    renderPage()
+    expect(await screen.findByText('Checking your login')).toBeInTheDocument()
+    expect(screen.queryByText(/API key/)).toBeNull()
+  })
+
+  it('Upstox not logged in today: says so, with Auto login and Dashboard', async () => {
+    useAuthStore.setState({ apiKey: null, sessionChecked: true, brokerSessionExpired: true })
+    renderPage()
+    expect(await screen.findByText(/Upstox is not logged in today/)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Auto login' })).toBeInTheDocument()
+    expect(screen.queryByText(/API key/)).toBeNull()
+  })
+
+  it('no API key: the existing message and link', async () => {
+    useAuthStore.setState({ apiKey: null, sessionChecked: true, brokerSessionExpired: false })
+    renderPage()
+    expect(await screen.findByText('Prices and search need an API key.')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Create one under API Key' })).toBeInTheDocument()
+  })
+
+  it('ready: no notice', async () => {
+    useAuthStore.setState({ apiKey: 'key', sessionChecked: true, brokerSessionExpired: false })
+    renderPage()
+    expect(await screen.findByRole('heading', { level: 1 })).toBeInTheDocument()
+    expect(document.querySelector('[data-access]')).toBeNull()
+  })
+})
+
+describe('Watchlist market alerts (M10.2)', () => {
+  it('swaps the sheet for the alert form, from the snapped live price; Back returns to the list', async () => {
+    const user = userEvent.setup()
+    renderPage(['/dashboard', '/watchlist'])
+    const sheet = await openSheet(user, /^SBIN/, 'SBIN')
+    await waitFor(() => expect(remote.contractOf).toHaveBeenCalled())
+
+    await user.click(within(sheet).getByRole('button', { name: 'Set alert' }))
+    const form = await screen.findByRole('dialog', { name: 'New alert' })
+    expect(where()).toHaveTextContent('/watchlist?sheet=alert')
+    expect(screen.queryByRole('dialog', { name: 'SBIN' })).toBeNull()
+    expect(within(form).getByLabelText('Price level')).toHaveValue('812.40')
+    expect(within(form).getByLabelText('Check')).toHaveValue('crosses_above')
+
+    back()
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'New alert' })).toBeNull())
+    expect(where()).toHaveTextContent(/^\/watchlist$/)
+    back()
+    expect(await screen.findByText('Dashboard page')).toBeInTheDocument()
+  })
+
+  it('gives the form the contract’s tick, so a level off it says where it is met', async () => {
+    const user = userEvent.setup()
+    renderPage(['/dashboard', '/watchlist'])
+    const sheet = await openSheet(user, /^SBIN/, 'SBIN')
+    await waitFor(() => expect(remote.contractOf).toHaveBeenCalled())
+    await user.click(within(sheet).getByRole('button', { name: 'Set alert' }))
+    const form = await screen.findByRole('dialog', { name: 'New alert' })
+
+    await user.clear(within(form).getByLabelText('Price level'))
+    await user.type(within(form).getByLabelText('Price level'), '812.43')
+    expect(within(form).getByText('Checks at ₹812.45 (nearest tick)')).toBeInTheDocument()
+  })
+
+  it('offers no alert on an exchange market alerts do not cover, and says why', async () => {
+    server.state.lists.push({
+      id: 3,
+      name: 'FX',
+      position: 2,
+      items: [{ id: 31, symbol: 'USDINR28OCT26FUT', exchange: 'CDS', position: 0 }],
+    })
+    localStorage.setItem(OPEN_LIST_KEY, '3')
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(await screen.findByRole('button', { name: /^USDINR FUT/ }))
+    const sheet = screen.getByRole('dialog')
+
+    const set = within(sheet).getByRole('button', { name: 'Set alert' })
+    expect(set).toHaveAttribute('aria-disabled', 'true')
+    await user.click(set)
+    expect(screen.queryByRole('dialog', { name: 'New alert' })).toBeNull()
+    expect(
+      within(sheet).getByText(
+        'Market alerts work on NSE, BSE, NFO and BFO instruments and their indices for now.'
+      )
+    ).toBeVisible()
+  })
+
+  it('saves once, then says the alert is set, with View to it', async () => {
+    alerting.create.mockReset().mockResolvedValue({
+      id: 77,
+      symbol: 'SBIN',
+      exchange: 'NSE',
+      words: { condition: 'Crosses above ₹812.40', meta: 'Once', checks_at: null },
+    })
+    for (const fn of Object.values(alerting.toasts)) fn.mockReset()
+    const user = userEvent.setup()
+    renderPage(['/dashboard', '/watchlist'])
+    const sheet = await openSheet(user, /^SBIN/, 'SBIN')
+    await user.click(within(sheet).getByRole('button', { name: 'Set alert' }))
+    const form = await screen.findByRole('dialog', { name: 'New alert' })
+
+    await user.dblClick(within(form).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(alerting.toasts.success).toHaveBeenCalledTimes(1))
+    expect(alerting.create).toHaveBeenCalledTimes(1)
+    expect(alerting.create.mock.calls[0][0]).toMatchObject({
+      symbol: 'SBIN',
+      exchange: 'NSE',
+      params: { op: 'crosses_above', level: '812.40', source: 'ltp' },
+    })
+    const [title, options] = alerting.toasts.success.mock.calls[0]
+    expect(title).toBe('Alert set: SBIN')
+    expect(options.description).toBe('Crosses above ₹812.40')
+    await waitFor(() => expect(where()).toHaveTextContent(/^\/watchlist$/))
+
+    act(() => options.action.onClick())
+    expect(where()).toHaveTextContent('/market-alerts?alert=77')
+  })
+
+  it('takes no tap in the first half second the form is open', async () => {
+    alerting.create.mockReset().mockResolvedValue({
+      id: 78,
+      symbol: 'SBIN',
+      exchange: 'NSE',
+      words: { condition: '', meta: '', checks_at: null },
+    })
+    const user = userEvent.setup()
+    renderPage()
+    const sheet = await openSheet(user, /^SBIN/, 'SBIN')
+    // The guard reads the clock: hold it still, so a slow machine cannot end the half second early.
+    OPEN_GUARD.ms = 500
+    vi.useFakeTimers({ toFake: ['Date'] })
+    const opened = Date.now()
+    await user.click(within(sheet).getByRole('button', { name: 'Set alert' }))
+    const form = await screen.findByRole('dialog', { name: 'New alert' })
+
+    await user.click(within(form).getByRole('button', { name: 'Save' }))
+    expect(alerting.create).not.toHaveBeenCalled()
+
+    vi.setSystemTime(opened + 600)
+    await user.click(within(form).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(alerting.create).toHaveBeenCalledTimes(1))
+  })
+
+  it('does not reopen an alert form with the page: it opens only from a tap', async () => {
+    const alert = { symbol: 'SBIN', exchange: 'NSE', tick: 0.05, price: 812.4 }
+    renderPage([
+      '/watchlist',
+      { pathname: '/watchlist', search: '?sheet=alert', state: { sdOverlay: true, alert } },
+    ])
+    await screen.findByRole('tab', { name: /Main/ })
+    await waitFor(() => expect(where()).toHaveTextContent(/^\/watchlist$/))
+    expect(screen.queryByRole('dialog', { name: 'New alert' })).toBeNull()
   })
 })

@@ -32,6 +32,15 @@ public method to this.
 
 Retention: events with their deliveries, and pauses, older than ``keep_days`` (100, never under
 90) go at start and after each session; baselines after 10 days; definitions never.
+
+Read-only (cross-design X7, A7p): ``MarketStore(path, read_only=True)`` is for the replay check
+and anything else that only reads. It never creates the file, never migrates it and never
+writes: every write raises StoreError, and a file at another version than this code's is refused
+in words (an older one waits for the service to migrate it; a newer one keeps market alerts off).
+It opens the file read-only (mode=ro), which takes the locks a writer's commit respects. Only a
+directory the reader cannot write to, where a read-only open cannot make its shared-memory file,
+falls back to immutable (no locks): ``consistent`` then reads again when the file changed
+meanwhile, as owner.read_owner does (review L4).
 """
 
 from __future__ import annotations
@@ -43,6 +52,7 @@ from collections.abc import Iterator, Mapping
 from datetime import date
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from sqlalchemy import (
     Column,
@@ -67,6 +77,7 @@ from database.engine_factory import create_db_engine
 from sudarshan.alerts.market import migrations, spec
 from sudarshan.alerts.market.clock import Pause
 from sudarshan.alerts.market.engine import Fire, State, stop_reason
+from sudarshan.alerts.owner import _file_state
 from sudarshan.alerts.store import _cause, _private_file
 
 DB_FILENAME = "market.db"
@@ -105,7 +116,9 @@ alert_event = Table(
     Column("id", Integer, primary_key=True, autoincrement=True), Column("principal", String),
     Column("alert_id", Integer), Column("session", Integer), Column("fired_at", Integer),
     Column("trade_time", Integer),
-    *(Column(n, String) for n in ("symbol", "exchange", "kind", "title", "line", "value", "level")),
+    *(Column(n, String) for n in ("symbol", "exchange", "kind", "title", "line", "detail", "note",
+                                  "value", "level")),
+    Column("value_paise", Integer), Column("level_paise", Integer),  # review L8 (X3)
     Column("found_later", Integer), Column("opening", Integer), Column("test", Integer),
     Column("claim", String, unique=True),
 )  # fmt: skip
@@ -184,11 +197,54 @@ def writer(made: Engine) -> Engine:
     return made.execution_options(**{migrations.IMMEDIATE: True})
 
 
+def _read_urls(path: Path) -> list[str]:
+    target = quote(str(path))
+    return [f"sqlite:///file:{target}?mode=ro&uri=true",
+            f"sqlite:///file:{target}?immutable=1&uri=true"]  # fmt: skip
+
+
+def open_read_only(path: Path) -> Engine:
+    """market.db for reading only: never created, migrated or written. Raises StoreError in the
+    owner's words (SchemaTooNew for a file from a newer release)."""
+    if not path.exists():
+        raise StoreError(WORDS["missing"])
+    failure: Exception | None = None
+    for url in _read_urls(path):  # mode=ro; immutable=1 only where that cannot open
+        made = create_db_engine(url)
+        try:
+            with made.connect() as conn:
+                found = migrations.version(conn)
+        except SQLAlchemyError as exc:
+            made.dispose()
+            failure = exc
+            continue
+        if found > migrations.LATEST:
+            made.dispose()
+            raise migrations.SchemaTooNew(found, migrations.LATEST)
+        if found < migrations.LATEST:
+            made.dispose()
+            raise StoreError(WORDS["older"].format(found=found, known=migrations.LATEST))
+        return made
+    raise StoreError(WORDS["read"], _cause(failure))
+
+
 class MarketStore:
-    def __init__(self, path: Path | str, principals=("owner",), keep_days: int = KEEP_DAYS):
+    def __init__(
+        self,
+        path: Path | str,
+        principals=("owner",),
+        keep_days: int = KEEP_DAYS,
+        *,
+        read_only: bool = False,
+    ):
         self.path = Path(path)
         self.principals = frozenset(principals)
         self.keep_days = max(MIN_KEEP_DAYS, int(keep_days))
+        self.read_only = read_only
+        if read_only:
+            self.engine = open_read_only(self.path)
+            self.writer, self.applied = None, []
+            return
         try:
             _private_file(self.path)
             self.engine = engine(self.path)
@@ -348,7 +404,7 @@ class MarketStore:
         self,
         principal: str,
         fire: Fire,
-        state: State,
+        state: State | None,
         *,
         title: str,
         line: str,
@@ -357,10 +413,15 @@ class MarketStore:
         channels: Mapping[str, bool],
         status: str | None = None,
         status_reason: str = "",
+        detail: str = "",
+        note: str = "",
     ) -> int | None:
         """One fire with its state (and its stop), once: the event id, or None when its claim
         was already told. The state and the stop apply only while the alert is Active at the
-        version the fire was decided on (``fire.version``)."""
+        version the fire was decided on (``fire.version``); ``state`` None keeps the saved one
+        (a fire recorded again later, whose state the Book has saved since). ``title``,
+        ``detail`` and ``note`` are the toast's words and ``line`` the Telegram line, all frozen
+        as they were at the fire."""
         who = self._who(principal)
         if status is not None:
             _status(status)
@@ -375,12 +436,15 @@ class MarketStore:
             event_id = _log(conn, who, fire.claim, channels, fire.at, {
                 "alert_id": fire.alert_id, "session": fire.session, "fired_at": fire.at,
                 "trade_time": fire.trade_time, "symbol": row.symbol, "exchange": row.exchange,
-                "kind": row.kind, "title": title, "line": line, "value": value, "level": level,
+                "kind": row.kind, "title": title, "line": line, "detail": detail, "note": note,
+                "value": value, "level": level,
+                "value_paise": fire.value, "level_paise": fire.level,
                 "found_later": int(fire.found_later is not None), "opening": int(fire.opening),
                 "test": 0,
             })  # fmt: skip
             if row.version == fire.version and row.status == "active":
-                _put_state(conn, who, fire.alert_id, state, fire.at)
+                if state is not None:
+                    _put_state(conn, who, fire.alert_id, state, fire.at)
                 if status is not None:
                     _set_status(
                         conn, who, fire.alert_id, fire.version, status, status_reason, fire.at
@@ -388,7 +452,13 @@ class MarketStore:
         return event_id
 
     def record_test(
-        self, principal: str, title: str, line: str, now: int, channels: Mapping[str, bool]
+        self,
+        principal: str,
+        title: str,
+        line: str,
+        now: int,
+        channels: Mapping[str, bool],
+        detail: str = "",
     ) -> int:
         """A test from the Settings sheet, logged like a fire so its deliveries show."""
         who = self._who(principal)
@@ -396,7 +466,9 @@ class MarketStore:
             return _log(conn, who, f"test:{uuid.uuid4().hex}", channels, now, {
                 "alert_id": 0, "session": 0, "fired_at": now, "trade_time": None,
                 "symbol": "", "exchange": "", "kind": "test", "title": title, "line": line,
-                "value": None, "level": None, "found_later": 0, "opening": 0, "test": 1,
+                "detail": detail, "note": "", "value": None, "level": None, "value_paise": None,
+                "level_paise": None, "found_later": 0,
+                "opening": 0, "test": 1,
             })  # fmt: skip
 
     def set_delivery(
@@ -429,6 +501,13 @@ class MarketStore:
                 ).rowcount
             )
 
+    def deliveries(self, principal: str, event_ids) -> dict[int, dict[str, dict[str, Any]]]:
+        """Event id -> channel -> its delivery, for these events (what a settled one became)."""
+        who = self._who(principal)
+        ids = sorted({int(event_id) for event_id in event_ids})
+        with self._read() as conn:
+            return _deliveries_of(conn, who, ids)
+
     def events(
         self,
         principal: str,
@@ -455,6 +534,15 @@ class MarketStore:
             .limit(max(1, min(int(limit), 500)))
         )
         return self._with_deliveries(principal, query)
+
+    def event_by_claim(self, principal: str, claim: str) -> dict[str, Any] | None:
+        """The event recorded under ``claim``, with its deliveries, or None. A write reported as
+        failed may still have committed: the runtime asks before it tells (review A7.l)."""
+        query = select(alert_event).where(
+            alert_event.c.principal == self._who(principal), alert_event.c.claim == claim
+        )
+        found = self._with_deliveries(principal, query)
+        return found[0] if found else None
 
     def pending(self, principal: str, channel: str) -> list[dict[str, Any]]:
         """Events whose delivery on ``channel`` is still pending (after a restart)."""
@@ -533,6 +621,14 @@ class MarketStore:
             rows = conn.execute(query.order_by(p.started_at, p.id)).all()
         return tuple(Pause(row.started_at, row.ended_at, row.cause) for row in rows)
 
+    def open_pauses(self, principal: str) -> list[tuple[int, int, str]]:
+        """(row id, start, cause) of each pause never closed: a run that stopped inside it."""
+        self._who(principal)
+        p = pause_table.c
+        query = select(p.id, p.started_at, p.cause).where(p.ended_at.is_(None)).order_by(p.id)
+        with self._read() as conn:
+            return [(row.id, row.started_at, row.cause) for row in conn.execute(query)]
+
     def seen(self, principal: str) -> int | None:
         """The last moment market alerts were known to be checking (written every 10 s)."""
         self._who(principal)
@@ -571,6 +667,18 @@ class MarketStore:
     def close(self) -> None:
         self.engine.dispose()
 
+    def consistent(self, read):
+        """``read()`` on this store; on a lock-free (immutable) open it is done again once if the
+        file or its log changed while it ran, for a writer may have been mid-commit (review L4)."""
+        if not (self.read_only and "immutable=1" in str(self.engine.url)):
+            return read()
+        for _ in range(2):
+            before = _file_state(self.path)
+            found = read()
+            if _file_state(self.path) == before:
+                break
+        return found
+
     # ---- inside ----------------------------------------------------------------------------
     def _move(self, principal: str, alert_id: int, version: int, move: str, now: int) -> dict:
         """A pause, resume or restart, accepted only from the status it is for, checked in the
@@ -607,15 +715,7 @@ class MarketStore:
         who = self._who(principal)
         with self._read() as conn:
             rows = [dict(row) for row in conn.execute(query).mappings().all()]
-            ids = [row["id"] for row in rows]
-            found: dict[int, dict] = {i: {} for i in ids}
-            if ids:
-                d = alert_delivery.c
-                query = select(alert_delivery).where(d.event_id.in_(ids), d.principal == who)
-                for row in conn.execute(query).mappings():
-                    found[row["event_id"]][row["channel"]] = {
-                        name: row[name] for name in ("status", "reason", "attempts", "updated_at")
-                    }
+            found = _deliveries_of(conn, who, [row["id"] for row in rows])
         for row in rows:
             for flag in ("found_later", "opening", "test"):
                 row[flag] = bool(row[flag])
@@ -624,6 +724,8 @@ class MarketStore:
 
     @contextlib.contextmanager
     def _tx(self) -> Iterator:
+        if self.read_only:
+            raise StoreError(WORDS["read_only"], "opened read-only")
         try:
             with self.writer.begin() as conn:
                 yield conn
@@ -650,6 +752,11 @@ WORDS = {
     "read": "The market alert record could not be read just now. Alerts already set are still "
     "checked. Try again in a minute; if it keeps failing, check that the server has free disk "
     "space.",
+    "missing": "There is no market alert record yet: sudarshan-alerts makes it when market "
+    "alerts first start.",
+    "older": "The market alert record is from an older release (version {found}; this one reads "
+    "version {known}). Start sudarshan-alerts once to bring it up to date, then try again.",
+    "read_only": "The market alert record was opened only to read: nothing can be saved here.",
 }
 
 
@@ -733,6 +840,19 @@ def _set_status(
             .values(status=status, status_reason=reason, updated_at=now)
         ).rowcount
     )
+
+
+def _deliveries_of(conn, who: str, ids: list[int]) -> dict[int, dict[str, dict[str, Any]]]:
+    """Event id -> channel -> its delivery, an empty map for an event with none."""
+    found: dict[int, dict[str, dict[str, Any]]] = {event_id: {} for event_id in ids}
+    if ids:
+        d = alert_delivery.c
+        query = select(alert_delivery).where(d.event_id.in_(ids), d.principal == who)
+        for row in conn.execute(query).mappings():
+            found[row["event_id"]][row["channel"]] = {
+                name: row[name] for name in ("status", "reason", "attempts", "updated_at")
+            }
+    return found
 
 
 def _put_state(conn, who: str, alert_id: int, state: State, now: int) -> None:

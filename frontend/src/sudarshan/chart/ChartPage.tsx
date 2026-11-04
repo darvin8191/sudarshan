@@ -19,7 +19,7 @@
  * This file is layout and wiring only. A tick re-renders the price header and
  * nothing else: the price lives in a small store outside React's tree.
  */
-import { ArrowLeft, Search, SunMedium, X } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, BellPlus, RefreshCw, Search, SunMedium, X } from 'lucide-react'
 import type { Bar } from 'openalgo-charts'
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { Link, Navigate, useLocation, useNavigate, useParams } from 'react-router'
@@ -32,6 +32,10 @@ import { priceDp } from '@/lib/trading/format'
 import type { LiveStatus } from '@/lib/trading/liveStatus'
 import { cn } from '@/lib/utils'
 import { useThemeStore } from '@/stores/themeStore'
+import { AccessNotice } from '@/sudarshan/AccessNotice'
+import { usePriceAccess } from '@/sudarshan/access'
+import { AlertFormSheet, toastAlertSet } from '@/sudarshan/alerts/AlertForm' // SUDARSHAN M10.2
+import { isCovered } from '@/sudarshan/alerts/words'
 import { directionOf, formatPercent, formatPrice, formatRupees } from '@/sudarshan/dashboard/format'
 import { useNow } from '@/sudarshan/dashboard/hooks'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
@@ -113,13 +117,14 @@ export default function ChartPage() {
 
 type Inspect = { bar: Bar; x: number | null; y: number }
 
-/** A sheet over the chart, as the browser history entry it is. */
-type Sheet = { sheet: 'ticket'; side: 'BUY' | 'SELL' } | { sheet: 'search' }
+/** A sheet over the chart, as the browser history entry it is; `alert` is a market alert's form (M10.2). */
+type Sheet = { sheet: 'ticket'; side: 'BUY' | 'SELL' } | { sheet: 'search' } | { sheet: 'alert' }
 
 function readSheet(state: unknown): Sheet | null {
   if (!state || typeof state !== 'object') return null
   const value = state as { sheet?: unknown; side?: unknown }
   if (value.sheet === 'search') return { sheet: 'search' }
+  if (value.sheet === 'alert') return { sheet: 'alert' }
   if (value.sheet === 'ticket' && (value.side === 'BUY' || value.side === 'SELL'))
     return { sheet: 'ticket', side: value.side }
   return null
@@ -144,6 +149,11 @@ function PhoneChartScreen({
   const navigate = useNavigate()
   const location = useLocation()
   const appMode = useThemeStore((s) => s.appMode)
+  // The chart reads with the API key and today's Upstox login (src/sudarshan/access.ts).
+  const access = usePriceAccess()
+  const ready = access.state === 'ready'
+  /** Counts Try again after the stream settings could not be read. */
+  const [attempt, setAttempt] = useState(0)
   const [config, setConfig] = useState<FeedConfig | null | undefined>(undefined)
   const [info, setInfo] = useState<InstrumentInfo | null | undefined>(undefined)
   const [chip, setChip] = useState<ChartChip>(() => readChip())
@@ -169,7 +179,14 @@ function PhoneChartScreen({
     saveLastInstrument(symbol, exchange)
   }, [symbol, exchange])
 
+  // Read once prices can be read at all; until then the chart is not built, and
+  // a chart built before is let go, so it is built again on a fresh host.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Try again is the trigger
   useEffect(() => {
+    if (!ready) {
+      setConfig(undefined)
+      return
+    }
     let alive = true
     void loadFeedConfig().then((value) => {
       if (alive) setConfig(value)
@@ -177,7 +194,7 @@ function PhoneChartScreen({
     return () => {
       alive = false
     }
-  }, [])
+  }, [ready, attempt])
 
   useEffect(() => {
     if (!config) return
@@ -282,6 +299,15 @@ function PhoneChartScreen({
     closing.current = false
   }, [location.key])
 
+  // SUDARSHAN M10.2: an alert form restored with the page (a reload, the phone bringing the app
+  // back) is not reopened: it opens only from a tap, as the watchlist's does.
+  const restoredAlert = useRef(sheet?.sheet === 'alert')
+  useEffect(() => {
+    if (!restoredAlert.current) return
+    restoredAlert.current = false
+    closeSheet()
+  }, [closeSheet])
+
   // The search's entry is gone: the instrument picked takes the chart's own.
   const sheetKind = sheet?.sheet ?? null
   useEffect(() => {
@@ -293,21 +319,45 @@ function PhoneChartScreen({
 
   const dp = (ltp: number) => priceDp(info?.tickSize, ltp)
 
+  // Checking the login, Upstox not logged in today, or no API key: the same
+  // words as every other screen, in place of the chart.
+  if (!ready) {
+    return (
+      <Screen>
+        <AppBar symbol={symbol} exchange={exchange} onBack={back} />
+        <AccessNotice access={access} className="m-4" />
+      </Screen>
+    )
+  }
+
+  // There is a key and a login, so the stream's settings did not come back:
+  // most often the phone's connection, which the owner can check himself.
   if (config === null) {
     return (
       <Screen>
         <AppBar symbol={symbol} exchange={exchange} onBack={back} />
-        <div className="m-4 rounded-2xl border bg-card p-4 text-sm shadow-[var(--shadow-card)]">
-          <p className="font-semibold">The chart needs your API key.</p>
-          <p className="mt-1 text-muted-foreground">
-            Charts read prices with it. Create one on the API key page, then come back.
+        <div className="m-4 flex flex-col items-start rounded-2xl border bg-card px-4 pt-4 pb-1 text-sm shadow-[var(--shadow-card)]">
+          <p className="flex items-start gap-2 font-semibold">
+            <AlertTriangle
+              aria-hidden="true"
+              className="mt-0.5 size-4 shrink-0 text-[color:var(--warning-text)]"
+            />
+            The chart could not start.
           </p>
-          <Link
-            to="/apikey"
-            className="mt-2 inline-flex min-h-12 items-center font-semibold text-primary underline-offset-4 hover:underline"
+          <p className="mt-1 text-muted-foreground">
+            Check the phone's connection, then try again.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setConfig(undefined)
+              setAttempt((count) => count + 1)
+            }}
+            className="inline-flex min-h-12 items-center gap-2 font-semibold text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            Open the API key page
-          </Link>
+            <RefreshCw aria-hidden="true" className="size-4" />
+            Try again
+          </button>
         </div>
       </Screen>
     )
@@ -322,6 +372,7 @@ function PhoneChartScreen({
         name={info?.name}
         onBack={back}
         onSearch={() => openSheet({ sheet: 'search' })}
+        onAlert={isCovered(exchange) ? () => openSheet({ sheet: 'alert' }) : undefined}
       />
 
       <PriceHeader
@@ -439,6 +490,21 @@ function PhoneChartScreen({
           strategy={STRATEGY}
         />
       )}
+      {sheet?.sheet === 'alert' && (
+        <AlertFormSheet
+          prefill={{
+            symbol,
+            exchange,
+            tick: info?.tickSize ?? null,
+            price: prices.get().tick?.ltp ?? null,
+          }}
+          onClose={closeSheet}
+          onSaved={(saved) => {
+            closeSheet()
+            toastAlertSet(saved, navigate)
+          }}
+        />
+      )}
       <SymbolSearchDialog
         open={searching}
         onOpenChange={(open) => !open && closeSheet()}
@@ -472,12 +538,15 @@ function AppBar({
   name,
   onBack,
   onSearch,
+  onAlert,
 }: {
   symbol: string
   exchange: string
   name?: string
   onBack(): void
   onSearch?(): void
+  /** A market alert on this instrument (M10.2); absent where market alerts do not reach. */
+  onAlert?(): void
 }) {
   const title = (
     <span className="flex min-w-0 flex-col">
@@ -520,6 +589,16 @@ function AppBar({
           className="inline-flex size-12 shrink-0 items-center justify-center rounded-full hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <Search aria-hidden="true" className="size-5" />
+        </button>
+      )}
+      {onAlert && (
+        <button
+          type="button"
+          onClick={onAlert}
+          aria-label="Set alert"
+          className="inline-flex size-12 shrink-0 items-center justify-center rounded-full hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <BellPlus aria-hidden="true" className="size-5" />
         </button>
       )}
     </header>

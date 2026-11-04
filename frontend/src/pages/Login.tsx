@@ -1,6 +1,7 @@
 import { ArrowLeft, ArrowRight, Eye, EyeOff, Fingerprint, Loader2, ShieldCheck } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
+import { syncSession } from '@/components/auth/AuthSync'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -176,6 +177,10 @@ export default function Login() {
       } else {
         // Set login state (broker from response if session was resumed, empty otherwise)
         setLogin(username, data.broker || '')
+        // SUDARSHAN: and what the page load would have brought: the API key,
+        // today's broker login, capabilities and mode. A resumed broker session
+        // goes straight to the dashboard, with no reload to run AuthSync.
+        await syncSession({ keepOnFailure: true })
         showToast.success('Login successful', 'system')
         // Use redirect from response if provided, otherwise go to broker
         navigate(data.redirect || '/broker')
@@ -228,6 +233,8 @@ export default function Login() {
       }
 
       setLogin(username, data.broker || '')
+      // SUDARSHAN: as after the password step (handleSubmit).
+      await syncSession({ keepOnFailure: true })
       showToast.success('Login successful', 'system')
       navigate(data.redirect || '/broker')
     } catch (_err) {

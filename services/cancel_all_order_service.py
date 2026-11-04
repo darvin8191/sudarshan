@@ -63,7 +63,11 @@ def import_broker_module(broker_name: str) -> Any | None:
 
 
 def cancel_all_orders_with_auth(
-    order_data: dict[str, Any], auth_token: str, broker: str, original_data: dict[str, Any]
+    order_data: dict[str, Any],
+    auth_token: str,
+    broker: str,
+    original_data: dict[str, Any],
+    force_live: bool = False,  # SUDARSHAN M5.13: the kill switch's cancel is always Live
 ) -> tuple[bool, dict[str, Any], int]:
     """
     Cancel all orders using provided auth token.
@@ -85,7 +89,7 @@ def cancel_all_orders_with_auth(
         order_request_data.pop("apikey", None)
 
     # If in analyze mode, route to sandbox for sandbox trading
-    if get_analyze_mode():
+    if not force_live and get_analyze_mode():  # SUDARSHAN M5.13
         from services.sandbox_service import sandbox_cancel_all_orders
 
         api_key = original_data.get("apikey")
@@ -112,7 +116,9 @@ def cancel_all_orders_with_auth(
             canceled_orders=response_data.get("canceled_orders", []) if isinstance(response_data, dict) else [],
             failed_cancellations=response_data.get("failed_cancellations", []) if isinstance(response_data, dict) else [],
             request_data=analyzer_request, response_data=response_data,
-            api_key=order_data.get("apikey", ""),
+            # SUDARSHAN: the caller's key, checked above. The app's Cancel all passes
+            # order_data={}, so its key was empty and the Telegram alert found no user.
+            api_key=api_key,
         ))
         return success, response_data, status_code
 
@@ -176,7 +182,9 @@ def cancel_all_orders_with_auth(
         }
         bus.publish(OrderFailedEvent(
             mode="live", api_type=API_TYPE,
-            request_data=order_request_data, response_data=error_response,
+            request_data=order_request_data,
+            # SUDARSHAN M6.8: told on Telegram with its reason (subscribers/telegram_subscriber.py).
+            response_data={**error_response, "nothing_sent": True},
             api_key=original_data.get("apikey", ""),
             error_message=error_response["message"],
         ))

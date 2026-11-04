@@ -8,6 +8,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { tradingApi } from '@/api/trading'
+import { noteKillSwitch, resetKillSwitchForTests } from '@/sudarshan/risk/killSwitch'
 import { render, screen, userEvent, waitFor } from '@/test/test-utils'
 import { showToast } from '@/utils/toast'
 import { lotsFor, PlaceOrderDialog } from './PlaceOrderDialog'
@@ -150,5 +151,34 @@ describe('PlaceOrderDialog', () => {
     } finally {
       host.remove()
     }
+  })
+})
+
+describe('PlaceOrderDialog while the kill switch is on', () => {
+  beforeEach(() => resetKillSwitchForTests())
+
+  it('says on the ticket that a new order is refused, and disables nothing', () => {
+    noteKillSwitch({ known: true, on: true }, 'on')
+    render(<PlaceOrderDialog {...nifty} />)
+    expect(screen.getByTestId('kill-switch-note')).toHaveTextContent(
+      'Kill switch on: a new order is refused'
+    )
+    for (const button of screen.getAllByRole('button', { name: /buy/i })) {
+      expect(button).toBeEnabled()
+    }
+  })
+
+  it('says only that the sandbox is covered when the guard is at the sandbox stage', () => {
+    noteKillSwitch({ known: true, on: true }, 'sandbox')
+    render(<PlaceOrderDialog {...nifty} />)
+    expect(screen.getByTestId('kill-switch-note')).toHaveTextContent(
+      'for the sandbox only: Live orders are not checked'
+    )
+  })
+
+  it('has no line while it is off', () => {
+    noteKillSwitch({ known: true, on: false }, 'on')
+    render(<PlaceOrderDialog {...nifty} />)
+    expect(screen.queryByTestId('kill-switch-note')).toBeNull()
   })
 })
