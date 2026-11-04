@@ -118,6 +118,7 @@ alert_event = Table(
     Column("trade_time", Integer),
     *(Column(n, String) for n in ("symbol", "exchange", "kind", "title", "line", "detail", "note",
                                   "value", "level")),
+    Column("value_paise", Integer), Column("level_paise", Integer),  # review L8 (X3)
     Column("found_later", Integer), Column("opening", Integer), Column("test", Integer),
     Column("claim", String, unique=True),
 )  # fmt: skip
@@ -437,6 +438,7 @@ class MarketStore:
                 "trade_time": fire.trade_time, "symbol": row.symbol, "exchange": row.exchange,
                 "kind": row.kind, "title": title, "line": line, "detail": detail, "note": note,
                 "value": value, "level": level,
+                "value_paise": fire.value, "level_paise": fire.level,
                 "found_later": int(fire.found_later is not None), "opening": int(fire.opening),
                 "test": 0,
             })  # fmt: skip
@@ -464,7 +466,8 @@ class MarketStore:
             return _log(conn, who, f"test:{uuid.uuid4().hex}", channels, now, {
                 "alert_id": 0, "session": 0, "fired_at": now, "trade_time": None,
                 "symbol": "", "exchange": "", "kind": "test", "title": title, "line": line,
-                "detail": detail, "note": "", "value": None, "level": None, "found_later": 0,
+                "detail": detail, "note": "", "value": None, "level": None, "value_paise": None,
+                "level_paise": None, "found_later": 0,
                 "opening": 0, "test": 1,
             })  # fmt: skip
 

@@ -84,6 +84,8 @@ V1 = (
         note TEXT NOT NULL DEFAULT '',
         value TEXT,
         level TEXT,
+        value_paise INTEGER,
+        level_paise INTEGER,
         found_later INTEGER NOT NULL DEFAULT 0,
         opening INTEGER NOT NULL DEFAULT 0,
         test INTEGER NOT NULL DEFAULT 0,

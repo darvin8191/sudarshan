@@ -592,7 +592,7 @@ def test_prune_keeps_100_days_never_fewer_than_90_and_every_definition(path):
 # ---- principal -----------------------------------------------------------------------------
 
 #: Upkeep, not readers: they touch no one's rows by principal.
-UPKEEP = {"prune", "close"}
+UPKEEP = {"prune", "close", "consistent"}
 
 
 def test_every_public_method_takes_the_principal_first():
@@ -633,3 +633,12 @@ def test_one_principal_never_reads_anothers_rows(path):
         store.record_fire("owner", fire(theirs["id"], "x"), State(), title="t", line="l",
                           value="v", level="l", channels=BOTH)  # fmt: skip
     store.close()
+
+
+def test_a_fire_keeps_its_value_and_level_in_paise_beside_the_words(path, store):
+    """Review L8 (X3): the words alone cannot be summed, compared or checked against the feed."""
+    row = store.create("owner", FIELDS, NOW)
+    store.record_fire("owner", fire(row["id"], "1:v1:once"), State(20261021, 0), title="t",
+                      line="l", value="100.05", level="100.00", channels=BOTH)  # fmt: skip
+    assert raw(path, "SELECT value, level, value_paise, level_paise FROM alert_event") == [
+        ("100.05", "100.00", 10005, 10000)]  # fmt: skip
