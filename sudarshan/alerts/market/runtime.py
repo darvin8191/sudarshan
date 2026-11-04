@@ -79,6 +79,8 @@ log = logging.getLogger("sudarshan.alerts.market")
 
 OWNER = "owner"
 TICK_S = 1.0
+#: Turns the clock job gives the frames job before judging candles (256 frames each).
+SETTLE_YIELDS = 100
 #: Connected and claimed this long with no price for a key: the card says so (design 2.3).
 NO_PRICES_MS = 60_000
 FLUSH_MS = 1_000
@@ -94,6 +96,14 @@ PUSH_FLUSH_S = 1.0
 #: How long after a failed or empty read of OpenAlgo's master contract it is read again.
 MASTER_RETRY_S = 300.0
 RESTARTED = "The alert service restarted before it was sent; it is in the alert history"
+
+
+def until_next_tick(now_ms: int, tick_s: float | None = None) -> float:
+    """Seconds to the next whole tick of the clock job, so a candle is judged at its grace's
+    end and not up to a second after it (review L11)."""
+    tick = TICK_S if tick_s is None else tick_s
+    step = max(1, round(tick * 1000))
+    return (step - now_ms % step) / 1000
 
 
 class MarketRuntime:
@@ -718,6 +728,7 @@ class MarketRuntime:
             now = self._now()
             self._roll(now)
             self._watch(now)
+            await self._settle()  # frames within the grace are judged before a candle is (L11)
             outcomes = self.book.on_clock(now, self.market)
             if outcomes:
                 self._handle(outcomes, now)
@@ -730,7 +741,15 @@ class MarketRuntime:
                 self._submit(self.store.set_seen, OWNER, now)
             self._read_master(now)
             self._prune(now)
-            await asyncio.sleep(TICK_S)
+            await asyncio.sleep(until_next_tick(self._now()))
+
+    async def _settle(self) -> None:
+        """Let the frames already waiting on the socket be judged before the clock judges a
+        candle: under load the frames job may not have run since they arrived. Bounded."""
+        for _ in range(SETTLE_YIELDS):
+            if self.link is None or not self.link.waiting():
+                return
+            await asyncio.sleep(0)
 
     def _roll(self, now: int, force: bool = False) -> None:
         """Today's sessions, asked again at midnight and every 30 s (A7.c)."""

@@ -106,6 +106,10 @@ class FeedLink:
             self.sock.unsubscribe(key.encode())
         self.topics = want
 
+    def waiting(self) -> bool:
+        """Frames are waiting on the socket, not yet taken."""
+        return not self.sock.closed and bool(self.sock.getsockopt(zmq.EVENTS) & zmq.POLLIN)
+
     async def receive(self) -> list[tuple[str, bytes]]:
         """Wait for a frame, then take those already waiting, up to DRAIN: (topic, payload),
         only health and the keys followed (a topic is matched exactly)."""

@@ -829,3 +829,44 @@ def test_market_alerts_off_by_themselves_drop_their_keys_and_a_stop_keeps_them(a
             assert feed.drops == 0
 
     asyncio.run(scenario())
+
+
+def test_the_clock_job_ticks_on_the_second():
+    """Review L11: unaligned, a candle was judged up to a second after its grace ended."""
+    assert runtime.until_next_tick(10_000) == 1.0
+    assert runtime.until_next_tick(10_250) == pytest.approx(0.75)
+    assert runtime.until_next_tick(10_999) == pytest.approx(0.001)
+    assert runtime.until_next_tick(7_030, 0.05) == pytest.approx(0.02)
+
+
+def test_frames_waiting_on_the_socket_are_judged_before_a_candle_is(alerts, quick):
+    """Review L11 (X5): a frame that arrived within the grace may not have been taken yet when
+    the clock job runs; the clock job gives the frames job its turns first."""
+
+    async def scenario():
+        clock = Clock(ist(2026, 10, 21, 10, 0))
+        async with FakeFeed(clock) as feed, FakeOpenAlgo() as notify:
+            settings = alerts(notify)
+            create(settings, clock())
+            rt, task = await started(settings, feed, clock)
+            real, order, backlog = rt.link.waiting, [], [3]
+
+            def waiting():
+                order.append("poll")
+                backlog[0] -= 1
+                return backlog[0] >= 0
+
+            rt.link.waiting = waiting
+            on_clock = rt.book.on_clock
+
+            def judged(now, market):
+                order.append("judge")
+                return on_clock(now, market)
+
+            rt.book.on_clock = judged
+            await wait_until(lambda: "judge" in order)
+            assert order[:5] == ["poll", "poll", "poll", "poll", "judge"]  # 3 turns, then none
+            rt.link.waiting = real
+            await stopped(rt, task)
+
+    asyncio.run(scenario())
