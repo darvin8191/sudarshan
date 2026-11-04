@@ -368,7 +368,9 @@ def test_s19_two_phones_and_tradingview_exiting_one_position_together_send_one(w
     )
     assert [o["symbol"] for o in world.broker.orders] == [X]
     refused = [body["message"] for w, code, body, *_ in world.answers if code == 409]
-    assert len(refused) == 2 and all("still working at Upstox" in words for words in refused)
+    assert len(refused) == 2 and all(
+        "already on its way" in words or "still working at Upstox" in words for words in refused
+    )  # the claim while the first is placed, or the hold once it is noted
 
 
 def test_s20_a_tradingview_exit_whose_read_answers_late_is_not_sent_again(world):
