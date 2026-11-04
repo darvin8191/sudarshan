@@ -60,7 +60,10 @@ class FakeFeed:
         with contextlib.suppress(asyncio.CancelledError):
             await self._beat
         self.server.close()
-        await self.server.wait_closed()
+        if hasattr(self.server, "abort_clients"):  # 3.13: a request still waiting is cut
+            self.server.abort_clients()
+        with contextlib.suppress(TimeoutError):  # never the test run's hang at exit (review)
+            await asyncio.wait_for(self.server.wait_closed(), 3)
         self.pub.close(0)
         self.ctx.term()
 
