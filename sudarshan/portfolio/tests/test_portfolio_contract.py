@@ -32,6 +32,7 @@ from sudarshan.vault.keys import PORTFOLIO_API_INFO
 REPO = Path(__file__).resolve().parents[3]
 PACKAGE = REPO / "sudarshan" / "portfolio"
 CORE = PACKAGE / "core"
+IMPORTS = PACKAGE / "imports"
 TYPES_TS = REPO / "frontend" / "src" / "sudarshan" / "portfolio" / "types.ts"
 README = PACKAGE / "README.md"
 
@@ -427,26 +428,38 @@ PURE_STDLIB = frozenset(
         "typing",
     }
 )
+#: What imports/ may use besides: text in memory (csv, io) and a hash (hashlib); no file, no clock.
+IMPORTS_STDLIB = PURE_STDLIB | {"csv", "hashlib", "io"}
 BANNED_CALLS = frozenset({"open", "print", "input", "exec", "eval", "compile", "__import__"})
 BANNED_ATTRIBUTES = frozenset(
-    {"now", "today", "utcnow", "read_text", "write_text", "read_bytes", "write_bytes", "unlink"}
+    {
+        "now",
+        "today",
+        "utcnow",
+        "open",
+        "read_text",
+        "write_text",
+        "read_bytes",
+        "write_bytes",
+        "unlink",
+    }
 )
 
 
-def impurities(source: str) -> list[str]:
+def impurities(source: str, allowed: frozenset = PURE_STDLIB) -> list[str]:
     """Why this source is not pure: an import outside the allowed few, a clock, a file, a print."""
     found = []
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.Import):
             for alias in node.names:
                 top = alias.name.partition(".")[0]
-                if top not in PURE_STDLIB and not alias.name.startswith("sudarshan.portfolio.core"):
+                if top not in allowed and not alias.name.startswith("sudarshan.portfolio.core"):
                     found.append(f"imports {alias.name}")
         elif isinstance(node, ast.ImportFrom):
             module = node.module or ""
             if node.level:  # a relative import stays inside the package
                 continue
-            if module.partition(".")[0] not in PURE_STDLIB and not module.startswith(
+            if module.partition(".")[0] not in allowed and not module.startswith(
                 "sudarshan.portfolio.core"
             ):
                 found.append(f"imports from {module}")
@@ -464,6 +477,19 @@ def impurities(source: str) -> list[str]:
 @pytest.mark.parametrize("path", sorted(CORE.glob("*.py")), ids=lambda path: path.name)
 def test_a_core_module_does_no_io(path):
     assert impurities(path.read_text(encoding="utf-8")) == []
+
+
+@pytest.mark.parametrize("path", sorted(IMPORTS.glob("*.py")), ids=lambda path: path.name)
+def test_an_import_module_does_no_io(path):
+    assert impurities(path.read_text(encoding="utf-8"), IMPORTS_STDLIB) == []
+
+
+def test_the_import_modules_are_all_held_to_it():
+    assert {path.name for path in IMPORTS.glob("*.py")} >= {
+        "csvutil.py",
+        "generic.py",
+        "preview.py",
+    }
 
 
 @pytest.mark.parametrize(
@@ -491,6 +517,29 @@ def test_the_purity_check_lets_the_pure_imports_through():
     assert impurities("from decimal import Decimal\nfrom fractions import Fraction\n") == []
     assert impurities("from sudarshan.portfolio.core.kinds import QTY_SCALE") == []
     assert impurities("from .kinds import QTY_SCALE") == []
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import os",
+        "import socket",
+        "import pathlib",
+        "from threading import Lock",
+        "import io\nio.open('f')",
+        "from pathlib import Path\nPath('x').open()",
+        "import csv\nopen('f')",
+        "from datetime import date\nx = date.today()",
+    ],
+)
+def test_the_import_modules_are_held_to_the_same_check(source):
+    assert impurities(source, IMPORTS_STDLIB) != []
+
+
+def test_text_in_memory_and_a_hash_are_allowed_to_the_import_modules_only():
+    text = "import csv\nimport hashlib\nimport io\nio.StringIO('a')\n"
+    assert impurities(text, IMPORTS_STDLIB) == []
+    assert len(impurities(text)) == 3
 
 
 # -- the reader of types.ts is itself honest -----------------------------------------------------

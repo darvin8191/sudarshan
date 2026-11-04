@@ -8,10 +8,10 @@ preview and the entry form all use these.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 
-from .kinds import PRICE_SCALE, QTY_SCALE
+from .kinds import IMPORT_ACTIONS, PRICE_SCALE, QTY_SCALE, WORDS
 from .money import unit_price_u
 
 RUPEE = chr(0x20B9)
@@ -64,6 +64,12 @@ def group_in(number: int) -> str:
 def date(day: int) -> str:
     """20250312 -> "12 Mar 2025"."""
     return f"{day % 100} {MONTHS[day // 100 % 100 - 1]} {day // 10000}"
+
+
+def date_short(day: int, today: int) -> str:
+    """A day without its year when it is this year's: "28 Oct", or "28 Oct 2025"."""
+    text = date(day)
+    return text.rpartition(" ")[0] if day // 10000 == today // 10000 else text
 
 
 def rupees(paise: int) -> str:
@@ -277,3 +283,180 @@ def describe(move) -> str:
     if entry.to_account_id is None:  # shares taken out
         return _lots(move.used) + DOT + "left at cost, no gain or loss"
     return _lots(move.used) + DOT + "cost and dates kept"
+
+
+# ---- importing a file of entries (design 4.11) --------------------------------------------------
+#: A file that cannot be read at all, and what a row says when it cannot be used. Every sentence
+#: names the row (the header is row 1) and what to change, and never a code or a cell's whole
+#: text: ``shown`` keeps what a cell echoes short.
+IMPORT_EMPTY = "The file is empty. Choose a CSV file whose first row names the columns."
+IMPORT_UNREADABLE = (
+    "This file could not be read as a CSV table. "
+    "Save it as CSV (UTF-8) from your spreadsheet and try again."
+)
+ROW_CELLS = (
+    "This row has more columns than the first row. A note with a comma needs quotes around it."
+)
+ROW_NO_ACCOUNT = "No account is named. Choose an account for the rows that do not name one."
+ROW_NO_SECOND_ACCOUNT = (
+    "A transfer between two accounts needs the second account in the to_account column."
+)
+ROW_ONE_ACCOUNT = (
+    "A transfer from outside or to outside takes one account. Leave the to_account column empty."
+)
+ROW_NO_ASSET = "No share or fund is named. Fill in the symbol or the ISIN."
+
+
+def shown(text: str, longest: int = 30) -> str:
+    """What a sentence echoes of a cell: one line, and cut short if it is long."""
+    flat = " ".join(text.split())
+    return flat if len(flat) <= longest else flat[: longest - 3] + "..."
+
+
+def _list(names: list[str]) -> str:
+    """Names quoted and joined: 'date'; 'date' and 'action'; 'a', 'b' and 'c'."""
+    quoted = [f"'{name}'" for name in names]
+    return quoted[0] if len(quoted) == 1 else ", ".join(quoted[:-1]) + " and " + quoted[-1]
+
+
+def import_columns(missing: list[str]) -> str:
+    """The first row does not name a column the format cannot do without."""
+    verb = "column is" if len(missing) == 1 else "columns are"
+    return (
+        f"The first row of the file must name its columns, and the {_list(missing)} {verb} needed."
+    )
+
+
+def import_column_twice(name: str) -> str:
+    return f"The column '{name}' appears twice in the first row. Keep one of them."
+
+
+def import_too_many_rows(most: int) -> str:
+    return (
+        f"This file has more than {group_in(most)} rows. "
+        "Download it in shorter date ranges and import each part."
+    )
+
+
+def row_says(number: int, sentence: str) -> str:
+    """A sentence about a row of the file, led by its number (the header is row 1)."""
+    return f"Row {number}: {sentence}"
+
+
+def row_date(text: str) -> str:
+    return (
+        f"The date '{shown(text)}' is not a real date. "
+        "Write it as 2026-03-10, 10-03-2026 or 10/03/2026 (day first)."
+    )
+
+
+def row_future(day: int) -> str:
+    return f"{date(day)} is after today. {WORDS['future_date']}"
+
+
+def row_action(text: str) -> str:
+    allowed = ", ".join(IMPORT_ACTIONS[:-1]) + " or " + IMPORT_ACTIONS[-1]
+    return f"The action '{shown(text)}' is not one this file can use. Use {allowed}."
+
+
+def row_number(label: str, text: str) -> str:
+    return (
+        f"The {label} '{shown(text)}' is not a number. "
+        "Write it with digits and a decimal point only, without commas or a currency sign."
+    )
+
+
+def row_negative(label: str, text: str) -> str:
+    hint = " The action says whether it is a purchase or a sale." if label == "quantity" else ""
+    return f"The {label} '{shown(text)}' cannot be negative.{hint}"
+
+
+def row_decimals(label: str, text: str, most: int) -> str:
+    return f"The {label} '{shown(text)}' has more than {most} decimals."
+
+
+def row_ratio(text: str) -> str:
+    return (
+        f"The ratio '{shown(text)}' must be two whole numbers such as 5:1 (each share becomes 5) "
+        "or 1:10 (one new for every ten old)."
+    )
+
+
+def row_note(most: int) -> str:
+    return f"The note is longer than {most} characters. Shorten it."
+
+
+def row_account(name: str) -> str:
+    return (
+        f"There is no account called '{shown(name)}' in this portfolio. "
+        "Check the name, or add the account first."
+    )
+
+
+def row_account_twice(name: str) -> str:
+    return f"More than one account is called '{shown(name)}'. Rename one of them first."
+
+
+def row_symbol(symbol: str) -> str:
+    return f"{shown(symbol)} is not in today's instrument list. Check the symbol."
+
+
+def row_isin(isin: str) -> str:
+    return f"The ISIN {shown(isin)} is not in today's instrument list. Check the ISIN."
+
+
+def row_step(asset: str, decimals: int) -> str:
+    """A quantity with more decimals than the holding takes."""
+    if decimals == 0:
+        return WORDS["whole_shares"]
+    return f"A quantity of {asset} takes at most {decimals} decimals."
+
+
+def row_amount(amount_paise: int, computed_paise: int) -> str:
+    """A note on a row that gives an amount and a quantity and price that do not agree."""
+    return (
+        f"The amount {rupees(amount_paise)} is used, "
+        f"not quantity times price ({rupees(computed_paise)})."
+    )
+
+
+def row_dup(number: int, imported: int, today: int) -> str:
+    return f"Row {number} is already in this tab (imported {date_short(imported, today)})."
+
+
+def row_repeat(number: int, first: int) -> str:
+    return f"Row {number} is the same trade as row {first}, which is in this file too."
+
+
+def import_clash(asset: str, kind: str, day: int, reason: str, unit: str) -> str:
+    """The rows of one holding cannot join the tab: an entry already there would no longer stand.
+
+    ``kind`` and ``day`` name that entry; ``reason`` is the refusal's (short, not_held, fraction).
+    """
+    breaks = (
+        f"make the {NOUNS[kind]} on {date(day)} leave part of a share"
+        if reason == "fraction"
+        else f"leave the {NOUNS[kind]} on {date(day)} without {unit}"
+    )
+    return (
+        f"The rows for {asset} do not fit the entries already in this tab: they would {breaks}. "
+        "None of them is imported. Check whether the same trades are already in this tab, "
+        "or fix that entry first."
+    )
+
+
+def import_summary(new: int, dup: int, bad: int) -> str:
+    """The counts in a line (42 new, 3 already in this tab, 2 with problems), zeros left out."""
+    parts = []
+    if new:
+        parts.append(f"{group_in(new)} new")
+    if dup:
+        parts.append(f"{group_in(dup)} already in this tab")
+    if bad:
+        parts.append("1 with a problem" if bad == 1 else f"{group_in(bad)} with problems")
+    return ", ".join(parts) or "The file has no rows."
+
+
+def import_unused(names: Sequence[str]) -> str:
+    """The columns of the file that nothing is read from (a misspelt name is the usual cause)."""
+    return f"Not used: {', '.join(shown(name, 20) for name in names)}."
