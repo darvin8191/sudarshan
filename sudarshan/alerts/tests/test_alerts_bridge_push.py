@@ -154,7 +154,9 @@ def test_logout_closes_the_room_and_still_works_without_one(room, monkeypatch):
     assert not joined.is_connected()
     after = app.test_client()
     login_session(after, OWNER)
-    assert after.post("/auth/logout", headers=csrf_headers(after)).status_code == 200  # no socket in the room now
+    assert (
+        after.post("/auth/logout", headers=csrf_headers(after)).status_code == 200
+    )  # no socket in the room now
 
 
 def test_the_daily_revoke_closes_the_room(room, monkeypatch):

@@ -211,7 +211,7 @@ nightly backup job records) every 20 seconds and sends through the same path as 
   of space, cap, write, source, integrity, offsite, settings, lock, overdue or other
   (`ops/backup.py`); any other word reads as "could not be completed".
 
-`SUDARSHAN_ORDER_ALERTS=off` also turns these off (the service exits). `SUDARSHAN_NOTICE_SPOOLS`
+`SUDARSHAN_ORDER_ALERTS=off` also turns these off. The service exits only if market alerts are off too; with them on, the process stays up and only order alerts and these notices stop. `SUDARSHAN_NOTICE_SPOOLS`
 (below) names the files to read. The first run of the deploy tool that records notices also tells
 the install of the tool before it, which made no record, once, if it was within the last 12
 hours; so v0.3.3's own install is told by the next timer run after it.
@@ -242,8 +242,20 @@ message text.
 The document is built by one plain function, `health_document(service)` in `health.py`
 (synchronous, changes nothing, its only I/O is reading the release record). The market alerts' API
 serves the same document with its own fields beside it (its state is `market_state`, so no name is
-shared); once both are in, that API is the only listener on 5582 and this page and its port
-setting go away.
+shared). That API is the only listener on 5582; there is no separate health listener (a test pins
+that nothing listens on 5585).
+
+| market field | meaning |
+|---|---|
+| `market_alerts` | `on` or `off`: whether market alerts are switched on and could start |
+| `market_state` | `off` (switched off, could not start, or stopped unexpectedly), `starting`, `running` (judging alerts) or `stopped` (shut down in order) |
+| `alerts_active` | how many Active alerts are being judged; 0 while off |
+| `instruments` | how many instruments they need from the feed; 0 while off |
+
+If OpenAlgo's pepper cannot be read at start (its `.env` is missing or has no pepper), market
+alerts' local API is not built and nothing listens on 5582 at all: `/health` is refused, and the
+Alerts page says it cannot reach the server. Order alerts are unaffected. The deploy tool's own
+health check polls OpenAlgo on 5000 only, so a release does not roll back over this.
 
 ## Turning it off
 
@@ -263,7 +275,7 @@ tool starts ring services again after each release.
 
 | variable | default | meaning |
 |---|---|---|
-| `SUDARSHAN_ORDER_ALERTS` | `on` | `off`: the service exits; nothing is sent and OpenAlgo is not contacted |
+| `SUDARSHAN_ORDER_ALERTS` | `on` | `off`: nothing is sent and OpenAlgo is not contacted for order alerts; the service exits only when `SUDARSHAN_MARKET_ALERTS` is off too |
 | `SUDARSHAN_ORDER_ALERTS_CANCELLED` | `all` | `part-filled`: only cancellations of an order that was part filled |
 | `SUDARSHAN_ORDER_ALERTS_SANDBOX` | `off` | `on`: Analyze-mode (sandbox) orders too, each line starting with "Sandbox" |
 | `SUDARSHAN_ALERTS_WINDOW` | `08:45-16:00` | IST, on trading days; a special day's own window gets the same margins around it. A value that is not HH:MM-HH:MM (the start first) logs a warning and the usual hours are used |
@@ -429,7 +441,11 @@ tick on the price feed in this same service, and told on Telegram (and, with M10
 Off until `SUDARSHAN_MARKET_ALERTS=on`; with it on, `SUDARSHAN_ORDER_ALERTS=off` stops only order
 alerts, and the service exits only when both are off. A market setting it cannot use (a mistyped
 switch, a limit out of range) keeps market alerts off with the reason on the Alerts page, and
-never stops order alerts.
+never stops order alerts. Off touches nothing but one thing: on each start the service sends one
+`DELETE /claims/sudarshan-alerts` to the feed on 127.0.0.1:5580, so keys an earlier run held are let
+go. It only releases, never claims, and is harmless to repeat; if the feed does not answer it is
+tried again after 5 s, 30 s, 2 min and 10 min. No price subscription, book, market.db writer or
+other port is opened.
 
 ```
 sudarshan-feed (one Upstox socket) -> ZMQ 127.0.0.1:5581 (ticks, __health__)
@@ -474,7 +490,9 @@ sudarshan-feed (one Upstox socket) -> ZMQ 127.0.0.1:5581 (ticks, __health__)
   128 KiB), which emits them to the Socket.IO room `sudarshan:alerts:owner` only: an open app joins
   it when its session is the owner's. The answer is the room's size, recorded as the app delivery
   ("Shown on 2 open screens", "No app was open"). A push is never retried; an app that reconnects
-  reads what it missed.
+  reads what it missed. The room is closed (its sockets disconnected) when the owner's session ends:
+  a logout, a forced logout (password change or reset) or OpenAlgo's daily expiry; the app
+  reconnects and its join is checked again.
 
 | variable | default | meaning |
 |---|---|---|
