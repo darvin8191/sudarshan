@@ -767,3 +767,36 @@ def test_an_alert_added_while_the_snapshot_is_read_is_seeded_too(alerts, quick, 
             await closed(rt, task)
 
     run(scenario)
+
+
+def test_an_alert_whose_instrument_sends_no_price_says_so_after_a_minute(alerts, quick):
+    """Review M7 (design 2.3): connected for a minute with the key claimed and not one price
+    for it, the card says so; it read 'Watching' all day before."""
+
+    async def scenario():
+        clock = Clock(ist(2026, 10, 21, 10, 0))
+        async with FakeFeed(clock) as feed, FakeOpenAlgo() as notify:
+            settings = alerts(notify)
+            office, rt, task = await opened(settings, feed, clock)
+            card = await office.call("create", {"alert": draft()})
+            assert card["check"] is None
+            await wait_until(lambda: rt._claimed_at.get(SBIN) is not None)
+            for _ in range(5):  # 50 s: not yet
+                clock.advance(10)
+                await feed.send_health()
+                await asyncio.sleep(0.05)
+            assert (await office.call("state", {}))["alerts"][0]["check"] is None
+            for _ in range(2):
+                clock.advance(10)
+                await feed.send_health()
+                await asyncio.sleep(0.05)
+            line = (await office.call("state", {}))["alerts"][0]["check"]
+            assert line == {"code": "waiting", "real_time": True,
+                            "line": "No prices from Upstox for this instrument yet"}  # fmt: skip
+            while rt.last_frame(SBIN) is None:
+                await feed.tick(SBIN, 99.0)
+                await asyncio.sleep(0.05)
+            assert (await office.call("state", {}))["alerts"][0]["check"] is None
+            await closed(rt, task)
+
+    run(scenario)

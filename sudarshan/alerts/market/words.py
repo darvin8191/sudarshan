@@ -424,6 +424,10 @@ def _on(day: date, today: date) -> str:
     return f"{day.day} {day:%b}" + (f" {day.year}" if day.year != today.year else "")
 
 
+#: An alert whose key has sent nothing for a minute with the feed connected (design 2.3).
+NO_PRICES = "No prices from Upstox for this instrument yet"
+
+
 def quote_waiting(source: str) -> str:
     """A bid or ask alert whose quote has not come yet (review A7.i)."""
     return f"Waiting for the first {source} from the price feed"

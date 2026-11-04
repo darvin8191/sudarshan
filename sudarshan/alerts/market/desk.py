@@ -353,6 +353,8 @@ class OwnerDesk:
         waiting = rt.book.waiting(alert.id)
         if waiting is not None:
             return _line("waiting", words.note_words(Reason(waiting, now)), True)
+        if rt.no_prices(alert.key, now):  # design 2.3, review M7
+            return _line("waiting", words.NO_PRICES, True)
         if quotes and (rt.last_frame(alert.key) or {}).get(alert.cond.source) is None:
             return _line("waiting", words.quote_waiting(alert.cond.source), True)  # A7.i
         noted = rt.note_of(alert.id)

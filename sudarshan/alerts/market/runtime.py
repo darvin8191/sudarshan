@@ -79,6 +79,8 @@ log = logging.getLogger("sudarshan.alerts.market")
 
 OWNER = "owner"
 TICK_S = 1.0
+#: Connected and claimed this long with no price for a key: the card says so (design 2.3).
+NO_PRICES_MS = 60_000
 FLUSH_MS = 1_000
 SEEN_EVERY_MS = 10_000
 CLAIM_RENEW_S = 600.0
@@ -162,6 +164,8 @@ class MarketRuntime:
         self._feed_started: str | None = None
         self._pauses: list[Paused] = []
         self._down_since: int | None = None
+        #: When the feed last became up (None while down): "no prices yet" needs it connected.
+        self._up_since: int | None = None
         self._open: tuple[int, int, str] | None = None  # (row id, start, cause)
         self._told_open = False
         self._line_ids = 0
@@ -417,6 +421,14 @@ class MarketRuntime:
     def last_frame(self, key: str) -> dict | None:
         return self._last.get(key)
 
+    def no_prices(self, key: str, now: int) -> bool:
+        """The feed has been up for NO_PRICES_MS, the key was asked for that long ago, and not
+        one price has come for it (design 2.3, review M7)."""
+        if key in self._last or self._up_since is None or self._started is None:
+            return False
+        since = max(self._up_since, self._claimed_at.get(key, self._started))
+        return now - since >= NO_PRICES_MS
+
     def note_of(self, alert_id: int) -> tuple[engine.Reason, int] | None:
         """The alert's latest note (a candle not checked, its base changed) and when it came."""
         return self._notes.get(alert_id)
@@ -506,8 +518,11 @@ class MarketRuntime:
         if not up:
             if self._down_since is None:
                 self._down_since = since if since is not None else now
+            self._up_since = None
         else:
             self._down_since = None
+            if self._up_since is None:
+                self._up_since = now
         watched = self._watched()
         inside = self._inside(now, watched)
         if self._down_since is not None and inside and self._open is None:
