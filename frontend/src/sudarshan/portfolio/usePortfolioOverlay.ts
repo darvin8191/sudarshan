@@ -26,6 +26,7 @@ export type SheetName = (typeof SHEETS)[number]
 export type PortfolioOverlay =
   | { kind: SheetName }
   | { kind: 'edit'; activityId: number }
+  | { kind: 'duplicate'; activityId: number }
   | { kind: 'activity'; activityId: number }
   | { kind: 'price'; assetId: number }
   | { kind: 'asset'; assetId: number }
@@ -64,7 +65,9 @@ export function portfolioOverlayOf(params: URLSearchParams): PortfolioOverlay | 
     return null
   }
   if ((SHEETS as readonly string[]).includes(sheet)) return { kind: sheet as SheetName }
-  if (sheet === 'edit') return activity === null ? null : { kind: 'edit', activityId: activity }
+  if (sheet === 'edit' || sheet === 'duplicate') {
+    return activity === null ? null : { kind: sheet, activityId: activity }
+  }
   if (sheet === 'price') return asset === null ? null : { kind: 'price', assetId: asset }
   return null
 }
@@ -79,7 +82,8 @@ function withOverlay(params: URLSearchParams, next: PortfolioOverlay | null): UR
   else if (next.kind === 'asset') out.set('asset', String(next.assetId))
   else {
     out.set('sheet', next.kind)
-    if (next.kind === 'edit') out.set('activity', String(next.activityId))
+    if (next.kind === 'edit' || next.kind === 'duplicate')
+      out.set('activity', String(next.activityId))
     if (next.kind === 'price') out.set('asset', String(next.assetId))
   }
   return out

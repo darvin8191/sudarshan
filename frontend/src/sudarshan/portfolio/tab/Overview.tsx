@@ -15,24 +15,22 @@ import {
   MarketCalendarSource,
   useIstDay,
 } from '@/sudarshan/dashboard/MarketCalendar'
-import { PortfolioError, portfolioCall, problemOf } from '../api'
+import { problemOf } from '../api'
 import { SECONDARY } from '../sheets/TabFields'
 import type { TabInfo, TabView, Widget } from '../types'
 import { ReadStamp } from '../upstox/parts'
 import { useTabLive } from '../useTabLive'
-import { PORTFOLIO_KEY } from './ActivityTab'
 import { HoldingsList } from './HoldingsList'
 import { listRows, moversOf, sortRows } from './rows'
 import { SummaryTile, TodayTile } from './SummaryTiles'
 import { TopMovers } from './TopMovers'
+import { tabViewOptions } from './tabView'
 
 /** The widgets this screen draws; the others arrive with their own parts. */
 type Drawn = 'summary' | 'today' | 'holdings' | 'movers'
 const DRAWN: readonly Widget[] = ['summary', 'today', 'holdings', 'movers']
 
 const BUTTON_ROW = 'flex flex-wrap justify-center gap-2'
-
-export const TAB_VIEW_KEY = [...PORTFOLIO_KEY, 'tab-view'] as const
 
 function Empty({ onAdd, onImport }: { onAdd: () => void; onImport: () => void }) {
   return (
@@ -124,18 +122,7 @@ export function TabOverview({
   const [market, setMarket] = useState<MarketCalendar>(CALENDAR_LOADING)
   const day = useIstDay()
   const { isOpen } = useMarketOpen(market)
-  const query = useQuery({
-    queryKey: [...TAB_VIEW_KEY, tab.id],
-    queryFn: async (): Promise<TabView> => {
-      const result = await portfolioCall('tab_get', { id: tab.id })
-      if (!result.enabled) {
-        throw new PortfolioError({ code: 'unavailable', message: result.message, entryId: null })
-      }
-      return result.data
-    },
-    retry: false,
-    refetchOnWindowFocus: false,
-  })
+  const query = useQuery(tabViewOptions(tab.id))
   const { refetch } = query
   // No timer: a reconnect and a return after 15 seconds read again.
   useBookSync(() => refetch(), { events: [], resyncMs: null })

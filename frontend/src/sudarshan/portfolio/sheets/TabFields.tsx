@@ -229,7 +229,7 @@ export const SECONDARY =
   'inline-flex min-h-12 items-center justify-center gap-2 rounded-[0.875rem] border border-input bg-card px-4 text-[0.9375rem] font-semibold outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50'
 export const DANGER =
   'inline-flex min-h-12 items-center justify-center gap-2 rounded-[0.875rem] bg-destructive px-4 text-[0.9375rem] font-semibold text-white outline-none hover:bg-destructive/90 focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50'
-export { FIELD, LABEL }
+export { CHOICE, FIELD, LABEL, OFF, ON }
 
 export function ProblemLine({ problem }: { problem: { message: string } | null }) {
   if (!problem) return null

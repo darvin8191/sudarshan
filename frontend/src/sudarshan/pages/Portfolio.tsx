@@ -15,6 +15,7 @@ import {
 import { useMemo } from 'react'
 import { portfolioCall, problemOf } from '@/sudarshan/portfolio/api'
 import { CustomStub } from '@/sudarshan/portfolio/StubViews'
+import { ActivitySheet } from '@/sudarshan/portfolio/sheets/ActivitySheet'
 import { ImportSheet } from '@/sudarshan/portfolio/sheets/ImportSheet'
 import { NewTabSheet } from '@/sudarshan/portfolio/sheets/NewTabSheet'
 import { TabSettingsSheet } from '@/sudarshan/portfolio/sheets/TabSettingsSheet'
@@ -46,6 +47,7 @@ const SHEET_WORDS: Record<PortfolioOverlay['kind'], { title: string; body: strin
   import: { title: 'Import entries', body: 'Bring in a CSV file and check it before it is saved.' },
   customize: { title: 'Customize', body: 'Choose the parts, columns, sorting and grouping.' },
   edit: { title: 'Edit entry', body: 'Change this entry.' },
+  duplicate: { title: 'Duplicate entry', body: 'Copy this entry.' },
   activity: { title: 'Entry', body: 'The details of this entry.' },
   price: { title: 'Update value', body: 'Set the value of a manual asset.' },
   asset: { title: 'Asset', body: 'The details of this asset.' },
@@ -91,6 +93,7 @@ export default function Portfolio() {
   )
   const archived = useMemo(() => custom.filter((t) => t.archived), [custom])
   const accounts = result?.enabled ? result.data.accounts : []
+  const members = result?.enabled ? result.data.members : []
   const shown = tab !== null && custom.some((t) => t.id === tab) ? tab : null
   const current = shown === null ? null : (custom.find((t) => t.id === shown) ?? null)
   const queries = useQueryClient()
@@ -167,7 +170,7 @@ export default function Portfolio() {
               onAdd={() => open({ kind: 'add' })}
               onImport={() => open({ kind: 'import' })}
               onEdit={(entry) => open({ kind: 'edit', activityId: entry.id })}
-              onDuplicate={() => open({ kind: 'add' })}
+              onDuplicate={(entry) => open({ kind: 'duplicate', activityId: entry.id })}
             />
           )}
         </div>
@@ -252,6 +255,26 @@ export default function Portfolio() {
           selectTab(null)
         }}
       />
+      <ActivitySheet
+        open={
+          (overlay?.kind === 'add' || overlay?.kind === 'edit' || overlay?.kind === 'duplicate') &&
+          current !== null
+        }
+        onClose={close}
+        tab={current}
+        accounts={accounts}
+        members={members}
+        mode={
+          overlay?.kind === 'edit' || overlay?.kind === 'duplicate'
+            ? { kind: overlay.kind, activityId: overlay.activityId }
+            : { kind: 'add' }
+        }
+        onSaved={() => {
+          void refresh()
+          close()
+        }}
+        onAccountCreated={() => void refresh()}
+      />
       <ImportSheet
         open={overlay?.kind === 'import' && current !== null}
         onClose={close}
@@ -264,7 +287,10 @@ export default function Portfolio() {
           sheet !== null &&
           overlay?.kind !== 'new-tab' &&
           overlay?.kind !== 'settings' &&
-          overlay?.kind !== 'import'
+          overlay?.kind !== 'import' &&
+          overlay?.kind !== 'add' &&
+          overlay?.kind !== 'edit' &&
+          overlay?.kind !== 'duplicate'
         }
         onOpenChange={(next) => !next && close()}
         title={sheet?.title ?? ''}

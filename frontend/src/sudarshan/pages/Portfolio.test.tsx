@@ -164,12 +164,13 @@ describe('the Portfolio page', () => {
     expect(screen.queryByRole('button', { name: 'Add' })).toBeNull()
   })
 
-  it('New tab opens its sheet, and the empty Activity buttons open the Add and Import stubs', async () => {
+  it('the empty Activity button opens the Add sheet', async () => {
     serve()
     show('/portfolio?tab=2&view=activity')
     await userEvent.click(await screen.findByRole('button', { name: 'Add an entry' }))
     expect(await screen.findByText('Add an entry', { selector: 'h2' })).toBeTruthy()
-    expect(screen.getByText(WORDS.not_ready)).toBeTruthy()
+    expect(await screen.findByRole('group', { name: 'Kind of entry' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Buy' }).getAttribute('aria-pressed')).toBe('true')
   })
 
   it('opens the New tab sheet from the strip', async () => {
