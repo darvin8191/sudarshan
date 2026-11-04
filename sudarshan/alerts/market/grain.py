@@ -23,6 +23,7 @@ whole number of paise, and a finer unit is needed before such a segment is accep
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal, InvalidOperation
 
@@ -33,14 +34,25 @@ PER_RUPEE = 100
 INDEX_TICK = Decimal("0.01")
 
 
+#: Typed text: ASCII digits, commas between digits as grouping, one '.'. Not "1e3", "1_000", "+5",
+#: or another script's digits (Decimal reads all of them, and "1e3" would be stored as "1E+3").
+TYPED = re.compile(r"[0-9]+(,[0-9]+)*(\.[0-9]+)?|\.[0-9]+")
+
+
 def to_decimal(value) -> Decimal | None:
-    """A finite Decimal from a JSON number or typed text ("25,900.50"); None for anything else."""
+    """A finite Decimal from a JSON number or typed text ("25,900.50"); None for anything else
+    (review: the level parser)."""
     if value is None or isinstance(value, bool):
         return None
     if isinstance(value, float):
-        value = repr(value)  # the shortest text that reads back as this float: 0.15 -> '0.15'
+        if not math.isfinite(value):
+            return None
+        value = format(Decimal(repr(value)), "f")  # repr: 0.15 -> '0.15'; never an exponent
     elif isinstance(value, str):
-        value = value.strip().replace(",", "")
+        value = value.strip()
+        if TYPED.fullmatch(value) is None:
+            return None
+        value = value.replace(",", "")
     try:
         number = Decimal(value)
     except (InvalidOperation, TypeError, ValueError):
