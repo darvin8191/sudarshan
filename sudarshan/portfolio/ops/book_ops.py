@@ -4,12 +4,16 @@ shape; the rules (versions, refusals, the ledger's check) are Book's."""
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from typing import Any
 
 from .. import serialize
 from ..core.days import day_of_instant, is_day
 from ..core.money import price_ok
+from ..errors import ApiError
+from ..resolver import WORDS as RESOLVER_WORDS
+from ..resolver import ResolverUnavailable
 from ..store import Invalid, NotFound, Refused
 from . import op
 from .common import OWNER, answer, given, maybe_whole, parts, whole
@@ -97,12 +101,49 @@ async def asset_create(ctx, message):
     )  # fmt: skip
     if message.get("tags") is not None:
         more["tags"] = message["tags"]
+    if message.get("kind") == "listed":
+        more = await _resolved(ctx, more, now)
     return await answer(
         lambda: book.asset_create(
             OWNER, message.get("request_id"), message.get("kind"), now=now, **more
         ),
         serialize.asset,
     )
+
+
+async def _resolved(ctx, more: dict, now: int) -> dict:
+    """A listed share is what the master contract says it is: its instrument key, ISIN, name and
+    tick size come from there, and a symbol it does not know is refused in words."""
+    resolver = ctx.ensure_resolver()
+    if resolver is None:
+        raise ApiError(503, "unavailable", RESOLVER_WORDS["unavailable"])
+    symbol, exchange = more.get("symbol"), more.get("exchange")
+    if not isinstance(symbol, str) or exchange not in ("NSE", "BSE"):
+        raise ApiError(400, "bad_request", RESOLVER_WORDS["exchange"])
+
+    def look():
+        try:
+            return resolver.find(symbol, exchange)
+        except ResolverUnavailable as exc:
+            raise ApiError(503, "unavailable", str(exc)) from None
+
+    found = await asyncio.get_running_loop().run_in_executor(None, look)
+    if found is None:
+        raise ApiError(
+            404,
+            "not_found",
+            RESOLVER_WORDS["unknown"].format(symbol=symbol.upper(), exchange=exchange),
+        )
+    return {
+        **more,
+        "symbol": found.symbol,
+        "exchange": found.exchange,
+        "name": more.get("name") or found.name,
+        "isin": found.isin,
+        "instrument_key": found.key,
+        "tick_size_u": found.tick_size_u,
+        "resolved_at": now,
+    }
 
 
 @op("asset_update")

@@ -101,6 +101,10 @@ class Service:
         #: The clock the ops read (epoch milliseconds); a test sets its own.
         self.clock: Callable[[], int] = lambda: int(time.time() * 1000)
         self._parts: dict[str, Any] = {}
+        #: The master-contract reader and the price book; built on first use from the settings
+        #: (a test puts its own here).
+        self.resolver: Any = None
+        self.prices: Any = None
         self._state = "starting"
         self._tasks: dict[str, asyncio.Task] = {}
         self._stop = asyncio.Event()
@@ -112,6 +116,32 @@ class Service:
         if have is None or have[0] is not self.store:
             have = self._parts[name] = (self.store, make(self.store))
         return have[1]
+
+    def ensure_resolver(self) -> Any:
+        """The master-contract reader, or None when OpenAlgo's database is not known."""
+        if self.resolver is None and self.settings.openalgo_db is not None:
+            from .resolver import Resolver
+
+            self.resolver = Resolver(self.settings.openalgo_db)
+        return self.resolver
+
+    def ensure_prices(self) -> Any:
+        """The price book (prices.py), built on first use."""
+        if self.prices is None:
+            from sudarshan.autologin.schedule import TradingCalendar
+
+            from .prices import PriceBook
+
+            calendar = TradingCalendar(
+                self.settings.holidays_file, self.settings.extra_days_file, logger=log
+            )
+            self.prices = PriceBook(
+                self.settings.feed_url,
+                self.ensure_resolver(),
+                calendar,
+                max_claims=self.settings.max_claims,
+            )
+        return self.prices
 
     # ---- what /health shows ---------------------------------------------------------------
     @property
@@ -166,6 +196,9 @@ class Service:
             self._set_state("stopping")
             await cancel_and_wait(api_task, *self._tasks.values())
             await self.api.close()
+            book, self.prices = self.prices, None
+            if book is not None and hasattr(book, "aclose"):
+                await book.aclose()
             store, self.store = self.store, None
             if store is not None:
                 try:

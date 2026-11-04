@@ -62,7 +62,19 @@ def parts(ctx: Any):
     from ..views import Views
 
     need(ctx)
-    return ctx.part("book", Book), ctx.part("views", Views)
+    return ctx.part("book", Book), ctx.part(
+        "views", lambda store: Views(store, ctx.ensure_prices())
+    )
+
+
+async def warmed(ctx: Any) -> None:
+    """Bring the price book's feed data into memory before a read that values holdings."""
+    book = ctx.ensure_prices()
+    if hasattr(book, "warm"):
+        try:
+            await book.warm(need(ctx), ctx.clock())
+        except Exception:  # prices degrade to the last closing record; the read goes on
+            log.exception("the price book could not be warmed")
 
 
 async def answer(call: Callable[[], Any], shape: Callable[[Any], Any] = lambda data: data) -> Any:

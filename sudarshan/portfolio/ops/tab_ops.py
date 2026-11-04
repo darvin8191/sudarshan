@@ -9,7 +9,7 @@ from typing import Any
 from .. import __version__, layout, serialize
 from ..store import NotFound, Refused, VersionConflict
 from . import op
-from .common import OWNER, answer, given, maybe_whole, parts, whole
+from .common import OWNER, answer, given, maybe_whole, parts, warmed, whole
 
 
 # ---- state, summary and the tab -----------------------------------------------------------------
@@ -22,6 +22,7 @@ async def state(ctx, message):
 
 @op("summary")
 async def summary(ctx, message):
+    await warmed(ctx)
     _, views = parts(ctx)
     now = ctx.clock()
     return await answer(lambda: views.summary(OWNER, now=now))
@@ -43,6 +44,7 @@ async def tab_create(ctx, message):
 
 @op("tab_get")
 async def tab_get(ctx, message):
+    await warmed(ctx)
     _, views = parts(ctx)
     now = ctx.clock()
     args = given(message, "as_of", "accounts", "classes", "tags", "held")
@@ -84,6 +86,7 @@ async def tab_delete(ctx, message):
 
 @op("performance")
 async def performance(ctx, message):
+    await warmed(ctx)
     _, views = parts(ctx)
     now = ctx.clock()
     return await answer(lambda: views.performance(OWNER, whole(message, "id"), now=now))

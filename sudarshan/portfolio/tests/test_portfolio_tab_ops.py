@@ -126,7 +126,16 @@ async def test_members_accounts_and_assets_are_made_and_changed(rig):
             "asset_create", request_id="x-3", kind="listed", symbol="tcs", exchange="NSE"
         )
     )["data"]
-    assert listed["symbol"] == "TCS" and listed["aliases"] == [{"kind": "symbol", "value": "TCS"}]
+    assert listed["symbol"] == "TCS" and listed["isin"] == "INE467B01029"
+    assert listed["name"] == "Tata Consultancy Services"
+    assert {"kind": "symbol", "value": "TCS"} in listed["aliases"]
+    assert {"kind": "isin", "value": "INE467B01029"} in listed["aliases"]
+    unknown = clean(
+        await rig.call(
+            "asset_create", request_id="x-4", kind="listed", symbol="NOSUCH", exchange="NSE"
+        )
+    )
+    assert unknown["code"] == "not_found" and "NOSUCH" in unknown["message"]
 
 
 @scenario_of

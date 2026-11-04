@@ -7,12 +7,14 @@ import json
 
 import httpx
 import pytest
+from portfolio_fakes import FakeResolver
 from test_portfolio_service import FERNET, post, sealed, settings_for
 
 from sudarshan.portfolio import store as store_module
 from sudarshan.portfolio.book import Book
 from sudarshan.portfolio.service import Service
 from sudarshan.portfolio.store import DB_FILENAME, PortfolioStore, Scope
+from sudarshan.portfolio.views import Prices
 
 NOW = 1_793_000_000_000  # 26 Oct 2026
 HOUR = 3_600_000
@@ -38,6 +40,8 @@ class Rig:
         self.svc = Service(settings_for(tmp_path), FERNET, jobs={})
         self.svc.store = PortfolioStore(tmp_path / "s" / DB_FILENAME, now=NOW)
         self.svc.clock = lambda: self.now
+        self.svc.resolver = FakeResolver()
+        self.svc.prices = Prices()
         self.now = NOW
         self.book = Book(self.svc.store)
         me = self.book.members(OWNER)[0]
@@ -234,3 +238,20 @@ def test_the_ops_are_registered():
     from sudarshan.portfolio import ops
 
     assert {"import_preview", "import_commit", "import_discard", "export_csv"} <= set(ops.REGISTRY)
+
+
+@scenario_of
+async def test_a_symbol_the_book_does_not_know_matches_through_the_master_contract_isin(rig):
+    """The book holds RELIANCE under its ISIN; the file uses another symbol the contract maps to
+    the same ISIN. Without a resolver that row is unmatched."""
+    from sudarshan.portfolio.resolver import Listing
+
+    rig.svc.resolver.listings[("RELIND", "NSE")] = Listing(
+        "RELIND", "NSE", "NSE_EQ|INE002A01018", "Reliance", "INE002A01018", 1000
+    )
+    text = "date,action,symbol,quantity,price,account\n2026-10-01,BUY,RELIND,10,1000,Zerodha\n"
+    matched = (await rig.preview(text))["data"]
+    assert (matched["rows_new"], matched["rows_bad"]) == (1, 0)
+    rig.svc.resolver.down = True  # an unreadable contract only means "not found"
+    again = (await rig.preview(text))["data"]
+    assert (again["rows_new"], again["rows_bad"]) == (0, 1)

@@ -54,8 +54,11 @@ assert set(FORMATS) == set(IMPORT_FORMATS)
 
 
 class Importer:
-    def __init__(self, store: PortfolioStore):
+    def __init__(self, store: PortfolioStore, resolver: Any = None):
         self.store = store
+        #: The master-contract reader (resolver.py): a symbol the book does not know is asked
+        #: there for its ISIN, which may be an old one the book kept as an alias.
+        self.resolver = resolver
 
     # ---- step 1 and 2: upload, preview --------------------------------------------------------
     def preview(
@@ -80,7 +83,7 @@ class Importer:
             if tab is None:
                 raise NotFound()
             _writable_tab(tx, tab_id, tab["version"])
-            result = _read(tx, tab_id, fmt, text, account_id, now)
+            result = _read(tx, tab_id, fmt, text, account_id, now, self.resolver)
             return self._store(tx, tab, fmt, filename.strip()[:200], result, now)
 
         return self._guard(self.store.write, scope, run)
@@ -226,18 +229,32 @@ def _drop_old(tx: Tx, now: int) -> None:
             tx.remove("import_batch", batch["id"])
 
 
-def _read(tx: Tx, tab_id: int, fmt: str, text: str, account_id: int | None, now: int) -> Preview:
+def _read(
+    tx: Tx, tab_id: int, fmt: str, text: str, account_id: int | None, now: int, resolver: Any = None
+) -> Preview:
     accounts = {a["id"]: a["name"] for a in tx.rows("account") if not a["system"]}
     if account_id is not None and account_id not in accounts:
         raise Invalid(WORDS["account"])
     names, decimals = _names(tx)
     holdings = {a["id"] for a in tx.rows("asset") if a["kind"] in HOLDING_KINDS}
 
+    def book_asset(kind: str, value: str) -> int | None:
+        alias = tx.find_alias(kind, value.strip().upper()) if value.strip() else None
+        return alias["asset_id"] if alias and alias["asset_id"] in holdings else None
+
     def resolve(symbol: str, exchange: str, isin: str) -> int | None:
-        for kind, value in (("symbol", symbol), ("isin", isin)):
-            alias = tx.find_alias(kind, value.strip().upper()) if value.strip() else None
-            if alias and alias["asset_id"] in holdings:
-                return alias["asset_id"]
+        found = book_asset("symbol", symbol) or book_asset("isin", isin)
+        if found is not None or resolver is None or not symbol.strip():
+            return found
+        # Not in the book by name: the master contract may know the symbol's ISIN, and the book
+        # may hold that ISIN (an old one kept as an alias) under another symbol.
+        for place in (exchange.strip().upper(),) if exchange.strip() else ("NSE", "BSE"):
+            try:
+                listing = resolver.find(symbol, place)
+            except Exception:  # an unreadable master contract only means "not found"
+                return None
+            if listing is not None and listing.isin:
+                return book_asset("isin", listing.isin)
         return None
 
     rows = tx.entries(tab_id)

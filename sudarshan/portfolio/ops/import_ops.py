@@ -13,7 +13,7 @@ from .common import OWNER, maybe_whole, need, whole, work
 
 
 def _importer(ctx) -> Importer:
-    return ctx.part("importer", lambda store: Importer(store))
+    return ctx.part("importer", lambda store: Importer(store, ctx.ensure_resolver()))
 
 
 @op("import_preview")
