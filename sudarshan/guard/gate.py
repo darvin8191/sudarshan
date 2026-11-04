@@ -980,6 +980,9 @@ class Gate:
             first = kept is None
             if first:
                 self._day_locks[(pipe, day.day)] = lock
+                # its own message covers the refusals of its first minute: marked with the lock,
+                # so no refusal that sees the lock is told as well
+                self._tellings[(pipe, "", DAILY_LOSS_LIMIT)] = (time.monotonic(), 0)
             else:
                 lock = kept
         if first:
@@ -1011,8 +1014,6 @@ class Gate:
             admin = find_user_by_username()
             if admin is not None:
                 _tell(Owner(admin.username, "app", "risk guard"), said)
-            with self._lock:  # the lock's own message covers the refusals of its first minute
-                self._tellings[(lock.pipe, "", DAILY_LOSS_LIMIT)] = (time.monotonic(), 0)
         except Exception:
             logger.exception("Today's lock could not be told on Telegram")
         try:
