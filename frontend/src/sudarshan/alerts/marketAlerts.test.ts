@@ -851,6 +851,18 @@ describe('one announcement across the app’s tabs', () => {
     expect(toasts.info).not.toHaveBeenCalled()
   })
 
+  it('takes a tab’s word by the key alone, or by the ids alone', async () => {
+    const socket = await joinedSocket()
+    channel.say({ key: 'e:345' })
+    socket.fire('sudarshan_market_alert', push())
+    channel.say({ ids: [346] })
+    socket.fire('sudarshan_market_alert', push({ event_id: 346 }))
+    expect(toasts.info).not.toHaveBeenCalled()
+
+    socket.fire('sudarshan_market_alert', push({ event_id: 347 }))
+    expect(toasts.info).toHaveBeenCalledTimes(1)
+  })
+
   it('waits, when another tab is the one in use, and stays quiet if that tab shows it', async () => {
     vi.mocked(document.hasFocus).mockReturnValue(false)
     const socket = await joinedSocket()
