@@ -85,7 +85,7 @@ def test_with_the_book_unreadable_it_cancels_every_order_without_it_then_exits(u
     assert [o for o in broker.orders if o["symbol"] == CE] == []
     assert broker.true_qty(CE) == 65
     assert steps["live_exit_all"]["ok"] is False
-    assert "could not be confirmed from Upstox's orders" in steps["live_exit_all"]["words"]
+    assert "Upstox did not send your orders in time" in steps["live_exit_all"]["words"]
 
 
 def test_if_that_fails_too_no_market_exit_is_sent_and_the_step_says_to_use_the_app(upstox):
