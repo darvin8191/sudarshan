@@ -41,7 +41,7 @@ never a move to another port.
 | 5580 | `sudarshan-feed` HTTP: `/health`, `/snapshot`, `/claims` (M18.1), and the REST governor under `/upstox/` (M18.9, off by default) |
 | 5581 | `sudarshan-feed` ZMQ PUB: ticks and `__health__` |
 | 5582 | `sudarshan-alerts`: the market alerts' sealed local API, and `GET /health` (the release installed and what the service is doing; the one listener, no other port) |
-| 5583 | `sudarshan-portfolio`: its sealed local API |
+| 5583 | `sudarshan-portfolio`: its sealed local API, and `GET /health` (the release installed and what the service is doing; the one listener, no other port; a taken port is tried again every minute) |
 | 5584 | `sudarshan-screener`: its sealed local API |
 
 **Sealed routes.** Each has its own key purpose in `sudarshan/vault/keys.py` (HKDF from OpenAlgo's
@@ -56,7 +56,7 @@ nonce that could still be replayed.
 | OpenAlgo to the market alerts API | `sudarshan/alerts/api/v1` | 64 KiB |
 | market alerts to OpenAlgo's owner room | `sudarshan/alerts/push/v1` | 128 KiB |
 | screener digests to the market alerts | `sudarshan/alerts/screener-digest/v1` | 64 KiB |
-| OpenAlgo to the portfolio API | `sudarshan/portfolio/api/v1` | 64 KiB (an import 1.25 MiB) |
+| OpenAlgo to the portfolio API | `sudarshan/portfolio/api/v1` | 64 KiB (an import 2 MiB: a 1.2 MB file seals to 1.5 to 1.9 MiB, see `portfolio/core/kinds.py`) |
 | OpenAlgo to the screener API | `sudarshan/screener/api/v1` | 64 KiB |
 | the screener to OpenAlgo | `sudarshan/screener/internal/v1` | 16 KiB |
 
