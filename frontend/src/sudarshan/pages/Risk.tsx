@@ -158,7 +158,9 @@ function KillSwitchCard({
       {ks.running && (
         <output className="flex items-center gap-2 text-[0.9375rem] font-semibold">
           <Loader2 aria-hidden="true" className="size-5 animate-spin" />
-          Being turned on: cancelling and exiting at Upstox.
+          {status.stage === 'sandbox'
+            ? "Being turned on: cancelling the sandbox's orders."
+            : 'Being turned on: cancelling and exiting at Upstox.'}
         </output>
       )}
       {report?.restarted && (

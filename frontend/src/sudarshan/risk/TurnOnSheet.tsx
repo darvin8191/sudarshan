@@ -263,7 +263,9 @@ export function TurnOnSheet({
           {sending && (
             <p className="flex items-center gap-2 text-[0.8125rem] text-[color:var(--text-secondary)]">
               <CircleCheck aria-hidden="true" className="size-4" />
-              Cancelling and exiting at Upstox can take a few seconds.
+              {stage === 'sandbox'
+                ? "Cancelling the sandbox's orders can take a few seconds."
+                : 'Cancelling and exiting at Upstox can take a few seconds.'}
             </p>
           )}
         </form>

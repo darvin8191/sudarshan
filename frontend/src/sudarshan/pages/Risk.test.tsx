@@ -118,6 +118,18 @@ describe('the Risk page', () => {
   })
 })
 
+describe('while it is being turned on in the sandbox stage', () => {
+  it('does not say Upstox is being touched', async () => {
+    api.status.mockResolvedValue(status({ known: true, on: true, running: true }, 'sandbox'))
+    renderBook('/risk', <Risk />)
+    await settle()
+    await pass(100)
+    expect(
+      screen.getByText("Being turned on: cancelling the sandbox's orders.")
+    ).toBeInTheDocument()
+  })
+})
+
 describe('the server clock', () => {
   it("is the difference between the server's time and when the status arrived", () => {
     expect(serverOffset('2026-11-04T10:00:30.000Z', Date.parse('2026-11-04T10:00:00.000Z'))).toBe(
