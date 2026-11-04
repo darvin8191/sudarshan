@@ -7,7 +7,9 @@ runtime's timers run in real time (shrunk by ``quick``).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
+import sqlite3
 from datetime import datetime, timedelta
 
 import pytest
@@ -781,5 +783,49 @@ def test_a_runtime_cancelled_in_its_stop_still_closes_its_feed_link(alerts, quic
             closed = (link.sock.closed, link.ctx.closed)
             link.close()  # never left open: the old code must not hang this process at exit
             assert task.cancelled() and closed == (True, True)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("how", ["a job fails", "market.db refused", "stop", "stop in the drop"])
+def test_market_alerts_off_by_themselves_drop_their_keys_and_a_stop_keeps_them(alerts, quick, how):
+    """Review L5: market alerts that turned themselves off (a job failed, or market.db could
+    not be opened) left up to 300 keys at the feed for 7 days. A stop by the service keeps
+    them, for the restart, and ends a drop still being asked."""
+
+    def broken(health, now):
+        raise RuntimeError("a bug in a job")
+
+    async def scenario():
+        clock = Clock(ist(2026, 10, 21, 10, 0))
+        async with FakeFeed(clock) as feed, FakeOpenAlgo() as notify:
+            settings = alerts(notify)
+            create(settings, clock())
+            if how == "market.db refused":
+                with contextlib.closing(sqlite3.connect(settings.state_dir / "market.db")) as db:
+                    db.execute("PRAGMA user_version = 99")  # written by a newer release
+                rt = MarketRuntime(settings, market_of(feed), owner_reader=lambda: Owner(
+                    OWNER, API_KEY), pacer=Pacer(), clock=clock)  # fmt: skip
+                await asyncio.wait_for(rt.run(), 10)
+                assert rt.state == "off" and feed.drops == 1
+                return
+            rt, task = await started(settings, feed, clock)
+            if how == "stop":
+                await stopped(rt, task)
+                assert rt.state == "stopped" and feed.drops == 0  # kept for the restart
+                return
+            rt._on_health = broken
+            feed.answering = how == "a job fails"  # else asked again only 5 s later
+            await feed.send_health()
+            if how == "a job fails":
+                await asyncio.wait_for(task, 10)  # it ends once the keys are dropped
+                assert rt.state == "off" and feed.drops == 1
+                return
+            await wait_until(lambda: rt.state == "off")
+            await asyncio.sleep(0.2)  # the first ask is refused; the next waits 5 s
+            assert not task.done()
+            rt.stop("test")
+            await asyncio.wait_for(task, 1)
+            assert feed.drops == 0
 
     asyncio.run(scenario())

@@ -133,6 +133,10 @@ class MarketRuntime:
         self.state, self.detail = "starting", ""
         self.stats = {"frames": 0, "judged": 0, "fires": 0}
         self._stop = asyncio.Event()
+        #: The service asked to stop (stop()); not a stop market alerts made themselves.
+        self._stopping = False
+        #: Dropping the claims after market alerts turned themselves off (review L5).
+        self._release: ReleasedClaims | None = None
         self._writer = ThreadPoolExecutor(1, thread_name_prefix="market-db")
         self._alerts: dict[int, spec.Alert] = {}
         self._channels: dict[int, dict | None] = {}
@@ -176,7 +180,8 @@ class MarketRuntime:
 
     # ---- lifecycle -------------------------------------------------------------------------
     async def run(self) -> None:
-        """Until stop(); never raises: a failure turns market alerts off, order alerts go on."""
+        """Until stop(); never raises: a failure turns market alerts off, order alerts go on.
+        Off by themselves, they drop their claims at the feed before returning (review L5)."""
         try:
             if await self._open_store():
                 await self._serve()
@@ -190,8 +195,21 @@ class MarketRuntime:
                 with contextlib.suppress(Exception):
                     await self._db(self.store.close)
             await asyncio.to_thread(self._writer.shutdown, True)
+        if self.state == "off" and not self._stopping:  # nothing watches their keys now
+            self._release = ReleasedClaims(self.config.feed_url)
+            try:
+                await self._release.run()
+            except Exception:
+                log.exception("market alerts' keys could not be dropped at the price feed")
 
     def stop(self, reason: str = "stop requested") -> None:
+        """The service stops: the run ends, and so does a drop of the claims under way."""
+        self._stopping = True
+        if self._release is not None:
+            self._release.stop(reason)
+        self._end(reason)
+
+    def _end(self, reason: str) -> None:
         if not self._stop.is_set():
             log.info("market alerts stopping: %s", reason)
             self._stop.set()
@@ -269,7 +287,7 @@ class MarketRuntime:
         except Exception:
             log.exception("market alerts' %s job failed; market alerts stop", name)
             self._set_state("off", words.STOPPED_UNEXPECTEDLY)
-            self.stop(f"the {name} job failed")
+            self._end(f"the {name} job failed")
 
     async def _shutdown(self) -> None:
         """A clean stop: the Book flushed, the pause closed, Telegram's queue sent (A7.n)."""
