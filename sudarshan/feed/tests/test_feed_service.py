@@ -14,7 +14,7 @@ import httpx
 import zmq
 import zmq.asyncio
 
-from sudarshan.feed import bus
+from sudarshan.feed import bus, service
 from sudarshan.feed.config import Settings
 from sudarshan.feed.http_api import is_local
 from sudarshan.feed.replay import read_ticks
@@ -115,6 +115,34 @@ def test_fan_out_http_api_and_clean_close(feed_env, fast, caplog):
         (recording,) = (state / "ticks").glob("*.jsonl.gz")
         assert len(list(read_ticks(recording))) == 3
         assert ff.TOKEN not in caplog.text and ff.CODE not in caplog.text
+
+    asyncio.run(scenario())
+
+
+def test_a_swallowed_cancel_still_stops_the_feed(feed_env, fast, monkeypatch):
+    """M18.1: a cancel can be lost inside httpx's connect; stop() must send it again."""
+
+    async def scenario():
+        async with ff.FakeUpstox() as fake:
+            svc = FeedService(Settings.from_env(feed_env(fake)))
+            swallowed, started = [], asyncio.Event()
+
+            async def stubborn(token):  # the attempt: swallows its first two cancels
+                started.set()
+                while True:
+                    try:
+                        await asyncio.sleep(3600)
+                    except asyncio.CancelledError:
+                        swallowed.append(1)
+                        if len(swallowed) > 2:
+                            raise
+
+            monkeypatch.setattr(svc, "_attempt", stubborn)
+            run = asyncio.create_task(svc.run())
+            await asyncio.wait_for(started.wait(), 5)
+            svc.stop("test")
+            await asyncio.wait_for(run, 10)
+            assert len(swallowed) == 3 and svc.health()["state"] == "stopped"
 
     asyncio.run(scenario())
 
@@ -266,3 +294,189 @@ def test_error_logs_are_rate_limited(caplog):
 def test_only_local_peers_are_served():
     assert is_local(("127.0.0.1", 40000)) and is_local(("::1", 40000, 0, 0))
     assert not is_local(("10.1.2.3", 40000)) and not is_local(None)
+
+
+def test_closing_auction_status_in_health_one_line_per_change(feed_env, fast, monkeypatch, caplog):
+    """M18.1 (X6h): Upstox's casMarketStatus as cas_status, on the health topic at once, and in
+    the journal: the first market info on every socket (an empty map too) and every change."""
+    caplog.set_level(logging.INFO, logger="sudarshan.feed")
+    monkeypatch.setattr(service, "HEALTH_EVERY_S", 3600.0)  # so only a change publishes health
+    at_1515, at_1520 = 1_793_094_300_120, 1_793_094_600_250  # 27 Oct 2026 IST, epoch ms
+    open_ = {"NSE_EQ": "NORMAL_OPEN"}
+
+    def info(cas: dict | None, segments=open_) -> bytes:
+        return ff.response({}, "market_info", segments, cas)
+
+    def phase(status: str, at: int) -> dict:
+        return {"status": status, "updated_ms": at}
+
+    async def health_showing(sub, cas_status: dict) -> None:
+        while True:  # well inside the 2 s: the hourly publish never comes here
+            topic, payload = await asyncio.wait_for(sub.recv_multipart(), 2)
+            if topic == b"__health__" and json.loads(payload)["cas_status"] == cas_status:
+                return
+
+    async def scenario():
+        async with ff.FakeUpstox() as fake:
+            svc = FeedService(Settings.from_env(feed_env(fake)))
+            run = asyncio.create_task(svc.run())
+            await ff.wait_until(lambda: svc.health()["subscriptions_live"])
+            assert svc.health()["cas_status"] == {}
+            ctx = zmq.asyncio.Context()
+            sub = ctx.socket(zmq.SUB)
+            sub.connect(svc.pub.endpoint)
+            sub.subscribe(b"__health__")
+            await asyncio.sleep(0.3)  # a SUB misses what is sent before it has joined
+            try:
+                server = fake.sockets[0]
+                both = {"NSE_EQ": ("CTS_CLOSE", at_1515), "BSE_EQ": ("CTS_CLOSE", at_1515)}
+                await server.send(info(both))
+                await health_showing(sub, {s: phase("CTS_CLOSE", at_1515) for s in both})
+                await server.send(info(both))  # the same state again: no line
+                await server.send(info(both | {"NSE_EQ": ("CAS_LM_START", at_1520)}))
+                await health_showing(sub, {"NSE_EQ": phase("CAS_LM_START", at_1520),
+                                           "BSE_EQ": phase("CTS_CLOSE", at_1515)})  # fmt: skip
+                later = {"NSE_EQ": ("CAS_LM_START", at_1520), "BSE_EQ": ("CTS_CLOSE", at_1520)}
+                await server.send(info(later))  # only BSE_EQ's time moves
+                await health_showing(sub, {s: phase(p, at_1520) for s, (p, _) in later.items()})
+                await server.send(info(None, {"NSE_EQ": "NORMAL_CLOSE"}))
+                await health_showing(sub, {})  # Upstox lists no auction any more
+                server.transport.abort()  # the next socket's first market info is told too
+                await ff.wait_until(lambda: len(fake.requests) == 2 and len(fake.requests[1]) == 3)
+                await fake.sockets[1].send(info(None))
+                await fake.sockets[1].send(ff.response({NIFTY: ff.ltpc(25000.0)}))  # no info
+                await ff.wait_until(lambda: svc.health()["stats"]["ticks"] == 1)
+                health = svc.health()
+            finally:
+                sub.close(0)
+                ctx.term()
+            await _stop(svc, run)
+        assert health["cas_status"] == {} and health["market_status"] == {"NSE_EQ": "NORMAL_OPEN"}
+        told = [r for r in caplog.records if r.getMessage().startswith("closing auction status")]
+        at = "2026-10-27T15:15:00+05:30"
+        assert [(r.levelname, r.getMessage()) for r in told] == [
+            ("INFO", f"closing auction status on connect: BSE_EQ CTS_CLOSE at {at}, NSE_EQ "
+                     f"CTS_CLOSE at {at}"),
+            ("INFO", "closing auction status: NSE_EQ CAS_LM_START at 2026-10-27T15:20:00+05:30"),
+            ("INFO", "closing auction status: BSE_EQ CTS_CLOSE at 2026-10-27T15:20:00+05:30"),
+            ("INFO", "closing auction status: BSE_EQ none, NSE_EQ none"),
+            ("INFO", "closing auction status on connect: none"),
+        ]  # fmt: skip
+
+    asyncio.run(scenario())
+
+
+def test_a_frame_moving_both_maps_is_one_health_copy_with_both(feed_env, fast, monkeypatch):
+    """Review M1: the auction state is noted after the segment status, so the one health copy a
+    frame publishes carries the new market status, never the old one."""
+    monkeypatch.setattr(service, "HEALTH_EVERY_S", 3600.0)  # so only a change publishes health
+    at_1530 = 1_793_095_200_000
+
+    async def scenario():
+        async with ff.FakeUpstox() as fake:
+            svc = FeedService(Settings.from_env(feed_env(fake)))
+            run = asyncio.create_task(svc.run())
+            await ff.wait_until(lambda: svc.health()["subscriptions_live"])
+            ctx = zmq.asyncio.Context()
+            sub = ctx.socket(zmq.SUB)
+            sub.connect(svc.pub.endpoint)
+            sub.subscribe(b"__health__")
+            await asyncio.sleep(0.3)  # a SUB misses what is sent before it has joined
+            got = []
+            try:
+                server = fake.sockets[0]
+                await server.send(ff.response({}, "market_info", {"NSE_EQ": "NORMAL_OPEN"}))
+                await ff.wait_until(
+                    lambda: svc.health()["market_status"] == {"NSE_EQ": "NORMAL_OPEN"}
+                )
+                await asyncio.sleep(0.2)
+                while True:  # what the first market info published, if anything
+                    try:
+                        await asyncio.wait_for(sub.recv_multipart(), 0.2)
+                    except TimeoutError:
+                        break
+                frame = ff.response({}, "market_info", {"NSE_EQ": "NORMAL_CLOSE"},
+                                    {"NSE_EQ": ("CAS_STOP", at_1530)})  # fmt: skip
+                await server.send(frame)
+                while True:
+                    try:
+                        _, payload = await asyncio.wait_for(sub.recv_multipart(), 0.5)
+                    except TimeoutError:
+                        break
+                    got.append(json.loads(payload))
+            finally:
+                sub.close(0)
+                ctx.term()
+            await _stop(svc, run)
+        return got
+
+    got = asyncio.run(scenario())
+    assert [(h["market_status"], h["cas_status"]) for h in got] == [
+        (
+            {"NSE_EQ": "NORMAL_CLOSE"},
+            {"NSE_EQ": {"status": "CAS_STOP", "updated_ms": 1_793_095_200_000}},
+        )
+    ]
+
+
+def test_a_phase_time_that_is_not_epoch_ms_costs_neither_the_frame_nor_its_status(
+    feed_env, fast, caplog
+):
+    """Review M1: an updatedTime in microseconds (or anything iso cannot place) is logged as it
+    came; the frame's NORMAL_CLOSE is still recorded and nothing counts as a decode error."""
+    caplog.set_level(logging.INFO, logger="sudarshan.feed")
+    micro = 1_793_095_200_000 * 1000
+
+    async def scenario():
+        async with ff.FakeUpstox() as fake:
+            svc = FeedService(Settings.from_env(feed_env(fake)))
+            run = asyncio.create_task(svc.run())
+            await ff.wait_until(lambda: svc.health()["subscriptions_live"])
+            server = fake.sockets[0]
+            await server.send(ff.response({}, "market_info", {"NSE_EQ": "NORMAL_OPEN"}))
+            await ff.wait_until(lambda: svc.health()["market_status"] == {"NSE_EQ": "NORMAL_OPEN"})
+            frame = ff.response({}, "market_info", {"NSE_EQ": "NORMAL_CLOSE"},
+                                {"NSE_EQ": ("CAS_STOP", micro)})  # fmt: skip
+            await server.send(frame)
+            await ff.wait_until(lambda: svc.health()["market_status"] == {"NSE_EQ": "NORMAL_CLOSE"})
+            health = svc.health()
+            await _stop(svc, run)
+            return health
+
+    health = asyncio.run(scenario())
+    assert health["stats"]["decode_errors"] == 0
+    assert health["cas_status"] == {"NSE_EQ": {"status": "CAS_STOP", "updated_ms": micro}}
+    assert f"closing auction status: NSE_EQ CAS_STOP at {micro}" in caplog.text
+
+
+def test_the_auction_phase_is_forgotten_when_its_socket_closes(feed_env, fast, caplog):
+    """Review L9: a phase is known only from a socket's own market info, so none stays in
+    /health once the socket is gone (overnight, or across a reconnect)."""
+    caplog.set_level(logging.INFO, logger="sudarshan.feed")
+
+    async def scenario():
+        async with ff.FakeUpstox() as fake:
+            svc = FeedService(Settings.from_env(feed_env(fake)))
+            run = asyncio.create_task(svc.run())
+            await ff.wait_until(lambda: svc.health()["subscriptions_live"])
+            frame = ff.response({}, "market_info", {"NSE_EQ": "NORMAL_OPEN"},
+                                {"NSE_EQ": ("CAS_LM_START", 1_793_094_600_250)})  # fmt: skip
+            await fake.sockets[0].send(frame)
+            await ff.wait_until(lambda: svc.health()["cas_status"] != {})
+            fake.upgrade_status = 403  # the next socket stays away for a while
+            fake.sockets[0].transport.abort()
+            await ff.wait_until(lambda: svc.health()["state"] == "backoff")
+            between = svc.health()["cas_status"]
+            fake.upgrade_status = None
+            await ff.wait_until(
+                lambda: len(fake.sockets) == 2 and svc.health()["subscriptions_live"], 5
+            )
+            await fake.sockets[1].send(frame)  # the next socket says the auction runs
+            await ff.wait_until(lambda: svc.health()["cas_status"] != {})
+            await _stop(svc, run)
+            return between
+
+    assert asyncio.run(scenario()) == {}
+    told = [r.getMessage() for r in caplog.records if "closing auction status" in r.getMessage()]
+    assert told == ["closing auction status on connect: NSE_EQ CAS_LM_START at "
+                    "2026-10-27T15:20:00+05:30"] * 2  # fmt: skip
