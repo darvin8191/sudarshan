@@ -1399,7 +1399,8 @@ def test_a_warm_start_in_flight_adds_no_tick_lag(feed_env, tmp_path):
                     await client.wait()
                 if feed.returncode is None:
                     feed.terminate()  # a clean stop writes the probe's file
-                    assert await asyncio.wait_for(feed.wait(), 15) == 0
+                    rc = await asyncio.wait_for(feed.wait(), 15)
+                    assert rc == 0, (tmp_path / 'feed.log').read_text()[-3000:]
         warm = json.loads(results.read_text())
         assert warm["answers"] == [[200, len(CANDLES)]] * 90
         return before, during, after, (warm["began"], warm["ended"])
