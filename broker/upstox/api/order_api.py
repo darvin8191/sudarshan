@@ -1055,6 +1055,27 @@ def modify_order(data, auth):
         return {"status": "error", "message": str(e)}, 500
 
 
+def cancel_every_open_order_api(auth):
+    """SUDARSHAN M5.13: Upstox's own cancel of every open order, which needs no read of the
+    order book (the kill switch's way when the book cannot be read). Answers
+    ``(cancelled, not_confirmed)``: ``cancelled`` only when Upstox says every order went; a
+    cancel with no usable answer may still have gone, so it is ``not_confirmed``."""
+    try:
+        answer = get_api_response("/v2/order/multi/cancel", auth, method="DELETE")
+    except BrokerBusyError:
+        return False, False  # refused by the pacer before anything was sent
+    except Exception:
+        logger.exception("Unexpected error cancelling every open order")
+        return False, True
+    if not isinstance(answer, dict):
+        return False, True
+    if answer.get("status") == "success":
+        summary = answer.get("summary")
+        failed = int(float(summary.get("error") or 0)) if isinstance(summary, dict) else 0
+        return failed == 0, failed != 0
+    return False, bool(answer.get("not_confirmed"))
+
+
 def cancel_all_orders_api(data, auth):
     """
     Cancels all open and trigger-pending orders.
