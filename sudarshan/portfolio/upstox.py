@@ -367,6 +367,11 @@ class UpstoxReader:
         if client is not None and self._own_client:
             await client.aclose()
 
+    def held_keys(self) -> list[str]:
+        """The instrument keys of the holdings last read (for the feed claims)."""
+        rows = self._memory["holdings"].data or []
+        return [r["instrument_key"] for r in rows]
+
     # ---- the book --------------------------------------------------------------------------
     async def book(
         self, parts: list[str] | tuple[str, ...], max_age_s: float | None = None

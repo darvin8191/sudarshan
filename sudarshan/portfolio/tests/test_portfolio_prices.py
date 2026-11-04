@@ -187,7 +187,9 @@ def test_claims_follow_the_listed_keys_and_never_fall_back_to_subscribe(tmp_path
     run(rig.warm())
     run(rig.warm())  # unchanged: not sent again
     puts = feed.paths("PUT", "/claims/")
-    assert len(puts) == 1 and puts[0]["_body"] == {"keys": {TCS: "ltpc"}}
+    assert len(puts) == 1 and puts[0]["_body"] == {
+        "keys": {TCS: "ltpc", "NSE_INDEX|Nifty 50": "ltpc", "NSE_INDEX|Nifty 500": "ltpc"}
+    }
     feed.started_at = "2026-10-26T13:00:00"  # the feed restarted: claims are made again
     run(rig.warm())
     assert len(feed.paths("PUT", "/claims/")) == 2

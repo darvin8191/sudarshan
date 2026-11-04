@@ -36,17 +36,18 @@ from sudarshan.alerts.market.grain import paise
 from sudarshan.autologin.schedule import TradingCalendar
 
 from .core.days import day_of_instant
+from .feedlink import CLIENT as _CLIENT
+from .feedlink import INDEX_KEYS, Claims, FeedClient, json_of
 from .resolver import SEGMENT, Resolver, ResolverUnavailable
 from .store import PortfolioStore, Scope, Tx
 from .views import NO_PRICE, Prices
 
 log = logging.getLogger("sudarshan.portfolio.prices")
 
-CLIENT = "sudarshan-portfolio"
+CLIENT = _CLIENT
 SNAPSHOT_BATCH = 200
 QUOTE_BATCH = 200
-HTTP_TIMEOUT_S = 5.0
-CLAIM_RENEW_MS = 10 * 60 * 1000
+CLOSE_QUOTE_BATCH = 500
 NO_AUCTION = (False, None, None, None)
 
 
@@ -70,36 +71,78 @@ class PriceBook(Prices):
         max_claims: int = 200,
         client: httpx.AsyncClient | None = None,
     ):
-        self.feed_url = feed_url.rstrip("/")
+        self.feed = FeedClient(feed_url, client)
+        self.claims = Claims(self.feed, max_claims)
         self.resolver, self.calendar, self.max_claims = resolver, calendar, max_claims
-        self._client = client
-        self._own_client = client is None
         self._ticks: dict[str, Mapping] = {}
         self._quotes: dict[tuple[int, str], dict[str, Any]] = {}
         self._asked: set[tuple[int, str]] = set()
         self._auction: dict[int, tuple] = {}
-        self._claimed: frozenset[str] = frozenset()
-        self._claimed_at = 0
-        self._feed_started: str | None = None
-        self._told: set[str] = set()
-        self._feed_down = False
-
-    # ---- the client ----------------------------------------------------------------------------
-    @property
-    def client(self) -> httpx.AsyncClient:
-        if self._client is None:
-            self._client = httpx.AsyncClient(timeout=HTTP_TIMEOUT_S)
-        return self._client
 
     async def aclose(self) -> None:
-        client, self._client = self._client, None
-        if client is not None and self._own_client:
-            await client.aclose()
+        await self.feed.aclose()
 
     def _say_once(self, name: str, text: str, *args: Any) -> None:
-        if name not in self._told:
-            self._told.add(name)
-            log.warning(text, *args)
+        self.feed.say_once(name, text, *args)
+
+    async def follow(self, store: PortfolioStore | None, now: int, reader: Any = None) -> bool:
+        """Keep the feed's set of this service's keys current: the indexes first, then every
+        listed asset, then the Upstox holdings the reader last saw. The "claims" job calls this."""
+        if store is None:
+            return False
+        loop = asyncio.get_running_loop()
+
+        def keys(tx: Tx) -> list[str]:
+            return sorted({a["instrument_key"] for a in tx.rows("asset", kind="listed")
+                           if a["instrument_key"]})  # fmt: skip
+
+        mine = await loop.run_in_executor(None, lambda: store.read(Scope.owner(), keys))
+        theirs = reader.held_keys() if reader is not None and hasattr(reader, "held_keys") else []
+        return await self.claims.sync([*INDEX_KEYS, *mine, *sorted(set(theirs) - set(mine))], now)
+
+    def index_tick(self, key: str, today: int) -> dict[str, Any] | None:
+        """The last tick of an index if it is from ``today``: ``{"price_u", "cp_u", "at"}``."""
+        tick = self._ticks.get(key)
+        at = tick.get("ltt") if tick else None
+        last = price_u(tick.get("ltp")) if tick else None
+        if last is None or not isinstance(at, int) or _day(at) != today:
+            return None
+        return {"price_u": last, "cp_u": price_u(tick.get("cp")), "at": at}
+
+    async def official_closes(self, keys: list[str], now: int) -> dict[str, tuple[int, str]]:
+        """The official close of each key as ``(price_u, "cp" or "quote")``: the tick's ``cp``
+        when its ``ltt`` is today, else the quote's previous close through the governor (500 keys
+        a call). A key neither gives is left out."""
+        today = _day(now)
+        found: dict[str, tuple[int, str]] = {}
+        for key, tick in (await self._snapshot(keys)).items():
+            close, at = price_u(tick.get("cp")), tick.get("ltt")
+            if close is not None and isinstance(at, int) and _day(at) == today:
+                found[key] = (close, "cp")
+        rest = [k for k in keys if k not in found]
+        for start in range(0, len(rest), CLOSE_QUOTE_BATCH):
+            batch = rest[start : start + CLOSE_QUOTE_BATCH]
+            answer = await self._call(
+                "GET",
+                "/upstox/v3/market-quote/quotes",
+                params={"instrument_key": ",".join(batch)},
+                headers={"X-Sudarshan-Client": CLIENT, "X-Sudarshan-Priority": "background"},
+            )
+            if answer is None or answer.status_code != 200:
+                if answer is not None:
+                    self._say_once("closeoff", "Official closes by quote are not asked for: the "
+                                   "feed's request governor does not answer them.")  # fmt: skip
+                break
+            for item in (json_of(answer).get("data") or {}).values():
+                if not isinstance(item, dict):
+                    continue
+                key, close = item.get("instrument_token"), price_u(item.get("prev_close_price"))
+                if isinstance(key, str) and close is not None:
+                    found[key] = (close, "quote")
+        return found
+
+    async def _call(self, method: str, path: str, **kwargs) -> httpx.Response | None:
+        return await self.feed.call(method, path, **kwargs)
 
     # ---- warming (all network work) -----------------------------------------------------------------
     async def warm(self, store: PortfolioStore, now: int, scope: Scope | None = None) -> None:
@@ -120,26 +163,12 @@ class PriceBook(Prices):
         session = _day(now)
         if self._quotes and next(iter(self._quotes))[0] != session:
             self._quotes, self._asked = {}, set()  # a quote is kept for its session only (P18)
-        await self._claim(sorted(keyed), now)
-        ticks = await self._snapshot(sorted(keyed))
+        await self.claims.sync([*INDEX_KEYS, *sorted(keyed)], now)
+        ticks = await self._snapshot([*INDEX_KEYS, *sorted(keyed)])
         self._ticks = ticks  # a whole generation at once
         need = [k for k, (_, has_eod) in keyed.items() if k not in ticks and not has_eod]
         await self._quote([k for k in need if (session, k) not in self._asked], session, now)
         await loop.run_in_executor(None, lambda: self._flag_auctions([a for a, _ in listed], now))
-
-    async def _call(self, method: str, path: str, **kwargs) -> httpx.Response | None:
-        try:
-            answer = await self.client.request(method, self.feed_url + path, **kwargs)
-        except httpx.HTTPError:
-            if not self._feed_down:
-                log.warning("The price feed is not answering; prices come from the last closing "
-                            "record until it does.")  # fmt: skip
-            self._feed_down = True
-            return None
-        if self._feed_down:
-            log.info("The price feed answers again.")
-            self._feed_down = False
-        return answer
 
     async def _snapshot(self, keys: list[str]) -> dict[str, Mapping]:
         found: dict[str, Mapping] = {}
@@ -148,41 +177,11 @@ class PriceBook(Prices):
             answer = await self._call("GET", "/snapshot", params={"keys": ",".join(batch)})
             if answer is None or answer.status_code != 200:
                 continue
-            ticks = _json(answer).get("ticks")
+            ticks = json_of(answer).get("ticks")
             for key, tick in (ticks or {}).items() if isinstance(ticks, dict) else ():
                 if isinstance(tick, dict):
                     found[key] = tick
         return found
-
-    async def _claim(self, keys: list[str], now: int) -> None:
-        """Ask the feed to follow these keys (5.2): when the set changes, every 10 minutes, and
-        when the feed has restarted. Never a fallback to /subscribe."""
-        health = await self._call("GET", "/health")
-        started = _json(health).get("started_at") if health is not None else None
-        restarted = started is not None and started != self._feed_started
-        want = frozenset(keys[: self.max_claims])
-        if len(keys) > self.max_claims:
-            self._say_once("cap", "More than %d listed holdings: the rest are priced by quote.",
-                           self.max_claims)  # fmt: skip
-        if (
-            health is None
-            or not want
-            or (want == self._claimed and not restarted and now - self._claimed_at < CLAIM_RENEW_MS)
-        ):
-            return
-        answer = await self._call(
-            "PUT", f"/claims/{CLIENT}", json={"keys": dict.fromkeys(want, "ltpc")}
-        )
-        if answer is None:
-            return
-        if answer.status_code == 200:
-            self._claimed, self._claimed_at, self._feed_started = want, now, started
-        elif answer.status_code == 404:
-            self._say_once("noclaims", "The feed does not take claims yet; the portfolio prices "
-                           "from closing records and quotes.")  # fmt: skip
-        elif answer.status_code == 409:
-            self._say_once("claimcap", "The feed has no room for the portfolio's keys; they are "
-                           "priced from closing records and quotes.")  # fmt: skip
 
     async def _quote(self, keys: list[str], session: int, now: int) -> None:
         """Quotes for keys with no tick and no closing record, once each per session, only
@@ -206,7 +205,7 @@ class PriceBook(Prices):
                     self._say_once(f"gov{answer.status_code}", "The feed's request governor did "
                                    "not give quotes (%d).", answer.status_code)  # fmt: skip
                 return
-            for item in (_json(answer).get("data") or {}).values():
+            for item in (json_of(answer).get("data") or {}).values():
                 if isinstance(item, dict):
                     self._take_quote(item, session, now)
 
@@ -306,13 +305,3 @@ def _info(price, prev, day, at, source, basis, late) -> dict[str, Any]:
         "basis": basis,
         "late": late,
     }
-
-
-def _json(answer: httpx.Response | None) -> dict:
-    if answer is None:
-        return {}
-    try:
-        found = answer.json()
-    except ValueError:
-        return {}
-    return found if isinstance(found, dict) else {}
