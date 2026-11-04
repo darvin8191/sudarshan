@@ -345,3 +345,67 @@ class FakeUpstox:
             self._server.shutdown()
             self._server.server_close()
             self._server = None
+
+
+#: A synthetic NAV file in the layout of AMFI's NAVAll.txt as the design describes it.
+NAVALL = """Scheme Code;ISIN Div Payout/ ISIN Growth;ISIN Div Reinvestment;Scheme Name;Net Asset Value;Date
+
+Open Ended Schemes(Equity Scheme - Large Cap Fund)
+
+Alpha Mutual Fund
+
+100001;INF000A01011;-;Alpha Bluechip Fund - Direct Plan - Growth;123.45675;04-Nov-2026
+100002;INF000A01029;INF000A01037;Alpha Bluechip Fund - Regular Plan - IDCW;N.A.;04-Nov-2026
+100003;-;-;Alpha Value Fund - Direct Plan - Growth;50.1;04-Nov-2026
+
+Open Ended Schemes(Debt Scheme - Liquid Fund)
+
+Beta Mutual Fund
+
+200001;INF000B01010;-;Beta Liquid Fund - Direct Plan - Growth;1234.5;04-Nov-2026
+200003;INF000B01036;-;Beta Comma Fund;1,234.5;04-Nov-2026
+200002;INF000B01028;-;Beta Overnight Fund - Direct Plan - Growth;1100.2500;04-Nov-2026
+this line is not a scheme; and neither is the next
+300001;INF000C01010;-;Broken Date Fund;10.0;not a date
+"""
+
+
+class FakeAmfi:
+    """AMFI's file on loopback: the body, a 304 for a repeated ask, and the asks it saw."""
+
+    def __init__(self, body: str = NAVALL):
+        self.body, self.status, self.modified = body, 200, True
+        self.asks: list[dict] = []
+        self._server = None
+        self.url = ""
+
+    def start(self) -> str:
+        fake = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                fake.asks.append(dict(self.headers))
+                if self.headers.get("If-Modified-Since") and not fake.modified:
+                    self.send_response(304)
+                    self.end_headers()
+                    return
+                data = fake.body.encode()
+                self.send_response(fake.status)
+                self.send_header("Content-Type", "text/plain")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+        self._server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=self._server.serve_forever, daemon=True).start()
+        self.url = f"http://127.0.0.1:{self._server.server_address[1]}/NAVAll.txt"
+        return self.url
+
+    def stop(self) -> None:
+        if self._server is not None:
+            self._server.shutdown()
+            self._server.server_close()
+            self._server = None
