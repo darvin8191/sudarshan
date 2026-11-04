@@ -463,6 +463,42 @@ def _screens() -> int:
         return 0
 
 
+def _room_sids() -> list[str]:
+    """The sids in the owner's room now, as a copy (a disconnect edits the room)."""
+    server = getattr(socketio, "server", None)
+    rooms = getattr(getattr(server, "manager", None), "rooms", None)
+    if not isinstance(rooms, dict):
+        return []
+    members = rooms.get(NAMESPACE, {}).get(ROOM)
+    try:
+        return [m[0] if isinstance(m, tuple) else m for m in list(members or ())]
+    except TypeError:
+        return []
+
+
+def _disconnect(sids: list[str]) -> None:
+    for sid in sids:
+        try:
+            socketio.server.disconnect(sid, namespace=NAMESPACE)
+        except Exception:
+            logger.exception("Could not close an alerts socket at the end of a session")
+
+
+def drop_owner_room() -> None:
+    """Close every socket in the owner's room, when the owner's session ends (logout, a forced
+    logout, the daily expiry or revoke). A socket joined while the session was valid, and the join
+    is the only check, so without this a lost phone logged out elsewhere keeps getting the owner's
+    alerts. The app reconnects and its join is checked again. Never raises, and does nothing when
+    there is no room or no socket. Under eventlet from a real thread the close is handed to the hub
+    (utils.real_threading.submit_to_hub); everywhere else it runs inline."""
+    try:
+        sids = _room_sids()
+        if sids:
+            real_threading.submit_to_hub(_disconnect, sids)
+    except Exception:
+        logger.exception("Could not close the owner's alerts room")
+
+
 def _refused(status: int, message: str):
     return jsonify({"status": "error", "message": message}), status
 
