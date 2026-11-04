@@ -937,9 +937,11 @@ class Gate:
             orders = self._read.live_order_rows(owner)
         except Exception:
             return None
+        # Each row is corrected together with the other products of its instrument, so a
+        # position converted in Upstox's app is judged right (sudarshan.books.fills).
+        held_rows = fills.held_each(rows, orders)
         out = []
-        for row in rows:
-            held = fills.held_now(row, orders) if isinstance(row, dict) else None
+        for row, held in zip(rows, held_rows, strict=True):
             if held is None:
                 if strict and isinstance(row, dict):
                     return None

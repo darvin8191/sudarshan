@@ -181,14 +181,6 @@ def held_each(positions: list[dict], orders: Iterable[dict] | None) -> list[int 
     return out
 
 
-def held_now(position: dict, orders: Iterable[dict] | None) -> int | None:
-    """Superseded by ``held_for``, which takes every row of the instrument; kept until the gate
-    uses that (M5.13). Right only for an instrument held in one product."""
-    return held_for(
-        [position], orders, str(position.get("instrument_token") or "").strip(), _product(position)
-    )
-
-
 def _stamp(value: Any) -> datetime | None:
     """A row's ``order_timestamp`` ("2026-10-27 09:20:00", India's time) as a moment, or None."""
     try:
