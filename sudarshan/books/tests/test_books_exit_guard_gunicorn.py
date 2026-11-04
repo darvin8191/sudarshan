@@ -79,7 +79,8 @@ APP = textwrap.dedent(
                 return Reply(200, {"status": "success", "data": []})
             rows = [
                 {"instrument_token": token, "exchange": exchange, "product": product,
-                 "tradingsymbol": symbol, "quantity": quantity}
+                 "tradingsymbol": symbol, "quantity": quantity,
+                 "day_buy_quantity": 0, "day_sell_quantity": 0}
                 for symbol, (token, exchange, product, quantity) in ROWS.items()
             ]
             slow = STATE.setdefault("slow_reads", [])

@@ -71,6 +71,10 @@ class Broker:
         self.slow_read = 0.0  # seconds a positions read takes to answer, its rows as at its start
         self.read_delay = None  # or callable(read number from 1) -> seconds, as slow_read
         self.order_book_delay = 0.0  # seconds the order book takes; past the read's limit, cut off
+        # symbol -> (bought, sold) already taken in today before the first fill below (rows the
+        # positions book shows and the order book lists as complete orders)
+        self.base_day: dict[str, tuple[int, int]] = {}
+        self.day_fields = True  # the positions rows carry day_buy_quantity / day_sell_quantity
 
     # -- state ---------------------------------------------------------------
     def true_qty(self, symbol: str) -> int:
@@ -83,6 +87,17 @@ class Broker:
             return self.base.get(symbol, 0) + sum(
                 d for t, s, d in self.fills if s == symbol and t <= cutoff
             )
+
+    def day_figures(self, symbol: str, now: float, fresh: bool = False) -> tuple[int, int]:
+        """(day_buy_quantity, day_sell_quantity) as the positions book shows them."""
+        with self.lock:
+            cutoff = now if fresh else now - self.lag
+            bought, sold = self.base_day.get(symbol, (0, 0))
+            for t, s, d in self.fills:
+                if s == symbol and t <= cutoff:
+                    bought += max(d, 0)
+                    sold += max(-d, 0)
+            return bought, sold
 
     def rest(
         self, symbol: str, side: str, qty: int, kind: str = "SL-M", trigger: float = 98.5
@@ -108,6 +123,9 @@ class Broker:
             for order in self.working:
                 delta = order["qty"] if order["side"] == "BUY" else -order["qty"]
                 self.fills.append((now, order["symbol"], delta))
+                for placed in self.orders:
+                    if placed["id"] == order.get("id"):
+                        placed["filled"] = placed["qty"]  # the rest of it filled too
             self.working.clear()
 
     def history(self, symbol: str) -> list[int]:
@@ -142,6 +160,12 @@ class Broker:
                     "product": product,
                     "tradingsymbol": symbol,
                     "quantity": self.shown_qty(symbol, now, fresh=fresh),
+                    **(
+                        dict(zip(("day_buy_quantity", "day_sell_quantity"),
+                                 self.day_figures(symbol, now, fresh=fresh)))  # fmt: skip
+                        if self.day_fields
+                        else {}
+                    ),
                     "average_price": 100.0,
                     "last_price": 101.0,
                     "pnl": 0.0,
@@ -188,7 +212,64 @@ class Broker:
                         "order_timestamp": placed.strftime("%Y-%m-%d %H:%M:%S"),
                     }
                 )
+            rows.extend(self._filled_rows())
         return FakeResponse(200, {"status": "success", "data": rows})
+
+    def _filled_rows(self) -> list[dict]:
+        """The order book's rows for every order that is not working now (call under the lock).
+
+        The order book shows an order and its fill at once, whatever the positions book shows: a
+        row for each order placed through ``post`` (complete, or rejected when the simulated
+        Upstox rejects it), and one complete order per instrument and side for any fill that no
+        order above carries (a base_day figure, a fill the test added)."""
+        working_ids = {order.get("id") for order in self.working}
+        totals: dict[tuple[str, str], int] = {}
+        for symbol, (bought, sold) in self.base_day.items():
+            totals[(symbol, "BUY")] = totals.get((symbol, "BUY"), 0) + bought
+            totals[(symbol, "SELL")] = totals.get((symbol, "SELL"), 0) + sold
+        for _t, symbol, delta in self.fills:
+            side = "BUY" if delta > 0 else "SELL"
+            totals[(symbol, side)] = totals.get((symbol, side), 0) + abs(delta)
+        for order in self.working:
+            key = (order["symbol"], order["side"])
+            totals[key] = totals.get(key, 0) - order.get("filled", 0)
+
+        def row(order_id, symbol, side, status, quantity, filled):
+            token, exchange, product, _oa = INSTRUMENTS[symbol]
+            return {
+                "order_id": order_id,
+                "instrument_token": token,
+                "exchange": exchange,
+                "product": product,
+                "tradingsymbol": symbol,
+                "transaction_type": side,
+                "status": status,
+                "order_type": "MARKET",
+                "trigger_price": 0,
+                "price": 0,
+                "pending_quantity": 0,
+                "quantity": quantity,
+                "filled_quantity": filled,
+                "order_timestamp": "2026-10-27 09:20:00",
+            }
+
+        rows = []
+        for placed in self.orders:
+            if placed["id"] in working_ids:
+                continue
+            rejected = placed.get("rejected", False)
+            filled = 0 if rejected else placed.get("filled", placed["qty"])
+            key = (placed["symbol"], placed["side"])
+            totals[key] = totals.get(key, 0) - filled
+            rows.append(
+                row(placed["id"], placed["symbol"], placed["side"],
+                    "rejected" if rejected else "complete" if filled == placed["qty"] else "cancelled",
+                    placed["qty"], filled)
+            )  # fmt: skip
+        for (symbol, side), quantity in sorted(totals.items()):
+            if quantity > 0:
+                rows.append(row(f"F{side[0]}{symbol[-6:]}", symbol, side, "complete", quantity, quantity))
+        return rows
 
     def post(self, url, headers=None, content=None, **kwargs):
         assert url.endswith("/v3/order/place"), url
@@ -203,9 +284,11 @@ class Broker:
         now = time.monotonic()
         with self.lock:
             oid = f"2610270000{len(self.orders) + 1:02d}"
-            self.orders.append({"at": now, "symbol": symbol, "side": side, "qty": qty, "id": oid})
+            self.orders.append({"at": now, "symbol": symbol, "side": side, "qty": qty, "id": oid,
+                                "rejected": symbol in self.rejected_later})  # fmt: skip
             if symbol not in self.rejected_later:
                 filled = self.part.get(symbol, qty)
+                self.orders[-1]["filled"] = filled
                 delta = filled if side == "BUY" else -filled
                 self.fills.append((now, symbol, delta))
                 if filled < qty:  # the rest of this market order, still working

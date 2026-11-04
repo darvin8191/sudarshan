@@ -128,15 +128,28 @@ in brand. Icon "Mor": tile #0E5A73, ring #E3A21A, glyph #FFFFFF. Numbers via
     last change; the exit's own open order (pinned by the order id in the answer) holds until
     a book read settles it. After that it asks again, saying what is known about the first.
     The server keeps exits for one position to one at a time (`sudarshan/books/exit_guard.py`):
-    a claim while an exit is being placed and a 15 s note after it, for the app's Exit, a smart
-    order to position size 0 (TradingView, scripts; claimed before its positions read) and
-    Flow's close; an overlapping one gets 409 with a sentence, and an entry is never refused.
-    The scalping terminal's closes and the strategy module's exits are not covered yet. Every
-    Exit all takes one claim for the whole book in `close_position_with_auth`; in Live it reads
-    positions and the order book once and leaves out, with a sentence each, any position that
-    is busy or has a working order on its closing side; it never waits. Anything that may have reached the broker reads "not confirmed",
-    never a refusal or raw error text. A stranded hold costs a retry; a released one can
-    reverse a position.
+    a claim while an exit is being placed, and a hold after it that Upstox's order book ends, not
+    a clock. When an exit's answer names an order id, a second exit of that position (the app's
+    Exit, a second device, a smart order to position size 0 from TradingView or scripts, Flow's
+    close, Exit all, the kill switch, and under the guard's `on` the gate's claim) is refused with
+    a sentence (409) while the order book shows that order working; it ends when the book shows it
+    complete, cancelled or rejected. The book is read only when a second exit arrives while a
+    hold is open (the same read that sizes the exit). If the book cannot be read, the hold lasts
+    up to 150 s from the answer and the refusal says the first exit is not confirmed. An answer
+    that names no order id keeps a 15 s note. A resting stop loss or target placed earlier does
+    not block a single Exit (the same as Upstox's app); Exit all leaves such a position out, with
+    its sentence. Every exit the server sizes (Exit all, the smart order to 0, the app's Exit,
+    Flow's close, the kill switch's Exit all) is sized from the positions row corrected by the
+    order book's fills (`sudarshan/books/fills.py`: today's filled quantity per instrument and
+    product less the row's `day_buy_quantity` and `day_sell_quantity`, positions read first, then
+    the order book). When that cannot be worked out, Exit all leaves the position out with a
+    sentence and a single exit is refused. An entry is never refused. The scalping terminal's
+    closes and the strategy module's exits are not covered yet. Every Exit all takes one claim for
+    the whole book in `close_position_with_auth`; in Live it reads positions and then the order
+    book once and leaves out, with a sentence each, any position that is busy, held or has a
+    working order on its closing side; it never waits. Anything that may have reached the broker
+    reads "not confirmed", never a refusal or raw error text. A stranded hold costs a retry; a
+    released one can reverse a position.
   - A sheet, a confirmation or an order ticket ignores taps for 500 ms after it opens
     (`watchlist/openGuard.ts`), so a double tap never presses what appeared under the finger.
   - Order alerts on Telegram (M6.8) are on by default (owner's broker-app benchmark, 20 Oct

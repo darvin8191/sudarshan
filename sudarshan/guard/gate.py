@@ -21,16 +21,17 @@ When it covers the pipe, an order passes in three steps:
 An exit always goes. A refusal is 403 with a sentence (words.py), never 409, which the phone reads
 as an earlier exit still being placed (frontend/src/sudarshan/books/sendOutcome.ts), and no
 function is called. Each send stays recorded until its answer says nothing was sent, until
-``SHOWS_WITHIN_S`` after it was answered or the book shows it, or ``SEND_HELD_AT_MOST_S`` at the
-latest. The records are the in-flight registry the kill switch waits on when it is turned on.
+the book shows it (or its order ended), or ``SEND_HELD_AT_MOST_S`` after its answer; an answer
+that names no order is forgotten ``SHOWS_WITHIN_S`` after it, for the book has no order to be
+asked about. The records are the in-flight registry the kill switch waits on when it is turned on.
 
 A claim ends with its order. A send let go while nothing was judging it counts against its
 position only while it waits for its answer. A cancel that went through (Upstox's or the
 sandbox's ``cancel_order``, Cancel all included) drops the claims on that order at once
 (``cancelled``). And before an order is refused only because of claims, the broker's order book
 is read once: a claim whose order shows cancelled, rejected or still resting is dropped, and the
-order judged again; a claim whose order shows complete, or is not in the book yet, stays its 15
-seconds.
+order judged again; a claim whose order shows complete, or is not in the book yet, stays until
+the positions book shows the exit or ``SEND_HELD_AT_MOST_S`` have passed.
 
 If the gate itself breaks, an order passes only when nothing is refusing new risk. While the kill
 switch is on, or its state could not be read, it is refused (fail closed). Under the kill switch
@@ -86,6 +87,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from broker.upstox.api import rate_limiter
+from sudarshan.books import fills
 from sudarshan.books.exit_guard import EXIT_SHOWS_WITHIN_S, trader_name
 from utils import real_threading
 from utils.broker_backpressure import BusyResponse
@@ -129,6 +131,10 @@ TIMED_KEPT = 500
 #: day's figure (design section 5), and, under the kill switch or on a locked day only, to judge
 #: an order (the coordinator's decision d). With none, such an order is refused.
 DAY_BOOK_REUSE_S = 15.0
+#: A positions book kept from an earlier read judges an order, when the positions cannot be read
+#: now, only if Upstox's order book can be read to correct it (``Gate._corrected``), and no longer
+#: than this after it was read.
+KEPT_BOOK_WITHIN_S = SEND_HELD_AT_MOST_S
 #: A segment's session window, read from the market calendar, is kept this long.
 SESSION_KEPT_S = 600.0
 #: How far ahead the daily card looks for the next session (a long holiday weekend fits).
@@ -900,21 +906,47 @@ class Gate:
 
     def _live_rows(self, owner: str, fallback: bool = False) -> tuple[list, bool]:
         """Upstox's positions for ``owner``, kept with the time the read began. When they cannot
-        be read and ``fallback`` allows it, the book read in the last ``DAY_BOOK_REUSE_S``,
-        with True; else Unreadable."""
+        be read and ``fallback`` allows it, the book read in the last ``KEPT_BOOK_WITHIN_S``
+        and corrected by the order book, with True; else Unreadable. Rows are corrected by the
+        fills the order book shows (``_corrected``), so a lagging positions book judges right."""
         started = time.monotonic()
         try:
             rows = self._read.live_cached_rows(owner)
             if rows is None:
                 rows = self._read.live_rows(owner)
         except readers.Unreadable:
-            kept = self._kept_rows(owner, DAY_BOOK_REUSE_S) if fallback else None
+            kept = self._kept_rows(owner, KEPT_BOOK_WITHIN_S) if fallback else None
             if kept is None:
                 raise
-            return kept, True
+            # A book kept from before judges only as the order book's fills correct it, however
+            # old it is: the row's own day figures say what it already shows.
+            corrected = self._corrected(owner, kept, strict=True)
+            if corrected is None:
+                raise
+            return corrected, True
         with self._lock:
-            self._rows = (owner, started, rows)
-        return rows, False
+            self._rows = (owner, started, rows)  # as Upstox shows them: corrected on every use
+        return self._corrected(owner, rows) or rows, False
+
+    def _corrected(self, owner: str, rows: list, strict: bool = False) -> list | None:
+        """``rows`` with each quantity corrected by what Upstox's order book says was filled
+        since the row was read (sudarshan.books.fills), read after the rows. A row it cannot
+        correct stays as read, unless ``strict``, which answers None for any such row; so does a
+        book that cannot be read."""
+        try:
+            orders = self._read.live_order_rows(owner)
+        except Exception:
+            return None
+        out = []
+        for row in rows:
+            held = fills.held_now(row, orders) if isinstance(row, dict) else None
+            if held is None:
+                if strict and isinstance(row, dict):
+                    return None
+                out.append(row)
+            else:
+                out.append({**row, "quantity": held})
+        return out
 
     def _kept_rows(self, owner: str, within: float) -> list | None:
         """The book last read for ``owner``, if that read began at most ``within`` ago."""
@@ -1300,9 +1332,16 @@ class Gate:
                 del self._withdrawn[token]
         for token, send in list(self._sends.items()):
             answered = send.answered
-            if now - send.admitted > SEND_HELD_AT_MOST_S or (
-                answered is not None and now - answered > SHOWS_WITHIN_S
-            ):
+            if answered is None:
+                gone = now - send.admitted > SEND_HELD_AT_MOST_S
+            elif send.ref:
+                # Upstox named its order: the claim stands until the book shows the exit
+                # (``_counted``) or the order ended (``_ended_orders``), at most
+                # ``SEND_HELD_AT_MOST_S`` from the answer; no shorter clock ends it.
+                gone = now - answered > SEND_HELD_AT_MOST_S
+            else:
+                gone = now - answered > SHOWS_WITHIN_S  # no order to ask the book about
+            if gone:
                 del self._sends[token]
 
     def _refuse(

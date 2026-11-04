@@ -14,11 +14,23 @@ position is busy while
 
 - an exit for it is being placed: claimed here from before the read it is
   sized from until after it is noted, or until it has sent nothing (``one``);
-- an exit for it may have placed an order in the last ``EXIT_SHOWS_WITHIN_S``:
-  noted here (``exit_placed``) by the app's Exit, by any smart order to a
-  position size of 0, and by Exit all for each exit it sent;
-- and, for Exit all, an order on its closing side is still working in Upstox's
-  order book (broker/upstox/api/order_api.py reads it once per Exit all).
+- an exit for it that Upstox answered with an order id is on hold (``Hold``) and the order book
+  still shows that order working. The hold is noted here (``exit_placed``) by the app's Exit, by
+  any smart order to a position size of 0, and by Exit all for each exit it sent. It ends when
+  Upstox's order book shows the order complete, cancelled or rejected, and no clock decides:
+  the book is read only when a second exit comes in while a hold is open. If the book cannot be
+  read, or does not list the order, the hold lasts up to ``EXIT_HOLD_UNCONFIRMED_S`` from the
+  answer, and the refusal says the first exit is not confirmed;
+- an exit for it whose answer named no order id may have placed one the book cannot be asked
+  about: that note lasts ``EXIT_SHOWS_WITHIN_S``.
+
+A resting stop loss or target placed earlier is not a hold: it does not stop a single Exit (the
+same as Upstox's own app). Exit all keeps leaving such a position out, with its own sentence.
+
+Every exit the server sizes (Exit all, the smart order to size 0, the app's Exit, Flow's close
+and the kill switch's Exit all) is sized from the positions row corrected by the order book's
+fills (``sudarshan.books.fills``), never by a clock; when that cannot be worked out, Exit all
+leaves the position out with a sentence and a single exit is refused.
 
 Exit all (``close_all_once``, which every surface passes: the app's, the one at
 /api/v1/closeposition that TradingView, scripts and Telegram's /closeall use,
@@ -64,9 +76,22 @@ logger = get_logger(__name__)
 
 EXIT_ALL_BEING_PLACED = "Exit all is still being placed. Wait for it, then check Orders."
 
-#: How long an exit counts as placed just now: the time the phone holds a sent exit for the
-#: book to show it (frontend/src/sudarshan/books/sent.ts, SENT_HOLD_MS).
+#: How long an exit whose answer named no order id counts as placed just now: the book has no
+#: order to be asked about, so only a clock can end it (frontend/src/sudarshan/books/sent.ts,
+#: SENT_HOLD_MS).
 EXIT_SHOWS_WITHIN_S = 15.0
+
+#: How long a hold lasts, at most, when Upstox's order book cannot say how its order ended (it
+#: could not be read, or does not list it): the phone's no-answer hold
+#: (frontend/src/sudarshan/books/sent.ts, NO_ANSWER_HOLD_MS).
+EXIT_HOLD_UNCONFIRMED_S = 150.0
+
+#: A single exit reads the order book with the gate's limit (sudarshan/guard/readers.READ_LIMIT_S),
+#: cut off there and never retried.
+EXIT_ORDERS_READ_S = 4.0
+
+#: Order statuses that end a hold: Upstox's order is done, whatever filled.
+FINAL_STATUSES = frozenset({"complete", "rejected", "cancelled"})
 
 #: Exit all reads the order book with a limit of its own and no retry: a read that takes longer
 #: counts as not read, and Exit all goes on without it and says so.
@@ -123,6 +148,32 @@ def on_its_way(position: Position, at: float) -> str:
         f"An exit for {trader_name(position)} is already on its way (sent {clock(at)}). Check "
         "Orders, and exit it again only if it is still open."
     )
+
+
+def first_exit_unconfirmed(position: Position, at: float) -> str:
+    """Why no exit was sent for a position whose first exit (sent at ``at``) cannot be checked."""
+    return (
+        f"The earlier exit for {trader_name(position)} (sent {clock(at)}) is not confirmed: its "
+        "order could not be checked at Upstox. Check Orders, and exit it again only if it is "
+        "not there."
+    )
+
+
+def exit_not_sized(position: Position) -> str:
+    """Why no exit was sent for a position whose quantity could not be confirmed."""
+    return (
+        f"No exit was sent for {trader_name(position)}: the quantity held could not be confirmed "
+        "from Upstox's orders. Check Positions and Orders, then exit again."
+    )
+
+
+@dataclass(frozen=True)
+class Hold:
+    """An exit Upstox answered with order ids, held until its orders end in the order book."""
+
+    order_ids: tuple[str, ...]  # empty: the answer named none
+    started: float  # monotonic, for how long it has been held
+    at: float  # epoch, for the sentence
 
 
 @dataclass(frozen=True)
@@ -184,25 +235,20 @@ class ExitsInFlight:
         # (book, *position) -> when its exit began (epoch seconds), while it is being placed.
         self._positions: dict[tuple[str, str, str, str], float] = {}
         self._every: set[str] = set()
-        # Per book, the positions whose exit may have placed an order, and when (monotonic for
-        # the age, epoch for the sentence); kept for EXIT_SHOWS_WITHIN_S only.
-        self._placed: dict[str, dict[Position, tuple[float, float]]] = {}
-        # Per book, a position whose cancelled exit part-filled: the most it can still hold
-        # (the order's quantity less what the order book shows it filled), and when (monotonic).
-        # Upstox's positions book may not show that fill for a while, so a new exit is sized
-        # no larger than this; kept for EXIT_SHOWS_WITHIN_S only.
-        self._caps: dict[str, dict[Position, tuple[float, int]]] = {}
+        # Per book, the exits Upstox answered (or may have answered), until their orders end.
+        self._placed: dict[str, dict[Position, Hold]] = {}
 
     def _since(self, book: str, position: Position, now: float) -> float | None:
-        """When the position's latest exit began or was noted, if it is busy; under the lock."""
+        """When the position's latest exit began, or its latest exit with no order id was noted,
+        if it is busy for a reason no order book can settle; under the lock."""
         self._forget_old(book, now)
         times = []
         began = self._positions.get((book, *position))
         if began is not None:
             times.append(began)
         noted = self._placed.get(book, {}).get(position)
-        if noted is not None:
-            times.append(noted[1])
+        if noted is not None and not noted.order_ids:
+            times.append(noted.at)
         return max(times) if times else None
 
     @contextmanager
@@ -261,24 +307,77 @@ class ExitsInFlight:
         return None if since is None else on_its_way(position, since)
 
     def busy(self, book: str) -> dict[Position, str]:
-        """Every position busy in ``book`` now, each with the sentence that says why."""
+        """Every position busy in ``book`` now for a reason no order book can settle, each with
+        the sentence that says why (an exit being placed, or noted with no order id)."""
         now = time.monotonic()
         with self._lock:
             self._forget_old(book, now)
-            since = {position: at for position, (_age, at) in self._placed.get(book, {}).items()}
+            since = {
+                position: hold.at
+                for position, hold in self._placed.get(book, {}).items()
+                if not hold.order_ids
+            }
             for (claimed_in, *position), began in self._positions.items():
                 if claimed_in == book:
                     key = tuple(position)
                     since[key] = max(began, since.get(key, began))
         return {position: on_its_way(position, at) for position, at in since.items()}
 
-    def placed(self, book: str, position: Position) -> None:
-        """Note that an exit for ``position`` in ``book`` may have placed an order just now."""
+    def placed(
+        self, book: str, position: Position, order_ids: tuple[str, ...] = ()
+    ) -> None:
+        """Note that an exit for ``position`` in ``book`` may have placed an order just now, and
+        which orders Upstox named for it."""
         now = time.monotonic()
         with self._lock:
             self._forget_old(book, now)
-            self._placed.setdefault(book, {})[position] = (now, time.time())
-            self._caps.get(book, {}).pop(position, None)  # a newer exit: its own note rules
+            self._placed.setdefault(book, {})[position] = Hold(order_ids, now, time.time())
+
+    def holds(self, book: str) -> dict[Position, Hold]:
+        """Every position with a hold on Upstox's orders in ``book`` now."""
+        with self._lock:
+            return {
+                position: hold
+                for position, hold in self._placed.get(book, {}).items()
+                if hold.order_ids
+            }
+
+    def hold_verdict(
+        self, book: str, position: Position, statuses: dict[str, str] | None
+    ) -> str | None:
+        """Why an exit for ``position`` is refused because of an earlier exit's orders, or None.
+
+        Args:
+            book: "live" or "sandbox".
+            position: The position, as the app writes it.
+            statuses: Upstox's order book as ``{order id: status}`` (OpenAlgo's words), read for
+                this exit; None when it could not be read.
+
+        A hold ends here, for good, when every order of it shows complete, cancelled or rejected;
+        a hold whose orders cannot be seen ends only ``EXIT_HOLD_UNCONFIRMED_S`` after its answer.
+        """
+        with self._lock:
+            hold = self._placed.get(book, {}).get(position)
+        if hold is None or not hold.order_ids:
+            return None
+        seen = None if statuses is None else [statuses.get(each) for each in hold.order_ids]
+        if seen is not None and all(each in FINAL_STATUSES for each in seen):
+            ended = True
+            said = None
+        elif seen is not None and any(each is not None and each not in FINAL_STATUSES for each in seen):
+            ended = False
+            said = on_its_way(position, hold.at)
+        else:  # not read, or an order the book does not list
+            ended = time.monotonic() - hold.started > EXIT_HOLD_UNCONFIRMED_S
+            said = None if ended else first_exit_unconfirmed(position, hold.at)
+        if ended:
+            with self._lock:
+                recent = self._placed.get(book)
+                if recent is not None and recent.get(position) is hold:
+                    del recent[position]
+                    if not recent:
+                        del self._placed[book]
+        return said
 
     def unplaced(self, book: str, position: Position) -> None:
         """Forget the note that an exit for ``position`` placed an order: that order was
@@ -290,41 +389,22 @@ class ExitsInFlight:
                 if not recent:
                     del self._placed[book]
 
-    def part_filled(self, book: str, position: Position, still_held: int) -> None:
-        """The exit order for ``position`` was cancelled after it part-filled (M5.13): no exit
-        is on its way, but the positions book may still show the quantity from before the fill,
-        so the next exit is sized to no more than ``still_held`` for ``EXIT_SHOWS_WITHIN_S``."""
-        with self._lock:
-            self._caps.setdefault(book, {})[position] = (time.monotonic(), max(int(still_held), 0))
-
-    def capped(self, book: str, position: Position, shown: int) -> int:
-        """The quantity an exit of ``position`` should be sized from: ``shown`` (the positions
-        book's signed quantity), cut to what a part-filled, cancelled exit left held."""
-        now = time.monotonic()
-        with self._lock:
-            caps = self._caps.get(book, {})
-            noted = caps.get(position)
-            if noted is not None and now - noted[0] > EXIT_SHOWS_WITHIN_S:
-                del caps[position]
-                noted = None
-        if noted is None or abs(shown) <= noted[1]:
-            return shown
-        return noted[1] if shown > 0 else -noted[1]
-
     def placed_lately(self, book: str) -> set[Position]:
-        """The positions whose exit may have placed an order in ``book`` in the last
-        ``EXIT_SHOWS_WITHIN_S``."""
+        """The positions with a note or a hold of an exit in ``book``."""
         with self._lock:
             self._forget_old(book, time.monotonic())
             return set(self._placed.get(book, {}))
 
     def _forget_old(self, book: str, now: float) -> None:
-        """Drop what is older than ``EXIT_SHOWS_WITHIN_S`` in ``book``; call under the lock."""
+        """Drop the notes that name no order and are older than ``EXIT_SHOWS_WITHIN_S``, in
+        ``book``; call under the lock. A hold on Upstox's orders is never dropped here: only the
+        order book ends it, or ``EXIT_HOLD_UNCONFIRMED_S`` when the book cannot say, at the next
+        exit for the position (``hold_verdict``), so no timer is needed."""
         recent = self._placed.get(book)
         if recent is None:
             return
-        for position, (age, _at) in list(recent.items()):
-            if now - age > EXIT_SHOWS_WITHIN_S:
+        for position, hold in list(recent.items()):
+            if not hold.order_ids and now - hold.started > EXIT_SHOWS_WITHIN_S:
                 del recent[position]
         if not recent:
             del self._placed[book]
@@ -358,14 +438,21 @@ def why_busy(book: str, exchange: object, symbol: object, product: object) -> st
     return EXITS.why_busy(book, position_of(exchange, symbol, product))
 
 
-def exit_placed(book: str, exchange: object, symbol: object, product: object) -> None:
+def exit_placed(
+    book: str,
+    exchange: object,
+    symbol: object,
+    product: object,
+    order_ids: object = (),
+) -> None:
     """Note that an exit for this position may have placed an order just now.
 
     Called by every exit in the Live book that was not refused, before its claim (or, for Exit
-    all, the book's) is let go: a second exit sized before the book shows this one would close
-    the position again.
+    all, the book's) is let go: a second exit that came before the order book shows this one
+    ended would close the position again. ``order_ids`` are the orders Upstox named for it.
     """
-    EXITS.placed(book, position_of(exchange, symbol, product))
+    ids = tuple(str(each).strip() for each in (order_ids or ()) if str(each or "").strip())
+    EXITS.placed(book, position_of(exchange, symbol, product), ids)
 
 
 def exit_cancelled(book: str, exchange: object, symbol: object, product: object) -> None:
@@ -374,18 +461,17 @@ def exit_cancelled(book: str, exchange: object, symbol: object, product: object)
     EXITS.unplaced(book, position_of(exchange, symbol, product))
 
 
-def exit_part_filled(
-    book: str, exchange: object, symbol: object, product: object, still_held: int
-) -> None:
-    """A cancelled exit order part-filled: the next exit is sized to at most ``still_held``
-    (``EXITS.part_filled``)."""
-    EXITS.part_filled(book, position_of(exchange, symbol, product), still_held)
+def exit_holds(book: str) -> dict[Position, Hold]:
+    """Every position with a hold on Upstox's orders in ``book`` (``EXITS.holds``)."""
+    return EXITS.holds(book)
 
 
-def exit_sized(book: str, exchange: object, symbol: object, product: object, shown: int) -> int:
-    """``shown``, the positions book's signed quantity, cut to what a part-filled, cancelled
-    exit left held (``EXITS.capped``)."""
-    return EXITS.capped(book, position_of(exchange, symbol, product), shown)
+def hold_verdict(
+    book: str, exchange: object, symbol: object, product: object, statuses: dict[str, str] | None
+) -> str | None:
+    """Why an exit for this position is refused because of an earlier exit's orders
+    (``EXITS.hold_verdict``), or None."""
+    return EXITS.hold_verdict(book, position_of(exchange, symbol, product), statuses)
 
 
 def exit_all_held(book: str) -> bool:

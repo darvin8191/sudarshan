@@ -25,7 +25,7 @@ from broker.upstox.mapping.transform_data import (
 )
 from database.auth_db import get_auth_token
 from database.token_db import get_br_symbol, get_symbol, get_token
-from sudarshan.books import exit_guard  # SUDARSHAN M6.9: an Exit all's exits, noted
+from sudarshan.books import exit_guard, fills  # SUDARSHAN M6.9: an Exit all's exits, noted
 from sudarshan.books.single_exit import EXIT_NOT_CONFIRMED, placed_order_ids  # SUDARSHAN M6.9
 from sudarshan.guard import gate as risk_gate  # SUDARSHAN M5.13: the risk gate
 from utils.broker_backpressure import (
@@ -95,7 +95,13 @@ def read_timeout() -> dict:
 
 
 def get_api_response(
-    endpoint, auth, method="GET", payload="", base_url=UPSTOX_BASE_URL, retry_count=0
+    endpoint,
+    auth,
+    method="GET",
+    payload="",
+    base_url=UPSTOX_BASE_URL,
+    retry_count=0,
+    timeout=None,
 ):
     """
     A wrapper to send requests to the Upstox API and handle responses.
@@ -106,6 +112,8 @@ def get_api_response(
         payload (str): The JSON payload for POST and PUT requests.
         base_url (str): The API host, only overridden for the v3 api-hft endpoints.
         retry_count (int): Internal; how many 429 retries have already been spent.
+        timeout (float): SUDARSHAN M5.13: a limit in seconds for a DELETE that must not wait for
+            the shared client's own 120 s (the kill switch's cancel of every open order).
     Returns:
         dict: The JSON response from the API, or an error dictionary.
     """
@@ -133,7 +141,7 @@ def get_api_response(
         elif method == "PUT":
             response = client.put(url, headers=headers, content=payload)
         elif method == "DELETE":
-            response = client.delete(url, headers=headers)
+            response = client.delete(url, headers=headers, **({"timeout": timeout} if timeout else {}))
         else:
             logger.error(f"Unsupported HTTP method: {method}")
             return {"status": "error", "message": f"Unsupported HTTP method: {method}"}
@@ -166,7 +174,7 @@ def get_api_response(
                 )
                 time.sleep(delay)
                 return get_api_response(
-                    endpoint, auth, method, payload, base_url, retry_count + 1
+                    endpoint, auth, method, payload, base_url, retry_count + 1, timeout
                 )
             if retries:
                 # gthread only (cap_server_delay never answers None elsewhere):
@@ -298,6 +306,78 @@ def get_open_position(tradingsymbol, exchange, product, auth):
     except Exception:
         logger.exception(f"Error getting open position for {tradingsymbol}")
         return "0"
+
+
+def _position_row(tradingsymbol, exchange, product, auth):
+    """SUDARSHAN M6.9: Upstox's raw positions row for one position, or None when it lists none.
+
+    The same row ``get_open_position`` reads its quantity from, through the same cache: the row
+    also carries the day's buy and sell quantities that ``sudarshan.books.fills`` corrects it by.
+    A refused or failed read raises, as there.
+    """
+    br_symbol = get_br_symbol(tradingsymbol, exchange)
+    positions_data = _get_cached_positions(auth)
+    if (
+        isinstance(positions_data, dict)
+        and positions_data.get("status") == "success"
+        and positions_data.get("data")
+    ):
+        for position in positions_data["data"]:
+            if (
+                position.get("tradingsymbol") == br_symbol
+                and position.get("exchange") == exchange
+                and position.get("product") == product
+            ):
+                return position
+    return None
+
+
+def _read_order_rows(auth, limit):
+    """SUDARSHAN M6.9: Upstox's raw order book rows, cut off after ``limit`` seconds and never
+    retried, or None when it could not be read (a refused read, a failure, a cut-off)."""
+    token = _READ_LIMIT.set(limit)
+    try:
+        book = get_order_book(auth)
+    except Exception:  # BrokerBusyError included: the read was refused, which is not "none"
+        logger.exception("The order book could not be read for an exit")
+        return None
+    finally:
+        _READ_LIMIT.reset(token)
+    if not isinstance(book, dict) or book.get("status") != "success":
+        logger.error("The order book could not be read for an exit")
+        return None
+    return [row for row in book.get("data") or [] if isinstance(row, dict)]
+
+
+def _order_statuses(rows):
+    """SUDARSHAN M6.9: ``{order id: status}`` (OpenAlgo's words) from the order book's rows, or
+    None when the book was not read."""
+    if rows is None:
+        return None
+    return {
+        str(row.get("order_id")): normalize_order_status(row.get("status"))
+        for row in rows
+        if row.get("order_id")
+    }
+
+
+def _held_for_exit(row, symbol, exchange, product, orders):
+    """SUDARSHAN M6.9: the signed quantity an exit of one position should be sized from: the
+    positions row corrected by the order book's fills (``sudarshan.books.fills``), or None when
+    that cannot be worked out. No row stands for a position the book does not list yet, so its
+    fills alone count."""
+    if row is None:
+        token = get_token(symbol, exchange)
+        if not token:
+            return 0  # no instrument by that name: nothing can be held in it
+        row = {
+            "instrument_token": token,
+            "product": map_product_type(product),
+            "quantity": 0,
+            "day_buy_quantity": 0,
+            "day_sell_quantity": 0,
+        }
+    return fills.held_now(row, orders)
 
 
 class _ErrorResponse:
@@ -506,18 +586,52 @@ def place_smartorder_api(data, auth):
             if position_size == 0:
                 busy = held.enter_context(exit_guard.one_exit("live", exchange, symbol, product))
 
-            current_position = int(get_open_position(symbol, exchange, map_product_type(product), auth))
+            unsized = None
+            statuses = None
             if position_size == 0:
-                # SUDARSHAN M5.13: an exit the kill switch cancelled after it part-filled: the
-                # positions book may not show that fill yet, so size from what is still held.
-                current_position = exit_guard.exit_sized(
-                    "live", exchange, symbol, product, current_position
+                # SUDARSHAN M6.9: an exit is sized from the positions row corrected by what the
+                # order book says was filled since (sudarshan/books/fills.py), read after the
+                # row, and no clock is involved. When that cannot be worked out nothing is sent.
+                row = _position_row(symbol, exchange, map_product_type(product), auth)
+                orders = _read_order_rows(auth, exit_guard.EXIT_ORDERS_READ_S)
+                statuses = _order_statuses(orders)
+                held_now = _held_for_exit(row, symbol, exchange, product, orders)
+                if held_now is None:
+                    unsized = exit_guard.exit_not_sized(
+                        exit_guard.position_of(exchange, symbol, product)
+                    )
+                    held_now = int(row.get("quantity", 0)) if row else 0
+                current_position = held_now
+            else:
+                current_position = int(
+                    get_open_position(symbol, exchange, map_product_type(product), auth)
                 )
             logger.debug(
                 f"Desired position size: {position_size}, Current position: {current_position}"
             )
 
-            if position_size == 0 and current_position == 0 and int(data.get("quantity", 0)) != 0:
+            held_by = None
+            if position_size == 0 and not busy:
+                # An earlier exit Upstox answered with an order id holds the position while the
+                # order book shows that order working, whatever its age; a resting stop or
+                # target placed earlier does not (the same as Upstox's own app).
+                held_by = exit_guard.hold_verdict("live", exchange, symbol, product, statuses)
+            if unsized and (busy or held_by or position_size == 0):
+                # Nothing was sent: what is held cannot be confirmed (the order book that
+                # corrects the positions row could not be read, or does not add up). An exit
+                # for a position that is busy or held says that first.
+                logger.warning(f"Exit for {symbol} not sent: the quantity held is not confirmed")
+                said = busy or held_by or unsized
+                refusal = {"status": "error", "message": said, "nothing_sent": True}
+                return _ErrorResponse(409 if said is not unsized else 424), refusal, None
+
+            entry = position_size == 0 and current_position == 0 and int(data.get("quantity", 0)) != 0
+            if held_by and not entry:
+                logger.warning(f"Exit for {symbol} not sent: an earlier exit is not ended")
+                refusal = {"status": "error", "message": held_by, "nothing_sent": True}
+                return _ErrorResponse(409), refusal, None
+
+            if entry:
                 logger.debug("No existing position and quantity is specified. Placing a new order.")
                 sent = True
                 res, response, orderid = place_order_api(data, auth)
@@ -566,7 +680,13 @@ def place_smartorder_api(data, auth):
                 answered = place_order_api(order_data, auth)
             finally:
                 if answered is None or _exit_answer(answered[0], answered[2]) != "refused":
-                    exit_guard.exit_placed("live", exchange, symbol, product)
+                    exit_guard.exit_placed(
+                        "live",
+                        exchange,
+                        symbol,
+                        product,
+                        _named_orders(answered),
+                    )
             _invalidate_position_cache(auth)
             res, response, orderid = answered
             return res, _with_sent(response, action, quantity, True), orderid
@@ -607,6 +727,17 @@ def _exit_answer(res, orderid):
     return "unknown"  # a 5xx, a failure after the send, or an answer naming no order
 
 
+def _named_orders(answered):
+    """SUDARSHAN M6.9: the order ids Upstox named in one exit's place_order_api answer, empty when
+    it named none (the order book has nothing to be asked about then)."""
+    if answered is None:
+        return ()
+    res, response, orderid = answered
+    if not orderid or _exit_answer(res, orderid) != "sent":
+        return ()
+    return tuple(placed_order_ids(response, orderid))
+
+
 def _counted(count, one, many):
     return f"{count} {one if count == 1 else many}"
 
@@ -635,28 +766,20 @@ def _amount(value):
         return 0.0
 
 
-def _working_exits(auth):
+def _working_exits(rows):
     """SUDARSHAN M6.9: the orders still working at Upstox, by what they would close.
+
+    Args:
+        rows: Upstox's raw order book rows, or None when the book could not be read.
 
     Returns:
         ``({(instrument_token, product, side): [exit_guard.WorkingOrder, ...]}, True)``, or
         ``({}, False)`` when the order book could not be read.
     """
-    limit = _READ_LIMIT.set(exit_guard.EXIT_ALL_ORDERS_READ_S)  # cut off, never retried
-    try:
-        book = get_order_book(auth)
-    except Exception:  # BrokerBusyError included: the read was refused, which is not "none"
-        logger.exception("Exit all could not read the order book")
-        return {}, False
-    finally:
-        _READ_LIMIT.reset(limit)
-    if not isinstance(book, dict) or book.get("status") != "success":
-        logger.error("Exit all could not read the order book")
+    if rows is None:
         return {}, False
     working = {}
-    for order in book.get("data") or []:
-        if not isinstance(order, dict):
-            continue
+    for order in rows:
         if normalize_order_status(order.get("status")) in _FINAL_ORDER_STATUSES:
             continue
         side = str(order.get("transaction_type") or "").upper()
@@ -727,9 +850,15 @@ def _exit_outcome(held, answer, res, response, orderid):
     return _outcome(held, "not_sent", why)
 
 
-_LATE = (
-    "Upstox was slow to answer, so Exit all stopped before sending an exit for it. Exit it again."
-)
+def _late_words(names):
+    """SUDARSHAN M6.9 (N7): the sentence for the exits Exit all had no time left to send. It
+    names no cause: the wait may be Upstox's, or SUDARSHAN's own order pacer behind other orders."""
+    them = "it" if len(names) == 1 else "them"
+    return (
+        f"Exit all ran out of its {exit_guard.EXIT_ALL_SENDS_FOR_S:g} seconds before it could send "
+        f"an exit for {_named(names)}, so nothing was sent for {them}. Check Positions, then send "
+        "Exit all again."
+    )
 
 
 def _close_all_summary(
@@ -799,12 +928,7 @@ def _close_all_summary(
         )
         words.append(f"{more} not sent either. Check Positions.")
     if late:
-        names = _named([exit_guard.trader_name(position) for position in late])
-        words.append(
-            f"Upstox was slow to answer, so Exit all stopped after "
-            f"{exit_guard.EXIT_ALL_SENDS_FOR_S:g} s and sent nothing for {names}. Check "
-            "Positions, then send Exit all again."
-        )
+        words.append(_late_words([exit_guard.trader_name(position) for position in late]))
     if refused or unmatched or unknown:
         words.append("Check Positions and Orders before sending again.")
     body = {"status": "error", "message": " ".join(words) + unread}
@@ -848,37 +972,48 @@ def close_all_positions(current_api_key, auth):
         skipped = []  # SUDARSHAN M6.9: why each busy position was not sent, in its own sentence
         late = []  # SUDARSHAN M6.9: the positions no time was left for
         outcomes = []  # SUDARSHAN M6.9: what became of each position, for the phone and the API
-        working, orders_read = {}, None  # SUDARSHAN M6.9: the order book, read once
-        if any(int(position.get("quantity", 0)) != 0 for position in positions_response["data"]):
-            working, orders_read = _working_exits(auth)
+        # SUDARSHAN M6.9: the order book, read once and after the positions, tells what each
+        # position really holds (sudarshan/books/fills.py) and which orders are still working.
+        orders = _read_order_rows(auth, exit_guard.EXIT_ALL_ORDERS_READ_S)
+        working, orders_read = _working_exits(orders)
+        if not any(int(position.get("quantity", 0)) != 0 for position in positions_response["data"]):
+            orders_read = None  # nothing shown as held: the order book was only a check
+        statuses = _order_statuses(orders)
         # SUDARSHAN M6.9: the time for sending starts now, so a slow read never uses it up.
         started = time.monotonic()
         for position in positions_response["data"]:
-            if int(position.get("quantity", 0)) == 0:
-                continue
-
-            action = "SELL" if int(position["quantity"]) > 0 else "BUY"
-            quantity = abs(int(position["quantity"]))
-            symbol = get_symbol(position["instrument_token"], position["exchange"])
+            shown = int(position.get("quantity", 0))
+            held_now = fills.held_now(position, orders)
+            if shown == 0 and held_now in (None, 0):
+                continue  # nothing held, as far as the books say
+            symbol = (
+                get_symbol(position["instrument_token"], position["exchange"])
+                if position.get("instrument_token")
+                else None
+            )
 
             if not symbol:
                 logger.warning(
-                    f"Could not find symbol for instrument token {position['instrument_token']}. Skipping position."
+                    f"Could not find symbol for instrument token {position.get('instrument_token')}. Skipping position."
                 )
                 unmatched += 1  # SUDARSHAN M6.9: not sent, so not squared off
                 continue
 
-            if symbol:
-                # SUDARSHAN M5.13: size from what a cancelled, part-filled exit left held.
-                quantity = abs(
-                    exit_guard.exit_sized(
-                        "live",
-                        position["exchange"],
-                        symbol,
-                        reverse_map_product_type(position["exchange"], position["product"]),
-                        int(position["quantity"]),
-                    )
-                )
+            product = reverse_map_product_type(position["exchange"], position["product"])
+            held = exit_guard.position_of(position["exchange"], symbol, product)
+            if held_now is None:
+                # SUDARSHAN M6.9: the order book could not be read, or does not add up with the
+                # row: what is held cannot be confirmed, so nothing is sent for it.
+                why = exit_guard.exit_not_sized(held)
+                logger.warning(f"Exit all sent no exit for {symbol}: the quantity is not confirmed")
+                skipped.append(why)
+                outcomes.append(_outcome(held, "not_sent", why))
+                continue
+            if held_now == 0:
+                logger.debug(f"Exit all: {symbol} is closed already, as the order book shows")
+                continue
+            action = "SELL" if held_now > 0 else "BUY"
+            quantity = abs(held_now)
             place_order_payload = {
                 "apikey": current_api_key,
                 "strategy": "Squareoff",
@@ -886,15 +1021,14 @@ def close_all_positions(current_api_key, auth):
                 "action": action,
                 "exchange": position["exchange"],
                 "pricetype": "MARKET",
-                "product": reverse_map_product_type(position["exchange"], position["product"]),
+                "product": product,
                 "quantity": str(quantity),
             }
             logger.debug(f"Closing position with payload: {place_order_payload}")
             # SUDARSHAN M6.9: a busy position is not sent, and neither is any once time is up.
-            held = exit_guard.position_of(
-                position["exchange"], symbol, place_order_payload["product"]
+            why = busy.get(held) or exit_guard.hold_verdict(
+                "live", position["exchange"], symbol, product, statuses
             )
-            why = busy.get(held)
             closing = (
                 str(position.get("instrument_token") or ""),
                 str(position.get("product") or "").upper(),
@@ -909,14 +1043,18 @@ def close_all_positions(current_api_key, auth):
                 continue
             if not _in_time(started):
                 late.append(held)
-                outcomes.append(_outcome(held, "not_sent", _LATE))
+                outcomes.append(_outcome(held, "not_sent", _late_words([exit_guard.trader_name(held)])))
                 continue
-            sending = [position["exchange"], symbol, place_order_payload["product"]]
+            sending = [position["exchange"], symbol, product]
             # SUDARSHAN M6.9: the pacer's wait is part of the time, so the budget is asked again
             # when this exit's turn comes: past it, nothing is sent (it never left for Upstox).
             ran_out = []
             deadline = SEND_DEADLINE.set(
-                (started + exit_guard.EXIT_ALL_SENDS_FOR_S, _LATE, ran_out)
+                (
+                    started + exit_guard.EXIT_ALL_SENDS_FOR_S,
+                    _late_words([exit_guard.trader_name(held)]),
+                    ran_out,
+                )
             )
             try:
                 res, api_response, orderid = place_order_api(place_order_payload, auth)
@@ -925,7 +1063,7 @@ def close_all_positions(current_api_key, auth):
             if ran_out:
                 sending = None
                 late.append(held)
-                outcomes.append(_outcome(held, "not_sent", _LATE))
+                outcomes.append(_outcome(held, "not_sent", _late_words([exit_guard.trader_name(held)])))
                 continue
             attempted += 1
             if isinstance(res, BusyResponse):
@@ -936,7 +1074,9 @@ def close_all_positions(current_api_key, auth):
             counts[answer] += 1
             if answer != "refused":
                 # SUDARSHAN M6.9: busy for every exit that follows, until the book shows it.
-                exit_guard.exit_placed("live", *sending)
+                exit_guard.exit_placed(
+                    "live", *sending, _named_orders((res, api_response, orderid))
+                )
             sending = None
             if answer == "refused" and not reason and not isinstance(res, BusyResponse):
                 reason = str((api_response or {}).get("message") or "").strip()
@@ -1055,25 +1195,72 @@ def modify_order(data, auth):
         return {"status": "error", "message": str(e)}, 500
 
 
-def cancel_every_open_order_api(auth):
-    """SUDARSHAN M5.13: Upstox's own cancel of every open order, which needs no read of the
-    order book (the kill switch's way when the book cannot be read). Answers
-    ``(cancelled, not_confirmed)``: ``cancelled`` only when Upstox says every order went; a
-    cancel with no usable answer may still have gone, so it is ``not_confirmed``."""
+#: Upstox's cancel of every open order is cut off after this long: it runs when Upstox is
+#: struggling (its order book could not be read), and a cut counts as not confirmed.
+MULTI_CANCEL_LIMIT_S = 10.0
+
+
+def _summary_count(summary, name):
+    """One whole number of Upstox's cancel summary, or None when it is missing or not one."""
+    if not isinstance(summary, dict) or isinstance(summary.get(name), bool):
+        return None
     try:
-        answer = get_api_response("/v2/order/multi/cancel", auth, method="DELETE")
+        value = float(summary.get(name))
+    except (TypeError, ValueError):
+        return None
+    return int(value) if value == int(value) and value >= 0 else None
+
+
+def cancel_every_open_order_detail(auth):
+    """SUDARSHAN M5.13: Upstox's own cancel of every open order, which needs no read of the
+    order book (the kill switch's way when the book cannot be read).
+
+    Upstox cancels at most 10 orders per request (UDAPI1110 above that, which is not done), and
+    answers a mix as 207 ``partial_success``. It counts as done only when its summary proves
+    every order went: ``error`` is 0 and ``success`` equals ``total``.
+
+    Returns:
+        ``{"cancelled": bool, "not_confirmed": bool, "ids": [...], "done": n, "total": n}``:
+        ``cancelled`` only when every order went; ``not_confirmed`` when the answer cannot say
+        (a timeout, an Upstox 5xx, a success that proves nothing), for the cancel may still have
+        gone; ``ids`` are the orders Upstox says it cancelled, ``done`` and ``total`` its
+        summary's counts when it gave them (else None).
+    """
+    result = {"cancelled": False, "not_confirmed": False, "ids": [], "done": None, "total": None}
+    try:
+        answer = get_api_response(
+            "/v2/order/multi/cancel", auth, method="DELETE", timeout=MULTI_CANCEL_LIMIT_S
+        )
     except BrokerBusyError:
-        return False, False  # refused by the pacer before anything was sent
+        return result  # refused by the pacer before anything was sent
     except Exception:
         logger.exception("Unexpected error cancelling every open order")
-        return False, True
+        return {**result, "not_confirmed": True}
     if not isinstance(answer, dict):
-        return False, True
-    if answer.get("status") == "success":
-        summary = answer.get("summary")
-        failed = int(float(summary.get("error") or 0)) if isinstance(summary, dict) else 0
-        return failed == 0, failed != 0
-    return False, bool(answer.get("not_confirmed"))
+        return {**result, "not_confirmed": True}
+    data = answer.get("data")
+    named = data.get("order_ids") if isinstance(data, dict) else None
+    result["ids"] = [str(each) for each in named] if isinstance(named, (list, tuple)) else []
+    summary = answer.get("summary")
+    total, done, failed = (_summary_count(summary, key) for key in ("total", "success", "error"))
+    result["done"], result["total"] = done, total
+    status = answer.get("status")
+    if status == "success":
+        proven = failed == 0 and total is not None and done == total
+        result["cancelled"] = proven
+        result["not_confirmed"] = not proven  # a success that proves nothing may still have gone
+    elif status == "partial_success":
+        pass  # some went and some did not: known, not "not confirmed"
+    else:
+        result["ids"] = []
+        result["not_confirmed"] = bool(answer.get("not_confirmed"))
+    return result
+
+
+def cancel_every_open_order_api(auth):
+    """SUDARSHAN M5.13: ``(cancelled, not_confirmed)`` of ``cancel_every_open_order_detail``."""
+    result = cancel_every_open_order_detail(auth)
+    return result["cancelled"], result["not_confirmed"]
 
 
 def cancel_all_orders_api(data, auth):

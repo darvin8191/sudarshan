@@ -429,6 +429,7 @@ def broker(monkeypatch):
     state = {
         "book": {X: 65, Y: -30},
         "orders": [],
+        "listed": [],  # the order book's rows: every order placed, working
         "hold": set(),  # symbols whose order waits at the broker until "release"
         "entered": threading.Event(),
         "release": threading.Event(),
@@ -443,6 +444,8 @@ def broker(monkeypatch):
                 "product": product,
                 "tradingsymbol": symbol,
                 "quantity": state["book"][symbol],
+                "day_buy_quantity": 0,
+                "day_sell_quantity": 0,
             }
             for symbol, (token, exchange, product) in ROWS.items()
             if symbol in state["book"]
@@ -457,12 +460,33 @@ def broker(monkeypatch):
         if state["answer"] is not None:
             return state["answer"]
         orderid = f"2610270000{len(state['orders']):02d}"
+        # Upstox's order book lists it at once, working: a market order held at its price
+        token, _exchange, product = ROWS[data["symbol"]]
+        state["listed"].append(
+            {
+                "order_id": orderid,
+                "instrument_token": token,
+                "product": product,
+                "transaction_type": data["action"],
+                "status": "open",
+                "order_type": "MARKET",
+                "quantity": int(data["quantity"]),
+                "pending_quantity": int(data["quantity"]),
+                "filled_quantity": 0,
+            }
+        )
         return Answer(200), {"status": "success", "data": {"order_ids": [orderid]}}, orderid
 
+    monkeypatch.setattr(
+        upstox, "get_order_book", lambda auth: {"status": "success", "data": list(state["listed"])}
+    )
     monkeypatch.setattr(upstox, "get_positions", get_positions)
     monkeypatch.setattr(upstox, "place_order_api", place_order_api)
     monkeypatch.setattr(upstox, "get_symbol", lambda token, exchange: BY_TOKEN.get(token))
     monkeypatch.setattr(upstox, "get_br_symbol", lambda symbol, exchange: symbol)
+    monkeypatch.setattr(
+        upstox, "get_token", lambda symbol, exchange: ROWS.get(symbol, (None,))[0]
+    )
     upstox._POSITION_BOOK.invalidate("token")
     monkeypatch.setattr(session_utils, "is_session_valid", lambda: True)
     monkeypatch.setattr(orders, "get_auth_token", lambda user: "token")
@@ -691,10 +715,10 @@ def test_an_exit_is_noted_before_its_claim_is_let_go(broker, monkeypatch):
     note = ExitsInFlight.placed
     noting = threading.Event()
 
-    def slow_to_note(self, book, position):
+    def slow_to_note(self, book, position, *rest):
         noting.set()
         time.sleep(0.3)
-        note(self, book, position)
+        note(self, book, position, *rest)
 
     monkeypatch.setattr(ExitsInFlight, "placed", slow_to_note)
     single, _ = _in_background(_post, "/close_position", EXIT)

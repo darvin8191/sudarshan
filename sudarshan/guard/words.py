@@ -294,6 +294,26 @@ def ks_orders_left(cancelled: int, left: int) -> str:
     )
 
 
+def ks_orders_not_cancelled_unread(
+    done: int | None, total: int | None, not_confirmed: bool
+) -> str:
+    """The order book could not be read and Upstox's own Cancel all did not cancel every order:
+    some went (it says how many), or it may have gone and cannot be told, or it did not go."""
+    if not_confirmed:
+        return (
+            "Upstox could not show its open orders, and its Cancel all is not confirmed: it may "
+            "have cancelled some or all of them. Open orders may still be working. Check "
+            "Orders in the Upstox app."
+        )
+    if done is not None and total is not None and total > 0 and done < total:
+        return (
+            "Upstox could not show its open orders, and its Cancel all cancelled "
+            f"{done} of {_many(total, 'order', 'orders')}. The rest may still be working. "
+            "Check Orders in the Upstox app."
+        )
+    return KS_ORDERS_NOT_CANCELLED_UNREAD
+
+
 def ks_orders_unchecked(cancelled: int) -> str:
     return (
         f"{_many(cancelled, 'open order', 'open orders')} cancelled, but the order book could "
