@@ -5,6 +5,97 @@ publish. The owner publishes each release on GitHub. The server's deploy timer t
 outside 08:30-16:00 IST on trading days (09:00-15:45 until v0.3.1), keeps backups, and rolls
 back if the app does not come up healthy.
 
+## v0.4.0 (4 Nov 2026)
+
+The risk guard, tried in the sandbox first; market alerts, built and switched off; nightly
+backups, server notices and a safer install. It includes everything in v0.3.4. **Publish it by
+Friday 6 Nov or from Monday 9 Nov: never on Saturday 7 or Sunday 8 Nov (Muhurat).**
+
+### What changes for you
+- **Live orders: Upstox order calls are paced at 5 a second (OpenAlgo's own figure was 8).**
+  Upstox allows 10, and 5 leaves room for a burst that arrives unevenly. An Exit all of 10
+  positions takes about 2 s, of 20 about 4 s. Nothing else about Live orders changes in this
+  release.
+- **The risk guard, Settings > Risk, for Analyze mode only.** It brings:
+  - the kill switch, with Exit all;
+  - a daily loss limit (delivery is not counted);
+  - a price band, a size limit and a burst brake;
+  - a history of everything it refused.
+  This release checks sandbox orders only: Live orders are not checked, and in this stage the
+  switch leaves the agent and remote MCP access alone. While the switch is on, a
+  chip shows in the app bar and a line on the order ticket. Telegram `/killswitch on`, `exit` or
+  `off`, with your phrase, works in your own chat only. Saving a daily limit at or below today's
+  loss asks for a second tap.
+- **Telegram tells you about refused orders that came from outside the app** (TradingView,
+  scripts, Flow, the strategy module), merged per symbol and reason per minute.
+- **Market alerts are in this release, switched off.** Once turned on, they alert you on
+  Telegram and in the app on a price, a % move, the day's high or low, VWAP, bid or ask, or a
+  candle close. You set them from the new Alerts page (profile menu), the Watchlist or the phone
+  chart. Until then nothing of them runs. Turning them on is a server step:
+  `SUDARSHAN_MARKET_ALERTS=on` in `/etc/sudarshan/alerts.env`, then restart `sudarshan-alerts`.
+- **A phone you have logged out stops getting your alerts.** Logging out, changing or resetting
+  the password, and the 03:00 expiry now cut off every phone still connected to them; it gets
+  them again only after a new login.
+- **Nightly backups on the server**, at 16:30 and 22:30 IST, never in market hours. They cover
+  OpenAlgo's, SUDARSHAN's and the ring's databases, the sealed vault, `/etc/sudarshan` and the
+  `.env`. Each archive is read back before it counts, and 30 daily and 12 monthly are kept within
+  10 GB. They stay on the server for now.
+- **Server notices on Telegram:** a release installed, rolled back or waiting for its window, and
+  a nightly backup that failed, was partial or is overdue.
+- **A safer install.** v0.3.3 and v0.3.4 let root write, during an install or a rollback, through
+  a link that a program running as the app's own user could have planted. That needed such a
+  program on the server first. The install and the rollback now never write by path in a folder
+  that user can change, and a rollback restores the code, every database, the `.env` and the
+  ring's databases.
+- **The feed** shows the closing-auction phase and Upstox's one-minute candle, ready for the
+  alerts and the screener. Its health answer names the installed release, and tick recordings
+  keep 7 days at up to 1,024 MB a day. Its REST governor is built and switched off.
+- **Auto-login on a special trading day** follows that day's own hours. On Muhurat, Sunday
+  8 Nov, 14:05-15:40, Test now works in the morning, and the scheduled run counts only the
+  session as market time.
+- **The Alerts page** says which of the four states it is in, like the Watchlist: checking, Upstox
+  not logged in today, no API key, or ready.
+
+### What you must do
+- **Publish it** (the link is in your task list). The server installs it outside 08:30-16:00 by
+  itself.
+- **Once, before the first backup night:** on the server, from the app folder, run
+  `sudo -u sudarshan .venv/bin/python -m sudarshan.ops.backup --check`. It should print no
+  `cannot be read:` and no `not taken:` line; if it does, send the lines.
+- **On a trading day, try the guard in Analyze mode.** Run session S1 (the kill switch) and
+  session S2 (the size limit, the band, the daily limit and a basket). The steps are in your task
+  list. The guard checks Live orders only after both sessions pass and two fixes found in this
+  release's review are in (v0.4.1).
+
+### What is refused now that used to be accepted
+- **In Analyze mode only:**
+  - new orders while the kill switch is on, or after the day's loss limit is reached;
+  - orders over the size limit, priced far from the market, or past the burst brake;
+  - a basket, multi-leg or split order that is not allowed whole (it goes whole or not at all);
+  - the part of a reversal beyond its exit (only the exit is sent);
+  - with the switch on or the day locked and the positions unreadable, an order that cannot be
+    told from an exit (the answer says to use the Upstox app).
+  TradingView, scripts and Flow get a refusal that gives the reason.
+- **Live:** nothing is refused. Orders wait their turn at 5 a second.
+- **In a market alert's level:** `1e3`, `1_000`, `+5`, and digits typed in Devanagari or Gujarati.
+
+### Not in this release yet
+- **The guard does not check Live orders yet.** That needs sessions S1 and S2, and two fixes
+  found in this release's review:
+  - a second exit sent while the first market exit is still working;
+  - Exit all sized from an old positions book after a part-filled exit was cancelled.
+- **What the guard does not see:**
+  - GTTs that trigger at Upstox, and orders already resting at the exchange, are not checked when
+    they fill.
+  - The daily figure is gross, before charges, and up to 5 s old. Upstox's positions book itself
+    can lag about a minute.
+  - Upstox's own apps bypass the guard.
+- **Exits the one-at-a-time rule does not cover yet:** the scalping terminal's closes and the
+  strategy module's exits.
+- **An offsite copy of the backups.** It needs your keys; the proposal is OCI Object Storage with
+  rclone crypt.
+- **The feed's REST governor** stays off until its live check.
+
 ## v0.3.4 (4 Nov 2026)
 
 Prices straight after a login inside the app, and every price screen says why it has none. It
