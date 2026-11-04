@@ -119,6 +119,9 @@ def test_it_writes_only_its_state_directory():
         ("RestrictRealtime", "yes"),
         ("SystemCallArchitectures", "native"),
         ("LimitCORE", "0"),
+        # Slowed at three quarters of its ceiling before it is killed with alerts in flight (R11).
+        ("MemoryHigh", "192M"),
+        ("MemoryMax", "256M"),
     ],
 )
 def test_service_hardening(key, value):

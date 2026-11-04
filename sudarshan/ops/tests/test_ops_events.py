@@ -217,6 +217,52 @@ def test_record_will_not_write_through_a_symlink(tmp_path):
     assert target.read_text() == "keep"
 
 
+def test_a_record_is_not_glued_to_a_line_a_crash_cut_off(tmp_path):
+    """Review M2: a last line left without its newline swallowed the next record, and ``record``
+    still said True, so nobody was ever told."""
+    path = tmp_path / "events.jsonl"
+    cut = '{"v":"1","id":"from-before","src":"backup","kind":"backup_failed","at":"17'
+    path.write_text(cut)  # a crash between the bytes of a line
+    fields = {"kind": "waiting", "at": NOW, "run": "r", "src": "backup"}
+    assert record(path, event_id="after", **fields) is True
+    assert [e.id for e in read_events(path)] == ["after"]  # on a line of its own
+    assert path.read_text().startswith(cut + "\n")
+    assert path.read_text().endswith("}\n")
+    assert record(path, event_id="and-again", **fields) is True
+    assert [e.id for e in read_events(path)] == ["after", "and-again"]
+    assert "\n\n" not in path.read_text()  # a whole last line needs no extra newline
+
+
+class _NarrowWrites:
+    """``events.os`` with a ``write`` that takes at most a few bytes, as a pipe or a full disk may."""
+
+    def __init__(self, take: int):
+        self.take, self.calls = take, 0
+
+    def __getattr__(self, name):
+        return getattr(os, name)
+
+    def write(self, fd, data):
+        self.calls += 1
+        return os.write(fd, bytes(data)[: self.take]) if self.take else 0
+
+
+def test_a_write_that_takes_only_part_of_a_line_is_carried_on(tmp_path, monkeypatch):
+    path = tmp_path / "events.jsonl"
+    narrow = _NarrowWrites(7)
+    monkeypatch.setattr(events, "os", narrow)
+    assert record(path, kind="waiting", event_id="whole", at=NOW, run="r", src="backup") is True
+    assert narrow.calls > 5  # the line really did go in pieces
+    assert [e.id for e in read_events(path)] == ["whole"]
+    assert path.read_text().endswith("}\n")
+
+
+def test_a_write_that_takes_nothing_is_a_failure_and_not_a_loop(tmp_path, monkeypatch):
+    path = tmp_path / "events.jsonl"
+    monkeypatch.setattr(events, "os", _NarrowWrites(0))
+    assert record(path, kind="waiting", event_id="never", at=NOW, run="r", src="backup") is False
+
+
 def test_record_keeps_the_newest_lines_when_the_file_grows(tmp_path):
     path = tmp_path / "events.jsonl"
     for n in range(events.COMPACT_ABOVE + 1):

@@ -159,6 +159,7 @@ def test_it_stays_behind_the_market_and_cannot_run_away():
     assert directives(SERVICE, "CPUWeight") == ["10"]
     assert directives(SERVICE, "IOWeight") == ["10"]
     assert directives(SERVICE, "MemoryMax") == ["512M"]
+    assert directives(SERVICE, "MemoryHigh") == ["384M"]  # slowed at three quarters, then killed
     (runtime,) = directives(SERVICE, "RuntimeMaxSec")
     settings = backup.Settings.from_env({})
     # The longest legitimate night: waiting out an install, the archive, then the upload.

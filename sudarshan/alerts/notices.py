@@ -94,7 +94,17 @@ ROLLBACK_OTHER = "the update stopped unexpectedly"
 #: out of the sentence rather than quoted.
 BACKUP_AGAIN = "It tries again at its next scheduled time."
 _AMOUNT = re.compile(r"[0-9]{1,6}(?:\.[0-9]{1,2})?")
-_FILE_LIST = re.compile(r"[A-Za-z0-9._-]{1,60}(?:, [A-Za-z0-9._-]{1,60}){0,9}")
+_FILE_LIST = re.compile(
+    r"[A-Za-z0-9._/-]{1,60}(?:, [A-Za-z0-9._/-]{1,60}){0,9}"
+)  # a folder: etc/x/
+_HOURS = re.compile(r"[0-9]{1,5}")
+#: Why a run left the night undone (backup.py: STEPPED_ASIDE), in the owner's words.
+_BECAUSE = {
+    "deploy": "A server update was still running when it tried.",
+    "busy": "Another backup was still going when it tried.",
+    "market": "It tried during market hours.",
+    "soon": "It tried just before the market opens.",
+}
 
 
 def _release(value: str) -> str | None:
@@ -123,13 +133,21 @@ def _rolled_back(event: Event, now: datetime) -> list[str]:
     cause = ROLLBACK_CAUSES.get(event.fact("why"), ROLLBACK_OTHER)
     start = f"Could not install {tag} at {_when(event.at, now)}: {cause}"
     if event.fact("up") == "no":
+        # Told once OpenAlgo is back, so it says what was true at that time, not what is true now.
         return [
-            f"{start}, and the earlier version did not start either. SUDARSHAN is not running. "
-            "The server needs attention now."
+            f"{start}, and the earlier version did not start either, so SUDARSHAN was not "
+            f"running at {_when(event.at, now)}. If it is still not running, the server needs "
+            "attention now."
         ]
     was = _release(event.fact("was"))
     back = f"{was} is back" if was else "the earlier version is back"
     return [f"{start}, so {back}. Nothing for you to do; the release will be looked at."]
+
+
+def _unit_words(unit: str) -> str:
+    """'sudarshan-market-alerts.service' -> 'the market alerts service' (a timer: 'schedule')."""
+    name, _, kind = unit.removeprefix("sudarshan-").rpartition(".")
+    return f"the {name.replace('-', ' ')} {'schedule' if kind == 'timer' else 'service'}"
 
 
 def _refused(events: list[Event]) -> list[str]:
@@ -137,10 +155,11 @@ def _refused(events: list[Event]) -> list[str]:
     tag = next((t for e in events if (t := _release(e.fact("tag")))), "the new release")
     if not units:
         return []
+    words = [_unit_words(unit) for unit in units]
     if len(units) == 1:
-        what, they = f"A background service in {tag} was not installed: {units[0]}.", "It"
+        what, they = f"A background service in {tag} was not installed: {words[0]}.", "It"
     else:
-        names = ", ".join(units)
+        names = f"{', '.join(words[:-1])} and {words[-1]}"
         what, they = (
             f"{len(units)} background services in {tag} were not installed: {names}.",
             "They",
@@ -197,6 +216,20 @@ def _backup_failed(event: Event) -> list[str]:
     elif why == "settings":
         return [
             f"{start} its settings on the server cannot be used. Have the backup settings fixed."
+        ]
+    elif why == "lock":
+        text = (
+            f"{start} it could not check whether a server update is running, so it did not run. "
+            "Have the server looked at."
+        )
+    elif why == "overdue":
+        hours = event.fact("hours")
+        old = f"{hours} hours old" if _HOURS.fullmatch(hours) else "more than a day old"
+        because = _BECAUSE.get(event.fact("because"), "")
+        return [
+            f"The nightly backup is overdue: the last complete backup is {old}. "
+            f"{because + ' ' if because else ''}{BACKUP_AGAIN[:-1]}; if this message comes "
+            "again tomorrow, have the server looked at."
         ]
     else:
         text = "The nightly backup could not be completed. Earlier backups are untouched."

@@ -230,7 +230,8 @@ def test_a_rollback_that_leaves_the_old_version_down_says_so(tmp_path):
     (event,) = told(box)
     assert event.id == "deploy-rolledback-v1.0.1-migrations-no" and event.fact("up") == "no"
     text = now_text(box, event)
-    assert "did not start either. SUDARSHAN is not running." in text
+    assert "did not start either, so SUDARSHAN was not running at " in text  # told once it is back
+    assert "If it is still not running, the server needs attention now." in text
     assert "so v1.0.0 is back" not in text  # never claims what is not true
 
 
@@ -338,7 +339,8 @@ def test_a_refused_unit_is_recorded_with_the_install_it_came_with(tmp_path):
     text = now_text(box, *found)
     assert text.count("\n") == 2  # the brand line, the install, the refusals as one line
     assert "2 background services in v1.0.1 were not installed: " in text
-    assert "sudarshan-evil.service, sudarshan-evil.timer" in text
+    assert "were not installed: the evil service and the evil schedule." in text
+    assert "sudarshan-evil" not in text  # a trader reads names, not unit files (review L6)
 
 
 # ---- a broken recorder never costs an install -------------------------------------------------

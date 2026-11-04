@@ -22,7 +22,7 @@ import shutil
 import sqlite3
 import stat
 import tarfile
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -33,6 +33,7 @@ from backup_fakes import (
     Sleeps,
     count_rows,
     damage,
+    fault,
     go,
     ist,
     make_database,
@@ -324,6 +325,19 @@ def test_a_database_that_fails_its_own_check_is_kept_but_never_counts_as_a_good_
     assert again.outcome == PARTIAL  # not skipped as fresh: a partial archive does not count
 
 
+def test_a_database_whose_check_finds_a_fault_without_failing_is_not_a_good_backup_either(server):
+    server.populate()
+    make_database(server.app / "db" / "found.db", rows=200)
+    fault(server.app / "db" / "found.db")
+
+    result = go(server)
+
+    assert (result.outcome, result.archive) == (PARTIAL, PARTIAL_ARCHIVE)
+    assert [(f.why, f.names) for f in result.failures] == [(INTEGRITY, ("db/found.db",))]
+    entries = {m["name"]: m for m in the_archive(server, PARTIAL_ARCHIVE).manifest["members"]}
+    assert entries["db/found.db"]["integrity"] == "failed"
+
+
 def test_the_job_waits_for_a_busy_database_and_tries_again(server, monkeypatch):
     server.populate()
     real = backup.sqlite3.connect
@@ -607,13 +621,18 @@ def test_the_job_keeps_out_of_the_trading_day(server, when, blocked):
     assert backup.market_blocks(calendar(server), when) is blocked
 
 
-def test_a_listed_special_session_blocks_its_own_hours_and_no_others(server):
+def test_a_listed_special_session_blocks_its_own_hours_with_the_margins_the_feed_keeps(server):
+    """Review L1: the window alone left the job free to start 30 minutes before a session opened
+    and to run into the minutes after it, where the feed and the alerts are still busy."""
     server.extra.write_text("2026-11-08 14:05-15:40  # Muhurat\n")
     cal = calendar(server)
-    assert backup.market_blocks(cal, ist(2026, 11, 8, 14, 4)) is False
+    assert backup.block_spans(cal, date(2026, 11, 8)) == ((13 * 60 + 35, 16 * 60),)
+    assert backup.market_blocks(cal, ist(2026, 11, 8, 13, 34)) is False
+    assert backup.market_blocks(cal, ist(2026, 11, 8, 13, 35)) is True
     assert backup.market_blocks(cal, ist(2026, 11, 8, 14, 5)) is True
-    assert backup.market_blocks(cal, ist(2026, 11, 8, 15, 39)) is True
-    assert backup.market_blocks(cal, ist(2026, 11, 8, 15, 40)) is False
+    assert backup.market_blocks(cal, ist(2026, 11, 8, 15, 40)) is True  # the session's close
+    assert backup.market_blocks(cal, ist(2026, 11, 8, 15, 59)) is True
+    assert backup.market_blocks(cal, ist(2026, 11, 8, 16, 0)) is False
     assert backup.market_blocks(cal, ist(2026, 11, 8, 12, 0)) is False  # a Sunday before it
     assert backup.market_blocks(cal, ist(2026, 11, 8, 16, 30)) is False  # the timer's hour
 
@@ -623,7 +642,11 @@ def test_an_evening_session_on_a_weekday_is_added_to_the_usual_hours(server):
     cal = calendar(server)
     assert backup.market_blocks(cal, ist(2026, 10, 21, 12, 0)) is True
     assert backup.market_blocks(cal, ist(2026, 10, 21, 17, 0)) is False
+    assert backup.market_blocks(cal, ist(2026, 10, 21, 17, 29)) is False
+    assert backup.market_blocks(cal, ist(2026, 10, 21, 17, 30)) is True  # its margin before
     assert backup.market_blocks(cal, ist(2026, 10, 21, 18, 30)) is True
+    assert backup.market_blocks(cal, ist(2026, 10, 21, 19, 59)) is True  # and after
+    assert backup.market_blocks(cal, ist(2026, 10, 21, 20, 0)) is False
     assert backup.market_blocks(cal, ist(2026, 10, 21, 22, 30)) is False
 
 
@@ -649,8 +672,9 @@ def test_a_run_that_is_still_going_when_the_market_opens_cleans_up_and_steps_asi
 
     def clock():
         asked["n"] += 1
-        # 08:29:50 until the fifth look; the market opens (08:30) while the sources are copied.
-        return ist(2026, 10, 21, 8, 29, 50) if asked["n"] <= 5 else ist(2026, 10, 21, 8, 30, 5)
+        # 07:29:50 (an hour and ten seconds before the hours begin, so it starts) until the fifth
+        # look; then the market opens (08:30) while the sources are copied.
+        return ist(2026, 10, 21, 7, 29, 50) if asked["n"] <= 5 else ist(2026, 10, 21, 8, 30, 5)
 
     result = backup.run(server.settings(), clock=clock, sleep=no_sleep)
 

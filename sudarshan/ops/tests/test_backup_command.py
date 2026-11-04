@@ -13,6 +13,7 @@ import dataclasses
 import fcntl
 import logging
 import os
+import re
 import shutil
 import signal
 import sqlite3
@@ -23,7 +24,17 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
-from backup_fakes import NIGHT, Archive, Server, damage, go, make_database, no_sleep, tar_bytes
+from backup_fakes import (
+    NIGHT,
+    Archive,
+    Server,
+    damage,
+    fault,
+    go,
+    make_database,
+    no_sleep,
+    tar_bytes,
+)
 
 from sudarshan.autologin.schedule import IST
 from sudarshan.ops import backup
@@ -98,6 +109,26 @@ def test_the_check_of_a_copy_knows_a_sound_file_from_a_damaged_one_and_from_none
     assert backup.quick_check(broken) is False
     assert backup.quick_check(junk) is False
     assert backup.quick_check(tmp_path / "missing.db") is False
+
+
+def test_a_check_that_answers_with_a_finding_instead_of_failing_is_not_a_pass(tmp_path):
+    """The damage the tests above use makes SQLite raise. This one it describes: the check answers,
+    and an answer that is not exactly "ok" is a fault (the mutation that read any answer as a pass
+    survived every other test)."""
+    path = tmp_path / "found.db"
+    make_database(path, rows=50)
+    fault(path)
+    con = sqlite3.connect(f"file:{path}?mode=ro&immutable=1", uri=True)
+    try:
+        answer = con.execute("PRAGMA quick_check").fetchall()
+    finally:
+        con.close()
+    assert answer != [("ok",)] and answer  # it answered, and did not raise
+    assert "Freelist: size is 0 but should be 999" in answer[0][0]
+    assert backup.quick_check(path) is False
+    copy = tmp_path / "copy.db"
+    backup.snapshot(path, copy)  # and the online backup carries the fault over as it is
+    assert backup.quick_check(copy) is False
 
 
 def test_a_damaged_database_that_makes_sqlite_run_out_of_memory_is_one_source_failing(tmp_path):
@@ -516,7 +547,12 @@ def test_check_says_what_a_run_would_do_and_changes_nothing(server, command, cap
         "cap",
         "offsite",
     ]
-    assert out[0] in ("hours: blocked (market)", "hours: open for a backup")
+    # whichever of the three the clock of the day the test runs at gives
+    assert re.fullmatch(
+        r"hours: (blocked \(market\)|open for a backup"
+        r"|not started this close to the market \(its hours begin in \d+ minutes\))",
+        out[0],
+    ), out[0]
     assert out[1].startswith("sources: 14 files")
     assert out[2] == "archives: 1 now, 1 kept, 0 to remove"
     assert out[3] == "cap: 10.0 GB, over: no"
@@ -583,7 +619,9 @@ def test_a_stop_by_the_system_ends_the_run_quietly_and_without_a_notice(
 
     monkeypatch.setattr(backup, "run", stopped)
     with caplog.at_level(logging.WARNING, logger="sudarshan.backup"):
-        assert backup.main([], server.env()) == 1
+        assert (
+            backup.main([], server.env()) == 0
+        )  # not a failure (review L8): the unit is not marked so
     assert "stopped by the system" in caplog.text
     assert server.events() == []  # a deploy restarting the unit is not a failure to report
     ((signum, handler),) = command["signals"]
@@ -661,7 +699,7 @@ def test_a_stop_while_waiting_for_an_install_leaves_nothing_behind(server):
             assert process.poll() is None and time.monotonic() < deadline, program_log(server)
             time.sleep(0.05)
         process.send_signal(signal.SIGTERM)
-        assert process.wait(timeout=15) == 1
+        assert process.wait(timeout=15) == 0  # and the unit is not marked failed for it (review L8)
     finally:
         if process.poll() is None:
             process.kill()

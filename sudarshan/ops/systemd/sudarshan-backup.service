@@ -2,9 +2,10 @@
 # online backups), SUDARSHAN's own databases and the sealed vault, the ring's databases,
 # /etc/sudarshan and OpenAlgo's .env, under /var/lib/sudarshan-backup/archive (mode 700).
 # Started by sudarshan-backup.timer (16:30 and 22:30 IST). The program decides for itself: it does
-# nothing from 08:30 to 16:00 on a trading day (nor in a listed day's own session), when an archive
-# under 8 hours old exists, or while the deploy tool is installing (it waits for the tool's lock),
-# so the deploy tool restarting this unit after an install is harmless.
+# nothing from 08:30 to 16:00 on a trading day (a listed special session: its own window widened by
+# the usual margins), nor in the hour before those hours begin, when an archive under 8 hours old
+# exists, or while the deploy tool is installing (it waits for the tool's lock, and holds it again
+# for the offsite upload), so the deploy tool restarting this unit after an install is harmless.
 # Docs: sudarshan/README.md ("Nightly backups"). Optional settings: /etc/sudarshan/backup.env
 # (root:sudarshan 640): the size cap, the counts kept, and the offsite command, which does nothing
 # until it is set.
@@ -37,6 +38,9 @@ TimeoutStopSec=30
 Nice=19
 CPUWeight=10
 IOWeight=10
+# Squeezed (reclaimed, slowed) before it is killed: a night that grows past 384M slows down instead of
+# being cut off at 512M half way through the archive.
+MemoryHigh=384M
 MemoryMax=512M
 UMask=0077
 LimitCORE=0

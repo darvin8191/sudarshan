@@ -140,11 +140,16 @@ def test_a_rollback_without_the_old_tag_does_not_invent_one():
 
 
 def test_a_rollback_that_left_the_app_down_says_so_and_does_not_say_it_is_back():
+    """Review L5: this notice travels through OpenAlgo, so it arrives once OpenAlgo is back. It says
+    what was true at the time it names, and what to do if it still is."""
     down = event("rolled_back", tag="v0.3.3", was="v0.3.2", why="migrations", up="no")
-    text = compose([down], T0)
-    assert text.endswith("and the earlier version did not start either. SUDARSHAN is not running. "
-                         "The server needs attention now.")  # fmt: skip
-    assert "is back" not in text
+    text = compose([down], T0 + timedelta(minutes=20))
+    assert text == (
+        f"{BRAND}\nCould not install v0.3.3 at 18:52 IST: a database update did not finish, and the "
+        "earlier version did not start either, so SUDARSHAN was not running at 18:52 IST. "
+        "If it is still not running, the server needs attention now."
+    )
+    assert "is back" not in text and " is not running" not in text
 
 
 def test_refused_services_are_told_with_the_install_as_one_message():
@@ -158,12 +163,35 @@ def test_refused_services_are_told_with_the_install_as_one_message():
     assert text.splitlines() == [
         BRAND,
         "v0.3.3 installed at 18:52 IST. A backup was taken.",
-        "2 background services in v0.3.3 were not installed: sudarshan-a.service, "
-        "sudarshan-b.timer. They did not pass the server's safety check. The rest of the release "
+        "2 background services in v0.3.3 were not installed: the a service and the b schedule. "
+        "They did not pass the server's safety check. The rest of the release "
         "is in place. Nothing for you to do; it will be looked at.",
     ]  # fmt: skip
     one = compose(found[:1], T0)
-    assert "A background service in v0.3.3 was not installed: sudarshan-b.timer." in one
+    assert "A background service in v0.3.3 was not installed: the b schedule." in one
+
+
+def test_the_services_that_were_refused_are_named_as_a_trader_would_not_as_the_server_does():
+    """Review L6: a unit file name is the server's word. The trader knows the portfolio, not
+    ``sudarshan-portfolio.service``."""
+    names = [
+        "sudarshan-portfolio.service",
+        "sudarshan-market-alerts.service",
+        "sudarshan-backup.timer",
+    ]
+    found = [
+        event("unit_refused", event_id=f"u{n}", run="r", tag="v0.3.3", unit=unit)
+        for n, unit in enumerate(names)
+    ]
+    text = compose(found, T0)
+    assert (
+        "3 background services in v0.3.3 were not installed: the backup schedule, the market "
+        "alerts service and the portfolio service."
+    ) in text
+    assert "sudarshan-" not in text and ".service" not in text and ".timer" not in text
+    assert "A background service in v0.3.3 was not installed: the portfolio service." in compose(
+        found[:1], T0
+    )
 
 
 def test_a_waiting_release_says_when_it_will_be_installed():
@@ -210,7 +238,7 @@ def test_a_fact_is_never_repeated_unless_it_is_a_release_or_a_service_name():
     text = compose(found, T0)
     assert not set("*_`[]\x1b") & set(text)
     assert "bold" not in text and "under" not in text and "link" not in text
-    assert "sudarshan-x" not in text and "sudarshan-ok.service" in text
+    assert "sudarshan-x" not in text and "the ok service" in text and "sudarshan-" not in text
     assert "The new release installed at 18:52 IST." in text
 
 
@@ -295,6 +323,45 @@ LOOK = "if it is incomplete again, have the server looked at."
             "Have the backup settings fixed.",
         ),
         (
+            {"why": "source", "names": "etc/sudarshan/, db/sudarshan-vault/"},
+            "The nightly backup is incomplete: etc/sudarshan/, db/sudarshan-vault/ could not be "
+            f"saved. Everything else was saved. {AGAIN[:-1]}; {LOOK}",
+        ),
+        (
+            {"why": "lock"},
+            "The nightly backup was not made: it could not check whether a server update is "
+            f"running, so it did not run. Have the server looked at. {AGAIN}",
+        ),
+        (
+            {"why": "overdue", "hours": "52", "because": "deploy"},
+            "The nightly backup is overdue: the last complete backup is 52 hours old. "
+            "A server update was still running when it tried. "
+            f"{AGAIN[:-1]}; if this message comes again tomorrow, have the server looked at.",
+        ),
+        (
+            {"why": "overdue", "hours": "31", "because": "busy"},
+            "The nightly backup is overdue: the last complete backup is 31 hours old. "
+            "Another backup was still going when it tried. "
+            f"{AGAIN[:-1]}; if this message comes again tomorrow, have the server looked at.",
+        ),
+        (
+            {"why": "overdue", "hours": "40", "because": "market"},
+            "The nightly backup is overdue: the last complete backup is 40 hours old. "
+            "It tried during market hours. "
+            f"{AGAIN[:-1]}; if this message comes again tomorrow, have the server looked at.",
+        ),
+        (
+            {"why": "overdue", "hours": "40", "because": "soon"},
+            "The nightly backup is overdue: the last complete backup is 40 hours old. "
+            "It tried just before the market opens. "
+            f"{AGAIN[:-1]}; if this message comes again tomorrow, have the server looked at.",
+        ),
+        (
+            {"why": "overdue", "hours": "lots", "because": "a reason nobody wrote words for"},
+            "The nightly backup is overdue: the last complete backup is more than a day old. "
+            f"{AGAIN[:-1]}; if this message comes again tomorrow, have the server looked at.",
+        ),
+        (
             {"why": "other"},
             f"The nightly backup could not be completed. Earlier backups are untouched. {AGAIN}",
         ),
@@ -357,9 +424,14 @@ def test_a_failed_backup_is_told_with_the_rest_of_its_run_after_the_install_fact
 def test_no_backup_message_carries_a_status_code_a_tool_name_or_a_symbol():
     found = [
         event("backup_failed", event_id=f"b{n}", why=why, names="junk.db", free_gb="0.40",
-              need_gb="1.20", cap_gb="10.0")
-        for n, why in enumerate(
-            ("space", "cap", "write", "source", "integrity", "offsite", "settings", "other")
+              need_gb="1.20", cap_gb="10.0", hours="52", because=because)
+        for n, (why, because) in enumerate(
+            (
+                ("space", ""), ("cap", ""), ("write", ""), ("source", ""), ("integrity", ""),
+                ("offsite", ""), ("settings", ""), ("lock", ""), ("other", ""),
+                ("overdue", "deploy"), ("overdue", "busy"), ("overdue", "market"),
+                ("overdue", "soon"),
+            )
         )
     ]  # fmt: skip
     text = compose(found, T0)
@@ -419,7 +491,7 @@ def test_the_facts_of_a_run_are_told_together(tmp_path):
         clock.advance(2)
         await d.sweep()
         assert len(send.texts) == 1
-        assert send.texts[0].count("\n") == 2 and "sudarshan-a.service" in send.texts[0]
+        assert send.texts[0].count("\n") == 2 and "the a service" in send.texts[0]
 
     asyncio.run(scenario())
 
@@ -1033,7 +1105,7 @@ def test_a_failures_whole_run_is_told_with_it(tmp_path):
         await settle(d, clock)
         await d.sweep()
         assert len(send.texts) == 1
-        assert "v0.3.3 installed" in send.texts[0] and "sudarshan-x.service" in send.texts[0]
+        assert "v0.3.3 installed" in send.texts[0] and "the x service" in send.texts[0]
         assert "v0.3.4" not in send.texts[0]
 
     asyncio.run(scenario())

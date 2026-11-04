@@ -161,6 +161,15 @@ Could not install v0.3.3 at 18:52 IST: the app did not come up healthy, so v0.3.
 The nightly backup was not made: the server's disk does not have enough free space (0.40 GB free, about 1.20 GB needed). Free some space on it. It tries again at its next scheduled time.
 ```
 
+```
+सुदर्शन / SUDARSHAN
+The nightly backup is overdue: the last complete backup is 41 hours old. A server update was still running when it tried. It tries again at its next scheduled time; if this message comes again tomorrow, have the server looked at.
+```
+
+When the earlier version did not start either, the message is told once OpenAlgo is back, so it
+says what was true at that time and not what is true now: "...so SUDARSHAN was not running at
+18:52 IST. If it is still not running, the server needs attention now."
+
 The deploy tool runs as root and holds no Telegram or OpenAlgo secret, so it only **records** each
 fact as a line in `/var/lib/sudarshan/events.jsonl` (the format is in `sudarshan/ops/events.py`);
 `notices.py` here looks at that file (and `/var/lib/sudarshan-backup/events.jsonl`, where the
@@ -194,12 +203,13 @@ nightly backup job records) every 20 seconds and sends through the same path as 
 - **Any time of day otherwise.** Notices do not depend on the alert window: a release is
   installed in the evening or at the weekend, so the owner's key is read when a notice is due.
 - **Words for a trader.** Only a release tag (`vA.B.C`), a service file name from the deploy
-  tool's own pattern and, for a failed backup, a figure in gigabytes (at most two decimals) and
-  the names of up to ten files that could not be saved (letters, digits, `.`, `_` and `-`) are
-  ever repeated from a fact; nothing else in the file reaches the message, and the Markdown
-  characters Telegram would act on never do. A backup's cause is one of space, cap, write,
-  source, integrity, offsite, settings or other (`ops/backup.py`); any other word reads as
-  "could not be completed".
+  tool's own pattern (worded as "the market alerts service", never as a file name) and, for a
+  failed backup, a figure in gigabytes (at most two decimals), the hours an overdue backup has
+  waited and the names of up to ten files or folders that could not be saved (letters, digits,
+  `.`, `_`, `-` and `/`) are ever repeated from a fact; nothing else in the file reaches the
+  message, and the Markdown characters Telegram would act on never do. A backup's cause is one
+  of space, cap, write, source, integrity, offsite, settings, lock, overdue or other
+  (`ops/backup.py`); any other word reads as "could not be completed".
 
 `SUDARSHAN_ORDER_ALERTS=off` also turns these off (the service exits). `SUDARSHAN_NOTICE_SPOOLS`
 (below) names the files to read. The first run of the deploy tool that records notices also tells

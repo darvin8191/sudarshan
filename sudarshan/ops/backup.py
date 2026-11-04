@@ -25,16 +25,28 @@ while it is read can never leave a damaged archive.
 
 When it runs, and when it refuses to:
 
-  Never between 08:30 and 16:00 on a trading day, nor in a listed day's own session (the same
-        hours the deploy tool installs outside of). The timer fires after the close; a run that
-        a boot or a missed timer starts earlier stops quietly, and one that was still going when
-        the market opened is cleaned up and left for the next time.
+  Never between 08:30 and 16:00 on a trading day. On a listed special day (a Muhurat evening)
+        the hours are the session's own window widened by the usual margins, so 13:35 to 16:00
+        for the one that runs 14:05 to 15:40; the deploy tool is stricter and keeps a listed day
+        for the market all day. A run is not started when those hours begin less than
+        ``START_CLEAR_MIN`` (60) minutes from now either: a morning install restarts the job, and
+        a full backup would still be running when the market opens. The timer fires after the
+        close; a run that a boot or a missed timer starts earlier stops quietly, and one that was
+        still going when the market opened is cleaned up and left for the next time.
   Once a night. An archive less than ``min_gap_s`` old (a complete one) ends the run at once, so
         the second timer of the day, and the run the deploy tool starts when it restarts the
         service after an install, cost nothing.
   Not with the deploy tool. It holds a lock for the whole of an install; the job takes the same
-        lock shared and waits for it, so a migration never meets an open copy of the database it
-        is changing, and the tool never stops the job half way.
+        lock shared, for the copy and for the offsite upload, and waits for it, so a migration
+        never meets an open copy of the database it is changing, and the tool never stops the
+        job half way. A lock that cannot be opened at all is a failure (cause ``lock``) and no
+        archive is made: it used to read as "no tool here" and let the backup run in the middle
+        of an install.
+
+A run that steps aside (the market, the hours about to begin, another run, an install still going
+after the wait) says nothing by itself. When that leaves the newest complete archive more than
+``OVERDUE_S`` (30 hours) old it tells the owner, once a day (cause ``overdue``); with no complete
+archive on the server at all it judges nothing, since a night skipped on a new server is not late.
 
 Keeping them: ``retention.py`` (30 daily and 12 monthly archives, then the size cap). Space is
 checked before anything is written: an archive that does not fit is not started, and the owner
@@ -86,7 +98,7 @@ import tempfile
 import time
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import quote
 
@@ -97,6 +109,8 @@ from sudarshan.autologin.schedule import (
     TradingCalendar,
     minute_of_day,
     minutes,
+    union,
+    with_margins,
 )
 
 from . import retention
@@ -112,6 +126,11 @@ RING_VAR = "/var/lib"
 DEPLOY_LOCK = "/var/lib/sudarshan/deploy.lock"
 #: No run in these hours of a trading day (the deploy tool's install window is the rest).
 BLOCKED = ("08:30", "16:00")
+#: A run does not start when those hours begin less than this many minutes from now: a morning
+#: install restarts the job, and a full backup would be running when the market opens.
+START_CLEAR_MIN = 60
+#: A run that stepped aside tells the owner when the newest complete archive is older than this.
+OVERDUE_S = 30 * 3600.0
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 
 GIB = 1 << 30
@@ -137,9 +156,11 @@ OFFSITE_LOG_BYTES = 4096
 OK, PARTIAL, FAILED, SKIPPED = "ok", "partial", "failed", "skipped"
 
 #: Why a run failed, as the notice (alerts/notices.py) names it.
-SPACE, CAP, WRITE, SOURCE, INTEGRITY, OFFSITE, SETTINGS, OTHER = (
-    "space", "cap", "write", "source", "integrity", "offsite", "settings", "other",
+SPACE, CAP, WRITE, SOURCE, INTEGRITY, OFFSITE, SETTINGS, LOCK, OVERDUE, OTHER = (
+    "space", "cap", "write", "source", "integrity", "offsite", "settings", "lock", "overdue", "other",
 )  # fmt: skip
+#: The reasons a run steps aside (Result.reason) that leave the night undone, so that it may be late.
+STEPPED_ASIDE = frozenset({"market", "soon", "busy", "deploy"})
 
 
 class ConfigError(ValueError):
@@ -255,15 +276,40 @@ def _command(raw: str | None) -> tuple[str, ...]:
 # ---- the hours --------------------------------------------------------------------------------
 
 
+def block_spans(calendar: TradingCalendar, day: date) -> tuple[tuple[int, int], ...]:
+    """When the job keeps out on a trading day, in IST minutes: 08:30 to 16:00, or a listed special
+    session's own window with the margins the feed and the alerts keep around it (Muhurat 14:05-15:40
+    gives 13:35-16:00), added to the usual hours on a weekday that trades anyway."""
+    usual = (minutes(BLOCKED[0]), minutes(BLOCKED[1]))
+    own = calendar.day_window(day)
+    if own is None:
+        return (usual,)
+    session = with_margins(own, usual)
+    return union([usual, session]) if calendar.trades_anyway(day) else (session,)
+
+
 def market_blocks(calendar: TradingCalendar, at: datetime) -> bool:
-    """True from 08:30 to 16:00 on a trading day, and in a listed day's own session."""
+    """True in the hours of ``block_spans`` on a trading day."""
     local = at.astimezone(IST)
     day = local.date()
     if not calendar.is_trading_day(day):
         return False
-    spans = calendar.market_spans(day, (minutes(BLOCKED[0]), minutes(BLOCKED[1])))
     now = minute_of_day(local)
-    return any(start <= now < end for start, end in spans)
+    return any(start <= now < end for start, end in block_spans(calendar, day))
+
+
+def block_soon(calendar: TradingCalendar, at: datetime) -> int | None:
+    """Minutes until the job's blocked hours begin, when that is less than ``START_CLEAR_MIN``
+    away today (a start now would still be going when they begin); None when it is not so."""
+    local = at.astimezone(IST)
+    day = local.date()
+    if not calendar.is_trading_day(day):
+        return None
+    now = minute_of_day(local)
+    ahead = [
+        start - now for start, _ in block_spans(calendar, day) if 0 < start - now < START_CLEAR_MIN
+    ]
+    return min(ahead, default=None)
 
 
 # ---- what to back up --------------------------------------------------------------------------
@@ -305,11 +351,19 @@ class Found:
         return max((s.size for s in self.sources if s.kind == "sqlite"), default=0)
 
 
-def _entries(path: Path) -> list[os.DirEntry]:
+def _entries(path: Path, found: Found | None = None, arc: str = "") -> list[os.DirEntry]:
+    """The folder's entries by name. A folder that is not there has none. One that is there and
+    cannot be listed is named in ``found.skipped`` (with a closing slash, ``arc`` being its name in
+    the archive), so that the archive is partial and the owner is told, and never left out in
+    silence (review M4). Without ``found`` the error is passed over."""
     try:
         with os.scandir(path) as scan:
             return sorted(scan, key=lambda e: e.name)
+    except (FileNotFoundError, NotADirectoryError):
+        return []
     except OSError:
+        if found is not None and f"{arc}/" not in found.skipped:
+            found.skipped.append(f"{arc}/")
         return []
 
 
@@ -344,7 +398,7 @@ def discover(settings: Settings) -> Found:
     there and not taken goes in ``skipped`` to be told, never left out quietly."""
     found = Found()
     db = settings.app_dir / "db"
-    for entry in _entries(db):
+    for entry in _entries(db, found, "db"):
         info = _stat(entry)
         if _is_file(info) and DB_NAME.fullmatch(entry.name):
             _add_database(found, f"db/{entry.name}", Path(entry.path), info)
@@ -366,7 +420,7 @@ def discover(settings: Settings) -> Found:
 def _add_sealed(found: Found, folder: os.DirEntry, info: os.stat_result) -> None:
     """One of SUDARSHAN's own folders under ``db/`` (the owner vault): every file in it, whole."""
     _add_folder(found, f"db/{folder.name}", info)
-    for inner in _entries(Path(folder.path)):
+    for inner in _entries(Path(folder.path), found, f"db/{folder.name}"):
         inner_info = _stat(inner)
         arc = f"db/{folder.name}/{inner.name}"
         if inner.name.endswith(SIDE_FILES) or not (_is_file(inner_info) or _is_dir(inner_info)):
@@ -384,13 +438,13 @@ def _add_sealed(found: Found, folder: os.DirEntry, info: os.stat_result) -> None
 def _add_ring(found: Found, settings: Settings) -> None:
     """The databases in the state folders of the ring's services (not this job's own)."""
     own_state = settings.state_dir.resolve()
-    for entry in _entries(settings.ring_var):
+    for entry in _entries(settings.ring_var, found, "ring"):
         info = _stat(entry)
         if not _is_dir(info) or not OWN_DIR.fullmatch(entry.name):
             continue
         if Path(entry.path).resolve() == own_state:
             continue
-        for inner in _entries(Path(entry.path)):
+        for inner in _entries(Path(entry.path), found, f"ring/{entry.name}"):
             inner_info = _stat(inner)
             if not _is_file(inner_info):
                 continue
@@ -420,7 +474,7 @@ def _walk_plain(found: Found, folder: Path, arc: str, *, depth: int, budget: lis
         found.skipped.append(arc)
         return
     _add_folder(found, arc, info)
-    for entry in _entries(folder):
+    for entry in _entries(folder, found, arc):
         inner = _stat(entry)
         here = f"{arc}/{entry.name}"
         if not (_is_dir(inner) or _is_file(inner)):
@@ -869,15 +923,24 @@ def with_deploy_tool(
 ) -> Iterator[str]:
     """Take the deploy tool's lock shared, waiting up to ``wait_s`` for an install to end.
 
-    Yields ``held``, ``absent`` (no such file: a machine the tool never ran on, or one that
-    cannot be opened, in which case the job goes on without) or ``busy`` (an install is still
-    running after the wait; the job steps aside).
+    Yields ``held``, ``absent`` (no such file: a machine the tool never ran on, so the job goes on
+    without), ``busy`` (an install is still running after the wait; the job steps aside) or
+    ``unreadable`` (the file is there and cannot be opened: the job cannot tell an install from
+    none, and must not guess "none" - review M1).
     """
     try:
         fd = os.open(path, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0))
-    except OSError:
+    except (FileNotFoundError, NotADirectoryError):
         log.info("the deploy tool's lock is not there to wait for; going on without it")
         yield "absent"
+        return
+    except OSError as exc:
+        log.error(
+            "the deploy tool's lock cannot be opened (%s); no backup is made while an install "
+            "cannot be told from none",
+            exc.strerror or "unknown reason",
+        )
+        yield "unreadable"
         return
     try:
         state = "busy"
@@ -956,7 +1019,7 @@ def send_offsite(settings: Settings, archive: Path) -> str:
 @dataclass
 class Result:
     outcome: str  # OK, PARTIAL, FAILED, SKIPPED
-    reason: str = ""  # SKIPPED: market, fresh, busy, deploy, nothing
+    reason: str = ""  # SKIPPED: market, soon, fresh, busy, deploy, nothing
     archive: str = ""
     size: int = 0
     members: int = 0
@@ -985,9 +1048,24 @@ def run(
     sleep: Callable[[float], None] = time.sleep,
     monotonic: Callable[[], float] = time.monotonic,
 ) -> Result:
-    """One nightly run. Never raises for anything about the data; the result says what happened."""
+    """One nightly run. Never raises for anything about the data; the result says what happened.
+    A run that steps aside tells the owner when that has left the night undone for too long."""
     clock = clock or (lambda: datetime.now(IST))
     started = clock()
+    result = _attempt(settings, started, clock, force, sleep, monotonic)
+    if result.outcome == SKIPPED and result.reason in STEPPED_ASIDE:
+        _tell_overdue(settings, started, result.reason)
+    return result
+
+
+def _attempt(
+    settings: Settings,
+    started: datetime,
+    clock: Callable[[], datetime],
+    force: bool,
+    sleep: Callable[[float], None],
+    monotonic: Callable[[], float],
+) -> Result:
     calendar = TradingCalendar(settings.holidays_file, settings.extra_days_file)
 
     def still_open() -> bool:
@@ -996,6 +1074,9 @@ def run(
     if not still_open():
         log.info("not during market hours; the next scheduled run will do it")
         return Result(SKIPPED, "market")
+    if (ahead := block_soon(calendar, started)) is not None:
+        log.info("the market hours begin in %d minutes; the next scheduled run will do it", ahead)
+        return Result(SKIPPED, "soon")
     settings.state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     with single_run(settings.state_dir / "backup.lock") as mine:
         if not mine:
@@ -1007,12 +1088,16 @@ def run(
             if deploy == "busy":
                 log.info("an install is still running; the next scheduled run will do it")
                 return Result(SKIPPED, "deploy")
-            result = _run_locked(settings, started, still_open, force, sleep)
-        # The install lock is let go: sending the file touches no database, and may take long.
-        if result.archive and result.outcome in (OK, PARTIAL):
-            result.offsite = send_offsite(settings, settings.archive_dir / result.archive)
-            if result.offsite == "failed":
-                result.failures.append(Failure(OFFSITE))
+            if deploy == "unreadable":
+                result = Result(FAILED, failures=[Failure(LOCK)])
+            else:
+                result = _run_locked(settings, started, still_open, force, sleep)
+                # The upload goes on under the same shared lock (review L9): an install that
+                # started meanwhile would restart this unit and cut the upload short.
+                if result.archive and result.outcome in (OK, PARTIAL):
+                    result.offsite = send_offsite(settings, settings.archive_dir / result.archive)
+                    if result.offsite == "failed":
+                        result.failures.append(Failure(OFFSITE))
     _write_status(settings, started, result)
     _tell(settings, started, result)
     return result
@@ -1188,10 +1273,11 @@ def _write_status(settings: Settings, started: datetime, result: Result) -> None
 
 
 def _names_fact(names: tuple[str, ...]) -> str:
-    """The files of a failure as a notice names them; "" when they do not all fit. A list cut
+    """The files of a failure as a notice names them (a file by its last part, a folder that could
+    not be listed by its whole name and a closing slash); "" when they do not all fit. A list cut
     short reads as the whole of it, and a name cut in half names a file that is not there: the
     archive's own record (``--verify``, ``status.json``) always has every one."""
-    plain = ", ".join(name.rsplit("/", 1)[-1] for name in names)
+    plain = ", ".join(name if name.endswith("/") else name.rsplit("/", 1)[-1] for name in names)
     return plain if 0 < len(names) <= NOTICE_NAMES and len(plain) <= MAX_VALUE else ""
 
 
@@ -1217,6 +1303,34 @@ def _tell(settings: Settings, started: datetime, result: Result) -> None:
             log.error("the notice for a failed backup (%s) could not be recorded", failure.why)
 
 
+def _tell_overdue(settings: Settings, started: datetime, reason: str) -> None:
+    """A run stepped aside (the market hours, another run, an install that would not end): when
+    the newest complete archive is more than ``OVERDUE_S`` old the owner is told, once a day
+    (review M3). Nothing is said while no complete archive exists: there is nothing to be late
+    against, and the first one is made by hand (the README's first check)."""
+    local = started.astimezone(IST)
+    newest = max((b.at for b in list_archives(settings.archive_dir) if not b.partial), default=None)
+    if newest is None:
+        return
+    age = (local.replace(tzinfo=None) - newest).total_seconds()
+    if age <= OVERDUE_S:
+        return
+    log.warning("no complete backup for %d hours; the run stepped aside (%s)", age // 3600, reason)
+    recorded = record(
+        settings.spool,
+        kind="backup_failed",
+        event_id=f"backup-failed-{local.strftime('%Y%m%d')}-{OVERDUE}",
+        at=started.timestamp(),
+        run=f"backup-{local.strftime('%Y%m%d-%H%M%S')}",
+        src="backup",
+        why=OVERDUE,
+        hours=str(int(age // 3600)),
+        because=reason,
+    )
+    if not recorded:
+        log.error("the notice for an overdue backup could not be recorded")
+
+
 def _tell_settings(env: Mapping[str, str], message: str, now: datetime) -> None:
     """A setting that cannot be used still gets its notice, in the default state folder."""
     record(
@@ -1234,6 +1348,16 @@ def _tell_settings(env: Mapping[str, str], message: str, now: datetime) -> None:
 # ---- the command ------------------------------------------------------------------------------
 
 
+def _readable(path: Path) -> bool:
+    """True when the file can be opened for reading now (it is opened and closed, nothing read)."""
+    flags = os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    try:
+        os.close(os.open(path, flags))
+    except OSError:
+        return False
+    return True
+
+
 def check(settings: Settings, now: datetime) -> str:
     """What a run would do now, in words. Changes nothing."""
     calendar = TradingCalendar(settings.holidays_file, settings.extra_days_file)
@@ -1246,10 +1370,19 @@ def check(settings: Settings, now: datetime) -> str:
         cap_bytes=settings.max_bytes,
         reserve=int(found.total * COMPRESSED_GUESS),
     )
+    unreadable = sorted(source.arc for source in found.sources if not _readable(source.path))
+    ahead = block_soon(calendar, now)
+    if market_blocks(calendar, now):
+        hours = "blocked (market)"
+    elif ahead is not None:
+        hours = f"not started this close to the market (its hours begin in {ahead} minutes)"
+    else:
+        hours = "open for a backup"
     lines = [
-        f"hours: {'blocked (market)' if market_blocks(calendar, now) else 'open for a backup'}",
+        f"hours: {hours}",
         f"sources: {len(found.sources)} files, {_gb(found.total)} GB",
         *([f"not taken: {', '.join(found.skipped)}"] if found.skipped else []),
+        *([f"cannot be read: {', '.join(unreadable)}"] if unreadable else []),
         f"archives: {len(existing)} now, {len(settled.keep)} kept, {len(settled.delete)} to remove",
         f"cap: {_gb(settings.max_bytes)} GB, over: {'yes' if settled.over_cap else 'no'}",
         f"offsite: {'set' if settings.offsite_cmd else 'not set'}",
@@ -1317,8 +1450,10 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) ->
     try:
         return run(settings, force=args.force).exit_code
     except _Terminated:
+        # Not a failure (review L8): the unit was stopped, by an install or the system, and the
+        # next scheduled run does the night. A unit marked failed would only cry wolf.
         log.warning("stopped by the system; the next scheduled run will do it")
-        return 1
+        return 0
     except Exception:
         log.exception("the nightly backup failed unexpectedly")
         record(

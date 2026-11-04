@@ -361,12 +361,26 @@ def test_the_command_is_run_for_each_good_archive_with_the_file_the_name_and_the
     assert server.status()["offsite"] == "ok"
 
 
-def test_the_command_runs_after_the_deploy_tools_lock_is_let_go(server, tmp_path):
-    """Sending a file touches no database; the tool is not kept waiting for an upload."""
+def test_the_command_runs_while_the_deploy_tools_lock_is_still_held(server, tmp_path):
+    """Review L9: an install that began during an upload restarted this unit and cut the upload
+    short. The tool waits for the upload as it waits for the copy (it tries again in ten minutes),
+    and the lock is let go once the upload is over."""
     server.populate()
     env, record = offsite(server, tmp_path)
     go(server, settings=server.settings(env))
-    assert json.loads(record.read_text())["lock_free"] is True
+    assert json.loads(record.read_text())["lock_free"] is False
+    os.close(
+        hold(server.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    )  # and afterwards the tool can take it
+
+
+def test_a_failed_upload_does_not_keep_the_lock_either(server, tmp_path):
+    server.populate()
+    env, record = offsite(server, tmp_path, exit_code=3)
+    result = go(server, settings=server.settings(env))
+    assert result.offsite == "failed"
+    assert json.loads(record.read_text())["lock_free"] is False
+    os.close(hold(server.lock, fcntl.LOCK_EX | fcntl.LOCK_NB))
 
 
 def test_a_command_that_fails_keeps_the_archive_and_tells_the_owner(server, tmp_path):

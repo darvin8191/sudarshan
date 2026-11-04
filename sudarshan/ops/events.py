@@ -24,6 +24,7 @@ short by its writer (the newest ``KEEP_LINES`` lines).
 
 from __future__ import annotations
 
+import errno
 import json
 import math
 import os
@@ -131,10 +132,10 @@ def record(
             return True
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         payload = (json.dumps(line, ensure_ascii=False, separators=(",", ":")) + "\n").encode()
-        flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+        flags = os.O_RDWR | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
         fd = os.open(path, flags, 0o600)
         try:
-            os.write(fd, payload)
+            _append(fd, payload)
         finally:
             os.close(fd)
     except OSError:
@@ -144,6 +145,24 @@ def record(
     except OSError:
         pass  # the event is written; a file left long is trimmed by the next writer
     return True
+
+
+def _append(fd: int, payload: bytes) -> None:
+    """All of ``payload`` at the end of the file, on a line of its own.
+
+    A last line a crash left without its newline is ended first: the record would otherwise be
+    glued to it and both lost, while ``record`` said it was there. A write that takes only part of
+    the bytes is carried on until they are all in.
+    """
+    size = os.fstat(fd).st_size
+    if size and os.pread(fd, 1, size - 1) != b"\n":
+        payload = b"\n" + payload
+    view = memoryview(payload)
+    while view:
+        written = os.write(fd, view)
+        if written <= 0:
+            raise OSError(errno.EIO, "nothing could be written")
+        view = view[written:]
 
 
 def _compact(path: Path) -> None:

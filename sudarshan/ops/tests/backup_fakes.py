@@ -14,6 +14,7 @@ import io
 import json
 import os
 import sqlite3
+import struct
 import tarfile
 from datetime import datetime
 from pathlib import Path
@@ -58,6 +59,15 @@ def damage(path: Path) -> None:
     with open(path, "r+b") as handle:
         handle.seek(4096)
         handle.write(b"\xff")
+
+
+def fault(path: Path) -> None:
+    """Set the header's count of free pages to a number the file does not bear out. SQLite's check
+    does not raise on this: it answers, with a finding ("Freelist: size is 0 but should be 999"), so
+    that a program reading "any answer" as a pass would call the file sound."""
+    with open(path, "r+b") as handle:
+        handle.seek(36)
+        handle.write(struct.pack(">I", 999))
 
 
 def count_rows(content: bytes, scratch: Path) -> int:

@@ -42,6 +42,9 @@ RestartPreventExitStatus=2
 # SIGTERM: the stream closes within 1 s plus 5 s for the close handshake, waiting alerts get
 # 5 s to go out; killed after 20 s.
 TimeoutStopSec=20
+# Squeezed before it is killed: a service that grows past 192M slows down instead of being cut off at 256M
+# with the owner's alerts in flight.
+MemoryHigh=192M
 MemoryMax=256M
 CPUWeight=50
 UMask=0077

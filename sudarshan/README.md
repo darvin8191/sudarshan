@@ -92,13 +92,15 @@ them apart from the databases it has always backed up:
 
 - the ring is stopped before an install; then every `*.db` in every `/var/lib/sudarshan-*/` folder
   is copied with SQLite's online backup (rows still in the write-ahead log come with it; a plain
-  file copy would lose them) into `<backup>/ring/<folder>/<name>`. Never at the top of the backup
+  file copy would lose them) into `<backup>/ring/<folder>/<name>`. The copy is made by `sudarshan`,
+  who owns the folder, and streamed to the tool (next section). Never at the top of the backup
   folder: a rollback puts every top-level `*.db` there into OpenAlgo's `db/` by name, and
   `market.db` exists in both places;
-- a rollback puts each copy back in its own folder, owned by `sudarshan`, mode 600, through a
-  temporary name and with the old `-wal`, `-shm` and `-journal` files removed, before OpenAlgo or
-  any ring service starts again. A folder that is gone is not made up. A database that cannot be put
-  back is logged and left as it was found, and the rollback carries on;
+- a rollback puts each copy back in its own folder before OpenAlgo or any ring service starts
+  again: `sudarshan` writes it as a new file beside the database (mode 600), removes the old
+  `-wal`, `-shm` and `-journal` files and renames the new file over the database. A folder that is
+  gone is not made up. A database that cannot be put back is logged and left as it was found, and
+  the rollback carries on;
 - the sealed owner vault (`db/sudarshan-vault/`) is in neither direction: the deploy backup does
   not hold it, and a rollback never replaces what the owner saved after the backup was made;
 - only plain names are used (`sudarshan-<name>` folders, file names of letters, digits, `.`, `_`
@@ -113,6 +115,43 @@ The tool that does an install is the one already on the server (it updates itsel
 release, so a new tool acts from the next run). The first install that brings these steps is made
 by the tool before them: it makes no ring copy, and a rollback of that install leaves the ring's
 databases as they are. Tests: `sudarshan/ops/tests/test_deploy_ring_databases.py`.
+
+## What an install does as root, and what it leaves to `sudarshan` (M18.11)
+
+`sudarshan-deploy` runs as root in folders that belong to the service user: OpenAlgo's `db/` and
+`frontend/`, and each ring service's `/var/lib/sudarshan-<service>/`. `sudarshan`, and anything
+that runs as it (OpenAlgo included), can plant a link or swap a name there at any moment, and a
+copy, a rename or a change of owner that root makes by such a path lands wherever the link leads: a
+link planted at `alerts.db.restoring` was enough to overwrite, and take over, any file on the
+server during a rollback. So:
+
+- root opens, copies, renames and re-owns nothing by a path in those folders. OpenAlgo's
+  databases, the ring's, the market history file (`historify.duckdb`) and the frontend are taken
+  out and put back by `sudarshan` itself (`sudo -u sudarshan`); the data crosses through a pipe
+  from or to a file in the backup folder, which only root opens. A file put back is written whole
+  as a new file beside its place and renamed over it, and a rename replaces a link and follows
+  none;
+- the install's backup folder, `/opt/sudarshan/backups/<time>-<tag>`, is root's alone, mode 700,
+  and nothing in it is readable by others, not even for a moment (read it with `sudo`). What a
+  rollback restores from cannot be changed by anyone who can write OpenAlgo's folders;
+- of folders named like that (`YYYYMMDD-HHMMSS-vA.B.C`) the tool keeps the newest ten, and it
+  removes no other folder in `/opt/sudarshan/backups`;
+- a stop by the system, `^C` or a hangup between stopping OpenAlgo and its health check is a
+  failure like any other: the install is rolled back, OpenAlgo and the ring start again and the
+  owner is told. Only a failing command did that before; the services stayed stopped until the
+  next run;
+- every download has a time limit (a list or a checksum 60 s, the release's frontend 15 minutes,
+  the fetch of the code 10 minutes), so a connection that stalls cannot hold an install up for
+  ever;
+- the lock, `/var/lib/sudarshan/deploy.lock`, is mode 644 and the state folder can be walked by
+  others, whatever the service's umask, so the nightly backup (it runs as `sudarshan`) can open
+  the lock and see that an install is running. The log writer does not hold the lock either: it
+  outlived the tool now and then and kept the next run out;
+- a notice goes on a line of its own: a line a crash cut off is closed first, and a cut-off line
+  does not count as told.
+
+Tests: `sudarshan/ops/tests/test_deploy_hardening.py`, and for the planted links
+`test_deploy_ring_databases.py`.
 
 ## Nightly backups (M18.11)
 
@@ -140,10 +179,12 @@ leaves the server (the offsite step below does).
 folders under `db/`, the `.env`), and for a database, what it does not take is named, not skipped:
 a name with anything but letters, digits, `.`, `_` and `-` (or over 128 characters), a file over
 32 MB (the `.env`: over 1 MB), more than 64 MB of files in `/etc/sudarshan` in all, folders nested
-more than four deep (or any folder inside a sealed one). The archive is then called partial and
-says so in its record, and the owner is told (cause `source`), so a key file with a stray space in
-its name is found on the first night, not on the day it is needed. `--check` lists them under "not
-taken". An editor's leftover (`feed.env~`) is such a file: remove it, or the backup stays partial.
+more than four deep (or any folder inside a sealed one), and a folder the job cannot list at all
+(named with a closing slash, `etc/sudarshan/`: everything in it is missing). The archive is then
+called partial and says so in its record, and the owner is told (cause `source`), so a key file
+with a stray space in its name is found on the first night, not on the day it is needed.
+`--check` lists them under "not taken". An editor's leftover (`feed.env~`) is such a file: remove
+it, or the backup stays partial.
 
 **Copied safely.** A database is copied with SQLite's own online backup, from a read-only
 connection (the source is never written), into a private work folder, checked with SQLite's
@@ -155,19 +196,33 @@ then renamed into place: a stop or a full disk leaves nothing that looks like an
 
 **When it runs, and when it does not:**
 
-- Never from 08:30 to 16:00 on a trading day, nor in a listed special day's own session (the hours
-  the deploy tool installs outside of). A run the timer or a boot starts earlier stops quietly; one
-  still going when the market opens cleans up and leaves it for the next time.
+- Never from 08:30 to 16:00 on a trading day. A listed special day (a Muhurat evening) is kept
+  for its session's own window widened by the margins the order alerts and the feed use, 30
+  minutes before and 20 after: 13:35 to 16:00 for a session from 14:05 to 15:40. (The deploy tool
+  is stricter and keeps a listed day for the market all day.) A run the timer or a boot starts
+  earlier stops quietly; one still going when the market opens cleans up and leaves it for the
+  next time.
+- Not in the hour before those hours begin. A morning install (06:30 to 08:30) restarts the job,
+  and a full backup would be cut off at 08:30: a run that the market hours would reach in less
+  than 60 minutes stops quietly and leaves the night to the next timer. `--force` is no
+  exception.
 - Once a night: a complete archive less than 8 hours old ends a run at once, so the 22:30 timer
   is a second chance after a failure and nothing more, and the restart the deploy tool gives the
   service after an install costs nothing. A partial archive does not count as a night done.
 - Not with an install. The deploy tool holds `/var/lib/sudarshan/deploy.lock` for the whole of an
-  install; the job takes the same lock shared for as long as it copies, waits up to 20 minutes for
-  an install to end, and steps aside after that. A migration therefore never meets an open copy
-  of the database it is changing, and an install that finds a backup running waits for the next
-  timer tick (10 minutes) with the tool's usual "another deploy is running" line.
+  install; the job takes the same lock shared for as long as it copies and for the offsite upload
+  that follows, waits up to 20 minutes for an install to end, and steps aside after that. A
+  migration therefore never meets an open copy of the database it is changing, and an install
+  that finds a backup running waits for the next timer tick (10 minutes) with the tool's usual
+  "another deploy is running" line. A lock the job cannot open at all is not read as "no install":
+  no archive is made and the owner is told (cause `lock`).
 - Never twice at once (its own lock). A stop by the system (a deploy restarting the unit) cleans up
-  and is not a failure.
+  and is not a failure: the unit is not left marked as failed.
+- A night left undone is told. When a run stood aside (the market hours, another run, an install
+  that would not end) and the newest complete archive is more than 30 hours old, the owner is told
+  once a day how many hours that is and why the run stood aside (cause `overdue`). With no
+  complete archive on the server at all nothing is said: there is nothing to be late against, and
+  the first one comes from "Before the first night", below.
 
 **Where the archives are, and who owns them.** In the unit's own state folder,
 `/var/lib/sudarshan-backup/archive/` (folder 700, files 600, owner `sudarshan`), as
@@ -204,8 +259,11 @@ one). The causes: `source` (a file could not be copied, or was not taken for the
 partial archive is made without it; a database that fails SQLite's check is kept, called out and
 also makes the archive partial, cause `integrity`),
 `space`, `cap`, `write` (the disk refused the archive or it did not read back whole), `offsite`
-(the offsite command failed; the archive is safe on the server) and `settings` (a setting in
-`backup.env` cannot be used: the job exits with status 2 and changes nothing). The job runs as
+(the offsite command failed; the archive is safe on the server), `lock` (the deploy tool's lock
+cannot be opened, so an install cannot be told from none: nothing is saved until it can),
+`overdue` (a run stood aside and the newest complete archive is more than 30 hours old) and
+`settings` (a setting in `backup.env` cannot be used: the job exits with status 2 and changes
+nothing). The job runs as
 `sudarshan` and cannot write root's notice file, so it records in
 `/var/lib/sudarshan-backup/events.jsonl`; `sudarshan-alerts` reads both files. `status.json`
 beside it says how the last run that did something went.
@@ -229,17 +287,34 @@ Storage through an rclone `crypt` remote, so that only encrypted files leave the
 is `SUDARSHAN_BACKUP_OFFSITE_CMD`: a command line, run without a shell after each good archive
 with `{archive}` (the file's full path), `{name}` and `{dir}` (the folder of archives) replaced in
 it, and it must name `{archive}` or `{dir}`. It runs as `sudarshan` with nothing from the job's
-environment but `PATH`, `HOME` (the state folder) and `LANG`, in the state folder, after the
-deploy lock is let go; its output goes to `offsite.log` there (mode 600) and a failure is told to
-the owner. Two shapes: `rclone copyto {archive} remote:bucket/{name}` sends that file only;
+environment but `PATH`, `HOME` (the state folder) and `LANG`, in the state folder, under the same
+shared deploy lock as the copy (an install that starts meanwhile waits for the next timer tick
+instead of restarting the unit and cutting the upload short; the timeout below bounds the wait);
+its output goes to `offsite.log` there (mode 600) and a failure is told to the owner. Two shapes: `rclone copyto {archive} remote:bucket/{name}` sends that file only;
 `rclone copy --immutable {dir} remote:bucket` sends whatever is not there yet, so an upload that
 failed or was stopped is made up on the next night. Not exercised against a real remote: the
 keys do not exist yet.
 
 **Looking at them.** `python -m sudarshan.ops.backup --check` says what a run would do now and
-changes nothing. `--verify FILE` reads an archive back against the record it carries (0 sound, 1
-something wrong, 2 not an archive) and says whether it is complete. `--force` makes an archive
-although a recent one exists.
+changes nothing: the hours (open, blocked, or not started this close to the market), the sources,
+what would not be taken (`not taken:`), what the user it runs as cannot open (`cannot be read:`),
+the archives and the offsite command. `--verify FILE` reads an archive back against the record it
+carries (0 sound, 1 something wrong, 2 not an archive) and says whether it is complete. `--force`
+makes an archive although a recent one exists.
+
+**Before the first night.** On the server, from the app folder, run the check as the job's own
+user:
+
+```sh
+sudo -u sudarshan .venv/bin/python -m sudarshan.ops.backup --check
+```
+
+It should print neither a `cannot be read:` nor a `not taken:` line. Run as root the check would
+see everything; as `sudarshan` it sees what the nightly job sees, and a file in `/etc/sudarshan`
+only root can open would otherwise make every archive partial, and the first sign would be the
+notice after the first night. Fix what it names, then let the first night run (or start
+`sudarshan-backup.service` by hand outside the market hours) and read the archive with
+`--verify`: from then on a late night is told.
 
 **Restoring** is a manual step, done with care and not by a rollback (a rollback uses the deploy
 tool's own backup, and never puts the vault back):
@@ -285,3 +360,15 @@ holds no Telegram or OpenAlgo secret and cannot be made to send anything:
 
 Tests: `sudarshan/ops/tests/test_deploy_notices.py` (the whole tool on a fake server),
 `test_ops_events.py`, and `sudarshan/alerts/tests/test_alerts_notices.py`.
+
+## Ports (M18.1)
+
+Every port is bound to 127.0.0.1 and fixed: a taken port is an error in plain words, never a move
+to another port. The ring's ports are listed together once the ring's base is in; this branch owns
+one of them:
+
+| port | what |
+|---|---|
+| 5585 | `sudarshan-alerts`: its health page, `GET /health` (the release installed and what the service is doing). **Interim:** the market alerts' API on 5582 serves the same document once both are in, and this port goes away then |
+
+Tests: `sudarshan/ops/tests/test_ops_docs.py`.
