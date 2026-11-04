@@ -362,6 +362,15 @@ def _order_statuses(rows):
     }
 
 
+def _reduces_or_crosses(current, target):
+    """SUDARSHAN M6.9 (X7): whether an order to ``target`` from ``current``, as the positions row
+    says, reduces the position or crosses it. One that only adds (from flat, or further the same
+    way) does neither. ``target == current`` needs no order."""
+    if target == current or current == 0:
+        return False
+    return (target > 0) != (current > 0) or abs(target) < abs(current)
+
+
 def _held_products(rows, symbol, exchange, orders):
     """SUDARSHAN M6.9: the signed quantity held in each product of one instrument, for an exit to
     be sized from: its positions rows corrected by the order book's fills across the products
@@ -600,9 +609,24 @@ def place_smartorder_api(data, auth):
                     held_now = 0  # nothing is sent below
                 current_position = held_now
             else:
-                current_position = int(
-                    get_open_position(symbol, exchange, map_product_type(product), auth)
-                )
+                current_position = int(get_open_position(symbol, exchange, request_product, auth))
+                if _reduces_or_crosses(current_position, position_size):
+                    # SUDARSHAN M6.9 (X7): sized as an exit is, from the row corrected by the
+                    # order book's fills, read after it: the row alone lags a fill, and a
+                    # reversal sized from it misses its target. An order that only adds goes as
+                    # the row says, with no order book read.
+                    rows = _position_rows(symbol, exchange, auth)
+                    orders = _read_order_rows(auth, exit_guard.EXIT_ORDERS_READ_S)
+                    by_product = _held_products(rows, symbol, exchange, orders)
+                    if by_product is None:
+                        logger.warning(f"Order for {symbol} not sent: the quantity held is unknown")
+                        said = exit_guard.exit_not_sized(
+                            exit_guard.position_of(exchange, symbol, product)
+                        )
+                        refusal = {"status": "error", "message": said, "nothing_sent": True}
+                        return _ErrorResponse(424), refusal, None
+                    current_position = by_product.get(request_product, 0)
+                    by_product = None  # only an exit's own guards read it
             logger.debug(
                 f"Desired position size: {position_size}, Current position: {current_position}"
             )

@@ -286,3 +286,70 @@ def test_x2_a_tv_exit_of_the_converted_position_in_its_own_product_goes(monkeypa
     code, _body = world.tv_smart_exit(X, quantity="65", action="SELL")
     assert code == 200
     assert broker.products == [("SELL", "D", 65)]
+
+
+# -- X7: a smart order to a size other than 0 is sized from the corrected figure ---------------------
+
+
+def _reversal(world, symbol, quantity, action, size):
+    return world.tv_smart_exit(symbol, quantity=quantity, action=action, position_size=size)
+
+
+def test_x7_a_tv_reversal_after_the_app_exit_lands_on_its_target(monkeypatch, clock):
+    """Long 65; the owner taps Exit (fills; the row lags). His strategy then reverses: SELL 130
+    with a position size of -65. Sized from the row it would sell 130 and end short 130."""
+    world = install(monkeypatch, Broker({X: 65}, 60.0))
+    world.phone_exit(X)
+    clock.advance(2.0)
+    _fresh_book()
+    code, body = _reversal(world, X, "130", "SELL", "-65")
+    assert code == 200, body
+    assert world.broker.true_qty(X) == -65
+    assert _sent(world.broker, X) == [("SELL", 65), ("SELL", 65)]
+
+
+def test_x7_a_partial_exit_repeated_while_the_row_lags_lands_on_its_target(monkeypatch, clock):
+    world = install(monkeypatch, Broker({X: 130}, 60.0))
+    assert _reversal(world, X, "65", "SELL", "65")[0] == 200
+    clock.advance(1.0)
+    _fresh_book()
+    _reversal(world, X, "65", "SELL", "65")  # the same alert again
+    assert world.broker.true_qty(X) == 65
+
+
+def test_x7_a_short_reversed_to_long_after_its_exit_lands_on_its_target(monkeypatch, clock):
+    world = install(monkeypatch, Broker({Y: -30}, 60.0))
+    world.phone_exit(Y)
+    clock.advance(2.0)
+    _fresh_book()
+    code, _body = _reversal(world, Y, "60", "BUY", "30")
+    assert code == 200
+    assert world.broker.true_qty(Y) == 30
+
+
+def test_x7_an_order_that_cannot_be_sized_is_refused_when_it_reduces_or_crosses(monkeypatch):
+    broker = Broker({X: 65}, 0.0)
+    broker.orders_unreadable = True
+    world = install(monkeypatch, broker)
+    for quantity, size in (("130", "-65"), ("65", "0"), ("30", "35")):
+        code, body = _reversal(world, X, quantity, "SELL", size)
+        assert code == 424, (size, body)
+        assert body["message"] == exit_guard.exit_not_sized(("NFO", X, "MIS"))
+    assert broker.orders == []
+
+
+def test_x7_an_order_that_only_adds_reads_no_order_book(monkeypatch):
+    broker = Broker({X: 65, Z: 0}, 0.0)
+    world = install(monkeypatch, broker)
+    assert _reversal(world, X, "65", "BUY", "130")[0] == 200  # adds to a long
+    assert _reversal(world, Z, "10", "BUY", "10")[0] == 200  # opens from flat
+    assert broker.order_book_reads == 0
+    assert broker.true_qty(X) == 130 and broker.true_qty(Z) == 10
+
+
+def test_x7_an_order_that_only_adds_goes_when_the_order_book_cannot_be_read(monkeypatch):
+    broker = Broker({X: 65}, 0.0)
+    broker.orders_unreadable = True
+    world = install(monkeypatch, broker)
+    assert _reversal(world, X, "65", "BUY", "130")[0] == 200
+    assert broker.true_qty(X) == 130
