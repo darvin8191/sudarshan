@@ -10,6 +10,8 @@ import { PlaceOrderDialog } from '@/components/trading/PlaceOrderDialog'
 import { cn } from '@/lib/utils'
 import { AccessNotice } from '@/sudarshan/AccessNotice'
 import { usePriceAccess } from '@/sudarshan/access'
+import { useNavigate } from 'react-router'
+import { AlertFormSheet, type AlertPrefill, toastAlertSet } from '@/sudarshan/alerts/AlertForm'
 import { useMarketOpen } from '@/sudarshan/dashboard/hooks'
 import { keyOf } from '@/sudarshan/dashboard/live'
 import {
@@ -74,17 +76,24 @@ export default function Watchlist() {
   const { overlay, open, swap, close } = useOverlay()
   const openItemId = overlay?.kind === 'item' ? overlay.itemId : null
   const order = overlay?.kind === 'order' ? overlay.order : null
+  const alertRequest = overlay?.kind === 'alert' ? overlay.alert : null // SUDARSHAN M10.2
+  const navigate = useNavigate()
 
   // An overlay that cannot be shown (an instrument no longer in the list, a
-  // ticket without its order, a list action with no list) is closed once the
-  // lists are known, rather than left open over nothing.
+  // ticket or an alert form without its instrument, a list action with no
+  // list) is closed once the lists are known, rather than left open over nothing.
   const settled = !watchlists.loading
   const orphan =
     overlay !== null &&
     settled &&
     ((overlay.kind === 'item' && !items.some((item) => item.id === overlay.itemId)) ||
       (overlay.kind === 'order' && overlay.order === null) ||
-      (overlay.kind !== 'item' && overlay.kind !== 'order' && overlay.kind !== 'new' && !active))
+      (overlay.kind === 'alert' && overlay.alert === null) ||
+      (overlay.kind !== 'item' &&
+        overlay.kind !== 'order' &&
+        overlay.kind !== 'alert' &&
+        overlay.kind !== 'new' &&
+        !active))
   useEffect(() => {
     if (orphan) close()
   }, [orphan, close])
@@ -123,6 +132,11 @@ export default function Watchlist() {
   )
   const placeOrder = useCallback(
     (request: OrderRequest) => swap({ kind: 'order', order: request }),
+    [swap]
+  )
+  // The sheet's Set alert swaps it for the alert form, as Buy swaps it for the ticket.
+  const setAlert = useCallback(
+    (request: AlertPrefill) => swap({ kind: 'alert', alert: request }),
     [swap]
   )
   const deleting = overlay?.kind === 'delete'
@@ -223,6 +237,7 @@ export default function Watchlist() {
             onAdd={startAdding}
             onCloseSheet={close}
             onOrder={placeOrder}
+            onAlert={setAlert}
           />
         </>
       )}
@@ -278,6 +293,17 @@ export default function Watchlist() {
         product={order?.product}
         strategy="Watchlist"
       />
+
+      {alertRequest && (
+        <AlertFormSheet
+          prefill={alertRequest}
+          onClose={close}
+          onSaved={(saved) => {
+            close()
+            toastAlertSet(saved, navigate)
+          }}
+        />
+      )}
     </div>
   )
 }

@@ -1,0 +1,205 @@
+import { useQueryClient } from '@tanstack/react-query'
+import {
+  CandlestickChart,
+  type LucideIcon,
+  Pause,
+  Pencil,
+  Play,
+  RotateCcw,
+  Trash2,
+} from 'lucide-react'
+import { type ReactNode, useState } from 'react'
+import { Link } from 'react-router'
+import type { AlertRow, AlertStatus } from '@/api/marketAlerts'
+import type { SymbolData } from '@/lib/MarketDataManager'
+import { cn } from '@/lib/utils'
+import { Confirm, Details, OUTLINED, SentNote } from '@/sudarshan/books/cards/parts'
+import { chartPath } from '@/sudarshan/chart/prefs'
+import type { FeedState } from '@/sudarshan/live/useFrameLines'
+import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
+import { useOpenGuard } from '@/sudarshan/watchlist/openGuard'
+import { describe } from '@/sudarshan/watchlist/rows'
+import { auctionShown, firedWords, PriceLine } from './AlertCard'
+import { type AlertAction, NO_ANSWER, sendChange, useHeld } from './actions'
+import { RecentFires } from './HistoryList'
+import { AlertStatusChip, BusyIcon, ConditionText, HELD, LineText } from './lines'
+
+/** The move each status allows, beside Edit and Delete (contract 1.4's button table). */
+const MOVE: Record<
+  AlertStatus,
+  { action: Exclude<AlertAction, 'delete'>; label: string; busy: string; icon: LucideIcon }
+> = {
+  active: { action: 'pause', label: 'Pause', busy: 'Pausing', icon: Pause },
+  paused: { action: 'resume', label: 'Resume', busy: 'Resuming', icon: Play },
+  stopped: { action: 'restart', label: 'Restart', busy: 'Restarting', icon: RotateCcw },
+}
+
+export interface SheetLive {
+  line: SymbolData | undefined
+  followed: boolean
+  feed: FeedState
+  now: number
+  marketOpen: boolean | null
+}
+
+/**
+ * One alert's sheet (M10.3, M10.4): its condition, where the price stands, why it stopped or
+ * paused, its check, how often and until when, its note, what can be done with it (Edit; Pause,
+ * Resume or Restart as its status allows; Delete after a question; its chart), and its last five
+ * fires with their deliveries.
+ */
+export function AlertSheet({
+  row,
+  live,
+  onClose,
+  onEdit,
+}: {
+  row: AlertRow | null
+  live: SheetLive
+  onClose: () => void
+  onEdit: (id: number) => void
+}) {
+  if (!row) return null
+  return <Sheet key={row.id} row={row} live={live} onClose={onClose} onEdit={onEdit} />
+}
+
+function Sheet({
+  row,
+  live,
+  onClose,
+  onEdit,
+}: {
+  row: AlertRow
+  live: SheetLive
+  onClose: () => void
+  onEdit: (id: number) => void
+}) {
+  const client = useQueryClient()
+  const held = useHeld(row.id)
+  const [confirming, setConfirming] = useState(false)
+  const named = describe(row.symbol, row.exchange)
+  const move = MOVE[row.status] ?? MOVE.stopped
+  const MoveIcon = move.icon
+  const sending = (action: AlertAction) => held?.action === action && held.state === 'sending'
+  // The price line already shows the check in the auction window: once is enough.
+  const shownInPrice = live.followed && auctionShown(row, live.feed, live.now) !== null
+
+  return (
+    <BottomSheet
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
+      title={named.title}
+      description={named.detail}
+      aside={
+        <div className="pt-2.5">
+          <AlertStatusChip status={row.status} />
+        </div>
+      }
+    >
+      <div className="flex flex-col gap-3">
+        <ConditionText row={row} className="text-base" />
+        {row.words.checks_at && (
+          <p className="-mt-2 pl-[1.375rem] text-sm text-[color:var(--text-secondary)]">
+            {row.words.checks_at}
+          </p>
+        )}
+        {live.followed && (
+          <PriceLine
+            row={row}
+            line={live.line}
+            feed={live.feed}
+            now={live.now}
+            marketOpen={live.marketOpen}
+          />
+        )}
+        {row.status !== 'active' && row.status_reason && (
+          <p className="text-sm font-semibold text-[color:var(--text-secondary)]">
+            {row.status_reason}
+          </p>
+        )}
+        {row.check && !shownInPrice && <LineText line={row.check} />}
+
+        <Details
+          rows={[
+            { label: 'How often', value: row.words.meta },
+            { label: 'Today', value: firedWords(row.fired_today) || 'Not fired' },
+            row.note ? { label: 'Note', value: row.note } : null,
+          ]}
+        />
+
+        {held?.state === 'unconfirmed' && <SentNote text={NO_ANSWER[held.action]} />}
+
+        {/* A status the server changed while the sheet is open (fired once, paused after 50
+            fires) changes what the middle button does under the finger: the row takes no tap
+            for the same half second a sheet does when it opens. */}
+        <Settling key={row.status} className="grid grid-cols-3 gap-2">
+          <button
+            type="button"
+            disabled={held !== undefined}
+            onClick={() => onEdit(row.id)}
+            className={cn(OUTLINED, 'px-2', HELD)}
+          >
+            <Pencil aria-hidden="true" className="size-5" />
+            Edit
+          </button>
+          <button
+            type="button"
+            disabled={held !== undefined}
+            onClick={() => void sendChange(client, row, move.action)}
+            className={cn(OUTLINED, 'px-2', HELD)}
+          >
+            {sending(move.action) ? (
+              <BusyIcon />
+            ) : (
+              <MoveIcon aria-hidden="true" className="size-5" />
+            )}
+            {sending(move.action) ? move.busy : move.label}
+          </button>
+          <button
+            type="button"
+            disabled={held !== undefined}
+            onClick={() => setConfirming(true)}
+            className={cn(OUTLINED, 'px-2 text-[color:var(--down)]', HELD)}
+          >
+            {sending('delete') ? <BusyIcon /> : <Trash2 aria-hidden="true" className="size-5" />}
+            {sending('delete') ? 'Deleting' : 'Delete'}
+          </button>
+        </Settling>
+        <Link to={chartPath(row.symbol, row.exchange)} className={OUTLINED}>
+          <CandlestickChart aria-hidden="true" className="size-5" />
+          Chart
+        </Link>
+
+        <RecentFires alertId={row.id} now={live.now} />
+      </div>
+
+      <Confirm
+        open={confirming}
+        title={`Delete the ${named.title} alert, ${row.words.condition}?`}
+        description="Its history stays."
+        confirmLabel="Delete"
+        onConfirm={() => void sendChange(client, row, 'delete')}
+        onClose={() => setConfirming(false)}
+      />
+    </BottomSheet>
+  )
+}
+
+/** What it holds takes no tap for `OPEN_GUARD.ms` after it mounts: key it to re-arm. */
+function Settling({ className, children }: { className: string; children: ReactNode }) {
+  const guard = useOpenGuard(true)
+  const { onPointerDownCapture, onClickCapture, onKeyDownCapture } = guard.handlers
+  return (
+    <div
+      onPointerDownCapture={onPointerDownCapture}
+      onClickCapture={onClickCapture}
+      onKeyDownCapture={onKeyDownCapture}
+      data-settling={guard.settling || undefined}
+      className={className}
+    >
+      {children}
+    </div>
+  )
+}

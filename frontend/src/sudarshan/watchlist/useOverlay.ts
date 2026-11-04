@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router'
+import type { AlertPrefill } from '@/sudarshan/alerts/AlertForm'
 import type { OrderRequest } from './SymbolSheet'
 
 /**
@@ -12,6 +13,9 @@ import type { OrderRequest } from './SymbolSheet'
  * - `?sheet=order`: the order ticket. What it is for (the instrument, Buy or
  *   Sell, the lot size) rides in the history entry's state, not the address:
  *   a ticket only ever opens from a tap.
+ * - `?sheet=alert` (M10.2): the form for a market alert on the instrument,
+ *   which rides in the entry's state as the ticket's order does, with the
+ *   price the form starts from.
  */
 export type Overlay =
   | { kind: 'item'; itemId: number }
@@ -20,17 +24,20 @@ export type Overlay =
   | { kind: 'rename' }
   | { kind: 'delete' }
   | { kind: 'order'; order: OrderRequest | null }
+  | { kind: 'alert'; alert: AlertPrefill | null }
 
 export type OverlayRequest =
-  | Exclude<Overlay, { kind: 'order' }>
+  | Exclude<Overlay, { kind: 'order' } | { kind: 'alert' }>
   | { kind: 'order'; order: OrderRequest }
+  | { kind: 'alert'; alert: AlertPrefill }
 
-const SHEETS = new Set(['add', 'new', 'rename', 'delete', 'order'])
+const SHEETS = new Set(['add', 'new', 'rename', 'delete', 'order', 'alert'])
 
-/** The history entry's state: whether this page pushed it, and the ticket's order. */
+/** The history entry's state: whether this page pushed it, the ticket's order, the alert's instrument. */
 interface EntryState {
   sdOverlay?: boolean
   order?: OrderRequest
+  alert?: AlertPrefill
 }
 
 function entryState(state: unknown): EntryState {
@@ -44,12 +51,17 @@ export function overlayOf(params: URLSearchParams, state: unknown): Overlay | nu
   const sheet = params.get('sheet')
   if (!sheet || !SHEETS.has(sheet)) return null
   if (sheet === 'order') return { kind: 'order', order: entryState(state).order ?? null }
+  if (sheet === 'alert') return { kind: 'alert', alert: entryState(state).alert ?? null }
   return { kind: sheet } as Overlay
 }
 
-/** The state an entry for `next` carries: whether this page pushed it, and a ticket's order. */
+/** The state an entry for `next` carries: whether this page pushed it, a ticket's order, an alert's. */
 function stateFor(next: OverlayRequest, own: boolean): EntryState {
-  return { sdOverlay: own, ...(next.kind === 'order' ? { order: next.order } : {}) }
+  return {
+    sdOverlay: own,
+    ...(next.kind === 'order' ? { order: next.order } : {}),
+    ...(next.kind === 'alert' ? { alert: next.alert } : {}),
+  }
 }
 
 function withOverlay(params: URLSearchParams, next: OverlayRequest | null): URLSearchParams {
@@ -128,9 +140,9 @@ export function useOverlay(): {
     else go(null, true, null)
   }, [go, navigate])
 
-  // A ticket restored with the page (a reload, the phone bringing the app
-  // back) is not reopened: a ticket opens only from a tap.
-  const restoredTicket = useRef(overlay?.kind === 'order')
+  // A ticket or an alert form restored with the page (a reload, the phone
+  // bringing the app back) is not reopened: each opens only from a tap.
+  const restoredTicket = useRef(overlay?.kind === 'order' || overlay?.kind === 'alert')
   useEffect(() => {
     if (!restoredTicket.current) return
     restoredTicket.current = false
