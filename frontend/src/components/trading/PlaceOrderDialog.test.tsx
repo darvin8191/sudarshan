@@ -163,7 +163,9 @@ describe('PlaceOrderDialog while the kill switch is on', () => {
     expect(screen.getByTestId('kill-switch-note')).toHaveTextContent(
       'Kill switch on: a new order is refused'
     )
-    expect(screen.getByRole('button', { name: /buy/i })).toBeEnabled()
+    for (const button of screen.getAllByRole('button', { name: /buy/i })) {
+      expect(button).toBeEnabled()
+    }
   })
 
   it('says only that the sandbox is covered when the guard is at the sandbox stage', () => {
