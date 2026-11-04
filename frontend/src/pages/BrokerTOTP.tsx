@@ -2,6 +2,7 @@ import { AlertTriangle, ArrowLeft, ExternalLink, Loader2, Shield } from 'lucide-
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { fetchCSRFToken } from '@/api/client'
+import { syncSession } from '@/components/auth/AuthSync'
 import { BrokerAuthSignOut } from '@/components/auth/BrokerAuthSignOut'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -404,6 +405,9 @@ export default function BrokerTOTP() {
 
       if (data.status === 'success' || response.ok) {
         login(formData.userid || formData.mobile || '', broker || '')
+        // SUDARSHAN: bring the API key and today's broker login in now, so the
+        // screens after this one never show the state from before the login.
+        await syncSession({ keepOnFailure: true })
         showToast.success('Authentication successful')
         navigate('/dashboard')
       } else {
