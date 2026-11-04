@@ -30,7 +30,7 @@ class Desk:
         self.answers, self.calls = answers, []
 
     def health(self) -> dict:
-        return {"service": "sudarshan-alerts", "market_alerts": "on", "state": "running",
+        return {"service": "sudarshan-alerts", "market_alerts": "on", "market_state": "running",
                 "alerts_active": 3, "instruments": 2}  # fmt: skip
 
     async def call(self, op: str, message) -> object:
@@ -69,7 +69,7 @@ def test_health_is_unsealed_and_carries_counts_only():
                 answer = await client.get(f"{base}/health", timeout=5)
                 assert answer.status_code == 200
                 assert answer.json() == {"service": "sudarshan-alerts", "market_alerts": "on",
-                                         "state": "running", "alerts_active": 3,
+                                         "market_state": "running", "alerts_active": 3,
                                          "instruments": 2}  # fmt: skip
                 assert (await client.post(f"{base}/health", timeout=5)).status_code == 405
                 assert (await client.get(f"{base}/v1/state", timeout=5)).status_code == 405

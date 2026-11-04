@@ -1,6 +1,6 @@
 """The market alerts' sealed local API on 127.0.0.1:5582 (M10.1): OpenAlgo's bridge to them.
 
-    GET  /health      unsealed: whether market alerts are on, their state, and counts only
+    GET  /health      unsealed: whether market alerts are on, their state (market_state), and counts only
     POST /v1/<op>     the body one Fernet token sealed for <op> (sudarshan/alerts/api/v1)
 
 The browser never calls this. OpenAlgo's blueprint (blueprints/sudarshan_alerts.py) checks the
@@ -114,7 +114,7 @@ class OffDesk:
         self.reason = reason
 
     def health(self) -> dict[str, Any]:
-        return {"service": SERVICE, "market_alerts": "off", "state": "off", "alerts_active": 0,
+        return {"service": SERVICE, "market_alerts": "off", "market_state": "off", "alerts_active": 0,
                 "instruments": 0}  # fmt: skip
 
     async def call(self, op: str, message: Mapping[str, Any]) -> Any:

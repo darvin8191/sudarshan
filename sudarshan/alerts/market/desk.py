@@ -96,7 +96,7 @@ class OwnerDesk:
 
     def health(self) -> dict[str, Any]:
         rt = self.rt
-        return {"service": SERVICE, "market_alerts": "on", "state": rt.state,
+        return {"service": SERVICE, "market_alerts": "on", "market_state": rt.state,
                 "alerts_active": len(rt.book.alerts()), "instruments": len(rt.book.modes())}  # fmt: skip
 
     async def call(self, op: str, message: Mapping[str, Any]) -> Any:

@@ -84,7 +84,7 @@ class Desk:
 
     def health(self) -> dict:
         return {"service": "sudarshan-alerts", "market_alerts": "on" if self.on else "off",
-                "state": "running", "alerts_active": 0, "instruments": 0}  # fmt: skip
+                "market_state": "running", "alerts_active": 0, "instruments": 0}  # fmt: skip
 
     async def call(self, op: str, message) -> object:
         self.calls.append((op, dict(message)))

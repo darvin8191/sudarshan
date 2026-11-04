@@ -14,6 +14,7 @@ import httpx
 import zmq
 import zmq.asyncio
 
+from sudarshan.feed import bus
 from sudarshan.feed.config import Settings
 from sudarshan.feed.http_api import is_local
 from sudarshan.feed.replay import read_ticks
@@ -72,6 +73,7 @@ def test_fan_out_http_api_and_clean_close(feed_env, fast, caplog):
                 async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{svc.http_port}") as http:
                     health = (await http.get("/health")).json()
                     assert health["state"] == "connected" and health["reconnects"] == 0
+                    assert bus.RING_HEALTH_FIELDS <= set(health)  # what other services read
                     assert health["subscribed"]["total"] == 4 and health["token_file_readable"]
                     assert health["market_status"] == {"NSE_EQ": "NORMAL_OPEN"}
                     assert health["keys_without_data"]["count"] == 2  # Nifty Bank, India VIX

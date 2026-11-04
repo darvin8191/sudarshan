@@ -101,7 +101,7 @@ def test_the_state_carries_the_alerts_in_words_and_the_engine_line(alerts, quick
             state = await office.call("state", {"principal": "owner"})
             assert state["alerts"][0]["fired_today"] == 1 and state["last_event_id"] == 1
             assert office.health() == {"service": "sudarshan-alerts", "market_alerts": "on",
-                                       "state": "running", "alerts_active": 1,
+                                       "market_state": "running", "alerts_active": 1,
                                        "instruments": 1}  # fmt: skip
             await closed(rt, task)
 
@@ -586,7 +586,7 @@ def test_the_service_serves_the_api_and_closes_it_with_everything_else(alerts, q
             await wait_until(lambda: rt.state == "running")
             async with httpx.AsyncClient(trust_env=False) as client:
                 health = (await client.get(f"http://127.0.0.1:{port}/health", timeout=5)).json()
-                assert health["market_alerts"] == "on" and health["state"] == "running"
+                assert health["market_alerts"] == "on" and health["market_state"] == "running"
                 body = seal(fernet, "create", principal="owner", alert=draft())
                 made = await client.post(f"http://127.0.0.1:{port}/v1/create", content=body,
                                          timeout=10)  # fmt: skip
