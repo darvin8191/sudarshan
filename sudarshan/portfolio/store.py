@@ -341,6 +341,14 @@ class Tx:
         """Every entry write moves the tab's version, and only from the one it was decided on."""
         return self.change("tab", tab_id, version, {}, now, "version_conflict")
 
+    def reposition(self, tab_id: int, position: int) -> None:
+        """Set a tab's place in the strip without moving its version: a tab pushed aside by a
+        move did not change, so a screen editing it is not told it did."""
+        t = self._t("tab")
+        self.conn.execute(
+            update(t).where(t.c.id == tab_id, self._mine(t)).values(position=position)
+        )
+
     def next_position(self) -> int:
         t = self._t("tab")
         top = self.conn.execute(select(func.max(t.c.position)).where(self._mine(t))).scalar()

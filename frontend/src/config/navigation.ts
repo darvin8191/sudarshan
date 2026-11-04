@@ -6,6 +6,7 @@ import {
   BookOpen,
   Bot,
   Boxes,
+  Briefcase,
   CandlestickChart,
   ChartCandlestick,
   ClipboardList,
@@ -101,6 +102,8 @@ export const profileMenuItems: NavItem[] = [
   { href: '/whatsapp', label: 'WhatsApp Bot', icon: MessageCircle },
   // SUDARSHAN M8.2: the watchlist, for a wide screen where the bottom bar is hidden.
   { href: '/watchlist', label: 'Watchlist', icon: Bookmark },
+  // SUDARSHAN M7.18: the portfolio, right after the watchlist (never between API Key and Action Center).
+  { href: '/portfolio', label: 'Portfolio', icon: Briefcase },
   { href: '/holdings', label: 'Holdings', icon: ClipboardList },
   { href: '/flow', label: 'Flow Editor', icon: Workflow },
   { href: '/scalping', label: 'Scalping', icon: Zap },

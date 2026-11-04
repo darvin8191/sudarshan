@@ -271,8 +271,10 @@ def react_sip_backtester():
     return serve_react_app()
 
 
-# The former path. Kept so an existing bookmark reaches the SPA, which
-# redirects it to the new one rather than showing a not-found.
+# SUDARSHAN M7.18: the owner's Portfolio page (frontend/src/sudarshan/pages/Portfolio.tsx).
+# Upstream served this path only so an old bookmark reached the SPA's redirect to the
+# backtester; the path is now the page itself, and stays a known route for a refresh or a
+# bookmark opened while signed out.
 @react_bp.route("/portfolio")
 def react_portfolio_legacy():
     return serve_react_app()

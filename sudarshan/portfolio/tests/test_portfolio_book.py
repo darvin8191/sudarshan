@@ -595,3 +595,111 @@ def test_another_principals_entries_and_tabs_are_out_of_reach(tmp_path):
     with pytest.raises(NotFound):
         book.tab_delete(OWNER, tab["id"], 1, "Theirs", now=NOW)
     both.close()
+
+
+# ---- moving a tab renumbers the others: positions are 0..n-1, never shared ----
+
+
+def _order(book):
+    return [
+        (t["name"], t["position"]) for t in sorted(book.tabs(OWNER), key=lambda t: t["position"])
+    ]
+
+
+def _four(book):
+    return [book.tab_create(OWNER, f"m{i}", f"T{i}", "stocks", now=NOW) for i in range(1, 4)]
+
+
+def test_new_tabs_take_the_next_place_and_positions_are_unique(book):
+    _four(book)
+    assert _order(book) == [("Upstox", 0), ("T1", 1), ("T2", 2), ("T3", 3)]
+
+
+def test_moving_a_tab_to_the_first_place_renumbers_the_others(book):
+    t1, t2, t3 = _four(book)
+    moved = book.tab_update(OWNER, t3["id"], 1, {"position": 1}, now=NOW)
+    assert moved["position"] == 1 and moved["version"] == 2
+    assert _order(book) == [("Upstox", 0), ("T3", 1), ("T1", 2), ("T2", 3)]
+
+
+def test_moving_a_tab_to_the_last_place(book):
+    t1, t2, t3 = _four(book)
+    book.tab_update(OWNER, t1["id"], 1, {"position": 3}, now=NOW)
+    assert _order(book) == [("Upstox", 0), ("T2", 1), ("T3", 2), ("T1", 3)]
+
+
+def test_moving_a_tab_to_the_middle_and_past_the_ends(book):
+    t1, t2, t3 = _four(book)
+    book.tab_update(OWNER, t3["id"], 1, {"position": 2}, now=NOW)
+    assert _order(book) == [("Upstox", 0), ("T1", 1), ("T3", 2), ("T2", 3)]
+    book.tab_update(OWNER, t1["id"], 1, {"position": 99}, now=NOW)  # clamped, not a gap
+    assert _order(book) == [("Upstox", 0), ("T3", 1), ("T2", 2), ("T1", 3)]
+    book.tab_update(OWNER, t2["id"], 1, {"position": 0}, now=NOW)  # never ahead of Upstox
+    assert _order(book)[0] == ("Upstox", 0)
+    assert sorted(p for _, p in _order(book)) == [0, 1, 2, 3]
+
+
+def test_only_the_moved_tab_gets_a_new_version(book):
+    t1, t2, t3 = _four(book)
+    book.tab_update(OWNER, t3["id"], 1, {"position": 1}, now=NOW)
+    versions = {t["name"]: t["version"] for t in book.tabs(OWNER)}
+    assert versions == {"Upstox": 1, "T3": 2, "T1": 1, "T2": 1}  # the others did not change
+
+
+def test_a_tab_that_does_not_move_keeps_its_version(book):
+    t1, t2, t3 = _four(book)
+    book.tab_update(OWNER, t1["id"], 1, {"position": 1}, now=NOW)  # already there
+    assert {t["name"]: t["version"] for t in book.tabs(OWNER)} == {
+        "Upstox": 1, "T1": 2, "T2": 1, "T3": 1,
+    }  # fmt: skip
+
+
+def test_a_move_from_an_old_version_is_refused_and_changes_nothing(book):
+    t1, t2, t3 = _four(book)
+    book.tab_update(OWNER, t1["id"], 1, {"position": 3}, now=NOW)  # this screen moved it first
+    before = _order(book)
+    with pytest.raises(VersionConflict) as caught:
+        book.tab_update(OWNER, t1["id"], 1, {"position": 1}, now=NOW)  # the other screen, stale
+    assert str(caught.value) == WORDS["version_conflict"]
+    assert _order(book) == before
+
+
+def test_a_tab_pushed_aside_by_another_screen_can_still_be_moved_and_stays_unique(book):
+    t1, t2, t3 = _four(book)
+    book.tab_update(OWNER, t3["id"], 1, {"position": 1}, now=NOW)  # T1 and T2 moved down
+    book.tab_update(OWNER, t2["id"], 1, {"position": 1}, now=NOW)  # the other screen, from its view
+    assert sorted(p for _, p in _order(book)) == [0, 1, 2, 3]
+
+
+def test_archived_tabs_stay_after_the_active_ones_in_their_own_order(book):
+    t1, t2, t3 = _four(book)
+    book.tab_update(OWNER, t1["id"], 1, {"archived": True}, now=NOW)
+    assert _order(book) == [("Upstox", 0), ("T2", 1), ("T3", 2), ("T1", 3)]
+    t4 = book.tab_create(OWNER, "m4", "T4", "stocks", now=NOW)  # active ones come first
+    assert t4["position"] == 3 and t4["version"] == 1
+    assert _order(book) == [("Upstox", 0), ("T2", 1), ("T3", 2), ("T4", 3), ("T1", 4)]
+    book.tab_update(OWNER, t2["id"], 1, {"archived": True}, now=NOW)
+    assert _order(book) == [("Upstox", 0), ("T3", 1), ("T4", 2), ("T1", 3), ("T2", 4)]
+    now = {t["name"]: t for t in book.tabs(OWNER)}
+    book.tab_update(OWNER, now["T1"]["id"], now["T1"]["version"], {"archived": False}, now=NOW)
+    assert [name for name, _ in _order(book)] == ["Upstox", "T3", "T4", "T1", "T2"]
+    assert sorted(p for _, p in _order(book)) == [0, 1, 2, 3, 4]
+
+
+def test_a_tab_is_moved_within_its_own_group_only(book):
+    t1, t2, t3 = _four(book)
+    book.tab_update(OWNER, t3["id"], 1, {"archived": True}, now=NOW)
+    book.tab_update(OWNER, t1["id"], 1, {"position": 99}, now=NOW)  # active: stays before archived
+    assert _order(book) == [("Upstox", 0), ("T2", 1), ("T1", 2), ("T3", 3)]
+
+
+def test_ties_and_gaps_from_older_data_are_closed_by_the_next_move(book):
+    t1, t2, t3 = _four(book)
+    book.store.write(
+        OWNER,
+        lambda tx: [
+            tx.change("tab", t["id"], t["version"], {"position": 7}, NOW) for t in (t1, t2)
+        ],
+    )
+    book.tab_update(OWNER, t3["id"], 1, {"position": 1}, now=NOW)
+    assert sorted(p for _, p in _order(book)) == [0, 1, 2, 3]

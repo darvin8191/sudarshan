@@ -12,6 +12,7 @@ import { useBrokerStore } from '@/stores/brokerStore'
 // Public pages
 const Home = lazy(() => import('@/pages/Home'))
 const PortfolioBacktester = lazy(() => import('@/pages/PortfolioBacktester'))
+const Portfolio = lazy(() => import('@/sudarshan/pages/Portfolio')) // SUDARSHAN M7.18
 const PortfolioBacktesterResults = lazy(() => import('@/pages/PortfolioBacktesterResults'))
 const SipBacktester = lazy(() => import('@/pages/SipBacktester'))
 const SipBacktesterResults = lazy(() => import('@/pages/SipBacktesterResults'))
@@ -211,12 +212,9 @@ function App() {
                   path="/portfolio-backtester/results"
                   element={<PortfolioBacktesterResults />}
                 />
-                {/* The page moved: /portfolio was ambiguous next to the
-                    analyzer. Redirect rather than 404 an existing bookmark. */}
-                <Route
-                  path="/portfolio"
-                  element={<Navigate to="/portfolio-backtester" replace />}
-                />
+                {/* SUDARSHAN M7.18: /portfolio is the owner's portfolio page. It was a
+                    redirect to the backtester; that page keeps its own path above. */}
+                <Route path="/portfolio" element={<Portfolio />} />
                 <Route path="/sip-backtester" element={<SipBacktester />} />
                 <Route path="/sip-backtester/results" element={<SipBacktesterResults />} />
                 <Route path="/portfolio-analyzer" element={<PortfolioAnalyzer />} />

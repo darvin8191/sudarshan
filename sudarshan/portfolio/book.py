@@ -157,6 +157,51 @@ def _unit(asset: Mapping[str, Any]) -> str:
     return "units" if asset["kind"] == "mf" else (asset.get("unit_label") or "units")
 
 
+NEW = -1  # the tab being created, in a layout
+
+
+def _layout(
+    tabs: list[dict],
+    *,
+    moved: int | None = None,
+    place: int | None = None,
+    archived: bool | None = None,
+    new: bool = False,
+) -> dict[int, int]:
+    """Every tab's position after a change: 0..n-1, no gaps, no ties. The Upstox tab is 0, then
+    the active custom tabs, then the archived ones, each group in its own order. ``place`` is the
+    position the ``moved`` tab is asked to take (clamped into its group); without one it keeps its
+    place among its group. A ``new`` tab goes last among the active ones."""
+    system = [t for t in tabs if t["system"]]
+    custom = sorted((t for t in tabs if not t["system"]), key=lambda t: (t["position"], t["id"]))
+
+    def is_archived(t: dict) -> bool:
+        return bool(archived) if t["id"] == moved and archived is not None else bool(t["archived"])
+
+    active = [t["id"] for t in custom if not is_archived(t)]
+    shelved = [t["id"] for t in custom if is_archived(t)]
+    if new:
+        active.append(NEW)
+    if moved in shelved and place is None:
+        shelved.remove(moved)  # a tab just put away joins the end of the archived ones
+        shelved.append(moved)
+    if moved is not None and place is not None:
+        group = shelved if moved in shelved else active
+        base = len(system) + (0 if group is active else len(active))
+        group.remove(moved)
+        group.insert(min(max(place - base, 0), len(group)), moved)
+    order = [t["id"] for t in system] + active + shelved
+    return {tab_id: index for index, tab_id in enumerate(order)}
+
+
+def _renumber(tx: Tx, layout: dict[int, int], now: int, *, skip: int) -> None:
+    """Write the positions that differ. A tab pushed aside is not changed, so its version stays."""
+    for tab in tx.rows("tab", "position,id"):
+        want = layout.get(tab["id"])
+        if tab["id"] != skip and want is not None and tab["position"] != want:
+            tx.reposition(tab["id"], want)
+
+
 class Book:
     def __init__(self, store: PortfolioStore):
         self.store = store
@@ -257,7 +302,10 @@ class Book:
                 return again
             if tx.count("tab", archived=0, system=0) >= MAX_TABS:
                 raise Refused(SHARED_WORDS["tab_limit"], reason="tab_limit")
-            return tx.insert("tab", {**values, "position": tx.next_position()}, now, rid)
+            layout = _layout(tx.rows("tab", "position,id"), new=True)
+            made = tx.insert("tab", {**values, "position": layout[NEW]}, now, rid)
+            _renumber(tx, layout, now, skip=NEW)
+            return made
 
         return self.store.write(scope, run)
 
@@ -303,6 +351,19 @@ class Book:
             if tab["archived"] and values.get("archived") is False:
                 if tx.count("tab", archived=0, system=0) >= MAX_TABS:
                     raise Refused(SHARED_WORDS["tab_limit"], reason="tab_limit")
+            if "position" in values or "archived" in values:
+                # A move renumbers the others in this transaction: positions stay 0..n-1 with no
+                # gaps and no ties, the Upstox tab first, archived tabs after the active ones.
+                layout = _layout(
+                    tx.rows("tab", "position,id"),
+                    moved=tab_id,
+                    place=values.pop("position", None),
+                    archived=values.get("archived"),
+                )
+                values["position"] = layout[tab_id]
+                made = tx.change("tab", tab_id, version, values, now, "version_conflict")
+                _renumber(tx, layout, now, skip=tab_id)
+                return made
             return tx.change("tab", tab_id, version, values, now, "version_conflict")
 
         return self.store.write(scope, run)
