@@ -8,7 +8,7 @@ read-only Analytics Token (market data, portfolio reads) — never with an order
 
 | dir | service | what it is |
 |---|---|---|
-| `feed/` | `sudarshan-feed` | The **single** Upstox Feed V3 WebSocket for all of SUDARSHAN (the socket budget is below). Subscribes once, keeps a tick snapshot, republishes over local ZMQ, records ticks (gzip JSON lines) for replay, exposes `/snapshot` over HTTP, and (with M18.1's claims) takes each ring service's subscriptions. The REST governor for Upstox market-data reads is planned here (below); it does not exist yet. |
+| `feed/` | `sudarshan-feed` | The **single** Upstox Feed V3 WebSocket for all of SUDARSHAN (the socket budget is below). Subscribes once, keeps a tick snapshot, republishes over local ZMQ, records ticks (gzip JSON lines) for replay, exposes `/snapshot` over HTTP, and (with M18.1's claims) takes each ring service's subscriptions. The REST governor for Upstox market-data reads is built here (below) and off by default. |
 | `alerts/` | `sudarshan-alerts` | **Today (M6.8): order alerts.** Fills, part fills, rejections (with the broker's reason), cancellations and stop-order triggers from OpenAlgo's order stream (`ws://127.0.0.1:8765`, `subscribe_orders`) to the owner's Telegram through OpenAlgo `/api/v1/telegram/notify`; once only (claims in `/var/lib/sudarshan-alerts/alerts.db`), the order book read again after any pause, bursts merged, trading days 08:45-16:00 IST; `SUDARSHAN_ORDER_ALERTS=off` turns it off; `127.0.0.1:5582/health` names the installed release and what the service is doing. **Planned:** the server-side alert engine (price, % move, volume, OI change/build-up, IV, indicator cross, Greeks, time, P&L, screener hit, feed health, rollover), evaluated on the feed, not in a browser tab, with one-time / recurring, cooldown, snooze, expiry and history; the family bot separately, Web Push later. |
 | `screener/` | `sudarshan-screener` | Scheduled scans (1/5/15 min, EOD) over universes (NIFTY 50/100/200/500, F&O list, custom watchlists, option chains) with a rule builder (price action, indicators via TA-Lib, OI build-up classes, IV rank/percentile, PCR, basis, bhavcopy fields). Results feed **membership-table watchlists** (first_seen / last_seen / hits / exited / pinned / score) in OpenAlgo's watchlist DB and raise digest alerts; every run is stored for rewind and forward-return backtests. |
 | `portfolio/` | `sudarshan-portfolio` | Upstox tab (holdings, positions, MTF, funds tree, trade history, trade-wise P&L + charges, GTT, MF, portfolio stream) on the Analytics Token + daily snapshots, dividends from corporate actions, sector tags; and the **custom manual portfolio engine**: activity model (BUY/SELL/DIVIDEND/FEE/INTEREST/TRANSFER/SPLIT/BONUS), any asset, tags, imports (CSV/tradebook), FIFO lots, STCG/LTCG (ITA 2025 sections, "verify with CA"), XIRR/TWR, allocation, goals, custom tab layouts. |
@@ -38,7 +38,7 @@ never a move to another port.
 | 5000 | OpenAlgo (REST `/api/v1`, the pages, the bridges to the ring) |
 | 8765 | OpenAlgo's WebSocket proxy |
 | 5555 | OpenAlgo's own ZMQ bus (its proxy's SUB binds; publishers connect) |
-| 5580 | `sudarshan-feed` HTTP: `/health`, `/snapshot`, `/claims` (M18.1); later the REST governor |
+| 5580 | `sudarshan-feed` HTTP: `/health`, `/snapshot`, `/claims` (M18.1), and the REST governor under `/upstox/` (M18.9, off by default) |
 | 5581 | `sudarshan-feed` ZMQ PUB: ticks and `__health__` |
 | 5582 | `sudarshan-alerts`: the market alerts' sealed local API, and `GET /health` (the release installed and what the service is doing; the one listener, no other port) |
 | 5583 | `sudarshan-portfolio`: its sealed local API |
@@ -84,9 +84,9 @@ clean session at a total of at least 600 keys: no drop near 600 s in
 claims that evening and the owner chooses whether cash stocks or stock futures are followed tick
 by tick.
 
-**REST to Upstox (planned: the governor, M18.9).** Not built yet. Upstox allows 50 requests a
-second, 500 a minute and 2,000 per 30 minutes per API per user. The governor will live in
-`sudarshan-feed` (`GET /upstox/<path>` on 5580), pass market-data reads only, and hold
+**REST to Upstox (the governor, M18.9).** Built and off by default (`SUDARSHAN_FEED_REST=off` answers every `/upstox/` request 503; the owner switches it on at G7). Upstox allows 50 requests a
+second, 500 a minute and 2,000 per 30 minutes per API per user. The governor lives in
+`sudarshan-feed` (`GET /upstox/<path>` on 5580), passes market-data reads only, and holds
 SUDARSHAN to these shares; the other 60% stays for OpenAlgo's daily-token calls and TRINETRA.
 
 | client | share | per second | per minute | per 30 minutes |
@@ -96,7 +96,7 @@ SUDARSHAN to these shares; the other 60% stays for OpenAlgo's daily-token calls 
 | `sudarshan-portfolio` | 5% | 2 | 25 | 100 |
 | `sudarshan-alerts` | 5% | 2 | 25 | 100 |
 
-Until it is deployed and `/health` shows it, no ring service makes bulk or warm-start REST calls
+Until it is switched on and `/health` shows it (`rest`), no ring service makes bulk or warm-start REST calls
 to Upstox: prices come from the feed's snapshot or the last closing record, with their time.
 Account reads (holdings, positions, funds) never pass through it; they stay in
 `sudarshan-portfolio` at its own budget.

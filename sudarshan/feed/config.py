@@ -48,6 +48,7 @@ class Settings:
     holidays_file: Path
     extra_days_file: Path  # sessions on otherwise closed days, as auto-login and the alerts read
     api_base: str
+    rest: bool  # M18.9: the REST governor on (SUDARSHAN_FEED_REST, default off until G7)
     http_port: int
     zmq_port: int
     always_on: bool
@@ -78,13 +79,14 @@ class Settings:
             holidays_file=Path(get("SUDARSHAN_NSE_HOLIDAYS_FILE", HOLIDAYS_FILE)),
             extra_days_file=Path(get("SUDARSHAN_NSE_EXTRA_DAYS_FILE") or EXTRA_TRADING_DAYS_FILE),
             api_base=api_base,
+            rest=_flag(get("SUDARSHAN_FEED_REST", "off")),  # M18.9: a feature flag, off
             http_port=int(get("SUDARSHAN_FEED_HTTP_PORT", "5580")),
             zmq_port=int(get("SUDARSHAN_FEED_ZMQ_PORT", "5581")),
             always_on=_flag(get("SUDARSHAN_FEED_ALWAYS_ON", "0")),
             window=window,
             record=_flag(get("SUDARSHAN_FEED_RECORD", "1")),
-            record_max_mb=int(get("SUDARSHAN_FEED_RECORD_MAX_MB", "512")),
-            record_keep_days=int(get("SUDARSHAN_FEED_RECORD_KEEP_DAYS", "10")),
+            record_max_mb=int(get("SUDARSHAN_FEED_RECORD_MAX_MB", "1024")),
+            record_keep_days=int(get("SUDARSHAN_FEED_RECORD_KEEP_DAYS", "7")),
             # M18.1
             deployed_tag_file=Path(get("SUDARSHAN_DEPLOYED_TAG_FILE") or DEPLOYED_TAG_FILE),
         )
