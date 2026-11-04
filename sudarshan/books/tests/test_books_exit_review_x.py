@@ -603,6 +603,23 @@ def test_y3_exit_all_with_an_empty_positions_book_and_no_order_list_says_so(monk
     assert broker.orders == []
 
 
+def test_z2_a_flat_position_with_its_own_exit_still_working_says_so(monkeypatch, clock):
+    """The app's Exit rests at Upstox; the owner then sells in Upstox's own app and that fills, so
+    the position is flat and SUDARSHAN's SELL still works. TradingView's exit must be told about
+    that order (it can still open a short), not that nothing is open."""
+    world = install(monkeypatch, Broker({X: 65}, 0.0))
+    world.broker.part[X] = 0
+    assert world.phone_exit(X)[0] == 200
+    world.broker.fills.append((time.monotonic(), X, -65))  # sold in Upstox's app
+    clock.advance(20.0)
+    _fresh_book()
+    code, body = world.tv_smart_exit(X, quantity="65", action="SELL")
+    assert code == 409
+    assert "still working at Upstox" in body["message"] and "Orders" in body["message"]
+    assert body["message"] != NOTHING_OPEN
+    assert _sent(world.broker, X) == [("SELL", 65)]
+
+
 # -- Y4: positions rows with no instrument token cannot be matched to the order book ---------------
 
 

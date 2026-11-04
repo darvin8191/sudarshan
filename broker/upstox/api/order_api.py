@@ -702,7 +702,7 @@ def place_smartorder_api(data, auth):
             entry = (
                 position_size == 0 and current_position == 0 and int(data.get("quantity", 0)) != 0
             )
-            if held_by and not entry:
+            if held_by:
                 logger.warning(f"Exit for {symbol} not sent: an earlier exit is not ended")
                 refusal = {"status": "error", "message": held_by, "nothing_sent": True}
                 return _ErrorResponse(409), refusal, None
