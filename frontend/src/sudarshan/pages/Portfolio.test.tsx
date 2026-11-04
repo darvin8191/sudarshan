@@ -64,6 +64,9 @@ function serve(state: object = STATE, extra: Record<string, unknown> = {}) {
     if (op in extra) return { enabled: true, data: extra[op] }
     if (op === 'activities_list') return { enabled: true, data: { items: [], next: null } }
     if (op === 'tab_get') return { enabled: true, data: { assets: [] } }
+    if (op === 'upstox_book') {
+      return { enabled: true, data: { holdings: { state: 'ok', read_at: 1, note: null, data: [] } } }
+    }
     throw new Error(`unexpected op ${op}`)
   })
 }
@@ -89,7 +92,7 @@ describe('the Portfolio page', () => {
     )
     expect(screen.queryByRole('tab', { name: 'Old one' })).toBeNull() // archived: not in the strip
     expect(screen.getByRole('button', { name: 'Old one' })).toBeTruthy() // but reachable
-    expect(screen.getByText(/Every holding with its quantity/)).toBeTruthy()
+    expect(await screen.findByText('No holdings in your Upstox account.')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Add' })).toBeNull() // no entries on Upstox
   })
 
@@ -106,7 +109,7 @@ describe('the Portfolio page', () => {
   it('a tab that is gone falls back to Upstox', async () => {
     serve()
     show('/portfolio?tab=99')
-    await screen.findByText(/Every holding with its quantity/)
+    await screen.findByText('No holdings in your Upstox account.')
   })
 
   it('switched off is said in words, with no tabs', async () => {

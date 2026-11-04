@@ -14,12 +14,13 @@ import {
 } from 'lucide-react'
 import { useMemo } from 'react'
 import { portfolioCall, problemOf } from '@/sudarshan/portfolio/api'
-import { CustomStub, UpstoxStub } from '@/sudarshan/portfolio/StubViews'
+import { CustomStub } from '@/sudarshan/portfolio/StubViews'
 import { NewTabSheet } from '@/sudarshan/portfolio/sheets/NewTabSheet'
 import { TabSettingsSheet } from '@/sudarshan/portfolio/sheets/TabSettingsSheet'
 import { TabStrip } from '@/sudarshan/portfolio/TabStrip'
 import { ActivityTab, PORTFOLIO_KEY } from '@/sudarshan/portfolio/tab/ActivityTab'
 import { WORDS } from '@/sudarshan/portfolio/types'
+import { UpstoxTab } from '@/sudarshan/portfolio/upstox/UpstoxTab'
 import {
   type CustomView,
   type PortfolioOverlay,
@@ -134,7 +135,7 @@ export default function Portfolio() {
   } else {
     body =
       current === null ? (
-        <UpstoxStub view={part as UpstoxView} onView={setView} />
+        <UpstoxTab view={part as UpstoxView} onView={setView} />
       ) : (
         <div className="flex flex-col gap-3">
           {current.archived && (

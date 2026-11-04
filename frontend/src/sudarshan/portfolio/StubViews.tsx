@@ -1,7 +1,7 @@
 import { cn } from '@/lib/utils'
 import { CUSTOM_VIEWS, type CustomView, UPSTOX_VIEWS, type UpstoxView } from './usePortfolioOverlay'
 
-const UPSTOX_LABELS: Record<UpstoxView, string> = {
+export const UPSTOX_LABELS: Record<UpstoxView, string> = {
   holdings: 'Holdings',
   positions: 'Positions',
   funds: 'Funds',
