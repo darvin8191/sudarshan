@@ -162,7 +162,7 @@ class Broker:
                     "quantity": self.shown_qty(symbol, now, fresh=fresh),
                     **(
                         dict(zip(("day_buy_quantity", "day_sell_quantity"),
-                                 self.day_figures(symbol, now, fresh=fresh)))  # fmt: skip
+                                 self.day_figures(symbol, now, fresh=fresh), strict=True))  # fmt: skip
                         if self.day_fields
                         else {}
                     ),
