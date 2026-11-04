@@ -201,11 +201,12 @@ def held_in_another_product(position: Position, elsewhere: dict[str, int]) -> st
         position: The position as the request wrote it.
         elsewhere: The signed quantity held in each other product, by the name the app writes.
     """
-    held = ", ".join(f"{abs(quantity)} in {product}" for product, quantity in elsewhere.items())
+    held = " and ".join(f"{abs(quantity)} in {product}" for product, quantity in elsewhere.items())
+    where = " or ".join(elsewhere)
     return (
         f"No exit was sent for {trader_name(position)} as {position[2]}: nothing is held in "
-        f"{position[2]} now, but {held} is. The position was converted to another product. Send "
-        "the exit for that product, or close it from the Upstox app."
+        f"{position[2]} now, but {held} {'is' if len(elsewhere) == 1 else 'are'}. Send the exit "
+        f"for {where}, or close it from the Upstox app."
     )
 
 

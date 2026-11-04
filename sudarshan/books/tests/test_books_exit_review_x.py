@@ -584,6 +584,17 @@ def test_y4_the_apps_exit_of_a_row_with_no_token_says_it_could_not_be_worked_out
     assert world.broker.orders == []
 
 
+def test_low_the_held_in_another_product_sentence_does_not_guess_the_cause():
+    one = exit_guard.held_in_another_product(("NFO", X, "MIS"), {"NRML": 65})
+    assert one == (
+        "No exit was sent for NIFTY 25900 CE as MIS: nothing is held in MIS now, but 65 in NRML "
+        "is. Send the exit for NRML, or close it from the Upstox app."
+    )
+    assert "converted" not in one
+    two = exit_guard.held_in_another_product(("NFO", X, "MIS"), {"NRML": -65, "CNC": 10})
+    assert "but 65 in NRML and 10 in CNC are." in two and "for NRML or CNC," in two
+
+
 # -- Words (X6, L4) -----------------------------------------------------------------------------------
 
 
