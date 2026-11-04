@@ -116,7 +116,7 @@ beforeEach(() => {
   for (const fn of Object.values(api)) fn.mockReset()
   api.prefs.mockResolvedValue({ telegram: true, app: true })
   for (const fn of Object.values(toasts)) fn.mockReset()
-  useAuthStore.setState({ apiKey: 'key' })
+  useAuthStore.setState({ apiKey: 'key', sessionChecked: true, brokerSessionExpired: false })
 })
 
 afterEach(() => {
@@ -688,5 +688,34 @@ describe('an edit', () => {
     expect(api.change.mock.calls[0][1].version).toBe(3)
     expect(within(sheet).getByRole('alert')).toHaveTextContent(sentence)
     expect(invalidate).toHaveBeenCalledWith({ queryKey: STATE_KEY })
+  })
+})
+
+describe('access to prices in the form', () => {
+  it('still checking: a quiet line and no API key message', () => {
+    useAuthStore.setState({ apiKey: null, sessionChecked: false, brokerSessionExpired: false })
+    const { sheet } = renderForm({ prefill: NIFTY })
+    expect(within(sheet).getByText('Checking your login')).toBeInTheDocument()
+    expect(within(sheet).queryByText(/API key/)).toBeNull()
+  })
+
+  it('Upstox not logged in today: says so with both links', () => {
+    useAuthStore.setState({ apiKey: 'key', sessionChecked: true, brokerSessionExpired: true })
+    const { sheet } = renderForm({ prefill: NIFTY })
+    expect(within(sheet).getByText(/Upstox is not logged in today/)).toBeInTheDocument()
+    expect(within(sheet).getByRole('link', { name: 'Auto login' })).toBeInTheDocument()
+    expect(within(sheet).getByRole('link', { name: 'Dashboard' })).toBeInTheDocument()
+  })
+
+  it('no API key: the message and its link', () => {
+    useAuthStore.setState({ apiKey: null, sessionChecked: true, brokerSessionExpired: false })
+    const { sheet } = renderForm({ prefill: NIFTY })
+    expect(within(sheet).getByText('Prices and search need an API key.')).toBeInTheDocument()
+    expect(within(sheet).getByRole('link', { name: 'Create one under API Key' })).toBeInTheDocument()
+  })
+
+  it('ready: no notice', () => {
+    const { sheet } = renderForm({ prefill: NIFTY })
+    expect(sheet.querySelector('[data-access]')).toBeNull()
   })
 })

@@ -2,12 +2,12 @@
 // holds them (blueprints/sudarshan_alerts.py, contract 1.1), kept current by what it pushes
 // (src/sudarshan/alerts/marketAlerts.ts), with each card's price from the tab's own tick stream.
 // At /market-alerts because upstream owns /alerts, for the /trading chart's own alerts.
-import { AlertTriangle, KeyRound, LoaderCircle, Plus, RefreshCw, Settings2 } from 'lucide-react'
+import { AlertTriangle, LoaderCircle, Plus, RefreshCw, Settings2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo } from 'react'
-import { Link } from 'react-router'
 import type { AlertRow } from '@/api/marketAlerts'
 import { cn } from '@/lib/utils'
-import { useAuthStore } from '@/stores/authStore'
+import { AccessNotice } from '@/sudarshan/AccessNotice'
+import { usePriceAccess } from '@/sudarshan/access'
 import { droppedHere } from '@/sudarshan/alerts/actions'
 import { AlertCard } from '@/sudarshan/alerts/AlertCard'
 import { AlertFormSheet } from '@/sudarshan/alerts/AlertForm'
@@ -102,7 +102,8 @@ function followedOf(rows: AlertRow[], cap: number): Followed {
 export default function MarketAlerts() {
   const query = useMarketAlertsState()
   const state = query.data
-  const apiKey = useAuthStore((auth) => auth.apiKey)
+  const access = usePriceAccess()
+  const ready = access.state === 'ready'
   const { overlay, tab, open, close, setTab } = useAlertOverlay()
   const now = useNow()
 
@@ -124,9 +125,9 @@ export default function MarketAlerts() {
   const quoted = useFrameLines({
     instruments: followed.quote,
     mode: 'Quote',
-    enabled: apiKey !== null,
+    enabled: ready,
   })
-  const plain = useFrameLines({ instruments: followed.ltp, mode: 'LTP', enabled: apiKey !== null })
+  const plain = useFrameLines({ instruments: followed.ltp, mode: 'LTP', enabled: ready })
   const lines = useMemo(
     () => new Map([...plain.lines, ...quoted.lines]),
     [plain.lines, quoted.lines]
@@ -154,7 +155,7 @@ export default function MarketAlerts() {
   const saved = useCallback((row: AlertRow) => open({ kind: 'alert', id: row.id }), [open])
   const live = (row: AlertRow) => ({
     line: lines.get(keyOf(row.symbol, row.exchange)),
-    followed: apiKey !== null && followed.keys.has(keyOf(row.symbol, row.exchange)),
+    followed: ready && followed.keys.has(keyOf(row.symbol, row.exchange)),
     feed,
     now,
     marketOpen: segmentOpen(state?.segments, row),
@@ -165,7 +166,7 @@ export default function MarketAlerts() {
   // the line. With the page's own feed down its cards say Reconnecting, so the line stays, grey,
   // "as last read". Either way it never claims Real-time.
   const hearing = useAlertsHearing()
-  const deaf = followed.keys.size > 0 && apiKey !== null && feed.epoch > 0 && !feed.connected
+  const deaf = followed.keys.size > 0 && ready && feed.epoch > 0 && !feed.connected
 
   return (
     <div className="flex flex-col gap-2">
@@ -238,18 +239,7 @@ export default function MarketAlerts() {
       </div>
       {problem && state && <StaleBookNote text="These are your alerts as last read." />}
 
-      {apiKey === null && (
-        <p className="flex flex-wrap items-center gap-x-2 rounded-[1.125rem] border border-[color:var(--gold)] bg-[color:var(--gold-tint)] px-4 py-2 text-sm font-semibold text-[color:var(--gold-ink)]">
-          <KeyRound aria-hidden="true" className="size-4 shrink-0" />
-          Prices and search need an API key.
-          <Link
-            to="/apikey"
-            className="inline-flex min-h-12 items-center text-[color:var(--brand)] underline underline-offset-2"
-          >
-            Create one under API Key
-          </Link>
-        </p>
-      )}
+      <AccessNotice access={access} />
 
       <Tabs
         tab={tab}

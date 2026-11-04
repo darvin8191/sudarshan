@@ -27,7 +27,8 @@ import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import type { SearchRow } from '@/lib/trading/terminal'
 import { cn } from '@/lib/utils'
-import { useAuthStore } from '@/stores/authStore'
+import { AccessNotice } from '@/sudarshan/AccessNotice'
+import { usePriceAccess } from '@/sudarshan/access'
 import { ACTION, OUTLINED, WarningLine } from '@/sudarshan/books/cards/parts'
 import { searchSymbols } from '@/sudarshan/chart/api'
 import { useNow } from '@/sudarshan/dashboard/hooks'
@@ -345,7 +346,9 @@ export function AlertFormSheet({
   onSaved: (row: AlertRow, created: boolean) => void
 }) {
   const client = useQueryClient()
-  const apiKey = useAuthStore((state) => state.apiKey)
+  const access = usePriceAccess()
+  const apiKey = access.apiKey
+  const ready = access.state === 'ready'
   const state = client.getQueryData<MarketAlertsState>(STATE_KEY)
   const [form, setForm] = useState(() => initialForm(row, prefill))
   // The version the form opened on: an edit made elsewhere meanwhile meets the server's conflict.
@@ -423,7 +426,7 @@ export function AlertFormSheet({
   const { lines, feed } = useFrameLines({
     instruments,
     mode: needsQuote(draftRow) ? 'Quote' : 'LTP',
-    enabled: apiKey !== null,
+    enabled: ready,
   })
   const line = instrument ? lines.get(keyOf(instrument.symbol, instrument.exchange)) : undefined
   // Until its first tick, the price the form opened with, for that instrument only.
@@ -629,7 +632,8 @@ export function AlertFormSheet({
               {instrument ? 'Change' : 'Search'}
             </span>
           </button>
-          {instrument && apiKey !== null && (
+          <AccessNotice access={access} />
+          {instrument && ready && (
             <FormPrice
               row={draftRow}
               line={line}

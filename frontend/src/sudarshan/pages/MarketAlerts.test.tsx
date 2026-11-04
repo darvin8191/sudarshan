@@ -162,7 +162,7 @@ beforeEach(() => {
   api.state.mockResolvedValue(alertsState())
   api.events.mockResolvedValue({ events: [], more: false })
   api.prefs.mockResolvedValue({ telegram: true, app: true })
-  useAuthStore.setState({ apiKey: 'key' })
+  useAuthStore.setState({ apiKey: 'key', sessionChecked: true, brokerSessionExpired: false })
 })
 
 afterEach(() => {
@@ -620,12 +620,42 @@ describe('live prices on the cards', () => {
   })
 
   it('follows nothing without an API key, and says why', async () => {
-    useAuthStore.setState({ apiKey: null })
+    useAuthStore.setState({ apiKey: null, sessionChecked: true, brokerSessionExpired: false })
     renderPage()
     await settle()
 
     expect(feed.live()).toEqual([])
     expect(screen.getByText('Prices and search need an API key.')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Create one under API Key' })).toBeInTheDocument()
+  })
+
+  it('still checking: a quiet line, never the API key message, and no price stream', async () => {
+    useAuthStore.setState({ apiKey: null, sessionChecked: false, brokerSessionExpired: false })
+    renderPage()
+    await settle()
+
+    expect(screen.getByText('Checking your login')).toBeInTheDocument()
+    expect(screen.queryByText(/API key/)).toBeNull()
+    expect(feed.live()).toEqual([])
+  })
+
+  it('Upstox not logged in today: says so with both links, even with a key held', async () => {
+    useAuthStore.setState({ apiKey: 'key', sessionChecked: true, brokerSessionExpired: true })
+    renderPage()
+    await settle()
+
+    expect(screen.getByText(/Upstox is not logged in today/)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Auto login' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Dashboard' })).toBeInTheDocument()
+    expect(screen.queryByText(/API key/)).toBeNull()
+    expect(feed.live()).toEqual([])
+  })
+
+  it('ready: no notice', async () => {
+    renderPage()
+    await settle()
+
+    expect(document.querySelector('[data-access]')).toBeNull()
   })
 
   it('follows the alert a link opens from another tab, so its sheet has a price', async () => {
