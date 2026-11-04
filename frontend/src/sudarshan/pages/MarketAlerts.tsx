@@ -46,7 +46,7 @@ const NOT_RECEIVING = {
 const GONE = 'This alert was deleted.'
 
 const HEADER_BUTTON =
-  'inline-flex min-h-12 items-center gap-1.5 rounded-[0.875rem] px-4 text-[0.9375rem] font-semibold outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50'
+  'inline-flex min-h-12 items-center gap-1.5 rounded-[0.875rem] px-4 text-[0.9375rem] font-semibold outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:bg-muted disabled:text-[color:var(--text-tertiary)] disabled:shadow-[inset_0_0_0_1px_var(--border-strong)]'
 
 const newestFirst = (a: AlertRow, b: AlertRow) => b.id - a.id
 

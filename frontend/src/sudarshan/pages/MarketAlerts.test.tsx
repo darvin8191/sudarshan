@@ -289,7 +289,12 @@ describe('the Alerts page', () => {
 
     expect(screen.getByText('Switched off on the server')).toBeInTheDocument()
     expect(screen.getByText('Market alerts are switched off on the server.')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'New' })).toBeDisabled()
+    const newButton = screen.getByRole('button', { name: 'New' })
+    expect(newButton).toBeDisabled()
+    // Half-faded white on brand is 2.5:1 in sunlight; the disabled button uses theme.css inks (5.1:1).
+    expect(newButton.className).not.toMatch(/disabled:opacity/)
+    expect(newButton.className).toContain('disabled:text-[color:var(--text-tertiary)]')
+    expect(newButton.className).toContain('disabled:bg-muted')
   })
 
   it('shows the server’s sentence when the service does not answer, and reads again on request', async () => {
