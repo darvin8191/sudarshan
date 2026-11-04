@@ -185,6 +185,7 @@ class MarketRuntime:
         self._checked_at = 0.0
         self._started: int | None = None
         self._flushed = self._seen = 0
+        self._flight: asyncio.Future | None = None  # the flush whose outcome is not in yet
         self._pruned_on: date | None = None
         self._claims_wake = asyncio.Event()
         #: Held while the claims are put at the feed, and by an owner's change from its claim to
@@ -856,17 +857,26 @@ class MarketRuntime:
         self._rebuild()
 
     async def _flush(self, now: int, wait: bool = False) -> None:
+        """Save the states changed since the last flush. One flush is in flight at a time: the
+        next waits until the last one's outcome is in (``_unsaved`` puts back what it could not
+        save), or a failed flush's older states would be put back after a newer flush had saved
+        the alert's later ones, and the next flush would write the older over the newer."""
+        if self._flight is not None:
+            if not wait:
+                return  # asked again at the next tick: ``_flushed`` stays as it was
+            await asyncio.wait([self._flight])  # _unsaved was added first: it has run
         self._flushed = now
         changed = self.book.changed()
         if not changed:
             return
-        future = self._submit(self.store.save_states, OWNER, changed, now)
+        future = self._flight = self._submit(self.store.save_states, OWNER, changed, now)
+        future.add_done_callback(lambda done: self._unsaved(done, changed))
         if wait:
             await future
-        else:
-            future.add_done_callback(lambda done: self._unsaved(done, changed))
 
     def _unsaved(self, done, changed) -> None:
+        if self._flight is done:
+            self._flight = None
         if not done.cancelled() and done.exception() is not None:
             self._throttle(logging.ERROR, "flush", "market alerts' state could not be saved: %s",
                            getattr(done.exception(), "cause", ""))  # fmt: skip

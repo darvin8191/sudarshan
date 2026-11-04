@@ -725,6 +725,52 @@ def test_a_fire_recorded_again_keeps_the_newer_state(alerts, quick, monkeypatch)
     asyncio.run(scenario())
 
 
+def test_a_failed_flush_is_put_back_before_the_next_flush_runs(alerts, quick, monkeypatch):
+    """The outcome of a failed flush reaches the loop a moment after the writer fails. A flush
+    that ran in that moment saved the alert's newer state, and the put-back then wrote the older
+    one over it. Here the outcome is held until the clock has gone past the next flush."""
+    from sudarshan.alerts.market.store import StoreError
+
+    real, calls = MarketStore.save_states, []
+
+    def save_states(self, principal, states, now):
+        below = any(state.side == -1 for _, state in states.values())
+        if below and not calls:  # the flush that holds the trade's state: refused once
+            calls.append(states)
+            raise StoreError("This could not be saved.", "disk I/O error")
+        return real(self, principal, states, now)
+
+    monkeypatch.setattr(MarketStore, "save_states", save_states)
+
+    async def scenario():
+        clock = Clock(ist(2026, 10, 21, 10, 0))
+        async with FakeFeed(clock) as feed, FakeOpenAlgo() as notify:
+            settings = alerts(notify)
+            create(settings, clock())
+            rt, task = await started(settings, feed, clock)
+            held = []
+            unsaved = rt._unsaved
+            rt._unsaved = lambda *args: held.append(args) or None  # the outcome is late
+            await trade(feed, clock, 99.95)
+            await wait_until(lambda: rt.stats["judged"] == 1)
+            clock.advance(2)
+            await wait_until(lambda: calls and held)  # the first flush, refused; not yet told
+            await trade(feed, clock, 99.90)  # the newer state of the same alert
+            await wait_until(lambda: rt.stats["judged"] == 2)
+            clock.advance(2)
+            await asyncio.sleep(0.3)  # ticks run past the next flush while the outcome is late
+            rt._unsaved = unsaved
+            unsaved(*held[0])  # the outcome arrives
+            clock.advance(2)
+            await wait_until(lambda: record(settings, "states").get(1, State()).ref == 9990)
+            clock.advance(2)
+            await asyncio.sleep(0.3)
+            assert record(settings, "states")[1].ref == 9990  # not the older 9995
+            await stopped(rt, task)
+
+    asyncio.run(scenario())
+
+
 def test_states_a_failed_flush_could_not_save_are_saved_by_the_next(alerts, quick, monkeypatch):
     """Mutant R12: a flush that fails puts what it held back, for the next flush."""
     from sudarshan.alerts.market.store import StoreError
