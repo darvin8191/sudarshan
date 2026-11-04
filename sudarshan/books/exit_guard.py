@@ -44,8 +44,9 @@ One position's exit claims its position before the read it is sized from and
 holds it across that read, so an Exit all or another exit that starts during a
 slow read leaves the position to it: a read can answer older than an exit sent
 while it was on its way. It is refused with that sentence (409) if its position
-is busy, or an Exit all holds the book, when it claims. An entry (a smart order
-that opens or adds to a position) is never refused.
+is busy, or an Exit all holds the book, when it claims, and then never placed as given: a smart
+order to a position size of 0 that finds the position flat is a late or repeated exit. An entry
+(a smart order to a size other than 0) is never refused.
 
 The sandbox's book shows each exit the moment it is placed, so nothing is noted
 there; the app's Exit still claims its position in the sandbox's book while it

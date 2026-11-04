@@ -688,13 +688,15 @@ def test_every_exit_all_surface_takes_the_one_claim(broker, surface, monkeypatch
 
 
 def test_a_smart_order_entry_is_never_refused(broker):
-    """TradingView's entries and new sizes go through whatever is busy: nothing is sized to 0."""
+    """TradingView's entries and new sizes go through whatever is busy. A size of 0 is an exit,
+    even with a quantity, so a flat position it finds while its position is busy is not an entry
+    (the review's X1): it is refused, never placed as given."""
     broker["book"] = {Y: -30}
     with exit_guard.EXITS.every("live"), exit_guard.EXITS.one("live", POSITION):
         exit_guard.exit_placed("live", "NFO", X, "MIS")
         assert _smart(position_size="65", quantity="65", action="BUY")[0] == 200
-        assert _smart(position_size="0", quantity="65", action="BUY")[0] == 200  # flat: fresh
-    assert broker["orders"] == [(X, "BUY", 65), (X, "BUY", 65)]
+        assert _smart(position_size="0", quantity="65", action="BUY")[0] == 409
+    assert broker["orders"] == [(X, "BUY", 65)]
 
 
 def test_a_smart_exit_from_the_api_sends_nothing_for_a_busy_position(broker):

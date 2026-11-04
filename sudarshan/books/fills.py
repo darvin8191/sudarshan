@@ -22,6 +22,7 @@ This module reads Upstox's raw rows and performs no I/O. It adds no field to any
 from __future__ import annotations
 
 from collections.abc import Iterable
+from datetime import datetime
 from typing import Any
 
 
@@ -104,3 +105,49 @@ def held_now(position: dict, orders: Iterable[dict] | None) -> int | None:
     if shown is None or unseen is None:
         return None
     return shown + unseen
+
+
+def _stamp(value: Any) -> datetime | None:
+    """A row's ``order_timestamp`` ("2026-10-27 09:20:00", India's time) as a moment, or None."""
+    try:
+        return datetime.fromisoformat(str(value or "").strip())
+    except ValueError:
+        return None
+
+
+def repeats_last_fill(orders: Iterable[dict], token: str, product: str, side: str) -> bool:
+    """Whether a flat position's most recent fill today was on ``side``: the order, if it is sent
+    as an exit, repeats the one that flattened it, and would open the opposite position.
+
+    Args:
+        orders: Every raw row of Upstox's order book for today.
+        token: The instrument's token.
+        product: Upstox's product letter ("I", "D", "CNC"-style).
+        side: The request's own side, BUY or SELL.
+
+    Returns:
+        True when the latest order of this instrument and product with a filled quantity was on
+        ``side``; also True, for safety, when that cannot be told: a filled order of it has no
+        usable timestamp or side, or two latest fills share a second and one is on ``side``.
+        False when nothing filled today in this product, or the latest fill was on the other side.
+    """
+    side = str(side or "").strip().upper()
+    latest: list[str] = []
+    latest_at: datetime | None = None
+    for order in orders:
+        if not isinstance(order, dict) or not _same_book_key(order, token, product):
+            continue
+        filled = _whole(order.get("filled_quantity"))
+        if filled is None:
+            return True
+        if filled == 0:
+            continue
+        stamp = _stamp(order.get("order_timestamp"))
+        order_side = str(order.get("transaction_type") or "").strip().upper()
+        if stamp is None or order_side not in ("BUY", "SELL"):
+            return True
+        if latest_at is None or stamp > latest_at:
+            latest_at, latest = stamp, [order_side]
+        elif stamp == latest_at:
+            latest.append(order_side)
+    return side in latest

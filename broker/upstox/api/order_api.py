@@ -582,7 +582,7 @@ def place_smartorder_api(data, auth):
             # sized from (sudarshan/books/exit_guard.py) and holds it until its exit is sent and
             # noted, or nothing is sent: an Exit all or another exit that starts meanwhile then
             # leaves the position to it, however long the read takes. When the claim is refused,
-            # ``busy`` says why, and a close is not sent (an entry still is).
+            # ``busy`` says why, and nothing is sent: not a close, and not the request as given either.
             busy = None
             if position_size == 0:
                 busy = held.enter_context(exit_guard.one_exit("live", exchange, symbol, product))
@@ -626,6 +626,16 @@ def place_smartorder_api(data, auth):
                 refusal = {"status": "error", "message": said, "nothing_sent": True}
                 return _ErrorResponse(409 if said is not unsized else 424), refusal, None
 
+            if busy:
+                # SUDARSHAN M6.9: the claim was refused (another exit of this position is being
+                # placed, or Exit all holds the book): this exit is not sent, and never placed
+                # as given either. A size-0 alert that finds the position flat is a late or
+                # repeated exit, and sent as an order it opens the opposite position.
+                logger.warning(f"Exit for {symbol} not sent: an exit for it is on its way")
+                # nothing_sent: the services tell Telegram, which hears no other refusal.
+                refusal = {"status": "error", "message": busy, "nothing_sent": True}
+                return _ErrorResponse(409), refusal, None
+
             entry = (
                 position_size == 0 and current_position == 0 and int(data.get("quantity", 0)) != 0
             )
@@ -633,6 +643,19 @@ def place_smartorder_api(data, auth):
                 logger.warning(f"Exit for {symbol} not sent: an earlier exit is not ended")
                 refusal = {"status": "error", "message": held_by, "nothing_sent": True}
                 return _ErrorResponse(409), refusal, None
+
+            if entry and fills.repeats_last_fill(
+                orders, get_token(symbol, exchange), map_product_type(product), data.get("action")
+            ):
+                # SUDARSHAN M6.9: TradingView's exit carries its contracts with a position size
+                # of 0. Flat, and the last fill on this side, it repeats the exit that flattened
+                # the position (or cannot be told from one): sent, it would open the opposite
+                # position. An order on the other side after an exit goes as an entry.
+                logger.warning(f"Exit for {symbol} not sent: the position is flat already")
+                return None, {
+                    "status": "success",
+                    "message": "No open position found. Not placing exit order.",
+                }, None
 
             if entry:
                 logger.debug("No existing position and quantity is specified. Placing a new order.")
@@ -670,13 +693,7 @@ def place_smartorder_api(data, auth):
                 _invalidate_position_cache(auth)
                 return res, _with_sent(response, action, quantity, False), orderid
             # SUDARSHAN M6.9: a close, sized from a book that may not show an exit placed just
-            # before: not sent while its position is busy, and noted, before the claim is let
-            # go, whenever it may have gone.
-            if busy:
-                logger.warning(f"Exit for {symbol} not sent: an exit for it is on its way")
-                # nothing_sent: the services tell Telegram, which hears no other refusal.
-                refusal = {"status": "error", "message": busy, "nothing_sent": True}
-                return _ErrorResponse(409), refusal, None
+            # before, and noted, before the claim is let go, whenever it may have gone.
             sent = True
             answered = None
             try:

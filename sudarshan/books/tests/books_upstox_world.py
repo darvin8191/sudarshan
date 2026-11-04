@@ -234,7 +234,7 @@ class Broker:
             key = (order["symbol"], order["side"])
             totals[key] = totals.get(key, 0) - order.get("filled", 0)
 
-        def row(order_id, symbol, side, status, quantity, filled):
+        def row(order_id, symbol, side, status, quantity, filled, wall=None):
             token, exchange, product, _oa = INSTRUMENTS[symbol]
             return {
                 "order_id": order_id,
@@ -250,7 +250,13 @@ class Broker:
                 "pending_quantity": 0,
                 "quantity": quantity,
                 "filled_quantity": filled,
-                "order_timestamp": "2026-10-27 09:20:00",
+                # An order placed through ``post`` carries the moment it was placed (India's time);
+                # a fill with no order of its own, the start of the day.
+                "order_timestamp": (
+                    datetime.fromtimestamp(wall, IST).strftime("%Y-%m-%d %H:%M:%S")
+                    if wall
+                    else "2026-10-27 09:20:00"
+                ),
             }
 
         rows = []
@@ -264,7 +270,7 @@ class Broker:
             rows.append(
                 row(placed["id"], placed["symbol"], placed["side"],
                     "rejected" if rejected else "complete" if filled == placed["qty"] else "cancelled",
-                    placed["qty"], filled)
+                    placed["qty"], filled, placed.get("wall"))
             )  # fmt: skip
         for (symbol, side), quantity in sorted(totals.items()):
             if quantity > 0:
@@ -284,8 +290,8 @@ class Broker:
         now = time.monotonic()
         with self.lock:
             oid = f"2610270000{len(self.orders) + 1:02d}"
-            self.orders.append({"at": now, "symbol": symbol, "side": side, "qty": qty, "id": oid,
-                                "rejected": symbol in self.rejected_later})  # fmt: skip
+            self.orders.append({"at": now, "wall": time.time(), "symbol": symbol, "side": side,
+                                "qty": qty, "id": oid, "rejected": symbol in self.rejected_later})  # fmt: skip
             if symbol not in self.rejected_later:
                 filled = self.part.get(symbol, qty)
                 self.orders[-1]["filled"] = filled
@@ -400,7 +406,9 @@ class World:
         )
         return self._record(f"flow close {symbol}", code, body, started)
 
-    def tv_smart_exit(self, symbol: str, quantity: str = "0", action: str = "SELL"):
+    def tv_smart_exit(
+        self, symbol: str, quantity: str = "0", action: str = "SELL", position_size: str = "0"
+    ):
         from services.place_smart_order_service import place_smart_order
 
         _token, exchange, _p, product = INSTRUMENTS[symbol]
@@ -413,7 +421,7 @@ class World:
                 "exchange": exchange,
                 "action": action,
                 "quantity": quantity,
-                "position_size": "0",
+                "position_size": position_size,
                 "product": product,
                 "pricetype": "MARKET",
             },
