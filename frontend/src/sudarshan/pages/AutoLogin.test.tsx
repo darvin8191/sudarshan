@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactElement } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AutoLoginStatus } from '@/api/autologin'
+import { useAuthStore } from '@/stores/authStore'
 import { fireEvent, render, screen, waitFor, within } from '@/test/test-utils'
 
 const api = vi.hoisted(() => ({
@@ -265,6 +266,37 @@ describe('Auto login page', () => {
     expect(await screen.findByText('Logged in to Upstox.')).toBeInTheDocument()
     expect(toast.success).toHaveBeenCalledWith('Upstox auto-login test passed.')
     expect(api.testNow).toHaveBeenCalledTimes(1)
+  })
+
+  it("hands today's login and the API key to every screen after a passed Test now", async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          status: 'success',
+          authenticated: true,
+          logged_in: true,
+          user: 'owner',
+          broker: 'upstox',
+          api_key: 'key-from-server',
+        }),
+      }))
+    )
+    useAuthStore.getState().logout()
+    api.status.mockResolvedValue(
+      makeStatus({ enabled: true, secrets: SAVED, test: { allowed: true, reason: null } })
+    )
+    api.testNow.mockResolvedValue({
+      outcome: 'ok',
+      message: 'Logged in to Upstox.',
+      at: '2026-10-20T19:05:00+05:30',
+    })
+    renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: /Test now/ }))
+    await waitFor(() => expect(useAuthStore.getState().apiKey).toBe('key-from-server'))
+    vi.unstubAllGlobals()
   })
 
   it('shows why Test now was refused', async () => {

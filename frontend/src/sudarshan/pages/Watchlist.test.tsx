@@ -1267,3 +1267,38 @@ describe('Watchlist and the Back button', () => {
     expect(screen.queryByRole('region', { name: 'Order ticket' })).toBeNull()
   })
 })
+
+describe('Watchlist access to prices', () => {
+  afterEach(() => {
+    useAuthStore.setState({ apiKey: 'key', sessionChecked: true, brokerSessionExpired: false })
+  })
+
+  it('still checking: a quiet line, never the API key message', async () => {
+    useAuthStore.setState({ apiKey: null, sessionChecked: false, brokerSessionExpired: false })
+    renderPage()
+    expect(await screen.findByText('Checking your login')).toBeInTheDocument()
+    expect(screen.queryByText(/API key/)).toBeNull()
+  })
+
+  it('Upstox not logged in today: says so, with Auto login and Dashboard', async () => {
+    useAuthStore.setState({ apiKey: null, sessionChecked: true, brokerSessionExpired: true })
+    renderPage()
+    expect(await screen.findByText(/Upstox is not logged in today/)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Auto login' })).toBeInTheDocument()
+    expect(screen.queryByText(/API key/)).toBeNull()
+  })
+
+  it('no API key: the existing message and link', async () => {
+    useAuthStore.setState({ apiKey: null, sessionChecked: true, brokerSessionExpired: false })
+    renderPage()
+    expect(await screen.findByText('Prices and search need an API key.')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Create one under API Key' })).toBeInTheDocument()
+  })
+
+  it('ready: no notice', async () => {
+    useAuthStore.setState({ apiKey: 'key', sessionChecked: true, brokerSessionExpired: false })
+    renderPage()
+    expect(await screen.findByRole('heading', { level: 1 })).toBeInTheDocument()
+    expect(document.querySelector('[data-access]')).toBeNull()
+  })
+})

@@ -5,6 +5,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, userEvent, waitFor } from '@/test/test-utils'
+import { useAuthStore } from '@/stores/authStore'
 import Login from './Login'
 
 interface FakeResponse {
@@ -116,5 +117,74 @@ describe('Login', () => {
     await user.click(screen.getByRole('button', { name: 'Login' }))
 
     expect(await screen.findByText('Invalid username or password')).toBeInTheDocument()
+  })
+})
+
+/**
+ * A server whose session check answers 401 until a login succeeds, then the
+ * resumed Upstox session with the API key, as it does on a morning login.
+ */
+function morningServer(loginBody: unknown) {
+  let signedIn = false
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) => {
+      if (url === '/auth/check-setup') return respond({ needs_setup: false })
+      if (url === '/auth/csrf-token') return respond({ csrf_token: 'token' })
+      if (url === '/auth/login') return respond(loginBody)
+      if (url === '/auth/login/totp') {
+        signedIn = true
+        return respond({ status: 'success', broker: 'upstox', redirect: '/dashboard' })
+      }
+      if (url === '/auth/session-status') {
+        if (!signedIn) return respond({ status: 'error' }, 401)
+        return respond({
+          status: 'success',
+          authenticated: true,
+          logged_in: true,
+          user: 'owner',
+          broker: 'upstox',
+          api_key: 'key-from-server',
+        })
+      }
+      return respond({}, 404)
+    })
+  )
+  return {
+    signIn: () => {
+      signedIn = true
+    },
+  }
+}
+
+describe('Login then the API key, with no reload', () => {
+  it('loads the API key after the password step resumes the Upstox session', async () => {
+    const server = morningServer({ status: 'success', broker: 'upstox', redirect: '/dashboard' })
+    useAuthStore.getState().logout()
+    const user = userEvent.setup()
+    render(<Login />)
+    await user.type(await screen.findByLabelText('Username'), 'owner')
+    await user.type(screen.getByLabelText('Password'), 'secret')
+    server.signIn()
+    await user.click(screen.getByRole('button', { name: 'Login' }))
+
+    await waitFor(() => expect(useAuthStore.getState().apiKey).toBe('key-from-server'))
+    expect(useAuthStore.getState().sessionChecked).toBe(true)
+    expect(useAuthStore.getState().brokerSessionExpired).toBe(false)
+  })
+
+  it('loads the API key after the authenticator code step', async () => {
+    morningServer({ status: 'totp_required' })
+    useAuthStore.getState().logout()
+    const user = userEvent.setup()
+    render(<Login />)
+    await user.type(await screen.findByLabelText('Username'), 'owner')
+    await user.type(screen.getByLabelText('Password'), 'secret')
+    await user.click(screen.getByRole('button', { name: 'Login' }))
+    await user.type(await screen.findByLabelText('Authentication code'), '123456')
+    await user.click(screen.getByRole('button', { name: 'Verify code' }))
+
+    await waitFor(() => expect(useAuthStore.getState().apiKey).toBe('key-from-server'))
+    expect(useAuthStore.getState().sessionChecked).toBe(true)
   })
 })

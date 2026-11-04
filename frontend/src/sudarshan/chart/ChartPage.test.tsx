@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChartStateView } from '@/lib/trading/chartState'
 import type { LiveStatus } from '@/lib/trading/liveStatus'
 import type { FeedLine } from '@/sudarshan/dashboard/live'
+import { useAuthStore } from '@/stores/authStore'
 import { rememberProduct } from '@/sudarshan/ticket/productPref'
 import type { PhoneChartCallbacks, PhoneTick } from './phoneChart'
 
@@ -163,6 +164,7 @@ async function opened(path = '/chart/NSE/SBIN', before: string[] = []) {
 beforeEach(() => {
   fakes.charts.length = 0
   fakes.config = { apiKey: 'test-key', wsUrl: 'ws://test.invalid' }
+  useAuthStore.setState({ apiKey: 'test-key', sessionChecked: true, brokerSessionExpired: false })
   fakes.instrument = { name: 'STATE BANK OF INDIA', lotSize: 1, tickSize: 0.05 }
   localStorage.clear()
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 })
@@ -333,14 +335,50 @@ describe('the phone chart page at 390 px', () => {
     expect(screen.getByRole('switch', { name: 'Keep screen on' })).toBeVisible()
   })
 
-  it('says what to do when there is no API key', async () => {
+  describe('without prices', () => {
+    beforeEach(() => {
+      // A re-check that cannot reach the server leaves the stores as they are.
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => Promise.reject(new Error('offline')))
+      )
+    })
+    afterEach(() => {
+      vi.unstubAllGlobals()
+    })
+
+    it('still checking: a quiet line, never the API key message', async () => {
+      useAuthStore.setState({ apiKey: null, sessionChecked: false })
+      renderAt('/chart/NSE/SBIN')
+      expect(await screen.findByText('Checking your login')).toBeVisible()
+      expect(screen.queryByText(/API key/)).toBeNull()
+    })
+
+    it('Upstox not logged in today: says so with the two links', async () => {
+      useAuthStore.setState({ apiKey: null, sessionChecked: true, brokerSessionExpired: true })
+      renderAt('/chart/NSE/SBIN')
+      expect(await screen.findByText(/Upstox is not logged in today/)).toBeVisible()
+      expect(screen.getByRole('link', { name: 'Auto login' })).toBeVisible()
+      expect(screen.queryByText(/API key/)).toBeNull()
+    })
+
+    it('no API key: says what to do', async () => {
+      useAuthStore.setState({ apiKey: null, sessionChecked: true, brokerSessionExpired: false })
+      renderAt('/chart/NSE/SBIN')
+      expect(await screen.findByText('Prices and search need an API key.')).toBeVisible()
+      expect(screen.getByRole('link', { name: 'Create one under API Key' })).toHaveAttribute(
+        'href',
+        '/apikey'
+      )
+    })
+  })
+
+  it('ready but the stream settings did not come back: Try again, not an API key message', async () => {
     fakes.config = null
     renderAt('/chart/NSE/SBIN')
-    expect(await screen.findByText('The chart needs your API key.')).toBeVisible()
-    expect(screen.getByRole('link', { name: 'Open the API key page' })).toHaveAttribute(
-      'href',
-      '/apikey'
-    )
+    expect(await screen.findByText('The chart could not start.')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeVisible()
+    expect(screen.queryByText(/API key/)).toBeNull()
   })
 
   it('shows a failed load in words, with Try again and Dismiss', async () => {
