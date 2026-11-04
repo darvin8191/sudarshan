@@ -52,6 +52,10 @@ eventlet.sleep(0.1)
 
 def ticks_between(start, end):
     return sum(1 for t in ticks if start < t < end)
+
+def widest_gap(start, end):
+    inside = [start] + [t for t in ticks if start < t < end] + [end]
+    return max(b - a for a, b in zip(inside, inside[1:]))
 """
 
 
@@ -119,16 +123,18 @@ def test_the_forward_to_a_slow_service_yields_to_the_hub(tmp_path):
         import blueprints.sudarshan_alerts as bridge
 
         client = httpx.Client(trust_env=False)
-        bridge.get_httpx_client = lambda: client
+        bridge._loopback = lambda: client
         with Flask("eventlet-bridge").app_context():
             start = time.monotonic()
             response, status = bridge._call("prefs_get")
             end = time.monotonic()
         print(json.dumps({"status": status, "body": response.get_json(), "took": end - start,
-                          "ticks": ticks_between(start, end)}))
+                          "ticks": ticks_between(start, end),
+                          "gap": widest_gap(start, end)}))
         """,
         tmp_path,
     )
     assert result["status"] == 200 and result["body"]["data"] == {"telegram": True, "app": True}
     assert 0.9 < result["took"] < 2.9  # answered, not cut at the 3 s timeout
     assert result["ticks"] >= 10  # the hub ran on through the wait (20 ticks a second)
+    assert result["gap"] < 0.2  # and never stood still: a stall of 0.8 s passed the count above

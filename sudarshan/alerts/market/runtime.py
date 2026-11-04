@@ -62,6 +62,7 @@ from sudarshan.alerts.market.feedlink import (
 from sudarshan.alerts.market.lane import Line, MarketLane
 from sudarshan.alerts.market.push import (
     ALERT_EVENT,
+    APP_FULL,
     DELIVERY_EVENT,
     NONE_OPEN,
     NOT_ANSWERED,
@@ -142,6 +143,8 @@ class MarketRuntime:
         #: its reason, and every second, for the page's line (both pushed to the open apps).
         self.on_change: Callable[[int, str], None] | None = None
         self.on_second: Callable[[int], None] | None = None
+        #: The page's line for a state push (the desk's), used to tell the apps to read again.
+        self.on_engine: Callable[[int], dict] | None = None
         self.state, self.detail = "starting", ""
         self.stats = {"frames": 0, "judged": 0, "fires": 0}
         self._stop = asyncio.Event()
@@ -267,7 +270,7 @@ class MarketRuntime:
             pushing = None
             if self.push_fernet is not None:  # M10.7: the app's owner room
                 self.pusher = Pusher(self.settings.openalgo_url, client, self.push_fernet,
-                                     self._shown)  # fmt: skip
+                                     self._shown, self._not_pushed, self._resync)  # fmt: skip
                 self.push = self._push_fire
                 pushing = asyncio.create_task(self._guard("push", self.pusher.run()),
                                               name="market alerts: app push")  # fmt: skip
@@ -368,11 +371,17 @@ class MarketRuntime:
         self._claims_wake.set()
 
     @contextlib.asynccontextmanager
-    async def claims_held(self):
+    async def claims_held(self, deadline: float | None = None):
         """No renewal puts the claims while an owner's change claims its key and takes its place
-        in the Book, so the new key is never dropped and claimed again a moment later."""
-        async with self._claims_lock:
+        in the Book, so the new key is never dropped and claimed again a moment later. With a
+        ``deadline`` (loop time) the wait for the lock ends there with TimeoutError, and nothing
+        is held (review M1)."""
+        async with asyncio.timeout_at(deadline):
+            await self._claims_lock.acquire()
+        try:
             yield
+        finally:
+            self._claims_lock.release()
 
     def use_prefs(self, prefs: dict[str, bool]) -> None:
         self._prefs = {"telegram": bool(prefs["telegram"]), "app": bool(prefs["app"])}
@@ -694,7 +703,7 @@ class MarketRuntime:
         """A recorded fire to the open apps (M10.7): the toast's words as the event keeps them
         (``said``, the record's options), and its marks."""
         self.pusher.add(ALERT_EVENT, {
-            "event_id": event_id, "alert_id": alert.id, "symbol": alert.symbol,
+            "event_id": event_id if event_id >= 0 else None, "alert_id": alert.id, "symbol": alert.symbol,
             "exchange": alert.exchange, "title": said["title"], "detail": said["detail"],
             "note": said["note"],
             "at": _at(fire.at).isoformat(timespec="seconds"), "at_ms": fire.at,
@@ -712,6 +721,22 @@ class MarketRuntime:
         for event_id in ids:
             self._submit(self.store.set_delivery, OWNER, event_id, "app", status, reason, now)
             self._resolve(event_id, "app", status)
+
+    def _not_pushed(self, ids: list[int]) -> None:
+        """Fires whose push was dropped because too many waited: told in History as it was
+        (review M2), not as OpenAlgo not answering."""
+        now = self._now()
+        for event_id in ids:
+            self._submit(self.store.set_delivery, OWNER, event_id, "app", "not_sent", APP_FULL, now)
+            self._resolve(event_id, "app", "not_sent")
+
+    def _resync(self) -> dict | None:
+        """The state push that follows a lost push: the page's line, and the order to read the
+        page again."""
+        if self.on_engine is None:
+            return None
+        now = self._now()
+        return {"engine": self.on_engine(now), "alerts": [], "removed": [], "server_time": now}
 
     def _tell_line(self, text: str, at: int) -> None:
         """A line that is no fire (a pause): no record, so no delivery to write."""
@@ -995,15 +1020,21 @@ class MarketRuntime:
     async def _resend_pending(self, now: int) -> None:
         """Telegram lines a stop left pending: sent if fresh, else not sent (A7.o). A push to
         the app is never sent late: the app reads what it missed when it reconnects."""
+        late = []
         for event in await self._db(self.store.pending, OWNER, "telegram"):
             if now - event["fired_at"] > LATE_MS:
                 self._submit(self.store.set_delivery, OWNER, event["id"], "telegram",
                              "not_sent", RESTARTED, now)  # fmt: skip
+                late.append(event["id"])
             else:
                 self.lane.add([Line(event["id"], event["line"], _at(event["fired_at"]))])
+        self._push_settled(late, "telegram")  # the open apps' History shows it too (review L3)
+        gone = []
         for event in await self._db(self.store.pending, OWNER, "app"):
             self._submit(self.store.set_delivery, OWNER, event["id"], "app", "not_sent",
                          RESTARTED, now)  # fmt: skip
+            gone.append(event["id"])
+        self._push_settled(gone, "app")
 
     # ---- small pieces ------------------------------------------------------------------------
     def _owner(self) -> Owner | None:

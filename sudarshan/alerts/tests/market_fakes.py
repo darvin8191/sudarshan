@@ -41,6 +41,8 @@ class FakeFeed:
         self.snapshot_asks: list[list[str]] = []
         self.refuse: tuple[int, str] | None = None
         self.answering = True
+        #: Seconds a claim waits before it is answered (a slow feed).
+        self.put_delay = 0.0
 
     async def __aenter__(self) -> FakeFeed:
         self.ctx = zmq.asyncio.Context()
@@ -102,6 +104,8 @@ class FakeFeed:
             writer.close()
             return
         method, target, _ = request_line.split(" ", 2)
+        if method == "PUT" and self.put_delay:
+            await asyncio.sleep(self.put_delay)
         status, answer = self._answer(method, urlsplit(target), body)
         data = json.dumps(answer).encode()
         with contextlib.suppress(ConnectionError):

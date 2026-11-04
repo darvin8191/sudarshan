@@ -28,6 +28,7 @@ paused (the feed down, unheard or silent), every line inside a session says so.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import Mapping
 from datetime import datetime
@@ -50,6 +51,10 @@ TEST_WAIT_S = 10.0
 #: History pages: the page asks for up to this many at a time.
 PAGE, PAGE_MAX = 50, 100
 SINCE, SINCE_MAX = 200, 200
+#: A change waits this long for its turn and its claim at the feed, so the page is told it was
+#: not saved (503) before the bridge's 6 s end, and a change the page was told failed never
+#: lands (review M1).
+CHANGE_WAIT_S = 4.5
 ACTIONS = ("edit", "pause", "resume", "restart")
 #: What the service takes from a draft; the bridge adds the key, tick size and expiry.
 DRAFT = (
@@ -93,6 +98,7 @@ class OwnerDesk:
         self._changes = asyncio.Lock()
         self._line: dict | None = None  # the page's line as last pushed to the open apps
         runtime.on_change, runtime.on_second = self._changed, self._second
+        runtime.on_engine = self.engine_line
 
     def health(self) -> dict[str, Any]:
         rt = self.rt
@@ -147,12 +153,13 @@ class OwnerDesk:
         fields = _draft(message.get("alert"))
         now = rt.now_ms()
         checked = _checked(fields, now)
-        async with self._changes:
+        deadline = asyncio.get_running_loop().time() + CHANGE_WAIT_S
+        async with self._turn(deadline):
             probe = _probe(checked, 0, "active")
             self._admit(probe, None)
-            async with rt.claims_held():
+            async with self._claims(deadline):
                 try:
-                    await self._claim(probe)
+                    await self._claim(probe, deadline)
                     row = await self._write(rt.store.create, OWNER, checked, now)
                 finally:
                     rt.wake_claims()  # a claim made for a refused change goes at once
@@ -165,20 +172,23 @@ class OwnerDesk:
         alert_id, version = _whole(message, "id"), _whole(message, "version")
         action = message.get("action")
         if action not in ACTIONS:
-            raise ApiError(400, "invalid", WORDS["action"])
+            raise ApiError(400, "invalid", WORDS["action"], "action")
         now = rt.now_ms()
-        async with self._changes:
+        deadline = asyncio.get_running_loop().time() + CHANGE_WAIT_S
+        async with self._turn(deadline):
             current = await self._write(rt.store.alert, OWNER, alert_id)
             if current is None:
                 raise ApiError(404, "gone", str(NotFound()))
             if action == "edit":
-                row = await self._edit(current, version, _draft(message.get("alert")), now)
+                row = await self._edit(current, version, _draft(message.get("alert")), now,
+                                       deadline)  # fmt: skip
             else:
-                row = await self._move(current, version, action, now)
+                row = await self._move(current, version, action, now, deadline)
         log.info("market alert %d: %s by the owner", alert_id, action)
         return self._pushed(self._view(row, now), now)
 
-    async def _edit(self, current: dict, version: int, fields: dict, now: int) -> dict:
+    async def _edit(self, current: dict, version: int, fields: dict, now: int,
+                    deadline: float) -> dict:  # fmt: skip
         rt = self.rt
         checked = _checked(fields, now)
         if "ends" not in fields:  # an edit that does not name the end keeps it
@@ -189,10 +199,10 @@ class OwnerDesk:
             raise ApiError(400, "invalid", WORDS["ended"], "ends")
         probe = _probe(checked, current["id"], status)
         self._admit(probe, current["id"])
-        async with rt.claims_held():
+        async with self._claims(deadline):
             try:
                 if status == "active":
-                    await self._claim(probe)
+                    await self._claim(probe, deadline)
                 row = await self._write(rt.store.update, OWNER, current["id"], version, checked,
                                         now, reset_state=changed)  # fmt: skip
             finally:
@@ -200,16 +210,17 @@ class OwnerDesk:
             rt.owner_put(row, reset=changed)
         return row
 
-    async def _move(self, current: dict, version: int, action: str, now: int) -> dict:
+    async def _move(self, current: dict, version: int, action: str, now: int,
+                    deadline: float) -> dict:  # fmt: skip
         rt = self.rt
         resumes = action in ("resume", "restart")
-        async with rt.claims_held():
+        async with self._claims(deadline):
             try:
                 if resumes and current["status"] == MOVES[action][0]:
                     probe = spec.Alert.of(current | {"status": "active"})
                     if stop_reason(probe, now) is None:  # else the store says why, in words
                         self._admit(probe, current["id"])
-                        await self._claim(probe)
+                        await self._claim(probe, deadline)
                 row = await self._write(getattr(rt.store, action), OWNER, current["id"], version,
                                         now)  # fmt: skip
             finally:
@@ -422,7 +433,34 @@ class OwnerDesk:
                 n = quantity(config.max_instruments)
                 raise ApiError(409, "limit", WORDS["instruments"].format(n=n))
 
-    async def _claim(self, alert: spec.Alert) -> None:
+    @contextlib.asynccontextmanager
+    async def _turn(self, deadline: float):
+        """The one change at a time, waited for until ``deadline``: a change stuck behind a slow
+        one is told it was not saved, and never lands afterwards (review M1)."""
+        try:
+            async with asyncio.timeout_at(deadline):
+                await self._changes.acquire()
+        except TimeoutError:
+            raise ApiError(503, "feed", WORDS["feed_silent"]) from None
+        try:
+            yield
+        finally:
+            self._changes.release()
+
+    @contextlib.asynccontextmanager
+    async def _claims(self, deadline: float):
+        """The claims job's lock, waited for until ``deadline`` (only the wait is timed)."""
+        held = self.rt.claims_held(deadline)
+        try:
+            await held.__aenter__()
+        except TimeoutError:
+            raise ApiError(503, "feed", WORDS["feed_silent"]) from None
+        try:
+            yield
+        finally:
+            await held.__aexit__(None, None, None)
+
+    async def _claim(self, alert: spec.Alert, deadline: float) -> None:
         """The alert's key at the feed, in the mode it needs, before the alert is saved: full for
         a stock that closes by auction, whose print is known by its volume (X6i)."""
         rt = self.rt
@@ -432,8 +470,12 @@ class OwnerDesk:
         if held in ("full", need):
             return
         modes[alert.key] = "full" if "full" in (held, need) else need
+        left = deadline - asyncio.get_running_loop().time()
         try:
-            await rt.link.put_claims(modes)
+            async with asyncio.timeout_at(deadline):
+                await rt.link.put_claims(modes, timeout=max(0.5, left))
+        except TimeoutError:
+            raise ApiError(503, "feed", WORDS["feed_silent"]) from None
         except FeedRefused as exc:
             log.warning("The price feed refused an instrument for a market alert: %s", exc)
             raise ApiError(409, "feed", WORDS["feed_full"]) from None
@@ -482,7 +524,7 @@ def _probe(fields: Mapping[str, Any], alert_id: int, status: str) -> spec.Alert:
 
 def _draft(value) -> dict[str, Any]:
     if not isinstance(value, Mapping):
-        raise ApiError(400, "invalid", WORDS["draft"])
+        raise ApiError(400, "draft", WORDS["draft"])
     return {name: value[name] for name in DRAFT if name in value}
 
 
@@ -501,7 +543,7 @@ def _whole(message: Mapping[str, Any], name: str, default=_REQUIRED) -> int | No
     if value is None and default is not _REQUIRED:
         return default
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise ApiError(400, "invalid", WORDS["number"])
+        raise ApiError(400, "invalid", WORDS["number"], name)
     return value
 
 

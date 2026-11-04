@@ -889,3 +889,64 @@ def test_the_claims_are_renewed_before_the_feed_forgets_them(alerts, quick, monk
             await stopped(rt, task)
 
     asyncio.run(scenario())
+
+
+def _pushed(notify, event: str) -> list[dict]:
+    return [i["data"] for b in notify.pushes for i in b if i["event"] == event]
+
+
+def test_a_fire_that_could_not_be_recorded_is_pushed_with_no_event_id(alerts, quick, monkeypatch):
+    """Review L4: it went with a negative id, which a page keeping the last id sent to
+    /events/since?after=-1 (400)."""
+    import os
+
+    from sudarshan.alerts.market.push import ALERT_EVENT
+    from sudarshan.alerts.market.store import StoreError
+    from sudarshan.vault import ALERTS_PUSH_INFO, fernet_for
+
+    def refuse(self, *args, **kwargs):
+        raise StoreError("This could not be saved.", "disk I/O error")
+
+    monkeypatch.setattr(MarketStore, "record_fire", refuse)
+
+    async def scenario():
+        clock = Clock(ist(2026, 10, 21, 10, 0))
+        async with FakeFeed(clock) as feed, FakeOpenAlgo() as notify:
+            settings = alerts(notify)
+            create(settings, clock(), channels={"telegram": False, "app": True})
+            fernet = fernet_for(os.environ["API_KEY_PEPPER"], ALERTS_PUSH_INFO)
+            rt, task = await started(settings, feed, clock, push_fernet=fernet)
+            await trade(feed, clock, 99.95)
+            await trade(feed, clock, 100.05, ltq=2)
+            await wait_until(lambda: _pushed(notify, ALERT_EVENT))
+            [shown] = _pushed(notify, ALERT_EVENT)
+            assert shown["event_id"] is None and shown["title"].startswith("SBIN crossed above")
+            await stopped(rt, task)
+
+    asyncio.run(scenario())
+
+
+def test_a_delivery_settled_at_a_restart_is_pushed_to_the_open_apps(alerts, quick):
+    """Review L3: the restart marked a late Telegram line 'not sent' in History and never told
+    the apps, which kept showing it pending."""
+    import os
+
+    from sudarshan.alerts.market.push import DELIVERY_EVENT
+    from sudarshan.vault import ALERTS_PUSH_INFO, fernet_for
+
+    async def scenario():
+        clock = Clock(ist(2026, 10, 21, 10, 0))
+        async with FakeFeed(clock) as feed, FakeOpenAlgo() as notify:
+            settings = alerts(notify)
+            old = ms(clock() - timedelta(hours=2))  # long past the time a line may still go
+            event_id = record(settings, "record_test", "t", "l", old,
+                              {"telegram": True, "app": False})  # fmt: skip
+            fernet = fernet_for(os.environ["API_KEY_PEPPER"], ALERTS_PUSH_INFO)
+            rt, task = await started(settings, feed, clock, push_fernet=fernet)
+            await wait_until(lambda: _pushed(notify, DELIVERY_EVENT))
+            [settled] = _pushed(notify, DELIVERY_EVENT)
+            assert settled["event_id"] == event_id and settled["channel"] == "telegram"
+            assert settled["delivery"]["status"] == "not_sent"
+            await stopped(rt, task)
+
+    asyncio.run(scenario())

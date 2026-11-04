@@ -260,7 +260,7 @@ def test_an_edit_resets_a_changed_condition_and_keeps_the_end_it_does_not_name(a
             settings = alerts(notify)
             office, rt, task = await opened(settings, feed, clock)
             card = await office.call("create", {"alert": draft(frequency="every_time",
-                                                               ends="2026-12-20")})  # fmt: skip
+                                                               ends="2026-11-30")})  # fmt: skip
             await following(rt)
             await trade(feed, clock, 99.95)
             await wait_until(lambda: rt.book.state(card["id"]).side == -1)
@@ -798,5 +798,237 @@ def test_an_alert_whose_instrument_sends_no_price_says_so_after_a_minute(alerts,
                 await asyncio.sleep(0.05)
             assert (await office.call("state", {}))["alerts"][0]["check"] is None
             await closed(rt, task)
+
+    run(scenario)
+
+
+@pytest.mark.parametrize("slow", ["its own claim", "a renewal under way"])
+def test_a_change_that_cannot_be_claimed_in_time_is_not_saved(alerts, quick, monkeypatch, slow):
+    """Review M1: a create that waited out the bridge's 6 s was saved and then reported as 'not
+    answering', and the retry made a duplicate. The desk ends the wait first, with 'not saved'."""
+    monkeypatch.setattr(desk, "CHANGE_WAIT_S", 0.5)
+
+    async def scenario():
+        clock = Clock(ist(2026, 10, 21, 10, 0))
+        async with FakeFeed(clock) as feed, FakeOpenAlgo() as notify:
+            settings = alerts(notify)
+            office, rt, task = await opened(settings, feed, clock)
+            feed.put_delay = 1.5
+            if slow == "a renewal under way":
+                rt.wake_claims()  # the claims job is mid-PUT, holding its lock
+                await asyncio.sleep(0.4)
+            other = "NSE_EQ|INE002A01018"
+            bad = await refused(office.call("create", {"alert": draft(
+                instrument_key=other, symbol="RELIANCE")}))  # fmt: skip
+            assert (bad.status, bad.code) == (503, "feed")
+            assert "was not saved" in bad.message
+            assert record(settings, "alerts") == []  # nothing landed
+            feed.put_delay = 0.0
+            await closed(rt, task)
+
+    run(scenario)
+
+
+# ---- review M3: the desk's rules the first tests left open (D01-D21) ---------------------------
+
+
+def scene(body, **env):
+    """One desk over a fake feed, for a body(office, rt, feed, settings, clock)."""
+
+    def run_it(alerts):
+        async def scenario():
+            clock = Clock(ist(2026, 10, 21, 10, 0))
+            async with FakeFeed(clock) as feed, FakeOpenAlgo() as notify:
+                settings = alerts(notify)
+                office, rt, task = await opened(settings, feed, clock, **env)
+                try:
+                    await body(office, rt, feed, settings, clock)
+                finally:
+                    await closed(rt, task)
+
+        run(scenario)
+
+    return run_it
+
+
+def test_changes_that_add_nothing_are_never_refused_for_a_limit(alerts, quick):
+    """D01-D04: at 2 Active alerts and 1 instrument, an edit stays within both; moving the only
+    alert on an instrument to another is no new instrument; a paused alert is not limited."""
+
+    async def body(office, rt, feed, settings, clock):
+        one = await office.call("create", {"alert": draft()})
+        two = await office.call("create", {"alert": draft(params={
+            "op": "crosses_below", "level": "90"})})  # fmt: skip
+        edit = await office.call("update", {"id": two["id"], "version": 1, "action": "edit",
+                                            "alert": draft(params={"op": "crosses_below",
+                                                                   "level": "91"})})  # fmt: skip
+        assert edit["version"] == 2  # D01, D02: neither a third Active nor a second instrument
+        paused = await office.call("update", {"id": two["id"], "version": 2, "action": "pause"})
+        other = draft(symbol="RELIANCE", instrument_key=RELIANCE)
+        moved = await office.call("update", {"id": paused["id"], "version": 3, "action": "edit",
+                                             "alert": other})  # fmt: skip
+        assert moved["status"] == "paused"  # D04: a Paused result is not counted at all
+        solo = await office.call("update", {"id": one["id"], "version": 1, "action": "edit",
+                                            "alert": other | {"params": {
+                                                "op": "crosses_above", "level": "1300"}}})  # fmt: skip
+        assert solo["instrument_key"] == RELIANCE  # D03: its old key does not count against it
+
+    scene(
+        body, SUDARSHAN_MARKET_ALERTS_MAX_INSTRUMENTS="1", SUDARSHAN_MARKET_ALERTS_MAX_ACTIVE="2"
+    )(alerts)
+
+
+def test_a_stale_pause_resume_or_restart_is_a_conflict(alerts, quick):
+    """D08: each move is made on the version the screen saw, not on the current one."""
+
+    async def body(office, rt, feed, settings, clock):
+        card = await office.call("create", {"alert": draft()})
+        edited = await office.call("update", {"id": card["id"], "version": 1, "action": "edit",
+                                              "alert": draft(note="seen on another screen")})  # fmt: skip
+        stale = await refused(office.call("update", {"id": card["id"], "version": 1,
+                                                     "action": "pause"}))  # fmt: skip
+        assert (stale.status, stale.code) == (409, "conflict")
+        paused = await office.call("update", {"id": card["id"], "version": edited["version"],
+                                              "action": "pause"})  # fmt: skip
+        stale = await refused(office.call("update", {"id": card["id"],
+                                                     "version": edited["version"],
+                                                     "action": "resume"}))  # fmt: skip
+        assert (stale.status, stale.code) == (409, "conflict")
+        ended = await office.call("create", {"alert": draft(note="ends")})
+        record(settings, "set_status", ended["id"], "stopped", "Stopped for the test.",
+               ms(clock()), version=ended["version"])  # fmt: skip
+        stale = await refused(office.call("update", {"id": ended["id"], "version": 99,
+                                                     "action": "restart"}))  # fmt: skip
+        assert (stale.status, stale.code) == (409, "conflict")
+        assert record(settings, "alert", card["id"])["version"] == paused["version"]
+
+    scene(body)(alerts)
+
+
+def test_an_edit_of_an_alert_whose_end_has_passed_is_refused_on_the_end(alerts, quick):
+    """D06."""
+
+    async def body(office, rt, feed, settings, clock):
+        card = await office.call("create", {"alert": draft(ends="2026-10-22")})
+        clock.advance(3 * 86400)
+        bad = await refused(office.call("update", {"id": card["id"], "version": 1,
+                                                   "action": "edit", "alert": draft()}))  # fmt: skip
+        assert (bad.status, bad.code, bad.field) == (400, "invalid", "ends")
+        assert bad.message == desk.WORDS["ended"]
+
+    scene(body)(alerts)
+
+
+def test_a_held_ltpc_key_is_raised_to_full_for_an_alert_that_needs_the_bid(alerts, quick):
+    """D11."""
+
+    async def body(office, rt, feed, settings, clock):
+        await office.call("create", {"alert": draft()})
+        assert feed.keys == {SBIN: "ltpc"}
+        await office.call("create", {"alert": draft(params={
+            "op": "crosses_above", "level": "100", "source": "bid"})})  # fmt: skip
+        assert feed.keys == {SBIN: "full"}
+
+    scene(body)(alerts)
+
+
+def test_only_active_cards_carry_a_check_and_the_segments_follow_every_card(alerts, quick):
+    """D13, D14: a Paused card has no status line of the market, and its segment is on the page."""
+
+    async def body(office, rt, feed, settings, clock):
+        card = await office.call("create", {"alert": draft()})
+        await office.call("update", {"id": card["id"], "version": 1, "action": "pause"})
+        clock.advance(8 * 3600)  # evening: an Active card would say the market is closed
+        state = await office.call("state", {})
+        [shown] = state["alerts"]
+        assert shown["status"] == "paused" and shown["check"] is None
+        assert "NSE_EQ" in state["segments"]
+
+    scene(body)(alerts)
+
+
+def test_the_engine_line_is_the_best_of_its_sessions(alerts, quick):
+    """D15: at 15:35 the cash session has closed and futures and options are still open; with
+    alerts in both, the line says it is watching."""
+
+    async def body(office, rt, feed, settings, clock):
+        await office.call("create", {"alert": draft()})
+        await office.call("create", {"alert": draft(
+            symbol="NIFTY", exchange="NFO", instrument_key="NSE_FO|45450", expiry="2026-11-25")})  # fmt: skip
+        clock.advance(5 * 3600 + 35 * 60)
+        await asyncio.sleep(0.1)
+        state = await office.call("state", {})
+        assert state["segments"]["NSE_EQ"]["code"] != "ok"
+        assert state["segments"]["NSE_FO"]["code"] == "ok"
+        assert state["engine"]["code"] == "ok"
+
+    scene(body)(alerts)
+
+
+def test_numbers_must_be_whole_and_not_negative_and_a_page_is_capped(alerts, quick, monkeypatch):
+    """D17, D18."""
+    monkeypatch.setattr(desk, "PAGE_MAX", 2)
+
+    async def body(office, rt, feed, settings, clock):
+        for value in (-1, True, "3", 1.5):
+            bad = await refused(office.call("events", {"before": value}))
+            assert (bad.status, bad.code, bad.field) == (400, "invalid", "before"), value
+        for n in range(4):
+            record(
+                settings,
+                "record_test",
+                f"t{n}",
+                "l",
+                ms(clock()) + n,
+                {"telegram": False, "app": False},
+            )
+        page = await office.call("events", {"limit": 99})
+        assert len(page["events"]) == 2 and page["more"] is True
+
+    scene(body)(alerts)
+
+
+def test_changes_are_made_one_at_a_time(alerts, quick):
+    """D21: a settings change that arrives while a create waits on the feed is made after it."""
+
+    async def body(office, rt, feed, settings, clock):
+        feed.put_delay = 0.4
+        order = []
+
+        async def note(name, call):
+            await call
+            order.append(name)
+
+        create_it = asyncio.create_task(note("create", office.call("create", {"alert": draft()})))
+        await asyncio.sleep(0.15)  # the create is on the feed now, holding its turn
+        prefs = asyncio.create_task(note("prefs", office.call("prefs_set", {
+            "telegram": False, "app": True})))  # fmt: skip
+        await asyncio.gather(create_it, prefs)
+        assert order == ["create", "prefs"]
+        feed.put_delay = 0.0
+
+    scene(body)(alerts)
+
+
+def test_an_alert_on_an_instrument_already_followed_passes_a_limit_lowered_since(alerts, quick):
+    """D02: past the limit after it was lowered, another alert on a followed instrument adds no
+    instrument and is never refused for it; a new instrument still is."""
+
+    async def scenario():
+        clock = Clock(ist(2026, 10, 21, 10, 0))
+        async with FakeFeed(clock) as feed, FakeOpenAlgo() as notify:
+            settings = alerts(notify)
+            create(settings, clock())
+            create(settings, clock(), symbol="RELIANCE", instrument_key=RELIANCE)
+            office, rt, task = await opened(settings, feed, clock,
+                                            SUDARSHAN_MARKET_ALERTS_MAX_INSTRUMENTS="1")  # fmt: skip
+            try:
+                same = await office.call("create", {"alert": draft(params={
+                    "op": "crosses_below", "level": "90"})})  # fmt: skip
+                assert same["id"] == 3
+                new = draft(symbol="INFY", instrument_key="NSE_EQ|INE009A01021")
+                assert (await refused(office.call("create", {"alert": new}))).code == "limit"
+            finally:
+                await closed(rt, task)
 
     run(scenario)

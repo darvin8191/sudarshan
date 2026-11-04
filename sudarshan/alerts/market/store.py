@@ -51,8 +51,8 @@ import uuid
 from collections.abc import Iterator, Mapping
 from datetime import date
 from pathlib import Path
-from urllib.parse import quote
 from typing import Any
+from urllib.parse import quote
 
 from sqlalchemy import (
     Column,

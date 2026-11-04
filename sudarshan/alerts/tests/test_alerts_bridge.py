@@ -68,7 +68,7 @@ def bridge(monkeypatch):
     reset_users()
     monkeypatch.setenv("REDIRECT_URL", "http://127.0.0.1:5000/upstox/callback")
     http = httpx.Client(trust_env=False)
-    monkeypatch.setattr(bp_module, "get_httpx_client", lambda: http)
+    monkeypatch.setattr(bp_module, "_loopback", lambda: http)
     monkeypatch.setattr(bp_module, "get_symbol_info", lambda s, e: MASTER.get((s, e)))
     monkeypatch.setattr(bp_module, "_warned", LockedTTLCache(maxsize=8, ttl=600))
     app = make_app()
@@ -282,7 +282,7 @@ def test_a_seal_the_service_cannot_open_is_said_with_what_to_do(bridge, desk, mo
 def test_too_many_requests_are_said_in_words(service, desk, monkeypatch):
     reset_users()
     http = httpx.Client(trust_env=False)
-    monkeypatch.setattr(bp_module, "get_httpx_client", lambda: http)
+    monkeypatch.setattr(bp_module, "_loopback", lambda: http)
     try:
         client = make_app(rate_limits=True).test_client()
         headers = as_owner(client)
@@ -320,3 +320,143 @@ def test_the_bridge_holds_no_loop_thread_or_scheduler():
     for banned in ("asyncio", "import threading", "Thread(", "ThreadPoolExecutor", "APScheduler",
                    "BackgroundScheduler", "submit_to_hub("):  # fmt: skip
         assert banned not in source
+
+
+# -- review of the API surface (M3, L1, L6, L7, the proxy point) -------------------------------
+
+
+def test_a_transport_refusal_of_the_service_reaches_the_page_as_a_sentence(bridge, service, desk):
+    """Review L1: 'size', 'timeout', 'length' and 'malformed' are the service's transport words,
+    not the contract's; the page gets the 500 'failed' sentence instead."""
+    headers = as_owner(bridge)
+    for code in ("size", "timeout", "length", "malformed", "not_found"):
+        desk.answers["prefs_get"] = ApiError(413, code, "request too large")
+        answer = call(bridge, "get", "/sudarshan/alerts/api/prefs")
+        assert answer.status_code == 500
+        assert answer.get_json() == {
+            "status": "error",
+            "code": "failed",
+            "message": (
+                "Market alerts could not do that. Your alerts are kept. Try again in a minute."
+            ),
+        }
+    desk.answers["delete"] = ApiError(404, "gone", "This alert is gone.")
+    kept = call(bridge, "delete", "/sudarshan/alerts/api/alerts/1", None, headers)
+    assert kept.status_code == 404 and kept.get_json()["code"] == "gone"  # a contract code stays
+
+
+def test_a_draft_over_64_kib_is_the_draft_refusal_and_never_parsed_or_forwarded(
+    bridge, service, desk
+):
+    headers = as_owner(bridge)
+    big = {"alert": DRAFT | {"note": "x" * 70_000}}
+    answer = call(bridge, "post", "/sudarshan/alerts/api/alerts", big, headers)
+    assert answer.status_code == 400 and answer.get_json()["code"] == "draft"
+    answer = call(bridge, "patch", "/sudarshan/alerts/api/alerts/1", big, headers)
+    assert answer.status_code == 400 and answer.get_json()["code"] == "draft"
+    assert desk.calls == []
+
+
+def test_a_failure_inside_the_bridge_is_the_envelope_not_an_error_page(
+    bridge, service, desk, monkeypatch
+):
+    def broken(symbol, exchange):
+        raise RuntimeError("the master contract table is gone")
+
+    monkeypatch.setattr(bp_module, "get_symbol_info", broken)
+    answer = call(
+        bridge, "post", "/sudarshan/alerts/api/alerts", {"alert": DRAFT}, as_owner(bridge)
+    )
+    assert answer.status_code == 500 and answer.is_json
+    assert answer.get_json()["code"] == "failed" and "RuntimeError" not in answer.get_data(True)
+
+
+def test_a_timeout_raised_inside_the_desk_is_a_500_not_a_408(bridge, service, desk):
+    """The service's 408 is for a client that is slow to send; a TimeoutError of the desk is not."""
+    desk.answers["prefs_get"] = TimeoutError("the claim")
+    login_session(bridge)
+    answer = call(bridge, "get", "/sudarshan/alerts/api/prefs")
+    assert answer.status_code == 500 and answer.get_json()["code"] == "failed"
+
+
+def test_each_op_waits_as_long_as_the_contract_says():
+    """Review L7, B23: 3 s to read, 6 s for a change (delete and the settings too), 12 s test."""
+    assert bp_module.TIMEOUTS == {
+        "state": 3.0, "create": 6.0, "update": 6.0, "delete": 6.0, "events": 3.0,
+        "events_since": 3.0, "prefs_get": 3.0, "prefs_set": 6.0, "test": 12.0,
+    }  # fmt: skip
+
+
+def test_the_service_url_follows_the_service_s_port_and_stays_on_this_server(monkeypatch):
+    """Review L6, B21."""
+    monkeypatch.delenv("SUDARSHAN_ALERTS_API_URL", raising=False)
+    monkeypatch.delenv("SUDARSHAN_ALERTS_HTTP_PORT", raising=False)
+    assert bp_module._service_url() == "http://127.0.0.1:5582"
+    monkeypatch.setenv("SUDARSHAN_ALERTS_HTTP_PORT", "5599")
+    assert bp_module._service_url() == "http://127.0.0.1:5599"
+    monkeypatch.setenv("SUDARSHAN_ALERTS_HTTP_PORT", "not a port")
+    assert bp_module._service_url() == "http://127.0.0.1:5582"
+    monkeypatch.setenv("SUDARSHAN_ALERTS_HTTP_PORT", "5599")
+    for elsewhere in ("http://203.0.113.9:5582", "https://127.0.0.1:5582", "http://example.org"):
+        monkeypatch.setenv("SUDARSHAN_ALERTS_API_URL", elsewhere)
+        assert bp_module._service_url() == "http://127.0.0.1:5599"
+    monkeypatch.setenv("SUDARSHAN_ALERTS_API_URL", "http://127.0.0.1:6000/")
+    assert bp_module._service_url() == "http://127.0.0.1:6000"
+
+
+def test_the_calls_to_the_service_ignore_a_proxy_in_the_environment(monkeypatch):
+    """The suspected point of the review: the shared client trusts HTTP_PROXY; the service is on
+    this server and its sealed bodies must never go through one."""
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:9")
+    monkeypatch.setenv("ALL_PROXY", "http://127.0.0.1:9")
+    made = bp_module._loopback_client._factory()
+    try:
+        assert made._trust_env is False and made.follow_redirects is False
+    finally:
+        made.close()
+
+
+def test_a_key_the_master_gives_that_is_not_an_upstox_key_is_refused(
+    bridge, service, desk, monkeypatch
+):
+    """Review B17."""
+    forged = SymbolData(symbol="SBIN", brsymbol="SBIN-EQ", name="X", exchange="NSE",
+                        brexchange="NSE_EQ", token="NSE_EQ|two|parts", expiry="", strike=-1.0,
+                        lotsize=1, instrumenttype="EQ", tick_size=0.05)  # fmt: skip
+    monkeypatch.setattr(bp_module, "get_symbol_info", lambda s, e: forged)
+    answer = call(
+        bridge, "post", "/sudarshan/alerts/api/alerts", {"alert": DRAFT}, as_owner(bridge)
+    )
+    assert answer.status_code == 400 and answer.get_json()["code"] == "instrument"
+    assert desk.calls == []
+
+
+def test_a_port_another_program_holds_gets_nothing_sent_and_is_said(
+    bridge, service, desk, monkeypatch
+):
+    """Review B19 ('held')."""
+    from sudarshan.alerts import loopback
+
+    monkeypatch.setattr(bp_module.loopback, "holder", lambda url, *rest: loopback.OTHER)
+    login_session(bridge)
+    answer = call(bridge, "get", "/sudarshan/alerts/api/prefs")
+    assert answer.status_code == 503 and answer.get_json()["code"] == "held"
+    assert "holds the alert service's port" in answer.get_json()["message"]
+    assert desk.calls == []
+
+
+def test_creating_is_limited_to_thirty_a_minute(service, desk, monkeypatch):
+    """Review B20."""
+    reset_users()
+    monkeypatch.setenv("REDIRECT_URL", "http://127.0.0.1:5000/upstox/callback")
+    monkeypatch.setattr(bp_module, "get_symbol_info", lambda s, e: MASTER.get((s, e)))
+    http = httpx.Client(trust_env=False)
+    monkeypatch.setattr(bp_module, "_loopback", lambda: http)
+    try:
+        client = make_app(rate_limits=True).test_client()
+        headers = as_owner(client)
+        codes = [call(client, "post", "/sudarshan/alerts/api/alerts", {"alert": DRAFT},
+                      headers).status_code for _ in range(31)]  # fmt: skip
+    finally:
+        http.close()
+    assert codes == [200] * 30 + [429]

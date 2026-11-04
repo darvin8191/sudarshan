@@ -30,7 +30,8 @@ How it forwards:
   (``get_symbol_info``), never from the page, and only with an Upstox login: the feed is
   Upstox's.
 - Each body is one Fernet token under ``ALERTS_API_INFO`` (60 s, once), posted through the
-  shared httpx client with an explicit timeout: 3 s, 6 s for a change, 12 s for the test. Under
+  httpx client of its own (it never reads a proxy from the environment: the service is on this
+  server) with an explicit timeout: 3 s, 6 s for a change, 12 s for the test. Under
   eventlet that is a green socket wait that yields to the hub; under gthread it holds one pool
   thread for at most that. No thread, scheduler or event loop is added to the app.
 - First, who listens on the port is looked up (``sudarshan.alerts.loopback``): nothing goes to a
@@ -48,6 +49,7 @@ from functools import wraps
 import httpx
 from flask import Blueprint, jsonify, request, session
 from flask_socketio import join_room
+from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 
 from database.token_db_enhanced import get_symbol_info
 from database.user_db import find_user_by_username
@@ -67,7 +69,6 @@ from sudarshan.autologin.handoff import (
 from sudarshan.feed.subscriptions import KEY_RE
 from sudarshan.vault import ALERTS_API_INFO, ALERTS_PUSH_INFO, fernet_for, pepper_from
 from utils import real_threading
-from utils.httpx_client import get_httpx_client
 from utils.lazy import LazyInit
 from utils.logging import get_logger
 from utils.session import check_session_validity, is_session_valid
@@ -78,15 +79,25 @@ logger = get_logger(__name__)
 sudarshan_alerts_bp = Blueprint("sudarshan_alerts", __name__, url_prefix="/sudarshan/alerts")
 
 BROKER = "upstox"
-SERVICE_URL = "http://127.0.0.1:5582"
+SERVICE_PORT = 5582
+SERVICE_URL = f"http://127.0.0.1:{SERVICE_PORT}"
+#: The largest body a route reads: an alert is a few hundred bytes (the service takes 64 KiB).
+MAX_BODY_BYTES = 64 * 1024
 PRINCIPAL = "owner"
 CONNECT_TIMEOUT_S = 1.0
 HEALTH_TIMEOUT_S = 3.0
 #: Per op: a change may wait for a claim at the feed (5 s), the test for Telegram (10 s).
 TIMEOUTS = {
-    "state": 3.0, "create": 6.0, "update": 6.0, "delete": 3.0, "events": 3.0,
-    "events_since": 3.0, "prefs_get": 3.0, "prefs_set": 3.0, "test": 12.0,
+    "state": 3.0, "create": 6.0, "update": 6.0, "delete": 6.0, "events": 3.0,
+    "events_since": 3.0, "prefs_get": 3.0, "prefs_set": 6.0, "test": 12.0,
 }  # fmt: skip
+#: The codes of the contract (section 1) the service may answer with; any other (a transport
+#: refusal such as 'size' or 'timeout') is the bridge's 500 'failed', in a sentence.
+CODES = frozenset({
+    "invalid", "instrument", "draft", "gone", "conflict", "refused", "limit", "feed", "off",
+    "broker", "starting", "stopping", "stopped", "record", "not_answering", "held", "sealed",
+    "busy", "failed",
+})  # fmt: skip
 #: What the page may set; the instrument's key, tick size and expiry come from the master.
 DRAFT = ("kind", "params", "frequency", "candle", "cooldown_s", "ends", "note", "channels",
          "price")  # fmt: skip
@@ -102,6 +113,7 @@ WORDS = {
     "instrument": "Pick the instrument again from the search.",
     "draft": "The alert could not be read. Open the form again, then save.",
     "busy": "Too many requests. Wait a minute, then try again.",
+    "failed": "Market alerts could not do that. Your alerts are kept. Try again in a minute.",
 }
 
 #: Every open app of the owner joins it (M10.7); nothing is broadcast.
@@ -123,14 +135,29 @@ PROXY_HEADERS = (
     "X-Forwarded-Host",
 )
 
+# The service is on this server: its calls never go through a proxy the environment names, and
+# no redirect is followed.
+_loopback_client = LazyInit(
+    lambda: httpx.Client(trust_env=False, follow_redirects=False,
+                         limits=httpx.Limits(max_connections=16, max_keepalive_connections=4)),
+    "sudarshan-alerts-loopback",
+)  # fmt: skip
+
+
+def _loopback() -> httpx.Client:
+    return _loopback_client.get()
+
+
 _fernet_lazy = LazyInit(
     lambda: fernet_for(pepper_from(os.environ), ALERTS_API_INFO), "sudarshan-alerts-seal"
 )
 _push_fernet_lazy = LazyInit(
     lambda: fernet_for(pepper_from(os.environ), ALERTS_PUSH_INFO), "sudarshan-alerts-push"
 )
-# Pushes come at most every 50 ms: the book holds 2 x 60 s of twice that (X9) and answers 503
-# past it rather than forget a nonce that could still be replayed.
+# The service sends a request when items wait, one after the other, each as the last was answered
+# (batches of up to 50 items, at least 50 ms apart when only a few wait). The book holds 2 x 60 s
+# of 40 a second (X9) and answers 503 past it rather than forget a nonce that could still be
+# replayed.
 _push_nonces = NonceBook(2 * SEAL_TTL_S * 40, lock=real_threading.RLock())
 # Which problems have been logged in the last 10 minutes: one line each, not one per request.
 _warned = LockedTTLCache(maxsize=8, ttl=600)
@@ -146,8 +173,12 @@ def _push_fernet():
 
 def _service_url() -> str:
     """The service's local API: the setting when it is plain http on this server, else 5582."""
-    url = (os.environ.get("SUDARSHAN_ALERTS_API_URL") or SERVICE_URL).rstrip("/")
-    return url if url.startswith("http://") and is_loopback_url(url) else SERVICE_URL
+    port = (os.environ.get("SUDARSHAN_ALERTS_HTTP_PORT") or "").strip()
+    fallback = (
+        f"http://127.0.0.1:{port}" if port.isdecimal() and 0 < int(port) < 65536 else SERVICE_URL
+    )
+    url = (os.environ.get("SUDARSHAN_ALERTS_API_URL") or fallback).rstrip("/")
+    return url if url.startswith("http://") and is_loopback_url(url) else fallback
 
 
 def _configured_broker() -> str:
@@ -213,7 +244,7 @@ def _health():
     if refused is not None:
         return None, refused
     try:
-        answer = get_httpx_client().get(
+        answer = _loopback().get(
             f"{_service_url()}/health",
             headers={"Accept": "application/json"},
             timeout=httpx.Timeout(HEALTH_TIMEOUT_S, connect=CONNECT_TIMEOUT_S),
@@ -234,7 +265,7 @@ def _call(op: str, fields: dict | None = None):
         return refused
     blob = seal(_fernet(), op, principal=PRINCIPAL, **(fields or {}))
     try:
-        answer = get_httpx_client().post(
+        answer = _loopback().post(
             f"{_service_url()}/v1/{op}",
             content=blob,
             headers={"Content-Type": "application/octet-stream", "Accept": "application/json"},
@@ -251,7 +282,35 @@ def _call(op: str, fields: dict | None = None):
         logger.error("Market alerts: sudarshan-alerts refused OpenAlgo's sealed request (%s); "
                      "the two may hold different peppers", body.get("code"))  # fmt: skip
         return _error("sealed", 503)
+    if body.get("status") == "error" and body.get("code") not in CODES:
+        logger.error("Market alerts: sudarshan-alerts answered %s with a refusal (%s) that the "
+                     "page has no word for", op, body.get("code"))  # fmt: skip
+        return _error("failed", 500)
     return jsonify(body), answer.status_code
+
+
+def _json_body():
+    """The request's JSON as a dict (else {}), read only up to MAX_BODY_BYTES: a longer one is
+    the 'draft' refusal before any of it is parsed."""
+    if (request.content_length or 0) > MAX_BODY_BYTES:
+        raise RequestEntityTooLarge()
+    request.max_content_length = MAX_BODY_BYTES  # a body with no length is cut here too
+    body = request.get_json(silent=True)
+    return body if isinstance(body, dict) else {}
+
+
+@sudarshan_alerts_bp.errorhandler(RequestEntityTooLarge)
+def _too_large(error):
+    return _error("draft", 400)
+
+
+@sudarshan_alerts_bp.errorhandler(Exception)
+def _failed(error):
+    """Nothing here ends in OpenAlgo's HTML error page: the page gets the envelope."""
+    if isinstance(error, HTTPException):
+        return error
+    logger.exception("Market alerts: the bridge failed on a request")
+    return _error("failed", 500)
 
 
 def _enriched(draft):
@@ -312,8 +371,7 @@ def state():
 @_owner_only
 @limiter.limit("30 per minute")
 def create_alert():
-    body = request.get_json(silent=True)
-    fields, refused = _enriched(body.get("alert") if isinstance(body, dict) else None)
+    fields, refused = _enriched(_json_body().get("alert"))
     if refused is not None:
         return refused
     return _call("create", {"alert": fields})
@@ -324,8 +382,7 @@ def create_alert():
 @_owner_only
 @limiter.limit("30 per minute")
 def change_alert(alert_id: int):
-    body = request.get_json(silent=True)
-    body = body if isinstance(body, dict) else {}
+    body = _json_body()
     fields = {"id": alert_id, "version": body.get("version"), "action": body.get("action")}
     if body.get("action") == "edit":
         fields["alert"], refused = _enriched(body.get("alert"))
@@ -376,8 +433,7 @@ def prefs():
 @_owner_only
 @limiter.limit("30 per minute")
 def set_prefs():
-    body = request.get_json(silent=True)
-    body = body if isinstance(body, dict) else {}
+    body = _json_body()
     return _call("prefs_set", {"telegram": body.get("telegram"), "app": body.get("app")})
 
 

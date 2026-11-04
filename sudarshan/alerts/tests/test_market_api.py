@@ -289,3 +289,66 @@ def test_the_answer_is_json_in_the_owner_s_words_never_a_trace():
             await server.close()
 
     run(scenario)
+
+
+def test_a_sealed_body_up_to_64_kib_is_opened_not_only_16(monkeypatch):
+    """Review A03: open_sealed's own default is 16 KiB; the route's limit is the one that counts."""
+
+    async def scenario():
+        server, base = await served(Desk())
+        try:
+            body = sealed("create", note="x" * 40_000)
+            assert 30_000 < len(body) < 64 * 1024
+            assert (await post(base, "create", body)).status_code == 200
+            assert (await post(base, "create", sealed("create", note="x" * 60_000))).status_code \
+                == 413  # fmt: skip
+        finally:
+            await server.close()
+
+    run(scenario)
+
+
+def test_a_head_over_8_kib_and_a_client_that_stops_sending_are_refused(monkeypatch):
+    """Review A04, A05: the head is bounded, and a half-sent request is answered 408 after the
+    read timeout and not held open."""
+    from sudarshan.alerts.market import api as api_module
+
+    monkeypatch.setattr(api_module, "READ_TIMEOUT_S", 0.4)
+
+    async def raw(base: str, data: bytes, wait: float) -> bytes:
+        host, port = base.removeprefix("http://").split(":")
+        reader, writer = await asyncio.open_connection(host, int(port))
+        writer.write(data)
+        await writer.drain()
+        try:
+            return await asyncio.wait_for(reader.read(4096), wait)
+        finally:
+            writer.close()
+
+    async def scenario():
+        server, base = await served(Desk())
+        try:
+            long_head = b"GET /health HTTP/1.1\r\nX-Pad: " + b"a" * 9_000 + b"\r\n\r\n"
+            answer = await raw(base, long_head, 3)
+            assert answer.startswith(b"HTTP/1.1 400") and b'"malformed"' in answer
+            started = asyncio.get_running_loop().time()
+            slow = await raw(base, b"POST /v1/state HTTP/1.1\r\nContent-Le", 3)
+            assert slow.startswith(b"HTTP/1.1 408")
+            assert asyncio.get_running_loop().time() - started < 2
+        finally:
+            await server.close()
+
+    run(scenario)
+
+
+def test_a_timeout_raised_by_the_desk_is_a_500_and_a_slow_reader_alone_is_a_408():
+    async def scenario():
+        desk = Desk(state=TimeoutError("the claim"))
+        server, base = await served(desk)
+        try:
+            answer = await post(base, "state", sealed("state"))
+            assert answer.status_code == 500 and answer.json()["code"] == "failed"
+        finally:
+            await server.close()
+
+    run(scenario)

@@ -371,3 +371,162 @@ def test_market_alerts_that_cannot_start_say_so_and_never_stop_order_alerts(
 
     run(scenario)
     assert "Market alerts could not start; order alerts carry on" in caplog.text
+
+
+# ---- review M2, M3 (P01-P08), L5 ----------------------------------------------------------------
+
+
+def test_a_state_item_waiting_takes_the_newer_card_in_place_of_the_older():
+    """Review M2: the queue keeps one card per alert, so a 'stopped' card cannot be pushed out by
+    the pushes after it."""
+
+    async def scenario():
+        async with FakeOpenAlgo() as notify:
+            pusher = Pusher(notify.url, httpx.AsyncClient(trust_env=False), FERNET,
+                            lambda ids, screens: None)  # fmt: skip
+            line = {"code": "ok", "line": "x", "real_time": True}
+            pusher.add(STATE_EVENT, {"engine": line, "alerts": [{"id": 1, "status": "active"},
+                                     {"id": 2, "status": "active"}], "removed": [],
+                                     "server_time": 1})  # fmt: skip
+            pusher.add(ALERT_EVENT, {"event_id": 9}, 9)
+            pusher.add(STATE_EVENT, {"engine": line | {"line": "y"}, "removed": [2], "server_time": 2,
+                                     "alerts": [{"id": 1, "status": "stopped"}]})  # fmt: skip
+            states = [i["data"] for i, _ in pusher._pending if i["event"] == STATE_EVENT]
+            assert len(states) == 1 and len(pusher._pending) == 2
+            assert states[0]["alerts"] == [{"id": 1, "status": "stopped"}]
+            assert states[0]["removed"] == [2] and states[0]["engine"]["line"] == "y"
+            assert states[0]["server_time"] == 2
+            await pusher.client.aclose()
+
+    run(scenario)
+
+
+def test_a_full_queue_says_what_it_dropped_and_sends_every_app_to_read_the_page_again(
+    monkeypatch, caplog
+):
+    """Review M2, P01-P03: the oldest item goes, loudly; a fire's delivery says why; and one
+    state push with `resync` follows, so no card stays out of date."""
+    monkeypatch.setattr(push, "MAX_PENDING", 3)
+
+    async def scenario():
+        async with FakeOpenAlgo() as notify:
+            dropped: list = []
+            pusher = Pusher(notify.url, httpx.AsyncClient(trust_env=False), FERNET,
+                            lambda ids, screens: None, dropped.append,
+                            lambda: {"engine": {"code": "ok"}, "alerts": [], "removed": [],
+                                     "server_time": 7})  # fmt: skip
+            for n in range(1, 5):
+                pusher.add(ALERT_EVENT, {"event_id": n}, n)
+            assert dropped == [[1]] and pusher.stats["dropped"] == 1
+            assert [e for _, e in pusher._pending] == [2, 3, 4]
+            pusher._pending.popleft()  # room again
+            pusher._queue_resync()
+            last, _ = pusher._pending[-1]
+            assert last["event"] == STATE_EVENT and last["data"]["resync"] is True
+            pusher._queue_resync()  # once per loss
+            assert sum(1 for i, _ in pusher._pending if i["event"] == STATE_EVENT) == 1
+            await pusher.client.aclose()
+
+    with caplog.at_level("WARNING", logger="sudarshan.alerts.market"):
+        run(scenario)
+    assert any("waiting faster than OpenAlgo takes them" in r.getMessage() for r in caplog.records)
+
+
+def test_a_dropped_fire_s_app_delivery_names_the_real_cause(alerts, quick):
+    """Review M2: it was 'OpenAlgo did not answer' for a push that was never tried."""
+
+    async def scenario():
+        clock = Clock(ist(2026, 10, 21, 10, 0))
+        async with FakeFeed(clock) as feed, FakeOpenAlgo() as notify:
+            settings = alerts(notify)
+            office, rt, task = await started(settings, feed, clock)
+            event_id = record(settings, "record_test", "t", "l", ms(clock()),
+                              {"telegram": False, "app": True})  # fmt: skip
+            rt._not_pushed([event_id])  # what the pusher calls for an item it dropped
+            await wait_until(lambda: record(settings, "events")[0]["deliveries"]["app"]["status"]
+                             == "not_sent")  # fmt: skip
+            assert record(settings, "events")[0]["deliveries"]["app"]["reason"] == push.APP_FULL
+            await closed(rt, task)
+
+    run(scenario)
+
+
+def test_the_batches_hold_fifty_items_when_the_text_is_small():
+    """Review P05: the earlier test always met the text limit first."""
+
+    async def scenario():
+        async with FakeOpenAlgo() as notify:
+            results: list = []
+            pusher, client, task = await pushing(notify, results)
+            for n in range(120):
+                pusher.add(ALERT_EVENT, {"event_id": n}, n)
+            await wait_until(lambda: sum(len(ids) for ids, _ in results) == 120)
+            assert [len(items) for items in notify.pushes] == [50, 50, 20]
+            await done(client, task)
+
+    run(scenario)
+
+
+def test_the_text_limit_counts_bytes_not_characters(monkeypatch):
+    """Review L5: Gujarati is three bytes a letter."""
+    monkeypatch.setattr(push, "MAX_TEXT", 2_000)
+
+    async def scenario():
+        async with FakeOpenAlgo() as notify:
+            results: list = []
+            pusher, client, task = await pushing(notify, results)
+            pusher.add(ALERT_EVENT, {"event_id": 1, "title": "ગ" * 900}, 1)  # 900 letters
+            await wait_until(lambda: results)
+            assert results == [([1], None)] and notify.pushes == []  # 2,700 bytes: too large
+            await done(client, task)
+
+    run(scenario)
+
+
+def test_the_screens_of_a_refused_push_are_not_believed():
+    """Review P07: an answer that is not a success is 'not sent', whatever screens it carries."""
+
+    async def scenario():
+        async with FakeOpenAlgo() as notify:
+            results: list = []
+            pusher, client, task = await pushing(notify, results)
+            notify.push_status = 500  # the fake sends screens: 3 with it
+            pusher.add(ALERT_EVENT, {"event_id": 5}, 5)
+            await wait_until(lambda: results)
+            assert results == [([5], None)]
+            await done(client, task)
+
+    run(scenario)
+
+
+def test_the_push_key_goes_only_to_a_port_this_user_listens_on(monkeypatch):
+    """Review P04: nothing is sent when the listener check refuses."""
+    monkeypatch.setattr(push.loopback, "refusal", lambda url: "another user listens there")
+
+    async def scenario():
+        async with FakeOpenAlgo() as notify:
+            results: list = []
+            pusher, client, task = await pushing(notify, results)
+            pusher.add(ALERT_EVENT, {"event_id": 5}, 5)
+            await wait_until(lambda: results)
+            assert results == [([5], None)] and notify.pushes == []
+            await done(client, task)
+
+    run(scenario)
+
+
+def test_items_added_within_the_wait_go_in_the_same_request(monkeypatch):
+    """Review P08: the 50 ms wait is what makes a burst one request."""
+
+    async def scenario():
+        async with FakeOpenAlgo() as notify:
+            results: list = []
+            pusher, client, task = await pushing(notify, results)
+            pusher.add(ALERT_EVENT, {"event_id": 1}, 1)
+            await asyncio.sleep(push.BATCH_S / 3)
+            pusher.add(ALERT_EVENT, {"event_id": 2}, 2)
+            await wait_until(lambda: results)
+            assert [len(items) for items in notify.pushes] == [2]
+            await done(client, task)
+
+    run(scenario)

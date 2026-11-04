@@ -193,14 +193,15 @@ class MarketApi:
             peer = writer.get_extra_info("peername")
             if not peer or peer[0] not in LOCAL_PEERS:  # defence in depth: bound to loopback
                 raise ApiError(403, "forbidden", WORDS["forbidden"])
-            method, path, body = await asyncio.wait_for(
-                _read(reader, writer, self.max_bytes), READ_TIMEOUT_S
-            )
+            try:
+                method, path, body = await asyncio.wait_for(
+                    _read(reader, writer, self.max_bytes), READ_TIMEOUT_S
+                )
+            except TimeoutError:  # only the read is a slow client; one raised by the desk is a 500
+                raise ApiError(408, "timeout", WORDS["failed"]) from None
             return 200, await self._route(method, path, body)
         except ApiError as exc:
             return exc.status, exc.body()
-        except TimeoutError:
-            return 408, ApiError(408, "timeout", WORDS["failed"]).body()
         except Exception:
             log.exception("a request to the market alerts' API failed")
             return 500, ApiError(500, "failed", WORDS["failed"]).body()

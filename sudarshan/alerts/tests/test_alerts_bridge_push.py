@@ -235,3 +235,59 @@ def test_a_push_reaches_the_owner_s_open_app_under_gunicorn(tmp_path, worker_cla
             if client is not None:
                 client.disconnect()
         _stop_group(server)
+
+
+def test_the_answer_counts_the_open_screens_in_the_room(room):
+    """Review B13: the count is the room's size, not a constant (the app delivery says 'Shown on
+    2 open screens')."""
+    app, client = room
+    http, first, _ = client()
+    client()
+    client(OWNER, join=False)  # never joined: not counted
+    body = http.post(PUSH, data=sealed([{"event": ALERT_EVENT, "data": FIRE}])).get_json()
+    assert body["screens"] == 2
+    assert http.post(PUSH, data=sealed([])).get_json()["screens"] == 2
+    first.disconnect()
+    assert http.post(PUSH, data=sealed([])).get_json()["screens"] == 1
+
+
+def test_an_owner_cookie_past_the_3_am_expiry_does_not_join_the_room(room, monkeypatch):
+    """Review B14: the join checks the session is still valid, not only whose it is."""
+    app, client = room
+    monkeypatch.setattr(bp_module, "is_session_valid", lambda: False)
+    _, sio, refused = client()
+    assert refused["ok"] is False and sio.get_received() == []
+
+
+def test_one_seal_is_accepted_once_when_eight_threads_present_it_together():
+    """Review H01: the nonce book's check and its write are one hold of its lock. The check is
+    slowed so that, without the lock, every thread passes it before any writes."""
+    import threading
+    import time
+
+    from sudarshan.autologin.handoff import HandoffRejected, open_sealed
+
+    class Slow(NonceBook):
+        def __contains__(self, nonce):
+            found = super().__contains__(nonce)
+            time.sleep(0.05)
+            return found
+
+    book, fernet = Slow(64), fernet_for(PEPPER, ALERTS_PUSH_INFO)
+    blob = seal(fernet, "push", items=[])
+    barrier, accepted = threading.Barrier(8), []
+
+    def present():
+        barrier.wait()
+        try:
+            open_sealed(fernet, blob, op="push", seen=book, max_bytes=1024)
+            accepted.append(1)
+        except HandoffRejected:
+            pass
+
+    threads = [threading.Thread(target=present) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert len(accepted) == 1

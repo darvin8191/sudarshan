@@ -310,7 +310,7 @@ class FakeOpenAlgo:
             return 403, {"status": "error", "message": "Forbidden"}
         self.pushes.append(message["items"])
         if self.push_status != 200:
-            return self.push_status, {"status": "error", "message": "refused"}
+            return self.push_status, {"status": "error", "message": "refused", "screens": 3}
         return 200, {"status": "success", "screens": self.screens}
 
     async def _serve(self, reader, writer) -> None:

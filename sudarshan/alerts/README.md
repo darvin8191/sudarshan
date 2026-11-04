@@ -370,6 +370,7 @@ sudarshan-feed (one Upstox socket) -> ZMQ 127.0.0.1:5581 (ticks, __health__)
 |---|---|---|
 | `SUDARSHAN_MARKET_ALERTS` | `off` | `on`: market alerts run in this service |
 | `SUDARSHAN_ALERTS_HTTP_PORT` | `5582` | the Alerts page's sealed local API (127.0.0.1) |
+| `SUDARSHAN_ALERTS_API_URL` | `http://127.0.0.1:` + the port above | OpenAlgo's `.env`: where the bridge calls the service; read only when it is plain http on this server. Leave it out unless the port above was changed in the service's file and OpenAlgo's `.env` cannot carry the same `SUDARSHAN_ALERTS_HTTP_PORT` |
 | `SUDARSHAN_ALERTS_FEED_URL` | `http://127.0.0.1:5580` | the feed's HTTP API, loopback only |
 | `SUDARSHAN_ALERTS_FEED_ZMQ` | `tcp://127.0.0.1:5581` | the feed's ZMQ, loopback only |
 | `SUDARSHAN_MARKET_ALERTS_MAX_INSTRUMENTS` | `200` | instruments followed at once (the feed's quota is 300) |

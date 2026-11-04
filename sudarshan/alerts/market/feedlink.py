@@ -107,14 +107,17 @@ class FeedLink:
         self.topics = want
 
     def waiting(self) -> bool:
-        """Frames are waiting on the socket, not yet taken."""
-        return not self.sock.closed and bool(self.sock.getsockopt(zmq.EVENTS) & zmq.POLLIN)
+        """Frames are waiting on the socket, not yet taken. Read with ``get``, not
+        ``getsockopt``: only ``get`` tells the asyncio socket that its pending receive has a
+        message to take, and reading EVENTS without it can swallow the wake-up the receive is
+        waiting for (a rare, lasting stall)."""
+        return not self.sock.closed and bool(self.sock.get(zmq.EVENTS) & zmq.POLLIN)
 
     async def receive(self) -> list[tuple[str, bytes]]:
         """Wait for a frame, then take those already waiting, up to DRAIN: (topic, payload),
         only health and the keys followed (a topic is matched exactly)."""
         frames = [await self.sock.recv_multipart()]
-        while len(frames) < DRAIN and self.sock.getsockopt(zmq.EVENTS) & zmq.POLLIN:
+        while len(frames) < DRAIN and self.sock.get(zmq.EVENTS) & zmq.POLLIN:
             frames.append(await self.sock.recv_multipart())
         out = []
         for frame in frames:
@@ -128,9 +131,9 @@ class FeedLink:
                 out.append((topic, frame[1]))
         return out
 
-    async def put_claims(self, keys: dict[str, str]) -> dict:
+    async def put_claims(self, keys: dict[str, str], timeout: float = HTTP_TIMEOUT_S) -> dict:
         """This service's whole set of keys, each in its mode; renews the claim."""
-        return await self._call("PUT", f"/claims/{CLIENT}", {"keys": keys})
+        return await self._call("PUT", f"/claims/{CLIENT}", {"keys": keys}, timeout=timeout)
 
     async def drop_claims(self) -> dict:
         return await self._call("DELETE", f"/claims/{CLIENT}")
@@ -146,10 +149,11 @@ class FeedLink:
                     found[key] = tick | {"key": key}
         return found
 
-    async def _call(self, method: str, path: str, body=None, params=None) -> dict:
+    async def _call(self, method: str, path: str, body=None, params=None,
+                    timeout: float = HTTP_TIMEOUT_S) -> dict:  # fmt: skip
         try:
             answer = await self.client.request(
-                method, self.http_url + path, json=body, params=params, timeout=HTTP_TIMEOUT_S
+                method, self.http_url + path, json=body, params=params, timeout=timeout
             )
         except httpx.HTTPError as exc:
             raise FeedUnreachable(str(exc)) from exc
