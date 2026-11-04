@@ -421,3 +421,22 @@ def test_a_change_is_committed_only_once_the_socket_is_free(tmp_path):
         assert host.socket.keys == {REL, INFY} and S in host.subs.claims
 
     asyncio.run(scenario())
+
+
+def test_a_release_is_committed_only_once_the_socket_is_free(tmp_path):
+    """Mutant C3 on the release: committed outside the send lock, the claim is gone from the
+    effective set while the socket is still being told the change before it."""
+
+    async def scenario():
+        host = Host(tmp_path, Socket(hold_s=0.2))
+        await host.put_claims(S, {INFY: "ltpc"})
+        host.socket.hold_s = 0.2
+        first = asyncio.create_task(host.put_claims(A, {REL: "full"}))
+        await asyncio.sleep(0.05)  # the first is on the socket now
+        second = asyncio.create_task(host.drop_claims(S))
+        await asyncio.sleep(0.05)
+        assert S in host.subs.claims  # the release waits for the socket
+        await asyncio.gather(first, second)
+        assert S not in host.subs.claims and host.socket.keys == {REL}
+
+    asyncio.run(scenario())
