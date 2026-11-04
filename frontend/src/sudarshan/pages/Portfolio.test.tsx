@@ -44,6 +44,7 @@ const STATE = {
     tab(2, 'Gold'),
     tab(3, 'Old one', { archived: true }),
   ],
+  accounts: [],
 }
 
 function show(url = '/portfolio') {
@@ -56,11 +57,24 @@ function show(url = '/portfolio') {
   )
 }
 
-beforeEach(() => api.call.mockReset())
+/** The service's answers by op: the state, and an empty tab for the Activity part. */
+function serve(state: object = STATE, extra: Record<string, unknown> = {}) {
+  api.call.mockImplementation(async (op: string) => {
+    if (op === 'state') return { enabled: true, data: state }
+    if (op in extra) return { enabled: true, data: extra[op] }
+    if (op === 'activities_list') return { enabled: true, data: { items: [], next: null } }
+    if (op === 'tab_get') return { enabled: true, data: { assets: [] } }
+    throw new Error(`unexpected op ${op}`)
+  })
+}
+
+beforeEach(() => {
+  api.call.mockReset()
+})
 
 describe('the Portfolio page', () => {
   it('shows the Upstox tab first with its parts, and the custom tabs without the archived', async () => {
-    api.call.mockResolvedValue({ enabled: true, data: STATE })
+    serve()
     show()
     await screen.findByRole('tab', { name: /Upstox/ })
     expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(
@@ -73,13 +87,14 @@ describe('the Portfolio page', () => {
         'History',
       ])
     )
-    expect(screen.queryByText('Old one')).toBeNull()
+    expect(screen.queryByRole('tab', { name: 'Old one' })).toBeNull() // archived: not in the strip
+    expect(screen.getByRole('button', { name: 'Old one' })).toBeTruthy() // but reachable
     expect(screen.getByText(/Every holding with its quantity/)).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Add' })).toBeNull() // no entries on Upstox
   })
 
   it('a custom tab has its own parts and an Add button', async () => {
-    api.call.mockResolvedValue({ enabled: true, data: STATE })
+    serve()
     show('/portfolio?tab=2&view=activity')
     await screen.findByRole('button', { name: 'Add' })
     expect(screen.getByText(/Every entry of this tab/)).toBeTruthy()
@@ -89,7 +104,7 @@ describe('the Portfolio page', () => {
   })
 
   it('a tab that is gone falls back to Upstox', async () => {
-    api.call.mockResolvedValue({ enabled: true, data: STATE })
+    serve()
     show('/portfolio?tab=99')
     await screen.findByText(/Every holding with its quantity/)
   })
@@ -107,22 +122,44 @@ describe('the Portfolio page', () => {
     )
     show()
     await screen.findByText(WORDS.not_answering)
-    api.call.mockResolvedValue({ enabled: true, data: STATE })
+    serve()
     await userEvent.click(screen.getByRole('button', { name: /Try again/ }))
     await waitFor(() => expect(screen.getByRole('tab', { name: /Upstox/ })).toBeTruthy())
   })
 
   it('a sheet in the address opens a stub that says what it is for, and says it is not ready', async () => {
-    api.call.mockResolvedValue({ enabled: true, data: STATE })
+    serve()
     show('/portfolio?tab=2&sheet=import')
     await screen.findByText('Import entries')
     expect(screen.getByText(WORDS.not_ready)).toBeTruthy()
   })
 
   it('says Real-time nowhere and never uses the arm words', async () => {
-    api.call.mockResolvedValue({ enabled: true, data: STATE })
+    serve()
     const { container } = show()
     await screen.findByRole('tab', { name: /Upstox/ })
     expect(container.textContent).not.toMatch(/\bLive\b|\barm(ed|ing)?\b/i)
+  })
+
+  it('an archived tab opens with a note, settings and no Add', async () => {
+    serve()
+    show('/portfolio?tab=3')
+    await screen.findByText(/This tab is archived/)
+    expect(screen.getByRole('button', { name: 'Tab settings' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Add' })).toBeNull()
+  })
+
+  it('opens the New tab sheet from the strip', async () => {
+    serve()
+    show()
+    await userEvent.click(await screen.findByRole('button', { name: 'New tab' }))
+    expect(await screen.findByRole('button', { name: 'Create tab' })).toBeTruthy()
+  })
+
+  it('opens Tab settings for the tab shown', async () => {
+    serve()
+    show('/portfolio?tab=2')
+    await userEvent.click(await screen.findByRole('button', { name: 'Tab settings' }))
+    expect(await screen.findByRole('button', { name: 'Archive this tab' })).toBeTruthy()
   })
 })

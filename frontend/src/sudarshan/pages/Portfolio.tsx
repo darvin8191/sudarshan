@@ -2,11 +2,21 @@
 // owner's own tabs, as the portfolio service holds them (blueprints/sudarshan_portfolio.py).
 // This is the shell: the tab strip, what is open kept in the address, and the states in words.
 // Each part of a tab arrives as its own change and replaces its stub in sudarshan/portfolio.
-import { useQuery } from '@tanstack/react-query'
-import { LoaderCircle, Plus, Power, RefreshCw, TriangleAlert } from 'lucide-react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  Archive,
+  LoaderCircle,
+  Plus,
+  Power,
+  RefreshCw,
+  Settings2,
+  TriangleAlert,
+} from 'lucide-react'
 import { useMemo } from 'react'
 import { portfolioCall, problemOf } from '@/sudarshan/portfolio/api'
 import { CustomStub, UpstoxStub } from '@/sudarshan/portfolio/StubViews'
+import { NewTabSheet } from '@/sudarshan/portfolio/sheets/NewTabSheet'
+import { TabSettingsSheet } from '@/sudarshan/portfolio/sheets/TabSettingsSheet'
 import { TabStrip } from '@/sudarshan/portfolio/TabStrip'
 import { WORDS } from '@/sudarshan/portfolio/types'
 import {
@@ -18,7 +28,8 @@ import {
 } from '@/sudarshan/portfolio/usePortfolioOverlay'
 import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
 
-export const PORTFOLIO_STATE_KEY = ['sudarshan', 'portfolio', 'state'] as const
+export const PORTFOLIO_KEY = ['sudarshan', 'portfolio'] as const
+export const PORTFOLIO_STATE_KEY = [...PORTFOLIO_KEY, 'state'] as const
 
 const CARD = 'rounded-[1.125rem] border bg-card px-4 py-6 text-center shadow-[var(--shadow-card)]'
 const ACTION =
@@ -67,16 +78,19 @@ export default function Portfolio() {
   })
 
   const result = state.data
-  const tabs = useMemo(
-    () =>
-      result?.enabled
-        ? result.data.tabs
-            .filter((t) => !t.system && !t.archived)
-            .sort((a, b) => a.position - b.position)
-        : [],
+  const custom = useMemo(
+    () => (result?.enabled ? result.data.tabs.filter((t) => !t.system) : []),
     [result]
   )
-  const shown = tab !== null && tabs.some((t) => t.id === tab) ? tab : null
+  const tabs = useMemo(
+    () => custom.filter((t) => !t.archived).sort((a, b) => a.position - b.position),
+    [custom]
+  )
+  const archived = useMemo(() => custom.filter((t) => t.archived), [custom])
+  const shown = tab !== null && custom.some((t) => t.id === tab) ? tab : null
+  const current = shown === null ? null : (custom.find((t) => t.id === shown) ?? null)
+  const queries = useQueryClient()
+  const refresh = () => queries.invalidateQueries({ queryKey: PORTFOLIO_KEY })
   // A tab that is gone (archived or deleted elsewhere) shows Upstox, from its first part.
   const part = shown === tab ? view : UPSTOX_VIEWS[0]
   const sheet = overlay ? SHEET_WORDS[overlay.kind] : null
@@ -118,10 +132,18 @@ export default function Portfolio() {
     )
   } else {
     body =
-      shown === null ? (
+      current === null ? (
         <UpstoxStub view={part as UpstoxView} onView={setView} />
       ) : (
-        <CustomStub view={part as CustomView} onView={setView} />
+        <div className="flex flex-col gap-3">
+          {current.archived && (
+            <p className="flex items-center gap-2 rounded-[0.875rem] border border-[color:var(--border-strong)] bg-card px-3 py-2 text-sm font-medium text-[color:var(--text-secondary)]">
+              <Archive aria-hidden="true" className="size-4 shrink-0" />
+              This tab is archived. It is hidden from the dashboard and kept as it is.
+            </p>
+          )}
+          <CustomStub view={part as CustomView} onView={setView} />
+        </div>
       )
   }
 
@@ -132,15 +154,27 @@ export default function Portfolio() {
         <h1 className="sd-display text-[1.75rem] leading-none font-bold md:text-[2rem]">
           Portfolio
         </h1>
-        {usable && shown !== null && (
-          <button
-            type="button"
-            onClick={() => open({ kind: 'add' })}
-            className={`${ACTION} bg-[color:var(--brand)] text-white hover:bg-[color:var(--brand-hover)]`}
-          >
-            <Plus aria-hidden="true" className="size-4" />
-            Add
-          </button>
+        {usable && current !== null && (
+          <div className="flex gap-2">
+            <button
+              type="button"
+              aria-label="Tab settings"
+              onClick={() => open({ kind: 'settings' })}
+              className={`${ACTION} border border-input bg-card px-3 hover:bg-accent`}
+            >
+              <Settings2 aria-hidden="true" className="size-5" />
+            </button>
+            {!current.archived && (
+              <button
+                type="button"
+                onClick={() => open({ kind: 'add' })}
+                className={`${ACTION} bg-[color:var(--brand)] text-white hover:bg-[color:var(--brand-hover)]`}
+              >
+                <Plus aria-hidden="true" className="size-4" />
+                Add
+              </button>
+            )}
+          </div>
         )}
       </div>
       {usable && (
@@ -151,9 +185,48 @@ export default function Portfolio() {
           onNew={() => open({ kind: 'new-tab' })}
         />
       )}
+      {usable && archived.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-semibold text-[color:var(--text-secondary)]">Archived</span>
+          {archived.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => selectTab(t.id)}
+              aria-pressed={shown === t.id}
+              className="inline-flex min-h-12 items-center gap-2 rounded-full border border-dashed border-[color:var(--border-strong)] bg-card px-4 text-sm font-medium text-[color:var(--text-secondary)] outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            >
+              <Archive aria-hidden="true" className="size-4" />
+              {t.name}
+            </button>
+          ))}
+        </div>
+      )}
       {body}
+      <NewTabSheet
+        open={overlay?.kind === 'new-tab'}
+        onClose={close}
+        tabCount={tabs.length}
+        onCreated={(made) => {
+          void refresh()
+          close()
+          selectTab(made.id)
+        }}
+      />
+      <TabSettingsSheet
+        open={overlay?.kind === 'settings' && current !== null}
+        onClose={close}
+        tab={current}
+        siblings={tabs}
+        onChanged={() => void refresh()}
+        onDeleted={() => {
+          void refresh()
+          close()
+          selectTab(null)
+        }}
+      />
       <BottomSheet
-        open={sheet !== null}
+        open={sheet !== null && overlay?.kind !== 'new-tab' && overlay?.kind !== 'settings'}
         onOpenChange={(next) => !next && close()}
         title={sheet?.title ?? ''}
       >
