@@ -18,9 +18,10 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from sqlalchemy import Boolean, Column, DateTime, Float, Index, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, Float, Index, Integer, String, Text, inspect
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import declarative_base
-from sqlalchemy.schema import CreateIndex, CreateTable
+from sqlalchemy.schema import CreateColumn, CreateIndex, CreateTable
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DB_FILENAME = "sudarshan_risk.db"
@@ -151,15 +152,54 @@ class AuditRow(Base):
 TABLES = tuple(Base.metadata.sorted_tables)
 
 
-def create_missing(engine) -> None:
-    """Every table and index in this file, each made only when it is missing, one statement
-    apiece. Two first uses at once (two threads, or the app and the migration) never trip over
-    each other: a check followed by a CREATE lets another creator in between, on any table."""
+def create_tables(engine) -> None:
+    """Every table in this file, each made only when it is missing, one statement apiece."""
     with engine.begin() as connection:
         for table in TABLES:
             connection.execute(CreateTable(table, if_not_exists=True))
+
+
+def add_missing_columns(engine) -> list[tuple[str, str]]:
+    """Add each column a table already in the file lacks (an older build made it without), and
+    return the (table, column) pairs added. A key column cannot be added and is left. Two
+    callers at once are safe: a column the other added first is not an error."""
+    inspector = inspect(engine)
+    added = []
+    for table in TABLES:
+        if table.name not in inspector.get_table_names():
+            continue
+        have = {column["name"] for column in inspector.get_columns(table.name)}
+        for column in table.columns:
+            if column.name in have or column.primary_key:
+                continue
+            ddl = CreateColumn(column).compile(dialect=engine.dialect)
+            try:
+                with engine.begin() as connection:
+                    connection.exec_driver_sql(f"ALTER TABLE {table.name} ADD COLUMN {ddl}")
+            except OperationalError as exc:
+                if "duplicate column" not in str(exc).lower():
+                    raise
+            added.append((table.name, column.name))
+    return added
+
+
+def create_indexes(engine) -> None:
+    """Every index in this file, each made only when it is missing. Run after the columns an
+    index covers exist."""
+    with engine.begin() as connection:
+        for table in TABLES:
             for index in sorted(table.indexes, key=lambda index: index.name):
                 connection.execute(CreateIndex(index, if_not_exists=True))
+
+
+def create_missing(engine) -> None:
+    """Every table, column and index in this file, each made only when it is missing, the
+    columns before the indexes that cover them (an older file may lack a column an index
+    names). Two first uses at once (two threads, or the app and the migration) never trip over
+    each other: a check followed by a CREATE lets another creator in between, on any table."""
+    create_tables(engine)
+    add_missing_columns(engine)
+    create_indexes(engine)
 
 
 #: The tables that hold one row, id 1, which must exist for the app to read them.

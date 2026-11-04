@@ -150,7 +150,7 @@ def apply(path):
         absent = missing_tables(engine)
         # Each only when missing: an interrupted run completes cleanly, and the app's own first
         # use at the same moment is no failure.
-        _schema().create_missing(engine)
+        _schema().create_tables(engine)  # the columns, then the indexes that cover them
         for name in absent:
             print(f"  [OK] Created {name}")
         for table, column in missing_columns(engine):
@@ -162,9 +162,9 @@ def apply(path):
                 connection.exec_driver_sql(f"ALTER TABLE {table.name} ADD COLUMN {ddl}")
             print(f"  [OK] Added {table.name}.{column.name}")
         for index in missing_indexes(engine):
-            with engine.begin() as connection:
-                index.create(bind=connection)
-            print(f"  [OK] Added index {index.name}")
+            if index.table.name not in absent:
+                print(f"  [OK] Added index {index.name}")
+        _schema().create_indexes(engine)  # each only when missing
         for name in missing_rows(engine):
             # Every value the model defaults, written out: a column an earlier build created
             # without a default would otherwise refuse the row (every guard off).

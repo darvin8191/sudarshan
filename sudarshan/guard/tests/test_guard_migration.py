@@ -164,3 +164,46 @@ def test_status_does_not_say_up_to_date_when_a_default_row_is_missing(tmp_path, 
     assert _row(path, table) is None  # --status changed nothing
     assert _run(path).returncode == 0
     assert _row(path, table) is not None  # and the migration puts it back
+
+
+def _older_audit_file(path: Path) -> None:
+    """A risk file from a build whose audit table had no merge_key column (nor its index)."""
+    from sudarshan.guard import store
+
+    fresh = store.RiskStore(path)
+    fresh.settings()  # made whole
+    fresh.dispose()
+    with closing(sqlite3.connect(path)) as db, db:
+        db.execute("DROP INDEX ix_risk_audit_merge")
+        db.execute("ALTER TABLE risk_audit DROP COLUMN merge_key")
+
+
+def _audit_columns(path: Path) -> set[str]:
+    with closing(sqlite3.connect(path)) as db, db:
+        return {row[1] for row in db.execute("PRAGMA table_info(risk_audit)")}
+
+
+def test_the_migration_adds_a_missing_column_before_the_index_that_covers_it(tmp_path):
+    """Release review A, L1: the indexes were created first and failed on the absent column."""
+    path = tmp_path / "sudarshan_risk.db"
+    _older_audit_file(path)
+    done = _run(path)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "merge_key" in _audit_columns(path)
+    with closing(sqlite3.connect(path)) as db, db:
+        names = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+    assert "ix_risk_audit_merge" in names
+    assert "up to date" in _run(path, "--status").stdout.lower()
+
+
+def test_the_app_s_first_use_adds_a_missing_column_before_the_index(tmp_path):
+    from sudarshan.guard import store
+
+    path = tmp_path / "sudarshan_risk.db"
+    _older_audit_file(path)
+    fresh = store.RiskStore(path)
+    try:
+        fresh.settings()  # the first use prepares the file
+    finally:
+        fresh.dispose()
+    assert "merge_key" in _audit_columns(path)
