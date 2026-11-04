@@ -1,0 +1,470 @@
+{
+ "about": "Golden vectors for imports/zerodha.py (PA8, Z1 and its neighbours): a tradebook's equity rows with the trade id as the duplicate key, rows that cannot be used in words, and a file that is not a tradebook. The rows are synthetic.",
+ "columns": [
+  "symbol",
+  "isin",
+  "trade_date",
+  "exchange",
+  "segment",
+  "series",
+  "trade_type",
+  "auction",
+  "quantity",
+  "price",
+  "trade_id",
+  "order_id",
+  "order_execution_time"
+ ],
+ "world": {
+  "today": 20261030,
+  "accounts": {
+   "1": "Zerodha",
+   "2": "Account B"
+  },
+  "default_account": 1,
+  "assets": {
+   "1": {
+    "name": "RELIANCE",
+    "symbol": "RELIANCE",
+    "isin": "INE000A00001"
+   },
+   "2": {
+    "name": "TCS",
+    "symbol": "TCS",
+    "isin": "INE000A00002"
+   }
+  }
+ },
+ "previews": [
+  {
+   "id": "Z1",
+   "title": "buys and a sale, trade ids as keys",
+   "why": "Two purchases and a sale. 1400.50 is 14,005,000 price_u; 1401.25 is 14,012,500. The 15 shares held after the purchases cover the sale of 12. Each key is zerodha: and the trade id. The account is the one chosen for the import (1), because a tradebook names none.",
+   "text": "symbol,isin,trade_date,exchange,segment,series,trade_type,auction,quantity,price,trade_id,order_id,order_execution_time\nRELIANCE,,2026-01-05,NSE,EQ,EQ,buy,false,10,1400.50,100001,ORD100001,2026-01-05T09:20:05\nRELIANCE,,2026-01-05,NSE,EQ,EQ,buy,false,5,1401.25,100002,ORD100002,2026-01-05T09:20:05\nRELIANCE,,2026-03-02,NSE,EQ,EQ,sell,false,12,1500.00,100003,ORD100003,2026-03-02T09:20:05\n",
+   "existing": [],
+   "keys": {},
+   "expect": {
+    "summary": "3 new",
+    "unused": [],
+    "rows": [
+     {
+      "row": 2,
+      "status": "new",
+      "words": null,
+      "entry": {
+       "kind": "BUY",
+       "trade_date": 20260105,
+       "account_id": 1,
+       "asset_id": 1,
+       "qty_u": 10000000,
+       "price_u": 14005000
+      },
+      "key": "zerodha:100001"
+     },
+     {
+      "row": 3,
+      "status": "new",
+      "words": null,
+      "entry": {
+       "kind": "BUY",
+       "trade_date": 20260105,
+       "account_id": 1,
+       "asset_id": 1,
+       "qty_u": 5000000,
+       "price_u": 14012500
+      },
+      "key": "zerodha:100002"
+     },
+     {
+      "row": 4,
+      "status": "new",
+      "words": null,
+      "entry": {
+       "kind": "SELL",
+       "trade_date": 20260302,
+       "account_id": 1,
+       "asset_id": 1,
+       "qty_u": 12000000,
+       "price_u": 15000000
+      },
+      "key": "zerodha:100003"
+     }
+    ]
+   }
+  },
+  {
+   "id": "Z1b",
+   "title": "the same file again adds nothing",
+   "why": "The tab holds the three trade ids: every row is already here, with the day the first import was made (this year, so without the year).",
+   "text": "symbol,isin,trade_date,exchange,segment,series,trade_type,auction,quantity,price,trade_id,order_id,order_execution_time\nRELIANCE,,2026-01-05,NSE,EQ,EQ,buy,false,10,1400.50,100001,ORD100001,2026-01-05T09:20:05\nRELIANCE,,2026-01-05,NSE,EQ,EQ,buy,false,5,1401.25,100002,ORD100002,2026-01-05T09:20:05\nRELIANCE,,2026-03-02,NSE,EQ,EQ,sell,false,12,1500.00,100003,ORD100003,2026-03-02T09:20:05\n",
+   "existing": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260101,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 15000000,
+     "price_u": 1000000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "SELL",
+     "trade_date": 20260302,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 12000000,
+     "price_u": 1000000
+    }
+   ],
+   "keys": {
+    "zerodha:100001": 20261015,
+    "zerodha:100002": 20261015,
+    "zerodha:100003": 20261015
+   },
+   "expect": {
+    "summary": "3 already in this tab",
+    "unused": [],
+    "rows": [
+     {
+      "row": 2,
+      "status": "dup",
+      "words": "Row 2 is already in this tab (imported 15 Oct).",
+      "entry": {
+       "kind": "BUY",
+       "trade_date": 20260105,
+       "account_id": 1,
+       "asset_id": 1,
+       "qty_u": 10000000,
+       "price_u": 14005000
+      },
+      "key": "zerodha:100001"
+     },
+     {
+      "row": 3,
+      "status": "dup",
+      "words": "Row 3 is already in this tab (imported 15 Oct).",
+      "entry": {
+       "kind": "BUY",
+       "trade_date": 20260105,
+       "account_id": 1,
+       "asset_id": 1,
+       "qty_u": 5000000,
+       "price_u": 14012500
+      },
+      "key": "zerodha:100002"
+     },
+     {
+      "row": 4,
+      "status": "dup",
+      "words": "Row 4 is already in this tab (imported 15 Oct).",
+      "entry": {
+       "kind": "SELL",
+       "trade_date": 20260302,
+       "account_id": 1,
+       "asset_id": 1,
+       "qty_u": 12000000,
+       "price_u": 15000000
+      },
+      "key": "zerodha:100003"
+     }
+    ]
+   }
+  },
+  {
+   "id": "Z1c",
+   "title": "a later file that overlaps the first",
+   "why": "A second download covers 2 Mar to 30 Jun and repeats the sale (trade id 100003); the purchase of 4 on 6 Jun is new. The 15 shares held cover the sale already in the tab.",
+   "text": "symbol,isin,trade_date,exchange,segment,series,trade_type,auction,quantity,price,trade_id,order_id,order_execution_time\nRELIANCE,,2026-03-02,NSE,EQ,EQ,sell,false,12,1500.00,100003,ORD100003,2026-03-02T09:20:05\nRELIANCE,,2026-06-06,NSE,EQ,EQ,buy,false,4,1480.00,100004,ORD100004,2026-06-06T09:20:05\n",
+   "existing": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260101,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 15000000,
+     "price_u": 1000000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "SELL",
+     "trade_date": 20260302,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 12000000,
+     "price_u": 1000000
+    }
+   ],
+   "keys": {
+    "zerodha:100003": 20261015
+   },
+   "expect": {
+    "summary": "1 new, 1 already in this tab",
+    "unused": [],
+    "rows": [
+     {
+      "row": 2,
+      "status": "dup",
+      "words": "Row 2 is already in this tab (imported 15 Oct).",
+      "entry": {
+       "kind": "SELL",
+       "trade_date": 20260302,
+       "account_id": 1,
+       "asset_id": 1,
+       "qty_u": 12000000,
+       "price_u": 15000000
+      },
+      "key": "zerodha:100003"
+     },
+     {
+      "row": 3,
+      "status": "new",
+      "words": null,
+      "entry": {
+       "kind": "BUY",
+       "trade_date": 20260606,
+       "account_id": 1,
+       "asset_id": 1,
+       "qty_u": 4000000,
+       "price_u": 14800000
+      },
+      "key": "zerodha:100004"
+     }
+    ]
+   }
+  },
+  {
+   "id": "Z2",
+   "title": "the same trade id twice in one file",
+   "why": "A trade id names one trade. Row 3 repeats row 2's id, so it is the same trade as row 2 and is not imported twice, whatever else its cells say.",
+   "text": "symbol,isin,trade_date,exchange,segment,series,trade_type,auction,quantity,price,trade_id,order_id,order_execution_time\nTCS,,2026-01-05,NSE,EQ,EQ,buy,false,2,3000.00,200001,ORD200001,2026-01-05T09:20:05\nTCS,,2026-01-05,NSE,EQ,EQ,buy,false,2,3000.00,200001,ORD200001,2026-01-05T09:20:05\n",
+   "existing": [],
+   "keys": {},
+   "expect": {
+    "summary": "1 new, 1 already in this tab",
+    "unused": [],
+    "rows": [
+     {
+      "row": 2,
+      "status": "new",
+      "words": null,
+      "entry": {
+       "kind": "BUY",
+       "trade_date": 20260105,
+       "account_id": 1,
+       "asset_id": 2,
+       "qty_u": 2000000,
+       "price_u": 30000000
+      },
+      "key": "zerodha:200001"
+     },
+     {
+      "row": 3,
+      "status": "dup",
+      "words": "Row 3 is the same trade as row 2, which is in this file too.",
+      "entry": {
+       "kind": "BUY",
+       "trade_date": 20260105,
+       "account_id": 1,
+       "asset_id": 2,
+       "qty_u": 2000000,
+       "price_u": 30000000
+      },
+      "key": "zerodha:200001"
+     }
+    ]
+   }
+  },
+  {
+   "id": "Z3",
+   "title": "identical trades with different trade ids are two trades",
+   "why": "Zerodha splits one order into several fills at the same price; each has its own trade id, so both import (the key is the id, not the content).",
+   "text": "symbol,isin,trade_date,exchange,segment,series,trade_type,auction,quantity,price,trade_id,order_id,order_execution_time\nTCS,,2026-01-05,NSE,EQ,EQ,buy,false,2,3000.00,200001,ORD200001,2026-01-05T09:20:05\nTCS,,2026-01-05,NSE,EQ,EQ,buy,false,2,3000.00,200002,ORD200002,2026-01-05T09:20:05\n",
+   "existing": [],
+   "keys": {},
+   "expect": {
+    "summary": "2 new",
+    "unused": [],
+    "rows": [
+     {
+      "row": 2,
+      "status": "new",
+      "words": null,
+      "entry": {
+       "kind": "BUY",
+       "trade_date": 20260105,
+       "account_id": 1,
+       "asset_id": 2,
+       "qty_u": 2000000,
+       "price_u": 30000000
+      },
+      "key": "zerodha:200001"
+     },
+     {
+      "row": 3,
+      "status": "new",
+      "words": null,
+      "entry": {
+       "kind": "BUY",
+       "trade_date": 20260105,
+       "account_id": 1,
+       "asset_id": 2,
+       "qty_u": 2000000,
+       "price_u": 30000000
+      },
+      "key": "zerodha:200002"
+     }
+    ]
+   }
+  },
+  {
+   "id": "Z4",
+   "title": "rows that cannot be used, in words",
+   "why": "Row 2 is a futures-and-options trade (segment FO): only EQ is imported. Row 3 has no trade id. Row 4's trade type is neither buy nor sell. Row 5 has no quantity. Row 6's symbol is not in the instrument list. Row 7 is dated after 30 Oct 2026. Row 8 is fine.",
+   "text": "symbol,isin,trade_date,exchange,segment,series,trade_type,auction,quantity,price,trade_id,order_id,order_execution_time\nRELIANCE,,2026-01-05,NSE,FO,EQ,buy,false,10,1400.00,300001,ORD300001,2026-01-05T09:20:05\nRELIANCE,,2026-01-05,NSE,EQ,EQ,buy,false,10,1400.00,,ORD,2026-01-05T09:20:05\nRELIANCE,,2026-01-05,NSE,EQ,EQ,hold,false,10,1400.00,300003,ORD300003,2026-01-05T09:20:05\nRELIANCE,,2026-01-05,NSE,EQ,EQ,buy,false,,1400.00,300004,ORD300004,2026-01-05T09:20:05\nTATAMTR,,2026-01-05,NSE,EQ,EQ,buy,false,10,1400.00,300005,ORD300005,2026-01-05T09:20:05\nRELIANCE,,2026-11-02,NSE,EQ,EQ,buy,false,10,1400.00,300006,ORD300006,2026-11-02T09:20:05\nRELIANCE,,2026-01-05,NSE,EQ,EQ,buy,false,1,1400.00,300007,ORD300007,2026-01-05T09:20:05\n",
+   "existing": [],
+   "keys": {},
+   "expect": {
+    "summary": "1 new, 6 with problems",
+    "unused": [],
+    "rows": [
+     {
+      "row": 2,
+      "status": "bad",
+      "words": "Row 2: This is a FO trade. Only equity trades (segment EQ) can be imported for now.",
+      "entry": null,
+      "key": null
+     },
+     {
+      "row": 3,
+      "status": "bad",
+      "words": "Row 3: This trade has no trade id, so it cannot be told from another trade.",
+      "entry": null,
+      "key": null
+     },
+     {
+      "row": 4,
+      "status": "bad",
+      "words": "Row 4: The trade type 'hold' is not buy or sell.",
+      "entry": null,
+      "key": null
+     },
+     {
+      "row": 5,
+      "status": "bad",
+      "words": "Row 5: The quantity '' is not a number. Write it with digits and a decimal point only, without commas or a currency sign.",
+      "entry": null,
+      "key": null
+     },
+     {
+      "row": 6,
+      "status": "bad",
+      "words": "Row 6: TATAMTR is not in today's instrument list. Check the symbol.",
+      "entry": null,
+      "key": null
+     },
+     {
+      "row": 7,
+      "status": "bad",
+      "words": "Row 7: 2 Nov 2026 is after today. A date after today can be saved as a draft only.",
+      "entry": null,
+      "key": null
+     },
+     {
+      "row": 8,
+      "status": "new",
+      "words": null,
+      "entry": {
+       "kind": "BUY",
+       "trade_date": 20260105,
+       "account_id": 1,
+       "asset_id": 1,
+       "qty_u": 1000000,
+       "price_u": 14000000
+      },
+      "key": "zerodha:300007"
+     }
+    ]
+   }
+  },
+  {
+   "id": "Z5",
+   "title": "a sale beyond what the tab holds",
+   "why": "The tab holds nothing of TCS; a sale of 3 on 5 Jan cannot be saved, with the ledger's own sentence. Its key is kept so that the same row is recognised when it is read again.",
+   "text": "symbol,isin,trade_date,exchange,segment,series,trade_type,auction,quantity,price,trade_id,order_id,order_execution_time\nTCS,,2026-01-05,NSE,EQ,EQ,sell,false,3,3000.00,400001,ORD400001,2026-01-05T09:20:05\n",
+   "existing": [],
+   "keys": {},
+   "expect": {
+    "summary": "1 with a problem",
+    "unused": [],
+    "rows": [
+     {
+      "row": 2,
+      "status": "bad",
+      "words": "Row 2: Zerodha holds no TCS on 5 Jan 2026, so a sale of 3 cannot be saved. Add the missing purchase first.",
+      "entry": {
+       "kind": "SELL",
+       "trade_date": 20260105,
+       "account_id": 1,
+       "asset_id": 2,
+       "qty_u": 3000000,
+       "price_u": 30000000
+      },
+      "key": "zerodha:400001"
+     }
+    ]
+   }
+  },
+  {
+   "id": "Z6",
+   "title": "a header written as the spreadsheet shows it, no segment column, a column of no use",
+   "why": "Header cells are read without regard to case, with spaces as underscores ('Trade Date' is trade_date). A file with no segment column is taken as equity. A column the format has no name for ('Remarks') is named after the counts so that it is not a mystery. The ISIN finds the holding when the symbol is not the instrument list's.",
+   "text": "Symbol,ISIN,Trade Date,Exchange,Trade Type,Quantity,Price,Trade ID,Remarks\nOLDNAME,INE000A00002,2026-01-05,BSE,BUY,3,3000,500001,x\n",
+   "existing": [],
+   "keys": {},
+   "expect": {
+    "summary": "1 new",
+    "unused": [
+     "remarks"
+    ],
+    "rows": [
+     {
+      "row": 2,
+      "status": "new",
+      "words": null,
+      "entry": {
+       "kind": "BUY",
+       "trade_date": 20260105,
+       "account_id": 1,
+       "asset_id": 2,
+       "qty_u": 3000000,
+       "price_u": 30000000
+      },
+      "key": "zerodha:500001"
+     }
+    ]
+   }
+  }
+ ],
+ "refused": [
+  {
+   "id": "Z7",
+   "title": "a file that is not a tradebook",
+   "why": "The first row lacks price and trade_id, which a tradebook always has: the whole file is refused with a sentence that names them.",
+   "text": "symbol,trade_date,trade_type,quantity\nTCS,2026-01-05,buy,1\n",
+   "expect": "This does not look like a Zerodha tradebook. Its first row has no 'price' and 'trade_id' columns. Download the tradebook from Zerodha Console as CSV and choose that file."
+  },
+  {
+   "id": "Z8",
+   "title": "a generic CSV is not a tradebook",
+   "why": "The generic format's header has no trade_id, trade_type or trade_date.",
+   "text": "date,action,symbol,quantity,price\n2026-01-05,BUY,TCS,1,3000\n",
+   "expect": "This does not look like a Zerodha tradebook. Its first row has no 'trade_date', 'trade_type' and 'trade_id' columns. Download the tradebook from Zerodha Console as CSV and choose that file."
+  }
+ ]
+}

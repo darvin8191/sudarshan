@@ -460,3 +460,27 @@ def import_summary(new: int, dup: int, bad: int) -> str:
 def import_unused(names: Sequence[str]) -> str:
     """The columns of the file that nothing is read from (a misspelt name is the usual cause)."""
     return f"Not used: {', '.join(shown(name, 20) for name in names)}."
+
+
+# ---- the Zerodha tradebook (design 4.11) -------------------------------------------------------
+ROW_NO_TRADE_ID = "This trade has no trade id, so it cannot be told from another trade."
+
+
+def import_not_tradebook(missing: Sequence[str]) -> str:
+    """The first row is not a Zerodha tradebook's: it lacks columns the tradebook always has."""
+    return (
+        "This does not look like a Zerodha tradebook. "
+        f"Its first row has no {_list(list(missing))} column{'' if len(missing) == 1 else 's'}. "
+        "Download the tradebook from Zerodha Console as CSV and choose that file."
+    )
+
+
+def row_segment(segment: str) -> str:
+    return (
+        f"This is a {shown(segment)} trade. "
+        "Only equity trades (segment EQ) can be imported for now."
+    )
+
+
+def row_trade_type(text: str) -> str:
+    return f"The trade type '{shown(text)}' is not buy or sell."
