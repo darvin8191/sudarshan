@@ -5,6 +5,108 @@ publish. The owner publishes each release on GitHub. The server's deploy timer t
 outside 08:30-16:00 IST on trading days (09:00-15:45 until v0.3.1), keeps backups, and rolls
 back if the app does not come up healthy.
 
+## v0.4.1 (4 Nov 2026)
+
+Live exits that Upstox's order book decides, sized from today's fills; a smart order to size 0
+that never opens a position; Telegram for Cancel all in Analyze mode; phone session fixes. It
+includes everything in v0.4.0. **Publish it on Monday 9 Nov or later: never on Saturday 7 or
+Sunday 8 Nov (Muhurat).**
+
+### What changes for you
+- **Live: one exit at a time for each position, until Upstox's order book shows it done.** After
+  an exit is sent (a card, a sheet, Exit all or a TradingView exit), a second exit of the same
+  position is refused while Upstox's order book shows the first one working. The message names
+  that order and says to cancel or modify it in Orders. The hold ends when the book shows the
+  order complete, cancelled or rejected, not after a fixed time. When the book cannot be read, it
+  lasts up to 150 s and says the first exit is not confirmed.
+- **Live exit sizes come from today's fills as well as the positions.** Upstox's positions can lag
+  a fill by up to a minute. Every exit now reads the positions and then the order list, and
+  corrects each size by the fills the positions have not shown yet. A position converted in the
+  Upstox app (Intraday to Delivery, say) is exited in the product that now holds it.
+- **A smart order to position size 0 never opens a position, in Live and in Analyze mode.** When
+  the position is already flat, nothing is sent, the answer is "No open position found. Not
+  placing exit order." and, in Live, Telegram tells you. If your own exit is still working at
+  Upstox, the answer names that order instead, because it can still fill. This covers
+  TradingView's own exit arriving after you exited by hand or a stop flattened the position, and
+  the exit of an entry that never filled. TradingView's strategy alerts carry the size after the
+  order, so their entries are never size 0. An exit sent for a product that holds nothing while
+  another product does (TradingView set to Intraday, the position in Delivery) also sends nothing,
+  and says where the position is.
+- **A smart order that reduces or reverses a position is sized from the corrected figure**, so a
+  lagging positions row can no longer make it sell more than you hold, and it waits while a market
+  order on the closing side is still working, so a repeated reversal alert cannot double it. One
+  that only adds is sized as before, without reading the order list.
+- **A single exit waits while a market order on the closing side is working**, even one placed
+  from the Upstox app or before a restart. A resting stop loss or target (SL, SL-M, LIMIT) does not
+  block it. Exit all leaves such a position out and names the order.
+- **Exit all** reads the positions and then the order list once, never waits, and lists every
+  position it left out with the reason. A part-filled exit that was cancelled is sized from the
+  order list, and the sending budget covers the wait at the 5-a-second pacer. A position traded
+  seconds ago that Upstox's positions do not show yet is named as not closed, and the answer never
+  says all positions were squared off while one is left.
+- **Every exit message is a sentence.** Anything that may have reached Upstox reads "not
+  confirmed", never a raw error, and Upstox's own refusal is shown without its error code.
+- **Telegram tells you about Cancel all in Analyze mode**, like a single cancel. It used to stay
+  silent (the v0.3.3 Analyze step).
+- **Phone sessions:**
+  - a session check asked before a logout no longer lands after it;
+  - a check that finds no API key clears the saved one, so the screen says so;
+  - a ready screen checks the session again when the phone wakes or the feed signs in again;
+  - the broker TOTP login syncs the session before the first screen.
+- **The Alerts page's disabled New button** reads in sunlight.
+- **The risk guard, still Analyze mode only:** with Upstox's order book unreadable, the kill switch
+  cancels without it and sends no market exit; a second exit waits while the first market exit is
+  working; an exit nobody judged is judged by the last positions read; its history file upgrades
+  cleanly from an older one.
+
+### What you must do
+- **Publish it** on Monday 9 Nov or later (the link is in your task list). The server installs it
+  outside 08:30-16:00 by itself. If v0.4.0 is not installed yet, its steps (the backup check,
+  sessions S1 and S2) apply as well.
+- **When an exit says Upstox did not send your orders in time, close that position from the Upstox
+  app** or try again in a minute. SUDARSHAN no longer guesses a size.
+- **If any alert, script or Flow of yours sends position size 0 to open a position, change it to
+  send the size after the order** (65 for a long, -65 for a short). TradingView strategy alerts
+  made on the TradingView page already do. Flow's Smart Order node used to say "0=use quantity";
+  it now says that 0 closes the position. A size-0 order is now only ever an exit.
+
+### What is refused now that used to be accepted
+- **Live, every exit SUDARSHAN sizes** (cards, sheets, Exit all, and TradingView smart orders that
+  reduce or reverse a position):
+  - when Upstox's order list does not come within 4 s (5 s for Exit all), nothing is sent, and
+    Exit all sends nothing at all;
+  - when the positions and the order list do not add up, nothing is sent for that position. Just
+    after a conversion, with a fill the positions do not show yet, this lasts until they do;
+  - a second exit of a position while the first is working at Upstox;
+  - a single exit while a market order on the closing side is working.
+- **Live and Analyze mode, smart orders to position size 0:**
+  - from flat, whatever their side or quantity: nothing is sent. It used to be placed as a new
+    order;
+  - while an exit of that position is being sent or held: refused with the reason.
+- **Live, a smart order that reduces or reverses** while a market order on the closing side is
+  still working: refused with the reason.
+- Smart orders that only add, and every order with a size other than 0 that finds nothing working,
+  go as before.
+
+### Not in this release yet
+- **The guard still checks Analyze mode only.** Live waits for sessions S1 and S2 and four kill
+  switch fixes found in this release's review.
+- **Plain TradingView order alerts** (an ordinary order, not a smart order) are not judged as
+  exits: a plain SELL after you exited by hand still opens a short. Keep the caution in your task
+  list for those.
+- **The scalping terminal's closes and the strategy module's exits** are not covered by the
+  one-at-a-time rule.
+- **Not measured yet, on the first Live trading day:** how long Upstox's order list takes to
+  answer; how Upstox shows a market exit resting at its protected price (the market-order wait
+  depends on it reading MARKET); the rows Upstox shows after a conversion; MCX quantities.
+- **A late TradingView exit that sent nothing is logged as a failed order** in OpenAlgo's API log,
+  as an exit with nothing open always was; nothing was sent.
+- **Exit all does not close a position Upstox's positions do not show yet**; it names it, and you
+  close it from the Upstox app or tap Exit all again a minute later.
+- **Two identical reversal alerts in the same second can still both go.** The wait starts once
+  Upstox's order list shows the first one working.
+- **An offsite copy of the backups**, and the feed's REST governor, stay as in v0.4.0.
+
 ## v0.4.0 (4 Nov 2026)
 
 The risk guard, tried in the sandbox first; market alerts, built and switched off; nightly
