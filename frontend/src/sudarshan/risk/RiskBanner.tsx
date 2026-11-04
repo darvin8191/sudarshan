@@ -8,9 +8,18 @@ import {
   dayLocked,
   dayUncheckedUntil,
   killSwitchOn,
+  killSwitchUnread,
+  reachOf,
   useKillSwitch,
   useKillSwitchSync,
 } from './killSwitch'
+
+/** Where the switch reaches from the page the owner is on (Live, or the sandbox in Analyze). */
+function useReach(): 'here' | 'sandbox' | 'none' {
+  const state = useKillSwitch()
+  const analyzer = useThemeStore((store) => store.appMode === 'analyzer')
+  return reachOf(state?.stage, analyzer)
+}
 
 /** Which book's lock a page shows: Analyze mode's orders go to the sandbox. */
 function useDayLocked(): boolean {
@@ -60,16 +69,42 @@ export function RiskBanner() {
   const state = useKillSwitch()
   const locked = useDayLocked()
   const unchecked = useDayUnchecked()
+  const reach = useReach()
+  if (killSwitchUnread(state)) {
+    return (
+      <output className="block" data-testid="risk-banner">
+        <Link to="/risk" className="sd-risk-banner">
+          <TriangleAlert aria-hidden="true" className="size-4 shrink-0" />
+          <span>
+            Kill switch state cannot be read <span aria-hidden="true">·</span> new orders are
+            refused until it can
+          </span>
+        </Link>
+      </output>
+    )
+  }
   if (killSwitchOn(state)) {
     return (
       // <output> is a status region, so the switch going on is announced.
       <output className="block" data-testid="risk-banner">
         <Link to="/risk" className="sd-risk-banner">
           <OctagonX aria-hidden="true" className="size-4 shrink-0" />
-          <span>
-            Kill switch on <span aria-hidden="true">·</span> new orders refused{' '}
-            <span aria-hidden="true">·</span> exits and cancels work
-          </span>
+          {reach === 'here' ? (
+            <span>
+              Kill switch on <span aria-hidden="true">·</span> new orders refused{' '}
+              <span aria-hidden="true">·</span> exits and cancels work
+            </span>
+          ) : reach === 'sandbox' ? (
+            <span>
+              Kill switch on for the sandbox only <span aria-hidden="true">·</span> Live orders are
+              not checked
+            </span>
+          ) : (
+            <span>
+              Kill switch on, but order checks are off on this server{' '}
+              <span aria-hidden="true">·</span> orders are not checked
+            </span>
+          )}
         </Link>
       </output>
     )
@@ -110,28 +145,44 @@ export function RiskChip({ variant = 'navbar' }: { variant?: 'navbar' | 'toolbar
   const state = useKillSwitch()
   const locked = useDayLocked()
   const unchecked = useDayUnchecked()
+  const reach = useReach()
+  const unread = killSwitchUnread(state)
   const on = killSwitchOn(state)
-  if (!on && !locked && !unchecked) return null
+  if (!on && !unread && !locked && !unchecked) return null
   const toolbar = variant === 'toolbar'
-  const Icon = on ? OctagonX : locked ? Lock : TriangleAlert
-  const title = on
-    ? 'Kill switch on: new orders are refused'
-    : locked
-      ? 'Daily loss limit reached: new orders are refused until tomorrow'
-      : 'Daily loss limit not being checked: positions cannot be read'
+  const Icon = on ? OctagonX : unread ? TriangleAlert : locked ? Lock : TriangleAlert
+  const title = unread
+    ? 'Kill switch state cannot be read: new orders are refused until it can'
+    : on
+      ? reach === 'here'
+        ? 'Kill switch on: new orders are refused'
+        : reach === 'sandbox'
+          ? 'Kill switch on for the sandbox only: Live orders are not checked'
+          : 'Kill switch on, but order checks are off on this server'
+      : locked
+        ? 'Daily loss limit reached: new orders are refused until tomorrow'
+        : 'Daily loss limit not being checked: positions cannot be read'
   return (
     <span
       data-testid="risk-chip"
       title={title}
       className={cn(
         'sd-risk-chip inline-flex shrink-0 items-center gap-1.5 rounded-full border font-bold uppercase tracking-[0.06em]',
-        !on && 'sd-risk-chip--day',
+        !on && !unread && 'sd-risk-chip--day',
         toolbar ? 'h-6 px-2 text-[11px]' : 'h-7 px-2.5 text-xs'
       )}
     >
       <Icon aria-hidden="true" className={toolbar ? 'size-3.5' : 'size-4'} />
       <span className={toolbar ? 'sr-only min-[1800px]:not-sr-only' : 'sr-only sm:not-sr-only'}>
-        {on ? 'Kill switch on' : locked ? 'Day locked' : 'Limit not checked'}
+        {unread
+          ? 'Kill switch unread'
+          : on
+            ? reach === 'sandbox'
+              ? 'Sandbox kill switch on'
+              : 'Kill switch on'
+            : locked
+              ? 'Day locked'
+              : 'Limit not checked'}
       </span>
     </span>
   )
@@ -145,11 +196,25 @@ export function RiskChip({ variant = 'navbar' }: { variant?: 'navbar' | 'toolbar
 export function KillSwitchNote() {
   const state = useKillSwitch()
   const locked = useDayLocked()
+  const reach = useReach()
+  if (killSwitchUnread(state)) {
+    return (
+      <p className="sd-risk-note" data-testid="kill-switch-note">
+        <TriangleAlert aria-hidden="true" className="size-5 shrink-0" />
+        Kill switch state cannot be read: a new order is refused until it can. An order that closes
+        a position you hold still goes.
+      </p>
+    )
+  }
   if (killSwitchOn(state)) {
     return (
       <p className="sd-risk-note" data-testid="kill-switch-note">
         <OctagonX aria-hidden="true" className="size-5 shrink-0" />
-        Kill switch on: a new order is refused. An order that closes a position you hold still goes.
+        {reach === 'here'
+          ? 'Kill switch on: a new order is refused. An order that closes a position you hold still goes.'
+          : reach === 'sandbox'
+            ? 'Kill switch on for the sandbox only: Live orders are not checked.'
+            : 'Kill switch on, but order checks are off on this server: orders are not checked.'}
       </p>
     )
   }

@@ -10,8 +10,8 @@ import { Label } from '@/components/ui/label'
 import { useAuthStore } from '@/stores/authStore'
 import { useThemeStore } from '@/stores/themeStore'
 import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
-import { actsOn, type Book, turnOnHeld } from './holds'
-import { noteKillSwitch } from './killSwitch'
+import { type Book, turnOnHeld } from './holds'
+import { actsOn, noteKillSwitch } from './killSwitch'
 import { RISK_AUDIT_KEY, RISK_STATUS_KEY, StepList } from './parts'
 
 /** The phrase's hint: R3 ships STOP, which the owner may change in Settings > Risk. */
@@ -167,8 +167,9 @@ export function TurnOnSheet({
         >
           <ul className="divide-y divide-[color:var(--divider)]">
             <Line icon={<Ban aria-hidden="true" className="size-5" />}>
-              New orders are refused from every place: this app, scripts and alerts, strategies and
-              Telegram.
+              {stage === 'sandbox'
+                ? 'New sandbox orders are refused. Live orders are not checked, and your Upstox account is not touched.'
+                : 'New orders are refused from every place: this app, scripts and alerts, strategies and Telegram.'}
             </Line>
             <Line icon={<Undo2 aria-hidden="true" className="size-5" />}>
               Exits and cancels still go. Python strategies keep running; the agent stops.
@@ -240,7 +241,7 @@ export function TurnOnSheet({
             type="submit"
             variant="destructive"
             className="h-12 text-base"
-            disabled={sending || !phrase.trim() || stage === 'off'}
+            disabled={sending || !phrase.trim() || stage === 'off' || preview.isPending}
           >
             {sending ? (
               <>
@@ -254,6 +255,11 @@ export function TurnOnSheet({
               </>
             )}
           </Button>
+          {preview.isPending && !sending && (
+            <p className="text-[0.8125rem] text-[color:var(--text-secondary)]">
+              Counting what is open: you can turn it on in a moment.
+            </p>
+          )}
           {sending && (
             <p className="flex items-center gap-2 text-[0.8125rem] text-[color:var(--text-secondary)]">
               <CircleCheck aria-hidden="true" className="size-4" />

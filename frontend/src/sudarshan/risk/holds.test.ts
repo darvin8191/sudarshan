@@ -14,7 +14,7 @@ import {
   sentMarksNow,
 } from '@/sudarshan/books/sent'
 import type { Order, Position } from '@/types/trading'
-import { actsOn, outcomesOf, positionKey, targetsOf, turnOnHeld } from './holds'
+import { actsOn, cancelEach, outcomesOf, positionKey, targetsOf, turnOnHeld } from './holds'
 
 afterEach(() => resetSentForTests())
 
@@ -169,7 +169,12 @@ describe('turning it on with the rows held', () => {
       send: async () => {
         during = sentMarksNow()
         return answer({}, [
-          { step: 'live_orders', ok: true, words: 'cancelled' },
+          {
+            step: 'live_orders',
+            ok: true,
+            words: 'cancelled',
+            detail: { cancelled_ids: ['A1', 'A2'] },
+          },
           {
             step: 'live_exit_all',
             ok: false,
@@ -242,5 +247,79 @@ describe('turning it on with the rows held', () => {
     const mark = exitMark(sentMarksNow(), true, 'NFO:NIFTY27OCT2625900CE:MIS')
     expect(mark?.state).toBe('unconfirmed')
     expect(mark?.noAnswer).toBe(true)
+  })
+})
+
+describe('each cancel settles by its own order id', () => {
+  const book = { positions: POSITIONS, orders: ORDERS }
+  const run = (steps: object[], overrides: Partial<SwitchAnswer> = {}) =>
+    turnOnHeld({
+      book,
+      sandbox: false,
+      stage: 'on',
+      exitAll: false,
+      send: async () => answer(overrides, steps),
+    })
+
+  it('holds an order no cancel was confirmed for, and lets go of one the look found ended', async () => {
+    await run([
+      {
+        step: 'live_orders',
+        ok: false,
+        words: 'One order could not be cancelled.',
+        detail: { cancelled_ids: ['A1'] },
+      },
+    ])
+    const after = sentMarksNow()
+    expect(cancelMark(after, false, 'A1')?.state).toBe('sent')
+    expect(cancelMark(after, false, 'A2')?.state).toBe('unconfirmed') // may still be working
+    resetSentForTests()
+    await run([
+      {
+        step: 'live_orders',
+        ok: true,
+        words: 'One order cancelled.',
+        detail: { cancelled_ids: ['A1'] },
+      },
+    ])
+    expect(cancelMark(sentMarksNow(), false, 'A1')?.state).toBe('sent')
+    expect(cancelMark(sentMarksNow(), false, 'A2')).toBeUndefined() // no cancel was sent for it
+  })
+
+  it('reads the second look too, and takes the last look as the verdict', async () => {
+    await run([
+      {
+        step: 'live_orders',
+        ok: false,
+        words: 'x',
+        detail: { cancelled_ids: ['A1'] },
+      },
+      {
+        step: 'live_orders_again',
+        ok: true,
+        words: 'y',
+        detail: { cancelled_ids: ['A2'] },
+      },
+    ])
+    expect(cancelMark(sentMarksNow(), false, 'A1')?.state).toBe('sent')
+    expect(cancelMark(sentMarksNow(), false, 'A2')?.state).toBe('sent')
+  })
+
+  it('lets every hold go when the switch was already on, although the answer is a success', async () => {
+    await turnOnHeld({
+      book,
+      sandbox: false,
+      stage: 'on',
+      exitAll: true,
+      send: async () =>
+        answer({ ok: true, activated: false, message: 'The kill switch is already on.' }),
+    })
+    expect(sentMarksNow().size).toBe(0)
+  })
+
+  it('says nothing per order for the sandbox, whose step gives a count', () => {
+    expect(cancelEach(answer(), true, ['A1'])).toBeNull()
+    expect(cancelEach(null, false, ['A1'])).toBeNull()
+    expect(cancelEach(answer(), false, [])).toBeNull()
   })
 })

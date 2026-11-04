@@ -9,6 +9,7 @@ import {
   settleSends,
 } from '@/sudarshan/books/sent'
 import type { Order, Position } from '@/types/trading'
+import { actsOn } from './killSwitch'
 
 /**
  * The kill switch is a destructive action like Exit all and Cancel all, so its sheet holds
@@ -33,10 +34,7 @@ export function positionKey(position: Pick<Position, 'exchange' | 'symbol' | 'pr
   return `${position.exchange}:${position.symbol}:${position.product}`
 }
 
-/** Whether turning the switch on cancels and exits in this book. */
-export function actsOn(stage: RiskStage | undefined, sandbox: boolean): boolean {
-  return stage === 'on' || (stage === 'sandbox' && sandbox)
-}
+export { actsOn }
 
 /** The open positions Exit all closes, and the working orders the cancel takes. */
 export function targetsOf(book: Book): { exits: SendTarget[]; cancels: SendTarget[] } {
@@ -95,6 +93,33 @@ export function outcomesOf(answer: SwitchAnswer | null, sandbox: boolean): Outco
 }
 
 /**
+ * What became of each held cancel, by the order's id, from the report's own list of the orders
+ * it cancelled (Live only; the sandbox's step gives a count). An order in the list was
+ * cancelled; one not in it was either already ended (the last look found nothing left working,
+ * so no cancel was sent for it: its hold lets go) or may still be working (not confirmed).
+ */
+export function cancelEach(
+  answer: SwitchAnswer | null,
+  sandbox: boolean,
+  ids: readonly string[]
+): Record<string, EachAnswer> | null {
+  if (answer === null || !answer.activated || sandbox || ids.length === 0) return null
+  const steps = named(answer, STEPS.live.cancel)
+  if (steps.length === 0) return null
+  const cancelled = new Set<string>()
+  for (const step of steps) {
+    const sent = step.detail?.cancelled_ids
+    if (Array.isArray(sent)) for (const id of sent) cancelled.add(String(id))
+  }
+  const settled = steps[steps.length - 1].ok === true
+  const each: Record<string, EachAnswer> = {}
+  for (const id of ids) {
+    each[id] = { outcome: cancelled.has(id) ? 'sent' : settled ? 'refused' : 'unconfirmed' }
+  }
+  return each
+}
+
+/**
  * Turn the switch on with the rows it acts on held from the tap, and settle the holds on its
  * answer. `book` is what the sheet read when it opened; null holds nothing (no book was read).
  */
@@ -123,6 +148,13 @@ export async function turnOnHeld({
   }
   const outcome = outcomesOf(answer, sandbox)
   if (exitBatch) settleSends(exitBatch, outcome.exit, Date.now(), null, outcome.each)
-  if (cancelBatch) settleSends(cancelBatch, outcome.cancel)
+  if (cancelBatch) {
+    const each = cancelEach(
+      answer,
+      sandbox,
+      cancels.map((cancel) => cancel.id)
+    )
+    settleSends(cancelBatch, outcome.cancel, Date.now(), null, each)
+  }
   return answer
 }

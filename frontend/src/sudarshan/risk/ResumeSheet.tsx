@@ -47,16 +47,20 @@ export function ResumeSheet({
   open,
   onOpenChange,
   killSwitch,
+  clockOffsetMs = 0,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   killSwitch: KillSwitchState | undefined
+  /** How far the server's clock is ahead of the phone's: the hold is the server's minute. */
+  clockOffsetMs?: number
 }) {
   const queryClient = useQueryClient()
   const [phrase, setPhrase] = useState('')
   const [sending, setSending] = useState(false)
   const [refused, setRefused] = useState<SwitchAnswer | null>(null)
-  const [now, setNow] = useState(() => Date.now())
+  const [tick, setTick] = useState(() => Date.now())
+  const now = tick + clockOffsetMs
   const busy = useRef(false)
   const phraseId = useId()
 
@@ -70,7 +74,7 @@ export function ResumeSheet({
   // The countdown's own clock: a second at a time, only while the sheet is open and counting.
   useEffect(() => {
     if (!open || left <= 0) return
-    const timer = setInterval(() => setNow(Date.now()), 1_000)
+    const timer = setInterval(() => setTick(Date.now()), 1_000)
     return () => clearInterval(timer)
   }, [open, left])
 

@@ -30,7 +30,7 @@ import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
 import type { FeedLine, MarketOpen } from '@/sudarshan/dashboard/live'
 import { TREND_TEXT, TrendArrow } from '@/sudarshan/dashboard/Trend'
 // SUDARSHAN M20.7: the kill switch beside Exit all, where a trader in a hurry already is.
-import { killSwitchOn, useKillSwitch } from '@/sudarshan/risk/killSwitch'
+import { actsOn, killSwitchOn, useKillSwitch } from '@/sudarshan/risk/killSwitch'
 import { TurnOnSheet } from '@/sudarshan/risk/TurnOnSheet'
 import {
   PRODUCT_MEANING,
@@ -382,8 +382,10 @@ const PositionBoard = memo(function PositionBoard({
   const told = useSentTold()
   // SUDARSHAN M20.7: the kill switch, where the server has one.
   const risk = useKillSwitch()
-  const [killSwitchSheet, setKillSwitchSheet] = useState(false)
-  const killSwitch = risk && risk.stage !== 'off' ? (killSwitchOn(risk) ? 'on' : 'off') : null
+  // Only where it acts on the book the page shows: a Live page with the guard at "sandbox" has
+  // nothing to turn on (its Live orders are not checked); Risk is where the sandbox's is.
+  const killSwitch =
+    risk && actsOn(risk.stage, sandbox) ? (killSwitchOn(risk) ? 'on' : 'off') : null
 
   const total = rows.reduce((sum, row) => sum + (row.pnl ?? 0), 0)
   // Why Exit all cannot be sent now, if it cannot: nothing is open, or an exit
@@ -400,7 +402,7 @@ const PositionBoard = memo(function PositionBoard({
   const orphan =
     overlay !== null &&
     !loading &&
-    (overlay.act === 'exitall'
+    (overlay.act === 'exitall' || overlay.act === 'killswitch'
       ? false
       : target === null || ((overlay.act === 'exit' || overlay.act === 'add') && !targetOpen))
   useEffect(() => {
@@ -432,9 +434,13 @@ const PositionBoard = memo(function PositionBoard({
           now={now}
           onExitAll={() => open({ act: 'exitall', row: null })}
           killSwitch={killSwitch}
-          onKillSwitch={() => setKillSwitchSheet(true)}
+          onKillSwitch={() => open({ act: 'killswitch', row: null })}
         />
-        <TurnOnSheet open={killSwitchSheet} onOpenChange={setKillSwitchSheet} stage={risk?.stage} />
+        <TurnOnSheet
+          open={overlay?.act === 'killswitch'}
+          onOpenChange={(next) => (next ? open({ act: 'killswitch', row: null }) : close())}
+          stage={risk?.stage}
+        />
         {error && <StaleBookNote text="Could not refresh just now. Showing the last figures." />}
         {held.length > 0 ? (
           <ul aria-label="Open positions" className="flex flex-col gap-2">

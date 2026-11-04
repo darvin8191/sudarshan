@@ -123,6 +123,8 @@ export interface RiskStatus extends Omit<RiskState, 'daily'> {
   gate: GateTiming
   upstox_kill_switch: UpstoxSegment[] | null
   broker: string | null
+  /** The server's clock when it answered (ISO), for the resume hold's countdown. */
+  server_time?: string
 }
 
 export interface PreviewCounts {

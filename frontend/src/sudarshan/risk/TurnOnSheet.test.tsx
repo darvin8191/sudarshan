@@ -181,3 +181,68 @@ describe('turning the kill switch on', () => {
     expect(cancelMark(sentMarksNow(), false, 'A1')?.state).toBe('unconfirmed')
   })
 })
+
+describe('the sheet while it is working and while it counts', () => {
+  it('waits for the counts before it can be turned on', async () => {
+    let counted: (value: typeof PREVIEW) => void = () => {}
+    api.preview.mockReturnValue(
+      new Promise((resolve) => {
+        counted = resolve
+      })
+    )
+    renderSheet()
+    fireEvent.change(phraseField(), { target: { value: 'STOP' } })
+    expect(turnOn()).toBeDisabled()
+    expect(screen.getByText(/Counting what is open/)).toBeInTheDocument()
+    await act(async () => counted(PREVIEW))
+    await waitFor(() => expect(turnOn()).toBeEnabled())
+  })
+
+  it('turns on when the counts could not be read, saying so', async () => {
+    api.preview.mockRejectedValue(new Error('down'))
+    renderSheet()
+    fireEvent.change(phraseField(), { target: { value: 'STOP' } })
+    await waitFor(() => expect(turnOn()).toBeEnabled())
+    expect(screen.getByTestId('kill-switch-preview')).toHaveTextContent('could not be counted')
+  })
+
+  it('cannot be closed while it sends', async () => {
+    let answer: (value: SwitchAnswer) => void = () => {}
+    api.turnOn.mockReturnValue(
+      new Promise((resolve) => {
+        answer = resolve
+      })
+    )
+    const onOpenChange = renderSheet()
+    await screen.findByTestId('kill-switch-preview')
+    fireEvent.change(phraseField(), { target: { value: 'STOP' } })
+    fireEvent.click(turnOn())
+    await screen.findByText('Turning on')
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' })
+    expect(onOpenChange).not.toHaveBeenCalled()
+    await act(async () => answer(ON_ANSWER))
+    fireEvent.click(await screen.findByRole('button', { name: 'Done' }))
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it('lets every hold go on an answer that is a success but turned nothing on', async () => {
+    api.turnOn.mockResolvedValue({
+      ...ON_ANSWER,
+      activated: false,
+      message: 'The kill switch is already on.',
+    })
+    renderSheet()
+    await screen.findByTestId('kill-switch-preview')
+    await waitFor(() => expect(trading.getOrders).toHaveBeenCalled())
+    fireEvent.change(phraseField(), { target: { value: 'STOP' } })
+    fireEvent.click(turnOn())
+    await screen.findByText('The kill switch is already on.')
+    expect(sentMarksNow().size).toBe(0)
+  })
+
+  it('says in the sandbox stage that Live orders are not checked', async () => {
+    renderSheet('sandbox')
+    expect(await screen.findByText(/Live orders are not checked/)).toBeInTheDocument()
+    expect(screen.queryByText(/from every place/)).toBeNull()
+  })
+})

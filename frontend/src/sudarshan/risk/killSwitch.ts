@@ -127,6 +127,29 @@ export function killSwitchOn(state: RiskState | null): boolean {
   return state?.kill_switch.known === true && state.kill_switch.on === true
 }
 
+/** True when the server answered but could not read the switch: the gate refuses every new order. */
+export function killSwitchUnread(state: RiskState | null): boolean {
+  return state?.kill_switch.known === false
+}
+
+/** Whether turning the switch on cancels and exits in this book (Live, or the sandbox). */
+export function actsOn(stage: RiskStage | undefined, sandbox: boolean): boolean {
+  return stage === 'on' || (stage === 'sandbox' && sandbox)
+}
+
+/**
+ * Where the switch reaches from the page the owner is on: `here` when it refuses this book's
+ * orders, `sandbox` when the guard covers the sandbox only and the page trades Live (Live orders
+ * are not checked), `none` when the guard is off on this server.
+ */
+export function reachOf(
+  stage: RiskStage | undefined,
+  sandbox: boolean
+): 'here' | 'sandbox' | 'none' {
+  if (actsOn(stage, sandbox)) return 'here'
+  return stage === 'sandbox' ? 'sandbox' : 'none'
+}
+
 /** True while the daily loss limit has locked the book the page shows (M5.14). */
 export function dayLocked(state: RiskState | null, sandbox: boolean): boolean {
   return state?.daily?.[sandbox ? 'sandbox' : 'live']?.locked === true

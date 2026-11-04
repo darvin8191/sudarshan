@@ -22,10 +22,11 @@ import {
   TriangleAlert,
   Weight,
 } from 'lucide-react'
-import { type ReactNode, useEffect, useState } from 'react'
+import { type ReactNode, useEffect } from 'react'
 import { type AuditRow, type RiskStage, type RiskStatus, riskApi } from '@/api/risk'
 import { useSocketContext } from '@/components/socket/SocketProvider'
 import { Button } from '@/components/ui/button'
+import { useBookOverlay } from '@/sudarshan/books/cards/useBookOverlay'
 import { DailyCard } from '@/sudarshan/risk/DailyCard'
 import { noteKillSwitch } from '@/sudarshan/risk/killSwitch'
 import {
@@ -146,9 +147,13 @@ function KillSwitchCard({
         )}
       </div>
       <p className="text-[0.9375rem] leading-snug">
-        {ks.on
-          ? 'New orders are refused from every place. Exits and cancels still go.'
-          : 'Stops every new order at once, from every place, and cancels open orders and GTTs. Exits and cancels always go.'}
+        {status.stage === 'sandbox'
+          ? ks.on
+            ? 'New sandbox orders are refused. Live orders are not checked: this server checks the sandbox only.'
+            : "Stops every new sandbox order at once and cancels the sandbox's open orders and GTTs. Live orders are not checked and Upstox is not touched."
+          : ks.on
+            ? 'New orders are refused from every place. Exits and cancels still go.'
+            : 'Stops every new order at once, from every place, and cancels open orders and GTTs. Exits and cancels always go.'}
       </p>
       {ks.running && (
         <output className="flex items-center gap-2 text-[0.9375rem] font-semibold">
@@ -276,17 +281,21 @@ function HistoryCard({ rows, loading }: { rows: AuditRow[] | undefined; loading:
   )
 }
 
+/** How far the server's clock is ahead of the phone's, in ms; 0 when it did not say. */
+export function serverOffset(serverTime: string | undefined, receivedAt: number): number {
+  const at = serverTime ? new Date(serverTime).getTime() : Number.NaN
+  return Number.isNaN(at) ? 0 : at - receivedAt
+}
+
 export default function Risk() {
   const queryClient = useQueryClient()
   const { socket } = useSocketContext()
-  const [sheet, setSheet] = useState<'on' | 'resume' | null>(null)
-  const status = useQuery({
-    queryKey: RISK_STATUS_KEY,
-    queryFn: riskApi.status,
-    // Not market data: read once, again on every change the server announces, and every two
-    // seconds only while an activation is still running its steps.
-    refetchInterval: (query) => (query.state.data?.kill_switch.running ? 2_000 : false),
-  })
+  // The sheets live in the address, so the phone's Back closes one before it leaves the page.
+  const { overlay, open: openSheet, close: closeSheet } = useBookOverlay()
+  const sheet = overlay?.act === 'killswitch' ? 'on' : overlay?.act === 'resume' ? 'resume' : null
+  // Not market data: read once and again on every change the server announces over Socket.IO
+  // (the report of an activation is announced when it is saved). Nothing polls.
+  const status = useQuery({ queryKey: RISK_STATUS_KEY, queryFn: riskApi.status })
   const audit = useQuery({ queryKey: RISK_AUDIT_KEY, queryFn: () => riskApi.audit(50) })
 
   // The banner's copy follows what this page read.
@@ -331,6 +340,9 @@ export default function Risk() {
   }
 
   const data = status.data
+  // The server's clock against the phone's, as of when this status arrived (the resume hold is
+  // the server's minute, whatever the phone's clock says).
+  const clockOffset = serverOffset(data.server_time, status.dataUpdatedAt)
   return (
     <div className="flex flex-col gap-4 md:mx-auto md:max-w-2xl">
       <div className="flex flex-col gap-1">
@@ -344,8 +356,8 @@ export default function Risk() {
       </div>
       <KillSwitchCard
         status={data}
-        onTurnOn={() => setSheet('on')}
-        onResume={() => setSheet('resume')}
+        onTurnOn={() => openSheet({ act: 'killswitch', row: null })}
+        onResume={() => openSheet({ act: 'resume', row: null })}
       />
       <Card title="Daily loss limit" icon={<Lock aria-hidden="true" className="size-5" />}>
         <DailyCard status={data} receivedAt={status.dataUpdatedAt} />
@@ -377,13 +389,14 @@ export default function Risk() {
       <HistoryCard rows={audit.data} loading={audit.isPending} />
       <TurnOnSheet
         open={sheet === 'on'}
-        onOpenChange={(open) => setSheet(open ? 'on' : null)}
+        onOpenChange={(next) => (next ? openSheet({ act: 'killswitch', row: null }) : closeSheet())}
         stage={data.stage}
       />
       <ResumeSheet
         open={sheet === 'resume'}
-        onOpenChange={(open) => setSheet(open ? 'resume' : null)}
+        onOpenChange={(next) => (next ? openSheet({ act: 'resume', row: null }) : closeSheet())}
         killSwitch={data.kill_switch}
+        clockOffsetMs={clockOffset}
       />
     </div>
   )
