@@ -161,6 +161,16 @@ _UNREAD = object()
 _NO_QUOTE = object()  # not read: the band did not need the market for this order
 BANDED_TYPES = ("LIMIT", "SL", "SL-M")
 REFUSED, ANSWERED = "refused", "answered"
+_ENDED, _WORKING = "ended", "working"
+
+
+def _rests(order: Order) -> bool:
+    """A limit or stop order, which can rest at the broker without being on its way to a fill
+    (a market order that is not filled yet is in flight, or beyond price protection). A modify
+    is judged by its new terms; terms unknown count as a market order (the claim stays)."""
+    terms = order.priced
+    price_type = terms.price_type if terms is not None else order.price_type
+    return price_type in BANDED_TYPES
 
 
 @dataclass(frozen=True)
@@ -670,7 +680,8 @@ class Gate:
             ended = self._ended_orders(known, decided.refs)  # a read: outside the lock
             if ended:
                 with self._lock:
-                    self._drop_claims(known.pipe, ended)
+                    self._drop_claims(known.pipe, ended.get(_ENDED, set()))
+                    self._drop_claims(known.pipe, ended.get(_WORKING, set()), resting_only=True)
 
     def _decide(
         self,
@@ -758,9 +769,12 @@ class Gate:
             return frozenset()
         return frozenset(send.ref for send in self._counted(order, facts.position) if send.ref)
 
-    def _ended_orders(self, order: Order, refs: frozenset) -> set[str]:
-        """Of ``refs``, the orders the broker shows cancelled, rejected or still resting: their
-        claims stand for nothing on its way to the positions book. A read that fails ends none."""
+    def _ended_orders(self, order: Order, refs: frozenset) -> dict[str, set[str]]:
+        """Of ``refs``, the orders the broker shows cancelled or rejected (key ``_ENDED``: their
+        claims stand for nothing) and those it shows working (key ``_WORKING``: the claim of a
+        resting limit or stop stands for nothing, but a market order not filled yet is still on
+        its way to the book, so its claim stays until the book shows it final). A read that
+        fails ends none."""
         try:
             if order.pipe == LIVE:
                 statuses = self._read.live_order_statuses(order.owner)
@@ -768,13 +782,24 @@ class Gate:
                 statuses = self._read.sandbox_order_statuses(order.owner, sorted(refs))
         except readers.Unreadable as exc:
             logger.warning(f"The risk check could not read the order book for claims: {exc}")
-            return set()
-        return {ref for ref in refs if ref in statuses and statuses[ref] != "complete"}
+            return {}
+        found: dict[str, set[str]] = {}
+        for ref in refs:
+            status = statuses.get(ref)
+            if status is None or status == "complete":
+                continue
+            kind = _WORKING if status in ("open", "trigger pending") else _ENDED
+            found.setdefault(kind, set()).add(ref)
+        return found
 
-    def _drop_claims(self, pipe: str, refs: set[str]) -> None:
-        """What was sent on these broker orders stops counting; call under the lock."""
+    def _drop_claims(self, pipe: str, refs: set[str], resting_only: bool = False) -> None:
+        """What was sent on these broker orders stops counting; call under the lock.
+        ``resting_only``: only the sends of a limit or stop order (a market order that the book
+        shows working has not reached the positions book yet, so its claim stays)."""
         for token, send in list(self._sends.items()):
             if send.order.pipe == pipe and send.ref in refs:
+                if resting_only and not _rests(send.order):
+                    continue
                 del self._sends[token]
 
     def release(self, pipe: str, ref: str) -> None:

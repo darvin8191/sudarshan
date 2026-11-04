@@ -201,7 +201,7 @@ def test_the_sandbox_reads_its_own_orders_for_claims(risk_store, monkeypatch):
         return True, {"status": "success", "orderid": f"S{len(sent)}"}, 200
 
     manager = SimpleNamespace(user_id="owner")
-    stop = {**order("SELL", 65, symbol="SBIN", exchange="NSE"), "price_type": "SL-M"}
+    stop = order("SELL", 65, symbol="SBIN", exchange="NSE", pricetype="SL-M")
     assert place_order(manager, stop)[2] == 200  # an exit, claimed: S1
     book.statuses = {"S1": "trigger pending"}
     assert place_order(manager, order("SELL", 65, symbol="SBIN", exchange="NSE"))[2] == 200
