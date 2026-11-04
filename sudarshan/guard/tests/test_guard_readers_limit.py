@@ -30,7 +30,9 @@ def client(monkeypatch):
     monkeypatch.setenv("BROKER_API_KEY", "key")
     from broker.upstox.api.data import BrokerData
 
-    monkeypatch.setattr(BrokerData, "_get_instrument_key", lambda self, symbol, exchange: "NSE_FO|1")
+    monkeypatch.setattr(
+        BrokerData, "_get_instrument_key", lambda self, symbol, exchange: "NSE_FO|1"
+    )
     return seen
 
 

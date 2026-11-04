@@ -33,6 +33,7 @@ eventlet.monkey_patch()
 
 import json, os, sys, threading, time
 sys.path.insert(0, {repo!r})
+import flask  # imported in production long before the first refusal (gate._surface)
 import eventlet.patcher
 _orig = eventlet.patcher.original("threading")
 ticks = []
@@ -78,8 +79,8 @@ def gate_on_a_slow_broker(tmp):
     on = KillSwitchState(on=True, since=datetime.now(UTC))
     return gate, place, on
 
-def order(action="BUY", hold=0):
-    return {{"symbol": "CE", "exchange": "NFO", "action": action, "quantity": "65",
+def order(action="BUY", hold=0, symbol="CE"):
+    return {{"symbol": symbol, "exchange": "NFO", "action": action, "quantity": "65",
              "product": "MIS", "hold": hold}}
 """
 
@@ -186,6 +187,33 @@ def test_refusals_and_their_audit_rows_never_stall_the_hub(tmp_path):
     assert result["rows"] <= 3  # merged: refusals racing to write first may each start a row
     assert result["elapsed"] < 5.0
     assert result["ticks"] >= result["elapsed"] * 10  # never stalled
+
+
+def test_a_runaway_over_many_symbols_writes_few_audit_rows_and_never_stalls_the_hub(tmp_path):
+    """Gate review M8: the throttle was per symbol, so a script cycling through 60 symbols
+    committed the audit 60 times on the hub. Now a few rows per window overall."""
+    result = run(
+        f"""
+        gate, place, on = gate_on_a_slow_broker({str(tmp_path)!r})
+        gate.GATE.set_state(on)
+        start = time.monotonic()
+        pool = [eventlet.spawn(place, order("BUY", symbol="S%d" % n), "token") for n in range(60)]
+        answers = [g.wait() for g in pool]
+        end = time.monotonic()
+        written = len(gate.GATE._the_store().history(500))
+        gate.GATE.flush_notes()
+        rows = gate.GATE._the_store().history(500)
+        inside = sorted(t for t in ticks if start <= t <= end)
+        gaps = [b - a for a, b in zip(inside, inside[1:])]
+        print(json.dumps({{"refused": sum(a[0].status == 403 for a in answers),
+                           "written": written, "total": sum(row.count for row in rows),
+                           "worst_gap": max(gaps, default=0), "elapsed": end - start}}))
+        """,
+        tmp_path,
+    )
+    assert result["refused"] == 60 and result["total"] == 60
+    assert result["written"] <= 3  # rows written while it ran, never one per symbol
+    assert result["worst_gap"] < 0.5  # the ticker was never held that long
 
 
 def test_a_real_thread_turns_the_switch_on_while_greenlets_are_sending(tmp_path):

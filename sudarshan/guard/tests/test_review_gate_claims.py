@@ -64,7 +64,7 @@ def test_a_webhook_s_url_token_is_kept_in_the_risk_audit(day):
     assert not any("SECRET-TOKEN" in (surface or "") for surface in surfaces)
 
 
-def test_a_refused_sandbox_gtt_leg_fires_again_on_every_tick(sandbox, caplog):
+def test_a_refused_sandbox_gtt_leg_fires_again_on_every_tick(sandbox, caplog):  # noqa: F811
     """A sandbox GTT whose leg the gate refuses (here a stop left over after its position was
     closed, under the kill switch's state as set by a lock-style refusal) goes back to pending and
     fires again on the next tick, every tick, each with SQLite commits and an error line."""
@@ -101,8 +101,9 @@ def test_an_order_racing_the_first_state_read_is_refused_as_unreadable(risk_stor
     and the store reads fine."""
     import threading
 
-    from sudarshan.guard import flag, gate, words
     from test_guard_gate import Book
+
+    from sudarshan.guard import flag, gate, words
 
     book = Book()
     fresh = gate.Gate(store=risk_store, read=book)

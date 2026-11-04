@@ -142,7 +142,13 @@ def test_with_the_switch_on_a_sandbox_entry_is_refused_and_nothing_is_stored(san
     sandbox.set_state(ON)
     assert _place("BUY", 10) == (
         False,
-        {"status": "error", "message": ENTRY, "mode": "analyze", "risk_refused": True},
+        {
+            "status": "error",
+            "message": ENTRY,
+            "mode": "analyze",
+            "risk_refused": True,
+            "nothing_sent": True,  # the Analyze order alert titles it as not sent
+        },
         403,
     )
     from database.sandbox_db import SandboxOrders

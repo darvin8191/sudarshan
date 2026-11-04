@@ -109,12 +109,18 @@ SEND_HELD_AT_MOST_S = 150.0
 STATE_RETRY_S = 2.0
 #: An order that finds the first state read in flight waits this long for it.
 STATE_WAIT_S = 5.0
-#: Refusals of one kind are written to the audit at most this often; the rest are counted in
-#: memory and written with the next one. A SQLite commit is disk work eventlet cannot make
+#: The audit is written to at most once in this long, overall (``NOTE_ROWS_PER_WINDOW`` rows);
+#: the rest are counted in memory and written with the next window. A SQLite commit is disk work eventlet cannot make
 #: cooperative, so a write per refusal would stall the worker under a runaway script.
 NOTE_EVERY_S = 2.0
 #: A count kept in memory this long without a refusal is written by the next note or flush.
 NOTE_KEPT_S = 60.0
+#: However many kinds of refusal there are, no more than this many audit rows are written in one
+#: ``NOTE_EVERY_S`` window (the rest are counted and written in the next).
+NOTE_ROWS_PER_WINDOW = 3
+#: Kinds of refusal kept counting at once; past it they fall into one row per reason.
+NOTE_MAX_KEYS = 200
+_NEVER = -1e9
 #: The gate's own time is kept for this many decisions, for its p50 and p95 on the status route
 #: (sessions S1 and G3 record them).
 TIMED_KEPT = 500
@@ -372,6 +378,8 @@ class Gate:
         self._store = store
         self._read = read or readers
         self._notes: dict[str, _Note] = {}  # audit rows by key, with counts not yet written
+        self._note_window = _NEVER  # monotonic: when the audit was last written to
+        self._writing = False  # one audit writer at a time
         self._timed: deque[float] = deque(maxlen=TIMED_KEPT)  # seconds per decision
         # Today's lock per pipe: (pipe, day) -> the lock, or None when read and not there. Only
         # this process writes locks (one worker), so a None read once stays true until it does.
@@ -560,6 +568,11 @@ class Gate:
                     del kept[key]
             key = (pipe, symbol, code)
             told = kept.get(key)
+            if code == DAILY_LOSS_LIMIT:  # the day's lock was told for every symbol at once
+                whole = kept.get((pipe, "", code))
+                if whole is not None and now - whole[0] < TOLD_EVERY_S:
+                    kept[key] = (whole[0], (told[1] if told else 0) + 1)
+                    return None
             if told is not None and now - told[0] < TOLD_EVERY_S:
                 kept[key] = (told[0], told[1] + 1)
                 return None
@@ -839,7 +852,8 @@ class Gate:
             product=gtt.product.upper() or order.product,
             side=gtt.side,
             # the broker sends the request's kind, not the stored one: OCO if either says OCO
-            trigger_type="OCO" if "OCO" in (gtt.trigger_type.upper(), order.trigger_type.upper())
+            trigger_type="OCO"
+            if "OCO" in (gtt.trigger_type.upper(), order.trigger_type.upper())
             else gtt.trigger_type,
         )
 
@@ -997,6 +1011,8 @@ class Gate:
             admin = find_user_by_username()
             if admin is not None:
                 _tell(Owner(admin.username, "app", "risk guard"), said)
+            with self._lock:  # the lock's own message covers the refusals of its first minute
+                self._tellings[(lock.pipe, "", DAILY_LOSS_LIMIT)] = (time.monotonic(), 0)
         except Exception:
             logger.exception("Today's lock could not be told on Telegram")
         try:
@@ -1534,30 +1550,47 @@ class Gate:
             with self._lock:
                 if kind != "order_refused":
                     self._problem = (time.time(), kind, said)
-                stale = self._take_stale(now)
                 note = self._notes.get(key)
-                if note is not None and now - note.written < NOTE_EVERY_S:
+                if note is None and len(self._notes) >= NOTE_MAX_KEYS:
+                    key = f"{decision.code}|{pipe}|many"  # a runaway over many symbols: one row
+                    note = self._notes.get(key)
+                    detail = {"code": decision.code, "symbol": "", **decision.detail}
+                if note is None:
+                    self._notes[key] = _Note(kind, said, pipe, surface, detail, _NEVER, 1)
+                else:
                     note.pending += 1
                     note.words, note.detail = said, detail
-                    write = None
-                else:
-                    count = 1 + (note.pending if note is not None else 0)
-                    self._notes[key] = _Note(kind, said, pipe, surface, detail, now)
-                    write = (key, _Note(kind, said, pipe, surface, detail, now, count))
-            for item in [*stale, *([write] if write else [])]:
+                batch = self._take_due(now)
+            for item in batch:
                 self._write_note(*item)
+            if batch:
+                with self._lock:
+                    self._writing = False
         except Exception:
+            with self._lock:
+                self._writing = False
             logger.exception("A risk refusal could not be written to the audit")
 
-    def _take_stale(self, now: float) -> list[tuple[str, _Note]]:
-        """Counts kept past ``NOTE_KEPT_S``, taken out to be written; call under the lock."""
-        stale = []
+    def _take_due(self, now: float) -> list[tuple[str, _Note]]:
+        """The counts to write now: at most ``NOTE_ROWS_PER_WINDOW`` rows, and only once in a
+        ``NOTE_EVERY_S`` window overall, by one writer at a time, oldest first. A commit is disk
+        work the eventlet hub cannot interleave, so however many symbols a runaway script tries,
+        the hub is held for those few commits per window and no more (gate review M8). The rest
+        stay counted in memory for the next window or ``flush_notes``. Call under the lock."""
         for key, note in list(self._notes.items()):
-            if now - note.written > NOTE_KEPT_S:
-                del self._notes[key]
-                if note.pending:
-                    stale.append((key, note))
-        return stale
+            if not note.pending and now - note.written > NOTE_KEPT_S:
+                del self._notes[key]  # written long ago and quiet since
+        if self._writing or now - self._note_window < NOTE_EVERY_S:
+            return []
+        due = sorted((n.written, key) for key, n in self._notes.items() if n.pending)
+        batch = []
+        for _written, key in due[:NOTE_ROWS_PER_WINDOW]:
+            note = self._notes[key]
+            batch.append((key, replace(note)))
+            note.pending, note.written = 0, now
+        if batch:
+            self._note_window, self._writing = now, True
+        return batch
 
     def _write_note(self, key: str, note: _Note) -> None:
         count = note.pending
