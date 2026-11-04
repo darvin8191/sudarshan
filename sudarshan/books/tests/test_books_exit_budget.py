@@ -37,7 +37,9 @@ def test_an_exit_waiting_behind_a_backlog_is_not_sent_after_the_budget(monkeypat
     for _ in range(15):  # other order calls already queued: a script, webhooks, a basket
         limiter.reserve()
     started = time.monotonic()
-    ok, body, code = close_position_with_auth({"apikey": "KEY"}, "token", "upstox", {"apikey": "KEY"})
+    ok, body, code = close_position_with_auth(
+        {"apikey": "KEY"}, "token", "upstox", {"apikey": "KEY"}
+    )
     sent_late = [order for order in broker.orders if order["at"] - started > 1.3]
     assert not sent_late, "an exit was sent after the budget, from reads that old"
     outcomes = {item["symbol"]: item["outcome"] for item in body.get("positions", [])}
@@ -55,5 +57,7 @@ def test_an_exit_that_leaves_the_queue_in_time_is_sent(monkeypatch):
     monkeypatch.setitem(rl._LIMITERS, "order", limiter)
     for _ in range(5):  # one second of backlog, well inside the 15 s budget
         limiter.reserve()
-    ok, body, code = close_position_with_auth({"apikey": "KEY"}, "token", "upstox", {"apikey": "KEY"})
+    ok, body, code = close_position_with_auth(
+        {"apikey": "KEY"}, "token", "upstox", {"apikey": "KEY"}
+    )
     assert code == 200 and broker.true_qty(CE) == 0

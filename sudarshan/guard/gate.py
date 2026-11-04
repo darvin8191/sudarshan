@@ -568,13 +568,17 @@ class Gate:
             # only the sends already judged count: another waiting unjudged send is judged in
             # its own turn, and the first judged to be an exit holds the position
             others = [o for o in self._counted(order, position) if o.reducing is not None]
-            verdict = self._verdict(order, _Facts(position=position), sum(o.quantity for o in others))
+            verdict = self._verdict(
+                order, _Facts(position=position), sum(o.quantity for o in others)
+            )
             if not verdict.reducing:
                 return False
             send.reducing = True
             send.position_then = verdict.position
             if verdict.reason == rules.EXIT:
-                send.expect = rules.exit_expectation(verdict.position, verdict.claimed, send.quantity)
+                send.expect = rules.exit_expectation(
+                    verdict.position, verdict.claimed, send.quantity
+                )
             return True
 
     def sends(self) -> int:
