@@ -42,6 +42,7 @@ class Account:
         self.order_books: list[list[dict]] = []
         self.book_reads = 0
         self.reads_before_exit: int | None = None
+        self.cancel_fails: set[str] = set()  # orders whose cancel by id is refused
 
         def record(name, answer):
             def call(*args, **kwargs):
@@ -62,6 +63,17 @@ class Account:
             "cancel_all_orders_with_auth",
             record("live_cancel_all", (True, cancelled, 200)),
         )
+        import services.cancel_order_service as cancel_one
+
+        def cancel_by_id(orderid, *args, **kwargs):
+            self.calls.append("live_cancel_order")
+            if kwargs.get("force_live") is not True:
+                raise AssertionError("live_cancel_order was not sent with force_live")
+            if str(orderid) in self.cancel_fails:
+                return False, {"status": "error", "message": "refused"}, 400
+            return True, {"status": "success", "orderid": orderid}, 200
+
+        monkeypatch.setattr(cancel_one, "cancel_order_with_auth", cancel_by_id)
         monkeypatch.setattr(
             gtt_book,
             "get_gtt_orderbook_with_auth",
@@ -136,6 +148,9 @@ class Account:
         monkeypatch.setattr(agent_settings, "set_kill_switch", set_agent)
         monkeypatch.setattr(killswitch, "preview_live", lambda owner, gtts=True: {
             "orders": 2, "stops": 1, "protected": 1, "positions": 1})  # fmt: skip
+        monkeypatch.setattr(
+            killswitch, "_stops_cancelled", lambda owner, ids, seen: {"stops": 1, "protected": 1}
+        )
         monkeypatch.setattr(killswitch, "_tell", lambda owner, text: self.told(text))
         monkeypatch.setattr(killswitch, "_announce", lambda state: None)
         self.messages: list[str] = []

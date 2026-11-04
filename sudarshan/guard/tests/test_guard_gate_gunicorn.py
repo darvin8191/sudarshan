@@ -352,7 +352,7 @@ def test_turning_the_switch_on_keeps_the_worker_answering_and_refuses_a_new_orde
     assert status == 200, body
     assert body["data"]["on"] is True and body["data"]["surface"] == "app"
     drain = next(step for step in body["data"]["report"]["steps"] if step["step"] == "drain")
-    assert drain["detail"] == {"sent": 1, "waiting": 0}
+    assert drain["detail"] == {"sent": 1, "waiting": 0, "stopped": 0}
     assert took > 1.5  # it waited for that order, not for its ten seconds
     assert sent["result"][0] == 200
 

@@ -11,7 +11,7 @@ import re
 
 import pytest
 
-from sudarshan.guard import band, rules, size, words
+from sudarshan.guard import band, flag, rules, size, words
 
 POSITION = ("NFO", "NIFTY27OCT2625900CE", "MIS")
 SINCE = "10:42"
@@ -133,13 +133,26 @@ def kill_switch_sentences() -> list[str]:
         {"orders": 0, "gtts": 0, "stops": 0, "protected": 0},
         {"orders": 1, "gtts": None, "stops": 1, "protected": 1},
         {"orders": 12, "gtts": 2, "stops": 3, "protected": 2},
+        {"orders": 0, "gtts": 1, "stops": 0, "gtt_stops": 1, "protected": 1},
+        {"orders": 2, "gtts": 2, "stops": 1, "gtt_stops": 2, "protected": 3},
     ]
     report = {"steps": [{"step": "live_orders", "ok": False, "words": words.KS_ORDERS_NOT_CONFIRMED},
                         {"step": "agent", "ok": True, "words": words.KS_AGENT_STOPPED}]}  # fmt: skip
-    out = [words.ks_already_on(SINCE), words.ks_already_on("")]
+    out = [
+        words.ks_already_on(SINCE),
+        words.ks_already_on(""),
+        words.ks_already_on(SINCE, exit_all_asked=True),
+    ]
     out += [words.ks_turned_on(SINCE, s) for s in ("app", "telegram", "api", None)]
     out += [words.ks_step_broke(step) for step in steps]
-    out += [words.ks_drained(*n) for n in ((0, 0), (1, 0), (2, 1), (5, 0))]
+    out += [
+        words.ks_drained(*n)
+        for n in ((0, 0, 0), (1, 0, 0), (2, 1, 0), (5, 0, 0), (5, 0, 4), (3, 1, 1))
+    ]
+    out += [words.ks_orders_left(*n) for n in ((0, 1), (3, 2))]
+    out += [words.ks_orders_unchecked(n) for n in (0, 1, 4)]
+    out += [words.kill_switch_on_at_send(since) for since in (SINCE, "")]
+    out += [words.KS_EXIT_ALL_NOT_RUN, words.KS_RESUMED_LOCKED]
     out += [words.ks_orders_cancelled(n, b) for n in (0, 1, 7) for b in counts[1:]]
     out += [words.ks_gtts_cancelled(*n) for n in ((0, 0), (1, 0), (2, 1))]
     out += [words.ks_exit_all("All Open Positions Squared Off"), words.ks_exit_all("")]
@@ -170,7 +183,7 @@ FORBIDDEN = [
     (r"\b\w*(Error|Exception)\b|Traceback", "an exception's name"),
     (r"https?://|/api/|/v\d/|/sudarshan/|\.py\b", "an endpoint or a file"),
     (r"\b[A-Z]+_[A-Z_]+\b|UDAPI\w*", "a machine code"),
-    (r"\barm(s|ed|ing)?\b", "an arm word"),
+    (r"\b(dis|re|un)?arm(s|ed|ing)?\b", "an arm word"),
     (r"\bpaper\b|\bvirtual\b", "a word this platform does not use"),
     (r"\b(gate|claim|verdict|pipe|token|None|True|False|null)\b", "an internal word"),
     (r"[{}]", "a placeholder left unfilled"),
@@ -184,6 +197,22 @@ def test_a_sentence_is_written_for_a_trader(sentence):
         assert found is None, f"{what} ({found.group(0)!r}) in: {sentence}"
     assert sentence.strip() == sentence and sentence.endswith((".", "app."))
     assert "  " not in sentence
+
+
+def test_the_sandbox_stage_sentences_are_written_for_a_trader_too(monkeypatch):
+    monkeypatch.setenv(flag.ENV, "sandbox")
+    sentences = [
+        words.ks_already_on(SINCE),
+        words.ks_already_on(SINCE, exit_all_asked=True),
+        words.ks_turned_on(SINCE, "app"),
+        words.ks_report_lead(None),
+        words.ks_report_lead({"steps": [{"step": "live", "ok": False, "words": "A look."}]}),
+    ]
+    for sentence in sentences:
+        for pattern, what in FORBIDDEN:
+            found = re.search(pattern, sentence, flags=re.IGNORECASE if "arm" in pattern else 0)
+            assert found is None, f"{what} ({found.group(0)!r}) in: {sentence}"
+        assert "Live orders are not checked" in sentence
 
 
 def test_a_refusal_says_what_lets_the_order_go():

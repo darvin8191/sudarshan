@@ -85,6 +85,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
+from broker.upstox.api import rate_limiter
 from sudarshan.books.exit_guard import EXIT_SHOWS_WITHIN_S, trader_name
 from utils import real_threading
 from utils.broker_backpressure import BusyResponse
@@ -371,6 +372,7 @@ class Gate:
         self._lock = real_threading.Lock()
         self._sends: dict[int, Send] = {}
         self._tokens = itertools.count(1)
+        self._withdrawn: dict[int, float] = {}  # token -> monotonic: let through, then not sent
         self._state: KillSwitchState | None = None
         self._state_retry_at = 0.0
         self._loading = None  # the first state read in flight: an Event set when it ends
@@ -470,6 +472,13 @@ class Gate:
             self._state = state
             return True
 
+    def undo_turn_off(self, off: KillSwitchState, state: KillSwitchState) -> None:
+        """``state`` was turned off as ``off`` and could not be saved as off: it is on again,
+        unless something changed it since."""
+        with self._lock:
+            if self._state is off:
+                self._state = state
+
     def settle_restart(self, activation_id: str | None, state: KillSwitchState) -> bool:
         """An activation saved as running by a process that is gone: hold it as settled."""
         with self._lock:
@@ -483,6 +492,35 @@ class Gate:
         """Which of ``tokens`` are still waiting for their answer."""
         with self._lock:
             return [t for t in tokens if t in self._sends and self._sends[t].answered is None]
+
+    def withdrawn(self, tokens: list[int]) -> list[int]:
+        """Which of ``tokens`` were let through before the switch went on and then not sent."""
+        with self._lock:
+            return [t for t in tokens if t in self._withdrawn]
+
+    def send_refusal(self, token: int) -> str | None:
+        """Asked while a send waits for its turn at the broker's pacer, and when the turn
+        comes: a sentence when the kill switch went on after the order was let through and the
+        order was not judged to reduce its position (the send is then dropped and not sent),
+        else None."""
+        with self._lock:
+            refusing = self._refusing()
+            if refusing is None:
+                return None
+            send = self._sends.get(token)
+            if send is not None and send.reducing is True:
+                return None
+            since = "" if refusing.state is None else _hhmm(refusing.state.since)
+            self._sends.pop(token, None)
+            self._withdrawn[token] = time.monotonic()
+            order = None if send is None else send.order
+        said = words.kill_switch_on_at_send(since)
+        self._note(
+            LIVE if order is None else order.pipe,
+            order,
+            Decision(True, said, KILL_SWITCH_ACTIVE, detail={"reason": "waiting_to_be_sent"}),
+        )
+        return said
 
     def sends(self) -> int:
         """How many sends count now (diagnostics and tests)."""
@@ -499,11 +537,18 @@ class Gate:
             return kind.refusal(decision.words, decision.detail.get("told"))
         if decision.clip is not None:
             args, kwargs = kind.clip(args, kwargs, decision.clip)
+        check = None
+        if decision.token is not None and kind.pipe == LIVE:
+            token = decision.token
+            check = rate_limiter.SEND_CHECK.set(lambda: self.send_refusal(token))
         try:
             result = fn(*args, **kwargs)
         except BaseException:
             self.settle(decision.token, ANSWERED, None)  # it may have reached the broker
             raise
+        finally:
+            if check is not None:
+                rate_limiter.SEND_CHECK.reset(check)
         try:
             answer, ref = kind.outcome(result)
         except Exception:
@@ -1176,6 +1221,9 @@ class Gate:
 
     def _forget(self, now: float) -> None:
         """Drop the sends that no longer count; call under the lock."""
+        for token, when in list(self._withdrawn.items()):
+            if now - when > SEND_HELD_AT_MOST_S:
+                del self._withdrawn[token]
         for token, send in list(self._sends.items()):
             answered = send.answered
             if now - send.admitted > SEND_HELD_AT_MOST_S or (
@@ -1873,6 +1921,17 @@ def _refuse_with_response(text: str, told: int | None = None):
 
 
 def _refuse_with_body(text: str, told: int | None = None):
+    return {"status": "error", "message": text}, 403
+
+
+def withdrawn_response(text: str):
+    """A place or a GTT let through and then not sent (the kill switch went on while it waited
+    for its turn): the answer a refusal gives, ``(response, body, None)``."""
+    return RefusedResponse(), {"status": "error", "message": text, "nothing_sent": True}, None
+
+
+def withdrawn_body(text: str):
+    """The same for a change to an order or a GTT: ``(body, status)``."""
     return {"status": "error", "message": text}, 403
 
 

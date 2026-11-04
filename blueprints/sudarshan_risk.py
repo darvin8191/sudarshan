@@ -233,6 +233,7 @@ def status():
                 "pacing": _pacing(),
                 "upstox_kill_switch": _upstox_kill_switch(owner),
                 "broker": session.get("broker"),
+                "server_time": datetime.now(UTC).isoformat(),
             },
         }
     )

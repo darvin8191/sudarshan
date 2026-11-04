@@ -50,6 +50,9 @@ def _limited():
         order_api._READ_LIMIT.reset(token)
 
 
+limited = _limited  # for the callers outside this module (the kill switch's reads)
+
+
 def _miss():
     raise _Miss
 
@@ -116,6 +119,18 @@ def _number(value: object) -> float:
         return float(value or 0)
     except (TypeError, ValueError):
         return 0.0
+
+
+def live_order_rows(auth: str) -> list:
+    """Upstox's raw order book rows, read once and cut off after ``READ_LIMIT_S``."""
+    try:
+        with _limited():
+            book = _upstox().get_order_book(auth)
+    except Exception as exc:  # a refused read (gthread) or a failed one
+        raise Unreadable(f"orders: {type(exc).__name__}") from exc
+    if not isinstance(book, dict) or book.get("status") != "success":
+        raise Unreadable("the orders answer is not a success")
+    return [row for row in book.get("data") or [] if isinstance(row, dict)]
 
 
 def live_working_order(auth: str, order_id: object) -> Working | None:

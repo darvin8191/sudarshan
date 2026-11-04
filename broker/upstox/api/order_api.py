@@ -10,6 +10,7 @@ import httpx
 
 from broker.upstox.api.rate_limiter import (
     MAX_RETRIES,
+    SendWithdrawn,  # SUDARSHAN M5.13
     apply_rate_limit,
     is_rate_limited,
     retry_delay_from_headers,
@@ -444,6 +445,9 @@ def place_order_api(data, auth):
             logger.error(f"Failed to place order: {error_msg} | Response: {response_data}")
             return response, response_data, None
 
+    except SendWithdrawn as exc:
+        # SUDARSHAN M5.13: the kill switch went on while this waited for its turn.
+        return risk_gate.withdrawn_response(exc.text)
     except BrokerBusyError as exc:
         # Refused by the pacer before anything was sent (gthread only).
         return busy_response(str(exc))
@@ -1010,6 +1014,8 @@ def modify_order(data, auth):
             logger.error(f"Failed to modify order: {error_msg} | Response: {response_data}")
             return {"status": "error", "message": error_msg}, 400
 
+    except SendWithdrawn as exc:  # SUDARSHAN M5.13
+        return risk_gate.withdrawn_body(exc.text)
     except BrokerBusyError as exc:
         return {"status": "error", "message": str(exc)}, 429
     except Exception as e:

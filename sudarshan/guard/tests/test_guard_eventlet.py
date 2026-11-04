@@ -322,7 +322,11 @@ def test_telegram_s_killswitch_runs_on_the_hub_and_waits_for_an_order_on_its_way
         tmp_path,
     )
     assert result["on_hub"] and result["on"] and result["sent"] == "OID"
-    assert result["drain"] == {"sent": 1, "waiting": 0}  # it waited for the order on its way
+    assert result["drain"] == {
+        "sent": 1,
+        "waiting": 0,
+        "stopped": 0,
+    }  # it waited for the order on its way
     assert 1.0 < result["took"] < 5.0
     assert result["reply"].startswith("Kill switch on: new orders are refused")
     assert result["ticks"] >= result["elapsed"] * 10  # the hub never stalled

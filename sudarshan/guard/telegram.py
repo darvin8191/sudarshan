@@ -80,7 +80,7 @@ def answer(chat, user, verb: str, phrase: str) -> tuple[str, str]:
     if verb in ("on", "exit"):
         done = killswitch.activate(owner, exit_all=verb == "exit", phrase=phrase)
         text = done.message
-        if done.status == 200 and done.state is not None and done.state.report:
+        if done.activated and done.state is not None and done.state.report:
             text = words.ks_report_message(done.state.report)
         return text, f"killswitch_{verb}"
     if verb == "off":

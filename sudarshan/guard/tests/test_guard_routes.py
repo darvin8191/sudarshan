@@ -278,6 +278,10 @@ def test_status_shows_the_stage_switch_settings_and_timing_and_never_the_phrase(
     assert data["settings"]["phrase_set"] is True and "confirm_phrase" not in data["settings"]
     assert set(data["gate"]) == {"orders", "p50_ms", "p95_ms", "max_ms", "last_problem"}
     assert data["upstox_kill_switch"] is None  # no broker login in this session
+    from datetime import UTC, datetime
+
+    said = datetime.fromisoformat(data["server_time"])  # the phone's countdown follows it
+    assert abs((datetime.now(UTC) - said).total_seconds()) < 30
 
 
 def test_the_banner_s_read_carries_the_switch_and_reads_no_broker(world, monkeypatch):

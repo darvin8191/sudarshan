@@ -151,3 +151,16 @@ def test_a_file_it_cannot_read_fails_the_migration(tmp_path, broken):
     done = _run(path)
     assert done.returncode == 1
     assert "Migration failed" in done.stdout
+
+
+@pytest.mark.parametrize("table", ["risk_settings", "risk_state"])
+def test_status_does_not_say_up_to_date_when_a_default_row_is_missing(tmp_path, table):
+    path = tmp_path / "sudarshan_risk.db"
+    assert _run(path).returncode == 0
+    with closing(sqlite3.connect(path)) as db, db:
+        db.execute(f"DELETE FROM {table} WHERE id = 1")
+    status = _run(path, "--status")
+    assert "Up to date. Nothing to do." not in status.stdout, status.stdout
+    assert _row(path, table) is None  # --status changed nothing
+    assert _run(path).returncode == 0
+    assert _row(path, table) is not None  # and the migration puts it back

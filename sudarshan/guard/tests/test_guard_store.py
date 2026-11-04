@@ -241,3 +241,12 @@ def test_many_operations_hold_no_file_open(risk_store):
         risk_store.state()
         risk_store.audit("settings_changed", "x", merge_key="k")
     assert len(os.listdir(fd_dir)) <= before + 2  # what the interpreter opened meanwhile
+
+
+def test_the_single_row_tables_give_every_not_null_column_a_default():
+    from sudarshan.guard import schema
+
+    for name in ("risk_settings", "risk_state"):
+        table = schema.Base.metadata.tables[name]
+        bare = [c.name for c in table.columns if not c.nullable and c.server_default is None]
+        assert bare == [] or bare == ["id"], (name, bare)

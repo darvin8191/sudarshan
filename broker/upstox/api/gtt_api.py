@@ -34,7 +34,7 @@
 
 import json
 
-from broker.upstox.api.rate_limiter import apply_rate_limit
+from broker.upstox.api.rate_limiter import SendWithdrawn, apply_rate_limit
 from broker.upstox.mapping.gtt_data import (
     map_gtt_book,
     transform_modify_gtt,
@@ -202,6 +202,8 @@ def place_gtt_order(data, auth):
 
     try:
         apply_rate_limit(_RATE_LIMIT_CATEGORY)
+    except SendWithdrawn as exc:  # SUDARSHAN M5.13: the kill switch went on while it waited
+        return risk_gate.withdrawn_response(exc.text)
     except BrokerBusyError as exc:
         # Refused by the pacer before anything was sent (gthread only).
         return _FakeResponse(429), {"status": "error", "message": str(exc)}, None
@@ -251,6 +253,8 @@ def modify_gtt_order(data, auth):
 
     try:
         apply_rate_limit(_RATE_LIMIT_CATEGORY)
+    except SendWithdrawn as exc:  # SUDARSHAN M5.13
+        return risk_gate.withdrawn_body(exc.text)
     except BrokerBusyError as exc:
         return {"status": "error", "message": str(exc)}, 429
     client = get_httpx_client()

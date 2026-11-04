@@ -153,13 +153,19 @@ def test_only_the_orders_it_cancelled_are_waited_for(account, monkeypatch):
     monkeypatch.setattr(killswitch, "CANCELS_SHOW_WITHIN_S", 5)
     # Order 9 was not cancelled by the switch (a cancel of it failed, or it came later).
     account.order_books = [[{"order_id": "9", "status": "open"}]]
-    _on(exit_all=True)
-    assert account.reads_before_exit == 1
+    account.cancel_fails = {"9"}
+    started = time.monotonic()
+    answer = _on(exit_all=True)
+    exit_all = next(s for s in answer.state.report["steps"] if s["step"] == "live_exit_all")
+    assert exit_all["detail"]["cancels_shown"] is True  # order 9 was not waited for
+    assert time.monotonic() - started < 3
 
 
 def test_without_exit_all_nothing_is_waited_for(account):
     _on(exit_all=False)
-    assert account.book_reads == 0 and "live_exit_all" not in account.calls
+    assert (
+        account.book_reads == 1 and "live_exit_all" not in account.calls
+    )  # the look for left-overs
 
 
 def test_the_report_carries_what_became_of_each_position(account):
@@ -188,8 +194,8 @@ def test_every_step_is_tried_whatever_broke_before_it(account, risk_store):
     assert answer.status == 200 and gate.GATE.state().on and risk_store.state().on
     tried = [step["step"] for step in answer.state.report["steps"]]
     assert tried == [
-        "saved", "told", "drain", "live_orders", "live_gtts", "live_exit_all",
-        "live_orders_again", "sandbox_orders", "sandbox_gtts", "sandbox_exit_all", "mcp", "agent",
+        "saved", "told", "drain", "live_orders", "live_gtts", "live_orders_again",
+        "live_exit_all", "sandbox_orders", "sandbox_gtts", "sandbox_exit_all", "mcp", "agent",
     ]  # fmt: skip
     failed = {s["step"] for s in answer.state.report["steps"] if not s["ok"]}
     assert failed == {"live_orders", "live_gtts", "live_orders_again", "sandbox_orders", "mcp"}
@@ -221,7 +227,7 @@ def test_a_send_on_its_way_is_waited_for_then_swept_again(account, monkeypatch):
     answer = _on()
     assert time.monotonic() - started >= killswitch.DRAIN_S
     drain = next(s for s in answer.state.report["steps"] if s["step"] == "drain")
-    assert drain["detail"] == {"sent": 2, "waiting": 1} and not drain["ok"]
+    assert drain["detail"] == {"sent": 2, "waiting": 1, "stopped": 0} and not drain["ok"]
     assert account.calls.count("live_cancel_all") == 2  # looked again for the one still on its way
     assert waiting is not None
 

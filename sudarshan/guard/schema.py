@@ -6,8 +6,11 @@ deploy's backup loop copies it with OpenAlgo's databases. ``SUDARSHAN_RISK_DB`` 
 
 This module imports SQLAlchemy only: upgrade/migrate_sudarshan_risk.py creates these tables from
 it, and a migration must still run when OpenAlgo's own packages cannot be imported
-(upgrade/_pragmas.py). Every column that cannot be NULL carries a server default, so a column
-added in a later release can be added to an existing file in place.
+(upgrade/_pragmas.py). Every column of the two single-row tables (``risk_settings`` and
+``risk_state``) that cannot be NULL carries a server default, so a column added in a later
+release can be added to an existing file in place. The other two tables hold rows that are
+written whole (a day's lock, an audit line), so their NOT NULL columns have no default: a column
+added to them later must be nullable or carry one.
 """
 
 from __future__ import annotations

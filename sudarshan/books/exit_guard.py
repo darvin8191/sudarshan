@@ -274,6 +274,16 @@ class ExitsInFlight:
             self._forget_old(book, now)
             self._placed.setdefault(book, {})[position] = (now, time.time())
 
+    def unplaced(self, book: str, position: Position) -> None:
+        """Forget the note that an exit for ``position`` placed an order: that order was
+        cancelled (M5.13: the kill switch cancels a resting exit), so none is on its way."""
+        with self._lock:
+            recent = self._placed.get(book)
+            if recent is not None:
+                recent.pop(position, None)
+                if not recent:
+                    del self._placed[book]
+
     def placed_lately(self, book: str) -> set[Position]:
         """The positions whose exit may have placed an order in ``book`` in the last
         ``EXIT_SHOWS_WITHIN_S``."""
@@ -329,6 +339,12 @@ def exit_placed(book: str, exchange: object, symbol: object, product: object) ->
     the position again.
     """
     EXITS.placed(book, position_of(exchange, symbol, product))
+
+
+def exit_cancelled(book: str, exchange: object, symbol: object, product: object) -> None:
+    """The order an exit for this position placed was cancelled: it no longer counts as on its
+    way (``EXITS.unplaced``)."""
+    EXITS.unplaced(book, position_of(exchange, symbol, product))
 
 
 def exit_all_held(book: str) -> bool:

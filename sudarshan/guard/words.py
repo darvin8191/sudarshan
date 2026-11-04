@@ -68,6 +68,16 @@ def kill_switch_on(
     return " ".join(words)
 
 
+def kill_switch_on_at_send(since: str) -> str:
+    """An order let through before the kill switch went on, still waiting for its turn."""
+    on = f"on since {since}" if since else "on"
+    return (
+        f"New orders are refused: the kill switch is {on}, and this order was still waiting "
+        "to be sent when it went on, so it was not sent. If it was meant to close a position, "
+        f"send it again. {EXITS_GO} {RESUME_HOW}"
+    )
+
+
 def _refusing_why(since: str | None, locked: tuple[float, float] | None) -> str:
     """What refuses new risk now, in a clause: the day's lock, or the kill switch (``since``:
     "HH:MM", "" when on at an unknown time, None when its state could not be read)."""
@@ -171,6 +181,10 @@ KS_CHANGED_MEANWHILE = (
     "The kill switch changed while it was being turned off. Check Settings > Risk and try again."
 )
 KS_RESUMED = "Kill switch off: new orders go again."
+KS_RESUMED_LOCKED = (
+    "Kill switch off, but new orders are still refused for today: the daily loss limit was "
+    "reached. They go again from the next trading day."
+)
 KS_RESTARTED = "The app restarted while the kill switch was working. Check Orders and Positions."
 
 _SURFACES = {"app": "the app", "telegram": "Telegram", "api": "a script or an alert"}
@@ -194,15 +208,39 @@ def _many(count: int, one: str, many: str) -> str:
     return f"{count} {one if count == 1 else many}"
 
 
-def ks_already_on(since: str) -> str:
+def _sandbox_only() -> bool:
+    """The guard covers the sandbox only (stage ``sandbox``): Live orders are not checked."""
+    from . import flag
+
+    return flag.stage() == flag.SANDBOX
+
+
+KS_SANDBOX_ONLY = "for the sandbox only: Live orders are not checked, and Upstox was not touched"
+KS_EXIT_ALL_NOT_RUN = (
+    "Exit all was not run, because the kill switch was already on. To close the positions, "
+    "use Exit all on Positions or send /closeall."
+)
+
+
+def ks_already_on(since: str, *, exit_all_asked: bool = False) -> str:
     when = f" since {since}" if since else ""
-    return (
-        f"The kill switch is already on{when}. New orders are refused; exits and cancels still go."
-    )
+    if _sandbox_only():
+        said = f"The kill switch is already on{when}, {KS_SANDBOX_ONLY}. New sandbox orders are refused."
+    else:
+        said = (
+            f"The kill switch is already on{when}. New orders are refused; exits and cancels "
+            "still go."
+        )
+    return f"{said} {KS_EXIT_ALL_NOT_RUN}" if exit_all_asked else said
 
 
 def ks_turned_on(clock: str, surface: str | None) -> str:
     where = _SURFACES.get(surface or "", "SUDARSHAN")
+    if _sandbox_only():
+        return (
+            f"Kill switch on at {clock} from {where}, {KS_SANDBOX_ONLY}. New sandbox orders are "
+            "refused. The sandbox's open orders and GTTs are being cancelled."
+        )
     return (
         f"Kill switch on at {clock} from {where}. New orders are refused; exits and cancels "
         "still go. Open orders and GTTs are being cancelled."
@@ -215,14 +253,39 @@ def ks_step_broke(name: str) -> str:
     return f"{_STEPS.get(name, 'A step')} could not finish. Check Orders and Positions."
 
 
-def ks_drained(sent: int, waiting: int) -> str:
+def ks_drained(sent: int, waiting: int, stopped: int = 0) -> str:
     if not sent:
         return "No order was on its way."
-    if not waiting:
-        return f"{_many(sent, 'order', 'orders')} already on the way got their answer."
+    said = []
+    if stopped:
+        said.append(
+            f"{_many(stopped, 'order', 'orders')} still waiting for its turn at Upstox "
+            f"{'was' if stopped == 1 else 'were'} stopped before being sent."
+        )
+    answered = sent - waiting - stopped
+    if answered > 0:
+        said.append(f"{_many(answered, 'order', 'orders')} already on the way got their answer.")
+    if waiting:
+        said.append(
+            f"{waiting} of {_many(sent, 'order', 'orders')} on the way got no answer in time, so "
+            "Orders is looked at again after the cancel."
+        )
+    return " ".join(said)
+
+
+def ks_orders_left(cancelled: int, left: int) -> str:
+    """Cancelled by the cancel, and these are still working at Upstox."""
     return (
-        f"{waiting} of {_many(sent, 'order', 'orders')} on the way got no answer in time, so "
-        "Orders is looked at again after the cancel."
+        f"{_many(cancelled, 'open order', 'open orders')} cancelled; "
+        f"{_many(left, 'order', 'orders')} could not be cancelled and may still be working. "
+        "Check Orders."
+    )
+
+
+def ks_orders_unchecked(cancelled: int) -> str:
+    return (
+        f"{_many(cancelled, 'open order', 'open orders')} cancelled, but the order book could "
+        "not be read to check that none is left. Check Orders."
     )
 
 
@@ -285,7 +348,10 @@ def ks_sandbox_exit_all(message: str) -> str:
 
 
 def ks_mcp_revoked(count: int) -> str:
-    return f"Remote MCP access revoked ({_many(count, 'sign-in', 'sign-ins')})."
+    return (
+        f"Remote MCP sign-ins revoked ({_many(count, 'sign-in', 'sign-ins')}). Access already "
+        "granted can still work for up to 15 minutes."
+    )
 
 
 def ks_resume_wait(seconds: int) -> str:
@@ -304,7 +370,10 @@ def ks_report_lead(report: dict | None) -> str:
     """The first line of an activation's answer: on, and whether any step needs a look."""
     steps = (report or {}).get("steps") or []
     failed = [s for s in steps if not s.get("ok") and s.get("step") not in ("told", "mcp")]
-    lead = "Kill switch on: new orders are refused; exits and cancels still go."
+    if _sandbox_only():
+        lead = f"Kill switch on {KS_SANDBOX_ONLY}. New sandbox orders are refused."
+    else:
+        lead = "Kill switch on: new orders are refused; exits and cancels still go."
     if (report or {}).get("restarted"):
         return f"{lead} {(report or {})['restarted']}"
     if failed:
@@ -340,12 +409,18 @@ def ks_preview(counts: dict | None, *, telegram: bool = False) -> str:
         what += f" and {_many(int(gtts), 'GTT', 'GTTs')}"
     said = f"{what} will be cancelled"
     stops = int(counts.get("stops") or 0)
-    if stops:
+    gtt_stops = int(counts.get("gtt_stops") or 0)
+    if stops or gtt_stops:
         protected = int(counts.get("protected") or 0)
-        verb = "protects" if stops == 1 else "protect"
+        verb = "protects" if stops + gtt_stops == 1 else "protect"
         those = "That position stays" if protected == 1 else "Those positions stay"
+        kinds = []
+        if stops:
+            kinds.append(_many(stops, "stop-loss order", "stop-loss orders"))
+        if gtt_stops:
+            kinds.append(_many(gtt_stops, "stop-loss GTT", "stop-loss GTTs"))
         said += (
-            f", including {_many(stops, 'stop-loss order', 'stop-loss orders')} that {verb} "
+            f", including {' and '.join(kinds)} that {verb} "
             f"{_many(protected, 'position', 'positions')}. {those} open without a stop {tick}."
         )
     else:
@@ -814,6 +889,8 @@ FIXED = (
     KS_NOT_SAVED_OFF,
     KS_CHANGED_MEANWHILE,
     KS_RESUMED,
+    KS_RESUMED_LOCKED,
+    KS_EXIT_ALL_NOT_RUN,
     KS_RESTARTED,
     OWNER_ONLY,
     TOO_MANY_REQUESTS,
