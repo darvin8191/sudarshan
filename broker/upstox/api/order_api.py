@@ -85,6 +85,13 @@ def _rate_limit_category(endpoint, base_url):
 _READ_LIMIT = contextvars.ContextVar("upstox_read_limit", default=None)
 
 
+def read_timeout() -> dict:
+    """SUDARSHAN M5.13: ``{"timeout": seconds}`` for a GET made while a read limit is set (the
+    risk gate's reads, Exit all's order book), else nothing: the shared client's own."""
+    limit = _READ_LIMIT.get()
+    return {"timeout": limit} if limit else {}
+
+
 def get_api_response(
     endpoint, auth, method="GET", payload="", base_url=UPSTOX_BASE_URL, retry_count=0
 ):
@@ -118,8 +125,7 @@ def get_api_response(
         url = f"{base_url}{endpoint}"
 
         if method == "GET":
-            limit = _READ_LIMIT.get()  # SUDARSHAN M6.9
-            response = client.get(url, headers=headers, **({"timeout": limit} if limit else {}))
+            response = client.get(url, headers=headers, **read_timeout())  # SUDARSHAN M6.9
         elif method == "POST":
             response = client.post(url, headers=headers, content=payload)
         elif method == "PUT":

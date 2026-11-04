@@ -326,7 +326,9 @@ def get_gtt_book(auth, include_history=False):
     """
     apply_rate_limit(_RATE_LIMIT_CATEGORY)
     client = get_httpx_client()
-    response = client.get(_GTT_BASE, headers=_headers(auth))
+    from broker.upstox.api.order_api import read_timeout  # SUDARSHAN M5.13: the gate's limit
+
+    response = client.get(_GTT_BASE, headers=_headers(auth), **read_timeout())
     logger.info(f"Upstox gtt_book raw: status={response.status_code}, body={response.text}")
 
     raw = _parse(response)

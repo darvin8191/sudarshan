@@ -52,7 +52,9 @@ def get_api_response(endpoint, auth, method="GET", payload="", retry_count=0):
     logger.debug(f"Making {method} request to Upstox v3 API: {url}")
 
     if method == "GET":
-        response = client.get(url, headers=headers)
+        from broker.upstox.api.order_api import read_timeout  # SUDARSHAN M5.13: the gate's limit
+
+        response = client.get(url, headers=headers, **read_timeout())
     elif method == "POST":
         response = client.post(url, headers=headers, content=payload)
     elif method == "PUT":

@@ -13,6 +13,7 @@ imports the gate.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 from dataclasses import dataclass
 
@@ -29,6 +30,24 @@ class Unreadable(Exception):
 
 class _Miss(Exception):
     pass
+
+
+#: Every read the gate makes is cut off after this long (a few seconds, never the shared client's
+#: 120): under the kill switch an exit waits for its read, and Exit all's sends are timed.
+READ_LIMIT_S = 4.0
+
+
+@contextlib.contextmanager
+def _limited():
+    """The Upstox module's reads made inside are cut off after ``READ_LIMIT_S`` and not retried
+    (a limit already set by Exit all, if shorter, stays)."""
+    order_api = _upstox()
+    held = order_api._READ_LIMIT.get()
+    token = order_api._READ_LIMIT.set(min(held, READ_LIMIT_S) if held else READ_LIMIT_S)
+    try:
+        yield
+    finally:
+        order_api._READ_LIMIT.reset(token)
 
 
 def _miss():
@@ -64,7 +83,8 @@ def live_cached_rows(auth: str) -> list | None:
 def live_rows(auth: str) -> list:
     """Upstox's raw short-term positions, through the module's own cache."""
     try:
-        book = _upstox()._get_cached_positions(auth)
+        with _limited():
+            book = _upstox()._get_cached_positions(auth)
     except Exception as exc:  # PositionReadError, BrokerBusyError (gthread), a network failure
         raise Unreadable(f"positions: {type(exc).__name__}") from exc
     return _rows(book)
@@ -102,7 +122,8 @@ def live_working_order(auth: str, order_id: object) -> Working | None:
     """The order ``order_id`` in Upstox's order book, or None when it is not there."""
     order_api = _upstox()
     try:
-        book = order_api.get_order_book(auth)
+        with _limited():
+            book = order_api.get_order_book(auth)
     except Exception as exc:
         raise Unreadable(f"orders: {type(exc).__name__}") from exc
     if not isinstance(book, dict) or book.get("status") != "success":
@@ -145,7 +166,8 @@ def live_order_statuses(auth: str) -> dict[str, str]:
     open, or Upstox's own word lowered): what tells whether a claim has ended (gate.py)."""
     order_api = _upstox()
     try:
-        book = order_api.get_order_book(auth)
+        with _limited():
+            book = order_api.get_order_book(auth)
     except Exception as exc:
         raise Unreadable(f"orders: {type(exc).__name__}") from exc
     if not isinstance(book, dict) or book.get("status") != "success":
@@ -175,7 +197,8 @@ def live_gtt(auth: str, trigger_id: object) -> Gtt | None:
     from broker.upstox.api import gtt_api
 
     try:
-        answer, status = gtt_api.get_gtt_book(auth)
+        with _limited():
+            answer, status = gtt_api.get_gtt_book(auth)
     except Exception as exc:  # BrokerBusyError under gthread: the read was not sent
         raise Unreadable(f"GTTs: {type(exc).__name__}") from exc
     if status != 200 or not isinstance(answer, dict) or answer.get("status") != "success":
@@ -254,7 +277,8 @@ def quote(pipe: str, owner: str, symbol: str, exchange: str):
         from broker.upstox.api.data import BrokerData
 
         try:
-            data = BrokerData(auth).get_quotes(symbol, exchange)
+            with _limited():
+                data = BrokerData(auth).get_quotes(symbol, exchange)
         except Exception as exc:
             raise Unreadable(f"quote: {type(exc).__name__}") from exc
         if not isinstance(data, dict):
