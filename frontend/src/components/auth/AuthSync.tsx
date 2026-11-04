@@ -34,12 +34,15 @@ let applied = 0
  */
 export async function syncSession({ keepOnFailure = false }: SyncOptions = {}): Promise<void> {
   const ticket = ++sent
+  // A logout while this check is in flight outdates its answer.
+  const startedAt = useAuthStore.getState().logoutEpoch
+  const signedOutSince = () => useAuthStore.getState().logoutEpoch !== startedAt
   try {
     const response = await fetch('/auth/session-status', {
       credentials: 'include',
     })
     const data = response.ok ? await response.json() : null
-    if (ticket < applied || (!response.ok && keepOnFailure)) return
+    if (ticket < applied || (!response.ok && keepOnFailure) || signedOutSince()) return
     applied = ticket
     const { setUser, setApiKey, setBrokerSession, logout } = useAuthStore.getState()
     const { fetchCapabilities, clearCapabilities } = useBrokerStore.getState()
@@ -61,6 +64,10 @@ export async function syncSession({ keepOnFailure = false }: SyncOptions = {}): 
       setBrokerSession(data.broker_session_expired === true)
       // Fetch broker capabilities (exchanges, type, features)
       await fetchCapabilities()
+      if (signedOutSince()) {
+        clearCapabilities()
+        return
+      }
       // Also sync app mode from backend
       await useThemeStore.getState().syncAppMode()
       // Sync active session count
