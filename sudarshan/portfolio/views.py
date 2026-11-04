@@ -106,7 +106,7 @@ class Prices:
         found = tx.index_closes()
         return {name: found.get(name, []) for name in BENCHMARKS}
 
-    def last_session_day(self, today: int) -> int:
+    def last_session_day(self, today: int, now: int) -> int:
         """The latest trading day whose session has begun. Without the exchange's calendar, the
         latest weekday; the price book knows the holidays."""
         day = today
@@ -170,7 +170,7 @@ class Views:
             today = day_of_instant(now)
             saved = layout.views_of(tx, tab_id)
             filters = self._filters(args, saved, today)
-            live = self._live(tx, tab, filters, today)
+            live = self._live(tx, tab, filters, today, now)
             held = [(live.facts[aid], live.core[aid]) for aid in live.rows_by]
             accounts = {a["id"]: Owner(a["name"], a["member_id"]) for a in tx.rows("account")}
             members = {m["id"]: m["name"] for m in tx.rows("member")}
@@ -223,7 +223,7 @@ class Views:
         return found
 
     def _live(
-        self, tx: Tx, tab: Mapping[str, Any], filters: Filters, today: int
+        self, tx: Tx, tab: Mapping[str, Any], filters: Filters, today: int, now: int
     ) -> SimpleNamespace:
         """The rows, the sums beside them and the totals of a tab under these filters."""
         entries = [Entry.of(r) for r in tx.entries(tab["id"])]
@@ -253,7 +253,7 @@ class Views:
                 closed.append(core_row)
                 continue
             core[aid] = core_row
-            rows.append(self._row(tx, tab, asset, info, mode, found, today, filters.as_of))
+            rows.append(self._row(tx, tab, asset, info, mode, found, today, now, filters.as_of))
         keep = _keeps(filters, facts)
         fixed = self._fixed(ledger, keep, closed, picked.today_off)
         core_fixed = Fixed(
@@ -291,7 +291,7 @@ class Views:
             prev[asset["id"]] = None
         return infos, prev
 
-    def _row(self, tx, tab, asset, info, mode, found, today, as_of) -> dict[str, Any]:
+    def _row(self, tx, tab, asset, info, mode, found, today, now, as_of) -> dict[str, Any]:
         if as_of is not None:
             fresh = freshness.Freshness(
                 freshness.OLD if info["price_u"] is None else freshness.FRESH,
@@ -301,7 +301,7 @@ class Views:
             fresh = freshness.of_price(
                 info,
                 today=today,
-                last_session_day=self.prices.last_session_day(today),
+                last_session_day=self.prices.last_session_day(today, now),
                 old_days=tab["manual_old_days"],
             )
         cas, auction_from, auction_until, auction_close = (
@@ -371,7 +371,7 @@ class Views:
             if tab is None:
                 raise NotFound()
             today = day_of_instant(now)
-            live = self._live(tx, tab, Filters(), today)
+            live = self._live(tx, tab, Filters(), today, now)
             ledger = live.ledger
             flows = performance.flows_of(ledger)
             out = performance.summary(flows, live.totals["value_paise"], today)
@@ -436,7 +436,7 @@ class Views:
                     continue
                 live = None
                 if not tab["system"]:
-                    found = self._live(tx, tab, Filters(), today)
+                    found = self._live(tx, tab, Filters(), today, now)
                     live = {"rows": found.rows, "fixed": found.fixed, "totals": found.totals}
                 entries.append({"tab": serialize.tab(tab), "live": live, "upstox": None})
             return {"read_at": now, "today": today, "entries": entries}
