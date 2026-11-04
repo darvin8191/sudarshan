@@ -116,7 +116,9 @@ def cancel_all_orders_with_auth(
             canceled_orders=response_data.get("canceled_orders", []) if isinstance(response_data, dict) else [],
             failed_cancellations=response_data.get("failed_cancellations", []) if isinstance(response_data, dict) else [],
             request_data=analyzer_request, response_data=response_data,
-            api_key=order_data.get("apikey", ""),
+            # SUDARSHAN: the caller's key, checked above. The app's Cancel all passes
+            # order_data={}, so its key was empty and the Telegram alert found no user.
+            api_key=api_key,
         ))
         return success, response_data, status_code
 
