@@ -193,9 +193,13 @@ def _clear_up(
             steps.run("sandbox_exit_all", lambda: _exit_all_sandbox(owner))
     else:
         steps.note("sandbox", words.KS_SANDBOX_NO_KEY)
-    if (settings is None or settings.revoke_mcp) and _mcp_enabled():
-        steps.run("mcp", _revoke_mcp)  # with MCP off there is nothing to say about it
-    agent = steps.run("agent", _engage_agent)
+    agent: dict = {}
+    if flag.stage() == flag.ON:
+        # Both reach tools that trade Live, so the sandbox stage leaves them alone, as its
+        # words say (release review A, L2).
+        if (settings is None or settings.revoke_mcp) and _mcp_enabled():
+            steps.run("mcp", _revoke_mcp)  # with MCP off there is nothing to say about it
+        agent = steps.run("agent", _engage_agent)
     report = {
         "activation_id": state.activation_id,
         "steps": steps.done,

@@ -104,6 +104,23 @@ def test_turning_it_on_saves_it_before_any_broker_call_then_clears_up(
     assert risk_store.history()[0].kind == "ks_on"
 
 
+def test_in_the_sandbox_stage_it_leaves_mcp_the_agent_and_upstox_alone(
+    account, risk_store, monkeypatch
+):
+    # Release review A, L2: the sandbox stage's words say Upstox was not touched, so nothing
+    # that trades Live may be, not even remote MCP access or the agent.
+    monkeypatch.setenv(flag.ENV, "sandbox")
+    answer = _on(exit_all=True)
+    assert answer.status == 200 and answer.state.on and not answer.state.running
+    assert "sandbox_cancel_all" in account.calls and "sandbox_exit_all" in account.calls
+    touched_live = [c for c in account.calls if not c.startswith(("sandbox_", "telegram"))]
+    assert touched_live == []
+    saved = risk_store.state()
+    steps = [step["step"] for step in saved.report["steps"]]
+    assert "mcp" not in steps and "agent" not in steps
+    assert not saved.agent_engaged_by_us
+
+
 def test_exit_all_goes_through_the_one_claim_and_is_never_retried(account, risk_store):
     account.exit_all_status = 409  # another Exit all holds the book
     answer = _on(exit_all=True)

@@ -244,5 +244,13 @@ describe('the sheet while it is working and while it counts', () => {
     renderSheet('sandbox')
     expect(await screen.findByText(/Live orders are not checked/)).toBeInTheDocument()
     expect(screen.queryByText(/from every place/)).toBeNull()
+    // Release review A, L2: the sandbox stage leaves the agent and remote MCP alone.
+    expect(screen.getByText(/the agent keep running/)).toBeInTheDocument()
+    expect(screen.queryByText(/the agent stops/)).toBeNull()
+  })
+
+  it('says under Live checking that the agent stops', async () => {
+    renderSheet('on')
+    expect(await screen.findByText(/the agent stops/)).toBeInTheDocument()
   })
 })

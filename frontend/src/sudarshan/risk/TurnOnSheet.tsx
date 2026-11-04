@@ -172,7 +172,9 @@ export function TurnOnSheet({
                 : 'New orders are refused from every place: this app, scripts and alerts, strategies and Telegram.'}
             </Line>
             <Line icon={<Undo2 aria-hidden="true" className="size-5" />}>
-              Exits and cancels still go. Python strategies keep running; the agent stops.
+              {stage === 'sandbox'
+                ? 'Exits and cancels still go. Python strategies and the agent keep running.'
+                : 'Exits and cancels still go. Python strategies keep running; the agent stops.'}
             </Line>
             <Line icon={<TriangleAlert aria-hidden="true" className="size-5" />}>
               {preview.isPending ? (
