@@ -66,40 +66,68 @@ export function DisplaySettings() {
           <Switch id="sd-cvd-mode" checked={cvd} onCheckedChange={setCvdMode} />
         </div>
 
-        <div className="flex items-start justify-between gap-4 rounded-lg border p-4">
-          <div className="space-y-1">
-            <Label htmlFor="sd-order-sound">Order alert sound</Label>
-            <p className="text-sm text-muted-foreground">
-              A short soft sound when an order fills, partly fills, is rejected or is cancelled at
-              the broker. The alert itself still shows when this is off. This device only.
-            </p>
-          </div>
-          <Switch
-            id="sd-order-sound"
-            checked={!soundMuted}
-            onCheckedChange={(on) => setOrderSoundMuted(!on)}
-          />
-        </div>
+        <SoundRow
+          id="sd-order-sound"
+          title="Order alert sound"
+          words="A short soft sound when an order fills, partly fills, is rejected or is cancelled at the broker. The alert itself still shows when this is off. This device only."
+          on={!soundMuted}
+          onChange={(on) => setOrderSoundMuted(!on)}
+        />
 
         {/* SUDARSHAN M10.7: market alerts sound on their own two notes. */}
-        <div
-          id="market-alert-sound"
-          className="flex items-start justify-between gap-4 rounded-lg border p-4"
-        >
-          <div className="space-y-1">
-            <Label htmlFor="sd-market-sound">Market alert sound</Label>
-            <p className="text-sm text-muted-foreground">
-              A short sound, higher than the order sounds, when a market alert you set fires. The
-              alert itself still shows when this is off. This device only.
-            </p>
-          </div>
-          <Switch
-            id="sd-market-sound"
-            checked={!marketMuted}
-            onCheckedChange={(on) => setMarketSoundMuted(!on)}
-          />
-        </div>
+        <SoundRow
+          id="sd-market-sound"
+          rowId="market-alert-sound"
+          title="Market alert sound"
+          words="A short sound, higher than the order sounds, when a market alert you set fires. The alert itself still shows when this is off. This device only."
+          on={!marketMuted}
+          onChange={(on) => setMarketSoundMuted(!on)}
+        />
       </CardContent>
     </Card>
+  )
+}
+
+/**
+ * A sound's switch, its whole row the target (a switch alone is under 48 dp): a tap anywhere on
+ * the row turns it on or off. Named by its title, described by its words.
+ */
+function SoundRow({
+  id,
+  rowId,
+  title,
+  words,
+  on,
+  onChange,
+}: {
+  id: string
+  rowId?: string
+  title: string
+  words: string
+  on: boolean
+  onChange: (on: boolean) => void
+}) {
+  return (
+    <label
+      id={rowId}
+      htmlFor={id}
+      className="flex min-h-12 cursor-pointer items-start justify-between gap-4 rounded-lg border p-4"
+    >
+      <span className="space-y-1">
+        <span id={`${id}-title`} className="block text-sm leading-none font-medium">
+          {title}
+        </span>
+        <span id={`${id}-words`} className="block text-sm text-muted-foreground">
+          {words}
+        </span>
+      </span>
+      <Switch
+        id={id}
+        aria-labelledby={`${id}-title`}
+        aria-describedby={`${id}-words`}
+        checked={on}
+        onCheckedChange={onChange}
+      />
+    </label>
   )
 }

@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { setMarketSoundMuted, setOrderSoundMuted } from './books/chime'
 import { DisplaySettings } from './DisplaySettings'
 import { setCvdMode } from './display'
 
@@ -69,6 +70,22 @@ describe('Display settings', () => {
     await user.click(market)
     expect(market).toBeChecked()
     expect(localStorage.getItem('sudarshan-market-sound')).toBeNull()
+  })
+
+  // SUDARSHAN (M10.7): a switch alone is under 48 dp; each sound's whole row is its target.
+  it('turns a sound off and on from anywhere on its row', async () => {
+    const user = userEvent.setup()
+    render(<DisplaySettings />)
+
+    await user.click(screen.getByText(/higher than the order sounds/))
+    expect(screen.getByRole('switch', { name: 'Market alert sound' })).not.toBeChecked()
+    expect(localStorage.getItem('sudarshan-market-sound')).toBe('off')
+
+    await user.click(screen.getByText(/partly fills, is rejected/))
+    expect(screen.getByRole('switch', { name: 'Order alert sound' })).not.toBeChecked()
+    expect(localStorage.getItem('sudarshan-order-sound')).toBe('off')
+    setOrderSoundMuted(false)
+    setMarketSoundMuted(false)
   })
 
   it('still switches when storage is refused, for the rest of the visit', async () => {
