@@ -106,6 +106,7 @@ from blueprints.strategy_module import strategy_module_bp  # Multi-leg options s
 from blueprints.strategy_portfolio import strategy_portfolio_bp  # Strategy Builder portfolio
 from blueprints.sudarshan_alerts import sudarshan_alerts_bp  # SUDARSHAN M10 market alerts
 from blueprints.sudarshan_autologin import sudarshan_autologin_bp  # SUDARSHAN M2.20 auto-login
+from blueprints.sudarshan_portfolio import sudarshan_portfolio_bp  # SUDARSHAN M7.18 portfolio bridge
 from blueprints.sudarshan_risk import sudarshan_risk_bp  # SUDARSHAN M5.13 kill switch, risk
 from blueprints.system_permissions import (
     system_permissions_bp,  # Import the system permissions blueprint
@@ -355,6 +356,7 @@ def create_app():
     app.register_blueprint(strategy_portfolio_bp)  # Register Strategy Portfolio blueprint
     app.register_blueprint(postback_bp)  # Register broker postback (order-update webhook) blueprint
     app.register_blueprint(sudarshan_autologin_bp)  # SUDARSHAN M2.20: sudarshan/autologin/README.md
+    app.register_blueprint(sudarshan_portfolio_bp)  # SUDARSHAN M7.18: sudarshan/portfolio/README.md
     app.register_blueprint(sudarshan_alerts_bp)  # SUDARSHAN M10: sudarshan/alerts/README.md
     app.register_blueprint(sudarshan_risk_bp)  # SUDARSHAN M5.13: sudarshan/guard (kill switch)
 
