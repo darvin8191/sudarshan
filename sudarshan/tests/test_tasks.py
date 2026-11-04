@@ -143,3 +143,25 @@ def test_real_httpx_requests_cancelled_in_their_first_milliseconds_always_end():
             server.close()
 
     asyncio.run(scenario())
+
+
+def test_a_task_that_swallows_many_cancels_is_waited_for_beyond_a_second_and_logged_once(caplog):
+    """Mutants T4 (a line for every re-cancel) and T6 (giving up after a second)."""
+
+    async def stubborn(until: float) -> None:
+        while time.monotonic() < until:
+            try:
+                await asyncio.sleep(30)
+            except asyncio.CancelledError:
+                pass  # every cancel lost, until its time is up
+
+    async def scenario():
+        task = asyncio.create_task(stubborn(time.monotonic() + 1.3), name="slow")
+        await asyncio.sleep(0)
+        began = time.monotonic()
+        await asyncio.wait_for(cancel_and_wait(task, again_after=0.05), 10)
+        assert task.done() and time.monotonic() - began >= 1.2
+
+    with caplog.at_level(logging.WARNING, logger=LOGGER):
+        asyncio.run(scenario())
+    assert len([r for r in caplog.records if r.name == LOGGER]) == 1

@@ -870,3 +870,22 @@ def test_frames_waiting_on_the_socket_are_judged_before_a_candle_is(alerts, quic
             await stopped(rt, task)
 
     asyncio.run(scenario())
+
+
+def test_the_claims_are_renewed_before_the_feed_forgets_them(alerts, quick, monkeypatch):
+    """Mutant R20: with no renewal, after 7 days the feed drops every alert key. The renewal
+    is a claim sent again with no change, and it is not a burst."""
+    monkeypatch.setattr(runtime, "CLAIM_RENEW_S", 0.3)
+
+    async def scenario():
+        clock = Clock(ist(2026, 10, 21, 10, 0))
+        async with FakeFeed(clock) as feed, FakeOpenAlgo() as notify:
+            settings = alerts(notify)
+            create(settings, clock())
+            rt, task = await started(settings, feed, clock)
+            await wait_until(lambda: len(feed.claims) >= 3)
+            assert all(sent == {SBIN: "ltpc"} or sent == {"keys": {SBIN: "ltpc"}}
+                       for sent in feed.claims)  # fmt: skip
+            await stopped(rt, task)
+
+    asyncio.run(scenario())
