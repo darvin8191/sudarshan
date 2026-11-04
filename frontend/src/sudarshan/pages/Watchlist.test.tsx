@@ -1316,6 +1316,9 @@ describe('Watchlist access to prices', () => {
     renderPage()
     expect(await screen.findByRole('heading', { level: 1 })).toBeInTheDocument()
     expect(document.querySelector('[data-access]')).toBeNull()
+  })
+})
+
 describe('Watchlist market alerts (M10.2)', () => {
   it('swaps the sheet for the alert form, from the snapped live price; Back returns to the list', async () => {
     const user = userEvent.setup()
