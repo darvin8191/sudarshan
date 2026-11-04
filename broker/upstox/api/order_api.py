@@ -371,6 +371,30 @@ def _reduces_or_crosses(current, target):
     return (target > 0) != (current > 0) or abs(target) < abs(current)
 
 
+def _market_exit_working(
+    rows, orders, symbol, exchange, product, request_product, current_position
+):
+    """SUDARSHAN M6.9 (L2, Y2): the refusal (409, nothing sent) for an order that closes or
+    reduces a position while the order book shows a MARKET order working on the closing side
+    (SELL when long, BUY when short): one that rests at its protected price, or whose answer was
+    lost to a restart, can still fill, and a second beside it would reverse the position. A
+    resting stop or target (SL, SL-M, LIMIT) is not a market order and does not block. None when
+    nothing blocks."""
+    token = rows[0].get("instrument_token") if rows else get_token(symbol, exchange)
+    closing = (
+        str(token or ""),
+        request_product,
+        "SELL" if current_position > 0 else "BUY",
+    )
+    market = [
+        order for order in _working_exits(orders)[0].get(closing, []) if order.kind == "MARKET"
+    ]
+    if not market:
+        return None
+    said = exit_guard.market_exit_working(exit_guard.position_of(exchange, symbol, product), market)
+    return _ErrorResponse(409), {"status": "error", "message": said, "nothing_sent": True}, None
+
+
 def _held_products(rows, symbol, exchange, orders):
     """SUDARSHAN M6.9: the signed quantity held in each product of one instrument, for an exit to
     be sized from: its positions rows corrected by the order book's fills across the products
@@ -627,6 +651,16 @@ def place_smartorder_api(data, auth):
                         return _ErrorResponse(424), refusal, None
                     current_position = by_product.get(request_product, 0)
                     by_product = None  # only an exit's own guards read it
+                    if _reduces_or_crosses(current_position, position_size):
+                        # SUDARSHAN M6.9 (Y2): a reversal or part exit repeated while the first
+                        # still rests at Upstox would go beside it.
+                        refused = _market_exit_working(
+                            rows, orders, symbol, exchange, product, request_product,
+                            current_position,
+                        )  # fmt: skip
+                        if refused:
+                            logger.warning(f"Order for {symbol} not sent: a market exit is working")
+                            return refused
             logger.debug(
                 f"Desired position size: {position_size}, Current position: {current_position}"
             )
@@ -668,27 +702,12 @@ def place_smartorder_api(data, auth):
                 # SUDARSHAN M6.9 (L2): a market order still working on the closing side holds a
                 # single exit, whether or not this process remembers placing it (a restart, an
                 # answer that named no order). A resting stop or target is not a market order.
-                token = rows[0].get("instrument_token") if rows else get_token(symbol, exchange)
-                closing = (
-                    str(token or ""),
-                    request_product,
-                    "SELL" if current_position > 0 else "BUY",
+                refused = _market_exit_working(
+                    rows, orders, symbol, exchange, product, request_product, current_position
                 )
-                market = [
-                    order
-                    for order in _working_exits(orders)[0].get(closing, [])
-                    if order.kind == "MARKET"
-                ]
-                if market:
+                if refused:
                     logger.warning(f"Exit for {symbol} not sent: a market exit is still working")
-                    said = exit_guard.market_exit_working(
-                        exit_guard.position_of(exchange, symbol, product), market
-                    )
-                    return (
-                        _ErrorResponse(409),
-                        {"status": "error", "message": said, "nothing_sent": True},
-                        None,
-                    )
+                    return refused
 
             elsewhere = {}
             if entry and by_product:

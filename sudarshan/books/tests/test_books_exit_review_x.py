@@ -415,6 +415,55 @@ def test_l2_a_working_market_order_on_the_other_side_does_not_block_an_exit(monk
     assert _sent(world.broker, X) == [("SELL", 65)]
 
 
+# -- Y2: a reversal or part exit is refused while a market order works on the closing side -----------
+
+
+@pytest.mark.parametrize(
+    "symbol,held,quantity,action,size",
+    [(X, 65, "130", "SELL", "-65"), (Y, -30, "60", "BUY", "30"), (X, 130, "65", "SELL", "65")],
+    ids=["long reversed to short", "short reversed to long", "part exit of a long"],
+)
+def test_y2_a_repeated_order_that_reduces_or_crosses_is_refused_while_the_first_rests(
+    monkeypatch, clock, symbol, held, quantity, action, size
+):
+    world = install(monkeypatch, Broker({symbol: held}, 0.0))
+    world.broker.part[symbol] = 0  # the first rests at its protected price, nothing filled
+    first = _reversal(world, symbol, quantity, action, size)
+    clock.advance(2.0)
+    _fresh_book()
+    code, body = _reversal(world, symbol, quantity, action, size)
+    assert first[0] == 200
+    assert code == 409
+    assert f"{action} {quantity} MARKET order" in body["message"]
+    assert "still working at Upstox" in body["message"] and "Orders" in body["message"]
+    assert _sent(world.broker, symbol) == [(action, int(quantity))]
+
+
+@pytest.mark.parametrize("kind", ["SL-M", "SL", "LIMIT"])
+def test_y2_a_resting_stop_or_target_does_not_block_a_reversal(monkeypatch, kind):
+    world = install(monkeypatch, Broker({X: 65}, 0.0))
+    world.broker.rest(X, "SELL", 65, kind=kind, trigger=98.5 if kind != "LIMIT" else 0)
+    code, _body = _reversal(world, X, "130", "SELL", "-65")
+    assert code == 200
+    assert _sent(world.broker, X) == [("SELL", 130)]
+
+
+def test_y2_a_market_order_on_the_other_side_does_not_block_a_reversal(monkeypatch):
+    world = install(monkeypatch, Broker({X: 65}, 0.0))
+    world.broker.rest(X, "BUY", 65, kind="MARKET", trigger=0)
+    code, _body = _reversal(world, X, "130", "SELL", "-65")
+    assert code == 200
+    assert _sent(world.broker, X) == [("SELL", 130)]
+
+
+def test_y2_an_order_that_only_adds_reads_no_order_book_whatever_is_working(monkeypatch):
+    broker = Broker({X: 65}, 0.0)
+    broker.rest(X, "SELL", 65, kind="MARKET", trigger=0)
+    world = install(monkeypatch, broker)
+    assert _reversal(world, X, "65", "BUY", "130")[0] == 200
+    assert broker.order_book_reads == 0
+
+
 # -- Words (X6, L4) -----------------------------------------------------------------------------------
 
 
