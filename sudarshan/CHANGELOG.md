@@ -5,6 +5,43 @@ publish. The owner publishes each release on GitHub. The server's deploy timer t
 outside 08:30-16:00 IST on trading days (09:00-15:45 until v0.3.1), keeps backups, and rolls
 back if the app does not come up healthy.
 
+## v0.3.4 (4 Nov 2026)
+
+Prices straight after a login inside the app, and every price screen says why it has none. It
+includes everything in v0.3.3. **Publish nothing on Saturday 7 or Sunday 8 Nov.**
+
+### What changes for you
+- **After a login inside the app, prices come at once.** A phone that was logged in before 03:00 is
+  logged out on its first visit of the day (OpenAlgo's daily rule; the Upstox login that auto-login
+  made stays). Logging in again inside the app used to leave the Watchlist, the phone chart, the
+  Dashboard and the cards without the API key until the page was reloaded, and the Watchlist said
+  "Prices and search need an API key". Now the login loads the API key, the Upstox state and the
+  broker's features at once, for the password and the TOTP login alike, and so does Test now on the
+  Auto login page.
+- **Every price screen says why it has no prices.** The Watchlist, the phone chart, the Dashboard
+  and the Holdings, Orders, Positions and Trades cards show one of these:
+  - nothing alarming while the login is still being checked;
+  - "Upstox is not logged in today, so there are no prices. Log in again with Test now on the Auto
+    login page, or Reconnect on the Dashboard.", with both links, when today's Upstox login is
+    missing;
+  - "Prices and search need an API key." with its link, only when there really is no API key.
+- **The phone chart says "The chart could not start." with Try again** when its stream could not be
+  set up. It used to blame the API key.
+
+### What you must do
+- **Publish it** (the link is in your task list). The server installs it outside 08:30-16:00 by
+  itself.
+- **The next morning,** open the app on the phone, log in if it asks, and check that the Watchlist
+  shows prices without a reload. Nothing else to check.
+
+### What is refused now that used to be accepted
+- Nothing.
+
+### Not in this release yet
+- A phone logged in before 03:00 is still logged out on its first visit of the day; that is
+  OpenAlgo's daily rule, and Upstox stays logged in.
+- The risk guards, market alerts and the ops work come in v0.4.0.
+
 ## v0.3.3 (28 Oct 2026)
 
 An Exit all that never closes a position twice, and the phone and Telegram fixes from the

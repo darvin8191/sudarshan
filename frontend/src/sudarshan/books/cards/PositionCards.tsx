@@ -3,6 +3,8 @@ import { CandlestickChart, LogOut, Plus } from 'lucide-react'
 import { memo, type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { PlaceOrderDialog } from '@/components/trading/PlaceOrderDialog'
 import { cn } from '@/lib/utils'
+import { AccessNotice } from '@/sudarshan/AccessNotice'
+import { usePriceAccess, useReadWhenReady } from '@/sudarshan/access'
 import { useExitOrderReads } from '@/sudarshan/books/exitOrders'
 import { type FeedRow, useBookFeed } from '@/sudarshan/books/feed'
 import { isFinalStatus } from '@/sudarshan/books/orderFold'
@@ -365,6 +367,9 @@ const PositionBoard = memo(function PositionBoard({
   const { overlay, open, swap, close } = useBookOverlay()
   const openSheet = useCallback((id: string) => open({ act: 'sheet', row: id }), [open])
   const refresh = useCallback(() => void onRefresh(true), [onRefresh])
+  // No key or no Upstox login: the notice says which, never "No open positions".
+  const access = usePriceAccess()
+  useReadWhenReady(access.state, error !== null, refresh)
   // Analyze mode: the book is the sandbox's, and so is every exit from it.
   const sandbox = useSandbox()
 
@@ -400,7 +405,9 @@ const PositionBoard = memo(function PositionBoard({
   }, [orphan, close])
 
   let content: ReactNode
-  if (positions.length === 0 && loading) {
+  if (access.state !== 'ready') {
+    content = <AccessNotice access={access} />
+  } else if (positions.length === 0 && loading) {
     content = <LoadingCards />
   } else if (positions.length === 0 && error) {
     content = <ProblemCard message="Positions could not be read just now." onRetry={refresh} />

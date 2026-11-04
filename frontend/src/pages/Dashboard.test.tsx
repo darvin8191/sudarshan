@@ -283,3 +283,40 @@ describe('Dashboard', () => {
     await waitFor(() => expect(reads(calls)).toBe(before + 1))
   })
 })
+
+describe('Dashboard access to prices', () => {
+  afterEach(() => {
+    useAuthStore.setState({ sessionChecked: false, brokerSessionExpired: false })
+  })
+
+  it('still checking: a quiet line, never the API key message', async () => {
+    server(OK)
+    useAuthStore.setState({ apiKey: null, sessionChecked: false })
+    render(<Dashboard />)
+    expect(await screen.findByText('Checking your login')).toBeInTheDocument()
+    expect(screen.queryByText(/API key/)).toBeNull()
+  })
+
+  it('Upstox not logged in today: the reconnect page, before any funds read', async () => {
+    server(OK)
+    useAuthStore.setState({ apiKey: 'key', sessionChecked: true, brokerSessionExpired: true })
+    render(<Dashboard />)
+    expect(await screen.findByRole('link', { name: /Reconnect/ })).toBeInTheDocument()
+    expect(screen.queryByText(/API key/)).toBeNull()
+  })
+
+  it('no API key: the existing message and link', async () => {
+    server(OK)
+    useAuthStore.setState({ apiKey: null, sessionChecked: true, brokerSessionExpired: false })
+    render(<Dashboard />)
+    expect(await screen.findByText('Prices and search need an API key.')).toBeInTheDocument()
+  })
+
+  it('ready: no notice', async () => {
+    server(OK)
+    useAuthStore.setState({ apiKey: 'key', sessionChecked: true, brokerSessionExpired: false })
+    render(<Dashboard />)
+    expect(await screen.findByTestId('pnl-total')).toBeInTheDocument()
+    expect(document.querySelector('[data-access]')).toBeNull()
+  })
+})
