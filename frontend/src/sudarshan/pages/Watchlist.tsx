@@ -5,12 +5,12 @@
 // instrument's sheet: Buy and Sell, chart, option chain and depth.
 import { Check, Plus, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router'
 import type { WatchlistItem } from '@/api/watchlist'
 import { PlaceOrderDialog } from '@/components/trading/PlaceOrderDialog'
 import { cn } from '@/lib/utils'
 import { AccessNotice } from '@/sudarshan/AccessNotice'
 import { usePriceAccess } from '@/sudarshan/access'
-import { useNavigate } from 'react-router'
 import { AlertFormSheet, type AlertPrefill, toastAlertSet } from '@/sudarshan/alerts/AlertForm'
 import { useMarketOpen } from '@/sudarshan/dashboard/hooks'
 import { keyOf } from '@/sudarshan/dashboard/live'

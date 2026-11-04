@@ -19,6 +19,7 @@ import { NewTabSheet } from '@/sudarshan/portfolio/sheets/NewTabSheet'
 import { TabSettingsSheet } from '@/sudarshan/portfolio/sheets/TabSettingsSheet'
 import { TabStrip } from '@/sudarshan/portfolio/TabStrip'
 import { ActivityTab, PORTFOLIO_KEY } from '@/sudarshan/portfolio/tab/ActivityTab'
+import { TabOverview } from '@/sudarshan/portfolio/tab/Overview'
 import { WORDS } from '@/sudarshan/portfolio/types'
 import { UpstoxTab } from '@/sudarshan/portfolio/upstox/UpstoxTab'
 import {
@@ -144,7 +145,20 @@ export default function Portfolio() {
               This tab is archived. It is hidden from the dashboard and kept as it is.
             </p>
           )}
-          <CustomStub view={part as CustomView} onView={setView} hideBody={part === 'activity'} />
+          <CustomStub
+            view={part as CustomView}
+            onView={setView}
+            hideBody={part === 'activity' || part === 'overview' || part === 'holdings'}
+          />
+          {(part === 'overview' || part === 'holdings') && (
+            <TabOverview
+              key={current.id}
+              tab={current}
+              part={part}
+              onAdd={() => open({ kind: 'add' })}
+              onImport={() => open({ kind: 'import' })}
+            />
+          )}
           {part === 'activity' && (
             <ActivityTab
               tab={current}

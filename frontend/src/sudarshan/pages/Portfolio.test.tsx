@@ -18,6 +18,7 @@ vi.mock('@/sudarshan/portfolio/api', async (importOriginal) => ({
 
 import { createQueryClient } from '@/app/providers'
 import { PortfolioError } from '@/sudarshan/portfolio/api'
+import { view } from '@/sudarshan/portfolio/tab/fixtures'
 import { WORDS } from '@/sudarshan/portfolio/types'
 import Portfolio from './Portfolio'
 
@@ -63,9 +64,12 @@ function serve(state: object = STATE, extra: Record<string, unknown> = {}) {
     if (op === 'state') return { enabled: true, data: state }
     if (op in extra) return { enabled: true, data: extra[op] }
     if (op === 'activities_list') return { enabled: true, data: { items: [], next: null } }
-    if (op === 'tab_get') return { enabled: true, data: { assets: [] } }
+    if (op === 'tab_get') return { enabled: true, data: view([]) }
     if (op === 'upstox_book') {
-      return { enabled: true, data: { holdings: { state: 'ok', read_at: 1, note: null, data: [] } } }
+      return {
+        enabled: true,
+        data: { holdings: { state: 'ok', read_at: 1, note: null, data: [] } },
+      }
     }
     throw new Error(`unexpected op ${op}`)
   })
@@ -103,7 +107,8 @@ describe('the Portfolio page', () => {
     expect(await screen.findByText('Nothing here yet. Add an entry or import a file.')).toBeTruthy()
     expect(screen.getByRole('tab', { name: 'Performance' })).toBeTruthy()
     await userEvent.click(screen.getByRole('tab', { name: 'Overview' }))
-    expect(screen.getByText(/The value of this tab now/)).toBeTruthy()
+    expect(await screen.findByRole('tab', { name: 'Overview', selected: true })).toBeTruthy()
+    expect(screen.getByText('Nothing here yet. Add an entry or import a file.')).toBeTruthy()
   })
 
   it('a tab that is gone falls back to Upstox', async () => {
