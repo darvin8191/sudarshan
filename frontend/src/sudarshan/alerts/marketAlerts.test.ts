@@ -317,7 +317,9 @@ describe('joining the owner’s room', () => {
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     bindMarketAlertsCache(client)
     const socket = await joinedSocket()
-    expect(invalidate).not.toHaveBeenCalled()
+    // The first join reads the state too (contract 2.1), but not History, which just loaded.
+    expect(invalidate.mock.calls.map(([filters]) => filters?.queryKey)).toEqual([STATE_KEY])
+    invalidate.mockClear()
 
     await reconnect(socket)
 
@@ -832,6 +834,78 @@ describe('a pushed alert', () => {
   })
 })
 
+describe('an alert the service could not record (contract 2.2, event_id null)', () => {
+  it('shows and sounds it, but keeps no id: nothing seen, nothing asked of events/since', async () => {
+    const socket = await joinedSocket()
+    socket.fire('sudarshan_market_alert', push({ event_id: null }))
+
+    expect(shown()).toEqual([['Alert · SBIN crossed above ₹100.00', '10:42:29 · now ₹100.05']])
+    expect(chime.played).toEqual(['market'])
+    expect(channel.sent).toContainEqual({
+      key: `n:${NOW - 2_000}:12:SBIN crossed above ₹100.00`,
+      ids: [],
+    })
+
+    await reconnect(socket)
+    // Still asks from where /state started it (340): the unrecorded fire moved nothing.
+    expect(api.eventsSince).toHaveBeenCalledWith(340, 200)
+  })
+
+  it('shows the same push once, however often it arrives, and counts it once', async () => {
+    const client = new QueryClient()
+    client.setQueryData(STATE_KEY, state())
+    bindMarketAlertsCache(client)
+    const socket = await joinedSocket()
+    socket.fire('sudarshan_market_alert', push({ event_id: null }))
+    socket.fire('sudarshan_market_alert', push({ event_id: null }))
+
+    expect(toasts.info).toHaveBeenCalledTimes(1)
+    expect(client.getQueryData<MarketAlertsState>(STATE_KEY)?.alerts[0].fired_today).toBe(3)
+  })
+
+  it('does not move the id a recorded alert after it still needs', async () => {
+    const socket = await joinedSocket()
+    socket.fire('sudarshan_market_alert', push({ event_id: null }))
+    socket.fire('sudarshan_market_alert', push({ event_id: 345 }))
+    expect(toasts.info).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('the page’s state after a join and after a lost push (contract 2.1, 2.3)', () => {
+  it('reads /state after every join, the first included', async () => {
+    const client = new QueryClient()
+    client.setQueryData(STATE_KEY, state())
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    bindMarketAlertsCache(client)
+    const socket = install()
+    socket.connect()
+    expect(invalidate).not.toHaveBeenCalled()
+    socket.ack({ ok: true })
+    await flush()
+    expect(invalidate.mock.calls.filter(([f]) => f?.queryKey === STATE_KEY)).toHaveLength(1)
+    await reconnect(socket)
+    expect(invalidate.mock.calls.filter(([f]) => f?.queryKey === STATE_KEY)).toHaveLength(2)
+  })
+
+  it('reads /state again for a state push that says a push was lost, whatever else it holds', async () => {
+    const client = new QueryClient()
+    client.setQueryData(STATE_KEY, state())
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    bindMarketAlertsCache(client)
+    const socket = await joinedSocket()
+    invalidate.mockClear()
+
+    socket.fire('sudarshan_market_alerts_state', {
+      engine: state().engine,
+      alerts: [],
+      removed: [99],
+      server_time: NOW + 1,
+      resync: true,
+    })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: STATE_KEY })
+  })
+})
+
 describe('one announcement across the app’s tabs', () => {
   it('tells the other tabs what it showed', async () => {
     const socket = await joinedSocket()
@@ -887,6 +961,7 @@ describe('the Alerts page’s cache', () => {
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     bindMarketAlertsCache(client)
     const socket = await joinedSocket()
+    invalidate.mockClear() // the join read the state once (contract 2.1)
     const cached = () => client.getQueryData<MarketAlertsState>(STATE_KEY)
     return { client, socket, invalidate, cached }
   }

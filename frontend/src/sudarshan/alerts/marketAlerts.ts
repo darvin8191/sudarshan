@@ -316,7 +316,8 @@ function viewOf(alertId: number): string {
 }
 
 function single(event: {
-  id: number
+  /** Null for a fire the service could not record: shown, but never kept as an id. */
+  id: number | null
   alertId: number
   title: string
   detail: string
@@ -325,8 +326,10 @@ function single(event: {
   live: boolean
 }): Announcement {
   return {
-    key: eventKey(event.id),
-    ids: [event.id],
+    // An unrecorded fire has no id: its key is its own words and moment, and only this page load
+    // and the other tabs ever see it.
+    key: event.id === null ? `n:${event.at}:${event.alertId}:${event.title}` : eventKey(event.id),
+    ids: event.id === null ? [] : [event.id],
     title: `Alert · ${event.title}`,
     description: described(event.at, event.detail, event.note),
     headline: event.title,
@@ -445,21 +448,29 @@ function deliver(alert: Announcement): void {
 // What the server pushes.
 
 function onAlert(push: MarketAlertPush): void {
-  if (!push || typeof push.event_id !== 'number') return
-  if (gap) gap.pushed = Math.max(gap.pushed, push.event_id)
-  else noteSeen(push.event_id)
-  if (counted.add(eventKey(push.event_id))) {
+  if (!push || (push.event_id !== null && typeof push.event_id !== 'number')) return
+  const id = push.event_id
+  const at = typeof push.at_ms === 'number' ? push.at_ms : Date.now()
+  if (id !== null) {
+    if (gap) gap.pushed = Math.max(gap.pushed, id)
+    else noteSeen(id)
+  }
+  // Counted once per event; an unrecorded fire has no id to count by, and a repeat of the same
+  // push (same words, same moment) is not counted twice.
+  const countKey =
+    id === null ? `n:${at}:${push.alert_id}:${String(push.title ?? '')}` : eventKey(id)
+  if (counted.add(countKey)) {
     if (!push.test) countInCache(push)
     refreshLater(push.alert_id)
   }
   deliver(
     single({
-      id: push.event_id,
+      id,
       alertId: push.alert_id,
       title: String(push.title ?? ''),
       detail: String(push.detail ?? ''),
       note: String(push.note ?? ''),
-      at: typeof push.at_ms === 'number' ? push.at_ms : Date.now(),
+      at,
       live: true,
     })
   )
@@ -564,7 +575,8 @@ function countInCache(push: MarketAlertPush): void {
 function onState(push: MarketAlertsStatePush): void {
   if (!cache || !push || typeof push !== 'object') return
   const state = cache.getQueryData<MarketAlertsState>(STATE_KEY)
-  let reread = state === undefined || cache.isFetching({ queryKey: STATE_KEY }) > 0
+  let reread =
+    push.resync === true || state === undefined || cache.isFetching({ queryKey: STATE_KEY }) > 0
   if (state) {
     const applied = applyStatePush(state, push)
     cache.setQueryData(STATE_KEY, applied.state)
@@ -661,8 +673,10 @@ function join(socket: Socket, connection: number, attempt = 0): void {
       if (ack?.ok !== true) return
       joined.set(socket, connection)
       hear('joined')
+      // The page's state is read after every join (contract 2.1): a state push lost while no app
+      // was connected would leave a card showing the wrong status.
+      if (cache) void cache.invalidateQueries({ queryKey: STATE_KEY })
       if (connection > 1 && cache) {
-        void cache.invalidateQueries({ queryKey: STATE_KEY })
         // A History page on its way (Show older) is not cut short: it is read again after.
         void cache.invalidateQueries({ queryKey: EVENTS_KEY }, { cancelRefetch: false })
         rereadTest()

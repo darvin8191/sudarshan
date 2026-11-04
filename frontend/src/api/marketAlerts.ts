@@ -181,7 +181,8 @@ export interface TestResult {
 
 /** `sudarshan_market_alert`: one fired alert, or a test. */
 export interface MarketAlertPush {
-  event_id: number
+  /** Null for a fire the service could not record: shown, never stored (contract 2.2). */
+  event_id: number | null
   alert_id: number
   symbol: string
   exchange: string
@@ -210,6 +211,8 @@ export interface MarketAlertsStatePush {
     Pick<AlertRow, 'id' | 'version' | 'status' | 'status_reason' | 'check' | 'fired_today'>
   >
   removed: number[]
+  /** A push was lost: read /state again (contract 2.3). */
+  resync?: true
   server_time: number
 }
 
