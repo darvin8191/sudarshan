@@ -67,8 +67,8 @@ import { createQueryClient } from '@/app/providers'
 import { useAuthStore } from '@/stores/authStore'
 import { alertRow, alertsState } from '@/test/marketAlerts'
 import { feed } from '@/test/marketDataHarness'
-import { NO_ANSWER_HOLD_MS } from './actions'
 import { AlertFormSheet, type AlertPrefill } from './AlertForm'
+import { NO_ANSWER_HOLD_MS } from './actions'
 import { STATE_KEY } from './stateCache'
 
 const NIFTY: AlertPrefill = {
@@ -711,7 +711,9 @@ describe('access to prices in the form', () => {
     useAuthStore.setState({ apiKey: null, sessionChecked: true, brokerSessionExpired: false })
     const { sheet } = renderForm({ prefill: NIFTY })
     expect(within(sheet).getByText('Prices and search need an API key.')).toBeInTheDocument()
-    expect(within(sheet).getByRole('link', { name: 'Create one under API Key' })).toBeInTheDocument()
+    expect(
+      within(sheet).getByRole('link', { name: 'Create one under API Key' })
+    ).toBeInTheDocument()
   })
 
   it('ready: no notice', () => {
