@@ -145,4 +145,19 @@ describe('syncSession', () => {
     expect(isAuthenticated).toBe(false)
     expect(sessionChecked).toBe(false)
   })
+  it('clears the saved key when a re-check says the account has none', async () => {
+    useAuthStore.setState({ apiKey: 'old', sessionChecked: true })
+    stubSession({
+      status: 'success',
+      logged_in: true,
+      authenticated: true,
+      user: 'owner',
+      broker: 'upstox',
+    })
+    await syncSession({ keepOnFailure: true })
+    expect(useAuthStore.getState().apiKey).toBeNull()
+    expect(
+      JSON.parse(localStorage.getItem('openalgo-auth') ?? '{}').state?.apiKey ?? null
+    ).toBeNull()
+  })
 })
