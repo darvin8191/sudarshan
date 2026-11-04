@@ -94,6 +94,10 @@ in brand. Icon "Mor": tile #0E5A73, ring #E3A21A, glyph #FFFFFF. Numbers via
   `sudarshan-screener`, `sudarshan-portfolio`, `sudarshan-family`, `sudarshan-ops`) talking to
   OpenAlgo through the REST API / `openalgo` SDK at `http://127.0.0.1:5000` and the WebSocket proxy
   `ws://127.0.0.1:8765`.
+- Ring services listen on 127.0.0.1 only, with one HTTP listener and one `/health` per service
+  (R14): `sudarshan-feed` 5580 (plus its ZMQ tick bus on 5581), `sudarshan-alerts` 5582,
+  `sudarshan-portfolio` 5583 and `sudarshan-screener` 5584 (both reserved). A new service takes
+  the next free port and is added here; an existing service never opens a second HTTP listener.
 - **No new asyncio loops, APScheduler jobs or background threads inside the OpenAlgo app**
   (gunicorn single worker + eventlet). Schedulers = systemd timers or the services above.
 - New React page = **three registrations**: route in `frontend/src/App.tsx`, known path in
@@ -190,5 +194,12 @@ in brand. Icon "Mor": tile #0E5A73, ring #E3A21A, glyph #FFFFFF. Numbers via
   attaches them and marks the release latest (a failed build is demoted to pre-release). The
   server's `sudarshan-deploy.timer` installs the latest release only outside 08:30–16:00 IST on
   trading days and rolls back on a failed health check.
+- Stop asyncio tasks with `sudarshan.tasks.cancel_and_wait(...)`, never a bare `cancel()` and
+  `await`. httpx 0.28 with anyio 4.14 can swallow a cancel during a connect, and the stop then
+  hangs; the helper cancels again until each task has ended.
+- Give pytest an explicit `--timeout`: `-o addopts=""` drops the timeout set in `pyproject.toml`,
+  and a hung test then holds the machine.
+- `sudarshan/STATUS.md` merges as a union (`.gitattributes`), so parallel branches never conflict
+  on it. After every merge, look for doubled M-id rows and keep one.
 - Before finishing a task: run the relevant tests, `npm run lint` for frontend changes, and update
   the feature's row in `sudarshan/STATUS.md` (M-id → done/partial + PR).

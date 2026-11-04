@@ -5,3 +5,7 @@
 # scripts, so they are kept LF too.
 *.sh text eol=lf
 install/lib/*.py text eol=lf
+
+# SUDARSHAN: rows added to STATUS.md by parallel branches merge as a union, so
+# they never conflict; after a merge, check for doubled M-id rows and keep one.
+sudarshan/STATUS.md merge=union
