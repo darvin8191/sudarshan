@@ -52,6 +52,8 @@ def settings_for(tmp_path):
             "SUDARSHAN_OPENALGO_WS_URL": proxy.url if proxy else "ws://127.0.0.1:9",
             "SUDARSHAN_OPENALGO_URL": notify.url if notify else "http://127.0.0.1:9",
             "SUDARSHAN_ALERTS_ALWAYS_ON": "1",
+            "SUDARSHAN_NOTICE_SPOOLS": str(tmp_path / "notice-spool.jsonl"),  # never the machine's
+            "SUDARSHAN_DEPLOYED_TAG_FILE": str(tmp_path / "deployed_tag"),  # nor this one
         }
         return Settings.from_env(env | overrides)
 

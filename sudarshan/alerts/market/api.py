@@ -33,7 +33,7 @@ import contextlib
 import json
 import logging
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any, Protocol
 
 from cryptography.fernet import Fernet
@@ -156,6 +156,8 @@ class MarketApi:
         self.desk, self.fernet, self.max_bytes = desk, fernet, max_bytes
         self.nonces = nonces if nonces is not None else NonceBook(NONCES)
         self.server: asyncio.Server | None = None
+        # M18.1/R14: the service's own health document, which /health carries beside the market fields
+        self.base_health: Callable[[], dict[str, Any]] | None = None
         self._warned: dict[str, float] = {}
 
     async def start(self, port: int) -> None:
@@ -210,7 +212,8 @@ class MarketApi:
         if path == HEALTH_PATH:
             if method != "GET":
                 raise ApiError(405, "method", "method not allowed")
-            return self.desk.health()
+            base = self.base_health() if self.base_health is not None else {}
+            return {**base, **self.desk.health()}
         op = path[len(OPS_PREFIX) :] if path.startswith(OPS_PREFIX) else None
         if op not in OPS:
             raise ApiError(404, "not_found", "not found")

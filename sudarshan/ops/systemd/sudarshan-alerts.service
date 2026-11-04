@@ -8,6 +8,10 @@
 # exits at once and stays stopped until the next restart).
 # Market alerts (M10) run in the same process when SUDARSHAN_MARKET_ALERTS=on there (off by
 # default): ticks from sudarshan-feed on 127.0.0.1:5581/5580, the Alerts page's API on 5582.
+# Also tells the owner what the server did with a release (installed, rolled back, waiting) from the
+# files the deploy tool and the backup job record, at any hour: see "Server notices" in the README.
+# GET /health on 127.0.0.1:5582 (the market alerts' API listens there, always) says which release is
+# installed and what the service is doing ("Health page" in the README); loopback only.
 # Installed, enabled and restarted by sudarshan-deploy from each release, like sudarshan-feed.
 
 [Unit]
@@ -41,6 +45,9 @@ RestartPreventExitStatus=2
 # SIGTERM: the stream closes within 1 s plus 5 s for the close handshake, waiting alerts get
 # 5 s to go out; killed after 20 s.
 TimeoutStopSec=20
+# Squeezed before it is killed: a service that grows past 192M slows down instead of being cut off at 256M
+# with the owner's alerts in flight.
+MemoryHigh=192M
 MemoryMax=256M
 CPUWeight=50
 UMask=0077

@@ -78,7 +78,7 @@ header get 403). JSON in and out; use `127.0.0.1`, not `localhost` (which may re
 
 | request | answer |
 |---|---|
-| `GET /health` | started_at (changes when the feed restarts), state, detail, connected_since, socket_age_s, last_message_age_s, next_retry_in_s, token_file_readable, subscribed (counts by mode), claims (keys per client), keys_without_data, reconnects, last_error (+ hint), last_disconnect, market_window (below), market_status, stats, recorder |
+| `GET /health` | service, release (the installed release tag, `v0.3.3`, from the deploy tool's record; `null` when that cannot be read), version (this service's own code version, not the release), state, detail, connected_since, socket_age_s, last_message_age_s, next_retry_in_s, token_file_readable, subscribed (counts by mode), claims (keys per client), keys_without_data, reconnects, last_error (+ hint), last_disconnect, market_window (below), market_status, stats, recorder |
 | `GET /snapshot?keys=K1,K2` | `{"ticks": {key: tick or null}}`; URL-encode the keys (`|` is `%7C`, space `%20`) |
 | `GET /snapshot/all` | every key the service has a tick for (survives restarts and after-hours) |
 | `GET /subscriptions` | the desired set by mode |
@@ -159,6 +159,9 @@ shows its last non-zero value. Use REST quotes for circuit checks.
   subscribed when the first data comes, and 10 minutes after the F&O close, so the updates that
   follow the close still arrive. Equity derivatives trade to 15:40 since 3 Aug 2026 (the cash
   market closes at 15:30), so the window ends at 15:50 and the stall watchdog runs 09:15-15:40.
+  Its 120 seconds are counted from the open and never from before it: a socket that heard nothing
+  in the minutes before 09:15 is not reconnected at 09:15:00, only when the open itself brings
+  nothing for 120 seconds.
   `SUDARSHAN_FEED_ALWAYS_ON=1` ignores the window and the calendar (tests).
 - **Trading days** come from auto-login's calendar, the one the alerts use: weekends and the
   holidays file are closed, a date in the extra-days file is open, even when the holidays file
@@ -181,7 +184,7 @@ shows its last non-zero value. Use REST quotes for circuit checks.
   | WebSocket upgrade refused (403/429) | as above but never sooner than 60 s, so a stale socket can expire at Upstox |
   | authorize 401 ("token rejected") | 10 min, 30 min, then hourly; at once when the token file changes |
   | token file missing, empty or malformed | 60 s; at once when the file changes |
-  | no data for 120 s during 09:15-15:40 (on a day with its own window: from 15 minutes after its start, the pre-open's length, to its end; on a reopened day without one: only after its first trade) | clean close and reconnect (stall watchdog) |
+  | no data for 120 s during 09:15-15:40, counted from the open (on a day with its own window: from 15 minutes after its start, the pre-open's length, to its end; on a reopened day without one: only after its first trade) | clean close and reconnect (stall watchdog) |
 
 - **Subscriptions**: `default_keys.txt` (or `SUDARSHAN_FEED_KEYS`) is the base set, one
   `MODE KEY` per line, re-read at every start. API changes are stored as an overlay in
@@ -241,6 +244,7 @@ live service holds 5581):
 | `SUDARSHAN_FEED_RECORD` | `1` |
 | `SUDARSHAN_FEED_RECORD_MAX_MB` / `SUDARSHAN_FEED_RECORD_KEEP_DAYS` | `512` / `10` |
 | `SUDARSHAN_FEED_LOG_LEVEL` | `INFO` |
+| `SUDARSHAN_DEPLOYED_TAG_FILE` | `/var/lib/sudarshan/deployed_tag` (where the deploy tool records the installed release; `/health` shows it as `release`) |
 | `SUDARSHAN_UPSTOX_API_BASE` | `https://api.upstox.com` (tests point it at a local fake; https is required otherwise) |
 
 Put overrides in `/etc/sudarshan/feed.env` (root:sudarshan 640); the unit reads it if present.

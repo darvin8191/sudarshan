@@ -48,7 +48,9 @@ from sudarshan.tasks import cancel_and_wait
 
 from . import __version__, loopback, messages
 from .config import ConfigError, Settings, setup_logging, switched_off
+from .health import health_document  # M18.1: the health document (served by the market API)
 from .market.config import MarketSettings, feed_url_of, http_port_of, market_on  # M10.1
+from .notices import NoticeDesk  # M18.x: the server's own notices (deploy, backup)
 from .orders import Alert, OrderTracker
 from .outbox import OpenAlgoTelegram, Outbox, Pacer, Throttle
 from .owner import Owner, OwnerError, load_openalgo_modules, prepare_openalgo_env, read_owner
@@ -127,6 +129,7 @@ class AlertService:
         self.store: Store | None = None
         self.tracker: OrderTracker | None = None
         self.outbox: Outbox | None = None
+        self.notices: NoticeDesk | None = None  # M18.x
         self.client: httpx.AsyncClient | None = None
         self._stop = asyncio.Event()
         self._state, self._detail = "starting", ""
@@ -163,6 +166,19 @@ class AlertService:
             )  # fmt: skip
             sender = asyncio.create_task(self.outbox.run(), name="order alerts: Telegram")
             ticker = asyncio.create_task(self._tick(), name="order alerts: clock")
+            # M18.x: tells what the deploy tool and the backup job recorded (notices.py). It does
+            # not depend on the alert window or the order stream.
+            self.notices = NoticeDesk(
+                self.settings.notice_spools,
+                self.store,
+                telegram.send,
+                self._owner_ready,
+                self.clock,
+                # Quiet while the market trades (failures excepted). M10.5 hook: add
+                # pace=LanePace(outbox.pacer) once outbox.Pacer is merged (notices.py).
+                market_open=self.window.calendar.in_market_hours,
+            )
+            notices = asyncio.create_task(self.notices.run(), name="order alerts: server notices")
             try:
                 await self._supervise()
             finally:
@@ -171,10 +187,12 @@ class AlertService:
                 for task in unfinished:  # a pause still unread is told as such (_resync)
                     task.cancel()
                 await asyncio.gather(*unfinished, return_exceptions=True)
-                left = await self.outbox.flush(STOP_FLUSH_S)
+                left, _ = await asyncio.gather(  # M18.x: a notice on its way gets the same grace
+                    self.outbox.flush(STOP_FLUSH_S), self.notices.close(STOP_FLUSH_S)
+                )
                 if left:
                     log.warning("%d order alerts were not sent before stopping", left)
-                await cancel_and_wait(sender, ticker)  # a cancel lost in httpx is sent again
+                await cancel_and_wait(sender, ticker, notices)  # a cancel lost in httpx is sent again
                 self.store.close()
                 self._set_state("stopped")
 
@@ -249,6 +267,11 @@ class AlertService:
             log.warning(OWNER_PROBLEMS[problem])
         self.owner, self._owner_problem = None, problem
         return None
+
+    def _owner_ready(self) -> bool:
+        """M18.x: True when the owner's key is loaded, read from OpenAlgo first when it is not (the
+        notices go out when the alert window is closed, when no connection has read it)."""
+        return self.owner is not None or self._load_owner() is not None
 
     def _use(self, owner: Owner) -> None:
         if self._owner_problem is not None or self.owner is None:
@@ -578,6 +601,7 @@ def _json(raw) -> dict | None:
 async def _serve(service: AlertService, market=None, api=None, port: int = 0) -> None:
     loop = asyncio.get_running_loop()
     if api is not None:  # M10.1: the market alerts' sealed local API, before anything else
+        api.base_health = lambda: health_document(service)  # M18.1: the one /health
         market, api = await _open_api(api, port, market)
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, _stop, service, market, f"signal {sig.name}")
