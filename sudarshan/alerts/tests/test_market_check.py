@@ -140,15 +140,37 @@ def plain(vector: dict) -> bool:
                              "auction", "day"} for fire in vector.get("fires", []))  # fmt: skip
 
 
+def plain_at_close(vector: dict) -> bool:
+    """A candle-close vector a recording can carry: the check's own timer covers its clock steps."""
+    day = vector.get("day")
+    if vector.get("alert", {}).get("frequency") != "at_close" or vector.get("down"):
+        return False
+    for step in expand(vector["steps"], vector.get("day", "2026-10-21")):
+        if "clock" in step and set(step) - {"clock", "at"} == set():
+            continue
+        if set(step) - set(PLAIN) or step.get("day", day) != day:
+            return False
+    return all(set(fire) <= {"at", "value", "level", "direction", "trade_time", "candle",
+                             "auction", "day"} for fire in vector.get("fires", []))  # fmt: skip
+
+
 VECTORS_AS_RECORDINGS = [v for v in VECTORS["alerts"] if plain(v)]
+
+
+AT_CLOSE_AS_RECORDINGS = [v for v in VECTORS["alerts"] if plain_at_close(v)]
 
 
 def test_enough_vectors_run_as_recordings():
     assert len(VECTORS_AS_RECORDINGS) >= 40
+    # review: the candle-close vectors the first version of this test left out
+    assert {"B3", "B5", "B6", "B9", "AU5", "AU11", "AU17"} <= {v["id"] for v in
+                                                              AT_CLOSE_AS_RECORDINGS}  # fmt: skip
 
 
 @pytest.mark.parametrize(
-    "vector", VECTORS_AS_RECORDINGS, ids=[v["id"] for v in VECTORS_AS_RECORDINGS]
+    "vector",
+    [*VECTORS_AS_RECORDINGS, *AT_CLOSE_AS_RECORDINGS],
+    ids=[v["id"] for v in [*VECTORS_AS_RECORDINGS, *AT_CLOSE_AS_RECORDINGS]],
 )
 def test_a_golden_vector_as_a_recording(vector, tmp_path):
     """The check and the vectors' own runner agree on what fires."""
@@ -158,6 +180,8 @@ def test_a_golden_vector_as_a_recording(vector, tmp_path):
     day = date.fromisoformat(on)
     ticks = []
     for raw in expand(vector["steps"], on):
+        if "clock" in raw and set(raw) - {"clock", "at"} == set():
+            continue  # a candle's close is judged by the check's own timer
         frame = world.frame(raw, on)
         ticks.append((world.alert.key, frame["ts_recv"], frame))
     found = sessions.sessions_of(day, trading_day=trades(day), window=window_of(day))
