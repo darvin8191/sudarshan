@@ -90,10 +90,10 @@ def _reset() -> None:
 def sandbox(monkeypatch, risk_store):
     _prepare()
     _reset()
+    import itertools
+
     import sandbox.order_manager as order_manager
     from sandbox.execution_engine import ExecutionEngine
-
-    import itertools
 
     ticks = itertools.count(1)
 
