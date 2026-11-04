@@ -127,6 +127,12 @@ SESSION_LOOKAHEAD_DAYS = 10
 #: The daily limit could not be checked this recently: the banner says so. Its first failure
 #: after a quiet spell is announced to every open screen (``sudarshan_risk_day``).
 UNCHECKED_SHOWN_S = 60.0
+#: A risk refusal of an order that did not come from the app's own screens is told on Telegram
+#: at most once this often for one pipe, symbol and reason; those not told are counted into the
+#: next (the coordinator's decision b).
+TOLD_EVERY_S = 60.0
+#: How many pipe, symbol and reason the telling remembers before forgetting the old ones.
+TOLD_KEPT = 256
 #: A batch counts once in the burst brake: the orders it sends within this long, each on the
 #: instrument, side and quantity the batch named, are not counted again.
 BATCH_PARTS_WITHIN_S = 30.0
@@ -369,6 +375,7 @@ class Gate:
         self._sessions = LockedTTLCache(maxsize=32, ttl=SESSION_KEPT_S)
         self._unchecked: dict[str, float] = {}  # pipe -> monotonic: the daily limit unchecked
         self._bursts: dict[str, _Burst] = {}  # pipe -> its admissions (the burst brake)
+        self._tellings: dict[tuple, tuple[float, int]] = {}  # (pipe, symbol, code) -> (at, untold)
         self._problem: tuple[float, str, str] | None = None  # (epoch, kind, words): the last one
 
     def _the_store(self) -> risk_store.RiskStore:
@@ -459,7 +466,7 @@ class Gate:
         """Admit or refuse one call to ``fn``; a refusal never calls it."""
         decision = self.admit(kind, args, kwargs)
         if decision.refused:
-            return kind.refusal(decision.words)
+            return kind.refusal(decision.words, decision.detail.get("told"))
         if decision.clip is not None:
             args, kwargs = kind.clip(args, kwargs, decision.clip)
         try:
@@ -493,9 +500,49 @@ class Gate:
             self._note(kind.pipe, order, decision)
         if decision.code == BURST_BRAKE and decision.detail.get("tell"):
             _tell_owner(decision.detail["tell"])
+        elif (decision.refused or decision.clip is not None) and order is not None:
+            decision = self._told(kind, order, decision)
         if decision.detail.get("unchecked_now"):
             _announce_unchecked(kind.pipe)
         return decision
+
+    def _told(self, kind: _Kind, order: Order, decision: Decision) -> Decision:
+        """The coordinator's decision b: a risk refusal of an order that did not come from the
+        app's own screens is told on Telegram, merged per symbol and reason per minute. A new
+        order's refusal is told through its answer (``nothing_sent``, which the services pass to
+        their failure event and Telegram hears); a change, a GTT or a reversal cut to its exit
+        is told here. The sentence names any exit it left unsent (words.py)."""
+        if _from_app():
+            return decision
+        by_answer = order.action == PLACE and decision.clip is None
+        if by_answer and kind.pipe == SANDBOX:
+            return decision  # Analyze mode's own alert already tells every order it refuses
+        untold = self.told_now(kind.pipe, order.symbol, decision.code)
+        if untold is None:
+            return decision  # told in the last minute: counted into the next
+        if not by_answer:
+            _tell_owner(words.refusal_told(decision.words, untold, kind.pipe, cut=decision.clip))
+            return decision
+        said = decision.words + words.refused_again(untold)
+        return replace(decision, words=said, detail={**decision.detail, "told": untold})
+
+    def told_now(self, pipe: str, symbol: str, code: str) -> int | None:
+        """Whether a refusal from outside the app's screens is told now: None when one for the
+        same pipe, symbol and reason was told in the last ``TOLD_EVERY_S`` (it is counted),
+        else how many like it went untold since the last telling (0 at first)."""
+        now = time.monotonic()
+        with self._lock:
+            kept = self._tellings
+            if len(kept) > TOLD_KEPT:
+                for key in [k for k, v in kept.items() if now - v[0] >= TOLD_EVERY_S]:
+                    del kept[key]
+            key = (pipe, symbol, code)
+            told = kept.get(key)
+            if told is not None and now - told[0] < TOLD_EVERY_S:
+                kept[key] = (told[0], told[1] + 1)
+                return None
+            kept[key] = (now, 0)
+            return 0 if told is None else told[1]
 
     def settle(self, token: int | None, answer: str, ref: str | None) -> None:
         """Record a call's answer: a refusal drops its send; anything else starts its clock."""
@@ -1571,6 +1618,18 @@ def _announce_unchecked(pipe: str) -> None:
         logger.exception("An unchecked daily limit could not be told to the open screens")
 
 
+def _from_app() -> bool:
+    """Whether the order came from the app's own screens: a request carrying the owner's logged
+    in session, as the phone's ticket, Positions and Orders send theirs (even to /api/v1).
+    Webhooks, scripts, Flow, the strategy module, MCP and Telegram carry none."""
+    try:
+        from flask import has_request_context, session
+
+        return has_request_context() and bool(session.get("user"))
+    except Exception:
+        return False
+
+
 def _hhmm(at: datetime | None) -> str:
     return "" if at is None else at.astimezone(IST).strftime("%H:%M")
 
@@ -1625,7 +1684,7 @@ def _openalgo_product(pipe: str, kept_as: str, asked: str, exchange: str) -> str
 class _Kind:
     pipe: str
     describe: Callable[..., Order]
-    refusal: Callable[[str], Any]
+    refusal: Callable[[str, int | None], Any]  # the sentence, and whether it is told (untold)
     outcome: Callable[[Any], tuple[str, str | None]]
     at: int = 0  # where a place's order data is in the call's arguments
 
@@ -1728,11 +1787,14 @@ def _upstox_gtt(action: str):
     return describe
 
 
-def _refuse_with_response(text: str):
-    return RefusedResponse(), {"status": "error", "message": text}, None
+def _refuse_with_response(text: str, told: int | None = None):
+    body = {"status": "error", "message": text}
+    if told is not None:  # Telegram hears it (subscribers/telegram_subscriber.on_order_failed)
+        body["nothing_sent"] = True
+    return RefusedResponse(), body, None
 
 
-def _refuse_with_body(text: str):
+def _refuse_with_body(text: str, told: int | None = None):
     return {"status": "error", "message": text}, 403
 
 
@@ -1844,9 +1906,11 @@ def _sandbox_gtt(action: str):
     return describe
 
 
-def _refuse_in_the_sandbox(text: str):
-    # risk_refused: a GTT leg the gate refuses is rejected for good (sandbox/gtt_manager.py)
-    return False, {"status": "error", "message": text, "mode": "analyze", "risk_refused": True}, 403
+def _refuse_in_the_sandbox(text: str, told: int | None = None):
+    # risk_refused: a GTT leg the gate refuses is rejected for good (sandbox/gtt_manager.py);
+    # nothing_sent: Analyze mode's order alert titles it as not sent
+    body = {"status": "error", "message": text, "mode": "analyze", "risk_refused": True}
+    return False, {**body, "nothing_sent": True}, 403
 
 
 def _answer_in_the_sandbox(result) -> tuple[str, str | None]:

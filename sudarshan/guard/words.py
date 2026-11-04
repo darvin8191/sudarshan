@@ -768,6 +768,23 @@ def sandbox_gtt_refused(name: str) -> str:
     )
 
 
+def refused_again(untold: int) -> str:
+    """What a refusal told on Telegram adds about those like it not told in the last minute."""
+    if not untold:
+        return ""
+    times = "time" if untold == 1 else "times"
+    return f" Refused {untold} more {times} like this since the last message."
+
+
+def refusal_told(said: str, untold: int, pipe: str, *, cut: int | None = None) -> str:
+    """Telegram, at most once a minute per symbol and reason: a risk refusal of an order that
+    did not come from the app's own screens (the coordinator's decision b), in its own words,
+    which name any exit it left unsent."""
+    where = "" if pipe == "live" else " in the sandbox"
+    title = "Order cut to its exit" if cut is not None else "Order not sent"
+    return f"{title}{where} (Settings > Risk)\n{said}{refused_again(untold)}"
+
+
 #: Every fixed sentence, for the tests that scan them.
 FIXED = (
     RESUME_HOW,

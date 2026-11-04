@@ -293,12 +293,15 @@ def place_order_with_auth(
             else "Failed to place order"
         )
         error_response = {"status": "error", "message": message}
+        # SUDARSHAN M5.13: a refusal the risk guard tells on Telegram, which hears no other
+        # failure, as place_smart_order_service passes one on (sudarshan/guard/gate.py).
+        heard = isinstance(response_data, dict) and response_data.get("nothing_sent") is True
         bus.publish(
             OrderFailedEvent(
                 mode="live",
                 api_type="placeorder",
                 request_data=order_request_data,
-                response_data=error_response,
+                response_data={**error_response, "nothing_sent": True} if heard else error_response,
                 api_key=api_key,
                 symbol=order_data.get("symbol", ""),
                 exchange=order_data.get("exchange", ""),

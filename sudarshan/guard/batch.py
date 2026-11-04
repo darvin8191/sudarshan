@@ -54,7 +54,8 @@ def basket(basket_data: dict, auth_token: str, original_data: dict) -> Answer | 
     part = None if index is None else index + 1  # None: the basket as a whole (the burst brake)
     exits = _exits(decision, described, "Order", [n + 1 for n in range(len(described))])
     message = words.together_refused("basket", part, decision.words, exits)
-    return _refused(pipe, "basket_order_service", "basketorder", original_data, message)
+    told = _told(pipe, decision, described, index)
+    return _refused(pipe, "basket_order_service", "basketorder", original_data, message, told)
 
 
 def split(split_data: dict, auth_token: str, original_data: dict) -> Answer | None:
@@ -78,7 +79,8 @@ def split(split_data: dict, auth_token: str, original_data: dict) -> Answer | No
         return None
     _index, decision = found
     message = words.together_refused("split", None, decision.words)
-    return _refused(pipe, "split_order_service", "splitorder", original_data, message)
+    told = _told(pipe, decision, [whole], 0)
+    return _refused(pipe, "split_order_service", "splitorder", original_data, message, told)
 
 
 def options_split(
@@ -111,7 +113,8 @@ def options_split(
         return None
     _index, decision = found
     message = words.together_refused("split", None, decision.words)
-    return _refused(pipe, None, "optionsorder", original_data, message)
+    told = _told(pipe, decision, [whole], 0)
+    return _refused(pipe, None, "optionsorder", original_data, message, told)
 
 
 def multi_leg(
@@ -167,7 +170,10 @@ def multi_leg(
     part = None if index is None else numbers[index]
     exits = _exits(decision, described, "Leg", numbers)
     message = words.together_refused("multi_leg", part, decision.words, exits)
-    return _refused(pipe, "options_multiorder_service", "optionsmultiorder", original_data, message)
+    told = _told(pipe, decision, described, index)
+    return _refused(
+        pipe, "options_multiorder_service", "optionsmultiorder", original_data, message, told
+    )
 
 
 # -- the parts -------------------------------------------------------------------------------------
@@ -255,14 +261,36 @@ class _SandboxUser:
         self.user_id = user_id
 
 
+def _told(pipe: str, decision, described: list, index: int | None) -> int | None:
+    """The coordinator's decision b for a batch refused whole: told on Telegram when it did not
+    come from the app's own screens, merged per symbol and reason per minute (gate.told_now).
+    None: not told now; else how many like it went untold since the last telling."""
+    if gate._from_app() or decision.code == gate.BURST_BRAKE:  # the brake tells on its own
+        return None
+    part = described[index] if index is not None and 0 <= index < len(described) else None
+    symbol = part.symbol if part is not None else ""
+    return gate.GATE.told_now(pipe, symbol, decision.code)
+
+
 def _refused(
-    pipe: str, service_name: str | None, api_type: str, original_data: dict, message: str
+    pipe: str,
+    service_name: str | None,
+    api_type: str,
+    original_data: dict,
+    message: str,
+    told: int | None = None,
 ) -> Answer:
     """The service's own error answer for a batch refused whole: 403, nothing sent. In Analyze
-    mode, its analyzer event (the service's own emitter, or one for ``api_type``)."""
+    mode, its analyzer event (the service's own emitter, or one for ``api_type``). When it is
+    told (``told``), Live's failure event carries nothing_sent, which Telegram hears; Analyze
+    mode's analyzer events are not alerted, so the sandbox's is told here."""
     import importlib
 
+    if told is not None:
+        message += words.refused_again(told)
     if pipe == gate.SANDBOX:
+        if told is not None:
+            gate._tell_owner(words.refusal_told(message, 0, pipe))
         if service_name is not None:
             service = importlib.import_module(f"services.{service_name}")
             return False, service.emit_analyzer_error(original_data, message), 403
@@ -271,6 +299,8 @@ def _refused(
     from utils.event_bus import bus
 
     response = {"status": "error", "message": message}
+    if told is not None:
+        response["nothing_sent"] = True  # subscribers/telegram_subscriber.on_order_failed
     request = {key: value for key, value in original_data.items() if key != "apikey"}
     bus.publish(
         OrderFailedEvent(
