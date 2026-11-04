@@ -31,6 +31,9 @@ from sudarshan.vault import PORTFOLIO_API_INFO, fernet_for
 from . import __version__
 from .api import PortfolioApi
 from .config import ConfigError, Settings, merged_env, read_pepper, setup_logging
+from .migrations import SchemaTooNew
+from .store import DB_FILENAME, PortfolioStore, StoreError
+from .store import stop as stop_store_thread
 
 log = logging.getLogger("sudarshan.portfolio")
 
@@ -55,15 +58,21 @@ def job(name: str, registry: dict[str, Job] | None = None) -> Callable[[Job], Jo
 
 
 def open_store(settings: Settings) -> Any:
-    """THE SEAM, start: open portfolio.db under ``settings.state_dir`` (migrations, the writer
-    thread) and return the store, or None. Filled by the store's merge; opens nothing yet."""
-    return None
+    """THE SEAM, start: open portfolio.db under ``settings.state_dir``. Opening runs the
+    migrations to the code's version and the first-start seeds (the owner as the one member, the
+    Upstox account and tab), each in one transaction. ``SchemaTooNew`` (a file a newer release
+    wrote) and ``StoreError`` come out as they are: the service keeps the portfolio off."""
+    settings.state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return PortfolioStore(settings.state_dir / DB_FILENAME)
 
 
 def close_store(store: Any) -> None:
-    """THE SEAM, stop: end the writer thread and dispose the engines, so that no thread, file or
-    connection outlives the service. Called once, with what ``open_store`` returned."""
-    return None
+    """THE SEAM, stop: dispose the engines and end the store's writer thread, so that no thread,
+    file or connection outlives the service. Called once, with what ``open_store`` returned."""
+    try:
+        store.close()
+    finally:
+        stop_store_thread()
 
 
 class Service:
@@ -83,6 +92,9 @@ class Service:
         self.enabled = settings.enabled
         self.api = PortfolioApi(self, fernet)
         self.store: Any = None
+        #: Why the portfolio is off when the switch is on (a newer file, a store that will not
+        #: open), in the owner's words; the API answers every op with it.
+        self.off_reason: str | None = None
         self._jobs = JOBS if jobs is None else jobs
         self._opener, self._closer, self._retry_s = opener, closer, port_retry_s
         self._state = "starting"
@@ -109,7 +121,8 @@ class Service:
                 "jobs": {
                     name: ("running" if not t.done() else "ended")
                     for name, t in self._tasks.items()
-                },  # fmt: skip
+                },
+                **({"reason": self.off_reason} if self.off_reason else {}),
             },
         }
 
@@ -129,7 +142,8 @@ class Service:
         api_task = None
         try:
             if self.enabled:
-                self.store = self._opener(self.settings)
+                self._open()
+            if self.enabled:
                 for name, function in self._jobs.items():
                     self._tasks[name] = asyncio.create_task(function(self), name=f"job-{name}")
             else:
@@ -148,6 +162,23 @@ class Service:
                 except Exception:
                     log.exception("the portfolio's store did not close cleanly")
             log.info("stopped (%s)", self._stop_reason or "ended")
+
+    def _open(self) -> None:
+        """Open the store. A file a newer release wrote, or one that will not open, keeps the
+        portfolio off (X7) and the service up, with the owner's sentence: a restart loop would
+        only repeat it, and a newer file must not be written to."""
+        try:
+            self.store = self._opener(self.settings)
+        except SchemaTooNew as exc:
+            log.error("portfolio.db was written by a newer release (file %s, this code %s): the "
+                      "portfolio stays off", exc.found, exc.known)  # fmt: skip
+            self._keep_off(str(exc))
+        except StoreError as exc:
+            log.error("portfolio.db could not be opened (%s): the portfolio stays off", exc.cause)
+            self._keep_off(str(exc))
+
+    def _keep_off(self, reason: str) -> None:
+        self.enabled, self.off_reason = False, reason
 
     async def _serve_api(self) -> None:
         """Bind the port; while it is taken say so and try again every minute; then hold it."""

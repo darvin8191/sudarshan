@@ -107,9 +107,10 @@ class Desk(Protocol):
     def health(self) -> dict[str, Any]: ...
 
 
-def off_data() -> dict[str, Any]:
-    """What every op answers while the portfolio is switched off."""
-    return {"enabled": False, "message": WORDS["off"]}
+def off_data(reason: str | None = None) -> dict[str, Any]:
+    """What every op answers while the portfolio is off: the switch, or ``reason`` (a file a newer
+    release wrote, a store that will not open) in the owner's words."""
+    return {"enabled": False, "message": reason or WORDS["off"]}
 
 
 class PortfolioApi:
@@ -218,7 +219,7 @@ class PortfolioApi:
             self._note(op, "principal")
             raise ApiError(403, "principal", WORDS["principal"])
         if not self.desk.enabled:
-            return {"status": "success", "data": off_data()}
+            return {"status": "success", "data": off_data(getattr(self.desk, "off_reason", None))}
         handler = self.registry.get(op)
         if handler is None:
             raise ApiError(501, "not_ready", WORDS["not_ready"])
