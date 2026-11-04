@@ -78,12 +78,15 @@ header get 403). JSON in and out; use `127.0.0.1`, not `localhost` (which may re
 
 | request | answer |
 |---|---|
-| `GET /health` | state, detail, connected_since, socket_age_s, last_message_age_s, next_retry_in_s, token_file_readable, subscribed (counts by mode), keys_without_data, reconnects, last_error (+ hint), last_disconnect, market_window (below), market_status, stats, recorder |
+| `GET /health` | started_at (changes when the feed restarts), state, detail, connected_since, socket_age_s, last_message_age_s, next_retry_in_s, token_file_readable, subscribed (counts by mode), claims (keys per client), keys_without_data, reconnects, last_error (+ hint), last_disconnect, market_window (below), market_status, stats, recorder |
 | `GET /snapshot?keys=K1,K2` | `{"ticks": {key: tick or null}}`; URL-encode the keys (`|` is `%7C`, space `%20`) |
 | `GET /snapshot/all` | every key the service has a tick for (survives restarts and after-hours) |
 | `GET /subscriptions` | the desired set by mode |
 | `POST /subscribe` `{"mode": "ltpc", "keys": [...]}` | 200 with counts; 400 bad mode or key; 409 over an Upstox cap |
-| `POST /unsubscribe` `{"keys": [...]}` | 200 with counts |
+| `POST /unsubscribe` `{"keys": [...]}` | 200 with counts; a key a client claims stays on the socket |
+| `PUT /claims/<client>` `{"keys": {"NSE_EQ|INE002A01018": "full"}}` | replaces that client's whole set and renews it: 200 `{ok, claimed, subscribed, applied_live}`; 400 bad client id, key or mode; 409 over the client's quota, the ring's 1,400 or an Upstox cap (nothing changes; the message names the client and gives the numbers) |
+| `DELETE /claims/<client>` | drops the client's set |
+| `GET /claims` | every client: renewed_at, keys, by_mode |
 
 `last_error` and `last_disconnect` describe the most recent such event and stay after recovery
 (history, not current health): `state` says what is happening now, and comparing their `at` with
@@ -121,7 +124,9 @@ separate from OpenAlgo's 5555 market-data bus, where the opposite rule holds (th
 binds and publishers connect). A taken port is a startup error, never a silent port change.
 
 Frames: `[topic = instrument key (utf-8), payload = compact JSON]`. Topic `__health__` carries
-the /health document every 5 s and on every state change. ZMQ subscriptions match by prefix
+the /health document every 5 s, on every state change, and at once when the exchange's market
+status for a segment changes (so a consumer's gate does not read the pre-open for the first
+seconds of a session). ZMQ subscriptions match by prefix
 (`NSE_INDEX|Nifty 50` also matches `NSE_INDEX|Nifty 500`), so compare frame 0 exactly:
 
 ```python
@@ -180,7 +185,24 @@ shows its last non-zero value. Use REST quotes for circuit checks.
 
 - **Subscriptions**: `default_keys.txt` (or `SUDARSHAN_FEED_KEYS`) is the base set, one
   `MODE KEY` per line, re-read at every start. API changes are stored as an overlay in
-  `$STATE_DIR/subscriptions.json` and survive restarts. Every key is re-sent after a reconnect,
+  `$STATE_DIR/subscriptions.json` and survive restarts.
+- **Claims** (M18.1): a local service (`sudarshan-alerts`) states its whole set of keys with
+  `PUT /claims/<client>`. The socket carries the overlay united with every client's claims, each
+  key in the highest mode anyone holds it in (ltpc < option_greeks < full < full_d30), so no
+  client downgrades or removes a key another one needs. On a change the socket is sent only the
+  difference, in an order that never holds more than the end state: `unsub` for keys nobody
+  holds any more, then `change_mode` for keys whose mode went down, then for those that went
+  up, then `sub` for keys new to it. Caps are checked on that effective set when a change adds
+  a key or raises a mode; a change that only takes keys away or lowers modes is never refused,
+  so a client can always let go of its keys. Each client has a quota (`sudarshan-screener` 700,
+  `sudarshan-alerts` 300, `sudarshan-portfolio` 200, any other client 50), at most 4 other
+  clients hold claims at once (their 200 keys are the ring's headroom over the named quotas),
+  and every client's claims together hold at most 1,400 keys, a key two clients hold counting
+  once; a claim over any of these is refused with 409 and the message names the client. A
+  client that has not renewed its claims for 7 days loses them (checked at start and at each
+  day's close); a stored claim over its quota, or claims that would break a cap or the ceiling
+  at start, are dropped with an ERROR and the feed starts with its base and overlay.
+- **Every key is re-sent after a reconnect**, claims included,
   in batches of 100. Caps per connection (Upstox): ltpc 5,000, full 2,000, option_greeks 3,000,
   full_d30 50; once two modes are in use, the total may not exceed the smallest "combined"
   figure among them (ltpc 2,000, option_greeks 2,000, full 1,500, full_d30 1,500). That reading
@@ -196,7 +218,7 @@ shows its last non-zero value. Use REST quotes for circuit checks.
 | file | what |
 |---|---|
 | `snapshot.json` | last tick per key; written atomically every 30 s and at shutdown, loaded at start |
-| `subscriptions.json` | the API overlay on top of the keys file |
+| `subscriptions.json` | the API overlay on top of the keys file, and each client's claims (version 2; a version 1 file still loads) |
 | `ticks/YYYY-MM-DD.jsonl.gz` | every published tick (IST date), one gzip member per 3 s flush; a day stops at the size cap; old days are deleted |
 
 Replay a recording to test a consumer offline (binds its own port; use another one while the

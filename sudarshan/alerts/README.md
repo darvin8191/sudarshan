@@ -170,9 +170,11 @@ tool starts ring services again after each release.
 | `SUDARSHAN_OPENALGO_WS_URL` | `ws://127.0.0.1:8765` | loopback only |
 
 Settings go in `/etc/sudarshan/alerts.env` (root:sudarshan 640); a missing file means the
-defaults; a change needs `sudo systemctl restart sudarshan-alerts`. A value the service cannot
-use stops it with a plain line in the journal and exit status 2, which systemd does not retry:
-fix the file, then restart. After a crash systemd restarts it every 10 s.
+defaults; a change needs `sudo systemctl restart sudarshan-alerts`. An order-alert value the
+service cannot use stops it with a plain line in the journal and exit status 2, which systemd
+does not retry: fix the file, then restart. A market-alert value it cannot use never stops it:
+market alerts stay off, the journal and the Alerts page say which setting to correct, and order
+alerts carry on. After a crash systemd restarts it every 10 s.
 
 ## The API key and the trust boundary
 
@@ -231,6 +233,14 @@ decrypting it with the Fernet key OpenAlgo derives from `API_KEY_PEPPER` and `FE
 - **Pace.** At least 1.1 s between messages and at most 20 a minute (Telegram asks for about one a
   second per chat; OpenAlgo allows `/notify` 30 times a minute). A message waits 0.3 s after the
   first alert of a burst, so the burst goes out as one.
+- **Lanes: fills first** (M10.5). Order alerts and market alerts share that pace through one
+  pacer, each lane sending from its own task. Market alerts take at most 12 messages a minute and
+  no slot while order alerts wait, so order alerts always keep at least 8 a minute, a fill during
+  a market storm waits at most the 0.3 s burst pause and one 1.1 s gap, and a market message slow
+  on Telegram never holds a fill back. A market alert that cannot go out within 5 minutes is not
+  sent late ("Not sent: OpenAlgo could not send it within 5 minutes; it is in the alert
+  history"); order alerts keep their 30 minutes. What became of each market message is written
+  to its alerts' history (sent, or not sent with the reason).
 - **Delivery.** OpenAlgo is asked to wait for Telegram's answer. Its "queued for delivery" answer
   means Telegram did not take the message (nothing in OpenAlgo sends that queue later), so it is
   tried up to 3 times; any other success counts as delivered. If OpenAlgo's wait had timed out
@@ -301,6 +311,95 @@ and one per alert (`order <id>: filled`); repeated problems at most once per 5 o
   OpenAlgo's code and its tests, not seen live).
 - A "trigger pending" that arrived again after the order had left it (a duplicate from a webhook,
   out of order) would start a new episode, and a second trigger line could follow.
+
+## Market alerts (M10)
+
+Price, % move, day high or low and VWAP alerts the owner sets on the Alerts page, judged tick by
+tick on the price feed in this same service, and told on Telegram (and, with M10.7, in the app).
+Off until `SUDARSHAN_MARKET_ALERTS=on`; with it on, `SUDARSHAN_ORDER_ALERTS=off` stops only order
+alerts, and the service exits only when both are off. A market setting it cannot use (a mistyped
+switch, a limit out of range) keeps market alerts off with the reason on the Alerts page, and
+never stops order alerts.
+
+```
+sudarshan-feed (one Upstox socket) -> ZMQ 127.0.0.1:5581 (ticks, __health__)
+  -> market/feedlink.py: only the keys of Active alerts, claimed at the feed as sudarshan-alerts
+  -> market/book.py and engine.py: the pure engine (golden vectors in tests/market_vectors.json)
+  -> market.db through one writer thread: each fire once, under its claim
+  -> market/lane.py: merged and paced behind the order alerts -> OpenAlgo /notify -> Telegram
+```
+
+- **The gate.** A value is judged only inside its segment's session on a trading day, with the
+  exchange's status open (pushed by the feed as it changes), a feed connected, live and heard in
+  the last 12 s, and the value fresh (5 s). A stock with futures closes by auction from 15:15
+  (`sessions.py`): its print is told as the closing auction's.
+- **Pauses.** The feed down, unheard or silent on the whole socket for more than 10 s inside a
+  session, or this service not running (from the last moment it was known checking), is a pause
+  in market.db. A crossing first seen after one is told "seen after a pause"; one over a minute
+  with Active alerts gets a line each way on Telegram.
+- **Telegram.** Fills go first: market alerts take at most 12 messages a minute and no slot while
+  an order alert waits, and a market alert not sent within 5 minutes is not sent late (the
+  history keeps it). Lines still waiting at a restart go if they are under 5 minutes old.
+- **Claims.** The service claims only what its Active alerts need, each key in the mode they need
+  (bid and ask need full), renews every 10 minutes and again at once when the feed restarts. Off,
+  it asks the feed to drop them.
+- **The Alerts page's local API.** OpenAlgo's bridge reaches market alerts only on
+  127.0.0.1:5582 (`market/api.py`): `GET /health` (counts, and whether market alerts are on: the
+  page says "Switched off on the server" from it) and `POST /v1/<op>`, each body sealed under a key
+  derived from OpenAlgo's pepper, good for 60 s and once, at most 64 KiB, for the owner only. A new
+  or changed alert is checked, kept within the limits and claimed at the feed before it is saved
+  (a refusal is said in words and nothing is saved), and reaches the engine only after market.db
+  took it (`market/desk.py`). The API runs whenever the service does, with market alerts off too;
+  a port that is taken keeps market alerts off, and order alerts carry on.
+- **The bridge in OpenAlgo** (`blueprints/sudarshan_alerts.py`, two marked lines in `app.py`):
+  `/sudarshan/alerts/api/*` for the Alerts page, each route behind the session, CSRF, the owner
+  himself (a family viewer gets 403 everywhere, reads included) and a limiter. A new or edited
+  alert takes its instrument key, tick size and expiry from the master contract, with an Upstox
+  login only. It forwards through OpenAlgo's shared HTTP client with explicit timeouts (3 s, 6 s
+  for a change, 12 s for the test) after checking who listens on 5582, and learns whether market
+  alerts are on from the service's `/health`. It holds no thread, loop or scheduler.
+- **The app** (M10.7). A fire, a card that changed, the line under "Alerts", and a fire's Telegram
+  delivery once it is sent or refused (for History) are pushed at once to OpenAlgo's
+  `/sudarshan/alerts/internal/push` (sealed under its own key, every 50 ms, at most 50 items and
+  128 KiB), which emits them to the Socket.IO room `sudarshan:alerts:owner` only: an open app joins
+  it when its session is the owner's. The answer is the room's size, recorded as the app delivery
+  ("Shown on 2 open screens", "No app was open"). A push is never retried; an app that reconnects
+  reads what it missed.
+
+| variable | default | meaning |
+|---|---|---|
+| `SUDARSHAN_MARKET_ALERTS` | `off` | `on`: market alerts run in this service |
+| `SUDARSHAN_ALERTS_HTTP_PORT` | `5582` | the Alerts page's sealed local API (127.0.0.1) |
+| `SUDARSHAN_ALERTS_API_URL` | `http://127.0.0.1:` + the port above | OpenAlgo's `.env`: where the bridge calls the service; read only when it is plain http on this server. Leave it out unless the port above was changed in the service's file and OpenAlgo's `.env` cannot carry the same `SUDARSHAN_ALERTS_HTTP_PORT` |
+| `SUDARSHAN_ALERTS_FEED_URL` | `http://127.0.0.1:5580` | the feed's HTTP API, loopback only |
+| `SUDARSHAN_ALERTS_FEED_ZMQ` | `tcp://127.0.0.1:5581` | the feed's ZMQ, loopback only |
+| `SUDARSHAN_MARKET_ALERTS_MAX_INSTRUMENTS` | `200` | instruments followed at once (the feed's quota is 300) |
+| `SUDARSHAN_MARKET_ALERTS_MAX_ACTIVE` | `500` | Active alerts at once |
+| `SUDARSHAN_MARKET_ALERTS_KEEP_DAYS` | `100` | days of history kept (never under 90) |
+| `SUDARSHAN_MARKET_ALERTS_REPLAY` | `0` | tests only: trust a replay's health and judge on its ticks' clock (`python -m sudarshan.feed.replay`) |
+
+`market.db` lives beside `alerts.db` in the state directory (directory 700, file 600) and is
+migrated by the service itself at start. To see its version without touching it:
+
+```bash
+cd /opt/sudarshan/apps/openalgo && sudo -u sudarshan .venv/bin/python -m sudarshan.alerts.market.migrate --status
+```
+
+Any evening, what market alerts would have told on a day the feed recorded, offline: it reads
+market.db and openalgo.db only, sends nothing, and prints each fire with its time and words. It
+writes nothing in OpenAlgo's directory either: OpenAlgo's database module it reads the master
+contract with loads no .env and logs to its own temporary directory, as the service's does. Its
+clock is the recording's, its gate the calendar's, and each alert starts the day fresh, so compare
+it with the day's History:
+
+```bash
+cd /opt/sudarshan/apps/openalgo && sudo -u sudarshan .venv/bin/python -m sudarshan.alerts.market.check \
+    /var/lib/sudarshan-feed/ticks/2026-10-21.jsonl.gz --openalgo-db db/openalgo.db
+```
+
+A record that cannot be opened turns market alerts off with a line in the journal; order alerts
+carry on. A record from a newer release (after a rollback) does the same until that release is
+back.
 
 ## Tests
 

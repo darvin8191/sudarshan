@@ -33,6 +33,7 @@ from websockets.exceptions import ConnectionClosed, InvalidHandshake, InvalidSta
 
 from . import __version__, protocol
 from .bus import HEALTH_TOPIC, Publisher
+from .claims import ClaimsMixin  # M18.1: per-client subscription claims
 from .config import Settings, is_loopback_url, setup_logging
 from .http_api import start_http
 from .store import SnapshotStore, TickRecorder
@@ -111,13 +112,14 @@ def _age(start: float | None, now: float) -> float | None:
     return None if start is None else round(now - start, 1)
 
 
-class FeedService:
+class FeedService(ClaimsMixin):
     def __init__(self, cfg: Settings, clock=time.time):
         self.cfg, self.clock = cfg, clock
+        self.started_at = iso(clock())  # M18.1: a consumer sees from /health that we restarted
         self.window = MarketWindow(
             cfg.holidays_file, cfg.window, cfg.always_on, cfg.extra_days_file
         )
-        self.subs = Subscriptions.load(cfg.keys_file, cfg.state_dir / "subscriptions.json")
+        self.subs = Subscriptions.load(cfg.keys_file, cfg.state_dir / "subscriptions.json", clock())
         self.store = SnapshotStore(cfg.state_dir / "snapshot.json")
         self.recorder = None
         if cfg.record:
@@ -215,6 +217,7 @@ class FeedService:
             self.recorder.flush()
 
     def _prune_snapshot(self) -> None:
+        self.subs.expire(self.clock())  # M18.1: claims not renewed for 7 days (no socket now)
         cutoff_ms = int((self.clock() - SNAPSHOT_KEEP_DAYS * 86400) * 1000)
         if n := self.store.prune(self.subs.desired(), cutoff_ms):
             log.info("snapshot: forgot %d unsubscribed keys idle %d days", n, SNAPSHOT_KEEP_DAYS)
@@ -446,6 +449,7 @@ class FeedService:
             if changed:
                 log.info("market status: %s", ", ".join(f"{s} {v}" for s, v in changed.items()))
                 self._market_status.update(changed)
+                self._publish_health()  # M18.1: consumers' gates see the change at once
             ts_recv, fresh = int(self.clock() * 1000), kind == "initial_feed"
             for key, partial in ticks.items():
                 if partial:
@@ -515,6 +519,7 @@ class FeedService:
         return {
             "service": "sudarshan-feed",
             "version": __version__,
+            "started_at": self.started_at,
             "state": self._state,
             "detail": self._detail,
             "connected_since": iso(self._connected_since),
@@ -523,6 +528,7 @@ class FeedService:
             "next_retry_in_s": None if retry is None else round(retry, 1),
             "token_file_readable": self._token_readable(),
             "subscribed": self.subs.counts(),
+            "claims": self.subs.claim_counts(),
             "subscriptions_live": self._live,
             "keys_without_data": {"count": len(missing), "sample": missing[:10]},
             "reconnects": max(0, self._stats["connects"] - 1),
@@ -547,36 +553,22 @@ class FeedService:
     async def subscribe(self, mode, keys) -> dict:
         keys = validate(mode, keys)
         async with self._send_lock:
-            new, moved = self.subs.subscribe(mode, keys)  # CapError leaves everything unchanged
-            for key in moved:
-                self.store.reset(key)  # do not carry the old mode's fields into the new one
-            live = await self._send_live((("sub", new), ("change_mode", moved)), mode)
-        log.info("API subscribe %s: %d new, %d moved (live: %s)", mode, len(new), len(moved), live)
+            change = self.subs.subscribe(mode, keys)  # CapError leaves everything unchanged
+            live = await self._apply_change(change)  # claims.py: only what the socket lacks
+        new, moved = len(change.new), len(change.moved)
+        log.info("API subscribe %s: %d new, %d moved (live: %s)", mode, new, moved, live)
         counts = self.subs.counts()
-        return {"ok": True, "new": len(new), "mode_changed": len(moved), "applied_live": live,
+        return {"ok": True, "new": new, "mode_changed": moved, "applied_live": live,
                 "subscribed": counts}  # fmt: skip
 
     async def unsubscribe(self, keys) -> dict:
         keys = validate(None, keys, need_mode=False)
         async with self._send_lock:
-            gone = self.subs.unsubscribe(keys)
-            live = await self._send_live((("unsub", gone),), None)
+            gone, change = self.subs.unsubscribe(keys)  # a claimed key stays on the socket
+            live = await self._apply_change(change)
         log.info("API unsubscribe: %d removed (live: %s)", len(gone), live)
         counts = self.subs.counts()
         return {"ok": True, "removed": len(gone), "applied_live": live, "subscribed": counts}
-
-    async def _send_live(self, batches, mode: str | None) -> bool:
-        """Send changes on the live socket; False means they apply at the next connect."""
-        ws = self._ws
-        if ws is None or not self._live:
-            return False
-        try:
-            for method, keys in batches:
-                if keys:
-                    await self._send(ws, method, keys, mode)
-        except ConnectionClosed:
-            return False
-        return True
 
 
 async def _serve(cfg: Settings) -> None:

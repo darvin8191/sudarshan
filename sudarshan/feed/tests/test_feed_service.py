@@ -14,6 +14,7 @@ import httpx
 import zmq
 import zmq.asyncio
 
+from sudarshan.feed import bus
 from sudarshan.feed.config import Settings
 from sudarshan.feed.http_api import is_local
 from sudarshan.feed.replay import read_ticks
@@ -72,6 +73,7 @@ def test_fan_out_http_api_and_clean_close(feed_env, fast, caplog):
                 async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{svc.http_port}") as http:
                     health = (await http.get("/health")).json()
                     assert health["state"] == "connected" and health["reconnects"] == 0
+                    assert bus.RING_HEALTH_FIELDS <= set(health)  # what other services read
                     assert health["subscribed"]["total"] == 4 and health["token_file_readable"]
                     assert health["market_status"] == {"NSE_EQ": "NORMAL_OPEN"}
                     assert health["keys_without_data"]["count"] == 2  # Nifty Bank, India VIX
@@ -84,7 +86,7 @@ def test_fan_out_http_api_and_clean_close(feed_env, fast, caplog):
                     ok = (await http.post("/subscribe", json=body)).json()
                     assert (ok["new"], ok["mode_changed"], ok["applied_live"]) == (1, 1, True)
                     await ff.wait_until(lambda: len(fake.requests[0]) == 5)
-                    assert [r["method"] for r in fake.requests[0][3:]] == ["sub", "change_mode"]
+                    assert [r["method"] for r in fake.requests[0][3:]] == ["change_mode", "sub"]
                     body = {"mode": "full_d30", "keys": [f"NSE_FO|{n}" for n in range(51)]}
                     over = await http.post("/subscribe", json=body)
                     assert over.status_code == 409 and "cap" in over.json()["error"]

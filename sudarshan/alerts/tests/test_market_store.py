@@ -475,14 +475,16 @@ def test_a_fire_is_recorded_once_with_its_state_and_stop(store):
     channels = {"telegram": True, "app": False}
     first = store.record_fire("owner", fire(row["id"], "1:v1:once", found_later=(NOW - 60_000, NOW)),
                               state, title="SBIN crossed above ₹100.00", line="Alert: ...",
-                              value="100.05", level="100.00", channels=channels,
-                              status="stopped", status_reason="Fired once at 10:00 on 21 Oct")  # fmt: skip
+                              detail="now ₹100.05", note="book half", value="100.05",
+                              level="100.00", channels=channels, status="stopped",
+                              status_reason="Fired once at 10:00 on 21 Oct")  # fmt: skip
     again = store.record_fire("owner", fire(row["id"], "1:v1:once"), state, title="t", line="l",
                               value="v", level="l", channels=channels)  # fmt: skip
     assert first is not None and again is None
     [event] = store.events("owner")
     assert event["found_later"] and not event["opening"] and not event["test"]
     assert event["title"] == "SBIN crossed above ₹100.00" and event["value"] == "100.05"
+    assert (event["detail"], event["note"]) == ("now ₹100.05", "book half")
     assert event["deliveries"] == {
         "telegram": {"status": "pending", "reason": "", "attempts": 0, "updated_at": NOW},
         "app": {"status": "off", "reason": OFF_REASON, "attempts": 0, "updated_at": NOW},
@@ -501,15 +503,20 @@ def test_deliveries_pages_and_catching_up(store):
                           title=f"t{n}", line="l", value="v", level="l", channels=BOTH)
         for n in range(1, 6)
     ]  # fmt: skip
-    test_id = store.record_test(
-        "owner", "Test", "Test: market alerts reach this chat", NOW + 9, BOTH
-    )
+    test_id = store.record_test("owner", "Test", "Test: market alerts reach this chat", NOW + 9,
+                                BOTH, detail="sent from the Alerts page")  # fmt: skip
     assert store.set_delivery("owner", ids[0], "telegram", "sent", "", NOW + 10, attempts=1)
     assert not store.set_delivery("owner", 12345, "telegram", "sent", "", NOW)
     with pytest.raises(ValueError):
         store.set_delivery("owner", ids[0], "telegram", "delivered", "", NOW)
+    settled = store.deliveries("owner", [ids[0], ids[1], 12345])  # as the push reads them back
+    assert settled[ids[0]]["telegram"] == {"status": "sent", "reason": "", "attempts": 1,
+                                           "updated_at": NOW + 10}  # fmt: skip
+    assert settled[ids[1]]["telegram"]["status"] == "pending" and settled[12345] == {}
     page = store.events("owner", limit=2)
     assert [e["id"] for e in page] == [test_id, ids[4]] and page[0]["test"]
+    assert (page[0]["detail"], page[0]["note"]) == ("sent from the Alerts page", "")
+    assert page[1]["detail"] == page[1]["note"] == ""  # a fire recorded without them
     older = store.events("owner", before=page[-1]["id"], limit=2)
     assert [e["id"] for e in older] == [ids[3], ids[2]]
     assert [e["id"] for e in store.events("owner", alert_id=row["id"])] == ids[::-1]
@@ -585,7 +592,7 @@ def test_prune_keeps_100_days_never_fewer_than_90_and_every_definition(path):
 # ---- principal -----------------------------------------------------------------------------
 
 #: Upkeep, not readers: they touch no one's rows by principal.
-UPKEEP = {"prune", "close"}
+UPKEEP = {"prune", "close", "consistent"}
 
 
 def test_every_public_method_takes_the_principal_first():
@@ -609,14 +616,15 @@ def test_one_principal_never_reads_anothers_rows(path):
     theirs = store.create("family", FIELDS, NOW)
     store.save_states("owner", {mine["id"]: (1, State(1)), theirs["id"]: (1, State(2))}, NOW)
     store.save_states("family", {theirs["id"]: (1, State(3))}, NOW)
-    store.record_fire("family", fire(theirs["id"], "2:v1:once"), State(3), title="t", line="l",
-                      value="v", level="l", channels=BOTH)  # fmt: skip
+    their_event = store.record_fire("family", fire(theirs["id"], "2:v1:once"), State(3),
+                                    title="t", line="l", value="v", level="l", channels=BOTH)  # fmt: skip
     store.set_prefs("family", telegram=False, app=False, now=NOW)
     assert [r["id"] for r in store.alerts("owner")] == [mine["id"]]
     assert store.alert("owner", theirs["id"]) is None
     assert store.states("owner") == {mine["id"]: State(1)}
     assert store.events("owner") == [] and store.events_since("owner", 0) == []
     assert store.pending("owner", "telegram") == []
+    assert store.deliveries("owner", [their_event]) == {their_event: {}}
     assert store.prefs("owner") == {"telegram": True, "app": True}
     assert not store.delete("owner", theirs["id"]) and store.alert("family", theirs["id"])
     with pytest.raises(NotFound):
@@ -625,3 +633,12 @@ def test_one_principal_never_reads_anothers_rows(path):
         store.record_fire("owner", fire(theirs["id"], "x"), State(), title="t", line="l",
                           value="v", level="l", channels=BOTH)  # fmt: skip
     store.close()
+
+
+def test_a_fire_keeps_its_value_and_level_in_paise_beside_the_words(path, store):
+    """Review L8 (X3): the words alone cannot be summed, compared or checked against the feed."""
+    row = store.create("owner", FIELDS, NOW)
+    store.record_fire("owner", fire(row["id"], "1:v1:once"), State(20261021, 0), title="t",
+                      line="l", value="100.05", level="100.00", channels=BOTH)  # fmt: skip
+    assert raw(path, "SELECT value, level, value_paise, level_paise FROM alert_event") == [
+        ("100.05", "100.00", 10005, 10000)]  # fmt: skip
