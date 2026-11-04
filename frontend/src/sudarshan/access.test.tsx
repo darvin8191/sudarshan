@@ -2,13 +2,15 @@
  * The four states a screen that reads prices can be in (src/sudarshan/access.ts)
  * and the words that say them (AccessNotice).
  */
+
+import { act, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
-import { render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { syncSession } from '@/components/auth/AuthSync'
+import { MarketDataManager } from '@/lib/MarketDataManager'
 import { useAuthStore } from '@/stores/authStore'
 import { AccessNotice } from './AccessNotice'
-import { priceAccessOf } from './access'
+import { MIN_GAP_MS, priceAccessOf, usePriceAccess } from './access'
 
 function stubSession(body: unknown, status = 200) {
   vi.stubGlobal(
@@ -159,5 +161,84 @@ describe('syncSession', () => {
     expect(
       JSON.parse(localStorage.getItem('openalgo-auth') ?? '{}').state?.apiKey ?? null
     ).toBeNull()
+  })
+})
+
+describe('a ready screen re-checks on an event, not on a timer', () => {
+  const lapsed = {
+    status: 'success',
+    logged_in: true,
+    authenticated: true,
+    user: 'owner',
+    broker: 'upstox',
+    api_key: 'k',
+    broker_session_expired: true,
+  }
+
+  function Probe() {
+    return <span>{usePriceAccess().state}</span>
+  }
+
+  const sessionChecks = () =>
+    vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('session-status')).length
+
+  function setVisibility(value: 'hidden' | 'visible') {
+    Object.defineProperty(document, 'visibilityState', { value, configurable: true })
+    document.dispatchEvent(new Event('visibilitychange'))
+  }
+
+  function readyAt(now: number) {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(now)
+    useAuthStore.setState({ apiKey: 'k', sessionChecked: true, brokerSessionExpired: false })
+  }
+
+  afterEach(() => {
+    vi.useRealTimers()
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
+  })
+
+  it('moves to Upstox logged out when the phone wakes after the login lapsed', async () => {
+    readyAt(1_000_000)
+    stubSession(lapsed)
+    render(<Probe />)
+    expect(screen.getByText('ready')).toBeInTheDocument()
+    await act(async () => setVisibility('visible'))
+    expect(screen.getByText('upstox-logged-out')).toBeInTheDocument()
+  })
+
+  it('moves to no API key when the page returns and the key is gone', async () => {
+    readyAt(2_000_000)
+    stubSession({ ...lapsed, broker_session_expired: false, api_key: undefined })
+    render(<Probe />)
+    await act(async () => setVisibility('visible'))
+    expect(screen.getByText('no-api-key')).toBeInTheDocument()
+  })
+
+  it('re-checks when the market socket signs in again', async () => {
+    readyAt(3_000_000)
+    stubSession(lapsed)
+    render(<Probe />)
+    await act(async () => {
+      const manager = MarketDataManager.getInstance() as unknown as {
+        connectionEpoch: number
+        notifyStateListeners: () => void
+      }
+      manager.connectionEpoch += 1
+      manager.notifyStateListeners()
+    })
+    expect(screen.getByText('upstox-logged-out')).toBeInTheDocument()
+  })
+
+  it('asks at most once every few seconds', async () => {
+    readyAt(4_000_000)
+    stubSession({ ...lapsed, broker_session_expired: false })
+    render(<Probe />)
+    await act(async () => setVisibility('visible'))
+    await act(async () => setVisibility('visible'))
+    expect(sessionChecks()).toBe(1)
+    vi.setSystemTime(4_000_000 + MIN_GAP_MS + 1)
+    await act(async () => setVisibility('visible'))
+    expect(sessionChecks()).toBe(2)
   })
 })
