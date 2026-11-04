@@ -60,6 +60,7 @@ omissions are a decision on record rather than a gap:
 
 from __future__ import annotations
 
+import contextvars
 import math
 import os
 import threading
@@ -75,6 +76,23 @@ logger = get_logger(__name__)
 # constrain any future slot, so they are purged on every reservation -- which is
 # what keeps the deque bounded (see SlidingWindowLimiter.reserve).
 LONGEST_WINDOW = 1800.0
+
+
+# SUDARSHAN M5.13: the risk gate sets this around a send it let through (sudarshan/guard/gate.py).
+# While that send waits for its turn at the order pacer, and once more when the turn comes, the
+# function is asked whether the send must still go; it answers a sentence when it must not (the
+# kill switch went on after the order was let through). Unset everywhere else, so nothing else
+# waits any differently.
+SEND_CHECK: contextvars.ContextVar = contextvars.ContextVar("upstox_send_check", default=None)
+SEND_CHECK_EVERY_S = 0.2
+
+
+class SendWithdrawn(Exception):
+    """A send the risk gate let through that is not sent after all; nothing went to Upstox."""
+
+    def __init__(self, text: str):
+        super().__init__(text)
+        self.text = text
 
 
 def describe_wait(seconds: float) -> str:
@@ -204,6 +222,10 @@ class SlidingWindowLimiter:
                 further away than the ceiling for this limiter's kind. Nothing
                 is booked.
         """
+        return self._book()[1]
+
+    def _book(self) -> tuple[float, float]:
+        """Book the earliest slot: (the slot as an epoch time, the seconds to wait for it)."""
         ceiling = max_queue_wait(self.kind)
         with self._lock:
             now = time.time()
@@ -229,7 +251,16 @@ class SlidingWindowLimiter:
                 f"{wait:.1f}s away (limit {ceiling:.0f}s under gthread)"
             )
             raise busy_error(wait, self.kind)
-        return wait
+        return slot, wait
+
+    def release(self, slot: float) -> None:
+        """Give back a slot not used yet, so what is reserved after it comes earlier."""
+        with self._lock:
+            if slot > time.time():
+                try:
+                    self._reserved.remove(slot)
+                except ValueError:
+                    pass
 
     def acquire(self) -> None:
         """Block until this caller's reserved slot arrives.
@@ -238,13 +269,31 @@ class SlidingWindowLimiter:
         monkey-patched, so this yields the hub to other green threads rather
         than blocking the single worker. The sleep is outside the lock.
         """
-        sleep_time = self.reserve()
+        slot, sleep_time = self._book()
+        check = SEND_CHECK.get() if self.kind == "order" else None
+        if check is not None:  # SUDARSHAN M5.13: a send the gate let through
+            self._wait_checked(slot, sleep_time, check)
+            return
         if sleep_time > 0:
             logger.debug(
                 f"Rate limiting ({self.name}): sleeping {sleep_time:.3f}s "
                 "before Upstox API call"
             )
             time.sleep(sleep_time)
+
+    def _wait_checked(self, slot: float, sleep_time: float, check) -> None:
+        """Wait for the slot in short steps, asking ``check`` before each step and at the end;
+        when it answers a sentence the slot is given back and nothing is sent."""
+        deadline = time.monotonic() + sleep_time
+        while True:
+            said = check()
+            if said:
+                self.release(slot)
+                raise SendWithdrawn(said)
+            left = deadline - time.monotonic()
+            if left <= 0:
+                return
+            time.sleep(min(left, SEND_CHECK_EVERY_S))
 
     def depth(self) -> int:
         """Number of reservations currently tracked. Diagnostics and tests."""

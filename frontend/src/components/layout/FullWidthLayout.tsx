@@ -2,6 +2,7 @@ import { Navigate, Outlet } from 'react-router'
 import { SocketProvider } from '@/components/socket/SocketProvider'
 import { useAuthStore } from '@/stores/authStore'
 import { AnalyzeBanner } from '@/sudarshan/AnalyzeBanner'
+import { RiskBanner } from '@/sudarshan/risk/RiskBanner' // SUDARSHAN M20.7
 
 /**
  * Full-width layout for apps like Playground that need maximum screen space.
@@ -26,6 +27,8 @@ export function FullWidthLayout() {
           without dvh keeps h-screen. */}
       <div className="h-screen supports-[height:100dvh]:h-dvh bg-background flex flex-col overflow-hidden">
         <AnalyzeBanner />
+        {/* SUDARSHAN M20.7: the kill switch, when it is on */}
+        <RiskBanner />
         {/* The height the banner leaves, so a page sized h-full still ends at
             the bottom of the screen instead of past it. */}
         <div className="flex min-h-0 flex-1 flex-col">

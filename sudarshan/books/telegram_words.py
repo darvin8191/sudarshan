@@ -44,6 +44,16 @@ TO_CLOSE = "to close the position"
 NOTHING_WAS_OPEN = "no position was open, so nothing was sent."
 EXIT_NOT_SENT_REASON = "Nothing was sent. Check Positions and try again."
 
+#: M5.13: an order the risk settings refused before anything was sent, by its API.
+NOT_SENT_TITLES = {
+    "placeorder": "Order not sent",
+    "placesmartorder": SMART_ORDER_NOT_SENT,
+    "basketorder": "Basket not sent",
+    "splitorder": "Split order not sent",
+    "optionsorder": "Options order not sent",
+    "optionsmultiorder": "Multi-leg order not sent",
+}
+
 EXIT_ALL_NO_ANSWER = (
     "No answer came for Exit all: its exits may still be going through. Check Positions and "
     "Orders before sending again."
@@ -148,7 +158,42 @@ def alert_template(
             return f"*{CANCEL_ALL_NOT_ALL_CANCELLED}*\n{{details}}"
         if not _count(response.get("canceled_orders")):
             return f"*{NO_OPEN_ORDERS}*\n{{details}}"
+    if _not_sent(order_type, response):  # M5.13: refused by the risk settings, never "Placed"
+        return f"*{NOT_SENT_TITLES[order_type]}*\n{{details}}"
     return template
+
+
+def _not_sent(order_type: str, response: dict[str, Any]) -> bool:
+    return (
+        order_type in NOT_SENT_TITLES
+        and response.get("status") != "success"
+        and response.get("nothing_sent") is True
+    )
+
+
+def not_sent_lines(
+    order_type: str, order_data: dict[str, Any], response: dict[str, Any]
+) -> list[str] | None:
+    """M5.13: the alert's lines for an order refused before anything was sent (the risk guard,
+    sudarshan/guard): what was asked, then why in the guard's own sentence, which names any exit
+    it left unsent. None for an alert that keeps its own lines."""
+    if not _not_sent(order_type, response) or is_app_exit(order_type, order_data):
+        return None
+    if order_type == "placesmartorder" and _position_size(order_data) == 0:
+        return None  # its own lines (smart_order_action_lines)
+    lines = []
+    if order_data.get("symbol"):
+        lines.append(f"Symbol: `{markdown_safe(str(order_data['symbol']))}`")
+    if order_data.get("action") and order_data.get("quantity"):
+        lines.append(f"Asked: {order_data['action']} {order_data['quantity']}")
+    if order_data.get("exchange"):
+        lines.append(f"Exchange: {order_data['exchange']}")
+    orders = order_data.get("orders") or order_data.get("legs")
+    if isinstance(orders, list) and orders:
+        lines.append(f"Orders in it: {len(orders)}")
+    message = str(response.get("message") or "").strip() or EXIT_NOT_SENT_REASON
+    lines.append(markdown_safe(message))
+    return lines
 
 
 def close_failed_line(order_data: dict[str, Any], response: dict[str, Any]) -> str:

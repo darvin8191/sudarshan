@@ -127,6 +127,13 @@ gives the format). On every deploy, after the release is checked out and before 
 `sudarshan-deploy --check` lists what the latest release would change, without changing it.
 Tests: `sudarshan/ops/tests/test_deploy_env.py`.
 
+`UPSTOX_ORDER_MAX_PER_SECOND  5` (M5.14) paces order calls to Upstox at 5 a second, half the 10
+Upstox allows. Under the gthread worker only, an order call waits at most 10 s for its turn
+(`utils/broker_backpressure.py`) and is refused after that, so at 5 a second the queue holds 50
+order calls before refusing, where it held 80 at upstream's default of 8. A cancel or an Exit all sent behind a burst
+waits its turn the same way. The eventlet worker (the default) has no such ceiling: its calls wait
+however long the queue is.
+
 ## NSE calendar lines that ship with a release (M0.1)
 
 Nobody edits the server's day files by hand either. `/etc/sudarshan/nse_holidays.txt` (days NSE is

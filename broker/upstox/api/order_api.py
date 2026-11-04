@@ -10,6 +10,7 @@ import httpx
 
 from broker.upstox.api.rate_limiter import (
     MAX_RETRIES,
+    SendWithdrawn,  # SUDARSHAN M5.13
     apply_rate_limit,
     is_rate_limited,
     retry_delay_from_headers,
@@ -25,6 +26,7 @@ from database.auth_db import get_auth_token
 from database.token_db import get_br_symbol, get_symbol, get_token
 from sudarshan.books import exit_guard  # SUDARSHAN M6.9: an Exit all's exits, noted
 from sudarshan.books.single_exit import EXIT_NOT_CONFIRMED, placed_order_ids  # SUDARSHAN M6.9
+from sudarshan.guard import gate as risk_gate  # SUDARSHAN M5.13: the risk gate
 from utils.broker_backpressure import (
     BrokerBusyError,
     BusyResponse,
@@ -84,6 +86,13 @@ def _rate_limit_category(endpoint, base_url):
 _READ_LIMIT = contextvars.ContextVar("upstox_read_limit", default=None)
 
 
+def read_timeout() -> dict:
+    """SUDARSHAN M5.13: ``{"timeout": seconds}`` for a GET made while a read limit is set (the
+    risk gate's reads, Exit all's order book), else nothing: the shared client's own."""
+    limit = _READ_LIMIT.get()
+    return {"timeout": limit} if limit else {}
+
+
 def get_api_response(
     endpoint, auth, method="GET", payload="", base_url=UPSTOX_BASE_URL, retry_count=0
 ):
@@ -117,8 +126,7 @@ def get_api_response(
         url = f"{base_url}{endpoint}"
 
         if method == "GET":
-            limit = _READ_LIMIT.get()  # SUDARSHAN M6.9
-            response = client.get(url, headers=headers, **({"timeout": limit} if limit else {}))
+            response = client.get(url, headers=headers, **read_timeout())  # SUDARSHAN M6.9
         elif method == "POST":
             response = client.post(url, headers=headers, content=payload)
         elif method == "PUT":
@@ -359,6 +367,7 @@ def _extract_order_id(data):
     return data.get("order_id")
 
 
+@risk_gate.upstox_place  # SUDARSHAN M5.13: new risk refused while the kill switch is on
 def place_order_api(data, auth):
     """
     Places an order using the Upstox API.
@@ -436,6 +445,9 @@ def place_order_api(data, auth):
             logger.error(f"Failed to place order: {error_msg} | Response: {response_data}")
             return response, response_data, None
 
+    except SendWithdrawn as exc:
+        # SUDARSHAN M5.13: the kill switch went on while this waited for its turn.
+        return risk_gate.withdrawn_response(exc.text)
     except BrokerBusyError as exc:
         # Refused by the pacer before anything was sent (gthread only).
         return busy_response(str(exc))
@@ -458,6 +470,8 @@ def _with_sent(response, action, quantity, closes):
     """
     if not isinstance(response, dict):
         return response
+    # SUDARSHAN M5.13: a reversal the risk gate cut to its exit sent only that.
+    quantity = response.get("sent_quantity", quantity)
     try:  # never a failure of its own after the order went
         quantity = int(quantity or 0)
     except (TypeError, ValueError):
@@ -950,6 +964,7 @@ def cancel_order(orderid, auth):
         if response_data.get("status") == "success":
             canceled_id = _extract_order_id(response_data.get("data"))
             logger.debug(f"Successfully canceled order ID: {canceled_id}")
+            risk_gate.cancelled(orderid)  # SUDARSHAN M5.13: its claims end with it
             return {"status": "success", "orderid": canceled_id}, 200
         elif response_data.get("not_confirmed"):
             # SUDARSHAN M6.9: no usable answer (a timeout, a dropped connection, an Upstox
@@ -971,6 +986,7 @@ def cancel_order(orderid, auth):
         return {"status": "error", "message": _CANCEL_NOT_CONFIRMED, "not_confirmed": True}, 500
 
 
+@risk_gate.upstox_modify  # SUDARSHAN M5.13: new risk refused while the kill switch is on
 def modify_order(data, auth):
     """
     Modifies an existing order.
@@ -998,6 +1014,8 @@ def modify_order(data, auth):
             logger.error(f"Failed to modify order: {error_msg} | Response: {response_data}")
             return {"status": "error", "message": error_msg}, 400
 
+    except SendWithdrawn as exc:  # SUDARSHAN M5.13
+        return risk_gate.withdrawn_body(exc.text)
     except BrokerBusyError as exc:
         return {"status": "error", "message": str(exc)}, 429
     except Exception as e:

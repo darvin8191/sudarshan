@@ -260,6 +260,11 @@ def place_order_with_auth(
 
     if res.status == 200:
         order_response_data = {"status": "success", "orderid": order_id}
+        # SUDARSHAN M5.13: a reversal the risk gate cut to its exit says so, and sent only that.
+        sent_quantity = order_data.get("quantity", 0)
+        if isinstance(response_data, dict) and response_data.get("risk_note"):
+            order_response_data["message"] = response_data["risk_note"]
+            sent_quantity = response_data.get("sent_quantity", sent_quantity)
 
         if emit_event:
             bus.publish(
@@ -270,7 +275,7 @@ def place_order_with_auth(
                     symbol=order_data.get("symbol", ""),
                     exchange=order_data.get("exchange", ""),
                     action=order_data.get("action", ""),
-                    quantity=int(order_data.get("quantity", 0)),
+                    quantity=int(sent_quantity),  # SUDARSHAN M5.13
                     pricetype=order_data.get("pricetype", ""),
                     product=order_data.get("product", ""),
                     orderid=str(order_id),
@@ -288,12 +293,15 @@ def place_order_with_auth(
             else "Failed to place order"
         )
         error_response = {"status": "error", "message": message}
+        # SUDARSHAN M5.13: a refusal the risk guard tells on Telegram, which hears no other
+        # failure, as place_smart_order_service passes one on (sudarshan/guard/gate.py).
+        heard = isinstance(response_data, dict) and response_data.get("nothing_sent") is True
         bus.publish(
             OrderFailedEvent(
                 mode="live",
                 api_type="placeorder",
                 request_data=order_request_data,
-                response_data=error_response,
+                response_data={**error_response, "nothing_sent": True} if heard else error_response,
                 api_key=api_key,
                 symbol=order_data.get("symbol", ""),
                 exchange=order_data.get("exchange", ""),

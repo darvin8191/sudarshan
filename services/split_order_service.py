@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from database.auth_db import get_auth_token_broker
 from database.settings_db import get_analyze_mode
 from events import AnalyzerErrorEvent, OrderFailedEvent, SplitCompletedEvent
+from sudarshan.guard import batch as risk_batch  # SUDARSHAN M20.7: a split held whole
 from utils.broker_backpressure import BrokerBusyError
 from utils.constants import (
     REQUIRED_ORDER_FIELDS,
@@ -228,6 +229,11 @@ def split_order_with_auth(
             api_key=original_data.get("apikey", ""),
         ))
         return False, error_response, 400
+
+    # SUDARSHAN M20.7: held to the owner's limits as the one order it was asked as (sudarshan/guard)
+    held = risk_batch.split(split_data, auth_token, original_data)
+    if held:
+        return held
 
     # If in analyze mode, route to sandbox for sandbox trading
     if get_analyze_mode():

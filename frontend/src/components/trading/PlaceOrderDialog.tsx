@@ -26,6 +26,8 @@ import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
 // SUDARSHAN: where the quote stands (Real-time, Reconnecting, Updated, Market closed).
 import { QuoteStatus } from '@/sudarshan/books/QuoteStatus'
+// SUDARSHAN M20.7: the kill switch's line on the ticket.
+import { KillSwitchNote } from '@/sudarshan/risk/RiskBanner'
 // SUDARSHAN M6.9: a ticket that has just opened takes no tap for half a second.
 import { useOpenGuard } from '@/sudarshan/watchlist/openGuard'
 import { showToast } from '@/utils/toast'
@@ -401,6 +403,8 @@ export function PlaceOrderDialog({
         </DialogHeader>
 
         <div className="space-y-4 py-2">
+          {/* SUDARSHAN M20.7: the kill switch's line; it disables nothing (a Buy can close a short). */}
+          <KillSwitchNote />
           {/* Quote Header - merged WebSocket + REST data */}
           <QuoteHeader
             exchange={exchange_}
