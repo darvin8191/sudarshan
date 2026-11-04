@@ -558,6 +558,51 @@ def test_y3_a_listed_row_or_a_conversion_is_not_unlisted():
     assert fills.unlisted_nets([_row("T", "D", 65, 65, 0)], orders) == []
 
 
+EMPTY_BOOK_UNREAD = (
+    "Upstox's positions show nothing open, but its order list did not come in time, so a "
+    "position opened in the last minute may not show yet. Check Positions in a minute."
+)
+
+
+def test_y3_exit_all_with_an_empty_positions_book_names_what_the_fills_show(monkeypatch):
+    world = install(monkeypatch, Broker({}, 0.0))
+    _bought_not_listed(world, Y, 30)
+    code, body = world.app_exit_all()
+    assert code != 200 and body.get("status") != "success"
+    assert UNLISTED in body["message"]
+    assert world.broker.orders == []
+
+
+def test_y3_exit_all_with_an_empty_positions_book_and_no_fills_finds_nothing_open(monkeypatch):
+    import broker.upstox.api.order_api as upstox
+
+    world = install(monkeypatch, Broker({}, 0.0))
+    body, code = upstox.close_all_positions("KEY", "token")
+    assert (code, body["message"]) == (200, "No Open Positions Found")
+    assert world.broker.orders == []
+
+
+def test_y3_exit_all_with_an_empty_positions_book_and_a_cnc_net_sale_finds_nothing_open(
+    monkeypatch, cnc
+):
+    import broker.upstox.api.order_api as upstox
+
+    world = install(monkeypatch, Broker({}, 0.0))
+    _bought_not_listed(world, cnc, -10)
+    body, code = upstox.close_all_positions("KEY", "token")
+    assert (code, body["message"]) == (200, "No Open Positions Found")
+
+
+def test_y3_exit_all_with_an_empty_positions_book_and_no_order_list_says_so(monkeypatch):
+    broker = Broker({}, 0.0)
+    broker.orders_unreadable = True
+    world = install(monkeypatch, broker)
+    code, body = world.app_exit_all()
+    assert code == 424 and body["status"] == "error"
+    assert body["message"] == EMPTY_BOOK_UNREAD
+    assert broker.orders == []
+
+
 # -- Y4: positions rows with no instrument token cannot be matched to the order book ---------------
 
 

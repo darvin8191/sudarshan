@@ -819,6 +819,10 @@ def place_smartorder_api(data, auth):
 # was placed with an order id; a positions read that failed sent nothing; anything else says how
 # many exits were sent, refused and not confirmed, and is marked not_confirmed when any went or
 # may have gone. A trader who believes he is flat when he is not is the worst outcome here.
+_CLOSE_ALL_EMPTY_NOT_CHECKED = (
+    "Upstox's positions show nothing open, but its order list did not come in time, so a "
+    "position opened in the last minute may not show yet. Check Positions in a minute."
+)
 _CLOSE_ALL_NOT_READ = (
     "Nothing was sent: the positions could not be read from Upstox. Check Positions and try again."
 )
@@ -1053,6 +1057,27 @@ def _close_all_summary(counts, unmatched, busy, reason, skipped=(), late=(), pos
     return body, 409  # only busy positions and late ones: nothing refused, nothing unknown
 
 
+def _unlisted_left_out(rows, orders):
+    """SUDARSHAN M6.9 (Y3): the sentence and the outcome for each instrument and product the order
+    book shows traded today and held, which Upstox's positions do not list yet (a CNC net sale is
+    a sale from holdings, not an open position)."""
+    skipped, outcomes = [], []
+    for exchange, name, _token, letter, net in fills.unlisted_nets(rows, orders):
+        product = reverse_map_product_type(exchange, letter)
+        if net < 0 and product == "CNC":
+            continue
+        held = exit_guard.position_of(exchange, name, product)
+        why = (
+            f"{exit_guard.trader_name(held)} was traded today but Upstox's positions do not "
+            "show it yet, so Exit all did not close it. Close it from the Upstox app, or "
+            "tap Exit all again in a minute."
+        )
+        logger.warning(f"Exit all sent no exit for {name}: no positions row lists it yet")
+        skipped.append(why)
+        outcomes.append(_outcome(held, "not_sent", why))
+    return skipped, outcomes
+
+
 def close_all_positions(current_api_key, auth):
     """
     Closes all open positions.
@@ -1072,6 +1097,14 @@ def close_all_positions(current_api_key, auth):
             logger.error(f"Close all: positions could not be read: {positions_response}")
             return {"status": "error", "message": _CLOSE_ALL_NOT_READ}, 424
         if not positions_response.get("data"):
+            # SUDARSHAN M6.9 (Y3): an empty book may be one that has not caught up with a
+            # position opened a moment ago: the order book says, read once, as Exit all does.
+            listed = _read_order_rows(auth, exit_guard.EXIT_ALL_ORDERS_READ_S)
+            if listed is None:
+                return {"status": "error", "message": _CLOSE_ALL_EMPTY_NOT_CHECKED}, 424
+            left_out, left_outcomes = _unlisted_left_out([], listed)
+            if left_out:
+                return _close_all_summary(counts, 0, 0, "", left_out, (), left_outcomes)
             logger.debug("No open positions found to close.")
             return {"message": "No Open Positions Found"}, 200
 
@@ -1207,21 +1240,9 @@ def close_all_positions(current_api_key, auth):
         # SUDARSHAN M6.9 (Y3): a position the order book shows traded today and Upstox's
         # positions do not list yet has no row to exit from: say so, never "squared off".
         # A sale from holdings (a CNC net sell) is not an open position.
-        for exchange, name, _token, letter, net in fills.unlisted_nets(
-            positions_response["data"], orders
-        ):
-            product = reverse_map_product_type(exchange, letter)
-            if net < 0 and product == "CNC":
-                continue
-            held = exit_guard.position_of(exchange, name, product)
-            why = (
-                f"{exit_guard.trader_name(held)} was traded today but Upstox's positions do not "
-                "show it yet, so Exit all did not close it. Close it from the Upstox app, or "
-                "tap Exit all again in a minute."
-            )
-            logger.warning(f"Exit all sent no exit for {name}: no positions row lists it yet")
-            skipped.append(why)
-            outcomes.append(_outcome(held, "not_sent", why))
+        more_skipped, more_outcomes = _unlisted_left_out(positions_response["data"], orders)
+        skipped.extend(more_skipped)
+        outcomes.extend(more_outcomes)
 
         # Only under the gthread worker does the order window refuse a square-off
         # whose turn is too far away instead of sending it late (BusyResponse).
