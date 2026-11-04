@@ -143,18 +143,18 @@ in brand. Icon "Mor": tile #0E5A73, ring #E3A21A, glyph #FFFFFF. Numbers via
     no order. The positions are read first, then the order book. When that cannot be worked out,
     or the order book did not answer, nothing is sent and the sentence says to use the Upstox app.
     An exit is sent in the product that holds the position.
-  - A smart order to position size 0 is an exit, even with a quantity (TradingView sends its
-    contracts with a size of 0). If its claim is refused it answers the busy sentence; if the
-    position is flat and the last fill today in that product was on the request's own side, or
-    the fills cannot be dated, it sends nothing ("No open position found. Not placing exit
-    order."); only an order on the other side after an exit is placed as an entry. An entry
-    (a size other than 0) is never refused for being busy. Every Exit all takes one claim for the
-    whole book, reads positions and then the order book once, and leaves out, with a sentence
-    each, any position that is busy, held or has a working order on its closing side; it never
-    waits. Anything that may have reached the broker reads "not confirmed", never a refusal or
-    raw error text; Upstox's own refusal text is shown without its error code. A stranded hold
-    costs a retry; a released one can reverse a position. The scalping terminal's closes and the
-    strategy module's exits are not covered yet.
+  - A smart order to position size 0 never opens a position: TradingView's size is the one after
+    the order, so its only size-0 alert is an exit (it sends its contracts with it). If its claim
+    is refused it answers the busy sentence; from flat it sends nothing ("No open position found.
+    Not placing exit order."), however the day's fills lie. A smart order to another size that
+    reduces or crosses a position is refused while a MARKET order works on the closing side, as a
+    single exit is; one that only adds is never refused for being busy. Every Exit all takes one
+    claim for the whole book, reads positions and then the order book once, and leaves out, with a
+    sentence each, any position that is busy, held, has a working order on its closing side or is
+    traded today but not yet in Upstox's positions; it never waits. Anything that may have reached
+    the broker reads "not confirmed", never a refusal or raw error text; Upstox's own refusal text
+    is shown without its error code. A stranded hold costs a retry; a released one can reverse a
+    position. The scalping terminal's closes and the strategy module's exits are not covered yet.
   - A sheet, a confirmation or an order ticket ignores taps for 500 ms after it opens
     (`watchlist/openGuard.ts`), so a double tap never presses what appeared under the finger.
   - Order alerts on Telegram (M6.8) are on by default (owner's broker-app benchmark, 20 Oct
