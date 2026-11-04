@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from sqlalchemy import MetaData, Table, and_, delete, event, func, insert, select, update
+from sqlalchemy import MetaData, Table, and_, delete, event, func, insert, or_, select, update
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -492,6 +492,140 @@ class Tx:
     def job_runs(self) -> list[dict[str, Any]]:
         t = self._t("job_run")
         found = self.conn.execute(select(t).order_by(t.c.day, t.c.at)).mappings()
+        return [dict(row) for row in found]
+
+    # ---- closing records, market data and the job log (writers; PB6, PB7) ----
+    def job_get(self, name: str, day: int) -> dict[str, Any] | None:
+        t = self._t("job_run")
+        row = (
+            self.conn.execute(select(t).where(t.c.name == name, t.c.day == day)).mappings().first()
+        )
+        return None if row is None else dict(row)
+
+    def job_put(self, name: str, day: int, status: str, detail: str | None, at: int) -> None:
+        """The one record of a job on a day; a later run of the same day replaces it."""
+        t = self._t("job_run")
+        self.conn.execute(delete(t).where(t.c.name == name, t.c.day == day))
+        self.conn.execute(insert(t).values(name=name, day=day, status=status, detail=detail, at=at))
+
+    def price_eod_get(self, asset_id: int, day: int) -> dict[str, Any] | None:
+        found = self.rows("price_eod", "day", asset_id=asset_id, day=day)
+        return found[0] if found else None
+
+    def price_eod_put(self, asset_id: int, day: int, values: Mapping[str, Any], now: int) -> None:
+        """A closing record of an asset for a day (price_u, prev_close_u, basis, source, late,
+        at); the day's earlier record, if any, is replaced."""
+        t = self._t("price_eod")
+        self.conn.execute(delete(t).where(t.c.asset_id == asset_id, t.c.day == day, self._mine(t)))
+        self.conn.execute(
+            insert(t).values(
+                asset_id=asset_id,
+                day=day,
+                principal=self.who,
+                created_at=now,
+                updated_at=now,
+                **{
+                    k: values[k]
+                    for k in ("price_u", "prev_close_u", "basis", "source", "late", "at")
+                },
+            )
+        )
+
+    def index_close_put(self, index_key: str, day: int, close_u: int, source: str) -> None:
+        t = self._t("benchmark_close")
+        self.conn.execute(delete(t).where(t.c.index_key == index_key, t.c.day == day))
+        self.conn.execute(
+            insert(t).values(index_key=index_key, day=day, close_u=close_u, source=source)
+        )
+
+    def index_close_get(self, index_key: str, day: int) -> dict[str, Any] | None:
+        t = self._t("benchmark_close")
+        row = self.conn.execute(
+            select(t).where(t.c.index_key == index_key, t.c.day == day)
+        ).mappings().first()  # fmt: skip
+        return None if row is None else dict(row)
+
+    def upstox_eod_put(
+        self, day: int, values: Mapping[str, Any], holdings: list[Mapping[str, Any]], now: int
+    ) -> None:
+        """The Upstox account's closing record of a day and its holding lines, replaced whole."""
+        head, lines = self._t("upstox_eod"), self._t("upstox_eod_holding")
+        for t in (head, lines):
+            self.conn.execute(delete(t).where(t.c.day == day, self._mine(t)))
+        self.conn.execute(
+            insert(head).values(
+                day=day, principal=self.who, created_at=now, updated_at=now,
+                **self._in({k: values.get(k) for k in (
+                    "read_at", "holdings_value_paise", "holdings_cost_paise",
+                    "positions_pnl_paise", "funds")}),
+            )
+        )  # fmt: skip
+        for line in holdings:
+            self.conn.execute(
+                insert(lines).values(
+                    day=day, principal=self.who, created_at=now, updated_at=now, **line
+                )
+            )
+
+    def mf_put_many(self, schemes: list[Mapping[str, Any]], now: int) -> int:
+        """Replace the NAV list: each scheme keeps the NAV it had as ``prev`` when a newer one
+        comes. Returns how many schemes were written."""
+        t = self._t("mf_scheme")
+        have = {
+            row["amfi_code"]: row
+            for row in self.conn.execute(
+                select(t.c.amfi_code, t.c.nav_u, t.c.nav_date, t.c.prev_nav_u, t.c.prev_nav_date)
+            ).mappings()
+        }
+        rows = []
+        for new in schemes:
+            old = have.get(new["amfi_code"])
+            prev_u, prev_date = new.get("prev_nav_u"), new.get("prev_nav_date")
+            if old is not None and new["nav_date"] is not None:
+                if old["nav_date"] is not None and old["nav_date"] < new["nav_date"]:
+                    prev_u, prev_date = old["nav_u"], old["nav_date"]
+                elif old["nav_date"] == new["nav_date"]:
+                    prev_u, prev_date = old["prev_nav_u"], old["prev_nav_date"]
+                elif old["nav_date"] is not None and old["nav_date"] > new["nav_date"]:
+                    continue  # an older file never replaces a newer NAV
+            rows.append(
+                {**new, "prev_nav_u": prev_u, "prev_nav_date": prev_date, "fetched_at": now}
+            )
+        for start in range(0, len(rows), 500):
+            batch = rows[start : start + 500]
+            self.conn.execute(delete(t).where(t.c.amfi_code.in_([r["amfi_code"] for r in batch])))
+            self.conn.execute(insert(t), batch)
+        return len(rows)
+
+    def mf_fetched_at(self) -> int | None:
+        return self.conn.execute(select(func.max(self._t("mf_scheme").c.fetched_at))).scalar()
+
+    def mf_get(self, amfi_code: str) -> dict[str, Any] | None:
+        t = self._t("mf_scheme")
+        row = self.conn.execute(select(t).where(t.c.amfi_code == amfi_code)).mappings().first()
+        return None if row is None else dict(row)
+
+    def mf_count(self) -> int:
+        return int(
+            self.conn.execute(select(func.count()).select_from(self._t("mf_scheme"))).scalar()
+        )
+
+    def mf_search(self, words: list[str], limit: int) -> list[dict[str, Any]]:
+        """Schemes whose name, category, AMC or code holds every word, a code match first."""
+        t = self._t("mf_scheme")
+        query = select(t)
+        for word in words:
+            like = f"%{word.replace('%', '').replace('_', '')}%"
+            query = query.where(
+                or_(
+                    t.c.name.ilike(like),
+                    t.c.amfi_code == word,
+                    t.c.amc.ilike(like),
+                    t.c.category.ilike(like),
+                    t.c.isin_growth == word.upper(),
+                )
+            )
+        found = self.conn.execute(query.order_by(t.c.name).limit(limit)).mappings()
         return [dict(row) for row in found]
 
     def nav_day(self) -> int | None:

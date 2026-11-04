@@ -1,8 +1,8 @@
 """Entry point: ``python -m sudarshan.portfolio`` from the OpenAlgo repo root."""
 
-from .resolver import register_job
 from .service import main
+from .timers import register_all
 
-register_job()  # the morning check of share identities
+register_all()  # every job registers from its own module
 
 raise SystemExit(main())

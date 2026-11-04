@@ -107,6 +107,7 @@ class Service:
         self.prices: Any = None
         self.upstox: Any = None
         self._calendar: Any = None
+        self._amfi: Any = None
         self._state = "starting"
         self._tasks: dict[str, asyncio.Task] = {}
         self._stop = asyncio.Event()
@@ -149,6 +150,14 @@ class Service:
                 max_claims=self.settings.max_claims,
             )
         return self.prices
+
+    def amfi_client(self) -> Any:
+        """The HTTP client of the nightly NAV fetch, built on first use and closed with the service."""
+        if self._amfi is None:
+            import httpx
+
+            self._amfi = httpx.AsyncClient(timeout=30.0)
+        return self._amfi
 
     def ensure_upstox(self) -> Any:
         """The Upstox reader (upstox.py), built on first use."""
@@ -219,6 +228,9 @@ class Service:
             for held in (self.prices, self.upstox):
                 if held is not None and hasattr(held, "aclose"):
                     await held.aclose()
+            client, self._amfi = self._amfi, None
+            if client is not None:
+                await client.aclose()
             self.prices = self.upstox = None
             store, self.store = self.store, None
             if store is not None:
