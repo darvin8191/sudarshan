@@ -475,13 +475,14 @@ def test_an_exit_the_sandbox_s_order_manager_broke_on_is_not_confirmed(alert, mo
 
 
 def test_a_fresh_order_at_position_size_0_the_sandbox_broke_on_is_an_order(monkeypatch):
-    """Flat, with a quantity: it opens a position, so it is not an exit that may have gone."""
+    """Flat, to a size of 5 (TradingView's entry): it opens a position, so it is not an exit that
+    may have gone."""
     from sandbox.order_manager import OrderManager
 
     sandbox_service = _sandbox_holding(monkeypatch)
     monkeypatch.setattr(OrderManager, "_validate_order", _locked)
     _, answer, code = sandbox_service.sandbox_place_smart_order(
-        {**ANALYZE_EXIT, "quantity": "5"}, "key", {}
+        {**ANALYZE_EXIT, "quantity": "5", "position_size": "5"}, "key", {}
     )
     assert (code, answer["not_confirmed"]) == (500, True)
     assert answer["message"].startswith("This order is not confirmed: it may have gone through.")

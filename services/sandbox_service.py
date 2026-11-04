@@ -510,8 +510,6 @@ def _place_smart_order_locked(
     original_quantity,
 ):
     """The body of sandbox_place_smart_order, run holding the position's lock."""
-    original_action = order_data.get("action")
-
     # Get current position
     success, positions_response, status_code = position_manager.get_open_positions()
     if not success:
@@ -531,11 +529,21 @@ def _place_smart_order_locked(
             current_quantity = pos.get("quantity", 0)
             break
 
-    # Special case: position_size=0 with quantity!=0 means fresh trade
     if target_quantity == 0 and current_quantity == 0 and original_quantity != 0:
-        # Use the original action and quantity for fresh trade
-        action = original_action
-        quantity = original_quantity
+        # SUDARSHAN M6.9 (Z1): the same rule as Live (broker/upstox/api/order_api.py). A smart
+        # order to position size 0 never opens a position: TradingView's size is the one after
+        # the order, so its only size-0 alert is an exit, and from flat it is a late or repeated
+        # one. To open a position, give the size after the order. Analyze mode must refuse what
+        # Live refuses, or it shows an entry working that Live would not send.
+        return (
+            True,
+            {
+                "status": "success",
+                "message": "No open position found. Not placing exit order.",
+                "mode": "analyze",
+            },
+            200,
+        )
     elif target_quantity == current_quantity:
         # Position already matches
         if original_quantity == 0:
