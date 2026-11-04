@@ -9,6 +9,7 @@ import logging
 from collections.abc import Callable, Mapping
 from typing import Any
 
+from .. import serialize
 from ..errors import ApiError
 from ..store import Invalid, NotFound, Refused, Scope, StoreError, VersionConflict
 
@@ -53,3 +54,23 @@ def whole(message: Mapping[str, Any], name: str) -> int:
 
 def maybe_whole(message: Mapping[str, Any], name: str) -> int | None:
     return None if message.get(name) is None else whole(message, name)
+
+
+def parts(ctx: Any):
+    """``(book, views)`` for the open store, built once for it."""
+    from ..book import Book
+    from ..views import Views
+
+    need(ctx)
+    return ctx.part("book", Book), ctx.part("views", Views)
+
+
+async def answer(call: Callable[[], Any], shape: Callable[[Any], Any] = lambda data: data) -> Any:
+    """Run store work, shape what it returns for the phone and pass it through the scope's mask:
+    every op ends here, so the mask is applied in one place."""
+    return serialize.out(OWNER, shape(await work(call)))
+
+
+def given(message: Mapping[str, Any], *names: str) -> dict[str, Any]:
+    """The named arguments the request carries (an argument left out stays out)."""
+    return {name: message[name] for name in names if name in message}

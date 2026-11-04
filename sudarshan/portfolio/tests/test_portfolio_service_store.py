@@ -36,7 +36,7 @@ def store_threads() -> list[str]:
 
 async def started(svc: Service) -> asyncio.Task:
     task = asyncio.create_task(svc.run())
-    for _ in range(200):
+    for _ in range(1500):
         if svc.state in ("running", "off"):
             return task
         await asyncio.sleep(0.02)

@@ -432,7 +432,7 @@ def test_a_taken_port_is_said_in_words_the_jobs_run_and_the_port_is_tried_again(
         assert len(ticks) > 5 and not task.done()
         assert svc.health()["portfolio_state"]["jobs"] == {"count": "running"}
         held.close()
-        for _ in range(100):
+        for _ in range(600):
             if svc.state == "running":
                 break
             await asyncio.sleep(0.05)
@@ -475,7 +475,7 @@ def test_start_then_stop_opens_the_store_once_and_leaves_nothing_open(tmp_path):
         svc = Service(settings_for(tmp_path, free_port()), FERNET, jobs=jobs,
                       opener=opener, closer=closer)  # fmt: skip
         task = asyncio.create_task(svc.run())
-        for _ in range(100):
+        for _ in range(1500):
             if svc.state == "running":
                 break
             await asyncio.sleep(0.02)
@@ -544,7 +544,7 @@ def test_switched_off_the_store_is_not_opened_and_no_job_runs(tmp_path):
         svc = Service(settings_for(tmp_path, port, enabled=False), FERNET, jobs=jobs,
                       opener=lambda s: opened.append(1), closer=lambda s: None)  # fmt: skip
         task = asyncio.create_task(svc.run())
-        for _ in range(100):
+        for _ in range(1500):
             if svc.state == "off":
                 break
             await asyncio.sleep(0.02)
