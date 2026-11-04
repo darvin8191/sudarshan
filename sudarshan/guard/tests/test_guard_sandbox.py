@@ -93,12 +93,18 @@ def sandbox(monkeypatch, risk_store):
     import sandbox.order_manager as order_manager
     from sandbox.execution_engine import ExecutionEngine
 
+    import itertools
+
+    ticks = itertools.count(1)
+
     class Morning(datetime):
-        """11:00 in India today: MIS orders are refused after the sandbox's 15:15 square-off."""
+        """11:00 in India today: MIS orders are refused after the sandbox's 15:15 square-off.
+        Each call is a microsecond later: the sandbox's order id is that microsecond and two
+        random digits, so a frozen clock made two orders collide one time in a hundred."""
 
         @classmethod
         def now(cls, tz=None):
-            return datetime.now(tz).replace(hour=11, minute=0, second=0, microsecond=0)
+            return datetime.now(tz).replace(hour=11, minute=0, second=0, microsecond=next(ticks))
 
     monkeypatch.setattr(order_manager, "datetime", Morning)
 
