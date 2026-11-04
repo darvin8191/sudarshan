@@ -37,7 +37,9 @@ GOVERNOR_CALLBACKS = {"RestGovernor._pump", "RestGovernor.save"}
 def _owner(callback) -> str:
     task = getattr(callback, "__self__", None)
     if isinstance(task, asyncio.Task):
-        return "governor" if task.get_coro().__qualname__ in GOVERNOR_TASKS else "feed"
+        # asyncio's own shutdown of async generators is a task whose coroutine has no name
+        name = getattr(task.get_coro(), "__qualname__", "")
+        return "governor" if name in GOVERNOR_TASKS else "feed"
     return "governor" if getattr(callback, "__qualname__", "") in GOVERNOR_CALLBACKS else "feed"
 
 
