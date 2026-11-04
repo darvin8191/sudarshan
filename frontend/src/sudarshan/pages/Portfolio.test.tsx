@@ -111,6 +111,13 @@ describe('the Portfolio page', () => {
     expect(screen.getByText('Nothing here yet. Add an entry or import a file.')).toBeTruthy()
   })
 
+  it('opens the Import sheet on a custom tab', async () => {
+    serve()
+    show('/portfolio?tab=2&view=activity&sheet=import')
+    expect(await screen.findByRole('button', { name: 'Choose a file' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Download entries/ })).toBeTruthy()
+  })
+
   it('a tab that is gone falls back to Upstox', async () => {
     serve()
     show('/portfolio?tab=99')
@@ -137,8 +144,8 @@ describe('the Portfolio page', () => {
 
   it('a sheet in the address opens a stub that says what it is for, and says it is not ready', async () => {
     serve()
-    show('/portfolio?tab=2&sheet=import')
-    await screen.findByText('Import entries')
+    show('/portfolio?tab=2&sheet=customize')
+    await screen.findByText('Customize')
     expect(screen.getByText(WORDS.not_ready)).toBeTruthy()
   })
 

@@ -15,6 +15,7 @@ import {
 import { useMemo } from 'react'
 import { portfolioCall, problemOf } from '@/sudarshan/portfolio/api'
 import { CustomStub } from '@/sudarshan/portfolio/StubViews'
+import { ImportSheet } from '@/sudarshan/portfolio/sheets/ImportSheet'
 import { NewTabSheet } from '@/sudarshan/portfolio/sheets/NewTabSheet'
 import { TabSettingsSheet } from '@/sudarshan/portfolio/sheets/TabSettingsSheet'
 import { TabStrip } from '@/sudarshan/portfolio/TabStrip'
@@ -251,8 +252,20 @@ export default function Portfolio() {
           selectTab(null)
         }}
       />
+      <ImportSheet
+        open={overlay?.kind === 'import' && current !== null}
+        onClose={close}
+        tab={current}
+        accounts={accounts}
+        onChanged={() => void refresh()}
+      />
       <BottomSheet
-        open={sheet !== null && overlay?.kind !== 'new-tab' && overlay?.kind !== 'settings'}
+        open={
+          sheet !== null &&
+          overlay?.kind !== 'new-tab' &&
+          overlay?.kind !== 'settings' &&
+          overlay?.kind !== 'import'
+        }
         onOpenChange={(next) => !next && close()}
         title={sheet?.title ?? ''}
       >
