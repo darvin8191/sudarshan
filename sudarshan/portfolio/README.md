@@ -107,6 +107,23 @@ owner data (`PortfolioHealth`).
 
 ### The answer
 
+There are two envelopes, and only the second one is the phone's contract.
+
+**The service's sealed envelope** is internal, between this service and the bridge. It is flat:
+
+```
+{"status": "success", "data": {...}}
+{"status": "success", "data": {"enabled": false, "message": "..."}}
+{"status": "error", "code": "refused", "message": "...", "field": "qty_u", "entry_id": 12}
+```
+
+`field` and `entry_id` are present only when they apply. A switched-off portfolio is a success whose
+`data` says `enabled: false` and why. The bridge reads this and never forwards it as it is.
+
+**The public envelope** is what the bridge returns to the phone (and what `types.ts` describes). The
+bridge builds it from the sealed one: `enabled` moves out of `data` to the top, and an error's
+`code`, `message` and `entry_id` move into `error`.
+
 ```
 {"status": "success", "enabled": true,  "data": {...}}
 {"status": "success", "enabled": false, "data": null}
