@@ -490,11 +490,11 @@ def drop_owner_room() -> None:
     is the only check, so without this a lost phone logged out elsewhere keeps getting the owner's
     alerts. The app reconnects and its join is checked again. Never raises, and does nothing when
     there is no room or no socket. Under eventlet from a real thread the close is handed to the hub
-    (utils.real_threading.submit_to_hub); everywhere else it runs inline."""
+    (utils.real_threading.run_on_hub); everywhere else it runs inline."""
     try:
         sids = _room_sids()
         if sids:
-            real_threading.submit_to_hub(_disconnect, sids)
+            real_threading.run_on_hub(_disconnect, sids, timeout=3)
     except Exception:
         logger.exception("Could not close the owner's alerts room")
 
