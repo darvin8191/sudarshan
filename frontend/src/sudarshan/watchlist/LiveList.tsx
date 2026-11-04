@@ -55,7 +55,10 @@ export const LiveList = memo(function LiveList({
 
   return (
     <>
-      {live.line && <LiveLine line={live.line} now={live.now} className="flex min-h-5 px-1" />}
+      {/* No key to read with: nothing is connecting, and the page's notice says why. */}
+      {apiKey !== null && live.line && (
+        <LiveLine line={live.line} now={live.now} className="flex min-h-5 px-1" />
+      )}
 
       {readFailed && (
         <output className="flex flex-wrap items-center gap-x-2 px-1 text-xs font-medium text-muted-foreground">

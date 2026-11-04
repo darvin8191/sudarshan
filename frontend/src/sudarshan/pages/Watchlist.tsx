@@ -3,13 +3,13 @@
 // /trading terminal's panel uses (blueprints/watchlist.py), the prices stream
 // tick by tick on the tab's shared market-data socket, and a tap opens the
 // instrument's sheet: Buy and Sell, chart, option chain and depth.
-import { Check, KeyRound, Plus, RefreshCw } from 'lucide-react'
+import { Check, Plus, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router'
 import type { WatchlistItem } from '@/api/watchlist'
 import { PlaceOrderDialog } from '@/components/trading/PlaceOrderDialog'
 import { cn } from '@/lib/utils'
-import { useAuthStore } from '@/stores/authStore'
+import { AccessNotice } from '@/sudarshan/AccessNotice'
+import { usePriceAccess } from '@/sudarshan/access'
 import { useMarketOpen } from '@/sudarshan/dashboard/hooks'
 import { keyOf } from '@/sudarshan/dashboard/live'
 import {
@@ -55,7 +55,10 @@ const HEADER_BUTTON =
 export const LIST_FULL = `This list holds ${MAX_ITEMS} symbols, the most a list can. Remove one to add another.`
 
 export default function Watchlist() {
-  const apiKey = useAuthStore((state) => state.apiKey)
+  // Prices and search need the API key and today's Upstox login; the key is
+  // null until both are there, and the notice says which is missing.
+  const access = usePriceAccess()
+  const { apiKey } = access
   const [market, setMarket] = useState<MarketCalendar>(CALENDAR_LOADING)
   const day = useIstDay()
   const { isOpen } = useMarketOpen(market)
@@ -173,20 +176,7 @@ export default function Watchlist() {
         </p>
       )}
 
-      {apiKey === null && (
-        <div className="flex flex-col items-start gap-2 rounded-[1.125rem] border border-[color:var(--gold)] bg-[color:var(--gold-tint)] px-4 py-3">
-          <p className="flex items-center gap-2 text-sm font-semibold text-[color:var(--gold-ink)]">
-            <KeyRound aria-hidden="true" className="size-4 shrink-0" />
-            Prices and search need an API key.
-          </p>
-          <Link
-            to="/apikey"
-            className="inline-flex min-h-12 items-center text-sm font-semibold text-[color:var(--brand)] underline underline-offset-2"
-          >
-            Create one under API Key
-          </Link>
-        </div>
-      )}
+      <AccessNotice access={access} />
 
       {watchlists.error && watchlists.lists.length === 0 ? (
         <section
