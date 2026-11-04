@@ -56,9 +56,8 @@ export async function syncSession({ keepOnFailure = false }: SyncOptions = {}): 
         loginTime: new Date().toISOString(),
       })
       // Store the API key for trading API calls
-      if (data.api_key) {
-        setApiKey(data.api_key)
-      }
+      // An answer with no key clears the saved one too: it is gone on the server.
+      setApiKey(data.api_key ? data.api_key : null)
       // SUDARSHAN: whether today's broker login is still good. After the key,
       // so a screen never sees "logged in, no key" on its way to ready.
       setBrokerSession(data.broker_session_expired === true)
