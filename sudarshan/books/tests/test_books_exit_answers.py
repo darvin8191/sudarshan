@@ -1073,7 +1073,7 @@ def test_a_cancel_that_breaks_after_its_answer_is_not_confirmed(upstox_answers, 
 
 
 def test_a_new_smart_order_that_breaks_after_its_send_is_not_confirmed(monkeypatch):
-    monkeypatch.setattr(upstox, "_position_rows", _row_of(0))
+    monkeypatch.setattr(upstox, "get_open_position", lambda *args: "0")
     monkeypatch.setattr(upstox, "place_order_api", lambda data, auth: PLACED)
 
     def broken(auth):
@@ -1081,7 +1081,7 @@ def test_a_new_smart_order_that_breaks_after_its_send_is_not_confirmed(monkeypat
 
     monkeypatch.setattr(upstox, "_invalidate_position_cache", broken)
     res, body, orderid = upstox.place_smartorder_api(
-        {**EXIT, "action": "BUY", "quantity": "65", "position_size": "0"}, "token"
+        {**EXIT, "action": "BUY", "quantity": "65", "position_size": "65"}, "token"
     )
     assert res.status == 500
     assert body["not_confirmed"] is True

@@ -291,10 +291,11 @@ def test_s14_flow_s_close_node_with_a_symbol_closes_that_position_only(world):
 
 
 def test_s15_a_tradingview_entry_right_after_an_exit_is_never_refused(world, monkeypatch):
-    """Position size 0 with a quantity, from flat, is upstream's fresh order: an entry."""
+    """TradingView's entry carries the size after the order (BUY 10 to a size of 10), so it is
+    not an exit and nothing about the exit just before it holds it back."""
     monkeypatch.setattr(world.broker, "lag", 0.0)  # the book shows the exit at once
     world.phone_exit(Z)
-    code, body = world.tv_smart_exit(Z, quantity="10", action="BUY")
+    code, body = world.tv_smart_exit(Z, quantity="10", action="BUY", position_size="10")
     assert (code, body["status"]) == (200, "success")
     assert [(o["symbol"], o["side"]) for o in world.broker.orders] == [(Z, "SELL"), (Z, "BUY")]
 

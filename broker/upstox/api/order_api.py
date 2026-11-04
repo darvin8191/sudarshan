@@ -712,33 +712,22 @@ def place_smartorder_api(data, auth):
                     None,
                 )
 
-            if entry and fills.repeats_last_fill(
-                orders, get_token(symbol, exchange), map_product_type(product), data.get("action")
-            ):
-                # SUDARSHAN M6.9: TradingView's exit carries its contracts with a position size
-                # of 0. Flat, and the last fill on this side, it repeats the exit that flattened
-                # the position (or cannot be told from one): sent, it would open the opposite
-                # position. An order on the other side after an exit goes as an entry.
+            if entry:
+                # SUDARSHAN M6.9 (Y1): a smart order to a position size of 0 never opens a
+                # position. TradingView's strategy alert carries the size after the order, so its
+                # only size-0 alert is an exit; from flat such an order is a late or repeated
+                # exit, or the exit of an entry that never filled, and sent it would open a
+                # position nobody asked for. A quantity of 0 (upstream's own exit form) is below.
                 logger.warning(f"Exit for {symbol} not sent: the position is flat already")
                 return (
                     None,
                     {
                         "status": "success",
                         "message": "No open position found. Not placing exit order.",
+                        "nothing_sent": True,
                     },
                     None,
                 )
-
-            if entry:
-                logger.debug("No existing position and quantity is specified. Placing a new order.")
-                sent = True
-                res, response, orderid = place_order_api(data, auth)
-                # Like every other placement here: the next smart order for this
-                # symbol must not read the book from before this one.
-                _invalidate_position_cache(auth)
-                # SUDARSHAN M6.9: a fresh order, as the request asked.
-                response = _with_sent(response, data.get("action"), data.get("quantity"), False)
-                return res, response, orderid
 
             if position_size == current_position:
                 msg = "No action needed. Position size matches current position."

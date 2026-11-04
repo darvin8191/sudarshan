@@ -635,12 +635,12 @@ def test_upstox_s_smart_order_says_what_it_sent(upstox_book):
 
 def test_upstox_s_fresh_order_from_flat_says_it_opened(upstox_book, monkeypatch):
     upstox, placed = upstox_book
-    monkeypatch.setattr(upstox, "_position_rows", _row_of(0, "D"))
+    monkeypatch.setattr(upstox, "get_open_position", lambda *args: "0")  # flat, then to a size of 5
     order = {"symbol": "RELIANCE", "exchange": "NSE", "product": "CNC", "action": "buy"}
     _, answer, _ = upstox.place_smartorder_api(
-        {**order, "quantity": "5", "position_size": "0"}, "t"
+        {**order, "quantity": "5", "position_size": "5"}, "t"
     )
-    assert placed == [("buy", "5")]
+    assert placed == [("BUY", "5")]
     assert answer["sent"] == {"action": "BUY", "quantity": 5, "closes": False}
 
 

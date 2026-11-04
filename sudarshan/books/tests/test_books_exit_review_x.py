@@ -10,7 +10,7 @@ from __future__ import annotations
 import time
 
 import pytest
-from books_upstox_world import Broker, install
+from books_upstox_world import INSTRUMENTS, Broker, install
 
 from sudarshan.books import exit_guard, fills
 
@@ -126,59 +126,74 @@ def test_x1_the_broker_answers_a_repeated_exit_as_it_does_an_exit_with_nothing_o
     _fresh_book()
     res, body, orderid = upstox.place_smartorder_api(exit_order, "token")
     assert first[2] and (res, orderid) == (None, None)
-    assert body == {"status": "success", "message": NOTHING_OPEN}
+    assert body == {"status": "success", "message": NOTHING_OPEN, "nothing_sent": True}
 
 
-def test_x1_an_opposite_side_entry_right_after_an_exit_is_still_placed(monkeypatch, clock):
-    """The fork's s15, with the row lagging as well: the last fill was the exit's SELL, so a BUY
-    with a position size of 0 is upstream's fresh order."""
+def test_y1_a_size_0_order_on_the_side_opposite_to_the_last_fill_sends_nothing(monkeypatch, clock):
+    """Flat after the owner's exit (a SELL); TradingView's size-0 BUY is not an entry, because
+    its entries carry the size after the order. It is a stray exit and opens nothing."""
     world = install(monkeypatch, Broker({Z: 10}, 60.0))
     world.phone_exit(Z)
     clock.advance(2.0)
     _fresh_book()
     code, body = world.tv_smart_exit(Z, quantity="10", action="BUY")
-    assert (code, body["status"]) == (200, "success")
-    assert _sent(world.broker, Z) == [("SELL", 10), ("BUY", 10)]
+    assert body["message"] == NOTHING_OPEN
+    assert _sent(world.broker, Z) == [("SELL", 10)]
+    assert world.broker.true_qty(Z) == 0
 
 
-def test_x1_a_flat_position_with_no_fill_today_places_the_order_as_given(monkeypatch):
+@pytest.mark.parametrize("action", ["BUY", "SELL"])
+def test_y1_a_flat_position_with_no_fill_today_sends_nothing(monkeypatch, action):
+    """The entry that this exit belongs to was refused or never filled."""
     world = install(monkeypatch, Broker({Z: 0}, 0.0))
-    code, body = world.tv_smart_exit(Z, quantity="10", action="BUY")
-    assert (code, body["status"]) == (200, "success")
-    assert _sent(world.broker, Z) == [("BUY", 10)]
+    code, body = world.tv_smart_exit(Z, quantity="10", action=action)
+    assert body["message"] == NOTHING_OPEN
+    assert world.broker.orders == []
 
 
-def _order(**fields):
-    return {
-        "instrument_token": "T",
-        "product": "I",
-        "transaction_type": "SELL",
-        "filled_quantity": 65,
-        "order_timestamp": "2026-10-27 09:20:00",
-        **fields,
-    }
+class StopModified(Broker):
+    """Flat. 10:00 BUY 65; 10:01 a stop SELL 65 SL-M is placed; 10:30 a second BUY 65 and the stop
+    is modified to 130; 11:00 the stop fills. The order book dates the stop 10:01 (when it was
+    placed), so it looks older than the add it closed."""
+
+    def _filled_rows(self):
+        token, exchange, product, _oa = INSTRUMENTS[X]
+        base = {"instrument_token": token, "exchange": exchange, "product": product,
+                "tradingsymbol": X, "status": "complete", "pending_quantity": 0,
+                "price": 0, "trigger_price": 0}  # fmt: skip
+        return [
+            {**base, "order_id": "1", "transaction_type": "BUY", "order_type": "MARKET",
+             "quantity": 65, "filled_quantity": 65, "order_timestamp": "2026-10-27 10:00:00"},
+            {**base, "order_id": "2", "transaction_type": "SELL", "order_type": "SL-M",
+             "quantity": 130, "filled_quantity": 130, "trigger_price": 98.5,
+             "order_timestamp": "2026-10-27 10:01:00"},
+            {**base, "order_id": "3", "transaction_type": "BUY", "order_type": "MARKET",
+             "quantity": 65, "filled_quantity": 65, "order_timestamp": "2026-10-27 10:30:00"},
+        ]  # fmt: skip
 
 
-def test_x1_the_last_fill_decides_by_its_timestamp_not_its_place_in_the_list():
-    early_sell = _order(order_timestamp="2026-10-27 09:20:00")
-    late_buy = _order(transaction_type="BUY", order_timestamp="2026-10-27 10:00:00")
-    assert fills.repeats_last_fill([late_buy, early_sell], "T", "I", "BUY") is True
-    assert fills.repeats_last_fill([early_sell, late_buy], "T", "I", "SELL") is False
+@pytest.mark.parametrize("action", ["SELL", "BUY"])
+def test_y1_flat_after_a_stop_placed_before_an_add_and_modified_to_cover_it_sends_nothing(
+    monkeypatch, action
+):
+    broker = StopModified({X: 0}, 0.0)
+    broker.base_day[X] = (130, 130)
+    world = install(monkeypatch, broker)
+    code, body = world.tv_smart_exit(X, quantity="130", action=action)
+    assert body["message"] == NOTHING_OPEN
+    assert broker.orders == []
 
 
-def test_x1_without_a_usable_timestamp_nothing_is_sent():
-    for stamp in (None, "", "yesterday"):
-        rows = [_order(order_timestamp=stamp)]
-        assert fills.repeats_last_fill(rows, "T", "I", "BUY") is True, stamp
+def test_y1_the_flat_answer_is_a_sentence_for_telegram(monkeypatch):
+    """The service marks the answer nothing_sent, so Telegram tells the owner, in plain words."""
+    from sudarshan.books import telegram_words
 
-
-def test_x1_orders_that_filled_nothing_or_belong_elsewhere_do_not_count():
-    rows = [
-        _order(filled_quantity=0, order_timestamp=None),
-        _order(instrument_token="OTHER", order_timestamp=None),
-        _order(product="D", order_timestamp=None),
-    ]
-    assert fills.repeats_last_fill(rows, "T", "I", "SELL") is False
+    order = {"symbol": X, "action": "SELL", "quantity": "65", "position_size": "0"}
+    answer = {"status": "error", "message": NOTHING_OPEN, "nothing_sent": True}
+    title = telegram_words.alert_template("placesmartorder", order, answer, "unused")
+    lines = telegram_words.smart_order_action_lines(order, answer)
+    assert title.startswith("*Smart order not sent*")
+    assert lines == ["Action: nothing sent", "No open position found. Not placing exit order."]
 
 
 # -- X2: a position converted between products (MIS to NRML in Upstox's app) -----------------------
