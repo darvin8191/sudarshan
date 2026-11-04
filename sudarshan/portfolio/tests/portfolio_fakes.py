@@ -86,6 +86,10 @@ class FakeResolver:
     def by_key(self, key):
         return next((v for v in self.listings.values() if v.key == key), None)
 
+    def by_keys(self, keys):
+        wanted = set(keys)
+        return {v.key: v for v in self.listings.values() if v.key in wanted}
+
     def has_derivatives(self, symbol):
         return symbol.upper() in self.futures
 
@@ -173,3 +177,171 @@ class FakeFeed:
 
     def paths(self, method: str, prefix: str) -> list[dict]:
         return [c[2] for c in self.calls if c[0] == method and c[1].startswith(prefix)]
+
+
+#: Synthetic rows typed from the documented field lists; nothing here is an account.
+HOLDINGS = {
+    "status": "success",
+    "data": [
+        {
+            "isin": "INE467B01029",
+            "instrument_token": "NSE_EQ|INE467B01029",
+            "trading_symbol": "TCS",
+            "exchange": "NSE",
+            "company_name": "Tata Consultancy Services",
+            "quantity": 10,
+            "t1_quantity": 2,
+            "average_price": 3400.005,
+            "last_price": 3500.55,
+            "close_price": 3450.0,
+            "pnl": 1005.495,
+            "day_change": 50.55,
+            "day_change_percentage": 1.46,
+            "product": "D",
+            "collateral_quantity": 0,
+            "collateral_type": None,
+            "haircut": 0.2,
+            "cnc_used_quantity": 0,
+        },
+        {
+            "isin": "INE000Z01011",
+            "instrument_token": "NSE_EQ|INE000Z01011",
+            "trading_symbol": "SMALLCO",
+            "exchange": "NSE",
+            "company_name": "Small Company",
+            "quantity": 3,
+            "t1_quantity": 0,
+            "average_price": 100.0,
+            "last_price": 90.0,
+            "close_price": 0,
+            "pnl": -30.0,
+            "product": "D",
+            "haircut": None,
+        },
+    ],
+}
+POSITIONS = {
+    "status": "success",
+    "data": [
+        {
+            "exchange": "NFO",
+            "instrument_token": "NSE_FO|12345",
+            "trading_symbol": "NIFTY26NOVFUT",
+            "product": "D",
+            "quantity": -65,
+            "overnight_quantity": 0,
+            "day_buy_quantity": 0,
+            "day_sell_quantity": 65,
+            "average_price": 24000.25,
+            "buy_price": 0.0,
+            "sell_price": 24000.25,
+            "last_price": 23990.0,
+            "close_price": 24010.0,
+            "multiplier": 1.0,
+            "pnl": 666.25,
+            "realised": 0.0,
+            "unrealised": 666.25,
+            "value": -1559350.0,
+        }
+    ],
+}
+FUNDS = {
+    "status": "success",
+    "data": {
+        "available_to_trade": {
+            "total": 125000.5,
+            "cash_available_to_trade": {
+                "total": 100000.5,
+                "cash": {
+                    "opening_balance": 100000.5,
+                    "added_today": 0,
+                    "withdrawn_today": 0.0,
+                    "amount_from_stock_sale": 0.0,
+                    "unpaid_charges": 0,
+                },
+                "margin_used": {
+                    "total": 0.0,
+                    "mtf": 0.0,
+                    "loss": {"total": 0.0, "realised": 0.0, "unrealised": 0.0},
+                    "span_exposure": 0.0,
+                    "cash_margin_var_elm": 0.0,
+                    "premium_present": 0.0,
+                    "delivery_margin": {"total": 0.0, "equity": 0.0, "fo_settlement": 0.0},
+                },
+            },
+            "pledge_available_to_trade": {
+                "total": 25000.0,
+                "margin_from_pledge": {"total": 25000.0, "equity": 25000.0, "mutual_funds": 0.0},
+                "margin_used": {"total": 0.0},
+            },
+        },
+        "unavailable_to_trade": {
+            "cash_unavailable_to_trade": {
+                "unsettled_profit": {"todays_profit": 10.5, "previous_days": 0.0}
+            },
+            "pledge_unavailable_to_trade": {"equity": 0.0, "mutual_funds": 0.0},
+        },
+    },
+}
+
+
+class FakeUpstox:
+    """Upstox's four read paths on loopback. ``status`` and ``bodies`` are set per part."""
+
+    PATHS = {
+        "/v2/portfolio/long-term-holdings": "holdings",
+        "/v2/portfolio/short-term-positions": "positions",
+        "/v3/portfolio/mtf-positions": "mtf",
+        "/v3/user/get-funds-and-margin": "funds",
+    }
+
+    def __init__(self):
+        self.status = {}
+        self.bodies = {"holdings": HOLDINGS, "positions": POSITIONS, "mtf": {"status": "success", "data": []},
+                       "funds": FUNDS}  # fmt: skip
+        self.raw: dict[str, bytes] = {}
+        self.delay = 0.0
+        self.requests: list[tuple[str, dict]] = []
+        self._server = None
+        self.url = ""
+
+    def count(self, part: str | None = None) -> int:
+        return sum(1 for p, _ in self.requests if part in (None, p))
+
+    def start(self) -> str:
+        fake = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                import time
+
+                part = fake.PATHS.get(urlsplit(self.path).path)
+                fake.requests.append((part, dict(self.headers)))
+                time.sleep(fake.delay)
+                if part is None:
+                    body, status = b"{}", 404
+                else:
+                    status = fake.status.get(part, 200)
+                    body = fake.raw.get(part) or json.dumps(fake.bodies[part]).encode()
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                try:
+                    self.wfile.write(body)
+                except OSError:
+                    pass
+
+        self._server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=self._server.serve_forever, daemon=True).start()
+        self.url = f"http://127.0.0.1:{self._server.server_address[1]}"
+        return self.url
+
+    def stop(self) -> None:
+        if self._server is not None:
+            self._server.shutdown()
+            self._server.server_close()
+            self._server = None

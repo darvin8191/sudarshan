@@ -128,6 +128,26 @@ class Resolver:
         )
         return _pick(rows)
 
+    def by_keys(self, keys: Iterable[str]) -> dict[str, Listing]:
+        """The master contract's row for each instrument key it has, in one connection per 500
+        keys. Any segment: a holding's, a futures contract's or an option's."""
+        wanted = sorted({k for k in keys if k})
+        found: dict[str, Listing] = {}
+        for start in range(0, len(wanted), 500):
+            batch = wanted[start : start + 500]
+            names = {f"k{n}": key for n, key in enumerate(batch)}
+            marks = ", ".join(f":{name}" for name in names)
+            rows = self._query(
+                "SELECT symbol, exchange, token, name, tick_size, instrumenttype FROM symtoken "
+                f"WHERE token IN ({marks})",
+                **names,
+            )
+            for key in batch:
+                listing = _pick([r for r in rows if r["token"] == key])
+                if listing is not None:
+                    found[key] = listing
+        return found
+
     def has_derivatives(self, symbol: str) -> bool:
         """Whether the stock has futures in the master contract: it then closes by auction."""
         rows = self._query(

@@ -17,6 +17,7 @@ later parts read, and the pepper is returned by ``read_pepper`` and kept out of 
 | ``SUDARSHAN_PORTFOLIO_EOD_AFTER_MIN`` | ``15`` (minutes after the close; the record is at 15:55 on a normal day) |
 | ``SUDARSHAN_PORTFOLIO_SETTLE_AT`` | ``09:20`` (IST) |
 | ``SUDARSHAN_UPSTOX_TOKEN_FILE`` | ``/etc/sudarshan/upstox_analytics_token`` |
+| ``SUDARSHAN_PORTFOLIO_UPSTOX_URL`` | ``https://api.upstox.com`` (a test points it at a fake on this server) |
 | ``SUDARSHAN_NSE_HOLIDAYS_FILE`` / ``SUDARSHAN_NSE_EXTRA_DAYS_FILE`` | the calendar files the other services read |
 | ``SUDARSHAN_PORTFOLIO_LOG_LEVEL`` | ``INFO`` |
 """
@@ -43,6 +44,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 STATE_DIR = "/var/lib/sudarshan-portfolio"
 FEED_URL = f"http://{LOCAL_HOST}:5580"
 TOKEN_FILE = "/etc/sudarshan/upstox_analytics_token"
+UPSTOX_URL = "https://api.upstox.com"
 #: The most keys this client may claim at the feed (cross-design X10).
 MAX_CLAIMS_CEILING = 200
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
@@ -104,6 +106,15 @@ def _loopback_url(env: Mapping[str, str], name: str, default: str) -> str:
     return url
 
 
+def _upstox_url(env: Mapping[str, str], name: str) -> str:
+    """Upstox itself, or http on this server (a fake in a test): the token goes nowhere else."""
+    url = (env.get(name) or UPSTOX_URL).strip().rstrip("/")
+    parts = urlsplit(url)
+    if url == UPSTOX_URL or (parts.scheme == "http" and (parts.hostname or "") in LOOPBACK_HOSTS):
+        return url
+    raise ConfigError(f"{name} must be {UPSTOX_URL} or http:// on this server")
+
+
 def read_openalgo_env(path: Path) -> dict[str, str]:
     """OpenAlgo's .env as a dict (values unquoted). Raises ConfigError if it cannot be read."""
     try:
@@ -143,6 +154,7 @@ class Settings:
     eod_after_min: int = 15
     settle_at_min: int = 9 * 60 + 20
     token_file: Path = Path(TOKEN_FILE)
+    upstox_url: str = UPSTOX_URL
     log_level: str = "INFO"
     app_dir: Path = REPO_ROOT
     env_file: Path = REPO_ROOT / ".env"
@@ -176,6 +188,7 @@ class Settings:
             eod_after_min=_number(env, "SUDARSHAN_PORTFOLIO_EOD_AFTER_MIN", 15, 0, 120),
             settle_at_min=_clock(env, "SUDARSHAN_PORTFOLIO_SETTLE_AT", "09:20"),
             token_file=Path(get("SUDARSHAN_UPSTOX_TOKEN_FILE") or TOKEN_FILE),
+            upstox_url=_upstox_url(env, "SUDARSHAN_PORTFOLIO_UPSTOX_URL"),
             log_level=(get("SUDARSHAN_PORTFOLIO_LOG_LEVEL") or "INFO").strip().upper(),
             app_dir=app_dir,
             env_file=Path(get("SUDARSHAN_OPENALGO_ENV_FILE") or app_dir / ".env"),

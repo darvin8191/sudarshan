@@ -220,27 +220,31 @@ class PriceBook(Prices):
             prev = prev or price_u(item.get(name))
         self._quotes[session, key] = {"price_u": last, "prev_close_u": prev, "at": now}
 
-    def _flag_auctions(self, assets: list[Mapping], now: int) -> None:
-        """Which stocks close by auction today, and the window (P24, X6m), from sessions.py."""
+    def auction_for(self, symbol: str | None, exchange: str | None, now: int) -> tuple:
+        """``(cas, from, until, close)`` of one stock today (P24, X6m), from sessions.py."""
+        segment = SEGMENT.get(exchange or "")
+        if segment is None or not symbol or self.resolver is None:
+            return NO_AUCTION
         today = _day(now)
         day = date(today // 10000, today // 100 % 100, today % 100)
+        try:
+            derivatives = self.resolver.has_derivatives(symbol)
+        except ResolverUnavailable:
+            return NO_AUCTION
+        if not sessions.closes_by_auction(segment, day, derivatives=derivatives):
+            return NO_AUCTION
         trading, window = self.calendar.is_trading_day(day), self.calendar.day_window(day)
-        found: dict[int, tuple] = {}
-        for asset in assets:
-            segment = SEGMENT.get(asset["exchange"] or "")
-            if segment is None or self.resolver is None:
-                continue
-            try:
-                derivatives = self.resolver.has_derivatives(asset["symbol"] or "")
-            except ResolverUnavailable:
-                continue
-            if not sessions.closes_by_auction(segment, day, derivatives=derivatives):
-                found[asset["id"]] = NO_AUCTION
-                continue
-            span = sessions.auction_window(segment, day, trading_day=trading, window=window)
-            close = sessions.auction_close(segment, day, trading_day=trading, window=window)
-            found[asset["id"]] = (True, *(span or (None, None)), close)
-        self._auction = found
+        span = sessions.auction_window(segment, day, trading_day=trading, window=window)
+        close = sessions.auction_close(segment, day, trading_day=trading, window=window)
+        return (True, *(span or (None, None)), close)
+
+    def _flag_auctions(self, assets: list[Mapping], now: int) -> None:
+        """Which stocks close by auction today, and the window, for the listed assets."""
+        self._auction = {
+            a["id"]: self.auction_for(a["symbol"], a["exchange"], now)
+            for a in assets
+            if SEGMENT.get(a["exchange"] or "") is not None
+        }
 
     # ---- the seam (inside a store read: memory and the store only) -----------------------------------
     def now(self, tx: Tx, asset: Mapping[str, Any], today: int) -> dict[str, Any]:
