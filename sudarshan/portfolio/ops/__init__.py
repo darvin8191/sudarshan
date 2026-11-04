@@ -35,3 +35,8 @@ def op(name: str, registry: dict[str, Handler] | None = None) -> Callable[[Handl
 
 
 # One import line per part that adds ops, in merge order:
+from . import (
+    book_ops,  # noqa: E402,F401  (members, accounts, assets, values, entries)
+    import_ops,  # noqa: E402,F401  (M7.22: import_preview, import_commit, import_discard, export_csv)
+    tab_ops,  # noqa: E402,F401  (state, summary, tabs, performance, layout, views)
+)

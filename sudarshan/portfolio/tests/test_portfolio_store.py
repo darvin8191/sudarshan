@@ -335,6 +335,10 @@ def test_every_query_of_a_transaction_filters_by_principal():
         if not calls & {"select", "update", "delete", "insert"}:
             continue
         text = ast.unparse(node)
+        if any(f"_t('{table}')" in text for table in migrations.SHARED_TABLES):
+            # market data and the job log belong to no one (migrations.SHARED_TABLES)
+            assert "principal" not in text, node.name
+            continue
         assert "_mine(" in text or "self.who" in text, node.name
         checked += 1
     assert checked >= 12
