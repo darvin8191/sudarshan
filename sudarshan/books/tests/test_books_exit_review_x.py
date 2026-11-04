@@ -353,3 +353,46 @@ def test_x7_an_order_that_only_adds_goes_when_the_order_book_cannot_be_read(monk
     world = install(monkeypatch, broker)
     assert _reversal(world, X, "65", "BUY", "130")[0] == 200
     assert broker.true_qty(X) == 130
+# -- L2: a working market order on the closing side holds a single exit -------------------------------
+
+
+@pytest.mark.parametrize("how", ["app restarted", "answer named no order"])
+def test_l2_a_resting_first_exit_still_blocks_a_second_after_a_restart_or_an_unnamed_answer(
+    monkeypatch, clock, how
+):
+    """The app's Exit is accepted and rests at Upstox (a market order held at its protected
+    price). Then the app restarts (the holds live in memory only) or the first answer had named
+    no order id, and 20 s pass. TradingView's exit is sized from the fills (nothing filled: 65)
+    and must not go beside it."""
+    world = install(monkeypatch, Broker({X: 65}, 0.0))
+    world.broker.part[X] = 0
+    code1, _ = world.phone_exit(X)
+    monkeypatch.setattr(exit_guard, "EXITS", exit_guard.ExitsInFlight())
+    if how == "answer named no order":
+        exit_guard.exit_placed("live", "NFO", X, "MIS")  # the note an unnamed answer leaves
+    clock.advance(20.0)
+    _fresh_book()
+    code2, body2 = world.tv_smart_exit(X)
+    assert code1 == 200 and code2 == 409
+    message = body2["message"]
+    assert "SELL 65 MARKET order" in message and "Orders" in message
+    assert "wait for it" in message.lower() and "cancel" in message.lower()
+    assert _sent(world.broker, X) == [("SELL", 65)]
+
+
+@pytest.mark.parametrize("kind", ["SL-M", "SL", "LIMIT"])
+def test_l2_a_resting_stop_or_target_does_not_block_a_single_exit(monkeypatch, kind):
+    world = install(monkeypatch, Broker({X: 65}, 0.0))
+    world.broker.rest(X, "SELL", 65, kind=kind, trigger=98.5 if kind != "LIMIT" else 0)
+    code, _body = world.phone_exit(X)
+    assert code == 200
+    assert _sent(world.broker, X) == [("SELL", 65)]
+
+
+def test_l2_a_working_market_order_on_the_other_side_does_not_block_an_exit(monkeypatch):
+    """A market BUY still working on a long is an add, not a way out of it."""
+    world = install(monkeypatch, Broker({X: 65}, 0.0))
+    world.broker.rest(X, "BUY", 65, kind="MARKET", trigger=0)
+    code, _body = world.phone_exit(X)
+    assert code == 200
+    assert _sent(world.broker, X) == [("SELL", 65)]

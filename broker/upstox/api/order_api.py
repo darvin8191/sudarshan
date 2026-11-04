@@ -664,6 +664,24 @@ def place_smartorder_api(data, auth):
                 refusal = {"status": "error", "message": held_by, "nothing_sent": True}
                 return _ErrorResponse(409), refusal, None
 
+            if position_size == 0 and current_position != 0 and not held_by:
+                # SUDARSHAN M6.9 (L2): a market order still working on the closing side holds a
+                # single exit, whether or not this process remembers placing it (a restart, an
+                # answer that named no order). A resting stop or target is not a market order.
+                token = rows[0].get("instrument_token") if rows else get_token(symbol, exchange)
+                closing = (str(token or ""), request_product, "SELL" if current_position > 0 else "BUY")
+                market = [
+                    order
+                    for order in _working_exits(orders)[0].get(closing, [])
+                    if order.kind == "MARKET"
+                ]
+                if market:
+                    logger.warning(f"Exit for {symbol} not sent: a market exit is still working")
+                    said = exit_guard.market_exit_working(
+                        exit_guard.position_of(exchange, symbol, product), market
+                    )
+                    return _ErrorResponse(409), {"status": "error", "message": said, "nothing_sent": True}, None
+
             elsewhere = {}
             if entry and by_product:
                 # SUDARSHAN M6.9 (X2): a size-0 order on the side that closes what the instrument

@@ -206,6 +206,41 @@ class WorkingOrder:
     placed: str = ""  # HH:MM:SS, India's time, as the broker stamped it
 
 
+def _described(order: WorkingOrder) -> str:
+    """One working order in a trader's words: "a SELL 65 MARKET order (order ending 1234, ...)"."""
+    what = " ".join(part for part in (order.side, str(order.quantity or ""), order.kind) if part)
+    details = []
+    if order.trigger > 0:
+        details.append(f"trigger {order.trigger:.2f}")
+    if order.price > 0 and order.kind not in ("MARKET", "SL-M"):
+        details.append(f"price {order.price:.2f}")
+    if order.order_id:
+        details.append(f"order ending {order.order_id[-4:]}")
+    if order.placed:
+        details.append(f"placed {order.placed}")
+    return f"a {what} order" + (f" ({', '.join(details)})" if details else "")
+
+
+def market_exit_working(position: Position, orders: list[WorkingOrder]) -> str:
+    """Why a single exit was not sent for a position with a market order on its closing side
+    still working: a market exit that rests at its protected price (or one whose answer was lost
+    to a restart) can still fill, and a second exit beside it would reverse the position.
+
+    Args:
+        position: The position, as the app writes it.
+        orders: Every market order working on its closing side; the first is named.
+    """
+    said = _described(orders[0])
+    more = len(orders) - 1
+    if more:
+        said += f" and {more} more {'order' if more == 1 else 'orders'}"
+    them = "them" if more else "it"
+    return (
+        f"{trader_name(position)} has {said} still working at Upstox, so no exit was sent. Wait "
+        f"for {them} in Orders, or cancel {them} there, then exit."
+    )
+
+
 def order_working(position: Position, orders: list[WorkingOrder], held: int) -> str:
     """Why Exit all sent no exit for a position with an order on its closing side still working.
 
@@ -219,18 +254,7 @@ def order_working(position: Position, orders: list[WorkingOrder], held: int) -> 
         orders: Every order working on its closing side; the first is named.
         held: The position's quantity, unsigned.
     """
-    first = orders[0]
-    what = " ".join(part for part in (first.side, str(first.quantity or ""), first.kind) if part)
-    details = []
-    if first.trigger > 0:
-        details.append(f"trigger {first.trigger:.2f}")
-    if first.price > 0 and first.kind not in ("MARKET", "SL-M"):
-        details.append(f"price {first.price:.2f}")
-    if first.order_id:
-        details.append(f"order ending {first.order_id[-4:]}")
-    if first.placed:
-        details.append(f"placed {first.placed}")
-    said = f"a {what} order" + (f" ({', '.join(details)})" if details else "")
+    said = _described(orders[0])
     more = len(orders) - 1
     if more:
         said += f" and {more} more {'order' if more == 1 else 'orders'}"
