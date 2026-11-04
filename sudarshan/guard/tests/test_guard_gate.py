@@ -433,14 +433,13 @@ def test_a_state_that_cannot_be_read_refuses_new_risk_and_lets_exits_go(
     def broken():
         raise RuntimeError("disk")
 
+    healthy = risk_store.state
     monkeypatch.setattr(risk_store, "state", broken)
     book.rows = [row(CE, 65)]
     upstox = broker()
     assert refused_message(upstox.place(order("BUY"), "token")) == words.STATE_UNREADABLE
     assert upstox.place(order("SELL"), "token")[2] == "OID0"
-    monkeypatch.undo()
-    monkeypatch.setenv(flag.ENV, "on")
-    monkeypatch.setattr(gate, "GATE", the_gate)
+    monkeypatch.setattr(risk_store, "state", healthy)  # the clock stays: a fresh machine's
     clock.now += gate.STATE_RETRY_S + 1  # read again: off
     book.calls.clear()
     assert upstox.place(order("BUY"), "token")[2] == "OID1"
@@ -539,6 +538,15 @@ def test_a_gtt_modify_is_judged_as_the_gtt_the_broker_has(the_gate, book):
     assert upstox.gtt_modify({"trigger_id": "M1", "quantity": "65"}, "token")[1] == 403
     body, status = upstox.gtt_modify({"trigger_id": "GONE", "quantity": "65"}, "token")
     assert status == 403 and body["message"] == words.order_not_found("live", "10:42")
+
+
+def test_a_gtt_modify_asking_for_oco_is_judged_as_oco_whatever_the_broker_has(the_gate, book):
+    """Gate review L1: the broker sends the request's kind, so either side saying OCO is OCO."""
+    the_gate.set_state(ON)
+    book.rows = [row(CE, 65, "D")]
+    book.gtts = {"S1": readers.Gtt("SINGLE", rules.SELL, "NRML", CE, "NFO")}
+    modify = {"trigger_id": "S1", "quantity": "65", "trigger_type": "OCO"}
+    assert broker().gtt_modify(modify, "token")[1] == 403
 
 
 # -- reads under the switch ------------------------------------------------------------------------

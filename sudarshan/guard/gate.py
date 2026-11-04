@@ -107,6 +107,8 @@ SHOWS_WITHIN_S = EXIT_SHOWS_WITHIN_S
 SEND_HELD_AT_MOST_S = 150.0
 #: How soon the kill switch's state is read again after a read failed.
 STATE_RETRY_S = 2.0
+#: An order that finds the first state read in flight waits this long for it.
+STATE_WAIT_S = 5.0
 #: Refusals of one kind are written to the audit at most this often; the rest are counted in
 #: memory and written with the next one. A SQLite commit is disk work eventlet cannot make
 #: cooperative, so a write per refusal would stall the worker under a runaway script.
@@ -364,6 +366,7 @@ class Gate:
         self._tokens = itertools.count(1)
         self._state: KillSwitchState | None = None
         self._state_retry_at = 0.0
+        self._loading = None  # the first state read in flight: an Event set when it ends
         self._rows: tuple[str, float, list] | None = None  # (owner, when, rows): Live only
         self._store = store
         self._read = read or readers
@@ -384,22 +387,40 @@ class Gate:
     # -- the kill switch's state -------------------------------------------------------------
 
     def _load_state(self) -> None:
-        """Read the kill switch's state at first use; while it cannot be read it stays unknown."""
+        """Read the kill switch's state at first use; while it cannot be read it stays unknown.
+
+        One reader at a time: an order arriving while the first read is in flight waits for it
+        (at most ``STATE_WAIT_S``, polling so the eventlet hub is never held) instead of being
+        refused as unreadable when the store reads fine (gate review L3)."""
         if self._state is not None:
             return
         now = time.monotonic()
         with self._lock:
-            if self._state is not None or now < self._state_retry_at:
+            if self._state is not None:
                 return
-            self._state_retry_at = now + STATE_RETRY_S  # one reader at a time
+            reading = self._loading
+            if reading is None:
+                if now < self._state_retry_at:
+                    return
+                self._state_retry_at = now + STATE_RETRY_S
+                reading = self._loading = real_threading.Event()
+                mine = True
+            else:
+                mine = False
+        if not mine:
+            real_threading.wait_for(reading, STATE_WAIT_S)
+            return
         try:
             state = self._the_store().state()
+            with self._lock:
+                if self._state is None:
+                    self._state = state
         except Exception:
             logger.exception("The risk guard could not read the kill switch's state")
-            return
-        with self._lock:
-            if self._state is None:
-                self._state = state
+        finally:
+            with self._lock:
+                self._loading = None
+            reading.set()
 
     def state(self) -> KillSwitchState | None:
         """The kill switch as this process holds it; None while it could not be read."""
@@ -816,7 +837,9 @@ class Gate:
             symbol=gtt.symbol or order.symbol,
             product=gtt.product.upper() or order.product,
             side=gtt.side,
-            trigger_type=gtt.trigger_type,
+            # the broker sends the request's kind, not the stored one: OCO if either says OCO
+            trigger_type="OCO" if "OCO" in (gtt.trigger_type.upper(), order.trigger_type.upper())
+            else gtt.trigger_type,
         )
 
     # -- the daily loss limit, outside the lock --------------------------------------------------
