@@ -10,7 +10,7 @@ import httpx
 
 from broker.upstox.api.rate_limiter import (
     MAX_RETRIES,
-    SEND_CHECK,  # SUDARSHAN M6.9
+    SEND_DEADLINE,  # SUDARSHAN M6.9
     SendWithdrawn,  # SUDARSHAN M5.13
     apply_rate_limit,
     is_rate_limited,
@@ -915,18 +915,13 @@ def close_all_positions(current_api_key, auth):
             # SUDARSHAN M6.9: the pacer's wait is part of the time, so the budget is asked again
             # when this exit's turn comes: past it, nothing is sent (it never left for Upstox).
             ran_out = []
-
-            def _budget(ran_out=ran_out):
-                if _in_time(started):
-                    return None
-                ran_out.append(True)
-                return _LATE
-
-            check = SEND_CHECK.set(_budget)
+            deadline = SEND_DEADLINE.set(
+                (started + exit_guard.EXIT_ALL_SENDS_FOR_S, _LATE, ran_out)
+            )
             try:
                 res, api_response, orderid = place_order_api(place_order_payload, auth)
             finally:
-                SEND_CHECK.reset(check)
+                SEND_DEADLINE.reset(deadline)
             if ran_out:
                 sending = None
                 late.append(held)

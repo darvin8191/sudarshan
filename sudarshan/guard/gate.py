@@ -595,12 +595,7 @@ class Gate:
         check = None
         if decision.token is not None and kind.pipe == LIVE:
             token = decision.token
-            outer = rate_limiter.SEND_CHECK.get()  # a caller's own check (Exit all's budget)
-
-            def _check() -> str | None:
-                return (outer() if outer is not None else None) or self.send_refusal(token)
-
-            check = rate_limiter.SEND_CHECK.set(_check)
+            check = rate_limiter.SEND_CHECK.set(lambda: self.send_refusal(token))
         try:
             result = fn(*args, **kwargs)
         except BaseException:

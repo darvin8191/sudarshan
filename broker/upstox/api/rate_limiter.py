@@ -86,6 +86,12 @@ LONGEST_WINDOW = 1800.0
 SEND_CHECK: contextvars.ContextVar = contextvars.ContextVar("upstox_send_check", default=None)
 SEND_CHECK_EVERY_S = 0.2
 
+# SUDARSHAN M6.9: Exit all sets this around each exit it sends: ``(deadline, text, fired)``. An
+# exit whose turn at the order pacer would come after the deadline (a time.monotonic() value) is
+# not sent: its slot is given back, ``fired`` is marked and SendWithdrawn carries ``text``.
+# Unset everywhere else, so nothing else waits any differently.
+SEND_DEADLINE: contextvars.ContextVar = contextvars.ContextVar("upstox_send_deadline", default=None)
+
 
 class SendWithdrawn(Exception):
     """A send the risk gate let through that is not sent after all; nothing went to Upstox."""
@@ -270,16 +276,23 @@ class SlidingWindowLimiter:
         than blocking the single worker. The sleep is outside the lock.
         """
         slot, sleep_time = self._book()
+        due = SEND_DEADLINE.get() if self.kind == "order" else None
+        if due is not None and time.monotonic() + sleep_time > due[0]:
+            self.release(slot)  # SUDARSHAN M6.9: its turn comes after the time it may be sent
+            due[2].append(True)
+            raise SendWithdrawn(due[1])
         check = SEND_CHECK.get() if self.kind == "order" else None
         if check is not None:  # SUDARSHAN M5.13: a send the gate let through
             self._wait_checked(slot, sleep_time, check)
-            return
-        if sleep_time > 0:
+        elif sleep_time > 0:
             logger.debug(
                 f"Rate limiting ({self.name}): sleeping {sleep_time:.3f}s "
                 "before Upstox API call"
             )
             time.sleep(sleep_time)
+        if due is not None and time.monotonic() > due[0]:  # slept past it (a busy worker)
+            due[2].append(True)
+            raise SendWithdrawn(due[1])
 
     def _wait_checked(self, slot: float, sleep_time: float, check) -> None:
         """Wait for the slot in short steps, asking ``check`` before each step and at the end;
