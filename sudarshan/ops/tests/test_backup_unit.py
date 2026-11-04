@@ -9,6 +9,7 @@ program itself keeps out of.
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -234,6 +235,7 @@ def test_systemd_reads_the_timer_calendar_as_every_day_at_those_hours_in_india()
             ["systemd-analyze", "calendar", "--iterations=8", expression],
             capture_output=True,
             text=True,
+            env={**os.environ, "TZ": "Asia/Kolkata"},  # the machine's own zone is shown first; a CI runner is on UTC
         )
         assert done.returncode == 0, done.stderr
         stamps = re.findall(
