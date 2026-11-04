@@ -1,3 +1,4 @@
+# ruff: noqa: F811 - pytest fixtures are imported, then named as arguments
 """Gate review M5 (the coordinator's decision b): a risk refusal of an order that did not come
 from the app's own screens is told on Telegram, merged per symbol and reason per minute; a
 refusal that left an exit unsent says which."""

@@ -1,3 +1,4 @@
+# ruff: noqa: F811 - pytest fixtures are imported, then named as arguments
 """Independent review (d628ff3): a resting exit's claim outlives the order (gate-level fakes)."""
 
 from __future__ import annotations
