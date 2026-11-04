@@ -3,7 +3,7 @@
 // says. The service prices the tab at read_at; ticks newer than that move it (useTabLive), so
 // "Real-time" shows only while ticks arrive. A re-read comes on mount, a reconnect, a return after
 // 15 seconds and any change to the portfolio, never on a timer.
-import { useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { LoaderCircle, RefreshCw, TriangleAlert } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useBookSync } from '@/sudarshan/books/useBookSync'
@@ -17,18 +17,22 @@ import {
 } from '@/sudarshan/dashboard/MarketCalendar'
 import { problemOf } from '../api'
 import { SECONDARY } from '../sheets/TabFields'
-import type { TabInfo, TabView, Widget } from '../types'
+import type { Account, AllocationBy, TabInfo, TabView, Widget } from '../types'
 import { ReadStamp } from '../upstox/parts'
 import { useTabLive } from '../useTabLive'
+import { AllocationBars } from './AllocationBars'
+import { countFilters, FilterBar, NO_FILTERS } from './Filters'
+import { dayText } from './format'
 import { HoldingsList } from './HoldingsList'
 import { listRows, moversOf, sortRows } from './rows'
 import { SummaryTile, TodayTile } from './SummaryTiles'
+import { argsOf, isActive, type Narrowing, pick, sliced } from './slices'
 import { TopMovers } from './TopMovers'
 import { tabViewOptions } from './tabView'
 
 /** The widgets this screen draws; the others arrive with their own parts. */
-type Drawn = 'summary' | 'today' | 'holdings' | 'movers'
-const DRAWN: readonly Widget[] = ['summary', 'today', 'holdings', 'movers']
+type Drawn = 'summary' | 'today' | 'holdings' | 'movers' | 'allocation'
+const DRAWN: readonly Widget[] = ['summary', 'today', 'holdings', 'movers', 'allocation']
 
 const BUTTON_ROW = 'flex flex-wrap justify-center gap-2'
 
@@ -52,20 +56,34 @@ function Loaded({
   data,
   part,
   marketOpen,
+  accounts,
+  narrowing,
+  onNarrow,
+  allocBy,
+  onAllocBy,
   onAdd,
   onImport,
 }: {
   data: TabView
   part: 'overview' | 'holdings'
   marketOpen: (exchange: string) => boolean | null
+  accounts: readonly Account[]
+  narrowing: Narrowing
+  onNarrow: (next: Narrowing) => void
+  allocBy: AllocationBy
+  onAllocBy: (next: AllocationBy) => void
   onAdd: () => void
   onImport: () => void
 }) {
+  const asOf = data.as_of !== null
+  const rowsIn = useMemo(() => sliced(data.rows, narrowing.slice), [data.rows, narrowing.slice])
+  // A day in the past has no ticks: the service's prices of that day stand.
   const live = useTabLive({
-    rows: data.rows,
+    rows: rowsIn,
     fixed: data.fixed,
-    readAt: data.read_at,
+    readAt: asOf ? Number.MAX_SAFE_INTEGER : data.read_at,
     marketOpen,
+    enabled: !asOf,
   })
   const spec = data.layout.spec
   const listed = useMemo(
@@ -75,17 +93,62 @@ function Loaded({
   const movers = useMemo(() => moversOf(listed), [listed])
   const stale = (r: (typeof listed)[number]) => live.stale(r.row)
   const allStale = live.line.kind === 'delayed' && live.line.stale
+  const narrowed = countFilters(narrowing.filters) > 0 || narrowing.slice !== null
+  const today = data.today
 
-  if (listed.length === 0) return <Empty onAdd={onAdd} onImport={onImport} />
+  const filterBar = (
+    <FilterBar
+      filters={narrowing.filters}
+      onChange={(filters) => onNarrow({ ...narrowing, filters })}
+      accounts={accounts}
+      assets={data.assets}
+      today={today}
+    />
+  )
+  if (listed.length === 0) {
+    if (!narrowed) return <Empty onAdd={onAdd} onImport={onImport} />
+    return (
+      <div className="flex flex-col gap-3">
+        {filterBar}
+        <section className="flex flex-col items-center gap-3 rounded-[1.125rem] border bg-card px-6 py-8 text-center shadow-[var(--shadow-card)]">
+          <p className="text-base font-bold">
+            {asOf
+              ? `Nothing was held on ${dayText(data.as_of as number)}.`
+              : 'No holding matches these filters.'}
+          </p>
+          <button
+            type="button"
+            className={SECONDARY}
+            onClick={() => onNarrow({ filters: NO_FILTERS, slice: null })}
+          >
+            Clear filters
+          </button>
+        </section>
+      </div>
+    )
+  }
 
   const holdings = (
     <HoldingsList key="holdings" rows={listed} columns={spec.columns} stale={stale} />
   )
   const widgets: Record<Drawn, React.ReactNode> = {
     summary: <SummaryTile key="summary" totals={live.totals} fixed={data.fixed} stale={allStale} />,
-    today: <TodayTile key="today" totals={live.totals} fixed={data.fixed} stale={allStale} />,
+    // Today means the day the page is read: not for a day in the past.
+    today: asOf ? null : (
+      <TodayTile key="today" totals={live.totals} fixed={data.fixed} stale={allStale} />
+    ),
     holdings,
-    movers: <TopMovers key="movers" movers={movers} />,
+    movers: asOf ? null : <TopMovers key="movers" movers={movers} />,
+    allocation: (
+      <AllocationBars
+        key="allocation"
+        by={allocBy}
+        onBy={onAllocBy}
+        rows={data.allocation[allocBy] ?? []}
+        isActive={(row) => isActive(allocBy, row, narrowing, accounts)}
+        onPick={(row) => onNarrow(pick(allocBy, row, narrowing, accounts))}
+      />
+    ),
   }
   const shown =
     part === 'holdings'
@@ -93,11 +156,35 @@ function Loaded({
       : spec.widgets.filter((w) => DRAWN.includes(w)).map((w) => widgets[w as Drawn])
   return (
     <div className="flex flex-col gap-3">
+      {filterBar}
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <LiveLine line={live.line} now={live.now} />
+        {asOf ? (
+          <span className="text-xs font-semibold text-[color:var(--text-secondary)]">
+            Value as on {dayText(data.as_of as number)}
+          </span>
+        ) : (
+          <LiveLine line={live.line} now={live.now} />
+        )}
         <ReadStamp at={data.read_at} />
       </div>
-      {live.capped > 0 && (
+      {asOf && live.totals.unpriced > 0 && (
+        <p
+          aria-live="polite"
+          className="rounded-[0.875rem] border border-[color:var(--warning-text)] bg-[color:var(--gold-tint)] px-3 py-2 text-sm font-medium text-[color:var(--warning-text)]"
+        >
+          Value on that day is not known
+          {live.totals.unpriced === listed.length
+            ? '.'
+            : ` for ${live.totals.unpriced} holding${live.totals.unpriced === 1 ? '' : 's'}.`}{' '}
+          They are counted at cost.
+        </p>
+      )}
+      {narrowing.slice !== null && (
+        <p className="text-sm text-[color:var(--text-secondary)]">
+          Realised gains, income and fees are for the whole tab, not this slice.
+        </p>
+      )}
+      {!asOf && live.capped > 0 && (
         <p className="text-sm text-[color:var(--text-secondary)]">
           {live.capped} holding{live.capped === 1 ? '' : 's'} beyond the first 200 show the price of
           the last read, not a real-time one.
@@ -111,18 +198,25 @@ function Loaded({
 export function TabOverview({
   tab,
   part,
+  accounts = [],
   onAdd,
   onImport,
 }: {
   tab: TabInfo
   part: 'overview' | 'holdings'
+  accounts?: readonly Account[]
   onAdd: () => void
   onImport: () => void
 }) {
   const [market, setMarket] = useState<MarketCalendar>(CALENDAR_LOADING)
   const day = useIstDay()
   const { isOpen } = useMarketOpen(market)
-  const query = useQuery(tabViewOptions(tab.id))
+  const [narrowing, setNarrowing] = useState<Narrowing>({ filters: NO_FILTERS, slice: null })
+  const [allocBy, setAllocBy] = useState<AllocationBy>('class')
+  const query = useQuery({
+    ...tabViewOptions(tab.id, argsOf(narrowing.filters)),
+    placeholderData: keepPreviousData,
+  })
   const { refetch } = query
   // No timer: a reconnect and a return after 15 seconds read again.
   useBookSync(() => refetch(), { events: [], resyncMs: null })
@@ -154,7 +248,18 @@ export function TabOverview({
     )
   } else {
     body = (
-      <Loaded data={query.data} part={part} marketOpen={isOpen} onAdd={onAdd} onImport={onImport} />
+      <Loaded
+        data={query.data}
+        part={part}
+        marketOpen={isOpen}
+        accounts={accounts}
+        narrowing={narrowing}
+        onNarrow={setNarrowing}
+        allocBy={allocBy}
+        onAllocBy={setAllocBy}
+        onAdd={onAdd}
+        onImport={onImport}
+      />
     )
   }
   return (

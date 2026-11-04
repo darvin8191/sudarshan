@@ -159,6 +159,7 @@ export default function Portfolio() {
               key={current.id}
               tab={current}
               part={part}
+              accounts={accounts}
               onAdd={() => open({ kind: 'add' })}
               onImport={() => open({ kind: 'import' })}
             />

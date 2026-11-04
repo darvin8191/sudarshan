@@ -5,6 +5,7 @@
  */
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -131,5 +132,92 @@ describe('the Overview', () => {
   it('says what to do on an empty tab', async () => {
     show(view([]))
     expect(await screen.findByText('Nothing here yet. Add an entry or import a file.')).toBeTruthy()
+  })
+
+  describe('allocation and filters', () => {
+    const layout = (widgets: string[]) => ({
+      ...view([]).layout,
+      spec: { ...view([]).layout.spec, widgets },
+    })
+    const slices = {
+      class: [
+        { key: 'equity', label: 'Equity', value_paise: 60_000, pct: '60.0000', holdings: 1 },
+        { key: 'gold', label: 'Gold and silver', value_paise: 40_000, pct: '40.0000', holdings: 1 },
+      ],
+    }
+
+    function serveFiltered(rows: ReturnType<typeof row>[], extra: object = {}) {
+      api.call.mockImplementation(
+        async (op: string, args: { classes?: string[]; as_of?: number }) => {
+          if (op !== 'tab_get') throw new Error(op)
+          const keep = args.classes?.length
+            ? rows.filter((r) => r.asset.asset_class === args.classes?.[0])
+            : rows
+          return {
+            enabled: true,
+            data: view(keep, {
+              layout: layout(['allocation', 'holdings']),
+              allocation: slices as never,
+              as_of: args.as_of ?? null,
+              ...extra,
+            }),
+          }
+        }
+      )
+      return render(
+        <QueryClientProvider client={createQueryClient()}>
+          <MemoryRouter>
+            <TabOverview
+              tab={tab(2, 'Gold')}
+              part="overview"
+              onAdd={() => {}}
+              onImport={() => {}}
+            />
+          </MemoryRouter>
+        </QueryClientProvider>
+      )
+    }
+
+    const gold = () => {
+      const r = row(2, 'Bar', { price: 900_000 })
+      r.asset.asset_class = 'gold'
+      return r
+    }
+
+    it('a tap on a bar reads the tab again with that class', async () => {
+      serveFiltered([row(1, 'Alpha'), gold()])
+      await userEvent.click(await screen.findByRole('button', { name: /Gold and silver/ }))
+      await waitFor(() =>
+        expect(api.call).toHaveBeenLastCalledWith('tab_get', { id: 2, classes: ['gold'] })
+      )
+      const cards = await screen.findByRole('list', { name: 'Holdings cards' })
+      await waitFor(() => expect(within(cards).queryByText('Alpha')).toBeNull())
+      expect(within(cards).getByText('Bar')).toBeTruthy()
+      expect(
+        within(screen.getByRole('list', { name: 'Allocation by class' }))
+          .getByRole('button', { name: /Gold and silver/ })
+          .getAttribute('aria-pressed')
+      ).toBe('true')
+    })
+
+    it('says so, with a way out, when nothing matches', async () => {
+      serveFiltered([row(1, 'Alpha')])
+      await userEvent.click(await screen.findByRole('button', { name: /Gold and silver/ }))
+      expect(await screen.findByText('No holding matches these filters.')).toBeTruthy()
+      await userEvent.click(screen.getAllByRole('button', { name: 'Clear filters' })[0])
+      expect(await screen.findByRole('list', { name: 'Holdings cards' })).toBeTruthy()
+    })
+
+    it('as of a date reads with the day and says value on that day is not known', async () => {
+      serveFiltered([row(1, 'Alpha', { price: null, day: null })])
+      await userEvent.click(await screen.findByRole('button', { name: /Filters/ }))
+      await userEvent.type(screen.getByLabelText('As of a date'), '2026-09-12')
+      await waitFor(() =>
+        expect(api.call).toHaveBeenLastCalledWith('tab_get', { id: 2, as_of: 20260912 })
+      )
+      expect(await screen.findByText(/Value on that day is not known/)).toBeTruthy()
+      expect(screen.getByText('Value as on 12 Sep 2026')).toBeTruthy()
+      expect(screen.queryByText('Real-time')).toBeNull()
+    })
   })
 })
