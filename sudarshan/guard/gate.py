@@ -161,6 +161,16 @@ _UNREAD = object()
 _NO_QUOTE = object()  # not read: the band did not need the market for this order
 BANDED_TYPES = ("LIMIT", "SL", "SL-M")
 REFUSED, ANSWERED = "refused", "answered"
+_ENDED, _WORKING = "ended", "working"
+
+
+def _rests(order: Order) -> bool:
+    """A limit or stop order, which can rest at the broker without being on its way to a fill
+    (a market order that is not filled yet is in flight, or beyond price protection). A modify
+    is judged by its new terms; terms unknown count as a market order (the claim stays)."""
+    terms = order.priced
+    price_type = terms.price_type if terms is not None else order.price_type
+    return price_type in BANDED_TYPES
 
 
 @dataclass(frozen=True)
@@ -510,6 +520,15 @@ class Gate:
             send = self._sends.get(token)
             if send is not None and send.reducing is True:
                 return None
+        if send is not None and send.reducing is None and self._is_exit_by_last_read(token, send):
+            return None  # decision c: a lone exit always goes
+        with self._lock:
+            refusing = self._refusing()
+            if refusing is None:
+                return None
+            send = self._sends.get(token)
+            if send is not None and send.reducing is True:
+                return None
             since = "" if refusing.state is None else _hhmm(refusing.state.since)
             self._sends.pop(token, None)
             self._withdrawn[token] = time.monotonic()
@@ -521,6 +540,46 @@ class Gate:
             Decision(True, said, KILL_SWITCH_ACTIVE, detail={"reason": "waiting_to_be_sent"}),
         )
         return said
+
+    def _is_exit_by_last_read(self, token: int, send: Send) -> bool:
+        """A send let through without being judged (every limit was off), now waiting while the
+        switch is on: judged against the last positions read, from the book kept by the last
+        check or Upstox's own kept copy, never a new read while it waits. An exit goes; with no
+        book to judge it by, or an order that adds risk, it is withdrawn. A yes is recorded on
+        the send, so it counts as the exit it is."""
+        order = send.order
+        if order.pipe != LIVE or order.action != PLACE or order.cnc_sell:
+            return False
+        try:
+            rows = self._kept_rows(order.owner, DAY_BOOK_REUSE_S)
+            if rows is None:
+                rows = self._read.live_cached_rows(order.owner)
+            instrument = self._read.instrument_token(order.symbol, order.exchange)
+        except readers.Unreadable:
+            return False
+        if rows is None or instrument is None:
+            return False
+        position = rules.upstox_position(
+            rows, instrument, rules.position_product(LIVE, order.product)
+        )
+        with self._lock:
+            if self._sends.get(token) is not send:
+                return False
+            # only the sends already judged count: another waiting unjudged send is judged in
+            # its own turn, and the first judged to be an exit holds the position
+            others = [o for o in self._counted(order, position) if o.reducing is not None]
+            verdict = self._verdict(
+                order, _Facts(position=position), sum(o.quantity for o in others)
+            )
+            if not verdict.reducing:
+                return False
+            send.reducing = True
+            send.position_then = verdict.position
+            if verdict.reason == rules.EXIT:
+                send.expect = rules.exit_expectation(
+                    verdict.position, verdict.claimed, send.quantity
+                )
+            return True
 
     def sends(self) -> int:
         """How many sends count now (diagnostics and tests)."""
@@ -670,7 +729,8 @@ class Gate:
             ended = self._ended_orders(known, decided.refs)  # a read: outside the lock
             if ended:
                 with self._lock:
-                    self._drop_claims(known.pipe, ended)
+                    self._drop_claims(known.pipe, ended.get(_ENDED, set()))
+                    self._drop_claims(known.pipe, ended.get(_WORKING, set()), resting_only=True)
 
     def _decide(
         self,
@@ -758,9 +818,12 @@ class Gate:
             return frozenset()
         return frozenset(send.ref for send in self._counted(order, facts.position) if send.ref)
 
-    def _ended_orders(self, order: Order, refs: frozenset) -> set[str]:
-        """Of ``refs``, the orders the broker shows cancelled, rejected or still resting: their
-        claims stand for nothing on its way to the positions book. A read that fails ends none."""
+    def _ended_orders(self, order: Order, refs: frozenset) -> dict[str, set[str]]:
+        """Of ``refs``, the orders the broker shows cancelled or rejected (key ``_ENDED``: their
+        claims stand for nothing) and those it shows working (key ``_WORKING``: the claim of a
+        resting limit or stop stands for nothing, but a market order not filled yet is still on
+        its way to the book, so its claim stays until the book shows it final). A read that
+        fails ends none."""
         try:
             if order.pipe == LIVE:
                 statuses = self._read.live_order_statuses(order.owner)
@@ -768,13 +831,24 @@ class Gate:
                 statuses = self._read.sandbox_order_statuses(order.owner, sorted(refs))
         except readers.Unreadable as exc:
             logger.warning(f"The risk check could not read the order book for claims: {exc}")
-            return set()
-        return {ref for ref in refs if ref in statuses and statuses[ref] != "complete"}
+            return {}
+        found: dict[str, set[str]] = {}
+        for ref in refs:
+            status = statuses.get(ref)
+            if status is None or status == "complete":
+                continue
+            kind = _WORKING if status in ("open", "trigger pending") else _ENDED
+            found.setdefault(kind, set()).add(ref)
+        return found
 
-    def _drop_claims(self, pipe: str, refs: set[str]) -> None:
-        """What was sent on these broker orders stops counting; call under the lock."""
+    def _drop_claims(self, pipe: str, refs: set[str], resting_only: bool = False) -> None:
+        """What was sent on these broker orders stops counting; call under the lock.
+        ``resting_only``: only the sends of a limit or stop order (a market order that the book
+        shows working has not reached the positions book yet, so its claim stays)."""
         for token, send in list(self._sends.items()):
             if send.order.pipe == pipe and send.ref in refs:
+                if resting_only and not _rests(send.order):
+                    continue
                 del self._sends[token]
 
     def release(self, pipe: str, ref: str) -> None:

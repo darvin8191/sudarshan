@@ -154,6 +154,18 @@ KS_SANDBOX_NO_KEY = (
 KS_ORDERS_NOT_CONFIRMED = (
     "Cancel all is not confirmed: some cancels may not have gone through. Check Orders."
 )
+KS_ORDERS_CANCELLED_UNREAD = (
+    "Upstox could not show its open orders, so Cancel all was sent to Upstox without them. "
+    "Check Orders to see that none is left."
+)
+KS_ORDERS_NOT_CANCELLED_UNREAD = (
+    "Upstox could not show its open orders, and its Cancel all did not go through either. "
+    "Open orders may still be working. Check Orders in the Upstox app."
+)
+KS_NO_EXIT_ORDERS_UNREAD = (
+    "Exit all was not sent, because open orders could not be cancelled and one left working "
+    "could close a position twice. Close your positions from the Upstox app."
+)
 KS_GTTS_NOT_READ = (
     "The GTTs could not be read from Upstox, so none were cancelled. Check GTTs and cancel them "
     "there."
@@ -874,6 +886,9 @@ FIXED = (
     KS_LIVE_NOT_REACHED,
     KS_SANDBOX_NO_KEY,
     KS_ORDERS_NOT_CONFIRMED,
+    KS_ORDERS_CANCELLED_UNREAD,
+    KS_ORDERS_NOT_CANCELLED_UNREAD,
+    KS_NO_EXIT_ORDERS_UNREAD,
     KS_GTTS_NOT_READ,
     KS_EXIT_ALL_BUSY,
     KS_SANDBOX_GTTS_NOT_READ,

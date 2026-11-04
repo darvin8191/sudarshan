@@ -178,11 +178,17 @@ def _clear_up(
             cancelled = steps.run("live_orders", lambda: _cancel_live_orders(owner, seen))
             steps.run("live_gtts", lambda: _cancel_live_gtts(owner))
             ids = list((cancelled.get("detail") or {}).get("cancelled_ids") or [])
+            again = None
             if not drained["ok"] or not cancelled["ok"]:
                 # Before Exit all, never after it: a look after it would cancel the exit it sent.
                 again = steps.run("live_orders_again", lambda: _sweep_again(owner, seen))
                 ids += (again.get("detail") or {}).get("cancelled_ids") or []
-            if state.exit_all:
+            latest = again if again is not None else cancelled
+            if state.exit_all and (latest.get("detail") or {}).get("no_cancel"):
+                # Closing orders may still be working and cannot be seen or cancelled: market
+                # exits beside them could close the position twice, so none is sent.
+                steps.note("live_exit_all", words.KS_NO_EXIT_ORDERS_UNREAD)
+            elif state.exit_all:
                 steps.run("live_exit_all", lambda: _exit_all_live(owner, ids, seen))
         else:
             steps.note("live", words.KS_LIVE_NOT_REACHED)
@@ -361,6 +367,15 @@ def _cancel_live_orders(owner: Owner, seen: dict[str, dict]) -> tuple[bool, str,
         detail["cancelled_ids"] = ids
     if rest is None:
         detail["checked"] = False
+        if not ids:
+            # The order book cannot be read, so no order could be cancelled one by one: Upstox's
+            # own cancel of every open order needs no book. Without it an order closing a
+            # position may still be working, and Exit all would close it twice.
+            if _cancel_without_book(owner):
+                detail["without_book"] = True
+                return True, words.KS_ORDERS_CANCELLED_UNREAD, detail
+            detail["no_cancel"] = True
+            return False, words.KS_ORDERS_NOT_CANCELLED_UNREAD, detail
     if still:
         return False, words.ks_orders_left(len(ids), len(still)), detail
     if rest is None:
@@ -368,6 +383,19 @@ def _cancel_live_orders(owner: Owner, seen: dict[str, dict]) -> tuple[bool, str,
             return False, words.ks_orders_unchecked(len(ids)), detail
         return False, str(body.get("message") or words.KS_ORDERS_NOT_CONFIRMED), detail
     return True, words.ks_orders_cancelled(len(ids), _stops_cancelled(owner, ids, seen)), detail
+
+
+def _cancel_without_book(owner: Owner) -> bool:
+    """Upstox's cancel of every open order, with no read of the order book; True only when
+    Upstox answers that every order went."""
+    try:
+        from broker.upstox.api.order_api import cancel_every_open_order_api
+
+        cancelled, _not_confirmed = cancel_every_open_order_api(owner.auth_token)
+        return bool(cancelled)
+    except Exception:
+        logger.exception("The kill switch could not cancel every open order without the book")
+        return False
 
 
 def _cancel_live_gtts(owner: Owner) -> tuple[bool, str, dict]:
@@ -426,10 +454,20 @@ def _cancels_shown(owner: Owner, cancelled: list[str], seen: dict[str, dict]) ->
         time.sleep(CANCELS_POLL_S)
 
 
+def _count(value: object) -> int:
+    """A quantity from an order row, 0 when it is missing or not a number."""
+    try:
+        return max(int(float(value or 0)), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _forget_cancelled_exits(owner: Owner, ended: set[str], seen: dict[str, dict]) -> None:
     """A closing order the switch cancelled is no exit on its way: the exit guard's note that
     one was placed lately (sudarshan/books/exit_guard.py) is dropped for its position, or Exit
-    all would skip the position for an order that no longer exists."""
+    all would skip the position for an order that no longer exists. An order that part-filled
+    is dropped the same way, but the next exit is sized from what the order book says is still
+    held (the order's quantity less its fills), for the positions book may lag the fill."""
     from broker.upstox.mapping.transform_data import reverse_map_product_type
     from sudarshan.books import exit_guard
 
@@ -460,6 +498,16 @@ def _forget_cancelled_exits(owner: Owner, ended: set[str], seen: dict[str, dict]
                 symbol = order_api.get_symbol(position["instrument_token"], exchange)
                 if symbol:
                     product = reverse_map_product_type(exchange, position["product"])
+                    filled = _count(row.get("filled_quantity"))
+                    if filled:
+                        # Part of it filled, and the positions book may not show that yet: the
+                        # next exit is sized from what the order book says is still held.
+                        ordered = _count(row.get("quantity"))
+                        if ordered <= filled:
+                            continue  # filled whole (or not told): it stays an exit on its way
+                        exit_guard.exit_part_filled(
+                            "live", exchange, symbol, product, ordered - filled
+                        )
                     exit_guard.exit_cancelled("live", exchange, symbol, product)
 
 
