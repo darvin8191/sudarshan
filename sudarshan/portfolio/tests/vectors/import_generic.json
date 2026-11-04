@@ -1,0 +1,907 @@
+{
+ "about": "Golden vectors for imports/generic.py and imports/preview.py (PA7): what importing a generic CSV would do to a tab (new, already here, with a problem, in words), the duplicate keys with their occurrence numbers, and the export that reads back as the same ledger (I7). Keys are worked out again in make_pa7.py (a hash of the trade and its occurrence). Entries are the contract's ActivityInput.",
+ "world": {
+  "today": 20261030,
+  "accounts": {
+   "1": "Zerodha",
+   "2": "Account B"
+  },
+  "default_account": 1,
+  "assets": {
+   "1": {
+    "name": "RELIANCE",
+    "symbol": "RELIANCE",
+    "isin": "INE000A00001"
+   },
+   "2": {
+    "name": "TCS",
+    "symbol": "TCS",
+    "isin": "INE000A00002"
+   },
+   "3": {
+    "name": "INFY",
+    "symbol": "INFY",
+    "isin": "INE000A00003"
+   }
+  },
+  "about": "Symbols and ISINs resolve without regard to case; every holding takes whole shares."
+ },
+ "previews": [
+  {
+   "id": "I1",
+   "title": "generic happy path",
+   "why": "Five rows of five kinds. Quantity 10 is 10,000,000 qty_u; a price of 1400.00 is 14,000,000 price_u; charges 12.50 are 1,250 paise. The first row names no account, so it is the account chosen for the import (1); row 3 names Account B. The split names none and is every account's (account null). Rows are numbered from 2 because the header is row 1.",
+   "text": "date,action,symbol,exchange,isin,quantity,price,amount,charges,account,tds,ratio,note\n2026-01-05,BUY,RELIANCE,NSE,,10,1400.00,,12.50,,,,first lot\n2026-02-10,BUY,TCS,,INE000A00002,5,3200,,,Account B,,,\n2026-03-02,SELL,reliance,,,4,1500,,10,,,,\n2026-04-15,DIVIDEND,RELIANCE,,,,,80,,,8,,\n2026-05-20,SPLIT,TCS,,,,,,,,,2:1,\n",
+   "existing": [],
+   "keys": {},
+   "expect": {
+    "summary": "5 new",
+    "unused": [],
+    "rows": [
+     {
+      "row": 2,
+      "status": "new",
+      "words": null,
+      "entry": {
+       "kind": "BUY",
+       "trade_date": 20260105,
+       "account_id": 1,
+       "asset_id": 1,
+       "qty_u": 10000000,
+       "price_u": 14000000,
+       "charges_paise": 1250,
+       "note": "first lot"
+      },
+      "key": "generic:66cd2b64102715d27a704c69d501713e:1"
+     },
+     {
+      "row": 3,
+      "status": "new",
+      "words": null,
+      "entry": {
+       "kind": "BUY",
+       "trade_date": 20260210,
+       "account_id": 2,
+       "asset_id": 2,
+       "qty_u": 5000000,
+       "price_u": 32000000
+      },
+      "key": "generic:a1757d08d3f5b997aed2dc703eb1fbde:1"
+     },
+     {
+      "row": 4,
+      "status": "new",
+      "words": null,
+      "entry": {
+       "kind": "SELL",
+       "trade_date": 20260302,
+       "account_id": 1,
+       "asset_id": 1,
+       "qty_u": 4000000,
+       "price_u": 15000000,
+       "charges_paise": 1000
+      },
+      "key": "generic:f25e54effe16f046cac87ad9350c4b44:1"
+     },
+     {
+      "row": 5,
+      "status": "new",
+      "words": null,
+      "entry": {
+       "kind": "DIVIDEND",
+       "trade_date": 20260415,
+       "account_id": 1,
+       "asset_id": 1,
+       "amount_paise": 8000,
+       "tds_paise": 800
+      },
+      "key": "generic:bd50198791bc63a2e0f31ddad8909e1a:1"
+     },
+     {
+      "row": 6,
+      "status": "new",
+      "words": null,
+      "entry": {
+       "kind": "SPLIT",
+       "trade_date": 20260520,
+       "account_id": null,
+       "asset_id": 2,
+       "ratio_num": 2,
+       "ratio_den": 1
+      },
+      "key": "generic:552cca6adbac05bdc699388c3d397895:1"
+     }
+    ]
+   }
+  },
+  {
+   "id": "I2",
+   "title": "a row that is already in this tab",
+   "why": "Row 2 is the trade an earlier import added on 28 Oct 2026 (the tab keeps its key); the key is its content (BUY, account 1, 5 Jan 2026, holding 1, 10 shares, amount 14,000.00) and occurrence 1. Charges are not part of it. Row 3 is new. The date is this year's, so the sentence says '28 Oct' only.",
+   "text": "date,action,symbol,exchange,isin,quantity,price,amount,charges,account,tds,ratio,note\n2026-01-05,BUY,RELIANCE,,,10,1400,,5,,,,\n2026-01-06,BUY,RELIANCE,,,2,1410,,,,,,\n",
+   "existing": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260105,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "price_u": 14000000
+    }
+   ],
+   "keys": {
+    "generic:66cd2b64102715d27a704c69d501713e:1": 20261028
+   },
+   "expect": {
+    "summary": "1 new, 1 already in this tab",
+    "unused": [],
+    "rows": [
+     {
+      "row": 2,
+      "status": "dup",
+      "words": "Row 2 is already in this tab (imported 28 Oct).",
+      "entry": {
+       "kind": "BUY",
+       "trade_date": 20260105,
+       "account_id": 1,
+       "asset_id": 1,
+       "qty_u": 10000000,
+       "price_u": 14000000,
+       "charges_paise": 500
+      },
+      "key": "generic:66cd2b64102715d27a704c69d501713e:1"
+     },
+     {
+      "row": 3,
+      "status": "new",
+      "words": null,
+      "entry": {
+       "kind": "BUY",
+       "trade_date": 20260106,
+       "account_id": 1,
+       "asset_id": 1,
+       "qty_u": 2000000,
+       "price_u": 14100000
+      },
+      "key": "generic:9a2b80484d6161b2bed54af656ec4f3d:1"
+     }
+    ]
+   }
+  },
+  {
+   "id": "I2b",
+   "title": "an import from last year says the year",
+   "why": "The same tab with the earlier import dated 28 Oct 2025: the sentence keeps the year.",
+   "text": "date,action,symbol,exchange,isin,quantity,price,amount,charges,account,tds,ratio,note\n2026-01-05,BUY,RELIANCE,,,10,1400,,,,,,\n",
+   "existing": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260105,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "price_u": 14000000
+    }
+   ],
+   "keys": {
+    "generic:66cd2b64102715d27a704c69d501713e:1": 20251028
+   },
+   "expect": {
+    "summary": "1 already in this tab",
+    "unused": [],
+    "rows": [
+     {
+      "row": 2,
+      "status": "dup",
+      "words": "Row 2 is already in this tab (imported 28 Oct 2025).",
+      "entry": {
+       "kind": "BUY",
+       "trade_date": 20260105,
+       "account_id": 1,
+       "asset_id": 1,
+       "qty_u": 10000000,
+       "price_u": 14000000
+      },
+      "key": "generic:66cd2b64102715d27a704c69d501713e:1"
+     }
+    ]
+   }
+  },
+  {
+   "id": "I3",
+   "title": "identical rows in one file all import",
+   "why": "Three identical purchases are three trades: they get the occurrence numbers 1, 2 and 3 on the same content, so none is a duplicate of another.",
+   "text": "date,action,symbol,exchange,isin,quantity,price,amount,charges,account,tds,ratio,note\n2026-01-05,BUY,INFY,,,1,1500,,,,,,\n2026-01-05,BUY,INFY,,,1,1500,,,,,,\n2026-01-05,BUY,INFY,,,1,1500,,,,,,\n",
+   "existing": [],
+   "keys": {},
+   "expect": {
+    "summary": "3 new",
+    "unused": [],
+    "rows": [
+     {
+      "row": 2,
+      "status": "new",
+      "words": null,
+      "entry": {
+       "kind": "BUY",
+       "trade_date": 20260105,
+       "account_id": 1,
+       "asset_id": 3,
+       "qty_u": 1000000,
+       "price_u": 15000000
+      },
+      "key": "generic:8acbd5f168707d1355386d38d0da9d00:1"
+     },
+     {
+      "row": 3,
+      "status": "new",
+      "words": null,
+      "entry": {
+       "kind": "BUY",
+       "trade_date": 20260105,
+       "account_id": 1,
+       "asset_id": 3,
+       "qty_u": 1000000,
+       "price_u": 15000000
+      },
+      "key": "generic:8acbd5f168707d1355386d38d0da9d00:2"
+     },
+     {
+      "row": 4,
+      "status": "new",
+      "words": null,
+      "entry": {
+       "kind": "BUY",
+       "trade_date": 20260105,
+       "account_id": 1,
+       "asset_id": 3,
+       "qty_u": 1000000,
+       "price_u": 15000000
+      },
+      "key": "generic:8acbd5f168707d1355386d38d0da9d00:3"
+     }
+    ]
+   }
+  },
+  {
+   "id": "I3b",
+   "title": "the same file read again adds nothing",
+   "why": "The tab now holds the three keys of I3: every row of the same file is already here, with the date the first import was made.",
+   "text": "date,action,symbol,exchange,isin,quantity,price,amount,charges,account,tds,ratio,note\n2026-01-05,BUY,INFY,,,1,1500,,,,,,\n2026-01-05,BUY,INFY,,,1,1500,,,,,,\n2026-01-05,BUY,INFY,,,1,1500,,,,,,\n",
+   "existing": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260105,
+     "account_id": 1,
+     "asset_id": 3,
+     "qty_u": 3000000,
+     "price_u": 15000000
+    }
+   ],
+   "keys": {
+    "generic:8acbd5f168707d1355386d38d0da9d00:1": 20261029,
+    "generic:8acbd5f168707d1355386d38d0da9d00:2": 20261029,
+    "generic:8acbd5f168707d1355386d38d0da9d00:3": 20261029
+   },
+   "expect": {
+    "summary": "3 already in this tab",
+    "unused": [],
+    "rows": [
+     {
+      "row": 2,
+      "status": "dup",
+      "words": "Row 2 is already in this tab (imported 29 Oct).",
+      "entry": {
+       "kind": "BUY",
+       "trade_date": 20260105,
+       "account_id": 1,
+       "asset_id": 3,
+       "qty_u": 1000000,
+       "price_u": 15000000
+      },
+      "key": "generic:8acbd5f168707d1355386d38d0da9d00:1"
+     },
+     {
+      "row": 3,
+      "status": "dup",
+      "words": "Row 3 is already in this tab (imported 29 Oct).",
+      "entry": {
+       "kind": "BUY",
+       "trade_date": 20260105,
+       "account_id": 1,
+       "asset_id": 3,
+       "qty_u": 1000000,
+       "price_u": 15000000
+      },
+      "key": "generic:8acbd5f168707d1355386d38d0da9d00:2"
+     },
+     {
+      "row": 4,
+      "status": "dup",
+      "words": "Row 4 is already in this tab (imported 29 Oct).",
+      "entry": {
+       "kind": "BUY",
+       "trade_date": 20260105,
+       "account_id": 1,
+       "asset_id": 3,
+       "qty_u": 1000000,
+       "price_u": 15000000
+      },
+      "key": "generic:8acbd5f168707d1355386d38d0da9d00:3"
+     }
+    ]
+   }
+  },
+  {
+   "id": "I3c",
+   "title": "a file with one more of the same trade adds only that one",
+   "why": "The tab holds occurrences 1 and 2 of the trade; the file has three: occurrence 3 alone is new.",
+   "text": "date,action,symbol,exchange,isin,quantity,price,amount,charges,account,tds,ratio,note\n2026-01-05,BUY,INFY,,,1,1500,,,,,,\n2026-01-05,BUY,INFY,,,1,1500,,,,,,\n2026-01-05,BUY,INFY,,,1,1500,,,,,,\n",
+   "existing": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260105,
+     "account_id": 1,
+     "asset_id": 3,
+     "qty_u": 2000000,
+     "price_u": 15000000
+    }
+   ],
+   "keys": {
+    "generic:8acbd5f168707d1355386d38d0da9d00:1": 20261029,
+    "generic:8acbd5f168707d1355386d38d0da9d00:2": 20261029
+   },
+   "expect": {
+    "summary": "1 new, 2 already in this tab",
+    "unused": [],
+    "rows": [
+     {
+      "row": 2,
+      "status": "dup",
+      "words": "Row 2 is already in this tab (imported 29 Oct).",
+      "entry": {
+       "kind": "BUY",
+       "trade_date": 20260105,
+       "account_id": 1,
+       "asset_id": 3,
+       "qty_u": 1000000,
+       "price_u": 15000000
+      },
+      "key": "generic:8acbd5f168707d1355386d38d0da9d00:1"
+     },
+     {
+      "row": 3,
+      "status": "dup",
+      "words": "Row 3 is already in this tab (imported 29 Oct).",
+      "entry": {
+       "kind": "BUY",
+       "trade_date": 20260105,
+       "account_id": 1,
+       "asset_id": 3,
+       "qty_u": 1000000,
+       "price_u": 15000000
+      },
+      "key": "generic:8acbd5f168707d1355386d38d0da9d00:2"
+     },
+     {
+      "row": 4,
+      "status": "new",
+      "words": null,
+      "entry": {
+       "kind": "BUY",
+       "trade_date": 20260105,
+       "account_id": 1,
+       "asset_id": 3,
+       "qty_u": 1000000,
+       "price_u": 15000000
+      },
+      "key": "generic:8acbd5f168707d1355386d38d0da9d00:3"
+     }
+    ]
+   }
+  },
+  {
+   "id": "I4",
+   "title": "an unknown symbol",
+   "why": "TATAMTR is not in the instrument list. The bad row is told first in a listing; the good row is new. A cell echoed in a sentence is cut at 30 characters.",
+   "text": "date,action,symbol,exchange,isin,quantity,price,amount,charges,account,tds,ratio,note\n2026-01-05,BUY,TATAMTR,,,1,100,,,,,,\n2026-01-06,BUY,TCS,,,1,3000,,,,,,\n",
+   "existing": [],
+   "keys": {},
+   "expect": {
+    "summary": "1 new, 1 with a problem",
+    "unused": [],
+    "rows": [
+     {
+      "row": 2,
+      "status": "bad",
+      "words": "Row 2: TATAMTR is not in today's instrument list. Check the symbol.",
+      "entry": null,
+      "key": null
+     },
+     {
+      "row": 3,
+      "status": "new",
+      "words": null,
+      "entry": {
+       "kind": "BUY",
+       "trade_date": 20260106,
+       "account_id": 1,
+       "asset_id": 2,
+       "qty_u": 1000000,
+       "price_u": 30000000
+      },
+      "key": "generic:53aacb88bb894f3398e35cc5be56d2d2:1"
+     }
+    ]
+   }
+  },
+  {
+   "id": "I5",
+   "title": "a sale beyond the holding",
+   "why": "The tab holds 10 RELIANCE in Zerodha on 5 Jan; the file sells 12 on 12 Mar. The ledger refuses the sale with its own sentence, and the purchase of 3 in the same file that comes before it does not rescue it (10 + 3 = 13 would, so the purchase is dated after the sale). The purchase is still new.",
+   "text": "date,action,symbol,exchange,isin,quantity,price,amount,charges,account,tds,ratio,note\n2026-03-12,SELL,RELIANCE,,,12,1500,,,,,,\n2026-03-13,BUY,RELIANCE,,,3,1500,,,,,,\n",
+   "existing": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260105,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "price_u": 14000000
+    }
+   ],
+   "keys": {},
+   "expect": {
+    "summary": "1 new, 1 with a problem",
+    "unused": [],
+    "rows": [
+     {
+      "row": 2,
+      "status": "bad",
+      "words": "Row 2: Zerodha holds 10 RELIANCE on 12 Mar 2026, so a sale of 12 cannot be saved. Add the missing purchase first.",
+      "entry": {
+       "kind": "SELL",
+       "trade_date": 20260312,
+       "account_id": 1,
+       "asset_id": 1,
+       "qty_u": 12000000,
+       "price_u": 15000000
+      },
+      "key": "generic:06318ad3efb401f38ec5c7d9be546bf5:1"
+     },
+     {
+      "row": 3,
+      "status": "new",
+      "words": null,
+      "entry": {
+       "kind": "BUY",
+       "trade_date": 20260313,
+       "account_id": 1,
+       "asset_id": 1,
+       "qty_u": 3000000,
+       "price_u": 15000000
+      },
+      "key": "generic:4ce31aaedcf141397182c746ba7f7982:1"
+     }
+    ]
+   }
+  },
+  {
+   "id": "I5b",
+   "title": "rows that would leave an entry of the tab without shares",
+   "why": "The tab has a purchase of 10 on 5 Jan and a sale of 10 on 12 Mar. The file sells 3 on 1 Feb, which is fine on its own day but leaves the March sale 3 short. The rows of that holding cannot join: none of them is imported and each says why.",
+   "text": "date,action,symbol,exchange,isin,quantity,price,amount,charges,account,tds,ratio,note\n2026-02-01,SELL,RELIANCE,,,3,1450,,,,,,\n",
+   "existing": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260105,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "price_u": 14000000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "SELL",
+     "trade_date": 20260312,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "price_u": 15000000
+    }
+   ],
+   "keys": {},
+   "expect": {
+    "summary": "1 with a problem",
+    "unused": [],
+    "rows": [
+     {
+      "row": 2,
+      "status": "bad",
+      "words": "Row 2: The rows for RELIANCE do not fit the entries already in this tab: they would leave the sale on 12 Mar 2026 without shares. None of them is imported. Check whether the same trades are already in this tab, or fix that entry first.",
+      "entry": {
+       "kind": "SELL",
+       "trade_date": 20260201,
+       "account_id": 1,
+       "asset_id": 1,
+       "qty_u": 3000000,
+       "price_u": 14500000
+      },
+      "key": "generic:767709da173f22916769052c23bc9d7d:1"
+     }
+    ]
+   }
+  },
+  {
+   "id": "I6",
+   "title": "dates are day first",
+   "why": "05/01/2026 is 5 January; 06-01-2026 is 6 January; 2026-01-07 is 7 January. 03/13/2026 would be month first and is not a day; a day after 30 Oct 2026 is refused whatever its form.",
+   "text": "date,action,symbol,exchange,isin,quantity,price,amount,charges,account,tds,ratio,note\n05/01/2026,BUY,TCS,,,1,3000,,,,,,\n06-01-2026,BUY,TCS,,,1,3000,,,,,,\n2026-01-07,BUY,TCS,,,1,3000,,,,,,\n03/13/2026,BUY,TCS,,,1,3000,,,,,,\n31/10/2026,BUY,TCS,,,1,3000,,,,,,\n",
+   "existing": [],
+   "keys": {},
+   "expect": {
+    "summary": "3 new, 2 with problems",
+    "unused": [],
+    "rows": [
+     {
+      "row": 2,
+      "status": "new",
+      "words": null,
+      "entry": {
+       "kind": "BUY",
+       "trade_date": 20260105,
+       "account_id": 1,
+       "asset_id": 2,
+       "qty_u": 1000000,
+       "price_u": 30000000
+      },
+      "key": "generic:8426868b96645af559d2255aea0b2602:1"
+     },
+     {
+      "row": 3,
+      "status": "new",
+      "words": null,
+      "entry": {
+       "kind": "BUY",
+       "trade_date": 20260106,
+       "account_id": 1,
+       "asset_id": 2,
+       "qty_u": 1000000,
+       "price_u": 30000000
+      },
+      "key": "generic:53aacb88bb894f3398e35cc5be56d2d2:1"
+     },
+     {
+      "row": 4,
+      "status": "new",
+      "words": null,
+      "entry": {
+       "kind": "BUY",
+       "trade_date": 20260107,
+       "account_id": 1,
+       "asset_id": 2,
+       "qty_u": 1000000,
+       "price_u": 30000000
+      },
+      "key": "generic:75515e72b6c48e2a8a7d8f36dadac46a:1"
+     },
+     {
+      "row": 5,
+      "status": "bad",
+      "words": "Row 5: The date '03/13/2026' is not a real date. Write it as 2026-03-10, 10-03-2026 or 10/03/2026 (day first).",
+      "entry": null,
+      "key": null
+     },
+     {
+      "row": 6,
+      "status": "bad",
+      "words": "Row 6: 31 Oct 2026 is after today. A date after today can be saved as a draft only.",
+      "entry": null,
+      "key": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "I8",
+   "title": "amount wins over quantity times price when they differ by more than a rupee",
+   "why": "Row 2: 5 x 3000.00 = 15,000.00 and the amount is 15,000.50: within a rupee, no remark. Row 3: amount 15,500.00 against 15,000.00: used, and the row says so. Row 4: amount only, no remark. The amount is in the entry; the price is kept too.",
+   "text": "date,action,symbol,exchange,isin,quantity,price,amount,charges,account,tds,ratio,note\n2026-01-05,BUY,TCS,,,5,3000,15000.50,,,,,\n2026-01-06,BUY,TCS,,,5,3000,15500,,,,,\n2026-01-07,BUY,TCS,,,5,,15000,,,,,\n",
+   "existing": [],
+   "keys": {},
+   "expect": {
+    "summary": "3 new",
+    "unused": [],
+    "rows": [
+     {
+      "row": 2,
+      "status": "new",
+      "words": null,
+      "entry": {
+       "kind": "BUY",
+       "trade_date": 20260105,
+       "account_id": 1,
+       "asset_id": 2,
+       "qty_u": 5000000,
+       "price_u": 30000000,
+       "amount_paise": 1500050
+      },
+      "key": "generic:cbd260dff95c3e600c7c107bb699c9ba:1"
+     },
+     {
+      "row": 3,
+      "status": "new",
+      "words": "Row 3: The amount ₹15,500.00 is used, not quantity times price (₹15,000.00).",
+      "entry": {
+       "kind": "BUY",
+       "trade_date": 20260106,
+       "account_id": 1,
+       "asset_id": 2,
+       "qty_u": 5000000,
+       "price_u": 30000000,
+       "amount_paise": 1550000
+      },
+      "key": "generic:10e6ef6784559e9ac5eb9d2ca49ade8b:1"
+     },
+     {
+      "row": 4,
+      "status": "new",
+      "words": null,
+      "entry": {
+       "kind": "BUY",
+       "trade_date": 20260107,
+       "account_id": 1,
+       "asset_id": 2,
+       "qty_u": 5000000,
+       "amount_paise": 1500000
+      },
+      "key": "generic:03ed787bbe8f045423a44480a06d6ea8:1"
+     }
+    ]
+   }
+  },
+  {
+   "id": "I9",
+   "title": "rows with problems are told in words, the first thing wrong in each",
+   "why": "Cells are read left to right: the date, then the action, then the holding, quantity, price, amount, charges, account, TDS, ratio, note, to_account.",
+   "text": "date,action,symbol,exchange,isin,quantity,price,amount,charges,account,tds,ratio,note\n2026-01-05,HOLD,TCS,,,1,1,,,,,,\n2026-01-05,BUY,,,,1,1,,,,,,\n2026-01-05,BUY,TCS,,,-1,1,,,,,,\n2026-01-05,BUY,TCS,,,1,1,1,,Nobody,,,\n2026-01-05,BUY,TCS,,,1.5,1,,,,,,\n2026-01-05,BUY,TCS,,,1,1,,x,,,,\n2026-01-05,BUY,TCS,,,1,1,,,,,,a,b\n2026-01-05,SPLIT,TCS,,,,,,,,,two,\n",
+   "existing": [],
+   "keys": {},
+   "expect": {
+    "summary": "8 with problems",
+    "unused": [],
+    "rows": [
+     {
+      "row": 2,
+      "status": "bad",
+      "words": "Row 2: The action 'HOLD' is not one this file can use. Use BUY, SELL, DIVIDEND, INTEREST, FEE, SPLIT, BONUS, RIGHTS, TRANSFER_IN, TRANSFER_OUT or TRANSFER.",
+      "entry": null,
+      "key": null
+     },
+     {
+      "row": 3,
+      "status": "bad",
+      "words": "Row 3: No share or fund is named. Fill in the symbol or the ISIN.",
+      "entry": null,
+      "key": null
+     },
+     {
+      "row": 4,
+      "status": "bad",
+      "words": "Row 4: The quantity '-1' cannot be negative. The action says whether it is a purchase or a sale.",
+      "entry": null,
+      "key": null
+     },
+     {
+      "row": 5,
+      "status": "bad",
+      "words": "Row 5: There is no account called 'Nobody' in this portfolio. Check the name, or add the account first.",
+      "entry": null,
+      "key": null
+     },
+     {
+      "row": 6,
+      "status": "bad",
+      "words": "Row 6: Shares are whole numbers.",
+      "entry": {
+       "kind": "BUY",
+       "trade_date": 20260105,
+       "account_id": 1,
+       "asset_id": 2,
+       "qty_u": 1500000,
+       "price_u": 10000
+      },
+      "key": null
+     },
+     {
+      "row": 7,
+      "status": "bad",
+      "words": "Row 7: The charges 'x' is not a number. Write it with digits and a decimal point only, without commas or a currency sign.",
+      "entry": null,
+      "key": null
+     },
+     {
+      "row": 8,
+      "status": "bad",
+      "words": "Row 8: This row has more columns than the first row. A note with a comma needs quotes around it.",
+      "entry": null,
+      "key": null
+     },
+     {
+      "row": 9,
+      "status": "bad",
+      "words": "Row 9: The ratio 'two' must be two whole numbers such as 5:1 (each share becomes 5) or 1:10 (one new for every ten old).",
+      "entry": null,
+      "key": null
+     }
+    ]
+   }
+  }
+ ],
+ "export": {
+  "id": "I7",
+  "title": "export, then import into an empty tab",
+  "why": "Nine posted entries (the draft is not written) in the order the ledger applies them, one line each in the import format: money as plain decimals (14000.00), quantity as it is, an outside transfer as TRANSFER_IN or TRANSFER_OUT with its original purchase date and value, the split as 2:1, a note that starts with = guarded by an apostrophe and a note with a comma and quotes quoted. The file name is ASCII: the tab's id and the day. Read back into an empty tab, the file gives the same entries (the test also replays both).",
+  "tab_id": 7,
+  "today": 20261030,
+  "accounts": {
+   "1": "Zerodha",
+   "2": "Account B"
+  },
+  "assets": {
+   "1": {
+    "symbol": "RELIANCE",
+    "exchange": "NSE",
+    "isin": "INE000A00001"
+   },
+   "2": {
+    "symbol": "TCS",
+    "exchange": "NSE",
+    "isin": "INE000A00002"
+   }
+  },
+  "rows": [
+   {
+    "id": 1,
+    "seq": 1,
+    "status": "posted",
+    "kind": "BUY",
+    "trade_date": 20260105,
+    "account_id": 1,
+    "asset_id": 1,
+    "qty_u": 10000000,
+    "price_u": 14000000,
+    "amount_paise": 1400000,
+    "charges_paise": 1250,
+    "note": "first lot, \"good\""
+   },
+   {
+    "id": 2,
+    "seq": 2,
+    "status": "posted",
+    "kind": "SELL",
+    "trade_date": 20260302,
+    "account_id": 1,
+    "asset_id": 1,
+    "qty_u": 4000000,
+    "price_u": 15000000,
+    "amount_paise": 600000,
+    "charges_paise": 1000,
+    "note": "=HYPERLINK(1)"
+   },
+   {
+    "id": 3,
+    "seq": 3,
+    "status": "posted",
+    "kind": "TRANSFER",
+    "trade_date": 20260310,
+    "account_id": 1,
+    "asset_id": 1,
+    "to_account_id": 2,
+    "qty_u": 3000000
+   },
+   {
+    "id": 4,
+    "seq": 4,
+    "status": "posted",
+    "kind": "TRANSFER",
+    "trade_date": 20260320,
+    "account_id": null,
+    "asset_id": 2,
+    "to_account_id": 2,
+    "qty_u": 5000000,
+    "amount_paise": 1500000,
+    "lot_date": 20250601,
+    "value_paise": 1600000
+   },
+   {
+    "id": 5,
+    "seq": 5,
+    "status": "posted",
+    "kind": "TRANSFER",
+    "trade_date": 20260325,
+    "account_id": 2,
+    "asset_id": 2,
+    "qty_u": 1000000,
+    "value_paise": 330000
+   },
+   {
+    "id": 6,
+    "seq": 6,
+    "status": "posted",
+    "kind": "BONUS",
+    "trade_date": 20260401,
+    "account_id": 2,
+    "asset_id": 2,
+    "qty_u": 5000000
+   },
+   {
+    "id": 7,
+    "seq": 7,
+    "status": "posted",
+    "kind": "SPLIT",
+    "trade_date": 20260402,
+    "account_id": null,
+    "asset_id": 2,
+    "ratio_num": 2,
+    "ratio_den": 1
+   },
+   {
+    "id": 8,
+    "seq": 8,
+    "status": "posted",
+    "kind": "DIVIDEND",
+    "trade_date": 20260415,
+    "account_id": 1,
+    "asset_id": 1,
+    "amount_paise": 8000,
+    "tds_paise": 800
+   },
+   {
+    "id": 9,
+    "seq": 9,
+    "status": "posted",
+    "kind": "FEE",
+    "trade_date": 20260416,
+    "account_id": 1,
+    "amount_paise": 2500,
+    "note": "yearly"
+   },
+   {
+    "id": 10,
+    "seq": 10,
+    "status": "draft",
+    "kind": "BUY",
+    "trade_date": 20260101,
+    "account_id": 1,
+    "asset_id": 1,
+    "qty_u": 1000000,
+    "price_u": 10000
+   }
+  ],
+  "expect": {
+   "filename": "SUDARSHAN_Portfolio_7_2026-10-30.csv",
+   "text": "date,action,symbol,exchange,isin,quantity,price,amount,charges,account,tds,ratio,note,to_account,lot_date,value\r\n2026-01-05,BUY,RELIANCE,NSE,INE000A00001,10,1400.00,14000.00,12.50,Zerodha,,,\"first lot, \"\"good\"\"\",,,\r\n2026-03-02,SELL,RELIANCE,NSE,INE000A00001,4,1500.00,6000.00,10.00,Zerodha,,,'=HYPERLINK(1),,,\r\n2026-03-10,TRANSFER,RELIANCE,NSE,INE000A00001,3,,,,Zerodha,,,,Account B,,\r\n2026-03-20,TRANSFER_IN,TCS,NSE,INE000A00002,5,,15000.00,,Account B,,,,,2025-06-01,16000.00\r\n2026-03-25,TRANSFER_OUT,TCS,NSE,INE000A00002,1,,,,Account B,,,,,,3300.00\r\n2026-04-01,BONUS,TCS,NSE,INE000A00002,5,,,,Account B,,,,,,\r\n2026-04-02,SPLIT,TCS,NSE,INE000A00002,,,,,,,2:1,,,,\r\n2026-04-15,DIVIDEND,RELIANCE,NSE,INE000A00001,,,80.00,,Zerodha,8.00,,,,,\r\n2026-04-16,FEE,,,,,,25.00,,Zerodha,,,yearly,,,\r\n"
+  }
+ },
+ "limits": {
+  "about": "The size and row caps of P19 (revised): checked before the table is read.",
+  "max_file_bytes": 1200000,
+  "max_rows": 5000,
+  "too_big": "This file is larger than 1.2 MB. Download it in shorter date ranges and import each part.",
+  "too_many_rows": "This file has more than 5,000 rows. Download it in shorter date ranges and import each part."
+ }
+}

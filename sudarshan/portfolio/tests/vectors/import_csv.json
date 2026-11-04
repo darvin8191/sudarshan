@@ -1,0 +1,512 @@
+{
+ "about": "Golden vectors for imports/csvutil.py (PA7): CSV text read as a table (record numbers, names, quotes, line endings, refusals), plain numbers as whole numbers of a unit, day-first dates, split ratios, the formula guard and CSV text written. The evaluator in make_pa7.py reads the same text a character at a time.",
+ "tables": [
+  {
+   "id": "T1",
+   "why": "Row 1 is the header, so the first record is row 2; names are lower-cased and spaces and hyphens become underscores; an empty cell is the empty text.",
+   "text": "Trade Date,Trade-Type,Note\n2026-01-05,buy,\n",
+   "expect": {
+    "header": [
+     "trade_date",
+     "trade_type",
+     "note"
+    ],
+    "records": [
+     [
+      2,
+      {
+       "trade_date": "2026-01-05",
+       "trade_type": "buy",
+       "note": ""
+      },
+      false
+     ]
+    ]
+   }
+  },
+  {
+   "id": "T2",
+   "why": "A byte-order mark, CRLF line endings, spaces after a comma and a quoted cell with a comma, a doubled quote and a line break all pass; the record that holds the line break is one row and the next record is row 3.",
+   "text": "﻿a,b\r\n1, \"x, \"\"y\"\"\nz\"\r\n2,3\r\n",
+   "expect": {
+    "header": [
+     "a",
+     "b"
+    ],
+    "records": [
+     [
+      2,
+      {
+       "a": "1",
+       "b": "x, \"y\"\nz"
+      },
+      false
+     ],
+     [
+      3,
+      {
+       "a": "2",
+       "b": "3"
+      },
+      false
+     ]
+    ]
+   }
+  },
+  {
+   "id": "T3",
+   "why": "Blank rows are skipped but keep their number: the record after two blank lines is row 4. A lone carriage return ends a line too.",
+   "text": "a\r1\r\r\r2\r",
+   "expect": {
+    "header": [
+     "a"
+    ],
+    "records": [
+     [
+      2,
+      {
+       "a": "1"
+      },
+      false
+     ],
+     [
+      5,
+      {
+       "a": "2"
+      },
+      false
+     ]
+    ]
+   }
+  },
+  {
+   "id": "T4",
+   "why": "A row with more cells than the header, the extra one not empty, is flagged; an extra cell that is empty (a trailing comma) is not.",
+   "text": "a,b\n1,2,3\n4,5,\n",
+   "expect": {
+    "header": [
+     "a",
+     "b"
+    ],
+    "records": [
+     [
+      2,
+      {
+       "a": "1",
+       "b": "2"
+      },
+      true
+     ],
+     [
+      3,
+      {
+       "a": "4",
+       "b": "5"
+      },
+      false
+     ]
+    ]
+   }
+  },
+  {
+   "id": "T5",
+   "why": "A cell the platform guarded (one apostrophe in front of a formula) is read without it; a plain apostrophe in front of text is kept.",
+   "text": "a,b,c\n'=1+1,'text,''=x\n",
+   "expect": {
+    "header": [
+     "a",
+     "b",
+     "c"
+    ],
+    "records": [
+     [
+      2,
+      {
+       "a": "=1+1",
+       "b": "'text",
+       "c": "'=x"
+      },
+      false
+     ]
+    ]
+   }
+  },
+  {
+   "id": "T6",
+   "why": "A column named twice refuses the whole file.",
+   "text": "a,A\n1,2\n",
+   "expect": {
+    "refused": "The column 'a' appears twice in the first row. Keep one of them."
+   }
+  },
+  {
+   "id": "T7",
+   "why": "A quote that never closes refuses the whole file.",
+   "text": "a\n\"1\n",
+   "expect": {
+    "refused": "This file could not be read as a CSV table. Save it as CSV (UTF-8) from your spreadsheet and try again."
+   }
+  },
+  {
+   "id": "T8",
+   "why": "Text after a closing quote is not a table.",
+   "text": "a,b\n1,\"2\"x\n",
+   "expect": {
+    "refused": "This file could not be read as a CSV table. Save it as CSV (UTF-8) from your spreadsheet and try again."
+   }
+  },
+  {
+   "id": "T9",
+   "why": "Nothing but blank lines is an empty file.",
+   "text": "\n\n  \n",
+   "expect": {
+    "refused": "The file is empty. Choose a CSV file whose first row names the columns."
+   }
+  },
+  {
+   "id": "T10",
+   "why": "A NUL character is no text file.",
+   "text": "a\n1\u0000\n",
+   "expect": {
+    "refused": "This file could not be read as a CSV table. Save it as CSV (UTF-8) from your spreadsheet and try again."
+   }
+  }
+ ],
+ "numbers": [
+  {
+   "text": "1428.25",
+   "decimals": 2,
+   "expect": 142825
+  },
+  {
+   "text": "10",
+   "decimals": 6,
+   "expect": 10000000
+  },
+  {
+   "text": "0.5",
+   "decimals": 6,
+   "expect": 500000
+  },
+  {
+   "text": ".5",
+   "decimals": 2,
+   "expect": 50
+  },
+  {
+   "text": "5.",
+   "decimals": 2,
+   "expect": 500
+  },
+  {
+   "text": "100.50",
+   "decimals": 2,
+   "expect": 10050
+  },
+  {
+   "text": "100.500",
+   "decimals": 2,
+   "expect": 10050
+  },
+  {
+   "text": "100.501",
+   "decimals": 2,
+   "expect": 2
+  },
+  {
+   "text": "45.6789",
+   "decimals": 4,
+   "expect": 456789
+  },
+  {
+   "text": "45.67891",
+   "decimals": 4,
+   "expect": 4
+  },
+  {
+   "text": "1,428.25",
+   "decimals": 2,
+   "expect": "number"
+  },
+  {
+   "text": "₹100",
+   "decimals": 2,
+   "expect": "number"
+  },
+  {
+   "text": "12abc",
+   "decimals": 2,
+   "expect": "number"
+  },
+  {
+   "text": "1e3",
+   "decimals": 2,
+   "expect": "number"
+  },
+  {
+   "text": "+5",
+   "decimals": 2,
+   "expect": "number"
+  },
+  {
+   "text": "-5",
+   "decimals": 2,
+   "expect": "negative"
+  },
+  {
+   "text": "-5.5",
+   "decimals": 2,
+   "expect": "negative"
+  },
+  {
+   "text": "-",
+   "decimals": 2,
+   "expect": "number"
+  },
+  {
+   "text": "",
+   "decimals": 2,
+   "expect": "number"
+  },
+  {
+   "text": "٣",
+   "decimals": 2,
+   "expect": "number"
+  },
+  {
+   "text": "1111111111111111111111111111111",
+   "decimals": 2,
+   "expect": "number"
+  },
+  {
+   "text": "000000000000000000000000000007",
+   "decimals": 2,
+   "expect": 700
+  }
+ ],
+ "days": [
+  {
+   "text": "2026-03-10",
+   "expect": 20260310
+  },
+  {
+   "text": "10-03-2026",
+   "expect": 20260310
+  },
+  {
+   "text": "10/03/2026",
+   "expect": 20260310
+  },
+  {
+   "text": "5/1/2026",
+   "expect": 20260105
+  },
+  {
+   "text": "03/13/2026",
+   "expect": null
+  },
+  {
+   "text": "13/03/2026",
+   "expect": 20260313
+  },
+  {
+   "text": "2026-02-29",
+   "expect": null
+  },
+  {
+   "text": "29/02/2028",
+   "expect": 20280229
+  },
+  {
+   "text": "31/04/2026",
+   "expect": null
+  },
+  {
+   "text": "2026/03/10",
+   "expect": null
+  },
+  {
+   "text": "10-03/2026",
+   "expect": null
+  },
+  {
+   "text": "10 Mar 2026",
+   "expect": null
+  },
+  {
+   "text": "2026-3-1",
+   "expect": 20260301
+  },
+  {
+   "text": "",
+   "expect": null
+  }
+ ],
+ "ratios": [
+  {
+   "text": "5:1",
+   "expect": [
+    5,
+    1
+   ]
+  },
+  {
+   "text": "5/1",
+   "expect": [
+    5,
+    1
+   ]
+  },
+  {
+   "text": "1:10",
+   "expect": [
+    1,
+    10
+   ]
+  },
+  {
+   "text": "5",
+   "expect": [
+    5,
+    1
+   ]
+  },
+  {
+   "text": " 2 : 1 ",
+   "expect": [
+    2,
+    1
+   ]
+  },
+  {
+   "text": "a:b",
+   "expect": null
+  },
+  {
+   "text": "5:",
+   "expect": null
+  },
+  {
+   "text": "1:2:3",
+   "expect": null
+  },
+  {
+   "text": "",
+   "expect": null
+  }
+ ],
+ "guards": [
+  {
+   "cell": "=1+1",
+   "written": "'=1+1"
+  },
+  {
+   "cell": "+5",
+   "written": "'+5"
+  },
+  {
+   "cell": "-5",
+   "written": "'-5"
+  },
+  {
+   "cell": "@SUM(A1)",
+   "written": "'@SUM(A1)"
+  },
+  {
+   "cell": "\tx",
+   "written": "'\tx"
+  },
+  {
+   "cell": "\rx",
+   "written": "'\rx"
+  },
+  {
+   "cell": "'=x",
+   "written": "''=x"
+  },
+  {
+   "cell": "text",
+   "written": "text"
+  },
+  {
+   "cell": "'text",
+   "written": "'text"
+  },
+  {
+   "cell": "",
+   "written": ""
+  },
+  {
+   "cell": "5-3",
+   "written": "5-3"
+  },
+  {
+   "cell": "a=b",
+   "written": "a=b"
+  }
+ ],
+ "writes": [
+  {
+   "id": "W1",
+   "header": [
+    "a",
+    "b"
+   ],
+   "rows": [
+    [
+     "1",
+     "x"
+    ]
+   ],
+   "text": "a,b\r\n1,x\r\n"
+  },
+  {
+   "id": "W2",
+   "header": [
+    "a"
+   ],
+   "rows": [
+    [
+     "x, y"
+    ],
+    [
+     "say \"hi\""
+    ],
+    [
+     "line\nbreak"
+    ]
+   ],
+   "text": "a\r\n\"x, y\"\r\n\"say \"\"hi\"\"\"\r\n\"line\nbreak\"\r\n"
+  },
+  {
+   "id": "W3",
+   "header": [
+    "a"
+   ],
+   "rows": [
+    [
+     "=1+1"
+    ],
+    [
+     "-5"
+    ],
+    [
+     "@x"
+    ]
+   ],
+   "text": "a\r\n'=1+1\r\n'-5\r\n'@x\r\n"
+  },
+  {
+   "id": "W4",
+   "header": [
+    "a"
+   ],
+   "rows": [
+    [
+     "=1,2"
+    ]
+   ],
+   "text": "a\r\n\"'=1,2\"\r\n"
+  }
+ ]
+}

@@ -62,6 +62,7 @@ def test_a_generator_imports_nothing_from_the_code_it_checks(name):
         "re",
         "decimal",
         "fractions",
+        "hashlib",
         "pathlib",
         "portfolio_vector_tools",
     }
