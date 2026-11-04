@@ -105,6 +105,8 @@ class Service:
         #: (a test puts its own here).
         self.resolver: Any = None
         self.prices: Any = None
+        self.upstox: Any = None
+        self._calendar: Any = None
         self._state = "starting"
         self._tasks: dict[str, asyncio.Task] = {}
         self._stop = asyncio.Event()
@@ -125,23 +127,41 @@ class Service:
             self.resolver = Resolver(self.settings.openalgo_db)
         return self.resolver
 
+    def ensure_calendar(self) -> Any:
+        """The exchange's trading calendar, from the files the other services read."""
+        if getattr(self, "_calendar", None) is None:
+            from sudarshan.autologin.schedule import TradingCalendar
+
+            self._calendar = TradingCalendar(
+                self.settings.holidays_file, self.settings.extra_days_file, logger=log
+            )
+        return self._calendar
+
     def ensure_prices(self) -> Any:
         """The price book (prices.py), built on first use."""
         if self.prices is None:
-            from sudarshan.autologin.schedule import TradingCalendar
-
             from .prices import PriceBook
 
-            calendar = TradingCalendar(
-                self.settings.holidays_file, self.settings.extra_days_file, logger=log
-            )
             self.prices = PriceBook(
                 self.settings.feed_url,
                 self.ensure_resolver(),
-                calendar,
+                self.ensure_calendar(),
                 max_claims=self.settings.max_claims,
             )
         return self.prices
+
+    def ensure_upstox(self) -> Any:
+        """The Upstox reader (upstox.py), built on first use."""
+        if self.upstox is None:
+            from .upstox import UpstoxReader, matcher
+
+            self.upstox = UpstoxReader(
+                self.settings.token_file,
+                self.settings.upstox_url,
+                clock=lambda: self.clock(),
+                decorate=matcher(self.ensure_resolver(), self.ensure_prices()),
+            )
+        return self.upstox
 
     # ---- what /health shows ---------------------------------------------------------------
     @property
@@ -196,9 +216,10 @@ class Service:
             self._set_state("stopping")
             await cancel_and_wait(api_task, *self._tasks.values())
             await self.api.close()
-            book, self.prices = self.prices, None
-            if book is not None and hasattr(book, "aclose"):
-                await book.aclose()
+            for held in (self.prices, self.upstox):
+                if held is not None and hasattr(held, "aclose"):
+                    await held.aclose()
+            self.prices = self.upstox = None
             store, self.store = self.store, None
             if store is not None:
                 try:

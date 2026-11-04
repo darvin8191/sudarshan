@@ -27,7 +27,7 @@ def buy(rig, **more):
 
 
 def test_every_op_of_the_contract_is_served_but_the_three_that_belong_to_other_parts():
-    assert set(kinds.OP_NAMES) - set(ops.REGISTRY) == {"mf_search", "upstox_book", "upstox_history"}
+    assert set(kinds.OP_NAMES) - set(ops.REGISTRY) == {"mf_search"}
 
 
 @scenario_of
