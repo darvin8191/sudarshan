@@ -124,11 +124,16 @@ def multi_leg(
     api_key: str,
     underlying_ltp: Any,
     original_data: dict,
+    learned: dict | None = None,
 ) -> Answer | None:
     """services/options_multiorder_service.process_multiorder_with_auth, once the underlying's
     price is known and before any leg is sent: each leg resolved to its option as the service
     resolves it, at its whole quantity (a leg's own split included). A leg that cannot be resolved
-    is left to the service, which reports it."""
+    is left to the service, which reports it.
+
+    When the underlying's price could not be fetched, the first leg's resolution fetches it and
+    every other leg is resolved at that price; it is put in ``learned["underlying_ltp"]`` for
+    the service to send the legs by, so the legs judged are the legs sent (gate review L4)."""
     pipe = _pipe()
     if pipe is None:
         return None
@@ -145,6 +150,10 @@ def multi_leg(
             )
             if not ok or not isinstance(resolved, dict) or not resolved.get("symbol"):
                 continue
+            if underlying_ltp is None and resolved.get("underlying_ltp") is not None:
+                underlying_ltp = resolved["underlying_ltp"]
+                if learned is not None:
+                    learned["underlying_ltp"] = underlying_ltp
             order = {
                 "symbol": resolved.get("symbol"),
                 "exchange": resolved.get("exchange"),

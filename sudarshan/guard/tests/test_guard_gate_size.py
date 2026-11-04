@@ -262,6 +262,31 @@ def test_a_multi_leg_order_with_one_leg_over_the_cap_sends_nothing(services, mon
     assert services.reached == []
 
 
+def test_a_multi_leg_order_whose_underlying_price_failed_is_sent_as_it_was_judged(
+    services, monkeypatch
+):
+    """Gate review L4: with no price for the underlying every leg fetched its own, so the leg
+    judged could differ from the leg sent. The first leg's price is the price of all."""
+    prices = []
+
+    def resolved(leg, common, api_key, ltp):
+        prices.append(ltp)
+        symbol = CE if leg["option_type"] == "CE" else PE
+        return True, {"symbol": symbol, "exchange": "NFO", "underlying_ltp": 25900.0}, 200
+
+    monkeypatch.setattr(services.multi, "resolve_leg_symbol", resolved)
+    monkeypatch.setattr(services.multi, "get_underlying_ltp", lambda *a: (False, None, "down"))
+    legs = [
+        {"offset": "ATM", "option_type": "CE", "action": "BUY", "quantity": 65},
+        {"offset": "ATM", "option_type": "PE", "action": "SELL", "quantity": 65},
+    ]
+    data = {"apikey": "key", "underlying": "NIFTY", "exchange": "NSE_INDEX",
+            "expiry_date": "27OCT26", "strategy": "s", "legs": legs}  # fmt: skip
+    services.multi.process_multiorder_with_auth(data, "token", "upstox", "key", data)
+    assert prices and prices[0] is None
+    assert all(price == 25900.0 for price in prices[1:]), prices
+
+
 def _options_order(services, monkeypatch, quantity, splitsize):
     """/api/v1/optionsorder (Flow's options node and Action Center approvals too), resolved to
     the PE, Live."""

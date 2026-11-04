@@ -60,6 +60,17 @@ def test_past_the_owner_s_number_a_new_order_is_refused_with_when_it_goes_again(
     assert len(upstox.reached) == 3
 
 
+def test_an_exit_of_an_entry_the_book_does_not_show_yet_is_not_counted(braked):
+    """Gate review L5: the book still says flat, so the exit reads as a new order; the brake
+    counts the entry only."""
+    upstox = broker()
+    for _ in range(3):
+        assert _new(upstox)[0].status == 200  # an entry, counted
+        assert upstox.place(order("SELL", 65, symbol=PE), "token")[0].status == 200  # its exit
+    refused_message(_new(upstox))  # the fourth entry: the brake is full
+    assert len(upstox.reached) == 6
+
+
 def test_exits_are_never_counted_or_refused(braked):
     braked.book.rows = [row(CE, 650)]
     upstox = broker()

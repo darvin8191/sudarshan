@@ -611,11 +611,14 @@ def process_multiorder_with_auth(
             logger.warning(f"Failed to fetch underlying LTP: {error_msg}. Will retry per leg.")
 
     # SUDARSHAN M20.7: every leg held to the owner's limits before any is sent (sudarshan/guard)
+    learned: dict = {}
     held = risk_batch.multi_leg(
-        multiorder_data, common_data, auth_token, api_key, underlying_ltp, original_data
+        multiorder_data, common_data, auth_token, api_key, underlying_ltp, original_data, learned
     )
     if held:
         return held
+    if underlying_ltp is None:  # the legs are sent at the price they were judged at
+        underlying_ltp = learned.get("underlying_ltp")
 
     # Check if any leg has splitsize > 0 (requires delay between orders)
     has_split_orders = any(leg.get("splitsize", 0) > 0 for _, leg in buy_legs + sell_legs)

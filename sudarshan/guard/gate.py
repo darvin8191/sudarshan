@@ -217,6 +217,7 @@ class Send:
     sent_at: float  # epoch, for the sentence
     ref: str | None = None  # the broker's order id, once known
     answered: float | None = None
+    closed: int = 0  # how much of this entry later exits have been taken to close (the brake)
 
 
 @dataclass
@@ -1231,14 +1232,34 @@ class Gate:
         refusal, unchecked = self._over_limits(order, guards, verdict, reads, sent_at)
         if refusal is not None:
             return refusal
-        if guards.braked(order):
+        closes = guards.braked(order) and self._closes_unseen_entry(order, verdict)
+        if guards.braked(order) and not closes:
             refusal = self._brake(order.pipe, guards.settings, now, key=_credit_key(order))
             if refusal is not None:
                 return refusal
         token = self._register(order, verdict, now)
+        if closes:
+            self._sends[token].closed = self._sends[token].quantity  # it closes; nothing closes it
         if unchecked:
             return Decision(token=token, words=unchecked, code=GUARD_UNAVAILABLE)
         return Decision(token=token)
+
+    def _closes_unseen_entry(self, order: Order, verdict: rules.Verdict) -> bool:
+        """Whether ``order`` closes an entry this process let go whose fill the book does not show
+        yet. The book still says flat, so it reads as a new order; the burst brake counts the
+        entry only (gate review L5). Call under the lock."""
+        for send in self._sends.values():
+            if (
+                send.order.key == order.key
+                and send.reducing is False
+                and send.order.side != order.side
+                and send.order.action in (PLACE, MODIFY)
+                and send.position_then == verdict.position
+                and send.quantity - send.closed >= (order.quantity or 0) > 0
+            ):
+                send.closed += order.quantity or 0
+                return True
+        return False
 
     def _over_limits(
         self,
