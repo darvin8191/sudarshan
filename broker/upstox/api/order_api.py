@@ -1195,6 +1195,25 @@ def close_all_positions(current_api_key, auth):
                 reason = _refusal_words(api_response)
             outcomes.append(_exit_outcome(held, answer, res, api_response, orderid))
 
+        # SUDARSHAN M6.9 (Y3): a position the order book shows traded today and Upstox's
+        # positions do not list yet has no row to exit from: say so, never "squared off".
+        # A sale from holdings (a CNC net sell) is not an open position.
+        for exchange, name, _token, letter, net in fills.unlisted_nets(
+            positions_response["data"], orders
+        ):
+            product = reverse_map_product_type(exchange, letter)
+            if net < 0 and product == "CNC":
+                continue
+            held = exit_guard.position_of(exchange, name, product)
+            why = (
+                f"{exit_guard.trader_name(held)} was traded today but Upstox's positions do not "
+                "show it yet, so Exit all did not close it. Close it from the Upstox app, or "
+                "tap Exit all again in a minute."
+            )
+            logger.warning(f"Exit all sent no exit for {name}: no positions row lists it yet")
+            skipped.append(why)
+            outcomes.append(_outcome(held, "not_sent", why))
+
         # Only under the gthread worker does the order window refuse a square-off
         # whose turn is too far away instead of sending it late (BusyResponse).
         # SUDARSHAN M6.9: reporting success when not every exit was placed would leave

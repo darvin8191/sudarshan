@@ -174,3 +174,58 @@ def held_each(positions: list[dict], orders: Iterable[dict] | None) -> list[int 
         held = by_token[token]
         out.append(None if held is None else held.get(_product(row)))
     return out
+
+
+def unlisted_nets(
+    positions: Iterable[dict], orders: Iterable[dict] | None
+) -> list[tuple[str, str, str, str, int]]:
+    """The instruments and products traded today that have no positions row, with their net.
+
+    A position bought a second ago can be in the order book before Upstox's positions list it,
+    and a book of rows cannot name it. Only the order book's filled quantities are used.
+
+    Args:
+        positions: Every raw row of Upstox's positions book.
+        orders: Every raw row of the order book for today, or None when it could not be read.
+
+    Returns:
+        One (exchange, trading symbol, token, product letter, net) per instrument and product
+        whose fills, counted across the instrument's products as ``held_by_product`` does, leave a
+        quantity held that no positions row carries; the net is signed (bought minus sold). Orders
+        with no usable token, product, side or filled quantity are left out.
+    """
+    if orders is None:
+        return []
+    positions, orders = list(positions), list(orders)
+    listed = {
+        (str(row.get("instrument_token") or "").strip(), _product(row))
+        for row in positions
+        if isinstance(row, dict)
+    }
+    nets: dict[tuple[str, str], int] = {}
+    names: dict[tuple[str, str], tuple[str, str]] = {}
+    for order in orders:
+        if not isinstance(order, dict):
+            continue
+        token = str(order.get("instrument_token") or "").strip()
+        product = _product(order)
+        filled = _whole(order.get("filled_quantity"))
+        side = str(order.get("transaction_type") or "").strip().upper()
+        if not token or not product or not filled or side not in ("BUY", "SELL"):
+            continue
+        key = (token, product)
+        nets[key] = nets.get(key, 0) + (filled if side == "BUY" else -filled)
+        names[key] = (
+            str(order.get("exchange") or "").strip().upper(),
+            str(order.get("tradingsymbol") or "").strip(),
+        )
+    out = []
+    for (token, product), net in nets.items():
+        if net == 0 or (token, product) in listed:
+            continue
+        # A conversion moves quantity to another product's row: what is held in this product,
+        # counted across the instrument's products, is what is left out.
+        held = held_by_product(positions, orders, token)
+        if held is not None and held.get(product, 0) != 0:
+            out.append((*names[(token, product)], token, product, held[product]))
+    return out

@@ -464,6 +464,100 @@ def test_y2_an_order_that_only_adds_reads_no_order_book_whatever_is_working(monk
     assert broker.order_book_reads == 0
 
 
+# -- Y3: Exit all says what it left out when the positions do not list an instrument yet --------------
+
+UNLISTED = (
+    "BANKNIFTY 57500 PE was traded today but Upstox's positions do not show it yet, so Exit all "
+    "did not close it. Close it from the Upstox app, or tap Exit all again in a minute."
+)
+
+
+def _bought_not_listed(world, symbol, quantity):
+    """A fill in the order book of an instrument the positions book has no row for yet."""
+    world.broker.fills.append((time.monotonic(), symbol, quantity))
+
+
+def test_y3_exit_all_leaves_out_an_instrument_the_positions_do_not_list_and_says_so(monkeypatch):
+    world = install(monkeypatch, Broker({X: 65}, 0.0))
+    _bought_not_listed(world, Y, 30)
+    code, body = world.app_exit_all()
+    assert _sent(world.broker, X) == [("SELL", 65)] and _sent(world.broker, Y) == []
+    assert code != 200 and body.get("status") != "success"
+    assert UNLISTED in body["message"]
+    assert "All Open Positions" not in body["message"]
+    assert any(p["symbol"] == Y and p["outcome"] == "not_sent" for p in body["positions"])
+
+
+def test_y3_the_same_for_a_short_that_is_not_listed(monkeypatch):
+    world = install(monkeypatch, Broker({X: 65}, 0.0))
+    _bought_not_listed(world, Y, -30)
+    code, body = world.app_exit_all()
+    assert UNLISTED in body["message"]
+    assert _sent(world.broker, Y) == []
+
+
+def test_y3_an_unlisted_instrument_that_nets_to_zero_is_not_mentioned(monkeypatch):
+    world = install(monkeypatch, Broker({X: 65}, 0.0))
+    _bought_not_listed(world, Y, 30)
+    _bought_not_listed(world, Y, -30)
+    code, body = world.app_exit_all()
+    assert code == 200 and "traded today" not in str(body)
+
+
+@pytest.fixture
+def cnc(monkeypatch):
+    from books_upstox_world import BY_TOKEN
+    from books_upstox_world import INSTRUMENTS as world_instruments
+
+    token = "NSE_EQ|INE002A01018"
+    monkeypatch.setitem(world_instruments, "RELIANCE", (token, "NSE", "D", "CNC"))
+    monkeypatch.setitem(BY_TOKEN, token, "RELIANCE")
+    return "RELIANCE"
+
+
+def test_y3_a_cnc_net_sale_from_holdings_is_not_an_open_position(monkeypatch, cnc):
+    world = install(monkeypatch, Broker({X: 65}, 0.0))
+    _bought_not_listed(world, cnc, -10)
+    code, body = world.app_exit_all()
+    assert code == 200 and "traded today" not in str(body)
+    assert _sent(world.broker, X) == [("SELL", 65)]
+
+
+def test_y3_a_cnc_net_purchase_is_left_out_with_its_sentence(monkeypatch, cnc):
+    world = install(monkeypatch, Broker({X: 65}, 0.0))
+    _bought_not_listed(world, cnc, 10)
+    code, body = world.app_exit_all()
+    assert "RELIANCE was traded today but Upstox's positions do not show it yet" in body["message"]
+    assert _sent(world.broker, cnc) == []
+
+
+def _row(token, product, quantity, bought, sold):
+    return {"instrument_token": token, "product": product, "quantity": quantity,
+            "overnight_quantity": 0, "day_buy_quantity": bought, "day_sell_quantity": sold}  # fmt: skip
+
+
+def _fill(token, product, side, quantity, name="N"):
+    return {"instrument_token": token, "product": product, "transaction_type": side,
+            "filled_quantity": quantity, "exchange": "NFO", "tradingsymbol": name}  # fmt: skip
+
+
+def test_y3_unlisted_nets_by_instrument_and_product():
+    orders = [_fill("T", "I", "BUY", 100), _fill("T", "I", "SELL", 40), _fill("U", "D", "SELL", 5)]
+    assert fills.unlisted_nets([], orders) == [
+        ("NFO", "N", "T", "I", 60),
+        ("NFO", "N", "U", "D", -5),
+    ]
+    assert fills.unlisted_nets([], None) == []
+    assert fills.unlisted_nets([], [_fill("T", "I", "BUY", 0)]) == []
+
+
+def test_y3_a_listed_row_or_a_conversion_is_not_unlisted():
+    orders = [_fill("T", "I", "BUY", 65)]
+    assert fills.unlisted_nets([_row("T", "I", 65, 65, 0)], orders) == []
+    # converted to NRML: the I row is gone, the D row carries the 65
+    assert fills.unlisted_nets([_row("T", "D", 65, 65, 0)], orders) == []
+
+
 # -- Words (X6, L4) -----------------------------------------------------------------------------------
 
 
