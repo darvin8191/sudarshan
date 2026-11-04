@@ -95,15 +95,16 @@ EXIT_ORDERS_READ_S = 4.0
 FINAL_STATUSES = frozenset({"complete", "rejected", "cancelled"})
 
 #: Exit all reads the order book with a limit of its own and no retry: a read that takes longer
-#: counts as not read, and Exit all goes on without it and says so.
+#: counts as not read. Nothing can be sized then (a position is sized from the positions row
+#: corrected by the order book's fills), so Exit all sends no exit and says so for each position.
 EXIT_ALL_ORDERS_READ_S = 5.0
 
 #: Exit all sends no exit after this long from the end of its reads. Its positions read may take
 #: 120 s (utils/httpx_client.REQUEST_TIMEOUT_SECONDS) plus 7 s of Upstox's 429 back-off, the order
 #: book EXIT_ALL_ORDERS_READ_S, and the last exit 120 s after up to 10 s in the order window under
 #: gthread (utils/broker_backpressure): 277 s in all, inside the 300 s nginx gives a request
-#: (install/install.sh). A slow read never uses up the time for sending, so a slow Upstox, when
-#: Exit all matters most, still closes everything. Overlaps stay safe through the claims and
+#: (install/install.sh). A slow read never uses up the time for sending, but one that fails or is
+#: cut off leaves nothing to size an exit from, and then nothing is sent. Overlaps stay safe through the claims and
 #: notes here, not through the phone's hold: a tap that comes after the phone stopped holding an
 #: unanswered Exit all (frontend/src/sudarshan/books/sent.ts, NO_ANSWER_HOLD_MS) gets the server's
 #: 409 and its sentence.
@@ -160,11 +161,35 @@ def first_exit_unconfirmed(position: Position, at: float) -> str:
     )
 
 
-def exit_not_sized(position: Position) -> str:
-    """Why no exit was sent for a position whose quantity could not be confirmed."""
+def exit_not_sized(position: Position, orders_read: bool = True) -> str:
+    """Why no exit was sent for a position whose quantity could not be confirmed.
+
+    Args:
+        position: The position, as the app writes it.
+        orders_read: False when Upstox's order list did not answer (the read failed or was cut
+            off), so that is the cause; True when it answered and does not add up with the
+            positions.
+    """
+    if not orders_read:
+        return (
+            "Upstox did not send your orders in time, so SUDARSHAN could not confirm how much "
+            f"you hold in {trader_name(position)} and sent no exit. Close it from the Upstox app, "
+            "or try again in a minute."
+        )
     return (
-        f"No exit was sent for {trader_name(position)}: the quantity held could not be confirmed "
-        "from Upstox's orders. Check Positions and Orders, then exit again."
+        f"SUDARSHAN could not work out how much you hold in {trader_name(position)} from "
+        "Upstox's positions and orders, and sent no exit. Close it from the Upstox app, or "
+        "check Positions and Orders and try again in a minute."
+    )
+
+
+def exit_working(position: Position, at: float, order_ids: tuple[str, ...]) -> str:
+    """Why no exit was sent for a position whose earlier exit (sent at ``at``) is seen working at
+    Upstox: the position is still open, so exiting again is refused until that order ends."""
+    named = f"order ending {order_ids[0][-4:]}, " if order_ids else ""
+    return (
+        f"The earlier exit for {trader_name(position)} ({named}sent {clock(at)}) is still "
+        "working at Upstox, so no exit was sent. Cancel or modify it in Orders, then exit."
     )
 
 
@@ -407,7 +432,12 @@ class ExitsInFlight:
             said = None
         elif seen is not None and any(each is not None and each not in FINAL_STATUSES for each in seen):
             ended = False
-            said = on_its_way(position, hold.at)
+            working = tuple(
+                each
+                for each, status in zip(hold.order_ids, seen, strict=True)
+                if status is not None and status not in FINAL_STATUSES
+            )
+            said = exit_working(position, hold.at, working)
         else:  # not read, or an order the book does not list
             ended = time.monotonic() - hold.started > EXIT_HOLD_UNCONFIRMED_S
             said = None if ended else first_exit_unconfirmed(position, hold.at)

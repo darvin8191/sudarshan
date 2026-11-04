@@ -702,7 +702,7 @@ def test_a_tradingview_exit_all_sent_twice_through_upstox_sells_once(monkeypatch
     assert sold == ["10"]  # one exit, not a second that would turn the position short
     assert "not_confirmed" not in second[1]  # nothing went
     assert (
-        "Of 1 exit, 1 was not sent. An exit for SBIN is already on its way (sent "
+        "Of 1 exit, 1 was not sent. The earlier exit for SBIN (order ending "
         in (second[1]["message"])
     )
 
@@ -809,7 +809,6 @@ def test_exit_all_s_answer_counts_each_kind_and_says_why_each_busy_one_was_not_s
         "margin",
         ["An exit for A is already on its way.", "B already has an order working to close it."],
         [("NSE", "SBIN", "MIS"), ("NFO", "NIFTY27OCT2625900CE", "MIS")],
-        False,
     )
     assert code == 400 and body["not_confirmed"] is True
     assert body["message"] == (
@@ -818,9 +817,7 @@ def test_exit_all_s_answer_counts_each_kind_and_says_why_each_busy_one_was_not_s
         "time. An exit for A is already on its way. B already has an order working to close it. "
         "Exit all ran out of its 15 seconds before it could send an exit for SBIN and "
         "NIFTY 25900 CE, so nothing was sent for them. Check Positions, then send Exit all again. "
-        "Check Positions and Orders "
-        "before sending again. The open orders could not be read from Upstox, so an order already "
-        "working to close a position was not looked for. Check Orders."
+        "Check Positions and Orders before sending again."
     )
 
 
@@ -831,7 +828,7 @@ def test_exit_all_names_ten_positions_a_kind_and_counts_the_rest():
     late = [("NSE", f"STOCK{n}", "MIS") for n in range(12)]
     positions = [{"symbol": f"STOCK{n}", "outcome": "not_sent"} for n in range(24)]
     body, code = upstox._close_all_summary(
-        {"sent": 0, "refused": 0, "unknown": 0}, 0, 0, "", skipped, late, True, positions
+        {"sent": 0, "refused": 0, "unknown": 0}, 0, 0, "", skipped, late, positions
     )
     assert code == 409 and body["positions"] == positions
     message = body["message"]
@@ -844,7 +841,7 @@ def test_exit_all_names_ten_positions_a_kind_and_counts_the_rest():
     )
     assert "STOCK10" not in message
     body, _ = upstox._close_all_summary(
-        {"sent": 0, "refused": 0, "unknown": 0}, 0, 0, "", skipped[:11], [], True, []
+        {"sent": 0, "refused": 0, "unknown": 0}, 0, 0, "", skipped[:11], [], []
     )
     assert "1 more position was not sent either. Check Positions." in body["message"]
     assert "positions" not in body
@@ -883,8 +880,12 @@ def test_exit_all_whose_order_book_was_not_read_sends_nothing_and_says_so(monkey
     assert sent == []
     assert code == 409
     assert (
-        exit_guard.exit_not_sized(exit_guard.position_of("NSE", "SBIN", "MIS")) in body["message"]
+        exit_guard.exit_not_sized(exit_guard.position_of("NSE", "SBIN", "MIS"), orders_read=False)
+        in body["message"]
     )
+    assert "Upstox did not send your orders in time" in body["message"]
+    assert "Close it from the Upstox app" in body["message"]
+    assert "was not looked for" not in body["message"]
     assert [each["outcome"] for each in body["positions"]] == ["not_sent"]
 
 

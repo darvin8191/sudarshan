@@ -182,8 +182,10 @@ def test_s2_the_second_phone_is_told_why_in_its_own_sentence(world):
     world.phone_exit(X)
     code, body = _answer(world, f"phone exit {X}")
     assert code == 409
-    assert body["message"].startswith("An exit for NIFTY 25900 CE is already on its way (sent ")
-    assert body["message"].endswith("Check Orders, and exit it again only if it is still open.")
+    assert body["message"].startswith("The earlier exit for NIFTY 25900 CE (order ending ")
+    assert body["message"].endswith(
+        "is still working at Upstox, so no exit was sent. Cancel or modify it in Orders, then exit."
+    )
     assert [o["symbol"] for o in world.broker.orders].count(X) == 1
 
 
@@ -254,8 +256,9 @@ def test_s13_an_order_book_that_cannot_be_read_leaves_every_position_out_and_say
     code, body = world.api_exit_all()
     assert code == 409 and world.broker.orders == []
     assert [world.broker.true_qty(s) for s in (X, Y, Z)] == [65, -30, 10]
-    assert body["message"].count("could not be confirmed from Upstox's orders") == 3
-    assert body["message"].endswith("was not looked for. Check Orders.")
+    assert body["message"].count("Upstox did not send your orders in time") == 3
+    assert "Close it from the Upstox app, or try again in a minute." in body["message"]
+    assert "was not looked for" not in body["message"]
     assert {each["outcome"] for each in body["positions"]} == {"not_sent"}
 
 
@@ -265,8 +268,12 @@ def test_s13_with_a_busy_position_too_both_are_said(world):
     world.broker.orders_unreadable = True
     code, body = world.api_exit_all()
     assert code == 409
-    assert body["message"].count("could not be confirmed from Upstox's orders") == 3
-    assert body["message"].endswith("was not looked for. Check Orders.")
+    # The busy position says it is busy (its exit's order cannot be checked either), the other
+    # two say their orders did not come.
+    assert "The earlier exit for NIFTY 25900 CE" in body["message"]
+    assert "is not confirmed" in body["message"]
+    assert body["message"].count("Upstox did not send your orders in time") == 2
+    assert "was not looked for" not in body["message"]
 
 
 def test_s14_flow_s_close_node_with_a_symbol_closes_that_position_only(world):
@@ -278,7 +285,7 @@ def test_s14_flow_s_close_node_with_a_symbol_closes_that_position_only(world):
     # A second, a second later, from the same node: the book still shows it open.
     time.sleep(0.3)
     code, body = world.flow_close(Z)
-    assert code == 409 and body["message"].startswith("An exit for SBIN is already on its way")
+    assert code == 409 and body["message"].startswith("The earlier exit for SBIN (order ending ")
     world.api_exit_all()
     assert all(never_reversed(world.broker, sym) for sym in (X, Y, Z)), summary(world, X, Y, Z)
 
@@ -361,7 +368,7 @@ def test_s19_two_phones_and_tradingview_exiting_one_position_together_send_one(w
     )
     assert [o["symbol"] for o in world.broker.orders] == [X]
     refused = [body["message"] for w, code, body, *_ in world.answers if code == 409]
-    assert len(refused) == 2 and all("already on its way" in words for words in refused)
+    assert len(refused) == 2 and all("still working at Upstox" in words for words in refused)
 
 
 def test_s20_a_tradingview_exit_whose_read_answers_late_is_not_sent_again(world):
@@ -451,7 +458,7 @@ def test_s24_an_exit_all_whose_order_book_is_too_slow_sends_nothing_and_says_so(
     code, body = world.api_exit_all()
     took = world.answers[-1][4] - world.answers[-1][3]
     assert world.broker.orders == [], summary(world, X, Y, Z)
-    assert code == 409 and "could not be confirmed" in body["message"]
+    assert code == 409 and "Upstox did not send your orders in time" in body["message"]
     assert took < 1.5, f"it took {took:.2f}s"  # cut off at its limit, not waited out
 
 

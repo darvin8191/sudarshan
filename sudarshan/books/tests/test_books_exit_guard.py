@@ -34,6 +34,10 @@ ON_ITS_WAY = re.compile(
     r"\AAn exit for NIFTY 25900 CE is already on its way \(sent \d\d:\d\d:\d\d\)\. Check Orders, "
     r"and exit it again only if it is still open\.\Z"
 )
+EXIT_WORKING = re.compile(  # the earlier exit's order is seen working in the order book (L4)
+    r"\AThe earlier exit for NIFTY 25900 CE \(order ending \d{4}, sent \d\d:\d\d:\d\d\) is "
+    r"still working at Upstox, so no exit was sent\. Cancel or modify it in Orders, then exit\.\Z"
+)
 WAIT = 10  # seconds; never reached when the code is right
 REPO = Path(__file__).resolve().parents[3]
 
@@ -573,7 +577,7 @@ def test_after_it_was_placed_the_book_not_showing_it_yet_it_is_still_refused(bro
     """Two phones, one after the other (the review's S3): the book still says 65."""
     assert _post("/close_position", EXIT)[0] == 200
     code, body = _post("/close_position", EXIT)
-    assert code == 409 and ON_ITS_WAY.match(body["message"])
+    assert code == 409 and EXIT_WORKING.match(body["message"])
     assert broker["orders"] == [(X, "SELL", 65)]
 
 
@@ -703,7 +707,7 @@ def test_a_smart_exit_from_the_api_sends_nothing_for_a_busy_position(broker):
     """The review's S4/S5: TradingView's exit and the app's, either way round."""
     assert _post("/close_position", EXIT)[0] == 200
     code, body = _smart()
-    assert code == 409 and ON_ITS_WAY.match(body["message"])
+    assert code == 409 and EXIT_WORKING.match(body["message"])
     assert broker["orders"] == [(X, "SELL", 65)]
     # And the other way: its exit noted, an Exit all sends nothing for it.
     assert _smart(symbol=Y, action="BUY")[0] == 200
@@ -820,7 +824,7 @@ def test_flow_s_close_node_with_a_symbol_closes_that_position_only_live(broker):
     assert (code, body["status"], body["orderid"]) == (200, "success", "261027000001")
     assert broker["orders"] == [(X, "SELL", 65)]
     code, body = _flow_close()  # the same node, again, before the book shows the first
-    assert code == 409 and ON_ITS_WAY.match(body["message"])
+    assert code == 409 and EXIT_WORKING.match(body["message"])
     assert broker["orders"] == [(X, "SELL", 65)]
     assert _flow_close(symbol="NIFTY27OCT2625800CE")[0] == 400  # nothing to close: nothing sent
     assert broker["orders"] == [(X, "SELL", 65)]

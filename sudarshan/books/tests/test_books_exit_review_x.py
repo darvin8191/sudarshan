@@ -334,7 +334,7 @@ def test_x7_an_order_that_cannot_be_sized_is_refused_when_it_reduces_or_crosses(
     for quantity, size in (("130", "-65"), ("65", "0"), ("30", "35")):
         code, body = _reversal(world, X, quantity, "SELL", size)
         assert code == 424, (size, body)
-        assert body["message"] == exit_guard.exit_not_sized(("NFO", X, "MIS"))
+        assert body["message"] == exit_guard.exit_not_sized(("NFO", X, "MIS"), orders_read=False)
     assert broker.orders == []
 
 
@@ -396,3 +396,91 @@ def test_l2_a_working_market_order_on_the_other_side_does_not_block_an_exit(monk
     code, _body = world.phone_exit(X)
     assert code == 200
     assert _sent(world.broker, X) == [("SELL", 65)]
+
+
+# -- Words (X6, L4) -----------------------------------------------------------------------------------
+
+
+def test_words_upstox_s_refusal_keeps_its_message_and_loses_its_code():
+    import broker.upstox.api.order_api as upstox
+
+    class Refused:
+        status = 400
+
+    response = {"status": "error", "message": "UDAPI100050: Invalid token used | UDAPI1040: Bad price"}
+    outcome = upstox._exit_outcome(("NFO", X, "MIS"), "refused", Refused(), response, None)
+    assert outcome["reason"] == "Upstox refused its exit: Invalid token used | Bad price"
+    assert "UDAPI" not in outcome["reason"]
+
+
+def test_words_exit_all_s_summary_carries_the_refusal_without_its_code(monkeypatch):
+    import broker.upstox.api.order_api as upstox
+
+    class Refused:
+        status = 400
+        status_code = 400
+
+    broker = Broker({X: 65}, 0.0)
+    install(monkeypatch, broker)
+    refusal = {"status": "error", "message": "UDAPI100050: Invalid token used"}
+    monkeypatch.setattr(upstox, "place_order_api", lambda data, auth: (Refused(), refusal, None))
+    body, code = upstox.close_all_positions("key", "token")
+    assert code == 400
+    assert "1 was refused (Invalid token used)" in body["message"]
+    assert "UDAPI" not in str(body)
+
+
+def test_words_a_single_exit_says_the_order_list_did_not_come_and_to_use_the_upstox_app(
+    monkeypatch,
+):
+    broker = Broker({X: 65}, 0.0)
+    broker.orders_unreadable = True
+    world = install(monkeypatch, broker)
+    code, body = world.phone_exit(X)
+    assert code == 424 and broker.orders == []
+    assert body["message"] == (
+        "Upstox did not send your orders in time, so SUDARSHAN could not confirm how much you "
+        "hold in NIFTY 25900 CE and sent no exit. Close it from the Upstox app, or try again in "
+        "a minute."
+    )
+
+
+def test_words_exit_all_with_no_order_list_sends_nothing_and_does_not_say_an_order_was_not_looked_for(
+    monkeypatch,
+):
+    broker = Broker({X: 65, Y: -30}, 0.0)
+    broker.orders_unreadable = True
+    world = install(monkeypatch, broker)
+    code, body = world.app_exit_all()
+    assert code == 409 and broker.orders == []
+    assert "not looked for" not in body["message"] and "Check Orders." not in body["message"]
+    assert body["message"].count("sent no exit. Close it from the Upstox app") == 2
+
+
+def test_words_an_exit_held_by_a_working_order_names_it_and_says_to_cancel_or_modify_it(
+    monkeypatch,
+):
+    broker = Broker({X: 65}, 0.0)
+    broker.part[X] = 0  # the first exit rests at Upstox
+    world = install(monkeypatch, broker)
+    world.phone_exit(X)
+    code, body = world.phone_exit(X)
+    assert code == 409
+    assert body["message"].startswith("The earlier exit for NIFTY 25900 CE (order ending ")
+    assert body["message"].endswith(
+        "is still working at Upstox, so no exit was sent. Cancel or modify it in Orders, then exit."
+    )
+    assert "only if it is still open" not in body["message"]
+
+
+def test_words_a_busy_position_is_said_before_the_not_sized_one_in_exit_all(monkeypatch):
+    broker = Broker({X: 65, Y: -30}, 0.0)
+    broker.part[X] = 0
+    world = install(monkeypatch, broker)
+    world.phone_exit(X)
+    broker.orders_unreadable = True
+    code, body = world.app_exit_all()
+    reasons = {each["symbol"]: each["reason"] for each in body["positions"]}
+    assert code == 409
+    assert "The earlier exit for NIFTY 25900 CE" in reasons[X]
+    assert "Upstox did not send your orders in time" in reasons[Y]

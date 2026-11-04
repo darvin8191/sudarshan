@@ -76,7 +76,8 @@ def test_a_second_exit_is_refused_while_the_first_still_works_however_long_after
         code, body = world.app_exit_all()
     assert _sent(world.broker) == [("SELL", 65)], body
     if second != "exit_all_leaves_it":
-        assert code == 409 and "already on its way" in body["message"], body
+        assert code == 409 and "still working at Upstox" in body["message"], body
+        assert "Cancel or modify it in Orders" in body["message"], body
 
 
 def test_the_hold_ends_when_the_book_shows_the_order_complete(monkeypatch, clock):
@@ -218,7 +219,8 @@ def test_a_single_exit_is_refused_when_the_order_book_cannot_be_read(monkeypatch
     for send in (world.phone_exit, world.tv_smart_exit, world.flow_close):
         code, body = send(X)
         assert code in (424, 400, 409) and _sent(world.broker) == [], (code, body)
-        assert "could not be confirmed" in body["message"], body
+        assert "Upstox did not send your orders in time" in body["message"], body
+        assert "sent no exit" in body["message"] and "Upstox app" in body["message"], body
 
 
 def test_a_single_exit_is_refused_when_the_row_has_no_day_quantities(monkeypatch):
@@ -227,7 +229,7 @@ def test_a_single_exit_is_refused_when_the_row_has_no_day_quantities(monkeypatch
     broker.day_fields = False
     world = install(monkeypatch, broker)
     code, body = world.phone_exit(X)
-    assert _sent(broker) == [] and "could not be confirmed" in body["message"], (code, body)
+    assert _sent(broker) == [] and "could not work out how much" in body["message"], (code, body)
 
 
 def test_a_single_exit_is_refused_when_the_row_shows_more_than_the_order_book(monkeypatch):
@@ -247,7 +249,7 @@ def test_a_single_exit_is_refused_when_the_row_shows_more_than_the_order_book(mo
 
     broker.get = lying
     code, body = world.phone_exit(X)
-    assert _sent(broker) == [] and "could not be confirmed" in body["message"], (code, body)
+    assert _sent(broker) == [] and "could not work out how much" in body["message"], (code, body)
 
 
 def test_exit_all_leaves_a_position_out_when_the_order_book_cannot_be_read(monkeypatch):
@@ -256,7 +258,9 @@ def test_exit_all_leaves_a_position_out_when_the_order_book_cannot_be_read(monke
     world.broker.orders_unreadable = True
     code, body = world.app_exit_all()
     assert world.broker.orders == [], body
-    assert body["message"].count("could not be confirmed") >= 2, body
+    assert body["message"].count("Upstox did not send your orders in time") >= 2, body
+    assert "Close it from the Upstox app" in body["message"], body
+    assert "was not looked for" not in body["message"], body
     assert {p["outcome"] for p in body["positions"]} == {"not_sent"}
 
 
@@ -279,7 +283,7 @@ def test_exit_all_leaves_out_a_position_whose_row_cannot_be_corrected_and_sends_
     broker.get = one_row_without_day_figures
     code, body = world.app_exit_all()
     assert _sent(broker, X) == [("SELL", 65)] and _sent(broker, Y) == [], body
-    assert "could not be confirmed" in body["message"]
+    assert "could not work out how much you hold in BANKNIFTY 57500 PE" in body["message"]
 
 
 # -- the late sentence (N7) -----------------------------------------------------------------------
@@ -302,9 +306,10 @@ def test_a_hold_is_judged_by_the_statuses_it_is_given(clock):
     guard = exit_guard.ExitsInFlight()
     position = ("NFO", X, "MIS")
     guard.placed("live", position, ("1", "2"))  # a sliced exit: two orders
-    assert "already on its way" in guard.hold_verdict("live", position, {"1": "complete", "2": "open"})
+    working = guard.hold_verdict("live", position, {"1": "complete", "2": "open"})
+    assert "order ending 2" in working and "Cancel or modify it in Orders" in working
     clock.advance(10_000.0)  # no clock ends it while the book shows it working
-    assert "already on its way" in guard.hold_verdict("live", position, {"1": "complete", "2": "open"})
+    assert guard.hold_verdict("live", position, {"1": "complete", "2": "open"}) == working
     assert guard.hold_verdict("live", position, {"1": "complete", "2": "cancelled"}) is None
     assert guard.hold_verdict("live", position, {}) is None  # ended for good: dropped
 
