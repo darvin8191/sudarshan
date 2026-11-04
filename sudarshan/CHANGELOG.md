@@ -58,6 +58,9 @@ Sunday 8 Nov (Muhurat).**
   cancels without it and sends no market exit; a second exit waits while the first market exit is
   working; an exit nobody judged is judged by the last positions read; its history file upgrades
   cleanly from an older one.
+- **A release build tries GitHub three times before it gives up.** v0.4.0's first build passed
+  every test, but one GitHub error at the last step left it unmarked as the latest release, so
+  the server did not install it until the build was run again.
 
 ### What you must do
 - **Publish it** on Monday 9 Nov or later (the link is in your task list). The server installs it
