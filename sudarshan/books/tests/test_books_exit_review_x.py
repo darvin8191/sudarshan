@@ -620,6 +620,21 @@ def test_z2_a_flat_position_with_its_own_exit_still_working_says_so(monkeypatch,
     assert _sent(world.broker, X) == [("SELL", 65)]
 
 
+def test_z3_the_unlisted_sentence_names_the_contract_from_its_openalgo_symbol(monkeypatch):
+    import broker.upstox.api.order_api as upstox
+
+    raw = {
+        **_fill("NSE_FO|1002", "D", "BUY", 30, "BANKNIFTY 57500 PE 27 OCT 26"),
+        "exchange": "NFO",
+    }
+    monkeypatch.setattr(upstox, "get_symbol", lambda token, exchange: Y)
+    skipped, outcomes = upstox._unlisted_left_out([], [raw])
+    assert skipped == [UNLISTED] and outcomes[0]["symbol"] == Y
+    monkeypatch.setattr(upstox, "get_symbol", lambda token, exchange: None)  # lookup finds nothing
+    skipped, _ = upstox._unlisted_left_out([], [raw])
+    assert skipped[0].startswith("BANKNIFTY 57500 PE 27 OCT 26 was traded today")
+
+
 # -- Y4: positions rows with no instrument token cannot be matched to the order book ---------------
 
 

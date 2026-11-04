@@ -1062,10 +1062,13 @@ def _unlisted_left_out(rows, orders):
     book shows traded today and held, which Upstox's positions do not list yet (a CNC net sale is
     a sale from holdings, not an open position)."""
     skipped, outcomes = [], []
-    for exchange, name, _token, letter, net in fills.unlisted_nets(rows, orders):
+    for exchange, raw_name, token, letter, net in fills.unlisted_nets(rows, orders):
         product = reverse_map_product_type(exchange, letter)
         if net < 0 and product == "CNC":
             continue
+        # SUDARSHAN M6.9 (Z3): named as every other exit sentence names it, from the OpenAlgo
+        # symbol; Upstox's own trading symbol only when the lookup finds nothing.
+        name = get_symbol(token, exchange) or raw_name
         held = exit_guard.position_of(exchange, name, product)
         why = (
             f"{exit_guard.trader_name(held)} was traded today but Upstox's positions do not "
