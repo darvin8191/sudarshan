@@ -1,8 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
-import { CandlestickChart, LogOut, Plus } from 'lucide-react'
+import { CandlestickChart, LogOut, OctagonX, Plus } from 'lucide-react'
 import { memo, type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router'
 import { PlaceOrderDialog } from '@/components/trading/PlaceOrderDialog'
 import { cn } from '@/lib/utils'
+import { AccessNotice } from '@/sudarshan/AccessNotice'
+import { usePriceAccess, useReadWhenReady } from '@/sudarshan/access'
 import { useExitOrderReads } from '@/sudarshan/books/exitOrders'
 import { type FeedRow, useBookFeed } from '@/sudarshan/books/feed'
 import { isFinalStatus } from '@/sudarshan/books/orderFold'
@@ -18,7 +21,9 @@ import {
   type SentMark,
   sendHeld,
   sentMarksNow,
+  toldOf,
   useSentMarks,
+  useSentTold,
 } from '@/sudarshan/books/sent'
 import { istTime } from '@/sudarshan/books/time'
 import { SymbolChartLink } from '@/sudarshan/chart/SymbolChartLink'
@@ -26,6 +31,9 @@ import { directionOf, formatRupees } from '@/sudarshan/dashboard/format'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
 import type { FeedLine, MarketOpen } from '@/sudarshan/dashboard/live'
 import { TREND_TEXT, TrendArrow } from '@/sudarshan/dashboard/Trend'
+// SUDARSHAN M20.7: the kill switch beside Exit all, where a trader in a hurry already is.
+import { actsOn, killSwitchOn, useKillSwitch } from '@/sudarshan/risk/killSwitch'
+import { TurnOnSheet } from '@/sudarshan/risk/TurnOnSheet'
 import {
   PRODUCT_MEANING,
   type Product,
@@ -363,6 +371,9 @@ const PositionBoard = memo(function PositionBoard({
   const { overlay, open, swap, close } = useBookOverlay()
   const openSheet = useCallback((id: string) => open({ act: 'sheet', row: id }), [open])
   const refresh = useCallback(() => void onRefresh(true), [onRefresh])
+  // No key or no Upstox login: the notice says which, never "No open positions".
+  const access = usePriceAccess()
+  useReadWhenReady(access.state, error !== null, refresh)
   // Analyze mode: the book is the sandbox's, and so is every exit from it.
   const sandbox = useSandbox()
 
@@ -372,6 +383,14 @@ const PositionBoard = memo(function PositionBoard({
   // the hold every book it reads (usePositionExits).
   const marks = useSentMarks()
   const exits = marksOf(marks, 'exit', sandbox)
+  // Why the last Exit all sent nothing for a position, shown on its card for a while.
+  const told = useSentTold()
+  // SUDARSHAN M20.7: the kill switch, where the server has one.
+  const risk = useKillSwitch()
+  // Only where it acts on the book the page shows: a Live page with the guard at "sandbox" has
+  // nothing to turn on (its Live orders are not checked); Risk is where the sandbox's is.
+  const killSwitch =
+    risk && actsOn(risk.stage, sandbox) ? (killSwitchOn(risk) ? 'on' : 'off') : null
 
   const total = rows.reduce((sum, row) => sum + (row.pnl ?? 0), 0)
   // Why Exit all cannot be sent now, if it cannot: nothing is open, or an exit
@@ -388,7 +407,7 @@ const PositionBoard = memo(function PositionBoard({
   const orphan =
     overlay !== null &&
     !loading &&
-    (overlay.act === 'exitall'
+    (overlay.act === 'exitall' || overlay.act === 'killswitch'
       ? false
       : target === null || ((overlay.act === 'exit' || overlay.act === 'add') && !targetOpen))
   useEffect(() => {
@@ -396,7 +415,9 @@ const PositionBoard = memo(function PositionBoard({
   }, [orphan, close])
 
   let content: ReactNode
-  if (positions.length === 0 && loading) {
+  if (access.state !== 'ready') {
+    content = <AccessNotice access={access} />
+  } else if (positions.length === 0 && loading) {
     content = <LoadingCards />
   } else if (positions.length === 0 && error) {
     content = <ProblemCard message="Positions could not be read just now." onRetry={refresh} />
@@ -419,12 +440,20 @@ const PositionBoard = memo(function PositionBoard({
           line={line}
           now={now}
           onExitAll={() => open({ act: 'exitall', row: null })}
+          killSwitch={killSwitch}
+          onKillSwitch={() => open({ act: 'killswitch', row: null })}
+        />
+        <TurnOnSheet
+          open={overlay?.act === 'killswitch'}
+          onOpenChange={(next) => (next ? open({ act: 'killswitch', row: null }) : close())}
+          stage={risk?.stage}
         />
         {error && <StaleBookNote text="Could not refresh just now. Showing the last figures." />}
         {held.length > 0 ? (
           <ul aria-label="Open positions" className="flex flex-col gap-2">
             {held.map((row) => {
               const words = exitWords(exitMark(marks, sandbox, positionId(row.item)))
+              const notSent = words ? null : toldOf(told, sandbox, positionId(row.item))
               return (
                 <PositionCard
                   key={positionId(row.item)}
@@ -441,6 +470,7 @@ const PositionBoard = memo(function PositionBoard({
                   stale={stale(feedRowOf(row))}
                   sentChip={words?.chip ?? null}
                   sentNote={words?.note ?? null}
+                  notSent={notSent}
                   onOpen={openSheet}
                 />
               )
@@ -577,6 +607,8 @@ function Summary({
   line,
   now,
   onExitAll,
+  killSwitch = null,
+  onKillSwitch,
 }: {
   total: number
   split: { realised: number; unrealised: number } | null
@@ -590,6 +622,9 @@ function Summary({
   line: FeedLine
   now: number
   onExitAll: () => void
+  /** SUDARSHAN M20.7: the kill switch's state, or null where the server has none. */
+  killSwitch?: 'on' | 'off' | null
+  onKillSwitch?: () => void
 }) {
   const direction = directionOf(total)
   const exitAll = useWhyNot(exitAllWhy)
@@ -632,17 +667,38 @@ function Summary({
         <p className="text-[0.78125rem] font-medium text-[color:var(--text-tertiary)]">
           {openCount(open)}
         </p>
-        <button
-          type="button"
-          {...exitAll.button(onExitAll)}
-          aria-haspopup={exitAllWhy === null ? 'dialog' : undefined}
-          className={
-            exitAllWhy === null ? cn(OUTLINED, 'border-destructive text-destructive') : UNAVAILABLE
-          }
-        >
-          <LogOut aria-hidden="true" className="size-4" />
-          Exit all
-        </button>
+        <span className="flex items-center gap-2">
+          {killSwitch === 'on' && (
+            <Link to="/risk" className={cn(OUTLINED, 'sd-risk-chip')}>
+              <OctagonX aria-hidden="true" className="size-4" />
+              Kill switch on
+            </Link>
+          )}
+          {killSwitch === 'off' && (
+            <button
+              type="button"
+              onClick={onKillSwitch}
+              aria-haspopup="dialog"
+              className={cn(OUTLINED, 'border-destructive text-destructive')}
+            >
+              <OctagonX aria-hidden="true" className="size-4" />
+              Kill switch
+            </button>
+          )}
+          <button
+            type="button"
+            {...exitAll.button(onExitAll)}
+            aria-haspopup={exitAllWhy === null ? 'dialog' : undefined}
+            className={
+              exitAllWhy === null
+                ? cn(OUTLINED, 'border-destructive text-destructive')
+                : UNAVAILABLE
+            }
+          >
+            <LogOut aria-hidden="true" className="size-4" />
+            Exit all
+          </button>
+        </span>
       </div>
       <WhyNot why={exitAll.why} id={exitAll.id} told={exitAll.told} />
     </section>
@@ -664,6 +720,7 @@ const PositionCard = memo(function PositionCard({
   stale,
   sentChip,
   sentNote,
+  notSent,
   onOpen,
 }: {
   id: string
@@ -681,6 +738,8 @@ const PositionCard = memo(function PositionCard({
   sentChip: string | null
   /** Its exit got no answer: what to do before sending another. */
   sentNote: string | null
+  /** Exit all sent nothing for it just now: why, in the app's words. */
+  notSent: string | null
   onOpen: (id: string) => void
 }) {
   const named = describe(symbol, exchange)
@@ -711,6 +770,7 @@ const PositionCard = memo(function PositionCard({
           <SignedPercent value={pnlPercent} stale={stale} className="text-xs font-semibold" />
         </span>
         {sentNote && <SentNote text={sentNote} />}
+        {!sentNote && notSent && <SentNote text={notSent} state="not-sent" />}
       </button>
     </li>
   )

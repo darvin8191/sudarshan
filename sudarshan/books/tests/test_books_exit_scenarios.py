@@ -15,6 +15,7 @@ import time
 import pytest
 from books_upstox_world import Broker, install
 
+import broker.upstox.api.order_api as upstox
 from sudarshan.books import exit_guard
 
 LAG = 1.5
@@ -176,12 +177,15 @@ def _answer(world, what):
 
 
 def test_s2_the_second_phone_is_told_why_in_its_own_sentence(world):
+    world.broker.part[X] = 0  # its exit rests at Upstox: the order book shows it working
     world.api_exit_all()
     world.phone_exit(X)
     code, body = _answer(world, f"phone exit {X}")
     assert code == 409
-    assert body["message"].startswith("An exit for NIFTY 25900 CE is already on its way (sent ")
-    assert body["message"].endswith("Check Orders, and exit it again only if it is still open.")
+    assert body["message"].startswith("The earlier exit for NIFTY 25900 CE (order ending ")
+    assert body["message"].endswith(
+        "is still working at Upstox, so no exit was sent. Cancel or modify it in Orders, then exit."
+    )
     assert [o["symbol"] for o in world.broker.orders].count(X) == 1
 
 
@@ -208,10 +212,33 @@ def test_s12_a_stop_loss_working_elsewhere_is_not_closed_twice(world):
     assert (world.broker.true_qty(Y), world.broker.true_qty(Z)) == (0, 0)
     assert [o["symbol"] for o in world.broker.orders] == [Y, Z]
     assert code == 409 and body["not_confirmed"] is True
-    assert "NIFTY 25900 CE already has an order working to close it (placed " in body["message"]
+    said = "NIFTY 25900 CE has a SELL 65 SL-M order (trigger 98.50, order ending 0000, placed "
+    assert said in body["message"]
+    assert (
+        ") working to close it, so no exit was sent for it. Cancel it in Orders, then exit."
+        in (body["message"])
+    )
+    [x] = [each for each in body["positions"] if each["symbol"] == X]
+    assert x["outcome"] == "not_sent" and x["reason"].startswith(said)
     world.broker.fill_working()
     assert never_reversed(world.broker, X)
     assert world.broker.order_book_reads == 1  # read once for the whole Exit all
+
+
+def test_s12c_a_stop_covering_part_of_a_position_holds_back_the_whole_exit(world):
+    """The second review's MEDIUM-3: kept, and said. Sizing only the part left uncovered cannot
+    be trusted from a book that lags, so nothing is sent for the position and the stop is named."""
+    world.broker.rest(X, "SELL", 35, kind="SL", trigger=98.5)
+    code, body = world.api_exit_all()
+    assert [o["symbol"] for o in world.broker.orders] == [Y, Z]
+    assert code == 409
+    assert (
+        "NIFTY 25900 CE has a SELL 35 SL order (trigger 98.50, order ending 0000, placed "
+    ) in body["message"]
+    assert (
+        ") working to close 35 of the 65 held, so no exit was sent for any of it. Cancel it in "
+        "Orders, then exit."
+    ) in body["message"]
 
 
 def test_s12_a_working_order_on_the_other_side_does_not_hold_the_position(world):
@@ -222,27 +249,35 @@ def test_s12_a_working_order_on_the_other_side_does_not_hold_the_position(world)
     assert sorted(o["symbol"] for o in world.broker.orders) == sorted([X, Y, Z])
 
 
-def test_s13_an_order_book_that_cannot_be_read_is_said_and_the_rest_goes(world):
+def test_s13_an_order_book_that_cannot_be_read_leaves_every_position_out_and_says_so(world):
+    """Sizing needs the order book's fills (sudarshan/books/fills.py): without them what is held
+    cannot be confirmed, so nothing is sent and each position says so."""
     world.broker.orders_unreadable = True
     code, body = world.api_exit_all()
-    assert (code, body["status"]) == (200, "success")
-    assert [world.broker.true_qty(s) for s in (X, Y, Z)] == [0, 0, 0]
-    assert body["message"] == (
-        "All Open Positions Squared Off. The open orders could not be read from Upstox, so an "
-        "order already working to close a position was not looked for. Check Orders."
-    )
+    assert code == 409 and world.broker.orders == []
+    assert [world.broker.true_qty(s) for s in (X, Y, Z)] == [65, -30, 10]
+    assert body["message"].count("Upstox did not send your orders in time") == 3
+    assert "Close it from the Upstox app, or try again in a minute." in body["message"]
+    assert "was not looked for" not in body["message"]
+    assert {each["outcome"] for each in body["positions"]} == {"not_sent"}
 
 
 def test_s13_with_a_busy_position_too_both_are_said(world):
+    world.broker.part[X] = 0  # its exit rests at Upstox
     world.phone_exit(X)
     world.broker.orders_unreadable = True
     code, body = world.api_exit_all()
     assert code == 409
-    assert "An exit for NIFTY 25900 CE is already on its way" in body["message"]
-    assert body["message"].endswith("was not looked for. Check Orders.")
+    # The busy position says it is busy (its exit's order cannot be checked either), the other
+    # two say their orders did not come.
+    assert "The earlier exit for NIFTY 25900 CE" in body["message"]
+    assert "is not confirmed" in body["message"]
+    assert body["message"].count("Upstox did not send your orders in time") == 2
+    assert "was not looked for" not in body["message"]
 
 
 def test_s14_flow_s_close_node_with_a_symbol_closes_that_position_only(world):
+    world.broker.part[Z] = 0  # its exit rests at Upstox: the order book shows it working
     code, body = world.flow_close(Z)
     assert (code, body["status"]) == (200, "success") and body["orderid"]
     assert [o["symbol"] for o in world.broker.orders] == [Z]
@@ -250,16 +285,17 @@ def test_s14_flow_s_close_node_with_a_symbol_closes_that_position_only(world):
     # A second, a second later, from the same node: the book still shows it open.
     time.sleep(0.3)
     code, body = world.flow_close(Z)
-    assert code == 409 and body["message"].startswith("An exit for SBIN is already on its way")
+    assert code == 409 and body["message"].startswith("The earlier exit for SBIN (order ending ")
     world.api_exit_all()
     assert all(never_reversed(world.broker, sym) for sym in (X, Y, Z)), summary(world, X, Y, Z)
 
 
 def test_s15_a_tradingview_entry_right_after_an_exit_is_never_refused(world, monkeypatch):
-    """Position size 0 with a quantity, from flat, is upstream's fresh order: an entry."""
+    """TradingView's entry carries the size after the order (BUY 10 to a size of 10), so it is
+    not an exit and nothing about the exit just before it holds it back."""
     monkeypatch.setattr(world.broker, "lag", 0.0)  # the book shows the exit at once
     world.phone_exit(Z)
-    code, body = world.tv_smart_exit(Z, quantity="10", action="BUY")
+    code, body = world.tv_smart_exit(Z, quantity="10", action="BUY", position_size="10")
     assert (code, body["status"]) == (200, "success")
     assert [(o["symbol"], o["side"]) for o in world.broker.orders] == [(Z, "SELL"), (Z, "BUY")]
 
@@ -274,9 +310,20 @@ def test_s16_an_exit_all_that_runs_out_of_time_says_which_it_did_not_send(world,
     assert code == 409 and body["not_confirmed"] is True
     assert "Of 3 exits, 1 was sent and 2 were not sent in time." in body["message"]
     assert (
-        "Upstox was slow to answer, so Exit all stopped after 0.5 s and sent nothing for "
-        "BANKNIFTY 57500 PE and SBIN. Check Positions, then send Exit all again."
+        "Exit all ran out of its 0.5 seconds before it could send an exit for BANKNIFTY 57500 PE "
+        "and SBIN, so nothing was sent for them. Check Positions, then send Exit all again."
     ) in body["message"]
+    late = (
+        "Exit all ran out of its 0.5 seconds before it could send an exit for {name}, so "
+        "nothing was sent for it. Check Positions, then send Exit all again."
+    )
+    assert [
+        (each["symbol"], each["outcome"], each.get("reason")) for each in body["positions"]
+    ] == [
+        (X, "sent", None),
+        (Y, "not_sent", late.format(name="BANKNIFTY 57500 PE")),
+        (Z, "not_sent", late.format(name="SBIN")),
+    ]
     world.broker.hang.clear()
     world.api_exit_all()  # sent again: the first one's exit is on its way, the rest go now
     assert [world.broker.true_qty(s) for s in (X, Y, Z)] == [0, 0, 0]
@@ -316,24 +363,121 @@ def test_s18_a_phone_exit_and_an_exit_all_released_together_close_it_once(world,
 
 @pytest.mark.parametrize("run", range(3))
 def test_s19_two_phones_and_tradingview_exiting_one_position_together_send_one(world, run):
+    world.broker.part[X] = 0  # its exit rests at Upstox: the order book shows it working
     _released_together(
         world, (world.phone_exit, X), (world.phone_exit, X), (world.tv_smart_exit, X)
     )
     assert [o["symbol"] for o in world.broker.orders] == [X]
-    assert world.broker.history(X) == [65, 0]
     refused = [body["message"] for w, code, body, *_ in world.answers if code == 409]
-    assert len(refused) == 2 and all("already on its way" in words for words in refused)
+    assert len(refused) == 2 and all(
+        "already on its way" in words or "still working at Upstox" in words for words in refused
+    )  # the claim while the first is placed, or the hold once it is noted
 
 
-def test_s20_a_tradingview_exit_whose_read_outlasts_the_note_is_not_sent(world, monkeypatch):
-    """Busy when it began sizing the close: its read answered after the note ran out, still
-    showing the position as it was before the phone's exit, and would have sold it again."""
-    monkeypatch.setattr(exit_guard, "EXIT_SHOWS_WITHIN_S", 1.0)
+def test_s20_a_tradingview_exit_whose_read_answers_late_is_not_sent_again(world):
+    """Its positions read answers late, still showing the position as it was before the phone's
+    exit. The order book shows the phone's fill, so the position is found closed: no second
+    exit, whatever the clock says."""
     world.phone_exit(X)
-    world.broker.slow_read = 1.3  # answers after the note has run out, rows as at its start
-    code, body = world.tv_smart_exit(X)
+    world.broker.slow_read = 1.3  # rows as at its start
+    _code, body = world.tv_smart_exit(X)
     world.broker.slow_read = 0.0
-    assert code == 409, summary(world, X)
-    assert body["message"].startswith("An exit for NIFTY 25900 CE is already on its way (sent ")
+    assert body["message"] == "No open position found. Not placing exit order.", summary(world, X)
     assert [(o["symbol"], o["side"]) for o in world.broker.orders] == [(X, "SELL")]
     assert never_reversed(world.broker, X)
+
+
+# -- the second review's orderings (its N2, N3, N3b) ---------------------------------------------
+
+
+def _slow_first_read(world, seconds):
+    """The first positions read answers ``seconds`` late, its rows as at its start."""
+    world.broker.read_delay = lambda number: seconds if number == 1 else 0.0
+
+
+def test_s21_a_tradingview_exit_whose_slow_read_an_exit_all_overtakes_closes_once(
+    world, monkeypatch
+):
+    """The exit claims its position before its read, so the Exit all that starts during the read
+    leaves that position to it; the read answers after the note would have run out."""
+    monkeypatch.setattr(exit_guard, "EXIT_SHOWS_WITHIN_S", 1.0)
+    _slow_first_read(world, 1.5)
+    tv, _ = world.background(world.tv_smart_exit, X)
+    time.sleep(0.2)
+    code, body = world.api_exit_all()
+    tv.join(10)
+    assert never_reversed(world.broker, X), summary(world, X)
+    assert [o["symbol"] for o in world.broker.orders].count(X) == 1
+    assert code == 409 and body["not_confirmed"] is True  # Y and Z went, X was left to the exit
+    assert "An exit for NIFTY 25900 CE is already on its way (sent " in body["message"]
+    assert [world.broker.true_qty(s) for s in (X, Y, Z)] == [0, 0, 0]
+
+
+def test_s22_the_app_s_exit_whose_slow_read_an_exit_all_overtakes_closes_once(world, monkeypatch):
+    monkeypatch.setattr(exit_guard, "EXIT_SHOWS_WITHIN_S", 1.0)
+    _slow_first_read(world, 1.5)
+    phone, out = world.background(world.phone_exit, X)
+    time.sleep(0.2)
+    world.api_exit_all()
+    phone.join(10)
+    assert never_reversed(world.broker, X), summary(world, X)
+    assert [o["symbol"] for o in world.broker.orders].count(X) == 1
+    assert out["result"][0] == 200  # the phone's exit is the one that closed it
+    assert [world.broker.true_qty(s) for s in (X, Y, Z)] == [0, 0, 0]
+
+
+def test_s22b_the_same_with_a_read_inside_the_note_closes_once(world, monkeypatch):
+    monkeypatch.setattr(exit_guard, "EXIT_SHOWS_WITHIN_S", 1.0)
+    _slow_first_read(world, 0.6)
+    phone, _ = world.background(world.phone_exit, X)
+    time.sleep(0.2)
+    world.api_exit_all()
+    phone.join(10)
+    assert never_reversed(world.broker, X), summary(world, X)
+    assert [o["symbol"] for o in world.broker.orders].count(X) == 1
+
+
+def test_s23_a_claim_taken_for_a_read_that_finds_nothing_to_close_is_let_go(world):
+    """A position size of 0 for a flat position sends nothing, and its claim ends with it."""
+    world.broker.base[X] = 0
+    _code, body = world.tv_smart_exit(X)
+    assert body["message"] == "No open position found. Not placing exit order."
+    assert world.broker.orders == [] and len(exit_guard.EXITS) == 0
+    world.broker.base[X] = 65
+    upstox._POSITION_BOOK.invalidate("token")  # the read just made is cached for a second
+    world.phone_exit(X)  # the position is free: nothing stranded a claim on it
+    assert [o["symbol"] for o in world.broker.orders] == [X]
+
+
+# -- the second review's slow reads (its N4 and N5) ----------------------------------------------
+
+
+def test_s24_an_exit_all_whose_order_book_is_too_slow_sends_nothing_and_says_so(world, monkeypatch):
+    """The order book's read is cut off at its own limit: not read, so what is held cannot be
+    confirmed, and nothing is sent."""
+    monkeypatch.setattr(exit_guard, "EXIT_ALL_ORDERS_READ_S", 0.3)
+    monkeypatch.setattr(exit_guard, "EXIT_ALL_SENDS_FOR_S", 0.5)
+    world.broker.order_book_delay = 2.0
+    code, body = world.api_exit_all()
+    took = world.answers[-1][4] - world.answers[-1][3]
+    assert world.broker.orders == [], summary(world, X, Y, Z)
+    assert code == 409 and "Upstox did not send your orders in time" in body["message"]
+    assert took < 1.5, f"it took {took:.2f}s"  # cut off at its limit, not waited out
+
+
+def test_s24b_an_order_book_slower_than_the_time_for_sending_still_leaves_it(world, monkeypatch):
+    """The review's N4: the time for sending starts once the reads are done."""
+    monkeypatch.setattr(exit_guard, "EXIT_ALL_SENDS_FOR_S", 0.5)
+    world.broker.order_book_delay = 0.6
+    code, body = world.api_exit_all()
+    assert [world.broker.true_qty(s) for s in (X, Y, Z)] == [0, 0, 0], summary(world, X, Y, Z)
+    assert code == 200 and "note" not in body
+
+
+def test_s25_an_exit_all_whose_positions_read_is_slow_still_closes_everything(world, monkeypatch):
+    """The review's N5."""
+    monkeypatch.setattr(exit_guard, "EXIT_ALL_SENDS_FOR_S", 0.5)
+    _slow_first_read(world, 0.6)
+    code, _body = world.api_exit_all()
+    assert [world.broker.true_qty(s) for s in (X, Y, Z)] == [0, 0, 0], summary(world, X, Y, Z)
+    assert code == 200

@@ -32,6 +32,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import random
 import signal
 import time
@@ -43,11 +44,15 @@ from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed, InvalidHandshake, InvalidURI
 
 from sudarshan.autologin.schedule import IST, TradingCalendar, hhmm
+from sudarshan.tasks import cancel_and_wait
 
 from . import __version__, loopback, messages
 from .config import ConfigError, Settings, setup_logging, switched_off
+from .health import health_document  # M18.1: the health document (served by the market API)
+from .market.config import MarketSettings, feed_url_of, http_port_of, market_on  # M10.1
+from .notices import NoticeDesk  # M18.x: the server's own notices (deploy, backup)
 from .orders import Alert, OrderTracker
-from .outbox import OpenAlgoTelegram, Outbox, Throttle
+from .outbox import OpenAlgoTelegram, Outbox, Pacer, Throttle
 from .owner import Owner, OwnerError, load_openalgo_modules, prepare_openalgo_env, read_owner
 from .resync import Books, BookUnavailable, read_books
 from .store import DB_FILENAME, Store
@@ -110,10 +115,12 @@ class AlertService:
         *,
         owner_reader: Callable[[], Owner],
         clock: Callable[[], datetime] | None = None,
+        pacer: Pacer | None = None,  # M10.5: one pace for every Telegram lane
     ):
         self.settings = settings
         self.read_owner = owner_reader
         self.clock = clock or (lambda: datetime.now(IST))
+        self.pacer = pacer
         calendar = TradingCalendar(settings.holidays_file, settings.extra_days_file)
         self.window = AlertWindow(
             calendar, settings.window, settings.always_on, settings.extra_days_file
@@ -122,6 +129,7 @@ class AlertService:
         self.store: Store | None = None
         self.tracker: OrderTracker | None = None
         self.outbox: Outbox | None = None
+        self.notices: NoticeDesk | None = None  # M18.x
         self.client: httpx.AsyncClient | None = None
         self._stop = asyncio.Event()
         self._state, self._detail = "starting", ""
@@ -150,14 +158,27 @@ class AlertService:
             telegram = OpenAlgoTelegram(
                 self.settings.openalgo_url, client, lambda: self.owner, self._reload_owner
             )
-            self.outbox = Outbox(telegram.send, self.clock)
+            self.outbox = Outbox(telegram.send, self.clock, self.pacer)
             log.info(
                 "sudarshan-alerts %s: window %s, cancellations %s, sandbox %s",
                 __version__, self._window_text(), self.settings.cancelled,
                 "on" if self.settings.sandbox else "off",
             )  # fmt: skip
-            sender = asyncio.create_task(self.outbox.run())
-            ticker = asyncio.create_task(self._tick())
+            sender = asyncio.create_task(self.outbox.run(), name="order alerts: Telegram")
+            ticker = asyncio.create_task(self._tick(), name="order alerts: clock")
+            # M18.x: tells what the deploy tool and the backup job recorded (notices.py). It does
+            # not depend on the alert window or the order stream.
+            self.notices = NoticeDesk(
+                self.settings.notice_spools,
+                self.store,
+                telegram.send,
+                self._owner_ready,
+                self.clock,
+                # Quiet while the market trades (failures excepted). M10.5 hook: add
+                # pace=LanePace(outbox.pacer) once outbox.Pacer is merged (notices.py).
+                market_open=self.window.calendar.in_market_hours,
+            )
+            notices = asyncio.create_task(self.notices.run(), name="order alerts: server notices")
             try:
                 await self._supervise()
             finally:
@@ -166,11 +187,12 @@ class AlertService:
                 for task in unfinished:  # a pause still unread is told as such (_resync)
                     task.cancel()
                 await asyncio.gather(*unfinished, return_exceptions=True)
-                left = await self.outbox.flush(STOP_FLUSH_S)
+                left, _ = await asyncio.gather(  # M18.x: a notice on its way gets the same grace
+                    self.outbox.flush(STOP_FLUSH_S), self.notices.close(STOP_FLUSH_S)
+                )
                 if left:
                     log.warning("%d order alerts were not sent before stopping", left)
-                sender.cancel()
-                await asyncio.gather(sender, ticker, return_exceptions=True)
+                await cancel_and_wait(sender, ticker, notices)  # a cancel lost in httpx is sent again
                 self.store.close()
                 self._set_state("stopped")
 
@@ -245,6 +267,11 @@ class AlertService:
             log.warning(OWNER_PROBLEMS[problem])
         self.owner, self._owner_problem = None, problem
         return None
+
+    def _owner_ready(self) -> bool:
+        """M18.x: True when the owner's key is loaded, read from OpenAlgo first when it is not (the
+        notices go out when the alert window is closed, when no connection has read it)."""
+        return self.owner is not None or self._load_owner() is not None
 
     def _use(self, owner: Owner) -> None:
         if self._owner_problem is not None or self.owner is None:
@@ -571,17 +598,114 @@ def _json(raw) -> dict | None:
     return message if isinstance(message, dict) else None
 
 
-async def _serve(service: AlertService) -> None:
+async def _serve(service: AlertService, market=None, api=None, port: int = 0) -> None:
     loop = asyncio.get_running_loop()
+    if api is not None:  # M10.1: the market alerts' sealed local API, before anything else
+        api.base_health = lambda: health_document(service)  # M18.1: the one /health
+        market, api = await _open_api(api, port, market)
     for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, service.stop, f"signal {sig.name}")
-    await service.run()
+        loop.add_signal_handler(sig, _stop, service, market, f"signal {sig.name}")
+    try:
+        await asyncio.gather(service.run(), *([market.run()] if market else []))  # M10.1
+    finally:
+        if api is not None:
+            await api.close()
+
+
+async def _open_api(api, port: int, market):
+    """M10.1: the API on 127.0.0.1:<port>. A port that is taken keeps market alerts off (their
+    claims are dropped at the feed) and order alerts carry on; no other port is tried."""
+    from .market.runtime import MarketRuntime, ReleasedClaims
+
+    try:
+        await api.start(port)
+    except OSError as exc:
+        log.error(
+            "Market alerts cannot open their local API: port %d on this server is taken (%s). "
+            "Market alerts stay off; order alerts carry on. Free the port, then restart "
+            "sudarshan-alerts.", port, exc.strerror or exc,
+        )  # fmt: skip
+        if isinstance(market, MarketRuntime):
+            market = ReleasedClaims(market.config.feed_url)
+        return market, None
+    return market, api
+
+
+def _stop(service: AlertService, market, reason: str) -> None:
+    service.stop(reason)
+    if market is not None:  # M10.1
+        market.stop(reason)
+
+
+#: Where the owner corrects a market setting: the unit's environment file (M10.1).
+ALERTS_ENV = "/etc/sudarshan/alerts.env"
+#: The Alerts page's line when market alerts could not start for a reason no setting explains.
+NOT_STARTED = (
+    "Market alerts could not start on the server; order alerts carry on. Restart "
+    "sudarshan-alerts; if this stays, its journal says why."
+)
+
+
+def _market_settings() -> tuple[bool, MarketSettings | None, str | None]:
+    """M10.1: whether market alerts are wanted, their settings, and why they are off when one
+    cannot be used. Never raises: a market setting never stops order alerts (review H2), and
+    a mistyped switch counts as wanted, so the Alerts page can say what to correct."""
+    try:
+        if not market_on():
+            return False, None, None
+        return True, MarketSettings.from_env(), None
+    except ConfigError as exc:
+        reason = (
+            f"Market alerts are off: {exc}. Correct it in {ALERTS_ENV}, then restart "
+            "sudarshan-alerts."
+        )
+        log.error("%s Order alerts carry on.", reason)
+        return True, None, reason
+
+
+def _market(
+    settings: Settings,
+    market: MarketSettings | None,
+    db_path,
+    pacer: Pacer,
+    off: str | None = None,
+):
+    """M10.1: market alerts and their local API, or, off, the API saying so (``off``: why) while
+    the feed drops the keys an earlier run claimed. Never raises: a failure here keeps market
+    alerts off with the page saying so, and order alerts carry on (review H2)."""
+    try:
+        return _market_parts(settings, market, db_path, pacer, off)
+    except Exception:
+        log.exception("Market alerts could not start; order alerts carry on")
+    try:
+        return _market_parts(settings, None, db_path, pacer, NOT_STARTED)
+    except Exception:
+        log.exception("Market alerts' local API could not start either")
+        return None, None, 0
+
+
+def _market_parts(settings, market, db_path, pacer, off):
+    from sudarshan.vault import ALERTS_API_INFO, ALERTS_PUSH_INFO, fernet_for, pepper_from
+
+    from .market.api import MarketApi, OffDesk
+    from .market.desk import OwnerDesk
+    from .market.runtime import MarketRuntime, ReleasedClaims
+
+    pepper = pepper_from(os.environ)
+    fernet = fernet_for(pepper, ALERTS_API_INFO)
+    if market is None:
+        return ReleasedClaims(feed_url_of()), MarketApi(OffDesk(off), fernet), http_port_of()
+    runtime = MarketRuntime(settings, market, owner_reader=lambda: read_owner(db_path),
+                            pacer=pacer, openalgo_db=db_path,
+                            push_fernet=fernet_for(pepper, ALERTS_PUSH_INFO))  # fmt: skip
+    return runtime, MarketApi(OwnerDesk(runtime), fernet), market.http_port
 
 
 def main() -> int:
     setup_logging()
+    market_wanted, market, market_off = _market_settings()  # M10.1: never stops order alerts
     try:
-        if switched_off():
+        if switched_off() and not market_wanted:
             log.info("Order alerts are off (SUDARSHAN_ORDER_ALERTS=off): nothing is sent")
             return 0  # the unit restarts on failure only, so it stays stopped
         settings = Settings.from_env()
@@ -594,9 +718,11 @@ def main() -> int:
     except Exception:  # OpenAlgo's modules refused their settings at import
         log.exception("sudarshan-alerts cannot load OpenAlgo's database modules")
         return 2
-    service = AlertService(settings, owner_reader=lambda: read_owner(db_path))
+    pacer = Pacer()  # M10.5: fills first, market alerts in what is left
+    service = AlertService(settings, owner_reader=lambda: read_owner(db_path), pacer=pacer)
+    runtime, api, port = _market(settings, market, db_path, pacer, market_off)  # M10.1
     try:
-        asyncio.run(_serve(service))
+        asyncio.run(_serve(service, runtime, api, port))
     except Exception:  # a bug: systemd restarts it
         log.exception("sudarshan-alerts stopped unexpectedly")
         return 1

@@ -2,6 +2,8 @@ import { CandlestickChart, Minus, Plus } from 'lucide-react'
 import { memo, type ReactNode, useCallback, useEffect } from 'react'
 import { calculateLiveStats } from '@/hooks/useLivePrice'
 import { cn } from '@/lib/utils'
+import { AccessNotice } from '@/sudarshan/AccessNotice'
+import { usePriceAccess, useReadWhenReady } from '@/sudarshan/access'
 import { type FeedRow, useBookFeed } from '@/sudarshan/books/feed'
 import type { TickDirection } from '@/sudarshan/books/prices'
 import { SymbolChartLink } from '@/sudarshan/chart/SymbolChartLink'
@@ -153,6 +155,9 @@ const HoldingBoard = memo(function HoldingBoard({
   })
   const openSheet = useCallback((id: string) => open({ act: 'sheet', row: id }), [open])
   const refresh = useCallback(() => void onRefresh(true), [onRefresh])
+  // No key or no Upstox login: the notice says which, never "No holdings".
+  const access = usePriceAccess()
+  useReadWhenReady(access.state, error !== null, refresh)
   const figuresStale = (line.kind === 'delayed' || line.kind === 'connecting') && line.stale
 
   const target =
@@ -191,7 +196,9 @@ const HoldingBoard = memo(function HoldingBoard({
   }
 
   let content: ReactNode
-  if (holdings.length === 0 && loading) {
+  if (access.state !== 'ready') {
+    content = <AccessNotice access={access} />
+  } else if (holdings.length === 0 && loading) {
     content = <LoadingCards />
   } else if (holdings.length === 0 && error) {
     content = <ProblemCard message="Holdings could not be read just now." onRetry={refresh} />

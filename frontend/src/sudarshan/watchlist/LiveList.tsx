@@ -1,5 +1,6 @@
 import { memo } from 'react'
 import type { WatchlistItem } from '@/api/watchlist'
+import type { AlertPrefill } from '@/sudarshan/alerts/AlertForm'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
 import type { MarketOpen } from '@/sudarshan/dashboard/live'
 import { type OrderRequest, SymbolSheet } from './SymbolSheet'
@@ -28,6 +29,7 @@ export const LiveList = memo(function LiveList({
   onAdd,
   onCloseSheet,
   onOrder,
+  onAlert,
 }: {
   items: WatchlistItem[]
   apiKey: string | null
@@ -46,6 +48,7 @@ export const LiveList = memo(function LiveList({
   onAdd?: () => void
   onCloseSheet: () => void
   onOrder: (order: OrderRequest) => void
+  onAlert: (alert: AlertPrefill) => void
 }) {
   const live = useLiveRows({ items, apiKey, marketOpen: isOpen })
   const sheetRow =
@@ -55,7 +58,10 @@ export const LiveList = memo(function LiveList({
 
   return (
     <>
-      {live.line && <LiveLine line={live.line} now={live.now} className="flex min-h-5 px-1" />}
+      {/* No key to read with: nothing is connecting, and the page's notice says why. */}
+      {apiKey !== null && live.line && (
+        <LiveLine line={live.line} now={live.now} className="flex min-h-5 px-1" />
+      )}
 
       {readFailed && (
         <output className="flex flex-wrap items-center gap-x-2 px-1 text-xs font-medium text-muted-foreground">
@@ -96,6 +102,7 @@ export const LiveList = memo(function LiveList({
         now={live.now}
         onClose={onCloseSheet}
         onOrder={onOrder}
+        onAlert={onAlert}
         onRemove={onRemove}
       />
     </>

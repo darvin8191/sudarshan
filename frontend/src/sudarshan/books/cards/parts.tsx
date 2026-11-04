@@ -310,11 +310,20 @@ export function SentChip({ label }: { label: string }) {
   )
 }
 
-/** A card's line when no answer came back for its exit or cancel: what to do first. */
-export function SentNote({ text }: { text: string }) {
+/**
+ * A card's line when no answer came back for its exit or cancel, or when Exit
+ * all sent nothing for it (`not-sent`): what happened, and what to do first.
+ */
+export function SentNote({
+  text,
+  state = 'unconfirmed',
+}: {
+  text: string
+  state?: 'unconfirmed' | 'not-sent'
+}) {
   return (
     <span
-      data-sent="unconfirmed"
+      data-sent={state}
       className="flex items-start gap-1.5 rounded-[0.625rem] bg-[color:var(--gold-tint)] px-2.5 py-1.5 text-xs leading-snug font-semibold text-[color:var(--warning-text)]"
     >
       <AlertTriangle aria-hidden="true" className="mt-px size-3.5 shrink-0" />

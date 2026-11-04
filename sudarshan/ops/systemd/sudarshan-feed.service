@@ -22,6 +22,8 @@ Restart=always
 RestartSec=10
 # SIGTERM -> close frame to Upstox (<= 5 s), final snapshot and recorder flush.
 TimeoutStopSec=20
+# No MemoryHigh, on purpose: throttling near it would delay ticks with no sign of it. A stop at
+# MemoryMax is visible (the services reading the feed say it is down) and it restarts in 10 s.
 MemoryMax=512M
 CPUWeight=50
 NoNewPrivileges=yes

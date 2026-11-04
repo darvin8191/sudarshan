@@ -93,8 +93,18 @@ jobs:
           GH_REPO: ${{ github.repository }}
           TAG: ${{ github.event.release.tag_name }}
         run: |
-          gh release upload "${TAG}" frontend-dist.tar.gz frontend-dist.tar.gz.sha256 --clobber
-          gh release edit "${TAG}" --prerelease=false --latest
+          # GitHub's API can answer 502 for a moment (v0.4.0's first build): each call is tried
+          # three times before the build counts as failed and the release is demoted.
+          for attempt in 1 2 3; do
+            gh release upload "${TAG}" frontend-dist.tar.gz frontend-dist.tar.gz.sha256 --clobber && break
+            [ "${attempt}" = 3 ] && exit 1
+            sleep 20
+          done
+          for attempt in 1 2 3; do
+            gh release edit "${TAG}" --prerelease=false --latest && break
+            [ "${attempt}" = 3 ] && exit 1
+            sleep 20
+          done
 
       - name: Failed build - demote the release so the server ignores it
         if: failure() && github.event_name == 'release'

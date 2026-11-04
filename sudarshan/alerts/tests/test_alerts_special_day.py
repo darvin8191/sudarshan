@@ -37,6 +37,25 @@ def quick_resync(monkeypatch):
     monkeypatch.setattr(service, "RESYNC_RETRY_S", (0.05, 0.05))
 
 
+@pytest.fixture(params=[0.0, 0.5], ids=["start read at once", "start read slow"])
+def start_read_s(request, monkeypatch):
+    """How long the start's own order book read takes. Slow, as under load, it outlasted the
+    window's close and told what the book showed later: these tests failed at random until they
+    waited for it (_start_read_decided)."""
+    delay = request.param
+    if delay:
+        real, calls = service.read_books, []
+
+        async def slow(*args, **kwargs):
+            calls.append(None)
+            if len(calls) == 1:
+                await asyncio.sleep(delay)
+            return await real(*args, **kwargs)
+
+        monkeypatch.setattr(service, "read_books", slow)
+    return delay
+
+
 @pytest.fixture
 def special(settings_for, tmp_path):
     """Settings on the real calendar files: Monday 9 Nov a holiday, ``extra`` the extra days."""
@@ -57,6 +76,11 @@ async def _start(settings, clock: Clock) -> tuple[AlertService, asyncio.Task]:
 async def _stop(svc: AlertService, task: asyncio.Task) -> None:
     svc.stop("test")
     await asyncio.wait_for(task, 10)
+
+
+async def _start_read_decided(svc: AlertService, openalgo: FakeOpenAlgo) -> None:
+    """Until the book read for the pause before this start is read and decided."""
+    await wait_until(lambda: openalgo.book_reads() >= 1 and svc._unchecked is None)
 
 
 def _lines(openalgo: FakeOpenAlgo) -> list[str]:
@@ -95,7 +119,9 @@ def test_a_pause_on_the_special_day_is_caught_up_that_day(special, fast, quick_r
     asyncio.run(scenario())
 
 
-def test_the_next_trading_day_looks_back_to_its_own_opening(special, fast, quick_resync):
+def test_the_next_trading_day_looks_back_to_its_own_opening(
+    special, fast, quick_resync, start_read_s
+):
     """The catch-up reads that day's order book and counts its pause from that day's opening:
     nothing after the special day's 16:00 is looked for again, so the margins must cover it."""
 
@@ -105,6 +131,7 @@ def test_the_next_trading_day_looks_back_to_its_own_opening(special, fast, quick
             clock = Clock(ist(2026, 11, 8, 15, 59, 58))
             svc, task = await _start(settings, clock)
             await wait_until(lambda: proxy.subscribed)
+            await _start_read_decided(svc, openalgo)
             clock.at = ist(2026, 11, 8, 16, 0, 1)  # the special day's window closes
             await wait_until(lambda: proxy.close_codes == [1000])
             await _stop(svc, task)
@@ -121,7 +148,9 @@ def test_the_next_trading_day_looks_back_to_its_own_opening(special, fast, quick
     asyncio.run(scenario())
 
 
-def test_the_hours_between_two_windows_of_a_day_are_caught_up(special, fast, quick_resync):
+def test_the_hours_between_two_windows_of_a_day_are_caught_up(
+    special, fast, quick_resync, start_read_s
+):
     """An evening session on a day that trades anyway: both windows, and the book in between."""
 
     async def scenario():
@@ -130,6 +159,7 @@ def test_the_hours_between_two_windows_of_a_day_are_caught_up(special, fast, qui
             clock = Clock(ist(2026, 11, 10, 15, 59, 58))  # Tuesday, at the usual close
             svc, task = await _start(settings, clock)
             await wait_until(lambda: proxy.subscribed)
+            await _start_read_decided(svc, openalgo)
             clock.at = ist(2026, 11, 10, 16, 0, 1)
             await wait_until(lambda: proxy.close_codes == [1000])
             await wait_until(lambda: svc.state == "closed")

@@ -1,10 +1,18 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router'
+import {
+  type InitialEntry,
+  MemoryRouter,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+} from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChartStateView } from '@/lib/trading/chartState'
 import type { LiveStatus } from '@/lib/trading/liveStatus'
 import type { FeedLine } from '@/sudarshan/dashboard/live'
+import { useAuthStore } from '@/stores/authStore'
 import { rememberProduct } from '@/sudarshan/ticket/productPref'
 import type { PhoneChartCallbacks, PhoneTick } from './phoneChart'
 
@@ -103,6 +111,24 @@ vi.mock('@/components/trading/SymbolSearchDialog', () => ({
     ) : null,
 }))
 
+// SUDARSHAN M10.2: the market alert form the bell opens: its own price stream and its save.
+vi.mock('@/lib/MarketDataManager', () => import('@/test/marketDataHarness'))
+const alerting = vi.hoisted(() => ({
+  create: vi.fn(),
+  prefs: vi.fn(async () => ({ telegram: true, app: true })),
+  toasts: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() },
+}))
+vi.mock('@/api/marketAlerts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/api/marketAlerts')>()),
+  marketAlertsApi: { create: alerting.create, prefs: alerting.prefs },
+}))
+vi.mock('@/utils/toast', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/utils/toast')>()),
+  toast: alerting.toasts,
+}))
+
+import { QueryClientProvider } from '@tanstack/react-query'
+import { createQueryClient } from '@/app/providers'
 import ChartPage from './ChartPage'
 
 function Where() {
@@ -120,17 +146,19 @@ function PhoneBack() {
   )
 }
 
-function renderAt(path: string, before: string[] = []) {
+function renderAt(path: InitialEntry, before: InitialEntry[] = []) {
   return render(
-    <MemoryRouter initialEntries={[...before, path]}>
-      <Routes>
-        <Route path="/chart" element={<ChartPage />} />
-        <Route path="/chart/:exchange/:symbol" element={<ChartPage />} />
-        <Route path="*" element={<p>Elsewhere</p>} />
-      </Routes>
-      <Where />
-      <PhoneBack />
-    </MemoryRouter>
+    <QueryClientProvider client={createQueryClient()}>
+      <MemoryRouter initialEntries={[...before, path]}>
+        <Routes>
+          <Route path="/chart" element={<ChartPage />} />
+          <Route path="/chart/:exchange/:symbol" element={<ChartPage />} />
+          <Route path="*" element={<p>Elsewhere</p>} />
+        </Routes>
+        <Where />
+        <PhoneBack />
+      </MemoryRouter>
+    </QueryClientProvider>
   )
 }
 
@@ -153,7 +181,7 @@ function emit(fn: (callbacks: PhoneChartCallbacks) => void) {
   act(() => fn(chart().opts.callbacks))
 }
 
-async function opened(path = '/chart/NSE/SBIN', before: string[] = []) {
+async function opened(path: InitialEntry = '/chart/NSE/SBIN', before: InitialEntry[] = []) {
   const view = renderAt(path, before)
   await waitFor(() => expect(fakes.charts.length).toBeGreaterThan(0))
   await waitFor(() => expect(chart().load).toHaveBeenCalled())
@@ -163,6 +191,7 @@ async function opened(path = '/chart/NSE/SBIN', before: string[] = []) {
 beforeEach(() => {
   fakes.charts.length = 0
   fakes.config = { apiKey: 'test-key', wsUrl: 'ws://test.invalid' }
+  useAuthStore.setState({ apiKey: 'test-key', sessionChecked: true, brokerSessionExpired: false })
   fakes.instrument = { name: 'STATE BANK OF INDIA', lotSize: 1, tickSize: 0.05 }
   localStorage.clear()
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 })
@@ -333,14 +362,50 @@ describe('the phone chart page at 390 px', () => {
     expect(screen.getByRole('switch', { name: 'Keep screen on' })).toBeVisible()
   })
 
-  it('says what to do when there is no API key', async () => {
+  describe('without prices', () => {
+    beforeEach(() => {
+      // A re-check that cannot reach the server leaves the stores as they are.
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => Promise.reject(new Error('offline')))
+      )
+    })
+    afterEach(() => {
+      vi.unstubAllGlobals()
+    })
+
+    it('still checking: a quiet line, never the API key message', async () => {
+      useAuthStore.setState({ apiKey: null, sessionChecked: false })
+      renderAt('/chart/NSE/SBIN')
+      expect(await screen.findByText('Checking your login')).toBeVisible()
+      expect(screen.queryByText(/API key/)).toBeNull()
+    })
+
+    it('Upstox not logged in today: says so with the two links', async () => {
+      useAuthStore.setState({ apiKey: null, sessionChecked: true, brokerSessionExpired: true })
+      renderAt('/chart/NSE/SBIN')
+      expect(await screen.findByText(/Upstox is not logged in today/)).toBeVisible()
+      expect(screen.getByRole('link', { name: 'Auto login' })).toBeVisible()
+      expect(screen.queryByText(/API key/)).toBeNull()
+    })
+
+    it('no API key: says what to do', async () => {
+      useAuthStore.setState({ apiKey: null, sessionChecked: true, brokerSessionExpired: false })
+      renderAt('/chart/NSE/SBIN')
+      expect(await screen.findByText('Prices and search need an API key.')).toBeVisible()
+      expect(screen.getByRole('link', { name: 'Create one under API Key' })).toHaveAttribute(
+        'href',
+        '/apikey'
+      )
+    })
+  })
+
+  it('ready but the stream settings did not come back: Try again, not an API key message', async () => {
     fakes.config = null
     renderAt('/chart/NSE/SBIN')
-    expect(await screen.findByText('The chart needs your API key.')).toBeVisible()
-    expect(screen.getByRole('link', { name: 'Open the API key page' })).toHaveAttribute(
-      'href',
-      '/apikey'
-    )
+    expect(await screen.findByText('The chart could not start.')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeVisible()
+    expect(screen.queryByText(/API key/)).toBeNull()
   })
 
   it('shows a failed load in words, with Try again and Dismiss', async () => {
@@ -495,5 +560,94 @@ describe('the phone chart page at 390 px', () => {
     const { unmount } = await opened()
     unmount()
     expect(chart().destroy).toHaveBeenCalled()
+  })
+})
+
+describe('a market alert from the phone chart (M10.2)', () => {
+  const tick = (ltp: number) =>
+    emit((cb) => cb.onTick({ ltp, time: null, tradeTime: null, at: Date.now(), polled: false }))
+
+  it('opens the alert form from the bell, at the last price, and Back closes it first', async () => {
+    await opened('/chart/NSE/SBIN', ['/dashboard'])
+    tick(812.4)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Set alert' }))
+    const form = screen.getByRole('dialog', { name: 'New alert' })
+    expect(within(form).getByLabelText('Price level')).toHaveValue('812.40')
+
+    // The open sheet hides the page around it, so the phone's Back is pressed as the phone would.
+    fireEvent.click(screen.getByRole('button', { name: 'Phone back', hidden: true }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(screen.getByRole('status', { name: 'Location' })).toHaveTextContent('/chart/NSE/SBIN')
+    await userEvent.click(screen.getByRole('button', { name: 'Phone back' }))
+    expect(screen.getByText('Elsewhere')).toBeInTheDocument()
+  })
+
+  it('says the alert is set, with View to it, and closes the form', async () => {
+    alerting.create.mockReset().mockResolvedValue({
+      id: 77,
+      symbol: 'SBIN',
+      exchange: 'NSE',
+      words: { condition: 'Crosses above ₹812.40', meta: 'Once', checks_at: null },
+    })
+    alerting.toasts.success.mockReset()
+    await opened('/chart/NSE/SBIN', ['/dashboard'])
+    tick(812.4)
+    await userEvent.click(screen.getByRole('button', { name: 'Set alert' }))
+    await userEvent.click(
+      within(screen.getByRole('dialog', { name: 'New alert' })).getByRole('button', {
+        name: 'Save',
+      })
+    )
+
+    await waitFor(() => expect(alerting.toasts.success).toHaveBeenCalledTimes(1))
+    expect(alerting.create.mock.calls[0][0]).toMatchObject({
+      symbol: 'SBIN',
+      exchange: 'NSE',
+      params: { op: 'crosses_above', level: '812.40', source: 'ltp' },
+      price: 812.4,
+    })
+    expect(alerting.toasts.success.mock.calls[0][0]).toBe('Alert set: SBIN')
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(screen.getByRole('status', { name: 'Location' })).toHaveTextContent('/chart/NSE/SBIN')
+
+    act(() => alerting.toasts.success.mock.calls[0][1].action.onClick())
+    expect(screen.getByRole('status', { name: 'Location' })).toHaveTextContent(
+      '/market-alerts?alert=77'
+    )
+  })
+
+  it('closes the form’s instrument search first on Back, and a pick goes back once', async () => {
+    await opened('/chart/NSE/SBIN', ['/dashboard'])
+    tick(812.4)
+    await userEvent.click(screen.getByRole('button', { name: 'Set alert' }))
+    const form = screen.getByRole('dialog', { name: 'New alert' })
+
+    fireEvent.click(within(form).getByRole('button', { name: /Change/ }))
+    expect(screen.getByRole('dialog', { name: 'Symbol Search' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Phone back', hidden: true }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Symbol Search' })).toBeNull())
+    expect(screen.getByRole('dialog', { name: 'New alert' })).toBeInTheDocument()
+
+    fireEvent.click(within(form).getByRole('button', { name: /Change/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'RELIANCE' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Symbol Search' })).toBeNull())
+    expect(within(form).getByRole('button', { name: /RELIANCE/ })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Phone back', hidden: true }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'New alert' })).toBeNull())
+    expect(screen.getByRole('status', { name: 'Location' })).toHaveTextContent('/chart/NSE/SBIN')
+  })
+
+  it('does not reopen an alert form with the page: it opens only from a tap', async () => {
+    await opened({ pathname: '/chart/NSE/SBIN', state: { sheet: 'alert' } }, ['/chart/NSE/SBIN'])
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'New alert' })).toBeNull())
+    expect(screen.getByRole('status', { name: 'Location' })).toHaveTextContent('/chart/NSE/SBIN')
+  })
+
+  it('offers no bell where market alerts do not reach', async () => {
+    await opened('/chart/MCX/GOLDM')
+    expect(screen.queryByRole('button', { name: 'Set alert' })).toBeNull()
   })
 })

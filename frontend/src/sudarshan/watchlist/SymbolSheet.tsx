@@ -1,11 +1,14 @@
 import { useQuery } from '@tanstack/react-query'
-import { CandlestickChart, Clock, Layers, Trash2 } from 'lucide-react'
+import { BellPlus, CandlestickChart, Clock, Layers, Trash2 } from 'lucide-react'
 import { useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { oiProfileApi } from '@/api/oi-profile'
 import type { WatchlistItem } from '@/api/watchlist'
 import type { DepthLevel } from '@/lib/MarketDataManager'
 import { cn } from '@/lib/utils'
+import type { AlertPrefill } from '@/sudarshan/alerts/AlertForm'
+import { isCovered, NOT_FOR } from '@/sudarshan/alerts/words'
+import { UNAVAILABLE, useWhyNot, WhyNot } from '@/sudarshan/books/cards/parts'
 import { chartPath } from '@/sudarshan/chart/prefs'
 import { formatAmount, formatPrice } from '@/sudarshan/dashboard/format'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
@@ -252,9 +255,10 @@ export type OrderRequest = {
 /**
  * The sheet a row opens: the instrument's level and change, its own status
  * line, Buy and Sell (the app's order ticket, `PlaceOrderDialog`), the product
- * the ticket opens with, its chart, its option chain when it has one, five
- * levels of depth, and taking it out of the list. An index has no order book
- * and cannot be traded, so it gets the chart and the option chain only.
+ * the ticket opens with, its chart, its option chain when it has one, a
+ * market alert on it (M10.2), five levels of depth, and taking it out of the
+ * list. An index has no order book and cannot be traded, so it gets the
+ * chart, the option chain and the alert only.
  */
 export function SymbolSheet({
   row,
@@ -265,6 +269,7 @@ export function SymbolSheet({
   now,
   onClose,
   onOrder,
+  onAlert,
   onRemove,
 }: {
   row: LiveRow | null
@@ -276,6 +281,8 @@ export function SymbolSheet({
   now: number
   onClose: () => void
   onOrder: (order: OrderRequest) => void
+  /** The market alert form on this instrument, from its snapped live price. */
+  onAlert: (alert: AlertPrefill) => void
   onRemove: (item: WatchlistItem) => void
 }) {
   if (!row) return null
@@ -290,6 +297,7 @@ export function SymbolSheet({
       now={now}
       onClose={onClose}
       onOrder={onOrder}
+      onAlert={onAlert}
       onRemove={onRemove}
     />
   )
@@ -304,6 +312,7 @@ function Sheet({
   now,
   onClose,
   onOrder,
+  onAlert,
   onRemove,
 }: Parameters<typeof SymbolSheet>[0] & { row: LiveRow }) {
   const { item } = row
@@ -329,6 +338,15 @@ function Sheet({
   const order = (action: 'BUY' | 'SELL') => {
     if (contract.data) onOrder({ item, action, contract: contract.data, product })
   }
+  // M10.2: market alerts cover NSE, BSE, NFO, BFO and their indices; anything else says why.
+  const alertWhy = useWhyNot(isCovered(item.exchange) ? null : NOT_FOR.exchange)
+  const setAlert = () =>
+    onAlert({
+      symbol: item.symbol,
+      exchange: item.exchange,
+      tick: contract.data?.tickSize ?? null,
+      price: row.view.ltp,
+    })
 
   return (
     <BottomSheet
@@ -410,7 +428,16 @@ function Sheet({
               Option chain
             </Link>
           )}
+          <button
+            type="button"
+            {...alertWhy.button(setAlert)}
+            className={alertWhy.why ? UNAVAILABLE : OUTLINED}
+          >
+            <BellPlus aria-hidden="true" className="size-5" />
+            Set alert
+          </button>
         </div>
+        <WhyNot why={alertWhy.why} id={alertWhy.id} told={alertWhy.told} />
 
         {tradable && apiKey !== null && <Depth item={item} marketOpen={marketOpen} now={now} />}
 

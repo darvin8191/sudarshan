@@ -770,6 +770,18 @@ def react_autologin():
     return serve_react_app()
 
 
+# SUDARSHAN M10.3: market alerts (its API is /sudarshan/alerts/api/*; upstream owns /alerts)
+@react_bp.route("/market-alerts", strict_slashes=False)
+def react_market_alerts():
+    return serve_react_app()
+
+
+# SUDARSHAN M20.7: Settings > Risk, the kill switch (its API is /sudarshan/risk/*)
+@react_bp.route("/risk", strict_slashes=False)
+def react_risk():
+    return serve_react_app()
+
+
 # SUDARSHAN M4.15: the phone chart. A bare /chart opens the last instrument.
 @react_bp.route("/chart", strict_slashes=False)
 def react_phone_chart():

@@ -13,9 +13,21 @@ interface AuthStore {
   user: User | null
   apiKey: string | null
   isAuthenticated: boolean
+  // SUDARSHAN: what /auth/session-status last said about the broker login.
+  // Both are this visit's facts, so neither is persisted (see partialize).
+  /** The server has answered a session check since the page loaded or the last logout. */
+  sessionChecked: boolean
+  /** The server said the app session is fine but today's broker login is not (token rolled over). */
+  brokerSessionExpired: boolean
+  /**
+   * SUDARSHAN: counts logouts. A session check that started before a logout
+   * compares it on return and drops its answer. Not persisted.
+   */
+  logoutEpoch: number
 
   setUser: (user: User) => void
   setApiKey: (apiKey: string | null) => void
+  setBrokerSession: (expired: boolean) => void
   login: (username: string, broker: string) => void
   logout: () => void
   checkSession: () => boolean
@@ -27,10 +39,15 @@ export const useAuthStore = create<AuthStore>()(
       user: null,
       apiKey: null,
       isAuthenticated: false,
+      sessionChecked: false,
+      brokerSessionExpired: false,
+      logoutEpoch: 0,
 
       setUser: (user) => set({ user, isAuthenticated: user.isLoggedIn }),
 
       setApiKey: (apiKey) => set({ apiKey }),
+
+      setBrokerSession: (expired) => set({ sessionChecked: true, brokerSessionExpired: expired }),
 
       login: (username, broker) => {
         const user: User = {
@@ -43,7 +60,14 @@ export const useAuthStore = create<AuthStore>()(
       },
 
       logout: () => {
-        set({ user: null, isAuthenticated: false, apiKey: null })
+        set((state) => ({
+          logoutEpoch: state.logoutEpoch + 1,
+          user: null,
+          isAuthenticated: false,
+          apiKey: null,
+          sessionChecked: false,
+          brokerSessionExpired: false,
+        }))
       },
 
       checkSession: () => {
@@ -88,6 +112,9 @@ export const useAuthStore = create<AuthStore>()(
     }),
     {
       name: 'openalgo-auth',
+      // SUDARSHAN: the same three fields as before; the broker-session facts
+      // must come from this visit's own check, never from an old one.
+      partialize: ({ user, apiKey, isAuthenticated }) => ({ user, apiKey, isAuthenticated }),
     }
   )
 )

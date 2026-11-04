@@ -30,6 +30,16 @@ G05 = Grain.of("0.05")
         (" 1399.8 ", Decimal("1399.8")),
         (Decimal("2.5"), Decimal("2.5")),
         ("NaN", None),
+        ("1e3", None),  # stored as "1E+3" before
+        ("1_000", None),
+        ("\u0967\u0966\u0966", None),  # Devanagari digits
+        ("\u0ae7\u0ae6\u0ae6", None),  # Gujarati digits
+        ("+5", None),
+        ("1,,0", None),
+        ("1,000.", None),
+        (".5", Decimal("0.5")),
+        ("1,25,000.50", Decimal("125000.50")),
+        (1e16, Decimal("10000000000000000")),
         (float("inf"), None),
         ("abc", None),
         ("", None),

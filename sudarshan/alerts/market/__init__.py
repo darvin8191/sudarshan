@@ -17,6 +17,16 @@ The runtime's seams are ``book.Book`` (``put``, ``drop``, ``seed``, ``on_tick``,
 ``changed``, ``modes``), ``clock.Market`` (what it knows about the market, rebuilt when health
 arrives, the day turns or a pause starts or ends) and ``spec.check`` / ``spec.Alert.of``.
 
+Around the engine, with I/O (sudarshan-alerts' own loop, never OpenAlgo's):
+
+    config    settings (SUDARSHAN_MARKET_ALERTS off by default)
+    feedlink  the feed's ZMQ ticks and health, its claims and snapshots
+    days      the day's sessions from the calendar files, the CAS keys from the master
+    store     market.db (migrations.py, migrate --status), one writer thread
+    lane      the Telegram lane behind the order alerts
+    words     what the owner reads
+    runtime   all of it together
+
 The golden vectors in sudarshan/alerts/tests/market_vectors.json are the contract; add a case
 whenever a rule changes.
 """

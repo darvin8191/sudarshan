@@ -1,0 +1,19 @@
+# सुदर्शन / SUDARSHAN nightly backup schedule (M18.11): 16:30 and 22:30 IST, every day.
+# Both are after 16:00, when the market hours the program keeps out of are over. The second is a
+# second chance after a failure, a boot or an install that kept the first from running: once an
+# archive under 8 hours old exists, a run does nothing. Every day, not Monday to Friday: the
+# program itself stays out of the way of a listed special session. Persistent: a run missed while
+# the server was down happens at boot, and the program ignores it if that is market hours.
+
+[Unit]
+Description=SUDARSHAN nightly backup schedule (IST)
+
+[Timer]
+OnCalendar=*-*-* 16:30:00 Asia/Kolkata
+OnCalendar=*-*-* 22:30:00 Asia/Kolkata
+AccuracySec=1min
+Persistent=true
+Unit=sudarshan-backup.service
+
+[Install]
+WantedBy=timers.target

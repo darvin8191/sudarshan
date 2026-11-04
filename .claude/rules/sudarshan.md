@@ -94,6 +94,10 @@ in brand. Icon "Mor": tile #0E5A73, ring #E3A21A, glyph #FFFFFF. Numbers via
   `sudarshan-screener`, `sudarshan-portfolio`, `sudarshan-family`, `sudarshan-ops`) talking to
   OpenAlgo through the REST API / `openalgo` SDK at `http://127.0.0.1:5000` and the WebSocket proxy
   `ws://127.0.0.1:8765`.
+- Ring services listen on 127.0.0.1 only, with one HTTP listener and one `/health` per service
+  (R14): `sudarshan-feed` 5580 (plus its ZMQ tick bus on 5581), `sudarshan-alerts` 5582,
+  `sudarshan-portfolio` 5583 and `sudarshan-screener` 5584 (both reserved). A new service takes
+  the next free port and is added here; an existing service never opens a second HTTP listener.
 - **No new asyncio loops, APScheduler jobs or background threads inside the OpenAlgo app**
   (gunicorn single worker + eventlet). Schedulers = systemd timers or the services above.
 - New React page = **three registrations**: route in `frontend/src/App.tsx`, known path in
@@ -123,11 +127,34 @@ in brand. Icon "Mor": tile #0E5A73, ring #E3A21A, glyph #FFFFFF. Numbers via
     can take 120 s); an answer the app could not confirm holds 15 s after the answer or the
     last change; the exit's own open order (pinned by the order id in the answer) holds until
     a book read settles it. After that it asks again, saying what is known about the first.
-    The server refuses an overlapping exit with 409 (`sudarshan/books/exit_guard.py`): per
-    position for the app's exits, and one claim taken by every Exit all from any surface
-    (app, `/api/v1/closeposition`, Telegram, Flow) in `close_position_with_auth`. Anything that may have reached the broker reads "not
-    confirmed", never a refusal or raw error text. A stranded hold costs a retry; a released
-    one can reverse a position.
+    The server keeps exits for one position to one at a time (`sudarshan/books/exit_guard.py`):
+    a claim while an exit is being placed, and a hold after it that Upstox's order book ends, not
+    a clock (up to 150 s when the book cannot be read; a 15 s note when the answer named no order).
+    A second exit of the position, from any surface, is refused with a sentence (409) while a hold
+    is open, and the sentence names the working order and says to cancel or modify it in Orders.
+    A single exit also refuses while the order book shows a MARKET order working on the position's
+    closing side, whether or not this process placed it (a restart loses the holds); a resting
+    stop or target (SL, SL-M, LIMIT) does not block it, and Exit all leaves such a position out
+    with its sentence.
+  - Sizing. Every exit and every smart order that reduces or crosses a position (a smart order that
+    only adds is sized from the row, with no order book read) is sized from the positions rows
+    corrected by the order book's fills (`sudarshan/books/fills.py`), per instrument across its
+    products, because a conversion (MIS to NRML in Upstox's app) moves quantity between rows with
+    no order. The positions are read first, then the order book. When that cannot be worked out,
+    or the order book did not answer, nothing is sent and the sentence says to use the Upstox app.
+    An exit is sent in the product that holds the position.
+  - A smart order to position size 0 never opens a position: TradingView's size is the one after
+    the order, so its only size-0 alert is an exit (it sends its contracts with it). If its claim
+    is refused it answers the busy sentence; from flat it sends nothing ("No open position found.
+    Not placing exit order."), however the day's fills lie. A smart order to another size that
+    reduces or crosses a position is refused while a MARKET order works on the closing side, as a
+    single exit is; one that only adds is never refused for being busy. Every Exit all takes one
+    claim for the whole book, reads positions and then the order book once, and leaves out, with a
+    sentence each, any position that is busy, held, has a working order on its closing side or is
+    traded today but not yet in Upstox's positions; it never waits. Anything that may have reached
+    the broker reads "not confirmed", never a refusal or raw error text; Upstox's own refusal text
+    is shown without its error code. A stranded hold costs a retry; a released one can reverse a
+    position. The scalping terminal's closes and the strategy module's exits are not covered yet.
   - A sheet, a confirmation or an order ticket ignores taps for 500 ms after it opens
     (`watchlist/openGuard.ts`), so a double tap never presses what appeared under the finger.
   - Order alerts on Telegram (M6.8) are on by default (owner's broker-app benchmark, 20 Oct
@@ -185,5 +212,12 @@ in brand. Icon "Mor": tile #0E5A73, ring #E3A21A, glyph #FFFFFF. Numbers via
   attaches them and marks the release latest (a failed build is demoted to pre-release). The
   server's `sudarshan-deploy.timer` installs the latest release only outside 08:30–16:00 IST on
   trading days and rolls back on a failed health check.
+- Stop asyncio tasks with `sudarshan.tasks.cancel_and_wait(...)`, never a bare `cancel()` and
+  `await`. httpx 0.28 with anyio 4.14 can swallow a cancel during a connect, and the stop then
+  hangs; the helper cancels again until each task has ended.
+- Give pytest an explicit `--timeout`: `-o addopts=""` drops the timeout set in `pyproject.toml`,
+  and a hung test then holds the machine.
+- `sudarshan/STATUS.md` merges as a union (`.gitattributes`), so parallel branches never conflict
+  on it. After every merge, look for doubled M-id rows and keep one.
 - Before finishing a task: run the relevant tests, `npm run lint` for frontend changes, and update
   the feature's row in `sudarshan/STATUS.md` (M-id → done/partial + PR).

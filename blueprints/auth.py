@@ -728,6 +728,12 @@ def reset_password():
             socketio.emit("force_logout", {
                 "message": "Your password was reset. Please log in again with the new password.",
             })
+            try:
+                from blueprints.sudarshan_alerts import drop_owner_room
+
+                drop_owner_room()
+            except Exception:
+                logger.exception("Could not close the owner's alerts room")
 
             # Clear reset session data for security
             session.pop("reset_token", None)
@@ -832,6 +838,12 @@ def change_password():
             socketio.emit("force_logout", {
                 "message": "Your password was changed. Please log in again with the new password.",
             })
+            try:
+                from blueprints.sudarshan_alerts import drop_owner_room
+
+                drop_owner_room()
+            except Exception:
+                logger.exception("Could not close the owner's alerts room")
             session.clear()
 
             return jsonify(
@@ -1336,6 +1348,12 @@ def logout():
         socketio.emit("force_logout", {
             "message": "You have been logged out from another device.",
         })
+        try:
+            from blueprints.sudarshan_alerts import drop_owner_room
+
+            drop_owner_room()
+        except Exception:
+            logger.exception("Could not close the owner's alerts room")
 
         # Update session count to 0
         socketio.emit("active_sessions_update", {
@@ -1463,6 +1481,12 @@ def change_password_api():
         socketio.emit("force_logout", {
             "message": "Your password was changed. Please log in again with the new password.",
         })
+        try:
+            from blueprints.sudarshan_alerts import drop_owner_room
+
+            drop_owner_room()
+        except Exception:
+            logger.exception("Could not close the owner's alerts room")
         session.clear()
 
         return jsonify({"status": "success", "message": "Password changed successfully"})

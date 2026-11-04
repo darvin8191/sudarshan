@@ -207,6 +207,34 @@ def alerts(monkeypatch):
     return send
 
 
+def test_an_exit_all_that_skipped_many_positions_fits_one_telegram_message(alerts):
+    """Forty positions each held back by a stop, forty more late: the alert stays a message."""
+    import broker.upstox.api.order_api as upstox
+    from sudarshan.books.exit_guard import WorkingOrder, order_working
+
+    stop = WorkingOrder("SELL", 65, "SL-M", 0.0, 98.5, "251027000123456", "10:42:20")
+    skipped = [
+        order_working(("NFO", f"NIFTY27OCT26{25000 + 50 * n}CE", "MIS"), [stop], 130)
+        for n in range(40)
+    ]
+    late = [("NFO", f"BANKNIFTY27OCT26{57000 + 100 * n}PE", "NRML") for n in range(40)]
+    body, _ = upstox._close_all_summary(
+        {"sent": 0, "refused": 0, "unknown": 0}, 0, 0, "", skipped, late, False
+    )
+    message = alerts("closeposition", body)
+    assert len(message) < 4096, len(message)
+    assert "30 more positions were not sent either. Check Positions." in message
+
+
+def test_the_note_on_an_exit_all_that_closed_everything_keeps_its_own_markdown(alerts):
+    """The second review's T6: the note line is escaped like every other line it did not write."""
+    message = alerts(
+        "closeposition",
+        {"status": "success", "message": "All Open Positions Squared Off", "note": "a_b *c* [d]"},
+    )
+    assert "All positions closed successfully\na\\_b \\*c\\* \\[d]\nTime: " in message
+
+
 @pytest.mark.parametrize(
     ("response", "title", "line"),
     [
