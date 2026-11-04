@@ -179,7 +179,7 @@ def main(argv: list[str] | None = None) -> int:
         err.write(f"{exc}\n")
         return 2
     try:
-        rows = store.alerts("owner")
+        rows = store.consistent(lambda: store.alerts("owner"))
     except StoreError as exc:
         err.write(f"{exc}\n")
         return 2

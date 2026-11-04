@@ -10,6 +10,7 @@ from datetime import datetime
 import pytest
 
 from sudarshan.alerts.market import migrate, migrations, spec
+from sudarshan.alerts.market import store as store_module
 from sudarshan.alerts.market.store import WORDS, MarketStore, StoreError
 from sudarshan.autologin.schedule import IST
 
@@ -110,3 +111,29 @@ def test_migrate_status_reports_without_touching(path, tmp_path, monkeypatch, ca
     monkeypatch.setenv("SUDARSHAN_ALERTS_STATE_DIR", str(tmp_path))
     assert migrate.default_path() == path
     assert migrate.main([]) == 2  # only --status is offered
+
+
+def test_a_reader_takes_the_locks_a_writer_respects_and_reads_again_if_it_cannot(path, monkeypatch):
+    """Review L4: with no -wal beside the file the reader opened immutable, with no locks at
+    all, and could read the file in the middle of a commit."""
+    reader = MarketStore(path, read_only=True)
+    try:
+        assert "immutable" not in str(reader.engine.url)
+    finally:
+        reader.close()
+    both = store_module._read_urls
+    monkeypatch.setattr(store_module, "_read_urls", lambda p: [both(p)[1]])
+    lock_free = MarketStore(path, read_only=True)
+    try:
+        assert "immutable=1" in str(lock_free.engine.url)
+        calls = []
+
+        def read():
+            calls.append(1)
+            if len(calls) == 1:  # a commit lands while it reads
+                raw(path, "UPDATE alert SET note = 'edited'")
+            return lock_free.alerts("owner")[0]["note"]
+
+        assert lock_free.consistent(read) == "edited" and len(calls) == 2
+    finally:
+        lock_free.close()

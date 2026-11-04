@@ -37,8 +37,10 @@ Read-only (cross-design X7, A7p): ``MarketStore(path, read_only=True)`` is for t
 and anything else that only reads. It never creates the file, never migrates it and never
 writes: every write raises StoreError, and a file at another version than this code's is refused
 in words (an older one waits for the service to migrate it; a newer one keeps market alerts off).
-It opens the file read-only, or as immutable when no write-ahead log is beside it, as the order
-alerts read openalgo.db (owner.database_urls).
+It opens the file read-only (mode=ro), which takes the locks a writer's commit respects. Only a
+directory the reader cannot write to, where a read-only open cannot make its shared-memory file,
+falls back to immutable (no locks): ``consistent`` then reads again when the file changed
+meanwhile, as owner.read_owner does (review L4).
 """
 
 from __future__ import annotations
@@ -49,6 +51,7 @@ import uuid
 from collections.abc import Iterator, Mapping
 from datetime import date
 from pathlib import Path
+from urllib.parse import quote
 from typing import Any
 
 from sqlalchemy import (
@@ -74,7 +77,7 @@ from database.engine_factory import create_db_engine
 from sudarshan.alerts.market import migrations, spec
 from sudarshan.alerts.market.clock import Pause
 from sudarshan.alerts.market.engine import Fire, State, stop_reason
-from sudarshan.alerts.owner import database_urls
+from sudarshan.alerts.owner import _file_state
 from sudarshan.alerts.store import _cause, _private_file
 
 DB_FILENAME = "market.db"
@@ -193,13 +196,19 @@ def writer(made: Engine) -> Engine:
     return made.execution_options(**{migrations.IMMEDIATE: True})
 
 
+def _read_urls(path: Path) -> list[str]:
+    target = quote(str(path))
+    return [f"sqlite:///file:{target}?mode=ro&uri=true",
+            f"sqlite:///file:{target}?immutable=1&uri=true"]  # fmt: skip
+
+
 def open_read_only(path: Path) -> Engine:
     """market.db for reading only: never created, migrated or written. Raises StoreError in the
     owner's words (SchemaTooNew for a file from a newer release)."""
     if not path.exists():
         raise StoreError(WORDS["missing"])
     failure: Exception | None = None
-    for url in database_urls(path):  # -wal beside it: mode=ro; none: immutable=1
+    for url in _read_urls(path):  # mode=ro; immutable=1 only where that cannot open
         made = create_db_engine(url)
         try:
             with made.connect() as conn:
@@ -654,6 +663,18 @@ class MarketStore:
 
     def close(self) -> None:
         self.engine.dispose()
+
+    def consistent(self, read):
+        """``read()`` on this store; on a lock-free (immutable) open it is done again once if the
+        file or its log changed while it ran, for a writer may have been mid-commit (review L4)."""
+        if not (self.read_only and "immutable=1" in str(self.engine.url)):
+            return read()
+        for _ in range(2):
+            before = _file_state(self.path)
+            found = read()
+            if _file_state(self.path) == before:
+                break
+        return found
 
     # ---- inside ----------------------------------------------------------------------------
     def _move(self, principal: str, alert_id: int, version: int, move: str, now: int) -> dict:
