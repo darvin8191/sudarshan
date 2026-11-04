@@ -179,3 +179,110 @@ def test_x1_orders_that_filled_nothing_or_belong_elsewhere_do_not_count():
         _order(product="D", order_timestamp=None),
     ]
     assert fills.repeats_last_fill(rows, "T", "I", "SELL") is False
+
+
+# -- X2: a position converted between products (MIS to NRML in Upstox's app) -----------------------
+#
+# Upstox's documentation does not say how the positions rows look after a conversion. The order
+# book keeps the original BUY 65 under product I. Three shapes are tried for the I row; the D row
+# carries the converted 65 as bought today in every one.
+
+_I_ROWS = {
+    "I row zeroed": {"quantity": 0, "day_buy_quantity": 0, "day_sell_quantity": 0},
+    "I row as a sell": {"quantity": 0, "day_buy_quantity": 65, "day_sell_quantity": 65},
+    "I row gone": None,
+}
+
+
+class Converted(Broker):
+    """Long 65 NIFTY CE bought MIS today (complete in the order book under I), then converted to
+    NRML in Upstox's app. Records the product of every order it is sent."""
+
+    def __init__(self, i_row):
+        super().__init__({X: 0}, 0.0)
+        self.base_day = {X: (65, 0)}  # the order book lists BUY 65 under product I, complete
+        self.i_row = i_row
+        self.products: list[tuple[str, str, int]] = []
+
+    def get(self, url, headers=None, **kwargs):
+        from books_upstox_world import INSTRUMENTS, ORDERS_URL, FakeResponse
+
+        if url.endswith(ORDERS_URL):
+            return self._order_book(kwargs.get("timeout"))
+        token = INSTRUMENTS[X][0]
+        common = {"instrument_token": token, "exchange": "NFO", "tradingsymbol": X,
+                  "average_price": 100.0, "last_price": 101.0, "pnl": 0.0}  # fmt: skip
+        rows = []
+        if self.i_row is not None:
+            rows.append({**common, "product": "I", **self.i_row})
+        rows.append({**common, "product": "D", "quantity": 65, "overnight_quantity": 0,
+                     "day_buy_quantity": 65, "day_sell_quantity": 0})  # fmt: skip
+        return FakeResponse(200, {"status": "success", "data": rows})
+
+    def post(self, url, headers=None, content=None, **kwargs):
+        import json
+
+        payload = json.loads(content)
+        self.products.append(
+            (payload["transaction_type"], payload["product"], int(payload["quantity"]))
+        )
+        return super().post(url, headers=headers, content=content, **kwargs)
+
+
+def _app_exit(world, product):
+    reply = world._client().post(
+        "/close_position", json={"symbol": X, "exchange": "NFO", "product": product}
+    )
+    return reply.status_code, reply.get_json()
+
+
+@pytest.mark.parametrize("shape", list(_I_ROWS), ids=list(_I_ROWS))
+def test_x2_the_apps_exit_of_a_converted_position_sells_it_in_its_own_product(monkeypatch, shape):
+    broker = Converted(_I_ROWS[shape])
+    world = install(monkeypatch, broker)
+    code, body = _app_exit(world, "NRML")
+    assert code == 200, body
+    assert broker.products == [("SELL", "D", 65)]
+
+
+@pytest.mark.parametrize("shape", list(_I_ROWS), ids=list(_I_ROWS))
+def test_x2_exit_all_closes_a_converted_position_in_its_own_product(monkeypatch, shape):
+    broker = Converted(_I_ROWS[shape])
+    world = install(monkeypatch, broker)
+    code, body = world.app_exit_all()
+    assert (code, body["status"]) == (200, "success"), body
+    assert broker.products == [("SELL", "D", 65)]
+
+
+@pytest.mark.parametrize("shape", list(_I_ROWS), ids=list(_I_ROWS))
+def test_x2_the_apps_exit_of_the_old_mis_row_sends_nothing(monkeypatch, shape):
+    broker = Converted(_I_ROWS[shape])
+    world = install(monkeypatch, broker)
+    _code, body = _app_exit(world, "MIS")
+    assert body["message"] == NOTHING_OPEN
+    assert broker.products == []
+
+
+@pytest.mark.parametrize("shape", list(_I_ROWS), ids=list(_I_ROWS))
+def test_x2_a_tv_exit_set_up_as_mis_sends_nothing_and_says_where_the_position_is(
+    monkeypatch, shape
+):
+    """TradingView's SELL 65 with a position size of 0, set up as MIS, after the position was
+    converted: sent as given it is a short in MIS beside the long in NRML."""
+    broker = Converted(_I_ROWS[shape])
+    world = install(monkeypatch, broker)
+    code, body = world.tv_smart_exit(X, quantity="65", action="SELL")
+    assert broker.products == []
+    assert code == 409
+    assert "nothing is held in MIS now, but 65 in NRML is" in body["message"]
+
+
+def test_x2_a_tv_exit_of_the_converted_position_in_its_own_product_goes(monkeypatch):
+    import books_upstox_world as world_module
+
+    broker = Converted(_I_ROWS["I row zeroed"])
+    world = install(monkeypatch, broker)
+    monkeypatch.setitem(world_module.INSTRUMENTS, X, ("NSE_FO|1001", "NFO", "D", "NRML"))
+    code, _body = world.tv_smart_exit(X, quantity="65", action="SELL")
+    assert code == 200
+    assert broker.products == [("SELL", "D", 65)]

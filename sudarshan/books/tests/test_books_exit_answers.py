@@ -40,7 +40,7 @@ def _row_of(quantity):
         "day_buy_quantity": 0,
         "day_sell_quantity": 0,
     }
-    return lambda *args: row
+    return lambda *args: [row]
 
 
 class Answer:
@@ -90,7 +90,7 @@ def exit_route(client, monkeypatch):
             "dynamic_import",
             lambda broker, module, names: {
                 "place_smartorder_api": place_smartorder_api,
-                "_position_row": _row_of(0),
+                "_position_rows": _row_of(0),
             },
         )
         response = client.post("/close_position", json=EXIT)
@@ -294,7 +294,7 @@ def test_the_cancel_route_says_a_timed_out_cancel_is_not_confirmed(
 
 
 def _smart_exit(monkeypatch, *, position="10", broken_after_send=False):
-    monkeypatch.setattr(upstox, "_position_row", _row_of(position))
+    monkeypatch.setattr(upstox, "_position_rows", _row_of(position))
     monkeypatch.setattr(
         upstox,
         "place_order_api",
@@ -323,7 +323,7 @@ def test_a_smart_exit_that_breaks_before_the_send_is_a_refusal_in_a_trader_s_wor
     def broken(*args):
         raise RuntimeError(SECRET_DETAIL)
 
-    monkeypatch.setattr(upstox, "_position_row", broken)
+    monkeypatch.setattr(upstox, "_position_rows", broken)
     res, body, orderid = upstox.place_smartorder_api(
         {**EXIT, "action": "BUY", "quantity": "0", "position_size": "0"}, "token"
     )
@@ -1072,7 +1072,7 @@ def test_a_cancel_that_breaks_after_its_answer_is_not_confirmed(upstox_answers, 
 
 
 def test_a_new_smart_order_that_breaks_after_its_send_is_not_confirmed(monkeypatch):
-    monkeypatch.setattr(upstox, "_position_row", _row_of(0))
+    monkeypatch.setattr(upstox, "_position_rows", _row_of(0))
     monkeypatch.setattr(upstox, "place_order_api", lambda data, auth: PLACED)
 
     def broken(auth):

@@ -210,17 +210,17 @@ TV_EXIT = {
 }
 
 
-def _row_of(quantity):
+def _row_of(quantity, product="I"):
     """SUDARSHAN M6.9: a raw positions row of the quantity held, whose day figures agree with an
     empty order book (the sizing of an exit reads the row, then the order book)."""
     row = {
         "quantity": int(quantity),
         "instrument_token": "NSE_EQ|1",
-        "product": "I",
+        "product": product,
         "day_buy_quantity": 0,
         "day_sell_quantity": 0,
     }
-    return lambda *args: row
+    return lambda *args: [row]
 
 
 def _smart(
@@ -607,7 +607,7 @@ def upstox_book(monkeypatch):
         status = 200
         status_code = 200
 
-    monkeypatch.setattr(upstox, "_position_row", _row_of(1))
+    monkeypatch.setattr(upstox, "_position_rows", _row_of(1, "D"))  # CNC
     monkeypatch.setattr(upstox, "get_br_symbol", lambda symbol, exchange: symbol)
 
     def place_order_api(data, auth):
@@ -635,7 +635,7 @@ def test_upstox_s_smart_order_says_what_it_sent(upstox_book):
 
 def test_upstox_s_fresh_order_from_flat_says_it_opened(upstox_book, monkeypatch):
     upstox, placed = upstox_book
-    monkeypatch.setattr(upstox, "_position_row", _row_of(0))
+    monkeypatch.setattr(upstox, "_position_rows", _row_of(0, "D"))
     order = {"symbol": "RELIANCE", "exchange": "NSE", "product": "CNC", "action": "buy"}
     _, answer, _ = upstox.place_smartorder_api(
         {**order, "quantity": "5", "position_size": "0"}, "t"
@@ -777,7 +777,7 @@ def test_the_app_s_live_exit_tells_its_alert_and_not_the_phone(alert, monkeypatc
                 {"status": "success", "sent": SOLD_1},
                 "251027000000123",
             ),
-            "_position_row": _row_of(1),
+            "_position_rows": _row_of(1),
         },
     )
     app = Flask(__name__)
@@ -893,7 +893,7 @@ def test_a_tradingview_exit_the_guard_refused_is_told_on_telegram(alert, publish
 
     monkeypatch.setattr(smart_service, "get_analyze_mode", lambda: False)
     monkeypatch.setattr(smart_service, "import_broker_module", lambda broker: upstox)
-    monkeypatch.setattr(upstox, "_position_row", _row_of(65))
+    monkeypatch.setattr(upstox, "_position_rows", _row_of(65))
     placed = []
     monkeypatch.setattr(upstox, "place_order_api", lambda data, auth: placed.append(data))
     exit_guard.exit_placed("live", "NFO", "NIFTY27OCT2625900CE", "MIS")  # the phone's, just now

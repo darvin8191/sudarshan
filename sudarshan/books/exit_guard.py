@@ -168,6 +168,22 @@ def exit_not_sized(position: Position) -> str:
     )
 
 
+def held_in_another_product(position: Position, elsewhere: dict[str, int]) -> str:
+    """Why an exit sent as ``position``'s product was not sent: nothing is held in that product
+    now, and the instrument is held in another (it was converted in Upstox's app).
+
+    Args:
+        position: The position as the request wrote it.
+        elsewhere: The signed quantity held in each other product, by the name the app writes.
+    """
+    held = ", ".join(f"{abs(quantity)} in {product}" for product, quantity in elsewhere.items())
+    return (
+        f"No exit was sent for {trader_name(position)} as {position[2]}: nothing is held in "
+        f"{position[2]} now, but {held} is. The position was converted to another product. Send "
+        "the exit for that product, or close it from the Upstox app."
+    )
+
+
 @dataclass(frozen=True)
 class Hold:
     """An exit Upstox answered with order ids, held until its orders end in the order book."""

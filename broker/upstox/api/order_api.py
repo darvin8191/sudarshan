@@ -309,12 +309,14 @@ def get_open_position(tradingsymbol, exchange, product, auth):
         return "0"
 
 
-def _position_row(tradingsymbol, exchange, product, auth):
-    """SUDARSHAN M6.9: Upstox's raw positions row for one position, or None when it lists none.
+def _position_rows(tradingsymbol, exchange, auth):
+    """SUDARSHAN M6.9: Upstox's raw positions rows for one instrument, one per product (empty when
+    it lists none).
 
-    The same row ``get_open_position`` reads its quantity from, through the same cache: the row
-    also carries the day's buy and sell quantities that ``sudarshan.books.fills`` corrects it by.
-    A refused or failed read raises, as there.
+    The same rows ``get_open_position`` reads its quantity from, through the same cache: they also
+    carry the day's buy and sell quantities that ``sudarshan.books.fills`` corrects them by. A
+    position converted to another product (MIS to NRML in Upstox's app) has a row in each, and an
+    exit of either is sized from both. A refused or failed read raises, as there.
     """
     br_symbol = get_br_symbol(tradingsymbol, exchange)
     positions_data = _get_cached_positions(auth)
@@ -323,14 +325,12 @@ def _position_row(tradingsymbol, exchange, product, auth):
         and positions_data.get("status") == "success"
         and positions_data.get("data")
     ):
-        for position in positions_data["data"]:
-            if (
-                position.get("tradingsymbol") == br_symbol
-                and position.get("exchange") == exchange
-                and position.get("product") == product
-            ):
-                return position
-    return None
+        return [
+            position
+            for position in positions_data["data"]
+            if position.get("tradingsymbol") == br_symbol and position.get("exchange") == exchange
+        ]
+    return []
 
 
 def _read_order_rows(auth, limit):
@@ -362,23 +362,16 @@ def _order_statuses(rows):
     }
 
 
-def _held_for_exit(row, symbol, exchange, product, orders):
-    """SUDARSHAN M6.9: the signed quantity an exit of one position should be sized from: the
-    positions row corrected by the order book's fills (``sudarshan.books.fills``), or None when
-    that cannot be worked out. No row stands for a position the book does not list yet, so its
-    fills alone count."""
-    if row is None:
-        token = get_token(symbol, exchange)
-        if not token:
-            return 0  # no instrument by that name: nothing can be held in it
-        row = {
-            "instrument_token": token,
-            "product": map_product_type(product),
-            "quantity": 0,
-            "day_buy_quantity": 0,
-            "day_sell_quantity": 0,
-        }
-    return fills.held_now(row, orders)
+def _held_products(rows, symbol, exchange, orders):
+    """SUDARSHAN M6.9: the signed quantity held in each product of one instrument, for an exit to
+    be sized from: its positions rows corrected by the order book's fills across the products
+    (``sudarshan.books.fills``), or None when that cannot be worked out. No row stands for a
+    position the book does not list yet, so its fills alone count; an instrument Upstox has no
+    token for holds nothing."""
+    token = rows[0].get("instrument_token") if rows else get_token(symbol, exchange)
+    if not token:
+        return {}
+    return fills.held_by_product(rows, orders, str(token).strip())
 
 
 class _ErrorResponse:
@@ -584,24 +577,27 @@ def place_smartorder_api(data, auth):
             # leaves the position to it, however long the read takes. When the claim is refused,
             # ``busy`` says why, and nothing is sent: not a close, and not the request as given either.
             busy = None
+            request_product = map_product_type(product)
             if position_size == 0:
                 busy = held.enter_context(exit_guard.one_exit("live", exchange, symbol, product))
 
             unsized = None
             statuses = None
+            by_product = None
             if position_size == 0:
                 # SUDARSHAN M6.9: an exit is sized from the positions row corrected by what the
                 # order book says was filled since (sudarshan/books/fills.py), read after the
                 # row, and no clock is involved. When that cannot be worked out nothing is sent.
-                row = _position_row(symbol, exchange, map_product_type(product), auth)
+                rows = _position_rows(symbol, exchange, auth)
                 orders = _read_order_rows(auth, exit_guard.EXIT_ORDERS_READ_S)
                 statuses = _order_statuses(orders)
-                held_now = _held_for_exit(row, symbol, exchange, product, orders)
+                by_product = _held_products(rows, symbol, exchange, orders)
+                held_now = None if by_product is None else by_product.get(request_product, 0)
                 if held_now is None:
                     unsized = exit_guard.exit_not_sized(
                         exit_guard.position_of(exchange, symbol, product)
                     )
-                    held_now = int(row.get("quantity", 0)) if row else 0
+                    held_now = 0  # nothing is sent below
                 current_position = held_now
             else:
                 current_position = int(
@@ -643,6 +639,24 @@ def place_smartorder_api(data, auth):
                 logger.warning(f"Exit for {symbol} not sent: an earlier exit is not ended")
                 refusal = {"status": "error", "message": held_by, "nothing_sent": True}
                 return _ErrorResponse(409), refusal, None
+
+            elsewhere = {}
+            if entry and by_product:
+                # SUDARSHAN M6.9 (X2): a size-0 order on the side that closes what the instrument
+                # holds in another product (it was converted in Upstox's app) is an exit set up
+                # for the old product. Sent as given it opens the opposite position beside it.
+                closing = data.get("action", "").upper() == "SELL"
+                elsewhere = {
+                    reverse_map_product_type(exchange, each): quantity
+                    for each, quantity in by_product.items()
+                    if each != request_product and quantity != 0 and (quantity > 0) == closing
+                }
+            if elsewhere:
+                logger.warning(f"Exit for {symbol} not sent: it is held in another product")
+                said = exit_guard.held_in_another_product(
+                    exit_guard.position_of(exchange, symbol, product), elsewhere
+                )
+                return _ErrorResponse(409), {"status": "error", "message": said, "nothing_sent": True}, None
 
             if entry and fills.repeats_last_fill(
                 orders, get_token(symbol, exchange), map_product_type(product), data.get("action")
@@ -1002,9 +1016,10 @@ def close_all_positions(current_api_key, auth):
         statuses = _order_statuses(orders)
         # SUDARSHAN M6.9: the time for sending starts now, so a slow read never uses it up.
         started = time.monotonic()
-        for position in positions_response["data"]:
+        # SUDARSHAN M6.9: each row corrected with the other products of its instrument.
+        held_rows = fills.held_each(positions_response["data"], orders)
+        for position, held_now in zip(positions_response["data"], held_rows, strict=True):
             shown = int(position.get("quantity", 0))
-            held_now = fills.held_now(position, orders)
             if shown == 0 and held_now in (None, 0):
                 continue  # nothing held, as far as the books say
             symbol = (
