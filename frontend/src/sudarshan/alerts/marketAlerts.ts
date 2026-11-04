@@ -2,6 +2,7 @@ import type { QueryClient } from '@tanstack/react-query'
 import type { Socket } from 'socket.io-client'
 import {
   type AlertEvent,
+  type EventsPage,
   type MarketAlertDeliveryPush,
   type MarketAlertPush,
   type MarketAlertsState,
