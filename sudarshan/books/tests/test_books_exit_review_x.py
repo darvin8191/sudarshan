@@ -558,6 +558,32 @@ def test_y3_a_listed_row_or_a_conversion_is_not_unlisted():
     assert fills.unlisted_nets([_row("T", "D", 65, 65, 0)], orders) == []
 
 
+# -- Y4: positions rows with no instrument token cannot be matched to the order book ---------------
+
+
+@pytest.mark.parametrize("token", [None, "", "  "])
+def test_y4_rows_that_carry_no_token_are_not_flat(monkeypatch, token):
+    import broker.upstox.api.order_api as upstox
+
+    row = _row(token, "I", 65, 65, 0)
+    assert upstox._held_products([row], X, "NFO", []) is None
+    assert upstox._held_products(
+        [_row("T", "I", 65, 65, 0)], X, "NFO", [_fill("T", "I", "BUY", 65)]
+    ) == {"I": 65}
+
+
+def test_y4_the_apps_exit_of_a_row_with_no_token_says_it_could_not_be_worked_out(monkeypatch):
+    import broker.upstox.api.order_api as upstox
+
+    world = install(monkeypatch, Broker({X: 65}, 0.0))
+    row = {**_row(None, "I", 65, 65, 0), "tradingsymbol": X, "exchange": "NFO"}
+    monkeypatch.setattr(upstox, "_position_rows", lambda *args: [row])
+    code, body = world.phone_exit(X)
+    assert code == 424
+    assert body["message"] == exit_guard.exit_not_sized(("NFO", X, "MIS"), orders_read=True)
+    assert world.broker.orders == []
+
+
 # -- Words (X6, L4) -----------------------------------------------------------------------------------
 
 

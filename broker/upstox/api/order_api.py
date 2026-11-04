@@ -401,9 +401,18 @@ def _held_products(rows, symbol, exchange, orders):
     (``sudarshan.books.fills``), or None when that cannot be worked out. No row stands for a
     position the book does not list yet, so its fills alone count; an instrument Upstox has no
     token for holds nothing."""
-    token = rows[0].get("instrument_token") if rows else get_token(symbol, exchange)
-    if not token:
-        return {}
+    if rows:
+        # SUDARSHAN M6.9 (Y4): rows are the instrument's own; one with no token is a row this
+        # cannot match to the order book, and when none has one what is held cannot be worked
+        # out (not "flat").
+        tokens = (str(r.get("instrument_token") or "").strip() for r in rows)
+        token = next((each for each in tokens if each), None)
+        if not token:
+            return None
+    else:
+        token = get_token(symbol, exchange)
+        if not token:
+            return {}
     return fills.held_by_product(rows, orders, str(token).strip())
 
 
