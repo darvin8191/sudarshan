@@ -334,8 +334,11 @@ def test_a_second_exit_is_refused_at_once_while_the_first_is_placed(server):
     first.join(15)
     assert out["result"][0] == 200
     assert server.claims()["held"] == 0
-    status, body, _ = server.post("/close_position", X)  # placed: noted, the book not showing it
-    assert status == 409 and body["message"].startswith(ON_ITS_WAY)
+    # placed: noted, and Upstox's order book (this server's lists none) does not show the order,
+    # so the first exit is not confirmed and a second is refused (M6.9: held until the book
+    # says it ended, 150 s at most)
+    status, body, _ = server.post("/close_position", X)
+    assert status == 409 and "is not confirmed" in body["message"], body
     assert server.claims()["orders"] == [Y["symbol"], X["symbol"]]
 
 

@@ -184,15 +184,15 @@ def test_a_two_leg_gtt_is_refused_when_the_figure_cannot_be_read(day):
     assert refused_message(answer) == words.daily_unreadable("live")
 
 
-def test_a_book_up_to_fifteen_seconds_old_serves_the_figure(day, clock):  # noqa: F811
+def test_a_kept_book_serves_the_figure_while_the_order_book_corrects_it(day, clock):  # noqa: F811
     day.book.rows = [day_row(CE, 65, -100.0, 0.0)]
     upstox = broker()
     assert upstox.place(order("BUY", symbol=PE), "token")[2] == "OID0"  # the book is read
     day.book.fail.add("rows")
-    clock.now += 10
+    clock.now += 20  # older than the old 15 s: the fills correct it, not a clock
     gtt = order("BUY", symbol=PE, trigger_type="OCO")
-    assert upstox.gtt_place(gtt, "token")[2] == "GTT-1"  # the figure from the 10 s old book
-    clock.now += 6
+    assert upstox.gtt_place(gtt, "token")[2] == "GTT-1"  # the figure from the kept book
+    day.book.fail.add("order_rows")  # the fills cannot be read: the kept book cannot be trusted
     assert refused_message(upstox.gtt_place(gtt, "token")) == words.daily_unreadable("live")
 
 
@@ -213,7 +213,7 @@ def test_on_a_locked_day_an_order_whose_book_cannot_be_read_is_refused(day):
     assert upstox.reached == []
 
 
-def test_on_a_locked_day_a_book_read_in_the_last_fifteen_seconds_judges_an_order(
+def test_on_a_locked_day_a_kept_book_corrected_by_the_order_book_judges_an_order(
     day,
     clock,  # noqa: F811
 ):
@@ -222,7 +222,7 @@ def test_on_a_locked_day_a_book_read_in_the_last_fifteen_seconds_judges_an_order
     upstox = broker()
     refused_message(upstox.place(order("BUY", symbol=PE), "token"))  # reads the book
     day.book.fail.add("rows")
-    clock.now += gate.DAY_BOOK_REUSE_S - 1
+    clock.now += 35  # older than the old 15 s
     assert upstox.place(order("SELL"), "token")[2] == "OID0"  # the CE exit, on that book
     message = refused_message(upstox.place(order("BUY", symbol=PE), "token"))
     assert message.startswith("New orders are refused for today: the day's loss of ₹5,200")
@@ -251,22 +251,15 @@ def test_the_figure_for_an_order_judged_without_the_book_is_read_afresh(
     assert oco.startswith("New orders are refused for today: the day's loss of ₹4,500")
 
 
-def test_a_book_kept_for_the_figure_is_as_old_as_its_read(day, clock):  # noqa: F811
-    """Gate review L6: a read that took 10 s, kept, is 16 s old 6 s after it answered, too old
-    to serve the figure."""
+def test_a_book_kept_for_the_figure_needs_the_order_book_s_fills(day, clock):  # noqa: F811
+    """M6.9 (replaces Gate review L6's age rule): the kept book serves the figure only as the
+    order book's fills correct it, whatever its age."""
     day.book.rows = [day_row(CE, 65, -3000.0, 0.0)]
-    original = day.book.live_rows
-
-    def slow(auth):
-        clock.now += 10
-        return original(auth)
-
-    day.book.live_rows = slow
     upstox = broker()
-    assert upstox.place(order("BUY", symbol=PE), "token")[2] == "OID0"  # read from 1000 to 1010
-    day.book.live_rows = original
+    assert upstox.place(order("BUY", symbol=PE), "token")[2] == "OID0"  # reads the book
     day.book.fail.add("rows")
-    clock.now += 6
+    day.book.fail.add("order_rows")
+    clock.now += 2  # past the order's own judging
     gtt = order("BUY", symbol=PE, trigger_type="OCO")
     assert refused_message(upstox.gtt_place(gtt, "token")) == words.daily_unreadable("live")
 

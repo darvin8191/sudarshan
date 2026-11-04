@@ -141,7 +141,9 @@ def get_api_response(
         elif method == "PUT":
             response = client.put(url, headers=headers, content=payload)
         elif method == "DELETE":
-            response = client.delete(url, headers=headers, **({"timeout": timeout} if timeout else {}))
+            response = client.delete(
+                url, headers=headers, **({"timeout": timeout} if timeout else {})
+            )
         else:
             logger.error(f"Unsupported HTTP method: {method}")
             return {"status": "error", "message": f"Unsupported HTTP method: {method}"}
@@ -268,7 +270,6 @@ def _invalidate_position_cache(auth):
     it read.
     """
     _POSITION_BOOK.invalidate(auth)
-
 
 
 def get_open_position(tradingsymbol, exchange, product, auth):
@@ -625,7 +626,9 @@ def place_smartorder_api(data, auth):
                 refusal = {"status": "error", "message": said, "nothing_sent": True}
                 return _ErrorResponse(409 if said is not unsized else 424), refusal, None
 
-            entry = position_size == 0 and current_position == 0 and int(data.get("quantity", 0)) != 0
+            entry = (
+                position_size == 0 and current_position == 0 and int(data.get("quantity", 0)) != 0
+            )
             if held_by and not entry:
                 logger.warning(f"Exit for {symbol} not sent: an earlier exit is not ended")
                 refusal = {"status": "error", "message": held_by, "nothing_sent": True}
@@ -923,9 +926,7 @@ def _close_all_summary(
         *skipped[:_SAID_AT_MOST],
     ]
     if len(skipped) > _SAID_AT_MOST:
-        more = _counted(
-            len(skipped) - _SAID_AT_MOST, "more position was", "more positions were"
-        )
+        more = _counted(len(skipped) - _SAID_AT_MOST, "more position was", "more positions were")
         words.append(f"{more} not sent either. Check Positions.")
     if late:
         words.append(_late_words([exit_guard.trader_name(position) for position in late]))
@@ -971,12 +972,15 @@ def close_all_positions(current_api_key, auth):
         reason = ""  # SUDARSHAN M6.9: the first refusal's own words
         skipped = []  # SUDARSHAN M6.9: why each busy position was not sent, in its own sentence
         late = []  # SUDARSHAN M6.9: the positions no time was left for
+        noted_here = set()  # SUDARSHAN M6.9: positions whose exit this call has noted
         outcomes = []  # SUDARSHAN M6.9: what became of each position, for the phone and the API
         # SUDARSHAN M6.9: the order book, read once and after the positions, tells what each
         # position really holds (sudarshan/books/fills.py) and which orders are still working.
         orders = _read_order_rows(auth, exit_guard.EXIT_ALL_ORDERS_READ_S)
         working, orders_read = _working_exits(orders)
-        if not any(int(position.get("quantity", 0)) != 0 for position in positions_response["data"]):
+        if not any(
+            int(position.get("quantity", 0)) != 0 for position in positions_response["data"]
+        ):
             orders_read = None  # nothing shown as held: the order book was only a check
         statuses = _order_statuses(orders)
         # SUDARSHAN M6.9: the time for sending starts now, so a slow read never uses it up.
@@ -1026,8 +1030,13 @@ def close_all_positions(current_api_key, auth):
             }
             logger.debug(f"Closing position with payload: {place_order_payload}")
             # SUDARSHAN M6.9: a busy position is not sent, and neither is any once time is up.
-            why = busy.get(held) or exit_guard.hold_verdict(
-                "live", position["exchange"], symbol, product, statuses
+            # A hold this very call made does not count against a later row of the same name.
+            why = busy.get(held) or (
+                None
+                if held in noted_here
+                else exit_guard.hold_verdict(
+                    "live", position["exchange"], symbol, product, statuses
+                )
             )
             closing = (
                 str(position.get("instrument_token") or ""),
@@ -1043,7 +1052,9 @@ def close_all_positions(current_api_key, auth):
                 continue
             if not _in_time(started):
                 late.append(held)
-                outcomes.append(_outcome(held, "not_sent", _late_words([exit_guard.trader_name(held)])))
+                outcomes.append(
+                    _outcome(held, "not_sent", _late_words([exit_guard.trader_name(held)]))
+                )
                 continue
             sending = [position["exchange"], symbol, product]
             # SUDARSHAN M6.9: the pacer's wait is part of the time, so the budget is asked again
@@ -1063,7 +1074,9 @@ def close_all_positions(current_api_key, auth):
             if ran_out:
                 sending = None
                 late.append(held)
-                outcomes.append(_outcome(held, "not_sent", _late_words([exit_guard.trader_name(held)])))
+                outcomes.append(
+                    _outcome(held, "not_sent", _late_words([exit_guard.trader_name(held)]))
+                )
                 continue
             attempted += 1
             if isinstance(res, BusyResponse):
@@ -1077,6 +1090,7 @@ def close_all_positions(current_api_key, auth):
                 exit_guard.exit_placed(
                     "live", *sending, _named_orders((res, api_response, orderid))
                 )
+                noted_here.add(held)
             sending = None
             if answer == "refused" and not reason and not isinstance(res, BusyResponse):
                 reason = str((api_response or {}).get("message") or "").strip()

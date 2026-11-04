@@ -35,8 +35,8 @@ the positions book shows the exit or ``SEND_HELD_AT_MOST_S`` have passed.
 
 If the gate itself breaks, an order passes only when nothing is refusing new risk. While the kill
 switch is on, or its state could not be read, it is refused (fail closed). Under the kill switch
-or on a locked day, a positions read that fails is answered from the book read in the last
-``DAY_BOOK_REUSE_S``; with none, an order that cannot be judged is refused, with a sentence
+or on a locked day, a positions read that fails is answered from the book last read, corrected by
+the order book's fills (``KEPT_BOOK_WITHIN_S``, no shorter clock); with none, an order that cannot be judged is refused, with a sentence
 pointing at the Upstox app for an urgent exit. In every other state an unreadable book lets the
 order go, noted, because it may be an exit.
 
@@ -127,10 +127,6 @@ _NEVER = -1e9
 #: The gate's own time is kept for this many decisions, for its p50 and p95 on the status route
 #: (sessions S1 and G3 record them).
 TIMED_KEPT = 500
-#: When Upstox's positions cannot be read just now, the book read this recently serves: for the
-#: day's figure (design section 5), and, under the kill switch or on a locked day only, to judge
-#: an order (the coordinator's decision d). With none, such an order is refused.
-DAY_BOOK_REUSE_S = 15.0
 #: A positions book kept from an earlier read judges an order, when the positions cannot be read
 #: now, only if Upstox's order book can be read to correct it (``Gate._corrected``), and no longer
 #: than this after it was read.
@@ -550,16 +546,20 @@ class Gate:
     def _is_exit_by_last_read(self, token: int, send: Send) -> bool:
         """A send let through without being judged (every limit was off), now waiting while the
         switch is on: judged against the last positions read, from the book kept by the last
-        check or Upstox's own kept copy, never a new read while it waits. An exit goes; with no
+        check or Upstox's own kept copy and corrected by the order book's fills, never a new
+        positions read while it waits. An exit goes; with no
         book to judge it by, or an order that adds risk, it is withdrawn. A yes is recorded on
         the send, so it counts as the exit it is."""
         order = send.order
         if order.pipe != LIVE or order.action != PLACE or order.cnc_sell:
             return False
         try:
-            rows = self._kept_rows(order.owner, DAY_BOOK_REUSE_S)
+            rows = self._kept_rows(order.owner, KEPT_BOOK_WITHIN_S)
             if rows is None:
                 rows = self._read.live_cached_rows(order.owner)
+            # M6.9: a book of any age judges only as the order book's fills correct it (the
+            # row's own day figures say what it already shows), never by a clock.
+            rows = None if rows is None else self._corrected(order.owner, rows, strict=True)
             instrument = self._read.instrument_token(order.symbol, order.exchange)
         except readers.Unreadable:
             return False
@@ -873,7 +873,7 @@ class Gate:
 
     def _facts(self, order: Order, fallback: bool = False) -> tuple[Order, _Facts]:
         """What the order does, read from the broker's books. ``fallback``: new risk is refused
-        now, so a positions book kept from the last ``DAY_BOOK_REUSE_S`` may judge it."""
+        now, so a positions book kept from an earlier read, corrected by the order book, may judge it."""
         try:
             if order.action == MODIFY:
                 return self._modify_facts(order, fallback)
@@ -1109,7 +1109,7 @@ class Gate:
         return daily.live_figure(self._rows_for_day(order.owner))
 
     def _rows_for_day(self, owner: str) -> list:
-        """The book the order was just judged on; else a read, else one up to 15 s old."""
+        """The book the order was just judged on; else a read, else the kept one as the order book corrects it."""
         kept = self._kept_rows(owner, 1.0)
         if kept is not None:
             return kept
@@ -1671,7 +1671,7 @@ class Gate:
         self, order: Order, refusing: _Refusing | None, lock: risk_store.DayLock | None = None
     ) -> Decision:
         """New risk is refused now and the order cannot be judged: no book, not even one kept
-        from the last ``DAY_BOOK_REUSE_S``, so it is refused with the way to an urgent exit."""
+        from the last read corrected by the order book, so it is refused with the way to an urgent exit."""
         since, locked = None, None
         if refusing is not None:
             since = None if refusing.state is None else _hhmm(refusing.state.since)

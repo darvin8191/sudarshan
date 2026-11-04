@@ -181,10 +181,14 @@ def test_m1_a_late_exit_is_not_sent_and_says_so(monkeypatch, risk_store, backlog
     for _ in range(backlog):
         limiter.reserve()
     depth = limiter.depth()
-    ok, body, code = close_position_with_auth({"apikey": "KEY"}, "token", "upstox", {"apikey": "KEY"})
+    ok, body, code = close_position_with_auth(
+        {"apikey": "KEY"}, "token", "upstox", {"apikey": "KEY"}
+    )
     outcomes = [(p["symbol"], p["outcome"], p.get("reason", "")[:60]) for p in body["positions"]]
-    print(f"\nbacklog {backlog}: {code} not_confirmed={body.get('not_confirmed')}; sent to Upstox "
-          f"{[(o['symbol'], o['qty']) for o in broker.orders]}; slots {depth} -> {limiter.depth()}")
+    print(
+        f"\nbacklog {backlog}: {code} not_confirmed={body.get('not_confirmed')}; sent to Upstox "
+        f"{[(o['symbol'], o['qty']) for o in broker.orders]}; slots {depth} -> {limiter.depth()}"
+    )
     print("  outcomes:", outcomes)
     print("  message:", body["message"])
     print("  telegram:", alert_template("closeposition", {}, body, "T").split("\n")[0], "|",
@@ -258,9 +262,13 @@ def test_l4_an_answer_that_does_not_prove_every_cancel_sends_no_exit_and_says_ho
     monkeypatch.setattr(gtt_book, "get_gtt_orderbook_with_auth",
                         lambda *a, **k: (True, {"status": "success", "data": []}, 200))  # fmt: skip
     told = []
-    monkeypatch.setattr(killswitch, "_tell", lambda owner, text: told.append(text) or (True, "", {}))
+    monkeypatch.setattr(
+        killswitch, "_tell", lambda owner, text: told.append(text) or (True, "", {})
+    )
     monkeypatch.setattr(killswitch, "_announce", lambda state: None)
-    monkeypatch.setattr(killswitch, "_engage_agent", lambda: (True, "agent", {"engaged_by_us": False}))
+    monkeypatch.setattr(
+        killswitch, "_engage_agent", lambda: (True, "agent", {"engaged_by_us": False})
+    )
     monkeypatch.setattr(killswitch, "DRAIN_S", 0.2)
     monkeypatch.setattr(killswitch, "CANCELS_POLL_S", 0.05)
     monkeypatch.setattr(killswitch, "SECOND_SWEEP_AFTER_S", 0.0)
@@ -275,8 +283,10 @@ def test_l4_an_answer_that_does_not_prove_every_cancel_sends_no_exit_and_says_ho
     result = killswitch.activate(OWNER, exit_all=True, phrase="STOP")
     steps = _steps(result)
     market = [(o["symbol"], o["side"], o["qty"]) for o in broker.orders]
-    print(f"\n{answer.__name__}: multi-cancel calls {broker.multi_calls}; still working "
-          f"{[(o['symbol'], o['side']) for o in broker.working]}; market exits {market}")
+    print(
+        f"\n{answer.__name__}: multi-cancel calls {broker.multi_calls}; still working "
+        f"{[(o['symbol'], o['side']) for o in broker.working]}; market exits {market}"
+    )
     for name in ("live_orders", "live_orders_again", "live_exit_all"):
         if name in steps:
             print(f"  {name}: ok={steps[name]['ok']} {steps[name]['words']!r}")
@@ -352,8 +362,12 @@ def test_item3_live_today_a_second_exit_16_s_after_a_resting_app_exit(
     "answer",
     [
         {"status": "success", "data": {"order_ids": ["1"]}},  # no summary at all
-        {"status": "success", "data": {"order_ids": ["1"]}, "errors": [{"order_id": "2"}],
-         "summary": {"total": 2, "success": 1}},  # fmt: skip
+        {
+            "status": "success",
+            "data": {"order_ids": ["1"]},
+            "errors": [{"order_id": "2"}],
+            "summary": {"total": 2, "success": 1},
+        },  # fmt: skip
     ],
     ids=["no summary", "errors listed, no error count"],
 )
@@ -456,7 +470,9 @@ def test_n9_exit_all_waits_for_the_orders_a_200_cancelled_to_show_ended(monkeypa
                         lambda *a, **k: (True, {"status": "success", "data": []}, 200))  # fmt: skip
     monkeypatch.setattr(killswitch, "_tell", lambda owner, text: (True, "", {}))
     monkeypatch.setattr(killswitch, "_announce", lambda state: None)
-    monkeypatch.setattr(killswitch, "_engage_agent", lambda: (True, "agent", {"engaged_by_us": False}))
+    monkeypatch.setattr(
+        killswitch, "_engage_agent", lambda: (True, "agent", {"engaged_by_us": False})
+    )
     monkeypatch.setattr(killswitch, "DRAIN_S", 0.2)
     monkeypatch.setattr(killswitch, "CANCELS_POLL_S", 0.05)
     monkeypatch.setattr(killswitch, "SECOND_SWEEP_AFTER_S", 0.0)
@@ -465,7 +481,7 @@ def test_n9_exit_all_waits_for_the_orders_a_200_cancelled_to_show_ended(monkeypa
     monkeypatch.setattr(gate, "GATE", fresh)
     monkeypatch.setenv(flag.ENV, "on")
     broker.rest(CE, "SELL", 65)  # the stop loss protecting the long
-    broker.fail_reads = 2  # the switch's first looks at the order book fail: it cancels without it
+    broker.fail_reads = 6  # the switch's first looks at the order book fail: it cancels without it
     result = killswitch.activate(OWNER, exit_all=True, phrase="STOP")
     steps = _steps(result)
     assert steps["live_orders"]["detail"].get("without_book") is True, steps
@@ -490,13 +506,38 @@ def test_n5_the_words_say_how_many_went_and_never_call_an_unconfirmed_cancel_ref
 @pytest.mark.parametrize(
     ("status", "body", "expect"),
     [
-        (200, {"status": "success", "data": {"order_ids": ["1", "2"]},
-               "summary": {"total": 2, "success": 2, "error": 0}}, (True, False)),
-        (200, {"status": "success", "data": {"order_ids": ["1"]},
-               "summary": {"total": 2, "success": 1, "error": 0}}, (False, True)),
-        (207, {"status": "partial_success", "data": {"order_ids": ["1"]},
-               "summary": {"total": 2, "success": 1, "error": 1}}, (False, False)),
-        (500, {"status": "error", "errors": [{"message": "down"}], "not_confirmed": True}, (False, True)),
+        (
+            200,
+            {
+                "status": "success",
+                "data": {"order_ids": ["1", "2"]},
+                "summary": {"total": 2, "success": 2, "error": 0},
+            },
+            (True, False),
+        ),
+        (
+            200,
+            {
+                "status": "success",
+                "data": {"order_ids": ["1"]},
+                "summary": {"total": 2, "success": 1, "error": 0},
+            },
+            (False, True),
+        ),
+        (
+            207,
+            {
+                "status": "partial_success",
+                "data": {"order_ids": ["1"]},
+                "summary": {"total": 2, "success": 1, "error": 1},
+            },
+            (False, False),
+        ),
+        (
+            500,
+            {"status": "error", "errors": [{"message": "down"}], "not_confirmed": True},
+            (False, True),
+        ),
     ],
     ids=["all went", "success but short", "207", "5xx"],
 )

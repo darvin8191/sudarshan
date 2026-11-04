@@ -44,7 +44,7 @@ def test_an_exit_waiting_behind_a_backlog_is_not_sent_after_the_budget(monkeypat
     assert not sent_late, "an exit was sent after the budget, from reads that old"
     outcomes = {item["symbol"]: item["outcome"] for item in body.get("positions", [])}
     assert outcomes and set(outcomes.values()) == {"not_sent"}, body
-    assert "sent nothing for" in body["message"]
+    assert "so nothing was sent for" in body["message"]
     assert broker.true_qty(CE) == 65 and broker.true_qty(PE) == -30  # nothing went, said so
 
 
