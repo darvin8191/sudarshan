@@ -161,8 +161,13 @@ class Broker:
                     "tradingsymbol": symbol,
                     "quantity": self.shown_qty(symbol, now, fresh=fresh),
                     **(
-                        dict(zip(("day_buy_quantity", "day_sell_quantity"),
-                                 self.day_figures(symbol, now, fresh=fresh), strict=True))  # fmt: skip
+                        dict(
+                            zip(
+                                ("day_buy_quantity", "day_sell_quantity"),
+                                self.day_figures(symbol, now, fresh=fresh),
+                                strict=True,
+                            )
+                        )  # fmt: skip
                         if self.day_fields
                         else {}
                     ),
@@ -274,7 +279,9 @@ class Broker:
             )  # fmt: skip
         for (symbol, side), quantity in sorted(totals.items()):
             if quantity > 0:
-                rows.append(row(f"F{side[0]}{symbol[-6:]}", symbol, side, "complete", quantity, quantity))
+                rows.append(
+                    row(f"F{side[0]}{symbol[-6:]}", symbol, side, "complete", quantity, quantity)
+                )
         return rows
 
     def post(self, url, headers=None, content=None, **kwargs):

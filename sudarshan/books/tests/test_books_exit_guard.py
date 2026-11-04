@@ -488,9 +488,7 @@ def broker(monkeypatch):
     monkeypatch.setattr(upstox, "place_order_api", place_order_api)
     monkeypatch.setattr(upstox, "get_symbol", lambda token, exchange: BY_TOKEN.get(token))
     monkeypatch.setattr(upstox, "get_br_symbol", lambda symbol, exchange: symbol)
-    monkeypatch.setattr(
-        upstox, "get_token", lambda symbol, exchange: ROWS.get(symbol, (None,))[0]
-    )
+    monkeypatch.setattr(upstox, "get_token", lambda symbol, exchange: ROWS.get(symbol, (None,))[0])
     upstox._POSITION_BOOK.invalidate("token")
     monkeypatch.setattr(session_utils, "is_session_valid", lambda: True)
     monkeypatch.setattr(orders, "get_auth_token", lambda user: "token")

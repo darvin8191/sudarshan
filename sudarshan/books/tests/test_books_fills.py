@@ -26,9 +26,7 @@ def test_held_for_and_held_each_agree_with_the_vectors(case):
     held = case["held"]
     for product in ("I", "D"):
         expected = None if held is None else held.get(product, 0)
-        assert (
-            fills.held_for(case["positions"], case["orders"], case["token"], product) == expected
-        )
+        assert fills.held_for(case["positions"], case["orders"], case["token"], product) == expected
     each = fills.held_each(case["positions"], case["orders"])
     expected_each = [
         None if held is None else held.get(row["product"]) for row in case["positions"]

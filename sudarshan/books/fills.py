@@ -138,7 +138,10 @@ def held_by_product(
             bought.get(product, 0),
             sold.get(product, 0),
         )
-    if all(buys >= day_buy and sells >= day_sell for _q, day_buy, day_sell, buys, sells in figures.values()):
+    if all(
+        buys >= day_buy and sells >= day_sell
+        for _q, day_buy, day_sell, buys, sells in figures.values()
+    ):
         return {
             product: quantity + (buys - day_buy) - (sells - day_sell)
             for product, (quantity, day_buy, day_sell, buys, sells) in figures.items()

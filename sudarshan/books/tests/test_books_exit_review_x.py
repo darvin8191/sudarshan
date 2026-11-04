@@ -353,6 +353,8 @@ def test_x7_an_order_that_only_adds_goes_when_the_order_book_cannot_be_read(monk
     world = install(monkeypatch, broker)
     assert _reversal(world, X, "65", "BUY", "130")[0] == 200
     assert broker.true_qty(X) == 130
+
+
 # -- L2: a working market order on the closing side holds a single exit -------------------------------
 
 
@@ -407,7 +409,10 @@ def test_words_upstox_s_refusal_keeps_its_message_and_loses_its_code():
     class Refused:
         status = 400
 
-    response = {"status": "error", "message": "UDAPI100050: Invalid token used | UDAPI1040: Bad price"}
+    response = {
+        "status": "error",
+        "message": "UDAPI100050: Invalid token used | UDAPI1040: Bad price",
+    }
     outcome = upstox._exit_outcome(("NFO", X, "MIS"), "refused", Refused(), response, None)
     assert outcome["reason"] == "Upstox refused its exit: Invalid token used | Bad price"
     assert "UDAPI" not in outcome["reason"]

@@ -669,7 +669,11 @@ def place_smartorder_api(data, auth):
                 # single exit, whether or not this process remembers placing it (a restart, an
                 # answer that named no order). A resting stop or target is not a market order.
                 token = rows[0].get("instrument_token") if rows else get_token(symbol, exchange)
-                closing = (str(token or ""), request_product, "SELL" if current_position > 0 else "BUY")
+                closing = (
+                    str(token or ""),
+                    request_product,
+                    "SELL" if current_position > 0 else "BUY",
+                )
                 market = [
                     order
                     for order in _working_exits(orders)[0].get(closing, [])
@@ -680,7 +684,11 @@ def place_smartorder_api(data, auth):
                     said = exit_guard.market_exit_working(
                         exit_guard.position_of(exchange, symbol, product), market
                     )
-                    return _ErrorResponse(409), {"status": "error", "message": said, "nothing_sent": True}, None
+                    return (
+                        _ErrorResponse(409),
+                        {"status": "error", "message": said, "nothing_sent": True},
+                        None,
+                    )
 
             elsewhere = {}
             if entry and by_product:
@@ -698,7 +706,11 @@ def place_smartorder_api(data, auth):
                 said = exit_guard.held_in_another_product(
                     exit_guard.position_of(exchange, symbol, product), elsewhere
                 )
-                return _ErrorResponse(409), {"status": "error", "message": said, "nothing_sent": True}, None
+                return (
+                    _ErrorResponse(409),
+                    {"status": "error", "message": said, "nothing_sent": True},
+                    None,
+                )
 
             if entry and fills.repeats_last_fill(
                 orders, get_token(symbol, exchange), map_product_type(product), data.get("action")
@@ -708,10 +720,14 @@ def place_smartorder_api(data, auth):
                 # the position (or cannot be told from one): sent, it would open the opposite
                 # position. An order on the other side after an exit goes as an entry.
                 logger.warning(f"Exit for {symbol} not sent: the position is flat already")
-                return None, {
-                    "status": "success",
-                    "message": "No open position found. Not placing exit order.",
-                }, None
+                return (
+                    None,
+                    {
+                        "status": "success",
+                        "message": "No open position found. Not placing exit order.",
+                    },
+                    None,
+                )
 
             if entry:
                 logger.debug("No existing position and quantity is specified. Placing a new order.")
@@ -1176,9 +1192,7 @@ def close_all_positions(current_api_key, auth):
         # SUDARSHAN M6.9: reporting success when not every exit was placed would leave
         # those positions unwatched, whatever refused them.
         if counts["sent"] < attempted or unmatched or skipped or late:
-            return _close_all_summary(
-                counts, unmatched, refused, reason, skipped, late, outcomes
-            )
+            return _close_all_summary(counts, unmatched, refused, reason, skipped, late, outcomes)
 
         logger.debug("Successfully initiated closing of all open positions.")
         done = {"status": "success", "message": "All Open Positions SquaredOff"}

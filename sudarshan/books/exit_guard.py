@@ -389,9 +389,7 @@ class ExitsInFlight:
                     since[key] = max(began, since.get(key, began))
         return {position: on_its_way(position, at) for position, at in since.items()}
 
-    def placed(
-        self, book: str, position: Position, order_ids: tuple[str, ...] = ()
-    ) -> None:
+    def placed(self, book: str, position: Position, order_ids: tuple[str, ...] = ()) -> None:
         """Note that an exit for ``position`` in ``book`` may have placed an order just now, and
         which orders Upstox named for it."""
         now = time.monotonic()
@@ -421,7 +419,9 @@ class ExitsInFlight:
         if seen is not None and all(each in FINAL_STATUSES for each in seen):
             ended = True
             said = None
-        elif seen is not None and any(each is not None and each not in FINAL_STATUSES for each in seen):
+        elif seen is not None and any(
+            each is not None and each not in FINAL_STATUSES for each in seen
+        ):
             ended = False
             working = tuple(
                 each
