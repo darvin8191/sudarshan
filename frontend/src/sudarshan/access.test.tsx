@@ -113,4 +113,36 @@ describe('syncSession', () => {
     await syncSession({ keepOnFailure: true })
     expect(useAuthStore.getState().apiKey).toBe('k')
   })
+  it('drops an answer that was asked before a logout', async () => {
+    let answer: (value: unknown) => void = () => {}
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        () =>
+          new Promise((resolve) => {
+            answer = resolve
+          })
+      )
+    )
+    const pending = syncSession({ keepOnFailure: true })
+    useAuthStore.getState().logout()
+    answer({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        status: 'success',
+        logged_in: true,
+        authenticated: true,
+        user: 'owner',
+        broker: 'upstox',
+        api_key: 'k',
+      }),
+    })
+    await pending
+    const { apiKey, user, isAuthenticated, sessionChecked } = useAuthStore.getState()
+    expect(apiKey).toBeNull()
+    expect(user).toBeNull()
+    expect(isAuthenticated).toBe(false)
+    expect(sessionChecked).toBe(false)
+  })
 })

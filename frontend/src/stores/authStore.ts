@@ -19,6 +19,11 @@ interface AuthStore {
   sessionChecked: boolean
   /** The server said the app session is fine but today's broker login is not (token rolled over). */
   brokerSessionExpired: boolean
+  /**
+   * SUDARSHAN: counts logouts. A session check that started before a logout
+   * compares it on return and drops its answer. Not persisted.
+   */
+  logoutEpoch: number
 
   setUser: (user: User) => void
   setApiKey: (apiKey: string | null) => void
@@ -36,6 +41,7 @@ export const useAuthStore = create<AuthStore>()(
       isAuthenticated: false,
       sessionChecked: false,
       brokerSessionExpired: false,
+      logoutEpoch: 0,
 
       setUser: (user) => set({ user, isAuthenticated: user.isLoggedIn }),
 
@@ -54,13 +60,14 @@ export const useAuthStore = create<AuthStore>()(
       },
 
       logout: () => {
-        set({
+        set((state) => ({
+          logoutEpoch: state.logoutEpoch + 1,
           user: null,
           isAuthenticated: false,
           apiKey: null,
           sessionChecked: false,
           brokerSessionExpired: false,
-        })
+        }))
       },
 
       checkSession: () => {
