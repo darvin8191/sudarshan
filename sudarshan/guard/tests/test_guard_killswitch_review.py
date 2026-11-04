@@ -161,21 +161,6 @@ def test_h2_a_resting_exit_the_switch_cancelled_does_not_stop_exit_all(upstox):
     assert [o["symbol"] for o in broker.working] == [CE]  # the new exit rests
 
 
-def test_h2_the_exit_guard_forgets_one_position_only():
-    from sudarshan.books import exit_guard
-
-    guard = exit_guard.ExitsInFlight()
-    first = exit_guard.position_of("NFO", CE, "MIS")
-    other = exit_guard.position_of("NSE", "SBIN", "CNC")
-    guard.placed("live", first)
-    guard.placed("live", other)
-    guard.unplaced("live", first)
-    assert guard.placed_lately("live") == {other}
-    guard.unplaced("live", other)
-    guard.unplaced("live", other)  # twice is fine
-    assert guard.placed_lately("live") == set()
-
-
 # -- H3: an order let through before the switch is refused at send time -----------------------------
 
 

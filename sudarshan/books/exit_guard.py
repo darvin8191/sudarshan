@@ -399,15 +399,6 @@ class ExitsInFlight:
             self._forget_old(book, now)
             self._placed.setdefault(book, {})[position] = Hold(order_ids, now, time.time())
 
-    def holds(self, book: str) -> dict[Position, Hold]:
-        """Every position with a hold on Upstox's orders in ``book`` now."""
-        with self._lock:
-            return {
-                position: hold
-                for position, hold in self._placed.get(book, {}).items()
-                if hold.order_ids
-            }
-
     def hold_verdict(
         self, book: str, position: Position, statuses: dict[str, str] | None
     ) -> str | None:
@@ -449,16 +440,6 @@ class ExitsInFlight:
                     if not recent:
                         del self._placed[book]
         return said
-
-    def unplaced(self, book: str, position: Position) -> None:
-        """Forget the note that an exit for ``position`` placed an order: that order was
-        cancelled (M5.13: the kill switch cancels a resting exit), so none is on its way."""
-        with self._lock:
-            recent = self._placed.get(book)
-            if recent is not None:
-                recent.pop(position, None)
-                if not recent:
-                    del self._placed[book]
 
     def placed_lately(self, book: str) -> set[Position]:
         """The positions with a note or a hold of an exit in ``book``."""
@@ -524,17 +505,6 @@ def exit_placed(
     """
     ids = tuple(str(each).strip() for each in (order_ids or ()) if str(each or "").strip())
     EXITS.placed(book, position_of(exchange, symbol, product), ids)
-
-
-def exit_cancelled(book: str, exchange: object, symbol: object, product: object) -> None:
-    """The order an exit for this position placed was cancelled: it no longer counts as on its
-    way (``EXITS.unplaced``)."""
-    EXITS.unplaced(book, position_of(exchange, symbol, product))
-
-
-def exit_holds(book: str) -> dict[Position, Hold]:
-    """Every position with a hold on Upstox's orders in ``book`` (``EXITS.holds``)."""
-    return EXITS.holds(book)
 
 
 def hold_verdict(
