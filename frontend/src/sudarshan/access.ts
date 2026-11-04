@@ -17,11 +17,19 @@
  * login made elsewhere (auto-login's schedule, Test now, another phone, a new
  * API key) reaches it without a reload. Never while it can: nothing is polled
  * on a working screen.
+ *
+ * A ready screen asks once more, and only on an event, never on a timer: when
+ * the page comes back into view (the phone woke after the 03:00 expiry) and
+ * when the market socket signs in again. At most once every MIN_GAP_MS. If the
+ * server says the login lapsed or the key is gone, every screen moves to its
+ * right state by itself.
  */
 import { useEffect, useMemo, useRef } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { syncSession } from '@/components/auth/AuthSync'
+import type { MarketDataManager } from '@/lib/MarketDataManager'
 import { useAuthStore } from '@/stores/authStore'
+import { useMarketDataManager } from '@/sudarshan/live/useFrameLines'
 
 export type PriceAccess =
   | { state: 'ready'; apiKey: string }
@@ -51,6 +59,12 @@ export function priceAccessOf({
 /** How often a screen that cannot read prices asks again, while it is in view. */
 export const RECHECK_MS = 30_000
 
+/** The least time between two checks started by a page return or a socket sign-in. */
+export const MIN_GAP_MS = 5_000
+
+/** When the last check started. */
+let lastAskedAt = 0
+
 /** One check at a time, and none for a page out of view. */
 let asking = false
 /** Screens open now that cannot read prices. */
@@ -60,6 +74,7 @@ let timer: ReturnType<typeof setInterval> | undefined
 function askAgain(): void {
   if (asking || document.visibilityState === 'hidden') return
   asking = true
+  lastAskedAt = Date.now()
   void syncSession({ keepOnFailure: true }).finally(() => {
     asking = false
   })
@@ -67,6 +82,44 @@ function askAgain(): void {
 
 function onVisibility(): void {
   if (document.visibilityState === 'visible') askAgain()
+}
+
+/** A check after an event, unless one started a moment ago. */
+function askOnEvent(): void {
+  if (Date.now() - lastAskedAt < MIN_GAP_MS) return
+  askAgain()
+}
+
+/** Screens open now, ready or not. */
+let watchers = 0
+let stopWatching: (() => void) | undefined
+
+function onReturn(): void {
+  if (document.visibilityState === 'visible') askOnEvent()
+}
+
+/** Ask again when the page returns to view and when the market socket signs in again. */
+function watch(manager: MarketDataManager): () => void {
+  watchers += 1
+  if (watchers === 1) {
+    document.addEventListener('visibilitychange', onReturn)
+    let epoch: number | undefined
+    const removeListener = manager.addStateListener((state) => {
+      // The first call reports where the socket already is, not a sign-in.
+      if (epoch !== undefined && state.connectionEpoch !== epoch) askOnEvent()
+      epoch = state.connectionEpoch
+    })
+    stopWatching = () => {
+      document.removeEventListener('visibilitychange', onReturn)
+      removeListener()
+    }
+  }
+  return () => {
+    watchers -= 1
+    if (watchers > 0) return
+    stopWatching?.()
+    stopWatching = undefined
+  }
 }
 
 /** Ask now, then on every return to the page and every RECHECK_MS, until the last screen stops. */
@@ -101,6 +154,8 @@ export function usePriceAccess(): PriceAccess {
   )
   const blocked = access.state !== 'ready'
   useEffect(() => (blocked ? wait() : undefined), [blocked])
+  const manager = useMarketDataManager()
+  useEffect(() => watch(manager), [manager])
   return access
 }
 
