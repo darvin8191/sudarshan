@@ -39,7 +39,9 @@ describe('the New tab sheet', () => {
 
   it('cannot be saved without a name', () => {
     show()
-    expect((screen.getByRole('button', { name: 'Create tab' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Create tab' }) as HTMLButtonElement).disabled).toBe(
+      true
+    )
   })
 
   it('sends the name, second name, kind, icon, colour and pin with a request id', async () => {
@@ -56,7 +58,12 @@ describe('the New tab sheet', () => {
     const [op, args] = api.call.mock.calls[0]
     expect(op).toBe('tab_create')
     expect(args).toMatchObject({
-      name: 'Gold', name_alt: 'સોનું', kind: 'gold', icon: 'gem', colour: 'gold', pinned: true,
+      name: 'Gold',
+      name_alt: 'સોનું',
+      kind: 'gold',
+      icon: 'gem',
+      colour: 'gold',
+      pinned: true,
     })
     expect(args.request_id).toMatch(/^[0-9a-f-]{36}$/)
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith(expect.objectContaining({ id: 9 })))
@@ -67,7 +74,9 @@ describe('the New tab sheet', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Crypto' }))
     expect(screen.getByRole('button', { name: 'Crypto' }).getAttribute('aria-pressed')).toBe('true')
     expect(screen.getByRole('button', { name: 'Crypto' }).className).toMatch(/border-2/)
-    expect(screen.getByRole('button', { name: 'Stocks and ETFs' }).getAttribute('aria-pressed')).toBe('false')
+    expect(
+      screen.getByRole('button', { name: 'Stocks and ETFs' }).getAttribute('aria-pressed')
+    ).toBe('false')
     for (const label of ['Blue', 'Gold', 'Sky', 'Grey']) {
       expect(screen.getByRole('button', { name: label })).toBeTruthy() // named, not just coloured
     }
@@ -75,7 +84,11 @@ describe('the New tab sheet', () => {
 
   it('sends once however often Create is tapped while the request is out', async () => {
     let finish: (value: unknown) => void = () => {}
-    api.call.mockReturnValue(new Promise((resolve) => { finish = resolve }))
+    api.call.mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve
+      })
+    )
     show()
     await typeName('Gold')
     const create = screen.getByRole('button', { name: 'Create tab' })

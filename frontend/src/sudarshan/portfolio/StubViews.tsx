@@ -99,14 +99,17 @@ export function UpstoxStub({
 export function CustomStub({
   view,
   onView,
+  hideBody = false,
 }: {
   view: CustomView
   onView: (view: CustomView) => void
+  /** The part has its own screen: only the segments are drawn. */
+  hideBody?: boolean
 }) {
   return (
     <div className="flex flex-col gap-3">
       <Segments views={CUSTOM_VIEWS} labels={CUSTOM_LABELS} value={view} onChange={onView} />
-      <Stub view={view} label={CUSTOM_LABELS[view]} />
+      {!hideBody && <Stub view={view} label={CUSTOM_LABELS[view]} />}
     </div>
   )
 }

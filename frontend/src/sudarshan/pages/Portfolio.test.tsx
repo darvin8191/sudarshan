@@ -97,7 +97,7 @@ describe('the Portfolio page', () => {
     serve()
     show('/portfolio?tab=2&view=activity')
     await screen.findByRole('button', { name: 'Add' })
-    expect(screen.getByText(/Every entry of this tab/)).toBeTruthy()
+    expect(await screen.findByText('Nothing here yet. Add an entry or import a file.')).toBeTruthy()
     expect(screen.getByRole('tab', { name: 'Performance' })).toBeTruthy()
     await userEvent.click(screen.getByRole('tab', { name: 'Overview' }))
     expect(screen.getByText(/The value of this tab now/)).toBeTruthy()
@@ -147,6 +147,14 @@ describe('the Portfolio page', () => {
     await screen.findByText(/This tab is archived/)
     expect(screen.getByRole('button', { name: 'Tab settings' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Add' })).toBeNull()
+  })
+
+  it('New tab opens its sheet, and the empty Activity buttons open the Add and Import stubs', async () => {
+    serve()
+    show('/portfolio?tab=2&view=activity')
+    await userEvent.click(await screen.findByRole('button', { name: 'Add an entry' }))
+    expect(await screen.findByText('Add an entry', { selector: 'h2' })).toBeTruthy()
+    expect(screen.getByText(WORDS.not_ready)).toBeTruthy()
   })
 
   it('opens the New tab sheet from the strip', async () => {

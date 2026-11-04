@@ -18,6 +18,7 @@ import { CustomStub, UpstoxStub } from '@/sudarshan/portfolio/StubViews'
 import { NewTabSheet } from '@/sudarshan/portfolio/sheets/NewTabSheet'
 import { TabSettingsSheet } from '@/sudarshan/portfolio/sheets/TabSettingsSheet'
 import { TabStrip } from '@/sudarshan/portfolio/TabStrip'
+import { ActivityTab, PORTFOLIO_KEY } from '@/sudarshan/portfolio/tab/ActivityTab'
 import { WORDS } from '@/sudarshan/portfolio/types'
 import {
   type CustomView,
@@ -28,7 +29,6 @@ import {
 } from '@/sudarshan/portfolio/usePortfolioOverlay'
 import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
 
-export const PORTFOLIO_KEY = ['sudarshan', 'portfolio'] as const
 export const PORTFOLIO_STATE_KEY = [...PORTFOLIO_KEY, 'state'] as const
 
 const CARD = 'rounded-[1.125rem] border bg-card px-4 py-6 text-center shadow-[var(--shadow-card)]'
@@ -87,6 +87,7 @@ export default function Portfolio() {
     [custom]
   )
   const archived = useMemo(() => custom.filter((t) => t.archived), [custom])
+  const accounts = result?.enabled ? result.data.accounts : []
   const shown = tab !== null && custom.some((t) => t.id === tab) ? tab : null
   const current = shown === null ? null : (custom.find((t) => t.id === shown) ?? null)
   const queries = useQueryClient()
@@ -142,7 +143,17 @@ export default function Portfolio() {
               This tab is archived. It is hidden from the dashboard and kept as it is.
             </p>
           )}
-          <CustomStub view={part as CustomView} onView={setView} />
+          <CustomStub view={part as CustomView} onView={setView} hideBody={part === 'activity'} />
+          {part === 'activity' && (
+            <ActivityTab
+              tab={current}
+              accounts={accounts}
+              onAdd={() => open({ kind: 'add' })}
+              onImport={() => open({ kind: 'import' })}
+              onEdit={(entry) => open({ kind: 'edit', activityId: entry.id })}
+              onDuplicate={() => open({ kind: 'add' })}
+            />
+          )}
         </div>
       )
   }

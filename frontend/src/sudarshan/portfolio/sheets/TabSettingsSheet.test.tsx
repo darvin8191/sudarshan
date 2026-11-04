@@ -38,7 +38,10 @@ describe('the Tab settings sheet', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Gem' }))
     await userEvent.click(save)
     expect(api.call).toHaveBeenCalledWith('tab_update', {
-      id: 2, version: 4, name: 'Gold and silver', icon: 'gem',
+      id: 2,
+      version: 4,
+      name: 'Gold and silver',
+      icon: 'gem',
     })
     await waitFor(() => expect(onChanged).toHaveBeenCalled())
   })
@@ -55,12 +58,18 @@ describe('the Tab settings sheet', () => {
 
   it('the first tab cannot move earlier', () => {
     show(SIBLINGS[0])
-    expect((screen.getByRole('button', { name: /Move earlier/ }) as HTMLButtonElement).disabled).toBe(true)
+    expect(
+      (screen.getByRole('button', { name: /Move earlier/ }) as HTMLButtonElement).disabled
+    ).toBe(true)
   })
 
   it('a tab changed on another screen shows the server’s sentence and saves nothing', async () => {
     api.call.mockRejectedValueOnce(
-      new PortfolioError({ code: 'version_conflict', message: WORDS.version_conflict, entryId: null })
+      new PortfolioError({
+        code: 'version_conflict',
+        message: WORDS.version_conflict,
+        entryId: null,
+      })
     )
     const { onChanged } = show()
     await userEvent.type(screen.getByRole('textbox', { name: /Second name/ }), 'x')
@@ -82,7 +91,11 @@ describe('the Tab settings sheet', () => {
 
   it('archives, sending once however often it is tapped', async () => {
     let finish: (value: unknown) => void = () => {}
-    api.call.mockReturnValue(new Promise((resolve) => { finish = resolve }))
+    api.call.mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve
+      })
+    )
     show()
     const archive = screen.getByRole('button', { name: /Archive this tab/ })
     fireEvent.click(archive)
@@ -111,7 +124,11 @@ describe('the Tab settings sheet', () => {
     await userEvent.type(box, 'Old gold')
     expect(del.disabled).toBe(false)
     await userEvent.click(del)
-    expect(api.call).toHaveBeenCalledWith('tab_delete', { id: 2, version: 4, confirm_name: 'Old gold' })
+    expect(api.call).toHaveBeenCalledWith('tab_delete', {
+      id: 2,
+      version: 4,
+      confirm_name: 'Old gold',
+    })
     await waitFor(() => expect(onDeleted).toHaveBeenCalledWith(2))
   })
 
