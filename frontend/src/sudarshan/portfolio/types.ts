@@ -1025,9 +1025,13 @@ export interface UpstoxBook {
 export interface UpstoxEodDay {
   day: Day
   read_at: EpochMs
-  holdings_value_paise: Paise
-  holdings_cost_paise: Paise
-  positions_pnl_paise: Paise
+  /** null: that part was not read at the close (never 0). */
+  holdings_value_paise: Paise | null
+  holdings_cost_paise: Paise | null
+  positions_pnl_paise: Paise | null
+  /** The reason a part was not read, when the service gives one. */
+  holdings_words?: string | null
+  positions_words?: string | null
   /** Taken at 15:55 and not yet settled to the official close. */
   provisional: boolean
   late: boolean

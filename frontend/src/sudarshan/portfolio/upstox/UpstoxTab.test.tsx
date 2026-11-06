@@ -269,6 +269,40 @@ describe('History', () => {
     expect(screen.getByRole('link', { name: /Portfolio Analyzer/ })).toBeTruthy()
   })
 
+  it('says a part not read at the close was not recorded, never 0, and leaves the day off the chart', async () => {
+    const day = (n: number, extra: object = {}) => ({
+      day: 20261020 + n,
+      read_at: READ_AT,
+      holdings_value_paise: 10_000_000,
+      holdings_cost_paise: 9_000_000,
+      positions_pnl_paise: 1000,
+      provisional: false,
+      late: false,
+      ...extra,
+    })
+    serve(
+      {},
+      {
+        days: [
+          day(0),
+          day(1),
+          day(2, { holdings_value_paise: null, holdings_cost_paise: null }),
+          day(3, { positions_pnl_paise: null, positions_words: 'Positions were not read.' }),
+        ],
+        note: null,
+      }
+    )
+    show('history')
+    const rows = within(await screen.findByRole('list', { name: 'Last days' })).getAllByRole(
+      'listitem'
+    )
+    // Newest first: the 23rd lacks positions, the 22nd lacks holdings.
+    expect(within(rows[0]).getByText('Positions were not read.')).toBeTruthy()
+    expect(within(rows[1]).getAllByText('Not recorded at the close')).toHaveLength(3)
+    expect(within(rows[1]).queryByText(/₹0/)).toBeNull()
+    expect(screen.getByText(/left out of the chart/)).toBeTruthy()
+  })
+
   it('says so when there is no record yet', async () => {
     serve({}, { days: [], note: null })
     show('history')

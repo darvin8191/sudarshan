@@ -13,8 +13,15 @@ const W = 320
 const H = 120
 const PAD = 6
 
+/** A day whose holdings were read: the only kind the chart draws. */
+type ReadDay = UpstoxEodDay & { holdings_value_paise: number; holdings_cost_paise: number }
+const isRead = (d: UpstoxEodDay): d is ReadDay =>
+  d.holdings_value_paise !== null && d.holdings_cost_paise !== null
+
+export const NOT_RECORDED = 'Not recorded at the close'
+
 /** Value (solid) against invested (dashed) as two lines; the legend says which is which. */
-function ValueChart({ days }: { days: UpstoxEodDay[] }) {
+function ValueChart({ days }: { days: ReadDay[] }) {
   const values = days.flatMap((d) => [d.holdings_value_paise, d.holdings_cost_paise])
   const low = Math.min(...values)
   const high = Math.max(...values)
@@ -59,6 +66,13 @@ function ValueChart({ days }: { days: UpstoxEodDay[] }) {
   )
 }
 
+/** A part that was not read: the service's reason, or "Not recorded at the close"; never a zero. */
+function Unread({ words }: { words?: string | null }) {
+  return (
+    <span className="font-medium text-[color:var(--text-secondary)]">{words || NOT_RECORDED}</span>
+  )
+}
+
 export function HistoryView({ history }: { history: UpstoxHistory }) {
   const days = [...history.days].sort((a, b) => a.day - b.day)
   if (days.length === 0) {
@@ -75,6 +89,7 @@ export function HistoryView({ history }: { history: UpstoxHistory }) {
       </div>
     )
   }
+  const read = days.filter(isRead)
   const recent = days.slice(-LAST_DAYS).reverse()
   const newest = days[days.length - 1]
   return (
@@ -91,7 +106,12 @@ export function HistoryView({ history }: { history: UpstoxHistory }) {
         <Clock aria-hidden="true" className="size-3.5" />
         Closing records taken at 15:55, not real-time
       </p>
-      {days.length >= 2 && <ValueChart days={days} />}
+      {read.length >= 2 && <ValueChart days={read} />}
+      {read.length < days.length && (
+        <p className="text-xs text-[color:var(--text-tertiary)]">
+          A day whose holdings were not read is left out of the chart.
+        </p>
+      )}
       <h2 className="text-[0.9375rem] font-bold">Last {Math.min(LAST_DAYS, days.length)} days</h2>
       <ul aria-label="Last days" className="flex flex-col gap-2">
         {recent.map((d) => (
@@ -106,22 +126,42 @@ export function HistoryView({ history }: { history: UpstoxHistory }) {
             <dl className="grid grid-cols-2 gap-2 text-sm">
               <div>
                 <dt className="text-xs font-semibold text-muted-foreground">Value</dt>
-                <dd className="font-semibold">{rupeesText(d.holdings_value_paise)}</dd>
+                <dd className="font-semibold">
+                  {d.holdings_value_paise === null ? (
+                    <Unread words={d.holdings_words} />
+                  ) : (
+                    rupeesText(d.holdings_value_paise)
+                  )}
+                </dd>
               </div>
               <div>
                 <dt className="text-xs font-semibold text-muted-foreground">Invested</dt>
-                <dd className="font-semibold">{rupeesText(d.holdings_cost_paise)}</dd>
+                <dd className="font-semibold">
+                  {d.holdings_cost_paise === null ? (
+                    <Unread words={d.holdings_words} />
+                  ) : (
+                    rupeesText(d.holdings_cost_paise)
+                  )}
+                </dd>
               </div>
               <div>
                 <dt className="text-xs font-semibold text-muted-foreground">Holdings gain</dt>
                 <dd className="font-semibold">
-                  <Signed paise={d.holdings_value_paise - d.holdings_cost_paise} />
+                  {d.holdings_value_paise === null || d.holdings_cost_paise === null ? (
+                    <Unread words={d.holdings_words} />
+                  ) : (
+                    <Signed paise={d.holdings_value_paise - d.holdings_cost_paise} />
+                  )}
                 </dd>
               </div>
               <div>
                 <dt className="text-xs font-semibold text-muted-foreground">Positions P&amp;L</dt>
                 <dd className="font-semibold">
-                  <Signed paise={d.positions_pnl_paise} />
+                  {d.positions_pnl_paise === null ? (
+                    <Unread words={d.positions_words} />
+                  ) : (
+                    <Signed paise={d.positions_pnl_paise} />
+                  )}
                 </dd>
               </div>
             </dl>
