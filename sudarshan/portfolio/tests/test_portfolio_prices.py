@@ -250,3 +250,46 @@ def test_a_manual_asset_is_still_its_owners_value(tmp_path, feed):
     )  # fmt: skip
     got = rig.now(gold)
     assert got["price_u"] == 50_000_000 and got["source"] == "manual"
+
+
+def test_a_read_does_not_wait_on_a_feed_that_never_answers(tmp_path):
+    """A feed that takes the connection and says nothing costs a read about a second, not the
+    five seconds of an ordinary call (the bridge gives up at three)."""
+    import socket
+    import threading
+    import time
+
+    held = []
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen(16)
+
+    def accept():
+        while True:
+            try:
+                held.append(server.accept()[0])  # taken, never answered
+            except OSError:
+                return
+
+    threading.Thread(target=accept, daemon=True).start()
+
+    class Silent:
+        url = f"http://127.0.0.1:{server.getsockname()[1]}"
+
+    rig = Rig(tmp_path, Silent())
+    rig.share()
+
+    async def go():
+        started = time.monotonic()
+        await rig.pb.warm_for_read(rig.store, NOW)
+        took = time.monotonic() - started
+        await rig.pb.aclose()
+        return took
+
+    try:
+        took = run(go())
+    finally:
+        server.close()
+        for conn in held:
+            conn.close()
+    assert took < 2.0, took

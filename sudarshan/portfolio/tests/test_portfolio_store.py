@@ -249,7 +249,7 @@ def test_the_default_path_follows_the_state_directory(monkeypatch, tmp_path):
 # ---- --status ------------------------------------------------------------------------------
 def test_status_of_a_missing_file_makes_nothing(tmp_path, capsys):
     target = tmp_path / "state" / DB_FILENAME
-    assert migrate.main(["--status", "--path", str(target)]) == 1
+    assert migrate.main(["--status", "--path", str(target)]) == 0
     out = capsys.readouterr().out
     assert "file none, code 1" in out and "pending: [1]" in out
     assert not target.parent.exists()
@@ -268,7 +268,7 @@ def test_status_of_an_old_file_lists_the_pending_step_and_leaves_it(path, made, 
     made.close()
     raw(path, "PRAGMA user_version = 0")
     before = snapshot(path.parent)
-    assert migrate.main(["--status", "--path", str(path)]) == 1
+    assert migrate.main(["--status", "--path", str(path)]) == 0
     assert "pending: [1]" in capsys.readouterr().out
     assert snapshot(path.parent) == before and raw(path, "PRAGMA user_version") == [(0,)]
 

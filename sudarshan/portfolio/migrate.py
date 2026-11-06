@@ -78,7 +78,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         _say(migrations.SchemaTooNew.WORDS)
         return 2
     if args.status:
-        return 1 if report["pending"] else 0
+        return 0  # a pending step is reported above; only a real failure exits non-zero
     if service_is_up(args.port):
         _say("The portfolio service is running; stop it first, or let it migrate at start.")
         return 2

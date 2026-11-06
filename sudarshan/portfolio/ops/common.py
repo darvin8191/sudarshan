@@ -72,7 +72,8 @@ async def warmed(ctx: Any) -> None:
     book = ctx.ensure_prices()
     if hasattr(book, "warm"):
         try:
-            await book.warm(need(ctx), ctx.clock())
+            bounded = getattr(book, "warm_for_read", None) or book.warm
+            await bounded(need(ctx), ctx.clock())
         except Exception:  # prices degrade to the last closing record; the read goes on
             log.exception("the price book could not be warmed")
 

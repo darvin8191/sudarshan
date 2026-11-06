@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Iterable
+from collections.abc import Awaitable, Callable, Iterable
 from typing import Any
 
 import httpx
@@ -33,6 +33,10 @@ CLAIM_CAP = 200
 RENEW_MS = 10 * 60 * 1000
 HTTP_TIMEOUT_S = 5.0
 CHECK_EVERY_S = 30.0
+#: A read that waits for the feed gives each call this long and the whole warming this long, so a
+#: feed that accepts a connection and never answers cannot push a read past the bridge's 3 s.
+READ_CALL_S = 0.6
+READ_BUDGET_S = 1.5
 #: The benchmark indexes (design 5.5); both are claimed so their ticks are there at the close.
 INDEX_KEYS = ("NSE_INDEX|Nifty 50", "NSE_INDEX|Nifty 500")
 
@@ -45,6 +49,7 @@ class FeedClient:
         self.url = feed_url.rstrip("/")
         self._client, self._own = client, client is None
         self.down = False
+        self.call_timeout: float | None = None  # set while a read waits for the feed
         self._told: set[str] = set()
 
     @property
@@ -65,6 +70,8 @@ class FeedClient:
 
     async def call(self, method: str, path: str, **kwargs: Any) -> httpx.Response | None:
         try:
+            if self.call_timeout is not None:
+                kwargs.setdefault("timeout", self.call_timeout)
             answer = await self.client.request(method, self.url + path, **kwargs)
         except httpx.HTTPError:
             if not self.down:
@@ -148,6 +155,33 @@ class Claims:
         if self.claimed:
             await self.feed.call("DELETE", f"/claims/{CLIENT}")
             self.claimed = frozenset()
+
+
+#: Waits between tries at releasing the claims while the portfolio is off; then it gives up (the
+#: feed lets a claim lapse by itself after 7 days).
+RELEASE_DELAYS_S = (0.0, 5.0, 15.0, 30.0, 60.0, 60.0, 60.0, 60.0)
+
+
+async def release(
+    feed_url: str,
+    delays: Iterable[float] = RELEASE_DELAYS_S,
+    sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep,
+) -> bool:
+    """Drop this service's claims at the feed, trying again while the feed does not answer.
+    True when the feed has no set for this client any more. Used when the portfolio is switched
+    off; a plain stop or restart keeps its claims."""
+    feed = FeedClient(feed_url)
+    try:
+        for wait in delays:
+            if wait:
+                await sleep(wait)
+            answer = await feed.call("DELETE", f"/claims/{CLIENT}")
+            if answer is not None and answer.status_code in (200, 204, 404):
+                return True
+        log.warning("The portfolio is off but the feed still holds its price subscriptions.")
+        return False
+    finally:
+        await feed.aclose()
 
 
 def register_job() -> None:
