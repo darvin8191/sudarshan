@@ -17,7 +17,7 @@ import {
 
 /** A sentence for the owner and the code the page acts on. */
 export interface PortfolioProblem {
-  code: ErrorCode | 'unanswered' | 'unsent' | 'unreadable'
+  code: ErrorCode | 'unanswered' | 'unsent' | 'unreadable' | 'too_large'
   message: string
   /** `refused`: the entry that stands in the way. */
   entryId: number | null
@@ -41,6 +41,9 @@ export type PortfolioResult<T> =
 
 const NO_ANSWER = 'No answer came from OpenAlgo. Check the connection, then try again.'
 const NOT_SENT = 'The request could not be sent. Reload the page, then try again.'
+/** What the server's front door answers (as a page, not as JSON) to a file it refuses (413). */
+export const TOO_LARGE =
+  'This file is larger than the server accepts. Split it into smaller files and import them one by one.'
 const UNREADABLE = 'OpenAlgo’s answer could not be read. Try again in a minute.'
 
 /** Waits for the bridge's own waits (3, 6, 15 and 12 s) with room for the trip. */
@@ -73,6 +76,36 @@ function problemFrom(body: unknown): PortfolioProblem | null {
   }
 }
 
+const SESSION_ENDED: PortfolioProblem = {
+  code: 'unauthorized',
+  message: WORDS.unauthorized,
+  entryId: null,
+}
+
+const asText = (data: unknown): string =>
+  typeof data === 'string' ? data : data && typeof data === 'object' ? JSON.stringify(data) : ''
+
+function onLoginPage(url?: string): boolean {
+  if (!url) return false
+  try {
+    return /^\/(auth\/)?login\/?$/.test(new URL(url, window.location.origin).pathname)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Whether an answer says the login is over: a 401, a CSRF refusal (a session that expired at
+ * 03:00 fails the CSRF check first, as JSON or as a page), or a redirect that landed on the login
+ * page (a form upload is answered that way and the browser follows it).
+ */
+export function sessionEnded(status: number | undefined, data: unknown, url?: string): boolean {
+  if (status === 401) return true
+  if (onLoginPage(url)) return true
+  if (status === 400 || status === 403) return /csrf/i.test(asText(data))
+  return false
+}
+
 /** The problem in an error a request threw, in the owner's words. */
 export function problemOf(error: unknown): PortfolioProblem {
   if (error instanceof PortfolioError) {
@@ -82,6 +115,16 @@ export function problemOf(error: unknown): PortfolioProblem {
     return { code: 'unsent', message: NOT_SENT, entryId: null }
   }
   if (!error.response) return { code: 'unanswered', message: NO_ANSWER, entryId: null }
+  const { status, data, request } = error.response as {
+    status: number
+    data: unknown
+    request?: { responseURL?: string }
+  }
+  const coded = problemFrom(data)
+  if (coded === null && sessionEnded(status, data, request?.responseURL)) return SESSION_ENDED
+  if (coded === null && status === 413) {
+    return { code: 'too_large', message: TOO_LARGE, entryId: null }
+  }
   return (
     problemFrom(error.response.data) ?? { code: 'unreadable', message: UNREADABLE, entryId: null }
   )
@@ -142,6 +185,9 @@ export async function portfolioCall<N extends OpName>(
             timeout,
             signal,
           })
+    if (sessionEnded(undefined, null, response.request?.responseURL)) {
+      throw new PortfolioError(SESSION_ENDED)
+    }
     body = response.data
   } catch (error) {
     throw new PortfolioError(problemOf(error))

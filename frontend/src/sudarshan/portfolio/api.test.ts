@@ -112,3 +112,63 @@ describe('portfolioCall', () => {
     await expect(portfolioCall('state')).rejects.toMatchObject({ code: 'unreadable' })
   })
 })
+
+describe('an ended session and a file the server refuses', () => {
+  const refused = (status: number, data: unknown, responseURL?: string) =>
+    new AxiosError('x', 'ERR_BAD_REQUEST', undefined, { responseURL }, {
+      status,
+      data,
+      statusText: '',
+      headers: {},
+      config: {} as never,
+      request: { responseURL },
+    } as never)
+
+  it('reads a 401 as the session having ended', async () => {
+    client.request.mockRejectedValue(refused(401, '<html>'))
+    await expect(portfolioCall('tab_update', { id: 1, version: 1 } as never)).rejects.toMatchObject(
+      {
+        message: WORDS.unauthorized,
+      }
+    )
+  })
+
+  it('reads a CSRF refusal, as JSON or as a page, as the session having ended', () => {
+    expect(problemOf(refused(400, { error: 'CSRF token has expired.' })).message).toBe(
+      WORDS.unauthorized
+    )
+    expect(problemOf(refused(400, '<html>The CSRF session token is missing.</html>')).message).toBe(
+      WORDS.unauthorized
+    )
+  })
+
+  it('reads a redirect that landed on the login page as the session having ended, uploads included', async () => {
+    client.request.mockResolvedValue({
+      data: '<html>Log in</html>',
+      request: { responseURL: 'https://x.example/auth/login?next=/api' },
+    })
+    await expect(
+      portfolioCall('import_preview', {
+        id: 3,
+        format: 'generic',
+        filename: 'a.csv',
+        text: 'a',
+      } as never)
+    ).rejects.toMatchObject({ message: WORDS.unauthorized })
+  })
+
+  it('reads the server’s 413 page as a file that is too large, with what to do', () => {
+    const p = problemOf(refused(413, '<html>413 Request Entity Too Large</html>'))
+    expect(p.code).toBe('too_large')
+    expect(p.message).toBe(
+      'This file is larger than the server accepts. Split it into smaller files and import them one by one.'
+    )
+  })
+
+  it('keeps a coded answer as it is', () => {
+    const p = problemOf(
+      refused(400, { status: 'error', error: { code: 'invalid', message: 'No.' } })
+    )
+    expect(p.message).toBe('No.')
+  })
+})
