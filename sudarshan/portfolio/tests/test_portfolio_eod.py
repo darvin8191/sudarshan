@@ -231,7 +231,7 @@ def settled(rig, tick_at, cp, quotes=None):
     if quotes:
         rig.feed.governor = "on"
         rig.feed.quotes.update(quotes)
-    assert rig.run(eod.settle_step, ist(27, 9, 20)) == "ok"
+    rig.run(eod.settle_step, ist(27, 9, 20))
     return rig.eod_row(20261026)
 
 
@@ -261,6 +261,32 @@ def test_a_settle_with_no_official_close_leaves_the_record_as_it_was(make):
     row = settled(rig, ist(26, 15, 29), 3450.0)  # old tick, governor off
     assert row["basis"] == "last" and row["price_u"] == 35_005_500
     assert "1 without a close" in rig.job("settle", 20261027)["detail"]
+    assert rig.job("settle", 20261027)["status"] == "failed"
+
+
+def test_a_settle_with_no_close_is_tried_again_at_the_next_start_that_day_only(make):
+    rig = make()
+    settled(rig, ist(26, 15, 29), 3450.0)  # old tick, governor off: nothing official
+    assert rig.run(eod.settle_step, ist(27, 11, 0)) is None  # the same process does not ask again
+    rig.feed.governor = "on"
+    rig.feed.quotes[TCS] = {"instrument_token": TCS, "prev_close_price": 3502.5}
+    rig.svc.settle_tried = None  # a restart
+    assert rig.run(eod.settle_step, ist(27, 11, 5)) == "ok"
+    assert rig.eod_row(20261026)["basis"] == "close"
+    assert rig.job("settle", 20261027)["status"] == "ok"
+    rig.svc.settle_tried = None
+    assert rig.run(eod.settle_step, ist(27, 11, 6)) is None  # done
+
+
+def test_the_retry_does_not_touch_a_day_that_has_frozen(make, monkeypatch):
+    rig = make()
+    settled(rig, ist(26, 15, 29), 3450.0)
+    rig.feed.governor = "on"
+    rig.feed.quotes[TCS] = {"instrument_token": TCS, "prev_close_price": 3502.5}
+    monkeypatch.setattr(Schedule, "frozen", lambda self, day, today: True)
+    rig.svc.settle_tried = None
+    rig.run(eod.settle_step, ist(27, 11, 5))
+    assert rig.eod_row(20261026)["basis"] == "last"
 
 
 def test_the_settle_runs_once_and_not_before_nine_twenty(make):

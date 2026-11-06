@@ -164,3 +164,45 @@ def test_follow_claims_the_indexes_the_listed_assets_and_the_upstox_holdings(tmp
             None, NOW)) is False  # fmt: skip
     finally:
         store_module.stop()
+
+
+def test_over_the_cap_the_most_valuable_holdings_are_claimed_first(tmp_path, feed):
+    from sudarshan.autologin.schedule import TradingCalendar
+    from sudarshan.portfolio import store as store_module
+    from sudarshan.portfolio.book import Book
+    from sudarshan.portfolio.prices import PriceBook
+    from sudarshan.portfolio.store import DB_FILENAME, PortfolioStore, Scope
+
+    store = PortfolioStore(tmp_path / "s" / DB_FILENAME, now=NOW)
+    try:
+        book = Book(store)
+        owner = Scope.owner()
+        me = book.members(owner)[0]
+        account = book.account_create(owner, "ac", me["id"], "Z", "demat", now=NOW)
+        tab = book.tab_create(owner, "t-1", "Long term", "stocks", now=NOW)
+        # keys in alphabetical order are the opposite of their value
+        worth = {"NSE_EQ|AAA": 1_000, "NSE_EQ|BBB": 500_000, "NSE_EQ|CCC": 20_000}
+        for n, (key, paise) in enumerate(worth.items()):
+            asset = book.asset_create(
+                owner, f"a-{n}", "listed", now=NOW, exchange="NSE", symbol=key[-3:],
+                isin=f"INE00000000{n}", name=key, instrument_key=key,
+            )  # fmt: skip
+            version = next(t for t in book.tabs(owner) if t["id"] == tab["id"])["version"]
+            book.activity_create(
+                owner, tab["id"], version,
+                {"kind": "BUY", "trade_date": 20261001, "account_id": account["id"],
+                 "asset_id": asset["id"], "qty_u": 1_000_000, "amount_paise": paise},
+                f"e-{n}", now=NOW,
+            )  # fmt: skip
+        prices = PriceBook(feed.url, None, TradingCalendar(tmp_path / "none"), max_claims=4)
+
+        async def go():
+            ok = await prices.follow(store, NOW)
+            await prices.aclose()
+            return ok
+
+        assert run(go()) is True
+        sent = set(puts(feed)[0]["_body"]["keys"])
+        assert sent == {*INDEX_KEYS, "NSE_EQ|BBB", "NSE_EQ|CCC"}  # AAA is the least valuable
+    finally:
+        store_module.stop()

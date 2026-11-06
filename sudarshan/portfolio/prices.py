@@ -78,12 +78,34 @@ class PriceBook(Prices):
         self._quotes: dict[tuple[int, str], dict[str, Any]] = {}
         self._asked: set[tuple[int, str]] = set()
         self._auction: dict[int, tuple] = {}
+        self._indexes: tuple[str, ...] | None = None
 
     async def aclose(self) -> None:
         await self.feed.aclose()
 
     def _say_once(self, name: str, text: str, *args: Any) -> None:
         self.feed.say_once(name, text, *args)
+
+    async def _index_keys(self) -> tuple[str, ...]:
+        """The index keys the master contract knows. NIFTY 500 missing there is said once and
+        NIFTY 50 goes on alone; an unreadable contract changes nothing and is asked again."""
+        if self._indexes is not None:
+            return self._indexes
+        if self.resolver is None:
+            return INDEX_KEYS
+        loop = asyncio.get_running_loop()
+        try:
+            found = await loop.run_in_executor(
+                None, lambda: [k for k in INDEX_KEYS if self.resolver.by_key(k) is not None]
+            )
+        except ResolverUnavailable:
+            return INDEX_KEYS
+        if INDEX_KEYS[0] in found and INDEX_KEYS[1] not in found:
+            self._say_once("noindex", "NIFTY 500 is not in the master contract, so only NIFTY 50 "
+                           "is followed.")  # fmt: skip
+            found = [INDEX_KEYS[0]]
+        self._indexes = tuple(found) if found else INDEX_KEYS
+        return self._indexes
 
     async def follow(self, store: PortfolioStore | None, now: int, reader: Any = None) -> bool:
         """Keep the feed's set of this service's keys current: the indexes first, then every
@@ -93,12 +115,42 @@ class PriceBook(Prices):
         loop = asyncio.get_running_loop()
 
         def keys(tx: Tx) -> list[str]:
-            return sorted({a["instrument_key"] for a in tx.rows("asset", kind="listed")
-                           if a["instrument_key"]})  # fmt: skip
+            return self._by_value(tx)
 
         mine = await loop.run_in_executor(None, lambda: store.read(Scope.owner(), keys))
         theirs = reader.held_keys() if reader is not None and hasattr(reader, "held_keys") else []
-        return await self.claims.sync([*INDEX_KEYS, *mine, *sorted(set(theirs) - set(mine))], now)
+        return await self.claims.sync(
+            [*await self._index_keys(), *mine, *sorted(set(theirs) - set(mine))], now
+        )
+
+    @staticmethod
+    def _by_value(tx: Tx) -> list[str]:
+        """The pricing keys of the listed assets, the most valuable holdings first (5.2): units
+        held in any tab at the newest closing price, or at cost when there is none."""
+        from .core.ledger import replay
+        from .core.model import Entry, Refusal
+        from .core.money import value_paise
+
+        assets = {a["id"]: a for a in tx.rows("asset", kind="listed") if a["instrument_key"]}
+        held: dict[int, list[int]] = {}
+        for tab in tx.rows("tab"):
+            try:
+                ledger = replay([Entry.of(r) for r in tx.entries(tab["id"])])
+            except Refusal:
+                continue
+            for (_, asset_id), pos in ledger.positions.items():
+                if asset_id in assets:
+                    got = held.setdefault(asset_id, [0, 0])
+                    got[0] += pos.qty_u
+                    got[1] += pos.cost_paise
+        worth = {}
+        for asset_id, (qty_u, cost) in held.items():
+            eods = tx.rows("price_eod", "day", asset_id=asset_id)
+            worth[asset_id] = value_paise(qty_u, eods[-1]["price_u"]) if eods and qty_u else cost
+        ordered = sorted(
+            assets.values(), key=lambda a: (-worth.get(a["id"], 0), a["instrument_key"])
+        )
+        return [a["instrument_key"] for a in ordered]
 
     def index_tick(self, key: str, today: int) -> dict[str, Any] | None:
         """The last tick of an index if it is from ``today``: ``{"price_u", "cp_u", "at"}``."""
@@ -126,7 +178,7 @@ class PriceBook(Prices):
                 "GET",
                 "/upstox/v3/market-quote/quotes",
                 params={"instrument_key": ",".join(batch)},
-                headers={"X-Sudarshan-Client": CLIENT, "X-Sudarshan-Priority": "background"},
+                headers={"X-Sudarshan-Client": CLIENT, "X-Sudarshan-Priority": "bulk"},
             )
             if answer is None or answer.status_code != 200:
                 if answer is not None:
@@ -156,15 +208,15 @@ class PriceBook(Prices):
             for asset in tx.rows("asset", kind="listed"):
                 eods = tx.rows("price_eod", "day", asset_id=asset["id"])
                 out.append((asset, bool(eods)))
-            return out
+            return out, self._by_value(tx)
 
-        listed = await loop.run_in_executor(None, lambda: store.read(scope, read))
+        listed, order = await loop.run_in_executor(None, lambda: store.read(scope, read))
         keyed = {a["instrument_key"]: (a, has_eod) for a, has_eod in listed if a["instrument_key"]}
         session = _day(now)
         if self._quotes and next(iter(self._quotes))[0] != session:
             self._quotes, self._asked = {}, set()  # a quote is kept for its session only (P18)
-        await self.claims.sync([*INDEX_KEYS, *sorted(keyed)], now)
-        ticks = await self._snapshot([*INDEX_KEYS, *sorted(keyed)])
+        await self.claims.sync([*await self._index_keys(), *order], now)
+        ticks = await self._snapshot([*await self._index_keys(), *sorted(keyed)])
         self._ticks = ticks  # a whole generation at once
         need = [k for k, (_, has_eod) in keyed.items() if k not in ticks and not has_eod]
         await self._quote([k for k in need if (session, k) not in self._asked], session, now)

@@ -155,10 +155,10 @@ async def eod_step(service: Any, now: int) -> str | None:
 
 
 # ---- the settle ----------------------------------------------------------------------------
-async def settle_day(service: Any, today: int, now: int, sched: Schedule) -> str:
+async def settle_day(service: Any, today: int, now: int, sched: Schedule) -> tuple[str, int]:
     previous = sched.previous_trading_day(to_date(today))
     if previous is None:
-        return "no earlier trading day"
+        return "no earlier trading day", 0
     before = previous.year * 10000 + previous.month * 100 + previous.day
     prices = service.ensure_prices()
     midnight = (to_date(today).toordinal() - date(1970, 1, 1).toordinal()) * 86_400_000 - 19_800_000
@@ -207,19 +207,30 @@ async def settle_day(service: Any, today: int, now: int, sched: Schedule) -> str
     settled, missed, done = await _write(service, apply)
     left = len(want) - settled - missed
     return (
-        f"{settled} settled, {missed} taken from the settle, {done} indexes, {left} without a close"
+        f"{settled} settled, {missed} taken from the settle, {done} indexes, {left} without a close",
+        left,
     )
 
 
 async def settle_step(service: Any, now: int) -> str | None:
+    """Settle the previous close once a day. A settle that left a stock without an official close
+    is written as failed and tried again once at the next start the same day (the frozen days
+    stay untouched either way)."""
     if service.store is None:
         return None
     sched, today = schedule(service), day_of_instant(now)
     at = sched.settle_at(to_date(today))
-    if at is None or now < at or (await _read(service, lambda tx: tx.job_get("settle", today))):
+    if at is None or now < at:
         return None
+    row = await _read(service, lambda tx: tx.job_get("settle", today))
+    if row is not None and (row["status"] != "failed" or service.settle_tried == today):
+        return None
+    service.settle_tried = today
     try:
-        detail, status = await settle_day(service, today, now, sched), "ok"
+        detail, left = await settle_day(service, today, now, sched)
+        status = "failed" if left else "ok"
+        if left:
+            detail += "; asked again at the next start today"
     except Exception:
         log.exception("the settle of the previous close failed")
         detail, status = "The settle of the previous close failed.", "failed"
