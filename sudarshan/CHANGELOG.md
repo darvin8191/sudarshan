@@ -8,15 +8,15 @@ back if the app does not come up healthy.
 ## v0.5.0 (6 Nov 2026)
 
 The Portfolio page: your Upstox account read-only, and portfolios you keep yourself. It includes
-everything in v0.4.1. **Publish it only after v0.4.1 is installed, on Monday 9 Nov or later: never
-on Saturday 7 or Sunday 8 Nov (Muhurat).**
+everything in v0.4.1. **Publish it only after v0.4.1 has installed and run one trading day on its
+own: Tuesday 10 Nov after the close, or later.**
 
 ### What changes for you
 - **The Portfolio page, switched on by this release.** It never places or changes an order, and it
   reads Upstox only, with the read-only token. You can turn it off with `SUDARSHAN_PORTFOLIO` set to
   `off` in OpenAlgo's `.env`; later releases leave your value alone.
-- **The Upstox tab:** holdings, positions, MTF positions and funds, read when you open the tab (no
-  timer), and shown with how old they are. Funds cannot be read from midnight to 05:30; the tab says so
+- **The Upstox tab:** holdings, positions, MTF positions and funds, read when you open the tab,
+  after each order and on a slow re-sync while the market is open, and shown with how old they are. Funds cannot be read from midnight to 05:30; the tab says so
   instead of showing an error.
 - **Your own tabs:** shares, ETFs, mutual funds, gold, deposits, anything with a value. Every figure
   comes from your entries and prices; nothing is typed in as a total. Buys, sells, dividends,
@@ -33,7 +33,8 @@ on Saturday 7 or Sunday 8 Nov (Muhurat).**
   next morning. A part Upstox did not answer for is shown as not known, never as 0.
 
 ### What you must do
-- **Publish it** (the link is in your task list) on Monday 9 Nov or later.
+- **Publish it** (the link is in your task list) on Tuesday 10 Nov after the close or later, once
+  v0.4.1 is installed.
 - **Check on your phone after the first trading day:**
   - the Upstox tab against the Upstox app: quantities, average prices, P&L, T1 quantity and the
     haircut;
@@ -52,12 +53,8 @@ on Saturday 7 or Sunday 8 Nov (Muhurat).**
 ### Not in this release yet
 - **The index history for the benchmark** and **fallback quotes** wait for the feed's request governor,
   which ships off. Until you turn it on, the benchmark fills day by day from the closing record and an
-  unpriced holding is counted at its cost, with a note on the summary only.
+  unpriced holding is counted at its cost, with a note.
 - **Open points from the review:**
-  - the Performance part does not say that unpriced holdings are counted at cost;
-  - editing an old draft entry saves it as posted without saying so;
-  - editing an opening holding or some transfers recomputes its value from quantity and price;
-  - after the 03:00 expiry a save can read "could not be read" instead of "your session has ended";
   - the morning check of each holding's identity follows a symbol that another company reuses;
   - a candle never replaces a close already stored, and both indexes share one limit of 30 requests a
     run;
