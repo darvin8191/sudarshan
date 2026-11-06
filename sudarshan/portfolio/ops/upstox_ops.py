@@ -87,12 +87,21 @@ def _day(ctx, row: dict[str, Any], now: int) -> dict[str, Any]:
     settle_ms = _settle_ms(settled_at, ctx.settings.settle_at_min)
     taken = day_of_instant(row["read_at"])
     late = taken != row["day"] or minute_of_day(row["read_at"]) > LATE_AFTER_MIN
+    # A part that was not read is not known: null, never 0, and the day says which.
+    value, cost = row["holdings_value_paise"], row["holdings_cost_paise"]
+    pnl = row["positions_pnl_paise"]
+    not_read = []
+    if value is None or cost is None:
+        not_read.append("Holdings were not read at the close.")
+    if pnl is None:
+        not_read.append("Positions were not read at the close.")
     return {
         "day": row["day"],
         "read_at": row["read_at"],
-        "holdings_value_paise": row["holdings_value_paise"] or 0,
-        "holdings_cost_paise": row["holdings_cost_paise"] or 0,
-        "positions_pnl_paise": row["positions_pnl_paise"] or 0,
+        "holdings_value_paise": value,
+        "holdings_cost_paise": cost,
+        "positions_pnl_paise": pnl,
+        "not_read": not_read,
         "provisional": now < settle_ms,
         "late": late,
     }
