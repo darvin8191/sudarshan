@@ -1,5 +1,5 @@
 // SUDARSHAN M7.22: bring entries in from a file and take them out again (design 4.11).
-// Pick the format, upload (within 1.2 MB), read the preview (counts, then the problem rows in
+// Pick the format, upload (within the size limit), read the preview (counts, then the problem rows in
 // words), add the rows with the tab version the preview saw, and "Remove this import" if it was
 // wrong. "Download entries" writes the tab's entries as a file of the generic format.
 
@@ -107,6 +107,9 @@ function RowLine({ row }: { row: ImportRow }) {
     </li>
   )
 }
+
+/** The size limit as the owner reads it, from the one constant the check uses. */
+const LIMIT_TEXT = `${Math.round(IMPORT_MAX_FILE_BYTES / 1000)} KB`
 
 export function ImportSheet({
   open,
@@ -292,7 +295,7 @@ export function ImportSheet({
               {send.pending ? 'Checking the file' : 'Choose a file'}
             </button>
             <p className="text-xs text-[color:var(--text-tertiary)]">
-              Up to 1.2 MB and 5,000 rows a file. Nothing is saved until you add the rows.
+              Up to {LIMIT_TEXT} and 5,000 rows a file. Nothing is saved until you add the rows.
             </p>
             {tooBig && (
               <p

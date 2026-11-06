@@ -67,7 +67,8 @@ function ValueChart({ days }: { days: ReadDay[] }) {
 }
 
 /** A part that was not read: the service's reason, or "Not recorded at the close"; never a zero. */
-function Unread({ words }: { words?: string | null }) {
+function Unread({ day, part }: { day: UpstoxEodDay; part: 'Holdings' | 'Positions' }) {
+  const words = day.not_read?.find((w) => w.startsWith(part))
   return (
     <span className="font-medium text-[color:var(--text-secondary)]">{words || NOT_RECORDED}</span>
   )
@@ -128,7 +129,7 @@ export function HistoryView({ history }: { history: UpstoxHistory }) {
                 <dt className="text-xs font-semibold text-muted-foreground">Value</dt>
                 <dd className="font-semibold">
                   {d.holdings_value_paise === null ? (
-                    <Unread words={d.holdings_words} />
+                    <Unread day={d} part="Holdings" />
                   ) : (
                     rupeesText(d.holdings_value_paise)
                   )}
@@ -138,7 +139,7 @@ export function HistoryView({ history }: { history: UpstoxHistory }) {
                 <dt className="text-xs font-semibold text-muted-foreground">Invested</dt>
                 <dd className="font-semibold">
                   {d.holdings_cost_paise === null ? (
-                    <Unread words={d.holdings_words} />
+                    <Unread day={d} part="Holdings" />
                   ) : (
                     rupeesText(d.holdings_cost_paise)
                   )}
@@ -148,7 +149,7 @@ export function HistoryView({ history }: { history: UpstoxHistory }) {
                 <dt className="text-xs font-semibold text-muted-foreground">Holdings gain</dt>
                 <dd className="font-semibold">
                   {d.holdings_value_paise === null || d.holdings_cost_paise === null ? (
-                    <Unread words={d.holdings_words} />
+                    <Unread day={d} part="Holdings" />
                   ) : (
                     <Signed paise={d.holdings_value_paise - d.holdings_cost_paise} />
                   )}
@@ -158,7 +159,7 @@ export function HistoryView({ history }: { history: UpstoxHistory }) {
                 <dt className="text-xs font-semibold text-muted-foreground">Positions P&amp;L</dt>
                 <dd className="font-semibold">
                   {d.positions_pnl_paise === null ? (
-                    <Unread words={d.positions_words} />
+                    <Unread day={d} part="Positions" />
                   ) : (
                     <Signed paise={d.positions_pnl_paise} />
                   )}

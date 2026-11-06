@@ -1029,9 +1029,8 @@ export interface UpstoxEodDay {
   holdings_value_paise: Paise | null
   holdings_cost_paise: Paise | null
   positions_pnl_paise: Paise | null
-  /** The reason a part was not read, when the service gives one. */
-  holdings_words?: string | null
-  positions_words?: string | null
+  /** One plain sentence for each part that was not read ("Holdings were not read at the close."). */
+  not_read?: string[]
   /** Taken at 15:55 and not yet settled to the official close. */
   provisional: boolean
   late: boolean
@@ -1236,7 +1235,7 @@ export interface MemberUpdateArgs extends Targets, Versioned {
   relation?: string | null
 }
 
-/** `id` is the tab. `text` is the file as UTF-8 text (at most 1,200,000 bytes, 5,000 rows). */
+/** `id` is the tab. `text` is the file as UTF-8 text (at most IMPORT_MAX_FILE_BYTES, 5,000 rows). */
 export interface ImportPreviewArgs extends Targets {
   format: ImportFormat
   filename: string

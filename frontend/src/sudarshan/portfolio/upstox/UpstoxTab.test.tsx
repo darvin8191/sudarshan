@@ -287,7 +287,10 @@ describe('History', () => {
           day(0),
           day(1),
           day(2, { holdings_value_paise: null, holdings_cost_paise: null }),
-          day(3, { positions_pnl_paise: null, positions_words: 'Positions were not read.' }),
+          day(3, {
+            positions_pnl_paise: null,
+            not_read: ['Positions were not read at the close.'],
+          }),
         ],
         note: null,
       }
@@ -297,7 +300,7 @@ describe('History', () => {
       'listitem'
     )
     // Newest first: the 23rd lacks positions, the 22nd lacks holdings.
-    expect(within(rows[0]).getByText('Positions were not read.')).toBeTruthy()
+    expect(within(rows[0]).getByText('Positions were not read at the close.')).toBeTruthy()
     expect(within(rows[1]).getAllByText('Not recorded at the close')).toHaveLength(3)
     expect(within(rows[1]).queryByText(/₹0/)).toBeNull()
     expect(screen.getByText(/left out of the chart/)).toBeTruthy()

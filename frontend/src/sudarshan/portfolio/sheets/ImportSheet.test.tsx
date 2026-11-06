@@ -1,5 +1,5 @@
 /**
- * The Import sheet (M7.22): the format, the 1.2 MB limit, the preview in words with the problem
+ * The Import sheet (M7.22): the format, the size limit, the preview in words with the problem
  * rows first, the commit with the version the preview saw, "Remove this import", and the export.
  */
 import { QueryClientProvider } from '@tanstack/react-query'
@@ -92,7 +92,12 @@ describe('the Import sheet', () => {
     expect(screen.getByRole('list', { name: 'Counts' }).textContent).toContain('With problems: 2')
   })
 
-  it('refuses a file over 1.2 MB without sending it', async () => {
+  it('says the limit from the constant', () => {
+    show()
+    expect(screen.getByText(/Up to 900 KB and 5,000 rows a file/)).toBeTruthy()
+  })
+
+  it('refuses a file over the limit without sending it', async () => {
     show()
     const big = file('big.csv')
     Object.defineProperty(big, 'size', { value: IMPORT_MAX_FILE_BYTES + 1 })
