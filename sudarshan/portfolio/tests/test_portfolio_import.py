@@ -253,7 +253,7 @@ def test_an_empty_file_has_no_rows():
 
 def test_the_caps_are_the_revised_ones():
     limits = GEN["limits"]
-    assert kinds.IMPORT_MAX_FILE_BYTES == limits["max_file_bytes"] == 1_200_000
+    assert kinds.IMPORT_MAX_FILE_BYTES == limits["max_file_bytes"] == 900_000
     assert kinds.IMPORT_MAX_ROWS == limits["max_rows"] == 5_000
 
 

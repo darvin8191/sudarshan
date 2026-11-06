@@ -53,7 +53,7 @@ NOUNS = {
     "SPLIT": "split",
     "BONUS": "bonus",
 }
-BIG = "This file is larger than 1.2 MB. Download it in shorter date ranges and import each part."
+BIG = "This file is larger than 900 KB. Download it in shorter date ranges and import each part."
 
 
 def echo(text):
@@ -1114,7 +1114,7 @@ IMPORT_GENERIC = {
 }
 LIMITS = {
     "about": "The size and row caps of P19 (revised): checked before the table is read.",
-    "max_file_bytes": 1_200_000,
+    "max_file_bytes": 900_000,
     "max_rows": 5_000,
     "too_big": BIG,
     "too_many_rows": "This file has more than 5,000 rows. Download it in shorter date ranges and import each part.",

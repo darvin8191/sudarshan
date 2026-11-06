@@ -83,8 +83,8 @@ dry runs 120/min). The bridge forwards each request to the service on `127.0.0.1
 sealed POST. The body is one Fernet token holding `{"op": "<name>", "nonce": "<32 hex>", "args":
 {...}}`, under the key purpose `sudarshan/portfolio/api/v1` (`sudarshan/vault/keys.py`): it
 expires after 60 s, its nonce is accepted once (`NonceBook`, answering 503 when full), and it is at
-most 64 KiB (`import_preview`: 2 MiB, because a token is base64 and a file of 1.2 MB seals to
-1.5 to 1.9 MiB). The JSON inside is written compact, with non-ASCII text left as UTF-8. The answer
+most 64 KiB (`import_preview`: 2 MiB, because a token is base64 and a file of 900 KB seals to
+1.2 to 1.5 MiB). The JSON inside is written compact, with non-ASCII text left as UTF-8. The answer
 is plain JSON.
 
 The bridge waits 3 s for a read, 6 s for a write, 15 s for an import and 12 s for the Upstox ops.
@@ -200,7 +200,7 @@ against the dry-run limiter, not the write limiter.
 `WORDS` in `kinds.py` and `types.ts` holds the sentences the bridge, the service and the phone
 say identically: the switched-off line, "not ready", "not answering", "Not confirmed: open the tab
 to see whether it was saved.", the version-conflict line, the store failures, the draft-date rule,
-the 50-tab limit, the 1.2 MB import limit. Anything that depends on a number or a name is built
+the 50-tab limit, the 900 KB import limit. Anything that depends on a number or a name is built
 where the number is known.
 
 ## What the shapes mean
@@ -313,7 +313,7 @@ of labelled lines). Funds are not read between 00:00 and 05:30 IST.
 
 ### Import and export
 
-`import_preview` takes the file as UTF-8 text (`text`), at most 1,200,000 bytes and 5,000 rows;
+`import_preview` takes the file as UTF-8 text (`text`), at most 900,000 bytes and 5,000 rows;
 the sheet checks both before it sends, and a bigger file is told in the `import_too_big` sentence
 and never sent. Text, not base64: the seal is base64 already, and base64 inside it would not fit
 2 MiB. If a file under the limit still seals to more than 2 MiB (every field quoted and then
