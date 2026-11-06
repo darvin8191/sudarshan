@@ -328,3 +328,45 @@ def test_the_downloaded_file_is_never_kept_or_logged(world, caplog):
     assert "Alpha Bluechip" not in caplog.text and "INF000A01011" not in caplog.text
     assert datetime.now(IST).year >= 2026
     assert OpsRig is not None
+
+
+def test_the_download_stops_reading_at_the_size_limit(monkeypatch):
+    """A body far over the limit is cut off while it streams, not read whole and then refused."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    import httpx
+
+    sent = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Content-Length", str(500 * 65_536))
+            self.end_headers()
+            try:
+                for _ in range(500):
+                    self.wfile.write(b"x" * 65_536)
+                    sent.append(1)
+            except OSError:
+                pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    monkeypatch.setattr(amfi, "MAX_BYTES", 100_000)
+
+    async def go():
+        async with httpx.AsyncClient(trust_env=False) as client:
+            return await amfi.fetch(client, f"http://127.0.0.1:{server.server_address[1]}/", None)
+
+    try:
+        state, why = asyncio.run(go())
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert state == "failed" and "bigger than expected" in why
+    assert len(sent) < 500  # the sender was cut off long before the whole body

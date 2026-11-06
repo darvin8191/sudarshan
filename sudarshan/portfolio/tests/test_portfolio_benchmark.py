@@ -258,8 +258,9 @@ def test_a_master_that_has_both_keeps_both(make):
 @pytest.mark.parametrize(
     ("day", "h", "m", "due"),
     [
-        (26, 15, 44, False),
-        (26, 15, 45, True),
+        (26, 15, 59, False),
+        (26, 16, 0, True),
+        (26, 15, 45, False),
         (26, 9, 0, False),
         (25, 3, 0, True),
         (24, 23, 0, True),
@@ -275,7 +276,7 @@ def test_it_runs_after_the_close_on_a_trading_day_and_any_time_on_a_closed_day(
 def test_a_special_day_uses_its_own_close(make):
     rig = make(extra="2026-11-08 14:05-15:40  # Muhurat\n")
     runner = Backfill(rig.svc)
-    assert not runner.due(ist(8, 15, 44, mo=11)) and runner.due(ist(8, 15, 45, mo=11))
+    assert not runner.due(ist(8, 15, 59, mo=11)) and runner.due(ist(8, 16, 0, mo=11))
 
 
 def test_the_step_runs_once_a_day_and_writes_the_job_row(make):
@@ -284,10 +285,10 @@ def test_the_step_runs_once_a_day_and_writes_the_job_row(make):
     rig.feed.governor = "on"
     rig.feed.candle_rows[INDEX_KEYS[0]] = [("2026-10-23", 25_900.0)]
     rig.run(benchmark.benchmark_step, ist(26, 15, 30))
-    assert rig.job("benchmark", TODAY) is None  # not before 15:45
-    assert asyncio.run(_step(rig, ist(26, 15, 45))) == "ok"
+    assert rig.job("benchmark", TODAY) is None  # not before 16:00
+    assert asyncio.run(_step(rig, ist(26, 16, 0))) == "ok"
     assert rig.job("benchmark", TODAY)["status"] == "ok"
-    assert asyncio.run(_step(rig, ist(26, 16, 0))) is None
+    assert asyncio.run(_step(rig, ist(26, 16, 15))) is None
 
 
 async def _step(rig, at):

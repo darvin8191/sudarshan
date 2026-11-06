@@ -30,7 +30,7 @@ from decimal import Decimal
 from typing import Any
 from urllib.parse import quote
 
-from .core.days import day_of_instant, from_date, to_date
+from .core.days import IST_OFFSET_MS, MS_PER_DAY, day_of_instant, from_date, to_date
 from .core.kinds import PRICE_SCALE
 from .feedlink import CLIENT, INDEX_KEYS, json_of
 from .store import Scope, Tx
@@ -43,6 +43,7 @@ OWNER = Scope.owner()
 PAUSE_S = 2.0
 MAX_REQUESTS = 30
 CLOSED_AFTER_MIN = 5  # minutes after the day's last close
+NOT_BEFORE_MIN = 16 * 60  # and never before 16:00 IST
 BENCHMARK_OF = dict(zip(INDEX_KEYS, ("nifty50", "nifty500"), strict=True))
 WORDS = {
     "off": "Index history is not asked for: the feed's request governor is switched off. "
@@ -112,7 +113,11 @@ class Backfill:
         if not sched.trading(day):
             return True
         close = sched.close_at(day)
-        return close is not None and now >= close + CLOSED_AFTER_MIN * 60_000
+        if close is None:
+            return False
+        midnight = (now + IST_OFFSET_MS) // MS_PER_DAY * MS_PER_DAY - IST_OFFSET_MS
+        start = max(close + CLOSED_AFTER_MIN * 60_000, midnight + NOT_BEFORE_MIN * 60_000)
+        return now >= start
 
     async def keys(self) -> tuple[list[str], str | None]:
         """The index keys to follow, and the sentence when one is not in the master contract."""

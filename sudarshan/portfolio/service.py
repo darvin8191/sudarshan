@@ -32,6 +32,7 @@ from sudarshan.vault import PORTFOLIO_API_INFO, fernet_for
 from . import __version__
 from .api import PortfolioApi
 from .config import ConfigError, Settings, merged_env, read_pepper, setup_logging
+from .feedlink import release
 from .migrations import SchemaTooNew
 from .store import DB_FILENAME, PortfolioStore, StoreError
 from .store import stop as stop_store_thread
@@ -218,9 +219,15 @@ class Service:
             if self.enabled:
                 for name, function in self._jobs.items():
                     self._tasks[name] = asyncio.create_task(function(self), name=f"job-{name}")
-            else:
-                log.info("The portfolio is switched off (SUDARSHAN_PORTFOLIO): every request is "
-                         "answered as off; nothing is read or written")  # fmt: skip
+            if not self.enabled:
+                # Switched off (by the switch, or kept off by its store): the feed is told to
+                # drop this service's claims, retried. A plain stop or restart keeps them.
+                self._tasks["release_claims"] = asyncio.create_task(
+                    release(self.settings.feed_url), name="job-release-claims"
+                )
+                if not self.settings.enabled:
+                    log.info("The portfolio is switched off (SUDARSHAN_PORTFOLIO): every request "
+                             "is answered as off; nothing is read or written")  # fmt: skip
             api_task = asyncio.create_task(self._serve_api(), name="portfolio-api")
             await self._stop.wait()
         finally:

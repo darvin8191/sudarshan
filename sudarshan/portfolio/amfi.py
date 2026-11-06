@@ -159,19 +159,27 @@ async def fetch(
         headers["If-Modified-Since"] = format_datetime(
             datetime.fromtimestamp(since_ms / 1000, UTC), usegmt=True
         )
+    chunks: list[bytes] = []
+    size = 0
     try:
-        answer = await client.get(url, headers=headers, timeout=TIMEOUT_S, follow_redirects=False)
+        async with client.stream(
+            "GET", url, headers=headers, timeout=TIMEOUT_S, follow_redirects=False
+        ) as answer:
+            if answer.status_code == 304:
+                return "same", None
+            if answer.status_code != 200:
+                log.warning("AMFI's list was refused (%d)", answer.status_code)
+                return "failed", "AMFI did not give its list."
+            async for chunk in answer.aiter_bytes():
+                size += len(chunk)
+                if size > MAX_BYTES:  # stop reading: the rest is never held in memory
+                    return "failed", "AMFI's list was far bigger than expected and was not read."
+                chunks.append(chunk)
+            encoding = answer.encoding or "utf-8"
     except httpx.HTTPError as exc:
         log.warning("AMFI's list was not fetched (%s)", type(exc).__name__)
         return "failed", "AMFI did not answer."
-    if answer.status_code == 304:
-        return "same", None
-    if answer.status_code != 200:
-        log.warning("AMFI's list was refused (%d)", answer.status_code)
-        return "failed", "AMFI did not give its list."
-    if len(answer.content) > MAX_BYTES:
-        return "failed", "AMFI's list was far bigger than expected and was not read."
-    return "ok", answer.text
+    return "ok", b"".join(chunks).decode(encoding, errors="replace")
 
 
 async def fetch_and_store(service: Any, now: int) -> tuple[str, str]:
