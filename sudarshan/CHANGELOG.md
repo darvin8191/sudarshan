@@ -5,6 +5,66 @@ publish. The owner publishes each release on GitHub. The server's deploy timer t
 outside 08:30-16:00 IST on trading days (09:00-15:45 until v0.3.1), keeps backups, and rolls
 back if the app does not come up healthy.
 
+## v0.5.0 (6 Nov 2026)
+
+The Portfolio page: your Upstox account read-only, and portfolios you keep yourself. It includes
+everything in v0.4.1. **Publish it only after v0.4.1 is installed, on Monday 9 Nov or later: never
+on Saturday 7 or Sunday 8 Nov (Muhurat).**
+
+### What changes for you
+- **The Portfolio page, switched on by this release.** It never places or changes an order, and it
+  reads Upstox only, with the read-only token. You can turn it off with `SUDARSHAN_PORTFOLIO` set to
+  `off` in OpenAlgo's `.env`; later releases leave your value alone.
+- **The Upstox tab:** holdings, positions, MTF positions and funds, read when you open the tab (no
+  timer), and shown with how old they are. Funds cannot be read from midnight to 05:30; the tab says so
+  instead of showing an error.
+- **Your own tabs:** shares, ETFs, mutual funds, gold, deposits, anything with a value. Every figure
+  comes from your entries and prices; nothing is typed in as a total. Buys, sells, dividends,
+  interest, fees, transfers, splits, bonus shares and rights. Sales use FIFO for each account and
+  asset. A tab shows value, invested, gain, today, XIRR, time-weighted return, allocation by class,
+  sector, cap size, account, member and tag, filters, saved views and a layout of your own.
+- **Import and export:** a generic CSV or a Zerodha tradebook, up to 900 KB and 5,000 rows. You see a
+  preview first, then add the rows, and you can undo the whole import. The same file twice adds nothing.
+  Export gives a CSV that reads back to the same entries.
+- **Prices:** live from the feed for what you hold (the 200 most valuable holdings; the rest at their
+  last closing record), mutual funds from AMFI's nightly list, and anything else at the value you
+  entered, with a note when it is old.
+- **History of the Upstox tab:** a closing record is taken 15 minutes after the close and settled the
+  next morning. A part Upstox did not answer for is shown as not known, never as 0.
+
+### What you must do
+- **Publish it** (the link is in your task list) on Monday 9 Nov or later.
+- **Check on your phone after the first trading day:**
+  - the Upstox tab against the Upstox app: quantities, average prices, P&L, T1 quantity and the
+    haircut;
+  - one custom tab against your own FIFO arithmetic, with a buy, a part sale and a dividend;
+  - an import of your own Zerodha tradebook: if its first row is not recognised, tell me the header
+    row; then undo it, and import the same file again;
+  - the next morning's history point for the Upstox tab;
+  - the funds window: open the tab after midnight and read the sentence.
+- **After the first night, check that mutual-fund prices arrived.** AMFI's file layout is read as
+  documented and has not been fetched yet.
+
+### What is refused now that used to be accepted
+- Nothing existing changes. New: an import over 900 KB or 5,000 rows is refused with a sentence that
+  says to split it; an entry that would sell more than is held is refused with the date it fails.
+
+### Not in this release yet
+- **The index history for the benchmark** and **fallback quotes** wait for the feed's request governor,
+  which ships off. Until you turn it on, the benchmark fills day by day from the closing record and an
+  unpriced holding is counted at its cost, with a note on the summary only.
+- **Open points from the review:**
+  - the Performance part does not say that unpriced holdings are counted at cost;
+  - editing an old draft entry saves it as posted without saying so;
+  - editing an opening holding or some transfers recomputes its value from quantity and price;
+  - after the 03:00 expiry a save can read "could not be read" instead of "your session has ended";
+  - the morning check of each holding's identity follows a symbol that another company reuses;
+  - a candle never replaces a close already stored, and both indexes share one limit of 30 requests a
+    run;
+  - liabilities without a tab are not shown;
+  - the PDF export, the dividend forecast and family sharing are not built.
+- **The dashboard card** replaces the Holdings card one release later (your decision P5).
+
 ## v0.4.1 (4 Nov 2026)
 
 Live exits that Upstox's order book decides, sized from today's fills; a smart order to size 0
