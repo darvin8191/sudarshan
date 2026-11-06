@@ -29,7 +29,7 @@ function ValueChart({ days }: { days: ReadDay[] }) {
   const x = (n: number) =>
     PAD + (days.length < 2 ? (W - 2 * PAD) / 2 : (n * (W - 2 * PAD)) / (days.length - 1))
   const y = (v: number) => H - PAD - ((v - low) / span) * (H - 2 * PAD)
-  const line = (pick: (d: UpstoxEodDay) => number) =>
+  const line = (pick: (d: ReadDay) => number) =>
     days.map((d, n) => `${x(n)},${y(pick(d))}`).join(' ')
   const first = days[0]
   const last = days[days.length - 1]
