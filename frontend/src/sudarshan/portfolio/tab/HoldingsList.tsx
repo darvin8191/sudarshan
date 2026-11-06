@@ -7,6 +7,7 @@ import { formatAmount } from '@/sudarshan/dashboard/format'
 import { pctNumber, Signed } from '../Signed'
 import type { HoldingColumn } from '../types'
 import { priceText, quantityText, rupeesText } from './format'
+import type { HoldingGroup } from './groups'
 import type { ListedRow } from './rows'
 
 const TH = 'px-3 py-2 text-left text-xs font-semibold text-muted-foreground'
@@ -144,18 +145,17 @@ function Cell({ column, r, stale }: { column: HoldingColumn; r: ListedRow; stale
   }
 }
 
-export function HoldingsList({
+function Rows({
   rows,
   columns,
   stale,
 }: {
   rows: readonly ListedRow[]
   columns: readonly HoldingColumn[]
-  /** Whether a row should be moving and is not: shown greyed, sign and arrow kept. */
   stale: (r: ListedRow) => boolean
 }) {
   return (
-    <section aria-label="Holdings" className="flex flex-col gap-2">
+    <>
       <ul aria-label="Holdings cards" className="flex flex-col gap-2 md:hidden">
         {rows.map((r) => (
           <Card key={r.row.asset.id} r={r} stale={stale(r)} />
@@ -185,6 +185,50 @@ export function HoldingsList({
           </tbody>
         </table>
       </div>
+    </>
+  )
+}
+
+export function HoldingsList({
+  rows,
+  columns,
+  stale,
+  groups = null,
+}: {
+  rows: readonly ListedRow[]
+  columns: readonly HoldingColumn[]
+  /** Whether a row should be moving and is not: shown greyed, sign and arrow kept. */
+  stale: (r: ListedRow) => boolean
+  /** The layout's grouping: when given, the holdings are listed under each group's heading. */
+  groups?: readonly HoldingGroup[] | null
+}) {
+  if (groups && groups.length > 0) {
+    return (
+      <section aria-label="Holdings" className="flex flex-col gap-4">
+        {groups.map((g) => (
+          <section key={g.key || g.label} aria-label={g.label} className="flex flex-col gap-2">
+            <header className="flex flex-wrap items-baseline justify-between gap-x-3 px-1">
+              <h3 className="text-sm font-bold">
+                {g.label}
+                <span className="font-medium text-[color:var(--text-secondary)]">
+                  {' '}
+                  · {g.rows.length} holding{g.rows.length === 1 ? '' : 's'}
+                </span>
+              </h3>
+              <span className="inline-flex flex-wrap items-baseline gap-x-2 text-sm">
+                <span className="font-semibold">{rupeesText(g.value_paise)}</span>
+                <Signed paise={g.unrealised_paise} />
+              </span>
+            </header>
+            <Rows rows={g.rows} columns={columns} stale={stale} />
+          </section>
+        ))}
+      </section>
+    )
+  }
+  return (
+    <section aria-label="Holdings" className="flex flex-col gap-2">
+      <Rows rows={rows} columns={columns} stale={stale} />
     </section>
   )
 }

@@ -26,7 +26,7 @@ vi.mock('@/sudarshan/dashboard/MarketCalendar', async (importOriginal) => ({
 import { createQueryClient } from '@/app/providers'
 import { feed } from '@/test/marketDataHarness'
 import { tab } from '../sheets/fixtures'
-import { row, view } from './fixtures'
+import { report, row, view } from './fixtures'
 import { TabOverview } from './Overview'
 
 function show(data: object, part: 'overview' | 'holdings' = 'overview') {
@@ -218,6 +218,119 @@ describe('the Overview', () => {
       expect(await screen.findByText(/Value on that day is not known/)).toBeTruthy()
       expect(screen.getByText('Value as on 12 Sep 2026')).toBeTruthy()
       expect(screen.queryByText('Real-time')).toBeNull()
+    })
+  })
+
+  describe('the performance widgets', () => {
+    function serveWith(widgets: string[], performance: () => unknown) {
+      const data = view([row(1, 'Alpha')])
+      data.layout.spec.widgets = widgets as never
+      api.call.mockImplementation(async (op: string) => {
+        if (op === 'tab_get') return { enabled: true, data }
+        if (op === 'performance') return { enabled: true, data: performance() }
+        throw new Error(`unexpected op ${op}`)
+      })
+      return render(
+        <QueryClientProvider client={createQueryClient()}>
+          <MemoryRouter>
+            <TabOverview
+              tab={tab(2, 'Gold')}
+              part="overview"
+              onAdd={() => {}}
+              onImport={() => {}}
+            />
+          </MemoryRouter>
+        </QueryClientProvider>
+      )
+    }
+
+    it('draws the return and the income where the layout puts them', async () => {
+      serveWith(['summary', 'performance', 'income'], report)
+      expect(await screen.findByRole('region', { name: 'Performance' })).toBeTruthy()
+      expect(screen.getByRole('region', { name: 'Income' })).toBeTruthy()
+      expect(screen.queryByRole('region', { name: 'Value against money put in' })).toBeNull()
+    })
+
+    it('says in words when the figures cannot be read, and tries again on request', async () => {
+      let n = 0
+      serveWith(['performance'], () => {
+        n += 1
+        if (n === 1) throw new Error('down')
+        return report()
+      })
+      await userEvent.click(await screen.findByRole('button', { name: 'Try again' }))
+      expect(await screen.findByRole('region', { name: 'Performance' })).toBeTruthy()
+    })
+  })
+
+  describe('layout grouping and the default saved view', () => {
+    const asset = (r: ReturnType<typeof row>, patch: object) => ({
+      ...r,
+      asset: { ...r.asset, ...patch },
+    })
+    function serveLayout(data: ReturnType<typeof view>, customizing = false) {
+      api.call.mockImplementation(async (op: string) => {
+        if (op === 'tab_get') return { enabled: true, data }
+        throw new Error(`unexpected op ${op}`)
+      })
+      return render(
+        <QueryClientProvider client={createQueryClient()}>
+          <MemoryRouter>
+            <TabOverview
+              tab={tab(2, 'Gold')}
+              part="holdings"
+              customizing={customizing}
+              onAdd={() => {}}
+              onImport={() => {}}
+            />
+          </MemoryRouter>
+        </QueryClientProvider>
+      )
+    }
+
+    it('lists the holdings under a heading for each group of the layout', async () => {
+      const data = view([
+        asset(row(1, 'Alpha'), { asset_class: 'equity' }),
+        asset(row(2, 'Bar'), { asset_class: 'gold' }),
+      ])
+      data.layout.spec.group = 'class'
+      serveLayout(data)
+      expect(await screen.findByRole('region', { name: 'Equity' })).toBeTruthy()
+      expect(screen.getByRole('region', { name: 'Gold and silver' })).toBeTruthy()
+    })
+
+    it('opens with the default saved view: its filters, its sort, group and columns', async () => {
+      const data = view([asset(row(1, 'Alpha'), { asset_class: 'equity' })])
+      data.views = [
+        {
+          id: 9,
+          tab_id: 2,
+          name: 'Long term',
+          is_default: true,
+          version: 1,
+          spec: {
+            filters: { accounts: [], classes: ['equity'], tags: [], held: 'over', as_of: null },
+            sort: 'name',
+            group: 'class',
+            columns: ['name'],
+          },
+        },
+      ]
+      serveLayout(data)
+      await waitFor(() =>
+        expect(api.call).toHaveBeenCalledWith('tab_get', {
+          id: 2,
+          classes: ['equity'],
+          held: 'over',
+        })
+      )
+      expect(await screen.findByText('Long term')).toBeTruthy() // "View: Long term"
+      expect(screen.getByRole('button', { name: 'Back to the layout' })).toBeTruthy()
+    })
+
+    it('opens the Customize sheet when the address asks for it', async () => {
+      serveLayout(view([row(1, 'Alpha')]), true)
+      expect(await screen.findByRole('dialog', { name: /Customize/ })).toBeTruthy()
     })
   })
 })

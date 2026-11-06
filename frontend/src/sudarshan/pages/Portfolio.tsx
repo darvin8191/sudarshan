@@ -10,6 +10,7 @@ import {
   Power,
   RefreshCw,
   Settings2,
+  SlidersHorizontal,
   TriangleAlert,
 } from 'lucide-react'
 import { useMemo } from 'react'
@@ -22,6 +23,7 @@ import { TabSettingsSheet } from '@/sudarshan/portfolio/sheets/TabSettingsSheet'
 import { TabStrip } from '@/sudarshan/portfolio/TabStrip'
 import { ActivityTab, PORTFOLIO_KEY } from '@/sudarshan/portfolio/tab/ActivityTab'
 import { TabOverview } from '@/sudarshan/portfolio/tab/Overview'
+import { PerformanceTab } from '@/sudarshan/portfolio/tab/PerformanceTab'
 import { WORDS } from '@/sudarshan/portfolio/types'
 import { UpstoxTab } from '@/sudarshan/portfolio/upstox/UpstoxTab'
 import {
@@ -152,7 +154,12 @@ export default function Portfolio() {
           <CustomStub
             view={part as CustomView}
             onView={setView}
-            hideBody={part === 'activity' || part === 'overview' || part === 'holdings'}
+            hideBody={
+              part === 'activity' ||
+              part === 'overview' ||
+              part === 'holdings' ||
+              part === 'performance'
+            }
           />
           {(part === 'overview' || part === 'holdings') && (
             <TabOverview
@@ -160,10 +167,13 @@ export default function Portfolio() {
               tab={current}
               part={part}
               accounts={accounts}
+              customizing={overlay?.kind === 'customize'}
+              onCustomizeClose={close}
               onAdd={() => open({ kind: 'add' })}
               onImport={() => open({ kind: 'import' })}
             />
           )}
+          {part === 'performance' && <PerformanceTab key={current.id} tab={current} />}
           {part === 'activity' && (
             <ActivityTab
               tab={current}
@@ -195,6 +205,16 @@ export default function Portfolio() {
             >
               <Settings2 aria-hidden="true" className="size-5" />
             </button>
+            {(part === 'overview' || part === 'holdings') && (
+              <button
+                type="button"
+                aria-label="Customize"
+                onClick={() => open({ kind: 'customize' })}
+                className={`${ACTION} border border-input bg-card px-3 hover:bg-accent`}
+              >
+                <SlidersHorizontal aria-hidden="true" className="size-5" />
+              </button>
+            )}
             {!current.archived && (
               <button
                 type="button"
@@ -289,6 +309,7 @@ export default function Portfolio() {
           overlay?.kind !== 'new-tab' &&
           overlay?.kind !== 'settings' &&
           overlay?.kind !== 'import' &&
+          overlay?.kind !== 'customize' &&
           overlay?.kind !== 'add' &&
           overlay?.kind !== 'edit' &&
           overlay?.kind !== 'duplicate'
