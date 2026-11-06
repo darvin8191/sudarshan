@@ -10,6 +10,7 @@ import {
   Power,
   RefreshCw,
   Settings2,
+  SlidersHorizontal,
   TriangleAlert,
 } from 'lucide-react'
 import { useMemo } from 'react'
@@ -166,6 +167,8 @@ export default function Portfolio() {
               tab={current}
               part={part}
               accounts={accounts}
+              customizing={overlay?.kind === 'customize'}
+              onCustomizeClose={close}
               onAdd={() => open({ kind: 'add' })}
               onImport={() => open({ kind: 'import' })}
             />
@@ -202,6 +205,16 @@ export default function Portfolio() {
             >
               <Settings2 aria-hidden="true" className="size-5" />
             </button>
+            {(part === 'overview' || part === 'holdings') && (
+              <button
+                type="button"
+                aria-label="Customize"
+                onClick={() => open({ kind: 'customize' })}
+                className={`${ACTION} border border-input bg-card px-3 hover:bg-accent`}
+              >
+                <SlidersHorizontal aria-hidden="true" className="size-5" />
+              </button>
+            )}
             {!current.archived && (
               <button
                 type="button"
@@ -296,6 +309,7 @@ export default function Portfolio() {
           overlay?.kind !== 'new-tab' &&
           overlay?.kind !== 'settings' &&
           overlay?.kind !== 'import' &&
+          overlay?.kind !== 'customize' &&
           overlay?.kind !== 'add' &&
           overlay?.kind !== 'edit' &&
           overlay?.kind !== 'duplicate'

@@ -3,9 +3,9 @@
 // says. The service prices the tab at read_at; ticks newer than that move it (useTabLive), so
 // "Real-time" shows only while ticks arrive. A re-read comes on mount, a reconnect, a return after
 // 15 seconds and any change to the portfolio, never on a timer.
-import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import { LoaderCircle, RefreshCw, TriangleAlert } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useBookSync } from '@/sudarshan/books/useBookSync'
 import { useMarketOpen } from '@/sudarshan/dashboard/hooks'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
@@ -16,13 +16,24 @@ import {
   useIstDay,
 } from '@/sudarshan/dashboard/MarketCalendar'
 import { problemOf } from '../api'
+import { CustomizeSheet } from '../sheets/CustomizeSheet'
 import { SECONDARY } from '../sheets/TabFields'
-import type { Account, AllocationBy, TabInfo, TabView, Widget } from '../types'
+import type {
+  Account,
+  AllocationBy,
+  LayoutSpec,
+  SavedView,
+  TabInfo,
+  TabView,
+  Widget,
+} from '../types'
 import { ReadStamp } from '../upstox/parts'
 import { useTabLive } from '../useTabLive'
+import { PORTFOLIO_KEY } from './ActivityTab'
 import { AllocationBars } from './AllocationBars'
 import { countFilters, FilterBar, NO_FILTERS } from './Filters'
 import { dayText } from './format'
+import { groupRows, TAG_GROUPS_NOTE } from './groups'
 import { HoldingsList } from './HoldingsList'
 import { PerformanceBlock } from './PerformanceBlocks'
 import { listRows, moversOf, sortRows } from './rows'
@@ -52,6 +63,12 @@ const DRAWN: readonly Widget[] = [
   'income',
 ]
 
+/** The layout, with the sort, grouping and columns of a saved view where one is in use. */
+function specInUse(spec: LayoutSpec, view: SavedView | null): LayoutSpec {
+  if (!view) return spec
+  return { ...spec, sort: view.spec.sort, group: view.spec.group, columns: view.spec.columns }
+}
+
 const BUTTON_ROW = 'flex flex-wrap justify-center gap-2'
 
 function Empty({ onAdd, onImport }: { onAdd: () => void; onImport: () => void }) {
@@ -79,6 +96,8 @@ function Loaded({
   onNarrow,
   allocBy,
   onAllocBy,
+  view,
+  onClearView,
   onAdd,
   onImport,
 }: {
@@ -90,6 +109,9 @@ function Loaded({
   onNarrow: (next: Narrowing) => void
   allocBy: AllocationBy
   onAllocBy: (next: AllocationBy) => void
+  /** The saved view in use: its sort, grouping and columns stand in for the layout's. */
+  view: SavedView | null
+  onClearView: () => void
   onAdd: () => void
   onImport: () => void
 }) {
@@ -103,7 +125,7 @@ function Loaded({
     marketOpen,
     enabled: !asOf,
   })
-  const spec = data.layout.spec
+  const spec = specInUse(data.layout.spec, view)
   const listed = useMemo(
     () => sortRows(listRows(live.rows, live.moved, live.totals.value_paise), spec.sort),
     [live.rows, live.moved, live.totals.value_paise, spec.sort]
@@ -146,8 +168,23 @@ function Loaded({
     )
   }
 
+  const groups =
+    spec.group === 'none'
+      ? null
+      : groupRows(
+          listed,
+          spec.group,
+          spec.sort,
+          live.totals.value_paise,
+          (id) => accounts.find((a) => a.id === id)?.name ?? 'An account'
+        )
   const holdings = (
-    <HoldingsList key="holdings" rows={listed} columns={spec.columns} stale={stale} />
+    <div key="holdings" className="flex flex-col gap-2">
+      <HoldingsList rows={listed} columns={spec.columns} stale={stale} groups={groups} />
+      {spec.group === 'tag' && (
+        <p className="text-sm text-[color:var(--text-secondary)]">{TAG_GROUPS_NOTE}</p>
+      )}
+    </div>
   )
   // The history, performance and income are for the whole tab: a narrowed or past view has no
   // live point on the chart, and the figures are the service's.
@@ -190,6 +227,20 @@ function Loaded({
   return (
     <div className="flex flex-col gap-3">
       {filterBar}
+      {view && (
+        <p className="flex flex-wrap items-center gap-x-3 text-sm text-[color:var(--text-secondary)]">
+          <span>
+            View: <span className="font-semibold text-foreground">{view.name}</span>
+          </span>
+          <button
+            type="button"
+            onClick={onClearView}
+            className="inline-flex min-h-12 items-center font-semibold text-[color:var(--brand)] underline outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          >
+            Back to the layout
+          </button>
+        </p>
+      )}
       <div className="flex flex-wrap items-center justify-between gap-2">
         {asOf ? (
           <span className="text-xs font-semibold text-[color:var(--text-secondary)]">
@@ -232,18 +283,24 @@ export function TabOverview({
   tab,
   part,
   accounts = [],
+  customizing = false,
+  onCustomizeClose = () => {},
   onAdd,
   onImport,
 }: {
   tab: TabInfo
   part: 'overview' | 'holdings'
   accounts?: readonly Account[]
+  /** The Customize sheet is open (the address says so). */
+  customizing?: boolean
+  onCustomizeClose?: () => void
   onAdd: () => void
   onImport: () => void
 }) {
   const [market, setMarket] = useState<MarketCalendar>(CALENDAR_LOADING)
   const day = useIstDay()
   const { isOpen } = useMarketOpen(market)
+  const queries = useQueryClient()
   const [narrowing, setNarrowing] = useState<Narrowing>({ filters: NO_FILTERS, slice: null })
   const [allocBy, setAllocBy] = useState<AllocationBy>('class')
   const query = useQuery({
@@ -251,6 +308,20 @@ export function TabOverview({
     placeholderData: keepPreviousData,
   })
   const { refetch } = query
+  // The saved view the tab opens with, taken on once; undefined until the tab has been read.
+  const [appliedId, setAppliedId] = useState<number | null | undefined>(undefined)
+  const data = query.data
+  useEffect(() => {
+    if (appliedId !== undefined || !data) return
+    const first = data.views.find((v) => v.is_default) ?? null
+    setAppliedId(first?.id ?? null)
+    if (first) setNarrowing({ filters: { ...NO_FILTERS, ...first.spec.filters }, slice: null })
+  }, [appliedId, data])
+  const applied = data?.views.find((v) => v.id === appliedId) ?? null
+  const useView = (next: SavedView | null) => {
+    setAppliedId(next?.id ?? null)
+    if (next) setNarrowing({ filters: { ...NO_FILTERS, ...next.spec.filters }, slice: null })
+  }
   // No timer: a reconnect and a return after 15 seconds read again.
   useBookSync(() => refetch(), { events: [], resyncMs: null })
 
@@ -290,6 +361,8 @@ export function TabOverview({
         onNarrow={setNarrowing}
         allocBy={allocBy}
         onAllocBy={setAllocBy}
+        view={applied}
+        onClearView={() => setAppliedId(null)}
         onAdd={onAdd}
         onImport={onImport}
       />
@@ -299,6 +372,20 @@ export function TabOverview({
     <>
       <MarketCalendarSource key={day} onChange={setMarket} />
       {body}
+      {data && (
+        <CustomizeSheet
+          open={customizing}
+          onClose={onCustomizeClose}
+          tab={tab}
+          layout={data.layout}
+          views={data.views}
+          filters={narrowing.filters}
+          drawn={DRAWN}
+          appliedViewId={applied?.id ?? null}
+          onUseView={useView}
+          onChanged={() => void queries.invalidateQueries({ queryKey: PORTFOLIO_KEY })}
+        />
+      )}
     </>
   )
 }

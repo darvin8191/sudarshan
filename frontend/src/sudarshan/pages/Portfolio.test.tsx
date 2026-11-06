@@ -18,9 +18,24 @@ vi.mock('@/sudarshan/portfolio/api', async (importOriginal) => ({
 
 import { createQueryClient } from '@/app/providers'
 import { PortfolioError } from '@/sudarshan/portfolio/api'
-import { view } from '@/sudarshan/portfolio/tab/fixtures'
+import { report, view } from '@/sudarshan/portfolio/tab/fixtures'
 import { WORDS } from '@/sudarshan/portfolio/types'
 import Portfolio from './Portfolio'
+
+// jsdom has no canvas: the value chart is told to draw and draws nothing.
+vi.mock('lightweight-charts', () => {
+  const series = () => ({ setData: () => {}, update: () => {} })
+  return {
+    createChart: () => ({
+      addSeries: series,
+      timeScale: () => ({ fitContent: () => {} }),
+      remove: () => {},
+    }),
+    LineSeries: 'line',
+    ColorType: { Solid: 'solid' },
+    LineStyle: { Dashed: 2 },
+  }
+})
 
 function tab(id: number, name: string, extra: object = {}) {
   return {
@@ -144,9 +159,28 @@ describe('the Portfolio page', () => {
 
   it('a sheet in the address opens a stub that says what it is for, and says it is not ready', async () => {
     serve()
-    show('/portfolio?tab=2&sheet=customize')
-    await screen.findByText('Customize')
+    show('/portfolio?tab=2&sheet=price&asset=5')
+    await screen.findByText('Update value')
     expect(screen.getByText(WORDS.not_ready)).toBeTruthy()
+  })
+
+  it('the Customize button opens the real sheet over the Overview', async () => {
+    serve()
+    show('/portfolio?tab=2&view=overview')
+    await userEvent.click(await screen.findByRole('button', { name: 'Customize' }))
+    expect(await screen.findByRole('dialog', { name: /Customize/ })).toBeTruthy()
+    expect(
+      screen.getByRole('button', { name: 'Reset to the defaults of this kind of tab' })
+    ).toBeTruthy()
+  })
+
+  it('the Performance part shows the return, the value chart and the income', async () => {
+    serve(STATE, { performance: report() })
+    show('/portfolio?tab=2&view=performance')
+    expect(await screen.findByRole('region', { name: 'Performance' })).toBeTruthy()
+    expect(screen.getByRole('region', { name: 'Income' })).toBeTruthy()
+    expect(screen.getByRole('region', { name: 'Value against money put in' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Customize' })).toBeNull()
   })
 
   it('says Real-time nowhere and never uses the arm words', async () => {
