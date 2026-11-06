@@ -107,6 +107,8 @@ class Service:
         self.prices: Any = None
         self.upstox: Any = None
         self._calendar: Any = None
+        #: The day the settle last ran in this process (a failed one is retried at a restart).
+        self.settle_tried: int | None = None
         self._amfi: Any = None
         self._state = "starting"
         self._tasks: dict[str, asyncio.Task] = {}

@@ -55,6 +55,11 @@ class Schedule:
         found = self._sessions(day)
         return max(s.end for s in found) + self.eod_after_min * MS_PER_MIN if found else None
 
+    def close_at(self, day: date) -> int | None:
+        """The day's last close (15:30 cash, 15:40 F&O; a special day's own)."""
+        found = self._sessions(day)
+        return max(s.end for s in found) if found else None
+
     def settle_at(self, day: date) -> int | None:
         """The day's first session start plus 5 minutes: the official closes are in by then."""
         found = self._sessions(day)
@@ -95,11 +100,12 @@ async def run_forever(service: Any, name: str, step: Step, every: float = CHECK_
 def register_all() -> None:
     """Register every job of the service, each from its own module. Called once by the entry
     point; a job module imported here adds one line."""
-    from . import eod, feedlink, resolver
+    from . import benchmark, eod, feedlink, resolver
 
     resolver.register_job()
     feedlink.register_job()
     eod.register_jobs()
+    benchmark.register_jobs()
     try:
         from . import amfi
     except ImportError:  # pragma: no cover - the NAV job lands with PB7

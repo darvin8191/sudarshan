@@ -110,6 +110,9 @@ class FakeFeed:
         self.claim_status = 200
         self.governor = "off"  # "off" answers 503 with the reason; "on" answers quotes
         self.quotes: dict[str, dict] = {}
+        #: instrument key -> [(YYYY-MM-DD, close)] the governor answers daily candles from
+        self.candle_rows: dict[str, list] = {}
+        self.times: list[float] = []
         self.calls: list[tuple[str, str, dict]] = []
         self.down = False
         self._server = None
@@ -154,6 +157,19 @@ class FakeFeed:
                         return self._send(
                             503, {"error": "switched off"}, {"X-Sudarshan-Reason": "off"}
                         )
+                    if "/historical-candle/" in url.path:
+                        import time
+                        from urllib.parse import unquote
+
+                        feed.times.append(time.monotonic())
+                        parts = url.path.split("/")  # .../historical-candle/KEY/days/1/TO/FROM
+                        key, end, start = unquote(parts[-5]), parts[-2], parts[-1]
+                        rows = [
+                            [f"{d}T00:00:00+05:30", c, c, c, c, 0, 0]
+                            for d, c in sorted(feed.candle_rows.get(key, []), reverse=True)
+                            if start <= d <= end
+                        ]
+                        return self._send(200, {"status": "success", "data": {"candles": rows}})
                     keys = [k for k in query.get("instrument_key", "").split(",") if k]
                     return self._send(
                         200, {"data": {f"x:{k}": feed.quotes[k] for k in keys if k in feed.quotes}}
