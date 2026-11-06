@@ -320,12 +320,13 @@ def test_the_largest_import_fits_its_seal_as_text(shape):
 
 def test_the_seal_is_base64_so_the_file_limit_cannot_be_the_seal_limit():
     text = _file_of(IMPORT_ROWS["plain"], kinds.IMPORT_MAX_FILE_BYTES)
-    # A token is a third larger than its JSON, so 1.2 MB of file seals to over 1.5 MiB: the
-    # 1.25 MiB first planned for the route would refuse the owner's largest allowed file.
-    assert _sealed_size({**IMPORT_ARGS, "text": text}) > 1_310_720
-    # And the file goes as text: base64 inside the seal is a third larger again, and over 2 MiB.
+    # A token is a third larger than its JSON, so the largest file seals to over a third more
+    # than its own size: the seal's limit must be set from the sealed size, not the file's.
+    sealed_text = _sealed_size({**IMPORT_ARGS, "text": text})
+    assert sealed_text > kinds.IMPORT_MAX_FILE_BYTES * 4 // 3
+    # And the file goes as text: base64 inside the seal is a third larger again.
     as_base64 = base64.b64encode(text.encode("utf-8")).decode("ascii")
-    assert _sealed_size({**IMPORT_ARGS, "data": as_base64}) > kinds.IMPORT_MAX_BYTES
+    assert _sealed_size({**IMPORT_ARGS, "data": as_base64}) > sealed_text * 5 // 4
 
 
 def test_an_ordinary_request_is_far_below_the_api_limit():
@@ -370,9 +371,9 @@ def test_the_sentences_the_design_spells_out_are_kept_word_for_word():
     )
     assert kinds.WORDS["version_conflict"].startswith("This tab was changed on another screen. ")
     assert str(kinds.MAX_TABS) in kinds.WORDS["tab_limit"]
-    assert f"{kinds.IMPORT_MAX_FILE_BYTES / 1_000_000:g} MB" in kinds.WORDS["import_too_big"]
+    assert f"{kinds.IMPORT_MAX_FILE_BYTES // 1000} KB" in kinds.WORDS["import_too_big"]
     assert kinds.WORDS["import_too_big"] == (
-        "This file is larger than 1.2 MB. Download it in shorter date ranges and import each part."
+        "This file is larger than 900 KB. Download it in shorter date ranges and import each part."
     )
 
 

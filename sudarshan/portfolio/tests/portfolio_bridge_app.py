@@ -104,8 +104,8 @@ class Calls:
 
     def _handler(self, name):
         async def handler(ctx, message):
-            self.calls.append((name, dict(message)))
-            answer = self.answers.get(name, {"op": name, "args": message.get("args")})
+            self.calls.append((name, {"args": dict(message)}))
+            answer = self.answers.get(name, {"op": name, "args": dict(message)})
             if isinstance(answer, BaseException):
                 raise answer
             if callable(answer):

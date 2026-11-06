@@ -37,7 +37,7 @@ from sudarshan.autologin.schedule import TradingCalendar
 
 from .core.days import day_of_instant
 from .feedlink import CLIENT as _CLIENT
-from .feedlink import INDEX_KEYS, Claims, FeedClient, json_of
+from .feedlink import INDEX_KEYS, READ_BUDGET_S, READ_CALL_S, Claims, FeedClient, json_of
 from .resolver import SEGMENT, Resolver, ResolverUnavailable
 from .store import PortfolioStore, Scope, Tx
 from .views import NO_PRICE, Prices
@@ -197,6 +197,18 @@ class PriceBook(Prices):
         return await self.feed.call(method, path, **kwargs)
 
     # ---- warming (all network work) -----------------------------------------------------------------
+    async def warm_for_read(self, store: PortfolioStore, now: int) -> None:
+        """``warm`` for a read the phone waits on: short calls and a total budget, so a feed that
+        never answers costs the read about a second and a half, not its whole time."""
+        self.feed.call_timeout = READ_CALL_S
+        try:
+            await asyncio.wait_for(self.warm(store, now), READ_BUDGET_S)
+        except TimeoutError:
+            self._say_once("slowfeed", "The price feed was too slow; this read used the last "
+                           "prices it had.")  # fmt: skip
+        finally:
+            self.feed.call_timeout = None
+
     async def warm(self, store: PortfolioStore, now: int, scope: Scope | None = None) -> None:
         """Bring the feed's ticks, the quotes the governor allows, the claims and the auction flags
         into memory for the listed assets in the book."""

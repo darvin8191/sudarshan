@@ -210,7 +210,13 @@ class PortfolioApi:
         handler = self.registry.get(op)
         if handler is None:
             raise ApiError(501, "not_ready", WORDS["not_ready"])
-        return {"status": "success", "data": await handler(self.desk, message)}
+        args = message.get("args")
+        if args is None:
+            args = {}
+        if not isinstance(args, dict):
+            raise ApiError(400, "bad_request", WORDS["failed"])
+        # The arguments are what the bridge put under "args"; op, nonce and principal stay the seal's.
+        return {"status": "success", "data": await handler(self.desk, args)}
 
     def _open(self, op: str, body: bytes) -> dict[str, Any]:
         try:

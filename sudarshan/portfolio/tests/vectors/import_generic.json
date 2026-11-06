@@ -899,9 +899,9 @@
  },
  "limits": {
   "about": "The size and row caps of P19 (revised): checked before the table is read.",
-  "max_file_bytes": 1200000,
+  "max_file_bytes": 900000,
   "max_rows": 5000,
-  "too_big": "This file is larger than 1.2 MB. Download it in shorter date ranges and import each part.",
+  "too_big": "This file is larger than 900 KB. Download it in shorter date ranges and import each part.",
   "too_many_rows": "This file has more than 5,000 rows. Download it in shorter date ranges and import each part."
  }
 }
