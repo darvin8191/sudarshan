@@ -54,7 +54,8 @@ def registry_with(calls: list, **answers) -> dict:
 
 
 def sealed(op: str, fernet=FERNET, **fields) -> bytes:
-    return seal(fernet, op, **({"principal": "owner"} | fields))
+    principal = fields.pop("principal", "owner")
+    return seal(fernet, op, principal=principal, args=fields)
 
 
 async def served(desk=None, registry=None, **options):
@@ -672,3 +673,75 @@ def test_the_port_table_names_the_listener():
     readme = (Path(__file__).resolve().parents[2] / "README.md").read_text(encoding="utf-8")
     row = next(line for line in readme.splitlines() if line.startswith("| 5583 |"))
     assert "/health" in row and "sealed local API" in row
+
+
+def _release_rig(tmp_path, enabled, feed_down=False):
+    import dataclasses
+
+    from portfolio_fakes import FakeFeed
+
+    feed = FakeFeed()
+    feed.url = feed.start()
+    feed.down = feed_down
+    settings = dataclasses.replace(
+        settings_for(tmp_path, free_port(), enabled=enabled), feed_url=feed.url
+    )
+    return feed, Service(settings, FERNET, jobs={}, opener=lambda s: None, closer=lambda s: None)
+
+
+def test_switched_off_the_claims_at_the_feed_are_dropped(tmp_path):
+    feed, svc = _release_rig(tmp_path, enabled=False)
+
+    async def scenario():
+        task = asyncio.create_task(svc.run())
+        for _ in range(500):
+            if any(c[0] == "DELETE" for c in feed.calls):
+                break
+            await asyncio.sleep(0.02)
+        svc.stop()
+        await asyncio.wait_for(task, 10)
+
+    try:
+        run(scenario)
+    finally:
+        feed.stop()
+    assert any(c[0] == "DELETE" and c[1] == "/claims/sudarshan-portfolio" for c in feed.calls)
+
+
+def test_the_release_is_retried_while_the_feed_does_not_answer(tmp_path):
+    from sudarshan.portfolio import feedlink
+
+    feed, _ = _release_rig(tmp_path, enabled=False, feed_down=True)
+    waits = []
+
+    async def wait(seconds):
+        waits.append(seconds)
+        if len(waits) == 2:
+            feed.down = False  # the feed is back after two waits
+
+    try:
+        done = asyncio.run(feedlink.release(feed.url, delays=(0.0, 1.0, 2.0, 3.0), sleep=wait))
+        gave_up = asyncio.run(feedlink.release("http://127.0.0.1:9", delays=(0.0, 0.5), sleep=wait))
+    finally:
+        feed.stop()
+    assert done is True and waits[:2] == [1.0, 2.0]
+    assert gave_up is False
+
+
+def test_a_plain_stop_keeps_the_claims(tmp_path):
+    feed, svc = _release_rig(tmp_path, enabled=True)
+
+    async def scenario():
+        task = asyncio.create_task(svc.run())
+        for _ in range(500):
+            if svc.state == "running":
+                break
+            await asyncio.sleep(0.02)
+        svc.stop()
+        await asyncio.wait_for(task, 10)
+
+    try:
+        run(scenario)
+    finally:
+        feed.stop()
+    assert not any(c[0] == "DELETE" for c in feed.calls)

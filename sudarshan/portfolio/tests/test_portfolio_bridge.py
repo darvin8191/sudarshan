@@ -154,7 +154,7 @@ def test_a_read_reaches_the_service_sealed_and_comes_back_in_the_envelope(bridge
         "status": "success", "enabled": True, "data": {"op": "state", "args": {}},
     }  # fmt: skip
     ((name, message),) = calls.calls
-    assert name == "state" and message["principal"] == "owner"
+    assert name == "state" and message == {"args": {}}  # the service checked the owner itself
 
 
 def test_query_values_are_read_as_the_table_says(bridge, service, calls):
