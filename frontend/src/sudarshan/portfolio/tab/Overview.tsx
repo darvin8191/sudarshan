@@ -196,6 +196,7 @@ function Loaded({
       widget={widget}
       today={today}
       liveValuePaise={liveValue}
+      unpriced={asOf || narrowed ? 0 : live.totals.unpriced}
     />
   )
   const widgets: Record<Drawn, React.ReactNode> = {

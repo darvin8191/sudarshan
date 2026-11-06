@@ -20,12 +20,15 @@ export function PerformanceBlock({
   widget,
   today,
   liveValuePaise,
+  unpriced = 0,
 }: {
   tabId: number
   widget: PerformanceWidget
   today: Day
   /** The tab's value at the latest tick, or null when it is not live or is narrowed. */
   liveValuePaise: number | null
+  /** Holdings with no price yet, for the Return widget to say they are counted at cost. */
+  unpriced?: number
 }) {
   const query = useQuery(performanceOptions(tabId))
   const { refetch } = query
@@ -61,5 +64,5 @@ export function PerformanceBlock({
     return <ValueChart report={report} today={today} liveValuePaise={liveValuePaise} />
   }
   if (widget === 'income') return <IncomeCard report={report} />
-  return <Performance report={report} />
+  return <Performance report={report} unpriced={unpriced} />
 }

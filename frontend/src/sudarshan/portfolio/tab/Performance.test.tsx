@@ -73,6 +73,17 @@ describe('Performance', () => {
   })
 })
 
+describe('Performance and prices', () => {
+  it('says unpriced holdings are counted at cost, as the Summary does', () => {
+    render(<Performance report={report()} unpriced={2} />)
+    expect(screen.getByText('2 holdings have no price yet and are counted at cost.')).toBeTruthy()
+  })
+  it('says nothing when every holding has a price', () => {
+    render(<Performance report={report()} />)
+    expect(screen.queryByText(/counted at cost/)).toBeNull()
+  })
+})
+
 describe('IncomeCard', () => {
   it('writes the amount on every month bar', () => {
     render(<IncomeCard report={report()} />)

@@ -9,6 +9,7 @@ import { TREND_TEXT, TrendArrow } from '@/sudarshan/dashboard/Trend'
 import { pctNumber, Signed } from '../Signed'
 import type { BenchmarkFigure, PerformanceReport } from '../types'
 import { dayText, rupeesText } from './format'
+import { UnpricedNote } from './SummaryTiles'
 
 const SECTION = 'rounded-[1.125rem] border bg-card px-4 py-3.5 shadow-[var(--shadow-card)]'
 const LABEL = 'text-xs font-semibold text-muted-foreground'
@@ -84,7 +85,14 @@ function Benchmark({ b, report }: { b: BenchmarkFigure; report: PerformanceRepor
   )
 }
 
-export function Performance({ report }: { report: PerformanceReport }) {
+export function Performance({
+  report,
+  unpriced = 0,
+}: {
+  report: PerformanceReport
+  /** Holdings with no price yet, counted at cost in the value the return rests on. */
+  unpriced?: number
+}) {
   const x = report.xirr
   const t = report.twr
   const ab = pctNumber(report.absolute_return_pct)
@@ -96,6 +104,7 @@ export function Performance({ report }: { report: PerformanceReport }) {
   return (
     <section aria-label="Performance" className={`${SECTION} flex flex-col gap-3`}>
       <h2 className="text-base font-bold">Return</h2>
+      <UnpricedNote count={unpriced} />
       <dl className="grid grid-cols-2 gap-x-3 gap-y-3">
         <Figure label="Gain so far">
           <Signed paise={report.total_gain_paise} pct={report.absolute_return_pct} />

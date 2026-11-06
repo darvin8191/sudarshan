@@ -46,7 +46,13 @@ function Live({
   const value = data === undefined ? null : live.totals.value_paise
   return (
     <div className="flex flex-col gap-3">
-      <PerformanceBlock tabId={tab.id} widget="performance" today={today} liveValuePaise={value} />
+      <PerformanceBlock
+        tabId={tab.id}
+        widget="performance"
+        today={today}
+        liveValuePaise={value}
+        unpriced={data === undefined ? 0 : live.totals.unpriced}
+      />
       <PerformanceBlock tabId={tab.id} widget="history" today={today} liveValuePaise={value} />
       <PerformanceBlock tabId={tab.id} widget="income" today={today} liveValuePaise={value} />
     </div>

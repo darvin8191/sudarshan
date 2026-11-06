@@ -18,6 +18,17 @@ function Part({ label, children }: { label: string; children: React.ReactNode })
   )
 }
 
+/** Holdings with no price yet are counted at cost: said wherever a figure rests on that. */
+export function UnpricedNote({ count }: { count: number }) {
+  if (count <= 0) return null
+  return (
+    <p className={NOTE}>
+      {count} holding{count === 1 ? ' has' : 's have'} no price yet and {count === 1 ? 'is' : 'are'}{' '}
+      counted at cost.
+    </p>
+  )
+}
+
 /** Value in Khand (the one large figure), what went in, and the overall gain and its parts. */
 export function SummaryTile({
   totals,
@@ -74,12 +85,7 @@ export function SummaryTile({
           </Part>
         </div>
       </dl>
-      {totals.unpriced > 0 && (
-        <p className={NOTE}>
-          {totals.unpriced} holding{totals.unpriced === 1 ? ' has' : 's have'} no price yet and{' '}
-          {totals.unpriced === 1 ? 'is' : 'are'} counted at cost.
-        </p>
-      )}
+      <UnpricedNote count={totals.unpriced} />
     </section>
   )
 }

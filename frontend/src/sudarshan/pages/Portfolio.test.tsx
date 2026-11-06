@@ -18,7 +18,7 @@ vi.mock('@/sudarshan/portfolio/api', async (importOriginal) => ({
 
 import { createQueryClient } from '@/app/providers'
 import { PortfolioError } from '@/sudarshan/portfolio/api'
-import { report, view } from '@/sudarshan/portfolio/tab/fixtures'
+import { report, row, view } from '@/sudarshan/portfolio/tab/fixtures'
 import { WORDS } from '@/sudarshan/portfolio/types'
 import Portfolio from './Portfolio'
 
@@ -181,6 +181,18 @@ describe('the Portfolio page', () => {
     expect(screen.getByRole('region', { name: 'Income' })).toBeTruthy()
     expect(screen.getByRole('region', { name: 'Value against money put in' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Customize' })).toBeNull()
+  })
+
+  it('the Performance part says when an unpriced holding is counted at cost', async () => {
+    serve(STATE, {
+      performance: report(),
+      tab_get: view([row(1, 'Gamma', { price: null, prev: null, day: null })]),
+    })
+    show('/portfolio?tab=2&view=performance')
+    await screen.findByRole('region', { name: 'Performance' })
+    expect(
+      await screen.findByText('1 holding has no price yet and is counted at cost.')
+    ).toBeTruthy()
   })
 
   it('says Real-time nowhere and never uses the arm words', async () => {
