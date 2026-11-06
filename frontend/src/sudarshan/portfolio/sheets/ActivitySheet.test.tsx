@@ -356,6 +356,48 @@ describe('Edit and Duplicate', () => {
     expect(sent?.[1]).toMatchObject({ id: 5, version: 4, entry: { qty_u: 12_000_000 } })
   })
 
+  const draftSeeded = (q: ReturnType<typeof createQueryClient>) =>
+    q.setQueryData([...PORTFOLIO_KEY, 'activities', 2], {
+      pages: [
+        {
+          items: [
+            entry(5, {
+              status: 'draft',
+              asset_id: 7,
+              qty_u: 10_000_000,
+              price_u: 1_000_000,
+              amount_paise: 100_000,
+            }),
+          ],
+          next: null,
+        },
+      ],
+      pageParams: [undefined],
+    })
+  const updates = () =>
+    api.call.mock.calls.filter((c) => c[0] === 'activity_update' && !c[1].dry_run)
+
+  it('an old draft stays a draft when saved, and says what each button does', async () => {
+    serve({ activity_update: (a) => (a.dry_run ? { ...SAVED, activity: null } : SAVED) })
+    show({ kind: 'edit', activityId: 5 }, [ACCOUNT], draftSeeded)
+    await screen.findByLabelText('Quantity')
+    expect(
+      screen.getByText(/"Save as draft" keeps it out\. "Save and count it" adds it/)
+    ).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Save as draft' }))
+    await waitFor(() => expect(updates()).toHaveLength(1))
+    expect(updates()[0][1].entry.status).toBe('draft')
+  })
+
+  it('"Save and count it" posts the draft', async () => {
+    serve({ activity_update: (a) => (a.dry_run ? { ...SAVED, activity: null } : SAVED) })
+    show({ kind: 'edit', activityId: 5 }, [ACCOUNT], draftSeeded)
+    await screen.findByLabelText('Quantity')
+    await userEvent.click(screen.getByRole('button', { name: 'Save and count it' }))
+    await waitFor(() => expect(updates()).toHaveLength(1))
+    expect(updates()[0][1].entry.status).toBe('posted')
+  })
+
   it('Duplicate opens filled in, dated today, and creates a new entry', async () => {
     serve({ activity_create: (a) => (a.dry_run ? { ...SAVED, activity: null } : SAVED) })
     show({ kind: 'duplicate', activityId: 5 }, [ACCOUNT], seeded)

@@ -95,6 +95,17 @@ export interface Form {
   note: string
   /** LOAN. */
   loanName: string
+  /**
+   * An edited transfer from outside or opening holding: the quantity and price as loaded and the
+   * stored amount and value. They stand unless the owner changes the quantity or the price, so an
+   * imported row whose value differed from quantity x price is not rewritten by opening it.
+   */
+  stored: {
+    qty: string
+    price: string
+    amount_paise: number | null
+    value_paise: number | null
+  } | null
 }
 
 const NO_PARTS = Object.fromEntries(CHARGE_PARTS.map((p) => [p, ''])) as Record<ChargePart, string>
@@ -122,6 +133,7 @@ export function emptyForm(mode: Mode, today: number, accountId: number | null): 
     ratioDen: '1',
     note: '',
     loanName: '',
+    stored: null,
   }
 }
 
@@ -148,7 +160,7 @@ export function chargesOf(form: Form): number | null {
 }
 
 export type Built =
-  | { ok: true; entry: ActivityInput; draft: boolean }
+  | { ok: true; entry: ActivityInput; draft: boolean; future: boolean }
   | { ok: false; words: string; problem: boolean }
 
 const missing = (words: string): Built => ({ ok: false, words, problem: false })
@@ -157,12 +169,17 @@ const wrong = (words: string): Built => ({ ok: false, words, problem: true })
 /** Whether the typed quantity has a fraction. */
 const hasFraction = (qtyU: number) => qtyU % QTY_SCALE !== 0
 
-export function buildEntry(form: Form, today: number): Built {
+/**
+ * `keepDraft`: the entry being edited is a draft whose date has come. It stays a draft (not
+ * counted) unless the owner chooses to count it, so editing it never posts it silently.
+ */
+export function buildEntry(form: Form, today: number, keepDraft = false): Built {
   const mode = form.mode
   if (mode === 'LOAN') return missing('A loan is saved on its own.')
   const day = inputToDay(form.date)
   if (day === null) return missing('Choose the date.')
-  const draft = day > today
+  const future = day > today
+  const draft = future || keepDraft
   const asset = form.asset?.asset ?? null
   const qty = parseQty(form.qty)
   const needsAsset = mode !== 'FEE' && mode !== 'INTEREST'
@@ -176,6 +193,7 @@ export function buildEntry(form: Form, today: number): Built {
     ok: true,
     entry: { ...common, ...note, ...entry },
     draft,
+    future,
   })
 
   if (mode === 'SPLIT') {
@@ -247,6 +265,7 @@ export function buildEntry(form: Form, today: number): Built {
   if (mode === 'OPENING') {
     if (form.accountId === null) return missing('Choose the account that holds it.')
     if (cost === null) return missing('Enter the cost per unit.')
+    const kept = unchanged(form)
     const total = valuePaise(qty, cost)
     return done({
       kind: 'TRANSFER',
@@ -256,8 +275,8 @@ export function buildEntry(form: Form, today: number): Built {
       asset_id: asset?.id ?? null,
       qty_u: qty,
       price_u: cost,
-      amount_paise: total,
-      value_paise: total,
+      amount_paise: kept?.amount_paise ?? total,
+      value_paise: kept?.value_paise ?? total,
       lot_date: day,
     })
   }
@@ -280,11 +299,21 @@ export function buildEntry(form: Form, today: number): Built {
     asset_id: asset?.id ?? null,
     qty_u: qty,
     ...(form.fromOutside && cost !== null
-      ? { price_u: cost, amount_paise: valuePaise(qty, cost) }
+      ? {
+          price_u: cost,
+          amount_paise: unchanged(form)?.amount_paise ?? valuePaise(qty, cost),
+        }
       : {}),
     ...(value !== null ? { value_paise: value } : {}),
     ...(lot !== null ? { lot_date: lot } : {}),
   })
+}
+
+/** The stored amount and value of an edited transfer, while its quantity and price are as loaded. */
+function unchanged(form: Form): { amount_paise: number | null; value_paise: number | null } | null {
+  const kept = form.stored
+  if (!kept || kept.qty !== form.qty.trim() || kept.price !== form.price.trim()) return null
+  return { amount_paise: kept.amount_paise, value_paise: kept.value_paise }
 }
 
 function detailOf(form: Form): ChargesDetail | null {
@@ -335,5 +364,14 @@ export function formOf(entry: Activity, assets: readonly Asset[], today: number)
     ratioNum: entry.ratio_num ? String(entry.ratio_num) : '',
     ratioDen: entry.ratio_den ? String(entry.ratio_den) : '1',
     note: entry.note ?? '',
+    stored:
+      entry.kind === 'TRANSFER' && entry.account_id === null
+        ? {
+            qty: entry.qty_u === null ? '' : qtyInput(entry.qty_u),
+            price: entry.price_u === null ? '' : priceInput(entry.price_u),
+            amount_paise: entry.amount_paise,
+            value_paise: entry.value_paise,
+          }
+        : null,
   }
 }

@@ -236,3 +236,52 @@ describe('Edit and Duplicate', () => {
     })
   })
 })
+
+describe('editing what was imported', () => {
+  const imported = entry(9, {
+    kind: 'TRANSFER',
+    account_id: null,
+    to_account_id: 1,
+    qty_u: 10_000_000,
+    price_u: 1_000_000, // 100 x 10 = 1,000.00
+    amount_paise: 123_456, // the file said otherwise
+    value_paise: 123_456,
+    lot_date: 20240101,
+    trade_date: 20260101,
+  })
+
+  it('keeps the stored amount and value of a transfer from outside while quantity and price are as loaded', () => {
+    const f = formOf(imported, [share], TODAY)
+    const built = buildEntry({ ...f, note: 'checked' }, TODAY)
+    expect(built.ok && built.entry).toMatchObject({ amount_paise: 123_456, value_paise: 123_456 })
+  })
+
+  it('works them again from quantity x price once the owner changes either', () => {
+    const f = formOf(imported, [share], TODAY)
+    const built = buildEntry({ ...f, qty: '11' }, TODAY)
+    expect(built.ok && built.entry).toMatchObject({ amount_paise: 110_000 })
+  })
+
+  it('keeps the stored value of an opening holding until quantity or price changes', () => {
+    const opening = { ...imported, lot_date: imported.trade_date }
+    const f = formOf(opening, [share], TODAY)
+    expect(f.mode).toBe('OPENING')
+    const same = buildEntry(f, TODAY)
+    expect(same.ok && same.entry).toMatchObject({ amount_paise: 123_456, value_paise: 123_456 })
+    const changed = buildEntry({ ...f, price: '101' }, TODAY)
+    expect(changed.ok && changed.entry).toMatchObject({
+      amount_paise: 101_000,
+      value_paise: 101_000,
+    })
+  })
+})
+
+describe('editing a draft whose date has come', () => {
+  it('stays a draft unless it is to be counted, and says it is not a future date', () => {
+    const f = form('BUY', { qty: '10', price: '100', accountId: 1 })
+    const kept = buildEntry(f, TODAY, true)
+    expect(kept.ok && [kept.entry.status, kept.draft, kept.future]).toEqual(['draft', true, false])
+    const counted = buildEntry(f, TODAY, false)
+    expect(counted.ok && [counted.entry.status, counted.draft]).toEqual(['posted', false])
+  })
+})

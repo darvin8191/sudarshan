@@ -39,6 +39,10 @@ import { inputToDay, parseRupees, priceInput, rupeesInput } from './parse'
 import { CHOICE, FIELD, LABEL, OFF, ON, PRIMARY, SECONDARY } from './TabFields'
 import { useSend } from './useSend'
 
+/** What the two buttons of an old draft do, in plain words. */
+export const DRAFT_WORDS =
+  'This entry is a draft, so it is not counted in your holdings or returns. "Save as draft" keeps it out. "Save and count it" adds it from its date.'
+
 export const DRY_RUN_MS = 300
 const LAST_ACCOUNT_KEY = 'sudarshan.portfolio.last-account'
 
@@ -167,7 +171,9 @@ export function ActivitySheet({
   }, [open, ready, entry?.id, mode.kind])
 
   const set = (patch: Partial<Form>) => setForm((f) => ({ ...f, ...patch }))
-  const built = useMemo(() => buildEntry(form, today), [form, today])
+  // A draft whose date has come stays a draft when edited, unless the owner chooses to count it.
+  const keepDraft = editing && entry?.status === 'draft'
+  const built = useMemo(() => buildEntry(form, today, keepDraft), [form, today, keepDraft])
   const amountShown = form.amountTouched ? form.amount : workedAmount(form) || form.amount
   const chargesTotal = (() => {
     const paise = chargesOf(form)
@@ -242,7 +248,7 @@ export function ActivitySheet({
     inputToDay(form.date) !== null
   const canSave = isLoan ? loanReady : built.ok && effect.state !== 'refused'
 
-  const save = async () => {
+  const save = async (count = false) => {
     if (!tab) return
     await send.run(async () => {
       if (isLoan) {
@@ -259,26 +265,26 @@ export function ActivitySheet({
         if (!made.enabled)
           throw new PortfolioError({ code: 'unavailable', message: made.message, entryId: null })
       } else {
-        if (!built.ok) return
+        const made = buildEntry(form, today, keepDraft && !count)
+        if (!made.ok) return
+        const body = made.entry
         const result =
           editing && entryId !== null
             ? await portfolioCall('activity_update', {
                 id: entryId,
                 version: tab.version,
-                entry: built.entry,
+                entry: body,
               })
             : await portfolioCall('activity_create', {
                 id: tab.id,
                 version: tab.version,
                 request_id: requestId.current,
-                entry: built.entry,
+                entry: body,
               })
         if (!result.enabled)
           throw new PortfolioError({ code: 'unavailable', message: result.message, entryId: null })
         rememberAccount(
-          built.entry.kind === 'TRANSFER'
-            ? (built.entry.to_account_id ?? built.entry.account_id)
-            : built.entry.account_id
+          body.kind === 'TRANSFER' ? (body.to_account_id ?? body.account_id) : body.account_id
         )
       }
       void queries.invalidateQueries({ queryKey: PORTFOLIO_KEY })
@@ -435,10 +441,16 @@ export function ActivitySheet({
                   value={form.date}
                   onChange={(date) => set({ date })}
                 />
-                {built.ok && built.draft && (
+                {built.ok && built.future && (
                   <p className="flex items-start gap-2 text-sm font-medium text-[color:var(--warning-text)]">
                     <TriangleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
                     {WORDS.future_date}
+                  </p>
+                )}
+                {keepDraft && built.ok && !built.future && (
+                  <p className="flex items-start gap-2 text-sm font-medium text-[color:var(--warning-text)]">
+                    <TriangleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+                    {DRAFT_WORDS}
                   </p>
                 )}
 
@@ -555,7 +567,7 @@ export function ActivitySheet({
                 {problem.message}
               </p>
             )}
-            <div className="flex gap-2">
+            <div className={keepDraft ? 'flex flex-col gap-2' : 'flex gap-2'}>
               <button type="button" className={`${SECONDARY} flex-1`} onClick={onClose}>
                 Cancel
               </button>
@@ -566,6 +578,16 @@ export function ActivitySheet({
               >
                 {send.pending ? 'Saving' : built.ok && built.draft ? 'Save as draft' : 'Save'}
               </button>
+              {keepDraft && built.ok && !built.future && (
+                <button
+                  type="button"
+                  className={`${SECONDARY} flex-1`}
+                  disabled={!canSave || send.pending}
+                  onClick={() => void save(true)}
+                >
+                  Save and count it
+                </button>
+              )}
             </div>
           </>
         )}
