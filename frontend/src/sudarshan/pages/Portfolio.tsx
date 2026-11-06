@@ -22,6 +22,7 @@ import { TabSettingsSheet } from '@/sudarshan/portfolio/sheets/TabSettingsSheet'
 import { TabStrip } from '@/sudarshan/portfolio/TabStrip'
 import { ActivityTab, PORTFOLIO_KEY } from '@/sudarshan/portfolio/tab/ActivityTab'
 import { TabOverview } from '@/sudarshan/portfolio/tab/Overview'
+import { PerformanceTab } from '@/sudarshan/portfolio/tab/PerformanceTab'
 import { WORDS } from '@/sudarshan/portfolio/types'
 import { UpstoxTab } from '@/sudarshan/portfolio/upstox/UpstoxTab'
 import {
@@ -152,7 +153,12 @@ export default function Portfolio() {
           <CustomStub
             view={part as CustomView}
             onView={setView}
-            hideBody={part === 'activity' || part === 'overview' || part === 'holdings'}
+            hideBody={
+              part === 'activity' ||
+              part === 'overview' ||
+              part === 'holdings' ||
+              part === 'performance'
+            }
           />
           {(part === 'overview' || part === 'holdings') && (
             <TabOverview
@@ -164,6 +170,7 @@ export default function Portfolio() {
               onImport={() => open({ kind: 'import' })}
             />
           )}
+          {part === 'performance' && <PerformanceTab key={current.id} tab={current} />}
           {part === 'activity' && (
             <ActivityTab
               tab={current}

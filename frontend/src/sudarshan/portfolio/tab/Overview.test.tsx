@@ -26,7 +26,7 @@ vi.mock('@/sudarshan/dashboard/MarketCalendar', async (importOriginal) => ({
 import { createQueryClient } from '@/app/providers'
 import { feed } from '@/test/marketDataHarness'
 import { tab } from '../sheets/fixtures'
-import { row, view } from './fixtures'
+import { report, row, view } from './fixtures'
 import { TabOverview } from './Overview'
 
 function show(data: object, part: 'overview' | 'holdings' = 'overview') {
@@ -218,6 +218,48 @@ describe('the Overview', () => {
       expect(await screen.findByText(/Value on that day is not known/)).toBeTruthy()
       expect(screen.getByText('Value as on 12 Sep 2026')).toBeTruthy()
       expect(screen.queryByText('Real-time')).toBeNull()
+    })
+  })
+
+  describe('the performance widgets', () => {
+    function serveWith(widgets: string[], performance: () => unknown) {
+      const data = view([row(1, 'Alpha')])
+      data.layout.spec.widgets = widgets as never
+      api.call.mockImplementation(async (op: string) => {
+        if (op === 'tab_get') return { enabled: true, data }
+        if (op === 'performance') return { enabled: true, data: performance() }
+        throw new Error(`unexpected op ${op}`)
+      })
+      return render(
+        <QueryClientProvider client={createQueryClient()}>
+          <MemoryRouter>
+            <TabOverview
+              tab={tab(2, 'Gold')}
+              part="overview"
+              onAdd={() => {}}
+              onImport={() => {}}
+            />
+          </MemoryRouter>
+        </QueryClientProvider>
+      )
+    }
+
+    it('draws the return and the income where the layout puts them', async () => {
+      serveWith(['summary', 'performance', 'income'], report)
+      expect(await screen.findByRole('region', { name: 'Performance' })).toBeTruthy()
+      expect(screen.getByRole('region', { name: 'Income' })).toBeTruthy()
+      expect(screen.queryByRole('region', { name: 'Value against money put in' })).toBeNull()
+    })
+
+    it('says in words when the figures cannot be read, and tries again on request', async () => {
+      let n = 0
+      serveWith(['performance'], () => {
+        n += 1
+        if (n === 1) throw new Error('down')
+        return report()
+      })
+      await userEvent.click(await screen.findByRole('button', { name: 'Try again' }))
+      expect(await screen.findByRole('region', { name: 'Performance' })).toBeTruthy()
     })
   })
 })

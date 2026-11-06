@@ -24,6 +24,7 @@ import { AllocationBars } from './AllocationBars'
 import { countFilters, FilterBar, NO_FILTERS } from './Filters'
 import { dayText } from './format'
 import { HoldingsList } from './HoldingsList'
+import { PerformanceBlock } from './PerformanceBlocks'
 import { listRows, moversOf, sortRows } from './rows'
 import { SummaryTile, TodayTile } from './SummaryTiles'
 import { argsOf, isActive, type Narrowing, pick, sliced } from './slices'
@@ -31,8 +32,25 @@ import { TopMovers } from './TopMovers'
 import { tabViewOptions } from './tabView'
 
 /** The widgets this screen draws; the others arrive with their own parts. */
-type Drawn = 'summary' | 'today' | 'holdings' | 'movers' | 'allocation'
-const DRAWN: readonly Widget[] = ['summary', 'today', 'holdings', 'movers', 'allocation']
+type Drawn =
+  | 'summary'
+  | 'today'
+  | 'holdings'
+  | 'movers'
+  | 'allocation'
+  | 'history'
+  | 'performance'
+  | 'income'
+const DRAWN: readonly Widget[] = [
+  'summary',
+  'today',
+  'holdings',
+  'movers',
+  'allocation',
+  'history',
+  'performance',
+  'income',
+]
 
 const BUTTON_ROW = 'flex flex-wrap justify-center gap-2'
 
@@ -131,7 +149,22 @@ function Loaded({
   const holdings = (
     <HoldingsList key="holdings" rows={listed} columns={spec.columns} stale={stale} />
   )
+  // The history, performance and income are for the whole tab: a narrowed or past view has no
+  // live point on the chart, and the figures are the service's.
+  const liveValue = asOf || narrowed ? null : live.totals.value_paise
+  const performance = (widget: 'history' | 'performance' | 'income') => (
+    <PerformanceBlock
+      key={widget}
+      tabId={data.tab.id}
+      widget={widget}
+      today={today}
+      liveValuePaise={liveValue}
+    />
+  )
   const widgets: Record<Drawn, React.ReactNode> = {
+    history: performance('history'),
+    performance: performance('performance'),
+    income: performance('income'),
     summary: <SummaryTile key="summary" totals={live.totals} fixed={data.fixed} stale={allStale} />,
     // Today means the day the page is read: not for a day in the past.
     today: asOf ? null : (
