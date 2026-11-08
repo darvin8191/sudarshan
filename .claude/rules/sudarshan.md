@@ -140,7 +140,10 @@ in brand. Icon "Mor": tile #0E5A73, ring #E3A21A, glyph #FFFFFF. Numbers via
     on every order it judged: an entry's or a resting order's claim ends 150 s after the answer;
     a market exit's claim lasts while Upstox's order book shows the order working (asked only
     when the claim would refuse an order), ends when the book shows it ended, complete past
-    150 s, or absent past 150 s, and never past 16 h.
+    150 s, or absent past 150 s, and never past 16 h. It judges an order on the positions rows
+    corrected by the day's fills, a position the rows do not list yet included, except an
+    unlisted product of an instrument the rows list in another product, which it reads as the
+    rows do (it may be a conversion, the rule Exit all follows below).
   - Sizing. Every exit and every smart order that reduces or crosses a position (a smart order that
     only adds is sized from the row, with no order book read) is sized from the positions rows
     corrected by the order book's fills (`sudarshan/books/fills.py`), per instrument across its

@@ -1001,7 +1001,10 @@ class Gate:
         A row it cannot correct stays as read, unless ``strict``, which answers None for any such
         row; so does a book that cannot be read. A position the day's fills show in a product the
         rows do not list yet (bought a moment ago) is added as a row of its own, so its exit is
-        judged an exit, never an opening order (review of fix/guard-on, MEDIUM-2)."""
+        judged an exit, never an opening order (review of fix/guard-on, MEDIUM-2); but not in an
+        instrument the rows list in another product, which cannot be told from a conversion in
+        Upstox's app whose new row is not shown yet: Exit all names that and sends nothing, and
+        the gate reads the product as the rows do (re-review of v0.5.1, LOW-C)."""
         orders = handed_order_rows(owner)
         if orders is None:
             try:
@@ -1019,7 +1022,14 @@ class Gate:
                 out.append(row)
             else:
                 out.append({**row, "quantity": held})
+        listed = {
+            str(row.get("instrument_token") or "").strip()
+            for row in rows
+            if isinstance(row, dict) and str(row.get("instrument_token") or "").strip()
+        }
         for exchange, tradingsymbol, token, product, net in fills.unlisted_nets(rows, orders):
+            if token in listed:
+                continue  # in another product's row: it may be a conversion (LOW-C)
             out.append(
                 {
                     "instrument_token": token,

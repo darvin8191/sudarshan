@@ -126,3 +126,42 @@ def test_m2_a_refusal_by_upstox_still_says_so():
         held, "refused", Refused(), {"status": "error", "message": "UDAPI1021: Market closed"}, None
     )
     assert outcome["reason"] == "Upstox refused its exit: Market closed"
+
+
+# -- re-review of v0.5.1, LOW-C: an unlisted product of a listed instrument --------------------------
+
+
+def test_c_an_unlisted_product_of_a_listed_instrument_is_not_an_exit_under_the_switch(
+    the_gate, book
+):
+    """NRML 65 PE carried (a D row, nothing traded on it today); 65 converted to MIS in Upstox's
+    app and that MIS sold today (an I order, complete); no I row yet. The account holds +65 NRML
+    and nothing in MIS, so a BUY 65 PE MIS opens a long. Exit-gaps' V1 rule cannot tell this from
+    a fresh MIS short, and Exit all sends nothing for it. On e3e74bb the gate added an unlisted I
+    row of -65 from the fills, judged the BUY an exit and let it through under the kill switch."""
+    the_gate.set_state(ON)
+    book.rows = [row(PE, 65, product="D")]
+    book.order_rows = [_fill("1", PE_TOKEN, "SELL", 65, product="I")]
+    upstox = broker()
+    said = refused_message(upstox.place(order("BUY", 65, symbol=PE, product="MIS"), "token"))
+    assert "refused" in said
+    assert upstox.reached == []
+
+
+def test_c_the_rows_the_gate_reads_add_no_product_of_a_listed_instrument(the_gate, book):
+    """The rows the gate judges on: the listed D row as read, and no made-up I row."""
+    listed = row(PE, 65, product="D")
+    book.order_rows = [_fill("1", PE_TOKEN, "SELL", 65, product="I")]
+    rows = the_gate._corrected("token", [listed])
+    assert [(r["instrument_token"], r["product"]) for r in rows] == [(PE_TOKEN, "D")]
+    assert not any(r.get("unlisted") for r in rows)
+
+
+def test_c_control_an_unlisted_instrument_with_no_row_in_any_product_still_exits(the_gate, book):
+    """Control (MEDIUM-2 itself): PE sold 30 MIS a moment ago, no row in any product: the BUY 30
+    is its exit under the switch, as before."""
+    the_gate.set_state(ON)
+    book.rows = [row(CE, 65)]
+    book.order_rows = [_fill("1", PE_TOKEN, "SELL", 30, product="I")]
+    upstox = broker()
+    assert upstox.place(order("BUY", 30, symbol=PE, product="MIS"), "token")[2] == "OID0"
