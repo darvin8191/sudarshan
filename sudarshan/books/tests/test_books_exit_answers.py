@@ -595,7 +595,7 @@ def test_exit_all_notes_each_position_whose_exit_went_or_may_have_gone(monkeypat
     names = {"NSE_EQ|1": "SBIN", "NSE_EQ|2": "INFY", "NSE_EQ|3": "TCS", "NSE_EQ|5": None}
     book = _book_of(
         ("NSE_EQ|1", 10, "I"),  # sent
-        ("NSE_EQ|2", -5, "D"),  # refused: nothing went
+        ("NSE_EQ|2", -5, "I"),  # refused: nothing went (a CNC short would be a holdings sale, L1)
         ("NSE_EQ|3", 3, "I"),  # not confirmed: it may have gone
         ("NSE_EQ|4", 0, "I"),  # flat: no exit
         ("NSE_EQ|5", 7, "I"),  # no contract: not sent
@@ -618,12 +618,12 @@ def test_exit_all_notes_each_position_whose_exit_went_or_may_have_gone(monkeypat
     )
     assert body["positions"][2]["reason"] == EXIT_NOT_CONFIRMED
     # Every exit sent: noted too, and the answer is the one it always was, with its orders.
-    monkeypatch.setattr(upstox, "get_positions", lambda auth: _book_of(("NSE_EQ|2", -5, "D")))
+    monkeypatch.setattr(upstox, "get_positions", lambda auth: _book_of(("NSE_EQ|2", -5, "I")))
     monkeypatch.setattr(upstox, "place_order_api", lambda data, auth: PLACED)
     body, code = upstox.close_all_positions("key", "token")
     assert [each["outcome"] for each in body.pop("positions")] == ["sent"]
     assert (body, code) == ({"status": "success", "message": "All Open Positions SquaredOff"}, 200)
-    assert ("NSE", "INFY", "CNC") in exit_guard.EXITS.placed_lately("live")
+    assert ("NSE", "INFY", "MIS") in exit_guard.EXITS.placed_lately("live")
 
 
 def test_exit_all_that_breaks_while_sending_an_exit_notes_that_one_too(monkeypatch):

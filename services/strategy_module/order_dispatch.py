@@ -59,6 +59,10 @@ class DispatchResult:
     broker_order_id: str | None = None
     response: dict[str, Any] | None = None
     error: str | None = None
+    # SUDARSHAN M6.9: the exit was deliberately held, not rejected: another exit for the
+    # position is being placed or an earlier one is not yet seen ended in the broker's order
+    # book (sudarshan/books/surface_exits.py). Nothing reached the broker; a retry is expected.
+    held: bool = False
 
     @property
     def rejected(self) -> bool:
@@ -182,16 +186,23 @@ def dispatch_order(
     mode: str,
     api_key: str,
     order: dict[str, Any],
+    closes: bool = False,  # SUDARSHAN M6.9
 ) -> DispatchResult:
     """Place one order, live or sandbox, and normalise the answer.
 
     Both pipes return ``(success, response, status_code)``, so the caller gets
     one shape whichever ran.
+
+    SUDARSHAN M6.9: ``closes`` marks an order that exits a position the run holds. In live
+    it then goes one at a time per position with every other surface's exits
+    (sudarshan/books/surface_exits.py): refused, as any refused dispatch is, while another
+    exit for the position is being placed or an earlier one is not yet seen ended in the
+    broker's order book, so the caller releases its own claim and the leg stays managed.
     """
     if mode == "sandbox":
         return _dispatch_sandbox(api_key, order)
     if mode == "live":
-        return _dispatch_live(api_key, order)
+        return _dispatch_live(api_key, order, closes=closes)
     return DispatchResult(ok=False, error=f"Unknown run mode: {mode!r}")
 
 
@@ -343,7 +354,7 @@ def _dispatch_sandbox(api_key: str, order: dict[str, Any]) -> DispatchResult:
     return _normalise(ok, response)
 
 
-def _dispatch_live(api_key: str, order: dict[str, Any]) -> DispatchResult:
+def _dispatch_live(api_key: str, order: dict[str, Any], closes: bool = False) -> DispatchResult:
     auth_token, broker, error = resolve_live_auth(api_key)
     if error:
         # Deliberately not attempted. See the module docstring: refusing and
@@ -355,8 +366,9 @@ def _dispatch_live(api_key: str, order: dict[str, Any]) -> DispatchResult:
 
     original = dict(order)
     original["apikey"] = api_key
-    try:
-        ok, response, _status = place_order_with_auth(
+
+    def send():
+        return place_order_with_auth(
             dict(order),
             auth_token,
             broker,
@@ -366,6 +378,27 @@ def _dispatch_live(api_key: str, order: dict[str, Any]) -> DispatchResult:
             # which reports success and leaves a real position orphaned.
             force_live=True,
         )
+
+    try:
+        if closes:
+            # SUDARSHAN M6.9: one exit at a time per position, with every other surface.
+            from sudarshan.books import surface_exits
+
+            ok, response, _status = surface_exits.exit_once(
+                "live",
+                order.get("exchange"),
+                order.get("symbol"),
+                order.get("product"),
+                send,
+                lambda: surface_exits.upstox_statuses(auth_token, broker),
+            )
+            if not ok and surface_exits.held(response, _status):
+                result = _normalise(ok, response)
+                return DispatchResult(
+                    ok=False, response=result.response, error=result.error, held=True
+                )
+        else:
+            ok, response, _status = send()
     except Exception:
         logger.exception("Live order placement raised for %s", order.get("symbol"))
         return DispatchResult(ok=False, error="Live order placement failed")

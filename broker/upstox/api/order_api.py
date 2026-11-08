@@ -372,14 +372,15 @@ def _reduces_or_crosses(current, target):
 
 
 def _market_exit_working(
-    rows, orders, symbol, exchange, product, request_product, current_position
+    rows, orders, symbol, exchange, product, request_product, current_position, order=False
 ):
     """SUDARSHAN M6.9 (L2, Y2): the refusal (409, nothing sent) for an order that closes or
     reduces a position while the order book shows a MARKET order working on the closing side
     (SELL when long, BUY when short): one that rests at its protected price, or whose answer was
     lost to a restart, can still fill, and a second beside it would reverse the position. A
     resting stop or target (SL, SL-M, LIMIT) is not a market order and does not block. None when
-    nothing blocks."""
+    nothing blocks. ``order``: the refused request is an order that reduces or crosses the
+    position, not an exit, and the sentence says so (exit_guard.on_its_way)."""
     token = rows[0].get("instrument_token") if rows else get_token(symbol, exchange)
     closing = (
         str(token or ""),
@@ -391,7 +392,9 @@ def _market_exit_working(
     ]
     if not market:
         return None
-    said = exit_guard.market_exit_working(exit_guard.position_of(exchange, symbol, product), market)
+    said = exit_guard.market_exit_working(
+        exit_guard.position_of(exchange, symbol, product), market, order
+    )
     return _ErrorResponse(409), {"status": "error", "message": said, "nothing_sent": True}, None
 
 
@@ -626,6 +629,7 @@ def place_smartorder_api(data, auth):
             unsized = None
             statuses = None
             by_product = None
+            reducing = False  # SUDARSHAN M6.9 (Y2): a size other than 0 that reduces or crosses
             if position_size == 0:
                 # SUDARSHAN M6.9: an exit is sized from the positions row corrected by what the
                 # order book says was filled since (sudarshan/books/fills.py), read after the
@@ -642,34 +646,64 @@ def place_smartorder_api(data, auth):
                     held_now = 0  # nothing is sent below
                 current_position = held_now
             else:
-                current_position = int(get_open_position(symbol, exchange, request_product, auth))
-                if _reduces_or_crosses(current_position, position_size):
+                row_position = int(get_open_position(symbol, exchange, request_product, auth))
+                current_position = row_position
+                if _reduces_or_crosses(row_position, position_size):
+                    # SUDARSHAN M6.9 (Y2): an order that reduces or crosses the position, as the
+                    # row says, claims the position before the read it is sized from and holds
+                    # it until its order is sent and noted, as a size-0 exit does: an Exit all
+                    # that starts meanwhile leaves the position to it, and one that holds the
+                    # book refuses it. The claim is let go whatever happens below, a refused
+                    # dispatch included. An order that only adds never claims.
+                    busy = held.enter_context(
+                        exit_guard.one_exit("live", exchange, symbol, product, order=True)
+                    )
+                    if busy:
+                        logger.warning(f"Order for {symbol} not sent: an exit for it is on its way")
+                        refusal = {"status": "error", "message": busy, "nothing_sent": True}
+                        return _ErrorResponse(409), refusal, None
                     # SUDARSHAN M6.9 (X7): sized as an exit is, from the row corrected by the
                     # order book's fills, read after it: the row alone lags a fill, and a
                     # reversal sized from it misses its target. An order that only adds goes as
                     # the row says, with no order book read.
                     rows = _position_rows(symbol, exchange, auth)
                     orders = _read_order_rows(auth, exit_guard.EXIT_ORDERS_READ_S)
+                    statuses = _order_statuses(orders)
                     by_product = _held_products(rows, symbol, exchange, orders)
                     if by_product is None:
                         logger.warning(f"Order for {symbol} not sent: the quantity held is unknown")
                         said = exit_guard.exit_not_sized(
-                            exit_guard.position_of(exchange, symbol, product), orders is not None
+                            exit_guard.position_of(exchange, symbol, product),
+                            orders is not None,
+                            order=True,
                         )
                         refusal = {"status": "error", "message": said, "nothing_sent": True}
                         return _ErrorResponse(424), refusal, None
                     current_position = by_product.get(request_product, 0)
                     by_product = None  # only an exit's own guards read it
-                    if _reduces_or_crosses(current_position, position_size):
-                        # SUDARSHAN M6.9 (Y2): a reversal or part exit repeated while the first
-                        # still rests at Upstox would go beside it.
-                        refused = _market_exit_working(
-                            rows, orders, symbol, exchange, product, request_product,
-                            current_position,
-                        )  # fmt: skip
-                        if refused:
-                            logger.warning(f"Order for {symbol} not sent: a market exit is working")
-                            return refused
+                    # SUDARSHAN M6.9 (Y2, R1): a reversal or part exit repeated while the first
+                    # is held (its order sent, and not yet seen ended in the order book) or still
+                    # rests at Upstox would go beside it. The claim was taken on the row's word,
+                    # and these checks go with it whatever the corrected figure says: after the
+                    # first reversal's market order filled the position's size and rests for the
+                    # other side, the corrected figure is flat or past it, and the repeat read as
+                    # an add went beside the resting order and doubled the short. The working
+                    # order is looked for on the side that closes what the row shows.
+                    reducing = True
+                    refused = _market_exit_working(
+                        rows, orders, symbol, exchange, product, request_product, row_position,
+                        order=True,
+                    )  # fmt: skip
+                    if refused:
+                        logger.warning(f"Order for {symbol} not sent: a market exit is working")
+                        return refused
+                    held_by = exit_guard.hold_verdict(
+                        "live", exchange, symbol, product, statuses, order=True
+                    )
+                    if held_by:
+                        logger.warning(f"Order for {symbol} not sent: an earlier one is held")
+                        refusal = {"status": "error", "message": held_by, "nothing_sent": True}
+                        return _ErrorResponse(409), refusal, None
             logger.debug(
                 f"Desired position size: {position_size}, Current position: {current_position}"
             )
@@ -776,13 +810,15 @@ def place_smartorder_api(data, auth):
             order_data["action"] = action
             order_data["quantity"] = str(quantity)
 
-            if position_size != 0:
+            if position_size != 0 and not reducing:
                 sent = True
                 res, response, orderid = place_order_api(order_data, auth)
                 _invalidate_position_cache(auth)
                 return res, _with_sent(response, action, quantity, False), orderid
-            # SUDARSHAN M6.9: a close, sized from a book that may not show an exit placed just
-            # before, and noted, before the claim is let go, whenever it may have gone.
+            # SUDARSHAN M6.9: a close (or an order that reduces or crosses the position), sized
+            # from a book that may not show an exit placed just before, and noted, before the
+            # claim is let go, whenever it may have gone: the next exit or reducing order for the
+            # position is held until the order book shows this one ended.
             sent = True
             answered = None
             try:
@@ -798,7 +834,7 @@ def place_smartorder_api(data, auth):
                     )
             _invalidate_position_cache(auth)
             res, response, orderid = answered
-            return res, _with_sent(response, action, quantity, True), orderid
+            return res, _with_sent(response, action, quantity, position_size == 0), orderid
 
     except BrokerBusyError as exc:
         # The position read or the order was refused by the pacer (gthread
@@ -874,6 +910,14 @@ def _amount(value):
         return max(float(value), 0.0)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _shown(value):
+    """SUDARSHAN M6.9 (R2): a positions row's signed quantity as shown, 0 when it says none."""
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return 0
 
 
 def _working_exits(rows):
@@ -1057,28 +1101,58 @@ def _close_all_summary(counts, unmatched, busy, reason, skipped=(), late=(), pos
     return body, 409  # only busy positions and late ones: nothing refused, nothing unknown
 
 
-def _unlisted_left_out(rows, orders):
-    """SUDARSHAN M6.9 (Y3): the sentence and the outcome for each instrument and product the order
-    book shows traded today and held, which Upstox's positions do not list yet (a CNC net sale is
-    a sale from holdings, not an open position)."""
-    skipped, outcomes = [], []
-    for exchange, raw_name, token, letter, net in fills.unlisted_nets(rows, orders):
+#: SUDARSHAN M6.9 (Y3): marks a positions row Exit all made up for an instrument and product the
+#: order book shows held and Upstox's positions do not list yet. Never leaves this module.
+_UNLISTED = "sudarshan_unlisted"
+
+
+def _unlisted_positions(rows, orders):
+    """SUDARSHAN M6.9 (Y3): the positions the order book shows traded today and held, which
+    Upstox's positions do not list yet (bought a second ago), each as a row of the shape Exit all
+    exits from, with the quantity held, so they are exited as every listed position is: the
+    product from the order rows, the size from what the fills leave held in it
+    (``sudarshan.books.fills``), and the symbol looked up from the token in the loop. One whose
+    size cannot be worked out is left out with its sentence, never counted as closed. A CNC net
+    sale is a sale from holdings, not an open position. An unlisted product of an instrument that
+    has a row in another product is named and not sent (V1): a conversion in Upstox's app whose
+    new row is not shown yet cannot be told from a fresh position, and an exit sent in the old
+    product would open the opposite position."""
+    candidates, skipped, outcomes = [], [], []
+    listed_in = {}  # token -> the products (as the app writes them) Upstox's positions list
+    for row in rows or ():
+        if isinstance(row, dict) and str(row.get("instrument_token") or "").strip():
+            token = str(row["instrument_token"]).strip()
+            letter = str(row.get("product") or "").strip().upper()
+            product = reverse_map_product_type(str(row.get("exchange") or ""), letter) or letter
+            listed_in.setdefault(token, []).append(product)
+    for exchange, raw_name, token, letter, held_now in fills.unlisted_nets(rows, orders):
         product = reverse_map_product_type(exchange, letter)
-        if net < 0 and product == "CNC":
+        if held_now is not None and held_now < 0 and product == "CNC":
             continue
-        # SUDARSHAN M6.9 (Z3): named as every other exit sentence names it, from the OpenAlgo
-        # symbol; Upstox's own trading symbol only when the lookup finds nothing.
-        name = get_symbol(token, exchange) or raw_name
-        held = exit_guard.position_of(exchange, name, product)
-        why = (
-            f"{exit_guard.trader_name(held)} was traded today but Upstox's positions do not "
-            "show it yet, so Exit all did not close it. Close it from the Upstox app, or "
-            "tap Exit all again in a minute."
-        )
-        logger.warning(f"Exit all sent no exit for {name}: no positions row lists it yet")
-        skipped.append(why)
-        outcomes.append(_outcome(held, "not_sent", why))
-    return skipped, outcomes
+        row = {
+            "instrument_token": token,
+            "exchange": exchange,
+            "product": letter,
+            "tradingsymbol": raw_name,
+            "quantity": 0,
+            _UNLISTED: True,
+        }
+        if held_now is None or not product or token in listed_in:
+            # SUDARSHAN M6.9 (Z3): named as every other exit sentence names it, from the
+            # OpenAlgo symbol; Upstox's own trading symbol only when the lookup finds nothing.
+            name = get_symbol(token, exchange) or raw_name
+            held = exit_guard.position_of(exchange, name, product or letter)
+            if held_now is not None and product and token in listed_in:
+                why = exit_guard.unlisted_in_another_product(held, listed_in[token])
+                logger.warning(f"Exit all sent no exit for {name}: unlisted as {product}, listed")
+            else:
+                why = exit_guard.unlisted_not_sized(held)
+                logger.warning(f"Exit all sent no exit for {name}: unlisted, and not sized")
+            skipped.append(why)
+            outcomes.append(_outcome(held, "not_sent", why))
+            continue
+        candidates.append((row, held_now))
+    return candidates, skipped, outcomes
 
 
 def close_all_positions(current_api_key, auth):
@@ -1099,17 +1173,7 @@ def close_all_positions(current_api_key, auth):
         if positions_response.get("status") != "success":
             logger.error(f"Close all: positions could not be read: {positions_response}")
             return {"status": "error", "message": _CLOSE_ALL_NOT_READ}, 424
-        if not positions_response.get("data"):
-            # SUDARSHAN M6.9 (Y3): an empty book may be one that has not caught up with a
-            # position opened a moment ago: the order book says, read once, as Exit all does.
-            listed = _read_order_rows(auth, exit_guard.EXIT_ALL_ORDERS_READ_S)
-            if listed is None:
-                return {"status": "error", "message": _CLOSE_ALL_EMPTY_NOT_CHECKED}, 424
-            left_out, left_outcomes = _unlisted_left_out([], listed)
-            if left_out:
-                return _close_all_summary(counts, 0, 0, "", left_out, (), left_outcomes)
-            logger.debug("No open positions found to close.")
-            return {"message": "No Open Positions Found"}, 200
+        listed_rows = positions_response.get("data") or []
 
         refused = 0
         attempted = 0
@@ -1122,37 +1186,81 @@ def close_all_positions(current_api_key, auth):
         # SUDARSHAN M6.9: the order book, read once and after the positions, tells what each
         # position really holds (sudarshan/books/fills.py) and which orders are still working.
         orders = _read_order_rows(auth, exit_guard.EXIT_ALL_ORDERS_READ_S)
+        if orders is None and not any(_shown(row.get("quantity")) for row in listed_rows):
+            # SUDARSHAN M6.9 (Y3, R2): a book that shows nothing open (empty, or only closed
+            # positions at 0) may be one that has not caught up with a position opened or
+            # re-entered a moment ago, and only the order book could say. With it unread, every
+            # row would read as nothing held and Exit all would answer success over a position
+            # it never saw: the one answer a trader must never get.
+            return {"status": "error", "message": _CLOSE_ALL_EMPTY_NOT_CHECKED}, 424
         working, _read = _working_exits(orders)
         statuses = _order_statuses(orders)
         # SUDARSHAN M6.9: the time for sending starts now, so a slow read never uses it up.
         started = time.monotonic()
         # SUDARSHAN M6.9: each row corrected with the other products of its instrument.
-        held_rows = fills.held_each(positions_response["data"], orders)
-        for position, held_now in zip(positions_response["data"], held_rows, strict=True):
-            shown = int(position.get("quantity", 0))
-            if shown == 0 and held_now in (None, 0):
-                continue  # nothing held, as far as the books say
+        held_rows = fills.held_each(listed_rows, orders)
+        candidates = list(zip(listed_rows, held_rows, strict=True))
+        # SUDARSHAN M6.9 (Y3): a position the order book shows traded today and held, which
+        # Upstox's positions do not list yet, is exited after the listed ones, from its fills,
+        # through the same claim, hold, working-order check and time limit as every other.
+        unlisted, left_out, left_outcomes = _unlisted_positions(listed_rows, orders)
+        candidates.extend(unlisted)
+        skipped.extend(left_out)
+        outcomes.extend(left_outcomes)
+        if not candidates and not skipped:
+            logger.debug("No open positions found to close.")
+            return {"message": "No Open Positions Found"}, 200
+        for position, held_now in candidates:
+            shown = _shown(position.get("quantity", 0))
+            if shown == 0 and held_now is None:
+                # Nothing held, as far as the books say, and the order book did not say: with
+                # it unread, a row that shows a quantity carries the sentence for the whole
+                # answer (and when none does, the answer above said the book was not checked).
+                continue
+            # A row at 0 whose corrected figure is 0 too is passed over below, once the hold of
+            # an exit for it, if one is open, has been asked (E3).
             symbol = (
                 get_symbol(position["instrument_token"], position["exchange"])
                 if position.get("instrument_token")
                 else None
             )
+            product = reverse_map_product_type(position["exchange"], position["product"])
 
+            if position.get(_UNLISTED) and (not symbol or not product):
+                # SUDARSHAN M6.9 (Y3): with no row, the contract or the product could not be
+                # worked out from the order rows: left out, with its sentence, never "closed".
+                held = exit_guard.position_of(
+                    position["exchange"], symbol or position["tradingsymbol"], product or ""
+                )
+                why = exit_guard.unlisted_not_sized(held)
+                logger.warning(f"Exit all sent no exit for {position['tradingsymbol']}: unlisted")
+                skipped.append(why)
+                outcomes.append(_outcome(held, "not_sent", why))
+                continue
             if not symbol:
+                if shown == 0 and held_now == 0:
+                    continue  # nothing held, as far as the books say
                 logger.warning(
                     f"Could not find symbol for instrument token {position.get('instrument_token')}. Skipping position."
                 )
                 unmatched += 1  # SUDARSHAN M6.9: not sent, so not squared off
                 continue
 
-            product = reverse_map_product_type(position["exchange"], position["product"])
             held = exit_guard.position_of(position["exchange"], symbol, product)
-            if held_now == 0:
-                logger.debug(f"Exit all: {symbol} is closed already, as the order book shows")
+            if product == "CNC" and held_now is not None and held_now < 0:
+                # SUDARSHAN M6.9 (L1): a CNC net sale is a sale from holdings, not a position
+                # to buy back, as the unlisted path already has it. Only an equity delivery row
+                # (NSE, BSE) reads as CNC: Upstox writes D for NRML too, and an F&O NRML short
+                # is closed as every position is.
+                logger.debug(f"Exit all: {symbol} is a sale from holdings, not a position")
                 continue
             # SUDARSHAN M6.9: a busy position is not sent, and neither is any once time is up.
             # A hold this very call made does not count against a later row of the same name.
             # Busy is said before not-sized: the position is on its way out whatever it holds.
+            # Asked before a flat row is passed over (E3): a reversal whose market order filled
+            # the position's size and rests for the other side leaves the corrected figure at 0
+            # while its hold is open and its order still works, and "All Open Positions
+            # SquaredOff" over it would be answered as the rest fills into a short.
             why = busy.get(held) or (
                 None
                 if held in noted_here
@@ -1160,6 +1268,14 @@ def close_all_positions(current_api_key, auth):
                     "live", position["exchange"], symbol, product, statuses
                 )
             )
+            if held_now == 0:
+                if why is None:
+                    logger.debug(f"Exit all: {symbol} is closed already, as the order book shows")
+                    continue
+                logger.warning(f"Exit all sent no exit for {symbol}: flat, and its exit is busy")
+                skipped.append(why)
+                outcomes.append(_outcome(held, "not_sent", why))
+                continue
             if why is None and held_now is None:
                 # The order book could not be read, or does not add up with the rows: what is
                 # held cannot be confirmed, so nothing is sent for it.
@@ -1239,13 +1355,6 @@ def close_all_positions(current_api_key, auth):
             if answer == "refused" and not reason and not isinstance(res, BusyResponse):
                 reason = _refusal_words(api_response)
             outcomes.append(_exit_outcome(held, answer, res, api_response, orderid))
-
-        # SUDARSHAN M6.9 (Y3): a position the order book shows traded today and Upstox's
-        # positions do not list yet has no row to exit from: say so, never "squared off".
-        # A sale from holdings (a CNC net sell) is not an open position.
-        more_skipped, more_outcomes = _unlisted_left_out(positions_response["data"], orders)
-        skipped.extend(more_skipped)
-        outcomes.extend(more_outcomes)
 
         # Only under the gthread worker does the order window refuse a square-off
         # whose turn is too far away instead of sending it late (BusyResponse).

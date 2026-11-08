@@ -16,7 +16,10 @@ position is busy while
   sized from until after it is noted, or until it has sent nothing (``one``);
 - an exit for it that Upstox answered with an order id is on hold (``Hold``) and the order book
   still shows that order working. The hold is noted here (``exit_placed``) by the app's Exit, by
-  any smart order to a position size of 0, and by Exit all for each exit it sent. It ends when
+  any smart order to a position size of 0, by a smart order to another size that reduces or
+  crosses the position (a reversal or a part exit, which claims it too), by Exit all for each
+  exit it sent, and by the scalping terminal's closes and the strategy module's exits
+  (``sudarshan.books.surface_exits``, which claim too). It ends when
   Upstox's order book shows the order complete, cancelled or rejected, and no clock decides:
   the book is read only when a second exit comes in while a hold is open. If the book cannot be
   read, or does not list the order, the hold lasts up to ``EXIT_HOLD_UNCONFIRMED_S`` from the
@@ -45,8 +48,9 @@ holds it across that read, so an Exit all or another exit that starts during a
 slow read leaves the position to it: a read can answer older than an exit sent
 while it was on its way. It is refused with that sentence (409) if its position
 is busy, or an Exit all holds the book, when it claims, and then never placed as given: a smart
-order to a position size of 0 that finds the position flat is a late or repeated exit. An entry
-(a smart order to a size other than 0) is never refused.
+order to a position size of 0 that finds the position flat is a late or repeated exit. A smart
+order to a size other than 0 claims the position the same way when, as the positions row says,
+it reduces or crosses the position; one that only adds is never refused.
 
 The sandbox's book shows each exit the moment it is placed, so nothing is noted
 there; the app's Exit still claims its position in the sandbox's book while it
@@ -144,16 +148,37 @@ def clock(at: float) -> str:
     return datetime.fromtimestamp(at, IST).strftime("%H:%M:%S")
 
 
-def on_its_way(position: Position, at: float) -> str:
-    """Why no exit was sent for a position whose earlier exit went at ``at``, or is going."""
+def on_its_way(position: Position, at: float, order: bool = False) -> str:
+    """Why no exit was sent for a position whose earlier exit went at ``at``, or is going.
+
+    Args:
+        position: The position, as the app writes it.
+        at: When the earlier exit began (epoch seconds).
+        order: True when what was refused is an order that reduces or crosses the position (a
+            reversal or a part exit from TradingView, say), not an exit: a trader who sent a
+            reversal is told what became of his order, not to "exit again".
+    """
+    if order:
+        return (
+            f"An exit for {trader_name(position)} is already on its way (sent {clock(at)}), so "
+            "this order was not sent. Check Orders and Positions, then send it again if the "
+            "position still needs it."
+        )
     return (
         f"An exit for {trader_name(position)} is already on its way (sent {clock(at)}). Check "
         "Orders, and exit it again only if it is still open."
     )
 
 
-def first_exit_unconfirmed(position: Position, at: float) -> str:
-    """Why no exit was sent for a position whose first exit (sent at ``at``) cannot be checked."""
+def first_exit_unconfirmed(position: Position, at: float, order: bool = False) -> str:
+    """Why no exit was sent for a position whose first exit (sent at ``at``) cannot be checked.
+    ``order``: see ``on_its_way``."""
+    if order:
+        return (
+            f"The earlier exit for {trader_name(position)} (sent {clock(at)}) is not confirmed: "
+            "its order could not be checked at Upstox, so this order was not sent. Check Orders "
+            "and Positions, then send it again."
+        )
     return (
         f"The earlier exit for {trader_name(position)} (sent {clock(at)}) is not confirmed: its "
         "order could not be checked at Upstox. Check Orders, and exit it again only if it is "
@@ -161,7 +186,7 @@ def first_exit_unconfirmed(position: Position, at: float) -> str:
     )
 
 
-def exit_not_sized(position: Position, orders_read: bool = True) -> str:
+def exit_not_sized(position: Position, orders_read: bool = True, order: bool = False) -> str:
     """Why no exit was sent for a position whose quantity could not be confirmed.
 
     Args:
@@ -169,24 +194,76 @@ def exit_not_sized(position: Position, orders_read: bool = True) -> str:
         orders_read: False when Upstox's order list did not answer (the read failed or was cut
             off), so that is the cause; True when it answered and does not add up with the
             positions.
+        order: See ``on_its_way``.
     """
+    name = trader_name(position)
+    if order:
+        if not orders_read:
+            return (
+                "Upstox did not send your orders in time, so SUDARSHAN could not confirm how much "
+                f"you hold in {name}, and this order was not sent. Check Positions in the Upstox "
+                "app, or try again in a minute."
+            )
+        return (
+            f"SUDARSHAN could not work out how much you hold in {name} from Upstox's positions "
+            "and orders, so this order was not sent. Check Positions and Orders, or the Upstox "
+            "app, and try again in a minute."
+        )
     if not orders_read:
         return (
             "Upstox did not send your orders in time, so SUDARSHAN could not confirm how much "
-            f"you hold in {trader_name(position)} and sent no exit. Close it from the Upstox app, "
-            "or try again in a minute."
+            f"you hold in {name} and sent no exit. Close it from the Upstox app, or try again in "
+            "a minute."
         )
     return (
-        f"SUDARSHAN could not work out how much you hold in {trader_name(position)} from "
-        "Upstox's positions and orders, and sent no exit. Close it from the Upstox app, or "
-        "check Positions and Orders and try again in a minute."
+        f"SUDARSHAN could not work out how much you hold in {name} from Upstox's positions and "
+        "orders, and sent no exit. Close it from the Upstox app, or check Positions and Orders "
+        "and try again in a minute."
     )
 
 
-def exit_working(position: Position, at: float, order_ids: tuple[str, ...]) -> str:
+def unlisted_not_sized(position: Position) -> str:
+    """Why Exit all sent no exit for a position the order book shows traded today and held, which
+    Upstox's positions do not list yet, when its contract, product or size could not be worked
+    out from the order rows. One that could be is exited like every other."""
+    return (
+        f"{trader_name(position)} was traded today but Upstox's positions do not show it yet, "
+        "and SUDARSHAN could not work out from its orders what to send, so Exit all did not "
+        "close it. Close it from the Upstox app, or tap Exit all again in a minute."
+    )
+
+
+def unlisted_in_another_product(position: Position, listed: list[str]) -> str:
+    """Why Exit all sent no exit for a product of an instrument the order book shows traded today
+    and held, which Upstox's positions list only in another product: a conversion in Upstox's app
+    moves quantity between products with no order and can show its new row late, so this cannot
+    be told from a fresh position, and when that cannot be worked out nothing is sent.
+
+    Args:
+        position: The position as it would have been sent, with the unlisted product.
+        listed: The products (as the app writes them) Upstox's positions do list it in.
+    """
+    shown = " and ".join(listed)
+    return (
+        f"{trader_name(position)} was traded today as {position[2]}, but Upstox's positions show "
+        f"it only as {shown}: it may have been converted, so Exit all did not close it as "
+        f"{position[2]}. Check Positions, and close it from the Upstox app if it is still held."
+    )
+
+
+def exit_working(
+    position: Position, at: float, order_ids: tuple[str, ...], order: bool = False
+) -> str:
     """Why no exit was sent for a position whose earlier exit (sent at ``at``) is seen working at
-    Upstox: the position is still open, so exiting again is refused until that order ends."""
+    Upstox: the position is still open, so exiting again is refused until that order ends.
+    ``order``: see ``on_its_way``."""
     named = f"order ending {order_ids[0][-4:]}, " if order_ids else ""
+    if order:
+        return (
+            f"The earlier exit for {trader_name(position)} ({named}sent {clock(at)}) is still "
+            "working at Upstox, so this order was not sent. Wait for it or cancel it in Orders, "
+            "then send the order again."
+        )
     return (
         f"The earlier exit for {trader_name(position)} ({named}sent {clock(at)}) is still "
         "working at Upstox, so no exit was sent. Cancel or modify it in Orders, then exit."
@@ -247,7 +324,7 @@ def _described(order: WorkingOrder) -> str:
     return f"a {what} order" + (f" ({', '.join(details)})" if details else "")
 
 
-def market_exit_working(position: Position, orders: list[WorkingOrder]) -> str:
+def market_exit_working(position: Position, orders: list[WorkingOrder], order: bool = False) -> str:
     """Why a single exit was not sent for a position with a market order on its closing side
     still working: a market exit that rests at its protected price (or one whose answer was lost
     to a restart) can still fill, and a second exit beside it would reverse the position.
@@ -255,12 +332,18 @@ def market_exit_working(position: Position, orders: list[WorkingOrder]) -> str:
     Args:
         position: The position, as the app writes it.
         orders: Every market order working on its closing side; the first is named.
+        order: See ``on_its_way``.
     """
     said = _described(orders[0])
     more = len(orders) - 1
     if more:
         said += f" and {more} more {'order' if more == 1 else 'orders'}"
     them = "them" if more else "it"
+    if order:
+        return (
+            f"{trader_name(position)} has {said} still working at Upstox, so this order was not "
+            f"sent. Wait for {them} in Orders, or cancel {them} there, then send the order again."
+        )
     return (
         f"{trader_name(position)} has {said} still working at Upstox, so no exit was sent. Wait "
         f"for {them} in Orders, or cancel {them} there, then exit."
@@ -319,8 +402,14 @@ class ExitsInFlight:
         return max(times) if times else None
 
     @contextmanager
-    def one(self, book: str, position: Position) -> Iterator[str | None]:
+    def one(self, book: str, position: Position, order: bool = False) -> Iterator[str | None]:
         """Claim one position's exit in ``book`` ("live" or "sandbox").
+
+        Args:
+            book: "live" or "sandbox".
+            position: The position, as the app writes it.
+            order: True when the claim is for an order that reduces or crosses the position
+                rather than an exit (``on_its_way``); the words of a refusal say so.
 
         Yields:
             None while the claim is held; otherwise the sentence saying why no exit is sent
@@ -336,7 +425,7 @@ class ExitsInFlight:
                 if since is None:
                     self._positions[key] = time.time()
         if since is not None:
-            busy = on_its_way(position, since)  # words built outside the lock
+            busy = on_its_way(position, since, order)  # words built outside the lock
         try:
             yield busy
         finally:
@@ -399,7 +488,11 @@ class ExitsInFlight:
             self._placed.setdefault(book, {})[position] = Hold(order_ids, now, time.time())
 
     def hold_verdict(
-        self, book: str, position: Position, statuses: dict[str, str] | None
+        self,
+        book: str,
+        position: Position,
+        statuses: dict[str, str] | None,
+        order: bool = False,
     ) -> str | None:
         """Why an exit for ``position`` is refused because of an earlier exit's orders, or None.
 
@@ -408,6 +501,8 @@ class ExitsInFlight:
             position: The position, as the app writes it.
             statuses: Upstox's order book as ``{order id: status}`` (OpenAlgo's words), read for
                 this exit; None when it could not be read.
+            order: True when what is refused is an order that reduces or crosses the position,
+                not an exit (``on_its_way``); the words say so.
 
         A hold ends here, for good, when every order of it shows complete, cancelled or rejected;
         a hold whose orders cannot be seen ends only ``EXIT_HOLD_UNCONFIRMED_S`` after its answer.
@@ -429,10 +524,10 @@ class ExitsInFlight:
                 for each, status in zip(hold.order_ids, seen, strict=True)
                 if status is not None and status not in FINAL_STATUSES
             )
-            said = exit_working(position, hold.at, working)
+            said = exit_working(position, hold.at, working, order)
         else:  # not read, or an order the book does not list
             ended = time.monotonic() - hold.started > EXIT_HOLD_UNCONFIRMED_S
-            said = None if ended else first_exit_unconfirmed(position, hold.at)
+            said = None if ended else first_exit_unconfirmed(position, hold.at, order)
         if ended:
             with self._lock:
                 recent = self._placed.get(book)
@@ -476,9 +571,9 @@ class ExitsInFlight:
 EXITS = ExitsInFlight()
 
 
-def one_exit(book: str, exchange: object, symbol: object, product: object):
-    """``EXITS.one`` for a position however its caller spelled it."""
-    return EXITS.one(book, position_of(exchange, symbol, product))
+def one_exit(book: str, exchange: object, symbol: object, product: object, order: bool = False):
+    """``EXITS.one`` for a position however its caller spelled it; ``order`` as there."""
+    return EXITS.one(book, position_of(exchange, symbol, product), order)
 
 
 def why_busy(book: str, exchange: object, symbol: object, product: object) -> str | None:
@@ -509,11 +604,16 @@ def exit_placed(
 
 
 def hold_verdict(
-    book: str, exchange: object, symbol: object, product: object, statuses: dict[str, str] | None
+    book: str,
+    exchange: object,
+    symbol: object,
+    product: object,
+    statuses: dict[str, str] | None,
+    order: bool = False,
 ) -> str | None:
     """Why an exit for this position is refused because of an earlier exit's orders
-    (``EXITS.hold_verdict``), or None."""
-    return EXITS.hold_verdict(book, position_of(exchange, symbol, product), statuses)
+    (``EXITS.hold_verdict``), or None; ``order`` as there."""
+    return EXITS.hold_verdict(book, position_of(exchange, symbol, product), statuses, order)
 
 
 def exit_all_held(book: str) -> bool:

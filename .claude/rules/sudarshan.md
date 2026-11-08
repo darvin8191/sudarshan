@@ -147,14 +147,44 @@ in brand. Icon "Mor": tile #0E5A73, ring #E3A21A, glyph #FFFFFF. Numbers via
     the order, so its only size-0 alert is an exit (it sends its contracts with it). If its claim
     is refused it answers the busy sentence; from flat it sends nothing ("No open position found.
     Not placing exit order."), however the day's fills lie. A smart order to another size that
-    reduces or crosses a position is refused while a MARKET order works on the closing side, as a
-    single exit is; one that only adds is never refused for being busy. Every Exit all takes one
-    claim for the whole book, reads positions and then the order book once, and leaves out, with a
-    sentence each, any position that is busy, held, has a working order on its closing side or is
-    traded today but not yet in Upstox's positions; it never waits. Anything that may have reached
-    the broker reads "not confirmed", never a refusal or raw error text; Upstox's own refusal text
-    is shown without its error code. A stranded hold costs a retry; a released one can reverse a
-    position. The scalping terminal's closes and the strategy module's exits are not covered yet.
+    reduces or crosses a position (as the row says) claims the position while it is placed and
+    notes the hold after, as a single exit does. Once that claim is taken, the hold and the
+    working-order checks are asked whatever the figure corrected by the fills says (after the
+    first reversal's order fills the position's size and rests for the other side, the corrected
+    figure is flat or past it, and the repeat would otherwise read as an add): so a repeated
+    reversal alert is refused with a sentence while the first is being placed, or its order is
+    not yet seen ended in the order book, or a MARKET order works on the side that closes what the
+    row shows, and an Exit all meanwhile leaves the position to it. The order is still sized from
+    the corrected figure, so one sent after the first is seen complete goes. Its refusal
+    sentences say this order was not sent and what to check before sending it again; an exit's
+    say to exit again only if the position is still open. One that only adds is never refused for
+    being busy. Every Exit all takes one claim for the whole book, reads positions and then the
+    order book once, and leaves out, with a sentence each, any position that is busy, held or has
+    a working order on its closing side; it never waits. A position traded today that Upstox's
+    positions do not list yet is exited from its fills (the contract from the order row's token,
+    the product from the order rows, the size from what the fills leave held in that product),
+    through the same claim, hold and time limit; it is left out with a sentence when one of those
+    cannot be worked out, and a CNC net sale is a sale from holdings, not a position, whether
+    Upstox lists it as a row or not (an F&O NRML short is a position: Upstox writes D for both).
+    An unlisted product of an instrument that has a row in another product is named in the
+    answer and not sent: a conversion in Upstox's app whose new row is not shown yet cannot be
+    told from a fresh position, and when that cannot be worked out nothing is sent. The hold of
+    an exit for a row at 0 is asked before the row is passed over, so a reversal whose rest still
+    works is said, not squared off; and when the order book was not read and no listed row shows
+    a quantity, Exit all says the book was not checked (as for an empty book), never success.
+    Anything that may have reached the broker reads "not confirmed", never a refusal or raw error
+    text; Upstox's own refusal text is shown without its error code. A stranded hold costs a
+    retry; a released one can reverse a position. The scalping terminal's closes (Close, Close
+    all and the trailing stop's auto-exit) and the strategy module's exits size themselves and
+    send a plain order; in Live they go through `sudarshan/books/surface_exits.py`: the same
+    claim while the order is placed, the hold of an earlier exit respected (the order book is
+    read only while one is open, with the broker session the order itself is placed with, which
+    the scalping terminal resolves from its api key through `statuses_reader`; a book that
+    truly cannot be read keeps the 150 s rule) and the hold noted after. The scalping Close all
+    names each position it did not close and never answers success over a refusal. A refusal
+    there is a refused dispatch for the strategy module, which releases its own `claim_leg_exit`
+    and keeps the leg managed, recorded as `leg_exit_held` at warn, not as a rejection; its
+    `force_live` is untouched. The sandbox is left alone on both surfaces.
   - A sheet, a confirmation or an order ticket ignores taps for 500 ms after it opens
     (`watchlist/openGuard.ts`), so a double tap never presses what appeared under the finger.
   - Order alerts on Telegram (M6.8) are on by default (owner's broker-app benchmark, 20 Oct

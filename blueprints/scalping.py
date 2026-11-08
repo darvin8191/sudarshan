@@ -776,23 +776,43 @@ def _reducing_exit(symbol, exchange, product, action, quantity, auth_token, brok
             "pricetype": "MARKET",
             "product": product,
         }
-        return split_order(
-            split_data=split_data, api_key=api_key, auth_token=auth_token, broker=broker
-        )
 
-    from services.place_order_service import place_order
+        def send():
+            return split_order(
+                split_data=split_data, api_key=api_key, auth_token=auth_token, broker=broker
+            )
+    else:
+        from services.place_order_service import place_order
 
-    order_data = {
-        "strategy": SCALPING_STRATEGY,
-        "symbol": symbol,
-        "exchange": exchange,
-        "action": action,
-        "pricetype": "MARKET",
-        "product": product,
-        "quantity": quantity,
-    }
-    return place_order(
-        order_data=order_data, api_key=api_key, auth_token=auth_token, broker=broker
+        order_data = {
+            "strategy": SCALPING_STRATEGY,
+            "symbol": symbol,
+            "exchange": exchange,
+            "action": action,
+            "pricetype": "MARKET",
+            "product": product,
+            "quantity": quantity,
+        }
+
+        def send():
+            return place_order(
+                order_data=order_data, api_key=api_key, auth_token=auth_token, broker=broker
+            )
+
+    # SUDARSHAN M6.9: in Live, one exit at a time per position, with every other surface
+    # (sudarshan/books/surface_exits.py): a claim while this close is placed, the hold of an
+    # earlier exit respected, and the hold noted after. The sandbox is left as it was. The
+    # callers pass no broker session (the order is placed by api key, see _resolve_session_auth),
+    # so the hold check resolves the same session the order is placed with to read the order book.
+    from sudarshan.books import surface_exits
+
+    return surface_exits.exit_once(
+        "live" if _current_mode() == "live" else "sandbox",
+        exchange,
+        symbol,
+        product,
+        send,
+        surface_exits.statuses_reader(api_key, auth_token, broker),
     )
 
 
@@ -893,6 +913,22 @@ def close_all():
         )
         if ok2:
             closed += 1
+
+    # SUDARSHAN M6.9: a close that was refused (an exit for the position already on its way or
+    # not yet ended, or Upstox's own refusal) is said, position by position, and the answer is
+    # not "success": "Closed 0 scalping position(s)" read as done while every position was still
+    # held. Nothing closed answers 409, the refused dispatch; some closed answers 200 with the
+    # status "error" the terminal shows as a toast, since those exits are on their way.
+    if closed < len(results):
+        not_closed = [r for r in results if r["status"] != "success"]
+        said = [f"{r['symbol']}: {r['message'] or 'its exit was not sent.'}" for r in not_closed]
+        if closed:
+            lead = f"Closed {closed} of {len(results)} scalping positions."
+        else:
+            lead = "No scalping position was closed."
+        return jsonify(
+            {"status": "error", "message": " ".join([lead, *said]), "results": results}
+        ), (200 if closed else 409)
 
     return jsonify(
         {"status": "success", "message": f"Closed {closed} scalping position(s)", "results": results}

@@ -178,8 +178,8 @@ def held_each(positions: list[dict], orders: Iterable[dict] | None) -> list[int 
 
 def unlisted_nets(
     positions: Iterable[dict], orders: Iterable[dict] | None
-) -> list[tuple[str, str, str, str, int]]:
-    """The instruments and products traded today that have no positions row, with their net.
+) -> list[tuple[str, str, str, str, int | None]]:
+    """The instruments and products traded today that have no positions row, with what is held.
 
     A position bought a second ago can be in the order book before Upstox's positions list it,
     and a book of rows cannot name it. Only the order book's filled quantities are used.
@@ -189,10 +189,14 @@ def unlisted_nets(
         orders: Every raw row of the order book for today, or None when it could not be read.
 
     Returns:
-        One (exchange, trading symbol, token, product letter, net) per instrument and product
-        whose fills, counted across the instrument's products as ``held_by_product`` does, leave a
-        quantity held that no positions row carries; the net is signed (bought minus sold). Orders
-        with no usable token, product, side or filled quantity are left out.
+        One (exchange, trading symbol, token, product letter, held) per instrument and product
+        whose fills net to something and that no positions row carries; ``held`` is the signed
+        quantity held in that product, counted across the instrument's products as
+        ``held_by_product`` does (so a conversion that moved the quantity to another product's
+        row leaves nothing here), or None when the instrument's figures cannot be worked out
+        (an order row of it with no usable field, or rows that do not add up): then something is
+        held with no row and nobody can say how much. Orders with no usable token, product, side
+        or filled quantity are left out of the nets.
     """
     if orders is None:
         return []
@@ -224,8 +228,12 @@ def unlisted_nets(
         if net == 0 or (token, product) in listed:
             continue
         # A conversion moves quantity to another product's row: what is held in this product,
-        # counted across the instrument's products, is what is left out.
+        # counted across the instrument's products, is what is left out. When the instrument's
+        # figures cannot be worked out, the fills still show a position with no row, of a size
+        # nobody can confirm: it is named, with None, so no Exit all can answer success over it.
         held = held_by_product(positions, orders, token)
-        if held is not None and held.get(product, 0) != 0:
+        if held is None:
+            out.append((*names[(token, product)], token, product, None))
+        elif held.get(product, 0) != 0:
             out.append((*names[(token, product)], token, product, held[product]))
     return out

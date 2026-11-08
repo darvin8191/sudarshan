@@ -1389,7 +1389,12 @@ def _exit_legs(
                 continue
             exit_claim_id = row_id
 
-        result = order_dispatch.dispatch_order(mode=mode, api_key=api_key, order=order)
+        result = order_dispatch.dispatch_order(
+            mode=mode,
+            api_key=api_key,
+            order=order,
+            closes=True,  # SUDARSHAN M6.9
+        )
 
         if row_id is not None:
             _record_acknowledgement(row_id, result, strategy["id"], user_id, run_id, leg["leg_id"])
@@ -1411,18 +1416,36 @@ def _exit_legs(
             else:
                 state.release_leg_exit(run_id, leg["leg_id"], exit_claim_id)
 
+        # SUDARSHAN M6.9: a hold is not a rejection. The exit was not sent because another exit
+        # for the position is on its way or an earlier one is not yet seen ended in the order
+        # book; the claim above was released, the leg stays managed, and the next tick or the
+        # pending-stop job sends it again. Recorded as a hold, at warn, with the sentence.
+        if result.ok:
+            kind_said, said, severity = (
+                "leg_exit_placed",
+                f"Exit {action} {quantity} {leg['symbol']} placed ({kind})",
+                "info",
+            )
+        elif getattr(result, "held", False):
+            kind_said, said, severity = (
+                "leg_exit_held",
+                f"Exit held on leg {leg['leg_id']}, to be sent again: {result.error}",
+                "warn",
+            )
+        else:
+            kind_said, said, severity = (
+                "leg_exit_rejected",
+                f"Exit rejected on leg {leg['leg_id']}: {result.error}",
+                "critical",
+            )
         _emit(
             strategy["id"],
             user_id,
-            "leg_exit_placed" if result.ok else "leg_exit_rejected",
-            (
-                f"Exit {action} {quantity} {leg['symbol']} placed ({kind})"
-                if result.ok
-                else f"Exit rejected on leg {leg['leg_id']}: {result.error}"
-            ),
+            kind_said,
+            said,
             run_id=run_id,
             leg_id=leg["leg_id"],
-            severity="info" if result.ok else "critical",
+            severity=severity,
         )
 
         if result.ok and row_id is not None:
