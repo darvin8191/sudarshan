@@ -275,10 +275,26 @@ def unlisted_in_another_product(position: Position, listed: list[str]) -> str:
     """
     shown = " and ".join(listed)
     return (
-        f"{trader_name(position)} was traded today as {position[2]}, but Upstox's positions show "
-        f"it only as {shown}: it may have been converted, so Exit all did not close it as "
-        f"{position[2]}. Check Positions, and close it from the Upstox app if it is still held."
+        f"{_shown_only_as(position)}{shown}: it may have been converted, so Exit all did not close "
+        f"it as {position[2]}. Check Positions, and close it from the Upstox app if it is still "
+        "held."
     )
+
+
+def _shown_only_as(position: Position) -> str:
+    """How ``unlisted_in_another_product`` begins, up to the products it names."""
+    return (
+        f"{trader_name(position)} was traded today as {position[2]}, but Upstox's positions show "
+        "it only as "
+    )
+
+
+def left_unlisted(position: Position, reason: object) -> bool:
+    """Whether ``reason`` is a sentence Exit all writes for a position Upstox's positions do not
+    list, which it sent nothing for and no order of its own is working on (``unlisted_not_sized``,
+    ``unlisted_in_another_product``): the kill switch's stop warning counts such a position."""
+    said = str(reason or "")
+    return said == unlisted_not_sized(position) or said.startswith(_shown_only_as(position))
 
 
 def exit_working(

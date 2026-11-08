@@ -640,9 +640,11 @@ def _nothing_sent_for_want_of_the_orders(body: dict) -> bool:
 
 def _left_with_nothing_watching(each: list) -> list[dict]:
     """The positions Exit all left with nothing sent and no closing order known to be working:
-    not sized (the order list did not answer, or does not add up) or not reached in its time. A
-    position left out for an order working on its closing side, a hold or a claim has that
-    order; these have nothing, and their stops may be the ones just cancelled."""
+    not sized (the order list did not answer, or does not add up), not reached in its time, or
+    not listed by Upstox's positions and not sent for (exit_guard.left_unlisted: its size could
+    not be worked out, or it may be a conversion). A position left out for an order working on
+    its closing side, a hold or a claim has that order; these have nothing, and their stops may
+    be the ones just cancelled."""
     from broker.upstox.api import order_api
     from sudarshan.books import exit_guard
 
@@ -658,7 +660,7 @@ def _left_with_nothing_watching(each: list) -> list[dict]:
         }
         if late_words is not None:
             reasons.add(late_words([exit_guard.trader_name(position)]))
-        if item.get("reason") in reasons:
+        if item.get("reason") in reasons or exit_guard.left_unlisted(position, item.get("reason")):
             left.append(item)
     return left
 
