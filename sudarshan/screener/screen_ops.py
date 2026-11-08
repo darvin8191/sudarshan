@@ -26,7 +26,7 @@ from datetime import datetime
 from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Any
 
-from sudarshan.alerts.market.sessions import day_key, sessions_of
+from sudarshan.alerts.market.sessions import day_key, epoch_ms, key_day, sessions_of
 from sudarshan.autologin.schedule import IST
 
 from . import alerting as al
@@ -738,44 +738,41 @@ async def universes(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
 
 @op("today")
 async def today(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
+    """The dashboard's card: each screen's day (entered, exited, matches now) and the latest
+    entries and exits. Read in a few queries whatever the number of runs (release review HIGH-4):
+    the counts from the runs, the changes from the membership rows, so a member only missing in
+    its grace never reads as left and the day's first run never lists carried members as new."""
     now = ctx.clock()
     session = _session_key(now)
+    start = epoch_ms(key_day(session), 0)
     store = _store(ctx)
 
     def read(tx: Tx):
         names = {r["id"]: r["name"] for r in tx.screens()}
-        screens: dict[int, dict[str, Any]] = {}
+        screens = [
+            {
+                "id": row["screen_id"],
+                "name": names[row["screen_id"]],
+                "entered": row["entered"],
+                "exited": row["exited"],
+                "matches": row["matched"],
+            }
+            for row in tx.session_totals(session)
+            if row["screen_id"] in names
+        ]
         recent: list[dict[str, Any]] = []
-        for found in tx.runs_session(session):
-            if found["status"] != "done":
+        for row in tx.memberships():
+            name = names.get(row["screen_id"])
+            if name is None:
                 continue
-            card = screens.setdefault(
-                found["screen_id"],
-                {
-                    "id": found["screen_id"],
-                    "name": names.get(found["screen_id"], ""),
-                    "entered": 0,
-                    "exited": 0,
-                    "matches": 0,
-                },
-            )
-            card["entered"] += found["entered"]
-            card["exited"] += found["exited"]
-            card["matches"] = found["matched"]
-            for change in tx.run_changes(found["id"]):
-                if change["change"] in ("in", "out"):
-                    recent.append(
-                        {
-                            "symbol": change["symbol"],
-                            "exchange": change["exchange"],
-                            "kind": "entered" if change["change"] == "in" else "exited",
-                            "at": found["candle_end"],
-                            "screen": names.get(found["screen_id"], ""),
-                        }
-                    )
+            seen = {"symbol": row["symbol"], "exchange": row["exchange"], "screen": name}
+            if row["first_seen_at"] >= start:
+                recent.append({**seen, "kind": "entered", "at": row["first_seen_at"]})
+            if row["status"] == mem.EXITED and (row["exited_at"] or 0) >= start:
+                recent.append({**seen, "kind": "exited", "at": row["exited_at"]})
         recent.sort(key=lambda item: item["at"], reverse=True)
         return {
-            "screens": list(screens.values()),
+            "screens": screens,
             "recent": recent[:20],
             "unseen_alerts": 0,
             "session": session,

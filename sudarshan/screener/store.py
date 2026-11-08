@@ -461,6 +461,46 @@ class Tx:
         t = self._t("run")
         return self._all(select(t).where(self._mine(t)).order_by(t.c.id.desc()).limit(limit))
 
+    def run_keys(self, session: int) -> list[str]:
+        """The keys of every run recorded for one trading day, whatever came of it (the run loop
+        reads them once a day instead of asking about each boundary every second, HIGH-4)."""
+        t = self._t("run")
+        query = select(t.c.run_key).where(t.c.session == session, self._mine(t))
+        return list(self.conn.execute(query).scalars())
+
+    def session_totals(self, session: int) -> list[dict[str, Any]]:
+        """Per screen, one trading day's done runs summed: entered, exited, and the matches of
+        its latest run (the dashboard's card, in two queries whatever the number of runs)."""
+        t = self._t("run")
+        done = (t.c.session == session, t.c.status == "done", self._mine(t))
+        sums = self.conn.execute(
+            select(
+                t.c.screen_id,
+                func.sum(t.c.entered).label("entered"),
+                func.sum(t.c.exited).label("exited"),
+                func.max(t.c.id).label("latest"),
+            )
+            .where(*done)
+            .group_by(t.c.screen_id)
+        ).mappings()
+        totals = [dict(row) for row in sums]
+        latest = {row["latest"] for row in totals}
+        matched = {
+            row[0]: row[1]
+            for row in self.conn.execute(
+                select(t.c.id, t.c.matched).where(t.c.id.in_(latest), self._mine(t))
+            )
+        }
+        return [
+            {
+                "screen_id": row["screen_id"],
+                "entered": int(row["entered"] or 0),
+                "exited": int(row["exited"] or 0),
+                "matched": int(matched.get(row["latest"], 0)),
+            }
+            for row in totals
+        ]
+
     def runs_session(self, session: int) -> list[dict[str, Any]]:
         """Every run of one trading day, oldest first."""
         t = self._t("run")

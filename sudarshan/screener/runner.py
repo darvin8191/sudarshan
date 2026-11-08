@@ -41,6 +41,10 @@ class Runner:
         self.slice_size = slice_size
         self._day: int | None = None
         self._sessions: Mapping = {}
+        #: The run keys recorded today, read once a day and kept as runs are recorded: an idle
+        #: tick asks the store nothing per boundary (release review HIGH-4).
+        self._recorded: set[str] = set()
+        self._recorded_day: int | None = None
         self.made = 0
         self.failed = 0
         self.last_run_key: str | None = None
@@ -104,11 +108,15 @@ class Runner:
         except StoreError:
             return 0
         rows = {r["id"]: r for r in active}
+        try:
+            recorded = self._recorded_keys(self._day)
+        except StoreError:
+            return 0
         due = scheduler.due(
             [sched_screen(r) for r in active],
             sessions,
             now,
-            lambda key: self.store.read(OWNER, lambda tx: tx.run_by_key(key) is not None),
+            recorded.__contains__,
             printed=lambda s: self._printed(rows[s.id]),
         )
         made = 0
@@ -116,6 +124,13 @@ class Runner:
             await self._one(rows[item.screen.id], item)
             made += 1
         return made
+
+    def _recorded_keys(self, day: int | None) -> set[str]:
+        """Today's recorded run keys: from the store once a day, then kept here."""
+        if day != self._recorded_day:
+            self._recorded = set(self.store.read(OWNER, lambda tx: tx.run_keys(day or 0)))
+            self._recorded_day = day
+        return self._recorded
 
     async def _one(self, screen_row: Mapping[str, Any], due: scheduler.Due) -> None:
         now = self.clock()
@@ -147,6 +162,7 @@ class Runner:
             log.exception("the run %s could not be recorded", due.key)
             self.failed += 1
             return
+        self._recorded.add(str(due.key))
         self.made += 1
         self.last_run_key = report.run_key
         log.info(
@@ -175,6 +191,8 @@ class Runner:
             self.store.write(OWNER, write)
         except StoreError:
             log.exception("the failed run %s could not be recorded either", due.key)
+            return
+        self._recorded.add(str(due.key))
 
 
 async def run_runner(service, *, tick_s: float = TICK_S, wait_s: float = 30.0) -> None:
