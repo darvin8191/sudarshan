@@ -7,7 +7,8 @@ engine line). Its job (``run_feed``) does, in one asyncio task:
 - at start and at each new day: today's sessions from the calendar (X11), the universes the
   active screens use from the master contract (universe.py, kept in the store), the keys to
   follow (at most ``max_keys``, X10) claimed at the feed in ``full`` mode (a stock that closes by
-  auction needs ``vtt`` for its print, X6n), and today's sealed bars restored from the store;
+  auction needs ``vtt`` for its print, X6n), and today's sealed bars restored from the store
+  (bar_today holds one trading day: an earlier day's bars are cleared, never restored as today's);
 - the feed's frames: ``__health__`` becomes ``clock.Feed`` and the exchange's status, a key's
   frame goes to ``bars.Bars.on_tick`` and is kept as the key's last frame (``ltp``, ``cp``);
   every second ``on_clock`` seals the minutes whose grace is over; sealed bars are written to the
@@ -41,7 +42,12 @@ from sudarshan.alerts.market.feedlink import (
     parse_health,
 )
 from sudarshan.alerts.market.grain import paise
-from sudarshan.alerts.market.sessions import day_key, previous_trading_day, sessions_of
+from sudarshan.alerts.market.sessions import (
+    day_key,
+    epoch_ms,
+    previous_trading_day,
+    sessions_of,
+)
 from sudarshan.autologin.schedule import IST
 
 from . import candles, universe
@@ -332,17 +338,27 @@ class LiveSource:
         return True
 
     def _restore(self) -> None:
+        """Today's sealed bars from the store, and nothing older (BLOCKER-1): bar_today holds one
+        trading day, so every bar that starts before today's midnight (IST) is cleared in the
+        same transaction, and the bars in memory start again from today's alone, whatever was
+        held before (a process that runs through midnight)."""
+        since = epoch_ms(self._today, 0) if self._today is not None else 0
+
+        def roll(tx: Tx) -> tuple[int, list]:
+            return tx.bars_clear(before=since), tx.bars(since=since)
+
         try:
-            rows = self.store.read(OWNER, Tx.bars)
+            cleared, rows = self.store.write(OWNER, roll)
         except StoreError:
-            return
-        today = self.market.today
+            cleared, rows = 0, []
         kept = [
             Sealed(r["key"], Bar(r["start"], r["o"], r["h"], r["l"], r["c"], r["v"], r["oi"] if r["oi"] is not None else -1, r["atp"] or 0, r["flags"]), 0)
             for r in rows
         ]  # fmt: skip
+        self.bars.restore(self.market.today, kept)
+        if cleared:
+            log.info("cleared %d sealed bars of earlier days from the store", cleared)
         if kept:
-            self.bars.restore(today, kept)
             log.info("restored %d sealed bars of today from the store", len(kept))
 
     def refresh_universes(self, specs: Sequence[Mapping[str, Any]], now: int) -> None:

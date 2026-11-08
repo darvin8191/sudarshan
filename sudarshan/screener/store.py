@@ -752,15 +752,22 @@ class Tx:
             count += 1
         return count
 
-    def bars(self, key: str | None = None) -> list[dict[str, Any]]:
+    def bars(self, key: str | None = None, since: int | None = None) -> list[dict[str, Any]]:
+        """The sealed bars held, by key and start; ``since`` (epoch ms): only those from then on."""
         t = self._t("bar_today")
         query = select(t)
         if key is not None:
             query = query.where(t.c.key == key)
+        if since is not None:
+            query = query.where(t.c.start >= since)
         return self._all(query.order_by(t.c.key, t.c.start))
 
-    def bars_clear(self) -> int:
-        return int(self.conn.execute(delete(self._t("bar_today"))).rowcount)
+    def bars_clear(self, before: int | None = None) -> int:
+        """Every bar, or (``before``, epoch ms) every bar that starts earlier: bar_today holds one
+        trading day, and an earlier day's bars are cleared when the next day begins."""
+        t = self._t("bar_today")
+        statement = delete(t) if before is None else delete(t).where(t.c.start < before)
+        return int(self.conn.execute(statement).rowcount)
 
     # ---- shared: coverage, daily stores, pauses ----
     def coverage_put(self, row: Mapping[str, Any]) -> None:
