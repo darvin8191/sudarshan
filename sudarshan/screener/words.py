@@ -180,6 +180,8 @@ def auction_words(price_at: int) -> str:
 
 #: The keys of a run's ``marks`` (a JSON object): what is true of the run as a whole.
 M_REPAIRED, M_LATE, M_WOULD_TELL, M_NOT_LOADED = "repaired", "late", "would_tell", "not_loaded"
+#: Matches the list could not take at the run: ``{"count", "full", "max_adds"}`` (MEDIUM-2).
+M_WAITING = "waiting"
 #: A run that had no instrument to judge: the screen's universe is empty or was not built yet
 #: (the master contract not loaded, a screen made after the day's build). Every member it holds
 #: is "not checked", never a miss, so a gap in the data never empties a list (release review HIGH-3).
@@ -224,6 +226,17 @@ def mark_words(marks: Mapping[str, object] | None) -> tuple[str, ...]:
             out.append("checked late after a restart")
     if marks.get(M_WOULD_TELL):
         out.append("would have raised an alert")
+    waiting = marks.get(M_WAITING)
+    if isinstance(waiting, Mapping) and isinstance(waiting.get("count"), int) and waiting["count"]:
+        more = f"{quantity(waiting['count'])} more matched, waiting"
+        if waiting.get("full"):
+            out.append(f"{more}: the list is full")
+        elif isinstance(waiting.get("max_adds"), int):
+            out.append(
+                f"{more} for the next check (at most {quantity(waiting['max_adds'])} added a check)"
+            )
+        else:
+            out.append(f"{more} for the next check")
     return tuple(out)
 
 

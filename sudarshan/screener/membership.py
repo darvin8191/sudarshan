@@ -305,11 +305,29 @@ def apply_run(
 
 def _by_rank(result: Result, order: str) -> tuple:
     """Best first: ranked before unranked, the direction of ``order``, then symbol and key."""
-    rank = result.rank
+    return best_first(result.rank, result.symbol, result.key, order)
+
+
+def best_first(rank: object, symbol: str, key: str, order: str) -> tuple:
+    """The sort key that puts the best ranked first, as the screen ranks (``order`` "desc" or
+    "asc"): ranked before unranked, then the symbol and the key. ``rank`` is a rank value (an
+    exact number or a float) or its text as stored (``rank_value``)."""
+    if isinstance(rank, str):
+        rank = rank_value(rank)
     if rank is None or isinstance(rank, float) and not math.isfinite(rank):
-        return (1, 0, result.symbol, result.key)
+        return (1, 0, symbol, key)
     exact = Fraction(rank)
-    return (0, -exact if order == "desc" else exact, result.symbol, result.key)
+    return (0, -exact if order == "desc" else exact, symbol, key)
+
+
+def rank_value(text: object) -> Fraction | None:
+    """A rank value stored as text (``str`` of an exact number or a float), or None."""
+    if text is None:
+        return None
+    try:
+        return Fraction(str(text))
+    except (ValueError, ZeroDivisionError):
+        return None
 
 
 # ---- the list ---------------------------------------------------------------------------------------------
@@ -390,6 +408,6 @@ def restore(row: Row) -> Row | None:
 __all__ = [
     "ACTIVE", "DISMISSED", "EXITED", "FULL", "LIMIT", "LIST_MAX", "MISSING", "STATUSES",
     "Applied", "Change", "Grace", "Pick", "Result", "Row", "Run", "Sync",
-    "apply_run", "dismiss", "free_slots", "pin", "plan_sync", "reconcile", "restore", "step",
-    "unpin", "wants",
+    "apply_run", "best_first", "dismiss", "free_slots", "pin", "plan_sync", "rank_value",
+    "reconcile", "restore", "step", "unpin", "wants",
 ]  # fmt: skip

@@ -152,20 +152,40 @@ def _results(judged: Iterable[Judged], rows: Mapping[str, mem.Row]) -> list[mem.
     return results
 
 
+def ranked_hits(judged: Iterable[Judged], order: str) -> list[Judged]:
+    """The run's matches, best ranked first as the screen ranks, ties by symbol (MEDIUM-2)."""
+    return sorted(
+        (j for j in judged if j.outcome.kind == HIT),
+        key=lambda j: mem.best_first(j.outcome.rank, j.member.symbol, j.member.key, order),
+    )
+
+
+def hit_values(item: Judged) -> dict[str, Any]:
+    """What a match's run_value row keeps: its clause values, the prices at the run, whether it
+    was read from a forming candle, and its name and rank value, so the run's whole match set
+    can be shown ranked from its values alone (MEDIUM-1, MEDIUM-2)."""
+    rank = item.outcome.rank
+    return {
+        **dict(item.outcome.values or {}),
+        "_ltp": item.prices[0],
+        "_cp": item.prices[1],
+        "_forming": item.outcome.forming,
+        "_symbol": item.member.symbol,
+        "_exchange": item.member.exchange,
+        "_rank": None if rank is None else str(rank),
+    }
+
+
 def _changes(
-    judged: Sequence[Judged], applied: mem.Applied, rows: Mapping[str, mem.Row], first_run: bool
+    judged: Sequence[Judged],
+    applied: mem.Applied,
+    rows: Mapping[str, mem.Row],
+    first_run: bool,
+    order: str = "desc",
 ) -> list[dict[str, Any]]:
     """The run_change rows: in, out and not_checked per instrument, ranked for the page."""
     out: dict[str, dict[str, Any]] = {}
-    ranked = {
-        item.member.key: index
-        for index, item in enumerate(
-            sorted(
-                (j for j in judged if j.outcome.kind == HIT),
-                key=lambda j: (j.outcome.rank is None, j.member.symbol),
-            )
-        )
-    }
+    ranked = {item.member.key: index for index, item in enumerate(ranked_hits(judged, order))}
     for item in judged:
         key, kind = item.member.key, item.outcome.kind
         if kind == NOT_CHECKED:
@@ -263,17 +283,12 @@ def record(
     for row in applied.rows.values():
         tx.membership_put(screen["id"], list_id, _row_dict(row), now)
 
-    changes = _changes(judged, applied, rows, first_run)
+    changes = _changes(judged, applied, rows, first_run, order)
     tx.run_changes_put(run["id"], changes)
     values: dict[str, dict[str, Any]] = {}
     for j in judged:
         if j.outcome.kind == HIT:
-            values[j.member.key] = {
-                **dict(j.outcome.values or {}),
-                "_ltp": j.prices[0],
-                "_cp": j.prices[1],
-                "_forming": j.outcome.forming,
-            }
+            values[j.member.key] = hit_values(j)
         elif j.outcome.kind == NOT_CHECKED:
             values[j.member.key] = {"_not_checked": words.not_checked_words(j.outcome.why)}
     tx.run_values_put(run["id"], values)
@@ -297,6 +312,12 @@ def record(
     }
     decision = al.decide(policy, facts, told, paused=bool(state.get("alerts_paused")))
     marks = words.run_marks(repaired=repaired, late_at=late_at)
+    if applied.waiting:  # matches the list could not take this run (MEDIUM-2)
+        marks[words.M_WAITING] = {
+            "count": len(applied.waiting),
+            "full": applied.blocked == mem.FULL,
+            "max_adds": max_adds,
+        }
     marks["alerts"] = words.told_words(decision, policy)
     tx.run_finish(run["id"], marks, **counts)
     if decision.tell:
@@ -451,5 +472,7 @@ __all__ = [
     "Report",
     "Source",
     "evaluate",
+    "hit_values",
+    "ranked_hits",
     "record",
 ]

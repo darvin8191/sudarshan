@@ -217,10 +217,7 @@ class LiveSource:
         judged = await runs.evaluate(
             plan, members, self, self.context(boundary.end, self.market.today)
         )
-        hits = sorted(
-            (j for j in judged if j.outcome.kind == "hit"),
-            key=lambda j: (j.outcome.rank is None, j.member.symbol),
-        )
+        hits = runs.ranked_hits(judged, (stored.get("rank") or {}).get("order", "desc"))
         changes = [
             {
                 "key": j.member.key,
@@ -243,12 +240,7 @@ class LiveSource:
         ]
         values = {
             j.member.key: (
-                {
-                    **dict(j.outcome.values or {}),
-                    "_ltp": j.prices[0],
-                    "_cp": j.prices[1],
-                    "_forming": j.outcome.forming,
-                }
+                runs.hit_values(j)
                 if j.outcome.kind == "hit"
                 else {"_not_checked": words.not_checked_words(j.outcome.why)}
             )

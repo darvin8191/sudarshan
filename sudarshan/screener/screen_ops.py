@@ -248,24 +248,25 @@ def result_rows(
     """(rows, not_checked) of a run: every instrument that matched, best ranked first, with its
     membership chip; the not-checked count and its reasons."""
     grace = mem.Grace.of((stored.get("target") or {}).get("grace"))
+    order = (stored.get("rank") or {}).get("order", "desc")
     by_key = {m["key"]: m for m in members}
-    ranked = sorted(
-        (c for c in changes if c["change"] == "in"),
-        key=lambda c: (c["rank"] is None, c["rank"] if c["rank"] is not None else 0, c["symbol"]),
-    )
-    matched = {c["key"] for c in ranked}
+    entries = {c["key"]: c for c in changes if c["change"] == "in"}
     # members matching now that this run did not list as "in" (a later run of the day): keep them
     for member in members:
-        if member["status"] in (mem.ACTIVE,) and member["key"] not in matched:
-            ranked.append(
-                {
-                    "key": member["key"],
-                    "symbol": member["symbol"],
-                    "exchange": member["exchange"],
-                    "rank": None,
-                }
-            )
-            matched.add(member["key"])
+        if member["status"] == mem.ACTIVE and member["key"] not in entries:
+            entries[member["key"]] = {
+                "key": member["key"],
+                "symbol": member["symbol"],
+                "exchange": member["exchange"],
+            }
+
+    def best(entry: Mapping[str, Any]) -> tuple:
+        """As the screen ranks (MEDIUM-2): the run's own rank value, else the member's score."""
+        found = values.get(entry["key"]) or {}
+        rank = found["_rank"] if "_rank" in found else (by_key.get(entry["key"]) or {}).get("score")
+        return mem.best_first(rank, entry["symbol"], entry["key"], order)
+
+    ranked = sorted(entries.values(), key=best)
     rows = []
     for position, change in enumerate(ranked, start=1):
         found = values.get(change["key"]) or {}
