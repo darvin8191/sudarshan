@@ -1239,6 +1239,13 @@ def close_all_positions(current_api_key, auth):
                 continue
 
             held = exit_guard.position_of(position["exchange"], symbol, product)
+            if product == "CNC" and held_now is not None and held_now < 0:
+                # SUDARSHAN M6.9 (L1): a CNC net sale is a sale from holdings, not a position
+                # to buy back, as the unlisted path already has it. Only an equity delivery row
+                # (NSE, BSE) reads as CNC: Upstox writes D for NRML too, and an F&O NRML short
+                # is closed as every position is.
+                logger.debug(f"Exit all: {symbol} is a sale from holdings, not a position")
+                continue
             # SUDARSHAN M6.9: a busy position is not sent, and neither is any once time is up.
             # A hold this very call made does not count against a later row of the same name.
             # Busy is said before not-sized: the position is on its way out whatever it holds.

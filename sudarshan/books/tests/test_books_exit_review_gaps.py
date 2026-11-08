@@ -294,7 +294,7 @@ def test_r1_after_a_restart_the_working_rest_of_the_first_reversal_still_refuses
     assert _sent(broker, X) == [("SELL", 130)] and broker.true_qty(X) == -65
 
 
-# -- R2. Exit all with an unreadable order book and only flat rows ---------------------------------------
+# -- R2. Exit all with an unreadable order book and only flat rows ---------------------------------
 
 
 def test_r2_exit_all_with_an_unreadable_order_book_and_only_flat_rows_never_answers_success(
@@ -342,7 +342,7 @@ def test_r2_control_a_short_row_with_the_order_book_unread_is_not_sized_and_not_
     assert "position opened in the last minute" not in body["message"]
 
 
-# -- V1. A conversion whose new row is not shown yet ------------------------------------------------------
+# -- V1. A conversion whose new row is not shown yet -----------------------------------------------
 
 
 class RawBroker(Broker):
@@ -435,7 +435,7 @@ def test_v1_the_sentence_is_for_a_trader():
         assert word not in said
 
 
-# -- E3. Exit all over a part-filled reversal whose rest still works ---------------------------------------
+# -- E3. Exit all over a part-filled reversal whose rest still works -------------------------------
 
 
 def test_e3_exit_all_over_a_part_filled_reversal_does_not_say_all_squared_off(monkeypatch):
@@ -496,3 +496,53 @@ def test_e3_control_a_flat_row_of_an_unknown_contract_is_passed_over(monkeypatch
     code, body = world.app_exit_all()
     assert (code, body["status"]) == (200, "success"), body
     assert _sent(world.broker, Y) == [("BUY", 30)]
+
+
+# -- L1. A sale from holdings that Upstox's positions do list --------------------------------------
+
+
+@pytest.fixture
+def cnc(monkeypatch):
+    from books_upstox_world import BY_TOKEN
+    from books_upstox_world import INSTRUMENTS as world_instruments
+
+    token = "NSE_EQ|INE002A01018"
+    monkeypatch.setitem(world_instruments, "RELIANCE", (token, "NSE", "D", "CNC"))
+    monkeypatch.setitem(BY_TOKEN, token, "RELIANCE")
+    return token
+
+
+def test_l1_a_listed_cnc_sale_from_holdings_is_not_bought_back(monkeypatch, cnc):
+    """Upstox lists a sale from holdings as a D row with a negative quantity on NSE. The unlisted
+    path leaves such a sale alone; on b14cb0e the listed path bought the shares back."""
+    positions = [_raw_row(cnc, "NSE", "RELIANCE", "D", -10, 0, 0, 10)]
+    orders = [_raw_order("261027000080", cnc, "NSE", "RELIANCE", "D", "SELL", 10)]
+    broker = RawBroker(positions, orders)
+    world = install(monkeypatch, broker)
+    code, body = world.app_exit_all()
+    assert ("BUY", "D", 10) not in broker.products, (code, body, broker.products)
+    assert broker.products == [] and (code, body["status"]) == (200, "success")
+    assert "RELIANCE" not in str(body.get("message"))
+
+
+def test_l1_control_an_fno_nrml_short_is_still_closed(monkeypatch):
+    """Control: Upstox writes D for NRML too. A BANKNIFTY PE short carried as NRML is bought
+    back by Exit all, as every position is."""
+    token = "NSE_FO|1002"
+    positions = [_raw_row(token, "NFO", Y, "D", -30, -30, 0, 0)]
+    broker = RawBroker(positions, [])
+    world = install(monkeypatch, broker)
+    code, body = world.app_exit_all()
+    assert (code, body["status"]) == (200, "success"), body
+    assert broker.products == [("BUY", "D", 30)]
+
+
+def test_l1_control_a_listed_cnc_purchase_is_sold_back(monkeypatch, cnc):
+    """Control: a CNC net purchase today is a position, and is sold."""
+    positions = [_raw_row(cnc, "NSE", "RELIANCE", "D", 10, 0, 10, 0)]
+    orders = [_raw_order("261027000081", cnc, "NSE", "RELIANCE", "D", "BUY", 10)]
+    broker = RawBroker(positions, orders)
+    world = install(monkeypatch, broker)
+    code, body = world.app_exit_all()
+    assert (code, body["status"]) == (200, "success"), body
+    assert broker.products == [("SELL", "D", 10)]
