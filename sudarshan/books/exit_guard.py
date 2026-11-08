@@ -17,8 +17,9 @@ position is busy while
 - an exit for it that Upstox answered with an order id is on hold (``Hold``) and the order book
   still shows that order working. The hold is noted here (``exit_placed``) by the app's Exit, by
   any smart order to a position size of 0, by a smart order to another size that reduces or
-  crosses the position (a reversal or a part exit, which claims it too), and by Exit all for
-  each exit it sent. It ends when
+  crosses the position (a reversal or a part exit, which claims it too), by Exit all for each
+  exit it sent, and by the scalping terminal's closes and the strategy module's exits
+  (``sudarshan.books.surface_exits``, which claim too). It ends when
   Upstox's order book shows the order complete, cancelled or rejected, and no clock decides:
   the book is read only when a second exit comes in while a hold is open. If the book cannot be
   read, or does not list the order, the hold lasts up to ``EXIT_HOLD_UNCONFIRMED_S`` from the

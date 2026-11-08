@@ -162,7 +162,12 @@ in brand. Icon "Mor": tile #0E5A73, ring #E3A21A, glyph #FFFFFF. Numbers via
     told from a fresh buy, as with a single exit. Anything that may have reached
     the broker reads "not confirmed", never a refusal or raw error text; Upstox's own refusal text
     is shown without its error code. A stranded hold costs a retry; a released one can reverse a
-    position. The scalping terminal's closes and the strategy module's exits are not covered yet.
+    position. The scalping terminal's closes and the strategy module's exits size themselves and
+    send a plain order; in Live they go through `sudarshan/books/surface_exits.py`: the same
+    claim while the order is placed, the hold of an earlier exit respected (the order book is
+    read only while one is open) and the hold noted after. A refusal there is a refused dispatch
+    for the strategy module, which releases its own `claim_leg_exit` and keeps the leg managed;
+    its `force_live` is untouched. The sandbox is left alone on both surfaces.
   - A sheet, a confirmation or an order ticket ignores taps for 500 ms after it opens
     (`watchlist/openGuard.ts`), so a double tap never presses what appeared under the finger.
   - Order alerts on Telegram (M6.8) are on by default (owner's broker-app benchmark, 20 Oct

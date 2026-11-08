@@ -839,7 +839,12 @@ def _place(
             severity="critical",
         )
 
-    result = order_dispatch.dispatch_order(mode=mode, api_key=api_key, order=order)
+    result = order_dispatch.dispatch_order(
+        mode=mode,
+        api_key=api_key,
+        order=order,
+        closes=exiting,  # SUDARSHAN M6.9
+    )
 
     if row_id is not None:
         from services.strategy_module.engine import _record_acknowledgement

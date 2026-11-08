@@ -776,23 +776,41 @@ def _reducing_exit(symbol, exchange, product, action, quantity, auth_token, brok
             "pricetype": "MARKET",
             "product": product,
         }
-        return split_order(
-            split_data=split_data, api_key=api_key, auth_token=auth_token, broker=broker
-        )
 
-    from services.place_order_service import place_order
+        def send():
+            return split_order(
+                split_data=split_data, api_key=api_key, auth_token=auth_token, broker=broker
+            )
+    else:
+        from services.place_order_service import place_order
 
-    order_data = {
-        "strategy": SCALPING_STRATEGY,
-        "symbol": symbol,
-        "exchange": exchange,
-        "action": action,
-        "pricetype": "MARKET",
-        "product": product,
-        "quantity": quantity,
-    }
-    return place_order(
-        order_data=order_data, api_key=api_key, auth_token=auth_token, broker=broker
+        order_data = {
+            "strategy": SCALPING_STRATEGY,
+            "symbol": symbol,
+            "exchange": exchange,
+            "action": action,
+            "pricetype": "MARKET",
+            "product": product,
+            "quantity": quantity,
+        }
+
+        def send():
+            return place_order(
+                order_data=order_data, api_key=api_key, auth_token=auth_token, broker=broker
+            )
+
+    # SUDARSHAN M6.9: in Live, one exit at a time per position, with every other surface
+    # (sudarshan/books/surface_exits.py): a claim while this close is placed, the hold of an
+    # earlier exit respected, and the hold noted after. The sandbox is left as it was.
+    from sudarshan.books import surface_exits
+
+    return surface_exits.exit_once(
+        "live" if _current_mode() == "live" else "sandbox",
+        exchange,
+        symbol,
+        product,
+        send,
+        lambda: surface_exits.upstox_statuses(auth_token, broker),
     )
 
 

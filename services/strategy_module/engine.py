@@ -1389,7 +1389,12 @@ def _exit_legs(
                 continue
             exit_claim_id = row_id
 
-        result = order_dispatch.dispatch_order(mode=mode, api_key=api_key, order=order)
+        result = order_dispatch.dispatch_order(
+            mode=mode,
+            api_key=api_key,
+            order=order,
+            closes=True,  # SUDARSHAN M6.9
+        )
 
         if row_id is not None:
             _record_acknowledgement(row_id, result, strategy["id"], user_id, run_id, leg["leg_id"])
