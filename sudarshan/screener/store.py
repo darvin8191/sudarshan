@@ -522,7 +522,8 @@ class Tx:
         """Write one instrument's standing (the engine's ``membership.Row`` as a mapping) for a
         screen and its list: inserted the first time, replaced after, the version moved."""
         t = self._t("membership")
-        values = self._in({k: v for k, v in row.items() if k in t.c and k != "id"})
+        skip = {"id", "principal", "screen_id", "list_id", "updated_at", "version"}
+        values = self._in({k: v for k, v in row.items() if k in t.c and k not in skip})
         if "score" in values and values["score"] is not None:
             values["score"] = str(values["score"])
         done = self.conn.execute(

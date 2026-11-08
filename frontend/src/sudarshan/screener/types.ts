@@ -19,6 +19,8 @@ export interface EngineLine {
   state: EngineState
   line: string
   real_time: boolean
+  /** The next check (epoch ms), when one is due today. */
+  next_at?: number | null
 }
 
 export type ScreenStatus = 'active' | 'paused' | 'stopped'
@@ -116,13 +118,17 @@ export interface ScreenRow {
   /** The last run's id, 0 before the first. */
   last_run_id: number
   updated_at: number
+  /** 'Alerts on', 'Alerts off' or the pause notice, as the service words it (words.alerts_words). */
+  alerts?: string
+  /** The screen's alerts are paused after a trigger until the owner resumes them. */
+  alerts_paused?: boolean
 }
 
 export interface ScreenerState {
   enabled: boolean
   engine: EngineLine
   screens: ScreenRow[]
-  limits: { active: number; active_used: number }
+  limits: { active: number; active_used: number; max_keys?: number }
   /** The newest run id the service holds, for the catch-up after a reconnect. */
   last_run_id: number
   server_time: number
@@ -143,6 +149,8 @@ export interface Chip {
 export interface ResultRow {
   /** The membership row's id, for Pin and Unpin. */
   member_id: number | null
+  /** The instrument key, as the feed names it. */
+  key?: string
   symbol: string
   exchange: string
   rank: number
@@ -166,6 +174,12 @@ export interface RunRow {
   entered: number
   exited: number
   marks: string[]
+  /** The service adds these; the page may ignore them. */
+  missing?: number
+  not_checked?: number
+  status?: 'done' | 'superseded' | 'failed'
+  /** Why the run did or did not raise an alert (words.told_words). */
+  alerts?: string | null
 }
 
 export interface Results {
@@ -182,6 +196,8 @@ export interface RunsPage {
 
 export interface RunSet extends Results {
   run: RunRow
+  /** "Values are kept for 7 days; the list for 100 days." once the values are pruned; else null. */
+  values_note?: string | null
 }
 
 export interface Preview {
@@ -190,6 +206,8 @@ export interface Preview {
   count: number
   first: ResultRow[]
   not_checked: { count: number; reasons: string[] }
+  /** Candles each timeframe needs before the screen is fully ready, by timeframe. */
+  needs?: Record<string, number>
 }
 
 export interface PresetCard {
@@ -222,6 +240,8 @@ export interface Today {
     screen: string
   }>
   unseen_alerts: number
+  /** The trading day the figures are for (YYYYMMDD). */
+  session?: number
 }
 
 // ---- pushes (design 4.5) ------------------------------------------------------------------------
