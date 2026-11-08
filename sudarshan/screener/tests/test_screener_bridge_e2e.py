@@ -354,7 +354,25 @@ def test_the_owner_flow_end_to_end(world):
     )
     assert deleted == {"deleted": screen_id, "removed_from_list": 2}
     assert client.get(f"{PREFIX}/screens/{screen_id}/results", headers=JSON).status_code == 404
-    pending = service.store.read(
-        OWNER, lambda tx: [r["kind"] for r in tx.outbox_due(NOW + 10**6, 100)]
+    pending = service.store.read(OWNER, lambda tx: tx.outbox_due(NOW + 10**6, 100))
+    queued = next(
+        r for r in pending if r["kind"] == "list_sync" and r["payload"]["list_id"] == list_id
     )
-    assert "list_sync" in pending
+
+    # the queued sync, through the real internal route, takes both out of the owner's list
+    link = Link("http://openalgo", "http://alerts", fernet_for(PEPPER, SCREENER_INTERNAL_INFO),
+                fernet_for(PEPPER, ALERTS_SCREENER_DIGEST_INFO), client=httpx.AsyncClient(transport=httpx.MockTransport(to_bridge)))  # fmt: skip
+    synced = asyncio.run(
+        listsync.sync(
+            service.store,
+            link,
+            screen_id=queued["payload"]["screen_id"],
+            list_id=queued["payload"]["list_id"],
+            create_name=queued["payload"]["create_name"],
+            ref=queued["ref"],
+            now=NOW + 1000,
+        )
+    )
+    asyncio.run(link.aclose())
+    assert set(synced.removed) == {"NSE_EQ|A", "NSE_EQ|B"}
+    assert watchlist_db.get_watchlists("owner")[0]["items"] == [], "the removal said 2, did none"

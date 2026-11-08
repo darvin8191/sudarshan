@@ -358,11 +358,11 @@ class Tx:
         return self.screen(screen_id)  # type: ignore[return-value]
 
     def screen_remove(self, screen_id: int) -> bool:
-        """A screen and what hangs on it: its state, membership, alert marks and pending outbox
-        rows. Its runs stay for the history until they are pruned."""
+        """A screen, its state and its alert marks. Its runs stay for the history until they are
+        pruned, and its membership rows stay for good (design 4.2): a removal the owner asked
+        for is still to be synced from them, and an item he kept stays wanted by them."""
         for name, column in (
             ("screen_state", "screen_id"),
-            ("membership", "screen_id"),
             ("alert_state", "screen_id"),
         ):
             t = self._t(name)

@@ -466,10 +466,20 @@ async def delete(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
         list_id = state_row.get("list_id") or (row["spec"].get("target") or {}).get("list_id") or 0
         left = 0
         if remove_added and list_id:
+            # the list sync takes out what the screener put in and no other screen still wants;
+            # the answer counts exactly those (release review HIGH-6)
+            others = {
+                m["key"]
+                for m in tx.memberships(list_id=list_id)
+                if m["screen_id"] != screen_id and m["status"] in (mem.ACTIVE, mem.MISSING)
+            }
             for found in tx.memberships(screen_id=screen_id, list_id=list_id):
-                if found["added_by_screener"] and found["status"] in (mem.ACTIVE, mem.MISSING):
+                if not found["added_by_screener"]:
+                    continue
+                if found["status"] in (mem.ACTIVE, mem.MISSING):
                     gone = {**found, "status": mem.EXITED, "pinned": False, "exited_at": now}
                     tx.membership_put(screen_id, list_id, gone, now)
+                if found["in_list"] and found["key"] not in others:
                     left += 1
             tx.outbox_add(
                 "list_sync",
@@ -614,11 +624,17 @@ async def membership(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
         raise ApiError.of("bad_request", WORDS["unreadable"])
     now = ctx.clock()
     store = _store(ctx)
-    rows = _translate(
-        lambda: store.read(
-            OWNER, lambda tx: [member_row(tx, r, now) for r in tx.memberships(screen_id, list_id)]
-        )
-    )
+
+    def read(tx: Tx):
+        # a deleted screen's rows are kept for the history, never shown as its chips
+        live = {s["id"] for s in tx.screens()}
+        return [
+            member_row(tx, r, now)
+            for r in tx.memberships(screen_id, list_id)
+            if r["screen_id"] in live
+        ]
+
+    rows = _translate(lambda: store.read(OWNER, read))
     return {"rows": rows}
 
 

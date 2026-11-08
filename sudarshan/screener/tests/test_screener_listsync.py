@@ -335,3 +335,129 @@ def test_a_sync_bigger_than_one_seal_goes_in_parts_each_under_the_limit(opened):
     # every part is applied once: the next sync has nothing to send
     sent = len(link.sizes)
     assert run_sync(opened, link, 7).added == () and len(link.sizes) == sent
+
+
+# ---- release review HIGH-6: delete with "Also remove the instruments it added" ------------------------
+@pytest.fixture
+def service(tmp_path):
+    from test_screener_runs import NOW as RUN_NOW
+
+    from sudarshan.screener.service import Service
+    from sudarshan.screener.tests.test_screener_service import FERNET, settings_for
+
+    svc = Service(settings_for(1, SUDARSHAN_SCREENER_STATE_DIR=str(tmp_path)), FERNET, jobs={})
+    svc.store = ScreenerStore(tmp_path / "screener.db")
+    svc.clock = lambda: RUN_NOW
+    yield svc
+    svc.store.close()
+    store_module.stop()
+
+
+def _screen(service, name: str) -> dict:
+    from test_screener_runs import NOW as RUN_NOW
+    from test_screener_runs import SPEC
+
+    from sudarshan.screener import spec
+
+    return service.store.write(
+        OWNER, lambda tx: tx.screen_insert(name, spec.check(SPEC), "active", RUN_NOW)
+    )
+
+
+def _delete(service, screen_id: int, remove_added: bool) -> dict:
+    from sudarshan.screener.ops import REGISTRY
+
+    return asyncio.run(REGISTRY["delete"](service, {"id": screen_id, "remove_added": remove_added}))
+
+
+def _queued_sync(service, link, now: int) -> None:
+    pending = service.store.read(OWNER, lambda tx: tx.outbox_due(now + 10**6, 10))
+    sync = next(p for p in pending if p["kind"] == "list_sync")
+    asyncio.run(
+        listsync.sync(service.store, link, screen_id=sync["payload"]["screen_id"],
+                      list_id=sync["payload"]["list_id"], create_name=None, ref=sync["ref"],
+                      now=now + 1000)
+    )  # fmt: skip
+
+
+def test_remove_added_takes_the_screeners_items_out_of_the_list(service):
+    from test_screener_runs import NOW as RUN_NOW
+
+    store = service.store
+    screen = _screen(service, "Above hundred")
+    link = FakeOpenAlgo()
+    link.lists[7] = {"name": "Mine", "items": []}
+    link.put(7, "ZZZ", "NSE")  # the owner's own item
+    put_rows(
+        service.store, 7, row("NSE_EQ|A", "AAA"), row("NSE_EQ|B", "BBB"), screen_id=screen["id"]
+    )
+    asyncio.run(
+        listsync.sync(store, link, screen_id=screen["id"], list_id=7, create_name=None, ref="r1",
+                      now=RUN_NOW)
+    )  # fmt: skip
+    assert {i["symbol"] for i in link.lists[7]["items"]} == {"ZZZ", "AAA", "BBB"}
+
+    answer = _delete(service, screen["id"], True)
+    _queued_sync(service, link, RUN_NOW)
+    items = sorted(i["symbol"] for i in link.lists[7]["items"])
+    assert items == ["ZZZ"], "the two instruments the screener added are still in the list"
+    assert answer == {"deleted": screen["id"], "removed_from_list": 2}
+    kept = store.read(OWNER, lambda tx: tx.memberships(screen_id=screen["id"]))
+    assert {r["key"]: r["status"] for r in kept} == {"NSE_EQ|A": "exited", "NSE_EQ|B": "exited"}, (
+        "a deleted screen's membership rows are kept for the history (design 4.2)"
+    )
+    known = store.read(OWNER, lambda tx: tx.list_items(7))
+    assert set(known) == {listsync.owner_key("ZZZ", "NSE")}
+
+
+def test_delete_counts_only_what_it_takes_out_and_keeps_what_another_screen_wants(service):
+    from test_screener_runs import NOW as RUN_NOW
+
+    store = service.store
+    first, second = _screen(service, "First"), _screen(service, "Second")
+    link = FakeOpenAlgo()
+    link.lists[7] = {"name": "Mine", "items": []}
+    put_rows(store, 7, row("NSE_EQ|A", "AAA"), row("NSE_EQ|B", "BBB"), screen_id=first["id"])
+    put_rows(store, 7, row("NSE_EQ|A", "AAA"), screen_id=second["id"])
+    put_rows(store, 7, row("NSE_EQ|C", "CCC"), screen_id=first["id"])
+    asyncio.run(
+        listsync.sync(store, link, screen_id=first["id"], list_id=7, create_name=None, ref="r1",
+                      now=RUN_NOW)
+    )  # fmt: skip
+    # C's add has not reached the list yet when the owner deletes: it is not in it to take out
+    put_rows(store, 7, row("NSE_EQ|C", "CCC", in_list=False), screen_id=first["id"])
+    link.drop(7, next(i["id"] for i in link.lists[7]["items"] if i["symbol"] == "CCC"))
+    answer = _delete(service, first["id"], True)
+    assert answer["removed_from_list"] == 1, "AAA stays for the other screen; CCC was never in it"
+    _queued_sync(service, link, RUN_NOW)
+    assert sorted(i["symbol"] for i in link.lists[7]["items"]) == ["AAA"]
+
+
+def test_delete_without_remove_keeps_the_items_and_hides_the_screens_chips(service):
+    from test_screener_runs import NOW as RUN_NOW
+
+    from sudarshan.screener.ops import REGISTRY
+
+    store = service.store
+    first, second = _screen(service, "First"), _screen(service, "Second")
+    link = FakeOpenAlgo()
+    link.lists[7] = {"name": "Mine", "items": []}
+    put_rows(store, 7, row("NSE_EQ|A", "AAA"), screen_id=first["id"])
+    put_rows(store, 7, row("NSE_EQ|B", "BBB"), screen_id=second["id"])
+    asyncio.run(
+        listsync.sync(store, link, screen_id=first["id"], list_id=7, create_name=None, ref="r1",
+                      now=RUN_NOW)
+    )  # fmt: skip
+    assert _delete(service, first["id"], False) == {"deleted": first["id"], "removed_from_list": 0}
+    kept = store.read(OWNER, lambda tx: tx.memberships(screen_id=first["id"]))
+    assert [(r["key"], r["status"]) for r in kept] == [("NSE_EQ|A", "active")], (
+        "a deleted screen's membership rows are kept for the history (design 4.2)"
+    )
+    # the other screen's next sync of the same list leaves the kept item alone
+    asyncio.run(
+        listsync.sync(store, link, screen_id=second["id"], list_id=7, create_name=None, ref="r2",
+                      now=RUN_NOW + 1000)
+    )  # fmt: skip
+    assert sorted(i["symbol"] for i in link.lists[7]["items"]) == ["AAA", "BBB"]
+    rows = asyncio.run(REGISTRY["membership"](service, {"list": 7}))["rows"]
+    assert [r["symbol"] for r in rows] == ["BBB"], "a deleted screen's rows still carry its chips"

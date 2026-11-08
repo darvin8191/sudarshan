@@ -224,7 +224,7 @@ def test_an_edit_moves_the_version_and_a_stale_edit_writes_nothing(opened):
         opened.write(OWNER, lambda tx: tx.screen_change(made["id"], 2, {"status": "armed"}, NOW))
 
 
-def test_removing_a_screen_takes_its_state_membership_and_marks_but_leaves_its_runs(opened):
+def test_removing_a_screen_takes_its_state_and_marks_and_keeps_its_runs_and_membership(opened):
     made = opened.write(OWNER, lambda tx: _screen(tx))
     sid = made["id"]
 
@@ -237,7 +237,8 @@ def test_removing_a_screen_takes_its_state_membership_and_marks_but_leaves_its_r
     run = opened.write(OWNER, fill)
     assert opened.write(OWNER, lambda tx: tx.screen_remove(sid)) is True
     assert opened.read(OWNER, lambda tx: tx.state(sid)) is None
-    assert opened.read(OWNER, lambda tx: tx.memberships(screen_id=sid)) == []
+    kept = opened.read(OWNER, lambda tx: tx.memberships(screen_id=sid))
+    assert [r["key"] for r in kept] == ["NSE_EQ|INE1"], "membership is kept (design 4.2)"
     assert opened.read(OWNER, lambda tx: tx.told(sid, 20251028)) == {}
     assert opened.read(OWNER, lambda tx: tx.run(run["id"]))["screen_id"] == sid
     assert opened.write(OWNER, lambda tx: tx.screen_remove(sid)) is False
