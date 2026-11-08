@@ -1100,7 +1100,10 @@ export interface PortfolioState {
 }
 
 export interface UpstoxSummary {
-  state: PartState
+  /** `reading`: the service answered with the tabs and Upstox is still being read; the phone asks
+   *  `upstox_book` for the figures. */
+  state: PartState | 'reading'
+  /** When the figures were read; null when they were not (state `reading` or `unavailable`). */
   read_at: EpochMs | null
   note: string | null
   /** The rows to move with ticks. */
