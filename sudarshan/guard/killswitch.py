@@ -474,9 +474,10 @@ def _exit_all_live(
 
     ended = _cancels_shown(owner, cancelled, seen)
     shown = not cancelled or ended == {str(orderid) for orderid in cancelled}
-    ok, body, status = close_position_with_auth(
-        {}, owner.auth_token, owner.broker, {}, force_live=True
-    )
+    with risk_gate.handed_orders_kept_apart():  # Exit all's one order book read serves the gate
+        ok, body, status = close_position_with_auth(
+            {}, owner.auth_token, owner.broker, {}, force_live=True
+        )
     body = body if isinstance(body, dict) else {}
     detail: dict[str, Any] = {"status": status, "cancels_shown": shown}
     each = body.get("positions")

@@ -53,6 +53,17 @@ def _no_exit_claimed_or_placed_lately(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _nothing_handed_to_the_gate():
+    """Each test starts with no order book rows handed to the risk gate (sudarshan/guard/gate.py,
+    order_book_read): the tests run one after another in one thread, so the rows one test's exit
+    handed would otherwise serve the next test's gate."""
+    from sudarshan.guard import gate
+
+    with gate.handed_orders_kept_apart():
+        yield
+
+
+@pytest.fixture(autouse=True)
 def _an_order_book_with_nothing_working(monkeypatch):
     """Upstox's Exit all reads the order book once, for orders still working to close a position.
 

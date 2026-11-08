@@ -77,6 +77,8 @@ gthread's real threads, and on the development server.
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import functools
 import itertools
 import time
@@ -88,7 +90,7 @@ from typing import Any
 
 from broker.upstox.api import rate_limiter
 from sudarshan.books import fills
-from sudarshan.books.exit_guard import EXIT_SHOWS_WITHIN_S, trader_name
+from sudarshan.books.exit_guard import EXIT_ALL_SENDS_FOR_S, EXIT_SHOWS_WITHIN_S, trader_name
 from utils import real_threading
 from utils.broker_backpressure import BusyResponse
 from utils.logging import get_logger
@@ -131,6 +133,18 @@ TIMED_KEPT = 500
 #: now, only if Upstox's order book can be read to correct it (``Gate._corrected``), and no longer
 #: than this after it was read.
 KEPT_BOOK_WITHIN_S = SEND_HELD_AT_MOST_S
+#: Order book rows a caller read for the exits it is sending (``order_book_read``) correct the
+#: gate's positions, instead of a read of its own, while they are at most this old: Exit all reads
+#: the book once and then sends for ``EXIT_ALL_SENDS_FOR_S``, with time for the read before and
+#: the last answer after (release review v0.4.1, X3).
+HANDED_ORDERS_WITHIN_S = EXIT_ALL_SENDS_FOR_S + 15.0
+#: ``(owner, read at, rows)`` the current request's caller handed, or None. A context variable:
+#: it belongs to one request (greenlet or thread) and never crosses to another, and the risk
+#: blueprint forgets it when the request ends (``forget_handed_orders``), so a pool thread that
+#: outlives its request hands nothing to the next one.
+_HANDED_ORDERS: contextvars.ContextVar[tuple[str, float, list] | None] = contextvars.ContextVar(
+    "sudarshan_guard_handed_orders", default=None
+)
 #: A segment's session window, read from the market calendar, is kept this long.
 SESSION_KEPT_S = 600.0
 #: How far ahead the daily card looks for the next session (a long holiday weekend fits).
@@ -930,13 +944,16 @@ class Gate:
 
     def _corrected(self, owner: str, rows: list, strict: bool = False) -> list | None:
         """``rows`` with each quantity corrected by what Upstox's order book says was filled
-        since the row was read (sudarshan.books.fills), read after the rows. A row it cannot
-        correct stays as read, unless ``strict``, which answers None for any such row; so does a
-        book that cannot be read."""
-        try:
-            orders = self._read.live_order_rows(owner)
-        except Exception:
-            return None
+        since the row was read (sudarshan.books.fills), read after the rows: the rows the caller
+        handed for the exits it is sending (``order_book_read``), else a read of the gate's own.
+        A row it cannot correct stays as read, unless ``strict``, which answers None for any such
+        row; so does a book that cannot be read."""
+        orders = handed_order_rows(owner)
+        if orders is None:
+            try:
+                orders = self._read.live_order_rows(owner)
+            except Exception:
+                return None
         # Each row is corrected together with the other products of its instrument, so a
         # position converted in Upstox's app is judged right (sudarshan.books.fills).
         held_rows = fills.held_each(rows, orders)
@@ -1810,6 +1827,43 @@ class Gate:
                 self._write_note(key, note)
             except Exception:
                 logger.exception("A risk refusal count could not be written to the audit")
+
+
+def order_book_read(owner: str, rows: list) -> None:
+    """A caller sizing exits read Upstox's order book for ``owner`` (the Upstox module's
+    ``_read_order_rows``: a smart order, Exit all): the gate corrects its positions with these
+    rows for the exits that follow in this request, instead of reading the book once more for
+    each of them, until ``HANDED_ORDERS_WITHIN_S`` have passed or the request ends."""
+    _HANDED_ORDERS.set((str(owner), time.monotonic(), list(rows)))
+
+
+def forget_handed_orders() -> None:
+    """The request is over: whatever its caller handed is not for the next one."""
+    _HANDED_ORDERS.set(None)
+
+
+def handed_order_rows(owner: str) -> list | None:
+    """The order book rows the current request's caller handed for ``owner``, while they are at
+    most ``HANDED_ORDERS_WITHIN_S`` old; else None, and the gate reads the book itself."""
+    handed = _HANDED_ORDERS.get()
+    if handed is None:
+        return None
+    read_for, read_at, rows = handed
+    if read_for != str(owner) or time.monotonic() - read_at > HANDED_ORDERS_WITHIN_S:
+        return None
+    return rows
+
+
+@contextlib.contextmanager
+def handed_orders_kept_apart():
+    """Run a block whose reads are handed to the gate for that block alone (the kill switch's
+    Exit all, outside any request): nothing handed before it is used in it, and nothing it hands
+    outlives it."""
+    token = _HANDED_ORDERS.set(None)
+    try:
+        yield
+    finally:
+        _HANDED_ORDERS.reset(token)
 
 
 def _tell_owner(text: str) -> None:

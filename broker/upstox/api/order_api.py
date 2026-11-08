@@ -347,7 +347,9 @@ def _read_order_rows(auth, limit):
     if not isinstance(book, dict) or book.get("status") != "success":
         logger.error("The order book could not be read for an exit")
         return None
-    return [row for row in book.get("data") or [] if isinstance(row, dict)]
+    rows = [row for row in book.get("data") or [] if isinstance(row, dict)]
+    risk_gate.order_book_read(auth, rows)  # SUDARSHAN M5.13: the gate reads it no second time
+    return rows
 
 
 def _order_statuses(rows):

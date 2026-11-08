@@ -41,6 +41,19 @@ def _guard_off_unless_a_test_says(monkeypatch):
     monkeypatch.delenv("SUDARSHAN_RISK_GUARD", raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _nothing_handed_to_the_gate():
+    """Each test starts with no order book rows handed to the risk gate (gate.order_book_read).
+
+    The tests run one after another in one thread, as a gthread pool thread serves requests, so
+    the rows one test's exit handed would otherwise correct the gate's positions in the next.
+    """
+    from sudarshan.guard import gate
+
+    with gate.handed_orders_kept_apart():
+        yield
+
+
 @pytest.fixture
 def risk_store(tmp_path, monkeypatch):
     """A risk database of the test's own, installed as the store everything reads."""
