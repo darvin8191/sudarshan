@@ -15,7 +15,12 @@ the same position from the app, TradingView or Exit all was being placed or stil
   order book is read then, and only then, so a close with no hold open costs no extra call;
 - the hold noted after (``exit_guard.exit_placed``) with the orders the broker named, unless the
   answer was a refusal, so the next exit for the position from any surface is held until the
-  order book shows this one ended.
+  order book shows this one ended. An answer that may have reached the broker and named no order
+  (a timeout, say) is noted with the side the close closes on: the surface sizes its next close
+  from Upstox's positions, which can show this one's fill a minute late, and nothing corrects
+  that, so the order book settles the hold, not the 15 s note (``exit_guard``,
+  ``ExitsInFlight._close_verdict``). The scalping terminal says such a close is not confirmed
+  (``not_confirmed``), never in the failure's own words.
 
 The surface keeps its own sizing and its own claims (the strategy module's ``claim_leg_exit``
 is untouched: a refusal here is a refused dispatch, which releases that claim as any other
@@ -29,7 +34,7 @@ from collections.abc import Callable
 from typing import Any
 
 from sudarshan.books import exit_guard
-from sudarshan.books.single_exit import placed_order_ids
+from sudarshan.books.single_exit import EXIT_NOT_CONFIRMED, placed_order_ids
 from utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -61,6 +66,19 @@ def held(response: Any, status: int) -> bool:
     return status == 409 and isinstance(response, dict) and response.get(HELD) is True
 
 
+def not_confirmed(answer: Answer) -> Answer:
+    """``answer`` with a close that may have reached the broker (not placed, and not a refusal:
+    a timeout, a 5xx, an answer that named no order) said as not confirmed, never in the
+    failure's own words ("The read operation timed out"); any other answer as it came. Marked
+    ``not_confirmed``, with a 5xx status (502 when it had none)."""
+    ok, response, status = answer
+    if ok or refused(answer):
+        return answer
+    body = dict(response) if isinstance(response, dict) else {}
+    body.update(status="error", message=EXIT_NOT_CONFIRMED, not_confirmed=True)
+    return False, body, status if isinstance(status, int) and status >= 500 else 502
+
+
 def order_ids(answer: Answer | None) -> tuple[str, ...]:
     """The orders the broker named in an answer, empty when it named none."""
     if answer is None or refused(answer):
@@ -79,7 +97,8 @@ def order_ids(answer: Answer | None) -> tuple[str, ...]:
 
 def upstox_statuses(auth_token: str, broker: str) -> dict[str, str] | None:
     """``{order id: status}`` from the broker's order book, read with the single exit's limit
-    (Upstox); None when it could not be read, or the broker is another."""
+    (Upstox), as an ``exit_guard.OrderBook``; None when it could not be read, or the broker is
+    another."""
     if str(broker or "").lower() != "upstox":
         return None
     from broker.upstox.api import order_api as upstox
@@ -125,6 +144,7 @@ def exit_once(
     product: object,
     send: Callable[[], Answer],
     read_statuses: Callable[[], dict[str, str] | None],
+    side: object = "",
 ) -> Answer:
     """Send one exit of a position that its surface sized itself, one at a time per position.
 
@@ -134,6 +154,11 @@ def exit_once(
         send: Places the order and answers ``(success, response, status)``.
         read_statuses: The order book as ``{order id: status}`` (OpenAlgo's words), or None when
             it could not be read; called only while an earlier exit of the position is held.
+            The broker's reader (``upstox_statuses``) answers an ``exit_guard.OrderBook``, which
+            can also say which market orders are working on one side of the position.
+        side: The side the exit closes on (BUY or SELL). When the answer may have reached the
+            broker and named no order, the hold is noted with it, and the order book settles
+            it (``exit_guard.ExitsInFlight.hold_verdict``); without it, the 15 s note.
 
     Returns:
         ``send``'s own answer; or ``(False, {"status": "error", "message": <why>}, 409)`` without
@@ -164,5 +189,5 @@ def exit_once(
             answer = send()
         finally:
             if answer is None or not refused(answer):
-                exit_guard.EXITS.placed(book, position, order_ids(answer))
+                exit_guard.EXITS.placed(book, position, order_ids(answer), str(side or ""))
         return answer

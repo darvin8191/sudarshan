@@ -804,16 +804,22 @@ def _reducing_exit(symbol, exchange, product, action, quantity, auth_token, brok
     # earlier exit respected, and the hold noted after. The sandbox is left as it was. The
     # callers pass no broker session (the order is placed by api key, see _resolve_session_auth),
     # so the hold check resolves the same session the order is placed with to read the order book.
+    # A close that may have reached Upstox without naming its order (a timeout) is held until the
+    # order book settles it, since the next close is sized from a positions row that can lag its
+    # fill, and it is said as not confirmed, never in the failure's own words.
     from sudarshan.books import surface_exits
 
-    return surface_exits.exit_once(
-        "live" if _current_mode() == "live" else "sandbox",
+    live = _current_mode() == "live"
+    answer = surface_exits.exit_once(
+        "live" if live else "sandbox",
         exchange,
         symbol,
         product,
         send,
         surface_exits.statuses_reader(api_key, auth_token, broker),
+        side=action,
     )
+    return surface_exits.not_confirmed(answer) if live else answer
 
 
 @scalping_bp.route("/scalping/api/close_leg", methods=["POST"])
@@ -895,6 +901,7 @@ def close_all():
 
     results = []
     closed = 0
+    unconfirmed = 0  # SUDARSHAN M6.9: closes that may have reached Upstox, named no order
     for t in tracked:
         netqty = posmap.get((t["symbol"], t["exchange"].upper(), t["product"].upper()), 0)
         if netqty == 0:
@@ -913,22 +920,31 @@ def close_all():
         )
         if ok2:
             closed += 1
+        elif isinstance(resp2, dict) and resp2.get("not_confirmed") is True:
+            unconfirmed += 1
 
     # SUDARSHAN M6.9: a close that was refused (an exit for the position already on its way or
     # not yet ended, or Upstox's own refusal) is said, position by position, and the answer is
     # not "success": "Closed 0 scalping position(s)" read as done while every position was still
-    # held. Nothing closed answers 409, the refused dispatch; some closed answers 200 with the
-    # status "error" the terminal shows as a toast, since those exits are on their way.
+    # held. A close that may have reached Upstox (a timeout) is said as not confirmed: never as
+    # not closed, which sends the trader back to close a position that may be flat already.
+    # "No scalping position was closed" (409, the refused dispatch) only when every close was
+    # refused; any not confirmed answers 502, as Exit all does; some closed and the rest refused
+    # answers 200 with the status "error" the terminal shows as a toast.
     if closed < len(results):
         not_closed = [r for r in results if r["status"] != "success"]
         said = [f"{r['symbol']}: {r['message'] or 'its exit was not sent.'}" for r in not_closed]
         if closed:
             lead = f"Closed {closed} of {len(results)} scalping positions."
+        elif unconfirmed:
+            lead = "No scalping close is confirmed."
         else:
             lead = "No scalping position was closed."
-        return jsonify(
-            {"status": "error", "message": " ".join([lead, *said]), "results": results}
-        ), (200 if closed else 409)
+        body = {"status": "error", "message": " ".join([lead, *said]), "results": results}
+        if unconfirmed:
+            body["not_confirmed"] = True
+            return jsonify(body), 502
+        return jsonify(body), (200 if closed else 409)
 
     return jsonify(
         {"status": "success", "message": f"Closed {closed} scalping position(s)", "results": results}

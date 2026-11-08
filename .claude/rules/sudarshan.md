@@ -129,7 +129,8 @@ in brand. Icon "Mor": tile #0E5A73, ring #E3A21A, glyph #FFFFFF. Numbers via
     a book read settles it. After that it asks again, saying what is known about the first.
     The server keeps exits for one position to one at a time (`sudarshan/books/exit_guard.py`):
     a claim while an exit is being placed, and a hold after it that Upstox's order book ends, not
-    a clock (up to 150 s when the book cannot be read; a 15 s note when the answer named no order).
+    a clock (up to 150 s when the book cannot be read; a 15 s note when the answer named no order,
+    except for a scalping or strategy close, which is held as the sizing paragraph says).
     A second exit of the position, from any surface, is refused with a sentence (409) while a hold
     is open, and the sentence names the working order and says to cancel or modify it in Orders.
     A single exit also refuses while the order book shows a MARKET order working on the position's
@@ -184,11 +185,20 @@ in brand. Icon "Mor": tile #0E5A73, ring #E3A21A, glyph #FFFFFF. Numbers via
     claim while the order is placed, the hold of an earlier exit respected (the order book is
     read only while one is open, with the broker session the order itself is placed with, which
     the scalping terminal resolves from its api key through `statuses_reader`; a book that
-    truly cannot be read keeps the 150 s rule) and the hold noted after. The scalping Close all
-    names each position it did not close and never answers success over a refusal. A refusal
-    there is a refused dispatch for the strategy module, which releases its own `claim_leg_exit`
-    and keeps the leg managed, recorded as `leg_exit_held` at warn, not as a rejection; its
-    `force_live` is untouched. The sandbox is left alone on both surfaces.
+    truly cannot be read keeps the 150 s rule for an exit that named its order) and the hold
+    noted after. A close of theirs that may have reached Upstox and named no order (a timeout)
+    is held longer than the 15 s note, because they size the next close from Upstox's positions,
+    which can show its fill a minute late: 150 s from the answer whatever the order book says,
+    then while the order book shows a MARKET order working on the side the close closes on
+    (counted again from the last read that showed one), ending at the first read that shows
+    none; a read that failed ends nothing, and no such hold lasts past 16 h. The scalping
+    terminal says such a close is not confirmed (Close, Close all, and the trailing stop's
+    auto-exit in its log), never in the failure's own words. The scalping Close all names each
+    position it did not close and never answers success over a refusal; any close not confirmed
+    makes it answer 502, and it says "No scalping position was closed" only when every close was
+    refused. A refusal there is a refused dispatch for the strategy module, which releases its
+    own `claim_leg_exit` and keeps the leg managed, recorded as `leg_exit_held` at warn, not as a
+    rejection; its `force_live` is untouched. The sandbox is left alone on both surfaces.
   - A sheet, a confirmation or an order ticket ignores taps for 500 ms after it opens
     (`watchlist/openGuard.ts`), so a double tap never presses what appeared under the finger.
   - Order alerts on Telegram (M6.8) are on by default (owner's broker-app benchmark, 20 Oct

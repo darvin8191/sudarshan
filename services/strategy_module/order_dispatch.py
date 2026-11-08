@@ -391,6 +391,9 @@ def _dispatch_live(api_key: str, order: dict[str, Any], closes: bool = False) ->
                 order.get("product"),
                 send,
                 lambda: surface_exits.upstox_statuses(auth_token, broker),
+                # An exit that may have reached the broker without naming its order is held
+                # until the order book settles it: the next is sized from the run's own book.
+                side=order.get("action"),
             )
             if not ok and surface_exits.held(response, _status):
                 result = _normalise(ok, response)

@@ -25,7 +25,12 @@ position is busy while
   read, or does not list the order, the hold lasts up to ``EXIT_HOLD_UNCONFIRMED_S`` from the
   answer, and the refusal says the first exit is not confirmed;
 - an exit for it whose answer named no order id may have placed one the book cannot be asked
-  about: that note lasts ``EXIT_SHOWS_WITHIN_S``.
+  about: that note lasts ``EXIT_SHOWS_WITHIN_S``. A close the scalping terminal or the strategy
+  module sized from its own book (``sudarshan.books.surface_exits``) is held longer, because
+  nothing corrects that book: its hold (``Hold.side``) lasts ``EXIT_HOLD_UNCONFIRMED_S`` from the
+  answer, then while the order book shows a market order working on the side it closes on (counted
+  again from the last read that showed one), ends at the first read that shows none after that, is
+  never ended by a read that failed, and never lasts past ``EXIT_HOLD_KEPT_AT_MOST_S``.
 
 A resting stop loss or target placed earlier is not a hold: it does not stop a single Exit (the
 same as Upstox's own app). Exit all keeps leaving such a position out, with its own sentence.
@@ -71,7 +76,7 @@ import re
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 
 from utils import real_threading
@@ -90,6 +95,11 @@ EXIT_SHOWS_WITHIN_S = 15.0
 #: could not be read, or does not list it): the phone's no-answer hold
 #: (frontend/src/sudarshan/books/sent.ts, NO_ANSWER_HOLD_MS).
 EXIT_HOLD_UNCONFIRMED_S = 150.0
+
+#: A surface's close whose answer named no order is held no longer than this (``Hold.side``):
+#: longer than any Indian session, so a market order still working is never let go by a clock,
+#: the same cap as the risk gate's market exit claim (sudarshan/guard/gate.CLAIM_KEPT_AT_MOST_S).
+EXIT_HOLD_KEPT_AT_MOST_S = 16 * 3600.0
 
 #: A single exit reads the order book with the gate's limit (sudarshan/guard/readers.READ_LIMIT_S),
 #: cut off there and never retried.
@@ -183,6 +193,26 @@ def first_exit_unconfirmed(position: Position, at: float, order: bool = False) -
         f"The earlier exit for {trader_name(position)} (sent {clock(at)}) is not confirmed: its "
         "order could not be checked at Upstox. Check Orders, and exit it again only if it is "
         "not there."
+    )
+
+
+def close_not_confirmed(position: Position, at: float, order: bool = False) -> str:
+    """Why no exit was sent for a position whose earlier close (sent at ``at``) was one a surface
+    sized from its own book and Upstox's answer to it named no order (a timeout, say): it may have
+    gone through, and Upstox's positions, which that surface sizes from, may not show it yet.
+    ``order``: see ``on_its_way``."""
+    name = trader_name(position)
+    if order:
+        return (
+            f"The earlier exit for {name} (sent {clock(at)}) is not confirmed: it may have gone "
+            "through, and Upstox's positions can take a minute to show it, so this order was not "
+            "sent. Check Orders and Positions, then send it again if the position still needs it."
+        )
+    return (
+        f"The earlier exit for {name} (sent {clock(at)}) is not confirmed: it may have gone "
+        "through, and Upstox's positions can take a minute to show it, so no exit was sent. Check "
+        "Orders: if that exit is not there and the position is still open, close it from the "
+        "Upstox app."
     )
 
 
@@ -289,11 +319,50 @@ def held_in_another_product(position: Position, elsewhere: dict[str, int]) -> st
 
 @dataclass(frozen=True)
 class Hold:
-    """An exit Upstox answered with order ids, held until its orders end in the order book."""
+    """An exit Upstox answered with order ids, held until its orders end in the order book; or
+    a surface's close whose answer named none (``side``), held as ``ExitsInFlight.hold_verdict``
+    says."""
 
     order_ids: tuple[str, ...]  # empty: the answer named none
     started: float  # monotonic, for how long it has been held
     at: float  # epoch, for the sentence
+    # A close its surface sized from its own book (sudarshan.books.surface_exits) whose answer
+    # may have reached Upstox and named no order: the side it closes on, BUY or SELL. Empty for
+    # every other hold (one that names no order is then the EXIT_SHOWS_WITHIN_S note).
+    side: str = ""
+    seen_working: float | None = None  # monotonic: the last read that showed a market order
+    # working on ``side``
+
+    @property
+    def unconfirmed_close(self) -> bool:
+        """A surface's close whose answer named no order: the order book settles its hold."""
+        return not self.order_ids and bool(self.side)
+
+
+class OrderBook(dict):
+    """Upstox's order book as ``{order id: status}`` (OpenAlgo's words), the shape every hold
+    check reads, which can also say which market orders work on one side of a position: what
+    settles the hold of a surface's close whose answer named no order (``Hold.side``).
+
+    Args:
+        statuses: ``{order id: status}``.
+        market_working: ``(position, side) -> [WorkingOrder, ...]`` from the rows the statuses
+            were read from, answering None when it cannot say (the broker module builds it).
+    """
+
+    def __init__(
+        self, statuses: dict[str, str], market_working: Callable[[Position, str], list | None]
+    ) -> None:
+        super().__init__(statuses)
+        self._market_working = market_working
+
+    def market_working(self, position: Position, side: str) -> list | None:
+        """The market orders working on ``side`` of ``position``, or None when it cannot say."""
+        try:
+            return self._market_working(position, side)
+        except Exception:
+            logger.exception("The order book could not say which market orders are working")
+            return None
 
 
 @dataclass(frozen=True)
@@ -397,7 +466,7 @@ class ExitsInFlight:
         if began is not None:
             times.append(began)
         noted = self._placed.get(book, {}).get(position)
-        if noted is not None and not noted.order_ids:
+        if noted is not None and not noted.order_ids and not noted.side:
             times.append(noted.at)
         return max(times) if times else None
 
@@ -471,7 +540,7 @@ class ExitsInFlight:
             since = {
                 position: hold.at
                 for position, hold in self._placed.get(book, {}).items()
-                if not hold.order_ids
+                if not hold.order_ids and not hold.side
             }
             for (claimed_in, *position), began in self._positions.items():
                 if claimed_in == book:
@@ -479,13 +548,18 @@ class ExitsInFlight:
                     since[key] = max(began, since.get(key, began))
         return {position: on_its_way(position, at) for position, at in since.items()}
 
-    def placed(self, book: str, position: Position, order_ids: tuple[str, ...] = ()) -> None:
+    def placed(
+        self, book: str, position: Position, order_ids: tuple[str, ...] = (), side: str = ""
+    ) -> None:
         """Note that an exit for ``position`` in ``book`` may have placed an order just now, and
-        which orders Upstox named for it."""
+        which orders Upstox named for it. ``side``: the side a surface's close closes on
+        (sudarshan.books.surface_exits); when the answer named no order, the order book then
+        settles the hold (``hold_verdict``) instead of the ``EXIT_SHOWS_WITHIN_S`` note."""
         now = time.monotonic()
+        side = "" if order_ids else _word(side)
         with self._lock:
             self._forget_old(book, now)
-            self._placed.setdefault(book, {})[position] = Hold(order_ids, now, time.time())
+            self._placed.setdefault(book, {})[position] = Hold(order_ids, now, time.time(), side)
 
     def hold_verdict(
         self,
@@ -506,9 +580,12 @@ class ExitsInFlight:
 
         A hold ends here, for good, when every order of it shows complete, cancelled or rejected;
         a hold whose orders cannot be seen ends only ``EXIT_HOLD_UNCONFIRMED_S`` after its answer.
+        A surface's close whose answer named no order is settled as ``_close_verdict`` says.
         """
         with self._lock:
             hold = self._placed.get(book, {}).get(position)
+        if hold is not None and hold.unconfirmed_close:
+            return self._close_verdict(book, position, hold, statuses, order)
         if hold is None or not hold.order_ids:
             return None
         seen = None if statuses is None else [statuses.get(each) for each in hold.order_ids]
@@ -529,13 +606,55 @@ class ExitsInFlight:
             ended = time.monotonic() - hold.started > EXIT_HOLD_UNCONFIRMED_S
             said = None if ended else first_exit_unconfirmed(position, hold.at, order)
         if ended:
+            self._end(book, position, hold)
+        return said
+
+    def _close_verdict(
+        self,
+        book: str,
+        position: Position,
+        hold: Hold,
+        statuses: dict[str, str] | None,
+        order: bool,
+    ) -> str | None:
+        """``hold_verdict`` for a surface's close whose answer named no order (``Hold.side``).
+
+        No order id can be looked up, and the surface sizes its next close from Upstox's
+        positions, which can show the fill a minute late: so the hold stands
+        ``EXIT_HOLD_UNCONFIRMED_S`` from the answer whatever the order book says, and after that
+        while the book shows a market order working on the side the close closes on (it may be
+        that close, resting at its protected price), counted again from the last read that showed
+        one. It ends at the first read after that which shows none. A read that failed, or a book
+        that cannot say, ends nothing (the way the risk gate keeps a market exit's claim,
+        sudarshan/guard/gate.py); ``_forget_old``, which every claim, Exit all and surface close
+        runs before asking here, lets no such hold last past ``EXIT_HOLD_KEPT_AT_MOST_S``.
+        """
+        now = time.monotonic()
+        working = (
+            statuses.market_working(position, hold.side)
+            if isinstance(statuses, OrderBook)
+            else None
+        )
+        if working:
             with self._lock:
                 recent = self._placed.get(book)
                 if recent is not None and recent.get(position) is hold:
-                    del recent[position]
-                    if not recent:
-                        del self._placed[book]
-        return said
+                    recent[position] = replace(hold, seen_working=now)
+            return market_exit_working(position, working, order)
+        since = hold.started if hold.seen_working is None else max(hold.started, hold.seen_working)
+        if working is not None and now - since > EXIT_HOLD_UNCONFIRMED_S:
+            self._end(book, position, hold)
+            return None
+        return close_not_confirmed(position, hold.at, order)
+
+    def _end(self, book: str, position: Position, hold: Hold) -> None:
+        """End ``hold``, unless a newer one has taken its place."""
+        with self._lock:
+            recent = self._placed.get(book)
+            if recent is not None and recent.get(position) is hold:
+                del recent[position]
+                if not recent:
+                    del self._placed[book]
 
     def placed_lately(self, book: str) -> set[Position]:
         """The positions with a note or a hold of an exit in ``book``."""
@@ -544,15 +663,20 @@ class ExitsInFlight:
             return set(self._placed.get(book, {}))
 
     def _forget_old(self, book: str, now: float) -> None:
-        """Drop the notes that name no order and are older than ``EXIT_SHOWS_WITHIN_S``, in
-        ``book``; call under the lock. A hold on Upstox's orders is never dropped here: only the
-        order book ends it, or ``EXIT_HOLD_UNCONFIRMED_S`` when the book cannot say, at the next
-        exit for the position (``hold_verdict``), so no timer is needed."""
+        """Drop the notes that name no order and are older than ``EXIT_SHOWS_WITHIN_S``, and the
+        holds of a surface's close older than ``EXIT_HOLD_KEPT_AT_MOST_S``, in ``book``; call
+        under the lock. A hold on Upstox's orders is never dropped here: only the order book ends
+        it, or ``EXIT_HOLD_UNCONFIRMED_S`` when the book cannot say, at the next exit for the
+        position (``hold_verdict``), so no timer is needed."""
         recent = self._placed.get(book)
         if recent is None:
             return
         for position, hold in list(recent.items()):
-            if not hold.order_ids and now - hold.started > EXIT_SHOWS_WITHIN_S:
+            if hold.unconfirmed_close:
+                gone = now - hold.started > EXIT_HOLD_KEPT_AT_MOST_S
+            else:
+                gone = not hold.order_ids and now - hold.started > EXIT_SHOWS_WITHIN_S
+            if gone:
                 del recent[position]
         if not recent:
             del self._placed[book]

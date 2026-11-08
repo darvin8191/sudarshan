@@ -354,14 +354,27 @@ def _read_order_rows(auth, limit):
 
 def _order_statuses(rows):
     """SUDARSHAN M6.9: ``{order id: status}`` (OpenAlgo's words) from the order book's rows, or
-    None when the book was not read."""
+    None when the book was not read. It can also say which MARKET orders work on one side of a
+    position, which settles the hold of a scalping or strategy close whose answer named no order
+    (exit_guard.OrderBook)."""
     if rows is None:
         return None
-    return {
+    statuses = {
         str(row.get("order_id")): normalize_order_status(row.get("status"))
         for row in rows
         if row.get("order_id")
     }
+
+    def market_working(position, side):
+        exchange, symbol, product = position
+        token = get_token(symbol, exchange)
+        if not token:
+            return None  # the contract cannot be matched to the book: it cannot say
+        closing = (str(token), map_product_type(product), str(side or "").upper())
+        working = _working_exits(rows)[0].get(closing, [])
+        return [order for order in working if order.kind == "MARKET"]
+
+    return exit_guard.OrderBook(statuses, market_working)
 
 
 def _reduces_or_crosses(current, target):
