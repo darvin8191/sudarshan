@@ -55,7 +55,7 @@ from .bars import Bar, Bars, Sealed
 from .engine import Context, Subject
 from .runs import Member
 from .store import OWNER, StoreError, Tx
-from .types import DAY, MINUTE_TFS, Plan, Series
+from .types import DAY, MINUTE_TFS, NEEDS_HISTORY, WEEK, Plan, Series, Why
 
 log = logging.getLogger("sudarshan.screener")
 
@@ -162,7 +162,12 @@ class LiveSource:
     def members(self, universe_spec: Mapping[str, Any]) -> Sequence[Member]:
         return self._universes.get(_uni_key(universe_spec), [])
 
-    def subject(self, member: Member, plan: Plan, boundary: int) -> Subject | None:
+    def subject(self, member: Member, plan: Plan, boundary: int) -> Subject | Why | None:
+        grid = self.market.sessions.get(member.segment)
+        for tf, need in plan.need.items():  # more than today alone can hold (MEDIUM-6)
+            most = _day_holds(tf, grid)
+            if most is not None and need > most:
+                return Why(NEEDS_HISTORY, (need, str(tf), most))
         frame = self._last.get(member.key)
         if frame is None and not self.bars.bars(member.key):
             return None
@@ -702,6 +707,18 @@ class LiveSource:
             self.store.write(OWNER, lambda tx: tx.bars_put(rows))
         except StoreError:
             log.exception("%d sealed bars could not be written", len(rows))
+
+
+def _day_holds(tf, grid) -> int | None:
+    """The most candles of ``tf`` one session gives (its short last one counted); None when the
+    session is not known. Before the history download (SV3) that is all a screen can read."""
+    if grid is None:
+        return None
+    if tf in (DAY, WEEK):
+        return 1
+    if isinstance(tf, int) and tf > 0:
+        return -(-(grid.end - grid.start) // (tf * 60_000))
+    return None
 
 
 def _uni_key(kind_spec: Mapping[str, Any]) -> str:

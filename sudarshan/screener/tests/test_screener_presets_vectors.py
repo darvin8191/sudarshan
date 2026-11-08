@@ -105,17 +105,24 @@ def test_using_a_preset_makes_a_paused_copy(case):
 
 
 @pytest.mark.parametrize("case", USABLE, ids=keys(USABLE))
-def test_the_card_of_a_usable_preset(case):
+def test_the_card_of_a_written_preset(case):
+    """A preset this release can judge is usable; one that waits for history or a daily store says
+    so on its card and cannot be used from it (release review MEDIUM-6)."""
     card = next(item for item in P.library() if item["key"] == case["key"])
     assert card == {
         "key": case["key"],
         "name": case["name"],
         "about": case["about"],
-        "usable": True,
+        "usable": "waits" not in case,
         "where": case["line"],
         "spec": stored_of(case),
-        "reason": None,
+        "reason": case.get("waits"),
     }
+
+
+def test_two_presets_can_be_judged_before_the_history_download():
+    usable = [card["key"] for card in P.library() if card["usable"]]
+    assert usable == ["orb_breakout", "vwap_reclaim"], "the Library shows presets it cannot judge"
 
 
 def test_the_card_of_the_delivery_spike_says_why_it_cannot_be_used():

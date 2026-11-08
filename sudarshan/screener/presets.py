@@ -4,8 +4,11 @@ A preset is a screen written the way the phone sends it. ``use`` checks it with 
 hands back the fields of a new screen that starts Paused, so the owner reads it before anything runs.
 ``library`` lists the cards the Library tab shows. Pure: nothing here opens a file or reads a clock.
 
-Eight presets can be used. "Delivery spike" is listed too, with the reason it cannot be used yet,
-because it needs the daily delivery file that is not set up: "Volume spike" does the same on volume.
+Two presets can be judged in this release: ORB breakout and VWAP reclaim. Six more are written out
+and listed with what they wait for (``waits``): history before today or a daily store of open
+interest and implied volatility, both waiting for the feed's REST governor (release review
+MEDIUM-6). "Delivery spike" is listed too, with the reason it cannot be used yet, because it needs
+the daily delivery file that is not set up: "Volume spike" does the same on volume.
 
 The three build-up presets read stock futures. Until the price feed follows those futures all day
 they are checked once, after the close; ``use(key, futures_followed=True)`` gives the copy that is
@@ -26,6 +29,20 @@ PAUSED = "paused"
 NOT_IN_LIBRARY = "That preset is not in the library."
 NO_DELIVERY_FILE = (
     "Needs the daily delivery file, not set up yet. Volume spike does the same on volume."
+)
+#: Presets this release cannot judge yet (release review MEDIUM-6): they read history before today
+#: or a daily store, which wait for the feed's REST governor (SV3, SV4). Each says what it waits for.
+WAITS_HISTORY_15 = (
+    "Waits for the history download, not set up yet: needs 151 candles of 15 minutes, and a day "
+    "gives 25."
+)
+WAITS_HISTORY_DAYS = (
+    "Waits for the history download, not set up yet: needs 20 days of candles. NIFTY 500 is "
+    "also checked only after the close."
+)
+WAITS_OI = "Waits for yesterday's open interest, which the daily store will keep: not set up yet."
+WAITS_IV = (
+    "Waits for the implied volatility history, which the daily store will keep: not set up yet."
 )
 
 
@@ -49,6 +66,8 @@ class Preset:
     unavailable: str | None = None
     #: The run once the price feed follows the stock futures all day; None: the run never changes.
     followed_run: dict | None = None
+    #: What a preset this release cannot judge yet waits for (history, a daily store); None: usable.
+    waits: str | None = None
 
 
 # ---- the pieces the presets are made of --------------------------------------------------------
@@ -94,6 +113,7 @@ def _buildup(name: str, state: str, op: str, percent: str, order: str, about: st
             "alerts": _ALSO_VALUE,
         },
         followed_run={"on": "close", "tf": 15},
+        waits=WAITS_OI,
     )
 
 
@@ -130,6 +150,7 @@ PRESETS: tuple[Preset, ...] = (
             "rank": {"by": _IV_PCT, "order": "desc"},
             "alerts": _ALSO_VALUE,
         },
+        waits=WAITS_IV,
     ),
     Preset(
         key="orb_breakout",
@@ -174,6 +195,7 @@ PRESETS: tuple[Preset, ...] = (
                 ]
             },
         },
+        waits=WAITS_HISTORY_15,
     ),
     Preset(
         key="vwap_reclaim",
@@ -219,6 +241,7 @@ PRESETS: tuple[Preset, ...] = (
             "rank": {"by": {"ind": "rvol", "p": {"length": 20}}, "order": "desc"},
             "alerts": _ALSO_VALUE,
         },
+        waits=WAITS_HISTORY_DAYS,
     ),
 )  # fmt: skip
 
@@ -279,12 +302,12 @@ def library(*, futures_followed: bool = False) -> tuple[dict, ...]:
             "key": item.key,
             "name": item.name,
             "about": item.about,
-            "usable": item.spec is not None,
+            "usable": item.spec is not None and item.waits is None,
         }
         if item.spec is None:
             card.update(where=None, spec=None, reason=item.unavailable)
         else:
             stored = _stored(item, futures_followed)
-            card.update(where=where(stored), spec=stored, reason=None)
+            card.update(where=where(stored), spec=stored, reason=item.waits)
         cards.append(card)
     return tuple(cards)

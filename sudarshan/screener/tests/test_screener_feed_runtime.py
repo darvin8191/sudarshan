@@ -222,3 +222,30 @@ def test_a_run_judges_the_candle_with_its_last_minute(world):
     run = store.read(OWNER, lambda tx: tx.runs_page(1, None, 1))[0]
     assert run["candle_end"] == ms(DAY, "09:30")
     assert run["matched"] == 1, "the run judged the candle without its last minute"
+
+
+def test_a_screen_needing_more_candles_than_a_day_holds_says_it_waits_for_history(world):
+    """Release review MEDIUM-6: the 15-min EMA cross needs 151 candles and a day gives 25; the
+    warm-up words read as progress that cannot come today. The reason names what it waits for."""
+    from sudarshan.screener import presets
+
+    store, source, clock = world
+    source.new_day(clock["now"])
+    source.refresh_universes([{"kind": "fno_stocks"}], clock["now"])
+    at = ms(DAY, "09:20:05")
+    source.on_frame(HEALTH, health(at), at)
+    source.on_frame(RELIANCE, frame(RELIANCE, at, 101.0, 10), at)
+    cross = next(p for p in presets.PRESETS if p.key == "ema_cross_15")
+    stored = spec.check(dict(cross.spec, target=None))
+    screen = store.write(OWNER, lambda tx: tx.screen_insert("EMA", stored, "active", 0))
+    clock["now"] = ms(DAY, "09:30:05")
+    source.on_frame(HEALTH, health(clock["now"]), clock["now"])
+    made = runner.Runner(store, source, lambda: clock["now"], Calendar())
+    asyncio.run(made.tick())
+    run = store.read(OWNER, lambda tx: tx.runs_page(screen["id"], None, 1))[0]
+    values = store.read(OWNER, lambda tx: tx.run_values(run["id"]))
+    reason = values.get(RELIANCE, {}).get("_not_checked")
+    assert reason == (
+        "Not checked: needs 151 candles of 15 minutes; a day gives 25, and history before today "
+        "waits for its download (not set up yet)"
+    ), f"the warm-up reads as progress that cannot come today: {reason!r}, {run['matched']} matched"

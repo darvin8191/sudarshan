@@ -116,6 +116,8 @@ SHORT_STORE = "short_store"  # (have, need): fewer stored days than the rank ask
 WINDOW_OPEN = "window_open"  # (minutes,): the opening range has not ended
 OTHER_DAY = "other_day"  # (name,): only today's candles can be read for this value
 NO_FEED = "no_feed"  # (): no price from the feed yet
+#: (need, tf, most): more candles of ``tf`` than today alone can give, before the history download
+NEEDS_HISTORY = "needs_history"
 
 
 @dataclass(frozen=True, slots=True)

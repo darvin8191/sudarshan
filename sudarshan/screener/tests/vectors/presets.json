@@ -26,6 +26,7 @@
   "presets": [
     {
       "key": "long_buildup",
+      "waits": "Waits for yesterday's open interest, which the daily store will keep: not set up yet.",
       "name": "Long build-up",
       "about": "Stock futures with the price up and open interest up 2% or more since yesterday's close.",
       "line": "F&O stock futures · after the close",
@@ -64,6 +65,7 @@
     },
     {
       "key": "short_buildup",
+      "waits": "Waits for yesterday's open interest, which the daily store will keep: not set up yet.",
       "name": "Short build-up",
       "about": "Stock futures with the price down and open interest up 2% or more since yesterday's close.",
       "line": "F&O stock futures · after the close",
@@ -102,6 +104,7 @@
     },
     {
       "key": "short_covering",
+      "waits": "Waits for yesterday's open interest, which the daily store will keep: not set up yet.",
       "name": "Short covering",
       "about": "Stock futures with the price up and open interest down 2% or more since yesterday's close.",
       "line": "F&O stock futures · after the close",
@@ -140,6 +143,7 @@
     },
     {
       "key": "iv_extremes",
+      "waits": "Waits for the implied volatility history, which the daily store will keep: not set up yet.",
       "name": "IV extremes",
       "about": "NIFTY 50 and NIFTY BANK when implied volatility is at its 80th percentile or higher, or at its 20th or lower. India VIX itself is not checked.",
       "line": "Indices · after the close",
@@ -207,6 +211,7 @@
     },
     {
       "key": "ema_cross_15",
+      "waits": "Waits for the history download, not set up yet: needs 151 candles of 15 minutes, and a day gives 25.",
       "name": "15-min EMA cross",
       "about": "Stocks where the 15-min EMA 20 crosses above EMA 50 while RSI 14 is above 50 and the price is above VWAP.",
       "line": "F&O stocks · 15-min",
@@ -282,6 +287,7 @@
     },
     {
       "key": "volume_spike",
+      "waits": "Waits for the history download, not set up yet: needs 20 days of candles. NIFTY 500 is also checked only after the close.",
       "name": "Volume spike",
       "about": "NIFTY 500 stocks whose volume for the day is at least twice its 20-day average and that closed above the previous close. Checked after the close.",
       "line": "NIFTY 500 · after the close",

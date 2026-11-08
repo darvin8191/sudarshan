@@ -102,6 +102,7 @@ _NOUNS = {
     "earlier option values": "earlier option values",
 }
 _OI_READINGS = {"buildup": "build-up", "oi_change_pct": "open interest change"}
+_TF_WORDS = {"1": "1 minute", "D": "a day", "W": "a week"}
 _UNKNOWN = "could not be checked this time"
 
 
@@ -144,6 +145,13 @@ def _reason(why: T.Why) -> str:
             return f"{label} for the day is read from today's candles only"
         if code == T.NO_FEED:
             return "no price from Upstox yet"
+        if code == T.NEEDS_HISTORY:
+            need, tf, most = detail
+            span = _TF_WORDS.get(str(tf)) or f"{quantity(int(tf))} minutes"
+            return (
+                f"needs {_count(need, 'candle', 'candles')} of {span}; a day gives "
+                f"{quantity(most)}, and history before today waits for its download (not set up yet)"
+            )
     except (TypeError, ValueError, OverflowError, OSError):
         pass
     return _UNKNOWN

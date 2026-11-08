@@ -55,8 +55,9 @@ class Source(Protocol):
 
     def members(self, universe: Mapping[str, Any]) -> Sequence[Member]: ...
 
-    def subject(self, member: Member, plan: Plan, boundary: int) -> Subject | None:
-        """The instrument's candles and facts at the boundary; None when no price has come yet."""
+    def subject(self, member: Member, plan: Plan, boundary: int) -> Subject | Why | None:
+        """The instrument's candles and facts at the boundary; None when no price has come yet,
+        or the reason it cannot be judged yet (a ``Why``)."""
         ...
 
     def context(self, boundary: int, session: int) -> Context: ...
@@ -111,6 +112,8 @@ async def evaluate(
             subject = source.subject(member, plan, ctx.boundary)
             if subject is None:
                 outcome = Outcome(NOT_CHECKED, (Why(NO_FEED),))
+            elif isinstance(subject, Why):  # the source knows why it cannot be judged yet
+                outcome = Outcome(NOT_CHECKED, (subject,))
             else:
                 outcome = judge(plan, subject, ctx, memo)
             out.append(Judged(member, outcome, source.prices(member)))
