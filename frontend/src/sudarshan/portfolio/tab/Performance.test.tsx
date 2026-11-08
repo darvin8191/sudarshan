@@ -115,14 +115,14 @@ describe('IncomeCard', () => {
     expect(screen.getByText('1.25%')).toBeTruthy()
     expect(
       screen.getByText(
-        'Income of the last 12 months on the lots you still hold, divided by their cost.'
+        'Income of the last 12 months on the shares that received it, divided by what those shares cost.'
       )
     ).toBeTruthy()
     expect(screen.getByText('Last 12 months').nextSibling?.textContent).toBe('₹100.00')
     expect(screen.getByText('FY 2025-26')).toBeTruthy()
     expect(screen.getByText('₹400.00')).toBeTruthy()
   })
-  it('says none, never a zero, when nothing is held at a cost', () => {
+  it('says none, never a zero, when no holding received income', () => {
     const sold = report({
       income: {
         ...report().income,
@@ -133,7 +133,7 @@ describe('IncomeCard', () => {
     })
     render(<IncomeCard report={sold} />)
     expect(screen.getByText('none')).toBeTruthy()
-    expect(screen.getByText('Nothing is held at a cost.')).toBeTruthy()
+    expect(screen.getByText('No holding received income in the last 12 months.')).toBeTruthy()
     expect(yieldText(null)).toBe('none')
     expect(yieldText('12.3456')).toBe('12.35%')
   })

@@ -872,10 +872,10 @@ export interface IncomeReport {
   by_month: MonthIncome[]
   /** The twelve months by_month lists, added up. */
   last_12m_paise: Paise
-  /** The part of that income the lots still held earned, and what those lots cost. */
+  /** The part of that income the lots still held earned, and what the lots that earned it cost. */
   held_income_paise: Paise
   held_cost_paise: Paise
-  /** `held_income_paise` on `held_cost_paise`; null when nothing is held at a cost (never 0 in
+  /** `held_income_paise` on `held_cost_paise`; null when no lot held earned anything in the twelve months (never 0 in
    *  its place). Income that went with units since sold, and interest on no asset, are not in it. */
   yield_on_cost_pct: Pct | null
   /** Oldest first; only years with income. */

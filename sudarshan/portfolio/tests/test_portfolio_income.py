@@ -34,7 +34,7 @@ def test_the_twelve_months_add_up_to_the_months_the_report_lists(case):
 def test_the_vectors_cover_the_shapes_that_matter():
     ids = {case["id"] for case in CASES}
     assert {"Y1", "Y2", "Y3", "Y4", "Y5", "Y6", "Y7", "Y8", "Y9", "Y10", "Y11", "Y12"} <= ids
-    assert {"Y5c", "Y13", "Y14", "Y15"} <= ids
+    assert {"Y5c", "Y13", "Y14", "Y15", "Y16", "Y17"} <= ids
     expects = [case["expect"] for case in CASES]
     assert any(e["yield_on_cost_pct"] is None for e in expects)  # nothing held at a cost
     assert any(e["by_fy"] == [] for e in expects)  # no income at all
@@ -149,4 +149,4 @@ def test_the_report_yield_of_a_sold_payer_is_not_given_to_what_was_bought_after(
     assert world.income()["yield_on_cost_pct"] is None  # nothing held at a cost
     world.add(kind="BUY", trade_date=20261002, asset_id=gold, qty_u=10_000_000,
               amount_paise=100_000)  # fmt: skip
-    assert world.income()["yield_on_cost_pct"] == "0.0000"
+    assert world.income()["yield_on_cost_pct"] is None  # the gold has earned nothing yet

@@ -509,12 +509,13 @@ def income_summary(ledger: Ledger, valuation_day: int) -> dict:
     valuation day counts nowhere.
 
     ``yield_on_cost_pct`` is the income of those twelve months that the lots *still held* earned
-    (``held_income_paise``), on what those lots cost (``held_cost_paise``): the FIFO lots the
-    ledger keeps, each credited with its units' share of every dividend or interest paid on an
-    asset while it was held. Income that went with units since sold, interest on no asset and
-    income that came before any units were held are left out of the yield; a lot bought after a
-    dividend counts at its cost with none of it. Percentage with four decimals; None when the
-    lots held cost nothing.
+    (``held_income_paise``), on what the lots that earned it cost (``held_cost_paise``): the FIFO
+    lots the ledger keeps, each credited with its units' share of every dividend or interest paid
+    on an asset while it was held. A lot that was credited anything in the twelve months counts
+    with its whole cost; one that was not (bought after the last income, or earning only before
+    the window) does not count until it earns. Income that went with units since sold, interest
+    on no asset and income that came before any units were held are left out. Percentage with
+    four decimals; None when no lot held earned anything in the window.
     """
     year, month = valuation_day // 10000, valuation_day // 100 % 100
     first = year * 12 + month - 1 - 11
@@ -533,8 +534,10 @@ def income_summary(ledger: Ledger, valuation_day: int) -> dict:
     held_income = held_cost = 0
     for position in ledger.positions.values():
         for lot in position.lots:
-            held_cost += lot.cost_paise
-            held_income += sum(paise for day, paise in lot.income if in_window(day))
+            earned = sum(paise for day, paise in lot.income if in_window(day))
+            if earned > 0:  # a lot counts, at its whole cost, once it has earned in the window
+                held_cost += lot.cost_paise
+                held_income += earned
     return {
         "last_12m_paise": last_12m,
         "held_income_paise": held_income,

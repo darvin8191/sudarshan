@@ -1,15 +1,16 @@
 """Generator of the PN1 golden vectors: income.json, yield on cost and the income by year (M7.29).
 
 The twelve months are the twelve calendar months that end with the valuation day's. The yield on
-cost is the income of those months that the lots *still held* earned, on what those lots cost, as
+cost is the income of those months that the lots *still held* earned, on what the lots that
+earned it cost (a lot credited anything in the twelve months counts with its whole cost), as
 a percentage with four decimals, half away from zero, written with a plain minus and never
 -0.0000. A dividend or interest paid on an asset is shared among the lots held that day by their
 units; what a sale takes of a lot takes its share of the income with it (and of its cost, first
 in first out); a transfer between accounts moves the income with the units; a split changes
 units, not income. Income that went with units since sold, interest on no asset, and income
 paid before any units were held are not in the yield, though they are in the twelve months'
-total. A lot bought after a dividend counts at its cost, with none of the dividend. Nothing held
-at a cost gives no yield (null), never 0. The income by financial year (April to March) has one
+total. A lot bought after the last income, or that earned only before the window, is not in the
+divisor until it earns. No lot that earned in the window gives no yield (null), never 0. The income by financial year (April to March) has one
 row per year with any income, oldest first, labelled "FY 2026-27". Income dated after the
 valuation day counts nowhere.
 
@@ -195,9 +196,9 @@ case(
 
 case(
     "Y4",
-    "Nothing held at a cost gives no yield, not a zero",
+    "No lot that earned gives no yield, not a zero",
     "10 shares bought for 10,000.00, a dividend of 60.00 on 1 Jun 2026, then every share sold on "
-    "1 Jul 2026 for 11,000.00. The lots held cost 0: the 60.00 in the twelve months has nothing "
+    "1 Jul 2026 for 11,000.00. No lot is held: the 60.00 in the twelve months has nothing "
     "to be a yield of, and the figure is null. The totals still stand: twelve months 60.00, "
     "FY 2026-27 60.00.",
     [TEN, dividend(2, 20260601, 1, 1, 6_000), sell(3, 20260701, 1, 1, 10, 1_100_000)],
@@ -262,12 +263,12 @@ case(
 case(
     "Y7",
     "No income at all",
-    "A tab with a purchase and no dividend or interest: twelve months 0, yield 0.0000% on its "
-    "cost (there is a cost, and the income on it is nothing), and no year row at all.",
+    "A tab with a purchase and no dividend or interest: twelve months 0, no lot earned anything "
+    "so none is in the divisor and the yield is null, and no year row at all.",
     [TEN],
     20261027,
     0,
-    1_000_000,
+    0,
 )
 
 case(
@@ -294,8 +295,8 @@ case(
     "A dividend payer sold and gold bought: the gold pays nothing",
     "100 shares bought for 10,000.00 on 10 Jan 2026, a dividend of 800.00 (80000) on 14 Aug 2026, "
     "all 100 sold on 1 Oct 2026 for 10,500.00, and 10 g of gold bought for 1,000.00 (100000) on "
-    "2 Oct 2026. The only lot held is the gold's: cost 100000, income 0: 0.0000%. The 800.00 is "
-    "still in the twelve months' total.",
+    "2 Oct 2026. The only lot held is the gold's and it earned nothing, so it is not in the "
+    "divisor: no yield (null), not 0. The 800.00 is still in the twelve months' total.",
     [
         buy(1, 20260110, 1, 1, 100, 1_000_000),
         dividend(2, 20260814, 1, 1, 80_000),
@@ -304,7 +305,7 @@ case(
     ],
     20261027,
     0,
-    100_000,
+    0,
 )
 
 case(
@@ -328,11 +329,11 @@ case(
 
 case(
     "Y11",
-    "A lot bought after the dividend counts at its cost with none of the income",
+    "A lot bought after the last income is not in the divisor until it earns",
     "100 shares bought for 10,000.00 (1000000) on 10 Jan 2026 earn a dividend of 500.00 (50000) "
     "on 14 Aug 2026. Another 100 are bought for 12,000.00 (1200000) on 1 Oct 2026 and earned "
-    "none of it. Both lots are still held: cost 2200000, income 50000: 50000 / 2200000 = "
-    "2.272727...%, written 2.2727.",
+    "none of it, so only the first lot counts: income 50000 on cost 1000000 = 5.0000% (not "
+    "50000 / 2200000 = 2.2727%).",
     [
         buy(1, 20260110, 1, 1, 100, 1_000_000),
         dividend(2, 20260814, 1, 1, 50_000),
@@ -340,7 +341,42 @@ case(
     ],
     20261027,
     50_000,
+    1_000_000,
+)
+
+case(
+    "Y16",
+    "A lot that earned one of two dividends counts with its whole cost",
+    "Lot A: 100 shares for 10,000.00 (1000000) on 10 Jan 2026. A dividend of 300.00 (30000) on "
+    "14 Feb 2026 is all A's. Lot B: 100 shares for 12,000.00 (1200000) on 1 Mar 2026. A dividend "
+    "of 400.00 (40000) on 14 Aug 2026 is shared 200.00 (20000) each. A earned 30000 + 20000 = "
+    "50000, B earned 20000 (one of the two dividends) and counts with its whole cost: income "
+    "70000 on 1000000 + 1200000 = 2200000: 3.181818...%, written 3.1818. Lot C, 50 shares for "
+    "6,000.00 (600000) on 1 Oct 2026, was bought after both dividends and is not in the divisor "
+    "(with it the figure would be 70000 / 2800000 = 2.5%).",
+    [
+        buy(1, 20260110, 1, 1, 100, 1_000_000),
+        dividend(2, 20260214, 1, 1, 30_000),
+        buy(3, 20260301, 1, 1, 100, 1_200_000),
+        dividend(4, 20260814, 1, 1, 40_000),
+        buy(5, 20261001, 1, 1, 50, 600_000),
+    ],
+    20261027,
+    70_000,
     2_200_000,
+)
+
+case(
+    "Y17",
+    "A lot that earned only before the twelve months is not in the divisor",
+    "10 shares for 10,000.00 bought on 10 Jan 2025 earned a dividend of 100.00 (10000) on 31 Oct "
+    "2025, a day before the twelve months that end on 27 Oct 2026 begin (Nov 2025). Nothing "
+    "was credited in the window, so no lot counts: twelve months 0, yield null. FY 2025-26 "
+    "keeps the 100.00.",
+    [TEN, dividend(2, 20251031, 1, 1, 10_000)],
+    20261027,
+    0,
+    0,
 )
 
 case(

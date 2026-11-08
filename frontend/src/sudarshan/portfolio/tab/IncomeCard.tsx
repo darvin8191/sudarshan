@@ -1,7 +1,7 @@
 // SUDARSHAN M7.38, M7.29: widget 8 of the Overview (design 4.6): income (dividends and interest)
 // of this financial year and of each of the last twelve months, as horizontal bars with the
 // amount written on each, so no month is told by length alone; the yield on cost (the income the lots still
-// held earned in the twelve months, on those lots' cost) and the income of each financial year.
+// held earned in the twelve months, on what the lots that received it cost) and the income of each financial year.
 import { formatAmount } from '@/sudarshan/dashboard/format'
 import { pctNumber } from '../Signed'
 import type { PerformanceReport } from '../types'
@@ -14,7 +14,7 @@ export function monthText(month: number): string {
   return `${MONTHS[(month % 100) - 1] ?? '?'} ${Math.floor(month / 100)}`
 }
 
-/** "1.25%" from the service's text; "none" when nothing is held at a cost. */
+/** "1.25%" from the service's text; "none" when no holding received income. */
 export function yieldText(pct: string | null): string {
   const value = pctNumber(pct)
   return value === null ? 'none' : `${formatAmount(value, 2)}%`
@@ -22,7 +22,7 @@ export function yieldText(pct: string | null): string {
 
 /** The one line that says what the yield is. */
 export const YIELD_DEFINITION =
-  'Income of the last 12 months on the lots you still hold, divided by their cost.'
+  'Income of the last 12 months on the shares that received it, divided by what those shares cost.'
 
 export function IncomeCard({ report }: { report: PerformanceReport }) {
   const { this_fy_paise, by_month, last_12m_paise, yield_on_cost_pct, by_fy } = report.income
@@ -49,7 +49,7 @@ export function IncomeCard({ report }: { report: PerformanceReport }) {
           <dt className="text-xs font-semibold text-muted-foreground">Yield on cost</dt>
           <dd className="text-[0.9375rem] font-semibold">{yieldText(yield_on_cost_pct)}</dd>
           <dd className="text-xs text-[color:var(--text-tertiary)]">
-            {yield_on_cost_pct === null ? 'Nothing is held at a cost.' : YIELD_DEFINITION}
+            {yield_on_cost_pct === null ? 'No holding received income in the last 12 months.' : YIELD_DEFINITION}
           </dd>
         </div>
       </dl>
