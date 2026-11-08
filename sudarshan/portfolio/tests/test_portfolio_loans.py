@@ -472,3 +472,60 @@ def test_a_loan_entered_at_zero_or_dated_later_is_listed_with_words_for_what_it_
     owed = w.loan(rid="l-1", lakhs=5, name="Home loan")
     w.book.loan_balance_set(OWNER, owed["id"], w.tab["id"], w.version(), 20261020, 0, now=NOW)
     assert owed["id"] not in {x["asset_id"] for x in w.get()["liabilities"]}
+
+
+# ---- a store already at the old step 2 (45d4b3a) --------------------------------------------------
+def test_a_store_at_the_old_step_two_keeps_its_links_and_status_reads_it_correctly(w, path, capsys):
+    """Step 2 is the only step this branch adds (step 3 belongs to the reports branch): its
+    schema is unchanged since 45d4b3a, so a file that ran it opens with nothing to apply and every
+    link kept, and a file whose step 2 was cut short (version 1, table present) re-runs it
+    cleanly."""
+    from sudarshan.portfolio import migrate
+
+    loan = w.loan()
+    w.store.close()
+    store_module.stop()
+    assert migrate.main(["--status", "--path", str(path)]) == 0
+    said = capsys.readouterr().out.replace(str(path), "<file>")
+    assert "version: file 2, code 2" in said and "pending: none" in said
+    again = PortfolioStore(path, now=NOW + 1)
+    assert again.applied == []
+    again.close()
+    store_module.stop()
+    raw(path, "PRAGMA user_version = 1")  # step 2 cut short after its table was made
+    assert migrate.main(["--status", "--path", str(path)]) == 0
+    assert "pending: [2]" in capsys.readouterr().out
+    rerun = PortfolioStore(path, now=NOW + 2)
+    assert rerun.applied == [2]
+    rerun.close()
+    assert raw(path, "SELECT tab_id, asset_id FROM tab_liability") == [(w.tab["id"], loan["id"])]
+    assert raw(path, "PRAGMA user_version") == [(2,)]
+
+
+# ---- boundaries the mutants found ----------------------------------------------------------------
+def test_a_balance_dated_today_counts_today(w):
+    w.loan(day=20261026, lakhs=7)  # NOW is 26 Oct 2026: the day itself is on or before it
+    assert w.get()["fixed"]["liabilities_paise"] == 7 * 100_000 * 100
+    assert w.get(as_of=20261026)["fixed"]["liabilities_paise"] == 7 * 100_000 * 100
+    assert w.get(as_of=20261025)["liabilities"] == []
+
+
+def test_a_loan_is_refused_on_an_archived_tab(w):
+    w.book.tab_update(OWNER, w.tab["id"], w.version(), {"archived": True}, now=NOW)
+    with pytest.raises(Refused) as caught:
+        w.loan()
+    assert str(caught.value) == BOOK_WORDS["archived"]
+    assert raw(w.store.path, "SELECT count(*) FROM tab_liability") == [(0,)]
+
+
+def test_a_nav_typed_by_hand_is_worded_as_a_nav_not_as_a_value(w):
+    fund = w.book.asset_create(OWNER, "f-1", "mf", now=NOW, amfi_code="120503", name="Fund")
+    w.book.activity_create(
+        OWNER, w.tab["id"], w.version(),
+        {"kind": "BUY", "trade_date": 20261001, "account_id": w.zerodha["id"],
+         "asset_id": fund["id"], "qty_u": 10_000_000, "amount_paise": 1_000_000},
+        "e-f", now=NOW,
+    )  # fmt: skip
+    w.store.write(OWNER, lambda tx: tx.set_price_point(fund["id"], 20261020, 123_4567, NOW))
+    (row,) = w.get()["rows"]
+    assert row["fresh"]["words"].startswith("NAV from 20 Oct")
