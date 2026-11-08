@@ -7,19 +7,31 @@ import { sendChange, useHeld } from './actions'
 import { StatusChip } from './marks'
 import { countsWords } from './ScreenCard'
 import type { ScreenRow } from './types'
+import type { ScreenTab } from './useScreenerAddress'
 
 /**
  * One screen opened (design 5.1): its name and status, what it looks at, Pause or Resume and
  * Delete, and below them its panels. A Stopped screen is not Resumed: a stopped screen has a
  * reason the owner reads first, and edits or deletes it.
  */
+export interface PanelTab {
+  id: ScreenTab
+  label: string
+}
+
 export function ScreenPage({
   row,
+  tabs,
+  tab,
+  onTab,
   onBack,
   onDelete,
   children,
 }: {
   row: ScreenRow
+  tabs: PanelTab[]
+  tab: ScreenTab
+  onTab: (tab: ScreenTab) => void
   onBack: () => void
   onDelete: () => void
   children?: ReactNode
@@ -103,7 +115,41 @@ export function ScreenPage({
           </button>
         </div>
       </section>
-      {children}
+      {tabs.length > 1 && (
+        <div role="tablist" aria-label="Screen" className="flex items-center gap-1.5">
+          {tabs.map(({ id, label }) => (
+            <button
+              key={id}
+              id={`sd-screen-tab-${id}`}
+              type="button"
+              role="tab"
+              aria-selected={id === tab}
+              aria-controls="sd-screen-panel"
+              onClick={() => onTab(id)}
+              className="group flex h-12 shrink-0 items-center outline-none"
+            >
+              <span
+                className={cn(
+                  'flex h-9 items-center rounded-full border px-3.5 text-sm group-focus-visible:ring-2 group-focus-visible:ring-ring',
+                  id === tab
+                    ? 'border-primary bg-[color:var(--primary-tint)] font-bold text-primary'
+                    : 'border-border bg-card font-semibold text-[color:var(--text-secondary)]'
+                )}
+              >
+                {label}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+      <section
+        id="sd-screen-panel"
+        role="tabpanel"
+        aria-labelledby={`sd-screen-tab-${tab}`}
+        className="flex flex-col gap-2"
+      >
+        {children}
+      </section>
     </div>
   )
 }

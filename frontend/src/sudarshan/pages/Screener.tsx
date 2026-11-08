@@ -3,7 +3,7 @@
 // (screener/push.ts). What is open lives in the address (screener/useScreenerAddress.ts), so the
 // phone's Back closes a sheet first, then the screen.
 import { useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, LoaderCircle, RefreshCw } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, LoaderCircle, Plus, RefreshCw } from 'lucide-react'
 import { useEffect, useMemo } from 'react'
 import { useSocketContext } from '@/components/socket/SocketProvider'
 import { cn } from '@/lib/utils'
@@ -19,7 +19,8 @@ import { DeleteSheet } from '@/sudarshan/screener/DeleteSheet'
 import { EngineText } from '@/sudarshan/screener/marks'
 import { useHearing, useScreenerPush } from '@/sudarshan/screener/push'
 import { ScreenCard } from '@/sudarshan/screener/ScreenCard'
-import { ScreenPage } from '@/sudarshan/screener/ScreenPage'
+import { ScreenEditor } from '@/sudarshan/screener/ScreenEditor'
+import { type PanelTab, ScreenPage } from '@/sudarshan/screener/ScreenPage'
 import { type ScreenRow, WORDS } from '@/sudarshan/screener/types'
 import { useScreenerAddress } from '@/sudarshan/screener/useScreenerAddress'
 import { useScreenerState } from '@/sudarshan/screener/useScreenerState'
@@ -34,6 +35,9 @@ const NOT_RECEIVING = {
   real_time: false,
 } as const
 
+/** The panels of an open screen; Results and History join as they are built. */
+const TABS: PanelTab[] = [{ id: 'edit', label: 'Edit' }]
+
 const ORDER = { active: 0, paused: 1, stopped: 2 } as const
 
 /** Active first, then Paused, then Stopped, newest first in each. */
@@ -46,7 +50,8 @@ export default function Screener() {
   const { socket } = useSocketContext()
   const query = useScreenerState()
   const state = query.data
-  const { address, openScreen, closeScreen, openSheet, closeSheet } = useScreenerAddress()
+  const { address, openScreen, openDraft, closeScreen, openSheet, closeSheet, setTab } =
+    useScreenerAddress()
   useScreenerPush(client, socket)
   const hearing = useHearing()
 
@@ -68,11 +73,20 @@ export default function Screener() {
   const switchedOff = state !== undefined && !state.enabled
   return (
     <div className="flex flex-col gap-2">
-      {open === null && (
+      {open === null && !address.draft && (
         <div className="flex items-center justify-between gap-3">
           <h1 className="sd-display text-[1.75rem] leading-none font-bold md:text-[2rem]">
             Screener
           </h1>
+          <button
+            type="button"
+            disabled={!state?.enabled}
+            onClick={openDraft}
+            className="inline-flex min-h-12 items-center gap-1.5 rounded-[0.875rem] bg-primary px-4 text-[0.9375rem] font-semibold text-primary-foreground outline-none hover:bg-primary/90 focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:bg-muted disabled:text-[color:var(--text-tertiary)] disabled:shadow-[inset_0_0_0_1px_var(--border-strong)]"
+          >
+            <Plus aria-hidden="true" className="size-5" />
+            New
+          </button>
         </div>
       )}
 
@@ -115,8 +129,44 @@ export default function Screener() {
       </div>
       {problem && state && <StaleBookNote text="These are your screens as last read." />}
 
-      {open ? (
-        <ScreenPage row={open} onBack={closeScreen} onDelete={() => openSheet('delete')} />
+      {address.draft && state?.enabled ? (
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              aria-label="Back to screens"
+              onClick={closeScreen}
+              className={cn(OUTLINED, 'w-12 shrink-0 px-0')}
+            >
+              <ArrowLeft aria-hidden="true" className="size-5" />
+            </button>
+            <h1 className="sd-display text-[1.5rem] leading-tight font-bold">New screen</h1>
+          </div>
+          <ScreenEditor
+            address={address}
+            openSheet={openSheet}
+            closeSheet={closeSheet}
+            onSaved={(row) => openScreen(row.id)}
+          />
+        </div>
+      ) : open ? (
+        <ScreenPage
+          row={open}
+          tabs={TABS}
+          tab={address.tab === 'edit' || TABS.length === 1 ? 'edit' : address.tab}
+          onTab={setTab}
+          onBack={closeScreen}
+          onDelete={() => openSheet('delete')}
+        >
+          <ScreenEditor
+            key={open.id}
+            row={open}
+            address={address}
+            openSheet={openSheet}
+            closeSheet={closeSheet}
+            onSaved={() => {}}
+          />
+        </ScreenPage>
       ) : (
         <section className={cn('flex flex-col gap-2', problem && state && STALE)}>
           {!state ? (

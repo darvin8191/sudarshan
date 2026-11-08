@@ -8,7 +8,7 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router'
  * - the screen: `?screen=<id>` with `&tab=results|history|edit`; the Library lives at
  *   `?tab=library` with no screen;
  * - a sheet over it: `?sheet=new|delete|settings|library` (a clause's or operand's sheet is the
- *   builder's own, with `&sheet=clause&c=<clause id>`), and `?sheet=run&run=<id>` for a past run's set.
+ *   builder's own, with `&sheet=clause&c=<clause id>`), and `?sheet=run&run=<id>` for a past run's set; a screen being written is `?new=1`.
  *
  * Opening pushes a history entry marked as this page's own, and closing goes back, so Back and
  * the close button leave the same history behind; a layer the page did not open (a link, a
@@ -21,10 +21,15 @@ export type HomeTab = 'screens' | 'library'
 
 export interface Address {
   screen: number | null
+  /** A screen being written, not saved yet (`?new=1`). */
+  draft: boolean
   tab: ScreenTab
   home: HomeTab
   sheet: string | null
+  /** A node the sheet is about: a clause id, or `g` and a path for a group (`g.0.2`). */
   clause: string | null
+  /** Which side of the clause an operand sheet edits. */
+  side: 'left' | 'right' | null
   run: number | null
 }
 
@@ -33,6 +38,7 @@ const SHEETS = new Set([
   'delete',
   'settings',
   'clause',
+  'operator',
   'operand',
   'group',
   'target',
@@ -52,10 +58,15 @@ export function addressOf(params: URLSearchParams): Address {
   const sheet = params.get('sheet')
   return {
     screen,
+    draft: screen === null && params.get('new') === '1',
     tab: tab === 'history' || tab === 'edit' ? tab : 'results',
     home: screen === null && tab === 'library' ? 'library' : 'screens',
     sheet: sheet && SHEETS.has(sheet) ? sheet : null,
     clause: params.get('c'),
+    side:
+      params.get('side') === 'left' || params.get('side') === 'right'
+        ? (params.get('side') as 'left' | 'right')
+        : null,
     run: screen === null ? null : positive(params.get('run')),
   }
 }
@@ -100,16 +111,22 @@ export function useScreenerAddress() {
       const after = new URLSearchParams()
       after.set('screen', String(id))
       if (tab !== 'results') after.set('tab', tab)
-      const shown = positive(current.get('screen')) !== null
+      // From a draft just saved, or from another screen: the entry is swapped, not stacked.
+      const shown = positive(current.get('screen')) !== null || current.get('new') === '1'
       go(after, shown, { sdScreen: shown ? !!now.sdScreen : true })
     },
     [go]
   )
 
-  /** Leave the open screen: back to the list. */
+  /** Open the editor for a new screen (pushed). */
+  const openDraft = useCallback(() => {
+    go(new URLSearchParams({ new: '1' }), false, { sdScreen: true })
+  }, [go])
+
+  /** Leave the open screen or the draft: back to the list. */
   const closeScreen = useCallback(() => {
     const { params: current, entry: now } = here.current
-    if (positive(current.get('screen')) === null) return
+    if (positive(current.get('screen')) === null && current.get('new') !== '1') return
     if (now.sdScreen && !now.sdSheet && !current.get('sheet')) {
       here.current = { ...here.current, params: new URLSearchParams(), entry: {} }
       navigate(-1)
@@ -124,6 +141,7 @@ export function useScreenerAddress() {
       const { params: current, entry: now } = here.current
       const after = new URLSearchParams(current)
       after.delete('c')
+      after.delete('side')
       after.delete('run')
       after.set('sheet', sheet)
       for (const [key, value] of Object.entries(extra)) after.set(key, value)
@@ -140,6 +158,7 @@ export function useScreenerAddress() {
       const after = new URLSearchParams(current)
       after.delete('sheet')
       after.delete('c')
+      after.delete('side')
       here.current = { ...here.current, params: after, entry: { sdScreen: !!now.sdScreen } }
       navigate(-1)
       return
@@ -147,6 +166,7 @@ export function useScreenerAddress() {
     const after = new URLSearchParams(current)
     after.delete('sheet')
     after.delete('c')
+    after.delete('side')
     go(after, true, now.sdScreen ? { sdScreen: true } : null)
   }, [go, navigate])
 
@@ -163,5 +183,5 @@ export function useScreenerAddress() {
     [go]
   )
 
-  return { address, openScreen, closeScreen, openSheet, closeSheet, setTab }
+  return { address, openScreen, openDraft, closeScreen, openSheet, closeSheet, setTab }
 }
