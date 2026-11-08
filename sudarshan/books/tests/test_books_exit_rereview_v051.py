@@ -505,3 +505,77 @@ def test_control_exit_all_past_150_s_with_nothing_working_exits_the_position(
     code, body = world.app_exit_all()
     assert (code, body["status"]) == (200, "success"), body
     assert [(o["side"], o["qty"]) for o in world.broker.orders] == [("SELL", 65)]
+
+
+# -- LOW-B: an unlisted fill whose filled quantity is null ------------------------------------------
+
+
+class RawBroker(Broker):
+    """Fixed raw positions and order rows (as test_books_exit_review_gaps.py has it); records each
+    order's side, product and quantity. ``orders_down``: the order book read fails."""
+
+    def __init__(self, positions, orders):
+        super().__init__({}, 0.0)
+        self.raw_positions = positions
+        self.raw_orders = orders
+        self.products = []
+        self.orders_down = False
+
+    def get(self, url, headers=None, **kwargs):
+        from books_upstox_world import ORDERS_URL, FakeResponse
+
+        if url.endswith(ORDERS_URL):
+            if self.orders_down:
+                return FakeResponse(503, {"status": "error", "errors": [{"message": "down"}]})
+            return FakeResponse(200, {"status": "success", "data": list(self.raw_orders)})
+        return FakeResponse(200, {"status": "success", "data": list(self.raw_positions)})
+
+    def post(self, url, headers=None, content=None, **kwargs):
+        import json
+
+        payload = json.loads(content)
+        self.products.append(
+            (payload["transaction_type"], payload["product"], int(payload["quantity"]))
+        )
+        return super().post(url, headers=headers, content=content, **kwargs)
+
+
+def _order(token, exchange, name, product, side, quantity, filled, status="complete"):
+    return {"order_id": "261027000090", "instrument_token": token, "exchange": exchange,
+            "tradingsymbol": name, "product": product, "transaction_type": side,
+            "order_type": "MARKET", "status": status, "quantity": quantity,
+            "filled_quantity": filled, "pending_quantity": 0,
+            "order_timestamp": "2026-10-27 11:00:00"}  # fmt: skip
+
+
+def test_an_unlisted_fill_whose_filled_quantity_is_null_is_named_not_counted_as_nothing():
+    """fills.unlisted_nets skipped an order whose filled quantity was null, so a complete BUY 30
+    with no positions row named nothing (on e3e74bb: [])."""
+    from sudarshan.books import fills
+
+    orders = [_order(TOKENS[Y], "NFO", Y, "D", "BUY", 30, None)]
+    assert fills.unlisted_nets([], orders) == [("NFO", Y, TOKENS[Y], "D", None)]
+
+
+def test_control_a_rejected_order_with_its_filled_quantity_null_still_holds_nothing():
+    """Control: a null on a status that says nothing filled reads as 0 (release review v0.4.1, L6)."""
+    from sudarshan.books import fills
+
+    orders = [_order(TOKENS[Y], "NFO", Y, "D", "BUY", 30, None, status="rejected")]
+    assert fills.unlisted_nets([], orders) == []
+
+
+def test_exit_all_never_says_nothing_open_over_an_unlisted_fill_it_cannot_count(monkeypatch):
+    """The re-review's probe: Upstox's positions list nothing yet; the order book shows a complete
+    BUY 30 whose filled quantity is null. On e3e74bb Exit all answered "No Open Positions Found",
+    which the service turns into "All Open Positions Squared Off" (200) over a position the account
+    may hold. Now it names the position as one it could not size, and sends nothing."""
+    broker = RawBroker([], [_order(TOKENS[Y], "NFO", Y, "D", "BUY", 30, None)])
+    world = install(monkeypatch, broker)
+    code, body = world.app_exit_all()
+    said = str(body.get("message"))
+    assert not (code == 200 and ("No Open Positions" in said or body.get("status") == "success"))
+    assert body["status"] == "error" and broker.products == []
+    assert "BANKNIFTY 57500 PE was traded today" in said and "Upstox app" in said
+    named = [p for p in body["positions"] if p["symbol"] == Y]
+    assert named and named[0]["outcome"] == "not_sent"

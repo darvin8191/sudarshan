@@ -222,8 +222,11 @@ def unlisted_nets(
         ``held_by_product`` does (so a conversion that moved the quantity to another product's
         row leaves nothing here), or None when the instrument's figures cannot be worked out
         (an order row of it with no usable field, or rows that do not add up): then something is
-        held with no row and nobody can say how much. Orders with no usable token, product, side
-        or filled quantity are left out of the nets.
+        held with no row and nobody can say how much. An order whose filled quantity cannot be
+        told (``_filled``: null on a status that may have filled, such as complete) names its
+        instrument and product with None, whatever the other orders net to: it may hold
+        something, and an unknown fill is not a fill of 0. Orders with no usable token, product
+        or side are left out.
     """
     if orders is None:
         return []
@@ -234,25 +237,34 @@ def unlisted_nets(
         if isinstance(row, dict)
     }
     nets: dict[tuple[str, str], int] = {}
+    unknown: set[tuple[str, str]] = set()  # a fill of it cannot be told
     names: dict[tuple[str, str], tuple[str, str]] = {}
     for order in orders:
         if not isinstance(order, dict):
             continue
         token = str(order.get("instrument_token") or "").strip()
         product = _product(order)
-        filled = _whole(order.get("filled_quantity"))
+        filled = _filled(order)
         side = str(order.get("transaction_type") or "").strip().upper()
-        if not token or not product or not filled or side not in ("BUY", "SELL"):
+        if not token or not product or side not in ("BUY", "SELL"):
             continue
         key = (token, product)
-        nets[key] = nets.get(key, 0) + (filled if side == "BUY" else -filled)
+        if filled is None:
+            unknown.add(key)
+        else:
+            nets[key] = nets.get(key, 0) + (filled if side == "BUY" else -filled)
         names[key] = (
             str(order.get("exchange") or "").strip().upper(),
             str(order.get("tradingsymbol") or "").strip(),
         )
     out = []
-    for (token, product), net in nets.items():
-        if net == 0 or (token, product) in listed:
+    for token, product in names:
+        if (token, product) in listed:
+            continue
+        if (token, product) in unknown:
+            out.append((*names[(token, product)], token, product, None))
+            continue
+        if nets[(token, product)] == 0:
             continue
         # A conversion moves quantity to another product's row: what is held in this product,
         # counted across the instrument's products, is what is left out. When the instrument's

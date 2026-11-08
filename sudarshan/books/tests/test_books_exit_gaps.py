@@ -281,12 +281,19 @@ def test_unlisted_nets_follow_the_golden_vectors(case):
     }
     for product in traded - listed:
         if case["held"] is None:
-            raw = sum(
-                (1 if o["transaction_type"] == "BUY" else -1) * (o["filled_quantity"] or 0)
+            mine = [
+                o
                 for o in case["orders"]
                 if o["product"] == product and o["instrument_token"] == case["token"]
+            ]
+            raw = sum(
+                (1 if o["transaction_type"] == "BUY" else -1) * (o["filled_quantity"] or 0)
+                for o in mine
             )
-            assert found.get(product, "absent") == (None if raw else "absent")
+            # A fill that cannot be told (null on a status that may have filled) is not 0: the
+            # product is named, with None, whatever the rest nets to (re-review LOW-B).
+            unknown = any(fills._filled(o) is None for o in mine)
+            assert found.get(product, "absent") == (None if raw or unknown else "absent")
         elif case["held"].get(product, 0):
             assert found[product] == case["held"][product]
         else:

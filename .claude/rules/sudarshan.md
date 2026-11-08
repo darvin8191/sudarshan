@@ -169,8 +169,10 @@ in brand. Icon "Mor": tile #0E5A73, ring #E3A21A, glyph #FFFFFF. Numbers via
     positions do not list yet is exited from its fills (the contract from the order row's token,
     the product from the order rows, the size from what the fills leave held in that product),
     through the same claim, hold and time limit; it is left out with a sentence when one of those
-    cannot be worked out, and a CNC net sale is a sale from holdings, not a position, whether
-    Upstox lists it as a row or not (an F&O NRML short is a position: Upstox writes D for both).
+    cannot be worked out (a filled quantity Upstox leaves null on an order that may have filled,
+    a complete one say, is unknown, not 0), and a CNC net sale is a sale from holdings, not a
+    position, whether Upstox lists it as a row or not (an F&O NRML short is a position: Upstox
+    writes D for both).
     An unlisted product of an instrument that has a row in another product is named in the
     answer and not sent: a conversion in Upstox's app whose new row is not shown yet cannot be
     told from a fresh position, and when that cannot be worked out nothing is sent. The hold of
