@@ -10,15 +10,17 @@ symbol table is empty, is not ready: the universes wait and are built again late
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
 from screener_helpers import ms
 from sqlalchemy import create_engine, text
-from test_screener_feed_runtime import FakeFeed
+from test_screener_feed_runtime import FakeFeed, health
 from test_screener_runs import SESSION, SPEC, due_for
 from test_screener_runtime import Calendar
 from test_screener_universe import master as master_fixture  # noqa: F401  (the fixture)
 
+from sudarshan.alerts.market.feedlink import HEALTH
 from sudarshan.screener import config, runner, runs, spec, words
 from sudarshan.screener import membership as mem
 from sudarshan.screener import store as store_module
@@ -145,3 +147,37 @@ def test_a_master_being_downloaded_or_empty_is_not_ready_and_the_universes_wait(
     source.refresh_universes([{"kind": "fno_stocks"}], clock["now"])
     assert source.master_ready is False, "an empty symbol table was read as today's master"
     assert len(source.members({"kind": "fno_stocks"})) == 2
+
+
+# ---- release review MEDIUM-7: universes the live source never built --------------------------------
+def index_frame(source, key: str, ltp: float, at: int) -> None:
+    source.on_frame(HEALTH, health(at), at)
+    source.on_frame(key, json.dumps({"key": key, "ltp": ltp, "ltt": at, "cp": ltp}).encode(), at)
+
+
+def test_option_windows_find_their_own_index_price(world):
+    store, source, clock = world
+    source.refresh_universes([{"kind": "indices"}], clock["now"])
+    at = ms(DAY, "09:15:01")
+    index_frame(source, "NSE_INDEX|Nifty Bank", 52_000.0, at)
+    index_frame(source, "NSE_INDEX|Nifty 50", 25_760.0, at)
+    nifty, bank = source._index_frame("NIFTY"), source._index_frame("BANKNIFTY")
+    assert bank is not None, "BANKNIFTY's options never find the Nifty Bank index price"
+    assert nifty["ltp"] == 25_760.0, "NIFTY's options read the Nifty Bank price"
+    assert bank["ltp"] == 52_000.0
+
+
+def test_an_option_window_waits_for_its_index_price_and_is_built_when_it_comes(world):
+    store, source, clock = world
+    options = {"kind": "options", "underlying": "NIFTY"}
+    source.refresh_universes([options], clock["now"])
+    assert source.members(options) == [] and "NSE_INDEX|Nifty 50" in source.keys, (
+        "the index an option window needs is not followed"
+    )
+    assert source.window_due() is False
+    index_frame(source, "NSE_INDEX|Nifty 50", 25_760.0, ms(DAY, "09:15:01"))
+    assert source.window_due() is True
+    source.refresh_universes([options], clock["now"], reuse=True)
+    strikes = {m.symbol for m in source.members(options)}
+    assert "NIFTY30OCT2625750CE" in strikes and "NIFTY30OCT2625750PE" in strikes
+    assert source.window_due() is False

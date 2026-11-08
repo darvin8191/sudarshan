@@ -152,6 +152,9 @@ class LiveSource:
         self.master_ready = False
         #: The master download the universes were built on (OpenAlgo's completion time).
         self.built_on: str | None = None
+        #: Option windows waiting for their index's first price, by universe name.
+        self._waiting: dict[str, Mapping[str, Any]] = {}
+        self._index_keys: dict[str, str] = {}
         self._master_asked = 0
         self.counts = {"frames": 0, "trades": 0, "sealed": 0, "late": 0}
 
@@ -446,7 +449,12 @@ class LiveSource:
         return download is not None and download[0] == "success" and download[1] != self.built_on
 
     def refresh_universes(
-        self, specs: Sequence[Mapping[str, Any]], now: int, *, reuse: bool = False
+        self,
+        specs: Sequence[Mapping[str, Any]],
+        now: int,
+        *,
+        reuse: bool = False,
+        lists: Mapping[int, Sequence[Mapping[str, Any]]] | None = None,
     ) -> None:
         """The universes the active screens use, from the master; the keys to follow.
 
@@ -455,7 +463,12 @@ class LiveSource:
         counts as not ready, so the feed job tries again. ``reuse`` follows a change of screens
         (HIGH-2): a universe already built today is kept as it is, only a new one is read from the
         master, and one no active screen uses any more is let go, so the keys shrink with the
-        screens."""
+        screens.
+
+        ``lists`` are the items of the owner's OpenAlgo lists a watchlist universe names (the feed
+        job reads them through the bridge). An option window waits, not built, until its index's
+        price has come: the index is followed for it, and ``window_due`` says when to build it
+        (MEDIUM-7)."""
         if self._today is None:
             return
         wanted: dict[str, Mapping[str, Any]] = {}
@@ -464,18 +477,25 @@ class LiveSource:
         found = {n: self._universes[n] for n in wanted if reuse and n in self._universes}
         listings = dict(self._listings) if reuse else {}
         built: dict[str, list[Member]] = {}
+        waiting: dict[str, Mapping[str, Any]] = {}
         todo = [s for n, s in wanted.items() if n not in found]
         if todo:
             try:
                 built_on = self._master_whole()
                 for kind_spec in todo:
                     name = _uni_key(kind_spec)
-                    extra = {}
+                    extra: dict[str, Any] = {}
                     if kind_spec["kind"] == "options":
                         frame = self._index_frame(kind_spec["underlying"])
-                        extra["ltp"] = (
-                            int(round(frame["ltp"] * 100)) if frame and frame.get("ltp") else None
-                        )
+                        if not (frame and frame.get("ltp")):
+                            waiting[name] = kind_spec  # built once the index's price comes
+                            continue
+                        extra["ltp"] = int(round(frame["ltp"] * 100))
+                    elif kind_spec["kind"] == "watchlist":
+                        items = (lists or {}).get(int(kind_spec["list_id"]))
+                        if items is None:
+                            continue  # the list could not be read: not loaded, never empty
+                        extra["items"] = items
                     members, rows, missing = universe_of(
                         kind_spec, self.master, self._today, extra=extra
                     )
@@ -497,8 +517,14 @@ class LiveSource:
                 built = {}  # the new universes wait for the master; the keys still follow
         found |= built
         self._universes, self._listings = found, listings
+        self._waiting = waiting
         keys: list[str] = []
         seen: set[str] = set()
+        for spec in wanted.values():  # an option window's index first: its price places the window
+            index_key = self._index_key(spec["underlying"]) if spec["kind"] == "options" else None
+            if index_key is not None and index_key not in seen:
+                seen.add(index_key)
+                keys.append(index_key)
         for members in found.values():
             for member in members:
                 if member.key not in seen:
@@ -529,11 +555,31 @@ class LiveSource:
         except StoreError:
             log.exception("the universes could not be written to the store")
 
+    def _index_key(self, underlying: str) -> str | None:
+        """The index's own key in the master (``NSE_INDEX|Nifty Bank`` for BANKNIFTY), never a
+        guess from the text of a key (MEDIUM-7)."""
+        if underlying not in self._index_keys:
+            try:
+                rows = self.master.rows("NSE_INDEX")
+            except universe.MasterUnavailable:
+                return None
+            self._index_keys = {row.symbol: row.key for row in rows}
+        return self._index_keys.get(underlying)
+
     def _index_frame(self, underlying: str) -> Mapping[str, Any] | None:
-        for key, frame in self._last.items():
-            if key.startswith("NSE_INDEX|") and underlying in key.upper().replace(" ", ""):
-                return frame
-        return None
+        key = self._index_key(underlying)
+        return self._last.get(key) if key is not None else None
+
+    def _uni_built(self, universe_spec: Mapping[str, Any]) -> bool:
+        """Whether that universe was built today (an empty one too)."""
+        return _uni_key(universe_spec) in self._universes
+
+    def window_due(self) -> bool:
+        """Whether an option window that waited for its index's price can be built now."""
+        return any(
+            (frame := self._index_frame(spec["underlying"])) is not None and frame.get("ltp")
+            for spec in self._waiting.values()
+        )
 
     async def claim(self) -> None:
         """The keys to follow, claimed at the feed as one whole set (it replaces the last one).
@@ -692,22 +738,23 @@ async def run_feed(service, *, tick_s: float = TICK_S) -> None:
         while True:
             now = service.clock()
             moved = _take_moved(service)
-            if (
+            full = (
                 source.new_day(now)
                 or _master_due(now, last_master_min, source)
                 or source.master_changed(now)
-            ):
+            )
+            # a screen made, edited, resumed, paused or deleted (HIGH-2), or an option window
+            # whose index's price has just come (MEDIUM-7): only what is new is built
+            if full or moved or source.window_due():
                 try:
-                    source.refresh_universes(_active_universes(service.store), now)
+                    specs = _active_universes(service.store)
                 except StoreError:
                     log.exception("the active screens could not be read")
-                last_master_min = _minute(now)
-                await source.claim()
-            elif moved:  # a screen made, edited, resumed, paused or deleted (HIGH-2)
-                try:
-                    source.refresh_universes(_active_universes(service.store), now, reuse=True)
-                except StoreError:
-                    log.exception("the active screens could not be read")
+                else:
+                    lists = await _watchlists(service, specs)
+                    source.refresh_universes(specs, now, reuse=not full, lists=lists)
+                if full:
+                    last_master_min = _minute(now)
                 await source.claim()
             loop = asyncio.get_running_loop()
             if source.keys and loop.time() - source.claimed_at > CLAIM_RENEW_S:
@@ -728,6 +775,26 @@ async def run_feed(service, *, tick_s: float = TICK_S) -> None:
             bars_task.cancel()
         feed.close()
         await client.aclose()
+
+
+async def _watchlists(service, specs: Sequence[Mapping[str, Any]]) -> dict[int, list]:
+    """The items of the owner's lists that watchlist universes name, read through the bridge's
+    internal route (the service's sealed link); a list that cannot be read is left out, so its
+    universe is not loaded rather than empty."""
+    link = service.parts.get("link")
+    wanted = {int(s["list_id"]) for s in specs if s.get("kind") == "watchlist"}
+    out: dict[int, list] = {}
+    if link is None or not wanted:
+        return out
+    for list_id in sorted(wanted):
+        try:
+            found = await link.watchlist_read(list_id)
+        except Exception as exc:  # noqa: BLE001  (the link's own failure words)
+            log.warning("the watchlist %s a screen looks at could not be read: %s", list_id, exc)
+            continue
+        if found is not None:
+            out[list_id] = list(found.get("items") or ())
+    return out
 
 
 def _take_moved(service) -> bool:

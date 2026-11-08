@@ -161,3 +161,55 @@ def test_a_service_switched_off_drops_the_claims_an_earlier_run_left(
             await task
 
     asyncio.run(scenario())
+
+
+class ListLink:
+    """The bridge's internal watchlist route as the service's sealed link answers it."""
+
+    def __init__(self, items):
+        self.items, self.reads = items, []
+
+    async def watchlist_read(self, list_id):
+        self.reads.append(list_id)
+        if self.items is None:
+            raise RuntimeError("watchlist_read: connecterror")
+        return {"list_id": list_id, "name": "Mine", "items": list(self.items)}
+
+
+def test_a_watchlist_screen_looks_at_the_owners_list(
+    tmp_path,
+    master_fixture,  # noqa: F811
+    recorded,
+):
+    """Release review MEDIUM-7: the live source never read the owner's list, so a watchlist
+    universe was always empty. The feed job reads it through the bridge's internal route."""
+    clock = {"now": ms(DAY, "09:20")}
+    settings = _settings(tmp_path, master_fixture)
+    universe = {"kind": "watchlist", "list_id": 3}
+
+    async def scenario():
+        svc = Service(settings, FERNET, jobs={"feed": lambda s: runtime.run_feed(s, tick_s=0.05)})
+        svc.clock = lambda: clock["now"]
+        link = svc.parts["link"] = ListLink(
+            [
+                {"id": 1, "symbol": "SBIN", "exchange": "NSE"},
+                {"id": 2, "symbol": "INFY", "exchange": "NSE"},
+            ]
+        )
+        task = asyncio.create_task(svc.run())
+        try:
+            await until(lambda: svc.state == "running" and "source" in svc.parts)
+            source = svc.parts["source"]
+            await REGISTRY["create"](svc, {"spec": dict(SPEC, universe=universe)})
+            await reached(
+                lambda: [m.symbol for m in source.members(universe)] == ["SBIN", "INFY"],
+                "a watchlist universe is always empty",
+            )
+            await reached(lambda: recorded[-1] == ("PUT", CLAIMS, 2), "its keys are not claimed")
+            assert link.reads == [3]
+        finally:
+            svc.stop("test")
+            await task
+
+    asyncio.run(scenario())
+    store_module.stop()
