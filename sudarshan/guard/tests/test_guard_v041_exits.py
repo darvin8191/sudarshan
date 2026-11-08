@@ -254,6 +254,10 @@ def _rate_limited(working):
 def test_l4_an_answer_that_does_not_prove_every_cancel_sends_no_exit_and_says_how_many(
     monkeypatch, risk_store, answer
 ):
+    """The switch without Exit all, the order book hanging: Upstox's cancel of every open order
+    is sent without the book, and its answer is told as it is. (With Exit all asked the switch
+    no longer cancels without the book at all: release review v0.4.1 X5,
+    test_guard_killswitch_book.py.)"""
     import services.gtt_orderbook_service as gtt_book
     from sudarshan.guard import flag, gate
 
@@ -280,22 +284,17 @@ def test_l4_an_answer_that_does_not_prove_every_cancel_sends_no_exit_and_says_ho
     broker.rest(CE, "SELL", 65)  # a stop under the long CE
     broker.rest(PE, "BUY", 30)  # a stop over the short PE
     broker.order_book_delay = 20.0  # the order book hangs: every read is cut off
-    result = killswitch.activate(OWNER, exit_all=True, phrase="STOP")
+    result = killswitch.activate(OWNER, exit_all=False, phrase="STOP")
     steps = _steps(result)
     market = [(o["symbol"], o["side"], o["qty"]) for o in broker.orders]
-    print(
-        f"\n{answer.__name__}: multi-cancel calls {broker.multi_calls}; still working "
-        f"{[(o['symbol'], o['side']) for o in broker.working]}; market exits {market}"
-    )
-    for name in ("live_orders", "live_orders_again", "live_exit_all"):
-        if name in steps:
-            print(f"  {name}: ok={steps[name]['ok']} {steps[name]['words']!r}")
-    print("  told:", [t[:160] for t in told])
     assert market == [], "a market exit was sent beside a closing order that may still work"
-    said = steps["live_exit_all"]["words"] + steps["live_orders"]["words"]
+    assert "live_exit_all" not in steps
+    assert broker.multi_calls >= 1
+    said = steps["live_orders"]["words"]
     if answer is _partial:
         assert "1" in said and "cancel" in said, "the step does not say how many were cancelled"
-    assert "Upstox app" in steps["live_exit_all"]["words"]
+    assert steps["live_orders"]["ok"] is False
+    assert "Upstox app" in said
 
 
 # -- N2 in whole lots: a target for half the position, one lot of it filled ------------------
@@ -433,7 +432,14 @@ class Cancelling(Multi):
 
     def delete(self, url, headers=None, **kwargs):
         if "/v2/order/multi/cancel" not in url:
-            return super().delete(url, headers, **kwargs)
+            from urllib.parse import parse_qs, urlparse
+
+            orderid = parse_qs(urlparse(url).query)["order_id"][0]
+            with self.lock:  # a cancel by id reads "cancel pending" too
+                self.cancelling[orderid] = self.pending_reads
+            return world_module.FakeResponse(
+                200, {"status": "success", "data": {"order_id": orderid}}
+            )
         with self.lock:
             ids = [order["id"] for order in self.working]
             for orderid in ids:
@@ -481,11 +487,14 @@ def test_n9_exit_all_waits_for_the_orders_a_200_cancelled_to_show_ended(monkeypa
     monkeypatch.setattr(gate, "GATE", fresh)
     monkeypatch.setenv(flag.ENV, "on")
     broker.rest(CE, "SELL", 65)  # the stop loss protecting the long
-    broker.fail_reads = 6  # the switch's first looks at the order book fail: it cancels without it
+    # The switch's first looks at the order book fail: with Exit all asked it cancels nothing
+    # without the book (X5) and looks again; the sweep reads the book and cancels the stop, which
+    # reads "cancel pending" for two reads more.
+    broker.fail_reads = 3
     result = killswitch.activate(OWNER, exit_all=True, phrase="STOP")
     steps = _steps(result)
-    assert steps["live_orders"]["detail"].get("without_book") is True, steps
-    assert steps["live_orders"]["detail"]["cancelled_ids"], steps
+    assert steps["live_orders"]["detail"].get("kept_for_exit_all") is True, steps
+    assert steps["live_orders_again"]["detail"]["cancelled_ids"], steps
     assert steps["live_exit_all"]["detail"]["cancels_shown"] is True, steps
     assert broker.true_qty(CE) == 0, steps["live_exit_all"]["words"]
 

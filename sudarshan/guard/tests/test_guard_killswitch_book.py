@@ -72,33 +72,122 @@ def _steps(answer) -> dict:
     return {step["step"]: step for step in answer.state.report["steps"]}
 
 
-def test_with_the_book_unreadable_it_cancels_every_order_without_it_then_exits(upstox):
+def test_x5_with_the_book_unreadable_and_exit_all_asked_the_stops_are_kept(upstox):
+    """Long 65 CE with its stop loss resting; the owner turns the switch on with Exit all while
+    the order book hangs. Nothing is cancelled and nothing is sent: a cancel without the book
+    would take the stop, and Exit all could not size an exit without the book, so the position
+    would be left held with no stop and no exit (release review v0.4.1, X5). On 376dc58 the stop
+    was cancelled and the position left open."""
     broker = upstox.broker
     broker.rest(CE, "SELL", 65)  # a resting stop beside the position
     broker.order_book_delay = 20.0  # the book hangs: every read is cut off
     answer = killswitch.activate(OWNER, exit_all=True, phrase="STOP")
     steps = _steps(answer)
+    assert broker.multi_calls == 0  # Upstox's cancel of every open order was not sent
+    assert broker.true_qty(CE) == 65 and len(broker.working) == 1  # the stop still protects it
+    assert [o for o in broker.orders if o["symbol"] == CE] == []  # no market exit beside it
+    assert steps["live_orders"]["words"] == words.KS_ORDERS_KEPT_UNREAD
+    assert steps["live_orders"]["ok"] is False
+    assert steps["live_orders_again"]["detail"]["kept_for_exit_all"] is True  # looked again
+    assert steps["live_exit_all"]["words"] == words.KS_NO_EXIT_ORDERS_UNREAD
+    assert steps["live_exit_all"]["ok"] is False
+    assert "Upstox app" in steps["live_exit_all"]["words"]
+
+
+def test_x5_the_sweep_finds_the_book_and_the_switch_cancels_then_exits(upstox, monkeypatch):
+    """The book hangs for the first look and answers for the sweep two seconds later: the stop
+    is cancelled from the book and Exit all closes the position, as on a readable book."""
+    broker = upstox.broker
+    broker.rest(CE, "SELL", 65)
+    broker.order_book_delay = 20.0
+    real_sweep = killswitch._sweep_again
+
+    def book_back(*args, **kwargs):
+        broker.order_book_delay = 0.0  # by the sweep, Upstox answers again
+        return real_sweep(*args, **kwargs)
+
+    monkeypatch.setattr(killswitch, "_sweep_again", book_back)
+    answer = killswitch.activate(OWNER, exit_all=True, phrase="STOP")
+    steps = _steps(answer)
+    assert broker.multi_calls == 0
+    assert steps["live_orders"]["words"] == words.KS_ORDERS_KEPT_UNREAD
+    assert steps["live_orders_again"]["ok"] is True
+    assert broker.true_qty(CE) == 0 and broker.working == []
+    assert steps["live_exit_all"]["ok"] is True
+
+
+def test_without_exit_all_the_book_unreadable_still_cancels_every_order_without_it(upstox):
+    """The switch alone (no Exit all) cancels every open order through Upstox's own cancel when
+    the book cannot be read, as before: no exit follows that the stops would be needed for."""
+    broker = upstox.broker
+    broker.rest(CE, "SELL", 65)
+    broker.order_book_delay = 20.0
+    answer = killswitch.activate(OWNER, exit_all=False, phrase="STOP")
+    steps = _steps(answer)
     assert broker.multi_calls >= 1 and broker.working == []
     assert steps["live_orders"]["words"] == words.KS_ORDERS_CANCELLED_UNREAD
-    # M6.9 (N2): what is held is worked out from the positions row and the order book's fills,
-    # and the order book hangs, so no market exit is sent for it; the step says so.
-    assert [o for o in broker.orders if o["symbol"] == CE] == []
-    assert broker.true_qty(CE) == 65
-    assert steps["live_exit_all"]["ok"] is False
-    assert "Upstox did not send your orders in time" in steps["live_exit_all"]["words"]
+    assert "live_exit_all" not in steps
 
 
-def test_if_that_fails_too_no_market_exit_is_sent_and_the_step_says_to_use_the_app(upstox):
+def test_without_exit_all_a_cancel_that_fails_too_is_said_as_not_confirmed(upstox):
     broker = upstox.broker
     broker.rest(CE, "SELL", 65)
     broker.order_book_delay = 20.0
     broker.multi_answer = 503
-    answer = killswitch.activate(OWNER, exit_all=True, phrase="STOP")
+    answer = killswitch.activate(OWNER, exit_all=False, phrase="STOP")
     steps = _steps(answer)
-    assert [o for o in broker.orders if o["symbol"] == CE] == []  # no market exit beside the stop
-    assert broker.true_qty(CE) == 65 and len(broker.working) == 1  # as it was: the app can close it
-    assert steps["live_exit_all"]["words"] == words.KS_NO_EXIT_ORDERS_UNREAD
-    assert steps["live_exit_all"]["ok"] is False
-    assert "Upstox app" in steps["live_exit_all"]["words"]
+    assert broker.true_qty(CE) == 65 and len(broker.working) == 1  # as it was
     # a 5xx may have come after Upstox acted: not confirmed, never "did not go through" (N5)
     assert steps["live_orders"]["words"] == words.ks_orders_not_cancelled_unread(None, None, True)
+
+
+def test_x5_exit_all_that_got_no_orders_in_time_is_sent_again_and_closes(upstox, monkeypatch):
+    """The book answers the switch's reads, the stop is cancelled, and then Upstox does not send
+    the orders in time for Exit all's own read: Exit all is tried once more, and closes."""
+    broker = upstox.broker
+    broker.rest(CE, "SELL", 65)
+    reads = []
+    real_order_book = broker._order_book
+
+    def book(timeout=None):
+        reads.append(timeout)
+        if len(reads) == 5:  # Exit all's own read, after the switch's four
+            broker.order_book_delay = 20.0
+        else:
+            broker.order_book_delay = 0.0
+        return real_order_book(timeout)
+
+    monkeypatch.setattr(broker, "_order_book", book)
+    monkeypatch.setattr(killswitch, "EXIT_ALL_AGAIN_AFTER_S", 0.0)
+    answer = killswitch.activate(OWNER, exit_all=True, phrase="STOP")
+    steps = _steps(answer)
+    assert broker.working == []
+    assert broker.true_qty(CE) == 0, steps["live_exit_all"]
+    assert steps["live_exit_all"]["detail"]["tried_again"] is True
+    assert steps["live_exit_all"]["words"].startswith("Exit all, sent again")
+
+
+def test_x5_a_position_left_open_after_its_stop_went_is_said_with_the_upstox_app(
+    upstox, monkeypatch
+):
+    """The stop is cancelled from the book, then the order book stays unreadable for both of Exit
+    all's tries: the step says the position is open with its stop cancelled."""
+    broker = upstox.broker
+    broker.rest(CE, "SELL", 65)
+    reads = []
+    real_order_book = broker._order_book
+
+    def book(timeout=None):
+        reads.append(timeout)
+        broker.order_book_delay = 20.0 if len(reads) >= 5 else 0.0
+        return real_order_book(timeout)
+
+    monkeypatch.setattr(broker, "_order_book", book)
+    monkeypatch.setattr(killswitch, "EXIT_ALL_AGAIN_AFTER_S", 0.0)
+    answer = killswitch.activate(OWNER, exit_all=True, phrase="STOP")
+    steps = _steps(answer)
+    assert broker.working == [] and broker.true_qty(CE) == 65
+    said = steps["live_exit_all"]["words"]
+    assert said.endswith(words.ks_left_without_stops(1))
+    assert "stop-loss order cancelled" in said and "Upstox app" in said
+    assert steps["live_exit_all"]["detail"]["left_without_stops"] == 1

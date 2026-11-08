@@ -162,9 +162,15 @@ KS_ORDERS_NOT_CANCELLED_UNREAD = (
     "Upstox could not show its open orders, and its Cancel all did not go through either. "
     "Open orders may still be working. Check Orders in the Upstox app."
 )
+KS_ORDERS_KEPT_UNREAD = (
+    "Upstox could not show its open orders, so nothing was cancelled: a cancel without them "
+    "would take the stop losses, and Exit all could not size an exit without them either. "
+    "Your orders stand as they were. Check Orders in the Upstox app."
+)
 KS_NO_EXIT_ORDERS_UNREAD = (
-    "Exit all was not sent, because open orders could not be cancelled and one left working "
-    "could close a position twice. Close your positions from the Upstox app."
+    "Exit all was not sent, because Upstox could not show its open orders: no exit could be "
+    "sized, and one still working could close a position twice. Your positions are open and "
+    "their stop-loss orders still work. Close them from the Upstox app."
 )
 KS_GTTS_NOT_READ = (
     "The GTTs could not be read from Upstox, so none were cancelled. Check GTTs and cancel them "
@@ -294,9 +300,7 @@ def ks_orders_left(cancelled: int, left: int) -> str:
     )
 
 
-def ks_orders_not_cancelled_unread(
-    done: int | None, total: int | None, not_confirmed: bool
-) -> str:
+def ks_orders_not_cancelled_unread(done: int | None, total: int | None, not_confirmed: bool) -> str:
     """The order book could not be read and Upstox's own Cancel all did not cancel every order:
     some went (it says how many), or it may have gone and cannot be told, or it did not go."""
     if not_confirmed:
@@ -348,8 +352,26 @@ def _ended(message: str) -> str:
     return message if message.endswith(".") else f"{message}."
 
 
-def ks_exit_all(message: str) -> str:
-    return f"Exit all: {_ended(message)}" if message.strip() else "Exit all sent."
+def ks_exit_all(message: str, tried_again: bool = False) -> str:
+    lead = (
+        "Exit all, sent again after Upstox did not send the orders in time"
+        if tried_again
+        else "Exit all"
+    )
+    return f"{lead}: {_ended(message)}" if message.strip() else f"{lead} sent."
+
+
+def ks_left_without_stops(count: int) -> str:
+    """Exit all left ``count`` positions open after the switch cancelled their stop losses."""
+    if count == 1:
+        return (
+            "The position Exit all did not close is open with its stop-loss order cancelled. "
+            "Close it from the Upstox app."
+        )
+    return (
+        f"The {count} positions Exit all did not close are open with their stop-loss orders "
+        "cancelled. Close them from the Upstox app."
+    )
 
 
 def ks_swept_again(said: str) -> str:
@@ -908,6 +930,7 @@ FIXED = (
     KS_ORDERS_NOT_CONFIRMED,
     KS_ORDERS_CANCELLED_UNREAD,
     KS_ORDERS_NOT_CANCELLED_UNREAD,
+    KS_ORDERS_KEPT_UNREAD,
     KS_NO_EXIT_ORDERS_UNREAD,
     KS_GTTS_NOT_READ,
     KS_EXIT_ALL_BUSY,
