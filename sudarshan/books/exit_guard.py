@@ -198,6 +198,24 @@ def unlisted_not_sized(position: Position) -> str:
     )
 
 
+def unlisted_in_another_product(position: Position, listed: list[str]) -> str:
+    """Why Exit all sent no exit for a product of an instrument the order book shows traded today
+    and held, which Upstox's positions list only in another product: a conversion in Upstox's app
+    moves quantity between products with no order and can show its new row late, so this cannot
+    be told from a fresh position, and when that cannot be worked out nothing is sent.
+
+    Args:
+        position: The position as it would have been sent, with the unlisted product.
+        listed: The products (as the app writes them) Upstox's positions do list it in.
+    """
+    shown = " and ".join(listed)
+    return (
+        f"{trader_name(position)} was traded today as {position[2]}, but Upstox's positions show "
+        f"it only as {shown}: it may have been converted, so Exit all did not close it as "
+        f"{position[2]}. Check Positions, and close it from the Upstox app if it is still held."
+    )
+
+
 def exit_working(position: Position, at: float, order_ids: tuple[str, ...]) -> str:
     """Why no exit was sent for a position whose earlier exit (sent at ``at``) is seen working at
     Upstox: the position is still open, so exiting again is refused until that order ends."""

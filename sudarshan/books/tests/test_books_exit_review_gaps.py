@@ -340,3 +340,96 @@ def test_r2_control_a_short_row_with_the_order_book_unread_is_not_sized_and_not_
     assert code != 200 and body["status"] == "error" and broker.orders == []
     assert "Upstox did not send your orders in time" in body["message"]
     assert "position opened in the last minute" not in body["message"]
+
+
+# -- V1. A conversion whose new row is not shown yet ------------------------------------------------------
+
+
+class RawBroker(Broker):
+    """Fixed raw positions and order rows; records each order's side, product and quantity."""
+
+    def __init__(self, positions, orders):
+        super().__init__({}, 0.0)
+        self.raw_positions = positions
+        self.raw_orders = orders
+        self.products = []
+
+    def get(self, url, headers=None, **kwargs):
+        if url.endswith(ORDERS_URL):
+            return FakeResponse(200, {"status": "success", "data": list(self.raw_orders)})
+        return FakeResponse(200, {"status": "success", "data": list(self.raw_positions)})
+
+    def post(self, url, headers=None, content=None, **kwargs):
+        payload = json.loads(content)
+        self.products.append(
+            (payload["transaction_type"], payload["product"], int(payload["quantity"]))
+        )
+        return super().post(url, headers=headers, content=content, **kwargs)
+
+
+def _raw_row(token, exchange, name, product, quantity, overnight, bought, sold):
+    return {"instrument_token": token, "exchange": exchange, "tradingsymbol": name,
+            "product": product, "quantity": quantity, "overnight_quantity": overnight,
+            "day_buy_quantity": bought, "day_sell_quantity": sold,
+            "average_price": 100.0, "last_price": 101.0}  # fmt: skip
+
+
+def _raw_order(order_id, token, exchange, name, product, side, quantity, status="complete"):
+    filled = quantity if status == "complete" else 0
+    return {"order_id": order_id, "instrument_token": token, "exchange": exchange,
+            "tradingsymbol": name, "product": product, "transaction_type": side,
+            "order_type": "MARKET", "status": status, "quantity": quantity,
+            "filled_quantity": filled, "pending_quantity": quantity - filled,
+            "order_timestamp": "2026-10-27 11:00:00"}  # fmt: skip
+
+
+def test_v1_a_converted_part_sold_today_whose_row_is_not_shown_is_not_bought_back(monkeypatch):
+    """NRML carried 130. In Upstox's app 65 were converted to MIS (no order), and that MIS 65 was
+    sold today (an I order, complete). The positions book shows the D row (65) and no I row yet.
+    The account holds +65 NRML and nothing in MIS. On b14cb0e Exit all sent SELL 65 NRML plus
+    BUY 65 MIS and answered success, leaving the account long 65 MIS. Now the MIS is named, not
+    sent, and the answer is not success."""
+    positions = [_raw_row(TOKEN_X, "NFO", X, "D", 65, 65, 0, 0)]
+    orders = [_raw_order("261027000070", TOKEN_X, "NFO", X, "I", "SELL", 65)]
+    broker = RawBroker(positions, orders)
+    world = install(monkeypatch, broker)
+    code, body = world.app_exit_all()
+    assert ("BUY", "I", 65) not in broker.products, (code, body, broker.products)
+    assert broker.products == [("SELL", "D", 65)]
+    assert code != 200 and body["status"] == "error"
+    assert "traded today as MIS" in body["message"] and "only as NRML" in body["message"]
+    assert "may have been converted" in body["message"]
+    named = [p for p in body["positions"] if p["product"] == "MIS"]
+    assert named and named[0]["outcome"] == "not_sent"
+
+
+def test_v1_a_fresh_position_in_another_product_of_a_listed_instrument_is_named_not_sent(
+    monkeypatch,
+):
+    """The same shape from the other side: NRML carried 65 (listed) and 65 bought as MIS a second
+    ago, not listed yet. It cannot be told from a conversion, so the MIS is named and not sent;
+    the NRML is exited. On b14cb0e both were sent."""
+    positions = [_raw_row(TOKEN_X, "NFO", X, "D", 65, 65, 0, 0)]
+    orders = [_raw_order("261027000071", TOKEN_X, "NFO", X, "I", "BUY", 65)]
+    broker = RawBroker(positions, orders)
+    world = install(monkeypatch, broker)
+    code, body = world.app_exit_all()
+    assert broker.products == [("SELL", "D", 65)], (code, body, broker.products)
+    assert code != 200 and "traded today as MIS" in body["message"]
+
+
+def test_v1_control_an_unlisted_instrument_with_no_row_at_all_is_still_exited(monkeypatch):
+    """Control: a position with no row in any product is exited from its fills, as item 1 says."""
+    world = install(monkeypatch, Broker({X: 65}, 0.0))
+    _bought_not_listed(world, Y, 30)
+    code, body = world.app_exit_all()
+    assert (code, body["status"]) == (200, "success"), body
+    assert _sent(world.broker, Y) == [("SELL", 30)]
+
+
+def test_v1_the_sentence_is_for_a_trader():
+    said = exit_guard.unlisted_in_another_product(("NFO", X, "MIS"), ["NRML"])
+    assert said.startswith("NIFTY 25900 CE was traded today as MIS")
+    assert "Upstox app" in said and "Positions" in said
+    for word in ("None", "token", "HTTP", "424", "409", "order book", "row", "arm"):
+        assert word not in said

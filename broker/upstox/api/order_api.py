@@ -1105,8 +1105,18 @@ def _unlisted_positions(rows, orders):
     product from the order rows, the size from what the fills leave held in it
     (``sudarshan.books.fills``), and the symbol looked up from the token in the loop. One whose
     size cannot be worked out is left out with its sentence, never counted as closed. A CNC net
-    sale is a sale from holdings, not an open position."""
+    sale is a sale from holdings, not an open position. An unlisted product of an instrument that
+    has a row in another product is named and not sent (V1): a conversion in Upstox's app whose
+    new row is not shown yet cannot be told from a fresh position, and an exit sent in the old
+    product would open the opposite position."""
     candidates, skipped, outcomes = [], [], []
+    listed_in = {}  # token -> the products (as the app writes them) Upstox's positions list
+    for row in rows or ():
+        if isinstance(row, dict) and str(row.get("instrument_token") or "").strip():
+            token = str(row["instrument_token"]).strip()
+            letter = str(row.get("product") or "").strip().upper()
+            product = reverse_map_product_type(str(row.get("exchange") or ""), letter) or letter
+            listed_in.setdefault(token, []).append(product)
     for exchange, raw_name, token, letter, held_now in fills.unlisted_nets(rows, orders):
         product = reverse_map_product_type(exchange, letter)
         if held_now is not None and held_now < 0 and product == "CNC":
@@ -1119,13 +1129,17 @@ def _unlisted_positions(rows, orders):
             "quantity": 0,
             _UNLISTED: True,
         }
-        if held_now is None or not product:
+        if held_now is None or not product or token in listed_in:
             # SUDARSHAN M6.9 (Z3): named as every other exit sentence names it, from the
             # OpenAlgo symbol; Upstox's own trading symbol only when the lookup finds nothing.
             name = get_symbol(token, exchange) or raw_name
             held = exit_guard.position_of(exchange, name, product or letter)
-            why = exit_guard.unlisted_not_sized(held)
-            logger.warning(f"Exit all sent no exit for {name}: unlisted, and not sized")
+            if held_now is not None and product and token in listed_in:
+                why = exit_guard.unlisted_in_another_product(held, listed_in[token])
+                logger.warning(f"Exit all sent no exit for {name}: unlisted as {product}, listed")
+            else:
+                why = exit_guard.unlisted_not_sized(held)
+                logger.warning(f"Exit all sent no exit for {name}: unlisted, and not sized")
             skipped.append(why)
             outcomes.append(_outcome(held, "not_sent", why))
             continue
