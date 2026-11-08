@@ -1,0 +1,72 @@
+# सुदर्शन / SUDARSHAN screener (M9): the owner's screens, run on the live feed's candles.
+# Its sealed local API answers OpenAlgo's bridge on 127.0.0.1:5584 (loopback only); GET /health there
+# says which release is installed and what the service is doing. The service is off until
+# SUDARSHAN_SCREENER=on in /etc/sudarshan/screener.env (the release writes the default when the key
+# is absent and keeps the owner's value); off, it answers every request as off, opens no database
+# and runs no job.
+# Docs: sudarshan/screener/README.md. Settings: /etc/sudarshan/screener.env (root:sudarshan 640).
+# Installed, enabled and restarted by sudarshan-deploy from each release, like sudarshan-feed.
+
+[Unit]
+Description=SUDARSHAN screener (the owner's screens on the live feed)
+After=network-online.target
+Wants=network-online.target
+# Ordering only, as for the alerts: no Wants= on OpenAlgo or the feed, which would start them while
+# the deploy tool has them stopped. The service reconnects to both by itself.
+After=openalgo.service sudarshan-feed.service
+
+[Service]
+Type=simple
+User=sudarshan
+Group=sudarshan
+Slice=sudarshan.slice
+WorkingDirectory=/opt/sudarshan/apps/openalgo
+ExecStart=/opt/sudarshan/apps/openalgo/.venv/bin/python -m sudarshan.screener
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+EnvironmentFile=-/etc/sudarshan/screener.env
+# The only place it writes: /var/lib/sudarshan-screener (screener.db, its journal, the bar files).
+# openalgo.db is read without write access, so db/ stays read-only here.
+StateDirectory=sudarshan-screener
+StateDirectoryMode=0700
+# Restarted after a crash, every 10 s. Not after exit status 2 (a setting or key it cannot use):
+# that would only repeat the same error line. A taken port is not a crash: it waits and tries again.
+Restart=on-failure
+RestartSec=10
+RestartPreventExitStatus=2
+# SIGTERM: the jobs are cancelled, the listener closes and the store is closed; killed after 20 s.
+TimeoutStopSec=20
+# Squeezed before it is killed (about 75% of MemoryMax, cross-design R11), and behind TRINETRA when
+# the box is busy. The candle series of 320 keys and the DuckDB reads fit well under this.
+MemoryHigh=576M
+MemoryMax=768M
+CPUWeight=40
+UMask=0077
+LimitCORE=0
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectProc=invisible
+ProtectSystem=strict
+ProtectHome=yes
+ReadOnlyPaths=-/etc/sudarshan
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+SystemCallArchitectures=native
+# All its traffic is loopback: the feed (ticks and REST through the governor), OpenAlgo and the
+# alerts service on this server. Upstox is reached only through the feed.
+IPAddressDeny=any
+IPAddressAllow=localhost
+
+[Install]
+WantedBy=multi-user.target

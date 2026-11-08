@@ -72,8 +72,19 @@ class Scope:
 
 
 def number(raw, path: str) -> tuple[Fraction, str]:
-    """A typed number as an exact fraction and as clean text."""
+    """A typed number as an exact fraction and as clean text.
+
+    The shared level parser takes unsigned text only (a level is never below zero); a screen
+    compares changes and returns too, so one leading minus is read here and the rest is shared.
+    """
+    negative = False
+    if isinstance(raw, str):
+        raw = raw.strip()
+        if raw.startswith("-"):
+            negative, raw = True, raw[1:]
     value = to_decimal(raw)
+    if value is not None and negative:
+        value = -value
     if value is None or abs(value) > NUMBER_LIMIT or value.as_tuple().exponent < -NUMBER_PLACES:
         raise SpecError(path, "Type a number, like 55 or 2500.50.")
     exact = Fraction(value)
