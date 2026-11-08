@@ -100,12 +100,13 @@ async def run_forever(service: Any, name: str, step: Step, every: float = CHECK_
 def register_all() -> None:
     """Register every job of the service, each from its own module. Called once by the entry
     point; a job module imported here adds one line."""
-    from . import benchmark, eod, feedlink, resolver
+    from . import benchmark, eod, feedlink, reports, resolver
 
     resolver.register_job()
     feedlink.register_job()
     eod.register_jobs()
     benchmark.register_jobs()
+    reports.register_jobs()
     try:
         from . import amfi
     except ImportError:  # pragma: no cover - the NAV job lands with PB7

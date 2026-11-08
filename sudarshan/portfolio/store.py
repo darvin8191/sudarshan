@@ -52,7 +52,7 @@ STATE_DIR = Path("/var/lib/sudarshan-portfolio")
 THREAD_PREFIX = "portfolio-store"
 
 #: Columns that hold JSON text, and columns that are flags; the store converts at the boundary.
-JSON_COLUMNS = frozenset({"tags", "charges_detail", "spec", "preview", "funds"})
+JSON_COLUMNS = frozenset({"tags", "charges_detail", "spec", "preview", "funds", "payload"})
 FLAG_COLUMNS = frozenset({"system", "pinned", "archived", "is_default", "late"})
 #: Never leave the store: who owns a row, and the client's retry key.
 HIDDEN_COLUMNS = ("principal", "request_id")
@@ -396,6 +396,58 @@ class Tx:
             t = self._t(name)
             self.conn.execute(delete(t).where(t.c[column] == tab_id, self._mine(t)))
         self.remove("tab", tab_id)
+
+    # ---- Upstox's reports (M7.6, M7.7, V3) ----
+    def report_get(self, kind: str, fy: int, segment: str) -> dict[str, Any] | None:
+        t = self._t("report_cache")
+        row = (
+            self.conn.execute(
+                select(t).where(
+                    t.c.kind == kind, t.c.fy == fy, t.c.segment == segment, self._mine(t)
+                )
+            )
+            .mappings()
+            .first()
+        )
+        return self._out(row)
+
+    def report_list(self, kind: str) -> list[dict[str, Any]]:
+        t = self._t("report_cache")
+        found = self.conn.execute(
+            select(t).where(t.c.kind == kind, self._mine(t)).order_by(t.c.fy, t.c.segment)
+        ).mappings()
+        return [self._out(row) for row in found]
+
+    def report_put(
+        self,
+        kind: str,
+        fy: int,
+        segment: str,
+        state: str,
+        read_at: int | None,
+        note: str | None,
+        payload: Any,
+        now: int,
+    ) -> None:
+        """The one record of a report; a later read replaces it whole."""
+        t = self._t("report_cache")
+        self.conn.execute(
+            delete(t).where(t.c.kind == kind, t.c.fy == fy, t.c.segment == segment, self._mine(t))
+        )
+        self.conn.execute(
+            insert(t).values(
+                principal=self.who,
+                kind=kind,
+                fy=fy,
+                segment=segment,
+                state=state,
+                read_at=read_at,
+                note=note,
+                payload=None if payload is None else json.dumps(payload, sort_keys=True),
+                created_at=now,
+                updated_at=now,
+            )
+        )
 
     # ---- a tab's loans (M7.19 V2) ----
     def liabilities_of(self, tab_id: int) -> list[int]:

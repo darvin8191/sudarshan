@@ -92,8 +92,8 @@ def raw(path, sql):
 # ---- the migration step --------------------------------------------------------------------------
 def test_the_step_is_the_second_and_the_status_tool_knows_it(path):
     made = PortfolioStore(path, now=NOW)
-    assert made.applied == [1, 2] and migrations.LATEST == 2
-    assert raw(path, "PRAGMA user_version") == [(2,)]
+    assert made.applied[:2] == [1, 2] and migrations.LATEST >= 2
+    assert raw(path, "PRAGMA user_version") == [(migrations.LATEST,)]
     made.close()
     again = PortfolioStore(path, now=NOW + 1)
     assert again.applied == []
@@ -136,8 +136,8 @@ def test_a_populated_v1_file_gains_the_table_and_keeps_every_row(path):
     assert rows_before["asset"] == 2 and rows_before["activity"] == 1
 
     again = PortfolioStore(path, now=NOW + 5)
-    assert again.applied == [2]
-    assert raw(path, "PRAGMA user_version") == [(2,)]
+    assert again.applied[0] == 2 and again.applied == list(range(2, migrations.LATEST + 1))
+    assert raw(path, "PRAGMA user_version") == [(migrations.LATEST,)]
     for table, rows in before.items():
         assert raw(path, f"SELECT * FROM {table} ORDER BY 1") == rows, table
     assert raw(path, "SELECT count(*) FROM tab_liability") == [(0,)]

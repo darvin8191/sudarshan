@@ -304,8 +304,33 @@ def _v2(conn: Connection) -> None:
         conn.exec_driver_sql(sql)
 
 
+#: V3 (M7.6, M7.7): Upstox's trade history and trade-wise P&L reports, kept per financial year
+#: and segment as the service last read them (integer paise inside the JSON payload), so a past
+#: year is read once and the current one at most once a night. Additive.
+V3 = (
+    """CREATE TABLE IF NOT EXISTS report_cache (
+        principal TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        fy INTEGER NOT NULL,
+        segment TEXT NOT NULL,
+        state TEXT NOT NULL,
+        read_at INTEGER,
+        note TEXT,
+        payload TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (principal, kind, fy, segment)
+    )""",
+)
+
+
+def _v3(conn: Connection) -> None:
+    for sql in V3:
+        conn.exec_driver_sql(sql)
+
+
 Step = tuple[int, Callable[[Connection], None]]
-STEPS: tuple[Step, ...] = ((1, _v1), (2, _v2))
+STEPS: tuple[Step, ...] = ((1, _v1), (2, _v2), (3, _v3))
 LATEST = STEPS[-1][0]
 
 

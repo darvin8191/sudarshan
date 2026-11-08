@@ -58,6 +58,7 @@ export const ACTIVITIES_PAGE_MAX = 500
 export const MF_SEARCH_MAX = 20
 export const IMPORT_PREVIEW_ROWS = 500
 export const UPSTOX_HISTORY_DAYS = 400
+export const REPORT_YEARS = 3
 export const NAV_OLD_BUSINESS_DAYS = 3
 export const XIRR_MIN_DAYS = 365
 export const IMPORT_MAX_FILE_BYTES = 900_000
@@ -182,6 +183,7 @@ export const JOB_NAMES = [
   'nav_settle',
   'benchmark',
   'resolve',
+  'reports',
 ] as const
 export type JobName = (typeof JOB_NAMES)[number]
 export const JOB_STATUSES = ['ok', 'late', 'failed', 'skipped'] as const
@@ -219,6 +221,12 @@ export const HELD_FILTERS = ['over', 'under'] as const
 export type HeldFilter = (typeof HELD_FILTERS)[number]
 export const UPSTOX_PARTS = ['holdings', 'positions', 'mtf', 'funds'] as const
 export type UpstoxPartName = (typeof UPSTOX_PARTS)[number]
+export const REPORT_SEGMENTS = ['EQ', 'FO', 'COM', 'CD', 'MF'] as const
+export type ReportSegment = (typeof REPORT_SEGMENTS)[number]
+export const REPORT_KINDS = ['trades', 'pnl'] as const
+export type ReportKind = (typeof REPORT_KINDS)[number]
+export const REPORT_STATES = ['ok', 'partial', 'reading', 'unavailable'] as const
+export type ReportState = (typeof REPORT_STATES)[number]
 export const PART_STATES = ['ok', 'stale', 'unavailable'] as const
 export type PartState = (typeof PART_STATES)[number]
 export const ERROR_CODES = [
@@ -406,6 +414,27 @@ export const OPS: readonly OpSpec[] = [
     route: '/upstox/history',
     cls: 'upstox',
     query: [['limit', 'int']],
+  },
+  { name: 'report_years', method: 'GET', route: '/reports/years', cls: 'upstox' },
+  {
+    name: 'report_trades',
+    method: 'GET',
+    route: '/reports/trades',
+    cls: 'upstox',
+    query: [
+      ['fy', 'int'],
+      ['segment', 'str'],
+    ],
+  },
+  {
+    name: 'report_pnl',
+    method: 'GET',
+    route: '/reports/pnl',
+    cls: 'upstox',
+    query: [
+      ['fy', 'int'],
+      ['segment', 'str'],
+    ],
   },
 ]
 
@@ -1308,6 +1337,105 @@ export interface UpstoxHistoryArgs {
   limit?: number
 }
 
+/** One of the last REPORT_YEARS financial years (the year it starts in) and a segment. */
+export interface ReportArgs {
+  fy: number
+  segment: ReportSegment
+}
+
+// ---- Upstox's reports (M7.6 trade history, M7.7 trade-wise P&L and charges) ----
+
+export interface ReportYear {
+  /** The year the financial year starts in: 2026 is FY 2026-27. */
+  fy: number
+  label: string
+  current: boolean
+}
+
+export interface ReportYears {
+  today: Day
+  years: ReportYear[]
+}
+
+/** What every report answer carries: not market data, so the time it was read is shown. */
+export interface ReportPart {
+  state: ReportState
+  /** When Upstox last answered in full; null until it has. */
+  read_at: EpochMs | null
+  /** A sentence when the figures are not complete or not fresh. */
+  note: string | null
+  fy: number
+  segment: ReportSegment
+}
+
+/** One executed trade as Upstox's trade history lists it (`/v2/charges/historical-trades`). */
+export interface TradeRow {
+  trade_id: string
+  trade_date: Day
+  exchange: string
+  segment: ReportSegment
+  transaction_type: 'BUY' | 'SELL'
+  scrip_name: string
+  symbol: string | null
+  isin: string | null
+  instrument_token: string | null
+  option_type: 'CE' | 'PE' | null
+  strike_price_u: PriceU | null
+  expiry: Day | null
+  qty_u: QtyU
+  price_u: PriceU
+  amount_paise: Paise
+}
+
+export interface TradesReport extends ReportPart {
+  rows: TradeRow[]
+  /** Upstox's count for the year and segment, when its answer carried one. */
+  total_records: number | null
+  bought_paise: Paise
+  sold_paise: Paise
+}
+
+/** One matched buy and sell as Upstox's trade-wise P&L report lists it. */
+export interface PnlRow {
+  scrip_name: string
+  isin: string | null
+  trade_type: 'EQ' | 'FUT' | 'OPT' | string
+  qty_u: QtyU
+  buy_date: Day | null
+  sell_date: Day | null
+  buy_average_u: PriceU
+  sell_average_u: PriceU
+  buy_amount_paise: Paise
+  sell_amount_paise: Paise
+  /** sell amount - buy amount, before charges. */
+  pnl_paise: Paise
+}
+
+/** Upstox's charges on the year's trades (`/v2/trade/profit-loss/charges`); null where it gave none. */
+export interface ChargesBreakdown {
+  total_paise: Paise | null
+  brokerage_paise: Paise | null
+  gst_paise: Paise | null
+  stt_paise: Paise | null
+  stamp_duty_paise: Paise | null
+  transaction_paise: Paise | null
+  clearing_paise: Paise | null
+  ipft_paise: Paise | null
+  others_paise: Paise | null
+  sebi_turnover_paise: Paise | null
+  demat_transaction_paise: Paise | null
+}
+
+export interface PnlReport extends ReportPart {
+  rows: PnlRow[]
+  /** Upstox's count of trades in the report; null until the metadata was read. */
+  trades_count: number | null
+  realised_paise: Paise
+  charges: ChargesBreakdown | null
+  /** realised less the charges total; null until the charges were read. */
+  net_paise: Paise | null
+}
+
 export interface ActivitiesPage {
   items: Activity[]
   /** Pass as `before` for the next page; null on the last. */
@@ -1367,6 +1495,9 @@ export interface PortfolioOps {
   view_delete: { args: Targets & Versioned; data: Deleted }
   upstox_book: { args: UpstoxBookArgs; data: UpstoxBook }
   upstox_history: { args: UpstoxHistoryArgs; data: UpstoxHistory }
+  report_years: { args: NoArgs; data: ReportYears }
+  report_trades: { args: ReportArgs; data: TradesReport }
+  report_pnl: { args: ReportArgs; data: PnlReport }
 }
 
 export type OpName = keyof PortfolioOps

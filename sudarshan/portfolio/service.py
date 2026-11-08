@@ -107,6 +107,7 @@ class Service:
         self.resolver: Any = None
         self.prices: Any = None
         self.upstox: Any = None
+        self.reports: Any = None  # the Upstox reports reader (reports.py), built on first use
         self._calendar: Any = None
         #: The day the settle last ran in this process (a failed one is retried at a restart).
         self.settle_tried: int | None = None
@@ -175,6 +176,15 @@ class Service:
             )
         return self.upstox
 
+    def ensure_reports(self) -> Any:
+        """The reports reader (reports.py): Upstox's trade history and trade-wise P&L, kept per
+        financial year, read through the live book's token, budget and client."""
+        if self.reports is None:
+            from .reports import ReportReader
+
+            self.reports = ReportReader(self, self.ensure_upstox())
+        return self.reports
+
     # ---- what /health shows ---------------------------------------------------------------
     @property
     def state(self) -> str:
@@ -232,7 +242,9 @@ class Service:
             await self._stop.wait()
         finally:
             self._set_state("stopping")
-            await cancel_and_wait(api_task, *self._tasks.values())
+            reads = [t for r in (self.reports,) if r is not None for t in r._tasks.values()]
+            await cancel_and_wait(api_task, *self._tasks.values(), *reads)
+            self.reports = None
             await self.api.close()
             for held in (self.prices, self.upstox):
                 if held is not None and hasattr(held, "aclose"):

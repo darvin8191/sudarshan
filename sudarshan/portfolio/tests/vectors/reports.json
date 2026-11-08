@@ -1,0 +1,307 @@
+{
+ "about": "Golden vectors for reports.py (PN2, M7.6 and M7.7): Upstox's documented rows of the trade history, the trade-wise P&L report, its metadata and the charges, and the integers the phone receives for each. Worked out by hand in each case's why; this file's arithmetic is Decimal, not the code's.",
+ "trades": [
+  {
+   "id": "T1",
+   "title": "An equity buy as the trade history lists it",
+   "why": "10 RELIANCE bought at 2,587.45 for 25,874.50 on 27 Oct 2026: quantity 10 is 10000000 qty_u, the price 25874500 price_u, the amount 2587450 paise, the date 20261027. No option type, strike or expiry (null), the ISIN, symbol and instrument token as given.",
+   "raw": {
+    "exchange": "NSE",
+    "segment": "EQ",
+    "option_type": null,
+    "quantity": 10,
+    "amount": 25874.5,
+    "trade_id": "50001",
+    "trade_date": "2026-10-27",
+    "transaction_type": "BUY",
+    "scrip_name": "RELIANCE INDUSTRIES",
+    "strike_price": null,
+    "expiry": null,
+    "price": 2587.45,
+    "isin": "INE002A01018",
+    "symbol": "RELIANCE",
+    "instrument_token": "NSE_EQ|INE002A01018"
+   },
+   "expect": {
+    "trade_id": "50001",
+    "trade_date": 20261027,
+    "exchange": "NSE",
+    "segment": "EQ",
+    "transaction_type": "BUY",
+    "scrip_name": "RELIANCE INDUSTRIES",
+    "symbol": "RELIANCE",
+    "isin": "INE002A01018",
+    "instrument_token": "NSE_EQ|INE002A01018",
+    "option_type": null,
+    "strike_price_u": null,
+    "expiry": null,
+    "qty_u": 10000000,
+    "price_u": 25874500,
+    "amount_paise": 2587450
+   }
+  },
+  {
+   "id": "T2",
+   "title": "An option sale carries its strike and expiry; no ISIN or token",
+   "why": "65 NIFTY 25900 CE sold at 125.00 for 8,125.00 on 28 Oct 2026, expiring 3 Nov 2026: strike 25900.0 is 259000000 price_u, expiry 20261103, option type CE. Upstox gives no ISIN and no instrument token for FO rows: both null.",
+   "raw": {
+    "exchange": "NFO",
+    "segment": "FO",
+    "option_type": "CE",
+    "quantity": 65,
+    "amount": 8125.0,
+    "trade_id": "50002",
+    "trade_date": "2026-10-28",
+    "transaction_type": "SELL",
+    "scrip_name": "NIFTY 25900 CE",
+    "strike_price": 25900.0,
+    "expiry": "2026-11-03",
+    "price": 125.0,
+    "isin": null,
+    "symbol": "NIFTY26NOV25900CE",
+    "instrument_token": null
+   },
+   "expect": {
+    "trade_id": "50002",
+    "trade_date": 20261028,
+    "exchange": "NFO",
+    "segment": "FO",
+    "transaction_type": "SELL",
+    "scrip_name": "NIFTY 25900 CE",
+    "symbol": "NIFTY26NOV25900CE",
+    "isin": null,
+    "instrument_token": null,
+    "option_type": "CE",
+    "strike_price_u": 259000000,
+    "expiry": 20261103,
+    "qty_u": 65000000,
+    "price_u": 1250000,
+    "amount_paise": 812500
+   }
+  },
+  {
+   "id": "T3",
+   "title": "A mutual-fund purchase with fractional units",
+   "why": "109.459 units bought at 45.6789 for 5,000.00: quantity 109.459 is 109459000 qty_u, the price 456789 price_u, the amount 500000 paise. Upstox gives an ISIN and a token for MF and no symbol.",
+   "raw": {
+    "exchange": "BMF",
+    "segment": "MF",
+    "option_type": null,
+    "quantity": 109.459,
+    "amount": 5000.0,
+    "trade_id": "MF7",
+    "trade_date": "2026-04-01",
+    "transaction_type": "BUY",
+    "scrip_name": "Some Flexi Cap Fund Direct Growth",
+    "strike_price": 0,
+    "expiry": null,
+    "price": 45.6789,
+    "isin": "INF000A01011",
+    "symbol": null,
+    "instrument_token": "MF|INF000A01011"
+   },
+   "expect": {
+    "trade_id": "MF7",
+    "trade_date": 20260401,
+    "exchange": "BMF",
+    "segment": "MF",
+    "transaction_type": "BUY",
+    "scrip_name": "Some Flexi Cap Fund Direct Growth",
+    "symbol": null,
+    "isin": "INF000A01011",
+    "instrument_token": "MF|INF000A01011",
+    "option_type": null,
+    "strike_price_u": null,
+    "expiry": null,
+    "qty_u": 109459000,
+    "price_u": 456789,
+    "amount_paise": 500000
+   }
+  },
+  {
+   "id": "T4",
+   "title": "A price with a half paise is rounded half away from zero",
+   "why": "3 shares at 100.005 for 300.015: the price 100.005 is exactly 1000050 price_u (four decimals hold it); the amount 300.015 rounds to 30002 paise, half away from zero. A strike of 0 is no strike (null).",
+   "raw": {
+    "exchange": "BSE",
+    "segment": "EQ",
+    "option_type": null,
+    "quantity": 3,
+    "amount": 300.015,
+    "trade_id": "50004",
+    "trade_date": "2026-05-12",
+    "transaction_type": "BUY",
+    "scrip_name": "SMALL CO",
+    "strike_price": 0,
+    "expiry": null,
+    "price": 100.005,
+    "isin": "INE000X01010",
+    "symbol": "SMALLCO",
+    "instrument_token": "BSE_EQ|INE000X01010"
+   },
+   "expect": {
+    "trade_id": "50004",
+    "trade_date": 20260512,
+    "exchange": "BSE",
+    "segment": "EQ",
+    "transaction_type": "BUY",
+    "scrip_name": "SMALL CO",
+    "symbol": "SMALLCO",
+    "isin": "INE000X01010",
+    "instrument_token": "BSE_EQ|INE000X01010",
+    "option_type": null,
+    "strike_price_u": null,
+    "expiry": null,
+    "qty_u": 3000000,
+    "price_u": 1000050,
+    "amount_paise": 30002
+   }
+  }
+ ],
+ "pnl": [
+  {
+   "id": "P1",
+   "title": "Upstox's documented P&L row",
+   "why": "100 ZEE ENTER bought on 14-09-2021 at 12,345.67 and sold the same day at 12,345.67: both amounts 12,345.67 are 1234567 paise and the P&L is 0. Dates in dd-mm-yyyy become 20210914.",
+   "raw": {
+    "quantity": 100,
+    "isin": "INE256A01028",
+    "scrip_name": "ZEE ENTER",
+    "trade_type": "EQ",
+    "buy_date": "14-09-2021",
+    "buy_average": 12345.67,
+    "sell_date": "14-09-2021",
+    "sell_average": 12345.67,
+    "buy_amount": 12345.67,
+    "sell_amount": 12345.67
+   },
+   "expect": {
+    "scrip_name": "ZEE ENTER",
+    "isin": "INE256A01028",
+    "trade_type": "EQ",
+    "qty_u": 100000000,
+    "buy_date": 20210914,
+    "sell_date": 20210914,
+    "buy_average_u": 123456700,
+    "sell_average_u": 123456700,
+    "buy_amount_paise": 1234567,
+    "sell_amount_paise": 1234567,
+    "pnl_paise": 0
+   }
+  },
+  {
+   "id": "P2",
+   "title": "A gain: sold for more than bought",
+   "why": "100 bought at 250.25 (25,025.00) and sold at 262.75 (26,275.00): 2627500 - 2502500 = 125000 paise, a gain of 1,250.00.",
+   "raw": {
+    "quantity": 100,
+    "isin": "INE256A01028",
+    "scrip_name": "ZEE ENTER",
+    "trade_type": "EQ",
+    "buy_date": "14-09-2026",
+    "buy_average": 250.25,
+    "sell_date": "15-09-2026",
+    "sell_average": 262.75,
+    "buy_amount": 25025.0,
+    "sell_amount": 26275.0
+   },
+   "expect": {
+    "scrip_name": "ZEE ENTER",
+    "isin": "INE256A01028",
+    "trade_type": "EQ",
+    "qty_u": 100000000,
+    "buy_date": 20260914,
+    "sell_date": 20260915,
+    "buy_average_u": 2502500,
+    "sell_average_u": 2627500,
+    "buy_amount_paise": 2502500,
+    "sell_amount_paise": 2627500,
+    "pnl_paise": 125000
+   }
+  },
+  {
+   "id": "P3",
+   "title": "A loss on an option, with a fractional average",
+   "why": "130 units of an option bought at an average of 101.333 (13,173.29) and sold at 95.5 (12,415.00): the P&L is 1241500 - 1317329 = -75829 paise (a loss of 758.29). The average 101.333 is 1013330 price_u. The trade type OPT is kept.",
+   "raw": {
+    "quantity": 130,
+    "isin": null,
+    "scrip_name": "NIFTY 25900 CE",
+    "trade_type": "OPT",
+    "buy_date": "20-10-2026",
+    "buy_average": 101.333,
+    "sell_date": "21-10-2026",
+    "sell_average": 95.5,
+    "buy_amount": 13173.29,
+    "sell_amount": 12415.0
+   },
+   "expect": {
+    "scrip_name": "NIFTY 25900 CE",
+    "isin": null,
+    "trade_type": "OPT",
+    "qty_u": 130000000,
+    "buy_date": 20261020,
+    "sell_date": 20261021,
+    "buy_average_u": 1013330,
+    "sell_average_u": 955000,
+    "buy_amount_paise": 1317329,
+    "sell_amount_paise": 1241500,
+    "pnl_paise": -75829
+   }
+  }
+ ],
+ "charges": [
+  {
+   "id": "C1",
+   "title": "Upstox's documented charges body: a null charge stays null",
+   "why": "total 154.23 is 15423 paise, brokerage 97.23 is 9723, GST 20.93 is 2093, STT 15 is 1500, stamp duty 2 is 200, transaction 0.56 is 56, clearing 0 is 0, IPFT null stays null (not 0), others 0, SEBI turnover 0.01 is 1, demat transaction 18.5 is 1850.",
+   "raw": {
+    "charges_breakdown": {
+     "total": 154.23,
+     "brokerage": 97.23,
+     "taxes": {
+      "gst": 20.93,
+      "stt": 15,
+      "stamp_duty": 2
+     },
+     "charges": {
+      "transaction": 0.56,
+      "clearing": 0,
+      "ipft": null,
+      "others": 0,
+      "sebi_turnover": 0.01,
+      "demat_transaction": 18.5
+     }
+    }
+   },
+   "expect": {
+    "total_paise": 15423,
+    "brokerage_paise": 9723,
+    "gst_paise": 2093,
+    "stt_paise": 1500,
+    "stamp_duty_paise": 200,
+    "transaction_paise": 56,
+    "clearing_paise": 0,
+    "ipft_paise": null,
+    "others_paise": 0,
+    "sebi_turnover_paise": 1,
+    "demat_transaction_paise": 1850
+   }
+  }
+ ],
+ "meta": [
+  {
+   "id": "M1",
+   "title": "Upstox's documented metadata body",
+   "why": "trades_count 10 and page_size_limit 5000 are kept as the whole numbers they are.",
+   "raw": {
+    "trades_count": 10,
+    "page_size_limit": 5000
+   },
+   "expect": {
+    "trades_count": 10,
+    "page_size_limit": 5000
+   }
+  }
+ ]
+}
