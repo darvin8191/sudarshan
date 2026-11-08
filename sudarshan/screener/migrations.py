@@ -13,7 +13,8 @@ an older release never writes to a schema it does not know.
 
 Schema 1 is frozen: its SQL never changes, and a later change is a new step. Every owner-data
 table carries ``principal`` (``'owner'`` in this release) so a family read-only layer later adds
-principals and no columns (6.5).
+principals and no columns (6.5). Step 2 adds a sealed bar's running volume and last trade time
+to ``bar_today`` (release review HIGH-1).
 """
 
 from __future__ import annotations
@@ -260,7 +261,16 @@ def _v1(conn: Connection) -> None:
         conn.exec_driver_sql(statement)
 
 
-STEPS: Sequence[Step] = ((1, _v1),)
+def _v2(conn: Connection) -> None:
+    """A sealed bar keeps the day's running volume accounted for through it (``cum``) and the time
+    of its last trade (``last_trade``, epoch ms), both lost on a restore before (release review
+    HIGH-1): the first bar after a restart then carried the whole day's volume, and a pause before
+    a restored bar was taken to touch every bar after it. Rows written before have neither (NULL)."""
+    add_column(conn, "bar_today", "cum", "INTEGER")
+    add_column(conn, "bar_today", "last_trade", "INTEGER")
+
+
+STEPS: Sequence[Step] = ((1, _v1), (2, _v2))
 LATEST = STEPS[-1][0]
 
 

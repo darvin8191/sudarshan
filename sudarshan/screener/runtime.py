@@ -339,10 +339,10 @@ class LiveSource:
         self.market = Market(day_key(day), sessions, day_key(previous) if previous else 0)
         self._pauses, self._open_pause, self._last = [], None, {}
         self._rebuild_market(now)
-        self._restore()
+        self._restore(now)
         return True
 
-    def _restore(self) -> None:
+    def _restore(self, now: int) -> None:
         """Today's sealed bars from the store, and nothing older (BLOCKER-1): bar_today holds one
         trading day, so every bar that starts before today's midnight (IST) is cleared in the
         same transaction, and the bars in memory start again from today's alone, whatever was
@@ -356,11 +356,19 @@ class LiveSource:
             cleared, rows = self.store.write(OWNER, roll)
         except StoreError:
             cleared, rows = 0, []
-        kept = [
-            Sealed(r["key"], Bar(r["start"], r["o"], r["h"], r["l"], r["c"], r["v"], r["oi"] if r["oi"] is not None else -1, r["atp"] or 0, r["flags"]), 0)
-            for r in rows
-        ]  # fmt: skip
-        self.bars.restore(self.market.today, kept)
+        kept: list[Sealed] = []
+        sums: dict[str, int] = {}
+        for r in rows:  # by key, oldest first
+            sums[r["key"]] = sums.get(r["key"], 0) + r["v"]
+            # the running volume through the bar (HIGH-1); a row from before schema 2 has none,
+            # and the sum of the day's bars so far is the nearest figure (it lacks the pre-open)
+            cum = r["cum"] if r.get("cum") is not None else sums[r["key"]]
+            until = r["last_trade"] if r.get("last_trade") is not None else r["start"]
+            bar = Bar(r["start"], r["o"], r["h"], r["l"], r["c"], r["v"], r["oi"] if r["oi"] is not None else -1, r["atp"] or 0, r["flags"], until)  # fmt: skip
+            kept.append(Sealed(r["key"], bar, cum))
+        # keys the store holds no bar of take their first frame from now on as their baseline
+        # (a mid-session start never counts the volume before it into a bar)
+        self.bars.restore(self.market.today, kept, since=now)
         if cleared:
             log.info("cleared %d sealed bars of earlier days from the store", cleared)
         if kept:
@@ -543,6 +551,7 @@ class LiveSource:
                 "key": s.key, "start": s.bar.start, "o": s.bar.o, "h": s.bar.h, "l": s.bar.low,
                 "c": s.bar.c, "v": s.bar.v, "oi": None if s.bar.oi < 0 else s.bar.oi,
                 "atp": s.bar.atp or None, "src": "ticks", "flags": s.bar.flags,
+                "cum": s.cum, "last_trade": s.bar.until or None,
             }
             for s in sealed
         ]  # fmt: skip

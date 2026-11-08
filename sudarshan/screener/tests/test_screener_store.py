@@ -47,7 +47,7 @@ def test_a_fresh_file_is_at_the_latest_version_with_every_table_and_private_mode
     path = tmp_path / "state" / "screener.db"
     made = ScreenerStore(path)
     try:
-        assert made.applied == [1]
+        assert made.applied == [1, 2]
         with made.engine.connect() as conn:
             assert migrations.version(conn) == migrations.LATEST
             names = set(store.tables_of(conn))
@@ -85,7 +85,7 @@ def test_a_populated_file_forced_back_to_version_zero_migrates_and_keeps_its_row
     first.close()
     again = ScreenerStore(path)
     try:
-        assert again.applied == [1]
+        assert again.applied == [1, 2]
         assert [row["name"] for row in again.read(OWNER, Tx.screens)] == ["Breakout"]
     finally:
         again.close()
@@ -112,7 +112,7 @@ def test_every_v1_statement_is_idempotent_ddl():
     for statement in migrations.V1:
         head = " ".join(statement.split()[:6])
         assert "IF NOT EXISTS" in head, head
-    assert migrations.STEPS[-1][0] == migrations.LATEST == 1
+    assert migrations.STEPS[-1][0] == migrations.LATEST == 2
 
 
 def test_migrate_status_is_read_only_and_reports_pending_steps(tmp_path, capsys):
@@ -120,7 +120,7 @@ def test_migrate_status_is_read_only_and_reports_pending_steps(tmp_path, capsys)
     assert migrate.main(["--status", "--path", str(path)]) == 1
     assert not path.exists(), "--status made a file"
     out = capsys.readouterr().out
-    assert "no file" in out and "pending steps: 1" in out
+    assert "no file" in out and "pending steps: 1, 2" in out
     assert migrate.main(["--path", str(path), "--port", "1"]) == 0
     assert migrate.main(["--status", "--path", str(path)]) == 0
     assert "up to date" in capsys.readouterr().out
@@ -578,3 +578,35 @@ def test_default_path_reads_the_state_directory(monkeypatch):
     assert store.default_path() == Path("/var/lib/sudarshan-screener/screener.db")
     monkeypatch.delenv("STATE_DIRECTORY")
     assert store.default_path() == store.STATE_DIR / store.DB_FILENAME
+
+
+def test_step_two_adds_the_running_volume_to_bar_today_and_keeps_the_rows(tmp_path):
+    """A schema-1 file with bars in it (release review HIGH-1): step 2 adds ``cum`` and
+    ``last_trade``, keeps every row (NULL in both), and runs once."""
+    path = tmp_path / "screener.db"
+    first = store.engine(path)
+    try:
+        assert migrations.migrate(first, migrations.STEPS[:1]) == [1]
+        with store.writer(first).begin() as conn:
+            conn.exec_driver_sql(
+                "INSERT INTO bar_today (key, start, o, h, l, c, v, src) "
+                "VALUES ('NSE_EQ|A', 1, 100, 101, 99, 100, 7, 'ticks')"
+            )
+    finally:
+        first.dispose()
+    opened = ScreenerStore(path)
+    try:
+        assert opened.applied == [2]
+        with opened.engine.connect() as conn:
+            assert {"cum", "last_trade"} <= migrations.columns(conn, "bar_today")
+        (row,) = opened.read(OWNER, lambda tx: tx.bars())
+        assert row["v"] == 7 and row["cum"] is None and row["last_trade"] is None
+    finally:
+        opened.close()
+        store.stop()
+    again = ScreenerStore(path)
+    try:
+        assert again.applied == []
+    finally:
+        again.close()
+        store.stop()

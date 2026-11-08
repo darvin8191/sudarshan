@@ -98,11 +98,9 @@ def test_the_next_day_starts_with_only_its_own_bars(world):
     )
     assert first_today.v == 20, "the 09:15 bar counts the pre-open volume"
 
-    # a restart later on day 2 reads day 2's bars back, and no others
+    # a restart later on day 2 reads day 2's bars back, and no others (with each bar's last trade)
     again = make(store, settings, master, ms(DAY2, "11:00"))
-    assert [b._replace(until=0) for b in again.bars.bars(RELIANCE)] == [
-        b._replace(until=0) for b in bars
-    ]
+    assert again.bars.bars(RELIANCE) == bars
 
 
 # ---- BLOCKER-1: memory and bar_today stay flat across days ------------------------------------------
@@ -149,3 +147,41 @@ def test_each_day_holds_only_its_own_bars_in_the_store_and_in_memory(world):
     source.new_day(ms("2026-10-30", "00:00:05"))
     assert held(source) == 0
     assert store.read(OWNER, lambda tx: len(tx.bars())) == 0
+
+
+# ---- HIGH-1: a restart keeps the running volume -------------------------------------------------------
+def test_a_restart_does_not_put_the_days_volume_into_its_first_bar(world):
+    store, settings, master, _ = world
+    first = make(store, settings, master, ms(DAY1, "09:00"))
+    vtt, _ = feed_minutes(first, DAY1, "09:15", 45, 100.0, 0, 20_000)  # 09:15..09:59, 1.8 M
+    # sudarshan-screener restarts at 10:02 (systemd Restart=on-failure, or a deploy)
+    again = make(store, settings, master, ms(DAY1, "10:02"))
+    at = ms(DAY1, "10:02:10")
+    again.on_frame(HEALTH, health(at - 500), at - 500)
+    again.on_frame(RELIANCE, trade(RELIANCE, at, 123.0, vtt + 100, ltq=100), at)
+    again.on_frame(HEALTH, health(ms(DAY1, "10:03:05")), ms(DAY1, "10:03:05"))
+    sealed = again.on_clock(ms(DAY1, "10:03:06"))
+    bar = next(s.bar for s in sealed if s.bar.start == ms(DAY1, "10:02"))
+    assert vtt == 1_800_000
+    assert bar.v == 100, "the first bar after a restart carries the whole day's volume"
+    assert next(s.cum for s in sealed if s.bar.start == ms(DAY1, "10:02")) == vtt + 100
+
+
+def test_a_key_first_seen_after_a_restart_counts_only_what_it_traded_after(world):
+    """SBIN had pre-open volume and no trade before the restart, so the store holds no bar of it:
+    its first trade after the restart is the baseline, not the day's whole running total."""
+    store, settings, master, _ = world
+    first = make(store, settings, master, ms(DAY1, "09:00"))
+    feed_minutes(first, DAY1, "09:15", 5, 100.0, 0, 10)  # RELIANCE only
+    sbin = "NSE_EQ|INE062A01020"
+    again = make(store, settings, master, ms(DAY1, "10:02"))
+    at = ms(DAY1, "10:02:10")
+    again.on_frame(HEALTH, health(at - 500), at - 500)
+    again.on_frame(sbin, trade(sbin, at, 812.0, 50_000 + 70, ltq=70), at)
+    later = at + 20_000
+    again.on_frame(HEALTH, health(later - 500), later - 500)
+    again.on_frame(sbin, trade(sbin, later, 812.5, 50_000 + 70 + 30, ltq=30), later)
+    again.on_frame(HEALTH, health(ms(DAY1, "10:03:05")), ms(DAY1, "10:03:05"))
+    sealed = again.on_clock(ms(DAY1, "10:03:06"))
+    bar = next(s.bar for s in sealed if s.key == sbin)
+    assert bar.v == 100, "a key's first bar after a restart counts its pre-open volume"

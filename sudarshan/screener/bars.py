@@ -14,7 +14,9 @@ day's running total (``vtt``). A minute without a trade has no bar.
 
 Volume is the running total at the last trade of the minute less the total already accounted for
 (``cum``), which starts at the last total seen before the open, so the pre-open volume belongs to
-no bar. The exchange's own 1-minute candle (``ohlc_1m``, I1) replaces a bar's prices and, when
+no bar. A restore keeps each key's ``cum`` from the store; a key the store held no bar of starts
+from its first frame of today's trades after the restore (``restore(since=...)``), so nothing
+traded before the restore lands in its first bar. The exchange's own 1-minute candle (``ohlc_1m``, I1) replaces a bar's prices and, when
 larger, its volume if it arrives after the minute ends and before the seal, with ``ts`` the
 minute's start. The share of it the ticks missed moves ``cum`` too, so the next bar does not count
 it again.
@@ -233,7 +235,7 @@ class _Key:
     """Everything kept for one instrument key today."""
 
     __slots__ = ("trade", "seen", "cum", "pre", "oi", "atp", "open", "sealed", "cums", "late",
-                 "printed", "printed_at")  # fmt: skip
+                 "printed", "printed_at", "rebase")  # fmt: skip
 
     def __init__(self) -> None:
         #: The identity of the last trade the gate let through.
@@ -252,12 +254,17 @@ class _Key:
         #: The day (YYYYMMDD) the closing auction's print was taken, and when it arrived.
         self.printed = 0
         self.printed_at: int | None = None
+        #: Set for a key first seen after a restore: the restore's moment (epoch ms); its first
+        #: frame of a trade made today becomes its baseline (``Bars._rebase``).
+        self.rebase: int | None = None
 
 
 class Bars:
     def __init__(self) -> None:
         self._day = 0
         self._keys: dict[str, _Key] = {}
+        #: When the bars were last restored, for the keys the store held no bar of.
+        self._since: int | None = None
 
     # ---- what the runtime asks -------------------------------------------------------------
     @property
@@ -317,6 +324,7 @@ class Bars:
         state = self._keys.get(key)
         if state is None:
             state = self._keys[key] = _Key()
+            state.rebase = self._since
         recv = _ms(frame.get("ts_recv"))
         segment = segment_of(key)
         volume = _count(frame.get("vtt"))
@@ -326,6 +334,8 @@ class Bars:
             key, frame, (ltt, ltp, frame.get("ltq")), now if recv is None else recv, now, segment,
             segment + AUCTION if key in market.auction else segment, grid, volume, state.seen,
         )  # fmt: skip
+        if state.rebase is not None:
+            self._rebase(state, frame, volume, ltt, market.today, grid)
         if volume is not None:
             state.seen = volume
         sealed: list[Sealed] = []
@@ -348,11 +358,22 @@ class Bars:
         return sealed
 
     # ---- a restart and a repair ------------------------------------------------------------
-    def restore(self, day: int, rows: Iterable[Sealed], printed: Iterable[str] = ()) -> None:
+    def restore(
+        self,
+        day: int,
+        rows: Iterable[Sealed],
+        printed: Iterable[str] = (),
+        since: int | None = None,
+    ) -> None:
         """Start today again from the bars the store holds. The running total accounted for is the
         largest one stored, and the key's last frame is taken to have shown it, so the first
-        frame after a restart cannot be mistaken for a print by a total that was never seen."""
-        self._day, self._keys = day, {}
+        frame after a restart cannot be mistaken for a print by a total that was never seen.
+
+        ``since`` is the moment of the restore: a key the store holds no bar of then has a running
+        total nobody accounted for (its pre-open volume and anything traded before the restore),
+        so its first frame of a trade made today becomes its baseline (``_rebase``) and that
+        volume belongs to no bar, as the pre-open volume never does."""
+        self._day, self._keys, self._since = day, {}, since
         for row in rows:
             state = self._keys.setdefault(row.key, _Key())
             state.sealed[row.bar.start] = row.bar
@@ -413,7 +434,35 @@ class Bars:
     def _roll(self, today: int) -> None:
         """A new trading day starts with nothing."""
         if today != self._day:
-            self._day, self._keys = today, {}
+            self._day, self._keys, self._since = today, {}, None
+
+    @staticmethod
+    def _rebase(
+        state: _Key,
+        frame: Mapping,
+        volume: int | None,
+        ltt: int | None,
+        today: int,
+        grid: Session | None,
+    ) -> None:
+        """The baseline of a key first seen after a restore made once its session had begun
+        (``restore(since=...)``): its first frame of a trade made today. A trade made after the
+        restore counts its own quantity (``ltq``) and nothing before it; one made before the
+        restore counts nothing. A frame of an earlier day's trade carries yesterday's total and
+        waits for today's. A restore before the session's start leaves the pre-open baseline to
+        the frames before the open, as on any day."""
+        since = state.rebase
+        if grid is None or since is None or since < grid.start:
+            state.rebase = None
+            return
+        if volume is None or ltt is None or ltt < epoch_ms(key_day(today), 0):
+            return
+        state.rebase = None
+        quantity = _count(frame.get("ltq"))
+        fresh = ltt >= since and quantity is not None and 0 < quantity <= volume
+        base = volume - quantity if fresh else volume
+        if state.pre is None or base > state.pre:
+            state.pre = base
 
     def _trade(self, state: _Key, item: _In, market: Market, sealed: list[Sealed]) -> str:
         at, grid = item.at, item.grid
