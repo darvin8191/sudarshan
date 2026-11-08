@@ -7,8 +7,9 @@ import asyncio
 
 import pytest
 
-from sudarshan.screener import listsync, store as store_module
+from sudarshan.screener import listsync
 from sudarshan.screener import membership as mem
+from sudarshan.screener import store as store_module
 from sudarshan.screener.store import OWNER, ScreenerStore, Tx
 
 NOW = 1_761_640_000_000
