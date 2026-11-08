@@ -15,9 +15,10 @@ you trade with, and nothing is screened until you switch it on after the two che
 ### What changes for you
 - **The Screener page (menu: Screener), switched off by this release.** While it is off the page
   says nothing is being screened because the screener is switched off on the server, the
-  dashboard card is not drawn, and the service reads nothing, writes nothing and asks the price
-  feed for nothing. The screener itself never places an order; Buy and Sell on a results row open
-  the usual order ticket.
+  dashboard card is not drawn, and the service opens no database and follows no instrument at the
+  price feed (when it starts, it only asks the feed to let go of any it followed before). The
+  screener itself never places an order; Buy and Sell on a results row open the usual order
+  ticket.
 - **What it does once you switch it on:**
   - A screen is a set of conditions in plain words (price, indicators, price action, the opening
     range, VWAP, candle patterns, open interest and option figures) over a universe: F&O stocks,
