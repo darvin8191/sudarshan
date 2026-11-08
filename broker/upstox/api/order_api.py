@@ -643,8 +643,9 @@ def place_smartorder_api(data, auth):
                     held_now = 0  # nothing is sent below
                 current_position = held_now
             else:
-                current_position = int(get_open_position(symbol, exchange, request_product, auth))
-                if _reduces_or_crosses(current_position, position_size):
+                row_position = int(get_open_position(symbol, exchange, request_product, auth))
+                current_position = row_position
+                if _reduces_or_crosses(row_position, position_size):
                     # SUDARSHAN M6.9 (Y2): an order that reduces or crosses the position, as the
                     # row says, claims the position before the read it is sized from and holds
                     # it until its order is sent and noted, as a size-0 exit does: an Exit all
@@ -675,25 +676,26 @@ def place_smartorder_api(data, auth):
                         return _ErrorResponse(424), refusal, None
                     current_position = by_product.get(request_product, 0)
                     by_product = None  # only an exit's own guards read it
-                    if _reduces_or_crosses(current_position, position_size):
-                        # SUDARSHAN M6.9 (Y2): a reversal or part exit repeated while the first
-                        # is held (its order sent, and not yet seen ended in the order book) or
-                        # still rests at Upstox would go beside it.
-                        reducing = True
-                        refused = _market_exit_working(
-                            rows, orders, symbol, exchange, product, request_product,
-                            current_position,
-                        )  # fmt: skip
-                        if refused:
-                            logger.warning(f"Order for {symbol} not sent: a market exit is working")
-                            return refused
-                        held_by = exit_guard.hold_verdict(
-                            "live", exchange, symbol, product, statuses
-                        )
-                        if held_by:
-                            logger.warning(f"Order for {symbol} not sent: an earlier one is held")
-                            refusal = {"status": "error", "message": held_by, "nothing_sent": True}
-                            return _ErrorResponse(409), refusal, None
+                    # SUDARSHAN M6.9 (Y2, R1): a reversal or part exit repeated while the first
+                    # is held (its order sent, and not yet seen ended in the order book) or still
+                    # rests at Upstox would go beside it. The claim was taken on the row's word,
+                    # and these checks go with it whatever the corrected figure says: after the
+                    # first reversal's market order filled the position's size and rests for the
+                    # other side, the corrected figure is flat or past it, and the repeat read as
+                    # an add went beside the resting order and doubled the short. The working
+                    # order is looked for on the side that closes what the row shows.
+                    reducing = True
+                    refused = _market_exit_working(
+                        rows, orders, symbol, exchange, product, request_product, row_position
+                    )
+                    if refused:
+                        logger.warning(f"Order for {symbol} not sent: a market exit is working")
+                        return refused
+                    held_by = exit_guard.hold_verdict("live", exchange, symbol, product, statuses)
+                    if held_by:
+                        logger.warning(f"Order for {symbol} not sent: an earlier one is held")
+                        refusal = {"status": "error", "message": held_by, "nothing_sent": True}
+                        return _ErrorResponse(409), refusal, None
             logger.debug(
                 f"Desired position size: {position_size}, Current position: {current_position}"
             )

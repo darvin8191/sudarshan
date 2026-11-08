@@ -43,7 +43,7 @@ def _reversal(world, symbol, quantity, action, size):
     return world.tv_smart_exit(symbol, quantity=quantity, action=action, position_size=size)
 
 
-# -- S1. The scalping terminal's hold check reads the order book with the session the order uses ----
+# -- S1. The scalping terminal's hold check reads the order book with the order's session ---------
 
 
 @pytest.fixture
@@ -187,3 +187,108 @@ def test_s1_a_session_that_cannot_be_resolved_reads_as_not_read(scalping, monkey
     ok, body, status = _production_close(scalping)
     assert (ok, status) == (False, 409) and scalping.sent == []
     assert "not confirmed" in body["message"]
+
+
+# -- R1. A repeated reversal after the first one part-filled ---------------------------------------
+
+
+def test_r1_a_repeated_reversal_after_the_first_part_filled_is_not_sent_beside_it(monkeypatch):
+    """Long 65. TradingView reverses: SELL 130 to -65. Its market order fills 65 and the other 65
+    rests at its protected price. The same alert again a second later: the corrected figure is 0,
+    so on b14cb0e the order was judged an add, neither check ran, and SELL 65 went beside the
+    resting 65. When the rest filled the account was short 130 for a -65 target."""
+    broker = Broker({X: 65}, 60.0)
+    broker.part[X] = 65  # the first order fills 65 of 130; 65 stays working
+    world = install(monkeypatch, broker)
+    code, body = _reversal(world, X, "130", "SELL", "-65")
+    assert code == 200, body
+    broker.part.pop(X)  # any later order fills whole
+    _fresh_book()
+    code2, body2 = _reversal(world, X, "130", "SELL", "-65")
+    assert code2 == 409, (code2, body2)
+    broker.fill_working()  # the market comes back: the resting 65 fills
+    assert _sent(broker, X) == [("SELL", 130)]
+    assert broker.true_qty(X) == -65
+
+
+def test_r1b_a_repeated_reversal_after_the_first_filled_past_flat_is_not_sent_beside_it(
+    monkeypatch,
+):
+    """The same with 100 of 130 filled: the corrected figure is -35, the target -65 read as an
+    add of 30, and SELL 30 went beside the resting 30: -95."""
+    broker = Broker({X: 65}, 60.0)
+    broker.part[X] = 100
+    world = install(monkeypatch, broker)
+    assert _reversal(world, X, "130", "SELL", "-65")[0] == 200
+    broker.part.pop(X)
+    _fresh_book()
+    code2, body2 = _reversal(world, X, "130", "SELL", "-65")
+    assert code2 == 409, (code2, body2)
+    broker.fill_working()
+    assert _sent(broker, X) == [("SELL", 130)]
+    assert broker.true_qty(X) == -65
+
+
+def test_r1_control_a_size_0_exit_after_the_part_filled_reversal_is_held(monkeypatch):
+    """Control: a size-0 exit asks the hold whatever the corrected figure says, and is refused."""
+    broker = Broker({X: 65}, 60.0)
+    broker.part[X] = 65
+    world = install(monkeypatch, broker)
+    assert _reversal(world, X, "130", "SELL", "-65")[0] == 200
+    broker.part.pop(X)
+    _fresh_book()
+    code, body = world.tv_smart_exit(X, quantity="65", action="SELL", position_size="0")
+    assert code == 409, body
+    assert _sent(broker, X) == [("SELL", 130)]
+
+
+def test_r1_control_an_order_after_the_first_reversal_completed_still_goes(monkeypatch):
+    """Control: the hold ends when the order book shows the first reversal complete, so an alert
+    further the same way, sized from the corrected figure, goes (the row still says long 65)."""
+    broker = Broker({X: 65}, 60.0)
+    world = install(monkeypatch, broker)
+    assert _reversal(world, X, "130", "SELL", "-65")[0] == 200
+    _fresh_book()
+    code, body = _reversal(world, X, "195", "SELL", "-130")
+    assert code == 200, body
+    assert _sent(broker, X) == [("SELL", 130), ("SELL", 65)]
+    assert broker.true_qty(X) == -130
+    assert exit_guard.EXITS.placed_lately("live") == {("NFO", X, "MIS")}  # noted, as a reduction is
+
+
+def test_r1_a_repeated_reversal_is_refused_even_when_the_book_does_not_list_the_first_yet(
+    monkeypatch,
+):
+    """Control: the first fills 65 of 130 and the order book has not listed it yet (5 s lag). The
+    repeat's corrected figure is then the row's 65 (no fill seen), the order crosses, and the hold
+    refuses it as not confirmed; nothing goes beside the first."""
+    broker = Broker({X: 65}, 60.0)
+    broker.part[X] = 65
+    broker.order_book_lag = 5.0
+    world = install(monkeypatch, broker)
+    assert _reversal(world, X, "130", "SELL", "-65")[0] == 200
+    broker.part.pop(X)
+    _fresh_book()
+    code, body = _reversal(world, X, "130", "SELL", "-65")
+    assert code == 409 and "not confirmed" in body["message"]
+    assert _sent(broker, X) == [("SELL", 130)]
+
+
+def test_r1_after_a_restart_the_working_rest_of_the_first_reversal_still_refuses_the_repeat(
+    monkeypatch,
+):
+    """The holds are per process. After a restart the repeat has only the order book to go by: the
+    first's remaining 65 rests as a MARKET order on the side that closes what the row shows (SELL,
+    the row still says long 65), and that refuses the repeat even though the corrected figure is 0.
+    Looked for on the corrected figure's side (BUY), it would not be found, and SELL 65 would go."""
+    broker = Broker({X: 65}, 60.0)
+    broker.part[X] = 65
+    world = install(monkeypatch, broker)
+    assert _reversal(world, X, "130", "SELL", "-65")[0] == 200
+    broker.part.pop(X)
+    monkeypatch.setattr(exit_guard, "EXITS", exit_guard.ExitsInFlight())  # the restart
+    _fresh_book()
+    code, body = _reversal(world, X, "130", "SELL", "-65")
+    assert code == 409 and "SELL 65 MARKET order" in body["message"], body
+    broker.fill_working()
+    assert _sent(broker, X) == [("SELL", 130)] and broker.true_qty(X) == -65
