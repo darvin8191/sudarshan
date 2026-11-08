@@ -5,6 +5,95 @@ publish. The owner publishes each release on GitHub. The server's deploy timer t
 outside 08:30-16:00 IST on trading days (09:00-15:45 until v0.3.1), keeps backups, and rolls
 back if the app does not come up healthy.
 
+## v0.6.0 (8 Nov 2026)
+
+The screener: your own screens over F&O stocks, futures, indices, option strikes or a watchlist,
+checked at every candle close, ranked, fed into a watchlist and told on Telegram. It includes
+everything in v0.5.1. **The screener ships switched off: publishing this release changes nothing
+you trade with, and nothing is screened until you switch it on after the two checks below.**
+
+### What changes for you
+- **The Screener page (menu: Screener), switched off by this release.** While it is off the page
+  says nothing is being screened because the screener is switched off on the server, the
+  dashboard card is not drawn, and the service reads nothing, writes nothing and asks the price
+  feed for nothing. The screener itself never places an order; Buy and Sell on a results row open
+  the usual order ticket.
+- **What it does once you switch it on:**
+  - A screen is a set of conditions in plain words (price, indicators, price action, the opening
+    range, VWAP, candle patterns, open interest and option figures) over a universe: F&O stocks,
+    stock or index futures, indices, NIFTY 50 or NIFTY BANK, option strikes around the money, or
+    one of your watchlists.
+  - It is checked 5 s after every close of its candle (1 minute up to a day) or once after the
+    close, from the price feed's ticks, for up to 320 instruments followed tick by tick. An
+    instrument it cannot judge says why ("Not checked: ...") and never counts as a miss.
+  - Matches are ranked as the screen says and can be added to a watchlist: a new
+    "Screener: <name>" list or one of yours. Each row says when it came in, how long it has been
+    there, whether it is missing and when it left; a row you remove stays out ("Removed by you"),
+    your own items are never touched, and you can pin a row.
+  - A run worth telling sends one Telegram line through market alerts, with a toast whose View
+    opens the screen, under the rules you set for each screen: fewest matches, once per stock a
+    day, skip empty checks, pause after the first, a cap.
+  - Results move as each run arrives, and their prices with every tick (the first 100 rows). The
+    History tab rewinds any run of the last 100 days to its whole match set.
+  - The Library has nine ready-made screens. Two can be used now: ORB breakout and VWAP reclaim.
+    Six say what they wait for (history before today, or the daily store of open interest and
+    implied volatility); Delivery spike needs the daily delivery file.
+  - The dashboard gets a "Screener today" card beside Holdings.
+- **The ring services share one slice**, whether the screener is on or off: together they keep the
+  CPU share they had before and use at most 2.5 GB of memory (slowed from 2 GB); each service
+  keeps its own smaller limits.
+- **The deploy** installs `sudarshan-screener` and writes `SUDARSHAN_SCREENER='off'` into
+  `/etc/sudarshan/screener.env` only when the file has no value. It never writes `on` and never
+  changes a value you set.
+
+### What you must do
+- **Nothing when you publish.** The screener stays off.
+- **Before switching it on, the replay check on a recorded day, with the screener still off.** After
+  a trading day's close, run the commands under "The replay check" in
+  `sudarshan/screener/README.md`, the part for the first switch-on. It passes when it prints a line
+  for each 5-minute close and ends with "N runs replayed from ...".
+- **Then one live session, on a non-expiry trading day** (about 20 minutes on the phone):
+  - before 09:15, set `SUDARSHAN_SCREENER='on'` in `/etc/sudarshan/screener.env` and run
+    `systemctl restart sudarshan-screener`; the Screener page no longer says it is switched off;
+  - make VWAP reclaim from the Library with a new watchlist, and resume it (a ready-made screen
+    starts paused);
+  - between 11:00 and 12:00, compare one 5-minute run with TradingView for two matches and two
+    non-matches: the 5-minute VWAP and the 20-candle volume average. Nothing can match before
+    about 10:55, when the average has its 20 candles. (The plan named 15-min EMA cross, which waits
+    for history in this release.)
+  - the phone watchlist shows the new list with its Auto tag and "New" chips; remove one row by hand
+    and see it stay out ("Removed by you" on the screen's membership);
+  - one Analyzer-mode Buy and Sell from a results row;
+  - after the close, the replay check with `--from-db --compare` (the README's first command) ends
+    with "all match", and the 1-minute bars of five instruments match Upstox's intraday candles.
+- **Keep it on only when both checks are clean.** To switch it off, set `'off'` and restart: it then
+  lets go of its instruments at the price feed.
+- **Run the compare again after the second day on.** The faults the release review found showed
+  from day 2 (yesterday's bars counted as today's, members not carried over); the fixes are tested
+  across midnight but have not yet met a real second day.
+
+### What is refused now that used to be accepted
+- Nothing existing changes. New, on the Screener page: a 13th screen checking during the day
+  (made, resumed or edited), more than 6 previews or 60 changes a minute, and every screener
+  request from a family (view-only) session, reads included.
+
+### Not in this release yet
+- **History before today and the daily stores** (open interest, implied volatility, India VIX) wait
+  for the feed's request governor, which ships off. Until you turn it on, a screen that needs more
+  candles than one day gives says so ("Not checked: needs 151 candles of 15 minutes; a day gives
+  25, ..."), the six ready-made screens above cannot be used, and the option chain is not
+  snapshotted after the close.
+- **Open points from the review:**
+  - an option window is not moved during the day, and a watchlist universe is read again only when
+    a screen changes or the universes are rebuilt;
+  - a screen that would pass 320 instruments is not refused when saved: the instruments past the
+    limit read "Not checked: past the 320 instruments the screener can follow tick by tick";
+  - every instrument that is not checked is still stored at every run (values 7 days, the run 100);
+  - a stock in a digest that never reached Telegram still counts as told for that day;
+  - after a screen moves to another watchlist, the items it added to the old list stay there;
+  - a plain `systemctl stop` keeps the screener's instruments at the feed for the restart, as
+    market alerts do: switch it off, or remove it, to let them go.
+
 ## v0.4.1 (4 Nov 2026)
 
 Live exits that Upstox's order book decides, sized from today's fills; a smart order to size 0
