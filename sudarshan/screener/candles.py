@@ -10,7 +10,10 @@ screener reads sealed bars only, so a day candle at the 10:15 run is the aggrega
 A candle's open is its first bar's, its close the last bar's, its volume the sum, its open
 interest and VWAP the last the feed gave (-1 and 0 when it never did). Its flags are the bars':
 UNVERIFIED when any bar a pause touched has not been replaced from REST, REPAIRED when any was,
-LATE and FROM_I1 as the bars say. Weeks are the days from the week's first trading day.
+LATE and FROM_I1 as the bars say. A candle whose span a pause touched is UNVERIFIED too, though no
+bar of it was in the pause (the market alerts' rule): the minutes after its last bar were not
+watched, by a quiet feed or by a stopped screener. Weeks are the days from the week's first
+trading day.
 """
 
 from __future__ import annotations
@@ -18,10 +21,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
-from sudarshan.alerts.market.clock import Market, candle, within
+from sudarshan.alerts.market.clock import Market, candle, paused_during, within
 from sudarshan.alerts.market.sessions import AUCTION, Session, key_day, segment_of
 from sudarshan.screener.bars import Bar, flags_of, touched
-from sudarshan.screener.types import DAY, MINUTE_TFS, TF, Candle, Series
+from sudarshan.screener.types import DAY, MINUTE_TFS, REPAIRED, TF, UNVERIFIED, Candle, Series
 
 if TYPE_CHECKING:
     from sudarshan.alerts.market.clock import Pause
@@ -53,6 +56,13 @@ def aggregate(
             row[10] |= flags
         else:
             out.append([k, start, end, bar.o, bar.h, bar.low, bar.c, bar.v, bar.oi, bar.atp, flags])
+    for row in out:
+        # the market alerts' rule (clock.paused_during): a candle a pause over GAP_S touched is not
+        # whole, though no bar of it was in the pause (no trade came after it in the candle, or the
+        # screener itself was stopped then, S14); a repaired candle is the repair's (MEDIUM-5)
+        span_end = min(row[2], boundary)
+        if pauses and not row[10] & REPAIRED and paused_during(tuple(pauses), row[1], span_end):
+            row[10] |= UNVERIFIED
     candles = [
         Candle(
             row[1],

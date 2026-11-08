@@ -62,6 +62,10 @@ log = logging.getLogger("sudarshan.screener")
 CLIENT = "sudarshan-screener"
 TICK_S = 1.0
 CLAIM_RENEW_S = 60.0
+#: How often the service writes that it is running (S14's seen mark): a restart's pause runs from
+#: the last one, so the minutes it never saw are never judged as part of a whole candle.
+SEEN_EVERY_MS = 10_000
+SEEN = "seen_at"
 #: Universes rebuilt from the master at start and after this moment of the day (the daily
 #: download has landed by then), every day.
 MASTER_AT_MIN = 9 * 60
@@ -137,6 +141,9 @@ class LiveSource:
         self._down_since: int | None = None
         self._pauses: list[Pause] = []
         self._open_pause: int | None = None
+        #: The store row of the open feed pause (today's pauses are kept for a restart).
+        self._open_pause_id: int | None = None
+        self._seen_written = 0
         self.keys: frozenset[str] = frozenset()
         self.claimed_at: float = 0.0
         #: Whether the feed may hold a claim of ours (an earlier run's, until dropped).
@@ -331,10 +338,59 @@ class LiveSource:
         sessions = sessions_of(day, trading_day=trading, window=windows.get(day))
         previous = previous_trading_day(day, self.calendar.is_trading_day)
         self.market = Market(day_key(day), sessions, day_key(previous) if previous else 0)
-        self._pauses, self._open_pause, self._last = [], None, {}
+        self._pauses, self._open_pause, self._open_pause_id, self._last = [], None, None, {}
         self._rebuild_market(now)
         self._restore(now)
+        self._restore_pauses(now)
         return True
+
+    def _restore_pauses(self, now: int) -> None:
+        """Today's pauses after a start (release review MEDIUM-5, S14): the feed pauses an earlier
+        run recorded (one it left open ends at its last seen mark), then a "service" pause from
+        that mark to now, inside today's sessions. A candle that holds the minutes the service
+        never saw is then "Not checked", never judged on the minutes before the stop."""
+        sessions = list(self.market.sessions.values())
+        session = self.market.today
+
+        def read(tx: Tx) -> list[Pause]:
+            raw = tx.meta_get(SEEN)
+            seen = int(raw) if raw and raw.isdigit() else None
+            kept: list[Pause] = []
+            for row in tx.pauses(session):
+                end = row["end"]
+                if end is None:
+                    end = max(row["start"], seen or row["start"])
+                    tx.pause_close(row["id"], end)
+                kept.append(Pause(row["start"], end, row["why"]))
+            if seen is not None and sessions and now - seen > GAP_S * 1000:
+                start = max(seen, min(s.start for s in sessions))
+                end = min(now, max(s.end for s in sessions))
+                if end - start > GAP_S * 1000:
+                    tx.pause_close(tx.pause_open(session, start, "service"), end)
+                    kept.append(Pause(start, end, "service"))
+                    log.warning(
+                        "the screener was not running from %s to %s: candles that hold that "
+                        "time are not checked",
+                        _hms(start),
+                        _hms(end),
+                    )
+            return kept
+
+        try:
+            self._pauses = self.store.write(OWNER, read)
+        except StoreError:
+            log.exception("today's pauses could not be read back")
+        self._rebuild_market(now)
+
+    def mark_seen(self, now: int) -> None:
+        """The seen mark, every SEEN_EVERY_MS: the moment a later start's pause runs from."""
+        if now - self._seen_written < SEEN_EVERY_MS:
+            return
+        self._seen_written = now
+        try:
+            self.store.write(OWNER, lambda tx: tx.meta_set(SEEN, str(now), now))
+        except StoreError:
+            log.exception("the screener's seen mark could not be written")
 
     def _restore(self, now: int) -> None:
         """Today's sealed bars from the store, and nothing older (BLOCKER-1): bar_today holds one
@@ -555,13 +611,33 @@ class LiveSource:
                 log.warning(
                     "the price feed is down; the candles from %s are marked", self._open_pause
                 )
+                self._open_pause_id = self._keep_pause(self._open_pause)
         else:
             self._down_since = None
             if self._open_pause is not None:
                 self._pauses.append(Pause(self._open_pause, now, "feed"))
+                if self._open_pause_id is not None:
+                    pause_id, self._open_pause_id = self._open_pause_id, None
+                    self._end_pause(pause_id, now)
                 self._open_pause = None
                 log.info("the price feed is back; %d pause(s) today", len(self._pauses))
         self._rebuild_market(now)
+
+    def _keep_pause(self, start: int) -> int | None:
+        """A feed pause, recorded as it opens, so a restart today still knows it (MEDIUM-5)."""
+        try:
+            return self.store.write(
+                OWNER, lambda tx: tx.pause_open(self.market.today, start, "feed")
+            )
+        except StoreError:
+            log.exception("a pause of the price feed could not be recorded")
+            return None
+
+    def _end_pause(self, pause_id: int, end: int) -> None:
+        try:
+            self.store.write(OWNER, lambda tx: tx.pause_close(pause_id, end))
+        except StoreError:
+            log.exception("the end of a pause of the price feed could not be recorded")
 
     def persist(self, sealed: Sequence[Sealed]) -> None:
         if not sealed:
@@ -646,6 +722,7 @@ async def run_feed(service, *, tick_s: float = TICK_S) -> None:
                 sealed.extend(source.on_frame(topic, payload, now))
             sealed.extend(source.on_clock(now))
             source.persist(sealed)
+            source.mark_seen(now)
     finally:
         if bars_task is not None:
             bars_task.cancel()
@@ -675,6 +752,10 @@ async def release_claims(service, *, waits: Sequence[float] = (0.0, 5.0, 30.0, 1
                 log.info("the screener is off; the price feed no longer keeps its instruments")
                 return
     log.warning("the screener is off, but the price feed did not answer to drop its instruments")
+
+
+def _hms(at: int) -> str:
+    return datetime.fromtimestamp(at / 1000, IST).strftime("%H:%M:%S")
 
 
 def _minute(now: int) -> int:

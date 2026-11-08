@@ -122,9 +122,9 @@ def _reason(why: T.Why) -> str:
             return "a value is zero, so a ratio cannot be worked out"
         if code == T.NOT_A_NUMBER:
             return "the indicator gave no number here"
-        if code == T.PAUSED:
+        if code == T.PAUSED:  # a pause of the feed, or a stop of the screener itself (S14)
             (start,) = detail
-            return f"the price feed paused during the {hm(start)} candle"
+            return f"prices did not reach the screener during the {hm(start)} candle"
         if code == T.NO_AUCTION:
             return "no closing auction price yet"
         if code == T.NO_OPTIONS:

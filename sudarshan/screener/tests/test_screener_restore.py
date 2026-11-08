@@ -8,6 +8,7 @@ Real LiveSource, real ScreenerStore, real Bars and candles, the universe tests' 
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 import tracemalloc
@@ -19,7 +20,7 @@ from test_screener_runtime import Calendar
 from test_screener_universe import master as master_fixture  # noqa: F401  (the fixture)
 
 from sudarshan.alerts.market.feedlink import HEALTH
-from sudarshan.screener import candles, config
+from sudarshan.screener import candles, config, words
 from sudarshan.screener import store as store_module
 from sudarshan.screener.runtime import LiveSource
 from sudarshan.screener.store import OWNER, ScreenerStore
@@ -185,3 +186,105 @@ def test_a_key_first_seen_after_a_restart_counts_only_what_it_traded_after(world
     sealed = again.on_clock(ms(DAY1, "10:03:06"))
     bar = next(s.bar for s in sealed if s.key == sbin)
     assert bar.v == 100, "a key's first bar after a restart counts its pre-open volume"
+
+
+# ---- MEDIUM-5: the minutes a restart did not see -----------------------------------------------------
+def seen(source: LiveSource, now: int) -> None:
+    """What the feed job does every tick: the seen mark, written at most every 10 s."""
+    mark = getattr(source, "mark_seen", None)
+    if mark is not None:
+        mark(now)
+
+
+def test_minutes_missed_while_stopped_are_not_judged_as_a_whole_candle(world):
+    """Stopped at 10:07, back at 10:20: the run for the 10:00-10:15 candle is made late from the
+    bars the store kept (10:00-10:06). S14: a service pause runs from the seen mark, so that
+    candle is not checked, never judged on the minutes before the stop."""
+    from test_screener_runs import SPEC
+
+    from sudarshan.screener import runner, spec
+
+    store, settings, master, _ = world
+    first = make(store, settings, master, ms(DAY1, "10:00"))
+    sealed, vtt = [], 0
+    for minute in range(7):  # 10:00..10:06 seen, at 101.00
+        at = ms(DAY1, "10:00:20") + minute * 60_000
+        sealed += first.on_frame(HEALTH, health(at), at)
+        vtt += 10
+        sealed += first.on_frame(RELIANCE, trade(RELIANCE, at, 101.0, vtt), at)
+        sealed += first.on_frame(HEALTH, health(at + 45_500), at + 45_500)
+        sealed += first.on_clock(at + 46_000)
+        first.persist(sealed)
+        sealed = []
+        seen(first, at + 46_000)  # the feed job writes it every 10 s
+    stored = spec.check(dict(SPEC, where={"id": "c1", "left": {"field": "close", "tf": 15},
+                                          "op": "gt", "right": {"num": "100"}}))  # fmt: skip
+    screen = store.write(OWNER, lambda tx: tx.screen_insert("Close over 100", stored, "active", 0))
+
+    # stopped 10:07; back at 10:20 (in those 13 minutes the price fell to 95: nobody saw it)
+    now = {"t": ms(DAY1, "10:20:00")}
+    back = make(store, settings, master, now["t"])
+    assert [p.cause for p in back.market.pauses] == ["service"], (
+        "a restart opens no pause for the minutes it did not see"
+    )
+    back.on_frame(HEALTH, health(now["t"]), now["t"])
+    made = runner.Runner(store, back, lambda: now["t"], Calendar())
+    asyncio.run(made.tick())
+    runs = store.read(OWNER, lambda tx: tx.runs_page(screen["id"], None, 50))
+    late = next(r for r in runs if r["candle_end"] == ms(DAY1, "10:15"))
+    values = store.read(OWNER, lambda tx: tx.run_values(late["id"]))
+    assert "_not_checked" in values.get(RELIANCE, {}), (
+        "a candle with minutes the service never saw is judged whole (and told)"
+    )
+    assert values[RELIANCE]["_not_checked"] == (
+        "Not checked: prices did not reach the screener during the 10:00 candle"
+    )
+    assert late["matched"] == 0 and "checked late at 10:20 after a restart" in words.mark_words(
+        late["marks"]
+    )
+
+
+def test_a_feed_pause_before_a_restart_is_still_known_after_it(world):
+    store, settings, master, _ = world
+    first = make(store, settings, master, ms(DAY1, "10:00"))
+    at = ms(DAY1, "10:00:10")
+    first.on_frame(HEALTH, health(at), at)
+    first.on_frame(HEALTH, health(at + 20_000, age=15.0), at + 20_000)  # silent: a pause opens
+    first.on_frame(HEALTH, health(at + 50_000), at + 50_000)  # back
+    seen(first, at + 50_000)
+    again = make(store, settings, master, at + 55_000)
+    assert [(p.start, p.end, p.cause) for p in again.market.pauses] == [
+        (at + 20_000, at + 50_000, "feed")
+    ], "a restart forgets today's feed pauses, so the bars they touched read as whole"
+
+
+def test_the_seen_mark_is_written_at_most_every_ten_seconds(world):
+    store, settings, master, _ = world
+    source = make(store, settings, master, ms(DAY1, "10:00"))
+    for second in range(0, 31):
+        seen(source, ms(DAY1, "10:00") + second * 1000)
+    raw = store.read(OWNER, lambda tx: tx.meta_get("seen_at"))
+    assert raw == str(ms(DAY1, "10:00:30")), "no seen mark: a restart cannot tell what it missed"
+
+
+def test_a_candle_a_pause_touched_after_its_last_bar_is_not_whole():
+    """The market alerts' rule (clock.paused_during): bars 10:00-10:06 and then a pause to the
+    candle's end: no bar was in the pause, but the minutes after 10:06 were not watched."""
+    from sudarshan.alerts.market.clock import Pause
+    from sudarshan.alerts.market.sessions import key_day, sessions_of
+    from sudarshan.screener.bars import Bar
+    from sudarshan.screener.types import UNVERIFIED
+
+    grid = sessions_of(key_day(20261028), trading_day=True)["NSE_EQ"]
+    bars = [
+        Bar(ms(DAY1, "10:00") + m * 60_000, 10100, 10100, 10100, 10100, 10, until=ms(DAY1, "10:00:20") + m * 60_000)
+        for m in range(7)
+    ]  # fmt: skip
+    pause = Pause(ms(DAY1, "10:07:06"), ms(DAY1, "10:20"), "service")
+    (whole,), _ = candles.aggregate(bars, 15, grid, ms(DAY1, "10:15"), ())
+    (cut,), _ = candles.aggregate(bars, 15, grid, ms(DAY1, "10:15"), (pause,))
+    assert not whole.flags & UNVERIFIED
+    assert cut.flags & UNVERIFIED, "a candle with unwatched minutes after its last bar is whole"
+    short = Pause(ms(DAY1, "10:07:06"), ms(DAY1, "10:07:12"), "feed")  # 6 s: ignored (GAP_S)
+    (kept,), _ = candles.aggregate(bars, 15, grid, ms(DAY1, "10:15"), (short,))
+    assert not kept.flags & UNVERIFIED
