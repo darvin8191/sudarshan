@@ -154,3 +154,36 @@ export function clauseSentence(clause: Clause): string {
 }
 
 export { GROUP_TITLES }
+
+/** '60 candles of 15 min and 20 of day': the history a screen reads before it can judge. */
+export function needsWords(needs: Record<string, number> | undefined): string | null {
+  const parts = Object.entries(needs ?? {})
+    .filter(([, count]) => Number.isFinite(count) && count > 0)
+    .map(([tf, count]) => {
+      const frame = tf === 'D' ? 'D' : tf === 'W' ? 'W' : Number(tf)
+      const label =
+        frame === 'D' || frame === 'W'
+          ? tfWords(frame).toLowerCase()
+          : Number.isInteger(frame)
+            ? tfWords(frame as TimeFrame)
+            : tf
+      return { label, count }
+    })
+  if (parts.length === 0) return null
+  const text = parts
+    .map(({ label, count }, i) =>
+      i === 0 ? `${count} candles of ${label}` : `${count} of ${label}`
+    )
+    .join(' and ')
+  return `Needs ${text} before it can judge every instrument.`
+}
+
+/** True when a reason says the history is still being collected (day and week candles at first). */
+export const isWarming = (reason: string) => /warming up/i.test(reason)
+
+/** The line that explains a warming-up reason, or null when no reason is one. */
+export function warmingNote(reasons: readonly string[]): string | null {
+  return reasons.some(isWarming)
+    ? 'Some conditions are still collecting candles. They judge once enough history is in.'
+    : null
+}

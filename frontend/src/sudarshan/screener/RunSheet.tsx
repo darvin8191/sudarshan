@@ -1,9 +1,9 @@
-import { History, LoaderCircle, RefreshCw, TriangleAlert } from 'lucide-react'
+import { History, Info, LoaderCircle, RefreshCw, TriangleAlert } from 'lucide-react'
 import { OUTLINED } from '@/sudarshan/books/cards/parts'
 import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
 import { describe } from '@/sudarshan/watchlist/rows'
 import { ChipMark } from './ChipMark'
-import { runMoment } from './History'
+import { RunFacts, runMoment } from './History'
 import { NotChecked, RunFigures, Values } from './Results'
 import { WORDS } from './types'
 import { useRunSet } from './useRuns'
@@ -34,6 +34,16 @@ export function RunSheet({ runId, onClose }: { runId: number | null; onClose: ()
           <p className="text-base font-bold">
             {set.run.matches} {set.run.matches === 1 ? 'match' : 'matches'}
           </p>
+          <RunFacts run={set.run} />
+          {set.values_note && (
+            <p
+              data-values-note="true"
+              className="flex items-start gap-1.5 text-[0.8125rem] font-semibold text-[color:var(--text-secondary)]"
+            >
+              <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+              {set.values_note}
+            </p>
+          )}
           {set.rows.length > 0 && (
             <ul className="flex flex-col divide-y rounded-xl border">
               {set.rows.map((row) => {

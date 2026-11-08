@@ -6,7 +6,15 @@ import { WATCHLISTS_KEY } from '@/sudarshan/watchlist/useWatchlists'
 import { screenerApi } from './api'
 import { MEMBERSHIP_KEY, RESULTS_KEY, RUNS_KEY, runsKey, STATE_KEY, TODAY_KEY } from './keys'
 import { applyRun, applyState } from './stateCache'
-import type { Results, RunPush, RunRow, RunsPage, ScreenerState, StatePush } from './types'
+import type {
+  ResultRow,
+  Results,
+  RunPush,
+  RunRow,
+  RunsPage,
+  ScreenerState,
+  StatePush,
+} from './types'
 
 /**
  * Joining the owner's room and applying what the screener pushes (design 4.5), for the Screener
@@ -91,6 +99,29 @@ function runOf(push: RunPush): RunRow {
     entered: push.counts.entered,
     exited: push.counts.exited,
     marks: push.marks,
+    missing: push.counts.missing,
+    not_checked: push.counts.not_checked,
+    status: 'done',
+  }
+}
+
+/**
+ * A row a push names carries only the instrument (and the membership id): the rest, the rank, the
+ * clause values, the chip and the price, comes from the read that follows, and shows as nothing
+ * until then rather than as a zero or an undefined.
+ */
+function fullRow(row: Partial<ResultRow> & Pick<ResultRow, 'symbol' | 'exchange'>): ResultRow {
+  return {
+    member_id: row.member_id ?? null,
+    key: row.key,
+    symbol: row.symbol,
+    exchange: row.exchange,
+    rank: row.rank ?? 0,
+    values: row.values ?? '',
+    forming: row.forming ?? false,
+    chip: row.chip ?? null,
+    ltp: row.ltp ?? null,
+    change_pct: row.change_pct ?? null,
   }
 }
 
@@ -113,7 +144,9 @@ export function mergeResults(held: Results, push: RunPush): Results {
   const gone = new Set(push.exited.map((row) => `${row.exchange}:${row.symbol}`))
   const keep = held.rows.filter((row) => !gone.has(`${row.exchange}:${row.symbol}`))
   const have = new Set(keep.map((row) => `${row.exchange}:${row.symbol}`))
-  const added = push.entered.filter((row) => !have.has(`${row.exchange}:${row.symbol}`))
+  const added = push.entered
+    .filter((row) => !have.has(`${row.exchange}:${row.symbol}`))
+    .map(fullRow)
   const run = runOf(push)
   return {
     ...held,

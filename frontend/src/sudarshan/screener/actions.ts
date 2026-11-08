@@ -17,7 +17,7 @@ import { type ScreenerState, type ScreenRow, WORDS } from './types'
  * conflict or a refusal shows its sentence and reads the state again; anything else shows its
  * sentence. Every sentence is the server's, as it came.
  */
-export type ScreenAction = 'pause' | 'resume' | 'delete'
+export type ScreenAction = 'pause' | 'resume' | 'delete' | 'alerts_on'
 
 export interface Held {
   action: ScreenAction
@@ -30,6 +30,7 @@ export const NO_ANSWER_HOLD_MS = 15_000
 export const NO_ANSWER: Record<ScreenAction, string> = {
   pause: `${WORDS.not_confirmed} Your screens are read again to show where it stands.`,
   resume: `${WORDS.not_confirmed} Your screens are read again to show where it stands.`,
+  alerts_on: `${WORDS.not_confirmed} Your screens are read again to show where it stands.`,
   delete:
     'Not confirmed: it may have been deleted. Your screens are read again to show whether it was.',
 }
@@ -120,7 +121,7 @@ export async function sendChange(
       return false
     }
     toast.error(problem.code === 'conflict' ? WORDS.conflict : problem.message)
-    if (problem.code === 'conflict' || problem.code === 'refused') {
+    if (problem.code === 'conflict' || problem.code === 'invalid') {
       void client.invalidateQueries({ queryKey: STATE_KEY })
     }
     return false

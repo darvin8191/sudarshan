@@ -6,6 +6,7 @@ import { webClient } from '@/api/client'
 import {
   type PresetCard,
   type Preview,
+  type ResultRow,
   type Results,
   type RunRow,
   type RunSet,
@@ -39,7 +40,9 @@ export class ScreenerError extends Error {
 
 interface Envelope<T> {
   status?: 'success' | 'error'
-  data?: T
+  /** False when the screener is switched off on the server: `data` is then null and `message` says so. */
+  enabled?: boolean
+  data?: T | null
   /** An error's code, sentence and the line of the screen it is about (contract.py ApiError.body). */
   error?: { code?: string; message?: string; field?: string }
   code?: string
@@ -59,6 +62,39 @@ const PAGE_CODE: Record<string, string> = {
   not_found: 'gone',
   not_confirmed: 'unanswered',
   unavailable: 'failed',
+}
+
+/**
+ * What the owner reads for each code when the service sent no sentence of its own, or sent one
+ * that is only a code. Written for a trader: what happened and what to do, never the code, a
+ * status or the name of a part.
+ */
+const CODE_WORDS: Record<string, string> = {
+  conflict: WORDS.conflict,
+  version_conflict: WORDS.conflict,
+  invalid: 'Something in this screen needs a change before it can be saved.',
+  refused: 'Something in this screen needs a change before it can be saved.',
+  gone: WORDS.gone,
+  not_found: WORDS.gone,
+  unanswered: WORDS.not_confirmed,
+  not_confirmed: WORDS.not_confirmed,
+  failed: WORDS.not_answering,
+  unavailable: WORDS.not_answering,
+  not_ready: 'This part of the screener is not ready yet.',
+  bad_request: WORDS.unreadable,
+  forbidden: 'Only the account owner can use the screener.',
+  unauthorized: WORDS.session_ended,
+  rate_limited: 'Too many requests. Wait a minute, then try again.',
+}
+
+/** A sentence that is a bare code or carries a status number is not for a trader. */
+const looksLikeCode = (message: string) =>
+  /^[a-z][a-z0-9_.:-]*$/.test(message) || /\b(?:HTTP\s*)?[45]\d\d\b/.test(message)
+
+/** The sentence to show: the service's own when it is one, else the page's words for the code. */
+export function traderWords(code: string, message: string | null): string {
+  if (message && !looksLikeCode(message)) return message
+  return CODE_WORDS[code] ?? WORDS.not_answering
 }
 
 const text = (value: unknown): string | null =>
@@ -100,23 +136,41 @@ export function problemOf(error: unknown): ScreenerProblem {
   // The service nests its refusal under `error`; an older shape put it at the top.
   const body = sent?.error && typeof sent.error === 'object' ? sent.error : sent
   const message = text(body?.message)
-  if (!message) {
+  if (!message && !text(body?.code)) {
     if (sessionEnded(status, data, request?.responseURL)) {
       return { code: 'unauthorized', message: WORDS.session_ended, field: null }
     }
     return { code: 'unreadable', message: WORDS.unreadable, field: null }
   }
   const code = text(body?.code)
-  return { code: (code && PAGE_CODE[code]) ?? code ?? 'failed', message, field: text(body?.field) }
+  const page = (code && PAGE_CODE[code]) ?? code ?? 'failed'
+  return { code: page, message: traderWords(page, message), field: text(body?.field) }
+}
+
+/** The problem a 200 answer carries when its envelope says error. */
+function problemIn(body: Envelope<unknown>): ScreenerProblem {
+  const error = body.error && typeof body.error === 'object' ? body.error : body
+  const code = text(error.code)
+  const page = (code && PAGE_CODE[code]) ?? code ?? 'failed'
+  return { code: page, message: traderWords(page, text(error.message)), field: text(error.field) }
 }
 
 const READ_MS = 15_000
 const CHANGE_MS = 20_000
 
-async function call<T>(
-  request: Promise<{ data: Envelope<T>; request?: { responseURL?: string } }>
-) {
-  let response: { data: Envelope<T>; request?: { responseURL?: string } }
+interface Answer<T> {
+  data: Envelope<T>
+  request?: { responseURL?: string }
+}
+
+/**
+ * One request and its envelope (README, API): data on success, a ScreenerError for an error. The
+ * screener switched off on the server answers success with `enabled: false` and no data; `off`
+ * says what the page shows for that (the state read builds an empty, switched-off state), and
+ * any other read gets a ScreenerError with the server's own sentence.
+ */
+async function call<T>(request: Promise<Answer<T>>, off?: (message: string) => T) {
+  let response: Answer<T>
   try {
     response = await request
   } catch (error) {
@@ -126,10 +180,51 @@ async function call<T>(
     throw new ScreenerError({ code: 'unauthorized', message: WORDS.session_ended, field: null })
   }
   const body = response.data
-  if (body && typeof body === 'object' && body.status === 'success' && body.data !== undefined) {
-    return body.data
+  if (body && typeof body === 'object') {
+    if (body.status === 'error') throw new ScreenerError(problemIn(body))
+    if (body.status === 'success') {
+      if (body.enabled === false) {
+        const message = text(body.message) ?? WORDS.switched_off
+        if (off) return off(message)
+        throw new ScreenerError({ code: 'off', message, field: null })
+      }
+      if (body.data !== undefined && body.data !== null) return body.data
+    }
   }
   throw new ScreenerError({ code: 'unreadable', message: WORDS.unreadable, field: null })
+}
+
+/** What the page holds while the screener is switched off on the server. */
+function switchedOff(message: string): ScreenerState {
+  return {
+    enabled: false,
+    engine: { state: 'switched_off', line: message, real_time: false, next_at: null },
+    screens: [],
+    limits: { active: 0, active_used: 0 },
+    last_run_id: 0,
+    server_time: Date.now(),
+  }
+}
+
+const PER_RUPEE = 100
+
+/**
+ * The service keeps a price in paise, a whole number (cross-design X3); the page shows rupees, as
+ * every other screen of the app does. The one conversion is here, so nothing else sees paise. A
+ * price that is not a number becomes null and shows as a dash, never as zero.
+ */
+export function inRupees<T extends { rows: ResultRow[] }>(answer: T): T {
+  return {
+    ...answer,
+    rows: answer.rows.map((row) => ({
+      ...row,
+      ltp: typeof row.ltp === 'number' && Number.isFinite(row.ltp) ? row.ltp / PER_RUPEE : null,
+      change_pct:
+        typeof row.change_pct === 'number' && Number.isFinite(row.change_pct)
+          ? row.change_pct
+          : null,
+    })),
+  }
 }
 
 const BASE = '/sudarshan/screener/api'
@@ -143,11 +238,12 @@ export interface ScreenDraft {
 }
 
 export type ScreenChange =
-  | { version: number; action: 'pause' | 'resume' }
+  | { version: number; action: 'pause' | 'resume' | 'alerts_on' | 'alerts_off' }
   | { version: number; action: 'edit'; spec: ScreenSpec }
 
 export const screenerApi = {
-  state: () => call<ScreenerState>(webClient.get(`${BASE}/state`, { timeout: READ_MS })),
+  state: () =>
+    call<ScreenerState>(webClient.get(`${BASE}/state`, { timeout: READ_MS }), switchedOff),
   create: (draft: ScreenDraft) =>
     call<ScreenRow>(webClient.post(`${BASE}/screens`, draft, { timeout: CHANGE_MS })),
   change: (id: number, change: ScreenChange) =>
@@ -162,8 +258,12 @@ export const screenerApi = {
   /** A draft (its spec) or a saved screen (its id); six a minute. */
   preview: (target: { spec: ScreenSpec } | { screen_id: number }, signal?: AbortSignal) =>
     call<Preview>(webClient.post(`${BASE}/preview`, target, { timeout: CHANGE_MS, signal })),
-  results: (id: number, signal?: AbortSignal) =>
-    call<Results>(webClient.get(`${BASE}/screens/${id}/results`, { timeout: READ_MS, signal })),
+  results: async (id: number, signal?: AbortSignal) =>
+    inRupees(
+      await call<Results>(
+        webClient.get(`${BASE}/screens/${id}/results`, { timeout: READ_MS, signal })
+      )
+    ),
   runs: (id: number, query: { before?: number | null; limit?: number }, signal?: AbortSignal) =>
     call<RunsPage>(
       webClient.get(`${BASE}/screens/${id}/runs`, {
@@ -175,8 +275,8 @@ export const screenerApi = {
         signal,
       })
     ),
-  run: (id: number, signal?: AbortSignal) =>
-    call<RunSet>(webClient.get(`${BASE}/runs/${id}`, { timeout: READ_MS, signal })),
+  run: async (id: number, signal?: AbortSignal) =>
+    inRupees(await call<RunSet>(webClient.get(`${BASE}/runs/${id}`, { timeout: READ_MS, signal }))),
   runsSince: (after: number) =>
     call<{ runs: RunRow[]; more: boolean }>(
       webClient.get(`${BASE}/runs/since`, { params: { after }, timeout: READ_MS })

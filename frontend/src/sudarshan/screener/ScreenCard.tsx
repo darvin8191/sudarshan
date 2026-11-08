@@ -1,4 +1,4 @@
-import { ArrowUpRight, Clock, ListChecks } from 'lucide-react'
+import { ArrowUpRight, Bell, BellOff, Clock, ListChecks } from 'lucide-react'
 import { memo } from 'react'
 import { cn } from '@/lib/utils'
 import { CARD } from '@/sudarshan/books/cards/parts'
@@ -52,6 +52,24 @@ export const ScreenCard = memo(function ScreenCard({
           <span className="inline-flex items-center gap-1 text-[color:var(--text-secondary)]">
             <Clock aria-hidden="true" className="size-4" />
             {row.next_check}
+          </span>
+        )}
+        {row.alerts && (
+          <span
+            data-alerts={row.alerts_paused ? 'paused' : 'text'}
+            className={cn(
+              'inline-flex items-center gap-1',
+              row.alerts_paused
+                ? 'text-[color:var(--warning-text)]'
+                : 'text-[color:var(--text-secondary)]'
+            )}
+          >
+            {row.alerts_paused || /off|paused/i.test(row.alerts) ? (
+              <BellOff aria-hidden="true" className="size-4" />
+            ) : (
+              <Bell aria-hidden="true" className="size-4" />
+            )}
+            {row.alerts}
           </span>
         )}
         <ArrowUpRight

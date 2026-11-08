@@ -1,7 +1,8 @@
-import { Clock, LoaderCircle, TriangleAlert } from 'lucide-react'
+import { Clock, Hourglass, LoaderCircle, TriangleAlert } from 'lucide-react'
 import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
 import type { Preview } from './types'
 import type { CheckState } from './usePreviewCheck'
+import { needsWords, warmingNote } from './words'
 
 /** The count and the first matches of a preview, with what could not be checked and why. */
 export function PreviewBody({ preview }: { preview: Preview }) {
@@ -35,6 +36,15 @@ export function PreviewBody({ preview }: { preview: Preview }) {
           ))}
         </ul>
       )}
+      {needsWords(preview.needs) && (
+        <p
+          data-needs="true"
+          className="flex items-start gap-1.5 text-[0.8125rem] font-semibold text-[color:var(--text-secondary)]"
+        >
+          <Hourglass aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+          {needsWords(preview.needs)}
+        </p>
+      )}
       {preview.not_checked.count > 0 && (
         <div className="flex flex-col gap-1 rounded-xl bg-[color:var(--gold-tint)] px-3 py-2">
           <p className="text-sm font-bold text-[color:var(--warning-text)]">
@@ -45,6 +55,12 @@ export function PreviewBody({ preview }: { preview: Preview }) {
               <li key={reason}>{reason}</li>
             ))}
           </ul>
+          {warmingNote(preview.not_checked.reasons) && (
+            <p className="flex items-start gap-1.5 text-[0.8125rem] font-semibold">
+              <Hourglass aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+              {warmingNote(preview.not_checked.reasons)}
+            </p>
+          )}
         </div>
       )}
     </div>

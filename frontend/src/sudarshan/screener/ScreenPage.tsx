@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Pause, Play, Trash2 } from 'lucide-react'
+import { ArrowLeft, Bell, BellOff, Pause, Play, Trash2 } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 import { ACTION, OUTLINED } from '@/sudarshan/books/cards/parts'
@@ -78,6 +78,39 @@ export function ScreenPage({
           {countsWords(row)}
           {row.next_check && row.status === 'active' ? ` · ${row.next_check}` : ''}
         </p>
+        {row.alerts && (
+          <p
+            data-alerts={row.alerts_paused ? 'paused' : 'text'}
+            className={cn(
+              'flex items-center gap-1.5 text-sm font-semibold',
+              row.alerts_paused
+                ? 'text-[color:var(--warning-text)]'
+                : 'text-[color:var(--text-secondary)]'
+            )}
+          >
+            {row.alerts_paused ? (
+              <BellOff aria-hidden="true" className="size-4 shrink-0" />
+            ) : (
+              <Bell aria-hidden="true" className="size-4 shrink-0" />
+            )}
+            {row.alerts}
+          </p>
+        )}
+        {row.alerts_paused && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void sendChange(client, row, 'alerts_on')}
+            className={OUTLINED}
+          >
+            <Bell aria-hidden="true" className="size-5" />
+            {held?.action === 'alerts_on'
+              ? held.state === 'sending'
+                ? 'Turning alerts on'
+                : 'Not confirmed'
+              : 'Turn alerts back on'}
+          </button>
+        )}
         <div className="flex gap-2 pt-1">
           {row.status === 'active' && (
             <button
