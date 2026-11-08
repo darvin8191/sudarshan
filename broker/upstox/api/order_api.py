@@ -347,7 +347,9 @@ def _read_order_rows(auth, limit):
     if not isinstance(book, dict) or book.get("status") != "success":
         logger.error("The order book could not be read for an exit")
         return None
-    return [row for row in book.get("data") or [] if isinstance(row, dict)]
+    rows = [row for row in book.get("data") or [] if isinstance(row, dict)]
+    risk_gate.order_book_read(auth, rows)  # SUDARSHAN M5.13: the gate reads it no second time
+    return rows
 
 
 def _order_statuses(rows):
@@ -600,6 +602,7 @@ def _with_sent(response, action, quantity, closes):
     return {**response, "sent": sent}
 
 
+@risk_gate.handing_order_rows  # SUDARSHAN M5.13: its order book read serves the gate's judging
 @refuse_smart_order_on_read_failure
 def place_smartorder_api(data, auth):
     """
@@ -1008,6 +1011,9 @@ def _exit_outcome(held, answer, res, response, orderid):
             "Upstox allows only a limited number of orders per minute and its turn was too far "
             "away, so its exit was not sent. Exit it again."
         )
+    elif isinstance(res, risk_gate.RefusedResponse):
+        # SUDARSHAN M5.13: the risk gate refused it, in its own sentence; Upstox never saw it.
+        why = _refusal_words(response) or "The risk guard refused its exit."
     else:
         said = _refusal_words(response)
         why = f"Upstox refused its exit: {said}" if said else "Upstox refused its exit."
@@ -1155,6 +1161,7 @@ def _unlisted_positions(rows, orders):
     return candidates, skipped, outcomes
 
 
+@risk_gate.handing_order_rows  # SUDARSHAN M5.13: its order book read serves the gate's judging
 def close_all_positions(current_api_key, auth):
     """
     Closes all open positions.
@@ -1490,13 +1497,22 @@ def cancel_every_open_order_detail(auth):
     every order went: ``error`` is 0 and ``success`` equals ``total``.
 
     Returns:
-        ``{"cancelled": bool, "not_confirmed": bool, "ids": [...], "done": n, "total": n}``:
-        ``cancelled`` only when every order went; ``not_confirmed`` when the answer cannot say
-        (a timeout, an Upstox 5xx, a success that proves nothing), for the cancel may still have
-        gone; ``ids`` are the orders Upstox says it cancelled, ``done`` and ``total`` its
-        summary's counts when it gave them (else None).
+        ``{"cancelled": bool, "not_confirmed": bool, "ids": [...], "done": n, "total": n,
+        "nothing_open": bool}``: ``cancelled`` only when every order went; ``not_confirmed``
+        when the answer cannot say (a timeout, an Upstox 5xx, a success that proves nothing),
+        for the cancel may still have gone; ``ids`` are the orders Upstox says it cancelled,
+        ``done`` and ``total`` its summary's counts when it gave them (else None);
+        ``nothing_open`` when Upstox answered that no order was open or pending (its error
+        UDAPI1109), which is every order cancelled and not a failure.
     """
-    result = {"cancelled": False, "not_confirmed": False, "ids": [], "done": None, "total": None}
+    result = {
+        "cancelled": False,
+        "not_confirmed": False,
+        "ids": [],
+        "done": None,
+        "total": None,
+        "nothing_open": False,
+    }
     try:
         answer = get_api_response(
             "/v2/order/multi/cancel", auth, method="DELETE", timeout=MULTI_CANCEL_LIMIT_S
@@ -1508,6 +1524,8 @@ def cancel_every_open_order_detail(auth):
         return {**result, "not_confirmed": True}
     if not isinstance(answer, dict):
         return {**result, "not_confirmed": True}
+    if _says_nothing_open(answer):
+        return {**result, "cancelled": True, "nothing_open": True, "done": 0, "total": 0}
     data = answer.get("data")
     named = data.get("order_ids") if isinstance(data, dict) else None
     result["ids"] = [str(each) for each in named] if isinstance(named, (list, tuple)) else []
@@ -1525,6 +1543,27 @@ def cancel_every_open_order_detail(auth):
         result["ids"] = []
         result["not_confirmed"] = bool(answer.get("not_confirmed"))
     return result
+
+
+#: Upstox's answer to a cancel of every open order when none is open or pending.
+_NOTHING_OPEN_CODE = "UDAPI1109"
+
+
+def _says_nothing_open(answer):
+    """SUDARSHAN M5.13: whether an Upstox error body says, and says only, UDAPI1109 ("No open or
+    pending orders available"): nothing to cancel, which is not a failure. An answer with data,
+    one not confirmed (a 5xx), or one that names any other error beside it keeps its meaning."""
+    if answer.get("status") != "error" or answer.get("data") or answer.get("not_confirmed"):
+        return False
+    errors = answer.get("errors")
+    if not isinstance(errors, list) or not errors:
+        return False
+    return all(
+        isinstance(error, dict)
+        and str(error.get("errorCode") or error.get("error_code") or "").strip().upper()
+        == _NOTHING_OPEN_CODE
+        for error in errors
+    )
 
 
 def cancel_every_open_order_api(auth):

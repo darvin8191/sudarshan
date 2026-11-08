@@ -20,8 +20,9 @@ When it covers the pipe, an order passes in three steps:
 
 An exit always goes. A refusal is 403 with a sentence (words.py), never 409, which the phone reads
 as an earlier exit still being placed (frontend/src/sudarshan/books/sendOutcome.ts), and no
-function is called. Each send stays recorded until its answer says nothing was sent, until
-the book shows it (or its order ended), or ``SEND_HELD_AT_MOST_S`` after its answer; an answer
+function is called. Each send stays recorded until its answer says nothing was sent, or until
+the book shows it (or its order ended); past ``SEND_HELD_AT_MOST_S`` from its answer it stays
+only until the next order book read answers for it, and no longer than its trading day. An answer
 that names no order is forgotten ``SHOWS_WITHIN_S`` after it, for the book has no order to be
 asked about. The records are the in-flight registry the kill switch waits on when it is turned on.
 
@@ -31,7 +32,9 @@ sandbox's ``cancel_order``, Cancel all included) drops the claims on that order 
 (``cancelled``). And before an order is refused only because of claims, the broker's order book
 is read once: a claim whose order shows cancelled, rejected or still resting is dropped, and the
 order judged again; a claim whose order shows complete, or is not in the book yet, stays until
-the positions book shows the exit or ``SEND_HELD_AT_MOST_S`` have passed.
+the positions book shows the exit or ``SEND_HELD_AT_MOST_S`` have passed; a claim whose market
+order shows working stays however long it has, counting from that read (release review v0.4.1,
+L1), so a plain exit never goes beside a first that is still working.
 
 If the gate itself breaks, an order passes only when nothing is refusing new risk. While the kill
 switch is on, or its state could not be read, it is refused (fail closed). Under the kill switch
@@ -77,6 +80,8 @@ gthread's real threads, and on the development server.
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import functools
 import itertools
 import time
@@ -88,7 +93,7 @@ from typing import Any
 
 from broker.upstox.api import rate_limiter
 from sudarshan.books import fills
-from sudarshan.books.exit_guard import EXIT_SHOWS_WITHIN_S, trader_name
+from sudarshan.books.exit_guard import EXIT_ALL_SENDS_FOR_S, EXIT_SHOWS_WITHIN_S, trader_name
 from utils import real_threading
 from utils.broker_backpressure import BusyResponse
 from utils.logging import get_logger
@@ -106,8 +111,16 @@ LIVE, SANDBOX = "live", "sandbox"
 #: show an exit (the same as sudarshan/books/exit_guard.py).
 SHOWS_WITHIN_S = EXIT_SHOWS_WITHIN_S
 #: A send counts this long at most, answered or not: the phone's no-answer hold
-#: (frontend/src/sudarshan/books/sent.ts).
+#: (frontend/src/sudarshan/books/sent.ts). A market exit whose answer named its order counts
+#: past it while the order book shows that order working (release review v0.4.1, L1): after this
+#: long from the answer, or from the last read that showed it working, its claim stands only until
+#: the next read of the book answers for it. Every other send (an entry, a resting limit or stop)
+#: ends here, as it always did.
 SEND_HELD_AT_MOST_S = 150.0
+#: A market exit's claim never asked about again ends here at the latest: longer than any Indian
+#: session, so a working order is never dropped by a clock; an MCX order answered late in the
+#: evening keeps it into the next morning, which costs one order book read if anything meets it.
+CLAIM_KEPT_AT_MOST_S = 16 * 3600.0
 #: How soon the kill switch's state is read again after a read failed.
 STATE_RETRY_S = 2.0
 #: An order that finds the first state read in flight waits this long for it.
@@ -131,6 +144,25 @@ TIMED_KEPT = 500
 #: now, only if Upstox's order book can be read to correct it (``Gate._corrected``), and no longer
 #: than this after it was read.
 KEPT_BOOK_WITHIN_S = SEND_HELD_AT_MOST_S
+#: The day's loss figure, when the positions cannot be read now, comes from a kept book no older
+#: than this: the order book's fills correct a row's quantities, not its money (realised,
+#: unrealised, the day's values), so the figure has only its age (release review v0.4.1, L3).
+DAY_BOOK_WITHIN_S = 15.0
+#: Order book rows a caller read for the exits it is sending (``order_book_read``) correct the
+#: gate's positions, instead of a read of its own, while they are at most this old: Exit all reads
+#: the book once and then sends for ``EXIT_ALL_SENDS_FOR_S``, with time for the read before and
+#: the last answer after (release review v0.4.1, X3).
+HANDED_ORDERS_WITHIN_S = EXIT_ALL_SENDS_FOR_S + 15.0
+#: Outside any ``handing_order_rows`` scope: nothing can be handed, and nothing is read.
+_NO_SCOPE = object()
+#: ``(owner, read at, rows)`` the caller of the current scope handed, None for a scope with
+#: nothing handed yet, or ``_NO_SCOPE``. A context variable, so it belongs to one greenlet or
+#: thread; the scope (``handing_order_rows``, around the broker call that reads and sends) resets
+#: it when the call ends, so nothing outlives that call on any thread: a request's, a Flow
+#: pool's or APScheduler's (review of fix/guard-on, MEDIUM-1).
+_HANDED_ORDERS: contextvars.ContextVar[object] = contextvars.ContextVar(
+    "sudarshan_guard_handed_orders", default=_NO_SCOPE
+)
 #: A segment's session window, read from the market calendar, is kept this long.
 SESSION_KEPT_S = 600.0
 #: How far ahead the daily card looks for the next session (a long holiday weekend fits).
@@ -164,6 +196,12 @@ _NO_QUOTE = object()  # not read: the band did not need the market for this orde
 BANDED_TYPES = ("LIMIT", "SL", "SL-M")
 REFUSED, ANSWERED = "refused", "answered"
 _ENDED, _WORKING = "ended", "working"
+
+
+def _market_exit(send: Send) -> bool:
+    """A send judged as reducing its position, by a market order: the one kind of claim that
+    outlasts ``SEND_HELD_AT_MOST_S`` (a market exit can rest price-protected at Upstox)."""
+    return bool(send.reducing) and not _rests(send.order)
 
 
 def _rests(order: Order) -> bool:
@@ -237,6 +275,7 @@ class Send:
     ref: str | None = None  # the broker's order id, once known
     answered: float | None = None
     closed: int = 0  # how much of this entry later exits have been taken to close (the brake)
+    working_at: float | None = None  # monotonic: the last order book read showing it working
 
 
 @dataclass
@@ -733,10 +772,18 @@ class Gate:
                 return decided
             checked = True
             ended = self._ended_orders(known, decided.refs)  # a read: outside the lock
-            if ended:
+            if ended is not None:
                 with self._lock:
+                    now = time.monotonic()
+                    working = ended.get(_WORKING, set())
                     self._drop_claims(known.pipe, ended.get(_ENDED, set()))
-                    self._drop_claims(known.pipe, ended.get(_WORKING, set()), resting_only=True)
+                    self._drop_claims(known.pipe, working, resting_only=True)
+                    self._seen_working(known.pipe, working, now)
+                    # Complete, or not in the book: past SEND_HELD_AT_MOST_S the positions book
+                    # has had its time to show the exit, so the claim stands for nothing more.
+                    self._drop_stale_claims(
+                        known.pipe, decided.refs - working - ended.get(_ENDED, set()), now
+                    )
 
     def _decide(
         self,
@@ -824,12 +871,12 @@ class Gate:
             return frozenset()
         return frozenset(send.ref for send in self._counted(order, facts.position) if send.ref)
 
-    def _ended_orders(self, order: Order, refs: frozenset) -> dict[str, set[str]]:
+    def _ended_orders(self, order: Order, refs: frozenset) -> dict[str, set[str]] | None:
         """Of ``refs``, the orders the broker shows cancelled or rejected (key ``_ENDED``: their
         claims stand for nothing) and those it shows working (key ``_WORKING``: the claim of a
         resting limit or stop stands for nothing, but a market order not filled yet is still on
         its way to the book, so its claim stays until the book shows it final). A read that
-        fails ends none."""
+        fails answers None, and ends none."""
         try:
             if order.pipe == LIVE:
                 statuses = self._read.live_order_statuses(order.owner)
@@ -837,7 +884,7 @@ class Gate:
                 statuses = self._read.sandbox_order_statuses(order.owner, sorted(refs))
         except readers.Unreadable as exc:
             logger.warning(f"The risk check could not read the order book for claims: {exc}")
-            return {}
+            return None
         found: dict[str, set[str]] = {}
         for ref in refs:
             status = statuses.get(ref)
@@ -855,6 +902,23 @@ class Gate:
             if send.order.pipe == pipe and send.ref in refs:
                 if resting_only and not _rests(send.order):
                     continue
+                del self._sends[token]
+
+    def _seen_working(self, pipe: str, refs: set[str], now: float) -> None:
+        """The order book showed these orders working: their claims count from now again
+        (``_forget``); call under the lock."""
+        for send in self._sends.values():
+            if send.order.pipe == pipe and send.ref in refs:
+                send.working_at = now
+
+    def _drop_stale_claims(self, pipe: str, refs: set[str], now: float) -> None:
+        """Of the sends on these orders, drop the ones past ``SEND_HELD_AT_MOST_S`` from their
+        answer or the last read that showed them working: the book was just read and did not
+        show the order working, so the claim has nothing left to wait for. Call under the lock."""
+        for token, send in list(self._sends.items()):
+            if send.order.pipe != pipe or send.ref not in refs or send.answered is None:
+                continue
+            if now - max(send.answered, send.working_at or _NEVER) > SEND_HELD_AT_MOST_S:
                 del self._sends[token]
 
     def release(self, pipe: str, ref: str) -> None:
@@ -904,9 +968,11 @@ class Gate:
         rows, stale = self._live_rows(order.owner, fallback)
         return rules.upstox_position(rows, instrument, product), stale
 
-    def _live_rows(self, owner: str, fallback: bool = False) -> tuple[list, bool]:
+    def _live_rows(
+        self, owner: str, fallback: bool = False, kept_within: float = KEPT_BOOK_WITHIN_S
+    ) -> tuple[list, bool]:
         """Upstox's positions for ``owner``, kept with the time the read began. When they cannot
-        be read and ``fallback`` allows it, the book read in the last ``KEPT_BOOK_WITHIN_S``
+        be read and ``fallback`` allows it, the book read in the last ``kept_within`` seconds
         and corrected by the order book, with True; else Unreadable. Rows are corrected by the
         fills the order book shows (``_corrected``), so a lagging positions book judges right."""
         started = time.monotonic()
@@ -915,7 +981,7 @@ class Gate:
             if rows is None:
                 rows = self._read.live_rows(owner)
         except readers.Unreadable:
-            kept = self._kept_rows(owner, KEPT_BOOK_WITHIN_S) if fallback else None
+            kept = self._kept_rows(owner, kept_within) if fallback else None
             if kept is None:
                 raise
             # A book kept from before judges only as the order book's fills correct it, however
@@ -930,13 +996,18 @@ class Gate:
 
     def _corrected(self, owner: str, rows: list, strict: bool = False) -> list | None:
         """``rows`` with each quantity corrected by what Upstox's order book says was filled
-        since the row was read (sudarshan.books.fills), read after the rows. A row it cannot
-        correct stays as read, unless ``strict``, which answers None for any such row; so does a
-        book that cannot be read."""
-        try:
-            orders = self._read.live_order_rows(owner)
-        except Exception:
-            return None
+        since the row was read (sudarshan.books.fills), read after the rows: the rows the caller
+        handed for the exits it is sending (``order_book_read``), else a read of the gate's own.
+        A row it cannot correct stays as read, unless ``strict``, which answers None for any such
+        row; so does a book that cannot be read. A position the day's fills show in a product the
+        rows do not list yet (bought a moment ago) is added as a row of its own, so its exit is
+        judged an exit, never an opening order (review of fix/guard-on, MEDIUM-2)."""
+        orders = handed_order_rows(owner)
+        if orders is None:
+            try:
+                orders = self._read.live_order_rows(owner)
+            except Exception:
+                return None
         # Each row is corrected together with the other products of its instrument, so a
         # position converted in Upstox's app is judged right (sudarshan.books.fills).
         held_rows = fills.held_each(rows, orders)
@@ -948,6 +1019,17 @@ class Gate:
                 out.append(row)
             else:
                 out.append({**row, "quantity": held})
+        for exchange, tradingsymbol, token, product, net in fills.unlisted_nets(rows, orders):
+            out.append(
+                {
+                    "instrument_token": token,
+                    "product": product,
+                    "quantity": net,
+                    "exchange": exchange,
+                    "tradingsymbol": tradingsymbol,
+                    "unlisted": True,  # from the fills alone: no money figures to read
+                }
+            )
         return out
 
     def _kept_rows(self, owner: str, within: float) -> list | None:
@@ -1111,11 +1193,13 @@ class Gate:
         return daily.live_figure(self._rows_for_day(order.owner))
 
     def _rows_for_day(self, owner: str) -> list:
-        """The book the order was just judged on; else a read, else the kept one as the order book corrects it."""
+        """The book the order was just judged on; else a read; else the one kept in the last
+        ``DAY_BOOK_WITHIN_S`` as the order book corrects it (its money is that old, so no
+        longer: the kept book that judges quantities for ``KEPT_BOOK_WITHIN_S`` serves no figure)."""
         kept = self._kept_rows(owner, 1.0)
         if kept is not None:
             return kept
-        return self._live_rows(owner, fallback=True)[0]
+        return self._live_rows(owner, fallback=True, kept_within=DAY_BOOK_WITHIN_S)[0]
 
     def _lock_day(self, pipe: str, day: _Guards, figure: daily.DayFigure) -> risk_store.DayLock:
         """Write today's lock; the first order here to see the breach says so, once."""
@@ -1336,10 +1420,16 @@ class Gate:
             answered = send.answered
             if answered is None:
                 gone = now - send.admitted > SEND_HELD_AT_MOST_S
+            elif send.ref and _market_exit(send):
+                # Upstox named its order, a market exit: the claim stands until the book shows
+                # the exit (``_counted``) or the order ended (``_ended_orders``). No clock ends it
+                # while the order may still be working (resting price-protected, L1): past
+                # ``SEND_HELD_AT_MOST_S`` it stands until the next order book read answers for
+                # it (``_drop_stale_claims``), and never past ``CLAIM_KEPT_AT_MOST_S``.
+                gone = now - answered > CLAIM_KEPT_AT_MOST_S
             elif send.ref:
-                # Upstox named its order: the claim stands until the book shows the exit
-                # (``_counted``) or the order ended (``_ended_orders``), at most
-                # ``SEND_HELD_AT_MOST_S`` from the answer; no shorter clock ends it.
+                # An entry, or a resting limit or stop: the book has had its time to show it, and
+                # a resting order's claim stands for nothing once the book shows it resting.
                 gone = now - answered > SEND_HELD_AT_MOST_S
             else:
                 gone = now - answered > SHOWS_WITHIN_S  # no order to ask the book about
@@ -1810,6 +1900,54 @@ class Gate:
                 self._write_note(key, note)
             except Exception:
                 logger.exception("A risk refusal count could not be written to the audit")
+
+
+def order_book_read(owner: str, rows: list) -> None:
+    """A caller sizing exits read Upstox's order book for ``owner`` (the Upstox module's
+    ``_read_order_rows``: a smart order, Exit all): the gate corrects its positions with these
+    rows for the exits that follow in the same ``handing_order_rows`` scope, instead of reading
+    the book once more for each of them, until ``HANDED_ORDERS_WITHIN_S`` have passed or the
+    scope ends. Outside a scope nothing is handed."""
+    if _HANDED_ORDERS.get() is _NO_SCOPE:
+        return
+    _HANDED_ORDERS.set((str(owner), time.monotonic(), list(rows)))
+
+
+def handed_order_rows(owner: str) -> list | None:
+    """The order book rows the current scope's caller handed for ``owner``, while they are at
+    most ``HANDED_ORDERS_WITHIN_S`` old; else None, and the gate reads the book itself."""
+    handed = _HANDED_ORDERS.get()
+    if handed is _NO_SCOPE or handed is None:
+        return None
+    read_for, read_at, rows = handed
+    if read_for != str(owner) or time.monotonic() - read_at > HANDED_ORDERS_WITHIN_S:
+        return None
+    return rows
+
+
+@contextlib.contextmanager
+def handed_orders_kept_apart():
+    """Run a block whose reads are handed to the gate for that block alone: nothing handed before
+    it is used in it, and nothing it hands outlives it, whatever thread runs it. The token
+    resets the variable in ``finally``, so no path depends on a request's teardown."""
+    token = _HANDED_ORDERS.set(None)
+    try:
+        yield
+    finally:
+        _HANDED_ORDERS.reset(token)
+
+
+def handing_order_rows(fn: Callable) -> Callable:
+    """Decorate a broker function that reads the order book to size the exits it sends (the
+    Upstox module's place_smartorder_api and close_all_positions): its read is handed to the
+    gate for its own sends alone (``handed_orders_kept_apart``)."""
+
+    @functools.wraps(fn)
+    def scoped(*args, **kwargs):
+        with handed_orders_kept_apart():
+            return fn(*args, **kwargs)
+
+    return scoped
 
 
 def _tell_owner(text: str) -> None:

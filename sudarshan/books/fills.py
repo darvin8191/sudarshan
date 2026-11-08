@@ -55,6 +55,32 @@ def _signed(value: Any) -> int | None:
     return int(number)
 
 
+#: Upstox statuses of an order that has reached no fill yet: a rejection, a request still being
+#: validated or waiting to be placed, a stop waiting for its trigger. A ``filled_quantity`` Upstox
+#: leaves null on one of these reads as 0; on any other status (open, complete, cancelled, a
+#: modify or cancel pending, which may have part-filled) it cannot be worked out.
+_NOTHING_FILLED_STATUSES = frozenset(
+    {
+        "REJECTED",
+        "VALIDATION PENDING",
+        "PUT ORDER REQ RECEIVED",
+        "OPEN PENDING",
+        "TRIGGER PENDING",
+        "AFTER MARKET ORDER REQ RECEIVED",
+    }
+)
+
+
+def _filled(order: dict) -> int | None:
+    """An order's filled quantity, or None when it cannot be told; null on an order whose status
+    says nothing has filled is 0 (release review v0.4.1, L6)."""
+    filled = _whole(order.get("filled_quantity"))
+    if filled is not None or order.get("filled_quantity") is not None:
+        return filled
+    status = str(order.get("status") or "").strip().upper().replace("_", " ")
+    return 0 if status in _NOTHING_FILLED_STATUSES else None
+
+
 def _product(row: dict) -> str:
     return str(row.get("product") or "").strip().upper()
 
@@ -75,7 +101,8 @@ def held_by_product(
         ``{product: quantity}`` for every product the instrument has a row or an order in (a
         product with an order and no row stands for a row that shows nothing yet); None when it
         cannot be worked out: a field is missing or not a number, an order of the instrument
-        names no side, product or filled quantity, or the figures do not add up.
+        names no side, product or filled quantity (a null filled quantity on an order whose
+        status says nothing has filled yet reads as 0), or the figures do not add up.
 
     A row lags the fills, by a second or by a minute. When every product is consistent (no row
     shows more bought or sold today than the order book lists), each product's quantity is its
@@ -105,7 +132,7 @@ def held_by_product(
     for order in orders:
         if not isinstance(order, dict) or str(order.get("instrument_token") or "").strip() != token:
             continue
-        filled = _whole(order.get("filled_quantity"))
+        filled = _filled(order)
         side = str(order.get("transaction_type") or "").strip().upper()
         product = _product(order)
         if filled is None or side not in ("BUY", "SELL") or not product:

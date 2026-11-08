@@ -238,3 +238,17 @@ def test_the_rules_are_pure():
         elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
             assert node.func.id not in {"open", "print", "input", "exec", "eval"}
     assert imported <= {"__future__", "dataclasses"}, imported
+
+
+@pytest.mark.parametrize("side", [rules.BUY, rules.SELL, None])
+@pytest.mark.parametrize("quantity", [65, 1, 0, None])
+def test_a_smart_order_to_size_0_from_flat_sends_nothing(side, quantity):
+    """v0.4.1 (X1, Y1): a smart order to position size 0 never opens a position, whatever
+    quantity and side it carries. Before v0.4.1 the broker sent the request's own order from a
+    flat book, and this model said so; both now agree that nothing is sent."""
+    assert rules.smart_order(0, 0, side, quantity) is None
+
+
+def test_a_smart_order_to_size_0_on_a_position_still_exits_it():
+    assert rules.smart_order(0, 65, rules.BUY, 65) == (rules.SELL, 65)
+    assert rules.smart_order(0, -130, rules.SELL, 65) == (rules.BUY, 130)

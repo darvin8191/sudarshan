@@ -135,7 +135,11 @@ in brand. Icon "Mor": tile #0E5A73, ring #E3A21A, glyph #FFFFFF. Numbers via
     A single exit also refuses while the order book shows a MARKET order working on the position's
     closing side, whether or not this process placed it (a restart loses the holds); a resting
     stop or target (SL, SL-M, LIMIT) does not block it, and Exit all leaves such a position out
-    with its sentence.
+    with its sentence. The risk gate (`sudarshan/guard/gate.py`, stage `on`) keeps its own claim
+    on every order it judged: an entry's or a resting order's claim ends 150 s after the answer;
+    a market exit's claim lasts while Upstox's order book shows the order working (asked only
+    when the claim would refuse an order), ends when the book shows it ended, complete past
+    150 s, or absent past 150 s, and never past 16 h.
   - Sizing. Every exit and every smart order that reduces or crosses a position (a smart order that
     only adds is sized from the row, with no order book read) is sized from the positions rows
     corrected by the order book's fills (`sudarshan/books/fills.py`), per instrument across its

@@ -33,7 +33,7 @@ import os
 import time
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Any
 
@@ -57,6 +57,9 @@ SECOND_SWEEP_AFTER_S = 2.0
 #: cancelled to show as ended; then it goes regardless, and Exit all says which it left out.
 CANCELS_SHOW_WITHIN_S = 5.0
 CANCELS_POLL_S = 0.5
+#: Exit all that sent nothing because Upstox did not send the orders in time is tried once more,
+#: this long after (the stops are gone by then, so a position left open has nothing watching it).
+EXIT_ALL_AGAIN_AFTER_S = 2.0
 
 _running_lock = real_threading.Lock()
 _running: set[str] = set()  # activations whose steps are running in this process
@@ -163,6 +166,30 @@ class _Steps:
         self.done.append({"step": name, "ok": False, "words": said})
 
 
+@dataclass
+class _Cancels:
+    """What the switch's passes over Upstox's Live orders have done so far, carried from the first
+    look to the sweep and on to Exit all: a later step's words never say nothing was cancelled
+    after an earlier one cancelled, or may have (release review of fix/guard-on, HIGH-2)."""
+
+    ids: list[str] = field(default_factory=list)  # orders Upstox confirmed cancelled
+    stops: int = 0  # stop-loss orders among them, counted where positions could be read
+    unsure: int = 0  # cancels sent whose answer did not confirm: they may have gone
+    blind: bool = False  # Upstox's cancel of every open order was sent without the book
+    gtts: int = 0  # GTTs cancelled
+    unseen: bool = False  # an order book read failed, so ``seen`` may miss working orders
+
+    @property
+    def touched(self) -> bool:
+        """Whether anything was, or may have been, cancelled."""
+        return bool(self.ids or self.unsure or self.blind or self.gtts)
+
+    @property
+    def said(self) -> tuple[int, int, int, int]:
+        """What the words take: cancelled, stop-loss orders among them, not confirmed, GTTs."""
+        return len(self.ids), self.stops, self.unsure + int(self.blind), self.gtts
+
+
 def _clear_up(
     owner: Owner, state: KillSwitchState, in_flight: list[int], settings
 ) -> KillSwitchState:
@@ -173,23 +200,40 @@ def _clear_up(
     if flag.stage() == flag.ON:
         if owner.auth_token and owner.broker:
             seen: dict[str, dict] = {}  # every order row read, by order id
+            cancels = _Cancels()
             if state.exit_all:
-                _note_rows(owner, seen)  # the orders as they stand, before the cancel
-            cancelled = steps.run("live_orders", lambda: _cancel_live_orders(owner, seen))
-            steps.run("live_gtts", lambda: _cancel_live_gtts(owner))
-            ids = list((cancelled.get("detail") or {}).get("cancelled_ids") or [])
+                cancels.unseen = not _note_rows(owner, seen)  # the orders before the cancel
+            cancelled = steps.run(
+                "live_orders",
+                lambda: _cancel_live_orders(owner, seen, exit_all=state.exit_all, cancels=cancels),
+            )
             again = None
             if not drained["ok"] or not cancelled["ok"]:
                 # Before Exit all, never after it: a look after it would cancel the exit it sent.
-                again = steps.run("live_orders_again", lambda: _sweep_again(owner, seen))
-                ids += (again.get("detail") or {}).get("cancelled_ids") or []
+                again = steps.run(
+                    "live_orders_again",
+                    lambda: _sweep_again(owner, seen, state.exit_all, cancels),
+                )
             latest = again if again is not None else cancelled
-            if state.exit_all and (latest.get("detail") or {}).get("no_cancel"):
-                # Closing orders may still be working and cannot be seen or cancelled: market
-                # exits beside them could close the position twice, so none is sent.
-                steps.note("live_exit_all", words.KS_NO_EXIT_ORDERS_UNREAD)
+            no_exit = state.exit_all and bool((latest.get("detail") or {}).get("no_cancel"))
+            if no_exit and not cancels.touched:
+                # Nothing was cancelled, so a GTT stop keeps protecting its position too (X5): a
+                # single-leg GTT cancelled here would leave the position with no stop and, with
+                # the book unreadable, no exit.
+                steps.note("live_gtts", words.KS_GTTS_KEPT_UNREAD)
+            else:
+                gtts = steps.run("live_gtts", lambda: _cancel_live_gtts(owner))
+                cancels.gtts += int((gtts.get("detail") or {}).get("cancelled") or 0)
+            if no_exit:
+                # The order book could not be read, so no more was cancelled (X5: a cancel
+                # without it takes the stop losses, and an exit cannot be sized without it).
+                # Closing orders may still be working: a market exit beside one could close the
+                # position twice, so none is sent. The words say what went before, if anything.
+                steps.note("live_exit_all", words.ks_no_exit_orders_unread(*cancels.said))
             elif state.exit_all:
-                steps.run("live_exit_all", lambda: _exit_all_live(owner, ids, seen))
+                steps.run(
+                    "live_exit_all", lambda: _exit_all_live(owner, list(cancels.ids), seen, cancels)
+                )
         else:
             steps.note("live", words.KS_LIVE_NOT_REACHED)
     if owner.api_key:
@@ -269,15 +313,17 @@ def _drain(tokens: list[int]) -> tuple[bool, str, dict]:
     )
 
 
-def _note_rows(owner: Owner, seen: dict[str, dict]) -> None:
+def _note_rows(owner: Owner, seen: dict[str, dict]) -> bool:
     """Remember the order book's rows (one read, cut off after ``readers.READ_LIMIT_S``): the
     cancel below leaves some orders out of the book, and Exit all needs to know which positions
-    the orders cancelled were closing."""
+    the orders cancelled were closing. Returns whether the book was read."""
     try:
         for row in readers.live_order_rows(owner.auth_token):
             seen[str(row.get("order_id"))] = row
     except readers.Unreadable:
         logger.warning("The kill switch could not read the order book before cancelling")
+        return False
+    return True
 
 
 def _stops_cancelled(owner: Owner, ids: list[str], seen: dict[str, dict]) -> dict:
@@ -343,9 +389,22 @@ def _cancel_the_rest(owner: Owner, ids: list[str], seen: dict[str, dict]):
     return cancelled, failed, not_final
 
 
-def _cancel_live_orders(owner: Owner, seen: dict[str, dict]) -> tuple[bool, str, dict]:
+def _cancel_live_orders(
+    owner: Owner,
+    seen: dict[str, dict],
+    exit_all: bool = False,
+    cancels: _Cancels | None = None,
+) -> tuple[bool, str, dict]:
+    """Cancel every open Live order: Upstox's Cancel all, then the rest by id from the order
+    book. ``exit_all``: Exit all follows, sized from that same order book, so when the book
+    cannot be read nothing is cancelled blind (release review v0.4.1, X5): Upstox's cancel of
+    every open order would take the stop losses and Exit all would then send nothing, leaving
+    each position held with no stop and no exit. ``cancels`` carries what this and earlier passes
+    did, so the words of a later pass never deny an earlier cancel."""
     from services.cancel_all_order_service import cancel_all_orders_with_auth
 
+    cancels = cancels if cancels is not None else _Cancels()
+    before_this_pass = cancels.touched
     with readers.limited():  # the order book read inside is cut off, never the 120 s client's
         ok, body, status = cancel_all_orders_with_auth(
             {}, owner.auth_token, owner.broker, {}, force_live=True
@@ -353,6 +412,7 @@ def _cancel_live_orders(owner: Owner, seen: dict[str, dict]) -> tuple[bool, str,
     body = body if isinstance(body, dict) else {}
     ids = [str(orderid) for orderid in body.get("canceled_orders") or []]
     refused = [str(orderid) for orderid in body.get("failed_cancellations") or []]
+    unsure = [str(orderid) for orderid in body.get("not_confirmed_cancellations") or []]
     rest = _cancel_the_rest(owner, ids, seen)
     still: list[str] = []
     if rest is not None:
@@ -363,15 +423,43 @@ def _cancel_live_orders(owner: Owner, seen: dict[str, dict]) -> tuple[bool, str,
     else:
         still = [i for i in refused if i not in ids]
     detail = {"cancelled": len(ids), "failed": len(still), "status": status}
+    before: dict = {}
+    cancels.ids += [i for i in ids if i not in cancels.ids]
+    cancels.unsure += len([i for i in unsure if i not in ids])
+    if rest is None:
+        cancels.unseen = True
     if ids:
         detail["cancelled_ids"] = ids
+        # The stop-loss orders among them, for the words after Exit all: counted on every pass
+        # that cancelled, not only one that could check the book after.
+        before = _stops_cancelled(owner, ids, seen)
+        detail["stops_cancelled"] = int(before.get("stops") or 0)
+        cancels.stops += detail["stops_cancelled"]
     if rest is None:
         detail["checked"] = False
-        if not ids:
+        if not ids and exit_all and not refused and not before_this_pass:
+            # Exit all cannot be sized without the order book, so a cancel without it would
+            # leave every position with its stop loss gone and no exit sent: the stops stay,
+            # and the sweep a moment later looks for the book again. Nothing at all has been
+            # sent to Upstox, by this pass or an earlier one, so the words may say so.
+            detail["no_cancel"] = True
+            detail["kept_for_exit_all"] = True
+            return False, words.KS_ORDERS_KEPT_UNREAD, detail
+        if not ids and exit_all and not refused:
+            # The same, after a pass that cancelled, or may have: no more is cancelled, and the
+            # words name what went before, for a position may be open with its stop gone.
+            detail["no_cancel"] = True
+            detail["after_cancels"] = True
+            return False, words.ks_orders_unread_after_cancels(*cancels.said), detail
+        if not ids and not exit_all:
             # The order book cannot be read, so no order could be cancelled one by one: Upstox's
             # own cancel of every open order needs no book. Without it an order closing a
             # position may still be working, and Exit all would close it twice.
             gone = _cancel_without_book(owner)
+            cancels.blind = True
+            cancels.ids += [i for i in gone["ids"] if i not in cancels.ids]
+            if gone["not_confirmed"]:
+                cancels.unsure += 1
             detail.update({k: gone[k] for k in ("done", "total") if gone[k] is not None})
             if gone["ids"]:
                 # The orders Upstox says it cancelled: Exit all waits for them to show ended,
@@ -379,6 +467,9 @@ def _cancel_live_orders(owner: Owner, seen: dict[str, dict]) -> tuple[bool, str,
                 detail["cancelled_ids"] = gone["ids"]
             if gone["cancelled"]:
                 detail["without_book"] = True
+                if gone.get("nothing_open"):
+                    detail["nothing_open"] = True
+                    return True, words.KS_NOTHING_TO_CANCEL_UNREAD, detail
                 return True, words.KS_ORDERS_CANCELLED_UNREAD, detail
             detail["no_cancel"] = True
             return (
@@ -389,12 +480,15 @@ def _cancel_live_orders(owner: Owner, seen: dict[str, dict]) -> tuple[bool, str,
                 detail,
             )
     if still:
+        if all(i in unsure for i in still):
+            # Anything that may have reached the broker reads "not confirmed", never refused.
+            return False, words.ks_cancels_not_confirmed(len(ids), len(still)), detail
         return False, words.ks_orders_left(len(ids), len(still)), detail
     if rest is None:
         if ok and not refused:
             return False, words.ks_orders_unchecked(len(ids)), detail
         return False, str(body.get("message") or words.KS_ORDERS_NOT_CONFIRMED), detail
-    return True, words.ks_orders_cancelled(len(ids), _stops_cancelled(owner, ids, seen)), detail
+    return True, words.ks_orders_cancelled(len(ids), before), detail
 
 
 def _cancel_without_book(owner: Owner) -> dict:
@@ -406,7 +500,14 @@ def _cancel_without_book(owner: Owner) -> dict:
         return cancel_every_open_order_detail(owner.auth_token)
     except Exception:
         logger.exception("The kill switch could not cancel every open order without the book")
-        return {"cancelled": False, "not_confirmed": True, "ids": [], "done": None, "total": None}
+        return {
+            "cancelled": False,
+            "not_confirmed": True,
+            "ids": [],
+            "done": None,
+            "total": None,
+            "nothing_open": False,
+        }
 
 
 def _cancel_live_gtts(owner: Owner) -> tuple[bool, str, dict]:
@@ -466,36 +567,142 @@ def _cancels_shown(owner: Owner, cancelled: list[str], seen: dict[str, dict]) ->
 
 
 def _exit_all_live(
-    owner: Owner, cancelled: list[str], seen: dict[str, dict]
+    owner: Owner,
+    cancelled: list[str],
+    seen: dict[str, dict],
+    cancels: _Cancels | None = None,
 ) -> tuple[bool, str, dict]:
     """Exit all through the one claim every Exit all takes (round nine's path, never a second),
-    once the orders just cancelled show as ended, so it leaves no position out for them."""
-    from services.close_position_service import close_position_with_auth
+    once the orders just cancelled show as ended, so it leaves no position out for them.
 
+    ``cancels``: what the cancel steps before it did. An Exit all that sent nothing because
+    Upstox did not send the orders in time is tried once more after ``EXIT_ALL_AGAIN_AFTER_S``;
+    a position it still leaves open with nothing watching it has its stop gone, or may have, and
+    the step says so and points to the Upstox app (release review v0.4.1, X5)."""
+    cancels = cancels if cancels is not None else _Cancels(ids=list(cancelled))
     ended = _cancels_shown(owner, cancelled, seen)
     shown = not cancelled or ended == {str(orderid) for orderid in cancelled}
-    ok, body, status = close_position_with_auth(
-        {}, owner.auth_token, owner.broker, {}, force_live=True
-    )
-    body = body if isinstance(body, dict) else {}
+    ok, body, status = _close_all(owner)
+    tried_again = False
+    if _nothing_sent_for_want_of_the_orders(body):
+        time.sleep(EXIT_ALL_AGAIN_AFTER_S)
+        ok, body, status = _close_all(owner)
+        tried_again = True
     detail: dict[str, Any] = {"status": status, "cancels_shown": shown}
+    if tried_again:
+        detail["tried_again"] = True
     each = body.get("positions")
+    unwatched: list[dict] = []
     if isinstance(each, list):
         # What became of each position (sent, not_confirmed, not_sent with its reason): the
         # phone settles its holds on it as after its own Exit all.
         detail["positions"] = each
         outcomes = [str(item.get("outcome")) for item in each if isinstance(item, dict)]
         detail["counts"] = {name: outcomes.count(name) for name in sorted(set(outcomes))}
+        unwatched = _left_with_nothing_watching(each)
     if status == 409 and not isinstance(each, list):
         # Another Exit all holds the book; one that left positions out has its own words.
         return False, words.KS_EXIT_ALL_BUSY, detail
-    return bool(ok), words.ks_exit_all(str(body.get("message") or "")), detail
+    said = words.ks_exit_all(str(body.get("message") or ""), tried_again)
+    known, maybe = _stops_gone(unwatched, cancels, seen)
+    if known or maybe:
+        said += " " + words.ks_left_without_stops(known, maybe)
+        detail["left_without_stops"] = known + maybe
+    return bool(ok), said, detail
 
 
-def _sweep_again(owner: Owner, seen: dict[str, dict]) -> tuple[bool, str, dict]:
+def _close_all(owner: Owner) -> tuple[bool, dict, int]:
+    from services.close_position_service import close_position_with_auth
+
+    # close_all_positions hands its one order book read to the gate for its own sends.
+    ok, body, status = close_position_with_auth(
+        {}, owner.auth_token, owner.broker, {}, force_live=True
+    )
+    return ok, body if isinstance(body, dict) else {}, status
+
+
+def _nothing_sent_for_want_of_the_orders(body: dict) -> bool:
+    """Exit all sent no exit, and every position it left out was left out because Upstox did not
+    send the order list in time (the sentence sudarshan.books.exit_guard writes for that)."""
+    from sudarshan.books import exit_guard
+
+    each = body.get("positions")
+    if not isinstance(each, list) or not each:
+        return False
+    for item in each:
+        if not isinstance(item, dict) or item.get("outcome") != "not_sent":
+            return False
+        position = (item.get("exchange"), item.get("symbol"), item.get("product"))
+        if item.get("reason") != exit_guard.exit_not_sized(position, False):
+            return False
+    return True
+
+
+def _left_with_nothing_watching(each: list) -> list[dict]:
+    """The positions Exit all left with nothing sent and no closing order known to be working:
+    not sized (the order list did not answer, or does not add up) or not reached in its time. A
+    position left out for an order working on its closing side, a hold or a claim has that
+    order; these have nothing, and their stops may be the ones just cancelled."""
+    from broker.upstox.api import order_api
+    from sudarshan.books import exit_guard
+
+    late_words = getattr(order_api, "_late_words", None)
+    left = []
+    for item in each:
+        if not isinstance(item, dict) or item.get("outcome") != "not_sent":
+            continue
+        position = (item.get("exchange"), item.get("symbol"), item.get("product"))
+        reasons = {
+            exit_guard.exit_not_sized(position, False),
+            exit_guard.exit_not_sized(position, True),
+        }
+        if late_words is not None:
+            reasons.add(late_words([exit_guard.trader_name(position)]))
+        if item.get("reason") in reasons:
+            left.append(item)
+    return left
+
+
+_STOP_TYPES = ("SL", "SL-M", "SL-L", "STOPLOSS", "STOPLOSS_MARKET", "STOPLOSS_LIMIT")
+
+
+def _stops_gone(unwatched: list[dict], cancels: _Cancels, seen: dict[str, dict]) -> tuple[int, int]:
+    """Of the positions left with nothing watching them: how many had a stop-loss order the
+    switch cancelled (a cancelled order of the stop kind on that instrument and product in the
+    rows read), and how many may have had one (a cancel not confirmed, a cancel without the
+    book, a GTT cancelled, or rows the switch never saw). ``(known, maybe)``."""
+    if not unwatched:
+        return 0, 0
+    gone: set[tuple[str, str]] = set()
+    other: set[tuple[str, str]] = set()
+    for orderid in cancels.ids:
+        row = seen.get(str(orderid))
+        if not row:
+            continue
+        key = (str(row.get("instrument_token") or ""), str(row.get("product") or "").upper())
+        kind = str(row.get("order_type") or "").upper().replace("_", "-")
+        (gone if kind in _STOP_TYPES else other).add(key)
+    unsure = bool(cancels.unsure or cancels.blind or cancels.gtts or cancels.unseen)
+    known = maybe = 0
+    for item in unwatched:
+        try:
+            token = readers.instrument_token(item.get("symbol"), item.get("exchange"))
+        except readers.Unreadable:
+            token = None
+        key = (str(token or ""), rules.position_product(risk_gate.LIVE, item.get("product")))
+        if token and key in gone:
+            known += 1
+        elif unsure or (token and key in other):
+            maybe += 1
+    return known, maybe
+
+
+def _sweep_again(
+    owner: Owner, seen: dict[str, dict], exit_all: bool = False, cancels: _Cancels | None = None
+) -> tuple[bool, str, dict]:
     """A send still on its way, or a cancel not confirmed: look again after a moment."""
     time.sleep(SECOND_SWEEP_AFTER_S)
-    ok, said, detail = _cancel_live_orders(owner, seen)
+    ok, said, detail = _cancel_live_orders(owner, seen, exit_all=exit_all, cancels=cancels)
     return ok, words.ks_swept_again(said), detail
 
 
