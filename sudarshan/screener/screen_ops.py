@@ -452,6 +452,13 @@ def _summary(ctx, tx: Tx, row: Mapping[str, Any], now: int) -> dict[str, Any]:
     return screen_row(tx, row, now, _session_key(now), next_at)
 
 
+def _target_of(stored: Mapping[str, Any]) -> tuple:
+    """Which list a screen feeds, as the owner chose it: an existing list, a new one by name,
+    or none."""
+    target = stored.get("target") or {}
+    return target.get("list_id"), target.get("create_name")
+
+
 def _within_limit(ctx, tx: Tx, screen_id: int | None) -> None:
     """Refuse a screen that would make more than the limit check during the day at once
     (SUDARSHAN_SCREENER_MAX_ACTIVE), for a create, a resume and an edit alike (MEDIUM-8)."""
@@ -525,6 +532,10 @@ async def update(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
             row = tx.screen_change(
                 screen_id, version, {"spec": stored, "name": stored["name"]}, now
             )
+            if before is not None and _target_of(before["spec"]) != _target_of(stored):
+                # a new target list, or none: the list made for the old target is not this
+                # screen's any more (MEDIUM-10); its rows and items stay where they are
+                tx.state_put(screen_id, now, list_id=None, list_name=None)
         elif action in ("pause", "resume"):
             row = tx.screen_change(
                 screen_id, version, {"status": "active" if action == "resume" else "paused"}, now

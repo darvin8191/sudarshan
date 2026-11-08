@@ -121,3 +121,24 @@ def test_a_past_runs_set_is_the_whole_match_set(service):
     assert replayed["values_note"] == "Values are kept for 7 days; the list for 100 days."
     later = call(service, "run", id=third["id"])
     assert sorted(r["symbol"] for r in later["rows"]) == ["AAA", "CCC"]
+
+
+# ---- MEDIUM-10: a new target list is honoured -------------------------------------------------------
+def test_an_edit_to_another_list_moves_the_screen_to_it(service):
+    made = make(service, target={"list_id": None, "create_name": "Screener: S"})
+    service.store.write(
+        OWNER, lambda tx: tx.state_put(made["id"], NOW, list_id=11, list_name="Screener: S")
+    )
+    record(service, made, 1, judged({"AAA": 100}))  # into the list it made (11)
+    screen = service.store.read(OWNER, lambda tx: tx.screen(made["id"]))
+    edited = call(
+        service, "update", id=screen["id"], version=screen["version"], action="edit",
+        spec=dict(SPEC, target={"list_id": 9}),
+    )  # fmt: skip
+    after = service.store.read(OWNER, lambda tx: tx.screen(made["id"]))
+    record(service, after, 2, judged({"AAA": 100, "BBB": 200}))
+    rows = service.store.read(OWNER, lambda tx: tx.memberships(screen_id=made["id"], list_id=9))
+    assert {r["symbol"] for r in rows} == {"AAA", "BBB"}, "the new target list is ignored"
+    queued = service.store.read(OWNER, lambda tx: tx.outbox_due(NOW + 10**9, 50))
+    assert any(p["kind"] == "list_sync" and p["payload"]["list_id"] == 9 for p in queued)
+    assert edited["list_id"] == 9
