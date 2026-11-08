@@ -68,7 +68,7 @@ def test_the_vectors_cover_every_segment_shape_and_a_null_charge():
         {"transaction_type": "HOLD", "segment": "EQ", "quantity": 1, "price": 1, "amount": 1, "trade_date": "2026-01-01"},
         {"transaction_type": "BUY", "segment": "XX", "quantity": 1, "price": 1, "amount": 1, "trade_date": "2026-01-01"},
         {"transaction_type": "BUY", "segment": "EQ", "quantity": None, "price": 1, "amount": 1, "trade_date": "2026-01-01"},
-        {"transaction_type": "BUY", "segment": "EQ", "quantity": 1, "price": 1, "amount": 1, "trade_date": "01-01-2026"},
+        {"transaction_type": "BUY", "segment": "EQ", "quantity": 1, "price": 1, "amount": 1, "trade_date": "2026-13-01"},
     ],
     ids=["side", "segment", "quantity", "date shape"],
 )  # fmt: skip
@@ -230,8 +230,8 @@ async def test_many_pages_are_read_in_order_and_a_trade_is_never_doubled(rig):
     page = lambda ids, more: {  # noqa: E731
         "status": "success",
         "data": [
-            {**rig.fake.bodies["trades"]["data"][0], "trade_id": i, "trade_date": f"2026-05-0{n + 1}"}
-            for n, i in enumerate(ids)
+            {**rig.fake.bodies["trades"]["data"][0], "trade_id": i, "trade_date": f"2026-05-0{ord(i) - 64}"}
+            for i in ids
         ],
         "metadata": {"page": {"page_number": 1, "page_size": 500, "total_pages": 2 if more else 1}},
     }  # fmt: skip

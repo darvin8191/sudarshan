@@ -145,7 +145,10 @@ async def report_trades(ctx, message):
     need(ctx)
     fy, segment = _report_args(ctx, message)
     reader = ctx.ensure_reports()
-    return serialize.out(OWNER, await reader.report("trades", fy, segment))
+    return serialize.out(
+        OWNER,
+        await reader.report("trades", fy, segment, force=message.get("force") is True),
+    )
 
 
 @op("report_pnl")
@@ -154,4 +157,7 @@ async def report_pnl(ctx, message):
     need(ctx)
     fy, segment = _report_args(ctx, message)
     reader = ctx.ensure_reports()
-    return serialize.out(OWNER, await reader.report("pnl", fy, segment))
+    return serialize.out(
+        OWNER,
+        await reader.report("pnl", fy, segment, force=message.get("force") is True),
+    )
