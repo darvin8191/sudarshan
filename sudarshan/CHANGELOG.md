@@ -11,7 +11,8 @@ Live exits close what Upstox's positions do not show yet, reversals and the scal
 exits keep to the one-at-a-time rule, a close Upstox did not answer is said and held as not
 confirmed, and the risk guard gets the fixes it needs before it can check Live. It includes
 everything in v0.5.0 and v0.4.1. **Publish it only after v0.4.1 has installed and run one trading
-day on its own: Tuesday 10 Nov after the close, or later.**
+day on its own: Wednesday 11 Nov after the close, or later (Tuesday 10 Nov is a market holiday).
+v0.5.0 is not published on its own: this release carries it to the server.**
 
 ### What changes for you
 - **Exit all closes a position Upstox's positions do not show yet.** A position bought seconds ago
@@ -85,8 +86,8 @@ day on its own: Tuesday 10 Nov after the close, or later.**
     for validation or its trigger) no longer stops every exit.
 
 ### What you must do
-- **Publish it** (the link is in your task list) on Tuesday 10 Nov after the close or later, once
-  v0.4.1 has run a trading day. v0.5.0's checks apply as well.
+- **Publish it** (the link is in your task list) on Wednesday 11 Nov after the close or later, once
+  v0.4.1 has run a trading day. It brings v0.5.0 with it, so v0.5.0's checks apply as well.
 - **After a scalping close says "not confirmed", check Orders before closing again.** SUDARSHAN
   holds that position for 150 s, and longer while a market order of yours works on its closing
   side or Upstox's order list cannot be read. To close it sooner, use the Upstox app, and only if
@@ -144,8 +145,7 @@ day on its own: Tuesday 10 Nov after the close, or later.**
 ## v0.5.0 (6 Nov 2026)
 
 The Portfolio page: your Upstox account read-only, and portfolios you keep yourself. It includes
-everything in v0.4.1. **Publish it only after v0.4.1 has installed and run one trading day on its
-own: Tuesday 10 Nov after the close, or later.**
+everything in v0.4.1. **It is not published on its own: v0.5.1 carries it to the server.**
 
 ### What changes for you
 - **The Portfolio page, switched on by this release.** It never places or changes an order, and it
@@ -169,8 +169,7 @@ own: Tuesday 10 Nov after the close, or later.**
   next morning. A part Upstox did not answer for is shown as not known, never as 0.
 
 ### What you must do
-- **Publish it** (the link is in your task list) on Tuesday 10 Nov after the close or later, once
-  v0.4.1 is installed.
+- **Publish v0.5.1, not this one:** v0.5.1 carries this release with it.
 - **Check on your phone after the first trading day:**
   - the Upstox tab against the Upstox app: quantities, average prices, P&L, T1 quantity and the
     haircut;
