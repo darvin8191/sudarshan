@@ -871,6 +871,46 @@
      }
     ]
    }
+  },
+  {
+   "id": "Y15",
+   "title": "Income dated on the valuation day itself counts",
+   "why": "10 shares (10,000.00). Read on 27 Oct 2026 a dividend of 90.00 (9000) dated 27 Oct 2026 is in the twelve months (the day is not after the valuation day) and in FY 2026-27, and the lot held on it earned it: 9000 / 1000000 = 0.9000%.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250110,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 1000000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "DIVIDEND",
+     "trade_date": 20261027,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 9000
+    }
+   ],
+   "valuation_day": 20261027,
+   "expect": {
+    "last_12m_paise": 9000,
+    "held_income_paise": 9000,
+    "held_cost_paise": 1000000,
+    "yield_on_cost_pct": "0.9000",
+    "by_fy": [
+     {
+      "fy": 2026,
+      "label": "FY 2026-27",
+      "paise": 9000
+     }
+    ]
+   }
   }
  ]
 }

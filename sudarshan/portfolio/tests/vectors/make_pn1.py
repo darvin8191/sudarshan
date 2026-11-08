@@ -397,6 +397,18 @@ case(
     20_000,
 )
 
+case(
+    "Y15",
+    "Income dated on the valuation day itself counts",
+    "10 shares (10,000.00). Read on 27 Oct 2026 a dividend of 90.00 (9000) dated 27 Oct 2026 is "
+    "in the twelve months (the day is not after the valuation day) and in FY 2026-27, and the lot "
+    "held on it earned it: 9000 / 1000000 = 0.9000%.",
+    [TEN, dividend(2, 20261027, 1, 1, 9_000)],
+    20261027,
+    9_000,
+    1_000_000,
+)
+
 INCOME = {
     "about": (
         "Golden vectors for core/performance.income_summary (PN1, M7.29): the last twelve months' "

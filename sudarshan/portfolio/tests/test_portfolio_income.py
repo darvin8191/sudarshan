@@ -34,7 +34,7 @@ def test_the_twelve_months_add_up_to_the_months_the_report_lists(case):
 def test_the_vectors_cover_the_shapes_that_matter():
     ids = {case["id"] for case in CASES}
     assert {"Y1", "Y2", "Y3", "Y4", "Y5", "Y6", "Y7", "Y8", "Y9", "Y10", "Y11", "Y12"} <= ids
-    assert {"Y5c", "Y13", "Y14"} <= ids
+    assert {"Y5c", "Y13", "Y14", "Y15"} <= ids
     expects = [case["expect"] for case in CASES]
     assert any(e["yield_on_cost_pct"] is None for e in expects)  # nothing held at a cost
     assert any(e["by_fy"] == [] for e in expects)  # no income at all
