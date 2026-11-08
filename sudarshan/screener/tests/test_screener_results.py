@@ -223,3 +223,20 @@ def test_a_runs_push_with_many_exits_fits_the_internal_seal(service):
         f"a run's push seals to {len(blob)} bytes: refused before it is sent, never retried"
     )
     assert push["counts"]["exited"] == 300 and push["more_exited"] == 300 - len(push["exited"])
+
+
+# ---- LOW-7: a pin a check overtook ----------------------------------------------------------------
+def test_a_pin_a_check_overtook_says_the_instrument_changed(service):
+    from sudarshan.screener.ops import ApiError
+
+    screen = make(service)
+    record(service, screen, 1, judged({"AAA": 100}))
+    row = call(service, "membership", screen=screen["id"])["rows"][0]
+    record(service, screen, 2, judged({"AAA": 120}))  # the next check moves the row
+    with pytest.raises(ApiError) as refused:
+        call(service, "membership_update", id=row["id"], version=row["version"], action="pin")
+    assert refused.value.code == "version_conflict"
+    assert refused.value.message == (
+        "This instrument changed with the latest check. Nothing was saved; look at it again, then "
+        "repeat the change."
+    ), "a pin a run overtook says the screen was changed on another screen"

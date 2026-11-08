@@ -64,6 +64,10 @@ UNIVERSE_LABELS = {
 NOT_FOLLOWED = "Checked after the close only: this list is not followed tick by tick."
 VALUES_GONE = "Values are kept for 7 days; the list for 100 days."
 PREVIEW_WAITS = "Preview needs the screener's price feed, which is not connected yet."
+MEMBER_MOVED = (
+    "This instrument changed with the latest check. Nothing was saved; look at it again, then "
+    "repeat the change."
+)
 RUNS_PAGE = 30
 RUNS_PAGE_MAX = 200
 VALUE_COLUMNS = 2
@@ -784,7 +788,10 @@ async def membership_update(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
         fields = {
             n: getattr(moved, n) for n in ("status", "pinned", "misses", "hits", "missing_session")
         }
-        out = tx.membership_change(member_id, version, fields, now)
+        try:
+            out = tx.membership_change(member_id, version, fields, now)
+        except VersionConflict:  # a check moved the row since the page read it (LOW-7)
+            raise ApiError.of("version_conflict", MEMBER_MOVED) from None
         if found["list_id"]:
             tx.outbox_add(
                 "list_sync",
