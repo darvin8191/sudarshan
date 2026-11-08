@@ -22,6 +22,7 @@ Off by default. `/etc/sudarshan/screener.env` (root:sudarshan 640):
 | `SUDARSHAN_SCREENER_HTTP_PORT` | `5584` |
 | `SUDARSHAN_SCREENER_FEED_URL`, `SUDARSHAN_SCREENER_FEED_ZMQ` | `http://127.0.0.1:5580`, `tcp://127.0.0.1:5581` |
 | `SUDARSHAN_SCREENER_OPENALGO_URL` | `http://127.0.0.1:5000` |
+| `SUDARSHAN_SCREENER_ALERTS_URL` | `http://127.0.0.1:5582` |
 | `SUDARSHAN_SCREENER_MAX_KEYS` | `320` (at most 700) |
 | `SUDARSHAN_SCREENER_MAX_ACTIVE` | `12` intraday screens |
 | `SUDARSHAN_SCREENER_OPTION_STRIKES` | `10` each side of the money |

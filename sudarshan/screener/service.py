@@ -26,7 +26,12 @@ from typing import Any
 
 from sudarshan.ops.release import installed_release
 from sudarshan.tasks import cancel_and_wait
-from sudarshan.vault import SCREENER_API_INFO, fernet_for
+from sudarshan.vault import (
+    ALERTS_SCREENER_DIGEST_INFO,
+    SCREENER_API_INFO,
+    SCREENER_INTERNAL_INFO,
+    fernet_for,
+)
 
 from . import __version__
 from .api import ScreenerApi
@@ -89,6 +94,8 @@ class Service:
         self.settings = settings
         self.enabled = settings.enabled
         self.api = ScreenerApi(self, fernet)
+        #: The pepper-derived keys of the service's own calls (None in a test without a pepper).
+        self.pepper: str | None = None
         self.store: Any = None
         #: Why the screener is off when the switch is on (a newer file, a store that will not
         #: open), in the owner's words; the API answers every op with it.
@@ -170,6 +177,7 @@ class Service:
             if self.enabled:
                 self._open()
             if self.enabled:
+                self._link()
                 for name, function in self._jobs.items():
                     self._tasks[name] = asyncio.create_task(function(self), name=f"job-{name}")
             elif not self.settings.enabled:
@@ -213,6 +221,20 @@ class Service:
             log.error("screener.db could not be opened (%s): the screener stays off", exc.cause)
             self._keep_off(str(exc))
 
+    def _link(self) -> None:
+        """The sealed client to OpenAlgo's internal routes and the alerts API (outbox.py); only
+        when the pepper is known, so a test without one runs no sender."""
+        if self.pepper is None or "link" in self.parts:
+            return
+        from .link import Link
+
+        self.parts["link"] = Link(
+            self.settings.openalgo_url,
+            self.settings.alerts_url,
+            fernet_for(self.pepper, SCREENER_INTERNAL_INFO),
+            fernet_for(self.pepper, ALERTS_SCREENER_DIGEST_INFO),
+        )
+
     def _keep_off(self, reason: str) -> None:
         self.enabled, self.off_reason = False, reason
 
@@ -241,6 +263,14 @@ class Service:
             return
 
 
+# One line per row that adds a job (S17); each module registers with @job at import:
+from . import outbox as _outbox  # noqa: E402  (M9.15: the outbox sender)
+from . import runner as _runner  # noqa: E402  (M9.14: the run loop)
+
+job("runner")(_runner.run_runner)
+job("outbox")(_outbox.run_sender)
+
+
 async def _serve(service: Service) -> None:
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
@@ -263,8 +293,10 @@ def main() -> int:
         return 2
     setup_logging({"SUDARSHAN_SCREENER_LOG_LEVEL": settings.log_level})
     fernet = fernet_for(pepper, SCREENER_API_INFO)
+    service = Service(settings, fernet)
+    service.pepper = pepper
     try:
-        asyncio.run(_serve(Service(settings, fernet)))
+        asyncio.run(_serve(service))
     except Exception:  # a bug: systemd restarts it
         log.exception("sudarshan-screener stopped unexpectedly")
         return 1
