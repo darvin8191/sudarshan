@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { type AlertCategories, useAlertStore } from '@/stores/alertStore'
 import { useAuthStore } from '@/stores/authStore'
 import { useSessionStore } from '@/stores/sessionStore'
+import { installMarketAlerts } from '@/sudarshan/alerts/marketAlerts' // SUDARSHAN M10.7
 // SUDARSHAN: the shared connection and the app-wide order alerts (src/sudarshan/books).
 import { claimOrderSound } from '@/sudarshan/books/chime'
 import { installOrderAlerts, noteAppCancelEvent } from '@/sudarshan/books/orderAlerts'
@@ -385,6 +386,7 @@ export function useSocket() {
 
     // SUDARSHAN: fills, partial fills, rejections and broker cancels (M6.8).
     const removeOrderAlerts = installOrderAlerts(shared)
+    installMarketAlerts(shared, socket.on, (to) => navigateRef.current(to)) // SUDARSHAN M10.7
 
     return () => {
       // SUDARSHAN: remove this provider's handlers and give the connection back;

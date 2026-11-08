@@ -58,8 +58,16 @@ vi.mock('@/components/trading', async () => {
       props.open ? createElement(Ticket, props) : null,
   }
 })
+const auth = vi.hoisted(() => ({
+  facts: {
+    apiKey: 'test-api-key' as string | null,
+    sessionChecked: true,
+    brokerSessionExpired: false,
+    user: { broker: 'upstox' },
+  },
+}))
 vi.mock('@/stores/authStore', () => ({
-  useAuthStore: () => ({ apiKey: 'test-api-key', user: { broker: 'upstox' } }),
+  useAuthStore: Object.assign(() => auth.facts, { getState: () => auth.facts }),
 }))
 const theme = vi.hoisted(() => ({ appMode: 'live' }))
 vi.mock('@/stores/themeStore', () => ({
@@ -385,5 +393,48 @@ describe('Holdings on a wide screen', () => {
     expect(screen.getByRole('table')).toBeInTheDocument()
     expect(screen.getByRole('columnheader', { name: 'Trading Symbol' })).toBeInTheDocument()
     expect(screen.queryByTestId('holdings-value')).toBeNull()
+  })
+})
+
+describe('Holdings without prices', () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Promise.reject(new Error('offline')))
+    )
+  })
+  afterEach(() => {
+    auth.facts = {
+      ...auth.facts,
+      apiKey: 'test-api-key',
+      sessionChecked: true,
+      brokerSessionExpired: false,
+    }
+  })
+
+  it('still checking: a quiet line, never the API key message', async () => {
+    auth.facts = { ...auth.facts, apiKey: null, sessionChecked: false }
+    await renderPhone()
+    expect(screen.getByText('Checking your login')).toBeInTheDocument()
+    expect(screen.queryByText(/API key/)).toBeNull()
+  })
+
+  it('Upstox not logged in today: says so, with Auto login and Dashboard', async () => {
+    auth.facts = { ...auth.facts, apiKey: null, brokerSessionExpired: true }
+    await renderPhone()
+    expect(screen.getByText(/Upstox is not logged in today/)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Auto login' })).toBeInTheDocument()
+    expect(screen.queryByText(/API key/)).toBeNull()
+  })
+
+  it('no API key: the existing message', async () => {
+    auth.facts = { ...auth.facts, apiKey: null }
+    await renderPhone()
+    expect(screen.getByText('Prices and search need an API key.')).toBeInTheDocument()
+  })
+
+  it('ready: no notice', async () => {
+    await renderPhone()
+    expect(document.querySelector('[data-access]')).toBeNull()
   })
 })

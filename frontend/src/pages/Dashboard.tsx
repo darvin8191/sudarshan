@@ -15,8 +15,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { tradingApi } from '@/api/trading'
 import { cn } from '@/lib/utils'
-import { useAuthStore } from '@/stores/authStore'
 import { onModeChange } from '@/stores/themeStore'
+import { AccessNotice } from '@/sudarshan/AccessNotice'
+import { usePriceAccess } from '@/sudarshan/access'
 import { useBookSync } from '@/sudarshan/books/useBookSync'
 import { HoldingsCard } from '@/sudarshan/dashboard/HoldingsCard'
 import { useMarketOpen } from '@/sudarshan/dashboard/hooks'
@@ -121,7 +122,11 @@ const QUICK_ACCESS = [
 
 export default function Dashboard() {
   const [marginData, setMarginData] = useState<DashboardFunds | null>(null)
-  const apiKey = useAuthStore((s) => s.apiKey)
+  // SUDARSHAN: the key once prices can be read (the API key and today's Upstox
+  // login, src/sudarshan/access.ts). Until then the index strip and the
+  // holdings card stay hidden, and the notice above them says why.
+  const access = usePriceAccess()
+  const { apiKey } = access
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [masterContract, setMasterContract] = useState<MasterContractStatus>({
@@ -255,7 +260,9 @@ export default function Dashboard() {
 
   // Broker token expired but the app session is fine: send the user to the
   // broker reconnect flow, not /login (which would bounce back) — #1400.
-  if (brokerExpired) {
+  // SUDARSHAN: also as soon as the session check says so, before the funds
+  // read comes back, so the cards never show first.
+  if (brokerExpired || access.state === 'upstox-logged-out') {
     return (
       <div className="mx-auto flex min-h-[50vh] max-w-md flex-col items-center justify-center gap-4 text-center">
         <span className="flex size-14 items-center justify-center rounded-2xl bg-[color:var(--gold-tint)] text-[color:var(--gold-ink)]">
@@ -325,6 +332,7 @@ export default function Dashboard() {
       </div>
 
       <MarketCalendarSource key={day} onChange={setMarket} />
+      <AccessNotice access={access} />
       <IndexStrip apiKey={apiKey} marketOpen={marketOpen} />
 
       <div className="grid items-start gap-2.5 md:gap-4 lg:grid-cols-2">

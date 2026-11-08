@@ -925,7 +925,8 @@ export function ConfigPanel() {
                     }}
                   />
                   <p className="text-[10px] text-muted-foreground">
-                    Target position (positive=long, negative=short, 0=use quantity)
+                    Position to hold after the order: 65 long, -65 short. 0 closes the position, and
+                    sends nothing when it is flat.
                   </p>
                 </div>
                 <ProductField

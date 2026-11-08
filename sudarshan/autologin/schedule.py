@@ -32,9 +32,11 @@ IST = timezone(timedelta(hours=5, minutes=30), "IST")  # India keeps no daylight
 SCHEDULE = ("08:35", "08:45", "08:55")
 #: Continuous trading, to the F&O close: NSE's equity derivatives trade to 15:40 since
 #: 3 Aug 2026 (the cash market closes at 15:30). A new login then would cut off a live session.
+#: A day listed in the extra-days file with its own window trades in that window instead (see
+#: ``TradingCalendar.market_spans``).
 MARKET_HOURS = ("09:15", "15:40")
 #: From the pre-open to the F&O close: Test now, which replaces today's login, is refused then
-#: while the login works.
+#: while the login works. A listed day's own window replaces it the same way.
 TEST_BLOCKED = ("09:00", "15:40")
 #: Upstox's daily access tokens stop working at 03:30 IST. OpenAlgo's own session rollover is
 #: 03:00, so a login between the two is on record as today's while its token is already dead.
@@ -386,16 +388,35 @@ class TradingCalendar:
             return True
         return day.weekday() < 5 and day not in self.holidays()
 
-    def _within(self, at: datetime, span: tuple[str, str]) -> bool:
+    def market_spans(self, day: date, usual: tuple[int, int]) -> tuple[tuple[int, int], ...]:
+        """When the market trades on ``day``, as spans of IST minutes: ``usual``, except that a
+        day listed in the extra-days file with its own window trades in that window. It takes the
+        place of ``usual`` on a day the exchange is otherwise closed (a weekend, an NSE holiday: a
+        Muhurat or a special Saturday session) and is added to it on a weekday that trades anyway
+        (``trades_anyway``), exactly as the feed and the alerts treat the same line. A listed day
+        with no window, or one that cannot be read, keeps ``usual``. Meant for a trading day."""
+        own = self.day_window(day)
+        if own is None:
+            return (usual,)
+        return union([usual, own]) if self.trades_anyway(day) else (own,)
+
+    def _within(self, at: datetime, usual: tuple[str, str]) -> bool:
         local = at.astimezone(IST)
-        start, end = (minutes(t) for t in span)
-        return self.is_trading_day(local.date()) and start <= minute_of_day(local) < end
+        day = local.date()
+        if not self.is_trading_day(day):
+            return False
+        now = minute_of_day(local)
+        spans = self.market_spans(day, (minutes(usual[0]), minutes(usual[1])))
+        return any(start <= now < end for start, end in spans)
 
     def in_market_hours(self, at: datetime) -> bool:
+        """09:15-15:40 on a trading day, or a listed day's own window: a new login must not be
+        made then while the stored one cannot be checked, because it would end that one."""
         return self._within(at, MARKET_HOURS)
 
     def blocks_test_now(self, at: datetime) -> bool:
-        """09:00-15:40 on a trading day: Test now must not replace a working login then."""
+        """09:00-15:40 on a trading day, or a listed day's own window: Test now must not replace
+        a working login then."""
         return self._within(at, TEST_BLOCKED)
 
     def slots(self, day: date) -> list[datetime]:

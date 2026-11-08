@@ -308,13 +308,20 @@ def test_a_bad_list_is_refused(tmp_path, bad):
 
 
 def test_the_shipped_list_on_a_fresh_install(tmp_path):
-    """On a .env made from .sample.env, the shipped list changes exactly its two keys."""
+    """On a .env made from .sample.env, the shipped list changes exactly its own keys."""
     sample = (REPO / ".sample.env").read_bytes()
     env, out = _applied(tmp_path, sample, SHIPPED_LIST.read_bytes())
     before, after = _read_by_openalgo(sample), _read_by_openalgo(env)
     assert after["MAX_WEBSOCKET_CONNECTIONS"] == "1"
     assert after["WEBSOCKET_BROKER_LINGER_SECONDS"] == "300"
-    managed = {"MAX_WEBSOCKET_CONNECTIONS", "WEBSOCKET_BROKER_LINGER_SECONDS"}
+    assert after["SUDARSHAN_RISK_GUARD"] == "sandbox"  # M5.13: Analyze mode first
+    assert after["UPSTOX_ORDER_MAX_PER_SECOND"] == "5"  # M5.14: orders paced at 5 a second
+    managed = {
+        "MAX_WEBSOCKET_CONNECTIONS",
+        "WEBSOCKET_BROKER_LINGER_SECONDS",
+        "SUDARSHAN_RISK_GUARD",
+        "UPSTOX_ORDER_MAX_PER_SECOND",
+    }
     assert {k: v for k, v in after.items() if k not in managed} == {
         k: v for k, v in before.items() if k not in managed
     }
@@ -381,7 +388,9 @@ exit 0
 @pytest.mark.parametrize(
     ("list_code", "says"),
     [
-        ("200", ["would set MAX_WEBSOCKET_CONNECTIONS='1'", "would add WEBSOCKET_BROKER_LINGER_SECONDS='300'"]),
+        ("200", ["would set MAX_WEBSOCKET_CONNECTIONS='1'", "would add WEBSOCKET_BROKER_LINGER_SECONDS='300'",
+                 "would add SUDARSHAN_RISK_GUARD='sandbox'",
+                 "would add UPSTOX_ORDER_MAX_PER_SECOND='5'"]),
         ("404", ["settings: nothing to change in"]),
         ("000", ["settings: could not fetch the list of v9.9.9"]),
     ],

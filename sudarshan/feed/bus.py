@@ -14,6 +14,11 @@ from __future__ import annotations
 import zmq
 
 HEALTH_TOPIC = "__health__"
+#: Health fields other services read (alerts' feed link: the exchange's status, silence on the
+#: whole socket, a restart). Frozen: renamed or dropped only with the readers (review L12).
+RING_HEALTH_FIELDS = frozenset({
+    "started_at", "state", "subscriptions_live", "market_status", "last_message_age_s",
+})  # fmt: skip
 
 
 class Publisher:

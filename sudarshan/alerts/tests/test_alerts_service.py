@@ -6,9 +6,11 @@ import asyncio
 import logging
 import subprocess
 import sys
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import httpx
 import pytest
 from alerts_fakes import (
     API_KEY,
@@ -23,6 +25,7 @@ from alerts_fakes import (
     wait_until,
 )
 
+from sudarshan.alerts.outbox import Outbox
 from sudarshan.alerts.owner import Owner, OwnerError
 from sudarshan.alerts.service import AlertService
 
@@ -302,13 +305,37 @@ def test_the_entry_point_refuses_bad_settings(tmp_path):
     assert done.returncode == 2 and "must point at this server" in done.stderr
 
 
-def test_the_whole_process_end_to_end(tmp_path):
+def _free_port() -> int:
+    import socket
+
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+#: A market setting the owner mistyped, and the words the Alerts page then shows (review H2).
+MISTYPED = {
+    "switch": ({"SUDARSHAN_MARKET_ALERTS": "enabled"}, "SUDARSHAN_MARKET_ALERTS must be on or off"),
+    "keep days": (
+        {"SUDARSHAN_MARKET_ALERTS": "on", "SUDARSHAN_MARKET_ALERTS_KEEP_DAYS": "30"},
+        "SUDARSHAN_MARKET_ALERTS_KEEP_DAYS must be a whole number from 90 to 3650",
+    ),
+}
+
+
+@pytest.mark.parametrize("mistyped", [None, "switch", "keep days"])
+def test_the_whole_process_end_to_end(tmp_path, mistyped):
     """``python -m sudarshan.alerts`` as the unit runs it: OpenAlgo's .env and openalgo.db (read
-    read-only with OpenAlgo's own functions), the proxy, /notify, and a clean SIGTERM."""
+    read-only with OpenAlgo's own functions), the proxy, /notify, and a clean SIGTERM. A market
+    setting the owner mistyped keeps market alerts off, says why on the Alerts page, and never
+    stops order alerts (review H2: the process exited 2, and the unit then stays down)."""
     import os
     import signal
 
     from alerts_fakes import FakeOpenAlgoDb
+
+    from sudarshan.autologin.handoff import seal
+    from sudarshan.vault import ALERTS_API_INFO, fernet_for
 
     app = tmp_path / "openalgo"
     db = FakeOpenAlgoDb(app / "db")
@@ -334,6 +361,12 @@ def test_the_whole_process_end_to_end(tmp_path):
                 "SUDARSHAN_OPENALGO_URL": notify.url,
                 "SUDARSHAN_ALERTS_ALWAYS_ON": "1",
             }
+            if mistyped:
+                port = _free_port()
+                env |= MISTYPED[mistyped][0] | {
+                    "SUDARSHAN_ALERTS_HTTP_PORT": str(port),
+                    "SUDARSHAN_ALERTS_FEED_URL": f"http://127.0.0.1:{_free_port()}",
+                }
             log_path = tmp_path / "service.log"
             with open(log_path, "wb") as log_file:
                 child = await asyncio.create_subprocess_exec(
@@ -351,6 +384,22 @@ def test_the_whole_process_end_to_end(tmp_path):
                     "\nFilled: BUY 65 NIFTY 21 OCT 25900 CE at ₹123.45 (MIS, NFO)\n"
                     in (notify.messages[0])
                 )
+                if mistyped:  # the Alerts page says what to correct
+                    fernet = fernet_for(os.environ["API_KEY_PEPPER"], ALERTS_API_INFO)
+                    async with httpx.AsyncClient(trust_env=False) as client:
+                        base = f"http://127.0.0.1:{port}"
+                        health = (await client.get(f"{base}/health", timeout=5)).json()
+                        state = await client.post(
+                            f"{base}/v1/state",
+                            timeout=5,
+                            content=seal(fernet, "state", principal="owner"),
+                        )
+                    assert health["market_alerts"] == "off"
+                    line = state.json()["data"]["engine"]["line"]
+                    assert line == (
+                        f"Market alerts are off: {MISTYPED[mistyped][1]}. Correct it "
+                        "in /etc/sudarshan/alerts.env, then restart sudarshan-alerts."
+                    )
                 child.send_signal(signal.SIGTERM)
                 assert await asyncio.wait_for(child.wait(), 20) == 0
             finally:
@@ -360,6 +409,10 @@ def test_the_whole_process_end_to_end(tmp_path):
             assert proxy.close_codes == [1000]
         text = log_path.read_text()
         assert "OpenAlgo API key found" in text and "stopping: signal SIGTERM" in text
+        if mistyped:
+            assert (
+                f"{MISTYPED[mistyped][1]}. Correct it" in text and "Order alerts carry on" in text
+            )
         assert API_KEY not in text
         assert (tmp_path / "state" / "alerts.db").exists()
         assert sorted(p.name for p in (app / "db").iterdir()) == ["openalgo.db"]  # untouched
@@ -500,3 +553,34 @@ def test_switched_off_it_exits_at_once_whatever_else_is_set(tmp_path):
     )  # fmt: skip
     assert done.returncode == 0
     assert "Order alerts are off" in done.stderr
+
+
+@pytest.mark.parametrize(
+    "owner, name", [(Outbox, "run"), (AlertService, "_tick")], ids=["Telegram", "clock"]
+)
+def test_a_stop_ends_even_when_a_task_swallows_its_cancel(
+    settings_for, fast, monkeypatch, owner, name
+):
+    """The Telegram sender may be inside an httpx request when the stop cancels it, where a
+    cancel can be lost (sudarshan/tasks.py): the stop used to wait for ever. Here each task
+    swallows its first cancel, as anyio's connect_tcp can, and then parks."""
+    job = getattr(owner, name)
+
+    async def carries_on(self) -> None:
+        try:
+            await job(self)
+        except asyncio.CancelledError:
+            pass
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(owner, name, carries_on)
+
+    async def scenario():
+        async with FakeProxy() as proxy, FakeOpenAlgo() as notify:
+            svc, task = await _start(settings_for(proxy, notify))
+            await wait_until(lambda: proxy.subscribed)
+            began = time.monotonic()
+            await _stop(svc, task)
+            assert time.monotonic() - began < 5 and svc.state == "stopped"
+
+    asyncio.run(scenario())

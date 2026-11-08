@@ -22,7 +22,7 @@ from autologin_fakes import FAKE_PIN, FAKE_TOKEN, FAKE_TOTP_SECRET
 import blueprints.sudarshan_autologin as bp_module
 from database import auth_db
 from sudarshan.autologin.handoff import MAX_SEALED_BYTES, seal
-from sudarshan.autologin.schedule import IST
+from sudarshan.autologin.schedule import IST, TradingCalendar
 from sudarshan.autologin.worker import EXIT_BUSY, SECRET_PIN, SECRET_TOTP
 from sudarshan.vault import HANDOFF_INFO, fernet_for
 
@@ -297,6 +297,46 @@ def test_test_now_refuses_from_the_pre_open_to_the_close_when_connected(
         assert response.status_code == 409 and started == []
         message = response.get_json()["message"]
         assert "Test now replaces today's login" in message and "09:00 to 15:40" in message
+    else:
+        assert started
+
+
+@pytest.mark.parametrize(
+    ("hour", "minute", "refused"),
+    [
+        (9, 0, False),  # the exchange is closed that morning
+        (11, 0, False),
+        (14, 4, False),
+        (14, 5, True),  # the session's own start
+        (15, 39, True),
+        (15, 40, False),
+    ],
+)
+def test_test_now_follows_a_special_sessions_own_window(
+    setup, monkeypatch, holidays_file, tmp_path, hour, minute, refused
+):
+    """Muhurat 2026 is a Sunday listed with 14:05-15:40: the page and the button agree with the
+    worker (one rule, TradingCalendar.blocks_test_now), and the page's reason says the hours."""
+    _, client, vault, calls = setup
+    _ready(vault)
+    extra = tmp_path / "nse_extra_trading_days.txt"
+    extra.write_text("2026-11-08 14:05-15:40  # Muhurat\n")
+    calendar = TradingCalendar(holidays_file, extra)
+    monkeypatch.setattr(bp_module, "_calendar", lambda: calendar)
+    at = datetime(2026, 11, 8, hour, minute, tzinfo=IST)
+    monkeypatch.setattr(bp_module, "_now", lambda: at)
+    monkeypatch.setattr(bp_module, "_holds_fresh_token", lambda username, now=None: True)
+    started = []
+    monkeypatch.setattr(bp_module, "run_test_child", lambda run_id: started.append(run_id))
+    login_session(client)
+    status = client.get("/sudarshan/autologin/status", headers=JSON).get_json()["data"]
+    assert status["test"]["allowed"] is not refused
+    response = _call(client, "post", "/sudarshan/autologin/test", None, csrf_headers(client))
+    if refused:
+        assert response.status_code == 409 and started == []
+        message = response.get_json()["message"]
+        assert message == status["test"]["reason"]
+        assert "a special session has its own hours" in message
     else:
         assert started
 

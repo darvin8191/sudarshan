@@ -65,7 +65,11 @@ def import_broker_module(broker_name: str) -> Any | None:
 
 
 def close_position_with_auth(
-    position_data: dict[str, Any], auth_token: str, broker: str, original_data: dict[str, Any]
+    position_data: dict[str, Any],
+    auth_token: str,
+    broker: str,
+    original_data: dict[str, Any],
+    force_live: bool = False,  # SUDARSHAN M5.13: the kill switch's Exit all is always Live
 ) -> tuple[bool, dict[str, Any], int]:
     """
     Close all positions using provided auth token.
@@ -87,7 +91,7 @@ def close_position_with_auth(
         position_request_data.pop("apikey", None)
 
     # If in analyze mode, route to sandbox for real position closing
-    if get_analyze_mode():
+    if not force_live and get_analyze_mode():  # SUDARSHAN M5.13
         from services.sandbox_service import sandbox_close_position
 
         api_key = original_data.get("apikey")
@@ -205,6 +209,8 @@ def close_position_with_auth(
         ))
         return False, error_response, 500
 
+    # SUDARSHAN M6.9: what became of each position (the broker's close-all says, for Upstox).
+    each = response_code.get("positions") if isinstance(response_code, dict) else None
     if status_code == 200:
         response_data = {"status": "success", "message": "All Open Positions Squared Off"}
         # SUDARSHAN M6.9: every exit went; what the close-all could not check is said too.
@@ -212,6 +218,8 @@ def close_position_with_auth(
         if note:
             message = f"All Open Positions Squared Off. {note}"
             response_data = {**response_data, "message": message, "note": note}
+        if each:
+            response_data["positions"] = each
         bus.publish(PositionClosedEvent(
             mode="live", api_type=API_TYPE,
             symbol=position_data.get("symbol", ""), exchange=position_data.get("exchange", ""),
@@ -231,6 +239,8 @@ def close_position_with_auth(
         # SUDARSHAN M6.9: a close-all that sent some of its exits keeps saying so.
         if isinstance(response_code, dict) and response_code.get("not_confirmed"):
             error_response["not_confirmed"] = True
+        if each:
+            error_response["positions"] = each
         bus.publish(PositionClosedEvent(
             mode="live", api_type=API_TYPE,
             symbol=position_data.get("symbol", ""), exchange=position_data.get("exchange", ""),

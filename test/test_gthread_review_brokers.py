@@ -91,13 +91,32 @@ def test_upstox_close_all_reports_refused_legs(gthread, monkeypatch):
         lambda auth: {
             "status": "success",
             "data": [
-                {"quantity": "50", "instrument_token": "t1", "exchange": "NFO", "product": "D"},
-                {"quantity": "-75", "instrument_token": "t2", "exchange": "NFO", "product": "D"},
+                # SUDARSHAN M6.9: Upstox's rows carry the day's buy and sell quantities, which
+                # Exit all corrects each size by (sudarshan/books/fills.py).
+                {
+                    "quantity": "50",
+                    "instrument_token": "t1",
+                    "exchange": "NFO",
+                    "product": "D",
+                    "day_buy_quantity": "0",
+                    "day_sell_quantity": "0",
+                },
+                {
+                    "quantity": "-75",
+                    "instrument_token": "t2",
+                    "exchange": "NFO",
+                    "product": "D",
+                    "day_buy_quantity": "0",
+                    "day_sell_quantity": "0",
+                },
             ],
         },
     )
     monkeypatch.setattr(upstox, "get_symbol", lambda token, exchange: f"SYM{token}")
     monkeypatch.setattr(upstox, "reverse_map_product_type", lambda exchange, product: "NRML")
+    # SUDARSHAN M6.9: Exit all reads the order book once, after the positions; with it unread,
+    # nothing is sent. Here it lists no order today.
+    monkeypatch.setattr(upstox, "get_order_book", lambda auth: {"status": "success", "data": []})
     sent = []
 
     def place(payload, auth):
@@ -141,7 +160,15 @@ def test_upstox_close_all_unchanged_when_every_leg_is_sent(dev, monkeypatch):
         lambda auth: {
             "status": "success",
             "data": [
-                {"quantity": "50", "instrument_token": "t1", "exchange": "NFO", "product": "D"}
+                # SUDARSHAN M6.9: with the day's quantities Upstox's rows carry (fills.py).
+                {
+                    "quantity": "50",
+                    "instrument_token": "t1",
+                    "exchange": "NFO",
+                    "product": "D",
+                    "day_buy_quantity": "0",
+                    "day_sell_quantity": "0",
+                }
             ],
         },
     )
@@ -156,7 +183,18 @@ def test_upstox_close_all_unchanged_when_every_leg_is_sent(dev, monkeypatch):
     # it lists no order working to close a position.
     monkeypatch.setattr(upstox, "get_order_book", lambda auth: {"status": "success", "data": []})
 
-    assert upstox.close_all_positions("x", "tok") == (
+    body, status = upstox.close_all_positions("x", "tok")
+    # SUDARSHAN M6.9: the answer also says what became of each position, for the phone's hold.
+    assert body.pop("positions") == [
+        {
+            "exchange": "NFO",
+            "symbol": "SYM",
+            "product": "NRML",
+            "outcome": "sent",
+            "orderids": ["1"],
+        }
+    ]
+    assert (body, status) == (
         {"status": "success", "message": "All Open Positions SquaredOff"},
         200,
     )

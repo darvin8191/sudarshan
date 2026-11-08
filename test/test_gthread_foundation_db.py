@@ -18,7 +18,9 @@ Each fix here closes a race without changing what happens when nothing races:
 from __future__ import annotations
 
 import importlib.util
+import os
 import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -436,6 +438,41 @@ def test_an_approved_order_is_claimed_for_the_broker_once(action_center):
 # --- master contract single flight ------------------------------------------
 
 
+def _master_contract_threads():
+    """The master contract download and saved-copy load threads alive now.
+
+    auth_utils starts them unnamed, so Python names each one after its target,
+    as in "Thread-12 (_run_claimed_download)".
+    """
+    targets = ("(_run_claimed_download)", "(_run_claimed_cached_load)")
+    return {thread for thread in threading.enumerate() if thread.name.endswith(targets)}
+
+
+def _join_master_contract_threads(before, timeout=10):
+    """Join each such thread started since ``before``; return those still running, by name."""
+    started = _master_contract_threads() - before
+    for thread in started:
+        thread.join(timeout)
+    return sorted(thread.name for thread in started if thread.is_alive())
+
+
+@pytest.fixture(autouse=True)
+def _master_contract_threads_end_with_their_test(monkeypatch):
+    """Fail a test that leaves a master contract thread running, and name the thread.
+
+    These tests patch in a fresh claim set, and a thread releases its claim
+    from whichever set is patched in when it finishes, so one that outlives its
+    test can undo the next test's claim. Taking monkeypatch tears this down
+    before the patches are undone: a leftover is joined while its own test's
+    set and fakes are still in place, and the next test starts clean.
+    """
+    before = _master_contract_threads()
+    yield
+    left = sorted(thread.name for thread in _master_contract_threads() - before)
+    _join_master_contract_threads(before)
+    assert not left, f"the test ended with master contract threads still running: {left}"
+
+
 @pytest.fixture
 def blocking_download(monkeypatch):
     started = threading.Event()
@@ -450,8 +487,10 @@ def blocking_download(monkeypatch):
 
     monkeypatch.setattr(auth_utils, "_download_master_contract", fake_download)
     monkeypatch.setattr(auth_utils, "_master_contract_running", set())
+    before = _master_contract_threads()
     yield types.SimpleNamespace(started=started, release=release, runs=runs)
     release.set()
+    assert not _join_master_contract_threads(before), "a fake download never finished"
 
 
 def test_a_second_start_while_one_runs_is_refused(blocking_download):
@@ -545,9 +584,10 @@ def download_in_its_tail(monkeypatch, status_row):
 
     monkeypatch.setattr(auth_utils, "_download_master_contract", fake_download)
     monkeypatch.setattr(auth_utils, "_master_contract_running", set())
+    before = _master_contract_threads()
     yield types.SimpleNamespace(in_tail=in_tail, release=release, runs=runs)
     release.set()
-    assert _wait_until_idle("zerodha"), "the fake download never finished"
+    assert not _join_master_contract_threads(before), "the fake download never finished"
 
 
 def test_a_refused_start_leaves_the_running_downloads_status_alone(
@@ -674,11 +714,14 @@ def test_a_login_on_a_fresh_cache_resets_the_row_and_loads_it_as_before(monkeypa
     loaded = threading.Event()
     monkeypatch.setattr(auth_utils, "load_existing_master_contract", lambda broker: loaded.set())
     monkeypatch.setattr(auth_utils, "_master_contract_running", set())
+    before = _master_contract_threads()
 
     status, _body = _log_in(monkeypatch, should_download=False)
     assert status == 200
     assert loaded.wait(5)
     assert status_row.resets == ["zerodha"]
+    # The load sets the event before it releases its claim.
+    assert not _join_master_contract_threads(before), "the cached load never finished"
 
 
 def test_a_login_on_a_fresh_cache_during_a_download_leaves_it_alone(
@@ -718,6 +761,7 @@ def test_a_download_is_refused_while_the_saved_copy_loads(monkeypatch, status_ro
     monkeypatch.setattr(auth_utils, "load_existing_master_contract", slow_load)
     monkeypatch.setattr(auth_utils, "_download_master_contract", downloads.append)
     monkeypatch.setattr(auth_utils, "_master_contract_running", set())
+    before = _master_contract_threads()
     try:
         assert auth_utils.try_start_cached_master_contract_load("zerodha") is True
         assert started.wait(5)
@@ -730,6 +774,7 @@ def test_a_download_is_refused_while_the_saved_copy_loads(monkeypatch, status_ro
     assert auth_utils.try_start_master_contract_download("zerodha") is True
     assert _wait_until_idle("zerodha")
     assert downloads == ["zerodha"]
+    assert not _join_master_contract_threads(before), "a master contract thread never finished"
 
 
 def test_a_failed_cached_load_releases_its_claim(monkeypatch, status_row):
@@ -742,6 +787,120 @@ def test_a_failed_cached_load_releases_its_claim(monkeypatch, status_row):
     with pytest.raises(RuntimeError):
         auth_utils._run_claimed_cached_load("zerodha")
     assert auth_utils.is_master_contract_download_running("zerodha") is False
+
+
+# A pytest plugin for a subprocess: the latest moment the tests allow a master
+# contract thread the first test started to release its claim. Each one is held
+# just before its release until something joins it, or else until a later test
+# wins a claim, which then waits for the held release to land. The summary line
+# says how many it held.
+LATE_RELEASE = """
+import threading
+
+import pytest
+
+_tests = []
+_gates = {}
+_start = threading.Thread.start
+_join = threading.Thread.join
+
+
+def _start_held(self):
+    if len(_tests) == 1 and self.name.endswith(
+        ("(_run_claimed_download)", "(_run_claimed_cached_load)")
+    ):
+        _gates[self] = (threading.Event(), threading.Event())
+    _start(self)
+
+
+def _join_lets_go(self, timeout=None):
+    if self in _gates:
+        _gates[self][0].set()
+    _join(self, timeout)
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_setup(item):
+    _tests.append(item.nodeid)
+    if len(_tests) > 1:
+        return
+    from utils import auth_utils
+
+    claim = auth_utils._claim_master_contract_download
+    release = auth_utils._release_master_contract_download
+
+    def release_when_let_go(broker):
+        go, done = _gates.get(threading.current_thread(), (None, None))
+        if go is not None:
+            go.wait(30)
+        try:
+            release(broker)
+        finally:
+            if done is not None:
+                done.set()
+
+    def claim_then_land_the_held(broker):
+        won = claim(broker)
+        if won and len(_tests) > 1:
+            for go, done in list(_gates.values()):
+                go.set()
+                done.wait(30)
+        return won
+
+    auth_utils._claim_master_contract_download = claim_then_land_the_held
+    auth_utils._release_master_contract_download = release_when_let_go
+    threading.Thread.start = _start_held
+    threading.Thread.join = _join_lets_go
+
+
+def pytest_terminal_summary(terminalreporter):
+    terminalreporter.write_line(f"late_release held {len(_gates)}")
+"""
+
+
+@pytest.mark.parametrize(
+    ("leaves_a_thread", "next_test"),
+    [
+        pytest.param(
+            "test_simultaneous_starts_start_one_download",
+            "test_a_refused_start_leaves_the_running_downloads_status_alone",
+            id="download",
+        ),
+        pytest.param(
+            "test_a_login_on_a_fresh_cache_resets_the_row_and_loads_it_as_before",
+            "test_a_login_on_a_fresh_cache_during_a_download_leaves_it_alone",
+            id="cached-load",
+        ),
+    ],
+)
+def test_a_thread_left_running_cannot_undo_the_next_tests_claim(
+    tmp_path, leaves_a_thread, next_test
+):
+    """Each pair passes even when the first test's thread releases as late as it can.
+
+    Every test here patches in a fresh claim set, and a thread releases its
+    claim from whichever set is patched in when it finishes. The download that
+    test_simultaneous_starts_start_one_download started once outlived it in the
+    full gthread run: its release discarded the claim of a later test, whose
+    second start was then not refused. LATE_RELEASE makes that timing certain,
+    so a pair passes only if its first test joins its threads before it ends.
+    """
+    (tmp_path / "late_release.py").write_text(LATE_RELEASE, encoding="utf-8")
+    test_file = Path(__file__).resolve()
+    args = [f"{test_file}::{leaves_a_thread}", f"{test_file}::{next_test}", "-p", "late_release"]
+    args += ["-p", "no:cacheprovider", "-o", "addopts=", "--timeout=60", "-q"]
+    paths = [str(tmp_path), os.environ.get("PYTHONPATH", "")]
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", *args],
+        capture_output=True,
+        text=True,
+        timeout=180,
+        cwd=str(REPO),
+        env={**os.environ, "PYTHONPATH": os.pathsep.join(filter(None, paths))},
+    )
+    # The schedule took hold: the first test's one thread was held.
+    assert "late_release held 1" in result.stdout, result.stdout[-4000:]
+    assert result.returncode == 0 and "2 passed" in result.stdout, result.stdout[-4000:]
 
 
 # --- .env writes and the version check ---------------------------------------

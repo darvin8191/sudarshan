@@ -2,20 +2,26 @@ import { ArrowDown, ArrowUp } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
-import { setOrderSoundMuted, useOrderSoundMuted } from './books/chime'
+import {
+  setMarketSoundMuted,
+  setOrderSoundMuted,
+  useMarketSoundMuted,
+  useOrderSoundMuted,
+} from './books/chime'
 import { setCvdMode, useCvdMode } from './display'
 
 /**
  * Profile's Display tab, in place of upstream's theme picker. The theme and the
  * accent are stated here rather than offered (light only, one brand accent: a
  * control that cannot change anything is not shown as one). Colour-blind mode
- * and the order alert sound are the settings, both kept on this device only;
- * the preview under colour-blind mode is drawn in the live tokens, so it
- * changes the moment the switch does.
+ * and the order and market alert sounds are the settings, all kept on this
+ * device only; the preview under colour-blind mode is drawn in the live tokens,
+ * so it changes the moment the switch does.
  */
 export function DisplaySettings() {
   const cvd = useCvdMode()
   const soundMuted = useOrderSoundMuted()
+  const marketMuted = useMarketSoundMuted()
 
   return (
     <Card>
@@ -60,21 +66,68 @@ export function DisplaySettings() {
           <Switch id="sd-cvd-mode" checked={cvd} onCheckedChange={setCvdMode} />
         </div>
 
-        <div className="flex items-start justify-between gap-4 rounded-lg border p-4">
-          <div className="space-y-1">
-            <Label htmlFor="sd-order-sound">Order alert sound</Label>
-            <p className="text-sm text-muted-foreground">
-              A short soft sound when an order fills, partly fills, is rejected or is cancelled at
-              the broker. The alert itself still shows when this is off. This device only.
-            </p>
-          </div>
-          <Switch
-            id="sd-order-sound"
-            checked={!soundMuted}
-            onCheckedChange={(on) => setOrderSoundMuted(!on)}
-          />
-        </div>
+        <SoundRow
+          id="sd-order-sound"
+          title="Order alert sound"
+          words="A short soft sound when an order fills, partly fills, is rejected or is cancelled at the broker. The alert itself still shows when this is off. This device only."
+          on={!soundMuted}
+          onChange={(on) => setOrderSoundMuted(!on)}
+        />
+
+        {/* SUDARSHAN M10.7: market alerts sound on their own two notes. */}
+        <SoundRow
+          id="sd-market-sound"
+          rowId="market-alert-sound"
+          title="Market alert sound"
+          words="A short sound, higher than the order sounds, when a market alert you set fires. The alert itself still shows when this is off. This device only."
+          on={!marketMuted}
+          onChange={(on) => setMarketSoundMuted(!on)}
+        />
       </CardContent>
     </Card>
+  )
+}
+
+/**
+ * A sound's switch, its whole row the target (a switch alone is under 48 dp): a tap anywhere on
+ * the row turns it on or off. Named by its title, described by its words.
+ */
+function SoundRow({
+  id,
+  rowId,
+  title,
+  words,
+  on,
+  onChange,
+}: {
+  id: string
+  rowId?: string
+  title: string
+  words: string
+  on: boolean
+  onChange: (on: boolean) => void
+}) {
+  return (
+    <label
+      id={rowId}
+      htmlFor={id}
+      className="flex min-h-12 cursor-pointer items-start justify-between gap-4 rounded-lg border p-4"
+    >
+      <span className="space-y-1">
+        <span id={`${id}-title`} className="block text-sm leading-none font-medium">
+          {title}
+        </span>
+        <span id={`${id}-words`} className="block text-sm text-muted-foreground">
+          {words}
+        </span>
+      </span>
+      <Switch
+        id={id}
+        aria-labelledby={`${id}-title`}
+        aria-describedby={`${id}-words`}
+        checked={on}
+        onCheckedChange={onChange}
+      />
+    </label>
   )
 }

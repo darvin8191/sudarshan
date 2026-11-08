@@ -104,11 +104,13 @@ def test_runtime_overlay_survives_a_restart(tmp_path):
     keys, state = tmp_path / "keys.txt", tmp_path / "state" / "subscriptions.json"
     keys.write_text("ltpc NSE_INDEX|Nifty 50\nltpc NSE_INDEX|Nifty Bank\n")
     subs = Subscriptions.load(keys, state)
-    new, moved = subs.subscribe("full", ["NSE_EQ|INE002A01018", "NSE_INDEX|Nifty 50"])
-    assert (new, moved) == (["NSE_EQ|INE002A01018"], ["NSE_INDEX|Nifty 50"])
-    assert subs.unsubscribe(["NSE_INDEX|Nifty Bank", "NSE_EQ|INE009A01021"]) == [
-        "NSE_INDEX|Nifty Bank"
-    ]
+    change = subs.subscribe("full", ["NSE_EQ|INE002A01018", "NSE_INDEX|Nifty 50"])
+    assert (change.new, change.moved) == (
+        {"NSE_EQ|INE002A01018": "full"},
+        {"NSE_INDEX|Nifty 50": "full"},
+    )
+    gone, change = subs.unsubscribe(["NSE_INDEX|Nifty Bank", "NSE_EQ|INE009A01021"])
+    assert gone == ["NSE_INDEX|Nifty Bank"] and change.gone == ("NSE_INDEX|Nifty Bank",)
     with pytest.raises(CapError):  # a rejected request changes nothing
         subs.subscribe("full_d30", [f"NSE_FO|{n}" for n in range(51)])
     again = Subscriptions.load(keys, state)

@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactElement } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AutoLoginStatus } from '@/api/autologin'
+import { useAuthStore } from '@/stores/authStore'
 import { fireEvent, render, screen, waitFor, within } from '@/test/test-utils'
 
 const api = vi.hoisted(() => ({
@@ -88,7 +89,7 @@ describe('Auto login page', () => {
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
     // Before anyone presses it: Test now replaces today's login, hence its hours.
     expect(screen.getByText(/Test now replaces today's login/)).toHaveTextContent(
-      /from 09:00 to 15:40 on a trading day while Upstox is connected/
+      /during market hours while Upstox is connected \(usually from 09:00 to 15:40 on a trading day; a special session has its own hours\)/
     )
   })
 
@@ -267,21 +268,53 @@ describe('Auto login page', () => {
     expect(api.testNow).toHaveBeenCalledTimes(1)
   })
 
+  it("hands today's login and the API key to every screen after a passed Test now", async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          status: 'success',
+          authenticated: true,
+          logged_in: true,
+          user: 'owner',
+          broker: 'upstox',
+          api_key: 'key-from-server',
+        }),
+      }))
+    )
+    useAuthStore.getState().logout()
+    api.status.mockResolvedValue(
+      makeStatus({ enabled: true, secrets: SAVED, test: { allowed: true, reason: null } })
+    )
+    api.testNow.mockResolvedValue({
+      outcome: 'ok',
+      message: 'Logged in to Upstox.',
+      at: '2026-10-20T19:05:00+05:30',
+    })
+    renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: /Test now/ }))
+    await waitFor(() => expect(useAuthStore.getState().apiKey).toBe('key-from-server'))
+    vi.unstubAllGlobals()
+  })
+
   it('shows why Test now was refused', async () => {
     api.status.mockResolvedValue(
       makeStatus({ secrets: SAVED, test: { allowed: true, reason: null } })
     )
     api.testNow.mockRejectedValue(
       new Error(
-        'Not available from 09:00 to 15:40 on a trading day while Upstox is connected: Test now ' +
-          "replaces today's login, which would cut off the live session."
+        'Not available during market hours while Upstox is connected (usually from 09:00 to ' +
+          '15:40 on a trading day; a special session has its own hours): Test now replaces ' +
+          "today's login, which would cut off the live session."
       )
     )
     renderPage()
     fireEvent.click(await screen.findByRole('button', { name: /Test now/ }))
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith(
-        expect.stringContaining('Not available from 09:00 to 15:40')
+        expect.stringContaining('Not available during market hours')
       )
     )
   })

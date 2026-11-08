@@ -94,6 +94,9 @@ def test_end_dates(ends, expected):
         (SBIN | price(level="-5"), "level", "Enter the price level"),
         (SBIN | price(level="0.009"), "level", "Enter a price level of at least 0.01."),
         (SBIN | price(level="abc"), "level", "Enter the price level"),
+        (SBIN | price(level="1e3"), "level", "Enter the price level"),  # was stored as 1E+3
+        (SBIN | price(level="1_000"), "level", "Enter the price level"),
+        (SBIN | price(level="\u0967\u0966\u0966"), "level", "Enter the price level"),
         (SBIN | price(params={"source": "mid"}), "source", "Pick the price to watch"),
         (NIFTY | price(params={"source": "bid"}), "source", "An index has no bid or ask."),
         (SBIN | price(frequency="hourly"), "frequency", "Pick how often"),

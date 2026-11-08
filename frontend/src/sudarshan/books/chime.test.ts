@@ -7,21 +7,29 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   claimOrderSound,
+  marketSoundMuted,
   orderSoundMuted,
   playChime,
   resetChimeForTests,
+  setMarketSoundMuted,
   setOrderSoundMuted,
   unlockSoundOnFirstTap,
 } from './chime'
 
+/** Every frequency set on an oscillator, in order. */
+const pitches: number[] = []
+
 class FakeParam {
-  setValueAtTime() {}
+  setValueAtTime(value?: number) {
+    if (this.records && value !== undefined) pitches.push(value)
+  }
+  records = false
   exponentialRampToValueAtTime() {}
 }
 
 class FakeNode {
   gain = new FakeParam()
-  frequency = new FakeParam()
+  frequency = Object.assign(new FakeParam(), { records: true })
   type = 'sine'
   onended: (() => void) | null = null
   connect() {
@@ -69,6 +77,7 @@ class FakeContext {
 
 beforeEach(() => {
   created.length = 0
+  pitches.length = 0
   startState = 'running'
   resetChimeForTests()
   setOrderSoundMuted(false)
@@ -162,5 +171,75 @@ describe('order alert sound', () => {
     unlockSoundOnFirstTap()
     document.dispatchEvent(new Event('pointerdown'))
     expect(playChime('filled', 30_000)).toBe(false)
+  })
+})
+
+// SUDARSHAN M10.7: the market alert's own two notes, mute and the shared quiet window.
+describe('market alert sound', () => {
+  beforeEach(() => {
+    setMarketSoundMuted(false)
+    unlockSoundOnFirstTap()
+    document.dispatchEvent(new Event('pointerdown'))
+  })
+
+  afterEach(() => setMarketSoundMuted(false))
+
+  it('plays on its own switch: the order mute does not silence it, its own mute does', () => {
+    setOrderSoundMuted(true)
+    expect(playChime('market', 70_000)).toBe(true)
+    expect(playChime('filled', 71_000)).toBe(false)
+
+    setOrderSoundMuted(false)
+    setMarketSoundMuted(true)
+    expect(marketSoundMuted()).toBe(true)
+    expect(localStorage.getItem('sudarshan-market-sound')).toBe('off')
+    expect(playChime('market', 72_000)).toBe(false)
+    expect(playChime('filled', 73_000)).toBe(true)
+
+    setMarketSoundMuted(false)
+    expect(localStorage.getItem('sudarshan-market-sound')).toBeNull()
+  })
+
+  it('shares the quiet window with the order sounds: a fill and an alert at once sound once', () => {
+    expect(playChime('filled', 80_000)).toBe(true)
+    expect(playChime('market', 80_300)).toBe(false)
+    expect(playChime('market', 81_000)).toBe(true)
+  })
+
+  it('reads its mute back when the app loads', async () => {
+    localStorage.setItem('sudarshan-market-sound', 'off')
+    vi.resetModules()
+    const fresh = await import('./chime')
+    expect(fresh.marketSoundMuted()).toBe(true)
+    expect(fresh.orderSoundMuted()).toBe(false)
+    localStorage.removeItem('sudarshan-market-sound')
+  })
+
+  it('sounds its own two high notes, a different pair from every order sound', () => {
+    expect(playChime('market', 90_000)).toBe(true)
+    expect(playChime('filled', 91_000)).toBe(true)
+    expect(pitches).toEqual([988, 1319, 660, 880])
+  })
+
+  it('is not muted when the browser refuses to read its storage', async () => {
+    const read = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('storage refused')
+    })
+    vi.resetModules()
+    const fresh = await import('./chime')
+    read.mockRestore()
+    expect(fresh.marketSoundMuted()).toBe(false)
+    expect(fresh.orderSoundMuted()).toBe(false)
+  })
+
+  it('follows a change of its mute made in another tab', () => {
+    expect(marketSoundMuted()).toBe(false)
+    localStorage.setItem('sudarshan-market-sound', 'off')
+    window.dispatchEvent(new StorageEvent('storage', { key: 'sudarshan-market-sound' }))
+    expect(marketSoundMuted()).toBe(true)
+    expect(playChime('market', 95_000)).toBe(false)
+    localStorage.removeItem('sudarshan-market-sound')
+    window.dispatchEvent(new StorageEvent('storage', { key: 'sudarshan-market-sound' }))
+    expect(marketSoundMuted()).toBe(false)
   })
 })

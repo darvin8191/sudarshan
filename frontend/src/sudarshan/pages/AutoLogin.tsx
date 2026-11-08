@@ -29,6 +29,7 @@ import {
   type SavedSecret,
   type TestResult,
 } from '@/api/autologin'
+import { syncSession } from '@/components/auth/AuthSync'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -284,8 +285,11 @@ export default function AutoLogin() {
     onMutate: () => setTestResult(null),
     onSuccess: (result) => {
       setTestResult(result)
-      if (result.outcome === 'ok') showToast.success('Upstox auto-login test passed.')
-      else showToast.error(result.message)
+      if (result.outcome === 'ok') {
+        showToast.success('Upstox auto-login test passed.')
+        // Today's login and the API key reach every screen now, not after a reload.
+        void syncSession({ keepOnFailure: true })
+      } else showToast.error(result.message)
     },
     onError: (error) => showToast.error(errorMessage(error, 'The test could not run.')),
     onSettled: refresh,
@@ -439,8 +443,8 @@ export default function AutoLogin() {
               </Button>
               <p className="text-sm text-muted-foreground">
                 One login now, at any time. Test now replaces today's login, so it is not available
-                from 09:00 to 15:40 on a trading day while Upstox is connected, or while auto-login
-                is paused.
+                during market hours while Upstox is connected (usually from 09:00 to 15:40 on a
+                trading day; a special session has its own hours), or while auto-login is paused.
               </p>
               {!data.test.allowed && data.test.reason && !test.isPending && (
                 <p className={`inline-flex items-start gap-1.5 text-sm ${WARNING}`}>

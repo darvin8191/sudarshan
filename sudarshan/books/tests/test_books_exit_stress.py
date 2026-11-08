@@ -31,12 +31,25 @@ def test_random_interleavings_keep_the_promises(monkeypatch):
     inside = {book: {"all": 0, "exits": {}} for book in ("live", "sandbox")}
     violations: list[str] = []
     counts = {"exit": 0, "exit409": 0, "all": 0, "all409": 0, "skipped": 0}
+    count_lock = threading.Lock()  # += on a shared dict is not atomic on real threads
     stop = time.monotonic() + 4.0
+
+    def count(name, n=1):
+        with count_lock:
+            counts[name] += n
+
+    def refused(name):
+        # A refused caller backs off for a moment, as a real request does. Without it, eleven
+        # threads retrying in a tight loop starve the one holding the claim of the interpreter
+        # lock, and on a slow runner too few exits finish in the window to test anything
+        # (CI on b5ae8c9: 78 exits against 1,346,328 refusals).
+        count(name)
+        time.sleep(0.0001 + random.random() * 0.0004)
 
     def app_exit(book, position):
         with guard.one(book, position) as busy:
             if busy:
-                counts["exit409"] += 1
+                refused("exit409")
                 return
             with state_lock:
                 here = inside[book]
@@ -50,12 +63,12 @@ def test_random_interleavings_keep_the_promises(monkeypatch):
                 here["exits"][position] -= 1
             if book == "live":
                 guard.placed(book, position)  # before the claim is let go
-            counts["exit"] += 1
+            count("exit")
 
     def exit_all(book):
         with guard.every(book) as busy:
             if busy:
-                counts["all409"] += 1
+                refused("all409")
                 return
             held = guard.busy(book)  # what the close-all skips
             with state_lock:
@@ -70,11 +83,11 @@ def test_random_interleavings_keep_the_promises(monkeypatch):
                 if sending:
                     violations.append(f"Exit all would send {sending} while it is placed ({book})")
                 here["all"] += 1
-            counts["skipped"] += len(held)
+            count("skipped", len(held))
             time.sleep(random.random() * 0.003)
             with state_lock:
                 here["all"] -= 1
-            counts["all"] += 1
+            count("all")
 
     def worker(seed):
         rnd = random.Random(seed)

@@ -2,6 +2,7 @@ import { Navigate, Outlet } from 'react-router'
 import { SocketProvider } from '@/components/socket/SocketProvider'
 import { useAuthStore } from '@/stores/authStore'
 import { AnalyzeBanner } from '@/sudarshan/AnalyzeBanner'
+import { RiskBanner } from '@/sudarshan/risk/RiskBanner' // SUDARSHAN M20.7
 import { Footer } from './Footer'
 import { MobileBottomNav } from './MobileBottomNav'
 import { Navbar } from './Navbar'
@@ -26,6 +27,8 @@ export function Layout() {
         {/* One sticky header, so the Analyze banner stays in view with the navbar. */}
         <div className="sticky top-0 z-50">
           <AnalyzeBanner />
+          {/* SUDARSHAN M20.7: the kill switch, when it is on */}
+          <RiskBanner />
           <Navbar />
         </div>
         {/* SUDARSHAN: on a phone the page starts closer to the bar (D), and

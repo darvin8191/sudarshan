@@ -34,13 +34,14 @@
 
 import json
 
-from broker.upstox.api.rate_limiter import apply_rate_limit
+from broker.upstox.api.rate_limiter import SendWithdrawn, apply_rate_limit
 from broker.upstox.mapping.gtt_data import (
     map_gtt_book,
     transform_modify_gtt,
     transform_place_gtt,
 )
 from database.token_db import get_token
+from sudarshan.guard import gate as risk_gate  # SUDARSHAN M5.13: the risk gate
 from utils.broker_backpressure import BrokerBusyError
 from utils.httpx_client import get_httpx_client
 from utils.logging import get_logger
@@ -172,6 +173,7 @@ def _prepare(data, auth):
     return None, None
 
 
+@risk_gate.upstox_gtt_place  # SUDARSHAN M5.13: new risk refused while the kill switch is on
 def place_gtt_order(data, auth):
     """Create a GTT on Upstox. Returns ``(response, response_dict, trigger_id)``.
 
@@ -200,6 +202,8 @@ def place_gtt_order(data, auth):
 
     try:
         apply_rate_limit(_RATE_LIMIT_CATEGORY)
+    except SendWithdrawn as exc:  # SUDARSHAN M5.13: the kill switch went on while it waited
+        return risk_gate.withdrawn_response(exc.text)
     except BrokerBusyError as exc:
         # Refused by the pacer before anything was sent (gthread only).
         return _FakeResponse(429), {"status": "error", "message": str(exc)}, None
@@ -225,6 +229,7 @@ def place_gtt_order(data, auth):
     return response, response_data, trigger_id
 
 
+@risk_gate.upstox_gtt_modify  # SUDARSHAN M5.13: new risk refused while the kill switch is on
 def modify_gtt_order(data, auth):
     """Modify an active GTT on Upstox. Returns ``(response_dict, status_code)``.
 
@@ -248,6 +253,8 @@ def modify_gtt_order(data, auth):
 
     try:
         apply_rate_limit(_RATE_LIMIT_CATEGORY)
+    except SendWithdrawn as exc:  # SUDARSHAN M5.13
+        return risk_gate.withdrawn_body(exc.text)
     except BrokerBusyError as exc:
         return {"status": "error", "message": str(exc)}, 429
     client = get_httpx_client()
@@ -323,7 +330,9 @@ def get_gtt_book(auth, include_history=False):
     """
     apply_rate_limit(_RATE_LIMIT_CATEGORY)
     client = get_httpx_client()
-    response = client.get(_GTT_BASE, headers=_headers(auth))
+    from broker.upstox.api.order_api import read_timeout  # SUDARSHAN M5.13: the gate's limit
+
+    response = client.get(_GTT_BASE, headers=_headers(auth), **read_timeout())
     logger.info(f"Upstox gtt_book raw: status={response.status_code}, body={response.text}")
 
     raw = _parse(response)
