@@ -141,6 +141,10 @@ TIMED_KEPT = 500
 #: now, only if Upstox's order book can be read to correct it (``Gate._corrected``), and no longer
 #: than this after it was read.
 KEPT_BOOK_WITHIN_S = SEND_HELD_AT_MOST_S
+#: The day's loss figure, when the positions cannot be read now, comes from a kept book no older
+#: than this: the order book's fills correct a row's quantities, not its money (realised,
+#: unrealised, the day's values), so the figure has only its age (release review v0.4.1, L3).
+DAY_BOOK_WITHIN_S = 15.0
 #: Order book rows a caller read for the exits it is sending (``order_book_read``) correct the
 #: gate's positions, instead of a read of its own, while they are at most this old: Exit all reads
 #: the book once and then sends for ``EXIT_ALL_SENDS_FOR_S``, with time for the read before and
@@ -952,9 +956,11 @@ class Gate:
         rows, stale = self._live_rows(order.owner, fallback)
         return rules.upstox_position(rows, instrument, product), stale
 
-    def _live_rows(self, owner: str, fallback: bool = False) -> tuple[list, bool]:
+    def _live_rows(
+        self, owner: str, fallback: bool = False, kept_within: float = KEPT_BOOK_WITHIN_S
+    ) -> tuple[list, bool]:
         """Upstox's positions for ``owner``, kept with the time the read began. When they cannot
-        be read and ``fallback`` allows it, the book read in the last ``KEPT_BOOK_WITHIN_S``
+        be read and ``fallback`` allows it, the book read in the last ``kept_within`` seconds
         and corrected by the order book, with True; else Unreadable. Rows are corrected by the
         fills the order book shows (``_corrected``), so a lagging positions book judges right."""
         started = time.monotonic()
@@ -963,7 +969,7 @@ class Gate:
             if rows is None:
                 rows = self._read.live_rows(owner)
         except readers.Unreadable:
-            kept = self._kept_rows(owner, KEPT_BOOK_WITHIN_S) if fallback else None
+            kept = self._kept_rows(owner, kept_within) if fallback else None
             if kept is None:
                 raise
             # A book kept from before judges only as the order book's fills correct it, however
@@ -1162,11 +1168,13 @@ class Gate:
         return daily.live_figure(self._rows_for_day(order.owner))
 
     def _rows_for_day(self, owner: str) -> list:
-        """The book the order was just judged on; else a read, else the kept one as the order book corrects it."""
+        """The book the order was just judged on; else a read; else the one kept in the last
+        ``DAY_BOOK_WITHIN_S`` as the order book corrects it (its money is that old, so no
+        longer: the kept book that judges quantities for ``KEPT_BOOK_WITHIN_S`` serves no figure)."""
         kept = self._kept_rows(owner, 1.0)
         if kept is not None:
             return kept
-        return self._live_rows(owner, fallback=True)[0]
+        return self._live_rows(owner, fallback=True, kept_within=DAY_BOOK_WITHIN_S)[0]
 
     def _lock_day(self, pipe: str, day: _Guards, figure: daily.DayFigure) -> risk_store.DayLock:
         """Write today's lock; the first order here to see the breach says so, once."""

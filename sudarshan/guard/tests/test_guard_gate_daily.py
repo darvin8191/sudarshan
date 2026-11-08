@@ -189,11 +189,39 @@ def test_a_kept_book_serves_the_figure_while_the_order_book_corrects_it(day, clo
     upstox = broker()
     assert upstox.place(order("BUY", symbol=PE), "token")[2] == "OID0"  # the book is read
     day.book.fail.add("rows")
-    clock.now += 20  # older than the old 15 s: the fills correct it, not a clock
+    clock.now += gate.DAY_BOOK_WITHIN_S - 5  # within the figure's time
     gtt = order("BUY", symbol=PE, trigger_type="OCO")
     assert upstox.gtt_place(gtt, "token")[2] == "GTT-1"  # the figure from the kept book
     day.book.fail.add("order_rows")  # the fills cannot be read: the kept book cannot be trusted
     assert refused_message(upstox.gtt_place(gtt, "token")) == words.daily_unreadable("live")
+
+
+def test_l3_the_figure_never_comes_from_a_book_older_than_15_s(day, clock):  # noqa: F811
+    """Release review v0.4.1, L3: the order book's fills correct a kept row's quantities, not
+    its money, so a kept book serves the day's figure for DAY_BOOK_WITHIN_S only (the 150 s it
+    judges quantities for would lock the day, or let an order through, on a figure that old)."""
+    day.book.rows = [day_row(CE, 65, -100.0, 0.0)]
+    upstox = broker()
+    assert upstox.place(order("BUY", symbol=PE), "token")[2] == "OID0"  # the book is read
+    day.book.fail.add("rows")
+    clock.now += 16  # past DAY_BOOK_WITHIN_S, well within the 150 s that judges quantities
+    gtt = order("BUY", symbol=PE, trigger_type="OCO")
+    assert refused_message(upstox.gtt_place(gtt, "token")) == words.daily_unreadable("live")
+    assert day.gate.day_unchecked("live")
+    assert gate.DAY_BOOK_WITHIN_S == 15.0
+
+
+def test_l3_a_kept_book_still_judges_quantities_for_150_s(day, clock):  # noqa: F811
+    """The quantities, which the fills do correct, keep the longer time (KEPT_BOOK_WITHIN_S):
+    under the day's lock an exit judged on a 100 s old book still goes."""
+    day.store.lock_day("live", today(), -5200.0, LIMIT)
+    day.book.rows = [day_row(CE, 65, -5200.0, 0.0)]
+    upstox = broker()
+    refused_message(upstox.place(order("BUY", symbol=PE), "token"))  # reads the book
+    day.book.fail.add("rows")
+    clock.now += 100
+    assert upstox.place(order("SELL"), "token")[2] == "OID0"  # the CE exit, on that book
+    assert gate.KEPT_BOOK_WITHIN_S > gate.DAY_BOOK_WITHIN_S
 
 
 def test_on_a_locked_day_an_order_whose_book_cannot_be_read_is_refused(day):
