@@ -292,3 +292,51 @@ def test_r1_after_a_restart_the_working_rest_of_the_first_reversal_still_refuses
     assert code == 409 and "SELL 65 MARKET order" in body["message"], body
     broker.fill_working()
     assert _sent(broker, X) == [("SELL", 130)] and broker.true_qty(X) == -65
+
+
+# -- R2. Exit all with an unreadable order book and only flat rows ---------------------------------------
+
+
+def test_r2_exit_all_with_an_unreadable_order_book_and_only_flat_rows_never_answers_success(
+    monkeypatch,
+):
+    """The positions book lists only a closed position (X, 0). Y was bought a second ago and is not
+    listed yet. The order book cannot be read, so nothing can say whether anything is held that
+    the rows do not show. On b14cb0e every flat row was skipped as nothing held and Exit all
+    answered "All Open Positions SquaredOff" over the 30 held."""
+    broker = Broker({X: 0}, 0.0)
+    broker.orders_unreadable = True
+    world = install(monkeypatch, broker)
+    _bought_not_listed(world, Y, 30)
+    code, body = world.app_exit_all()
+    assert broker.true_qty(Y) == 30 and broker.orders == []
+    assert code == 424 and body["status"] == "error", (code, body)
+    assert "position opened in the last minute may not show yet" in body["message"]
+
+
+def test_r2b_exit_all_with_an_unreadable_order_book_and_a_lagging_flat_row_never_answers_success(
+    monkeypatch,
+):
+    """X was closed earlier (row 0) and bought again a second ago; the row still shows 0. The
+    order book cannot be read. Exit all must not answer success."""
+    broker = Broker({X: 0}, 60.0)
+    broker.orders_unreadable = True
+    world = install(monkeypatch, broker)
+    _bought_not_listed(world, X, 65)
+    code, body = world.app_exit_all()
+    assert broker.true_qty(X) == 65
+    assert code == 424 and body["status"] == "error", (code, body)
+
+
+def test_r2_control_a_short_row_with_the_order_book_unread_is_not_sized_and_not_success(
+    monkeypatch,
+):
+    """Control: a row that shows a quantity (a short, -30) with the order book unread is left out
+    as not sized, with its sentence, as before; the flat-rows answer is not given over it."""
+    broker = Broker({Y: -30}, 0.0)
+    broker.orders_unreadable = True
+    world = install(monkeypatch, broker)
+    code, body = world.app_exit_all()
+    assert code != 200 and body["status"] == "error" and broker.orders == []
+    assert "Upstox did not send your orders in time" in body["message"]
+    assert "position opened in the last minute" not in body["message"]

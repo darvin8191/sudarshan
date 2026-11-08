@@ -904,6 +904,14 @@ def _amount(value):
         return 0.0
 
 
+def _shown(value):
+    """SUDARSHAN M6.9 (R2): a positions row's signed quantity as shown, 0 when it says none."""
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return 0
+
+
 def _working_exits(rows):
     """SUDARSHAN M6.9: the orders still working at Upstox, by what they would close.
 
@@ -1156,9 +1164,12 @@ def close_all_positions(current_api_key, auth):
         # SUDARSHAN M6.9: the order book, read once and after the positions, tells what each
         # position really holds (sudarshan/books/fills.py) and which orders are still working.
         orders = _read_order_rows(auth, exit_guard.EXIT_ALL_ORDERS_READ_S)
-        if not listed_rows and orders is None:
-            # SUDARSHAN M6.9 (Y3): an empty book may be one that has not caught up with a
-            # position opened a moment ago, and only the order book could say.
+        if orders is None and not any(_shown(row.get("quantity")) for row in listed_rows):
+            # SUDARSHAN M6.9 (Y3, R2): a book that shows nothing open (empty, or only closed
+            # positions at 0) may be one that has not caught up with a position opened or
+            # re-entered a moment ago, and only the order book could say. With it unread, every
+            # row would read as nothing held and Exit all would answer success over a position
+            # it never saw: the one answer a trader must never get.
             return {"status": "error", "message": _CLOSE_ALL_EMPTY_NOT_CHECKED}, 424
         working, _read = _working_exits(orders)
         statuses = _order_statuses(orders)
