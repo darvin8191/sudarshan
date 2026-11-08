@@ -210,8 +210,10 @@ def test_every_step_is_tried_whatever_broke_before_it(account, risk_store):
     answer = _on(exit_all=True)
     assert answer.status == 200 and gate.GATE.state().on and risk_store.state().on
     tried = [step["step"] for step in answer.state.report["steps"]]
+    # The GTTs are cancelled after the sweep and before Exit all: with Exit all asked and the
+    # order book unreadable the switch cancels nothing, GTT stops included (review HIGH-2).
     assert tried == [
-        "saved", "told", "drain", "live_orders", "live_gtts", "live_orders_again",
+        "saved", "told", "drain", "live_orders", "live_orders_again", "live_gtts",
         "live_exit_all", "sandbox_orders", "sandbox_gtts", "sandbox_exit_all", "mcp", "agent",
     ]  # fmt: skip
     failed = {s["step"] for s in answer.state.report["steps"] if not s["ok"]}

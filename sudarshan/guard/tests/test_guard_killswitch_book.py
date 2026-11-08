@@ -257,3 +257,157 @@ def test_the_switch_says_there_was_nothing_to_cancel(upstox):
     assert "did not go through" not in steps["live_orders"]["words"]
     assert steps["live_orders"]["detail"]["nothing_open"] is True
     assert "live_orders_again" not in steps  # nothing to look at again
+
+
+# -- the review of this branch, HIGH-2: the stop gone on another path, and the words ------------
+
+
+def _never_reassures(broker, steps):
+    """The X5 outcome reached another way: the stop is gone, nothing was sent, and the words say
+    so. They never say the stop-loss orders still work, or that nothing was cancelled."""
+    said = steps["live_exit_all"]["words"]
+    assert broker.working == [] and broker.true_qty(CE) == 65
+    assert "stop-loss orders still work" not in said and "still stand" not in said, said
+    assert "cancel" in said.lower() and "Upstox app" in said, said
+    assert "open with no stop" in said or "may have been cancelled" in said, said
+
+
+def test_h2a_cancel_all_takes_the_stop_then_the_book_hangs(upstox, monkeypatch):
+    """Upstox's Cancel all reads the book and cancels the resting stop; the book hangs from the
+    next read on (Upstox struggling in a crisis): the rest, the sweep, Exit all."""
+    broker = upstox.broker
+    broker.rest(CE, "SELL", 65)
+    real_rest = killswitch._cancel_the_rest
+
+    def hangs_after_cancel_all(*args, **kwargs):
+        broker.order_book_delay = 20.0
+        return real_rest(*args, **kwargs)
+
+    monkeypatch.setattr(killswitch, "_cancel_the_rest", hangs_after_cancel_all)
+    steps = _steps(killswitch.activate(OWNER, exit_all=True, phrase="STOP"))
+    _never_reassures(broker, steps)
+    assert steps["live_orders"]["words"] == words.ks_orders_unchecked(1)
+    assert steps["live_orders"]["detail"]["stops_cancelled"] == 1  # counted on this pass too
+    assert steps["live_orders_again"]["detail"]["after_cancels"] is True
+    assert "1 order was cancelled, 1 stop-loss order among them" in steps["live_exit_all"]["words"]
+    assert steps["live_exit_all"]["words"] == words.ks_no_exit_orders_unread(1, 1, 0, 0)
+
+
+def test_h2c_a_full_first_pass_then_the_sweep_meets_a_hung_book(upstox, monkeypatch):
+    broker = upstox.broker
+    broker.rest(CE, "SELL", 65)
+    monkeypatch.setattr(
+        killswitch,
+        "_drain",
+        lambda tokens: (False, "One order was still waiting.", {"sent": 1, "waiting": 1}),
+    )
+    real_sweep = killswitch._sweep_again
+
+    def book_hangs(*args, **kwargs):
+        broker.order_book_delay = 20.0
+        return real_sweep(*args, **kwargs)
+
+    monkeypatch.setattr(killswitch, "_sweep_again", book_hangs)
+    steps = _steps(killswitch.activate(OWNER, exit_all=True, phrase="STOP"))
+    assert steps["live_orders"]["detail"].get("stops_cancelled") == 1
+    _never_reassures(broker, steps)
+    assert steps["live_orders_again"]["words"] == words.ks_swept_again(
+        words.ks_orders_unread_after_cancels(1, 1, 0, 0)
+    )
+
+
+def test_h2g_with_the_book_unreadable_a_gtt_stop_is_kept_too(upstox, monkeypatch):
+    """The main X5 case with a single-leg GTT as the stop (how a carried NRML position keeps one
+    overnight): nothing is cancelled, the GTT included, and the step says so."""
+    import services.cancel_gtt_order_service as cancel_gtt
+    import services.gtt_orderbook_service as gtt_book
+
+    broker = upstox.broker
+    broker.order_book_delay = 20.0
+    gtts = [{"trigger_id": "GTT-STOP-1", "symbol": CE, "action": "SELL", "quantity": 65}]
+    monkeypatch.setattr(
+        gtt_book,
+        "get_gtt_orderbook_with_auth",
+        lambda *args, **kwargs: (True, {"status": "success", "data": list(gtts)}, 200),
+    )
+    cancelled_gtts = []
+
+    def cancel(trigger_id, *args, **kwargs):
+        cancelled_gtts.append(trigger_id)
+        gtts.clear()
+        return True, {"status": "success"}, 200
+
+    monkeypatch.setattr(cancel_gtt, "cancel_gtt_order_with_auth", cancel)
+    steps = _steps(killswitch.activate(OWNER, exit_all=True, phrase="STOP"))
+    assert broker.true_qty(CE) == 65 and cancelled_gtts == []
+    assert steps["live_gtts"]["words"] == words.KS_GTTS_KEPT_UNREAD
+    assert steps["live_exit_all"]["words"] == words.KS_NO_EXIT_ORDERS_UNREAD
+    assert "still stand" in steps["live_exit_all"]["words"]  # true here: nothing was cancelled
+
+
+def test_h2g_a_gtt_is_cancelled_when_the_book_was_read_and_counted_for_the_words(
+    upstox, monkeypatch
+):
+    """The book answers for the cancels and the GTT step runs; then Exit all's own reads fail:
+    the position left open is said to have had its stop cancelled, maybe (the GTT)."""
+    import services.cancel_gtt_order_service as cancel_gtt
+    import services.gtt_orderbook_service as gtt_book
+
+    broker = upstox.broker
+    gtts = [{"trigger_id": "GTT-STOP-1", "symbol": CE, "action": "SELL", "quantity": 65}]
+    monkeypatch.setattr(
+        gtt_book,
+        "get_gtt_orderbook_with_auth",
+        lambda *args, **kwargs: (True, {"status": "success", "data": list(gtts)}, 200),
+    )
+    monkeypatch.setattr(
+        cancel_gtt,
+        "cancel_gtt_order_with_auth",
+        lambda *args, **kwargs: (gtts.clear(), (True, {"status": "success"}, 200))[1],
+    )
+    reads = []
+    real_order_book = broker._order_book
+
+    def book(timeout=None):
+        reads.append(timeout)
+        broker.order_book_delay = 20.0 if len(reads) >= 4 else 0.0  # Exit all's reads fail
+        return real_order_book(timeout)
+
+    monkeypatch.setattr(broker, "_order_book", book)
+    monkeypatch.setattr(killswitch, "EXIT_ALL_AGAIN_AFTER_S", 0.0)
+    steps = _steps(killswitch.activate(OWNER, exit_all=True, phrase="STOP"))
+    assert gtts == [] and broker.true_qty(CE) == 65
+    said = steps["live_exit_all"]["words"]
+    assert said.endswith(words.ks_left_without_stops(0, 1)), said
+    assert "may have been cancelled" in said
+
+
+def test_h2n_a_stop_cancel_that_timed_out_is_not_called_nothing_cancelled(upstox, monkeypatch):
+    """Cancel all reads the book and sends the stop's cancel; Upstox cancels it but the answer
+    times out (not confirmed); the book then hangs. Anything that may have reached the broker
+    reads "not confirmed", never "nothing was cancelled"."""
+    from broker.upstox.api import order_api
+
+    broker = upstox.broker
+    broker.rest(CE, "SELL", 65)
+
+    def cancel_times_out(orderid, auth):
+        with broker.lock:
+            broker.working = [o for o in broker.working if o["id"] != orderid]  # it went
+        broker.order_book_delay = 20.0  # and the book hangs from here on
+        return {"status": "error", "message": "The read operation timed out",
+                "not_confirmed": True}, 500  # fmt: skip
+
+    monkeypatch.setattr(order_api, "cancel_order", cancel_times_out)
+    steps = _steps(killswitch.activate(OWNER, exit_all=True, phrase="STOP"))
+    first = steps["live_orders"]["words"]
+    assert first == words.ks_cancels_not_confirmed(0, 1), first
+    assert "nothing was cancelled" not in first and "could not be cancelled" not in first
+    _never_reassures(broker, steps)
+    assert "1 cancel is not confirmed and may have gone through" in steps["live_exit_all"]["words"]
+
+
+def test_the_kept_words_claim_no_stop_exists():
+    for said in (words.KS_ORDERS_KEPT_UNREAD, words.KS_NO_EXIT_ORDERS_UNREAD):
+        assert "their stop-loss orders" not in said and "the stop losses" not in said
+    assert "any stop-loss orders you placed still stand" in words.KS_NO_EXIT_ORDERS_UNREAD

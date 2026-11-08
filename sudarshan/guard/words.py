@@ -167,14 +167,19 @@ KS_ORDERS_NOT_CANCELLED_UNREAD = (
     "Open orders may still be working. Check Orders in the Upstox app."
 )
 KS_ORDERS_KEPT_UNREAD = (
-    "Upstox could not show its open orders, so nothing was cancelled: a cancel without them "
-    "would take the stop losses, and Exit all could not size an exit without them either. "
-    "Your orders stand as they were. Check Orders in the Upstox app."
+    "Upstox could not show its open orders, so no cancel was sent: a cancel without them would "
+    "take any stop-loss orders, and Exit all could not size an exit without them either. Your "
+    "orders stand as they were. Check Orders in the Upstox app."
 )
 KS_NO_EXIT_ORDERS_UNREAD = (
     "Exit all was not sent, because Upstox could not show its open orders: no exit could be "
-    "sized, and one still working could close a position twice. Your positions are open and "
-    "their stop-loss orders still work. Close them from the Upstox app."
+    "sized, and an order still working could close a position twice. No order was cancelled, so "
+    "any stop-loss orders you placed still stand. Close your positions from the Upstox app."
+)
+KS_GTTS_KEPT_UNREAD = (
+    "GTTs were not cancelled: Upstox could not show its open orders, so Exit all could not be "
+    "sized, and a GTT stop left standing still protects its position. Cancel them in the Upstox "
+    "app if you need to."
 )
 KS_GTTS_NOT_READ = (
     "The GTTs could not be read from Upstox, so none were cancelled. Check GTTs and cancel them "
@@ -322,6 +327,56 @@ def ks_orders_not_cancelled_unread(done: int | None, total: int | None, not_conf
     return KS_ORDERS_NOT_CANCELLED_UNREAD
 
 
+def _cancels_before(cancelled: int, stops: int, unsure: int, gtts: int) -> str:
+    """What the switch's earlier passes did, for the words of a later one: never nothing."""
+    parts = []
+    if cancelled:
+        said = f"{_many(cancelled, 'order was', 'orders were')} cancelled"
+        if stops:
+            said += f", {_many(stops, 'stop-loss order', 'stop-loss orders')} among them"
+        parts.append(said)
+    if unsure:
+        parts.append(
+            f"{_many(unsure, 'cancel is', 'cancels are')} not confirmed and may have gone through"
+        )
+    if gtts:
+        parts.append(f"{_many(gtts, 'GTT was', 'GTTs were')} cancelled")
+    return "; ".join(parts) if parts else "no order was cancelled"
+
+
+def ks_orders_unread_after_cancels(cancelled: int, stops: int, unsure: int, gtts: int) -> str:
+    """The order book could not be read on a later pass, after an earlier one cancelled, or may
+    have: no more is cancelled, and nothing is denied."""
+    return (
+        "Upstox could not show its open orders, so no more cancels were sent and Exit all could "
+        f"not be sized. Before that, {_cancels_before(cancelled, stops, unsure, gtts)}. A position "
+        "whose stop-loss order was cancelled is open with no stop. Close your positions from the "
+        "Upstox app."
+    )
+
+
+def ks_no_exit_orders_unread(cancelled: int, stops: int, unsure: int, gtts: int) -> str:
+    """Exit all not sent for an unreadable order book; what the cancel steps did goes first."""
+    if not (cancelled or unsure or gtts):
+        return KS_NO_EXIT_ORDERS_UNREAD
+    return (
+        "Exit all was not sent, because Upstox could not show its open orders: no exit could be "
+        "sized, and an order still working could close a position twice. Before that, "
+        f"{_cancels_before(cancelled, stops, unsure, gtts)}. A position whose stop-loss order was "
+        "cancelled is open with no stop. Close your positions from the Upstox app."
+    )
+
+
+def ks_cancels_not_confirmed(cancelled: int, unsure: int) -> str:
+    """Cancels sent whose answers did not come: they may have gone through, so they are never
+    called refused."""
+    lead = f"{_many(cancelled, 'open order', 'open orders')} cancelled; " if cancelled else ""
+    return (
+        f"{lead}{_many(unsure, 'cancel is', 'cancels are')} not confirmed: Upstox did not answer "
+        "in time, so the order may be cancelled or may still be working. Check Orders."
+    )
+
+
 def ks_orders_unchecked(cancelled: int) -> str:
     return (
         f"{_many(cancelled, 'open order', 'open orders')} cancelled, but the order book could "
@@ -365,17 +420,34 @@ def ks_exit_all(message: str, tried_again: bool = False) -> str:
     return f"{lead}: {_ended(message)}" if message.strip() else f"{lead} sent."
 
 
-def ks_left_without_stops(count: int) -> str:
-    """Exit all left ``count`` positions open after the switch cancelled their stop losses."""
-    if count == 1:
-        return (
-            "The position Exit all did not close is open with its stop-loss order cancelled. "
-            "Close it from the Upstox app."
+def ks_left_without_stops(known: int, maybe: int = 0) -> str:
+    """Exit all left positions open with nothing watching them: ``known`` had a stop-loss order
+    the switch cancelled; ``maybe`` may have had one (a cancel not confirmed, a cancel without
+    the book, a GTT cancelled, or orders the switch never saw). Never reassures."""
+    said = []
+    if known == 1:
+        said.append(
+            "The position Exit all did not close is open with its stop-loss order cancelled."
         )
-    return (
-        f"The {count} positions Exit all did not close are open with their stop-loss orders "
-        "cancelled. Close them from the Upstox app."
-    )
+    elif known:
+        said.append(
+            f"The {known} positions Exit all did not close are open with their stop-loss orders "
+            "cancelled."
+        )
+    if maybe == 1:
+        said.append(
+            ("Another position" if known else "The position")
+            + " Exit all did not close is open, and any stop-loss order it had may have been "
+            "cancelled."
+        )
+    elif maybe:
+        said.append(
+            (f"{maybe} more positions" if known else f"The {maybe} positions")
+            + " Exit all did not close are open, and any stop-loss orders they had may have been "
+            "cancelled."
+        )
+    them = "it" if known + maybe == 1 else "them"
+    return " ".join(said) + f" Close {them} from the Upstox app."
 
 
 def ks_swept_again(said: str) -> str:
@@ -937,6 +1009,7 @@ FIXED = (
     KS_ORDERS_NOT_CANCELLED_UNREAD,
     KS_ORDERS_KEPT_UNREAD,
     KS_NO_EXIT_ORDERS_UNREAD,
+    KS_GTTS_KEPT_UNREAD,
     KS_GTTS_NOT_READ,
     KS_EXIT_ALL_BUSY,
     KS_SANDBOX_GTTS_NOT_READ,
