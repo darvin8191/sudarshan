@@ -82,7 +82,7 @@ class Prices:
         A fund with a NAV the owner entered by hand (design 4.5) is priced by it here."""
         if asset["kind"] not in ("manual", "mf"):
             return dict(NO_PRICE)
-        return manual_point(tx, asset, today, after_day=None) or dict(NO_PRICE)
+        return manual_point(tx, asset, today, from_day=None) or dict(NO_PRICE)
 
     def closes(self, tx: Tx, assets: list[Mapping[str, Any]]) -> dict[int, dict[str, Any]]:
         """Each asset's closing prices as ``history.Quotes.of`` reads them."""
@@ -120,13 +120,14 @@ class Prices:
 
 
 def manual_point(
-    tx: Tx, asset: Mapping[str, Any], today: int, after_day: int | None
+    tx: Tx, asset: Mapping[str, Any], today: int, from_day: int | None
 ) -> dict[str, Any] | None:
     """The owner's newest own value of an asset on or before ``today`` as a ``PriceInfo``, or None;
-    with ``after_day``, only a value newer than that day (the day of the fund's published NAV)."""
+    with ``from_day``, only a value dated that day or later (the day of the fund's published NAV:
+    the owner's own value wins on a day, here as in the history of closing prices)."""
     points = [p for p in tx.rows("price_point", "day", asset_id=asset["id"]) if p["day"] <= today]
-    if after_day is not None:
-        points = [p for p in points if p["day"] > after_day]
+    if from_day is not None:
+        points = [p for p in points if p["day"] >= from_day]
     if not points:
         return None
     last = points[-1]

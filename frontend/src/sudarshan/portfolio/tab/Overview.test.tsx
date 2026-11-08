@@ -152,6 +152,30 @@ describe('the Overview', () => {
     expect(screen.getByLabelText('Value (₹ per g)')).toBeTruthy()
   })
 
+  it('opens the NAV sheet from an old NAV, not the value sheet, and has no notes on a past day', async () => {
+    const data = view([row(1, 'Alpha', { price: 1_100_000 })])
+    const notes = [
+      {
+        asset_id: 4,
+        name: 'Some Fund',
+        kind: 'nav' as const,
+        words: 'NAV of 21 Oct; AMFI has not published a newer one.',
+        price_day: 20261021,
+      },
+    ]
+    const layout = { ...data.layout, spec: { ...data.layout.spec, widgets: ['summary', 'notes'] } }
+    const { unmount } = show({ ...data, layout, notes })
+    const region = await screen.findByRole('region', { name: 'Notes on prices' })
+    await userEvent.click(within(region).getByRole('button', { name: 'Update Some Fund' }))
+    expect(await screen.findByText('Enter the NAV')).toBeTruthy()
+    expect(screen.getByLabelText('NAV (₹ per unit)')).toBeTruthy()
+    expect(screen.queryByText('Update the value')).toBeNull()
+    unmount()
+    show({ ...data, layout, notes, as_of: 20260912 })
+    await screen.findByRole('region', { name: 'Summary' })
+    expect(screen.queryByRole('region', { name: 'Notes on prices' })).toBeNull()
+  })
+
   it('says every value is current when the Notes widget is on and nothing is old', async () => {
     const data = view([row(1, 'Alpha', { price: 1_100_000 })])
     show({

@@ -273,6 +273,23 @@ def test_a_nav_entered_by_hand_stands_while_it_is_newer_than_amfis(tmp_path, fee
     assert again["prev_close_u"] == 125_0000
 
 
+def test_a_typed_nav_and_amfis_on_the_same_day_agree_now_and_in_history(tmp_path, feed):
+    """One rule: the owner's own value wins on a day. On the day AMFI also has a NAV, now() and
+    the history (closes, as of a day, the series) both give the typed one; AMFI's earlier NAV is
+    the previous close."""
+    rig = Rig(tmp_path, feed)
+    fund = rig.book.asset_create(OWNER, "f-1", "mf", now=NOW, amfi_code="120503", name="Fund")
+    rig.eod(fund, 20261022, 124_0000, NOW)
+    rig.eod(fund, 20261023, 125_0000, NOW)
+    rig.store.write(OWNER, lambda tx: tx.set_price_point(fund["id"], 20261023, 126_0000, NOW))
+    got = rig.now(fund)
+    assert (got["price_u"], got["day"], got["basis"]) == (126_0000, 20261023, "manual")
+    assert got["prev_close_u"] == 124_0000
+    row = rig.store.read(OWNER, lambda tx: tx.get("asset", fund["id"]))
+    history = rig.store.read(OWNER, lambda tx: rig.pb.closes(tx, [row]))[fund["id"]]["prices"]
+    assert dict(history)[20261023] == got["price_u"]
+
+
 def test_a_read_does_not_wait_on_a_feed_that_never_answers(tmp_path):
     """A feed that takes the connection and says nothing costs a read about a second, not the
     five seconds of an ordinary call (the bridge gives up at three)."""
