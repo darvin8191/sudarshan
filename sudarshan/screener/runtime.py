@@ -55,7 +55,7 @@ from .bars import Bar, Bars, Sealed
 from .engine import Context, Subject
 from .runs import Member
 from .store import OWNER, StoreError, Tx
-from .types import DAY, MINUTE_TFS, NEEDS_HISTORY, WEEK, Plan, Series, Why
+from .types import DAY, MINUTE_TFS, NEEDS_HISTORY, OVER_LIMIT, WEEK, Plan, Series, Why
 
 log = logging.getLogger("sudarshan.screener")
 
@@ -154,6 +154,8 @@ class LiveSource:
         self.built_on: str | None = None
         #: Option windows waiting for their index's first price, by universe name.
         self._waiting: dict[str, Mapping[str, Any]] = {}
+        #: Keys the screens follow past the key limit (``max_keys``): not claimed, not judged.
+        self._over: frozenset[str] = frozenset()
         self._index_keys: dict[str, str] = {}
         self._master_asked = 0
         self.counts = {"frames": 0, "trades": 0, "sealed": 0, "late": 0}
@@ -163,6 +165,8 @@ class LiveSource:
         return self._universes.get(_uni_key(universe_spec), [])
 
     def subject(self, member: Member, plan: Plan, boundary: int) -> Subject | Why | None:
+        if member.key in self._over:  # cut by the key limit: never "no price yet" (LOW-6)
+            return Why(OVER_LIMIT, (self.settings.max_keys,))
         grid = self.market.sessions.get(member.segment)
         for tf, need in plan.need.items():  # more than today alone can hold (MEDIUM-6)
             most = _day_holds(tf, grid)
@@ -535,6 +539,7 @@ class LiveSource:
                 if member.key not in seen:
                     seen.add(member.key)
                     keys.append(member.key)
+        self._over = frozenset(keys[self.settings.max_keys :])
         if len(keys) > self.settings.max_keys:
             log.warning(
                 "the screens follow %d keys; only the first %d are claimed (the limit)",

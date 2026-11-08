@@ -145,6 +145,12 @@ def _reason(why: T.Why) -> str:
             return f"{label} for the day is read from today's candles only"
         if code == T.NO_FEED:
             return "no price from Upstox yet"
+        if code == T.OVER_LIMIT:
+            (limit,) = detail
+            return (
+                f"past the {_count(limit, 'instrument', 'instruments')} the screener can follow "
+                "tick by tick"
+            )
         if code == T.NEEDS_HISTORY:
             need, tf, most = detail
             span = _TF_WORDS.get(str(tf)) or f"{quantity(int(tf))} minutes"

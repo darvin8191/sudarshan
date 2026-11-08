@@ -153,7 +153,8 @@ def test_frames_become_sealed_bars_a_live_subject_and_a_run(world):
     )
     assert preview["not_checked"] == {
         "count": 1,
-        "reasons": ["Not checked: no price from Upstox yet"],
+        # SBIN is past the key limit (1 here): it says so, never "no price from Upstox yet" (LOW-6)
+        "reasons": ["Not checked: past the 1 instrument the screener can follow tick by tick"],
     }
     early = asyncio.run(source.preview(plan, spec.check(SPEC), ms(DAY, "09:20")))
     assert early["count"] == 0 and early["label"].startswith("No candle has closed")

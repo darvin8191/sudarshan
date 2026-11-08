@@ -118,6 +118,7 @@ OTHER_DAY = "other_day"  # (name,): only today's candles can be read for this va
 NO_FEED = "no_feed"  # (): no price from the feed yet
 #: (need, tf, most): more candles of ``tf`` than today alone can give, before the history download
 NEEDS_HISTORY = "needs_history"
+OVER_LIMIT = "over_limit"  # (limit,): past the instruments the screener may follow tick by tick
 
 
 @dataclass(frozen=True, slots=True)
