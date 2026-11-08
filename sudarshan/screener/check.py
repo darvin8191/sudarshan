@@ -14,7 +14,11 @@ recordings.
 ``--compare`` checks each run against the live ``run`` rows of the same day: a difference on a
 run the service marked repaired or late is listed as explained; any other difference, or a run
 the service made that the replay did not (or the other way round), exits 1. A clean check prints
-"Replay check: N runs compared, all match" and exits 0.
+"Replay check: N runs compared, all match" and exits 0. With ``--from-db`` each screen starts the
+day with the members it carried from earlier days (a member touched today is taken as matching
+at the start), so they are not counted as the day's entries.
+
+Before the screener was ever switched on there is no screener.db: use ``--spec`` and ``--keys``.
 
 What a recording cannot hold is left out, as the service would in replay (``replay=True``): the
 exchange's status and the feed's health are not recorded, so the feed counts as healthy within
@@ -25,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import itertools
 import json
 import sys
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
@@ -35,7 +40,7 @@ from typing import Any
 
 from sudarshan.alerts.market.clock import Feed, Market
 from sudarshan.alerts.market.grain import paise
-from sudarshan.alerts.market.sessions import day_key, previous_trading_day, sessions_of
+from sudarshan.alerts.market.sessions import day_key, epoch_ms, previous_trading_day, sessions_of
 from sudarshan.autologin.schedule import (
     EXTRA_TRADING_DAYS_FILE,
     HOLIDAYS_FILE,
@@ -163,8 +168,11 @@ async def replay_day(
     calendar: TradingCalendar,
     *,
     day: date | None = None,
+    members: Mapping[int, Mapping[str, mem.Row]] | None = None,
 ) -> list[RunLine]:
-    """The pipeline over one day's ticks, judged at each tick's arrival."""
+    """The pipeline over one day's ticks, judged at each tick's arrival. ``members`` are the
+    screens' members at the day's start (``--from-db``): carried from earlier days, they are not
+    entries of this day."""
     bars = Bars()
     ticks = iter(ticks)
     first = next(ticks, None)
@@ -176,7 +184,9 @@ async def replay_day(
     source = ReplaySource(bars, market, universes)
     plans = {row["id"]: spec.compile_plan(row["spec"]) for row in screens}
     sched = [sched_screen(row) for row in screens]
-    rows: dict[int, dict[str, mem.Row]] = {row["id"]: {} for row in screens}
+    rows: dict[int, dict[str, mem.Row]] = {
+        row["id"]: dict((members or {}).get(row["id"], {})) for row in screens
+    }
     told: dict[int, dict[str, al.Told]] = {row["id"]: {} for row in screens}
     paused: dict[int, bool] = {row["id"]: False for row in screens}
     recorded: set[str] = set()
@@ -395,15 +405,30 @@ def main(argv: Sequence[str] | None = None, say: Callable[[str], None] = _say) -
                 + " are not in screener.db; give --keys or run the service once."
             )
             return CANNOT
+        ticks = read_recording(args.recording)
+        first = next(ticks, None)
+        if first is None:
+            say(f"The recording {args.recording.name} holds no tick.")
+            return CANNOT
+        day = datetime.fromtimestamp(first[1] / 1000, IST).date()
+        start = epoch_ms(day, 0)
+        carried = _members_from_db(engine, screens, start) if engine is not None else {}
         lines = asyncio.run(
-            replay_day(read_recording(args.recording), screens, universes, calendar)
+            replay_day(
+                itertools.chain([first], ticks),
+                screens,
+                universes,
+                calendar,
+                day=day,
+                members=carried,
+            )  # fmt: skip
         )
         for line in lines:
             say(line_words(line))
         say(f"{len(lines)} runs replayed from {args.recording.name}")
         if not args.compare:
             return CLEAN
-        live = _runs_from_db(engine, screens)
+        live = _runs_from_db(engine, screens, day_key(day))
         explained, unexplained = compare(lines, live)
         for text in explained:
             say("explained: " + text)
@@ -464,7 +489,38 @@ def _universes_from_db(engine, screens: Sequence[Mapping[str, Any]]) -> dict[str
     return out
 
 
-def _runs_from_db(engine, screens: Sequence[Mapping[str, Any]]) -> list[dict]:
+def _members_from_db(
+    engine, screens: Sequence[Mapping[str, Any]], start: int
+) -> dict[int, dict[str, mem.Row]]:
+    """Each screen's members at the day's start (``start``, epoch ms), from its membership rows:
+    a row nothing touched today is as it was; one a run or the owner touched today is taken as
+    matching at the start (its misses before today are not kept), or as dismissed. A row that
+    entered today, or left before it, is no member at the start (release review MEDIUM-11)."""
+    from sqlalchemy import text
+
+    ids = {row["id"] for row in screens}
+    out: dict[int, dict[str, mem.Row]] = {sid: {} for sid in ids}
+    with engine.connect() as conn:
+        found = conn.execute(
+            text("SELECT * FROM membership WHERE principal = :p ORDER BY id"), {"p": OWNER}
+        ).mappings()
+        for row in found:
+            if row["screen_id"] not in ids or row["first_seen_at"] >= start:
+                continue
+            if row["status"] == mem.EXITED and (row["exited_at"] or 0) < start:
+                continue
+            fields = {n: row[n] for n in mem.Row.__dataclass_fields__ if n in row.keys()}
+            for flag in ("pinned", "added_by_screener", "in_list"):
+                fields[flag] = bool(fields.get(flag))
+            if row["updated_at"] >= start:  # touched today: how it stood this morning is not kept
+                status = mem.DISMISSED if row["status"] == mem.DISMISSED else mem.ACTIVE
+                fields.update(status=status, misses=0, missing_session=0, exited_at=None)
+            out[row["screen_id"]][row["key"]] = mem.Row(**fields)
+    return out
+
+
+def _runs_from_db(engine, screens: Sequence[Mapping[str, Any]], session: int) -> list[dict]:
+    """The live runs of the replayed day only: earlier days' runs are no difference."""
     from sqlalchemy import text
 
     ids = [row["id"] for row in screens]
@@ -472,9 +528,10 @@ def _runs_from_db(engine, screens: Sequence[Mapping[str, Any]]) -> list[dict]:
         found = (
             conn.execute(
                 text(
-                    "SELECT run_key, matched, entered, exited, marks, status, screen_id FROM run WHERE principal = :p"
+                    "SELECT run_key, matched, entered, exited, marks, status, screen_id FROM run "
+                    "WHERE principal = :p AND session = :s"
                 ),
-                {"p": OWNER},
+                {"p": OWNER, "s": session},
             )
             .mappings()
             .all()

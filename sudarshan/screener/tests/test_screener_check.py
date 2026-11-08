@@ -175,3 +175,95 @@ def test_compare_is_clean_against_the_live_runs_and_names_what_differs(tmp_path)
     assert any(line.startswith("explained: ") and "was late" in line for line in said)
     assert said[-1] == "Replay check: 4 runs compared, all match (1 explained)"
     assert HEALTH  # the recording carries no health frames: the replay counts the feed as healthy
+
+
+def test_compare_on_a_later_day_starts_with_the_carried_members_and_reads_that_day_only(tmp_path):
+    """Release review MEDIUM-11: from day 2 the replay started every screen with no member, so a
+    member carried from earlier days read as entered, and every earlier day's run read as one the
+    replay did not make: DIFFERENT, exit 1, on a day the service got right."""
+    from sudarshan.screener import membership as mem
+
+    recording = tmp_path / "2026-10-28.jsonl.gz"
+    ticks = write_recording(recording)
+    db = tmp_path / "screener.db"
+    store = ScreenerStore(db)
+    yesterday = ms("2026-10-27", "15:30")
+    try:
+        stored = spec.check({**SPEC, "target": None})
+        screen = store.write(
+            OWNER, lambda tx: tx.screen_insert(stored["name"], stored, "active", yesterday)
+        )
+        members = [Member(A, "AAA", "NSE", "NSE_EQ"), Member(B, "BBB", "NSE", "NSE_EQ")]
+        store.write(OWNER, lambda tx: tx.universe_replace("fno_stocks", "fno_stocks", [
+            {"key": m.key, "symbol": m.symbol, "exchange": m.exchange, "segment": m.segment, "cas": False}
+            for m in members
+        ], ms(DAY, "09:00")))  # fmt: skip
+        carried = mem.Row(A, "AAA", "NSE", mem.ACTIVE, first_seen_at=yesterday - 3_600_000,
+                          last_seen_at=yesterday, hits=3)  # fmt: skip
+
+        def earlier_day(tx):
+            tx.membership_put(
+                screen["id"],
+                0,
+                {n: getattr(carried, n) for n in mem.Row.__dataclass_fields__},
+                yesterday,
+            )
+            run = tx.run_insert({
+                "screen_id": screen["id"], "screen_version": 1, "run_key": f"{screen['id']}:v1:20261027:15:24",
+                "session": 20261027, "candle_start": yesterday - 900_000, "candle_end": yesterday,
+                "ran_at": yesterday + 5000, "status": "done", "engine_version": 1,
+            })  # fmt: skip
+            tx.run_finish(run["id"], {}, matched=1)
+
+        store.write(OWNER, earlier_day)
+        made = drive_live(store, ticks, members)
+        assert made.made == 4
+        live = store.read(OWNER, lambda tx: tx.runs_session(20261028))
+        assert sum(r["entered"] for r in live) == 0, "the carried member entered in the live run"
+    finally:
+        store.close()
+        store_module.stop()
+
+    args = [str(recording), "--from-db", "--db", str(db), "--compare",
+            "--holidays", str(tmp_path / "none"), "--extra-days", str(tmp_path / "none2")]  # fmt: skip
+    said: list[str] = []
+    code = check.main(args, say=said.append)
+    assert code == check.CLEAN, said
+    assert said[-1] == "Replay check: 4 runs compared, all match"
+
+
+def drive_live(store, ticks, members):
+    """The real run loop over the recording's ticks, as the service would have run it."""
+    from datetime import date
+
+    bars = Bars()
+    calendar = Calendar()
+    market = check.market_for(date(2026, 10, 28), calendar, frozenset(), ticks[0][1])
+    source = check.ReplaySource(bars, market, {"fno_stocks": members})
+    clock = {"now": ticks[0][1]}
+    made = runner.Runner(store, source, lambda: clock["now"], calendar)
+    tick_clock = ticks[0][1] - ticks[0][1] % 1000
+
+    def at(moment):
+        return check.Market(*market[:4], check.Feed("replay", True, moment), (), True, frozenset())
+
+    async def drive():
+        nonlocal tick_clock
+        for key, when, frame in ticks:
+            while tick_clock <= when:
+                clock["now"] = tick_clock
+                source.market = at(tick_clock)
+                bars.on_clock(tick_clock, source.market)
+                await made.tick(tick_clock)
+                tick_clock += 1000
+            source.market = at(when)
+            source.last[key] = frame
+            bars.on_tick(frame, when, source.market)
+        for _ in range(6):
+            clock["now"] = tick_clock
+            bars.on_clock(tick_clock, source.market)
+            await made.tick(tick_clock)
+            tick_clock += 1000
+
+    asyncio.run(drive())
+    return made
