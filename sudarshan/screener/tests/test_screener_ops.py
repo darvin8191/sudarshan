@@ -285,3 +285,59 @@ def test_results_runs_run_since_membership_and_pins_read_a_recorded_run(tmp_path
             await asyncio.wait_for(task, 5)
 
     asyncio.run(scenario())
+
+
+def test_resume_and_edit_keep_to_the_active_screen_limit(tmp_path):
+    """Create refused a thirteenth screen checking during the day; resume and an edit to a
+    during-the-day run did not (release review MEDIUM-8)."""
+    svc = Service(
+        settings_for(
+            1, SUDARSHAN_SCREENER_STATE_DIR=str(tmp_path), SUDARSHAN_SCREENER_MAX_ACTIVE="2"
+        ),
+        FERNET,
+        jobs={},
+    )
+    svc.store = ScreenerStore(tmp_path / "screener.db")
+    svc.clock = lambda: NOW
+
+    def call(op, **args):
+        return asyncio.run(REGISTRY[op](svc, args))
+
+    try:
+        made = [call("create", spec={**SPEC, "name": f"S{n}"}, status="paused") for n in range(3)]
+        answers = []
+        for row in made:
+            try:
+                answers.append(
+                    call("update", id=row["id"], version=row["version"], action="resume")["status"]
+                )
+            except Exception as exc:  # noqa: BLE001
+                answers.append(getattr(exc, "code", type(exc).__name__))
+        active = [
+            r for r in svc.store.read(OWNER, lambda tx: tx.screens()) if r["status"] == "active"
+        ]
+        assert len(active) <= 2, f"resume does not keep to the limit: {answers}"
+        assert answers == ["active", "active", "refused"]
+        # an after-close screen may run beside them; turning it into a during-the-day one may not
+        day_close = {"field": "close", "tf": "D"}
+        late = call("create", spec={
+            **SPEC, "name": "Late", "run": {"on": "after_close"},
+            "where": {"id": "c1", "left": day_close, "op": "gt", "right": {"num": "100"}},
+            "rank": {"by": day_close, "order": "desc"},
+        })  # fmt: skip
+        try:
+            call("update", id=late["id"], version=late["version"], action="edit", spec=SPEC)
+        except Exception as exc:  # noqa: BLE001
+            assert getattr(exc, "code", None) == "refused"
+        else:
+            raise AssertionError("an edit to a during-the-day run passed the limit")
+        # an edit of a screen already counted is not refused
+        first = svc.store.read(OWNER, lambda tx: tx.screen(made[0]["id"]))
+        edited = call(
+            "update", id=first["id"], version=first["version"], action="edit",
+            spec={**SPEC, "name": "Renamed"},
+        )  # fmt: skip
+        assert edited["name"] == "Renamed"
+    finally:
+        svc.store.close()
+        store_module.stop()

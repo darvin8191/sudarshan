@@ -392,6 +392,23 @@ def _summary(ctx, tx: Tx, row: Mapping[str, Any], now: int) -> dict[str, Any]:
     return screen_row(tx, row, now, _session_key(now), next_at)
 
 
+def _within_limit(ctx, tx: Tx, screen_id: int | None) -> None:
+    """Refuse a screen that would make more than the limit check during the day at once
+    (SUDARSHAN_SCREENER_MAX_ACTIVE), for a create, a resume and an edit alike (MEDIUM-8)."""
+    busy = sum(
+        1
+        for r in tx.screens()
+        if r["id"] != screen_id and r["status"] == "active" and r["spec"]["run"]["on"] == "close"
+    )
+    if busy >= ctx.settings.max_active:
+        raise ApiError.of(
+            "refused",
+            f"Up to {ctx.settings.max_active} screens can check during the day at once. "
+            "Pause one, or make this one run after the close.",
+            "run",
+        )
+
+
 @op("create")
 async def create(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
     stored, _plan = _spec(args.get("spec"))
@@ -412,18 +429,7 @@ async def create(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
             if have is not None:
                 return _summary(ctx, tx, have, now)
         if status == "active" and stored["run"]["on"] == "close":
-            busy = sum(
-                1
-                for r in tx.screens()
-                if r["status"] == "active" and r["spec"]["run"]["on"] == "close"
-            )
-            if busy >= ctx.settings.max_active:
-                raise ApiError.of(
-                    "refused",
-                    f"Up to {ctx.settings.max_active} screens can check during the day at once. "
-                    "Pause one, or make this one run after the close.",
-                    "run",
-                )
+            _within_limit(ctx, tx, None)
         return _summary(
             ctx, tx, tx.screen_insert(stored["name"], stored, status, now, request_id), now
         )
@@ -445,6 +451,16 @@ async def update(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
     store = _store(ctx)
 
     def change(tx: Tx):
+        before = tx.screen(screen_id)
+        if before is not None and before["version"] == version:
+            status = "active" if action == "resume" else before["status"]
+            run_on = (stored or before["spec"])["run"]["on"]
+            counted = before["status"] == "active" and before["spec"]["run"]["on"] == "close"
+            if action in ("edit", "resume") and status == "active" and run_on == "close":
+                if (
+                    not counted
+                ):  # it would start checking during the day: the same limit as a create
+                    _within_limit(ctx, tx, screen_id)
         if action == "edit":
             row = tx.screen_change(
                 screen_id, version, {"spec": stored, "name": stored["name"]}, now
