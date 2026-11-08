@@ -172,13 +172,15 @@ in brand. Icon "Mor": tile #0E5A73, ring #E3A21A, glyph #FFFFFF. Numbers via
     cannot be worked out (a filled quantity Upstox leaves null on an order that may have filled,
     a complete one say, is unknown, not 0), and a CNC net sale is a sale from holdings, not a
     position, whether Upstox lists it as a row or not (an F&O NRML short is a position: Upstox
-    writes D for both).
+    writes D for both); with the order book unread, a listed row's own sign says it, and it is
+    never named as a position to close.
     An unlisted product of an instrument that has a row in another product is named in the
     answer and not sent: a conversion in Upstox's app whose new row is not shown yet cannot be
     told from a fresh position, and when that cannot be worked out nothing is sent. The hold of
     an exit for a row at 0 is asked before the row is passed over, so a reversal whose rest still
     works is said, not squared off; and when the order book was not read and no listed row shows
-    a quantity, Exit all says the book was not checked (as for an empty book), never success.
+    a position's quantity (a sale from holdings is not one), Exit all says the book was not
+    checked (as for an empty book), never success.
     Anything that may have reached the broker reads "not confirmed", never a refusal or raw error
     text; Upstox's own refusal text is shown without its error code. A stranded hold costs a
     retry; a released one can reverse a position. The scalping terminal's closes (Close, Close

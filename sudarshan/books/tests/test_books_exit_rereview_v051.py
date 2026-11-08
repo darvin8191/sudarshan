@@ -579,3 +579,92 @@ def test_exit_all_never_says_nothing_open_over_an_unlisted_fill_it_cannot_count(
     assert "BANKNIFTY 57500 PE was traded today" in said and "Upstox app" in said
     named = [p for p in body["positions"] if p["symbol"] == Y]
     assert named and named[0]["outcome"] == "not_sent"
+
+
+# -- LOW-E: a listed sale from holdings with the order book unread ---------------------------------
+
+
+RELIANCE_TOKEN = "NSE_EQ|INE002A01018"
+
+
+@pytest.fixture
+def reliance(monkeypatch):
+    """RELIANCE as an equity delivery contract of the simulated Upstox's symbol master."""
+    from books_upstox_world import BY_TOKEN
+    from books_upstox_world import INSTRUMENTS as world_instruments
+
+    monkeypatch.setitem(world_instruments, "RELIANCE", (RELIANCE_TOKEN, "NSE", "D", "CNC"))
+    monkeypatch.setitem(BY_TOKEN, RELIANCE_TOKEN, "RELIANCE")
+
+
+def _row(token, exchange, name, product, quantity, overnight, bought, sold):
+    return {"instrument_token": token, "exchange": exchange, "tradingsymbol": name,
+            "product": product, "quantity": quantity, "overnight_quantity": overnight,
+            "day_buy_quantity": bought, "day_sell_quantity": sold,
+            "average_price": 100.0, "last_price": 101.0}  # fmt: skip
+
+
+def test_with_the_order_book_unread_a_sale_from_holdings_is_not_told_to_be_closed(
+    monkeypatch, reliance
+):
+    """The re-review's probe: 10 RELIANCE sold from holdings today (a D row at -10) and the order
+    book did not answer. The row's own sign says it is a sale from holdings. On e3e74bb Exit all
+    named it "...sent no exit. Close it from the Upstox app": buying back shares sold on purpose.
+    Nothing else is listed, so the answer is that the order list was not checked, never success."""
+    positions = [_row(RELIANCE_TOKEN, "NSE", "RELIANCE", "D", -10, 0, 0, 10)]
+    broker = RawBroker(positions, [])
+    broker.orders_down = True
+    world = install(monkeypatch, broker)
+    code, body = world.app_exit_all()
+    assert broker.products == [] and ("BUY", "D", 10) not in broker.products
+    assert "RELIANCE" not in str(body.get("message")), (code, body)
+    assert code == 424 and body["status"] == "error"
+    assert "position opened in the last minute may not show yet" in body["message"]
+
+
+def test_with_the_order_book_unread_a_sale_from_holdings_beside_a_position_is_left_unnamed(
+    monkeypatch, reliance
+):
+    """The same sale beside a BANKNIFTY PE short: the short is left out as not sized (the order
+    list did not come), the sale is not named at all (on e3e74bb both were named)."""
+    positions = [
+        _row(RELIANCE_TOKEN, "NSE", "RELIANCE", "D", -10, 0, 0, 10),
+        _row(TOKENS[Y], "NFO", Y, "D", -30, -30, 0, 0),
+    ]
+    broker = RawBroker(positions, [])
+    broker.orders_down = True
+    world = install(monkeypatch, broker)
+    code, body = world.app_exit_all()
+    assert broker.products == []
+    assert code != 200 and body["status"] == "error"
+    assert "RELIANCE" not in body["message"]
+    assert "Upstox did not send your orders in time" in body["message"]
+    assert "BANKNIFTY 57500 PE" in body["message"]
+
+
+def test_control_with_the_order_book_unread_an_fno_nrml_short_is_still_named(monkeypatch):
+    """Control: Upstox writes D for an F&O NRML short too; it is a position, and with the order
+    book unread it is left out as not sized, with its sentence, as before."""
+    positions = [_row(TOKENS[Y], "NFO", Y, "D", -30, -30, 0, 0)]
+    broker = RawBroker(positions, [])
+    broker.orders_down = True
+    world = install(monkeypatch, broker)
+    code, body = world.app_exit_all()
+    assert broker.products == [] and code != 200
+    assert "Upstox did not send your orders in time" in body["message"]
+    assert "BANKNIFTY 57500 PE" in body["message"]
+
+
+def test_control_with_the_order_book_unread_a_cnc_purchase_is_still_named(monkeypatch, reliance):
+    """Control: a CNC net purchase today is a position; with the order book unread it is named as
+    not sized, as before."""
+    positions = [_row(RELIANCE_TOKEN, "NSE", "RELIANCE", "D", 10, 0, 10, 0)]
+    broker = RawBroker(positions, [])
+    broker.orders_down = True
+    world = install(monkeypatch, broker)
+    code, body = world.app_exit_all()
+    assert broker.products == [] and code != 200
+    assert (
+        "RELIANCE" in body["message"]
+        and "Upstox did not send your orders in time" in body["message"]
+    )

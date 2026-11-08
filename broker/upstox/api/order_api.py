@@ -936,6 +936,14 @@ def _shown(value):
         return 0
 
 
+def _sale_from_holdings(row):
+    """SUDARSHAN M6.9 (L1, LOW-E): a positions row Upstox shows as a CNC net sale, by its own sign:
+    a sale from holdings, not a position. Only an equity delivery row (NSE, BSE) reads as CNC;
+    Upstox writes D for an F&O NRML short too, which is a position."""
+    product = reverse_map_product_type(row.get("exchange"), row.get("product"))
+    return product == "CNC" and _shown(row.get("quantity")) < 0
+
+
 def _working_exits(rows):
     """SUDARSHAN M6.9: the orders still working at Upstox, by what they would close.
 
@@ -1206,12 +1214,15 @@ def close_all_positions(current_api_key, auth):
         # SUDARSHAN M6.9: the order book, read once and after the positions, tells what each
         # position really holds (sudarshan/books/fills.py) and which orders are still working.
         orders = _read_order_rows(auth, exit_guard.EXIT_ALL_ORDERS_READ_S)
-        if orders is None and not any(_shown(row.get("quantity")) for row in listed_rows):
+        if orders is None and not any(
+            _shown(row.get("quantity")) and not _sale_from_holdings(row) for row in listed_rows
+        ):
             # SUDARSHAN M6.9 (Y3, R2): a book that shows nothing open (empty, or only closed
-            # positions at 0) may be one that has not caught up with a position opened or
-            # re-entered a moment ago, and only the order book could say. With it unread, every
-            # row would read as nothing held and Exit all would answer success over a position
-            # it never saw: the one answer a trader must never get.
+            # positions at 0, or sales from holdings, which are not positions) may be one that has
+            # not caught up with a position opened or re-entered a moment ago, and only the order
+            # book could say. With it unread, every row would read as nothing held and Exit all
+            # would answer success over a position it never saw: the one answer a trader must
+            # never get.
             return {"status": "error", "message": _CLOSE_ALL_EMPTY_NOT_CHECKED}, 424
         working, _read = _working_exits(orders)
         statuses = _order_statuses(orders)
@@ -1267,11 +1278,12 @@ def close_all_positions(current_api_key, auth):
                 continue
 
             held = exit_guard.position_of(position["exchange"], symbol, product)
-            if product == "CNC" and held_now is not None and held_now < 0:
+            if product == "CNC" and (shown if held_now is None else held_now) < 0:
                 # SUDARSHAN M6.9 (L1): a CNC net sale is a sale from holdings, not a position
                 # to buy back, as the unlisted path already has it. Only an equity delivery row
                 # (NSE, BSE) reads as CNC: Upstox writes D for NRML too, and an F&O NRML short
-                # is closed as every position is.
+                # is closed as every position is. With the order book unread the row's own sign
+                # says it (LOW-E): never told to be closed from the Upstox app.
                 logger.debug(f"Exit all: {symbol} is a sale from holdings, not a position")
                 continue
             # SUDARSHAN M6.9: a busy position is not sent, and neither is any once time is up.
