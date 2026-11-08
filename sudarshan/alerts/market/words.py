@@ -431,3 +431,95 @@ NO_PRICES = "No prices from Upstox for this instrument yet"
 def quote_waiting(source: str) -> str:
     """A bid or ask alert whose quote has not come yet (review A7.i)."""
     return f"Waiting for the first {source} from the price feed"
+
+
+# ---- the screener's digests (M9.18, screener design 4.4, SV10) ----------------------------------------
+
+SCREENER_NAME_MAX = 40
+SCREENER_NAMED_MAX = 5
+SCREENER_TITLE = "Screener"
+SCREENER_MORE = "the Screener page has them"
+
+
+def _pct(change: object) -> str:
+    """'+1.20%' from the digest's Decimal string ('1.2', '-0.8'); '' when unknown."""
+    value = to_decimal(change) if isinstance(change, str) else None
+    if value is None:
+        return ""
+    shown = value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return f"{'+' if shown > 0 else ''}{shown}%"
+
+
+def _screener_instrument(item: dict) -> str:
+    """'RELIANCE ₹1,428.25 (+1.20%)', or just the name when no price came with it."""
+    name = clean(item.get("symbol") or "", SCREENER_NAME_MAX)
+    ltp = item.get("ltp")
+    if not isinstance(ltp, int) or ltp <= 0:
+        return name
+    key = str(item.get("key") or "")
+    sign = "" if key.partition("|")[0] in INDEX_SEGMENTS else "₹"
+    text = f"{name} {_number(rupees(ltp), sign)}"
+    pct = _pct(item.get("change"))
+    return f"{text} ({pct})" if pct else text
+
+
+def _screener_side(items: list, more: int, verb: str) -> str:
+    named = [
+        _screener_instrument(item) for item in items[:SCREENER_NAMED_MAX] if isinstance(item, dict)
+    ]
+    left = more + max(0, len(items) - SCREENER_NAMED_MAX)
+    count = len(named) + left
+    text = f"{quantity(count)} {verb}: " + ", ".join(named)
+    if left:
+        text += f" and {quantity(left)} more ({SCREENER_MORE})"
+    return text
+
+
+def screener_line(digest: dict, at: int) -> str:
+    """The Telegram line of one screener digest, composed here and never in the screener:
+    'Screener: 15-min EMA cross, 10:30 to 10:45 candle: 3 entered: RELIANCE ₹1,428.25 (+1.20%),
+    SBIN ₹812.55 (+0.80%); 7 match now'. Pause and not-checked notes stay in the app."""
+    name = clean(digest.get("screen") or "", SCREENER_NAME_MAX) or "screen"
+    candle = digest.get("candle")
+    when = (
+        f"{_hm(int(candle[0]))} to {_hm(int(candle[1]))} candle"
+        if isinstance(candle, list) and len(candle) == 2
+        else f"{_hm(at)} check"
+    )
+    parts = []
+    entered, exited = digest.get("entered") or [], digest.get("exited") or []
+    if entered:
+        parts.append(_screener_side(entered, int(digest.get("more_entered") or 0), "entered"))
+    if exited:
+        parts.append(_screener_side(exited, int(digest.get("more_exited") or 0), "left"))
+    if not parts:
+        parts.append("nothing new")
+    matches = digest.get("matches")
+    tail = f"; {quantity(int(matches))} match now" if isinstance(matches, int) else ""
+    return f"{SCREENER_TITLE}: {name}, {when}: " + "; ".join(parts) + tail
+
+
+def screener_detail(digest: dict) -> str:
+    """The toast's second line: what entered and left, counts only."""
+    entered = len(digest.get("entered") or []) + int(digest.get("more_entered") or 0)
+    exited = len(digest.get("exited") or []) + int(digest.get("more_exited") or 0)
+    parts = []
+    if entered:
+        parts.append(f"{quantity(entered)} entered")
+    if exited:
+        parts.append(f"{quantity(exited)} left")
+    matches = digest.get("matches")
+    if isinstance(matches, int):
+        parts.append(f"{quantity(matches)} match now")
+    return ", ".join(parts) if parts else "nothing new"
+
+
+def screener_note(digest: dict) -> str:
+    """The app's note (never Telegram): a late check, or alerts paused after this one."""
+    notes = []
+    late = digest.get("late_at")
+    if isinstance(late, int):
+        notes.append(f"checked late at {_hm(late)} after a restart")
+    if digest.get("pause") is True:
+        notes.append("alerts paused after this one; resume them on the Screener page")
+    return "; ".join(notes)

@@ -310,6 +310,7 @@ def record(
             session=due.key.session,
             decision=decision,
             prices=prices,
+            candle=(due.boundary.start, due.boundary.end),
         )
         tx.outbox_add("digest", run_key, payload, now)
     state_fields: dict[str, Any] = {"last_run_key": run_key, "last_run_at": now}

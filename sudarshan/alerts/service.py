@@ -192,7 +192,9 @@ class AlertService:
                 )
                 if left:
                     log.warning("%d order alerts were not sent before stopping", left)
-                await cancel_and_wait(sender, ticker, notices)  # a cancel lost in httpx is sent again
+                await cancel_and_wait(
+                    sender, ticker, notices
+                )  # a cancel lost in httpx is sent again
                 self.store.close()
                 self._set_state("stopped")
 
@@ -685,7 +687,13 @@ def _market(
 
 
 def _market_parts(settings, market, db_path, pacer, off):
-    from sudarshan.vault import ALERTS_API_INFO, ALERTS_PUSH_INFO, fernet_for, pepper_from
+    from sudarshan.vault import (
+        ALERTS_API_INFO,
+        ALERTS_PUSH_INFO,
+        ALERTS_SCREENER_DIGEST_INFO,
+        fernet_for,
+        pepper_from,
+    )
 
     from .market.api import MarketApi, OffDesk
     from .market.desk import OwnerDesk
@@ -698,7 +706,12 @@ def _market_parts(settings, market, db_path, pacer, off):
     runtime = MarketRuntime(settings, market, owner_reader=lambda: read_owner(db_path),
                             pacer=pacer, openalgo_db=db_path,
                             push_fernet=fernet_for(pepper, ALERTS_PUSH_INFO))  # fmt: skip
-    return runtime, MarketApi(OwnerDesk(runtime), fernet), market.http_port
+    digest_fernet = fernet_for(pepper, ALERTS_SCREENER_DIGEST_INFO)
+    return (
+        runtime,
+        MarketApi(OwnerDesk(runtime), fernet, digest_fernet=digest_fernet),
+        market.http_port,
+    )
 
 
 def main() -> int:

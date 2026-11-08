@@ -99,6 +99,17 @@ and `sudarshan_screener_state`. The service's two internal routes
 `/sudarshan/screener/internal/push`) are sealed under their own purpose, refused with 404 when
 nginx forwarded them, and never called by the page.
 
+## Alerts
+
+A run worth telling (alerting.py decides) is one digest, sealed under the alerts' screener-digest
+purpose and posted to sudarshan-alerts at `POST 127.0.0.1:5582/v1/screener_digest` by the outbox
+(retried with backoff for 5 minutes). The alerts service records it once under
+`scr:<screen_id>:<run_key>` (a retried post answers "already told"), composes the Telegram line
+itself ("Screener: 15-min EMA cross, 10:30 to 10:45 candle: 3 entered: RELIANCE ₹1,428.25
+(+1.20%), ...; 7 match now"), sends it through the market lane (12 a minute, fills first, 5-minute
+age limit) and pushes a toast with a View link to the open apps; its History tab shows the row
+with its delivery chips. Pause and not-checked notes stay in the app, never on Telegram.
+
 ## Storage
 
 `screener.db` (schema 1, `migrations.py`): screens and their state, runs with their changes and

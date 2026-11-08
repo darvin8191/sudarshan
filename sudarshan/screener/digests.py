@@ -61,8 +61,10 @@ def build(
     session: int,
     decision: al.Decision,
     prices: Mapping[str, tuple[int | None, int | None]],
+    candle: tuple[int, int] | None = None,
 ) -> dict[str, Any]:
-    """The digest of one told run. ``prices`` maps a key to (ltp, previous close) in paise."""
+    """The digest of one told run. ``prices`` maps a key to (ltp, previous close) in paise;
+    ``candle`` is the (start, end) the run judged, for the line's "10:30 to 10:45 candle"."""
     return {
         "schema": SCHEMA,
         "kind": "screener",
@@ -70,6 +72,7 @@ def build(
         "screen": screen_name,
         "run_key": run_key,
         "at": at,
+        "candle": list(candle) if candle else None,
         "session": session,
         "matches": decision.matches,
         "entered": _named(decision.entered, prices),

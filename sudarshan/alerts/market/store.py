@@ -451,6 +451,31 @@ class MarketStore:
                     )
         return event_id
 
+    def record_screener(
+        self,
+        principal: str,
+        claim: str,
+        *,
+        title: str,
+        line: str,
+        detail: str,
+        note: str,
+        now: int,
+        channels: Mapping[str, bool],
+    ) -> int | None:
+        """A screener digest (M9.18), logged like a fire under its once-only claim
+        (``scr:<screen_id>:<run_key>``): the event id, or None when already told (a retried
+        post). ``alert_id`` 0 and kind ``screener``: no table changes (screener design 4.4)."""
+        who = self._who(principal)
+        with self._tx() as conn:
+            return _log(conn, who, claim, channels, now, {
+                "alert_id": 0, "session": 0, "fired_at": now, "trade_time": None,
+                "symbol": "", "exchange": "", "kind": "screener", "title": title, "line": line,
+                "detail": detail, "note": note, "value": None, "level": None,
+                "value_paise": None, "level_paise": None, "found_later": 0, "opening": 0,
+                "test": 0,
+            })  # fmt: skip
+
     def record_test(
         self,
         principal: str,

@@ -278,6 +278,56 @@ class OwnerDesk:
         log.info("a market alert test was sent from the Alerts page")
         return {"event_id": event_id, "deliveries": deliveries}
 
+    # ---- the screener's digests (M9.18, SV10) -----------------------------------------------
+    async def _screener_digest(self, message) -> dict[str, Any]:
+        """One run of a screen worth telling, sealed by sudarshan-screener under its own purpose
+        (the API opened it). Recorded once under ``scr:<screen_id>:<run_key>``: a retried post
+        answers "already told" and sends nothing twice. The Telegram line is composed here
+        (words.screener_line) and goes through the market lane; the toast to the open apps."""
+        rt = self._running()
+        digest = message.get("args")
+        if not isinstance(digest, dict):
+            raise ApiError(400, "bad_request", "The screener's digest could not be read.")
+        screen_id, run_key = digest.get("screen_id"), digest.get("run_key")
+        if not isinstance(screen_id, int) or not isinstance(run_key, str) or not run_key:
+            raise ApiError(400, "bad_request", "The screener's digest names no screen or run.")
+        for name in ("entered", "exited"):
+            if not isinstance(digest.get(name, []), list):
+                raise ApiError(400, "bad_request", "The screener's digest could not be read.")
+        now = rt.now_ms()
+        at = digest.get("at") if isinstance(digest.get("at"), int) else now
+        claim = f"scr:{screen_id}:{run_key}"
+        have = await self._write(rt.store.event_by_claim, OWNER, claim)
+        if have is not None:
+            return {
+                "claimed": False,
+                "event_id": have["id"],
+                "deliveries": have.get("deliveries", {}),
+            }
+        said = {
+            "title": f"{words.SCREENER_TITLE}: {words.clean(digest.get('screen') or '', words.SCREENER_NAME_MAX)}",
+            "detail": words.screener_detail(digest),
+            "note": words.screener_note(digest),
+        }
+        line = words.screener_line(digest, at)
+        prefs = rt.prefs
+        channels = {"telegram": prefs["telegram"]}
+        if rt.pusher is not None:
+            channels["app"] = prefs["app"]
+        event_id = await self._write(
+            rt.store.record_screener, OWNER, claim, title=said["title"], line=line,
+            detail=said["detail"], note=said["note"], now=now, channels=channels,
+        )  # fmt: skip
+        if event_id is None:  # another post of the same run got in first
+            have = await self._write(rt.store.event_by_claim, OWNER, claim)
+            return {"claimed": False, "event_id": have["id"] if have else None, "deliveries": {}}
+        if channels["telegram"]:
+            rt.tell_digest(event_id, line, at)
+        if channels.get("app"):
+            rt.push_digest(event_id, digest, said, at)
+        log.info("screener digest recorded for screen %s (%s)", screen_id, run_key)
+        return {"claimed": True, "event_id": event_id, "deliveries": channels}
+
     # ---- what the open apps are told at once (M10.7) ---------------------------------------
     def _changed(self, alert_id: int, reason: str) -> None:
         """An alert stopped or paused itself: every open app's card follows at once."""
