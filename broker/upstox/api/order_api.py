@@ -967,6 +967,9 @@ def _exit_outcome(held, answer, res, response, orderid):
             "Upstox allows only a limited number of orders per minute and its turn was too far "
             "away, so its exit was not sent. Exit it again."
         )
+    elif isinstance(res, risk_gate.RefusedResponse):
+        # SUDARSHAN M5.13: the risk gate refused it, in its own sentence; Upstox never saw it.
+        why = _refusal_words(response) or "The risk guard refused its exit."
     else:
         said = _refusal_words(response)
         why = f"Upstox refused its exit: {said}" if said else "Upstox refused its exit."

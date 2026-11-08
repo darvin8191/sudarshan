@@ -999,7 +999,9 @@ class Gate:
         since the row was read (sudarshan.books.fills), read after the rows: the rows the caller
         handed for the exits it is sending (``order_book_read``), else a read of the gate's own.
         A row it cannot correct stays as read, unless ``strict``, which answers None for any such
-        row; so does a book that cannot be read."""
+        row; so does a book that cannot be read. A position the day's fills show in a product the
+        rows do not list yet (bought a moment ago) is added as a row of its own, so its exit is
+        judged an exit, never an opening order (review of fix/guard-on, MEDIUM-2)."""
         orders = handed_order_rows(owner)
         if orders is None:
             try:
@@ -1017,6 +1019,17 @@ class Gate:
                 out.append(row)
             else:
                 out.append({**row, "quantity": held})
+        for exchange, tradingsymbol, token, product, net in fills.unlisted_nets(rows, orders):
+            out.append(
+                {
+                    "instrument_token": token,
+                    "product": product,
+                    "quantity": net,
+                    "exchange": exchange,
+                    "tradingsymbol": tradingsymbol,
+                    "unlisted": True,  # from the fills alone: no money figures to read
+                }
+            )
         return out
 
     def _kept_rows(self, owner: str, within: float) -> list | None:
