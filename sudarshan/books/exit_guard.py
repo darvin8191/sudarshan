@@ -183,6 +183,17 @@ def exit_not_sized(position: Position, orders_read: bool = True) -> str:
     )
 
 
+def unlisted_not_sized(position: Position) -> str:
+    """Why Exit all sent no exit for a position the order book shows traded today and held, which
+    Upstox's positions do not list yet, when its contract, product or size could not be worked
+    out from the order rows. One that could be is exited like every other."""
+    return (
+        f"{trader_name(position)} was traded today but Upstox's positions do not show it yet, "
+        "and SUDARSHAN could not work out from its orders what to send, so Exit all did not "
+        "close it. Close it from the Upstox app, or tap Exit all again in a minute."
+    )
+
+
 def exit_working(position: Position, at: float, order_ids: tuple[str, ...]) -> str:
     """Why no exit was sent for a position whose earlier exit (sent at ``at``) is seen working at
     Upstox: the position is still open, so exiting again is refused until that order ends."""

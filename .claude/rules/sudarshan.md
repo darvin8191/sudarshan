@@ -150,8 +150,13 @@ in brand. Icon "Mor": tile #0E5A73, ring #E3A21A, glyph #FFFFFF. Numbers via
     reduces or crosses a position is refused while a MARKET order works on the closing side, as a
     single exit is; one that only adds is never refused for being busy. Every Exit all takes one
     claim for the whole book, reads positions and then the order book once, and leaves out, with a
-    sentence each, any position that is busy, held, has a working order on its closing side or is
-    traded today but not yet in Upstox's positions; it never waits. Anything that may have reached
+    sentence each, any position that is busy, held or has a working order on its closing side; it
+    never waits. A position traded today that Upstox's positions do not list yet is exited from
+    its fills (the contract from the order row's token, the product from the order rows, the size
+    from what the fills leave held in that product), through the same claim, hold and time limit;
+    it is left out with a sentence only when one of those cannot be worked out, and a CNC net sale
+    is a sale from holdings, not a position. A conversion whose new row is not shown yet cannot be
+    told from a fresh buy, as with a single exit. Anything that may have reached
     the broker reads "not confirmed", never a refusal or raw error text; Upstox's own refusal text
     is shown without its error code. A stranded hold costs a retry; a released one can reverse a
     position. The scalping terminal's closes and the strategy module's exits are not covered yet.

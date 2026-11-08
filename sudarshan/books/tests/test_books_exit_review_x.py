@@ -464,11 +464,16 @@ def test_y2_an_order_that_only_adds_reads_no_order_book_whatever_is_working(monk
     assert broker.order_book_reads == 0
 
 
-# -- Y3: Exit all says what it left out when the positions do not list an instrument yet --------------
+# -- Y3: Exit all closes a position the positions do not list yet, from its fills --------------------
+#
+# Until fix/exit-gaps it left such a position out with a sentence; now it exits it as every listed
+# position is exited (test_books_exit_gaps.py has the cases), and the sentence is kept only for one
+# whose contract, product or size cannot be worked out.
 
-UNLISTED = (
-    "BANKNIFTY 57500 PE was traded today but Upstox's positions do not show it yet, so Exit all "
-    "did not close it. Close it from the Upstox app, or tap Exit all again in a minute."
+UNLISTED_NOT_SIZED = (
+    "BANKNIFTY 57500 PE was traded today but Upstox's positions do not show it yet, and SUDARSHAN "
+    "could not work out from its orders what to send, so Exit all did not close it. Close it from "
+    "the Upstox app, or tap Exit all again in a minute."
 )
 
 
@@ -477,23 +482,23 @@ def _bought_not_listed(world, symbol, quantity):
     world.broker.fills.append((time.monotonic(), symbol, quantity))
 
 
-def test_y3_exit_all_leaves_out_an_instrument_the_positions_do_not_list_and_says_so(monkeypatch):
+def test_y3_exit_all_closes_an_instrument_the_positions_do_not_list_from_its_fills(monkeypatch):
     world = install(monkeypatch, Broker({X: 65}, 0.0))
     _bought_not_listed(world, Y, 30)
     code, body = world.app_exit_all()
-    assert _sent(world.broker, X) == [("SELL", 65)] and _sent(world.broker, Y) == []
-    assert code != 200 and body.get("status") != "success"
-    assert UNLISTED in body["message"]
-    assert "All Open Positions" not in body["message"]
-    assert any(p["symbol"] == Y and p["outcome"] == "not_sent" for p in body["positions"])
+    assert _sent(world.broker, X) == [("SELL", 65)] and _sent(world.broker, Y) == [("SELL", 30)]
+    assert (code, body["status"]) == (200, "success")
+    assert world.broker.true_qty(Y) == 0
+    assert any(p["symbol"] == Y and p["outcome"] == "sent" for p in body["positions"])
 
 
 def test_y3_the_same_for_a_short_that_is_not_listed(monkeypatch):
     world = install(monkeypatch, Broker({X: 65}, 0.0))
     _bought_not_listed(world, Y, -30)
     code, body = world.app_exit_all()
-    assert UNLISTED in body["message"]
-    assert _sent(world.broker, Y) == []
+    assert code == 200
+    assert _sent(world.broker, Y) == [("BUY", 30)]
+    assert world.broker.true_qty(Y) == 0
 
 
 def test_y3_an_unlisted_instrument_that_nets_to_zero_is_not_mentioned(monkeypatch):
@@ -523,12 +528,12 @@ def test_y3_a_cnc_net_sale_from_holdings_is_not_an_open_position(monkeypatch, cn
     assert _sent(world.broker, X) == [("SELL", 65)]
 
 
-def test_y3_a_cnc_net_purchase_is_left_out_with_its_sentence(monkeypatch, cnc):
+def test_y3_a_cnc_net_purchase_is_sold_back_as_cnc(monkeypatch, cnc):
     world = install(monkeypatch, Broker({X: 65}, 0.0))
     _bought_not_listed(world, cnc, 10)
     code, body = world.app_exit_all()
-    assert "RELIANCE was traded today but Upstox's positions do not show it yet" in body["message"]
-    assert _sent(world.broker, cnc) == []
+    assert code == 200
+    assert _sent(world.broker, cnc) == [("SELL", 10)]
 
 
 def _row(token, product, quantity, bought, sold):
@@ -564,13 +569,12 @@ EMPTY_BOOK_UNREAD = (
 )
 
 
-def test_y3_exit_all_with_an_empty_positions_book_names_what_the_fills_show(monkeypatch):
+def test_y3_exit_all_with_an_empty_positions_book_exits_what_the_fills_show(monkeypatch):
     world = install(monkeypatch, Broker({}, 0.0))
     _bought_not_listed(world, Y, 30)
     code, body = world.app_exit_all()
-    assert code != 200 and body.get("status") != "success"
-    assert UNLISTED in body["message"]
-    assert world.broker.orders == []
+    assert (code, body["status"]) == (200, "success")
+    assert _sent(world.broker, Y) == [("SELL", 30)]
 
 
 def test_y3_exit_all_with_an_empty_positions_book_and_no_fills_finds_nothing_open(monkeypatch):
@@ -627,11 +631,15 @@ def test_z3_the_unlisted_sentence_names_the_contract_from_its_openalgo_symbol(mo
         **_fill("NSE_FO|1002", "D", "BUY", 30, "BANKNIFTY 57500 PE 27 OCT 26"),
         "exchange": "NFO",
     }
+    # The product cannot be worked out (an exchange Upstox's D maps to nothing), so it is left
+    # out, and the sentence names the contract from its OpenAlgo symbol.
+    raw["exchange"] = "XXX"
     monkeypatch.setattr(upstox, "get_symbol", lambda token, exchange: Y)
-    skipped, outcomes = upstox._unlisted_left_out([], [raw])
-    assert skipped == [UNLISTED] and outcomes[0]["symbol"] == Y
+    _candidates, skipped, outcomes = upstox._unlisted_positions([], [raw])
+    assert skipped[0].startswith(f"{Y} was traded today") and "could not work out" in skipped[0]
+    assert outcomes[0]["symbol"] == Y and outcomes[0]["outcome"] == "not_sent"
     monkeypatch.setattr(upstox, "get_symbol", lambda token, exchange: None)  # lookup finds nothing
-    skipped, _ = upstox._unlisted_left_out([], [raw])
+    _candidates, skipped, _ = upstox._unlisted_positions([], [raw])
     assert skipped[0].startswith("BANKNIFTY 57500 PE 27 OCT 26 was traded today")
 
 
