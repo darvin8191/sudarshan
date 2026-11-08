@@ -190,3 +190,148 @@ def test_two_screens_feeding_one_list_keep_an_item_while_either_wants_it(opened)
     put_rows(opened, 7, row("NSE_EQ|A", "AAA", status="exited", in_list=True), screen_id=2)
     assert run_sync(opened, link, 7).removed == ("NSE_EQ|A",)
     assert link.lists[7]["items"] == []
+
+
+# ---- release review HIGH-5: a retried sync never repeats what an earlier try did ---------------------
+class FlakyOpenAlgo(FakeOpenAlgo):
+    """Fails the first change after a list is made (its adds), once: a timeout or a 5xx."""
+
+    def __init__(self):
+        super().__init__()
+        self.failed = False
+
+    async def watchlist_apply(self, *, list_id, create_name, add, remove, ref):
+        if list_id is not None and add and not self.failed:
+            self.failed = True
+            raise RuntimeError("watchlist: readtimeout")
+        return await super().watchlist_apply(
+            list_id=list_id, create_name=create_name, add=add, remove=remove, ref=ref
+        )
+
+
+def test_a_retry_after_the_list_was_made_does_not_make_it_again(tmp_path):
+    from test_screener_runs import NOW as RUN_NOW
+    from test_screener_runs import SPEC, due_for
+
+    from sudarshan.screener import outbox, runs, spec
+    from sudarshan.screener.runs import Judged, Member
+    from sudarshan.screener.types import HIT, Outcome
+
+    opened = ScreenerStore(tmp_path / "screener.db")
+    try:
+        target = {"list_id": None, "create_name": "Screener: Above hundred"}
+        stored = spec.check(dict(SPEC, target=target))
+        screen = opened.write(OWNER, lambda tx: tx.screen_insert("S", stored, "active", RUN_NOW))
+        members = [
+            Member("NSE_EQ|A", "AAA", "NSE", "NSE_EQ"),
+            Member("NSE_EQ|B", "BBB", "NSE", "NSE_EQ"),
+        ]
+        judged = [Judged(m, Outcome(HIT, (), {}, 100), (12000, 11000)) for m in members]
+        due = due_for(screen, 1)
+        opened.write(OWNER, lambda tx: runs.record(
+            tx, tx.screen(screen["id"]), tx.state(screen["id"]), due, judged, RUN_NOW))  # fmt: skip
+        link = FlakyOpenAlgo()
+        clock = {"now": RUN_NOW}
+        sender = outbox.Sender(opened, link, lambda: clock["now"])
+        for _ in range(4):  # the first try, then the retries as their backoff comes due
+            asyncio.run(sender.tick())
+            clock["now"] += 61_000
+        state = opened.read(OWNER, lambda tx: tx.state(screen["id"]))
+        rows = opened.read(OWNER, lambda tx: tx.memberships(screen_id=screen["id"]))
+        assert len(link.lists) == 1, "every retry of the sync makes another 'Screener: ...' list"
+        (made,) = link.lists
+        assert state["list_id"] == made and {r["list_id"] for r in rows} == {made}
+        assert sorted(i["symbol"] for i in link.lists[made]["items"]) == ["AAA", "BBB"]
+        creates = [c for c in link.calls if c[0] == "apply" and c[1] is None]
+        assert [c[5] for c in creates] == [listsync.create_ref(screen["id"])]
+    finally:
+        opened.close()
+        store_module.stop()
+
+
+class LostAnswer(FakeOpenAlgo):
+    """Applies the first change and then loses its answer (the connection dropped after OpenAlgo
+    had written it), once."""
+
+    def __init__(self):
+        super().__init__()
+        self.lost = False
+
+    async def watchlist_apply(self, *, list_id, create_name, add, remove, ref):
+        answer = await super().watchlist_apply(
+            list_id=list_id, create_name=create_name, add=add, remove=remove, ref=ref
+        )
+        if add and not self.lost:
+            self.lost = True
+            raise RuntimeError("watchlist: remoteprotocolerror")
+        return answer
+
+
+def test_an_add_that_landed_without_its_answer_stays_the_screeners(opened):
+    link = LostAnswer()
+    link.lists[7] = {"name": "Mine", "items": []}
+    link.put(7, "ZZZ", "NSE")  # the owner's own item
+    put_rows(opened, 7, row("NSE_EQ|A", "AAA"), row("NSE_EQ|B", "BBB"))
+    with pytest.raises(RuntimeError):
+        run_sync(opened, link, 7)
+    run_sync(opened, link, 7)  # the outbox's retry: the adds are in the list already
+    rows = rows_of(opened, 7)
+    assert rows["NSE_EQ|A"]["added_by_screener"] is True, (
+        "the screener's add is taken for the owner's"
+    )
+    assert rows["NSE_EQ|A"]["in_list"] is True and rows["NSE_EQ|B"]["in_list"] is True
+    # both exit: the screener takes out what it put in, and only that
+    put_rows(
+        opened, 7,
+        row("NSE_EQ|A", "AAA", status="exited", in_list=True),
+        row("NSE_EQ|B", "BBB", status="exited", in_list=True),
+    )  # fmt: skip
+    run_sync(opened, link, 7)
+    assert [i["symbol"] for i in link.lists[7]["items"]] == ["ZZZ"], (
+        "the screener's items stay for good"
+    )
+
+
+class SealedOpenAlgo(FakeOpenAlgo):
+    """Refuses a change whose sealed request would pass the internal routes' limit, as the
+    service's Link does before it sends (link.Link._internal_call)."""
+
+    def __init__(self):
+        super().__init__()
+        self.sizes: list[int] = []
+
+    async def watchlist_apply(self, *, list_id, create_name, add, remove, ref):
+        from sudarshan.autologin.handoff import seal
+        from sudarshan.screener import contract
+        from sudarshan.screener.link import LinkError
+        from sudarshan.vault import SCREENER_INTERNAL_INFO, fernet_for
+
+        args = {"list_id": list_id, "create_name": create_name, "add": list(add),
+                "remove": list(remove), "ref": ref}  # fmt: skip
+        blob = seal(fernet_for("f" * 64, SCREENER_INTERNAL_INFO), "watchlist_apply",
+                    principal="owner", args=args)  # fmt: skip
+        self.sizes.append(len(blob))
+        if len(blob) > contract.INTERNAL_MAX_BYTES:
+            raise LinkError(413, "watchlist_apply: the request is over the limit")
+        return await super().watchlist_apply(
+            list_id=list_id, create_name=create_name, add=add, remove=remove, ref=ref
+        )
+
+
+def test_a_sync_bigger_than_one_seal_goes_in_parts_each_under_the_limit(opened):
+    from sudarshan.screener import contract
+
+    link = SealedOpenAlgo()
+    link.lists[7] = {"name": "Mine", "items": []}
+    many = [row(f"NSE_EQ|INE{n:06d}A01018", f"SYMBOL{n:04d}") for n in range(mem.LIST_MAX)]
+    put_rows(opened, 7, *many)
+    result = run_sync(opened, link, 7)
+    assert len(result.added) == mem.LIST_MAX
+    assert len(link.lists[7]["items"]) == mem.LIST_MAX, "a sync over the seal is refused every try"
+    assert len(link.sizes) >= 2 and max(link.sizes) <= contract.INTERNAL_MAX_BYTES
+    known = opened.read(OWNER, lambda tx: tx.list_items(7))
+    assert all(known[r["key"]]["added_by_screener"] for r in many)
+    assert all(r["in_list"] for r in rows_of(opened, 7).values())
+    # every part is applied once: the next sync has nothing to send
+    sent = len(link.sizes)
+    assert run_sync(opened, link, 7).added == () and len(link.sizes) == sent

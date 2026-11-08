@@ -66,6 +66,7 @@ def bridge(monkeypatch):
     http = httpx.Client(trust_env=False)
     monkeypatch.setattr(bp_module, "get_httpx_client", lambda: http)
     monkeypatch.setattr(bp_module, "_warned", LockedTTLCache(maxsize=8, ttl=600))
+    monkeypatch.setattr(bp_module, "_made", LockedTTLCache(maxsize=64, ttl=3600), raising=False)
     app = make_app()
     yield app.test_client()
     http.close()
@@ -379,6 +380,29 @@ def test_the_watchlist_route_reads_makes_adds_and_removes_as_the_owner(bridge, m
         ref="z",
     )
     assert response.status_code == 400
+
+
+def test_a_create_tried_again_answers_the_list_it_made(bridge, monkeypatch):
+    """The service's create lost its answer and is tried again under the same key: the same list,
+    never "Screener: Breakout (2)"; a list deleted meanwhile is made again (release review HIGH-5)."""
+    monkeypatch.setattr(bp_module, "emit_from_any_thread", lambda *a, **kw: None)
+
+    def create(ref):
+        return internal(
+            bridge, "watchlist", "watchlist_apply", list_id=None,
+            create_name="Screener: Breakout", add=[], remove=[], ref=ref,
+        ).get_json()  # fmt: skip
+
+    first = create("screen:4:list")
+    again = create("screen:4:list")
+    assert again["list_id"] == first["list_id"] and again["name"] == "Screener: Breakout"
+    names = sorted(w["name"] for w in watchlist_db.get_watchlists(OWNER))
+    assert names == ["Screener: Breakout"], "a retried create made another list"
+    watchlist_db.delete_watchlist(OWNER, first["list_id"])
+    assert watchlist_db.get_watchlists(OWNER) == []
+    remade = create("screen:4:list")
+    assert remade["found"] is True and remade["name"] == "Screener: Breakout"
+    assert [w["name"] for w in watchlist_db.get_watchlists(OWNER)] == ["Screener: Breakout"]
 
 
 def test_the_join_handler_admits_the_owner_only(bridge, monkeypatch):

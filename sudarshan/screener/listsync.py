@@ -11,9 +11,19 @@ per list, since only the newest desired set matters):
    and is never touched; a dismissed instrument the owner put back by hand may enter again.
 3. Plan (membership.plan_sync): add every wanted row that is not in the list, remove every item
    the screener added that no row wants, within the list's room (250).
-4. Send one sealed ``watchlist_apply`` with the adds, the removes (by OpenAlgo's item ids) and the
-   run key; an add that exists and a remove of an item already gone are no-ops there, so a retry
-   is harmless. Then record what the list holds (``list_item``) and each row's ``in_list``.
+4. Send the adds and the removes (by OpenAlgo's item ids) in sealed ``watchlist_apply`` parts,
+   each under the internal routes' 16 KiB seal (``contract.INTERNAL_MAX_BYTES``); after each part,
+   record what the list holds (``list_item``) and each row's ``in_list``.
+
+A retried sync never repeats what an earlier try did (release review HIGH-5):
+
+- The list is made once. Once a list exists for the screen (``screen_state.list_id``), every later
+  sync uses it, whatever its queued row said; before that, the create carries a key of its own
+  (``create_ref``), and the bridge answers the list it already made for that key instead of a new
+  "Screener: X (2)". A screen deleted meanwhile gets no list.
+- Every add is recorded as the screener's before it is sent, so an add that reached OpenAlgo
+  without its answer is never mistaken for the owner's item on the next try (and so never left
+  in the list for good). An add that exists and a remove of an item already gone are no-ops there.
 
 The link to OpenAlgo is a protocol: the runtime's sealed HTTP client (SV5) or a test's fake. The
 owner's items are known by symbol and exchange only; they count toward the room under a key of
@@ -22,6 +32,7 @@ their own and are never added, removed or recorded as the screener's.
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -35,6 +46,12 @@ log = logging.getLogger("sudarshan.screener")
 NO_LIST = 0
 #: What a sync came to, for the outbox and the journal.
 DONE, CREATED, LIST_GONE, NOTHING = "done", "created", "list_gone", "nothing"
+#: The most one part may carry, as the JSON of its adds and removes. A sealed request to OpenAlgo's
+#: internal routes is at most 16 KiB and the seal's base64 grows its JSON by a third: 8 KiB of
+#: changes plus the envelope seals to about 11.5 KiB.
+PART_BYTES = 8 * 1024
+#: And at most this many changes a part (the bridge takes up to 300 a request).
+PART_CHANGES = 120
 
 
 class Link(Protocol):
@@ -76,6 +93,12 @@ def owner_key(symbol: str, exchange: str) -> str:
     return f"owner:{exchange}:{symbol}"
 
 
+def create_ref(screen_id: int) -> str:
+    """The key a screen's list is made under: the same for every try of that create, so the
+    bridge answers a list it already made for it instead of making another."""
+    return f"screen:{screen_id}:list"
+
+
 def items_of(
     listing: Mapping[str, Any],
     rows: Mapping[tuple[int, str], mem.Row],
@@ -95,6 +118,28 @@ def items_of(
     return items, ids
 
 
+def parts(
+    add: Sequence[Mapping[str, str]], remove: Sequence[int]
+) -> list[tuple[list[Mapping[str, str]], list[int]]]:
+    """The adds and removes as parts that each seal under the internal routes' limit: removes
+    first (they make room), then adds, in order."""
+    out: list[tuple[list, list]] = []
+    adds: list = []
+    removes: list = []
+    size = 0
+    for kind, item in [("remove", r) for r in remove] + [("add", a) for a in add]:
+        cost = len(json.dumps(item, separators=(",", ":"))) + 1
+        if adds or removes:
+            if size + cost > PART_BYTES or len(adds) + len(removes) >= PART_CHANGES:
+                out.append((adds, removes))
+                adds, removes, size = [], [], 0
+        (removes if kind == "remove" else adds).append(item)
+        size += cost
+    if adds or removes:
+        out.append((adds, removes))
+    return out
+
+
 async def sync(
     store: ScreenerStore,
     link: Link,
@@ -105,13 +150,26 @@ async def sync(
     ref: str,
     now: int,
 ) -> Synced:
-    """One sync of the list a screen targets. Reads and writes the store on its thread; one or
-    two calls to OpenAlgo. Raises what the link raises (the outbox retries)."""
+    """One sync of the list a screen targets. Reads and writes the store on its thread; one call
+    to OpenAlgo to read the list and one a part to change it (a list made first is one more).
+    Raises what the link raises (the outbox retries)."""
+    status = DONE
     if list_id == NO_LIST:
         if not create_name:
             return Synced(NOTHING, NO_LIST)
+
+        def known_list(tx: Tx) -> tuple[bool, int]:
+            state = tx.state(screen_id) or {}
+            return tx.screen(screen_id) is not None, int(state.get("list_id") or NO_LIST)
+
+        exists, made_id = store.read(OWNER, known_list)
+        if made_id != NO_LIST:  # an earlier try of this create made it: never made twice
+            list_id = made_id
+        elif not exists:  # the screen was deleted meanwhile: no list for it
+            return Synced(NOTHING, NO_LIST)
+    if list_id == NO_LIST:
         made = await link.watchlist_apply(
-            list_id=None, create_name=create_name, add=(), remove=(), ref=ref
+            list_id=None, create_name=create_name, add=(), remove=(), ref=create_ref(screen_id)
         )
         list_id = int(made["list_id"])
 
@@ -122,8 +180,6 @@ async def sync(
         store.write(OWNER, relist)
         log.info("the screener made the watchlist %s for screen %s", list_id, screen_id)
         status = CREATED
-    else:
-        status = DONE
 
     listing = await link.watchlist_read(list_id)
     if listing is None:
@@ -141,37 +197,44 @@ async def sync(
                 rows[(sid, key)] = moved[(sid, key)] = changed
                 tx.membership_put(sid, list_id, _dict(changed), now)
         wanted = mem.plan_sync(rows.values(), items)
+        # written ahead: each add is the screener's before it is sent (HIGH-5)
+        tx.list_items_mark(list_id, [p.key for p in wanted.add], now)
         return rows, items, ids, moved, wanted
 
     rows, items, ids, moved, wanted = store.write(OWNER, plan)
     add = [{"key": p.key, "symbol": p.symbol, "exchange": p.exchange} for p in wanted.add]
     remove_ids = [ids[key] for key in wanted.remove if key in ids]
-    if add or remove_ids:
-        listing = await link.watchlist_apply(
-            list_id=list_id, create_name=None, add=add, remove=remove_ids, ref=ref
-        )
+    known = {**_known(items, ids), **{p.key: {"added_by_screener": True} for p in wanted.add}}
 
-    def settle(tx: Tx) -> None:
-        tx.state_put(screen_id, now, list_name=listing.get("name"))
-        after, after_ids = items_of(
-            listing,
-            rows,
-            {**_known(items, ids), **{p.key: {"added_by_screener": True} for p in wanted.add}},
-        )
-        tx.list_items_replace(
-            list_id,
-            [
+    def settle(answer: Mapping[str, Any], pending: Sequence[str]):
+        def write(tx: Tx) -> None:
+            tx.state_put(screen_id, now, list_name=answer.get("name"))
+            after, after_ids = items_of(answer, rows, known)
+            entries = [
                 {"key": key, "added_by_screener": ours, "openalgo_item_id": after_ids.get(key)}
                 for key, ours in after.items()
-            ],
-            now,
-        )
-        for (sid, key), row in rows.items():
-            present = key in after
-            if row.in_list != present:
-                tx.membership_put(sid, list_id, _dict(replace(row, in_list=present)), now)
+            ] + [
+                {"key": key, "added_by_screener": True, "openalgo_item_id": None}
+                for key in pending
+                if key not in after
+            ]
+            tx.list_items_replace(list_id, entries, now)
+            for (sid, key), row in rows.items():
+                present = key in after
+                if row.in_list != present:
+                    rows[(sid, key)] = replace(row, in_list=present)
+                    tx.membership_put(sid, list_id, _dict(rows[(sid, key)]), now)
 
-    store.write(OWNER, settle)
+        store.write(OWNER, write)
+
+    chunks = parts(add, remove_ids)
+    if not chunks:
+        settle(listing, ())
+    for n, (part_add, part_remove) in enumerate(chunks):
+        listing = await link.watchlist_apply(
+            list_id=list_id, create_name=None, add=part_add, remove=part_remove, ref=ref
+        )
+        settle(listing, [a["key"] for later in chunks[n + 1 :] for a in later[0]])
     dismissed = tuple(sorted({k for (_, k), r in moved.items() if r.status == mem.DISMISSED}))
     return Synced(
         status, list_id, tuple(p.key for p in wanted.add), wanted.remove, dismissed, wanted.held
@@ -195,9 +258,12 @@ __all__ = [
     "LIST_GONE",
     "NOTHING",
     "NO_LIST",
+    "PART_BYTES",
     "Link",
     "Synced",
+    "create_ref",
     "items_of",
     "owner_key",
+    "parts",
     "sync",
 ]

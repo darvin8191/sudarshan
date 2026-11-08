@@ -602,6 +602,24 @@ class Tx:
             self.conn.execute(insert(t), rows)
         return len(rows)
 
+    def list_items_mark(self, list_id: int, keys: Iterable[str], now: int) -> int:
+        """Record ``keys`` as the screener's items of the list before they are sent: an add that
+        reaches OpenAlgo without its answer is then still known as the screener's."""
+        t = self._t("list_item")
+        count = 0
+        for key in keys:
+            done = self.conn.execute(
+                update(t)
+                .where(t.c.list_id == list_id, t.c.key == key)
+                .values(added_by_screener=1, seen_at=now)
+            ).rowcount
+            if not done:
+                self.conn.execute(
+                    insert(t).values(list_id=list_id, key=key, added_by_screener=1, seen_at=now)
+                )
+            count += 1
+        return count
+
     # ---- alert marks ----
     def told(self, screen_id: int, session: int) -> dict[str, dict[str, Any]]:
         """What the owner has been told this session about a screen, by key: ``told`` is how

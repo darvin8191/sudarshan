@@ -90,6 +90,7 @@ def world(tmp_path, monkeypatch):
     http = httpx.Client(trust_env=False)
     monkeypatch.setattr(bp_module, "get_httpx_client", lambda: http)
     monkeypatch.setattr(bp_module, "_warned", LockedTTLCache(maxsize=8, ttl=600))
+    monkeypatch.setattr(bp_module, "_made", LockedTTLCache(maxsize=64, ttl=3600), raising=False)
     port = free_port()
     monkeypatch.setenv("SUDARSHAN_SCREENER_API_URL", f"http://127.0.0.1:{port}")
     app = make_app()

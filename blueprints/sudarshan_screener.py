@@ -99,6 +99,10 @@ _ERROR_CODES = frozenset(contract.ERROR_CODES)
 _BRIDGE_ONLY = frozenset({"unauthorized", "forbidden", "rate_limited", "not_confirmed"})
 
 _warned = LockedTTLCache(maxsize=8, ttl=600)
+#: The lists this route made, by the create's key (the request's ``ref`` and the name asked for):
+#: a create tried again after its answer was lost answers the list already made, never a second
+#: "Screener: X (2)" (release review HIGH-5). An hour outlasts the service's 30 minutes of retries.
+_made = LockedTTLCache(maxsize=64, ttl=3600)
 _fernet_lazy = LazyInit(
     lambda: fernet_for(pepper_from(os.environ), SCREENER_API_INFO), "sudarshan-screener-seal"
 )
@@ -411,9 +415,10 @@ def _owner_id() -> str | None:
 @sudarshan_screener_internal_bp.route("/watchlist", methods=["POST"])
 def internal_watchlist():
     """``watchlist_read`` answers one list as OpenAlgo holds it (or ``found: false``);
-    ``watchlist_apply`` makes the list when ``create_name`` is given, adds and removes items (an
-    add that exists and a remove of an item already gone are no-ops), emits
-    ``sudarshan_screener_lists`` and answers the list. Both run as the owner."""
+    ``watchlist_apply`` makes the list when ``create_name`` is given (once per ``ref`` and name:
+    the same create again answers the list it made), adds and removes items (an add that exists
+    and a remove of an item already gone are no-ops), emits ``sudarshan_screener_lists`` and
+    answers the list. Both run as the owner."""
     op = (request.args.get("op") or "").strip()
     if op not in ("watchlist_read", "watchlist_apply"):
         return _refused(404, "Not found")
@@ -441,11 +446,20 @@ def internal_watchlist():
     if list_id is None:
         if not isinstance(create_name, str) or not create_name.strip():
             return _refused(400, "Bad request")
-        name = _free_name(create_name.strip()[:64], {found["name"] for found in lists.values()})
-        made = watchlist_db.create_watchlist(user_id, name)
-        if made is None:
-            return _refused(503, "The list could not be made")
-        list_id = made["id"]
+        asked = create_name.strip()[:64]
+        ref = args.get("ref")
+        key = (ref, asked) if isinstance(ref, str) and ref else None
+        earlier = _made.get(key) if key is not None else None
+        if earlier in lists:
+            list_id = earlier  # the same create again: its list, not another one
+        else:
+            name = _free_name(asked, {found["name"] for found in lists.values()})
+            made = watchlist_db.create_watchlist(user_id, name)
+            if made is None:
+                return _refused(503, "The list could not be made")
+            list_id = made["id"]
+            if key is not None:
+                _made[key] = list_id
     elif not isinstance(list_id, int) or list_id not in lists:
         return jsonify({"status": "success", "found": False})
     for item in add:
