@@ -53,7 +53,7 @@ from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 
 from database.token_db_enhanced import get_symbol_info
 from database.user_db import find_user_by_username
-from extensions import emit_from_any_thread, socketio
+from extensions import emit_from_any_thread, is_owner_session, socketio
 from limiter import limiter
 from sudarshan.alerts import loopback
 from sudarshan.alerts.market.api import off_state
@@ -71,7 +71,7 @@ from sudarshan.vault import ALERTS_API_INFO, ALERTS_PUSH_INFO, fernet_for, peppe
 from utils import real_threading
 from utils.lazy import LazyInit
 from utils.logging import get_logger
-from utils.session import check_session_validity, is_session_valid
+from utils.session import check_session_validity
 from utils.thread_safe_cache import MISSING, LockedTTLCache
 
 logger = get_logger(__name__)
@@ -463,13 +463,15 @@ def _screens() -> int:
         return 0
 
 
-def _room_sids() -> list[str]:
-    """The sids in the owner's room now, as a copy (a disconnect edits the room)."""
+def _owner_sids() -> list[str]:
+    """Every socket on the default namespace now, as a copy (a disconnect edits it). Only the
+    owner's sessions connect (SUDARSHAN SIO1), so these are all his, the room's included; the
+    room None is python-socketio's room of every sid in a namespace."""
     server = getattr(socketio, "server", None)
     rooms = getattr(getattr(server, "manager", None), "rooms", None)
     if not isinstance(rooms, dict):
         return []
-    members = rooms.get(NAMESPACE, {}).get(ROOM)
+    members = rooms.get(NAMESPACE, {}).get(None)
     try:
         return [m[0] if isinstance(m, tuple) else m for m in list(members or ())]
     except TypeError:
@@ -485,14 +487,15 @@ def _disconnect(sids: list[str]) -> None:
 
 
 def drop_owner_room() -> None:
-    """Close every socket in the owner's room, when the owner's session ends (logout, a forced
-    logout, the daily expiry or revoke). A socket joined while the session was valid, and the join
-    is the only check, so without this a lost phone logged out elsewhere keeps getting the owner's
-    alerts. The app reconnects and its join is checked again. Never raises, and does nothing when
-    there is no room or no socket. Under eventlet from a real thread the close is handed to the hub
-    (utils.real_threading.run_on_hub); everywhere else it runs inline."""
+    """Close every Socket.IO connection, the owner's room's included, when the owner's session
+    ends (logout, a forced logout, the daily expiry or revoke). A socket is checked when it
+    connects (SIO1) and when it joins, so without this one admitted while the session was valid
+    (a lost phone logged out elsewhere) keeps getting the owner's orders and alerts; any reconnect
+    is checked again. Never raises, and does nothing when there is no socket. Under eventlet from a
+    real thread the close is handed to the hub (utils.real_threading.run_on_hub); everywhere else
+    it runs inline."""
     try:
-        sids = _room_sids()
+        sids = _owner_sids()
         if sids:
             real_threading.run_on_hub(_disconnect, sids, timeout=3)
     except Exception:
@@ -540,10 +543,10 @@ def internal_push():
 
 @socketio.on("sudarshan_alerts_join")
 def _join_owner_room(data=None):
-    """An open app joins the owner's room, if its session is the owner's (the default namespace
-    has no connect-time check, so the join is where it is made)."""
-    owner = find_user_by_username()
-    if not is_session_valid() or owner is None or session.get("user") != owner.username:
+    """An open app joins the owner's room, if its session is the owner's: the check every connect
+    makes (SIO1, extensions.is_owner_session), made again because a socket admitted before the
+    daily expiry may ask after it, with the session it connected with."""
+    if not is_owner_session():
         return {"ok": False, "message": WORDS["owner_only"]}
     join_room(ROOM)
     return {"ok": True}

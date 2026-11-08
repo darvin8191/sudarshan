@@ -1,9 +1,13 @@
 import threading
 
+from flask_socketio import ConnectionRefusedError as SocketIORefusal
 from flask_socketio import SocketIO
 
 from utils import real_threading
+from utils.logging import get_logger
 from utils.runtime import is_monkey_patched
+
+logger = get_logger(__name__)
 
 
 class SerializedSocketIO(SocketIO):
@@ -112,3 +116,53 @@ def emit_from_any_thread(event, data, **kwargs) -> None:
         real_threading.submit_to_hub(socketio.emit, event, data, **kwargs)
         return
     socketio.emit(event, data, **kwargs)
+
+
+# SUDARSHAN: SIO1. Only the owner's valid session may hold a Socket.IO connection. Upstream sends
+# every order event (and positions closed, the session list with its IP addresses, the WhatsApp
+# pairing code) to every connected client, accepts any origin and has no connect handler on the
+# default namespace, so anyone who reached /socket.io/ could watch the owner's orders. The check
+# runs at every connect, a reconnect included, and is the one the alerts room's join makes
+# (blueprints/sudarshan_alerts.py). It fails closed: Flask-SocketIO hands an exception raised in a
+# connect handler to the default error handler (utils/socketio_error_handler.py), and that
+# handler's True would admit the socket.
+
+#: What a refused client is told. The app shows it nowhere; a script reads it.
+SOCKET_REFUSED = "Log in to receive live updates."
+
+
+def is_owner_session() -> bool:
+    """True when this request's session is valid (``utils.session.is_session_valid``: logged in,
+    broker step done, not past the daily expiry) and is OpenAlgo's owner, the admin account.
+
+    An invalid session is answered without reading the database. May raise (the users table
+    unreadable): a caller that admits on True treats a raise as False.
+    """
+    from flask import session
+
+    from database.user_db import find_user_by_username
+    from utils.session import is_session_valid
+
+    if not is_session_valid():
+        return False
+    owner = find_user_by_username()
+    return owner is not None and session.get("user") == owner.username
+
+
+def admit_owner_only() -> None:
+    """Refuse this Socket.IO connection unless ``is_owner_session()``; a check that raises refuses
+    too. Called first by every namespace's connect handler."""
+    try:
+        admitted = is_owner_session()
+    except Exception:
+        logger.exception("Socket.IO: could not check the session, so the connection was refused")
+        admitted = False
+    if not admitted:
+        logger.debug("Socket.IO: refused a connection without the owner's session")
+        raise SocketIORefusal(SOCKET_REFUSED)
+
+
+@socketio.on("connect")
+def _connect_owner_only(auth=None):
+    """The default namespace: the owner's valid session only."""
+    admit_owner_only()
