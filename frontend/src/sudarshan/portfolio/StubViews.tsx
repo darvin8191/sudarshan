@@ -6,6 +6,8 @@ export const UPSTOX_LABELS: Record<UpstoxView, string> = {
   positions: 'Positions',
   funds: 'Funds',
   history: 'History',
+  trades: 'Trades',
+  pnl: 'P&L',
 }
 const CUSTOM_LABELS: Record<CustomView, string> = {
   overview: 'Overview',
@@ -21,13 +23,15 @@ export const STUB_WORDS: Record<UpstoxView | CustomView, string> = {
   positions: 'Your open positions in Upstox, for reading only. Orders are placed in Positions.',
   funds: 'Your Upstox funds, line by line, with the time they were read.',
   history: 'The value of your Upstox account against what you put in, then the last 10 days.',
+  trades: 'Every trade Upstox lists for a financial year, with its date, side, quantity and price.',
+  pnl: 'Your realised profit or loss for a financial year, trade by trade, with the charges.',
   overview: 'The value of this tab now, today’s change, what you put in and the profit or loss.',
   activity: 'Every entry of this tab, newest first: buys, sells, dividends, fees and transfers.',
   performance: 'Your return, how it compares with NIFTY 50 and NIFTY 500, and each financial year.',
 }
 
 const SEGMENT =
-  'inline-flex min-h-12 flex-1 items-center justify-center rounded-[0.875rem] px-3 text-[0.9375rem] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50'
+  'inline-flex min-h-12 flex-1 items-center justify-center rounded-[0.875rem] px-3 text-[0.9375rem] whitespace-nowrap outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50'
 
 /** The parts of a tab as a row of segments; the shown one is told by tint, edge and weight. */
 export function Segments<V extends string>({
@@ -42,7 +46,7 @@ export function Segments<V extends string>({
   onChange: (view: V) => void
 }) {
   return (
-    <div role="tablist" aria-label="Parts of this tab" className="flex gap-1.5">
+    <div role="tablist" aria-label="Parts of this tab" className="flex gap-1.5 overflow-x-auto">
       {views.map((view) => (
         <button
           key={view}

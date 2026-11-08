@@ -58,11 +58,37 @@ function serve(book: object, history: object = { days: [], note: null }) {
   api.call.mockImplementation(async (op: string) => {
     if (op === 'upstox_book') return { enabled: true, data: book }
     if (op === 'upstox_history') return { enabled: true, data: history }
+    if (op === 'report_years')
+      return {
+        enabled: true,
+        data: { today: 20261108, years: [{ fy: 2026, label: '2026-27', current: true }] },
+      }
+    if (op === 'report_trades' || op === 'report_pnl')
+      return {
+        enabled: true,
+        data: {
+          state: 'unavailable',
+          read_at: null,
+          note: null,
+          fy: 2026,
+          segment: 'EQ',
+          rows: [],
+          total_records: null,
+          bought_paise: 0,
+          sold_paise: 0,
+          trades_count: null,
+          realised_paise: 0,
+          charges: null,
+          net_paise: null,
+        },
+      }
     throw new Error(`unexpected op ${op}`)
   })
 }
 
-function show(view: 'holdings' | 'positions' | 'funds' | 'history' = 'holdings') {
+function show(
+  view: 'holdings' | 'positions' | 'funds' | 'history' | 'trades' | 'pnl' = 'holdings'
+) {
   return render(
     <QueryClientProvider client={createQueryClient()}>
       <MemoryRouter>
@@ -310,5 +336,23 @@ describe('History', () => {
     serve({}, { days: [], note: null })
     show('history')
     expect(await screen.findByText(/No closing records yet/)).toBeTruthy()
+  })
+})
+
+describe('Trades and P&L parts', () => {
+  it('are two more parts of the tab, each reading its own report', async () => {
+    serve({})
+    show('trades')
+    expect(await screen.findByText('No trades to show yet.')).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Trades' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'P&L' })).toBeInTheDocument()
+    expect(api.call.mock.calls.some((c) => c[0] === 'upstox_book')).toBe(false)
+  })
+
+  it('P&L reads the P&L report', async () => {
+    serve({})
+    show('pnl')
+    expect(await screen.findByText('No closed trades to show yet.')).toBeInTheDocument()
+    expect(api.call.mock.calls.some((c) => c[0] === 'report_pnl')).toBe(true)
   })
 })

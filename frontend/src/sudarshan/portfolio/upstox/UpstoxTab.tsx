@@ -21,6 +21,7 @@ import { HistoryView } from './HistoryView'
 import { HoldingsView } from './HoldingsView'
 import { PositionsView } from './PositionsView'
 import { CARD } from './parts'
+import { PnlView, TradesView } from './ReportsView'
 import { useUpstoxBook } from './useUpstoxBook'
 import { useUpstoxLive } from './useUpstoxLive'
 
@@ -59,7 +60,7 @@ function BookPart({
   marketOpen,
   anyOpen,
 }: {
-  view: Exclude<UpstoxView, 'history'>
+  view: Exclude<UpstoxView, 'history' | 'trades' | 'pnl'>
   marketOpen: (exchange: string) => boolean | null
   anyOpen: () => boolean | null
 }) {
@@ -134,6 +135,10 @@ export function UpstoxTab({
       )}
       {view === 'history' ? (
         <HistoryPart />
+      ) : view === 'trades' ? (
+        <TradesView />
+      ) : view === 'pnl' ? (
+        <PnlView />
       ) : (
         <BookPart key={view} view={view} marketOpen={isOpen} anyOpen={anyOpen} />
       )}

@@ -31,7 +31,7 @@ export type PortfolioOverlay =
   | { kind: 'price'; assetId: number }
   | { kind: 'asset'; assetId: number }
 
-export const UPSTOX_VIEWS = ['holdings', 'positions', 'funds', 'history'] as const
+export const UPSTOX_VIEWS = ['holdings', 'positions', 'funds', 'history', 'trades', 'pnl'] as const
 export const CUSTOM_VIEWS = ['overview', 'holdings', 'activity', 'performance'] as const
 export type UpstoxView = (typeof UPSTOX_VIEWS)[number]
 export type CustomView = (typeof CUSTOM_VIEWS)[number]
