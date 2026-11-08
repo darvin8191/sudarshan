@@ -156,7 +156,9 @@ def test_the_first_run_records_the_whole_set_enters_members_and_tells_once(opene
         ("NSE_EQ|C", "not_checked", None), ("NSE_EQ|A", "in", 0), ("NSE_EQ|B", "in", 1),
     ]  # fmt: skip
     values = opened.read(OWNER, lambda tx: tx.run_values(report.run_id))
-    assert set(values) == {"NSE_EQ|A", "NSE_EQ|B"} and values["NSE_EQ|A"]["c1"]["l"] == "120.00"
+    assert set(values) == {"NSE_EQ|A", "NSE_EQ|B", "NSE_EQ|C"}
+    assert values["NSE_EQ|A"]["c1"]["l"] == "120.00" and values["NSE_EQ|A"]["_ltp"] == 12000
+    assert values["NSE_EQ|C"] == {"_not_checked": "Not checked: no price from Upstox yet"}
     rows = opened.read(OWNER, lambda tx: tx.memberships(screen_id=screen["id"], list_id=7))
     assert {r["key"]: (r["status"], r["entry_price"], r["first_seen_run"]) for r in rows} == {
         "NSE_EQ|A": ("active", 12000, report.run_id), "NSE_EQ|B": ("active", 11000, report.run_id),

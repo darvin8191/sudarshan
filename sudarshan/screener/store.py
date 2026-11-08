@@ -456,6 +456,16 @@ class Tx:
             query = query.where(t.c.id < before)
         return self._all(query.order_by(t.c.id.desc()).limit(limit))
 
+    def runs_page_all(self, limit: int) -> list[dict[str, Any]]:
+        """The newest runs of every screen (the page's catch-up mark)."""
+        t = self._t("run")
+        return self._all(select(t).where(self._mine(t)).order_by(t.c.id.desc()).limit(limit))
+
+    def runs_session(self, session: int) -> list[dict[str, Any]]:
+        """Every run of one trading day, oldest first."""
+        t = self._t("run")
+        return self._all(select(t).where(t.c.session == session, self._mine(t)).order_by(t.c.id))
+
     def runs_since(self, after: int, limit: int) -> list[dict[str, Any]]:
         """Every run recorded after run ``after``, oldest first (the page's catch-up)."""
         t = self._t("run")

@@ -107,6 +107,10 @@ from blueprints.strategy_portfolio import strategy_portfolio_bp  # Strategy Buil
 from blueprints.sudarshan_alerts import sudarshan_alerts_bp  # SUDARSHAN M10 market alerts
 from blueprints.sudarshan_autologin import sudarshan_autologin_bp  # SUDARSHAN M2.20 auto-login
 from blueprints.sudarshan_risk import sudarshan_risk_bp  # SUDARSHAN M5.13 kill switch, risk
+from blueprints.sudarshan_screener import (  # SUDARSHAN M9 screener bridge
+    sudarshan_screener_bp,
+    sudarshan_screener_internal_bp,
+)
 from blueprints.system_permissions import (
     system_permissions_bp,  # Import the system permissions blueprint
 )
@@ -357,6 +361,8 @@ def create_app():
     app.register_blueprint(sudarshan_autologin_bp)  # SUDARSHAN M2.20: sudarshan/autologin/README.md
     app.register_blueprint(sudarshan_alerts_bp)  # SUDARSHAN M10: sudarshan/alerts/README.md
     app.register_blueprint(sudarshan_risk_bp)  # SUDARSHAN M5.13: sudarshan/guard (kill switch)
+    app.register_blueprint(sudarshan_screener_bp)  # SUDARSHAN M9: sudarshan/screener/README.md
+    app.register_blueprint(sudarshan_screener_internal_bp)  # SUDARSHAN M9: internal routes
 
     # Remote MCP (HTTP + OAuth) — opt-in via MCP_HTTP_ENABLED. Off by default.
     # Pre-flight refusal: must NEVER coexist with FLASK_DEBUG=True (debug-mode

@@ -117,7 +117,7 @@ async def sync(
 
         def relist(tx: Tx) -> None:
             tx.membership_relist(screen_id, NO_LIST, list_id, now)
-            tx.state_put(screen_id, now, list_id=list_id)
+            tx.state_put(screen_id, now, list_id=list_id, list_name=made.get("name"))
 
         store.write(OWNER, relist)
         log.info("the screener made the watchlist %s for screen %s", list_id, screen_id)
@@ -152,6 +152,7 @@ async def sync(
         )
 
     def settle(tx: Tx) -> None:
+        tx.state_put(screen_id, now, list_name=listing.get("name"))
         after, after_ids = items_of(
             listing,
             rows,

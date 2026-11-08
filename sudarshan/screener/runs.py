@@ -261,11 +261,17 @@ def record(
 
     changes = _changes(judged, applied, rows, first_run)
     tx.run_changes_put(run["id"], changes)
-    values = {
-        j.member.key: dict(j.outcome.values)
-        for j in judged
-        if j.outcome.kind == HIT and j.outcome.values
-    }
+    values: dict[str, dict[str, Any]] = {}
+    for j in judged:
+        if j.outcome.kind == HIT:
+            values[j.member.key] = {
+                **dict(j.outcome.values or {}),
+                "_ltp": j.prices[0],
+                "_cp": j.prices[1],
+                "_forming": j.outcome.forming,
+            }
+        elif j.outcome.kind == NOT_CHECKED:
+            values[j.member.key] = {"_not_checked": words.not_checked_words(j.outcome.why)}
     tx.run_values_put(run["id"], values)
 
     counts = {
@@ -328,7 +334,28 @@ def record(
         tx.outbox_add(
             "push",
             run_key,
-            {"screen_id": screen["id"], "run_id": run["id"], "run_key": run_key, **counts},
+            {
+                "screen_id": screen["id"],
+                "run_id": run["id"],
+                "run_key": run_key,
+                "at": due.boundary.end,
+                "candle": f"{words.hm(due.boundary.start)} to {words.hm(due.boundary.end)}",
+                "counts": {
+                    "matches": counts["matched"],
+                    **{k: v for k, v in counts.items() if k != "matched"},
+                },
+                "entered": [
+                    {"symbol": c.row.symbol, "exchange": c.row.exchange, "member_id": None}
+                    for c in applied.changes
+                    if c.event == mem.EV_ENTERED
+                ],
+                "exited": [
+                    {"symbol": c.row.symbol, "exchange": c.row.exchange}
+                    for c in applied.changes
+                    if c.event == mem.EV_EXITED
+                ],
+                "marks": list(words.mark_words(marks)),
+            },
             now,
         )
     return Report(

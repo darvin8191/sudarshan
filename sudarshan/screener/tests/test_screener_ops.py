@@ -62,10 +62,13 @@ def test_screens_are_created_edited_paused_and_deleted_with_versions(tmp_path):
             assert (
                 status == 200 and body["data"]["screens"] == [] and body["data"]["enabled"] is True
             )
-            assert body["data"]["budget"]["max_active"] == 12
-            assert body["data"]["engine"]["text"].startswith(
+            assert body["data"]["limits"] == {"active": 12, "active_used": 0, "max_keys": 320}
+            engine = body["data"]["engine"]
+            assert engine["line"].startswith(
                 ("Market closed", "Real-time", "Waiting", "Not checking")
             )
+            assert engine["real_time"] is False and body["data"]["last_run_id"] == 0
+            assert body["data"]["server_time"] == NOW
 
             status, body = await client.op("create", spec=SPEC, request_id="r1")
             assert status == 200, body
@@ -76,6 +79,8 @@ def test_screens_are_created_edited_paused_and_deleted_with_versions(tmp_path):
                 and made["status"] == "active"
             )
             assert made["where"] and made["alerts"] == "Alerts on" and made["list_id"] == 7
+            assert made["matches"] == 0 and made["entered_today"] == 0 and made["last_run_id"] == 0
+            assert made["status_reason"] is None and made["target_name"] is None
             status, again = await client.op("create", spec=SPEC, request_id="r1")
             assert again["data"]["id"] == made["id"], "a retried create returns the same screen"
 
@@ -149,7 +154,9 @@ def test_the_intraday_screen_limit_is_refused_in_words_and_after_close_is_free(t
             )
             assert status == 200 and body["data"]["status"] == "paused"
             status, body = await client.op("today")
-            assert status == 200 and len(body["data"]["boundaries"]) == 13
+            assert status == 200 and body["data"]["screens"] == [] and body["data"]["recent"] == []
+            status, body = await client.op("state")
+            assert body["data"]["limits"]["active_used"] == 12
         finally:
             svc.stop()
             await asyncio.wait_for(task, 5)
@@ -179,35 +186,60 @@ def test_results_runs_run_since_membership_and_pins_read_a_recorded_run(tmp_path
 
             status, body = await client.op("results", id=screen["id"])
             data = body["data"]
-            assert data["run"]["id"] == report.run_id and data["run"]["matched"] == 1
-            assert [m["key"] for m in data["members"]] == ["NSE_EQ|A"] and data["members"][0][
-                "status"
-            ] == "active"
-            assert data["values"]["NSE_EQ|A"]["c1"]["l"] == "120.00"
-            assert {c["change"] for c in data["changes"]} == {"in", "not_checked"}
-            assert data["screen"]["last_run"]["run_key"] == report.run_key
+            assert data["screen_id"] == screen["id"]
+            assert data["run"]["id"] == report.run_id and data["run"]["matches"] == 1
+            assert data["run"]["candle"] == "10:00 to 10:15" and data["run"]["marks"] == []
+            assert [r["symbol"] for r in data["rows"]] == ["AAA"]
+            row = data["rows"][0]
+            assert row["rank"] == 1 and row["values"] == "Close 120.00" and row["ltp"] == 12000
+            assert row["change_pct"] == 33.33 and row["member_id"] is not None
+            assert row["forming"] is False
+            assert row["chip"]["icon"] and row["chip"]["text"], "always an icon and a word"
+            assert data["not_checked"] == {
+                "count": 1,
+                "reasons": ["Not checked: no price from Upstox yet"],
+            }
+
+            status, body = await client.op("state")
+            card = body["data"]["screens"][0]
+            assert card["matches"] == 1 and card["entered_today"] == 1
+            assert card["last_run_id"] == report.run_id
+            assert body["data"]["last_run_id"] == report.run_id
 
             status, body = await client.op("runs", id=screen["id"], limit=10)
-            assert [r["id"] for r in body["data"]["runs"]] == [report.run_id] and body["data"][
-                "more"
-            ] is False
+            assert [r["id"] for r in body["data"]["runs"]] == [report.run_id]
+            assert body["data"]["more"] is False
             status, body = await client.op("run", id=report.run_id)
             assert (
-                body["data"]["values_note"] is None
-                and body["data"]["run"]["run_key"] == report.run_key
+                body["data"]["values_note"] is None and body["data"]["run"]["id"] == report.run_id
             )
+            assert body["data"]["rows"][0]["symbol"] == "AAA"
             status, body = await client.op("run", id=999)
             assert status == 404 and "history" in body["error"]["message"]
             status, body = await client.op("runs_since", after=0)
             assert [r["id"] for r in body["data"]["runs"]] == [report.run_id]
+            status, body = await client.op("today")
+            assert body["data"]["screens"] == [
+                {
+                    "id": screen["id"],
+                    "name": "Above hundred",
+                    "entered": 1,
+                    "exited": 0,
+                    "matches": 1,
+                }
+            ]
+            assert body["data"]["recent"][0]["symbol"] == "AAA"
+            assert body["data"]["recent"][0]["kind"] == "entered"
 
             status, body = await client.op("membership", list=7)
             member = body["data"]["rows"][0]
-            assert member["symbol"] == "AAA" and member["pinned"] is False
+            assert (
+                member["symbol"] == "AAA" and member["pinned"] is False and member["chip"]["kind"]
+            )
             status, body = await client.op(
                 "membership_update", id=member["id"], version=member["version"], action="pin"
             )
-            assert status == 200 and body["data"]["pinned"] is True
+            assert status == 200 and body["data"]["pinned"] is True and body["data"]["chip"]
             status, body = await client.op(
                 "membership_update", id=member["id"], version=member["version"], action="unpin"
             )
@@ -215,7 +247,7 @@ def test_results_runs_run_since_membership_and_pins_read_a_recorded_run(tmp_path
             status, body = await client.op(
                 "membership_update",
                 id=member["id"],
-                version=body["error"] and member["version"] + 1,
+                version=member["version"] + 1,
                 action="dismiss",
             )
             assert status == 200 and body["data"]["status"] == "dismissed"
@@ -239,9 +271,15 @@ def test_results_runs_run_since_membership_and_pins_read_a_recorded_run(tmp_path
             cards = body["data"]["presets"]
             assert len(cards) >= 8 and all(c["name"] for c in cards)
             status, body = await client.op("universes")
-            assert "fno_stocks" in body["data"]["kinds"]
+            kinds = {u["kind"] for u in body["data"]["universes"]}
+            assert "fno_stocks" in kinds and "watchlist" not in kinds
+            assert any(u["note"] for u in body["data"]["universes"] if u["kind"] == "index_list")
             status, body = await client.op("preview", spec=SPEC)
-            assert status == 200 and body["data"]["results"] is None and body["data"]["needs"]
+            assert status == 200 and body["data"]["count"] == 0 and body["data"]["label"]
+            status, body = await client.op("preview", screen_id=screen["id"])
+            assert status == 200 and body["data"]["needs"]
+            status, body = await client.op("preview", screen_id=999)
+            assert status == 404
         finally:
             svc.stop()
             await asyncio.wait_for(task, 5)

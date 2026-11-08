@@ -307,6 +307,7 @@ _FEED_DOWN = {
     "no_token": "the price feed has no token: put the Analytics Token in the feed's token file",
     "stopped": "the price feed is stopped: start sudarshan-feed again",
     "silent": "the price feed is not answering: check that sudarshan-feed is running",
+    "not_linked": "the screener is not connected to the price feed yet",
 }
 
 

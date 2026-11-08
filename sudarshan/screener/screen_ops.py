@@ -6,17 +6,24 @@ Each op is an ``async def (ctx, args)`` registered in ``ops.REGISTRY``; ``ctx`` 
 A refused request is an ``ApiError`` whose message is the owner's sentence and whose ``field``
 names the line of the screen it is about (``SpecError``).
 
+The answers take the shapes the page's ``frontend/src/sudarshan/screener/types.ts`` reads
+(``ScreenerState``, ``ScreenRow``, ``Results``, ``ResultRow``, ``RunRow``, ``Preview``,
+``PresetCard``, ``UniverseOption``, ``Today``, ``MemberRow``); every sentence in them is built
+by ``words.py`` and shown as it came.
+
 Live facts (whether the market trades, the feed's condition, loading counts) come from the
 runtime's parts when they are registered (SV5: ``ctx.parts["engine"]`` answering
-``engine_facts(now)``); without them the engine line is built from the sessions and the store
-alone, which is what a service without a feed link can honestly say.
+``engine_facts(now)``, ``ctx.parts["source"]`` answering a preview); without them the engine line
+is built from the sessions and the store alone, which is what a service without a feed link can
+honestly say.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict
 from datetime import datetime
+from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Any
 
 from sudarshan.alerts.market.sessions import day_key, sessions_of
@@ -41,11 +48,24 @@ SEGMENTS_OF = {
     "indices": frozenset({"NSE_INDEX"}),
     "watchlist": frozenset({"NSE_EQ", "NSE_EQ+auction", "NSE_FO", "NSE_INDEX"}),
 }
+UNIVERSE_LABELS = {
+    "fno_stocks": "F&O stocks",
+    "fno_futures": "Stock futures",
+    "index_futures": "Index futures",
+    "indices": "Indices",
+    "options": "Option strikes",
+    "index_list": "NIFTY list",
+    "watchlist": "A watchlist",
+}
+NOT_FOLLOWED = "Checked after the close only: this list is not followed tick by tick."
 VALUES_GONE = "Values are kept for 7 days; the list for 100 days."
-RUNS_PAGE = 50
+PREVIEW_WAITS = "Preview needs the screener's price feed, which is not connected yet."
+RUNS_PAGE = 30
 RUNS_PAGE_MAX = 200
+VALUE_COLUMNS = 2
 
 
+# ---- helpers ---------------------------------------------------------------------------------------
 def _store(ctx):
     if ctx.store is None:
         raise ApiError.of("unavailable", WORDS["not_answering"])
@@ -85,14 +105,13 @@ def _translate(call):
 def sched_screen(row: Mapping[str, Any]) -> scheduler.Screen:
     stored = row["spec"]
     run = stored["run"]
-    universe = stored["universe"]["kind"]
     tf = run.get("tf", DAY)
     return scheduler.Screen(
         row["id"],
         row["version"],
         run["on"],
         tf if isinstance(tf, int) else 0,
-        SEGMENTS_OF.get(universe, frozenset({"NSE_EQ"})),
+        SEGMENTS_OF.get(stored["universe"]["kind"], frozenset({"NSE_EQ"})),
     )
 
 
@@ -104,59 +123,265 @@ def _sessions(ctx, now: int):
     return sessions_of(today, trading_day=calendar.is_trading_day(today), window=windows.get(today))
 
 
-def engine_line(ctx, now: int, active: list) -> dict[str, Any]:
+def _session_key(now: int) -> int:
+    return day_key(datetime.fromtimestamp(now / 1000, IST).date())
+
+
+def engine_line(ctx, now: int, active: Sequence[scheduler.Screen], sessions=None) -> dict[str, Any]:
     """The line under the header: the runtime's facts when it has them, else sessions and store."""
     facts = ctx.parts.get("engine")
     base: dict[str, Any] = {"now": now, "enabled": ctx.enabled}
     if facts is not None and hasattr(facts, "engine_facts"):
         base.update(facts.engine_facts(now))
     else:
-        sessions = _sessions(ctx, now)
+        sessions = _sessions(ctx, now) if sessions is None else sessions
         base["trading"] = any(s.start <= now < s.end for s in sessions.values())
         base["next_at"] = scheduler.next_at(active, sessions, now) if active else None
+        base["feed"] = "not_linked"  # no feed link registered: never claim real time (rule 7)
     engine = words.Engine(
         **{k: v for k, v in base.items() if k in words.Engine.__dataclass_fields__}
     )
+    state = words.engine_state(engine)
     return {
-        "state": words.engine_state(engine),
-        "text": words.engine_words(engine),
-        **asdict(engine),
+        "state": state,
+        "line": words.engine_words(engine),
+        "real_time": state == words.REAL_TIME,
+        "next_at": engine.next_at,
     }
 
 
-def _summary(tx: Tx, row: Mapping[str, Any]) -> dict[str, Any]:
+def _change_pct(ltp, cp) -> float | None:
+    if not isinstance(ltp, int) or not isinstance(cp, int) or not cp:
+        return None
+    value = (Decimal(ltp) - Decimal(cp)) * 100 / Decimal(cp)
+    return float(value.quantize(Decimal("0.01"), rounding=ROUND_HALF_EVEN))
+
+
+def _label(operand: Mapping[str, Any]) -> str:
+    if "field" in operand:
+        return (
+            cat.FIELDS[operand["field"]].words
+            if operand["field"] in cat.FIELDS
+            else operand["field"]
+        )
+    if "ind" in operand:
+        return str(operand["ind"]).upper()
+    if "oi" in operand:
+        return "OI change" if operand["oi"] == "oi_change_pct" else "OI"
+    if "opt" in operand:
+        return str(operand["opt"]).replace("_", " ")
+    if "math" in operand:
+        return "value"
+    return ""
+
+
+def _clauses(node) -> list[dict]:
+    if isinstance(node, dict) and "id" in node and "left" in node:
+        return [node]
+    out = []
+    if isinstance(node, dict):
+        for key in ("all", "any", "none"):
+            for child in node.get(key, ()):
+                out.extend(_clauses(child))
+        if "not" in node:
+            out.extend(_clauses(node["not"]))
+    return out
+
+
+def values_text(stored: Mapping[str, Any], found: Mapping[str, Any] | None) -> str:
+    """'RSI 61.2 · OI +4.1%': the first two clause values of a match, labelled."""
+    if not found:
+        return ""
+    parts = []
+    for clause in _clauses(stored.get("where")):
+        value = found.get(clause["id"])
+        if isinstance(value, dict) and value.get("l") is not None:
+            label = _label(clause["left"])
+            parts.append(f"{label} {value['l']}".strip())
+        if len(parts) == VALUE_COLUMNS:
+            break
+    return " · ".join(parts)
+
+
+def run_row(run: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    if run is None:
+        return None
+    return {
+        "id": run["id"],
+        "screen_id": run["screen_id"],
+        "at": run["candle_end"],
+        "candle": f"{words.hm(run['candle_start'])} to {words.hm(run['candle_end'])}",
+        "matches": run["matched"],
+        "entered": run["entered"],
+        "exited": run["exited"],
+        "missing": run["missing"],
+        "not_checked": run["not_checked"],
+        "status": run["status"],
+        "marks": list(words.mark_words(run.get("marks"))),
+        "alerts": (run.get("marks") or {}).get("alerts"),
+    }
+
+
+def _chip_of(row: Mapping[str, Any], *, now: int, last_run: int, grace: mem.Grace, screen: str):
+    found = mem.Row(**{n: row[n] for n in mem.Row.__dataclass_fields__ if n in row})
+    chip = words.chip(found, now=now, last_run=last_run, grace=grace, screen=screen)
+    return asdict(chip) if chip is not None else None
+
+
+def result_rows(
+    stored: Mapping[str, Any],
+    screen_name: str,
+    run: Mapping[str, Any] | None,
+    changes: Sequence[Mapping[str, Any]],
+    values: Mapping[str, Any],
+    members: Sequence[Mapping[str, Any]],
+    now: int,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """(rows, not_checked) of a run: every instrument that matched, best ranked first, with its
+    membership chip; the not-checked count and its reasons."""
+    grace = mem.Grace.of((stored.get("target") or {}).get("grace"))
+    by_key = {m["key"]: m for m in members}
+    ranked = sorted(
+        (c for c in changes if c["change"] == "in"),
+        key=lambda c: (c["rank"] is None, c["rank"] if c["rank"] is not None else 0, c["symbol"]),
+    )
+    matched = {c["key"] for c in ranked}
+    # members matching now that this run did not list as "in" (a later run of the day): keep them
+    for member in members:
+        if member["status"] in (mem.ACTIVE,) and member["key"] not in matched:
+            ranked.append(
+                {
+                    "key": member["key"],
+                    "symbol": member["symbol"],
+                    "exchange": member["exchange"],
+                    "rank": None,
+                }
+            )
+            matched.add(member["key"])
+    rows = []
+    for position, change in enumerate(ranked, start=1):
+        found = values.get(change["key"]) or {}
+        member = by_key.get(change["key"])
+        rows.append(
+            {
+                "member_id": member["id"] if member else None,
+                "key": change["key"],
+                "symbol": change["symbol"],
+                "exchange": change["exchange"],
+                "rank": position,
+                "values": values_text(stored, found),
+                "forming": bool(found.get("_forming")),
+                "chip": _chip_of(
+                    member,
+                    now=now,
+                    last_run=run["id"] if run else 0,
+                    grace=grace,
+                    screen=screen_name,
+                )
+                if member
+                else None,
+                "ltp": found.get("_ltp"),
+                "change_pct": _change_pct(found.get("_ltp"), found.get("_cp")),
+            }
+        )
+    reasons = []
+    count = 0
+    for change in changes:
+        if change["change"] == "not_checked":
+            count += 1
+            text = (values.get(change["key"]) or {}).get("_not_checked")
+            if isinstance(text, str) and text not in reasons:
+                reasons.append(text)
+    return rows, {"count": count, "reasons": reasons[: words.REASONS_SHOWN]}
+
+
+def screen_row(
+    tx: Tx, row: Mapping[str, Any], now: int, session: int, next_at: int | None
+) -> dict[str, Any]:
     state = tx.state(row["id"]) or {}
     latest = tx.latest_run(row["id"])
+    entered_today = sum(
+        r["entered"]
+        for r in tx.runs_page(row["id"], None, 400)
+        if r["session"] == session and r["status"] == "done"
+    )
+    target = row["spec"].get("target") or {}
+    list_id = state.get("list_id") or target.get("list_id") or 0
+    added = sum(
+        1
+        for m in tx.memberships(screen_id=row["id"], list_id=list_id)
+        if m["added_by_screener"] and m["in_list"]
+    )
     return {
-        **row,
+        "id": row["id"],
+        "version": row["version"],
+        "name": row["name"],
+        "status": row["status"],
+        "status_reason": row.get("status_reason"),
         "where": presets.where(row["spec"]),
-        "alerts_paused": bool(state.get("alerts_paused")),
-        "list_id": state.get("list_id") or (row["spec"].get("target") or {}).get("list_id"),
-        "last_run": latest,
+        "spec": row["spec"],
+        "matches": latest["matched"] if latest else 0,
+        "entered_today": entered_today,
+        "added_count": added,
+        "target_name": state.get("list_name")
+        or (target.get("create_name") if target and not list_id else None),
+        "list_id": list_id or None,
+        "next_check": f"next check {words.when(next_at, now)}"
+        if next_at and row["status"] == "active"
+        else None,
+        "last_run_id": latest["id"] if latest else 0,
         "alerts": words.alerts_words(
             al.Policy.of(row["spec"].get("alerts")), paused=bool(state.get("alerts_paused"))
         ),
+        "alerts_paused": bool(state.get("alerts_paused")),
+        "updated_at": row["updated_at"],
     }
 
 
+# ---- the ops -----------------------------------------------------------------------------------------
 @op("state")
 async def state(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
     now = ctx.clock()
     store = _store(ctx)
-    screens = _translate(
-        lambda: store.read(OWNER, lambda tx: [_summary(tx, r) for r in tx.screens()])
-    )
-    active = [sched_screen(r) for r in screens if r["status"] == "active"]
+    sessions = _sessions(ctx, now)
+    session = _session_key(now)
+
+    def read(tx: Tx):
+        screens = tx.screens()
+        active = [sched_screen(r) for r in screens if r["status"] == "active"]
+        rows = []
+        for row in screens:
+            next_at = (
+                scheduler.next_at([sched_screen(row)], sessions, now)
+                if row["status"] == "active"
+                else None
+            )
+            rows.append(screen_row(tx, row, now, session, next_at))
+        newest = tx.runs_page_all(1)
+        return rows, active, (newest[0]["id"] if newest else 0)
+
+    rows, active, last_run_id = _translate(lambda: store.read(OWNER, read))
+    intraday = sum(1 for r in rows if r["status"] == "active" and r["spec"]["run"]["on"] == "close")
     return {
         "enabled": True,
-        "screens": screens,
-        "engine": engine_line(ctx, now, active),
-        "budget": {
-            "active": len(active),
-            "max_active": ctx.settings.max_active,
+        "engine": engine_line(ctx, now, active, sessions),
+        "screens": rows,
+        "limits": {
+            "active": ctx.settings.max_active,
+            "active_used": intraday,
             "max_keys": ctx.settings.max_keys,
         },
+        "last_run_id": last_run_id,
+        "server_time": now,
     }
+
+
+def _summary(ctx, tx: Tx, row: Mapping[str, Any], now: int) -> dict[str, Any]:
+    sessions = _sessions(ctx, now)
+    next_at = (
+        scheduler.next_at([sched_screen(row)], sessions, now) if row["status"] == "active" else None
+    )
+    return screen_row(tx, row, now, _session_key(now), next_at)
 
 
 @op("create")
@@ -166,7 +391,9 @@ async def create(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
     if status not in ("active", "paused"):
         raise ApiError.of("bad_request", WORDS["unreadable"])
     request_id = args.get("request_id")
-    if request_id is not None and (request_id.__class__ is not str or len(request_id) > 64):
+    if request_id is not None and (
+        request_id.__class__ is not str or not 0 < len(request_id) <= 64
+    ):
         raise ApiError.of("bad_request", WORDS["unreadable"])
     now = ctx.clock()
     store = _store(ctx)
@@ -175,7 +402,7 @@ async def create(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
         if request_id is not None:
             have = tx.screen_by_request(request_id)
             if have is not None:
-                return _summary(tx, have)
+                return _summary(ctx, tx, have, now)
         if status == "active" and stored["run"]["on"] == "close":
             busy = sum(
                 1
@@ -189,7 +416,9 @@ async def create(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
                     "Pause one, or make this one run after the close.",
                     "run",
                 )
-        return _summary(tx, tx.screen_insert(stored["name"], stored, status, now, request_id))
+        return _summary(
+            ctx, tx, tx.screen_insert(stored["name"], stored, status, now, request_id), now
+        )
 
     return _translate(lambda: store.write(OWNER, make))
 
@@ -217,7 +446,7 @@ async def update(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
         else:
             row = tx.screen_change(screen_id, version, {}, now)  # the version moves with the state
             tx.state_put(screen_id, now, alerts_paused=(action == "alerts_off"))
-        return _summary(tx, row)
+        return _summary(ctx, tx, row, now)
 
     return _translate(lambda: store.write(OWNER, change))
 
@@ -257,26 +486,31 @@ async def delete(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
 
 @op("preview")
 async def preview(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
-    stored, plan = _spec(args.get("spec"))
-    out: dict[str, Any] = {
-        "spec": stored,
-        "where": presets.where(stored),
-        "needs": {str(tf): count for tf, count in plan.need.items()},
-        "instances": len(plan.instances),
-        "uses": sorted(plan.uses),
-    }
+    if "spec" in args:
+        stored, plan = _spec(args.get("spec"))
+    else:
+        screen_id = _int(args, "screen_id")
+        store = _store(ctx)
+        row = _translate(lambda: store.read(OWNER, lambda tx: tx.screen(screen_id)))
+        if row is None:
+            raise ApiError.of("not_found", WORDS["gone"])
+        stored, plan = _spec(row["spec"])
     source = ctx.parts.get("source")
     if source is not None and hasattr(source, "preview"):
-        out["results"] = await source.preview(plan, stored, ctx.clock())
-    else:
-        out["results"] = None
-        out["note"] = "Live figures come once the screener's price feed is connected."
-    return out
+        return await source.preview(plan, stored, ctx.clock())
+    return {
+        "label": PREVIEW_WAITS,
+        "count": 0,
+        "first": [],
+        "not_checked": {"count": 0, "reasons": []},
+        "needs": {str(tf): count for tf, count in plan.need.items()},
+    }
 
 
 @op("results")
 async def results(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
     screen_id = _int(args, "id")
+    now = ctx.clock()
     store = _store(ctx)
 
     def read(tx: Tx):
@@ -289,13 +523,14 @@ async def results(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
         members = tx.memberships(screen_id=screen_id, list_id=list_id)
         values = tx.run_values(latest["id"]) if latest else {}
         changes = tx.run_changes(latest["id"]) if latest else []
+        rows, not_checked = result_rows(
+            row["spec"], row["name"], latest, changes, values, members, now
+        )
         return {
-            "screen": _summary(tx, row),
-            "run": latest,
-            "marks": words.mark_words(latest["marks"]) if latest else (),
-            "members": members,
-            "values": values,
-            "changes": changes,
+            "screen_id": screen_id,
+            "run": run_row(latest),
+            "rows": rows,
+            "not_checked": not_checked,
         }
 
     return _translate(lambda: store.read(OWNER, read))
@@ -312,9 +547,7 @@ async def runs(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
         if tx.screen(screen_id) is None:
             raise NotFound()
         page = tx.runs_page(screen_id, before, limit)
-        for row in page:
-            row["mark_words"] = words.mark_words(row["marks"])
-        return {"runs": page, "more": len(page) == limit}
+        return {"runs": [run_row(r) for r in page], "more": len(page) == limit}
 
     return _translate(lambda: store.read(OWNER, read))
 
@@ -322,19 +555,26 @@ async def runs(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
 @op("run")
 async def run(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
     run_id = _int(args, "id")
+    now = ctx.clock()
     store = _store(ctx)
 
     def read(tx: Tx):
-        row = tx.run(run_id)
-        if row is None:
+        found = tx.run(run_id)
+        if found is None:
             raise ApiError.of("not_found", "This check is no longer in the history.")
+        screen = tx.screen(found["screen_id"])
+        stored = screen["spec"] if screen else {"where": None}
         values = tx.run_values(run_id)
+        changes = tx.run_changes(run_id)
+        rows, not_checked = result_rows(
+            stored, screen["name"] if screen else "", found, changes, values, [], now
+        )
         return {
-            "run": row,
-            "changes": tx.run_changes(run_id),
-            "values": values,
-            "values_note": None if values else VALUES_GONE,
-            "mark_words": words.mark_words(row["marks"]),
+            "screen_id": found["screen_id"],
+            "run": run_row(found),
+            "rows": rows,
+            "not_checked": not_checked,
+            "values_note": None if values or not rows else VALUES_GONE,
         }
 
     return _translate(lambda: store.read(OWNER, read))
@@ -346,7 +586,24 @@ async def runs_since(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
     limit = min(_int(args, "limit", required=False) or RUNS_PAGE, RUNS_PAGE_MAX)
     store = _store(ctx)
     page = _translate(lambda: store.read(OWNER, lambda tx: tx.runs_since(after, limit)))
-    return {"runs": page, "more": len(page) == limit}
+    return {"runs": [run_row(r) for r in page], "more": len(page) == limit}
+
+
+def member_row(tx: Tx, found: Mapping[str, Any], now: int) -> dict[str, Any]:
+    screen = tx.screen(found["screen_id"])
+    stored = screen["spec"] if screen else {}
+    latest = tx.latest_run(found["screen_id"])
+    grace = mem.Grace.of((stored.get("target") or {}).get("grace"))
+    return {
+        **found,
+        "chip": _chip_of(
+            found,
+            now=now,
+            last_run=latest["id"] if latest else 0,
+            grace=grace,
+            screen=screen["name"] if screen else "",
+        ),
+    }
 
 
 @op("membership")
@@ -355,8 +612,13 @@ async def membership(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
     screen_id = _int(args, "screen", required=False)
     if list_id is None and screen_id is None:
         raise ApiError.of("bad_request", WORDS["unreadable"])
+    now = ctx.clock()
     store = _store(ctx)
-    rows = _translate(lambda: store.read(OWNER, lambda tx: tx.memberships(screen_id, list_id)))
+    rows = _translate(
+        lambda: store.read(
+            OWNER, lambda tx: [member_row(tx, r, now) for r in tx.memberships(screen_id, list_id)]
+        )
+    )
     return {"rows": rows}
 
 
@@ -393,7 +655,7 @@ async def membership_update(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
                 now,
                 coalesce=True,
             )
-        return out
+        return member_row(tx, out, now)
 
     return _translate(lambda: store.write(OWNER, change))
 
@@ -401,11 +663,9 @@ async def membership_update(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
 def _refusal(action: str, row: mem.Row) -> str:
     if action == "restore":
         return "Only an instrument you removed can be restored."
-    return (
-        f"{row.symbol} is not in the list any more, so it cannot be {action}ned."
-        if action == "pin"
-        else (f"{row.symbol} is not in the list any more.")
-    )
+    if action == "pin":
+        return f"{row.symbol} is not in the list any more, so it cannot be pinned."
+    return f"{row.symbol} is not in the list any more."
 
 
 @op("presets")
@@ -416,29 +676,78 @@ async def presets_op(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
 
 @op("universes")
 async def universes(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
-    store = _store(ctx)
-    built = _translate(lambda: store.read(OWNER, Tx.universes))
-    return {"kinds": list(cat.UNIVERSES), "built": built}
+    options: list[dict[str, Any]] = []
+    for kind in cat.UNIVERSES:
+        if kind == "options":
+            for underlying in cat.UNDERLYINGS:
+                options.append(
+                    {
+                        "kind": kind,
+                        "underlying": underlying,
+                        "label": f"{underlying} option strikes",
+                        "note": None,
+                    }
+                )
+        elif kind == "index_list":
+            for list_key, (name, followed) in cat.INDEX_LISTS.items():
+                options.append(
+                    {
+                        "kind": kind,
+                        "id": list_key,
+                        "label": name,
+                        "note": None if followed else NOT_FOLLOWED,
+                    }
+                )
+        elif kind == "watchlist":
+            continue  # the page offers the owner's own lists from its watchlist API
+        else:
+            options.append({"kind": kind, "label": UNIVERSE_LABELS.get(kind, kind), "note": None})
+    return {"universes": options}
 
 
 @op("today")
 async def today(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
     now = ctx.clock()
+    session = _session_key(now)
     store = _store(ctx)
-    screens = _translate(
-        lambda: store.read(OWNER, lambda tx: [r for r in tx.screens() if r["status"] == "active"])
-    )
-    active = [sched_screen(r) for r in screens]
-    sessions = _sessions(ctx, now)
-    day = datetime.fromtimestamp(now / 1000, IST).date()
-    return {
-        "session": day_key(day) if sessions else None,
-        "trading": bool(sessions),
-        "boundaries": {
-            str(s.id): [
-                {"k": b.k, "end": b.end, "at": b.at} for b in scheduler.boundaries(s, sessions)
-            ]
-            for s in active
-        },
-        "next_at": scheduler.next_at(active, sessions, now) if active else None,
-    }
+
+    def read(tx: Tx):
+        names = {r["id"]: r["name"] for r in tx.screens()}
+        screens: dict[int, dict[str, Any]] = {}
+        recent: list[dict[str, Any]] = []
+        for found in tx.runs_session(session):
+            if found["status"] != "done":
+                continue
+            card = screens.setdefault(
+                found["screen_id"],
+                {
+                    "id": found["screen_id"],
+                    "name": names.get(found["screen_id"], ""),
+                    "entered": 0,
+                    "exited": 0,
+                    "matches": 0,
+                },
+            )
+            card["entered"] += found["entered"]
+            card["exited"] += found["exited"]
+            card["matches"] = found["matched"]
+            for change in tx.run_changes(found["id"]):
+                if change["change"] in ("in", "out"):
+                    recent.append(
+                        {
+                            "symbol": change["symbol"],
+                            "exchange": change["exchange"],
+                            "kind": "entered" if change["change"] == "in" else "exited",
+                            "at": found["candle_end"],
+                            "screen": names.get(found["screen_id"], ""),
+                        }
+                    )
+        recent.sort(key=lambda item: item["at"], reverse=True)
+        return {
+            "screens": list(screens.values()),
+            "recent": recent[:20],
+            "unseen_alerts": 0,
+            "session": session,
+        }
+
+    return _translate(lambda: store.read(OWNER, read))
