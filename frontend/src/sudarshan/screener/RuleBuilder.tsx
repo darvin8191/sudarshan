@@ -2,6 +2,7 @@ import { useCallback, useMemo } from 'react'
 import { ClauseCard, type Side } from './ClauseCard'
 import { GroupCard } from './GroupCard'
 import { type NodeMenu, NodeMenuSheet } from './NodeMenuSheet'
+import { OperandSheet } from './OperandSheet'
 import { OperatorSheet, withOperator } from './OperatorSheet'
 import {
   addClause,
@@ -112,6 +113,7 @@ export function RuleBuilder({
               problem={problems.get(kid.id) ?? null}
               onToggle={(on) => apply(updateClause(where, here, (c) => ({ ...c, on })))}
               onOperator={() => openSheet('operator', { c: kid.id })}
+              onOperand={(side) => openSheet('operand', { c: kid.id, side })}
               onNumber={(side: Side, value) =>
                 apply(updateClause(where, here, (c) => ({ ...c, [side]: { num: value } })))
               }
@@ -133,6 +135,22 @@ export function RuleBuilder({
   return (
     <div className="flex flex-col gap-2">
       {renderGroup(where, [])}
+      {address.sheet === 'operand' && clause && address.side && (
+        <OperandSheet
+          key={`${clause.id}:${address.side}`}
+          operand={(address.side === 'left' ? clause.left : clause.right) ?? { num: '0' }}
+          runTf={runTf}
+          onApply={(next) => {
+            if (clausePath) {
+              apply(
+                updateClause(where, clausePath, (c) => ({ ...c, [address.side as Side]: next }))
+              )
+            }
+            closeSheet()
+          }}
+          onClose={closeSheet}
+        />
+      )}
       <OperatorSheet
         clause={address.sheet === 'operator' ? clause : null}
         onChange={(next) => clausePath && apply(updateClause(where, clausePath, () => next))}

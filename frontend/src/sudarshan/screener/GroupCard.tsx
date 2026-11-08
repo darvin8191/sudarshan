@@ -58,7 +58,7 @@ export function GroupCard({
       </div>
       {empty && (
         <p className="px-1 text-[0.8125rem] font-semibold text-[color:var(--warning-text)]">
-          This group has no conditions. Add one, or delete the group.
+          A group needs at least one condition.
         </p>
       )}
       {children}

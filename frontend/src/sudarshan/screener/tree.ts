@@ -111,7 +111,7 @@ export function whyNoGroup(root: Group, path: Path): string | null {
 
 export function whyNoClause(root: Group): string | null {
   return countClauses(root) >= MAX_CLAUSES
-    ? `A screen can have ${MAX_CLAUSES} conditions at most.`
+    ? `A screen can hold ${MAX_CLAUSES} conditions at most. Delete some.`
     : null
 }
 

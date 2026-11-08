@@ -1,4 +1,4 @@
-import { EllipsisVertical, Power, PowerOff, TriangleAlert } from 'lucide-react'
+import { EllipsisVertical, Power, PowerOff, Replace, TriangleAlert } from 'lucide-react'
 import { useId } from 'react'
 import { cn } from '@/lib/utils'
 import { OPERATOR_BY_ID } from './catalog'
@@ -148,14 +148,26 @@ function OperandChips({
     )
   if (operand && 'num' in operand) {
     return (
-      <input
-        type="text"
-        inputMode="decimal"
-        aria-label={`Number, ${side === 'left' ? 'first' : 'second'} side`}
-        value={operand.num}
-        onChange={(event) => onNumber(side, event.target.value)}
-        className="min-h-12 w-24 rounded-xl border border-input bg-card px-3 text-[0.9375rem] font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      />
+      <span className="inline-flex items-center gap-1">
+        <input
+          type="text"
+          inputMode="decimal"
+          aria-label={`Number, ${side === 'left' ? 'first' : 'second'} side`}
+          value={operand.num}
+          onChange={(event) => onNumber(side, event.target.value)}
+          className="min-h-12 w-24 rounded-xl border border-input bg-card px-3 text-[0.9375rem] font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        />
+        {onOperand && (
+          <button
+            type="button"
+            aria-label={`Pick a different value, ${side === 'left' ? 'first' : 'second'} side`}
+            onClick={() => onOperand(side)}
+            className="flex size-12 items-center justify-center rounded-xl text-[color:var(--text-secondary)] outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Replace aria-hidden="true" className="size-5" />
+          </button>
+        )}
+      </span>
     )
   }
   return (

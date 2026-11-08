@@ -131,9 +131,10 @@ export function ScreenEditor({
         : send.problem?.code === 'invalid'
           ? send.problem
           : null
-    if (problem?.field) {
-      const id = clausesOf(draft.where).find((clause) => clause.id === problem.field)?.id
-      if (id) out.set(id, problem.message)
+    // The service names the part by a path ("c1.right", "c1.args.pct"): the card is the id before it.
+    const id = problem?.field?.split('.')[0]
+    if (problem && id && clausesOf(draft.where).some((clause) => clause.id === id)) {
+      out.set(id, problem.message)
     }
     return out
   }, [check.state, send.problem, draft.where])

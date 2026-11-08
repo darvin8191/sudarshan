@@ -55,7 +55,7 @@ describe('the rule tree', () => {
     for (let i = 1; i < MAX_CLAUSES; i += 1) tree = addClause(tree, [], 15) as Group
     expect(countClauses(tree)).toBe(MAX_CLAUSES)
     expect(addClause(tree, [], 15)).toBeNull()
-    expect(whyNoClause(tree)).toBe('A screen can have 20 conditions at most.')
+    expect(whyNoClause(tree)).toBe('A screen can hold 20 conditions at most. Delete some.')
     expect(duplicate(tree, [0])).toBeNull()
   })
 

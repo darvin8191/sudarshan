@@ -259,3 +259,8 @@ export const WORDS = {
   switched_off: 'The screener is switched off on the server.',
   gone: 'This screen was deleted.',
 } as const
+
+export type IndOperand = Extract<Operand, { ind: string }>
+export type OptOperand = Extract<Operand, { opt: string }>
+export type OiOperand = Extract<Operand, { oi: 'buildup' | 'oi_change_pct' }>
+export type FieldOperand = Extract<Operand, { field: string }>
