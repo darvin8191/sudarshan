@@ -1,0 +1,14 @@
+# NIFTY BANK constituents, typed from NSE's index factsheet (S7: shipped with the release, no
+# download). One NSE symbol a line. Check against the current factsheet before trusting a run.
+HDFCBANK
+ICICIBANK
+SBIN
+KOTAKBANK
+AXISBANK
+INDUSINDBK
+BANKBARODA
+PNB
+CANBK
+FEDERALBNK
+IDFCFIRSTB
+AUBANK
