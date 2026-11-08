@@ -599,6 +599,7 @@ def _with_sent(response, action, quantity, closes):
     return {**response, "sent": sent}
 
 
+@risk_gate.handing_order_rows  # SUDARSHAN M5.13: its order book read serves the gate's judging
 @refuse_smart_order_on_read_failure
 def place_smartorder_api(data, auth):
     """
@@ -1083,6 +1084,7 @@ def _unlisted_left_out(rows, orders):
     return skipped, outcomes
 
 
+@risk_gate.handing_order_rows  # SUDARSHAN M5.13: its order book read serves the gate's judging
 def close_all_positions(current_api_key, auth):
     """
     Closes all open positions.

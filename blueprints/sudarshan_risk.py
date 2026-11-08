@@ -41,15 +41,6 @@ logger = get_logger(__name__)
 
 sudarshan_risk_bp = Blueprint("sudarshan_risk_bp", __name__, url_prefix="/sudarshan/risk")
 
-
-@sudarshan_risk_bp.teardown_app_request
-def _forget_handed_orders(_exc=None):
-    """Every request, whatever blueprint served it: the order book rows its exits handed to the
-    risk gate (gate.order_book_read) end with it, so a thread that serves the next request hands
-    it nothing (M5.13, release review v0.4.1 X3)."""
-    risk_gate.forget_handed_orders()
-
-
 #: Every route that changes something (method, path), for the family layer's viewer test.
 WRITE_ROUTES = (
     ("POST", "/sudarshan/risk/killswitch"),

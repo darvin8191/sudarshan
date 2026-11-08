@@ -12,15 +12,23 @@ them for the rest of that request; it reads the book itself only when nothing wa
 from __future__ import annotations
 
 import time
+from concurrent.futures import ThreadPoolExecutor
 
-from guard_world import make_app
-from v041_world import CE, ON, OWNER, SBIN, _order, _steps, _world
+import pytest
+import test_guard_gate as gate_tests
+from test_guard_gate import CE as GATE_CE
+from test_guard_gate import ON, TOKENS, broker
+from test_guard_gate import order as gate_order
+from v041_world import CE, OWNER, SBIN, _order, _steps, _world
 
 from sudarshan.books import exit_guard
 from sudarshan.guard import gate, killswitch
 from sudarshan.guard.store import KillSwitchState
 
 PE = "BANKNIFTY27OCT2657500PE"  # NRML in the world
+
+# the fake books, the gate over them and the clock of test_guard_gate.py, as fixtures here
+book, gate_clock, the_gate = gate_tests.book, gate_tests.clock, gate_tests.the_gate
 
 
 def _held(broker, *symbols):
@@ -80,35 +88,76 @@ def test_x3_a_plain_order_nothing_handed_still_reads_the_book_itself(monkeypatch
 # -- the handing itself -----------------------------------------------------------------------
 
 
+def _row(oid: str, side: str, quantity: int, kind: str) -> dict:
+    """Upstox's raw order book row, the fields fills.held_by_product reads and more."""
+    return {
+        "order_id": oid,
+        "exchange_order_id": f"1100000000{oid[-2:]}",
+        "instrument_token": TOKENS[(GATE_CE, "NFO")],
+        "tradingsymbol": "NIFTY2610725900CE",
+        "exchange": "NFO",
+        "product": "I",
+        "transaction_type": side,
+        "order_type": kind,
+        "quantity": quantity,
+        "filled_quantity": quantity,
+        "pending_quantity": 0,
+        "status": "complete",
+        "average_price": 120.0,
+        "order_timestamp": "2026-11-09 10:00:00",
+    }
+
+
+ENTRY = _row("261109000000001", "BUY", 65, "MARKET")
+STOP = _row("261109000000002", "SELL", 65, "SL-M")
+
+
 def test_handed_rows_serve_their_owner_only_and_age_out(monkeypatch):
     rows = [{"order_id": "1"}]
-    gate.order_book_read("token", rows)
-    assert gate.handed_order_rows("token") == rows
-    assert gate.handed_order_rows("another") is None
-    real = time.monotonic
-    monkeypatch.setattr(time, "monotonic", lambda: real() + gate.HANDED_ORDERS_WITHIN_S + 1)
-    assert gate.handed_order_rows("token") is None
+    with gate.handed_orders_kept_apart():
+        gate.order_book_read("token", rows)
+        assert gate.handed_order_rows("token") == rows
+        assert gate.handed_order_rows("another") is None
+        real = time.monotonic
+        monkeypatch.setattr(time, "monotonic", lambda: real() + gate.HANDED_ORDERS_WITHIN_S + 1)
+        assert gate.handed_order_rows("token") is None
 
 
 def test_the_handed_rows_are_a_copy_the_caller_cannot_change_after():
     rows = [{"order_id": "1"}]
-    gate.order_book_read("token", rows)
-    rows.clear()
-    assert gate.handed_order_rows("token") == [{"order_id": "1"}]
+    with gate.handed_orders_kept_apart():
+        gate.order_book_read("token", rows)
+        rows.clear()
+        assert gate.handed_order_rows("token") == [{"order_id": "1"}]
 
 
-def test_forgetting_ends_the_handing():
+def test_outside_a_scope_nothing_is_handed_and_nothing_is_read():
+    """Review MEDIUM-1: a caller that opens no scope (a background thread's read, a module that
+    hands rows without the decorator) hands nothing, so the gate reads the book itself."""
     gate.order_book_read("token", [{"order_id": "1"}])
-    gate.forget_handed_orders()
     assert gate.handed_order_rows("token") is None
 
 
-def test_a_block_kept_apart_neither_sees_what_came_before_nor_leaves_anything():
-    gate.order_book_read("token", [{"order_id": "before"}])
+def test_a_scope_neither_sees_what_came_before_nor_leaves_anything():
     with gate.handed_orders_kept_apart():
-        assert gate.handed_order_rows("token") is None
-        gate.order_book_read("token", [{"order_id": "inside"}])
-    assert gate.handed_order_rows("token") == [{"order_id": "before"}]
+        gate.order_book_read("token", [{"order_id": "before"}])
+        with gate.handed_orders_kept_apart():
+            assert gate.handed_order_rows("token") is None
+            gate.order_book_read("token", [{"order_id": "inside"}])
+        assert gate.handed_order_rows("token") == [{"order_id": "before"}]
+    assert gate.handed_order_rows("token") is None
+
+
+def test_the_scope_ends_when_the_call_raises_too():
+    @gate.handing_order_rows
+    def reads_then_breaks(owner):
+        gate.order_book_read(owner, [{"order_id": "1"}])
+        assert gate.handed_order_rows(owner) is not None
+        raise RuntimeError("Upstox dropped the connection")
+
+    with pytest.raises(RuntimeError):
+        reads_then_breaks("token")
+    assert gate.handed_order_rows("token") is None
 
 
 def test_the_handing_lasts_the_window_exit_all_sends_in():
@@ -117,23 +166,62 @@ def test_the_handing_lasts_the_window_exit_all_sends_in():
     )
 
 
-def test_every_request_forgets_what_its_caller_handed(monkeypatch, risk_store):
-    """A gthread pool thread serves one request after another in the same context: the rows one
-    exit handed must not correct the gate for the next request's order."""
-    from blueprints import sudarshan_risk
+def test_the_two_upstox_callers_scope_their_own_reads():
+    from broker.upstox.api import order_api
 
-    monkeypatch.setattr(sudarshan_risk, "find_user_by_username", lambda: None)
-    app = make_app()
-    seen_inside = []
+    for name in ("place_smartorder_api", "close_all_positions"):
+        wrapped = getattr(order_api, name)
+        assert "scoped" in wrapped.__code__.co_name, name  # gate.handing_order_rows outermost
 
-    @app.route("/hand-for-tests")
-    def hand():
-        gate.order_book_read("token", [{"order_id": "1"}])
-        seen_inside.append(gate.handed_order_rows("token"))
-        return {"ok": True}
 
-    with gate.handed_orders_kept_apart():
-        with app.test_client() as client:
-            assert client.get("/hand-for-tests").status_code == 200
-        assert seen_inside == [[{"order_id": "1"}]]
-        assert gate.handed_order_rows("token") is None
+def test_m1_rows_one_flow_run_handed_do_not_judge_the_next_run_on_its_pool_thread(
+    the_gate, book, gate_clock, monkeypatch
+):
+    """Review MEDIUM-1. 10:00:00 a price alert's Flow run sends a smart order: _read_order_rows
+    reads the order book (long 65, entry filled) on a pool thread. 10:00:05 the owner's stop
+    (SELL 65 SL-M) fills at Upstox; the positions row still shows 65. 10:00:10 the next alert's
+    run, on the same pool thread, sends a plain SELL 65 (a new short) while the kill switch is
+    on. The gate must read the order book, see the stop's fill and refuse. On 7fd4e44 the rows
+    the first run handed were still there (no request, no teardown): the SELL went as an exit
+    and the account ended short 65 under the kill switch."""
+    from broker.upstox.api import order_api
+
+    the_gate.set_state(ON)
+    upstox = broker()
+    monkeypatch.setattr(
+        order_api, "get_order_book", lambda auth: {"status": "success", "data": [dict(ENTRY)]}
+    )
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="flow-pool-test") as pool:
+        assert pool.submit(order_api._read_order_rows, "token", 4.0).result() == [ENTRY]
+        gate_clock.now += 10
+        book.rows = [
+            {
+                "instrument_token": TOKENS[(GATE_CE, "NFO")],
+                "product": "I",
+                "quantity": 65,  # the row lags the stop's fill
+                "day_buy_quantity": 65,
+                "day_sell_quantity": 0,
+            }
+        ]
+        book.order_rows = [dict(ENTRY), dict(STOP)]  # the order book as it is now
+        res, body, ref = pool.submit(upstox.place, gate_order("SELL", 65), "token").result()
+    assert ref is None, "a new short went as an exit under the kill switch"
+    assert "order_rows" in book.calls, "the gate never read the order book"
+
+
+def test_m1_control_the_same_order_in_a_fresh_thread_is_refused(the_gate, book, monkeypatch):
+    the_gate.set_state(ON)
+    upstox = broker()
+    book.rows = [
+        {
+            "instrument_token": TOKENS[(GATE_CE, "NFO")],
+            "product": "I",
+            "quantity": 65,
+            "day_buy_quantity": 65,
+            "day_sell_quantity": 0,
+        }
+    ]
+    book.order_rows = [dict(ENTRY), dict(STOP)]
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        res, body, ref = pool.submit(upstox.place, gate_order("SELL", 65), "token").result()
+    assert ref is None

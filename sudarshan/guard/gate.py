@@ -153,12 +153,15 @@ DAY_BOOK_WITHIN_S = 15.0
 #: the book once and then sends for ``EXIT_ALL_SENDS_FOR_S``, with time for the read before and
 #: the last answer after (release review v0.4.1, X3).
 HANDED_ORDERS_WITHIN_S = EXIT_ALL_SENDS_FOR_S + 15.0
-#: ``(owner, read at, rows)`` the current request's caller handed, or None. A context variable:
-#: it belongs to one request (greenlet or thread) and never crosses to another, and the risk
-#: blueprint forgets it when the request ends (``forget_handed_orders``), so a pool thread that
-#: outlives its request hands nothing to the next one.
-_HANDED_ORDERS: contextvars.ContextVar[tuple[str, float, list] | None] = contextvars.ContextVar(
-    "sudarshan_guard_handed_orders", default=None
+#: Outside any ``handing_order_rows`` scope: nothing can be handed, and nothing is read.
+_NO_SCOPE = object()
+#: ``(owner, read at, rows)`` the caller of the current scope handed, None for a scope with
+#: nothing handed yet, or ``_NO_SCOPE``. A context variable, so it belongs to one greenlet or
+#: thread; the scope (``handing_order_rows``, around the broker call that reads and sends) resets
+#: it when the call ends, so nothing outlives that call on any thread: a request's, a Flow
+#: pool's or APScheduler's (review of fix/guard-on, MEDIUM-1).
+_HANDED_ORDERS: contextvars.ContextVar[object] = contextvars.ContextVar(
+    "sudarshan_guard_handed_orders", default=_NO_SCOPE
 )
 #: A segment's session window, read from the market calendar, is kept this long.
 SESSION_KEPT_S = 600.0
@@ -1889,21 +1892,19 @@ class Gate:
 def order_book_read(owner: str, rows: list) -> None:
     """A caller sizing exits read Upstox's order book for ``owner`` (the Upstox module's
     ``_read_order_rows``: a smart order, Exit all): the gate corrects its positions with these
-    rows for the exits that follow in this request, instead of reading the book once more for
-    each of them, until ``HANDED_ORDERS_WITHIN_S`` have passed or the request ends."""
+    rows for the exits that follow in the same ``handing_order_rows`` scope, instead of reading
+    the book once more for each of them, until ``HANDED_ORDERS_WITHIN_S`` have passed or the
+    scope ends. Outside a scope nothing is handed."""
+    if _HANDED_ORDERS.get() is _NO_SCOPE:
+        return
     _HANDED_ORDERS.set((str(owner), time.monotonic(), list(rows)))
 
 
-def forget_handed_orders() -> None:
-    """The request is over: whatever its caller handed is not for the next one."""
-    _HANDED_ORDERS.set(None)
-
-
 def handed_order_rows(owner: str) -> list | None:
-    """The order book rows the current request's caller handed for ``owner``, while they are at
+    """The order book rows the current scope's caller handed for ``owner``, while they are at
     most ``HANDED_ORDERS_WITHIN_S`` old; else None, and the gate reads the book itself."""
     handed = _HANDED_ORDERS.get()
-    if handed is None:
+    if handed is _NO_SCOPE or handed is None:
         return None
     read_for, read_at, rows = handed
     if read_for != str(owner) or time.monotonic() - read_at > HANDED_ORDERS_WITHIN_S:
@@ -1913,14 +1914,27 @@ def handed_order_rows(owner: str) -> list | None:
 
 @contextlib.contextmanager
 def handed_orders_kept_apart():
-    """Run a block whose reads are handed to the gate for that block alone (the kill switch's
-    Exit all, outside any request): nothing handed before it is used in it, and nothing it hands
-    outlives it."""
+    """Run a block whose reads are handed to the gate for that block alone: nothing handed before
+    it is used in it, and nothing it hands outlives it, whatever thread runs it. The token
+    resets the variable in ``finally``, so no path depends on a request's teardown."""
     token = _HANDED_ORDERS.set(None)
     try:
         yield
     finally:
         _HANDED_ORDERS.reset(token)
+
+
+def handing_order_rows(fn: Callable) -> Callable:
+    """Decorate a broker function that reads the order book to size the exits it sends (the
+    Upstox module's place_smartorder_api and close_all_positions): its read is handed to the
+    gate for its own sends alone (``handed_orders_kept_apart``)."""
+
+    @functools.wraps(fn)
+    def scoped(*args, **kwargs):
+        with handed_orders_kept_apart():
+            return fn(*args, **kwargs)
+
+    return scoped
 
 
 def _tell_owner(text: str) -> None:

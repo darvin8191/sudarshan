@@ -614,10 +614,10 @@ def _exit_all_live(
 def _close_all(owner: Owner) -> tuple[bool, dict, int]:
     from services.close_position_service import close_position_with_auth
 
-    with risk_gate.handed_orders_kept_apart():  # Exit all's one order book read serves the gate
-        ok, body, status = close_position_with_auth(
-            {}, owner.auth_token, owner.broker, {}, force_live=True
-        )
+    # close_all_positions hands its one order book read to the gate for its own sends.
+    ok, body, status = close_position_with_auth(
+        {}, owner.auth_token, owner.broker, {}, force_live=True
+    )
     return ok, body if isinstance(body, dict) else {}, status
 
 
