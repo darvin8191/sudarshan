@@ -88,7 +88,8 @@ export interface AlertSettings {
   after_trigger: 'continue' | 'pause'
   cooldown_runs: number
   max_per_day_per_symbol: number
-  channels: Array<'telegram' | 'app'> | null
+  /** Null is the owner's usual channels; otherwise each switched on or off (the service's shape). */
+  channels: { telegram: boolean; app: boolean } | null
   columns: Array<'ltp' | 'change_pct' | 'value'>
 }
 

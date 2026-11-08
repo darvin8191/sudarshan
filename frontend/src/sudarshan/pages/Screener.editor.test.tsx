@@ -40,6 +40,14 @@ vi.mock('@/components/socket/SocketProvider', () => ({
   useSocketContext: () => ({ socket: null }),
 }))
 
+vi.mock('@/sudarshan/watchlist/useWatchlists', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/sudarshan/watchlist/useWatchlists')>()),
+  readLists: async () => [
+    { id: 4, name: 'Swing', position: 0, items: [] },
+    { id: 5, name: 'Intraday', position: 1, items: [] },
+  ],
+}))
+
 import { createQueryClient } from '@/app/providers'
 import { resetScreenActionsForTests } from '@/sudarshan/screener/actions'
 import { ScreenerError } from '@/sudarshan/screener/api'
@@ -354,5 +362,114 @@ describe('editing a saved screen', () => {
       expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Other')
     )
     expect(screen.queryByText(WORDS.conflict)).toBeNull()
+  })
+})
+
+describe('where matches go and when to be told (M9.19)', () => {
+  const saved = () => api.change.mock.calls[0][1].spec
+
+  async function openSaved() {
+    api.change.mockResolvedValue(screenRow({ version: 2 }))
+    renderPage(['/screener?screen=1&tab=edit'])
+    await screen.findByLabelText('Name')
+  }
+  const save = async () => {
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(api.change).toHaveBeenCalledTimes(1))
+  }
+
+  it('says in words where matches go and how alerts are set', async () => {
+    await openSaved()
+    expect(screen.getByText(/Alerts on · 1\+ matches · your usual channels/)).toBeTruthy()
+    expect(screen.getByText(/up to 10 a check/)).toBeTruthy()
+  })
+
+  it('picks one of my lists and saves it with the grace and the cap', async () => {
+    await openSaved()
+    await userEvent.click(screen.getByRole('button', { name: /Add matches to a watchlist/ }))
+    expect(where()).toContain('sheet=target')
+    await userEvent.click(await screen.findByRole('button', { name: 'One of mine' }))
+    await userEvent.selectOptions(screen.getByLabelText('Your list'), '5')
+    await userEvent.click(screen.getByRole('button', { name: 'At the end of the day' }))
+    const cap = screen.getByLabelText('Most to add in one check')
+    await userEvent.clear(cap)
+    await userEvent.type(cap, '25')
+    await userEvent.click(screen.getByRole('button', { name: 'Done' }))
+    expect(where()).not.toContain('sheet=')
+    await save()
+    expect(saved().target).toEqual({
+      list_id: 5,
+      create_name: null,
+      grace: { mode: 'day_end' },
+      max_adds_per_run: 25,
+    })
+  })
+
+  it('refuses a number out of range in the service words and keeps the last good value (99, before the third digit)', async () => {
+    await openSaved()
+    await userEvent.click(screen.getByRole('button', { name: /Add matches to a watchlist/ }))
+    const cap = await screen.findByLabelText('Most to add in one check')
+    await userEvent.clear(cap)
+    await userEvent.type(cap, '999')
+    expect(
+      await screen.findByText('The most to add in one check must be a whole number from 1 to 250.')
+    ).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Done' }))
+    await save()
+    expect(saved().target.max_adds_per_run).toBe(99)
+  })
+
+  it('switches the list off, and saves that as no list rather than a missing one', async () => {
+    await openSaved()
+    await userEvent.click(screen.getByRole('button', { name: /Add matches to a watchlist/ }))
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Add matches to a watchlist', pressed: true })
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Done' }))
+    expect(screen.getByText('Matches are not added to a watchlist.')).toBeTruthy()
+    await save()
+    expect(saved().target).toBeNull()
+  })
+
+  it('sets alerts: where they go, which figures, and warns when they go nowhere', async () => {
+    await openSaved()
+    await userEvent.click(screen.getByRole('button', { name: /^Alerts/ }))
+    expect(where()).toContain('sheet=alerts')
+    await userEvent.click(await screen.findByRole('button', { name: 'Telegram' }))
+    expect(screen.getByRole('button', { name: 'Telegram' }).getAttribute('aria-pressed')).toBe(
+      'true'
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Telegram' }))
+    await userEvent.click(screen.getByRole('button', { name: 'The app' }))
+    expect(await screen.findByText(/Alerts are on but go nowhere/)).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'The app' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Rank value' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Pause alerts' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Done' }))
+    await save()
+    expect(saved().alerts).toMatchObject({
+      channels: { telegram: false, app: true },
+      columns: ['ltp', 'change_pct', 'value'],
+      after_trigger: 'pause',
+    })
+  })
+
+  it('keeps at least one figure in the alert', async () => {
+    await openSaved()
+    await userEvent.click(screen.getByRole('button', { name: /^Alerts/ }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Price' }))
+    await userEvent.click(screen.getByRole('button', { name: '% change' }))
+    expect(screen.getByRole('button', { name: '% change' }).getAttribute('aria-pressed')).toBe(
+      'true'
+    )
+  })
+
+  it('closes a settings sheet on Back, leaving the screen open', async () => {
+    await openSaved()
+    await userEvent.click(screen.getByRole('button', { name: /^Alerts/ }))
+    await screen.findByRole('button', { name: 'Pause alerts' })
+    back()
+    await waitFor(() => expect(where()).not.toContain('sheet='))
+    expect(where()).toContain('screen=1')
   })
 })

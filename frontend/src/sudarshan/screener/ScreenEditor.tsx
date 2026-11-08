@@ -1,14 +1,17 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { FlaskConical, LoaderCircle, Save, TriangleAlert } from 'lucide-react'
+import { ChevronRight, FlaskConical, LoaderCircle, Save, TriangleAlert } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { ACTION, OUTLINED } from '@/sudarshan/books/cards/parts'
+import { readLists, WATCHLISTS_KEY } from '@/sudarshan/watchlist/useWatchlists'
 import { toast } from '@/utils/toast'
 import { screenerApi } from './api'
 import { INDEX_LISTS, NAME_MAX, RUN_TIMEFRAMES } from './catalog'
 import { STATE_KEY, UNIVERSES_KEY } from './keys'
 import { PreviewSheet } from './PreviewSheet'
 import { RuleBuilder } from './RuleBuilder'
+import { AlertsSheet, TargetSheet } from './SettingsSheets'
+import { alertWords, freshTarget, targetWords } from './settings'
 import { putRow } from './stateCache'
 import { clausesOf, countOn, freshClause, groupOf } from './tree'
 import type {
@@ -23,6 +26,8 @@ import { WORDS } from './types'
 import { usePreviewCheck } from './usePreviewCheck'
 import type { Address } from './useScreenerAddress'
 import { useSend } from './useSend'
+
+const NO_LISTS: Array<{ id: number; name: string }> = []
 
 const INPUT =
   'min-h-12 w-full rounded-xl border border-input bg-card px-3 text-[0.9375rem] font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring'
@@ -103,6 +108,13 @@ export function ScreenEditor({
   const [base, setBase] = useState(() => ({ spec: row?.spec ?? null, version: row?.version ?? 0 }))
   const requestId = useRef(crypto.randomUUID())
   const send = useSend()
+  const listsQuery = useQuery({
+    queryKey: WATCHLISTS_KEY,
+    queryFn: readLists,
+    staleTime: 15_000,
+    retry: false,
+  })
+  const lists = listsQuery.data ?? NO_LISTS
   const universes = useQuery({
     queryKey: UNIVERSES_KEY,
     queryFn: screenerApi.universes,
@@ -111,6 +123,9 @@ export function ScreenEditor({
   })
   const options = universes.data?.universes.length ? universes.data.universes : FALLBACK
 
+  // A screen that never said where its matches go gets the service's default: a new list named
+  // after it. Null is the owner's choice of none.
+  const target = draft.target === undefined ? freshTarget(draft.name) : draft.target
   const touched = JSON.stringify(draft) !== JSON.stringify(base.spec)
   const dirty = row ? JSON.stringify(draft) !== JSON.stringify(row.spec) : true
   const changedElsewhere = row !== undefined && row.version !== base.version && touched
@@ -267,6 +282,42 @@ export function ScreenEditor({
         closeSheet={closeSheet}
       />
 
+      <section className="flex flex-col divide-y rounded-[1.125rem] border bg-card shadow-[var(--shadow-card)]">
+        <button
+          type="button"
+          aria-haspopup="dialog"
+          onClick={() => openSheet('target')}
+          className="flex min-h-14 w-full items-center justify-between gap-3 px-4 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        >
+          <span className="flex min-w-0 flex-col gap-0.5">
+            <span className="text-sm font-bold">Add matches to a watchlist</span>
+            <span className="text-[0.8125rem] font-medium text-[color:var(--text-secondary)]">
+              {targetWords(
+                target,
+                target?.list_id != null
+                  ? (lists.find((list) => list.id === target.list_id)?.name ?? null)
+                  : null
+              )}
+            </span>
+          </span>
+          <ChevronRight aria-hidden="true" className="size-5 shrink-0" />
+        </button>
+        <button
+          type="button"
+          aria-haspopup="dialog"
+          onClick={() => openSheet('alerts')}
+          className="flex min-h-14 w-full items-center justify-between gap-3 px-4 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        >
+          <span className="flex min-w-0 flex-col gap-0.5">
+            <span className="text-sm font-bold">Alerts</span>
+            <span className="text-[0.8125rem] font-medium text-[color:var(--text-secondary)]">
+              {alertWords(draft.alerts)}
+            </span>
+          </span>
+          <ChevronRight aria-hidden="true" className="size-5 shrink-0" />
+        </button>
+      </section>
+
       {noneOn && (
         <p className="flex items-start gap-1.5 text-[0.8125rem] font-semibold text-[color:var(--warning-text)]">
           <TriangleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
@@ -321,6 +372,20 @@ export function ScreenEditor({
         </button>
       </div>
 
+      <TargetSheet
+        open={address.sheet === 'target'}
+        name={draft.name}
+        target={target}
+        lists={lists}
+        onChange={(target) => set({ target })}
+        onClose={closeSheet}
+      />
+      <AlertsSheet
+        open={address.sheet === 'alerts'}
+        alerts={draft.alerts}
+        onChange={(alerts) => set({ alerts })}
+        onClose={closeSheet}
+      />
       <PreviewSheet open={address.sheet === 'preview'} state={check.state} onClose={closeSheet} />
     </div>
   )
