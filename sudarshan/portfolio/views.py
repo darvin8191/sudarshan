@@ -494,8 +494,9 @@ class Views:
             out["by_fy"] = [fy.as_dict() for fy in performance.by_financial_year(ledger)]
             out["income"] = {
                 **performance.income_report(ledger, today),
-                # M7.29: yield on cost is the twelve months' income on what the holdings cost.
-                **performance.income_summary(ledger, today, live.totals["cost_paise"]),
+                # M7.29: yield on cost is the income the lots still held earned in the twelve
+                # months, on those lots' cost.
+                **performance.income_summary(ledger, today),
             }
             out["series_words"] = days.words
             return out

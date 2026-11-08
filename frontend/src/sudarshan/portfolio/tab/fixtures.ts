@@ -193,6 +193,8 @@ export function report(extra: Partial<PerformanceReport> = {}): PerformanceRepor
         { month: 202511, paise: 10_000 },
       ],
       last_12m_paise: 10_000,
+      held_income_paise: 10_000,
+      held_cost_paise: 800_000,
       yield_on_cost_pct: '1.2500',
       by_fy: [
         { fy: 2025, label: 'FY 2025-26', paise: 40_000 },

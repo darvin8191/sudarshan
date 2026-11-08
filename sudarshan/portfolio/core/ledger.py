@@ -87,8 +87,11 @@ def _sell(ledger: Ledger, entry: Entry) -> None:
 
 
 def _income(ledger: Ledger, entry: Entry) -> None:
-    """A dividend or interest: counted gross, whatever was withheld; no lots change."""
-    ledger.position(entry.account_id, entry.asset_id).income_paise += entry.amount_paise
+    """A dividend or interest: counted gross, whatever was withheld; no lot changes in quantity or
+    cost, but the lots held on the day are credited with it (Lot.income)."""
+    position = ledger.position(entry.account_id, entry.asset_id)
+    position.income_paise += entry.amount_paise
+    position.credit(entry.trade_date, entry.amount_paise)  # to the lots held, for the yield
     ledger.journal.append(Move(entry, entry.account_id, entry.asset_id, paise=entry.amount_paise))
 
 
