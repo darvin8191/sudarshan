@@ -275,7 +275,11 @@ def test_h1_a_resting_stop_s_claim_ends_150_s_after_its_answer_as_before(judged,
     assert judged.sends() == 1
     clock.now += PAST
     judged.set_state(ON)
+    book.calls.clear()
     assert upstox.place(order("SELL"), "token")[2] == "OID1"  # no read, no refusal
+    # The stop's claim ended at 150 s on its own: nothing was left for an order book read to
+    # settle (a stop kept past 150 s would be dropped by that read, and the exit still go).
+    assert book.calls.count("statuses") == 0, book.calls
     assert judged.sends() == 1  # the exit's own claim; the stop's is gone
 
 
