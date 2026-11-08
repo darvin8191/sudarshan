@@ -37,6 +37,7 @@ from .core.filters import BadFilter, Filters
 from .core.kinds import BENCHMARKS, HOLDING_KINDS
 from .core.ledger import replay
 from .core.model import Entry, Refusal
+from .core.money import round_div
 from .core.valuation import Fixed, Row
 from .store import Invalid, NotFound, PortfolioStore, Scope, StoreError, Tx
 
@@ -175,6 +176,9 @@ class Views:
             accounts = {a["id"]: Owner(a["name"], a["member_id"]) for a in tx.rows("account")}
             members = {m["id"]: m["name"] for m in tx.rows("member")}
             named = sorted({e.asset_id for e in live.entries if e.asset_id is not None})
+            # M7.19 V2: the tab's loans lower its net worth and enter no return figure.
+            liabilities = self._liabilities(tx, tab, today, filters.as_of, now)
+            live.fixed["liabilities_paise"] = sum(each["outstanding_paise"] for each in liabilities)
             return {
                 "tab": serialize.tab(tab),
                 "today": today,
@@ -189,7 +193,7 @@ class Views:
                     for a in named
                     if a in live.assets
                 ],
-                "liabilities": [],
+                "liabilities": liabilities,
                 "allocation": allocate_all(held, accounts, members),
                 "notes": self._notes(live),
                 "layout": layout.layout_state(tx, tab),
@@ -339,6 +343,35 @@ class Views:
             "closed_today_base_paise": base,
             "liabilities_paise": 0,
         }
+
+    def _liabilities(self, tx, tab, today, as_of, now) -> list[dict[str, Any]]:
+        """types.ts ``Liability`` for each loan linked to the tab: its outstanding balance on the
+        newest day on or before ``as_of`` (today), as the owner last set it, and how old that is.
+        A loan whose balance has reached 0 is paid off and not listed; one with no balance on or
+        before the day is left out too (it did not exist then)."""
+        on = today if as_of is None else as_of
+        found = []
+        for asset_id in tx.liabilities_of(tab["id"]):
+            asset = tx.get("asset", asset_id)
+            if asset is None or asset["kind"] != "liability":
+                continue
+            points = [p for p in tx.price_points(asset_id) if p["day"] <= on]
+            if not points:
+                continue
+            latest = points[-1]
+            if latest["price_u"] <= 0:
+                continue
+            fresh = freshness.manual(latest["day"], on, tab["manual_old_days"], noun="Balance")
+            found.append(
+                {
+                    "asset_id": asset_id,
+                    "name": asset["name"],
+                    "outstanding_paise": round_div(latest["price_u"], 100),
+                    "day": latest["day"],
+                    "fresh": fresh.as_dict(),
+                }
+            )
+        return found
 
     @staticmethod
     def _notes(live) -> list[dict[str, Any]]:

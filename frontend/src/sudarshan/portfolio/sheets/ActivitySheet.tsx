@@ -255,12 +255,15 @@ export function ActivitySheet({
         const day = inputToDay(form.date)
         const paise = parseRupees(amountShown)
         if (day === null || paise === null) return
+        // M7.19 V2: a loan belongs to this tab, whose net worth it lowers.
         const made = await portfolioCall('asset_create', {
           request_id: requestId.current,
           kind: 'liability',
           name: form.loanName.trim(),
           asset_class: 'other',
           first_value: { day, price_u: paise * 100 },
+          tab_id: tab.id,
+          version: tab.version,
         })
         if (!made.enabled)
           throw new PortfolioError({ code: 'unavailable', message: made.message, entryId: null })

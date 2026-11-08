@@ -26,7 +26,7 @@ vi.mock('@/sudarshan/dashboard/MarketCalendar', async (importOriginal) => ({
 import { createQueryClient } from '@/app/providers'
 import { feed } from '@/test/marketDataHarness'
 import { tab } from '../sheets/fixtures'
-import { report, row, view } from './fixtures'
+import { FIXED, report, row, view } from './fixtures'
 import { TabOverview } from './Overview'
 
 function show(data: object, part: 'overview' | 'holdings' = 'overview') {
@@ -80,6 +80,40 @@ describe('the Overview', () => {
     expect(within(cards).getAllByText('No price yet').length).toBeGreaterThan(0)
     expect(within(cards).getAllByText('Not known yet').length).toBeGreaterThan(0)
     expect(screen.getByText('1 holding has no price yet and is counted at cost.')).toBeTruthy()
+  })
+
+  it('shows net worth and each loan with its age when the tab has a loan', async () => {
+    const loans = [
+      {
+        asset_id: 9,
+        name: 'Home loan',
+        outstanding_paise: 150_000,
+        day: 20260901,
+        fresh: { state: 'old' as const, words: 'Balance from 1 Sep · 55 days old' },
+      },
+    ]
+    show({
+      ...view([row(1, 'Alpha', { price: 1_100_000 })]),
+      fixed: { ...FIXED, liabilities_paise: 150_000 },
+      liabilities: loans,
+    })
+    const summary = await screen.findByRole('region', { name: 'Summary' })
+    expect(within(summary).getByText(/Net worth/).textContent).toContain('−₹400.00') // 1,100 − 1,500
+    expect(within(summary).getByText(/after loans of ₹1,500.00/)).toBeTruthy()
+    const list = within(summary).getByRole('list', { name: 'Loans' })
+    expect(within(list).getByText('Home loan')).toBeTruthy()
+    expect(within(list).getByText('₹1,500.00')).toBeTruthy()
+    expect(within(list).getByText(/Old ·/)).toBeTruthy()
+    expect(within(list).getByText(/55 days old/)).toBeTruthy()
+    // A return figure never moves for a loan: the overall gain is still +200.
+    expect(within(summary).getAllByText('+₹200.00')).toHaveLength(2)
+  })
+
+  it('shows no net worth line and no loans list on a tab without a loan', async () => {
+    show(view([row(1, 'Alpha', { price: 1_100_000 })]))
+    const summary = await screen.findByRole('region', { name: 'Summary' })
+    expect(within(summary).queryByText(/Net worth/)).toBeNull()
+    expect(within(summary).queryByRole('list', { name: 'Loans' })).toBeNull()
   })
 
   it('marks an old NAV with a clock and the word Old', async () => {

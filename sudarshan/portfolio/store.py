@@ -384,16 +384,58 @@ class Tx:
         return [self._out(row) for row in self.conn.execute(query).mappings()]
 
     def remove_tab(self, tab_id: int) -> None:
-        """A tab and what hangs on it (entries, layout, saved views, import batches)."""
+        """A tab and what hangs on it (entries, layout, saved views, import batches, the links
+        to its loans; a loan's asset and balances stay, as every asset does)."""
         for name, column in (
             ("activity", "tab_id"),
             ("tab_layout", "tab_id"),
             ("saved_view", "tab_id"),
             ("import_batch", "tab_id"),
+            ("tab_liability", "tab_id"),
         ):
             t = self._t(name)
             self.conn.execute(delete(t).where(t.c[column] == tab_id, self._mine(t)))
         self.remove("tab", tab_id)
+
+    # ---- a tab's loans (M7.19 V2) ----
+    def liabilities_of(self, tab_id: int) -> list[int]:
+        """The ids of the liability assets linked to a tab, oldest link first."""
+        t = self._t("tab_liability")
+        found = self.conn.execute(
+            select(t.c.asset_id)
+            .where(t.c.tab_id == tab_id, self._mine(t))
+            .order_by(t.c.created_at, t.c.asset_id)
+        )
+        return [int(row[0]) for row in found]
+
+    def tabs_of_liability(self, asset_id: int) -> list[int]:
+        t = self._t("tab_liability")
+        found = self.conn.execute(select(t.c.tab_id).where(t.c.asset_id == asset_id, self._mine(t)))
+        return [int(row[0]) for row in found]
+
+    def link_liability(self, tab_id: int, asset_id: int, now: int) -> bool:
+        """Link a loan to a tab; False when it was linked already."""
+        if tab_id in self.tabs_of_liability(asset_id):
+            return False
+        t = self._t("tab_liability")
+        self.conn.execute(
+            insert(t).values(
+                tab_id=tab_id, asset_id=asset_id, principal=self.who, created_at=now, updated_at=now
+            )
+        )
+        return True
+
+    def unlink_liability(self, tab_id: int, asset_id: int) -> bool:
+        t = self._t("tab_liability")
+        return bool(
+            self.conn.execute(
+                delete(t).where(t.c.tab_id == tab_id, t.c.asset_id == asset_id, self._mine(t))
+            ).rowcount
+        )
+
+    def price_points(self, asset_id: int) -> list[dict[str, Any]]:
+        """The owner's own values of an asset, oldest day first."""
+        return self.rows("price_point", "day", asset_id=asset_id)
 
     # ---- assets ----
     def aliases(self, asset_id: int) -> list[dict[str, Any]]:

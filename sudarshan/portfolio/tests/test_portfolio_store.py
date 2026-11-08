@@ -30,6 +30,7 @@ from sudarshan.portfolio.store import (
 
 NOW = 1_793_000_000_000
 OWNER = Scope.owner()
+ALL_STEPS = [number for number, _ in migrations.STEPS]
 VIEWER = Scope("viewer")
 
 
@@ -62,7 +63,7 @@ def snapshot(directory: Path) -> dict:
 
 # ---- the file and its schema ---------------------------------------------------------------
 def test_a_fresh_file_is_private_at_the_latest_version_and_seeded(path, made):
-    assert made.applied == [1] and raw(path, "PRAGMA user_version") == [(migrations.LATEST,)]
+    assert made.applied == ALL_STEPS and raw(path, "PRAGMA user_version") == [(migrations.LATEST,)]
     assert os.stat(path).st_mode & 0o777 == 0o600
     assert os.stat(path.parent).st_mode & 0o777 == 0o700
     assert raw(path, "PRAGMA journal_mode") == [("wal",)]
@@ -86,7 +87,7 @@ def test_a_populated_copy_forced_back_a_version_is_migrated_without_losing_a_row
     raw(path, "PRAGMA user_version = 0")
     before = raw(path, "SELECT id, name, version FROM tab ORDER BY id")
     again = PortfolioStore(path, now=NOW + 5)
-    assert again.applied == [1]
+    assert again.applied == ALL_STEPS
     assert raw(path, "SELECT id, name, version FROM tab ORDER BY id") == before
     assert raw(path, "SELECT count(*) FROM member") == [(1,)]  # the seeds did not repeat
     again.close()
@@ -114,7 +115,7 @@ def test_a_file_newer_than_the_code_is_refused_and_left_alone(path, made):
             "nothing was changed."
         )
     )
-    assert caught.value.cause == "file version 99, this release knows up to 1"
+    assert caught.value.cause == f"file version 99, this release knows up to {migrations.LATEST}"
     assert raw(path, "PRAGMA user_version") == [(99,)]
     assert {k: v for k, v in snapshot(path.parent).items() if not k.endswith("-shm")} == {
         k: v for k, v in stamp.items() if not k.endswith("-shm")
@@ -164,7 +165,7 @@ def test_two_openers_of_a_new_file_at_once_both_start(path, monkeypatch):
     finally:
         event.remove(Engine, "before_cursor_execute", hook)
     assert not [r for r in results if isinstance(r, BaseException)], results
-    assert sorted(len(r[0]) for r in results) == [0, 1]
+    assert sorted(len(r[0]) for r in results) == [0, len(ALL_STEPS)]
     assert raw(path, "PRAGMA user_version") == [(migrations.LATEST,)]
     assert raw(path, "SELECT count(*) FROM tab") == [(1,)]  # seeded once
 
@@ -251,7 +252,7 @@ def test_status_of_a_missing_file_makes_nothing(tmp_path, capsys):
     target = tmp_path / "state" / DB_FILENAME
     assert migrate.main(["--status", "--path", str(target)]) == 0
     out = capsys.readouterr().out
-    assert "file none, code 1" in out and "pending: [1]" in out
+    assert f"file none, code {migrations.LATEST}" in out and f"pending: {ALL_STEPS}" in out
     assert not target.parent.exists()
 
 
@@ -260,7 +261,7 @@ def test_status_changes_nothing_in_the_directory(path, made, capsys):
     before = snapshot(path.parent)
     assert migrate.main(["--status", "--path", str(path)]) == 0
     out = capsys.readouterr().out
-    assert "file 1, code 1" in out and "pending: none" in out
+    assert f"file {migrations.LATEST}, code {migrations.LATEST}" in out and "pending: none" in out
     assert snapshot(path.parent) == before
 
 
@@ -269,7 +270,7 @@ def test_status_of_an_old_file_lists_the_pending_step_and_leaves_it(path, made, 
     raw(path, "PRAGMA user_version = 0")
     before = snapshot(path.parent)
     assert migrate.main(["--status", "--path", str(path)]) == 0
-    assert "pending: [1]" in capsys.readouterr().out
+    assert f"pending: {ALL_STEPS}" in capsys.readouterr().out
     assert snapshot(path.parent) == before and raw(path, "PRAGMA user_version") == [(0,)]
 
 
@@ -299,7 +300,7 @@ def test_applying_migrates_and_refuses_while_the_service_holds_its_port(path, ca
         assert not path.exists()
     assert "stop it first" in capsys.readouterr().out
     assert migrate.main(["--path", str(path), "--port", "1"]) == 0
-    assert raw(path, "PRAGMA user_version") == [(1,)]
+    assert raw(path, "PRAGMA user_version") == [(migrations.LATEST,)]
 
 
 # ---- principal -----------------------------------------------------------------------------

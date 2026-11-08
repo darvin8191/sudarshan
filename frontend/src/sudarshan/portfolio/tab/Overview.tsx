@@ -203,7 +203,15 @@ function Loaded({
     history: performance('history'),
     performance: performance('performance'),
     income: performance('income'),
-    summary: <SummaryTile key="summary" totals={live.totals} fixed={data.fixed} stale={allStale} />,
+    summary: (
+      <SummaryTile
+        key="summary"
+        totals={live.totals}
+        fixed={data.fixed}
+        stale={allStale}
+        loans={data.liabilities}
+      />
+    ),
     // Today means the day the page is read: not for a day in the past.
     today: asOf ? null : (
       <TodayTile key="today" totals={live.totals} fixed={data.fixed} stale={allStale} />

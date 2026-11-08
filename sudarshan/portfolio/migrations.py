@@ -283,8 +283,29 @@ def _v1(conn: Connection) -> None:
         conn.exec_driver_sql(sql)
 
 
+#: V2 (M7.19, after v0.5.0): a loan or liability belongs to one tab, so that tab shows net worth
+#: (design 4.2 and 4.5). Additive: a link table; a liability made before this step has no row
+#: here and is linked the first time its balance is set from a tab.
+V2 = (
+    """CREATE TABLE IF NOT EXISTS tab_liability (
+        tab_id INTEGER NOT NULL,
+        asset_id INTEGER NOT NULL,
+        principal TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (tab_id, asset_id)
+    )""",
+    "CREATE INDEX IF NOT EXISTS tab_liability_asset ON tab_liability (principal, asset_id)",
+)
+
+
+def _v2(conn: Connection) -> None:
+    for sql in V2:
+        conn.exec_driver_sql(sql)
+
+
 Step = tuple[int, Callable[[Connection], None]]
-STEPS: tuple[Step, ...] = ((1, _v1),)
+STEPS: tuple[Step, ...] = ((1, _v1), (2, _v2))
 LATEST = STEPS[-1][0]
 
 

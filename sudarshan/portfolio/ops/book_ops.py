@@ -22,6 +22,7 @@ WORDS = {
     "manual_only": "Only a value you keep by hand can be set here. A share or a fund is priced for you.",
     "value": "Enter the value with a real date and a price above zero.",
     "future": "A value cannot be dated after today.",
+    "balance": "Enter the outstanding balance with a real date; 0 once the loan is paid off.",
     "entry": "The entry was incomplete. Reload the page and enter it again.",
 }
 
@@ -101,6 +102,9 @@ async def asset_create(ctx, message):
     )  # fmt: skip
     if message.get("tags") is not None:
         more["tags"] = message["tags"]
+    if message.get("kind") == "liability":  # M7.19 V2: a loan belongs to a tab
+        more["tab_id"] = maybe_whole(message, "tab_id")
+        more["version"] = maybe_whole(message, "version")
     if message.get("kind") == "listed":
         more = await _resolved(ctx, more, now)
     return await answer(
@@ -171,17 +175,25 @@ async def price_point_set(ctx, message):
         ctx.clock(),
     )
 
+    tab_id = maybe_whole(message, "tab_id")  # M7.19 V2: links a loan to the tab it is set from
+
     def run(tx):
-        if not (is_day(day) and price_ok(price_u) and price_u > 0):
-            raise Invalid(WORDS["value"])
-        if day > day_of_instant(now):
-            raise Invalid(WORDS["future"])
         asset = tx.get("asset", asset_id)
         if asset is None:
             raise NotFound()
         if asset["kind"] not in ("manual", "liability"):
             raise Refused(WORDS["manual_only"])
+        # A loan's balance may reach 0 (paid off); a value kept by hand is above zero.
+        loan = asset["kind"] == "liability"
+        if not (is_day(day) and price_ok(price_u) and (price_u > 0 or loan)):
+            raise Invalid(WORDS["balance"] if loan else WORDS["value"])
+        if day > day_of_instant(now):
+            raise Invalid(WORDS["future"])
         tx.set_price_point(asset_id, day, price_u, now)
+        if asset["kind"] == "liability" and tab_id is not None:
+            tab = tx.get("tab", tab_id)
+            if tab is not None and not tab["system"] and tab["kind"] != "upstox":
+                tx.link_liability(tab_id, asset_id, now)
         return {"asset_id": asset_id, "day": day, "price_u": price_u}
 
     return await answer(lambda: book.store.write(OWNER, run))

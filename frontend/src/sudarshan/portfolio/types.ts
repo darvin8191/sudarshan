@@ -1183,7 +1183,11 @@ export interface AssetCreateArgs extends Creates {
   name?: string
   asset_class?: AssetClass
   unit_label?: string
+  /** A liability: its outstanding balance on a day; a manual asset: its first value. */
   first_value?: { day: Day; price_u: PriceU }
+  /** A liability belongs to one tab, whose version moves (M7.19 V2). */
+  tab_id?: number
+  version?: number
   sector?: string | null
   mcap?: Mcap | null
   tags?: string[]
@@ -1201,7 +1205,10 @@ export interface AssetUpdateArgs extends Targets, Versioned {
 /** `id` is the asset. */
 export interface PricePointSetArgs extends Targets {
   day: Day
+  /** A loan's balance may be 0 (paid off); a value kept by hand is above zero. */
   price_u: PriceU
+  /** A loan set from a tab is linked to it (one made before M7.19 V2 has no tab yet). */
+  tab_id?: number
 }
 
 export interface MfSearchArgs {

@@ -73,6 +73,8 @@ WORDS = {
     "delete_name": "Type the portfolio's name exactly to delete it.",
     "delete_upstox": "The Upstox portfolio cannot be deleted.",
     "liability": "A loan or liability keeps balances, not entries. Add a balance instead.",
+    "loan_tab": "A loan belongs to one of your own portfolios. Open that tab, then add it.",
+    "loan_first": "Enter the loan's outstanding balance with a real date.",
     "breakdown": "The charges breakdown must add up to the charges.",
     "draft": "Saved as a draft; it counts nowhere until it is posted.",
     "cursor": "That page of entries is not valid. Open the list again.",
@@ -494,11 +496,22 @@ class Book:
         aliases: Sequence[tuple[str, str]] = (),
         first_value: Mapping[str, int] | None = None,
         resolved_at: int | None = None,
+        tab_id: int | None = None,
+        version: int | None = None,
     ) -> dict:
         """A listed asset (already resolved by the caller), a fund, a manual asset or a
-        liability. ISIN, symbol and fund code are also its aliases; ``aliases`` adds old ones."""
+        liability. ISIN, symbol and fund code are also its aliases; ``aliases`` adds old ones.
+
+        A liability (M7.19 V2) belongs to one of the owner's own tabs, ``tab_id``, whose net worth
+        it lowers; its ``first_value`` is the outstanding balance on a day, and the tab's version
+        moves (from ``version``) so a screen showing the tab learns of it."""
         rid = _request_id(request_id)
         kind = _choice(kind, ASSET_KINDS, "a kind")
+        if kind == "liability":
+            if not isinstance(tab_id, int) or isinstance(tab_id, bool):
+                raise Invalid(WORDS["loan_tab"])
+            if first_value is None:
+                raise Invalid(WORDS["loan_first"])
         values: dict[str, Any] = {
             "kind": kind,
             "sector": _text(sector, "the sector", NAME_MAX, required=False),
@@ -548,6 +561,18 @@ class Book:
         def run(tx: Tx):
             if (again := tx.by_request("asset", rid)) is not None:
                 return _with_aliases(tx, again)
+            if kind == "liability":
+                tab = (
+                    tx.get("tab", tab_id)
+                    if version is None
+                    else _load(tx, "tab", tab_id, version, "version_conflict")
+                )
+                if tab is None:
+                    raise NotFound()
+                if tab["system"] or tab["kind"] == "upstox":
+                    raise Refused(WORDS["loan_tab"])
+                if tab["archived"]:
+                    raise Refused(WORDS["archived"])
             for alias_kind, value in dict.fromkeys(found):
                 if tx.find_alias(alias_kind, value):
                     raise Refused(f"{values['name']} is already in your list.", reason="duplicate")
@@ -564,6 +589,10 @@ class Book:
                 tx.add_alias(row["id"], alias_kind, value, now)
             if first_value is not None:
                 tx.set_price_point(row["id"], first_value["day"], first_value["price_u"], now)
+            if kind == "liability":
+                tx.link_liability(tab_id, row["id"], now)
+                if version is not None:
+                    tx.bump_tab(tab_id, version, now)
             return _with_aliases(tx, row)
 
         return self.store.write(scope, run)
