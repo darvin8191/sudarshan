@@ -147,8 +147,11 @@ in brand. Icon "Mor": tile #0E5A73, ring #E3A21A, glyph #FFFFFF. Numbers via
     the order, so its only size-0 alert is an exit (it sends its contracts with it). If its claim
     is refused it answers the busy sentence; from flat it sends nothing ("No open position found.
     Not placing exit order."), however the day's fills lie. A smart order to another size that
-    reduces or crosses a position is refused while a MARKET order works on the closing side, as a
-    single exit is; one that only adds is never refused for being busy. Every Exit all takes one
+    reduces or crosses a position (as the row says) claims the position while it is placed and
+    notes the hold after, as a single exit does, so a repeated reversal alert is refused with a
+    sentence while the first is being placed or its order is not yet seen ended in the order
+    book, and an Exit all meanwhile leaves the position to it; it is also refused while a MARKET
+    order works on the closing side. One that only adds is never refused for being busy. Every Exit all takes one
     claim for the whole book, reads positions and then the order book once, and leaves out, with a
     sentence each, any position that is busy, held or has a working order on its closing side; it
     never waits. A position traded today that Upstox's positions do not list yet is exited from

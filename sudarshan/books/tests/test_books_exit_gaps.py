@@ -4,8 +4,9 @@
    fills, through the same claim, hold and time limit as every listed position. Until this change
    it left the position out with a sentence (the Y3 mitigation).
 2. A smart order to a size other than 0 that reduces or crosses a position claims the position
-   while it is placed, so two identical reversal alerts in one second cannot both go. The race
-   itself is in test/test_gthread_brokers_b_smart_order.py; the surface behaviour is here.
+   while it is placed and notes a hold after, so two identical reversal alerts in one second
+   cannot both go (the barrier-synchronised race is below), and an Exit all meanwhile leaves the
+   position to it.
 
 Each test here fails on 376dc58 (v0.4.1) unless it says it is a control.
 """
@@ -323,3 +324,197 @@ def test_nothing_waits_on_a_lock_across_the_exit(monkeypatch):
     monkeypatch.setattr(world.broker, "post", post)
     assert world.app_exit_all()[0] == 200
     assert taken == [False]
+
+
+# -- 2. A claim for smart orders that reduce or cross a position -----------------------------------------
+#
+# A reversal (long 65, SELL 130 to -65) is sized from the row corrected by the order book's fills.
+# Between its send and the moment Upstox's order book lists the order, a second identical alert
+# saw nothing working and went beside it (-195). Now the first claims the position while it is
+# placed, and notes a hold after, so the second is refused until the book shows the first ended.
+
+
+def _reversal(world, symbol, quantity, action, size):
+    return world.tv_smart_exit(symbol, quantity=quantity, action=action, position_size=size)
+
+
+def _at_the_barrier(world, count, fn, *args):
+    """``count`` threads calling ``fn(*args)`` released together; each thread's (code, body)."""
+    import threading
+
+    barrier = threading.Barrier(count)
+    results: list = [None] * count
+
+    def worker(index):
+        barrier.wait(5)
+        results[index] = fn(*args)
+
+    threads = [threading.Thread(target=worker, args=(i,), daemon=True) for i in range(count)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(30)
+        assert not thread.is_alive(), "a smart order hung"
+    return results
+
+
+@pytest.mark.parametrize(
+    "symbol,held,quantity,action,size,sent_once",
+    [(X, 65, "130", "SELL", "-65", ("SELL", 130)), (Y, -30, "60", "BUY", "30", ("BUY", 60)),
+     (X, 130, "65", "SELL", "65", ("SELL", 65))],
+    ids=["long reversed to short", "short reversed to long", "part exit of a long"],
+)  # fmt: skip
+def test_two_identical_reversals_released_together_send_one_order(
+    monkeypatch, symbol, held, quantity, action, size, sent_once
+):
+    """The barrier-synchronised race: two alerts in the same instant, the positions row 60 s
+    behind and the order book not listing a just-placed order for 5 s. On 376dc58 both go and the
+    position ends at twice the target."""
+    broker = Broker({symbol: held}, 60.0)
+    broker.order_book_lag = 5.0
+    world = install(monkeypatch, broker)
+    results = _at_the_barrier(world, 2, _reversal, world, symbol, quantity, action, size)
+    codes = sorted(code for code, _body in results)
+    assert codes == [200, 409], results
+    refused = next(body for code, body in results if code == 409)
+    assert "not confirmed" in refused["message"] and "Orders" in refused["message"]
+    assert _sent(world.broker, symbol) == [sent_once]
+    assert world.broker.true_qty(symbol) == int(size)
+
+
+def test_the_hold_ends_when_the_order_book_shows_the_first_reversal_complete(monkeypatch):
+    """Control: once the book lists the first order complete, a later alert to the same size is
+    no action, and one further the same way is sized from the corrected figure and goes."""
+    world = install(monkeypatch, Broker({X: 65}, 60.0))
+    assert _reversal(world, X, "130", "SELL", "-65")[0] == 200
+    _fresh_book()
+    code, body = _reversal(world, X, "130", "SELL", "-65")
+    assert code == 200 and "no action needed" in body["message"].lower()
+    _fresh_book()
+    code, body = _reversal(world, X, "195", "SELL", "-130")  # the row still says 65: crosses it
+    assert code == 200, body
+    assert _sent(world.broker, X) == [("SELL", 130), ("SELL", 65)]
+    assert world.broker.true_qty(X) == -130
+
+
+def test_a_reversal_in_flight_keeps_exit_all_off_its_position(monkeypatch):
+    """The claim: while the reversal's order is on its way to Upstox (not placed yet, so no book
+    can show it), Exit all leaves the position to it and says so. On 376dc58 Exit all sent an
+    exit beside the reversal and the position ended short."""
+    import threading
+
+    broker = Broker({X: 65}, 60.0)
+    broker.hang[X] = 1.0
+    world = install(monkeypatch, broker)
+    entered = threading.Event()
+    real_post = broker.post
+
+    def post(url, headers=None, content=None, **kwargs):
+        entered.set()
+        return real_post(url, headers=headers, content=content, **kwargs)
+
+    monkeypatch.setattr(broker, "post", post)
+    thread, out = world.background(_reversal, world, X, "130", "SELL", "-65")
+    assert entered.wait(5)
+    code, body = world.app_exit_all()
+    thread.join(10)
+    assert out["result"][0] == 200
+    assert code == 409
+    assert "An exit for NIFTY 25900 CE is already on its way" in body["message"]
+    assert _sent(world.broker, X) == [("SELL", 130)]
+    assert world.broker.true_qty(X) == -65
+
+
+def test_a_reversal_while_exit_all_holds_the_book_is_refused(monkeypatch):
+    world = install(monkeypatch, Broker({X: 65}, 0.0))
+    with exit_guard.EXITS.every("live") as busy:
+        assert busy is None
+        code, body = _reversal(world, X, "130", "SELL", "-65")
+    assert code == 409 and body["message"] == exit_guard.EXIT_ALL_BEING_PLACED
+    assert world.broker.orders == []
+
+
+def test_a_refused_reversal_releases_its_claim(monkeypatch):
+    """Upstox refuses the order (nothing placed): the next reversal is not told one is on its way
+    or held, and goes."""
+    import broker.upstox.api.order_api as upstox
+
+    world = install(monkeypatch, Broker({X: 65}, 0.0))
+    refusals = [True]
+
+    real = upstox.place_order_api
+
+    def place(data, auth):
+        if refusals:
+            refusals.pop()
+            return (upstox._ErrorResponse(400), {"status": "error", "message": "refused"}, None)
+        return real(data, auth)
+
+    monkeypatch.setattr(upstox, "place_order_api", place)
+    code, _body = _reversal(world, X, "130", "SELL", "-65")
+    assert code == 400 and len(exit_guard.EXITS) == 0
+    assert exit_guard.EXITS.placed_lately("live") == set()
+    _fresh_book()
+    code, _body = _reversal(world, X, "130", "SELL", "-65")
+    assert code == 200 and _sent(world.broker, X) == [("SELL", 130)]
+
+
+def test_a_dispatch_that_broke_off_still_notes_the_hold(monkeypatch):
+    """The send raised after it may have reached Upstox: the claim is let go (nothing is stuck),
+    and the hold is noted so the next reversal waits for the book."""
+    import broker.upstox.api.order_api as upstox
+
+    world = install(monkeypatch, Broker({X: 65}, 0.0))
+
+    def place(data, auth):
+        raise RuntimeError("the connection dropped after the send")
+
+    monkeypatch.setattr(upstox, "place_order_api", place)
+    code, body = _reversal(world, X, "130", "SELL", "-65")
+    assert code == 500 and "not confirmed" in body["message"]
+    assert len(exit_guard.EXITS) == 0
+    assert exit_guard.EXITS.placed_lately("live") == {("NFO", X, "MIS")}
+
+
+def test_an_order_that_only_adds_is_never_refused_for_being_busy(monkeypatch):
+    """Control: an add claims nothing and goes while Exit all holds the book or another exit of
+    the position is being placed."""
+    world = install(monkeypatch, Broker({X: 65}, 0.0))
+    with exit_guard.EXITS.every("live"):
+        code, _body = _reversal(world, X, "65", "BUY", "130")
+    assert code == 200
+    _fresh_book()
+    with exit_guard.one_exit("live", "NFO", X, "MIS"):
+        code, _body = _reversal(world, X, "65", "BUY", "195")
+    assert code == 200
+    assert _sent(world.broker, X) == [("BUY", 65), ("BUY", 65)]
+    assert len(exit_guard.EXITS) == 0
+
+
+def test_a_tv_exit_after_a_reversal_the_book_does_not_list_yet_is_held(monkeypatch):
+    """A size-0 exit right after the reversal, before the book lists it: sized from the lagging
+    row it would sell 65 beside the SELL 130. The reversal's hold refuses it."""
+    broker = Broker({X: 65}, 60.0)
+    broker.order_book_lag = 5.0
+    world = install(monkeypatch, broker)
+    assert _reversal(world, X, "130", "SELL", "-65")[0] == 200
+    _fresh_book()
+    code, body = world.tv_smart_exit(X, quantity="65", action="SELL")
+    assert code == 409 and "not confirmed" in body["message"]
+    assert _sent(world.broker, X) == [("SELL", 130)]
+
+
+def test_the_claim_is_held_across_the_reads_and_the_send_and_let_go_after(monkeypatch):
+    world = install(monkeypatch, Broker({X: 65}, 0.0))
+    seen = []
+
+    real_post = world.broker.post
+
+    def post(url, headers=None, content=None, **kwargs):
+        seen.append(exit_guard.why_busy("live", "NFO", X, "MIS"))
+        return real_post(url, headers=headers, content=content, **kwargs)
+
+    monkeypatch.setattr(world.broker, "post", post)
+    assert _reversal(world, X, "130", "SELL", "-65")[0] == 200
+    assert len(seen) == 1 and seen[0] and "on its way" in seen[0]
+    assert len(exit_guard.EXITS) == 0

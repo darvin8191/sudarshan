@@ -626,6 +626,7 @@ def place_smartorder_api(data, auth):
             unsized = None
             statuses = None
             by_product = None
+            reducing = False  # SUDARSHAN M6.9 (Y2): a size other than 0 that reduces or crosses
             if position_size == 0:
                 # SUDARSHAN M6.9: an exit is sized from the positions row corrected by what the
                 # order book says was filled since (sudarshan/books/fills.py), read after the
@@ -644,12 +645,26 @@ def place_smartorder_api(data, auth):
             else:
                 current_position = int(get_open_position(symbol, exchange, request_product, auth))
                 if _reduces_or_crosses(current_position, position_size):
+                    # SUDARSHAN M6.9 (Y2): an order that reduces or crosses the position, as the
+                    # row says, claims the position before the read it is sized from and holds
+                    # it until its order is sent and noted, as a size-0 exit does: an Exit all
+                    # that starts meanwhile leaves the position to it, and one that holds the
+                    # book refuses it. The claim is let go whatever happens below, a refused
+                    # dispatch included. An order that only adds never claims.
+                    busy = held.enter_context(
+                        exit_guard.one_exit("live", exchange, symbol, product)
+                    )
+                    if busy:
+                        logger.warning(f"Order for {symbol} not sent: an exit for it is on its way")
+                        refusal = {"status": "error", "message": busy, "nothing_sent": True}
+                        return _ErrorResponse(409), refusal, None
                     # SUDARSHAN M6.9 (X7): sized as an exit is, from the row corrected by the
                     # order book's fills, read after it: the row alone lags a fill, and a
                     # reversal sized from it misses its target. An order that only adds goes as
                     # the row says, with no order book read.
                     rows = _position_rows(symbol, exchange, auth)
                     orders = _read_order_rows(auth, exit_guard.EXIT_ORDERS_READ_S)
+                    statuses = _order_statuses(orders)
                     by_product = _held_products(rows, symbol, exchange, orders)
                     if by_product is None:
                         logger.warning(f"Order for {symbol} not sent: the quantity held is unknown")
@@ -662,7 +677,9 @@ def place_smartorder_api(data, auth):
                     by_product = None  # only an exit's own guards read it
                     if _reduces_or_crosses(current_position, position_size):
                         # SUDARSHAN M6.9 (Y2): a reversal or part exit repeated while the first
+                        # is held (its order sent, and not yet seen ended in the order book) or
                         # still rests at Upstox would go beside it.
+                        reducing = True
                         refused = _market_exit_working(
                             rows, orders, symbol, exchange, product, request_product,
                             current_position,
@@ -670,6 +687,13 @@ def place_smartorder_api(data, auth):
                         if refused:
                             logger.warning(f"Order for {symbol} not sent: a market exit is working")
                             return refused
+                        held_by = exit_guard.hold_verdict(
+                            "live", exchange, symbol, product, statuses
+                        )
+                        if held_by:
+                            logger.warning(f"Order for {symbol} not sent: an earlier one is held")
+                            refusal = {"status": "error", "message": held_by, "nothing_sent": True}
+                            return _ErrorResponse(409), refusal, None
             logger.debug(
                 f"Desired position size: {position_size}, Current position: {current_position}"
             )
@@ -776,13 +800,15 @@ def place_smartorder_api(data, auth):
             order_data["action"] = action
             order_data["quantity"] = str(quantity)
 
-            if position_size != 0:
+            if position_size != 0 and not reducing:
                 sent = True
                 res, response, orderid = place_order_api(order_data, auth)
                 _invalidate_position_cache(auth)
                 return res, _with_sent(response, action, quantity, False), orderid
-            # SUDARSHAN M6.9: a close, sized from a book that may not show an exit placed just
-            # before, and noted, before the claim is let go, whenever it may have gone.
+            # SUDARSHAN M6.9: a close (or an order that reduces or crosses the position), sized
+            # from a book that may not show an exit placed just before, and noted, before the
+            # claim is let go, whenever it may have gone: the next exit or reducing order for the
+            # position is held until the order book shows this one ended.
             sent = True
             answered = None
             try:
@@ -798,7 +824,7 @@ def place_smartorder_api(data, auth):
                     )
             _invalidate_position_cache(auth)
             res, response, orderid = answered
-            return res, _with_sent(response, action, quantity, True), orderid
+            return res, _with_sent(response, action, quantity, position_size == 0), orderid
 
     except BrokerBusyError as exc:
         # The position read or the order was refused by the pacer (gthread

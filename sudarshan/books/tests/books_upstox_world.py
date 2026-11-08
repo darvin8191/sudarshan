@@ -75,6 +75,9 @@ class Broker:
         # positions book shows and the order book lists as complete orders)
         self.base_day: dict[str, tuple[int, int]] = {}
         self.day_fields = True  # the positions rows carry day_buy_quantity / day_sell_quantity
+        # seconds after an order is placed through ``post`` before the order book lists it (and
+        # its fill): Upstox's book can answer before a just-placed order is in it
+        self.order_book_lag = 0.0
 
     # -- state ---------------------------------------------------------------
     def true_qty(self, symbol: str) -> int:
@@ -195,8 +198,11 @@ class Broker:
             self.order_book_reads += 1
             if self.orders_unreadable:
                 return FakeResponse(503, {"status": "error", "errors": [{"message": "down"}]})
+            unlisted = self._not_listed_yet()
             rows = []
             for n, order in enumerate(self.working):
+                if order.get("id") in unlisted:
+                    continue
                 token, exchange, product, _oa = INSTRUMENTS[order["symbol"]]
                 placed = datetime.fromtimestamp(order.get("at", time.time()), IST)
                 rows.append(
@@ -219,6 +225,14 @@ class Broker:
                 )
             rows.extend(self._filled_rows())
         return FakeResponse(200, {"status": "success", "data": rows})
+
+    def _not_listed_yet(self) -> set[str]:
+        """The ids of the orders placed through ``post`` too recently for the order book to list
+        (``order_book_lag``); call under the lock."""
+        if not self.order_book_lag:
+            return set()
+        now = time.monotonic()
+        return {o["id"] for o in self.orders if now - o["at"] < self.order_book_lag}
 
     def _filled_rows(self) -> list[dict]:
         """The order book's rows for every order that is not working now (call under the lock).
@@ -265,12 +279,17 @@ class Broker:
             }
 
         rows = []
+        unlisted = self._not_listed_yet()
         for placed in self.orders:
-            if placed["id"] in working_ids:
-                continue
             rejected = placed.get("rejected", False)
             filled = 0 if rejected else placed.get("filled", placed["qty"])
             key = (placed["symbol"], placed["side"])
+            if placed["id"] in unlisted:
+                if placed["id"] not in working_ids:  # a working one was taken out above
+                    totals[key] = totals.get(key, 0) - filled  # its fill is not in the book either
+                continue
+            if placed["id"] in working_ids:
+                continue
             totals[key] = totals.get(key, 0) - filled
             rows.append(
                 row(placed["id"], placed["symbol"], placed["side"],

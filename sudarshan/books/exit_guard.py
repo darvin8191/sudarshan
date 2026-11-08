@@ -16,7 +16,9 @@ position is busy while
   sized from until after it is noted, or until it has sent nothing (``one``);
 - an exit for it that Upstox answered with an order id is on hold (``Hold``) and the order book
   still shows that order working. The hold is noted here (``exit_placed``) by the app's Exit, by
-  any smart order to a position size of 0, and by Exit all for each exit it sent. It ends when
+  any smart order to a position size of 0, by a smart order to another size that reduces or
+  crosses the position (a reversal or a part exit, which claims it too), and by Exit all for
+  each exit it sent. It ends when
   Upstox's order book shows the order complete, cancelled or rejected, and no clock decides:
   the book is read only when a second exit comes in while a hold is open. If the book cannot be
   read, or does not list the order, the hold lasts up to ``EXIT_HOLD_UNCONFIRMED_S`` from the
@@ -45,8 +47,9 @@ holds it across that read, so an Exit all or another exit that starts during a
 slow read leaves the position to it: a read can answer older than an exit sent
 while it was on its way. It is refused with that sentence (409) if its position
 is busy, or an Exit all holds the book, when it claims, and then never placed as given: a smart
-order to a position size of 0 that finds the position flat is a late or repeated exit. An entry
-(a smart order to a size other than 0) is never refused.
+order to a position size of 0 that finds the position flat is a late or repeated exit. A smart
+order to a size other than 0 claims the position the same way when, as the positions row says,
+it reduces or crosses the position; one that only adds is never refused.
 
 The sandbox's book shows each exit the moment it is placed, so nothing is noted
 there; the app's Exit still claims its position in the sandbox's book while it
