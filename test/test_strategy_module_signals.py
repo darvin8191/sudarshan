@@ -1111,3 +1111,74 @@ def test_a_batch_run_still_ends_when_it_goes_flat(placed):
     assert went_flat is True
     assert store.get_run(run.id).stopped_at is not None
     assert store.get_strategy(strategy.id, USER).status == "stopped"
+
+
+# SUDARSHAN M6.9 (re-review LOW-F): a held signal exit is a hold, not a rejection.
+
+
+def test_a_held_signal_exit_is_recorded_as_a_hold_not_a_rejection(placed):
+    # SUDARSHAN M6.9 (re-review LOW-F): an exit the one-at-a-time rule held (another exit for
+    # the position on its way, or an earlier one not yet seen ended in the order book) is not a
+    # rejection, on the signal path as on the batch path: leg_exit_held at warn, with the
+    # sentence. The claim is released, so the next exit signal goes.
+    strategy = _make()
+    strategy_id = strategy.id
+    signals.handle_signal(strategy, "long_entry", leg_id=1)
+    run_id = _fill(strategy, 1)
+    sentence = (
+        "An exit for RELIANCE is already on its way (sent 10:00:01). Check Orders, and exit it "
+        "again only if it is still open."
+    )
+    with patch.object(
+        signals.order_dispatch,
+        "dispatch_order",
+        return_value=DispatchResult(ok=False, error=sentence, held=True),
+    ):
+        held = signals.handle_signal(strategy, "long_exit", leg_id=1)
+
+    assert held.ok is False
+    events = [e for e in store.list_events(strategy_id) if e["kind"].startswith("leg_exit_")]
+    assert [e["kind"] for e in events] == ["leg_exit_held"]
+    assert events[0]["severity"] == "warn"
+    assert events[0]["message"] == f"Signal SELL 100 RELIANCE held, to be sent again: {sentence}"
+    assert "rejected" not in events[0]["message"]
+
+    strategy = store.get_strategy(strategy_id, USER)
+    again = signals.handle_signal(strategy, "long_exit", leg_id=1)
+    assert again.ok is True and placed[-1]["action"] == "SELL"
+    assert store.get_strategy(strategy_id, USER).current_run_id == run_id
+
+
+def test_a_refused_signal_exit_is_still_recorded_as_rejected(placed):
+    # Control: a refusal that is not a hold (the broker's, the pipe's) keeps its record.
+    strategy = _make()
+    strategy_id = strategy.id
+    signals.handle_signal(strategy, "long_entry", leg_id=1)
+    _fill(strategy, 1)
+    with patch.object(
+        signals.order_dispatch,
+        "dispatch_order",
+        return_value=DispatchResult(ok=False, error="Upstox refused it"),
+    ):
+        refused = signals.handle_signal(strategy, "long_exit", leg_id=1)
+
+    assert refused.ok is False
+    events = [e for e in store.list_events(strategy_id) if e["kind"].startswith("leg_exit_")]
+    assert [e["kind"] for e in events] == ["leg_exit_placed"]
+    assert events[0]["message"] == "Signal SELL 100 RELIANCE rejected: Upstox refused it"
+    assert events[0]["severity"] == "warn"
+
+
+def test_an_entry_is_never_recorded_as_an_exit_hold(placed):
+    # Control: only an exit can be held; an entry refused for any reason keeps the entry record.
+    strategy = _make()
+    with patch.object(
+        signals.order_dispatch,
+        "dispatch_order",
+        return_value=DispatchResult(ok=False, error="venue refused", held=True),
+    ):
+        refused = signals.handle_signal(strategy, "long_entry", leg_id=1)
+
+    assert refused.ok is False
+    kinds = [e["kind"] for e in store.list_events(strategy.id) if e["kind"].startswith("leg_")]
+    assert "leg_exit_held" not in kinds and "leg_entry_placed" in kinds

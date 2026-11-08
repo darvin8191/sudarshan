@@ -130,13 +130,17 @@ Manual close events describe accepted intent only. `close_all_manual` uses
 `Operator requested closure of leg <leg_id>`. Completed wording is reserved
 for the later fill-confirmed `run_stopped` transition.
 
-`leg_exit_held` is written at `warn` severity when a live exit was not sent because
-another exit for the same position is being placed, or an earlier one is not yet
-seen ended in the broker's order book (one exit at a time per position, across
-every surface). Nothing reached the broker, the leg's exit claim is released and
-the leg stays managed; the next tick or the pending-stop job sends it again. It is
-not a rejection: `leg_exit_rejected` stays for an exit the broker or the pipe
-refused.
+`leg_exit_held` is written at `warn` severity, on the batch and the signal path
+alike, when a live exit was not sent because another exit for the same position is
+being placed, or an earlier one is not yet seen ended in the broker's order book
+(one exit at a time per position, across every surface; an earlier exit whose
+answer may have reached the broker without naming its order holds the position at
+least 150 s, and after that while the order book shows a market order working on
+the side it closes on). Nothing reached the broker, the leg's exit claim is
+released and the leg stays managed; the next tick, the pending-stop job or the
+next exit signal sends it again. It is not a rejection: `leg_exit_rejected` stays
+for an exit the broker or the pipe refused on the batch path (the signal path
+records that refusal as `leg_exit_placed`, its message ending in "rejected").
 
 `leg_expiry_fallback` is written at `warn` severity, before the entry goes out, when the chain did not list the expiry rank the leg asked for and a nearer one was used. A `next_week` leg trading the current week is a different trade from the one that was configured, so it is said out loud rather than inferred from the symbol afterwards.
 

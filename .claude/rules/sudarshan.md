@@ -202,7 +202,8 @@ in brand. Icon "Mor": tile #0E5A73, ring #E3A21A, glyph #FFFFFF. Numbers via
     makes it answer 502, and it says "No scalping position was closed" only when every close was
     refused. A refusal there is a refused dispatch for the strategy module, which releases its
     own `claim_leg_exit` and keeps the leg managed, recorded as `leg_exit_held` at warn, not as a
-    rejection; its `force_live` is untouched. The sandbox is left alone on both surfaces.
+    rejection, on the batch and the signal path alike; its `force_live` is untouched. The sandbox
+    is left alone on both surfaces.
   - A sheet, a confirmation or an order ticket ignores taps for 500 ms after it opens
     (`watchlist/openGuard.ts`), so a double tap never presses what appeared under the finger.
   - Order alerts on Telegram (M6.8) are on by default (owner's broker-app benchmark, 20 Oct

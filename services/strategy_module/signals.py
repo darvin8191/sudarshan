@@ -862,15 +862,26 @@ def _place(
         )
         reconcile_rejected_entry_stop = not result.ok
 
+    said = f"Signal {action} {leg.get('quantity') or leg.get('qty')} {leg['symbol']}"
+    if exiting and getattr(result, "held", False):
+        # SUDARSHAN M6.9: a hold is not a rejection, as on the batch path (engine._exit_legs):
+        # another exit for the position is on its way, or an earlier one is not yet seen ended in
+        # the order book. Nothing was sent; the caller releases the exit claim, and the leg stays
+        # exitable by the next signal, its stop, its target and the square-off.
+        kind, severity = "leg_exit_held", "warn"
+        said = f"{said} held, to be sent again: {result.error}"
+    else:
+        kind = "leg_exit_placed" if exiting else "leg_entry_placed"
+        said += "" if result.ok else f" rejected: {result.error}"
+        severity = "info" if result.ok else "warn"
     store.record_event(
         strategy_id,
         user_id,
-        "leg_exit_placed" if exiting else "leg_entry_placed",
-        f"Signal {action} {leg.get('quantity') or leg.get('qty')} {leg['symbol']}"
-        + ("" if result.ok else f" rejected: {result.error}"),
+        kind,
+        said,
         run_id=run_id,
         leg_id=leg["leg_id"],
-        severity="info" if result.ok else "warn",
+        severity=severity,
     )
 
     if row_id is not None and result.ok:
