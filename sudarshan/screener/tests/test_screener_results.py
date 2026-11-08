@@ -186,3 +186,40 @@ def test_a_digest_market_alerts_did_not_take_turns_alert_raised_into_why(
     run = call(service, "runs", id=screen["id"])["runs"][0]
     assert run["alerts"] == line, "the History says an alert was raised that never went"
     assert (link.digests > 1) is retried, "a digest refused for good is tried again"
+
+
+# ---- LOW-2: a run's push fits one sealed request ----------------------------------------------------
+def test_a_runs_push_with_many_exits_fits_the_internal_seal(service):
+    from sudarshan.autologin.handoff import seal
+    from sudarshan.screener import contract
+    from sudarshan.screener import membership as mem
+    from sudarshan.vault import SCREENER_INTERNAL_INFO, fernet_for
+
+    screen = make(service, target=None)
+    many = [f"S{n:04d}LONGNAME" for n in range(300)]
+
+    def held(tx):
+        for symbol in many:
+            row = mem.Row(f"NSE_EQ|{symbol}", symbol, "NSE", mem.MISSING, misses=1, first_seen_at=1)
+            tx.membership_put(
+                screen["id"], 0, {n: getattr(row, n) for n in mem.Row.__dataclass_fields__}, 1
+            )
+
+    service.store.write(OWNER, held)
+    found = [
+        Judged(Member(f"NSE_EQ|{s}", s, "NSE", "NSE_EQ"), Outcome(MISS, (), {}, None), (0, 9000))
+        for s in many
+    ]
+    report = record(service, screen, 2, found)
+    assert report.exited == 300
+    push = next(
+        p["payload"]
+        for p in service.store.read(OWNER, lambda tx: tx.outbox_due(NOW + 10**9, 50))
+        if p["kind"] == "push"
+    )
+    blob = seal(fernet_for("f" * 64, SCREENER_INTERNAL_INFO), "push", principal="owner",
+                args={"items": [{"event": contract.EVENT_RUN, "data": push}]})  # fmt: skip
+    assert len(blob) <= contract.INTERNAL_MAX_BYTES, (
+        f"a run's push seals to {len(blob)} bytes: refused before it is sent, never retried"
+    )
+    assert push["counts"]["exited"] == 300 and push["more_exited"] == 300 - len(push["exited"])

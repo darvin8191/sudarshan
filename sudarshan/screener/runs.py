@@ -380,6 +380,11 @@ def record(
     )
 
 
+#: The most entries and exits a run's push names (the counts carry the rest): a push is one
+#: sealed request of at most 16 KiB, refused before it is sent if larger (release review LOW-2).
+PUSH_NAMES = 40
+
+
 def _push(
     screen: Mapping[str, Any],
     run: Mapping[str, Any],
@@ -388,7 +393,10 @@ def _push(
     changes: Sequence[mem.Change],
     marks: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """The ``sudarshan_screener_run`` push for an open page: the run's counts and changes."""
+    """The ``sudarshan_screener_run`` push for an open page: the run's counts and changes, at
+    most PUSH_NAMES of each named."""
+    entered = [c for c in changes if c.event == mem.EV_ENTERED]
+    exited = [c for c in changes if c.event == mem.EV_EXITED]
     return {
         "screen_id": screen["id"],
         "run_id": run["id"],
@@ -401,14 +409,13 @@ def _push(
         },
         "entered": [
             {"symbol": c.row.symbol, "exchange": c.row.exchange, "member_id": None}
-            for c in changes
-            if c.event == mem.EV_ENTERED
+            for c in entered[:PUSH_NAMES]
         ],
         "exited": [
-            {"symbol": c.row.symbol, "exchange": c.row.exchange}
-            for c in changes
-            if c.event == mem.EV_EXITED
+            {"symbol": c.row.symbol, "exchange": c.row.exchange} for c in exited[:PUSH_NAMES]
         ],
+        "more_entered": max(0, len(entered) - PUSH_NAMES),
+        "more_exited": max(0, len(exited) - PUSH_NAMES),
         "marks": list(words.mark_words(marks)),
     }
 
