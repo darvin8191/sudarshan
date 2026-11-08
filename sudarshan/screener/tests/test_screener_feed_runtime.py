@@ -141,6 +141,23 @@ def test_frames_become_sealed_bars_a_live_subject_and_a_run(world):
     values = store.read(OWNER, lambda tx: tx.run_values(run["id"]))
     assert values[RELIANCE]["c1"]["l"] == "107.10" and values[RELIANCE]["_ltp"] == 10760
 
+    # a preview judges the last closed candle and saves nothing
+    preview = asyncio.run(source.preview(plan, spec.check(SPEC), clock["now"]))
+    assert (
+        preview["label"] == "Preview on the 09:15 to 09:30 candle, not saved"
+        and preview["count"] == 1
+    )
+    assert (
+        preview["first"][0]["symbol"] == "RELIANCE"
+        and preview["first"][0]["values"] == "Close 107.10"
+    )
+    assert preview["not_checked"] == {
+        "count": 1,
+        "reasons": ["Not checked: no price from Upstox yet"],
+    }
+    early = asyncio.run(source.preview(plan, spec.check(SPEC), ms(DAY, "09:20")))
+    assert early["count"] == 0 and early["label"].startswith("No candle has closed")
+
     # a restart restores today's bars from the store
     again = LiveSource(
         store, FakeFeed(), source.master, source.settings, lambda: clock["now"], Calendar()

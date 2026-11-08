@@ -178,6 +178,80 @@ class LiveSource:
     def printed(self, member: Member) -> bool:
         return self.bars.printed(member.key, self.market.today)
 
+    # ---- a preview (6.3): the screen judged now on the last closed candle, nothing saved -----------------
+    async def preview(self, plan: Plan, stored: Mapping[str, Any], now: int) -> dict[str, Any]:
+        from . import runs, scheduler, screen_ops, words
+
+        tf = plan.tf if isinstance(plan.tf, int) else 0
+        screen = scheduler.Screen(
+            0,
+            0,
+            plan.on,
+            tf,
+            screen_ops.SEGMENTS_OF.get(stored["universe"]["kind"], frozenset({"NSE_EQ"})),
+        )
+        closed = [b for b in scheduler.boundaries(screen, self.market.sessions) if b.at <= now]
+        empty = {"count": 0, "first": [], "not_checked": {"count": 0, "reasons": []}}
+        if not closed:
+            return {
+                "label": "No candle has closed yet today; the preview waits for the first.",
+                **empty,
+            }
+        boundary = closed[-1]
+        members = list(self.members(stored["universe"]))
+        if not members:
+            return {"label": "This universe has no instruments today.", **empty}
+        judged = await runs.evaluate(
+            plan, members, self, self.context(boundary.end, self.market.today)
+        )
+        hits = sorted(
+            (j for j in judged if j.outcome.kind == "hit"),
+            key=lambda j: (j.outcome.rank is None, j.member.symbol),
+        )
+        changes = [
+            {
+                "key": j.member.key,
+                "symbol": j.member.symbol,
+                "exchange": j.member.exchange,
+                "change": "in",
+                "rank": i,
+            }
+            for i, j in enumerate(hits)
+        ] + [
+            {
+                "key": j.member.key,
+                "symbol": j.member.symbol,
+                "exchange": j.member.exchange,
+                "change": "not_checked",
+                "rank": None,
+            }
+            for j in judged
+            if j.outcome.kind == "not_checked"
+        ]
+        values = {
+            j.member.key: (
+                {
+                    **dict(j.outcome.values or {}),
+                    "_ltp": j.prices[0],
+                    "_cp": j.prices[1],
+                    "_forming": j.outcome.forming,
+                }
+                if j.outcome.kind == "hit"
+                else {"_not_checked": words.not_checked_words(j.outcome.why)}
+            )
+            for j in judged
+            if j.outcome.kind in ("hit", "not_checked")
+        }
+        rows, not_checked = screen_ops.result_rows(
+            stored, stored.get("name", ""), None, changes, values, [], now
+        )
+        return {
+            "label": f"Preview on the {words.hm(boundary.start)} to {words.hm(boundary.end)} candle, not saved",
+            "count": len(rows),
+            "first": rows[:25],
+            "not_checked": not_checked,
+        }
+
     # ---- the engine line ------------------------------------------------------------------------------
     def engine_facts(self, now: int) -> dict[str, Any]:
         trading = any(s.start <= now < s.end for s in self.market.sessions.values())
