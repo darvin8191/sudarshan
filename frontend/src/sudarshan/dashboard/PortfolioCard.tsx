@@ -14,7 +14,7 @@ import { type FeedRow, useBookFeed } from '@/sudarshan/books/feed'
 import { useBookSync, useLatestRead } from '@/sudarshan/books/useBookSync'
 import { useFrameLines } from '@/sudarshan/live/useFrameLines'
 import { portfolioCall } from '@/sudarshan/portfolio/api'
-import { clockOfInstant } from '@/sudarshan/portfolio/days'
+import { dateTimeOfInstant } from '@/sudarshan/portfolio/days'
 import {
   LIVE_CAP,
   liveInstruments,
@@ -147,7 +147,7 @@ export function rowsOf(
         lastGood: unread
           ? lastGood === null
             ? 'No good read yet'
-            : `Last good read ${clockOfInstant(lastGood)}`
+            : `Last good read ${dateTimeOfInstant(lastGood)}`
           : null,
       })
       continue

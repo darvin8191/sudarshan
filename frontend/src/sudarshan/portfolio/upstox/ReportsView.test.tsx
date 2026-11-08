@@ -185,7 +185,7 @@ describe('Trades', () => {
     expect(within(rows[1]).getByText('SELL')).toBeInTheDocument()
     expect(within(rows[1]).getByText('5 at ₹4,123.45')).toBeInTheDocument()
     expect(within(rows[1]).getByText('₹20,617.25')).toBeInTheDocument()
-    expect(screen.getByText('As of 10:41:05')).toBeInTheDocument()
+    expect(screen.getByText('As of 4 Nov 2026, 10:41:05')).toBeInTheDocument()
     expect(callsOf('report_trades')[0][1]).toEqual({ fy: 2026, segment: 'EQ' })
   })
 
@@ -362,7 +362,7 @@ describe('P&L', () => {
     expect(within(totals).getByText(/\+₹349\.50/)).toBeInTheDocument()
     expect(within(totals).getByText(/\+₹226\.05/)).toBeInTheDocument()
     expect(within(totals).getByText('2 closed trades as Upstox pairs them.')).toBeInTheDocument()
-    expect(within(totals).getByText('As of 10:41:05')).toBeInTheDocument()
+    expect(within(totals).getByText('As of 4 Nov 2026, 10:41:05')).toBeInTheDocument()
   })
 
   it('has a table for wide screens with the same figures', async () => {
@@ -445,14 +445,14 @@ describe('P&L', () => {
         realised_paise: 0,
         charges: null,
         net_paise: null,
-        note: 'Upstox has no trade-wise P&L report for mutual funds; their trades are in History.',
+        note: 'Upstox has no trade-wise P&L report for mutual funds; their trades are in Trades.',
       }),
     })
     show('pnl')
     expect(
       await screen.findByText(/Upstox has no trade-wise P&L report for mutual funds/)
     ).toBeInTheDocument()
-    expect(screen.getByText('Upstox has not said how many trades yet.')).toBeInTheDocument()
+    expect(screen.queryByText('Upstox has not said how many trades yet.')).toBeNull()
   })
 
   it('says a read is in progress and a refused report in words', async () => {

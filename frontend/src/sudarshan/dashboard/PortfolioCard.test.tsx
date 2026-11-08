@@ -152,7 +152,7 @@ describe('the Portfolio card', () => {
   it('gives the time of the last good read for a row that is not read now', () => {
     const entries = [upstoxEntry([], 'unavailable')]
     const [shown] = rowsOf(entries, new Map(), READ_AT, false, READ_AT)
-    expect(shown).toMatchObject({ status: 'unread', lastGood: 'Last good read 10:41:05' })
+    expect(shown).toMatchObject({ status: 'unread', lastGood: 'Last good read 4 Nov 2026, 10:41:05' })
     const [never] = rowsOf(entries, new Map(), READ_AT, false, null)
     expect(never.lastGood).toBe('No good read yet')
     const [ok] = rowsOf([upstoxEntry()], new Map(), READ_AT, false, null)

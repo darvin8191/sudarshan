@@ -3,12 +3,12 @@
 // is not market data: every figure carries the time the service read it from Upstox ("As of"), a
 // past year is read once, and the current year at most once a night or when this view finds it
 // older than six hours. Loading, empty and refused states are each a sentence.
-import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { LoaderCircle, RefreshCw, TriangleAlert } from 'lucide-react'
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import { PortfolioError, portfolioCall, problemOf } from '../api'
-import { clockOfInstant } from '../days'
+import { dateTimeOfInstant } from '../days'
 import { Signed } from '../Signed'
 import { SECONDARY } from '../sheets/TabFields'
 import { PORTFOLIO_KEY } from '../tab/ActivityTab'
@@ -75,11 +75,13 @@ function Choices<V extends string | number>({
   )
 }
 
-/** "As of 21:05:12" (the service's read), or that nothing has been read yet. */
+/** "As of 31 Mar 2026, 21:05:12" (the service's read), or that nothing has been read yet. */
 export function AsOf({ part }: { part: ReportPart }) {
   return (
     <span className="text-xs font-semibold text-[color:var(--text-tertiary)]">
-      {part.read_at === null ? 'Not read from Upstox yet' : `As of ${clockOfInstant(part.read_at)}`}
+      {part.read_at === null
+        ? 'Not read from Upstox yet'
+        : `As of ${dateTimeOfInstant(part.read_at)}`}
     </span>
   )
 }
@@ -116,22 +118,48 @@ export function PartLine({ part }: { part: ReportPart }) {
   )
 }
 
-/** A partial year: reading again carries on from the page the service stopped at. */
+/**
+ * The one button a report offers when it is not being read: Read more for a partial year (it
+ * carries on from the page it stopped at), Try again when nothing could be read, and Read again for
+ * a complete one (a fresh read from Upstox, which the service's budget still limits).
+ */
 export function ReadMore({
   part,
   busy,
   onMore,
+  onAgain,
 }: {
   part: ReportPart
   busy: boolean
   onMore: () => void
+  onAgain?: () => void
 }) {
-  if (part.state !== 'partial') return null
+  if (part.state === 'reading') return null
+  const [text, run] =
+    part.state === 'partial'
+      ? ['Read more', onMore]
+      : part.state === 'unavailable'
+        ? ['Try again', onMore]
+        : ['Read again', onAgain]
+  if (!run) return null
   return (
-    <button type="button" className={SECONDARY} onClick={onMore} disabled={busy}>
+    <button type="button" className={SECONDARY} onClick={run} disabled={busy}>
       <RefreshCw aria-hidden="true" className={cn('size-4', busy && 'animate-spin')} />
-      Read more
+      {text}
     </button>
+  )
+}
+
+/** A re-ask that failed while a report was shown: the bridge's own sentence, not the old words. */
+function AskFailed({ error }: { error: unknown }) {
+  return (
+    <p
+      aria-live="polite"
+      className="flex items-start gap-2 rounded-[0.875rem] border border-[color:var(--warning-text)] bg-[color:var(--gold-tint)] px-3 py-2 text-sm font-medium text-[color:var(--warning-text)]"
+    >
+      <TriangleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+      {problemOf(error).message}
+    </p>
   )
 }
 
@@ -195,7 +223,28 @@ function useReport<K extends 'report_trades' | 'report_pnl'>(
     retry: false,
     refetchOnWindowFocus: false,
     // Not market data: the only timer here follows a read the service has not finished.
-    refetchInterval: (query) => (query.state.data?.state === 'reading' ? READING_POLL_MS : false),
+    refetchInterval: (query) =>
+      query.state.status !== 'error' && query.state.data?.state === 'reading'
+        ? READING_POLL_MS
+        : false,
+  })
+}
+
+/** "Read again": a read from Upstox now of any year. The answer replaces what is shown. */
+function useReadAgain<K extends 'report_trades' | 'report_pnl'>(
+  op: K,
+  fy: number | null,
+  segment: ReportSegment
+) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async () => {
+      const result = await portfolioCall(op, { fy: fy as number, segment, force: true })
+      if (!result.enabled)
+        throw new PortfolioError({ code: 'unavailable', message: result.message, entryId: null })
+      return result.data
+    },
+    onSuccess: (data) => client.setQueryData([...PORTFOLIO_KEY, op, fy, segment], data),
   })
 }
 
@@ -280,8 +329,8 @@ export function TradesList({ report }: { report: TradesReport }) {
         aria-label="Trades"
         className="flex flex-col divide-y divide-[color:var(--divider)] md:hidden"
       >
-        {report.rows.map((row) => (
-          <li key={`${row.trade_id}-${row.trade_date}`} className="flex flex-col gap-0.5 py-2">
+        {report.rows.map((row, n) => (
+          <li key={`${row.trade_id}-${row.trade_date}-${n}`} className="flex flex-col gap-0.5 py-2">
             <div className="flex items-center justify-between gap-3">
               <span className="min-w-0 truncate text-[0.9375rem] font-semibold">
                 {row.scrip_name}
@@ -319,8 +368,8 @@ export function TradesList({ report }: { report: TradesReport }) {
           </tr>
         </thead>
         <tbody className="divide-y divide-[color:var(--divider)]">
-          {report.rows.map((row) => (
-            <tr key={`${row.trade_id}-${row.trade_date}`}>
+          {report.rows.map((row, n) => (
+            <tr key={`${row.trade_id}-${row.trade_date}-${n}`}>
               <td className="py-2 pr-3 whitespace-nowrap">{dayText(row.trade_date)}</td>
               <td className="py-2 pr-3 font-semibold">
                 {row.scrip_name}
@@ -351,6 +400,7 @@ export function TradesView() {
   const years = useYears()
   const pick = usePick(years.data)
   const report = useReport('report_trades', pick.fy, pick.segment)
+  const again = useReadAgain('report_trades', pick.fy, pick.segment)
   if (years.isPending) return <Waiting what="trades" />
   if (years.isError || !years.data)
     return <Failed error={years.error} retry={() => years.refetch()} />
@@ -375,7 +425,7 @@ export function TradesView() {
             <h2 className="text-base font-bold">Trades</h2>
             <AsOf part={data} />
           </div>
-          <PartLine part={data} />
+          {report.isError ? <AskFailed error={report.error} /> : <PartLine part={data} />}
           <dl className="grid grid-cols-3 gap-3">
             <div className="flex flex-col gap-px">
               <dt className={LABEL}>Trades</dt>
@@ -393,7 +443,12 @@ export function TradesView() {
             </div>
           </dl>
           <TradesList report={data} />
-          <ReadMore part={data} busy={report.isFetching} onMore={() => report.refetch()} />
+          <ReadMore
+            part={data}
+            busy={report.isFetching || again.isPending}
+            onMore={() => report.refetch()}
+            onAgain={() => again.mutate()}
+          />
         </section>
       ) : null}
     </div>
@@ -534,6 +589,7 @@ export function PnlView() {
   const years = useYears()
   const pick = usePick(years.data)
   const report = useReport('report_pnl', pick.fy, pick.segment)
+  const again = useReadAgain('report_pnl', pick.fy, pick.segment)
   if (years.isPending) return <Waiting what="P&L" />
   if (years.isError || !years.data)
     return <Failed error={years.error} retry={() => years.refetch()} />
@@ -552,6 +608,10 @@ export function PnlView() {
         <Waiting what="P&L" />
       ) : report.isError && !data ? (
         <Failed error={report.error} retry={() => report.refetch()} />
+      ) : data && data.segment === 'MF' ? (
+        <section aria-label="Realised P&L" className={`${CARD} px-4 py-3.5`}>
+          <p className="text-sm text-[color:var(--text-secondary)]">{data.note}</p>
+        </section>
       ) : data ? (
         <>
           <section aria-label="Realised P&L" className={`${CARD} flex flex-col gap-3 px-4 py-3.5`}>
@@ -559,7 +619,7 @@ export function PnlView() {
               <h2 className="text-base font-bold">Realised P&amp;L</h2>
               <AsOf part={data} />
             </div>
-            <PartLine part={data} />
+            {report.isError ? <AskFailed error={report.error} /> : <PartLine part={data} />}
             <dl className="flex flex-col gap-3">
               <div className="flex flex-col gap-px">
                 <dt className={LABEL}>Before charges</dt>
@@ -593,7 +653,12 @@ export function PnlView() {
           >
             <h2 className="text-base font-bold">Closed trades</h2>
             <PnlList report={data} />
-            <ReadMore part={data} busy={report.isFetching} onMore={() => report.refetch()} />
+            <ReadMore
+              part={data}
+              busy={report.isFetching || again.isPending}
+              onMore={() => report.refetch()}
+              onAgain={() => again.mutate()}
+            />
           </section>
         </>
       ) : null}

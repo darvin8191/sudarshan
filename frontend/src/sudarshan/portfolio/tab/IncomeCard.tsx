@@ -49,7 +49,9 @@ export function IncomeCard({ report }: { report: PerformanceReport }) {
           <dt className="text-xs font-semibold text-muted-foreground">Yield on cost</dt>
           <dd className="text-[0.9375rem] font-semibold">{yieldText(yield_on_cost_pct)}</dd>
           <dd className="text-xs text-[color:var(--text-tertiary)]">
-            {yield_on_cost_pct === null ? 'No holding received income in the last 12 months.' : YIELD_DEFINITION}
+            {yield_on_cost_pct === null
+              ? 'None of what you hold now received income in the last 12 months.'
+              : YIELD_DEFINITION}
           </dd>
         </div>
       </dl>

@@ -133,7 +133,7 @@ describe('IncomeCard', () => {
     })
     render(<IncomeCard report={sold} />)
     expect(screen.getByText('none')).toBeTruthy()
-    expect(screen.getByText('No holding received income in the last 12 months.')).toBeTruthy()
+    expect(screen.getByText('None of what you hold now received income in the last 12 months.')).toBeTruthy()
     expect(yieldText(null)).toBe('none')
     expect(yieldText('12.3456')).toBe('12.35%')
   })

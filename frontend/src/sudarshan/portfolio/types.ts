@@ -1365,6 +1365,8 @@ export interface UpstoxHistoryArgs {
 export interface ReportArgs {
   fy: number
   segment: ReportSegment
+  /** Read it from Upstox now, whatever the cache holds (the budget still limits it). */
+  force?: boolean
 }
 
 // ---- Upstox's reports (M7.6 trade history, M7.7 trade-wise P&L and charges) ----
