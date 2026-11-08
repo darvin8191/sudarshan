@@ -1,11 +1,11 @@
-import type { QueryClient } from '@tanstack/react-query'
+import type { InfiniteData, QueryClient } from '@tanstack/react-query'
 import { useEffect, useSyncExternalStore } from 'react'
 import type { Socket } from 'socket.io-client'
 import { connectionCount } from '@/sudarshan/books/sharedSocket'
 import { screenerApi } from './api'
-import { RESULTS_KEY, RUNS_KEY, STATE_KEY, TODAY_KEY } from './keys'
+import { RESULTS_KEY, RUNS_KEY, runsKey, STATE_KEY, TODAY_KEY } from './keys'
 import { applyRun, applyState } from './stateCache'
-import type { Results, RunPush, RunRow, ScreenerState, StatePush } from './types'
+import type { Results, RunPush, RunRow, RunsPage, ScreenerState, StatePush } from './types'
 
 /**
  * Joining the owner's room and applying what the screener pushes (design 4.5), for the Screener
@@ -71,8 +71,33 @@ export function onRun(client: QueryClient, push: RunPush): void {
   // The patch is on screen; the read that follows brings the chips and the clause values of the
   // rows that stayed, which a push this small cannot carry.
   void client.invalidateQueries({ queryKey: [...RESULTS_KEY, push.screen_id] })
+  client.setQueryData<InfiniteData<RunsPage, number | null>>(runsKey(push.screen_id), (held) =>
+    held ? putRun(held, runOf(push)) : held
+  )
   void client.invalidateQueries({ queryKey: [...RUNS_KEY, push.screen_id] })
   void client.invalidateQueries({ queryKey: TODAY_KEY })
+}
+
+/** The history row a push stands for. */
+function runOf(push: RunPush): RunRow {
+  return {
+    id: push.run_id,
+    screen_id: push.screen_id,
+    at: push.at,
+    candle: push.candle,
+    matches: push.counts.matches,
+    entered: push.counts.entered,
+    exited: push.counts.exited,
+    marks: push.marks,
+  }
+}
+
+/** A run joins the top of the history held, once; one already held changes nothing. */
+function putRun(held: InfiniteData<RunsPage, number | null>, run: RunRow) {
+  if (held.pages.some((page) => page.runs.some((have) => have.id === run.id))) return held
+  const [first, ...rest] = held.pages
+  if (!first) return held
+  return { ...held, pages: [{ ...first, runs: [run, ...first.runs] }, ...rest] }
 }
 
 /**
@@ -87,16 +112,7 @@ export function mergeResults(held: Results, push: RunPush): Results {
   const keep = held.rows.filter((row) => !gone.has(`${row.exchange}:${row.symbol}`))
   const have = new Set(keep.map((row) => `${row.exchange}:${row.symbol}`))
   const added = push.entered.filter((row) => !have.has(`${row.exchange}:${row.symbol}`))
-  const run: RunRow = {
-    id: push.run_id,
-    screen_id: push.screen_id,
-    at: push.at,
-    candle: push.candle,
-    matches: push.counts.matches,
-    entered: push.counts.entered,
-    exited: push.counts.exited,
-    marks: push.marks,
-  }
+  const run = runOf(push)
   return {
     ...held,
     run,

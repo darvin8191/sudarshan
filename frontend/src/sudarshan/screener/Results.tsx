@@ -28,7 +28,7 @@ export function runWords(run: NonNullable<ResultsData['run']>): string {
 const KEY = (row: Pick<ResultRow, 'symbol' | 'exchange'>) => keyOf(row.symbol, row.exchange)
 
 /** A row's clause values and its "forming" mark. */
-function Values({ row }: { row: ResultRow }) {
+export function Values({ row }: { row: ResultRow }) {
   if (!row.values && !row.forming) return null
   return (
     <span className="flex flex-wrap items-center gap-x-2 text-[0.8125rem] font-medium text-[color:var(--text-secondary)]">
@@ -44,7 +44,7 @@ function Values({ row }: { row: ResultRow }) {
 }
 
 /** A row past the live cap: the price of the run, grey, and where it comes from. */
-function RunFigures({ row, at }: { row: ResultRow; at: number }) {
+export function RunFigures({ row, at }: { row: ResultRow; at: number }) {
   return (
     <span className={cn('flex shrink-0 flex-col items-end gap-0.5 text-right', STALE)}>
       <span className="text-base font-bold">
@@ -115,7 +115,7 @@ const ResultLine = memo(function ResultLine({
 })
 
 /** "Not checked (12)": the reasons the screen could not judge some instruments, in the service's words. */
-function NotChecked({ data }: { data: ResultsData['not_checked'] }) {
+export function NotChecked({ data }: { data: ResultsData['not_checked'] }) {
   const [open, setOpen] = useState(false)
   if (data.count === 0) return null
   const Icon = open ? ChevronUp : ChevronDown

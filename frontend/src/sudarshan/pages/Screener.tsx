@@ -16,9 +16,11 @@ import {
 } from '@/sudarshan/books/cards/parts'
 import { droppedHere } from '@/sudarshan/screener/actions'
 import { DeleteSheet } from '@/sudarshan/screener/DeleteSheet'
+import { History } from '@/sudarshan/screener/History'
 import { EngineText } from '@/sudarshan/screener/marks'
 import { useHearing, useScreenerPush } from '@/sudarshan/screener/push'
 import { ResultsPanel } from '@/sudarshan/screener/ResultsPanel'
+import { RunSheet } from '@/sudarshan/screener/RunSheet'
 import { ScreenCard } from '@/sudarshan/screener/ScreenCard'
 import { ScreenEditor } from '@/sudarshan/screener/ScreenEditor'
 import { type PanelTab, ScreenPage } from '@/sudarshan/screener/ScreenPage'
@@ -36,9 +38,10 @@ const NOT_RECEIVING = {
   real_time: false,
 } as const
 
-/** The panels of an open screen; Results and History join as they are built. */
+/** The panels of an open screen. */
 const TABS: PanelTab[] = [
   { id: 'results', label: 'Results' },
+  { id: 'history', label: 'History' },
   { id: 'edit', label: 'Edit' },
 ]
 
@@ -157,7 +160,7 @@ export default function Screener() {
         <ScreenPage
           row={open}
           tabs={TABS}
-          tab={address.tab === 'edit' ? 'edit' : 'results'}
+          tab={address.tab}
           onTab={setTab}
           onBack={closeScreen}
           onDelete={() => openSheet('delete')}
@@ -171,6 +174,15 @@ export default function Screener() {
               closeSheet={closeSheet}
               onSaved={() => {}}
             />
+          ) : address.tab === 'history' ? (
+            <>
+              <History
+                screenId={open.id}
+                hearing={hearing}
+                onOpen={(runId) => openSheet('run', { run: String(runId) })}
+              />
+              <RunSheet runId={address.sheet === 'run' ? address.run : null} onClose={closeSheet} />
+            </>
           ) : (
             <ResultsPanel
               key={open.id}
