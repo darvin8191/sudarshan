@@ -78,6 +78,36 @@ def upstox_statuses(auth_token: str, broker: str) -> dict[str, str] | None:
     return upstox._order_statuses(rows)
 
 
+def statuses_reader(
+    api_key: str | None, auth_token: str | None = None, broker: str | None = None
+) -> Callable[[], dict[str, str] | None]:
+    """The order book reader for a surface that places its order by api key alone.
+
+    The scalping terminal's close (blueprints/scalping.py) passes no broker session on purpose:
+    the service layer resolves one from the api key and routes by mode. The hold check needs
+    the same session to read the order book, so it is resolved here the way the service layer
+    resolves it for the order (``database.auth_db.get_auth_token_broker``), and only when the
+    reader is called, which is only while an earlier exit of the position is held. A session
+    that cannot be resolved reads as "not read": the hold then lasts its unconfirmed time.
+    """
+
+    def read() -> dict[str, str] | None:
+        token, name = auth_token, broker
+        if not (token and name):
+            try:
+                from database.auth_db import get_auth_token_broker
+
+                token, name = get_auth_token_broker(api_key) if api_key else (None, None)
+            except Exception:
+                logger.exception("The broker session for an exit's order book read was not found")
+                return None
+        if not (token and name):
+            return None
+        return upstox_statuses(token, name)
+
+    return read
+
+
 def exit_once(
     book: str,
     exchange: object,

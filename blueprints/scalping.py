@@ -801,7 +801,9 @@ def _reducing_exit(symbol, exchange, product, action, quantity, auth_token, brok
 
     # SUDARSHAN M6.9: in Live, one exit at a time per position, with every other surface
     # (sudarshan/books/surface_exits.py): a claim while this close is placed, the hold of an
-    # earlier exit respected, and the hold noted after. The sandbox is left as it was.
+    # earlier exit respected, and the hold noted after. The sandbox is left as it was. The
+    # callers pass no broker session (the order is placed by api key, see _resolve_session_auth),
+    # so the hold check resolves the same session the order is placed with to read the order book.
     from sudarshan.books import surface_exits
 
     return surface_exits.exit_once(
@@ -810,7 +812,7 @@ def _reducing_exit(symbol, exchange, product, action, quantity, auth_token, brok
         symbol,
         product,
         send,
-        lambda: surface_exits.upstox_statuses(auth_token, broker),
+        surface_exits.statuses_reader(api_key, auth_token, broker),
     )
 
 
