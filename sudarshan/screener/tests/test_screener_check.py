@@ -14,7 +14,8 @@ from test_screener_feed_runtime import Calendar as _Calendar
 from test_screener_runs import SPEC
 
 from sudarshan.alerts.market.feedlink import HEALTH
-from sudarshan.screener import check, runner, spec, store as store_module
+from sudarshan.screener import check, runner, spec
+from sudarshan.screener import store as store_module
 from sudarshan.screener.bars import Bars
 from sudarshan.screener.runs import Member
 from sudarshan.screener.store import OWNER, ScreenerStore
