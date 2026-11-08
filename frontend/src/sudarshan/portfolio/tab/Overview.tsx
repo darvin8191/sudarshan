@@ -15,14 +15,16 @@ import {
   MarketCalendarSource,
   useIstDay,
 } from '@/sudarshan/dashboard/MarketCalendar'
-import { problemOf } from '../api'
+import { PortfolioError, portfolioCall, problemOf } from '../api'
 import { CustomizeSheet } from '../sheets/CustomizeSheet'
 import { PriceSheet, type PriceTarget } from '../sheets/PriceSheet'
 import { SECONDARY } from '../sheets/TabFields'
+import { useSend } from '../sheets/useSend'
 import type {
   Account,
   AllocationBy,
   LayoutSpec,
+  Liability,
   SavedView,
   TabInfo,
   TabView,
@@ -123,6 +125,21 @@ function Loaded({
   onPrice: (target: PriceTarget) => void
 }) {
   const asOf = data.as_of !== null
+  const queries = useQueryClient()
+  const move = useSend()
+  // M7.19 V2: a loan entered before a loan had a tab is put on this tab by the owner.
+  const moveLoan = async (loan: Liability) => {
+    const ok = await move.run(async () => {
+      const result = await portfolioCall('loan_move', {
+        id: loan.asset_id,
+        tab_id: data.tab.id,
+        version: data.tab.version,
+      })
+      if (!result.enabled)
+        throw new PortfolioError({ code: 'unavailable', message: result.message, entryId: null })
+    })
+    if (ok) void queries.invalidateQueries({ queryKey: PORTFOLIO_KEY })
+  }
   const rowsIn = useMemo(() => sliced(data.rows, narrowing.slice), [data.rows, narrowing.slice])
   // A day in the past has no ticks: the service's prices of that day stand.
   const live = useTabLive({
@@ -224,8 +241,14 @@ function Loaded({
             kind: 'liability',
             unit_label: null,
             tab_id: data.tab.id,
+            tab_version: data.tab.version,
           })
         }
+        looseLoans={data.loose_loans}
+        tabName={data.tab.name}
+        onMoveLoan={(loan) => void moveLoan(loan)}
+        moveProblem={move.problem?.message ?? null}
+        loansHidden={data.loans_hidden}
       />
     ),
     // Old values and NAVs are a matter of today: a day in the past has none to update.
@@ -233,7 +256,7 @@ function Loaded({
       <FreshnessNotes
         key="notes"
         notes={data.notes}
-        onUpdate={(note) => onPrice(targetOf(note, data.assets, data.tab.id))}
+        onUpdate={(note) => onPrice(targetOf(note, data.assets, data.tab.id, data.tab.version))}
       />
     ),
     // Today means the day the page is read: not for a day in the past.

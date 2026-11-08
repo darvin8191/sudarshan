@@ -376,6 +376,7 @@ OPS = (
     OpSpec("asset_create", "POST", "/assets", "write"),
     OpSpec("asset_update", "PATCH", "/assets/<id>", "write"),
     OpSpec("price_point_set", "POST", "/assets/<id>/prices", "write"),
+    OpSpec("loan_move", "POST", "/assets/<id>/tab", "write"),
     OpSpec("mf_search", "GET", "/mf/search", "read", query=(("q", "str"), ("limit", "int"))),
     OpSpec("account_create", "POST", "/accounts", "write"),
     OpSpec("account_update", "PATCH", "/accounts/<id>", "write"),

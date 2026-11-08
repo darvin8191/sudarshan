@@ -303,6 +303,29 @@ describe('the Add sheet', () => {
     expect(screen.getByLabelText('Name of the loan')).toBeTruthy()
   })
 
+  it('sends a loan with the tab it is made on and that tab’s version', async () => {
+    serve({ asset_create: () => ({ id: 31, kind: 'liability', name: 'Home loan' }) })
+    show()
+    await userEvent.click(screen.getByRole('button', { name: /More/ }))
+    await userEvent.click(
+      within(screen.getByRole('group', { name: 'More kinds' })).getByRole('button', {
+        name: 'Loan',
+      })
+    )
+    await userEvent.type(screen.getByLabelText('Name of the loan'), 'Home loan')
+    await userEvent.type(screen.getByLabelText('Outstanding (₹)'), '4800000')
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(api.call.mock.calls.some((c) => c[0] === 'asset_create')).toBe(true))
+    const sent = api.call.mock.calls.find((c) => c[0] === 'asset_create')
+    expect(sent?.[1]).toMatchObject({
+      kind: 'liability',
+      name: 'Home loan',
+      tab_id: 2,
+      version: 4,
+      first_value: { price_u: 48_000_000_000 },
+    })
+  })
+
   it('selects the last account used, and offers a new one', async () => {
     serve()
     window.localStorage.setItem('sudarshan.portfolio.last-account', '2')

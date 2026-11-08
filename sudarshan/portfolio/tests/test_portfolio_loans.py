@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -71,6 +72,8 @@ def w(path):
 
         def loan(self, rid="l-1", name="Home loan", day=20261001, lakhs=50, tab=None, **more):
             tab = tab or self.tab
+            if "version" not in more:
+                more["version"] = self.version(tab)
             return self.book.asset_create(
                 OWNER, rid, "liability", now=NOW, name=name, tab_id=tab["id"],
                 first_value={"day": day, "price_u": lakhs * LAKH_U}, **more,
@@ -165,8 +168,8 @@ def test_status_lists_step_two_for_a_v1_file(path, capsys):
     made.close()
     raw(path, "PRAGMA user_version = 1")
     assert migrate.main(["--status", "--path", str(path)]) == 0
-    said = capsys.readouterr().out
-    assert "1" in said and "2" in said
+    said = capsys.readouterr().out.replace(str(path), "<file>")  # the temp path may hold any digit
+    assert "version: file 1, code 2" in said and "pending: [2]" in said
     assert raw(path, "PRAGMA user_version") == [(1,)]  # --status changed nothing
 
 
@@ -181,10 +184,10 @@ def test_a_loan_needs_a_tab_and_a_first_balance(w):
         )
     assert str(caught.value) == BOOK_WORDS["loan_first"]
     with pytest.raises(NotFound):
-        w.loan(tab={"id": 999})
+        w.loan(tab={"id": 999}, version=1)
     upstox = next(t for t in w.book.tabs(OWNER) if t["kind"] == "upstox")
     with pytest.raises(Refused) as caught:
-        w.loan(tab=upstox)
+        w.loan(tab=upstox, version=upstox["version"])
     assert str(caught.value) == BOOK_WORDS["loan_tab"]
 
 
@@ -261,3 +264,211 @@ def test_deleting_the_tab_drops_the_link_and_keeps_the_loan_asset(w):
     assert raw(
         w.store.path, "SELECT name FROM asset WHERE id = ?".replace("?", str(loan["id"]))
     ) == [("Home loan",)]
+
+
+# ---- loans entered in v0.5.0 (before a loan had a tab) -------------------------------------------
+FIXTURE = Path(__file__).parent / "fixtures" / "v050_store.sql"
+LATER = NOW + 15 * 86_400_000  # 10 Nov 2026: the day after v0.5.0 is published, and its loans' days
+
+
+@pytest.fixture
+def v050(tmp_path):
+    """A portfolio.db written by the v0.5.0 code itself (2dc208a): the Upstox tab, a tab "Home"
+    with two buys, and two loans made by that release's Loan entry, which carries no tab."""
+    path = tmp_path / "s" / DB_FILENAME
+    path.parent.mkdir()
+    with sqlite3.connect(path) as conn:
+        conn.executescript(FIXTURE.read_text())
+        conn.execute("PRAGMA user_version = 1")
+    assert raw(path, "SELECT name FROM sqlite_master WHERE name = 'tab_liability'") == []
+    made = PortfolioStore(path, now=LATER)
+    assert made.applied == [2]
+    book, views = Book(made), Views(made)
+    home = next(t for t in book.tabs(OWNER) if t["name"] == "Home")
+
+    class Opened:
+        store, path_, tab = made, path, home
+
+        @staticmethod
+        def version(tab=home):
+            return next(t for t in book.tabs(OWNER) if t["id"] == tab["id"])["version"]
+
+        @staticmethod
+        def view(tab=home, **args):
+            return views.tab_view(OWNER, tab["id"], args, now=LATER)
+
+        @staticmethod
+        def loan_id(name):
+            return raw(path, f"SELECT id FROM asset WHERE name = '{name}'")[0][0]
+
+        book_ = book
+
+    yield Opened
+    made.close()
+
+
+def test_a_loan_from_v050_is_listed_as_on_no_tab_and_can_be_moved_to_one(v050):
+    """MEDIUM-4. The row says nothing of a tab, so the migration cannot backfill it; the Summary
+    lists it ('Loans not on a tab') and the owner moves it, from the tab's own version."""
+    view = v050.view()
+    assert view["liabilities"] == [] and view["fixed"]["liabilities_paise"] == 0
+    loose = {each["name"]: each for each in view["loose_loans"]}
+    assert set(loose) == {"Home loan", "Car loan"}
+    assert loose["Home loan"]["outstanding_paise"] == 50 * 100_000 * 100
+    assert loose["Home loan"]["state"] == "owing"
+    upstox = next(t for t in v050.book_.tabs(OWNER) if t["kind"] == "upstox")
+    assert v050.view(upstox)["loose_loans"] == []  # nothing can be moved to the Upstox tab
+
+    before = v050.version()
+    v050.book_.loan_move(OWNER, v050.loan_id("Home loan"), v050.tab["id"], before, now=LATER)
+    assert v050.version() == before + 1
+    moved = v050.view()
+    assert [each["name"] for each in moved["liabilities"]] == ["Home loan"]
+    assert moved["fixed"]["liabilities_paise"] == 50 * 100_000 * 100
+    assert [each["name"] for each in moved["loose_loans"]] == ["Car loan"]
+
+
+def test_moving_a_loan_is_guarded_by_the_tabs_version_and_goes_to_one_tab_only(v050):
+    loan = v050.loan_id("Home loan")
+    with pytest.raises(VersionConflict):
+        v050.book_.loan_move(OWNER, loan, v050.tab["id"], v050.version() + 3, now=LATER)
+    assert raw(v050.path_, "SELECT count(*) FROM tab_liability") == [(0,)]
+    v050.book_.loan_move(OWNER, loan, v050.tab["id"], v050.version(), now=LATER)
+    other = v050.book_.tab_create(OWNER, "t-x", "Long term", "stocks", now=LATER)
+    with pytest.raises(Refused) as caught:  # it is on Home now
+        v050.book_.loan_move(OWNER, loan, other["id"], other["version"], now=LATER)
+    assert "on the Home portfolio" in str(caught.value)
+    assert raw(v050.path_, "SELECT tab_id FROM tab_liability") == [(v050.tab["id"],)]
+    with pytest.raises(Refused):  # a share is not a loan
+        v050.book_.loan_move(OWNER, 1, other["id"], other["version"], now=LATER)
+    upstox = next(t for t in v050.book_.tabs(OWNER) if t["kind"] == "upstox")
+    with pytest.raises(Refused) as caught:
+        v050.book_.loan_move(
+            OWNER, v050.loan_id("Car loan"), upstox["id"], upstox["version"], now=LATER
+        )
+    assert str(caught.value) == BOOK_WORDS["loan_tab"]
+    v050.book_.tab_update(OWNER, other["id"], other["version"], {"archived": True}, now=LATER)
+    archived = next(t for t in v050.book_.tabs(OWNER) if t["id"] == other["id"])
+    with pytest.raises(Refused) as caught:
+        v050.book_.loan_move(
+            OWNER, v050.loan_id("Car loan"), other["id"], archived["version"], now=LATER
+        )
+    assert str(caught.value) == BOOK_WORDS["archived"]
+    with pytest.raises(NotFound):
+        v050.book_.loan_move(OWNER, 999, other["id"], archived["version"], now=LATER)
+
+
+def test_adding_a_loan_again_says_where_the_one_with_that_name_is(v050):
+    """The sentence names the place: no tab yet (and what to do), or the tab it is on."""
+
+    def again(name="Home loan", rid="l-again"):
+        return v050.book_.asset_create(
+            OWNER, rid, "liability", now=LATER, name=name, tab_id=v050.tab["id"],
+            version=v050.version(), first_value={"day": 20261105, "price_u": LAKH_U},
+        )  # fmt: skip
+
+    with pytest.raises(Refused) as caught:
+        again("home LOAN")  # the name is matched ignoring case
+    said = str(caught.value)
+    assert "Home loan" in said and "on no portfolio yet" in said and "Move to a tab" in said
+    assert "already have an asset" not in said
+    v050.book_.loan_move(
+        OWNER, v050.loan_id("Home loan"), v050.tab["id"], v050.version(), now=LATER
+    )
+    with pytest.raises(Refused) as caught:
+        again()
+    assert str(caught.value) == (
+        "You already have a loan called Home loan, on the Home portfolio. Update it there."
+    )
+    with pytest.raises(Refused) as caught:  # a manual asset keeps the plain sentence
+        again("Gold coin")
+    assert str(caught.value) == "You already have an asset called Gold coin."
+
+
+def test_the_v050_file_migrates_once_and_a_second_open_changes_nothing(v050):
+    before = {
+        t: raw(v050.path_, f"SELECT * FROM {t} ORDER BY 1") for t in ("asset", "tab", "price_point")
+    }
+    v050.store.close()
+    again = PortfolioStore(v050.path_, now=LATER + 1)
+    assert again.applied == []
+    again.close()
+    assert before == {t: raw(v050.path_, f"SELECT * FROM {t} ORDER BY 1") for t in before}
+
+
+# ---- every loan write goes through the tab's version ---------------------------------------------
+def test_a_loan_cannot_be_made_without_the_tabs_version(w):
+    with pytest.raises(Invalid):
+        w.book.asset_create(
+            OWNER, "l-nv", "liability", now=NOW, name="Home loan", tab_id=w.tab["id"],
+            first_value={"day": 20261001, "price_u": LAKH_U},
+        )  # fmt: skip
+    assert raw(w.store.path, "SELECT count(*) FROM tab_liability") == [(0,)]
+
+
+def test_a_balance_is_set_from_the_loans_own_tab_at_its_version_and_moves_it(w):
+    loan = w.loan(lakhs=50)
+    before = w.version()
+    with pytest.raises(VersionConflict):
+        w.book.loan_balance_set(
+            OWNER, loan["id"], w.tab["id"], before + 2, 20261020, LAKH_U, now=NOW
+        )
+    w.book.loan_balance_set(OWNER, loan["id"], w.tab["id"], before, 20261020, 48 * LAKH_U, now=NOW)
+    assert w.version() == before + 1
+    assert w.get()["liabilities"][0]["outstanding_paise"] == 48 * 100_000 * 100
+    # Another tab cannot take the loan by setting its balance: it counts on one tab only.
+    other_version = w.version(w.other)
+    with pytest.raises(Refused) as caught:
+        w.book.loan_balance_set(
+            OWNER, loan["id"], w.other["id"], other_version, 20261021, 47 * LAKH_U, now=NOW
+        )
+    assert "on the Home portfolio" in str(caught.value)
+    assert w.version(w.other) == other_version
+    assert raw(w.store.path, "SELECT tab_id FROM tab_liability") == [(w.tab["id"],)]
+    assert w.get(tab=w.other)["liabilities"] == []
+    with pytest.raises(Refused):
+        w.book.loan_balance_set(OWNER, w.gold["id"], w.tab["id"], w.version(), 20261020, 1, now=NOW)
+
+
+# ---- net worth under a filter ---------------------------------------------------------------------
+def test_loans_and_net_worth_are_for_the_whole_tab_not_for_a_filtered_part(w):
+    bank = w.book.account_create(
+        OWNER, "a-2", w.book.members(OWNER)[0]["id"], "Bank", "bank", now=NOW
+    )
+    w.hold_gold()
+    w.loan(lakhs=1)
+    whole = w.get()
+    assert whole["fixed"]["liabilities_paise"] == 100_000 * 100 and whole["loans_hidden"] is False
+    for narrowing in ({"accounts": [bank["id"]]}, {"classes": ["gold"]}, {"tags": ["x"]},
+                      {"held": "over"}):  # fmt: skip
+        part = w.get(**narrowing)
+        assert part["liabilities"] == [] and part["fixed"]["liabilities_paise"] == 0, narrowing
+        assert part["loans_hidden"] is True and part["loose_loans"] == [], narrowing
+    # A day in the past is not a part of the tab: the loan's balance on that day stands.
+    past = w.get(as_of=20261010)
+    assert past["fixed"]["liabilities_paise"] == 100_000 * 100 and past["loans_hidden"] is False
+    assert w.get(tab=w.other, accounts=[bank["id"]])["loans_hidden"] is False  # nothing to hide
+
+
+# ---- a loan entered at 0, or dated later ----------------------------------------------------------
+def test_a_loan_entered_at_zero_or_dated_later_is_listed_with_words_for_what_it_means(w):
+    zero = w.loan(rid="l-0", lakhs=0, name="Spare loan")
+    later = w.loan(rid="l-9", day=20261231, lakhs=20, name="Car loan")
+    view = w.get()
+    shown = {each["asset_id"]: each for each in view["liabilities"]}
+    assert set(shown) == {zero["id"], later["id"]}
+    assert shown[zero["id"]]["state"] == "zero"
+    assert (
+        shown[zero["id"]]["words"]
+        == "Entered at 0, so it lowers nothing. Update the balance once you owe something."
+    )
+    assert shown[later["id"]]["state"] == "later" and shown[later["id"]]["day"] == 20261231
+    assert shown[later["id"]]["words"] == (
+        "Its balance starts on 31 Dec. It lowers net worth from that day, not before."
+    )
+    assert view["fixed"]["liabilities_paise"] == 0  # neither lowers net worth today
+    assert w.get(as_of=20260930)["liabilities"] == []  # on a past day it did not exist yet
+    # A loan that was owed and is paid off still leaves the list (state zero is only for 0 first).
+    owed = w.loan(rid="l-1", lakhs=5, name="Home loan")
+    w.book.loan_balance_set(OWNER, owed["id"], w.tab["id"], w.version(), 20261020, 0, now=NOW)
+    assert owed["id"] not in {x["asset_id"] for x in w.get()["liabilities"]}

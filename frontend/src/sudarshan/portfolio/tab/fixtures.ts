@@ -103,6 +103,8 @@ export function view(rows: HoldingRow[], extra: Partial<TabView> = {}): TabView 
     filters: { accounts: [], classes: [], tags: [], held: null, as_of: null },
     assets: [],
     liabilities: [],
+    loans_hidden: false,
+    loose_loans: [],
     allocation: {} as TabView['allocation'],
     notes: [],
     layout: {

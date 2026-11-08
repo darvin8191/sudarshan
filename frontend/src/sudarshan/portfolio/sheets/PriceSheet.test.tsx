@@ -22,6 +22,7 @@ const GOLD: PriceTarget = {
   kind: 'manual',
   unit_label: 'g',
   tab_id: 2,
+  tab_version: 7,
 }
 const FUND: PriceTarget = {
   asset_id: 4,
@@ -29,6 +30,7 @@ const FUND: PriceTarget = {
   kind: 'mf',
   unit_label: null,
   tab_id: 2,
+  tab_version: 7,
 }
 const LOAN: PriceTarget = {
   asset_id: 9,
@@ -36,6 +38,7 @@ const LOAN: PriceTarget = {
   kind: 'liability',
   unit_label: null,
   tab_id: 2,
+  tab_version: 7,
 }
 
 function show(target: PriceTarget, onClose = vi.fn()) {
@@ -78,7 +81,7 @@ describe('the price sheet', () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled())
     expect(api.call).toHaveBeenCalledWith(
       'price_point_set',
-      expect.objectContaining({ id: 9, price_u: 48_000_000_000, tab_id: 2 })
+      expect.objectContaining({ id: 9, price_u: 48_000_000_000, tab_id: 2, version: 7 })
     )
     const sent = api.call.mock.calls[0][1]
     expect(sent.day).toBeGreaterThan(20260000)
