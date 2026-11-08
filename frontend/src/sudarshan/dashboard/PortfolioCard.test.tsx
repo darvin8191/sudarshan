@@ -250,4 +250,24 @@ describe('the switch', () => {
     act(() => setPortfolioCard(false))
     expect(window.localStorage.getItem('sudarshan-portfolio-card')).toBeNull()
   })
+
+  it('reads blocked storage as off, and a choice made while it is blocked lasts for the visit', () => {
+    function Probe() {
+      return <span>{usePortfolioCard() ? 'on' : 'off'}</span>
+    }
+    render(<Probe />)
+    const blocked = () => {
+      throw new Error('storage is blocked')
+    }
+    const get = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(blocked)
+    const set = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(blocked)
+    act(() => setPortfolioCard(true))
+    expect(screen.getByText('on')).toBeTruthy() // the choice holds although it could not be kept
+    act(() => {
+      window.dispatchEvent(new StorageEvent('storage', { key: 'sudarshan-portfolio-card' }))
+    })
+    expect(screen.getByText('off')).toBeTruthy() // an unreadable store reads as off, not on
+    get.mockRestore()
+    set.mockRestore()
+  })
 })
