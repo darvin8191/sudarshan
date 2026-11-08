@@ -74,7 +74,7 @@ OUTBOX_MAX_PENDING = 1_000
 #: Columns that hold JSON text; the store converts at the boundary.
 JSON_COLUMNS = frozenset({"spec", "marks", "values_json", "payload"})
 FLAG_COLUMNS = frozenset(
-    {"shared", "alerts_paused", "pinned", "added_by_screener", "in_list", "told", "cas"}
+    {"shared", "alerts_paused", "pinned", "added_by_screener", "in_list", "cas"}
 )
 #: Never leave the store: who owns a row, and the client's retry key.
 HIDDEN_COLUMNS = ("principal", "request_id")
@@ -403,8 +403,9 @@ class Tx:
         return self._out(row.first())
 
     def run_insert(self, values: Mapping[str, Any]) -> dict[str, Any]:
-        """Record a run of a screen at the version it judged; a run of an older version is
-        refused (``VersionConflict``), a run already recorded is returned as it is."""
+        """Record a run of a screen at the version it judged. A ``done`` run of an older version
+        is refused (``VersionConflict``): it must be recorded ``superseded`` instead, which is
+        always accepted and changes nothing else. A run already recorded is returned as it is."""
         if values["status"] not in RUN_STATUSES:
             raise ValueError(f"not a run status: {values['status']!r}")
         have = self.run_by_key(values["run_key"])
@@ -413,13 +414,23 @@ class Tx:
         screen = self.screen(values["screen_id"])
         if screen is None:
             raise NotFound()
-        if screen["version"] != values["screen_version"]:
+        if values["status"] == "done" and screen["version"] != values["screen_version"]:
             raise VersionConflict(WORDS["stale_run"])
         t = self._t("run")
         key = self.conn.execute(
             insert(t).values(principal=self.who, **self._in(values))
         ).inserted_primary_key[0]
         return self.run(key)  # type: ignore[return-value]
+
+    def run_finish(self, run_id: int, marks: Mapping[str, Any] | None, **counts: int) -> None:
+        """The counts and marks of a run once it is evaluated (the row is made first so the
+        membership rows can name it)."""
+        t = self._t("run")
+        self.conn.execute(
+            update(t)
+            .where(t.c.id == run_id, self._mine(t))
+            .values(**self._in({"marks": marks or {}}), **counts)
+        )
 
     def run_mark(self, run_id: int, status: str) -> None:
         if status not in RUN_STATUSES:
@@ -550,6 +561,18 @@ class Tx:
             raise VersionConflict()
         return self.membership(member_id)  # type: ignore[return-value]
 
+    def membership_relist(self, screen_id: int, old_list: int, new_list: int, now: int) -> int:
+        """Move a screen's rows from one list to another (the list the screen asked for was just
+        made: rows kept under 0 until then)."""
+        t = self._t("membership")
+        return int(
+            self.conn.execute(
+                update(t)
+                .where(t.c.screen_id == screen_id, t.c.list_id == old_list, self._mine(t))
+                .values(list_id=new_list, updated_at=now)
+            ).rowcount
+        )
+
     def membership_remove(self, member_id: int) -> bool:
         t = self._t("membership")
         return bool(self.conn.execute(delete(t).where(t.c.id == member_id, self._mine(t))).rowcount)
@@ -570,17 +593,20 @@ class Tx:
 
     # ---- alert marks ----
     def told(self, screen_id: int, session: int) -> dict[str, dict[str, Any]]:
-        """What the owner has been told this session about a screen, by key."""
+        """What the owner has been told this session about a screen, by key: ``told`` is how
+        many times, ``last_run`` the run number (k) that told it last."""
         t = self._t("alert_state")
         found = self.conn.execute(
             select(t).where(t.c.screen_id == screen_id, t.c.session == session, self._mine(t))
         ).mappings()
         return {row["key"]: self._out(row) for row in found}  # type: ignore[misc]
 
-    def mark_told(self, screen_id: int, session: int, keys: Iterable[str], run_id: int) -> int:
+    def mark_told(
+        self, screen_id: int, session: int, told: Mapping[str, tuple[int, int | None]]
+    ) -> int:
+        """Write the digest's marks: key -> (count, last run number)."""
         t = self._t("alert_state")
-        count = 0
-        for key in keys:
+        for key, (count, last) in told.items():
             done = self.conn.execute(
                 update(t)
                 .where(
@@ -589,7 +615,7 @@ class Tx:
                     t.c.key == key,
                     self._mine(t),
                 )
-                .values(told=1, last_run=run_id)
+                .values(told=count, last_run=last)
             ).rowcount
             if not done:
                 self.conn.execute(
@@ -598,12 +624,11 @@ class Tx:
                         screen_id=screen_id,
                         session=session,
                         key=key,
-                        told=1,
-                        last_run=run_id,
+                        told=count,
+                        last_run=last,
                     )
                 )
-            count += 1
-        return count
+        return len(told)
 
     # ---- the outbox ----
     def outbox_add(

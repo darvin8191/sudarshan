@@ -231,7 +231,7 @@ def test_removing_a_screen_takes_its_state_membership_and_marks_but_leaves_its_r
     def fill(tx: Tx):
         run = tx.run_insert(_run(sid, 1, "k1"))
         tx.membership_put(sid, 7, _row("NSE_EQ|INE1", "SBIN"), NOW)
-        tx.mark_told(sid, 20251028, ["NSE_EQ|INE1"], run["id"])
+        tx.mark_told(sid, 20251028, {"NSE_EQ|INE1": (1, 3)})
         return run
 
     run = opened.write(OWNER, fill)
@@ -274,6 +274,8 @@ def test_a_run_applies_only_to_the_screen_version_it_judged(opened):
     with pytest.raises(VersionConflict) as caught:
         opened.write(OWNER, lambda tx: tx.run_insert(_run(sid, 1, "b")))
     assert str(caught.value) == store.WORDS["stale_run"]
+    stale = opened.write(OWNER, lambda tx: tx.run_insert(_run(sid, 1, "b", status="superseded")))
+    assert stale["status"] == "superseded" and stale["screen_version"] == 1
     second = opened.write(OWNER, lambda tx: tx.run_insert(_run(sid, 2, "b", NOW + 900_000)))
     assert opened.read(OWNER, lambda tx: tx.latest_run(sid))["id"] == second["id"]
     opened.write(OWNER, lambda tx: tx.run_mark(second["id"], "superseded"))
@@ -373,10 +375,19 @@ def test_list_items_are_replaced_whole_and_told_marks_are_per_session(opened):
     assert got["NSE_EQ|A"]["added_by_screener"] is True and got["NSE_EQ|A"]["seen_at"] == NOW
     assert opened.write(OWNER, lambda tx: tx.list_items_replace(7, [], NOW)) == 0
     assert opened.read(OWNER, lambda tx: tx.list_items(7)) == {}
-    opened.write(OWNER, lambda tx: tx.mark_told(sid, 20251028, ["NSE_EQ|A", "NSE_EQ|B"], 5))
-    opened.write(OWNER, lambda tx: tx.mark_told(sid, 20251028, ["NSE_EQ|A"], 6))
+    opened.write(
+        OWNER, lambda tx: tx.mark_told(sid, 20251028, {"NSE_EQ|A": (1, 5), "NSE_EQ|B": (1, 5)})
+    )
+    opened.write(OWNER, lambda tx: tx.mark_told(sid, 20251028, {"NSE_EQ|A": (2, 6)}))
     told = opened.read(OWNER, lambda tx: tx.told(sid, 20251028))
-    assert told["NSE_EQ|A"]["last_run"] == 6 and told["NSE_EQ|B"]["told"] is True
+    assert told["NSE_EQ|A"] == {
+        "screen_id": sid,
+        "session": 20251028,
+        "key": "NSE_EQ|A",
+        "told": 2,
+        "last_run": 6,
+    }
+    assert told["NSE_EQ|B"]["told"] == 1
     assert opened.read(OWNER, lambda tx: tx.told(sid, 20251029)) == {}
 
 
