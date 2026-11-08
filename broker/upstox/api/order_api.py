@@ -1203,9 +1203,14 @@ def close_all_positions(current_api_key, auth):
             logger.debug("No open positions found to close.")
             return {"message": "No Open Positions Found"}, 200
         for position, held_now in candidates:
-            shown = int(position.get("quantity", 0))
-            if shown == 0 and held_now in (None, 0):
-                continue  # nothing held, as far as the books say
+            shown = _shown(position.get("quantity", 0))
+            if shown == 0 and held_now is None:
+                # Nothing held, as far as the books say, and the order book did not say: with
+                # it unread, a row that shows a quantity carries the sentence for the whole
+                # answer (and when none does, the answer above said the book was not checked).
+                continue
+            # A row at 0 whose corrected figure is 0 too is passed over below, once the hold of
+            # an exit for it, if one is open, has been asked (E3).
             symbol = (
                 get_symbol(position["instrument_token"], position["exchange"])
                 if position.get("instrument_token")
@@ -1225,6 +1230,8 @@ def close_all_positions(current_api_key, auth):
                 outcomes.append(_outcome(held, "not_sent", why))
                 continue
             if not symbol:
+                if shown == 0 and held_now == 0:
+                    continue  # nothing held, as far as the books say
                 logger.warning(
                     f"Could not find symbol for instrument token {position.get('instrument_token')}. Skipping position."
                 )
@@ -1232,12 +1239,13 @@ def close_all_positions(current_api_key, auth):
                 continue
 
             held = exit_guard.position_of(position["exchange"], symbol, product)
-            if held_now == 0:
-                logger.debug(f"Exit all: {symbol} is closed already, as the order book shows")
-                continue
             # SUDARSHAN M6.9: a busy position is not sent, and neither is any once time is up.
             # A hold this very call made does not count against a later row of the same name.
             # Busy is said before not-sized: the position is on its way out whatever it holds.
+            # Asked before a flat row is passed over (E3): a reversal whose market order filled
+            # the position's size and rests for the other side leaves the corrected figure at 0
+            # while its hold is open and its order still works, and "All Open Positions
+            # SquaredOff" over it would be answered as the rest fills into a short.
             why = busy.get(held) or (
                 None
                 if held in noted_here
@@ -1245,6 +1253,14 @@ def close_all_positions(current_api_key, auth):
                     "live", position["exchange"], symbol, product, statuses
                 )
             )
+            if held_now == 0:
+                if why is None:
+                    logger.debug(f"Exit all: {symbol} is closed already, as the order book shows")
+                    continue
+                logger.warning(f"Exit all sent no exit for {symbol}: flat, and its exit is busy")
+                skipped.append(why)
+                outcomes.append(_outcome(held, "not_sent", why))
+                continue
             if why is None and held_now is None:
                 # The order book could not be read, or does not add up with the rows: what is
                 # held cannot be confirmed, so nothing is sent for it.

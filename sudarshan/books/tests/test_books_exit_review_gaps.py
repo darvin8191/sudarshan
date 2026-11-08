@@ -433,3 +433,66 @@ def test_v1_the_sentence_is_for_a_trader():
     assert "Upstox app" in said and "Positions" in said
     for word in ("None", "token", "HTTP", "424", "409", "order book", "row", "arm"):
         assert word not in said
+
+
+# -- E3. Exit all over a part-filled reversal whose rest still works ---------------------------------------
+
+
+def test_e3_exit_all_over_a_part_filled_reversal_does_not_say_all_squared_off(monkeypatch):
+    """Long 65; the reversal SELL 130 fills 65 and 65 rests (its hold is noted). Exit all reads the
+    corrected figure as flat. On b14cb0e it passed the row over and answered success, while the
+    resting 65 was about to open a short. Now the hold is asked first, and the working order is
+    named."""
+    broker = Broker({X: 65}, 60.0)
+    broker.part[X] = 65
+    world = install(monkeypatch, broker)
+    assert _reversal(world, X, "130", "SELL", "-65")[0] == 200
+    broker.part.pop(X)
+    _fresh_book()
+    code, body = world.app_exit_all()
+    assert code != 200 and body["status"] == "error", (code, body)
+    assert "still working at Upstox" in body["message"] and "order ending 0001" in body["message"]
+    assert _sent(broker, X) == [("SELL", 130)]
+    flat = [p for p in body["positions"] if p["symbol"] == X]
+    assert flat and flat[0]["outcome"] == "not_sent"
+
+
+def test_e3_a_flat_row_whose_earlier_exit_is_complete_is_passed_over_and_its_hold_ends(monkeypatch):
+    """The hold of a completed exit ends on Exit all's read, and the flat row is nothing to close;
+    Exit all answers success with nothing more sent, as before (on b14cb0e the hold lingered,
+    unasked, until the next single exit)."""
+    world = install(monkeypatch, Broker({X: 65}, 0.0))
+    assert world.phone_exit(X)[0] == 200
+    _fresh_book()
+    code, body = world.app_exit_all()
+    assert (code, body["status"]) == (200, "success"), body
+    assert _sent(world.broker, X) == [("SELL", 65)]
+    assert exit_guard.EXITS.placed_lately("live") == set()  # the hold ended on that read
+
+
+def test_e3_a_row_at_0_whose_own_exit_still_works_is_said_too(monkeypatch):
+    """The app's Exit rests at Upstox (nothing filled); the owner then sells in Upstox's own app
+    and that fills. The row shows 0 and the corrected figure is 0, and SUDARSHAN's SELL still
+    works: it can open a short, so Exit all says so instead of answering success."""
+    world = install(monkeypatch, Broker({X: 65}, 0.0))
+    world.broker.part[X] = 0
+    assert world.phone_exit(X)[0] == 200
+    world.broker.fills.append((time.monotonic(), X, -65))  # sold in Upstox's app
+    _fresh_book()
+    code, body = world.app_exit_all()
+    assert code != 200 and "still working at Upstox" in body["message"], (code, body)
+    assert _sent(world.broker, X) == [("SELL", 65)]
+
+
+def test_e3_control_a_flat_row_of_an_unknown_contract_is_passed_over(monkeypatch):
+    """Control: a closed position whose token the symbol master does not know is nothing to
+    close, not a contract Exit all could not send for."""
+    import broker.upstox.api.order_api as upstox
+
+    world = install(monkeypatch, Broker({X: 0, Y: -30}, 0.0))
+    monkeypatch.setattr(
+        upstox, "get_symbol", lambda token, exchange: Y if "1002" in token else None
+    )
+    code, body = world.app_exit_all()
+    assert (code, body["status"]) == (200, "success"), body
+    assert _sent(world.broker, Y) == [("BUY", 30)]
