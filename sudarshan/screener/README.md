@@ -110,6 +110,35 @@ itself ("Screener: 15-min EMA cross, 10:30 to 10:45 candle: 3 entered: RELIANCE 
 age limit) and pushes a toast with a View link to the open apps; its History tab shows the row
 with its delivery chips. Pause and not-checked notes stay in the app, never on Telegram.
 
+## The replay check (the owner's check 7.4, after the close)
+
+On the server, as the `sudarshan` user or root, after a trading day the feed recorded:
+
+```sh
+cd /opt/sudarshan/apps/openalgo
+STATE_DIRECTORY=/var/lib/sudarshan-screener .venv/bin/python -m sudarshan.screener.check \
+    /var/lib/sudarshan-feed/ticks/$(date +%F).jsonl.gz --from-db --compare
+```
+
+It opens screener.db read-only (nothing is written, the service may keep running), replays the
+day's ticks through the same bars, runs, membership and alert policy with each tick's own clock,
+prints one line per run (`10:00  15-min EMA cross  3 matched  1 entered (SBIN)  0 left  digest:
+Alert raised: 1 entered; 3 match now`) and compares each with the run the service recorded.
+
+Passing looks like this, and the command exits 0:
+
+```
+N runs replayed from 2026-10-28.jsonl.gz
+Replay check: N runs compared, all match
+```
+
+A difference on a run the service marked `late` (a restart) or `repaired` (a pause) is printed as
+`explained: ...` and still passes. Any other line starting `DIFFERENT:` fails the check (exit 1):
+read the journal (`journalctl -u sudarshan-screener --since today`) for that run's time. Exit 2
+means the check could not run (no recording, no screener.db, no universe yet); the message says
+which. Without a database, `--spec screen.json --keys NSE_EQ|...,NSE_EQ|...` replays one screen
+over the keys given (what CI does with synthetic recordings).
+
 ## Storage
 
 `screener.db` (schema 1, `migrations.py`): screens and their state, runs with their changes and
