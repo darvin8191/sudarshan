@@ -607,7 +607,8 @@ async def run(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
         screen = tx.screen(found["screen_id"])
         stored = screen["spec"] if screen else {"where": None}
         values = tx.run_values(run_id)
-        changes = tx.run_changes(run_id)
+        own = tx.run_changes(run_id)
+        changes = [c for c in own if c["change"] == "not_checked"] + _match_set(tx, found, values)
         rows, not_checked = result_rows(
             stored, screen["name"] if screen else "", found, changes, values, [], now
         )
@@ -620,6 +621,25 @@ async def run(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
         }
 
     return _translate(lambda: store.read(OWNER, read))
+
+
+def _match_set(tx: Tx, run: Mapping[str, Any], values: Mapping[str, Any]) -> list[dict]:
+    """A past run's whole match set as "in" rows (MEDIUM-1): from its values while they are
+    kept (every match has its own), else replayed from the day's first run, which records every
+    match, and the later runs' changes up to this one."""
+    hits = {k: v for k, v in values.items() if "_not_checked" not in v}
+    if hits and all("_symbol" in v for v in hits.values()):
+        return [
+            {"key": k, "symbol": v["_symbol"], "exchange": v["_exchange"], "change": "in"}
+            for k, v in hits.items()
+        ]
+    held: dict[str, dict] = {}
+    for change in tx.session_changes(run["screen_id"], run["session"], run["id"]):
+        if change["change"] == "in":
+            held[change["key"]] = change
+        elif change["change"] == "out":
+            held.pop(change["key"], None)
+    return list(held.values())
 
 
 @op("runs_since")

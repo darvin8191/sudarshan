@@ -97,3 +97,27 @@ def test_matches_the_list_could_not_take_are_said_to_be_waiting(service):
     assert words.mark_words({"waiting": {"count": 4, "full": True, "max_adds": 10}}) == (
         "4 more matched, waiting: the list is full",
     )
+
+
+# ---- MEDIUM-1: a past run's whole match set --------------------------------------------------------
+def test_a_past_runs_set_is_the_whole_match_set(service):
+    screen = make(service)
+    record(service, screen, 1, judged({"AAA": 100, "BBB": 200}))
+    record(service, screen, 2, judged({"AAA": 100, "BBB": 200, "CCC": 300}))
+    record(service, screen, 3, judged({"AAA": 100, "CCC": 300}, missed=("BBB",)))
+    page = call(service, "runs", id=screen["id"])["runs"]
+    second, third = page[1], page[0]
+    answer = call(service, "run", id=second["id"])
+    assert answer["run"]["matches"] == 3
+    assert [r["symbol"] for r in answer["rows"]] == ["CCC", "BBB", "AAA"], (
+        "rewind shows only what changed in that run"
+    )
+    assert [r["symbol"] for r in call(service, "run", id=third["id"])["rows"]] == ["CCC", "AAA"]
+
+    # after 7 days the values are gone: the set is replayed from the day's changes
+    service.store.write(OWNER, lambda tx: tx.conn.execute(tx._t("run_value").delete()))
+    replayed = call(service, "run", id=second["id"])
+    assert sorted(r["symbol"] for r in replayed["rows"]) == ["AAA", "BBB", "CCC"]
+    assert replayed["values_note"] == "Values are kept for 7 days; the list for 100 days."
+    later = call(service, "run", id=third["id"])
+    assert sorted(r["symbol"] for r in later["rows"]) == ["AAA", "CCC"]

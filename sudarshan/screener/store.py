@@ -524,6 +524,20 @@ class Tx:
         query = select(t).where(t.c.run_id == run_id, self._mine(t)).order_by(t.c.rank, t.c.key)
         return self._all(query)
 
+    def session_changes(self, screen_id: int, session: int, through: int) -> list[dict[str, Any]]:
+        """The changes of a screen's done runs of one day, up to run ``through``, oldest run first
+        (a past run's match set replayed, once its values are gone)."""
+        r, c = self._t("run"), self._t("run_change")
+        runs = select(r.c.id).where(
+            r.c.screen_id == screen_id,
+            r.c.session == session,
+            r.c.status == "done",
+            r.c.id <= through,
+            self._mine(r),
+        )
+        query = select(c).where(c.c.run_id.in_(runs), self._mine(c)).order_by(c.c.run_id, c.c.key)
+        return self._all(query)
+
     def run_values_put(self, run_id: int, values: Mapping[str, Mapping[str, Any]]) -> int:
         t = self._t("run_value")
         rows = [
