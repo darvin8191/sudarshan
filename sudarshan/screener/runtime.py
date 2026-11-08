@@ -139,6 +139,8 @@ class LiveSource:
         self._open_pause: int | None = None
         self.keys: frozenset[str] = frozenset()
         self.claimed_at: float = 0.0
+        #: Whether the feed may hold a claim of ours (an earlier run's, until dropped).
+        self._held = True
         self.claim_words: str | None = None
         self.master_ready = False
         #: The master download the universes were built on (OpenAlgo's completion time).
@@ -395,43 +397,57 @@ class LiveSource:
         download = self.master.download() if hasattr(self.master, "download") else None
         return download is not None and download[0] == "success" and download[1] != self.built_on
 
-    def refresh_universes(self, specs: Sequence[Mapping[str, Any]], now: int) -> None:
-        """The universes the active screens use, from the master; the keys to follow. While the
-        master is being downloaded or is empty, the universes already built stay as they are and
-        the master counts as not ready, so the feed job tries again."""
+    def refresh_universes(
+        self, specs: Sequence[Mapping[str, Any]], now: int, *, reuse: bool = False
+    ) -> None:
+        """The universes the active screens use, from the master; the keys to follow.
+
+        A full rebuild (the day, the master) reads every universe again; while the master is being
+        downloaded or is empty, the universes already built stay as they are and the master
+        counts as not ready, so the feed job tries again. ``reuse`` follows a change of screens
+        (HIGH-2): a universe already built today is kept as it is, only a new one is read from the
+        master, and one no active screen uses any more is let go, so the keys shrink with the
+        screens."""
         if self._today is None:
             return
-        found: dict[str, list[Member]] = {}
-        listings: dict[str, universe.Listing] = {}
-        try:
-            built_on = self._master_whole()
-            for kind_spec in specs:
-                name = _uni_key(kind_spec)
-                if name in found:
-                    continue
-                extra = {}
-                if kind_spec["kind"] == "options":
-                    frame = self._index_frame(kind_spec["underlying"])
-                    extra["ltp"] = (
-                        int(round(frame["ltp"] * 100)) if frame and frame.get("ltp") else None
+        wanted: dict[str, Mapping[str, Any]] = {}
+        for kind_spec in specs:
+            wanted.setdefault(_uni_key(kind_spec), kind_spec)
+        found = {n: self._universes[n] for n in wanted if reuse and n in self._universes}
+        listings = dict(self._listings) if reuse else {}
+        built: dict[str, list[Member]] = {}
+        todo = [s for n, s in wanted.items() if n not in found]
+        if todo:
+            try:
+                built_on = self._master_whole()
+                for kind_spec in todo:
+                    name = _uni_key(kind_spec)
+                    extra = {}
+                    if kind_spec["kind"] == "options":
+                        frame = self._index_frame(kind_spec["underlying"])
+                        extra["ltp"] = (
+                            int(round(frame["ltp"] * 100)) if frame and frame.get("ltp") else None
+                        )
+                    members, rows, missing = universe_of(
+                        kind_spec, self.master, self._today, extra=extra
                     )
-                members, rows, missing = universe_of(
-                    kind_spec, self.master, self._today, extra=extra
-                )
-                found[name], self._missing[name] = members, missing
-                listings |= rows
-                if missing:
-                    log.warning(
-                        "%d names of %s are not in the master contract: %s",
-                        len(missing),
-                        name,
-                        ", ".join(missing[:5]),
-                    )
-            self.master_ready, self.built_on = True, built_on
-        except (universe.MasterUnavailable, FileNotFoundError) as exc:
-            log.warning("universes could not be built: %s", exc)
-            self.master_ready = False
-            return
+                    built[name], self._missing[name] = members, missing
+                    listings |= rows
+                    if missing:
+                        log.warning(
+                            "%d names of %s are not in the master contract: %s",
+                            len(missing),
+                            name,
+                            ", ".join(missing[:5]),
+                        )
+                self.master_ready, self.built_on = True, built_on
+            except (universe.MasterUnavailable, FileNotFoundError) as exc:
+                log.warning("universes could not be built: %s", exc)
+                self.master_ready = False
+                if not reuse:
+                    return
+                built = {}  # the new universes wait for the master; the keys still follow
+        found |= built
         self._universes, self._listings = found, listings
         keys: list[str] = []
         seen: set[str] = set()
@@ -450,6 +466,8 @@ class LiveSource:
         self.keys = frozenset(keys)
         self.feed.follow(self.keys)
         self._rebuild_market(now)
+        if not built:
+            return
         try:
             self.store.write(
                 OWNER,
@@ -457,7 +475,7 @@ class LiveSource:
                     tx.universe_replace(
                         name, name.split(":")[0], universe.member_rows(members, listings), now
                     )
-                    for name, members in found.items()
+                    for name, members in built.items()
                 ],
             )
         except StoreError:
@@ -470,10 +488,15 @@ class LiveSource:
         return None
 
     async def claim(self) -> None:
-        if not self.keys:
-            return
+        """The keys to follow, claimed at the feed as one whole set (it replaces the last one).
+        With no key to follow the claim is dropped, so nothing the screener no longer needs stays
+        on the shared socket (HIGH-2); a claim an earlier run left is dropped the same way."""
         try:
-            await self.feed.put_claims(dict.fromkeys(sorted(self.keys), "full"))
+            if self.keys:
+                await self.feed.put_claims(dict.fromkeys(sorted(self.keys), "full"))
+            elif self._held:
+                await self.feed.drop_claims()
+            self._held = bool(self.keys)
             self.claim_words = None
         except FeedRefused as exc:
             self.claim_words = str(exc)
@@ -594,6 +617,7 @@ async def run_feed(service, *, tick_s: float = TICK_S) -> None:
         last_master_min = -1
         while True:
             now = service.clock()
+            moved = _take_moved(service)
             if (
                 source.new_day(now)
                 or _master_due(now, last_master_min, source)
@@ -604,6 +628,12 @@ async def run_feed(service, *, tick_s: float = TICK_S) -> None:
                 except StoreError:
                     log.exception("the active screens could not be read")
                 last_master_min = _minute(now)
+                await source.claim()
+            elif moved:  # a screen made, edited, resumed, paused or deleted (HIGH-2)
+                try:
+                    source.refresh_universes(_active_universes(service.store), now, reuse=True)
+                except StoreError:
+                    log.exception("the active screens could not be read")
                 await source.claim()
             loop = asyncio.get_running_loop()
             if source.keys and loop.time() - source.claimed_at > CLAIM_RENEW_S:
@@ -625,6 +655,30 @@ async def run_feed(service, *, tick_s: float = TICK_S) -> None:
         await client.aclose()
 
 
+def _take_moved(service) -> bool:
+    """Whether an op changed the active screens or what they look at since the last tick."""
+    take = getattr(service, "take_screens_moved", None)
+    return bool(take()) if callable(take) else False
+
+
+async def release_claims(service, *, waits: Sequence[float] = (0.0, 5.0, 30.0, 120.0, 600.0)):
+    """The screener is off (switched off, or kept off): the feed may still keep the keys an
+    earlier run claimed, so they are dropped, asked again with growing waits until the feed
+    answers, as market alerts do (HIGH-2). A plain stop keeps them for the restart."""
+    url = f"{service.settings.feed_url.rstrip('/')}/claims/{CLIENT}"
+    async with httpx.AsyncClient(trust_env=False, follow_redirects=False) as client:
+        for wait in waits:
+            await asyncio.sleep(wait)
+            try:
+                answer = await client.delete(url, timeout=5.0)
+            except httpx.HTTPError:
+                continue
+            if answer.status_code == 200:
+                log.info("the screener is off; the price feed no longer keeps its instruments")
+                return
+    log.warning("the screener is off, but the price feed did not answer to drop its instruments")
+
+
 def _minute(now: int) -> int:
     moment = datetime.fromtimestamp(now / 1000, IST)
     return moment.hour * 60 + moment.minute
@@ -639,4 +693,4 @@ def _master_due(now: int, last_min: int, source: LiveSource) -> bool:
     return last_min < MASTER_AT_MIN <= minute
 
 
-__all__ = ["CLIENT", "FeedLink", "LiveSource", "run_feed", "universe_of"]
+__all__ = ["CLIENT", "FeedLink", "LiveSource", "release_claims", "run_feed", "universe_of"]

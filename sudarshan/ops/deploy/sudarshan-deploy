@@ -743,6 +743,12 @@ ring_remove() {   # $1 = sudarshan-<service>.service
     bdir="/opt/sudarshan/backups/$(date +%Y%m%d-%H%M%S)-remove-${folder}"
     mkdir -m 700 -p "${bdir}"
     systemctl disable --now "${n}" > /dev/null 2>&1 || log "ring: ${n} was not running"
+    if [[ "${folder}" != "sudarshan-feed" ]]; then   # the keys it claimed at the feed (under its name) go with it
+        local code
+        code="$(curl -s --max-time 5 -o /dev/null -w '%{http_code}' -X DELETE "http://127.0.0.1:5580/claims/${folder}" 2>/dev/null)" || code=""
+        if [[ "${code}" == "200" ]]; then log "ring: the price feed no longer keeps ${folder}'s instruments"
+        else log "WARNING: ring: the price feed did not drop ${folder}'s instruments (is sudarshan-feed running?); it lets them go after 7 days without a renewal"; fi
+    fi
     if [[ -d "${RING_VAR}/${folder}" && ! -L "${RING_VAR}/${folder}" ]]; then
         local f name
         for f in "${RING_VAR}/${folder}"/*.db; do

@@ -206,6 +206,7 @@ def test_remove_ring_stops_the_unit_copies_the_store_and_keeps_the_owners_settin
     make_db(box.ringvar / SCREENER / "screener.db", [31, 32])
     env_file = box.etc / "screener.env"
     env_file.write_text("SUDARSHAN_SCREENER='on'\n")
+    box.serve(f"http://127.0.0.1:5580/claims/{SCREENER}", b'{"dropped": 302}')
     done = box.run("--remove-ring", UNIT)
     assert done.returncode == 0, done.stdout + done.stderr
     assert f"disable --now {UNIT}" in systemctl_log(box)
@@ -217,7 +218,10 @@ def test_remove_ring_stops_the_unit_copies_the_store_and_keeps_the_owners_settin
     assert rows_of(box.ringvar / SCREENER / "screener.db") == [31, 32], "the state folder stays"
     assert env_file.read_text() == "SUDARSHAN_SCREENER='on'\n", "the owner's settings stay"
     assert f"ring: removed {UNIT}" in done.stdout
-    assert box.requests() == [], "no release is fetched for a removal"
+    claims = f"http://127.0.0.1:5580/claims/{SCREENER}"
+    assert box.requests() == [claims], "no release is fetched for a removal; only the claims go"
+    assert (box.web / "methods").read_text().splitlines() == [f"DELETE {claims}"]
+    assert f"ring: the price feed no longer keeps {SCREENER}'s instruments" in done.stdout
     bad = box.run("--remove-ring", "openalgo.service")
     assert bad.returncode == 2
     worse = box.run("--remove-ring", "../etc/passwd")

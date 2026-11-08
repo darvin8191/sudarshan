@@ -90,6 +90,14 @@ def _spec(raw) -> tuple[dict, Any]:
         raise ApiError.of("refused", exc.message, exc.field) from None
 
 
+def _moved(ctx) -> None:
+    """The active screens or what they look at changed: the feed job rebuilds the universes and
+    the claims at its next tick, not at the next midnight (release review HIGH-2)."""
+    changed = getattr(ctx, "screens_changed", None)
+    if callable(changed):
+        changed()
+
+
 def _translate(call):
     """Run a store call; the store's own refusals become the contract's codes."""
     try:
@@ -420,7 +428,9 @@ async def create(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
             ctx, tx, tx.screen_insert(stored["name"], stored, status, now, request_id), now
         )
 
-    return _translate(lambda: store.write(OWNER, make))
+    made = _translate(lambda: store.write(OWNER, make))
+    _moved(ctx)
+    return made
 
 
 @op("update")
@@ -448,7 +458,10 @@ async def update(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
             tx.state_put(screen_id, now, alerts_paused=(action == "alerts_off"))
         return _summary(ctx, tx, row, now)
 
-    return _translate(lambda: store.write(OWNER, change))
+    changed = _translate(lambda: store.write(OWNER, change))
+    if action in ("edit", "pause", "resume"):
+        _moved(ctx)
+    return changed
 
 
 @op("delete")
@@ -491,7 +504,9 @@ async def delete(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
         tx.screen_remove(screen_id)
         return {"deleted": screen_id, "removed_from_list": left}
 
-    return _translate(lambda: store.write(OWNER, remove))
+    deleted = _translate(lambda: store.write(OWNER, remove))
+    _moved(ctx)
+    return deleted
 
 
 @op("preview")

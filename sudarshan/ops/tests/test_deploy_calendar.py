@@ -971,11 +971,12 @@ FAKE_CURL = r"""
 # A fake curl: the answer to a URL is web/KEY.code and web/KEY.body (KEY from the URL's sha256), else
 # 404. web/KEY.cut: the body is cut off in transit (curl reports the code, then fails with 18).
 # web/KEY.later: serving that URL takes long enough for the clock to pass FAKE_NOW_LATER.
-out="" write="" url="" fail=0
+out="" write="" url="" fail=0 method=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -o) out="$2"; shift 2 ;;
         -w) write="$2"; shift 2 ;;
+        -X|--request) method="$2"; shift 2 ;;
         -H|--max-time|--connect-timeout) shift 2 ;;
         --*) shift ;;
         -*) if [[ "$1" == *f* ]]; then fail=1; fi; shift ;;
@@ -983,6 +984,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 echo "${url}" >> "${FAKE_WEB}/requests"
+if [[ -n "${method}" ]]; then echo "${method} ${url}" >> "${FAKE_WEB}/methods"; fi
 key="$(printf '%s' "${url}" | sha256sum | cut -c1-16)"
 if [[ -f "${FAKE_WEB}/${key}.later" ]]; then : > "${FAKE_WEB}/later"; fi
 code=404

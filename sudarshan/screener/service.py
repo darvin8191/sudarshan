@@ -3,7 +3,9 @@ and the sealed local API on 127.0.0.1:5584.
 
 * **Switched off** (``SUDARSHAN_SCREENER`` is not on): the store is not opened, no job runs, and
   the API answers every op with ``enabled: false`` (api.py). The service stays up so that the
-  bridge learns the switch from the API and the page says so (cross-design R3).
+  bridge learns the switch from the API and the page says so (cross-design R3). Its one off-time
+  job drops the feed claims an earlier run left, so nothing it no longer watches stays on the
+  shared socket; a plain stop keeps them for the restart, as market alerts do.
 * **The store** is opened once at start and closed on stop. The loop never does store work: the
   store owns its one writer thread and ``close_store`` ends it (S13).
 * **Jobs** register from their own modules with ``@job("name")`` (the run scheduler, the outbox,
@@ -47,6 +49,9 @@ SERVICE = "sudarshan-screener"
 PORT_RETRY_S = 60.0
 Job = Callable[["Service"], Awaitable[None]]
 JOBS: dict[str, Job] = {}
+#: What the service runs while the screener is off (switched off, or kept off): dropping the feed
+#: claims an earlier run left (release review HIGH-2).
+OFF_JOBS: dict[str, Job] = {}
 
 
 def job(name: str, registry: dict[str, Job] | None = None) -> Callable[[Job], Job]:
@@ -87,6 +92,7 @@ class Service:
         fernet,
         *,
         jobs: dict[str, Job] | None = None,
+        off_jobs: dict[str, Job] | None = None,
         opener: Callable[[Settings], Any] = open_store,
         closer: Callable[[Any], None] = close_store,
         port_retry_s: float = PORT_RETRY_S,
@@ -101,6 +107,11 @@ class Service:
         #: open), in the owner's words; the API answers every op with it.
         self.off_reason: str | None = None
         self._jobs = JOBS if jobs is None else jobs
+        # a test that names its jobs runs no off-time job unless it names those too
+        self._off_jobs = (OFF_JOBS if jobs is None else {}) if off_jobs is None else off_jobs
+        #: Set by an op that changed which screens are active or what they look at; the feed job
+        #: follows it at its next tick: universes and claims (release review HIGH-2).
+        self._screens_moved = False
         self._opener, self._closer, self._retry_s = opener, closer, port_retry_s
         #: The clock the ops and jobs read (epoch milliseconds); a test sets its own.
         self.clock: Callable[[], int] = lambda: int(time.time() * 1000)
@@ -122,6 +133,15 @@ class Service:
                 self.settings.holidays_file, self.settings.extra_days_file, logger=log
             )
         return self._calendar
+
+    def screens_changed(self) -> None:
+        """A screen was made, edited, resumed, paused or deleted: the feed job rebuilds the
+        universes the active screens use and the claims at the feed, at once."""
+        self._screens_moved = True
+
+    def take_screens_moved(self) -> bool:
+        moved, self._screens_moved = self._screens_moved, False
+        return moved
 
     # ---- what /health shows ---------------------------------------------------------------
     @property
@@ -180,11 +200,14 @@ class Service:
                 self._link()
                 for name, function in self._jobs.items():
                     self._tasks[name] = asyncio.create_task(function(self), name=f"job-{name}")
-            elif not self.settings.enabled:
-                log.info(
-                    "The screener is switched off (SUDARSHAN_SCREENER): every request is "
-                    "answered as off; nothing is read or written"
-                )
+            else:
+                if not self.settings.enabled:
+                    log.info(
+                        "The screener is switched off (SUDARSHAN_SCREENER): every request is "
+                        "answered as off; nothing is read or written"
+                    )
+                for name, function in self._off_jobs.items():
+                    self._tasks[name] = asyncio.create_task(function(self), name=f"off-{name}")
             api_task = asyncio.create_task(self._serve_api(), name="screener-api")
             await self._stop.wait()
         finally:
@@ -271,6 +294,7 @@ from . import runtime as _runtime  # noqa: E402  (M9.1: the feed link and live b
 job("feed")(_runtime.run_feed)
 job("runner")(_runner.run_runner)
 job("outbox")(_outbox.run_sender)
+job("claims", OFF_JOBS)(_runtime.release_claims)
 
 
 async def _serve(service: Service) -> None:
