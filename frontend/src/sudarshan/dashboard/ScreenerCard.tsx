@@ -123,12 +123,12 @@ export function ScreenerCard({ marketOpen = NOT_KNOWN }: { marketOpen?: MarketOp
               <span className="min-w-0 truncate text-[0.9375rem] font-semibold">{screen.name}</span>
               <span className="flex shrink-0 items-center gap-2.5 text-[0.8125rem] font-semibold">
                 <span className="text-[0.9375rem] font-bold">{screen.matches}</span>
-                <span className="inline-flex items-center gap-0.5 text-[color:var(--profit)]">
+                <span className="inline-flex items-center gap-0.5 text-[color:var(--brand)]">
                   <Plus aria-hidden="true" className="size-3.5" />
                   {screen.entered}
                   <span className="sr-only"> entered</span>
                 </span>
-                <span className="inline-flex items-center gap-0.5 text-[color:var(--loss)]">
+                <span className="inline-flex items-center gap-0.5 text-[color:var(--warning-text)]">
                   <Minus aria-hidden="true" className="size-3.5" />
                   {screen.exited}
                   <span className="sr-only"> exited</span>
@@ -147,9 +147,9 @@ export function ScreenerCard({ marketOpen = NOT_KNOWN }: { marketOpen?: MarketOp
               className="flex items-center gap-1.5 text-[0.8125rem] font-medium text-[color:var(--text-secondary)]"
             >
               {each.kind === 'entered' ? (
-                <Plus aria-hidden="true" className="size-3.5 text-[color:var(--profit)]" />
+                <Plus aria-hidden="true" className="size-3.5 text-[color:var(--brand)]" />
               ) : (
-                <LogOut aria-hidden="true" className="size-3.5 text-[color:var(--loss)]" />
+                <LogOut aria-hidden="true" className="size-3.5 text-[color:var(--warning-text)]" />
               )}
               <span className="font-semibold">{each.symbol}</span>
               {each.kind === 'entered' ? 'entered' : 'left'} {each.screen} ·{' '}

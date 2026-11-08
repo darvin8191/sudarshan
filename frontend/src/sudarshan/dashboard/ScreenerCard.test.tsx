@@ -96,6 +96,19 @@ describe('Screener today', () => {
     expect(screen.getByText('2 new alerts')).toBeInTheDocument()
   })
 
+  it('colours entries in the brand and exits in amber, never as a price move', async () => {
+    // design 4.3: green and red are the up and down of a price; an entry is not a price move
+    const room = fakeSocket()
+    sockets.current = room.socket
+    show()
+    const first = (await screen.findByText('15-min EMA cross')).closest('a') as HTMLElement
+    const entered = within(first).getByText(/entered/).parentElement as HTMLElement
+    const exited = within(first).getByText(/exited/).parentElement as HTMLElement
+    expect(entered.className).toContain('--brand')
+    expect(exited.className).toContain('--warning-text')
+    expect(first.innerHTML).not.toMatch(/--profit|--loss/)
+  })
+
   it('says the figures may be behind while the page is not in the owner room', async () => {
     const room = fakeSocket()
     sockets.current = room.socket
