@@ -134,6 +134,12 @@ class Runner:
 
     async def _one(self, screen_row: Mapping[str, Any], due: scheduler.Due) -> None:
         now = self.clock()
+        # the run is due the moment the candle's last minute is sealed, and the feed job seals on
+        # its own tick: seal everything due now first, so a closed candle is judged whole
+        # (release review MEDIUM-4)
+        settle = getattr(self.source, "settle", None)
+        if callable(settle):
+            settle(now)
         try:
             plan = spec.compile_plan(screen_row["spec"])
             members = list(self.source.members(screen_row["spec"]["universe"]))

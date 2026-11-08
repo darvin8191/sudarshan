@@ -535,6 +535,12 @@ class LiveSource:
         self._watch(now)
         return self.bars.on_clock(now, self.market)
 
+    def settle(self, now: int) -> None:
+        """Seal and write every minute whose grace is over at ``now``: the run loop calls it
+        before it judges, since a run is due the moment its candle's last minute is sealed and
+        the feed job seals on a tick of its own."""
+        self.persist(self.on_clock(now))
+
     def _feed_up(self, now: int) -> bool:
         health = self._health
         if health is None or now - health.heard_at > HEALTH_MAX_AGE_MS:

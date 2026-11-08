@@ -193,3 +193,32 @@ def test_a_silent_or_down_feed_opens_a_pause_inside_the_session_and_the_engine_l
     assert source.engine_facts(back + 1000)["feed"] == "token_rejected"
     assert len(source.market.pauses) == 2
     assert date(2026, 10, 28) == source._today
+
+
+def test_a_run_judges_the_candle_with_its_last_minute(world):
+    """The run for 09:15-09:30 is due at 09:30:05, the moment the 09:29 minute is sealed; the
+    runner's tick may come before the feed job's: the run seals it first (release review MEDIUM-4)."""
+    store, source, clock = world
+    source.new_day(clock["now"])
+    source.refresh_universes([{"kind": "fno_stocks"}], clock["now"])
+    vtt, sealed = 0, []
+    for minute in range(15):  # 09:15..09:29, price 99.00, and 101.00 in the last minute
+        at = ms(DAY, "09:15:20") + minute * 60_000
+        sealed += source.on_frame(HEALTH, health(at), at)
+        vtt += 10
+        price = 101.0 if minute == 14 else 99.0
+        sealed += source.on_frame(RELIANCE, frame(RELIANCE, at, price, vtt), at)
+        sealed += source.on_frame(HEALTH, health(at + 45_500), at + 45_500)
+        if minute < 14:
+            sealed += source.on_clock(at + 46_000)  # each minute sealed at its end + 5 s
+    source.persist(sealed)
+    stored = spec.check(dict(SPEC, where={"id": "c1", "left": {"field": "close", "tf": 15},
+                                          "op": "gt", "right": {"num": "100"}}))  # fmt: skip
+    store.write(OWNER, lambda tx: tx.screen_insert("Close over 100", stored, "active", 0))
+    clock["now"] = ms(DAY, "09:30:05.200")  # the runner's tick lands before the feed's on_clock
+    source.on_frame(HEALTH, health(clock["now"] - 200), clock["now"] - 200)
+    made = runner.Runner(store, source, lambda: clock["now"], Calendar())
+    asyncio.run(made.tick())
+    run = store.read(OWNER, lambda tx: tx.runs_page(1, None, 1))[0]
+    assert run["candle_end"] == ms(DAY, "09:30")
+    assert run["matched"] == 1, "the run judged the candle without its last minute"
