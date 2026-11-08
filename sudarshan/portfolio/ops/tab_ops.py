@@ -3,6 +3,7 @@ performance, its layout and its saved views, over views.Views, book.Book and lay
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from typing import Any
 
@@ -10,6 +11,11 @@ from .. import __version__, layout, serialize
 from ..store import NotFound, Refused, VersionConflict
 from . import op
 from .common import OWNER, answer, given, maybe_whole, parts, warmed, whole
+
+log = logging.getLogger(__name__)
+
+#: The Upstox row of the dashboard card when the holdings could not be read at all.
+UPSTOX_NOT_READ = "Upstox holdings could not be read. Open Portfolio to try again."
 
 
 # ---- state, summary and the tab -----------------------------------------------------------------
@@ -22,10 +28,33 @@ async def state(ctx, message):
 
 @op("summary")
 async def summary(ctx, message):
+    """The dashboard card (M3.11): the pinned custom tabs with their live-math inputs, and the
+    Upstox tab's holdings as the reader last read them (its five seconds of memory, the service's
+    own budget), so the card prices every row from the same ticks. When Upstox cannot be read the
+    row carries the reader's state and sentence, never a failure of the whole card."""
     await warmed(ctx)
     _, views = parts(ctx)
     now = ctx.clock()
-    return await answer(lambda: views.summary(OWNER, now=now))
+    found = await answer(lambda: views.summary(OWNER, now=now))
+    entries = found.get("entries") if isinstance(found, dict) else None
+    if entries and any(e["tab"]["system"] for e in entries):
+        try:
+            book = await ctx.ensure_upstox().book(["holdings"])
+            part = serialize.out(OWNER, book)["holdings"]
+            row = {
+                "state": part["state"],
+                "read_at": part["read_at"],
+                "note": part["note"],
+                "holdings": part["data"] or [],
+            }
+        except Exception:
+            # The card still shows the owner's own tabs; the Upstox row says it was not read.
+            log.exception("The dashboard card could not read the Upstox holdings")
+            row = {"state": "unavailable", "read_at": None, "note": UPSTOX_NOT_READ, "holdings": []}
+        for entry in entries:
+            if entry["tab"]["system"]:
+                entry["upstox"] = row
+    return found
 
 
 @op("tab_create")

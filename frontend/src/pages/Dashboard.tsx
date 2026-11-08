@@ -19,6 +19,7 @@ import { onModeChange } from '@/stores/themeStore'
 import { AccessNotice } from '@/sudarshan/AccessNotice'
 import { usePriceAccess } from '@/sudarshan/access'
 import { useBookSync } from '@/sudarshan/books/useBookSync'
+import { formatAmount } from '@/sudarshan/dashboard/format'
 import { HoldingsCard } from '@/sudarshan/dashboard/HoldingsCard'
 import { useMarketOpen } from '@/sudarshan/dashboard/hooks'
 import { IndexStrip } from '@/sudarshan/dashboard/IndexStrip'
@@ -30,7 +31,8 @@ import {
   useIstDay,
 } from '@/sudarshan/dashboard/MarketCalendar'
 import { type DashboardFunds, PnlCard } from '@/sudarshan/dashboard/PnlCard'
-import { formatAmount } from '@/sudarshan/dashboard/format'
+import { PortfolioCard } from '@/sudarshan/dashboard/PortfolioCard'
+import { usePortfolioCard } from '@/sudarshan/dashboard/portfolioCard'
 
 interface MasterContractStatus {
   status: 'pending' | 'downloading' | 'success' | 'error'
@@ -144,6 +146,7 @@ export default function Dashboard() {
   const [market, setMarket] = useState<MarketCalendar>(CALENDAR_LOADING)
   const day = useIstDay()
   const { isOpen: marketOpen, anyOpen } = useMarketOpen(market)
+  const portfolioCard = usePortfolioCard() // SUDARSHAN M3.11
   const anyMarketOpen = useRef(anyOpen)
   useEffect(() => {
     anyMarketOpen.current = anyOpen
@@ -372,6 +375,9 @@ export default function Dashboard() {
               marketOpen={marketOpen}
             />
           )}
+          {/* SUDARSHAN M3.11: the Portfolio card, beside the Holdings card while the owner's
+              switch (Display settings) is on; it replaces it a release after his check (P5). */}
+          {portfolioCard && <PortfolioCard marketOpen={marketOpen} />}
           <HoldingsCard apiKey={apiKey} marketOpen={marketOpen} />
         </div>
 

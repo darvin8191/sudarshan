@@ -8,6 +8,7 @@ import {
   useMarketSoundMuted,
   useOrderSoundMuted,
 } from './books/chime'
+import { setPortfolioCard, usePortfolioCard } from './dashboard/portfolioCard'
 import { setCvdMode, useCvdMode } from './display'
 
 /**
@@ -22,6 +23,7 @@ export function DisplaySettings() {
   const cvd = useCvdMode()
   const soundMuted = useOrderSoundMuted()
   const marketMuted = useMarketSoundMuted()
+  const portfolioCard = usePortfolioCard()
 
   return (
     <Card>
@@ -82,6 +84,17 @@ export function DisplaySettings() {
           words="A short sound, higher than the order sounds, when a market alert you set fires. The alert itself still shows when this is off. This device only."
           on={!marketMuted}
           onChange={(on) => setMarketSoundMuted(!on)}
+        />
+
+        {/* SUDARSHAN M3.11: the dashboard's Portfolio card, off until the owner has checked it
+            (decision P5); it then replaces the Holdings card a release later. */}
+        <SoundRow
+          id="sd-portfolio-card"
+          rowId="portfolio-card"
+          title="Portfolio card on the dashboard"
+          words="A card with the Upstox account and your pinned portfolio tabs, each with its value, today and overall gain, moving with the ticks. Shown beside the Holdings card for now. This device only."
+          on={portfolioCard}
+          onChange={setPortfolioCard}
         />
       </CardContent>
     </Card>

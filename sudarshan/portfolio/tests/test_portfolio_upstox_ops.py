@@ -47,6 +47,19 @@ async def test_the_book_answers_the_parts_asked_for_in_order_and_only_those(rig)
 
 
 @scenario_of
+async def test_the_summary_carries_the_upstox_holdings_for_the_dashboard_card(rig):
+    """M3.11: the card's Upstox row comes with the summary, from the reader's memory, so the
+    phone reads once and prices every row from the same ticks."""
+    data = (await rig.call("summary"))["data"]
+    upstox = next(e for e in data["entries"] if e["tab"]["system"])
+    assert upstox["live"] is None
+    assert upstox["upstox"]["state"] == "ok" and upstox["upstox"]["read_at"] == NOW
+    assert upstox["upstox"]["holdings"][0]["qty_u"] == 10_000_000
+    assert upstox["upstox"]["note"] is None
+    assert all(e["upstox"] is None for e in data["entries"] if not e["tab"]["system"])
+
+
+@scenario_of
 async def test_no_parts_means_all_four_and_max_age_is_read_as_seconds(rig):
     first = (await rig.call("upstox_book"))["data"]
     assert list(first) == ["holdings", "positions", "mtf", "funds"]
