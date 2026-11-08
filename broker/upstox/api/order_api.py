@@ -1441,12 +1441,15 @@ _NOTHING_OPEN_CODE = "UDAPI1109"
 
 
 def _says_nothing_open(answer):
-    """SUDARSHAN M5.13: whether an Upstox error body names UDAPI1109, "No open or pending orders
-    available": nothing to cancel, which is not a failure."""
-    errors = answer.get("errors")
-    if not isinstance(errors, list):
+    """SUDARSHAN M5.13: whether an Upstox error body says, and says only, UDAPI1109 ("No open or
+    pending orders available"): nothing to cancel, which is not a failure. An answer with data,
+    one not confirmed (a 5xx), or one that names any other error beside it keeps its meaning."""
+    if answer.get("status") != "error" or answer.get("data") or answer.get("not_confirmed"):
         return False
-    return any(
+    errors = answer.get("errors")
+    if not isinstance(errors, list) or not errors:
+        return False
+    return all(
         isinstance(error, dict)
         and str(error.get("errorCode") or error.get("error_code") or "").strip().upper()
         == _NOTHING_OPEN_CODE

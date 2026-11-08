@@ -231,9 +231,18 @@ def test_udapi1109_is_nothing_to_cancel_not_a_failure(monkeypatch):
         {"status": "error", "errors": [{"message": "No open or pending orders available"}]},
         {"status": "error", "errors": "UDAPI1109"},
         {"status": "error", "message": "UDAPI1109"},
+        {"status": "error", "errors": []},
+        {"status": "error", "not_confirmed": True,
+         "errors": [{"errorCode": "UDAPI1109", "message": "No open or pending orders available"}]},
+        {"status": "error", "errors": [{"errorCode": "UDAPI1109", "message": "No open orders"},
+                                       {"errorCode": "UDAPI100050", "message": "Something else"}]},
+        {"status": "success", "errors": [{"errorCode": "UDAPI1109", "message": "No open orders"}]},
+        {"status": "error", "data": {"order_ids": ["1"]},
+         "errors": [{"errorCode": "UDAPI1109", "message": "No open orders"}]},
     ],
-    ids=["another code", "no code", "errors not a list", "no errors list"],
-)
+    ids=["another code", "no code", "errors not a list", "no errors list", "empty errors",
+         "a 5xx not confirmed", "beside another error", "not an error status", "with data"],
+)  # fmt: skip
 def test_only_the_code_itself_reads_as_nothing_open(monkeypatch, body):
     from broker.upstox.api import order_api
 
