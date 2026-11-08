@@ -65,6 +65,7 @@ V1 = (
         last_run_at INTEGER,
         next_run_at INTEGER,
         alerts_paused INTEGER NOT NULL DEFAULT 0,
+        list_id INTEGER,
         updated_at INTEGER NOT NULL
     )""",
     # ---- runs ----
