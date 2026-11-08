@@ -311,7 +311,10 @@ function described(at: number, detail: string, note: string): string {
   return [when(at), detail, note ? `Note: ${note}` : ''].filter(Boolean).join(' · ')
 }
 
-function viewOf(alertId: number): string {
+function viewOf(alertId: number, link?: string): string {
+  // A screener digest's View opens its screen (release review MEDIUM-9); only that page's own
+  // path is taken from the push, never another address.
+  if (typeof link === 'string' && /^\/screener(\?screen=\d+)?$/.test(link)) return link
   return alertId > 0 ? `${ALERTS_PATH}?alert=${alertId}` : `${ALERTS_PATH}?tab=history`
 }
 
@@ -319,6 +322,8 @@ function single(event: {
   /** Null for a fire the service could not record: shown, but never kept as an id. */
   id: number | null
   alertId: number
+  /** A screener digest's page (the push's link). */
+  link?: string
   title: string
   detail: string
   note: string
@@ -333,7 +338,7 @@ function single(event: {
     title: `Alert · ${event.title}`,
     description: described(event.at, event.detail, event.note),
     headline: event.title,
-    view: viewOf(event.alertId),
+    view: viewOf(event.alertId, event.link),
     at: event.at,
     live: event.live,
   }
@@ -467,6 +472,7 @@ function onAlert(push: MarketAlertPush): void {
     single({
       id,
       alertId: push.alert_id,
+      link: push.kind === 'screener' ? push.link : undefined,
       title: String(push.title ?? ''),
       detail: String(push.detail ?? ''),
       note: String(push.note ?? ''),

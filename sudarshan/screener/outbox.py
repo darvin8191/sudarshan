@@ -2,7 +2,9 @@
 
 A run's transaction queues rows; this job sends them in order and marks each done. A failure
 retries with backoff (2, 5, 10, 30, 60 s), up to 30 minutes for a list sync and 5 minutes for a
-digest, never for a push (a late toast is no use). Each is idempotent at the far end: an add that
+digest, never for a push (a late toast is no use). A digest market alerts refused for good (they
+are off, 409; the request was not accepted, 403) is not tried again, and a dropped digest turns the
+run's "Alert raised" into the reason no alert went. Each is idempotent at the far end: an add that
 exists is a no-op, a remove only touches items the screener added, the alerts store refuses a
 digest claim it already holds.
 
@@ -17,7 +19,7 @@ import logging
 from collections.abc import Mapping
 from typing import Any
 
-from . import listsync
+from . import listsync, words
 from .contract import EVENT_RUN
 from .store import OWNER, StoreError, Tx
 
@@ -93,11 +95,22 @@ class Sender:
 
     def _failed(self, row: Mapping[str, Any], exc: BaseException) -> None:
         now = self.clock()
-        again = next_attempt(row["kind"], row["attempts"], row["created_at"], now)
+        status = getattr(exc, "status", None)
+        # market alerts off (409) or the request not accepted (403): trying again changes nothing
+        final = row["kind"] == "digest" and status in (403, 409)
+        again = (
+            None if final else next_attempt(row["kind"], row["attempts"], row["created_at"], now)
+        )
         if again is None:
             self.failed[row["kind"]] = self.failed.get(row["kind"], 0) + 1
             log.warning("a %s could not be sent and is dropped: %s", row["kind"], exc)
-            self.store.write(OWNER, lambda tx: tx.outbox_settle(row["id"], "failed", now))
+
+            def drop(tx: Tx) -> None:
+                tx.outbox_settle(row["id"], "failed", now)
+                if row["kind"] == "digest":  # the run's line says no alert went (MEDIUM-9)
+                    tx.run_alert_words(row["ref"], words.untold_words(status if final else None))
+
+            self.store.write(OWNER, drop)
             return
         log.info(
             "a %s could not be sent (%s); trying again at +%ds",

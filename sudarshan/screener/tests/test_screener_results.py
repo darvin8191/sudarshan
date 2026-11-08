@@ -142,3 +142,47 @@ def test_an_edit_to_another_list_moves_the_screen_to_it(service):
     queued = service.store.read(OWNER, lambda tx: tx.outbox_due(NOW + 10**9, 50))
     assert any(p["kind"] == "list_sync" and p["payload"]["list_id"] == 9 for p in queued)
     assert edited["list_id"] == 9
+
+
+# ---- MEDIUM-9: what became of a run's digest --------------------------------------------------------
+class AlertsLink:
+    """sudarshan-alerts as the service's sealed link reaches it: refuses, or never answers."""
+
+    def __init__(self, status):
+        self.status, self.digests = status, 0
+
+    async def digest(self, payload):
+        from sudarshan.screener.link import LinkError
+
+        self.digests += 1
+        raise LinkError(self.status, "refused" if self.status else "digest: connecterror")
+
+    async def push(self, items):
+        return 1
+
+
+@pytest.mark.parametrize(
+    ("status", "line", "retried"),
+    [
+        (409, "No alert sent: market alerts are switched off on the server", False),
+        (None, "No alert sent: market alerts did not answer for 5 minutes", True),
+    ],
+)
+def test_a_digest_market_alerts_did_not_take_turns_alert_raised_into_why(
+    service, status, line, retried
+):
+    from sudarshan.screener import outbox
+
+    screen = make(service)
+    record(service, screen, 1, judged({"AAA": 100}))
+    run = call(service, "runs", id=screen["id"])["runs"][0]
+    assert run["alerts"].startswith("Alert raised")
+    link = AlertsLink(status)
+    clock = {"now": due_for(screen, 1).boundary.at + 1000}  # just after the run queued it
+    sender = outbox.Sender(service.store, link, lambda: clock["now"])
+    for _ in range(12):  # each try as its backoff comes due, past the digest's 5 minutes
+        asyncio.run(sender.tick())
+        clock["now"] += 61_000
+    run = call(service, "runs", id=screen["id"])["runs"][0]
+    assert run["alerts"] == line, "the History says an alert was raised that never went"
+    assert (link.digests > 1) is retried, "a digest refused for good is tried again"

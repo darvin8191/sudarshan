@@ -432,6 +432,21 @@ class Tx:
             .values(**self._in({"marks": marks or {}}), **counts)
         )
 
+    def run_alert_words(self, run_key: str, text: str) -> bool:
+        """Replace the alert line of a recorded run (its digest's outcome came after it)."""
+        found = self.run_by_key(run_key)
+        if found is None:
+            return False
+        marks = dict(found.get("marks") or {})
+        marks["alerts"] = text
+        t = self._t("run")
+        self.conn.execute(
+            update(t)
+            .where(t.c.id == found["id"], self._mine(t))
+            .values(**self._in({"marks": marks}))
+        )
+        return True
+
     def run_mark(self, run_id: int, status: str) -> None:
         if status not in RUN_STATUSES:
             raise ValueError(f"not a run status: {status!r}")

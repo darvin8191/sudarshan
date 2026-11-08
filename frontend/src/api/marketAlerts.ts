@@ -184,6 +184,10 @@ export interface MarketAlertPush {
   /** Null for a fire the service could not record: shown, never stored (contract 2.2). */
   event_id: number | null
   alert_id: number
+  /** "screener" for a screener digest (M10.7), which carries the screen's page as its link. */
+  kind?: string
+  /** Where View goes for a screener digest: "/screener?screen=4". */
+  link?: string
   symbol: string
   exchange: string
   title: string

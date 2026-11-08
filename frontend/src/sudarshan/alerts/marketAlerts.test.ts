@@ -501,6 +501,26 @@ describe('what fired while the app was away', () => {
     expect(shown()[0][0]).toBe('3 alerts fired while the app was away')
   })
 
+  it("opens the screen of a screener digest from the toast's View", async () => {
+    const socket = await joinedSocket()
+    socket.fire(
+      'sudarshan_market_alert',
+      push({ event_id: 361, alert_id: 0, kind: 'screener', link: '/screener?screen=4' })
+    )
+    await flush()
+    toasts.info.mock.calls.at(-1)?.[1].action.onClick()
+    expect(navigate).toHaveBeenCalledWith('/screener?screen=4')
+    // anything but the Screener page's own path is not taken from a push
+    navigate.mockClear()
+    socket.fire(
+      'sudarshan_market_alert',
+      push({ event_id: 362, alert_id: 0, kind: 'screener', link: 'https://example.invalid/' })
+    )
+    await flush()
+    toasts.info.mock.calls.at(-1)?.[1].action.onClick()
+    expect(navigate).toHaveBeenCalledWith(`${ALERTS_PATH}?tab=history`)
+  })
+
   it('does not tell again what was pushed and shown here', async () => {
     const socket = await joinedSocket()
     socket.fire('sudarshan_market_alert', push({ event_id: 341 }))

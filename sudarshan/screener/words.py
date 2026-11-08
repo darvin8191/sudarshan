@@ -277,6 +277,24 @@ def alerts_words(policy: al.Policy, *, paused: bool = False) -> str:
     return PAUSED_NOTE if paused else "Alerts on"
 
 
+#: What a run's alert line becomes when sudarshan-alerts did not take its digest (MEDIUM-9), by
+#: the status it answered: 409 market alerts are off, 403 the request was not accepted, None no
+#: answer for the digest's 5 minutes of tries.
+UNTOLD = {
+    409: "No alert sent: market alerts are switched off on the server",
+    403: (
+        "No alert sent: market alerts did not accept the screener's request; restart "
+        "sudarshan-alerts and sudarshan-screener if it happens again"
+    ),
+    None: "No alert sent: market alerts did not answer for 5 minutes",
+}
+
+
+def untold_words(status: int | None) -> str:
+    """The run's alert line after its digest was dropped."""
+    return UNTOLD.get(status, UNTOLD[None])
+
+
 def told_words(decision: al.Decision, policy: al.Policy) -> str:
     """Why a run did or did not raise an alert, for the History tab (never sent to Telegram)."""
     if decision.why == al.TOLD:
