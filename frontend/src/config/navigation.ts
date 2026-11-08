@@ -24,6 +24,7 @@ import {
   type LucideIcon,
   MessageCircle,
   MessageSquare,
+  ScanSearch,
   Search,
   Settings,
   ShieldAlert,
@@ -101,6 +102,8 @@ export const profileMenuItems: NavItem[] = [
   { href: '/whatsapp', label: 'WhatsApp Bot', icon: MessageCircle },
   // SUDARSHAN M8.2: the watchlist, for a wide screen where the bottom bar is hidden.
   { href: '/watchlist', label: 'Watchlist', icon: Bookmark },
+  // SUDARSHAN M9: the screener, right after the watchlist.
+  { href: '/screener', label: 'Screener', icon: ScanSearch },
   { href: '/holdings', label: 'Holdings', icon: ClipboardList },
   { href: '/flow', label: 'Flow Editor', icon: Workflow },
   { href: '/scalping', label: 'Scalping', icon: Zap },

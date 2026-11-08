@@ -3,14 +3,17 @@
 // /trading terminal's panel uses (blueprints/watchlist.py), the prices stream
 // tick by tick on the tab's shared market-data socket, and a tap opens the
 // instrument's sheet: Buy and Sell, chart, option chain and depth.
+
+import { useQueryClient } from '@tanstack/react-query'
 import { Check, Plus, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router'
 import type { WatchlistItem } from '@/api/watchlist'
+import { useSocketContext } from '@/components/socket/SocketProvider'
 import { PlaceOrderDialog } from '@/components/trading/PlaceOrderDialog'
 import { cn } from '@/lib/utils'
 import { AccessNotice } from '@/sudarshan/AccessNotice'
 import { usePriceAccess } from '@/sudarshan/access'
-import { useNavigate } from 'react-router'
 import { AlertFormSheet, type AlertPrefill, toastAlertSet } from '@/sudarshan/alerts/AlertForm'
 import { useMarketOpen } from '@/sudarshan/dashboard/hooks'
 import { keyOf } from '@/sudarshan/dashboard/live'
@@ -20,6 +23,8 @@ import {
   MarketCalendarSource,
   useIstDay,
 } from '@/sudarshan/dashboard/MarketCalendar'
+import { useFedLists, useListMembership } from '@/sudarshan/screener/feed'
+import { useScreenerPush } from '@/sudarshan/screener/push'
 import { AddSymbolSheet } from '@/sudarshan/watchlist/AddSymbolSheet'
 import { DeleteDialog, NameDialog } from '@/sudarshan/watchlist/ListDialogs'
 import { ListTabs, PANEL_ID, tabId } from '@/sudarshan/watchlist/ListTabs'
@@ -66,9 +71,16 @@ export default function Watchlist() {
   const { isOpen } = useMarketOpen(market)
 
   const watchlists = useWatchlists()
+  // SUDARSHAN M9 UI7: the lists a screener feeds, who it put in the open one, and its pushes.
+  const queryClient = useQueryClient()
+  const { socket } = useSocketContext()
+  const fed = useFedLists()
+  useScreenerPush(queryClient, fed.size > 0 ? socket : null)
+  const fedIds = useMemo(() => new Set(fed.keys()), [fed])
   const [chosen, setChosen] = useState<number | null>(readOpenList)
   const active = watchlists.lists.find((list) => list.id === chosen) ?? watchlists.lists[0] ?? null
   const items = active?.items ?? NO_ITEMS
+  const members = useListMembership(active?.id ?? null, active ? fed.has(active.id) : false)
   const full = items.length >= MAX_ITEMS
   const [editing, setEditing] = useState(false)
 
@@ -219,6 +231,7 @@ export default function Watchlist() {
               onRename={() => open({ kind: 'rename' })}
               onEdit={() => setEditing((on) => !on)}
               onDelete={() => open({ kind: 'delete' })}
+              fed={fedIds}
             />
           )}
 
@@ -238,6 +251,7 @@ export default function Watchlist() {
             onCloseSheet={close}
             onOrder={placeOrder}
             onAlert={setAlert}
+            members={members}
           />
         </>
       )}

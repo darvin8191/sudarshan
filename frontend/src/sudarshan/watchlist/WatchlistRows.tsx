@@ -5,6 +5,8 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import { directionOf, formatPercent, formatPrice } from '@/sudarshan/dashboard/format'
 import { TREND_TEXT, TrendArrow } from '@/sudarshan/dashboard/Trend'
+import { ChipMark } from '@/sudarshan/screener/ChipMark'
+import type { Chip } from '@/sudarshan/screener/types'
 import { describe, formatChange, priceDecimals, type TickDirection } from './rows'
 import type { LiveRow } from './useLiveRows'
 
@@ -34,12 +36,24 @@ export function figuresOf(row: LiveRow): FigureValues {
   }
 }
 
-function Name({ symbol, exchange }: { symbol: string; exchange: string }) {
+function Name({
+  symbol,
+  exchange,
+  chip,
+}: {
+  symbol: string
+  exchange: string
+  /** SUDARSHAN M9 UI7: what a screener says about this row (New, Held, Pinned), an icon and a word. */
+  chip?: Chip
+}) {
   const named = describe(symbol, exchange)
   return (
     <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-      <span className="truncate text-[0.9375rem] leading-tight font-semibold" title={symbol}>
-        {named.title}
+      <span className="flex min-w-0 items-center gap-2">
+        <span className="truncate text-[0.9375rem] leading-tight font-semibold" title={symbol}>
+          {named.title}
+        </span>
+        {chip && <ChipMark chip={chip} />}
       </span>
       <span className="truncate text-xs leading-tight font-medium text-[color:var(--text-tertiary)]">
         {named.detail}
@@ -113,12 +127,14 @@ const PriceRow = memo(function PriceRow({
   itemId,
   symbol,
   exchange,
+  chip,
   onOpen,
   ...figures
 }: FigureValues & {
   itemId: number
   symbol: string
   exchange: string
+  chip?: Chip
   onOpen: (itemId: number) => void
 }) {
   return (
@@ -129,7 +145,7 @@ const PriceRow = memo(function PriceRow({
         onClick={() => onOpen(itemId)}
         className="flex min-h-14 w-full items-center gap-3 px-4 py-2 text-left outline-none active:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       >
-        <Name symbol={symbol} exchange={exchange} />
+        <Name symbol={symbol} exchange={exchange} chip={chip} />
         <Figures {...figures} decimals={priceDecimals(exchange)} />
       </button>
     </li>
@@ -150,6 +166,7 @@ export function WatchlistRows({
   onMove,
   onRemove,
   onAdd,
+  tags,
 }: {
   rows: LiveRow[]
   loading: boolean
@@ -159,6 +176,8 @@ export function WatchlistRows({
   onRemove: (item: WatchlistItem) => void
   /** Absent while there is no API key to search with: the page says why. */
   onAdd?: () => void
+  /** The chip of each row a screener fed, by EXCHANGE:SYMBOL (M9 UI7). */
+  tags?: ReadonlyMap<string, Chip>
 }) {
   if (loading) {
     return (
@@ -208,6 +227,7 @@ export function WatchlistRows({
               itemId={item.id}
               symbol={item.symbol}
               exchange={item.exchange}
+              chip={tags?.get(row.key)}
               onOpen={onOpen}
               {...figuresOf(row)}
             />

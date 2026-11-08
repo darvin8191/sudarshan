@@ -11,8 +11,8 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChartStateView } from '@/lib/trading/chartState'
 import type { LiveStatus } from '@/lib/trading/liveStatus'
-import type { FeedLine } from '@/sudarshan/dashboard/live'
 import { useAuthStore } from '@/stores/authStore'
+import type { FeedLine } from '@/sudarshan/dashboard/live'
 import { rememberProduct } from '@/sudarshan/ticket/productPref'
 import type { PhoneChartCallbacks, PhoneTick } from './phoneChart'
 

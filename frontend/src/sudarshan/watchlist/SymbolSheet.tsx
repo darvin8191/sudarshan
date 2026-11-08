@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { BellPlus, CandlestickChart, Clock, Layers, Trash2 } from 'lucide-react'
+import { BellPlus, CandlestickChart, Clock, Layers, Pin, PinOff, Trash2 } from 'lucide-react'
 import { useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { oiProfileApi } from '@/api/oi-profile'
@@ -14,6 +14,7 @@ import { formatAmount, formatPrice } from '@/sudarshan/dashboard/format'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
 import { ago, keyOf, STALE_MS } from '@/sudarshan/dashboard/live'
 import { type FeedState, useFrameLines, useMarketDataManager } from '@/sudarshan/live/useFrameLines'
+import type { PinControl } from '@/sudarshan/screener/feed'
 import {
   PRODUCT_MEANING,
   type Product,
@@ -271,6 +272,7 @@ export function SymbolSheet({
   onOrder,
   onAlert,
   onRemove,
+  pin,
 }: {
   row: LiveRow | null
   listName: string
@@ -283,7 +285,10 @@ export function SymbolSheet({
   onOrder: (order: OrderRequest) => void
   /** The market alert form on this instrument, from its snapped live price. */
   onAlert: (alert: AlertPrefill) => void
-  onRemove: (item: WatchlistItem) => void
+  /** Absent where the instrument is not in a list the owner keeps (a screener's results). */
+  onRemove?: (item: WatchlistItem) => void
+  /** A row a screener put here: Pin keeps it in the list while it stops matching (M9 UI7). */
+  pin?: PinControl | null
 }) {
   if (!row) return null
   return (
@@ -299,6 +304,7 @@ export function SymbolSheet({
       onOrder={onOrder}
       onAlert={onAlert}
       onRemove={onRemove}
+      pin={pin}
     />
   )
 }
@@ -314,6 +320,7 @@ function Sheet({
   onOrder,
   onAlert,
   onRemove,
+  pin,
 }: Parameters<typeof SymbolSheet>[0] & { row: LiveRow }) {
   const { item } = row
   const named = describe(item.symbol, item.exchange)
@@ -441,14 +448,39 @@ function Sheet({
 
         {tradable && apiKey !== null && <Depth item={item} marketOpen={marketOpen} now={now} />}
 
-        <button
-          type="button"
-          onClick={() => onRemove(item)}
-          className={cn(ACTION, 'justify-start px-1 text-[color:var(--down)] hover:bg-accent')}
-        >
-          <Trash2 aria-hidden="true" className="size-5" />
-          Remove from {listName}
-        </button>
+        {pin && (
+          <div className="flex flex-col gap-1">
+            <button
+              type="button"
+              disabled={pin.pending}
+              onClick={pin.onToggle}
+              className={cn(ACTION, 'justify-start px-1 hover:bg-accent')}
+            >
+              {pin.pinned ? (
+                <PinOff aria-hidden="true" className="size-5" />
+              ) : (
+                <Pin aria-hidden="true" className="size-5" />
+              )}
+              {pin.pinned ? 'Unpin: let the screen remove it' : 'Pin: keep it in the list'}
+            </button>
+            {pin.problem && (
+              <p role="alert" className="px-1 text-[0.8125rem] font-semibold text-destructive">
+                {pin.problem}
+              </p>
+            )}
+          </div>
+        )}
+
+        {onRemove && (
+          <button
+            type="button"
+            onClick={() => onRemove(item)}
+            className={cn(ACTION, 'justify-start px-1 text-[color:var(--down)] hover:bg-accent')}
+          >
+            <Trash2 aria-hidden="true" className="size-5" />
+            Remove from {listName}
+          </button>
+        )}
       </div>
     </BottomSheet>
   )

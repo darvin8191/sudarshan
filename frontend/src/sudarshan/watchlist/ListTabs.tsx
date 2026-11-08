@@ -1,4 +1,4 @@
-import { ArrowUpDown, Check, MoreVertical, Pencil, Plus, Trash2 } from 'lucide-react'
+import { ArrowUpDown, Check, MoreVertical, Pencil, Plus, Trash2, Zap } from 'lucide-react'
 import { type KeyboardEvent, useEffect } from 'react'
 import type { Watchlist } from '@/api/watchlist'
 import {
@@ -35,6 +35,7 @@ export function ListTabs({
   onRename,
   onEdit,
   onDelete,
+  fed,
 }: {
   lists: Watchlist[]
   activeId: number | null
@@ -44,6 +45,8 @@ export function ListTabs({
   onRename: () => void
   onEdit: () => void
   onDelete: () => void
+  /** The lists a screener feeds (M9 UI7): each tab says Auto, an icon and a word. */
+  fed?: ReadonlySet<number>
 }) {
   // Keep the open tab in view when it changes, from a menu or a restored session.
   useEffect(() => {
@@ -102,6 +105,15 @@ export function ListTabs({
                 )}
               >
                 <span className="max-w-[11rem] truncate">{list.name}</span>
+                {fed?.has(list.id) && (
+                  <span
+                    data-auto="true"
+                    className="inline-flex items-center gap-0.5 text-[0.6875rem] font-bold"
+                  >
+                    <Zap aria-hidden="true" className="size-3" />
+                    Auto
+                  </span>
+                )}
                 <span className="text-xs font-semibold opacity-80">{list.items.length}</span>
               </span>
             </button>

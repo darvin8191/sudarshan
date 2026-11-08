@@ -31,6 +31,7 @@ import {
 } from '@/sudarshan/dashboard/MarketCalendar'
 import { type DashboardFunds, PnlCard } from '@/sudarshan/dashboard/PnlCard'
 import { formatAmount } from '@/sudarshan/dashboard/format'
+import { ScreenerCard } from '@/sudarshan/dashboard/ScreenerCard'
 
 interface MasterContractStatus {
   status: 'pending' | 'downloading' | 'success' | 'error'
@@ -373,6 +374,8 @@ export default function Dashboard() {
             />
           )}
           <HoldingsCard apiKey={apiKey} marketOpen={marketOpen} />
+          {/* SUDARSHAN M9 UI8: the screener's day, live from its run pushes. */}
+          <ScreenerCard marketOpen={marketOpen} />
         </div>
 
         <section
