@@ -218,6 +218,7 @@ export function PortfolioCard({ marketOpen = NOT_KNOWN }: { marketOpen?: MarketO
   // given. A read that fails says so in words about Upstox, not about the service.
   const [fill, setFill] = useState<UpstoxSummary | null>(null)
   const reading = summary?.entries.some((e) => e.tab.system && e.upstox?.state === 'reading')
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new summary that is still reading asks again
   useEffect(() => {
     if (!reading) return
     setFill(null)
