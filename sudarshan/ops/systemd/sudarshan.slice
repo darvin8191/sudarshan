@@ -1,15 +1,16 @@
 # सुदर्शन / SUDARSHAN: the slice every ring service runs in (Slice=sudarshan.slice in each unit;
 # cross-design R11). One ceiling for the ring as a whole, so that the feed, the alerts, the portfolio
 # and the screener together can never squeeze OpenAlgo or TRINETRA off the 2-OCPU / 12 GB box: the
-# ring may use at most half the CPU when the box is busy and 2.5 GB of memory, squeezed from 2 GB.
-# Each unit keeps its own, smaller limits inside this one.
+# ring may use at most half the CPU when the box is busy (its weight 100 against system.slice's
+# 100, the weight the ring had before this file named one) and 2.5 GB of memory, squeezed from
+# 2 GB. Each unit keeps its own, smaller limits inside this one.
 # Installed by sudarshan-deploy with the units (its policy allows a slice to carry only resource limits).
 
 [Unit]
 Description=SUDARSHAN ring services (feed, alerts, portfolio, screener)
 
 [Slice]
-CPUWeight=50
+CPUWeight=100
 MemoryHigh=2G
 MemoryMax=2560M
 TasksMax=512

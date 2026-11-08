@@ -61,6 +61,17 @@ def env_values(path: Path) -> dict[str, str]:
 
 
 # ---- the files the release ships ------------------------------------------------------------------
+def test_the_slice_gives_the_ring_the_half_of_the_cpu_its_words_say():
+    """Release review LOW-4: CPUWeight=50 against system.slice's 100 gave the ring a third, not
+    the half the slice's comment promised, and less than the implicit slice's 100 before it, so
+    the feed's share fell whatever the screener's switch said."""
+    lines = (SYSTEMD / SLICE).read_text().splitlines()
+    (weight,) = [int(line.split("=", 1)[1]) for line in lines if line.startswith("CPUWeight=")]
+    system_slice = 100  # systemd's default weight for system.slice, OpenAlgo's and TRINETRA's
+    assert weight / (weight + system_slice) == 0.5, f"the ring gets {weight}/{weight + 100}"
+    assert "at most half the CPU" in (SYSTEMD / SLICE).read_text()
+
+
 def test_the_slice_carries_resource_limits_only_and_every_ring_unit_runs_in_it():
     text = (SYSTEMD / SLICE).read_text()
     for line in text.splitlines():
