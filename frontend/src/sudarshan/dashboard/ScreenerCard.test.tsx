@@ -27,7 +27,7 @@ vi.mock('@/components/socket/SocketProvider', () => ({
 }))
 
 import { createQueryClient } from '@/app/providers'
-import { FIGURES_BEHIND, ScreenerCard } from '@/sudarshan/dashboard/ScreenerCard'
+import { FIGURES_BEHIND, ScreenerCard, sessionWords } from '@/sudarshan/dashboard/ScreenerCard'
 import { resetScreenerPushForTests } from '@/sudarshan/screener/push'
 import type { Today } from '@/sudarshan/screener/types'
 import { fakeSocket, NOW, screenerState, screenRow } from '@/test/screener'
@@ -139,5 +139,22 @@ describe('Screener today', () => {
       for (let i = 0; i < 10; i += 1) await Promise.resolve()
     })
     expect(screen.queryByText('Screener today')).not.toBeInTheDocument()
+  })
+})
+
+describe('the session the figures belong to', () => {
+  const monday = Date.UTC(2026, 10, 9, 5, 0, 0)
+  it('names the current session, and an earlier one as the last session', () => {
+    expect(sessionWords(20261109, monday)).toBe('Session 9 Nov')
+    expect(sessionWords(20261106, monday)).toBe('Last session 6 Nov')
+  })
+  it('says nothing for a session it cannot read', () => {
+    expect(sessionWords(undefined, monday)).toBeNull()
+    expect(sessionWords(123, monday)).toBeNull()
+  })
+  it('shows it on the card', async () => {
+    api.today.mockResolvedValue({ ...TODAY, session: 20261106 })
+    show()
+    expect(await screen.findByText(/Last session 6 Nov|Session 6 Nov/)).toBeTruthy()
   })
 })

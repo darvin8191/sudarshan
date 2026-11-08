@@ -13,6 +13,26 @@ import { keyOf, type MarketOpen } from './live'
 /** What stands over the figures when this page is not in the owner's room. */
 export const FIGURES_BEHIND = 'Not receiving updates · figures are from the last read'
 
+const SESSION_DAY = new Intl.DateTimeFormat('en-IN', {
+  timeZone: 'Asia/Kolkata',
+  day: 'numeric',
+  month: 'short',
+})
+const KEY_DAY = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' })
+
+/**
+ * The trading day the figures belong to, from the service's session (YYYYMMDD): 'Session 9 Nov'
+ * for today's, 'Last session 6 Nov' for an earlier one, so yesterday's counts never read as
+ * today's. Null when the service sent none.
+ */
+export function sessionWords(session: number | undefined, now: number): string | null {
+  if (!session || !/^\d{8}$/.test(String(session))) return null
+  const text = String(session)
+  const at = Date.UTC(+text.slice(0, 4), +text.slice(4, 6) - 1, +text.slice(6, 8), 6)
+  const current = KEY_DAY.format(now).replaceAll('-', '')
+  return `${text === current ? 'Session' : 'Last session'} ${SESSION_DAY.format(at)}`
+}
+
 const NOT_KNOWN: MarketOpen = () => null
 const SHOWN_SCREENS = 4
 const SHOWN_RECENT = 3
@@ -73,6 +93,14 @@ export function ScreenerCard({ marketOpen = NOT_KNOWN }: { marketOpen?: MarketOp
         </Link>
       </div>
 
+      {sessionWords(today.session, Date.now()) && (
+        <p
+          data-session={today.session}
+          className="text-[0.8125rem] font-semibold text-[color:var(--text-secondary)]"
+        >
+          {sessionWords(today.session, Date.now())}
+        </p>
+      )}
       {(behind || closed) && (
         <p
           data-screener-note={behind ? 'behind' : 'closed'}

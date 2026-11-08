@@ -1,6 +1,9 @@
 import {
+  Bell,
   ChevronDown,
+  CircleAlert,
   Clock,
+  Hourglass,
   Info,
   LoaderCircle,
   Minus,
@@ -26,6 +29,50 @@ const DAY = new Intl.DateTimeFormat('en-IN', {
 /** "9 Nov 10:30:05": a run's moment as the clock in India shows it. */
 export function runMoment(at: number): string {
   return `${DAY.format(at)} ${istTime(at)}`
+}
+
+/** What the service says of a run beyond its counts: still waiting to leave, not checked, not finished, alerts. */
+export const STATUS_WORDS: Record<string, string> = {
+  superseded: 'Replaced by a newer check',
+  failed: 'This check did not finish',
+}
+
+export function RunFacts({ run }: { run: RunRow }) {
+  const waiting = run.missing ?? 0
+  const skipped = run.not_checked ?? 0
+  const status = run.status && run.status !== 'done' ? run.status : null
+  if (!status && !waiting && !skipped && !run.alerts) return null
+  return (
+    <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[0.8125rem] font-medium text-[color:var(--text-secondary)]">
+      {status && (
+        <span
+          data-run-status={status}
+          className="inline-flex items-center gap-1 font-semibold text-[color:var(--warning-text)]"
+        >
+          <CircleAlert aria-hidden="true" className="size-3.5" />
+          {STATUS_WORDS[status] ?? 'This check did not finish'}
+        </span>
+      )}
+      {waiting > 0 && (
+        <span className="inline-flex items-center gap-1">
+          <Hourglass aria-hidden="true" className="size-3.5" />
+          {waiting} waiting to leave
+        </span>
+      )}
+      {skipped > 0 && (
+        <span className="inline-flex items-center gap-1">
+          <Info aria-hidden="true" className="size-3.5" />
+          {skipped} not checked
+        </span>
+      )}
+      {run.alerts && (
+        <span className="inline-flex items-center gap-1">
+          <Bell aria-hidden="true" className="size-3.5" />
+          {run.alerts}
+        </span>
+      )}
+    </span>
+  )
 }
 
 const RunLine = memo(function RunLine({
@@ -60,6 +107,7 @@ const RunLine = memo(function RunLine({
             {run.exited} exited
           </span>
         </span>
+        <RunFacts run={run} />
         {run.marks.length > 0 && (
           <span className="flex flex-col gap-0.5">
             {run.marks.map((mark) => (

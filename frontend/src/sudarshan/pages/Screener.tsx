@@ -3,7 +3,7 @@
 // (screener/push.ts). What is open lives in the address (screener/useScreenerAddress.ts), so the
 // phone's Back closes a sheet first, then the screen.
 import { useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, ArrowLeft, LoaderCircle, Plus, RefreshCw } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Gauge, LoaderCircle, Plus, RefreshCw } from 'lucide-react'
 import { useEffect, useMemo } from 'react'
 import { useSocketContext } from '@/components/socket/SocketProvider'
 import { cn } from '@/lib/utils'
@@ -14,6 +14,7 @@ import {
   STALE,
   StaleBookNote,
 } from '@/sudarshan/books/cards/parts'
+import { istTime } from '@/sudarshan/books/time'
 import { droppedHere } from '@/sudarshan/screener/actions'
 import { DeleteSheet } from '@/sudarshan/screener/DeleteSheet'
 import { History } from '@/sudarshan/screener/History'
@@ -25,7 +26,12 @@ import { RunSheet } from '@/sudarshan/screener/RunSheet'
 import { ScreenCard } from '@/sudarshan/screener/ScreenCard'
 import { ScreenEditor } from '@/sudarshan/screener/ScreenEditor'
 import { type PanelTab, ScreenPage } from '@/sudarshan/screener/ScreenPage'
-import { type ScreenRow, WORDS } from '@/sudarshan/screener/types'
+import {
+  type EngineLine,
+  type ScreenerState,
+  type ScreenRow,
+  WORDS,
+} from '@/sudarshan/screener/types'
 import { type HomeTab, useScreenerAddress } from '@/sudarshan/screener/useScreenerAddress'
 import { useScreenerState } from '@/sudarshan/screener/useScreenerState'
 import { toast } from '@/utils/toast'
@@ -38,6 +44,30 @@ const NOT_RECEIVING = {
   line: 'Not receiving updates on this screen · reconnecting',
   real_time: false,
 } as const
+
+/** ' · next check 10:45' when the service sent the time and its line does not already say so. */
+export function nextCheckWords(engine: EngineLine): string {
+  if (!engine.next_at || /next check/i.test(engine.line)) return ''
+  return ` · next check ${istTime(engine.next_at).slice(0, 5)}`
+}
+
+/** How much of the screener's room the owner's screens use, in words: screens and instruments. */
+function Budget({ limits }: { limits: ScreenerState['limits'] }) {
+  return (
+    <p
+      data-budget="true"
+      className="flex items-start gap-1.5 px-1 pt-1 text-[0.8125rem] font-medium text-[color:var(--text-secondary)]"
+    >
+      <Gauge aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+      <span>
+        {limits.active_used} of {limits.active} screens checking through the day
+        {limits.max_keys
+          ? ` · prices followed for up to ${limits.max_keys} instruments at once`
+          : ''}
+      </span>
+    </p>
+  )
+}
 
 /** The panels of an open screen. */
 const TABS: PanelTab[] = [
@@ -140,13 +170,15 @@ export default function Screener() {
               ? WORDS.not_answering
               : problem.message}
           </span>
-        ) : state && hearing === 'not_joined' ? (
+        ) : state?.engine.real_time && hearing !== 'joined' ? (
           <span data-heard="no" className="inline-flex">
             <EngineText line={NOT_RECEIVING} />
           </span>
         ) : state ? (
           <span data-heard="yes" className="inline-flex">
-            <EngineText line={state.engine} className={cn(!state.engine.real_time && undefined)} />
+            <EngineText
+              line={{ ...state.engine, line: state.engine.line + nextCheckWords(state.engine) }}
+            />
           </span>
         ) : (
           <span className="inline-flex items-center gap-1.5 text-[0.8125rem] font-semibold text-[color:var(--text-secondary)]">
@@ -257,6 +289,7 @@ export default function Screener() {
               ))}
             </ul>
           )}
+          {state?.enabled && <Budget limits={state.limits} />}
         </section>
       )}
 

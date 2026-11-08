@@ -16,6 +16,7 @@ import { followedItems } from './resultItems'
 import type { ResultRow, Results as ResultsData, ScreenRow } from './types'
 import { WORDS } from './types'
 import { useResults } from './useResults'
+import { warmingNote } from './words'
 
 /** What stands under the run when nothing in the screen is current. */
 export const NOT_RECEIVING = 'Not receiving updates on this screen · reconnecting'
@@ -25,6 +26,7 @@ export function runWords(run: NonNullable<ResultsData['run']>): string {
   return `Run at ${istTime(run.at)} · ${run.candle} candle`
 }
 
+/** The live stream's name for a row: EXCHANGE:SYMBOL (the service's own `key` names the feed's instrument). */
 const KEY = (row: Pick<ResultRow, 'symbol' | 'exchange'>) => keyOf(row.symbol, row.exchange)
 
 /** A row's clause values and its "forming" mark. */
@@ -138,6 +140,12 @@ export function NotChecked({ data }: { data: ResultsData['not_checked'] }) {
           {data.reasons.map((reason) => (
             <li key={reason}>{reason}</li>
           ))}
+          {warmingNote(data.reasons) && (
+            <li className="flex items-start gap-1.5 font-semibold text-[color:var(--text-secondary)]">
+              <Hourglass aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+              {warmingNote(data.reasons)}
+            </li>
+          )}
         </ul>
       )}
     </section>
@@ -250,7 +258,7 @@ export function Results({
           <ul className="divide-y">
             {rows.map((row) => (
               <ResultLine
-                key={KEY(row)}
+                key={row.key ?? KEY(row)}
                 row={row}
                 live={liveByKey.get(KEY(row))}
                 runAt={data.run?.at ?? 0}
