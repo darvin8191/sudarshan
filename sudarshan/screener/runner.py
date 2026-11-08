@@ -30,6 +30,7 @@ from .types import RunKey
 log = logging.getLogger("sudarshan.screener")
 
 TICK_S = 1.0
+PRUNE_AT_MIN = 16 * 60 + 30
 
 
 class Runner:
@@ -43,6 +44,9 @@ class Runner:
         self.made = 0
         self.failed = 0
         self.last_run_key: str | None = None
+        #: The day the retention last ran (6.1: at start and at 16:30).
+        self.pruned_day: int | None = None
+        self.keep_days = 100
 
     def status(self) -> dict[str, Any]:
         return {
@@ -68,8 +72,28 @@ class Runner:
         printed = getattr(self.source, "printed", None)
         return all(printed(m) for m in cas) if (cas and printed is not None) else True
 
+    def prune(self, now: int) -> dict[str, int] | None:
+        """Retention (6.1): runs 100 days (never under 90), values 7, done outbox rows 2; at
+        start, then once a day at or after 16:30 IST."""
+        moment = datetime.fromtimestamp(now / 1000, IST)
+        today = day_key(moment.date())
+        if self.pruned_day is not None and (
+            self.pruned_day == today or moment.hour * 60 + moment.minute < PRUNE_AT_MIN
+        ):
+            return None
+        try:
+            counts = self.store.write(OWNER, lambda tx: tx.prune(now, self.keep_days))
+        except StoreError:
+            log.exception("the retention could not run")
+            return None
+        self.pruned_day = today
+        if any(counts.values()):
+            log.info("retention: removed %s", ", ".join(f"{v} {k}" for k, v in counts.items() if v))
+        return counts
+
     async def tick(self, now: int | None = None) -> int:
         now = self.clock() if now is None else now
+        self.prune(now)
         sessions = self.sessions(now)
         if not sessions:
             return 0
@@ -165,6 +189,7 @@ async def run_runner(service, *, tick_s: float = TICK_S, wait_s: float = 30.0) -
         log.info("no price source is registered in this process; no screen is checked")
         return
     runner = Runner(service.store, source, service.clock, service.ensure_calendar())
+    runner.keep_days = service.settings.keep_days
     service.parts["runner"] = runner
     while True:
         try:

@@ -69,6 +69,19 @@ def test_the_runner_makes_every_due_run_once_and_records_a_failed_evaluation(ope
     assert asyncio.run(made.tick(ms("2026-10-25", "12:00"))) == 0, "a Sunday has no sessions"
 
 
+def test_the_retention_runs_at_start_and_once_a_day_at_16_30(opened):
+    make_screen(opened)
+    clock = {"now": ms(DAY, "10:15:05")}
+    made = runner.Runner(opened, FakeSource({}), lambda: clock["now"], Calendar())
+    assert made.prune(clock["now"]) == {"run_change": 0, "run_value": 0, "run": 0, "outbox": 0}
+    assert made.pruned_day == 20261028
+    assert made.prune(ms(DAY, "16:29")) is None and made.prune(ms(DAY, "16:31")) is None, (
+        "once today"
+    )
+    assert made.prune(ms("2026-10-29", "16:29")) is None, "the next day waits for 16:30"
+    assert made.prune(ms("2026-10-29", "16:30")) is not None and made.pruned_day == 20261029
+
+
 class FakeLink:
     def __init__(self, fail: set[str] = frozenset()):
         self.fail = set(fail)
