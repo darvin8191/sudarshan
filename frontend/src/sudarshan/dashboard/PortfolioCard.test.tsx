@@ -24,7 +24,14 @@ import { FIXED, READ_AT, row } from '@/sudarshan/portfolio/tab/fixtures'
 import type { PortfolioSummary, SummaryEntry } from '@/sudarshan/portfolio/types'
 import { holding } from '@/sudarshan/portfolio/upstox/fixtures'
 import { feed } from '@/test/marketDataHarness'
-import { entriesShown, instrumentsOf, PINNED_SHOWN, PortfolioCard } from './PortfolioCard'
+import {
+  entriesShown,
+  FILL_FAILED,
+  instrumentsOf,
+  PINNED_SHOWN,
+  PortfolioCard,
+  rowsOf,
+} from './PortfolioCard'
 import { setPortfolioCard, usePortfolioCard } from './portfolioCard'
 
 function custom(
@@ -42,14 +49,14 @@ function custom(
 
 function upstoxEntry(
   holdings = [holding()],
-  state: 'ok' | 'stale' | 'unavailable' = 'ok'
+  state: 'ok' | 'stale' | 'unavailable' | 'reading' = 'ok'
 ): SummaryEntry {
   return {
     tab: tab(1, 'Upstox', { system: true, kind: 'upstox' }),
     live: null,
     upstox: {
       state,
-      read_at: state === 'unavailable' ? null : READ_AT,
+      read_at: state === 'unavailable' || state === 'reading' ? null : READ_AT,
       note: state === 'ok' ? null : 'Upstox did not answer. Figures from 10:41:05.',
       holdings,
     },
@@ -123,11 +130,91 @@ describe('the Portfolio card', () => {
     expect(within(card).getByText('Upstox account (real)')).toBeTruthy()
   })
 
-  it('says when Upstox could not be read, with the reader sentence, and never a zero as today', async () => {
-    show(summary([upstoxEntry([], 'unavailable')]))
+  it('says Not read, never a zero, when Upstox could not be read, and keeps the other tabs', async () => {
+    show(
+      summary([
+        upstoxEntry([], 'unavailable'),
+        custom(2, 'Gold', [row(1, 'Alpha', { price: 1_100_000 })]),
+      ])
+    )
     const card = await screen.findByRole('region', { name: 'Portfolio' })
-    expect(within(card).getByText('Upstox did not answer. Figures from 10:41:05.')).toBeTruthy()
-    expect(within(card).getByText(/Today/).textContent).toContain('none')
+    const rows = within(card).getAllByRole('listitem')
+    const upstox = rows[0].textContent ?? ''
+    expect(upstox).toContain('Not read')
+    expect(upstox).toContain('Upstox did not answer. Figures from 10:41:05.')
+    expect(upstox).toContain('No good read yet')
+    expect(upstox).not.toContain('₹0.00')
+    expect(upstox).not.toContain('Today')
+    expect(upstox).not.toContain('Overall')
+    expect(within(rows[1]).getByText('₹1,100.00')).toBeTruthy() // the owner's own tab is whole
+  })
+
+  it('gives the time of the last good read for a row that is not read now', () => {
+    const entries = [upstoxEntry([], 'unavailable')]
+    const [shown] = rowsOf(entries, new Map(), READ_AT, false, READ_AT)
+    expect(shown).toMatchObject({ status: 'unread', lastGood: 'Last good read 10:41:05' })
+    const [never] = rowsOf(entries, new Map(), READ_AT, false, null)
+    expect(never.lastGood).toBe('No good read yet')
+    const [ok] = rowsOf([upstoxEntry()], new Map(), READ_AT, false, null)
+    expect(ok).toMatchObject({ status: 'ok', lastGood: null })
+  })
+
+  it('shows the tabs and "Upstox account: reading" while Upstox is slow, then fills in', async () => {
+    let release: (value: unknown) => void = () => {}
+    api.call.mockImplementation(async (op: string) => {
+      if (op === 'summary')
+        return {
+          enabled: true,
+          data: summary([
+            upstoxEntry([], 'reading'),
+            custom(2, 'Gold', [row(1, 'Alpha', { price: 1_100_000 })]),
+          ]),
+        }
+      if (op === 'upstox_book') {
+        await new Promise((resolve) => {
+          release = resolve
+        })
+        return {
+          enabled: true,
+          data: { holdings: { state: 'ok', read_at: READ_AT, note: null, data: [holding()] } },
+        }
+      }
+      throw new Error(`unexpected op ${op}`)
+    })
+    render(
+      <MemoryRouter>
+        <PortfolioCard marketOpen={() => true} />
+      </MemoryRouter>
+    )
+    const card = await screen.findByRole('region', { name: 'Portfolio' })
+    const rows = within(card).getAllByRole('listitem')
+    expect(within(rows[0]).getByText('Upstox account: reading')).toBeTruthy()
+    expect(rows[0].textContent).not.toContain('₹')
+    expect(within(rows[1]).getByText('₹1,100.00')).toBeTruthy() // the tabs do not wait
+    expect(api.call).toHaveBeenCalledWith('upstox_book', { parts: ['holdings'] })
+    expect(card.textContent).not.toMatch(/not answering/i)
+    await act(async () => release(null))
+    await waitFor(() => expect(within(card).getByText('₹15,000.00')).toBeTruthy())
+    expect(within(card).queryByText('Upstox account: reading')).toBeNull()
+  })
+
+  it('says it in words about Upstox when the fill-in read fails, never that the service is silent', async () => {
+    api.call.mockImplementation(async (op: string) => {
+      if (op === 'summary')
+        return { enabled: true, data: summary([upstoxEntry([], 'reading'), custom(2, 'Gold', [])]) }
+      throw new Error('the bridge timed out')
+    })
+    render(
+      <MemoryRouter>
+        <PortfolioCard marketOpen={() => true} />
+      </MemoryRouter>
+    )
+    const card = await screen.findByRole('region', { name: 'Portfolio' })
+    await waitFor(() => expect(within(card).getByText(FILL_FAILED)).toBeTruthy())
+    const upstox = within(card).getAllByRole('listitem')[0].textContent ?? ''
+    expect(upstox).toContain('Not read')
+    expect(upstox).not.toContain('₹0.00')
+    expect(card.textContent).not.toMatch(/not answering|portfolio service/i)
   })
 
   it('shows at most four pinned tabs after the Upstox row, and subscribes at most 200 instruments', () => {
@@ -162,5 +249,25 @@ describe('the switch', () => {
     expect(window.localStorage.getItem('sudarshan-portfolio-card')).toBe('1')
     act(() => setPortfolioCard(false))
     expect(window.localStorage.getItem('sudarshan-portfolio-card')).toBeNull()
+  })
+
+  it('reads blocked storage as off, and a choice made while it is blocked lasts for the visit', () => {
+    function Probe() {
+      return <span>{usePortfolioCard() ? 'on' : 'off'}</span>
+    }
+    render(<Probe />)
+    const blocked = () => {
+      throw new Error('storage is blocked')
+    }
+    const get = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(blocked)
+    const set = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(blocked)
+    act(() => setPortfolioCard(true))
+    expect(screen.getByText('on')).toBeTruthy() // the choice holds although it could not be kept
+    act(() => {
+      window.dispatchEvent(new StorageEvent('storage', { key: 'sudarshan-portfolio-card' }))
+    })
+    expect(screen.getByText('off')).toBeTruthy() // an unreadable store reads as off, not on
+    get.mockRestore()
+    set.mockRestore()
   })
 })

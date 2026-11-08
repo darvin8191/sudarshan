@@ -63,12 +63,14 @@ export function Loans({
                     Old ·{' '}
                   </>
                 )}
-                {loan.fresh.words}
+                {loan.state === 'owing' ? loan.fresh.words : loan.words}
               </span>
             </div>
-            <span className="text-[0.9375rem] font-semibold tabular-nums">
-              {rupeesText(loan.outstanding_paise)}
-            </span>
+            {loan.state === 'owing' && (
+              <span className="text-[0.9375rem] font-semibold tabular-nums">
+                {rupeesText(loan.outstanding_paise)}
+              </span>
+            )}
             {onUpdate && (
               <button
                 type="button"
@@ -85,6 +87,64 @@ export function Loans({
   )
 }
 
+/** Loans that are on no tab (entered before a loan had one): each can be moved to this tab. */
+export function LooseLoans({
+  loans,
+  tabName,
+  onMove,
+  problem,
+}: {
+  loans: readonly Liability[]
+  tabName: string
+  onMove?: (loan: Liability) => void
+  problem?: string | null
+}) {
+  if (loans.length === 0) return null
+  return (
+    <div className="flex flex-col gap-1">
+      <dt className={LABEL}>Loans not on a tab</dt>
+      <dd className={NOTE}>
+        These loans were entered before a loan belonged to a tab, so no net worth counts them yet.
+      </dd>
+      <dd>
+        <ul
+          aria-label="Loans not on a tab"
+          className="flex flex-col divide-y divide-[color:var(--divider)]"
+        >
+          {loans.map((loan) => (
+            <li key={loan.asset_id} className="flex items-center gap-3 py-1.5">
+              <div className="flex min-w-0 flex-1 flex-col">
+                <span className="truncate text-[0.9375rem] font-semibold">{loan.name}</span>
+                <span className="text-xs text-[color:var(--text-tertiary)]">
+                  {loan.state === 'owing'
+                    ? `${rupeesText(loan.outstanding_paise)} · ${loan.fresh.words ?? ''}`
+                    : loan.words}
+                </span>
+              </div>
+              {onMove && (
+                <button
+                  type="button"
+                  onClick={() => onMove(loan)}
+                  aria-label={`Move ${loan.name} to a tab`}
+                  className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-[0.875rem] border border-[color:var(--border-strong)] px-3 text-sm font-semibold text-[color:var(--brand)] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                >
+                  Move to a tab
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      </dd>
+      <dd className={NOTE}>Move to a tab puts the loan on {tabName}.</dd>
+      {problem && (
+        <dd role="alert" className="text-sm font-medium text-[color:var(--loss)]">
+          {problem}
+        </dd>
+      )}
+    </div>
+  )
+}
+
 /** Value in Khand (the one large figure), what went in, and the overall gain and its parts. */
 export function SummaryTile({
   totals,
@@ -92,12 +152,23 @@ export function SummaryTile({
   stale = false,
   loans = [],
   onUpdateLoan,
+  looseLoans = [],
+  tabName = 'this tab',
+  onMoveLoan,
+  moveProblem = null,
+  loansHidden = false,
 }: {
   totals: TabTotals
   fixed: TabFixed
   stale?: boolean
   loans?: readonly Liability[]
   onUpdateLoan?: (loan: Liability) => void
+  looseLoans?: readonly Liability[]
+  tabName?: string
+  onMoveLoan?: (loan: Liability) => void
+  moveProblem?: string | null
+  /** A filter on a part of the tab hides the loans, which belong to all of it. */
+  loansHidden?: boolean
 }) {
   return (
     <section aria-label="Summary" className={cn(TILE, 'flex flex-col gap-3')}>
@@ -123,6 +194,24 @@ export function SummaryTile({
             </dd>
           )}
         </div>
+        {loansHidden && (
+          <div className="border-t border-[color:var(--divider)] pt-3">
+            <p className={NOTE}>
+              Loans and net worth are for the whole tab, so they are not shown while a filter
+              narrows it.
+            </p>
+          </div>
+        )}
+        {looseLoans.length > 0 && (
+          <div className="border-t border-[color:var(--divider)] pt-3">
+            <LooseLoans
+              loans={looseLoans}
+              tabName={tabName}
+              onMove={onMoveLoan}
+              problem={moveProblem}
+            />
+          </div>
+        )}
         {loans.length > 0 && (
           <div className="flex flex-col gap-px border-t border-[color:var(--divider)] pt-3">
             <dt className={LABEL}>Loans</dt>

@@ -200,9 +200,62 @@ async def test_a_loan_is_made_on_its_tab_and_its_balance_moves_to_nought_when_pa
         )
     )  # fmt: skip
     assert stale["code"] == "version_conflict"
-    paid = await rig.call("price_point_set", id=loan["id"], day=20261020, price_u=0)
+    bare = clean(await rig.call("price_point_set", id=loan["id"], day=20261020, price_u=0))
+    assert bare["code"] == "bad_request"  # a balance is set through the tab and its version
+    paid = await rig.call(
+        "price_point_set", id=loan["id"], day=20261020, price_u=0, tab_id=rig.tab["id"],
+        version=rig.version(),
+    )  # fmt: skip
     assert paid["data"]["price_u"] == 0
     assert (await rig.call("tab_get", id=rig.tab["id"]))["data"]["liabilities"] == []
+
+
+@scenario_of
+async def test_a_loan_stays_on_one_tab_and_a_loan_on_no_tab_is_moved_by_the_owner(rig):
+    """M7.19 V2 and the review: a balance set from another tab cannot link the loan to it, and a
+    loan that is on no tab (made in v0.5.0) joins the tab the owner moves it to."""
+    other = rig.book.tab_create(OWNER, "t-9", "Retirement", "mixed", now=rig.now)
+    loan = (
+        await rig.call(
+            "asset_create", request_id="l-1", kind="liability", name="Home loan",
+            tab_id=rig.tab["id"], version=rig.version(),
+            first_value={"day": 20261001, "price_u": 50_000_000_000},
+        )
+    )["data"]  # fmt: skip
+    away = clean(
+        await rig.call(
+            "price_point_set", id=loan["id"], day=20261020, price_u=49_000_000_000,
+            tab_id=other["id"], version=other["version"],
+        )
+    )  # fmt: skip
+    assert away["code"] == "refused" and "on the Retirement" not in away["message"]
+    assert "on the Long term portfolio" in away["message"]
+    shown = (await rig.call("tab_get", id=other["id"]))["data"]
+    assert shown["liabilities"] == [] and shown["fixed"]["liabilities_paise"] == 0
+
+    # What v0.5.0 wrote: a loan and its balance, no tab.
+    def old_loan(tx):
+        row = tx.insert(
+            "asset", {"kind": "liability", "name": "Car loan", "asset_class": "other", "tags": []},
+            rig.now, "v050-car",
+        )  # fmt: skip
+        tx.set_price_point(row["id"], 20261001, 4_000_000_000, rig.now)
+        return row["id"]
+
+    car = rig.book.store.write(OWNER, old_loan)
+    loose = (await rig.call("tab_get", id=other["id"]))["data"]["loose_loans"]
+    assert [each["name"] for each in loose] == ["Car loan"]
+    stale = clean(await rig.call("loan_move", id=car, tab_id=other["id"], version=99))
+    assert stale["code"] == "version_conflict"
+    moved = await rig.call("loan_move", id=car, tab_id=other["id"], version=other["version"])
+    assert moved["data"]["name"] == "Car loan"
+    after = (await rig.call("tab_get", id=other["id"]))["data"]
+    assert [each["name"] for each in after["liabilities"]] == ["Car loan"]
+    assert after["loose_loans"] == [] and after["tab"]["version"] == other["version"] + 1
+    twice = clean(await rig.call("loan_move", id=car, tab_id=rig.tab["id"], version=rig.version()))
+    assert twice["code"] == "refused" and "on the Retirement portfolio" in twice["message"]
+    bare = clean(await rig.call("loan_move", id=car))
+    assert bare["code"] == "bad_request"
 
 
 @scenario_of

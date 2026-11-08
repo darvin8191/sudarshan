@@ -3,6 +3,7 @@ performance, its layout and its saved views, over views.Views, book.Book and lay
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Mapping
 from typing import Any
@@ -16,6 +17,47 @@ log = logging.getLogger(__name__)
 
 #: The Upstox row of the dashboard card when the holdings could not be read at all.
 UPSTOX_NOT_READ = "Upstox holdings could not be read. Open Portfolio to try again."
+#: ...and while the read is still going: Upstox is slow, and the service is waiting for it.
+UPSTOX_READING = "Upstox is slow to answer. SUDARSHAN is still reading your account."
+#: How long the summary waits for the Upstox part before it answers with the tabs' part alone. The
+#: bridge gives a read 3 seconds (core/kinds.TIMEOUTS_S), and the views and the price book have
+#: used some of them, so the wait is a third of the whole.
+UPSTOX_WAIT_S = 1.0
+
+
+async def _upstox_row(ctx) -> dict[str, Any]:
+    """The Upstox row as the reader gives it; a failure is the row saying it was not read."""
+    try:
+        book = await ctx.ensure_upstox().book(["holdings"])
+        part = serialize.out(OWNER, book)["holdings"]
+        return {
+            "state": part["state"],
+            "read_at": part["read_at"],
+            "note": part["note"],
+            "holdings": part["data"] or [],
+        }
+    except Exception:
+        # The card still shows the owner's own tabs; the Upstox row says it was not read.
+        log.exception("The dashboard card could not read the Upstox holdings")
+        return {"state": "unavailable", "read_at": None, "note": UPSTOX_NOT_READ, "holdings": []}
+
+
+async def _upstox_within(ctx) -> dict[str, Any]:
+    """The Upstox row, or a row that says it is still being read once ``UPSTOX_WAIT_S`` has gone.
+    The read itself goes on (the reader keeps its answer for the phone's next ask), so a slow
+    Upstox costs the card one line and never the owner's own tabs."""
+    # The reads that went on past the wait are held (one at a time) so that nothing drops them
+    # half way, and a summary asked while one is out joins it instead of starting another.
+    out: set = ctx.part("summary_reads", lambda _store: set())
+    task = next(iter(out), None)
+    if task is None or task.done():
+        task = asyncio.ensure_future(_upstox_row(ctx))
+        out.add(task)
+        task.add_done_callback(out.discard)
+    try:
+        return await asyncio.wait_for(asyncio.shield(task), UPSTOX_WAIT_S)
+    except TimeoutError:
+        return {"state": "reading", "read_at": None, "note": UPSTOX_READING, "holdings": []}
 
 
 # ---- state, summary and the tab -----------------------------------------------------------------
@@ -31,26 +73,16 @@ async def summary(ctx, message):
     """The dashboard card (M3.11): the pinned custom tabs with their live-math inputs, and the
     Upstox tab's holdings as the reader last read them (its five seconds of memory, the service's
     own budget), so the card prices every row from the same ticks. When Upstox cannot be read the
-    row carries the reader's state and sentence, never a failure of the whole card."""
+    row carries the reader's state and sentence, never a failure of the whole card. A slow Upstox
+    is waited for only ``UPSTOX_WAIT_S``: after that the row is state ``reading`` and the phone
+    asks ``upstox_book`` (which has its own, longer time) for the figures."""
     await warmed(ctx)
     _, views = parts(ctx)
     now = ctx.clock()
     found = await answer(lambda: views.summary(OWNER, now=now))
     entries = found.get("entries") if isinstance(found, dict) else None
     if entries and any(e["tab"]["system"] for e in entries):
-        try:
-            book = await ctx.ensure_upstox().book(["holdings"])
-            part = serialize.out(OWNER, book)["holdings"]
-            row = {
-                "state": part["state"],
-                "read_at": part["read_at"],
-                "note": part["note"],
-                "holdings": part["data"] or [],
-            }
-        except Exception:
-            # The card still shows the owner's own tabs; the Upstox row says it was not read.
-            log.exception("The dashboard card could not read the Upstox holdings")
-            row = {"state": "unavailable", "read_at": None, "note": UPSTOX_NOT_READ, "holdings": []}
+        row = await _upstox_within(ctx)
         for entry in entries:
             if entry["tab"]["system"]:
                 entry["upstox"] = row

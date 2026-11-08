@@ -63,6 +63,11 @@ NO_PRICE: dict[str, Any] = {
 }
 
 
+#: What a loan listed with no balance to subtract says it is (state ``zero`` or ``later``).
+ZERO_LOAN_WORDS = "Entered at 0, so it lowers nothing. Update the balance once you owe something."
+LATER_LOAN_WORDS = "Its balance starts on {day}. It lowers net worth from that day, not before."
+
+
 class Prices:
     """The one seam to the price book (PB5): what an asset is worth now, and what it closed at.
 
@@ -77,7 +82,7 @@ class Prices:
         A fund with a NAV the owner entered by hand (design 4.5) is priced by it here."""
         if asset["kind"] not in ("manual", "mf"):
             return dict(NO_PRICE)
-        return manual_point(tx, asset, today, after_day=None) or dict(NO_PRICE)
+        return manual_point(tx, asset, today, from_day=None) or dict(NO_PRICE)
 
     def closes(self, tx: Tx, assets: list[Mapping[str, Any]]) -> dict[int, dict[str, Any]]:
         """Each asset's closing prices as ``history.Quotes.of`` reads them."""
@@ -115,13 +120,14 @@ class Prices:
 
 
 def manual_point(
-    tx: Tx, asset: Mapping[str, Any], today: int, after_day: int | None
+    tx: Tx, asset: Mapping[str, Any], today: int, from_day: int | None
 ) -> dict[str, Any] | None:
     """The owner's newest own value of an asset on or before ``today`` as a ``PriceInfo``, or None;
-    with ``after_day``, only a value newer than that day (the day of the fund's published NAV)."""
+    with ``from_day``, only a value dated that day or later (the day of the fund's published NAV:
+    the owner's own value wins on a day, here as in the history of closing prices)."""
     points = [p for p in tx.rows("price_point", "day", asset_id=asset["id"]) if p["day"] <= today]
-    if after_day is not None:
-        points = [p for p in points if p["day"] > after_day]
+    if from_day is not None:
+        points = [p for p in points if p["day"] >= from_day]
     if not points:
         return None
     last = points[-1]
@@ -187,6 +193,13 @@ class Views:
             named = sorted({e.asset_id for e in live.entries if e.asset_id is not None})
             # M7.19 V2: the tab's loans lower its net worth and enter no return figure.
             liabilities = self._liabilities(tx, tab, today, filters.as_of, now)
+            loose = self._loose_loans(tx, tab, today, filters.as_of, now)
+            # A loan belongs to the whole tab: against a part of it (an account, a kind, a tag, the
+            # lots held over or under a year) net worth would subtract all of it from some of it.
+            narrowed = bool(filters.accounts or filters.classes or filters.tags or filters.held)
+            loans_hidden = narrowed and bool(liabilities)
+            if narrowed:
+                liabilities, loose = [], []
             live.fixed["liabilities_paise"] = sum(each["outstanding_paise"] for each in liabilities)
             return {
                 "tab": serialize.tab(tab),
@@ -203,6 +216,8 @@ class Views:
                     if a in live.assets
                 ],
                 "liabilities": liabilities,
+                "loans_hidden": loans_hidden,
+                "loose_loans": loose,
                 "allocation": allocate_all(held, accounts, members),
                 "notes": self._notes(live),
                 "layout": layout.layout_state(tx, tab),
@@ -357,31 +372,70 @@ class Views:
     def _liabilities(self, tx, tab, today, as_of, now) -> list[dict[str, Any]]:
         """types.ts ``Liability`` for each loan linked to the tab: its outstanding balance on the
         newest day on or before ``as_of`` (today), as the owner last set it, and how old that is.
-        A loan whose balance has reached 0 is paid off and not listed; one with no balance on or
-        before the day is left out too (it did not exist then)."""
+
+        * A loan whose balance has come down to 0 after it was owed is paid off and not listed.
+        * A loan entered at 0 is listed as owing nothing, and one dated after the day is listed
+          with the day its balance starts, each with words for what it means (state ``zero`` and
+          ``later``); neither lowers net worth.
+        * On a past day (``as_of``) a loan with no balance yet did not exist then and is left out.
+        """
         on = today if as_of is None else as_of
         found = []
         for asset_id in tx.liabilities_of(tab["id"]):
             asset = tx.get("asset", asset_id)
-            if asset is None or asset["kind"] != "liability":
-                continue
-            points = [p for p in tx.price_points(asset_id) if p["day"] <= on]
-            if not points:
-                continue
-            latest = points[-1]
-            if latest["price_u"] <= 0:
-                continue
-            fresh = freshness.manual(latest["day"], on, tab["manual_old_days"], noun="Balance")
-            found.append(
-                {
-                    "asset_id": asset_id,
-                    "name": asset["name"],
-                    "outstanding_paise": round_div(latest["price_u"], 100),
-                    "day": latest["day"],
-                    "fresh": fresh.as_dict(),
-                }
-            )
+            if asset is not None and asset["kind"] == "liability":
+                shown = self._loan_line(tx, asset, tab["manual_old_days"], today, as_of, on)
+                if shown is not None:
+                    found.append(shown)
         return found
+
+    def _loose_loans(self, tx, tab, today, as_of, now) -> list[dict[str, Any]]:
+        """Loans that are on no tab (entered in v0.5.0, before a loan had one), offered on the
+        Summary of every tab the owner can move one to, so that none is out of reach."""
+        if as_of is not None or tab["system"] or tab["kind"] == "upstox" or tab["archived"]:
+            return []
+        found = []
+        for asset in tx.rows("asset"):
+            if asset["kind"] == "liability" and not tx.tabs_of_liability(asset["id"]):
+                shown = self._loan_line(
+                    tx, asset, tab["manual_old_days"], today, None, today, loose=True
+                )
+                if shown is not None:
+                    found.append(shown)
+        return found
+
+    @staticmethod
+    def _loan_line(tx, asset, old_days, today, as_of, on, loose: bool = False):
+        points = tx.price_points(asset["id"])
+        known = [p for p in points if p["day"] <= on]
+        state, words_ = "owing", None
+        if known:
+            latest = known[-1]
+            if latest["price_u"] <= 0:
+                if not loose and any(p["price_u"] > 0 for p in known):
+                    return None  # it was owed and is paid off
+                state, words_ = "zero", ZERO_LOAN_WORDS
+        else:
+            later = [p for p in points if p["day"] > on]
+            if as_of is not None or not later:
+                return None  # it did not exist on that day
+            latest = later[0]
+            state = "later"
+            words_ = LATER_LOAN_WORDS.format(day=freshness.when(latest["day"], today))
+        fresh = (
+            freshness.Freshness(freshness.FRESH, None)
+            if state == "later"
+            else freshness.manual(latest["day"], on, old_days, noun="Balance")
+        )
+        return {
+            "asset_id": asset["id"],
+            "name": asset["name"],
+            "outstanding_paise": round_div(latest["price_u"], 100) if state == "owing" else 0,
+            "day": latest["day"],
+            "state": state,
+            "words": words_,
+            "fresh": fresh.as_dict(),
+        }
 
     @staticmethod
     def _notes(live) -> list[dict[str, Any]]:
@@ -441,8 +495,9 @@ class Views:
             out["by_fy"] = [fy.as_dict() for fy in performance.by_financial_year(ledger)]
             out["income"] = {
                 **performance.income_report(ledger, today),
-                # M7.29: yield on cost is the twelve months' income on what the holdings cost.
-                **performance.income_summary(ledger, today, live.totals["cost_paise"]),
+                # M7.29: yield on cost is the income the lots still held earned in the twelve
+                # months, on those lots' cost.
+                **performance.income_summary(ledger, today),
             }
             out["series_words"] = days.words
             return out

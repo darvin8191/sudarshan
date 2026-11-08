@@ -12,7 +12,8 @@ const LABEL = 'text-xs font-semibold text-muted-foreground'
 export function targetOf(
   note: FreshnessNote,
   assets: readonly Asset[],
-  tabId: number
+  tabId: number,
+  tabVersion: number
 ): PriceTarget {
   const asset = assets.find((a) => a.id === note.asset_id)
   return {
@@ -21,6 +22,7 @@ export function targetOf(
     kind: note.kind === 'nav' ? 'mf' : 'manual',
     unit_label: asset?.unit_label ?? null,
     tab_id: tabId,
+    tab_version: tabVersion,
   }
 }
 

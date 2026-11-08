@@ -21,8 +21,9 @@ export interface PriceTarget {
   kind: AssetKind
   /** A manual asset's unit ("g", "unit"); null for a fund or a loan. */
   unit_label: string | null
-  /** The tab the sheet was opened from: a loan set from it is linked to it. */
+  /** The tab the sheet was opened from, and its version: a loan's balance is set through them. */
   tab_id: number
+  tab_version: number
 }
 
 /** The field's words, by what is being set. */
@@ -93,7 +94,9 @@ export function PriceSheet({
         id: target.asset_id,
         day,
         price_u: price,
-        ...(target.kind === 'liability' ? { tab_id: target.tab_id } : {}),
+        ...(target.kind === 'liability'
+          ? { tab_id: target.tab_id, version: target.tab_version }
+          : {}),
       })
       if (!result.enabled)
         throw new PortfolioError({ code: 'unavailable', message: result.message, entryId: null })

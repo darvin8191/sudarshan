@@ -90,6 +90,8 @@ describe('the Overview', () => {
         name: 'Home loan',
         outstanding_paise: 150_000,
         day: 20260901,
+        state: 'owing' as const,
+        words: null,
         fresh: { state: 'old' as const, words: 'Balance from 1 Sep · 55 days old' },
       },
     ]
@@ -150,6 +152,30 @@ describe('the Overview', () => {
     expect(screen.getByLabelText('Value (₹ per g)')).toBeTruthy()
   })
 
+  it('opens the NAV sheet from an old NAV, not the value sheet, and has no notes on a past day', async () => {
+    const data = view([row(1, 'Alpha', { price: 1_100_000 })])
+    const notes = [
+      {
+        asset_id: 4,
+        name: 'Some Fund',
+        kind: 'nav' as const,
+        words: 'NAV of 21 Oct; AMFI has not published a newer one.',
+        price_day: 20261021,
+      },
+    ]
+    const layout = { ...data.layout, spec: { ...data.layout.spec, widgets: ['summary', 'notes'] } }
+    const { unmount } = show({ ...data, layout, notes })
+    const region = await screen.findByRole('region', { name: 'Notes on prices' })
+    await userEvent.click(within(region).getByRole('button', { name: 'Update Some Fund' }))
+    expect(await screen.findByText('Enter the NAV')).toBeTruthy()
+    expect(screen.getByLabelText('NAV (₹ per unit)')).toBeTruthy()
+    expect(screen.queryByText('Update the value')).toBeNull()
+    unmount()
+    show({ ...data, layout, notes, as_of: 20260912 })
+    await screen.findByRole('region', { name: 'Summary' })
+    expect(screen.queryByRole('region', { name: 'Notes on prices' })).toBeNull()
+  })
+
   it('says every value is current when the Notes widget is on and nothing is old', async () => {
     const data = view([row(1, 'Alpha', { price: 1_100_000 })])
     show({
@@ -171,6 +197,8 @@ describe('the Overview', () => {
           name: 'Home loan',
           outstanding_paise: 150_000,
           day: 20261001,
+          state: 'owing' as const,
+          words: null,
           fresh: { state: 'fresh', words: 'Balance from 1 Oct · 25 days old' },
         },
       ],
@@ -179,6 +207,76 @@ describe('the Overview', () => {
     await userEvent.click(within(loans).getByRole('button', { name: 'Update' }))
     expect(await screen.findByText('Update the balance')).toBeTruthy()
     expect(screen.getByLabelText('Outstanding balance (₹)')).toBeTruthy()
+  })
+
+  it('lists loans that are on no tab and moves one to this tab with its version', async () => {
+    const data = view([row(1, 'Alpha', { price: 1_100_000 })])
+    const loose = {
+      asset_id: 12,
+      name: 'Car loan',
+      outstanding_paise: 400_000,
+      day: 20261102,
+      state: 'owing' as const,
+      words: null,
+      fresh: { state: 'fresh' as const, words: 'Balance from 2 Nov · 8 days old' },
+    }
+    api.call.mockImplementation(async (op: string) => {
+      if (op === 'tab_get') return { enabled: true, data: { ...data, loose_loans: [loose] } }
+      if (op === 'loan_move') return { enabled: true, data: { id: 12 } }
+      throw new Error(`unexpected op ${op}`)
+    })
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <MemoryRouter>
+          <TabOverview tab={tab(2, 'Gold')} part="overview" onAdd={() => {}} onImport={() => {}} />
+        </MemoryRouter>
+      </QueryClientProvider>
+    )
+    const list = await screen.findByRole('list', { name: 'Loans not on a tab' })
+    expect(screen.getAllByText('Loans not on a tab').length).toBeGreaterThan(0)
+    expect(within(list).getByText('Car loan')).toBeTruthy()
+    expect(within(list).getByText(/₹4,000.00/)).toBeTruthy()
+    await userEvent.click(within(list).getByRole('button', { name: 'Move Car loan to a tab' }))
+    await waitFor(() =>
+      expect(api.call).toHaveBeenCalledWith('loan_move', {
+        id: 12,
+        tab_id: data.tab.id,
+        version: data.tab.version,
+      })
+    )
+  })
+
+  it('says the loans are hidden while a filter narrows the tab, and shows loans with words', async () => {
+    const data = view([row(1, 'Alpha', { price: 1_100_000 })])
+    show({ ...data, loans_hidden: true })
+    expect(await screen.findByText(/Loans and net worth are for the whole tab/)).toBeTruthy()
+    show({
+      ...data,
+      liabilities: [
+        {
+          asset_id: 9,
+          name: 'Spare loan',
+          outstanding_paise: 0,
+          day: 20261001,
+          state: 'zero',
+          words: 'Entered at 0, so it lowers nothing. Update the balance once you owe something.',
+          fresh: { state: 'fresh', words: 'Balance from 1 Oct' },
+        },
+        {
+          asset_id: 10,
+          name: 'Car loan',
+          outstanding_paise: 0,
+          day: 20261231,
+          state: 'later',
+          words: 'Its balance starts on 31 Dec. It lowers net worth from that day, not before.',
+          fresh: { state: 'fresh', words: null },
+        },
+      ],
+    })
+    const loans = await screen.findByRole('list', { name: 'Loans' })
+    expect(within(loans).getByText(/Entered at 0, so it lowers nothing/)).toBeTruthy()
+    expect(within(loans).getByText(/Its balance starts on 31 Dec/)).toBeTruthy()
+    expect(within(loans).queryByText('₹0.00')).toBeNull() // no amount drawn for either
   })
 
   it('marks an old NAV with a clock and the word Old', async () => {

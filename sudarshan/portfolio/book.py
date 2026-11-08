@@ -75,6 +75,7 @@ WORDS = {
     "liability": "A loan or liability keeps balances, not entries. Add a balance instead.",
     "loan_tab": "A loan belongs to one of your own portfolios. Open that tab, then add it.",
     "loan_first": "Enter the loan's outstanding balance with a real date.",
+    "loan_not_loan": "Only a loan can be moved to a portfolio.",
     "breakdown": "The charges breakdown must add up to the charges.",
     "draft": "Saved as a draft; it counts nowhere until it is posted.",
     "cursor": "That page of entries is not valid. Open the list again.",
@@ -141,6 +142,31 @@ def _load(tx: Tx, table: str, row_id: int, version: int, word: str = "version_co
     if row["version"] != version:
         raise VersionConflict(word)
     return row
+
+
+def _loan_tab(tx: Tx, tab_id: int, version: int) -> dict:
+    """The tab a loan is written through: the owner's own, not archived, at ``version``."""
+    tab = _load(tx, "tab", tab_id, version, "version_conflict")
+    if tab["system"] or tab["kind"] == "upstox":
+        raise Refused(WORDS["loan_tab"])
+    if tab["archived"]:
+        raise Refused(WORDS["archived"])
+    return tab
+
+
+def _taken_words(tx: Tx, asset: Mapping[str, Any]) -> str:
+    """Why a name is taken, and where the one that has it can be found."""
+    name = asset["name"]
+    if asset["kind"] != "liability":
+        return f"You already have an asset called {name}."
+    tabs = [t for t in (tx.get("tab", i) for i in tx.tabs_of_liability(asset["id"])) if t]
+    if not tabs:
+        return (
+            f"You already have a loan called {name} that is on no portfolio yet. Open the "
+            "Summary of the portfolio it belongs to and choose Move to a tab."
+        )
+    where = tabs[0]["name"] + (" (archived)" if tabs[0]["archived"] else "")
+    return f"You already have a loan called {name}, on the {where} portfolio. Update it there."
 
 
 def _decimals(asset: Mapping[str, Any]) -> int:
@@ -512,6 +538,8 @@ class Book:
                 raise Invalid(WORDS["loan_tab"])
             if first_value is None:
                 raise Invalid(WORDS["loan_first"])
+            if not isinstance(version, int) or isinstance(version, bool):
+                raise Invalid(WORDS["request"])  # every loan write goes through the tab's version
         values: dict[str, Any] = {
             "kind": kind,
             "sector": _text(sector, "the sector", NAME_MAX, required=False),
@@ -562,28 +590,21 @@ class Book:
             if (again := tx.by_request("asset", rid)) is not None:
                 return _with_aliases(tx, again)
             if kind == "liability":
-                tab = (
-                    tx.get("tab", tab_id)
-                    if version is None
-                    else _load(tx, "tab", tab_id, version, "version_conflict")
-                )
-                if tab is None:
-                    raise NotFound()
-                if tab["system"] or tab["kind"] == "upstox":
-                    raise Refused(WORDS["loan_tab"])
-                if tab["archived"]:
-                    raise Refused(WORDS["archived"])
+                _loan_tab(tx, tab_id, version)
             for alias_kind, value in dict.fromkeys(found):
                 if tx.find_alias(alias_kind, value):
                     raise Refused(f"{values['name']} is already in your list.", reason="duplicate")
             if values.get("amfi_code") and tx.rows("asset", amfi_code=values["amfi_code"]):
                 raise Refused(f"{values['name']} is already in your list.", reason="duplicate")
-            if kind in ("manual", "liability") and any(
-                a["name"].casefold() == values["name"].casefold()
-                for a in tx.rows("asset")
-                if a["kind"] in ("manual", "liability")
-            ):
-                raise Refused(f"You already have an asset called {values['name']}.")
+            if kind in ("manual", "liability"):
+                same = [
+                    a
+                    for a in tx.rows("asset")
+                    if a["kind"] in ("manual", "liability")
+                    and a["name"].casefold() == values["name"].casefold()
+                ]
+                if same:
+                    raise Refused(_taken_words(tx, same[0]), reason="duplicate")
             row = tx.insert("asset", values, now, rid)
             for alias_kind, value in dict.fromkeys(found):
                 tx.add_alias(row["id"], alias_kind, value, now)
@@ -591,9 +612,58 @@ class Book:
                 tx.set_price_point(row["id"], first_value["day"], first_value["price_u"], now)
             if kind == "liability":
                 tx.link_liability(tab_id, row["id"], now)
-                if version is not None:
-                    tx.bump_tab(tab_id, version, now)
+                tx.bump_tab(tab_id, version, now)
             return _with_aliases(tx, row)
+
+        return self.store.write(scope, run)
+
+    def loan_move(
+        self, scope: Scope, asset_id: int, tab_id: int, version: int, *, now: int
+    ) -> dict:
+        """Put a loan that is on no portfolio (one entered in v0.5.0, before a loan had a tab) on
+        this one, whose net worth it then lowers. A loan already on a portfolio stays there."""
+
+        def run(tx: Tx):
+            loan = tx.get("asset", asset_id)
+            if loan is None:
+                raise NotFound()
+            if loan["kind"] != "liability":
+                raise Refused(WORDS["loan_not_loan"])
+            _loan_tab(tx, tab_id, version)
+            if tx.tabs_of_liability(asset_id):
+                raise Refused(_taken_words(tx, loan), reason="duplicate")
+            tx.link_liability(tab_id, asset_id, now)
+            tx.bump_tab(tab_id, version, now)
+            return _with_aliases(tx, loan)
+
+        return self.store.write(scope, run)
+
+    def loan_balance_set(
+        self,
+        scope: Scope,
+        asset_id: int,
+        tab_id: int,
+        version: int,
+        day: int,
+        price_u: int,
+        *,
+        now: int,
+    ) -> dict:
+        """A loan's outstanding balance on a day (0 once paid off), set from the portfolio it is on
+        and from that portfolio's version, which then moves: its net worth changed."""
+
+        def run(tx: Tx):
+            loan = tx.get("asset", asset_id)
+            if loan is None:
+                raise NotFound()
+            if loan["kind"] != "liability":
+                raise Refused(WORDS["loan_not_loan"])
+            _loan_tab(tx, tab_id, version)
+            if tab_id not in tx.tabs_of_liability(asset_id):
+                raise Refused(_taken_words(tx, loan), reason="elsewhere")
+            tx.set_price_point(asset_id, day, price_u, now)
+            tx.bump_tab(tab_id, version, now)
+            return {"asset_id": asset_id, "day": day, "price_u": price_u}
 
         return self.store.write(scope, run)
 

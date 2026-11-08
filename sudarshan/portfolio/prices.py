@@ -316,10 +316,13 @@ class PriceBook(Prices):
         eods = tx.rows("price_eod", "day", asset_id=asset["id"])
         last = eods[-1] if eods else None
         if asset["kind"] == "mf":
-            # A NAV the owner entered by hand stands while it is newer than AMFI's (design 4.5).
-            typed = manual_point(tx, asset, today, after_day=last["day"] if last else None)
+            # A NAV the owner entered by hand stands from AMFI's newest day on: the owner's own value
+            # wins on a day, as in the history (Prices.closes), so now and the series agree
+            # (design 4.5). Its previous close is AMFI's last NAV before its day.
+            typed = manual_point(tx, asset, today, from_day=last["day"] if last else None)
             if typed is not None:
-                typed["prev_close_u"] = last["price_u"] if last else None
+                before = [e for e in eods if e["day"] < typed["day"]]
+                typed["prev_close_u"] = before[-1]["price_u"] if before else None
                 return typed
         tick = (
             self._ticks.get(asset.get("instrument_key") or "")

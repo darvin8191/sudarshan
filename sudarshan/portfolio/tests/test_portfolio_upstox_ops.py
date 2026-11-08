@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from portfolio_fakes import FakeUpstox
 from sqlalchemy import insert
@@ -57,6 +59,83 @@ async def test_the_summary_carries_the_upstox_holdings_for_the_dashboard_card(ri
     assert upstox["upstox"]["holdings"][0]["qty_u"] == 10_000_000
     assert upstox["upstox"]["note"] is None
     assert all(e["upstox"] is None for e in data["entries"] if not e["tab"]["system"])
+
+
+def pin(rig):
+    """Pin the rig's tab, so that the summary (the dashboard card) carries it."""
+    rig.book.tab_update(OWNER, rig.tab["id"], rig.version(), {"pinned": True}, now=rig.now)
+
+
+class StuckReader:
+    """A reader whose holdings read waits until the test lets it go (a slow Upstox), then answers
+    as the real one does, or raises (a reader that is broken)."""
+
+    def __init__(self, real, *, fail=False):
+        self.real, self.fail, self.calls, self.go = real, fail, 0, asyncio.Event()
+
+    async def book(self, parts, max_age_s=None):
+        self.calls += 1
+        if self.fail:
+            raise RuntimeError("the reader broke")
+        await self.go.wait()
+        return await self.real.book(parts, max_age_s)
+
+
+@scenario_of
+async def test_a_slow_upstox_leaves_the_card_its_tabs_and_a_row_that_is_still_reading(rig):
+    """MEDIUM-1: the summary answers inside the bridge's time. The owner's tabs are there, the
+    Upstox row says it is still being read (in words about Upstox, never about the service), and a
+    later summary, once the read is done, has the figures."""
+    from sudarshan.portfolio.ops import tab_ops
+
+    pin(rig)
+    tab_ops.UPSTOX_WAIT_S = 0.05
+    stuck = StuckReader(rig.svc.upstox)
+    rig.svc.upstox = stuck
+    try:
+        await slow_summary(rig, stuck)
+    finally:
+        tab_ops.UPSTOX_WAIT_S = 1.0
+        stuck.go.set()
+
+
+async def slow_summary(rig, stuck):
+    from sudarshan.portfolio.ops import tab_ops
+
+    first = (await rig.call("summary"))["data"]
+    names = [e["tab"]["name"] for e in first["entries"]]
+    assert "Upstox" in names and len(names) >= 2  # the tabs are in
+    upstox = next(e for e in first["entries"] if e["tab"]["system"])["upstox"]
+    assert upstox["state"] == "reading" and upstox["holdings"] == [] and upstox["read_at"] is None
+    assert upstox["note"] == tab_ops.UPSTOX_READING
+    assert "not answering" not in upstox["note"] and "service" not in upstox["note"].lower()
+    # A second ask while the read is out joins it: one read, not two.
+    await rig.call("summary")
+    assert stuck.calls == 1
+    stuck.go.set()
+    await asyncio.sleep(0.05)
+    later = (await rig.call("summary"))["data"]
+    done = next(e for e in later["entries"] if e["tab"]["system"])["upstox"]
+    assert done["state"] == "ok" and done["holdings"][0]["qty_u"] == 10_000_000
+
+
+@scenario_of
+async def test_a_reader_that_breaks_gives_the_row_its_sentence_and_the_card_its_tabs(rig):
+    """MEDIUM-1, the failure path: the row says Upstox could not be read; the tabs stay."""
+    from sudarshan.portfolio.ops import tab_ops
+
+    pin(rig)
+    rig.svc.upstox = StuckReader(rig.svc.upstox, fail=True)
+    data = (await rig.call("summary"))["data"]
+    assert len(data["entries"]) >= 2
+    upstox = next(e for e in data["entries"] if e["tab"]["system"])["upstox"]
+    assert upstox == {
+        "state": "unavailable",
+        "read_at": None,
+        "note": tab_ops.UPSTOX_NOT_READ,
+        "holdings": [],
+    }
+    assert "not answering" not in upstox["note"]
 
 
 @scenario_of

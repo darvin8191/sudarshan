@@ -1,10 +1,10 @@
 {
- "about": "Golden vectors for core/performance.income_summary (PN1, M7.29): the last twelve months' income, the yield on cost and the income by financial year. The cost of the current holdings is an input (the ledger's vectors pin it). Every figure is worked out by hand in the case's why; the generator's arithmetic is Decimal, not the code's.",
+ "about": "Golden vectors for core/performance.income_summary (PN1, M7.29): the last twelve months' income, the yield on cost of the lots still held, and the income by financial year. Every figure is worked out by hand in the case's why; the generator derives only the twelve months, the years and the percentage.",
  "cases": [
   {
    "id": "Y1",
    "title": "Twelve months of income on what the holdings cost",
-   "why": "Read on 27 Oct 2026 the twelve months are Nov 2025 to Oct 2026. Dividends of 100.00 on 15 Nov 2025, 150.00 on 15 Feb 2026 and 200.00 on 15 Aug 2026: 450.00 (45000) in the twelve months, on holdings that cost 10,000.00 (1000000): 4.5000%. FY 2025-26 has 250.00 (the Nov and Feb credits) and FY 2026-27 has 200.00.",
+   "why": "10 shares of one stock bought for 10,000.00 (1000000) on 10 Jan 2025 and never sold. Read on 27 Oct 2026 the twelve months are Nov 2025 to Oct 2026. Dividends of 100.00 on 15 Nov 2025, 150.00 on 15 Feb 2026 and 200.00 on 15 Aug 2026 are all earned by the one lot: 450.00 (45000) on its cost of 10,000.00: 4.5000%. FY 2025-26 has 250.00 (the Nov and Feb credits) and FY 2026-27 has 200.00.",
    "entries": [
     {
      "id": 1,
@@ -13,15 +13,16 @@
      "trade_date": 20250110,
      "account_id": 1,
      "asset_id": 1,
-     "amount_paise": 1000000,
-     "qty_u": 10000000
+     "qty_u": 10000000,
+     "amount_paise": 1000000
     },
     {
      "id": 2,
      "seq": 2,
-     "kind": "INTEREST",
+     "kind": "DIVIDEND",
      "trade_date": 20251115,
      "account_id": 1,
+     "asset_id": 1,
      "amount_paise": 10000
     },
     {
@@ -36,16 +37,18 @@
     {
      "id": 4,
      "seq": 4,
-     "kind": "INTEREST",
+     "kind": "DIVIDEND",
      "trade_date": 20260815,
      "account_id": 1,
+     "asset_id": 1,
      "amount_paise": 20000
     }
    ],
    "valuation_day": 20261027,
-   "cost_paise": 1000000,
    "expect": {
     "last_12m_paise": 45000,
+    "held_income_paise": 45000,
+    "held_cost_paise": 1000000,
     "yield_on_cost_pct": "4.5000",
     "by_fy": [
      {
@@ -62,13 +65,76 @@
    }
   },
   {
-   "id": "Y2",
-   "title": "Income a month too early is in its year but not in the twelve months",
-   "why": "Read on 27 Oct 2026 the first of the twelve months is Nov 2025. A dividend of 300.00 on 31 Oct 2025 is a day too early for them and counts in FY 2025-26 only; 120.00 on 1 Nov 2025 is the first day of the twelve. Twelve months: 120.00 (12000) on a cost of 8,000.00: 1.5000%. FY 2025-26: 420.00.",
+   "id": "Y1b",
+   "title": "Interest on no asset is in the twelve months but not in the yield",
+   "why": "The same 10 shares (10,000.00). A dividend of 100.00 on 15 Nov 2025 is earned by the lot; interest of 300.00 on 1 Jun 2026 is on a bank balance, on no asset, so no lot earned it. Twelve months: 400.00 (40000), the total of everything received. Yield: the lot's 100.00 (10000) on 10,000.00: 1.0000%. FY 2025-26 100.00, FY 2026-27 300.00.",
    "entries": [
     {
      "id": 1,
      "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250110,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 1000000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "DIVIDEND",
+     "trade_date": 20251115,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 10000
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "INTEREST",
+     "trade_date": 20260601,
+     "account_id": 1,
+     "amount_paise": 30000
+    }
+   ],
+   "valuation_day": 20261027,
+   "expect": {
+    "last_12m_paise": 40000,
+    "held_income_paise": 10000,
+    "held_cost_paise": 1000000,
+    "yield_on_cost_pct": "1.0000",
+    "by_fy": [
+     {
+      "fy": 2025,
+      "label": "FY 2025-26",
+      "paise": 10000
+     },
+     {
+      "fy": 2026,
+      "label": "FY 2026-27",
+      "paise": 30000
+     }
+    ]
+   }
+  },
+  {
+   "id": "Y2",
+   "title": "Income a month too early is in its year but not in the twelve months",
+   "why": "8 shares bought for 8,000.00 (800000) on 10 Jan 2025. Read on 27 Oct 2026 the first of the twelve months is Nov 2025. A dividend of 300.00 on 31 Oct 2025 is a day too early for them and counts in FY 2025-26 only; 120.00 on 1 Nov 2025 is the first day of the twelve. Twelve months: 120.00 (12000) on a cost of 8,000.00: 1.5000%. FY 2025-26: 420.00.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250110,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 8000000,
+     "amount_paise": 800000
+    },
+    {
+     "id": 2,
+     "seq": 2,
      "kind": "DIVIDEND",
      "trade_date": 20251031,
      "account_id": 1,
@@ -76,18 +142,20 @@
      "amount_paise": 30000
     },
     {
-     "id": 2,
-     "seq": 2,
-     "kind": "INTEREST",
+     "id": 3,
+     "seq": 3,
+     "kind": "DIVIDEND",
      "trade_date": 20251101,
      "account_id": 1,
+     "asset_id": 1,
      "amount_paise": 12000
     }
    ],
    "valuation_day": 20261027,
-   "cost_paise": 800000,
    "expect": {
     "last_12m_paise": 12000,
+    "held_income_paise": 12000,
+    "held_cost_paise": 800000,
     "yield_on_cost_pct": "1.5000",
     "by_fy": [
      {
@@ -101,11 +169,21 @@
   {
    "id": "Y3",
    "title": "Income dated after the valuation day counts nowhere",
-   "why": "Read on 27 Oct 2026: a dividend of 500.00 dated 28 Oct 2026 (a draft the owner dated ahead, or a day in the future when the tab is read as of an earlier day) is in no month and no year. Only the 80.00 of 1 Oct 2026 counts: 0.8000% on 10,000.00.",
+   "why": "10 shares (10,000.00). Read on 27 Oct 2026: a dividend of 500.00 dated 28 Oct 2026 (a draft the owner dated ahead, or a day in the future when the tab is read as of an earlier day) is in no month and no year, and no lot earned it yet. Only the 80.00 of 1 Oct 2026 counts: 0.8000% on 10,000.00.",
    "entries": [
     {
      "id": 1,
      "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250110,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 1000000
+    },
+    {
+     "id": 2,
+     "seq": 2,
      "kind": "DIVIDEND",
      "trade_date": 20261001,
      "account_id": 1,
@@ -113,18 +191,20 @@
      "amount_paise": 8000
     },
     {
-     "id": 2,
-     "seq": 2,
-     "kind": "INTEREST",
+     "id": 3,
+     "seq": 3,
+     "kind": "DIVIDEND",
      "trade_date": 20261028,
      "account_id": 1,
+     "asset_id": 1,
      "amount_paise": 50000
     }
    ],
    "valuation_day": 20261027,
-   "cost_paise": 1000000,
    "expect": {
     "last_12m_paise": 8000,
+    "held_income_paise": 8000,
+    "held_cost_paise": 1000000,
     "yield_on_cost_pct": "0.8000",
     "by_fy": [
      {
@@ -137,23 +217,44 @@
   },
   {
    "id": "Y4",
-   "title": "Nothing held at a cost gives no yield, not a zero",
-   "why": "Every share was sold, so the current holdings cost 0: the 60.00 of income in the twelve months has nothing to be a yield of, and the figure is null. The totals still stand: twelve months 60.00, FY 2026-27 60.00.",
+   "title": "No lot that earned gives no yield, not a zero",
+   "why": "10 shares bought for 10,000.00, a dividend of 60.00 on 1 Jun 2026, then every share sold on 1 Jul 2026 for 11,000.00. No lot is held: the 60.00 in the twelve months has nothing to be a yield of, and the figure is null. The totals still stand: twelve months 60.00, FY 2026-27 60.00.",
    "entries": [
     {
      "id": 1,
      "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250110,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 1000000
+    },
+    {
+     "id": 2,
+     "seq": 2,
      "kind": "DIVIDEND",
      "trade_date": 20260601,
      "account_id": 1,
      "asset_id": 1,
      "amount_paise": 6000
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "SELL",
+     "trade_date": 20260701,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 1100000
     }
    ],
    "valuation_day": 20261027,
-   "cost_paise": 0,
    "expect": {
     "last_12m_paise": 6000,
+    "held_income_paise": 0,
+    "held_cost_paise": 0,
     "yield_on_cost_pct": null,
     "by_fy": [
      {
@@ -166,12 +267,22 @@
   },
   {
    "id": "Y5",
-   "title": "The percentage is rounded half away from zero at the fourth decimal",
-   "why": "Income of 1.00 (100) on a cost of 3,000.00 (300000): 100 x 100 / 300000 = 0.033333...%, written 0.0333. Income of 2.00 on 300.00 is 0.666666...%, written 0.6667 (the vector Y5b).",
+   "title": "The percentage is rounded half away from zero at the fourth decimal (down)",
+   "why": "30 shares for 3,000.00 (300000) and income of 1.00 (100): 100 x 100 / 300000 = 0.033333...%, written 0.0333. Y5b rounds up and Y5c is exactly on a half.",
    "entries": [
     {
      "id": 1,
      "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250110,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 30000000,
+     "amount_paise": 300000
+    },
+    {
+     "id": 2,
+     "seq": 2,
      "kind": "DIVIDEND",
      "trade_date": 20260601,
      "account_id": 1,
@@ -180,9 +291,10 @@
     }
    ],
    "valuation_day": 20261027,
-   "cost_paise": 300000,
    "expect": {
     "last_12m_paise": 100,
+    "held_income_paise": 100,
+    "held_cost_paise": 300000,
     "yield_on_cost_pct": "0.0333",
     "by_fy": [
      {
@@ -196,11 +308,21 @@
   {
    "id": "Y5b",
    "title": "The percentage is rounded half away from zero at the fourth decimal (up)",
-   "why": "Income of 2.00 (200) on a cost of 300.00 (30000): 0.666666...%, written 0.6667.",
+   "why": "3 shares for 300.00 (30000) and income of 2.00 (200): 0.666666...%, written 0.6667.",
    "entries": [
     {
      "id": 1,
      "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250110,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 3000000,
+     "amount_paise": 30000
+    },
+    {
+     "id": 2,
+     "seq": 2,
      "kind": "DIVIDEND",
      "trade_date": 20260601,
      "account_id": 1,
@@ -209,9 +331,10 @@
     }
    ],
    "valuation_day": 20261027,
-   "cost_paise": 30000,
    "expect": {
     "last_12m_paise": 200,
+    "held_income_paise": 200,
+    "held_cost_paise": 30000,
     "yield_on_cost_pct": "0.6667",
     "by_fy": [
      {
@@ -223,13 +346,63 @@
    }
   },
   {
-   "id": "Y6",
-   "title": "Read in April: the twelve months straddle two financial years",
-   "why": "Read on 10 Apr 2026 the twelve months are May 2025 to Apr 2026. Interest of 1,000.00 on 30 Apr 2025 is a month too early; 2,000.00 on 31 May 2025 and 3,000.00 on 31 Mar 2026 are FY 2025-26; 4,000.00 on 1 Apr 2026 is FY 2026-27. Twelve months: 9,000.00 (900000) on 1,00,000.00: 9.0000%. By year: FY 2025-26 6,000.00, FY 2026-27 4,000.00.",
+   "id": "Y5c",
+   "title": "Exactly on a half the percentage goes away from zero",
+   "why": "16 shares for 160.00 (16000) and income of 0.01 (1 paise): 1 x 100 / 16000 = 0.00625% exactly, which half away from zero writes as 0.0063 (not 0.0062).",
    "entries": [
     {
      "id": 1,
      "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250110,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 16000000,
+     "amount_paise": 16000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "DIVIDEND",
+     "trade_date": 20260601,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 1
+    }
+   ],
+   "valuation_day": 20261027,
+   "expect": {
+    "last_12m_paise": 1,
+    "held_income_paise": 1,
+    "held_cost_paise": 16000,
+    "yield_on_cost_pct": "0.0063",
+    "by_fy": [
+     {
+      "fy": 2026,
+      "label": "FY 2026-27",
+      "paise": 1
+     }
+    ]
+   }
+  },
+  {
+   "id": "Y6",
+   "title": "Read in April: the twelve months straddle two financial years",
+   "why": "100 shares for 1,00,000.00 (10000000). Read on 10 Apr 2026 the twelve months are May 2025 to Apr 2026. A dividend of 1,000.00 on 30 Apr 2025 is a month too early. 2,000.00 on 31 May 2025 and 3,000.00 on 31 Mar 2026 are in the twelve months, and so is 4,000.00 on 1 Apr 2026 (the first day of FY 2026-27). Twelve months: 9,000.00 (900000) on 1,00,000.00: 9.0000%. By year: FY 2025-26 has 1,000.00 + 2,000.00 + 3,000.00 = 6,000.00 and FY 2026-27 has 4,000.00.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250110,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 100000000,
+     "amount_paise": 10000000
+    },
+    {
+     "id": 2,
+     "seq": 2,
      "kind": "DIVIDEND",
      "trade_date": 20250430,
      "account_id": 1,
@@ -237,16 +410,17 @@
      "amount_paise": 100000
     },
     {
-     "id": 2,
-     "seq": 2,
-     "kind": "INTEREST",
+     "id": 3,
+     "seq": 3,
+     "kind": "DIVIDEND",
      "trade_date": 20250531,
      "account_id": 1,
+     "asset_id": 1,
      "amount_paise": 200000
     },
     {
-     "id": 3,
-     "seq": 3,
+     "id": 4,
+     "seq": 4,
      "kind": "DIVIDEND",
      "trade_date": 20260331,
      "account_id": 1,
@@ -254,18 +428,20 @@
      "amount_paise": 300000
     },
     {
-     "id": 4,
-     "seq": 4,
-     "kind": "INTEREST",
+     "id": 5,
+     "seq": 5,
+     "kind": "DIVIDEND",
      "trade_date": 20260401,
      "account_id": 1,
+     "asset_id": 1,
      "amount_paise": 400000
     }
    ],
    "valuation_day": 20260410,
-   "cost_paise": 10000000,
    "expect": {
     "last_12m_paise": 900000,
+    "held_income_paise": 900000,
+    "held_cost_paise": 10000000,
     "yield_on_cost_pct": "9.0000",
     "by_fy": [
      {
@@ -284,7 +460,7 @@
   {
    "id": "Y7",
    "title": "No income at all",
-   "why": "A tab with a purchase and no dividend or interest: twelve months 0, yield 0.0000% on its cost (there is a cost, and the income on it is nothing), and no year row at all.",
+   "why": "A tab with a purchase and no dividend or interest: twelve months 0, no lot earned anything so none is in the divisor and the yield is null, and no year row at all.",
    "entries": [
     {
      "id": 1,
@@ -293,16 +469,561 @@
      "trade_date": 20250110,
      "account_id": 1,
      "asset_id": 1,
-     "amount_paise": 1000000,
-     "qty_u": 10000000
+     "qty_u": 10000000,
+     "amount_paise": 1000000
     }
    ],
    "valuation_day": 20261027,
-   "cost_paise": 1000000,
    "expect": {
     "last_12m_paise": 0,
-    "yield_on_cost_pct": "0.0000",
+    "held_income_paise": 0,
+    "held_cost_paise": 0,
+    "yield_on_cost_pct": null,
     "by_fy": []
+   }
+  },
+  {
+   "id": "Y8",
+   "title": "Sold 90 of 100: the dividend on the 90 sold is not a yield on the 10 kept",
+   "why": "100 shares bought for 10,000.00 (1000000) on 10 Jan 2026. A dividend of Rs 5 a share, 500.00 (50000), on 14 Aug 2026 is paid on all 100. On 1 Oct 2026 90 are sold for 9,900.00: first in first out, the one lot gives up 90/100 of its cost (900000) and 90/100 of its income (45000). Left: 10 shares costing 100000 with 5000 of the dividend, which is Rs 5 a share on Rs 100 a share: 5000 / 100000 = 5.0000%, not the 50% of 50000 on 100000. The twelve months still say 500.00 was received.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260110,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 100000000,
+     "amount_paise": 1000000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "DIVIDEND",
+     "trade_date": 20260814,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 50000
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "SELL",
+     "trade_date": 20261001,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 90000000,
+     "amount_paise": 990000
+    }
+   ],
+   "valuation_day": 20261027,
+   "expect": {
+    "last_12m_paise": 50000,
+    "held_income_paise": 5000,
+    "held_cost_paise": 100000,
+    "yield_on_cost_pct": "5.0000",
+    "by_fy": [
+     {
+      "fy": 2026,
+      "label": "FY 2026-27",
+      "paise": 50000
+     }
+    ]
+   }
+  },
+  {
+   "id": "Y9",
+   "title": "A dividend payer sold and gold bought: the gold pays nothing",
+   "why": "100 shares bought for 10,000.00 on 10 Jan 2026, a dividend of 800.00 (80000) on 14 Aug 2026, all 100 sold on 1 Oct 2026 for 10,500.00, and 10 g of gold bought for 1,000.00 (100000) on 2 Oct 2026. The only lot held is the gold's and it earned nothing, so it is not in the divisor: no yield (null), not 0. The 800.00 is still in the twelve months' total.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260110,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 100000000,
+     "amount_paise": 1000000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "DIVIDEND",
+     "trade_date": 20260814,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 80000
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "SELL",
+     "trade_date": 20261001,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 100000000,
+     "amount_paise": 1050000
+    },
+    {
+     "id": 4,
+     "seq": 4,
+     "kind": "BUY",
+     "trade_date": 20261002,
+     "account_id": 1,
+     "asset_id": 2,
+     "qty_u": 10000000,
+     "amount_paise": 100000
+    }
+   ],
+   "valuation_day": 20261027,
+   "expect": {
+    "last_12m_paise": 80000,
+    "held_income_paise": 0,
+    "held_cost_paise": 0,
+    "yield_on_cost_pct": null,
+    "by_fy": [
+     {
+      "fy": 2026,
+      "label": "FY 2026-27",
+      "paise": 80000
+     }
+    ]
+   }
+  },
+  {
+   "id": "Y10",
+   "title": "A sale takes the oldest lot first and its income with it",
+   "why": "Lot A: 50 shares for 5,000.00 (500000) on 1 Feb 2026. Lot B: 50 shares for 7,000.00 (700000) on 1 Mar 2026. A dividend of 200.00 (20000), Rs 2 a share, on 14 Aug 2026 on all 100: 10000 to A and 10000 to B. On 1 Oct 2026 70 shares are sold for 9,000.00: all of A and 20 of B. B keeps 30 of its 50: cost 700000 x 30/50 = 420000, income 10000 x 30/50 = 6000. 6000 / 420000 = 1.428571...%, written 1.4286.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260201,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 50000000,
+     "amount_paise": 500000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "BUY",
+     "trade_date": 20260301,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 50000000,
+     "amount_paise": 700000
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "DIVIDEND",
+     "trade_date": 20260814,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 20000
+    },
+    {
+     "id": 4,
+     "seq": 4,
+     "kind": "SELL",
+     "trade_date": 20261001,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 70000000,
+     "amount_paise": 900000
+    }
+   ],
+   "valuation_day": 20261027,
+   "expect": {
+    "last_12m_paise": 20000,
+    "held_income_paise": 6000,
+    "held_cost_paise": 420000,
+    "yield_on_cost_pct": "1.4286",
+    "by_fy": [
+     {
+      "fy": 2026,
+      "label": "FY 2026-27",
+      "paise": 20000
+     }
+    ]
+   }
+  },
+  {
+   "id": "Y11",
+   "title": "A lot bought after the last income is not in the divisor until it earns",
+   "why": "100 shares bought for 10,000.00 (1000000) on 10 Jan 2026 earn a dividend of 500.00 (50000) on 14 Aug 2026. Another 100 are bought for 12,000.00 (1200000) on 1 Oct 2026 and earned none of it, so only the first lot counts: income 50000 on cost 1000000 = 5.0000% (not 50000 / 2200000 = 2.2727%).",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260110,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 100000000,
+     "amount_paise": 1000000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "DIVIDEND",
+     "trade_date": 20260814,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 50000
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "BUY",
+     "trade_date": 20261001,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 100000000,
+     "amount_paise": 1200000
+    }
+   ],
+   "valuation_day": 20261027,
+   "expect": {
+    "last_12m_paise": 50000,
+    "held_income_paise": 50000,
+    "held_cost_paise": 1000000,
+    "yield_on_cost_pct": "5.0000",
+    "by_fy": [
+     {
+      "fy": 2026,
+      "label": "FY 2026-27",
+      "paise": 50000
+     }
+    ]
+   }
+  },
+  {
+   "id": "Y16",
+   "title": "A lot that earned one of two dividends counts with its whole cost",
+   "why": "Lot A: 100 shares for 10,000.00 (1000000) on 10 Jan 2026. A dividend of 300.00 (30000) on 14 Feb 2026 is all A's. Lot B: 100 shares for 12,000.00 (1200000) on 1 Mar 2026. A dividend of 400.00 (40000) on 14 Aug 2026 is shared 200.00 (20000) each. A earned 30000 + 20000 = 50000, B earned 20000 (one of the two dividends) and counts with its whole cost: income 70000 on 1000000 + 1200000 = 2200000: 3.181818...%, written 3.1818. Lot C, 50 shares for 6,000.00 (600000) on 1 Oct 2026, was bought after both dividends and is not in the divisor (with it the figure would be 70000 / 2800000 = 2.5%).",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260110,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 100000000,
+     "amount_paise": 1000000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "DIVIDEND",
+     "trade_date": 20260214,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 30000
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "BUY",
+     "trade_date": 20260301,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 100000000,
+     "amount_paise": 1200000
+    },
+    {
+     "id": 4,
+     "seq": 4,
+     "kind": "DIVIDEND",
+     "trade_date": 20260814,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 40000
+    },
+    {
+     "id": 5,
+     "seq": 5,
+     "kind": "BUY",
+     "trade_date": 20261001,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 50000000,
+     "amount_paise": 600000
+    }
+   ],
+   "valuation_day": 20261027,
+   "expect": {
+    "last_12m_paise": 70000,
+    "held_income_paise": 70000,
+    "held_cost_paise": 2200000,
+    "yield_on_cost_pct": "3.1818",
+    "by_fy": [
+     {
+      "fy": 2025,
+      "label": "FY 2025-26",
+      "paise": 30000
+     },
+     {
+      "fy": 2026,
+      "label": "FY 2026-27",
+      "paise": 40000
+     }
+    ]
+   }
+  },
+  {
+   "id": "Y17",
+   "title": "A lot that earned only before the twelve months is not in the divisor",
+   "why": "10 shares for 10,000.00 bought on 10 Jan 2025 earned a dividend of 100.00 (10000) on 31 Oct 2025, a day before the twelve months that end on 27 Oct 2026 begin (Nov 2025). Nothing was credited in the window, so no lot counts: twelve months 0, yield null. FY 2025-26 keeps the 100.00.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250110,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 1000000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "DIVIDEND",
+     "trade_date": 20251031,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 10000
+    }
+   ],
+   "valuation_day": 20261027,
+   "expect": {
+    "last_12m_paise": 0,
+    "held_income_paise": 0,
+    "held_cost_paise": 0,
+    "yield_on_cost_pct": null,
+    "by_fy": [
+     {
+      "fy": 2025,
+      "label": "FY 2025-26",
+      "paise": 10000
+     }
+    ]
+   }
+  },
+  {
+   "id": "Y12",
+   "title": "A transfer between accounts moves the income with the units",
+   "why": "100 shares in account 1 bought for 10,000.00 (1000000) on 10 Jan 2026; a dividend of 500.00 (50000) on 14 Aug 2026; on 1 Sep 2026 40 shares move to account 2. Account 1 keeps 60: cost 600000, income 30000. Account 2 holds 40: cost 400000, income 20000. Together 50000 on 1000000: 5.0000%.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260110,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 100000000,
+     "amount_paise": 1000000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "DIVIDEND",
+     "trade_date": 20260814,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 50000
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "TRANSFER",
+     "trade_date": 20260901,
+     "account_id": 1,
+     "to_account_id": 2,
+     "asset_id": 1,
+     "qty_u": 40000000
+    }
+   ],
+   "valuation_day": 20261027,
+   "expect": {
+    "last_12m_paise": 50000,
+    "held_income_paise": 50000,
+    "held_cost_paise": 1000000,
+    "yield_on_cost_pct": "5.0000",
+    "by_fy": [
+     {
+      "fy": 2026,
+      "label": "FY 2026-27",
+      "paise": 50000
+     }
+    ]
+   }
+  },
+  {
+   "id": "Y13",
+   "title": "A split changes the units, not the income or the cost",
+   "why": "100 shares for 10,000.00 (1000000), a dividend of 500.00 (50000) on 14 Aug 2026, then a 2-for-1 split on 1 Oct 2026: 200 shares at the same cost, and the lot's income unchanged: 50000 / 1000000 = 5.0000%.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260110,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 100000000,
+     "amount_paise": 1000000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "DIVIDEND",
+     "trade_date": 20260814,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 50000
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "SPLIT",
+     "trade_date": 20261001,
+     "account_id": 1,
+     "asset_id": 1,
+     "ratio_num": 2,
+     "ratio_den": 1
+    }
+   ],
+   "valuation_day": 20261027,
+   "expect": {
+    "last_12m_paise": 50000,
+    "held_income_paise": 50000,
+    "held_cost_paise": 1000000,
+    "yield_on_cost_pct": "5.0000",
+    "by_fy": [
+     {
+      "fy": 2026,
+      "label": "FY 2026-27",
+      "paise": 50000
+     }
+    ]
+   }
+  },
+  {
+   "id": "Y14",
+   "title": "Income shared among lots in whole paise, the leftover to the largest remainder",
+   "why": "Three lots of 1 share (cost 100.00, 10000, each) on 10, 11 and 12 Jan 2026. A dividend of 1.00 (100 paise) on 14 Aug 2026 is shared 33, 33, 33 with 1 paise left; the three remainders tie, so the oldest lot takes it: 34, 33, 33. On 1 Oct 2026 1 share is sold for 120.00: the oldest lot, and its 34 with it. Held: two lots, income 33 + 33 = 66, cost 20000: 66 x 100 / 20000 = 0.33%, written 0.3300. (Had the leftover gone to the newest lot it would be 67 and 0.3350.)",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20260110,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 1000000,
+     "amount_paise": 10000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "BUY",
+     "trade_date": 20260111,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 1000000,
+     "amount_paise": 10000
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "BUY",
+     "trade_date": 20260112,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 1000000,
+     "amount_paise": 10000
+    },
+    {
+     "id": 4,
+     "seq": 4,
+     "kind": "DIVIDEND",
+     "trade_date": 20260814,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 100
+    },
+    {
+     "id": 5,
+     "seq": 5,
+     "kind": "SELL",
+     "trade_date": 20261001,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 1000000,
+     "amount_paise": 12000
+    }
+   ],
+   "valuation_day": 20261027,
+   "expect": {
+    "last_12m_paise": 100,
+    "held_income_paise": 66,
+    "held_cost_paise": 20000,
+    "yield_on_cost_pct": "0.3300",
+    "by_fy": [
+     {
+      "fy": 2026,
+      "label": "FY 2026-27",
+      "paise": 100
+     }
+    ]
+   }
+  },
+  {
+   "id": "Y15",
+   "title": "Income dated on the valuation day itself counts",
+   "why": "10 shares (10,000.00). Read on 27 Oct 2026 a dividend of 90.00 (9000) dated 27 Oct 2026 is in the twelve months (the day is not after the valuation day) and in FY 2026-27, and the lot held on it earned it: 9000 / 1000000 = 0.9000%.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250110,
+     "account_id": 1,
+     "asset_id": 1,
+     "qty_u": 10000000,
+     "amount_paise": 1000000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "DIVIDEND",
+     "trade_date": 20261027,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 9000
+    }
+   ],
+   "valuation_day": 20261027,
+   "expect": {
+    "last_12m_paise": 9000,
+    "held_income_paise": 9000,
+    "held_cost_paise": 1000000,
+    "yield_on_cost_pct": "0.9000",
+    "by_fy": [
+     {
+      "fy": 2026,
+      "label": "FY 2026-27",
+      "paise": 9000
+     }
+    ]
    }
   }
  ]

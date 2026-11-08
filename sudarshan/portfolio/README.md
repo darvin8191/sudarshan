@@ -97,8 +97,8 @@ owner data (`PortfolioHealth`).
 ### Arguments
 
 - `id` is the number in the route (`/tabs/<id>`). On `activity_update`, `activity_delete` it is the
-  entry; on `import_commit` and `import_discard` the batch; on `asset_update` and
-  `price_point_set` the asset; on the routes under `/tabs/<id>` the tab.
+  entry; on `import_commit` and `import_discard` the batch; on `asset_update`,
+  `price_point_set` and `loan_move` the asset; on the routes under `/tabs/<id>` the tab.
 - A GET's other arguments come from the query string, read as the *query* column says. `day` is
   `YYYYMMDD`; `ints` and `strs` are comma-separated lists.
 - Every other op takes a JSON body of at most 64 KiB.
@@ -170,7 +170,8 @@ two types, and a test holds this table, that map and `kinds.py` to each other.
 | `activity_delete` | DELETE | `/activities/<id>` | write | | `ActivityDeleteArgs` | `ActivityDeleted` | |
 | `asset_create` | POST | `/assets` | write | | `AssetCreateArgs` | `Asset` | |
 | `asset_update` | PATCH | `/assets/<id>` | write | | `AssetUpdateArgs` | `Asset` | |
-| `price_point_set` | POST | `/assets/<id>/prices` | write | | `PricePointSetArgs` | `PricePoint` | a manual value or a liability's balance |
+| `price_point_set` | POST | `/assets/<id>/prices` | write | | `PricePointSetArgs` | `PricePoint` | a manual value, a fund's NAV or a liability's balance |
+| `loan_move` | POST | `/assets/<id>/tab` | write | | `LoanMoveArgs` | `Asset` | a loan on no tab (made in v0.5.0) joins one |
 | `mf_search` | GET | `/mf/search` | read | `q:str, limit:int` | `MfSearchArgs` | `MfSearch` | |
 | `account_create` | POST | `/accounts` | write | | `AccountCreateArgs` | `Account` | |
 | `account_update` | PATCH | `/accounts/<id>` | write | | `AccountUpdateArgs` | `Account` | |

@@ -361,6 +361,7 @@ export const OPS: readonly OpSpec[] = [
   { name: 'asset_create', method: 'POST', route: '/assets', cls: 'write' },
   { name: 'asset_update', method: 'PATCH', route: '/assets/<id>', cls: 'write' },
   { name: 'price_point_set', method: 'POST', route: '/assets/<id>/prices', cls: 'write' },
+  { name: 'loan_move', method: 'POST', route: '/assets/<id>/tab', cls: 'write' },
   {
     name: 'mf_search',
     method: 'GET',
@@ -742,11 +743,17 @@ export interface FreshnessNote {
   price_day: Day | null
 }
 
+/**
+ * `owing`: a balance to subtract. `zero`: entered at 0, owing nothing. `later`: its balance starts
+ * on `day`, after the day shown. For the last two `words` says what that means.
+ */
 export interface Liability {
   asset_id: number
   name: string
   outstanding_paise: Paise
   day: Day
+  state: 'owing' | 'zero' | 'later'
+  words: string | null
   fresh: Freshness
 }
 
@@ -815,6 +822,10 @@ export interface TabView extends TabLive {
   /** Every asset the tab's entries name, sold out ones too. */
   assets: Asset[]
   liabilities: Liability[]
+  /** True when a filter on a part of the tab hides loans that belong to the whole of it. */
+  loans_hidden: boolean
+  /** Loans on no tab (entered in v0.5.0), each of which can be moved to this one. */
+  loose_loans: Liability[]
   allocation: Record<AllocationBy, AllocationRow[]>
   notes: FreshnessNote[]
   layout: LayoutState
@@ -890,8 +901,11 @@ export interface IncomeReport {
   by_month: MonthIncome[]
   /** The twelve months by_month lists, added up. */
   last_12m_paise: Paise
-  /** The last twelve months' income on what the current holdings cost; null when nothing is
-   *  held at a cost (never 0 in its place). */
+  /** The part of that income the lots still held earned, and what the lots that earned it cost. */
+  held_income_paise: Paise
+  held_cost_paise: Paise
+  /** `held_income_paise` on `held_cost_paise`; null when no lot held earned anything in the twelve months (never 0 in
+   *  its place). Income that went with units since sold, and interest on no asset, are not in it. */
   yield_on_cost_pct: Pct | null
   /** Oldest first; only years with income. */
   by_fy: IncomeYear[]
@@ -1115,7 +1129,10 @@ export interface PortfolioState {
 }
 
 export interface UpstoxSummary {
-  state: PartState
+  /** `reading`: the service answered with the tabs and Upstox is still being read; the phone asks
+   *  `upstox_book` for the figures. */
+  state: PartState | 'reading'
+  /** When the figures were read; null when they were not (state `reading` or `unavailable`). */
   read_at: EpochMs | null
   note: string | null
   /** The rows to move with ticks. */
@@ -1257,8 +1274,15 @@ export interface PricePointSetArgs extends Targets {
   day: Day
   /** A loan's balance may be 0 (paid off); a value kept by hand is above zero. */
   price_u: PriceU
-  /** A loan set from a tab is linked to it (one made before M7.19 V2 has no tab yet). */
+  /** A loan's balance is set from the tab it is on, at that tab's version (M7.19 V2). */
   tab_id?: number
+  version?: number
+}
+
+/** `id` is a loan that is on no tab (one entered in v0.5.0); it joins `tab_id`. */
+export interface LoanMoveArgs extends Targets {
+  tab_id: number
+  version: number
 }
 
 export interface MfSearchArgs {
@@ -1477,6 +1501,7 @@ export interface PortfolioOps {
   asset_create: { args: AssetCreateArgs; data: Asset }
   asset_update: { args: AssetUpdateArgs; data: Asset }
   price_point_set: { args: PricePointSetArgs; data: PricePoint }
+  loan_move: { args: LoanMoveArgs; data: Asset }
   mf_search: { args: MfSearchArgs; data: MfSearch }
   account_create: { args: AccountCreateArgs; data: Account }
   account_update: { args: AccountUpdateArgs; data: Account }

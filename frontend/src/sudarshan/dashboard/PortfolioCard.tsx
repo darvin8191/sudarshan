@@ -5,7 +5,7 @@
 // subscription over the union of the rows' listed instruments, at most LIVE_CAP of them (R4),
 // moves every row with every tick. The Upstox row is labelled as the real account in Analyze
 // mode, because the sandbox has no portfolio of its own. "See all" goes to /portfolio.
-import { ChevronRight } from 'lucide-react'
+import { ChevronRight, LoaderCircle } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { cn } from '@/lib/utils'
@@ -14,6 +14,7 @@ import { type FeedRow, useBookFeed } from '@/sudarshan/books/feed'
 import { useBookSync, useLatestRead } from '@/sudarshan/books/useBookSync'
 import { useFrameLines } from '@/sudarshan/live/useFrameLines'
 import { portfolioCall } from '@/sudarshan/portfolio/api'
+import { clockOfInstant } from '@/sudarshan/portfolio/days'
 import {
   LIVE_CAP,
   liveInstruments,
@@ -23,7 +24,12 @@ import {
 } from '@/sudarshan/portfolio/liveTab'
 import { Signed } from '@/sudarshan/portfolio/Signed'
 import { rupeesText } from '@/sudarshan/portfolio/tab/format'
-import type { PortfolioSummary, SummaryEntry } from '@/sudarshan/portfolio/types'
+import type {
+  PortfolioSummary,
+  SummaryEntry,
+  UpstoxBook,
+  UpstoxSummary,
+} from '@/sudarshan/portfolio/types'
 import { holdingNow, holdingsTotals } from '@/sudarshan/portfolio/upstox/live'
 import { LiveLine } from './LiveLine'
 import { keyOf, type MarketOpen } from './live'
@@ -44,6 +50,31 @@ export interface CardRow {
   gainPaise: number
   gainPct: string | null
   stale: boolean
+  /**
+   * `ok`: figures. `reading`: the Upstox part is still being read, so no figure at all. `unread`:
+   * it could not be read, so the value, Today and Overall are the words "Not read", never 0.
+   */
+  status: 'ok' | 'reading' | 'unread'
+  /** For an unread Upstox row: when it was last read well, or that it has not been. */
+  lastGood: string | null
+}
+
+/** The words for an Upstox part that could not be read: its own sentence, never a guess. */
+export const NOT_READ = 'Not read'
+export const READING_LINE = 'Upstox account: reading'
+/** Said when the fill-in read fails: about Upstox, never about the portfolio service. */
+export const FILL_FAILED = 'Upstox did not answer in time. Open Portfolio to try again.'
+
+/** The Upstox row of the summary, from the part `upstox_book` answered. */
+export function fromBook(book: UpstoxBook): UpstoxSummary {
+  const part = book.holdings
+  if (!part) return { state: 'unavailable', read_at: null, note: FILL_FAILED, holdings: [] }
+  return {
+    state: part.state,
+    read_at: part.read_at,
+    note: part.note,
+    holdings: part.data ?? [],
+  }
 }
 
 /** The entries the card shows: the Upstox tab first, then the pinned custom tabs, at most four. */
@@ -75,7 +106,8 @@ export function rowsOf(
   entries: readonly SummaryEntry[],
   ticks: ReadonlyMap<string, Tick>,
   readAt: number,
-  analyze: boolean
+  analyze: boolean,
+  lastGoodAt: number | null = null
 ): CardRow[] {
   const out: CardRow[] = []
   for (const entry of entries) {
@@ -90,24 +122,33 @@ export function rowsOf(
         )
       )
       const totals = holdingsTotals(now)
+      const reading = part?.state === 'reading'
       const unread = !part || part.state === 'unavailable'
+      const lastGood = part?.read_at ?? lastGoodAt
       out.push({
         key: `upstox-${entry.tab.id}`,
         name: analyze ? 'Upstox account (real)' : entry.tab.name,
-        note: part?.note ?? null,
+        note: reading ? null : (part?.note ?? null),
         valuePaise: totals.valuePaise,
-        todayPaise: unread ? null : totals.todayPaise,
+        todayPaise: unread || reading ? null : totals.todayPaise,
         todayPct: null, // the Upstox tab shows Today in rupees alone, as its own figure
-        todayWords: unread
-          ? null
-          : totals.todayPaise === null
-            ? 'Today: not known yet'
-            : totals.todayUnknown > 0
-              ? `${totals.todayUnknown} without a previous close`
-              : null,
+        todayWords:
+          unread || reading
+            ? null
+            : totals.todayPaise === null
+              ? 'Today: not known yet'
+              : totals.todayUnknown > 0
+                ? `${totals.todayUnknown} without a previous close`
+                : null,
         gainPaise: totals.pnlPaise,
         gainPct: totals.pnlPct,
         stale: part?.state === 'stale',
+        status: reading ? 'reading' : unread ? 'unread' : 'ok',
+        lastGood: unread
+          ? lastGood === null
+            ? 'No good read yet'
+            : `Last good read ${clockOfInstant(lastGood)}`
+          : null,
       })
       continue
     }
@@ -133,6 +174,8 @@ export function rowsOf(
       gainPaise: moved.totals.overall_gain_paise,
       gainPct: moved.totals.absolute_return_pct,
       stale: false,
+      status: 'ok',
+      lastGood: null,
     })
   }
   return out
@@ -170,7 +213,42 @@ export function PortfolioCard({ marketOpen = NOT_KNOWN }: { marketOpen?: MarketO
     load()
   }, [load])
   useBookSync(load, { events: [], resyncMs: null })
-  const entries = useMemo(() => entriesShown(summary?.entries ?? []), [summary])
+  // The Upstox row may come back `reading` (Upstox was slow, the service did not wait for it):
+  // the card shows the tabs at once and asks for the Upstox figures here, with the time Upstox is
+  // given. A read that fails says so in words about Upstox, not about the service.
+  const [fill, setFill] = useState<UpstoxSummary | null>(null)
+  const reading = summary?.entries.some((e) => e.tab.system && e.upstox?.state === 'reading')
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new summary that is still reading asks again
+  useEffect(() => {
+    if (!reading) return
+    setFill(null)
+    let current = true
+    const fail: UpstoxSummary = {
+      state: 'unavailable',
+      read_at: null,
+      note: FILL_FAILED,
+      holdings: [],
+    }
+    portfolioCall('upstox_book', { parts: ['holdings'] })
+      .then((result) => current && setFill(result.enabled ? fromBook(result.data) : fail))
+      .catch(() => current && setFill(fail))
+    return () => {
+      current = false
+    }
+  }, [reading, summary])
+  const entries = useMemo(() => {
+    const shown = entriesShown(summary?.entries ?? [])
+    if (!fill || !reading) return shown
+    return shown.map((e) =>
+      e.tab.system && e.upstox?.state === 'reading' ? { ...e, upstox: fill } : e
+    )
+  }, [summary, fill, reading])
+  // The newest good read of the Upstox account this page has seen, for a row that later is not read.
+  const lastGood = useRef<number | null>(null)
+  for (const e of entries) {
+    if (e.tab.system && e.upstox?.state === 'ok' && e.upstox.read_at !== null)
+      lastGood.current = e.upstox.read_at
+  }
   const instruments = useMemo(() => instrumentsOf(entries), [entries])
   const { lines, feed } = useFrameLines({
     instruments,
@@ -191,7 +269,14 @@ export function PortfolioCard({ marketOpen = NOT_KNOWN }: { marketOpen?: MarketO
   }, [lines, instruments])
 
   const rows = useMemo(
-    () => rowsOf(entries, ticks, summary?.read_at ?? Number.MAX_SAFE_INTEGER, analyze),
+    () =>
+      rowsOf(
+        entries,
+        ticks,
+        summary?.read_at ?? Number.MAX_SAFE_INTEGER,
+        analyze,
+        lastGood.current
+      ),
     [entries, ticks, summary, analyze]
   )
   const feedRows: FeedRow[] = useMemo(
@@ -249,6 +334,29 @@ export function PortfolioCard({ marketOpen = NOT_KNOWN }: { marketOpen?: MarketO
       >
         {rows.map((row) => {
           const stale = allStale || row.stale
+          if (row.status === 'reading')
+            return (
+              <li key={row.key} className="flex flex-col gap-px py-2">
+                <span className="truncate text-[0.9375rem] font-semibold">{row.name}</span>
+                <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-[color:var(--text-secondary)]">
+                  <LoaderCircle aria-hidden="true" className="size-3.5 shrink-0 animate-spin" />
+                  {READING_LINE}
+                </span>
+              </li>
+            )
+          if (row.status === 'unread')
+            return (
+              <li key={row.key} className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-px py-2">
+                <span className="truncate text-[0.9375rem] font-semibold">{row.name}</span>
+                <span className="text-right text-[0.9375rem] font-semibold text-[color:var(--text-secondary)]">
+                  {NOT_READ}
+                </span>
+                <span className="text-xs text-[color:var(--text-secondary)]">{row.note}</span>
+                <span className="text-right text-xs text-[color:var(--text-secondary)]">
+                  {row.lastGood}
+                </span>
+              </li>
+            )
           return (
             <li key={row.key} className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-px py-2">
               <span className="truncate text-[0.9375rem] font-semibold">{row.name}</span>
