@@ -1437,7 +1437,7 @@
    }
   },
   {
-   "name": "to size 0 on a flat book with a quantity is a fresh order",
+   "name": "to size 0 on a flat book with a quantity sends nothing (v0.4.1: never an entry)",
    "kind": "smart",
    "book": [],
    "claims": [],
@@ -1449,16 +1449,39 @@
     "action": "BUY",
     "quantity": 65
    },
-   "expect": {
-    "reducing": false,
-    "reason": "opens",
-    "position": 0,
-    "room": 0,
-    "sends": {
-     "action": "BUY",
-     "quantity": 65
-    }
-   }
+   "expect": null
+  },
+  {
+   "name": "to size 0 on a flat book, selling with a quantity, sends nothing too",
+   "kind": "smart",
+   "book": [],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "product": "MIS",
+    "position_size": 0,
+    "action": "SELL",
+    "quantity": 65
+   },
+   "expect": null
+  },
+  {
+   "name": "to size 0 on a book flat in this product while another product holds it sends nothing",
+   "kind": "smart",
+   "book": [
+    "nifty_ce_long_65_nrml"
+   ],
+   "claims": [],
+   "order": {
+    "instrument_token": "NSE_FO|49213",
+    "exchange": "NFO",
+    "product": "MIS",
+    "position_size": 0,
+    "action": "SELL",
+    "quantity": 65
+   },
+   "expect": null
   },
   {
    "name": "to size 0 on a short buys it back",

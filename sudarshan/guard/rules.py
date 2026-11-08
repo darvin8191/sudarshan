@@ -188,14 +188,15 @@ def smart_order(
 ) -> tuple[int, int] | None:
     """The order a smart order sends, as the broker works it out (place_smartorder_api).
 
-    Returns ``(side, quantity)``, or None when nothing is sent. To a position size of 0 from a
-    flat book with a quantity, it sends the request's own order, a fresh trade.
+    Returns ``(side, quantity)``, or None when nothing is sent. A smart order to position size 0
+    never opens a position: from a flat book it sends nothing, whatever quantity and side it
+    carries (v0.4.1, X1 and Y1: TradingView's size is the one after the order, so its only
+    size-0 alert is an exit, and it sends its contracts with it). ``side`` and ``quantity`` are
+    kept for callers that pass them; they decide nothing.
 
     A smart order reduces risk exactly when its target lies between 0 and p inclusive: the gate
     judges the order this returns, at the broker, so no other rule is needed for smart orders.
     """
-    if target == 0 and position == 0 and quantity:
-        return (side, quantity) if side is not None else None
     if target == position:
         return None
     return (BUY, target - position) if target > position else (SELL, position - target)
