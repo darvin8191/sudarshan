@@ -514,11 +514,19 @@ def test_prune_keeps_runs_ninety_days_at_least_values_seven_and_never_screens_or
         done = tx.outbox_add("digest", "d", {}, NOW - 3 * DAY)
         tx.outbox_settle(done["id"], "done", NOW - 3 * DAY)
         tx.outbox_add("digest", "e", {}, NOW - 3 * DAY)  # pending: never pruned
+        tx.mark_told(sid, 20251015, {"NSE_EQ|A": (1, 3)})  # 13 days before NOW's session
+        tx.mark_told(sid, 20251027, {"NSE_EQ|A": (1, 3)})  # the day before: kept
+        tx.pause_close(tx.pause_open(20251015, NOW - 13 * DAY, "feed"), NOW - 13 * DAY + 60_000)
+        tx.pause_open(20251028, NOW, "feed")
         return old["id"], mid["id"], new["id"]
 
     old, mid, new = opened.write(OWNER, fill)
     counts = opened.write(OWNER, lambda tx: tx.prune(NOW, keep_run_days=30))  # 30 is raised to 90
-    assert counts == {"run_change": 1, "run_value": 2, "run": 1, "outbox": 1}
+    assert counts == {
+        "run_change": 1, "run_value": 2, "run": 1, "outbox": 1, "alert_state": 1, "pause": 1,
+    }, "the alert marks and pauses of old sessions are never pruned"  # fmt: skip
+    assert opened.read(OWNER, lambda tx: tx.told(sid, 20251027)) != {}
+    assert len(opened.read(OWNER, lambda tx: tx.pauses(20251028))) == 1
     assert opened.read(OWNER, lambda tx: tx.run(old)) is None
     assert opened.read(OWNER, lambda tx: tx.run(mid))["matched"] == 3
     assert opened.read(OWNER, lambda tx: tx.run_values(mid)) == {}

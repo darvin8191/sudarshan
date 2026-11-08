@@ -937,8 +937,9 @@ class Tx:
     # ---- retention ----
     def prune(self, now: int, keep_run_days: int) -> dict[str, int]:
         """Runs and their changes past ``keep_run_days`` (never under 90), run values past 7
-        days, done or failed outbox rows past 2 days. Screens, membership and the daily stores
-        are never pruned."""
+        days, done or failed outbox rows past 2 days, and the alert marks and pauses of sessions
+        more than 7 days old (each matters for its own day only; release review LOW-1). Screens,
+        membership and the daily stores are never pruned."""
         days = max(keep_run_days, KEEP_RUN_DAYS_MIN)
         run, change, value, outbox = (
             self._t("run"),
@@ -972,6 +973,12 @@ class Tx:
                 self._mine(outbox),
             )
         ).rowcount
+        cutoff = _session_of(now - KEEP_VALUE_DAYS * DAY_MS)
+        told, pause = self._t("alert_state"), self._t("pause")
+        counts["alert_state"] = self.conn.execute(
+            delete(told).where(told.c.session < cutoff, self._mine(told))
+        ).rowcount
+        counts["pause"] = self.conn.execute(delete(pause).where(pause.c.session < cutoff)).rowcount
         return counts
 
     def user_version(self) -> int:
@@ -1048,6 +1055,16 @@ class ScreenerStore:
                 "outbox_pending": tx.outbox_count("pending"),
             },
         )
+
+
+def _session_of(at: int) -> int:
+    """The trading-day key (YYYYMMDD, IST) of an instant."""
+    from datetime import datetime
+
+    from sudarshan.autologin.schedule import IST
+
+    moment = datetime.fromtimestamp(at / 1000, IST)
+    return moment.year * 10000 + moment.month * 100 + moment.day
 
 
 def clock_ms() -> int:
