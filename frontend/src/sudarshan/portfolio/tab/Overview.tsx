@@ -17,6 +17,7 @@ import {
 } from '@/sudarshan/dashboard/MarketCalendar'
 import { problemOf } from '../api'
 import { CustomizeSheet } from '../sheets/CustomizeSheet'
+import { PriceSheet, type PriceTarget } from '../sheets/PriceSheet'
 import { SECONDARY } from '../sheets/TabFields'
 import type {
   Account,
@@ -32,6 +33,7 @@ import { useTabLive } from '../useTabLive'
 import { PORTFOLIO_KEY } from './ActivityTab'
 import { AllocationBars } from './AllocationBars'
 import { countFilters, FilterBar, NO_FILTERS } from './Filters'
+import { FreshnessNotes, targetOf } from './FreshnessNotes'
 import { dayText } from './format'
 import { groupRows, TAG_GROUPS_NOTE } from './groups'
 import { HoldingsList } from './HoldingsList'
@@ -52,6 +54,7 @@ type Drawn =
   | 'history'
   | 'performance'
   | 'income'
+  | 'notes'
 const DRAWN: readonly Widget[] = [
   'summary',
   'today',
@@ -61,6 +64,7 @@ const DRAWN: readonly Widget[] = [
   'history',
   'performance',
   'income',
+  'notes',
 ]
 
 /** The layout, with the sort, grouping and columns of a saved view where one is in use. */
@@ -100,6 +104,7 @@ function Loaded({
   onClearView,
   onAdd,
   onImport,
+  onPrice,
 }: {
   data: TabView
   part: 'overview' | 'holdings'
@@ -114,6 +119,8 @@ function Loaded({
   onClearView: () => void
   onAdd: () => void
   onImport: () => void
+  /** Opens the price sheet for an old value, an old NAV or a loan's balance. */
+  onPrice: (target: PriceTarget) => void
 }) {
   const asOf = data.as_of !== null
   const rowsIn = useMemo(() => sliced(data.rows, narrowing.slice), [data.rows, narrowing.slice])
@@ -210,6 +217,23 @@ function Loaded({
         fixed={data.fixed}
         stale={allStale}
         loans={data.liabilities}
+        onUpdateLoan={(loan) =>
+          onPrice({
+            asset_id: loan.asset_id,
+            name: loan.name,
+            kind: 'liability',
+            unit_label: null,
+            tab_id: data.tab.id,
+          })
+        }
+      />
+    ),
+    // Old values and NAVs are a matter of today: a day in the past has none to update.
+    notes: asOf ? null : (
+      <FreshnessNotes
+        key="notes"
+        notes={data.notes}
+        onUpdate={(note) => onPrice(targetOf(note, data.assets, data.tab.id))}
       />
     ),
     // Today means the day the page is read: not for a day in the past.
@@ -312,6 +336,8 @@ export function TabOverview({
   const queries = useQueryClient()
   const [narrowing, setNarrowing] = useState<Narrowing>({ filters: NO_FILTERS, slice: null })
   const [allocBy, setAllocBy] = useState<AllocationBy>('class')
+  // The price sheet's target: an old value or NAV from the notes, or a loan from the Summary.
+  const [pricing, setPricing] = useState<PriceTarget | null>(null)
   const query = useQuery({
     ...tabViewOptions(tab.id, argsOf(narrowing.filters)),
     placeholderData: keepPreviousData,
@@ -374,6 +400,7 @@ export function TabOverview({
         onClearView={() => setAppliedId(null)}
         onAdd={onAdd}
         onImport={onImport}
+        onPrice={setPricing}
       />
     )
   }
@@ -381,6 +408,7 @@ export function TabOverview({
     <>
       <MarketCalendarSource key={day} onChange={setMarket} />
       {body}
+      <PriceSheet open={pricing !== null} onClose={() => setPricing(null)} target={pricing} />
       {data && (
         <CustomizeSheet
           open={customizing}

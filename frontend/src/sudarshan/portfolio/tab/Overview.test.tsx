@@ -26,6 +26,7 @@ vi.mock('@/sudarshan/dashboard/MarketCalendar', async (importOriginal) => ({
 import { createQueryClient } from '@/app/providers'
 import { feed } from '@/test/marketDataHarness'
 import { tab } from '../sheets/fixtures'
+import type { TabView } from '../types'
 import { FIXED, report, row, view } from './fixtures'
 import { TabOverview } from './Overview'
 
@@ -114,6 +115,70 @@ describe('the Overview', () => {
     const summary = await screen.findByRole('region', { name: 'Summary' })
     expect(within(summary).queryByText(/Net worth/)).toBeNull()
     expect(within(summary).queryByRole('list', { name: 'Loans' })).toBeNull()
+  })
+
+  it('lists the old values in the Notes widget, and Update opens the price sheet', async () => {
+    const data = view([row(1, 'Alpha', { price: 1_100_000 })])
+    show({
+      ...data,
+      layout: { ...data.layout, spec: { ...data.layout.spec, widgets: ['summary', 'notes'] } },
+      assets: [
+        { id: 3, kind: 'manual', name: 'Gold coin', unit_label: 'g', asset_class: 'gold' },
+      ] as unknown as TabView['assets'],
+      notes: [
+        {
+          asset_id: 3,
+          name: 'Gold coin',
+          kind: 'manual',
+          words: 'Value from 12 Sep · 45 days old',
+          price_day: 20260912,
+        },
+        {
+          asset_id: 4,
+          name: 'Some Fund',
+          kind: 'nav',
+          words: 'NAV of 21 Oct; AMFI has not published a newer one.',
+          price_day: 20261021,
+        },
+      ],
+    })
+    const notes = await screen.findByRole('region', { name: 'Notes on prices' })
+    expect(within(notes).getAllByText(/Old ·/)).toHaveLength(2)
+    expect(within(notes).getByText(/45 days old/)).toBeTruthy()
+    await userEvent.click(within(notes).getByRole('button', { name: 'Update Gold coin' }))
+    expect(await screen.findByText('Update the value')).toBeTruthy()
+    expect(screen.getByLabelText('Value (₹ per g)')).toBeTruthy()
+  })
+
+  it('says every value is current when the Notes widget is on and nothing is old', async () => {
+    const data = view([row(1, 'Alpha', { price: 1_100_000 })])
+    show({
+      ...data,
+      layout: { ...data.layout, spec: { ...data.layout.spec, widgets: ['notes'] } },
+    })
+    const notes = await screen.findByRole('region', { name: 'Notes on prices' })
+    expect(within(notes).getByText('Every value on this tab is current.')).toBeTruthy()
+  })
+
+  it('opens the balance sheet from a loan', async () => {
+    const data = view([row(1, 'Alpha', { price: 1_100_000 })])
+    show({
+      ...data,
+      fixed: { ...FIXED, liabilities_paise: 150_000 },
+      liabilities: [
+        {
+          asset_id: 9,
+          name: 'Home loan',
+          outstanding_paise: 150_000,
+          day: 20261001,
+          fresh: { state: 'fresh', words: 'Balance from 1 Oct · 25 days old' },
+        },
+      ],
+    })
+    const loans = await screen.findByRole('list', { name: 'Loans' })
+    await userEvent.click(within(loans).getByRole('button', { name: 'Update' }))
+    expect(await screen.findByText('Update the balance')).toBeTruthy()
+    expect(screen.getByLabelText('Outstanding balance (₹)')).toBeTruthy()
   })
 
   it('marks an old NAV with a clock and the word Old', async () => {

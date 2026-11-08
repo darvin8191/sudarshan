@@ -157,6 +157,14 @@ async def test_a_value_kept_by_hand_is_set_for_a_day_and_a_share_cannot_have_one
     assert future["code"] == "bad_request" and "after today" in future["message"]
     zero = clean(await rig.call("price_point_set", id=gold["id"], day=20261020, price_u=0))
     assert zero["code"] == "bad_request"
+    # A fund takes a NAV by hand (design 4.5, the Update button of an old NAV).
+    fund = (
+        await rig.call(
+            "asset_create", request_id="f-9", kind="mf", amfi_code="120503", name="Some Fund"
+        )
+    )["data"]
+    typed = await rig.call("price_point_set", id=fund["id"], day=20261020, price_u=1_234_567)
+    assert typed["data"]["price_u"] == 1_234_567
 
 
 @scenario_of

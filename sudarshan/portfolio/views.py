@@ -73,24 +73,11 @@ class Prices:
     """
 
     def now(self, tx: Tx, asset: Mapping[str, Any], today: int) -> dict[str, Any]:
-        """The ``PriceInfo`` of an asset now. THE seam: PB5 answers listed shares and funds."""
-        if asset["kind"] != "manual":
+        """The ``PriceInfo`` of an asset now. THE seam: PB5 answers listed shares and funds.
+        A fund with a NAV the owner entered by hand (design 4.5) is priced by it here."""
+        if asset["kind"] not in ("manual", "mf"):
             return dict(NO_PRICE)
-        points = [
-            p for p in tx.rows("price_point", "day", asset_id=asset["id"]) if p["day"] <= today
-        ]
-        if not points:
-            return dict(NO_PRICE)
-        last = points[-1]
-        return {
-            "price_u": last["price_u"],
-            "prev_close_u": None,
-            "day": last["day"],
-            "at": last["updated_at"],
-            "source": "manual",
-            "basis": "manual",
-            "late": False,
-        }
+        return manual_point(tx, asset, today, after_day=None) or dict(NO_PRICE)
 
     def closes(self, tx: Tx, assets: list[Mapping[str, Any]]) -> dict[int, dict[str, Any]]:
         """Each asset's closing prices as ``history.Quotes.of`` reads them."""
@@ -125,6 +112,28 @@ class Prices:
     def stamp(self, tx: Tx) -> tuple:
         """Changes whenever a price the history reads does."""
         return tx.price_stamp()
+
+
+def manual_point(
+    tx: Tx, asset: Mapping[str, Any], today: int, after_day: int | None
+) -> dict[str, Any] | None:
+    """The owner's newest own value of an asset on or before ``today`` as a ``PriceInfo``, or None;
+    with ``after_day``, only a value newer than that day (the day of the fund's published NAV)."""
+    points = [p for p in tx.rows("price_point", "day", asset_id=asset["id"]) if p["day"] <= today]
+    if after_day is not None:
+        points = [p for p in points if p["day"] > after_day]
+    if not points:
+        return None
+    last = points[-1]
+    return {
+        "price_u": last["price_u"],
+        "prev_close_u": None,
+        "day": last["day"],
+        "at": last["updated_at"],
+        "source": "manual",
+        "basis": "manual",
+        "late": False,
+    }
 
 
 class SeriesCache:
@@ -307,6 +316,7 @@ class Views:
                 today=today,
                 last_session_day=self.prices.last_session_day(today, now),
                 old_days=tab["manual_old_days"],
+                noun="NAV" if asset["kind"] == "mf" else "Value",  # a NAV entered by hand
             )
         cas, auction_from, auction_until, auction_close = (
             self.prices.auction(asset, today)

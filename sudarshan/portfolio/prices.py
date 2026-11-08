@@ -40,7 +40,7 @@ from .feedlink import CLIENT as _CLIENT
 from .feedlink import INDEX_KEYS, READ_BUDGET_S, READ_CALL_S, Claims, FeedClient, json_of
 from .resolver import SEGMENT, Resolver, ResolverUnavailable
 from .store import PortfolioStore, Scope, Tx
-from .views import NO_PRICE, Prices
+from .views import NO_PRICE, Prices, manual_point
 
 log = logging.getLogger("sudarshan.portfolio.prices")
 
@@ -315,6 +315,12 @@ class PriceBook(Prices):
             return super().now(tx, asset, today)
         eods = tx.rows("price_eod", "day", asset_id=asset["id"])
         last = eods[-1] if eods else None
+        if asset["kind"] == "mf":
+            # A NAV the owner entered by hand stands while it is newer than AMFI's (design 4.5).
+            typed = manual_point(tx, asset, today, after_day=last["day"] if last else None)
+            if typed is not None:
+                typed["prev_close_u"] = last["price_u"] if last else None
+                return typed
         tick = (
             self._ticks.get(asset.get("instrument_key") or "")
             if asset["kind"] == "listed"

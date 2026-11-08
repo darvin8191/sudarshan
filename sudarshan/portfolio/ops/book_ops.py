@@ -19,7 +19,7 @@ from . import op
 from .common import OWNER, answer, given, maybe_whole, parts, whole
 
 WORDS = {
-    "manual_only": "Only a value you keep by hand can be set here. A share or a fund is priced for you.",
+    "manual_only": "Only a value you keep by hand, a fund's NAV or a loan's balance can be set here. A share is priced for you.",
     "value": "Enter the value with a real date and a price above zero.",
     "future": "A value cannot be dated after today.",
     "balance": "Enter the outstanding balance with a real date; 0 once the loan is paid off.",
@@ -181,7 +181,7 @@ async def price_point_set(ctx, message):
         asset = tx.get("asset", asset_id)
         if asset is None:
             raise NotFound()
-        if asset["kind"] not in ("manual", "liability"):
+        if asset["kind"] not in ("manual", "liability", "mf"):
             raise Refused(WORDS["manual_only"])
         # A loan's balance may reach 0 (paid off); a value kept by hand is above zero.
         loan = asset["kind"] == "liability"
