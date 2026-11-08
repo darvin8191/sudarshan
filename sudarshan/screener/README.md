@@ -14,7 +14,16 @@ and the alerts service over loopback. OpenAlgo's bridge is `blueprints/sudarshan
 
 ## Switch and settings
 
-Off by default. `/etc/sudarshan/screener.env` (root:sudarshan 640):
+Off by default. `/etc/sudarshan/screener.env` (root:sudarshan 640) is made by `sudarshan-deploy`
+on the first install that ships the unit, from `sudarshan/ops/deploy/screener-env.conf`, with
+`SUDARSHAN_SCREENER='off'`; the deploy never changes a value the owner wrote there. Turning the
+screener on is the owner's own edit (`SUDARSHAN_SCREENER='on'`, then `systemctl restart
+sudarshan-screener`) after the live session of the owner's check. The deploy installs the unit
+and the ring's `sudarshan.slice`, logs `migrate --status` before each start, checks
+`127.0.0.1:5584/health` after it (a WARNING in its log when it does not answer, never a rollback),
+copies `screener.db` into every backup and puts it back on a rollback.
+`sudarshan-deploy --remove-ring sudarshan-screener.service` takes the service out (the unit goes,
+its database is copied to a backup folder, the state folder and this file stay).
 
 | setting | default |
 |---|---|
