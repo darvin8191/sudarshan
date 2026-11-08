@@ -18,6 +18,7 @@ import time
 import pytest
 from books_upstox_world import ORDERS_URL, Broker, FakeResponse, install
 
+import restx_api  # noqa: F401  (at collection: the scalping tests need it when the file runs alone)
 from sudarshan.books import exit_guard
 
 X = "NIFTY27OCT2625900CE"  # MIS, NFO
@@ -51,8 +52,6 @@ def scalping(monkeypatch):
     """The scalping close as production calls it: auth_token and broker None, the api key alone.
     Nothing here patches surface_exits.upstox_statuses; the order book is Upstox's own, as the
     patched get_order_book answers it, and the broker session is resolved from the api key."""
-    import restx_api  # noqa: F401, I001  (first, or place_order_service's import cycle fails)
-
     import blueprints.scalping as scalping
     import database.auth_db as auth_db
 
