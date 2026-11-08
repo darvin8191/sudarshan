@@ -20,6 +20,8 @@ honestly say.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict
 from datetime import datetime
@@ -33,11 +35,13 @@ from . import alerting as al
 from . import catalog as cat
 from . import membership as mem
 from . import presets, scheduler, spec, words
-from .contract import MEMBERSHIP_ACTIONS, SCREEN_ACTIONS, WORDS
+from .contract import EVENT_STATE, MEMBERSHIP_ACTIONS, SCREEN_ACTIONS, WORDS
 from .operand import SpecError
 from .ops import ApiError, op
 from .store import OWNER, NotFound, StoreError, Tx, VersionConflict
 from .types import DAY
+
+log = logging.getLogger("sudarshan.screener")
 
 SEGMENTS_OF = {
     "fno_stocks": frozenset({"NSE_EQ", "NSE_EQ+auction"}),
@@ -135,17 +139,37 @@ def _session_key(now: int) -> int:
     return day_key(datetime.fromtimestamp(now / 1000, IST).date())
 
 
+def _sessions_on(ctx, day):
+    calendar = ctx.ensure_calendar()
+    windows = calendar.windows() if hasattr(calendar, "windows") else {}
+    return sessions_of(day, trading_day=calendar.is_trading_day(day), window=windows.get(day))
+
+
+def next_check(ctx, now: int, active: Sequence[scheduler.Screen], sessions) -> int | None:
+    """When the active screens check next: today, or the next trading day's first check
+    ("Market closed · next check Mon 09:30"); None with no active screen."""
+    if not active:
+        return None
+    found = scheduler.next_at(active, sessions, now)
+    if found is None:
+        found = scheduler.next_trading_boundary(
+            active, now, sessions_of=lambda day: _sessions_on(ctx, day)
+        )
+    return found
+
+
 def engine_line(ctx, now: int, active: Sequence[scheduler.Screen], sessions=None) -> dict[str, Any]:
-    """The line under the header: the runtime's facts when it has them, else sessions and store."""
+    """The line under the header: the runtime's facts when it has them, else sessions and store;
+    the next check either way (MEDIUM-3)."""
     facts = ctx.parts.get("engine")
+    sessions = _sessions(ctx, now) if sessions is None else sessions
     base: dict[str, Any] = {"now": now, "enabled": ctx.enabled}
     if facts is not None and hasattr(facts, "engine_facts"):
         base.update(facts.engine_facts(now))
     else:
-        sessions = _sessions(ctx, now) if sessions is None else sessions
         base["trading"] = any(s.start <= now < s.end for s in sessions.values())
-        base["next_at"] = scheduler.next_at(active, sessions, now) if active else None
         base["feed"] = "not_linked"  # no feed link registered: never claim real time (rule 7)
+    base["next_at"] = next_check(ctx, now, active, sessions)
     engine = words.Engine(
         **{k: v for k, v in base.items() if k in words.Engine.__dataclass_fields__}
     )
@@ -348,6 +372,41 @@ def screen_row(
 
 
 # ---- the ops -----------------------------------------------------------------------------------------
+#: How often the engine line is looked at for a change to push (the page's line follows it).
+ENGINE_TICK_S = 1.0
+
+
+async def run_engine_push(service, *, tick_s: float = ENGINE_TICK_S) -> None:
+    """The job: the engine line pushed to an open page whenever it changes
+    (``sudarshan_screener_state``, design 4.5), so it never stays "Real-time" after the feed
+    stops or the market closes while the page is open (release review MEDIUM-3)."""
+    last: dict[str, Any] | None = None
+    while True:
+        try:
+            last = engine_push(service, last)
+        except StoreError:
+            log.warning("the engine line could not be read for the page")
+        except Exception:
+            log.exception("the engine line push failed")
+        await asyncio.sleep(tick_s)
+
+
+def engine_push(service, last: dict[str, Any] | None) -> dict[str, Any]:
+    """One look at the engine line: a push is queued when it differs from ``last``."""
+    now = service.clock()
+    sessions = _sessions(service, now)
+    rows = service.store.read(
+        OWNER, lambda tx: [r for r in tx.screens() if r["status"] == "active"]
+    )
+    line = engine_line(service, now, [sched_screen(r) for r in rows], sessions)
+    if last is None or (line["state"], line["line"]) != (last["state"], last["line"]):
+        payload = {"_event": EVENT_STATE, "engine": line, "screens": [], "removed": []}
+        service.store.write(
+            OWNER, lambda tx: tx.outbox_add("push", "engine", payload, now, coalesce=True)
+        )
+    return line
+
+
 @op("state")
 async def state(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
     now = ctx.clock()

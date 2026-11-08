@@ -29,6 +29,8 @@ TIMEOUTS_S = {"read": 3, "write": 6, "preview": 6}
 #: The Socket.IO events the page listens for (4.5, UI4, UI7).
 EVENT_RUN = "sudarshan_screener_run"
 EVENT_LISTS = "sudarshan_screener_lists"
+#: The engine line as it changes (design 4.5): ``{engine, screens, removed}`` (types.ts StatePush).
+EVENT_STATE = "sudarshan_screener_state"
 OWNER_ROOM = "sudarshan_owner"
 
 #: ``not_ready`` the op is not built yet; ``bad_request`` the arguments are wrong; ``not_found``

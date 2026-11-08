@@ -76,8 +76,10 @@ class Sender:
                 )
             elif kind == "digest":
                 await self.link.digest(payload)
-            elif kind == "push":
-                await self.link.push([{"event": EVENT_RUN, "data": payload}])
+            elif kind == "push":  # a run's summary, or the engine line ("_event": EVENT_STATE)
+                data = dict(payload)
+                event = data.pop("_event", EVENT_RUN)
+                await self.link.push([{"event": event, "data": data}])
             else:
                 raise ValueError(f"unknown outbox kind {kind!r}")
         except Exception as exc:

@@ -341,3 +341,72 @@ def test_resume_and_edit_keep_to_the_active_screen_limit(tmp_path):
     finally:
         svc.store.close()
         store_module.stop()
+
+
+class EngineFacts:
+    """The live source's engine facts (runtime.LiveSource.engine_facts), set by the test."""
+
+    def __init__(self, feed="ok", trading=True):
+        self.feed, self.trading = feed, trading
+
+    def engine_facts(self, now):
+        return {"master_ready": True, "trading": self.trading, "feed": self.feed,
+                "feed_since": None, "loading": 0, "total": 3, "without_prices": 0}  # fmt: skip
+
+
+def test_the_engine_line_with_the_live_source_names_the_next_check(tmp_path):
+    """Release review MEDIUM-3: with the live source the line never carried next_at, so "next
+    check 10:45" and "Market closed · next check Mon 09:30" were never shown."""
+    from sudarshan.screener import screen_ops
+
+    svc = Service(
+        settings_for(1, SUDARSHAN_SCREENER_STATE_DIR=str(tmp_path),
+                     SUDARSHAN_NSE_HOLIDAYS_FILE=str(tmp_path / "none-holidays.txt"),
+                     SUDARSHAN_NSE_EXTRA_DAYS_FILE=str(tmp_path / "none-extra.txt")),
+        FERNET, jobs={},
+    )  # fmt: skip
+    svc.parts["engine"] = EngineFacts()
+    active = [screen_ops.sched_screen({"id": 1, "version": 1, "spec": spec.check(SPEC)})]
+    line = screen_ops.engine_line(svc, NOW, active, SESSIONS)  # Wednesday 10:15:05
+    assert line["next_at"] is not None, "the live engine line never carries next_at"
+    assert line["line"] == "Real-time · next check 10:30"
+    saturday = NOW + 3 * 86_400_000
+    svc.parts["engine"] = EngineFacts(trading=False)
+    closed = screen_ops.engine_line(svc, saturday, active)
+    assert closed["line"] == "Market closed · next check Mon 09:30"
+
+
+def test_the_engine_line_is_pushed_to_an_open_page_when_it_changes(tmp_path):
+    """The page reads the state on open and on reconnect only: the line is pushed as it changes,
+    so it never stays "Real-time" after the feed stops."""
+    from sudarshan.screener import contract, screen_ops
+
+    svc = Service(
+        settings_for(1, SUDARSHAN_SCREENER_STATE_DIR=str(tmp_path),
+                     SUDARSHAN_NSE_HOLIDAYS_FILE=str(tmp_path / "none-holidays.txt"),
+                     SUDARSHAN_NSE_EXTRA_DAYS_FILE=str(tmp_path / "none-extra.txt")),
+        FERNET, jobs={},
+    )  # fmt: skip
+    svc.store = ScreenerStore(tmp_path / "screener.db")
+    svc.clock = lambda: NOW
+    facts = svc.parts["engine"] = EngineFacts()
+    try:
+        svc.store.write(OWNER, lambda tx: tx.screen_insert("S", spec.check(SPEC), "active", NOW))
+        last = screen_ops.engine_push(svc, None)
+        last = screen_ops.engine_push(svc, last)  # nothing changed: nothing more
+        facts.feed = "reconnecting"
+        last = screen_ops.engine_push(svc, last)
+        pushes = svc.store.read(OWNER, lambda tx: tx.outbox_due(NOW + 1, 10))
+        states = [
+            p["payload"] for p in pushes if p["payload"].get("_event") == contract.EVENT_STATE
+        ]
+        assert [s["engine"]["state"] for s in states] == ["feed_down"], (
+            "the engine line is never pushed to the page"
+        )
+        assert states[0]["engine"]["line"].startswith(
+            "Not checking · the price feed is reconnecting"
+        )
+        assert states[0]["screens"] == [] and states[0]["removed"] == []
+    finally:
+        svc.store.close()
+        store_module.stop()

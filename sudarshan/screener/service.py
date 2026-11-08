@@ -290,10 +290,12 @@ class Service:
 from . import outbox as _outbox  # noqa: E402  (M9.15: the outbox sender)
 from . import runner as _runner  # noqa: E402  (M9.14: the run loop)
 from . import runtime as _runtime  # noqa: E402  (M9.1: the feed link and live bars)
+from . import screen_ops as _screen_ops  # noqa: E402  (M9.3: the engine line for an open page)
 
 job("feed")(_runtime.run_feed)
 job("runner")(_runner.run_runner)
 job("outbox")(_outbox.run_sender)
+job("engine")(_screen_ops.run_engine_push)
 job("claims", OFF_JOBS)(_runtime.release_claims)
 
 
