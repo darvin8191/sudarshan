@@ -7,3 +7,5 @@ export const runsKey = (screenId: number) => [...RUNS_KEY, screenId] as const
 export const PRESETS_KEY = ['sudarshan', 'screener', 'presets'] as const
 export const UNIVERSES_KEY = ['sudarshan', 'screener', 'universes'] as const
 export const TODAY_KEY = ['sudarshan', 'screener', 'today'] as const
+export const MEMBERSHIP_KEY = ['sudarshan', 'screener', 'membership'] as const
+export const membershipKey = (listId: number) => [...MEMBERSHIP_KEY, listId] as const

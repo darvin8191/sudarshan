@@ -111,6 +111,8 @@ export interface ScreenRow {
   target_name: string | null
   /** 'next check 10:45', or null when none is due. */
   next_check: string | null
+  /** The watchlist the screen feeds, once it has one. */
+  list_id?: number | null
   /** The last run's id, 0 before the first. */
   last_run_id: number
   updated_at: number

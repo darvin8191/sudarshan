@@ -2,8 +2,9 @@ import type { InfiniteData, QueryClient } from '@tanstack/react-query'
 import { useEffect, useSyncExternalStore } from 'react'
 import type { Socket } from 'socket.io-client'
 import { connectionCount } from '@/sudarshan/books/sharedSocket'
+import { WATCHLISTS_KEY } from '@/sudarshan/watchlist/useWatchlists'
 import { screenerApi } from './api'
-import { RESULTS_KEY, RUNS_KEY, runsKey, STATE_KEY, TODAY_KEY } from './keys'
+import { MEMBERSHIP_KEY, RESULTS_KEY, RUNS_KEY, runsKey, STATE_KEY, TODAY_KEY } from './keys'
 import { applyRun, applyState } from './stateCache'
 import type { Results, RunPush, RunRow, RunsPage, ScreenerState, StatePush } from './types'
 
@@ -76,6 +77,7 @@ export function onRun(client: QueryClient, push: RunPush): void {
   )
   void client.invalidateQueries({ queryKey: [...RUNS_KEY, push.screen_id] })
   void client.invalidateQueries({ queryKey: TODAY_KEY })
+  void client.invalidateQueries({ queryKey: MEMBERSHIP_KEY })
 }
 
 /** The history row a push stands for. */
@@ -157,6 +159,16 @@ export async function catchUp(client: QueryClient): Promise<void> {
 }
 
 /** Listen on the app's shared connection while the page is open. */
+/**
+ * A screener changed a list (an add, an exit, a pin): the chips, the watchlists themselves and the
+ * screens' counts are read again. The push says only that, so nothing is patched from it.
+ */
+export function onListsPush(client: QueryClient): void {
+  void client.invalidateQueries({ queryKey: MEMBERSHIP_KEY })
+  void client.invalidateQueries({ queryKey: WATCHLISTS_KEY })
+  void client.invalidateQueries({ queryKey: STATE_KEY })
+}
+
 export function useScreenerPush(client: QueryClient, socket: Socket | null): void {
   useEffect(() => {
     if (!socket) {
@@ -204,11 +216,13 @@ export function useScreenerPush(client: QueryClient, socket: Socket | null): voi
     const onDisconnect = () => hear('not_joined')
     const run = (push: RunPush) => onRun(client, push)
     const state = (push: StatePush) => onStatePush(client, push)
+    const lists = () => onListsPush(client)
 
     socket.on('connect', onConnect)
     socket.on('disconnect', onDisconnect)
     socket.on('sudarshan_screener_run', run)
     socket.on('sudarshan_screener_state', state)
+    socket.on('sudarshan_screener_lists', lists)
     if (socket.connected) onConnect()
     else hear('not_joined')
     return () => {
@@ -218,6 +232,7 @@ export function useScreenerPush(client: QueryClient, socket: Socket | null): voi
       socket.off('disconnect', onDisconnect)
       socket.off('sudarshan_screener_run', run)
       socket.off('sudarshan_screener_state', state)
+      socket.off('sudarshan_screener_lists', lists)
       hear('unknown')
     }
   }, [client, socket])

@@ -197,12 +197,20 @@ export const screenerApi = {
     ),
 }
 
+/** One instrument a screen put in a list (membership.py Row), with the chip the service words for it. */
 export interface MemberRow {
   id: number
+  /** Moves with every change to the row; a pin sent with a stale one is refused. */
+  version: number
   screen_id: number
   list_id: number
   symbol: string
   exchange: string
+  status: 'active' | 'missing' | 'exited' | 'dismissed'
+  pinned: boolean
+  first_seen_at: number
+  last_seen_at: number
+  exited_at: number | null
   chip: import('./types').Chip | null
 }
 
