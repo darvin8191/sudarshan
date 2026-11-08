@@ -111,12 +111,15 @@ LIVE, SANDBOX = "live", "sandbox"
 #: show an exit (the same as sudarshan/books/exit_guard.py).
 SHOWS_WITHIN_S = EXIT_SHOWS_WITHIN_S
 #: A send counts this long at most, answered or not: the phone's no-answer hold
-#: (frontend/src/sudarshan/books/sent.ts). A send whose answer named its order counts past it
-#: while the order book shows that order working (release review v0.4.1, L1): after this long
-#: from the answer, or from the last read that showed it working, its claim stands only until
-#: the next read of the book answers for it.
+#: (frontend/src/sudarshan/books/sent.ts). A market exit whose answer named its order counts
+#: past it while the order book shows that order working (release review v0.4.1, L1): after this
+#: long from the answer, or from the last read that showed it working, its claim stands only until
+#: the next read of the book answers for it. Every other send (an entry, a resting limit or stop)
+#: ends here, as it always did.
 SEND_HELD_AT_MOST_S = 150.0
-#: No order outlives its trading day, so a claim never asked about again ends here at the latest.
+#: A market exit's claim never asked about again ends here at the latest: longer than any Indian
+#: session, so a working order is never dropped by a clock; an MCX order answered late in the
+#: evening keeps it into the next morning, which costs one order book read if anything meets it.
 CLAIM_KEPT_AT_MOST_S = 16 * 3600.0
 #: How soon the kill switch's state is read again after a read failed.
 STATE_RETRY_S = 2.0
@@ -190,6 +193,12 @@ _NO_QUOTE = object()  # not read: the band did not need the market for this orde
 BANDED_TYPES = ("LIMIT", "SL", "SL-M")
 REFUSED, ANSWERED = "refused", "answered"
 _ENDED, _WORKING = "ended", "working"
+
+
+def _market_exit(send: Send) -> bool:
+    """A send judged as reducing its position, by a market order: the one kind of claim that
+    outlasts ``SEND_HELD_AT_MOST_S`` (a market exit can rest price-protected at Upstox)."""
+    return bool(send.reducing) and not _rests(send.order)
 
 
 def _rests(order: Order) -> bool:
@@ -1395,13 +1404,17 @@ class Gate:
             answered = send.answered
             if answered is None:
                 gone = now - send.admitted > SEND_HELD_AT_MOST_S
-            elif send.ref:
-                # Upstox named its order: the claim stands until the book shows the exit
-                # (``_counted``) or the order ended (``_ended_orders``). No clock ends it while
-                # the order may still be working (a market exit resting price-protected, L1):
-                # past ``SEND_HELD_AT_MOST_S`` it stands until the next order book read answers
-                # for it (``_drop_stale_claims``), and never past its trading day.
+            elif send.ref and _market_exit(send):
+                # Upstox named its order, a market exit: the claim stands until the book shows
+                # the exit (``_counted``) or the order ended (``_ended_orders``). No clock ends it
+                # while the order may still be working (resting price-protected, L1): past
+                # ``SEND_HELD_AT_MOST_S`` it stands until the next order book read answers for
+                # it (``_drop_stale_claims``), and never past ``CLAIM_KEPT_AT_MOST_S``.
                 gone = now - answered > CLAIM_KEPT_AT_MOST_S
+            elif send.ref:
+                # An entry, or a resting limit or stop: the book has had its time to show it, and
+                # a resting order's claim stands for nothing once the book shows it resting.
+                gone = now - answered > SEND_HELD_AT_MOST_S
             else:
                 gone = now - answered > SHOWS_WITHIN_S  # no order to ask the book about
             if gone:
