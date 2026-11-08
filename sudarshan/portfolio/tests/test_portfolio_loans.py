@@ -169,7 +169,8 @@ def test_status_lists_step_two_for_a_v1_file(path, capsys):
     raw(path, "PRAGMA user_version = 1")
     assert migrate.main(["--status", "--path", str(path)]) == 0
     said = capsys.readouterr().out.replace(str(path), "<file>")  # the temp path may hold any digit
-    assert "version: file 1, code 2" in said and "pending: [2]" in said
+    later = list(range(2, migrations.LATEST + 1))  # the steps stacked branches add come after
+    assert f"version: file 1, code {migrations.LATEST}" in said and f"pending: {later}" in said
     assert raw(path, "PRAGMA user_version") == [(1,)]  # --status changed nothing
 
 
@@ -282,7 +283,7 @@ def v050(tmp_path):
         conn.execute("PRAGMA user_version = 1")
     assert raw(path, "SELECT name FROM sqlite_master WHERE name = 'tab_liability'") == []
     made = PortfolioStore(path, now=LATER)
-    assert made.applied == [2]
+    assert made.applied == list(range(2, migrations.LATEST + 1))
     book, views = Book(made), Views(made)
     home = next(t for t in book.tabs(OWNER) if t["name"] == "Home")
 
@@ -487,19 +488,20 @@ def test_a_store_at_the_old_step_two_keeps_its_links_and_status_reads_it_correct
     store_module.stop()
     assert migrate.main(["--status", "--path", str(path)]) == 0
     said = capsys.readouterr().out.replace(str(path), "<file>")
-    assert "version: file 2, code 2" in said and "pending: none" in said
+    top = migrations.LATEST
+    assert f"version: file {top}, code {top}" in said and "pending: none" in said
     again = PortfolioStore(path, now=NOW + 1)
     assert again.applied == []
     again.close()
     store_module.stop()
     raw(path, "PRAGMA user_version = 1")  # step 2 cut short after its table was made
     assert migrate.main(["--status", "--path", str(path)]) == 0
-    assert "pending: [2]" in capsys.readouterr().out
+    assert f"pending: {list(range(2, top + 1))}" in capsys.readouterr().out
     rerun = PortfolioStore(path, now=NOW + 2)
-    assert rerun.applied == [2]
+    assert rerun.applied == list(range(2, top + 1))
     rerun.close()
     assert raw(path, "SELECT tab_id, asset_id FROM tab_liability") == [(w.tab["id"], loan["id"])]
-    assert raw(path, "PRAGMA user_version") == [(2,)]
+    assert raw(path, "PRAGMA user_version") == [(top,)]
 
 
 # ---- boundaries the mutants found ----------------------------------------------------------------
