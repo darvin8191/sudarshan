@@ -141,6 +141,9 @@ class LiveSource:
         self.claimed_at: float = 0.0
         self.claim_words: str | None = None
         self.master_ready = False
+        #: The master download the universes were built on (OpenAlgo's completion time).
+        self.built_on: str | None = None
+        self._master_asked = 0
         self.counts = {"frames": 0, "trades": 0, "sealed": 0, "late": 0}
 
     # ---- runs.Source --------------------------------------------------------------------------------
@@ -205,6 +208,8 @@ class LiveSource:
             }
         boundary = closed[-1]
         members = list(self.members(stored["universe"]))
+        if not members and _uni_key(stored["universe"]) not in self._universes:
+            return {"label": words.NOT_LOADED + "; save the screen to load them.", **empty}
         if not members:
             return {"label": "This universe has no instruments today.", **empty}
         judged = await runs.evaluate(
@@ -361,13 +366,37 @@ class LiveSource:
         if kept:
             log.info("restored %d sealed bars of today from the store", len(kept))
 
+    def _master_whole(self) -> str | None:
+        """When OpenAlgo's last master download completed, or None if it keeps no record. Raises
+        MasterUnavailable while a download runs or the symbol table is empty (OpenAlgo empties it
+        before it fills it again): a universe built then would not be whole (HIGH-3)."""
+        download = self.master.download() if hasattr(self.master, "download") else None
+        if download is not None and download[0] == "downloading":
+            raise universe.MasterUnavailable
+        if not self.master.ready():
+            raise universe.MasterUnavailable
+        return download[1] if download is not None else None
+
+    def master_changed(self, now: int) -> bool:
+        """Whether OpenAlgo has finished a master download since the universes were built (it
+        downloads after the morning login, and again when the owner asks); asked at most once a
+        minute."""
+        if now - self._master_asked < 60_000 or not self.master_ready:
+            return False
+        self._master_asked = now
+        download = self.master.download() if hasattr(self.master, "download") else None
+        return download is not None and download[0] == "success" and download[1] != self.built_on
+
     def refresh_universes(self, specs: Sequence[Mapping[str, Any]], now: int) -> None:
-        """The universes the active screens use, from the master; the keys to follow."""
+        """The universes the active screens use, from the master; the keys to follow. While the
+        master is being downloaded or is empty, the universes already built stay as they are and
+        the master counts as not ready, so the feed job tries again."""
         if self._today is None:
             return
         found: dict[str, list[Member]] = {}
         listings: dict[str, universe.Listing] = {}
         try:
+            built_on = self._master_whole()
             for kind_spec in specs:
                 name = _uni_key(kind_spec)
                 if name in found:
@@ -390,7 +419,7 @@ class LiveSource:
                         name,
                         ", ".join(missing[:5]),
                     )
-            self.master_ready = True
+            self.master_ready, self.built_on = True, built_on
         except (universe.MasterUnavailable, FileNotFoundError) as exc:
             log.warning("universes could not be built: %s", exc)
             self.master_ready = False
@@ -556,7 +585,11 @@ async def run_feed(service, *, tick_s: float = TICK_S) -> None:
         last_master_min = -1
         while True:
             now = service.clock()
-            if source.new_day(now) or _master_due(now, last_master_min, source):
+            if (
+                source.new_day(now)
+                or _master_due(now, last_master_min, source)
+                or source.master_changed(now)
+            ):
                 try:
                     source.refresh_universes(_active_universes(service.store), now)
                 except StoreError:

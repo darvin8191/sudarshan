@@ -179,15 +179,26 @@ def auction_words(price_at: int) -> str:
 # ---- marks ----------------------------------------------------------------------------------------------
 
 #: The keys of a run's ``marks`` (a JSON object): what is true of the run as a whole.
-M_REPAIRED, M_LATE, M_WOULD_TELL = "repaired", "late", "would_tell"
+M_REPAIRED, M_LATE, M_WOULD_TELL, M_NOT_LOADED = "repaired", "late", "would_tell", "not_loaded"
+#: A run that had no instrument to judge: the screen's universe is empty or was not built yet
+#: (the master contract not loaded, a screen made after the day's build). Every member it holds
+#: is "not checked", never a miss, so a gap in the data never empties a list (release review HIGH-3).
+NOT_LOADED = "Not checked: the instruments of this screen are not loaded yet"
 
 
 def run_marks(
-    *, repaired: bool = False, late_at: int | None = None, would_tell: bool = False
+    *,
+    repaired: bool = False,
+    late_at: int | None = None,
+    would_tell: bool = False,
+    not_loaded: bool = False,
 ) -> dict[str, object]:
     """The ``run.marks`` object: a candle read at the run had been repaired after a pause, the run was
-    made late (``late_at``, epoch ms), or it would have raised an alert (before alerts are connected)."""
+    made late (``late_at``, epoch ms), it would have raised an alert (before alerts are connected),
+    or it had no instrument to judge (``not_loaded``)."""
     marks: dict[str, object] = {}
+    if not_loaded:
+        marks[M_NOT_LOADED] = True
     if repaired:
         marks[M_REPAIRED] = True
     if late_at is not None:
@@ -201,6 +212,8 @@ def mark_words(marks: Mapping[str, object] | None) -> tuple[str, ...]:
     """A run's marks as the History tab shows them, in a fixed order."""
     marks = marks or {}
     out = []
+    if marks.get(M_NOT_LOADED):
+        out.append(NOT_LOADED[0].lower() + NOT_LOADED[1:])
     if marks.get(M_REPAIRED):
         out.append("repaired after a pause")
     late = marks.get(M_LATE)

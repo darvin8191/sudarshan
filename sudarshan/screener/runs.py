@@ -11,7 +11,9 @@ is still at the version the run was evaluated on: the ``run`` row, its changes (
 (membership.apply_run), the alert marks and the outbox rows for the list sync, the digest and the
 push. A screen edited meanwhile gets a ``superseded`` row and nothing else changes. A screen with
 no target list keeps its membership under list 0 (never synced): transitions and alerts work the
-same either way.
+same either way. A run with no instrument to judge (an empty universe, or one not built yet)
+records the members the screen holds as not checked and changes nothing else: "not checked" is
+never "missed", so a gap in the data never empties the owner's list.
 
 Rewind (3.8): the session's first run of a screen records every match as ``in``; later runs record
 differences, so the page replays them.
@@ -235,6 +237,8 @@ def record(
     target = spec.get("target")
     state = state or {}
     list_id = (state.get("list_id") if target else None) or (target or {}).get("list_id") or NO_LIST
+    if not judged:  # an empty universe, or one not built: nothing was judged (HIGH-3)
+        return _not_loaded(tx, screen, due, run, list_id, now, push=push)
     grace = mem.Grace.of((target or {}).get("grace"))
     max_adds = (target or {}).get("max_adds_per_run", cat.DEFAULT_MAX_ADDS)
     order = (spec.get("rank") or {}).get("order", "desc")
@@ -335,28 +339,7 @@ def record(
         tx.outbox_add(
             "push",
             run_key,
-            {
-                "screen_id": screen["id"],
-                "run_id": run["id"],
-                "run_key": run_key,
-                "at": due.boundary.end,
-                "candle": f"{words.hm(due.boundary.start)} to {words.hm(due.boundary.end)}",
-                "counts": {
-                    "matches": counts["matched"],
-                    **{k: v for k, v in counts.items() if k != "matched"},
-                },
-                "entered": [
-                    {"symbol": c.row.symbol, "exchange": c.row.exchange, "member_id": None}
-                    for c in applied.changes
-                    if c.event == mem.EV_ENTERED
-                ],
-                "exited": [
-                    {"symbol": c.row.symbol, "exchange": c.row.exchange}
-                    for c in applied.changes
-                    if c.event == mem.EV_EXITED
-                ],
-                "marks": list(words.mark_words(marks)),
-            },
+            _push(screen, run, due, counts, applied.changes, marks),
             now,
         )
     return Report(
@@ -369,6 +352,83 @@ def record(
         list_id=list_id,
         changes=applied.changes,
         waiting=applied.waiting,
+        marks=marks,
+    )
+
+
+def _push(
+    screen: Mapping[str, Any],
+    run: Mapping[str, Any],
+    due: Due,
+    counts: Mapping[str, int],
+    changes: Sequence[mem.Change],
+    marks: Mapping[str, Any],
+) -> dict[str, Any]:
+    """The ``sudarshan_screener_run`` push for an open page: the run's counts and changes."""
+    return {
+        "screen_id": screen["id"],
+        "run_id": run["id"],
+        "run_key": str(due.key),
+        "at": due.boundary.end,
+        "candle": f"{words.hm(due.boundary.start)} to {words.hm(due.boundary.end)}",
+        "counts": {
+            "matches": counts["matched"],
+            **{k: v for k, v in counts.items() if k != "matched"},
+        },
+        "entered": [
+            {"symbol": c.row.symbol, "exchange": c.row.exchange, "member_id": None}
+            for c in changes
+            if c.event == mem.EV_ENTERED
+        ],
+        "exited": [
+            {"symbol": c.row.symbol, "exchange": c.row.exchange}
+            for c in changes
+            if c.event == mem.EV_EXITED
+        ],
+        "marks": list(words.mark_words(marks)),
+    }
+
+
+def _not_loaded(
+    tx: Tx,
+    screen: Mapping[str, Any],
+    due: Due,
+    run: Mapping[str, Any],
+    list_id: int,
+    now: int,
+    *,
+    push: bool,
+) -> Report:
+    """A run with no instrument to judge: the screen's universe is empty or was not built (the
+    master contract not loaded yet, a screen made after the day's build). Every member the screen
+    holds is recorded "not checked", never missed: no membership moves, no list change is queued
+    and no alert is decided, so a data gap never empties the owner's list (design 3.4)."""
+    held = [
+        r
+        for r in tx.memberships(screen_id=screen["id"], list_id=list_id)
+        if r["status"] in (mem.ACTIVE, mem.MISSING)
+    ]
+    tx.run_changes_put(
+        run["id"],
+        [
+            _change(Member(r["key"], r["symbol"], r["exchange"], ""), "not_checked", None)
+            for r in held
+        ],
+    )
+    tx.run_values_put(run["id"], {r["key"]: {"_not_checked": words.NOT_LOADED} for r in held})
+    counts = {"matched": 0, "entered": 0, "exited": 0, "missing": 0, "not_checked": len(held)}
+    marks = words.run_marks(late_at=now if due.late else None, not_loaded=True)
+    tx.run_finish(run["id"], marks, **counts)
+    tx.state_put(screen["id"], now, last_run_key=str(due.key), last_run_at=now)
+    if push:
+        tx.outbox_add("push", str(due.key), _push(screen, run, due, counts, (), marks), now)
+    return Report(
+        run["id"],
+        str(due.key),
+        "done",
+        **counts,
+        why=words.M_NOT_LOADED,
+        list_id=list_id,
         marks=marks,
     )
 

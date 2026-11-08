@@ -136,7 +136,7 @@ class Master:
         self.db_path = Path(db_path)
         self._factory = engine_factory
 
-    def _query(self, sql: str, **params) -> list[Mapping]:
+    def _query(self, sql: str, *, quiet: bool = False, **params) -> list[Mapping]:
         from sudarshan.alerts.owner import database_urls
 
         if not self.db_path.is_file():
@@ -151,7 +151,8 @@ class Master:
                 last = exc
             finally:
                 engine.dispose()  # type: ignore[attr-defined]
-        log.error("the master contract could not be read: %s", type(last).__name__)
+        if not quiet:
+            log.error("the master contract could not be read: %s", type(last).__name__)
         raise MasterUnavailable from last
 
     _COLUMNS = "symbol, exchange, token, name, expiry, strike, lotsize, instrumenttype, tick_size"
@@ -176,6 +177,25 @@ class Master:
             return bool(self._query("SELECT 1 FROM symtoken LIMIT 1"))
         except MasterUnavailable:
             return False
+
+    def download(self) -> tuple[str, str | None] | None:
+        """OpenAlgo's own word on its master download (``master_contract_status``, the broker
+        updated last): (its status, when a download last completed), or None when OpenAlgo keeps
+        no such record (nothing to go by). ``downloading`` means the symbol table is being
+        emptied and filled again, so nothing built from it now is whole."""
+        try:
+            rows = self._query(
+                "SELECT status, last_download_time FROM master_contract_status "
+                "ORDER BY last_updated DESC LIMIT 1",
+                quiet=True,
+            )
+        except MasterUnavailable:
+            return None
+        if not rows:
+            return None
+        found = rows[0]
+        done = found["last_download_time"]
+        return str(found["status"] or ""), (str(done) if done is not None else None)
 
 
 # ---- builders (pure over listings) ----------------------------------------------------------------
