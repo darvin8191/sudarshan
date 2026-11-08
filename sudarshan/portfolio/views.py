@@ -439,7 +439,11 @@ class Views:
             ]
             out["series"] = [point.as_dict() for point in days.series]
             out["by_fy"] = [fy.as_dict() for fy in performance.by_financial_year(ledger)]
-            out["income"] = performance.income_report(ledger, today)
+            out["income"] = {
+                **performance.income_report(ledger, today),
+                # M7.29: yield on cost is the twelve months' income on what the holdings cost.
+                **performance.income_summary(ledger, today, live.totals["cost_paise"]),
+            }
             out["series_words"] = days.words
             return out
 

@@ -190,6 +190,12 @@ export function report(extra: Partial<PerformanceReport> = {}): PerformanceRepor
         { month: 202510, paise: 0 },
         { month: 202511, paise: 10_000 },
       ],
+      last_12m_paise: 10_000,
+      yield_on_cost_pct: '1.2500',
+      by_fy: [
+        { fy: 2025, label: 'FY 2025-26', paise: 40_000 },
+        { fy: 2026, label: 'FY 2026-27', paise: 10_000 },
+      ],
     },
     series_words:
       'Daily history from 2 Nov 2026, the first day every holding here had a closing price.',

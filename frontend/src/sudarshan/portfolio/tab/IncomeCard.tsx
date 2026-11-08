@@ -1,6 +1,9 @@
-// SUDARSHAN M7.38: widget 8 of the Overview (design 4.6): income (dividends and interest) of this
-// financial year and of each of the last twelve months, as horizontal bars with the amount written
-// on each, so no month is told by length alone.
+// SUDARSHAN M7.38, M7.29: widget 8 of the Overview (design 4.6): income (dividends and interest)
+// of this financial year and of each of the last twelve months, as horizontal bars with the
+// amount written on each, so no month is told by length alone; the yield on cost (the twelve
+// months' income on what the holdings cost) and the income of each financial year.
+import { formatAmount } from '@/sudarshan/dashboard/format'
+import { pctNumber } from '../Signed'
 import type { PerformanceReport } from '../types'
 import { rupeesText } from './format'
 
@@ -11,8 +14,14 @@ export function monthText(month: number): string {
   return `${MONTHS[(month % 100) - 1] ?? '?'} ${Math.floor(month / 100)}`
 }
 
+/** "1.25%" from the service's text; "none" when nothing is held at a cost. */
+export function yieldText(pct: string | null): string {
+  const value = pctNumber(pct)
+  return value === null ? 'none' : `${formatAmount(value, 2)}%`
+}
+
 export function IncomeCard({ report }: { report: PerformanceReport }) {
-  const { this_fy_paise, by_month } = report.income
+  const { this_fy_paise, by_month, last_12m_paise, yield_on_cost_pct, by_fy } = report.income
   const top = Math.max(0, ...by_month.map((m) => m.paise))
   const none = by_month.every((m) => m.paise === 0)
   return (
@@ -27,6 +36,31 @@ export function IncomeCard({ report }: { report: PerformanceReport }) {
           {rupeesText(this_fy_paise)}
         </dd>
       </dl>
+      <dl className="grid grid-cols-2 gap-3 border-t border-[color:var(--divider)] pt-2">
+        <div className="flex flex-col gap-px">
+          <dt className="text-xs font-semibold text-muted-foreground">Last 12 months</dt>
+          <dd className="text-[0.9375rem] font-semibold">{rupeesText(last_12m_paise)}</dd>
+        </div>
+        <div className="flex flex-col gap-px">
+          <dt className="text-xs font-semibold text-muted-foreground">Yield on cost</dt>
+          <dd className="text-[0.9375rem] font-semibold">{yieldText(yield_on_cost_pct)}</dd>
+          <dd className="text-xs text-[color:var(--text-tertiary)]">
+            {yield_on_cost_pct === null
+              ? 'Nothing is held at a cost.'
+              : 'The last 12 months on what the holdings cost.'}
+          </dd>
+        </div>
+      </dl>
+      {by_fy.length > 0 && (
+        <dl aria-label="Income by financial year" className="flex flex-col gap-px pt-1">
+          {by_fy.map((year) => (
+            <div key={year.fy} className="flex items-center justify-between gap-2 text-sm">
+              <dt className="text-[color:var(--text-secondary)]">{year.label}</dt>
+              <dd className="font-semibold">{rupeesText(year.paise)}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
       {none ? (
         <p className="text-sm text-[color:var(--text-secondary)]">
           No dividend or interest in the last 12 months.

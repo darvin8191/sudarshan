@@ -1,0 +1,309 @@
+{
+ "about": "Golden vectors for core/performance.income_summary (PN1, M7.29): the last twelve months' income, the yield on cost and the income by financial year. The cost of the current holdings is an input (the ledger's vectors pin it). Every figure is worked out by hand in the case's why; the generator's arithmetic is Decimal, not the code's.",
+ "cases": [
+  {
+   "id": "Y1",
+   "title": "Twelve months of income on what the holdings cost",
+   "why": "Read on 27 Oct 2026 the twelve months are Nov 2025 to Oct 2026. Dividends of 100.00 on 15 Nov 2025, 150.00 on 15 Feb 2026 and 200.00 on 15 Aug 2026: 450.00 (45000) in the twelve months, on holdings that cost 10,000.00 (1000000): 4.5000%. FY 2025-26 has 250.00 (the Nov and Feb credits) and FY 2026-27 has 200.00.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250110,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 1000000,
+     "qty_u": 10000000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "INTEREST",
+     "trade_date": 20251115,
+     "account_id": 1,
+     "amount_paise": 10000
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "DIVIDEND",
+     "trade_date": 20260215,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 15000
+    },
+    {
+     "id": 4,
+     "seq": 4,
+     "kind": "INTEREST",
+     "trade_date": 20260815,
+     "account_id": 1,
+     "amount_paise": 20000
+    }
+   ],
+   "valuation_day": 20261027,
+   "cost_paise": 1000000,
+   "expect": {
+    "last_12m_paise": 45000,
+    "yield_on_cost_pct": "4.5000",
+    "by_fy": [
+     {
+      "fy": 2025,
+      "label": "FY 2025-26",
+      "paise": 25000
+     },
+     {
+      "fy": 2026,
+      "label": "FY 2026-27",
+      "paise": 20000
+     }
+    ]
+   }
+  },
+  {
+   "id": "Y2",
+   "title": "Income a month too early is in its year but not in the twelve months",
+   "why": "Read on 27 Oct 2026 the first of the twelve months is Nov 2025. A dividend of 300.00 on 31 Oct 2025 is a day too early for them and counts in FY 2025-26 only; 120.00 on 1 Nov 2025 is the first day of the twelve. Twelve months: 120.00 (12000) on a cost of 8,000.00: 1.5000%. FY 2025-26: 420.00.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "DIVIDEND",
+     "trade_date": 20251031,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 30000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "INTEREST",
+     "trade_date": 20251101,
+     "account_id": 1,
+     "amount_paise": 12000
+    }
+   ],
+   "valuation_day": 20261027,
+   "cost_paise": 800000,
+   "expect": {
+    "last_12m_paise": 12000,
+    "yield_on_cost_pct": "1.5000",
+    "by_fy": [
+     {
+      "fy": 2025,
+      "label": "FY 2025-26",
+      "paise": 42000
+     }
+    ]
+   }
+  },
+  {
+   "id": "Y3",
+   "title": "Income dated after the valuation day counts nowhere",
+   "why": "Read on 27 Oct 2026: a dividend of 500.00 dated 28 Oct 2026 (a draft the owner dated ahead, or a day in the future when the tab is read as of an earlier day) is in no month and no year. Only the 80.00 of 1 Oct 2026 counts: 0.8000% on 10,000.00.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "DIVIDEND",
+     "trade_date": 20261001,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 8000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "INTEREST",
+     "trade_date": 20261028,
+     "account_id": 1,
+     "amount_paise": 50000
+    }
+   ],
+   "valuation_day": 20261027,
+   "cost_paise": 1000000,
+   "expect": {
+    "last_12m_paise": 8000,
+    "yield_on_cost_pct": "0.8000",
+    "by_fy": [
+     {
+      "fy": 2026,
+      "label": "FY 2026-27",
+      "paise": 8000
+     }
+    ]
+   }
+  },
+  {
+   "id": "Y4",
+   "title": "Nothing held at a cost gives no yield, not a zero",
+   "why": "Every share was sold, so the current holdings cost 0: the 60.00 of income in the twelve months has nothing to be a yield of, and the figure is null. The totals still stand: twelve months 60.00, FY 2026-27 60.00.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "DIVIDEND",
+     "trade_date": 20260601,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 6000
+    }
+   ],
+   "valuation_day": 20261027,
+   "cost_paise": 0,
+   "expect": {
+    "last_12m_paise": 6000,
+    "yield_on_cost_pct": null,
+    "by_fy": [
+     {
+      "fy": 2026,
+      "label": "FY 2026-27",
+      "paise": 6000
+     }
+    ]
+   }
+  },
+  {
+   "id": "Y5",
+   "title": "The percentage is rounded half away from zero at the fourth decimal",
+   "why": "Income of 1.00 (100) on a cost of 3,000.00 (300000): 100 x 100 / 300000 = 0.033333...%, written 0.0333. Income of 2.00 on 300.00 is 0.666666...%, written 0.6667 (the vector Y5b).",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "DIVIDEND",
+     "trade_date": 20260601,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 100
+    }
+   ],
+   "valuation_day": 20261027,
+   "cost_paise": 300000,
+   "expect": {
+    "last_12m_paise": 100,
+    "yield_on_cost_pct": "0.0333",
+    "by_fy": [
+     {
+      "fy": 2026,
+      "label": "FY 2026-27",
+      "paise": 100
+     }
+    ]
+   }
+  },
+  {
+   "id": "Y5b",
+   "title": "The percentage is rounded half away from zero at the fourth decimal (up)",
+   "why": "Income of 2.00 (200) on a cost of 300.00 (30000): 0.666666...%, written 0.6667.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "DIVIDEND",
+     "trade_date": 20260601,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 200
+    }
+   ],
+   "valuation_day": 20261027,
+   "cost_paise": 30000,
+   "expect": {
+    "last_12m_paise": 200,
+    "yield_on_cost_pct": "0.6667",
+    "by_fy": [
+     {
+      "fy": 2026,
+      "label": "FY 2026-27",
+      "paise": 200
+     }
+    ]
+   }
+  },
+  {
+   "id": "Y6",
+   "title": "Read in April: the twelve months straddle two financial years",
+   "why": "Read on 10 Apr 2026 the twelve months are May 2025 to Apr 2026. Interest of 1,000.00 on 30 Apr 2025 is a month too early; 2,000.00 on 31 May 2025 and 3,000.00 on 31 Mar 2026 are FY 2025-26; 4,000.00 on 1 Apr 2026 is FY 2026-27. Twelve months: 9,000.00 (900000) on 1,00,000.00: 9.0000%. By year: FY 2025-26 6,000.00, FY 2026-27 4,000.00.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "DIVIDEND",
+     "trade_date": 20250430,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 100000
+    },
+    {
+     "id": 2,
+     "seq": 2,
+     "kind": "INTEREST",
+     "trade_date": 20250531,
+     "account_id": 1,
+     "amount_paise": 200000
+    },
+    {
+     "id": 3,
+     "seq": 3,
+     "kind": "DIVIDEND",
+     "trade_date": 20260331,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 300000
+    },
+    {
+     "id": 4,
+     "seq": 4,
+     "kind": "INTEREST",
+     "trade_date": 20260401,
+     "account_id": 1,
+     "amount_paise": 400000
+    }
+   ],
+   "valuation_day": 20260410,
+   "cost_paise": 10000000,
+   "expect": {
+    "last_12m_paise": 900000,
+    "yield_on_cost_pct": "9.0000",
+    "by_fy": [
+     {
+      "fy": 2025,
+      "label": "FY 2025-26",
+      "paise": 600000
+     },
+     {
+      "fy": 2026,
+      "label": "FY 2026-27",
+      "paise": 400000
+     }
+    ]
+   }
+  },
+  {
+   "id": "Y7",
+   "title": "No income at all",
+   "why": "A tab with a purchase and no dividend or interest: twelve months 0, yield 0.0000% on its cost (there is a cost, and the income on it is nothing), and no year row at all.",
+   "entries": [
+    {
+     "id": 1,
+     "seq": 1,
+     "kind": "BUY",
+     "trade_date": 20250110,
+     "account_id": 1,
+     "asset_id": 1,
+     "amount_paise": 1000000,
+     "qty_u": 10000000
+    }
+   ],
+   "valuation_day": 20261027,
+   "cost_paise": 1000000,
+   "expect": {
+    "last_12m_paise": 0,
+    "yield_on_cost_pct": "0.0000",
+    "by_fy": []
+   }
+  }
+ ]
+}

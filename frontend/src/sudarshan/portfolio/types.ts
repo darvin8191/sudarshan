@@ -847,6 +847,27 @@ export interface MonthIncome {
   paise: Paise
 }
 
+/** One financial year's income (M7.29). */
+export interface IncomeYear {
+  /** The year the financial year starts in: 2026 is FY 2026-27. */
+  fy: number
+  label: string
+  paise: Paise
+}
+
+/** Income this financial year, the last twelve months and by year, and the yield on cost. */
+export interface IncomeReport {
+  this_fy_paise: Paise
+  by_month: MonthIncome[]
+  /** The twelve months by_month lists, added up. */
+  last_12m_paise: Paise
+  /** The last twelve months' income on what the current holdings cost; null when nothing is
+   *  held at a cost (never 0 in its place). */
+  yield_on_cost_pct: Pct | null
+  /** Oldest first; only years with income. */
+  by_fy: IncomeYear[]
+}
+
 export interface PerformanceReport {
   valuation_day: Day
   first_flow_day: Day | null
@@ -864,7 +885,7 @@ export interface PerformanceReport {
   benchmarks: BenchmarkFigure[]
   series: SeriesPoint[]
   by_fy: FyFigure[]
-  income: { this_fy_paise: Paise; by_month: MonthIncome[] }
+  income: IncomeReport
   /** "Daily history from 3 Nov 2026, the first day every holding here had a closing price." */
   series_words: string | null
 }

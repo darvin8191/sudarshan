@@ -500,6 +500,38 @@ def by_financial_year(ledger: Ledger) -> list[Fy]:
     ]
 
 
+def income_summary(ledger: Ledger, valuation_day: int, cost_paise: int) -> dict:
+    """Yield on cost and the income totals by financial year (M7.29; types.ts ``IncomeSummary``).
+
+    ``last_12m_paise`` is the income (dividends and interest, gross) of the twelve months that end
+    with the valuation day's, the same months ``income_report`` lists. ``yield_on_cost_pct`` is
+    that income on ``cost_paise``, what the current holdings cost (invested in current holdings,
+    design 4.5), as a percentage with four decimals; None when nothing is held at a cost. Income
+    dated after the valuation day counts nowhere. ``by_fy`` has one row per financial year (April
+    to March) with any income, oldest first.
+    """
+    year, month = valuation_day // 10000, valuation_day // 100 % 100
+    first = year * 12 + month - 1 - 11
+    last_12m = 0
+    years: dict[int, int] = {}
+    for move in ledger.journal:
+        if move.kind not in ("DIVIDEND", "INTEREST") or move.day > valuation_day:
+            continue
+        day = move.day
+        if day // 10000 * 12 + day // 100 % 100 - 1 >= first:
+            last_12m += move.paise
+        years[financial_year(day)] = years.get(financial_year(day), 0) + move.paise
+    return {
+        "last_12m_paise": last_12m,
+        "yield_on_cost_pct": pct(last_12m, cost_paise) if cost_paise > 0 else None,
+        "by_fy": [
+            {"fy": fy, "label": f"FY {fy}-{(fy + 1) % 100:02d}", "paise": paise}
+            for fy, paise in sorted(years.items())
+            if paise
+        ],
+    }
+
+
 def income_report(ledger: Ledger, valuation_day: int) -> dict:
     """Income (dividends and interest, gross) this financial year and in each of the twelve months
     that end with the valuation day's, oldest first, months with none shown as 0."""
