@@ -40,9 +40,25 @@ export class ScreenerError extends Error {
 interface Envelope<T> {
   status?: 'success' | 'error'
   data?: T
+  /** An error's code, sentence and the line of the screen it is about (contract.py ApiError.body). */
+  error?: { code?: string; message?: string; field?: string }
   code?: string
   message?: string
   field?: string
+}
+
+/**
+ * The service's error codes (contract.py ERROR_CODES) as the page acts on them. The page's own
+ * names are older than the contract's, so the answer is translated once, here, and nothing else
+ * reads a service code. A code with no entry (forbidden, rate_limited, bad_request, not_ready)
+ * is kept: its sentence is the service's and is shown as it came.
+ */
+const PAGE_CODE: Record<string, string> = {
+  version_conflict: 'conflict',
+  refused: 'invalid',
+  not_found: 'gone',
+  not_confirmed: 'unanswered',
+  unavailable: 'failed',
 }
 
 const text = (value: unknown): string | null =>
@@ -80,7 +96,9 @@ export function problemOf(error: unknown): ScreenerProblem {
     data: unknown
     request?: { responseURL?: string }
   }
-  const body = data && typeof data === 'object' ? (data as Envelope<unknown>) : null
+  const sent = data && typeof data === 'object' ? (data as Envelope<unknown>) : null
+  // The service nests its refusal under `error`; an older shape put it at the top.
+  const body = sent?.error && typeof sent.error === 'object' ? sent.error : sent
   const message = text(body?.message)
   if (!message) {
     if (sessionEnded(status, data, request?.responseURL)) {
@@ -88,7 +106,8 @@ export function problemOf(error: unknown): ScreenerProblem {
     }
     return { code: 'unreadable', message: WORDS.unreadable, field: null }
   }
-  return { code: text(body?.code) ?? 'failed', message, field: text(body?.field) }
+  const code = text(body?.code)
+  return { code: (code && PAGE_CODE[code]) ?? code ?? 'failed', message, field: text(body?.field) }
 }
 
 const READ_MS = 15_000
@@ -125,7 +144,7 @@ export interface ScreenDraft {
 
 export type ScreenChange =
   | { version: number; action: 'pause' | 'resume' }
-  | { version: number; spec: ScreenSpec }
+  | { version: number; action: 'edit'; spec: ScreenSpec }
 
 export const screenerApi = {
   state: () => call<ScreenerState>(webClient.get(`${BASE}/state`, { timeout: READ_MS })),
@@ -134,7 +153,7 @@ export const screenerApi = {
   change: (id: number, change: ScreenChange) =>
     call<ScreenRow>(webClient.patch(`${BASE}/screens/${id}`, change, { timeout: CHANGE_MS })),
   remove: (id: number, removeAdded: boolean) =>
-    call<{ deleted: boolean }>(
+    call<{ deleted: number; removed_from_list: number }>(
       webClient.delete(`${BASE}/screens/${id}`, {
         data: { remove_added: removeAdded },
         timeout: CHANGE_MS,
@@ -168,12 +187,13 @@ export const screenerApi = {
     call<{ universes: UniverseOption[] }>(webClient.get(`${BASE}/universes`, { timeout: READ_MS })),
   today: () => call<Today>(webClient.get(`${BASE}/today`, { timeout: READ_MS })),
   membership: (query: { list?: number; screen?: number }) =>
-    call<{ members: MemberRow[] }>(
+    call<{ rows: MemberRow[] }>(
       webClient.get(`${BASE}/membership`, { params: query, timeout: READ_MS })
     ),
-  member: (id: number, action: 'pin' | 'unpin' | 'dismiss' | 'restore') =>
+  /** The version is the membership row's own: a pin on a row that moved meanwhile is refused. */
+  member: (id: number, version: number, action: 'pin' | 'unpin' | 'dismiss' | 'restore') =>
     call<MemberRow>(
-      webClient.patch(`${BASE}/membership/${id}`, { action }, { timeout: CHANGE_MS })
+      webClient.patch(`${BASE}/membership/${id}`, { action, version }, { timeout: CHANGE_MS })
     ),
 }
 

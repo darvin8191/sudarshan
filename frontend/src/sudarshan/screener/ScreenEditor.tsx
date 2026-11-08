@@ -177,7 +177,7 @@ export function ScreenEditor({
     let saved: ScreenRow | null = null
     const ok = await send.run(async () => {
       saved = row
-        ? await screenerApi.change(row.id, { version: row.version, spec: draft })
+        ? await screenerApi.change(row.id, { version: row.version, action: 'edit', spec: draft })
         : await screenerApi.create({ spec: draft, request_id: requestId.current })
     })
     if (ok && saved) {

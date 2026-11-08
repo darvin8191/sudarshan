@@ -12,7 +12,10 @@ describe('what a failed request says', () => {
   it('keeps the server sentence and its code as they came', () => {
     expect(
       problemOf(
-        failure(409, { status: 'error', code: 'conflict', message: 'Changed.', field: 'name' })
+        failure(409, {
+          status: 'error',
+          error: { code: 'version_conflict', message: 'Changed.', field: 'name' },
+        })
       )
     ).toEqual({
       code: 'conflict',
@@ -32,6 +35,17 @@ describe('what a failed request says', () => {
     expect(sessionEnded(200, null, '/auth/login')).toBe(true)
     expect(sessionEnded(200, null, '/screener')).toBe(false)
   })
+  it('translates the service codes to the ones the page acts on, and keeps the rest', () => {
+    const code = (service: string) =>
+      problemOf(failure(422, { status: 'error', error: { code: service, message: 'Words.' } })).code
+    expect(code('refused')).toBe('invalid')
+    expect(code('not_found')).toBe('gone')
+    expect(code('not_confirmed')).toBe('unanswered')
+    expect(code('unavailable')).toBe('failed')
+    expect(code('rate_limited')).toBe('rate_limited')
+    expect(code('forbidden')).toBe('forbidden')
+  })
+
   it('never shows a status code or a protocol word for an answer it cannot read', () => {
     const problem = problemOf(failure(502, '<html>Bad Gateway</html>'))
     expect(problem).toMatchObject({ code: 'unreadable', message: WORDS.unreadable })
