@@ -59,6 +59,10 @@ class DispatchResult:
     broker_order_id: str | None = None
     response: dict[str, Any] | None = None
     error: str | None = None
+    # SUDARSHAN M6.9: the exit was deliberately held, not rejected: another exit for the
+    # position is being placed or an earlier one is not yet seen ended in the broker's order
+    # book (sudarshan/books/surface_exits.py). Nothing reached the broker; a retry is expected.
+    held: bool = False
 
     @property
     def rejected(self) -> bool:
@@ -388,6 +392,11 @@ def _dispatch_live(api_key: str, order: dict[str, Any], closes: bool = False) ->
                 send,
                 lambda: surface_exits.upstox_statuses(auth_token, broker),
             )
+            if not ok and surface_exits.held(response, _status):
+                result = _normalise(ok, response)
+                return DispatchResult(
+                    ok=False, response=result.response, error=result.error, held=True
+                )
         else:
             ok, response, _status = send()
     except Exception:

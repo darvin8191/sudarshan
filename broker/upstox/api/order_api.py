@@ -372,14 +372,15 @@ def _reduces_or_crosses(current, target):
 
 
 def _market_exit_working(
-    rows, orders, symbol, exchange, product, request_product, current_position
+    rows, orders, symbol, exchange, product, request_product, current_position, order=False
 ):
     """SUDARSHAN M6.9 (L2, Y2): the refusal (409, nothing sent) for an order that closes or
     reduces a position while the order book shows a MARKET order working on the closing side
     (SELL when long, BUY when short): one that rests at its protected price, or whose answer was
     lost to a restart, can still fill, and a second beside it would reverse the position. A
     resting stop or target (SL, SL-M, LIMIT) is not a market order and does not block. None when
-    nothing blocks."""
+    nothing blocks. ``order``: the refused request is an order that reduces or crosses the
+    position, not an exit, and the sentence says so (exit_guard.on_its_way)."""
     token = rows[0].get("instrument_token") if rows else get_token(symbol, exchange)
     closing = (
         str(token or ""),
@@ -391,7 +392,9 @@ def _market_exit_working(
     ]
     if not market:
         return None
-    said = exit_guard.market_exit_working(exit_guard.position_of(exchange, symbol, product), market)
+    said = exit_guard.market_exit_working(
+        exit_guard.position_of(exchange, symbol, product), market, order
+    )
     return _ErrorResponse(409), {"status": "error", "message": said, "nothing_sent": True}, None
 
 
@@ -653,7 +656,7 @@ def place_smartorder_api(data, auth):
                     # book refuses it. The claim is let go whatever happens below, a refused
                     # dispatch included. An order that only adds never claims.
                     busy = held.enter_context(
-                        exit_guard.one_exit("live", exchange, symbol, product)
+                        exit_guard.one_exit("live", exchange, symbol, product, order=True)
                     )
                     if busy:
                         logger.warning(f"Order for {symbol} not sent: an exit for it is on its way")
@@ -670,7 +673,9 @@ def place_smartorder_api(data, auth):
                     if by_product is None:
                         logger.warning(f"Order for {symbol} not sent: the quantity held is unknown")
                         said = exit_guard.exit_not_sized(
-                            exit_guard.position_of(exchange, symbol, product), orders is not None
+                            exit_guard.position_of(exchange, symbol, product),
+                            orders is not None,
+                            order=True,
                         )
                         refusal = {"status": "error", "message": said, "nothing_sent": True}
                         return _ErrorResponse(424), refusal, None
@@ -686,12 +691,15 @@ def place_smartorder_api(data, auth):
                     # order is looked for on the side that closes what the row shows.
                     reducing = True
                     refused = _market_exit_working(
-                        rows, orders, symbol, exchange, product, request_product, row_position
-                    )
+                        rows, orders, symbol, exchange, product, request_product, row_position,
+                        order=True,
+                    )  # fmt: skip
                     if refused:
                         logger.warning(f"Order for {symbol} not sent: a market exit is working")
                         return refused
-                    held_by = exit_guard.hold_verdict("live", exchange, symbol, product, statuses)
+                    held_by = exit_guard.hold_verdict(
+                        "live", exchange, symbol, product, statuses, order=True
+                    )
                     if held_by:
                         logger.warning(f"Order for {symbol} not sent: an earlier one is held")
                         refusal = {"status": "error", "message": held_by, "nothing_sent": True}

@@ -546,3 +546,185 @@ def test_l1_control_a_listed_cnc_purchase_is_sold_back(monkeypatch, cnc):
     code, body = world.app_exit_all()
     assert (code, body["status"]) == (200, "success"), body
     assert broker.products == [("SELL", "D", 10)]
+
+
+# -- LOW 5. The words ---------------------------------------------------------------------------------
+
+
+_EXIT_WORDS = ("exit it again", "then exit", "no exit was sent", "sent no exit")
+
+
+def _for_a_trader(said):
+    for word in ("None", "token", "HTTP", "424", "409", "order book", "arm", "status_code"):
+        assert word not in said, said
+
+
+def test_words_a_reversal_refused_while_an_exit_is_on_its_way_says_the_order_was_not_sent(
+    monkeypatch,
+):
+    world = install(monkeypatch, Broker({X: 65}, 0.0))
+    with exit_guard.one_exit("live", "NFO", X, "MIS"):
+        code, body = _reversal(world, X, "130", "SELL", "-65")
+    assert code == 409 and world.broker.orders == []
+    said = body["message"]
+    assert "An exit for NIFTY 25900 CE is already on its way" in said
+    assert "this order was not sent" in said and "Orders" in said
+    assert not any(words in said for words in _EXIT_WORDS), said
+    _for_a_trader(said)
+
+
+def test_words_a_reversal_refused_by_a_working_earlier_exit_says_the_order_was_not_sent(
+    monkeypatch,
+):
+    broker = Broker({X: 65}, 60.0)
+    broker.part[X] = 0  # the app's exit rests
+    world = install(monkeypatch, broker)
+    assert world.phone_exit(X)[0] == 200
+    broker.part.pop(X)
+    _fresh_book()
+    code, body = _reversal(world, X, "130", "SELL", "-65")
+    assert code == 409 and _sent(broker, X) == [("SELL", 65)]
+    said = body["message"]
+    assert "still working at Upstox" in said and "this order was not sent" in said
+    assert "send the order again" in said and "Orders" in said
+    assert not any(words in said for words in _EXIT_WORDS), said
+    _for_a_trader(said)
+
+
+def test_words_a_reversal_held_by_an_unconfirmed_exit_says_the_order_was_not_sent(monkeypatch):
+    broker = Broker({X: 65}, 60.0)
+    broker.order_book_lag = 5.0
+    world = install(monkeypatch, broker)
+    assert _reversal(world, X, "130", "SELL", "-65")[0] == 200
+    _fresh_book()
+    code, body = _reversal(world, X, "130", "SELL", "-65")
+    assert code == 409 and _sent(broker, X) == [("SELL", 130)]
+    said = body["message"]
+    assert "is not confirmed" in said and "this order was not sent" in said and "Orders" in said
+    assert not any(words in said for words in _EXIT_WORDS), said
+    _for_a_trader(said)
+
+
+def test_words_a_reversal_refused_by_a_working_market_order_says_the_order_was_not_sent(
+    monkeypatch,
+):
+    world = install(monkeypatch, Broker({X: 65}, 0.0))
+    world.broker.rest(X, "SELL", 65, kind="MARKET", trigger=0)  # placed in Upstox's own app
+    code, body = _reversal(world, X, "130", "SELL", "-65")
+    assert code == 409 and world.broker.orders == []
+    said = body["message"]
+    assert "SELL 65 MARKET order" in said and "this order was not sent" in said
+    assert "send the order again" in said
+    assert not any(words in said for words in _EXIT_WORDS), said
+    _for_a_trader(said)
+
+
+def test_words_a_reversal_that_cannot_be_sized_says_the_order_was_not_sent(monkeypatch):
+    broker = Broker({X: 65}, 0.0)
+    broker.orders_unreadable = True
+    world = install(monkeypatch, broker)
+    code, body = _reversal(world, X, "130", "SELL", "-65")
+    assert code == 424 and broker.orders == []
+    said = body["message"]
+    assert "Upstox did not send your orders in time" in said and "this order was not sent" in said
+    assert not any(words in said for words in _EXIT_WORDS), said
+    _for_a_trader(said)
+
+
+def test_words_control_a_single_exit_keeps_its_own_sentences(monkeypatch):
+    """Control: the size-0 exit's refusals still say "exit", as before."""
+    broker = Broker({X: 65}, 60.0)
+    broker.order_book_lag = 5.0
+    world = install(monkeypatch, broker)
+    assert world.phone_exit(X)[0] == 200
+    _fresh_book()
+    code, body = world.tv_smart_exit(X, quantity="65", action="SELL")
+    assert code == 409 and "exit it again only if it is not there" in body["message"]
+
+
+@pytest.fixture
+def terminal(scalping, monkeypatch):
+    """The scalping terminal's Close all route, over a book with X long 65 and Y short 30."""
+    from flask import Flask
+
+    import database.scalping_db as scalping_db
+    import services.positionbook_service as positionbook_service
+    import utils.session as session_utils
+    from database.latency_db import init_latency_db
+
+    init_latency_db()
+    monkeypatch.setattr(session_utils, "is_session_valid", lambda: True)
+    monkeypatch.setattr(scalping, "get_api_key_for_tradingview", lambda user: "key")
+    monkeypatch.setattr(
+        scalping_db,
+        "get_tracked_symbols",
+        lambda mode=None: [
+            {"symbol": X, "exchange": "NFO", "product": "MIS"},
+            {"symbol": Y, "exchange": "NFO", "product": "NRML"},
+        ],
+    )
+    monkeypatch.setattr(
+        positionbook_service,
+        "get_positionbook",
+        lambda api_key, auth_token, broker: (
+            True,
+            {
+                "status": "success",
+                "data": [
+                    {"symbol": X, "exchange": "NFO", "product": "MIS", "quantity": 65},
+                    {"symbol": Y, "exchange": "NFO", "product": "NRML", "quantity": -30},
+                ],
+            },
+            200,
+        ),  # fmt: skip
+    )
+    app = Flask(__name__)
+    app.secret_key = "test"
+    app.register_blueprint(scalping.scalping_bp)
+    client = app.test_client()
+    with client.session_transaction() as sess:
+        sess["user"] = "owner"
+        sess["broker"] = "upstox"
+
+    def close_all():
+        reply = client.post("/scalping/api/close_all", json={})
+        return reply.status_code, reply.get_json()
+
+    return close_all
+
+
+def test_words_the_scalping_close_all_does_not_say_success_when_every_close_was_refused(
+    scalping, terminal
+):
+    """Both positions are busy (an exit for each on its way from another surface). On b14cb0e the
+    answer was status "success", "Closed 0 scalping position(s)"."""
+    with (
+        exit_guard.one_exit("live", "NFO", X, "MIS"),
+        exit_guard.one_exit("live", "NFO", Y, "NRML"),
+    ):
+        code, body = terminal()
+    assert scalping.sent == []
+    assert code == 409 and body["status"] == "error", (code, body)
+    assert body["message"].startswith("No scalping position was closed.")
+    assert "NIFTY 25900 CE is already on its way" in body["message"]
+    assert "BANKNIFTY 57500 PE is already on its way" in body["message"]
+    assert "Closed 0" not in body["message"]
+    _for_a_trader(body["message"])
+    assert [r["status"] for r in body["results"]] == ["error", "error"]
+
+
+def test_words_the_scalping_close_all_with_one_refused_says_which(scalping, terminal):
+    with exit_guard.one_exit("live", "NFO", Y, "NRML"):
+        code, body = terminal()
+    assert scalping.sent == [(X, "SELL", 65)]
+    assert code == 200 and body["status"] == "error", (code, body)
+    assert body["message"].startswith("Closed 1 of 2 scalping positions.")
+    assert "BANKNIFTY 57500 PE is already on its way" in body["message"]
+    _for_a_trader(body["message"])
+
+
+def test_words_control_the_scalping_close_all_that_closed_everything_says_so(scalping, terminal):
+    code, body = terminal()
+    assert sorted(scalping.sent) == sorted([(X, "SELL", 65), (Y, "BUY", 30)])
+    assert (code, body["status"]) == (200, "success")
+    assert body["message"] == "Closed 2 scalping position(s)"

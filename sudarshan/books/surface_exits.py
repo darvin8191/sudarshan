@@ -51,6 +51,16 @@ def refused(answer: Answer | None) -> bool:
     return isinstance(status, int) and 400 <= status < 500
 
 
+#: Marks an answer of ``exit_once`` that sent nothing because the position is busy or held.
+HELD = "exit_held"
+
+
+def held(response: Any, status: int) -> bool:
+    """Whether an answer is ``exit_once``'s own refusal: the exit was held, not rejected, because
+    another exit for the position is being placed or an earlier one is not yet seen ended."""
+    return status == 409 and isinstance(response, dict) and response.get(HELD) is True
+
+
 def order_ids(answer: Answer | None) -> tuple[str, ...]:
     """The orders the broker named in an answer, empty when it named none."""
     if answer is None or refused(answer):
@@ -135,12 +145,20 @@ def exit_once(
     with exit_guard.EXITS.one(book, position) as busy:
         if busy:
             logger.warning(f"Exit for {position[1]} not sent: an exit for it is on its way")
-            return False, {"status": "error", "message": busy, "nothing_sent": True}, 409
+            return (
+                False,
+                {"status": "error", "message": busy, "nothing_sent": True, HELD: True},
+                409,
+            )
         if position in exit_guard.EXITS.placed_lately(book):
             said = exit_guard.EXITS.hold_verdict(book, position, read_statuses())
             if said:
                 logger.warning(f"Exit for {position[1]} not sent: an earlier exit is not ended")
-                return False, {"status": "error", "message": said, "nothing_sent": True}, 409
+                return (
+                    False,
+                    {"status": "error", "message": said, "nothing_sent": True, HELD: True},
+                    409,
+                )
         answer = None
         try:
             answer = send()

@@ -205,6 +205,7 @@ EVENT_KINDS = (
     "leg_exit_placed",
     "leg_exit_filled",
     "leg_exit_rejected",
+    "leg_exit_held",  # SUDARSHAN M6.9
     "leg_close_manual",
     "leg_expiry_fallback",
     "order_ack_unrecorded",

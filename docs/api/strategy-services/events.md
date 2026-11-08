@@ -123,12 +123,20 @@ run remains open and managed for a retry.
 flip is still held under its exact `position_ref`, remains managed, and can be
 targeted by another exit even though the replacement side is also live.
 
-Entry and exit: `leg_entry_placed`, `leg_entry_filled`, `leg_entry_rejected`, `leg_exit_placed`, `leg_exit_filled`, `leg_exit_rejected`, `leg_close_manual`, `leg_expiry_fallback`, `order_ack_unrecorded`
+Entry and exit: `leg_entry_placed`, `leg_entry_filled`, `leg_entry_rejected`, `leg_exit_placed`, `leg_exit_filled`, `leg_exit_rejected`, `leg_exit_held`, `leg_close_manual`, `leg_expiry_fallback`, `order_ack_unrecorded`
 
 Manual close events describe accepted intent only. `close_all_manual` uses
 `Operator requested closure of all held legs`, and `leg_close_manual` uses
 `Operator requested closure of leg <leg_id>`. Completed wording is reserved
 for the later fill-confirmed `run_stopped` transition.
+
+`leg_exit_held` is written at `warn` severity when a live exit was not sent because
+another exit for the same position is being placed, or an earlier one is not yet
+seen ended in the broker's order book (one exit at a time per position, across
+every surface). Nothing reached the broker, the leg's exit claim is released and
+the leg stays managed; the next tick or the pending-stop job sends it again. It is
+not a rejection: `leg_exit_rejected` stays for an exit the broker or the pipe
+refused.
 
 `leg_expiry_fallback` is written at `warn` severity, before the entry goes out, when the chain did not list the expiry rank the leg asked for and a nearer one was used. A `next_week` leg trading the current week is a different trade from the one that was configured, so it is said out loud rather than inferred from the symbol afterwards.
 

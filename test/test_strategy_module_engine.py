@@ -754,6 +754,42 @@ def test_a_rejected_exit_can_be_retried_rather_than_looking_like_a_duplicate(api
     assert len(calls) == 2
 
 
+def test_a_held_exit_is_recorded_as_a_hold_not_a_rejection_and_can_be_sent_again(api_key):
+    # SUDARSHAN M6.9: an exit the one-at-a-time rule held (another exit for the position on
+    # its way, or an earlier one not yet seen ended in the order book) is not a rejection.
+    # It is recorded as leg_exit_held at warn, with the sentence, the claim is released and
+    # the next attempt goes; a broker refusal is still leg_exit_rejected at critical.
+    sid = _make()
+    run_id = _start(sid).run_id
+    engine.apply_fill(run_id, 1, 100.0, is_entry=True)
+    strategy = store.strategy_to_dict(store.get_strategy(sid, USER))
+    answers = iter(
+        [
+            DispatchResult(
+                ok=False,
+                error="An exit for NIFTY 24000 CE is already on its way (sent 10:00:01). Check "
+                "Orders, and exit it again only if it is still open.",
+                held=True,
+            ),
+            DispatchResult(ok=True, broker_order_id="SB-X", response={}),
+        ]
+    )
+
+    with patch.object(
+        engine.order_dispatch, "dispatch_order", side_effect=lambda **kwargs: next(answers)
+    ):
+        engine._exit_legs(run_id, strategy, [1], "exit_sl", "live", "k", USER)
+        engine._exit_legs(run_id, strategy, [1], "exit_sl", "live", "k", USER)
+
+    events = [e for e in store.list_events(sid) if e["kind"].startswith("leg_exit_")]
+    assert sorted(e["kind"] for e in events) == ["leg_exit_held", "leg_exit_placed"]
+    held = next(e for e in events if e["kind"] == "leg_exit_held")
+    assert held["severity"] == "warn"
+    assert held["message"].startswith("Exit held on leg 1, to be sent again: An exit for")
+    assert "rejected" not in held["message"]
+    assert not any(e["kind"] == "leg_exit_rejected" for e in store.list_events(sid))
+
+
 def test_a_manual_close_does_not_trail_the_other_legs_to_entry(api_key):
     # Trail-to-entry answers the market moving against the book. An operator
     # closing one leg by hand is an override, and treating it as a signal would

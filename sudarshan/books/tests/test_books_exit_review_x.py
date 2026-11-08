@@ -349,7 +349,10 @@ def test_x7_an_order_that_cannot_be_sized_is_refused_when_it_reduces_or_crosses(
     for quantity, size in (("130", "-65"), ("65", "0"), ("30", "35")):
         code, body = _reversal(world, X, quantity, "SELL", size)
         assert code == 424, (size, body)
-        assert body["message"] == exit_guard.exit_not_sized(("NFO", X, "MIS"), orders_read=False)
+        # The exit's sentence for the size-0 exit; the order's for a reversal or a part exit.
+        assert body["message"] == exit_guard.exit_not_sized(
+            ("NFO", X, "MIS"), orders_read=False, order=size != "0"
+        )
     assert broker.orders == []
 
 

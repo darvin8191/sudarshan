@@ -914,6 +914,22 @@ def close_all():
         if ok2:
             closed += 1
 
+    # SUDARSHAN M6.9: a close that was refused (an exit for the position already on its way or
+    # not yet ended, or Upstox's own refusal) is said, position by position, and the answer is
+    # not "success": "Closed 0 scalping position(s)" read as done while every position was still
+    # held. Nothing closed answers 409, the refused dispatch; some closed answers 200 with the
+    # status "error" the terminal shows as a toast, since those exits are on their way.
+    if closed < len(results):
+        not_closed = [r for r in results if r["status"] != "success"]
+        said = [f"{r['symbol']}: {r['message'] or 'its exit was not sent.'}" for r in not_closed]
+        if closed:
+            lead = f"Closed {closed} of {len(results)} scalping positions."
+        else:
+            lead = "No scalping position was closed."
+        return jsonify(
+            {"status": "error", "message": " ".join([lead, *said]), "results": results}
+        ), (200 if closed else 409)
+
     return jsonify(
         {"status": "success", "message": f"Closed {closed} scalping position(s)", "results": results}
     )

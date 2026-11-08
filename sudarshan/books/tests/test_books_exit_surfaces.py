@@ -311,6 +311,28 @@ def test_a_strategy_exit_is_a_refused_dispatch_while_another_exit_is_on_its_way(
     assert result.broker_order_id is None
 
 
+def test_a_held_strategy_exit_says_so_and_a_broker_refusal_does_not(dispatch, monkeypatch):
+    """SUDARSHAN M6.9 (words): the engine records a hold as a hold, not as a rejection, so the
+    dispatch result marks one; a refusal from the broker or the pipe is not marked."""
+    import services.place_order_service as place_order_service
+
+    with exit_guard.one_exit("live", "NFO", X, "MIS"):
+        result = dispatch.dispatch_order(mode="live", api_key="k", order=_exit_order(), closes=True)
+    assert result.ok is False and result.held is True
+    dispatch.dispatch_order(mode="live", api_key="k", order=_exit_order(), closes=True)
+    monkeypatch.setattr(surface_exits, "upstox_statuses", lambda a, b: {"261027000001": "open"})
+    result = dispatch.dispatch_order(mode="live", api_key="k", order=_exit_order(), closes=True)
+    assert result.ok is False and result.held is True and "still working" in result.error
+    monkeypatch.setattr(
+        place_order_service,
+        "place_order_with_auth",
+        lambda *a, **k: (False, {"status": "error", "message": "Upstox refused it"}, 400),
+    )
+    monkeypatch.setattr(surface_exits, "upstox_statuses", lambda a, b: {"261027000001": "complete"})
+    result = dispatch.dispatch_order(mode="live", api_key="k", order=_exit_order(), closes=True)
+    assert result.ok is False and result.held is False and result.error == "Upstox refused it"
+
+
 def test_a_strategy_exit_is_refused_while_exit_all_holds_the_book(dispatch):
     with exit_guard.EXITS.every("live"):
         result = dispatch.dispatch_order(mode="live", api_key="k", order=_exit_order(), closes=True)
