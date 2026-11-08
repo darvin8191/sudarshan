@@ -119,6 +119,8 @@ export interface ScreenDraft {
   spec: ScreenSpec
   /** One id per Save, so a resend after a lost answer returns the screen already made. */
   request_id: string
+  /** A screen made from a library card starts Paused: the owner reads it before it runs. */
+  status?: 'paused'
 }
 
 export type ScreenChange =

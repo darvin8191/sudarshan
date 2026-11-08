@@ -17,6 +17,7 @@ import {
 import { droppedHere } from '@/sudarshan/screener/actions'
 import { DeleteSheet } from '@/sudarshan/screener/DeleteSheet'
 import { History } from '@/sudarshan/screener/History'
+import { Library } from '@/sudarshan/screener/Library'
 import { EngineText } from '@/sudarshan/screener/marks'
 import { useHearing, useScreenerPush } from '@/sudarshan/screener/push'
 import { ResultsPanel } from '@/sudarshan/screener/ResultsPanel'
@@ -25,7 +26,7 @@ import { ScreenCard } from '@/sudarshan/screener/ScreenCard'
 import { ScreenEditor } from '@/sudarshan/screener/ScreenEditor'
 import { type PanelTab, ScreenPage } from '@/sudarshan/screener/ScreenPage'
 import { type ScreenRow, WORDS } from '@/sudarshan/screener/types'
-import { useScreenerAddress } from '@/sudarshan/screener/useScreenerAddress'
+import { type HomeTab, useScreenerAddress } from '@/sudarshan/screener/useScreenerAddress'
 import { useScreenerState } from '@/sudarshan/screener/useScreenerState'
 import { toast } from '@/utils/toast'
 
@@ -44,6 +45,40 @@ const TABS: PanelTab[] = [
   { id: 'history', label: 'History' },
   { id: 'edit', label: 'Edit' },
 ]
+
+/** Screens and the Library, the two things the home of the Screener holds. */
+function HomeTabs({ home, onTab }: { home: HomeTab; onTab: (tab: HomeTab) => void }) {
+  return (
+    <div role="tablist" aria-label="Screener" className="flex items-center gap-1.5">
+      {(
+        [
+          ['screens', 'Screens'],
+          ['library', 'Library'],
+        ] as const
+      ).map(([id, label]) => (
+        <button
+          key={id}
+          type="button"
+          role="tab"
+          aria-selected={id === home}
+          onClick={() => onTab(id)}
+          className="group flex h-12 shrink-0 items-center outline-none"
+        >
+          <span
+            className={cn(
+              'flex h-9 items-center rounded-full border px-3.5 text-sm group-focus-visible:ring-2 group-focus-visible:ring-ring',
+              id === home
+                ? 'border-primary bg-[color:var(--primary-tint)] font-bold text-primary'
+                : 'border-border bg-card font-semibold text-[color:var(--text-secondary)]'
+            )}
+          >
+            {label}
+          </span>
+        </button>
+      ))}
+    </div>
+  )
+}
 
 const ORDER = { active: 0, paused: 1, stopped: 2 } as const
 
@@ -194,8 +229,14 @@ export default function Screener() {
             />
           )}
         </ScreenPage>
+      ) : address.home === 'library' ? (
+        <section className="flex flex-col gap-2">
+          <HomeTabs home={address.home} onTab={setTab} />
+          <Library onMade={(row) => openScreen(row.id)} />
+        </section>
       ) : (
         <section className={cn('flex flex-col gap-2', problem && state && STALE)}>
+          <HomeTabs home={address.home} onTab={setTab} />
           {!state ? (
             query.isPending ? (
               <LoadingCards />
