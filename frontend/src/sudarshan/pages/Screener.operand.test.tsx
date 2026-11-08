@@ -76,11 +76,6 @@ function renderPage(entries: InitialEntry[] = ['/elsewhere', '/screener']) {
 }
 const where = () => screen.getByTestId('where').textContent
 const back = () => act(() => history.go(-1))
-async function settle() {
-  await act(async () => {
-    for (let i = 0; i < 10; i += 1) await Promise.resolve()
-  })
-}
 const clauseCard = (id: string) => document.querySelector(`[data-clause="${id}"]`) as HTMLElement
 
 beforeEach(() => {
