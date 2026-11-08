@@ -5,6 +5,142 @@ publish. The owner publishes each release on GitHub. The server's deploy timer t
 outside 08:30-16:00 IST on trading days (09:00-15:45 until v0.3.1), keeps backups, and rolls
 back if the app does not come up healthy.
 
+## v0.5.1 (8 Nov 2026)
+
+Live exits close what Upstox's positions do not show yet, reversals and the scalping and strategy
+exits keep to the one-at-a-time rule, a close Upstox did not answer is said and held as not
+confirmed, and the risk guard gets the fixes it needs before it can check Live. It includes
+everything in v0.5.0 and v0.4.1. **Publish it only after v0.4.1 has installed and run one trading
+day on its own: Tuesday 10 Nov after the close, or later.**
+
+### What changes for you
+- **Exit all closes a position Upstox's positions do not show yet.** A position bought seconds ago
+  is in Upstox's order list before its positions list. Exit all used to name it and leave it to
+  you; it now exits it from its fills (the contract, product and size from the order rows),
+  through the same one-at-a-time rule and time limit as every other position. When one of those
+  cannot be worked out, it is named as not closed, never counted as closed.
+- **A product traded today that Upstox lists only in another product is still named, not sent.**
+  A conversion in the Upstox app (Intraday to Delivery, say) whose new row is not shown yet cannot
+  be told from a fresh position, and an exit sent in the old product would open the opposite one.
+  Exit all says so and asks you to check Positions.
+- **Exit all never says "squared off" over a position it could not see.** An order Upstox shows
+  complete with no filled quantity is unknown, not 0: its position is named as not sized, where
+  Exit all used to miss it. When Upstox's order list does not come in time and the positions show
+  nothing open (closed positions at 0, or a sale from holdings), it says the order list was not
+  checked. A reversal whose resting order still works is named, not passed over as flat.
+- **A sale from holdings is left alone**, whether Upstox lists it or not and whether the order list
+  came or not: never bought back, never named as a position to close. An F&O Delivery (NRML) short
+  is still a position.
+- **TradingView reversals and part exits** (a smart order to another size that reduces or reverses
+  the position) now hold the position while they are placed, and the hold stays until Upstox's
+  order list shows the order ended. A repeated reversal is refused while the first is being
+  placed, is not yet seen ended, or a market order works on the side that closes the position, so
+  it can no longer go beside a first one that part-filled and rests. Exit all leaves the position
+  to it meanwhile. The refusal says this order was not sent and what to check before sending it
+  again. One sent after the first is seen complete goes, sized from today's fills.
+- **The scalping terminal and the strategy module keep to the one-at-a-time rule in Live**: the
+  terminal's Close, Close all and trailing stop auto-exit, and the strategy module's exits (basket
+  and signal). A close is refused while another exit of the position is being placed or an earlier
+  one still works at Upstox, and the next exit from any surface waits for it. The order list is
+  read only while an earlier exit is held, with the session the terminal's own order uses.
+- **A close Upstox does not answer reads "not confirmed".** When Upstox times out on a scalping
+  close, the terminal says "This exit is not confirmed: it may have gone through. Check Orders
+  before sending it again." instead of the raw error. Close all leads with "No scalping close is
+  confirmed." or "Closed N of M scalping positions." and names each position; "No scalping
+  position was closed" only when every close was refused, and never "success" over a refusal.
+  Such a close (the strategy module's too) holds the position for 150 s, then for as long as
+  Upstox shows a market order working on its closing side or its order list cannot be read, up to
+  16 h: both size the next close from Upstox's positions, which can show the first fill a minute
+  late. The refusal says the
+  earlier exit is not confirmed, and to close from the Upstox app only if that exit is not in
+  Orders.
+- **The strategy module records a held exit as a hold** ("held, to be sent again", at warn) on
+  both the basket and the signal path, not as a rejection; the leg stays managed and the next
+  tick, the pending stop or the next exit signal sends it.
+- **The risk guard, still Analyze mode only.** These are the fixes Live waits for, and act only
+  once the guard checks Live:
+  - the gate judges an exit on the order list its caller has just read (one read for all of Exit
+    all's exits), and only inside that call;
+  - it reads a position Upstox's positions do not list yet from the day's fills, so the kill
+    switch lets its exit go; but a product of an instrument listed in another product is read as
+    the positions show it (it may be a conversion), so an order there is judged on the positions
+    alone;
+  - a market exit's claim lasts while Upstox shows the order working, never past 16 h; an
+    entry's or a resting order's claim ends 150 s after its answer, as before;
+  - with Upstox's order list unreadable and Exit all asked, the kill switch cancels nothing and
+    sends nothing, so your stop-loss orders keep working, and looks for the order list again 2 s
+    later; an Exit all that sent nothing because the order list did not come is tried once more;
+    when the switch did cancel stops and Exit all then left a position with nothing working (not
+    sized, out of time, or a position Upstox does not list that it could not size or that may be
+    a conversion), it says that position is open with its stop-loss order cancelled and points to
+    the Upstox app;
+  - its words never deny a cancel that went before, and a cancel that may have reached Upstox
+    reads "not confirmed";
+  - when Upstox's positions cannot be read, the day's loss figure comes from a read at most 15 s
+    old, not 150 s;
+  - Upstox's answer that no order is open counts as nothing to cancel only when it is the whole
+    answer;
+  - a smart order to size 0 from flat is judged as sending nothing, as the order path sends;
+  - an order Upstox shows with no filled quantity that has filled nothing (rejected, or waiting
+    for validation or its trigger) no longer stops every exit.
+
+### What you must do
+- **Publish it** (the link is in your task list) on Tuesday 10 Nov after the close or later, once
+  v0.4.1 has run a trading day. v0.5.0's checks apply as well.
+- **After a scalping close says "not confirmed", check Orders before closing again.** SUDARSHAN
+  holds that position for 150 s, and longer while a market order of yours works on its closing
+  side or Upstox's order list cannot be read. To close it sooner, use the Upstox app, and only if
+  the first exit is not in Orders.
+- **On the first Live trading day, check and tell me:**
+  1. how soon Upstox's order list shows an order just placed (it sets how often a repeated
+     reversal, or Exit all over a fresh reversal, says "not confirmed");
+  2. whether a market order with price protection part-fills and rests at Upstox, and for how long;
+  3. one scalping close of a contract within 150 s of an app Exit of it: it should go once Orders
+     shows the first one complete; and what the terminal says when Upstox is slow;
+  4. Positions before and after converting one lot, and whether a closed position at 0 stays
+     listed;
+  5. whether Upstox's positions list a sale from holdings;
+  6. which order statuses Upstox sends with no filled quantity, and that a part-filled order never
+     shows as rejected;
+  7. Upstox's answer to Cancel all when no order is open;
+  8. how far Upstox's positions lag a fill (it sets the window in the last point under "Not in
+     this release yet");
+  9. MCX, for when the guard checks Live: its claim on a market exit sent in the evening is kept
+     into the next morning, which costs one order list read then; the next morning's first MCX
+     order should go as usual.
+
+### What is refused now that used to be accepted
+- **Live, Exit all** with the order list not in time and nothing open in the positions: it says
+  the order list was not checked, where it used to answer "squared off". Nothing is sent either
+  way.
+- **Live, a TradingView reversal or part exit** while an exit or a reversal of the position is
+  being placed, or is not yet seen ended in the order list: refused, with the reason. (One while a
+  market order works on the closing side was refused already.)
+- **Live, the scalping terminal's Close, Close all and auto-exit, and the strategy module's
+  exits:** refused while another exit of the position is being placed or still works at Upstox,
+  and for at least 150 s after one of theirs that Upstox did not answer. The trailing stop tries
+  again every 3 s, the strategy module on its next tick.
+- Everything else goes as before, and the sandbox is left alone on every surface. Newly sent: an
+  Exit all of a position Upstox's positions do not list yet, sized from its fills.
+
+### Not in this release yet
+- **The guard still checks Analyze mode only.** Live waits for sessions S1 and S2 and the first
+  Live day's checks above.
+- **The scalping terminal and the strategy module still size their exits from their own books.**
+  Once Upstox shows an earlier exit complete, the hold ends, and a close sent before Upstox's
+  positions show that fill can close the position a second time. A close Upstox did not answer is
+  held 150 s for this reason; one it answered is not.
+- **The strategy module's log records an exit Upstox did not answer as rejected**, with the
+  failure's own words; it is held and sent again as above.
+- **Once the guard checks Live, a position Upstox does not list and that cannot be sized reads as
+  flat**, so under the kill switch its exit is refused as opening; Exit all names it, and you
+  close it from the Upstox app. The same holds for a product that may be a conversion.
+- **The kill switch's stop warning does not count a position whose exit Upstox itself refused.**
+- **A reversal back inside the positions' lag:** long 65, reversed to -65, reversed back to +65
+  while Upstox's positions still show +65: the order reads as nothing to do and the account stays
+  at -65. It was like this before; check 8 above sets how wide the window is.
+- **Plain TradingView order alerts** are still not judged as exits, as in v0.4.1.
+
 ## v0.5.0 (6 Nov 2026)
 
 The Portfolio page: your Upstox account read-only, and portfolios you keep yourself. It includes
