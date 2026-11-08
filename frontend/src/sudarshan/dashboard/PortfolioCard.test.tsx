@@ -191,7 +191,9 @@ describe('the Portfolio card', () => {
     expect(within(rows[0]).getByText('Upstox account: reading')).toBeTruthy()
     expect(rows[0].textContent).not.toContain('₹')
     expect(within(rows[1]).getByText('₹1,100.00')).toBeTruthy() // the tabs do not wait
-    expect(api.call).toHaveBeenCalledWith('upstox_book', { parts: ['holdings'] })
+    await waitFor(() =>
+      expect(api.call).toHaveBeenCalledWith('upstox_book', { parts: ['holdings'] })
+    ) // asked once the summary is drawn, so wait for it under load
     expect(card.textContent).not.toMatch(/not answering/i)
     await act(async () => release(null))
     await waitFor(() => expect(within(card).getByText('₹15,000.00')).toBeTruthy())
