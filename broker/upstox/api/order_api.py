@@ -1383,13 +1383,22 @@ def cancel_every_open_order_detail(auth):
     every order went: ``error`` is 0 and ``success`` equals ``total``.
 
     Returns:
-        ``{"cancelled": bool, "not_confirmed": bool, "ids": [...], "done": n, "total": n}``:
-        ``cancelled`` only when every order went; ``not_confirmed`` when the answer cannot say
-        (a timeout, an Upstox 5xx, a success that proves nothing), for the cancel may still have
-        gone; ``ids`` are the orders Upstox says it cancelled, ``done`` and ``total`` its
-        summary's counts when it gave them (else None).
+        ``{"cancelled": bool, "not_confirmed": bool, "ids": [...], "done": n, "total": n,
+        "nothing_open": bool}``: ``cancelled`` only when every order went; ``not_confirmed``
+        when the answer cannot say (a timeout, an Upstox 5xx, a success that proves nothing),
+        for the cancel may still have gone; ``ids`` are the orders Upstox says it cancelled,
+        ``done`` and ``total`` its summary's counts when it gave them (else None);
+        ``nothing_open`` when Upstox answered that no order was open or pending (its error
+        UDAPI1109), which is every order cancelled and not a failure.
     """
-    result = {"cancelled": False, "not_confirmed": False, "ids": [], "done": None, "total": None}
+    result = {
+        "cancelled": False,
+        "not_confirmed": False,
+        "ids": [],
+        "done": None,
+        "total": None,
+        "nothing_open": False,
+    }
     try:
         answer = get_api_response(
             "/v2/order/multi/cancel", auth, method="DELETE", timeout=MULTI_CANCEL_LIMIT_S
@@ -1401,6 +1410,8 @@ def cancel_every_open_order_detail(auth):
         return {**result, "not_confirmed": True}
     if not isinstance(answer, dict):
         return {**result, "not_confirmed": True}
+    if _says_nothing_open(answer):
+        return {**result, "cancelled": True, "nothing_open": True, "done": 0, "total": 0}
     data = answer.get("data")
     named = data.get("order_ids") if isinstance(data, dict) else None
     result["ids"] = [str(each) for each in named] if isinstance(named, (list, tuple)) else []
@@ -1418,6 +1429,24 @@ def cancel_every_open_order_detail(auth):
         result["ids"] = []
         result["not_confirmed"] = bool(answer.get("not_confirmed"))
     return result
+
+
+#: Upstox's answer to a cancel of every open order when none is open or pending.
+_NOTHING_OPEN_CODE = "UDAPI1109"
+
+
+def _says_nothing_open(answer):
+    """SUDARSHAN M5.13: whether an Upstox error body names UDAPI1109, "No open or pending orders
+    available": nothing to cancel, which is not a failure."""
+    errors = answer.get("errors")
+    if not isinstance(errors, list):
+        return False
+    return any(
+        isinstance(error, dict)
+        and str(error.get("errorCode") or error.get("error_code") or "").strip().upper()
+        == _NOTHING_OPEN_CODE
+        for error in errors
+    )
 
 
 def cancel_every_open_order_api(auth):

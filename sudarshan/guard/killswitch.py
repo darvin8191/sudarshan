@@ -404,6 +404,9 @@ def _cancel_live_orders(
                 detail["cancelled_ids"] = gone["ids"]
             if gone["cancelled"]:
                 detail["without_book"] = True
+                if gone.get("nothing_open"):
+                    detail["nothing_open"] = True
+                    return True, words.KS_NOTHING_TO_CANCEL_UNREAD, detail
                 return True, words.KS_ORDERS_CANCELLED_UNREAD, detail
             detail["no_cancel"] = True
             return (
@@ -433,7 +436,14 @@ def _cancel_without_book(owner: Owner) -> dict:
         return cancel_every_open_order_detail(owner.auth_token)
     except Exception:
         logger.exception("The kill switch could not cancel every open order without the book")
-        return {"cancelled": False, "not_confirmed": True, "ids": [], "done": None, "total": None}
+        return {
+            "cancelled": False,
+            "not_confirmed": True,
+            "ids": [],
+            "done": None,
+            "total": None,
+            "nothing_open": False,
+        }
 
 
 def _cancel_live_gtts(owner: Owner) -> tuple[bool, str, dict]:
@@ -514,21 +524,21 @@ def _exit_all_live(
     if tried_again:
         detail["tried_again"] = True
     each = body.get("positions")
-    not_sent = 0
+    unwatched = 0
     if isinstance(each, list):
         # What became of each position (sent, not_confirmed, not_sent with its reason): the
         # phone settles its holds on it as after its own Exit all.
         detail["positions"] = each
         outcomes = [str(item.get("outcome")) for item in each if isinstance(item, dict)]
         detail["counts"] = {name: outcomes.count(name) for name in sorted(set(outcomes))}
-        not_sent = outcomes.count("not_sent")
+        unwatched = _left_with_nothing_watching(each)
     if status == 409 and not isinstance(each, list):
         # Another Exit all holds the book; one that left positions out has its own words.
         return False, words.KS_EXIT_ALL_BUSY, detail
     said = words.ks_exit_all(str(body.get("message") or ""), tried_again)
-    if not_sent and stops_cancelled:
-        said += " " + words.ks_left_without_stops(not_sent)
-        detail["left_without_stops"] = not_sent
+    if unwatched and stops_cancelled:
+        said += " " + words.ks_left_without_stops(unwatched)
+        detail["left_without_stops"] = unwatched
     return bool(ok), said, detail
 
 
@@ -557,6 +567,31 @@ def _nothing_sent_for_want_of_the_orders(body: dict) -> bool:
         if item.get("reason") != exit_guard.exit_not_sized(position, False):
             return False
     return True
+
+
+def _left_with_nothing_watching(each: list) -> int:
+    """How many positions Exit all left with nothing sent and no closing order known to be
+    working: not sized (the order list did not answer, or does not add up) or not reached in
+    its time. A position left out for an order working on its closing side, a hold or a claim
+    has that order; these have nothing, and their stops may be the ones just cancelled."""
+    from broker.upstox.api import order_api
+    from sudarshan.books import exit_guard
+
+    late_words = getattr(order_api, "_late_words", None)
+    count = 0
+    for item in each:
+        if not isinstance(item, dict) or item.get("outcome") != "not_sent":
+            continue
+        position = (item.get("exchange"), item.get("symbol"), item.get("product"))
+        reasons = {
+            exit_guard.exit_not_sized(position, False),
+            exit_guard.exit_not_sized(position, True),
+        }
+        if late_words is not None:
+            reasons.add(late_words([exit_guard.trader_name(position)]))
+        if item.get("reason") in reasons:
+            count += 1
+    return count
 
 
 def _sweep_again(

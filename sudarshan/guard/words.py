@@ -158,6 +158,10 @@ KS_ORDERS_CANCELLED_UNREAD = (
     "Upstox could not show its open orders, so Cancel all was sent to Upstox without them. "
     "Check Orders to see that none is left."
 )
+KS_NOTHING_TO_CANCEL_UNREAD = (
+    "Upstox could not show its open orders, so Cancel all was sent to Upstox without them, and "
+    "Upstox answered that no order was open: there was nothing to cancel."
+)
 KS_ORDERS_NOT_CANCELLED_UNREAD = (
     "Upstox could not show its open orders, and its Cancel all did not go through either. "
     "Open orders may still be working. Check Orders in the Upstox app."
@@ -929,6 +933,7 @@ FIXED = (
     KS_SANDBOX_NO_KEY,
     KS_ORDERS_NOT_CONFIRMED,
     KS_ORDERS_CANCELLED_UNREAD,
+    KS_NOTHING_TO_CANCEL_UNREAD,
     KS_ORDERS_NOT_CANCELLED_UNREAD,
     KS_ORDERS_KEPT_UNREAD,
     KS_NO_EXIT_ORDERS_UNREAD,

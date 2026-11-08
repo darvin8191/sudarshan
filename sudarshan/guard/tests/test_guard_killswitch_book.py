@@ -21,6 +21,7 @@ class Multi(Upstox):
     def __init__(self, held, lag=0.0):
         super().__init__(held, lag)
         self.multi_answer = 200
+        self.multi_body = None  # the body of an answer other than 200, when a test gives one
         self.multi_calls = 0
 
     def delete(self, url, headers=None, **kwargs):
@@ -29,9 +30,8 @@ class Multi(Upstox):
         with self.lock:
             self.multi_calls += 1
             if self.multi_answer != 200:
-                return world_module.FakeResponse(
-                    self.multi_answer, {"status": "error", "errors": [{"message": "down"}]}
-                )
+                body = self.multi_body or {"status": "error", "errors": [{"message": "down"}]}
+                return world_module.FakeResponse(self.multi_answer, body)
             ids = [order["id"] for order in self.working]
             self.working = []
         return world_module.FakeResponse(
@@ -191,3 +191,69 @@ def test_x5_a_position_left_open_after_its_stop_went_is_said_with_the_upstox_app
     assert said.endswith(words.ks_left_without_stops(1))
     assert "stop-loss order cancelled" in said and "Upstox app" in said
     assert steps["live_exit_all"]["detail"]["left_without_stops"] == 1
+
+
+# -- UDAPI1109: Upstox's answer to a cancel of every open order when none is open (L4) ---------
+
+
+def _nothing_open_body():
+    return {
+        "status": "error",
+        "errors": [
+            {
+                "errorCode": "UDAPI1109",
+                "message": "No open or pending orders available",
+                "propertyPath": None,
+                "invalidValue": None,
+                "error_code": "UDAPI1109",
+                "property_path": None,
+                "invalid_value": None,
+            }
+        ],
+    }
+
+
+def test_udapi1109_is_nothing_to_cancel_not_a_failure(monkeypatch):
+    from broker.upstox.api import order_api
+
+    monkeypatch.setattr(order_api, "get_api_response", lambda *a, **k: _nothing_open_body())
+    result = order_api.cancel_every_open_order_detail("token")
+    assert result["cancelled"] is True and result["nothing_open"] is True
+    assert result["not_confirmed"] is False and result["ids"] == []
+    assert (result["done"], result["total"]) == (0, 0)
+    assert order_api.cancel_every_open_order_api("token") == (True, False)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"status": "error", "errors": [{"errorCode": "UDAPI1110", "message": "too many"}]},
+        {"status": "error", "errors": [{"message": "No open or pending orders available"}]},
+        {"status": "error", "errors": "UDAPI1109"},
+        {"status": "error", "message": "UDAPI1109"},
+    ],
+    ids=["another code", "no code", "errors not a list", "no errors list"],
+)
+def test_only_the_code_itself_reads_as_nothing_open(monkeypatch, body):
+    from broker.upstox.api import order_api
+
+    monkeypatch.setattr(order_api, "get_api_response", lambda *a, **k: dict(body))
+    result = order_api.cancel_every_open_order_detail("token")
+    assert result["cancelled"] is False and result["nothing_open"] is False
+
+
+def test_the_switch_says_there_was_nothing_to_cancel(upstox):
+    """The book hangs, no order is open, the switch alone: Upstox's cancel of every open order
+    answers UDAPI1109. The step says nothing was open, never that the cancel did not go through."""
+    broker = upstox.broker
+    broker.order_book_delay = 20.0
+    broker.multi_answer = 400
+    broker.multi_body = _nothing_open_body()
+    answer = killswitch.activate(OWNER, exit_all=False, phrase="STOP")
+    steps = _steps(answer)
+    assert broker.multi_calls >= 1
+    assert steps["live_orders"]["ok"] is True
+    assert steps["live_orders"]["words"] == words.KS_NOTHING_TO_CANCEL_UNREAD
+    assert "did not go through" not in steps["live_orders"]["words"]
+    assert steps["live_orders"]["detail"]["nothing_open"] is True
+    assert "live_orders_again" not in steps  # nothing to look at again

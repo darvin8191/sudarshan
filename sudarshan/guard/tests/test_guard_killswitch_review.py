@@ -132,9 +132,9 @@ def test_h1_both_looks_pass_their_cancelled_ids_on(upstox, monkeypatch):
     seen_by_exit_all = {}
     real = killswitch._exit_all_live
 
-    def spy(owner, cancelled, seen):
+    def spy(owner, cancelled, seen, *rest):
         seen_by_exit_all["ids"] = list(cancelled)
-        return real(owner, cancelled, seen)
+        return real(owner, cancelled, seen, *rest)
 
     monkeypatch.setattr(killswitch, "_exit_all_live", spy)
     broker.refuse_always.add(broker.working[-1]["id"])  # forces the second look
