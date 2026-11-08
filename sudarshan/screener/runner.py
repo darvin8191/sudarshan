@@ -153,8 +153,13 @@ class Runner:
             log.exception("the failed run %s could not be recorded either", due.key)
 
 
-async def run_runner(service, *, tick_s: float = TICK_S) -> None:
-    """The job: a Runner over the service's store and the registered source."""
+async def run_runner(service, *, tick_s: float = TICK_S, wait_s: float = 30.0) -> None:
+    """The job: a Runner over the service's store and the registered source. The feed job
+    registers the source moments after start; this waits for it, then idles in words if none."""
+    waited = 0.0
+    while service.parts.get("source") is None and waited < wait_s:
+        await asyncio.sleep(0.5)
+        waited += 0.5
     source = service.parts.get("source")
     if source is None or service.store is None:
         log.info("no price source is registered in this process; no screen is checked")
