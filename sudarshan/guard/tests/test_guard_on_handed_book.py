@@ -42,9 +42,9 @@ def test_x3_the_switchs_exit_all_sends_every_exit_when_the_order_book_is_slow(
     reads_before = []
     real_exit_all = killswitch._exit_all_live
 
-    def counted(owner, cancelled, seen):
+    def counted(*args, **kwargs):
         reads_before.append(broker.order_book_reads)
-        return real_exit_all(owner, cancelled, seen)
+        return real_exit_all(*args, **kwargs)
 
     monkeypatch.setattr(killswitch, "_exit_all_live", counted)
     answer = killswitch.activate(OWNER, exit_all=True, phrase="STOP")

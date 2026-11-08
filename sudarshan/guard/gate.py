@@ -20,8 +20,9 @@ When it covers the pipe, an order passes in three steps:
 
 An exit always goes. A refusal is 403 with a sentence (words.py), never 409, which the phone reads
 as an earlier exit still being placed (frontend/src/sudarshan/books/sendOutcome.ts), and no
-function is called. Each send stays recorded until its answer says nothing was sent, until
-the book shows it (or its order ended), or ``SEND_HELD_AT_MOST_S`` after its answer; an answer
+function is called. Each send stays recorded until its answer says nothing was sent, or until
+the book shows it (or its order ended); past ``SEND_HELD_AT_MOST_S`` from its answer it stays
+only until the next order book read answers for it, and no longer than its trading day. An answer
 that names no order is forgotten ``SHOWS_WITHIN_S`` after it, for the book has no order to be
 asked about. The records are the in-flight registry the kill switch waits on when it is turned on.
 
@@ -31,7 +32,9 @@ sandbox's ``cancel_order``, Cancel all included) drops the claims on that order 
 (``cancelled``). And before an order is refused only because of claims, the broker's order book
 is read once: a claim whose order shows cancelled, rejected or still resting is dropped, and the
 order judged again; a claim whose order shows complete, or is not in the book yet, stays until
-the positions book shows the exit or ``SEND_HELD_AT_MOST_S`` have passed.
+the positions book shows the exit or ``SEND_HELD_AT_MOST_S`` have passed; a claim whose market
+order shows working stays however long it has, counting from that read (release review v0.4.1,
+L1), so a plain exit never goes beside a first that is still working.
 
 If the gate itself breaks, an order passes only when nothing is refusing new risk. While the kill
 switch is on, or its state could not be read, it is refused (fail closed). Under the kill switch
@@ -108,8 +111,13 @@ LIVE, SANDBOX = "live", "sandbox"
 #: show an exit (the same as sudarshan/books/exit_guard.py).
 SHOWS_WITHIN_S = EXIT_SHOWS_WITHIN_S
 #: A send counts this long at most, answered or not: the phone's no-answer hold
-#: (frontend/src/sudarshan/books/sent.ts).
+#: (frontend/src/sudarshan/books/sent.ts). A send whose answer named its order counts past it
+#: while the order book shows that order working (release review v0.4.1, L1): after this long
+#: from the answer, or from the last read that showed it working, its claim stands only until
+#: the next read of the book answers for it.
 SEND_HELD_AT_MOST_S = 150.0
+#: No order outlives its trading day, so a claim never asked about again ends here at the latest.
+CLAIM_KEPT_AT_MOST_S = 16 * 3600.0
 #: How soon the kill switch's state is read again after a read failed.
 STATE_RETRY_S = 2.0
 #: An order that finds the first state read in flight waits this long for it.
@@ -251,6 +259,7 @@ class Send:
     ref: str | None = None  # the broker's order id, once known
     answered: float | None = None
     closed: int = 0  # how much of this entry later exits have been taken to close (the brake)
+    working_at: float | None = None  # monotonic: the last order book read showing it working
 
 
 @dataclass
@@ -747,10 +756,18 @@ class Gate:
                 return decided
             checked = True
             ended = self._ended_orders(known, decided.refs)  # a read: outside the lock
-            if ended:
+            if ended is not None:
                 with self._lock:
+                    now = time.monotonic()
+                    working = ended.get(_WORKING, set())
                     self._drop_claims(known.pipe, ended.get(_ENDED, set()))
-                    self._drop_claims(known.pipe, ended.get(_WORKING, set()), resting_only=True)
+                    self._drop_claims(known.pipe, working, resting_only=True)
+                    self._seen_working(known.pipe, working, now)
+                    # Complete, or not in the book: past SEND_HELD_AT_MOST_S the positions book
+                    # has had its time to show the exit, so the claim stands for nothing more.
+                    self._drop_stale_claims(
+                        known.pipe, decided.refs - working - ended.get(_ENDED, set()), now
+                    )
 
     def _decide(
         self,
@@ -838,12 +855,12 @@ class Gate:
             return frozenset()
         return frozenset(send.ref for send in self._counted(order, facts.position) if send.ref)
 
-    def _ended_orders(self, order: Order, refs: frozenset) -> dict[str, set[str]]:
+    def _ended_orders(self, order: Order, refs: frozenset) -> dict[str, set[str]] | None:
         """Of ``refs``, the orders the broker shows cancelled or rejected (key ``_ENDED``: their
         claims stand for nothing) and those it shows working (key ``_WORKING``: the claim of a
         resting limit or stop stands for nothing, but a market order not filled yet is still on
         its way to the book, so its claim stays until the book shows it final). A read that
-        fails ends none."""
+        fails answers None, and ends none."""
         try:
             if order.pipe == LIVE:
                 statuses = self._read.live_order_statuses(order.owner)
@@ -851,7 +868,7 @@ class Gate:
                 statuses = self._read.sandbox_order_statuses(order.owner, sorted(refs))
         except readers.Unreadable as exc:
             logger.warning(f"The risk check could not read the order book for claims: {exc}")
-            return {}
+            return None
         found: dict[str, set[str]] = {}
         for ref in refs:
             status = statuses.get(ref)
@@ -869,6 +886,23 @@ class Gate:
             if send.order.pipe == pipe and send.ref in refs:
                 if resting_only and not _rests(send.order):
                     continue
+                del self._sends[token]
+
+    def _seen_working(self, pipe: str, refs: set[str], now: float) -> None:
+        """The order book showed these orders working: their claims count from now again
+        (``_forget``); call under the lock."""
+        for send in self._sends.values():
+            if send.order.pipe == pipe and send.ref in refs:
+                send.working_at = now
+
+    def _drop_stale_claims(self, pipe: str, refs: set[str], now: float) -> None:
+        """Of the sends on these orders, drop the ones past ``SEND_HELD_AT_MOST_S`` from their
+        answer or the last read that showed them working: the book was just read and did not
+        show the order working, so the claim has nothing left to wait for. Call under the lock."""
+        for token, send in list(self._sends.items()):
+            if send.order.pipe != pipe or send.ref not in refs or send.answered is None:
+                continue
+            if now - max(send.answered, send.working_at or _NEVER) > SEND_HELD_AT_MOST_S:
                 del self._sends[token]
 
     def release(self, pipe: str, ref: str) -> None:
@@ -1355,9 +1389,11 @@ class Gate:
                 gone = now - send.admitted > SEND_HELD_AT_MOST_S
             elif send.ref:
                 # Upstox named its order: the claim stands until the book shows the exit
-                # (``_counted``) or the order ended (``_ended_orders``), at most
-                # ``SEND_HELD_AT_MOST_S`` from the answer; no shorter clock ends it.
-                gone = now - answered > SEND_HELD_AT_MOST_S
+                # (``_counted``) or the order ended (``_ended_orders``). No clock ends it while
+                # the order may still be working (a market exit resting price-protected, L1):
+                # past ``SEND_HELD_AT_MOST_S`` it stands until the next order book read answers
+                # for it (``_drop_stale_claims``), and never past its trading day.
+                gone = now - answered > CLAIM_KEPT_AT_MOST_S
             else:
                 gone = now - answered > SHOWS_WITHIN_S  # no order to ask the book about
             if gone:
