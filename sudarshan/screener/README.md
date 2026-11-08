@@ -81,28 +81,39 @@ screen), `unavailable` (503), `not_confirmed` (504: a write was sent and no answ
 `unauthorized` (401), `forbidden` (403), `rate_limited` (429). The sentences shared word for word
 are `contract.WORDS`.
 
-What the data carries:
+What the data carries (the shapes of `types.ts`):
 
-- `state`: `screens` (each screen row with `spec`, `status`, `version`, `where` (the conditions
-  in words), `alerts`, `alerts_paused`, `list_id`, `last_run`), `engine` (`state`, `text`: the
-  line under the header, and its facts), `budget` (`active`, `max_active`, `max_keys`).
-- `create` and `update`: the screen row as in `state`.
-- `results`: `screen`, `run` (the latest done run), `marks` (words), `members` (the membership
-  rows of the screen's list), `values` (key to clause values of the latest run), `changes`.
-- `runs`: `runs` (newest first, each with `mark_words`) and `more`; `run`: `run`, `changes`,
-  `values`, `values_note` ("Values are kept for 7 days; the list for 100 days." when gone),
-  `mark_words`; `runs_since`: `runs` (oldest first) and `more`.
-- `membership`: `rows`; `membership_update`: the row.
+- `state`: `enabled`, `engine` (`state`, `line`: the words under the header, `real_time`,
+  `next_at`), `screens` (each a `ScreenRow`: `id`, `version`, `name`, `status`, `status_reason`,
+  `where` (the conditions in words), `spec`, `matches`, `entered_today`, `added_count`,
+  `target_name`, `list_id`, `next_check`, `last_run_id`, `alerts`, `alerts_paused`,
+  `updated_at`), `limits` (`active`, `active_used`, `max_keys`), `last_run_id` (the newest run
+  the service holds, for the catch-up), `server_time`.
+- `create` and `update`: one `ScreenRow`; `delete`: `deleted` (the id) and `removed_from_list`.
+- `results`: `screen_id`, `run` (a `RunRow`: `id`, `screen_id`, `at`, `candle` ("10:00 to
+  10:15"), `matches`, `entered`, `exited`, `missing`, `not_checked`, `status`, `marks` (words),
+  `alerts`), `rows` (each a `ResultRow`: `member_id`, `key`, `symbol`, `exchange`, `rank`,
+  `values` ("Close 120.00 · RSI 61.2"), `forming`, `chip` (icon, text, tone, name, note),
+  `ltp`, `change_pct`), `not_checked` (`count`, `reasons`).
+- `runs`: `runs` (`RunRow`s, newest first) and `more`; `run`: `screen_id`, `run`, `rows`,
+  `not_checked`, `values_note` ("Values are kept for 7 days; the list for 100 days." once the
+  values are gone, else null); `runs_since`: `runs` (oldest first) and `more`.
+- `preview`: `label` ("Preview on the 10:15 to 10:30 candle, not saved"), `count`, `first` (at
+  most 25 `ResultRow`s), `not_checked`, `needs`.
+- `membership`: `rows` (each a `MemberRow`: the membership fields with `chip`);
+  `membership_update`: the row.
 - `presets`: `presets` (the Library cards: `key`, `name`, `about`, `usable`, `where`, `spec`,
-  `reason`); `universes`: `kinds` and `built`; `today`: `session`, `trading`, `boundaries` per
-  active screen (`k`, `end`, `at`) and `next_at`.
+  `reason`); `universes`: `universes` (each `kind`, `label`, `note`, plus `id`, `underlying` or
+  `list_id`; the owner's own watchlists are not listed, the page has them); `today`: `screens`
+  (`id`, `name`, `entered`, `exited`, `matches`), `recent` (`symbol`, `exchange`, `kind`, `at`,
+  `screen`), `unseen_alerts`, `session`.
 
 Units everywhere (cross-design X3): prices in paise as integers, percentages as decimal strings,
 instants in epoch milliseconds, a trading day as `YYYYMMDD`.
 
 Live updates reach an open app over Socket.IO: the app emits `sudarshan_screener_join` (the owner
-only) and then receives `sudarshan_screener_run` (`{screen_id, run_id, run_key, matched, entered,
-exited, missing, not_checked}`), `sudarshan_screener_lists` (`{list_id}`: a target list changed)
+only) and then receives `sudarshan_screener_run` (`{screen_id, run_id, run_key, at, candle, counts: {matches,
+entered, exited, missing, not_checked}, entered, exited, marks}`), `sudarshan_screener_lists` (`{list_id}`: a target list changed)
 and `sudarshan_screener_state`. The service's two internal routes
 (`/sudarshan/screener/internal/watchlist?op=watchlist_read|watchlist_apply` and
 `/sudarshan/screener/internal/push`) are sealed under their own purpose, refused with 404 when
