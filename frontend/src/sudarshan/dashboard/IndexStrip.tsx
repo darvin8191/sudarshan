@@ -219,10 +219,12 @@ function IndexTile({
  * market-data connection the whole app shares (`useMarketData`, LTP mode),
  * starting from a REST read that also gives the previous close. While NSE is
  * open, a level that has stopped arriving is muted and marked with a clock;
- * the line underneath says "Live" only while ticks are coming in, and
+ * the line underneath says "Real-time" only while ticks are coming in, and
  * "Reconnecting" with the age of the levels while the socket is down (after
  * the phone wakes, say). A tile opens its index's phone chart (M4.15). Shown
- * only when the account has an API key, which the feed and the quote call need.
+ * only with a key to read with, which the feed and the quote call need; the
+ * dashboard passes one once Upstox is logged in and says why when it cannot
+ * (AccessNotice).
  */
 export function IndexStrip({
   apiKey,

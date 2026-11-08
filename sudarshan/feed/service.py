@@ -31,10 +31,15 @@ import websockets
 import zmq
 from websockets.exceptions import ConnectionClosed, InvalidHandshake, InvalidStatus, InvalidURI
 
+from sudarshan.ops.release import installed_release  # M18.1
+from sudarshan.tasks import cancel_and_wait
+
 from . import __version__, protocol
 from .bus import HEALTH_TOPIC, Publisher
+from .claims import ClaimsMixin  # M18.1: per-client subscription claims
 from .config import Settings, is_loopback_url, setup_logging
 from .http_api import start_http
+from .rest import RestGovernor  # M18.9: the REST governor
 from .store import SnapshotStore, TickRecorder
 from .subscriptions import Subscriptions, validate
 from .window import MarketWindow, iso, ist_date
@@ -50,7 +55,7 @@ NO_TOKEN_S = 60.0
 TOKEN_POLL_S = 5.0  # how often a backoff checks whether the token file changed
 CLOSED_POLL_S = 30.0
 WATCH_EVERY_S = 1.0
-STALL_S = 120.0  # no message for this long in continuous trading (09:15-15:40) forces a reconnect
+STALL_S = 120.0  # silence this long in continuous trading, from its open (09:15), reconnects
 SNAPSHOT_EVERY_S, FLUSH_EVERY_S, HEALTH_EVERY_S = 30.0, 3.0, 5.0
 SNAPSHOT_KEEP_DAYS = 30  # an unsubscribed key's last tick is kept this long
 SUB_BATCH, SUB_PAUSE_S = 100, 0.1
@@ -111,13 +116,29 @@ def _age(start: float | None, now: float) -> float | None:
     return None if start is None else round(now - start, 1)
 
 
-class FeedService:
+def _phase(segment: str, phase: dict | None) -> str:
+    """M18.1: "NSE_EQ CAS_LM_START at 2026-10-27T15:20:00+05:30", or "NSE_EQ none". A time that is
+    no epoch-ms instant (the unit is Upstox's, not ours) is shown as it came, never an error."""
+    if phase is None:
+        return f"{segment} none"
+    at = phase["updated_ms"]
+    if not at:
+        return f"{segment} {phase['status']}"
+    try:
+        when = iso(at / 1000)
+    except (ValueError, OverflowError, OSError):
+        when = str(at)
+    return f"{segment} {phase['status']} at {when}"
+
+
+class FeedService(ClaimsMixin):
     def __init__(self, cfg: Settings, clock=time.time):
         self.cfg, self.clock = cfg, clock
+        self.started_at = iso(clock())  # M18.1: a consumer sees from /health that we restarted
         self.window = MarketWindow(
             cfg.holidays_file, cfg.window, cfg.always_on, cfg.extra_days_file
         )
-        self.subs = Subscriptions.load(cfg.keys_file, cfg.state_dir / "subscriptions.json")
+        self.subs = Subscriptions.load(cfg.keys_file, cfg.state_dir / "subscriptions.json", clock())
         self.store = SnapshotStore(cfg.state_dir / "snapshot.json")
         self.recorder = None
         if cfg.record:
@@ -131,6 +152,7 @@ class FeedService:
         self._send_lock = asyncio.Lock()
         self._throttle = Throttle()
         self._attempt_task: asyncio.Task | None = None
+        self._abandon_task: asyncio.Future | None = None  # stop(): re-cancels the attempt
         self._ws = None
         self._live = False  # the desired set has been sent on the current socket
         self._state, self._detail = "starting", ""
@@ -144,10 +166,13 @@ class FeedService:
         self._next_retry_at: float | None = None
         self._seen: set[str] = set()  # keys that sent data on the current socket
         self._market_status: dict[str, str] = {}
+        self._cas_status: dict[str, dict] = {}  # M18.1: Upstox's closing-auction phase per segment
+        self._cas_socket: float | None = None  # M18.1: the socket whose first market info was told
         self._traded_on = None  # the IST day of the last tick whose last trade was that day
         self._last_error: dict | None = None
         self._last_disconnect: dict | None = None
         self._stats = dict.fromkeys(STATS, 0)
+        self.rest = RestGovernor(self)  # M18.9: GET /upstox/... on the HTTP port (rest.py)
 
     # ---- lifecycle -------------------------------------------------------------------------
     async def run(self) -> None:
@@ -173,9 +198,8 @@ class FeedService:
             try:
                 await self._supervise()
             finally:
-                for task in tasks:
-                    task.cancel()
-                await asyncio.gather(*tasks, return_exceptions=True)
+                self.rest.close()  # M18.9: waiting REST calls are answered, never dropped
+                await cancel_and_wait(self._abandon_task, *tasks)
                 for fn in (self.store.save, self._flush_recorder):
                     try:
                         fn()
@@ -189,8 +213,9 @@ class FeedService:
             self._stop.set()
         # Mid-authorize or mid-handshake there is no socket to close yet: abandon the attempt.
         # With a socket, the session watchdog sends the close frame.
-        if self._ws is None and self._attempt_task is not None:
-            self._attempt_task.cancel()
+        # A cancel can be swallowed inside httpx's connect, so it is sent again until the task ends.
+        if self._ws is None and self._attempt_task is not None and self._abandon_task is None:
+            self._abandon_task = asyncio.ensure_future(cancel_and_wait(self._attempt_task))
 
     @property
     def http_port(self) -> int:
@@ -215,6 +240,7 @@ class FeedService:
             self.recorder.flush()
 
     def _prune_snapshot(self) -> None:
+        self.subs.expire(self.clock())  # M18.1: claims not renewed for 7 days (no socket now)
         cutoff_ms = int((self.clock() - SNAPSHOT_KEEP_DAYS * 86400) * 1000)
         if n := self.store.prune(self.subs.desired(), cutoff_ms):
             log.info("snapshot: forgot %d unsubscribed keys idle %d days", n, SNAPSHOT_KEEP_DAYS)
@@ -362,6 +388,7 @@ class FeedService:
             return self._fail("network", f"{type(exc).__name__}: {exc}")
         finally:
             self._ws, self._live = None, False
+            self._cas_status = {}  # M18.1: known only from a socket's own market info
             if self._connected_at is not None:
                 self._last_session_s = time.monotonic() - self._connected_at
             self._connected_at = self._connected_since = None
@@ -377,9 +404,7 @@ class FeedService:
             async for message in ws:
                 self._on_message(message)
         finally:
-            for task in helpers:
-                task.cancel()
-            await asyncio.gather(*helpers, return_exceptions=True)
+            await cancel_and_wait(*helpers)
         reason = self._close_reason
         self._disconnected(ws.close_code, ws.close_reason or "", reason or "closed by Upstox")
         return {WINDOW_CLOSED: "window", STOPPING: "stopped"}.get(reason, "closed")
@@ -403,11 +428,13 @@ class FeedService:
             return
 
     def _stalled(self, now: float) -> bool:
-        if not (self._live and self.subs.desired() and self.window.in_core_session(now)):
+        opened = self.window.core_age(now)  # M18.1: seconds since continuous trading began
+        if not (self._live and self.subs.desired() and opened is not None):
             return False  # quiet is normal outside continuous trading or with nothing subscribed
         if self.window.waits_for_first_trade(now) and self._traded_on != ist_date(now):
             return False  # a reopened day at the usual hours: until it trades, quiet is normal
-        return time.monotonic() - self._last_msg > STALL_S
+        # M18.1: silence counts from the open, never from before it (a quiet pre-open is no stall)
+        return min(time.monotonic() - self._last_msg, opened) > STALL_S
 
     async def _resubscribe(self, ws) -> None:
         """Upstox forgets every subscription when a socket closes: send the whole set again."""
@@ -441,11 +468,15 @@ class FeedService:
             self._throttle(logging.WARNING, "upstox-text", f"Upstox says: {text}")
             return
         try:
-            kind, ticks, status = protocol.decode(message)
+            kind, ticks, status, cas = protocol.decode(message)
             changed = {s: v for s, v in status.items() if self._market_status.get(s) != v}
             if changed:
                 log.info("market status: %s", ", ".join(f"{s} {v}" for s, v in changed.items()))
                 self._market_status.update(changed)
+            # M18.1: the segment status first, then the auction status, so one health copy has both;
+            # either change reaches the consumers' gates at once
+            if self._note_cas(cas) or changed:
+                self._publish_health()
             ts_recv, fresh = int(self.clock() * 1000), kind == "initial_feed"
             for key, partial in ticks.items():
                 if partial:
@@ -456,6 +487,29 @@ class FeedService:
             self._stats["decode_errors"] += 1
             what = f"bad feed frame ({len(message)} bytes): {exc!r}"
             self._throttle(logging.WARNING, "decode", what, exc_info=True)
+
+    def _note_cas(self, cas: dict[str, dict] | None) -> bool:
+        """M18.1: a frame with market info carries the whole closing-auction state (protocol.py).
+
+        Whether Upstox fills casMarketStatus is not known yet (on 27 Oct segmentStatus said
+        nothing at 15:15 or 15:20), so the journal tells every session: the first market info on
+        each socket is one INFO line even when the map is empty, and every later change is one
+        INFO line naming the segments that changed, with Upstox's own time for each phase
+        (segments in name order: the wire's map has none). True when the map changed: the
+        caller publishes health once for the whole frame.
+        """
+        first = self._cas_socket != self._connected_at  # the first market info on this socket
+        if cas is None or (cas == self._cas_status and not first):
+            return False
+        old, self._cas_status, self._cas_socket = self._cas_status, cas, self._connected_at
+        changed = sorted(cas) if first else sorted(s for s in cas.keys() | old.keys()
+                                                   if cas.get(s) != old.get(s))  # fmt: skip
+        told = ", ".join(_phase(seg, cas.get(seg)) for seg in changed)
+        if first:
+            log.info("closing auction status on connect: %s", told or "none")
+        else:
+            log.info("closing auction status: %s", told)
+        return cas != old
 
     def _note_trade(self, ticks: dict, ts_recv: int) -> None:
         """A tick whose last trade time falls on today (IST) shows the exchange trading today."""
@@ -514,7 +568,9 @@ class FeedService:
         stats = self._stats | {"snapshot_keys": len(self.store.ticks)}
         return {
             "service": "sudarshan-feed",
+            "release": installed_release(self.cfg.deployed_tag_file),  # M18.1: not "version"
             "version": __version__,
+            "started_at": self.started_at,
             "state": self._state,
             "detail": self._detail,
             "connected_since": iso(self._connected_since),
@@ -523,6 +579,7 @@ class FeedService:
             "next_retry_in_s": None if retry is None else round(retry, 1),
             "token_file_readable": self._token_readable(),
             "subscribed": self.subs.counts(),
+            "claims": self.subs.claim_counts(),
             "subscriptions_live": self._live,
             "keys_without_data": {"count": len(missing), "sample": missing[:10]},
             "reconnects": max(0, self._stats["connects"] - 1),
@@ -530,9 +587,11 @@ class FeedService:
             "last_disconnect": self._last_disconnect,
             "market_window": self.window.describe(now),
             "market_status": self._market_status,
+            "cas_status": self._cas_status,  # M18.1: {} when no closing auction runs
             "stats": stats | {"zmq_dropped": self.pub.dropped if self.pub else 0},
             "recorder": self.recorder.status() if self.recorder else None,
             "zmq": self.pub.endpoint if self.pub else None,
+            "rest": self.rest.health(),  # M18.9: the REST governor, per API and client
         }
 
     # ---- local API ------------------------------------------------------------------------------
@@ -547,36 +606,22 @@ class FeedService:
     async def subscribe(self, mode, keys) -> dict:
         keys = validate(mode, keys)
         async with self._send_lock:
-            new, moved = self.subs.subscribe(mode, keys)  # CapError leaves everything unchanged
-            for key in moved:
-                self.store.reset(key)  # do not carry the old mode's fields into the new one
-            live = await self._send_live((("sub", new), ("change_mode", moved)), mode)
-        log.info("API subscribe %s: %d new, %d moved (live: %s)", mode, len(new), len(moved), live)
+            change = self.subs.subscribe(mode, keys)  # CapError leaves everything unchanged
+            live = await self._apply_change(change)  # claims.py: only what the socket lacks
+        new, moved = len(change.new), len(change.moved)
+        log.info("API subscribe %s: %d new, %d moved (live: %s)", mode, new, moved, live)
         counts = self.subs.counts()
-        return {"ok": True, "new": len(new), "mode_changed": len(moved), "applied_live": live,
+        return {"ok": True, "new": new, "mode_changed": moved, "applied_live": live,
                 "subscribed": counts}  # fmt: skip
 
     async def unsubscribe(self, keys) -> dict:
         keys = validate(None, keys, need_mode=False)
         async with self._send_lock:
-            gone = self.subs.unsubscribe(keys)
-            live = await self._send_live((("unsub", gone),), None)
+            gone, change = self.subs.unsubscribe(keys)  # a claimed key stays on the socket
+            live = await self._apply_change(change)
         log.info("API unsubscribe: %d removed (live: %s)", len(gone), live)
         counts = self.subs.counts()
         return {"ok": True, "removed": len(gone), "applied_live": live, "subscribed": counts}
-
-    async def _send_live(self, batches, mode: str | None) -> bool:
-        """Send changes on the live socket; False means they apply at the next connect."""
-        ws = self._ws
-        if ws is None or not self._live:
-            return False
-        try:
-            for method, keys in batches:
-                if keys:
-                    await self._send(ws, method, keys, mode)
-        except ConnectionClosed:
-            return False
-        return True
 
 
 async def _serve(cfg: Settings) -> None:

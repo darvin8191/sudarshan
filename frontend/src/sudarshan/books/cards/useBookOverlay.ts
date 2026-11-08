@@ -9,7 +9,8 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router'
  * - `?row=<id>`: the sheet of one card (a position, an order, a holding);
  * - `?act=<what>&row=<id>`: a step taken from that sheet (the exit or cancel
  *   confirmation, the order ticket, the modify dialog);
- * - `?act=exitall` or `?act=cancelall`: the confirmation for the whole book.
+ * - `?act=exitall` or `?act=cancelall`: the confirmation for the whole book;
+ * - `?act=killswitch` or `?act=resume`: the kill switch's sheets (Positions, Risk).
  *
  * Opening pushes a history entry marked as this page's own; closing it (the
  * close button, a tap outside, Escape, Cancel) goes back, so Back and the close
@@ -40,6 +41,8 @@ export type BookAct =
   | 'cancelall'
   | 'buy'
   | 'sell'
+  | 'killswitch'
+  | 'resume'
 
 export type BookOverlay = { act: 'sheet'; row: string } | { act: BookAct; row: string | null }
 
@@ -52,6 +55,8 @@ const ACTS = new Set<string>([
   'cancelall',
   'buy',
   'sell',
+  'killswitch',
+  'resume',
 ])
 
 /**

@@ -23,6 +23,7 @@ import broker.upstox.api.order_api as upstox
 import utils.session as session_utils
 from sudarshan.books import exit_guard
 from sudarshan.books.exit_guard import EXIT_ALL_BEING_PLACED, ExitsInFlight
+from sudarshan.books.single_exit import EXIT_NOT_CONFIRMED
 
 X = "NIFTY27OCT2625900CE"
 Y = "BANKNIFTY27OCT2657500PE"
@@ -32,6 +33,10 @@ POSITION = ("NFO", X, "MIS")
 ON_ITS_WAY = re.compile(
     r"\AAn exit for NIFTY 25900 CE is already on its way \(sent \d\d:\d\d:\d\d\)\. Check Orders, "
     r"and exit it again only if it is still open\.\Z"
+)
+EXIT_WORKING = re.compile(  # the earlier exit's order is seen working in the order book (L4)
+    r"\AThe earlier exit for NIFTY 25900 CE \(order ending \d{4}, sent \d\d:\d\d:\d\d\) is "
+    r"still working at Upstox, so no exit was sent\. Cancel or modify it in Orders, then exit\.\Z"
 )
 WAIT = 10  # seconds; never reached when the code is right
 REPO = Path(__file__).resolve().parents[3]
@@ -183,6 +188,34 @@ def test_a_position_is_named_as_the_phone_names_it(position, name):
     assert exit_guard.trader_name(position) == name
 
 
+def test_a_working_order_is_named_with_what_to_do_and_the_rest_counted():
+    """The second review's MEDIUM-3: which order holds the position back, and the next step."""
+    from sudarshan.books.exit_guard import WorkingOrder, order_working
+
+    held = ("NFO", "NIFTY27OCT2625900CE", "MIS")
+    stop = WorkingOrder("SELL", 65, "SL-M", 97.0, 98.5, "251027000123456", "10:42:20")
+    assert order_working(held, [stop], 65) == (
+        "NIFTY 25900 CE has a SELL 65 SL-M order (trigger 98.50, order ending 3456, placed "
+        "10:42:20) working to close it, so no exit was sent for it. Cancel it in Orders, then exit."
+    )  # a stop-market order's price is not its own: not said
+    target = WorkingOrder("SELL", 30, "LIMIT", 180.0, 0.0, "251027000123457", "")
+    part = WorkingOrder("SELL", 20, "SL", 97.0, 98.5, "251027000123458", "10:42:21")
+    assert order_working(held, [target, part], 65) == (
+        "NIFTY 25900 CE has a SELL 30 LIMIT order (price 180.00, order ending 3457) and 1 more "
+        "order working to close 50 of the 65 held, so no exit was sent for any of it. Cancel them "
+        "in Orders, then exit."
+    )
+    assert order_working(held, [target, part, stop], 65).endswith(
+        "and 2 more orders working to close it, so no exit was sent for it. Cancel them in "
+        "Orders, then exit."
+    )
+    bare = WorkingOrder("BUY", 0)  # an order book that said little
+    assert order_working(("NSE", "SBIN", "MIS"), [bare], 10) == (
+        "SBIN has a BUY order working to close it, so no exit was sent for it. Cancel it in "
+        "Orders, then exit."
+    )
+
+
 @pytest.fixture
 def server_zone(monkeypatch):
     """Set the process's own time zone, as a server kept on UTC (or anywhere) has it."""
@@ -323,23 +356,39 @@ def test_an_exit_counts_as_placed_as_long_as_the_phone_holds_it():
     assert exit_guard.EXIT_SHOWS_WITHIN_S == hold_ms / 1000
 
 
-def test_an_unanswered_exit_all_is_held_on_the_phone_until_the_server_is_done():
-    """Exit all starts no Upstox call after EXIT_ALL_SENDS_FOR_S, and the one running then is
-    bounded; the phone holds an Exit all that got no answer at least that long (item 9)."""
+def _app_request_limit_s() -> int:
+    """The time nginx gives a request to the app (install/install.sh, the gunicorn location)."""
+    script = (REPO / "install/install.sh").read_text(encoding="utf-8")
+    block = re.search(r"location / \{\s*proxy_pass http://unix:[^}]*\}", script)
+    assert block, "the app's nginx location was not found"
+    return int(re.search(r"proxy_read_timeout (\d+)s;", block[0])[1])
+
+
+def test_an_exit_all_ends_inside_the_time_nginx_gives_its_request():
+    """Its reads (the positions with Upstox's 429 back-off, the order book cut off at its own
+    limit), then EXIT_ALL_SENDS_FOR_S for sending, and the last exit's own bound (item 2)."""
+    from broker.upstox.api.rate_limiter import BASE_BACKOFF, MAX_RETRIES
     from utils.broker_backpressure import BROKER_MAX_ORDER_QUEUE_WAIT_SECONDS
     from utils.httpx_client import REQUEST_TIMEOUT_SECONDS
 
+    back_off = sum(BASE_BACKOFF * 2**attempt for attempt in range(MAX_RETRIES))
+    reads = REQUEST_TIMEOUT_SECONDS + back_off + exit_guard.EXIT_ALL_ORDERS_READ_S
+    last_exit = REQUEST_TIMEOUT_SECONDS + BROKER_MAX_ORDER_QUEUE_WAIT_SECONDS
+    budget = reads + exit_guard.EXIT_ALL_SENDS_FOR_S + last_exit
+    assert budget <= _app_request_limit_s(), budget
+    assert exit_guard.EXIT_ALL_SENDS_FOR_S >= 5  # and it is not cut short in an ordinary day
+    assert exit_guard.EXIT_ALL_ORDERS_READ_S <= 5  # a slow order book costs a few seconds only
+
+
+def test_the_phone_s_hold_of_an_unanswered_exit_is_not_what_keeps_overlaps_safe():
+    """The hold ends before a slow Exit all may: the server answers a tap after it with 409."""
     sent = (REPO / "frontend/src/sudarshan/books/sent.ts").read_text(encoding="utf-8")
     hold_ms = int(
         re.search(r"export const NO_ANSWER_HOLD_MS = ([0-9_]+)", sent)[1].replace("_", "")
     )
-    budget = (
-        exit_guard.EXIT_ALL_SENDS_FOR_S
-        + REQUEST_TIMEOUT_SECONDS
-        + BROKER_MAX_ORDER_QUEUE_WAIT_SECONDS
-    )
-    assert budget <= hold_ms / 1000, (budget, hold_ms)
-    assert exit_guard.EXIT_ALL_SENDS_FOR_S >= 5  # and it is not cut short in an ordinary day
+    assert hold_ms / 1000 < _app_request_limit_s()
+    with exit_guard.EXITS.every("live"):
+        assert exit_guard.why_busy("live", "NFO", X, "MIS") == EXIT_ALL_BEING_PLACED
 
 
 # -- The app's routes and services, over the real Upstox module ---------------------------------
@@ -384,6 +433,7 @@ def broker(monkeypatch):
     state = {
         "book": {X: 65, Y: -30},
         "orders": [],
+        "listed": [],  # the order book's rows: every order placed, working
         "hold": set(),  # symbols whose order waits at the broker until "release"
         "entered": threading.Event(),
         "release": threading.Event(),
@@ -398,6 +448,8 @@ def broker(monkeypatch):
                 "product": product,
                 "tradingsymbol": symbol,
                 "quantity": state["book"][symbol],
+                "day_buy_quantity": 0,
+                "day_sell_quantity": 0,
             }
             for symbol, (token, exchange, product) in ROWS.items()
             if symbol in state["book"]
@@ -412,12 +464,31 @@ def broker(monkeypatch):
         if state["answer"] is not None:
             return state["answer"]
         orderid = f"2610270000{len(state['orders']):02d}"
+        # Upstox's order book lists it at once, working: a market order held at its price
+        token, _exchange, product = ROWS[data["symbol"]]
+        state["listed"].append(
+            {
+                "order_id": orderid,
+                "instrument_token": token,
+                "product": product,
+                "transaction_type": data["action"],
+                "status": "open",
+                "order_type": "MARKET",
+                "quantity": int(data["quantity"]),
+                "pending_quantity": int(data["quantity"]),
+                "filled_quantity": 0,
+            }
+        )
         return Answer(200), {"status": "success", "data": {"order_ids": [orderid]}}, orderid
 
+    monkeypatch.setattr(
+        upstox, "get_order_book", lambda auth: {"status": "success", "data": list(state["listed"])}
+    )
     monkeypatch.setattr(upstox, "get_positions", get_positions)
     monkeypatch.setattr(upstox, "place_order_api", place_order_api)
     monkeypatch.setattr(upstox, "get_symbol", lambda token, exchange: BY_TOKEN.get(token))
     monkeypatch.setattr(upstox, "get_br_symbol", lambda symbol, exchange: symbol)
+    monkeypatch.setattr(upstox, "get_token", lambda symbol, exchange: ROWS.get(symbol, (None,))[0])
     upstox._POSITION_BOOK.invalidate("token")
     monkeypatch.setattr(session_utils, "is_session_valid", lambda: True)
     monkeypatch.setattr(orders, "get_auth_token", lambda user: "token")
@@ -504,7 +575,7 @@ def test_after_it_was_placed_the_book_not_showing_it_yet_it_is_still_refused(bro
     """Two phones, one after the other (the review's S3): the book still says 65."""
     assert _post("/close_position", EXIT)[0] == 200
     code, body = _post("/close_position", EXIT)
-    assert code == 409 and ON_ITS_WAY.match(body["message"])
+    assert code == 409 and EXIT_WORKING.match(body["message"])
     assert broker["orders"] == [(X, "SELL", 65)]
 
 
@@ -619,20 +690,22 @@ def test_every_exit_all_surface_takes_the_one_claim(broker, surface, monkeypatch
 
 
 def test_a_smart_order_entry_is_never_refused(broker):
-    """TradingView's entries and new sizes go through whatever is busy: nothing is sized to 0."""
+    """TradingView's entries and new sizes go through whatever is busy. A size of 0 is an exit,
+    even with a quantity, so a flat position it finds while its position is busy is not an entry
+    (the review's X1): it is refused, never placed as given."""
     broker["book"] = {Y: -30}
     with exit_guard.EXITS.every("live"), exit_guard.EXITS.one("live", POSITION):
         exit_guard.exit_placed("live", "NFO", X, "MIS")
         assert _smart(position_size="65", quantity="65", action="BUY")[0] == 200
-        assert _smart(position_size="0", quantity="65", action="BUY")[0] == 200  # flat: fresh
-    assert broker["orders"] == [(X, "BUY", 65), (X, "BUY", 65)]
+        assert _smart(position_size="0", quantity="65", action="BUY")[0] == 409
+    assert broker["orders"] == [(X, "BUY", 65)]
 
 
 def test_a_smart_exit_from_the_api_sends_nothing_for_a_busy_position(broker):
     """The review's S4/S5: TradingView's exit and the app's, either way round."""
     assert _post("/close_position", EXIT)[0] == 200
     code, body = _smart()
-    assert code == 409 and ON_ITS_WAY.match(body["message"])
+    assert code == 409 and EXIT_WORKING.match(body["message"])
     assert broker["orders"] == [(X, "SELL", 65)]
     # And the other way: its exit noted, an Exit all sends nothing for it.
     assert _smart(symbol=Y, action="BUY")[0] == 200
@@ -646,10 +719,10 @@ def test_an_exit_is_noted_before_its_claim_is_let_go(broker, monkeypatch):
     note = ExitsInFlight.placed
     noting = threading.Event()
 
-    def slow_to_note(self, book, position):
+    def slow_to_note(self, book, position, *rest):
         noting.set()
         time.sleep(0.3)
-        note(self, book, position)
+        note(self, book, position, *rest)
 
     monkeypatch.setattr(ExitsInFlight, "placed", slow_to_note)
     single, _ = _in_background(_post, "/close_position", EXIT)
@@ -749,10 +822,26 @@ def test_flow_s_close_node_with_a_symbol_closes_that_position_only_live(broker):
     assert (code, body["status"], body["orderid"]) == (200, "success", "261027000001")
     assert broker["orders"] == [(X, "SELL", 65)]
     code, body = _flow_close()  # the same node, again, before the book shows the first
-    assert code == 409 and ON_ITS_WAY.match(body["message"])
+    assert code == 409 and EXIT_WORKING.match(body["message"])
     assert broker["orders"] == [(X, "SELL", 65)]
     assert _flow_close(symbol="NIFTY27OCT2625800CE")[0] == 400  # nothing to close: nothing sent
     assert broker["orders"] == [(X, "SELL", 65)]
+
+
+def test_flow_s_close_of_one_position_that_breaks_is_not_confirmed(broker, monkeypatch):
+    """The second review's C3: whatever breaks once the exit is on its way to the broker may
+    have placed it, so the node is told "not confirmed" (a 500), never a refusal (a 4xx)."""
+    import services.close_position_service as close_service
+
+    def broken(data, auth):
+        raise RuntimeError("the broker module broke")
+
+    module = type("Broker", (), {"place_smartorder_api": staticmethod(broken)})
+    monkeypatch.setattr(close_service, "import_broker_module", lambda name: module)
+    code, body = _flow_close()
+    assert code == 500
+    assert body == {"status": "error", "message": EXIT_NOT_CONFIRMED, "not_confirmed": True}
+    assert broker["orders"] == []
 
 
 def test_flow_s_close_node_with_a_symbol_closes_that_position_only_in_the_sandbox(

@@ -117,6 +117,23 @@ def plugin(request, monkeypatch):
     monkeypatch.setattr(module, "_position_book_ok", lambda _data: True)
     monkeypatch.setattr(module, "place_order_api", fake.place_order_api)
     monkeypatch.setattr(module, "get_open_position", get_open_position)
+    if hasattr(module, "_position_rows"):
+        # Upstox sizes an exit (a position size of 0) from its raw positions row corrected by
+        # the order book's fills (sudarshan/books/fills.py): the same net quantity, as a row
+        # whose day figures agree with an order book that lists nothing.
+        def position_rows(symbol, exchange, auth):
+            return [
+                {
+                    "quantity": int(module._get_cached_positions(auth).get(symbol, 0)),
+                    "instrument_token": "NSE_EQ|" + symbol,
+                    "product": "I",  # the tests' orders are MIS
+                    "day_buy_quantity": 0,
+                    "day_sell_quantity": 0,
+                }
+            ]
+
+        monkeypatch.setattr(module, "_position_rows", position_rows)
+        monkeypatch.setattr(module, "_read_order_rows", lambda auth, limit: [])
     monkeypatch.setattr(runtime, "gthread_active", lambda: False)
     module.fake = fake
     yield module

@@ -1,0 +1,1099 @@
+/**
+ * The Alerts page (M10.3), end to end in jsdom: the bridge is a stand-in answering as the
+ * contract says, the market-data manager is the shared harness (so subscriptions are real), and
+ * frames run by hand. Pinned: the server's words as they come, an icon and a word for every
+ * status and line, the tabs, each card's live price with the M3.7 freshness mark (never
+ * "Real-time" once stale, the auction line in an auction), the 100-instrument cap, Back closing
+ * the sheet first, and Pause and Delete sent once with the contract's outcomes.
+ */
+import { QueryClientProvider } from '@tanstack/react-query'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import {
+  type InitialEntry,
+  MemoryRouter,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+} from 'react-router'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('@/lib/MarketDataManager', () => import('@/test/marketDataHarness'))
+
+const api = vi.hoisted(() => ({
+  state: vi.fn(),
+  eventsSince: vi.fn(),
+  events: vi.fn(),
+  prefs: vi.fn(),
+  setPrefs: vi.fn(),
+  test: vi.fn(),
+  create: vi.fn(),
+  change: vi.fn(),
+  remove: vi.fn(),
+}))
+vi.mock('@/api/marketAlerts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/api/marketAlerts')>()),
+  marketAlertsApi: api,
+}))
+
+const toasts = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+  warning: vi.fn(),
+  info: vi.fn(),
+}))
+vi.mock('@/utils/toast', () => ({ toast: toasts, showToast: toasts }))
+
+import {
+  type AlertRow,
+  AlertsError,
+  type LineCode,
+  type MarketAlertsState,
+} from '@/api/marketAlerts'
+import { createQueryClient } from '@/app/providers'
+import { useAuthStore } from '@/stores/authStore'
+import { NO_ANSWER_HOLD_MS, resetAlertActionsForTests } from '@/sudarshan/alerts/actions'
+import { LineText } from '@/sudarshan/alerts/lines'
+import { installMarketAlerts, resetMarketAlertsForTests } from '@/sudarshan/alerts/marketAlerts'
+import { applyStatePush, STATE_KEY } from '@/sudarshan/alerts/stateCache'
+import { STALE_MS } from '@/sudarshan/dashboard/live'
+import { fakeClock, frames } from '@/test/frames'
+import { alertRow, alertsState, NOW, WATCHING } from '@/test/marketAlerts'
+import { feed } from '@/test/marketDataHarness'
+import MarketAlerts, { LIVE_CAP } from './MarketAlerts'
+
+vi.setConfig({ testTimeout: 15_000 })
+
+function Where() {
+  const location = useLocation()
+  return <p data-testid="where">{`${location.pathname}${location.search}`}</p>
+}
+
+const history = { go: (_delta: number) => {} }
+function Nav() {
+  const navigate = useNavigate()
+  history.go = (delta) => navigate(delta)
+  return null
+}
+
+function renderPage(entries: InitialEntry[] = ['/elsewhere', '/market-alerts']) {
+  const client = createQueryClient()
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={entries} initialIndex={entries.length - 1}>
+        <Nav />
+        <Routes>
+          <Route path="/market-alerts" element={<MarketAlerts />} />
+          <Route path="/elsewhere" element={<p>Another page</p>} />
+          <Route path="*" element={null} />
+        </Routes>
+        <Where />
+      </MemoryRouter>
+    </QueryClientProvider>
+  )
+  return client
+}
+
+const where = () => screen.getByTestId('where').textContent
+const back = () => act(() => history.go(-1))
+const card = (id: number) => document.querySelector(`[data-alert="${id}"]`) as HTMLElement
+
+async function settle() {
+  await act(async () => {
+    for (let i = 0; i < 10; i += 1) await Promise.resolve()
+  })
+  act(() => frames.flush())
+}
+
+type Handler = (...args: any[]) => void
+
+/** The app's connection to OpenAlgo as market alerts listen on it: connects, acks and drops by hand. */
+function alertSocket() {
+  const handlers = new Map<string, Set<Handler>>()
+  const acks: Handler[] = []
+  const socket = {
+    connected: false,
+    on(event: string, handler: Handler) {
+      handlers.set(event, (handlers.get(event) ?? new Set()).add(handler))
+      return socket
+    },
+    off(event: string, handler: Handler) {
+      handlers.get(event)?.delete(handler)
+      return socket
+    },
+    listeners: (event: string) => [...(handlers.get(event) ?? [])],
+    timeout: () => ({ emit: (_event: string, ack: Handler) => acks.push(ack) }),
+    fire(event: string) {
+      for (const handler of [...(handlers.get(event) ?? [])]) handler()
+    },
+    connect() {
+      socket.connected = true
+      socket.fire('connect')
+    },
+    drop() {
+      socket.connected = false
+      socket.fire('disconnect')
+    },
+    ack(answer: unknown) {
+      acks.shift()?.(null, answer)
+    },
+  }
+  return socket
+}
+
+function tick(symbol: string, exchange: string, data: Record<string, unknown>) {
+  act(() => {
+    feed.push(symbol, exchange, data)
+    frames.flush()
+  })
+}
+
+const refused = (code: string, message: string) => new AlertsError({ code, message, field: null })
+
+beforeEach(() => {
+  fakeClock()
+  vi.setSystemTime(NOW)
+  feed.reset()
+  frames.install()
+  resetMarketAlertsForTests()
+  resetAlertActionsForTests()
+  for (const fn of [...Object.values(api), ...Object.values(toasts)]) fn.mockReset()
+  api.state.mockResolvedValue(alertsState())
+  api.events.mockResolvedValue({ events: [], more: false })
+  api.prefs.mockResolvedValue({ telegram: true, app: true })
+  useAuthStore.setState({ apiKey: 'key', sessionChecked: true, brokerSessionExpired: false })
+})
+
+afterEach(() => {
+  vi.useRealTimers()
+  vi.unstubAllGlobals()
+})
+
+describe('the Alerts page', () => {
+  it('says what the alert service says under the title, as it says it', async () => {
+    renderPage()
+    await settle()
+
+    expect(screen.getByRole('heading', { name: 'Alerts' })).toBeInTheDocument()
+    const line = screen.getByText('Watching · Real-time')
+    expect(line.closest('[data-line="ok"]')?.querySelector('svg')).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'New' })).toBeEnabled()
+  })
+
+  it('draws every line with an icon and the server’s words, whatever its code', () => {
+    const codes: LineCode[] = [
+      'ok',
+      'closing_auction',
+      'feed_down',
+      'not_open_yet',
+      'closed_by_exchange',
+      'outside_hours',
+      'closed_today',
+      'waiting',
+      'note',
+      'starting',
+      'off',
+    ]
+    const { container } = render(
+      <div>
+        {codes.map((code) => (
+          <LineText key={code} line={{ code, line: `words for ${code}`, real_time: false }} />
+        ))}
+      </div>
+    )
+    for (const code of codes) {
+      const line = container.querySelector(`[data-line="${code}"]`)
+      expect(line?.querySelector('svg')).not.toBeNull()
+      expect(line?.textContent).toBe(`words for ${code}`)
+    }
+  })
+
+  it('shows every status with its icon and its word, and why one stopped', async () => {
+    api.state.mockResolvedValue(
+      alertsState({
+        alerts: [
+          alertRow({ id: 1, status: 'active' }),
+          alertRow({
+            id: 2,
+            status: 'paused',
+            status_reason: 'Fired 50 times today; paused so Telegram is not flooded',
+          }),
+          alertRow({ id: 3, status: 'stopped', status_reason: 'Fired once at 10:42 on 21 Oct' }),
+        ],
+      })
+    )
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    renderPage()
+    await settle()
+
+    for (const [id, word] of [
+      [1, 'Active'],
+      [2, 'Paused'],
+    ] as const) {
+      const chip = card(id).querySelector('[data-status]')
+      expect(chip?.textContent).toBe(word)
+      expect(chip?.querySelector('svg')).not.toBeNull()
+    }
+    expect(
+      within(card(2)).getByText('Fired 50 times today; paused so Telegram is not flooded')
+    ).toBeInTheDocument()
+
+    await user.click(screen.getByRole('tab', { name: /Stopped/ }))
+    const chip = card(3).querySelector('[data-status]')
+    expect(chip?.textContent).toBe('Stopped')
+    expect(chip?.querySelector('svg')).not.toBeNull()
+    expect(within(card(3)).getByText('Fired once at 10:42 on 21 Oct')).toBeInTheDocument()
+  })
+
+  it('lists Active and Paused under Active, Stopped under Stopped, and moves between tabs without adding to Back', async () => {
+    api.state.mockResolvedValue(
+      alertsState({
+        alerts: [
+          alertRow({ id: 1, status: 'paused' }),
+          alertRow({ id: 2, status: 'active' }),
+          alertRow({ id: 3, status: 'stopped' }),
+        ],
+      })
+    )
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    renderPage()
+    await settle()
+
+    expect(screen.getByRole('tab', { name: 'Active (2)' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('tab', { name: 'Stopped (1)' })).toBeInTheDocument()
+    const order = [...document.querySelectorAll('[data-alert]')].map((each) =>
+      each.getAttribute('data-alert')
+    )
+    expect(order).toEqual(['2', '1'])
+
+    await user.click(screen.getByRole('tab', { name: 'Stopped (1)' }))
+    expect(where()).toBe('/market-alerts?tab=stopped')
+    await user.click(screen.getByRole('tab', { name: 'History' }))
+    expect(where()).toBe('/market-alerts?tab=history')
+
+    back()
+    expect(where()).toBe('/elsewhere')
+  })
+
+  it('offers no New when market alerts are switched off on the server, and says so', async () => {
+    api.state.mockResolvedValue(
+      alertsState({
+        enabled: false,
+        alerts: [],
+        engine: { code: 'off', line: 'Switched off on the server', real_time: false },
+      })
+    )
+    renderPage()
+    await settle()
+
+    expect(screen.getByText('Switched off on the server')).toBeInTheDocument()
+    expect(screen.getByText('Market alerts are switched off on the server.')).toBeInTheDocument()
+    const newButton = screen.getByRole('button', { name: 'New' })
+    expect(newButton).toBeDisabled()
+    // Half-faded white on brand is 2.5:1 in sunlight; the disabled button uses theme.css inks (5.1:1).
+    expect(newButton.className).not.toMatch(/disabled:opacity/)
+    expect(newButton.className).toContain('disabled:text-[color:var(--text-tertiary)]')
+    expect(newButton.className).toContain('disabled:bg-muted')
+  })
+
+  it('shows the server’s sentence when the service does not answer, and reads again on request', async () => {
+    const sentence =
+      'The alert service is not answering. Your alerts are kept; checking resumes when it is back.'
+    api.state.mockRejectedValueOnce(refused('not_answering', sentence))
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    renderPage()
+    await settle()
+
+    expect(screen.getByText(sentence)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'New' })).toBeDisabled()
+
+    await user.click(screen.getByRole('button', { name: 'Try again' }))
+    await settle()
+    expect(screen.queryByText(sentence)).toBeNull()
+    expect(screen.getByText('Watching · Real-time')).toBeInTheDocument()
+  })
+
+  it('shows a family viewer the owner-only sentence and nothing else', async () => {
+    api.state.mockRejectedValue(
+      refused('owner_only', 'Only the account owner can manage market alerts.')
+    )
+    renderPage()
+    await settle()
+
+    expect(screen.getByText('Only the account owner can manage market alerts.')).toBeInTheDocument()
+    expect(document.querySelector('[data-alert]')).toBeNull()
+  })
+})
+
+describe('the line under the title', () => {
+  const header = () => document.getElementById('sd-alerts-line') as HTMLElement
+
+  it('greys the server’s line, as last read, while the page’s own feed is down', async () => {
+    renderPage()
+    await settle()
+    tick('SBIN', 'NSE', { ltp: 100.25 })
+    expect(header().querySelector('[data-heard]')).toHaveAttribute('data-heard', 'yes')
+    expect(header().textContent).not.toContain('as last read')
+
+    act(() =>
+      feed.setState({ connectionState: 'disconnected', isConnected: false, isAuthenticated: false })
+    )
+    expect(header().querySelector('[data-heard]')).toHaveAttribute('data-heard', 'no')
+    expect(header().textContent).toBe('Watching · Real-time· as last read')
+
+    act(() =>
+      feed.setState({ connectionState: 'authenticated', isConnected: true, isAuthenticated: true })
+    )
+    expect(header().textContent).not.toContain('as last read')
+  })
+
+  it('says this screen is not receiving alerts while it is out of the owner’s room', async () => {
+    api.eventsSince.mockResolvedValue({ events: [], more: false })
+    const socket = alertSocket()
+    installMarketAlerts(socket as never, (name, handler) => socket.on(name, handler))
+    socket.connect()
+    socket.ack({ ok: true })
+    renderPage()
+    await settle()
+    expect(header().textContent).toBe('Watching · Real-time')
+
+    act(() => socket.drop())
+    expect(header().querySelector('[data-heard]')).toHaveAttribute('data-heard', 'no')
+    expect(header().textContent).toBe('Not receiving alerts on this screen · reconnecting')
+    expect(header().textContent).not.toContain('Real-time')
+
+    act(() => socket.connect())
+    expect(header().textContent).toBe('Not receiving alerts on this screen · reconnecting')
+    act(() => socket.ack({ ok: true }))
+    expect(header().textContent).toBe('Watching · Real-time')
+  })
+
+  it('draws a tab’s count in its own ink, not faded below 4.5:1', async () => {
+    renderPage()
+    await settle()
+    const count = within(screen.getByRole('tab', { name: 'Active (1)' })).getByText('(1)')
+    expect(count.className).not.toMatch(/opacity/)
+  })
+})
+
+describe('live prices on the cards', () => {
+  it('shows the figure the alert watches and its distance, Real-time while ticks come', async () => {
+    renderPage()
+    await settle()
+    tick('SBIN', 'NSE', { ltp: 100.25 })
+
+    expect(within(card(12)).getByText('₹100.25')).toBeInTheDocument()
+    expect(within(card(12)).getByText('· ₹0.25 above the level')).toBeInTheDocument()
+    expect(card(12).querySelector('[data-feed="live"]')?.textContent).toBe('Real-time')
+    expect(feed.live()).toEqual(['NSE:SBIN:LTP'])
+  })
+
+  it('follows a bid alert on the Quote stream, its distance from the bid', async () => {
+    api.state.mockResolvedValue(
+      alertsState({
+        alerts: [alertRow({ params: { op: 'crosses_below', level: '99.50', source: 'bid' } })],
+      })
+    )
+    renderPage()
+    await settle()
+    tick('SBIN', 'NSE', { ltp: 100.25, bid_price: 99.4 })
+
+    expect(feed.live()).toEqual(['NSE:SBIN:Quote'])
+    expect(within(card(12)).getByText('Bid')).toBeInTheDocument()
+    expect(within(card(12)).getByText('· ₹0.10 below the level')).toBeInTheDocument()
+  })
+
+  it('greys a price whose ticks stopped while due, and never calls it Real-time', async () => {
+    renderPage()
+    await settle()
+    tick('SBIN', 'NSE', { ltp: 100.25 })
+    act(() =>
+      feed.setState({ connectionState: 'disconnected', isConnected: false, isAuthenticated: false })
+    )
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(STALE_MS + 2_000)
+    })
+    act(() => frames.flush())
+
+    expect(card(12).textContent).not.toContain('Real-time')
+    expect(card(12).querySelector('[data-stale]')).not.toBeNull()
+    expect(card(12).querySelector('[data-feed="connecting"]')?.textContent).toMatch(
+      /^Reconnecting · updated \d+s ago$/
+    )
+  })
+
+  it('says the market is closed from the server’s session line, not from a calendar of its own', async () => {
+    const closed = {
+      code: 'outside_hours' as const,
+      line: 'Market closed · checks from Thu 09:15',
+      real_time: false,
+    }
+    api.state.mockResolvedValue(alertsState({ engine: closed, segments: { NSE_EQ: closed } }))
+    renderPage()
+    await settle()
+    tick('SBIN', 'NSE', { ltp: 100.25 })
+
+    expect(card(12).querySelector('[data-feed="closed"]')?.textContent).toBe('Market closed')
+  })
+
+  it('shows the server’s auction line in the closing auction, never Real-time or Delayed', async () => {
+    const auction = { from: NOW - 60_000, close: NOW + 14 * 60_000, until: NOW + 19 * 60_000 }
+    const check = {
+      code: 'closing_auction' as const,
+      line: 'Closing auction · price at about 15:30',
+      real_time: false,
+    }
+    api.state.mockResolvedValue(alertsState({ alerts: [alertRow({ auction, check })] }))
+    renderPage()
+    await settle()
+    tick('SBIN', 'NSE', { ltp: 100.25 })
+
+    expect(card(12).querySelector('[data-feed]')).toBeNull()
+    expect(within(card(12)).getAllByText('Closing auction · price at about 15:30')).toHaveLength(1)
+  })
+
+  it('marks a dropped feed in the auction window too, and greys the price, instead of the auction line', async () => {
+    const auction = { from: NOW - 60_000, close: NOW + 14 * 60_000, until: NOW + 19 * 60_000 }
+    const check = {
+      code: 'closing_auction' as const,
+      line: 'Closing auction · price at about 15:30',
+      real_time: false,
+    }
+    api.state.mockResolvedValue(alertsState({ alerts: [alertRow({ auction, check })] }))
+    renderPage()
+    await settle()
+    tick('SBIN', 'NSE', { ltp: 100.25 })
+    act(() =>
+      feed.setState({ connectionState: 'disconnected', isConnected: false, isAuthenticated: false })
+    )
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(STALE_MS + 2_000)
+    })
+    act(() => frames.flush())
+
+    expect(card(12).querySelector('[data-feed="connecting"]')?.textContent).toMatch(
+      /^Reconnecting · updated \d+s ago$/
+    )
+    expect(card(12).querySelector('[data-stale]')).not.toBeNull()
+    // The auction still shows, once, as the card's check.
+    expect(within(card(12)).getAllByText('Closing auction · price at about 15:30')).toHaveLength(1)
+  })
+
+  it('keeps the auction window through its last moment, and leaves it after', async () => {
+    const check = {
+      code: 'closing_auction' as const,
+      line: 'Closing auction · price at about 15:30',
+      real_time: false,
+    }
+    api.state.mockResolvedValue(
+      alertsState({
+        alerts: [
+          alertRow({ id: 1, auction: { from: NOW - 60_000, close: NOW, until: NOW }, check }),
+          alertRow({ id: 2, auction: { from: NOW - 60_000, close: NOW - 2, until: NOW - 1 } }),
+        ],
+      })
+    )
+    vi.useFakeTimers({
+      toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'],
+    })
+    vi.setSystemTime(NOW)
+    renderPage()
+    await settle()
+
+    expect(card(1).querySelector('[data-line="closing_auction"]')).not.toBeNull()
+    expect(card(1).querySelector('[data-feed]')).toBeNull()
+    expect(card(2).querySelector('[data-feed]')).not.toBeNull()
+  })
+
+  it('never calls a price from the REST fallback Real-time', async () => {
+    renderPage()
+    await settle()
+    act(() => {
+      feed.push('SBIN', 'NSE', { ltp: 100.25 }, 'rest')
+      frames.flush()
+    })
+
+    expect(within(card(12)).getByText('₹100.25')).toBeInTheDocument()
+    expect(card(12).textContent).not.toContain('Real-time')
+    expect(card(12).querySelector('[data-feed]')?.getAttribute('data-feed')).toBe('delayed')
+  })
+
+  it('leaves out a card’s check where it repeats the line under the title, and shows any other', async () => {
+    const closed = {
+      code: 'outside_hours' as const,
+      line: 'Market closed · checks from Thu 09:15',
+      real_time: false,
+    }
+    const waiting = { code: 'waiting' as const, line: "Waiting for today's open", real_time: true }
+    api.state.mockResolvedValue(
+      alertsState({
+        engine: closed,
+        segments: { NSE_EQ: closed },
+        alerts: [alertRow({ id: 1, check: closed }), alertRow({ id: 2, check: waiting })],
+      })
+    )
+    renderPage()
+    await settle()
+
+    expect(within(card(1)).queryByText('Market closed · checks from Thu 09:15')).toBeNull()
+    expect(within(card(2)).getByText("Waiting for today's open")).toBeInTheDocument()
+  })
+
+  it('reads each alert’s session from its own segment: a future under NSE_FO', async () => {
+    const closed = { code: 'outside_hours' as const, line: 'Market closed', real_time: false }
+    api.state.mockResolvedValue(
+      alertsState({
+        segments: { NSE_EQ: WATCHING, NSE_FO: closed },
+        alerts: [
+          alertRow({
+            id: 5,
+            symbol: 'NIFTY25NOV26FUT',
+            exchange: 'NFO',
+            instrument_key: 'NSE_FO|51714',
+            tick_size: '0.1',
+            expiry: '2026-11-25',
+          }),
+        ],
+      })
+    )
+    renderPage()
+    await settle()
+    tick('NIFTY25NOV26FUT', 'NFO', { ltp: 26010.1 })
+
+    expect(card(5).querySelector('[data-feed="closed"]')?.textContent).toBe('Market closed')
+  })
+
+  it('takes a segment whose price feed is down on the server as open, so a dropped page feed greys', async () => {
+    const down = {
+      code: 'feed_down' as const,
+      line: 'Not checking since 10:41:05 · the price feed is reconnecting',
+      real_time: false,
+    }
+    api.state.mockResolvedValue(alertsState({ segments: { NSE_EQ: down } }))
+    renderPage()
+    await settle()
+    tick('SBIN', 'NSE', { ltp: 100.25 })
+    act(() =>
+      feed.setState({ connectionState: 'disconnected', isConnected: false, isAuthenticated: false })
+    )
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(STALE_MS + 2_000)
+    })
+    act(() => frames.flush())
+
+    expect(card(12).querySelector('[data-stale]')).not.toBeNull()
+  })
+
+  it('follows only the instruments that need the bid, ask, open, high, low or VWAP on the Quote stream', async () => {
+    api.state.mockResolvedValue(
+      alertsState({
+        alerts: [
+          alertRow({ id: 1, symbol: 'SBIN' }),
+          alertRow({ id: 2, symbol: 'INFY' }),
+          alertRow({
+            id: 3,
+            symbol: 'TCS',
+            params: { op: 'crosses_below', level: '99.50', source: 'bid' },
+          }),
+        ],
+      })
+    )
+    renderPage()
+    await settle()
+
+    expect(feed.live().sort()).toEqual(['NSE:INFY:LTP', 'NSE:SBIN:LTP', 'NSE:TCS:Quote'])
+  })
+
+  it('follows nothing on the History tab, again on Active, and nothing once the page is left', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    renderPage()
+    await settle()
+    expect(feed.live()).toEqual(['NSE:SBIN:LTP'])
+
+    await user.click(screen.getByRole('tab', { name: 'History' }))
+    await settle()
+    expect(feed.live()).toEqual([])
+    await user.click(screen.getByRole('tab', { name: /Active/ }))
+    await settle()
+    expect(feed.live()).toEqual(['NSE:SBIN:LTP'])
+
+    back()
+    await settle()
+    expect(where()).toBe('/elsewhere')
+    expect(feed.live()).toEqual([])
+  })
+
+  it('follows nothing without an API key, and says why', async () => {
+    useAuthStore.setState({ apiKey: null, sessionChecked: true, brokerSessionExpired: false })
+    renderPage()
+    await settle()
+
+    expect(feed.live()).toEqual([])
+    expect(screen.getByText('Prices and search need an API key.')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Create one under API Key' })).toBeInTheDocument()
+  })
+
+  it('still checking: a quiet line, never the API key message, and no price stream', async () => {
+    useAuthStore.setState({ apiKey: null, sessionChecked: false, brokerSessionExpired: false })
+    renderPage()
+    await settle()
+
+    expect(screen.getByText('Checking your login')).toBeInTheDocument()
+    expect(screen.queryByText(/API key/)).toBeNull()
+    expect(feed.live()).toEqual([])
+  })
+
+  it('Upstox not logged in today: says so with both links, even with a key held', async () => {
+    useAuthStore.setState({ apiKey: 'key', sessionChecked: true, brokerSessionExpired: true })
+    renderPage()
+    await settle()
+
+    expect(screen.getByText(/Upstox is not logged in today/)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Auto login' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Dashboard' })).toBeInTheDocument()
+    expect(screen.queryByText(/API key/)).toBeNull()
+    expect(feed.live()).toEqual([])
+  })
+
+  it('ready: no notice', async () => {
+    renderPage()
+    await settle()
+
+    expect(document.querySelector('[data-access]')).toBeNull()
+  })
+
+  it('follows the alert a link opens from another tab, so its sheet has a price', async () => {
+    api.state.mockResolvedValue(
+      alertsState({
+        alerts: [alertRow({ id: 12 }), alertRow({ id: 3, symbol: 'INFY', status: 'stopped' })],
+      })
+    )
+    renderPage(['/elsewhere', '/market-alerts?alert=3'])
+    await settle()
+    tick('INFY', 'NSE', { ltp: 1428.25 })
+
+    expect(feed.live().sort()).toEqual(['NSE:INFY:LTP', 'NSE:SBIN:LTP'])
+    expect(within(screen.getByRole('dialog')).getByText('₹1,428.25')).toBeInTheDocument()
+  })
+
+  it('keeps to 100 instruments with a form open, its own stream included', async () => {
+    const alerts: AlertRow[] = Array.from({ length: LIVE_CAP + 1 }, (_, index) =>
+      alertRow({ id: index + 1, symbol: `STOCK${index}` })
+    )
+    api.state.mockResolvedValue(alertsState({ alerts }))
+    const instruments = () =>
+      new Set(feed.live().map((key) => key.split(':').slice(0, 2).join(':'))).size
+    // The form for the 101st card, the one the cap leaves out of the tab.
+    renderPage(['/elsewhere', '/market-alerts?alert=1&sheet=edit'])
+    await settle()
+
+    expect(screen.getByRole('dialog', { name: 'Edit alert' })).toBeInTheDocument()
+    expect(feed.live()).toContain('NSE:STOCK0:LTP')
+    expect(instruments()).toBeLessThanOrEqual(LIVE_CAP)
+  })
+
+  it('keeps a place free for a new alert’s form', async () => {
+    const alerts: AlertRow[] = Array.from({ length: LIVE_CAP + 1 }, (_, index) =>
+      alertRow({ id: index + 1, symbol: `STOCK${index}` })
+    )
+    api.state.mockResolvedValue(alertsState({ alerts }))
+    renderPage(['/elsewhere', '/market-alerts?sheet=new'])
+    await settle()
+
+    expect(screen.getByRole('dialog', { name: 'New alert' })).toBeInTheDocument()
+    expect(feed.live()).toHaveLength(LIVE_CAP - 1)
+  })
+
+  it('follows at most 100 instruments, and says so', async () => {
+    const alerts: AlertRow[] = Array.from({ length: LIVE_CAP + 1 }, (_, index) =>
+      alertRow({ id: index + 1, symbol: `STOCK${index}` })
+    )
+    api.state.mockResolvedValue(alertsState({ alerts }))
+    renderPage()
+    await settle()
+
+    expect(feed.live()).toHaveLength(LIVE_CAP)
+    expect(
+      screen.getByText('Prices follow the first 100 instruments on this tab.')
+    ).toBeInTheDocument()
+  })
+})
+
+describe('an alert’s sheet', () => {
+  async function openSheet(user: ReturnType<typeof userEvent.setup>, id = 12) {
+    await user.click(card(id))
+    return screen.getByRole('dialog')
+  }
+
+  it('opens from its card, and Back closes it before leaving the page', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    renderPage()
+    await settle()
+
+    const sheet = await openSheet(user)
+    expect(where()).toBe('/market-alerts?alert=12')
+    expect(within(sheet).getByText('Crosses above ₹100.00')).toBeInTheDocument()
+
+    back()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(where()).toBe('/market-alerts')
+    back()
+    expect(where()).toBe('/elsewhere')
+  })
+
+  it.each([
+    ['active', 'Pause', ['Resume', 'Restart']],
+    ['paused', 'Resume', ['Pause', 'Restart']],
+    ['stopped', 'Restart', ['Pause', 'Resume']],
+  ] as const)('offers a %s alert %s, Delete and its chart', async (status, move, others) => {
+    api.state.mockResolvedValue(alertsState({ alerts: [alertRow({ status })] }))
+    renderPage(['/market-alerts?alert=12'])
+    await settle()
+
+    const sheet = screen.getByRole('dialog')
+    expect(within(sheet).getByRole('button', { name: move })).toBeEnabled()
+    for (const other of others)
+      expect(within(sheet).queryByRole('button', { name: other })).toBeNull()
+    expect(within(sheet).getByRole('button', { name: 'Delete' })).toBeEnabled()
+    expect(within(sheet).getByRole('link', { name: 'Chart' })).toHaveAttribute(
+      'href',
+      '/chart/NSE/SBIN'
+    )
+  })
+
+  it.each([
+    ['active', 'Pause', 'pause'],
+    ['paused', 'Resume', 'resume'],
+    ['stopped', 'Restart', 'restart'],
+  ] as const)('sends a %s alert’s %s as %s', async (status, move, action) => {
+    api.state.mockResolvedValue(alertsState({ alerts: [alertRow({ status })] }))
+    api.change.mockReturnValue(new Promise(() => {}))
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    renderPage(['/market-alerts?alert=12'])
+    await settle()
+
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: move }))
+    expect(api.change).toHaveBeenCalledWith(12, { version: 3, action })
+  })
+
+  it('pauses once however fast it is tapped, and shows the answer', async () => {
+    let answer: (row: AlertRow) => void = () => {}
+    api.change.mockReturnValue(
+      new Promise<AlertRow>((resolve) => {
+        answer = resolve
+      })
+    )
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    renderPage()
+    await settle()
+    const sheet = await openSheet(user)
+
+    await user.click(within(sheet).getByRole('button', { name: 'Pause' }))
+    expect(within(sheet).getByRole('button', { name: 'Pausing' })).toBeDisabled()
+    // Busy says so with a turning mark, not by fading its words.
+    expect(
+      within(sheet).getByRole('button', { name: 'Pausing' }).querySelector('.animate-spin')
+    ).not.toBeNull()
+    expect(within(sheet).getByRole('button', { name: 'Edit' })).toBeDisabled()
+    expect(within(sheet).getByRole('button', { name: 'Delete' })).toBeDisabled()
+    await user.click(within(sheet).getByRole('button', { name: 'Pausing' }))
+    expect(api.change).toHaveBeenCalledTimes(1)
+    expect(api.change).toHaveBeenCalledWith(12, { version: 3, action: 'pause' })
+
+    await act(async () => answer(alertRow({ version: 4, status: 'paused' })))
+    expect(await within(sheet).findByRole('button', { name: 'Resume' })).toBeEnabled()
+    expect(card(12).querySelector('[data-status]')?.textContent).toBe('Paused')
+  })
+
+  it('asks before deleting, sends once, and drops the card', async () => {
+    api.remove.mockResolvedValue({ deleted: true })
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    renderPage()
+    await settle()
+    const sheet = await openSheet(user)
+
+    await user.click(within(sheet).getByRole('button', { name: 'Delete' }))
+    // The question names the alert, so a list that moved cannot put another card under the tap.
+    const ask = screen.getByRole('dialog', {
+      name: 'Delete the SBIN alert, Crosses above ₹100.00?',
+    })
+    expect(within(ask).getByText('Its history stays.')).toBeInTheDocument()
+    expect(api.remove).not.toHaveBeenCalled()
+
+    const yes = within(ask).getByRole('button', { name: 'Delete' })
+    await user.dblClick(yes)
+    await settle()
+
+    expect(api.remove).toHaveBeenCalledTimes(1)
+    expect(api.remove).toHaveBeenCalledWith(12)
+    await waitFor(() => expect(card(12)).toBeNull())
+    expect(toasts.success).toHaveBeenCalledWith('Alert deleted. Its history stays.')
+    await waitFor(() => expect(where()).toBe('/market-alerts'))
+    // Deleted here: said once, not again as a delete from elsewhere.
+    expect(toasts.info).not.toHaveBeenCalled()
+  })
+
+  it('shows a refusal’s sentence as it came, and reads the alerts again', async () => {
+    const sentence = 'This alert was changed on another screen. Open it again, then try again.'
+    api.change.mockRejectedValue(refused('conflict', sentence))
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    renderPage()
+    await settle()
+    const sheet = await openSheet(user)
+    const reads = api.state.mock.calls.length
+
+    await user.click(within(sheet).getByRole('button', { name: 'Pause' }))
+    await settle()
+
+    expect(toasts.error).toHaveBeenCalledWith(sentence)
+    await waitFor(() => expect(api.state.mock.calls.length).toBe(reads + 1))
+    expect(within(sheet).getByRole('button', { name: 'Pause' })).toBeEnabled()
+  })
+
+  it('drops the card of an alert already gone', async () => {
+    api.change.mockRejectedValue(refused('gone', 'This alert has been deleted.'))
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    renderPage()
+    await settle()
+    const sheet = await openSheet(user)
+
+    await user.click(within(sheet).getByRole('button', { name: 'Pause' }))
+    await settle()
+
+    expect(toasts.info).toHaveBeenCalledWith('This alert has been deleted.')
+    await waitFor(() => expect(card(12)).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(toasts.info).toHaveBeenCalledTimes(1)
+  })
+
+  it('holds a delete that got no answer, and reads the alerts again to see where it stands', async () => {
+    api.remove.mockRejectedValue(refused('unanswered', 'No answer came from OpenAlgo.'))
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    renderPage()
+    await settle()
+    const sheet = await openSheet(user)
+    const reads = api.state.mock.calls.length
+
+    await user.click(within(sheet).getByRole('button', { name: 'Delete' }))
+    await user.click(
+      within(
+        screen.getByRole('dialog', { name: 'Delete the SBIN alert, Crosses above ₹100.00?' })
+      ).getByRole('button', {
+        name: 'Delete',
+      })
+    )
+    await settle()
+
+    expect(toasts.warning).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(api.state.mock.calls.length).toBe(reads + 1))
+    expect(within(sheet).getByText(/No answer came for this delete/)).toBeInTheDocument()
+    expect(within(sheet).getByRole('button', { name: 'Delete' })).toBeDisabled()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(NO_ANSWER_HOLD_MS)
+    })
+    expect(within(sheet).getByRole('button', { name: 'Delete' })).toBeEnabled()
+  })
+
+  it('shows the auction line once in the sheet, in its price line', async () => {
+    const auction = { from: NOW - 60_000, close: NOW + 14 * 60_000, until: NOW + 19 * 60_000 }
+    const check = {
+      code: 'closing_auction' as const,
+      line: 'Closing auction · price at about 15:30',
+      real_time: false,
+    }
+    api.state.mockResolvedValue(alertsState({ alerts: [alertRow({ auction, check })] }))
+    renderPage(['/market-alerts?alert=12'])
+    await settle()
+
+    expect(
+      within(screen.getByRole('dialog')).getAllByText('Closing auction · price at about 15:30')
+    ).toHaveLength(1)
+  })
+
+  it('closes when the alert it names is not there, and says so', async () => {
+    renderPage(['/elsewhere', '/market-alerts?alert=99'])
+    await settle()
+    await waitFor(() => expect(where()).toBe('/market-alerts'))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(toasts.info).toHaveBeenCalledWith('This alert was deleted.')
+  })
+
+  it('closes the sheet of an alert deleted on another screen, and says so', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    const client = renderPage()
+    await settle()
+    await user.click(card(12))
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+
+    // The state push for a delete made on another screen (contract 2.3).
+    act(() => {
+      const held = client.getQueryData<MarketAlertsState>(STATE_KEY)
+      if (!held) throw new Error('no state')
+      client.setQueryData(
+        STATE_KEY,
+        applyStatePush(held, { engine: held.engine, alerts: [], removed: [12], server_time: NOW })
+          .state
+      )
+    })
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(where()).toBe('/market-alerts')
+    expect(toasts.info).toHaveBeenCalledWith('This alert was deleted.')
+  })
+
+  it('closes the form of an alert deleted on another screen too, and says so', async () => {
+    const client = renderPage(['/elsewhere', '/market-alerts?alert=12&sheet=edit'])
+    await settle()
+    expect(screen.getByRole('dialog', { name: 'Edit alert' })).toBeInTheDocument()
+
+    act(() => {
+      const held = client.getQueryData<MarketAlertsState>(STATE_KEY)
+      if (!held) throw new Error('no state')
+      client.setQueryData(
+        STATE_KEY,
+        applyStatePush(held, { engine: held.engine, alerts: [], removed: [12], server_time: NOW })
+          .state
+      )
+    })
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(toasts.info).toHaveBeenCalledWith('This alert was deleted.')
+  })
+
+  it('says only the server’s sentence when an edit finds the alert already gone', async () => {
+    api.change.mockRejectedValue(refused('gone', 'This alert has been deleted.'))
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    renderPage(['/elsewhere', '/market-alerts?alert=12&sheet=edit'])
+    await settle()
+
+    await user.click(
+      within(screen.getByRole('dialog', { name: 'Edit alert' })).getByRole('button', {
+        name: 'Save',
+      })
+    )
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(toasts.info).toHaveBeenCalledTimes(1)
+    expect(toasts.info).toHaveBeenCalledWith('This alert has been deleted.')
+  })
+
+  it('closes with the close button the way Back does, so Back then leaves the page', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    renderPage()
+    await settle()
+    await user.click(card(12))
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(where()).toBe('/market-alerts'))
+
+    back()
+    expect(where()).toBe('/elsewhere')
+  })
+})
+
+describe('the form on the page', () => {
+  it('opens a new alert’s form from New, and Back closes it before leaving the page', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    renderPage()
+    await settle()
+
+    await user.click(screen.getByRole('button', { name: 'New' }))
+    expect(where()).toBe('/market-alerts?sheet=new')
+    expect(screen.getByRole('dialog', { name: 'New alert' })).toBeInTheDocument()
+
+    back()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(where()).toBe('/market-alerts')
+  })
+
+  it('closes the instrument search first when Back is pressed in the form', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    renderPage()
+    await settle()
+    await user.click(screen.getByRole('button', { name: 'New' }))
+    const form = screen.getByRole('dialog', { name: 'New alert' })
+    await user.click(within(form).getByRole('button', { name: /Pick an instrument/ }))
+    expect(screen.getByRole('dialog', { name: 'Instrument' })).toBeInTheDocument()
+
+    back()
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Instrument' })).toBeNull())
+    expect(screen.getByRole('dialog', { name: 'New alert' })).toBeInTheDocument()
+    expect(where()).toBe('/market-alerts?sheet=new')
+
+    back()
+    expect(screen.queryByRole('dialog', { name: 'New alert' })).toBeNull()
+    expect(where()).toBe('/market-alerts')
+  })
+
+  it('edits from the sheet on the alert’s own settings, then shows what was saved', async () => {
+    api.change.mockResolvedValue(
+      alertRow({
+        version: 4,
+        words: { condition: 'Crosses above ₹101.00', meta: 'Once', checks_at: null },
+      })
+    )
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    renderPage()
+    await settle()
+
+    await user.click(card(12))
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Edit' }))
+    expect(where()).toBe('/market-alerts?alert=12&sheet=edit')
+    const form = screen.getByRole('dialog', { name: 'Edit alert' })
+    expect(within(form).getByLabelText('Price level')).toHaveValue('100')
+
+    await user.click(within(form).getByRole('button', { name: 'Save' }))
+    await settle()
+    expect(api.change.mock.calls[0][1]).toMatchObject({ version: 3, action: 'edit' })
+    await waitFor(() => expect(where()).toBe('/market-alerts?alert=12'))
+    expect(
+      await within(screen.getByRole('dialog')).findByText('Crosses above ₹101.00')
+    ).toBeInTheDocument()
+
+    back()
+    expect(where()).toBe('/market-alerts')
+  })
+})
+
+describe('a save that answers late', () => {
+  it('opens nothing once the owner has closed the form, and says the alert was saved', async () => {
+    let answer: (row: AlertRow) => void = () => {}
+    api.change.mockReturnValue(
+      new Promise<AlertRow>((resolve) => {
+        answer = resolve
+      })
+    )
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    renderPage()
+    await settle()
+    await user.click(card(12))
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Edit' }))
+    const form = screen.getByRole('dialog', { name: 'Edit alert' })
+    await user.click(within(form).getByRole('button', { name: 'Save' }))
+    await user.click(within(form).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(where()).toBe('/market-alerts'))
+
+    await act(async () => answer(alertRow({ version: 4 })))
+    await settle()
+    expect(where()).toBe('/market-alerts')
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(toasts.success.mock.calls.at(-1)?.[0]).toBe('Alert saved: SBIN')
+  })
+})
+
+describe('the settings on the page', () => {
+  it('opens from its button beside New, and Back closes it before leaving the page', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    renderPage()
+    await settle()
+
+    await user.click(screen.getByRole('button', { name: 'Alert settings' }))
+    expect(where()).toBe('/market-alerts?sheet=settings')
+    const sheet = screen.getByRole('dialog', { name: 'Alert settings' })
+    await waitFor(() =>
+      expect(within(sheet).getByRole('switch', { name: 'Telegram' })).toBeChecked()
+    )
+
+    back()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(where()).toBe('/market-alerts')
+  })
+})

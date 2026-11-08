@@ -19,6 +19,7 @@ from database.settings_db import get_analyze_mode
 from events import AnalyzerErrorEvent, OptionsOrderCompletedEvent
 from services.option_symbol_service import get_option_symbol
 from services.place_order_service import place_order
+from sudarshan.guard import batch as risk_batch  # SUDARSHAN M20.7: a split held to the limits whole
 from utils.broker_backpressure import BrokerBusyError
 from utils.event_bus import bus
 from utils.logging import get_logger
@@ -264,6 +265,16 @@ def place_options_order(
                 "disclosed_quantity": options_data.get("disclosed_quantity", 0),
                 "underlying_ltp": underlying_ltp,  # Pass LTP for execution reference
             }
+
+            # SUDARSHAN M20.7: held to the owner's limits as the one order it was asked as
+            held = risk_batch.options_split(
+                {**base_order_data, "quantity": total_quantity, "splitsize": splitsize},
+                auth_token,
+                symbol_api_key,
+                original_data,
+            )
+            if held:
+                return held
 
             # Process split orders sequentially with rate limiting
             results = []

@@ -210,10 +210,28 @@ TV_EXIT = {
 }
 
 
-def _smart(lines: str, order_id: str | None = "251027000000456", mode: str = LIVE) -> str:
+def _row_of(quantity, product="I"):
+    """SUDARSHAN M6.9: a raw positions row of the quantity held, whose day figures agree with an
+    empty order book (the sizing of an exit reads the row, then the order book)."""
+    row = {
+        "quantity": int(quantity),
+        "instrument_token": "NSE_EQ|1",
+        "product": product,
+        "day_buy_quantity": 0,
+        "day_sell_quantity": 0,
+    }
+    return lambda *args: [row]
+
+
+def _smart(
+    lines: str,
+    order_id: str | None = "251027000000456",
+    mode: str = LIVE,
+    title: str = "Smart Order Placed",
+) -> str:
     tail = f"\nOrder ID: `{order_id}`" if order_id else ""
     return (
-        "*Smart Order Placed*\nStrategy: *Nifty breakout*\n"
+        f"*{title}*\nStrategy: *Nifty breakout*\n"
         + mode
         + "Symbol: `NIFTY27OCT2625900CE`\n"
         + lines
@@ -301,10 +319,13 @@ def test_a_smart_order_to_a_position_size_of_0_never_shows_the_placeholders(
     ],
 )
 def test_a_smart_exit_that_sent_nothing_says_so_and_why(alert, response, lines):
-    """The review's LOW-4: a refused one read "Action: to close the position", with no reason."""
+    """The review's LOW-4: a refused one read "Action: to close the position", with no reason;
+    and its title said "Placed" (the second review's MEDIUM-6)."""
     message = alert("placesmartorder", TV_EXIT, response)
     mode = ANALYZE if response.get("mode") == "analyze" else LIVE
-    assert message == _smart(lines, order_id=None, mode=mode)
+    went = response.get("not_confirmed")
+    title = "Smart order not confirmed" if went else "Smart order not sent"
+    assert message == _smart(lines, order_id=None, mode=mode, title=title)
 
 
 def test_what_was_sent_with_no_quantity_reads_as_to_close(alert):
@@ -454,13 +475,14 @@ def test_an_exit_the_sandbox_s_order_manager_broke_on_is_not_confirmed(alert, mo
 
 
 def test_a_fresh_order_at_position_size_0_the_sandbox_broke_on_is_an_order(monkeypatch):
-    """Flat, with a quantity: it opens a position, so it is not an exit that may have gone."""
+    """Flat, to a size of 5 (TradingView's entry): it opens a position, so it is not an exit that
+    may have gone."""
     from sandbox.order_manager import OrderManager
 
     sandbox_service = _sandbox_holding(monkeypatch)
     monkeypatch.setattr(OrderManager, "_validate_order", _locked)
     _, answer, code = sandbox_service.sandbox_place_smart_order(
-        {**ANALYZE_EXIT, "quantity": "5"}, "key", {}
+        {**ANALYZE_EXIT, "quantity": "5", "position_size": "5"}, "key", {}
     )
     assert (code, answer["not_confirmed"]) == (500, True)
     assert answer["message"].startswith("This order is not confirmed: it may have gone through.")
@@ -586,7 +608,7 @@ def upstox_book(monkeypatch):
         status = 200
         status_code = 200
 
-    monkeypatch.setattr(upstox, "get_open_position", lambda *args: "1")
+    monkeypatch.setattr(upstox, "_position_rows", _row_of(1, "D"))  # CNC
     monkeypatch.setattr(upstox, "get_br_symbol", lambda symbol, exchange: symbol)
 
     def place_order_api(data, auth):
@@ -614,18 +636,18 @@ def test_upstox_s_smart_order_says_what_it_sent(upstox_book):
 
 def test_upstox_s_fresh_order_from_flat_says_it_opened(upstox_book, monkeypatch):
     upstox, placed = upstox_book
-    monkeypatch.setattr(upstox, "get_open_position", lambda *args: "0")
+    monkeypatch.setattr(upstox, "get_open_position", lambda *args: "0")  # flat, then to a size of 5
     order = {"symbol": "RELIANCE", "exchange": "NSE", "product": "CNC", "action": "buy"}
     _, answer, _ = upstox.place_smartorder_api(
-        {**order, "quantity": "5", "position_size": "0"}, "t"
+        {**order, "quantity": "5", "position_size": "5"}, "t"
     )
-    assert placed == [("buy", "5")]
+    assert placed == [("BUY", "5")]
     assert answer["sent"] == {"action": "BUY", "quantity": 5, "closes": False}
 
 
 def test_upstox_s_smart_order_to_a_new_size_is_no_close(upstox_book, monkeypatch):
     upstox, placed = upstox_book
-    monkeypatch.setattr(upstox, "get_open_position", lambda *args: "0")
+    monkeypatch.setattr(upstox, "get_open_position", lambda *args: "0")  # a sized order
     order = {"symbol": "RELIANCE", "exchange": "NSE", "product": "CNC", "action": "BUY"}
     _, answer, _ = upstox.place_smartorder_api(
         {**order, "quantity": "0", "position_size": "5"}, "t"
@@ -756,7 +778,7 @@ def test_the_app_s_live_exit_tells_its_alert_and_not_the_phone(alert, monkeypatc
                 {"status": "success", "sent": SOLD_1},
                 "251027000000123",
             ),
-            "get_open_position": lambda *args: "1",
+            "_position_rows": _row_of(1),
         },
     )
     app = Flask(__name__)
@@ -833,4 +855,59 @@ def test_the_owner_s_analyze_mode_exit_from_the_route_to_the_alert(alert, monkey
     assert message == (
         "*Exit sent*\n" + ANALYZE + "RELIANCE (NSE, CNC), sell 1 to close\n"
         "Order ID: `26102710521301`\nTime: 10:52:13"
+    )
+
+
+# -- A refusal nobody else hears of is told on Telegram (the second review's MEDIUM-6) ---------
+
+
+def test_the_telegram_subscriber_tells_only_a_failure_marked_as_sending_nothing(monkeypatch):
+    """Upstream sends nothing for a failed order, and that stays so for every other failure."""
+    import subscribers.telegram_subscriber as subscriber
+
+    told = []
+    monkeypatch.setattr(subscriber, "_send_alert", lambda *args: told.append(args))
+
+    def failed(response):
+        return SimpleNamespace(
+            api_type="placesmartorder",
+            request_data=dict(TV_EXIT),
+            response_data=response,
+            api_key="key",
+        )
+
+    subscriber.on_order_failed(failed({"status": "error", "message": "margin"}))
+    subscriber.on_order_failed(failed({"status": "error", "message": "x", "nothing_sent": "yes"}))
+    subscriber.on_order_failed(failed(None))
+    assert told == []
+    marked = {"status": "error", "message": "busy", "nothing_sent": True}
+    subscriber.on_order_failed(failed(marked))
+    assert told == [("placesmartorder", TV_EXIT, marked, "key")]
+
+
+def test_a_tradingview_exit_the_guard_refused_is_told_on_telegram(alert, published, monkeypatch):
+    """The phone's exit went; TradingView's exit for the position a moment later sends nothing.
+    Its failure was heard by nobody: its alert now says nothing was sent, and why."""
+    import broker.upstox.api.order_api as upstox
+    import services.place_smart_order_service as smart_service
+    from sudarshan.books import exit_guard
+
+    monkeypatch.setattr(smart_service, "get_analyze_mode", lambda: False)
+    monkeypatch.setattr(smart_service, "import_broker_module", lambda broker: upstox)
+    monkeypatch.setattr(upstox, "_position_rows", _row_of(65))
+    placed = []
+    monkeypatch.setattr(upstox, "place_order_api", lambda data, auth: placed.append(data))
+    exit_guard.exit_placed("live", "NFO", "NIFTY27OCT2625900CE", "MIS")  # the phone's, just now
+    order = {**TV_EXIT, "apikey": "key"}
+    ok, answer, code = smart_service.place_smart_order_with_auth(
+        dict(order), "tok", "upstox", order
+    )
+    assert (ok, code, placed) == (False, 409, [])
+    assert answer["message"].startswith("An exit for NIFTY 25900 CE is already on its way (sent ")
+    assert "nothing_sent" not in answer  # the API's answer is as it was
+    [event] = published
+    assert event.response_data == {**answer, "nothing_sent": True}
+    message = alert("placesmartorder", event.request_data, event.response_data)
+    assert message == _smart(
+        "Action: nothing sent\n" + answer["message"], order_id=None, title="Smart order not sent"
     )
