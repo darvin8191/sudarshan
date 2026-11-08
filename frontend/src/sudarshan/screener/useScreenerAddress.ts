@@ -31,6 +31,8 @@ export interface Address {
   /** Which side of the clause an operand sheet edits. */
   side: 'left' | 'right' | null
   run: number | null
+  /** The result row a symbol sheet is about, EXCHANGE:SYMBOL (`&k=`). */
+  key: string | null
 }
 
 const SHEETS = new Set([
@@ -45,6 +47,9 @@ const SHEETS = new Set([
   'alerts',
   'preview',
   'run',
+  'symbol',
+  'order',
+  'alert',
 ])
 
 function positive(value: string | null): number | null {
@@ -68,6 +73,7 @@ export function addressOf(params: URLSearchParams): Address {
         ? (params.get('side') as 'left' | 'right')
         : null,
     run: screen === null ? null : positive(params.get('run')),
+    key: params.get('k'),
   }
 }
 
@@ -159,6 +165,7 @@ export function useScreenerAddress() {
       after.delete('sheet')
       after.delete('c')
       after.delete('side')
+      after.delete('k')
       here.current = { ...here.current, params: after, entry: { sdScreen: !!now.sdScreen } }
       navigate(-1)
       return
@@ -167,6 +174,7 @@ export function useScreenerAddress() {
     after.delete('sheet')
     after.delete('c')
     after.delete('side')
+    after.delete('k')
     go(after, true, now.sdScreen ? { sdScreen: true } : null)
   }, [go, navigate])
 

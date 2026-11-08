@@ -68,6 +68,9 @@ export function onRun(client: QueryClient, push: RunPush): void {
     if (!held) return held
     return mergeResults(held, push)
   })
+  // The patch is on screen; the read that follows brings the chips and the clause values of the
+  // rows that stayed, which a push this small cannot carry.
+  void client.invalidateQueries({ queryKey: [...RESULTS_KEY, push.screen_id] })
   void client.invalidateQueries({ queryKey: [...RUNS_KEY, push.screen_id] })
   void client.invalidateQueries({ queryKey: TODAY_KEY })
 }
@@ -78,6 +81,8 @@ export function onRun(client: QueryClient, push: RunPush): void {
  * the results, which a push this small cannot carry; the page reads them once the push is in.
  */
 export function mergeResults(held: Results, push: RunPush): Results {
+  // A run the page already shows, or an older one that arrived late, changes nothing.
+  if (held.run && held.run.id >= push.run_id) return held
   const gone = new Set(push.exited.map((row) => `${row.exchange}:${row.symbol}`))
   const keep = held.rows.filter((row) => !gone.has(`${row.exchange}:${row.symbol}`))
   const have = new Set(keep.map((row) => `${row.exchange}:${row.symbol}`))

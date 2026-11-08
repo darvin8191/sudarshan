@@ -303,7 +303,7 @@ describe('the rule builder', () => {
 describe('editing a saved screen', () => {
   it('saves with the version it was opened at, and keeps Save off until something changed', async () => {
     api.change.mockResolvedValue(screenRow({ version: 2, name: 'Renamed' }))
-    renderPage(['/screener?screen=1'])
+    renderPage(['/screener?screen=1&tab=edit'])
     const save = await screen.findByRole('button', { name: 'Save' })
     expect((save as HTMLButtonElement).disabled).toBe(true)
     const name = screen.getByLabelText('Name')
@@ -319,7 +319,7 @@ describe('editing a saved screen', () => {
     api.change.mockRejectedValue(
       new ScreenerError({ code: 'conflict', message: 'raw', field: null })
     )
-    renderPage(['/screener?screen=1'])
+    renderPage(['/screener?screen=1&tab=edit'])
     const name = await screen.findByLabelText('Name')
     await userEvent.type(name, '!')
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
@@ -328,7 +328,7 @@ describe('editing a saved screen', () => {
   })
 
   it('stops Save when the screen changed elsewhere while it was being edited', async () => {
-    const client = renderPage(['/screener?screen=1'])
+    const client = renderPage(['/screener?screen=1&tab=edit'])
     const name = await screen.findByLabelText('Name')
     await userEvent.type(name, '!')
     await act(async () => {
@@ -342,7 +342,7 @@ describe('editing a saved screen', () => {
   })
 
   it('takes a newer version in place when the draft was never touched', async () => {
-    const client = renderPage(['/screener?screen=1'])
+    const client = renderPage(['/screener?screen=1&tab=edit'])
     await screen.findByLabelText('Name')
     await act(async () => {
       client.setQueryData(

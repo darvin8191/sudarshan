@@ -283,7 +283,8 @@ export function SymbolSheet({
   onOrder: (order: OrderRequest) => void
   /** The market alert form on this instrument, from its snapped live price. */
   onAlert: (alert: AlertPrefill) => void
-  onRemove: (item: WatchlistItem) => void
+  /** Absent where the instrument is not in a list the owner keeps (a screener's results). */
+  onRemove?: (item: WatchlistItem) => void
 }) {
   if (!row) return null
   return (
@@ -441,14 +442,16 @@ function Sheet({
 
         {tradable && apiKey !== null && <Depth item={item} marketOpen={marketOpen} now={now} />}
 
-        <button
-          type="button"
-          onClick={() => onRemove(item)}
-          className={cn(ACTION, 'justify-start px-1 text-[color:var(--down)] hover:bg-accent')}
-        >
-          <Trash2 aria-hidden="true" className="size-5" />
-          Remove from {listName}
-        </button>
+        {onRemove && (
+          <button
+            type="button"
+            onClick={() => onRemove(item)}
+            className={cn(ACTION, 'justify-start px-1 text-[color:var(--down)] hover:bg-accent')}
+          >
+            <Trash2 aria-hidden="true" className="size-5" />
+            Remove from {listName}
+          </button>
+        )}
       </div>
     </BottomSheet>
   )

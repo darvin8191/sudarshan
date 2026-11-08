@@ -18,6 +18,7 @@ import { droppedHere } from '@/sudarshan/screener/actions'
 import { DeleteSheet } from '@/sudarshan/screener/DeleteSheet'
 import { EngineText } from '@/sudarshan/screener/marks'
 import { useHearing, useScreenerPush } from '@/sudarshan/screener/push'
+import { ResultsPanel } from '@/sudarshan/screener/ResultsPanel'
 import { ScreenCard } from '@/sudarshan/screener/ScreenCard'
 import { ScreenEditor } from '@/sudarshan/screener/ScreenEditor'
 import { type PanelTab, ScreenPage } from '@/sudarshan/screener/ScreenPage'
@@ -36,7 +37,10 @@ const NOT_RECEIVING = {
 } as const
 
 /** The panels of an open screen; Results and History join as they are built. */
-const TABS: PanelTab[] = [{ id: 'edit', label: 'Edit' }]
+const TABS: PanelTab[] = [
+  { id: 'results', label: 'Results' },
+  { id: 'edit', label: 'Edit' },
+]
 
 const ORDER = { active: 0, paused: 1, stopped: 2 } as const
 
@@ -153,19 +157,30 @@ export default function Screener() {
         <ScreenPage
           row={open}
           tabs={TABS}
-          tab={address.tab === 'edit' || TABS.length === 1 ? 'edit' : address.tab}
+          tab={address.tab === 'edit' ? 'edit' : 'results'}
           onTab={setTab}
           onBack={closeScreen}
           onDelete={() => openSheet('delete')}
         >
-          <ScreenEditor
-            key={open.id}
-            row={open}
-            address={address}
-            openSheet={openSheet}
-            closeSheet={closeSheet}
-            onSaved={() => {}}
-          />
+          {address.tab === 'edit' ? (
+            <ScreenEditor
+              key={open.id}
+              row={open}
+              address={address}
+              openSheet={openSheet}
+              closeSheet={closeSheet}
+              onSaved={() => {}}
+            />
+          ) : (
+            <ResultsPanel
+              key={open.id}
+              screen={open}
+              address={address}
+              hearing={hearing}
+              openSheet={openSheet}
+              closeSheet={closeSheet}
+            />
+          )}
         </ScreenPage>
       ) : (
         <section className={cn('flex flex-col gap-2', problem && state && STALE)}>
