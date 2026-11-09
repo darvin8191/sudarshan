@@ -739,7 +739,9 @@ def _exit_all_sandbox(owner: Owner) -> tuple[bool, str, dict]:
     return (
         bool(ok),
         words.ks_sandbox_exit_all(
-            str(body.get("message") or ""), body.get("closed_positions"), body.get("failed_closures")
+            str(body.get("message") or ""),
+            body.get("closed_positions"),
+            body.get("failed_closures"),
         ),
         {"status": status},
     )

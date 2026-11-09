@@ -126,13 +126,16 @@ def _daily_status(owner: killswitch.Owner, limit: float | None) -> dict:
     for pipe in _PIPES:
         if not flag.covers(pipe):
             continue
-        read_at = datetime.now(UTC)
+        now = datetime.now(UTC)
+        read_at = now
         try:
             figure = _day_figure(pipe, owner)
         except Exception:
             logger.exception(f"Today's figure could not be read for the risk page ({pipe})")
             figure = None
-        session = risk_gate.GATE.session(_CARD_SEGMENT, read_at)
+        if figure is not None and figure.marked_at is not None:
+            read_at = figure.marked_at  # the sandbox: when its positions were marked
+        session = risk_gate.GATE.session(_CARD_SEGMENT, now)
         lock = risk_gate.GATE.day_lock(pipe)
         shown[pipe] = {
             "figure": None if figure is None else round(figure.total, 2),

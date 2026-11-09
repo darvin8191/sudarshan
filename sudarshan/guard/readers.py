@@ -16,6 +16,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from utils.thread_safe_cache import LockedTTLCache
 
@@ -364,6 +365,35 @@ def _sandbox_delivery(row) -> bool:
     )
 
 
+#: The sandbox marks a position's P&L only when something reads its positions with live prices
+#: (its background loop, ``python -m sandbox.position_manager``, never runs inside the app), so
+#: the figure is marked here before it is read. Orders and the card within this many seconds of
+#: one another share one marking.
+SANDBOX_MARK_KEPT_S = 1.0
+_sandbox_marked = LockedTTLCache(maxsize=8, ttl=SANDBOX_MARK_KEPT_S)
+
+
+def _mark_sandbox(user_id: str) -> datetime:
+    """Mark ``user_id``'s open sandbox positions at live prices, the way the positionbook does
+    (``get_open_positions(update_mtm=True)``), and return when that was (UTC). Cooperative: it
+    waits on no lock of its own, only on the sandbox's own session and quote reads, which the
+    positionbook request does too. Raises ``Unreadable`` when the positions cannot be read."""
+    kept = _sandbox_marked.get(user_id)
+    if kept is not None:
+        return kept
+    try:
+        from sandbox.position_manager import PositionManager
+
+        ok, _body, _status = PositionManager(user_id).get_open_positions(update_mtm=True)
+    except Exception as exc:
+        raise Unreadable(f"sandbox marks: {type(exc).__name__}") from exc
+    if not ok:
+        raise Unreadable("sandbox marks: positions not read")
+    marked = datetime.now(UTC)
+    _sandbox_marked[user_id] = marked
+    return marked
+
+
 def sandbox_day(user_id: str):
     """Today's P&L in the sandbox (M5.14): its funds' realised P&L for today, and its open
     positions' P&L as the sandbox marks them, delivery (CNC in cash) left out of both. A position
@@ -371,6 +401,7 @@ def sandbox_day(user_id: str):
     for it."""
     from .daily import DayFigure
 
+    marked_at = _mark_sandbox(user_id)  # before the stored column is read, never after
     try:
         db = _sandbox()
         funds = db.SandboxFunds.query.filter_by(user_id=user_id).populate_existing().first()
@@ -386,7 +417,7 @@ def sandbox_day(user_id: str):
     unrealised = sum(
         _number(row.pnl) for row in rows if row.quantity and not _sandbox_delivery(row)
     )
-    return DayFigure(realised, unrealised)
+    return DayFigure(realised, unrealised, marked_at=marked_at)
 
 
 def sandbox_working_order(user_id: str, order_id: object) -> Working | None:

@@ -486,6 +486,7 @@ def test_readers_sandbox_day_is_its_funds_and_open_positions(monkeypatch):
         ),
     )
     monkeypatch.setattr(readers, "_sandbox", lambda: db)
+    monkeypatch.setattr(readers, "_mark_sandbox", lambda user: datetime.now(UTC))
     figure = readers.sandbox_day("owner")
     assert (figure.realised, figure.unrealised) == (-900.5, -300.0)
 

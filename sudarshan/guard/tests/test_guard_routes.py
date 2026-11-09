@@ -399,6 +399,21 @@ def test_outside_the_session_the_status_never_says_reached_and_says_when_it_open
     assert {exchange for _day, exchange in asked} == {"NFO"}
 
 
+def test_the_card_says_when_the_sandbox_positions_were_marked(world, monkeypatch):
+    client, account, store = world
+    from datetime import UTC, datetime, timedelta
+
+    from sudarshan.guard import readers
+
+    monkeypatch.setattr(gate.GATE, "_in_session", lambda exchange, at: True)
+    marked = datetime.now(UTC) - timedelta(seconds=45)
+    monkeypatch.setattr(
+        readers, "sandbox_day", lambda user: daily.DayFigure(0.0, 8601.8, marked_at=marked)
+    )
+    day = _owner_call(client, "get", "/sudarshan/risk/status").get_json()["data"]["daily"]
+    assert day["sandbox"]["read_at"] == marked.isoformat()
+
+
 def test_status_reads_the_live_figure_from_upstox_s_rows(world, monkeypatch):
     client, account, store = world
     from sudarshan.guard import readers
