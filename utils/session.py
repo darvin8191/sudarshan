@@ -217,6 +217,14 @@ def revoke_user_tokens(revoke_db_tokens=True):
                         remove_session(current_sid)
                     except Exception as session_error:
                         logger.warning(f"Error removing stale session row: {session_error}")
+                # SUDARSHAN: SIO1. The Socket.IO connections this rollover ended are still open
+                # (the full teardown below closes them all); close the ones from before it.
+                try:
+                    from blueprints.sudarshan_alerts import drop_sockets_from_before
+
+                    drop_sockets_from_before(_todays_rollover_boundary())
+                except Exception:
+                    logger.exception("Could not close the sockets opened before the rollover")
                 return
 
             # Publish cache invalidation event via ZeroMQ for other processes

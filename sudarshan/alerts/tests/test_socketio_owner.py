@@ -7,10 +7,17 @@ happened. Now every connect, a reconnect included, is refused unless its session
 of OpenAlgo's owner (the check the alerts room's join makes); /market makes the same check; and when
 the owner's session ends every socket is closed, so each reconnect is checked again.
 
-Each test fails on the code before SIO1, for the reason its docstring gives. They run through
-Flask-SocketIO's test client (threading, as the dev server runs it) with app.py's default Socket.IO
-error handler bound, and last through a real gunicorn worker, eventlet and gthread: a real client
-over HTTP polling (the app's transport) and a raw one that ignores its refusal and keeps listening.
+python-socketio puts a connecting socket in its namespace's room of everyone before the connect
+handler runs, and dispatches that socket's events while the check is still running. So a
+broadcast goes only to the room the check joins on success (extensions.ADMITTED_ROOM), and an
+event from a socket not yet admitted is dropped (review HIGH-1).
+
+Each test fails on the code before the change it pins, for the reason its docstring gives (the
+first round: 376dc58; the review's round: 8c178eb). The guard tests at the end pin today's
+registrations and pass on both by design. They run through Flask-SocketIO's test client
+(threading, as the dev server runs it) with app.py's default Socket.IO error handler bound, and
+last through a real gunicorn worker, eventlet and gthread: a real client over HTTP polling (the
+app's transport) and a raw one that ignores its refusal and keeps listening.
 """
 
 from __future__ import annotations
@@ -22,16 +29,22 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import flask
 import httpx
 import pytest
 import pytz
 from bridge_app import OWNER, VIEWER, csrf_headers, make_app, reset_users
+from socketio import packet
 
+# Imported here, before any test binds Socket.IO to an app: a handler registered after that is
+# kept by the server of the moment only (Flask-SocketIO), and lost at the next init_app.
+import blueprints.websocket_example as market_module  # the /market namespace
 import database.auth_db as auth_db
 import database.user_db as user_db
 from events.order_events import OrderPlacedEvent
@@ -95,6 +108,36 @@ def heard(client, event: str = "order_event") -> list[dict]:
     got = [m["args"][0] for m in client.queue if m["name"] == event]
     client.queue.clear()
     return got
+
+
+class HeldCheck:
+    """The connect check held inside its handler until the test lets it go, as a preemption or a
+    GIL hand-off holds it under gthread or the dev server (a log line, a database read)."""
+
+    def __init__(self, monkeypatch):
+        self.inside, self.go, self.box = threading.Event(), threading.Event(), {}
+        real = session_utils.is_session_valid
+
+        def held():
+            self.box["sid"] = flask.request.sid
+            self.inside.set()
+            assert self.go.wait(10)
+            return real()
+
+        monkeypatch.setattr(session_utils, "is_session_valid", held)
+
+    def start(self, opener) -> None:
+        self.thread = threading.Thread(target=lambda: self.box.update(client=opener()))
+        self.thread.start()
+        assert self.inside.wait(10), "the connect check never ran"
+
+    def eio_sid(self) -> str:
+        return socketio.server.manager.eio_sid_from_sid(self.box["sid"], "/")
+
+    def finish(self):
+        self.go.set()
+        self.thread.join(10)
+        return self.box["client"]
 
 
 @pytest.fixture
@@ -249,8 +292,6 @@ def test_a_check_that_fails_refuses_the_socket_instead_of_admitting_it(world, mo
 def test_the_market_namespace_admits_the_owner_s_valid_session_only(world):
     """/market refused only a cookie without a user. Before SIO1 a login stopped before the broker
     step, a cookie past the daily expiry and another account's session were admitted."""
-    import blueprints.websocket_example  # noqa: F401  (registers /market, as app.py's import does)
-
     app, browser, connect = world
     owner = connect(browser(OWNER), namespace="/market")
     refused = {
@@ -264,6 +305,164 @@ def test_the_market_namespace_admits_the_owner_s_valid_session_only(world):
     assert {name: sio.is_connected("/market") for name, sio in refused.items()} == dict.fromkeys(
         refused, False
     )
+
+
+def test_a_broadcast_made_while_a_connect_is_checked_never_reaches_that_socket(world, monkeypatch):
+    """Review HIGH-1. Before this round the connecting socket sat in the room of everyone while its
+    check ran, so an order published meanwhile reached it and it was refused afterwards (the review
+    measured 953 of 1000 orders on gthread with yesterday's owner cookie). Broadcasts now go to the
+    admitted room, which a socket joins only once its check has passed."""
+    app, browser, connect = world
+    owner = connect(browser(OWNER))
+    hold = HeldCheck(monkeypatch)
+    hold.start(lambda: connect(browser(OWNER, expired=True)))
+    publish_order()  # the owner's order goes out while the stranger's check is held
+    stranger = hold.finish()
+    assert not stranger.is_connected()
+    assert heard(stranger) == []
+    assert heard(owner) == [ORDER]
+
+
+def test_an_event_sent_while_its_connect_is_checked_is_not_handled(world, monkeypatch):
+    """Review HIGH-1, the same window for events: python-socketio dispatched an event from a socket
+    whose check was still running, so a room join made there (strategy_subscribe takes yesterday's
+    owner cookie) would put a socket the check then refused in a strategy's room. An event from a
+    socket the check has not admitted is now dropped; an admitted one's is handled as before."""
+    app, browser, connect = world
+    handled = []
+
+    @socketio.on("sio1_probe")  # on this test's server only: the next init_app forgets it
+    def probe(*args):
+        handled.append(flask.request.sid)
+        return {"handled": True}
+
+    hold = HeldCheck(monkeypatch)
+    try:
+        hold.start(lambda: connect(browser(None)))
+        socketio.server._handle_eio_message(hold.eio_sid(), '2["sio1_probe"]')
+        stranger = hold.finish()
+    finally:
+        hold.go.set()
+    assert not stranger.is_connected()
+    assert handled == []
+    owner = connect(browser(OWNER))
+    assert owner.emit("sio1_probe", callback=True) == {"handled": True}
+
+
+def test_a_check_that_fails_tells_the_app_to_try_again(world, monkeypatch):
+    """Review MEDIUM-2. A check that failed was refused with the words a session that is not the
+    owner's gets, so the app could only treat it as final. Its refusal now carries retry: true; a
+    session that is not the owner's is refused without it."""
+    app, browser, connect = world
+    sio = connect(browser(OWNER))
+    sio.disconnect()
+    stranger = connect(browser(None))  # refused once here, before the recorder below
+    refusals = []
+    send = socketio.server._send_packet  # the newest test client's; it delivers to any of them
+
+    def record(eio_sid, pkt):
+        if pkt.packet_type == packet.CONNECT_ERROR:
+            refusals.append(pkt.data)
+        return send(eio_sid, pkt)
+
+    monkeypatch.setattr(socketio.server, "_send_packet", record)
+    readable = user_db.find_user_by_username
+
+    def unreadable():
+        raise RuntimeError("the users table could not be read")
+
+    monkeypatch.setattr(user_db, "find_user_by_username", unreadable)
+    sio.connect()
+    monkeypatch.setattr(user_db, "find_user_by_username", readable)
+    stranger.connect()
+    assert not sio.is_connected() and not stranger.is_connected()
+    assert [refusal.get("data") for refusal in refusals] == [{"retry": True}, None]
+    assert all(isinstance(refusal.get("message"), str) for refusal in refusals)
+
+
+def test_the_rollover_closes_the_sockets_opened_before_it_when_a_fresher_login_exists(
+    world, monkeypatch
+):
+    """Review MEDIUM-1. With a login after 03:00 on record (another device, or each morning's
+    auto-login), the stale phone's first request took revoke_user_tokens' early return, which closed
+    nothing, so yesterday's socket heard today's orders. That branch now closes every socket whose
+    session logged in before the rollover; today's sockets stay."""
+    monkeypatch.setenv("SESSION_EXPIRY_TIME", "03:00")
+    clock = Clock(monkeypatch, at(2, 50))
+    monkeypatch.setattr(session_utils, "_has_fresher_session", lambda *a, **k: True)
+    app, browser, connect = world
+    phone = app.test_client()
+    sign_in(phone, OWNER, at(21, 0, day=8))
+    yesterday = connect(phone)
+    yesterday_market = connect(phone, namespace="/market")
+    assert yesterday.is_connected() and yesterday_market.is_connected("/market")
+    clock.at = at(9, 5)
+    laptop = app.test_client()
+    sign_in(laptop, OWNER, clock.at)
+    today = connect(laptop)
+    stale = phone.get("/sudarshan/alerts/api/state", headers={"Accept": "application/json"})
+    assert stale.status_code == 401
+    assert not yesterday.is_connected() and not yesterday_market.is_connected("/market")
+    assert today.is_connected()
+    publish_order()
+    assert heard(yesterday) == [] and heard(today) == [ORDER]
+
+
+def test_a_market_socket_closes_when_the_owner_s_session_ends(world, monkeypatch):
+    """Review LOW-1. drop_owner_room closed the default namespace's sockets only, so a /market
+    socket admitted before a logout kept reading quotes and changing the feed's subscriptions."""
+    import blueprints.auth as auth_module
+
+    monkeypatch.setattr(auth_module, "upsert_auth", lambda *a, **k: 1)
+    monkeypatch.setattr(auth_db, "clear_user_sessions", lambda *a, **k: None)
+    app, browser, connect = world
+    app.register_blueprint(auth_module.auth_bp)
+    http = browser(OWNER)
+    market = connect(http, namespace="/market")
+    assert market.is_connected("/market")
+    assert http.post("/auth/logout", headers=csrf_headers(http)).status_code == 200
+    assert not market.is_connected("/market")
+
+
+# -- guards: what replaces the owner check would go unnoticed otherwise ---------------------
+
+
+def _connect_registrations(tree: ast.AST) -> list[str]:
+    """Where a source registers a connect handler on the default namespace, or a class-based
+    namespace (which could carry its own): socketio.on/on_event("connect"[, namespace="/"]), a
+    function named connect under @socketio.event, socketio.on_namespace(...)."""
+    found = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == "connect":
+            for decorator in node.decorator_list:
+                if (isinstance(decorator, ast.Attribute) and decorator.attr == "event"
+                        and isinstance(decorator.value, ast.Name)
+                        and decorator.value.id == "socketio"):  # fmt: skip
+                    found.append("socketio.event connect")
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "socketio"):  # fmt: skip
+            continue
+        if node.func.attr == "on_namespace":
+            found.append("socketio.on_namespace")
+        elif (node.func.attr in ("on", "on_event") and node.args
+              and isinstance(node.args[0], ast.Constant) and node.args[0].value == "connect"):  # fmt: skip
+            namespace = next((k.value for k in node.keywords if k.arg == "namespace"), None)
+            if namespace is None or getattr(namespace, "value", None) == "/":
+                found.append(f"socketio.{node.func.attr} connect")
+    return found
+
+
+def test_the_guard_sees_every_way_to_register_a_connect_handler():
+    """Review LOW-4: the scan missed @socketio.event def connect and on_namespace."""
+    sources = {
+        "@socketio.on('connect')\ndef a(auth=None): pass": ["socketio.on connect"],
+        "socketio.on_event('connect', h, namespace='/')": ["socketio.on_event connect"],
+        "@socketio.event\ndef connect(auth=None): pass": ["socketio.event connect"],
+        "socketio.on_namespace(Gate('/'))": ["socketio.on_namespace"],
+        "@socketio.on('connect', namespace='/market')\ndef b(auth): pass": [],
+    }  # fmt: skip
+    assert {code: _connect_registrations(ast.parse(code)) for code in sources} == sources
 
 
 def test_nothing_else_registers_a_connect_handler_on_the_default_namespace():
@@ -286,18 +485,21 @@ def test_nothing_else_registers_a_connect_handler_on_the_default_namespace():
                 tree = ast.parse(text)
             except (SyntaxError, ValueError):
                 continue
-            for node in ast.walk(tree):
-                if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-                        and node.func.attr in ("on", "on_event")
-                        and isinstance(node.func.value, ast.Name)
-                        and node.func.value.id == "socketio" and node.args
-                        and isinstance(node.args[0], ast.Constant)
-                        and node.args[0].value == "connect"):  # fmt: skip
-                    continue
-                namespace = next((k.value for k in node.keywords if k.arg == "namespace"), None)
-                if namespace is None or getattr(namespace, "value", None) == "/":
-                    found.append(path.relative_to(REPO).as_posix())
-    assert found == ["extensions.py"]
+            found += [f"{path.relative_to(REPO).as_posix()}: {kind}"
+                      for kind in _connect_registrations(tree)]  # fmt: skip
+    assert found == ["extensions.py: socketio.on connect"]
+
+
+def test_the_connect_handlers_the_server_runs_are_the_owner_checks(world):
+    """Review LOW-4: what the server will actually call, after every module that registers a
+    Socket.IO handler has been imported (as app.py imports them)."""
+    import blueprints.strategy_module  # noqa: F401
+    import blueprints.sudarshan_alerts  # noqa: F401
+    import extensions
+
+    handlers = socketio.server.handlers
+    assert handlers["/"]["connect"].__wrapped__ is extensions._connect_owner_only
+    assert handlers["/market"]["connect"].__wrapped__ is market_module.handle_connect
 
 
 # -- under a real gunicorn worker -----------------------------------------------------------

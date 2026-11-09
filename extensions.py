@@ -9,6 +9,14 @@ from utils.runtime import is_monkey_patched
 
 logger = get_logger(__name__)
 
+#: SUDARSHAN: SIO1. The room a socket joins once its namespace's connect check has admitted it
+#: (``admit_owner_only``). python-socketio puts a connecting socket in the room of everyone before
+#: the connect handler runs and dispatches its events while the check is still running, so under
+#: real threads (gthread, the dev server) a broadcast or a room join made during the check would
+#: reach a socket the check then refuses. Broadcasts go to this room instead, and an event from a
+#: socket outside it is dropped (``SerializedSocketIO.emit`` and ``_handle_event``).
+ADMITTED_ROOM = "sudarshan:admitted"
+
 
 class SerializedSocketIO(SocketIO):
     """SocketIO whose server-originated emits are serialised by one lock.
@@ -72,11 +80,26 @@ class SerializedSocketIO(SocketIO):
                 cls._binary_emit_count += 1
 
     def emit(self, event, *args, **kwargs):
+        if not kwargs.get("to") and not kwargs.get("room"):
+            kwargs["to"] = ADMITTED_ROOM  # SUDARSHAN: SIO1, a broadcast reaches admitted sockets
         self._count(bool(args) and self._has_binary(args[0]))
         if is_monkey_patched("thread"):
             return super().emit(event, *args, **kwargs)
         with self._emit_lock:
             return super().emit(event, *args, **kwargs)
+
+    def _handle_event(self, handler, message, namespace, sid, *args):
+        """SUDARSHAN: SIO1. Every event handler runs through here (``SocketIO.on`` wraps each one).
+        An event from a socket its connect check has not admitted (still being checked, or about
+        to be refused) is dropped; connect and disconnect pass. Flask-SocketIO is pinned in
+        pyproject, and the window tests in sudarshan/alerts/tests/test_socketio_owner.py fail if
+        this hook stops being called."""
+        if message not in ("connect", "disconnect"):
+            rooms = self.server.manager.rooms if self.server else {}
+            admitted = rooms.get(namespace or "/", {}).get(ADMITTED_ROOM)
+            if admitted is None or sid not in admitted:
+                return None
+        return super()._handle_event(handler, message, namespace, sid, *args)
 
 
 # async_mode stays "threading" under every worker: Flask-SocketIO's eventlet
@@ -129,6 +152,9 @@ def emit_from_any_thread(event, data, **kwargs) -> None:
 
 #: What a refused client is told. The app shows it nowhere; a script reads it.
 SOCKET_REFUSED = "Log in to receive live updates."
+#: What a client is told when the check itself failed; the data {"retry": True} tells the app to
+#: connect again after a pause instead of taking the refusal as final (review MEDIUM-2).
+SOCKET_RETRY = "Live updates could not start just now. Trying again."
 
 
 def is_owner_session() -> bool:
@@ -150,16 +176,21 @@ def is_owner_session() -> bool:
 
 
 def admit_owner_only() -> None:
-    """Refuse this Socket.IO connection unless ``is_owner_session()``; a check that raises refuses
-    too. Called first by every namespace's connect handler."""
+    """Refuse this Socket.IO connection unless ``is_owner_session()``, and admit it otherwise: it
+    joins ``ADMITTED_ROOM``, from which it hears broadcasts and may send events. A check that
+    raises refuses too, with ``{"retry": True}`` so the app tries again. Called first by every
+    namespace's connect handler."""
+    from flask_socketio import join_room
+
     try:
         admitted = is_owner_session()
     except Exception:
         logger.exception("Socket.IO: could not check the session, so the connection was refused")
-        admitted = False
+        raise SocketIORefusal(SOCKET_RETRY, {"retry": True}) from None
     if not admitted:
         logger.debug("Socket.IO: refused a connection without the owner's session")
         raise SocketIORefusal(SOCKET_REFUSED)
+    join_room(ADMITTED_ROOM)
 
 
 @socketio.on("connect")
