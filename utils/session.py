@@ -161,6 +161,27 @@ def _has_fresher_session(username, current_session_id=None):
     return False
 
 
+def session_row_gone() -> bool:
+    """SUDARSHAN: SIO1. True when this cookie names a session whose active_sessions row the server
+    has removed: a logout, a password change or a reset removes every row. Such a cookie still
+    passes is_session_valid() until the daily expiry (the "sessions valid after" issue, still
+    open), so only two places ask this: the login page's check and /auth/active-sessions, which
+    must agree or the login page loops. It is never asked on an ordinary request, because
+    register_session also replaces the row of an earlier login from the same IP (a laptop and a
+    phone on one Wi-Fi) and drops the oldest row past five sessions. A cookie without a session
+    id, or a row that cannot be read, is not judged: False."""
+    session_id = session.get("session_id")
+    if not session_id:
+        return False
+    try:
+        from database.auth_db import ActiveSession
+
+        return ActiveSession.query.filter_by(session_id=session_id).first() is None
+    except Exception:
+        logger.exception("Could not read the active session row")
+        return False
+
+
 def has_login_this_trading_session(username) -> bool:
     """Return True if ``username`` has an active session that authenticated at
     or after today's rollover boundary (default 03:00 IST).
@@ -217,6 +238,14 @@ def revoke_user_tokens(revoke_db_tokens=True):
                         remove_session(current_sid)
                     except Exception as session_error:
                         logger.warning(f"Error removing stale session row: {session_error}")
+                # SUDARSHAN: SIO1. The Socket.IO connections this rollover ended are still open
+                # (the full teardown below closes them all); close the ones from before it.
+                try:
+                    from blueprints.sudarshan_alerts import drop_sockets_from_before
+
+                    drop_sockets_from_before(_todays_rollover_boundary())
+                except Exception:
+                    logger.exception("Could not close the sockets opened before the rollover")
                 return
 
             # Publish cache invalidation event via ZeroMQ for other processes

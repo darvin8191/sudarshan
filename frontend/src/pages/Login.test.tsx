@@ -26,6 +26,9 @@ function respond(body: unknown, status = 200): FakeResponse {
   }
 }
 
+/** The session check, the login page's own (`?for=login`, SIO1) included. */
+const isSessionStatus = (url: string) => url.split('?')[0] === '/auth/session-status'
+
 /** A server with no session yet, answering the login POST with `login`. */
 function server(login: unknown) {
   const calls: string[] = []
@@ -34,7 +37,7 @@ function server(login: unknown) {
     vi.fn(async (url: string) => {
       calls.push(url)
       if (url === '/auth/check-setup') return respond({ needs_setup: false })
-      if (url === '/auth/session-status') return respond({ status: 'error' }, 401)
+      if (isSessionStatus(url)) return respond({ status: 'error' }, 401)
       if (url === '/auth/csrf-token') return respond({ csrf_token: 'token' })
       if (url === '/auth/login') return respond(login)
       return respond({}, 404)
@@ -136,7 +139,7 @@ function morningServer(loginBody: unknown) {
         signedIn = true
         return respond({ status: 'success', broker: 'upstox', redirect: '/dashboard' })
       }
-      if (url === '/auth/session-status') {
+      if (isSessionStatus(url)) {
         if (!signedIn) return respond({ status: 'error' }, 401)
         return respond({
           status: 'success',
