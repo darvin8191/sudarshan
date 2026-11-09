@@ -9,7 +9,6 @@ import {
   EmptyCard,
   LoadingCards,
   OUTLINED,
-  STALE,
   StaleBookNote,
 } from '@/sudarshan/books/cards/parts'
 import { useMarketOpen } from '@/sudarshan/dashboard/hooks'
@@ -45,8 +44,8 @@ export const DASH_WORDS = {
   last_read: 'These are your widgets as last read.',
 } as const
 
-/** One column on a phone, two from 768 px, three from 1,200 px. */
-export const GRID = 'grid grid-cols-1 items-start gap-2 md:grid-cols-2 min-[1200px]:grid-cols-3'
+/** One column on a phone, two from 768 px, three from 1,200 px (in rem: Tailwind emits a px breakpoint before the rem ones, so `md:` would win at every width). */
+export const GRID = 'grid grid-cols-1 items-start gap-2 md:grid-cols-2 min-[75rem]:grid-cols-3'
 
 /** The instruments the dashboard follows tick by tick: the open row's too, whichever card it is on. */
 function itemsOf(followed: WatchlistItem[], shown: ResultRow[], openKey: string | null) {
@@ -208,7 +207,7 @@ export function Dashboard({
       ) : data.widgets.length === 0 ? (
         <EmptyCard title={DASH_WORDS.empty_title} hint={DASH_WORDS.empty_hint} />
       ) : (
-        <ul className={cn(GRID, problem && STALE)}>
+        <ul className={GRID}>
           {cards.map((card) => {
             const screen = screens.get(card.screen_id)
             const own = {
@@ -223,6 +222,7 @@ export function Dashboard({
                 hearing,
                 feed: feedOf(card),
                 access: access.state,
+                readFailed: Boolean(problem),
               }),
               onOpenScreen: openCard,
               onOptions: options,

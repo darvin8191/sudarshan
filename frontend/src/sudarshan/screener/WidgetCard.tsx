@@ -81,6 +81,9 @@ export function ModeChip({ mode }: { mode: Card['mode'] }) {
   )
 }
 
+/** Everything in a greyed list takes the stale ink (5.37:1), trend colours included. */
+const GREYED = '[&_*]:!text-[color:var(--stale)]'
+
 const FOOT =
   'flex min-h-12 w-full items-center justify-between gap-2 px-4 text-left text-[0.875rem] font-semibold text-primary outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring'
 
@@ -254,7 +257,10 @@ function WidgetFace({
       ) : (
         <ul
           data-greyed={line.greyed || behind || undefined}
-          className={cn('divide-y border-t', (line.greyed || behind) && 'opacity-60')}
+          className={cn(
+            'divide-y border-t', // Grey by token, never by opacity (which drops ink under 4.5:1): sign, arrow and label stay.
+            (line.greyed || behind) && GREYED
+          )}
         >
           {card.rows_shown.map((row) => {
             const key = keyOf(row.symbol, row.exchange)

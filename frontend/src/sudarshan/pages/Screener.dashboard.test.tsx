@@ -189,7 +189,7 @@ describe('the dashboard view', () => {
     const list = (await screen.findByText('One')).closest('ul[class*="grid"]') as HTMLElement
     expect(list.className).toContain('grid-cols-1')
     expect(list.className).toContain('md:grid-cols-2')
-    expect(list.className).toContain('min-[1200px]:grid-cols-3')
+    expect(list.className).toContain('min-[75rem]:grid-cols-3')
   })
 
   it("reads the cards past the read's budget one by one, in card order, and fills them in place", async () => {

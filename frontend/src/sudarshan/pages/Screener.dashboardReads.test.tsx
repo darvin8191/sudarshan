@@ -562,3 +562,49 @@ describe('the reconnect and the suggestion (M2, M3, M8, L10)', () => {
     await waitFor(() => expect(cardOf(1).querySelector('[data-mode="forming_day"]')).toBeTruthy())
   })
 })
+
+describe('greyed rows, the grid and a failed read (M5, M10, L6)', () => {
+  it('greys a stale list by the stale ink, never by opacity, and keeps the words', async () => {
+    api.dashboard.mockResolvedValue(
+      dashboard([
+        widgetCard({
+          status: 'paused',
+          line: { kind: 'paused', words: 'Paused · not checking', live: false, state: 'real_time' },
+        }),
+      ])
+    )
+    api.state.mockResolvedValue(screenerState([screenRow({ id: 1, status: 'paused' })]))
+    renderPage()
+    await joinedOnce(room)
+    await waitFor(() => expect(cardOf(1)).toBeTruthy())
+    const list = cardOf(1).querySelector('[data-greyed]') as HTMLElement
+    expect(list).toBeTruthy()
+    expect(list.className).toContain('--stale')
+    expect(list.className).not.toMatch(/opacity/)
+  })
+
+  it('lays out three columns from 75rem, the unit Tailwind orders after md', async () => {
+    api.dashboard.mockResolvedValue(dashboard([widgetCard()]))
+    renderPage()
+    await waitFor(() => expect(cardOf(1)).toBeTruthy())
+    const grid = cardOf(1).parentElement as HTMLElement
+    expect(grid.className).toContain('min-[75rem]:grid-cols-3')
+    expect(grid.className).not.toContain('1200px')
+  })
+
+  it('a failed dashboard read says every card is as last read, not Real-time, and says it in words', async () => {
+    api.dashboard.mockResolvedValueOnce(dashboard([widgetCard()], { version: 3, suggested: false }))
+    renderPage()
+    await joinedOnce(room)
+    await waitFor(() => expect(cardOf(1)).toBeTruthy())
+    expect(cardOf(1).querySelector('[data-card-line]')?.textContent).toMatch(/Real-time/)
+    api.dashboard.mockRejectedValue(
+      new ScreenerError({ code: 'failed', message: 'The screener is not answering.', field: null })
+    )
+    act(() => room.fire('sudarshan_screener_dashboard', { version: 9 }))
+    await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy())
+    const line = cardOf(1).querySelector('[data-card-line]')?.textContent ?? ''
+    expect(line).toMatch(/As last read/)
+    expect(line).not.toMatch(/Real-time/)
+  })
+})

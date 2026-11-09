@@ -16,6 +16,7 @@ import type { CardLineKind, EngineLine, ScreenRow, WidgetCard } from './types'
 
 /** The most prices followed at once on the dashboard, and what a card past it says. */
 export const LIVE_CAP = 100
+export const READ_FAILED = 'As last read · not updating until the dashboard can be read'
 export const NOT_RECEIVING = 'Not receiving updates on this screen · reconnecting'
 
 export type LineIcon =
@@ -168,6 +169,7 @@ export function cardLine({
   hearing,
   feed,
   access = 'ready',
+  readFailed = false,
 }: {
   card: WidgetCard
   screen: ScreenRow | undefined
@@ -176,9 +178,12 @@ export function cardLine({
   feed: CardFeed
   /** Whether prices can be read at all: the login and the key. */
   access?: PriceAccessState
+  /** The dashboard's last read failed: every card is as last read, and says it is not updating. */
+  readFailed?: boolean
 }): LineView {
   if (hearing !== 'joined')
     return { icon: 'wifi-off', words: NOT_RECEIVING, warn: true, greyed: true }
+  if (readFailed) return { icon: 'wifi-off', words: READ_FAILED, warn: true, greyed: true }
   const { kind, words } = lineOf(card, screen, engine, feed.now)
   const next = screen?.next_check
     ? ` · ${screen.next_check}`
