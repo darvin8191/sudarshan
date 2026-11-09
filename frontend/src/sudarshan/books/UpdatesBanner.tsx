@@ -1,7 +1,9 @@
-import { useEffect, useReducer, useState } from 'react'
+import { LogIn } from 'lucide-react'
+import { useEffect, useReducer, useState, useSyncExternalStore } from 'react'
 import type { Socket } from 'socket.io-client'
 import { useSocketContext } from '@/components/socket/SocketProvider'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
+import { goToLogin, signInNeededNow, subscribeSignInNeeded } from './sharedSocket'
 
 /** How long a page's first connect may take before the line says "Connecting". */
 export const FIRST_CONNECT_GRACE_MS = 3_000
@@ -70,10 +72,35 @@ export function useUpdatesStanding(socket: Socket | null): Standing & { now: num
  * The line every page shows while the tab's connection is down: "Order updates", then the app's
  * own "Reconnecting · updated 12s ago" (or "Connecting" on a first connect that has not come
  * within a few seconds), in words and an icon, never a colour alone. Nothing while it is up.
+ *
+ * When the session has ended and the tab may not go to the login page by itself just now (it went
+ * less than a minute ago, `trips.ts`), the line says "Sign in again to get them" with a button that
+ * takes the owner there.
  */
 export function UpdatesLine({ socket }: { socket: Socket | null }) {
   const { connected, everConnected, downSince, openedAt, now } = useUpdatesStanding(socket)
+  const signIn = useSyncExternalStore(subscribeSignInNeeded, signInNeededNow, signInNeededNow)
   if (socket === null || connected) return null
+  if (signIn) {
+    return (
+      <div
+        data-testid="updates-banner"
+        className="flex items-center justify-center gap-3 border-b border-[color:var(--divider)] bg-[color:var(--surface-card)] px-4 py-1"
+      >
+        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-[color:var(--text-secondary)]">
+          <LogIn aria-hidden="true" className="size-3.5 shrink-0" />
+          Order updates · Sign in again to get them
+        </span>
+        <button
+          type="button"
+          onClick={goToLogin}
+          className="min-h-12 rounded-lg bg-[color:var(--brand)] px-4 text-sm font-semibold text-white hover:bg-[color:var(--brand-hover)]"
+        >
+          Sign in
+        </button>
+      </div>
+    )
+  }
   if (!everConnected && now - openedAt < FIRST_CONNECT_GRACE_MS) return null
   const stale = downSince !== null && now - downSince > STALE_AFTER_MS
   return (

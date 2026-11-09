@@ -5,14 +5,18 @@
  * to be open and is not is asked to connect again.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { claimTrip, resetTripsForTests, TRIP_GAP_MS } from '@/sudarshan/trips'
 import {
   acquireSharedSocket,
   connectionCount,
+  goToLogin,
   REFUSED_RETRY_MS,
   RETRY_MS,
   releaseSharedSocket,
+  SESSION_READ_TIMEOUT_MS,
   type SessionState,
   setRefusalHandlersForTests,
+  signInNeededNow,
 } from './sharedSocket'
 
 type Handler = (...args: unknown[]) => void
@@ -71,6 +75,7 @@ afterEach(async () => {
   for (const socket of made) releaseSharedSocket(socket as never)
   await endOfTask()
   setRefusalHandlersForTests(null)
+  resetTripsForTests()
   vi.useRealTimers()
 })
 
@@ -158,12 +163,17 @@ describe('shared Socket.IO connection', () => {
   })
 })
 
+/** The refusal handlers with each pause at its listed length (no spread): random() 0.5. */
+function handle(next: Parameters<typeof setRefusalHandlersForTests>[0]) {
+  setRefusalHandlersForTests({ random: () => 0.5, ...next })
+}
+
 describe('a connect the server refuses (SIO1)', () => {
   it('is asked again after a growing pause while the session holds, from the first pause once up', async () => {
     vi.useFakeTimers()
     const askSession = vi.fn(async (): Promise<SessionState> => 'valid')
     const toLogin = vi.fn()
-    setRefusalHandlersForTests({ askSession, toLogin })
+    handle({ askSession, toLogin })
     acquireSharedSocket(create)
     const socket = made[0]
 
@@ -192,7 +202,7 @@ describe('a connect the server refuses (SIO1)', () => {
   it('that says retry is asked again after the pause without asking about the session', async () => {
     vi.useFakeTimers()
     const askSession = vi.fn(async (): Promise<SessionState> => 'ended')
-    setRefusalHandlersForTests({ askSession, toLogin: vi.fn() })
+    handle({ askSession, toLogin: vi.fn() })
     acquireSharedSocket(create)
 
     made[0].refuse({ retry: true })
@@ -204,7 +214,7 @@ describe('a connect the server refuses (SIO1)', () => {
   it('for a session that has ended leads to the login page, as a 401 does, and is not asked again', async () => {
     vi.useFakeTimers()
     const toLogin = vi.fn()
-    setRefusalHandlersForTests({ askSession: async () => 'ended', toLogin })
+    handle({ askSession: async () => 'ended', toLogin })
     acquireSharedSocket(create)
 
     made[0].refuse()
@@ -216,7 +226,7 @@ describe('a connect the server refuses (SIO1)', () => {
 
   it('is asked again at once when the page comes back into view or the browser is online', async () => {
     vi.useFakeTimers()
-    setRefusalHandlersForTests({ askSession: async () => 'unknown', toLogin: vi.fn() })
+    handle({ askSession: async () => 'unknown', toLogin: vi.fn() })
     acquireSharedSocket(create)
     const socket = made[0]
 
@@ -235,7 +245,7 @@ describe('a connect the server refuses (SIO1)', () => {
     vi.useFakeTimers()
     const askSession = vi.fn(async (): Promise<SessionState> => 'ended')
     const toLogin = vi.fn()
-    setRefusalHandlersForTests({ askSession, toLogin })
+    handle({ askSession, toLogin })
     acquireSharedSocket(create)
     const socket = made[0]
 
@@ -253,7 +263,7 @@ describe('a connect the server refuses (SIO1)', () => {
 
   it('is left alone once the tab lets the connection go', async () => {
     vi.useFakeTimers()
-    setRefusalHandlersForTests({ askSession: async () => 'valid', toLogin: vi.fn() })
+    handle({ askSession: async () => 'valid', toLogin: vi.fn() })
     const socket = acquireSharedSocket(create)
 
     made[0].refuse()
@@ -268,7 +278,7 @@ describe('a connect the server refuses (SIO1)', () => {
     const fetchMock = vi.fn(async () => ({ ok: false, status: 401 }))
     vi.stubGlobal('fetch', fetchMock)
     const toLogin = vi.fn()
-    setRefusalHandlersForTests({ toLogin }) // the real question, a stubbed answer
+    handle({ toLogin }) // the real question, a stubbed answer
     try {
       acquireSharedSocket(create)
       made[0].refuse()
@@ -280,5 +290,137 @@ describe('a connect the server refuses (SIO1)', () => {
     } finally {
       vi.unstubAllGlobals()
     }
+  })
+})
+
+describe('a refused connect, kept gentle (SIO1 round 3)', () => {
+  it('spreads each pause by up to half either way, so tabs refused together do not come back together', async () => {
+    vi.useFakeTimers()
+    const draws = [0, 0.99]
+    handle({
+      askSession: async () => 'valid',
+      toLogin: vi.fn(),
+      random: () => draws.shift() ?? 0.5,
+    })
+    acquireSharedSocket(create)
+    const socket = made[0]
+
+    socket.refuse() // drawn 0: half the first pause, 500 ms
+    await vi.advanceTimersByTimeAsync(499)
+    expect(socket.connects).toBe(0)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(socket.connects).toBe(1)
+
+    socket.refuse() // drawn 0.99: the second pause times 1.49, 2,980 ms
+    await vi.advanceTimersByTimeAsync(2_979)
+    expect(socket.connects).toBe(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(socket.connects).toBe(2)
+  })
+
+  it('counts a session read with no answer in 10 s as unknown, and asks again after the pause', async () => {
+    vi.useFakeTimers()
+    const askSession = vi.fn(() => new Promise<SessionState>(() => {})) // a read that never answers
+    const toLogin = vi.fn()
+    handle({ askSession, toLogin })
+    acquireSharedSocket(create)
+    const socket = made[0]
+
+    socket.refuse()
+    await vi.advanceTimersByTimeAsync(SESSION_READ_TIMEOUT_MS + REFUSED_RETRY_MS[0] - 1)
+    expect(socket.connects).toBe(0)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(socket.connects).toBe(1)
+    expect(askSession).toHaveBeenCalledTimes(1)
+    expect(toLogin).not.toHaveBeenCalled()
+  })
+
+  it('lets the session read itself go at the time limit', async () => {
+    vi.useFakeTimers()
+    let signal: AbortSignal | null | undefined
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init?: RequestInit) => {
+        signal = init?.signal
+        return new Promise(() => {}) // the server never answers
+      })
+    )
+    handle({ toLogin: vi.fn() }) // the real read
+    try {
+      acquireSharedSocket(create)
+      made[0].refuse()
+      await vi.advanceTimersByTimeAsync(SESSION_READ_TIMEOUT_MS - 1)
+      expect(signal?.aborted).toBe(false)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(signal?.aborted).toBe(true)
+      await vi.advanceTimersByTimeAsync(REFUSED_RETRY_MS[0])
+      expect(made[0].connects).toBe(1)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('goes to the login page by itself at most once a minute; within it, the line asks the owner instead', async () => {
+    vi.useFakeTimers()
+    const toLogin = vi.fn()
+    handle({ askSession: async () => 'ended', toLogin })
+    acquireSharedSocket(create)
+
+    made[0].refuse()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(toLogin).toHaveBeenCalledTimes(1)
+    expect(signInNeededNow()).toBe(false)
+
+    // Sent straight back within the minute (a server that still took the cookie), refused again.
+    acquireSharedSocket(create)
+    made[1].refuse()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(toLogin).toHaveBeenCalledTimes(1)
+    expect(signInNeededNow()).toBe(true)
+
+    goToLogin() // the line's button: the owner asked, so it is not limited
+    expect(toLogin).toHaveBeenCalledTimes(2)
+
+    await vi.advanceTimersByTimeAsync(TRIP_GAP_MS)
+    acquireSharedSocket(create)
+    made[2].refuse() // a minute on, the tab may go by itself again
+    await vi.advanceTimersByTimeAsync(0)
+    expect(toLogin).toHaveBeenCalledTimes(3)
+
+    acquireSharedSocket(create)
+    made[3].fire('connect') // signed in again: the line has nothing to ask
+    expect(signInNeededNow()).toBe(false)
+  })
+
+  it('asks the owner nothing on a new connection, as after signing in again with no reload', async () => {
+    vi.useFakeTimers()
+    handle({ askSession: async () => 'ended', toLogin: vi.fn() })
+    expect(claimTrip('login')).toBe(true) // the tab went to the login page a moment ago
+    const old = acquireSharedSocket(create)
+    made[0].refuse()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(signInNeededNow()).toBe(true)
+
+    releaseSharedSocket(old) // signed out: the shells let the connection go
+    await endOfTask()
+    acquireSharedSocket(create) // signed in again inside the app: a new connection, still coming up
+    expect(signInNeededNow()).toBe(false)
+  })
+
+  it('asks nothing about the session on a transport failure, which Socket.IO retries by itself', async () => {
+    vi.useFakeTimers()
+    const askSession = vi.fn(async (): Promise<SessionState> => 'ended')
+    const toLogin = vi.fn()
+    handle({ askSession, toLogin })
+    acquireSharedSocket(create)
+    const socket = made[0]
+
+    socket.connected = false // still active: Socket.IO's own reconnection is running
+    for (let attempt = 0; attempt < 3; attempt++) {
+      socket.fire('connect_error', new Error('xhr poll error'))
+    }
+    await vi.advanceTimersByTimeAsync(RETRY_MS)
+    expect(askSession).not.toHaveBeenCalled()
+    expect(toLogin).not.toHaveBeenCalled()
   })
 })

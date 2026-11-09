@@ -13,11 +13,12 @@ broadcast goes only to the room the check joins on success (extensions.ADMITTED_
 event from a socket not yet admitted is dropped (review HIGH-1).
 
 Each test fails on the code before the change it pins, for the reason its docstring gives (the
-first round: 376dc58; the review's round: 8c178eb). The guard tests at the end pin today's
-registrations and pass on both by design. They run through Flask-SocketIO's test client
-(threading, as the dev server runs it) with app.py's default Socket.IO error handler bound, and
-last through a real gunicorn worker, eventlet and gthread: a real client over HTTP polling (the
-app's transport) and a raw one that ignores its refusal and keeps listening.
+first round: 376dc58; the review's round: 8c178eb; the re-review's round: 3c75d18). The guard tests
+at the end pin today's registrations and pass on both by design, as do the tests that say so. They
+run through Flask-SocketIO's test client (threading, as the dev server runs it) with app.py's
+default Socket.IO error handler bound, and last through a real gunicorn worker, eventlet and
+gthread: a real client over HTTP polling (the app's transport) and a raw one that ignores its
+refusal and keeps listening.
 """
 
 from __future__ import annotations
@@ -66,15 +67,19 @@ def at(hour: int, minute: int, day: int = 9) -> datetime:
     return IST.localize(datetime(2026, 11, day, hour, minute))
 
 
-def sign_in(http, user: str, when: datetime, *, half: bool = False) -> None:
+def sign_in(http, user: str, when: datetime, *, half: bool = False, session_id=None) -> None:
     """The session OpenAlgo's login leaves: the user after the password step; logged in, with its
-    time, after the broker step (half: stopped before it)."""
+    time, after the broker step (half: stopped before it); with the id of its active session row
+    and the broker when `session_id` is given, as handle_auth_success writes them."""
     with http.session_transaction() as session:
         session.clear()
         session["user"] = user
         if not half:
             session["logged_in"] = True
             session["login_time"] = when.isoformat()
+        if session_id is not None:
+            session["session_id"] = session_id
+            session["broker"] = "upstox"
 
 
 class Clock:
@@ -422,6 +427,75 @@ def test_a_market_socket_closes_when_the_owner_s_session_ends(world, monkeypatch
     assert market.is_connected("/market")
     assert http.post("/auth/logout", headers=csrf_headers(http)).status_code == 200
     assert not market.is_connected("/market")
+
+
+def _devices(app, *ips: str) -> list:
+    """Browsers signed in now as the owner, each with its own active session row from its IP. Each
+    request reads the rows afresh, as app.py's teardown (every scoped session removed) makes it."""
+    app.teardown_appcontext(lambda exception=None: auth_db.db_session.remove())
+    auth_db.init_db()
+    auth_db.clear_user_sessions(OWNER)
+    browsers = []
+    for number, ip in enumerate(ips):
+        http, session_id = app.test_client(), f"{number}" * 64
+        sign_in(http, OWNER, datetime.now(IST), session_id=session_id)
+        assert auth_db.register_session(OWNER, session_id, f"device {number}", ip, "upstox")
+        browsers.append(http)
+    return browsers
+
+
+def test_after_a_logout_elsewhere_the_login_page_and_the_session_read_sign_the_device_out(
+    world, monkeypatch
+):
+    """Re-review, the loop: after a logout on the laptop the phone's cookie still read as signed in
+    to the login page's check and to /auth/active-sessions (200), though the logout had removed
+    every session row. The login page sent the phone to the dashboard, whose guard sent it back,
+    about 300 reads in 2 s. Both now take a cookie whose row the server removed as signed out, and
+    clear it."""
+    import blueprints.auth as auth_module
+
+    monkeypatch.setattr(auth_module, "upsert_auth", lambda *a, **k: 1)
+    app, browser, connect = world
+    app.register_blueprint(auth_module.auth_bp)
+    laptop, phone, tablet = _devices(app, "192.0.2.1", "192.0.2.2", "192.0.2.3")
+    json_read = {"Accept": "application/json"}
+    assert phone.get("/auth/session-status?for=login").get_json()["logged_in"] is True
+    assert tablet.get("/auth/active-sessions", headers=json_read).status_code == 200
+    assert laptop.post("/auth/logout", headers=csrf_headers(laptop)).status_code == 200
+
+    assert phone.get("/auth/session-status?for=login").get_json()["authenticated"] is False
+    assert phone.get("/auth/session-status").get_json()["authenticated"] is False  # cleared
+    assert tablet.get("/auth/active-sessions", headers=json_read).status_code == 401
+    assert tablet.get("/auth/session-status").get_json()["authenticated"] is False  # cleared
+
+
+def test_a_page_load_s_own_check_still_ignores_a_row_a_same_ip_login_replaced(world, monkeypatch):
+    """register_session replaces the row of an earlier login from the same IP (a laptop and a phone
+    on one Wi-Fi), so only the login page asks about the row: the laptop's page loads and its live
+    connection carry on. Those checks pass before and after: they pin that the row is asked about
+    nowhere else. The login page's own check does ask, and signs such a laptop out (on 3c75d18 it
+    did not ask): the accepted edge until the server keeps a "sessions valid after" time, since the
+    row is its only record of a logout."""
+    import blueprints.auth as auth_module
+
+    app, browser, connect = world
+    app.register_blueprint(auth_module.auth_bp)
+    laptop, phone = _devices(app, "192.0.2.7", "192.0.2.7")
+    assert [row["device_info"] for row in auth_db.get_active_sessions(OWNER)] == ["device 1"]
+    status = laptop.get("/auth/session-status").get_json()
+    assert status["authenticated"] is True and status["logged_in"] is True
+    assert connect(laptop).is_connected()
+    assert laptop.get("/auth/session-status?for=login").get_json()["authenticated"] is False
+
+
+def test_an_admitted_market_socket_s_request_is_answered(world):
+    """Re-review L5: the event gate reads the admitted room of the event's own namespace. Reading
+    the default namespace's instead would drop every /market request; nothing pinned that."""
+    app, browser, connect = world
+    market = connect(browser(OWNER), namespace="/market")
+    market.get_received("/market")  # its greeting
+    market.emit("get_ltp", {"symbol": "SBIN", "exchange": "NSE"}, namespace="/market")
+    assert [m["name"] for m in market.get_received("/market")] == ["ltp_data"]
 
 
 # -- guards: what replaces the owner check would go unnoticed otherwise ---------------------

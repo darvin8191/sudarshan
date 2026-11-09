@@ -7,8 +7,9 @@
  */
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { act, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { setRefusalHandlersForTests, setSignInNeededForTests } from './sharedSocket'
 import { FIRST_CONNECT_GRACE_MS, STALE_AFTER_MS, UpdatesLine } from './UpdatesBanner'
 
 type Handler = () => void
@@ -32,6 +33,7 @@ class FakeSocket {
 const line = () => screen.queryByTestId('updates-banner')
 
 afterEach(() => {
+  setRefusalHandlersForTests(null)
   vi.useRealTimers()
 })
 
@@ -89,6 +91,28 @@ describe('the order updates line', () => {
     })
     expect(line()?.textContent).toContain('Connecting')
     expect(line()?.textContent).not.toContain('Reconnecting')
+  })
+
+  it('asks the owner to sign in again when the tab may not go there by itself, with a button that does', () => {
+    const toLogin = vi.fn()
+    setRefusalHandlersForTests({ toLogin })
+    const socket = new FakeSocket() // refused, so down
+    render(<UpdatesLine socket={socket as never} />)
+    expect(line()).toBeNull()
+
+    act(() => {
+      setSignInNeededForTests(true) // the session has ended and the tab went to log in a moment ago
+    })
+    expect(line()?.textContent).toContain('Order updates · Sign in again to get them')
+    expect(line()?.querySelector('svg')).not.toBeNull() // an icon beside the words
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+    expect(toLogin).toHaveBeenCalledTimes(1)
+
+    act(() => {
+      socket.connected = true
+      socket.fire('connect')
+    })
+    expect(line()).toBeNull()
   })
 
   it('shows nothing where there is no connection to watch', () => {

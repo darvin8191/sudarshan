@@ -35,7 +35,12 @@ from utils.email_debug import debug_smtp_connection
 from utils.email_utils import send_password_reset_email, send_test_email
 from utils.ip_helper import get_real_ip
 from utils.logging import get_logger
-from utils.session import check_session_validity, is_session_valid, revoke_user_tokens
+from utils.session import (
+    check_session_validity,
+    is_session_valid,
+    revoke_user_tokens,
+    session_row_gone,  # SUDARSHAN: SIO1
+)
 
 # Initialize logger
 logger = get_logger(__name__)
@@ -1025,6 +1030,13 @@ def _touch_session_heartbeat():
 @auth_bp.route("/session-status", methods=["GET"])
 def get_session_status():
     """Return current session status for React SPA."""
+    # SUDARSHAN: SIO1. The login page asks with ?for=login. A cookie whose session row the
+    # server removed (a logout, a password change or reset) is signed out and cleared here, as
+    # /auth/active-sessions does: the page then shows the form instead of sending the device to
+    # the dashboard, whose guard sent it straight back (a loop). Other callers do not ask, since
+    # a same-IP login also replaces a row (utils.session.session_row_gone).
+    if request.args.get("for") == "login" and session_row_gone():
+        session.clear()
     if "user" not in session:
         # Return 200 with authenticated: false instead of 401
         # This prevents unnecessary console errors in the browser
@@ -1108,6 +1120,17 @@ def active_sessions():
     """Return the list of active sessions for the current user."""
     if "user" not in session:
         return jsonify({"status": "error", "message": "Not authenticated"}), 401
+    # SUDARSHAN: SIO1. The same answer the login page gets (session-status?for=login): a session
+    # whose row the server removed has ended, and its cookie is cleared.
+    if session_row_gone():
+        session.clear()
+        return jsonify(
+            {
+                "status": "error",
+                "error": "session_expired",
+                "message": "Your session has ended. Please log in again.",
+            }
+        ), 401
 
     from database.auth_db import get_active_sessions
     sessions = get_active_sessions(session["user"])

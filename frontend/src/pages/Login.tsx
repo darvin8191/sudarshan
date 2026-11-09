@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
 import { BrandLockup } from '@/sudarshan/BrandLockup'
+import { claimTrip } from '@/sudarshan/trips' // SUDARSHAN SIO1
 import { showToast } from '@/utils/toast'
 
 // SUDARSHAN: the D login. The brand's own colours rather than the mode's
@@ -84,8 +85,10 @@ export default function Login() {
           return
         }
 
-        // Check if already logged in
-        const sessionResponse = await fetch('/auth/session-status', {
+        // Check if already logged in. SUDARSHAN SIO1: ?for=login, so a cookie the server has
+        // signed out (its session row removed by a logout elsewhere) is cleared and answered as
+        // signed out, and this page shows the form.
+        const sessionResponse = await fetch('/auth/session-status?for=login', {
           credentials: 'include',
         })
 
@@ -94,9 +97,13 @@ export default function Login() {
           const sessionData = await sessionResponse.json()
 
           if (sessionData.status === 'success' && sessionData.logged_in && sessionData.broker) {
-            // Already fully logged in with broker, go to dashboard
-            navigate('/dashboard', { replace: true })
-            return
+            // Already fully logged in with broker, go to dashboard. SUDARSHAN SIO1: at most once
+            // a minute, so a dashboard that sends this tab straight back (its guard still signed
+            // out) leaves it on the form instead of looping (sudarshan/trips.ts).
+            if (claimTrip('dashboard')) {
+              navigate('/dashboard', { replace: true })
+              return
+            }
           } else if (
             sessionData.status === 'success' &&
             sessionData.authenticated &&

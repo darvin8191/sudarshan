@@ -1,4 +1,5 @@
 import type { Socket } from 'socket.io-client'
+import { claimTrip } from '@/sudarshan/trips'
 
 /**
  * One Socket.IO connection for the signed-in tab, not one per layout or page.
@@ -40,13 +41,22 @@ import type { Socket } from 'socket.io-client'
  * login page; otherwise the connect is asked again after the same pause. A
  * connection the server closes on purpose (a session's end, the daily
  * rollover) gets the same question, since Socket.IO does not reconnect those.
+ *
+ * Each pause is spread by up to half either way, so tabs refused together do
+ * not come back together. The read is given 10 s, and no answer counts as
+ * "unknown". The tab goes to the login page by itself at most once a minute
+ * (`trips.ts`), whatever the server answers. A trip that would repeat is not
+ * taken: the order updates line says "Sign in again" with a button instead.
  */
 
 /** How often a connection that is meant to be open, and is not, is asked to connect. */
 export const RETRY_MS = 10_000
 
-/** The pause before each new try after a refused connect; the last one repeats. */
+/** The pause before each new try after a refused connect (spread ±50 %); the last one repeats. */
 export const REFUSED_RETRY_MS = [1_000, 2_000, 5_000, 10_000, 30_000] as const
+
+/** How long the session read may take; past it the answer is "unknown". */
+export const SESSION_READ_TIMEOUT_MS = 10_000
 
 /** What a refused connect learns from the server about the session. */
 export type SessionState = 'valid' | 'ended' | 'unknown'
@@ -56,20 +66,45 @@ interface RefusalHandlers {
   askSession: () => Promise<SessionState>
   /** Leaves for the login page, as a page read's 401 does. */
   toLogin: () => void
+  /** A number in [0, 1), which spreads each pause. */
+  random: () => number
 }
 
 async function askSession(): Promise<SessionState> {
+  // The read is let go at the time limit too, so it holds none of the browser's connections.
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), SESSION_READ_TIMEOUT_MS)
   try {
     // A route behind the session check: an ended session answers 401 and is cleared on the server.
     const response = await fetch('/auth/active-sessions', {
       credentials: 'include',
       headers: { Accept: 'application/json' },
+      signal: controller.signal,
     })
     if (response.status === 401) return 'ended'
     return response.ok ? 'valid' : 'unknown'
   } catch {
     return 'unknown'
+  } finally {
+    clearTimeout(timer)
   }
+}
+
+/** The session read's answer, or "unknown" once the time limit has passed without one. */
+function withinTimeLimit(read: Promise<SessionState>): Promise<SessionState> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve('unknown'), SESSION_READ_TIMEOUT_MS)
+    read.then(
+      (state) => {
+        clearTimeout(timer)
+        resolve(state)
+      },
+      () => {
+        clearTimeout(timer)
+        resolve('unknown')
+      }
+    )
+  })
 }
 
 const defaultHandlers: RefusalHandlers = {
@@ -77,13 +112,50 @@ const defaultHandlers: RefusalHandlers = {
   toLogin: () => {
     window.location.href = '/login'
   },
+  random: Math.random,
 }
 
 let handlers: RefusalHandlers = defaultHandlers
 
-/** Tests only: how a refused connect asks about the session, and where an ended one goes. */
+let signInNeeded = false
+const signInListeners = new Set<() => void>()
+
+function setSignInNeeded(next: boolean): void {
+  if (signInNeeded === next) return
+  signInNeeded = next
+  for (const listener of [...signInListeners]) listener()
+}
+
+/**
+ * Whether the session has ended and the tab may not go to the login page by itself just now (it
+ * went less than a minute ago): the order updates line then asks the owner to sign in again.
+ */
+export function signInNeededNow(): boolean {
+  return signInNeeded
+}
+
+/** Calls `listener` whenever signInNeededNow() changes; returns the way to stop. */
+export function subscribeSignInNeeded(listener: () => void): () => void {
+  signInListeners.add(listener)
+  return () => {
+    signInListeners.delete(listener)
+  }
+}
+
+/** The owner's own way to the login page (the line's button): not limited, he asked. */
+export function goToLogin(): void {
+  handlers.toLogin()
+}
+
+/** Tests only: how a refused connect asks, where it goes and how it spreads; null resets all. */
 export function setRefusalHandlersForTests(next: Partial<RefusalHandlers> | null): void {
   handlers = next ? { ...defaultHandlers, ...next } : defaultHandlers
+  if (!next) setSignInNeeded(false)
+}
+
+/** Tests only: say the session has ended and the trip is spent, or that it has not. */
+export function setSignInNeededForTests(next: boolean): void {
+  setSignInNeeded(next)
 }
 
 interface Shared {
@@ -118,7 +190,8 @@ function keepConnected(socket: Socket): () => void {
   }
   const retryLater = () => {
     if (stopped) return
-    const pause = REFUSED_RETRY_MS[Math.min(refusals, REFUSED_RETRY_MS.length - 1)]
+    const base = REFUSED_RETRY_MS[Math.min(refusals, REFUSED_RETRY_MS.length - 1)]
+    const pause = Math.round(base * (0.5 + handlers.random())) // half to one and a half
     refusals += 1
     if (refusedTimer) clearTimeout(refusedTimer)
     refusedTimer = setTimeout(retryNow, pause)
@@ -130,10 +203,11 @@ function keepConnected(socket: Socket): () => void {
       retryLater()
       return
     }
-    void handlers.askSession().then((state) => {
+    void withinTimeLimit(handlers.askSession()).then((state) => {
       if (stopped || socket.connected) return
-      if (state === 'ended') handlers.toLogin()
-      else retryLater()
+      if (state !== 'ended') retryLater()
+      else if (claimTrip('login')) handlers.toLogin()
+      else setSignInNeeded(true) // it went less than a minute ago: the line asks instead
     })
   }
 
@@ -160,6 +234,7 @@ function keepConnected(socket: Socket): () => void {
   const connected = () => {
     connects.set(socket, (connects.get(socket) ?? 0) + 1)
     settle()
+    setSignInNeeded(false)
     refusals = 0
     if (refusedTimer) clearTimeout(refusedTimer)
     refusedTimer = null
@@ -212,6 +287,7 @@ export function acquireSharedSocket(create: () => Socket): Socket {
     shared = null
   }
   if (!shared) {
+    setSignInNeeded(false) // a new connection has asked nothing yet (a sign-in with no reload)
     const socket = create()
     shared = { socket, holders: 0, stop: keepConnected(socket) }
   }
