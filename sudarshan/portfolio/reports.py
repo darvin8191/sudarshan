@@ -59,6 +59,9 @@ ANSWER_WITHIN_S = 8.0
 TRADES_PAGE_SIZE = 500
 #: Pages read in one go for one record; past this the record is ``partial`` until the next read.
 MAX_PAGES_PER_READ = 20
+#: A refresh of a complete year that stops part-way is kept this long and carried on from the page
+#: it stopped at; past it, the pages may have moved, so the refresh starts again.
+REFRESH_KEPT_MS = 24 * 3_600_000
 PATHS = {
     "trades": "/v2/charges/historical-trades",
     "pnl_meta": "/v2/trade/profit-loss/metadata",
@@ -86,6 +89,10 @@ WORDS = {
     "the button below to read again.",
     "count": "Upstox's count of trades does not match the rows it sent, so this report is not "
     "shown as complete. Tap the button below to read again.",
+    "stepwise": "This year is large, so SUDARSHAN reads it again in steps. These are the figures "
+    "from the last complete read. Tap Read again to carry on.",
+    "held_back": "SUDARSHAN has read Upstox as often as it allows for now, so these are the "
+    "figures from the last complete read. Wait a minute, then tap Read again.",
     "kept": "Upstox could not be read again just now, so these are the figures from the last "
     "complete read.",
     "early": "This year was read before it had closed and settled. SUDARSHAN reads it again once "
@@ -514,9 +521,22 @@ class ReportReader:
             and bool(old.get("rows"))
             and bool(old.get("next_page"))
         )
-        rows: list[dict] = list(old["rows"]) if carry else []
-        page = int(old["next_page"]) if carry else 1
-        total = old.get("total_records") if carry else None
+        # A refresh of a complete year that did not finish is kept beside the complete figures
+        # (``refresh``) and carried on from the page it stopped at, so a year of more pages than
+        # one read holds still gets refreshed: it ends when every page is in, never at the cap.
+        refreshing = record is not None and record.get("state") == "ok" and bool(old.get("rows"))
+        shadow = dict(old.get("refresh") or {}) if refreshing else {}
+        if shadow and not (
+            shadow.get("rows")
+            and shadow.get("next_page")
+            and now - int(shadow.get("since") or 0) <= REFRESH_KEPT_MS
+        ):
+            shadow = {}
+        source = shadow if shadow else old
+        carry = carry or bool(shadow)
+        rows: list[dict] = list(source["rows"]) if carry else []
+        page = int(source["next_page"]) if carry else 1
+        total = source.get("total_records") if carry else None
         first, last = fy_span(fy)
         end = min(last, day_of_instant(now))
         state, note = "ok", None
@@ -568,6 +588,21 @@ class ReportReader:
             nxt = None  # nothing left to ask for: the next read starts again
         else:
             nxt = page if state == "partial" else None
+        if refreshing and state != "ok":
+            # The complete figures stay, with the words for why they are not newer. Only a
+            # stop that SUDARSHAN's own limits caused is worded as SUDARSHAN's; what Upstox did
+            # is worded as Upstox's.
+            held = {key: value for key, value in old.items() if key != "refresh"}
+            if nxt is not None and kept:
+                held["refresh"] = {
+                    "rows": kept, "total_records": total, "next_page": nxt,
+                    "since": shadow.get("since") or now,
+                }  # fmt: skip
+            words = {WORDS["more"]: WORDS["stepwise"], WORDS["busy"]: WORDS["held_back"]}.get(
+                note, WORDS["kept"]
+            )
+            await self._put("trades", fy, segment, "ok", record.get("read_at"), words, held)
+            return
         await self._store(
             "trades", fy, segment, record, state, note,
             {"rows": kept, "total_records": total, "next_page": nxt},

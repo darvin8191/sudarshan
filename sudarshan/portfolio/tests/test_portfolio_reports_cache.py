@@ -252,7 +252,7 @@ async def test_a_refresh_stopped_by_the_minute_budget_keeps_the_complete_year(ri
         reports.TRADES_PAGE_SIZE = kept
     assert [q["page_number"] for q in _rows(rig.fake, "trades")][3:] == ["1", "2"]
     assert again["state"] == "ok" and len(again["rows"]) == 6
-    assert again["read_at"] == full["read_at"] and again["note"] == reports.WORDS["kept"]
+    assert again["read_at"] == full["read_at"] and again["note"] == reports.WORDS["held_back"]
 
 
 @scenario_of
@@ -362,7 +362,7 @@ async def test_read_again_reads_any_year_inside_the_budget_and_never_loses_the_o
     rig.fake.bodies["trades"] = page([trow("Z")], 1, 1)
     kept = (await rig.call("report_trades", fy=2024, segment="EQ", force=True))["data"]
     assert rig.fake.count("trades") == 2 and len(kept["rows"]) == 2
-    assert kept["state"] == "ok" and kept["note"] == reports.WORDS["kept"]
+    assert kept["state"] == "ok" and kept["note"] == reports.WORDS["held_back"]
 
 
 @scenario_of
