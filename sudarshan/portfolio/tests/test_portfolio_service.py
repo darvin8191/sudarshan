@@ -11,6 +11,7 @@ import logging
 import os
 import socket
 import threading
+import time
 from pathlib import Path
 
 import httpx
@@ -410,7 +411,21 @@ def fds() -> int:
     return len(os.listdir("/proc/self/fd"))
 
 
-def test_a_taken_port_is_said_in_words_the_jobs_run_and_the_port_is_tried_again(tmp_path, caplog):
+async def until(check, timeout_s: float = 30.0) -> None:
+    """Wait for ``check()`` to hold, polling, rather than for a fixed time a slow runner may need
+    more of; give up after ``timeout_s``."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_s
+    while not check() and loop.time() < deadline:
+        await asyncio.sleep(0.01)
+
+
+@pytest.mark.parametrize("opens_in_s", [0.0, 0.5], ids=["store-at-once", "slow-store"])
+def test_a_taken_port_is_said_in_words_the_jobs_run_and_the_port_is_tried_again(
+    tmp_path, caplog, opens_in_s
+):
+    """The store opens before the port is tried, so a fixed 0.3 s wait failed whenever opening it
+    took longer (CI run 42603692721: still "starting"). The slow-store case opens it in 0.5 s."""
     caplog.set_level(logging.INFO, logger="sudarshan.portfolio")
     held = socket.socket()
     held.bind(("127.0.0.1", 0))
@@ -425,11 +440,18 @@ def test_a_taken_port_is_said_in_words_the_jobs_run_and_the_port_is_tried_again(
             ticks.append(1)
             await asyncio.sleep(0.01)
 
+    def opener(settings):
+        time.sleep(opens_in_s)  # a busy disk: the event loop waits, as it does for the real one
+        return service.open_store(settings)
+
     async def scenario():
-        svc = Service(settings_for(tmp_path, port), FERNET, jobs=jobs, port_retry_s=0.05)
+        svc = Service(
+            settings_for(tmp_path, port), FERNET, jobs=jobs, opener=opener, port_retry_s=0.05
+        )
         task = asyncio.create_task(svc.run())
-        await asyncio.sleep(0.3)
+        await until(lambda: svc.state != "starting")
         assert svc.state == "port_taken"  # it did not exit, and no other port was tried
+        await until(lambda: len(ticks) > 5)
         assert len(ticks) > 5 and not task.done()
         assert svc.health()["portfolio_state"]["jobs"] == {"count": "running"}
         held.close()
