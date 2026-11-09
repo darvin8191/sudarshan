@@ -7,7 +7,7 @@ and a cap of 2 pages for 500 and 20."""
 from __future__ import annotations
 
 import pytest
-from test_portfolio_import_ops import scenario_of
+from test_portfolio_import_ops import OWNER, scenario_of
 from test_portfolio_reports import _rows, _wire, fake  # noqa: F401  (fixtures)
 from test_portfolio_reports_cache import (
     HOUR,
@@ -246,3 +246,55 @@ async def test_a_pnl_refresh_whose_rows_do_not_match_the_count_says_so_and_keeps
     assert again["state"] == "ok" and len(again["rows"]) == 1  # the complete figures stay
     assert again["note"] == reports.WORDS["count_kept"], again["note"]
     assert "does not match" in again["note"] and "Upstox could not" not in again["note"]
+
+
+async def nightly(rig, now):
+    """The nightly job at ``now``: the closing record is in, so the reports step reads."""
+    rig.svc.store.write(
+        OWNER, lambda tx: tx.job_put("eod", day_of_instant(now), "ok", "", now - 60_000)
+    )
+    rig.now = now
+    return await reports.reports_step(rig.svc, now)
+
+
+@scenario_of
+async def test_the_nightly_read_alone_carries_a_large_year_on_when_the_next_night_starts_later(rig):
+    """Two nightly reads are about 24 hours apart and land on either side of that at random. The
+    next night 30 seconds later in the day used to be past the window: page 1 again, every night,
+    and the year stayed on the last complete read for good."""
+    fy = await complete_year_of_five(rig)
+    six(rig, "ABCDEF")  # the owner traded again: three pages, the cap is two
+    night = rig.now + 7 * HOUR
+    await nightly(rig, night)
+    first = record_of(rig, "trades", fy, "EQ")
+    assert first["note"] == reports.WORDS["stepwise"] and "refresh" in first["payload"]
+    before = len(_rows(rig.fake, "trades"))
+    await nightly(rig, night + 24 * HOUR + 30_000)
+    got = record_of(rig, "trades", fy, "EQ")
+    assert [q["page_number"] for q in _rows(rig.fake, "trades")][before:] == ["3"]
+    assert ids(got["payload"]) == list("ABCDEF") and "refresh" not in got["payload"]
+
+
+@scenario_of
+async def test_a_friday_step_is_carried_on_by_the_monday_nightly(rig):
+    fy = await complete_year_of_five(rig)
+    six(rig, "ABCDEF")
+    friday = rig.now + 7 * HOUR
+    await nightly(rig, friday)
+    await nightly(rig, friday + 72 * HOUR - 60_000)  # Monday's, a minute earlier in the day
+    got = record_of(rig, "trades", fy, "EQ")
+    assert ids(got["payload"]) == list("ABCDEF"), "Monday started again from page 1"
+
+
+@scenario_of
+async def test_a_continuation_older_than_the_window_still_starts_again(rig):
+    """The short check stays: past four days the pages may have moved."""
+    assert reports.REFRESH_KEPT_MS >= 4 * 24 * HOUR
+    fy = await complete_year_of_five(rig)
+    six(rig, "ABCDEF")
+    night = rig.now + 7 * HOUR
+    await nightly(rig, night)
+    before = len(_rows(rig.fake, "trades"))
+    await nightly(rig, night + reports.REFRESH_KEPT_MS + HOUR)
+    assert [q["page_number"] for q in _rows(rig.fake, "trades")][before:][0] == "1"
+    assert "refresh" in record_of(rig, "trades", fy, "EQ")["payload"]  # a new one, from page 1

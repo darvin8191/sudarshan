@@ -59,9 +59,11 @@ ANSWER_WITHIN_S = 8.0
 TRADES_PAGE_SIZE = 500
 #: Pages read in one go for one record; past this the record is ``partial`` until the next read.
 MAX_PAGES_PER_READ = 20
-#: A refresh of a complete year that stops part-way is kept this long and carried on from the page
-#: it stopped at; past it, the pages may have moved, so the refresh starts again.
-REFRESH_KEPT_MS = 24 * 3_600_000
+#: A refresh of a complete year that stops part-way is kept this long, from its first step, and
+#: carried on from the page it stopped at; past it, the pages may have moved, so the refresh starts
+#: again. The nightly read runs once a trading day, so this is longer than a weekend: the nightly
+#: read alone carries a large year on across nights, whichever minute each night begins at.
+REFRESH_KEPT_MS = 4 * 24 * 3_600_000
 PATHS = {
     "trades": "/v2/charges/historical-trades",
     "pnl_meta": "/v2/trade/profit-loss/metadata",
