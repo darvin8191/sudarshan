@@ -24,6 +24,7 @@ refusal and keeps listening.
 from __future__ import annotations
 
 import ast
+import gc
 import json
 import os
 import signal
@@ -699,7 +700,7 @@ def test_under_gunicorn_only_the_owner_s_session_connects_and_hears_orders(tmp_p
 
     with serving(tmp_path, worker_class) as url:
         stranger = RawPolling(url)
-        owner = None
+        owner = owner_http = None
         try:
             stranger.send("40")
             answer = stranger.read(10)
@@ -715,12 +716,18 @@ def test_under_gunicorn_only_the_owner_s_session_connects_and_hears_orders(tmp_p
             def admitted(http, namespaces) -> bool:
                 client = sio_client.Client(http_session=http, reconnection=False)
                 try:
-                    client.connect(url, transports=["polling"], namespaces=namespaces,
-                                   wait_timeout=20)  # fmt: skip
-                except sio_client.exceptions.ConnectionError:
-                    return False
-                client.disconnect()
-                return True
+                    try:
+                        client.connect(url, transports=["polling"], namespaces=namespaces,
+                                       wait_timeout=20)  # fmt: skip
+                    except sio_client.exceptions.ConnectionError:
+                        return False
+                    client.disconnect()
+                    return True
+                finally:
+                    # The client never closes a session it was handed: left open, its kept-alive
+                    # sockets close only when the garbage collector gets to them, inside some
+                    # later test's descriptor count.
+                    http.close()
 
             cases = {
                 f"{kind} on {namespace}": admitted(browser(**params), [namespace])
@@ -730,7 +737,8 @@ def test_under_gunicorn_only_the_owner_s_session_connects_and_hears_orders(tmp_p
             }  # fmt: skip
             assert cases == dict.fromkeys(cases, False)
 
-            owner = sio_client.Client(http_session=browser(), reconnection=False)
+            owner_http = browser()
+            owner = sio_client.Client(http_session=owner_http, reconnection=False)
             got: list = []
             owner.on("order_event", got.append)
             owner.connect(url, transports=["polling"], namespaces=["/", "/market"],
@@ -746,4 +754,9 @@ def test_under_gunicorn_only_the_owner_s_session_connects_and_hears_orders(tmp_p
         finally:
             if owner is not None:
                 owner.disconnect()
+            if owner_http is not None:
+                owner_http.close()
             stranger.close()
+            # A read that timed out leaves its connection out of the pool, so closing the session
+            # does not close it; collect it here rather than inside a later test's count.
+            gc.collect()
