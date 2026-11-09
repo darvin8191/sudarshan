@@ -106,3 +106,21 @@ opens the file read-only and prints the file, its schema, this release's schema 
 mode). A file from a newer release is refused untouched, in the owner's sentence. Tests:
 `tests/test_watchlists_migration.py` (missing, populated copy forced back, newer, the app store
 opening the result).
+
+## F1 - the v2 client (`frontend/src/sudarshan/watchlist/v2/`)
+
+The phone's half of the contract, with no screen yet. `api.ts` calls any op by name through the
+route `types.ts` gives it (`callOp`), unwraps the envelope and throws `WatchlistsError` with the
+server's own sentence, or the page's words when there was no answer or the answer was not the
+bridge's; a status code or an address never reaches a screen. `useListView.ts` holds the query keys
+and the reads: `useV2State` is the only read made while the switch is off, and `useListView` and
+`useLists` wait for it to say `enabled`. The version rule is `keepNewer`: versions are `<boot>:<n>`,
+an older answer than the one held is dropped (looked at when the answer arrives, not when the read
+began), and two boots cannot be ordered so the later answer wins. `usePush.ts` joins the owner's
+room after each connect with an ack, collects pushes for 200 ms into one read (`applyPushes`, which
+skips a push whose version the view already holds), and reads everything again after a reconnect;
+nothing is read on a timer. `useOverlay(v2)` knows `?sheet=lists` only when v2 is on, so Back closes
+a sheet first as before and a bookmarked address reads as nothing while it is off. Tests run against
+`mockBridge.ts`, a stand-in that answers the contract's routes. Still to check on a real bridge:
+whether a write wants its path fields in the body as well as the path (the client sends both).
+

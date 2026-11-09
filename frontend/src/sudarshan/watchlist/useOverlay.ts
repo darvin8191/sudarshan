@@ -16,6 +16,9 @@ import type { OrderRequest } from './SymbolSheet'
  * - `?sheet=alert` (M10.2): the form for a market alert on the instrument,
  *   which rides in the entry's state as the ticket's order does, with the
  *   price the form starts from.
+ * - `?sheet=lists` (M8.5, v2 only): the All lists sheet. A sheet of v2 is
+ *   known to the address only while v2 is on (`useOverlay(true)`), so with the
+ *   switch off the page reads its address exactly as it did.
  */
 export type Overlay =
   | { kind: 'item'; itemId: number }
@@ -25,6 +28,7 @@ export type Overlay =
   | { kind: 'delete' }
   | { kind: 'order'; order: OrderRequest | null }
   | { kind: 'alert'; alert: AlertPrefill | null }
+  | { kind: 'lists' }
 
 export type OverlayRequest =
   | Exclude<Overlay, { kind: 'order' } | { kind: 'alert' }>
@@ -32,6 +36,8 @@ export type OverlayRequest =
   | { kind: 'alert'; alert: AlertPrefill }
 
 const SHEETS = new Set(['add', 'new', 'rename', 'delete', 'order', 'alert'])
+/** The sheets only v2 opens; later v2 sheets are added here. */
+const V2_SHEETS = new Set(['lists'])
 
 /** The history entry's state: whether this page pushed it, the ticket's order, the alert's instrument. */
 interface EntryState {
@@ -44,12 +50,12 @@ function entryState(state: unknown): EntryState {
   return state !== null && typeof state === 'object' ? (state as EntryState) : {}
 }
 
-export function overlayOf(params: URLSearchParams, state: unknown): Overlay | null {
+export function overlayOf(params: URLSearchParams, state: unknown, v2 = false): Overlay | null {
   const item = Number(params.get('item'))
   if (params.has('item') && Number.isInteger(item) && item > 0)
     return { kind: 'item', itemId: item }
   const sheet = params.get('sheet')
-  if (!sheet || !SHEETS.has(sheet)) return null
+  if (!sheet || !(SHEETS.has(sheet) || (v2 && V2_SHEETS.has(sheet)))) return null
   if (sheet === 'order') return { kind: 'order', order: entryState(state).order ?? null }
   if (sheet === 'alert') return { kind: 'alert', alert: entryState(state).alert ?? null }
   return { kind: sheet } as Overlay
@@ -88,7 +94,7 @@ function withOverlay(params: URLSearchParams, next: OverlayRequest | null): URLS
  * `open`, `swap` and `close` keep their identity while overlays come and go,
  * so the rows that are handed them are not redrawn each time one does.
  */
-export function useOverlay(): {
+export function useOverlay(v2 = false): {
   overlay: Overlay | null
   open: (next: OverlayRequest) => void
   swap: (next: OverlayRequest) => void
@@ -97,7 +103,7 @@ export function useOverlay(): {
   const [params] = useSearchParams()
   const location = useLocation()
   const navigate = useNavigate()
-  const overlay = overlayOf(params, location.state)
+  const overlay = overlayOf(params, location.state, v2)
   const pushed = entryState(location.state).sdOverlay === true
 
   // Where the page stands, for the handlers below; set after each render, so
