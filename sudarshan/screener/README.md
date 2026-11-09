@@ -173,6 +173,16 @@ card says "Real-time" only while its own rows tick, and says "Prices at the run"
 followed. A card's status, next check and engine line come from the shared state cache, so a state push
 changes every card; its own words are used only while the state still agrees with them. A pushed run changes a
 card's run line and counts at once and the rows move once, from that card's own `widget` read.
+Adding, arranging and removing (C2): the Add sheet (`?sheet=add`) offers a screen of yours not yet on the
+dashboard for the chosen kind, or a ready-made one that makes the screen and the widget in one step, shows the
+screen's conditions as sentences, the rows, "When it checks" for a screen that reads day candles alone and the
+"Start checking after adding" switch (off, with the screen added Paused, when the Active limit is used). A widget's
+options (`?sheet=menu&s=&k=`) move it up or down (the whole order is sent at once, as `[screen id, kind]` pairs),
+open its screen or remove it after asking. Settings (`?sheet=widget&s=&k=`) show the screen's full name and send
+each choice (kind, rows, sort, up to two values) as one write; "When it checks" is a normal edit of the screen.
+Every write names the dashboard version; a version conflict, or a widget gone while its screen is still held,
+reads the dashboard again and says the dashboard was changed on another screen. With all 50 of OpenAlgo's
+watchlists in use, a ready-made screen is first made on a list the owner chooses.
 
 ## Alerts
 

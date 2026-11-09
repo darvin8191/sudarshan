@@ -24,6 +24,7 @@ import { cardKey } from './dashboardCache'
 import { StatusChip } from './marks'
 import { ResultLine, runWords } from './Results'
 import type { WidgetCard as Card, ScreenStatus } from './types'
+import { OptionsButton } from './WidgetMenu'
 
 const ICONS: Record<LineIcon, LucideIcon> = {
   'wifi-off': WifiOff,
@@ -100,6 +101,7 @@ export const WidgetCard = memo(function WidgetCard({
   onRetry,
   onOpenScreen,
   onOpenRow,
+  onOptions,
 }: {
   card: Card
   name: string
@@ -113,6 +115,7 @@ export const WidgetCard = memo(function WidgetCard({
   onRetry: () => void
   onOpenScreen: (id: number) => void
   onOpenRow: (card: Card, key: string) => void
+  onOptions: (card: Card) => void
 }) {
   const list = card.list
   return (
@@ -121,21 +124,24 @@ export const WidgetCard = memo(function WidgetCard({
       aria-label={`${name}, ${where}`}
       className="flex flex-col overflow-hidden rounded-[1rem] border bg-card shadow-[var(--shadow-card)]"
     >
-      <button
-        type="button"
-        onClick={() => onOpenScreen(card.screen_id)}
-        aria-label={`${name}: open this screen`}
-        className="flex min-h-12 flex-col gap-1 px-4 pt-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-      >
-        <span className="flex w-full items-start justify-between gap-2">
-          <span className="min-w-0 truncate text-base font-bold">{name}</span>
-          <StatusChip status={status} />
-        </span>
-        <span className="flex flex-wrap items-center gap-2 text-[0.8125rem] font-medium text-[color:var(--text-secondary)]">
-          {where}
-          <ModeChip mode={card.mode} />
-        </span>
-      </button>
+      <div className="flex items-start">
+        <button
+          type="button"
+          onClick={() => onOpenScreen(card.screen_id)}
+          aria-label={`${name}: open this screen`}
+          className="flex min-h-12 min-w-0 flex-1 flex-col gap-1 pt-3 pl-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        >
+          <span className="flex w-full items-start justify-between gap-2">
+            <span className="min-w-0 truncate text-base font-bold">{name}</span>
+            <StatusChip status={status} />
+          </span>
+          <span className="flex flex-wrap items-center gap-2 text-[0.8125rem] font-medium text-[color:var(--text-secondary)]">
+            {where}
+            <ModeChip mode={card.mode} />
+          </span>
+        </button>
+        <OptionsButton name={name} onOpen={() => onOptions(card)} />
+      </div>
       <div className="flex flex-col gap-1 px-4 pt-1 pb-2">
         <Line line={line} />
         <p

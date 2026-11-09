@@ -8,7 +8,7 @@ import type { WidgetKind } from './types'
  *
  * - the screen: `?screen=<id>` with `&tab=results|history|edit`; with no screen the home is the
  *   Dashboard (no `tab`), `?tab=screens` or `?tab=library`;
- * - a sheet over it: `?sheet=new|delete|settings|library|add` (a dashboard widget's settings are
+ * - a sheet over it: `?sheet=new|delete|settings|library|add`, a widget's options `?sheet=menu&s=&k=` (a dashboard widget's settings are
  *   `?sheet=widget&s=<screen id>&k=<kind>`, addressed by screen and kind and never by an id; a row
  *   of a widget opens `?sheet=symbol&k=EXCHANGE:SYMBOL&s=<screen id>&wk=<kind>`) (a clause's or operand's sheet is the
  *   builder's own, with `&sheet=clause&c=<clause id>`), and `?sheet=run&run=<id>` for a past run's set; a screen being written is `?new=1`.
@@ -65,6 +65,7 @@ const SHEETS = new Set([
   'alert',
   'add',
   'widget',
+  'menu',
 ])
 
 function positive(value: string | null): number | null {
@@ -99,8 +100,9 @@ export function addressOf(params: URLSearchParams): Address {
         : null,
     run: screen === null ? null : positive(params.get('run')),
     // On a widget's settings `k` is the kind, not an instrument.
-    key: sheet === 'widget' ? null : params.get('k'),
-    widget: sheet === 'widget' ? widgetOf(params.get('s'), params.get('k')) : null,
+    key: sheet === 'widget' || sheet === 'menu' ? null : params.get('k'),
+    widget:
+      sheet === 'widget' || sheet === 'menu' ? widgetOf(params.get('s'), params.get('k')) : null,
     from: sheet === 'symbol' ? widgetOf(params.get('s'), params.get('wk')) : null,
   }
 }

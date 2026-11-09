@@ -14,7 +14,7 @@ import { useSend } from './useSend'
 /** What the owner is told once a card has become a screen. */
 export const MADE_WORDS = 'Added to your screens, Paused. Open it, read it, then Resume.'
 
-function usePresets() {
+export function usePresets() {
   return useQuery<{ presets: PresetCard[] }, ScreenerError>({
     queryKey: PRESETS_KEY,
     queryFn: () => screenerApi.presets(),

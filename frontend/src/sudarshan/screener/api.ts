@@ -5,6 +5,7 @@ import axios from 'axios'
 import { webClient } from '@/api/client'
 import {
   type Dashboard,
+  type DashboardWritten,
   type PresetCard,
   type Preview,
   type ResultRow,
@@ -17,8 +18,12 @@ import {
   type ScreenSpec,
   type Today,
   type UniverseOption,
+  type WidgetAdd,
+  type WidgetAdded,
   type WidgetCard,
   type WidgetKind,
+  type WidgetOrder,
+  type WidgetUpdate,
   WORDS,
 } from './types'
 
@@ -271,6 +276,23 @@ export const screenerApi = {
         })
       )
     ),
+  /** Add a widget for a screen, or for a preset (the screen and the widget in one step). */
+  widgetAdd: (body: WidgetAdd) =>
+    call<WidgetAdded>(webClient.post(`${BASE}/dashboard/widgets`, body, { timeout: CHANGE_MS })),
+  widgetUpdate: (screenId: number, body: WidgetUpdate) =>
+    call<DashboardWritten>(
+      webClient.patch(`${BASE}/dashboard/widgets/${screenId}`, body, { timeout: CHANGE_MS })
+    ),
+  widgetRemove: (screenId: number, kind: WidgetKind, version: number) =>
+    call<DashboardWritten>(
+      webClient.delete(`${BASE}/dashboard/widgets/${screenId}`, {
+        params: { kind, version },
+        timeout: CHANGE_MS,
+      })
+    ),
+  /** The whole layout, in the order wanted, as [screen id, kind] pairs. */
+  widgetOrder: (body: WidgetOrder) =>
+    call<DashboardWritten>(webClient.post(`${BASE}/dashboard/order`, body, { timeout: CHANGE_MS })),
   create: (draft: ScreenDraft) =>
     call<ScreenRow>(webClient.post(`${BASE}/screens`, draft, { timeout: CHANGE_MS })),
   change: (id: number, change: ScreenChange) =>

@@ -4,6 +4,7 @@ import type { WatchlistItem } from '@/api/watchlist'
 import { cn } from '@/lib/utils'
 import { usePriceAccess } from '@/sudarshan/access'
 import {
+  Confirm,
   EmptyCard,
   LoadingCards,
   OUTLINED,
@@ -18,11 +19,12 @@ import {
   MarketCalendarSource,
   useIstDay,
 } from '@/sudarshan/dashboard/MarketCalendar'
-import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
 import { statusLine } from '@/sudarshan/watchlist/rows'
 import { type LiveRow, useLiveRows } from '@/sudarshan/watchlist/useLiveRows'
+import { AddWidgetSheet } from './AddWidgetSheet'
 import { type CardFeed, cardLine } from './cardLine'
 import { cardKey } from './dashboardCache'
+import { useLayoutWrites } from './dashboardWrites'
 import { StatusChip } from './marks'
 import type { Hearing } from './push'
 import { RowSheets } from './RowSheets'
@@ -31,6 +33,8 @@ import { type WidgetCard as Card, type ResultRow, type ScreenerState, WORDS } fr
 import { useDashboard } from './useDashboard'
 import type { Address } from './useScreenerAddress'
 import { WidgetCard } from './WidgetCard'
+import { OptionsButton, WidgetMenu } from './WidgetMenu'
+import { WidgetSheet } from './WidgetSheet'
 
 /** The sentences the dashboard says when it has nothing to show (design 3.5). */
 export const DASH_WORDS = {
@@ -44,18 +48,19 @@ export const DASH_WORDS = {
 export const GRID = 'grid grid-cols-1 items-start gap-2 md:grid-cols-2 min-[1200px]:grid-cols-3'
 
 /** A count card until its own face is built: its name, status and where. */
-function CountStub({ card }: { card: Card }) {
+function CountStub({ card, onOptions }: { card: Card; onOptions: (card: Card) => void }) {
   return (
     <li
       key={cardKey(card)}
       data-widget={cardKey(card)}
-      className="flex flex-col gap-1 rounded-[1rem] border bg-card px-4 py-3 shadow-[var(--shadow-card)]"
+      className="flex flex-col gap-1 rounded-[1rem] border bg-card py-1 pl-4 shadow-[var(--shadow-card)]"
     >
       <span className="flex items-start justify-between gap-2">
-        <span className="min-w-0 truncate text-base font-bold">{card.name}</span>
+        <span className="min-w-0 truncate pt-2 text-base font-bold">{card.name}</span>
         <StatusChip status={card.status} />
+        <OptionsButton name={card.name} onOpen={() => onOptions(card)} />
       </span>
-      <span className="text-[0.8125rem] font-medium text-[color:var(--text-secondary)]">
+      <span className="pb-2 text-[0.8125rem] font-medium text-[color:var(--text-secondary)]">
         {card.where}
       </span>
     </li>
@@ -107,6 +112,8 @@ export function Dashboard({
   const data = query.data
   const problem = query.error
   const cards = data?.widgets ?? NO_CARDS
+  const layout = useLayoutWrites(data)
+  const [removing, setRemoving] = useState<Card | null>(null)
 
   const { apiKey } = usePriceAccess()
   const [market, setMarket] = useState<MarketCalendar>(CALENDAR_LOADING)
@@ -147,6 +154,13 @@ export function Dashboard({
       }),
     }
   }
+  const named = (key: typeof address.widget) =>
+    key ? cards.find((card) => card.screen_id === key.screen && card.kind === key.kind) : undefined
+  const menu = address.sheet === 'menu' ? named(address.widget) : undefined
+  const settings = address.sheet === 'widget' ? named(address.widget) : undefined
+  const nameOf = (card: Card) => screens.get(card.screen_id)?.name ?? card.name
+  const place = (card: Card | undefined) => (card ? cards.indexOf(card) : -1)
+  const options = (card: Card) => openSheet('menu', { s: String(card.screen_id), k: card.kind })
   const opened = address.from
     ? cards.find(
         (card) => card.screen_id === address.from?.screen && card.kind === address.from.kind
@@ -201,7 +215,8 @@ export function Dashboard({
         <ul className={cn(GRID, problem && STALE)}>
           {cards.map((card) => {
             const screen = screens.get(card.screen_id)
-            if (card.kind !== 'table') return <CountStub key={cardKey(card)} card={card} />
+            if (card.kind !== 'table')
+              return <CountStub key={cardKey(card)} card={card} onOptions={options} />
             return (
               <WidgetCard
                 key={cardKey(card)}
@@ -214,6 +229,7 @@ export function Dashboard({
                 now={live.now}
                 unreadable={failed.has(cardKey(card))}
                 onRetry={retry}
+                onOptions={options}
                 onOpenScreen={openScreen}
                 onOpenRow={(from, key) =>
                   openSheet('symbol', { k: key, s: String(from.screen_id), wk: from.kind })
@@ -234,16 +250,43 @@ export function Dashboard({
         openSheet={openSheet}
         closeSheet={closeSheet}
       />
-      <BottomSheet
+      <AddWidgetSheet
         open={address.sheet === 'add'}
-        onOpenChange={(next) => !next && closeSheet()}
-        title="Add a widget"
-        description="Choose a screen to show on the dashboard"
-      >
-        <p className="text-sm font-medium text-[color:var(--text-secondary)]">
-          The list of screens to add appears here.
-        </p>
-      </BottomSheet>
+        state={state}
+        cards={cards}
+        version={data?.version ?? 0}
+        onClose={closeSheet}
+      />
+      <WidgetMenu
+        card={menu ?? null}
+        name={menu ? nameOf(menu) : ''}
+        first={place(menu) === 0}
+        last={place(menu) === cards.length - 1}
+        busy={layout.pending}
+        onSettings={(card) => openSheet('widget', { s: String(card.screen_id), k: card.kind })}
+        onMove={(card, by) => void layout.move(card, by).then((ok) => ok && closeSheet())}
+        onOpenScreen={openScreen}
+        onRemove={(card) => {
+          setRemoving(card)
+          closeSheet()
+        }}
+        onClose={closeSheet}
+      />
+      <WidgetSheet
+        card={settings ?? null}
+        screen={settings ? screens.get(settings.screen_id) : undefined}
+        version={data?.version ?? 0}
+        onClose={closeSheet}
+      />
+      <Confirm
+        open={removing !== null}
+        title="Remove from the dashboard?"
+        description={`${removing ? nameOf(removing) : ''} stays as a screen, with its list and its history. Only this widget is removed.`}
+        cancelLabel="Keep it"
+        confirmLabel="Remove"
+        onConfirm={() => removing && void layout.remove(removing)}
+        onClose={() => setRemoving(null)}
+      />
     </div>
   )
 }
