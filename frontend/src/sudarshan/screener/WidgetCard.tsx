@@ -38,7 +38,7 @@ const ICONS: Record<LineIcon, LucideIcon> = {
 }
 
 /** The card's line: an icon and the words, in the warning ink when the card cannot be live. */
-function Line({ line }: { line: LineView }) {
+export function Line({ line }: { line: LineView }) {
   const Icon = ICONS[line.icon]
   return (
     <p
@@ -59,7 +59,7 @@ function Line({ line }: { line: LineView }) {
 }
 
 /** Two day-only choices of "when it checks", as the chip under the name. */
-function ModeChip({ mode }: { mode: Card['mode'] }) {
+export function ModeChip({ mode }: { mode: Card['mode'] }) {
   if (mode === 'intraday') return null
   const forming = mode === 'forming_day'
   const Icon = forming ? Hourglass : Clock

@@ -183,6 +183,11 @@ each choice (kind, rows, sort, up to two values) as one write; "When it checks" 
 Every write names the dashboard version; a version conflict, or a widget gone while its screen is still held,
 reads the dashboard again and says the dashboard was changed on another screen. With all 50 of OpenAlgo's
 watchlists in use, a ready-made screen is first made on a list the owner chooses.
+The count widget (C3) shows the matches now as one big figure, the day's entries and exits, the run line, the mode
+chip for a day-only screen and a strip of matches at each check (one bar for each, the latest labelled; the
+service's sentence is its text for a screen reader). Its line says "Checking" with the next check and never
+"Real-time", since it shows no prices; a pushed run adds its point to the strip at once and the card's own read
+corrects it.
 
 ## Alerts
 

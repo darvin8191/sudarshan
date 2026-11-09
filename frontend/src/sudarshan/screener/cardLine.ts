@@ -131,6 +131,9 @@ export function cardLine({
       warn: true,
       greyed: false,
     }
+  // A count card shows no prices, so it never says Real-time: it says it is checking.
+  if (card.kind === 'count')
+    return { icon: 'circle-check', words: `Checking${next}`, warn: false, greyed: false }
   // The engine is real-time: say it of the prices only while this card's rows tick.
   if (card.rows_shown.length === 0)
     return { icon: 'clock', words: `Checking${next}`, warn: false, greyed: false }

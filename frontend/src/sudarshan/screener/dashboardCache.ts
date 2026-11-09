@@ -52,6 +52,13 @@ export async function readCard(
   }
 }
 
+/** A count card's strip takes the pushed run's point at once; the card's own read corrects it. */
+function withPoint(counts: NonNullable<WidgetCard['counts']>, run: RunRow) {
+  const last = counts.series.at(-1)
+  if (last && last.at >= run.at) return counts
+  return { ...counts, series: [...counts.series, { at: run.at, matches: run.matches }] }
+}
+
 /**
  * A pushed run changes what the push can say for certain, the run line and the counts, on every
  * card of its screen, and nothing else (design 3.7, LOW-B7): the push's `exited` names are
@@ -73,6 +80,7 @@ export function patchRun(held: Dashboard, push: RunPush, run: RunRow): Dashboard
         not_checked: card.not_checked
           ? { ...card.not_checked, count: push.counts.not_checked }
           : card.not_checked,
+        counts: card.counts && withPoint(card.counts, run),
       }
     }),
   }

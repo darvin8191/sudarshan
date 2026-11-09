@@ -22,10 +22,10 @@ import {
 import { statusLine } from '@/sudarshan/watchlist/rows'
 import { type LiveRow, useLiveRows } from '@/sudarshan/watchlist/useLiveRows'
 import { AddWidgetSheet } from './AddWidgetSheet'
+import { CountCard } from './CountCard'
 import { type CardFeed, cardLine } from './cardLine'
 import { cardKey } from './dashboardCache'
 import { useLayoutWrites } from './dashboardWrites'
-import { StatusChip } from './marks'
 import type { Hearing } from './push'
 import { RowSheets } from './RowSheets'
 import { followedItems } from './resultItems'
@@ -33,7 +33,7 @@ import { type WidgetCard as Card, type ResultRow, type ScreenerState, WORDS } fr
 import { useDashboard } from './useDashboard'
 import type { Address } from './useScreenerAddress'
 import { WidgetCard } from './WidgetCard'
-import { OptionsButton, WidgetMenu } from './WidgetMenu'
+import { WidgetMenu } from './WidgetMenu'
 import { WidgetSheet } from './WidgetSheet'
 
 /** The sentences the dashboard says when it has nothing to show (design 3.5). */
@@ -46,26 +46,6 @@ export const DASH_WORDS = {
 
 /** One column on a phone, two from 768 px, three from 1,200 px. */
 export const GRID = 'grid grid-cols-1 items-start gap-2 md:grid-cols-2 min-[1200px]:grid-cols-3'
-
-/** A count card until its own face is built: its name, status and where. */
-function CountStub({ card, onOptions }: { card: Card; onOptions: (card: Card) => void }) {
-  return (
-    <li
-      key={cardKey(card)}
-      data-widget={cardKey(card)}
-      className="flex flex-col gap-1 rounded-[1rem] border bg-card py-1 pl-4 shadow-[var(--shadow-card)]"
-    >
-      <span className="flex items-start justify-between gap-2">
-        <span className="min-w-0 truncate pt-2 text-base font-bold">{card.name}</span>
-        <StatusChip status={card.status} />
-        <OptionsButton name={card.name} onOpen={() => onOptions(card)} />
-      </span>
-      <span className="pb-2 text-[0.8125rem] font-medium text-[color:var(--text-secondary)]">
-        {card.where}
-      </span>
-    </li>
-  )
-}
 
 /** The instruments the dashboard follows tick by tick: the open row's too, whichever card it is on. */
 function itemsOf(followed: WatchlistItem[], shown: ResultRow[], openKey: string | null) {
@@ -215,22 +195,24 @@ export function Dashboard({
         <ul className={cn(GRID, problem && STALE)}>
           {cards.map((card) => {
             const screen = screens.get(card.screen_id)
-            if (card.kind !== 'table')
-              return <CountStub key={cardKey(card)} card={card} onOptions={options} />
+            const own = {
+              card,
+              name: screen?.name ?? card.name,
+              where: screen?.where ?? card.where,
+              status: screen?.status ?? card.status,
+              line: cardLine({ card, screen, engine: state.engine, hearing, feed: feedOf(card) }),
+              onOpenScreen: openScreen,
+              onOptions: options,
+            }
+            if (card.kind === 'count') return <CountCard key={cardKey(card)} {...own} />
             return (
               <WidgetCard
                 key={cardKey(card)}
-                card={card}
-                name={screen?.name ?? card.name}
-                where={screen?.where ?? card.where}
-                status={screen?.status ?? card.status}
-                line={cardLine({ card, screen, engine: state.engine, hearing, feed: feedOf(card) })}
+                {...own}
                 liveByKey={liveByKey}
                 now={live.now}
                 unreadable={failed.has(cardKey(card))}
                 onRetry={retry}
-                onOptions={options}
-                onOpenScreen={openScreen}
                 onOpenRow={(from, key) =>
                   openSheet('symbol', { k: key, s: String(from.screen_id), wk: from.kind })
                 }
