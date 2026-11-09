@@ -2,6 +2,7 @@ import { Navigate, Outlet } from 'react-router'
 import { SocketProvider } from '@/components/socket/SocketProvider'
 import { useAuthStore } from '@/stores/authStore'
 import { AnalyzeBanner } from '@/sudarshan/AnalyzeBanner'
+import { UpdatesBanner } from '@/sudarshan/books/UpdatesBanner' // SUDARSHAN SIO1
 import { RiskBanner } from '@/sudarshan/risk/RiskBanner' // SUDARSHAN M20.7
 import { Footer } from './Footer'
 import { MobileBottomNav } from './MobileBottomNav'
@@ -29,6 +30,8 @@ export function Layout() {
           <AnalyzeBanner />
           {/* SUDARSHAN M20.7: the kill switch, when it is on */}
           <RiskBanner />
+          {/* SUDARSHAN SIO1: order updates reconnecting, while the connection is down */}
+          <UpdatesBanner />
           <Navbar />
         </div>
         {/* SUDARSHAN: on a phone the page starts closer to the bar (D), and

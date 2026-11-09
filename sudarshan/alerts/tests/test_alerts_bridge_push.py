@@ -57,7 +57,10 @@ def room(monkeypatch):
         if user is not None:
             login_session(http, user)
         sio = socketio.test_client(app, flask_test_client=http)
-        ack = sio.emit("sudarshan_alerts_join", callback=True) if join else None
+        # SIO1: a session that is not the owner's is refused at connect (test_socketio_owner.py),
+        # so it has no socket to send the join on: its ack is None.
+        joinable = join and sio.is_connected()
+        ack = sio.emit("sudarshan_alerts_join", callback=True) if joinable else None
         return http, sio, ack
 
     return app, client
@@ -71,10 +74,12 @@ def test_only_the_owner_s_sessions_join_and_a_push_reaches_only_them(room):
     app, client = room
     http, owner, ack = client()
     assert ack == {"ok": True}
+    # SIO1: the viewer's and the unsigned sockets used to connect and have their join refused;
+    # now the connect itself is refused, so neither can ask to join or hear anything.
     _, viewer, refused = client(VIEWER)
-    assert refused == {"ok": False, "message": "Only the account owner can manage market alerts."}
+    assert not viewer.is_connected() and refused is None
     _, nobody, unsigned = client(None)
-    assert unsigned["ok"] is False
+    assert not nobody.is_connected() and unsigned is None
     _, quiet, _ = client(OWNER, join=False)  # the owner's, but it never joined
     state = {"engine": {"code": "ok", "line": "Watching · Real-time", "real_time": True},
              "alerts": [], "removed": [], "server_time": 1}  # fmt: skip
@@ -89,8 +94,9 @@ def test_only_the_owner_s_sessions_join_and_a_push_reaches_only_them(room):
     messages = owner.get_received()  # the three it may carry, never another event name
     assert [(m["name"], m["args"][0]) for m in messages] == [
         (ALERT_EVENT, FIRE), (STATE_EVENT, state), (DELIVERY_EVENT, settled)]  # fmt: skip
-    for other in (viewer, nobody, quiet):
-        assert other.get_received() == []
+    assert quiet.get_received() == []
+    for refused_socket in (viewer, nobody):  # get_received() raises on a socket never connected
+        assert refused_socket.queue == []
 
 
 def test_only_this_server_s_service_may_push(room):
@@ -253,12 +259,17 @@ def test_a_push_reaches_the_owner_s_open_app_under_gunicorn(tmp_path, worker_cla
             client = sio_client.Client(http_session=http, reconnection=False)
             got: list = []
             client.on(ALERT_EVENT, got.append)
-            client.connect(url, transports=["polling"], wait_timeout=20)
+            try:
+                client.connect(url, transports=["polling"], wait_timeout=20)
+            except sio_client.exceptions.ConnectionError:
+                # SIO1: a session that is not the owner's is refused at connect, before the join
+                # that used to refuse it; it has no socket, so no ack.
+                return client, got, None
             return client, got, client.call("sudarshan_alerts_join", timeout=20)
 
         owner, owner_got, joined = signed_in(OWNER)
         viewer, viewer_got, refused = signed_in(VIEWER)
-        assert joined == {"ok": True} and refused["ok"] is False
+        assert joined == {"ok": True} and refused is None and not viewer.connected
 
         async def push() -> list:
             results: list = []
@@ -300,10 +311,15 @@ def test_the_answer_counts_the_open_screens_in_the_room(room):
 
 
 def test_an_owner_cookie_past_the_3_am_expiry_does_not_join_the_room(room, monkeypatch):
-    """Review B14: the join checks the session is still valid, not only whose it is."""
+    """Review B14: the join checks the session is still valid, not only whose it is. SIO1 refuses
+    such a cookie at connect and the join now calls the shared check (extensions), so the join's
+    own check is reached the one way left: a socket admitted before the expiry asks after it."""
+    from utils import session as session_utils
+
     app, client = room
-    monkeypatch.setattr(bp_module, "is_session_valid", lambda: False)
-    _, sio, refused = client()
+    _, sio, _ = client(join=False)
+    monkeypatch.setattr(session_utils, "is_session_valid", lambda: False)
+    refused = sio.emit("sudarshan_alerts_join", callback=True)
     assert refused["ok"] is False and sio.get_received() == []
 
 

@@ -6,7 +6,7 @@ for internal UI components without authentication overhead.
 from flask import Blueprint, current_app, jsonify, render_template, request, session
 from flask_socketio import emit, join_room, leave_room
 
-from extensions import socketio
+from extensions import admit_owner_only, socketio
 from services.market_data_service import (
     SubscriberPriority,
     get_health_status,
@@ -323,6 +323,9 @@ def api_websocket_metrics():
 @socketio.on("connect", namespace="/market")
 def handle_connect(auth):
     """Handle client connection"""
+    # SUDARSHAN: SIO1. The owner's valid session only, as on the default namespace: a user name in
+    # the cookie also let in a session past the daily expiry and a login stopped before the broker.
+    admit_owner_only()
     username = get_username_from_session()
     if not username:
         return False  # Reject connection
