@@ -26,3 +26,16 @@ while the price stays inside its band (midpoint to the neighbour plus 10% of the
 The price is the page's own tick while its socket is up, however old, then the page snapshot, then
 the feed's; none means "waiting". Vectors: `tests/vectors/dynamic.json`. `numfmt.py` holds the
 Indian number and IST time formats the words use.
+
+## W16 - the search grammar (`search.py`, `words/search.py`)
+
+Pure grammar over reference maps of the master (`Index`, built from rows in slices by
+`IndexBuilder`; it holds the rows themselves, never copies, and is dropped with the master
+generation it came from). It reads underlying aliases ("bank nifty", "vix"), expiry words ("this
+week", "next week", "month", "next month", month names, "24 nov", "24nov", ISO dates), strikes (any
+number beside CE, PE, C, P, CALL or PUT, any size; a bare number is a strike from 100 up, and "24
+nov" is a date), ATM and ATM plus or minus n (with the price sent), FUT and an ISIN. Results come
+in the design's order (exact symbol, cash or index row, futures nearest first, options by distance
+from the ATM or by strike), at most 50; an underlying alone offers Pick a strike instead of its
+options. A miss names up to three names one edit away (a swap counts as one). No Upstox call is made.
+Vectors: `tests/vectors/search.json` (synthetic master, hand-typed expectations).
