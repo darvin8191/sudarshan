@@ -214,8 +214,9 @@ restart opens a pause from the last seen mark: a candle that holds minutes the s
 is "Not checked", never judged whole. An instrument no screen followed for a while (a screen paused
 and resumed, a watchlist that could not be read, the key limit) counts its volume again from when
 it comes back, and the stretch is kept as that instrument's own pause (with its key, so a restart
-keeps it): its candles that hold the stretch are "Not checked" too. A stretch before the open, or of
-10 s or less, changes nothing.
+keeps it): its candles that hold the stretch are "Not checked" too. A start that cannot follow
+anything at once (OpenAlgo's master contract downloading) counts the wait the same way for every
+instrument it had bars of. A stretch before the open, or of 10 s or less, changes nothing.
 
 ## What the screener follows, and when
 

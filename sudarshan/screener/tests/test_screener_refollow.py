@@ -50,11 +50,24 @@ def world(tmp_path, master_fixture):  # noqa: F811
     store_module.stop()
 
 
-def start(world, at: str) -> LiveSource:
+class _Downloading:
+    """OpenAlgo's master while a download runs: its symbol table is being filled again."""
+
+    def __init__(self, real):
+        self.real = real
+
+    def __getattr__(self, name):
+        return getattr(self.real, name)
+
+    def download(self):
+        return ("downloading", None)
+
+
+def start(world, at: str, *, master=None) -> LiveSource:
     """The service started (or started again) at ``at``: a fresh LiveSource on the same store."""
-    store, settings, master = world
+    store, settings, real = world
     now = ms(DAY, at)
-    source = LiveSource(store, FakeFeed(), master, settings, lambda: now, Calendar())
+    source = LiveSource(store, FakeFeed(), master or real, settings, lambda: now, Calendar())
     source.new_day(now)
     return source
 
@@ -71,6 +84,13 @@ def frame(source, at: int, ltp: float, vtt: int) -> list:
                "ts_recv": at}  # fmt: skip
     sealed = source.on_frame(HEALTH, health(at), at)
     return sealed + source.on_frame(RELIANCE, json.dumps(payload).encode(), at)
+
+
+def heard(source, at: int, ltp: float, vtt: int) -> list:
+    """A trade the real feed link hands over only while it follows RELIANCE (``feed.follow``)."""
+    if RELIANCE not in source.feed.topics:
+        return source.on_frame(HEALTH, health(at), at)
+    return frame(source, at, ltp, vtt)
 
 
 def seal(source, at: int, sealed: list) -> list:
@@ -113,6 +133,12 @@ def morning(source) -> None:
 
 def pause_rows(world, source) -> list[dict]:
     return world[0].read(OWNER, lambda tx: tx.pauses(source.market.today))
+
+
+def gap_rows(world, source) -> list[tuple]:
+    """RELIANCE's own pauses (its gaps): (start, end)."""
+    rows = pause_rows(world, source)
+    return [(row["start"], row["end"]) for row in rows if row.get("key") == RELIANCE]
 
 
 # ---- MEDIUM-1: the gap's volume is in no bar, and the gap is not checked ----------------------------
@@ -210,6 +236,48 @@ def test_the_gap_still_reads_not_checked_after_a_restart(world):
     assert unverified(again, 5, "11:03:06") and unverified(again, DAY_TF, "11:03:06")
     (row,) = pause_rows(world, again)
     assert (row["key"], row["start"], row["end"]) == (RELIANCE, ms(DAY, "10:00"), ms(DAY, "11:00"))
+
+
+@pytest.mark.parametrize("op", [False, True], ids=["no-op-during-download", "op-during-download"])
+def test_a_restart_while_the_master_downloads_keeps_the_stretch_out_of_the_first_bar(world, op):
+    """Re-review MEDIUM-A1. Restarted at 10:00:02 (a fast restart: the seen mark is 2 s old, so
+    no service pause) while OpenAlgo fills its symbol table again: the start's rebuild finds the
+    master not ready and follows nothing, so the feed link drops RELIANCE's frames until the
+    5-minute retry builds the universes at 10:05. RELIANCE traded 500,000 meanwhile. An op during
+    the download (a rebuild that builds nothing) let the keys go and kept the gap already; with no
+    op, the first set after the restore took the restored keys as followed all along, and the
+    10:05 bar held 500,020, judged as verified."""
+    source = start(world, "08:50")
+    morning(source)
+    minute(source, "09:59", 100.0, [100_010, 100_020])
+    source.mark_seen(ms(DAY, "10:00:00"))
+    again = start(world, "10:00:02", master=_Downloading(world[2]))
+    follow(again, BOTH, "10:00:02", reuse=False)  # the start: the master is not ready
+    assert again.feed.topics == frozenset() and not again.master_ready
+    if op:
+        follow(again, BOTH, "10:01")  # the owner edits a screen during the download
+    heard(again, ms(DAY, "10:02:30"), 100.5, 300_000)  # dropped: the link follows nothing
+    again.master = world[2]  # the download has finished
+    follow(again, BOTH, "10:05", reuse=False)  # the 5-minute retry
+    assert RELIANCE in again.feed.topics
+    minute(again, "10:05", 101.0, [600_030, 600_040])
+    assert bar_at(again, "10:05").v == 20, "the first bar after the build holds the stretch"
+    assert unverified(again, 5, "10:06:06"), "the 10:05 candle holds minutes nobody watched"
+    assert gap_rows(world, again) == [(ms(DAY, "10:00:02"), ms(DAY, "10:05"))]
+
+
+def test_a_normal_restart_marks_nothing(world):
+    """The guard: a start that follows its keys at once (the restore and the first set at the
+    same moment) keeps the running total and records no gap."""
+    source = start(world, "08:50")
+    morning(source)
+    source.mark_seen(ms(DAY, "10:00:00"))
+    again = start(world, "10:00:02")
+    follow(again, BOTH, "10:00:02", reuse=False)
+    minute(again, "10:00", 101.0, [50_030, 50_040])
+    assert bar_at(again, "10:00").v == 20, "what traded since the last bar, as for a lost frame"
+    assert not unverified(again, 5, "10:01:06")
+    assert gap_rows(world, again) == []
 
 
 def test_a_key_the_restart_did_not_follow_is_taken_as_let_go_from_the_restart(world):

@@ -316,14 +316,17 @@ class Bars:
         stretch becomes its gap. A shorter stretch, or one before the open, changes nothing: the
         running total carries what traded meanwhile into the next bar, as for a lost frame.
 
-        The first set after a restore says which of the keys the store held go on: one no screen
-        follows then is let go from the moment of the restore."""
+        Every key the store held is taken as let go at the moment of the restore, and the first
+        set after it says which come back: on a normal start that is the same moment, so nothing
+        changes, but a start that could follow nothing at once (the master contract downloading,
+        the active screens unreadable) left them unwatched until that set, a gap like any other
+        (re-review MEDIUM-A1). A key the first set leaves out stays let go from the restore."""
         self._roll(market.today)
         wanted = frozenset(keys)
         first = self._followed is None
         before = frozenset(self._keys) if first else self._followed
         let_go = self._since if first and self._since is not None else at
-        for key in before - wanted:
+        for key in before if first else before - wanted:
             self._let_go.setdefault(key, let_go)
         sealed: list[Sealed] = []
         gaps: list[tuple[str, Pause]] = []
