@@ -165,7 +165,8 @@ and moving between them replaces the history entry. The sheets are in the addres
 kind, never an id, so a suggested layout at version 0 has addresses too); a widget row's symbol sheet is
 `?sheet=symbol&k=EXCHANGE:SYMBOL&s=<screen id>&wk=<kind>`. The view reads `dashboard` once when it opens and never
 on a timer; it is read again only when another screen changes the layout (`sudarshan_screener_dashboard` with a
-newer version) or a reconnect finds runs that moved. Cards past the read's budget (`rows_pending`) are read one
+newer version), on every reconnect's catch-up (whether or not a run moved), when the engine's state changes, and,
+while the layout is only a suggestion, when a screen is added, removed, paused or resumed. Cards past the read's budget (`rows_pending`) are read one
 by one with `widget`, in card order. A table card shows the screen's rows (5, 10 or 20) with the price and the
 change, at most two clause values, "and N more" and the screen's automatic list as 48 dp links. One live
 subscription serves the whole dashboard (the shown rows of every card in card order, at most 100 prices), so a

@@ -189,25 +189,48 @@ export function mergeResults(held: Results, push: RunPush): Results {
   }
 }
 
+function suggestionMoved(shown: Dashboard, push: StatePush): boolean {
+  const held = new Set(shown.widgets.map((card) => card.screen_id))
+  const oldest = Math.min(...held)
+  const room = shown.widgets.length < shown.limits.widgets
+  return (
+    push.resync === true ||
+    push.removed.some((id) => held.has(id)) ||
+    push.screens.some((part) =>
+      part.status === 'active'
+        ? !held.has(part.id) && (room || part.id > oldest)
+        : held.has(part.id)
+    )
+  )
+}
+
 export function onStatePush(client: QueryClient, push: StatePush): void {
   const state = client.getQueryData<ScreenerState>(STATE_KEY)
   // The engine's state moved (the 15:30 close, a feed drop): each card's own line, with its own
   // next check, is worded by the server, so the cards are read again.
   if (state && push.engine && push.engine.state !== state.engine.state)
     void client.invalidateQueries({ queryKey: DASHBOARD_KEY })
-  // A layout that is only a suggestion is the Active screens at this moment, and no dashboard
-  // push says one was added, removed, paused or resumed: read it again.
+  // A layout that is only a suggestion is the Active screens at this moment (newest first, up to
+  // the limit), and no dashboard push says one was added, removed, paused or resumed. It is
+  // compared with the suggestion's own cards, not with the state cache, which a Pause made on
+  // this phone has already changed before the push arrives.
   const shown = client.getQueryData<Dashboard>(DASHBOARD_KEY)
-  if (
-    shown?.suggested &&
-    (push.resync ||
-      push.removed.length > 0 ||
-      push.screens.some((part) => {
-        const held = state?.screens.find((row) => row.id === part.id)
-        return !held || held.status !== part.status
-      }))
-  )
+  if (shown?.suggested && suggestionMoved(shown, push)) {
     void client.invalidateQueries({ queryKey: DASHBOARD_KEY })
+  } else if (state && shown) {
+    // A screen edited elsewhere (its version moved): its cards' mode and day-only words are read again.
+    const moved = new Set(
+      push.screens
+        .filter((part) => {
+          const held = state.screens.find((row) => row.id === part.id)
+          return held !== undefined && held.version !== part.version
+        })
+        .map((part) => part.id)
+    )
+    for (const card of shown.widgets) {
+      if (moved.has(card.screen_id) && !card.rows_pending) readCard(client, card).catch(() => {})
+    }
+  }
   const next = state ? applyState(state, push) : null
   if (state && next) client.setQueryData<ScreenerState>(STATE_KEY, next)
   else void client.invalidateQueries({ queryKey: STATE_KEY })
@@ -232,13 +255,14 @@ export async function catchUp(client: QueryClient): Promise<void> {
     if (!more || runs.length === 0) break
   }
   noteSeen(after)
+  // The layout may have changed on another screen while this one was away, whether or not a run moved.
+  void client.invalidateQueries({ queryKey: DASHBOARD_KEY })
   if (moved) {
     // Which screens moved, and their lists, is the state's to say.
     void client.invalidateQueries({ queryKey: STATE_KEY })
     void client.invalidateQueries({ queryKey: RESULTS_KEY })
     void client.invalidateQueries({ queryKey: RUNS_KEY })
     void client.invalidateQueries({ queryKey: TODAY_KEY })
-    void client.invalidateQueries({ queryKey: DASHBOARD_KEY })
   }
 }
 

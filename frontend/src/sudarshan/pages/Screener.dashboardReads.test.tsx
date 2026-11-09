@@ -131,7 +131,9 @@ vi.mock('@/sudarshan/watchlist/rows', async (importOriginal) => {
 
 import { createQueryClient } from '@/app/providers'
 import Screener from '@/sudarshan/pages/Screener'
+import { sendChange } from '@/sudarshan/screener/actions'
 import { ScreenerError } from '@/sudarshan/screener/api'
+import { DASHBOARD_KEY, STATE_KEY } from '@/sudarshan/screener/keys'
 import { resetScreenerPushForTests } from '@/sudarshan/screener/push'
 import {
   dashboard,
@@ -455,5 +457,108 @@ describe('the Dashboard when Upstox is logged out, and at the close (M4, M6, M7)
       })
     )
     await waitFor(() => expect(api.dashboard).toHaveBeenCalledTimes(2))
+  })
+})
+
+describe('the reconnect and the suggestion (M2, M3, M8, L10)', () => {
+  it('reads the dashboard again on every catch-up, whether or not a run moved', async () => {
+    api.dashboard.mockResolvedValue(dashboard([widgetCard()], { version: 3, suggested: false }))
+    renderPage()
+    await joinedOnce(room)
+    await waitFor(() => expect(cardOf(1)).toBeTruthy())
+    expect(api.dashboard).toHaveBeenCalledTimes(1)
+    act(() => room.fire('disconnect'))
+    act(() => room.fire('connect'))
+    await joinedOnce(room, 1)
+    await waitFor(() => expect(api.runsSince).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(api.dashboard).toHaveBeenCalledTimes(2))
+  })
+
+  it('a dashboard read during a drop does not make the catch-up skip the state', async () => {
+    renderPage()
+    api.dashboard.mockResolvedValue(dashboard([widgetCard()], { last_run_id: 12 }))
+    await joinedOnce(room)
+    await waitFor(() => expect(cardOf(1)).toBeTruthy())
+    expect(api.state).toHaveBeenCalledTimes(1)
+    await userEvent.click(screen.getByRole('tab', { name: 'Screens' }))
+    act(() => room.fire('disconnect'))
+    api.runsSince.mockImplementation(async (after: number) =>
+      after < 12 ? { runs: [runRow(11), runRow(12)], more: false } : { runs: [], more: false }
+    )
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(Date.now() + 61_000)
+    await userEvent.click(screen.getByRole('tab', { name: 'Dashboard' }))
+    await waitFor(() => expect(api.dashboard).toHaveBeenCalledTimes(2))
+    act(() => room.fire('connect'))
+    await joinedOnce(room, 1)
+    await waitFor(() => expect(api.runsSince).toHaveBeenCalledTimes(2))
+    await settle()
+    expect(api.runsSince.mock.calls[1]?.[0]).toBeLessThan(12)
+    expect(api.state.mock.calls.length).toBeGreaterThan(1)
+  })
+
+  it('a suggested layout is read again after a Pause made on this phone', async () => {
+    api.dashboard.mockResolvedValue(
+      dashboard([widgetCard({ screen_id: 2, name: 'Breakout' }), widgetCard({ screen_id: 1 })])
+    )
+    const client = renderPage()
+    await joinedOnce(room)
+    await waitFor(() => expect(cardOf(1)).toBeTruthy())
+    api.change.mockResolvedValue(
+      screenRow({ id: 1, name: 'EMA cross', status: 'paused', version: 2 })
+    )
+    const row = client
+      .getQueryData<{ screens: Array<{ id: number }> }>(STATE_KEY)
+      ?.screens.find((each) => each.id === 1)
+    await act(async () => {
+      await sendChange(client, row as never, 'pause')
+    })
+    act(() =>
+      room.fire('sudarshan_screener_state', {
+        engine: { state: 'real_time', line: 'Real-time', real_time: true, next_at: null },
+        screens: [
+          {
+            id: 1,
+            version: 2,
+            status: 'paused',
+            status_reason: null,
+            next_check: null,
+            matches: 7,
+            entered_today: 3,
+          },
+        ],
+        removed: [],
+      })
+    )
+    await settle()
+    expect(api.dashboard).toHaveBeenCalledTimes(2)
+    expect(client.getQueryData(DASHBOARD_KEY)).toBeTruthy()
+  })
+
+  it('reads the cards of a screen edited on another screen', async () => {
+    api.dashboard.mockResolvedValue(dashboard([widgetCard()], { version: 3, suggested: false }))
+    api.widget.mockResolvedValue(widgetCard({ mode: 'forming_day' }))
+    renderPage()
+    await joinedOnce(room)
+    await waitFor(() => expect(cardOf(1)).toBeTruthy())
+    act(() =>
+      room.fire('sudarshan_screener_state', {
+        engine: { state: 'real_time', line: 'Real-time', real_time: true, next_at: null },
+        screens: [
+          {
+            id: 1,
+            version: 9,
+            status: 'active',
+            status_reason: null,
+            next_check: null,
+            matches: 2,
+            entered_today: 0,
+          },
+        ],
+        removed: [],
+      })
+    )
+    await waitFor(() => expect(api.widget).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(cardOf(1).querySelector('[data-mode="forming_day"]')).toBeTruthy())
   })
 })

@@ -12,7 +12,6 @@ import {
   useUnread,
 } from './dashboardCache'
 import { DASHBOARD_KEY } from './keys'
-import { noteSeen } from './push'
 import type { Dashboard } from './types'
 
 /**
@@ -27,7 +26,6 @@ export function useDashboard() {
     queryKey: DASHBOARD_KEY,
     queryFn: async ({ signal }) => {
       const read = await screenerApi.dashboard(signal)
-      noteSeen(read.last_run_id)
       // A fresh layout starts every card's reads again, and never puts an older card over a newer.
       clearUnread()
       return mergeRead(client.getQueryData<Dashboard>(DASHBOARD_KEY), read)
