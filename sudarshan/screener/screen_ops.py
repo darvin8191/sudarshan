@@ -128,6 +128,7 @@ def sched_screen(row: Mapping[str, Any]) -> scheduler.Screen:
         run["on"],
         tf if isinstance(tf, int) else 0,
         SEGMENTS_OF.get(stored["universe"]["kind"], frozenset({"NSE_EQ"})),
+        row.get("updated_at") or 0,  # every change moves the version (store.screen_change)
     )
 
 

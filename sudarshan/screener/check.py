@@ -33,8 +33,8 @@ import itertools
 import json
 import sys
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
-from dataclasses import dataclass, field
-from datetime import date, datetime
+from dataclasses import dataclass, field, replace
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -183,7 +183,7 @@ async def replay_day(
     market = market_for(day, calendar, auction, first[1])
     source = ReplaySource(bars, market, universes)
     plans = {row["id"]: spec.compile_plan(row["spec"]) for row in screens}
-    sched = [sched_screen(row) for row in screens]
+    sched = [_on_the_day(sched_screen(row), day) for row in screens]
     rows: dict[int, dict[str, mem.Row]] = {
         row["id"]: dict((members or {}).get(row["id"], {})) for row in screens
     }
@@ -221,6 +221,13 @@ async def replay_day(
         await run_due(clock)
         clock += 1000
     return lines
+
+
+def _on_the_day(screen: scheduler.Screen, day: date) -> scheduler.Screen:
+    """A version that began on the replayed day starts there, as the service ran it; one that
+    began on another day is replayed over the whole day."""
+    start, end = epoch_ms(day, 0), epoch_ms(day + timedelta(days=1), 0)
+    return screen if start <= screen.since < end else replace(screen, since=0)
 
 
 def _printed(source, universes, screens, screen_sched) -> bool:
@@ -453,7 +460,10 @@ def _screens_from_db(engine, only: int | None) -> list[dict]:
     rows = []
     with engine.connect() as conn:
         for found in conn.execute(
-            text("SELECT id, version, name, spec, status FROM screen WHERE principal = :p"),
+            text(
+                "SELECT id, version, name, spec, status, updated_at FROM screen "
+                "WHERE principal = :p"
+            ),
             {"p": OWNER},
         ).mappings():
             if found["status"] != "active" or (only is not None and found["id"] != only):

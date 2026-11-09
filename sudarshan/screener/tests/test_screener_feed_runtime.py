@@ -130,8 +130,8 @@ def test_frames_become_sealed_bars_a_live_subject_and_a_run(world):
     assert (candle.o, candle.c, candle.v) == (10000, 10710, 300)
 
     # the run loop judges the live bars: close 107.10 > 100 is a hit
-    store.write(
-        OWNER, lambda tx: tx.screen_insert("Live", spec.check(SPEC), "active", clock["now"])
+    store.write(  # made before the open, so the 09:30 check is its own
+        OWNER, lambda tx: tx.screen_insert("Live", spec.check(SPEC), "active", ms(DAY, "09:00"))
     )
     clock["now"] = ms(DAY, "09:30:05")
     made = runner.Runner(store, source, lambda: clock["now"], Calendar())

@@ -242,6 +242,11 @@ does.
   its index's first price, follows that index, and is built at the next tick after it.
 - Keys past `SUDARSHAN_SCREENER_MAX_KEYS` are not claimed and read "Not checked: past the 320
   instruments the screener can follow tick by tick".
+- A screen made, resumed or edited during the session has one check, on the latest candle closed
+  by then (on time, never marked late), and then follows its schedule: the day's earlier checks
+  are never run at once, so no list change or alert comes for a candle that closed before it. A
+  check a restart missed after that is still made late, marked so. A screen whose lines read only
+  day candles is judged on the forming day candle at each close of its run's timeframe.
 
 ## Not built yet
 
