@@ -77,3 +77,18 @@ OpenAlgo: no thread, timer, executor, scheduler or event loop anywhere in `sudar
 or the bridge (an AST scan, and a check that no thread starts for any op or master swap); one
 generation, the old rows freed with it; the derived maps under 15 MB on 120,000 rows (about 2 MB
 measured). Do not loosen these tests to land a feature.
+
+## W1 - the store (`schema.py`, `engine.py`, `words/store.py`)
+
+Schema 1 of `db/sudarshan_watchlists.db` (`SUDARSHAN_WATCHLISTS_DB` points elsewhere), frozen: list
+guard rows, sections and their members, follow rows, flags and notes, favourite slots, view
+preferences and `wl_meta`. Times are epoch ms, prices paise, every table has `principal`. The file
+holds ranges and enums as checks; counts (20 sections, 20 follow rows a list) are the store's.
+`schema.py` imports SQLAlchemy only, so the migration runs without OpenAlgo's packages. `engine.py`
+builds one NullPool engine on first use from `database.engine_factory` (never at import, no thread),
+prepares the file outside any lock (idempotent: creates what is missing, writes `schema = 1` only
+when absent, never changes a value) and hands out sessions as `with open_session() as s:`. A file
+whose `schema` is newer than the code, or not a number, is refused before a byte of it is touched:
+`RecordTooNew` carries the owner's sentence (`words/store.py`), the cause goes to the error log, and
+OpenAlgo's own lists keep working. Seeds nothing: default flag names and favourites are computed at
+read. Tests: `tests/test_watchlists_store.py` (columns typed by hand from the design).
