@@ -13,12 +13,31 @@ import dataclasses
 import pytest
 from test_screener_dashboard_ops import add, named
 from test_screener_dashboard_ops import service as ops_service  # noqa: F401  (a fixture)
-from test_screener_results import call, make
+from test_screener_results import call as run_op
+from test_screener_results import make
 from test_screener_runs import NOW
 
 from sudarshan.screener import contract, presets, words
 from sudarshan.screener.ops import ApiError
 from sudarshan.screener.store import OWNER
+
+
+def call(svc, op, **args):
+    """The op as the bridge forwards it: the route's id is the screen, the changes of an update
+    are its ``set`` (``to_kind`` is a new kind) and the whole order is ``keys``. The tests below
+    say screen_id, to_kind, rows and order, as the owner would; the bridge's and the sealed API's
+    tests carry the real shapes."""
+    if op in ("widget", "widget_update", "widget_remove") and "screen_id" in args:
+        args["id"] = args.pop("screen_id")
+    if op == "widget_update":
+        changes = {k: args.pop(k) for k in ("rows", "sort_by", "value_clauses") if k in args}
+        if "to_kind" in args:
+            changes["kind"] = args.pop("to_kind")
+        if changes:
+            args["set"] = changes
+    if op == "widget_order" and "order" in args:
+        args["keys"] = args.pop("order")
+    return run_op(svc, op, **args)
 
 
 @pytest.fixture
@@ -59,13 +78,13 @@ def test_the_contract_names_the_writes_the_event_and_every_push_event():
     assert (ops["widget_add"].method, ops["widget_add"].route) == ("POST", "/dashboard/widgets")
     assert (ops["widget_update"].method, ops["widget_update"].route) == (
         "PATCH",
-        "/dashboard/widget",
+        "/dashboard/widgets/<id>",
     )
     assert (ops["widget_remove"].method, ops["widget_remove"].route) == (
         "DELETE",
-        "/dashboard/widget",
+        "/dashboard/widgets/<id>",
     )
-    assert ops["widget_remove"].query == (("screen_id", "int"), ("kind", "str"), ("version", "int"))
+    assert ops["widget_remove"].query == (("kind", "str"), ("version", "int"))
     assert (ops["widget_order"].method, ops["widget_order"].route) == ("POST", "/dashboard/order")
     assert contract.EVENT_DASHBOARD == "sudarshan_screener_dashboard"
     assert contract.PUSH_EVENTS == (
@@ -75,7 +94,7 @@ def test_the_contract_names_the_writes_the_event_and_every_push_event():
 
 def test_the_first_change_at_version_zero_keeps_the_suggestion_and_moves_to_two(service):
     one, two = make(service), named(service, "Two")
-    got = call(service, "widget_update", version=0, screen_id=two["id"], kind="table", rows=5)
+    got = call(service, "widget_update", version=0, id=two["id"], kind="table", rows=5)
     assert got == {"version": 2}
     after = call(service, "dashboard")
     assert after["suggested"] is False and after["version"] == 2
@@ -85,7 +104,7 @@ def test_the_first_change_at_version_zero_keeps_the_suggestion_and_moves_to_two(
 
 def test_a_stale_version_writes_nothing_and_says_so(service):
     screen = make(service)
-    call(service, "widget_update", version=0, screen_id=screen["id"], kind="table", rows=5)
+    call(service, "widget_update", version=0, id=screen["id"], kind="table", rows=5)
     for op, args in (
         ("widget_update", {"rows": 20}),
         ("widget_remove", {}),
@@ -126,7 +145,7 @@ def test_update_can_turn_a_table_into_a_count_but_not_onto_one_that_exists(servi
     ]
     twice = refused(service, "widget_update", "refused", version=version, **addr, to_kind="count")
     assert "already on the dashboard as a count" in twice.message
-    call(service, "widget_remove", version=version, screen_id=screen["id"], kind="count")
+    call(service, "widget_remove", version=version, id=screen["id"], kind="count")
     call(service, "widget_update", version=version + 1, **addr, to_kind="count")
     assert keys(service) == [(screen["id"], "count")]
 
@@ -161,9 +180,7 @@ def test_update_refuses_what_a_widget_cannot_be_in_words(service, fields, senten
 
 def test_update_with_nothing_to_change_and_a_widget_that_is_not_there(service):
     screen = make(service)
-    refused(
-        service, "widget_update", "bad_request", version=0, screen_id=screen["id"], kind="table"
-    )
+    refused(service, "widget_update", "bad_request", version=0, id=screen["id"], kind="table")
     err = refused(
         service,
         "widget_update",
@@ -179,7 +196,7 @@ def test_update_with_nothing_to_change_and_a_widget_that_is_not_there(service):
 
 def test_remove_closes_the_gap_and_says_the_screen_is_kept(service):
     a, b, c = make(service), named(service, "B"), named(service, "C")
-    got = call(service, "widget_remove", version=0, screen_id=b["id"], kind="table")
+    got = call(service, "widget_remove", version=0, id=b["id"], kind="table")
     assert got == {"version": 2, "notice": words.DASH_REMOVED}
     assert keys(service) == [(c["id"], "table"), (a["id"], "table")]
     assert [w["position"] for w in call(service, "dashboard")["widgets"]] == [0, 1]
@@ -190,7 +207,7 @@ def test_order_moves_the_whole_layout_by_screen_and_kind(service):
     a, b = make(service), named(service, "B")
     version = call(service, "widget_add", version=0, screen_id=a["id"], kind="count")["version"]
     wanted = [[a["id"], "count"], [a["id"], "table"], [b["id"], "table"]]
-    assert call(service, "widget_order", version=version, order=wanted) == {"version": version + 1}
+    assert call(service, "widget_order", version=version, keys=wanted) == {"version": version + 1}
     assert keys(service) == [(a["id"], "count"), (a["id"], "table"), (b["id"], "table")]
     cases = [
         ([[a["id"], "count"]], "version_conflict", words.DASH_CONFLICT),  # not the whole layout
@@ -202,14 +219,14 @@ def test_order_moves_the_whole_layout_by_screen_and_kind(service):
     ]
     for bad, code, sentence in cases:
         assert (
-            refused(service, "widget_order", code, version=version + 1, order=bad).message
+            refused(service, "widget_order", code, version=version + 1, keys=bad).message
             == sentence
         )
 
 
 def test_order_at_version_zero_moves_the_suggestion_he_was_looking_at(service):
     a, b = make(service), named(service, "B")
-    got = call(service, "widget_order", version=0, order=[[a["id"], "table"], [b["id"], "table"]])
+    got = call(service, "widget_order", version=0, keys=[[a["id"], "table"], [b["id"], "table"]])
     assert got == {"version": 2} and keys(service) == [(a["id"], "table"), (b["id"], "table")]
 
 
@@ -284,7 +301,7 @@ def test_a_day_only_screen_may_choose_when_it_checks_and_no_other_may(service):
         service, "widget_add", version=0, screen_id=day["id"], kind="count", when="after_close"
     )
     assert got["screen"]["where"] == "F&O stocks · after the close"
-    card = call(service, "widget", screen_id=day["id"], kind="count")
+    card = call(service, "widget", id=day["id"], kind="count")
     assert card["mode"] == "after_close" and card["day_only"] is True
     late = named(service, "Late", status="paused", run={"on": "after_close"}, **DAY_ONLY)
     back = call(service, "widget_add", version=2, screen_id=late["id"], when="during_day")
@@ -314,10 +331,10 @@ def test_a_day_only_screen_may_choose_when_it_checks_and_no_other_may(service):
 def test_every_write_queues_the_push_and_only_the_newest_is_kept(service):
     a, b = make(service), named(service, "B")
     assert pushes(service) == []
-    call(service, "widget_update", version=0, screen_id=a["id"], kind="table", rows=5)
+    call(service, "widget_update", version=0, id=a["id"], kind="table", rows=5)
     assert pushes(service) == [{"_event": contract.EVENT_DASHBOARD, "version": 2}]
-    call(service, "widget_order", version=2, order=[[b["id"], "table"], [a["id"], "table"]])
-    call(service, "widget_remove", version=3, screen_id=b["id"], kind="table")
+    call(service, "widget_order", version=2, keys=[[b["id"], "table"], [a["id"], "table"]])
+    call(service, "widget_remove", version=3, id=b["id"], kind="table")
     call(service, "widget_add", version=4, screen_id=a["id"], kind="count")
     assert pushes(service) == [{"_event": contract.EVENT_DASHBOARD, "version": 5}]
 
@@ -340,7 +357,7 @@ def test_a_refused_write_queues_no_push(service):
 
 def test_deleting_a_screen_with_widgets_queues_the_push_too(service):
     a, b = make(service), named(service, "B")
-    call(service, "widget_update", version=0, screen_id=a["id"], kind="table", rows=5)
+    call(service, "widget_update", version=0, id=a["id"], kind="table", rows=5)
     call(service, "delete", id=b["id"])
     assert keys(service) == [(a["id"], "table")]
     assert pushes(service) == [{"_event": contract.EVENT_DASHBOARD, "version": 3}]
@@ -358,16 +375,14 @@ def test_the_writes_work_through_the_real_sealed_api(tmp_path):
             assert status == 200
             screen = made["data"]["id"]
             status, body = await client.op(
-                "widget_update", version=0, screen_id=screen, kind="table", rows=5
+                "widget_update", version=0, id=screen, kind="table", set={"rows": 5}
             )
             assert (status, body["data"]) == (200, {"version": 2})
             status, body = await client.op(
-                "widget_update", version=1, screen_id=screen, kind="table", rows=20
+                "widget_update", version=1, id=screen, kind="table", set={"rows": 20}
             )
             assert status == 409 and body["error"]["message"] == words.DASH_CONFLICT
-            status, body = await client.op(
-                "widget_remove", version=2, screen_id=screen, kind="table"
-            )
+            status, body = await client.op("widget_remove", version=2, id=screen, kind="table")
             assert status == 200 and body["data"]["notice"] == words.DASH_REMOVED
             status, body = await client.op("dashboard")
             assert status == 200 and body["data"]["widgets"] == [] and body["data"]["version"] == 3

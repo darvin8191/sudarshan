@@ -128,17 +128,15 @@ OPS = (
     OpSpec("today", "GET", "/today", "read"),
     # The dashboard (M9.16): a widget is addressed by its screen and its kind, never by an id.
     OpSpec("dashboard", "GET", "/dashboard", "read"),
-    OpSpec(
-        "widget", "GET", "/dashboard/widget", "read", query=(("screen_id", "int"), ("kind", "str"))
-    ),
+    OpSpec("widget", "GET", "/dashboard/widgets/<id>", "read", query=(("kind", "str"),)),
     OpSpec("widget_add", "POST", "/dashboard/widgets", "write"),
-    OpSpec("widget_update", "PATCH", "/dashboard/widget", "write"),
+    OpSpec("widget_update", "PATCH", "/dashboard/widgets/<id>", "write"),
     OpSpec(
         "widget_remove",
         "DELETE",
-        "/dashboard/widget",
+        "/dashboard/widgets/<id>",
         "write",
-        query=(("screen_id", "int"), ("kind", "str"), ("version", "int")),
+        query=(("kind", "str"), ("version", "int")),
     ),
     OpSpec("widget_order", "POST", "/dashboard/order", "write"),
 )

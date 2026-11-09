@@ -59,9 +59,9 @@ def change(svc, version, screen, **fields):
 def test_the_dashboard_ops_are_in_the_contract_with_widgets_addressed_by_screen_and_kind():
     ops = {s.name: s for s in contract.OPS}
     assert ops["dashboard"].route == "/dashboard" and ops["dashboard"].method == "GET"
-    assert ops["widget"].route == "/dashboard/widget"
-    assert ops["widget"].query == (("screen_id", "int"), ("kind", "str"))
-    assert all("<id>" not in s.route for s in contract.OPS if s.name in ("dashboard", "widget"))
+    # the route's one <id> is the screen; the kind rides in the query (reads, remove) or the body
+    assert ops["widget"].route == "/dashboard/widgets/<id>"
+    assert ops["widget"].query == (("kind", "str"),)
 
 
 def test_before_a_change_the_dashboard_is_a_suggestion_of_the_active_screens(service):
@@ -125,7 +125,7 @@ def test_the_widgets_own_sort_overrides_the_screens_rank_and_ranks_follow_it(ser
     screen = make(service)
     record(service, screen, 1, judged({"AAA": 100, "BBB": 300, "CCC": 200}))
     change(service, 0, screen, sort_by={"by": "ltp", "order": "asc"})
-    card = call(service, "widget", screen_id=screen["id"], kind="table")
+    card = call(service, "widget", id=screen["id"], kind="table")
     assert [r["symbol"] for r in card["rows_shown"]] == ["AAA", "CCC", "BBB"]
     assert [r["rank"] for r in card["rows_shown"]] == [1, 2, 3]
     assert card["sort_by"] == {"by": "ltp", "order": "asc"}
@@ -138,7 +138,7 @@ def test_a_sort_or_value_column_the_screen_lacks_falls_back(service):
         service, 0, screen,
         sort_by={"by": "value", "order": "asc", "clause": "gone"}, value_clauses=["gone"],
     )  # fmt: skip
-    card = call(service, "widget", screen_id=screen["id"], kind="table")
+    card = call(service, "widget", id=screen["id"], kind="table")
     assert card["sort_by"] is None and card["value_clauses"] is None
     assert [r["symbol"] for r in card["rows_shown"]] == ["BBB", "AAA"]
 
@@ -146,14 +146,14 @@ def test_a_sort_or_value_column_the_screen_lacks_falls_back(service):
 def test_a_suggested_widget_is_read_by_its_screen_and_kind(service):
     screen = make(service)
     record(service, screen, 1, judged({"AAA": 100}))
-    card = call(service, "widget", screen_id=screen["id"], kind="table")
+    card = call(service, "widget", id=screen["id"], kind="table")
     assert card == call(service, "dashboard")["widgets"][0]
 
 
 def test_a_widget_that_is_not_there_says_so_in_words(service):
     screen = make(service)
     with pytest.raises(ApiError) as gone:
-        call(service, "widget", screen_id=screen["id"], kind="count")
+        call(service, "widget", id=screen["id"], kind="count")
     assert gone.value.code == "not_found" and gone.value.message == words.DASH_GONE
     for bad in (
         {"screen_id": screen["id"], "kind": "pie"},
@@ -177,7 +177,7 @@ def test_a_count_card_carries_the_days_checks_and_how_a_screen_reader_says_them(
     ):
         record(service, screen, k, found)
     add(service, 0, screen, "count")
-    card = call(service, "widget", screen_id=screen["id"], kind="count")
+    card = call(service, "widget", id=screen["id"], kind="count")
     counts = card["counts"]
     assert [p["matches"] for p in counts["series"]] == [3, 2, 1]
     day = call(service, "today")["screens"][0]  # the same figures the home card shows
@@ -189,7 +189,7 @@ def test_a_count_card_carries_the_days_checks_and_how_a_screen_reader_says_them(
 
 def test_a_card_that_is_not_live_says_why_in_the_engine_lines_own_words(service):
     screen = make(service)
-    card = call(service, "widget", screen_id=screen["id"], kind="table")
+    card = call(service, "widget", id=screen["id"], kind="table")
     line = card["line"]
     assert line["live"] is False and line["state"] == "not_linked" or line["words"]
     assert not line["words"].startswith("Real-time")
@@ -199,12 +199,15 @@ def test_a_card_that_is_not_live_says_why_in_the_engine_lines_own_words(service)
             return {"trading": True, "feed": "token_rejected", "feed_since": NOW - 60_000}
 
     service.parts["engine"] = Facts()
-    line = call(service, "widget", screen_id=screen["id"], kind="table")["line"]
+    line = call(service, "widget", id=screen["id"], kind="table")["line"]
     assert line["kind"] == "feed_down" and line["live"] is False
+    assert (
+        call(service, "widget", id=screen["id"], kind="table")["not_live_words"] == (line["words"])
+    )
     assert "Upstox refused the price feed's token" in line["words"]
     paused = named(service, "Paused", status="paused")
     add(service, 0, paused)
-    line = call(service, "widget", screen_id=paused["id"], kind="table")["line"]
+    line = call(service, "widget", id=paused["id"], kind="table")["line"]
     assert (line["kind"], line["words"]) == ("paused", "Paused · not checking")
 
 
@@ -217,7 +220,7 @@ def test_a_screen_that_needs_history_says_what_it_waits_for(service):
         "rank": {"by": {"field": "change_pct", "tf": "D"}, "order": "desc"},
     }  # fmt: skip
     screen = named(service, "Needs days", **needs_days)
-    card = call(service, "widget", screen_id=screen["id"], kind="table")
+    card = call(service, "widget", id=screen["id"], kind="table")
     assert (
         card["waits"] == "Waits for the history download: needs 3 day candles, and today gives 1."
     )
@@ -236,7 +239,7 @@ def test_cards_past_the_budget_answer_rows_pending_on_an_injected_clock(service)
     assert late["name"] == "S0" and late["status"] == "active" and late["line"]["words"]
     assert late["rows_shown"] == [] and late["run"] is None and late["matches"] is None
     assert late["list"] is None and late["not_checked"] is None
-    whole = call(service, "widget", screen_id=late["screen_id"], kind="table")
+    whole = call(service, "widget", id=late["screen_id"], kind="table")
     assert whole["rows_pending"] is False and whole["matches"] == 1
 
 
@@ -269,4 +272,4 @@ def test_a_day_of_twelve_one_minute_screens_reads_under_the_bridges_timeout(serv
     assert len(got["widgets"]) == 20 and not any(w["rows_pending"] for w in got["widgets"])
     counted = [w for w in got["widgets"] if w["kind"] == "count"]
     assert len(counted) == 8 and len(counted[0]["counts"]["series"]) == 75
-    assert took < contract.TIMEOUTS_S["read"] - 1.0, f"the dashboard read took {took:.2f}s"
+    assert took < 1.5, f"the dashboard read took {took:.2f}s"

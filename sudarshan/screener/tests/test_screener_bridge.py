@@ -183,20 +183,20 @@ def test_the_dashboard_ops_are_forwarded_by_screen_and_kind_never_by_an_id(bridg
     sent = {**JSON, **headers}
     assert bridge.get(f"{PREFIX}/dashboard", headers=JSON).status_code == 200
     assert calls.calls[-1] == ("dashboard", {})
-    bridge.get(f"{PREFIX}/dashboard/widget?screen_id=7&kind=count", headers=JSON)
-    assert calls.calls[-1] == ("widget", {"screen_id": 7, "kind": "count"})
-    bridge.delete(f"{PREFIX}/dashboard/widget?screen_id=7&kind=table&version=3", headers=sent)
-    assert calls.calls[-1] == ("widget_remove", {"screen_id": 7, "kind": "table", "version": 3})
-    body = {"screen_id": 7, "kind": "table", "version": 3, "rows": 5}
-    bridge.patch(f"{PREFIX}/dashboard/widget", json=body, headers=headers)
-    assert calls.calls[-1] == ("widget_update", body)
+    bridge.get(f"{PREFIX}/dashboard/widgets/7?kind=count", headers=JSON)
+    assert calls.calls[-1] == ("widget", {"id": 7, "kind": "count"})
+    bridge.delete(f"{PREFIX}/dashboard/widgets/7?kind=table&version=3", headers=sent)
+    assert calls.calls[-1] == ("widget_remove", {"id": 7, "kind": "table", "version": 3})
+    body = {"version": 3, "kind": "table", "set": {"rows": 5, "kind": "count"}}
+    bridge.patch(f"{PREFIX}/dashboard/widgets/7", json={**body, "id": 99}, headers=headers)
+    assert calls.calls[-1] == ("widget_update", {**body, "id": 7})
     body = {"version": 3, "screen_id": 7, "kind": "count", "when": "after_close", "start": False}
     bridge.post(f"{PREFIX}/dashboard/widgets", json=body, headers=headers)
     assert calls.calls[-1] == ("widget_add", body)
-    body = {"version": 3, "order": [[7, "table"], [8, "count"]]}
+    body = {"version": 3, "keys": [[7, "table"], [8, "count"]]}
     bridge.post(f"{PREFIX}/dashboard/order", json=body, headers=headers)
     assert calls.calls[-1] == ("widget_order", body)
-    bad = bridge.get(f"{PREFIX}/dashboard/widget?screen_id=x&kind=count", headers=JSON)
+    bad = bridge.delete(f"{PREFIX}/dashboard/widgets/7?kind=table&version=abc", headers=sent)
     assert bad.status_code == 400 and error_of(bad)["code"] == "bad_request"
 
 

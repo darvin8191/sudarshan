@@ -139,16 +139,17 @@ nginx forwarded them, and never called by the page.
 **The dashboard (lane B, M9.16).** The Dashboard view's layout lives in `screener.db` (step 4: `dashboard`
 and `dashboard_widget`), behind one version that every write names; the first change (version 0) turns
 the suggestion (a table for each Active screen, newest first) into the stored layout and then applies
-itself. A widget is addressed by its screen and its kind, never by an id: `GET /dashboard`
-(`dashboard`: `version`, `suggested`, `widgets`, `limits`, `last_run_id`), `GET /dashboard/widget?screen_id=&kind=`
-(`widget`: one card), `POST /dashboard/widgets` (`widget_add`: `{version, screen_id | preset, kind?, rows?,
-sort_by?, value_clauses?, start?, when?}`; a preset makes its screen and the widget in one transaction, a
-screen that would pass the Active limit is added Paused and the answer's `notice` says so),
-`PATCH /dashboard/widget` (`widget_update`: `{version, screen_id, kind}` and any of `to_kind`, `rows`,
-`sort_by`, `value_clauses`), `DELETE /dashboard/widget?screen_id=&kind=&version=` (`widget_remove`) and
-`POST /dashboard/order` (`widget_order`: `{version, order: [[screen_id, kind], ...]}`, the whole layout).
+itself. A widget is addressed by its screen and its kind, never by an id (the route's one `<id>` is the
+screen id): `GET /dashboard` (`dashboard`: `version`, `suggested`, `widgets`, `limits`, `last_run_id`),
+`GET /dashboard/widgets/<id>?kind=` (`widget`: one card), `POST /dashboard/widgets` (`widget_add`:
+`{version, screen_id | preset, kind?, rows?, sort_by?, value_clauses?, start?, when?}`; a preset makes its
+screen and the widget in one transaction, a screen that would pass the Active limit is added Paused and the
+answer's `notice` says so), `PATCH /dashboard/widgets/<id>` (`widget_update`: `{version, kind, set}`, `kind`
+the widget's kind now and `set` any of `kind`, `rows`, `sort_by`, `value_clauses`),
+`DELETE /dashboard/widgets/<id>?kind=&version=` (`widget_remove`) and `POST /dashboard/order`
+(`widget_order`: `{version, keys: [[screen_id, kind], ...]}`, the whole layout).
 A card (`dashboard.py`, pure) carries the screen's name and state, how it is checked, the latest run's
-rows in the widget's order (ties by symbol), and a `line` that says why it is or is not live in the engine
+rows in the widget's order (ties by symbol), and a `line` and `not_live_words` that say why it is not live in the engine
 line's own words; the `dashboard` read works cards out in position order against a 1.5 s budget and the
 cards past it answer `rows_pending` with no rows, which the page reads with `widget`. Every write queues a
 `sudarshan_screener_dashboard` push (`{version}`) in its own transaction, so another screen reads the

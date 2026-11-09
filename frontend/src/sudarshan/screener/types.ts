@@ -355,21 +355,23 @@ export interface WidgetAdd {
   when?: 'during_day' | 'after_close'
 }
 
-/** `widget_update`: the widget is named by `screen_id` and `kind`; `to_kind` changes its kind. */
+/** `widget_update` (PATCH, the route's id is the screen): `kind` is the widget's kind now. */
 export interface WidgetUpdate {
   version: number
-  screen_id: number
   kind: WidgetKind
-  to_kind?: WidgetKind
-  rows?: 5 | 10 | 20
-  sort_by?: WidgetSort | null
-  value_clauses?: string[] | null
+  set: {
+    /** A new kind. */
+    kind?: WidgetKind
+    rows?: 5 | 10 | 20
+    sort_by?: WidgetSort | null
+    value_clauses?: string[] | null
+  }
 }
 
 /** `widget_order`: the whole layout, in the order wanted. */
 export interface WidgetOrder {
   version: number
-  order: Array<[number, WidgetKind]>
+  keys: Array<[number, WidgetKind]>
 }
 
 /** What a dashboard write answers: the version the dashboard is at now. */

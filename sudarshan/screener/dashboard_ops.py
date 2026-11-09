@@ -65,7 +65,7 @@ def translate(call, gone: str = words.DASH_GONE):
 
 
 def _address(args: Mapping[str, Any]) -> tuple[int, str]:
-    screen_id, kind = _int(args, "screen_id"), args.get("kind")
+    screen_id, kind = _int(args, "id"), args.get("kind")  # the route's id is the screen
     if kind not in WIDGET_KINDS:
         raise ApiError.of("bad_request", WORDS["unreadable"])
     return screen_id, kind  # type: ignore[return-value]
@@ -176,6 +176,9 @@ def _with_line(card: dict[str, Any], engine: Mapping[str, Any], now: int) -> dic
         run_at=run["at"] if run else None,
         now=now,
     )
+    # LOW-B8: the engine line's own sentence (token refused, no token, feed stopped, not answering)
+    # whenever the engine is not real-time, so a card that is not live says why
+    card["not_live_words"] = None if engine["state"] == words.REAL_TIME else engine["line"]
     return card
 
 
@@ -367,13 +370,11 @@ def _widget_args(args: Mapping[str, Any]) -> tuple[int, int, str]:
 @op("widget_update")
 async def widget_update(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
     version, screen_id, kind = _widget_args(args)
-    named = {
-        ("kind" if k == "to_kind" else k): args[k]
-        for k in ("to_kind", "rows", "sort_by", "value_clauses")
-        if k in args
-    }
-    if not named:
+    named = args.get("set")
+    if not isinstance(named, dict) or not named:
         raise ApiError.of("bad_request", words.DASH_NOTHING)
+    if set(named) - {"kind", "rows", "sort_by", "value_clauses"}:
+        raise ApiError.of("bad_request", WORDS["unreadable"])
     fields, store, now = _checked(named), _store(ctx), ctx.clock()
     return _written(
         ctx,
@@ -398,7 +399,7 @@ async def widget_remove(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
 async def widget_order(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
     version, store, now = _int(args, "version"), _store(ctx), ctx.clock()
     try:
-        order = dash.check_order(args.get("order"))
+        order = dash.check_order(args.get("keys"))
     except dash.WidgetError as exc:
         raise ApiError.of("bad_request", str(exc)) from None
     return _written(
