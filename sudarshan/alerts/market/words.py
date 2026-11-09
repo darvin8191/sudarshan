@@ -18,6 +18,7 @@ and ``line`` joins them for Telegram with the exchange, the pause mark and the n
 
 from __future__ import annotations
 
+import types
 from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
@@ -40,6 +41,8 @@ from sudarshan.autologin.messages import BRAND
 from sudarshan.autologin.schedule import IST
 
 NOTE_MAX = 120
+#: Lines one digest lists; the rest are counted ("5 more on the Alerts page.").
+MAX_DIGEST_LINES = 15
 #: A pause gets its Telegram lines only when it lasts longer than this inside the session.
 PAUSE_TELL_MS = 60_000
 TEST_LINE = "Test: market alerts reach this chat (sent from the Alerts page)."
@@ -211,6 +214,34 @@ def message(lines: list[str], first: datetime, last: datetime, dropped: int = 0)
             "The Alerts page has them."
         )
     parts.append(f"{when} IST")
+    return "\n".join(parts)
+
+
+def group_title(name: str, kind: str, params: dict) -> str:
+    """A list alert's title in a digest and on its card: 'Swing list · Up 2% on the day'."""
+    shape = types.SimpleNamespace(kind=kind, params=params)
+    return f"{clean(name, 40)} list · {condition(shape)}"
+
+
+def digest(title: str, lines: list[str], first: datetime, last: datetime, more: int = 0) -> str:
+    """One list alert's digest on Telegram: the header, the list and its check with the count and
+    the IST time span, up to MAX_DIGEST_LINES lines, then how many more the Alerts page has.
+
+        सुदर्शन / SUDARSHAN
+        Swing list · Up 2% on the day: 4 alerts, 10:40-10:45 IST
+        RELIANCE up 2.03% on the day: ₹1,428.25 (previous close ₹1,399.80) (NSE)
+        1 more on the Alerts page.
+    """
+    first, last = first.astimezone(IST), last.astimezone(IST)
+    span = (
+        f"{first:%H:%M}" if f"{first:%H:%M}" == f"{last:%H:%M}" else f"{first:%H:%M}-{last:%H:%M}"
+    )
+    total = len(lines) + more
+    count = f"{quantity(total)} alert{'' if total == 1 else 's'}"
+    shown = [text.removeprefix("Alert: ") for text in lines]
+    parts = [BRAND, f"{title}: {count}, {span} IST", *shown]
+    if more:
+        parts.append(f"{quantity(more)} more on the Alerts page.")
     return "\n".join(parts)
 
 
