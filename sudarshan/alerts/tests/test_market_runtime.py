@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import sqlite3
 from datetime import datetime, timedelta
@@ -700,9 +701,35 @@ def test_a_fire_found_already_told_is_never_told_again(alerts, quick, monkeypatc
     asyncio.run(scenario())
 
 
+def deliver_late(rt: MarketRuntime, ltp: float, by_s: float) -> None:
+    """The frame carrying this price reaches the runtime ``by_s`` seconds late, as on a loaded
+    box: the clock job keeps running meanwhile."""
+    real = rt.link.receive
+
+    async def receive():
+        batch = await real()
+        for _topic, payload in batch:
+            try:
+                late = json.loads(payload).get("ltp") == ltp
+            except (ValueError, TypeError, AttributeError):
+                late = False
+            if late:
+                await asyncio.sleep(by_s)
+                break
+        return batch
+
+    rt.link.receive = receive
+
+
 def test_a_fire_recorded_again_keeps_the_newer_state(alerts, quick, monkeypatch):
     """Review L9: the fire recorded again after a failed write wrote its state as it was at the
-    fire over the newer one the Book had saved meanwhile."""
+    fire over the newer one the Book had saved meanwhile.
+
+    The newer state is the Book's only once the 99.9 frame is judged. The test used to move the
+    clock past the next flush as soon as it had sent that frame, so on a loaded box the flush ran
+    first, saved the fire's state, and no later flush came before the wait ran out (CI run
+    42613236310). Here the frame always arrives a second late, and the test waits until it is
+    judged before it moves the clock."""
     monkeypatch.setattr(runtime, "RECORD_RETRY_S", (1.0,))
     calls = failing_record(monkeypatch, commit=False)
 
@@ -712,10 +739,12 @@ def test_a_fire_recorded_again_keeps_the_newer_state(alerts, quick, monkeypatch)
             settings = alerts(notify)
             create(settings, clock(), frequency="every_time")
             rt, task = await started(settings, feed, clock)
+            deliver_late(rt, 99.9, 1.0)
             await trade(feed, clock, 99.95)
             await trade(feed, clock, 100.05, ltq=2)  # fires; its record fails
             await wait_until(lambda: calls)
             await trade(feed, clock, 99.9, ltq=3)  # below again: the Book's newer state
+            await wait_until(lambda: rt.stats["judged"] == 3)  # only now is it the Book's
             clock.advance(2)
             await wait_until(lambda: record(settings, "states").get(1, State()).side == -1)
             await wait_until(lambda: len(calls) == 2 and record(settings, "events"))

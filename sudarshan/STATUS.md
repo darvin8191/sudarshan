@@ -6,20 +6,20 @@ One row per feature id from the (private) feature list. Status: `todo` → `part
 | id | feature | status | release | PR / notes |
 |---|---|---|---|---|
 | M0.1 | Fork, CI (`SUDARSHAN CI`), release build + server auto-deploy (outside 08:30-16:00 IST on trading days, 09:00-15:45 until v0.3.1; never on a listed extra trading day, backups, rollback, self-update, ring units); NSE calendar lines that ship with a release (`ops/deploy/nse-calendar.conf`), merged into the day files on every run without ever opening the market gate on the day; the gate asked again before the stop | partial | v0.0.1, v0.3.2, v0.4.0 | deploys since v0.0.1; settings that ship with a release from v0.2.1 (M18.2); calendar lines from v0.3.2 (branch `feat/calendar-ship`), first line Muhurat Sun 8 Nov 2026, 14:05-15:40 (NSE circulars 149/2026 and 142/2026); v0.3.2 installed itself on 27 Oct at 18:52 and the next run added the Muhurat line to the server's calendar at 19:00:04 (owner's check, 27 Oct); from v0.4.0: notices on Telegram for a release installed, rolled back or waiting, and the install and rollback never write by path in a folder the service user can write |
-| M1.1 | Bilingual lockup in the D look: Mor icon + सुदर्शन from Tiro outlines + SUDARSHAN in Khand; white app bar; D login with the Chrome fingerprint-fill hint; stacked lockup on connect and About | partial | v0.2.0 | server check pending; NSE status pill on login left out (needs a session) |
-| M1.2 | `<title>`, page titles, meta and og tags | partial | v0.2.0 | server check pending |
-| M1.3 | Icons "Mor" (सु on peacock with a gold ring, maskable), web manifest with `display: browser` | partial | v0.2.0 | re-add the home-screen shortcut for the new icon |
-| M1.4 | Footer: सुदर्शन / SUDARSHAN, About, "Built on OpenAlgo (AGPL-3.0)" | partial | v0.2.0 | server check pending |
-| M1.5 | Chart corner mark on /trading | partial | v0.2.0 | server check pending |
-| M1.6 | Light-only lock | partial | v0.2.0 | server check pending |
-| M1.7 | Analyze mode in light form, LIVE / ANALYZE chips | partial | v0.2.0 | server check pending |
-| M1.8 | Design tokens, the D look (`frontend/src/sudarshan/theme.css`, `theme.test.ts`) | partial | v0.2.0 | server check pending |
-| M1.9 | `color-scheme: only light`, `theme-color #FFFFFF` | partial | v0.2.0 | server check pending |
-| M1.10 | Self-hosted fonts: Barlow (tabular), Khand, Noto Sans Devanagari / Gujarati, Tiro | partial | v0.2.0 | server check pending |
+| M1.1 | Bilingual lockup in the D look: Mor icon + सुदर्शन from Tiro outlines + SUDARSHAN in Khand; white app bar; D login with the Chrome fingerprint-fill hint; stacked lockup on connect and About | partial | v0.2.0 | server check 9 Nov 2026: the lockup shows on About and the chart; the login screen is not checked yet; NSE status pill on login left out (needs a session) |
+| M1.2 | `<title>`, page titles, meta and og tags | done | v0.2.0 | checked on the server 9 Nov 2026 (v0.4.1): page titles, description and og:title |
+| M1.3 | Icons "Mor" (सु on peacock with a gold ring, maskable), web manifest with `display: browser` | done | v0.2.0 | checked on the server 9 Nov 2026 (v0.4.1): manifest name, short name, display browser, 192/512 icons any and maskable; re-adding the home-screen shortcut picks up the new icon |
+| M1.4 | Footer: सुदर्शन / SUDARSHAN, About, "Built on OpenAlgo (AGPL-3.0)" | done | v0.2.0 | checked on the server 9 Nov 2026 (v0.4.1) |
+| M1.5 | Chart corner mark on /trading | done | v0.2.0 | checked on the server 9 Nov 2026 (v0.4.1): सुदर्शन at the chart's lower left |
+| M1.6 | Light-only lock | done | v0.2.0 | checked on the server 9 Nov 2026 (v0.4.1): no theme control; Profile > Display says there is no dark theme |
+| M1.7 | Analyze mode in light form, LIVE / ANALYZE chips | done | v0.2.0 | checked on the server 9 Nov 2026 (v0.4.1): light violet ANALYZE banner and chip, page stays light |
+| M1.8 | Design tokens, the D look (`frontend/src/sudarshan/theme.css`, `theme.test.ts`) | done | v0.2.0 | checked on the server 9 Nov 2026 (v0.4.1): tokens served as built (values held by theme.test.ts) |
+| M1.9 | `color-scheme: only light`, `theme-color #FFFFFF` | done | v0.2.0 | checked on the server 9 Nov 2026 (v0.4.1): color-scheme light only, theme-color #FFFFFF |
+| M1.10 | Self-hosted fonts: Barlow (tabular), Khand, Noto Sans Devanagari / Gujarati, Tiro | done | v0.2.0 | checked on the server 9 Nov 2026 (v0.4.1): every font from this server; Barlow, Khand, Noto Sans Devanagari and Gujarati load; tabular figures; Tiro as outlines |
 | M1.11 | Phone navigation: bottom bar Watchlist · Dashboard · Orders · Positions; Tradebook in the menu | partial | v0.3.0 | phone cards for the books in v0.3.1 (M6.9) |
-| M1.12 | One brand accent (Mor), picker removed | partial | v0.2.0 | server check pending |
-| M1.13 | Colour-blind mode (`data-cvd`), Profile > Display switch | partial | v0.2.0 | server check pending |
-| M1.16 | About page `/about` | partial | v0.2.0 | server check pending |
+| M1.12 | One brand accent (Mor), picker removed | done | v0.2.0 | checked on the server 9 Nov 2026 (v0.4.1): Profile > Display names the one accent, no picker |
+| M1.13 | Colour-blind mode (`data-cvd`), Profile > Display switch | done | v0.2.0 | checked on the server 9 Nov 2026 (v0.4.1): the switch is on Profile > Display (the toggle itself is held by tests) |
+| M1.16 | About page `/about` | done | v0.2.0 | checked on the server 9 Nov 2026 (v0.4.1): release, commit and licences |
 | M1.18 | Hard-coded colour audit | partial | v0.2.0 | Order Book done; other pages still carry upstream's greens and reds |
 | M1.21 | Motion: no tick flash, no pulsing dot, `prefers-reduced-motion` | partial | v0.2.0, v0.3.0 | v0.3.0 removes the flash from the option chain legs and the books |
 | M2.3 | Multi-device sessions (OpenAlgo's five sessions, the same user and address replace); SIO1: the app's live connection (Socket.IO) admits only the owner's session and sends order and alert events only to admitted screens; refused connects retried with backoff and jitter, the session read limited to 10 s; a logout elsewhere reaches the login page once, never a loop (the login page and the session list sign out a cookie whose session row is gone); sockets from before the 03:00 rollover closed | partial | v0.5.1 | branch fix/socketio-owner (8c178eb, 3c75d18, a2695a1), three review rounds; the phone check in the v0.5.1 notes; open: a device not open at a logout elsewhere stays signed in until 03:00 (a separate change to how sessions end) |
