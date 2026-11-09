@@ -47,7 +47,7 @@ def test_a_fresh_file_is_at_the_latest_version_with_every_table_and_private_mode
     path = tmp_path / "state" / "screener.db"
     made = ScreenerStore(path)
     try:
-        assert made.applied == [1, 2, 3]
+        assert made.applied == [1, 2, 3, 4]
         with made.engine.connect() as conn:
             assert migrations.version(conn) == migrations.LATEST
             names = set(store.tables_of(conn))
@@ -85,7 +85,7 @@ def test_a_populated_file_forced_back_to_version_zero_migrates_and_keeps_its_row
     first.close()
     again = ScreenerStore(path)
     try:
-        assert again.applied == [1, 2, 3]
+        assert again.applied == [1, 2, 3, 4]
         assert [row["name"] for row in again.read(OWNER, Tx.screens)] == ["Breakout"]
     finally:
         again.close()
@@ -112,7 +112,7 @@ def test_every_v1_statement_is_idempotent_ddl():
     for statement in migrations.V1:
         head = " ".join(statement.split()[:6])
         assert "IF NOT EXISTS" in head, head
-    assert migrations.STEPS[-1][0] == migrations.LATEST == 3
+    assert migrations.STEPS[-1][0] == migrations.LATEST == 4
 
 
 def test_migrate_status_is_read_only_and_reports_pending_steps(tmp_path, capsys):
@@ -120,7 +120,7 @@ def test_migrate_status_is_read_only_and_reports_pending_steps(tmp_path, capsys)
     assert migrate.main(["--status", "--path", str(path)]) == 1
     assert not path.exists(), "--status made a file"
     out = capsys.readouterr().out
-    assert "no file" in out and "pending steps: 1, 2, 3" in out
+    assert "no file" in out and "pending steps: 1, 2, 3, 4" in out
     assert migrate.main(["--path", str(path), "--port", "1"]) == 0
     assert migrate.main(["--status", "--path", str(path)]) == 0
     assert "up to date" in capsys.readouterr().out
@@ -604,7 +604,7 @@ def test_step_two_adds_the_running_volume_to_bar_today_and_keeps_the_rows(tmp_pa
         first.dispose()
     opened = ScreenerStore(path)
     try:
-        assert opened.applied == [2, 3]
+        assert opened.applied == [2, 3, 4]
         with opened.engine.connect() as conn:
             assert {"cum", "last_trade"} <= migrations.columns(conn, "bar_today")
         (row,) = opened.read(OWNER, lambda tx: tx.bars())
@@ -635,11 +635,11 @@ def test_step_three_lets_a_pause_name_one_instrument_and_keeps_the_rows(tmp_path
             )
     finally:
         first.dispose()
-    assert migrate.status(path)["pending"] == [3]
+    assert migrate.status(path)["pending"] == [3, 4]
     assert migrate.file_version(path) == 2
     opened = ScreenerStore(path)
     try:
-        assert opened.applied == [3]
+        assert opened.applied == [3, 4]
         rows = opened.read(OWNER, lambda tx: tx.pauses(20261028))
         assert [(r["start"], r["end"], r["why"], r["key"]) for r in rows] == [
             (1000, 2000, "feed", None),

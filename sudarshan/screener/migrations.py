@@ -15,7 +15,7 @@ Schema 1 is frozen: its SQL never changes, and a later change is a new step. Eve
 table carries ``principal`` (``'owner'`` in this release) so a family read-only layer later adds
 principals and no columns (6.5). Step 2 adds a sealed bar's running volume and last trade time
 to ``bar_today`` (release review HIGH-1). Step 3 lets a pause name one instrument (re-review
-MEDIUM-1).
+MEDIUM-1). Step 4 adds the dashboard and its widgets (M9.16, dashboards design 3.3).
 """
 
 from __future__ import annotations
@@ -40,6 +40,8 @@ OWNER_TABLES = (
     "membership",
     "alert_state",
     "outbox",
+    "dashboard",
+    "dashboard_widget",
 )
 
 V1 = (
@@ -278,7 +280,46 @@ def _v3(conn: Connection) -> None:
     add_column(conn, "pause", "key", "TEXT")
 
 
-STEPS: Sequence[Step] = ((1, _v1), (2, _v2), (3, _v3))
+V4 = (
+    """CREATE TABLE IF NOT EXISTS dashboard (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        principal TEXT NOT NULL,
+        name TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1
+    )""",
+    "CREATE UNIQUE INDEX IF NOT EXISTS dashboard_name ON dashboard (principal, name)",
+    # No CHECK constraints: kind, rows and sort_by are checked in code, because SQLite cannot
+    # alter a CHECK in place and a later "50 rows" or a third kind would mean a table rebuild.
+    """CREATE TABLE IF NOT EXISTS dashboard_widget (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        principal TEXT NOT NULL,
+        dashboard_id INTEGER NOT NULL,
+        screen_id INTEGER NOT NULL,
+        kind TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        rows INTEGER NOT NULL,
+        sort_by TEXT,
+        value_clauses TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+    )""",
+    """CREATE UNIQUE INDEX IF NOT EXISTS dashboard_widget_one
+        ON dashboard_widget (dashboard_id, screen_id, kind)""",
+    "CREATE INDEX IF NOT EXISTS dashboard_widget_order ON dashboard_widget (dashboard_id, position)",
+    "CREATE INDEX IF NOT EXISTS dashboard_widget_screen ON dashboard_widget (screen_id)",
+)
+
+
+def _v4(conn: Connection) -> None:
+    """The owner's dashboard and its widgets (new tables, nothing to backfill: no row is seeded,
+    the read answers a suggestion until his first change)."""
+    for statement in V4:
+        conn.exec_driver_sql(statement)
+
+
+STEPS: Sequence[Step] = ((1, _v1), (2, _v2), (3, _v3), (4, _v4))
 LATEST = STEPS[-1][0]
 
 
