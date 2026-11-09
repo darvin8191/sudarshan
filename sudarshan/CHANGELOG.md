@@ -5,6 +5,68 @@ publish. The owner publishes each release on GitHub. The server's deploy timer t
 outside 08:30-16:00 IST on trading days (09:00-15:45 until v0.3.1), keeps backups, and rolls
 back if the app does not come up healthy.
 
+## v0.6.1 (9 Nov 2026)
+
+Fixes from the sandbox checks of 9 Nov: the order ticket's buttons always in view, an exit from
+the Positions table that asks first, cancel messages that say who cancelled, the kill switch's
+report and History, the Strategy Builder's feed chip, and the daily loss limit's sandbox figure,
+which now moves with the price. It includes everything in v0.6.0. **Publish it only after v0.6.0
+has installed and run one trading day.**
+
+### What changes for you
+- **The order ticket fits a short window.** On a laptop window of about 650 px the ticket's body
+  scrolls and Place and Cancel stay in view.
+- **An exit from the Positions table asks first:** "Exit NIFTY 27 OCT 25900 CE: sell 130 at
+  market?" with an Exit button. It sends once however it is tapped, and the message says what was
+  sent ("Exit sent: sell 130 NIFTY 27 OCT 25900 CE"), not the old "BUY Order Placed ... Qty: 0" for
+  closing a long.
+- **Who cancelled an order.** "Cancelled by the kill switch." appears only for an order the kill
+  switch's own report lists. Any other cancel you did not make on this screen says "Cancelled in
+  the sandbox, not from this screen." or "Cancelled at Upstox, not from this screen." While the
+  kill switch is running, its cancel messages come with its report (at most 60 s later).
+- **The kill switch's report** says the sandbox's Exit all in a sentence: "The sandbox's Exit all
+  closed 1 position.", with "could not close N" or "found no open positions to close" when that is
+  what happened.
+- **Risk History** shows an activation at the same time as the card, and says whether it came from
+  Telegram or the app.
+- **The Strategy Builder's feed chip** says "Real-time", "Reconnecting", "Delayed · updated 12s
+  ago" or "Loading", never "Live" (LIVE is only the trading mode), and it shows on a phone too.
+- **The daily loss limit's sandbox figure** is worked out at the moment it is read, from the
+  sandbox's positions and prices with the sandbox's own arithmetic (a feed price at most 5 s old,
+  as on Positions; Upstox's quote answers kept for 1 s). The Risk card now moves with the price and
+  matches Positions, and a part exit is never counted twice. Before, the card and the limit read a
+  stored figure that moved only while some screen had the sandbox positions open, so they could
+  judge an old loss. An exit never waits for this figure: only an order that adds risk reads it.
+
+### What you must do
+- Nothing to set. At the first sandbox session after it installs, open Risk with a sandbox
+  position open and see the day's figure move with the price and match Positions.
+
+### What is refused now that used to be accepted
+- **New sandbox orders pause when today's sandbox figure cannot be worked out**, while the daily
+  loss limit is on: an open position with no feed price for 5 s and Upstox's quote refused, busy or
+  slower than 4 s. The order answers "New orders are paused: today's P&L could not be read from the
+  sandbox, so the daily loss limit cannot be checked. ...", and the banner, chip and card say
+  "today's P&L cannot be read · new orders paused, exits go" until a price comes. Before, the order
+  was judged on the last stored figure, however old. Exits, cancels, resting stops, Exit all and
+  the kill switch still go.
+  - An order that both closes and opens (a reversal from TradingView or the ticket) sends only its
+    closing part meanwhile, as it does on a locked day.
+  - A basket that adds risk is refused whole, as on a locked day; a basket of exits only goes.
+  - A sandbox GTT whose order triggers meanwhile is rejected and Telegram says it will not fire
+    again: place it again once prices are back.
+
+### Not in this release yet
+- The Live stage of the risk guard is unchanged and still not switched on for Live orders. When it
+  is, the phone's 60 s wait for the kill switch's report may end before a Live report arrives, and
+  a cancel it made then reads "Cancelled at Upstox, not from this screen."
+- Under the default worker, Upstox's own wait after "too many requests" can still use up the 4 s
+  quote read (the price band's quote read has the same limit).
+- Today's booked P&L is still the sandbox funds row's, reset by the sandbox's daily job.
+- An expired contract the sandbox has not settled yet is valued at the price its settlement will
+  use (its last stored price), not at a market price.
+- There is still no screen to create a GTT order.
+
 ## v0.6.0 (8 Nov 2026)
 
 The screener: your own screens over F&O stocks, futures, indices, option strikes or a watchlist,
