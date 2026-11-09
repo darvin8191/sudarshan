@@ -52,7 +52,9 @@ APP = textwrap.dedent(
         "SBIN": ("NSE_EQ|1", "NSE", "I", 10),
     }
     BY_TOKEN = {row[0]: symbol for symbol, row in ROWS.items()}
-    STATE = {"hang": {}, "refuse": False, "orders": [], "started": []}
+    # a worker that starts afresh has no /setup: this is how a test makes its first exit slow
+    FIRST_EXIT_S = float(os.environ.get("FIRST_EXIT_S", "0"))
+    STATE = {"hang": {"NIFTY27OCT2625900CE": FIRST_EXIT_S}, "refuse": False, "orders": [], "started": []}
 
 
     class Reply:
@@ -205,6 +207,7 @@ class Server:
         timeout: int = 30,
         sends_for_s: float | None = None,
         note_lasts_s: float | None = None,
+        first_exit_s: float | None = None,
     ):
         app_dir = tmp_path / "app"
         app_dir.mkdir()
@@ -223,6 +226,8 @@ class Server:
             env["SENDS_FOR_S"] = str(sends_for_s)
         if note_lasts_s is not None:
             env["NOTE_LASTS_S"] = str(note_lasts_s)
+        if first_exit_s is not None:
+            env["FIRST_EXIT_S"] = str(first_exit_s)
         command = [
             sys.executable, "-m", "gunicorn", "--worker-class", worker, "--workers", "1",
             *(["--threads", "8"] if worker == "gthread" else []),
@@ -467,24 +472,37 @@ def test_a_view_that_raises_lets_its_claim_go(server):
 
 
 def test_a_worker_killed_on_its_timeout_takes_its_claims_with_it(tmp_path):
+    """The replacement worker holds no claim the old one took.
+
+    The old version probed with the exit itself on a 5 s client timeout. A replacement worker
+    that is slow to answer its first exit (cold imports on a loaded two-CPU box, 7 s here) was
+    still placing it when the client gave up, so the next probe met that exit's own hold and
+    answered 409 for the rest of the wait: a flake, not a claim left by the killed worker. Wait
+    for the replacement itself (a new pid with nothing held, through /claims, which places
+    nothing), then send the one exit with the time a slow Upstox call may take.
+    """
     _needs("eventlet")
-    srv = Server(tmp_path, "eventlet", timeout=3)
+    srv = Server(tmp_path, "eventlet", timeout=3, first_exit_s=7)
     try:
         before = srv.claims()["pid"]
         blocked, _ = _in_background(_swallow, srv.post, "/close_position?block=12", X, 40)
         time.sleep(1.0)
         deadline = time.monotonic() + 40
-        status = None
+        now: dict = {}
         while time.monotonic() < deadline:
             try:
-                status = srv.post("/close_position", X, timeout=5)[0]
-                if status == 200:
-                    break
+                now = srv.claims()
             except OSError:
-                pass
-            time.sleep(0.5)
-        assert status == 200  # the new worker holds no claim the old one took
-        assert srv.claims()["pid"] != before, "the worker was not replaced"
+                now = {}  # between workers
+            else:
+                if now["pid"] != before:
+                    break
+            time.sleep(0.25)
+        assert now.get("pid") not in (None, before), "the worker was not replaced"
+        assert now["held"] == 0, now  # the new worker holds no claim the old one took
+        status, body, _took = srv.post("/close_position", X, timeout=30)
+        assert status == 200, (status, body)
+        assert srv.claims()["orders"] == [X["symbol"]]
         blocked.join(45)
     finally:
         srv.stop()
