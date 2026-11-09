@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Ban, LoaderCircle, Plus } from 'lucide-react'
 import { useMemo, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
-import { ACTION } from '@/sudarshan/books/cards/parts'
+import { ACTION, OUTLINED } from '@/sudarshan/books/cards/parts'
 import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
 import { MAX_LISTS, readLists, WATCHLISTS_KEY } from '@/sudarshan/watchlist/useWatchlists'
 import { toast } from '@/utils/toast'
@@ -237,6 +237,15 @@ function Body({
             )
           )}
         </Group>
+      ) : presets.isError ? (
+        <div className="flex flex-col items-start gap-2">
+          <p role="alert" className="text-sm font-semibold">
+            The ready-made screens could not be read.
+          </p>
+          <button type="button" onClick={() => void presets.refetch()} className={OUTLINED}>
+            Try again
+          </button>
+        </div>
       ) : (
         <p className="text-sm font-medium text-[color:var(--text-secondary)]">
           Reading the ready-made screens

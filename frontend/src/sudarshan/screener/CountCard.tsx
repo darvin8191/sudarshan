@@ -9,6 +9,30 @@ import type { WidgetCard as Card, ScreenStatus } from './types'
 import { Line, ModeChip } from './WidgetCard'
 import { OptionsButton } from './WidgetMenu'
 
+interface Props {
+  card: Card
+  name: string
+  where: string
+  status: ScreenStatus
+  line: LineView
+  onOpenScreen: (id: number) => void
+  onOptions: (card: Card) => void
+}
+
+/** Redraw only when what the card shows changed: the dashboard re-renders on every tick frame. */
+function same(a: Props, b: Props): boolean {
+  return (
+    a.card === b.card &&
+    a.name === b.name &&
+    a.where === b.where &&
+    a.status === b.status &&
+    a.line.icon === b.line.icon &&
+    a.line.words === b.line.words &&
+    a.line.warn === b.line.warn &&
+    a.line.greyed === b.line.greyed
+  )
+}
+
 const NUMBER = new Intl.NumberFormat('en-IN')
 
 type Series = NonNullable<Card['counts']>['series']
@@ -52,23 +76,9 @@ function Strip({ series, words }: { series: Series; words: string }) {
  * the run line, the mode chip for a screen that reads day candles alone, and the strip of matches
  * at each check. It shows no prices, so its line says Checking and never Real-time.
  */
-export const CountCard = memo(function CountCard({
-  card,
-  name,
-  where,
-  status,
-  line,
-  onOpenScreen,
-  onOptions,
-}: {
-  card: Card
-  name: string
-  where: string
-  status: ScreenStatus
-  line: LineView
-  onOpenScreen: (id: number) => void
-  onOptions: (card: Card) => void
-}) {
+export const CountCard = memo(CountFace, same)
+
+function CountFace({ card, name, where, status, line, onOpenScreen, onOptions }: Props) {
   const matches = card.matches ?? card.run?.matches ?? 0
   const counts = card.counts
   return (
@@ -136,4 +146,4 @@ export const CountCard = memo(function CountCard({
       </div>
     </li>
   )
-})
+}

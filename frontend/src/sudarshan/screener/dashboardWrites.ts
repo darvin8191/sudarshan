@@ -56,7 +56,13 @@ export function noteWritten(
   change?: (held: Dashboard) => Dashboard
 ): void {
   client.setQueryData<Dashboard>(DASHBOARD_KEY, (held) =>
-    held ? { ...(change ? change(held) : held), version: written.version, suggested: false } : held
+    held
+      ? {
+          ...(change ? change(held) : held),
+          version: Math.max(held.version, written.version),
+          suggested: false,
+        }
+      : held
   )
 }
 
