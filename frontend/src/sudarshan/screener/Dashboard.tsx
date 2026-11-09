@@ -101,9 +101,17 @@ export function Dashboard({
   const day = useIstDay()
   const { isOpen } = useMarketOpen(market)
   const openKey = address.from ? address.key : null
+  const screens = useMemo(() => new Map(state.screens.map((row) => [row.id, row])), [state.screens])
+  // A Paused or Stopped card is greyed and says it is not checking: its rows do not spend the 100
+  // followed prices, so an open row past the cap is never followed beside a card saying "at the run".
   const shown = useMemo(
-    () => cards.flatMap((card) => (card.kind === 'table' ? card.rows_shown : [])),
-    [cards]
+    () =>
+      cards.flatMap((card) =>
+        card.kind === 'table' && (screens.get(card.screen_id)?.status ?? card.status) === 'active'
+          ? card.rows_shown
+          : []
+      ),
+    [cards, screens]
   )
   const followed = useMemo(() => followedItems(shown), [shown])
   const capped = useMemo(
@@ -113,7 +121,6 @@ export function Dashboard({
   const items = useMemo(() => itemsOf(followed, shown, openKey), [followed, shown, openKey])
   const live = useLiveRows({ items, apiKey, marketOpen: isOpen })
   const liveByKey = useMemo(() => new Map(live.rows.map((row) => [row.key, row])), [live.rows])
-  const screens = useMemo(() => new Map(state.screens.map((row) => [row.id, row])), [state.screens])
 
   /** Where this card's own rows stand: the line over the followed ones alone. */
   const feedOf = (card: Card): CardFeed => {

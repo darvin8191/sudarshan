@@ -12,10 +12,11 @@ import type { PriceAccessState } from '@/sudarshan/access'
 import { istTime } from '@/sudarshan/books/time'
 import { ago, type FeedLine } from '@/sudarshan/dashboard/live'
 import type { Hearing } from './push'
+import { LIVE_CAP } from './resultItems'
 import type { CardLineKind, EngineLine, ScreenRow, WidgetCard } from './types'
 
-/** The most prices followed at once on the dashboard, and what a card past it says. */
-export const LIVE_CAP = 100
+/** The most prices followed at once on the dashboard: one number, shared with the rows' own cap. */
+export { LIVE_CAP }
 export const READ_FAILED = 'As last read · not updating until the dashboard can be read'
 export const NOT_RECEIVING = 'Not receiving updates on this screen · reconnecting'
 

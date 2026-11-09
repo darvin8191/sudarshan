@@ -295,7 +295,7 @@ function WidgetFace({
               <span className="flex min-w-0 items-center gap-2">
                 <List aria-hidden="true" className="size-4 shrink-0" />
                 <span className="truncate">
-                  {list.name} · {list.count}
+                  {list.name ?? 'Its list'} · {list.count}
                 </span>
               </span>
               <ChevronRight aria-hidden="true" className="size-4 shrink-0" />

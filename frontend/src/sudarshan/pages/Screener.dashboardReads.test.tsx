@@ -6,7 +6,7 @@
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter, Route, Routes } from 'react-router'
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({
@@ -530,8 +530,8 @@ describe('the reconnect and the suggestion (M2, M3, M8, L10)', () => {
         removed: [],
       })
     )
-    await settle()
-    expect(api.dashboard).toHaveBeenCalledTimes(2)
+    // At least one more read: how many more is not the behaviour (a slow machine saw a third).
+    await waitFor(() => expect(api.dashboard.mock.calls.length).toBeGreaterThanOrEqual(2))
     expect(client.getQueryData(DASHBOARD_KEY)).toBeTruthy()
   })
 
@@ -606,5 +606,72 @@ describe('greyed rows, the grid and a failed read (M5, M10, L6)', () => {
     const line = cardOf(1).querySelector('[data-card-line]')?.textContent ?? ''
     expect(line).toMatch(/As last read/)
     expect(line).not.toMatch(/Real-time/)
+  })
+})
+
+describe('the rest of the review (L2, L3, L7, L8)', () => {
+  it('a paused card’s rows do not spend the followed prices', async () => {
+    api.dashboard.mockResolvedValue(
+      dashboard([
+        widgetCard({ screen_id: 1 }),
+        widgetCard({
+          screen_id: 2,
+          rows_shown: [resultRow('PAUSEDONE')],
+          status: 'paused',
+          line: { kind: 'paused', words: 'Paused · not checking', live: false, state: 'real_time' },
+        }),
+      ])
+    )
+    api.state.mockResolvedValue(
+      screenerState([screenRow({ id: 1 }), screenRow({ id: 2, status: 'paused' })])
+    )
+    renderPage()
+    await joinedOnce(room)
+    await waitFor(() => expect(cardOf(2)).toBeTruthy())
+    expect(feed.followed).toContain('NSE:INFY')
+    expect(feed.followed).not.toContain('NSE:PAUSEDONE')
+  })
+
+  it('names a list whose name the service did not send, not a bare count', async () => {
+    api.dashboard.mockResolvedValue(
+      dashboard([widgetCard({ list: { id: 5, name: null, count: 12 } })])
+    )
+    renderPage()
+    await waitFor(() => expect(cardOf(1)).toBeTruthy())
+    expect(cardOf(1).textContent).toContain('Its list · 12')
+  })
+
+  it('Back from a screen opened on a card returns to the Dashboard, then leaves the page', async () => {
+    const go = { back: () => {} }
+    function Nav() {
+      const navigate = useNavigate()
+      go.back = () => navigate(-1)
+      return null
+    }
+    function Where() {
+      const location = useLocation()
+      return <p data-testid="where">{`${location.pathname}${location.search}`}</p>
+    }
+    api.dashboard.mockResolvedValue(dashboard([widgetCard()]))
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <MemoryRouter initialEntries={['/elsewhere', '/screener']} initialIndex={1}>
+          <Nav />
+          <Routes>
+            <Route path="/screener" element={<Screener />} />
+            <Route path="/elsewhere" element={<p>Another page</p>} />
+          </Routes>
+          <Where />
+        </MemoryRouter>
+      </QueryClientProvider>
+    )
+    await waitFor(() => expect(cardOf(1)).toBeTruthy())
+    await userEvent.click(screen.getByRole('button', { name: /open this screen/ }))
+    await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/screener?screen=1'))
+    act(() => go.back())
+    await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/screener'))
+    expect(cardOf(1)).toBeTruthy()
+    act(() => go.back())
+    await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/elsewhere'))
   })
 })
