@@ -121,6 +121,26 @@ def test_in_the_sandbox_stage_it_leaves_mcp_the_agent_and_upstox_alone(
     assert not saved.agent_engaged_by_us
 
 
+def test_the_sandbox_exit_all_is_worded_from_its_counts_with_the_right_plural(
+    account, risk_store, monkeypatch
+):
+    # The sandbox's own sentence reads "Closed 1 positions"; the owner is told ours.
+    monkeypatch.setenv(flag.ENV, "sandbox")
+    answer = _on(exit_all=True)
+    step = next(s for s in answer.state.report["steps"] if s["step"] == "sandbox_exit_all")
+    assert step["words"] == "The sandbox's Exit all closed 1 position."
+    assert "positions" not in step["words"]
+    assert words.ks_sandbox_exit_all("Closed 3 positions", 3, 0) == (
+        "The sandbox's Exit all closed 3 positions."
+    )
+    assert words.ks_sandbox_exit_all("x", 2, 1) == (
+        "The sandbox's Exit all closed 2 positions and could not close 1 position."
+    )
+    assert words.ks_sandbox_exit_all("No open positions to close", 0, 0) == (
+        "The sandbox's Exit all found no open positions to close."
+    )
+
+
 def test_exit_all_goes_through_the_one_claim_and_is_never_retried(account, risk_store):
     account.exit_all_status = 409  # another Exit all holds the book
     answer = _on(exit_all=True)

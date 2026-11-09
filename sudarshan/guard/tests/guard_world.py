@@ -115,7 +115,16 @@ class Account:
             "sandbox_close_position",
             record(
                 "sandbox_exit_all",
-                (True, {"status": "success", "message": "Closed 1 positions"}, 200),
+                (
+                    True,
+                    {
+                        "status": "success",
+                        "message": "Closed 1 positions",
+                        "closed_positions": 1,
+                        "failed_closures": 0,
+                    },
+                    200,
+                ),
             ),
         )
         monkeypatch.setattr(oauth_db, "revoke_all_tokens", record("mcp", 3))

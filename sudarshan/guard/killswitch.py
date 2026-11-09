@@ -734,9 +734,12 @@ def _exit_all_sandbox(owner: Owner) -> tuple[bool, str, dict]:
     from services.sandbox_service import sandbox_close_position
 
     ok, body, status = sandbox_close_position({}, owner.api_key, {})
+    body = body or {}
     return (
         bool(ok),
-        words.ks_sandbox_exit_all(str((body or {}).get("message") or "")),
+        words.ks_sandbox_exit_all(
+            str(body.get("message") or ""), body.get("closed_positions"), body.get("failed_closures")
+        ),
         {"status": status},
     )
 
