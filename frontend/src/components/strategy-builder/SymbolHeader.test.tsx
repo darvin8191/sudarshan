@@ -110,12 +110,13 @@ describe('SymbolHeader selectors', () => {
     expect(screen.getByText('Idle')).toBeInTheDocument()
 
     rerender(<SymbolHeader {...props} connectionStatus="refreshing" isRefreshing />)
-    expect(screen.getByText('Refreshing')).toBeInTheDocument()
+    expect(screen.getByText('Reconnecting')).toBeInTheDocument()
 
     rerender(<SymbolHeader {...props} connectionStatus="stale" />)
-    expect(screen.getByText('Stale')).toBeInTheDocument()
+    expect(screen.getByText('Delayed')).toBeInTheDocument()
 
     rerender(<SymbolHeader {...props} connectionStatus="live" />)
-    expect(screen.getByText('Live')).toBeInTheDocument()
+    expect(screen.getByText('Real-time')).toBeInTheDocument()
+    expect(screen.queryByText('Live')).toBeNull()
   })
 })

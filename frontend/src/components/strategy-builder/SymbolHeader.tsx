@@ -101,13 +101,15 @@ export function SymbolHeader({
   isRefreshing,
   connectionStatus,
 }: SymbolHeaderProps) {
+  // SUDARSHAN: "LIVE" is only the trading-mode chip; the feed says Real-time while ticks
+  // arrive and Delayed or Reconnecting otherwise (it read a green "Live" in Analyze mode too).
   const statusLabel =
     connectionStatus === 'live'
-      ? 'Live'
+      ? 'Real-time'
       : connectionStatus === 'refreshing'
-        ? 'Refreshing'
+        ? 'Reconnecting'
         : connectionStatus === 'stale'
-          ? 'Stale'
+          ? 'Delayed'
           : 'Idle'
   const isLive = connectionStatus === 'live'
 
