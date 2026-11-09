@@ -5,7 +5,7 @@
 // older than six hours. Loading, empty and refused states are each a sentence.
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { LoaderCircle, RefreshCw, TriangleAlert } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { PortfolioError, portfolioCall, problemOf } from '../api'
 import { dateTimeOfInstant } from '../days'
@@ -237,7 +237,7 @@ function useReadAgain<K extends 'report_trades' | 'report_pnl'>(
   segment: ReportSegment
 ) {
   const client = useQueryClient()
-  return useMutation({
+  const mutation = useMutation({
     mutationFn: async () => {
       const result = await portfolioCall(op, { fy: fy as number, segment, force: true })
       if (!result.enabled)
@@ -246,6 +246,11 @@ function useReadAgain<K extends 'report_trades' | 'report_pnl'>(
     },
     onSuccess: (data) => client.setQueryData([...PORTFOLIO_KEY, op, fy, segment], data),
   })
+  // A refusal belongs to the year it was asked for: another year or segment starts clean.
+  const { reset } = mutation
+  // biome-ignore lint/correctness/useExhaustiveDependencies: fy and segment are the trigger
+  useEffect(() => reset(), [fy, segment, reset])
+  return mutation
 }
 
 /** The year and segment choosers shared by both views; the year list comes from the service. */
@@ -425,7 +430,13 @@ export function TradesView() {
             <h2 className="text-base font-bold">Trades</h2>
             <AsOf part={data} />
           </div>
-          {report.isError ? <AskFailed error={report.error} /> : <PartLine part={data} />}
+          {again.isError ? (
+            <AskFailed error={again.error} />
+          ) : report.isError ? (
+            <AskFailed error={report.error} />
+          ) : (
+            <PartLine part={data} />
+          )}
           <dl className="grid grid-cols-3 gap-3">
             <div className="flex flex-col gap-px">
               <dt className={LABEL}>Trades</dt>
@@ -619,7 +630,13 @@ export function PnlView() {
               <h2 className="text-base font-bold">Realised P&amp;L</h2>
               <AsOf part={data} />
             </div>
-            {report.isError ? <AskFailed error={report.error} /> : <PartLine part={data} />}
+            {again.isError ? (
+              <AskFailed error={again.error} />
+            ) : report.isError ? (
+              <AskFailed error={report.error} />
+            ) : (
+              <PartLine part={data} />
+            )}
             <dl className="flex flex-col gap-3">
               <div className="flex flex-col gap-px">
                 <dt className={LABEL}>Before charges</dt>

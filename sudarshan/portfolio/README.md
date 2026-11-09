@@ -191,8 +191,8 @@ two types, and a test holds this table, that map and `kinds.py` to each other.
 | `upstox_book` | GET | `/upstox` | upstox | `parts:strs, max_age:int` | `UpstoxBookArgs` | `UpstoxBook` | reads Upstox |
 | `upstox_history` | GET | `/upstox/history` | upstox | `limit:int` | `UpstoxHistoryArgs` | `UpstoxHistory` | |
 | `report_years` | GET | `/reports/years` | upstox | | `NoArgs` | `ReportYears` | |
-| `report_trades` | GET | `/reports/trades` | upstox | `fy:int, segment:str` | `ReportArgs` | `TradesReport` | reads Upstox, cached per year |
-| `report_pnl` | GET | `/reports/pnl` | upstox | `fy:int, segment:str` | `ReportArgs` | `PnlReport` | reads Upstox, cached per year |
+| `report_trades` | GET | `/reports/trades` | upstox | `fy:int, segment:str, force:bool` | `ReportArgs` | `TradesReport` | reads Upstox, cached per year |
+| `report_pnl` | GET | `/reports/pnl` | upstox | `fy:int, segment:str, force:bool` | `ReportArgs` | `PnlReport` | reads Upstox, cached per year |
 
 The bridge builds all of these routes from one table (`OPS` in `kinds.py`), so a later op never
 means editing it. An op the service does not have yet answers `not_ready` ("This part of the

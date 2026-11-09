@@ -332,7 +332,7 @@ WORDS = {
 
 #: How an op's query string is read: a whole number, a day (YYYYMMDD), text, a comma-separated
 #: list of whole numbers, a comma-separated list of text.
-QUERY_TYPES = ("int", "day", "str", "ints", "strs")
+QUERY_TYPES = ("int", "day", "str", "ints", "strs", "bool")
 
 
 class OpSpec(NamedTuple):
@@ -417,14 +417,14 @@ OPS = (
         "GET",
         "/reports/trades",
         "upstox",
-        query=(("fy", "int"), ("segment", "str")),
+        query=(("fy", "int"), ("segment", "str"), ("force", "bool")),
     ),
     OpSpec(
         "report_pnl",
         "GET",
         "/reports/pnl",
         "upstox",
-        query=(("fy", "int"), ("segment", "str")),
+        query=(("fy", "int"), ("segment", "str"), ("force", "bool")),
     ),
 )
 OP_NAMES = tuple(op.name for op in OPS)

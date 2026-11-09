@@ -242,12 +242,21 @@ def _items(read, raw: str) -> list:
     return [read(part.strip()) for part in parts]
 
 
+def _bool(raw: str) -> bool:
+    """A flag in a query string: exactly true or false, nothing else."""
+    word = raw.strip().lower()
+    if word not in ("true", "false"):
+        raise _Unreadable()
+    return word == "true"
+
+
 QUERY_READERS = {
     "int": _int,
     "day": _day,
     "str": _text,
     "ints": lambda raw: _items(_int, raw),
     "strs": lambda raw: _items(_text, raw),
+    "bool": _bool,
 }
 
 

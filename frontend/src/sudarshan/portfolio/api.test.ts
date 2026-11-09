@@ -15,6 +15,18 @@ beforeEach(() => {
 })
 
 describe('portfolioCall', () => {
+  it.each([
+    'report_trades',
+    'report_pnl',
+  ] as const)('%s sends force on the query, because Read again is a GET', async (op) => {
+    client.get.mockResolvedValue({ data: { status: 'success', enabled: true, data: { rows: [] } } })
+    await portfolioCall(op, { fy: 2025, segment: 'EQ', force: true })
+    expect(client.get.mock.calls[0][1].params).toEqual({ fy: '2025', segment: 'EQ', force: 'true' })
+    client.get.mockClear()
+    await portfolioCall(op, { fy: 2025, segment: 'EQ' })
+    expect(client.get.mock.calls[0][1].params).toEqual({ fy: '2025', segment: 'EQ' })
+  })
+
   it('reads with its query from the table: lists joined, empty values left out', async () => {
     client.get.mockResolvedValue({ data: { status: 'success', enabled: true, data: { tab: 1 } } })
     const result = await portfolioCall('tab_get', {

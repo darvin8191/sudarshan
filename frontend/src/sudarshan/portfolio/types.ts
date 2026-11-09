@@ -242,7 +242,7 @@ export const ERROR_CODES = [
   'rate_limited',
 ] as const
 export type ErrorCode = (typeof ERROR_CODES)[number]
-export const QUERY_TYPES = ['int', 'day', 'str', 'ints', 'strs'] as const
+export const QUERY_TYPES = ['int', 'day', 'str', 'ints', 'strs', 'bool'] as const
 export type QueryType = (typeof QUERY_TYPES)[number]
 
 // ---- strings ----
@@ -425,6 +425,7 @@ export const OPS: readonly OpSpec[] = [
     query: [
       ['fy', 'int'],
       ['segment', 'str'],
+      ['force', 'bool'],
     ],
   },
   {
@@ -435,6 +436,7 @@ export const OPS: readonly OpSpec[] = [
     query: [
       ['fy', 'int'],
       ['segment', 'str'],
+      ['force', 'bool'],
     ],
   },
 ]
