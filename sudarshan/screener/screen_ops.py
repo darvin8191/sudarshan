@@ -163,9 +163,9 @@ def next_check(ctx, now: int, active: Sequence[scheduler.Screen], sessions) -> i
     return found
 
 
-def engine_line(ctx, now: int, active: Sequence[scheduler.Screen], sessions=None) -> dict[str, Any]:
-    """The line under the header: the runtime's facts when it has them, else sessions and store;
-    the next check either way (MEDIUM-3)."""
+def engine_of(ctx, now: int, active: Sequence[scheduler.Screen], sessions=None) -> words.Engine:
+    """The runtime's facts when it has them, else sessions and store; the next check either way
+    (MEDIUM-3)."""
     facts = ctx.parts.get("engine")
     sessions = _sessions(ctx, now) if sessions is None else sessions
     base: dict[str, Any] = {"now": now, "enabled": ctx.enabled}
@@ -175,9 +175,12 @@ def engine_line(ctx, now: int, active: Sequence[scheduler.Screen], sessions=None
         base["trading"] = any(s.start <= now < s.end for s in sessions.values())
         base["feed"] = "not_linked"  # no feed link registered: never claim real time (rule 7)
     base["next_at"] = next_check(ctx, now, active, sessions)
-    engine = words.Engine(
-        **{k: v for k, v in base.items() if k in words.Engine.__dataclass_fields__}
-    )
+    return words.Engine(**{k: v for k, v in base.items() if k in words.Engine.__dataclass_fields__})
+
+
+def engine_line(ctx, now: int, active: Sequence[scheduler.Screen], sessions=None) -> dict[str, Any]:
+    """The line under the header, e.g. 'Real-time · next check 10:45'."""
+    engine = engine_of(ctx, now, active, sessions)
     state = words.engine_state(engine)
     return {
         "state": state,

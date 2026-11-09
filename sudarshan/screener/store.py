@@ -619,11 +619,14 @@ class Tx:
         return self._dashboard_bump(row, now)
 
     @staticmethod
-    def _find(current: Sequence[Mapping[str, Any]], screen_id: int, kind: str):
+    def _find(current: Sequence[Mapping[str, Any]], screen_id: int, kind: str, *, suggested: bool):
+        """The widget at (screen_id, kind). Not there in the suggestion (version 0, which is worked
+        out from the Active screens at each read) means the page's layout is stale, not that the
+        widget was never there: a VersionConflict, so the page reads the dashboard again."""
         for widget in current:
             if widget["screen_id"] == screen_id and widget["kind"] == kind:
                 return widget
-        raise NotFound()
+        raise VersionConflict() if suggested else NotFound()
 
     def widget_change(
         self, version: int, screen_id: int, kind: str, fields: Mapping[str, Any], now: int
@@ -631,7 +634,7 @@ class Tx:
         """Change the widget at (screen_id, kind): rows, sort, values or its kind. A kind the
         screen already has a widget for is refused with its sentence."""
         row, current = self._open_layout(version)
-        self._find(current, screen_id, kind)
+        self._find(current, screen_id, kind, suggested=row is None)
         changes = self._check_fields(fields, full=False)
         if "screen_id" in changes and changes["screen_id"] != screen_id:
             raise ValueError("a widget keeps its screen")
@@ -656,7 +659,7 @@ class Tx:
     def widget_delete(self, version: int, screen_id: int, kind: str, now: int) -> dict[str, Any]:
         """Remove the widget at (screen_id, kind); the positions after it close the gap."""
         row, current = self._open_layout(version)
-        gone = self._find(current, screen_id, kind)
+        gone = self._find(current, screen_id, kind, suggested=row is None)
         row = row or self._dashboard_make(DASHBOARD_NAME, current, now)
         t = self._t("dashboard_widget")
         self.conn.execute(

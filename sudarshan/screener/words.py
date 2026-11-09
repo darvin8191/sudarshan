@@ -611,6 +611,7 @@ def card_line_words(
     run_at: int | None,
     now: int,
     after_close: str,
+    next_at: int | None = None,
 ) -> str:
     """The sentence under a card's head (design 3.6): the card's own for a screen that is stopped,
     paused or checked after the close; the engine line's own words, as they are, for the rest."""
@@ -622,6 +623,8 @@ def card_line_words(
         return f"Checks after the close ({after_close}){_as_of(run_at, now)}"
     if kind == "closed":
         return f"{engine_line}{_as_of(run_at, now)}"
+    if kind == "checking":  # a count card: checks arrive, no prices tick
+        return f"Checking · next check {when(next_at, now)}" if next_at else "Checking"
     return engine_line
 
 

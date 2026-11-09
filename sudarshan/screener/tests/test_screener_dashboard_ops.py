@@ -153,7 +153,7 @@ def test_a_suggested_widget_is_read_by_its_screen_and_kind(service):
 def test_a_widget_that_is_not_there_says_so_in_words(service):
     screen = make(service)
     with pytest.raises(ApiError) as gone:
-        call(service, "widget", id=screen["id"], kind="count")
+        call(service, "widget", id=screen["id"] + 99, kind="count")  # no such screen
     assert gone.value.code == "not_found" and gone.value.message == words.DASH_GONE
     for bad in (
         {"screen_id": screen["id"], "kind": "pie"},
