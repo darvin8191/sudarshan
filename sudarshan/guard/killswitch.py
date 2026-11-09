@@ -271,6 +271,7 @@ def _clear_up(
             actor=owner.actor,
             activation_id=state.activation_id,
             detail=report,
+            at=state.since,  # the moment it went on, the one the card and the banner show
         )
     except Exception:
         logger.exception("The kill switch's report could not be saved")

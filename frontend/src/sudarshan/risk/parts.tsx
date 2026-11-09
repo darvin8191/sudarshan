@@ -45,6 +45,12 @@ export function surfaceOf(surface: string | null | undefined): string {
   return (surface && SURFACES[surface]) || 'SUDARSHAN'
 }
 
+/** "from Telegram", "from the app": where a history line was done; '' when it was not a person's
+ * surface (an order's route, background work). */
+export function fromSurface(surface: string | null | undefined): string {
+  return surface && SURFACES[surface] ? `from ${SURFACES[surface]}` : ''
+}
+
 /** What each step of an activation did: an icon and its sentence, never colour alone. */
 export function StepList({ steps }: { steps: KillSwitchStep[] }) {
   return (

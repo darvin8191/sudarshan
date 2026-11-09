@@ -104,6 +104,23 @@ def test_turning_it_on_saves_it_before_any_broker_call_then_clears_up(
     assert risk_store.history()[0].kind == "ks_on"
 
 
+def test_the_history_row_carries_the_moment_it_went_on_not_when_the_steps_ended(
+    account, risk_store, monkeypatch
+):
+    # The card said "Since 10:40" while History said 10:41:00 for the same activation: the row
+    # was stamped when its report was saved, a minute after the switch went on.
+    from sudarshan.guard import store as store_module
+
+    late = utcnow() + timedelta(seconds=90)
+    monkeypatch.setattr(store_module, "utcnow", lambda: late)
+    _on()
+    saved = risk_store.state()
+    row = risk_store.history()[0]
+    assert row.kind == "ks_on" and row.surface == OWNER.surface
+    assert abs((row.at - saved.since).total_seconds()) < 1
+    assert abs((row.last_at - saved.since).total_seconds()) < 1
+
+
 def test_in_the_sandbox_stage_it_leaves_mcp_the_agent_and_upstox_alone(
     account, risk_store, monkeypatch
 ):
