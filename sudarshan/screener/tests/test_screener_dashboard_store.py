@@ -290,7 +290,7 @@ def test_a_refused_first_change_leaves_no_dashboard_row_behind(opened):
         _insert(opened, 0, a, "table")  # already in the suggestion
     with pytest.raises(NotFound):
         _insert(opened, 0, 999, "table")
-    with pytest.raises(NotFound):
+    with pytest.raises(VersionConflict):  # not in the suggestion: the page's layout is stale
         opened.write(OWNER, lambda tx: tx.widget_delete(0, 999, "table", LATER))
     with pytest.raises(VersionConflict):
         opened.write(OWNER, lambda tx: tx.widgets_order(0, [(999, "table")], LATER))

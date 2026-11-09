@@ -356,3 +356,9 @@ class RunKey(NamedTuple):
         if not version.startswith("v"):
             raise ValueError(f"not a run key: {text!r}")
         return cls(int(screen), int(version[1:]), int(session), tf, int(k))
+
+
+def candles_in(tf: int, span_ms: int) -> int:
+    """How many candles of ``tf`` minutes a session of ``span_ms`` holds, its short last one counted.
+    The engine and the dashboard card both judge "needs more candles than a day gives" by this."""
+    return -(-span_ms // (tf * 60_000))

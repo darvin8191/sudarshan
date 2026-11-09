@@ -17,6 +17,7 @@ from __future__ import annotations
 import time
 from collections import defaultdict
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import Any
 
 from . import dashboard as dash
@@ -33,7 +34,9 @@ from .screen_ops import (
     _spec,
     _store,
     _summary,
-    engine_line,
+    _within_limit,
+    engine_of,
+    next_check,
     result_rows,
     run_row,
     sched_screen,
@@ -89,6 +92,7 @@ def _list_of(tx: Tx, screen: Mapping[str, Any], stored: Mapping[str, Any]):
 
 
 def _card(
+    ctx,
     tx: Tx,
     widget: Mapping[str, Any],
     screen: Mapping[str, Any],
@@ -121,7 +125,8 @@ def _card(
         "mode_words": mode_words,
         "day_only": only_day,
         "waits": dash.waits_of(need),
-        "next_at": scheduler.next_at([sched_screen(screen)], sessions, now) if active else None,
+        # today's next check, else the next trading day's, as the engine line words it
+        "next_at": next_check(ctx, now, [sched_screen(screen)], sessions) if active else None,
         "rows_pending": pending,
         "run": None,
         "matches": None,
@@ -143,7 +148,7 @@ def _card(
     }
     if widget["kind"] == "count":
         done = [r for r in session_runs.get(screen["id"], ()) if r["status"] == "done"]
-        series = dash.thin_series([(r["candle_end"], r["matched"]) for r in done])
+        series = dash.thin_series(dash.newest_per_boundary(done))
         card["not_checked"] = {"count": latest["not_checked"] if latest else 0, "reasons": []}
         card["counts"] = {
             "entered_today": sum(r["entered"] for r in done),
@@ -164,21 +169,26 @@ def _card(
     return card
 
 
-def _with_line(card: dict[str, Any], engine: Mapping[str, Any], now: int) -> dict[str, Any]:
-    run = card["run"]
+def _with_line(card: dict[str, Any], engine: words.Engine, now: int) -> dict[str, Any]:
+    """The card's line. The engine's facts are the whole screener's; the next check in its sentence
+    is this card's own screen's (``next_at``), not the earliest of every Active screen."""
+    run, state = card["run"], words.engine_state(engine)
+    own = words.engine_words(replace(engine, next_at=card["next_at"]))
     card["line"] = dash.line(
         status=card["status"],
         reason=card["status_reason"],
         mode=card["mode"],
         waits=card["waits"],
-        engine_state=engine["state"],
-        engine_line=engine["line"],
+        engine_state=state,
+        engine_line=own,
         run_at=run["at"] if run else None,
         now=now,
+        next_at=card["next_at"],
+        count=card["kind"] == "count",
     )
     # LOW-B8: the engine line's own sentence (token refused, no token, feed stopped, not answering)
     # whenever the engine is not real-time, so a card that is not live says why
-    card["not_live_words"] = None if engine["state"] == words.REAL_TIME else engine["line"]
+    card["not_live_words"] = None if state == words.REAL_TIME else own
     return card
 
 
@@ -201,7 +211,14 @@ def _read(ctx, pick):
             if screen is None:
                 raise NotFound()
             return _card(
-                tx, widget, screen, now=now, sessions=sessions, session_runs=day, pending=pending
+                ctx,
+                tx,
+                widget,
+                screen,
+                now=now,
+                sessions=sessions,
+                session_runs=day,
+                pending=pending,
             )
 
         out = pick(tx, layout, make)
@@ -210,7 +227,7 @@ def _read(ctx, pick):
         return layout, out, active, (newest[0]["id"] if newest else 0)
 
     layout, out, active, last_run_id = translate(lambda: store.read(OWNER, read))
-    return now, layout, out, engine_line(ctx, now, active, sessions), last_run_id
+    return now, layout, out, engine_of(ctx, now, active, sessions), last_run_id
 
 
 @op("dashboard")
@@ -247,7 +264,8 @@ async def widget(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
         for found in layout["widgets"]:
             if (found["screen_id"], found["kind"]) == (screen_id, kind):
                 return make(found)
-        raise NotFound()
+        # only the widget is gone while its screen is still there: the layout moved, read it again
+        raise VersionConflict() if tx.screen(screen_id) else NotFound()
 
     now, _layout, card, engine, _last = _read(ctx, pick)
     return _with_line(card, engine, now)
@@ -290,7 +308,7 @@ def _start(
     return tx.screen_change(screen["id"], screen["version"], {"status": "active"}, now), None
 
 
-def _when(tx: Tx, screen: Mapping[str, Any], choice: str, now: int) -> Mapping[str, Any]:
+def _when(ctx, tx: Tx, screen: Mapping[str, Any], choice: str, now: int) -> Mapping[str, Any]:
     """Change how a day-only screen is checked: an edit of the screen, through the checker."""
     stored, need, _ids = _facts(screen)
     if not dash.day_only(need):
@@ -300,6 +318,8 @@ def _when(tx: Tx, screen: Mapping[str, Any], choice: str, now: int) -> Mapping[s
         return screen  # already checked at its closes
     if stored["run"] == run:
         return screen
+    if screen["status"] == "active" and run["on"] == "close":
+        _within_limit(ctx, tx, screen["id"])  # it would start checking through the day
     edited = _spec({**stored, "run": run})[0]
     return tx.screen_change(
         screen["id"], screen["version"], {"spec": edited, "name": edited["name"]}, now
@@ -345,7 +365,7 @@ async def widget_add(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
         if screen is None:
             raise NotFound(WORDS["gone"])
         if choice is not None:
-            screen = _when(tx, screen, choice, now)
+            screen = _when(ctx, tx, screen, choice, now)
         # the widget first: at version 0 the layout is worked out from the Active screens, and a
         # screen started before it would already be on it
         row = tx.widget_insert(version, {"screen_id": screen["id"], **fields}, now)
@@ -360,6 +380,17 @@ async def widget_add(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
         raise ApiError.of("bad_request", WORDS["unreadable"]) from None
     _moved(ctx)
     return {"version": row["version"], "kind": fields["kind"], "screen": summary, "notice": notice}
+
+
+def _kept(tx: Tx, screen_id: int, call):
+    """A write on one widget. When only the widget is missing and its screen is still there, the
+    layout moved under the page: a VersionConflict, never "that screen is no longer there"."""
+    try:
+        return call()
+    except NotFound:
+        if tx.screen(screen_id) is not None:
+            raise VersionConflict() from None
+        raise
 
 
 def _widget_args(args: Mapping[str, Any]) -> tuple[int, int, str]:
@@ -379,7 +410,10 @@ async def widget_update(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
     return _written(
         ctx,
         lambda: store.write(
-            OWNER, lambda tx: tx.widget_change(version, screen_id, kind, fields, now)
+            OWNER,
+            lambda tx: _kept(
+                tx, screen_id, lambda: tx.widget_change(version, screen_id, kind, fields, now)
+            ),
         ),
     )
 
@@ -390,7 +424,12 @@ async def widget_remove(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
     store, now = _store(ctx), ctx.clock()
     return _written(
         ctx,
-        lambda: store.write(OWNER, lambda tx: tx.widget_delete(version, screen_id, kind, now)),
+        lambda: store.write(
+            OWNER,
+            lambda tx: _kept(
+                tx, screen_id, lambda: tx.widget_delete(version, screen_id, kind, now)
+            ),
+        ),
         notice=words.DASH_REMOVED,
     )
 

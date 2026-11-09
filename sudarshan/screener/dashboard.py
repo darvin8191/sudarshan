@@ -49,6 +49,7 @@ LINE_KINDS = (
     "feed_down",
     "after_close",
     "partial",
+    "checking",
     "real_time",
 )
 
@@ -78,7 +79,7 @@ def waits_of(need: Mapping[Any, int]) -> str | None:
     if need.get(T.DAY, 0) > 1:
         return words.waits_words(T.DAY, need[T.DAY], 1)
     for tf in sorted(k for k in need if isinstance(k, int)):
-        most = DAY_MINUTES // tf
+        most = T.candles_in(tf, DAY_MINUTES * 60_000)
         if need[tf] > most:
             return words.waits_words(tf, need[tf], most)
     return None
@@ -142,6 +143,16 @@ def sort_rows(
     return [{**row, "rank": place} for place, row in enumerate([*have, *lacking], start=1)]
 
 
+def newest_per_boundary(runs: Sequence[Mapping[str, Any]]) -> list[tuple[int, int]]:
+    """One (candle_end, matches) for each boundary, the newest run's: a changed screen runs its
+    latest boundary again, and that check is the one the card means."""
+    newest: dict[int, Mapping[str, Any]] = {}
+    for run in runs:
+        if run["candle_end"] not in newest or run["id"] > newest[run["candle_end"]]["id"]:
+            newest[run["candle_end"]] = run
+    return [(end, run["matched"]) for end, run in sorted(newest.items())]
+
+
 def thin_series(
     points: Sequence[tuple[int, int]], *, slot_ms: int = SERIES_SLOT_MS, limit: int = SERIES_MAX
 ) -> list[tuple[int, int]]:
@@ -164,6 +175,8 @@ def line(
     engine_line: str,
     run_at: int | None,
     now: int,
+    next_at: int | None = None,
+    count: bool = False,
 ) -> dict[str, Any]:
     """The card's line, the first that applies: ``kind`` (for the icon), ``words`` (the sentence),
     ``live`` (ticks and checks are arriving) and the engine ``state`` it was worked out from. The
@@ -186,13 +199,24 @@ def line(
     elif mode == words.MODE_AFTER_CLOSE:
         kind = "after_close"
     elif engine_state == words.REAL_TIME:
-        kind = "real_time"
+        kind = "checking" if count else "real_time"  # a count card shows no prices
     else:
         kind = "partial"
     text = words.card_line_words(
-        kind, reason=reason, engine_line=engine_line, run_at=run_at, now=now, after_close=after
+        kind,
+        reason=reason,
+        engine_line=engine_line,
+        run_at=run_at,
+        now=now,
+        after_close=after,
+        next_at=next_at,
     )
-    return {"kind": kind, "words": text, "live": kind == "real_time", "state": engine_state}
+    return {
+        "kind": kind,
+        "words": text,
+        "live": kind in ("real_time", "checking"),
+        "state": engine_state,
+    }
 
 
 # ---- what a write may say (the owner's words for each refusal) ---------------------------------------------

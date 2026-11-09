@@ -266,6 +266,8 @@ export type CardLineKind =
   | 'feed_down'
   | 'after_close'
   | 'partial'
+  /** A count card while checks arrive: it shows no prices, so it never says Real-time. */
+  | 'checking'
   | 'real_time'
 
 export interface CardLine {
@@ -297,9 +299,11 @@ export interface WidgetCard {
   day_only: boolean
   /** Why the screen cannot judge yet, or null. */
   waits: string | null
-  /** The screen's next check (epoch ms). */
+  /** This screen's own next check (epoch ms): today's, else the next trading day's. */
   next_at: number | null
   line: CardLine
+  /** Why the card is not live, in the engine line's own words; null while the engine is real-time. */
+  not_live_words: string | null
   /**
    * True for a card the dashboard read did not have time to work out: it carries its identity, its
    * screen's name and state and no rows, and the page reads it with the widget read. The facts

@@ -136,12 +136,14 @@ words change, so an open page never keeps "Real-time" after the feed stops). The
 `/sudarshan/screener/internal/push`) are sealed under their own purpose, refused with 404 when
 nginx forwarded them, and never called by the page.
 
+## Dashboards
+
 **The dashboard (lane B, M9.16).** The Dashboard view's layout lives in `screener.db` (step 4: `dashboard`
 and `dashboard_widget`), behind one version that every write names; the first change (version 0) turns
 the suggestion (a table for each Active screen, newest first) into the stored layout and then applies
 itself. A widget is addressed by its screen and its kind, never by an id (the route's one `<id>` is the
 screen id): `GET /dashboard` (`dashboard`: `version`, `suggested`, `widgets`, `limits`, `last_run_id`),
-`GET /dashboard/widgets/<id>?kind=` (`widget`: one card), `POST /dashboard/widgets` (`widget_add`:
+`GET /dashboard/widgets/<id>?kind=` (`widget`: one card; its `line` is the card's own: the next check is its screen's, and a count card says "Checking", never "Real-time"), `POST /dashboard/widgets` (`widget_add`:
 `{version, screen_id | preset, kind?, rows?, sort_by?, value_clauses?, start?, when?}`; a preset makes its
 screen and the widget in one transaction, a screen that would pass the Active limit is added Paused and the
 answer's `notice` says so), `PATCH /dashboard/widgets/<id>` (`widget_update`: `{version, kind, set}`, `kind`
@@ -219,8 +221,8 @@ session's, on the phone.
 
 ## Storage
 
-`screener.db` (schema 3, `migrations.py`; step 2 adds each bar's running volume `cum` and last
-trade time `last_trade`, step 3 a pause's `key`): screens and their state, runs with their changes and values (kept 100
+`screener.db` (schema 4, `migrations.py`; step 2 adds each bar's running volume `cum` and last
+trade time `last_trade`, step 3 a pause's `key`, step 4 the dashboard and its widgets): screens and their state, runs with their changes and values (kept 100
 and 7 days), membership per screen, list and instrument (`first_seen`, `last_seen`, `exited_at`,
 `pinned`, never pruned, kept when a screen is deleted), the list as last seen (each add recorded
 before it is sent), the alert marks per session and the pauses (kept 7 days), the outbox (list

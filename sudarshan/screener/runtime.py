@@ -57,7 +57,17 @@ from .bars import Bar, Bars, Sealed
 from .engine import Context, Subject
 from .runs import Member
 from .store import OWNER, StoreError, Tx
-from .types import DAY, MINUTE_TFS, NEEDS_HISTORY, OVER_LIMIT, WEEK, Plan, Series, Why
+from .types import (
+    DAY,
+    MINUTE_TFS,
+    NEEDS_HISTORY,
+    OVER_LIMIT,
+    WEEK,
+    Plan,
+    Series,
+    Why,
+    candles_in,
+)
 
 log = logging.getLogger("sudarshan.screener")
 
@@ -760,7 +770,7 @@ def _day_holds(tf, grid) -> int | None:
     if tf in (DAY, WEEK):
         return 1
     if isinstance(tf, int) and tf > 0:
-        return -(-(grid.end - grid.start) // (tf * 60_000))
+        return candles_in(tf, grid.end - grid.start)
     return None
 
 

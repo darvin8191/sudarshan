@@ -184,13 +184,13 @@ def test_update_with_nothing_to_change_and_a_widget_that_is_not_there(service):
     err = refused(
         service,
         "widget_update",
-        "not_found",
+        "version_conflict",  # version 0 is the suggestion: a widget not in it means a stale page
         version=0,
         screen_id=screen["id"],
         kind="count",
         rows=5,
     )
-    assert err.message == words.DASH_GONE
+    assert err.message == words.DASH_CONFLICT
     refused(service, "widget_remove", "bad_request", version=0, screen_id=screen["id"], kind="pie")
 
 
