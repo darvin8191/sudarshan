@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import gc
 import os
 import sqlite3
 import threading
@@ -18,6 +19,14 @@ from sudarshan.portfolio.store import DB_FILENAME, THREAD_PREFIX, Scope, StoreEr
 
 def fds() -> int:
     return len(os.listdir("/proc/self/fd"))
+
+
+def settled_fds() -> int:
+    """The count once earlier tests' garbage is collected: a socket another test left unreferenced
+    closes whenever the collector runs, and must not close inside this test's window. Seen in CI:
+    a Socket.IO test's unclosed HTTP sessions moved this count by one either way."""
+    gc.collect()
+    return fds()
 
 
 def targets() -> dict:
@@ -50,7 +59,7 @@ def version_of(path: Path) -> int:
 
 def test_start_migrates_seeds_and_stop_leaves_nothing_open(tmp_path):
     seen: dict = {}
-    before_fds, before_threads = fds(), set(threading.enumerate())
+    before_fds, before_threads = settled_fds(), set(threading.enumerate())
     t0 = targets()
 
     async def scenario():
@@ -85,7 +94,7 @@ def test_a_second_start_runs_nothing_again_and_seeds_nothing_twice(tmp_path):
         await asyncio.wait_for(task, 10)
 
     run(once)
-    before = fds()
+    before = settled_fds()
     run(once)
     assert counts[0] == counts[1]
     assert fds() == before
