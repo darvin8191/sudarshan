@@ -837,8 +837,10 @@ class Gate:
                 return _CheckClaims(refs)
         if not day_read and refusing is None and lock is None and guards.limit is not None:
             return _READ_DAY
-        if (refusing is not None or lock is not None) and self._clippable(known, verdict):
-            return self._clip(known, refusing, lock, verdict, now)
+        if (refusing is not None or lock is not None or day_unread) and self._clippable(
+            known, verdict
+        ):
+            return self._clip(known, refusing, lock, verdict, now, day_unread)
         if refusing is not None:
             return self._refuse(known, refusing, verdict, sent_at)
         if lock is not None:
@@ -863,10 +865,11 @@ class Gate:
         lock: risk_store.DayLock | None,
         verdict: rules.Verdict,
         now: float,
+        day_unread: bool = False,
     ) -> Decision:
-        """The coordinator's decision a: under the kill switch or the day's lock a reversal
-        sends its exit to 0 and only the part beyond is refused. The exit is recorded as one;
-        call under the lock."""
+        """The coordinator's decision a: under the kill switch or the day's lock (or while the
+        day's figure cannot be read) a reversal sends its exit to 0 and only the part beyond is
+        refused. The exit is recorded as one; call under the lock."""
         room = verdict.room
         exit_part = replace(order, quantity=room)
         exited = rules.Verdict(True, rules.EXIT, verdict.position, verdict.claimed, room)
@@ -876,6 +879,9 @@ class Gate:
             since = None if refusing.state is None else _hhmm(refusing.state.since)
             said = words.reversal_cut(order.name, order.side, room, beyond, since=since)
             code = KILL_SWITCH_ACTIVE if refusing.state is not None else RISK_STATE_UNREADABLE
+        elif lock is None and day_unread:
+            said = words.reversal_cut(order.name, order.side, room, beyond, unread=order.pipe)
+            code = GUARD_UNAVAILABLE
         else:
             said = words.reversal_cut(
                 order.name, order.side, room, beyond, locked=(lock.figure, lock.loss_limit)
@@ -2011,12 +2017,12 @@ def _tell_owner(text: str) -> None:
         logger.exception("A risk message could not be told on Telegram")
 
 
-def gtt_refused(symbol: str, exchange: str) -> None:
+def gtt_refused(symbol: str, exchange: str, paused: bool = False) -> None:
     """A sandbox GTT whose order the gate refused when it triggered is rejected for good
     (sandbox/gtt_manager.py): the owner is told once; never raises."""
     try:
         name = trader_name((str(exchange or "").upper(), str(symbol or ""), ""))
-        _tell_owner(words.sandbox_gtt_refused(name))
+        _tell_owner(words.sandbox_gtt_refused(name, paused))
     except Exception:
         logger.exception("A refused sandbox GTT could not be told on Telegram")
 
@@ -2347,6 +2353,8 @@ def _refuse_in_the_sandbox(text: str, told: int | None = None):
     # risk_refused: a GTT leg the gate refuses is rejected for good (sandbox/gtt_manager.py);
     # nothing_sent: Analyze mode's order alert titles it as not sent
     body = {"status": "error", "message": text, "mode": "analyze", "risk_refused": True}
+    if text == words.daily_unreadable(SANDBOX):
+        body["risk_paused"] = True  # a GTT cannot "try again": its owner is told so
     return False, {**body, "nothing_sent": True}, 403
 
 

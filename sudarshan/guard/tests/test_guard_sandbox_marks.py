@@ -21,7 +21,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
-from test_guard_sandbox import USER, _place, sandbox  # noqa: F401 - the fixture
+from test_guard_sandbox import USER, _place, _position, sandbox  # noqa: F401 - the fixture
 
 from sudarshan.guard import daily, readers
 
@@ -380,3 +380,70 @@ def test_the_sandbox_price_read_is_cut_off_like_every_other_gate_read(sandbox, m
     readers.sandbox_day(USER)
     assert limits == [readers.READ_LIMIT_S]
     assert order_api._READ_LIMIT.get() is None  # and only for that read
+
+
+def _no_price_now(monkeypatch) -> None:
+    from sandbox.position_manager import PositionManager
+
+    monkeypatch.setattr(PositionManager, "_fetch_quotes_from_websocket", lambda self, s: {})
+    monkeypatch.setattr(PositionManager, "_fetch_quotes_batch", lambda self, s: {})
+    _a_second_later()
+
+
+def test_a_reversal_while_new_orders_are_paused_sends_its_exit_and_says_so(
+    sandbox,  # noqa: F811
+    monkeypatch,
+    risk_store,
+):
+    """R-MEDIUM-1: with the figure unreadable the part that closes goes, as under the day's
+    lock; only the part that opens is refused, with the paused sentence."""
+    from sudarshan.guard import words
+
+    price = {"ltp": 800.0}
+    _prices(monkeypatch, price)
+    _quiet_announcements(monkeypatch)
+    risk_store.save_settings("owner", daily_loss_limit=LIMIT)
+    monkeypatch.setattr(sandbox, "_in_session", lambda exchange, at: True)
+    assert _place("BUY", 100)[0] and _position() == 100
+    _no_price_now(monkeypatch)
+    ok, body, status = _place("SELL", 200)
+    assert ok, body
+    assert _position() == 0  # the old side is closed
+    note = body["risk_note"]
+    assert "Only the exit was sent" in note and "sell 100" in note
+    assert "paused" in note and "could not be read" in note
+    assert body["sent_quantity"] == 100
+
+
+def test_a_plain_entry_while_paused_is_refused_and_an_exit_goes(
+    sandbox,  # noqa: F811
+    monkeypatch,
+    risk_store,
+):
+    from sudarshan.guard import words
+
+    price = {"ltp": 800.0}
+    _prices(monkeypatch, price)
+    _quiet_announcements(monkeypatch)
+    risk_store.save_settings("owner", daily_loss_limit=LIMIT)
+    monkeypatch.setattr(sandbox, "_in_session", lambda exchange, at: True)
+    assert _place("BUY", 100)[0]
+    _no_price_now(monkeypatch)
+    ok, body, status = _place("BUY", 10)
+    assert (ok, status) == (False, 403)
+    assert body["message"] == words.daily_unreadable("sandbox")
+    assert _position() == 100
+    assert _place("SELL", 40)[0] and _position() == 60  # an exit goes
+
+
+def test_a_sandbox_gtt_refused_while_paused_says_it_will_not_be_tried_again():
+    from sudarshan.guard import gate, words
+
+    said = words.sandbox_gtt_refused("SBIN", paused=True)
+    assert "could not be read" in said and "not tried again" in said
+    assert "try again" not in said.lower().replace("not tried again", "")
+    text = words.daily_unreadable("sandbox")
+    _ok, body, _status = gate._refuse_in_the_sandbox(text)
+    assert body["risk_paused"] is True
+    _ok, other, _status = gate._refuse_in_the_sandbox(words.burst_refused(5, 60, 0.0))
+    assert "risk_paused" not in other

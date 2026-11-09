@@ -1049,7 +1049,12 @@ def _fire_claimed_leg(leg, gtt, leg_id: int, execution_price) -> bool:
             # SUDARSHAN M5.13: the risk gate's refusal is final for this GTT (sudarshan/guard):
             # put back, it would fire and be refused again on every tick.
             if isinstance(response, dict) and response.get("risk_refused") is True:
-                _reject_after_risk_refusal(gtt, leg_id, released if released_ok else None)
+                _reject_after_risk_refusal(
+                    gtt,
+                    leg_id,
+                    released if released_ok else None,
+                    response.get("risk_paused") is True,
+                )
                 return False
             logger.error(f"GTT leg {leg_id} order rejected: {message}")
             _compensate_failed_fire(
@@ -1103,7 +1108,7 @@ def _fire_claimed_leg(leg, gtt, leg_id: int, execution_price) -> bool:
         return False
 
 
-def _reject_after_risk_refusal(gtt, leg_id: int, released) -> None:
+def _reject_after_risk_refusal(gtt, leg_id: int, released, paused: bool = False) -> None:
     """SUDARSHAN M5.13: a leg the risk gate refused ends its GTT: rejected, its legs cancelled,
     the owner told once (sudarshan/guard/gate.py). Its reservation was released before the
     order was tried, which is right for a GTT that will not fire again. When that cannot be
@@ -1129,7 +1134,7 @@ def _reject_after_risk_refusal(gtt, leg_id: int, released) -> None:
         )
         return
     logger.info(f"Sandbox GTT {gtt.gtt_id} rejected: the risk guard refused its order")
-    risk_gate.gtt_refused(gtt.symbol, gtt.exchange)
+    risk_gate.gtt_refused(gtt.symbol, gtt.exchange, paused)
 
 
 def _notify_websocket_engine(gtt: SandboxGTT) -> None:
