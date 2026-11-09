@@ -75,7 +75,7 @@ One row per feature id from the (private) feature list. Status: `todo` → `part
 | M9.3 | Screen JSON schema 1 checked in the owner's words and compiled to a plan; the page's rule builder, operand sheets and the live preview on the last closed candle | partial | v0.6.0 | feat/screener; preview answers with live figures only once the feed link runs |
 | M9.4 | Price action: levels, pivots, opening range, relative strength, candle patterns | partial | v0.6.0 | feat/screener (price.py, patterns.py, vectors) |
 | M9.5 | Indicators over openalgo.ta with the screener's own rolling extrema | partial | v0.6.0 | feat/screener (library.py, vectors) |
-| M9.6 | Timeframes, offsets, forming candles, operators, three-valued logic | partial | v0.6.0 | feat/screener (engine.py, vectors); week candles wait for history (FD2) |
+| M9.6 | Timeframes, offsets, forming candles, operators, three-valued logic; a screen of day lines run at N-minute closes is judged on the forming day candle at each close the instrument traded in (the sources build the run's own timeframe) | partial | v0.6.0 | feat/screener (engine.py, vectors), feat/screener-round3 (round-3 review HIGH-B1); week candles wait for history (FD2) |
 | M9.9 | Open interest build-up and OI change | partial | v0.6.0 | feat/screener (options.py); the daily OI store waits for the governor (FD2) |
 | M9.10 | PCR and max pain on the strikes near the money | partial | v0.6.0 | feat/screener (options.py); the 15:55 chain snapshot waits for the governor (FD2) |
 | M9.11 | ATM IV, straddle, IV rank | partial | v0.6.0 | feat/screener (options.py); IV rank needs the daily IV store (FD2) |

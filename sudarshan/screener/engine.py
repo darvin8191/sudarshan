@@ -13,7 +13,9 @@ not ended is the aggregate of the 1-minute bars that have). ``ago n`` goes n can
 ``first_today`` is the first candle of the session, ``last_prev_day`` the last candle of the
 session before it. A candle that ends after the boundary is never read (no look-ahead), whatever
 the series holds. An instrument is judged only when it has a candle that ends at the boundary;
-otherwise it is not due, which is neither a hit nor a miss.
+otherwise it is not due, which is neither a hit nor a miss. That candle is the run's own timeframe,
+which a source always builds (``timeframes``): a screen whose lines read only day candles, checked
+at N-minute closes, is judged on the forming day candle at each close the instrument traded in.
 
 Three-valued logic. An operand that cannot be computed makes its line UNKNOWN. ``all``: any FALSE
 gives FALSE, else any UNKNOWN gives UNKNOWN. ``any``: any TRUE gives TRUE, else any UNKNOWN gives
@@ -62,6 +64,7 @@ from sudarshan.screener.types import (
     FIRST_TODAY,
     HIT,
     LAST_PREV_DAY,
+    MINUTE_TFS,
     MISS,
     NO_AUCTION,
     NO_CANDLE,
@@ -718,6 +721,17 @@ class Reading:
         return None
 
 
+def timeframes(plan: Plan) -> tuple[TF, ...]:
+    """The timeframes a source builds for ``plan``: those its lines read, and the run's own minute
+    timeframe, whose candle ending at the boundary says the instrument traded in it (``_early``).
+    Without it a screen whose lines read only day candles was never due at a minute close (round-3
+    review HIGH-B1)."""
+    found = tuple(plan.need)
+    if plan.on == "close" and plan.tf in MINUTE_TFS and plan.tf not in plan.need:
+        found += (plan.tf,)
+    return found
+
+
 def judge(plan: Plan, subject: Subject, ctx: Context, memo: dict | None = None) -> Outcome:
     """What ``plan`` says about ``subject`` at ``ctx.boundary``."""
     return Reading(subject, ctx, memo).judge(plan)
@@ -760,4 +774,5 @@ __all__ = [
     "ranked",
     "shortfall",
     "show",
+    "timeframes",
 ]

@@ -54,7 +54,7 @@ from sudarshan.autologin.schedule import IST
 
 from . import candles, universe
 from .bars import Bar, Bars, Sealed
-from .engine import Context, Subject
+from .engine import Context, Subject, timeframes
 from .runs import Member
 from .store import OWNER, StoreError, Tx
 from .types import DAY, MINUTE_TFS, NEEDS_HISTORY, OVER_LIMIT, WEEK, Plan, Series, Why
@@ -181,7 +181,7 @@ class LiveSource:
         if frame is None and not self.bars.bars(member.key):
             return None
         series: dict[Any, Series] = {}
-        for tf in plan.need:
+        for tf in timeframes(plan):  # the run's own timeframe too: it says when one is due
             if tf in MINUTE_TFS or tf == DAY:
                 series[tf] = candles.read(self.bars, member.key, tf, self.market, boundary)
             else:

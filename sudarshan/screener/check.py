@@ -52,7 +52,7 @@ from . import alerting as al
 from . import candles, scheduler, spec, words
 from . import membership as mem
 from .bars import Bars
-from .engine import Context, Subject
+from .engine import Context, Subject, timeframes
 from .runs import Judged, Member, evaluate
 from .screen_ops import sched_screen
 from .store import OWNER, open_read_only
@@ -92,7 +92,7 @@ class ReplaySource:
         if frame is None and not self.bars.bars(member.key):
             return None
         series: dict[Any, Series] = {}
-        for tf in plan.need:
+        for tf in timeframes(plan):  # the run's own timeframe too, as the live source
             if tf in MINUTE_TFS or tf == DAY:
                 series[tf] = candles.read(self.bars, member.key, tf, self.market, boundary)
             else:
