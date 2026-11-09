@@ -95,6 +95,8 @@ WORDS = {
     "figures from the last complete read. Wait a minute, then tap Read again.",
     "kept": "Upstox could not be read again just now, so these are the figures from the last "
     "complete read.",
+    "count_kept": "Upstox's count of trades does not match the rows it sent, so these are the "
+    "figures from the last complete read. Tap Read again to read again.",
     "early": "This year was read before it had closed and settled. SUDARSHAN reads it again once "
     "it has; tap Read again to do it now.",
     "no_pnl_mf": "Upstox has no trade-wise P&L report for mutual funds; their trades are in "
@@ -102,6 +104,17 @@ WORDS = {
     "year": "Upstox keeps the last three financial years only.",
     "segment": "Choose one of the segments: EQ, FO, COM, CD or MF.",
 }
+
+
+def _kept_words(note: str | None) -> str:
+    """The line that goes with complete figures kept because a newer read did not finish: only a
+    stop that SUDARSHAN's own limits caused is worded as SUDARSHAN's, what Upstox did is worded as
+    Upstox's, and a count that does not match says so."""
+    if note == WORDS["busy"]:
+        return WORDS["held_back"]
+    if note == WORDS["count"]:
+        return WORDS["count_kept"]
+    return WORDS["kept"]
 
 
 # ---- the years ---------------------------------------------------------------------------------
@@ -504,7 +517,7 @@ class ReportReader:
         the complete figures stay, with a line saying the refresh did not finish."""
         old = record.get("payload") if record is not None else None
         if state != "ok" and record is not None and record.get("state") == "ok" and old:
-            await self._put(kind, fy, segment, "ok", record.get("read_at"), WORDS["kept"], old)
+            await self._put(kind, fy, segment, "ok", record.get("read_at"), _kept_words(note), old)
             return
         read_at = self.clock() if state == "ok" else (record or {}).get("read_at")
         await self._put(kind, fy, segment, state, read_at, note, payload)
@@ -598,9 +611,7 @@ class ReportReader:
                     "rows": kept, "total_records": total, "next_page": nxt,
                     "since": shadow.get("since") or now,
                 }  # fmt: skip
-            words = {WORDS["more"]: WORDS["stepwise"], WORDS["busy"]: WORDS["held_back"]}.get(
-                note, WORDS["kept"]
-            )
+            words = WORDS["stepwise"] if note == WORDS["more"] else _kept_words(note)
             await self._put("trades", fy, segment, "ok", record.get("read_at"), words, held)
             return
         await self._store(

@@ -195,3 +195,41 @@ async def test_a_pnl_carried_on_after_a_new_closed_trade_is_read_afresh_never_do
         "P3",
     ]
     assert done["realised_paise"] == 40_000  # 10,000 + 10,000 - 10,000 + 30,000 paise, by hand
+
+
+async def complete_pnl_year(rig):
+    rig.svc.upstox.budget = Budget(limits=WIDE)
+    fy = reports.financial_year(day_of_instant(rig.now))
+    rig.fake.bodies["pnl_meta"] = meta_of(1, 100)
+    rig.fake.bodies["pnl"] = [page([prow("P1", 1000, 1100)])]
+    full = (await rig.call("report_pnl", fy=fy, segment="EQ"))["data"]
+    assert full["state"] == "ok", full
+    return fy
+
+
+@scenario_of
+async def test_a_pnl_refresh_stopped_by_sudarshans_own_minute_budget_is_worded_as_sudarshans(rig):
+    """Upstox was never asked, so the words must not say it could not be read."""
+    fy = await complete_pnl_year(rig)
+    spent = Budget(limits=MINUTE_OF_TWO)
+    assert spent.take("pnl_meta") and spent.take("pnl_meta")
+    rig.svc.upstox.budget = spent
+    asked = len(_rows(rig.fake, "pnl_meta"))
+    again = (await rig.call("report_pnl", fy=fy, segment="EQ", force=True))["data"]
+    assert len(_rows(rig.fake, "pnl_meta")) == asked
+    assert again["state"] == "ok" and len(again["rows"]) == 1
+    assert again["note"] == reports.WORDS["held_back"], again["note"]
+    assert "Upstox could not" not in again["note"]
+
+
+@scenario_of
+async def test_a_pnl_refresh_whose_rows_do_not_match_the_count_says_so_and_keeps_the_figures(rig):
+    """The count note the changelog asks the owner to report must not be hidden under the words for
+    Upstox failing."""
+    fy = await complete_pnl_year(rig)
+    rig.fake.bodies["pnl_meta"] = meta_of(2, 100)  # Upstox counts 2 trades and sends 1 row
+    rig.now += 7 * HOUR
+    again = (await rig.call("report_pnl", fy=fy, segment="EQ", force=True))["data"]
+    assert again["state"] == "ok" and len(again["rows"]) == 1  # the complete figures stay
+    assert again["note"] == reports.WORDS["count_kept"], again["note"]
+    assert "does not match" in again["note"] and "Upstox could not" not in again["note"]
