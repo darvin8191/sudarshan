@@ -171,6 +171,23 @@ def test_history_is_newest_first_and_bounded(risk_store):
     assert len(risk_store.history(limit=0)) == 1
 
 
+def test_history_is_in_the_order_things_happened_not_the_order_they_were_written(
+    risk_store, monkeypatch
+):
+    """A kill switch's row is written when its report is saved but stamped with the moment it
+    went on (review of v0.6.1, LOW 4): a refusal written during its clear-up happened after it
+    and is listed above it."""
+    now = [datetime(2026, 10, 27, 5, 10, 30, tzinfo=UTC)]
+    monkeypatch.setattr(store, "utcnow", lambda: now[0])
+    risk_store.audit("order_refused", "refused at 10:40:30")
+    now[0] = datetime(2026, 10, 27, 5, 11, 0, tzinfo=UTC)
+    risk_store.audit("ks_on", "on since 10:40:00", at=datetime(2026, 10, 27, 5, 10, tzinfo=UTC))
+    assert [row.summary for row in risk_store.history()] == [
+        "refused at 10:40:30",
+        "on since 10:40:00",
+    ]
+
+
 def test_first_use_from_two_threads_at_once_builds_one_engine(tmp_path):
     fresh = RiskStore(tmp_path / "r.db")
     start = threading.Barrier(4)

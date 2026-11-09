@@ -408,10 +408,14 @@ class RiskStore:
                 self._pruned_on = None
 
     def history(self, limit: int = 50) -> list[AuditEntry]:
-        """The newest audit rows first."""
+        """The newest audit rows first, by when each happened: a kill switch's row is written
+        when its report is saved but stamped with the moment it went on, so a refusal written
+        during its clear-up is listed above it (review of v0.6.1, LOW 4)."""
         with self._session() as session:
             rows = session.execute(
-                select(AuditRow).order_by(AuditRow.id.desc()).limit(max(1, min(int(limit), 500)))
+                select(AuditRow)
+                .order_by(AuditRow.at.desc(), AuditRow.id.desc())
+                .limit(max(1, min(int(limit), 500)))
             ).scalars()
             return [
                 AuditEntry(
