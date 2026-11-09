@@ -285,15 +285,28 @@ def stored_schema(engine) -> int | None:
         return 10**9
 
 
-def create_missing(engine) -> None:
-    """Every table, column and index, each only when missing, then the ``schema`` row when absent.
-    Two first uses at once (the app and the migration) never trip over each other. It never
-    changes a ``schema`` row that exists, and a caller checks ``stored_schema`` first."""
-    create_tables(engine)
-    add_missing_columns(engine)
-    create_indexes(engine)
+def record_schema(engine) -> None:
+    """Write ``schema`` when it is absent, and raise it when it is lower; never lower it, never
+    touch a value above this code's (a caller refuses a newer file first)."""
     with engine.begin() as connection:
         connection.execute(
             text("INSERT OR IGNORE INTO wl_meta (name, value) VALUES ('schema', :v)"),
             {"v": str(SCHEMA_VERSION)},
         )
+        connection.execute(
+            text(
+                "UPDATE wl_meta SET value = :v WHERE name = 'schema'"
+                " AND CAST(value AS INTEGER) < :n AND value GLOB '[0-9]*'"
+            ),
+            {"v": str(SCHEMA_VERSION), "n": SCHEMA_VERSION},
+        )
+
+
+def create_missing(engine) -> None:
+    """Every table, column and index, each only when missing, then the ``schema`` row. Two first
+    uses at once (the app and the migration) never trip over each other. A caller checks
+    ``stored_schema`` first, so a newer file is never reached here."""
+    create_tables(engine)
+    add_missing_columns(engine)
+    create_indexes(engine)
+    record_schema(engine)

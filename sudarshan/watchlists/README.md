@@ -92,3 +92,17 @@ whose `schema` is newer than the code, or not a number, is refused before a byte
 `RecordTooNew` carries the owner's sentence (`words/store.py`), the cause goes to the error log, and
 OpenAlgo's own lists keep working. Seeds nothing: default flag names and favourites are computed at
 read. Tests: `tests/test_watchlists_store.py` (columns typed by hand from the design).
+
+## W2 - the migration (`upgrade/migrate_sudarshan_watchlists.py`)
+
+Creates `db/sudarshan_watchlists.db` and its tables from `schema.py` on an upgrade. Listed in
+`migrate_all.py`'s `MIGRATIONS` (beside the risk layer's line), deliberately not in
+`REQUIRED_MIGRATIONS`: an overlay of OpenAlgo's lists is not worth rolling a release back, and with
+the file missing the bridge answers in words while OpenAlgo's lists keep working. A failure still
+shows in the summary. Safe to run again: tables, columns and indexes only when missing, the `schema`
+record only when absent or lower, nothing seeded, no row or value ever written over. `--status`
+opens the file read-only and prints the file, its schema, this release's schema and what is pending
+(the file's bytes are unchanged; SQLite may leave its own `-wal` and `-shm` beside a file in WAL
+mode). A file from a newer release is refused untouched, in the owner's sentence. Tests:
+`tests/test_watchlists_migration.py` (missing, populated copy forced back, newer, the app store
+opening the result).

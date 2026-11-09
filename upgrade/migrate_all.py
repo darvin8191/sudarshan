@@ -96,6 +96,8 @@ MIGRATIONS = [
     ("migrate_muhurat_nov_2026.py", "Muhurat Trading Hours (8 November 2026)"),
     # SUDARSHAN M5.13: the risk layer's own file, db/sudarshan_risk.db
     ("migrate_sudarshan_risk.py", "SUDARSHAN Risk Layer (kill switch and order guards)"),
+    # SUDARSHAN M8.4: the watchlist store, db/sudarshan_watchlists.db. Listed, not required (L14).
+    ("migrate_sudarshan_watchlists.py", "SUDARSHAN Watchlists v2 (sections, follow rows, flags)"),
 ]
 
 # Legacy migrations historically used non-zero exits for best-effort warnings,
