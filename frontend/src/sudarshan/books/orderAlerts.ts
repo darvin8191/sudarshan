@@ -4,6 +4,7 @@ import { formatAmount, formatRupees } from '@/sudarshan/dashboard/format'
 import { showToast } from '@/utils/toast'
 import { type ChimeKind, playChime, unlockSoundOnFirstTap } from './chime'
 import { cancelAllTargets, notePushedFrame, reasonOf } from './orderFold'
+import { killSwitchOnSince } from '@/sudarshan/risk/killSwitch'
 import { istTime } from './time'
 
 /**
@@ -79,7 +80,12 @@ function units(n: number): string {
  * What a frame says, in a trader's words, or null when it says nothing worth
  * an alert (an order placed, modified, or still waiting).
  */
-export function describeOrderUpdate(frame: OrderUpdateFrame): OrderAlert | null {
+export function describeOrderUpdate(
+  frame: OrderUpdateFrame,
+  /** Set when the kill switch was already on when the frame arrived (ms since epoch). */
+  killSwitchSince: number | null = null,
+  now: number = Date.now()
+): OrderAlert | null {
   const orderid = text(frame.orderid)
   if (!orderid) return null
   const status = text(frame.order_status).toLowerCase()
@@ -112,9 +118,14 @@ export function describeOrderUpdate(frame: OrderUpdateFrame): OrderAlert | null 
   } else if (OFF.has(status)) {
     kind = 'cancelled'
     title = `Cancelled · ${order(true)}`
-    description = sandbox
-      ? 'Cancelled by the sandbox, not from this app.'
-      : 'Cancelled at the broker, not from this app.'
+    // Only what is known: the kill switch is named only when it was on before the cancel;
+    // otherwise the place is named (the sandbox or Upstox), never a guessed cause.
+    description =
+      killSwitchSince !== null && killSwitchSince <= now
+        ? 'Cancelled by the kill switch.'
+        : sandbox
+          ? 'Cancelled in the sandbox, not from this screen.'
+          : 'Cancelled at Upstox, not from this screen.'
     if (filled > 0) description += ` ${units(filled)} of ${units(quantity)} had filled.`
   } else if (filled > 0 && (quantity === 0 || filled < quantity)) {
     kind = 'partial'
@@ -407,7 +418,7 @@ export function installOrderAlerts(socket: Socket): () => void {
   const onUpdate = (frame: OrderUpdateFrame) => {
     const at = Date.now()
     notePushedFrame(frame ?? {}, at)
-    const alert = describeOrderUpdate(frame ?? {})
+    const alert = describeOrderUpdate(frame ?? {}, killSwitchOnSince(), at)
     if (!alert) return
     if (alert.kind !== 'cancelled') {
       deliver(alert, at)

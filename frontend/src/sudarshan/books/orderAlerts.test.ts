@@ -196,8 +196,26 @@ describe('describeOrderUpdate', () => {
     ).toMatchObject({
       kind: 'cancelled',
       title: 'Cancelled · BUY 65 NIFTY28OCT2525900CE',
-      description: 'Cancelled at the broker, not from this app. 30 of 65 had filled.',
+      description: 'Cancelled at Upstox, not from this screen. 30 of 65 had filled.',
     })
+  })
+
+  it('names the kill switch only when it was on before the cancel, and says no cause otherwise', () => {
+    const cancel = frame({ order_status: 'cancelled', mode: 'analyze', filled_quantity: 0 })
+    const now = Date.parse('2026-11-09T05:10:00Z')
+    expect(describeOrderUpdate(cancel, now - 1000, now)?.description).toBe(
+      'Cancelled by the kill switch.'
+    )
+    expect(describeOrderUpdate(cancel, now + 5000, now)?.description).toBe(
+      'Cancelled in the sandbox, not from this screen.'
+    )
+    expect(describeOrderUpdate(cancel, null, now)?.description).toBe(
+      'Cancelled in the sandbox, not from this screen.'
+    )
+    expect(
+      describeOrderUpdate(frame({ order_status: 'cancelled', filled_quantity: 0 }), null, now)
+        ?.description
+    ).toBe('Cancelled at Upstox, not from this screen.')
   })
 
   it('labels every alert "Sandbox" in Analyze mode, where the sandbox speaks, not the broker', () => {
@@ -315,7 +333,7 @@ describe('installOrderAlerts', () => {
     vi.advanceTimersByTime(CANCEL_SETTLE_MS)
     expect(toast.warning).toHaveBeenCalledTimes(1)
     expect(toast.warning.mock.calls[0][2].description).toMatch(
-      /^10:12:31 · Cancelled at the broker/
+      /^10:12:31 · Cancelled at Upstox/
     )
   })
 

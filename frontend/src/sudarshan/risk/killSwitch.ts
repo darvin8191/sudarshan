@@ -127,6 +127,13 @@ export function killSwitchOn(state: RiskState | null): boolean {
   return state?.kill_switch.known === true && state.kill_switch.on === true
 }
 
+/** When the switch was turned on (ms since epoch) while it is on; null when off or not known. */
+export function killSwitchOnSince(): number | null {
+  if (!killSwitchOn(current)) return null
+  const at = Date.parse(current?.kill_switch.since ?? '')
+  return Number.isFinite(at) ? at : null
+}
+
 /** True when the server answered but could not read the switch: the gate refuses every new order. */
 export function killSwitchUnread(state: RiskState | null): boolean {
   return state?.kill_switch.known === false
