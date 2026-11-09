@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest'
 import { cleanup } from '@testing-library/react'
-import { afterEach, beforeEach, vi } from 'vitest'
+import { afterAll, afterEach, beforeEach, vi } from 'vitest'
 // SUDARSHAN (M6.9): the guard that makes a just-opened sheet or confirmation
 // ignore taps for half a second. Tests that are not about it tap at once.
 import { OPEN_GUARD } from '@/sudarshan/watchlist/openGuard'
@@ -13,6 +13,17 @@ beforeEach(() => {
 // Cleanup after each test case
 afterEach(() => {
   cleanup()
+})
+
+// SUDARSHAN: let the 0 ms timers an unmount leaves behind run while this file's jsdom still
+// exists. Radix's FocusScope dispatches its unmount event from such a timer; when it fired after
+// the environment was torn down, jsdom's own globals were already gone, the event was Node's, and
+// the whole run failed with "parameter 1 is not of type 'Event'" although every test had passed
+// (CI run 42591051897, from ComparisonMenu.test.tsx). Real timers, so a file that left fake ones
+// on cannot hang here.
+afterAll(async () => {
+  vi.useRealTimers()
+  await new Promise((resolve) => setTimeout(resolve, 0))
 })
 
 // Mock window.matchMedia for tests
