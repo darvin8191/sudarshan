@@ -388,7 +388,9 @@ export function PlaceOrderDialog({
       <DialogContent
         {...guard.handlers}
         data-settling={guard.settling || undefined}
-        className="sm:max-w-[420px]"
+        // SUDARSHAN: on a short window the body scrolls inside the viewport and the title and
+        // the Place / Cancel buttons stay in reach (the dialog is a three-row grid).
+        className="sm:max-w-[420px] max-h-[calc(100dvh-1rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden"
         aria-describedby={undefined}
         container={container}
       >
@@ -402,7 +404,7 @@ export function PlaceOrderDialog({
           </DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4 py-2">
+        <div data-testid="ticket-body" className="space-y-4 py-2 min-h-0 overflow-y-auto">
           {/* SUDARSHAN M20.7: the kill switch's line; it disables nothing (a Buy can close a short). */}
           <KillSwitchNote />
           {/* Quote Header - merged WebSocket + REST data */}
