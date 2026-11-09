@@ -224,12 +224,19 @@ def _clauses(node) -> list[dict]:
     return out
 
 
-def values_text(stored: Mapping[str, Any], found: Mapping[str, Any] | None) -> str:
-    """'RSI 61.2 · OI +4.1%': the first two clause values of a match, labelled."""
+def values_text(
+    stored: Mapping[str, Any], found: Mapping[str, Any] | None, only: Sequence[str] | None = None
+) -> str:
+    """'RSI 61.2 · OI +4.1%': the first two clause values of a match, labelled (``only``: the
+    clauses a dashboard widget chose, in its order)."""
     if not found:
         return ""
     parts = []
-    for clause in _clauses(stored.get("where")):
+    clauses = _clauses(stored.get("where"))
+    if only:
+        by_id = {c["id"]: c for c in clauses}
+        clauses = [by_id[i] for i in only if i in by_id]
+    for clause in clauses:
         value = found.get(clause["id"])
         if isinstance(value, dict) and value.get("l") is not None:
             label = _label(clause["left"])
@@ -272,6 +279,7 @@ def result_rows(
     values: Mapping[str, Any],
     members: Sequence[Mapping[str, Any]],
     now: int,
+    value_clauses: Sequence[str] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """(rows, not_checked) of a run: every instrument that matched, best ranked first, with its
     membership chip; the not-checked count and its reasons."""
@@ -306,7 +314,7 @@ def result_rows(
                 "symbol": change["symbol"],
                 "exchange": change["exchange"],
                 "rank": position,
-                "values": values_text(stored, found),
+                "values": values_text(stored, found, value_clauses),
                 "forming": bool(found.get("_forming")),
                 "chip": _chip_of(
                     member,

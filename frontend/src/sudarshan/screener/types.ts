@@ -244,6 +244,97 @@ export interface Today {
   session?: number
 }
 
+// ---- the dashboard (M9.16): a widget is addressed by its screen and its kind, never by an id ----
+export type WidgetKind = 'table' | 'count'
+export type CheckMode = 'intraday' | 'forming_day' | 'after_close'
+
+export interface WidgetSort {
+  by: 'change_pct' | 'ltp' | 'entered' | 'value'
+  order: 'asc' | 'desc'
+  /** Only with `by: 'value'`. */
+  clause?: string
+}
+
+/** What a card's line is, for the icon; `words` is the server's sentence, shown as it came. */
+export type CardLineKind =
+  | 'stopped'
+  | 'paused'
+  | 'engine'
+  | 'waiting'
+  | 'waits'
+  | 'closed'
+  | 'feed_down'
+  | 'after_close'
+  | 'partial'
+  | 'real_time'
+
+export interface CardLine {
+  kind: CardLineKind
+  /** For a card that is not live this is the engine line's own sentence (why it is not). */
+  words: string
+  /** True only while checks and ticks arrive: the page may override it, never the other way. */
+  live: boolean
+  state: EngineState
+}
+
+export interface WidgetCard {
+  screen_id: number
+  kind: WidgetKind
+  position: number
+  rows: 5 | 10 | 20
+  /** As used: null when the widget sorts by a line the screen no longer has. */
+  sort_by: WidgetSort | null
+  value_clauses: string[] | null
+  name: string
+  status: ScreenStatus
+  status_reason: string | null
+  /** 'F&O stocks · 5-min'. */
+  where: string
+  mode: CheckMode
+  /** 'Forming day candle · each 15-min close', 'After the close (16:05)', '5-min closes'. */
+  mode_words: string
+  /** The screen reads only day candles and session levels, so "when it checks" is the owner's. */
+  day_only: boolean
+  /** Why the screen cannot judge yet, or null. */
+  waits: string | null
+  /** The screen's next check (epoch ms). */
+  next_at: number | null
+  line: CardLine
+  /**
+   * True for a card the dashboard read did not have time to work out: it carries its identity, its
+   * screen's name and state and no rows, and the page reads it with the widget read. The facts
+   * below are then null or empty.
+   */
+  rows_pending: boolean
+  run: RunRow | null
+  matches: number | null
+  /** A table: at most `rows`, in the widget's order, ranks renumbered to it. */
+  rows_shown: ResultRow[]
+  /** Matches past `rows`. */
+  more: number
+  not_checked: { count: number; reasons: string[] } | null
+  /** Its automatic watchlist. */
+  list: { id: number | null; name: string | null; count: number } | null
+  /** A count card only. */
+  counts?: {
+    entered_today: number
+    exited_today: number
+    series: Array<{ at: number; matches: number }>
+    series_words: string
+  }
+}
+
+export interface Dashboard {
+  /** 0 while the layout is only a suggestion (one table for each Active screen). */
+  version: number
+  name: string
+  suggested: boolean
+  widgets: WidgetCard[]
+  limits: { widgets: number }
+  last_run_id: number
+  server_time: number
+}
+
 // ---- pushes (design 4.5) ------------------------------------------------------------------------
 export interface RunPush {
   screen_id: number

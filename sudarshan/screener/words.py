@@ -539,3 +539,85 @@ def exited_words(exits: Sequence[tuple[str, int]], limit: int = EXITS_SHOWN) -> 
     if len(exits) > limit:
         text += f" and {len(exits) - limit} more"
     return text
+
+
+# ---- the dashboard: a card says what it is and why it is or is not live (M9.16) ---------------------------
+DASH_CONFLICT = (
+    "The dashboard was changed on another screen. Nothing was saved; it shows the latest now, so "
+    "repeat the change."
+)
+DASH_GONE = "That screen is no longer there, so its widget was removed."
+DASH_REMOVED = "Removed from the dashboard. The screen and its list are kept."
+DASH_NO_SERIES = "No checks yet today."
+
+#: The ways a card describes how its screen is checked.
+MODE_INTRADAY, MODE_FORMING_DAY, MODE_AFTER_CLOSE = "intraday", "forming_day", "after_close"
+
+
+def mode_words(mode: str, tf: int | None, after_close: str) -> str:
+    """'5-min closes', 'Forming day candle · each 15-min close', 'After the close (16:05)'."""
+    if mode == MODE_AFTER_CLOSE:
+        return f"After the close ({after_close})"
+    if mode == MODE_FORMING_DAY:
+        return f"Forming day candle · each {tf}-min close"
+    return f"{tf}-min closes"
+
+
+def waits_words(tf: T.TF, need: int, most: int) -> str:
+    """Why a screen cannot judge yet: it needs more candles than today gives."""
+    if tf == T.WEEK:
+        return (
+            f"Waits for the history download: needs {_count(need, 'week candle', 'week candles')}, "
+            "and today gives none."
+        )
+    if tf == T.DAY:
+        return (
+            f"Waits for the history download: needs {_count(need, 'day candle', 'day candles')}, "
+            f"and today gives {quantity(most)}."
+        )
+    return (
+        f"Waits for the history download: needs {_count(need, 'candle', 'candles')} of {tf} "
+        f"minutes, and a day gives {quantity(most)}."
+    )
+
+
+def series_words(points: Sequence[tuple[int, int]]) -> str:
+    """For a screen reader: 'Matches at each check today: 0, 2, 3, 5, 7; latest 7 at 11:15.'"""
+    if not points:
+        return DASH_NO_SERIES
+    shown = ", ".join(str(matches) for _, matches in points)
+    at, matches = points[-1]
+    return f"Matches at each check today: {shown}; latest {matches} at {hm(at)}."
+
+
+def paused_add_words(used: int, limit: int) -> str:
+    return (
+        f"Added Paused: {used} of {limit} screens already check through the day. Pause one to "
+        "start this."
+    )
+
+
+def _as_of(at: int | None, now: int) -> str:
+    return f" · matches as of {when(at, now)}" if at else ""
+
+
+def card_line_words(
+    kind: str,
+    *,
+    reason: str | None,
+    engine_line: str,
+    run_at: int | None,
+    now: int,
+    after_close: str,
+) -> str:
+    """The sentence under a card's head (design 3.6): the card's own for a screen that is stopped,
+    paused or checked after the close; the engine line's own words, as they are, for the rest."""
+    if kind == "stopped":
+        return f"Stopped · {reason}" if reason else "Stopped"
+    if kind == "paused":
+        return f"Paused · not checking{_as_of(run_at, now)}"
+    if kind == "after_close":
+        return f"Checks after the close ({after_close}){_as_of(run_at, now)}"
+    if kind == "closed":
+        return f"{engine_line}{_as_of(run_at, now)}"
+    return engine_line

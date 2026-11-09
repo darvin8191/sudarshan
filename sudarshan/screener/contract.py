@@ -120,6 +120,11 @@ OPS = (
     OpSpec("presets", "GET", "/presets", "read"),
     OpSpec("universes", "GET", "/universes", "read"),
     OpSpec("today", "GET", "/today", "read"),
+    # The dashboard (M9.16): a widget is addressed by its screen and its kind, never by an id.
+    OpSpec("dashboard", "GET", "/dashboard", "read"),
+    OpSpec(
+        "widget", "GET", "/dashboard/widget", "read", query=(("screen_id", "int"), ("kind", "str"))
+    ),
 )
 OP_NAMES = tuple(op.name for op in OPS)
 #: The membership moves the owner may make (PATCH /membership/<id>, ``{"action": ..., "version"}``).

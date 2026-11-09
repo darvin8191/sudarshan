@@ -54,5 +54,6 @@ def op(name: str, registry: dict[str, Handler] | None = None) -> Callable[[Handl
 
 # One import line per row that adds ops, in merge order (each module registers at import):
 from . import (
+    dashboard_ops,  # noqa: E402,F401  (M9.16: dashboard, widget)
     screen_ops,  # noqa: E402,F401  (M9.1: state, create, update, delete, preview, results, runs, run, runs_since, membership, membership_update, presets, universes, today)
 )

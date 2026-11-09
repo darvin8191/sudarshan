@@ -1,0 +1,96 @@
+{"about": ["Hand-typed from the dashboards design (3.2, 3.6 and 3.8); nothing here is computed by the code.",
+  "A string that starts with @ is a time in IST ('@2026-10-30 15:30'). 2026-10-30 is a Friday, 2026-10-27 a Tuesday.",
+  "A need maps a timeframe to the candles a screen needs; the key D is the day candle, a digit is minutes."],
+"modes": [
+ {"id": "M1", "run": {"on": "after_close"}, "day_only": true, "mode": "after_close", "words": "After the close (16:05)"},
+ {"id": "M2", "run": {"on": "close", "tf": 15}, "day_only": true, "mode": "forming_day", "words": "Forming day candle · each 15-min close"},
+ {"id": "M3", "run": {"on": "close", "tf": 5}, "day_only": false, "mode": "intraday", "words": "5-min closes"},
+ {"id": "M4", "run": {"on": "after_close"}, "day_only": false, "mode": "after_close", "words": "After the close (16:05)"}
+],
+"day_only": [
+ {"id": "D1", "need": {"D": 1}, "expect": true},
+ {"id": "D2", "need": {}, "expect": true},
+ {"id": "D3", "need": {"5": 1, "D": 1}, "expect": false},
+ {"id": "D4", "need": {"W": 1}, "expect": false},
+ {"id": "D5", "need": {"60": 49}, "expect": false}
+],
+"waits": [
+ {"id": "W1", "need": {"D": 50, "60": 49}, "expect": "Waits for the history download: needs 50 day candles, and today gives 1."},
+ {"id": "W2", "need": {"D": 1}, "expect": null},
+ {"id": "W3", "need": {"5": 1, "D": 1}, "expect": null},
+ {"id": "W4", "need": {"15": 151}, "expect": "Waits for the history download: needs 151 candles of 15 minutes, and a day gives 25."},
+ {"id": "W5", "need": {"15": 25}, "expect": null},
+ {"id": "W6", "need": {"W": 1}, "expect": "Waits for the history download: needs 1 week candle, and today gives none."},
+ {"id": "W7", "need": {"D": 3}, "expect": "Waits for the history download: needs 3 day candles, and today gives 1."},
+ {"id": "W8", "need": {"1": 376}, "expect": "Waits for the history download: needs 376 candles of 1 minutes, and a day gives 375."}
+],
+"clauses": [
+ {"id": "C1", "asked": ["c1", "c9"], "has": ["c1", "c2"], "expect": ["c1"]},
+ {"id": "C2", "asked": ["c9"], "has": ["c1"], "expect": null},
+ {"id": "C3", "asked": null, "has": ["c1"], "expect": null},
+ {"id": "C4", "asked": ["c2", "c1", "c3"], "has": ["c1", "c2", "c3"], "expect": ["c2", "c1"]}
+],
+"sorts": [
+ {"id": "S1", "sort": {"by": "value", "order": "asc", "clause": "c9"}, "has": ["c1"], "expect": null},
+ {"id": "S2", "sort": {"by": "value", "order": "asc", "clause": "c1"}, "has": ["c1"], "expect": {"by": "value", "order": "asc", "clause": "c1"}},
+ {"id": "S3", "sort": {"by": "change_pct", "order": "desc"}, "has": [], "expect": {"by": "change_pct", "order": "desc"}},
+ {"id": "S4", "sort": null, "has": [], "expect": null}
+],
+"order": {
+ "rows": [
+  {"key": "A", "symbol": "AAA", "change_pct": 1.5, "ltp": 10000},
+  {"key": "B", "symbol": "BBB", "change_pct": 3.0, "ltp": 5000},
+  {"key": "C", "symbol": "CCC", "change_pct": 1.5, "ltp": 7000},
+  {"key": "D", "symbol": "DDD", "change_pct": null, "ltp": null}
+ ],
+ "entered": {"A": 1000, "B": 3000, "C": 3000},
+ "found": {"A": {"c1": {"l": "61.2"}}, "B": {"c1": {"l": "7"}}, "C": {"c1": {"l": "up"}}},
+ "cases": [
+  {"id": "O1", "sort": null, "expect": ["AAA", "BBB", "CCC", "DDD"]},
+  {"id": "O2", "sort": {"by": "change_pct", "order": "desc"}, "expect": ["BBB", "AAA", "CCC", "DDD"]},
+  {"id": "O3", "sort": {"by": "change_pct", "order": "asc"}, "expect": ["AAA", "CCC", "BBB", "DDD"]},
+  {"id": "O4", "sort": {"by": "ltp", "order": "desc"}, "expect": ["AAA", "CCC", "BBB", "DDD"]},
+  {"id": "O5", "sort": {"by": "ltp", "order": "asc"}, "expect": ["BBB", "CCC", "AAA", "DDD"]},
+  {"id": "O6", "sort": {"by": "entered", "order": "desc"}, "expect": ["BBB", "CCC", "AAA", "DDD"]},
+  {"id": "O7", "sort": {"by": "entered", "order": "asc"}, "expect": ["AAA", "BBB", "CCC", "DDD"]},
+  {"id": "O8", "sort": {"by": "value", "order": "desc", "clause": "c1"}, "expect": ["AAA", "BBB", "CCC", "DDD"]},
+  {"id": "O9", "sort": {"by": "value", "order": "asc", "clause": "c1"}, "expect": ["BBB", "AAA", "CCC", "DDD"]}
+ ]
+},
+"series": [
+ {"id": "T1", "about": "375 one-minute checks, 09:16 to 15:30, kept as the last of each 5-minute slot",
+  "from": "@2026-10-30 09:15", "step_min": 1, "count": 375, "matches": "minute", "kept": 75,
+  "first": ["@2026-10-30 09:20", 5], "last": ["@2026-10-30 15:30", 375]},
+ {"id": "T2", "about": "75 five-minute checks are all kept",
+  "from": "@2026-10-30 09:15", "step_min": 5, "count": 75, "matches": "minute", "kept": 75,
+  "first": ["@2026-10-30 09:20", 5], "last": ["@2026-10-30 15:30", 375]},
+ {"id": "T3", "about": "more than 80 slots keeps the newest 80",
+  "from": "@2026-10-30 09:15", "step_min": 5, "count": 100, "matches": "minute", "kept": 80,
+  "first": ["@2026-10-30 11:00", 105], "last": ["@2026-10-30 17:35", 500]},
+ {"id": "T4", "about": "3-minute checks keep the last of each slot",
+  "from": "@2026-10-30 09:15", "step_min": 3, "count": 10, "matches": "minute", "kept": 6,
+  "first": ["@2026-10-30 09:18", 3], "last": ["@2026-10-30 09:45", 30]}
+],
+"series_words": [
+ {"id": "R1", "points": [["@2026-10-30 09:30", 0], ["@2026-10-30 09:45", 2], ["@2026-10-30 10:00", 3], ["@2026-10-30 10:15", 5], ["@2026-10-30 11:15", 7]],
+  "expect": "Matches at each check today: 0, 2, 3, 5, 7; latest 7 at 11:15."},
+ {"id": "R2", "points": [], "expect": "No checks yet today."}
+],
+"lines": [
+ {"id": "L1", "in": {"status": "stopped", "reason": "Upstox refused the token", "state": "real_time", "line": "Real-time"}, "kind": "stopped", "words": "Stopped · Upstox refused the token", "live": false},
+ {"id": "L2", "in": {"status": "stopped", "state": "real_time", "line": "Real-time", "waits": "Waits for the history download: needs 3 day candles, and today gives 1."}, "kind": "stopped", "words": "Stopped", "live": false},
+ {"id": "L3", "in": {"status": "paused", "state": "real_time", "line": "Real-time", "run_at": "@2026-10-30 10:30", "now": "@2026-10-30 11:00"}, "kind": "paused", "words": "Paused · not checking · matches as of 10:30", "live": false},
+ {"id": "L4", "in": {"status": "paused", "state": "not_answering", "line": "The screener is not answering"}, "kind": "paused", "words": "Paused · not checking", "live": false},
+ {"id": "L5", "in": {"state": "not_answering", "line": "The screener is not answering"}, "kind": "engine", "words": "The screener is not answering", "live": false},
+ {"id": "L6", "in": {"state": "waiting_master", "line": "Waiting for today's master contract"}, "kind": "waiting", "words": "Waiting for today's master contract", "live": false},
+ {"id": "L7", "in": {"state": "real_time", "line": "Real-time · next check 11:15", "waits": "Waits for the history download: needs 3 day candles, and today gives 1."}, "kind": "waits", "words": "Waits for the history download: needs 3 day candles, and today gives 1.", "live": false},
+ {"id": "L8", "in": {"state": "closed", "line": "Market closed · next check Mon 09:30", "run_at": "@2026-10-30 15:30", "now": "@2026-10-31 11:00"}, "kind": "closed", "words": "Market closed · next check Mon 09:30 · matches as of Fri 15:30", "live": false},
+ {"id": "L9", "in": {"state": "closed", "line": "Market closed · next check Mon 09:30"}, "kind": "closed", "words": "Market closed · next check Mon 09:30", "live": false},
+ {"id": "L10", "in": {"state": "feed_down", "line": "Not checking · Upstox refused the price feed's token: put the current Analytics Token in the feed's token file (since 10:41:05)"}, "kind": "feed_down", "words": "Not checking · Upstox refused the price feed's token: put the current Analytics Token in the feed's token file (since 10:41:05)", "live": false},
+ {"id": "L11", "in": {"mode": "after_close", "state": "real_time", "line": "Real-time · next check 16:05", "run_at": "@2026-10-27 16:05", "now": "@2026-10-28 11:00"}, "kind": "after_close", "words": "Checks after the close (16:05) · matches as of Tue 16:05", "live": false},
+ {"id": "L12", "in": {"state": "real_time", "line": "Real-time · next check 11:15"}, "kind": "real_time", "words": "Real-time · next check 11:15", "live": true},
+ {"id": "L13", "in": {"state": "warming_up", "line": "Warming up · history loading for 12 of 300 instruments"}, "kind": "partial", "words": "Warming up · history loading for 12 of 300 instruments", "live": false},
+ {"id": "L14", "in": {"state": "no_prices", "line": "No prices from Upstox for 3 instruments yet"}, "kind": "partial", "words": "No prices from Upstox for 3 instruments yet", "live": false},
+ {"id": "L15", "in": {"mode": "after_close", "state": "closed", "line": "Market closed · next check Mon 16:05"}, "kind": "closed", "words": "Market closed · next check Mon 16:05", "live": false}
+]
+}
