@@ -65,3 +65,15 @@ minutes), never "Live"; the sign-in, closed, unavailable and wait lines are here
 made here: the Smartlist client is a later PR. The answer's exact envelope, the unit of traded
 value and of premium, and the base of `previous` are checked on a real read (design facts W-1 and
 W-10). Vectors: `tests/vectors/ranked.json`.
+
+## W11 - master access (`master.py`) and the exception's tests (`tests/test_exception.py`)
+
+`master.py` is the one reader of OpenAlgo's symbol master. It keeps one generation of reference
+maps (`search.Index`: the snapshot's own rows, never copies) tied to the snapshot it came from,
+builds it in slices that yield to the hub behind a keyed single flight, and drops it when the
+snapshot is replaced or lapses. Symbol, exchange and instrument-key lookups read OpenAlgo's snapshot
+and keep nothing. `tests/test_exception.py` holds the limits that let this feature live inside
+OpenAlgo: no thread, timer, executor, scheduler or event loop anywhere in `sudarshan/watchlists/`
+or the bridge (an AST scan, and a check that no thread starts for any op or master swap); one
+generation, the old rows freed with it; the derived maps under 15 MB on 120,000 rows (about 2 MB
+measured). Do not loosen these tests to land a feature.
