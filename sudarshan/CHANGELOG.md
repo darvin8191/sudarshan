@@ -66,9 +66,11 @@ switch it on after the two checks below.**
   - **Trades and P&L on the Upstox tab:** the trade history of three financial years and the
     trade-wise P&L with every charge listed. A charge Upstox does not give reads "not given", never
     0. A year counts as final only when it was read in full on or after 3 April; "Read again"
-    re-reads any year, still inside Upstox's limits (when they are spent it says so and keeps the
-    figures it had). A year with more trades than one read holds (10,000 in a segment) is
-    refreshed in steps, from the page it stopped at, and the note says so.
+    re-reads any year, still inside SUDARSHAN's own reading budget (when it is spent it says so and
+    keeps the figures it had). A year with more trades than one read holds (10,000 in a segment) is
+    read again in steps, each from the page the last one stopped at, and the note says so. The
+    steps go on at the nightly read, when you open the year, or when you tap Read again, and the
+    figures shown stay the last complete read until the last step is in.
 
 ### What you must do
 - **Nothing when you publish.** The screener stays off.
@@ -124,7 +126,13 @@ switch it on after the two checks below.**
   - a stock in a digest that never reached Telegram still counts as told for that day;
   - after a screen moves to another watchlist, the items it added to the old list stay there;
   - a plain `systemctl stop` keeps the screener's instruments at the feed for the restart, as
-    market alerts do: switch it off, or remove it, to let them go.
+    market alerts do: switch it off, or remove it, to let them go;
+  - a screen paused and resumed during the day, or an instrument that leaves the screener's list
+    and comes back, counts the volume traded meanwhile into its first candle after it comes back,
+    so that candle can look like a volume spike. The screener ships off and this is fixed before
+    it is switched on; until then, make and resume screens before 09:15;
+  - the day's open, high, low and gap of an instrument first followed during the session start at
+    that moment, so a screen made at 10:00 judges them from 10:00.
 
 ## v0.5.1 (8 Nov 2026)
 
