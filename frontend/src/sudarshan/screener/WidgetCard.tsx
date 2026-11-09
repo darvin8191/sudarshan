@@ -10,17 +10,19 @@ import {
   Moon,
   Pause,
   RefreshCw,
+  TriangleAlert,
   WifiOff,
 } from 'lucide-react'
 import { memo } from 'react'
 import { Link } from 'react-router'
 import { cn } from '@/lib/utils'
 import { OUTLINED } from '@/sudarshan/books/cards/parts'
+import { istTime } from '@/sudarshan/books/time'
 import { keyOf } from '@/sudarshan/dashboard/live'
 import { rememberOpenList } from '@/sudarshan/watchlist/openList'
 import type { LiveRow } from '@/sudarshan/watchlist/useLiveRows'
 import type { LineIcon, LineView } from './cardLine'
-import { cardKey } from './dashboardCache'
+import { cardKey, rowsBehind, rowsRun } from './dashboardCache'
 import { StatusChip } from './marks'
 import { ResultLine, runWords } from './Results'
 import type { WidgetCard as Card, ScreenStatus } from './types'
@@ -118,6 +120,9 @@ export const WidgetCard = memo(function WidgetCard({
   onOptions: (card: Card) => void
 }) {
   const list = card.list
+  const behind = rowsBehind(card)
+  const own = rowsRun(card)
+  const hhmm = (at: number) => istTime(at).slice(0, 5)
   return (
     <li
       data-widget={cardKey(card)}
@@ -155,6 +160,33 @@ export const WidgetCard = memo(function WidgetCard({
               : 'Not checking.'}
         </p>
       </div>
+      {behind && !card.rows_pending && card.run && own && (
+        <div
+          data-rows-behind={unreadable ? 'unread' : 'reading'}
+          className="flex min-h-12 items-center gap-2 border-t px-4 text-[0.8125rem] font-semibold text-[color:var(--warning-text)]"
+        >
+          {unreadable ? (
+            <>
+              <TriangleAlert aria-hidden="true" className="size-4 shrink-0" />
+              <span className="flex-1">
+                These matches are from the {hhmm(own.at)} check; the {hhmm(card.run.at)} check could
+                not be read.
+              </span>
+              <button type="button" onClick={onRetry} className={OUTLINED}>
+                <RefreshCw aria-hidden="true" className="size-4" />
+                Try again
+              </button>
+            </>
+          ) : (
+            <>
+              <LoaderCircle aria-hidden="true" className="size-4 shrink-0 animate-spin" />
+              <span>
+                Reading the {hhmm(card.run.at)} matches. These are from the {hhmm(own.at)} check.
+              </span>
+            </>
+          )}
+        </div>
+      )}
       {card.rows_pending ? (
         <div className="flex min-h-14 items-center gap-2 border-t px-4 text-[0.8125rem] font-semibold text-[color:var(--text-secondary)]">
           {unreadable ? (
@@ -181,8 +213,8 @@ export const WidgetCard = memo(function WidgetCard({
         )
       ) : (
         <ul
-          data-greyed={line.greyed || undefined}
-          className={cn('divide-y border-t', line.greyed && 'opacity-60')}
+          data-greyed={line.greyed || behind || undefined}
+          className={cn('divide-y border-t', (line.greyed || behind) && 'opacity-60')}
         >
           {card.rows_shown.map((row) => {
             const key = keyOf(row.symbol, row.exchange)
@@ -191,7 +223,7 @@ export const WidgetCard = memo(function WidgetCard({
                 key={row.key ?? key}
                 row={row}
                 live={liveByKey.get(key)}
-                runAt={card.run?.at ?? 0}
+                runAt={own?.at ?? card.run?.at ?? 0}
                 now={now}
                 onOpen={(open) => onOpenRow(card, open)}
               />

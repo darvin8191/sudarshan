@@ -311,6 +311,11 @@ export interface WidgetCard {
    */
   rows_pending: boolean
   run: RunRow | null
+  /**
+   * Page only, never sent: the run the shown rows belong to, set while a pushed run has moved
+   * `run` ahead of rows the card's own read has not yet replaced.
+   */
+  read_run?: RunRow | null
   matches: number | null
   /** A table: at most `rows`, in the widget's order, ranks renumbered to it. */
   rows_shown: ResultRow[]

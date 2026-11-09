@@ -2,7 +2,15 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useState } from 'react'
 import type { ScreenerError } from './api'
 import { screenerApi } from './api'
-import { cardKey, readCard } from './dashboardCache'
+import {
+  cardKey,
+  clearUnread,
+  isUnread,
+  mergeRead,
+  readCard,
+  rowsBehind,
+  useUnread,
+} from './dashboardCache'
 import { DASHBOARD_KEY } from './keys'
 import { noteSeen } from './push'
 import type { Dashboard } from './types'
@@ -20,19 +28,23 @@ export function useDashboard() {
     queryFn: async ({ signal }) => {
       const read = await screenerApi.dashboard(signal)
       noteSeen(read.last_run_id)
-      return read
+      // A fresh layout starts every card's reads again, and never puts an older card over a newer.
+      clearUnread()
+      return mergeRead(client.getQueryData<Dashboard>(DASHBOARD_KEY), read)
     },
     staleTime: 60_000,
     retry: false,
   })
-  const [failed, setFailed] = useState<ReadonlySet<string>>(new Set())
+  const failed = useUnread()
   const [tries, setTries] = useState(0)
 
+  // Cards still to read: those the read had no time for, and those whose rows are behind a pushed run.
   const pending = (query.data?.widgets ?? [])
-    .filter((card) => card.rows_pending)
+    .filter((card) => card.rows_pending || rowsBehind(card))
     .map(cardKey)
     .join(',')
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `tries` restarts the reads after a retry
+  const unreadKeys = [...failed].sort().join(',')
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `tries` restarts the reads after a retry; `unreadKeys` lets the next card go once one has settled
   useEffect(() => {
     if (!pending) return
     let alive = true
@@ -42,21 +54,23 @@ export function useDashboard() {
         const held = client
           .getQueryData<Dashboard>(DASHBOARD_KEY)
           ?.widgets.find((card) => cardKey(card) === key)
-        if (!held?.rows_pending) continue
+        if (!held || !(held.rows_pending || rowsBehind(held))) continue
+        // A card that failed waits for Try again: later cards filling in never re-read it.
+        if (isUnread(key)) continue
         try {
           await readCard(client, held)
         } catch {
-          if (alive) setFailed((now) => new Set(now).add(key))
+          // readCard has marked it unread.
         }
       }
     })()
     return () => {
       alive = false
     }
-  }, [client, pending, tries])
+  }, [client, pending, tries, unreadKeys])
 
   const retry = useCallback(() => {
-    setFailed(new Set())
+    clearUnread()
     setTries((n) => n + 1)
   }, [])
   return { query, failed, retry }
