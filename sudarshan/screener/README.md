@@ -253,7 +253,7 @@ does.
 - History before today and the daily stores (open interest, implied volatility, India VIX): they
   wait for the feed's REST governor (SV3, SV4). Until then a plan that needs more candles than one
   session holds reads "Not checked: needs 151 candles of 15 minutes; a day gives 25, ...", the
-  six presets that need them are not usable, and "Warming up · history loading" never shows.
+  eight presets that need them are not usable, and "Warming up · history loading" never shows.
 - Re-anchoring an option window at 09:16 and near its edge; reading a watchlist universe again at
   each run; refusing a screen at save when it would pass the key limit.
 - Compacting the not-checked rows: every not-checked instrument is still written to `run_change`

@@ -326,6 +326,130 @@
         ],
         "uses": [], "ids": ["c1", "c2"], "rank_order": "desc"
       }
+    },
+    {
+      "key": "orb_follow_up",
+      "name": "Opening-range follow-through, up",
+      "about": "F&O stocks whose 5-min close is more than one opening range above the high of the day's first 5-min candle; the range is that candle's high less its low. The first check that can match is 09:25. Differs from the usual form of this scan: F&O stocks, the stocks followed tick by tick, in place of NIFTY 200; each closed 5-min candle is judged, not the one still forming, so a match never vanishes inside its candle; ranked by the day's % change against yesterday's close, largest first; shows the LTP, % change and the line's value. A stock first followed after 09:15 reads Not checked, since its first candle was not seen.",
+      "line": "F&O stocks · 5-min",
+      "columns": ["ltp", "change_pct", "value"],
+      "screen": {
+        "universe": {"kind": "fno_stocks"},
+        "run": {"on": "close", "tf": 5},
+        "where": {
+          "all": [
+            {"id": "c1", "on": true, "left": {"field": "close", "tf": 5, "at": 0}, "op": "gt", "right": {"math": "add", "args": [{"field": "high", "tf": 5, "at": "first_today"}, {"math": "sub", "args": [{"field": "high", "tf": 5, "at": "first_today"}, {"field": "low", "tf": 5, "at": "first_today"}]}]}}
+          ]
+        },
+        "rank": {"by": {"field": "change_pct", "tf": "D", "at": 0}, "order": "desc"}
+      },
+      "plan": {"on": "close", "tf": 5, "need": {"5": 1, "D": 1}, "instances": [], "uses": [], "ids": ["c1"], "rank_order": "desc"}
+    },
+    {
+      "key": "orb_follow_down",
+      "name": "Opening-range follow-through, down",
+      "about": "F&O stocks whose 5-min close is more than one opening range below the low of the day's first 5-min candle; the range is that candle's high less its low. The first check that can match is 09:25. Differs from the usual form of this scan: F&O stocks in place of NIFTY 200; each closed 5-min candle is judged, not the one still forming; ranked by the day's % change with the largest fall first, where the usual form lists the largest rise first; shows the LTP, % change and the line's value. A stock first followed after 09:15 reads Not checked, since its first candle was not seen.",
+      "line": "F&O stocks · 5-min",
+      "columns": ["ltp", "change_pct", "value"],
+      "screen": {
+        "universe": {"kind": "fno_stocks"},
+        "run": {"on": "close", "tf": 5},
+        "where": {
+          "all": [
+            {"id": "c1", "on": true, "left": {"field": "close", "tf": 5, "at": 0}, "op": "lt", "right": {"math": "sub", "args": [{"field": "low", "tf": 5, "at": "first_today"}, {"math": "sub", "args": [{"field": "high", "tf": 5, "at": "first_today"}, {"field": "low", "tf": 5, "at": "first_today"}]}]}}
+          ]
+        },
+        "rank": {"by": {"field": "change_pct", "tf": "D", "at": 0}, "order": "asc"}
+      },
+      "plan": {"on": "close", "tf": 5, "need": {"5": 1, "D": 1}, "instances": [], "uses": [], "ids": ["c1"], "rank_order": "asc"}
+    },
+    {
+      "key": "open_at_low",
+      "name": "Opened at the low, strong start",
+      "about": "F&O stocks that opened at their low of the day so far and above yesterday's close, whose latest 3-min candle opened at its low and closed higher. The day's open, high and low are the exchange's, the pre-open price as the open. Differs from the usual form of this scan: F&O stocks in place of NIFTY 200; the 3-min lines judge each closed candle, not the one still forming; two lines, yesterday's close above its 200-day average and a 15-day average volume above 10 lakh, are written in and switched off until the history download; the body test, (close - open) / (close - low) of 0.7 or more, is written as close above open, which finds the same stocks while the 3-min open is its low and stops meaning the same if that line is switched off; ranked by the day's % change, largest first.",
+      "line": "F&O stocks · 3-min",
+      "columns": ["ltp", "change_pct", "value"],
+      "screen": {
+        "universe": {"kind": "fno_stocks"},
+        "run": {"on": "close", "tf": 3},
+        "where": {
+          "all": [
+            {"id": "c1", "on": true, "left": {"field": "day_open"}, "op": "eq", "right": {"field": "day_low"}},
+            {"id": "c2", "on": true, "left": {"field": "day_open"}, "op": "gt", "right": {"field": "prev_close"}},
+            {"id": "c3", "on": true, "left": {"field": "open", "tf": 3, "at": 0}, "op": "eq", "right": {"field": "low", "tf": 3, "at": 0}},
+            {"id": "c4", "on": true, "left": {"field": "close", "tf": 3, "at": 0}, "op": "gt", "right": {"field": "open", "tf": 3, "at": 0}},
+            {"id": "c5", "on": false, "left": {"field": "close", "tf": "D", "at": {"ago": 1}}, "op": "gt", "right": {"ind": "sma", "p": {"length": 200, "source": "close"}, "out": "value", "tf": "D", "at": {"ago": 1}}},
+            {"id": "c6", "on": false, "left": {"ind": "sma", "p": {"length": 15, "source": "volume"}, "out": "value", "tf": "D", "at": 0}, "op": "gt", "right": {"num": "1000000"}}
+          ]
+        },
+        "rank": {"by": {"field": "change_pct", "tf": "D", "at": 0}, "order": "desc"}
+      },
+      "plan": {"on": "close", "tf": 3, "need": {"D": 1, "3": 1}, "instances": [], "uses": [], "ids": ["c1", "c2", "c3", "c4"], "rank_order": "desc"}
+    },
+    {
+      "key": "open_at_high",
+      "name": "Opened at the high, weak start",
+      "about": "F&O stocks that opened at their high of the day so far, with more than 5 lakh shares traded today and a day low above 100 rupees. Checked on the forming day candle at each 15-minute close; the day's open, high, low and volume are the exchange's, the pre-open included. Differs from the usual form of this scan: F&O stocks during the day in place of NIFTY 200, whose copy checked after the close comes with that list; ranked by the day's % change with the largest fall first, where the usual form lists the largest rise first.",
+      "line": "F&O stocks · 15-min",
+      "columns": ["ltp", "change_pct", "value"],
+      "screen": {
+        "universe": {"kind": "fno_stocks"},
+        "run": {"on": "close", "tf": 15},
+        "where": {
+          "all": [
+            {"id": "c1", "on": true, "left": {"field": "day_open"}, "op": "eq", "right": {"field": "day_high"}},
+            {"id": "c2", "on": true, "left": {"field": "volume", "tf": "D", "at": 0}, "op": "gt", "right": {"num": "500000"}},
+            {"id": "c3", "on": true, "left": {"field": "day_low"}, "op": "gt", "right": {"num": "100"}}
+          ]
+        },
+        "rank": {"by": {"field": "change_pct", "tf": "D", "at": 0}, "order": "asc"}
+      },
+      "plan": {"on": "close", "tf": 15, "need": {"D": 1}, "instances": [], "uses": [], "ids": ["c1", "c2", "c3"], "rank_order": "asc"}
+    },
+    {
+      "key": "supertrend_turn",
+      "waits": "Waits for the history download, not set up yet: needs 50 day candles and 49 candles of 60 minutes, and a day gives 1 and 7.",
+      "name": "Supertrend turn with volume, hourly confirmed",
+      "about": "F&O stocks whose day close crosses above Supertrend 7, 3 (yesterday at or below it), on volume above the 7-day average, with the 60-min close above its own Supertrend 7, 3. Differs from the usual form of this scan: F&O stocks in place of every listed stock; no company-value filter (the usual form asks for more than 1,500 crore), as none is expected to remove an F&O stock and SUDARSHAN has no source of company values yet; Supertrend averages the true range Wilder's way, the common charting rule, and a scan that averages it otherwise can differ slightly; ranked by the day's % change, largest first.",
+      "line": "F&O stocks · 15-min",
+      "columns": ["ltp", "change_pct", "value"],
+      "screen": {
+        "universe": {"kind": "fno_stocks"},
+        "run": {"on": "close", "tf": 15},
+        "where": {
+          "all": [
+            {"id": "c1", "on": true, "left": {"field": "close", "tf": "D", "at": {"ago": 1}}, "op": "lte", "right": {"ind": "supertrend", "p": {"atr_length": 7, "factor": "3"}, "out": "value", "tf": "D", "at": {"ago": 1}}},
+            {"id": "c2", "on": true, "left": {"field": "close", "tf": "D", "at": 0}, "op": "gt", "right": {"ind": "supertrend", "p": {"atr_length": 7, "factor": "3"}, "out": "value", "tf": "D", "at": 0}},
+            {"id": "c3", "on": true, "left": {"field": "volume", "tf": "D", "at": 0}, "op": "gt", "right": {"ind": "sma", "p": {"length": 7, "source": "volume"}, "out": "value", "tf": "D", "at": 0}},
+            {"id": "c4", "on": true, "left": {"field": "close", "tf": 60, "at": 0}, "op": "gt", "right": {"ind": "supertrend", "p": {"atr_length": 7, "factor": "3"}, "out": "value", "tf": 60, "at": 0}}
+          ]
+        },
+        "rank": {"by": {"field": "change_pct", "tf": "D", "at": 0}, "order": "desc"}
+      },
+      "plan": {"on": "close", "tf": 15, "need": {"D": 50, "60": 49}, "instances": [["sma", {"length": 7, "source": "volume"}, "D"], ["supertrend", {"atr_length": 7, "factor": "3"}, "D"], ["supertrend", {"atr_length": 7, "factor": "3"}, 60]], "uses": [], "ids": ["c1", "c2", "c3", "c4"], "rank_order": "desc"}
+    },
+    {
+      "key": "two_day_reversal",
+      "waits": "Waits for the history download, not set up yet: needs 3 day candles, and a day gives 1.",
+      "name": "Two-day reversal from an opening low",
+      "about": "F&O stocks that opened at the day's low, below the lows of the two days before, and now trade above the highs of both. Checked on the forming day candle at each 15-minute close; the day's open and low are the exchange's. Differs from the usual form of this scan: F&O stocks in place of every listed stock, whose stand-in, a NIFTY 500 copy checked after the close, comes with that list; no company-value filter (the usual form asks for more than 200 crore), as none is expected to remove an F&O stock and SUDARSHAN has no source of company values yet; ranked by the day's % change, largest first.",
+      "line": "F&O stocks · 15-min",
+      "columns": ["ltp", "change_pct", "value"],
+      "screen": {
+        "universe": {"kind": "fno_stocks"},
+        "run": {"on": "close", "tf": 15},
+        "where": {
+          "all": [
+            {"id": "c1", "on": true, "left": {"field": "day_open"}, "op": "eq", "right": {"field": "day_low"}},
+            {"id": "c2", "on": true, "left": {"field": "day_open"}, "op": "lt", "right": {"field": "prev_day_low"}},
+            {"id": "c3", "on": true, "left": {"field": "day_open"}, "op": "lt", "right": {"field": "low", "tf": "D", "at": {"ago": 2}}},
+            {"id": "c4", "on": true, "left": {"field": "close", "tf": "D", "at": 0}, "op": "gt", "right": {"field": "prev_day_high"}},
+            {"id": "c5", "on": true, "left": {"field": "close", "tf": "D", "at": 0}, "op": "gt", "right": {"field": "high", "tf": "D", "at": {"ago": 2}}}
+          ]
+        },
+        "rank": {"by": {"field": "change_pct", "tf": "D", "at": 0}, "order": "desc"}
+      },
+      "plan": {"on": "close", "tf": 15, "need": {"D": 3}, "instances": [], "uses": [], "ids": ["c1", "c2", "c3", "c4", "c5"], "rank_order": "desc"}
     }
   ],
   "lines": [
