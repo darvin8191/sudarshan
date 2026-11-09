@@ -247,3 +247,39 @@ def test_an_expired_contract_is_valued_at_its_settlement_price_with_no_quote(
     db_session.remove()
     row = SandboxPositions.query.filter_by(user_id=USER, symbol="NIFTY28OCT2525900CE").first()
     assert row.quantity == 65  # left to the sandbox's own settlement: the figure settles nothing
+
+
+def test_a_fill_while_the_prices_are_read_leaves_no_mark_and_the_figure_true(
+    sandbox,  # noqa: F811
+    monkeypatch,
+):
+    """Review of v0.6.1, MEDIUM-1: the marking loaded the rows, waited on its quotes (a REST
+    call yields under eventlet; under gthread another order simply runs) and wrote P&L from the
+    quantity it had loaded, so a fill landing in that wait left a mark for the old quantity in
+    the table (50 held, P&L -10,000 worked out for 100). The rows are read once now, and nothing
+    is written."""
+    from sandbox.position_manager import PositionManager
+
+    price = {"ltp": 800.0}
+    _prices(monkeypatch, price)
+    assert _place("BUY", 100)[0]
+    price["ltp"] = 700.0
+    _a_second_later()
+    fired = {"done": False}
+
+    def ticks_with_a_fill_meanwhile(self, symbols):
+        if not fired["done"]:
+            fired["done"] = True
+            other = threading.Thread(target=lambda: _place("SELL", 50))  # its own session
+            other.start()
+            other.join(JOIN_S)
+        return {s: {"ltp": price["ltp"]} for s in symbols}
+
+    monkeypatch.setattr(
+        PositionManager, "_fetch_quotes_from_websocket", ticks_with_a_fill_meanwhile
+    )
+    figure = readers.sandbox_day(USER)
+    stored = _stored()
+    assert fired["done"] and stored.quantity == 50
+    assert stored.pnl == 0.0  # the fill's own figure, never one worked out for 100
+    assert figure.total == -10_000.0  # the rows as read: the truth before the fill and after it
