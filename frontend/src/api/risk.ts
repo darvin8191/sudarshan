@@ -48,6 +48,8 @@ export interface DayState {
   unchecked_left_s?: number | null
   /** When that ends, by this phone's clock (ms): set as the state is read. */
   unchecked_until?: number | null
+  /** Today's figure, not the book, could not be read: new orders are paused, exits go. */
+  paused?: boolean
 }
 
 /** The banner's read: no broker call behind it. */
@@ -76,6 +78,8 @@ export interface DailyStatus {
   lock: { at: string; figure: number; limit: number } | null
   /** The limit could not be checked in the last minute: orders went unchecked. */
   unchecked: boolean
+  /** That was today's figure, not the book: new orders were paused, exits went. */
+  paused?: boolean
 }
 
 export interface GateTiming {

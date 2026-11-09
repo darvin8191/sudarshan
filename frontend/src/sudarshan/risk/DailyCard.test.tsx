@@ -161,5 +161,17 @@ describe('the daily loss card', () => {
     expect(live).toHaveTextContent("Today's figure could not be read just now.")
     expect(live).not.toHaveTextContent('₹')
     expect(live).toHaveTextContent('Not being checked just now: positions cannot be read.')
+    expect(live).not.toHaveTextContent('read at')
+  })
+
+  it("says new orders are paused when today's P&L could not be read while the positions could", () => {
+    card(status(4000, { sandbox: day({ figure: null, unchecked: true, paused: true }) }))
+    const sandbox = screen.getByRole('region', { name: 'Sandbox today' })
+    expect(sandbox).toHaveTextContent("Today's figure could not be read just now.")
+    expect(sandbox).toHaveTextContent(
+      "Not being checked just now: today's P&L cannot be read. New orders are paused meanwhile; exits and cancels still go."
+    )
+    expect(sandbox).not.toHaveTextContent('Orders go meanwhile')
+    expect(sandbox).not.toHaveTextContent('read at')
   })
 })

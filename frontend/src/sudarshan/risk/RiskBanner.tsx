@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils'
 import { useThemeStore } from '@/stores/themeStore'
 import {
   dayLocked,
+  dayPaused,
   dayUncheckedUntil,
   killSwitchOn,
   killSwitchUnread,
@@ -49,6 +50,14 @@ function useDayUnchecked(): boolean {
   return until !== null && until > Date.now()
 }
 
+/** While the limit is not being checked: whether new orders are paused (today's figure could
+ * not be read) rather than going unchecked (the book could not be read). */
+function useDayPaused(): boolean {
+  const state = useKillSwitch()
+  const analyzer = useThemeStore((store) => store.appMode === 'analyzer')
+  return dayPaused(state, analyzer)
+}
+
 /**
  * The kill switch's banner (M20.7), in both shells beside the Analyze banner: Layout above the
  * navbar, FullWidthLayout above the full-screen pages (/trading included). The words and an icon
@@ -57,8 +66,9 @@ function useDayUnchecked(): boolean {
  *
  * When the daily loss limit has locked the day in the book the page trades (M5.14), the same
  * banner says that instead, with a lock on the attention tint; the kill switch, when both hold,
- * is the one said. While the limit cannot be checked (positions unreadable, so orders go
- * unchecked), it says that, with a warning sign, for as long as the server does.
+ * is the one said. While the limit cannot be checked it says that, with a warning sign, for as
+ * long as the server does: orders go unchecked when the positions could not be read (any may be
+ * an exit), new orders are paused when today's figure could not be read (exits still go).
  *
  * It also keeps the app-wide copy of the switch in step (useKillSwitchSync), so the chip in the
  * account controls and every page read the same state.
@@ -69,6 +79,7 @@ export function RiskBanner() {
   const state = useKillSwitch()
   const locked = useDayLocked()
   const unchecked = useDayUnchecked()
+  const paused = useDayPaused()
   const reach = useReach()
   if (killSwitchUnread(state)) {
     return (
@@ -114,10 +125,17 @@ export function RiskBanner() {
       <output className="block" data-testid="risk-banner">
         <Link to="/risk" className="sd-risk-banner sd-risk-banner--day">
           <TriangleAlert aria-hidden="true" className="size-4 shrink-0" />
-          <span>
-            Daily loss limit not being checked <span aria-hidden="true">·</span> positions cannot be
-            read <span aria-hidden="true">·</span> orders go meanwhile
-          </span>
+          {paused ? (
+            <span>
+              Daily loss limit not being checked <span aria-hidden="true">·</span> today's P&L
+              cannot be read <span aria-hidden="true">·</span> new orders paused, exits go
+            </span>
+          ) : (
+            <span>
+              Daily loss limit not being checked <span aria-hidden="true">·</span> positions cannot
+              be read <span aria-hidden="true">·</span> orders go meanwhile
+            </span>
+          )}
         </Link>
       </output>
     )
@@ -145,6 +163,7 @@ export function RiskChip({ variant = 'navbar' }: { variant?: 'navbar' | 'toolbar
   const state = useKillSwitch()
   const locked = useDayLocked()
   const unchecked = useDayUnchecked()
+  const paused = useDayPaused()
   const reach = useReach()
   const unread = killSwitchUnread(state)
   const on = killSwitchOn(state)
@@ -161,7 +180,9 @@ export function RiskChip({ variant = 'navbar' }: { variant?: 'navbar' | 'toolbar
           : 'Kill switch on, but order checks are off on this server'
       : locked
         ? 'Daily loss limit reached: new orders are refused until tomorrow'
-        : 'Daily loss limit not being checked: positions cannot be read'
+        : paused
+          ? "Daily loss limit not being checked: today's P&L cannot be read, so new orders are paused"
+          : 'Daily loss limit not being checked: positions cannot be read'
   return (
     <span
       data-testid="risk-chip"

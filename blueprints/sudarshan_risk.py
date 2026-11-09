@@ -130,6 +130,9 @@ def _daily_status(owner: killswitch.Owner, limit: float | None) -> dict:
         read_at = now
         try:
             figure = _day_figure(pipe, owner)
+        except readers.Unreadable as exc:  # a price or a book not to be had now: said as such
+            logger.warning(f"Today's figure could not be read for the risk page ({pipe}): {exc}")
+            figure = None
         except Exception:
             logger.exception(f"Today's figure could not be read for the risk page ({pipe})")
             figure = None
@@ -137,6 +140,7 @@ def _daily_status(owner: killswitch.Owner, limit: float | None) -> dict:
             read_at = figure.marked_at  # the sandbox: when its positions' prices were had
         session = risk_gate.GATE.session(_CARD_SEGMENT, now)
         lock = risk_gate.GATE.day_lock(pipe)
+        unchecked = risk_gate.GATE.day_unchecked(pipe)
         shown[pipe] = {
             "figure": None if figure is None else round(figure.total, 2),
             "approximate": bool(figure is not None and figure.approximate),
@@ -149,7 +153,9 @@ def _daily_status(owner: killswitch.Owner, limit: float | None) -> dict:
             "lock": None
             if lock is None
             else {"at": lock.at.isoformat(), "figure": lock.figure, "limit": lock.loss_limit},
-            "unchecked": risk_gate.GATE.day_unchecked(pipe),
+            "unchecked": unchecked,
+            # today's figure, not the book, could not be read: new orders pause, exits go
+            "paused": unchecked and risk_gate.GATE.day_unchecked_paused(pipe),
         }
     return shown
 
@@ -179,12 +185,14 @@ def _upstox_kill_switch(owner: killswitch.Owner) -> list[dict] | None:
 
 def _day_state(pipe: str) -> dict:
     """The banner's daily line for ``pipe``: locked today, or not being checked (for how many
-    more seconds the banner says so)."""
+    more seconds the banner says so, and whether new orders are paused meanwhile)."""
     left = risk_gate.GATE.day_unchecked_left(pipe)
     return {
         "locked": risk_gate.GATE.day_lock(pipe) is not None,
         "unchecked": left is not None,
         "unchecked_left_s": left,
+        # today's figure, not the book, could not be read: new orders pause, exits go
+        "paused": left is not None and risk_gate.GATE.day_unchecked_paused(pipe),
     }
 
 

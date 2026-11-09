@@ -49,13 +49,14 @@ function parseDaily(value: unknown): RiskState['daily'] {
   for (const pipe of ['live', 'sandbox'] as RiskPipe[]) {
     const day = (value as Record<string, unknown>)[pipe]
     if (typeof day === 'object' && day !== null) {
-      const { locked, unchecked, unchecked_left_s: left } = day as Record<string, unknown>
+      const { locked, unchecked, unchecked_left_s: left, paused } = day as Record<string, unknown>
       const shown = unchecked === true && typeof left === 'number' && left > 0
       daily[pipe] = {
         locked: locked === true,
         unchecked: shown,
         unchecked_left_s: shown ? left : null,
         unchecked_until: shown ? Date.now() + left * 1000 : null,
+        paused: shown && paused === true,
       }
     }
   }
@@ -170,6 +171,15 @@ export function dayUncheckedUntil(state: RiskState | null, sandbox: boolean): nu
   const day = state?.daily?.[sandbox ? 'sandbox' : 'live']
   if (!day?.unchecked || typeof day.unchecked_until !== 'number') return null
   return day.unchecked_until
+}
+
+/**
+ * Whether the line above says new orders are paused (today's figure could not be read, so the
+ * gate refuses them while exits go), rather than that orders go unchecked (the book could not be
+ * read, so any order may be an exit).
+ */
+export function dayPaused(state: RiskState | null, sandbox: boolean): boolean {
+  return state?.daily?.[sandbox ? 'sandbox' : 'live']?.paused === true
 }
 
 /**

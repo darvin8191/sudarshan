@@ -472,7 +472,9 @@ def _sandbox_unrealised(user_id: str, held: list) -> tuple[float, datetime]:
     """The open positions' P&L at the sandbox's own prices, by its own arithmetic
     (``PositionManager._calculate_position_pnl`` with the contract's value), and when the prices
     were had. A contract past its expiry that the sandbox has not settled yet is valued at the
-    price its settlement will use, needing no quote."""
+    price its settlement will use, needing no quote. Raises ``Unreadable`` when any other open
+    position has no price now: its stored figure may be any age, and is never served as current
+    (review of v0.6.1, MEDIUM-2)."""
     from sandbox.position_manager import (
         PositionManager,
         get_contract_expiry,
@@ -496,8 +498,7 @@ def _sandbox_unrealised(user_id: str, held: list) -> tuple[float, datetime]:
     for index, row in enumerate(held):
         price = settled.get(index, prices.get((row.symbol, row.exchange)))
         if price is None:
-            total += _number(row.pnl)  # no price now: its last stored mark
-            continue
+            raise Unreadable(f"sandbox prices: none now for {row.symbol} on {row.exchange}")
         value = manager._get_contract_value(row.symbol, row.exchange)
         total += float(
             manager._calculate_position_pnl(

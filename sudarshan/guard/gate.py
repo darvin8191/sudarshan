@@ -439,6 +439,8 @@ class Gate:
         self._day_locks: dict[tuple[str, str], risk_store.DayLock | None] = {}
         self._sessions = LockedTTLCache(maxsize=32, ttl=SESSION_KEPT_S)
         self._unchecked: dict[str, float] = {}  # pipe -> monotonic: the daily limit unchecked
+        # pipe -> whether that was today's figure, not the book: new orders paused, exits go
+        self._paused: dict[str, bool] = {}
         self._bursts: dict[str, _Burst] = {}  # pipe -> its admissions (the burst brake)
         self._tellings: dict[tuple, tuple[float, int]] = {}  # (pipe, symbol, code) -> (at, untold)
         self._problem: tuple[float, str, str] | None = None  # (epoch, kind, words): the last one
@@ -1146,7 +1148,7 @@ class Gate:
         except readers.Unreadable as exc:
             logger.warning(f"The daily loss limit could not be checked: {exc}")
             with self._lock:
-                now_shown = self._mark_unchecked(order.pipe, time.monotonic())
+                now_shown = self._mark_unchecked(order.pipe, time.monotonic(), paused=True)
             if now_shown:
                 _announce_unchecked(order.pipe)
             return None, True
@@ -1323,12 +1325,28 @@ class Gate:
         left = at + UNCHECKED_SHOWN_S - time.monotonic()
         return round(left, 1) if left >= 0 else None
 
-    def _mark_unchecked(self, pipe: str, now: float) -> bool:
-        """The daily limit could not be checked in ``pipe`` just now; True when the banner was
-        not already saying so (the screens are told). Call under the lock."""
+    def day_unchecked_paused(self, pipe: str) -> bool:
+        """Whether the daily limit is not being checked because today's figure could not be read
+        while the book could (new orders are paused, exits go), rather than because the book
+        could not be read (orders go, since any may be an exit). Read with
+        ``day_unchecked_left``, which says whether it is being said at all."""
+        with self._lock:
+            return self._paused.get(pipe, False)
+
+    def _mark_unchecked(self, pipe: str, now: float, paused: bool = False) -> bool:
+        """The daily limit could not be checked in ``pipe`` just now: ``paused`` when it was
+        today's figure that could not be read (new orders refused), else the book (orders go).
+        While a book that could not be read is being said, that stays the line: orders go then,
+        and an order refused for its figure says so in its own words. True when the banner was
+        not already saying this (the screens are told). Call under the lock."""
         at = self._unchecked.get(pipe)
+        shown = at is not None and now - at <= UNCHECKED_SHOWN_S
+        was_paused = self._paused.get(pipe, False)
+        if paused and shown and not was_paused:
+            paused = False
         self._unchecked[pipe] = now
-        return at is None or now - at > UNCHECKED_SHOWN_S
+        self._paused[pipe] = paused
+        return not shown or was_paused != paused
 
     # -- deciding, under the lock -------------------------------------------------------------------
 

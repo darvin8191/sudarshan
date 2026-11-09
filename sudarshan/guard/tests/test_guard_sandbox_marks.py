@@ -283,3 +283,50 @@ def test_a_fill_while_the_prices_are_read_leaves_no_mark_and_the_figure_true(
     assert fired["done"] and stored.quantity == 50
     assert stored.pnl == 0.0  # the fill's own figure, never one worked out for 100
     assert figure.total == -10_000.0  # the rows as read: the truth before the fill and after it
+
+
+def test_a_position_with_no_price_now_makes_the_figure_unreadable_never_the_old_one(
+    sandbox,  # noqa: F811
+    monkeypatch,
+):
+    """Review of v0.6.1, MEDIUM-2: no tick for 5 s and multiquotes refused, busy or timed out:
+    the marking kept the old mark (-10,000 at 700) and said "read at" now while the market had
+    fallen to 600 (truth -20,000). With no price for an open position the figure is unreadable."""
+    from sandbox.position_manager import PositionManager
+
+    price = {"ltp": 800.0}
+    _prices(monkeypatch, price)
+    assert _place("BUY", 100)[0]
+    price["ltp"] = 700.0
+    _a_second_later()
+    assert readers.sandbox_day(USER).total == -10_000.0
+    price["ltp"] = 600.0  # the market falls further, but no price can be had now
+    monkeypatch.setattr(PositionManager, "_fetch_quotes_from_websocket", lambda self, s: {})
+    monkeypatch.setattr(PositionManager, "_fetch_quotes_batch", lambda self, s: {})
+    _a_second_later()
+    with pytest.raises(readers.Unreadable):
+        readers.sandbox_day(USER)
+
+
+def test_with_no_price_new_orders_pause_and_exits_go_and_the_screens_hear_why(
+    sandbox,  # noqa: F811
+    monkeypatch,
+    risk_store,
+):
+    from sandbox.position_manager import PositionManager
+    from sudarshan.guard import words
+
+    price = {"ltp": 800.0}
+    _prices(monkeypatch, price)
+    _quiet_announcements(monkeypatch)
+    risk_store.save_settings("owner", daily_loss_limit=LIMIT)
+    monkeypatch.setattr(sandbox, "_in_session", lambda exchange, at: True)
+    assert _place("BUY", 100)[0]
+    monkeypatch.setattr(PositionManager, "_fetch_quotes_from_websocket", lambda self, s: {})
+    monkeypatch.setattr(PositionManager, "_fetch_quotes_batch", lambda self, s: {})
+    _a_second_later()
+    ok, body, status = _place("BUY", 1)
+    assert (ok, status) == (False, 403)
+    assert body["message"] == words.daily_unreadable("sandbox")
+    assert sandbox.day_unchecked("sandbox") and sandbox.day_unchecked_paused("sandbox")
+    assert _place("SELL", 50)[0]  # an exit goes

@@ -573,3 +573,19 @@ def test_an_order_that_read_the_book_just_before_another_locked_the_day_is_refus
     day.book.before_rows = b_locks_the_day_first
     refused_message(upstox.place(order("BUY", symbol=PE), "token"))  # A
     assert ran == ["B"] and upstox.reached == []
+
+
+def test_the_banner_says_why_the_limit_is_not_checked_and_an_unread_book_stays_the_line(day):
+    """Today's figure unreadable while the book reads: new orders are paused (exits go). The book
+    unreadable: orders go, since any may be an exit. While that is being said it stays the line,
+    for an order refused for its figure says so in its own words; each change is told."""
+    unchecked = day.gate._mark_unchecked
+    assert unchecked("sandbox", 100.0, paused=True) is True  # told
+    assert day.gate.day_unchecked_paused("sandbox")
+    assert unchecked("sandbox", 101.0, paused=True) is False  # already being said
+    assert unchecked("sandbox", 102.0) is True  # the book now: orders go, told again
+    assert not day.gate.day_unchecked_paused("sandbox")
+    assert unchecked("sandbox", 103.0, paused=True) is False  # the book's line stays
+    assert not day.gate.day_unchecked_paused("sandbox")
+    assert unchecked("sandbox", 103.0 + gate.UNCHECKED_SHOWN_S + 1, paused=True) is True
+    assert day.gate.day_unchecked_paused("sandbox")
