@@ -11,7 +11,7 @@
 {"id": "W3c", "why": ["no_data", "vwap"], "sentence": "No VWAP yet", "line": "Not checked: no VWAP yet"}, 
 {"id": "W3d", "why": ["no_data", "year_high"], "sentence": "No 52-week high yet", "line": "Not checked: no 52-week high yet"}, 
 {"id": "W3e", "why": ["no_data", "year_low"], "sentence": "No 52-week low yet", "line": "Not checked: no 52-week low yet"}, 
-{"id": "W3e2", "why": ["no_data", "day_open"], "sentence": "Day open not known yet", "line": "Not checked: day open not known yet", "note": "the exchange's day candle has not come; the first trade never stands in for its open"}, 
+{"id": "W3e2", "why": ["no_data", "day_open"], "sentence": "The day's open, high and low are not known yet", "line": "Not checked: the day's open, high and low are not known yet", "note": "the exchange's day candle has not come; the first trade never stands in for its open"}, 
 {"id": "W3f", "why": ["no_data", "spot"], "sentence": "No spot price yet", "line": "Not checked: no spot price yet"}, 
 {"id": "W3g", "why": ["no_data", "iv"], "sentence": "No implied volatility yet", "line": "Not checked: no implied volatility yet"}, 
 {"id": "W3h", "why": ["no_data", "option price"], "sentence": "No option price yet", "line": "Not checked: no option price yet"}, 

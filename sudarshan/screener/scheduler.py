@@ -19,7 +19,8 @@ every one has printed, or at the latest until the auction window's end plus the 
 
 A screen made, resumed or edited during the session starts a new version (``Screen.since``, the
 moment it began), and its run key is new for every boundary of the day. It gets one run, on the
-latest candle closed by then, on time and not marked late, and then follows its schedule: the day's
+latest candle closed by then, on time (not marked late unless a restart delayed it past
+``LATE_MS`` from the later of its moment and the version's start), and then follows its schedule: the day's
 earlier boundaries are not its missed checks and are never run at once (round-3 review MEDIUM-B6:
 95 runs of a 3-minute screen made at 14:00, with their list changes and alerts for old candles).
 A boundary after the version began that its run missed (a restart) is still run late, marked so.
@@ -132,11 +133,13 @@ def _held_until(screen: Screen, sessions: Mapping[str, Session], boundary: Bound
 
 
 def _first(today: Sequence[Boundary], since: int) -> int:
-    """The index of the screen's first run today: the latest boundary whose moment had come when
-    its version began, else the day's first."""
+    """The index of the screen's first run today: the latest boundary whose candle had closed when
+    its version began (its run moment, end plus the grace, may still be seconds away: the loop
+    waits for it, so an edit just after a close judges that candle once and no older one), else
+    the day's first."""
     first = 0
     for k, boundary in enumerate(today):
-        if boundary.at > since:
+        if boundary.end > since:
             break
         first = k
     return first
@@ -171,7 +174,7 @@ def due(
             key = RunKey(screen.id, screen.version, session, boundary.tf, boundary.k)
             if recorded(str(key)):
                 continue
-            late = now - boundary.at > LATE_MS and boundary.at > screen.since
+            late = now - max(boundary.at, screen.since) > LATE_MS
             out.append(Due(key, screen, boundary, late, boundary is today[-1]))
     out.sort(key=lambda item: (item.boundary.at, item.screen.id))
     return out

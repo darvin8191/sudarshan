@@ -266,8 +266,9 @@ today's bars, each with its running volume, so a restart's first bar carries its
 restart opens a pause from the last seen mark: a candle that holds minutes the screener did not see
 is "Not checked", never judged whole. An instrument no screen followed for a while (a screen paused
 and resumed, a watchlist that could not be read, the key limit) counts its volume again from when
-it comes back, and the stretch is kept as that instrument's own pause (with its key, so a restart
-keeps it): its candles that hold the stretch are "Not checked" too. A start that cannot follow
+it comes back, and the stretch is kept as that instrument's own pause (with its key, written open
+when the instrument is let go and closed when it comes back, so a restart in between keeps it
+from the let-go): its candles that hold the stretch are "Not checked" too. A start that cannot follow
 anything at once (OpenAlgo's master contract downloading) counts the wait the same way for every
 instrument it had bars of. An instrument first followed after 09:15 (the first screen on its
 universe made or resumed later, or a restart for an instrument the store holds no bar of) was not
@@ -279,9 +280,11 @@ The day candle is the exchange's: its open, high and low come from the day candl
 frame carries (the pre-open price is the open, as on every broker's chart), as it stood at the
 latest trade judged, and its volume is the exchange's running total there, the pre-open included.
 Until a frame has carried that candle (after a restart, until the next trade) they read "Not
-checked: day open not known yet", never the first trade's. A stretch nobody watched earlier in the
-day no longer blanks the day once a trade after it has come; a pause after the latest trade still
-does.
+checked: the day's open, high and low are not known yet", never the first trade's. A stretch
+nobody watched earlier in the day no longer blanks the day once a trade after it has come; a
+pause after the latest trade still does. A start before the open that hears no pre-open frame
+(Upstox sends none from 09:08 to 09:15) takes the first trade of the session as its baseline, so
+the pre-open volume is in no bar.
 
 ## What the screener follows, and when
 
@@ -296,9 +299,11 @@ does.
 - Keys past `SUDARSHAN_SCREENER_MAX_KEYS` are not claimed and read "Not checked: past the 320
   instruments the screener can follow tick by tick".
 - A screen made, resumed or edited during the session has one check, on the latest candle closed
-  by then (on time, never marked late), and then follows its schedule: the day's earlier checks
-  are never run at once, so no list change or alert comes for a candle that closed before it. A
-  check a restart missed after that is still made late, marked so. A screen whose lines read only
+  by then (on time), and then follows its schedule: the day's earlier checks are never run at once,
+  so no list change or alert comes for a candle that closed before the latest one. An edit within
+  5 s after a close waits for that candle's check and runs no older one. A first check that a
+  restart delayed, and every check a restart missed after it, is made late and marked so. A screen
+  changed in the evening has one check on the day's last candle, at the change. A screen whose lines read only
   day candles is judged on the forming day candle at each close of its run's timeframe.
 
 ## Not built yet

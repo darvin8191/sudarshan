@@ -48,9 +48,9 @@ def health(now_ms: int, *, state="connected", live=True, age=0.5) -> bytes:
                        "market_status": {"NSE_EQ": "NORMAL_OPEN"}}).encode()  # fmt: skip
 
 
-def frame(key: str, at: int, ltp: float, vtt: int, cp: float = 90.0) -> bytes:
+def frame(key: str, at: int, ltp: float, vtt: int, cp: float = 90.0, ltq: int = 1) -> bytes:
     return json.dumps(
-        {"key": key, "ltp": ltp, "ltt": at, "ltq": 1, "vtt": vtt, "cp": cp, "ts_recv": at}
+        {"key": key, "ltp": ltp, "ltt": at, "ltq": ltq, "vtt": vtt, "cp": cp, "ts_recv": at}
     ).encode()
 
 
@@ -108,7 +108,7 @@ def test_frames_become_sealed_bars_a_live_subject_and_a_run(world):
             sealed += source.on_frame(HEALTH, health(at - 1000), at - 1000)
             vtt += 10
             price = 100.0 + minute * 0.5 + (0.1 if second == 35 else 0)
-            sealed += source.on_frame(RELIANCE, frame(RELIANCE, at, price, vtt), at)
+            sealed += source.on_frame(RELIANCE, frame(RELIANCE, at, price, vtt, ltq=10), at)
         clock["now"] = at + 30_000
         sealed += source.on_clock(clock["now"])
     source.persist(sealed)

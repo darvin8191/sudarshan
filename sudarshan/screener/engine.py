@@ -35,7 +35,7 @@ where ``[1]`` is the candle before the one read (touching the line then counts a
 
 A candle built while the price feed paused and not repaired (``UNVERIFIED``) makes any line that
 reads it UNKNOWN with ``PAUSED``; today's day candle before the exchange's open, high and low have
-come (``NO_EXCHANGE_DAY``) does the same for a line that stands on them, "day open not known yet"; what a line reads is the candle it names (a window operand reads
+come (``NO_EXCHANGE_DAY``) does the same for a line that stands on them, "the day's open, high and low are not known yet"; what a line reads is the candle it names (a window operand reads
 the window, an indicator only the candle it is read at). A closing-auction stock is not judged on
 the day's last candle until its auction price has come: "Not checked: no closing auction price yet".
 
@@ -414,7 +414,7 @@ class Reading:
         self, series: Series, first: int, after: int, forming: bool = False, ohl: bool = True
     ) -> Why | None:
         """Note the candles ``[first, after)`` as read; PAUSED when one was never verified, and
-        "day open not known yet" when the read stands on today's open, high or low (``ohl``) and
+        "the day's open, high and low are not known yet" when the read stands on today's open, high or low (``ohl``) and
         the exchange has not given them."""
         pause = price.unverified_in(series, first, after)
         if pause is None and ohl:
