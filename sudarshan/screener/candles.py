@@ -12,8 +12,8 @@ interest and VWAP the last the feed gave (-1 and 0 when it never did). Its flags
 UNVERIFIED when any bar a pause touched has not been replaced from REST, REPAIRED when any was,
 LATE and FROM_I1 as the bars say. A candle whose span a pause touched is UNVERIFIED too, though no
 bar of it was in the pause (the market alerts' rule): the minutes after its last bar were not
-watched, by a quiet feed or by a stopped screener. Weeks are the days from the week's first
-trading day.
+watched, by a quiet feed, by a stopped screener, or because no screen followed the key then (its
+gap, bars.Bars.follow_from). Weeks are the days from the week's first trading day.
 """
 
 from __future__ import annotations
@@ -102,15 +102,17 @@ def series(
 
 def read(store: Bars, key: str, tf: TF, market: Market, boundary: int) -> Series:
     """``key``'s candles of ``tf`` up to ``boundary``, from the bars ``store`` holds: the cash grid
-    (a stock that closes by auction is read on it too), the pauses as they fall inside the key's
-    own session. A store still on an earlier day (no frame or clock tick has rolled it yet) has
-    no candles for today, never yesterday's."""
+    (a stock that closes by auction is read on it too), the pauses (the feed's and the service's,
+    and the key's own gaps: stretches the screener did not follow it) as they fall inside the
+    key's own session. A store still on an earlier day (no frame or clock tick has rolled it yet)
+    has no candles for today, never yesterday's."""
     segment = segment_of(key)
     grid = market.sessions.get(segment)
     own = market.sessions.get(segment + AUCTION if key in market.auction else segment)
     if grid is None or own is None or store.day != market.today:
         return Series.of(tf, [])
-    pauses = within(market.pauses, own.start, own.end) if market.pauses else ()
+    pauses = market.pauses + store.gaps(key)
+    pauses = within(pauses, own.start, own.end) if pauses else ()
     return series(store.bars(key), tf, grid, boundary, pauses)
 
 

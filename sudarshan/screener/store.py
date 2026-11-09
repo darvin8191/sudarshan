@@ -893,10 +893,13 @@ class Tx:
         query = select(t).where(t.c[first] == name).order_by(t.c.session.desc()).limit(limit)
         return self._all(query)
 
-    def pause_open(self, session: int, start: int, why: str) -> int:
+    def pause_open(
+        self, session: int, start: int, why: str, *, end: int | None = None, key: str | None = None
+    ) -> int:
+        """A pause of every key, or of one ``key`` (its gap: the screener did not follow it)."""
         t = self._t("pause")
         return self.conn.execute(
-            insert(t).values(session=session, start=start, why=why)
+            insert(t).values(session=session, start=start, why=why, end=end, key=key)
         ).inserted_primary_key[0]
 
     def pause_close(self, pause_id: int, end: int) -> None:

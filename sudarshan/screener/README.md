@@ -199,8 +199,8 @@ session's, on the phone.
 
 ## Storage
 
-`screener.db` (schema 2, `migrations.py`; step 2 adds each bar's running volume `cum` and last
-trade time `last_trade`): screens and their state, runs with their changes and values (kept 100
+`screener.db` (schema 3, `migrations.py`; step 2 adds each bar's running volume `cum` and last
+trade time `last_trade`, step 3 a pause's `key`): screens and their state, runs with their changes and values (kept 100
 and 7 days), membership per screen, list and instrument (`first_seen`, `last_seen`, `exited_at`,
 `pinned`, never pruned, kept when a screen is deleted), the list as last seen (each add recorded
 before it is sent), the alert marks per session and the pauses (kept 7 days), the outbox (list
@@ -211,7 +211,11 @@ owner edit and run.
 `bar_today` holds one trading day: a start or midnight clears every earlier day and restores only
 today's bars, each with its running volume, so a restart's first bar carries its own volume. A
 restart opens a pause from the last seen mark: a candle that holds minutes the screener did not see
-is "Not checked", never judged whole.
+is "Not checked", never judged whole. An instrument no screen followed for a while (a screen paused
+and resumed, a watchlist that could not be read, the key limit) counts its volume again from when
+it comes back, and the stretch is kept as that instrument's own pause (with its key, so a restart
+keeps it): its candles that hold the stretch are "Not checked" too. A stretch before the open, or of
+10 s or less, changes nothing.
 
 ## What the screener follows, and when
 

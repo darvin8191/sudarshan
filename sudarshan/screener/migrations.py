@@ -14,7 +14,8 @@ an older release never writes to a schema it does not know.
 Schema 1 is frozen: its SQL never changes, and a later change is a new step. Every owner-data
 table carries ``principal`` (``'owner'`` in this release) so a family read-only layer later adds
 principals and no columns (6.5). Step 2 adds a sealed bar's running volume and last trade time
-to ``bar_today`` (release review HIGH-1).
+to ``bar_today`` (release review HIGH-1). Step 3 lets a pause name one instrument (re-review
+MEDIUM-1).
 """
 
 from __future__ import annotations
@@ -270,7 +271,14 @@ def _v2(conn: Connection) -> None:
     add_column(conn, "bar_today", "last_trade", "INTEGER")
 
 
-STEPS: Sequence[Step] = ((1, _v1), (2, _v2))
+def _v3(conn: Connection) -> None:
+    """A pause may name one instrument (``key``): the stretch the screener did not follow a key it
+    then followed again the same day (re-review MEDIUM-1), kept so a restart still marks that
+    key's candles. NULL is a pause of every key, which is what every row written before is."""
+    add_column(conn, "pause", "key", "TEXT")
+
+
+STEPS: Sequence[Step] = ((1, _v1), (2, _v2), (3, _v3))
 LATEST = STEPS[-1][0]
 
 

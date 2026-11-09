@@ -27,6 +27,12 @@ sealed. A bar's volume spans from the last trade of the bar before it, so a paus
 marks the bar after it too. ``repair`` replaces those bars from the REST candles; a replaced bar is
 REPAIRED and is never UNVERIFIED again.
 
+A key let go and followed again the same day (``follow_from``; re-review MEDIUM-1) was not watched
+in between, so the stretch is that key's own pause (a gap, ``gaps``) and its first frame of a trade
+made after it comes back is its baseline in place of the running total: the volume traded meanwhile
+belongs to no bar, and the candles that hold the gap are UNVERIFIED. A gap before the open, or no
+longer than GAP_S inside the session, changes nothing.
+
 A stock that closes by auction (``Market.auction``) trades continuously to the continuous end and
 then prints the auction's price once (clock.auction; the frame must carry a volume that rose, as
 Book.on_tick says). The print belongs to the last minute of the cash session, so the 15:15 to 15:30
@@ -67,6 +73,8 @@ MINUTE_MS = 60_000
 REPAIR_WAIT_MS = 60_000
 #: A trade for a minute that came too late to count (``Tick.check``).
 LATE_TRADE = "late"
+#: The cause of a key's own pause: the screener did not follow it then (``Bars.follow_from``).
+UNFOLLOWED = "unfollowed"
 
 
 class Bar(NamedTuple):
@@ -109,6 +117,15 @@ class Repair(NamedTuple):
     rows: tuple[Sealed, ...]
     #: Starts of the minutes the REST candles do not have: their bars are gone.
     removed: tuple[int, ...]
+
+
+class Followed(NamedTuple):
+    """What a change of the keys followed made, for the store to write."""
+
+    #: The minutes a key followed again held open from before it was let go, sealed now.
+    sealed: tuple[Sealed, ...] = ()
+    #: (key, gap) for each key followed again after a stretch that counts.
+    gaps: tuple[tuple[str, Pause], ...] = ()
 
 
 def seal_at(end: int) -> int:
@@ -235,7 +252,7 @@ class _Key:
     """Everything kept for one instrument key today."""
 
     __slots__ = ("trade", "seen", "cum", "pre", "oi", "atp", "open", "sealed", "cums", "late",
-                 "printed", "printed_at", "rebase")  # fmt: skip
+                 "printed", "printed_at", "rebase", "again")  # fmt: skip
 
     def __init__(self) -> None:
         #: The identity of the last trade the gate let through.
@@ -257,6 +274,9 @@ class _Key:
         #: Set for a key first seen after a restore: the restore's moment (epoch ms); its first
         #: frame of a trade made today becomes its baseline (``Bars._rebase``).
         self.rebase: int | None = None
+        #: True for a key followed again after a gap until its baseline is taken: the baseline
+        #: then replaces the running total, not only the pre-open volume.
+        self.again = False
 
 
 class Bars:
@@ -268,16 +288,66 @@ class Bars:
         #: Keys first followed after the day began, with the moment they were claimed: their
         #: first frame of a trade made today is their baseline too (see ``follow_from``).
         self._claimed: dict[str, int] = {}
+        self._reset()
 
-    def follow_from(self, keys: Iterable[str], at: int) -> None:
-        """Keys the screener follows from ``at`` on (a screen made, resumed or edited, a master
-        download, an option window built). A key the bars hold nothing of has traded before ``at``
-        and nobody counted it, so its first frame of a trade made today becomes its baseline and
-        that volume belongs to no bar, as after a restart. Before the open this changes nothing:
-        the pre-open frames give the baseline, as on any day."""
-        for key in keys:
-            if key not in self._keys and key not in self._claimed:
-                self._claimed[key] = at
+    def _reset(self) -> None:
+        #: The keys followed, as the last ``follow_from`` named them; None until the first one
+        #: after a restore or a new day.
+        self._followed: frozenset[str] | None = None
+        #: Keys let go today and not followed again yet, with the moment they were let go.
+        self._let_go: dict[str, int] = {}
+        #: Each key's gaps today: the stretches it was not followed (``follow_from``).
+        self._gaps: dict[str, list[Pause]] = {}
+
+    def follow_from(self, keys: Iterable[str], at: int, market: Market) -> Followed:
+        """The whole set of keys the screener follows from ``at`` on (a screen made, resumed,
+        paused, edited or deleted, a master download, an option window built, a watchlist read
+        again or not, the key limit).
+
+        A key the bars hold nothing of has traded before ``at`` and nobody counted it, so its first
+        frame of a trade made today becomes its baseline and that volume belongs to no bar, as
+        after a restart. Before the open this changes nothing: the pre-open frames give the
+        baseline, as on any day.
+
+        A key let go earlier today and followed again was not watched in between (re-review
+        MEDIUM-1). When that stretch holds more than GAP_S of its session, the minutes it held
+        open are sealed now from the running total (nothing more of them can come), its first
+        frame of a trade made from now on is its baseline in place of that total, and the
+        stretch becomes its gap. A shorter stretch, or one before the open, changes nothing: the
+        running total carries what traded meanwhile into the next bar, as for a lost frame.
+
+        The first set after a restore says which of the keys the store held go on: one no screen
+        follows then is let go from the moment of the restore."""
+        self._roll(market.today)
+        wanted = frozenset(keys)
+        first = self._followed is None
+        before = frozenset(self._keys) if first else self._followed
+        let_go = self._since if first and self._since is not None else at
+        for key in before - wanted:
+            self._let_go.setdefault(key, let_go)
+        sealed: list[Sealed] = []
+        gaps: list[tuple[str, Pause]] = []
+        for key in sorted(wanted if first else wanted - before):
+            since = self._let_go.pop(key, None)
+            state = self._keys.get(key)
+            if state is None:
+                if since is not None or key not in self._claimed:
+                    self._claimed[key] = at
+            elif since is not None:
+                gap = self._again(key, state, since, at, market, sealed)
+                if gap is not None:
+                    gaps.append((key, gap))
+        self._followed = wanted
+        return Followed(tuple(sealed), tuple(gaps))
+
+    def gaps(self, key: str) -> tuple[Pause, ...]:
+        """``key``'s gaps today: the stretches the screener did not follow it."""
+        return tuple(self._gaps.get(key, ()))
+
+    def restore_gaps(self, gaps: Iterable[tuple[str, Pause]]) -> None:
+        """Today's gaps from the store after a start (after ``restore``): they hold all day."""
+        for key, gap in gaps:
+            self._gaps.setdefault(key, []).append(gap)
 
     # ---- what the runtime asks -------------------------------------------------------------
     @property
@@ -388,6 +458,7 @@ class Bars:
         volume belongs to no bar, as the pre-open volume never does."""
         self._day, self._keys, self._since = day, {}, since
         self._claimed = {}
+        self._reset()
         for row in rows:
             state = self._keys.setdefault(row.key, _Key())
             state.sealed[row.bar.start] = row.bar
@@ -411,10 +482,11 @@ class Bars:
         segment = segment_of(key)
         grid = market.sessions.get(segment)
         own = market.sessions.get(segment + AUCTION if key in market.auction else segment)
-        if grid is None or own is None or not market.pauses or market.today != self._day:
+        pauses = market.pauses + self.gaps(key)
+        if grid is None or own is None or not pauses or market.today != self._day:
             return Repair((), ())
         state = self._keys.setdefault(key, _Key())
-        pauses = within(market.pauses, own.start, own.end)
+        pauses = within(pauses, own.start, own.end)
         rows = list(rest)
         have = {row.start: row for row in rows if _candle(row)}
         given = {row.start for row in rows}
@@ -450,6 +522,23 @@ class Bars:
         if today != self._day:
             self._day, self._keys, self._since = today, {}, None
             self._claimed = {}
+            self._reset()
+
+    def _again(
+        self, key: str, state: _Key, since: int, at: int, market: Market, sealed: list[Sealed]
+    ) -> Pause | None:
+        """A key let go at ``since`` and followed again at ``at``: its gap, or None when the
+        stretch holds no more than GAP_S of its session (``follow_from``)."""
+        grid = market.sessions.get(segment_of(key))
+        gap = Pause(since, at, UNFOLLOWED)
+        inside = within((gap,), grid.start, grid.end) if grid is not None else ()
+        if not inside or not paused_during(inside, grid.start, grid.end):
+            return None
+        for start in sorted(state.open):  # traded before the let-go, from the running total
+            sealed.append(self._seal(key, state, start))
+        state.rebase, state.again = at, True
+        self._gaps.setdefault(key, []).append(gap)
+        return gap
 
     @staticmethod
     def _rebase(
@@ -461,14 +550,16 @@ class Bars:
         grid: Session | None,
     ) -> None:
         """The baseline of a key first seen after a restore made once its session had begun
-        (``restore(since=...)``): its first frame of a trade made today. A trade made after the
-        restore counts its own quantity (``ltq``) and nothing before it; one made before the
-        restore counts nothing. A frame of an earlier day's trade carries yesterday's total and
-        waits for today's. A restore before the session's start leaves the pre-open baseline to
-        the frames before the open, as on any day."""
+        (``restore(since=...)``), first followed then, or followed again after a gap: its first
+        frame of a trade made today. A trade made after that moment counts its own quantity
+        (``ltq``) and nothing before it; one made before it counts nothing. A frame of an earlier
+        day's trade carries yesterday's total and waits for today's. A restore before the
+        session's start leaves the pre-open baseline to the frames before the open, as on any
+        day. A key followed again starts its running total again here (``cum`` and the pre-open
+        volume give way to the baseline)."""
         since = state.rebase
         if grid is None or since is None or since < grid.start:
-            state.rebase = None
+            state.rebase, state.again = None, False
             return
         if volume is None or ltt is None or ltt < epoch_ms(key_day(today), 0):
             return
@@ -476,7 +567,9 @@ class Bars:
         quantity = _count(frame.get("ltq"))
         fresh = ltt >= since and quantity is not None and 0 < quantity <= volume
         base = volume - quantity if fresh else volume
-        if state.pre is None or base > state.pre:
+        if state.again:
+            state.again, state.cum, state.pre = False, None, base
+        elif state.pre is None or base > state.pre:
             state.pre = base
 
     def _trade(self, state: _Key, item: _In, market: Market, sealed: list[Sealed]) -> str:
@@ -532,7 +625,7 @@ class Bars:
                 minute = state.open[start] = _Open(start, state.oi, state.atp)
             minute.add(at, price, volume, oi, atp)
             return self._seal(key, state, start)
-        cum = state.cum or 0
+        cum = state.cum if state.cum is not None else (state.pre or 0)  # as _seal (MEDIUM-1)
         added = 0 if volume is None else max(0, volume - cum)
         bar = held._replace(
             h=max(held.h, price),
