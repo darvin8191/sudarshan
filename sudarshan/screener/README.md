@@ -226,7 +226,7 @@ The day candle is the exchange's: its open, high and low come from the day candl
 frame carries (the pre-open price is the open, as on every broker's chart), as it stood at the
 latest trade judged, and its volume is the exchange's running total there, the pre-open included.
 Until a frame has carried that candle (after a restart, until the next trade) they read "Not
-checked: day open not known yet", never the first trade's. A stretch nobody watched earlier in the
+checked: the day's open, high and low are not known yet", never the first trade's. A stretch nobody watched earlier in the
 day no longer blanks the day once a trade after it has come; a pause after the latest trade still
 does.
 
@@ -243,9 +243,11 @@ does.
 - Keys past `SUDARSHAN_SCREENER_MAX_KEYS` are not claimed and read "Not checked: past the 320
   instruments the screener can follow tick by tick".
 - A screen made, resumed or edited during the session has one check, on the latest candle closed
-  by then (on time, never marked late), and then follows its schedule: the day's earlier checks
-  are never run at once, so no list change or alert comes for a candle that closed before it. A
-  check a restart missed after that is still made late, marked so. A screen whose lines read only
+  by then (on time), and then follows its schedule: the day's earlier checks are never run at once,
+  so no list change or alert comes for a candle that closed before the latest one. An edit within
+  5 s after a close waits for that candle's check and runs no older one. A first check that a
+  restart delayed, and every check a restart missed after it, is made late and marked so. A screen
+  changed in the evening has one check on the day's last candle, at the change. A screen whose lines read only
   day candles is judged on the forming day candle at each close of its run's timeframe.
 
 ## Not built yet

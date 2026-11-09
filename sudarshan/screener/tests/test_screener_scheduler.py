@@ -175,7 +175,7 @@ def test_checks_a_restart_missed_after_the_version_began_are_still_run_late():
     ]  # fmt: skip
     edited = sch.Screen(7, 2, "close", 15, frozenset({"NSE_EQ"}), since=hm(DAY, "10:00") + 10_000)
     assert ends(sch.due([edited], NORMAL, hm(DAY, "11:01"), lambda key: False)) == [
-        ("10:00", False), ("10:15", True), ("10:30", True), ("10:45", True), ("11:00", False),
+        ("10:00", True), ("10:15", True), ("10:30", True), ("10:45", True), ("11:00", False),
     ]  # fmt: skip
 
 
@@ -183,3 +183,38 @@ def test_an_after_close_screen_made_in_the_evening_runs_once_and_not_late():
     screen = sch.Screen(8, 1, "after_close", 0, frozenset({"NSE_EQ"}), since=hm(DAY, "17:00"))
     found = sch.due([screen], NORMAL, hm(DAY, "17:00") + 1_000, lambda key: False)
     assert [(item.boundary.tf, item.late) for item in found] == [("after_close", False)]
+
+
+# ---- a new version's first run, at its edges (round-4 review LOW-A4) ----------------------------
+def test_an_edit_just_after_a_close_first_runs_that_candle_once_and_no_older_one():
+    """Edited at 10:00:03, the 15-minute candle that closed at 10:00 is the latest closed: its run
+    waits for its moment (10:00:05) and nothing runs for 09:45, which the old rule ran first."""
+    edited = hm(DAY, "10:00") + 3_000
+    screen = sch.Screen(7, 2, "close", 15, frozenset({"NSE_EQ"}), since=edited)
+    done: set[str] = set()
+    assert sch.due([screen], NORMAL, edited, done.__contains__) == []
+    first = sch.due([screen], NORMAL, hm(DAY, "10:00") + 5_000, done.__contains__)
+    assert ends(first) == [("10:00", False)]
+    done |= {str(item.key) for item in first}
+    assert sch.due([screen], NORMAL, hm(DAY, "10:00") + 9_000, done.__contains__) == []
+    assert ends(sch.due([screen], NORMAL, hm(DAY, "10:15") + 5_000, done.__contains__)) == [
+        ("10:15", False)
+    ]
+
+
+def test_a_first_run_a_restart_delayed_is_marked_late():
+    """Edited at 10:00:10 and the service back at 11:01: the 10:00 candle's check is an hour old,
+    so its history line says so. At 10:00:30 (the loop 20 s behind) it is still on time."""
+    edited = hm(DAY, "10:00") + 10_000
+    screen = sch.Screen(7, 2, "close", 15, frozenset({"NSE_EQ"}), since=edited)
+    delayed = sch.due([screen], NORMAL, hm(DAY, "11:01"), lambda key: False)
+    assert ends(delayed)[0] == ("10:00", True)
+    assert ends(sch.due([screen], NORMAL, edited + 20_000, lambda key: False)) == [("10:00", False)]
+
+
+def test_an_edit_in_the_evening_runs_the_days_last_candle_once_on_time():
+    """Decided (design 3.13): kept. One run at the edit, not marked late."""
+    edited = hm(DAY, "20:00")
+    screen = sch.Screen(7, 2, "close", 3, frozenset({"NSE_EQ"}), since=edited)
+    found = sch.due([screen], NORMAL, edited + 1_000, lambda key: False)
+    assert ends(found) == [("15:30", False)]
