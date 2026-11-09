@@ -55,6 +55,7 @@ import { cn, makeFormatCurrency, sanitizeCSV } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
 import { onModeChange } from '@/stores/themeStore'
 // SUDARSHAN M6.9: on a phone the positions are cards (src/sudarshan/books/cards).
+import { units } from '@/sudarshan/books/cards/format'
 import { PositionCards, usePositionExits } from '@/sudarshan/books/cards/PositionCards'
 import { WarningLine } from '@/sudarshan/books/cards/parts'
 // SUDARSHAN: the book re-read, status line and tick prices (src/sudarshan/books).
@@ -79,6 +80,7 @@ import { BookSymbolLink } from '@/sudarshan/chart/BookSymbolLink'
 import { usePhoneLayout } from '@/sudarshan/chart/usePhoneLayout'
 import { useMarketOpen } from '@/sudarshan/dashboard/hooks'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
+import { spokenContract } from '@/sudarshan/watchlist/rows'
 import type { Position } from '@/types/trading'
 import { showToast } from '@/utils/toast'
 
@@ -473,13 +475,14 @@ export default function Positions() {
         position.product
       )
       if (response.status === 'success') {
-        // SUDARSHAN: says what was sent, from the position; the server's sentence read
-        // "BUY Order Placed ... Qty: 0" for a long being sold.
+        // SUDARSHAN: says what was sent, from the position, in the confirmation's words; the
+        // server's sentence read "BUY Order Placed ... Qty: 0" for a long being sold.
         const held = Number(position.quantity) || 0
+        const contract = spokenContract(position.symbol, position.exchange)
         showToast.success(
           held === 0
-            ? `Exit sent: ${position.symbol}`
-            : `Exit sent: ${held > 0 ? 'sell' : 'buy'} ${Math.abs(held)} ${position.symbol}`,
+            ? `Exit sent: ${contract}`
+            : `Exit sent: ${held > 0 ? 'sell' : 'buy'} ${units(Math.abs(held))} ${contract}`,
           'positions'
         )
         fetchPositions(true)
