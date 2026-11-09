@@ -473,7 +473,15 @@ export default function Positions() {
         position.product
       )
       if (response.status === 'success') {
-        showToast.success(response.message || `Position closed for ${position.symbol}`, 'positions')
+        // SUDARSHAN: says what was sent, from the position; the server's sentence read
+        // "BUY Order Placed ... Qty: 0" for a long being sold.
+        const held = Number(position.quantity) || 0
+        showToast.success(
+          held === 0
+            ? `Exit sent: ${position.symbol}`
+            : `Exit sent: ${held > 0 ? 'sell' : 'buy'} ${Math.abs(held)} ${position.symbol}`,
+          'positions'
+        )
         fetchPositions(true)
         // The orders this placed are the exit's own, not any other on its side.
         return { outcome: 'sent', orderids: sentOrderIds(response) }

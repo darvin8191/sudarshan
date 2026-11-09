@@ -732,6 +732,7 @@ describe('Positions on a phone: the sheet and its actions', () => {
     const wide = renderBook('/positions', <Positions />)
     await settle()
     await tap.click(screen.getByRole('button', { name: `Close ${PUT} position` }))
+    await tap.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Exit' }))
     expect(api.closePosition).toHaveBeenLastCalledWith(PUT, 'NFO', 'NRML')
 
     wide.unmount()

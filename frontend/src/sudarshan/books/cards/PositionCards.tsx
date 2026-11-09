@@ -42,7 +42,7 @@ import {
 } from '@/sudarshan/ticket/productPref'
 import { contractOf } from '@/sudarshan/watchlist/api'
 import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
-import { describe } from '@/sudarshan/watchlist/rows'
+import { describe, spokenContract } from '@/sudarshan/watchlist/rows'
 import type { Position } from '@/types/trading'
 import { showToast } from '@/utils/toast'
 import { figure, sideOf, signedUnits, units } from './format'
@@ -1121,9 +1121,9 @@ export function usePositionExits({
     close: (position) => {
       const mark = exitMark(sentMarksNow(), sandbox, positionId(position))
       if (mark && !mark.expired) return refuse(mark)
-      // An earlier exit's time ran out unseen: ask first, saying what is known of it.
-      if (mark) return setAsking(positionId(position))
-      send(position)
+      // SUDARSHAN: the table's Close always asks first (it used to send at once), saying what
+      // it will send; an earlier exit whose time ran out unseen adds what is known of it.
+      setAsking(positionId(position))
     },
     // Held while any exit is, as the phone's Exit all is: it sizes from the same book.
     closeAll: () => {
@@ -1148,7 +1148,7 @@ export function usePositionExits({
   }
 }
 
-/** The wide table's Close, asked first because an earlier exit's time ran out unseen. */
+/** The wide table's Close, always asked first (and says what an earlier exit left unseen). */
 function TableExitConfirm({
   position,
   warning,
@@ -1169,7 +1169,11 @@ function TableExitConfirm({
   return (
     <Confirm
       open={position !== null}
-      title={`Close ${shown ? describe(shown.symbol, shown.exchange).title : ''}?`}
+      title={
+        shown
+          ? `Exit ${spokenContract(shown.symbol, shown.exchange)}: ${sideOf(quantityOf(shown)) === 'SHORT' ? 'buy' : 'sell'} ${units(Math.abs(quantityOf(shown)))} at market?`
+          : ''
+      }
       description={
         shown ? (
           <>
@@ -1181,7 +1185,7 @@ function TableExitConfirm({
         )
       }
       cancelLabel="Keep it"
-      confirmLabel="Close"
+      confirmLabel="Exit"
       confirmClassName={shown && quantityOf(shown) < 0 ? BUY_FILL : SELL_FILL}
       onConfirm={() => {
         if (position) onConfirm(position)
