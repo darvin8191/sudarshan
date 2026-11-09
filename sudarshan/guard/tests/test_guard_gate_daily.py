@@ -440,55 +440,35 @@ def test_the_figure_is_read_from_the_same_book_the_order_is_judged_on(day):
 
 
 def test_readers_sandbox_day_is_its_funds_and_open_positions(monkeypatch):
-    """The sandbox's figure: today's realised P&L in its funds and its open positions' P&L, its
-    delivery (CNC in cash) left out of both (the owner's decision)."""
+    """The sandbox's figure: today's realised P&L in its funds and its open positions' P&L at the
+    sandbox's prices, its delivery (CNC in cash) left out of both (the owner's decision)."""
     from decimal import Decimal
 
-    class Query:
-        def __init__(self, rows):
-            self.rows = rows
+    from sandbox.position_manager import PositionManager
 
-        def filter_by(self, **kwargs):
-            return self
-
-        def filter(self, *args):
-            return self
-
-        def populate_existing(self):
-            return self
-
-        def first(self):
-            return self.rows[0] if self.rows else None
-
-        def all(self):
-            return self.rows
-
-    class Model:
-        def __init__(self, rows):
-            self.query = Query(rows)
-            self.user_id = self.quantity = 0  # compared, never used
-
-    def position(product, exchange, quantity, pnl, booked):
+    def position(symbol, product, exchange, quantity, average, booked):
         return SimpleNamespace(
-            product=product, exchange=exchange, quantity=quantity, pnl=pnl,
-            today_realized_pnl=booked,
+            symbol=symbol, product=product, exchange=exchange, quantity=quantity,
+            average_price=average, ltp=None, pnl=Decimal("0"), today_realized_pnl=booked,
         )  # fmt: skip
 
-    db = SimpleNamespace(
-        SandboxFunds=Model([SimpleNamespace(today_realized_pnl=Decimal("-1250.50"))]),
-        SandboxPositions=Model(
-            [
-                position("MIS", "NFO", 65, Decimal("-300"), Decimal("0")),
-                position("NRML", "NFO", 0, None, None),  # closed: nothing open
-                position("CNC", "NSE", 400, Decimal("-4000"), Decimal("-250")),  # delivery
-                position("CNC", "BSE", 0, Decimal("0"), Decimal("-100")),  # delivery, sold today
-            ]
-        ),
-    )
-    monkeypatch.setattr(readers, "_sandbox", lambda: db)
-    monkeypatch.setattr(readers, "_mark_sandbox", lambda user: datetime.now(UTC))
+    rows = [
+        position("NIFTY29DEC3025900CE", "MIS", "NFO", 60, Decimal("100"), Decimal("0")),
+        position("NIFTY29DEC3026000CE", "NRML", "NFO", 0, Decimal("0"), None),  # closed
+        position("RELIANCE", "CNC", "NSE", 400, Decimal("1500"), Decimal("-250")),  # delivery
+        position("INFY", "CNC", "BSE", 0, Decimal("0"), Decimal("-100")),  # delivery, sold today
+    ]
+    monkeypatch.setattr(readers, "_sandbox_book", lambda user: (Decimal("-1250.50"), rows))
+    asked = []
+
+    def ticks(self, symbols):
+        asked.extend(symbols)
+        return {symbol: {"ltp": 95.0} for symbol in symbols}
+
+    monkeypatch.setattr(PositionManager, "_fetch_quotes_from_websocket", ticks)
     figure = readers.sandbox_day("owner")
-    assert (figure.realised, figure.unrealised) == (-900.5, -300.0)
+    assert (figure.realised, figure.unrealised) == (-900.5, -300.0)  # (95 - 100) x 60
+    assert asked == [("NIFTY29DEC3025900CE", "NFO")]  # only what is open and not delivery
 
 
 def test_a_segment_s_window_is_kept_and_a_closed_day_is_asked_again(risk_store, monkeypatch):

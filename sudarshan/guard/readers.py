@@ -365,58 +365,171 @@ def _sandbox_delivery(row) -> bool:
     )
 
 
-#: The sandbox marks a position's P&L only when something reads its positions with live prices
-#: (its background loop, ``python -m sandbox.position_manager``, never runs inside the app), so
-#: the figure is marked here before it is read. Orders and the card within this many seconds of
-#: one another share one marking.
-SANDBOX_MARK_KEPT_S = 1.0
-_sandbox_marked = LockedTTLCache(maxsize=8, ttl=SANDBOX_MARK_KEPT_S)
+#: The sandbox stores a position's P&L only when something marks it (its positions page; its
+#: background loop never runs inside the app), and a fill leaves the stored figure as it was, for
+#: the old quantity. So the day's figure is worked out here from the rows as they stand and the
+#: sandbox's own prices, and nothing is written. Only the prices Upstox answered are shared, this
+#: long, so two orders in one second ask Upstox once; the rows are read afresh every time, so a
+#: fill counts in the very next figure (review of v0.6.1, HIGH-1).
+SANDBOX_PRICE_KEPT_S = 1.0
+_sandbox_prices = LockedTTLCache(maxsize=256, ttl=SANDBOX_PRICE_KEPT_S)
 
 
-def _mark_sandbox(user_id: str) -> datetime:
-    """Mark ``user_id``'s open sandbox positions at live prices, the way the positionbook does
-    (``get_open_positions(update_mtm=True)``), and return when that was (UTC). Cooperative: it
-    waits on no lock of its own, only on the sandbox's own session and quote reads, which the
-    positionbook request does too. Raises ``Unreadable`` when the positions cannot be read."""
-    kept = _sandbox_marked.get(user_id)
-    if kept is not None:
-        return kept
+@contextlib.contextmanager
+def _between_fills():
+    """Held while the sandbox's rows are read for the day's figure. A fill that reduces a
+    position books its realised P&L to the funds in one commit and the new quantity in the next,
+    both under the execution engine's position lock, so a read between them counts the closed
+    part twice. Waits at most ``READ_LIMIT_S``; a fill still being booked then makes the figure
+    unreadable."""
+    from sandbox.execution_engine import ExecutionEngine
+
+    lock = getattr(ExecutionEngine, "_position_lock", None)
+    if lock is None:  # an upstream sandbox without it: nothing to wait for
+        yield
+        return
+    if not lock.acquire(timeout=READ_LIMIT_S):
+        raise Unreadable("sandbox day: a fill is still being booked")
     try:
-        from sandbox.position_manager import PositionManager
+        yield
+    finally:
+        lock.release()
 
-        ok, _body, _status = PositionManager(user_id).get_open_positions(update_mtm=True)
-    except Exception as exc:
-        raise Unreadable(f"sandbox marks: {type(exc).__name__}") from exc
-    if not ok:
-        raise Unreadable("sandbox marks: positions not read")
-    marked = datetime.now(UTC)
-    _sandbox_marked[user_id] = marked
-    return marked
+
+def _sandbox_book(user_id: str) -> tuple[object, list]:
+    """Today's realised P&L in the user's sandbox funds and their position rows, as committed.
+    Column reads: the caller's session objects are neither refreshed nor changed."""
+    from sqlalchemy import select
+
+    db = _sandbox()
+    funds, positions = db.SandboxFunds, db.SandboxPositions
+    with _between_fills():
+        realised = db.db_session.execute(
+            select(funds.today_realized_pnl).where(funds.user_id == user_id)
+        ).first()
+        rows = db.db_session.execute(
+            select(
+                positions.symbol,
+                positions.exchange,
+                positions.product,
+                positions.quantity,
+                positions.average_price,
+                positions.ltp,
+                positions.pnl,
+                positions.today_realized_pnl,
+            ).where(positions.user_id == user_id)
+        ).all()
+    return (realised[0] if realised is not None else None), rows
+
+
+def _price_of(quote: object):
+    """The last price in a sandbox quote, above 0, as the sandbox marks with it; else None."""
+    from decimal import Decimal, InvalidOperation
+
+    if not isinstance(quote, dict):
+        return None
+    try:
+        price = Decimal(str(quote.get("ltp", 0)))
+    except (InvalidOperation, ValueError):
+        return None
+    return price if price > 0 else None
+
+
+def _sandbox_marks(manager, wanted: list[tuple[str, str]]) -> tuple[dict, datetime | None]:
+    """A price for each ``(symbol, exchange)`` from the sandbox's own two sources, in its own
+    order: the live feed's ticks no older than its 5 s first, then one multiquotes read for the
+    rest. Returns the prices found and when the oldest of them was had (None for none)."""
+    prices: dict = {}
+    times: list[datetime] = []
+    if not wanted:
+        return prices, None
+    ticks = manager._fetch_quotes_from_websocket(wanted)
+    now = datetime.now(UTC)
+    for key in wanted:
+        price = _price_of(ticks.get(key))
+        if price is not None:
+            prices[key] = price
+            times.append(now)
+    for key in [key for key in wanted if key not in prices]:
+        kept = _sandbox_prices.get(key)
+        if kept is not None:
+            prices[key] = kept[0]
+            times.append(kept[1])
+    missing = [key for key in wanted if key not in prices]
+    if missing:
+        answered = manager._fetch_quotes_batch(missing)
+        had = datetime.now(UTC)
+        for key in missing:
+            price = _price_of(answered.get(key))
+            if price is not None:
+                prices[key] = price
+                times.append(had)
+                _sandbox_prices[key] = (price, had)
+    return prices, (min(times) if times else None)
+
+
+def _sandbox_unrealised(user_id: str, held: list) -> tuple[float, datetime]:
+    """The open positions' P&L at the sandbox's own prices, by its own arithmetic
+    (``PositionManager._calculate_position_pnl`` with the contract's value), and when the prices
+    were had. A contract past its expiry that the sandbox has not settled yet is valued at the
+    price its settlement will use, needing no quote."""
+    from sandbox.position_manager import (
+        PositionManager,
+        get_contract_expiry,
+        get_expiry_settlement_price,
+        is_contract_expired_now,
+    )
+
+    if not held:
+        return 0.0, datetime.now(UTC)
+    manager = PositionManager(user_id)
+    settled: dict[int, object] = {}
+    for index, row in enumerate(held):
+        expiry = get_contract_expiry(row.symbol, row.exchange)
+        if expiry is not None and is_contract_expired_now(expiry, row.exchange):
+            settled[index] = get_expiry_settlement_price(row)
+    wanted = sorted(
+        {(row.symbol, row.exchange) for index, row in enumerate(held) if index not in settled}
+    )
+    prices, priced_at = _sandbox_marks(manager, wanted)
+    total = 0.0
+    for index, row in enumerate(held):
+        price = settled.get(index, prices.get((row.symbol, row.exchange)))
+        if price is None:
+            total += _number(row.pnl)  # no price now: its last stored mark
+            continue
+        value = manager._get_contract_value(row.symbol, row.exchange)
+        total += float(
+            manager._calculate_position_pnl(
+                row.quantity, row.average_price, price, contract_value=value
+            )
+        )
+    return total, priced_at or datetime.now(UTC)
 
 
 def sandbox_day(user_id: str):
     """Today's P&L in the sandbox (M5.14): its funds' realised P&L for today, and its open
-    positions' P&L as the sandbox marks them, delivery (CNC in cash) left out of both. A position
-    carried in from an earlier day counts from its entry, the sandbox keeping no day's figure
-    for it."""
+    positions' P&L at the sandbox's own prices, worked out from the rows as they stand (never
+    stored), delivery (CNC in cash) left out of both. A position carried in from an earlier day
+    counts from its entry, the sandbox keeping no day's figure for it. ``marked_at`` is when its
+    prices were had."""
     from .daily import DayFigure
 
-    marked_at = _mark_sandbox(user_id)  # before the stored column is read, never after
     try:
-        db = _sandbox()
-        funds = db.SandboxFunds.query.filter_by(user_id=user_id).populate_existing().first()
-        rows = (
-            db.SandboxPositions.query.filter(db.SandboxPositions.user_id == user_id)
-            .populate_existing()
-            .all()
-        )
+        booked, rows = _sandbox_book(user_id)
+    except Unreadable:
+        raise
     except Exception as exc:
         raise Unreadable(f"sandbox day: {type(exc).__name__}") from exc
-    realised = _number(funds.today_realized_pnl) if funds is not None else 0.0
+    realised = _number(booked)
     realised -= sum(_number(row.today_realized_pnl) for row in rows if _sandbox_delivery(row))
-    unrealised = sum(
-        _number(row.pnl) for row in rows if row.quantity and not _sandbox_delivery(row)
-    )
+    held = [row for row in rows if row.quantity and not _sandbox_delivery(row)]
+    try:
+        unrealised, marked_at = _sandbox_unrealised(user_id, held)
+    except Unreadable:
+        raise
+    except Exception as exc:
+        raise Unreadable(f"sandbox prices: {type(exc).__name__}") from exc
     return DayFigure(realised, unrealised, marked_at=marked_at)
 
 

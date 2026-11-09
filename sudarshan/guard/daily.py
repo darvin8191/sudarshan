@@ -49,7 +49,7 @@ class DayFigure:
     realised: float
     unrealised: float
     approximate: bool = False  # a row had no day figures: its net P&L was used instead
-    marked_at: datetime | None = None  # the sandbox: when its open positions were last marked
+    marked_at: datetime | None = None  # the sandbox: when its positions' prices were had
 
     @property
     def total(self) -> float:

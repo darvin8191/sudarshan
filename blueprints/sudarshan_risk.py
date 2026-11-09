@@ -134,7 +134,7 @@ def _daily_status(owner: killswitch.Owner, limit: float | None) -> dict:
             logger.exception(f"Today's figure could not be read for the risk page ({pipe})")
             figure = None
         if figure is not None and figure.marked_at is not None:
-            read_at = figure.marked_at  # the sandbox: when its positions were marked
+            read_at = figure.marked_at  # the sandbox: when its positions' prices were had
         session = risk_gate.GATE.session(_CARD_SEGMENT, now)
         lock = risk_gate.GATE.day_lock(pipe)
         shown[pipe] = {
