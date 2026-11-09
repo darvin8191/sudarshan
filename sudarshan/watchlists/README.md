@@ -15,3 +15,14 @@ window ...), the error codes and the write routes. `gentypes.py` writes
 `python -m sudarshan.watchlists.gentypes` after a change, and `--check` (also a test) fails when the
 file differs. Never edit `types.ts` by hand. A later contract change is its own PR and merges before
 the phone PR that uses it.
+
+## W14 - the follow-row rules (`dynamic.py`, `words/dynamic.py`, `numfmt.py`)
+
+Pure rules for ATM, strike and current-month future rows. Expiries come from the master as listed;
+a row rolls at the session close of expiry day, taken from OpenAlgo's market calendar and passed in
+as `closes` (15:30 IST when the calendar has no row). The ATM is the strike nearest the price, a tie
+going to the lower strike (a test holds it equal to OpenAlgo's own function); a held strike is kept
+while the price stays inside its band (midpoint to the neighbour plus 10% of the gap, open ends).
+The price is the page's own tick while its socket is up, however old, then the page snapshot, then
+the feed's; none means "waiting". Vectors: `tests/vectors/dynamic.json`. `numfmt.py` holds the
+Indian number and IST time formats the words use.
