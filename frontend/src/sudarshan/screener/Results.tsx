@@ -11,6 +11,7 @@ import { describe, priceDecimals } from '@/sudarshan/watchlist/rows'
 import { type LiveRow, useLiveRows } from '@/sudarshan/watchlist/useLiveRows'
 import { Figures, type FigureValues, figuresOf } from '@/sudarshan/watchlist/WatchlistRows'
 import { ChipMark } from './ChipMark'
+import { whenWords } from './cardLine'
 import type { Hearing } from './push'
 import { followedItems } from './resultItems'
 import type { ResultRow, Results as ResultsData, ScreenRow } from './types'
@@ -55,7 +56,7 @@ export function RunFigures({ row, at }: { row: ResultRow; at: number }) {
       <span className="flex items-center gap-1 text-xs font-semibold">
         {row.change_pct !== null && formatPercent(row.change_pct)}
         <Clock aria-hidden="true" className="size-3" />
-        at the run, {istTime(at).slice(0, 5)}
+        at the run, {whenWords(at, Date.now())}
       </span>
     </span>
   )
@@ -88,7 +89,8 @@ export const NO_LIVE: RowLive = {
 }
 
 export function rowLiveOf(live: LiveRow | undefined): RowLive {
-  if (!live) return NO_LIVE
+  // A row with no price yet shows the price at the run, dated, rather than a dash.
+  if (!live || live.view.ltp === null) return NO_LIVE
   const figures = figuresOf(live)
   return {
     hasLive: true,

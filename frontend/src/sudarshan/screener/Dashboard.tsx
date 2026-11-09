@@ -2,6 +2,7 @@ import { Plus, RefreshCw } from 'lucide-react'
 import { useCallback, useMemo, useRef, useState } from 'react'
 import type { WatchlistItem } from '@/api/watchlist'
 import { cn } from '@/lib/utils'
+import { AccessNotice } from '@/sudarshan/AccessNotice'
 import { usePriceAccess } from '@/sudarshan/access'
 import {
   Confirm,
@@ -95,7 +96,8 @@ export function Dashboard({
   const layout = useLayoutWrites(data)
   const [removing, setRemoving] = useState<Card | null>(null)
 
-  const { apiKey } = usePriceAccess()
+  const access = usePriceAccess()
+  const apiKey = access.apiKey
   const [market, setMarket] = useState<MarketCalendar>(CALENDAR_LOADING)
   const day = useIstDay()
   const { isOpen } = useMarketOpen(market)
@@ -197,6 +199,7 @@ export function Dashboard({
             : problem.message}
         </p>
       )}
+      <AccessNotice access={access} />
       {problem && data && <StaleBookNote text={DASH_WORDS.last_read} />}
       {!data ? (
         query.isPending ? (
@@ -213,7 +216,14 @@ export function Dashboard({
               name: screen?.name ?? card.name,
               where: screen?.where ?? card.where,
               status: screen?.status ?? card.status,
-              line: cardLine({ card, screen, engine: state.engine, hearing, feed: feedOf(card) }),
+              line: cardLine({
+                card,
+                screen,
+                engine: state.engine,
+                hearing,
+                feed: feedOf(card),
+                access: access.state,
+              }),
               onOpenScreen: openCard,
               onOptions: options,
             }

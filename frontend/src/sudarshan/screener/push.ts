@@ -191,6 +191,10 @@ export function mergeResults(held: Results, push: RunPush): Results {
 
 export function onStatePush(client: QueryClient, push: StatePush): void {
   const state = client.getQueryData<ScreenerState>(STATE_KEY)
+  // The engine's state moved (the 15:30 close, a feed drop): each card's own line, with its own
+  // next check, is worded by the server, so the cards are read again.
+  if (state && push.engine && push.engine.state !== state.engine.state)
+    void client.invalidateQueries({ queryKey: DASHBOARD_KEY })
   // A layout that is only a suggestion is the Active screens at this moment, and no dashboard
   // push says one was added, removed, paused or resumed: read it again.
   const shown = client.getQueryData<Dashboard>(DASHBOARD_KEY)

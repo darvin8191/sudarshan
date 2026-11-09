@@ -3,8 +3,10 @@
  * words, and "Real-time" only while ticks arrive for the card's own shown rows.
  */
 import { describe, expect, it } from 'vitest'
+import { feedLine } from '@/sudarshan/dashboard/live'
+import { statusLine } from '@/sudarshan/watchlist/rows'
 import { NOW, REAL_TIME, screenRow, widgetCard } from '@/test/screener'
-import { type CardFeed, cardLine, LIVE_CAP, NOT_RECEIVING } from './cardLine'
+import { type CardFeed, cardLine, LIVE_CAP, NOT_RECEIVING, whenWords } from './cardLine'
 import type { EngineLine, WidgetCard } from './types'
 
 const TICKING: CardFeed = { followed: 2, line: { kind: 'live' }, now: NOW }
@@ -12,9 +14,15 @@ const NONE: CardFeed = { followed: 0, line: null, now: NOW }
 
 function line(
   card: WidgetCard,
-  over: { engine?: EngineLine; feed?: CardFeed; hearing?: 'joined' | 'not_joined' | 'unknown' } = {}
+  over: {
+    engine?: EngineLine
+    feed?: CardFeed
+    hearing?: 'joined' | 'not_joined' | 'unknown'
+    access?: 'ready' | 'checking' | 'upstox-logged-out' | 'no-api-key'
+  } = {}
 ) {
   return cardLine({
+    access: over.access,
     card,
     screen: screenRow({ id: card.screen_id, status: card.status }),
     engine: over.engine ?? REAL_TIME,
@@ -174,5 +182,104 @@ describe('the card line', () => {
       line(widgetCard(), { hearing: 'not_joined' }).words,
     ].join(' ')
     expect(all).not.toMatch(/\blive\b|\barm/i)
+  })
+})
+
+describe('the card line, in the app’s words for the feed, the login and the close (M9.16)', () => {
+  it('a quiet minute on a working socket is an age, not Stale, and the rows stay black', () => {
+    const quiet = statusLine({
+      now: NOW,
+      marketOpen: true,
+      lastTickAt: NOW - 15_000,
+      lastUpdateAt: NOW - 15_000,
+      connected: true,
+      fallback: false,
+    })
+    const view = line(widgetCard(), { feed: { followed: 3, line: quiet, now: NOW } })
+    expect(view).toMatchObject({
+      words: 'Prices updated 15s ago · next check 10:45',
+      warn: false,
+      greyed: false,
+    })
+    expect(view.words).not.toMatch(/Stale/)
+  })
+
+  it('says Reconnecting while the market-data socket is down, with the age of the last price', () => {
+    const down = feedLine({
+      now: NOW,
+      marketOpen: true,
+      lastTickAt: NOW - 3_000,
+      lastUpdateAt: NOW - 3_000,
+      ticksDue: true,
+      connected: false,
+    })
+    const view = line(widgetCard(), { feed: { followed: 3, line: down, now: NOW } })
+    expect(view.words).toBe('Reconnecting · prices updated 3s ago · next check 10:45')
+    expect(view).toMatchObject({ icon: 'wifi-off', warn: true, greyed: true })
+    const first = feedLine({
+      now: NOW,
+      marketOpen: true,
+      lastTickAt: null,
+      lastUpdateAt: null,
+      ticksDue: true,
+      connected: false,
+    })
+    expect(line(widgetCard(), { feed: { followed: 3, line: first, now: NOW } }).words).toMatch(
+      /^Connecting to prices/
+    )
+  })
+
+  it('says Delayed while a quote request fills in for a down socket, Stale once it is old', () => {
+    const polling = (stale: boolean): CardFeed => ({
+      followed: 2,
+      line: { kind: 'polling', at: NOW - 6_000, stale },
+      now: NOW,
+    })
+    expect(line(widgetCard(), { feed: polling(false) }).words).toMatch(
+      /^Delayed · prices updated 6s ago/
+    )
+    expect(line(widgetCard(), { feed: polling(true) }).words).toMatch(
+      /^Stale · prices updated 6s ago/
+    )
+  })
+
+  it('says why when Upstox is logged out or there is no key, and never Waiting for prices', () => {
+    const none: CardFeed = { followed: 2, line: { kind: 'idle' }, now: NOW }
+    const out = line(widgetCard(), { feed: none, access: 'upstox-logged-out' })
+    expect(out.words).toMatch(
+      /^Upstox is logged out, so there are no live prices · prices at the run/
+    )
+    expect(out).toMatchObject({ icon: 'wifi-off', warn: true })
+    expect(line(widgetCard(), { feed: none, access: 'no-api-key' }).words).toMatch(/No API key/)
+    expect(line(widgetCard(), { feed: none, access: 'checking' }).words).toMatch(
+      /^Waiting for prices/
+    )
+  })
+
+  it('after the close, a card names its own next check with the day, not the engine’s earliest', () => {
+    const closed: EngineLine = {
+      state: 'closed',
+      line: 'Market closed · next check 16:05',
+      real_time: false,
+      next_at: NOW + 3_600_000,
+    }
+    const tuesdayOpen = Date.UTC(2026, 10, 10, 4, 0, 0)
+    const view = line(widgetCard({ next_at: tuesdayOpen }), {
+      engine: closed,
+      feed: { followed: 2, line: { kind: 'closed' }, now: NOW },
+    })
+    expect(view.words).toBe('Market closed · next check Tue 09:30 · matches as of 10:45')
+    expect(view.words).not.toMatch(/16:05/)
+  })
+
+  it('names the day of an earlier check, and the time of a check after the close', () => {
+    expect(whenWords(NOW, NOW)).toBe('10:45')
+    expect(whenWords(NOW - 86_400_000, NOW)).toBe('Sun 10:45')
+    const after = widgetCard({
+      mode: 'after_close',
+      mode_words: 'After the close (16:05)',
+      line: { kind: 'after_close', words: 'x', live: false, state: 'closed' },
+    })
+    expect(line(after).words).toBe('Checks after the close (16:05) · matches as of 10:45')
   })
 })

@@ -131,9 +131,7 @@ vi.mock('@/sudarshan/watchlist/rows', async (importOriginal) => {
 
 import { createQueryClient } from '@/app/providers'
 import Screener from '@/sudarshan/pages/Screener'
-import { sendChange } from '@/sudarshan/screener/actions'
 import { ScreenerError } from '@/sudarshan/screener/api'
-import { DASHBOARD_KEY, STATE_KEY } from '@/sudarshan/screener/keys'
 import { resetScreenerPushForTests } from '@/sudarshan/screener/push'
 import {
   dashboard,
@@ -415,7 +413,47 @@ describe('a tick redraws only its own row (HIGH-2)', () => {
     draws.rows = 0
     act(() => feed.tick())
     expect(draws.rows).toBe(0)
-    await userEvent.click(within(cardOf(7)).getAllByRole('button', { name: /S7R2/ })[0] as HTMLElement)
+    await userEvent.click(
+      within(cardOf(7)).getAllByRole('button', { name: /S7R2/ })[0] as HTMLElement
+    )
     expect(await screen.findByRole('dialog')).toBeTruthy()
+  })
+})
+
+describe('the Dashboard when Upstox is logged out, and at the close (M4, M6, M7)', () => {
+  it('says the login is the reason, above the cards and on each card, and keeps the price at the run', async () => {
+    access.loggedOut = true
+    feed.mode = 'no_key'
+    api.dashboard.mockResolvedValue(dashboard([widgetCard()]))
+    renderPage()
+    await joinedOnce(room)
+    await waitFor(() => expect(cardOf(1)).toBeTruthy())
+    const card = cardOf(1)
+    expect(document.querySelector('[data-access="upstox-logged-out"]')).toBeTruthy()
+    expect(card.querySelector('[data-card-line]')?.textContent).toMatch(/Upstox is logged out/)
+    for (const row of card.querySelectorAll('[data-result]'))
+      expect(row.textContent).toMatch(/at the run/)
+    expect(within(card).queryAllByText('No price yet')).toHaveLength(0)
+  })
+
+  it('reads the cards again when the engine’s state changes, so each says its own next check', async () => {
+    api.dashboard.mockResolvedValue(dashboard([widgetCard()], { version: 3, suggested: false }))
+    renderPage()
+    await joinedOnce(room)
+    await waitFor(() => expect(cardOf(1)).toBeTruthy())
+    expect(api.dashboard).toHaveBeenCalledTimes(1)
+    act(() =>
+      room.fire('sudarshan_screener_state', {
+        engine: {
+          state: 'closed',
+          line: 'Market closed · next check 16:05',
+          real_time: false,
+          next_at: NOW + 3_600_000,
+        },
+        screens: [],
+        removed: [],
+      })
+    )
+    await waitFor(() => expect(api.dashboard).toHaveBeenCalledTimes(2))
   })
 })
