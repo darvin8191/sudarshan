@@ -148,7 +148,20 @@ async def test_a_continuation_that_comes_up_short_is_dropped_and_the_old_figures
         got["state"] == "ok" and len(got["rows"]) == 5
     )  # never a doubled or short year as complete
     assert "refresh" not in record["payload"]
-    assert got["note"] == reports.WORDS["kept"]
+    # The pages moved: Upstox answered every call, so the words must not say it could not be read.
+    assert got["note"] == reports.WORDS["short_kept"], got["note"]
+    assert "could not be read" not in got["note"]
+
+
+@scenario_of
+async def test_a_refresh_with_no_token_on_the_server_says_so_not_that_upstox_failed(rig):
+    fy = await complete_year_of_five(rig)
+    six(rig, "ABCDEF")
+    rig.svc.upstox.token_file.unlink()  # SUDARSHAN's own token is gone from the server
+    rig.now += 7 * HOUR
+    got = (await rig.call("report_trades", fy=fy, segment="EQ", force=True))["data"]
+    assert got["state"] == "ok" and len(got["rows"]) == 5
+    assert got["note"] == reports.WORDS["no_token"], got["note"]
 
 
 @scenario_of

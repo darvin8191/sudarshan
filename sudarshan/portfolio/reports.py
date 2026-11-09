@@ -97,6 +97,8 @@ WORDS = {
     "complete read.",
     "count_kept": "Upstox's count of trades does not match the rows it sent, so these are the "
     "figures from the last complete read. Tap Read again to read again.",
+    "short_kept": "Upstox listed fewer trades than it counted, so these are the figures from the "
+    "last complete read.",
     "early": "This year was read before it had closed and settled. SUDARSHAN reads it again once "
     "it has; tap Read again to do it now.",
     "no_pnl_mf": "Upstox has no trade-wise P&L report for mutual funds; their trades are in "
@@ -108,12 +110,17 @@ WORDS = {
 
 def _kept_words(note: str | None) -> str:
     """The line that goes with complete figures kept because a newer read did not finish: only a
-    stop that SUDARSHAN's own limits caused is worded as SUDARSHAN's, what Upstox did is worded as
-    Upstox's, and a count that does not match says so."""
+    stop that SUDARSHAN's own limits caused is worded as SUDARSHAN's, a missing token as the
+    server's, a short or mismatched list as that, and only what Upstox really failed at as
+    Upstox's."""
     if note == WORDS["busy"]:
         return WORDS["held_back"]
     if note == WORDS["count"]:
         return WORDS["count_kept"]
+    if note == WORDS["short"]:
+        return WORDS["short_kept"]
+    if note == WORDS["no_token"]:
+        return WORDS["no_token"]
     return WORDS["kept"]
 
 
