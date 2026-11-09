@@ -21,14 +21,20 @@
 #               calendar lines that release would change, change nothing
 #   --redeploy  install the latest Release again even if it is already deployed (still gated)
 #   --force     like --redeploy but ALSO ignores the market-hours gate (root only, emergencies)
+#   --remove-ring sudarshan-<service>
+#               take one ring service out: stop and disable its unit, copy its databases into a
+#               backup folder, remove the unit file; its state folder and /etc/sudarshan/<service>.env
+#               stay (an owner's settings are never deleted). The next release that still ships the
+#               unit installs it again.
 set -Eeuo pipefail
-MODE="deploy"; FORCE=0; REDEPLOY=0
+MODE="deploy"; FORCE=0; REDEPLOY=0; REMOVE_RING=""
 case "${1:-}" in
     --check) MODE="check" ;;
     --redeploy) REDEPLOY=1 ;;
     --force) FORCE=1; REDEPLOY=1 ;;
+    --remove-ring) MODE="remove-ring"; REMOVE_RING="${2:-}" ;;
     "") ;;
-    *) echo "usage: sudarshan-deploy [--check|--redeploy|--force]" >&2; exit 2 ;;
+    *) echo "usage: sudarshan-deploy [--check|--redeploy|--force|--remove-ring sudarshan-<service>]" >&2; exit 2 ;;
 esac
 # shellcheck disable=SC1091
 source /etc/sudarshan/deploy.env
@@ -633,93 +639,17 @@ cal_preview() {   # $1 = the list a release brings, $2 = a new private folder. I
         cal_sync install "$1" "$2/etc" "$2/work" "$(cal_today)" "$2/bk" || true
     ) > /dev/null 2>&1
 }
-deployed="$(cat "${STATE}/deployed_tag" 2>/dev/null || echo none)"
-# ---- every run, also one that installs nothing or runs in market hours: keep the day files as they
-# are for the market gate (gate_view), then apply the installed release's calendar list (cal_run).
-if [[ "${MODE}" != "check" ]]; then
-    if gate_view; then cal_run || log "WARNING: calendar: the day files could not be checked"
-    else log "WARNING: calendar: the day files could not be kept for the market gate, so this run leaves them alone"; fi
-    notice_catch_up
-fi
-json="$(curl -fsSL --max-time "${FETCH_TIMEOUT}" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${OWNER_REPO}/releases/latest" 2>/dev/null)" \
-    || { [[ "${MODE}" == "check" ]] && echo "no GitHub Release found yet for ${OWNER_REPO} (or API unreachable)"; exit 0; }
-tag="$(jq -r '.tag_name // empty' <<< "${json}")"
-asset_url="$(jq -r --arg a "${ASSET}" '.assets[]? | select(.name==$a) | .browser_download_url' <<< "${json}" | head -1)"
-if [[ "${MODE}" == "check" ]]; then
-    echo "latest release: ${tag:-none} | deployed: ${deployed} | asset: ${asset_url:-MISSING} | market_open: $(market_open && echo yes || echo no)"
-    if [[ "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then   # what that release would change in .env and the day files
-        ck="$(mktemp -d)"; trap 'rm -rf "${ck}"' EXIT
-        if ! env_conf_fetch "${tag}" "${ck}/openalgo-env.conf"; then echo "settings: could not fetch the list of ${tag}"
-        elif ! env_sync check "${ck}/openalgo-env.conf" "${ENV_FILE}" "${ck}"; then echo "settings: the list of ${tag} is not valid"; fi
-        got=0; cal_conf_fetch "${tag}" "${ck}/nse-calendar.conf" || got=$?
-        if [[ ${got} -eq 3 ]]; then echo "calendar: no list was found for ${tag}"
-        elif [[ ${got} -ne 0 ]]; then echo "calendar: could not fetch the list of ${tag}"
-        elif ! cal_sync check "${ck}/nse-calendar.conf" "${CAL_DIR}" "${ck}" "$(cal_today)"; then echo "calendar: the list of ${tag} could not be checked"; fi
-    fi
-    exit 0
-fi
-[[ -n "${tag}" ]] || exit 0
-[[ "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { log "latest release '${tag}' is not a vA.B.C tag - ignored"; exit 0; }
-[[ "${tag}" != "${deployed}" || ${REDEPLOY} -eq 1 ]] || exit 0
-if market_open && [[ ${FORCE} -eq 0 ]]; then notice waiting "deploy-wait-${tag}" tag="${tag}"; log "release ${tag} waiting for market close"; exit 0; fi
-[[ -n "${asset_url}" ]] || { log "release ${tag} has no ${ASSET} asset - not deploying"; exit 0; }
-sha_url="$(jq -r --arg a "${ASSET}.sha256" '.assets[]? | select(.name==$a) | .browser_download_url' <<< "${json}" | head -1)"
-ts="$(date +%Y%m%d-%H%M%S)"; bdir="/opt/sudarshan/backups/${ts}-${tag}"; mkdir -p "${bdir}"; chmod 700 "${bdir}"
-NOTICE_RUN="${ts}-${tag}"
-exec 8>&1   # where the output went before: kept for on_signal
-exec > >(exec 9>&- 8>&-; tee -a "${STATE}/deploy-${ts}.log") 2>&1   # the writer must not hold the lock (it can outlive this tool)
-log "== deploy ${deployed} -> ${tag}"
-tmp="$(mktemp -d)"; trap 'rm -rf "${tmp}"' EXIT
-curl -fsSL --max-time "${DOWNLOAD_TIMEOUT}" "${asset_url}" -o "${tmp}/${ASSET}"
-if [[ -n "${sha_url}" ]]; then
-    want="$(curl -fsSL --max-time "${FETCH_TIMEOUT}" "${sha_url}" | awk '{print $1; exit}')"
-    have="$(sha256sum "${tmp}/${ASSET}" | awk '{print $1}')"
-    [[ -n "${want}" && "${want}" == "${have}" ]] || { log "checksum mismatch for ${ASSET} - not deploying"; exit 1; }
-    log "checksum OK (${have:0:12}...)"
-else
-    log "no ${ASSET}.sha256 in the release - continuing without checksum"
-fi
-# (no grep -q here: with pipefail an early grep exit could SIGPIPE tar and fake a failure)
-tar -tzf "${tmp}/${ASSET}" | grep -x 'dist/index.html' > /dev/null || { log "${ASSET} has no dist/index.html - not deploying"; exit 1; }
-# ---- the .env settings of this release, fetched and checked while OpenAlgo still runs: a list that
-# cannot be fetched or read stops the deploy before anything is touched.
-env_conf="${tmp}/openalgo-env.conf"; mkdir -m 700 "${tmp}/env-plan" "${tmp}/env" "${tmp}/cal"
-env_conf_fetch "${tag}" "${env_conf}" || { log "could not fetch the settings list of ${tag} - not deploying"; exit 1; }
-env_sync check "${env_conf}" "${ENV_FILE}" "${tmp}/env-plan" || { log "the settings list of ${tag} is not valid - not deploying"; exit 1; }
-# ---- the calendar lines of this release, fetched while OpenAlgo still runs. Unlike the settings, a
-# list that cannot be fetched or read never stops the deploy: the day files then stay as they are,
-# nothing is kept, and the runs after the install fetch the list again (cal_run).
-cal_conf="${tmp}/nse-calendar.conf"; got=0
-cal_conf_fetch "${tag}" "${cal_conf}" || got=$?
-if [[ ${got} -eq 3 ]]; then log "calendar: no list was found for ${tag}; the day files stay as they are"; cal_conf=""
-elif [[ ${got} -ne 0 ]]; then log "calendar: could not fetch the list of ${tag} whole; the day files stay as they are"; cal_conf=""; fi
-# ---- self-update: a release may carry a newer version of this tool. It is read straight from
-# GitHub at the release tag (never from APP_DIR, which the service user can write), checked, and
-# used from the NEXT run on - so a fixed tool arrives even when this run's deploy fails.
-self_update() {
-    local url="https://raw.githubusercontent.com/${OWNER_REPO}/${tag}/sudarshan/ops/deploy/sudarshan-deploy"
-    local new="${tmp}/sudarshan-deploy.new" me
-    me="$(readlink -f "$0")"
-    curl -fsSL --max-time "${FETCH_TIMEOUT}" "${url}" -o "${new}" 2>/dev/null || return 0      # this release carries no tool
-    cmp -s "${new}" "${me}" && return 0                            # already current
-    if bash -n "${new}" 2>/dev/null && grep -q '^# sudarshan-deploy' "${new}"; then
-        cp -a "${me}" "${me}.prev" 2>/dev/null || true
-        install -m 755 "${new}" "${me}.tmp" && mv -f "${me}.tmp" "${me}"
-        log "deploy tool updated from ${tag} (used from the next run; previous kept as ${me}.prev)"
-    else
-        log "WARNING: the deploy tool in ${tag} failed the syntax check - kept the current one"
-    fi
-}
-self_update
-as_svc timeout "${GIT_TIMEOUT}" git -C "${APP_DIR}" fetch --tags --quiet sudarshan
-as_svc git -C "${APP_DIR}" rev-parse -q --verify "refs/tags/${tag}^{commit}" > /dev/null || { log "tag ${tag} not found after fetch"; exit 1; }
-prev_ref="$(as_svc git -C "${APP_DIR}" rev-parse HEAD)"
-UV=(env UV_PYTHON_DOWNLOADS=never /usr/local/bin/uv pip install --quiet --python "${APP_DIR}/.venv/bin/python" -r "${APP_DIR}/requirements-nginx.txt")
 UNIT_DIR="/etc/systemd/system"; MANAGED="${STATE}/managed_units"
-managed_units() { [[ -f "${MANAGED}" ]] && grep -E '^sudarshan-[a-z0-9-]+\.(service|timer)$' "${MANAGED}" || true; }
+managed_units() { [[ -f "${MANAGED}" ]] && grep -E '^sudarshan(-[a-z0-9-]+\.(service|timer)|\.slice)$' "${MANAGED}" || true; }
 ring_services() { managed_units | grep '\.service$' || true; }
 unit_ok() {   # $1 = downloaded unit file, $2 = unit name; 0 = acceptable
     local f="$1" n="$2" ws='[[:space:]]*'
+    if [[ "${n}" == "sudarshan.slice" ]]; then   # the ring's slice (R11): only resource limits and a description
+        if grep -Eiv "^${ws}(#.*|\[(Unit|Slice)\]|Description${ws}=.*|(CPUWeight|CPUQuota|MemoryHigh|MemoryMax|TasksMax|IOWeight)${ws}=${ws}[0-9]+[%GMK]?|)${ws}$" "${f}" | grep -q .; then
+            log "unit ${n}: a slice may carry only resource limits"; return 1
+        fi
+        return 0
+    fi
     [[ "${n}" =~ ^sudarshan-[a-z0-9-]+\.(service|timer)$ ]] || { log "unit ${n}: bad name"; return 1; }
     case "${n}" in sudarshan-deploy.*|sudarshan-claude.*|sudarshan-dev.*) log "unit ${n}: reserved name"; return 1 ;; esac
     # every User=/Group= line must name sudarshan (an empty value would reset to root)
@@ -802,6 +732,122 @@ dist_put() {   # $1 = a tarball (root's) holding dist/: it replaces frontend/dis
 # Both run in a subshell with their own error handling: a ring database that cannot be copied or put
 # back is logged and never stops an install or a rollback (trading does not depend on the ring).
 ring_name_ok() { [[ "$1" =~ ^sudarshan-[a-z0-9-]+$ && "$2" =~ ^[A-Za-z0-9._-]+\.db$ ]]; }   # $1 = folder, $2 = file
+# ---- --remove-ring: one ring service taken out by hand (an uninstall path besides a release dropping
+# its unit). Its databases are copied into a backup folder first; the state folder and the settings
+# file stay, so putting it back is a later release's unit install.
+ring_remove() {   # $1 = sudarshan-<service>.service
+    local n="$1" folder bdir
+    [[ "${n}" =~ ^sudarshan-[a-z0-9-]+\.service$ ]] || { echo "usage: sudarshan-deploy --remove-ring sudarshan-<service>.service" >&2; exit 2; }
+    [[ "${n}" != "${SERVICE}.service" ]] || { echo "${n} is OpenAlgo itself, not a ring service" >&2; exit 2; }
+    folder="${n%.service}"
+    bdir="/opt/sudarshan/backups/$(date +%Y%m%d-%H%M%S)-remove-${folder}"
+    mkdir -m 700 -p "${bdir}"
+    systemctl disable --now "${n}" > /dev/null 2>&1 || log "ring: ${n} was not running"
+    if [[ "${folder}" != "sudarshan-feed" ]]; then   # the keys it claimed at the feed (under its name) go with it
+        local code
+        code="$(curl -s --max-time 5 -o /dev/null -w '%{http_code}' -X DELETE "http://127.0.0.1:5580/claims/${folder}" 2>/dev/null)" || code=""
+        if [[ "${code}" == "200" ]]; then log "ring: the price feed no longer keeps ${folder}'s instruments"
+        else log "WARNING: ring: the price feed did not drop ${folder}'s instruments (is sudarshan-feed running?); it lets them go after 7 days without a renewal"; fi
+    fi
+    if [[ -d "${RING_VAR}/${folder}" && ! -L "${RING_VAR}/${folder}" ]]; then
+        local f name
+        for f in "${RING_VAR}/${folder}"/*.db; do
+            [[ -f "${f}" && ! -L "${f}" ]] || continue
+            name="$(basename -- "${f}")"
+            ring_name_ok "${folder}" "${name}" || continue
+            mkdir -p "${bdir}/ring/${folder}"
+            if db_copy_out "${RING_USER}" "${f}" "${bdir}/ring/${folder}/${name}"; then log "ring: backed up ${folder}/${name} before removal"
+            else log "WARNING: ring: could not back up ${folder}/${name}"; fi
+        done
+    fi
+    rm -f "${UNIT_DIR:?}/${n}"
+    if [[ -f "${MANAGED}" ]]; then grep -vx "${n}" "${MANAGED}" > "${MANAGED}.new" || true; mv -f "${MANAGED}.new" "${MANAGED}"; fi
+    systemctl daemon-reload > /dev/null 2>&1 || true
+    log "ring: removed ${n}; its state in ${RING_VAR}/${folder} and ${CAL_DIR}/${folder#sudarshan-}.env stay; databases copied to ${bdir}"
+}
+if [[ "${MODE}" == "remove-ring" ]]; then ring_remove "${REMOVE_RING}"; exit 0; fi
+deployed="$(cat "${STATE}/deployed_tag" 2>/dev/null || echo none)"
+# ---- every run, also one that installs nothing or runs in market hours: keep the day files as they
+# are for the market gate (gate_view), then apply the installed release's calendar list (cal_run).
+if [[ "${MODE}" != "check" ]]; then
+    if gate_view; then cal_run || log "WARNING: calendar: the day files could not be checked"
+    else log "WARNING: calendar: the day files could not be kept for the market gate, so this run leaves them alone"; fi
+    notice_catch_up
+fi
+json="$(curl -fsSL --max-time "${FETCH_TIMEOUT}" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${OWNER_REPO}/releases/latest" 2>/dev/null)" \
+    || { [[ "${MODE}" == "check" ]] && echo "no GitHub Release found yet for ${OWNER_REPO} (or API unreachable)"; exit 0; }
+tag="$(jq -r '.tag_name // empty' <<< "${json}")"
+asset_url="$(jq -r --arg a "${ASSET}" '.assets[]? | select(.name==$a) | .browser_download_url' <<< "${json}" | head -1)"
+if [[ "${MODE}" == "check" ]]; then
+    echo "latest release: ${tag:-none} | deployed: ${deployed} | asset: ${asset_url:-MISSING} | market_open: $(market_open && echo yes || echo no)"
+    if [[ "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then   # what that release would change in .env and the day files
+        ck="$(mktemp -d)"; trap 'rm -rf "${ck}"' EXIT
+        if ! env_conf_fetch "${tag}" "${ck}/openalgo-env.conf"; then echo "settings: could not fetch the list of ${tag}"
+        elif ! env_sync check "${ck}/openalgo-env.conf" "${ENV_FILE}" "${ck}"; then echo "settings: the list of ${tag} is not valid"; fi
+        got=0; cal_conf_fetch "${tag}" "${ck}/nse-calendar.conf" || got=$?
+        if [[ ${got} -eq 3 ]]; then echo "calendar: no list was found for ${tag}"
+        elif [[ ${got} -ne 0 ]]; then echo "calendar: could not fetch the list of ${tag}"
+        elif ! cal_sync check "${ck}/nse-calendar.conf" "${CAL_DIR}" "${ck}" "$(cal_today)"; then echo "calendar: the list of ${tag} could not be checked"; fi
+    fi
+    exit 0
+fi
+[[ -n "${tag}" ]] || exit 0
+[[ "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { log "latest release '${tag}' is not a vA.B.C tag - ignored"; exit 0; }
+[[ "${tag}" != "${deployed}" || ${REDEPLOY} -eq 1 ]] || exit 0
+if market_open && [[ ${FORCE} -eq 0 ]]; then notice waiting "deploy-wait-${tag}" tag="${tag}"; log "release ${tag} waiting for market close"; exit 0; fi
+[[ -n "${asset_url}" ]] || { log "release ${tag} has no ${ASSET} asset - not deploying"; exit 0; }
+sha_url="$(jq -r --arg a "${ASSET}.sha256" '.assets[]? | select(.name==$a) | .browser_download_url' <<< "${json}" | head -1)"
+ts="$(date +%Y%m%d-%H%M%S)"; bdir="/opt/sudarshan/backups/${ts}-${tag}"; mkdir -p "${bdir}"; chmod 700 "${bdir}"
+NOTICE_RUN="${ts}-${tag}"
+exec 8>&1   # where the output went before: kept for on_signal
+exec > >(exec 9>&- 8>&-; tee -a "${STATE}/deploy-${ts}.log") 2>&1   # the writer must not hold the lock (it can outlive this tool)
+log "== deploy ${deployed} -> ${tag}"
+tmp="$(mktemp -d)"; trap 'rm -rf "${tmp}"' EXIT
+curl -fsSL --max-time "${DOWNLOAD_TIMEOUT}" "${asset_url}" -o "${tmp}/${ASSET}"
+if [[ -n "${sha_url}" ]]; then
+    want="$(curl -fsSL --max-time "${FETCH_TIMEOUT}" "${sha_url}" | awk '{print $1; exit}')"
+    have="$(sha256sum "${tmp}/${ASSET}" | awk '{print $1}')"
+    [[ -n "${want}" && "${want}" == "${have}" ]] || { log "checksum mismatch for ${ASSET} - not deploying"; exit 1; }
+    log "checksum OK (${have:0:12}...)"
+else
+    log "no ${ASSET}.sha256 in the release - continuing without checksum"
+fi
+# (no grep -q here: with pipefail an early grep exit could SIGPIPE tar and fake a failure)
+tar -tzf "${tmp}/${ASSET}" | grep -x 'dist/index.html' > /dev/null || { log "${ASSET} has no dist/index.html - not deploying"; exit 1; }
+# ---- the .env settings of this release, fetched and checked while OpenAlgo still runs: a list that
+# cannot be fetched or read stops the deploy before anything is touched.
+env_conf="${tmp}/openalgo-env.conf"; mkdir -m 700 "${tmp}/env-plan" "${tmp}/env" "${tmp}/cal"
+env_conf_fetch "${tag}" "${env_conf}" || { log "could not fetch the settings list of ${tag} - not deploying"; exit 1; }
+env_sync check "${env_conf}" "${ENV_FILE}" "${tmp}/env-plan" || { log "the settings list of ${tag} is not valid - not deploying"; exit 1; }
+# ---- the calendar lines of this release, fetched while OpenAlgo still runs. Unlike the settings, a
+# list that cannot be fetched or read never stops the deploy: the day files then stay as they are,
+# nothing is kept, and the runs after the install fetch the list again (cal_run).
+cal_conf="${tmp}/nse-calendar.conf"; got=0
+cal_conf_fetch "${tag}" "${cal_conf}" || got=$?
+if [[ ${got} -eq 3 ]]; then log "calendar: no list was found for ${tag}; the day files stay as they are"; cal_conf=""
+elif [[ ${got} -ne 0 ]]; then log "calendar: could not fetch the list of ${tag} whole; the day files stay as they are"; cal_conf=""; fi
+# ---- self-update: a release may carry a newer version of this tool. It is read straight from
+# GitHub at the release tag (never from APP_DIR, which the service user can write), checked, and
+# used from the NEXT run on - so a fixed tool arrives even when this run's deploy fails.
+self_update() {
+    local url="https://raw.githubusercontent.com/${OWNER_REPO}/${tag}/sudarshan/ops/deploy/sudarshan-deploy"
+    local new="${tmp}/sudarshan-deploy.new" me
+    me="$(readlink -f "$0")"
+    curl -fsSL --max-time "${FETCH_TIMEOUT}" "${url}" -o "${new}" 2>/dev/null || return 0      # this release carries no tool
+    cmp -s "${new}" "${me}" && return 0                            # already current
+    if bash -n "${new}" 2>/dev/null && grep -q '^# sudarshan-deploy' "${new}"; then
+        cp -a "${me}" "${me}.prev" 2>/dev/null || true
+        install -m 755 "${new}" "${me}.tmp" && mv -f "${me}.tmp" "${me}"
+        log "deploy tool updated from ${tag} (used from the next run; previous kept as ${me}.prev)"
+    else
+        log "WARNING: the deploy tool in ${tag} failed the syntax check - kept the current one"
+    fi
+}
+self_update
+as_svc timeout "${GIT_TIMEOUT}" git -C "${APP_DIR}" fetch --tags --quiet sudarshan
+as_svc git -C "${APP_DIR}" rev-parse -q --verify "refs/tags/${tag}^{commit}" > /dev/null || { log "tag ${tag} not found after fetch"; exit 1; }
+prev_ref="$(as_svc git -C "${APP_DIR}" rev-parse HEAD)"
+UV=(env UV_PYTHON_DOWNLOADS=never /usr/local/bin/uv pip install --quiet --python "${APP_DIR}/.venv/bin/python" -r "${APP_DIR}/requirements-nginx.txt")
 ring_db_backup() {
     (
         set +eEu; trap - ERR
@@ -981,7 +1027,7 @@ ring_deploy() {
         if ! curl -fsSL --max-time "${FETCH_TIMEOUT}" "https://raw.githubusercontent.com/${OWNER_REPO}/${tag}/sudarshan/ops/systemd/${n}" -o "${f}"; then log "ring: download of ${n} failed - skipped"; continue; fi
         if unit_ok "${f}" "${n}"; then names+=("${n}")
         else log "ring: ${n} REFUSED by the unit policy"; notice unit_refused "deploy-refused-${tag}-${n}" tag="${tag}" unit="${n}"; fi
-    done < <(jq -r '.[]? | select(.type=="file") | .name | select(test("^sudarshan-[a-z0-9-]+\\.(service|timer)$"))' <<< "${list}")
+    done < <(jq -r '.[]? | select(.type=="file") | .name | select(test("^sudarshan(-[a-z0-9-]+\\.(service|timer)|\\.slice)$"))' <<< "${list}")
     for n in "${names[@]}"; do
         if ! cmp -s "${tmp}/units/${n}" "${UNIT_DIR}/${n}"; then
             install -m 644 -o root -g root "${tmp}/units/${n}" "${UNIT_DIR}/${n}"; changed=1; log "ring: installed ${n}"
@@ -995,7 +1041,9 @@ ring_deploy() {
     done
     [[ ${changed} -eq 1 ]] && systemctl daemon-reload
     printf '%s\n' "${names[@]}" > "${MANAGED}"
+    for n in "${names[@]}"; do [[ "${n}" == *.service ]] && ring_env "${n}"; done
     for n in "${names[@]}"; do
+        if [[ "${n}" == *.slice ]]; then continue; fi   # a slice has nothing to start
         if [[ "${n}" == *.timer ]]; then
             systemctl enable --now "${n}" > /dev/null 2>&1 || log "ring: ${n} could not be enabled"
         else
@@ -1006,8 +1054,57 @@ ring_deploy() {
     done
     if [[ ${#names[@]} -gt 0 ]]; then
         sleep 5
-        for n in "${names[@]}"; do log "ring: ${n} $(systemctl is-active "${n}" 2>/dev/null || true)"; done
+        for n in "${names[@]}"; do
+            [[ "${n}" == *.slice ]] && continue
+            log "ring: ${n} $(systemctl is-active "${n}" 2>/dev/null || true)"
+            [[ "${n}" == *.service ]] && ring_health "${n}"
+        done
     fi
+}
+# ---- a ring service's own settings file, /etc/sudarshan/<service>.env (root:sudarshan 640, cross-design
+# R3): a release may ship sudarshan/ops/deploy/<service>-env.conf in openalgo-env.conf's format; each key
+# is added when absent or moved off a default an earlier release shipped, and a value the owner chose
+# stays. A missing file is made first, empty. A release without a list changes nothing here.
+ring_env() {   # $1 = sudarshan-<service>.service
+    (
+        set +eEu; trap - ERR
+        local svc="${1#sudarshan-}" conf out got envf work
+        svc="${svc%.service}"
+        [[ "${svc}" =~ ^[a-z0-9]+$ ]] || exit 0
+        conf="${tmp}/${svc}-env.conf"
+        release_file "${svc}-env.conf" "${tag}" "${conf}"; got=$?
+        [[ ${got} -eq 0 && -s "${conf}" ]] || { [[ ${got} -eq 1 ]] && log "ring: the settings list of ${svc} could not be fetched whole; its file stays as it is"; exit 0; }
+        envf="${CAL_DIR}/${svc}.env"
+        if [[ -L "${envf}" ]]; then log "ring: ${envf} is a link - left alone"; exit 0; fi
+        if [[ ! -e "${envf}" ]]; then
+            install -m 640 -o root -g "${RING_USER}" /dev/null "${envf}" 2>/dev/null || install -m 640 /dev/null "${envf}" || { log "ring: ${envf} could not be made"; exit 0; }
+            log "ring: made ${envf}"
+        fi
+        work="${tmp}/ring-env-${svc}"; mkdir -m 700 -p "${work}"
+        env_sync apply "${conf}" "${envf}" "${work}" "${bdir}/${svc}.env" || log "WARNING: ring: ${envf} did not take every setting of ${tag}"
+    ) || true
+}
+# ---- a ring service's /health after its start (R14: one listener per service on its port). Not
+# answering within 30 s is a WARNING with what the owner can check, never a rollback: trading does
+# not depend on the ring.
+ring_port() { case "$1" in sudarshan-feed.service) echo 5580 ;; sudarshan-alerts.service) echo 5582 ;;
+              sudarshan-portfolio.service) echo 5583 ;; sudarshan-screener.service) echo 5584 ;; *) echo "" ;; esac; }
+ring_health() {   # $1 = sudarshan-<service>.service
+    (
+        set +eEu; trap - ERR
+        local port body state i
+        port="$(ring_port "$1")"; [[ -n "${port}" ]] || exit 0
+        for i in 1 2 3 4 5 6; do
+            body="$(curl -s --max-time 5 "http://127.0.0.1:${port}/health" 2>/dev/null)" || body=""
+            if [[ -n "${body}" ]]; then
+                state="$(jq -r '.state // empty' <<< "${body}" 2>/dev/null)"
+                log "ring: $1 health: ${state:-answered} (release $(jq -r '.release // "unknown"' <<< "${body}" 2>/dev/null))"
+                exit 0
+            fi
+            sleep 5
+        done
+        log "WARNING: ring: $1 did not answer on 127.0.0.1:${port}/health within 30 s; see journalctl -u $1"
+    ) || true
 }
 ring_deploy || log "WARNING: ring service step failed - OpenAlgo itself is deployed"
 # keep the 10 newest backups: the folders this tool makes (<date>-<time>-<tag>), by their names, which

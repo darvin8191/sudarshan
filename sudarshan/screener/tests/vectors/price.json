@@ -1,0 +1,380 @@
+{
+  "schema": 1,
+  "note": "Hand-computed golden vectors for price.py and patterns.py (EN4). Prices are paise. A ratio is an exact fraction in percent units written as text ('199/100'; 2% is '2'); a plain number is an int; an object with 'why' is a Why. Candle rows are [day, start, minutes, open, high, low, close, volume] plus an optional {oi, atp, flags}; a week or day candle starts at its session's first minute.",
+
+  "series": {
+    "days_a": {"tf": "D", "rows": [
+      ["2026-10-23", "09:15", 375, 9800, 10050, 9750, 9900, 1000],
+      ["2026-10-26", "09:15", 375, 9920, 10080, 9900, 10000, 1000],
+      ["2026-10-27", "09:15", 375, 10010, 10320, 9990, 10300, 1000],
+      ["2026-10-28", "09:15", 375, 10250, 10400, 10200, 10380, 1000]
+    ]},
+    "days_to_27": {"tf": "D", "rows": [
+      ["2026-10-23", "09:15", 375, 9800, 10050, 9750, 9900, 1000],
+      ["2026-10-26", "09:15", 375, 9920, 10080, 9900, 10000, 1000],
+      ["2026-10-27", "09:15", 375, 10010, 10320, 9990, 10300, 1000]
+    ]},
+    "days_to_26": {"tf": "D", "rows": [
+      ["2026-10-23", "09:15", 375, 9800, 10050, 9750, 9900, 1000],
+      ["2026-10-26", "09:15", 375, 9920, 10080, 9900, 10000, 1000]
+    ]},
+    "days_only_today": {"tf": "D", "rows": [
+      ["2026-10-28", "09:15", 375, 10250, 10400, 10200, 10380, 1000]
+    ]},
+    "days_zero": {"tf": "D", "rows": [
+      ["2026-10-22", "09:15", 375, 0, 0, 0, 0, 0],
+      ["2026-10-23", "09:15", 375, 9800, 10050, 9750, 9900, 1000]
+    ]},
+    "days_muhurat": {"tf": "D", "rows": [
+      ["2026-11-06", "09:15", 375, 19900, 20100, 19850, 20000, 1000],
+      ["2026-11-08", "14:20", 70, 20010, 20150, 19980, 20050, 400],
+      ["2026-11-09", "09:15", 375, 20300, 20400, 20250, 20350, 900]
+    ]},
+    "days_pivot": {"tf": "D", "rows": [
+      ["2026-10-26", "09:15", 375, 1, 2, 1, 2, 1],
+      ["2026-10-27", "09:15", 375, 249000, 251000, 248000, 250000, 1000],
+      ["2026-10-28", "09:15", 375, 250500, 252000, 250000, 251500, 500]
+    ]},
+    "days_pivot_whole": {"tf": "D", "rows": [
+      ["2026-10-27", "09:15", 375, 92, 100, 90, 95, 1000],
+      ["2026-10-28", "09:15", 375, 95, 99, 94, 97, 500]
+    ]},
+    "days_pivot_low_close": {"tf": "D", "rows": [
+      ["2026-10-27", "09:15", 375, 190, 200, 100, 110, 1000],
+      ["2026-10-28", "09:15", 375, 111, 115, 105, 112, 500]
+    ]},
+
+    "chg": {"tf": 5, "rows": [
+      ["2026-10-27", "09:15", 5, 10100, 10100, 10100, 10100, 10],
+      ["2026-10-27", "09:20", 5, 10099, 10099, 10099, 10099, 10],
+      ["2026-10-28", "09:15", 5, 10299, 10299, 10299, 10299, 10],
+      ["2026-10-28", "09:20", 5, 10506, 10506, 10506, 10506, 10],
+      ["2026-10-28", "09:25", 5, 10505, 10505, 10505, 10505, 10],
+      ["2026-10-28", "09:30", 5, 10455, 10455, 10455, 10455, 10]
+    ]},
+    "chg_old": {"tf": 5, "rows": [
+      ["2026-10-23", "09:15", 5, 9950, 9950, 9950, 9950, 10]
+    ]},
+    "chg_week": {"tf": "W", "rows": [
+      ["2026-10-26", "09:15", 6135, 9920, 10400, 9900, 10380, 4000]
+    ]},
+    "chg_week_monday": {"tf": "W", "rows": [
+      ["2026-10-26", "09:15", 6135, 10010, 10080, 9990, 10050, 1000]
+    ]},
+
+    "m5_28": {"tf": 5, "rows": [
+      ["2026-10-28", "09:15", 5, 10000, 10050, 9980, 10030, 100],
+      ["2026-10-28", "09:20", 5, 10030, 10080, 10010, 10070, 300],
+      ["2026-10-28", "09:25", 5, 10070, 10100, 10040, 10060, 200],
+      ["2026-10-28", "09:30", 5, 10060, 10120, 10050, 10110, 500],
+      ["2026-10-28", "09:35", 5, 10110, 10130, 10090, 10100, 400],
+      ["2026-10-28", "09:40", 5, 10100, 10140, 10060, 10120, 250],
+      ["2026-10-28", "09:45", 5, 10120, 10180, 10110, 10170, 600]
+    ]},
+    "m5_28_late": {"tf": 5, "rows": [
+      ["2026-10-28", "09:20", 5, 10030, 10080, 10010, 10070, 300],
+      ["2026-10-28", "09:25", 5, 10070, 10100, 10040, 10060, 200]
+    ]},
+    "m5_28_after": {"tf": 5, "rows": [
+      ["2026-10-28", "09:35", 5, 10110, 10130, 10090, 10100, 400]
+    ]},
+    "m15_28": {"tf": 15, "rows": [
+      ["2026-10-28", "09:15", 15, 10000, 10100, 9980, 10050, 600],
+      ["2026-10-28", "09:30", 15, 10050, 10200, 10040, 10150, 900]
+    ]},
+    "m5_two_days": {"tf": 5, "rows": [
+      ["2026-10-27", "09:15", 5, 20000, 20500, 19500, 20100, 100],
+      ["2026-10-28", "09:15", 5, 10000, 10050, 9980, 10030, 100],
+      ["2026-10-28", "09:20", 5, 10030, 10080, 10010, 10070, 300],
+      ["2026-10-28", "09:25", 5, 10070, 10100, 10040, 10060, 200]
+    ]},
+    "m5_muhurat": {"tf": 5, "rows": [
+      ["2026-11-08", "14:20", 5, 20000, 20040, 19990, 20030, 100],
+      ["2026-11-08", "14:25", 5, 20030, 20060, 20020, 20050, 100],
+      ["2026-11-08", "14:30", 5, 20050, 20055, 20010, 20020, 100]
+    ]},
+    "m5_flags": {"tf": 5, "rows": [
+      ["2026-10-28", "09:15", 5, 10000, 10050, 9980, 10030, 100],
+      ["2026-10-28", "09:20", 5, 10030, 10080, 10010, 10070, 300],
+      ["2026-10-28", "09:25", 5, 10070, 10100, 10040, 10060, 200, {"flags": 1}],
+      ["2026-10-28", "09:30", 5, 10060, 10120, 10050, 10110, 500],
+      ["2026-10-28", "09:35", 5, 10110, 10130, 10090, 10100, 400, {"flags": 2}],
+      ["2026-10-28", "09:40", 5, 10100, 10140, 10060, 10120, 250, {"flags": 5}],
+      ["2026-10-28", "09:45", 5, 10120, 10180, 10110, 10170, 600, {"flags": 4}]
+    ]},
+    "fields": {"tf": 5, "rows": [
+      ["2026-10-28", "09:15", 5, 10000, 10050, 9980, 10030, 1200],
+      ["2026-10-28", "09:20", 5, 10030, 10080, 10010, 10001, 3, {"oi": 0, "atp": 10025}],
+      ["2026-10-28", "09:25", 5, 10001, 10020, 9990, 10010, 250005, {"oi": 1500, "atp": 10075}]
+    ]},
+
+    "rs_i": {"tf": 5, "rows": [
+      ["2026-10-28", "09:15", 5, 10000, 10000, 10000, 10000, 1],
+      ["2026-10-28", "09:20", 5, 10100, 10100, 10100, 10100, 1],
+      ["2026-10-28", "09:25", 5, 10200, 10200, 10200, 10200, 1],
+      ["2026-10-28", "09:30", 5, 10404, 10404, 10404, 10404, 1],
+      ["2026-10-28", "09:35", 5, 10300, 10300, 10300, 10300, 1],
+      ["2026-10-28", "09:40", 5, 10500, 10500, 10500, 10500, 1]
+    ]},
+    "rs_b": {"tf": 5, "rows": [
+      ["2026-10-28", "09:15", 5, 20000, 20000, 20000, 20000, 0],
+      ["2026-10-28", "09:20", 5, 20100, 20100, 20100, 20100, 0],
+      ["2026-10-28", "09:25", 5, 20000, 20000, 20000, 20000, 0],
+      ["2026-10-28", "09:30", 5, 20400, 20400, 20400, 20400, 0],
+      ["2026-10-28", "09:35", 5, 20400, 20400, 20400, 20400, 0],
+      ["2026-10-28", "09:40", 5, 20400, 20400, 20400, 20400, 0]
+    ]},
+    "rs_b_gap": {"tf": 5, "rows": [
+      ["2026-10-28", "09:15", 5, 20000, 20000, 20000, 20000, 0],
+      ["2026-10-28", "09:20", 5, 20100, 20100, 20100, 20100, 0],
+      ["2026-10-28", "09:25", 5, 20000, 20000, 20000, 20000, 0],
+      ["2026-10-28", "09:35", 5, 20400, 20400, 20400, 20400, 0],
+      ["2026-10-28", "09:40", 5, 20400, 20400, 20400, 20400, 0]
+    ]},
+    "rs_b_wider": {"tf": 5, "rows": [
+      ["2026-10-28", "09:05", 5, 99999, 99999, 99999, 99999, 0],
+      ["2026-10-28", "09:10", 5, 88888, 88888, 88888, 88888, 0],
+      ["2026-10-28", "09:15", 5, 20000, 20000, 20000, 20000, 0],
+      ["2026-10-28", "09:20", 5, 20100, 20100, 20100, 20100, 0],
+      ["2026-10-28", "09:25", 5, 20000, 20000, 20000, 20000, 0],
+      ["2026-10-28", "09:30", 5, 20400, 20400, 20400, 20400, 0],
+      ["2026-10-28", "09:35", 5, 20400, 20400, 20400, 20400, 0],
+      ["2026-10-28", "09:40", 5, 20400, 20400, 20400, 20400, 0]
+    ]},
+    "rs_b_zero": {"tf": 5, "rows": [
+      ["2026-10-28", "09:15", 5, 0, 0, 0, 0, 0],
+      ["2026-10-28", "09:20", 5, 20100, 20100, 20100, 20100, 0],
+      ["2026-10-28", "09:25", 5, 20000, 20000, 20000, 20000, 0],
+      ["2026-10-28", "09:30", 5, 20400, 20400, 20400, 20400, 0],
+      ["2026-10-28", "09:35", 5, 20400, 20400, 20400, 20400, 0],
+      ["2026-10-28", "09:40", 5, 20400, 20400, 20400, 20400, 0]
+    ]}
+  },
+
+  "turnover": [
+    {"id": "T1", "note": "Rs 2500.05 times 1200 shares is Rs 30,00,060", "close": 250005, "volume": 1200, "expect": "3000060"},
+    {"id": "T2", "note": "a fraction of a rupee stays exact", "close": 10001, "volume": 3, "expect": "30003/100"},
+    {"id": "T3", "note": "five paise on one share", "close": 5, "volume": 1, "expect": "1/20"},
+    {"id": "T4", "note": "no volume, no turnover", "close": 10000, "volume": 0, "expect": "0"}
+  ],
+
+  "fields": [
+    {"id": "F1", "series": "m5_28", "index": 3, "name": "open", "expect": 10060},
+    {"id": "F2", "series": "m5_28", "index": 3, "name": "high", "expect": 10120},
+    {"id": "F3", "series": "m5_28", "index": 3, "name": "low", "expect": 10050},
+    {"id": "F4", "series": "m5_28", "index": 3, "name": "close", "expect": 10110},
+    {"id": "F5", "series": "m5_28", "index": 3, "name": "volume", "expect": 500},
+    {"id": "F6", "series": "m5_28", "index": 3, "name": "turnover", "expect": "50550", "note": "10110 paise x 500 / 100"},
+    {"id": "F7", "series": "fields", "index": 0, "name": "oi", "expect": {"why": "no_data", "detail": ["oi"]}, "note": "cash has no open interest: -1"},
+    {"id": "F8", "series": "fields", "index": 1, "name": "oi", "expect": 0, "note": "an open interest of zero is a number"},
+    {"id": "F9", "series": "fields", "index": 2, "name": "oi", "expect": 1500},
+    {"id": "F10", "series": "fields", "index": 0, "name": "vwap", "expect": {"why": "no_data", "detail": ["vwap"]}},
+    {"id": "F11", "series": "fields", "index": 1, "name": "vwap", "expect": 10025},
+    {"id": "F12", "series": "fields", "index": 1, "name": "turnover", "expect": "30003/100"},
+    {"id": "F13", "series": "fields", "index": 2, "name": "turnover", "expect": "50051001/2", "note": "10010 paise x 250005 / 100 = 2,50,25,500.50"}
+  ],
+
+  "change_pct": [
+    {"id": "C1", "note": "an earlier session against the close before it", "series": "chg", "index": 0, "days": "days_a", "today": "2026-10-28", "cp": 10300, "expect": "1"},
+    {"id": "C2", "note": "one paisa short of a percent", "series": "chg", "index": 1, "days": "days_a", "today": "2026-10-28", "cp": 10300, "expect": "99/100"},
+    {"id": "C3", "note": "today against the frozen previous close", "series": "chg", "index": 2, "days": "days_a", "today": "2026-10-28", "cp": 10300, "expect": "-1/103"},
+    {"id": "C4", "note": "exactly 2 percent", "series": "chg", "index": 3, "days": "days_a", "today": "2026-10-28", "cp": 10300, "expect": "2"},
+    {"id": "C5", "note": "a paisa under 2 percent is not 2", "series": "chg", "index": 4, "days": "days_a", "today": "2026-10-28", "cp": 10300, "expect": "205/103"},
+    {"id": "C6", "note": "the feed's previous close wins over the day candles for today", "series": "chg", "index": 5, "days": "days_a", "today": "2026-10-28", "cp": 10250, "expect": "2"},
+    {"id": "C7", "note": "no feed previous close: the day before", "series": "chg", "index": 5, "days": "days_a", "today": "2026-10-28", "cp": null, "expect": "155/103"},
+    {"id": "C8", "note": "a previous close of zero is no previous close", "series": "chg", "index": 5, "days": "days_a", "today": "2026-10-28", "cp": 0, "expect": "155/103"},
+    {"id": "C9", "note": "nothing to measure against", "series": "chg", "index": 5, "days": null, "today": "2026-10-28", "cp": null, "expect": {"why": "no_data", "detail": ["prev_close"]}},
+    {"id": "C10", "note": "the oldest session has no session before it", "series": "chg_old", "index": 0, "days": "days_a", "today": "2026-10-28", "cp": 10300, "expect": {"why": "no_data", "detail": ["prev_close"]}},
+    {"id": "C11", "note": "a previous close of zero in the data is a division by zero", "series": "chg_old", "index": 0, "days": "days_zero", "today": "2026-10-28", "cp": 10300, "expect": {"why": "zero", "detail": []}},
+    {"id": "C12", "note": "a weekly candle against the close before its week began (Friday 23 Oct)", "series": "chg_week", "index": 0, "days": "days_a", "today": "2026-10-28", "cp": 10300, "expect": "160/33"},
+    {"id": "C13", "note": "a weekly candle that starts today uses the frozen previous close", "series": "chg_week_monday", "index": 0, "days": "days_to_26", "today": "2026-10-26", "cp": 10000, "expect": "1/2"}
+  ],
+
+  "session": [
+    {"id": "S1", "days": "days_a", "session": "2026-10-28", "cp": 10300, "year": [11000, 8000], "name": "prev_close", "expect": 10300},
+    {"id": "S2", "days": "days_a", "session": "2026-10-28", "cp": 10300, "year": [11000, 8000], "name": "day_open", "expect": 10250},
+    {"id": "S3", "days": "days_a", "session": "2026-10-28", "cp": 10300, "year": [11000, 8000], "name": "day_high", "expect": 10400},
+    {"id": "S4", "days": "days_a", "session": "2026-10-28", "cp": 10300, "year": [11000, 8000], "name": "day_low", "expect": 10200},
+    {"id": "S5", "days": "days_a", "session": "2026-10-28", "cp": 10300, "year": [11000, 8000], "name": "prev_day_high", "expect": 10320},
+    {"id": "S6", "days": "days_a", "session": "2026-10-28", "cp": 10300, "year": [11000, 8000], "name": "prev_day_low", "expect": 9990},
+    {"id": "S7", "days": "days_a", "session": "2026-10-28", "cp": 10300, "year": [11000, 8000], "name": "prev_day_close", "expect": 10300},
+    {"id": "S8", "days": "days_a", "session": "2026-10-28", "cp": 10300, "year": [11000, 8000], "name": "year_high", "expect": 11000},
+    {"id": "S9", "days": "days_a", "session": "2026-10-28", "cp": 10300, "year": [11000, 8000], "name": "year_low", "expect": 8000},
+    {"id": "S10", "days": "days_a", "session": "2026-10-28", "cp": 10300, "year": [11000, 8000], "name": "gap_pct", "expect": "-50/103", "note": "open 10250 against 10300"},
+    {"id": "S11", "note": "the frozen previous close, not the day candle, is the gap's base", "days": "days_a", "session": "2026-10-28", "cp": 10000, "year": null, "name": "gap_pct", "expect": "5/2"},
+    {"id": "S12", "note": "no frozen previous close: the day before", "days": "days_a", "session": "2026-10-28", "cp": null, "year": null, "name": "prev_close", "expect": 10300},
+    {"id": "S13", "note": "nothing before today and no frozen close", "days": "days_only_today", "session": "2026-10-28", "cp": null, "year": null, "name": "prev_close", "expect": {"why": "no_data", "detail": ["prev_close"]}},
+    {"id": "S14", "note": "nothing before today and no frozen close: no gap", "days": "days_only_today", "session": "2026-10-28", "cp": null, "year": null, "name": "gap_pct", "expect": {"why": "no_data", "detail": ["prev_close"]}},
+    {"id": "S15", "note": "today's high passes the 52-week high", "days": "days_a", "session": "2026-10-28", "cp": 10300, "year": [10350, 8000], "name": "year_high", "expect": 10400},
+    {"id": "S16", "note": "today's low passes the 52-week low", "days": "days_a", "session": "2026-10-28", "cp": 10300, "year": [11000, 10300], "name": "year_low", "expect": 10200},
+    {"id": "S17", "note": "equal to the 52-week high is that high", "days": "days_a", "session": "2026-10-28", "cp": 10300, "year": [10400, 10200], "name": "year_high", "expect": 10400},
+    {"id": "S18", "note": "no snapshot, no 52-week high", "days": "days_a", "session": "2026-10-28", "cp": 10300, "year": null, "name": "year_high", "expect": {"why": "no_data", "detail": ["year_high"]}},
+    {"id": "S19", "note": "no snapshot, no 52-week low", "days": "days_a", "session": "2026-10-28", "cp": 10300, "year": null, "name": "year_low", "expect": {"why": "no_data", "detail": ["year_low"]}},
+    {"id": "S20", "note": "before today's first candle the snapshot stands as it is", "days": "days_to_27", "session": "2026-10-28", "cp": 10300, "year": [11000, 8000], "name": "year_high", "expect": 11000},
+    {"id": "S21", "note": "before today's first candle there is no day open", "days": "days_to_27", "session": "2026-10-28", "cp": 10300, "year": null, "name": "day_open", "expect": {"why": "no_candle", "detail": []}},
+    {"id": "S22", "note": "before today's first candle there is no day high", "days": "days_to_27", "session": "2026-10-28", "cp": 10300, "year": null, "name": "day_high", "expect": {"why": "no_candle", "detail": []}},
+    {"id": "S23", "note": "before today's first candle there is no gap", "days": "days_to_27", "session": "2026-10-28", "cp": 10300, "year": null, "name": "gap_pct", "expect": {"why": "no_candle", "detail": []}},
+    {"id": "S24", "note": "yesterday is the last candle before today", "days": "days_to_27", "session": "2026-10-28", "cp": 10300, "year": null, "name": "prev_day_high", "expect": 10320},
+    {"id": "S25", "note": "no day candles at all: no yesterday", "days": null, "session": "2026-10-28", "cp": 10300, "year": null, "name": "prev_day_high", "expect": {"why": "no_candle", "detail": []}},
+    {"id": "S26", "note": "no day candles at all: the frozen previous close still stands", "days": null, "session": "2026-10-28", "cp": 10300, "year": null, "name": "prev_close", "expect": 10300},
+    {"id": "S27", "note": "no day candles at all: no day high", "days": null, "session": "2026-10-28", "cp": 10300, "year": null, "name": "day_high", "expect": {"why": "no_candle", "detail": []}},
+    {"id": "S28", "note": "after the Muhurat Sunday yesterday is the Muhurat candle, not Friday", "days": "days_muhurat", "session": "2026-11-09", "cp": null, "year": null, "name": "prev_day_high", "expect": 20150},
+    {"id": "S29", "days": "days_muhurat", "session": "2026-11-09", "cp": null, "year": null, "name": "prev_day_low", "expect": 19980},
+    {"id": "S30", "days": "days_muhurat", "session": "2026-11-09", "cp": null, "year": null, "name": "prev_day_close", "expect": 20050},
+    {"id": "S31", "note": "the gap after Muhurat is measured from the Muhurat close", "days": "days_muhurat", "session": "2026-11-09", "cp": null, "year": null, "name": "gap_pct", "expect": "500/401"}
+  ],
+
+  "pivot": [
+    {"id": "V1", "note": "classic from H 2510.00, L 2480.00, C 2500.00; today's own candle and older days are not read", "days": "days_pivot", "session": "2026-10-28", "kind": "classic",
+     "expect": {"P": "749000/3", "R1": "754000/3", "S1": "745000/3", "R2": "758000/3", "S2": "740000/3", "R3": "763000/3", "S3": "736000/3"}},
+    {"id": "V2", "note": "central pivot range from the same day: BC is the midpoint, TC mirrors it about P", "days": "days_pivot", "session": "2026-10-28", "kind": "cpr",
+     "expect": {"P": "749000/3", "TC": "749500/3", "BC": "249500"}},
+    {"id": "V3", "note": "whole numbers stay whole: H 100, L 90, C 95", "days": "days_pivot_whole", "session": "2026-10-28", "kind": "classic",
+     "expect": {"P": "95", "R1": "100", "S1": "90", "R2": "105", "S2": "85", "R3": "110", "S3": "80"}},
+    {"id": "V4", "note": "CPR with C 95 on a 90-100 day collapses to one line", "days": "days_pivot_whole", "session": "2026-10-28", "kind": "cpr",
+     "expect": {"P": "95", "TC": "95", "BC": "95"}},
+    {"id": "V5", "note": "a day that closed low in its range puts TC below BC (the names are not swapped)", "days": "days_pivot_low_close", "session": "2026-10-28", "kind": "cpr",
+     "expect": {"P": "410/3", "TC": "370/3", "BC": "150"}},
+    {"id": "V6", "note": "the classic levels of that day", "days": "days_pivot_low_close", "session": "2026-10-28", "kind": "classic",
+     "expect": {"P": "410/3", "R1": "520/3", "S1": "220/3", "R2": "710/3", "S2": "110/3", "R3": "820/3", "S3": "-80/3"}},
+    {"id": "V7", "note": "after the Muhurat Sunday the pivots come from the Muhurat candle (H 201.50, L 199.80, C 200.50)", "days": "days_muhurat", "session": "2026-11-09", "kind": "classic",
+     "expect": {"P": "20060", "R1": "20140", "S1": "19970", "R2": "20230", "S2": "19890", "R3": "20310", "S3": "19800"}},
+    {"id": "V8", "note": "no day before the session: no pivot", "days": "days_only_today", "session": "2026-10-28", "kind": "classic", "expect": {"all": {"why": "no_candle", "detail": []}}},
+    {"id": "V9", "note": "no day candles at all", "days": null, "session": "2026-10-28", "kind": "cpr", "expect": {"all": {"why": "no_candle", "detail": []}}}
+  ],
+
+  "orb": [
+    {"id": "R1", "note": "15 minutes of 5-minute candles, read on the candle that ends the range", "series": "m5_28", "opens": {"2026-10-28": "09:15"}, "minutes": 15, "index": 2, "now": ["2026-10-28", "09:30:05"], "span": [0, 3], "high": 10100, "low": 9980},
+    {"id": "R2", "note": "one second before the range ends it is not known", "series": "m5_28", "opens": {"2026-10-28": "09:15"}, "minutes": 15, "index": 2, "now": ["2026-10-28", "09:29:59"], "span": {"why": "window_open", "detail": [15]}, "high": {"why": "window_open", "detail": [15]}, "low": {"why": "window_open", "detail": [15]}},
+    {"id": "R3", "note": "a candle that ended before the range did cannot be compared with it, however late the run", "series": "m5_28", "opens": {"2026-10-28": "09:15"}, "minutes": 15, "index": 1, "now": ["2026-10-28", "09:30:05"], "span": {"why": "window_open", "detail": [15]}, "high": {"why": "window_open", "detail": [15]}, "low": {"why": "window_open", "detail": [15]}},
+    {"id": "R4", "note": "a later candle reads the same range", "series": "m5_28", "opens": {"2026-10-28": "09:15"}, "minutes": 15, "index": 4, "now": ["2026-10-28", "09:40:05"], "span": [0, 3], "high": 10100, "low": 9980},
+    {"id": "R5", "note": "30 minutes", "series": "m5_28", "opens": {"2026-10-28": "09:15"}, "minutes": 30, "index": 6, "now": ["2026-10-28", "09:50:05"], "span": [0, 6], "high": 10140, "low": 9980},
+    {"id": "R6", "note": "30 minutes, read the instant the range ends", "series": "m5_28", "opens": {"2026-10-28": "09:15"}, "minutes": 30, "index": 5, "now": ["2026-10-28", "09:45:00"], "span": [0, 6], "high": 10140, "low": 9980},
+    {"id": "R7", "note": "30 minutes, one second early", "series": "m5_28", "opens": {"2026-10-28": "09:15"}, "minutes": 30, "index": 5, "now": ["2026-10-28", "09:44:59"], "span": {"why": "window_open", "detail": [30]}, "high": {"why": "window_open", "detail": [30]}, "low": {"why": "window_open", "detail": [30]}},
+    {"id": "R8", "note": "5 minutes is the first candle", "series": "m5_28", "opens": {"2026-10-28": "09:15"}, "minutes": 5, "index": 0, "now": ["2026-10-28", "09:20:00"], "span": [0, 1], "high": 10050, "low": 9980},
+    {"id": "R9", "note": "the session's start is not known", "series": "m5_28", "opens": {}, "minutes": 15, "index": 2, "now": ["2026-10-28", "09:30:05"], "span": {"why": "no_data", "detail": ["opening range"]}, "high": {"why": "no_data", "detail": ["opening range"]}, "low": {"why": "no_data", "detail": ["opening range"]}},
+    {"id": "R10", "note": "no trade, no bar: a stock that first traded at 09:20 has a range of the candles it has", "series": "m5_28_late", "opens": {"2026-10-28": "09:15"}, "minutes": 15, "index": 1, "now": ["2026-10-28", "09:30:05"], "span": [0, 2], "high": 10100, "low": 10010},
+    {"id": "R11", "note": "no trade in the range at all", "series": "m5_28_after", "opens": {"2026-10-28": "09:15"}, "minutes": 15, "index": 0, "now": ["2026-10-28", "09:40:05"], "span": {"why": "no_candle", "detail": []}, "high": {"why": "no_candle", "detail": []}, "low": {"why": "no_candle", "detail": []}},
+    {"id": "R12", "note": "candles that run past the end of the range cannot make it (the spec refuses this screen)", "series": "m15_28", "opens": {"2026-10-28": "09:15"}, "minutes": 5, "index": 0, "now": ["2026-10-28", "09:30:05"], "span": {"why": "no_data", "detail": ["opening range"]}, "high": {"why": "no_data", "detail": ["opening range"]}, "low": {"why": "no_data", "detail": ["opening range"]}},
+    {"id": "R13", "note": "one 15-minute candle is the 15-minute range", "series": "m15_28", "opens": {"2026-10-28": "09:15"}, "minutes": 15, "index": 0, "now": ["2026-10-28", "09:30:05"], "span": [0, 1], "high": 10100, "low": 9980},
+    {"id": "R14", "note": "the next 15-minute candle reads the first one's range", "series": "m15_28", "opens": {"2026-10-28": "09:15"}, "minutes": 15, "index": 1, "now": ["2026-10-28", "09:45:05"], "span": [0, 1], "high": 10100, "low": 9980},
+    {"id": "R15", "note": "yesterday's candles are not in today's range", "series": "m5_two_days", "opens": {"2026-10-27": "09:15", "2026-10-28": "09:15"}, "minutes": 15, "index": 3, "now": ["2026-10-28", "09:30:05"], "span": [1, 4], "high": 10100, "low": 9980},
+    {"id": "R16", "note": "yesterday's candle reads yesterday's range", "series": "m5_two_days", "opens": {"2026-10-27": "09:15", "2026-10-28": "09:15"}, "minutes": 5, "index": 0, "now": ["2026-10-28", "09:30:05"], "span": [0, 1], "high": 20500, "low": 19500},
+    {"id": "R17", "note": "Muhurat: the range starts at the session's own start", "series": "m5_muhurat", "opens": {"2026-11-08": "14:20"}, "minutes": 15, "index": 2, "now": ["2026-11-08", "14:35:05"], "span": [0, 3], "high": 20060, "low": 19990}
+  ],
+
+  "unverified": [
+    {"id": "U1", "note": "a clean range", "series": "m5_flags", "first": 0, "after": 2, "expect": null},
+    {"id": "U2", "note": "a candle built while the feed paused", "series": "m5_flags", "first": 0, "after": 3, "expect": {"why": "paused", "detail": [["2026-10-28", "09:25"]]}},
+    {"id": "U3", "note": "a repaired candle is trusted again", "series": "m5_flags", "first": 3, "after": 5, "expect": null},
+    {"id": "U4", "note": "the first unverified candle is named", "series": "m5_flags", "first": 3, "after": 7, "expect": {"why": "paused", "detail": [["2026-10-28", "09:40"]]}},
+    {"id": "U5", "note": "a candle that took a late trade but was not paused is trusted", "series": "m5_flags", "first": 6, "after": 7, "expect": null},
+    {"id": "U6", "note": "an empty range holds nothing unverified", "series": "m5_flags", "first": 3, "after": 3, "expect": null},
+    {"id": "U7", "note": "the range is half open: the candle after is not read", "series": "m5_flags", "first": 1, "after": 2, "expect": null}
+  ],
+
+  "extremum": [
+    {"id": "X1", "series": "m5_28", "side": "high", "n": 3, "source": "high", "index": 5, "expect": 10140},
+    {"id": "X2", "series": "m5_28", "side": "low", "n": 3, "source": "low", "index": 5, "expect": 10050},
+    {"id": "X3", "note": "the candle itself is in the window", "series": "m5_28", "side": "high", "n": 3, "source": "close", "index": 2, "expect": 10070},
+    {"id": "X4", "note": "fewer candles than the window", "series": "m5_28", "side": "high", "n": 5, "source": "high", "index": 3, "expect": {"why": "warming", "detail": [5, 4]}},
+    {"id": "X5", "note": "a window of one is the candle", "series": "m5_28", "side": "high", "n": 1, "source": "high", "index": 3, "expect": 10120},
+    {"id": "X6", "series": "m5_28", "side": "low", "n": 3, "source": "open", "index": 4, "expect": 10060},
+    {"id": "X7", "series": "m5_28", "side": "high", "n": 4, "source": "volume", "index": 3, "expect": 500},
+    {"id": "X8", "series": "m5_28", "side": "low", "n": 3, "source": "volume", "index": 5, "expect": 250},
+    {"id": "X9", "note": "the window is the whole series", "series": "m5_28", "side": "high", "n": 7, "source": "high", "index": 6, "expect": 10180},
+    {"id": "X10", "note": "one candle short", "series": "m5_28", "side": "high", "n": 8, "source": "high", "index": 6, "expect": {"why": "warming", "detail": [8, 7]}},
+    {"id": "X11", "note": "the first candle with a full window", "series": "m5_28", "side": "high", "n": 3, "source": "high", "index": 2, "expect": 10100},
+    {"id": "X12", "note": "one before it", "series": "m5_28", "side": "high", "n": 3, "source": "high", "index": 1, "expect": {"why": "warming", "detail": [3, 2]}}
+  ],
+
+  "extremum_array": [
+    {"id": "XA1", "series": "m5_28", "side": "high", "n": 3, "source": "high", "expect": [null, null, 10100, 10120, 10130, 10140, 10180]},
+    {"id": "XA2", "series": "m5_28", "side": "low", "n": 3, "source": "low", "expect": [null, null, 9980, 10010, 10040, 10050, 10060]},
+    {"id": "XA3", "series": "m5_28", "side": "high", "n": 1, "source": "close", "expect": [10030, 10070, 10060, 10110, 10100, 10120, 10170]},
+    {"id": "XA4", "series": "m5_28", "side": "low", "n": 7, "source": "low", "expect": [null, null, null, null, null, null, 9980]}
+  ],
+
+  "rs": [
+    {"id": "G1", "note": "stock +4.04%, index +2%: ahead by exactly 2 points of the ratio", "stock": "rs_i", "bench": "rs_b", "index": 3, "n": 3, "expect": "2"},
+    {"id": "G2", "stock": "rs_i", "bench": "rs_b", "index": 3, "n": 2, "expect": "151/101"},
+    {"id": "G3", "stock": "rs_i", "bench": "rs_b", "index": 5, "n": 5, "expect": "50/17"},
+    {"id": "G4", "note": "behind the index while the index stands still", "stock": "rs_i", "bench": "rs_b", "index": 4, "n": 1, "expect": "-2600/2601"},
+    {"id": "G5", "note": "not enough candles", "stock": "rs_i", "bench": "rs_b", "index": 2, "n": 3, "expect": {"why": "warming", "detail": [4, 3]}},
+    {"id": "G7", "note": "no index series", "stock": "rs_i", "bench": null, "index": 3, "n": 3, "expect": {"why": "no_data", "detail": ["index"]}},
+    {"id": "G8", "note": "the index has no candle at the stock's time", "stock": "rs_i", "bench": "rs_b_gap", "index": 3, "n": 3, "expect": {"why": "no_data", "detail": ["index"]}},
+    {"id": "G9", "note": "candles are matched by their time, not their place in the list", "stock": "rs_i", "bench": "rs_b_wider", "index": 3, "n": 3, "expect": "2"},
+    {"id": "G10", "note": "a zero index price", "stock": "rs_i", "bench": "rs_b_zero", "index": 3, "n": 3, "expect": {"why": "zero", "detail": []}}
+  ],
+
+  "patterns": [
+    {"id": "D1", "pattern": "doji", "note": "a small body", "candles": [[1000, 1100, 900, 1010]], "expect": true},
+    {"id": "D2", "pattern": "doji", "note": "a body of exactly a tenth of the range", "candles": [[1000, 1100, 900, 1020]], "expect": true},
+    {"id": "D3", "pattern": "doji", "note": "a paisa over a tenth", "candles": [[1000, 1100, 900, 1021]], "expect": false},
+    {"id": "D4", "pattern": "doji", "note": "no body at all", "candles": [[1000, 1050, 950, 1000]], "expect": true},
+    {"id": "D5", "pattern": "doji", "note": "one price only is not a shape", "candles": [[1000, 1000, 1000, 1000]], "expect": false},
+    {"id": "D6", "pattern": "doji", "note": "a down candle of a tenth", "candles": [[1020, 1100, 900, 1000]], "expect": true},
+    {"id": "D7", "pattern": "doji", "note": "a big body", "candles": [[1000, 1100, 900, 1090]], "expect": false},
+    {"id": "D8", "pattern": "doji", "note": "a single candle is enough", "candles": [[1000, 1100, 900, 1010]], "at": 0, "expect": true},
+
+    {"id": "H1", "pattern": "hammer", "note": "up candle, tail five times the body", "candles": [[1000, 1022, 900, 1020]], "expect": true},
+    {"id": "H2", "pattern": "hammer", "note": "tail exactly twice the body", "candles": [[1000, 1022, 960, 1020]], "expect": true},
+    {"id": "H3", "pattern": "hammer", "note": "a paisa short of twice", "candles": [[1000, 1022, 961, 1020]], "expect": false},
+    {"id": "H4", "pattern": "hammer", "note": "head exactly a tenth of the range", "candles": [[1000, 1020, 920, 1010]], "expect": true},
+    {"id": "H5", "pattern": "hammer", "note": "head a paisa over a tenth", "candles": [[1000, 1021, 920, 1010]], "expect": false},
+    {"id": "H6", "pattern": "hammer", "note": "a down candle can be a hammer", "candles": [[1020, 1022, 920, 1000]], "expect": true},
+    {"id": "H7", "pattern": "hammer", "note": "no body is not a hammer", "candles": [[1000, 1000, 900, 1000]], "expect": false},
+    {"id": "H8", "pattern": "hammer", "note": "one price only", "candles": [[1000, 1000, 1000, 1000]], "expect": false},
+    {"id": "H9", "pattern": "hammer", "note": "a tail above is a shooting star, not a hammer", "candles": [[1000, 1100, 978, 980]], "expect": false},
+
+    {"id": "SS1", "pattern": "shooting_star", "note": "down candle, wick five times the body", "candles": [[1000, 1100, 978, 980]], "expect": true},
+    {"id": "SS2", "pattern": "shooting_star", "note": "wick exactly twice the body", "candles": [[1000, 1040, 978, 980]], "expect": true},
+    {"id": "SS3", "pattern": "shooting_star", "note": "a paisa short of twice", "candles": [[1000, 1039, 978, 980]], "expect": false},
+    {"id": "SS4", "pattern": "shooting_star", "note": "tail exactly a tenth of the range", "candles": [[1000, 1080, 980, 990]], "expect": true},
+    {"id": "SS5", "pattern": "shooting_star", "note": "tail a paisa over a tenth", "candles": [[1000, 1080, 979, 990]], "expect": false},
+    {"id": "SS6", "pattern": "shooting_star", "note": "an up candle can be a shooting star", "candles": [[980, 1100, 978, 1000]], "expect": true},
+    {"id": "SS7", "pattern": "shooting_star", "note": "no body is not a shooting star", "candles": [[1000, 1100, 1000, 1000]], "expect": false},
+    {"id": "SS8", "pattern": "shooting_star", "note": "one price only", "candles": [[1000, 1000, 1000, 1000]], "expect": false},
+    {"id": "SS9", "pattern": "shooting_star", "note": "a tail below is a hammer, not a shooting star", "candles": [[1000, 1022, 900, 1020]], "expect": false},
+
+    {"id": "E1", "pattern": "bullish_engulfing", "note": "a down candle, then an up candle that covers it and is larger", "candles": [[1000, 1005, 975, 980], [979, 1005, 975, 1001]], "expect": true},
+    {"id": "E2", "pattern": "bullish_engulfing", "note": "equal bodies cover but are not larger", "candles": [[1000, 1005, 975, 980], [980, 1005, 975, 1000]], "expect": false},
+    {"id": "E3", "pattern": "bullish_engulfing", "note": "a paisa larger at the close", "candles": [[1000, 1005, 975, 980], [980, 1005, 975, 1001]], "expect": true},
+    {"id": "E4", "pattern": "bullish_engulfing", "note": "a paisa larger at the open", "candles": [[1000, 1005, 975, 980], [979, 1005, 975, 1000]], "expect": true},
+    {"id": "E5", "pattern": "bullish_engulfing", "note": "opens above the earlier close", "candles": [[1000, 1005, 975, 980], [981, 1015, 975, 1010]], "expect": false},
+    {"id": "E6", "pattern": "bullish_engulfing", "note": "closes below the earlier open", "candles": [[1000, 1005, 965, 980], [970, 1005, 965, 999]], "expect": false},
+    {"id": "E7", "pattern": "bullish_engulfing", "note": "the second candle is down", "candles": [[1000, 1005, 975, 980], [1010, 1015, 965, 970]], "expect": false},
+    {"id": "E8", "pattern": "bullish_engulfing", "note": "the first candle is up", "candles": [[980, 1005, 975, 1000], [979, 1025, 975, 1021]], "expect": false},
+    {"id": "E9", "pattern": "bullish_engulfing", "note": "the first candle has no body", "candles": [[1000, 1005, 995, 1000], [995, 1010, 995, 1005]], "expect": false},
+    {"id": "E10", "pattern": "bullish_engulfing", "note": "one candle is not enough", "candles": [[979, 1005, 975, 1001]], "expect": {"why": "warming", "detail": [2, 1]}},
+
+    {"id": "B1", "pattern": "bearish_engulfing", "note": "an up candle, then a down candle that covers it and is larger", "candles": [[980, 1005, 975, 1000], [1001, 1005, 975, 979]], "expect": true},
+    {"id": "B2", "pattern": "bearish_engulfing", "note": "equal bodies cover but are not larger", "candles": [[980, 1005, 975, 1000], [1000, 1005, 975, 980]], "expect": false},
+    {"id": "B3", "pattern": "bearish_engulfing", "note": "a paisa larger at the close", "candles": [[980, 1005, 975, 1000], [1000, 1005, 975, 979]], "expect": true},
+    {"id": "B4", "pattern": "bearish_engulfing", "note": "a paisa larger at the open", "candles": [[980, 1005, 975, 1000], [1001, 1005, 975, 980]], "expect": true},
+    {"id": "B5", "pattern": "bearish_engulfing", "note": "opens below the earlier close", "candles": [[980, 1005, 975, 1000], [999, 1005, 965, 970]], "expect": false},
+    {"id": "B6", "pattern": "bearish_engulfing", "note": "closes above the earlier open", "candles": [[980, 1015, 975, 1000], [1010, 1015, 975, 981]], "expect": false},
+    {"id": "B7", "pattern": "bearish_engulfing", "note": "the second candle is up", "candles": [[980, 1005, 975, 1000], [970, 1015, 965, 1010]], "expect": false},
+    {"id": "B8", "pattern": "bearish_engulfing", "note": "the first candle is down", "candles": [[1000, 1005, 975, 980], [1001, 1005, 955, 959]], "expect": false},
+    {"id": "B9", "pattern": "bearish_engulfing", "note": "the first candle has no body", "candles": [[1000, 1005, 995, 1000], [1005, 1005, 990, 995]], "expect": false},
+    {"id": "B10", "pattern": "bearish_engulfing", "note": "one candle is not enough", "candles": [[1001, 1005, 975, 979]], "expect": {"why": "warming", "detail": [2, 1]}},
+
+    {"id": "I1", "pattern": "inside_bar", "note": "a lower high and a higher low", "candles": [[1000, 1100, 900, 1050], [1050, 1099, 901, 1060]], "expect": true},
+    {"id": "I2", "pattern": "inside_bar", "note": "an equal high is not inside", "candles": [[1000, 1100, 900, 1050], [1050, 1100, 901, 1060]], "expect": false},
+    {"id": "I3", "pattern": "inside_bar", "note": "an equal low is not inside", "candles": [[1000, 1100, 900, 1050], [1050, 1099, 900, 1060]], "expect": false},
+    {"id": "I4", "pattern": "inside_bar", "note": "a higher high", "candles": [[1000, 1100, 900, 1050], [1050, 1101, 901, 1060]], "expect": false},
+    {"id": "I5", "pattern": "inside_bar", "note": "a lower low", "candles": [[1000, 1100, 900, 1050], [1050, 1099, 899, 1060]], "expect": false},
+    {"id": "I6", "pattern": "inside_bar", "note": "one candle is not enough", "candles": [[1050, 1099, 901, 1060]], "expect": {"why": "warming", "detail": [2, 1]}},
+    {"id": "I7", "pattern": "inside_bar", "note": "only the candle before counts, not the one before that", "candles": [[1000, 1300, 700, 1050], [1000, 1100, 900, 1050], [1050, 1099, 901, 1060]], "expect": true},
+
+    {"id": "N1", "pattern": "nr7", "note": "ranges 50 40 60 30 70 45 30: a tie with the narrowest of the six before counts", "ranges": [50, 40, 60, 30, 70, 45, 30], "expect": true},
+    {"id": "N2", "pattern": "nr7", "note": "narrower than all", "ranges": [50, 40, 60, 30, 70, 45, 29], "expect": true},
+    {"id": "N3", "pattern": "nr7", "note": "a paisa wider than the narrowest", "ranges": [50, 40, 60, 30, 70, 45, 31], "expect": false},
+    {"id": "N4", "pattern": "nr7", "note": "no range is not narrow", "ranges": [50, 40, 60, 30, 70, 45, 0], "expect": false},
+    {"id": "N5", "pattern": "nr7", "note": "only the last seven count", "ranges": [10, 50, 40, 60, 30, 70, 45, 30], "expect": true},
+    {"id": "N6", "pattern": "nr7", "note": "six candles are not enough", "ranges": [40, 60, 30, 70, 45, 30], "expect": {"why": "warming", "detail": [7, 6]}},
+    {"id": "N7", "pattern": "nr7", "note": "a later candle is not read: the verdict at the seventh stands", "ranges": [50, 40, 60, 30, 70, 45, 30, 5], "at": 6, "expect": true},
+    {"id": "N8", "pattern": "nr7", "note": "the widest of the six before decides nothing; the narrowest does", "ranges": [50, 40, 60, 31, 70, 45, 30], "expect": true},
+    {"id": "N9", "pattern": "nr7", "note": "one earlier candle is narrower", "ranges": [50, 20, 60, 31, 70, 45, 30], "expect": false}
+  ]
+}

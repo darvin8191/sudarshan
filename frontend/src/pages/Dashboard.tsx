@@ -33,6 +33,7 @@ import {
 import { type DashboardFunds, PnlCard } from '@/sudarshan/dashboard/PnlCard'
 import { PortfolioCard } from '@/sudarshan/dashboard/PortfolioCard'
 import { usePortfolioCard } from '@/sudarshan/dashboard/portfolioCard'
+import { ScreenerCard } from '@/sudarshan/dashboard/ScreenerCard'
 
 interface MasterContractStatus {
   status: 'pending' | 'downloading' | 'success' | 'error'
@@ -379,6 +380,8 @@ export default function Dashboard() {
               switch (Display settings) is on; it replaces it a release after his check (P5). */}
           {portfolioCard && <PortfolioCard marketOpen={marketOpen} />}
           <HoldingsCard apiKey={apiKey} marketOpen={marketOpen} />
+          {/* SUDARSHAN M9 UI8: the screener's day, live from its run pushes. */}
+          <ScreenerCard marketOpen={marketOpen} />
         </div>
 
         <section

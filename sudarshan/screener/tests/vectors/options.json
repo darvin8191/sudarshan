@@ -1,0 +1,148 @@
+{
+  "schema": 1,
+  "note": "Hand-computed golden vectors for options.py (EN5). Prices and strikes are paise, open interest whole contracts, an implied volatility a float in the feed's unit. A ratio is an exact fraction in percent units written as text; a float is a JSON number with a point; an object with 'why' is a Why. In a build-up vector 'price' and 'oi' are [reference, now].",
+
+  "buildup": [
+    {"id": "O1", "note": "price +0.5%, OI +2.0% over the day", "price": [20000, 20100], "oi": [100000, 102000], "expect": "long_buildup"},
+    {"id": "O2a", "note": "price -0.5%, OI +2.0%", "price": [20000, 19900], "oi": [100000, 102000], "expect": "short_buildup"},
+    {"id": "O2b", "note": "price +0.5%, OI -1%", "price": [20000, 20100], "oi": [100000, 99000], "expect": "short_covering"},
+    {"id": "O2c", "note": "price -0.5%, OI -1%", "price": [20000, 19900], "oi": [100000, 99000], "expect": "long_unwinding"},
+    {"id": "O3", "note": "price unchanged, OI +3%", "price": [20000, 20000], "oi": [100000, 103000], "expect": "none"},
+    {"id": "O3b", "note": "price up, OI unchanged", "price": [20000, 20100], "oi": [100000, 100000], "expect": "none"},
+    {"id": "O3c", "note": "nothing moved", "price": [20000, 20000], "oi": [100000, 100000], "expect": "none"},
+    {"id": "T1", "note": "a move of exactly the threshold counts", "price": [20000, 20100], "oi": [100000, 102000], "min_price": "0.5", "min_oi": "2", "expect": "long_buildup"},
+    {"id": "T2", "note": "a paisa under the price threshold: 0.495%", "price": [20000, 20099], "oi": [100000, 102000], "min_price": "0.5", "expect": "none"},
+    {"id": "T3", "note": "OI +1.99% is under a threshold of 2%", "price": [20000, 20100], "oi": [100000, 101990], "min_oi": "2", "expect": "none"},
+    {"id": "T4", "note": "a fall of exactly the threshold counts", "price": [20000, 19900], "oi": [100000, 102000], "min_price": "0.5", "expect": "short_buildup"},
+    {"id": "T5", "note": "a reference of zero needs no division", "price": [0, 100], "oi": [0, 10], "min_price": "1", "min_oi": "1", "expect": "long_buildup"},
+    {"id": "T6", "note": "large open interest, exactly +2%", "price": [20000, 20100], "oi": [12345600, 12592512], "min_oi": "2", "expect": "long_buildup"},
+    {"id": "T7", "note": "large open interest, one contract under +2%", "price": [20000, 20100], "oi": [12345600, 12592511], "min_oi": "2", "expect": "none"}
+  ],
+
+  "oi_change": [
+    {"id": "C1", "oi": [100000, 102000], "expect": "2"},
+    {"id": "C2", "oi": [100000, 99000], "expect": "-1"},
+    {"id": "C3", "note": "nothing to compare with", "oi": [0, 5], "expect": {"why": "zero", "detail": []}},
+    {"id": "C4", "note": "no reference", "oi": [null, 5], "expect": {"why": "no_data", "detail": ["oi"]}},
+    {"id": "C5", "oi": [100000, 100000], "expect": "0"}
+  ],
+
+  "atm": [
+    {"id": "O6", "note": "spot exactly between two strikes takes the lower", "spot": 2587500, "strikes": [2585000, 2590000], "expect": 2585000},
+    {"id": "A2", "note": "a paisa above the middle", "spot": 2587501, "strikes": [2585000, 2590000], "expect": 2590000},
+    {"id": "A3", "note": "a paisa below the middle", "spot": 2587499, "strikes": [2585000, 2590000], "expect": 2585000},
+    {"id": "A4", "note": "below every strike", "spot": 100, "strikes": [2585000, 2590000], "expect": 2585000},
+    {"id": "A5", "note": "above every strike", "spot": 9999999, "strikes": [2585000, 2590000], "expect": 2590000},
+    {"id": "A6", "note": "on a strike", "spot": 2590000, "strikes": [2585000, 2590000, 2595000], "expect": 2590000},
+    {"id": "A7", "note": "no spot yet", "spot": null, "strikes": [2585000, 2590000], "expect": {"why": "no_data", "detail": ["spot"]}},
+    {"id": "A8", "note": "no strikes followed", "spot": 2587500, "strikes": [], "expect": {"why": "no_options", "detail": ["NIFTY"]}}
+  ],
+
+  "pcr": [
+    {"id": "O4", "note": "PE 1,200,000 over CE 1,000,000", "strikes": [
+      {"strike": 2585000, "ce_oi": 400000, "pe_oi": 500000},
+      {"strike": 2590000, "ce_oi": 300000, "pe_oi": 400000},
+      {"strike": 2595000, "ce_oi": 300000, "pe_oi": 300000}], "expect": "6/5"},
+    {"id": "O4b", "note": "one more put contract", "strikes": [
+      {"strike": 2585000, "ce_oi": 400000, "pe_oi": 500000},
+      {"strike": 2590000, "ce_oi": 300000, "pe_oi": 400000},
+      {"strike": 2595000, "ce_oi": 300000, "pe_oi": 300001}], "expect": "1200001/1000000"},
+    {"id": "P3", "note": "a strike that does not report both sides is left out of both sums", "strikes": [
+      {"strike": 2585000, "ce_oi": 400000, "pe_oi": 500000},
+      {"strike": 2590000, "ce_oi": 900000, "pe_oi": null},
+      {"strike": 2595000, "ce_oi": null, "pe_oi": 900000}], "expect": "5/4"},
+    {"id": "P4", "note": "no calls at all", "strikes": [
+      {"strike": 2585000, "ce_oi": 0, "pe_oi": 500000}], "expect": {"why": "zero", "detail": []}},
+    {"id": "P5", "note": "no open interest followed", "strikes": [
+      {"strike": 2585000}], "expect": {"why": "no_data", "detail": ["oi"]}},
+    {"id": "P6", "note": "no puts is a ratio of zero", "strikes": [
+      {"strike": 2585000, "ce_oi": 500, "pe_oi": 0}], "expect": "0"}
+  ],
+
+  "max_pain": [
+    {"id": "O5", "note": "strikes 100/110/120, CE OI 10/20/30, PE OI 30/20/10: pain 400, 200, 400", "strikes": [
+      {"strike": 10000, "ce_oi": 10, "pe_oi": 30},
+      {"strike": 11000, "ce_oi": 20, "pe_oi": 20},
+      {"strike": 12000, "ce_oi": 30, "pe_oi": 10}], "expect": 11000},
+    {"id": "M2", "note": "two strikes with the same pain: the lower", "strikes": [
+      {"strike": 10000, "ce_oi": 10, "pe_oi": 10},
+      {"strike": 11000, "ce_oi": 10, "pe_oi": 10}], "expect": 10000},
+    {"id": "M3", "note": "all the writing is at the top strike", "strikes": [
+      {"strike": 10000, "ce_oi": 0, "pe_oi": 0},
+      {"strike": 11000, "ce_oi": 0, "pe_oi": 0},
+      {"strike": 12000, "ce_oi": 0, "pe_oi": 100}], "expect": 12000},
+    {"id": "M4", "note": "a strike without both sides is not a candidate", "strikes": [
+      {"strike": 10000, "ce_oi": 10, "pe_oi": 30},
+      {"strike": 11000, "ce_oi": 20, "pe_oi": null},
+      {"strike": 12000, "ce_oi": 30, "pe_oi": 10}], "expect": 10000},
+    {"id": "M5", "note": "no open interest followed", "strikes": [{"strike": 10000}], "expect": {"why": "no_data", "detail": ["oi"]}}
+  ],
+
+  "atm_iv": [
+    {"id": "V1", "note": "the mean of the ATM call and put", "spot": 2587500, "strikes": [
+      {"strike": 2585000, "ce_iv": 12.0, "pe_iv": 13.0, "ce_ltp": 15000, "pe_ltp": 13000},
+      {"strike": 2590000, "ce_iv": 99.0, "pe_iv": 99.0, "ce_ltp": 1, "pe_ltp": 1}], "iv": 12.5, "straddle": 28000},
+    {"id": "V2", "note": "the call has no IV", "spot": 2587500, "strikes": [
+      {"strike": 2585000, "ce_iv": null, "pe_iv": 13.0, "ce_ltp": 15000, "pe_ltp": null}], "iv": {"why": "no_data", "detail": ["iv"]}, "straddle": {"why": "no_data", "detail": ["option price"]}},
+    {"id": "V3", "note": "an IV of zero is no IV", "spot": 2587500, "strikes": [
+      {"strike": 2585000, "ce_iv": 0.0, "pe_iv": 13.0, "ce_ltp": 0, "pe_ltp": 13000}], "iv": {"why": "no_data", "detail": ["iv"]}, "straddle": {"why": "no_data", "detail": ["option price"]}},
+    {"id": "V4", "note": "no spot yet", "spot": null, "strikes": [
+      {"strike": 2585000, "ce_iv": 12.0, "pe_iv": 13.0, "ce_ltp": 15000, "pe_ltp": 13000}], "iv": {"why": "no_data", "detail": ["spot"]}, "straddle": {"why": "no_data", "detail": ["spot"]}},
+    {"id": "V5", "note": "a NaN is not a number", "spot": 2587500, "strikes": [
+      {"strike": 2585000, "ce_iv": 12.0, "pe_iv": 1e999, "ce_ltp": 15000, "pe_ltp": 13000}], "iv": {"why": "nan", "detail": []}, "straddle": 28000}
+  ],
+
+  "iv_rank": [
+    {"id": "O7a", "note": "20 days of IV (19 stored and today), today the highest", "history": [10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0, 25.0, 26.0, 27.0, 28.0], "today": 29.0, "rank": 100.0, "percentile": "100"},
+    {"id": "O7b", "note": "today equal to 5 other days: 7 days below, 7 above, so the percentile counts only those below", "history": [20.0, 20.0, 20.0, 20.0, 20.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0], "today": 20.0, "rank": 50.0, "percentile": "700/19"},
+    {"id": "R3", "note": "today the lowest", "history": [10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0, 25.0, 26.0, 27.0, 28.0], "today": 10.0, "rank": 0.0, "percentile": "0"},
+    {"id": "R4", "note": "today above every stored day", "history": [10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0, 25.0, 26.0, 27.0, 28.0], "today": 40.0, "rank": 100.0, "percentile": "100"},
+    {"id": "R5", "note": "today below every stored day", "history": [10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0, 25.0, 26.0, 27.0, 28.0], "today": 5.0, "rank": 0.0, "percentile": "0"},
+    {"id": "R6", "note": "one day short: 19 days with today, 20 needed", "history": [10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0, 25.0, 26.0, 27.0], "today": 29.0, "rank": {"why": "short_store", "detail": [19, 20]}, "percentile": {"why": "short_store", "detail": [19, 20]}},
+    {"id": "R7", "note": "a store that has just started", "history": [], "today": 14.0, "rank": {"why": "short_store", "detail": [1, 20]}, "percentile": {"why": "short_store", "detail": [1, 20]}},
+    {"id": "R8", "note": "every day the same: no range to rank within", "history": [15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0], "today": 15.0, "rank": {"why": "zero", "detail": []}, "percentile": "0"}
+  ],
+
+  "iv_change": [
+    {"id": "H1", "now": 12.0, "ago": 10.0, "expect": 20.0},
+    {"id": "H2", "now": 10.0, "ago": 12.5, "expect": -20.0},
+    {"id": "H3", "now": 10.0, "ago": 0.0, "expect": {"why": "zero", "detail": []}},
+    {"id": "H4", "now": null, "ago": 10.0, "expect": {"why": "no_data", "detail": ["iv"]}},
+    {"id": "H5", "now": 10.0, "ago": null, "expect": {"why": "no_data", "detail": ["iv"]}}
+  ],
+
+  "view": {
+    "chains": {
+      "NIFTY": {"spot": 2587500, "strikes": [
+        {"strike": 2585000, "ce_oi": 400000, "pe_oi": 500000, "ce_iv": 12.0, "pe_iv": 13.0, "ce_ltp": 15000, "pe_ltp": 13000},
+        {"strike": 2590000, "ce_oi": 300000, "pe_oi": 400000, "ce_iv": 11.0, "pe_iv": 12.0, "ce_ltp": 12000, "pe_ltp": 16000},
+        {"strike": 2595000, "ce_oi": 300000, "pe_oi": 300000, "ce_iv": 10.0, "pe_iv": 11.0, "ce_ltp": 9000, "pe_ltp": 20000}]},
+      "BANKNIFTY": {"spot": 5500000, "strikes": [
+        {"strike": 5500000, "ce_oi": 100, "pe_oi": 250, "ce_iv": 14.0, "pe_iv": 15.0, "ce_ltp": 30000, "pe_ltp": 28000}]},
+      "RELIANCE": {"spot": 120000, "strikes": [
+        {"strike": 120000, "ce_oi": 10, "pe_oi": 5, "ce_iv": 20.0, "pe_iv": 22.0, "ce_ltp": 3000, "pe_ltp": 2500}]}
+    },
+    "iv_history": {"NIFTY": [10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0, 25.0, 26.0, 27.0, 28.0]},
+    "iv_ago": {"NIFTY": {"5": 10.0}},
+    "vix_now": 14.0,
+    "vix_history": [10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0, 25.0, 26.0, 27.0, 28.0],
+    "reads": [
+      {"id": "W1", "what": "pcr", "underlying": "NIFTY", "expect": "6/5"},
+      {"id": "W2", "what": "pcr", "underlying": "BANKNIFTY", "expect": "5/2"},
+      {"id": "W3", "what": "max_pain", "underlying": "NIFTY", "expect": 2590000},
+      {"id": "W4", "what": "atm_iv", "underlying": "NIFTY", "expect": 12.5},
+      {"id": "W5", "what": "straddle", "underlying": "NIFTY", "expect": 28000},
+      {"id": "W6", "what": "iv_change", "underlying": "NIFTY", "tf": 5, "expect": 25.0},
+      {"id": "W7", "what": "iv_change", "underlying": "NIFTY", "tf": 15, "expect": {"why": "no_data", "detail": ["iv"]}},
+      {"id": "W8", "what": "iv_rank", "underlying": "NIFTY", "expect": 13.88888888888889},
+      {"id": "W9", "what": "iv_pct", "underlying": "NIFTY", "expect": "300/19"},
+      {"id": "W10", "what": "pcr", "underlying": "self", "own": "RELIANCE", "expect": "1/2"},
+      {"id": "W11", "what": "pcr", "underlying": "self", "own": null, "expect": {"why": "no_options", "detail": ["self"]}},
+      {"id": "W12", "what": "pcr", "underlying": "self", "own": "TCS", "expect": {"why": "no_options", "detail": ["TCS"]}},
+      {"id": "W13", "what": "pcr", "underlying": "BANKNIFTY", "own": "NIFTY", "expect": "5/2", "note": "a named underlying ignores the row's own"},
+      {"id": "W14", "what": "iv_rank", "underlying": "BANKNIFTY", "expect": {"why": "short_store", "detail": [1, 20]}},
+      {"id": "W15", "what": "vix_rank", "underlying": "NIFTY", "expect": 22.22222222222222},
+      {"id": "W16", "what": "vix_pct", "underlying": "NIFTY", "expect": "400/19"}
+    ]
+  }
+}

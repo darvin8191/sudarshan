@@ -25,6 +25,7 @@ import {
   type LucideIcon,
   MessageCircle,
   MessageSquare,
+  ScanSearch,
   Search,
   Settings,
   ShieldAlert,
@@ -104,6 +105,8 @@ export const profileMenuItems: NavItem[] = [
   { href: '/watchlist', label: 'Watchlist', icon: Bookmark },
   // SUDARSHAN M7.18: the portfolio, right after the watchlist (never between API Key and Action Center).
   { href: '/portfolio', label: 'Portfolio', icon: Briefcase },
+  // SUDARSHAN M9: the screener, right after the watchlist.
+  { href: '/screener', label: 'Screener', icon: ScanSearch },
   { href: '/holdings', label: 'Holdings', icon: ClipboardList },
   { href: '/flow', label: 'Flow Editor', icon: Workflow },
   { href: '/scalping', label: 'Scalping', icon: Zap },

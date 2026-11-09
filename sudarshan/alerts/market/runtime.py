@@ -405,6 +405,26 @@ class MarketRuntime:
         }, event_id)  # fmt: skip
         return waiter
 
+    def tell_digest(self, event_id: int, text: str, at: int) -> None:
+        """A screener digest's line through the market lane (12 a minute, fills first on the
+        Pacer, the 5-minute age limit); its delivery is written as the lane answers."""
+        self.lane.add([Line(event_id, text, _at(at))])
+
+    def push_digest(self, event_id: int, digest: dict, said: dict, at: int) -> None:
+        """A screener digest to the open apps (M10.7): kind ``screener`` with a View link to the
+        Screener page; the app's delivery is written as the push answers."""
+        if self.pusher is None:
+            return
+        screen_id = digest.get("screen_id")
+        self.pusher.add(ALERT_EVENT, {
+            "event_id": event_id, "alert_id": 0, "symbol": "", "exchange": "",
+            "kind": "screener", "screen_id": screen_id, "run_key": digest.get("run_key"),
+            "link": f"/screener?screen={screen_id}" if isinstance(screen_id, int) else "/screener",
+            "title": said["title"], "detail": said["detail"], "note": said["note"],
+            "at": _at(at).isoformat(timespec="seconds"), "at_ms": at, "found_later": False,
+            "opening": False, "auction": False, "test": False,
+        }, event_id)  # fmt: skip
+
     def push_state(self, data: dict) -> None:
         """A change the open apps apply to their Alerts page (the desk builds it)."""
         if self.pusher is not None:

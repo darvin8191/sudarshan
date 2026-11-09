@@ -230,10 +230,20 @@ def test_claims_reach_the_socket_and_a_reconnect_resubscribes_them(feed_env, fas
                 health = (await http.get("/health")).json()
                 assert health["claims"] == {A: 3} and health["started_at"] == svc.started_at
                 await fake.sockets[0].close()  # Upstox drops the socket: all of it is sent again
-                await ff.wait_until(lambda: len(fake.requests) == 2 and svc.health()[
-                    "subscriptions_live"])  # fmt: skip
-                again = {k for r in fake.requests[1] for k in r["data"]["instrumentKeys"]}
-                assert {INFY, NIFTY, REL} <= again
+
+                def resubscribed() -> set:
+                    if len(fake.requests) < 2:
+                        return set()
+                    return {k for r in fake.requests[1] for k in r["data"]["instrumentKeys"]}
+
+                # health says live as soon as the new socket is up; the subscribe frames follow it
+                # by a few milliseconds, so wait for them too (seen on a loaded CI runner)
+                await ff.wait_until(
+                    lambda: (
+                        svc.health()["subscriptions_live"] and {INFY, NIFTY, REL} <= resubscribed()
+                    )
+                )
+                assert len(fake.requests) == 2
                 sent = len(fake.requests[1])
                 gone = (await http.delete(f"/claims/{A}")).json()
                 assert gone["applied_live"] and gone["subscribed"]["full"] == 1  # RELIANCE base

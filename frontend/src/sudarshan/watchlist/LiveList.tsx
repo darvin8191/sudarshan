@@ -1,8 +1,11 @@
-import { memo } from 'react'
+import { LogOut } from 'lucide-react'
+import { memo, useMemo } from 'react'
 import type { WatchlistItem } from '@/api/watchlist'
 import type { AlertPrefill } from '@/sudarshan/alerts/AlertForm'
 import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
-import type { MarketOpen } from '@/sudarshan/dashboard/live'
+import { keyOf, type MarketOpen } from '@/sudarshan/dashboard/live'
+import type { MemberRow } from '@/sudarshan/screener/api'
+import { exitedToday, tagsOf, usePin } from '@/sudarshan/screener/feed'
 import { type OrderRequest, SymbolSheet } from './SymbolSheet'
 import { useLiveRows } from './useLiveRows'
 import { WatchlistRows } from './WatchlistRows'
@@ -14,6 +17,8 @@ import { WatchlistRows } from './WatchlistRows'
  * the dialogs), and it draws at most once a frame (`useFrameLines`); each row
  * redraws only when its own figures change.
  */
+const NO_MEMBERS: MemberRow[] = []
+
 export const LiveList = memo(function LiveList({
   items,
   apiKey,
@@ -30,6 +35,7 @@ export const LiveList = memo(function LiveList({
   onCloseSheet,
   onOrder,
   onAlert,
+  members,
 }: {
   items: WatchlistItem[]
   apiKey: string | null
@@ -49,10 +55,19 @@ export const LiveList = memo(function LiveList({
   onCloseSheet: () => void
   onOrder: (order: OrderRequest) => void
   onAlert: (alert: AlertPrefill) => void
+  /** What a screener put in this list (M9 UI7): chips on rows, who left today, Pin in the sheet. */
+  members?: readonly MemberRow[]
 }) {
+  const tags = useMemo(() => tagsOf(members ?? NO_MEMBERS), [members])
+  const byKey = useMemo(
+    () => new Map((members ?? NO_MEMBERS).map((row) => [keyOf(row.symbol, row.exchange), row])),
+    [members]
+  )
   const live = useLiveRows({ items, apiKey, marketOpen: isOpen })
   const sheetRow =
     openItemId === null ? null : (live.rows.find((row) => row.item.id === openItemId) ?? null)
+  const pin = usePin(sheetRow ? byKey.get(sheetRow.key) : undefined)
+  const exited = exitedToday(members ?? NO_MEMBERS, live.now)
   const nothingShown = live.rows.length > 0 && live.rows.every((row) => row.view.ltp === null)
   const readFailed = apiKey !== null && live.snapshot === 'error' && live.rows.length > 0
 
@@ -90,8 +105,18 @@ export const LiveList = memo(function LiveList({
           onMove={onMove}
           onRemove={onRemove}
           onAdd={onAdd}
+          tags={tags}
         />
       </section>
+      {exited.length > 0 && (
+        <p
+          data-exited-today="true"
+          className="flex items-start gap-1.5 px-1 text-[0.8125rem] font-semibold text-[color:var(--text-secondary)]"
+        >
+          <LogOut aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+          Exited today ({exited.length}): {exited.join(' · ')}
+        </p>
+      )}
 
       <SymbolSheet
         row={sheetRow}
@@ -104,6 +129,7 @@ export const LiveList = memo(function LiveList({
         onOrder={onOrder}
         onAlert={onAlert}
         onRemove={onRemove}
+        pin={pin}
       />
     </>
   )

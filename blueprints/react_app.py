@@ -802,6 +802,12 @@ def react_watchlist():
     return serve_react_app()
 
 
+# SUDARSHAN M9: the screener (its API is /sudarshan/screener/api/*)
+@react_bp.route("/screener", strict_slashes=False)
+def react_screener():
+    return serve_react_app()
+
+
 # ============================================================
 # Flow Routes - Visual Workflow Automation
 # ============================================================

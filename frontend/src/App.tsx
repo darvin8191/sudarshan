@@ -49,6 +49,7 @@ const ActionCenter = lazy(() => import('@/pages/ActionCenter'))
 const AutoLogin = lazy(() => import('@/sudarshan/pages/AutoLogin')) // SUDARSHAN M2.20
 const Watchlist = lazy(() => import('@/sudarshan/pages/Watchlist')) // SUDARSHAN M8.2
 const MarketAlerts = lazy(() => import('@/sudarshan/pages/MarketAlerts')) // SUDARSHAN M10
+const Screener = lazy(() => import('@/sudarshan/pages/Screener')) // SUDARSHAN M9
 const Risk = lazy(() => import('@/sudarshan/pages/Risk')) // SUDARSHAN M20.7
 
 // Platform pages
@@ -195,6 +196,8 @@ function App() {
                 <Route path="/dashboard" element={<Dashboard />} />
                 {/* SUDARSHAN M8.2: the phone-first watchlist */}
                 <Route path="/watchlist" element={<Watchlist />} />
+                {/* SUDARSHAN M9: the screener */}
+                <Route path="/screener" element={<Screener />} />
                 <Route path="/positions" element={<Positions />} />
                 <Route path="/orderbook" element={<OrderBook />} />
                 <Route path="/tradebook" element={<TradeBook />} />

@@ -54,8 +54,11 @@ HEALTH_PATH = "/health"
 OPS_PREFIX = "/v1/"
 OPS = frozenset(
     {"state", "create", "update", "delete", "events", "events_since", "prefs_get", "prefs_set",
-     "test"}
+     "test", "screener_digest"}
 )  # fmt: skip
+#: The screener's digests come sealed under their own purpose (sudarshan/alerts/screener-digest/v1,
+#: cross-design X9): this op opens only with that key, the others only with the bridge's.
+DIGEST_OP = "screener_digest"
 #: The largest sealed request this route takes (cross-design X9).
 MAX_SEALED = 64 * 1024
 #: The bridge's limits let through at most 156 requests a minute (120 reads, 30 changes, 6
@@ -152,8 +155,10 @@ class MarketApi:
         *,
         nonces: NonceBook | None = None,
         max_bytes: int = MAX_SEALED,
+        digest_fernet: Fernet | None = None,
     ):
         self.desk, self.fernet, self.max_bytes = desk, fernet, max_bytes
+        self.digest_fernet = digest_fernet
         self.nonces = nonces if nonces is not None else NonceBook(NONCES)
         self.server: asyncio.Server | None = None
         # M18.1/R14: the service's own health document, which /health carries beside the market fields
@@ -226,8 +231,12 @@ class MarketApi:
         return {"status": "success", "data": await self.desk.call(op, message)}
 
     def _open(self, op: str, body: bytes) -> dict[str, Any]:
+        fernet = self.digest_fernet if op == DIGEST_OP else self.fernet
+        if fernet is None:
+            self._note(op, "no key for this op")
+            raise ApiError(403, "forbidden", WORDS["forbidden"])
         try:
-            return open_sealed(self.fernet, body, op=op, seen=self.nonces,
+            return open_sealed(fernet, body, op=op, seen=self.nonces,
                                max_bytes=self.max_bytes)  # fmt: skip
         except NoncesFull:
             log.warning("the market alerts' API is refusing requests: too many in the last two "
