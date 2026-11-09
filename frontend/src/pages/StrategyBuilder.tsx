@@ -236,6 +236,7 @@ export default function StrategyBuilder() {
     isStreaming,
     isPaused,
     lastStreamUpdate,
+    lastUpdate: lastChainUpdate, // SUDARSHAN: the figures' age for the Delayed chip
     dataIdentity,
     refetch: refetchLiveChain,
   } = useOptionChainLive(
@@ -1771,6 +1772,7 @@ export default function StrategyBuilder() {
         onRefresh={refreshContracts}
         isRefreshing={isLiveLoading}
         connectionStatus={connectionStatus}
+        figuresAt={lastChainUpdate}
       />
 
       {/* Template grid */}
