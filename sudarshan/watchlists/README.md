@@ -51,3 +51,17 @@ roll); other exchanges and unknown names are left out with their reason. Section
 letters, a repeat gets a number, an empty section is kept, duplicates are dropped. `split` cuts more
 than 250 symbols into lists at section boundaries. The alias table is completed against one real
 export (design fact W-5). Vectors: `tests/vectors/tvimport.json`.
+
+## W21 - ranked rows (`ranked.py`, `words/ranked.py`)
+
+Pure mapping of an Upstox Smartlist answer to rows, through the master by instrument key, in
+Upstox's order, with the ranking's own figure per category ("Traded Rs 1,320.9 cr", "Volume
+2,45,600", "OI +12.4%", "IV 14.2%, +1.1", "Premium 38.40", "Costs Rs 4,350 to buy"), the time Upstox
+made it (`time_stamp`, read as a number or an ISO text, IST when it has no offset) and a count of
+contracts the master does not have. Smartlist ranks futures, options and MTF only: the catalogue
+offers futures and options for Index, Stock and Commodity (commodities with the first four
+categories), 44 rankings, never MTF. Words say "Ranked by Upstox" and the age (stale after ten
+minutes), never "Live"; the sign-in, closed, unavailable and wait lines are here too. No read is
+made here: the Smartlist client is a later PR. The answer's exact envelope, the unit of traded
+value and of premium, and the base of `previous` are checked on a real read (design facts W-1 and
+W-10). Vectors: `tests/vectors/ranked.json`.

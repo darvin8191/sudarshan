@@ -45,6 +45,11 @@ def short_day(iso: str) -> str:
     return f"{d.day} {_MONTHS[d.month - 1]}"
 
 
+def ist_date(ms: int) -> date:
+    """The IST calendar date of an epoch in milliseconds."""
+    return datetime.fromtimestamp(ms / 1000, IST).date()
+
+
 def hm(ms: int) -> str:
     """An epoch in milliseconds as IST ``10:42``."""
     return datetime.fromtimestamp(ms / 1000, IST).strftime("%H:%M")
@@ -53,3 +58,19 @@ def hm(ms: int) -> str:
 def hms(ms: int) -> str:
     """An epoch in milliseconds as IST ``10:42:05``."""
     return datetime.fromtimestamp(ms / 1000, IST).strftime("%H:%M:%S")
+
+
+def fixed(x: float, places: int = 2) -> str:
+    """``38.4`` to ``38.40`` with Indian grouping and exactly ``places`` decimals."""
+    text = f"{abs(x):.{places}f}"
+    whole, _, frac = text.partition(".")
+    out = group(int(whole)) + ("." + frac if frac else "")
+    return ("-" if x < 0 and float(text) != 0 else "") + out
+
+
+def signed(x: float, places: int = 1, unit: str = "") -> str:
+    """``+12.4%`` or ``−3.1%``; zero has no sign. The minus is the typographic one."""
+    text = fixed(abs(x), places)
+    if float(text.replace(",", "")) == 0:
+        return text + unit
+    return ("+" if x > 0 else "−") + text + unit
