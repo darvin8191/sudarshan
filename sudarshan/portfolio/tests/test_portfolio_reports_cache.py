@@ -149,7 +149,8 @@ async def test_a_pnl_cut_by_the_budget_carries_on_page_by_page_and_reads_the_cha
             break
     assert seen == [("partial", 1), ("partial", 2), ("ok", 3)]
     assert [q["page_number"] for q in _rows(rig.fake, "pnl")] == ["1", "2", "3"]
-    assert rig.fake.count("charges") == 1 and rig.fake.count("pnl_meta") == 1
+    # the count is read once, and again before each carry-on, to see that no page has moved
+    assert rig.fake.count("charges") == 1 and rig.fake.count("pnl_meta") == 3
     assert d["realised_paise"] == 30_000  # 3 x 10,000 paise, worked by hand
 
 
@@ -443,7 +444,12 @@ async def test_a_minute_budget_stop_says_what_happens_next_and_the_next_read_car
 def test_no_word_promises_a_follow_up_that_does_not_come():
     for key in ("slow", "busy", "more", "short", "count"):
         text = reports.WORDS[key]
-        assert "follows in a minute" not in text and "button below" in text, key
+        assert "follows in a minute" not in text and (
+            "button below" in text or "Read more" in text
+        ), key
+    # a partial year's one button says Read more, so the words that point at it say so
+    for key in ("short", "count"):
+        assert "button below" not in reports.WORDS[key] and "Read more" in reports.WORDS[key], key
     assert "Wait a minute" in reports.WORDS["busy"] and "Wait a minute" in reports.WORDS["slow"]
     assert reports.WORDS["no_pnl_mf"].endswith("in Trades.")
 

@@ -36,7 +36,9 @@ switch it on after the two checks below.**
     your own items are never touched, and you can pin a row.
   - A run worth telling sends one Telegram line through market alerts, with a toast whose View
     opens the screen, under the rules you set for each screen: fewest matches, once per stock a
-    day, skip empty checks, pause after the first, a cap.
+    day, skip empty checks, pause after the first, a cap. **Market alerts must be switched on for
+    it: they ship off, and with them off the run says "No alert sent: ..." and nothing reaches
+    Telegram.**
   - Results move as each run arrives, and their prices with every tick (the first 100 rows). The
     History tab rewinds any run of the last 100 days to its whole match set.
   - The Library has nine ready-made screens. Two can be used now: ORB breakout and VWAP reclaim.
@@ -63,8 +65,10 @@ switch it on after the two checks below.**
     "Not read" with the time of the last good read, never Rs 0.00.
   - **Trades and P&L on the Upstox tab:** the trade history of three financial years and the
     trade-wise P&L with every charge listed. A charge Upstox does not give reads "not given", never
-    0. A year counts as final only when it was read in full after 3 April; "Read again" re-reads
-    any year.
+    0. A year counts as final only when it was read in full on or after 3 April; "Read again"
+    re-reads any year, still inside Upstox's limits (when they are spent it says so and keeps the
+    figures it had). A year with more trades than one read holds (10,000 in a segment) is
+    refreshed in steps, from the page it stopped at, and the note says so.
 
 ### What you must do
 - **Nothing when you publish.** The screener stays off.
@@ -76,7 +80,10 @@ switch it on after the two checks below.**
   - before 09:15, set `SUDARSHAN_SCREENER='on'` in `/etc/sudarshan/screener.env` and run
     `systemctl restart sudarshan-screener`; the Screener page no longer says it is switched off;
   - make VWAP reclaim from the Library with a new watchlist, and resume it (a ready-made screen
-    starts paused);
+    starts paused), **also before 09:15**: an instrument followed from the moment you make a
+    screen counts its volume from then, but its day's open, high, low and the gap are taken from
+    that moment too, so a screen made at 10:00 judges them from 10:00;
+  - switch market alerts on first if you want the Telegram line to arrive;
   - between 11:00 and 12:00, compare one 5-minute run with TradingView for two matches and two
     non-matches: the 5-minute VWAP and the 20-candle volume average. Nothing can match before
     about 10:55, when the average has its 20 candles. (The plan named 15-min EMA cross, which waits

@@ -44,7 +44,8 @@ def make(tmp_path, master):
 
 
 def test_a_restart_that_finds_the_master_not_ready_keeps_the_claims_the_stop_kept(
-    tmp_path, master_fixture  # noqa: F811
+    tmp_path,
+    master_fixture,  # noqa: F811
 ):
     store, source, feed, clock = make(tmp_path, Downloading(master_fixture))
     try:

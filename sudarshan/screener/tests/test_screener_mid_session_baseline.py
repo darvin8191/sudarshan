@@ -31,7 +31,9 @@ def live(tmp_path, master_fixture):  # noqa: F811
     store = ScreenerStore(tmp_path / "screener.db")
     settings = config.Settings.from_env({"SUDARSHAN_SCREENER": "on"})
     clock = {"now": ms(DAY, "08:50")}
-    source = LiveSource(store, FakeFeed(), master_fixture, settings, lambda: clock["now"], Calendar())
+    source = LiveSource(
+        store, FakeFeed(), master_fixture, settings, lambda: clock["now"], Calendar()
+    )
     source.new_day(clock["now"])  # started before the open, as on any normal morning
     yield store, source, clock
     store.close()
@@ -43,7 +45,9 @@ def frame(source, key, at, ltp, vtt, ltq=10):
     return source.on_frame(key, json.dumps(payload).encode(), at)
 
 
-@pytest.mark.parametrize("claimed", ["09:00", "10:00"], ids=["control-before-open", "during-session"])
+@pytest.mark.parametrize(
+    "claimed", ["09:00", "10:00"], ids=["control-before-open", "during-session"]
+)
 def test_a_key_first_followed_during_the_session_has_a_baseline(live, claimed):
     store, source, clock = live
     source.refresh_universes([{"kind": "indices"}], ms(DAY, "09:00"))  # another screen's keys

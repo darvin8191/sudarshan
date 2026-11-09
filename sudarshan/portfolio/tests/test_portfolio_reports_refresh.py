@@ -9,7 +9,16 @@ from __future__ import annotations
 import pytest
 from test_portfolio_import_ops import scenario_of
 from test_portfolio_reports import _rows, _wire, fake  # noqa: F401  (fixtures)
-from test_portfolio_reports_cache import HOUR, MINUTE_OF_TWO, WIDE, page, record_of, trow
+from test_portfolio_reports_cache import (
+    HOUR,
+    MINUTE_OF_TWO,
+    WIDE,
+    meta_of,
+    page,
+    prow,
+    record_of,
+    trow,
+)
 
 from sudarshan.portfolio import reports
 from sudarshan.portfolio.budget import Budget
@@ -153,3 +162,36 @@ async def test_a_year_past_the_cap_is_never_frozen_however_many_times_it_is_open
         if last == 6:
             break
     assert last == 6, "a complete year past the page cap is never refreshed"
+
+
+@scenario_of
+async def test_a_pnl_carried_on_after_a_new_closed_trade_is_read_afresh_never_doubled(rig):
+    """The current year, a trade a page, the read cut after 2 of 3 pages. Before Read more, one
+    more trade closes and Upstox lists it first: every page moves up by one. Page 3 read onto the
+    rows held would repeat P2 and the count would still match, so the year was stored complete
+    with a doubled row (realised 10,000 against 40,000)."""
+    rig.svc.upstox.budget = Budget(limits=WIDE)
+    rig.svc.ensure_reports().pages = 2
+    fy = reports.financial_year(day_of_instant(rig.now))
+    rig.fake.bodies["pnl_meta"] = meta_of(3, 1)
+    rig.fake.bodies["pnl"] = [page([prow("P1", 1000, 1100)]), page([prow("P2", 2000, 1900)]),
+                              page([prow("P3", 3000, 3300)])]  # fmt: skip
+    first = (await rig.call("report_pnl", fy=fy, segment="EQ"))["data"]
+    assert first["state"] == "partial" and len(first["rows"]) == 2
+    rig.fake.bodies["pnl_meta"] = meta_of(4, 1)
+    rig.fake.bodies["pnl"] = [page([prow("P0", 500, 600)]), page([prow("P1", 1000, 1100)]),
+                              page([prow("P2", 2000, 1900)]), page([prow("P3", 3000, 3300)])]  # fmt: skip
+    rig.now += 60_000
+    more = (await rig.call("report_pnl", fy=fy, segment="EQ"))["data"]
+    names = [r["scrip_name"] for r in more["rows"]]
+    assert len(set(names)) == len(names), names
+    assert more["state"] != "ok" or sorted(names) == ["P0", "P1", "P2", "P3"]
+    rig.now += 60_000
+    done = (await rig.call("report_pnl", fy=fy, segment="EQ"))["data"]
+    assert done["state"] == "ok" and sorted(r["scrip_name"] for r in done["rows"]) == [
+        "P0",
+        "P1",
+        "P2",
+        "P3",
+    ]
+    assert done["realised_paise"] == 40_000  # 10,000 + 10,000 - 10,000 + 30,000 paise, by hand

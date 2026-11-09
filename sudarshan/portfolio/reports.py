@@ -86,9 +86,9 @@ WORDS = {
     "reading": "Reading from Upstox. This takes a moment.",
     "more": "More pages follow. Tap the button below to carry on; the figures so far are shown.",
     "short": "Upstox listed fewer trades than it counted, so the figures so far are shown. Tap "
-    "the button below to read again.",
+    "Read more to read again.",
     "count": "Upstox's count of trades does not match the rows it sent, so this report is not "
-    "shown as complete. Tap the button below to read again.",
+    "shown as complete. Tap Read more to read again.",
     "stepwise": "This year is large, so SUDARSHAN reads it again in steps. These are the figures "
     "from the last complete read. Tap Read again to carry on.",
     "held_back": "SUDARSHAN has read Upstox as often as it allows for now, so these are the "
@@ -630,6 +630,19 @@ class ReportReader:
         page = int(old.get("next_page") or 1) if carry and not done else 1
         base = {"segment": segment, "financial_year": fy_code(fy)}
         state, note = "ok", None
+        if carry and not done:
+            # Pages that were not read yet are read onto the rows already held only while Upstox
+            # still counts the same trades: a trade closed since moves every page, and a page
+            # read onto the old rows would repeat one of them as a second row.
+            outcome, answer = await self._call("pnl_meta", base)
+            if outcome != "ok":
+                return await self._keep(record, fy, segment, outcome)
+            try:
+                meta = parse_meta(answer.get("data") or {})
+            except Unreadable:
+                return await self._keep(record, fy, segment, "unreadable")
+            if (meta["trades_count"], meta["page_size_limit"]) != (count, size):
+                rows, count, size, charges, page = [], None, None, None, 1
         if count is None or size is None:
             outcome, answer = await self._call("pnl_meta", base)
             if outcome == "ok":
