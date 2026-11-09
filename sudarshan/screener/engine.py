@@ -34,7 +34,8 @@ where ``[1]`` is the candle before the one read (touching the line then counts a
 ``rising(n)`` is n strict comparisons between n + 1 neighbouring candles.
 
 A candle built while the price feed paused and not repaired (``UNVERIFIED``) makes any line that
-reads it UNKNOWN with ``PAUSED``; what a line reads is the candle it names (a window operand reads
+reads it UNKNOWN with ``PAUSED``; today's day candle before the exchange's open, high and low have
+come (``NO_EXCHANGE_DAY``) does the same for a line that stands on them, "day open not known yet"; what a line reads is the candle it names (a window operand reads
 the window, an indicator only the candle it is read at). A closing-auction stock is not judged on
 the day's last candle until its auction price has come: "Not checked: no closing auction price yet".
 
@@ -409,9 +410,15 @@ class Reading:
             return Why(NO_CANDLE)
         return Located(series, index, forming and index == base)
 
-    def _read(self, series: Series, first: int, after: int, forming: bool = False) -> Why | None:
-        """Note the candles ``[first, after)`` as read; PAUSED when one was never verified."""
+    def _read(
+        self, series: Series, first: int, after: int, forming: bool = False, ohl: bool = True
+    ) -> Why | None:
+        """Note the candles ``[first, after)`` as read; PAUSED when one was never verified, and
+        "day open not known yet" when the read stands on today's open, high or low (``ohl``) and
+        the exchange has not given them."""
         pause = price.unverified_in(series, first, after)
+        if pause is None and ohl:
+            pause = price.day_unknown_in(series, first, after)
         if pause is not None:
             return pause
         self._flags |= int(np.bitwise_or.reduce(series.flags[first:after]))
@@ -450,7 +457,8 @@ class Reading:
         if isinstance(found, Why):
             return found
         series, index = found.series, found.index
-        if (pause := self._read(series, index, index + 1, found.forming)) is not None:
+        ohl = field.name in ("open", "high", "low")  # the close, volume, OI and VWAP stand alone
+        if (pause := self._read(series, index, index + 1, found.forming, ohl)) is not None:
             return pause
         if field.name == "change_pct":
             days = self.subject.series.get(DAY)
@@ -524,7 +532,8 @@ class Reading:
         result = price.extremum_at(series, side, n, params["source"], index)
         if isinstance(result, Why):
             return result
-        pause = self._read(series, index - n + 1, index + 1, found.forming)
+        ohl = params["source"] in ("open", "high", "low")
+        pause = self._read(series, index - n + 1, index + 1, found.forming, ohl)
         return pause if pause is not None else result
 
     def _opening_range(self, ind: Ind, found: Located, params: Mapping) -> Value:
@@ -543,11 +552,12 @@ class Reading:
         result = price.relative_strength(series, bench, index, n)
         if isinstance(result, Why):
             return result
-        for at in (index - n, index):
-            if (pause := self._read(series, at, at + 1, found.forming and at == index)) is not None:
+        for at in (index - n, index):  # closes only
+            forming = found.forming and at == index
+            if (pause := self._read(series, at, at + 1, forming, ohl=False)) is not None:
                 return pause
             where = bench.index_of_start(int(series.start[at]))
-            if (pause := self._read(bench, where, where + 1)) is not None:
+            if (pause := self._read(bench, where, where + 1, ohl=False)) is not None:
                 return pause
         return result
 
@@ -588,7 +598,8 @@ class Reading:
             if oi_ref < 0:
                 return Why(NO_DATA, ("oi",))
         for at in (first, index):
-            if (pause := self._read(series, at, at + 1, found.forming and at == index)) is not None:
+            forming = found.forming and at == index
+            if (pause := self._read(series, at, at + 1, forming, ohl=False)) is not None:
                 return pause
         if oi.what == "buildup":
             return options.buildup(price_now, price_ref, oi_now, oi_ref, oi.min_price, oi.min_oi)

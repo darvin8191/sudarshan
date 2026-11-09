@@ -191,6 +191,16 @@ class Run:
             out["ts_recv"] = now
         elif tick["recv"] is not None:
             out["ts_recv"] = clock_ms(tick["recv"], self.day)
+        if "ohlc" in tick:  # the exchange's day candle, as every full-mode frame carries it
+            spec = tick["ohlc"]
+            out["ohlc"] = {
+                "open": number(spec["open"]),
+                "high": number(spec["high"]),
+                "low": number(spec["low"]),
+                "close": number(spec["close"]),
+                "vol": spec["vol"],
+                "ts": clock_ms(spec["ts"], self.day),
+            }
         if "i1" in tick:
             spec = tick["i1"]
             out["ohlc_1m"] = {
@@ -362,6 +372,7 @@ def test_the_flag_bits_and_check_names_typed_in_the_vectors_are_the_codes():
         "repaired": T.REPAIRED,
         "late": T.LATE,
         "i1": T.FROM_I1,
+        "no_exchange_day": T.NO_EXCHANGE_DAY,
     }
     codes = {
         "ok": clock.OK,

@@ -2,7 +2,8 @@
 before it was followed belongs to no bar. A screen made, resumed or edited at 10:00, a master
 download or an option window claims keys in a process that started before the open; the bars
 held nothing of those keys, so the first bar took the day's whole running volume and kept it in the
-20-candle volume average for 100 minutes. Real LiveSource, Bars and candles."""
+20-candle volume average for 100 minutes. The day candle's volume is the exchange's running total
+(MEDIUM-B5), which is the day's own figure, not a spike. Real LiveSource, Bars and candles."""
 
 from __future__ import annotations
 
@@ -74,4 +75,4 @@ def test_a_key_first_followed_during_the_session_has_a_baseline(live, claimed):
     bar = next(s.bar for s in sealed if s.key == RELIANCE and s.bar.start == start)
     daily = candles.read(source.bars, RELIANCE, DAY_TF, source.market, at)
     assert bar.v <= 20, "the first bar of a key followed during the session holds the day's volume"
-    assert int(daily.v[-1]) <= 20
+    assert int(daily.v[-1]) == day_volume + 20, "the day's volume is the exchange's running total"

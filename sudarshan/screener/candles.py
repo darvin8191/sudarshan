@@ -14,17 +14,35 @@ LATE and FROM_I1 as the bars say. A candle whose span a pause touched is UNVERIF
 bar of it was in the pause (the market alerts' rule): the minutes after its last bar were not
 watched, by a quiet feed, by a stopped screener, or because no screen followed the key then (its
 gap, bars.Bars.follow_from). Weeks are the days from the week's first trading day.
+
+Today's day candle is the exchange's (``day``, MEDIUM-B5): its open, high and low are the day candle
+the feed carried with the latest trade judged (the pre-open price as its open), widened by the
+bars after that trade, and its volume is the exchange's running total there, the pre-open
+included. Before any frame carried that candle its open, high and low are not known
+(NO_EXCHANGE_DAY), never the first trade's. The exchange's candle covers every minute before it,
+so only a pause after it leaves the day UNVERIFIED: a stretch nobody watched earlier in the day
+(a feed pause, a restart, a key first followed at 11:00) no longer blanks the day's levels once a
+trade after it has come.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
 from sudarshan.alerts.market.clock import Market, candle, paused_during, within
 from sudarshan.alerts.market.sessions import AUCTION, Session, key_day, segment_of
 from sudarshan.screener.bars import Bar, flags_of, touched
-from sudarshan.screener.types import DAY, MINUTE_TFS, REPAIRED, TF, UNVERIFIED, Candle, Series
+from sudarshan.screener.types import (
+    DAY,
+    MINUTE_TFS,
+    NO_EXCHANGE_DAY,
+    REPAIRED,
+    TF,
+    UNVERIFIED,
+    Candle,
+    Series,
+)
 
 if TYPE_CHECKING:
     from sudarshan.alerts.market.clock import Pause
@@ -100,6 +118,41 @@ def series(
     return Series.of(tf, found, forming)
 
 
+def day(
+    bars: Sequence[Bar],
+    exchange: Mapping[int, tuple[int, int, int]],
+    cums: Mapping[int, int],
+    grid: Session,
+    boundary: int,
+    pauses: Sequence[Pause] = (),
+) -> Series:
+    """Today's day candle up to ``boundary`` as the exchange counts it (see the module notes):
+    ``exchange`` maps a bar's start to the exchange's (open, high, low) at its latest trade,
+    ``cums`` to the running total through it."""
+    found, forming = aggregate(bars, 0, grid, boundary)
+    if not found:
+        return Series.of(DAY, [], False)
+    upto = [bar for bar in bars if bar.end <= boundary]
+    last = upto[-1]
+    known = [i for i, bar in enumerate(upto) if bar.start in exchange]
+    candle = found[-1]
+    o, h, low, flags = candle.o, candle.h, candle.low, candle.flags
+    since = max(last.until, last.start)  # the latest trade judged
+    if known:
+        first = known[-1]
+        o, h, low = exchange[upto[first].start]
+        h = max(h, *(bar.h for bar in upto[first:]))
+        low = min(low, *(bar.low for bar in upto[first:]))
+        since = max(upto[first].until, upto[first].start)
+    else:
+        flags |= NO_EXCHANGE_DAY
+    if pauses and paused_during(tuple(pauses), since, min(grid.end, boundary)):
+        flags |= UNVERIFIED
+    volume = cums.get(last.start, candle.v)
+    today = candle._replace(o=o, h=h, low=low, v=volume, flags=flags)
+    return Series.of(DAY, [today], forming)
+
+
 def read(store: Bars, key: str, tf: TF, market: Market, boundary: int) -> Series:
     """``key``'s candles of ``tf`` up to ``boundary``, from the bars ``store`` holds: the cash grid
     (a stock that closes by auction is read on it too), the pauses (the feed's and the service's,
@@ -113,6 +166,9 @@ def read(store: Bars, key: str, tf: TF, market: Market, boundary: int) -> Series
         return Series.of(tf, [])
     pauses = market.pauses + store.gaps(key)
     pauses = within(pauses, own.start, own.end) if pauses else ()
+    if tf == DAY:
+        held = store.bars(key)
+        return day(held, store.exchange_days(key), store.cums(key), grid, boundary, pauses)
     return series(store.bars(key), tf, grid, boundary, pauses)
 
 

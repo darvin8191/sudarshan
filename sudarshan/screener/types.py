@@ -144,8 +144,9 @@ class Candle(NamedTuple):
 
 
 #: Candle flags: a bar built while the feed paused, one repaired from REST, one that took a late
-#: trade or the exchange's own 1-minute candle.
-UNVERIFIED, REPAIRED, LATE, FROM_I1 = 1, 2, 4, 8
+#: trade or the exchange's own 1-minute candle; and today's day candle whose open, high and low the
+#: exchange has not given yet (no frame carried its day candle: they are not the first trade's).
+UNVERIFIED, REPAIRED, LATE, FROM_I1, NO_EXCHANGE_DAY = 1, 2, 4, 8, 16
 _COLUMNS = ("start", "end", "session", "o", "h", "l", "c", "v", "oi", "atp", "flags")
 
 

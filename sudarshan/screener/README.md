@@ -218,9 +218,17 @@ keeps it): its candles that hold the stretch are "Not checked" too. A start that
 anything at once (OpenAlgo's master contract downloading) counts the wait the same way for every
 instrument it had bars of. An instrument first followed after 09:15 (the first screen on its
 universe made or resumed later, or a restart for an instrument the store holds no bar of) was not
-watched from the open either: that stretch is its own pause too, so its day and its first candle
-read "Not checked" while its later candles are judged. A stretch before the open, or of 10 s or
-less, changes nothing.
+watched from the open either: that stretch is its own pause too, so its first candle reads "Not
+checked" while its later candles are judged. A stretch before the open, or of 10 s or less, changes
+nothing.
+
+The day candle is the exchange's: its open, high and low come from the day candle every full-mode
+frame carries (the pre-open price is the open, as on every broker's chart), as it stood at the
+latest trade judged, and its volume is the exchange's running total there, the pre-open included.
+Until a frame has carried that candle (after a restart, until the next trade) they read "Not
+checked: day open not known yet", never the first trade's. A stretch nobody watched earlier in the
+day no longer blanks the day once a trade after it has come; a pause after the latest trade still
+does.
 
 ## What the screener follows, and when
 
