@@ -1,5 +1,5 @@
 import { ArrowUpDown, Check, MoreVertical, Pencil, Plus, Trash2, Zap } from 'lucide-react'
-import { type KeyboardEvent, useEffect } from 'react'
+import { type KeyboardEvent, type ReactNode, useEffect } from 'react'
 import type { Watchlist } from '@/api/watchlist'
 import {
   DropdownMenu,
@@ -36,6 +36,7 @@ export function ListTabs({
   onEdit,
   onDelete,
   fed,
+  strip,
 }: {
   lists: Watchlist[]
   activeId: number | null
@@ -47,6 +48,8 @@ export function ListTabs({
   onDelete: () => void
   /** The lists a screener feeds (M9 UI7): each tab says Auto, an icon and a word. */
   fed?: ReadonlySet<number>
+  /** v2 (M8.5): the favourite tabs and All lists, in place of the tab row; the menu stays. */
+  strip?: ReactNode
 }) {
   // Keep the open tab in view when it changes, from a menu or a restored session.
   useEffect(() => {
@@ -76,50 +79,52 @@ export function ListTabs({
 
   return (
     <div className="flex items-center gap-1">
-      <div
-        role="tablist"
-        aria-label="Watchlists"
-        className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-      >
-        {lists.map((list, index) => {
-          const active = list.id === activeId
-          return (
-            <button
-              key={list.id}
-              id={tabId(list.id)}
-              type="button"
-              role="tab"
-              aria-selected={active}
-              aria-controls={PANEL_ID}
-              tabIndex={active ? 0 : -1}
-              onClick={() => onSelect(list.id)}
-              onKeyDown={(event) => step(event, index)}
-              className="group flex h-12 shrink-0 items-center outline-none"
-            >
-              <span
-                className={cn(
-                  'flex h-9 items-center gap-1.5 rounded-full border px-3.5 text-sm group-focus-visible:ring-2 group-focus-visible:ring-ring',
-                  active
-                    ? 'border-primary bg-[color:var(--primary-tint)] font-bold text-primary'
-                    : 'border-border bg-card font-semibold text-[color:var(--text-secondary)]'
-                )}
+      {strip ?? (
+        <div
+          role="tablist"
+          aria-label="Watchlists"
+          className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
+          {lists.map((list, index) => {
+            const active = list.id === activeId
+            return (
+              <button
+                key={list.id}
+                id={tabId(list.id)}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                aria-controls={PANEL_ID}
+                tabIndex={active ? 0 : -1}
+                onClick={() => onSelect(list.id)}
+                onKeyDown={(event) => step(event, index)}
+                className="group flex h-12 shrink-0 items-center outline-none"
               >
-                <span className="max-w-[11rem] truncate">{list.name}</span>
-                {fed?.has(list.id) && (
-                  <span
-                    data-auto="true"
-                    className="inline-flex items-center gap-0.5 text-[0.6875rem] font-bold"
-                  >
-                    <Zap aria-hidden="true" className="size-3" />
-                    Auto
-                  </span>
-                )}
-                <span className="text-xs font-semibold opacity-80">{list.items.length}</span>
-              </span>
-            </button>
-          )
-        })}
-      </div>
+                <span
+                  className={cn(
+                    'flex h-9 items-center gap-1.5 rounded-full border px-3.5 text-sm group-focus-visible:ring-2 group-focus-visible:ring-ring',
+                    active
+                      ? 'border-primary bg-[color:var(--primary-tint)] font-bold text-primary'
+                      : 'border-border bg-card font-semibold text-[color:var(--text-secondary)]'
+                  )}
+                >
+                  <span className="max-w-[11rem] truncate">{list.name}</span>
+                  {fed?.has(list.id) && (
+                    <span
+                      data-auto="true"
+                      className="inline-flex items-center gap-0.5 text-[0.6875rem] font-bold"
+                    >
+                      <Zap aria-hidden="true" className="size-3" />
+                      Auto
+                    </span>
+                  )}
+                  <span className="text-xs font-semibold opacity-80">{list.items.length}</span>
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      )}
 
       <DropdownMenu>
         <DropdownMenuTrigger

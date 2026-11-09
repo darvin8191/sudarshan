@@ -26,12 +26,16 @@ import {
 import { useFedLists, useListMembership } from '@/sudarshan/screener/feed'
 import { useScreenerPush } from '@/sudarshan/screener/push'
 import { AddSymbolSheet } from '@/sudarshan/watchlist/AddSymbolSheet'
+import { AllListsSheet } from '@/sudarshan/watchlist/AllListsSheet'
 import { DeleteDialog, NameDialog } from '@/sudarshan/watchlist/ListDialogs'
-import { ListTabs, PANEL_ID, tabId } from '@/sudarshan/watchlist/ListTabs'
+import { ListStrip, ownId, ownRef, tabsFor } from '@/sudarshan/watchlist/ListStrip'
+import { LISTS_FULL, ListTabs, PANEL_ID, tabId } from '@/sudarshan/watchlist/ListTabs'
 import { LiveList } from '@/sudarshan/watchlist/LiveList'
 import type { OrderRequest } from '@/sudarshan/watchlist/SymbolSheet'
 import { useOverlay } from '@/sudarshan/watchlist/useOverlay'
-import { MAX_ITEMS, useWatchlists } from '@/sudarshan/watchlist/useWatchlists'
+import { MAX_ITEMS, MAX_LISTS, useWatchlists } from '@/sudarshan/watchlist/useWatchlists'
+import { useV2State } from '@/sudarshan/watchlist/v2/useListView'
+import { usePush } from '@/sudarshan/watchlist/v2/usePush'
 
 /** The list that was open last on this device: a convenience, so it lives in this browser only. */
 export const OPEN_LIST_KEY = 'sudarshan-watchlist-open'
@@ -71,6 +75,10 @@ export default function Watchlist() {
   const { isOpen } = useMarketOpen(market)
 
   const watchlists = useWatchlists()
+  // M8.5: the favourite tabs and the All lists sheet, only once the server says v2 is on.
+  const v2State = useV2State().data
+  const v2 = v2State?.enabled === true
+  usePush(v2)
   // SUDARSHAN M9 UI7: the lists a screener feeds, who it put in the open one, and its pushes.
   const queryClient = useQueryClient()
   const { socket } = useSocketContext()
@@ -83,9 +91,11 @@ export default function Watchlist() {
   const members = useListMembership(active?.id ?? null, active ? fed.has(active.id) : false)
   const full = items.length >= MAX_ITEMS
   const [editing, setEditing] = useState(false)
+  // A favourite that is not one of his own lists (built-in, ranked, flag): its rows come in later changes.
+  const [otherRef, setOtherRef] = useState<string | null>(null)
 
   // What is open over the list lives in the address, so Back closes it.
-  const { overlay, open, swap, close } = useOverlay()
+  const { overlay, open, swap, close } = useOverlay(v2)
   const openItemId = overlay?.kind === 'item' ? overlay.itemId : null
   const order = overlay?.kind === 'order' ? overlay.order : null
   const alertRequest = overlay?.kind === 'alert' ? overlay.alert : null // SUDARSHAN M10.2
@@ -118,8 +128,35 @@ export default function Watchlist() {
   const select = useCallback((listId: number) => {
     setChosen(listId)
     saveOpenList(listId)
+    setOtherRef(null)
     setEditing(false)
   }, [])
+  const selectRef = useCallback(
+    (ref: string) => {
+      const id = ownId(ref)
+      if (id !== null) select(id)
+      else {
+        setOtherRef(ref)
+        setEditing(false)
+      }
+    },
+    [select]
+  )
+  const tabs = useMemo(() => {
+    if (!v2) return []
+    const shown = tabsFor(v2State?.favourites ?? [], watchlists.lists)
+    const open = active ? ownRef(active.id) : null
+    // The open list always has a tab, even when it is not a favourite.
+    return open && !otherRef && !shown.some((tab) => tab.ref === open) && active
+      ? [
+          ...shown,
+          { ref: open, kind: 'list' as const, name: active.name, count: active.items.length },
+        ]
+      : shown
+  }, [v2, v2State?.favourites, watchlists.lists, active, otherRef])
+  const foreign =
+    v2 && otherRef !== null ? (tabs.find((tab) => tab.ref === otherRef) ?? null) : null
+  const activeRef = foreign ? foreign.ref : active ? ownRef(active.id) : null
 
   const activeId = active?.id ?? null
   const { move, removeItem: removeFromList } = watchlists
@@ -185,7 +222,7 @@ export default function Watchlist() {
         ) : (
           <button
             type="button"
-            disabled={!active || apiKey === null || full}
+            disabled={!active || apiKey === null || full || foreign !== null}
             aria-describedby={full ? 'sd-watchlist-full' : undefined}
             onClick={() => open({ kind: 'add' })}
             className={cn(HEADER_BUTTON, 'bg-primary text-primary-foreground hover:bg-primary/90')}
@@ -232,28 +269,65 @@ export default function Watchlist() {
               onEdit={() => setEditing((on) => !on)}
               onDelete={() => open({ kind: 'delete' })}
               fed={fedIds}
+              strip={
+                v2 ? (
+                  <ListStrip
+                    tabs={tabs}
+                    activeRef={activeRef}
+                    fed={fedIds}
+                    onSelect={selectRef}
+                    onAll={() => open({ kind: 'lists' })}
+                  />
+                ) : undefined
+              }
             />
           )}
 
-          <LiveList
-            items={items}
-            apiKey={apiKey}
-            isOpen={isOpen}
-            loading={watchlists.loading}
-            editing={editing}
-            listName={active?.name ?? 'the list'}
-            openItemId={openItemId}
-            panel={panel}
-            onOpen={openSheet}
-            onMove={moveItem}
-            onRemove={removeItem}
-            onAdd={startAdding}
-            onCloseSheet={close}
-            onOrder={placeOrder}
-            onAlert={setAlert}
-            members={members}
-          />
+          {foreign ? (
+            <section
+              id={PANEL_ID}
+              role="tabpanel"
+              aria-label={foreign.name}
+              className="rounded-[1.125rem] border bg-card px-4 py-6 text-center text-sm font-medium"
+            >
+              The rows of {foreign.name} are not shown on this screen yet.
+            </section>
+          ) : (
+            <LiveList
+              items={items}
+              apiKey={apiKey}
+              isOpen={isOpen}
+              loading={watchlists.loading}
+              editing={editing}
+              listName={active?.name ?? 'the list'}
+              openItemId={openItemId}
+              panel={panel}
+              onOpen={openSheet}
+              onMove={moveItem}
+              onRemove={removeItem}
+              onAdd={startAdding}
+              onCloseSheet={close}
+              onOrder={placeOrder}
+              onAlert={setAlert}
+              members={members}
+            />
+          )}
         </>
+      )}
+
+      {v2 && (
+        <AllListsSheet
+          open={overlay?.kind === 'lists'}
+          onClose={close}
+          fed={fedIds}
+          activeRef={activeRef}
+          onPick={(ref) => {
+            selectRef(ref)
+            close()
+          }}
+          onNew={() => swap({ kind: 'new' })}
+          newOff={watchlists.lists.length >= MAX_LISTS ? LISTS_FULL : null}
+        />
       )}
 
       <AddSymbolSheet

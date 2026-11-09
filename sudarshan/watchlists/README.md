@@ -124,3 +124,21 @@ a sheet first as before and a bookmarked address reads as nothing while it is of
 `mockBridge.ts`, a stand-in that answers the contract's routes. Still to check on a real bridge:
 whether a write wants its path fields in the body as well as the path (the client sends both).
 
+
+## F2 - seven favourite tabs and the All lists sheet
+
+With v2 on, `Watchlist.tsx` hands `ListTabs` a `ListStrip` in place of its tab row (the options menu
+stays): the favourites in slot order, up to seven, numbered by position, each at 48 dp, the open one
+bold with a tick as well as tinted, a lock, a ranking glyph or a flag with words for a built-in,
+ranked or flag list, and the All lists button outside the scrolling part so it is reachable at every
+width. Until anything is pinned the strip shows the first seven own lists in OpenAlgo's order
+(`tabsFor`, computed, never stored); an own list opened from the sheet that is not a favourite gets
+a last tab so the open list always has one. `AllListsSheet` (`?sheet=lists` through
+`useOverlay(true)`, so Back closes it first) reads the `lists` op only while open and has the blocks
+Favourites (move up and down), Your lists, Fed by a screen, Built-in (locked), Ranked by Upstox and
+Flags, each row 56 dp with its kind in words and a star (`aria-pressed`) that writes the slots with
+the `favourites` version it read and reads state and lists again after, a refusal shown in the
+server's words. At seven the star is off and the sheet says so. The 500 ms tap guard is
+`BottomSheet`'s. While v2 is off nothing renders and only the state is read. Tests:
+`v2/favourites.test.tsx` against `mockBridge.ts`, and one in `Watchlist.test.tsx` for the off state.
+Not yet: opening the rows of a non-own favourite (placeholder), Import from TradingView (F15).
