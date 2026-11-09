@@ -552,6 +552,36 @@ def test_a_sandbox_order_at_the_limit_locks_the_sandbox_s_day_only(day, monkeypa
     assert day.told == [words.daily_lock_told(-4500.0, LIMIT, "sandbox")]
 
 
+def test_an_exit_never_works_out_the_figure_an_entry_does(day, monkeypatch):
+    """Review of v0.6.1, MEDIUM-3: an exit always goes, so the daily limit reads nothing for it,
+    Live or sandbox; an entry is judged on the figure as before."""
+    worked: list = []
+    original = daily.live_figure
+
+    def counted(rows):
+        worked.append(len(rows))
+        return original(rows)
+
+    monkeypatch.setattr(daily, "live_figure", counted)
+    day.book.rows = [day_row(CE, 65, -1000.0, 0.0)]
+    upstox = broker()
+    assert upstox.place(order("SELL"), "token")[2] == "OID0"  # the CE long's exit
+    assert worked == []
+    assert upstox.place(order("BUY", symbol=PE), "token")[2] == "OID1"  # an entry
+    assert worked == [1]
+    book = SandboxBook(daily.DayFigure(-1000.0, 0.0))
+    book.sandbox_position = lambda owner, symbol, exchange, product: 65  # long 65
+    fresh = gate.Gate(store=day.store, read=book)
+    fresh.set_state(KillSwitchState())
+    monkeypatch.setattr(fresh, "_in_session", lambda exchange, at: True)
+    kind = gate._Kind(
+        gate.SANDBOX, gate._sandbox_place, gate._refuse_in_the_sandbox, gate._answer_in_the_sandbox
+    )
+    data = {"symbol": CE, "exchange": "NFO", "product": "MIS", "action": "SELL", "quantity": 65}
+    assert not fresh.admit(kind, (SimpleNamespace(user_id="owner"), data), {}).refused
+    assert book.calls == []  # its position read (patched above), and never the day
+
+
 def test_an_order_that_read_the_book_just_before_another_locked_the_day_is_refused(day):
     """A reads the book while the day is above the limit; B reads it at the limit and locks the
     day before A decides. A, deciding after the lock, is refused too: the lock holds from the

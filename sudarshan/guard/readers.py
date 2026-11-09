@@ -438,7 +438,9 @@ def _price_of(quote: object):
 def _sandbox_marks(manager, wanted: list[tuple[str, str]]) -> tuple[dict, datetime | None]:
     """A price for each ``(symbol, exchange)`` from the sandbox's own two sources, in its own
     order: the live feed's ticks no older than its 5 s first, then one multiquotes read for the
-    rest. Returns the prices found and when the oldest of them was had (None for none)."""
+    rest, cut off after ``READ_LIMIT_S`` like every other read of the gate's (never the shared
+    client's 120 s). Returns the prices found and when the oldest of them was had (None for
+    none)."""
     prices: dict = {}
     times: list[datetime] = []
     if not wanted:
@@ -457,7 +459,8 @@ def _sandbox_marks(manager, wanted: list[tuple[str, str]]) -> tuple[dict, dateti
             times.append(kept[1])
     missing = [key for key in wanted if key not in prices]
     if missing:
-        answered = manager._fetch_quotes_batch(missing)
+        with _limited():
+            answered = manager._fetch_quotes_batch(missing)
         had = datetime.now(UTC)
         for key in missing:
             price = _price_of(answered.get(key))

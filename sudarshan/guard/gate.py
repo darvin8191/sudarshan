@@ -51,10 +51,12 @@ else a reversing order is judged whole, as before.
 The daily loss limit (M5.14, daily.py) refuses new risk the same way once the day's loss has
 reached it: the first order to see the figure at the limit writes the day's lock, and the lock
 holds every new order in that pipe until India's date changes, whatever the figure does after.
-While a limit is set, each order's step 2 also yields the day's figure, from the same read of the
-book. A book that cannot be read leaves the order unjudged, so under the daily limit alone it
-goes, and that is noted (an exit must never be refused for a read that failed); a two-leg GTT,
-new risk whatever the book says, is refused instead.
+While a limit is set, an order found in step 3 to add risk has the day's figure read (outside the
+lock, from the same read of the book in Live, from the sandbox's rows and prices in the sandbox)
+and is decided again; an exit never has it read, for it always goes. A book that cannot be read
+leaves the order unjudged, so under the daily limit alone it goes, and that is noted (an exit
+must never be refused for a read that failed); a two-leg GTT, new risk whatever the book says, is
+refused instead.
 
 The price band (M20.7, band.py) holds a priced order that adds risk to the market: step 2 reads
 Upstox's quote for it (kept a second) only when the book shows the order adding risk, and step 3
@@ -398,6 +400,15 @@ class _CheckClaims:
     """The order would be refused only for claims on these broker orders: read their status."""
 
     refs: frozenset
+
+
+class _ReadDay:
+    """The order adds risk and the daily limit is set: read today's figure (outside the lock)
+    and decide again. An exit never reads it (review of v0.6.1, MEDIUM-3): it always goes, and
+    in the sandbox the gate decides inside the position's lock."""
+
+
+_READ_DAY = _ReadDay()
 
 
 @dataclass(frozen=True)
@@ -758,9 +769,9 @@ class Gate:
         known, facts = self._facts(order, fallback)  # reads: outside the lock
         lock, day_unread, reads = None, False, _Reads(_NO_QUOTE)
         if refusing is None and not facts.pass_through and not facts.unreadable:
-            lock, day_unread = self._day_facts(known, facts, guards)  # the figure, and its lock
             reads = self._limit_reads(known, facts, guards)  # the market and the lot size
         checked = False  # the order book read for claims, at most once per order
+        day_read = False  # today's figure, read only once the order is found to add risk
         while True:
             with self._lock:
                 now = time.monotonic()
@@ -768,8 +779,12 @@ class Gate:
                 if lock is None and guards.daily:
                     lock = self._day_locks.get((known.pipe, guards.day))  # another order's
                 decided = self._decide(
-                    known, facts, guards, refusing, lock, day_unread, reads, now, checked
+                    known, facts, guards, refusing, lock, day_unread, reads, now, checked, day_read
                 )
+            if decided is _READ_DAY:
+                lock, day_unread = self._day_facts(known, facts, guards)  # the figure, its lock
+                day_read = True
+                continue
             if not isinstance(decided, _CheckClaims):
                 return decided
             checked = True
@@ -798,9 +813,11 @@ class Gate:
         reads: _Reads,
         now: float,
         checked: bool,
-    ) -> Decision | _CheckClaims:
+        day_read: bool = True,
+    ) -> Decision | _CheckClaims | _ReadDay:
         """Step 3: judge and decide, under the lock. ``_CheckClaims`` when the order would be
-        refused only because of claims the order book has not been read for yet."""
+        refused only because of claims the order book has not been read for yet; ``_READ_DAY``
+        when it adds risk and today's figure has not been read for it yet."""
         if facts.pass_through:
             return Decision(token=self._register(known, None, now))
         if facts.unreadable:
@@ -818,6 +835,8 @@ class Gate:
             refs = self._claims_in_the_way(known, facts, verdict)
             if refs:
                 return _CheckClaims(refs)
+        if not day_read and refusing is None and lock is None and guards.limit is not None:
+            return _READ_DAY
         if (refusing is not None or lock is not None) and self._clippable(known, verdict):
             return self._clip(known, refusing, lock, verdict, now)
         if refusing is not None:

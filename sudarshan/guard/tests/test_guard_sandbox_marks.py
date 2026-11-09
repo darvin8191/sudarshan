@@ -330,3 +330,53 @@ def test_with_no_price_new_orders_pause_and_exits_go_and_the_screens_hear_why(
     assert body["message"] == words.daily_unreadable("sandbox")
     assert sandbox.day_unchecked("sandbox") and sandbox.day_unchecked_paused("sandbox")
     assert _place("SELL", 50)[0]  # an exit goes
+
+
+def test_an_exit_never_reads_the_figure_and_an_entry_does(sandbox, monkeypatch, risk_store):  # noqa: F811
+    """Review of v0.6.1, MEDIUM-3: the figure was read for every order, exits too, inside the
+    sandbox position's lock (a GTT leg fired on a tick held the feed's drain thread for it). An
+    exit always goes, so it reads nothing for the daily limit now."""
+    from sandbox import position_locks
+
+    price = {"ltp": 800.0}
+    _prices(monkeypatch, price)
+    _quiet_announcements(monkeypatch)
+    risk_store.save_settings("owner", daily_loss_limit=LIMIT)
+    monkeypatch.setattr(sandbox, "_in_session", lambda exchange, at: True)
+    original = readers.sandbox_day
+    read: list = []
+
+    def counted(user):
+        read.append(position_locks.held_position_count())
+        return original(user)
+
+    monkeypatch.setattr(readers, "sandbox_day", counted)
+    assert _place("BUY", 100)[0]
+    assert read == [1]  # an entry: read, inside its position's lock
+    assert _place("SELL", 50)[0]
+    assert _place("SELL", 50)[0]  # the rest
+    assert read == [1]  # two exits: never read
+    assert _place("BUY", 1)[0]
+    assert len(read) == 2
+
+
+def test_the_sandbox_price_read_is_cut_off_like_every_other_gate_read(sandbox, monkeypatch):  # noqa: F811
+    """Its multiquotes read honours the gate's 4 s limit (and is never retried), never the
+    shared client's 120 s."""
+    from broker.upstox.api import order_api
+    from sandbox.position_manager import PositionManager
+
+    price = {"ltp": 800.0}
+    _prices(monkeypatch, price, ticks=False)
+    assert _place("BUY", 10)[0]
+    limits: list = []
+
+    def batch(self, symbols):
+        limits.append(order_api._READ_LIMIT.get())
+        return {s: {"ltp": price["ltp"]} for s in symbols}
+
+    monkeypatch.setattr(PositionManager, "_fetch_quotes_batch", batch)
+    _a_second_later()
+    readers.sandbox_day(USER)
+    assert limits == [readers.READ_LIMIT_S]
+    assert order_api._READ_LIMIT.get() is None  # and only for that read
