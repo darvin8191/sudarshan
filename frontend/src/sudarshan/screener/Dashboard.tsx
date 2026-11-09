@@ -1,5 +1,5 @@
 import { Plus, RefreshCw } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import type { WatchlistItem } from '@/api/watchlist'
 import { cn } from '@/lib/utils'
 import { usePriceAccess } from '@/sudarshan/access'
@@ -140,7 +140,20 @@ export function Dashboard({
   const settings = address.sheet === 'widget' ? named(address.widget) : undefined
   const nameOf = (card: Card) => screens.get(card.screen_id)?.name ?? card.name
   const place = (card: Card | undefined) => (card ? cards.indexOf(card) : -1)
-  const options = (card: Card) => openSheet('menu', { s: String(card.screen_id), k: card.kind })
+  // The callbacks a card is given never change identity, so a tick frame redraws no card for them.
+  const latestRef = useRef({ openSheet, openScreen })
+  latestRef.current = { openSheet, openScreen }
+  const options = useCallback(
+    (card: Card) =>
+      latestRef.current.openSheet('menu', { s: String(card.screen_id), k: card.kind }),
+    []
+  )
+  const openCard = useCallback((id: number) => latestRef.current.openScreen(id), [])
+  const openRow = useCallback(
+    (from: Card, key: string) =>
+      latestRef.current.openSheet('symbol', { k: key, s: String(from.screen_id), wk: from.kind }),
+    []
+  )
   const opened = address.from
     ? cards.find(
         (card) => card.screen_id === address.from?.screen && card.kind === address.from.kind
@@ -201,7 +214,7 @@ export function Dashboard({
               where: screen?.where ?? card.where,
               status: screen?.status ?? card.status,
               line: cardLine({ card, screen, engine: state.engine, hearing, feed: feedOf(card) }),
-              onOpenScreen: openScreen,
+              onOpenScreen: openCard,
               onOptions: options,
             }
             if (card.kind === 'count') return <CountCard key={cardKey(card)} {...own} />
@@ -213,9 +226,7 @@ export function Dashboard({
                 now={live.now}
                 unreadable={failed.has(cardKey(card))}
                 onRetry={retry}
-                onOpenRow={(from, key) =>
-                  openSheet('symbol', { k: key, s: String(from.screen_id), wk: from.kind })
-                }
+                onOpenRow={openRow}
               />
             )
           })}

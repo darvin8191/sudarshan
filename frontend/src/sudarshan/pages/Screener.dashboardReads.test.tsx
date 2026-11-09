@@ -55,6 +55,8 @@ const feed = vi.hoisted(() => {
     mode: 'ticking' as 'ticking' | 'no_key',
     now: Date.UTC(2026, 10, 9, 5, 15, 30),
     followed: [] as string[],
+    /** Instruments that have moved: key -> added to the price. */
+    moves: new Map<string, number>(),
     version: 0,
     listeners,
     /** One animation frame in which a tick arrived: the hook's holder re-renders. */
@@ -85,7 +87,7 @@ vi.mock('@/sudarshan/watchlist/useLiveRows', async () => {
           key: `${item.exchange}:${item.symbol}`,
           view: ticking
             ? {
-                ltp: 1500.5,
+                ltp: 1500.5 + (feed.moves.get(`${item.exchange}:${item.symbol}`) ?? 0),
                 prevClose: 1480,
                 at: feed.now - 1000,
                 live: true,
@@ -194,6 +196,7 @@ beforeEach(() => {
   room = fakeSocket()
   sockets.current = room.socket
   feed.mode = 'ticking'
+  feed.moves.clear()
   access.loggedOut = false
   resetScreenerPushForTests()
   for (const fn of Object.values(api)) fn.mockReset()
@@ -365,5 +368,54 @@ describe('a card that failed in the budget loop (L1)', () => {
     await waitFor(() => expect(symbolsIn(cardOf(4))).toEqual(['R4']))
     await settle()
     expect(api.widget.mock.calls.map((call) => call[0]).filter((id) => id === 2)).toHaveLength(1)
+  })
+})
+
+describe('a tick redraws only its own row (HIGH-2)', () => {
+  async function twentyCards() {
+    const cards = Array.from({ length: 20 }, (_, i) =>
+      widgetCard({
+        screen_id: i + 1,
+        rows: 10,
+        rows_shown: Array.from({ length: 10 }, (_, r) => resultRow(`S${i + 1}R${r + 1}`)),
+      })
+    )
+    api.dashboard.mockResolvedValue(dashboard(cards))
+    api.state.mockResolvedValue(
+      screenerState(
+        cards.map((card) => screenRow({ id: card.screen_id, name: `Screen ${card.screen_id}` }))
+      )
+    )
+    renderPage()
+    await joinedOnce(room)
+    await waitFor(() => expect(cardOf(20)).toBeTruthy())
+    await settle()
+  }
+
+  it('one instrument moving redraws that row and no other of the 200', async () => {
+    await twentyCards()
+    draws.rows = 0
+    feed.moves.set('NSE:S7R3', 1.25)
+    feed.now += 16
+    act(() => feed.tick())
+    expect(draws.rows).toBe(1)
+    expect(within(cardOf(7)).getByText('1,501.75')).toBeTruthy()
+  })
+
+  it('the clock second redraws no row', async () => {
+    await twentyCards()
+    draws.rows = 0
+    feed.now += 1000
+    act(() => feed.tick())
+    expect(draws.rows).toBe(0)
+  })
+
+  it('a frame in which nothing moved redraws no row, and the open sheet opens the right row', async () => {
+    await twentyCards()
+    draws.rows = 0
+    act(() => feed.tick())
+    expect(draws.rows).toBe(0)
+    await userEvent.click(within(cardOf(7)).getAllByRole('button', { name: /S7R2/ })[0] as HTMLElement)
+    expect(await screen.findByRole('dialog')).toBeTruthy()
   })
 })

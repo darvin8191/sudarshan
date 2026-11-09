@@ -13,7 +13,7 @@ import {
   TriangleAlert,
   WifiOff,
 } from 'lucide-react'
-import { memo } from 'react'
+import { memo, useCallback } from 'react'
 import { Link } from 'react-router'
 import { cn } from '@/lib/utils'
 import { OUTLINED } from '@/sudarshan/books/cards/parts'
@@ -24,7 +24,7 @@ import type { LiveRow } from '@/sudarshan/watchlist/useLiveRows'
 import type { LineIcon, LineView } from './cardLine'
 import { cardKey, rowsBehind, rowsRun } from './dashboardCache'
 import { StatusChip } from './marks'
-import { ResultLine, runWords } from './Results'
+import { clockFor, ResultLine, rowLiveOf, runWords, sameRowLive } from './Results'
 import type { WidgetCard as Card, ScreenStatus } from './types'
 import { OptionsButton } from './WidgetMenu'
 
@@ -91,20 +91,44 @@ const FOOT =
  * a foot: "and N more" and the screen's automatic list, each 48 dp. The order of the rows changes
  * only at a check: ticks change the figures in place.
  */
-export const WidgetCard = memo(function WidgetCard({
-  card,
-  name,
-  where,
-  status,
-  line,
-  liveByKey,
-  now,
-  unreadable,
-  onRetry,
-  onOpenScreen,
-  onOpenRow,
-  onOptions,
-}: {
+export const WidgetCard = memo(WidgetFace, sameCard)
+
+/** What a card's rows draw from the stream, in row order. */
+const livesOf = (card: Card, liveByKey: ReadonlyMap<string, LiveRow>) =>
+  card.rows_shown.map((row) => rowLiveOf(liveByKey.get(keyOf(row.symbol, row.exchange))))
+
+/**
+ * Redraw only when what the card shows changed. The dashboard renders on every tick frame and
+ * every clock second; a card none of whose rows moved is skipped, and the clock reaches it only
+ * while one of its rows is stale. The callbacks are stable by the dashboard's construction.
+ */
+function sameCard(a: CardProps, b: CardProps): boolean {
+  if (
+    a.card !== b.card ||
+    a.name !== b.name ||
+    a.where !== b.where ||
+    a.status !== b.status ||
+    a.unreadable !== b.unreadable ||
+    a.line.icon !== b.line.icon ||
+    a.line.words !== b.line.words ||
+    a.line.warn !== b.line.warn ||
+    a.line.greyed !== b.line.greyed ||
+    a.onOpenScreen !== b.onOpenScreen ||
+    a.onOpenRow !== b.onOpenRow ||
+    a.onOptions !== b.onOptions ||
+    a.onRetry !== b.onRetry
+  )
+    return false
+  const before = livesOf(a.card, a.liveByKey)
+  const after = livesOf(b.card, b.liveByKey)
+  return after.every(
+    (own, at) =>
+      sameRowLive(own, before[at] as ReturnType<typeof rowLiveOf>) &&
+      clockFor(own, a.now) === clockFor(own, b.now)
+  )
+}
+
+interface CardProps {
   card: Card
   name: string
   where: string
@@ -118,9 +142,25 @@ export const WidgetCard = memo(function WidgetCard({
   onOpenScreen: (id: number) => void
   onOpenRow: (card: Card, key: string) => void
   onOptions: (card: Card) => void
-}) {
+}
+
+function WidgetFace({
+  card,
+  name,
+  where,
+  status,
+  line,
+  liveByKey,
+  now,
+  unreadable,
+  onRetry,
+  onOpenScreen,
+  onOpenRow,
+  onOptions,
+}: CardProps) {
   const list = card.list
   const behind = rowsBehind(card)
+  const open = useCallback((key: string) => onOpenRow(card, key), [onOpenRow, card])
   const own = rowsRun(card)
   const hhmm = (at: number) => istTime(at).slice(0, 5)
   return (
@@ -218,14 +258,15 @@ export const WidgetCard = memo(function WidgetCard({
         >
           {card.rows_shown.map((row) => {
             const key = keyOf(row.symbol, row.exchange)
+            const lives = rowLiveOf(liveByKey.get(key))
             return (
               <ResultLine
                 key={row.key ?? key}
                 row={row}
-                live={liveByKey.get(key)}
+                live={lives}
                 runAt={own?.at ?? card.run?.at ?? 0}
-                now={now}
-                onOpen={(open) => onOpenRow(card, open)}
+                now={clockFor(lives, now)}
+                onOpen={open}
               />
             )
           })}
@@ -258,4 +299,4 @@ export const WidgetCard = memo(function WidgetCard({
       )}
     </li>
   )
-})
+}
