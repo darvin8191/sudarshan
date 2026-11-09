@@ -24,9 +24,10 @@ v0.5.0 is not published on its own: this release carries it to the server.**
   old updates as current. A screen left open past 03:00 goes to the login page by itself.
 - **A logout on another device ends this one cleanly.** After you log out on the laptop, the phone
   says "You have been logged out from another device" and shows the login form within a few
-  seconds, and stays on it after a reload, where it used to bounce between the login page and the
-  dashboard. If it would ever bounce again, it shows "Order updates · Sign in again to get them"
-  with a button instead.
+  seconds, and stays on it after a reload of that page, where it used to bounce between the login
+  page and the dashboard. It makes at most one automatic trip to the login page a minute, so it
+  cannot bounce; a screen that learns within that minute that the session has ended shows "Order
+  updates · Sign in again to get them" with a button.
 - **Exit all closes a position Upstox's positions do not show yet.** A position bought seconds ago
   is in Upstox's order list before its positions list. Exit all used to name it and leave it to
   you; it now exits it from its fills (the contract, product and size from the order rows),
@@ -100,10 +101,11 @@ v0.5.0 is not published on its own: this release carries it to the server.**
 ### What you must do
 - **Publish it** (the link is in your task list) on Wednesday 11 Nov after the close or later, once
   v0.4.1 has run a trading day. It brings v0.5.0 with it, so v0.5.0's checks apply as well.
-- **Check on your phone after the install (2 minutes):** with the app open on the phone, log out on
-  the laptop. The phone shows "You have been logged out from another device" and the login form
-  within a few seconds, with no flicker, and is still on the form after a reload. Sign in again:
-  live order updates come back without a reload. Then lock the phone for two minutes and unlock
+- **Check on your phone after the install (2 minutes, after the close):** with the app open on the
+  phone, log out on the laptop. The phone shows "You have been logged out from another device" and
+  the login form within a few seconds, with no flicker, and is still on the form after a reload.
+  Sign in again: the laptop's logout signs Upstox out too, so this includes the Upstox login; live
+  order updates then come back without a reload. Then lock the phone for two minutes and unlock
   it: "Reconnecting" briefly, then live again.
 - **After a scalping close says "not confirmed", check Orders before closing again.** SUDARSHAN
   holds that position for 150 s, and longer while a market order of yours works on its closing
@@ -161,12 +163,13 @@ v0.5.0 is not published on its own: this release carries it to the server.**
   while Upstox's positions still show +65: the order reads as nothing to do and the account stays
   at -65. It was like this before; check 8 above sets how wide the window is.
 - **Plain TradingView order alerts** are still not judged as exits, as in v0.4.1.
-- **A logout on one device does not end a device that is not open at the time.** That device
-  stays signed in until 03:00 unless it lands on the login page. Ending every session at once
-  needs a separate change to how sessions end.
-- **Phone and laptop on the same home Wi-Fi:** the later sign-in replaces the earlier device's
-  session record, so the earlier device keeps working but is asked to sign in again if it lands
-  on the login page.
+- **A logout on one device does not end a device that is not open at the time** (a phone locked
+  for more than a minute counts), or one with a request still on its way: that device stays signed
+  in until 03:00 unless it lands on the login page. Ending every session at once needs a separate
+  change to how sessions end.
+- **Two devices on the same home Wi-Fi:** the later sign-in replaces the session record of the
+  device that signed in first, so that device keeps working but is asked to sign in again if it
+  lands on the login page (for example from the home page's Login button).
 
 ## v0.5.0 (6 Nov 2026)
 
