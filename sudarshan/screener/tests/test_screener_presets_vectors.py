@@ -35,6 +35,13 @@ ORDER = [
     "vwap_reclaim",
     "delivery_spike",
     "volume_spike",
+    # the dashboards study's six, in the order the study listed them (design 3.10)
+    "orb_follow_up",
+    "orb_follow_down",
+    "open_at_low",
+    "open_at_high",
+    "supertrend_turn",
+    "two_day_reversal",
 ]
 PLAN_KEYS = ("on", "tf", "need", "instances", "uses", "ids", "rank_order")
 
@@ -69,7 +76,7 @@ def planned(stored: dict) -> dict:
 def test_the_vectors_are_what_the_tests_expect():
     assert keys(LIBRARY) == ORDER, "the library lists the presets in the design's order"
     assert [item.key for item in P.PRESETS] == ORDER
-    assert len(USABLE) == 8 and len(FOLLOWING) == 3
+    assert len(USABLE) == 14 and len(FOLLOWING) == 3
     assert len(VECTORS["lines"]) >= 16
     assert len({case["name"] for case in LIBRARY}) == len(LIBRARY), "two presets share a name"
     assert [case["key"] for case in LIBRARY if "reason" in case] == ["delivery_spike"]
@@ -120,9 +127,26 @@ def test_the_card_of_a_written_preset(case):
     }
 
 
-def test_two_presets_can_be_judged_before_the_history_download():
+def test_six_presets_can_be_judged_before_the_history_download():
     usable = [card["key"] for card in P.library() if card["usable"]]
-    assert usable == ["orb_breakout", "vwap_reclaim"], "the Library shows presets it cannot judge"
+    assert usable == [
+        "orb_breakout", "vwap_reclaim",
+        "orb_follow_up", "orb_follow_down", "open_at_low", "open_at_high",
+    ], "the Library shows presets it cannot judge"  # fmt: skip
+
+
+def test_the_studys_presets_say_how_they_differ_and_name_no_other_product():
+    """Each of the dashboards study's presets says, in its about, how it differs from the usual
+    form of its scan (its words are ours and are read at review; no test lists another product's
+    name, which would put it in this public repository)."""
+    study = [item for item in P.PRESETS if item.key in ORDER[-6:]]
+    assert len(study) == 6
+    for item in study:
+        assert "Differs from the usual form of this scan: " in item.about, item.key
+        assert "ranked by the day's % change" in item.about, item.key
+    assert [item.waits for item in study[-2:]] == [P.WAITS_SUPERTREND, P.WAITS_THREE_DAYS]
+    off = [line["id"] for line in P.preset("open_at_low").spec["where"]["all"] if not line["on"]]
+    assert off == ["c5", "c6"], "the two lines that need history are written in, switched off"
 
 
 def test_the_card_of_the_delivery_spike_says_why_it_cannot_be_used():

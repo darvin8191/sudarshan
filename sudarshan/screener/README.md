@@ -236,7 +236,19 @@ and resumed, a watchlist that could not be read, the key limit) counts its volum
 it comes back, and the stretch is kept as that instrument's own pause (with its key, so a restart
 keeps it): its candles that hold the stretch are "Not checked" too. A start that cannot follow
 anything at once (OpenAlgo's master contract downloading) counts the wait the same way for every
-instrument it had bars of. A stretch before the open, or of 10 s or less, changes nothing.
+instrument it had bars of. An instrument first followed after 09:15 (the first screen on its
+universe made or resumed later, or a restart for an instrument the store holds no bar of) was not
+watched from the open either: that stretch is its own pause too, so its first candle reads "Not
+checked" while its later candles are judged. A stretch before the open, or of 10 s or less, changes
+nothing.
+
+The day candle is the exchange's: its open, high and low come from the day candle every full-mode
+frame carries (the pre-open price is the open, as on every broker's chart), as it stood at the
+latest trade judged, and its volume is the exchange's running total there, the pre-open included.
+Until a frame has carried that candle (after a restart, until the next trade) they read "Not
+checked: day open not known yet", never the first trade's. A stretch nobody watched earlier in the
+day no longer blanks the day once a trade after it has come; a pause after the latest trade still
+does.
 
 ## What the screener follows, and when
 
@@ -250,13 +262,18 @@ instrument it had bars of. A stretch before the open, or of 10 s or less, change
   its index's first price, follows that index, and is built at the next tick after it.
 - Keys past `SUDARSHAN_SCREENER_MAX_KEYS` are not claimed and read "Not checked: past the 320
   instruments the screener can follow tick by tick".
+- A screen made, resumed or edited during the session has one check, on the latest candle closed
+  by then (on time, never marked late), and then follows its schedule: the day's earlier checks
+  are never run at once, so no list change or alert comes for a candle that closed before it. A
+  check a restart missed after that is still made late, marked so. A screen whose lines read only
+  day candles is judged on the forming day candle at each close of its run's timeframe.
 
 ## Not built yet
 
 - History before today and the daily stores (open interest, implied volatility, India VIX): they
   wait for the feed's REST governor (SV3, SV4). Until then a plan that needs more candles than one
   session holds reads "Not checked: needs 151 candles of 15 minutes; a day gives 25, ...", the
-  six presets that need them are not usable, and "Warming up · history loading" never shows.
+  eight presets that need them are not usable, and "Warming up · history loading" never shows.
 - Re-anchoring an option window at 09:16 and near its edge; reading a watchlist universe again at
   each run; refusing a screen at save when it would pass the key limit.
 - Compacting the not-checked rows: every not-checked instrument is still written to `run_change`

@@ -16,6 +16,13 @@ A stock that closes by auction has no continuous trade after the cash close unti
 (X6): a screen whose universe holds such stocks holds its last cash boundary of the day until
 every one has printed, or at the latest until the auction window's end plus the grace (S12:
 15:35:05 on a normal day). ``due`` takes ``printed(screen) -> bool`` for that.
+
+A screen made, resumed or edited during the session starts a new version (``Screen.since``, the
+moment it began), and its run key is new for every boundary of the day. It gets one run, on the
+latest candle closed by then, on time and not marked late, and then follows its schedule: the day's
+earlier boundaries are not its missed checks and are never run at once (round-3 review MEDIUM-B6:
+95 runs of a 3-minute screen made at 14:00, with their list changes and alerts for old candles).
+A boundary after the version began that its run missed (a restart) is still run late, marked so.
 """
 
 from __future__ import annotations
@@ -51,6 +58,8 @@ class Screen:
     tf: int
     #: The session keys its universe trades under (``NSE_EQ``, ``NSE_FO``, ``NSE_EQ+auction``...).
     segments: frozenset[str]
+    #: When its current version began (epoch ms: made, resumed or edited); 0 when not known.
+    since: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,6 +131,17 @@ def _held_until(screen: Screen, sessions: Mapping[str, Session], boundary: Bound
     return None
 
 
+def _first(today: Sequence[Boundary], since: int) -> int:
+    """The index of the screen's first run today: the latest boundary whose moment had come when
+    its version began, else the day's first."""
+    first = 0
+    for k, boundary in enumerate(today):
+        if boundary.at > since:
+            break
+        first = k
+    return first
+
+
 def due(
     screens: Iterable[Screen],
     sessions: Mapping[str, Session],
@@ -133,15 +153,16 @@ def due(
 ) -> list[Due]:
     """Every run to make now, oldest boundary first: its moment has come, it is not recorded, and
     (for the last cash candle of a screen with auction stocks) the prints are in or the window has
-    ended. ``recorded(run_key)`` answers from the store."""
+    ended. ``recorded(run_key)`` answers from the store. A version that began during the day
+    starts from the latest boundary closed by then (``_first``), not late."""
     out: list[Due] = []
     for screen in screens:
         spans = _spans(screen, sessions)
-        if not spans:
+        if not spans or now < screen.since:  # a version not begun yet (the replay walks the day)
             continue
         session = session_key if session_key is not None else spans[0].key
         today = boundaries(screen, sessions)
-        for boundary in today:
+        for boundary in today[_first(today, screen.since) :]:
             if now < boundary.at:
                 break
             hold = _held_until(screen, sessions, boundary)
@@ -150,7 +171,7 @@ def due(
             key = RunKey(screen.id, screen.version, session, boundary.tf, boundary.k)
             if recorded(str(key)):
                 continue
-            late = now - boundary.at > LATE_MS
+            late = now - boundary.at > LATE_MS and boundary.at > screen.since
             out.append(Due(key, screen, boundary, late, boundary is today[-1]))
     out.sort(key=lambda item: (item.boundary.at, item.screen.id))
     return out

@@ -25,13 +25,13 @@ from test_screener_universe import master as master_fixture  # noqa: F401  (the 
 from sudarshan.alerts.market import clock
 from sudarshan.alerts.market.feedlink import HEALTH
 from sudarshan.alerts.market.sessions import sessions_of
-from sudarshan.screener import candles, config
+from sudarshan.screener import candles, config, runs, spec
 from sudarshan.screener import store as store_module
 from sudarshan.screener.bars import UNFOLLOWED, Bars
 from sudarshan.screener.runtime import LiveSource
 from sudarshan.screener.store import OWNER, ScreenerStore
 from sudarshan.screener.types import DAY as DAY_TF
-from sudarshan.screener.types import UNVERIFIED
+from sudarshan.screener.types import HIT, NO_DATA, NOT_CHECKED, PAUSED, UNVERIFIED
 
 DAY = "2026-10-28"
 RELIANCE = "NSE_EQ|INE002A01018"
@@ -78,10 +78,14 @@ def follow(source, specs, at: str, *, reuse: bool = True) -> None:
     asyncio.run(source.claim())
 
 
-def frame(source, at: int, ltp: float, vtt: int) -> list:
-    """A trade of 10 at ``at`` (epoch ms), health just before it, as the feed job hands them."""
+def frame(source, at: int, ltp: float, vtt: int, day: tuple | None = None) -> list:
+    """A trade of 10 at ``at`` (epoch ms), health just before it, as the feed job hands them;
+    ``day`` is the exchange's day candle (open, high, low) the frame carries, if any."""
     payload = {"key": RELIANCE, "ltp": ltp, "ltt": at, "ltq": 10, "vtt": vtt, "cp": 90.0,
                "ts_recv": at}  # fmt: skip
+    if day is not None:
+        payload["ohlc"] = {"open": day[0], "high": day[1], "low": day[2], "close": ltp,
+                           "vol": vtt, "ts": ms(DAY, "00:00")}  # fmt: skip
     sealed = source.on_frame(HEALTH, health(at), at)
     return sealed + source.on_frame(RELIANCE, json.dumps(payload).encode(), at)
 
@@ -100,11 +104,11 @@ def seal(source, at: int, sealed: list) -> list:
     return sealed
 
 
-def minute(source, at: str, ltp: float, vtts) -> list:
+def minute(source, at: str, ltp: float, vtts, day: tuple | None = None) -> list:
     """Trades of 10 at :20 and :40 of the minute ``at``, then the clock past its seal."""
     begin, sealed = ms(DAY, at), []
     for n, vtt in enumerate(vtts):
-        sealed += frame(source, begin + 20_000 * (n + 1), ltp, vtt)
+        sealed += frame(source, begin + 20_000 * (n + 1), ltp, vtt, day)
     return seal(source, begin + 66_000, sealed)
 
 
@@ -117,6 +121,11 @@ def unverified(source, tf, boundary: str) -> bool:
     checked"), as the engine reads it."""
     series = candles.read(source.bars, RELIANCE, tf, source.market, ms(DAY, boundary))
     return bool(series.flags[-1] & UNVERIFIED)
+
+
+def day_volume(source, boundary: str) -> int:
+    """The day candle's volume at ``boundary``: the exchange's running total (MEDIUM-B5)."""
+    return int(candles.read(source.bars, RELIANCE, DAY_TF, source.market, ms(DAY, boundary)).v[-1])
 
 
 def preopen(source, vtt: int = 50_000) -> None:
@@ -159,7 +168,11 @@ def test_a_key_followed_again_starts_its_volume_from_then_and_its_gap_reads_not_
     assert bar_at(source, "11:00").v == 20, "the first bar after the resume holds the paused hour"
     # the 11:00 to 11:05 candle and the day hold the hour nobody watched: never judged
     assert unverified(source, 5, "11:01:06") is gap
-    assert unverified(source, DAY_TF, "11:01:06") is gap
+    assert unverified(source, 60, "11:01:06") is gap
+    # the day is the exchange's (MEDIUM-B5): the stretch does not blank it, and its volume is the
+    # running total, what traded meanwhile included
+    assert not unverified(source, DAY_TF, "11:01:06")
+    assert day_volume(source, "11:01:06") == traded + 20
 
 
 def test_a_screen_paused_before_the_open_and_resumed_at_ten_has_a_baseline(world):
@@ -172,7 +185,7 @@ def test_a_screen_paused_before_the_open_and_resumed_at_ten_has_a_baseline(world
     follow(source, BOTH, "10:00")  # resumed at 10:00
     minute(source, "10:00", 101.0, [1_800_010, 1_800_020])
     assert bar_at(source, "10:00").v == 20, "the first bar holds the morning's volume"
-    assert unverified(source, DAY_TF, "10:01:06"), "09:15 to 10:00 was not watched"
+    assert unverified(source, 60, "10:01:06"), "09:15 to 10:00 was not watched"
 
 
 def test_a_key_followed_again_before_the_open_needs_no_pause(world):
@@ -233,9 +246,8 @@ def test_the_gap_still_reads_not_checked_after_a_restart(world):
     follow(again, BOTH, "11:01:10", reuse=False)  # a start rebuilds every universe
     minute(again, "11:02", 102.0, [1_800_050, 1_800_060])
     assert bar_at(again, "11:00").v == 20 and bar_at(again, "11:02").v == 20
-    assert unverified(again, 5, "11:03:06") and unverified(again, DAY_TF, "11:03:06")
-    (row,) = pause_rows(world, again)
-    assert (row["key"], row["start"], row["end"]) == (RELIANCE, ms(DAY, "10:00"), ms(DAY, "11:00"))
+    assert unverified(again, 5, "11:03:06") and unverified(again, 60, "11:03:06")
+    assert gap_rows(world, again) == [(ms(DAY, "10:00"), ms(DAY, "11:00"))]
 
 
 @pytest.mark.parametrize("op", [False, True], ids=["no-op-during-download", "op-during-download"])
@@ -291,7 +303,101 @@ def test_a_key_the_restart_did_not_follow_is_taken_as_let_go_from_the_restart(wo
     follow(again, BOTH, "10:00")
     minute(again, "10:00", 101.0, [1_800_010, 1_800_020])
     assert bar_at(again, "10:00").v == 20
-    assert unverified(again, 5, "10:01:06") and unverified(again, DAY_TF, "10:01:06")
+    assert unverified(again, 5, "10:01:06") and unverified(again, 60, "10:01:06")
+
+
+# ---- a key first followed after the open (design A1) -----------------------------------------------
+def judge(source, line: dict, boundary: str):
+    """RELIANCE judged at ``boundary`` by a 5-min screen on F&O stocks, as a run does: the line,
+    and a 5-min line that always holds (so the instrument is due at every 5-min close it trades
+    in, whatever the line reads)."""
+    traded = {"id": "c0", "on": True, "left": {"field": "close", "tf": 5}, "op": "gt",
+              "right": {"num": "0"}}  # fmt: skip
+    _, plan = spec.build({"name": "A1", "universe": {"kind": "fno_stocks"},
+                          "run": {"on": "close", "tf": 5},
+                          "where": {"all": [traded, {"id": "c1", "on": True, **line}]}})  # fmt: skip
+    member = next(m for m in source.members({"kind": "fno_stocks"}) if m.key == RELIANCE)
+    ctx = source.context(ms(DAY, boundary), source.market.today)
+    (found,) = asyncio.run(runs.evaluate(plan, [member], source, ctx))
+    return found.outcome
+
+
+DAY_OPEN = {"left": {"field": "day_open"}, "op": "gt", "right": {"num": "1"}}
+FIRST_CANDLE = {"left": {"field": "close", "tf": 5, "at": "first_today"}, "op": "gt",
+                "right": {"num": "1"}}  # fmt: skip
+LATEST_CANDLE = {"left": {"field": "close", "tf": 5}, "op": "gt", "right": {"num": "1"}}
+
+
+def paused(outcome) -> bool:
+    """Not checked because a candle it read holds a stretch nobody watched, for no other reason."""
+    return outcome.kind == NOT_CHECKED and {why.code for why in outcome.why} == {PAUSED}
+
+
+def day_not_known(outcome) -> bool:
+    """Not checked because the exchange's day candle has not come: "day open not known yet"."""
+    whys = [(why.code, why.detail) for why in outcome.why]
+    return outcome.kind == NOT_CHECKED and whys == [(NO_DATA, ("day_open",))]
+
+
+#: The exchange's day candle as every full-mode frame carries it: the pre-open price 99.50 opened
+#: the day, the high so far is 103.00 and the low 99.00.
+EXCHANGE_DAY = (99.5, 103.0, 99.0)
+
+
+@pytest.mark.parametrize("claimed", ["09:00", "11:00"], ids=["control-before-open", "at-11"])
+def test_a_key_first_followed_after_the_open_reads_its_first_candle_not_checked(world, claimed):
+    """The first screen on F&O stocks is made at 11:00: RELIANCE has bars from 11:00 only, so its
+    "first candle" would be the 11:00 one, judged as verified, and its "day open" its 11:00
+    price. 09:15 to 11:00 is now its gap (design A1): the first candle reads "Not checked", over a
+    restart too, and the candles after its first bar are judged as usual. Its day is the
+    exchange's (MEDIUM-B5): known as soon as a frame carries the exchange's day candle, and the
+    same whichever moment it was first followed."""
+    source = start(world, "08:50")
+    follow(source, OTHER, "09:00", reuse=False)  # another screen's keys since the morning
+    follow(source, BOTH, claimed)
+    traded = 50_020
+    if claimed == "09:00":
+        preopen(source)
+        minute(source, "09:15", 100.0, [50_010, 50_020], EXCHANGE_DAY)
+    else:
+        assert gap_rows(world, source) == [(ms(DAY, "09:15"), ms(DAY, "11:00"))]
+        traded = 1_800_000
+    minute(source, "11:00", 101.0, [traded + 10, traded + 20], EXCHANGE_DAY)
+    minute(source, "11:06", 102.0, [traded + 30, traded + 40], EXCHANGE_DAY)
+    late = claimed == "11:00"
+    assert paused(judge(source, FIRST_CANDLE, "11:10")) is late
+    assert judge(source, LATEST_CANDLE, "11:10").kind == HIT, "the 11:05 candle is whole"
+    opened = judge(source, DAY_OPEN, "11:10")
+    assert opened.kind == HIT and opened.values["c1"]["l"] == "99.50", "the exchange's open"
+    if not late:
+        assert judge(source, FIRST_CANDLE, "11:10").kind == HIT
+        assert gap_rows(world, source) == []
+    source.mark_seen(ms(DAY, "11:10:30"))
+    again = start(world, "11:10:32")  # a fast restart: the keyed row brings the gap back
+    follow(again, BOTH, "11:10:32", reuse=False)
+    assert paused(judge(again, FIRST_CANDLE, "11:10")) is late
+    assert day_not_known(judge(again, DAY_OPEN, "11:10")), "restored bars carry no day candle"
+    minute(again, "11:11", 102.5, [traded + 50, traded + 60], EXCHANGE_DAY)
+    assert judge(again, DAY_OPEN, "11:15").kind == HIT, "the next trade's frame brings it back"
+    assert paused(judge(again, FIRST_CANDLE, "11:15")) is late
+
+
+def test_a_key_the_store_holds_no_bar_of_is_first_followed_at_the_restart(world):
+    """The restart clause: nothing says whether a key with no bar in the store was followed
+    before the restart, so the first set after it counts as its first follow. No frame here
+    carries the exchange's day candle, so the day open is not known either."""
+    source = start(world, "08:50")
+    follow(source, OTHER, "09:00", reuse=False)
+    source.mark_seen(ms(DAY, "10:00:00"))
+    again = start(world, "10:00:02")
+    follow(again, BOTH, "10:00:02", reuse=False)
+    assert gap_rows(world, again) == [(ms(DAY, "09:15"), ms(DAY, "10:00:02"))]
+    minute(again, "10:01", 101.0, [700_010, 700_020])
+    minute(again, "10:06", 101.0, [700_030, 700_040])
+    assert bar_at(again, "10:01").v == 20, "the first frame after the follow is the baseline"
+    assert paused(judge(again, FIRST_CANDLE, "10:10"))
+    assert day_not_known(judge(again, DAY_OPEN, "10:10"))
+    assert judge(again, LATEST_CANDLE, "10:10").kind == HIT
 
 
 # ---- the closing auction --------------------------------------------------------------------------

@@ -31,7 +31,16 @@ A key let go and followed again the same day (``follow_from``; re-review MEDIUM-
 in between, so the stretch is that key's own pause (a gap, ``gaps``) and its first frame of a trade
 made after it comes back is its baseline in place of the running total: the volume traded meanwhile
 belongs to no bar, and the candles that hold the gap are UNVERIFIED. A gap before the open, or no
-longer than GAP_S inside the session, changes nothing.
+longer than GAP_S inside the session, changes nothing. A key first followed after its session
+began (a screen made or resumed at 11:00, a restart for a key the store holds no bar of) was not
+watched from the open either: that stretch is its gap too, so its day candle and its first bar are
+UNVERIFIED (design A1).
+
+The day's open, high and low are the exchange's (MEDIUM-B5): every full-mode frame carries the day
+candle as the exchange counts it, with the pre-open price as its open and in its high and low.
+Each bar keeps that candle as the frame of its latest trade gave it (``exchange_days``, in memory
+only: bars restored after a restart have none until the next trade), so candles.py reads the day
+as of the last trade judged, never a later one.
 
 A stock that closes by auction (``Market.auction``) trades continuously to the continuous end and
 then prints the auction's price once (clock.auction; the frame must carry a volume that rose, as
@@ -61,6 +70,7 @@ from sudarshan.alerts.market.clock import (
     paused_during,
     within,
 )
+from sudarshan.alerts.market.conditions import todays
 from sudarshan.alerts.market.engine import CLOSE_CHECK_MS
 from sudarshan.alerts.market.grain import paise
 from sudarshan.alerts.market.sessions import AUCTION, Session, epoch_ms, key_day, segment_of
@@ -188,6 +198,18 @@ def _count(value) -> int | None:
     return found if found is not None and found >= 0 else None
 
 
+def _exchange_day(frame: Mapping, market: Market, segment: str) -> tuple[int, int, int] | None:
+    """The exchange's day candle a frame carries (open, high, low in paise): today's, and a
+    candle (its low at or under its open, its open at or under its high); None otherwise."""
+    ohlc = todays(frame, market, segment)
+    if ohlc is None:
+        return None
+    o, h, low = (paise(ohlc.get(name)) for name in ("open", "high", "low"))
+    if o is None or h is None or low is None or not low <= o <= h:
+        return None
+    return o, h, low
+
+
 def _candle(row: Candle) -> bool:
     """Whether a REST row can be a minute's candle."""
     return (
@@ -226,11 +248,14 @@ class _In(NamedTuple):
 class _Open:
     """A minute that has trades and is not sealed."""
 
-    __slots__ = ("start", "first", "last", "o", "h", "low", "c", "vtt", "oi", "atp", "flags", "i1")
+    __slots__ = ("start", "first", "last", "o", "h", "low", "c", "vtt", "oi", "atp", "flags", "i1",
+                 "day")  # fmt: skip
 
     def __init__(self, start: int, oi: int, atp: int):
         self.start, self.oi, self.atp, self.flags = start, oi, atp, 0
         self.first = self.last = self.o = self.h = self.low = self.c = self.vtt = self.i1 = None
+        #: The exchange's day candle (open, high, low in paise) the latest trade's frame carried.
+        self.day: tuple[int, int, int] | None = None
 
     def add(self, at: int, price: int, vtt: int | None, oi: int | None, atp: int | None) -> None:
         """A trade by its own time ``at``: the open is the earliest, the close the latest."""
@@ -252,7 +277,7 @@ class _Key:
     """Everything kept for one instrument key today."""
 
     __slots__ = ("trade", "seen", "cum", "pre", "oi", "atp", "open", "sealed", "cums", "late",
-                 "printed", "printed_at", "rebase", "again")  # fmt: skip
+                 "printed", "printed_at", "rebase", "again", "days")  # fmt: skip
 
     def __init__(self) -> None:
         #: The identity of the last trade the gate let through.
@@ -277,6 +302,8 @@ class _Key:
         #: True for a key followed again after a gap until its baseline is taken: the baseline
         #: then replaces the running total, not only the pre-open volume.
         self.again = False
+        #: Bar start -> the exchange's day candle (open, high, low) as of the bar's latest trade.
+        self.days: dict[int, tuple[int, int, int]] = {}
 
 
 class Bars:
@@ -307,7 +334,11 @@ class Bars:
         A key the bars hold nothing of has traded before ``at`` and nobody counted it, so its first
         frame of a trade made today becomes its baseline and that volume belongs to no bar, as
         after a restart. Before the open this changes nothing: the pre-open frames give the
-        baseline, as on any day.
+        baseline, as on any day. Nobody watched it from its session's start (or from when it was
+        let go before its first trade came) either, so that stretch is its gap when it holds more
+        than GAP_S of the session (design A1): its day candle and its first bar read "Not
+        checked", and later minute candles are judged as usual. The first set after a restore
+        counts as the first follow of every key the store holds no bar of.
 
         A key let go earlier today and followed again was not watched in between (re-review
         MEDIUM-1). When that stretch holds more than GAP_S of its session, the minutes it held
@@ -333,13 +364,16 @@ class Bars:
         for key in sorted(wanted if first else wanted - before):
             since = self._let_go.pop(key, None)
             state = self._keys.get(key)
-            if state is None:
+            if state is None:  # first followed today (since None), or let go before a trade
+                gap = self._stretch(key, since, at, market)
                 if since is not None or key not in self._claimed:
                     self._claimed[key] = at
             elif since is not None:
                 gap = self._again(key, state, since, at, market, sealed)
-                if gap is not None:
-                    gaps.append((key, gap))
+            else:
+                gap = None
+            if gap is not None:
+                gaps.append((key, gap))
         self._followed = wanted
         return Followed(tuple(sealed), tuple(gaps))
 
@@ -363,6 +397,18 @@ class Bars:
         """The key's sealed bars of ``day``, oldest first."""
         state = self._keys.get(key)
         return () if state is None else tuple(state.sealed[start] for start in sorted(state.sealed))
+
+    def cums(self, key: str) -> Mapping[int, int]:
+        """Bar start -> the running total accounted for through it: the exchange's volume of the
+        day at the bar's latest trade, the pre-open included."""
+        state = self._keys.get(key)
+        return {} if state is None else dict(state.cums)
+
+    def exchange_days(self, key: str) -> Mapping[int, tuple[int, int, int]]:
+        """Bar start -> the exchange's day candle (open, high, low in paise) as the frame of the
+        bar's latest trade carried it; a bar restored after a restart has none."""
+        state = self._keys.get(key)
+        return {} if state is None else dict(state.days)
 
     def late(self, key: str) -> int:
         """Trades for a minute that came too late to count (they stay in the day's volume)."""
@@ -516,6 +562,7 @@ class Bars:
                 written.append(Sealed(key, bar, cum))
             elif old is not None and start not in given:
                 del state.sealed[start], state.cums[start]
+                state.days.pop(start, None)
                 removed.append(start)
         return Repair(tuple(written), tuple(removed))
 
@@ -527,20 +574,30 @@ class Bars:
             self._claimed = {}
             self._reset()
 
+    def _stretch(self, key: str, since: int | None, at: int, market: Market) -> Pause | None:
+        """The stretch ``key`` was not followed, from ``since`` (None: its session's start) to
+        ``at``, kept as its gap; None when it holds no more than GAP_S of the session."""
+        grid = market.sessions.get(segment_of(key))
+        if grid is None:
+            return None
+        gap = Pause(grid.start if since is None else since, at, UNFOLLOWED)
+        inside = within((gap,), grid.start, grid.end)
+        if not inside or not paused_during(inside, grid.start, grid.end):
+            return None
+        self._gaps.setdefault(key, []).append(gap)
+        return gap
+
     def _again(
         self, key: str, state: _Key, since: int, at: int, market: Market, sealed: list[Sealed]
     ) -> Pause | None:
         """A key let go at ``since`` and followed again at ``at``: its gap, or None when the
         stretch holds no more than GAP_S of its session (``follow_from``)."""
-        grid = market.sessions.get(segment_of(key))
-        gap = Pause(since, at, UNFOLLOWED)
-        inside = within((gap,), grid.start, grid.end) if grid is not None else ()
-        if not inside or not paused_during(inside, grid.start, grid.end):
+        gap = self._stretch(key, since, at, market)
+        if gap is None:
             return None
         for start in sorted(state.open):  # traded before the let-go, from the running total
             sealed.append(self._seal(key, state, start))
         state.rebase, state.again = at, True
-        self._gaps.setdefault(key, []).append(gap)
         return gap
 
     @staticmethod
@@ -601,20 +658,24 @@ class Bars:
             state.late += 1
             return LATE_TRADE
         oi, atp = _count(item.frame.get("oi")), paise(item.frame.get("atp"))
+        day = _exchange_day(item.frame, market, item.segment)
         if printed:
             state.printed, state.printed_at = market.today, item.now
-            sealed.append(self._print(item.key, state, start, (at, price, item.volume, oi, atp)))
+            trade = (at, price, item.volume, oi, atp)
+            sealed.append(self._print(item.key, state, start, trade, day))
             return check
         minute = state.open.get(start)
         if minute is None:
             minute = state.open[start] = _Open(start, state.oi, state.atp)
         minute.add(at, price, item.volume, oi, atp)
+        if day is not None and minute.last == at:  # the minute's latest trade so far
+            minute.day = day
         if item.recv >= end:
             minute.flags |= LATE_BAR  # the minute was over when this trade came
         state.oi, state.atp = minute.oi, minute.atp
         return check
 
-    def _print(self, key: str, state: _Key, start: int, trade: tuple) -> Sealed:
+    def _print(self, key: str, state: _Key, start: int, trade: tuple, day=None) -> Sealed:
         """The closing auction's price, into the day's last minute, which it seals on arrival.
 
         A minute that continuous trading has already sealed (every stock from 7 Dec 2026, which
@@ -627,7 +688,10 @@ class Bars:
             if minute is None:
                 minute = state.open[start] = _Open(start, state.oi, state.atp)
             minute.add(at, price, volume, oi, atp)
+            minute.day = day if day is not None else minute.day
             return self._seal(key, state, start)
+        if day is not None:
+            state.days[start] = day
         cum = state.cum if state.cum is not None else (state.pre or 0)  # as _seal (MEDIUM-1)
         added = 0 if volume is None else max(0, volume - cum)
         bar = held._replace(
@@ -682,4 +746,6 @@ class Bars:
         state.cum = cum + volume
         bar = Bar(start, o, h, low, c, volume, minute.oi, minute.atp, flags, minute.last)
         state.sealed[start], state.cums[start] = bar, state.cum
+        if minute.day is not None:
+            state.days[start] = minute.day
         return Sealed(key, bar, state.cum)

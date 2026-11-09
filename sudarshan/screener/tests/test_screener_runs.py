@@ -86,11 +86,11 @@ def opened(tmp_path):
     store_module.stop()
 
 
-def make_screen(opened, raw=SPEC) -> dict:
+def make_screen(opened, raw=SPEC, at: int | None = None) -> dict:
+    """The screen made at ``at`` (a moment before NOW by default)."""
     stored = spec.check(raw)
-    return opened.write(
-        OWNER, lambda tx: tx.screen_insert(stored["name"], stored, "active", NOW - 1)
-    )
+    made = NOW - 1 if at is None else at
+    return opened.write(OWNER, lambda tx: tx.screen_insert(stored["name"], stored, "active", made))
 
 
 def due_for(screen: dict, k: int, late=False, last=False) -> sch.Due:

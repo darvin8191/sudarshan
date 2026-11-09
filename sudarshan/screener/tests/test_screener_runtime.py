@@ -43,7 +43,7 @@ def opened(tmp_path):
 
 
 def test_the_runner_makes_every_due_run_once_and_records_a_failed_evaluation(opened):
-    screen = make_screen(opened)
+    screen = make_screen(opened, at=ms(DAY, "09:00"))  # made before the open: a restart catches up
     source = FakeSource({"NSE_EQ|A": 12000, "NSE_EQ|B": 9000})
     clock = {"now": ms(DAY, "10:15:05")}
     made = runner.Runner(opened, source, lambda: clock["now"], Calendar())

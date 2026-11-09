@@ -173,8 +173,11 @@ def test_the_owner_flow_end_to_end(world):
 
     # the real run loop makes the due runs from a fake price source (no feed in this process)
     source = FakeSource({"NSE_EQ|A": 12000, "NSE_EQ|B": 11000, "NSE_EQ|C": None})
-    loop_runner = runner.Runner(service.store, source, lambda: NOW, Calendar())
-    assert asyncio.run(loop_runner.tick()) == 4  # 09:30, 09:45, 10:00 and 10:15
+    clock = {"now": NOW}
+    loop_runner = runner.Runner(service.store, source, lambda: clock["now"], Calendar())
+    # made at 10:15:05: one run, on the 10:00 to 10:15 candle, never the day's earlier checks
+    # at once (round-3 review MEDIUM-B6; they were 09:30, 09:45, 10:00 and 10:15)
+    assert asyncio.run(loop_runner.tick()) == 1
 
     # the results, as types.ts declares them
     results = data_of(client.get(f"{PREFIX}/screens/{screen_id}/results", headers=JSON))
@@ -213,11 +216,15 @@ def test_the_owner_flow_end_to_end(world):
     )
     assert state["last_run_id"] == results["run"]["id"] and state["limits"]["active_used"] == 1
 
+    # the loop stopped after that run and ticks again at 11:01: 10:30 and 10:45 are made late
+    clock["now"] = ms("2026-10-28", "11:01")
+    assert asyncio.run(loop_runner.tick()) == 3  # 10:30 and 10:45 late, 11:00 on time
+
     # history, catch-up and rewind
     page = data_of(client.get(f"{PREFIX}/screens/{screen_id}/runs?limit=3", headers=JSON))
     assert len(page["runs"]) == 3 and page["more"] is True
     assert page["runs"][0]["marks"] == [] and page["runs"][-1]["marks"] == [
-        "checked late at 10:15 after a restart"
+        "checked late at 11:01 after a restart"
     ]
     older = data_of(
         client.get(
@@ -229,7 +236,7 @@ def test_the_owner_flow_end_to_end(world):
     since = data_of(client.get(f"{PREFIX}/runs/since?after=0", headers=JSON))
     assert [r["id"] for r in since["runs"]] == sorted(r["id"] for r in older["runs"] + page["runs"])
     rewind = data_of(client.get(f"{PREFIX}/runs/{older['runs'][0]['id']}", headers=JSON))
-    assert rewind["run"]["candle"] == "09:15 to 09:30" and [
+    assert rewind["run"]["candle"] == "10:00 to 10:15" and [
         r["symbol"] for r in rewind["rows"]
     ] == ["AAA", "BBB"]
     assert rewind["values_note"] is None
