@@ -33,7 +33,7 @@ return a value or a ``Why``. Pure: no I/O, no clock, no logging. Definitions:
   opening range's).
 - ``day_open``, ``day_high`` and ``day_low`` are the exchange's (MEDIUM-B5): the day candle the
   feed carries, the pre-open price as the open (candles.py). ``day_unknown_in`` says when no frame
-  has carried it yet: "Not checked: day open not known yet", never the first trade.
+  has carried it yet: "Not checked: the day's open, high and low are not known yet", never the first trade.
 """
 
 from __future__ import annotations

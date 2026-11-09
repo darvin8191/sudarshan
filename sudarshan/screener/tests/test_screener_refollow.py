@@ -334,7 +334,7 @@ def paused(outcome) -> bool:
 
 
 def day_not_known(outcome) -> bool:
-    """Not checked because the exchange's day candle has not come: "day open not known yet"."""
+    """Not checked because the exchange's day candle has not come: "the day's open, high and low are not known yet"."""
     whys = [(why.code, why.detail) for why in outcome.why]
     return outcome.kind == NOT_CHECKED and whys == [(NO_DATA, ("day_open",))]
 

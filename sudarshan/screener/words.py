@@ -118,7 +118,7 @@ def _reason(why: T.Why) -> str:
         if code == T.NO_DATA:
             (name,) = detail
             if name == "day_open":  # the exchange's day candle has not come (MEDIUM-B5)
-                return "day open not known yet"
+                return "the day's open, high and low are not known yet"
             noun = _NOUNS.get(name)
             return f"no {noun} yet" if noun else "a value it needs is not available yet"
         if code == T.ZERO:
