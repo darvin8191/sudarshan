@@ -491,6 +491,7 @@ class LiveSource:
         built: dict[str, list[Member]] = {}
         waiting: dict[str, Mapping[str, Any]] = {}
         todo = [s for n, s in wanted.items() if n not in found]
+        built_ok = True  # false only when the master could not be read for a universe
         if todo:
             try:
                 built_on = self._master_whole()
@@ -523,7 +524,7 @@ class LiveSource:
                 self.master_ready, self.built_on = True, built_on
             except (universe.MasterUnavailable, FileNotFoundError) as exc:
                 log.warning("universes could not be built: %s", exc)
-                self.master_ready = False
+                self.master_ready = built_ok = False
                 if not reuse:
                     return
                 built = {}  # the new universes wait for the master; the keys still follow
@@ -551,7 +552,9 @@ class LiveSource:
             )
             keys = keys[: self.settings.max_keys]
         self.keys = frozenset(keys)
-        self._keys_known = True
+        # Known only once a build has succeeded: a reuse rebuild that found the master still
+        # downloading built nothing, and the claims a stop kept must stay until it can.
+        self._keys_known = self._keys_known or built_ok
         self.bars.follow_from(self.keys, now)  # a key first followed mid-session counts from here
         self.feed.follow(self.keys)
         self._rebuild_market(now)

@@ -67,3 +67,43 @@ def test_claims_are_dropped_once_the_universes_are_built_and_empty(tmp_path, mas
     finally:
         store.close()
         store_module.stop()
+
+
+def test_a_screen_changed_while_the_master_is_still_downloading_keeps_the_claims(
+    tmp_path,
+    master_fixture,  # noqa: F811
+):
+    """After a crash restart during the master download the owner edits or pauses a screen: the
+    rebuild that follows the change builds nothing, and must not count as the first build, or it
+    drops the claims the stop kept."""
+    store, source, feed, clock = make(tmp_path, Downloading(master_fixture))
+    try:
+        source.refresh_universes([{"kind": "fno_stocks"}], clock["now"])  # full: the master fails
+        asyncio.run(source.claim())
+        assert feed.dropped == 0
+        clock["now"] += 60_000
+        source.refresh_universes([{"kind": "fno_stocks"}], clock["now"], reuse=True)
+        asyncio.run(source.claim())
+        assert not source.master_ready and not source.keys
+        assert feed.dropped == 0, "a rebuild that built nothing dropped the claims the stop kept"
+    finally:
+        store.close()
+        store_module.stop()
+
+
+def test_a_screen_changed_once_the_master_is_ready_still_lets_go_of_what_it_no_longer_needs(
+    tmp_path,
+    master_fixture,  # noqa: F811
+):
+    store, source, feed, clock = make(tmp_path, master_fixture)
+    try:
+        source.refresh_universes([{"kind": "fno_stocks"}], clock["now"])
+        asyncio.run(source.claim())
+        assert source.keys and feed.dropped == 0
+        clock["now"] += 60_000
+        source.refresh_universes([], clock["now"], reuse=True)  # the screen is paused
+        asyncio.run(source.claim())
+        assert feed.dropped == 1
+    finally:
+        store.close()
+        store_module.stop()
