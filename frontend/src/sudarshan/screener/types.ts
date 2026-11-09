@@ -300,6 +300,8 @@ export interface WidgetCard {
   /** The screen's next check (epoch ms). */
   next_at: number | null
   line: CardLine
+  /** The engine line's own sentence whenever the screener is not real-time, else null. */
+  not_live_words: string | null
   /**
    * True for a card the dashboard read did not have time to work out: it carries its identity, its
    * screen's name and state and no rows, and the page reads it with the widget read. The facts

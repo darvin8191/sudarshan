@@ -87,7 +87,7 @@ afterEach(() => vi.useRealTimers())
 describe('the engine line', () => {
   it('reads the service words without the feed link, never Real-time', async () => {
     api.state.mockResolvedValue(screenerState([screenRow()], { engine: NOT_LINKED }))
-    renderPage(['/screener'])
+    renderPage(['/screener?tab=screens'])
     expect(await screen.findByText(NOT_LINKED.line)).toBeInTheDocument()
     expect(screen.queryByText(/Real-time/)).not.toBeInTheDocument()
   })
@@ -95,7 +95,7 @@ describe('the engine line', () => {
   it('does not say Real-time while the page is not hearing the screener', async () => {
     api.state.mockResolvedValue(screenerState([screenRow()], { engine: REAL_TIME }))
     sockets.current = fakeSocket().socket
-    renderPage(['/screener'])
+    renderPage(['/screener?tab=screens'])
     await screen.findByText(/Not receiving updates/)
     expect(screen.queryByText(/Real-time/)).not.toBeInTheDocument()
   })
@@ -104,7 +104,7 @@ describe('the engine line', () => {
     api.state.mockResolvedValue(screenerState([screenRow()], { engine: REAL_TIME }))
     const room = fakeSocket()
     sockets.current = room.socket
-    renderPage(['/screener'])
+    renderPage(['/screener?tab=screens'])
     await screen.findByText('15-min EMA cross')
     await act(async () => {
       for (let i = 0; i < 10; i += 1) await Promise.resolve()
@@ -121,7 +121,7 @@ describe('the engine line', () => {
         engine: { state: 'closed', line: 'Market closed', real_time: false, next_at: NOW },
       })
     )
-    renderPage(['/screener'])
+    renderPage(['/screener?tab=screens'])
     expect(await screen.findByText(/Market closed · next check 10:45/)).toBeInTheDocument()
   })
 
@@ -129,7 +129,7 @@ describe('the engine line', () => {
     api.state.mockResolvedValue(
       screenerState([screenRow()], { limits: { active: 5, active_used: 1, max_keys: 700 } })
     )
-    renderPage(['/screener'])
+    renderPage(['/screener?tab=screens'])
     expect(
       await screen.findByText(
         /1 of 5 screens checking through the day · prices followed for up to 700 instruments/
@@ -143,7 +143,7 @@ describe('alerts on a screen', () => {
     api.state.mockResolvedValue(
       screenerState([screenRow({ alerts: 'Alerts on', alerts_paused: false })])
     )
-    renderPage(['/screener'])
+    renderPage(['/screener?tab=screens'])
     const card = (await screen.findByText('Alerts on')).closest('[data-alerts]') as HTMLElement
     expect(card.dataset.alerts).toBe('text')
     expect(card.querySelector('svg')).not.toBeNull()

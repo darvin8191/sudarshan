@@ -1,13 +1,16 @@
 import { useCallback, useLayoutEffect, useRef } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router'
+import type { WidgetKind } from './types'
 
 /**
  * What the Screener page has open, kept in the address so the phone's Back closes it before it
  * leaves the page, by the watchlist's rules (watchlist/useOverlay.ts). Two layers:
  *
- * - the screen: `?screen=<id>` with `&tab=results|history|edit`; the Library lives at
- *   `?tab=library` with no screen;
- * - a sheet over it: `?sheet=new|delete|settings|library` (a clause's or operand's sheet is the
+ * - the screen: `?screen=<id>` with `&tab=results|history|edit`; with no screen the home is the
+ *   Dashboard (no `tab`), `?tab=screens` or `?tab=library`;
+ * - a sheet over it: `?sheet=new|delete|settings|library|add` (a dashboard widget's settings are
+ *   `?sheet=widget&s=<screen id>&k=<kind>`, addressed by screen and kind and never by an id; a row
+ *   of a widget opens `?sheet=symbol&k=EXCHANGE:SYMBOL&s=<screen id>&wk=<kind>`) (a clause's or operand's sheet is the
  *   builder's own, with `&sheet=clause&c=<clause id>`), and `?sheet=run&run=<id>` for a past run's set; a screen being written is `?new=1`.
  *
  * Opening pushes a history entry marked as this page's own, and closing goes back, so Back and
@@ -17,7 +20,13 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router'
  * once.
  */
 export type ScreenTab = 'results' | 'history' | 'edit'
-export type HomeTab = 'screens' | 'library'
+export type HomeTab = 'dashboard' | 'screens' | 'library'
+
+/** A dashboard widget as the address names it: its screen and its kind. */
+export interface WidgetAddress {
+  screen: number
+  kind: WidgetKind
+}
 
 export interface Address {
   screen: number | null
@@ -33,6 +42,10 @@ export interface Address {
   run: number | null
   /** The result row a symbol sheet is about, EXCHANGE:SYMBOL (`&k=`). */
   key: string | null
+  /** The widget a settings sheet is about (`?sheet=widget&s=&k=`). */
+  widget: WidgetAddress | null
+  /** The widget a symbol sheet was opened from (`&s=&wk=`), when it came from the dashboard. */
+  from: WidgetAddress | null
 }
 
 const SHEETS = new Set([
@@ -50,11 +63,18 @@ const SHEETS = new Set([
   'symbol',
   'order',
   'alert',
+  'add',
+  'widget',
 ])
 
 function positive(value: string | null): number | null {
   const n = Number(value)
   return value !== null && Number.isInteger(n) && n > 0 ? n : null
+}
+
+function widgetOf(screen: string | null, kind: string | null): WidgetAddress | null {
+  const id = positive(screen)
+  return id !== null && (kind === 'table' || kind === 'count') ? { screen: id, kind } : null
 }
 
 export function addressOf(params: URLSearchParams): Address {
@@ -65,7 +85,12 @@ export function addressOf(params: URLSearchParams): Address {
     screen,
     draft: screen === null && params.get('new') === '1',
     tab: tab === 'history' || tab === 'edit' ? tab : 'results',
-    home: screen === null && tab === 'library' ? 'library' : 'screens',
+    home:
+      screen === null && tab === 'library'
+        ? 'library'
+        : screen === null && tab === 'screens'
+          ? 'screens'
+          : 'dashboard',
     sheet: sheet && SHEETS.has(sheet) ? sheet : null,
     clause: params.get('c'),
     side:
@@ -73,7 +98,10 @@ export function addressOf(params: URLSearchParams): Address {
         ? (params.get('side') as 'left' | 'right')
         : null,
     run: screen === null ? null : positive(params.get('run')),
-    key: params.get('k'),
+    // On a widget's settings `k` is the kind, not an instrument.
+    key: sheet === 'widget' ? null : params.get('k'),
+    widget: sheet === 'widget' ? widgetOf(params.get('s'), params.get('k')) : null,
+    from: sheet === 'symbol' ? widgetOf(params.get('s'), params.get('wk')) : null,
   }
 }
 
@@ -166,6 +194,8 @@ export function useScreenerAddress() {
       after.delete('c')
       after.delete('side')
       after.delete('k')
+      after.delete('s')
+      after.delete('wk')
       here.current = { ...here.current, params: after, entry: { sdScreen: !!now.sdScreen } }
       navigate(-1)
       return
@@ -175,6 +205,8 @@ export function useScreenerAddress() {
     after.delete('c')
     after.delete('side')
     after.delete('k')
+    after.delete('s')
+    after.delete('wk')
     go(after, true, now.sdScreen ? { sdScreen: true } : null)
   }, [go, navigate])
 
@@ -184,7 +216,7 @@ export function useScreenerAddress() {
       const { params: current, entry: now } = here.current
       const after = new URLSearchParams(current)
       after.delete('run')
-      if (tab === 'results' || tab === 'screens') after.delete('tab')
+      if (tab === 'results' || tab === 'dashboard') after.delete('tab')
       else after.set('tab', tab)
       go(after, true, now.sdScreen || now.sdSheet ? now : null)
     },

@@ -73,7 +73,7 @@ function Nav() {
   return null
 }
 
-function renderPage(entries: InitialEntry[] = ['/elsewhere', '/screener']) {
+function renderPage(entries: InitialEntry[] = ['/elsewhere', '/screener?tab=screens']) {
   const client = createQueryClient()
   render(
     <QueryClientProvider client={client}>
@@ -246,7 +246,7 @@ describe('the Screener page', () => {
     await waitFor(() => expect(where()).toBe('/screener?screen=1'))
     expect(screen.queryByText('Delete this screen?')).toBeNull()
     back()
-    await waitFor(() => expect(where()).toBe('/screener'))
+    await waitFor(() => expect(where()).toBe('/screener?tab=screens'))
     back()
     await waitFor(() => expect(where()).toBe('/elsewhere'))
   })

@@ -4,6 +4,7 @@
 import axios from 'axios'
 import { webClient } from '@/api/client'
 import {
+  type Dashboard,
   type PresetCard,
   type Preview,
   type ResultRow,
@@ -16,6 +17,8 @@ import {
   type ScreenSpec,
   type Today,
   type UniverseOption,
+  type WidgetCard,
+  type WidgetKind,
   WORDS,
 } from './types'
 
@@ -229,6 +232,12 @@ export function inRupees<T extends { rows: ResultRow[] }>(answer: T): T {
 
 const BASE = '/sudarshan/screener/api'
 
+/** A card's rows come in paise, as results do. */
+const cardInRupees = (card: WidgetCard): WidgetCard => ({
+  ...card,
+  rows_shown: inRupees({ rows: card.rows_shown }).rows,
+})
+
 export interface ScreenDraft {
   spec: ScreenSpec
   /** One id per Save, so a resend after a lost answer returns the screen already made. */
@@ -244,6 +253,24 @@ export type ScreenChange =
 export const screenerApi = {
   state: () =>
     call<ScreenerState>(webClient.get(`${BASE}/state`, { timeout: READ_MS }), switchedOff),
+  /** The dashboard: every card, those past the read's time budget without rows (`rows_pending`). */
+  dashboard: async (signal?: AbortSignal) => {
+    const read = await call<Dashboard>(
+      webClient.get(`${BASE}/dashboard`, { timeout: READ_MS, signal })
+    )
+    return { ...read, widgets: read.widgets.map(cardInRupees) }
+  },
+  /** One card, addressed by its screen and its kind. */
+  widget: async (screenId: number, kind: WidgetKind, signal?: AbortSignal) =>
+    cardInRupees(
+      await call<WidgetCard>(
+        webClient.get(`${BASE}/dashboard/widgets/${screenId}`, {
+          params: { kind },
+          timeout: READ_MS,
+          signal,
+        })
+      )
+    ),
   create: (draft: ScreenDraft) =>
     call<ScreenRow>(webClient.post(`${BASE}/screens`, draft, { timeout: CHANGE_MS })),
   change: (id: number, change: ScreenChange) =>
