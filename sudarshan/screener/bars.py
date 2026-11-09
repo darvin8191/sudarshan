@@ -615,13 +615,30 @@ class Bars:
         (``ltq``) and nothing before it; one made before it counts nothing. A frame of an earlier
         day's trade carries yesterday's total and waits for today's. A restore before the
         session's start leaves the pre-open baseline to the frames before the open, as on any
-        day. A key followed again starts its running total again here (``cum`` and the pre-open
-        volume give way to the baseline)."""
+        day, unless no pre-open frame has come by the first trade of the session: that trade's
+        ``vtt - ltq`` is the baseline then. A key followed again starts its running total again
+        here (``cum`` and the pre-open volume give way to the baseline)."""
         since = state.rebase
-        if grid is None or since is None or since < grid.start:
+        if grid is None or since is None:
             state.rebase, state.again = None, False
             return
+        before = since < grid.start
+        if before and state.pre is not None:  # a pre-open frame gave the baseline
+            state.rebase = None
+            return
         if volume is None or ltt is None or ltt < epoch_ms(key_day(today), 0):
+            return
+        if before:
+            # restored before the open and no pre-open frame has come (Upstox sends none in the
+            # quiet minutes from 09:08 to 09:15): the first trade of the session is the baseline
+            # (round-4 review LOW-A6). A frame of a pre-open trade waits: ``_trade`` takes its
+            # volume.
+            if ltt < grid.start:
+                return
+            state.rebase = None
+            quantity = _count(frame.get("ltq"))
+            if quantity is not None and 0 < quantity <= volume:
+                state.pre = volume - quantity
             return
         state.rebase = None
         quantity = _count(frame.get("ltq"))

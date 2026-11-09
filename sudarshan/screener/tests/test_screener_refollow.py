@@ -420,6 +420,7 @@ def test_the_closing_auction_print_after_a_comeback_adds_only_its_own_volume():
 
     bars = Bars()
     bars.follow_from([RELIANCE], ms(day, "09:00"), world("09:00"))
+    tick(bars, "09:05", "09:05", 100.0, 0, ltq=0)  # the pre-open frame: the day's baseline is 0
     assert tick(bars, "15:29:10", "15:29:10", 100.0, 1_000_000).check == clock.OK
     bars.follow_from([], ms(day, "15:29:45"), world("15:29:45"))
     back = bars.follow_from([RELIANCE], ms(day, "15:31"), world("15:31"))

@@ -10420,6 +10420,68 @@
    ]
   },
   {
+   "id": "A6a",
+   "says": "a restart at 09:14 with no pre-open frame since: the first trade's own quantity is the baseline, so the first bar does not hold the pre-open volume (round-4 review LOW-A6)",
+   "bars": [
+    {
+     "at": "09:15",
+     "o": 10000,
+     "h": 10005,
+     "l": 10000,
+     "c": 10005,
+     "v": 20,
+     "flags": [],
+     "until": "09:15:40"
+    }
+   ],
+   "cum": 50020,
+   "gaps": [],
+   "steps": [
+    {
+     "at": "09:14",
+     "restore": {
+      "rows": [],
+      "printed": [],
+      "since": "09:14"
+     }
+    },
+    {
+     "at": "09:14",
+     "follow": [
+      "NSE_EQ|INE002A01018"
+     ],
+     "gaps": []
+    },
+    {
+     "at": "09:15:20.050",
+     "tick": {
+      "ltt": "09:15:20.000",
+      "ltp": 100.0,
+      "ltq": 10,
+      "vtt": 50010
+     },
+     "check": "ok"
+    },
+    {
+     "at": "09:15:40.050",
+     "tick": {
+      "ltt": "09:15:40.000",
+      "ltp": 100.05,
+      "ltq": 10,
+      "vtt": 50020
+     },
+     "check": "ok"
+    },
+    {
+     "at": "09:16:05",
+     "clock": true,
+     "sealed": [
+      "09:15"
+     ]
+    }
+   ]
+  },
+  {
    "id": "A0b",
    "says": "a restart whose keys are followed only at the 5-minute retry (the master contract was downloading): the wait is a gap, the first bar counts from the first frame after it and is not checked",
    "bars": [

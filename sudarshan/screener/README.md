@@ -226,9 +226,11 @@ The day candle is the exchange's: its open, high and low come from the day candl
 frame carries (the pre-open price is the open, as on every broker's chart), as it stood at the
 latest trade judged, and its volume is the exchange's running total there, the pre-open included.
 Until a frame has carried that candle (after a restart, until the next trade) they read "Not
-checked: the day's open, high and low are not known yet", never the first trade's. A stretch nobody watched earlier in the
-day no longer blanks the day once a trade after it has come; a pause after the latest trade still
-does.
+checked: the day's open, high and low are not known yet", never the first trade's. A stretch
+nobody watched earlier in the day no longer blanks the day once a trade after it has come; a
+pause after the latest trade still does. A start before the open that hears no pre-open frame
+(Upstox sends none from 09:08 to 09:15) takes the first trade of the session as its baseline, so
+the pre-open volume is in no bar.
 
 ## What the screener follows, and when
 
