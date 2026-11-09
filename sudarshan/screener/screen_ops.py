@@ -600,7 +600,7 @@ async def delete(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
                 now,
                 coalesce=True,
             )
-        tx.screen_remove(screen_id)
+        tx.screen_remove(screen_id, now)
         return {"deleted": screen_id, "removed_from_list": left}
 
     deleted = _translate(lambda: store.write(OWNER, remove))

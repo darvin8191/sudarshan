@@ -16,7 +16,17 @@ from sudarshan.screener import dashboard as d
 from sudarshan.screener import words as w
 
 VECTORS = json.loads((Path(__file__).parent / "vectors" / "dashboard.json").read_text("utf-8"))
-FLOORS = {"modes": 4, "day_only": 5, "waits": 8, "clauses": 4, "sorts": 4, "series": 4, "lines": 15}
+FLOORS = {
+    "modes": 4,
+    "day_only": 5,
+    "waits": 8,
+    "clauses": 4,
+    "sorts": 4,
+    "series": 4,
+    "lines": 15,
+    "checks": 14,
+    "orders": 6,
+}
 
 
 def at(text: str) -> int:
@@ -106,3 +116,23 @@ def test_a_card_that_is_not_live_never_says_real_time_unless_it_is():
     for v in VECTORS["lines"]:
         if not v["live"]:
             assert not v["words"].startswith("Real-time"), v["id"]
+
+
+@pytest.mark.parametrize("v", VECTORS["checks"], ids=lambda v: v["id"])
+def test_what_a_widget_may_be_in_the_owners_words(v):
+    if "error" in v:
+        with pytest.raises(d.WidgetError) as caught:
+            d.check_fields(v["in"])
+        assert str(caught.value) == v["error"]
+    else:
+        assert d.check_fields(v["in"]) == v["out"]
+
+
+@pytest.mark.parametrize("v", VECTORS["orders"], ids=lambda v: v["id"])
+def test_the_whole_order_as_screen_and_kind_pairs(v):
+    if "error" in v:
+        with pytest.raises(d.WidgetError) as caught:
+            d.check_order(v["in"])
+        assert str(caught.value) == v["error"]
+    else:
+        assert d.check_order(v["in"]) == [tuple(pair) for pair in v["out"]]

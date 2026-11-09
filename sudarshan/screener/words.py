@@ -621,3 +621,17 @@ def card_line_words(
     if kind == "closed":
         return f"{engine_line}{_as_of(run_at, now)}"
     return engine_line
+
+
+DASH_ROWS = "Show 5, 10 or 20 rows."
+DASH_KIND = "Pick a table or a count."
+DASH_SORT = (
+    "Sort by the day's change, the price, the time it entered or one of the screen's values, "
+    "up or down."
+)
+DASH_VALUES = "Pick up to two of the screen's values, each once."
+DASH_ORDER = "The order could not be read. Open the dashboard again, then repeat the move."
+DASH_WHEN = "Pick when to check: during the day, or after the close."
+DASH_WHEN_DAY_ONLY = "Only a screen that reads day candles alone can choose when it checks."
+DASH_PICK = "Pick a screen or a preset to add."
+DASH_NOTHING = "Pick what to change on the widget."

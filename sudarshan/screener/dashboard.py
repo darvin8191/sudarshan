@@ -23,6 +23,7 @@ from typing import Any
 
 from . import scheduler, words
 from . import types as T
+from .store import VALUE_CLAUSES_MAX, WIDGET_KINDS, WIDGET_ORDERS, WIDGET_ROWS, WIDGET_SORTS
 
 #: How long the ``dashboard`` read spends working cards out before the rest answer "rows pending".
 CARD_BUDGET_S = 1.5
@@ -31,7 +32,11 @@ SERIES_MAX = 80
 SERIES_SLOT_MS = 5 * 60_000
 #: Minutes of a trading day, the most candles of any minute size that one day holds.
 DAY_MINUTES = 375
-VALUE_COLUMNS = 2
+VALUE_COLUMNS = VALUE_CLAUSES_MAX
+#: The longest clause id a widget may name; the screen's own ids are far shorter.
+ID_MAX = 64
+#: When a day-only screen is checked (the owner's choice): the run each writes.
+WHEN_RUNS = {"during_day": {"on": "close", "tf": 15}, "after_close": {"on": "after_close"}}
 
 #: What the card's line is, for the page to choose its icon (design 3.6).
 LINE_KINDS = (
@@ -188,3 +193,64 @@ def line(
         kind, reason=reason, engine_line=engine_line, run_at=run_at, now=now, after_close=after
     )
     return {"kind": kind, "words": text, "live": kind == "real_time", "state": engine_state}
+
+
+# ---- what a write may say (the owner's words for each refusal) ---------------------------------------------
+class WidgetError(ValueError):
+    """A widget the owner asked for that cannot be; ``str()`` is his sentence."""
+
+
+def check_fields(raw: Mapping[str, Any]) -> dict[str, Any]:
+    """The widget fields named in ``raw`` (kind, rows, sort_by, value_clauses), each checked and
+    worded; a field that is not named is not in the answer."""
+    if "kind" in raw and raw["kind"] not in WIDGET_KINDS:
+        raise WidgetError(words.DASH_KIND)
+    if "rows" in raw and (isinstance(raw["rows"], bool) or raw["rows"] not in WIDGET_ROWS):
+        raise WidgetError(words.DASH_ROWS)
+    sort = raw.get("sort_by")
+    if sort is not None:
+        if (
+            not isinstance(sort, Mapping)
+            or set(sort) - {"by", "order", "clause"}
+            or sort.get("by") not in WIDGET_SORTS
+            or sort.get("order") not in WIDGET_ORDERS
+        ):
+            raise WidgetError(words.DASH_SORT)
+        clause = sort.get("clause")
+        if (sort["by"] == "value") != (clause is not None) or (
+            clause is not None and not (isinstance(clause, str) and 0 < len(clause) <= ID_MAX)
+        ):
+            raise WidgetError(words.DASH_SORT)
+        sort = dict(sort)
+    clauses = raw.get("value_clauses")
+    if clauses is not None and (
+        not isinstance(clauses, (list, tuple))
+        or len(clauses) > VALUE_COLUMNS
+        or len(set(clauses)) != len(clauses)
+        or not all(isinstance(c, str) and 0 < len(c) <= ID_MAX for c in clauses)
+    ):
+        raise WidgetError(words.DASH_VALUES)
+    out = {n: raw[n] for n in ("kind", "rows", "sort_by", "value_clauses") if n in raw}
+    if sort is not None:
+        out["sort_by"] = sort
+    if clauses is not None:
+        out["value_clauses"] = list(clauses)
+    return out
+
+
+def check_order(raw: Any) -> list[tuple[int, str]]:
+    """The whole order as (screen_id, kind) pairs."""
+    if not isinstance(raw, (list, tuple)) or not 0 < len(raw) <= 20:
+        raise WidgetError(words.DASH_ORDER)
+    pairs = []
+    for item in raw:
+        if (
+            not isinstance(item, (list, tuple))
+            or len(item) != 2
+            or isinstance(item[0], bool)
+            or not isinstance(item[0], int)
+            or item[1] not in WIDGET_KINDS
+        ):
+            raise WidgetError(words.DASH_ORDER)
+        pairs.append((item[0], item[1]))
+    return pairs

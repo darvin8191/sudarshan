@@ -31,6 +31,12 @@ EVENT_RUN = "sudarshan_screener_run"
 EVENT_LISTS = "sudarshan_screener_lists"
 #: The engine line as it changes (design 4.5): ``{engine, screens, removed}`` (types.ts StatePush).
 EVENT_STATE = "sudarshan_screener_state"
+#: The dashboard's layout changed on another screen (M9.16): ``{version}``; a page whose version is
+#: older reads the dashboard again.
+EVENT_DASHBOARD = "sudarshan_screener_dashboard"
+#: Every event the bridge forwards to the owner's room. A new event is added here and nowhere else:
+#: the bridge derives its set from this tuple, and a test holds it to it.
+PUSH_EVENTS = (EVENT_RUN, EVENT_LISTS, EVENT_STATE, EVENT_DASHBOARD)
 OWNER_ROOM = "sudarshan_owner"
 
 #: ``not_ready`` the op is not built yet; ``bad_request`` the arguments are wrong; ``not_found``
@@ -125,6 +131,16 @@ OPS = (
     OpSpec(
         "widget", "GET", "/dashboard/widget", "read", query=(("screen_id", "int"), ("kind", "str"))
     ),
+    OpSpec("widget_add", "POST", "/dashboard/widgets", "write"),
+    OpSpec("widget_update", "PATCH", "/dashboard/widget", "write"),
+    OpSpec(
+        "widget_remove",
+        "DELETE",
+        "/dashboard/widget",
+        "write",
+        query=(("screen_id", "int"), ("kind", "str"), ("version", "int")),
+    ),
+    OpSpec("widget_order", "POST", "/dashboard/order", "write"),
 )
 OP_NAMES = tuple(op.name for op in OPS)
 #: The membership moves the owner may make (PATCH /membership/<id>, ``{"action": ..., "version"}``).

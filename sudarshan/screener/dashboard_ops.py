@@ -27,25 +27,39 @@ from .ops import ApiError, op
 from .screen_ops import (
     _clauses,
     _int,
+    _moved,
     _session_key,
     _sessions,
+    _spec,
     _store,
+    _summary,
     engine_line,
     result_rows,
     run_row,
     sched_screen,
 )
-from .store import OWNER, WIDGET_KINDS, WIDGET_LIMIT, NotFound, StoreError, Tx, VersionConflict
+from .store import (
+    OWNER,
+    WIDGET_KINDS,
+    WIDGET_LIMIT,
+    NotFound,
+    StoreError,
+    Tx,
+    VersionConflict,
+    WidgetRefused,
+)
 
 
-def translate(call):
+def translate(call, gone: str = words.DASH_GONE):
     """A store call; its refusals become the contract's codes, in the dashboard's words."""
     try:
         return call()
     except NotFound:
-        raise ApiError.of("not_found", words.DASH_GONE) from None
+        raise ApiError.of("not_found", gone) from None
     except VersionConflict:
         raise ApiError.of("version_conflict", words.DASH_CONFLICT) from None
+    except WidgetRefused as exc:
+        raise ApiError.of("refused", str(exc)) from None
     except StoreError as exc:
         raise ApiError.of("unavailable", str(exc)) from None
 
@@ -236,4 +250,157 @@ async def widget(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
     return _with_line(card, engine, now)
 
 
-__all__ = ["dashboard", "widget"]
+# ---- the writes: every one names the dashboard version it was decided on --------------------------------
+def _checked(raw: Mapping[str, Any]) -> dict[str, Any]:
+    try:
+        return dash.check_fields(raw)
+    except dash.WidgetError as exc:
+        raise ApiError.of("refused", str(exc)) from None
+
+
+def _written(ctx, call, **extra) -> dict[str, Any]:
+    """A write in the dashboard's words; the answer is the version the dashboard is at now."""
+    try:
+        row = translate(call)
+    except ValueError:  # the store's own check: a field the owner could not have sent
+        raise ApiError.of("bad_request", WORDS["unreadable"]) from None
+    return {"version": row["version"], **extra}
+
+
+def _start(
+    ctx, tx: Tx, screen: Mapping[str, Any], now: int
+) -> tuple[Mapping[str, Any], str | None]:
+    """Start a Paused screen that was just added, unless that would make more screens check through
+    the day than the limit: then it stays Paused and the owner is told."""
+    if screen["status"] != "paused":
+        return screen, None
+    if screen["spec"]["run"]["on"] == "close":
+        busy = sum(
+            1
+            for r in tx.screens()
+            if r["id"] != screen["id"]
+            and r["status"] == "active"
+            and r["spec"]["run"]["on"] == "close"
+        )
+        if busy >= ctx.settings.max_active:
+            return screen, words.paused_add_words(busy, ctx.settings.max_active)
+    return tx.screen_change(screen["id"], screen["version"], {"status": "active"}, now), None
+
+
+def _when(tx: Tx, screen: Mapping[str, Any], choice: str, now: int) -> Mapping[str, Any]:
+    """Change how a day-only screen is checked: an edit of the screen, through the checker."""
+    stored, need, _ids = _facts(screen)
+    if not dash.day_only(need):
+        raise ApiError.of("refused", words.DASH_WHEN_DAY_ONLY, "run")
+    run = dash.WHEN_RUNS[choice]
+    if choice == "during_day" and stored["run"]["on"] == "close":
+        return screen  # already checked at its closes
+    if stored["run"] == run:
+        return screen
+    edited = _spec({**stored, "run": run})[0]
+    return tx.screen_change(
+        screen["id"], screen["version"], {"spec": edited, "name": edited["name"]}, now
+    )
+
+
+@op("widget_add")
+async def widget_add(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
+    version, store, now = _int(args, "version"), _store(ctx), ctx.clock()
+    screen_id, key = args.get("screen_id"), args.get("preset")
+    if (screen_id is None) == (key is None):
+        raise ApiError.of("bad_request", words.DASH_PICK)
+    if screen_id is not None:
+        screen_id = _int(args, "screen_id")
+    fields = _checked(
+        {
+            "kind": "table",
+            "rows": 10,
+            **{k: args[k] for k in ("kind", "rows", "sort_by", "value_clauses") if k in args},
+        }
+    )
+    choice, start = args.get("when"), args.get("start", True)
+    if choice is not None and choice not in dash.WHEN_RUNS:
+        raise ApiError.of("bad_request", words.DASH_WHEN)
+    if start.__class__ is not bool:
+        raise ApiError.of("bad_request", WORDS["unreadable"])
+    made = None
+    if key is not None:
+        try:
+            item = presets.preset(key)
+            made = presets.use(key, futures_followed=ctx.settings.max_keys >= 700)
+        except presets.Unavailable as exc:
+            raise ApiError.of("refused", exc.message) from None
+        if item.waits:
+            raise ApiError.of("refused", item.waits)
+
+    def add(tx: Tx):
+        screen = (
+            tx.screen_insert(made["name"], made["spec"], made["status"], now)
+            if made
+            else tx.screen(screen_id)
+        )
+        if screen is None:
+            raise NotFound(WORDS["gone"])
+        if choice is not None:
+            screen = _when(tx, screen, choice, now)
+        # the widget first: at version 0 the layout is worked out from the Active screens, and a
+        # screen started before it would already be on it
+        row = tx.widget_insert(version, {"screen_id": screen["id"], **fields}, now)
+        notice = None
+        if start:
+            screen, notice = _start(ctx, tx, screen, now)
+        return row, _summary(ctx, tx, screen, now), notice
+
+    try:
+        row, summary, notice = translate(lambda: store.write(OWNER, add), WORDS["gone"])
+    except ValueError:
+        raise ApiError.of("bad_request", WORDS["unreadable"]) from None
+    _moved(ctx)
+    return {"version": row["version"], "kind": fields["kind"], "screen": summary, "notice": notice}
+
+
+def _widget_args(args: Mapping[str, Any]) -> tuple[int, int, str]:
+    screen_id, kind = _address(args)
+    return _int(args, "version"), screen_id, kind
+
+
+@op("widget_update")
+async def widget_update(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
+    version, screen_id, kind = _widget_args(args)
+    named = {
+        ("kind" if k == "to_kind" else k): args[k]
+        for k in ("to_kind", "rows", "sort_by", "value_clauses")
+        if k in args
+    }
+    if not named:
+        raise ApiError.of("bad_request", words.DASH_NOTHING)
+    fields, store, now = _checked(named), _store(ctx), ctx.clock()
+    return _written(
+        ctx,
+        lambda: store.write(
+            OWNER, lambda tx: tx.widget_change(version, screen_id, kind, fields, now)
+        ),
+    )
+
+
+@op("widget_remove")
+async def widget_remove(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
+    version, screen_id, kind = _widget_args(args)
+    store, now = _store(ctx), ctx.clock()
+    return _written(
+        ctx,
+        lambda: store.write(OWNER, lambda tx: tx.widget_delete(version, screen_id, kind, now)),
+        notice=words.DASH_REMOVED,
+    )
+
+
+@op("widget_order")
+async def widget_order(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
+    version, store, now = _int(args, "version"), _store(ctx), ctx.clock()
+    try:
+        order = dash.check_order(args.get("order"))
+    except dash.WidgetError as exc:
+        raise ApiError.of("bad_request", str(exc)) from None
+    return _written(
+        ctx, lambda: store.write(OWNER, lambda tx: tx.widgets_order(version, order, now))
+    )

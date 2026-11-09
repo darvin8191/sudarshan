@@ -47,6 +47,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from database.engine_factory import create_db_engine
 
 from . import migrations
+from .contract import EVENT_DASHBOARD
 from .migrations import SchemaTooNew
 
 log = logging.getLogger("sudarshan.screener")
@@ -579,7 +580,15 @@ class Tx:
         ).rowcount
         if not done:
             raise VersionConflict()
+        self._dashboard_push(row["version"] + 1, now)
         return self.dashboard()  # type: ignore[return-value]
+
+    def _dashboard_push(self, version: int, now: int) -> None:
+        """Tell the owner's open pages the layout moved (queued in the write's own transaction, so
+        a push exists exactly when the write does; the newest pending one is the only one kept)."""
+        self.outbox_add(
+            "push", "dashboard", {"_event": EVENT_DASHBOARD, "version": version}, now, coalesce=True
+        )
 
     def dashboard_create(
         self, name: str, widgets: Sequence[Mapping[str, Any]], now: int
@@ -721,7 +730,13 @@ class Tx:
                 .where(d.c.id == dashboard_id, self._mine(d))
                 .values(version=d.c.version + 1, updated_at=now)
             )
+            self._dashboard_push(self._dashboard_version(dashboard_id), now)
         return int(removed)
+
+    def _dashboard_version(self, dashboard_id: int) -> int:
+        t = self._t("dashboard")
+        row = self.conn.execute(select(t.c.version).where(t.c.id == dashboard_id, self._mine(t)))
+        return int(row.scalar_one())
 
     # ---- runs ----
     def run(self, run_id: int) -> dict[str, Any] | None:

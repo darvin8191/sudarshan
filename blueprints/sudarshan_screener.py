@@ -75,7 +75,8 @@ SCOPES = {cls: f"sudarshan-screener-{cls}" for cls in LIMITS}
 #: Every open app of the owner joins it (4.5); nothing is broadcast.
 ROOM = "sudarshan:screener:owner"
 NAMESPACE = "/"
-PUSH_EVENTS = frozenset({contract.EVENT_RUN, contract.EVENT_LISTS, contract.EVENT_STATE})
+#: Derived from the contract, so a new push event never needs an edit here (M9.16).
+PUSH_EVENTS = frozenset(contract.PUSH_EVENTS)
 #: Set by nginx on every proxied location: a request carrying any of them did not come from this
 #: server's sudarshan-screener, which calls 127.0.0.1:5000 directly.
 PROXY_HEADERS = (

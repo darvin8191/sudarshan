@@ -178,6 +178,44 @@ def test_the_forward_carries_the_route_id_the_query_and_the_body(bridge, service
     assert runs.cls == "read"
 
 
+def test_the_dashboard_ops_are_forwarded_by_screen_and_kind_never_by_an_id(bridge, service, calls):
+    headers = as_owner(bridge)
+    sent = {**JSON, **headers}
+    assert bridge.get(f"{PREFIX}/dashboard", headers=JSON).status_code == 200
+    assert calls.calls[-1] == ("dashboard", {})
+    bridge.get(f"{PREFIX}/dashboard/widget?screen_id=7&kind=count", headers=JSON)
+    assert calls.calls[-1] == ("widget", {"screen_id": 7, "kind": "count"})
+    bridge.delete(f"{PREFIX}/dashboard/widget?screen_id=7&kind=table&version=3", headers=sent)
+    assert calls.calls[-1] == ("widget_remove", {"screen_id": 7, "kind": "table", "version": 3})
+    body = {"screen_id": 7, "kind": "table", "version": 3, "rows": 5}
+    bridge.patch(f"{PREFIX}/dashboard/widget", json=body, headers=headers)
+    assert calls.calls[-1] == ("widget_update", body)
+    body = {"version": 3, "screen_id": 7, "kind": "count", "when": "after_close", "start": False}
+    bridge.post(f"{PREFIX}/dashboard/widgets", json=body, headers=headers)
+    assert calls.calls[-1] == ("widget_add", body)
+    body = {"version": 3, "order": [[7, "table"], [8, "count"]]}
+    bridge.post(f"{PREFIX}/dashboard/order", json=body, headers=headers)
+    assert calls.calls[-1] == ("widget_order", body)
+    bad = bridge.get(f"{PREFIX}/dashboard/widget?screen_id=x&kind=count", headers=JSON)
+    assert bad.status_code == 400 and error_of(bad)["code"] == "bad_request"
+
+
+def test_every_push_event_of_the_contract_is_forwarded_to_the_owners_room(bridge, monkeypatch):
+    emitted: list = []
+    monkeypatch.setattr(
+        bp_module, "emit_from_any_thread", lambda event, data, **kw: emitted.append((event, data))
+    )
+    assert bp_module.PUSH_EVENTS == frozenset(contract.PUSH_EVENTS)
+    assert contract.EVENT_DASHBOARD in bp_module.PUSH_EVENTS
+    items = [{"event": event, "data": {"n": n}} for n, event in enumerate(contract.PUSH_EVENTS)]
+    response = internal(bridge, "push", "push", items=items)
+    assert response.status_code == 200
+    assert emitted == [(event, {"n": n}) for n, event in enumerate(contract.PUSH_EVENTS)]
+    emitted.clear()
+    internal(bridge, "push", "push", items=[{"event": "order_update", "data": {"n": 1}}])
+    assert emitted == [], "an event outside the contract's tuple is not forwarded"
+
+
 def test_the_services_refusals_keep_their_code_and_words(bridge, monkeypatch):
     calls = Calls(
         results=ApiError.of("not_found", contract.WORDS["gone"]),

@@ -335,6 +335,56 @@ export interface Dashboard {
   server_time: number
 }
 
+/** The dashboard changed on another screen: read it again when this page's version is older. */
+export interface DashboardPush {
+  version: number
+}
+
+/** `widget_add`: a screen or a preset (one of them), made in one step. */
+export interface WidgetAdd {
+  version: number
+  screen_id?: number
+  preset?: string
+  kind?: WidgetKind
+  rows?: 5 | 10 | 20
+  sort_by?: WidgetSort | null
+  value_clauses?: string[] | null
+  /** Start the screen after adding it (default true); it stays Paused at the Active limit. */
+  start?: boolean
+  /** A day-only screen: when it checks. Written to the screen itself. */
+  when?: 'during_day' | 'after_close'
+}
+
+/** `widget_update`: the widget is named by `screen_id` and `kind`; `to_kind` changes its kind. */
+export interface WidgetUpdate {
+  version: number
+  screen_id: number
+  kind: WidgetKind
+  to_kind?: WidgetKind
+  rows?: 5 | 10 | 20
+  sort_by?: WidgetSort | null
+  value_clauses?: string[] | null
+}
+
+/** `widget_order`: the whole layout, in the order wanted. */
+export interface WidgetOrder {
+  version: number
+  order: Array<[number, WidgetKind]>
+}
+
+/** What a dashboard write answers: the version the dashboard is at now. */
+export interface DashboardWritten {
+  version: number
+  /** The server's sentence, shown as it came ('Removed from the dashboard. ...'). */
+  notice?: string | null
+}
+
+export interface WidgetAdded extends DashboardWritten {
+  kind: WidgetKind
+  /** The screen as it is now (made from a preset, started, or changed by `when`). */
+  screen: ScreenRow
+}
+
 // ---- pushes (design 4.5) ------------------------------------------------------------------------
 export interface RunPush {
   screen_id: number
