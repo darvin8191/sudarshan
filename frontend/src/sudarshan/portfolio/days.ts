@@ -66,3 +66,28 @@ export function clockOfInstant(epochMs: number): string {
   const two = (n: number) => String(n).padStart(2, '0')
   return `${two(Math.floor(seconds / 3600))}:${two(Math.floor(seconds / 60) % 60)}:${two(seconds % 60)}`
 }
+
+const MONTH_ABBR = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+]
+
+/**
+ * The IST date and time of an instant, "31 Mar 2026, 11:00:00". A figure kept for months must say
+ * which day it was read, so a time of day alone is not used where a read can be old.
+ */
+export function dateTimeOfInstant(epochMs: number): string {
+  const day = dayOfInstant(epochMs)
+  const month = MONTH_ABBR[(Math.floor(day / 100) % 100) - 1] ?? '?'
+  return `${day % 100} ${month} ${Math.floor(day / 10_000)}, ${clockOfInstant(epochMs)}`
+}

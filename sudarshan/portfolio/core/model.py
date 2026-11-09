@@ -217,12 +217,18 @@ class Piece(NamedTuple):
 
 @dataclass(slots=True)
 class Lot:
-    """Units bought on one day; ``cost_paise`` is the cost of what remains."""
+    """Units bought on one day; ``cost_paise`` is the cost of what remains.
+
+    ``income`` is what dividends and interest credited to these units while they were held, as
+    (day, paise) pairs: each credit is shared among the lots held on its day by their units, and
+    leaves with the units a sale or a transfer takes (M7.29, the yield on cost).
+    """
 
     day: int
     order: int
     qty_u: int
     cost_paise: int
+    income: tuple[tuple[int, int], ...] = ()
 
 
 class Position:
@@ -255,22 +261,56 @@ class Position:
         self.income_paise = 0
         self.fees_paise = 0
 
-    def add(self, day: int, order: int, qty_u: int, cost_paise: int) -> None:
-        insort(self.lots, Lot(day, order, qty_u, cost_paise), key=lambda lot: (lot.day, lot.order))
+    def add(
+        self,
+        day: int,
+        order: int,
+        qty_u: int,
+        cost_paise: int,
+        income: tuple[tuple[int, int], ...] = (),
+    ) -> None:
+        insort(
+            self.lots,
+            Lot(day, order, qty_u, cost_paise, income),
+            key=lambda lot: (lot.day, lot.order),
+        )
         self.qty_u += qty_u
         self.cost_paise += cost_paise
 
-    def take(self, qty_u: int) -> list[Piece]:
+    def credit(self, day: int, paise: int) -> None:
+        """Share an income of ``paise`` among the lots held now, by their units. Whole paise: each
+        lot gets the floor of its share and the paise left over go, one each, to the lots with
+        the largest remainders (the oldest first when they tie), so the shares add up exactly."""
+        total = self.qty_u
+        if total <= 0 or paise <= 0:
+            return
+        shares = [paise * lot.qty_u // total for lot in self.lots]
+        order = sorted(
+            range(len(self.lots)), key=lambda i: (-(paise * self.lots[i].qty_u % total), i)
+        )
+        for i in order[: paise - sum(shares)]:
+            shares[i] += 1
+        for lot, share in zip(self.lots, shares, strict=True):
+            if share:
+                lot.income += ((day, share),)
+
+    def take(self, qty_u: int, income: list | None = None) -> list[Piece]:
         """Remove ``qty_u`` from the oldest lots; the caller has checked the position holds them.
 
-        A whole lot goes at its remaining cost; a part of one at ``share_of_cost``.
+        A whole lot goes at its remaining cost; a part of one at ``share_of_cost``. The income the
+        units earned leaves with them, by the same share; a caller that moves the units on (a
+        transfer) passes a list and gets, for each piece, the income (day, paise) pairs it took.
         """
         pieces = []
         while qty_u:
             lot = self.lots[0]
             part = min(qty_u, lot.qty_u)
             cost = share_of_cost(lot.cost_paise, part, lot.qty_u)
+            gone = tuple((d, share_of_cost(p, part, lot.qty_u)) for d, p in lot.income)
             pieces.append(Piece(lot.day, part, cost))
+            if income is not None:
+                income.append(gone)
+            lot.income = tuple((d, p - g) for (d, p), (_, g) in zip(lot.income, gone, strict=True))
             lot.qty_u -= part
             lot.cost_paise -= cost
             self.qty_u -= part

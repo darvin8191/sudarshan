@@ -103,6 +103,8 @@ export function view(rows: HoldingRow[], extra: Partial<TabView> = {}): TabView 
     filters: { accounts: [], classes: [], tags: [], held: null, as_of: null },
     assets: [],
     liabilities: [],
+    loans_hidden: false,
+    loose_loans: [],
     allocation: {} as TabView['allocation'],
     notes: [],
     layout: {
@@ -189,6 +191,14 @@ export function report(extra: Partial<PerformanceReport> = {}): PerformanceRepor
       by_month: [
         { month: 202510, paise: 0 },
         { month: 202511, paise: 10_000 },
+      ],
+      last_12m_paise: 10_000,
+      held_income_paise: 10_000,
+      held_cost_paise: 800_000,
+      yield_on_cost_pct: '1.2500',
+      by_fy: [
+        { fy: 2025, label: 'FY 2025-26', paise: 40_000 },
+        { fy: 2026, label: 'FY 2026-27', paise: 10_000 },
       ],
     },
     series_words:

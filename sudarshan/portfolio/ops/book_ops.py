@@ -19,9 +19,11 @@ from . import op
 from .common import OWNER, answer, given, maybe_whole, parts, whole
 
 WORDS = {
-    "manual_only": "Only a value you keep by hand can be set here. A share or a fund is priced for you.",
+    "manual_only": "Only a value you keep by hand, a fund's NAV or a loan's balance can be set here. A share is priced for you.",
     "value": "Enter the value with a real date and a price above zero.",
     "future": "A value cannot be dated after today.",
+    "balance": "Enter the outstanding balance with a real date; 0 once the loan is paid off.",
+    "loan_from_tab": "A loan's balance is set from the portfolio it is on. Reload the page.",
     "entry": "The entry was incomplete. Reload the page and enter it again.",
 }
 
@@ -101,6 +103,9 @@ async def asset_create(ctx, message):
     )  # fmt: skip
     if message.get("tags") is not None:
         more["tags"] = message["tags"]
+    if message.get("kind") == "liability":  # M7.19 V2: a loan belongs to a tab
+        more["tab_id"] = maybe_whole(message, "tab_id")
+        more["version"] = maybe_whole(message, "version")
     if message.get("kind") == "listed":
         more = await _resolved(ctx, more, now)
     return await answer(
@@ -161,8 +166,9 @@ async def asset_update(ctx, message):
 
 @op("price_point_set")
 async def price_point_set(ctx, message):
-    """The owner's own value of a manual asset (or the balance of a loan) on a day; the last one
-    entered for a day stands."""
+    """The owner's own value of a manual asset or a fund (its NAV), or the balance of a loan, on a
+    day; the last one entered for a day stands. A loan's balance is set from the portfolio it is
+    on and from that portfolio's version (M7.19 V2)."""
     book, _ = parts(ctx)
     asset_id, day, price_u, now = (
         whole(message, "id"),
@@ -170,21 +176,48 @@ async def price_point_set(ctx, message):
         message.get("price_u"),
         ctx.clock(),
     )
+    tab_id, version = maybe_whole(message, "tab_id"), maybe_whole(message, "version")
 
-    def run(tx):
-        if not (is_day(day) and price_ok(price_u) and price_u > 0):
-            raise Invalid(WORDS["value"])
-        if day > day_of_instant(now):
-            raise Invalid(WORDS["future"])
-        asset = tx.get("asset", asset_id)
+    def run():
+        asset = book.store.read(OWNER, lambda tx: tx.get("asset", asset_id))
         if asset is None:
             raise NotFound()
-        if asset["kind"] not in ("manual", "liability"):
+        if asset["kind"] not in ("manual", "liability", "mf"):
             raise Refused(WORDS["manual_only"])
-        tx.set_price_point(asset_id, day, price_u, now)
-        return {"asset_id": asset_id, "day": day, "price_u": price_u}
+        # A loan's balance may reach 0 (paid off); a value kept by hand is above zero.
+        loan = asset["kind"] == "liability"
+        if not (is_day(day) and price_ok(price_u) and (price_u > 0 or loan)):
+            raise Invalid(WORDS["balance"] if loan else WORDS["value"])
+        if day > day_of_instant(now):
+            raise Invalid(WORDS["future"])
+        if loan:
+            if tab_id is None or version is None:
+                raise Invalid(WORDS["loan_from_tab"])
+            return book.loan_balance_set(OWNER, asset_id, tab_id, version, day, price_u, now=now)
 
-    return await answer(lambda: book.store.write(OWNER, run))
+        def write(tx):
+            tx.set_price_point(asset_id, day, price_u, now)
+            return {"asset_id": asset_id, "day": day, "price_u": price_u}
+
+        return book.store.write(OWNER, write)
+
+    return await answer(run)
+
+
+@op("loan_move")
+async def loan_move(ctx, message):
+    """Put a loan that is on no portfolio (entered before a loan had a tab) on this one."""
+    book, _ = parts(ctx)
+    now = ctx.clock()
+    return await answer(
+        lambda: book.loan_move(
+            OWNER,
+            whole(message, "id"),
+            whole(message, "tab_id"),
+            whole(message, "version"),
+            now=now,
+        )
+    )
 
 
 # ---- the entries of a tab -------------------------------------------------------------------------

@@ -223,7 +223,7 @@ XIRR_STATES = ("shown", "later", "none")
 BENCHMARKS = ("nifty50", "nifty500")
 BENCHMARK_LABELS = {"nifty50": "NIFTY 50", "nifty500": "NIFTY 500"}
 
-JOB_NAMES = ("eod", "settle", "nav_fetch", "nav_settle", "benchmark", "resolve")
+JOB_NAMES = ("eod", "settle", "nav_fetch", "nav_settle", "benchmark", "resolve", "reports")
 JOB_STATUSES = ("ok", "late", "failed", "skipped")
 
 # ---- layout (M7.25) ------------------------------------------------------------------------
@@ -247,6 +247,16 @@ LAYOUT_VERSION = 1
 
 # ---- the Upstox tab ------------------------------------------------------------------------
 UPSTOX_PARTS = ("holdings", "positions", "mtf", "funds")
+#: The segments Upstox's trade history and trade-wise P&L reports are kept by (M7.6, M7.7); the
+#: P&L report has no MF.
+REPORT_SEGMENTS = ("EQ", "FO", "COM", "CD", "MF")
+#: The two reports kept per financial year and segment.
+REPORT_KINDS = ("trades", "pnl")
+#: Upstox gives the reports for the last three financial years only.
+REPORT_YEARS = 3
+#: A report's state in the cache: ``ok`` (complete), ``partial`` (more pages to read),
+#: ``reading`` (a read is on its way), ``unavailable`` (nothing read yet and the last try failed).
+REPORT_STATES = ("ok", "partial", "reading", "unavailable")
 #: ``ok`` a read that succeeded; ``stale`` the last figures kept, the note says why; ``unavailable``
 #: nothing read yet, the note says why.
 PART_STATES = ("ok", "stale", "unavailable")
@@ -376,6 +386,7 @@ OPS = (
     OpSpec("asset_create", "POST", "/assets", "write"),
     OpSpec("asset_update", "PATCH", "/assets/<id>", "write"),
     OpSpec("price_point_set", "POST", "/assets/<id>/prices", "write"),
+    OpSpec("loan_move", "POST", "/assets/<id>/tab", "write"),
     OpSpec("mf_search", "GET", "/mf/search", "read", query=(("q", "str"), ("limit", "int"))),
     OpSpec("account_create", "POST", "/accounts", "write"),
     OpSpec("account_update", "PATCH", "/accounts/<id>", "write"),
@@ -400,6 +411,21 @@ OPS = (
         query=(("parts", "strs"), ("max_age", "int")),
     ),
     OpSpec("upstox_history", "GET", "/upstox/history", "upstox", query=(("limit", "int"),)),
+    OpSpec("report_years", "GET", "/reports/years", "upstox"),
+    OpSpec(
+        "report_trades",
+        "GET",
+        "/reports/trades",
+        "upstox",
+        query=(("fy", "int"), ("segment", "str")),
+    ),
+    OpSpec(
+        "report_pnl",
+        "GET",
+        "/reports/pnl",
+        "upstox",
+        query=(("fy", "int"), ("segment", "str")),
+    ),
 )
 OP_NAMES = tuple(op.name for op in OPS)
 #: A write op whose body may carry ``dry_run``: the bridge counts those against the dry-run
@@ -433,6 +459,7 @@ SHARED_NUMBERS = {
     "MF_SEARCH_MAX": MF_SEARCH_MAX,
     "IMPORT_PREVIEW_ROWS": IMPORT_PREVIEW_ROWS,
     "UPSTOX_HISTORY_DAYS": UPSTOX_HISTORY_DAYS,
+    "REPORT_YEARS": REPORT_YEARS,
     "NAV_OLD_BUSINESS_DAYS": NAV_OLD_BUSINESS_DAYS,
     "XIRR_MIN_DAYS": XIRR_MIN_DAYS,
     "IMPORT_MAX_FILE_BYTES": IMPORT_MAX_FILE_BYTES,
@@ -472,6 +499,9 @@ SHARED_LISTS = {
     "ALLOCATION_BY": ALLOCATION_BY,
     "HELD_FILTERS": HELD_FILTERS,
     "UPSTOX_PARTS": UPSTOX_PARTS,
+    "REPORT_SEGMENTS": REPORT_SEGMENTS,
+    "REPORT_KINDS": REPORT_KINDS,
+    "REPORT_STATES": REPORT_STATES,
     "PART_STATES": PART_STATES,
     "ERROR_CODES": ERROR_CODES,
     "QUERY_TYPES": QUERY_TYPES,

@@ -500,6 +500,57 @@ def by_financial_year(ledger: Ledger) -> list[Fy]:
     ]
 
 
+def income_summary(ledger: Ledger, valuation_day: int) -> dict:
+    """The income totals and the yield on cost (M7.29; types.ts ``IncomeSummary``).
+
+    ``last_12m_paise`` is all the income (dividends and interest, gross) of the twelve months that
+    end with the valuation day's, the same months ``income_report`` lists. ``by_fy`` has one row
+    per financial year (April to March) with any income, oldest first. Income dated after the
+    valuation day counts nowhere.
+
+    ``yield_on_cost_pct`` is the income of those twelve months that the lots *still held* earned
+    (``held_income_paise``), on what the lots that earned it cost (``held_cost_paise``): the FIFO
+    lots the ledger keeps, each credited with its units' share of every dividend or interest paid
+    on an asset while it was held. A lot that was credited anything in the twelve months counts
+    with its whole cost; one that was not (bought after the last income, or earning only before
+    the window) does not count until it earns. Income that went with units since sold, interest
+    on no asset and income that came before any units were held are left out. Percentage with
+    four decimals; None when no lot held earned anything in the window.
+    """
+    year, month = valuation_day // 10000, valuation_day // 100 % 100
+    first = year * 12 + month - 1 - 11
+
+    def in_window(day: int) -> bool:
+        return day <= valuation_day and day // 10000 * 12 + day // 100 % 100 - 1 >= first
+
+    last_12m = 0
+    years: dict[int, int] = {}
+    for move in ledger.journal:
+        if move.kind not in ("DIVIDEND", "INTEREST") or move.day > valuation_day:
+            continue
+        if in_window(move.day):
+            last_12m += move.paise
+        years[financial_year(move.day)] = years.get(financial_year(move.day), 0) + move.paise
+    held_income = held_cost = 0
+    for position in ledger.positions.values():
+        for lot in position.lots:
+            earned = sum(paise for day, paise in lot.income if in_window(day))
+            if earned > 0:  # a lot counts, at its whole cost, once it has earned in the window
+                held_cost += lot.cost_paise
+                held_income += earned
+    return {
+        "last_12m_paise": last_12m,
+        "held_income_paise": held_income,
+        "held_cost_paise": held_cost,
+        "yield_on_cost_pct": pct(held_income, held_cost) if held_cost > 0 else None,
+        "by_fy": [
+            {"fy": fy, "label": f"FY {fy}-{(fy + 1) % 100:02d}", "paise": paise}
+            for fy, paise in sorted(years.items())
+            if paise
+        ],
+    }
+
+
 def income_report(ledger: Ledger, valuation_day: int) -> dict:
     """Income (dividends and interest, gross) this financial year and in each of the twelve months
     that end with the valuation day's, oldest first, months with none shown as 0."""

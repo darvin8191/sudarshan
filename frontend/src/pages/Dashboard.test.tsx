@@ -49,9 +49,32 @@ const calendar = {
   error: null,
 }
 vi.mock('@/hooks/useMarketStatus', () => ({ useMarketStatus: () => calendar }))
+const portfolio = vi.hoisted(() => ({ calls: 0 }))
+vi.mock('@/sudarshan/portfolio/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/sudarshan/portfolio/api')>()),
+  portfolioCall: async () => {
+    portfolio.calls += 1
+    return {
+      enabled: true,
+      data: {
+        read_at: Date.now(),
+        today: 20261104,
+        entries: [
+          {
+            tab: { id: 1, name: 'Upstox', system: true, pinned: false, archived: false },
+            live: null,
+            upstox: { state: 'ok', read_at: Date.now(), note: null, holdings: [] },
+          },
+        ],
+      },
+    }
+  },
+}))
+const portfolioCalls = () => portfolio.calls
 
 import { useAuthStore } from '@/stores/authStore'
 import { RESYNC_MS } from '@/sudarshan/dashboard/live'
+import { setPortfolioCard } from '@/sudarshan/dashboard/portfolioCard'
 import { feed } from '@/test/marketDataHarness'
 import { render, screen, userEvent, waitFor } from '@/test/test-utils'
 import Dashboard from './Dashboard'
@@ -151,6 +174,22 @@ describe('Dashboard', () => {
       '/master-contract'
     )
     expect(screen.getByRole('region', { name: 'Indices' })).toBeInTheDocument()
+  })
+
+  it('shows the Portfolio card only when its switch is on, beside the Holdings card (M3.11)', async () => {
+    server(OK)
+    const { unmount } = render(<Dashboard />)
+    await screen.findByTestId('pnl-total')
+    expect(screen.queryByRole('region', { name: 'Portfolio' })).toBeNull()
+    expect(portfolioCalls()).toBe(0) // off: nothing is read
+    unmount()
+
+    setPortfolioCard(true)
+    render(<Dashboard />)
+    await screen.findByTestId('pnl-total')
+    expect(await screen.findByRole('region', { name: 'Portfolio' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /See all/ })).toHaveAttribute('href', '/portfolio')
+    setPortfolioCard(false)
   })
 
   it('reads the position book before the funds, then moves the P&L with each tick', async () => {

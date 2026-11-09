@@ -22,16 +22,16 @@ export const ACCOUNT_RESYNC_MS = 45_000
 /** A part read this recently is answered from memory; an event asks for a read this fresh. */
 export const EVENT_MAX_AGE_S = 2
 
-export const PARTS_OF: Record<Exclude<UpstoxView, 'history'>, UpstoxPartName[]> = {
+/** The views that read the account book; History, Trades and P&L read their own records. */
+export type BookView = Exclude<UpstoxView, 'history' | 'trades' | 'pnl'>
+
+export const PARTS_OF: Record<BookView, UpstoxPartName[]> = {
   holdings: ['holdings'],
   positions: ['positions', 'mtf'],
   funds: ['funds'],
 }
 
-export function useUpstoxBook(
-  view: Exclude<UpstoxView, 'history'>,
-  marketOpen: () => boolean | null
-) {
+export function useUpstoxBook(view: BookView, marketOpen: () => boolean | null) {
   const maxAge = useRef<number | undefined>(undefined)
   const parts = PARTS_OF[view]
   const query = useQuery({

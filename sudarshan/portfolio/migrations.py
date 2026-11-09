@@ -283,8 +283,54 @@ def _v1(conn: Connection) -> None:
         conn.exec_driver_sql(sql)
 
 
+#: V2 (M7.19, after v0.5.0): a loan or liability belongs to one tab, so that tab shows net worth
+#: (design 4.2 and 4.5). Additive: a link table; a liability made before this step has no row
+#: here and is linked the first time its balance is set from a tab.
+V2 = (
+    """CREATE TABLE IF NOT EXISTS tab_liability (
+        tab_id INTEGER NOT NULL,
+        asset_id INTEGER NOT NULL,
+        principal TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (tab_id, asset_id)
+    )""",
+    "CREATE INDEX IF NOT EXISTS tab_liability_asset ON tab_liability (principal, asset_id)",
+)
+
+
+def _v2(conn: Connection) -> None:
+    for sql in V2:
+        conn.exec_driver_sql(sql)
+
+
+#: V3 (M7.6, M7.7): Upstox's trade history and trade-wise P&L reports, kept per financial year
+#: and segment as the service last read them (integer paise inside the JSON payload), so a past
+#: year is read once and the current one at most once a night. Additive.
+V3 = (
+    """CREATE TABLE IF NOT EXISTS report_cache (
+        principal TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        fy INTEGER NOT NULL,
+        segment TEXT NOT NULL,
+        state TEXT NOT NULL,
+        read_at INTEGER,
+        note TEXT,
+        payload TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (principal, kind, fy, segment)
+    )""",
+)
+
+
+def _v3(conn: Connection) -> None:
+    for sql in V3:
+        conn.exec_driver_sql(sql)
+
+
 Step = tuple[int, Callable[[Connection], None]]
-STEPS: tuple[Step, ...] = ((1, _v1),)
+STEPS: tuple[Step, ...] = ((1, _v1), (2, _v2), (3, _v3))
 LATEST = STEPS[-1][0]
 
 

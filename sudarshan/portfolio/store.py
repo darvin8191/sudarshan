@@ -52,7 +52,7 @@ STATE_DIR = Path("/var/lib/sudarshan-portfolio")
 THREAD_PREFIX = "portfolio-store"
 
 #: Columns that hold JSON text, and columns that are flags; the store converts at the boundary.
-JSON_COLUMNS = frozenset({"tags", "charges_detail", "spec", "preview", "funds"})
+JSON_COLUMNS = frozenset({"tags", "charges_detail", "spec", "preview", "funds", "payload"})
 FLAG_COLUMNS = frozenset({"system", "pinned", "archived", "is_default", "late"})
 #: Never leave the store: who owns a row, and the client's retry key.
 HIDDEN_COLUMNS = ("principal", "request_id")
@@ -384,16 +384,110 @@ class Tx:
         return [self._out(row) for row in self.conn.execute(query).mappings()]
 
     def remove_tab(self, tab_id: int) -> None:
-        """A tab and what hangs on it (entries, layout, saved views, import batches)."""
+        """A tab and what hangs on it (entries, layout, saved views, import batches, the links
+        to its loans; a loan's asset and balances stay, as every asset does)."""
         for name, column in (
             ("activity", "tab_id"),
             ("tab_layout", "tab_id"),
             ("saved_view", "tab_id"),
             ("import_batch", "tab_id"),
+            ("tab_liability", "tab_id"),
         ):
             t = self._t(name)
             self.conn.execute(delete(t).where(t.c[column] == tab_id, self._mine(t)))
         self.remove("tab", tab_id)
+
+    # ---- Upstox's reports (M7.6, M7.7, V3) ----
+    def report_get(self, kind: str, fy: int, segment: str) -> dict[str, Any] | None:
+        t = self._t("report_cache")
+        row = (
+            self.conn.execute(
+                select(t).where(
+                    t.c.kind == kind, t.c.fy == fy, t.c.segment == segment, self._mine(t)
+                )
+            )
+            .mappings()
+            .first()
+        )
+        return self._out(row)
+
+    def report_list(self, kind: str) -> list[dict[str, Any]]:
+        t = self._t("report_cache")
+        found = self.conn.execute(
+            select(t).where(t.c.kind == kind, self._mine(t)).order_by(t.c.fy, t.c.segment)
+        ).mappings()
+        return [self._out(row) for row in found]
+
+    def report_put(
+        self,
+        kind: str,
+        fy: int,
+        segment: str,
+        state: str,
+        read_at: int | None,
+        note: str | None,
+        payload: Any,
+        now: int,
+    ) -> None:
+        """The one record of a report; a later read replaces it whole."""
+        t = self._t("report_cache")
+        self.conn.execute(
+            delete(t).where(t.c.kind == kind, t.c.fy == fy, t.c.segment == segment, self._mine(t))
+        )
+        self.conn.execute(
+            insert(t).values(
+                principal=self.who,
+                kind=kind,
+                fy=fy,
+                segment=segment,
+                state=state,
+                read_at=read_at,
+                note=note,
+                payload=None if payload is None else json.dumps(payload, sort_keys=True),
+                created_at=now,
+                updated_at=now,
+            )
+        )
+
+    # ---- a tab's loans (M7.19 V2) ----
+    def liabilities_of(self, tab_id: int) -> list[int]:
+        """The ids of the liability assets linked to a tab, oldest link first."""
+        t = self._t("tab_liability")
+        found = self.conn.execute(
+            select(t.c.asset_id)
+            .where(t.c.tab_id == tab_id, self._mine(t))
+            .order_by(t.c.created_at, t.c.asset_id)
+        )
+        return [int(row[0]) for row in found]
+
+    def tabs_of_liability(self, asset_id: int) -> list[int]:
+        t = self._t("tab_liability")
+        found = self.conn.execute(select(t.c.tab_id).where(t.c.asset_id == asset_id, self._mine(t)))
+        return [int(row[0]) for row in found]
+
+    def link_liability(self, tab_id: int, asset_id: int, now: int) -> bool:
+        """Link a loan to a tab; False when it was linked already."""
+        if tab_id in self.tabs_of_liability(asset_id):
+            return False
+        t = self._t("tab_liability")
+        self.conn.execute(
+            insert(t).values(
+                tab_id=tab_id, asset_id=asset_id, principal=self.who, created_at=now, updated_at=now
+            )
+        )
+        return True
+
+    def unlink_liability(self, tab_id: int, asset_id: int) -> bool:
+        t = self._t("tab_liability")
+        return bool(
+            self.conn.execute(
+                delete(t).where(t.c.tab_id == tab_id, t.c.asset_id == asset_id, self._mine(t))
+            ).rowcount
+        )
+
+    def price_points(self, asset_id: int) -> list[dict[str, Any]]:
+        """The owner's own values of an asset, oldest day first."""
+        return self.rows("price_point", "day", asset_id=asset_id)
 
     # ---- assets ----
     def aliases(self, asset_id: int) -> list[dict[str, Any]]:

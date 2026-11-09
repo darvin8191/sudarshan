@@ -301,28 +301,88 @@ FUNDS = {
 }
 
 
+#: Upstox's documented example rows for the reports (M7.6, M7.7), as the docs print them.
+TRADES = {
+    "status": "success",
+    "data": [
+        {
+            "exchange": "NSE", "segment": "EQ", "option_type": None, "quantity": 10,
+            "amount": 25874.50, "trade_id": "50001", "trade_date": "2026-10-27",
+            "transaction_type": "BUY", "scrip_name": "RELIANCE INDUSTRIES", "strike_price": None,
+            "expiry": None, "price": 2587.45, "isin": "INE002A01018", "symbol": "RELIANCE",
+            "instrument_token": "NSE_EQ|INE002A01018",
+        },
+        {
+            "exchange": "NFO", "segment": "FO", "option_type": "CE", "quantity": 65,
+            "amount": 8125.00, "trade_id": "50002", "trade_date": "2026-10-28",
+            "transaction_type": "SELL", "scrip_name": "NIFTY 25900 CE", "strike_price": 25900.0,
+            "expiry": "2026-11-03", "price": 125.0, "isin": None, "symbol": "NIFTY26NOV25900CE",
+            "instrument_token": None,
+        },
+    ],
+    "metadata": {"page": {"page_number": 1, "page_size": 500, "total_records": 2, "total_pages": 1}},
+}  # fmt: skip
+PNL_META = {"status": "success", "data": {"trades_count": 1, "page_size_limit": 5000}}
+PNL = {
+    "status": "success",
+    "data": [
+        {
+            "quantity": 100, "isin": "INE256A01028", "scrip_name": "ZEE ENTER", "trade_type": "EQ",
+            "buy_date": "14-09-2026", "buy_average": 250.25, "sell_date": "15-09-2026",
+            "sell_average": 262.75, "buy_amount": 25025.0, "sell_amount": 26275.0,
+        }
+    ],
+    "metadata": {"page": {"page_number": 1, "page_size": 5000}},
+}  # fmt: skip
+CHARGES = {
+    "status": "success",
+    "data": {
+        "charges_breakdown": {
+            "total": 154.23, "brokerage": 97.23,
+            "taxes": {"gst": 20.93, "stt": 15, "stamp_duty": 2},
+            "charges": {"transaction": 0.56, "clearing": 0, "ipft": None, "others": 0,
+                        "sebi_turnover": 0.01, "demat_transaction": 18.5},
+        }
+    },
+}  # fmt: skip
+
+
 class FakeUpstox:
-    """Upstox's four read paths on loopback. ``status`` and ``bodies`` are set per part."""
+    """Upstox's read paths on loopback. ``status`` and ``bodies`` are set per part; a report
+    path may hold a list of bodies, one per page asked for (``page_number``)."""
 
     PATHS = {
         "/v2/portfolio/long-term-holdings": "holdings",
         "/v2/portfolio/short-term-positions": "positions",
         "/v3/portfolio/mtf-positions": "mtf",
         "/v3/user/get-funds-and-margin": "funds",
+        "/v2/charges/historical-trades": "trades",
+        "/v2/trade/profit-loss/metadata": "pnl_meta",
+        "/v2/trade/profit-loss/data": "pnl",
+        "/v2/trade/profit-loss/charges": "charges",
     }
 
     def __init__(self):
         self.status = {}
         self.bodies = {"holdings": HOLDINGS, "positions": POSITIONS, "mtf": {"status": "success", "data": []},
-                       "funds": FUNDS}  # fmt: skip
+                       "funds": FUNDS, "trades": TRADES, "pnl_meta": PNL_META, "pnl": PNL,
+                       "charges": CHARGES}  # fmt: skip
         self.raw: dict[str, bytes] = {}
         self.delay = 0.0
         self.requests: list[tuple[str, dict]] = []
+        self.queries: list[tuple[str, dict]] = []  # (part, query parameters) of every request
         self._server = None
         self.url = ""
 
     def count(self, part: str | None = None) -> int:
         return sum(1 for p, _ in self.requests if part in (None, p))
+
+    def _body_for(self, part: str, query: dict) -> bytes:
+        body = self.bodies[part]
+        if isinstance(body, list):  # one body per page
+            page = int(query.get("page_number", "1"))
+            body = body[min(page, len(body)) - 1]
+        return json.dumps(body).encode()
 
     def start(self) -> str:
         fake = self
@@ -334,14 +394,17 @@ class FakeUpstox:
             def do_GET(self):
                 import time
 
-                part = fake.PATHS.get(urlsplit(self.path).path)
+                split = urlsplit(self.path)
+                part = fake.PATHS.get(split.path)
+                query = {k: v[-1] for k, v in parse_qs(split.query).items()}
                 fake.requests.append((part, dict(self.headers)))
+                fake.queries.append((part, query))
                 time.sleep(fake.delay)
                 if part is None:
                     body, status = b"{}", 404
                 else:
                     status = fake.status.get(part, 200)
-                    body = fake.raw.get(part) or json.dumps(fake.bodies[part]).encode()
+                    body = fake.raw.get(part) or fake._body_for(part, query)
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(body)))

@@ -252,6 +252,44 @@ def test_a_manual_asset_is_still_its_owners_value(tmp_path, feed):
     assert got["price_u"] == 50_000_000 and got["source"] == "manual"
 
 
+def test_a_nav_entered_by_hand_stands_while_it_is_newer_than_amfis(tmp_path, feed):
+    """Design 4.5: a fund is priced by the newest AMFI NAV or by a NAV the owner typed (the
+    Update button of an old NAV). The typed one wins only while it is newer; AMFI's previous NAV
+    stays the base of the day's change."""
+    rig = Rig(tmp_path, feed)
+    fund = rig.book.asset_create(
+        OWNER, "f-1", "mf", now=NOW, amfi_code="120503", name="Some Flexi Cap Fund"
+    )
+    assert rig.now(fund)["price_u"] is None  # nothing yet
+    rig.store.write(OWNER, lambda tx: tx.set_price_point(fund["id"], 20261020, 123_4567, NOW))
+    typed = rig.now(fund)
+    assert (typed["price_u"], typed["day"], typed["basis"]) == (123_4567, 20261020, "manual")
+    rig.eod(fund, 20261021, 125_0000, NOW)  # AMFI publishes a newer NAV: it wins
+    got = rig.now(fund)
+    assert (got["price_u"], got["day"]) == (125_0000, 20261021)
+    rig.store.write(OWNER, lambda tx: tx.set_price_point(fund["id"], 20261023, 126_0000, NOW))
+    again = rig.now(fund)
+    assert (again["price_u"], again["day"], again["basis"]) == (126_0000, 20261023, "manual")
+    assert again["prev_close_u"] == 125_0000
+
+
+def test_a_typed_nav_and_amfis_on_the_same_day_agree_now_and_in_history(tmp_path, feed):
+    """One rule: the owner's own value wins on a day. On the day AMFI also has a NAV, now() and
+    the history (closes, as of a day, the series) both give the typed one; AMFI's earlier NAV is
+    the previous close."""
+    rig = Rig(tmp_path, feed)
+    fund = rig.book.asset_create(OWNER, "f-1", "mf", now=NOW, amfi_code="120503", name="Fund")
+    rig.eod(fund, 20261022, 124_0000, NOW)
+    rig.eod(fund, 20261023, 125_0000, NOW)
+    rig.store.write(OWNER, lambda tx: tx.set_price_point(fund["id"], 20261023, 126_0000, NOW))
+    got = rig.now(fund)
+    assert (got["price_u"], got["day"], got["basis"]) == (126_0000, 20261023, "manual")
+    assert got["prev_close_u"] == 124_0000
+    row = rig.store.read(OWNER, lambda tx: tx.get("asset", fund["id"]))
+    history = rig.store.read(OWNER, lambda tx: rig.pb.closes(tx, [row]))[fund["id"]]["prices"]
+    assert dict(history)[20261023] == got["price_u"]
+
+
 def test_a_read_does_not_wait_on_a_feed_that_never_answers(tmp_path):
     """A feed that takes the connection and says nothing costs a read about a second, not the
     five seconds of an ordinary call (the bridge gives up at three)."""

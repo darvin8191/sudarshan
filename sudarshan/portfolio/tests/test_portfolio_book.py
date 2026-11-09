@@ -515,7 +515,11 @@ def test_an_entry_is_refused_where_it_cannot_go(book, world):
     ):
         with pytest.raises((Invalid, Refused)):
             add(book, world, "u-3", version=1, **bad)
-    gone = book.asset_create(OWNER, "l", "liability", now=NOW, name="Home loan")
+    other = book.tab_create(OWNER, "t-2", "Loans", "mixed", now=NOW)
+    gone = book.asset_create(
+        OWNER, "l", "liability", now=NOW, name="Home loan", tab_id=other["id"],
+        version=other["version"], first_value={"day": 20261001, "price_u": 5_000_000_0000},
+    )  # fmt: skip
     with pytest.raises(Invalid) as caught:
         add(book, world, "u-4", version=1, asset_id=gone["id"])
     assert str(caught.value) == BOOK_WORDS["liability"]

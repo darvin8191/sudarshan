@@ -145,10 +145,11 @@ def _transfer_between(ledger: Ledger, entry: Entry) -> None:
     source = ledger.position(entry.account_id, entry.asset_id)
     if source.qty_u < entry.qty_u:
         raise short_of(ledger.names, entry, source.qty_u)
-    pieces = tuple(source.take(entry.qty_u))
+    earned: list = []
+    pieces = tuple(source.take(entry.qty_u, earned))
     target = ledger.position(entry.to_account_id, entry.asset_id)
-    for piece in pieces:
-        target.add(piece.day, ledger.next_order(), piece.qty_u, piece.cost_paise)
+    for piece, income in zip(pieces, earned, strict=True):  # the income moves with the units
+        target.add(piece.day, ledger.next_order(), piece.qty_u, piece.cost_paise, income)
     cost = sum(piece.cost_paise for piece in pieces)
     ledger.journal.append(
         Move(entry, entry.account_id, entry.asset_id, -entry.qty_u, -cost, used=pieces)

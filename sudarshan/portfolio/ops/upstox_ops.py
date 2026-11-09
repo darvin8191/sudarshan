@@ -14,7 +14,7 @@ from sudarshan.alerts.market import sessions
 
 from .. import serialize
 from ..core.days import day_of_instant, to_date
-from ..core.kinds import UPSTOX_HISTORY_DAYS, UPSTOX_PARTS
+from ..core.kinds import REPORT_SEGMENTS, UPSTOX_HISTORY_DAYS, UPSTOX_PARTS
 from ..errors import ApiError
 from ..upstox import MAX_AGE_S
 from . import op
@@ -116,3 +116,48 @@ def _settle_ms(day: date, settle_at_min: int) -> int:
 
     midnight = (day.toordinal() - date(1970, 1, 1).toordinal()) * MS_PER_DAY - IST_OFFSET_MS
     return midnight + settle_at_min * 60_000
+
+
+# ---- the reports (M7.6 trade history, M7.7 trade-wise P&L and charges) -----------------------------
+def _report_args(ctx, message) -> tuple[int, str]:
+    from .. import reports
+
+    today = day_of_instant(ctx.clock())
+    fy, segment = message.get("fy"), str(message.get("segment") or "").upper()
+    if fy.__class__ is not int or not reports.year_ok(fy, today):
+        raise ApiError(400, "bad_request", reports.WORDS["year"])
+    if segment not in REPORT_SEGMENTS:
+        raise ApiError(400, "bad_request", reports.WORDS["segment"])
+    return fy, segment
+
+
+@op("report_years")
+async def report_years(ctx, message):
+    from .. import reports
+
+    today = day_of_instant(ctx.clock())
+    return serialize.out(OWNER, {"today": today, "years": reports.years_of(today)})
+
+
+@op("report_trades")
+async def report_trades(ctx, message):
+    """The executed trades of one financial year and segment, from the cache or read now."""
+    need(ctx)
+    fy, segment = _report_args(ctx, message)
+    reader = ctx.ensure_reports()
+    return serialize.out(
+        OWNER,
+        await reader.report("trades", fy, segment, force=message.get("force") is True),
+    )
+
+
+@op("report_pnl")
+async def report_pnl(ctx, message):
+    """The trade-wise realised P&L of one financial year and segment, with Upstox's charges."""
+    need(ctx)
+    fy, segment = _report_args(ctx, message)
+    reader = ctx.ensure_reports()
+    return serialize.out(
+        OWNER,
+        await reader.report("pnl", fy, segment, force=message.get("force") is True),
+    )

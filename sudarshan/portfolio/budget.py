@@ -1,9 +1,12 @@
 """The service's own cap on its Upstox reads (M7.1, design 3.2, cross-design P17).
 
 Upstox limits each API per user to 50 a second, 500 a minute and 2,000 in 30 minutes, shared with
-OpenAlgo's own reads. This service asks for at most 2 a second, 30 a minute and 200 in 30 minutes
-per API (a tenth of Upstox's figures, rounded to what a page needs), with three token buckets on a
-monotonic clock. A read that finds a bucket empty is not sent: the caller shows its last figures.
+OpenAlgo's own reads. This service asks for about 2 a second, 30 a minute and 200 in 30 minutes per
+API (a tenth of Upstox's figures, rounded to what a page needs), with three token buckets on a
+monotonic clock. A token bucket admits up to twice its size in a sliding window of its own length,
+so a burst can reach double; that is still far inside Upstox's figures. A read that finds a bucket
+empty is not sent: the caller shows its last figures. A report read may wait out the per-second
+bucket (``wait_s``, under a second); the minute and 30-minute buckets are stops.
 
 A 429 (or Upstox's own rate code) pauses that API for 60 seconds.
 
@@ -20,6 +23,8 @@ from collections.abc import Callable
 LIMITS = ((2, 1.0), (30, 60.0), (200, 1800.0))
 #: How long an API rests after Upstox said to slow down.
 PAUSE_S = 60.0
+#: The longest a read waits for a bucket to refill before it stops: the per-second bucket only.
+MAX_WAIT_S = 0.6
 
 
 class Bucket:
@@ -36,6 +41,13 @@ class Bucket:
     def ready(self, now: float) -> bool:
         self._fill(now)
         return self.tokens >= 1.0
+
+    def wait(self, now: float) -> float:
+        """Seconds until this bucket holds a token (0 when it does)."""
+        self._fill(now)
+        if self.tokens >= 1.0:
+            return 0.0
+        return (1.0 - self.tokens) / self.rate if self.rate > 0 else float("inf")
 
     def spend(self) -> None:
         self.tokens -= 1.0
@@ -72,6 +84,16 @@ class Budget:
 
     def pause(self, api: str, seconds: float = PAUSE_S) -> None:
         self._paused[api] = self._clock() + seconds
+
+    def wait_s(self, api: str, longest: float = MAX_WAIT_S) -> float | None:
+        """How long until ``take`` would succeed, when that is no more than ``longest`` seconds
+        (the per-second bucket alone); ``None`` when a longer bucket is short or the API is
+        paused, which are stops, not waits."""
+        if self.paused_for(api):
+            return None
+        now = self._clock()
+        worst = max(bucket.wait(now) for bucket in self._of(api))
+        return worst + 0.01 if worst <= longest else None
 
     def take(self, api: str) -> bool:
         """Spend one read of ``api`` if every bucket has one and the API is not paused. All or

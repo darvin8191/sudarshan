@@ -73,6 +73,22 @@ describe('Display settings', () => {
   })
 
   // SUDARSHAN (M10.7): a switch alone is under 48 dp; each sound's whole row is its target.
+  it('offers the Portfolio card, off by default, for this device (M3.11, decision P5)', async () => {
+    const user = userEvent.setup()
+    render(<DisplaySettings />)
+    const card = screen.getByRole('switch', { name: 'Portfolio card on the dashboard' })
+    expect(card).not.toBeChecked()
+    expect(screen.getByText(/Shown beside the Holdings card for now/)).toBeTruthy()
+
+    await user.click(card)
+    expect(card).toBeChecked()
+    expect(localStorage.getItem('sudarshan-portfolio-card')).toBe('1')
+
+    await user.click(card)
+    expect(card).not.toBeChecked()
+    expect(localStorage.getItem('sudarshan-portfolio-card')).toBeNull()
+  })
+
   it('turns a sound off and on from anywhere on its row', async () => {
     const user = userEvent.setup()
     render(<DisplaySettings />)
