@@ -39,3 +39,15 @@ in the design's order (exact symbol, cash or index row, futures nearest first, o
 from the ATM or by strike), at most 50; an underlying alone offers Pick a strike instead of its
 options. A miss names up to three names one edit away (a swap counts as one). No Upstox call is made.
 Vectors: `tests/vectors/search.json` (synthetic master, hand-typed expectations).
+
+## W18 - the TradingView mapping (`tvimport.py`, `words/tvimport.py`)
+
+Reads a TradingView watchlist file (commas or line ends, `###Name` for a section) against a
+`known(exchange, symbol)` lookup of the master and says what it would make, writing nothing. NSE and
+BSE symbols become cash rows or, through an alias table (CNXIT, CNXFINANCE, CNX500 ...), index rows;
+`_` is tried as written, then as `-`, then as `&`; `NAME1!` and `NAME2!` become current-month and
+next-month follow rows up to the 20 a list holds (the rest become today's contract, said not to
+roll); other exchanges and unknown names are left out with their reason. Section names are cut to 40
+letters, a repeat gets a number, an empty section is kept, duplicates are dropped. `split` cuts more
+than 250 symbols into lists at section boundaries. The alias table is completed against one real
+export (design fact W-5). Vectors: `tests/vectors/tvimport.json`.
