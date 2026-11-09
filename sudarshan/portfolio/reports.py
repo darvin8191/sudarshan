@@ -98,9 +98,15 @@ WORDS = {
     "kept": "Upstox could not be read again just now, so these are the figures from the last "
     "complete read.",
     "count_kept": "Upstox's count of trades does not match the rows it sent, so these are the "
-    "figures from the last complete read. Tap Read again to read again.",
+    "figures from the last complete read. Tap Read again.",
     "short_kept": "Upstox listed fewer trades than it counted, so these are the figures from the "
     "last complete read.",
+    "no_token_kept": "SUDARSHAN cannot find its Upstox token on this server, so these are the "
+    "figures from the last complete read. Check the server; nothing needs changing in the Upstox "
+    "app.",
+    "token_refused_kept": "Upstox did not accept SUDARSHAN's read-only token, so these are the "
+    "figures from the last complete read. The token is shared with TRINETRA: do not create a new "
+    "one in the Upstox app; check the server first.",
     "early": "This year was read before it had closed and settled. SUDARSHAN reads it again once "
     "it has; tap Read again to do it now.",
     "no_pnl_mf": "Upstox has no trade-wise P&L report for mutual funds; their trades are in "
@@ -113,8 +119,8 @@ WORDS = {
 def _kept_words(note: str | None) -> str:
     """The line that goes with complete figures kept because a newer read did not finish: only a
     stop that SUDARSHAN's own limits caused is worded as SUDARSHAN's, a missing token as the
-    server's, a short or mismatched list as that, and only what Upstox really failed at as
-    Upstox's."""
+    server's, a short or mismatched list as that, a refused token with its warning about the token
+    TRINETRA shares, and only what Upstox really failed at as Upstox's."""
     if note == WORDS["busy"]:
         return WORDS["held_back"]
     if note == WORDS["count"]:
@@ -122,7 +128,9 @@ def _kept_words(note: str | None) -> str:
     if note == WORDS["short"]:
         return WORDS["short_kept"]
     if note == WORDS["no_token"]:
-        return WORDS["no_token"]
+        return WORDS["no_token_kept"]
+    if note == WORDS["token_refused"]:
+        return WORDS["token_refused_kept"]
     return WORDS["kept"]
 
 

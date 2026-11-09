@@ -161,7 +161,24 @@ async def test_a_refresh_with_no_token_on_the_server_says_so_not_that_upstox_fai
     rig.now += 7 * HOUR
     got = (await rig.call("report_trades", fy=fy, segment="EQ", force=True))["data"]
     assert got["state"] == "ok" and len(got["rows"]) == 5
-    assert got["note"] == reports.WORDS["no_token"], got["note"]
+    assert got["note"] == reports.WORDS["no_token_kept"], got["note"]
+    assert "last complete read" in got["note"] and "could not be read" not in got["note"]
+
+
+@scenario_of
+async def test_a_refresh_refused_for_the_token_keeps_the_figures_and_its_token_warning(rig):
+    """A refused token while complete figures are kept: the words keep the warning that the token
+    is shared with TRINETRA and must not be made again in the Upstox app, not a bare "could not
+    be read" that sends the owner to the Upstox app to make a new one."""
+    fy = await complete_year_of_five(rig)
+    six(rig, "ABCDEF")
+    rig.fake.status["trades"] = 401  # Upstox refuses SUDARSHAN's read-only token
+    rig.now += 7 * HOUR
+    got = (await rig.call("report_trades", fy=fy, segment="EQ", force=True))["data"]
+    assert got["state"] == "ok" and len(got["rows"]) == 5, got
+    assert got["note"] == reports.WORDS["token_refused_kept"], got["note"]
+    assert "TRINETRA" in got["note"] and "Upstox app" in got["note"]
+    assert "last complete read" in got["note"]
 
 
 @scenario_of
