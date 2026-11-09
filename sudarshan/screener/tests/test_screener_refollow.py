@@ -141,7 +141,10 @@ def morning(source) -> None:
 
 
 def pause_rows(world, source) -> list[dict]:
-    return world[0].read(OWNER, lambda tx: tx.pauses(source.market.today))
+    """The pauses that mark anything: a key's row for a stretch that was no gap closes empty
+    (start == end), and a restart reads it as nothing."""
+    rows = world[0].read(OWNER, lambda tx: tx.pauses(source.market.today))
+    return [row for row in rows if row["end"] is None or row["end"] > row["start"]]
 
 
 def gap_rows(world, source) -> list[tuple]:
@@ -248,6 +251,47 @@ def test_the_gap_still_reads_not_checked_after_a_restart(world):
     assert bar_at(again, "11:00").v == 20 and bar_at(again, "11:02").v == 20
     assert unverified(again, 5, "11:03:06") and unverified(again, 60, "11:03:06")
     assert gap_rows(world, again) == [(ms(DAY, "10:00"), ms(DAY, "11:00"))]
+
+
+def test_a_key_let_go_before_a_restart_keeps_its_gap_from_the_let_go(world):
+    """Round-3 review LOW-A2: let go at 10:02:30 with trades in the 10:00 to 10:05 candle, the
+    service restarted at 10:30:02, the key followed again at 11:00. The let-go lived only in
+    memory, so the gap began at the restart and the candles holding the stretch before it read
+    verified. Its row is written open at the let-go and closed at the comeback."""
+    source = start(world, "08:50")
+    morning(source)
+    minute(source, "10:00", 100.0, [60_010, 60_020])
+    minute(source, "10:01", 100.0, [60_030, 60_040])
+    frame(source, ms(DAY, "10:02:20"), 100.0, 60_050)
+    follow(source, OTHER, "10:02:30")
+    assert gap_rows(world, source) == [(ms(DAY, "10:02:30"), None)], "open at the let-go"
+    seal(source, ms(DAY, "10:03:06"), [])
+    source.mark_seen(ms(DAY, "10:30:00"))
+    again = start(world, "10:30:02")
+    follow(again, OTHER, "10:30:02", reuse=False)
+    assert gap_rows(world, again) == [(ms(DAY, "10:02:30"), None)], "a restart leaves it open"
+    follow(again, BOTH, "11:00")
+    minute(again, "11:00", 101.0, [1_800_030, 1_800_040])
+    assert gap_rows(world, again) == [(ms(DAY, "10:02:30"), ms(DAY, "11:00"))]
+    assert unverified(again, 5, "10:05") and unverified(again, 30, "10:30")
+    assert bar_at(again, "11:00").v == 20
+    third = start(world, "11:01:10")  # and the closed row still marks the candles after another
+    follow(third, BOTH, "11:01:10", reuse=False)
+    assert unverified(third, 5, "10:05") and unverified(third, 30, "10:30")
+
+
+def test_a_let_go_that_comes_back_within_a_pause_leaves_no_gap_behind(world):
+    """A stretch no longer than GAP_S is no gap: its row closes empty, a restart marks nothing."""
+    source = start(world, "08:50")
+    morning(source)
+    follow(source, OTHER, "10:00:00")
+    follow(source, BOTH, "10:00:05")
+    minute(source, "10:00", 101.0, [60_010, 60_020])
+    source.mark_seen(ms(DAY, "10:01:06"))
+    again = start(world, "10:01:08")
+    follow(again, BOTH, "10:01:08", reuse=False)
+    minute(again, "10:02", 101.0, [60_030, 60_040])
+    assert [r for r in gap_rows(world, again) if r[1] is None or r[1] > r[0]] == []
 
 
 @pytest.mark.parametrize("op", [False, True], ids=["no-op-during-download", "op-during-download"])

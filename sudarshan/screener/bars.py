@@ -136,6 +136,10 @@ class Followed(NamedTuple):
     sealed: tuple[Sealed, ...] = ()
     #: (key, gap) for each key followed again after a stretch that counts.
     gaps: tuple[tuple[str, Pause], ...] = ()
+    #: (key, moment) for each key let go by this set: the moment its gap would begin.
+    let_go: tuple[tuple[str, int], ...] = ()
+    #: The keys followed again after having been let go (their gap, if it counts, is in ``gaps``).
+    back: tuple[str, ...] = ()
 
 
 def seal_at(end: int) -> int:
@@ -357,12 +361,18 @@ class Bars:
         first = self._followed is None
         before = frozenset(self._keys) if first else self._followed
         let_go = self._since if first and self._since is not None else at
-        for key in before if first else before - wanted:
+        left: list[tuple[str, int]] = []
+        for key in sorted(before if first else before - wanted):
+            if key not in self._let_go and key not in wanted:
+                left.append((key, let_go))
             self._let_go.setdefault(key, let_go)
         sealed: list[Sealed] = []
         gaps: list[tuple[str, Pause]] = []
+        back: list[str] = []
         for key in sorted(wanted if first else wanted - before):
             since = self._let_go.pop(key, None)
+            if since is not None:
+                back.append(key)
             state = self._keys.get(key)
             if state is None:  # first followed today (since None), or let go before a trade
                 gap = self._stretch(key, since, at, market)
@@ -375,7 +385,7 @@ class Bars:
             if gap is not None:
                 gaps.append((key, gap))
         self._followed = wanted
-        return Followed(tuple(sealed), tuple(gaps))
+        return Followed(tuple(sealed), tuple(gaps), tuple(left), tuple(back))
 
     def gaps(self, key: str) -> tuple[Pause, ...]:
         """``key``'s gaps today: the stretches the screener did not follow it."""
@@ -385,6 +395,12 @@ class Bars:
         """Today's gaps from the store after a start (after ``restore``): they hold all day."""
         for key, gap in gaps:
             self._gaps.setdefault(key, []).append(gap)
+
+    def restore_let_go(self, let_go: Mapping[str, int]) -> None:
+        """Keys let go earlier today and not followed again before a restart, with the moment they
+        were let go (their open row in the store): the gap runs from there, not from the restart
+        (round-3 review LOW-A2). After ``restore``, before the first ``follow_from``."""
+        self._let_go.update(let_go)
 
     # ---- what the runtime asks -------------------------------------------------------------
     @property

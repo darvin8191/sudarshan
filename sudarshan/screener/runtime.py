@@ -53,7 +53,7 @@ from sudarshan.alerts.market.sessions import (
 from sudarshan.autologin.schedule import IST
 
 from . import candles, universe
-from .bars import Bar, Bars, Sealed
+from .bars import UNFOLLOWED, Bar, Bars, Followed, Sealed
 from .engine import Context, Subject, timeframes
 from .runs import Member
 from .store import OWNER, StoreError, Tx
@@ -145,6 +145,8 @@ class LiveSource:
         self._open_pause: int | None = None
         #: The store row of the open feed pause (today's pauses are kept for a restart).
         self._open_pause_id: int | None = None
+        #: key -> (row id, start) of each key let go today and not followed again: its open gap row.
+        self._gap_rows: dict[str, tuple[int, int]] = {}
         self._seen_written = 0
         self.keys: frozenset[str] = frozenset()
         self.claimed_at: float = 0.0
@@ -356,6 +358,7 @@ class LiveSource:
         previous = previous_trading_day(day, self.calendar.is_trading_day)
         self.market = Market(day_key(day), sessions, day_key(previous) if previous else 0)
         self._pauses, self._open_pause, self._open_pause_id, self._last = [], None, None, {}
+        self._gap_rows = {}
         self._rebuild_market(now)
         self._restore(now)
         self._restore_pauses(now)
@@ -370,19 +373,25 @@ class LiveSource:
         sessions = list(self.market.sessions.values())
         session = self.market.today
         gaps: list[tuple[str, Pause]] = []
+        let_go: dict[str, tuple[int, int]] = {}
 
         def read(tx: Tx) -> list[Pause]:
             raw = tx.meta_get(SEEN)
             seen = int(raw) if raw and raw.isdigit() else None
             kept: list[Pause] = []
             gaps.clear()
+            let_go.clear()
             for row in tx.pauses(session):
                 end = row["end"]
+                if end is None and row.get("key"):  # a key let go and not back yet: still let go
+                    let_go[row["key"]] = (row["id"], row["start"])
+                    continue
                 if end is None:
                     end = max(row["start"], seen or row["start"])
                     tx.pause_close(row["id"], end)
                 if row.get("key"):
-                    gaps.append((row["key"], Pause(row["start"], end, row["why"])))
+                    if end > row["start"]:  # an empty one was a stretch that was no gap
+                        gaps.append((row["key"], Pause(row["start"], end, row["why"])))
                 else:
                     kept.append(Pause(row["start"], end, row["why"]))
             if seen is not None and sessions and now - seen > GAP_S * 1000:
@@ -402,6 +411,8 @@ class LiveSource:
         try:
             self._pauses = self.store.write(OWNER, read)
             self.bars.restore_gaps(gaps)
+            self.bars.restore_let_go({key: start for key, (_, start) in let_go.items()})
+            self._gap_rows = dict(let_go)
         except StoreError:
             log.exception("today's pauses could not be read back")
         self._rebuild_market(now)
@@ -567,7 +578,7 @@ class LiveSource:
         # a key first followed mid-session, or followed again, counts from here (MEDIUM-1)
         followed = self.bars.follow_from(self.keys, now, self.market)
         self.persist(followed.sealed)
-        self._keep_gaps(followed.gaps)
+        self._keep_gaps(followed)
         self.feed.follow(self.keys)
         self._rebuild_market(now)
         if not built:
@@ -716,22 +727,41 @@ class LiveSource:
         except StoreError:
             log.exception("the end of a pause of the price feed could not be recorded")
 
-    def _keep_gaps(self, gaps: Sequence[tuple[str, Pause]]) -> None:
-        """Keys followed again after a gap: each gap is kept with its key, so a restart today
-        still marks that key's candles (MEDIUM-1)."""
-        if not gaps:
+    def _keep_gaps(self, followed: Followed) -> None:
+        """Each key's gap is kept with its key, so a restart today still marks that key's candles
+        (MEDIUM-1). A key let go gets its row at once, open from the moment it was let go, and the
+        comeback closes it (at the end of its gap, or at its start when the stretch was no gap), so
+        a restart in between keeps the gap from the let-go (round-3 review LOW-A2)."""
+        if not (followed.gaps or followed.let_go or followed.back):
             return
         session = self.market.today
-        try:
-            self.store.write(
-                OWNER,
-                lambda tx: [
+        gap_of = dict(followed.gaps)
+        rows = self._gap_rows
+
+        def write(tx: Tx) -> dict[str, tuple[int, int]]:
+            opened: dict[str, tuple[int, int]] = {}
+            for key in followed.back:
+                row = rows.get(key)
+                gap = gap_of.pop(key, None)
+                if row is not None:
+                    tx.pause_close(row[0], row[1] if gap is None else gap.end)
+                elif gap is not None:
                     tx.pause_open(session, gap.start, gap.cause, end=gap.end, key=key)
-                    for key, gap in gaps
-                ],
-            )
+            for key, gap in gap_of.items():  # first followed after the open: never let go
+                tx.pause_open(session, gap.start, gap.cause, end=gap.end, key=key)
+            for key, at in followed.let_go:
+                if key not in rows:
+                    opened[key] = (tx.pause_open(session, at, UNFOLLOWED, key=key), at)
+            return opened
+
+        try:
+            opened = self.store.write(OWNER, write)
         except StoreError:
-            log.exception("%d gaps of instruments followed again could not be recorded", len(gaps))
+            log.exception("the gaps of instruments let go or followed again could not be recorded")
+            return
+        for key in followed.back:
+            rows.pop(key, None)
+        rows.update(opened)
 
     def persist(self, sealed: Sequence[Sealed]) -> None:
         if not sealed:

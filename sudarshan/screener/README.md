@@ -213,8 +213,9 @@ today's bars, each with its running volume, so a restart's first bar carries its
 restart opens a pause from the last seen mark: a candle that holds minutes the screener did not see
 is "Not checked", never judged whole. An instrument no screen followed for a while (a screen paused
 and resumed, a watchlist that could not be read, the key limit) counts its volume again from when
-it comes back, and the stretch is kept as that instrument's own pause (with its key, so a restart
-keeps it): its candles that hold the stretch are "Not checked" too. A start that cannot follow
+it comes back, and the stretch is kept as that instrument's own pause (with its key, written open
+when the instrument is let go and closed when it comes back, so a restart in between keeps it
+from the let-go): its candles that hold the stretch are "Not checked" too. A start that cannot follow
 anything at once (OpenAlgo's master contract downloading) counts the wait the same way for every
 instrument it had bars of. An instrument first followed after 09:15 (the first screen on its
 universe made or resumed later, or a restart for an instrument the store holds no bar of) was not
