@@ -148,6 +148,9 @@ class LiveSource:
         self.claimed_at: float = 0.0
         #: Whether the feed may hold a claim of ours (an earlier run's, until dropped).
         self._held = True
+        #: Whether the keys were ever worked out in this process. A restart that finds the master
+        #: not ready has not, and must not let go of the claims the stop kept.
+        self._keys_known = False
         self.claim_words: str | None = None
         self.master_ready = False
         #: The master download the universes were built on (OpenAlgo's completion time).
@@ -548,6 +551,8 @@ class LiveSource:
             )
             keys = keys[: self.settings.max_keys]
         self.keys = frozenset(keys)
+        self._keys_known = True
+        self.bars.follow_from(self.keys, now)  # a key first followed mid-session counts from here
         self.feed.follow(self.keys)
         self._rebuild_market(now)
         if not built:
@@ -598,9 +603,10 @@ class LiveSource:
         try:
             if self.keys:
                 await self.feed.put_claims(dict.fromkeys(sorted(self.keys), "full"))
-            elif self._held:
+            elif self._held and self._keys_known:
                 await self.feed.drop_claims()
-            self._held = bool(self.keys)
+            if self.keys or self._keys_known:
+                self._held = bool(self.keys)
             self.claim_words = None
         except FeedRefused as exc:
             self.claim_words = str(exc)

@@ -888,6 +888,7 @@ async def today(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
         return {
             "screens": screens,
             "recent": recent[:20],
+            # Not counted yet: the screener keeps no "seen" mark per alert, so the card never shows it.
             "unseen_alerts": 0,
             "session": session,
         }

@@ -265,6 +265,19 @@ class Bars:
         self._keys: dict[str, _Key] = {}
         #: When the bars were last restored, for the keys the store held no bar of.
         self._since: int | None = None
+        #: Keys first followed after the day began, with the moment they were claimed: their
+        #: first frame of a trade made today is their baseline too (see ``follow_from``).
+        self._claimed: dict[str, int] = {}
+
+    def follow_from(self, keys: Iterable[str], at: int) -> None:
+        """Keys the screener follows from ``at`` on (a screen made, resumed or edited, a master
+        download, an option window built). A key the bars hold nothing of has traded before ``at``
+        and nobody counted it, so its first frame of a trade made today becomes its baseline and
+        that volume belongs to no bar, as after a restart. Before the open this changes nothing:
+        the pre-open frames give the baseline, as on any day."""
+        for key in keys:
+            if key not in self._keys and key not in self._claimed:
+                self._claimed[key] = at
 
     # ---- what the runtime asks -------------------------------------------------------------
     @property
@@ -324,7 +337,7 @@ class Bars:
         state = self._keys.get(key)
         if state is None:
             state = self._keys[key] = _Key()
-            state.rebase = self._since
+            state.rebase = self._claimed.pop(key, self._since)
         recv = _ms(frame.get("ts_recv"))
         segment = segment_of(key)
         volume = _count(frame.get("vtt"))
@@ -374,6 +387,7 @@ class Bars:
         so its first frame of a trade made today becomes its baseline (``_rebase``) and that
         volume belongs to no bar, as the pre-open volume never does."""
         self._day, self._keys, self._since = day, {}, since
+        self._claimed = {}
         for row in rows:
             state = self._keys.setdefault(row.key, _Key())
             state.sealed[row.bar.start] = row.bar
@@ -435,6 +449,7 @@ class Bars:
         """A new trading day starts with nothing."""
         if today != self._day:
             self._day, self._keys, self._since = today, {}, None
+            self._claimed = {}
 
     @staticmethod
     def _rebase(
