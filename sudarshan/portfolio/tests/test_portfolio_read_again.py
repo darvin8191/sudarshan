@@ -118,4 +118,4 @@ def test_a_forced_read_still_obeys_the_budget_and_keeps_the_old_figures(bridge):
     again = get(client, "trades", force="true").get_json()
     assert upstox.count("trades") == asked, "a forced read went past the minute budget"
     assert len(again["data"]["rows"]) == 1 and again["data"]["rows"][0]["trade_id"] == "A"
-    assert again["data"]["note"] == reports.WORDS["kept"]
+    assert again["data"]["note"] == reports.WORDS["held_back"]
