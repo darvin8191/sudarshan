@@ -156,6 +156,22 @@ cards past it answer `rows_pending` with no rows, which the page reads with `wid
 layout again; the bridge forwards every event in `contract.PUSH_EVENTS`, so a new one needs no bridge edit.
 A run's push patches only a card's counts and run line: rows move once, from the card's own read.
 
+**The Dashboard tab (lane C, M9.16).** `/screener` opens on the Dashboard: the tab row is Dashboard, Screens,
+Library, the Dashboard has no `tab` in the address, Screens is `?tab=screens` and the Library `?tab=library`,
+and moving between them replaces the history entry. The sheets are in the address so Back closes them first:
+`?sheet=add`, and one widget's settings at `?sheet=widget&s=<screen id>&k=<kind>` (a widget is a screen and a
+kind, never an id, so a suggested layout at version 0 has addresses too); a widget row's symbol sheet is
+`?sheet=symbol&k=EXCHANGE:SYMBOL&s=<screen id>&wk=<kind>`. The view reads `dashboard` once when it opens and never
+on a timer; it is read again only when another screen changes the layout (`sudarshan_screener_dashboard` with a
+newer version) or a reconnect finds runs that moved. Cards past the read's budget (`rows_pending`) are read one
+by one with `widget`, in card order. A table card shows the screen's rows (5, 10 or 20) with the price and the
+change, at most two clause values, "and N more" and the screen's automatic list as 48 dp links. One live
+subscription serves the whole dashboard (the shown rows of every card in card order, at most 100 prices), so a
+card says "Real-time" only while its own rows tick, and says "Prices at the run" when none of its rows is
+followed. A card's status, next check and engine line come from the shared state cache, so a state push
+changes every card; its own words are used only while the state still agrees with them. A pushed run changes a
+card's run line and counts at once and the rows move once, from that card's own `widget` read.
+
 ## Alerts
 
 A run worth telling (alerting.py decides) is one digest, sealed under the alerts' screener-digest

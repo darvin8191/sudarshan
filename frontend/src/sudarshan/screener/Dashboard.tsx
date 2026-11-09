@@ -1,5 +1,8 @@
 import { Plus, RefreshCw } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import type { WatchlistItem } from '@/api/watchlist'
 import { cn } from '@/lib/utils'
+import { usePriceAccess } from '@/sudarshan/access'
 import {
   EmptyCard,
   LoadingCards,
@@ -7,13 +10,27 @@ import {
   STALE,
   StaleBookNote,
 } from '@/sudarshan/books/cards/parts'
+import { useMarketOpen } from '@/sudarshan/dashboard/hooks'
+import { anyOpen, keyOf, latest } from '@/sudarshan/dashboard/live'
+import {
+  CALENDAR_LOADING,
+  type MarketCalendar,
+  MarketCalendarSource,
+  useIstDay,
+} from '@/sudarshan/dashboard/MarketCalendar'
 import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
+import { statusLine } from '@/sudarshan/watchlist/rows'
+import { type LiveRow, useLiveRows } from '@/sudarshan/watchlist/useLiveRows'
+import { type CardFeed, cardLine } from './cardLine'
 import { cardKey } from './dashboardCache'
 import { StatusChip } from './marks'
 import type { Hearing } from './push'
-import { type WidgetCard, WORDS } from './types'
+import { RowSheets } from './RowSheets'
+import { followedItems } from './resultItems'
+import { type WidgetCard as Card, type ResultRow, type ScreenerState, WORDS } from './types'
 import { useDashboard } from './useDashboard'
 import type { Address } from './useScreenerAddress'
+import { WidgetCard } from './WidgetCard'
 
 /** The sentences the dashboard says when it has nothing to show (design 3.5). */
 export const DASH_WORDS = {
@@ -26,50 +43,119 @@ export const DASH_WORDS = {
 /** One column on a phone, two from 768 px, three from 1,200 px. */
 export const GRID = 'grid grid-cols-1 items-start gap-2 md:grid-cols-2 min-[1200px]:grid-cols-3'
 
-/** The cards the dashboard shows. Replaced by the table card in the next change. */
-function Cards({ cards }: { cards: WidgetCard[] }) {
+/** A count card until its own face is built: its name, status and where. */
+function CountStub({ card }: { card: Card }) {
   return (
-    <ul className={GRID}>
-      {cards.map((card) => (
-        <li
-          key={cardKey(card)}
-          data-widget={cardKey(card)}
-          className="flex flex-col gap-1 rounded-[1rem] border bg-card px-4 py-3 shadow-[var(--shadow-card)]"
-        >
-          <span className="flex items-start justify-between gap-2">
-            <span className="min-w-0 truncate text-base font-bold">{card.name}</span>
-            <StatusChip status={card.status} />
-          </span>
-          <span className="text-[0.8125rem] font-medium text-[color:var(--text-secondary)]">
-            {card.where}
-          </span>
-        </li>
-      ))}
-    </ul>
+    <li
+      key={cardKey(card)}
+      data-widget={cardKey(card)}
+      className="flex flex-col gap-1 rounded-[1rem] border bg-card px-4 py-3 shadow-[var(--shadow-card)]"
+    >
+      <span className="flex items-start justify-between gap-2">
+        <span className="min-w-0 truncate text-base font-bold">{card.name}</span>
+        <StatusChip status={card.status} />
+      </span>
+      <span className="text-[0.8125rem] font-medium text-[color:var(--text-secondary)]">
+        {card.where}
+      </span>
+    </li>
   )
 }
 
+/** The instruments the dashboard follows tick by tick: the open row's too, whichever card it is on. */
+function itemsOf(followed: WatchlistItem[], shown: ResultRow[], openKey: string | null) {
+  if (openKey === null || followed.some((item) => keyOf(item.symbol, item.exchange) === openKey))
+    return followed
+  const row = shown.find((each) => keyOf(each.symbol, each.exchange) === openKey)
+  if (!row) return followed
+  return [
+    ...followed,
+    {
+      id: followed.length + 1,
+      symbol: row.symbol,
+      exchange: row.exchange,
+      position: followed.length,
+    },
+  ]
+}
+
+const NO_CARDS: Card[] = []
+
 /**
- * The Dashboard tab (design 3.1, 3.7): the Add a widget button and the owner's widgets, one card
- * each, in the order the screener keeps them. A layout that is only a suggestion (version 0) is
- * shown like any other. A failed read says so and keeps the cards as last read, greyed.
+ * The Dashboard tab (design 3.1, 3.6, 3.7): the Add a widget button and the owner's widgets, one
+ * card each, in the order the screener keeps them. A layout that is only a suggestion (version 0)
+ * is shown like any other. One live subscription serves every card: the shown rows of all of them
+ * in card order, at most 100 prices, so a card says "Real-time" only while its own rows tick. A
+ * failed read says so and keeps the cards as last read, greyed.
  */
 export function Dashboard({
   address,
-  hearing: _hearing,
+  state,
+  hearing,
+  openScreen,
   openSheet,
   closeSheet,
 }: {
   address: Address
+  state: ScreenerState
   hearing: Hearing
+  openScreen: (id: number) => void
   openSheet: (sheet: string, extra?: Record<string, string>) => void
   closeSheet: () => void
 }) {
-  const { query, retry } = useDashboard()
+  const { query, failed, retry } = useDashboard()
   const data = query.data
   const problem = query.error
+  const cards = data?.widgets ?? NO_CARDS
+
+  const { apiKey } = usePriceAccess()
+  const [market, setMarket] = useState<MarketCalendar>(CALENDAR_LOADING)
+  const day = useIstDay()
+  const { isOpen } = useMarketOpen(market)
+  const openKey = address.from ? address.key : null
+  const shown = useMemo(
+    () => cards.flatMap((card) => (card.kind === 'table' ? card.rows_shown : [])),
+    [cards]
+  )
+  const followed = useMemo(() => followedItems(shown), [shown])
+  const capped = useMemo(
+    () => new Set(followed.map((item) => keyOf(item.symbol, item.exchange))),
+    [followed]
+  )
+  const items = useMemo(() => itemsOf(followed, shown, openKey), [followed, shown, openKey])
+  const live = useLiveRows({ items, apiKey, marketOpen: isOpen })
+  const liveByKey = useMemo(() => new Map(live.rows.map((row) => [row.key, row])), [live.rows])
+  const screens = useMemo(() => new Map(state.screens.map((row) => [row.id, row])), [state.screens])
+
+  /** Where this card's own rows stand: the line over the followed ones alone. */
+  const feedOf = (card: Card): CardFeed => {
+    const own = card.rows_shown
+      .map((row) => liveByKey.get(keyOf(row.symbol, row.exchange)))
+      .filter((row): row is LiveRow => row !== undefined)
+      .filter((row) => capped.has(row.key))
+    if (own.length === 0) return { followed: 0, line: null, now: live.now }
+    return {
+      followed: own.length,
+      now: live.now,
+      line: statusLine({
+        now: live.now,
+        marketOpen: anyOpen(own.map((row) => isOpen(row.item.exchange))),
+        lastTickAt: latest(...own.map((row) => row.tickAt)),
+        lastUpdateAt: latest(...own.map((row) => row.view.at)),
+        connected: live.feed.connected,
+        fallback: live.feed.fallback,
+      }),
+    }
+  }
+  const opened = address.from
+    ? cards.find(
+        (card) => card.screen_id === address.from?.screen && card.kind === address.from.kind
+      )
+    : undefined
+
   return (
     <div className="flex flex-col gap-2">
+      <MarketCalendarSource key={day} onChange={setMarket} />
       <div className="flex items-center justify-between gap-3 px-1">
         <button
           type="button"
@@ -112,10 +198,42 @@ export function Dashboard({
       ) : data.widgets.length === 0 ? (
         <EmptyCard title={DASH_WORDS.empty_title} hint={DASH_WORDS.empty_hint} />
       ) : (
-        <div className={cn(problem && STALE)}>
-          <Cards cards={data.widgets} />
-        </div>
+        <ul className={cn(GRID, problem && STALE)}>
+          {cards.map((card) => {
+            const screen = screens.get(card.screen_id)
+            if (card.kind !== 'table') return <CountStub key={cardKey(card)} card={card} />
+            return (
+              <WidgetCard
+                key={cardKey(card)}
+                card={card}
+                name={screen?.name ?? card.name}
+                where={screen?.where ?? card.where}
+                status={screen?.status ?? card.status}
+                line={cardLine({ card, screen, engine: state.engine, hearing, feed: feedOf(card) })}
+                liveByKey={liveByKey}
+                now={live.now}
+                unreadable={failed.has(cardKey(card))}
+                onRetry={retry}
+                onOpenScreen={openScreen}
+                onOpenRow={(from, key) =>
+                  openSheet('symbol', { k: key, s: String(from.screen_id), wk: from.kind })
+                }
+              />
+            )
+          })}
+        </ul>
       )}
+      <RowSheets
+        address={address}
+        row={openKey ? (liveByKey.get(openKey) ?? null) : null}
+        listName={opened?.list?.name ?? opened?.name ?? 'Screener'}
+        apiKey={apiKey}
+        isOpen={isOpen}
+        feed={live.feed}
+        now={live.now}
+        openSheet={openSheet}
+        closeSheet={closeSheet}
+      />
       <BottomSheet
         open={address.sheet === 'add'}
         onOpenChange={(next) => !next && closeSheet()}

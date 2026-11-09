@@ -275,7 +275,9 @@ export default function Screener() {
           ) : (
             <Dashboard
               address={address}
+              state={state}
               hearing={hearing}
+              openScreen={openScreen}
               openSheet={openSheet}
               closeSheet={closeSheet}
             />

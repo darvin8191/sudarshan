@@ -33,6 +33,16 @@ vi.mock('@/sudarshan/screener/api', async (importOriginal) => ({
 vi.mock('@/utils/toast', () => ({
   toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() },
 }))
+vi.mock('@/sudarshan/watchlist/useLiveRows', () => ({
+  useLiveRows: () => ({
+    rows: [],
+    line: null,
+    now: Date.UTC(2026, 10, 9, 5, 15, 30),
+    feed: { connected: true, fallback: false },
+    snapshot: null,
+    retry: () => {},
+  }),
+}))
 const sockets = vi.hoisted(() => ({ current: null as unknown }))
 vi.mock('@/components/socket/SocketProvider', () => ({
   useSocketContext: () => ({ socket: sockets.current }),
@@ -41,7 +51,7 @@ vi.mock('@/components/socket/SocketProvider', () => ({
 import { createQueryClient } from '@/app/providers'
 import { resetScreenerPushForTests } from '@/sudarshan/screener/push'
 import { addressOf } from '@/sudarshan/screener/useScreenerAddress'
-import { dashboard, screenerState, screenRow, widgetCard } from '@/test/screener'
+import { dashboard, resultRow, screenerState, screenRow, widgetCard } from '@/test/screener'
 import Screener from './Screener'
 
 vi.setConfig({ testTimeout: 15_000 })
@@ -73,6 +83,10 @@ function renderPage(entries: InitialEntry[] = ['/elsewhere', '/screener']) {
   return client
 }
 const where = () => screen.getByTestId('where').textContent
+const cardsShown = () =>
+  Array.from(document.querySelectorAll('[data-widget]')).map((card) =>
+    card.getAttribute('data-widget')
+  )
 const back = () => act(() => history.go(-1))
 
 beforeEach(() => {
@@ -81,7 +95,11 @@ beforeEach(() => {
   for (const fn of Object.values(api)) fn.mockReset()
   api.runsSince.mockResolvedValue({ runs: [], more: false })
   api.state.mockResolvedValue(
-    screenerState([screenRow({ id: 1 }), screenRow({ id: 2, name: 'Two' })])
+    screenerState([
+      screenRow({ id: 1, name: 'One' }),
+      screenRow({ id: 2, name: 'Two' }),
+      screenRow({ id: 3, name: 'Three' }),
+    ])
   )
 })
 
@@ -93,13 +111,13 @@ describe('the tab row and the address', () => {
     expect(tabs.map((tab) => tab.textContent)).toEqual(['Dashboard', 'Screens', 'Library'])
     expect(tabs[0].getAttribute('aria-selected')).toBe('true')
     expect(where()).toBe('/screener')
-    expect(await screen.findByText('15-min EMA cross')).toBeTruthy()
+    expect(await screen.findByText('One')).toBeTruthy()
     expect(api.dashboard).toHaveBeenCalledTimes(1)
   })
 
   it('keeps Screens at ?tab=screens and the Library at ?tab=library', async () => {
     renderPage(['/screener?tab=screens'])
-    expect(await screen.findByRole('button', { name: /15-min EMA cross/ })).toBeTruthy()
+    expect(await screen.findByRole('button', { name: /One/ })).toBeTruthy()
     expect(api.dashboard).not.toHaveBeenCalled()
     expect(screen.getByRole('tab', { name: 'Screens' }).getAttribute('aria-selected')).toBe('true')
   })
@@ -148,16 +166,14 @@ describe('the tab row and the address', () => {
 describe('the dashboard view', () => {
   it('shows a suggested layout, version 0, like any other: one card each, in its order', async () => {
     api.dashboard.mockResolvedValue(
-      dashboard([
-        widgetCard({ screen_id: 2, name: 'Two' }),
-        widgetCard({ screen_id: 1, name: 'One' }),
-      ])
+      dashboard([widgetCard({ screen_id: 2 }), widgetCard({ screen_id: 1 })])
     )
     renderPage()
     await screen.findByText('Two')
-    const cards = screen.getAllByRole('listitem')
-    expect(cards.map((card) => card.getAttribute('data-widget'))).toEqual(['2:table', '1:table'])
-    expect(within(cards[0]).getByText('Active')).toBeTruthy()
+    expect(cardsShown()).toEqual(['2:table', '1:table'])
+    expect(
+      within(document.querySelector('[data-widget]') as HTMLElement).getByText('Active')
+    ).toBeTruthy()
   })
 
   it("says so when nothing is on the dashboard, in the screener's words", async () => {
@@ -170,7 +186,7 @@ describe('the dashboard view', () => {
   it('lays the cards out in one column, two from 768 px and three from 1,200 px', async () => {
     api.dashboard.mockResolvedValue(dashboard())
     renderPage()
-    const list = (await screen.findByText('15-min EMA cross')).closest('ul') as HTMLElement
+    const list = (await screen.findByText('One')).closest('ul[class*="grid"]') as HTMLElement
     expect(list.className).toContain('grid-cols-1')
     expect(list.className).toContain('md:grid-cols-2')
     expect(list.className).toContain('min-[1200px]:grid-cols-3')
@@ -179,7 +195,7 @@ describe('the dashboard view', () => {
   it("reads the cards past the read's budget one by one, in card order, and fills them in place", async () => {
     api.dashboard.mockResolvedValue(
       dashboard([
-        widgetCard({ screen_id: 1, name: 'One' }),
+        widgetCard({ screen_id: 1 }),
         widgetCard({ screen_id: 2, name: 'Two', rows_pending: true, rows_shown: [], run: null }),
         widgetCard({ screen_id: 3, name: 'Three', rows_pending: true, rows_shown: [], run: null }),
       ])
@@ -187,17 +203,15 @@ describe('the dashboard view', () => {
     const order: number[] = []
     api.widget.mockImplementation(async (id: number) => {
       order.push(id)
-      return widgetCard({ screen_id: id, name: id === 2 ? 'Two read' : 'Three read' })
+      return widgetCard({ screen_id: id, rows_shown: [resultRow(id === 2 ? 'TCS' : 'ITC')] })
     })
     renderPage()
-    expect(await screen.findByText('Two read')).toBeTruthy()
-    expect(await screen.findByText('Three read')).toBeTruthy()
+    expect(await screen.findByText('TCS')).toBeTruthy()
+    expect(await screen.findByText('ITC')).toBeTruthy()
     expect(order).toEqual([2, 3])
     expect(api.widget).toHaveBeenCalledWith(2, 'table', expect.anything())
     expect(api.dashboard).toHaveBeenCalledTimes(1)
-    expect(screen.getAllByRole('listitem').map((card) => card.getAttribute('data-widget'))).toEqual(
-      ['1:table', '2:table', '3:table']
-    )
+    expect(cardsShown()).toEqual(['1:table', '2:table', '3:table'])
   })
 
   it('says the read failed and offers Try again', async () => {

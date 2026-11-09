@@ -61,7 +61,8 @@ export function RunFigures({ row, at }: { row: ResultRow; at: number }) {
   )
 }
 
-const ResultLine = memo(function ResultLine({
+/** One row of a screen's matches (also the dashboard card's row): 56 dp, one button. */
+export const ResultLine = memo(function ResultLine({
   row,
   live,
   runAt,
