@@ -9,3 +9,7 @@ export const UNIVERSES_KEY = ['sudarshan', 'screener', 'universes'] as const
 export const TODAY_KEY = ['sudarshan', 'screener', 'today'] as const
 export const MEMBERSHIP_KEY = ['sudarshan', 'screener', 'membership'] as const
 export const membershipKey = (listId: number) => [...MEMBERSHIP_KEY, listId] as const
+export const DASHBOARD_KEY = ['sudarshan', 'screener', 'dashboard'] as const
+/** One card, read alone: the dashboard's `widget` op, addressed by its screen and its kind. */
+export const widgetKey = (screenId: number, kind: string) =>
+  [...DASHBOARD_KEY, 'widget', screenId, kind] as const

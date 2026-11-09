@@ -29,12 +29,12 @@ import { AddSymbolSheet } from '@/sudarshan/watchlist/AddSymbolSheet'
 import { DeleteDialog, NameDialog } from '@/sudarshan/watchlist/ListDialogs'
 import { ListTabs, PANEL_ID, tabId } from '@/sudarshan/watchlist/ListTabs'
 import { LiveList } from '@/sudarshan/watchlist/LiveList'
+import { OPEN_LIST_KEY } from '@/sudarshan/watchlist/openList'
 import type { OrderRequest } from '@/sudarshan/watchlist/SymbolSheet'
 import { useOverlay } from '@/sudarshan/watchlist/useOverlay'
 import { MAX_ITEMS, useWatchlists } from '@/sudarshan/watchlist/useWatchlists'
 
-/** The list that was open last on this device: a convenience, so it lives in this browser only. */
-export const OPEN_LIST_KEY = 'sudarshan-watchlist-open'
+export { OPEN_LIST_KEY }
 
 function readOpenList(): number | null {
   try {

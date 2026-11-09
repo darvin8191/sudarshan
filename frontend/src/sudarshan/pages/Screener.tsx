@@ -16,6 +16,7 @@ import {
 } from '@/sudarshan/books/cards/parts'
 import { istTime } from '@/sudarshan/books/time'
 import { droppedHere } from '@/sudarshan/screener/actions'
+import { Dashboard } from '@/sudarshan/screener/Dashboard'
 import { DeleteSheet } from '@/sudarshan/screener/DeleteSheet'
 import { History } from '@/sudarshan/screener/History'
 import { Library } from '@/sudarshan/screener/Library'
@@ -76,12 +77,13 @@ const TABS: PanelTab[] = [
   { id: 'edit', label: 'Edit' },
 ]
 
-/** Screens and the Library, the two things the home of the Screener holds. */
+/** The Dashboard, Screens and the Library: what the home of the Screener holds. */
 function HomeTabs({ home, onTab }: { home: HomeTab; onTab: (tab: HomeTab) => void }) {
   return (
     <div role="tablist" aria-label="Screener" className="flex items-center gap-1.5">
       {(
         [
+          ['dashboard', 'Dashboard'],
           ['screens', 'Screens'],
           ['library', 'Library'],
         ] as const
@@ -261,6 +263,26 @@ export default function Screener() {
             />
           )}
         </ScreenPage>
+      ) : address.home === 'dashboard' ? (
+        <section className="flex flex-col gap-2">
+          <HomeTabs home={address.home} onTab={setTab} />
+          {!state ? (
+            query.isPending ? (
+              <LoadingCards />
+            ) : null
+          ) : switchedOff ? (
+            <EmptyCard title="Nothing is being screened" hint={WORDS.switched_off} />
+          ) : (
+            <Dashboard
+              address={address}
+              state={state}
+              hearing={hearing}
+              openScreen={openScreen}
+              openSheet={openSheet}
+              closeSheet={closeSheet}
+            />
+          )}
+        </section>
       ) : address.home === 'library' ? (
         <section className="flex flex-col gap-2">
           <HomeTabs home={address.home} onTab={setTab} />

@@ -48,9 +48,9 @@ def health(now_ms: int, *, state="connected", live=True, age=0.5) -> bytes:
                        "market_status": {"NSE_EQ": "NORMAL_OPEN"}}).encode()  # fmt: skip
 
 
-def frame(key: str, at: int, ltp: float, vtt: int, cp: float = 90.0) -> bytes:
+def frame(key: str, at: int, ltp: float, vtt: int, cp: float = 90.0, ltq: int = 1) -> bytes:
     return json.dumps(
-        {"key": key, "ltp": ltp, "ltt": at, "ltq": 1, "vtt": vtt, "cp": cp, "ts_recv": at}
+        {"key": key, "ltp": ltp, "ltt": at, "ltq": ltq, "vtt": vtt, "cp": cp, "ts_recv": at}
     ).encode()
 
 
@@ -108,7 +108,7 @@ def test_frames_become_sealed_bars_a_live_subject_and_a_run(world):
             sealed += source.on_frame(HEALTH, health(at - 1000), at - 1000)
             vtt += 10
             price = 100.0 + minute * 0.5 + (0.1 if second == 35 else 0)
-            sealed += source.on_frame(RELIANCE, frame(RELIANCE, at, price, vtt), at)
+            sealed += source.on_frame(RELIANCE, frame(RELIANCE, at, price, vtt, ltq=10), at)
         clock["now"] = at + 30_000
         sealed += source.on_clock(clock["now"])
     source.persist(sealed)
@@ -130,8 +130,8 @@ def test_frames_become_sealed_bars_a_live_subject_and_a_run(world):
     assert (candle.o, candle.c, candle.v) == (10000, 10710, 300)
 
     # the run loop judges the live bars: close 107.10 > 100 is a hit
-    store.write(
-        OWNER, lambda tx: tx.screen_insert("Live", spec.check(SPEC), "active", clock["now"])
+    store.write(  # made before the open, so the 09:30 check is its own
+        OWNER, lambda tx: tx.screen_insert("Live", spec.check(SPEC), "active", ms(DAY, "09:00"))
     )
     clock["now"] = ms(DAY, "09:30:05")
     made = runner.Runner(store, source, lambda: clock["now"], Calendar())

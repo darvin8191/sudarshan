@@ -1,11 +1,13 @@
 // Fixtures for the Screener's tests: screens, states and a stand-in for the shared connection.
 import type {
+  Dashboard,
   EngineLine,
   ResultRow,
   RunRow,
   ScreenerState,
   ScreenRow,
   ScreenSpec,
+  WidgetCard,
 } from '@/sudarshan/screener/types'
 
 export const NOW = Date.UTC(2026, 10, 9, 5, 15, 0)
@@ -137,4 +139,54 @@ export function fakeSocket(connected = true) {
     },
     count: (event: string) => handlers.get(event)?.size ?? 0,
   }
+}
+
+/** One dashboard card as the `dashboard` and `widget` ops answer it (a table of two rows). */
+export function widgetCard(over: Partial<WidgetCard> = {}): WidgetCard {
+  const screenId = over.screen_id ?? 1
+  return {
+    screen_id: screenId,
+    kind: 'table',
+    position: 0,
+    rows: 10,
+    sort_by: null,
+    value_clauses: null,
+    name: '15-min EMA cross',
+    status: 'active',
+    status_reason: null,
+    where: 'F&O stocks · 15-min',
+    mode: 'intraday',
+    mode_words: '15-min closes',
+    day_only: false,
+    waits: null,
+    next_at: NOW + 1_800_000,
+    line: {
+      kind: 'real_time',
+      words: 'Real-time · next check 10:45',
+      live: true,
+      state: 'real_time',
+    },
+    rows_pending: false,
+    run: runRow(10, { screen_id: screenId }),
+    matches: 2,
+    rows_shown: [resultRow('INFY', { rank: 1 }), resultRow('SBIN', { rank: 2, change_pct: -0.6 })],
+    more: 0,
+    not_checked: { count: 0, reasons: [] },
+    list: { id: 5, name: 'Screener: 15-min EMA cross', count: 2 },
+    not_live_words: null,
+    ...over,
+  }
+}
+
+export function dashboard(widgets: WidgetCard[] = [widgetCard()], over: Partial<Dashboard> = {}) {
+  return {
+    version: 0,
+    name: 'Dashboard',
+    suggested: true,
+    widgets: widgets.map((card, position) => ({ ...card, position })),
+    limits: { widgets: 20 },
+    last_run_id: 10,
+    server_time: NOW,
+    ...over,
+  } satisfies Dashboard
 }

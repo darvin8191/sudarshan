@@ -244,6 +244,158 @@ export interface Today {
   session?: number
 }
 
+// ---- the dashboard (M9.16): a widget is addressed by its screen and its kind, never by an id ----
+export type WidgetKind = 'table' | 'count'
+export type CheckMode = 'intraday' | 'forming_day' | 'after_close'
+
+export interface WidgetSort {
+  by: 'change_pct' | 'ltp' | 'entered' | 'value'
+  order: 'asc' | 'desc'
+  /** Only with `by: 'value'`. */
+  clause?: string
+}
+
+/** What a card's line is, for the icon; `words` is the server's sentence, shown as it came. */
+export type CardLineKind =
+  | 'stopped'
+  | 'paused'
+  | 'engine'
+  | 'waiting'
+  | 'waits'
+  | 'closed'
+  | 'feed_down'
+  | 'after_close'
+  | 'partial'
+  /** A count card while checks arrive: it shows no prices, so it never says Real-time. */
+  | 'checking'
+  | 'real_time'
+
+export interface CardLine {
+  kind: CardLineKind
+  /** For a card that is not live this is the engine line's own sentence (why it is not). */
+  words: string
+  /** True only while checks and ticks arrive: the page may override it, never the other way. */
+  live: boolean
+  state: EngineState
+}
+
+export interface WidgetCard {
+  screen_id: number
+  kind: WidgetKind
+  position: number
+  rows: 5 | 10 | 20
+  /** As used: null when the widget sorts by a line the screen no longer has. */
+  sort_by: WidgetSort | null
+  value_clauses: string[] | null
+  name: string
+  status: ScreenStatus
+  status_reason: string | null
+  /** 'F&O stocks · 5-min'. */
+  where: string
+  mode: CheckMode
+  /** 'Forming day candle · each 15-min close', 'After the close (16:05)', '5-min closes'. */
+  mode_words: string
+  /** The screen reads only day candles and session levels, so "when it checks" is the owner's. */
+  day_only: boolean
+  /** Why the screen cannot judge yet, or null. */
+  waits: string | null
+  /** This screen's own next check (epoch ms): today's, else the next trading day's. */
+  next_at: number | null
+  line: CardLine
+  /** Why the card is not live, in the engine line's own words; null while the engine is real-time. */
+  not_live_words: string | null
+  /**
+   * True for a card the dashboard read did not have time to work out: it carries its identity, its
+   * screen's name and state and no rows, and the page reads it with the widget read. The facts
+   * below are then null or empty.
+   */
+  rows_pending: boolean
+  run: RunRow | null
+  /**
+   * Page only, never sent: the run the shown rows belong to, set while a pushed run has moved
+   * `run` ahead of rows the card's own read has not yet replaced.
+   */
+  read_run?: RunRow | null
+  matches: number | null
+  /** A table: at most `rows`, in the widget's order, ranks renumbered to it. */
+  rows_shown: ResultRow[]
+  /** Matches past `rows`. */
+  more: number
+  not_checked: { count: number; reasons: string[] } | null
+  /** Its automatic watchlist. */
+  list: { id: number | null; name: string | null; count: number } | null
+  /** A count card only. */
+  counts?: {
+    entered_today: number
+    exited_today: number
+    series: Array<{ at: number; matches: number }>
+    series_words: string
+  }
+}
+
+export interface Dashboard {
+  /** 0 while the layout is only a suggestion (one table for each Active screen). */
+  version: number
+  name: string
+  suggested: boolean
+  widgets: WidgetCard[]
+  limits: { widgets: number }
+  last_run_id: number
+  server_time: number
+}
+
+/** The dashboard changed on another screen: read it again when this page's version is older. */
+export interface DashboardPush {
+  version: number
+}
+
+/** `widget_add`: a screen or a preset (one of them), made in one step. */
+export interface WidgetAdd {
+  version: number
+  screen_id?: number
+  preset?: string
+  kind?: WidgetKind
+  rows?: 5 | 10 | 20
+  sort_by?: WidgetSort | null
+  value_clauses?: string[] | null
+  /** Start the screen after adding it (default true); it stays Paused at the Active limit. */
+  start?: boolean
+  /** A day-only screen: when it checks. Written to the screen itself. */
+  when?: 'during_day' | 'after_close'
+}
+
+/** `widget_update` (PATCH, the route's id is the screen): `kind` is the widget's kind now. */
+export interface WidgetUpdate {
+  version: number
+  kind: WidgetKind
+  set: {
+    /** A new kind. */
+    kind?: WidgetKind
+    rows?: 5 | 10 | 20
+    sort_by?: WidgetSort | null
+    value_clauses?: string[] | null
+  }
+}
+
+/** `widget_order`: the whole layout, in the order wanted. */
+export interface WidgetOrder {
+  version: number
+  keys: Array<[number, WidgetKind]>
+}
+
+/** What a dashboard write answers: the version the dashboard is at now. */
+export interface DashboardWritten {
+  version: number
+  /** The server's sentence, shown as it came ('Removed from the dashboard. ...'). */
+  notice?: string | null
+}
+
+export interface WidgetAdded extends DashboardWritten {
+  kind: WidgetKind
+  /** The screen as it is now (made from a preset, started, or changed by `when`). */
+  screen: ScreenRow
+}
+
 // ---- pushes (design 4.5) ------------------------------------------------------------------------
 export interface RunPush {
   screen_id: number

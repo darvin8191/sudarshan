@@ -4,6 +4,8 @@
 import axios from 'axios'
 import { webClient } from '@/api/client'
 import {
+  type Dashboard,
+  type DashboardWritten,
   type PresetCard,
   type Preview,
   type ResultRow,
@@ -16,6 +18,12 @@ import {
   type ScreenSpec,
   type Today,
   type UniverseOption,
+  type WidgetAdd,
+  type WidgetAdded,
+  type WidgetCard,
+  type WidgetKind,
+  type WidgetOrder,
+  type WidgetUpdate,
   WORDS,
 } from './types'
 
@@ -229,6 +237,12 @@ export function inRupees<T extends { rows: ResultRow[] }>(answer: T): T {
 
 const BASE = '/sudarshan/screener/api'
 
+/** A card's rows come in paise, as results do. */
+const cardInRupees = (card: WidgetCard): WidgetCard => ({
+  ...card,
+  rows_shown: inRupees({ rows: card.rows_shown }).rows,
+})
+
 export interface ScreenDraft {
   spec: ScreenSpec
   /** One id per Save, so a resend after a lost answer returns the screen already made. */
@@ -244,6 +258,41 @@ export type ScreenChange =
 export const screenerApi = {
   state: () =>
     call<ScreenerState>(webClient.get(`${BASE}/state`, { timeout: READ_MS }), switchedOff),
+  /** The dashboard: every card, those past the read's time budget without rows (`rows_pending`). */
+  dashboard: async (signal?: AbortSignal) => {
+    const read = await call<Dashboard>(
+      webClient.get(`${BASE}/dashboard`, { timeout: READ_MS, signal })
+    )
+    return { ...read, widgets: read.widgets.map(cardInRupees) }
+  },
+  /** One card, addressed by its screen and its kind. */
+  widget: async (screenId: number, kind: WidgetKind, signal?: AbortSignal) =>
+    cardInRupees(
+      await call<WidgetCard>(
+        webClient.get(`${BASE}/dashboard/widgets/${screenId}`, {
+          params: { kind },
+          timeout: READ_MS,
+          signal,
+        })
+      )
+    ),
+  /** Add a widget for a screen, or for a preset (the screen and the widget in one step). */
+  widgetAdd: (body: WidgetAdd) =>
+    call<WidgetAdded>(webClient.post(`${BASE}/dashboard/widgets`, body, { timeout: CHANGE_MS })),
+  widgetUpdate: (screenId: number, body: WidgetUpdate) =>
+    call<DashboardWritten>(
+      webClient.patch(`${BASE}/dashboard/widgets/${screenId}`, body, { timeout: CHANGE_MS })
+    ),
+  widgetRemove: (screenId: number, kind: WidgetKind, version: number) =>
+    call<DashboardWritten>(
+      webClient.delete(`${BASE}/dashboard/widgets/${screenId}`, {
+        params: { kind, version },
+        timeout: CHANGE_MS,
+      })
+    ),
+  /** The whole layout, in the order wanted, as [screen id, kind] pairs. */
+  widgetOrder: (body: WidgetOrder) =>
+    call<DashboardWritten>(webClient.post(`${BASE}/dashboard/order`, body, { timeout: CHANGE_MS })),
   create: (draft: ScreenDraft) =>
     call<ScreenRow>(webClient.post(`${BASE}/screens`, draft, { timeout: CHANGE_MS })),
   change: (id: number, change: ScreenChange) =>

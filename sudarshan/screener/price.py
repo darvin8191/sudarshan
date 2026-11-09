@@ -31,6 +31,9 @@ return a value or a ``Why``. Pure: no I/O, no clock, no logging. Definitions:
 - ``unverified_in``: PAUSED when a candle a clause reads was built while the price feed paused and
   has not been repaired. The engine passes the span each operand reads (``orb_span`` gives the
   opening range's).
+- ``day_open``, ``day_high`` and ``day_low`` are the exchange's (MEDIUM-B5): the day candle the
+  feed carries, the pre-open price as the open (candles.py). ``day_unknown_in`` says when no frame
+  has carried it yet: "Not checked: the day's open, high and low are not known yet", never the first trade.
 """
 
 from __future__ import annotations
@@ -44,6 +47,7 @@ from sudarshan.screener.rolling import rolling_max, rolling_min
 from sudarshan.screener.types import (
     NO_CANDLE,
     NO_DATA,
+    NO_EXCHANGE_DAY,
     PAUSED,
     UNVERIFIED,
     WARMING,
@@ -241,6 +245,15 @@ def unverified_in(series: Series, first: int, after: int) -> Why | None:
     if not flagged.size:
         return None
     return Why(PAUSED, (int(series.start[first + int(flagged[0])]),))
+
+
+def day_unknown_in(series: Series, first: int, after: int) -> Why | None:
+    """``NO_DATA`` ("day_open") when a candle in ``[first, after)`` is today's day candle and the
+    exchange's open, high and low have not come with any frame yet (MEDIUM-B5): the first trade
+    after 09:15 is not the day's open, so nothing stands in for it."""
+    if np.any(series.flags[first:after] & NO_EXCHANGE_DAY):
+        return Why(NO_DATA, ("day_open",))
+    return None
 
 
 def extremum_at(series: Series, side: str, n: int, source: str, index: int) -> Value:

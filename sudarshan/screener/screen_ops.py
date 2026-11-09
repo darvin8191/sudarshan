@@ -128,6 +128,7 @@ def sched_screen(row: Mapping[str, Any]) -> scheduler.Screen:
         run["on"],
         tf if isinstance(tf, int) else 0,
         SEGMENTS_OF.get(stored["universe"]["kind"], frozenset({"NSE_EQ"})),
+        row.get("updated_at") or 0,  # every change moves the version (store.screen_change)
     )
 
 
@@ -162,9 +163,9 @@ def next_check(ctx, now: int, active: Sequence[scheduler.Screen], sessions) -> i
     return found
 
 
-def engine_line(ctx, now: int, active: Sequence[scheduler.Screen], sessions=None) -> dict[str, Any]:
-    """The line under the header: the runtime's facts when it has them, else sessions and store;
-    the next check either way (MEDIUM-3)."""
+def engine_of(ctx, now: int, active: Sequence[scheduler.Screen], sessions=None) -> words.Engine:
+    """The runtime's facts when it has them, else sessions and store; the next check either way
+    (MEDIUM-3)."""
     facts = ctx.parts.get("engine")
     sessions = _sessions(ctx, now) if sessions is None else sessions
     base: dict[str, Any] = {"now": now, "enabled": ctx.enabled}
@@ -174,9 +175,12 @@ def engine_line(ctx, now: int, active: Sequence[scheduler.Screen], sessions=None
         base["trading"] = any(s.start <= now < s.end for s in sessions.values())
         base["feed"] = "not_linked"  # no feed link registered: never claim real time (rule 7)
     base["next_at"] = next_check(ctx, now, active, sessions)
-    engine = words.Engine(
-        **{k: v for k, v in base.items() if k in words.Engine.__dataclass_fields__}
-    )
+    return words.Engine(**{k: v for k, v in base.items() if k in words.Engine.__dataclass_fields__})
+
+
+def engine_line(ctx, now: int, active: Sequence[scheduler.Screen], sessions=None) -> dict[str, Any]:
+    """The line under the header, e.g. 'Real-time · next check 10:45'."""
+    engine = engine_of(ctx, now, active, sessions)
     state = words.engine_state(engine)
     return {
         "state": state,
@@ -224,12 +228,19 @@ def _clauses(node) -> list[dict]:
     return out
 
 
-def values_text(stored: Mapping[str, Any], found: Mapping[str, Any] | None) -> str:
-    """'RSI 61.2 · OI +4.1%': the first two clause values of a match, labelled."""
+def values_text(
+    stored: Mapping[str, Any], found: Mapping[str, Any] | None, only: Sequence[str] | None = None
+) -> str:
+    """'RSI 61.2 · OI +4.1%': the first two clause values of a match, labelled (``only``: the
+    clauses a dashboard widget chose, in its order)."""
     if not found:
         return ""
     parts = []
-    for clause in _clauses(stored.get("where")):
+    clauses = _clauses(stored.get("where"))
+    if only:
+        by_id = {c["id"]: c for c in clauses}
+        clauses = [by_id[i] for i in only if i in by_id]
+    for clause in clauses:
         value = found.get(clause["id"])
         if isinstance(value, dict) and value.get("l") is not None:
             label = _label(clause["left"])
@@ -272,6 +283,7 @@ def result_rows(
     values: Mapping[str, Any],
     members: Sequence[Mapping[str, Any]],
     now: int,
+    value_clauses: Sequence[str] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """(rows, not_checked) of a run: every instrument that matched, best ranked first, with its
     membership chip; the not-checked count and its reasons."""
@@ -306,7 +318,7 @@ def result_rows(
                 "symbol": change["symbol"],
                 "exchange": change["exchange"],
                 "rank": position,
-                "values": values_text(stored, found),
+                "values": values_text(stored, found, value_clauses),
                 "forming": bool(found.get("_forming")),
                 "chip": _chip_of(
                     member,
@@ -592,7 +604,7 @@ async def delete(ctx, args: Mapping[str, Any]) -> dict[str, Any]:
                 now,
                 coalesce=True,
             )
-        tx.screen_remove(screen_id)
+        tx.screen_remove(screen_id, now)
         return {"deleted": screen_id, "removed_from_list": left}
 
     deleted = _translate(lambda: store.write(OWNER, remove))

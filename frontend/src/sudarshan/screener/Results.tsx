@@ -9,8 +9,9 @@ import { ago, keyOf, type MarketOpen } from '@/sudarshan/dashboard/live'
 import type { FeedState as LiveFeed } from '@/sudarshan/live/useFrameLines'
 import { describe, priceDecimals } from '@/sudarshan/watchlist/rows'
 import { type LiveRow, useLiveRows } from '@/sudarshan/watchlist/useLiveRows'
-import { Figures, figuresOf } from '@/sudarshan/watchlist/WatchlistRows'
+import { Figures, type FigureValues, figuresOf } from '@/sudarshan/watchlist/WatchlistRows'
 import { ChipMark } from './ChipMark'
+import { whenWords } from './cardLine'
 import type { Hearing } from './push'
 import { followedItems } from './resultItems'
 import type { ResultRow, Results as ResultsData, ScreenRow } from './types'
@@ -55,13 +56,77 @@ export function RunFigures({ row, at }: { row: ResultRow; at: number }) {
       <span className="flex items-center gap-1 text-xs font-semibold">
         {row.change_pct !== null && formatPercent(row.change_pct)}
         <Clock aria-hidden="true" className="size-3" />
-        at the run, {istTime(at).slice(0, 5)}
+        at the run, {whenWords(at, Date.now())}
       </span>
     </span>
   )
 }
 
-const ResultLine = memo(function ResultLine({
+/**
+ * What a row draws from the live stream, as plain figures: a row redraws only when one of them
+ * changes, so a tick frame redraws the rows that ticked and no other (the live hook answers new
+ * objects for every row every frame, which would defeat `memo` if the row took them whole).
+ */
+export interface RowLive {
+  hasLive: boolean
+  ltp: number | null
+  change: number | null
+  changePercent: number | null
+  direction: FigureValues['direction']
+  stale: boolean
+  /** When the last tick came, only while the row is stale: it names the age. */
+  staleAt: number | null
+}
+
+export const NO_LIVE: RowLive = {
+  hasLive: false,
+  ltp: null,
+  change: null,
+  changePercent: null,
+  direction: null,
+  stale: false,
+  staleAt: null,
+}
+
+export function rowLiveOf(live: LiveRow | undefined): RowLive {
+  // A row with no price yet shows the price at the run, dated, rather than a dash.
+  if (!live || live.view.ltp === null) return NO_LIVE
+  const figures = figuresOf(live)
+  return {
+    hasLive: true,
+    ltp: figures.ltp,
+    change: figures.change,
+    changePercent: figures.changePercent,
+    direction: figures.direction,
+    stale: figures.stale,
+    staleAt: live.stale ? live.view.at : null,
+  }
+}
+
+/** The clock a row is given: only a stale row's age moves with it, so the others never redraw for it. */
+export const clockFor = (live: RowLive, now: number) => (live.staleAt !== null ? now : 0)
+
+export const sameRowLive = (a: RowLive, b: RowLive) =>
+  a.hasLive === b.hasLive &&
+  a.ltp === b.ltp &&
+  a.change === b.change &&
+  a.changePercent === b.changePercent &&
+  a.direction === b.direction &&
+  a.stale === b.stale &&
+  a.staleAt === b.staleAt
+
+/** One row of a screen's matches (also the dashboard card's row): 56 dp, one button. */
+export const ResultLine = memo(
+  ResultFace,
+  (a, b) =>
+    a.row === b.row &&
+    a.runAt === b.runAt &&
+    a.now === b.now &&
+    a.onOpen === b.onOpen &&
+    sameRowLive(a.live, b.live)
+)
+
+function ResultFace({
   row,
   live,
   runAt,
@@ -69,14 +134,15 @@ const ResultLine = memo(function ResultLine({
   onOpen,
 }: {
   row: ResultRow
-  live: LiveRow | undefined
+  live: RowLive
   runAt: number
+  /** The clock, given only while the row is stale (its age moves each second); 0 otherwise. */
   now: number
   onOpen: (key: string) => void
 }) {
   const named = describe(row.symbol, row.exchange)
   const key = KEY(row)
-  const stale = live?.stale === true
+  const stale = live.stale
   return (
     <li data-stale={stale || undefined} data-result={key}>
       <button
@@ -99,22 +165,29 @@ const ResultLine = memo(function ResultLine({
             {named.detail}
           </span>
           <Values row={row} />
-          {stale && live && live.view.at !== null && (
+          {stale && live.staleAt !== null && (
             <span className="inline-flex items-center gap-1 text-xs font-semibold text-[color:var(--warning-text)]">
               <Clock aria-hidden="true" className="size-3" />
-              Stale · updated {ago(now - live.view.at)}
+              Stale · updated {ago(now - live.staleAt)}
             </span>
           )}
         </span>
-        {live ? (
-          <Figures {...figuresOf(live)} decimals={priceDecimals(row.exchange)} />
+        {live.hasLive ? (
+          <Figures
+            ltp={live.ltp}
+            change={live.change}
+            changePercent={live.changePercent}
+            direction={live.direction}
+            stale={live.stale}
+            decimals={priceDecimals(row.exchange)}
+          />
         ) : (
           <RunFigures row={row} at={runAt} />
         )}
       </button>
     </li>
   )
-})
+}
 
 /** "Not checked (12)": the reasons the screen could not judge some instruments, in the service's words. */
 export function NotChecked({ data }: { data: ResultsData['not_checked'] }) {
@@ -256,16 +329,19 @@ export function Results({
           className="overflow-hidden rounded-[1.125rem] border bg-card shadow-[var(--shadow-card)]"
         >
           <ul className="divide-y">
-            {rows.map((row) => (
-              <ResultLine
-                key={row.key ?? KEY(row)}
-                row={row}
-                live={liveByKey.get(KEY(row))}
-                runAt={data.run?.at ?? 0}
-                now={live.now}
-                onOpen={onOpen}
-              />
-            ))}
+            {rows.map((row) => {
+              const own = rowLiveOf(liveByKey.get(KEY(row)))
+              return (
+                <ResultLine
+                  key={row.key ?? KEY(row)}
+                  row={row}
+                  live={own}
+                  runAt={data.run?.at ?? 0}
+                  now={clockFor(own, live.now)}
+                  onOpen={onOpen}
+                />
+              )
+            })}
           </ul>
         </section>
       )}

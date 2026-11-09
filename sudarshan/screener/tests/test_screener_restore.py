@@ -94,9 +94,10 @@ def test_the_next_day_starts_with_only_its_own_bars(world):
     first_today = next(b for b in bars if b.start == ms(DAY2, "09:15"))
     day = candles.read(day1.bars, RELIANCE, DAY_TF, day1.market, ms(DAY2, "09:31")).candle(0)
     assert len(bars) == 16
-    assert (day.o, day.h, day.low, day.v) == (20000, 20750, 20000, 320), (
+    assert (day.o, day.h, day.low) == (20000, 20750, 20000), (
         "the day candle starts with yesterday's bars"
     )
+    assert day.v == 50_320, "the day's volume is the exchange's, the pre-open 50,000 included"
     assert first_today.v == 20, "the 09:15 bar counts the pre-open volume"
 
     # a restart later on day 2 reads day 2's bars back, and no others (with each bar's last trade)

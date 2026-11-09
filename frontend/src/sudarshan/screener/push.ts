@@ -4,9 +4,20 @@ import type { Socket } from 'socket.io-client'
 import { connectionCount } from '@/sudarshan/books/sharedSocket'
 import { WATCHLISTS_KEY } from '@/sudarshan/watchlist/useWatchlists'
 import { screenerApi } from './api'
-import { MEMBERSHIP_KEY, RESULTS_KEY, RUNS_KEY, runsKey, STATE_KEY, TODAY_KEY } from './keys'
+import { patchRun, readCard } from './dashboardCache'
+import {
+  DASHBOARD_KEY,
+  MEMBERSHIP_KEY,
+  RESULTS_KEY,
+  RUNS_KEY,
+  runsKey,
+  STATE_KEY,
+  TODAY_KEY,
+} from './keys'
 import { applyRun, applyState } from './stateCache'
 import type {
+  Dashboard,
+  DashboardPush,
   ResultRow,
   Results,
   RunPush,
@@ -86,6 +97,28 @@ export function onRun(client: QueryClient, push: RunPush): void {
   void client.invalidateQueries({ queryKey: [...RUNS_KEY, push.screen_id] })
   void client.invalidateQueries({ queryKey: TODAY_KEY })
   void client.invalidateQueries({ queryKey: MEMBERSHIP_KEY })
+  onRunDashboard(client, push)
+}
+
+/**
+ * The dashboard's cards of the screen that ran take the run line and the counts at once; the
+ * rows move once, when each card is read alone with the `widget` op (design 3.7, LOW-B7).
+ */
+function onRunDashboard(client: QueryClient, push: RunPush): void {
+  const held = client.getQueryData<Dashboard>(DASHBOARD_KEY)
+  const next = held ? patchRun(held, push, runOf(push)) : null
+  if (!next) return
+  client.setQueryData<Dashboard>(DASHBOARD_KEY, next)
+  for (const card of next.widgets) {
+    if (card.screen_id === push.screen_id) readCard(client, card).catch(() => {})
+  }
+}
+
+/** The layout was changed on another screen: read the dashboard again when this page's is older. */
+export function onDashboardPush(client: QueryClient, push: DashboardPush): void {
+  const held = client.getQueryData<Dashboard>(DASHBOARD_KEY)
+  if (held && push.version <= held.version) return
+  void client.invalidateQueries({ queryKey: DASHBOARD_KEY })
 }
 
 /** The history row a push stands for. */
@@ -156,8 +189,48 @@ export function mergeResults(held: Results, push: RunPush): Results {
   }
 }
 
+function suggestionMoved(shown: Dashboard, push: StatePush): boolean {
+  const held = new Set(shown.widgets.map((card) => card.screen_id))
+  const oldest = Math.min(...held)
+  const room = shown.widgets.length < shown.limits.widgets
+  return (
+    push.resync === true ||
+    push.removed.some((id) => held.has(id)) ||
+    push.screens.some((part) =>
+      part.status === 'active'
+        ? !held.has(part.id) && (room || part.id > oldest)
+        : held.has(part.id)
+    )
+  )
+}
+
 export function onStatePush(client: QueryClient, push: StatePush): void {
   const state = client.getQueryData<ScreenerState>(STATE_KEY)
+  // The engine's state moved (the 15:30 close, a feed drop): each card's own line, with its own
+  // next check, is worded by the server, so the cards are read again.
+  if (state && push.engine && push.engine.state !== state.engine.state)
+    void client.invalidateQueries({ queryKey: DASHBOARD_KEY })
+  // A layout that is only a suggestion is the Active screens at this moment (newest first, up to
+  // the limit), and no dashboard push says one was added, removed, paused or resumed. It is
+  // compared with the suggestion's own cards, not with the state cache, which a Pause made on
+  // this phone has already changed before the push arrives.
+  const shown = client.getQueryData<Dashboard>(DASHBOARD_KEY)
+  if (shown?.suggested && suggestionMoved(shown, push)) {
+    void client.invalidateQueries({ queryKey: DASHBOARD_KEY })
+  } else if (state && shown) {
+    // A screen edited elsewhere (its version moved): its cards' mode and day-only words are read again.
+    const moved = new Set(
+      push.screens
+        .filter((part) => {
+          const held = state.screens.find((row) => row.id === part.id)
+          return held !== undefined && held.version !== part.version
+        })
+        .map((part) => part.id)
+    )
+    for (const card of shown.widgets) {
+      if (moved.has(card.screen_id) && !card.rows_pending) readCard(client, card).catch(() => {})
+    }
+  }
   const next = state ? applyState(state, push) : null
   if (state && next) client.setQueryData<ScreenerState>(STATE_KEY, next)
   else void client.invalidateQueries({ queryKey: STATE_KEY })
@@ -182,6 +255,8 @@ export async function catchUp(client: QueryClient): Promise<void> {
     if (!more || runs.length === 0) break
   }
   noteSeen(after)
+  // The layout may have changed on another screen while this one was away, whether or not a run moved.
+  void client.invalidateQueries({ queryKey: DASHBOARD_KEY })
   if (moved) {
     // Which screens moved, and their lists, is the state's to say.
     void client.invalidateQueries({ queryKey: STATE_KEY })
@@ -250,12 +325,14 @@ export function useScreenerPush(client: QueryClient, socket: Socket | null): voi
     const run = (push: RunPush) => onRun(client, push)
     const state = (push: StatePush) => onStatePush(client, push)
     const lists = () => onListsPush(client)
+    const layout = (push: DashboardPush) => onDashboardPush(client, push)
 
     socket.on('connect', onConnect)
     socket.on('disconnect', onDisconnect)
     socket.on('sudarshan_screener_run', run)
     socket.on('sudarshan_screener_state', state)
     socket.on('sudarshan_screener_lists', lists)
+    socket.on('sudarshan_screener_dashboard', layout)
     if (socket.connected) onConnect()
     else hear('not_joined')
     return () => {
@@ -266,6 +343,7 @@ export function useScreenerPush(client: QueryClient, socket: Socket | null): voi
       socket.off('sudarshan_screener_run', run)
       socket.off('sudarshan_screener_state', state)
       socket.off('sudarshan_screener_lists', lists)
+      socket.off('sudarshan_screener_dashboard', layout)
       hear('unknown')
     }
   }, [client, socket])

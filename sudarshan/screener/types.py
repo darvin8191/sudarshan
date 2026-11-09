@@ -144,8 +144,9 @@ class Candle(NamedTuple):
 
 
 #: Candle flags: a bar built while the feed paused, one repaired from REST, one that took a late
-#: trade or the exchange's own 1-minute candle.
-UNVERIFIED, REPAIRED, LATE, FROM_I1 = 1, 2, 4, 8
+#: trade or the exchange's own 1-minute candle; and today's day candle whose open, high and low the
+#: exchange has not given yet (no frame carried its day candle: they are not the first trade's).
+UNVERIFIED, REPAIRED, LATE, FROM_I1, NO_EXCHANGE_DAY = 1, 2, 4, 8, 16
 _COLUMNS = ("start", "end", "session", "o", "h", "l", "c", "v", "oi", "atp", "flags")
 
 
@@ -356,3 +357,9 @@ class RunKey(NamedTuple):
         if not version.startswith("v"):
             raise ValueError(f"not a run key: {text!r}")
         return cls(int(screen), int(version[1:]), int(session), tf, int(k))
+
+
+def candles_in(tf: int, span_ms: int) -> int:
+    """How many candles of ``tf`` minutes a session of ``span_ms`` holds, its short last one counted.
+    The engine and the dashboard card both judge "needs more candles than a day gives" by this."""
+    return -(-span_ms // (tf * 60_000))

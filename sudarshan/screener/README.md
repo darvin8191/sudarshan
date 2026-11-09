@@ -136,6 +136,60 @@ words change, so an open page never keeps "Real-time" after the feed stops). The
 `/sudarshan/screener/internal/push`) are sealed under their own purpose, refused with 404 when
 nginx forwarded them, and never called by the page.
 
+## Dashboards
+
+**The dashboard (lane B, M9.16).** The Dashboard view's layout lives in `screener.db` (step 4: `dashboard`
+and `dashboard_widget`), behind one version that every write names; the first change (version 0) turns
+the suggestion (a table for each Active screen, newest first) into the stored layout and then applies
+itself. A widget is addressed by its screen and its kind, never by an id (the route's one `<id>` is the
+screen id): `GET /dashboard` (`dashboard`: `version`, `suggested`, `widgets`, `limits`, `last_run_id`),
+`GET /dashboard/widgets/<id>?kind=` (`widget`: one card; its `line` is the card's own: the next check is its screen's, and a count card says "Checking", never "Real-time"), `POST /dashboard/widgets` (`widget_add`:
+`{version, screen_id | preset, kind?, rows?, sort_by?, value_clauses?, start?, when?}`; a preset makes its
+screen and the widget in one transaction, a screen that would pass the Active limit is added Paused and the
+answer's `notice` says so), `PATCH /dashboard/widgets/<id>` (`widget_update`: `{version, kind, set}`, `kind`
+the widget's kind now and `set` any of `kind`, `rows`, `sort_by`, `value_clauses`),
+`DELETE /dashboard/widgets/<id>?kind=&version=` (`widget_remove`) and `POST /dashboard/order`
+(`widget_order`: `{version, keys: [[screen_id, kind], ...]}`, the whole layout).
+A card (`dashboard.py`, pure) carries the screen's name and state, how it is checked, the latest run's
+rows in the widget's order (ties by symbol), and a `line` and `not_live_words` that say why it is not live in the engine
+line's own words; the `dashboard` read works cards out in position order against a 1.5 s budget and the
+cards past it answer `rows_pending` with no rows, which the page reads with `widget`. Every write queues a
+`sudarshan_screener_dashboard` push (`{version}`) in its own transaction, so another screen reads the
+layout again; the bridge forwards every event in `contract.PUSH_EVENTS`, so a new one needs no bridge edit.
+A run's push patches only a card's counts and run line: rows move once, from the card's own read.
+
+**The Dashboard tab (lane C, M9.16).** `/screener` opens on the Dashboard: the tab row is Dashboard, Screens,
+Library, the Dashboard has no `tab` in the address, Screens is `?tab=screens` and the Library `?tab=library`,
+and moving between them replaces the history entry. The sheets are in the address so Back closes them first:
+`?sheet=add`, and one widget's settings at `?sheet=widget&s=<screen id>&k=<kind>` (a widget is a screen and a
+kind, never an id, so a suggested layout at version 0 has addresses too); a widget row's symbol sheet is
+`?sheet=symbol&k=EXCHANGE:SYMBOL&s=<screen id>&wk=<kind>`. The view reads `dashboard` once when it opens and never
+on a timer; it is read again only when another screen changes the layout (`sudarshan_screener_dashboard` with a
+newer version), on every reconnect's catch-up (whether or not a run moved), when the engine's state changes, and,
+while the layout is only a suggestion, when a screen is added, removed, paused or resumed. Cards past the read's budget (`rows_pending`) are read one
+by one with `widget`, in card order. A table card shows the screen's rows (5, 10 or 20) with the price and the
+change, at most two clause values, "and N more" and the screen's automatic list as 48 dp links. One live
+subscription serves the whole dashboard (the shown rows of every card in card order, at most 100 prices), so a
+card says "Real-time" only while its own rows tick, and says "Prices at the run" when none of its rows is
+followed. A card's status, next check and engine line come from the shared state cache, so a state push
+changes every card; its own words are used only while the state still agrees with them. A pushed run changes a
+card's run line and counts at once and the rows move once, from that card's own `widget` read.
+Adding, arranging and removing (C2): the Add sheet (`?sheet=add`) offers a screen of yours not yet on the
+dashboard for the chosen kind, or a ready-made one that makes the screen and the widget in one step, shows the
+screen's conditions as sentences, the rows, "When it checks" for a screen that reads day candles alone and the
+"Start checking after adding" switch (off, with the screen added Paused, when the Active limit is used). A widget's
+options (`?sheet=menu&s=&k=`) move it up or down (the whole order is sent at once, as `[screen id, kind]` pairs),
+open its screen or remove it after asking. Settings (`?sheet=widget&s=&k=`) show the screen's full name and send
+each choice (kind, rows, sort, up to two values) as one write; "When it checks" is a normal edit of the screen.
+Every write names the dashboard version; a version conflict, or a widget gone while its screen is still held,
+reads the dashboard again and says the dashboard was changed on another screen. With all 50 of OpenAlgo's
+watchlists in use, a ready-made screen is first made on a list the owner chooses.
+The count widget (C3) shows the matches now as one big figure, the day's entries and exits, the run line, the mode
+chip for a day-only screen and a strip of matches at each check (one bar for each, the latest labelled; the
+service's sentence is its text for a screen reader). Its line says "Checking" with the next check and never
+"Real-time", since it shows no prices; a pushed run adds its point to the strip at once and the card's own read
+corrects it.
+
 ## Alerts
 
 A run worth telling (alerting.py decides) is one digest, sealed under the alerts' screener-digest
@@ -199,8 +253,8 @@ session's, on the phone.
 
 ## Storage
 
-`screener.db` (schema 2, `migrations.py`; step 2 adds each bar's running volume `cum` and last
-trade time `last_trade`): screens and their state, runs with their changes and values (kept 100
+`screener.db` (schema 4, `migrations.py`; step 2 adds each bar's running volume `cum` and last
+trade time `last_trade`, step 3 a pause's `key`, step 4 the dashboard and its widgets): screens and their state, runs with their changes and values (kept 100
 and 7 days), membership per screen, list and instrument (`first_seen`, `last_seen`, `exited_at`,
 `pinned`, never pruned, kept when a screen is deleted), the list as last seen (each add recorded
 before it is sent), the alert marks per session and the pauses (kept 7 days), the outbox (list
@@ -211,7 +265,27 @@ owner edit and run.
 `bar_today` holds one trading day: a start or midnight clears every earlier day and restores only
 today's bars, each with its running volume, so a restart's first bar carries its own volume. A
 restart opens a pause from the last seen mark: a candle that holds minutes the screener did not see
-is "Not checked", never judged whole.
+is "Not checked", never judged whole. An instrument no screen followed for a while (a screen paused
+and resumed, a watchlist that could not be read, the key limit) counts its volume again from when
+it comes back, and the stretch is kept as that instrument's own pause (with its key, written open
+when the instrument is let go and closed when it comes back, so a restart in between keeps it
+from the let-go): its candles that hold the stretch are "Not checked" too. A start that cannot follow
+anything at once (OpenAlgo's master contract downloading) counts the wait the same way for every
+instrument it had bars of. An instrument first followed after 09:15 (the first screen on its
+universe made or resumed later, or a restart for an instrument the store holds no bar of) was not
+watched from the open either: that stretch is its own pause too, so its first candle reads "Not
+checked" while its later candles are judged. A stretch before the open, or of 10 s or less, changes
+nothing.
+
+The day candle is the exchange's: its open, high and low come from the day candle every full-mode
+frame carries (the pre-open price is the open, as on every broker's chart), as it stood at the
+latest trade judged, and its volume is the exchange's running total there, the pre-open included.
+Until a frame has carried that candle (after a restart, until the next trade) they read "Not
+checked: the day's open, high and low are not known yet", never the first trade's. A stretch
+nobody watched earlier in the day no longer blanks the day once a trade after it has come; a
+pause after the latest trade still does. A start before the open that hears no pre-open frame
+(Upstox sends none from 09:08 to 09:15) takes the first trade of the session as its baseline, so
+the pre-open volume is in no bar.
 
 ## What the screener follows, and when
 
@@ -225,13 +299,20 @@ is "Not checked", never judged whole.
   its index's first price, follows that index, and is built at the next tick after it.
 - Keys past `SUDARSHAN_SCREENER_MAX_KEYS` are not claimed and read "Not checked: past the 320
   instruments the screener can follow tick by tick".
+- A screen made, resumed or edited during the session has one check, on the latest candle closed
+  by then (on time), and then follows its schedule: the day's earlier checks are never run at once,
+  so no list change or alert comes for a candle that closed before the latest one. An edit within
+  5 s after a close waits for that candle's check and runs no older one. A first check that a
+  restart delayed, and every check a restart missed after it, is made late and marked so. A screen
+  changed in the evening has one check on the day's last candle, at the change. A screen whose lines read only
+  day candles is judged on the forming day candle at each close of its run's timeframe.
 
 ## Not built yet
 
 - History before today and the daily stores (open interest, implied volatility, India VIX): they
   wait for the feed's REST governor (SV3, SV4). Until then a plan that needs more candles than one
   session holds reads "Not checked: needs 151 candles of 15 minutes; a day gives 25, ...", the
-  six presets that need them are not usable, and "Warming up · history loading" never shows.
+  eight presets that need them are not usable, and "Warming up · history loading" never shows.
 - Re-anchoring an option window at 09:16 and near its edge; reading a watchlist universe again at
   each run; refusing a screen at save when it would pass the key limit.
 - Compacting the not-checked rows: every not-checked instrument is still written to `run_change`

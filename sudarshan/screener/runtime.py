@@ -15,7 +15,9 @@ engine line). Its job (``run_feed``) does, in one asyncio task:
   store on its thread, a batch a tick;
 - pauses as the market alerts define them (S14): the feed not heard for 12 s, not connected or
   not live, or silence of the whole socket for over 10 s, inside a session, opens a pause; it is
-  closed when the feed is back. The pauses are what ``candles.read`` marks UNVERIFIED with.
+  closed when the feed is back. The pauses are what ``candles.read`` marks UNVERIFIED with, with
+  each key's own gaps: the stretch a key followed again was not followed (bars.follow_from),
+  kept in the store with its key (MEDIUM-1).
 
 What it does not do yet: history before today (SV3, the REST governor) and the daily stores
 (SV4); a plan that needs more candles than today holds is judged "warming up" by the engine.
@@ -51,11 +53,21 @@ from sudarshan.alerts.market.sessions import (
 from sudarshan.autologin.schedule import IST
 
 from . import candles, universe
-from .bars import Bar, Bars, Sealed
-from .engine import Context, Subject
+from .bars import UNFOLLOWED, Bar, Bars, Followed, Sealed
+from .engine import Context, Subject, timeframes
 from .runs import Member
 from .store import OWNER, StoreError, Tx
-from .types import DAY, MINUTE_TFS, NEEDS_HISTORY, OVER_LIMIT, WEEK, Plan, Series, Why
+from .types import (
+    DAY,
+    MINUTE_TFS,
+    NEEDS_HISTORY,
+    OVER_LIMIT,
+    WEEK,
+    Plan,
+    Series,
+    Why,
+    candles_in,
+)
 
 log = logging.getLogger("sudarshan.screener")
 
@@ -143,6 +155,8 @@ class LiveSource:
         self._open_pause: int | None = None
         #: The store row of the open feed pause (today's pauses are kept for a restart).
         self._open_pause_id: int | None = None
+        #: key -> (row id, start) of each key let go today and not followed again: its open gap row.
+        self._gap_rows: dict[str, tuple[int, int]] = {}
         self._seen_written = 0
         self.keys: frozenset[str] = frozenset()
         self.claimed_at: float = 0.0
@@ -179,7 +193,7 @@ class LiveSource:
         if frame is None and not self.bars.bars(member.key):
             return None
         series: dict[Any, Series] = {}
-        for tf in plan.need:
+        for tf in timeframes(plan):  # the run's own timeframe too: it says when one is due
             if tf in MINUTE_TFS or tf == DAY:
                 series[tf] = candles.read(self.bars, member.key, tf, self.market, boundary)
             else:
@@ -354,6 +368,7 @@ class LiveSource:
         previous = previous_trading_day(day, self.calendar.is_trading_day)
         self.market = Market(day_key(day), sessions, day_key(previous) if previous else 0)
         self._pauses, self._open_pause, self._open_pause_id, self._last = [], None, None, {}
+        self._gap_rows = {}
         self._rebuild_market(now)
         self._restore(now)
         self._restore_pauses(now)
@@ -363,20 +378,32 @@ class LiveSource:
         """Today's pauses after a start (release review MEDIUM-5, S14): the feed pauses an earlier
         run recorded (one it left open ends at its last seen mark), then a "service" pause from
         that mark to now, inside today's sessions. A candle that holds the minutes the service
-        never saw is then "Not checked", never judged on the minutes before the stop."""
+        never saw is then "Not checked", never judged on the minutes before the stop. A pause
+        that names a key is that key's gap (MEDIUM-1) and goes back to the bars."""
         sessions = list(self.market.sessions.values())
         session = self.market.today
+        gaps: list[tuple[str, Pause]] = []
+        let_go: dict[str, tuple[int, int]] = {}
 
         def read(tx: Tx) -> list[Pause]:
             raw = tx.meta_get(SEEN)
             seen = int(raw) if raw and raw.isdigit() else None
             kept: list[Pause] = []
+            gaps.clear()
+            let_go.clear()
             for row in tx.pauses(session):
                 end = row["end"]
+                if end is None and row.get("key"):  # a key let go and not back yet: still let go
+                    let_go[row["key"]] = (row["id"], row["start"])
+                    continue
                 if end is None:
                     end = max(row["start"], seen or row["start"])
                     tx.pause_close(row["id"], end)
-                kept.append(Pause(row["start"], end, row["why"]))
+                if row.get("key"):
+                    if end > row["start"]:  # an empty one was a stretch that was no gap
+                        gaps.append((row["key"], Pause(row["start"], end, row["why"])))
+                else:
+                    kept.append(Pause(row["start"], end, row["why"]))
             if seen is not None and sessions and now - seen > GAP_S * 1000:
                 start = max(seen, min(s.start for s in sessions))
                 end = min(now, max(s.end for s in sessions))
@@ -393,6 +420,9 @@ class LiveSource:
 
         try:
             self._pauses = self.store.write(OWNER, read)
+            self.bars.restore_gaps(gaps)
+            self.bars.restore_let_go({key: start for key, (_, start) in let_go.items()})
+            self._gap_rows = dict(let_go)
         except StoreError:
             log.exception("today's pauses could not be read back")
         self._rebuild_market(now)
@@ -555,7 +585,10 @@ class LiveSource:
         # Known only once a build has succeeded: a reuse rebuild that found the master still
         # downloading built nothing, and the claims a stop kept must stay until it can.
         self._keys_known = self._keys_known or built_ok
-        self.bars.follow_from(self.keys, now)  # a key first followed mid-session counts from here
+        # a key first followed mid-session, or followed again, counts from here (MEDIUM-1)
+        followed = self.bars.follow_from(self.keys, now, self.market)
+        self.persist(followed.sealed)
+        self._keep_gaps(followed)
         self.feed.follow(self.keys)
         self._rebuild_market(now)
         if not built:
@@ -704,6 +737,42 @@ class LiveSource:
         except StoreError:
             log.exception("the end of a pause of the price feed could not be recorded")
 
+    def _keep_gaps(self, followed: Followed) -> None:
+        """Each key's gap is kept with its key, so a restart today still marks that key's candles
+        (MEDIUM-1). A key let go gets its row at once, open from the moment it was let go, and the
+        comeback closes it (at the end of its gap, or at its start when the stretch was no gap), so
+        a restart in between keeps the gap from the let-go (round-3 review LOW-A2)."""
+        if not (followed.gaps or followed.let_go or followed.back):
+            return
+        session = self.market.today
+        gap_of = dict(followed.gaps)
+        rows = self._gap_rows
+
+        def write(tx: Tx) -> dict[str, tuple[int, int]]:
+            opened: dict[str, tuple[int, int]] = {}
+            for key in followed.back:
+                row = rows.get(key)
+                gap = gap_of.pop(key, None)
+                if row is not None:
+                    tx.pause_close(row[0], row[1] if gap is None else gap.end)
+                elif gap is not None:
+                    tx.pause_open(session, gap.start, gap.cause, end=gap.end, key=key)
+            for key, gap in gap_of.items():  # first followed after the open: never let go
+                tx.pause_open(session, gap.start, gap.cause, end=gap.end, key=key)
+            for key, at in followed.let_go:
+                if key not in rows:
+                    opened[key] = (tx.pause_open(session, at, UNFOLLOWED, key=key), at)
+            return opened
+
+        try:
+            opened = self.store.write(OWNER, write)
+        except StoreError:
+            log.exception("the gaps of instruments let go or followed again could not be recorded")
+            return
+        for key in followed.back:
+            rows.pop(key, None)
+        rows.update(opened)
+
     def persist(self, sealed: Sequence[Sealed]) -> None:
         if not sealed:
             return
@@ -731,7 +800,7 @@ def _day_holds(tf, grid) -> int | None:
     if tf in (DAY, WEEK):
         return 1
     if isinstance(tf, int) and tf > 0:
-        return -(-(grid.end - grid.start) // (tf * 60_000))
+        return candles_in(tf, grid.end - grid.start)
     return None
 
 

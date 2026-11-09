@@ -47,6 +47,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from database.engine_factory import create_db_engine
 
 from . import migrations
+from .contract import EVENT_DASHBOARD
 from .migrations import SchemaTooNew
 
 log = logging.getLogger("sudarshan.screener")
@@ -72,7 +73,7 @@ KEEP_OUTBOX_DAYS = 2
 OUTBOX_MAX_PENDING = 1_000
 
 #: Columns that hold JSON text; the store converts at the boundary.
-JSON_COLUMNS = frozenset({"spec", "marks", "values_json", "payload"})
+JSON_COLUMNS = frozenset({"spec", "marks", "values_json", "payload", "sort_by", "value_clauses"})
 FLAG_COLUMNS = frozenset(
     {"shared", "alerts_paused", "pinned", "added_by_screener", "in_list", "cas"}
 )
@@ -98,7 +99,24 @@ WORDS = {
         "the change."
     ),
     "stale_run": "This run judged an older version of the screen, so it was not kept.",
+    "dash_full": ("A dashboard holds up to 20 widgets. Remove one before adding another."),
+    "dash_twice": (
+        "This screen is already on the dashboard as a {kind}. Change that widget instead of "
+        "adding it again."
+    ),
 }
+
+#: The dashboard (M9.16, dashboards design 3.2): what a widget may be, checked here in code
+#: (the table carries no CHECK constraints).
+DASHBOARD_NAME = "Dashboard"
+WIDGET_LIMIT = 20
+WIDGET_KINDS = ("table", "count")
+WIDGET_ROWS = (5, 10, 20)
+WIDGET_DEFAULT_ROWS = 10
+WIDGET_SORTS = ("change_pct", "ltp", "entered", "value")
+WIDGET_ORDERS = ("asc", "desc")
+VALUE_CLAUSES_MAX = 2
+WIDGET_FIELDS = ("screen_id", "kind", "rows", "sort_by", "value_clauses")
 
 
 class StoreError(RuntimeError):
@@ -120,6 +138,10 @@ class VersionConflict(StoreError):
 
     def __init__(self, message: str = WORDS["version_conflict"]) -> None:
         super().__init__(message)
+
+
+class WidgetRefused(StoreError):
+    """A widget the dashboard will not hold: the sentence is for the owner."""
 
 
 class UnknownPrincipal(ValueError):
@@ -357,10 +379,12 @@ class Tx:
             raise VersionConflict()
         return self.screen(screen_id)  # type: ignore[return-value]
 
-    def screen_remove(self, screen_id: int) -> bool:
-        """A screen, its state and its alert marks. Its runs stay for the history until they are
-        pruned, and its membership rows stay for good (design 4.2): a removal the owner asked
-        for is still to be synced from them, and an item he kept stays wanted by them."""
+    def screen_remove(self, screen_id: int, now: int | None = None) -> bool:
+        """A screen, its state, its alert marks and its dashboard widgets (in this same
+        transaction; ``now`` stamps the dashboard it moves). Its runs stay for the history until
+        they are pruned, and its membership rows stay for good (design 4.2): a removal the owner
+        asked for is still to be synced from them, and an item he kept stays wanted by them."""
+        self.widgets_of_screen_delete(screen_id, clock_ms() if now is None else now)
         for name, column in (
             ("screen_state", "screen_id"),
             ("alert_state", "screen_id"),
@@ -390,6 +414,332 @@ class Tx:
                     screen_id=screen_id, principal=self.who, updated_at=now, **self._in(fields)
                 )
             )
+
+    # ---- the dashboard (M9.16, dashboards design 3.2 to 3.4) ----
+    @staticmethod
+    def _widget_out(row: Mapping | None) -> dict[str, Any] | None:
+        """A widget as the owner's pages see it: addressed by (screen_id, kind), never by id."""
+        out = Tx._out(row)
+        if out is not None:
+            out.pop("id", None)
+            out.pop("dashboard_id", None)
+        return out
+
+    def dashboard(self) -> dict[str, Any] | None:
+        """The owner's dashboard row, or None until his first change."""
+        t = self._t("dashboard")
+        row = self.conn.execute(select(t).where(self._mine(t)).order_by(t.c.id)).mappings()
+        return self._out(row.first())
+
+    def widgets(self, dashboard_id: int | None = None) -> list[dict[str, Any]]:
+        """The dashboard's widgets by position (the owner's only dashboard when none is named)."""
+        t = self._t("dashboard_widget")
+        if dashboard_id is None:
+            found = self.dashboard()
+            if found is None:
+                return []
+            dashboard_id = found["id"]
+        query = (
+            select(t)
+            .where(t.c.dashboard_id == dashboard_id, self._mine(t))
+            .order_by(t.c.position, t.c.id)
+        )
+        return [self._widget_out(row) for row in self.conn.execute(query).mappings()]  # type: ignore
+
+    def suggestion(self) -> list[dict[str, Any]]:
+        """What the dashboard shows before the owner's first change: a table widget for each
+        Active screen in the order the Screens tab shows them (newest first), at most 20."""
+        t = self._t("screen")
+        rows = self.conn.execute(
+            select(t.c.id)
+            .where(self._mine(t), t.c.status == "active")
+            .order_by(t.c.id.desc())
+            .limit(WIDGET_LIMIT)
+        )
+        return [
+            {
+                "screen_id": int(row[0]),
+                "kind": "table",
+                "position": index,
+                "rows": WIDGET_DEFAULT_ROWS,
+                "sort_by": None,
+                "value_clauses": None,
+            }
+            for index, row in enumerate(rows)
+        ]
+
+    def layout(self) -> dict[str, Any]:
+        """The dashboard as the page reads it: the stored layout, or the suggestion at version 0."""
+        row = self.dashboard()
+        if row is None:
+            return {"suggested": True, "version": 0, "name": DASHBOARD_NAME,
+                    "widgets": self.suggestion()}  # fmt: skip
+        return {"suggested": False, "version": row["version"], "name": row["name"],
+                "widgets": self.widgets(row["id"])}  # fmt: skip
+
+    @staticmethod
+    def _check_fields(fields: Mapping[str, Any], *, full: bool) -> dict[str, Any]:
+        """A widget's fields, checked (a ValueError for a programming error: the API's own
+        checker words these for the owner). ``full`` fills the defaults for a new widget."""
+        unknown = set(fields) - set(WIDGET_FIELDS)
+        if unknown:
+            raise ValueError(f"not a widget field: {sorted(unknown)!r}")
+        out = dict(fields)
+        if full:
+            out.setdefault("kind", "table")
+            out.setdefault("rows", WIDGET_DEFAULT_ROWS)
+            out.setdefault("sort_by", None)
+            out.setdefault("value_clauses", None)
+            if "screen_id" not in out:
+                raise ValueError("a widget names a screen")
+        if "screen_id" in out and (
+            isinstance(out["screen_id"], bool) or not isinstance(out["screen_id"], int)
+        ):
+            raise ValueError(f"not a screen id: {out['screen_id']!r}")
+        if "kind" in out and out["kind"] not in WIDGET_KINDS:
+            raise ValueError(f"not a widget kind: {out['kind']!r}")
+        if "rows" in out and (isinstance(out["rows"], bool) or out["rows"] not in WIDGET_ROWS):
+            raise ValueError(f"not a row count: {out['rows']!r}")
+        if out.get("sort_by") is not None:
+            sort = out["sort_by"]
+            if not isinstance(sort, Mapping) or set(sort) - {"by", "order", "clause"}:
+                raise ValueError(f"not a sort: {sort!r}")
+            if sort.get("by") not in WIDGET_SORTS or sort.get("order") not in WIDGET_ORDERS:
+                raise ValueError(f"not a sort: {sort!r}")
+            clause = sort.get("clause")
+            if sort["by"] == "value":
+                if not isinstance(clause, str) or not clause:
+                    raise ValueError("sorting by a value names its clause")
+            elif "clause" in sort:
+                raise ValueError("only sorting by a value names a clause")
+            out["sort_by"] = dict(sort)
+        if out.get("value_clauses") is not None:
+            ids = out["value_clauses"]
+            if (
+                not isinstance(ids, (list, tuple))
+                or len(ids) > VALUE_CLAUSES_MAX
+                or len(set(ids)) != len(ids)
+                or not all(isinstance(i, str) and i for i in ids)
+            ):
+                raise ValueError(f"not a list of up to two clause ids: {ids!r}")
+            out["value_clauses"] = list(ids)
+        return out
+
+    @staticmethod
+    def _check_room(current: Sequence[Mapping[str, Any]], screen_id: int, kind: str) -> None:
+        """One more widget: the limit and one widget per screen and kind, with their sentences."""
+        if len(current) >= WIDGET_LIMIT:
+            raise WidgetRefused(WORDS["dash_full"])
+        if any(w["screen_id"] == screen_id and w["kind"] == kind for w in current):
+            raise WidgetRefused(WORDS["dash_twice"].format(kind=kind))
+
+    def _open_layout(self, version: int) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+        """Where a write named ``version`` starts: the stored dashboard and its widgets, or at
+        version 0 with no row (None) the suggestion the first change keeps. Version 0 over an
+        existing row, and any version that is not the row's, is a VersionConflict."""
+        row = self.dashboard()
+        if version == 0:
+            if row is not None:
+                raise VersionConflict()
+            return None, self.suggestion()
+        if row is None or row["version"] != version:
+            raise VersionConflict()
+        return row, self.widgets(row["id"])
+
+    def _widget_row(self, dashboard_id: int, fields: Mapping[str, Any], position: int, now: int):
+        self.conn.execute(
+            insert(self._t("dashboard_widget")).values(
+                principal=self.who,
+                dashboard_id=dashboard_id,
+                position=position,
+                created_at=now,
+                updated_at=now,
+                **self._in({k: fields[k] for k in WIDGET_FIELDS}),
+            )
+        )
+
+    def _dashboard_make(
+        self, name: str, widgets: Sequence[Mapping[str, Any]], now: int
+    ) -> dict[str, Any]:
+        t = self._t("dashboard")
+        key = self.conn.execute(
+            insert(t).values(
+                principal=self.who, name=name, created_at=now, updated_at=now, version=1
+            )
+        ).inserted_primary_key[0]
+        for position, widget in enumerate(widgets):
+            self._widget_row(int(key), widget, position, now)
+        return self.dashboard()  # type: ignore[return-value]
+
+    def _dashboard_bump(self, row: Mapping[str, Any], now: int) -> dict[str, Any]:
+        t = self._t("dashboard")
+        done = self.conn.execute(
+            update(t)
+            .where(t.c.id == row["id"], self._mine(t), t.c.version == row["version"])
+            .values(version=row["version"] + 1, updated_at=now)
+        ).rowcount
+        if not done:
+            raise VersionConflict()
+        self._dashboard_push(row["version"] + 1, now)
+        return self.dashboard()  # type: ignore[return-value]
+
+    def _dashboard_push(self, version: int, now: int) -> None:
+        """Tell the owner's open pages the layout moved (queued in the write's own transaction, so
+        a push exists exactly when the write does; the newest pending one is the only one kept)."""
+        self.outbox_add(
+            "push", "dashboard", {"_event": EVENT_DASHBOARD, "version": version}, now, coalesce=True
+        )
+
+    def dashboard_create(
+        self, name: str, widgets: Sequence[Mapping[str, Any]], now: int
+    ) -> dict[str, Any]:
+        """The dashboard at version 1 with ``widgets`` in order. A VersionConflict when one
+        exists (two phones making the first change: the second is told), writing nothing."""
+        if self.dashboard() is not None:
+            raise VersionConflict()
+        checked: list[dict[str, Any]] = []
+        for widget in widgets:
+            fields = self._check_fields(widget, full=True)
+            self._check_room(checked, fields["screen_id"], fields["kind"])
+            if self.screen(fields["screen_id"]) is None:
+                raise NotFound()
+            checked.append(fields)
+        return self._dashboard_make(name, checked, now)
+
+    def widget_insert(self, version: int, fields: Mapping[str, Any], now: int) -> dict[str, Any]:
+        """Append a widget, moving the dashboard from ``version``. The 21st widget and a screen
+        twice for one kind are refused with their sentences; an unknown screen is NotFound."""
+        row, current = self._open_layout(version)
+        new = self._check_fields(fields, full=True)
+        self._check_room(current, new["screen_id"], new["kind"])
+        if self.screen(new["screen_id"]) is None:
+            raise NotFound()
+        row = row or self._dashboard_make(DASHBOARD_NAME, current, now)
+        self._widget_row(row["id"], new, len(current), now)
+        return self._dashboard_bump(row, now)
+
+    @staticmethod
+    def _find(current: Sequence[Mapping[str, Any]], screen_id: int, kind: str, *, suggested: bool):
+        """The widget at (screen_id, kind). Not there in the suggestion (version 0, which is worked
+        out from the Active screens at each read) means the page's layout is stale, not that the
+        widget was never there: a VersionConflict, so the page reads the dashboard again."""
+        for widget in current:
+            if widget["screen_id"] == screen_id and widget["kind"] == kind:
+                return widget
+        raise VersionConflict() if suggested else NotFound()
+
+    def widget_change(
+        self, version: int, screen_id: int, kind: str, fields: Mapping[str, Any], now: int
+    ) -> dict[str, Any]:
+        """Change the widget at (screen_id, kind): rows, sort, values or its kind. A kind the
+        screen already has a widget for is refused with its sentence."""
+        row, current = self._open_layout(version)
+        self._find(current, screen_id, kind, suggested=row is None)
+        changes = self._check_fields(fields, full=False)
+        if "screen_id" in changes and changes["screen_id"] != screen_id:
+            raise ValueError("a widget keeps its screen")
+        changes.pop("screen_id", None)
+        if changes.get("kind", kind) != kind:
+            others = [w for w in current if (w["screen_id"], w["kind"]) != (screen_id, kind)]
+            self._check_room(others, screen_id, changes["kind"])
+        row = row or self._dashboard_make(DASHBOARD_NAME, current, now)
+        t = self._t("dashboard_widget")
+        self.conn.execute(
+            update(t)
+            .where(
+                t.c.dashboard_id == row["id"],
+                t.c.screen_id == screen_id,
+                t.c.kind == kind,
+                self._mine(t),
+            )
+            .values(**self._in(changes), updated_at=now)
+        )
+        return self._dashboard_bump(row, now)
+
+    def widget_delete(self, version: int, screen_id: int, kind: str, now: int) -> dict[str, Any]:
+        """Remove the widget at (screen_id, kind); the positions after it close the gap."""
+        row, current = self._open_layout(version)
+        gone = self._find(current, screen_id, kind, suggested=row is None)
+        row = row or self._dashboard_make(DASHBOARD_NAME, current, now)
+        t = self._t("dashboard_widget")
+        self.conn.execute(
+            delete(t).where(
+                t.c.dashboard_id == row["id"],
+                t.c.screen_id == screen_id,
+                t.c.kind == kind,
+                self._mine(t),
+            )
+        )
+        self.conn.execute(
+            update(t)
+            .where(t.c.dashboard_id == row["id"], t.c.position > gone["position"], self._mine(t))
+            .values(position=t.c.position - 1, updated_at=now)
+        )
+        return self._dashboard_bump(row, now)
+
+    def widgets_order(
+        self, version: int, keys: Sequence[tuple[int, str]], now: int
+    ) -> dict[str, Any]:
+        """The whole order at once, as (screen_id, kind) pairs: refused (VersionConflict, the
+        owner's layout is not the one he arranged) unless it is exactly the dashboard's widgets."""
+        row, current = self._open_layout(version)
+        wanted = [(int(screen_id), str(kind)) for screen_id, kind in keys]
+        have = {(w["screen_id"], w["kind"]) for w in current}
+        if len(wanted) != len(have) or set(wanted) != have:
+            raise VersionConflict()
+        row = row or self._dashboard_make(DASHBOARD_NAME, current, now)
+        t = self._t("dashboard_widget")
+        before = {(w["screen_id"], w["kind"]): w["position"] for w in current}
+        for position, (screen_id, kind) in enumerate(wanted):
+            if before[(screen_id, kind)] != position:
+                self.conn.execute(
+                    update(t)
+                    .where(
+                        t.c.dashboard_id == row["id"],
+                        t.c.screen_id == screen_id,
+                        t.c.kind == kind,
+                        self._mine(t),
+                    )
+                    .values(position=position, updated_at=now)
+                )
+        return self._dashboard_bump(row, now)
+
+    def widgets_of_screen_delete(self, screen_id: int, now: int) -> int:
+        """A deleted screen's widgets go with it (``screen_remove`` calls this in the same
+        transaction); the dashboard's version moves, and the gaps close, only when any went."""
+        t, d = self._t("dashboard_widget"), self._t("dashboard")
+        found = self.conn.execute(
+            select(t.c.dashboard_id).where(t.c.screen_id == screen_id, self._mine(t)).distinct()
+        ).all()
+        if not found:
+            return 0
+        removed = self.conn.execute(
+            delete(t).where(t.c.screen_id == screen_id, self._mine(t))
+        ).rowcount
+        for (dashboard_id,) in found:
+            kept = self.conn.execute(
+                select(t.c.id)
+                .where(t.c.dashboard_id == dashboard_id, self._mine(t))
+                .order_by(t.c.position, t.c.id)
+            ).all()
+            for position, (widget_id,) in enumerate(kept):
+                self.conn.execute(
+                    update(t)
+                    .where(t.c.id == widget_id, self._mine(t), t.c.position != position)
+                    .values(position=position, updated_at=now)
+                )
+            self.conn.execute(
+                update(d)
+                .where(d.c.id == dashboard_id, self._mine(d))
+                .values(version=d.c.version + 1, updated_at=now)
+            )
+            self._dashboard_push(self._dashboard_version(dashboard_id), now)
+        return int(removed)
+
+    def _dashboard_version(self, dashboard_id: int) -> int:
+        t = self._t("dashboard")
+        row = self.conn.execute(select(t.c.version).where(t.c.id == dashboard_id, self._mine(t)))
+        return int(row.scalar_one())
 
     # ---- runs ----
     def run(self, run_id: int) -> dict[str, Any] | None:
@@ -893,10 +1243,13 @@ class Tx:
         query = select(t).where(t.c[first] == name).order_by(t.c.session.desc()).limit(limit)
         return self._all(query)
 
-    def pause_open(self, session: int, start: int, why: str) -> int:
+    def pause_open(
+        self, session: int, start: int, why: str, *, end: int | None = None, key: str | None = None
+    ) -> int:
+        """A pause of every key, or of one ``key`` (its gap: the screener did not follow it)."""
         t = self._t("pause")
         return self.conn.execute(
-            insert(t).values(session=session, start=start, why=why)
+            insert(t).values(session=session, start=start, why=why, end=end, key=key)
         ).inserted_primary_key[0]
 
     def pause_close(self, pause_id: int, end: int) -> None:
