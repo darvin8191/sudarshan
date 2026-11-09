@@ -128,11 +128,25 @@ export function killSwitchOn(state: RiskState | null): boolean {
   return state?.kill_switch.known === true && state.kill_switch.on === true
 }
 
-/** When the switch was turned on (ms since epoch) while it is on; null when off or not known. */
-export function killSwitchOnSince(): number | null {
-  if (!killSwitchOn(current)) return null
-  const at = Date.parse(current?.kill_switch.since ?? '')
-  return Number.isFinite(at) ? at : null
+/** The report's steps that cancel orders, Live and sandbox; each lists the orders it cancelled. */
+const CANCEL_STEPS = new Set(['live_orders', 'live_orders_again', 'sandbox_orders'])
+
+/**
+ * Whether the kill switch cancelled order `orderid`, by its report's own list of the orders it
+ * cancelled: `yes` when the report names it, `running` while its steps still run (the report
+ * comes when they end), else `no`. Order ids only, never a clock: a cancel hours later (the
+ * 15:15 square-off) is not the switch's, and the phone's clock is never set against the
+ * server's.
+ */
+export function killSwitchCancelled(orderid: string): 'yes' | 'no' | 'running' {
+  const killSwitch = current?.kill_switch
+  if (!killSwitch?.known) return 'no'
+  for (const step of killSwitch.report?.steps ?? []) {
+    if (!CANCEL_STEPS.has(step.step)) continue
+    const ids = step.detail?.cancelled_ids
+    if (Array.isArray(ids) && ids.some((id) => String(id) === orderid)) return 'yes'
+  }
+  return killSwitch.on === true && killSwitch.running === true ? 'running' : 'no'
 }
 
 /** True when the server answered but could not read the switch: the gate refuses every new order. */

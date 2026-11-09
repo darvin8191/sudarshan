@@ -121,6 +121,17 @@ def test_the_history_row_carries_the_moment_it_went_on_not_when_the_steps_ended(
     assert abs((row.last_at - saved.since).total_seconds()) < 1
 
 
+def test_the_report_names_the_orders_it_cancelled_in_the_sandbox_too(account, monkeypatch):
+    """The phone says "Cancelled by the kill switch." only for an order the report names
+    (review of v0.6.1, MEDIUM-4): the Live step named its cancels already, now the sandbox's
+    does too."""
+    monkeypatch.setenv(flag.ENV, "sandbox")
+    answer = _on()
+    step = next(s for s in answer.state.report["steps"] if s["step"] == "sandbox_orders")
+    assert step["detail"]["cancelled_ids"] == ["S-1"]
+    assert step["detail"]["cancelled"] == 1
+
+
 def test_in_the_sandbox_stage_it_leaves_mcp_the_agent_and_upstox_alone(
     account, risk_store, monkeypatch
 ):

@@ -95,7 +95,10 @@ class Account:
         monkeypatch.setattr(
             sandbox,
             "sandbox_cancel_all_orders",
-            record("sandbox_cancel_all", (True, {"status": "success", "canceled_count": 1}, 200)),
+            record(
+                "sandbox_cancel_all",
+                (True, {"status": "success", "canceled_orders": ["S-1"]}, 200),
+            ),
         )
         monkeypatch.setattr(
             sandbox,

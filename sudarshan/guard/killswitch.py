@@ -710,13 +710,17 @@ def _sweep_again(
 
 
 def _cancel_sandbox_orders(owner: Owner) -> tuple[bool, str, dict]:
+    """Cancel every open sandbox order. The report names the orders it cancelled, as the Live
+    step does: the phone says "Cancelled by the kill switch." for those orders only."""
     from services.sandbox_service import sandbox_cancel_all_orders
 
     ok, body, status = sandbox_cancel_all_orders({}, owner.api_key, {})
-    count = int(
-        (body or {}).get("canceled_count") or len((body or {}).get("canceled_orders") or [])
-    )
-    return bool(ok), words.ks_sandbox_orders(count, ok), {"cancelled": count, "status": status}
+    ids = [str(orderid) for orderid in (body or {}).get("canceled_orders") or [] if orderid]
+    count = int((body or {}).get("canceled_count") or len(ids))
+    detail: dict[str, Any] = {"cancelled": count, "status": status}
+    if ids:
+        detail["cancelled_ids"] = ids
+    return bool(ok), words.ks_sandbox_orders(count, ok), detail
 
 
 def _cancel_sandbox_gtts(owner: Owner) -> tuple[bool, str, dict]:

@@ -1,10 +1,10 @@
 import type { Socket } from 'socket.io-client'
 import { type AlertCategories, useAlertStore } from '@/stores/alertStore'
 import { formatAmount, formatRupees } from '@/sudarshan/dashboard/format'
+import { killSwitchCancelled } from '@/sudarshan/risk/killSwitch'
 import { showToast } from '@/utils/toast'
 import { type ChimeKind, playChime, unlockSoundOnFirstTap } from './chime'
 import { cancelAllTargets, notePushedFrame, reasonOf } from './orderFold'
-import { killSwitchOnSince } from '@/sudarshan/risk/killSwitch'
 import { istTime } from './time'
 
 /**
@@ -82,9 +82,8 @@ function units(n: number): string {
  */
 export function describeOrderUpdate(
   frame: OrderUpdateFrame,
-  /** Set when the kill switch was already on when the frame arrived (ms since epoch). */
-  killSwitchSince: number | null = null,
-  now: number = Date.now()
+  /** The kill switch's own report names this order among those it cancelled. */
+  byKillSwitch = false
 ): OrderAlert | null {
   const orderid = text(frame.orderid)
   if (!orderid) return null
@@ -118,14 +117,13 @@ export function describeOrderUpdate(
   } else if (OFF.has(status)) {
     kind = 'cancelled'
     title = `Cancelled · ${order(true)}`
-    // Only what is known: the kill switch is named only when it was on before the cancel;
-    // otherwise the place is named (the sandbox or Upstox), never a guessed cause.
-    description =
-      killSwitchSince !== null && killSwitchSince <= now
-        ? 'Cancelled by the kill switch.'
-        : sandbox
-          ? 'Cancelled in the sandbox, not from this screen.'
-          : 'Cancelled at Upstox, not from this screen.'
+    // Only what is known: the kill switch is named only for an order its own report says it
+    // cancelled; otherwise the place is named (the sandbox or Upstox), never a guessed cause.
+    description = byKillSwitch
+      ? 'Cancelled by the kill switch.'
+      : sandbox
+        ? 'Cancelled in the sandbox, not from this screen.'
+        : 'Cancelled at Upstox, not from this screen.'
     if (filled > 0) description += ` ${units(filled)} of ${units(quantity)} had filled.`
   } else if (filled > 0 && (quantity === 0 || filled < quantity)) {
     kind = 'partial'
@@ -179,6 +177,13 @@ export const APP_CANCEL_MS = 15_000
  * update can arrive a moment before that.
  */
 export const CANCEL_SETTLE_MS = 1_500
+
+/**
+ * A cancel that comes while the kill switch's steps are running waits, at most this long from
+ * its arrival, for the switch's report, which names every order it cancelled; past it the cancel
+ * is said with the place's words.
+ */
+export const KILL_SWITCH_REPORT_WAIT_MS = 60_000
 
 const cancelledHere = new Map<string, number>()
 
@@ -418,18 +423,30 @@ export function installOrderAlerts(socket: Socket): () => void {
   const onUpdate = (frame: OrderUpdateFrame) => {
     const at = Date.now()
     notePushedFrame(frame ?? {}, at)
-    const alert = describeOrderUpdate(frame ?? {}, killSwitchOnSince(), at)
+    const alert = describeOrderUpdate(frame ?? {})
     if (!alert) return
     if (alert.kind !== 'cancelled') {
       deliver(alert, at)
       return
     }
-    const timer = setTimeout(() => {
-      waiting.delete(timer)
-      if (cancelledFromApp(alert.orderid, Date.now())) shown.add(alert.key)
-      else deliver(alert, at)
-    }, CANCEL_SETTLE_MS)
-    waiting.add(timer)
+    const settle = () => {
+      const timer = setTimeout(() => {
+        waiting.delete(timer)
+        const now = Date.now()
+        if (cancelledFromApp(alert.orderid, now)) {
+          shown.add(alert.key)
+          return
+        }
+        const cause = killSwitchCancelled(alert.orderid)
+        if (cause === 'running' && now - at < KILL_SWITCH_REPORT_WAIT_MS) {
+          settle() // the switch's report, when its steps end, says whether it cancelled this
+          return
+        }
+        deliver(cause === 'yes' ? (describeOrderUpdate(frame ?? {}, true) ?? alert) : alert, at)
+      }, CANCEL_SETTLE_MS)
+      waiting.add(timer)
+    }
+    settle()
   }
 
   socket.on('order_update', onUpdate)
