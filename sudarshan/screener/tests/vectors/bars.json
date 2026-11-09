@@ -10297,6 +10297,1091 @@
      ]
     }
    ]
+  },
+  {
+   "id": "A0a",
+   "says": "a restart that follows its keys at once: the restored key goes on, no gap, and the next bar counts from the last total",
+   "bars": [
+    {
+     "at": "09:15",
+     "o": 10000,
+     "h": 10000,
+     "l": 10000,
+     "c": 10000,
+     "v": 20,
+     "flags": [],
+     "until": "09:15:40"
+    },
+    {
+     "at": "10:00",
+     "o": 10050,
+     "h": 10050,
+     "l": 10050,
+     "c": 10050,
+     "v": 20,
+     "flags": [],
+     "until": "10:00:40"
+    }
+   ],
+   "cum": 50040,
+   "gaps": [],
+   "steps": [
+    {
+     "at": "10:00:02",
+     "restore": {
+      "rows": [
+       {
+        "bar": {
+         "at": "09:15",
+         "o": 10000,
+         "h": 10000,
+         "l": 10000,
+         "c": 10000,
+         "v": 20,
+         "flags": [],
+         "until": "09:15:40"
+        },
+        "cum": 50020
+       }
+      ],
+      "printed": [],
+      "since": "10:00:02"
+     }
+    },
+    {
+     "at": "10:00:02",
+     "follow": [
+      "NSE_EQ|INE002A01018"
+     ],
+     "gaps": []
+    },
+    {
+     "at": "10:00:20.050",
+     "tick": {
+      "ltt": "10:00:20.000",
+      "ltp": 100.5,
+      "ltq": 10,
+      "vtt": 50030
+     },
+     "check": "ok"
+    },
+    {
+     "at": "10:00:40.050",
+     "tick": {
+      "ltt": "10:00:40.000",
+      "ltp": 100.5,
+      "ltq": 10,
+      "vtt": 50040
+     },
+     "check": "ok"
+    },
+    {
+     "at": "10:01:05",
+     "clock": true,
+     "sealed": [
+      "10:00"
+     ]
+    },
+    {
+     "at": "10:01:05",
+     "read": {
+      "tf": 1,
+      "boundary": "10:01"
+     },
+     "forming": false,
+     "candles": [
+      {
+       "start": "09:15",
+       "end": "09:16",
+       "o": 10000,
+       "h": 10000,
+       "l": 10000,
+       "c": 10000,
+       "v": 20,
+       "flags": []
+      },
+      {
+       "start": "10:00",
+       "end": "10:01",
+       "o": 10050,
+       "h": 10050,
+       "l": 10050,
+       "c": 10050,
+       "v": 20,
+       "flags": []
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "A0b",
+   "says": "a restart whose keys are followed only at the 5-minute retry (the master contract was downloading): the wait is a gap, the first bar counts from the first frame after it and is not checked",
+   "bars": [
+    {
+     "at": "09:15",
+     "o": 10000,
+     "h": 10000,
+     "l": 10000,
+     "c": 10000,
+     "v": 20,
+     "flags": [],
+     "until": "09:15:40"
+    },
+    {
+     "at": "10:05",
+     "o": 10100,
+     "h": 10100,
+     "l": 10100,
+     "c": 10100,
+     "v": 20,
+     "flags": [],
+     "until": "10:05:40"
+    }
+   ],
+   "cum": 550040,
+   "gaps": [
+    [
+     "10:00:02",
+     "10:05"
+    ]
+   ],
+   "steps": [
+    {
+     "at": "10:00:02",
+     "restore": {
+      "rows": [
+       {
+        "bar": {
+         "at": "09:15",
+         "o": 10000,
+         "h": 10000,
+         "l": 10000,
+         "c": 10000,
+         "v": 20,
+         "flags": [],
+         "until": "09:15:40"
+        },
+        "cum": 50020
+       }
+      ],
+      "printed": [],
+      "since": "10:00:02"
+     }
+    },
+    {
+     "at": "10:05",
+     "follow": [
+      "NSE_EQ|INE002A01018"
+     ],
+     "gaps": [
+      [
+       "NSE_EQ|INE002A01018",
+       "10:00:02",
+       "10:05"
+      ]
+     ]
+    },
+    {
+     "at": "10:05:20.050",
+     "tick": {
+      "ltt": "10:05:20.000",
+      "ltp": 101.0,
+      "ltq": 10,
+      "vtt": 550030
+     },
+     "check": "ok"
+    },
+    {
+     "at": "10:05:40.050",
+     "tick": {
+      "ltt": "10:05:40.000",
+      "ltp": 101.0,
+      "ltq": 10,
+      "vtt": 550040
+     },
+     "check": "ok"
+    },
+    {
+     "at": "10:06:05",
+     "clock": true,
+     "sealed": [
+      "10:05"
+     ]
+    },
+    {
+     "at": "10:06:05",
+     "read": {
+      "tf": 1,
+      "boundary": "10:06"
+     },
+     "forming": false,
+     "candles": [
+      {
+       "start": "09:15",
+       "end": "09:16",
+       "o": 10000,
+       "h": 10000,
+       "l": 10000,
+       "c": 10000,
+       "v": 20,
+       "flags": []
+      },
+      {
+       "start": "10:05",
+       "end": "10:06",
+       "o": 10100,
+       "h": 10100,
+       "l": 10100,
+       "c": 10100,
+       "v": 20,
+       "flags": [
+        "unverified"
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "A1a",
+   "says": "first followed at 11:00: 09:15 to 11:00 is its gap, so its day candle and its first bar are not checked; the next bar is judged as usual",
+   "bars": [
+    {
+     "at": "11:00",
+     "o": 10000,
+     "h": 10050,
+     "l": 10000,
+     "c": 10050,
+     "v": 20,
+     "flags": [],
+     "until": "11:00:40"
+    },
+    {
+     "at": "11:01",
+     "o": 10020,
+     "h": 10020,
+     "l": 10020,
+     "c": 10020,
+     "v": 5,
+     "flags": [],
+     "until": "11:01:30"
+    }
+   ],
+   "cum": 1800025,
+   "gaps": [
+    [
+     "09:15",
+     "11:00"
+    ]
+   ],
+   "steps": [
+    {
+     "at": "11:00",
+     "follow": [
+      "NSE_EQ|INE002A01018"
+     ],
+     "gaps": [
+      [
+       "NSE_EQ|INE002A01018",
+       "09:15",
+       "11:00"
+      ]
+     ]
+    },
+    {
+     "at": "11:00:20.050",
+     "tick": {
+      "ltt": "11:00:20.000",
+      "ltp": 100.0,
+      "ltq": 10,
+      "vtt": 1800010
+     },
+     "check": "ok"
+    },
+    {
+     "at": "11:00:40.050",
+     "tick": {
+      "ltt": "11:00:40.000",
+      "ltp": 100.5,
+      "ltq": 10,
+      "vtt": 1800020
+     },
+     "check": "ok"
+    },
+    {
+     "at": "11:01:05",
+     "clock": true,
+     "sealed": [
+      "11:00"
+     ]
+    },
+    {
+     "at": "11:01:30.050",
+     "tick": {
+      "ltt": "11:01:30.000",
+      "ltp": 100.2,
+      "ltq": 5,
+      "vtt": 1800025
+     },
+     "check": "ok"
+    },
+    {
+     "at": "11:02:05",
+     "clock": true,
+     "sealed": [
+      "11:01"
+     ]
+    },
+    {
+     "at": "11:02:05",
+     "read": {
+      "tf": 1,
+      "boundary": "11:02"
+     },
+     "forming": false,
+     "candles": [
+      {
+       "start": "11:00",
+       "end": "11:01",
+       "o": 10000,
+       "h": 10050,
+       "l": 10000,
+       "c": 10050,
+       "v": 20,
+       "flags": [
+        "unverified"
+       ]
+      },
+      {
+       "start": "11:01",
+       "end": "11:02",
+       "o": 10020,
+       "h": 10020,
+       "l": 10020,
+       "c": 10020,
+       "v": 5,
+       "flags": []
+      }
+     ]
+    },
+    {
+     "at": "11:05:05",
+     "read": {
+      "tf": 5,
+      "boundary": "11:05"
+     },
+     "forming": false,
+     "candles": [
+      {
+       "start": "11:00",
+       "end": "11:05",
+       "o": 10000,
+       "h": 10050,
+       "l": 10000,
+       "c": 10020,
+       "v": 25,
+       "flags": [
+        "unverified"
+       ]
+      }
+     ]
+    },
+    {
+     "at": "11:02:05",
+     "read": {
+      "tf": "D",
+      "boundary": "11:02"
+     },
+     "forming": true,
+     "candles": [
+      {
+       "start": "09:15",
+       "end": "15:30",
+       "o": 10000,
+       "h": 10050,
+       "l": 10000,
+       "c": 10020,
+       "v": 25,
+       "flags": [
+        "unverified"
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "A1b",
+   "says": "followed before the open: nothing is kept, and the pre-open frame gives the baseline as on any day",
+   "bars": [
+    {
+     "at": "09:15",
+     "o": 10000,
+     "h": 10050,
+     "l": 10000,
+     "c": 10050,
+     "v": 20,
+     "flags": [],
+     "until": "09:15:40"
+    }
+   ],
+   "cum": 50020,
+   "gaps": [],
+   "steps": [
+    {
+     "at": "09:00",
+     "follow": [
+      "NSE_EQ|INE002A01018"
+     ],
+     "gaps": []
+    },
+    {
+     "at": "09:07:30",
+     "tick": {
+      "ltt": "09:07:30",
+      "ltp": 100.0,
+      "ltq": 100,
+      "vtt": 50000
+     },
+     "check": "outside_hours"
+    },
+    {
+     "at": "09:15:20.050",
+     "tick": {
+      "ltt": "09:15:20.000",
+      "ltp": 100.0,
+      "ltq": 10,
+      "vtt": 50010
+     },
+     "check": "ok"
+    },
+    {
+     "at": "09:15:40.050",
+     "tick": {
+      "ltt": "09:15:40.000",
+      "ltp": 100.5,
+      "ltq": 10,
+      "vtt": 50020
+     },
+     "check": "ok"
+    },
+    {
+     "at": "09:16:05",
+     "clock": true,
+     "sealed": [
+      "09:15"
+     ]
+    },
+    {
+     "at": "09:16:05",
+     "read": {
+      "tf": 1,
+      "boundary": "09:16"
+     },
+     "forming": false,
+     "candles": [
+      {
+       "start": "09:15",
+       "end": "09:16",
+       "o": 10000,
+       "h": 10050,
+       "l": 10000,
+       "c": 10050,
+       "v": 20,
+       "flags": []
+      }
+     ]
+    },
+    {
+     "at": "09:16:05",
+     "read": {
+      "tf": "D",
+      "boundary": "09:16"
+     },
+     "forming": true,
+     "candles": [
+      {
+       "start": "09:15",
+       "end": "15:30",
+       "o": 10000,
+       "h": 10050,
+       "l": 10000,
+       "c": 10050,
+       "v": 20,
+       "flags": []
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "A1c",
+   "says": "first followed 5 s after the open: no gap; the first frame after the follow gives the baseline",
+   "bars": [
+    {
+     "at": "09:15",
+     "o": 10000,
+     "h": 10050,
+     "l": 10000,
+     "c": 10050,
+     "v": 20,
+     "flags": [],
+     "until": "09:15:40"
+    }
+   ],
+   "cum": 50020,
+   "gaps": [],
+   "steps": [
+    {
+     "at": "09:15:05",
+     "follow": [
+      "NSE_EQ|INE002A01018"
+     ],
+     "gaps": []
+    },
+    {
+     "at": "09:15:20.050",
+     "tick": {
+      "ltt": "09:15:20.000",
+      "ltp": 100.0,
+      "ltq": 10,
+      "vtt": 50010
+     },
+     "check": "ok"
+    },
+    {
+     "at": "09:15:40.050",
+     "tick": {
+      "ltt": "09:15:40.000",
+      "ltp": 100.5,
+      "ltq": 10,
+      "vtt": 50020
+     },
+     "check": "ok"
+    },
+    {
+     "at": "09:16:05",
+     "clock": true,
+     "sealed": [
+      "09:15"
+     ]
+    },
+    {
+     "at": "09:16:05",
+     "read": {
+      "tf": 1,
+      "boundary": "09:16"
+     },
+     "forming": false,
+     "candles": [
+      {
+       "start": "09:15",
+       "end": "09:16",
+       "o": 10000,
+       "h": 10050,
+       "l": 10000,
+       "c": 10050,
+       "v": 20,
+       "flags": []
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "A1d",
+   "says": "first followed exactly 10 s after the open: no gap (a stretch counts when it is longer than 10 s)",
+   "bars": [
+    {
+     "at": "09:15",
+     "o": 10000,
+     "h": 10050,
+     "l": 10000,
+     "c": 10050,
+     "v": 20,
+     "flags": [],
+     "until": "09:15:40"
+    }
+   ],
+   "gaps": [],
+   "steps": [
+    {
+     "at": "09:15:10",
+     "follow": [
+      "NSE_EQ|INE002A01018"
+     ],
+     "gaps": []
+    },
+    {
+     "at": "09:15:20.050",
+     "tick": {
+      "ltt": "09:15:20.000",
+      "ltp": 100.0,
+      "ltq": 10,
+      "vtt": 50010
+     },
+     "check": "ok"
+    },
+    {
+     "at": "09:15:40.050",
+     "tick": {
+      "ltt": "09:15:40.000",
+      "ltp": 100.5,
+      "ltq": 10,
+      "vtt": 50020
+     },
+     "check": "ok"
+    },
+    {
+     "at": "09:16:05",
+     "clock": true,
+     "sealed": [
+      "09:15"
+     ]
+    },
+    {
+     "at": "09:16:05",
+     "read": {
+      "tf": 1,
+      "boundary": "09:16"
+     },
+     "forming": false,
+     "candles": [
+      {
+       "start": "09:15",
+       "end": "09:16",
+       "o": 10000,
+       "h": 10050,
+       "l": 10000,
+       "c": 10050,
+       "v": 20,
+       "flags": []
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "A1e",
+   "says": "first followed 11 s after the open: those 11 s are its gap, so its first bar is not checked",
+   "bars": [
+    {
+     "at": "09:15",
+     "o": 10000,
+     "h": 10050,
+     "l": 10000,
+     "c": 10050,
+     "v": 20,
+     "flags": [],
+     "until": "09:15:40"
+    }
+   ],
+   "gaps": [
+    [
+     "09:15",
+     "09:15:11"
+    ]
+   ],
+   "steps": [
+    {
+     "at": "09:15:11",
+     "follow": [
+      "NSE_EQ|INE002A01018"
+     ],
+     "gaps": [
+      [
+       "NSE_EQ|INE002A01018",
+       "09:15",
+       "09:15:11"
+      ]
+     ]
+    },
+    {
+     "at": "09:15:20.050",
+     "tick": {
+      "ltt": "09:15:20.000",
+      "ltp": 100.0,
+      "ltq": 10,
+      "vtt": 50010
+     },
+     "check": "ok"
+    },
+    {
+     "at": "09:15:40.050",
+     "tick": {
+      "ltt": "09:15:40.000",
+      "ltp": 100.5,
+      "ltq": 10,
+      "vtt": 50020
+     },
+     "check": "ok"
+    },
+    {
+     "at": "09:16:05",
+     "clock": true,
+     "sealed": [
+      "09:15"
+     ]
+    },
+    {
+     "at": "09:16:05",
+     "read": {
+      "tf": 1,
+      "boundary": "09:16"
+     },
+     "forming": false,
+     "candles": [
+      {
+       "start": "09:15",
+       "end": "09:16",
+       "o": 10000,
+       "h": 10050,
+       "l": 10000,
+       "c": 10050,
+       "v": 20,
+       "flags": [
+        "unverified"
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "A1f",
+   "says": "first followed at 11:00, let go at 11:30 and followed again at 12:00: both stretches are kept, and each first bar is not checked",
+   "bars": [
+    {
+     "at": "11:00",
+     "o": 10000,
+     "h": 10000,
+     "l": 10000,
+     "c": 10000,
+     "v": 10,
+     "flags": [],
+     "until": "11:00:20"
+    },
+    {
+     "at": "12:00",
+     "o": 10100,
+     "h": 10100,
+     "l": 10100,
+     "c": 10100,
+     "v": 10,
+     "flags": [],
+     "until": "12:00:20"
+    }
+   ],
+   "cum": 2500010,
+   "gaps": [
+    [
+     "09:15",
+     "11:00"
+    ],
+    [
+     "11:30",
+     "12:00"
+    ]
+   ],
+   "steps": [
+    {
+     "at": "11:00",
+     "follow": [
+      "NSE_EQ|INE002A01018"
+     ],
+     "gaps": [
+      [
+       "NSE_EQ|INE002A01018",
+       "09:15",
+       "11:00"
+      ]
+     ]
+    },
+    {
+     "at": "11:00:20.050",
+     "tick": {
+      "ltt": "11:00:20.000",
+      "ltp": 100.0,
+      "ltq": 10,
+      "vtt": 1800010
+     },
+     "check": "ok"
+    },
+    {
+     "at": "11:01:05",
+     "clock": true,
+     "sealed": [
+      "11:00"
+     ]
+    },
+    {
+     "at": "11:30",
+     "follow": [],
+     "gaps": []
+    },
+    {
+     "at": "12:00",
+     "follow": [
+      "NSE_EQ|INE002A01018"
+     ],
+     "gaps": [
+      [
+       "NSE_EQ|INE002A01018",
+       "11:30",
+       "12:00"
+      ]
+     ],
+     "sealed": []
+    },
+    {
+     "at": "12:00:20.050",
+     "tick": {
+      "ltt": "12:00:20.000",
+      "ltp": 101.0,
+      "ltq": 10,
+      "vtt": 2500010
+     },
+     "check": "ok"
+    },
+    {
+     "at": "12:01:05",
+     "clock": true,
+     "sealed": [
+      "12:00"
+     ]
+    },
+    {
+     "at": "12:01:05",
+     "read": {
+      "tf": 1,
+      "boundary": "12:01"
+     },
+     "forming": false,
+     "candles": [
+      {
+       "start": "11:00",
+       "end": "11:01",
+       "o": 10000,
+       "h": 10000,
+       "l": 10000,
+       "c": 10000,
+       "v": 10,
+       "flags": [
+        "unverified"
+       ]
+      },
+      {
+       "start": "12:00",
+       "end": "12:01",
+       "o": 10100,
+       "h": 10100,
+       "l": 10100,
+       "c": 10100,
+       "v": 10,
+       "flags": [
+        "unverified"
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "A1g",
+   "says": "followed before the open, let go at 10:00 before its first trade and followed again at 11:00: the stretch is its gap",
+   "bars": [
+    {
+     "at": "11:00",
+     "o": 10000,
+     "h": 10000,
+     "l": 10000,
+     "c": 10000,
+     "v": 10,
+     "flags": [],
+     "until": "11:00:20"
+    }
+   ],
+   "cum": 900010,
+   "gaps": [
+    [
+     "10:00",
+     "11:00"
+    ]
+   ],
+   "steps": [
+    {
+     "at": "09:00",
+     "follow": [
+      "NSE_EQ|INE002A01018"
+     ],
+     "gaps": []
+    },
+    {
+     "at": "10:00",
+     "follow": [],
+     "gaps": []
+    },
+    {
+     "at": "11:00",
+     "follow": [
+      "NSE_EQ|INE002A01018"
+     ],
+     "gaps": [
+      [
+       "NSE_EQ|INE002A01018",
+       "10:00",
+       "11:00"
+      ]
+     ]
+    },
+    {
+     "at": "11:00:20.050",
+     "tick": {
+      "ltt": "11:00:20.000",
+      "ltp": 100.0,
+      "ltq": 10,
+      "vtt": 900010
+     },
+     "check": "ok"
+    },
+    {
+     "at": "11:01:05",
+     "clock": true,
+     "sealed": [
+      "11:00"
+     ]
+    },
+    {
+     "at": "11:01:05",
+     "read": {
+      "tf": 1,
+      "boundary": "11:01"
+     },
+     "forming": false,
+     "candles": [
+      {
+       "start": "11:00",
+       "end": "11:01",
+       "o": 10000,
+       "h": 10000,
+       "l": 10000,
+       "c": 10000,
+       "v": 10,
+       "flags": [
+        "unverified"
+       ]
+      }
+     ]
+    },
+    {
+     "at": "11:01:05",
+     "read": {
+      "tf": "D",
+      "boundary": "11:01"
+     },
+     "forming": true,
+     "candles": [
+      {
+       "start": "09:15",
+       "end": "15:30",
+       "o": 10000,
+       "h": 10000,
+       "l": 10000,
+       "c": 10000,
+       "v": 10,
+       "flags": [
+        "unverified"
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "A1h",
+   "says": "after a restart at 10:00:02 a key the store holds no bar of is first followed by the first set: 09:15 to 10:00:02 is its gap",
+   "bars": [
+    {
+     "at": "10:00",
+     "o": 10000,
+     "h": 10000,
+     "l": 10000,
+     "c": 10000,
+     "v": 10,
+     "flags": [],
+     "until": "10:00:20"
+    }
+   ],
+   "cum": 700010,
+   "gaps": [
+    [
+     "09:15",
+     "10:00:02"
+    ]
+   ],
+   "steps": [
+    {
+     "at": "10:00:02",
+     "restore": {
+      "rows": [],
+      "printed": [],
+      "since": "10:00:02"
+     }
+    },
+    {
+     "at": "10:00:02",
+     "follow": [
+      "NSE_EQ|INE002A01018"
+     ],
+     "gaps": [
+      [
+       "NSE_EQ|INE002A01018",
+       "09:15",
+       "10:00:02"
+      ]
+     ]
+    },
+    {
+     "at": "10:00:20.050",
+     "tick": {
+      "ltt": "10:00:20.000",
+      "ltp": 100.0,
+      "ltq": 10,
+      "vtt": 700010
+     },
+     "check": "ok"
+    },
+    {
+     "at": "10:01:05",
+     "clock": true,
+     "sealed": [
+      "10:00"
+     ]
+    },
+    {
+     "at": "10:01:05",
+     "read": {
+      "tf": 1,
+      "boundary": "10:01"
+     },
+     "forming": false,
+     "candles": [
+      {
+       "start": "10:00",
+       "end": "10:01",
+       "o": 10000,
+       "h": 10000,
+       "l": 10000,
+       "c": 10000,
+       "v": 10,
+       "flags": [
+        "unverified"
+       ]
+      }
+     ]
+    }
+   ]
   }
  ],
  "aggregate": [

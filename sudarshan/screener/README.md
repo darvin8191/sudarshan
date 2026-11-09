@@ -216,7 +216,11 @@ and resumed, a watchlist that could not be read, the key limit) counts its volum
 it comes back, and the stretch is kept as that instrument's own pause (with its key, so a restart
 keeps it): its candles that hold the stretch are "Not checked" too. A start that cannot follow
 anything at once (OpenAlgo's master contract downloading) counts the wait the same way for every
-instrument it had bars of. A stretch before the open, or of 10 s or less, changes nothing.
+instrument it had bars of. An instrument first followed after 09:15 (the first screen on its
+universe made or resumed later, or a restart for an instrument the store holds no bar of) was not
+watched from the open either: that stretch is its own pause too, so its day and its first candle
+read "Not checked" while its later candles are judged. A stretch before the open, or of 10 s or
+less, changes nothing.
 
 ## What the screener follows, and when
 

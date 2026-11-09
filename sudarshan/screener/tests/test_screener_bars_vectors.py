@@ -248,6 +248,8 @@ class Run:
                 self.repair(step, market, where)
             elif "restore" in step:
                 self.restore(step["restore"])
+            elif "follow" in step:
+                self.follow(step, now, market, where)
             elif "auction" in step:
                 end, printed = self.bars.auction_of(self.key, market)
                 spec = step["auction"]
@@ -295,8 +297,20 @@ class Run:
             B.Sealed(row.get("key", self.key), bar_of(row["bar"], self.day), row["cum"])
             for row in spec["rows"]
         ]
-        self.bars.restore(day_key(self.day), rows, spec["printed"])
+        since = clock_ms(spec["since"], self.day) if "since" in spec else None
+        self.bars.restore(day_key(self.day), rows, spec["printed"], since=since)
         self.record(rows)
+
+    def follow(self, step: dict, now: int, market: clock.Market, where: str) -> None:
+        """The whole set of keys followed from now on, the bars it sealed and the gaps it kept."""
+        made = self.bars.follow_from(step["follow"], now, market)
+        assert self.record(made.sealed) == self.starts(step.get("sealed", [])), where
+        found = [(key, hms(gap.start), hms(gap.end)) for key, gap in made.gaps]
+        wanted = [
+            (key, hms(clock_ms(start, self.day)), hms(clock_ms(end, self.day)))
+            for key, start, end in step.get("gaps", [])
+        ]
+        assert found == wanted, f"{where}: gaps"
 
     # ---- what the case ends with -----------------------------------------------------------
     def finish(self) -> None:
@@ -312,6 +326,12 @@ class Run:
         assert self.bars.late(self.key) == case.get("late", 0), "late"
         if "printed" in case:
             assert self.bars.printed(self.key, day_key(self.day)) is case["printed"], "printed"
+        if "gaps" in case:  # every stretch the key was not followed, kept for the day
+            held = [(hms(gap.start), hms(gap.end)) for gap in self.bars.gaps(self.key)]
+            assert held == [
+                (hms(clock_ms(start, self.day)), hms(clock_ms(end, self.day)))
+                for start, end in case["gaps"]
+            ], "gaps"
 
 
 @pytest.mark.parametrize("case", DOC["cases"], ids=[case["id"] for case in DOC["cases"]])

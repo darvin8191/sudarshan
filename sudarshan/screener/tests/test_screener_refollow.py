@@ -25,13 +25,13 @@ from test_screener_universe import master as master_fixture  # noqa: F401  (the 
 from sudarshan.alerts.market import clock
 from sudarshan.alerts.market.feedlink import HEALTH
 from sudarshan.alerts.market.sessions import sessions_of
-from sudarshan.screener import candles, config
+from sudarshan.screener import candles, config, runs, spec
 from sudarshan.screener import store as store_module
 from sudarshan.screener.bars import UNFOLLOWED, Bars
 from sudarshan.screener.runtime import LiveSource
 from sudarshan.screener.store import OWNER, ScreenerStore
 from sudarshan.screener.types import DAY as DAY_TF
-from sudarshan.screener.types import UNVERIFIED
+from sudarshan.screener.types import HIT, NOT_CHECKED, PAUSED, UNVERIFIED
 
 DAY = "2026-10-28"
 RELIANCE = "NSE_EQ|INE002A01018"
@@ -234,8 +234,7 @@ def test_the_gap_still_reads_not_checked_after_a_restart(world):
     minute(again, "11:02", 102.0, [1_800_050, 1_800_060])
     assert bar_at(again, "11:00").v == 20 and bar_at(again, "11:02").v == 20
     assert unverified(again, 5, "11:03:06") and unverified(again, DAY_TF, "11:03:06")
-    (row,) = pause_rows(world, again)
-    assert (row["key"], row["start"], row["end"]) == (RELIANCE, ms(DAY, "10:00"), ms(DAY, "11:00"))
+    assert gap_rows(world, again) == [(ms(DAY, "10:00"), ms(DAY, "11:00"))]
 
 
 @pytest.mark.parametrize("op", [False, True], ids=["no-op-during-download", "op-during-download"])
@@ -292,6 +291,84 @@ def test_a_key_the_restart_did_not_follow_is_taken_as_let_go_from_the_restart(wo
     minute(again, "10:00", 101.0, [1_800_010, 1_800_020])
     assert bar_at(again, "10:00").v == 20
     assert unverified(again, 5, "10:01:06") and unverified(again, DAY_TF, "10:01:06")
+
+
+# ---- a key first followed after the open (design A1) -----------------------------------------------
+def judge(source, line: dict, boundary: str):
+    """RELIANCE judged at ``boundary`` by a 5-min screen on F&O stocks, as a run does: the line,
+    and a 5-min line that always holds (so the instrument is due at every 5-min close it trades
+    in, whatever the line reads)."""
+    traded = {"id": "c0", "on": True, "left": {"field": "close", "tf": 5}, "op": "gt",
+              "right": {"num": "0"}}  # fmt: skip
+    _, plan = spec.build({"name": "A1", "universe": {"kind": "fno_stocks"},
+                          "run": {"on": "close", "tf": 5},
+                          "where": {"all": [traded, {"id": "c1", "on": True, **line}]}})  # fmt: skip
+    member = next(m for m in source.members({"kind": "fno_stocks"}) if m.key == RELIANCE)
+    ctx = source.context(ms(DAY, boundary), source.market.today)
+    (found,) = asyncio.run(runs.evaluate(plan, [member], source, ctx))
+    return found.outcome
+
+
+DAY_OPEN = {"left": {"field": "day_open"}, "op": "gt", "right": {"num": "1"}}
+FIRST_CANDLE = {"left": {"field": "close", "tf": 5, "at": "first_today"}, "op": "gt",
+                "right": {"num": "1"}}  # fmt: skip
+LATEST_CANDLE = {"left": {"field": "close", "tf": 5}, "op": "gt", "right": {"num": "1"}}
+
+
+def paused(outcome) -> bool:
+    """Not checked because a candle it read holds a stretch nobody watched, for no other reason."""
+    return outcome.kind == NOT_CHECKED and {why.code for why in outcome.why} == {PAUSED}
+
+
+@pytest.mark.parametrize("claimed", ["09:00", "11:00"], ids=["control-before-open", "at-11"])
+def test_a_key_first_followed_after_the_open_reads_its_day_and_first_candle_not_checked(
+    world, claimed
+):
+    """The first screen on F&O stocks is made at 11:00: RELIANCE has bars from 11:00 only, so its
+    "day open" would be its 11:00 price and its "first candle" the 11:00 one, judged as verified.
+    09:15 to 11:00 is now its gap: the day and the first candle read "Not checked", over a restart
+    too, while the candles after its first bar are judged as usual."""
+    source = start(world, "08:50")
+    follow(source, OTHER, "09:00", reuse=False)  # another screen's keys since the morning
+    follow(source, BOTH, claimed)
+    traded = 50_020
+    if claimed == "09:00":
+        preopen(source)
+        minute(source, "09:15", 100.0, [50_010, 50_020])
+    else:
+        assert gap_rows(world, source) == [(ms(DAY, "09:15"), ms(DAY, "11:00"))]
+        traded = 1_800_000
+    minute(source, "11:00", 101.0, [traded + 10, traded + 20])
+    minute(source, "11:06", 102.0, [traded + 30, traded + 40])
+    late = claimed == "11:00"
+    assert paused(judge(source, DAY_OPEN, "11:10")) is late
+    assert paused(judge(source, FIRST_CANDLE, "11:10")) is late
+    assert judge(source, LATEST_CANDLE, "11:10").kind == HIT, "the 11:05 candle is whole"
+    if not late:
+        assert judge(source, DAY_OPEN, "11:10").kind == HIT
+        assert judge(source, FIRST_CANDLE, "11:10").kind == HIT
+        assert gap_rows(world, source) == []
+    source.mark_seen(ms(DAY, "11:10:30"))
+    again = start(world, "11:10:32")  # a fast restart: the keyed row brings the gap back
+    follow(again, BOTH, "11:10:32", reuse=False)
+    assert paused(judge(again, DAY_OPEN, "11:10")) is late
+    assert judge(again, LATEST_CANDLE, "11:10").kind == HIT
+
+
+def test_a_key_the_store_holds_no_bar_of_is_first_followed_at_the_restart(world):
+    """The restart clause: nothing says whether a key with no bar in the store was followed
+    before the restart, so the first set after it counts as its first follow."""
+    source = start(world, "08:50")
+    follow(source, OTHER, "09:00", reuse=False)
+    source.mark_seen(ms(DAY, "10:00:00"))
+    again = start(world, "10:00:02")
+    follow(again, BOTH, "10:00:02", reuse=False)
+    assert gap_rows(world, again) == [(ms(DAY, "09:15"), ms(DAY, "10:00:02"))]
+    minute(again, "10:01", 101.0, [700_010, 700_020])
+    minute(again, "10:06", 101.0, [700_030, 700_040])
+    assert bar_at(again, "10:01").v == 20, "the first frame after the follow is the baseline"
+    assert paused(judge(again, DAY_OPEN, "10:10"))
+    assert judge(again, LATEST_CANDLE, "10:10").kind == HIT
 
 
 # ---- the closing auction --------------------------------------------------------------------------

@@ -31,7 +31,10 @@ A key let go and followed again the same day (``follow_from``; re-review MEDIUM-
 in between, so the stretch is that key's own pause (a gap, ``gaps``) and its first frame of a trade
 made after it comes back is its baseline in place of the running total: the volume traded meanwhile
 belongs to no bar, and the candles that hold the gap are UNVERIFIED. A gap before the open, or no
-longer than GAP_S inside the session, changes nothing.
+longer than GAP_S inside the session, changes nothing. A key first followed after its session
+began (a screen made or resumed at 11:00, a restart for a key the store holds no bar of) was not
+watched from the open either: that stretch is its gap too, so its day candle and its first bar are
+UNVERIFIED (design A1).
 
 A stock that closes by auction (``Market.auction``) trades continuously to the continuous end and
 then prints the auction's price once (clock.auction; the frame must carry a volume that rose, as
@@ -307,7 +310,11 @@ class Bars:
         A key the bars hold nothing of has traded before ``at`` and nobody counted it, so its first
         frame of a trade made today becomes its baseline and that volume belongs to no bar, as
         after a restart. Before the open this changes nothing: the pre-open frames give the
-        baseline, as on any day.
+        baseline, as on any day. Nobody watched it from its session's start (or from when it was
+        let go before its first trade came) either, so that stretch is its gap when it holds more
+        than GAP_S of the session (design A1): its day candle and its first bar read "Not
+        checked", and later minute candles are judged as usual. The first set after a restore
+        counts as the first follow of every key the store holds no bar of.
 
         A key let go earlier today and followed again was not watched in between (re-review
         MEDIUM-1). When that stretch holds more than GAP_S of its session, the minutes it held
@@ -333,13 +340,16 @@ class Bars:
         for key in sorted(wanted if first else wanted - before):
             since = self._let_go.pop(key, None)
             state = self._keys.get(key)
-            if state is None:
+            if state is None:  # first followed today (since None), or let go before a trade
+                gap = self._stretch(key, since, at, market)
                 if since is not None or key not in self._claimed:
                     self._claimed[key] = at
             elif since is not None:
                 gap = self._again(key, state, since, at, market, sealed)
-                if gap is not None:
-                    gaps.append((key, gap))
+            else:
+                gap = None
+            if gap is not None:
+                gaps.append((key, gap))
         self._followed = wanted
         return Followed(tuple(sealed), tuple(gaps))
 
@@ -527,20 +537,30 @@ class Bars:
             self._claimed = {}
             self._reset()
 
+    def _stretch(self, key: str, since: int | None, at: int, market: Market) -> Pause | None:
+        """The stretch ``key`` was not followed, from ``since`` (None: its session's start) to
+        ``at``, kept as its gap; None when it holds no more than GAP_S of the session."""
+        grid = market.sessions.get(segment_of(key))
+        if grid is None:
+            return None
+        gap = Pause(grid.start if since is None else since, at, UNFOLLOWED)
+        inside = within((gap,), grid.start, grid.end)
+        if not inside or not paused_during(inside, grid.start, grid.end):
+            return None
+        self._gaps.setdefault(key, []).append(gap)
+        return gap
+
     def _again(
         self, key: str, state: _Key, since: int, at: int, market: Market, sealed: list[Sealed]
     ) -> Pause | None:
         """A key let go at ``since`` and followed again at ``at``: its gap, or None when the
         stretch holds no more than GAP_S of its session (``follow_from``)."""
-        grid = market.sessions.get(segment_of(key))
-        gap = Pause(since, at, UNFOLLOWED)
-        inside = within((gap,), grid.start, grid.end) if grid is not None else ()
-        if not inside or not paused_during(inside, grid.start, grid.end):
+        gap = self._stretch(key, since, at, market)
+        if gap is None:
             return None
         for start in sorted(state.open):  # traded before the let-go, from the running total
             sealed.append(self._seal(key, state, start))
         state.rebase, state.again = at, True
-        self._gaps.setdefault(key, []).append(gap)
         return gap
 
     @staticmethod
