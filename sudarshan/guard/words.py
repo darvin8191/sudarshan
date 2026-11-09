@@ -474,7 +474,8 @@ def ks_sandbox_gtts(cancelled: int, failed: int) -> str:
 def ks_sandbox_exit_all(message: str, closed: object = None, failed: object = None) -> str:
     """The sandbox's Exit all, in our words when it gave counts (the sandbox's own sentence reads
     "Closed 1 positions"); its message only when it gave none."""
-    if isinstance(closed, int) and isinstance(failed, int) and not isinstance(closed, bool):
+    counted = isinstance(closed, int) and isinstance(failed, int)
+    if counted and not isinstance(closed, bool) and not isinstance(failed, bool):
         if closed == 0 and failed == 0:
             return "The sandbox's Exit all found no open positions to close."
         said = f"The sandbox's Exit all closed {_many(closed, 'position', 'positions')}"

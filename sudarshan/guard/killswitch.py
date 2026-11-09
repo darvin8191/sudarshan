@@ -740,13 +740,12 @@ def _exit_all_sandbox(owner: Owner) -> tuple[bool, str, dict]:
 
     ok, body, status = sandbox_close_position({}, owner.api_key, {})
     body = body or {}
+    closed, failed = body.get("closed_positions"), body.get("failed_closures")
+    if ok and closed is None and failed is None:
+        closed = failed = 0  # the sandbox answers an empty book with success and no counts
     return (
         bool(ok),
-        words.ks_sandbox_exit_all(
-            str(body.get("message") or ""),
-            body.get("closed_positions"),
-            body.get("failed_closures"),
-        ),
+        words.ks_sandbox_exit_all(str(body.get("message") or ""), closed, failed),
         {"status": status},
     )
 

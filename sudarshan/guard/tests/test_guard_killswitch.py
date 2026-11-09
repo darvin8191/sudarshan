@@ -169,6 +169,23 @@ def test_the_sandbox_exit_all_is_worded_from_its_counts_with_the_right_plural(
     )
 
 
+def test_an_empty_sandbox_book_is_said_in_our_words_too(account, monkeypatch):
+    """The sandbox answers an empty book with success and its own sentence, no counts (review of
+    v0.6.1, LOW 5): it read "The sandbox's Exit all: No open positions to close."."""
+    import services.sandbox_service as sandbox
+
+    empty = {"status": "success", "message": "No open positions to close", "mode": "analyze"}
+    monkeypatch.setattr(sandbox, "sandbox_close_position", lambda *args: (True, empty, 200))
+    monkeypatch.setenv(flag.ENV, "sandbox")
+    answer = _on(exit_all=True)
+    step = next(s for s in answer.state.report["steps"] if s["step"] == "sandbox_exit_all")
+    assert step["words"] == "The sandbox's Exit all found no open positions to close."
+    # a count that is not one is never read as one
+    assert words.ks_sandbox_exit_all("Closed 1 positions", 1, True) == (
+        "The sandbox's Exit all: Closed 1 positions."
+    )
+
+
 def test_exit_all_goes_through_the_one_claim_and_is_never_retried(account, risk_store):
     account.exit_all_status = 409  # another Exit all holds the book
     answer = _on(exit_all=True)
