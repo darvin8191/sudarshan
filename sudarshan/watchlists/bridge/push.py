@@ -88,8 +88,7 @@ def _prune(endpoint: str, listed: int | None) -> None:
         return
     try:
         if endpoint == REMOVE_LIST:
-            if prune.drop_list(listed):  # a favourite slot was emptied
-                versions.bump_favourites()
+            prune.drop_list(listed)  # a slot it empties moves the favourites version itself
         else:
             prune.clear_membership(listed)
     except Exception:

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from sqlalchemy import delete
 
-from sudarshan.watchlists import engine, schema
+from sudarshan.watchlists import engine, schema, versions
 from sudarshan.watchlists.schema import OWNER
 from utils.logging import get_logger
 
@@ -31,7 +31,8 @@ def _usable() -> bool:
 
 
 def drop_list(list_id: int) -> bool:
-    """Everything the overlay holds for a deleted list; True when a favourite slot was emptied."""
+    """Everything the overlay holds for a deleted list; True when a favourite slot was emptied, in
+    which case the favourites version went up in the same transaction and the mirror follows it."""
     if not _usable():
         return False
     ref = f"list:{list_id}"
@@ -44,7 +45,11 @@ def drop_list(list_id: int) -> bool:
             schema.PrefRow.principal == OWNER, schema.PrefRow.ref == ref))  # fmt: skip
         emptied = s.execute(delete(schema.FavouriteRow).where(
             schema.FavouriteRow.principal == OWNER, schema.FavouriteRow.ref == ref))  # fmt: skip
-    return emptied.rowcount > 0
+        version = versions.advance_favourites(s) if emptied.rowcount > 0 else None
+    if version is None:
+        return False
+    versions.committed("favourites", version)
+    return True
 
 
 def clear_membership(list_id: int) -> None:

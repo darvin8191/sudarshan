@@ -30,8 +30,10 @@ def store(tmp_path, monkeypatch):
     monkeypatch.setenv(contract.SWITCH_ENV, "on")
     bp_module._record.clear()
     engine.dispose()
+    versions.forget()
     yield tmp_path / "wl.db"
     engine.dispose()
+    versions.forget()
     bp_module._record.clear()
 
 
@@ -101,15 +103,75 @@ WRITES = [
 
 
 # -- the versions ------------------------------------------------------------------------------
-def test_a_version_reads_boot_and_count_and_each_kind_counts_alone(emitted):
+def stored(name):
+    with engine.open_session() as s:
+        return s.scalar(select(schema.MetaRow.value).where(schema.MetaRow.name == name))
+
+
+def test_the_lists_version_reads_boot_and_count_and_the_other_two_are_the_stores_integers(emitted):
+    engine.ready()
     first = versions.snapshot()
-    assert all(v.startswith(versions.BOOT + ":") for v in first.values())
-    versions.bump_flags()
-    versions.bump_favourites()
+    assert first["lists"].startswith(versions.BOOT + ":")
+    assert first["favourites"] == 0 and first["flags"] == 0  # an absent row reads as 0
+    assert stored("favourites_version") is None
+    with engine.open_session() as s, s.begin():
+        n = versions.advance_flags(s)
+    versions.committed("flags", n)
     after = versions.snapshot()
     assert after["lists"] == first["lists"] and emitted == []
-    assert after["flags"] != first["flags"] and after["favourites"] != first["favourites"]
+    assert after["flags"] == 1 and after["favourites"] == 0 and stored("flags_version") == "1"
     assert versions.bump("items", ["list:1"]) != first["lists"]
+
+
+def test_a_writer_adds_one_in_its_own_transaction_and_a_rollback_adds_nothing():
+    engine.ready()
+    with engine.open_session() as s, s.begin():
+        assert [versions.advance_favourites(s) for _ in range(3)] == [1, 2, 3]
+    with engine.open_session() as s:
+        with s.begin():
+            versions.advance_favourites(s)
+            s.rollback()
+    assert stored("favourites_version") == "3"
+
+
+def test_the_versions_survive_a_restart_because_the_store_holds_them():
+    engine.ready()
+    with engine.open_session() as s, s.begin():
+        s.add(schema.MetaRow(name="favourites_version", value="41"))
+        s.add(schema.MetaRow(name="flags_version", value="7"))
+    versions.forget()  # a restart: the mirror is empty, the store is not
+    assert (versions.favourites(), versions.flags()) == (41, 7)
+
+
+def test_the_mirror_is_loaded_once_and_a_push_then_opens_no_session(emitted, monkeypatch):
+    engine.ready()
+    versions.bump("items", [])  # the first load
+    opened = []
+    real = engine.open_session
+    monkeypatch.setattr(engine, "open_session", lambda: opened.append(1) or real())
+    versions.bump("items", ["list:2"])
+    versions.snapshot()
+    assert opened == [] and emitted[-1][1]["favourites"] == 0 and emitted[-1][1]["flags"] == 0
+
+
+def test_the_mirror_only_moves_forward_and_a_late_load_cannot_undo_a_commit():
+    versions.committed("flags", 5)
+    versions.committed("flags", 4)
+    assert versions.flags() == 5
+    engine.ready()  # the store says 0 (no row): the first load must not undo the 5
+    versions.committed("flags", 0, loaded=True)
+    assert versions.flags() == 5
+
+
+def test_a_store_that_cannot_be_read_leaves_the_two_out_and_never_raises(emitted, store):
+    assert not store.exists()
+    assert versions.snapshot() == {"lists": versions.read()}
+    versions.bump("items", ["list:1"])
+    assert set(emitted[-1][1]) == {"v", "ref", "why"}
+    assert "versions" not in state_ops.state({})
+    engine.ready()
+    assert set(versions.snapshot()) == {"lists", "favourites", "flags"}
+    assert state_ops.state({})["versions"] == versions.snapshot()
 
 
 def test_the_boot_part_changes_at_each_process_start():
@@ -126,17 +188,19 @@ def test_the_boot_part_changes_at_each_process_start():
 
 
 def test_a_bump_pushes_v_ref_why_and_the_other_versions_to_the_owners_room(emitted):
+    engine.ready()
     v = versions.bump("items", ["list:5"])
     ((event, data, kw),) = emitted
     assert event == contract.EVENT_PUSH == "sudarshan_watchlists"
     assert kw == {"to": contract.ROOM, "namespace": "/"}
-    assert data == {"v": v, "ref": "list:5", "why": "items",
-                    "favourites": versions.read("favourites"), "flags": versions.read("flags")}  # fmt: skip
+    assert data == {"v": v, "ref": "list:5", "why": "items", "favourites": 0, "flags": 0}
     versions.bump("lists", ["list:1", "list:2"])
     assert emitted[-1][1]["ref"] == "lists"
 
 
 def test_a_push_that_cannot_be_sent_is_logged_and_the_bump_stands(monkeypatch, caplog):
+    engine.ready()
+
     def broken(*a, **k):
         raise RuntimeError("no server")
 
@@ -153,6 +217,7 @@ def test_state_answers_the_three_versions():
     login_session(client)
     got = client.get(contract.API_PREFIX + "/state").get_json()["data"]["versions"]
     assert got == versions.snapshot() and set(got) == {"lists", "favourites", "flags"}
+    assert got["favourites"] == 0 and got["flags"] == 0
     assert state_ops.state({})["versions"] == versions.snapshot()
 
 
@@ -258,7 +323,7 @@ def counts():
 def test_a_delete_prunes_the_overlay_and_empties_the_favourite_slot(emitted):
     _, client, headers = build()
     seed()
-    fav = versions.read("favourites")
+    fav = versions.favourites()
     assert send(client, headers, "DELETE", "/watchlist/api/lists/7").status_code == 200
     assert counts() == {"wl_list": 1, "wl_section": 1, "wl_section_item": 1, "wl_row": 1,
                         "wl_pref": 1, "wl_favourite": 2}  # fmt: skip
@@ -266,28 +331,29 @@ def test_a_delete_prunes_the_overlay_and_empties_the_favourite_slot(emitted):
         assert sorted(f.ref for f in s.scalars(select(schema.FavouriteRow))) == [
             "list:8", "preset:nifty"]  # fmt: skip
         assert s.scalars(select(schema.ListRow)).one().list_id == 8
-    assert versions.read("favourites") != fav and len(emitted) == 1
-    assert emitted[0][1]["favourites"] == versions.read("favourites")  # the push already knows
+    assert fav == 0 and versions.favourites() == 1 and stored("favourites_version") == "1"
+    assert len(emitted) == 1
+    assert emitted[0][1]["favourites"] == versions.favourites()  # the push already knows
 
 
 def test_a_delete_with_no_favourite_leaves_the_favourites_version(emitted):
     _, client, headers = build()
     seed((8,))
-    fav = versions.read("favourites")
+    fav = versions.favourites()
     send(client, headers, "DELETE", "/watchlist/api/lists/7")
-    assert versions.read("favourites") == fav and counts()["wl_list"] == 1
+    assert versions.favourites() == fav and counts()["wl_list"] == 1
 
 
 def test_a_clear_drops_membership_only(emitted):
     _, client, headers = build()
     seed()
-    fav = versions.read("favourites")
+    fav = versions.favourites()
     assert send(client, headers, "POST", "/watchlist/api/lists/7/clear").status_code == 200
     assert counts() == {"wl_list": 2, "wl_section": 2, "wl_section_item": 1, "wl_row": 2,
                         "wl_pref": 2, "wl_favourite": 3}  # fmt: skip
     with engine.open_session() as s:
         assert s.scalars(select(schema.SectionItemRow)).one().list_id == 8
-    assert versions.read("favourites") == fav and len(emitted) == 1
+    assert versions.favourites() == fav and len(emitted) == 1
 
 
 def test_a_missing_store_is_not_created_by_a_delete_and_a_newer_one_is_skipped(

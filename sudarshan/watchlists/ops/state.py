@@ -22,13 +22,16 @@ def enabled() -> bool:
 
 
 def state(args: dict) -> dict:
-    return {
+    got = versions.snapshot()
+    answer = {
         "enabled": True,
         "limits": dict(contract.LIMITS),
         "flag_names": [{"mark": n, "name": w} for n, w in enumerate(DEFAULT_FLAG_NAMES, 1)],
-        "versions": versions.snapshot(),
         # favourites: W10. ranked and alerts availability: W22.
     }
+    if len(got) == len(contract.record("Versions")):  # a store that cannot be read: left out
+        answer["versions"] = got
+    return answer
 
 
 HANDLERS = {"state": state}
