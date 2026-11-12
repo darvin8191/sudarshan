@@ -166,7 +166,7 @@ RECORDS = {
     "ArrangeItem": "exchange:string, symbol:string, section_id:int|null",
     "CopySource": "ref:string, section_id?:int, keys?:string[]",
     "CopyTarget": "list?:int, name?:string, section_id?:int|null",
-    "Push": "v:string, ref:string, why:Why",
+    "Push": "v:string, ref:string, why:Why, favourites?:int, flags?:int",
     "State": "enabled:bool, versions?:Versions, limits?:Limits, flag_names?:FlagName[], "
     "favourites?:Favourite[], ranked?:Availability, alerts?:Availability",
     "Lists": "version:string, own:Entry[], presets:Entry[], ranked:Entry[], flags:Entry[], "

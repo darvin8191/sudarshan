@@ -375,6 +375,8 @@ export interface Push {
   v: string
   ref: string
   why: Why
+  favourites?: number
+  flags?: number
 }
 
 export interface State {

@@ -165,9 +165,46 @@ def test_two_openers_of_a_new_file_at_once_both_start(path, monkeypatch):
     finally:
         event.remove(Engine, "before_cursor_execute", hook)
     assert not [r for r in results if isinstance(r, BaseException)], results
-    assert sorted(len(r[0]) for r in results) == [0, len(ALL_STEPS)]
+    # Each step is its own transaction, so who takes the next one after a commit is up to the
+    # lock: what is guaranteed is that every step ran once in all, never which opener ran it.
+    assert sorted(n for r in results for n in r[0]) == ALL_STEPS
     assert raw(path, "PRAGMA user_version") == [(migrations.LATEST,)]
     assert raw(path, "SELECT count(*) FROM tab") == [(1,)]  # seeded once
+
+
+def test_the_steps_run_once_in_all_even_when_the_second_opener_takes_the_later_ones(
+    path, monkeypatch
+):
+    """The split the test above used to demand ([0, all]) is not promised: held here by hand, the
+    first opener runs step 1, the second wins the lock after that commit and runs the rest."""
+    monkeypatch.setattr(database, "LOCK_RETRY_BUDGET_S", 10.0)
+    first_done, second_done = threading.Event(), threading.Event()
+    begins = {"race-0": 0, "race-1": 0}
+
+    def hold(conn, cursor, statement, parameters, context, executemany):
+        name = threading.current_thread().name
+        if name not in begins:
+            return
+        if statement.startswith("BEGIN IMMEDIATE"):
+            begins[name] += 1
+            if name == "race-1" and begins[name] == 1:
+                first_done.wait(timeout=10)  # the first opener has step 1 in hand
+            if name == "race-0" and begins[name] == 2:
+                second_done.wait(timeout=10)  # ... and lets the second take the rest
+        elif statement.startswith("PRAGMA user_version = ") and name == "race-0":
+            first_done.set()
+        elif statement == f"PRAGMA user_version = {ALL_STEPS[-1]}" and name == "race-1":
+            second_done.set()
+
+    event.listen(Engine, "before_cursor_execute", hold)
+    try:
+        results = _race(lambda: _open(path), lambda: _open(path))
+    finally:
+        event.remove(Engine, "before_cursor_execute", hold)
+    assert not [r for r in results if isinstance(r, BaseException)], results
+    assert [r[0] for r in results] == [[1], [2, 3]]
+    assert raw(path, "PRAGMA user_version") == [(migrations.LATEST,)]
+    assert raw(path, "SELECT count(*) FROM tab") == [(1,)]
 
 
 def _open(path):

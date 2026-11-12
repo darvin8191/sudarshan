@@ -1,0 +1,1247 @@
+{
+ "master": {
+  "NSE:INFY": {
+   "name": "Infosys",
+   "lotsize": 1,
+   "tick_size": 0.05,
+   "expiry": null,
+   "token": "NSE_EQ|INE009A01021"
+  },
+  "NSE:TCS": {
+   "name": "Tata Consultancy Services",
+   "lotsize": 1,
+   "tick_size": 0.05,
+   "expiry": null,
+   "token": "NSE_EQ|INE467B01029"
+  },
+  "NSE:SBIN": {
+   "name": "State Bank of India",
+   "lotsize": 1,
+   "tick_size": 0.05,
+   "expiry": null,
+   "token": "NSE_EQ|INE062A01020"
+  },
+  "NSE:ITC": {
+   "name": "ITC",
+   "lotsize": 1,
+   "tick_size": 0.05,
+   "expiry": null,
+   "token": "NSE_EQ|INE154A01025"
+  },
+  "NSE:WIPRO": {
+   "name": "Wipro",
+   "lotsize": 1,
+   "tick_size": 0.05,
+   "expiry": null,
+   "token": "NSE_EQ|INE075A01022"
+  },
+  "NFO:NIFTY24NOV2625900CE": {
+   "name": "NIFTY",
+   "lotsize": 65,
+   "tick_size": 0.05,
+   "expiry": "24-NOV-26",
+   "token": "NSE_FO|71234"
+  },
+  "NSE_INDEX:NIFTY": {
+   "name": "Nifty 50",
+   "lotsize": 1,
+   "tick_size": 0.05,
+   "expiry": null,
+   "token": "NSE_INDEX|Nifty 50"
+  }
+ },
+ "cases": [
+  {
+   "name": "symbols with no section come first, then each section by position",
+   "live": {
+    "id": 7,
+    "name": "Swing",
+    "created_at": "2026-11-10 09:00:00",
+    "items": [
+     [
+      1,
+      "NSE",
+      "INFY",
+      0
+     ],
+     [
+      2,
+      "NSE",
+      "TCS",
+      1
+     ],
+     [
+      3,
+      "NSE",
+      "SBIN",
+      2
+     ],
+     [
+      4,
+      "NSE",
+      "ITC",
+      3
+     ],
+     [
+      5,
+      "NSE",
+      "WIPRO",
+      4
+     ]
+    ]
+   },
+   "overlay": {
+    "version": 3,
+    "oa_created_at": "2026-11-10 09:00:00",
+    "sections": [
+     {
+      "id": 20,
+      "name": "Late",
+      "mark": 0,
+      "position": 2
+     },
+     {
+      "id": 10,
+      "name": "Early",
+      "mark": 3,
+      "position": 1
+     }
+    ],
+    "items": {
+     "NSE:INFY": 20,
+     "NSE:TCS": 10,
+     "NSE:ITC": 10,
+     "NSE:WIPRO": 20
+    },
+    "follow": [],
+    "symbols": {},
+    "pref": null
+   },
+   "expect": {
+    "rows": [
+     [
+      "NSE:SBIN",
+      null
+     ],
+     [
+      "NSE:TCS",
+      10
+     ],
+     [
+      "NSE:ITC",
+      10
+     ],
+     [
+      "NSE:INFY",
+      20
+     ],
+     [
+      "NSE:WIPRO",
+      20
+     ]
+    ],
+    "sections": [
+     [
+      10,
+      "Early",
+      3,
+      1,
+      2
+     ],
+     [
+      20,
+      "Late",
+      0,
+      2,
+      2
+     ]
+    ],
+    "follow": [],
+    "total": 5,
+    "version": "3",
+    "pref": {
+     "sort": "list",
+     "descending": false,
+     "basis": "close",
+     "held": false
+    }
+   }
+  },
+  {
+   "name": "sections follow their position, not their id or the order they were read",
+   "live": {
+    "id": 7,
+    "name": "Swing",
+    "created_at": "2026-11-10 09:00:00",
+    "items": [
+     [
+      1,
+      "NSE",
+      "INFY",
+      0
+     ],
+     [
+      2,
+      "NSE",
+      "TCS",
+      1
+     ]
+    ]
+   },
+   "overlay": {
+    "version": 3,
+    "oa_created_at": "2026-11-10 09:00:00",
+    "sections": [
+     {
+      "id": 1,
+      "name": "Z",
+      "mark": 0,
+      "position": 9
+     },
+     {
+      "id": 2,
+      "name": "A",
+      "mark": 0,
+      "position": 0
+     }
+    ],
+    "items": {
+     "NSE:INFY": 1,
+     "NSE:TCS": 2
+    },
+    "follow": [],
+    "symbols": {},
+    "pref": null
+   },
+   "expect": {
+    "rows": [
+     [
+      "NSE:TCS",
+      2
+     ],
+     [
+      "NSE:INFY",
+      1
+     ]
+    ],
+    "sections": [
+     [
+      2,
+      "A",
+      0,
+      0,
+      1
+     ],
+     [
+      1,
+      "Z",
+      0,
+      9,
+      1
+     ]
+    ],
+    "follow": [],
+    "total": 2,
+    "version": "3",
+    "pref": {
+     "sort": "list",
+     "descending": false,
+     "basis": "close",
+     "held": false
+    }
+   }
+  },
+  {
+   "name": "follow rows come first in their section, by position, and No section's come before all",
+   "live": {
+    "id": 7,
+    "name": "Swing",
+    "created_at": "2026-11-10 09:00:00",
+    "items": [
+     [
+      1,
+      "NSE",
+      "INFY",
+      0
+     ],
+     [
+      2,
+      "NSE",
+      "TCS",
+      1
+     ],
+     [
+      3,
+      "NSE",
+      "SBIN",
+      2
+     ]
+    ]
+   },
+   "overlay": {
+    "version": 3,
+    "oa_created_at": "2026-11-10 09:00:00",
+    "sections": [
+     {
+      "id": 10,
+      "name": "Index",
+      "mark": 0,
+      "position": 1
+     }
+    ],
+    "items": {
+     "NSE:INFY": 10
+    },
+    "follow": [
+     {
+      "id": 1,
+      "kind": "month_future",
+      "section_id": 10,
+      "position": 5,
+      "underlying": "NIFTY",
+      "underlying_exchange": "NSE_INDEX",
+      "expiry_rule": "month",
+      "strike_rule": "atm",
+      "offset": 0,
+      "strike_paise": null,
+      "opt_right": null
+     },
+     {
+      "id": 2,
+      "kind": "month_future",
+      "section_id": 10,
+      "position": 1,
+      "underlying": "NIFTY",
+      "underlying_exchange": "NSE_INDEX",
+      "expiry_rule": "month",
+      "strike_rule": "atm",
+      "offset": 0,
+      "strike_paise": null,
+      "opt_right": null
+     },
+     {
+      "id": 3,
+      "kind": "month_future",
+      "section_id": null,
+      "position": 0,
+      "underlying": "NIFTY",
+      "underlying_exchange": "NSE_INDEX",
+      "expiry_rule": "month",
+      "strike_rule": "atm",
+      "offset": 0,
+      "strike_paise": null,
+      "opt_right": null
+     },
+     {
+      "id": 4,
+      "kind": "month_future",
+      "section_id": null,
+      "position": 2,
+      "underlying": "NIFTY",
+      "underlying_exchange": "NSE_INDEX",
+      "expiry_rule": "month",
+      "strike_rule": "atm",
+      "offset": 0,
+      "strike_paise": null,
+      "opt_right": null
+     }
+    ],
+    "symbols": {},
+    "pref": null
+   },
+   "expect": {
+    "rows": [
+     [
+      "NSE:TCS",
+      null
+     ],
+     [
+      "NSE:SBIN",
+      null
+     ],
+     [
+      "NSE:INFY",
+      10
+     ]
+    ],
+    "sections": [
+     [
+      10,
+      "Index",
+      0,
+      1,
+      3
+     ]
+    ],
+    "follow": [
+     [
+      3,
+      null
+     ],
+     [
+      4,
+      null
+     ],
+     [
+      2,
+      10
+     ],
+     [
+      1,
+      10
+     ]
+    ],
+    "total": 3,
+    "version": "3",
+    "pref": {
+     "sort": "list",
+     "descending": false,
+     "basis": "close",
+     "held": false
+    }
+   }
+  },
+  {
+   "name": "a symbol added on /trading has no section row and sits at the end of No section",
+   "live": {
+    "id": 7,
+    "name": "Swing",
+    "created_at": "2026-11-10 09:00:00",
+    "items": [
+     [
+      1,
+      "NSE",
+      "INFY",
+      0
+     ],
+     [
+      2,
+      "NSE",
+      "TCS",
+      1
+     ],
+     [
+      3,
+      "NSE",
+      "SBIN",
+      2
+     ],
+     [
+      9,
+      "NSE",
+      "WIPRO",
+      7
+     ]
+    ]
+   },
+   "overlay": {
+    "version": 3,
+    "oa_created_at": "2026-11-10 09:00:00",
+    "sections": [
+     {
+      "id": 10,
+      "name": "Banks",
+      "mark": 0,
+      "position": 1
+     }
+    ],
+    "items": {
+     "NSE:INFY": 10,
+     "NSE:SBIN": 10
+    },
+    "follow": [],
+    "symbols": {},
+    "pref": null
+   },
+   "expect": {
+    "rows": [
+     [
+      "NSE:TCS",
+      null
+     ],
+     [
+      "NSE:WIPRO",
+      null
+     ],
+     [
+      "NSE:INFY",
+      10
+     ],
+     [
+      "NSE:SBIN",
+      10
+     ]
+    ],
+    "sections": [
+     [
+      10,
+      "Banks",
+      0,
+      1,
+      2
+     ]
+    ],
+    "follow": [],
+    "total": 4,
+    "version": "3",
+    "pref": {
+     "sort": "list",
+     "descending": false,
+     "basis": "close",
+     "held": false
+    }
+   }
+  },
+  {
+   "name": "a section item for a symbol no longer in the list is ignored and not counted",
+   "live": {
+    "id": 7,
+    "name": "Swing",
+    "created_at": "2026-11-10 09:00:00",
+    "items": [
+     [
+      1,
+      "NSE",
+      "INFY",
+      0
+     ],
+     [
+      2,
+      "NSE",
+      "TCS",
+      1
+     ]
+    ]
+   },
+   "overlay": {
+    "version": 3,
+    "oa_created_at": "2026-11-10 09:00:00",
+    "sections": [
+     {
+      "id": 10,
+      "name": "Old",
+      "mark": 0,
+      "position": 1
+     }
+    ],
+    "items": {
+     "NSE:INFY": 10,
+     "NSE:GONE": 10,
+     "BSE:INFY": 10
+    },
+    "follow": [],
+    "symbols": {},
+    "pref": null
+   },
+   "expect": {
+    "rows": [
+     [
+      "NSE:TCS",
+      null
+     ],
+     [
+      "NSE:INFY",
+      10
+     ]
+    ],
+    "sections": [
+     [
+      10,
+      "Old",
+      0,
+      1,
+      1
+     ]
+    ],
+    "follow": [],
+    "total": 2,
+    "version": "3",
+    "pref": {
+     "sort": "list",
+     "descending": false,
+     "basis": "close",
+     "held": false
+    }
+   }
+  },
+  {
+   "name": "a reused list id (different oa_created_at) reads with no sections, no follow rows, no preference",
+   "live": {
+    "id": 7,
+    "name": "Swing",
+    "created_at": "2026-11-12 10:30:00",
+    "items": [
+     [
+      1,
+      "NSE",
+      "INFY",
+      0
+     ],
+     [
+      2,
+      "NSE",
+      "TCS",
+      1
+     ],
+     [
+      3,
+      "NSE",
+      "SBIN",
+      2
+     ]
+    ]
+   },
+   "overlay": {
+    "version": 3,
+    "oa_created_at": "2026-11-10 09:00:00",
+    "sections": [
+     {
+      "id": 10,
+      "name": "Stale",
+      "mark": 0,
+      "position": 1
+     }
+    ],
+    "items": {
+     "NSE:INFY": 10
+    },
+    "follow": [
+     {
+      "id": 1,
+      "kind": "month_future",
+      "section_id": 10,
+      "position": 0,
+      "underlying": "NIFTY",
+      "underlying_exchange": "NSE_INDEX",
+      "expiry_rule": "month",
+      "strike_rule": "atm",
+      "offset": 0,
+      "strike_paise": null,
+      "opt_right": null
+     },
+     {
+      "id": 2,
+      "kind": "month_future",
+      "section_id": null,
+      "position": 0,
+      "underlying": "NIFTY",
+      "underlying_exchange": "NSE_INDEX",
+      "expiry_rule": "month",
+      "strike_rule": "atm",
+      "offset": 0,
+      "strike_paise": null,
+      "opt_right": null
+     }
+    ],
+    "symbols": {
+     "NSE:INFY": [
+      2,
+      false
+     ]
+    },
+    "pref": {
+     "sort": "price",
+     "descending": 1,
+     "basis": "open",
+     "held": 1
+    }
+   },
+   "expect": {
+    "rows": [
+     [
+      "NSE:INFY",
+      null
+     ],
+     [
+      "NSE:TCS",
+      null
+     ],
+     [
+      "NSE:SBIN",
+      null
+     ]
+    ],
+    "sections": [],
+    "follow": [],
+    "total": 3,
+    "version": "0",
+    "pref": {
+     "sort": "list",
+     "descending": false,
+     "basis": "close",
+     "held": false
+    },
+    "flags": {
+     "NSE:INFY": 2
+    }
+   }
+  },
+  {
+   "name": "a section id that is no longer a section reads as No section, for symbols and follow rows",
+   "live": {
+    "id": 7,
+    "name": "Swing",
+    "created_at": "2026-11-10 09:00:00",
+    "items": [
+     [
+      1,
+      "NSE",
+      "INFY",
+      0
+     ],
+     [
+      2,
+      "NSE",
+      "TCS",
+      1
+     ]
+    ]
+   },
+   "overlay": {
+    "version": 3,
+    "oa_created_at": "2026-11-10 09:00:00",
+    "sections": [
+     {
+      "id": 10,
+      "name": "Kept",
+      "mark": 0,
+      "position": 1
+     }
+    ],
+    "items": {
+     "NSE:INFY": 99,
+     "NSE:TCS": 10
+    },
+    "follow": [
+     {
+      "id": 1,
+      "kind": "month_future",
+      "section_id": 99,
+      "position": 0,
+      "underlying": "NIFTY",
+      "underlying_exchange": "NSE_INDEX",
+      "expiry_rule": "month",
+      "strike_rule": "atm",
+      "offset": 0,
+      "strike_paise": null,
+      "opt_right": null
+     }
+    ],
+    "symbols": {},
+    "pref": null
+   },
+   "expect": {
+    "rows": [
+     [
+      "NSE:INFY",
+      null
+     ],
+     [
+      "NSE:TCS",
+      10
+     ]
+    ],
+    "sections": [
+     [
+      10,
+      "Kept",
+      0,
+      1,
+      1
+     ]
+    ],
+    "follow": [
+     [
+      1,
+      null
+     ]
+    ],
+    "total": 2,
+    "version": "3",
+    "pref": {
+     "sort": "list",
+     "descending": false,
+     "basis": "close",
+     "held": false
+    }
+   }
+  },
+  {
+   "name": "a list the overlay has not met reads as plain OpenAlgo order, version 0 and default preference",
+   "live": {
+    "id": 7,
+    "name": "Swing",
+    "created_at": "2026-11-10 09:00:00",
+    "items": [
+     [
+      2,
+      "NSE",
+      "TCS",
+      3
+     ],
+     [
+      1,
+      "NSE",
+      "INFY",
+      3
+     ],
+     [
+      3,
+      "NSE",
+      "SBIN",
+      1
+     ]
+    ]
+   },
+   "overlay": {
+    "oa_created_at": null,
+    "version": null,
+    "symbols": {}
+   },
+   "expect": {
+    "rows": [
+     [
+      "NSE:SBIN",
+      null
+     ],
+     [
+      "NSE:INFY",
+      null
+     ],
+     [
+      "NSE:TCS",
+      null
+     ]
+    ],
+    "sections": [],
+    "follow": [],
+    "total": 3,
+    "version": "0",
+    "pref": {
+     "sort": "list",
+     "descending": false,
+     "basis": "close",
+     "held": false
+    }
+   }
+  },
+  {
+   "name": "the stored preference is read as booleans",
+   "live": {
+    "id": 7,
+    "name": "Swing",
+    "created_at": "2026-11-10 09:00:00",
+    "items": [
+     [
+      1,
+      "NSE",
+      "INFY",
+      0
+     ]
+    ]
+   },
+   "overlay": {
+    "version": 3,
+    "oa_created_at": "2026-11-10 09:00:00",
+    "sections": [],
+    "items": {},
+    "follow": [],
+    "symbols": {},
+    "pref": {
+     "sort": "change",
+     "descending": 1,
+     "basis": "open",
+     "held": 0
+    }
+   },
+   "expect": {
+    "rows": [
+     [
+      "NSE:INFY",
+      null
+     ]
+    ],
+    "sections": [],
+    "follow": [],
+    "total": 1,
+    "version": "3",
+    "pref": {
+     "sort": "change",
+     "descending": true,
+     "basis": "open",
+     "held": false
+    }
+   }
+  },
+  {
+   "name": "a flag and a note marker per symbol, never the note",
+   "live": {
+    "id": 7,
+    "name": "Swing",
+    "created_at": "2026-11-10 09:00:00",
+    "items": [
+     [
+      1,
+      "NSE",
+      "INFY",
+      0
+     ],
+     [
+      2,
+      "NSE",
+      "TCS",
+      1
+     ]
+    ]
+   },
+   "overlay": {
+    "version": 3,
+    "oa_created_at": "2026-11-10 09:00:00",
+    "sections": [],
+    "items": {},
+    "follow": [],
+    "symbols": {
+     "NSE:INFY": [
+      3,
+      true
+     ],
+     "NSE:TCS": [
+      null,
+      true
+     ]
+    },
+    "pref": null
+   },
+   "expect": {
+    "rows": [
+     [
+      "NSE:INFY",
+      null
+     ],
+     [
+      "NSE:TCS",
+      null
+     ]
+    ],
+    "sections": [],
+    "follow": [],
+    "total": 2,
+    "version": "3",
+    "pref": {
+     "sort": "list",
+     "descending": false,
+     "basis": "close",
+     "held": false
+    },
+    "flags": {
+     "NSE:INFY": 3,
+     "NSE:TCS": null
+    },
+    "notes": {
+     "NSE:INFY": true,
+     "NSE:TCS": true,
+     "NSE:SBIN": false
+    }
+   }
+  },
+  {
+   "name": "the ISIN is the one in a cash row's instrument key, null for an option and an index",
+   "live": {
+    "id": 7,
+    "name": "Swing",
+    "created_at": "2026-11-10 09:00:00",
+    "items": [
+     [
+      1,
+      "NSE",
+      "INFY",
+      0
+     ],
+     [
+      2,
+      "NFO",
+      "NIFTY24NOV2625900CE",
+      1
+     ],
+     [
+      3,
+      "NSE_INDEX",
+      "NIFTY",
+      2
+     ]
+    ]
+   },
+   "overlay": {
+    "version": 3,
+    "oa_created_at": "2026-11-10 09:00:00",
+    "sections": [],
+    "items": {},
+    "follow": [],
+    "symbols": {},
+    "pref": null
+   },
+   "expect": {
+    "rows": [
+     [
+      "NSE:INFY",
+      null
+     ],
+     [
+      "NFO:NIFTY24NOV2625900CE",
+      null
+     ],
+     [
+      "NSE_INDEX:NIFTY",
+      null
+     ]
+    ],
+    "sections": [],
+    "follow": [],
+    "total": 3,
+    "version": "3",
+    "pref": {
+     "sort": "list",
+     "descending": false,
+     "basis": "close",
+     "held": false
+    },
+    "isin": {
+     "NSE:INFY": "INE009A01021",
+     "NFO:NIFTY24NOV2625900CE": null,
+     "NSE_INDEX:NIFTY": null
+    },
+    "contracts": {
+     "NFO:NIFTY24NOV2625900CE": {
+      "lot": 65,
+      "expiry": "2026-11-24",
+      "tick": 0.05,
+      "name": "NIFTY"
+     }
+    }
+   }
+  },
+  {
+   "name": "a symbol the master lacks is expired and missing, with its own name and no ISIN",
+   "live": {
+    "id": 7,
+    "name": "Swing",
+    "created_at": "2026-11-10 09:00:00",
+    "items": [
+     [
+      1,
+      "NSE",
+      "INFY",
+      0
+     ],
+     [
+      2,
+      "NFO",
+      "NIFTY24OCT2625000PE",
+      1
+     ]
+    ]
+   },
+   "overlay": {
+    "version": 3,
+    "oa_created_at": "2026-11-10 09:00:00",
+    "sections": [],
+    "items": {},
+    "follow": [],
+    "symbols": {},
+    "pref": null
+   },
+   "expect": {
+    "rows": [
+     [
+      "NSE:INFY",
+      null
+     ],
+     [
+      "NFO:NIFTY24OCT2625000PE",
+      null
+     ]
+    ],
+    "sections": [],
+    "follow": [],
+    "total": 2,
+    "version": "3",
+    "pref": {
+     "sort": "list",
+     "descending": false,
+     "basis": "close",
+     "held": false
+    },
+    "missing": [
+     "NFO:NIFTY24OCT2625000PE"
+    ],
+    "expired": {
+     "NSE:INFY": false,
+     "NFO:NIFTY24OCT2625000PE": true
+    },
+    "isin": {
+     "NFO:NIFTY24OCT2625000PE": null
+    },
+    "contracts": {
+     "NFO:NIFTY24OCT2625000PE": {
+      "lot": null,
+      "expiry": null,
+      "tick": null,
+      "name": "NIFTY24OCT2625000PE"
+     }
+    }
+   }
+  },
+  {
+   "name": "with the master not loaded nothing is called expired",
+   "live": {
+    "id": 7,
+    "name": "Swing",
+    "created_at": "2026-11-10 09:00:00",
+    "items": [
+     [
+      1,
+      "NSE",
+      "INFY",
+      0
+     ]
+    ]
+   },
+   "overlay": {
+    "version": 3,
+    "oa_created_at": "2026-11-10 09:00:00",
+    "sections": [],
+    "items": {},
+    "follow": [],
+    "symbols": {},
+    "pref": null
+   },
+   "loaded": false,
+   "expect": {
+    "rows": [
+     [
+      "NSE:INFY",
+      null
+     ]
+    ],
+    "sections": [],
+    "follow": [],
+    "total": 1,
+    "version": "3",
+    "pref": {
+     "sort": "list",
+     "descending": false,
+     "basis": "close",
+     "held": false
+    },
+    "missing": [],
+    "expired": {
+     "NSE:INFY": false
+    }
+   }
+  },
+  {
+   "name": "follow rows are rules as stored: a strike in paise is rupees, a month future has no strike or offset",
+   "live": {
+    "id": 7,
+    "name": "Swing",
+    "created_at": "2026-11-10 09:00:00",
+    "items": []
+   },
+   "overlay": {
+    "version": 3,
+    "oa_created_at": "2026-11-10 09:00:00",
+    "sections": [],
+    "items": {},
+    "follow": [
+     {
+      "id": 1,
+      "kind": "strike_pair",
+      "section_id": null,
+      "position": 0,
+      "underlying": "NIFTY",
+      "underlying_exchange": "NSE_INDEX",
+      "expiry_rule": "nearest",
+      "strike_rule": "fixed",
+      "offset": 0,
+      "strike_paise": 2590000,
+      "opt_right": null
+     },
+     {
+      "id": 2,
+      "kind": "atm_option",
+      "section_id": null,
+      "position": 1,
+      "underlying": "NIFTY",
+      "underlying_exchange": "NSE_INDEX",
+      "expiry_rule": "next",
+      "strike_rule": "atm",
+      "offset": -2,
+      "strike_paise": null,
+      "opt_right": "PE"
+     },
+     {
+      "id": 3,
+      "kind": "month_future",
+      "section_id": null,
+      "position": 2,
+      "underlying": "NIFTY",
+      "underlying_exchange": "NSE_INDEX",
+      "expiry_rule": "month",
+      "strike_rule": "atm",
+      "offset": 0,
+      "strike_paise": null,
+      "opt_right": null
+     }
+    ],
+    "symbols": {},
+    "pref": null
+   },
+   "expect": {
+    "rows": [],
+    "sections": [],
+    "total": 0,
+    "version": "3",
+    "pref": {
+     "sort": "list",
+     "descending": false,
+     "basis": "close",
+     "held": false
+    },
+    "follow": [
+     [
+      1,
+      null
+     ],
+     [
+      2,
+      null
+     ],
+     [
+      3,
+      null
+     ]
+    ],
+    "follow_detail": {
+     "1": {
+      "strike": 25900.0,
+      "strike_rule": "fixed",
+      "offset": 0,
+      "opt_right": null
+     },
+     "2": {
+      "strike": null,
+      "strike_rule": "atm",
+      "offset": -2,
+      "opt_right": "PE"
+     },
+     "3": {
+      "strike": null,
+      "strike_rule": null,
+      "offset": null,
+      "opt_right": null
+     }
+    }
+   }
+  }
+ ]
+}

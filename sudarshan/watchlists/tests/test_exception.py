@@ -127,6 +127,35 @@ def run_every_op(m: master.Master):
     dynamic.pick_expiries(["2026-11-24"], 0)
 
 
+def run_every_registered_op(monkeypatch, tmp_path):
+    """Every op the bridge registers, switched on and off, through the real blueprint."""
+    from watchlists_bridge_app import csrf_headers, login_session, make_app, path_of, reset_users
+
+    import blueprints.sudarshan_watchlists as bridge
+    from sudarshan.watchlists import contract, engine, ops
+
+    monkeypatch.setenv(contract.DB_ENV, str(tmp_path / "wl.db"))
+    reset_users()
+    client = make_app(ops.discover(), real=True).test_client()
+    login_session(client)
+    headers = csrf_headers(client)
+    registered = [op for op in contract.OPS if op.name in ops.discover()]
+    assert registered
+    for switch in ("on", "off"):
+        monkeypatch.setenv(contract.SWITCH_ENV, switch)
+        bridge._record.clear()
+        for op in registered:
+            r = client.open(path_of(op), method=op.method, json={}, headers=headers)
+            assert r.status_code in (200, 400, 503), (op.name, r.status_code)
+    engine.dispose()
+
+
+def test_no_thread_starts_for_any_registered_op(monkeypatch, tmp_path):
+    before = {t.ident for t in threading.enumerate()}
+    run_every_registered_op(monkeypatch, tmp_path)
+    assert {t.ident for t in threading.enumerate()} == before
+
+
 def test_no_thread_starts_for_any_op_or_a_swap_of_the_master():
     a, _ = snapshot("A")
     b, _ = snapshot("B")
