@@ -61,6 +61,29 @@ APP = textwrap.dedent(
     app.register_blueprint(bridge.attach(
         Blueprint("wl_gthread", __name__, url_prefix=contract.API_PREFIX), handlers))
 
+    # W5: OpenAlgo's watchlist blueprint's name and add route, a recorder where the push is
+    # emitted (no Socket.IO server here), and a bump of the bridge's own.
+    from sudarshan.watchlists import versions
+
+    emitted = []
+    versions.emit_from_any_thread = lambda event, data, **kw: emitted.append(data)
+    stand_in = Blueprint("watchlist_bp", __name__)
+
+    @stand_in.route("/watchlist/api/lists/<int:watchlist_id>/items", methods=["POST"])
+    def add_symbol(watchlist_id):
+        return jsonify(status="success"), 201
+
+    app.register_blueprint(stand_in)
+
+    @app.route("/bump", methods=["POST"])
+    def bump():
+        versions.bump("items", ["list:1"])
+        return "ok"
+
+    @app.route("/emitted")
+    def emitted_pushes():
+        return jsonify(emitted)
+
     @app.route("/ping")
     def ping():
         return "ok"
@@ -186,6 +209,54 @@ def at_once(count, call):
         t.join(60)
     assert all(r is not None for r in results), "a request did not finish"
     return results
+
+
+def lists_count(server, headers) -> int:
+    status, raw, _ = server.request("GET", "/sudarshan/watchlists/api/state", headers=headers)
+    assert status == 200
+    return int(json.loads(raw)["data"]["versions"]["lists"].split(":")[1])
+
+
+def test_the_harness_sees_a_lost_update_in_a_counter_that_checks_then_acts():
+    """The control: a counter read, then written back after a yield loses bumps under twelve
+    threads, so the tests below can fail on a broken version."""
+    box = {"n": 0}
+
+    def racy(i):
+        n = box["n"]
+        time.sleep(0.001)
+        box["n"] = n + 1
+        return True
+
+    at_once(12, racy)
+    assert box["n"] < 12
+
+
+def test_twelve_bumps_at_once_raise_the_lists_version_by_exactly_twelve(server_on):
+    headers = server_on.login()
+    before = lists_count(server_on, headers)
+    at_once(12, lambda i: server_on.request("POST", "/bump", headers=headers))
+    assert lists_count(server_on, headers) == before + 12
+    _, raw, _ = server_on.request("GET", "/emitted")
+    versions = [push["v"] for push in json.loads(raw)]
+    assert len(versions) == 12 and len(set(versions)) == 12, "a push repeated a version"
+
+
+def test_concurrent_writes_through_the_hook_emit_once_each(server_on):
+    headers = server_on.login()
+    before = lists_count(server_on, headers)
+    results = at_once(
+        12,
+        lambda i: server_on.request(
+            "POST", f"/watchlist/api/lists/{i + 1}/items", body={}, headers=headers
+        ),
+    )
+    assert [status for status, _, _ in results] == [201] * 12
+    assert lists_count(server_on, headers) == before + 12
+    _, raw, _ = server_on.request("GET", "/emitted")
+    pushes = json.loads(raw)
+    assert sorted(p["ref"] for p in pushes) == sorted(f"list:{i + 1}" for i in range(12))
+    assert len({p["v"] for p in pushes}) == 12 and {p["why"] for p in pushes} == {"items"}
 
 
 def test_six_concurrent_reads_each_answer_for_themselves(server_on):

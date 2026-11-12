@@ -183,7 +183,7 @@ def test_state_answers_only_what_needs_no_later_change():
     assert r.status_code == 200 and r.headers["Cache-Control"] == "no-store"
     body = r.get_json()
     assert body["status"] == "ok"
-    assert set(body["data"]) == {"enabled", "limits", "flag_names"}
+    assert set(body["data"]) == {"enabled", "limits", "flag_names", "versions"}
     assert body["data"]["enabled"] is True
     assert body["data"]["limits"] == contract.LIMITS
     assert [f["name"] for f in body["data"]["flag_names"]] == [

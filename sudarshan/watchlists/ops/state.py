@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 
-from sudarshan.watchlists import contract
+from sudarshan.watchlists import contract, versions
 
 DEFAULT_FLAG_NAMES = ("Watch", "Breakout", "Results", "Long term", "Avoid")
 _ON = ("on", "true", "1", "yes")
@@ -26,7 +26,8 @@ def state(args: dict) -> dict:
         "enabled": True,
         "limits": dict(contract.LIMITS),
         "flag_names": [{"mark": n, "name": w} for n, w in enumerate(DEFAULT_FLAG_NAMES, 1)],
-        # versions and the push: W5. favourites: W10. ranked and alerts availability: W22.
+        "versions": versions.snapshot(),
+        # favourites: W10. ranked and alerts availability: W22.
     }
 
 

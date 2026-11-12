@@ -26,7 +26,7 @@ from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 
 from extensions import is_owner_session
 from limiter import limiter
-from sudarshan.watchlists import bridge, contract, ops
+from sudarshan.watchlists import bridge, contract, ops, versions
 from sudarshan.watchlists.engine import RecordTooNew, RecordUnreadable, ready
 from sudarshan.watchlists.ops.state import enabled
 from sudarshan.watchlists.words.base import MESSAGES, TOO_BIG
@@ -182,7 +182,12 @@ def _guarded(op: contract.OpSpec, handler):
             return _error("record", words)
         try:
             args = _read(op, route)
-            return _answer({"status": "ok", "data": handler(args)})
+            data = handler(args)
+            declared = getattr(handler, "bump", None)
+            if declared is not None:  # a write op: the change is committed, tell the phone
+                why, refs = declared
+                versions.bump(why, refs(args, data) if refs else ())
+            return _answer({"status": "ok", "data": data})
         except _Bad as bad:
             return _error("invalid", field=bad.field)
         except ops.OpError as refused:

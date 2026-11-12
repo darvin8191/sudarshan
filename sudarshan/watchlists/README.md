@@ -177,3 +177,30 @@ otherwise; a route's id must equal the same field of the body, else `invalid` wi
 come with W5, favourites W10, ranked and alerts availability W22. Tests: `tests/test_watchlists_bridge.py`
 (in process, real CSRF, limiter and user table) and `test/test_gthread_watchlists.py` (a real gunicorn
 gthread worker: concurrent reads, the switch off, the limit under a barrier).
+
+## W5 - the version, the push and the hook (`versions.py`, `bridge/push.py`, `store/prune.py`)
+
+Three in-memory counters, lists, favourites and flags, each read as `"<boot>:<n>"` where `<boot>`
+is new at every process start, so a reader only compares for equality. A bump is under a real lock
+(`utils.real_threading`) whose critical section is the increment. `versions.bump(why, refs)` bumps
+the lists version once and emits `contract.EVENT_PUSH` (`{v, ref, why}` plus the favourites and
+flags versions) to the room `sudarshan:watchlists:owner` through `extensions.emit_from_any_thread`;
+`ref` is the one ref changed, else `lists`. A push that cannot be sent is logged, never raised.
+`state` answers `versions`. An app joins the room with `contract.EVENT_JOIN` (an ack): the owner's
+session only, and refused in words with the switch off.
+
+The one rule: every write that changes what a list, a section or a flag list holds bumps the lists
+version once, after its transaction commits, from one of two sources and never both. (1) The hook:
+`bridge/push.py` registers one `after_request`; for a 2xx answer to a non-GET request of OpenAlgo's
+watchlist blueprint, or to the screener's internal watchlist route when its op is `watchlist_apply`
+and it found the list, it bumps and pushes. Every other request pays one membership test of
+`request.blueprint`. A delete also prunes that list's overlay (`store/prune.py`: list guard row,
+sections, section items, follow rows, preferences, and favourite slots naming `list:<id>`, then the
+favourites version) in one transaction in the overlay's own file; a clear drops section membership
+only, because /trading cannot see sections or follow rows. A store file that is missing (never
+created by a delete) or newer is skipped and logged, and a failure in the hook is logged and never
+changes OpenAlgo's answer. (2) The bridge's own ops: a handler marked `@ops.bumps(why, refs)` has
+the bridge bump and push after it returns, never after a refusal. The hook starts no thread, timer
+or loop. Tests: `tests/test_watchlists_push.py`; `test/test_gthread_watchlists.py` (twelve bumps at
+once, twelve writes through the hook under a real gthread worker).
+

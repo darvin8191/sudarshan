@@ -25,6 +25,18 @@ class OpError(Exception):
         self.code, self.message, self.field = code, message, field
 
 
+def bumps(why: str, refs=None):
+    """Declare that an op changes what a list, a section or a flag list holds: the bridge bumps
+    the lists version once and pushes ``why`` after the handler returns (so after its commit),
+    never for a refusal. ``refs(args, data)`` names the refs changed (none: the whole of lists)."""
+
+    def mark(handler):
+        handler.bump = (why, refs)
+        return handler
+
+    return mark
+
+
 def collect() -> list[tuple[str, object, str]]:
     """Every ``(op, handler, module)`` the modules declare, duplicates and unknown ops included."""
     found = []
