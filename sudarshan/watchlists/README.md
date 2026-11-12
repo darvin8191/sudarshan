@@ -6,6 +6,54 @@ no I/O, no clock and no logging; words a trader reads live in `words/<feature>.p
 starts no thread, timer or event loop. Tests: `sudarshan/watchlists/tests/` (vectors in
 `tests/vectors/`, typed by hand, never made by the code they test).
 
+## Why this runs inside OpenAlgo: the watchlists exception (9 Nov 2026)
+
+The SUDARSHAN rule is that everything new lives in `sudarshan/` as separate systemd services that
+talk to OpenAlgo through its REST API. Watchlists v2 is the one written exception. Its store
+(`db/sudarshan_watchlists.db`), its bridge (`blueprints/sudarshan_watchlists.py`), the hook on
+OpenAlgo's watchlist routes and the reads derived from the symbol master (search, strikes, built-in
+lists, follow rows) run inside the OpenAlgo app. Nothing else moves in with it: list alerts stay in
+`sudarshan-alerts`, and every other SUDARSHAN feature keeps its state in its own service. The risk
+layer (`sudarshan/guard`) is in process too, but because it gates orders inside OpenAlgo's order
+path; this feature judges nothing and sits in no order path, so the guard is a pattern for the
+mechanics here (a file of its own in `db/`, NullPool engines, a migration in `upgrade/`), not a
+precedent for placement. `.claude/rules/sudarshan.md` keeps the ring rule as written; this section
+is the exception's record in the repository.
+
+Why here:
+
+1. **Rollback.** Every row is keyed to an OpenAlgo list id. A file in `db/` is backed up before a
+   deploy and restored with `openalgo.db`; a service's own store is not, so after a rollback it
+   would point at list ids the restored database no longer has.
+2. **The hook must run in process.** A change made on any device, `/trading`'s panel included,
+   reaches the phone through an `after_request` on OpenAlgo's watchlist routes.
+3. **The master is already in memory here**, so search and follow rows read it with no copy and no
+   Upstox call.
+4. **A service would cost more than it buys:** a port, a unit, a health block, its own store and
+   backups, a bridge, and still a sealed route in OpenAlgo for every list read and write, plus the
+   hook.
+
+**The limits.** Each is a condition of the exception, and a PR that breaks one is not merged:
+
+1. No thread, timer, scheduler, executor or event loop in `sudarshan/watchlists/` or the bridge;
+   every call is a request or an event.
+2. One generation of master-derived maps, tied to OpenAlgo's current snapshot and dropped with it,
+   holding references and never copies, under 15 MB on 120,000 rows.
+3. NullPool engines from `database.engine_factory`, every operation in its own session, and the
+   `fd-audit` skill on the store, the bridge, the push and the Smartlist read.
+4. Correct under eventlet, gthread and the dev server, with barrier tests in the gthread suite for
+   the bridge and the push.
+5. The switch `SUDARSHAN_WATCHLISTS_V2` ships off; off, the watchlist page is v0.6.0's.
+6. One transaction per file: a write never holds a transaction across this store and `openalgo.db`.
+
+Limits 1 and 2 are held by `tests/test_exception.py` (W11 below).
+
+**Reversible.** The pure modules import no Flask and no OpenAlgo, the store sits behind plain-data
+functions, and `master.py` is the only reader of OpenAlgo's master. Moving the store into a service
+of its own later is about three PRs (a unit, its store with the rows copied over, and a bridge
+forwarding the same `contract.py` ops); the hook and the master reads stay here, and the phone's
+client does not change.
+
 ## W3 - the contract (`contract.py`, `gentypes.py`)
 
 `contract.py` holds every op of the owner's bridge once: method, path, class, request fields and the
