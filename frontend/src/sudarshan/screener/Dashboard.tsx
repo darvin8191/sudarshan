@@ -1,3 +1,4 @@
+import { useQuery } from '@tanstack/react-query'
 import { Plus, RefreshCw } from 'lucide-react'
 import { useCallback, useMemo, useRef, useState } from 'react'
 import type { WatchlistItem } from '@/api/watchlist'
@@ -21,6 +22,7 @@ import {
 } from '@/sudarshan/dashboard/MarketCalendar'
 import { statusLine } from '@/sudarshan/watchlist/rows'
 import { type LiveRow, useLiveRows } from '@/sudarshan/watchlist/useLiveRows'
+import { readLists, WATCHLISTS_KEY } from '@/sudarshan/watchlist/useWatchlists'
 import { AddWidgetSheet } from './AddWidgetSheet'
 import { CountCard } from './CountCard'
 import { type CardFeed, cardLine } from './cardLine'
@@ -64,6 +66,20 @@ function itemsOf(followed: WatchlistItem[], shown: ResultRow[], openKey: string 
   ]
 }
 
+/** The cards with every list the page can name named: the service's own name wins, the page's list by id fills a null. */
+export function namedLists(
+  cards: Card[],
+  lists: ReadonlyArray<{ id: number; name: string }> | undefined
+): Card[] {
+  if (!lists || !cards.some((card) => card.list?.id && !card.list.name)) return cards
+  return cards.map((card) => {
+    const list = card.list
+    if (!list?.id || list.name) return card
+    const found = lists.find((each) => each.id === list.id)
+    return found ? { ...card, list: { ...list, name: found.name } } : card
+  })
+}
+
 const NO_CARDS: Card[] = []
 
 /**
@@ -91,7 +107,18 @@ export function Dashboard({
   const { query, failed, retry } = useDashboard()
   const data = query.data
   const problem = query.error
-  const cards = data?.widgets ?? NO_CARDS
+  const widgets = data?.widgets ?? NO_CARDS
+  // The service sends an id and no name for a list until the first sync settles: the page names it
+  // from its own watchlists (read only while some card needs it), so a card never says "Its list"
+  // for a list the page can name.
+  const lists = useQuery({
+    queryKey: WATCHLISTS_KEY,
+    queryFn: readLists,
+    staleTime: 15_000,
+    retry: false,
+    enabled: widgets.some((card) => card.list?.id && !card.list.name),
+  })
+  const cards = useMemo(() => namedLists(widgets, lists.data), [widgets, lists.data])
   const layout = useLayoutWrites(data)
   const [removing, setRemoving] = useState<Card | null>(null)
 

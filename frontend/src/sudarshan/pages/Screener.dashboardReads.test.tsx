@@ -22,6 +22,11 @@ vi.mock('@/sudarshan/screener/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/sudarshan/screener/api')>()),
   screenerApi: api,
 }))
+const lists = vi.hoisted(() => ({ list: vi.fn() }))
+vi.mock('@/api/watchlist', async (importOriginal) => {
+  const real = await importOriginal<typeof import('@/api/watchlist')>()
+  return { ...real, watchlistApi: { ...real.watchlistApi, list: lists.list } }
+})
 const toasts = vi.hoisted(() => ({
   success: vi.fn(),
   error: vi.fn(),
@@ -200,6 +205,8 @@ beforeEach(() => {
   access.loggedOut = false
   resetScreenerPushForTests()
   for (const fn of Object.values(api)) fn.mockReset()
+  lists.list.mockReset()
+  lists.list.mockResolvedValue([])
   for (const fn of Object.values(toasts)) fn.mockReset()
   api.runsSince.mockResolvedValue({ runs: [], more: false })
   api.results.mockReturnValue(new Promise(() => {}))
@@ -634,12 +641,38 @@ describe('the rest of the review (L2, L3, L7, L8)', () => {
     expect(feed.followed).not.toContain('NSE:PAUSEDONE')
   })
 
-  it('names a list whose name the service did not send, not a bare count', async () => {
+  it('names a list the service sent with an id and no name from the page’s own watchlists', async () => {
+    lists.list.mockResolvedValue([
+      { id: 4, name: 'Other', position: 0, items: [] },
+      { id: 5, name: 'Breakouts', position: 1, items: [] },
+    ])
     api.dashboard.mockResolvedValue(
       dashboard([widgetCard({ list: { id: 5, name: null, count: 12 } })])
     )
     renderPage()
     await waitFor(() => expect(cardOf(1)).toBeTruthy())
+    await waitFor(() => expect(cardOf(1).textContent).toContain('Breakouts · 12'))
+    expect(cardOf(1).textContent).not.toContain('Its list')
+  })
+
+  it('keeps the service’s own name, and reads no watchlists when every card has one', async () => {
+    api.dashboard.mockResolvedValue(
+      dashboard([widgetCard({ list: { id: 5, name: 'From the service', count: 3 } })])
+    )
+    renderPage()
+    await waitFor(() => expect(cardOf(1)).toBeTruthy())
+    expect(cardOf(1).textContent).toContain('From the service · 3')
+    expect(lists.list).not.toHaveBeenCalled()
+  })
+
+  it('says "Its list" only while the page cannot name the list', async () => {
+    lists.list.mockRejectedValue(new Error('down'))
+    api.dashboard.mockResolvedValue(
+      dashboard([widgetCard({ list: { id: 5, name: null, count: 12 } })])
+    )
+    renderPage()
+    await waitFor(() => expect(cardOf(1)).toBeTruthy())
+    await waitFor(() => expect(lists.list).toHaveBeenCalled())
     expect(cardOf(1).textContent).toContain('Its list · 12')
   })
 
