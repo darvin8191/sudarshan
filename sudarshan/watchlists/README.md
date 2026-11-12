@@ -154,3 +154,26 @@ opens the file read-only and prints the file, its schema, this release's schema 
 mode). A file from a newer release is refused untouched, in the owner's sentence. Tests:
 `tests/test_watchlists_migration.py` (missing, populated copy forced back, newer, the app store
 opening the result).
+
+## W4 - the bridge (`blueprints/sudarshan_watchlists.py`, `ops/`, `refs/`, `bridge/`, `words/base.py`)
+
+The owner's routes under `contract.API_PREFIX`, built from `contract.OPS`, one for each op that has a
+handler: `ops/` is found with `pkgutil.iter_modules`, each module exposing `HANDLERS = {op: fn}` with
+`fn(args) -> data` (refusals are `ops.OpError(code, words, field)`), so a later change adds a module
+and edits nothing else; `refs/` and `bridge/` are found the same way (bridge parts define
+`install(app)`, called from the blueprint's `record_once`). A test keeps the list of ops not built
+yet and fails when an op is neither handled nor listed, a handler has no row, or an op has two. Every
+request is checked in this order: an OpenAlgo session (`session`, in the envelope, never a redirect),
+the owner (`owner_only` for any other session, reads included), CSRF on every POST, PUT, PATCH and
+DELETE (the blueprint is let go by the app's own check so it runs after the owner check; a lapsed
+token is `session`), and the shared limiter's per-class count (`busy`; it acts as the request
+arrives, so it may answer before the checks above). Then the switch `SUDARSHAN_WATCHLISTS_V2`, read at
+each request and shipped `off` in `openalgo-env.conf`: off, `state` answers `{"enabled": false}`,
+every other op `off`, and nothing is opened or read. Then the record check (`engine.ready()`, its
+outcome kept five seconds in a `LockedTTLCache`, a newer or unreadable file answers `record` in the
+owner's words), then the request is read against the contract (query string for GET and DELETE, JSON
+otherwise; a route's id must equal the same field of the body, else `invalid` with that field).
+`state` answers the switch, `contract.LIMITS` and the five default flag names; versions and the push
+come with W5, favourites W10, ranked and alerts availability W22. Tests: `tests/test_watchlists_bridge.py`
+(in process, real CSRF, limiter and user table) and `test/test_gthread_watchlists.py` (a real gunicorn
+gthread worker: concurrent reads, the switch off, the limit under a barrier).
