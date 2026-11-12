@@ -253,3 +253,34 @@ apply in every list.
 instrument key (cash rows carry it, null otherwise), and a symbol the master lacks is `expired`
 and named in `missing` (with the master not loaded nothing is called expired). Prices are never in
 `view`: the page streams them. Tests: `tests/test_watchlists_view.py`.
+
+## W7 - sections (`store/sections.py`, `ops/sections.py`, `words/sections.py`)
+
+`section_add`, `section_edit` and `section_remove` act on own lists only (`list:<id>`): a list or a
+section that does not exist (or is another user's) is `gone`. Every write names the version it was
+decided on (`view` answered it) and is one transaction in `db/sudarshan_watchlists.db`
+(`openalgo.db` is never written). The transaction's first statement is the claim
+(`store.claim`): one `UPDATE wl_list ... WHERE version = <held> AND oa_created_at = <live>` checked
+by its row count, so a stale version is `conflict` ("Changed on another screen. The list is shown
+again.") and nothing is changed, the refusals after it (`invalid` for a name over 40 letters, empty
+or already used in the list, letter case aside; `invalid` for a mark outside 0 to 5; `limit` for a
+21st section) roll the claim back with it. It is an UPDATE first and not a read first on purpose:
+an UPDATE takes SQLite's write lock at once, while a read followed by a write fails under WAL as a
+lock error no retry clears when another writer committed in between (that was a 500 in the first
+write race). A list with no guard row is held as "0": the first write inserts the row (the primary
+key refuses a second one, told `conflict`) with `oa_created_at` as `view.created_key` gives it. A
+guard row whose `oa_created_at` differs belongs to a deleted list whose id was reused: a write
+holding "0" prunes that list's overlay (`prune.drop_overlay`: sections, items, follow rows,
+preference; favourite slots are the delete hook's) in the same transaction and starts a fresh row
+at the epoch milliseconds, which no client of the old overlay can hold; a write holding the old
+version is `conflict` and prunes nothing. A version no list can hold (not a number) is `conflict`.
+
+A new section takes the next position (1 for the first). Removing a section deletes its section
+items and sets its follow rows to No section, so its symbols read under No section in `view`.
+Renaming to the section's own name is allowed. After its commit each write bumps the lists version
+once with why `sections` (`ops.bumps`); `section_edit` and `section_remove` name only the section,
+so their answer is a `Done` dict that also carries the ref of its list for the bump (the record
+sent is the contract's `Done`). The handlers import the list reader when used, so importing the
+bridge still loads no master. Tests: `tests/test_watchlists_sections.py`; `test/test_gthread_watchlists.py`
+(eight threads on one version: one wins, seven `conflict`; eight first writes to one list: one row,
+never a 500). Left for W8: `arrange`, `copy` and `move`.

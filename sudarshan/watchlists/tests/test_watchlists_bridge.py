@@ -29,7 +29,13 @@ CHANGING = [op for op in contract.OPS if op.method in ("POST", "PUT", "PATCH", "
 
 #: The ops with no handler yet. A later change builds some and removes them from here; a row of the
 #: contract that is neither handled nor listed fails, so no op is forgotten.
-NOT_BUILT = {op.name for op in contract.OPS} - {"state", "view"}
+NOT_BUILT = {op.name for op in contract.OPS} - {
+    "state",
+    "view",
+    "section_add",
+    "section_edit",
+    "section_remove",
+}
 
 BODIES = {
     "section_add": {"list": 1, "name": "A", "version": "v"},
@@ -78,7 +84,10 @@ def test_only_handled_ops_get_a_route():
     rules = {
         r.rule for r in app.url_map.iter_rules() if r.endpoint.startswith("sudarshan_watchlists.")
     }
-    assert rules == {contract.API_PREFIX + "/state", contract.API_PREFIX + "/view"}
+    assert rules == {
+        contract.API_PREFIX + route
+        for route in ("/state", "/view", "/sections", "/sections/<int:id>")
+    }
 
 
 # -- the checks, in order ------------------------------------------------------------------------

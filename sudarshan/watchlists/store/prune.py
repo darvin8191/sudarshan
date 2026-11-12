@@ -30,6 +30,18 @@ def _usable() -> bool:
     return True
 
 
+def drop_overlay(s, list_id: int) -> None:
+    """The overlay of one list inside the caller's open transaction: its guard row, sections,
+    section items, follow rows and preference (not its favourite slots: a delete's own prune
+    empties those and raises the favourites version, which a stale guard does not)."""
+    for table in (schema.SectionItemRow, schema.SectionRow, schema.FollowRow):
+        s.execute(delete(table).where(table.principal == OWNER, table.list_id == list_id))
+    s.execute(delete(schema.ListRow).where(
+        schema.ListRow.principal == OWNER, schema.ListRow.list_id == list_id))  # fmt: skip
+    s.execute(delete(schema.PrefRow).where(
+        schema.PrefRow.principal == OWNER, schema.PrefRow.ref == f"list:{list_id}"))  # fmt: skip
+
+
 def drop_list(list_id: int) -> bool:
     """Everything the overlay holds for a deleted list; True when a favourite slot was emptied, in
     which case the favourites version went up in the same transaction and the mirror follows it."""
@@ -37,12 +49,7 @@ def drop_list(list_id: int) -> bool:
         return False
     ref = f"list:{list_id}"
     with engine.open_session() as s, s.begin():
-        for table in (schema.SectionItemRow, schema.SectionRow, schema.FollowRow):
-            s.execute(delete(table).where(table.principal == OWNER, table.list_id == list_id))
-        s.execute(delete(schema.ListRow).where(
-            schema.ListRow.principal == OWNER, schema.ListRow.list_id == list_id))  # fmt: skip
-        s.execute(delete(schema.PrefRow).where(
-            schema.PrefRow.principal == OWNER, schema.PrefRow.ref == ref))  # fmt: skip
+        drop_overlay(s, list_id)
         emptied = s.execute(delete(schema.FavouriteRow).where(
             schema.FavouriteRow.principal == OWNER, schema.FavouriteRow.ref == ref))  # fmt: skip
         version = versions.advance_favourites(s) if emptied.rowcount > 0 else None

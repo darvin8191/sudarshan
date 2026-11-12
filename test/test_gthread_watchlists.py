@@ -21,6 +21,7 @@ import importlib.util
 import json
 import os
 import socket
+import sqlite3
 import subprocess
 import sys
 import textwrap
@@ -79,6 +80,12 @@ APP = textwrap.dedent(
     def bump():
         versions.bump("items", ["list:1"])
         return "ok"
+
+    # W7: the real section ops, over a list OpenAlgo "has" (its own database is not under test)
+    from sudarshan.watchlists.refs import list as listref
+
+    listref.read_live = lambda user, lid: {
+        "id": lid, "name": "L", "created_at": "2026-01-01 00:00:00", "items": []}
 
     @app.route("/emitted")
     def emitted_pushes():
@@ -317,3 +324,52 @@ def test_the_limit_of_a_class_lets_no_more_through_than_it_allows(server_on):
     assert codes.count(429) == len(results) - allowed
     busy = next(json.loads(raw) for status, raw, _ in results if status == 429)
     assert busy["code"] == "busy" and busy["status"] == "error"
+
+
+# -- W7: the section writes decide on a version, as one compare-and-set -----------------------------
+SECTIONS = "/sudarshan/watchlists/api/sections"
+
+
+def add_section(server, headers, list_id, name, version):
+    status, raw, _ = server.request(
+        "POST", SECTIONS, {"list": list_id, "name": name, "version": version}, headers
+    )
+    return status, json.loads(raw)
+
+
+def store_rows(server, sql):
+    with sqlite3.connect(server.db) as conn:
+        return conn.execute(sql).fetchall()
+
+
+def test_two_writers_on_one_version_one_wins_and_the_other_is_told_conflict(server_on):
+    headers = server_on.login()
+    assert add_section(server_on, headers, 5, "First", "0")[0] == 200
+    for round_no in range(3):  # a race is only seen when the threads really overlap: try again
+        held = store_rows(server_on, "SELECT version FROM wl_list WHERE list_id = 5")[0][0]
+        got = at_once(
+            8,
+            lambda i, r=round_no, v=held: add_section(server_on, headers, 5, f"R{r}-{i}", str(v)),
+        )
+        assert sorted(status for status, _ in got) == [200] + [409] * 7, got
+        assert {body["code"] for status, body in got if status == 409} == {"conflict"}
+        (winner,) = (body for status, body in got if status == 200)
+        assert winner["data"]["version"] == str(held + 1)
+        (now,) = store_rows(server_on, "SELECT version FROM wl_list WHERE list_id = 5")
+        assert now[0] == held + 1
+    names = store_rows(server_on, "SELECT count(*) FROM wl_section WHERE list_id = 5")
+    assert names[0][0] == 1 + 3  # exactly one section per round
+    status, raw, _ = server_on.request("GET", "/emitted")
+    assert len(json.loads(raw)) == 1 + 3  # one push per successful write, none for a conflict
+
+
+def test_two_first_writes_to_one_list_make_one_row_and_the_other_is_told_conflict(server_on):
+    headers = server_on.login()
+    for list_id in range(10, 14):
+        got = at_once(8, lambda i, lid=list_id: add_section(server_on, headers, lid, f"N{i}", "0"))
+        assert sorted(status for status, _ in got) == [200] + [409] * 7, got  # never a 500
+        assert {body["code"] for status, body in got if status == 409} == {"conflict"}
+        rows = store_rows(server_on, f"SELECT version FROM wl_list WHERE list_id = {list_id}")
+        assert rows == [(1,)]
+        sections = store_rows(server_on, f"SELECT 1 FROM wl_section WHERE list_id = {list_id}")
+        assert len(sections) == 1
