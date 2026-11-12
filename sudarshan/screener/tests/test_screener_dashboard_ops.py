@@ -273,3 +273,35 @@ def test_a_day_of_twelve_one_minute_screens_reads_under_the_bridges_timeout(serv
     counted = [w for w in got["widgets"] if w["kind"] == "count"]
     assert len(counted) == 8 and len(counted[0]["counts"]["series"]) == 75
     assert took < 1.5, f"the dashboard read took {took:.2f}s"
+
+
+def test_a_cards_read_loads_runs_only_for_a_count_card_and_only_for_its_screen(
+    service, monkeypatch
+):
+    """Review L2: a table card's read loaded every run of the day of every screen as soon as any
+    count card was on the layout, on the service's one event loop."""
+    screens = [named(service, f"Minute {i}", run={"on": "close", "tf": 1}) for i in range(3)]
+    for screen in screens:
+        for k in range(1, 4):
+            record(service, screen, k, judged({"AAA": 100}))
+    version = add(service, 0, screens[0], "count")["version"]  # a count card on the layout
+    reads: list[tuple] = []
+    real_all, real_of = store_module.Tx.runs_session, store_module.Tx.runs_session_of
+    monkeypatch.setattr(
+        store_module.Tx,
+        "runs_session",
+        lambda self, s: reads.append(("all", s)) or real_all(self, s),
+    )
+    monkeypatch.setattr(
+        store_module.Tx,
+        "runs_session_of",
+        lambda self, sid, s: reads.append(("one", sid)) or real_of(self, sid, s),
+    )
+    call(service, "widget", id=screens[1]["id"], kind="table")
+    assert reads == [], "a table card needs none of the day's runs"
+    card = call(service, "widget", id=screens[0]["id"], kind="count")
+    assert reads == [("one", screens[0]["id"])], "a count card reads its own screen's day only"
+    assert [p["matches"] for p in card["counts"]["series"]] == [1, 1, 1]
+    got = call(service, "dashboard")
+    assert [r for r in reads if r[0] == "all"] == []
+    assert version >= 1 and len(got["widgets"]) == 4

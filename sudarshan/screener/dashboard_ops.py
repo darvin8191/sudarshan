@@ -15,7 +15,6 @@ state and no rows, and the page reads it with ``widget``. The bridge waits 3 s f
 from __future__ import annotations
 
 import time
-from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
@@ -201,15 +200,14 @@ def _read(ctx, pick):
     def read(tx: Tx):
         layout = tx.layout()
         screens = {r["id"]: r for r in tx.screens()}
-        day: dict[int, list] = defaultdict(list)
-        if any(w["kind"] == "count" for w in layout["widgets"]):
-            for run in tx.runs_session(session):
-                day[run["screen_id"]].append(run)
 
         def make(widget, *, pending=False):
             screen = screens.get(widget["screen_id"])
             if screen is None:
                 raise NotFound()
+            day: dict[int, list] = {}
+            if widget["kind"] == "count" and not pending:  # only a count card reads the day's runs
+                day[screen["id"]] = tx.runs_session_of(screen["id"], session)
             return _card(
                 ctx,
                 tx,

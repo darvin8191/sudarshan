@@ -871,6 +871,12 @@ class Tx:
         t = self._t("run")
         return self._all(select(t).where(t.c.session == session, self._mine(t)).order_by(t.c.id))
 
+    def runs_session_of(self, screen_id: int, session: int) -> list[dict[str, Any]]:
+        """Every run of one screen on one trading day, oldest first (a count card's day)."""
+        t = self._t("run")
+        query = select(t).where(t.c.screen_id == screen_id, t.c.session == session, self._mine(t))
+        return self._all(query.order_by(t.c.id))
+
     def runs_since(self, after: int, limit: int) -> list[dict[str, Any]]:
         """Every run recorded after run ``after``, oldest first (the page's catch-up)."""
         t = self._t("run")
