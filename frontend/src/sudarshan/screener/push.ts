@@ -67,6 +67,34 @@ export function useHearing(): Hearing {
   )
 }
 
+/**
+ * When the page last read the whole dashboard and when its socket last left the room, on one
+ * counter: a join re-reads the dashboard only when the socket was away after the last read began
+ * (a reconnect), never when the layout is the one just read.
+ */
+let stamp = 0
+let readBegan = 0
+let awayAt = 0
+
+/** The dashboard's read is beginning: what the socket missed before now, this read brings. */
+export function noteDashboardRead(): void {
+  stamp += 1
+  readBegan = stamp
+}
+
+function noteAway(): void {
+  stamp += 1
+  awayAt = stamp
+}
+
+/** The state, read the page's own way: a read in flight is shared and a fresh one is not repeated. */
+export async function readState(): Promise<ScreenerState> {
+  const state = await screenerApi.state()
+  noteSeen(state.last_run_id)
+  return state
+}
+export const STATE_STALE_MS = 30_000
+
 /** The newest run id this page has seen: the catch-up asks for what came after it. */
 let seen = 0
 
@@ -239,8 +267,11 @@ export function onStatePush(client: QueryClient, push: StatePush): void {
 /** Read what ran after the last run seen, oldest first, and apply each as a pushed run would. */
 export async function catchUp(client: QueryClient): Promise<void> {
   if (seen === 0) {
-    const state = await screenerApi.state()
-    client.setQueryData(STATE_KEY, state)
+    const state = await client.fetchQuery({
+      queryKey: STATE_KEY,
+      queryFn: readState,
+      staleTime: STATE_STALE_MS,
+    })
     noteSeen(state.last_run_id)
     return
   }
@@ -255,8 +286,12 @@ export async function catchUp(client: QueryClient): Promise<void> {
     if (!more || runs.length === 0) break
   }
   noteSeen(after)
-  // The layout may have changed on another screen while this one was away, whether or not a run moved.
-  void client.invalidateQueries({ queryKey: DASHBOARD_KEY })
+  // The layout may have changed on another screen while the socket was away: read it again then,
+  // and share a read already in flight. A join of a socket that never left (the page's own read
+  // began after it connected) finds the layout it just read, unless runs moved meanwhile: the
+  // cards' rows are behind those, so the read is not a repeat.
+  if (awayAt > readBegan || moved)
+    void client.invalidateQueries({ queryKey: DASHBOARD_KEY }, { cancelRefetch: false })
   if (moved) {
     // Which screens moved, and their lists, is the state's to say.
     void client.invalidateQueries({ queryKey: STATE_KEY })
@@ -321,7 +356,10 @@ export function useScreenerPush(client: QueryClient, socket: Socket | null): voi
       hear('not_joined')
       join(connection)
     }
-    const onDisconnect = () => hear('not_joined')
+    const onDisconnect = () => {
+      noteAway()
+      hear('not_joined')
+    }
     const run = (push: RunPush) => onRun(client, push)
     const state = (push: StatePush) => onStatePush(client, push)
     const lists = () => onListsPush(client)
@@ -334,7 +372,10 @@ export function useScreenerPush(client: QueryClient, socket: Socket | null): voi
     socket.on('sudarshan_screener_lists', lists)
     socket.on('sudarshan_screener_dashboard', layout)
     if (socket.connected) onConnect()
-    else hear('not_joined')
+    else {
+      noteAway() // not in the room yet: what the layout does until the join is read at the join
+      hear('not_joined')
+    }
     return () => {
       alive = false
       for (const timer of timers) clearTimeout(timer)
@@ -352,5 +393,8 @@ export function useScreenerPush(client: QueryClient, socket: Socket | null): voi
 /** Tests only: forget what was seen and where the screen stands. */
 export function resetScreenerPushForTests(): void {
   seen = 0
+  stamp = 0
+  readBegan = 0
+  awayAt = 0
   hearing = 'unknown'
 }

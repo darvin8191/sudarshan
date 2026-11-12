@@ -530,8 +530,10 @@ describe('the reconnect and the suggestion (M2, M3, M8, L10)', () => {
         removed: [],
       })
     )
-    // At least one more read: how many more is not the behaviour (a slow machine saw a third).
-    await waitFor(() => expect(api.dashboard.mock.calls.length).toBeGreaterThanOrEqual(2))
+    // The mount's read and the Pause's: the join of a socket that never left reads nothing more.
+    await waitFor(() => expect(api.dashboard).toHaveBeenCalledTimes(2))
+    await settle()
+    expect(api.dashboard).toHaveBeenCalledTimes(2)
     expect(client.getQueryData(DASHBOARD_KEY)).toBeTruthy()
   })
 

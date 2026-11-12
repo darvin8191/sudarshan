@@ -1,8 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import type { ScreenerError } from './api'
-import { screenerApi } from './api'
 import { STATE_KEY } from './keys'
-import { noteSeen } from './push'
+import { readState, STATE_STALE_MS } from './push'
 import type { ScreenerState } from './types'
 
 /**
@@ -13,12 +12,8 @@ import type { ScreenerState } from './types'
 export function useScreenerState() {
   return useQuery<ScreenerState, ScreenerError>({
     queryKey: STATE_KEY,
-    queryFn: async () => {
-      const state = await screenerApi.state()
-      noteSeen(state.last_run_id)
-      return state
-    },
-    staleTime: 30_000,
+    queryFn: readState,
+    staleTime: STATE_STALE_MS,
     retry: false,
   })
 }

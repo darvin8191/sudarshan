@@ -12,6 +12,7 @@ import {
   useUnread,
 } from './dashboardCache'
 import { DASHBOARD_KEY } from './keys'
+import { noteDashboardRead } from './push'
 import type { Dashboard } from './types'
 
 /**
@@ -25,12 +26,15 @@ export function useDashboard() {
   const query = useQuery<Dashboard, ScreenerError>({
     queryKey: DASHBOARD_KEY,
     queryFn: async ({ signal }) => {
+      noteDashboardRead()
       const read = await screenerApi.dashboard(signal)
       // A fresh layout starts every card's reads again, and never puts an older card over a newer.
       clearUnread()
       return mergeRead(client.getQueryData<Dashboard>(DASHBOARD_KEY), read)
     },
     staleTime: 60_000,
+    // A wake is the reconnect's catch-up (push.ts), which shares a read in flight; a focus read would cancel it.
+    refetchOnWindowFocus: false,
     retry: false,
   })
   const failed = useUnread()
