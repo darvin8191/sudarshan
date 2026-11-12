@@ -63,6 +63,14 @@ class Result(NamedTuple):
     suggestions: tuple[str, ...]
 
 
+def isin_of(token: str | None) -> str | None:
+    """The ISIN in an Upstox instrument key (``NSE_EQ|INE002A01018``), or None."""
+    if not token or "|" not in token:
+        return None
+    tail = token.split("|", 1)[1]
+    return tail if _ISIN.match(tail) else None
+
+
 def key_of(text: str) -> str:
     """A name as a lookup key: lower case, only letters, digits and ``&``."""
     return re.sub(r"[^a-z0-9&]", "", text.lower())
@@ -134,9 +142,9 @@ class IndexBuilder:
             ix.display.setdefault(k, r.symbol)
             if r.name:
                 ix.names.append((key_of(r.name), r))
-            tok = r.token or ""
-            if "|" in tok and _ISIN.match(tok.split("|", 1)[1]):
-                ix.isin.setdefault(tok.split("|", 1)[1], []).append(r)
+            isin = isin_of(r.token)
+            if isin:
+                ix.isin.setdefault(isin, []).append(r)
 
     def finish(self) -> Index:
         for lst in self.ix.futures.values():

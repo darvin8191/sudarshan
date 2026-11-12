@@ -123,6 +123,20 @@ class Master:
         snap = self._source()
         return snap is not None and (symbol, exchange) in snap.by_symbol_exchange
 
+    def loaded(self) -> bool:
+        """True when OpenAlgo's snapshot is loaded and current."""
+        return self._source() is not None
+
+    def row(self, exchange: str, symbol: str) -> Any:
+        """OpenAlgo's own row of a symbol on an exchange, or ``None``. Nothing is kept."""
+        snap = self._source()
+        return None if snap is None else snap.by_symbol_exchange.get((symbol, exchange))
+
+    @staticmethod
+    def isin(row: Any) -> str | None:
+        """The ISIN a row carries in its instrument key (cash rows do), or ``None``."""
+        return None if row is None else search.isin_of(getattr(row, "token", None))
+
     def by_token(self, token: str) -> Any:
         """The row of an Upstox instrument key, or ``None``."""
         snap = self._source()

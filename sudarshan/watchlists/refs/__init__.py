@@ -1,5 +1,64 @@
-"""Ref kinds of Watchlists v2 (list, preset, ranked, flag), found by discovery (M8.4).
+"""Ref kinds of Watchlists v2 (list, preset, ranked, flag), found by discovery (M8.4, W6).
 
-Empty until W5: a module added here is found by ``pkgutil.iter_modules`` and needs no edit
-elsewhere. Pure and thread-free, like the rest of this package.
+A ref is ``<kind>:<id>``. Each module of this package names its kind (``KIND``) and gives the
+``view`` op's dispatcher the reader of that kind; a module added here is found by
+``pkgutil.iter_modules`` and needs no edit elsewhere. Built so far: ``list`` (W6). The preset (W12),
+flag (W9) and ranked (W22) kinds come later, and until then a ref of those kinds is refused as
+``invalid`` with field ``ref``.
+
+Every reader module exposes:
+
+``KIND``
+    The kind it reads, one of ``contract.ENUMS["RefKind"]``.
+
+``view(ident: str, user: str) -> dict``
+    The ``View`` record of ``<KIND>:<ident>`` for OpenAlgo user ``user``. Raises ``OpError("gone")``
+    when it does not exist and ``OpError("invalid", field="ref")`` when the id is not one of the
+    kind. Reads only; prices are never in it.
+
+``members(ident: str, user: str) -> dict``
+    The ``Members`` record of the sealed members route (W23): ``{ref, version, members: Contract[],
+    valid_until, left_out: Cut[]}``, the contracts a ref holds today, follow rows resolved, with
+    ``valid_until`` the epoch ms at which a rolling row would resolve differently (None when none
+    does). Same refusals as ``view``. Defined with the interface in W6 and implemented later: a
+    reader that has not built it raises ``NotImplementedError``, and nothing calls it before W23.
+
+Pure of threads, like the rest of this package; a reader opens its sessions as ``with`` blocks.
 """
+
+from __future__ import annotations
+
+import importlib
+import pkgutil
+from types import ModuleType
+
+from sudarshan.watchlists import contract
+
+
+def readers() -> dict[str, ModuleType]:
+    """The reader of each kind that has one, by kind."""
+    found: dict[str, ModuleType] = {}
+    for info in pkgutil.iter_modules(__path__):
+        module = importlib.import_module(f"{__name__}.{info.name}")
+        kind = getattr(module, "KIND", None)
+        if kind in contract.ENUMS["RefKind"]:
+            found[kind] = module
+    return found
+
+
+def split(ref: str) -> tuple[str, str] | None:
+    """``list:7`` to ``("list", "7")``; None when it is not ``<kind>:<id>`` of a kind of the
+    contract."""
+    kind, sep, ident = ref.partition(":")
+    if not sep or not ident or kind not in contract.ENUMS["RefKind"]:
+        return None
+    return kind, ident
+
+
+def reader_of(ref: str) -> tuple[ModuleType, str] | None:
+    """The reader and the id for a ref, or None when its kind is unbuilt or the ref is not one."""
+    parts = split(ref)
+    if parts is None:
+        return None
+    module = readers().get(parts[0])
+    return None if module is None else (module, parts[1])

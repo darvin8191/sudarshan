@@ -210,3 +210,46 @@ changes OpenAlgo's answer. (2) The bridge's own ops: a handler marked `@ops.bump
 the bridge bump and push after it returns, never after a refusal. The hook starts no thread, timer
 or loop. Tests: `tests/test_watchlists_push.py`; `test/test_gthread_watchlists.py` (twelve bumps at
 once, twelve writes through the hook under a real gthread worker).
+
+## W6 - own lists and view (`view.py`, `refs/`, `ops/view.py`, `words/view.py`)
+
+`view` (GET, class read) answers the `View` record of a `list:<id>` ref: OpenAlgo's list and the
+overlay merged. `ops/view.py` picks the reader by the ref's kind; `refs/` is found with
+`pkgutil.iter_modules` and each module names its `KIND` and gives `view(ident, user)` and
+`members(ident, user)` (the sealed members route's reader, documented in `refs/__init__.py` and
+implemented in W23; until then it raises `NotImplementedError` and nothing calls it). A kind that
+is not built (preset W12, flag W9, ranked W22), a ref that is not `<kind>:<id>` and a list id that
+is not a whole number answer `invalid` with field `ref`; a list that does not exist (or is another
+user's) answers `gone`.
+
+`refs/list.py` reads OpenAlgo's list and items through `database/watchlist_db.py` (read only, its
+scoped session removed after the read) and the overlay in one read-only session of the store: the
+`wl_list` guard row (version, `oa_created_at`), `wl_section`, `wl_section_item`, `wl_row` (follow
+rows as the rules they are, never resolved: resolving is W15), each symbol's flag and whether it has
+a note (a length test in the query, the note itself is never read) and `wl_pref`, or the defaults
+(sort `list`, ascending, basis `close`, holdings off), never written. `view.py` is the merge and is
+pure; its vectors are `tests/vectors/view.json`, typed by hand.
+
+Order inside a list: the symbols with no section first, then each section by `position`; inside
+each, the follow rows first (by their position) then the fixed symbols in OpenAlgo's item order,
+which stays the only order of fixed symbols. `rows` carries the fixed symbols in that order and
+`follow` the follow rows in that order (No section's, then each section's), so a page puts each
+section's follow rows above its rows. A symbol OpenAlgo has with no section row (added on /trading)
+is in No section at its OpenAlgo position, a section item for a symbol no longer in the list is
+ignored, and a section id that is no longer a section reads as No section. A section's `count` is
+its fixed symbols plus its follow rows. Follow rows are as stored, with the strike in rupees; a
+month future has no strike rule, offset or strike (null).
+
+The `oa_created_at` guard: SQLite can hand a deleted list's id to a new list. When the list's
+`wl_list.oa_created_at` differs from the live list's `created_at` (both as `view.created_key`, the
+text SQLite writes, which the write ops of W7 store when they make the guard row), the whole
+overlay of that list is ignored: no sections, no follow rows, no preference, version "0". The read
+writes nothing; the next write that touches the list prunes it (W7). A list with no guard row has
+nothing to ignore and reads in OpenAlgo's order. A symbol's flag and note belong to the symbol and
+apply in every list.
+
+`version` is the list's stored `wl_list.version` as text ("0" until a write makes the row).
+`Row.key` (`Contract.key`) is `EXCHANGE:SYMBOL`. A row's ISIN is read through `master.py` from the
+instrument key (cash rows carry it, null otherwise), and a symbol the master lacks is `expired`
+and named in `missing` (with the master not loaded nothing is called expired). Prices are never in
+`view`: the page streams them. Tests: `tests/test_watchlists_view.py`.
