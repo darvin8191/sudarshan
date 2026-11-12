@@ -476,3 +476,47 @@ def test_the_closing_auction_print_after_a_comeback_adds_only_its_own_volume():
     assert printed.check == clock.AUCTION_PRINT
     (last,) = [bar for bar in bars.bars(RELIANCE) if bar.start == ms(day, "15:29")]
     assert (last.c, last.v) == (10100, 1_050_000), "the print adds the auction's 50,000"
+
+
+# ---- the first trade of the session as a baseline: cash segments only -----------------------------
+OPTION = "NSE_FO|71234"  # an index option strike: no pre-open session
+OPTION_DAY, OPTION_TODAY = "2026-10-28", 20261028
+
+
+def _first_bar_volume(key: str, claimed_at: str) -> int:
+    """A key claimed at ``claimed_at`` whose first frame after the open already carries trades
+    made in that minute (3,000 traded, the last of 75), 4,500 by the end of it: the 09:15 bar."""
+    sessions = sessions_of(date(2026, 10, 28), trading_day=True)
+
+    def world(at: str) -> clock.Market:
+        feed = clock.Feed("connected", True, ms(OPTION_DAY, at))
+        return clock.Market(OPTION_TODAY, sessions, 20261027, {}, feed, (), False, frozenset())
+
+    def tick(at: str, ltt: str, ltp: float, vtt: int):
+        payload = {"key": key, "ltt": ms(OPTION_DAY, ltt), "ltp": ltp, "ltq": 75, "vtt": vtt,
+                   "ts_recv": ms(OPTION_DAY, at)}  # fmt: skip
+        bars.on_tick(payload, ms(OPTION_DAY, at), world(at))
+
+    bars = Bars()
+    bars.follow_from([key], ms(OPTION_DAY, claimed_at), world(claimed_at))
+    tick("09:15:00.6", "09:15:00.5", 100.0, 3_000)
+    tick("09:15:30", "09:15:29.9", 101.0, 4_500)
+    sealed = bars.on_clock(ms(OPTION_DAY, "09:16:06"), world("09:16:06"))
+    (bar,) = [s.bar for s in sealed if s.key == key and s.bar.start == ms(OPTION_DAY, "09:15")]
+    return bar.v
+
+
+@pytest.mark.parametrize("claimed_at", ["00:00:30", "08:45"])
+def test_an_option_keeps_the_whole_of_its_first_minute(claimed_at):
+    """Options have no pre-open session, so nothing before the first frame is pre-open volume:
+    the first minute's bar is the running total (4,500), whether the key was claimed at the day
+    roll or at a morning start (review M1: it was 1,575)."""
+    assert _first_bar_volume(OPTION, claimed_at) == 4_500
+
+
+@pytest.mark.parametrize("claimed_at", ["00:00:30", "08:45"])
+def test_a_cash_key_with_no_pre_open_frame_takes_the_first_trade_as_its_baseline(claimed_at):
+    """The quiet minutes 09:08 to 09:15 send no pre-open frame for a cash stock, so its first
+    trade of the session is the baseline (round-4 LOW-A6): what was traded before it is not in
+    the first bar."""
+    assert _first_bar_volume(RELIANCE, claimed_at) == 1_575

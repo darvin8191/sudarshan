@@ -81,6 +81,8 @@ MINUTE_MS = 60_000
 #: A candle that held a pause is waited for this long after its end for the repair, then the seal's
 #: grace more: the 10:15 run waits until 10:16:05.
 REPAIR_WAIT_MS = 60_000
+#: The segments with a pre-open session, whose pre-open volume can hide in the running total.
+PRE_OPEN_VOLUME_SEGMENTS = frozenset({"NSE_EQ", "BSE_EQ"})
 #: A trade for a minute that came too late to count (``Tick.check``).
 LATE_TRADE = "late"
 #: The cause of a key's own pause: the screener did not follow it then (``Bars.follow_from``).
@@ -483,7 +485,7 @@ class Bars:
             segment + AUCTION if key in market.auction else segment, grid, volume, state.seen,
         )  # fmt: skip
         if state.rebase is not None:
-            self._rebase(state, frame, volume, ltt, market.today, grid)
+            self._rebase(state, frame, volume, ltt, market.today, grid, segment)
         if volume is not None:
             state.seen = volume
         sealed: list[Sealed] = []
@@ -624,6 +626,7 @@ class Bars:
         ltt: int | None,
         today: int,
         grid: Session | None,
+        segment: str = "",
     ) -> None:
         """The baseline of a key first seen after a restore made once its session had begun
         (``restore(since=...)``), first followed then, or followed again after a gap: its first
@@ -632,7 +635,10 @@ class Bars:
         day's trade carries yesterday's total and waits for today's. A restore before the
         session's start leaves the pre-open baseline to the frames before the open, as on any
         day, unless no pre-open frame has come by the first trade of the session: that trade's
-        ``vtt - ltq`` is the baseline then. A key followed again starts its running total again
+        ``vtt - ltq`` is the baseline then, for a key of the cash segments only: a pre-open
+        trade hides in ``vtt`` only where there is a pre-open session. Any other segment (options
+        first among them) has no pre-open volume to take out, so with none the running total is
+        the first minute's own volume, as before. A key followed again starts its running total again
         here (``cum`` and the pre-open volume give way to the baseline)."""
         since = state.rebase
         if grid is None or since is None:
@@ -641,6 +647,9 @@ class Bars:
         before = since < grid.start
         if before and state.pre is not None:  # a pre-open frame gave the baseline
             state.rebase = None
+            return
+        if before and segment not in PRE_OPEN_VOLUME_SEGMENTS:  # no pre-open session to hide in vtt
+            state.rebase, state.again = None, False
             return
         if volume is None or ltt is None or ltt < epoch_ms(key_day(today), 0):
             return
