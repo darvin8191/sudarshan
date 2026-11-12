@@ -392,7 +392,9 @@ def test_a_recorded_day_replayed_through_the_feed_tool_fires(alerts, quick, tmp_
                                       "ts_recv": at + 20}) + "\n")  # fmt: skip
         async with FakeFeed(Clock(start)) as feed, FakeOpenAlgo() as notify:
             settings = alerts(notify)
-            create(settings, start - timedelta(hours=1))
+            # no end of its own: the default 60 days of an alert made on the recording's day pass
+            # on 21 Dec 2026, and the runtime then no longer follows it on the real clock
+            create(settings, start - timedelta(hours=1), ends=None)
             with socket.socket() as probe:  # a free port for the replay to bind
                 probe.bind(("127.0.0.1", 0))
                 port = probe.getsockname()[1]
