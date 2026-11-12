@@ -1,5 +1,6 @@
 import { History, Info, LoaderCircle, RefreshCw, TriangleAlert } from 'lucide-react'
 import { OUTLINED } from '@/sudarshan/books/cards/parts'
+import { useNow } from '@/sudarshan/dashboard/hooks'
 import { BottomSheet } from '@/sudarshan/watchlist/BottomSheet'
 import { describe } from '@/sudarshan/watchlist/rows'
 import { ChipMark } from './ChipMark'
@@ -16,6 +17,7 @@ import { useRunSet } from './useRuns'
 export function RunSheet({ runId, onClose }: { runId: number | null; onClose: () => void }) {
   const query = useRunSet(runId)
   const set = query.data
+  const now = useNow()
   return (
     <BottomSheet
       open={runId !== null}
@@ -66,7 +68,7 @@ export function RunSheet({ runId, onClose }: { runId: number | null; onClose: ()
                       </span>
                       <Values row={row} />
                     </span>
-                    <RunFigures row={row} at={set.run.at} />
+                    <RunFigures row={row} at={set.run.at} now={now} />
                   </li>
                 )
               })}

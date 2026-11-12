@@ -11,7 +11,7 @@ import { describe, priceDecimals } from '@/sudarshan/watchlist/rows'
 import { type LiveRow, useLiveRows } from '@/sudarshan/watchlist/useLiveRows'
 import { Figures, type FigureValues, figuresOf } from '@/sudarshan/watchlist/WatchlistRows'
 import { ChipMark } from './ChipMark'
-import { whenWords } from './cardLine'
+import { dayStart, whenWords } from './cardLine'
 import type { Hearing } from './push'
 import { followedItems } from './resultItems'
 import type { ResultRow, Results as ResultsData, ScreenRow } from './types'
@@ -47,7 +47,8 @@ export function Values({ row }: { row: ResultRow }) {
 }
 
 /** A row past the live cap: the price of the run, grey, and where it comes from. */
-export function RunFigures({ row, at }: { row: ResultRow; at: number }) {
+/** `now` is the page's own clock, so a run from another day carries its weekday by the page's day, not the machine's. */
+export function RunFigures({ row, at, now }: { row: ResultRow; at: number; now: number }) {
   return (
     <span className={cn('flex shrink-0 flex-col items-end gap-0.5 text-right', STALE)}>
       <span className="text-base font-bold">
@@ -56,7 +57,7 @@ export function RunFigures({ row, at }: { row: ResultRow; at: number }) {
       <span className="flex items-center gap-1 text-xs font-semibold">
         {row.change_pct !== null && formatPercent(row.change_pct)}
         <Clock aria-hidden="true" className="size-3" />
-        at the run, {whenWords(at, Date.now())}
+        at the run, {whenWords(at, now)}
       </span>
     </span>
   )
@@ -121,6 +122,7 @@ export const ResultLine = memo(
   (a, b) =>
     a.row === b.row &&
     a.runAt === b.runAt &&
+    a.today === b.today &&
     a.now === b.now &&
     a.onOpen === b.onOpen &&
     sameRowLive(a.live, b.live)
@@ -130,12 +132,15 @@ function ResultFace({
   row,
   live,
   runAt,
+  today,
   now,
   onOpen,
 }: {
   row: ResultRow
   live: RowLive
   runAt: number
+  /** The page's clock as the start of its IST day: a run's time is worded against it. */
+  today: number
   /** The clock, given only while the row is stale (its age moves each second); 0 otherwise. */
   now: number
   onOpen: (key: string) => void
@@ -182,7 +187,7 @@ function ResultFace({
             decimals={priceDecimals(row.exchange)}
           />
         ) : (
-          <RunFigures row={row} at={runAt} />
+          <RunFigures row={row} at={runAt} now={today} />
         )}
       </button>
     </li>
@@ -337,6 +342,7 @@ export function Results({
                   row={row}
                   live={own}
                   runAt={data.run?.at ?? 0}
+                  today={dayStart(live.now)}
                   now={clockFor(own, live.now)}
                   onOpen={onOpen}
                 />

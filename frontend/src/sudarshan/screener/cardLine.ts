@@ -53,6 +53,9 @@ const IST_MS = 19_800_000
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const
 const dayOf = (at: number) => Math.floor((at + IST_MS) / 86_400_000)
 
+/** The start of the IST day a moment falls in: a clock that only moves at midnight, so a memoised row can hold it. */
+export const dayStart = (at: number) => dayOf(at) * 86_400_000 - IST_MS
+
 /** A moment as a trader reads it: '15:30' today, 'Fri 15:30' on any other day (as the server words it). */
 export function whenWords(at: number, now: number): string {
   if (dayOf(at) === dayOf(now)) return hhmm(at)

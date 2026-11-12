@@ -21,7 +21,7 @@ import { istTime } from '@/sudarshan/books/time'
 import { keyOf } from '@/sudarshan/dashboard/live'
 import { rememberOpenList } from '@/sudarshan/watchlist/openList'
 import type { LiveRow } from '@/sudarshan/watchlist/useLiveRows'
-import type { LineIcon, LineView } from './cardLine'
+import { dayStart, type LineIcon, type LineView } from './cardLine'
 import { cardKey, rowsBehind, rowsRun } from './dashboardCache'
 import { StatusChip } from './marks'
 import { clockFor, ResultLine, rowLiveOf, runWords, sameRowLive } from './Results'
@@ -271,6 +271,7 @@ function WidgetFace({
                 row={row}
                 live={lives}
                 runAt={own?.at ?? card.run?.at ?? 0}
+                today={dayStart(now)}
                 now={clockFor(lives, now)}
                 onOpen={open}
               />
