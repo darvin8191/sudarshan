@@ -40,6 +40,29 @@ async def wait_until(predicate, timeout: float = 5.0) -> None:
         await asyncio.sleep(0.02)
 
 
+async def wait_joined(sub, probe, timeout: float = 5.0) -> None:
+    """Return once the publisher has taken this SUB's subscriptions, which a connect does not say.
+
+    ``sub.connect`` returns at once, the TCP and ZMQ handshakes finish a few milliseconds later,
+    and a PUB drops every frame it publishes before then (the "slow joiner"). Nothing on the SUB
+    side tells when that is over, so this proves it from the other end: ``probe`` (an awaitable
+    callable) makes the publisher send a frame on a topic the SUB has subscribed, and this returns
+    on the first one that arrives, then drains what else is queued. Subscriptions reach a PUB in
+    the order they were made, so make the probe's topic the SUB's last subscription and every
+    earlier one is live too. A test that sent its frames right after ``subscriptions_live`` used
+    to pass only while the handshake happened to win that race.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        await probe()
+        if await sub.poll(100):
+            break
+        if time.monotonic() > deadline:
+            raise AssertionError("the publisher never took the subscription")
+    while await sub.poll(50):  # the probes still in flight
+        await sub.recv_multipart()
+
+
 def response(
     feeds: dict, kind: str = "live_feed", segments: dict | None = None, cas: dict | None = None
 ) -> bytes:
