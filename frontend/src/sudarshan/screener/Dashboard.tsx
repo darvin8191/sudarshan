@@ -201,8 +201,9 @@ export function Dashboard({
       <div className="flex items-center justify-between gap-3 px-1">
         <button
           type="button"
+          disabled={!data}
           onClick={() => openSheet('add')}
-          className="inline-flex min-h-12 items-center gap-1.5 rounded-[0.875rem] bg-primary px-4 text-[0.9375rem] font-semibold text-primary-foreground outline-none hover:bg-primary/90 focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          className="inline-flex min-h-12 items-center gap-1.5 rounded-[0.875rem] bg-primary px-4 text-[0.9375rem] font-semibold text-primary-foreground outline-none hover:bg-primary/90 focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:bg-muted disabled:text-[color:var(--text-secondary)] disabled:hover:bg-muted"
         >
           <Plus aria-hidden="true" className="size-5" />
           Add a widget
@@ -288,7 +289,7 @@ export function Dashboard({
         closeSheet={closeSheet}
       />
       <AddWidgetSheet
-        open={address.sheet === 'add'}
+        open={address.sheet === 'add' && data !== undefined}
         state={state}
         cards={cards}
         version={data?.version ?? 0}

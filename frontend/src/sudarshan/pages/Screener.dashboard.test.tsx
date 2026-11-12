@@ -49,6 +49,7 @@ vi.mock('@/components/socket/SocketProvider', () => ({
 }))
 
 import { createQueryClient } from '@/app/providers'
+import { ScreenerError } from '@/sudarshan/screener/api'
 import { resetScreenerPushForTests } from '@/sudarshan/screener/push'
 import { addressOf } from '@/sudarshan/screener/useScreenerAddress'
 import { dashboard, resultRow, screenerState, screenRow, widgetCard } from '@/test/screener'
@@ -141,6 +142,7 @@ describe('the tab row and the address', () => {
     const add = await screen.findByRole('button', { name: 'Add a widget' })
     expect(add.className).toContain('min-h-12')
     expect(add.querySelector('svg')).not.toBeNull()
+    await waitFor(() => expect((add as HTMLButtonElement).disabled).toBe(false))
     await userEvent.click(add)
     expect(where()).toBe('/screener?sheet=add')
     expect(await screen.findByRole('dialog')).toBeTruthy()
@@ -149,6 +151,33 @@ describe('the tab row and the address', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
     back()
     await waitFor(() => expect(where()).toBe('/elsewhere'))
+  })
+
+  it('keeps Add a widget off until the dashboard has been read, so version 0 is never sent', async () => {
+    let release: (value: ReturnType<typeof dashboard>) => void = () => {}
+    api.dashboard.mockReturnValue(
+      new Promise((resolve) => {
+        release = resolve
+      })
+    )
+    renderPage()
+    const add = (await screen.findByRole('button', { name: 'Add a widget' })) as HTMLButtonElement
+    expect(add.disabled).toBe(true)
+    await userEvent.click(add)
+    expect(where()).toBe('/screener')
+    expect(screen.queryByRole('dialog')).toBeNull()
+    release(dashboard([], { suggested: false, version: 4 }))
+    await waitFor(() => expect(add.disabled).toBe(false))
+  })
+
+  it('keeps Add a widget off after a failed read too, with Try again beside it', async () => {
+    api.dashboard.mockRejectedValue(
+      new ScreenerError({ code: 'failed', message: 'The screener is not answering.', field: null })
+    )
+    renderPage()
+    const add = (await screen.findByRole('button', { name: 'Add a widget' })) as HTMLButtonElement
+    await screen.findByRole('button', { name: 'Try again' })
+    expect(add.disabled).toBe(true)
   })
 
   it('reads a widget from its screen and kind, never an id', () => {
