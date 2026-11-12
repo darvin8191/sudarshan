@@ -30,7 +30,7 @@ CARD_BUDGET_S = 1.5
 #: A day's checks kept for a count card, and the slot a 1 or 3-minute screen keeps one check of.
 SERIES_MAX = 80
 SERIES_SLOT_MS = 5 * 60_000
-#: Minutes of a trading day, the most candles of any minute size that one day holds.
+#: Minutes of a cash trading day: the span ``waits_of`` takes when it is not told the screen's own.
 DAY_MINUTES = 375
 VALUE_COLUMNS = VALUE_CLAUSES_MAX
 #: The longest clause id a widget may name; the screen's own ids are far shorter.
@@ -71,15 +71,17 @@ def mode_of(run: Mapping[str, Any], only_day: bool) -> tuple[str, str]:
     return mode, words.mode_words(mode, tf, after)
 
 
-def waits_of(need: Mapping[Any, int]) -> str | None:
+def waits_of(need: Mapping[Any, int], day_ms: int = DAY_MINUTES * 60_000) -> str | None:
     """Why the screen cannot judge yet: it needs more candles than today alone gives, so it waits
-    for the history download (not built yet). The day candles first, then the minute sizes."""
+    for the history download (not built yet). The day candles first, then the minute sizes.
+    ``day_ms`` is the span of the screen's session today, as the engine counts it
+    (``runtime._day_holds``): the longest of its segments' sessions."""
     if T.WEEK in need:
         return words.waits_words(T.WEEK, need[T.WEEK], 0)
     if need.get(T.DAY, 0) > 1:
         return words.waits_words(T.DAY, need[T.DAY], 1)
     for tf in sorted(k for k in need if isinstance(k, int)):
-        most = T.candles_in(tf, DAY_MINUTES * 60_000)
+        most = T.candles_in(tf, day_ms)
         if need[tf] > most:
             return words.waits_words(tf, need[tf], most)
     return None

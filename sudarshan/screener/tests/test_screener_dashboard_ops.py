@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from datetime import date
 
 import pytest
 from screener_helpers import ms
@@ -305,3 +306,52 @@ def test_a_cards_read_loads_runs_only_for_a_count_card_and_only_for_its_screen(
     got = call(service, "dashboard")
     assert [r for r in reads if r[0] == "all"] == []
     assert version >= 1 and len(got["widgets"]) == 4
+
+
+@pytest.mark.parametrize(
+    ("universe", "waits"), [({"kind": "fno_stocks"}, True), ({"kind": "index_futures"}, False)]
+)
+def test_a_card_counts_the_candles_of_its_own_segments_session(service, universe, waits):
+    """Review L3: the waits rule counted 375 minutes for every segment. A cash screen needing 26
+    candles of 15 minutes waits (a cash day holds 25), a futures screen does not (385 minutes hold
+    26): the card says what the engine does."""
+    needs_26 = {
+        "universe": universe,
+        "where": {
+            "id": "c1", "left": {"field": "close", "tf": 15, "at": {"ago": 25}}, "op": "gt",
+            "right": {"num": "100"},
+        },
+    }  # fmt: skip
+    screen = named(service, "Needs 26", **needs_26)
+    card = call(service, "widget", id=screen["id"], kind="table")
+    assert (card["waits"] is not None) is waits, card["waits"]
+    assert (card["line"]["kind"] == "waits") is waits
+
+
+def test_waits_of_takes_the_span_it_is_given():
+    from sudarshan.screener import dashboard as dash
+
+    assert dash.waits_of({15: 26}) is not None  # the cash day, as before
+    assert dash.waits_of({15: 26}, 385 * 60_000) is None
+    assert dash.waits_of({1: 390}, 385 * 60_000) is not None
+    assert dash.waits_of({1: 390}, 390 * 60_000) is None
+
+
+@pytest.mark.parametrize(
+    ("day", "tf", "need"),
+    [
+        (date(2026, 10, 28), 15, 26),  # the 385-minute F&O day
+        (date(2026, 10, 28), 5, 77),
+        (date(2026, 12, 8), 5, 78),  # the 390-minute F&O day from 7 Dec 2026
+        (date(2026, 12, 8), 1, 390),
+    ],
+)
+def test_the_cards_waits_rule_agrees_with_the_engines_count_on_the_futures_session(day, tf, need):
+    from sudarshan.alerts.market.sessions import sessions_of
+    from sudarshan.screener import dashboard as dash
+    from sudarshan.screener.runtime import _day_holds
+
+    grid = sessions_of(day, trading_day=True)["NSE_FO"]
+    assert _day_holds(tf, grid) >= need, "the engine judges it on this day"
+    assert dash.waits_of({tf: need}, grid.end - grid.start) is None
+    assert dash.waits_of({tf: _day_holds(tf, grid) + 1}, grid.end - grid.start) is not None

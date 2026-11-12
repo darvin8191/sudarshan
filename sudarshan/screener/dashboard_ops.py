@@ -19,6 +19,8 @@ from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
 
+from sudarshan.alerts.market.sessions import AUCTION, SEGMENTS
+
 from . import dashboard as dash
 from . import presets, scheduler, spec, words
 from .contract import WORDS
@@ -82,6 +84,21 @@ def _facts(screen: Mapping[str, Any]) -> tuple[dict, dict, list[str]]:
     return stored, dict(plan.need) if plan else {}, [c["id"] for c in _clauses(stored.get("where"))]
 
 
+def _day_span(screen: Mapping[str, Any], sessions) -> int:
+    """The span in ms of the session the screen's segments hold today, the longest of them: what
+    the engine counts its candles on (``runtime._day_holds``). A day with no session (closed)
+    takes the regular hours of the segment."""
+    spans = []
+    for segment in sched_screen(screen).segments:
+        segment = segment.removesuffix(AUCTION)  # the engine judges on the plain segment's grid
+        grid = sessions.get(segment)
+        if grid is not None:
+            spans.append(grid.end - grid.start)
+        elif segment in SEGMENTS:
+            spans.append((SEGMENTS[segment][1] - SEGMENTS[segment][0]) * 60_000)
+    return max(spans, default=dash.DAY_MINUTES * 60_000)
+
+
 def _list_of(tx: Tx, screen: Mapping[str, Any], stored: Mapping[str, Any]):
     state = tx.state(screen["id"]) or {}
     target = stored.get("target") or {}
@@ -123,7 +140,7 @@ def _card(
         "mode": mode,
         "mode_words": mode_words,
         "day_only": only_day,
-        "waits": dash.waits_of(need),
+        "waits": dash.waits_of(need, _day_span(screen, sessions)),
         # today's next check, else the next trading day's, as the engine line words it
         "next_at": next_check(ctx, now, [sched_screen(screen)], sessions) if active else None,
         "rows_pending": pending,
