@@ -8,7 +8,10 @@ import { TREND_TEXT, TrendArrow } from '@/sudarshan/dashboard/Trend'
 import { ChipMark } from '@/sudarshan/screener/ChipMark'
 import type { Chip } from '@/sudarshan/screener/types'
 import { describe, formatChange, priceDecimals, type TickDirection } from './rows'
+import { SectionHeader } from './SectionHeader'
 import type { LiveRow } from './useLiveRows'
+import type { Group } from './v2/sections'
+import type { Section } from './v2/types'
 
 /** Grey for a level that has stopped arriving; its sign and arrow stay. */
 const STALE = 'text-[color:var(--stale)]'
@@ -152,6 +155,69 @@ const PriceRow = memo(function PriceRow({
   )
 })
 
+/** F3 (v2): the open own list in sections: the view's groups, what is folded, and the taps. */
+export interface SectionLayout {
+  groups: Group[]
+  collapsed: ReadonlySet<number>
+  onToggle: (id: number) => void
+  onMenu: (id: number) => void
+}
+
+/** F3: no section first, then each section under its header; a folded one shows only its header. */
+function Sectioned({
+  rows,
+  layout,
+  tags,
+  onOpen,
+}: {
+  rows: LiveRow[]
+  layout: SectionLayout
+  tags?: ReadonlyMap<string, Chip>
+  onOpen: (itemId: number) => void
+}) {
+  const byId = new Map(rows.map((row) => [row.item.id, row]))
+  const shown = new Set(layout.groups.flatMap((group) => group.ids))
+  // An item the view does not list yet (the two reads crossed) is shown with the unsectioned.
+  const extra = rows.filter((row) => !shown.has(row.item.id)).map((row) => row.item.id)
+  return (
+    <ul className="divide-y divide-[color:var(--divider)]">
+      {layout.groups.flatMap((group) => {
+        const ids = group.section ? group.ids : [...group.ids, ...extra]
+        const section: Section | null = group.section
+        const open = ids.flatMap((id) => {
+          const row = byId.get(id)
+          return row && !layout.collapsed.has(section?.id ?? -1)
+            ? [
+                <PriceRow
+                  key={row.item.id}
+                  itemId={row.item.id}
+                  symbol={row.item.symbol}
+                  exchange={row.item.exchange}
+                  chip={tags?.get(row.key)}
+                  onOpen={onOpen}
+                  {...figuresOf(row)}
+                />,
+              ]
+            : []
+        })
+        return section
+          ? [
+              <SectionHeader
+                key={`section-${section.id}`}
+                section={section}
+                count={ids.length}
+                collapsed={layout.collapsed.has(section.id)}
+                onToggle={layout.onToggle}
+                onMenu={layout.onMenu}
+              />,
+              ...open,
+            ]
+          : open
+      })}
+    </ul>
+  )
+}
+
 /**
  * The open list's rows: 56dp or taller, the name and venue on the left, the
  * level and the day's change on the right. A tap opens the instrument's sheet.
@@ -167,6 +233,7 @@ export function WatchlistRows({
   onRemove,
   onAdd,
   tags,
+  sections,
 }: {
   rows: LiveRow[]
   loading: boolean
@@ -178,6 +245,8 @@ export function WatchlistRows({
   onAdd?: () => void
   /** The chip of each row a screener fed, by EXCHANGE:SYMBOL (M9 UI7). */
   tags?: ReadonlyMap<string, Chip>
+  /** v2 (F3): the rows in sections. Absent with the switch off, and while editing (flat). */
+  sections?: SectionLayout
 }) {
   if (loading) {
     return (
@@ -192,7 +261,8 @@ export function WatchlistRows({
     )
   }
 
-  if (rows.length === 0) {
+  const sectioned = sections && !editing && sections.groups.length > 1
+  if (rows.length === 0 && !sectioned) {
     return (
       <div className="flex flex-col items-center gap-3 px-6 py-10 text-center">
         <span className="flex size-12 items-center justify-center rounded-2xl bg-[color:var(--primary-tint)] text-primary">
@@ -215,6 +285,9 @@ export function WatchlistRows({
       </div>
     )
   }
+
+  if (sections && sectioned)
+    return <Sectioned rows={rows} layout={sections} tags={tags} onOpen={onOpen} />
 
   return (
     <ul className="divide-y divide-[color:var(--divider)]">

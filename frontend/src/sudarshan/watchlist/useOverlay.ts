@@ -19,6 +19,9 @@ import type { OrderRequest } from './SymbolSheet'
  * - `?sheet=lists` (M8.5, v2 only): the All lists sheet. A sheet of v2 is
  *   known to the address only while v2 is on (`useOverlay(true)`), so with the
  *   switch off the page reads its address exactly as it did.
+ * - `?sheet=section&section=<id>` (M8.4 F3, v2 only): a section's menu; `?sheet=section-name`
+ *   names a new section, or renames the one in `&section=<id>`; `?sheet=section-remove&section=<id>`
+ *   asks before removing it.
  */
 export type Overlay =
   | { kind: 'item'; itemId: number }
@@ -29,6 +32,9 @@ export type Overlay =
   | { kind: 'order'; order: OrderRequest | null }
   | { kind: 'alert'; alert: AlertPrefill | null }
   | { kind: 'lists' }
+  | { kind: 'section'; sectionId: number }
+  | { kind: 'sectionName'; sectionId: number | null }
+  | { kind: 'sectionRemove'; sectionId: number }
 
 export type OverlayRequest =
   | Exclude<Overlay, { kind: 'order' } | { kind: 'alert' }>
@@ -37,7 +43,17 @@ export type OverlayRequest =
 
 const SHEETS = new Set(['add', 'new', 'rename', 'delete', 'order', 'alert'])
 /** The sheets only v2 opens; later v2 sheets are added here. */
-const V2_SHEETS = new Set(['lists'])
+const V2_SHEETS = new Set(['lists', 'section', 'section-name', 'section-remove'])
+const SECTION_KINDS: Record<string, 'section' | 'sectionName' | 'sectionRemove'> = {
+  section: 'section',
+  'section-name': 'sectionName',
+  'section-remove': 'sectionRemove',
+}
+const SECTION_SHEET = {
+  section: 'section',
+  sectionName: 'section-name',
+  sectionRemove: 'section-remove',
+}
 
 /** The history entry's state: whether this page pushed it, the ticket's order, the alert's instrument. */
 interface EntryState {
@@ -58,6 +74,13 @@ export function overlayOf(params: URLSearchParams, state: unknown, v2 = false): 
   if (!sheet || !(SHEETS.has(sheet) || (v2 && V2_SHEETS.has(sheet)))) return null
   if (sheet === 'order') return { kind: 'order', order: entryState(state).order ?? null }
   if (sheet === 'alert') return { kind: 'alert', alert: entryState(state).alert ?? null }
+  const kind = SECTION_KINDS[sheet]
+  if (kind) {
+    const id = Number(params.get('section'))
+    const sectionId = params.has('section') && Number.isInteger(id) && id > 0 ? id : null
+    if (kind !== 'sectionName' && sectionId === null) return null
+    return { kind, sectionId } as Overlay
+  }
   return { kind: sheet } as Overlay
 }
 
@@ -74,8 +97,12 @@ function withOverlay(params: URLSearchParams, next: OverlayRequest | null): URLS
   const out = new URLSearchParams(params)
   out.delete('item')
   out.delete('sheet')
+  out.delete('section')
   if (next?.kind === 'item') out.set('item', String(next.itemId))
-  else if (next) out.set('sheet', next.kind)
+  else if (next && 'sectionId' in next) {
+    out.set('sheet', SECTION_SHEET[next.kind])
+    if (next.sectionId !== null) out.set('section', String(next.sectionId))
+  } else if (next) out.set('sheet', next.kind)
   return out
 }
 

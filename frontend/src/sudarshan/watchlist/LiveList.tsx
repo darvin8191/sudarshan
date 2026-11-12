@@ -8,7 +8,7 @@ import type { MemberRow } from '@/sudarshan/screener/api'
 import { exitedToday, tagsOf, usePin } from '@/sudarshan/screener/feed'
 import { type OrderRequest, SymbolSheet } from './SymbolSheet'
 import { useLiveRows } from './useLiveRows'
-import { WatchlistRows } from './WatchlistRows'
+import { type SectionLayout, WatchlistRows } from './WatchlistRows'
 
 /**
  * The part of the watchlist that moves with the market: the line over the
@@ -36,6 +36,7 @@ export const LiveList = memo(function LiveList({
   onOrder,
   onAlert,
   members,
+  sections,
 }: {
   items: WatchlistItem[]
   apiKey: string | null
@@ -57,6 +58,8 @@ export const LiveList = memo(function LiveList({
   onAlert: (alert: AlertPrefill) => void
   /** What a screener put in this list (M9 UI7): chips on rows, who left today, Pin in the sheet. */
   members?: readonly MemberRow[]
+  /** v2 (F3): the open own list's sections; absent with the switch off. */
+  sections?: SectionLayout
 }) {
   const tags = useMemo(() => tagsOf(members ?? NO_MEMBERS), [members])
   const byKey = useMemo(
@@ -106,6 +109,7 @@ export const LiveList = memo(function LiveList({
           onRemove={onRemove}
           onAdd={onAdd}
           tags={tags}
+          sections={sections}
         />
       </section>
       {exited.length > 0 && (

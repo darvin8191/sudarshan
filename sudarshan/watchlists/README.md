@@ -305,6 +305,36 @@ and are not in the D look's table (`--mark-4` is 9.6 from `--chart-4` and `--mar
 `--chart-3`). The colour-blind mode (`data-cvd`) changes none of them; a test fails if its block
 names a mark.
 
+## F3 - sections on the phone
+
+With v2 on and an own list open, `Watchlist.tsx` reads the `view` op for it (`useListView`) and hands
+`LiveList` a section layout (`v2/sections.ts`: `groupsOf`, `useCollapsed`, `writeSection`). The rows
+are the OpenAlgo items as before, so prices stream exactly as they did, but `WatchlistRows` draws
+them in the view's order: the symbols with no section first, then each section by position under its
+header. An item the view does not list yet (the two reads crossed) is shown with the unsectioned;
+follow rows are F11's and render nothing. Editing (Reorder or remove) stays the flat list until W8's
+`arrange` has an F-side. With the switch off, a built-in or ranked favourite, or no `view` yet, the
+page draws the flat rows it always did. `SectionHeader.tsx` is a 48 dp row in the card: a 4 px stripe
+and the glyph of its mark (none for mark 0), "Banks · 8", a chevron whose accessible name is Collapse
+or Expand, and a 48 dp menu button. Folded sections are kept per list in `localStorage`
+(`sudarshan-watchlist-collapsed`), every read and write inside try/catch, so a refused store costs
+only the memory.
+
+The section menu, the name box (New section, Rename) and the remove confirmation are bottom sheets
+(`SectionMenus.tsx`) opened through `useOverlay` as `?sheet=section`, `section-name` and
+`section-remove` with `&section=<id>`, so Back closes them first and `BottomSheet`'s 500 ms guard
+covers them. The menu has Rename, Mark (None and the five, each 48 dp with glyph and name, the current
+one ticked and `aria-pressed`) and Remove section. The list menu gains New section for an own list
+only (off with its words at 20 sections; a built-in list is offered none of it) and, with v2 on, its
+Radix menu takes the open guard too. Every write sends the `version` the last `view` answered and the
+list is read again whatever the answer; a refusal shows the server's sentence (a `conflict` says the
+list is shown again), never a status code; a name over 40 letters and a 21st section are refused
+before sending with "Section names can be up to 40 letters." and "A list can have 20 sections.", and
+the second is also shown when the server answers `limit`. Moving or copying symbols and sections
+between lists is F5's. Tests: `v2/sections.test.tsx` against `mockBridge.ts`.
+Not covered: Back does not close the list menu itself (a Radix dropdown, not an address entry); the
+sheets it opens do.
+
 ## W7 - sections (`store/sections.py`, `ops/sections.py`, `words/sections.py`)
 
 `section_add`, `section_edit` and `section_remove` act on own lists only (`list:<id>`): a list or a

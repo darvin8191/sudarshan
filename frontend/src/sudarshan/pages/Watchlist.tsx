@@ -31,10 +31,13 @@ import { DeleteDialog, NameDialog } from '@/sudarshan/watchlist/ListDialogs'
 import { ListStrip, ownId, ownRef, tabsFor } from '@/sudarshan/watchlist/ListStrip'
 import { LISTS_FULL, ListTabs, PANEL_ID, tabId } from '@/sudarshan/watchlist/ListTabs'
 import { LiveList } from '@/sudarshan/watchlist/LiveList'
+import { SectionSheets } from '@/sudarshan/watchlist/SectionMenus'
 import type { OrderRequest } from '@/sudarshan/watchlist/SymbolSheet'
 import { useOverlay } from '@/sudarshan/watchlist/useOverlay'
 import { MAX_ITEMS, MAX_LISTS, useWatchlists } from '@/sudarshan/watchlist/useWatchlists'
-import { useV2State } from '@/sudarshan/watchlist/v2/useListView'
+import { groupsOf, SECTIONS_FULL, useCollapsed } from '@/sudarshan/watchlist/v2/sections'
+import { LIMITS } from '@/sudarshan/watchlist/v2/types'
+import { useListView, useV2State } from '@/sudarshan/watchlist/v2/useListView'
 import { usePush } from '@/sudarshan/watchlist/v2/usePush'
 
 /** The list that was open last on this device: a convenience, so it lives in this browser only. */
@@ -159,6 +162,22 @@ export default function Watchlist() {
   const activeRef = foreign ? foreign.ref : active ? ownRef(active.id) : null
 
   const activeId = active?.id ?? null
+  // F3 (v2): the open own list in sections, read from the `view` op; flat while it is not read.
+  const sectionsRef = v2 && active && !foreign ? ownRef(active.id) : null
+  const view = useListView(sectionsRef).data
+  const folds = useCollapsed(sectionsRef)
+  const sectionLayout = useMemo(
+    () =>
+      view && sectionsRef
+        ? {
+            groups: groupsOf(view),
+            collapsed: folds.collapsed,
+            onToggle: folds.toggle,
+            onMenu: (sectionId: number) => open({ kind: 'section', sectionId }),
+          }
+        : undefined,
+    [view, sectionsRef, folds.collapsed, folds.toggle, open]
+  )
   const { move, removeItem: removeFromList } = watchlists
   const openSheet = useCallback((itemId: number) => open({ kind: 'item', itemId }), [open])
   const moveItem = useCallback(
@@ -269,6 +288,12 @@ export default function Watchlist() {
               onEdit={() => setEditing((on) => !on)}
               onDelete={() => open({ kind: 'delete' })}
               fed={fedIds}
+              onNewSection={
+                sectionsRef ? () => open({ kind: 'sectionName', sectionId: null }) : undefined
+              }
+              newSectionOff={
+                view && view.sections.length >= LIMITS.sections_per_list ? SECTIONS_FULL : null
+              }
               strip={
                 v2 ? (
                   <ListStrip
@@ -310,6 +335,7 @@ export default function Watchlist() {
               onOrder={placeOrder}
               onAlert={setAlert}
               members={members}
+              sections={sectionLayout}
             />
           )}
         </>
@@ -327,6 +353,16 @@ export default function Watchlist() {
           }}
           onNew={() => swap({ kind: 'new' })}
           newOff={watchlists.lists.length >= MAX_LISTS ? LISTS_FULL : null}
+        />
+      )}
+
+      {v2 && (
+        <SectionSheets
+          overlay={overlay}
+          view={view}
+          listId={active?.id ?? null}
+          onSwap={swap}
+          onClose={close}
         />
       )}
 

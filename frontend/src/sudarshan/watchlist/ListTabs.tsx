@@ -1,5 +1,14 @@
-import { ArrowUpDown, Check, MoreVertical, Pencil, Plus, Trash2, Zap } from 'lucide-react'
-import { type KeyboardEvent, type ReactNode, useEffect } from 'react'
+import {
+  ArrowUpDown,
+  Check,
+  FolderPlus,
+  MoreVertical,
+  Pencil,
+  Plus,
+  Trash2,
+  Zap,
+} from 'lucide-react'
+import { type KeyboardEvent, type ReactNode, useEffect, useState } from 'react'
 import type { Watchlist } from '@/api/watchlist'
 import {
   DropdownMenu,
@@ -9,6 +18,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
+import { useOpenGuard } from './openGuard'
 import { MAX_LISTS } from './useWatchlists'
 
 export const PANEL_ID = 'sd-watchlist-panel'
@@ -37,6 +47,8 @@ export function ListTabs({
   onDelete,
   fed,
   strip,
+  onNewSection,
+  newSectionOff,
 }: {
   lists: Watchlist[]
   activeId: number | null
@@ -50,7 +62,14 @@ export function ListTabs({
   fed?: ReadonlySet<number>
   /** v2 (M8.5): the favourite tabs and All lists, in place of the tab row; the menu stays. */
   strip?: ReactNode
+  /** v2 (M8.4 F3): offers New section for an own list; absent for a built-in one. */
+  onNewSection?: () => void
+  /** Why New section is off (the list has 20), or null. */
+  newSectionOff?: string | null
 }) {
+  // F3: with v2 on the menu ignores taps for its first half second (openGuard.ts).
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuGuard = useOpenGuard(menuOpen)
   // Keep the open tab in view when it changes, from a menu or a restored session.
   useEffect(() => {
     if (activeId === null) return
@@ -126,14 +145,19 @@ export function ListTabs({
         </div>
       )}
 
-      <DropdownMenu>
+      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
         <DropdownMenuTrigger
           aria-label="List options"
           className="flex size-12 shrink-0 items-center justify-center rounded-xl text-[color:var(--text-secondary)] outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
         >
           <MoreVertical aria-hidden="true" className="size-5" />
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-56">
+        <DropdownMenuContent
+          align="end"
+          className="w-56"
+          {...(strip ? menuGuard.handlers : {})}
+          data-settling={(strip && menuGuard.settling) || undefined}
+        >
           <DropdownMenuItem
             className={MENU_ITEM}
             disabled={full}
@@ -155,6 +179,27 @@ export function ListTabs({
             <Pencil aria-hidden="true" className="size-5" />
             Rename list
           </DropdownMenuItem>
+          {onNewSection && (
+            <>
+              <DropdownMenuItem
+                className={MENU_ITEM}
+                disabled={activeId === null || !!newSectionOff}
+                aria-describedby={newSectionOff ? 'sd-sections-full' : undefined}
+                onSelect={onNewSection}
+              >
+                <FolderPlus aria-hidden="true" className="size-5" />
+                New section
+              </DropdownMenuItem>
+              {newSectionOff && (
+                <p
+                  id="sd-sections-full"
+                  className="px-2 pb-2 text-xs leading-snug font-medium text-muted-foreground"
+                >
+                  {newSectionOff}
+                </p>
+              )}
+            </>
+          )}
           <DropdownMenuItem className={MENU_ITEM} disabled={activeId === null} onSelect={onEdit}>
             {editing ? (
               <Check aria-hidden="true" className="size-5" />
