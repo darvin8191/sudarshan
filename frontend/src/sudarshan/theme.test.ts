@@ -261,3 +261,77 @@ describe('SUDARSHAN tokens', () => {
     expect(rules).not.toMatch(/prefers-color-scheme:\s*dark/)
   })
 })
+
+/**
+ * The five marks (M8.4 F4): a glyph and a colour each, always drawn with a name. They are pinned
+ * here and are not in the rules file's token table. Colour-blind mode changes none of them: the
+ * glyph and the name carry the difference.
+ */
+const MARKS = [
+  ['--mark-1', '#B0246B'],
+  ['--mark-2', '#5E7800'],
+  ['--mark-3', '#7A3B1D'],
+  ['--mark-4', '#00796B'],
+  ['--mark-5', '#8E2F8E'],
+] as const
+
+function lab(hex: string): [number, number, number] {
+  const n = Number.parseInt(hex.slice(1), 16)
+  const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map(toLinear)
+  const x = (0.4124564 * r + 0.3575761 * g + 0.1804375 * b) / 0.95047
+  const y = 0.2126729 * r + 0.7151522 * g + 0.072175 * b
+  const z = (0.0193339 * r + 0.119192 * g + 0.9503041 * b) / 1.08883
+  const f = (t: number) => (t > 216 / 24389 ? t ** (1 / 3) : ((24389 / 27) * t + 16) / 116)
+  return [116 * f(y) - 16, 500 * (f(x) - f(y)), 200 * (f(y) - f(z))]
+}
+
+/** CIE76: the straight distance between two colours in CIELAB. */
+function deltaE(a: string, b: string): number {
+  const [l1, a1, b1] = lab(a)
+  const [l2, a2, b2] = lab(b)
+  return Math.hypot(l1 - l2, a1 - a2, b1 - b2)
+}
+
+describe('SUDARSHAN marks', () => {
+  const tokens = oklchTokens()
+  const byName = new Map(tokens.map((t) => [t.name, t.hex]))
+  // Every colour of the D look, the marks themselves and the upstream chart series left out:
+  // the series colours only draw chart lines and are not in the D look's table.
+  const others = tokens.filter(
+    (t) => !t.name.startsWith('--mark-') && !t.name.startsWith('--chart-')
+  )
+
+  it('reads the D look colours it compares against', () => {
+    expect(others.length).toBeGreaterThan(40)
+  })
+
+  it.each(MARKS)('%s is %s', (name, hex) => {
+    expect(byName.get(name)).toBe(hex)
+  })
+
+  it.each(MARKS)('%s is 3:1 or better as a graphic on white and on the page', (name) => {
+    const hex = byName.get(name) as string
+    expect(contrast(hex, WHITE)).toBeGreaterThanOrEqual(3)
+    expect(contrast(hex, CANVAS)).toBeGreaterThanOrEqual(3)
+  })
+
+  it.each(MARKS)('%s is 20 CIELAB units or more from every D look colour', (name) => {
+    const hex = byName.get(name) as string
+    for (const other of others) {
+      expect(deltaE(hex, other.hex), `${name} against ${other.name}`).toBeGreaterThanOrEqual(20)
+    }
+  })
+
+  it('keeps the five marks apart from each other too', () => {
+    for (const [a, hexA] of MARKS) {
+      for (const [b, hexB] of MARKS) {
+        if (a < b) expect(deltaE(hexA, hexB), `${a} against ${b}`).toBeGreaterThanOrEqual(20)
+      }
+    }
+  })
+
+  it('leaves the marks alone in colour-blind mode', () => {
+    const block = /html\[data-cvd='1'\]\s*{([\s\S]*?)}/.exec(css)?.[1] ?? ''
+    expect(block).not.toMatch(/--mark-/)
+  })
+})

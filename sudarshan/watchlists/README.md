@@ -290,6 +290,21 @@ instrument key (cash rows carry it, null otherwise), and a symbol the master lac
 and named in `missing` (with the master not loaded nothing is called expired). Prices are never in
 `view`: the page streams them. Tests: `tests/test_watchlists_view.py`.
 
+## F4 - marks
+
+Five marks, used by sections now and by flags later, each a shape and a colour and always drawn with
+its name: 1 `--mark-1` #B0246B circle, 2 `--mark-2` #5E7800 square, 3 `--mark-3` #7A3B1D triangle,
+4 `--mark-4` #00796B diamond, 5 `--mark-5` #8E2F8E star; mark 0 is no mark. `watchlist/marks.tsx`
+draws the glyph (`MarkGlyph`, an SVG hidden from a screen reader because the name is beside it) and
+holds the names. The five mark tokens are pinned in `theme.test.ts` and are not in the rules file's
+token table (`.claude/rules/sudarshan.md` is unchanged). That test computes, and does not hard-code,
+that each reads at 3:1 or better as a graphic on white and on the page colour #F4F6F8, and that each
+is at least 20 CIELAB (CIE76) units from every other colour in `theme.css` and from the other marks.
+The upstream `--chart-*` series colours are left out of that comparison: they draw chart lines only
+and are not in the D look's table (`--mark-4` is 9.6 from `--chart-4` and `--mark-5` 16.3 from
+`--chart-3`). The colour-blind mode (`data-cvd`) changes none of them; a test fails if its block
+names a mark.
+
 ## W7 - sections (`store/sections.py`, `ops/sections.py`, `words/sections.py`)
 
 `section_add`, `section_edit` and `section_remove` act on own lists only (`list:<id>`): a list or a
