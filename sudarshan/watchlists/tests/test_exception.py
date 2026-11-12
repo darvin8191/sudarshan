@@ -129,7 +129,7 @@ def run_every_op(m: master.Master):
 
 def run_every_registered_op(monkeypatch, tmp_path):
     """Every op the bridge registers, switched on and off, through the real blueprint."""
-    from bridge_app import csrf_headers, login_session, make_app, path_of, reset_users
+    from watchlists_bridge_app import csrf_headers, login_session, make_app, path_of, reset_users
 
     import blueprints.sudarshan_watchlists as bridge
     from sudarshan.watchlists import contract, engine, ops

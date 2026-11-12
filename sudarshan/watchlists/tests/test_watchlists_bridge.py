@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 
 import pytest
-from bridge_app import (
+from watchlists_bridge_app import (
     VIEWER,
     csrf_headers,
     echo_handlers,
