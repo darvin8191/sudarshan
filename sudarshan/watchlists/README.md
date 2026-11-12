@@ -283,4 +283,49 @@ so their answer is a `Done` dict that also carries the ref of its list for the b
 sent is the contract's `Done`). The handlers import the list reader when used, so importing the
 bridge still loads no master. Tests: `tests/test_watchlists_sections.py`; `test/test_gthread_watchlists.py`
 (eight threads on one version: one wins, seven `conflict`; eight first writes to one list: one row,
-never a 500). Left for W8: `arrange`, `copy` and `move`.
+never a 500).
+
+## W8 - arrange, copy and move (`ops/arrange.py`, `ops/copy.py`, `store/items.py`, `words/arrange.py`)
+
+`arrange` (PUT, own lists) decides the section order, each symbol's section and the item order on the
+version `view` answered. One overlay transaction claims the version (W7's compare-and-set), checks
+that `sections` is exactly the list's sections and every item's `section_id` is one of them (else
+`invalid`, field `sections` or `items`, and the claim rolls back), then writes the section
+positions and replaces the list's section rows. Symbols the request leaves out keep their section
+and go after the named ones; symbols it names that the list no longer has are left out. Then
+OpenAlgo's item order is written through `watchlist_db.reorder_items` in section-major order (No
+section first, then each section in the new order) so /trading shows the same order flat. If that
+second write fails the answer is `failed` ("Saved here, but the order on /trading is unchanged
+until you arrange the list again."); the overlay is saved, OpenAlgo's order is as it was, and the
+page shows the list again.
+
+`copy` takes `from` (`ref` of an own list, plus `keys` of `EXCHANGE:SYMBOL` or one `section_id`,
+never both) and `to` (an existing `list`, or a new `name`; `section_id` only for an existing list),
+and `move: true` for a move (there is no op of its own). A built-in or ranked source, a ref that is
+not a list, a symbol the source does not hold and the same list as source and target are `invalid`
+with the field named. Everything that can be refused is refused first, in words with the numbers:
+a stale `version` when a section is to be set (`conflict`), 250 symbols a list holds ("Swing has
+room for 3 more symbols; this section has 8. Make room in Swing or pick another list."), 50 lists
+("You have 50 lists, the most there can be. Delete one to make a new list."), a name taken. A symbol
+already in the target is skipped, never an error (`skipped` in the answer); a move still takes it
+out of the source. Order of writes, one file at a time: OpenAlgo's `add_item` for each symbol (one
+commit each) or `create_watchlist` with all items in one call; then, only when a section is set, one
+overlay transaction that claims the target's version and writes the section rows; then for a move
+OpenAlgo's `remove_item` for each, and one overlay transaction dropping the source's section rows
+(its failure is logged, because rows for symbols the list no longer has are ignored). A failure
+between steps answers `failed` with what was done, and every state it leaves is valid: symbols
+OpenAlgo has and the overlay does not know read as No section. A move is a removal from the
+screener's point of view, which is intended.
+
+Bumps (`ops.bumps`), once per write and never also by the hook, because these ops call OpenAlgo's
+functions in process: `arrange` with why `arranged` and `list:<id>`; `copy` and `move` with why
+`items` and the target's ref (a move adds the source's, so the push says `lists`).
+
+The yield: writes of up to 250 items yield to the hub (`time.sleep(0)`) between OpenAlgo's per-item
+commits, because SQLite's file I/O does not yield under eventlet. It is never done inside an overlay
+transaction: that holds the store's write lock, and another greenlet writing to the store would
+wait inside C for a holder that cannot be resumed to commit. The overlay rows go in as one batch.
+Tests: `tests/test_watchlists_arrange.py`, which includes the yield under a real eventlet hub in a
+subprocess (a second greenlet runs 240+ times during a 250-item copy, and not at all with the yield
+removed).
+
