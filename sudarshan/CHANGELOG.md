@@ -5,6 +5,66 @@ publish. The owner publishes each release on GitHub. The server's deploy timer t
 outside 08:30-16:00 IST on trading days (09:00-15:45 until v0.3.1), keeps backups, and rolls
 back if the app does not come up healthy.
 
+## v0.7.0 (12 Nov 2026)
+
+Screener dashboards: a Dashboard tab of cards you choose, six more ready-made screens, and fixes to
+how the screener reads the day's open, high, low and first minutes. It includes everything in
+v0.6.1. **Publish it only after v0.6.1 has installed and run one trading day. The screener is
+still switched off: publishing this release changes nothing you trade with or see, and none of the
+changes below shows until you switch it on (v0.6.0, "What you must do").**
+
+### What changes for you, once the screener is on
+- **The Dashboard tab on the Screener page**, shown first. Each card is one of your screens:
+  - a table card: its top 10 rows with LTP, % change and two values you pick;
+  - a count card: how many instruments pass now, and how that moved through the day's runs.
+  Add, arrange and remove cards and set each one up; a change made on one phone shows on your
+  other phones at once. Three columns from 1,200 px wide.
+- **Each card says what it is waiting for**: its own next check, "Real-time" only while its prices
+  tick (a count card never says it), the feed or the Upstox login when either is down, and the
+  close after the close. A card whose screen feeds a watchlist names that list.
+- **Six more ready-made screens**, each saying in its description how it differs from the scan it
+  was modelled on.
+- **Day lines are judged on the forming day candle** at its minute closes, so a screen of daily
+  lines can match during the session instead of only after the close.
+- **The day's open, high and low are the exchange's**, from the day candle the feed carries, not
+  the first price the screener happened to see. When that candle is missing the instrument reads
+  "Not checked" and names which of the three is missing.
+- **A screen made or resumed during the session runs once at once** on the latest closed candle.
+  After an upgrade or a restart the first run lands on the latest closed candle, marked late when
+  the restart delayed it.
+- **Two open points of v0.6.0 are fixed:**
+  - an instrument first followed after the open reads its day as not checked, instead of judging
+    its open, high, low and gap from that moment;
+  - an instrument followed again the same day starts its volume from then, so its next candle is
+    no false volume spike, and its gap reads not checked.
+- **Restarts:** an instrument let go before a restart keeps its gap from the moment it was let go,
+  and a restart during the morning contract download keeps that wait out of the first candle.
+- **The 09:15 candle's volume.** When the screener starts before the open and a cash stock hears no
+  pre-open price, it takes the stock's first trade as the baseline, so the pre-open auction's
+  volume is not counted into the 09:15 candle. Options and futures, which have no pre-open session,
+  count their first minute whole.
+- **The dashboard reads less:** a card reads only its own screen's runs, and the page reads the
+  dashboard once, not twice, after it opens or the phone wakes.
+
+### What you must do
+- Nothing when you publish. The screener stays off.
+- On the first session with the screener on: add one table card and one count card, and check the
+  09:15 candle's volume of two or three liquid option strikes against Upstox's 1-minute candles.
+
+### What is refused now that used to be accepted
+- Nothing existing changes. On the Dashboard tab, Add a card stays off until the dashboard has been
+  read, so it never answers "changed on another screen" when nothing changed.
+
+### Not in this release yet
+- **A frame costs about 30 ms on a mid-range phone with 20 cards while prices stream**, about 30
+  frames a second; no price is lost or held past the next frame. Planned: rebuild a card only when
+  its own figures change.
+- **The cash pre-open baseline has not met a live session yet**: it is checked on the first session
+  with the screener on.
+- **History before today** still waits for the feed's request governor, as in v0.6.0; a card for a
+  screen that needs it says it waits for the history download.
+- The other open points listed under v0.6.0 remain.
+
 ## v0.6.1 (9 Nov 2026)
 
 Fixes from the sandbox checks of 9 Nov: the order ticket's buttons always in view, an exit from
