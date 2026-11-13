@@ -2,10 +2,10 @@
 
 ``closes`` answers the session close of an expiry day where the calendar has a dated row for it (a
 special session such as an evening Muhurat, or a holiday row that leaves the exchange open with its
-own window); a date it has no such row for is left out, and ``dynamic.close_ms`` closes it at 15:30
-IST. The calendar's *default* F&O close (15:40, after SEBI's closing auction) is deliberately not
-used: an expiring contract stops trading at 15:30 whatever the rest of the segment does, and the
-design (owner decision 4) rolls a row at that close. ``market_open`` says whether the underlying's
+own window); a date it has no such row for is left out, and ``expiry.stop_ms`` stops it by
+the regime of the day (the one rule of the watchlists package, read from the alerts sessions
+table). The calendar's *default* F&O close is deliberately not used: only a dated row for a
+special day overrides the regime. ``market_open`` says whether the underlying's
 own exchange is trading at an instant, by the calendar's effective window. Request-driven reads of
 OpenAlgo's own tables; no clock here (the instant is an argument), no thread, no timer. The
 calendar's scoped session is removed after each question.

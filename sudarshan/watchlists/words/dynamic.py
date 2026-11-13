@@ -42,7 +42,8 @@ def moved(old_strike: float, right: str, at_ms: int, price: float, underlying: s
 
 
 def rolled(expiry: str, at_ms: int) -> str:
-    """On expiry day, from the close."""
+    """On expiry day, from the stop of the regime (15:40 until 6 Dec 2026, 15:30 for an index
+    contract from 7 Dec 2026)."""
     return f"Rolled to {numfmt.day(expiry)} at {numfmt.hm(at_ms)}"
 
 

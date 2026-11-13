@@ -15,8 +15,8 @@ pure functions:
 ``members(prepared, now_ms, closes) -> Built``
     The rows now. A list that does not depend on the clock returns what was prepared; index
     futures pick the first future whose expiry close is still ahead (3.7's roll), ``closes`` being
-    the calendar's close in epoch ms for an expiry date (``dynamic.close_ms``: 15:30 IST when
-    there is none).
+    the calendar's end of a special session day in epoch ms for an expiry date; any other day
+    stops by ``expiry.stop_ms``, the regime of the day.
 
 ``merge`` makes the ``View`` record. Built-in lists are locked, have no sections and no follow
 rows, and carry version "0": nothing is written against them.

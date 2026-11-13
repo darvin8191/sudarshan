@@ -68,7 +68,8 @@ the phone PR that uses it.
 
 Pure rules for ATM, strike and current-month future rows. Expiries come from the master as listed;
 a row rolls at the session close of expiry day, taken from OpenAlgo's market calendar and passed in
-as `closes` (15:30 IST when the calendar has no row). The ATM is the strike nearest the price, a tie
+as `closes` (a special session day's own end only; any other day stops by `expiry.stop_ms`, see
+W15's regime paragraph). The ATM is the strike nearest the price, a tie
 going to the lower strike (a test holds it equal to OpenAlgo's own function); a held strike is kept
 while the price stays inside its band (midpoint to the neighbour plus 10% of the gap, open ends).
 The price is the page's own tick while its socket is up, however old, then the page snapshot, then
@@ -89,8 +90,8 @@ underlying must be in today's master with options (or futures, for a future row)
 `resolve` (a read) takes, for each row, the page's price, its time, its source and the strike the row
 last showed (`held`), and `connected`. The expiry is the first whose session close is after now:
 `sessions.closes` reads OpenAlgo's calendar for a dated special-session or holiday-open window and
-otherwise `dynamic.close_ms` closes at 15:30 IST. The calendar's default F&O close of 15:40 is
-deliberately not used, because an expiring contract stops at 15:30. The price is the page's tick while
+otherwise `expiry.stop_ms` stops it by the regime of the day (below). The calendar's default F&O
+close is deliberately not used. The price is the page's tick while
 connected, its snapshot, the feed's last tick (one `/snapshot` read for every row that needs it, 0.5 s,
 through the shared httpx client; any failure is an empty answer), then the page's last price when the
 exchange is closed by the calendar, else the row waits. The answer carries the contracts looked up in the
@@ -98,6 +99,19 @@ master (never built), the band of the ATM, `valid_until`, and the words; a side 
 named and no contract is answered. For the first minute after a roll the words are "Rolled to ...".
 Nothing is written and no thread or timer is started. Tests: `tests/test_watchlists_rows.py`,
 `tests/test_watchlists_follow.py`.
+
+**One rule for when an expiring contract stops (`expiry.py`).** `expiry.stop_ms(day, index=...,
+exchange=..., window_end_ms=...)` answers the instant a contract stops on its expiry day, and
+`dynamic.close_ms` (so the expiry pick, `valid_until` and the "Rolled to ... at HH:MM" words of
+`resolve`, and the roll and `valid_until` of the Index futures list) asks nothing else. It reads the
+regime from `sudarshan.alerts.market.sessions` (`expiry_close`, `INDEX_UNDERLYINGS`), the repository's
+one table of sessions. Until 6 Dec 2026 an expiring index contract trades to the F&O close, 15:40, as a
+stock contract does. From 7 Dec 2026 (SEBI circular of 15 Oct 2026) an index contract stops at 15:30 on
+its expiry day while a stock contract trades to the F&O close, 15:45. A special session day takes its
+end from OpenAlgo's calendar, passed as the date's entry of `closes` (`get_special_session`,
+`get_holiday_exchange_window`), in either regime. A row is an index row when its underlying is in
+`INDEX_UNDERLYINGS`. The older rules are gone: W12's calendar default close (15:40 on every day, which
+the calendar's effective window gave) and W15's fixed 15:30. Tests: `tests/test_watchlists_expiry.py`.
 
 ## W16 - the search grammar (`search.py`, `words/search.py`)
 
@@ -564,11 +578,10 @@ rows as `search.Index` keeps them (references to the snapshot's own rows, never 
   today: ABC.") where the screener drops it without a word.
 - **Index futures** are, per index underlying (NFO and BFO, so SENSEX and BANKEX are in; the
   screener's index futures read NFO only), the first future whose expiry close is still ahead
-  (3.7's roll): at the close of expiry day the row is the next month's. The close is OpenAlgo's
-  market calendar's for NFO, asked for only when an expiry falls today (any other day closes before
-  or after now whatever the calendar says), and 15:30 IST when the calendar has no window
-  (`dynamic.close_ms`). Note that OpenAlgo's default NFO window ends at 15:40, so on a normal
-  expiry day the calendar's close, not 15:30, rolls the row. An underlying with no future left is
+  (3.7's roll): at the stop of expiry day the row is the next month's. The stop is
+  `expiry.stop_ms`, the one rule of the regime of the day (see W15), the same as a follow row's. The
+  market calendar is asked for NFO only when an expiry falls today, and only for a special session
+  day's own end (any other day stops before or after now whatever the calendar says). An underlying with no future left is
   not listed. The list depends on the clock, so only what the master fixes is cached.
 
 **One generation.** `refs/preset.py` builds from `master.shared()` and keeps each prepared list

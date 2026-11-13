@@ -3,19 +3,19 @@
 Pure: every input is an argument, there is no clock, no I/O and no logging. Times are epoch
 milliseconds; an expiry is an ISO date (``2026-11-24``); a strike is a number in rupees. The
 bridge looks the session closes up in OpenAlgo's market calendar and passes them in as
-``closes`` (date to epoch ms); a date with no entry closes at 15:30 IST. Arithmetic on strikes is
+``closes`` (date to epoch ms, special session days only); a date with no entry stops at the
+instant ``expiry.stop_ms`` gives by the regime of that day. Arithmetic on strikes is
 exact (fractions), so a price on a band edge is never moved by a float.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from fractions import Fraction
 from typing import Any, NamedTuple
 
+from sudarshan.watchlists import expiry as stops
+
 BAND_PAD = Fraction(1, 10)
-#: 15:30 IST is 10:00 UTC.
-_DEFAULT_CLOSE_UTC = (10, 0)
 
 
 class Price(NamedTuple):
@@ -41,13 +41,18 @@ class Resolution(NamedTuple):
     steps: int | None = None
 
 
-def close_ms(expiry: str, closes: dict[str, int] | None = None) -> int:
-    """The session close of an expiry day: the calendar's, else 15:30 IST."""
-    if closes and expiry in closes:
-        return closes[expiry]
-    y, m, d = (int(p) for p in expiry.split("-"))
-    base = datetime(y, m, d, *_DEFAULT_CLOSE_UTC, tzinfo=UTC)
-    return int(base.timestamp() * 1000)
+def close_ms(
+    expiry: str,
+    closes: dict[str, int] | None = None,
+    *,
+    index: bool = False,
+    exchange: str = "NFO",
+) -> int:
+    """When a contract expiring on ``expiry`` stops: the calendar's end of a special session day,
+    else the regime's (``expiry.stop_ms``), which depends on ``index``."""
+    return stops.stop_ms(
+        expiry, index=index, exchange=exchange, window_end_ms=(closes or {}).get(expiry)
+    )
 
 
 def _month_ends(expiries: list[str]) -> set[str]:
@@ -58,17 +63,22 @@ def _month_ends(expiries: list[str]) -> set[str]:
 
 
 def pick_expiries(
-    expiries: list[str], now_ms: int, closes: dict[str, int] | None = None
+    expiries: list[str],
+    now_ms: int,
+    closes: dict[str, int] | None = None,
+    *,
+    index: bool = False,
+    exchange: str = "NFO",
 ) -> dict[str, str | None]:
     """``nearest``, ``next``, ``month`` and ``next_month`` among the listed expiries.
 
     An expiry is open while its session close is after ``now_ms`` (so the row rolls at the close
-    of expiry day, 15:30:00.000 sharp); ``month`` is the first open expiry that is the last of its
+    of expiry day, at the instant of its regime); ``month`` is the first open expiry that is the last of its
     calendar month in the list, ``next_month`` the next such one.
     """
     allx = sorted(set(expiries))
     ends = _month_ends(allx)
-    live = [e for e in allx if close_ms(e, closes) > now_ms]
+    live = [e for e in allx if close_ms(e, closes, index=index, exchange=exchange) > now_ms]
     month = next((e for e in live if e in ends), None)
     after = [e for e in live if month is not None and e > month and e in ends]
     return {
@@ -164,6 +174,8 @@ def resolve(
     held: float | None = None,
     closes: dict[str, int] | None = None,
     sides: dict[tuple[str, float], tuple[str, ...]] | None = None,
+    index: bool = False,
+    exchange: str = "NFO",
 ) -> Resolution:
     """Work out the expiry and strike a follow row points at.
 
@@ -171,10 +183,12 @@ def resolve(
     ``fixed``), ``offset``, ``strike`` (rupees, fixed) and ``opt_right``. ``sides`` optionally
     names the rights listed per (expiry, strike) so a missing side is told, never guessed.
     """
-    expiry = pick_expiries(expiries, now_ms, closes)[row["expiry_rule"]]
+    expiry = pick_expiries(expiries, now_ms, closes, index=index, exchange=exchange)[
+        row["expiry_rule"]
+    ]
     if expiry is None:
         return Resolution("missing", None, None, None, None, price, "no_expiry")
-    until = close_ms(expiry, closes)
+    until = close_ms(expiry, closes, index=index, exchange=exchange)
     if row["kind"] == "month_future":
         state = "closed" if price.state == "closed" else "ok"
         return Resolution(state, expiry, None, None, until, price, None)

@@ -348,7 +348,7 @@ def test_resolve_answers_each_row_with_its_contracts_and_writes_nothing(client, 
     assert (pair["ce"]["symbol"], pair["pe"]["symbol"]) == (
         "NIFTY24NOV2625900CE", "NIFTY24NOV2625900PE")  # fmt: skip
     assert fut["future"]["symbol"] == "NIFTY24NOV26FUT" and fut["state"] == "ok"
-    assert first["valid_until"] == AT + (4 * 24 * 3600 + 4 * 3600 + 30 * 60) * 1000
+    assert first["valid_until"] == AT + (4 * 24 * 3600 + 4 * 3600 + 40 * 60) * 1000
     assert (len(emitted), (table("wl_row"), table("wl_list"))) == (n, before)  # no write, no push
     assert world == []  # the page had a price for every row that needs one
 
@@ -398,6 +398,6 @@ def test_resolve_follows_the_rows_through_a_roll_without_a_write(client, world, 
     monkeypatch.setattr(rows_ops, "_now_ms", lambda: close + 1000)
     after = ask(client, [page(a)]).get_json()["data"]["rows"][0]
     assert (
-        after["ce"]["expiry"] == "2026-12-01" and after["words"] == "Rolled to 1 Dec 2026 at 15:30"
+        after["ce"]["expiry"] == "2026-12-01" and after["words"] == "Rolled to 1 Dec 2026 at 15:40"
     )
     assert len(table("wl_row")) == 1

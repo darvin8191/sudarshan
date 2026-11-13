@@ -72,7 +72,7 @@ def test_a_normal_day_follows_the_nearest_expiry_to_its_close():
     got = one(World(), rule(), item(), "2026-11-20T11:00:05")
     assert got["state"] == "ok" and got["strike"] == 25900.0
     assert got["ce"]["symbol"] == "NIFTY24NOV2625900CE" and got["pe"] is None
-    assert got["ce"]["expiry"] == "2026-11-24" and got["valid_until"] == ms("2026-11-24T15:30:00")
+    assert got["ce"]["expiry"] == "2026-11-24" and got["valid_until"] == ms("2026-11-24T15:40:00")
     assert got["words"] == "Now: NIFTY 25,900 CE, 24 Nov 2026 (NIFTY at 25,912.35)"
     assert got["price"] == 25912.35 and got["price_at"] == ms("2026-11-20T11:00:00")
     assert got["band"] == {"low": 25870.0, "high": 25930.0}
@@ -82,10 +82,10 @@ def test_a_normal_day_follows_the_nearest_expiry_to_its_close():
     ("now", "expiry", "words_start"),
     [
         ("2026-11-24T11:00:00", "2026-11-24", "Now: NIFTY 25,900 CE, 24 Nov 2026"),
-        ("2026-11-24T15:29:59.999", "2026-11-24", "Now: NIFTY 25,900 CE, 24 Nov 2026"),
-        ("2026-11-24T15:30:00", "2026-12-01", "Rolled to 1 Dec 2026 at 15:30"),
-        ("2026-11-24T15:30:59", "2026-12-01", "Rolled to 1 Dec 2026 at 15:30"),
-        ("2026-11-24T15:31:01", "2026-12-01", "Now: NIFTY 25,900 CE, 1 Dec 2026"),
+        ("2026-11-24T15:39:59.999", "2026-11-24", "Now: NIFTY 25,900 CE, 24 Nov 2026"),
+        ("2026-11-24T15:40:00", "2026-12-01", "Rolled to 1 Dec 2026 at 15:40"),
+        ("2026-11-24T15:40:59", "2026-12-01", "Rolled to 1 Dec 2026 at 15:40"),
+        ("2026-11-24T15:41:01", "2026-12-01", "Now: NIFTY 25,900 CE, 1 Dec 2026"),
         ("2026-11-25T09:20:00", "2026-12-01", "Now: NIFTY 25,900 CE, 1 Dec 2026"),
     ],
 )
@@ -101,7 +101,7 @@ def test_a_special_close_on_the_calendar_moves_the_roll():
     assert before["valid_until"] == ms("2026-11-24T13:00:00")
     after = one(w, rule(), item(at=None), "2026-11-24T14:00:00")
     assert after["ce"]["expiry"] == "2026-12-01" and after["valid_until"] == ms(
-        "2026-12-01T15:30:00"
+        "2026-12-01T15:40:00"
     )
     late = World(closes={"2026-11-24": "2026-11-24T18:00:00"})
     still = one(late, rule(), item(at=None), "2026-11-24T16:00:00")
@@ -131,10 +131,10 @@ def test_a_future_row_follows_the_month_and_names_its_roll():
     assert got["future"]["symbol"] == "NIFTY24NOV26FUT" and got["ce"] is None and got["pe"] is None
     assert got["strike"] is None and got["band"] is None and got["price"] is None
     assert got["words"] == "Now: NIFTY future, 24 Nov 2026"
-    assert got["valid_until"] == ms("2026-11-24T15:30:00")
-    after = one(World(), r, item(), "2026-11-24T15:30:30")
+    assert got["valid_until"] == ms("2026-11-24T15:40:00")
+    after = one(World(), r, item(), "2026-11-24T15:40:30")
     assert after["future"]["symbol"] == "NIFTY01DEC26FUT"
-    assert after["words"] == "Rolled to 1 Dec 2026 at 15:30"
+    assert after["words"] == "Rolled to 1 Dec 2026 at 15:40"
 
 
 # -- a contract the master lacks --------------------------------------------------------------------
@@ -255,7 +255,7 @@ def test_no_price_at_all_waits_and_a_closed_market_with_none_waits_too():
         got = one(w, rule(), item(price=None, source=None, at=None), "2026-11-20T11:00:00")
         assert got["state"] == "waiting" and got["ce"] is None and got["strike"] is None
         assert got["words"] == "Waiting for NIFTY's price to pick the strike"
-        assert got["valid_until"] == ms("2026-11-24T15:30:00")
+        assert got["valid_until"] == ms("2026-11-24T15:40:00")
 
 
 # -- the band's edges ---------------------------------------------------------------------------------
@@ -431,7 +431,9 @@ def test_the_calendar_gives_a_dated_close_and_nothing_for_an_ordinary_day(calend
 def test_the_calendars_default_f_and_o_close_of_15_40_is_not_the_roll(calendar):
     from sudarshan.watchlists import sessions
 
-    assert sessions.closes(["2026-11-25"], "NFO") == {}  # no dated row: 15:30 by dynamic.close_ms
+    assert (
+        sessions.closes(["2026-11-25"], "NFO") == {}
+    )  # no dated row: the regime stop by expiry.stop_ms
 
 
 def test_an_exchange_is_open_inside_the_calendars_window_only(calendar):

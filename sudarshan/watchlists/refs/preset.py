@@ -8,9 +8,10 @@ alive. Nothing is built before a list is asked for, and nothing runs on a timer:
 the clock of these lists (each morning after the day's login) and the request is the rest.
 
 What depends on the clock is not cached. Index futures pick the first future whose expiry close
-is still ahead at each call; the close is the market calendar's, asked for only when an expiry
-falls today (an expiry on any other day closes before or after now whatever the calendar says),
-and 15:30 IST when the calendar has no row (``dynamic.close_ms``).
+is still ahead at each call; the close is ``expiry.stop_ms``, the one rule of the regime of the
+day (15:40 until 6 Dec 2026, 15:30 for an index contract from 7 Dec 2026). The market calendar is
+asked only when an expiry falls today and only for a special session day's own end (an expiry on
+any other day stops before or after now whatever the calendar says).
 
 The owner's flags and notes are read from the store (a flag or a note on a symbol belongs to the
 symbol and applies in every list); only whether a note exists is read, never the note. Built-in
@@ -26,7 +27,7 @@ from datetime import UTC, datetime, timedelta, timezone
 
 from sqlalchemy import func, select
 
-from sudarshan.watchlists import engine, master, presets, schema, versions
+from sudarshan.watchlists import engine, master, presets, schema, sessions, versions
 from sudarshan.watchlists import view as merge_view
 from sudarshan.watchlists.ops import OpError
 from sudarshan.watchlists.schema import OWNER
@@ -67,16 +68,10 @@ def prepared_for(e: presets.Entry, gen: master.Generation) -> presets.Prepared:
 
 
 def calendar_close(iso: str) -> int | None:
-    """The F&O session close of an expiry date from OpenAlgo's market calendar (epoch ms), or
-    None when it has no window for the day (the rule then closes it at 15:30 IST)."""
-    try:
-        from database.market_calendar_db import get_effective_session_window
-
-        window = get_effective_session_window(datetime.fromisoformat(iso).date(), "NFO")
-    except Exception:
-        logger.exception("Watchlists: the market calendar could not be read for an expiry")
-        return None
-    return int(window["end_ms"]) if window else None
+    """The end of a special session day (an evening Muhurat, a holiday row with a window) on
+    OpenAlgo's market calendar, epoch ms, or None for a day with no such row: the regime's stop
+    (``expiry.stop_ms``) then applies. The calendar's default close is not used."""
+    return sessions.closes([iso], "NFO").get(iso)
 
 
 def closes_for(prepared: presets.Prepared, at_ms: int) -> dict[str, int]:

@@ -45,35 +45,35 @@
       "now": "2026-11-10T10:00:00+05:30",
       "closes": {},
       "rows": ["NFO:NIFTY24NOV26FUT", "NFO:BANKNIFTY24NOV26FUT", "NFO:FINNIFTY24NOV26FUT", "BFO:SENSEX26NOV26FUT"],
-      "valid_until": "2026-11-24T15:30:00+05:30"
+      "valid_until": "2026-11-24T15:40:00+05:30"
     },
     {
-      "name": "expiry day, one second before 15:30: still the expiring month",
-      "now": "2026-11-24T15:29:59+05:30",
+      "name": "expiry day, one second before 15:40: still the expiring month",
+      "now": "2026-11-24T15:39:59+05:30",
       "closes": {},
-      "rows": ["NFO:NIFTY24NOV26FUT", "NFO:BANKNIFTY24NOV26FUT", "NFO:FINNIFTY24NOV26FUT", "BFO:SENSEX26NOV26FUT"],
-      "valid_until": "2026-11-24T15:30:00+05:30"
-    },
-    {
-      "name": "expiry day from 15:30: the next month; FINNIFTY has none left and is not listed",
-      "now": "2026-11-24T15:30:00+05:30",
-      "closes": {},
-      "rows": ["NFO:NIFTY29DEC26FUT", "NFO:BANKNIFTY29DEC26FUT", "BFO:SENSEX26NOV26FUT"],
-      "valid_until": "2026-11-26T15:30:00+05:30"
-    },
-    {
-      "name": "the calendar's later close (15:40) holds the expiring month at 15:35",
-      "now": "2026-11-24T15:35:00+05:30",
-      "closes": {"2026-11-24": "2026-11-24T15:40:00+05:30"},
       "rows": ["NFO:NIFTY24NOV26FUT", "NFO:BANKNIFTY24NOV26FUT", "NFO:FINNIFTY24NOV26FUT", "BFO:SENSEX26NOV26FUT"],
       "valid_until": "2026-11-24T15:40:00+05:30"
+    },
+    {
+      "name": "expiry day from 15:40: the next month; FINNIFTY has none left and is not listed",
+      "now": "2026-11-24T15:40:00+05:30",
+      "closes": {},
+      "rows": ["NFO:NIFTY29DEC26FUT", "NFO:BANKNIFTY29DEC26FUT", "BFO:SENSEX26NOV26FUT"],
+      "valid_until": "2026-11-26T15:40:00+05:30"
+    },
+    {
+      "name": "a special session ending at 15:55 holds the expiring month at 15:45",
+      "now": "2026-11-24T15:45:00+05:30",
+      "closes": {"2026-11-24": "2026-11-24T15:55:00+05:30"},
+      "rows": ["NFO:NIFTY24NOV26FUT", "NFO:BANKNIFTY24NOV26FUT", "NFO:FINNIFTY24NOV26FUT", "BFO:SENSEX26NOV26FUT"],
+      "valid_until": "2026-11-24T15:55:00+05:30"
     },
     {
       "name": "the day after: every index is on the next month",
       "now": "2026-11-25T09:20:00+05:30",
       "closes": {},
       "rows": ["NFO:NIFTY29DEC26FUT", "NFO:BANKNIFTY29DEC26FUT", "BFO:SENSEX26NOV26FUT"],
-      "valid_until": "2026-11-26T15:30:00+05:30"
+      "valid_until": "2026-11-26T15:40:00+05:30"
     },
     {
       "name": "everything past: the list is empty and nothing is valid",
