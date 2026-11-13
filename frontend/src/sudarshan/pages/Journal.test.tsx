@@ -10,6 +10,11 @@ vi.mock('@/sudarshan/journal/api', async (original) => ({
 }))
 
 import { JournalError } from '@/sudarshan/journal/api'
+
+vi.mock('@/sudarshan/journal/TripsList', () => ({
+  TripsList: ({ mode }: { mode: string }) => <p data-testid="trips-of">{mode}</p>,
+}))
+
 import { renderBook, where } from '@/test/bookPages'
 import Journal from './Journal'
 
@@ -66,6 +71,7 @@ describe('Journal', () => {
     expect(chip.getAttribute('aria-checked')).toBe('false')
     await user.click(chip)
     await waitFor(() => expect(where()).toBe('/journal?mode=sandbox'))
+    expect(screen.getByTestId('trips-of').textContent).toBe('sandbox')
     const on = screen.getByRole('switch', { name: 'Sandbox trades' })
     expect(on.getAttribute('aria-checked')).toBe('true')
     await user.click(on)

@@ -6,12 +6,11 @@ import { useQuery } from '@tanstack/react-query'
 import { LoaderCircle, Power, RefreshCw, TriangleAlert } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { journalCall, problemOf } from '@/sudarshan/journal/api'
+import { JOURNAL_STATE_KEY } from '@/sudarshan/journal/keys'
 import { ModeChip } from '@/sudarshan/journal/ModeChip'
 import { Segmented } from '@/sudarshan/journal/Segmented'
+import { TripsList } from '@/sudarshan/journal/TripsList'
 import { type JournalView, useJournalOverlay } from '@/sudarshan/journal/useJournalOverlay'
-
-export const JOURNAL_KEY = ['sudarshan', 'journal'] as const
-export const JOURNAL_STATE_KEY = [...JOURNAL_KEY, 'state'] as const
 
 const PARTS: ReadonlyArray<{ id: JournalView; label: string }> = [
   { id: 'trades', label: 'Trades' },
@@ -58,7 +57,7 @@ function Stub({ part }: { part: JournalView }) {
 }
 
 export default function Journal() {
-  const { view, mode, setView, setMode } = useJournalOverlay()
+  const { view, mode, setView, setMode, open } = useJournalOverlay()
   const state = useQuery({
     queryKey: JOURNAL_STATE_KEY,
     queryFn: async () => journalCall('state'),
@@ -100,7 +99,12 @@ export default function Journal() {
       </Notice>
     )
   } else {
-    body = <Stub part={view} />
+    body =
+      view === 'trades' ? (
+        <TripsList mode={mode} onOpen={(tradeId) => open({ kind: 'trade', tradeId })} />
+      ) : (
+        <Stub part={view} />
+      )
   }
 
   const usable = result?.enabled === true
