@@ -8,7 +8,6 @@ import {
   chipOf,
   type Draft,
   draftOf,
-  EXPIRIES,
   editBody,
   expiriesFor,
   type FollowForm,

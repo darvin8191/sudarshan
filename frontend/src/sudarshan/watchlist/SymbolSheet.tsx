@@ -349,7 +349,7 @@ export function SymbolSheet({
   if (!row) return null
   return (
     <Sheet
-      key={row.item.id}
+      key={follow ? row.key : row.item.id} // F11: a follow row's sheet is the contract it shows
       row={row}
       listName={listName}
       apiKey={apiKey}

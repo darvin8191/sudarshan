@@ -889,6 +889,60 @@ open"), and a ranked or unknown favourite with no tab no longer shows the own li
 by address that acts on the own list while another list is open is closed. Tests:
 `pages/Watchlist.menu.test.tsx`.
 
+## F11 - ATM and current-month FUT rows
+
+The phone draws the rows W15 stores (`view.follow`) and keeps each on the contract the server says it
+stands on now. `followRows.ts` is the pure part (words, form choices, request bodies and
+`FollowResolver`), `useFollowRows.ts` its React wiring, `FollowRows.tsx` the row, `FollowRowSheet.tsx`
+the form.
+- **Where they are.** First in their section (or in No section), above the fixed symbols, as the view's
+  order says; they do not take part in a sort and are not in edit mode's arranging (change or remove one
+  from its sheet). A row's contract is an item of the list with a negative id (`-<row id>`), so it is
+  subscribed, snapshotted and counted in the 250 like any row; the open sheet's contract that the row has
+  moved off is held as one more item with its own id for as long as the sheet is open. Only the open own
+  list shows them, never a family render, and only with the switch on.
+- **A row.** Title "NIFTY 25,900 CE" (the resolved strike; "NIFTY FUT" for a future; "NIFTY ATM+2 CE"
+  while it has no contract), a chip ("ATM", "ATM+2", "ATM-1", "Current-month FUT", "Fixed strike"), the
+  detail "NFO · 24 Nov 2026 · follows NIFTY", the contract's price and change as any row. The ATM chip's
+  help text is in the row's screen-reader text, in its tooltip and on the row's sheet. The one line under
+  a row, in this order: the page's note while it lasts (60 s): "Moved from 25,850 CE at 10:12 (NIFTY
+  25,931)", composed here from the strike last shown and the answer's price and time (the server sends no
+  such words), or the server's "Rolled to ... at HH:MM" as sent (found by its first words, shown for 60 s
+  from the answer); else the server's words for waiting, closed and missing, as sent; else, while the row
+  has no contract, a sentence for a read that failed. A move is not noted across a roll, for a fixed strike
+  or for a future.
+- **When it asks again.** The page follows each underlying once (`follow.underlyings`, counted before any
+  row) and the resolver compares the latest websocket tick with the band of the last answer (open at both
+  ends, as the server's). A tick on or past an edge asks `resolve`; so do the first tick after "waiting",
+  one timeout aimed at the earliest `valid_until` (sent with `held` null, as after a roll; a longer wait
+  than a timer can hold is aimed again), a reconnect (the socket's epoch moving) and the page coming back.
+  One call for every row that needs it, at most 100; a row has one call in flight (a reconnect or return
+  that meets one is asked again when it lands); a band exit or the first price keeps to one ask in 2 s a
+  row, and the tick that is turned away is simply the next tick's business. Nothing repeats on a clock:
+  30 minutes with no band exit and no `valid_until` ask nothing (tested). `held` is the strike the row
+  last showed; the price is the underlying's tick, or null with source null for the server to ask the feed.
+- **The sheet** of a row stays on the contract it opened with. When the row moves it says "This row now
+  follows 25,950 CE" with Show; Buy and Sell open the existing ticket for the contract shown (the ticket
+  and its 500 ms open guard are unchanged, nothing was added to the order path). Edit and Remove are on the
+  sheet; a row with no contract opens its form on tap. The sheet has no flags, notes, pin, move or copy:
+  those belong to the contract, which the row does not own.
+- **The form** (`FollowRowSheet`, `?sheet=follow`, carried by the history entry like the order ticket and
+  never reopened by a reload): Expiry (Nearest, Next, This month's, Next month's; a future offers the two
+  monthly ones), Strike (ATM, ATM+1 to +10, ATM-1 to -10), Side (CE, PE), a line saying what the row will
+  follow, Add row or Save, and Remove this row after asking. Each write carries the list's version, is
+  sent once however it is tapped, and the list is read again after it; the server's words are shown as
+  sent. It is offered by the symbol sheet of an NSE or BSE stock or index with options in an own list
+  ("Add ATM row", "Add current-month FUT row"), the row going into the symbol's section. A future of an
+  underlying with options but no futures is refused by the server in words.
+- **The seam for F13.** Open `{ kind: 'follow', form: { mode: 'add', kind, underlying, exchange,
+  sectionId } }` through the page's `open` or `swap` (`FollowForm` in `followRows.ts`; `exchange` is
+  `NSE_INDEX`, `NSE`, `BSE_INDEX` or `BSE`); nothing else is needed.
+- **Decision: no preview from the server.** The design reads the preview line from "one `resolve` of a
+  draft", but `resolve` takes stored row ids only, so before the row exists there is nothing to ask. The
+  form's line says what the row will follow in its own words; the server's "Now: ..." line is the row's
+  own once added. Tests: `followRows.test.ts` (the rules, the resolver), `follow.rows.test.tsx` (rows, ticks,
+  the sheet, the form, the switch off).
+
 ## W12 - built-in lists from the master (`presets/`, `refs/preset.py`, `ops/presets.py`, `words/presets.py`)
 
 Three built-in lists made from today's master: **Indices**, **F&O stocks** and **Index futures**

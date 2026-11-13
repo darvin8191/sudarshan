@@ -41,3 +41,19 @@ export const answer = (strike: number, over: Partial<Resolved> = {}): Resolved =
   words: `Now: NIFTY ${strike} CE, 24 Nov 2026 (NIFTY at ${strike + 12.35})`,
   ...over,
 })
+
+/** The server's answer for a current-month future row. */
+export const futureAnswer = (id: number, over: Partial<Resolved> = {}): Resolved => ({
+  id,
+  state: 'ok',
+  ce: null,
+  pe: null,
+  future: { ...contract(0), symbol: 'NIFTY24NOV26FUT', key: 'NFO:NIFTY24NOV26FUT' },
+  strike: null,
+  band: null,
+  valid_until: null,
+  price: null,
+  price_at: null,
+  words: 'Now: NIFTY future, 24 Nov 2026',
+  ...over,
+})
