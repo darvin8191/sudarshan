@@ -54,6 +54,23 @@ const Risk = lazy(() => import('@/sudarshan/pages/Risk')) // SUDARSHAN M20.7
 const Journal = lazy(() => import('@/sudarshan/pages/Journal')) // SUDARSHAN M14
 const Reports = lazy(() => import('@/sudarshan/pages/Reports')) // SUDARSHAN M15.10
 
+// SUDARSHAN P6 D2 (M2.7): the family view, a separate shell of view-only screens, and the owner's
+// Family page. The family screens are the viewer's, so they never mount the owner's providers.
+const FamilyLayout = lazy(() =>
+  import('@/sudarshan/family/FamilyLayout').then((m) => ({ default: m.FamilyLayout }))
+)
+const FamilyDashboard = lazy(() => import('@/sudarshan/family/pages/FamilyDashboard'))
+const FamilyPositions = lazy(() => import('@/sudarshan/family/pages/FamilyPositions'))
+const FamilyHoldings = lazy(() => import('@/sudarshan/family/pages/FamilyHoldings'))
+const FamilyOrders = lazy(() => import('@/sudarshan/family/pages/FamilyOrders'))
+const FamilyTrades = lazy(() => import('@/sudarshan/family/pages/FamilyTrades'))
+const FamilyWatchlist = lazy(() => import('@/sudarshan/family/pages/FamilyWatchlist'))
+const FamilyPortfolio = lazy(() => import('@/sudarshan/family/pages/FamilyPortfolio'))
+const FamilySettings = lazy(() => import('@/sudarshan/family/pages/FamilySettings'))
+const FamilyLogin = lazy(() => import('@/sudarshan/family/pages/FamilyLogin'))
+const FamilyJoin = lazy(() => import('@/sudarshan/family/pages/FamilyJoin'))
+const FamilyMembers = lazy(() => import('@/sudarshan/pages/FamilyMembers'))
+
 // Platform pages
 const Platforms = lazy(() => import('@/pages/Platforms'))
 const TradingView = lazy(() => import('@/pages/TradingView'))
@@ -183,6 +200,20 @@ function App() {
               <Route path="/login" element={<Login />} />
               <Route path="/reset-password" element={<ResetPassword />} />
               <Route path="/download" element={<Download />} />
+              {/* SUDARSHAN P6 D2: the family view. Public sign-in and join pages, then the
+                  shell, which reads its own session and sends a signed-out phone to the login. */}
+              <Route path="/family/login" element={<FamilyLogin />} />
+              <Route path="/family/join/:code" element={<FamilyJoin />} />
+              <Route path="/family" element={<FamilyLayout />}>
+                <Route index element={<FamilyDashboard />} />
+                <Route path="positions" element={<FamilyPositions />} />
+                <Route path="holdings" element={<FamilyHoldings />} />
+                <Route path="orders" element={<FamilyOrders />} />
+                <Route path="trades" element={<FamilyTrades />} />
+                <Route path="watchlist" element={<FamilyWatchlist />} />
+                <Route path="portfolio" element={<FamilyPortfolio />} />
+                <Route path="settings" element={<FamilySettings />} />
+              </Route>
               <Route path="/error" element={<ServerError />} />
               <Route path="/rate-limited" element={<RateLimited />} />
 
@@ -324,6 +355,8 @@ function App() {
                 <Route path="/journal" element={<Journal />} />
                 {/* SUDARSHAN M15.10: the reports archive and settings */}
                 <Route path="/reports" element={<Reports />} />
+                {/* SUDARSHAN P6 D2: the owner's Family page (members, invites, privacy) */}
+                <Route path="/family-members" element={<FamilyMembers />} />
               </Route>
 
               {/* Full-width protected routes */}

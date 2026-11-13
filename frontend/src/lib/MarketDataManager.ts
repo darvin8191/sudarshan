@@ -159,6 +159,24 @@ interface SubscriptionEntry {
   refCount: number
 }
 
+// SUDARSHAN P6 D2: a manager that reaches its feed some other way than the owner's proxy (the
+// family viewer socket). It never asks for the owner's API key or configuration and never falls
+// back to the owner's REST quotes. getInstance() and every owner path are unchanged.
+export interface ManagerTransport {
+  /** The socket address, read at each connect. */
+  url: () => string
+  /** Sent once the socket is open; the server answers `{type:'auth', status:'success'}`. */
+  authenticate: (socket: WebSocket) => void
+  /** What the subscribe message carries for a mode. */
+  mode: (mode: SubscriptionMode) => unknown
+  /** A message the manager does not read itself (feed state, book changes, subscribe errors). */
+  onMessage?: (message: Record<string, unknown>) => void
+  /** A close code after which the socket is not opened again (signed out). */
+  stopAfter?: readonly number[]
+  /** Every close, with its code. */
+  onClose?: (code: number) => void
+}
+
 // Fetch CSRF token for authenticated requests
 async function fetchCSRFToken(): Promise<string> {
   const response = await fetch('/auth/csrf-token', { credentials: 'include' })
@@ -219,8 +237,17 @@ export class MarketDataManager {
   /** Invalidates REST responses that belong to an earlier fallback session. */
   private fallbackGeneration: number = 0
 
-  private constructor() {
+  // SUDARSHAN P6 D2: set only on a manager made by `create`.
+  private transport: ManagerTransport | null = null
+
+  private constructor(transport: ManagerTransport | null = null) {
     // Private constructor for singleton pattern
+    this.transport = transport
+  }
+
+  /** SUDARSHAN P6 D2: a manager of its own that connects through `transport`. */
+  static create(transport: ManagerTransport): MarketDataManager {
+    return new MarketDataManager(transport)
   }
 
   static getInstance(): MarketDataManager {
@@ -431,6 +458,9 @@ export class MarketDataManager {
     // Clear user disconnect flag when starting a new connection
     this.userDisconnected = false
 
+    // SUDARSHAN P6 D2: a transport of its own takes its own, shorter path.
+    if (this.transport) return this.connectViaTransport(this.transport)
+
     // Abort any previous connect attempt
     this.connectAbortController?.abort()
     this.connectAbortController = new AbortController()
@@ -561,6 +591,53 @@ export class MarketDataManager {
         this.enableFallbackMode()
       }
     }
+  }
+
+  /**
+   * SUDARSHAN P6 D2: connect through a transport of the manager's own. No owner endpoint is
+   * asked for anything, there is no REST fallback, and a drop is retried without limit (the
+   * viewer's words are "Reconnecting" for as long as it takes) unless the server closed the
+   * socket with a code that says the session is over.
+   */
+  private connectViaTransport(transport: ManagerTransport): void {
+    this.setConnectionState('connecting')
+    this.error = null
+    let socket: WebSocket
+    try {
+      socket = new WebSocket(transport.url())
+    } catch (err) {
+      this.setError(`Connection failed: ${err}`)
+      this.setConnectionState('disconnected')
+      this.retryViaTransport()
+      return
+    }
+    socket.onopen = () => {
+      if (this.userDisconnected) {
+        socket.close(1000, 'User disconnect during connection')
+        return
+      }
+      this.setConnectionState('authenticating')
+      this.reconnectAttempts = 0
+      transport.authenticate(socket)
+    }
+    socket.onmessage = (event) => this.handleMessage(event)
+    socket.onerror = () => this.setError('WebSocket connection error')
+    socket.onclose = (event) => {
+      if (this.socket === socket) this.socket = null
+      if (this.connectionState !== 'paused') this.setConnectionState('disconnected')
+      transport.onClose?.(event.code)
+      if (transport.stopAfter?.includes(event.code)) return
+      this.retryViaTransport()
+    }
+    this.socket = socket
+  }
+
+  private retryViaTransport(): void {
+    if (!this.autoReconnect || this.userDisconnected || this.connectionState === 'paused') return
+    this.reconnectAttempts++
+    const delay = Math.min(1000 * 2 ** (this.reconnectAttempts - 1), 30000)
+    if (this.reconnectTimeout) clearTimeout(this.reconnectTimeout)
+    this.reconnectTimeout = setTimeout(() => void this.connect(), delay)
   }
 
   /**
@@ -716,6 +793,10 @@ export class MarketDataManager {
         case 'error':
           this.setError(`WebSocket error: ${data.message}`)
           break
+
+        default:
+          // SUDARSHAN P6 D2: what only a transport's owner reads (feed_state, book).
+          this.transport?.onMessage?.(data)
       }
     } catch {
       // Ignore parse errors for non-JSON messages
@@ -732,7 +813,7 @@ export class MarketDataManager {
       JSON.stringify({
         action: 'subscribe',
         symbols,
-        mode,
+        mode: this.transport ? this.transport.mode(mode) : mode, // SUDARSHAN P6 D2
       })
     )
   }
@@ -747,7 +828,7 @@ export class MarketDataManager {
       JSON.stringify({
         action: 'unsubscribe',
         symbols,
-        mode,
+        mode: this.transport ? this.transport.mode(mode) : mode, // SUDARSHAN P6 D2
       })
     )
   }
