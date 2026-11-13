@@ -132,14 +132,20 @@ class Waits:
 NO_WAITS = Waits()
 
 
-def waits_of(members: Iterable[Any], printed_at: Callable[[Any], int | None]) -> Waits:
+def waits_of(
+    members: Iterable[Any],
+    printed_at: Callable[[Any], int | None],
+    followed: Callable[[Any], bool] | None = None,
+) -> Waits:
     """A screen's ``Waits`` from its members today (each with ``cas`` and ``segment``, as
     ``runs.Member``): ``printed_at(member)`` is when a stock's closing auction print arrived (0
-    when not known), or None while it has not come."""
+    when not known), or None while it has not come. ``followed(member)`` says whether the
+    screener follows the instrument (review N9): one it does not follow can never print here, so
+    its arrival is unknown and nothing waits for it. None counts every member as followed."""
     found = tuple(members)
     last: int | None = 0
     for member in found:
-        if member.cas and last is not None:
+        if member.cas and last is not None and (followed is None or followed(member)):
             arrived = printed_at(member)
             last = None if arrived is None else max(last, arrived)
     return Waits(last, any(member.segment in INDEX_SEGMENTS for member in found))

@@ -394,3 +394,37 @@ def test_only_a_screen_holding_an_index_waits_for_its_closing_value(december):
     run = _last_run(store, ids["indices"])
     assert run["candle_end"] == ms(THURSDAY, "15:30")
     assert "late" not in (run["marks"] or {}), run["marks"]
+
+
+def test_an_auction_stock_the_screener_does_not_follow_is_not_waited_for(world, monkeypatch):
+    """Review N9: SBIN is past the key limit (max_keys 1), so no print of it can ever arrive; a
+    screen holding both waits only for RELIANCE's print and, once that has come, is free at once
+    instead of waiting to the window's end for a print it cannot receive."""
+    store, source, clock = world
+    source.new_day(clock["now"])
+    source.refresh_universes([{"kind": "fno_stocks"}], clock["now"])
+    members = source.members({"kind": "fno_stocks"})
+    assert [m.cas for m in members] == [True, True]
+    assert [source.follows(m) for m in members] == [True, False]
+    row = {"spec": {"universe": {"kind": "fno_stocks"}}}
+    run = runner.Runner(store, source, lambda: clock["now"], Calendar())
+    arrived = {RELIANCE: None}
+    monkeypatch.setattr(source.bars, "printed_at", lambda key, today: arrived.get(key))
+    assert run._waits(row).printed is None, "the followed stock has not printed yet"
+    arrived[RELIANCE] = ms(DAY, "15:41")
+    assert run._waits(row).printed == ms(DAY, "15:41"), "the unfollowed one is not waited for"
+    # a source that cannot say which it follows counts every member, as before
+    monkeypatch.delattr(LiveSource, "follows")
+    assert run._waits(row).printed is None
+
+
+def test_waits_of_skips_what_the_screener_does_not_follow():
+    from sudarshan.screener import scheduler as sch
+    from sudarshan.screener.runs import Member
+
+    kept = Member("NSE_EQ|A", "A", "NSE", "NSE_EQ", cas=True)
+    cut = Member("NSE_EQ|B", "B", "NSE", "NSE_EQ", cas=True)
+    arrived = {kept: 1_000}
+    assert sch.waits_of([kept, cut], arrived.get) == sch.Waits(printed=None)
+    assert sch.waits_of([kept, cut], arrived.get, lambda m: m is kept) == sch.Waits(printed=1_000)
+    assert sch.waits_of([cut], arrived.get, lambda m: False) == sch.Waits(printed=0)
