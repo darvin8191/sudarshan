@@ -336,6 +336,7 @@ export interface Done {
   version: string | null
   id: number | null
   words: string | null
+  lists_version?: string
 }
 
 export interface CopyDone {
@@ -344,6 +345,7 @@ export interface CopyDone {
   skipped: number
   version: string | null
   words: string | null
+  lists_version?: string
 }
 
 export interface TvDone {
@@ -351,6 +353,7 @@ export interface TvDone {
   added: number
   version: string | null
   words: string
+  lists_version?: string
 }
 
 export interface ArrangeItem {

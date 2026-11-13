@@ -224,7 +224,12 @@ none; the alerts' one-minute version check catches that). An open page reads its
 on every push, and `state` or `lists` when `why` names them, whatever `refs` says. `ref` is the one
 ref changed, else `lists`: the phone reads `ref` today, so
 it stays in the push until lane F moves to `refs`, and is then dropped as a contract change of its
-own. A push that cannot be sent is logged, never raised. `state` answers
+own. A push that cannot be sent is logged, never raised. A write's answer (the `Done`, `CopyDone`
+and `TvDone` records) carries `lists_version`, the lists version its bump produced (the push's
+`v`), so the phone that wrote knows the push of its own write and skips it instead of reading
+again; a write that bumped nothing (a favourites or preference write, a write that changed nothing)
+answers without it, and a refusal answers the error alone (the page reads the list again after any
+refusal). `state` answers
 `versions`. An app joins the room with `contract.EVENT_JOIN` (an ack): the owner's session only, and
 refused in words with the switch off.
 

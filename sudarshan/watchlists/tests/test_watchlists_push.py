@@ -566,8 +566,11 @@ def test_a_write_whose_refs_say_unchanged_bumps_and_pushes_nothing(emitted):
     before = versions.read()
     r = client.post(path, json={"list": 3, "name": "same", "version": "v"}, headers=headers)
     assert r.status_code == 200 and versions.read() == before and emitted == []
-    client.post(path, json={"list": 3, "name": "new", "version": "v"}, headers=headers)
+    assert "lists_version" not in r.get_json()["data"]  # it bumped nothing, so it names nothing
+    r = client.post(path, json={"list": 3, "name": "new", "version": "v"}, headers=headers)
     assert [d["refs"] for _, d, _ in emitted] == [["list:3"]]
+    # the answer names the push it sent, so the phone that wrote can skip that push
+    assert r.get_json()["data"]["lists_version"] == emitted[0][1]["v"] == versions.read()
 
 
 def test_an_op_that_does_not_declare_a_bump_pushes_nothing(emitted):

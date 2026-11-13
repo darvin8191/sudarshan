@@ -163,9 +163,13 @@ RECORDS = {
     "TvPreview": "hash:string, sections:int, symbols:int, matched:int, follow:int, "
     "left_out:Cut[], lists:TvSection[], words:string[]",
     "TvExport": "text:string, filename:string, left_out:Cut[], words:string[]",
-    "Done": "version:string|null, id:int|null, words:string|null",
-    "CopyDone": "list:int, added:int, skipped:int, version:string|null, words:string|null",
-    "TvDone": "lists:int[], added:int, version:string|null, words:string",
+    # A write's answer: ``lists_version`` is the lists version its bump produced (the ``v`` of the
+    # push it sent), so the phone knows the push of its own write and skips it; absent when the
+    # write bumped nothing (it changed no list's members, or nothing at all).
+    "Done": "version:string|null, id:int|null, words:string|null, lists_version?:string",
+    "CopyDone": "list:int, added:int, skipped:int, version:string|null, words:string|null, "
+    "lists_version?:string",
+    "TvDone": "lists:int[], added:int, version:string|null, words:string, lists_version?:string",
     "ArrangeItem": "exchange:string, symbol:string, section_id:int|null",
     "CopySource": "ref:string, section_id?:int, keys?:string[]",
     "CopyTarget": "list?:int, name?:string, section_id?:int|null",

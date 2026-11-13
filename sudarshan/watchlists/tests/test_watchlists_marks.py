@@ -348,7 +348,8 @@ def test_flags_read_as_their_default_names_and_nothing_is_written_until_one_is_r
     assert [f["name"] for f in got["flag_names"]] == list(DEFAULT_FLAG_NAMES)
     assert table("wl_flag") == [] and info(client, "NSE:INFY")["flag_name"] is None
     done = rename(client, [{"mark": 2, "name": " Setup "}, {"mark": 5, "name": "Avoid"}], 0)
-    assert done.get_json()["data"] == {"version": "1", "id": None, "words": None}
+    assert done.get_json()["data"] == {"version": "1", "id": None, "words": None,
+                                       "lists_version": versions.read()}  # fmt: skip
     assert table("wl_flag") == [("owner", 2, "Setup")]  # a default name is never stored as chosen
     names = client.get(API + "/state").get_json()["data"]["flag_names"]
     assert [f["name"] for f in names] == ["Watch", "Setup", "Results", "Long term", "Avoid"]

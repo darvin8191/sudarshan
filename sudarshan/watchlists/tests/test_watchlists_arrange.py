@@ -147,11 +147,12 @@ def two_sections(client):
 
 
 # -- arrange -------------------------------------------------------------------------------------
-def test_arrange_writes_the_overlay_then_openalgo_in_section_major_order(client):
+def test_arrange_writes_the_overlay_then_openalgo_in_section_major_order(client, emitted):
     lid, banks, it = two_sections(client)
     items = [pick("TCS", it), pick("SBIN", banks), pick("INFY", it), pick("ITC")]
     r = arrange(client, lid, v(2), [it, banks], items)
-    assert r.get_json()["data"] == {"version": v(3), "id": lid, "words": None}
+    assert r.get_json()["data"] == {
+        "version": v(3), "id": lid, "words": None, "lists_version": emitted[-1]["v"]}  # fmt: skip
     assert oa_order(lid) == ["ITC", "TCS", "INFY", "SBIN"]  # no section, IT, Banks
     data = read(client, lid)
     assert data["version"] == v(3)
@@ -230,12 +231,13 @@ def test_arrange_bumps_once_with_why_arranged_and_its_ref(client, emitted):
 
 
 # -- copy and move -------------------------------------------------------------------------------
-def test_copy_into_another_list_adds_in_order_and_keeps_the_source(client):
+def test_copy_into_another_list_adds_in_order_and_keeps_the_source(client, emitted):
     src, dst = make_list(), make_list(("HDFCBANK",), "Banks")
     r = put(client, {"from": {"ref": f"list:{src}", "keys": ["NSE:SBIN", "NSE:INFY"]},
                      "to": {"list": dst}})  # fmt: skip
-    assert r.get_json()["data"] == {
-        "list": dst, "added": 2, "skipped": 0, "version": None, "words": None}  # fmt: skip
+    (pushed,) = emitted
+    assert r.get_json()["data"] == {"list": dst, "added": 2, "skipped": 0, "version": None,
+                                    "words": None, "lists_version": pushed["v"]}  # fmt: skip
     assert oa_order(dst) == ["HDFCBANK", "SBIN", "INFY"]
     assert oa_order(src) == ["INFY", "TCS", "SBIN", "ITC"]
 

@@ -114,7 +114,7 @@ def refused(r, status, code, field=None):
 
 
 # -- the writes ----------------------------------------------------------------------------------
-def test_add_rename_mark_and_remove_each_move_the_version_view_reports(client):
+def test_add_rename_mark_and_remove_each_move_the_version_view_reports(client, emitted):
     lid, _ = make_list()
     assert read(client, lid)["version"] == "0"
     done = add(client, lid, "Banks", "0", mark=2).get_json()["data"]
@@ -134,6 +134,7 @@ def test_add_rename_mark_and_remove_each_move_the_version_view_reports(client):
         "version": v(6),
         "id": sid,
         "words": None,
+        "lists_version": emitted[-1]["v"],  # the push this write sent, so the phone can skip it
     }
     assert [s["id"] for s in read(client, lid)["sections"]] == [other]
 

@@ -192,8 +192,10 @@ def _checked(limited):
 def _served(op: contract.OpSpec, handler):
     """What a request meets once it passed the checks and its class's limit: the switch, the
     record check, the request read against the contract, the handler and its bump. A write that
-    refuses after committing part of its change names those refs (``OpError.changed``) and is
-    bumped and pushed for them, once, before the refusal is answered."""
+    bumped answers ``lists_version``, the lists version of the push it sent, so the phone can
+    skip that push. A write that refuses after committing part of its change names those refs
+    (``OpError.changed``) and is bumped and pushed for them, once, before the refusal is
+    answered."""
 
     @wraps(handler)
     def view(**route):
@@ -212,7 +214,9 @@ def _served(op: contract.OpSpec, handler):
                 why, refs = declared
                 changed = refs(args, data) if refs else ()
                 if changed is not ops.UNCHANGED:  # a write that changed nothing tells nobody
-                    versions.bump(why, changed)
+                    pushed = versions.bump(why, changed)
+                    if isinstance(data, dict):  # the phone knows its own write's push by it
+                        data["lists_version"] = pushed
             return _answer({"status": "ok", "data": data})
         except _Bad as bad:
             return _error("invalid", field=bad.field)

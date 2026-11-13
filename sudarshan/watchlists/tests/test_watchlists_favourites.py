@@ -260,7 +260,8 @@ def test_a_favourites_write_pushes_once_with_the_new_version_and_bumps_no_lists_
 ):
     (a,) = make_lists("Swing")
     before = versions.read()
-    assert put(client, [(1, f"list:{a}")], 0).status_code == 200
+    r = put(client, [(1, f"list:{a}")], 0)
+    assert r.status_code == 200 and "lists_version" not in r.get_json()["data"]  # no bump
     assert versions.read() == before  # no list's membership changed
     assert emitted == [{"v": before, "ref": "lists", "refs": [], "why": "favourites",
                         "favourites": 1, "flags": 0}]  # fmt: skip
