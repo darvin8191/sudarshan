@@ -3,7 +3,8 @@
  * books for all its events (the app's order event and the broker's updates
  * together), and one more once the broker's books have caught up; nothing is
  * reloaded while the page is hidden; and the MultiQuotes snapshot is read
- * once per symbol set, never every 30 seconds.
+ * once per symbol set, never every 30 seconds. On an expiry day the page moves
+ * to the next expiry at the stop and says so (v0.8.1 review N5).
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act } from '@testing-library/react'
@@ -26,13 +27,14 @@ vi.mock('@/api/trading', () => ({
     getMultiQuotes: (...args: unknown[]) => getMultiQuotes(...args),
   },
 }))
+const getExpiry = vi.fn()
 vi.mock('@/api/scalping', () => {
   const empty = () => Promise.resolve({ status: 'success', data: [] })
   return {
     scalpingApi: {
       search: empty,
       getAllUnderlyings: empty,
-      getExpiry: empty,
+      getExpiry: (...args: unknown[]) => getExpiry(...args),
       getStrikes: () => Promise.resolve({ status: 'success', chain: [] }),
       futures: empty,
       getTracked: empty,
@@ -44,6 +46,14 @@ vi.mock('@/api/scalping', () => {
       cancelAll: empty,
       closeLeg: empty,
     },
+  }
+})
+const toastInfo = vi.fn()
+vi.mock('@/utils/toast', async (importOriginal) => {
+  const real = await importOriginal<typeof import('@/utils/toast')>()
+  return {
+    ...real,
+    showToast: { ...real.showToast, info: (...args: unknown[]) => toastInfo(...args) },
   }
 })
 vi.mock('@/stores/authStore', () => ({
@@ -143,6 +153,8 @@ beforeEach(() => {
   getOrders.mockReset().mockResolvedValue({ status: 'success', data: { orders: [] } })
   getTrades.mockReset().mockResolvedValue({ status: 'success', data: [] })
   getMultiQuotes.mockReset().mockResolvedValue({ status: 'success', results: [] })
+  getExpiry.mockReset().mockResolvedValue({ status: 'success', data: [] })
+  toastInfo.mockReset()
 })
 
 afterEach(() => {
@@ -212,5 +224,33 @@ describe('Scalping books, live', () => {
     act(() => setVisibility('visible'))
     await pass(10_000)
     expect(getMultiQuotes).toHaveBeenCalledTimes(3)
+  })
+})
+
+describe('the expiry on an expiry day', () => {
+  it('moves to the next expiry at the stop and says so once; the first load says nothing', async () => {
+    // Tue 8 Dec 2026 at 15:29 in India; today's NIFTY expiry stops at 15:30.
+    vi.setSystemTime(Date.UTC(2026, 11, 8, 9, 59))
+    getExpiry
+      .mockResolvedValueOnce({
+        status: 'success',
+        data: ['08DEC26', '15DEC26'],
+        rolls_at: Date.UTC(2026, 11, 8, 10, 0),
+      })
+      .mockResolvedValue({ status: 'success', data: ['15DEC26'], rolls_at: null })
+    renderScalping()
+    await pass(0)
+    expect(getExpiry).toHaveBeenCalledTimes(1)
+    expect(toastInfo).not.toHaveBeenCalled()
+
+    await pass(61_000)
+    expect(getExpiry).toHaveBeenCalledTimes(2)
+    expect(toastInfo).toHaveBeenCalledTimes(1)
+    expect(toastInfo).toHaveBeenCalledWith(
+      'The 08DEC26 expiry stopped trading at 15:30. Now showing 15DEC26.'
+    )
+
+    await pass(5 * 60_000)
+    expect(toastInfo).toHaveBeenCalledTimes(1)
   })
 })
