@@ -29,7 +29,7 @@ const BY_CODE: Partial<Record<ProblemCode, string>> = {
   off: 'The new watchlist features are switched off on this server.',
   session: 'You are signed out. Sign in again, then try again.',
   owner_only: 'Only the owner of this server can change watchlists.',
-  limit: 'Too many requests just now. Wait a moment, then try again.',
+  limit: 'That is more than a list can hold.', // review L14: a cap, in the server's words; the rate limit is `busy`
   busy: 'The watchlists are busy. Try again in a moment.',
   conflict: 'The list changed on another screen. It has been read again; try once more.',
   gone: 'That list or symbol is no longer there.',

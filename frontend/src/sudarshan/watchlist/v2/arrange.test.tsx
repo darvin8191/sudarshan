@@ -17,6 +17,7 @@ vi.mock('@/utils/toast', () => ({ toast: { success: vi.fn(), info: vi.fn(), erro
 import type { WatchlistItem } from '@/api/watchlist'
 import { createQueryClient } from '@/app/providers'
 import { ArrangeSheets, useArrange } from '../ArrangeSheet'
+import { LISTS_FULL as MENU_LISTS_FULL } from '../ListTabs'
 import { OPEN_GUARD } from '../openGuard'
 import { rowView } from '../rows'
 import { SectionSheets } from '../SectionMenus'
@@ -410,6 +411,9 @@ describe('copy and move to another list', () => {
   })
 
   it('turns New list off at 50 lists and says why', async () => {
+    // Review L14: the one sentence the list menu says too.
+    expect(LISTS_FULL).toBe(MENU_LISTS_FULL)
+    expect(LISTS_FULL).toBe('You have 50 lists, the most there can be. Delete one to make another.')
     setup('/watchlist?sheet=to-list&ci=2')
     b().on('lists', () => lists(Array.from({ length: 50 }, (_, i) => entry(i + 1, `L${i + 1}`, 1))))
     expect(await screen.findByText(LISTS_FULL)).toBeVisible()
