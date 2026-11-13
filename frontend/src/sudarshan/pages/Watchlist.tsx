@@ -6,7 +6,7 @@
 
 import { useQueryClient } from '@tanstack/react-query'
 import { Check, Plus, RefreshCw } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import type { WatchlistItem } from '@/api/watchlist'
 import { useSocketContext } from '@/components/socket/SocketProvider'
@@ -27,7 +27,7 @@ import { useFedLists, useListMembership } from '@/sudarshan/screener/feed'
 import { useScreenerPush } from '@/sudarshan/screener/push'
 import { AddSymbolSheet } from '@/sudarshan/watchlist/AddSymbolSheet'
 import { AllListsSheet } from '@/sudarshan/watchlist/AllListsSheet'
-import { ArrangeSheets, useArrange } from '@/sudarshan/watchlist/ArrangeSheet'
+import { ArrangeSheets, UnsavedSheet, useArrange } from '@/sudarshan/watchlist/ArrangeSheet'
 import { ExportSheet } from '@/sudarshan/watchlist/ExportSheet' // F15
 import { FollowRowSheet } from '@/sudarshan/watchlist/FollowRowSheet'
 import type { FollowForm } from '@/sudarshan/watchlist/followRows'
@@ -42,7 +42,7 @@ import { RankedLine } from '@/sudarshan/watchlist/RankedLine' // F16
 import { SearchSheet } from '@/sudarshan/watchlist/SearchSheet' // F13
 import { SectionSheets } from '@/sudarshan/watchlist/SectionMenus'
 import type { OrderRequest } from '@/sudarshan/watchlist/SymbolSheet'
-import { useOverlay } from '@/sudarshan/watchlist/useOverlay'
+import { type OverlayRequest, useOverlay } from '@/sudarshan/watchlist/useOverlay'
 import { useRanked } from '@/sudarshan/watchlist/useRanked' // F16
 import { MAX_ITEMS, MAX_LISTS, useWatchlists } from '@/sudarshan/watchlist/useWatchlists'
 import { useViewPref } from '@/sudarshan/watchlist/ViewSheet'
@@ -97,6 +97,16 @@ const actsOnScreen = (kind: string, flag: boolean) =>
 const HEADER_BUTTON =
   'inline-flex min-h-12 items-center gap-1.5 rounded-[0.875rem] px-4 text-[0.9375rem] font-semibold outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50'
 
+/** Review M4: a tap that leaves edit mode, held while the question asks about the moves not saved. */
+interface Leaving {
+  /** What the tap was for, run after Save order or Discard moves (edit mode has ended by then). */
+  after: () => void
+  /** A sheet that takes the question's place (New list, Import); otherwise the question closes. */
+  sheet?: OverlayRequest
+  /** Answered: hidden at once, forgotten when its entry has gone. */
+  answered?: boolean
+}
+
 /** Why Add is off for a full list, in a trader's words. */
 export const LIST_FULL = `This list holds ${MAX_ITEMS} symbols, the most a list can. Remove one to add another.`
 
@@ -130,6 +140,8 @@ export default function Watchlist() {
   const members = useListMembership(active?.id ?? null, active ? fed.has(active.id) : false)
   const full = items.length >= MAX_ITEMS
   const [editing, setEditing] = useState(false)
+  // Review M4: what a tap that leaves edit mode with moves not saved goes on to do, once answered.
+  const [leaving, setLeaving] = useState<Leaving | null>(null)
   // A favourite that is not one of his own lists (built-in, ranked, flag): its rows come in later changes.
   const [otherRef, setOtherRef] = useState<string | null>(null)
   // F8 (v2): a flag list is read from `view` alone: its rows are the flagged symbols, newest flag first.
@@ -177,6 +189,7 @@ export default function Watchlist() {
       (overlay.kind === 'order' && overlay.order === null) ||
       (overlay.kind === 'follow' && overlay.form === null) || // F11
       (overlay.kind === 'alert' && overlay.alert === null) ||
+      (overlay.kind === 'unsaved' && leaving === null) || // review M4: a reload or a link asks nothing
       (overlay.kind !== 'item' &&
         overlay.kind !== 'order' &&
         overlay.kind !== 'alert' &&
@@ -342,6 +355,55 @@ export default function Watchlist() {
     editing,
     open: (id) => open({ kind: 'pickSection', item: id }),
   })
+  // Review M4: edit mode holds its moves as a draft until Save order. Done, Done editing, a tab, All
+  // lists, New list and Import leave edit mode, so with moves not saved they ask first (Save order,
+  // Discard moves, Keep editing). The question is in the address, so Back closes it and keeps the
+  // moves. The address changes in a transition, after the state set with it, so what the tap was for
+  // is forgotten only once the question's entry has gone, never by the answer itself.
+  const unsaved = arrange.edit?.dirty === true
+  const asking = useRef(false)
+  const ask = useCallback(
+    (next: Leaving, over = false) => {
+      if (asking.current) return
+      asking.current = true
+      setLeaving(next)
+      if (over) swap({ kind: 'unsaved' })
+      else open({ kind: 'unsaved' })
+    },
+    [open, swap]
+  )
+  const questionShown = overlay?.kind === 'unsaved'
+  const questionSeen = useRef(false)
+  useEffect(() => {
+    if (questionShown) questionSeen.current = true
+    else if (questionSeen.current) {
+      questionSeen.current = false
+      asking.current = false
+      setLeaving(null)
+    }
+  }, [questionShown])
+  const answering = useRef(false)
+  const answer = async (choice: 'save' | 'discard' | 'keep') => {
+    const next = leaving
+    if (!next || next.answered || answering.current) return
+    answering.current = true
+    try {
+      // A refused save stays in edit mode with the moves, and the Save bar says why.
+      const go = choice === 'discard' || (choice === 'save' && (await arrange.save()))
+      setLeaving({ ...next, answered: true })
+      if (!go) {
+        close()
+        return
+      }
+      setEditing(false)
+      next.after()
+      if (next.sheet) swap(next.sheet)
+      else close()
+    } finally {
+      answering.current = false
+    }
+  }
+  const leaveEditing = () => (unsaved ? ask({ after: () => {} }) : setEditing(false))
   const symbolActions = useMemo(
     () =>
       view && sectionsRef
@@ -430,7 +492,7 @@ export default function Watchlist() {
         {editing ? (
           <button
             type="button"
-            onClick={() => setEditing(false)}
+            onClick={leaveEditing} // review M4
             className={cn(HEADER_BUTTON, 'border border-input bg-card hover:bg-accent')}
           >
             <Check aria-hidden="true" className="size-5" />
@@ -490,9 +552,11 @@ export default function Watchlist() {
               activeId={active.id}
               editing={editing}
               onSelect={select}
-              onCreate={() => open({ kind: 'new' })}
+              onCreate={() =>
+                unsaved ? ask({ after: () => {}, sheet: { kind: 'new' } }) : open({ kind: 'new' })
+              } // review M4
               onRename={() => open({ kind: 'rename' })}
-              onEdit={() => setEditing((on) => !on)}
+              onEdit={() => (editing ? leaveEditing() : setEditing(true))} // review M4
               onDelete={() => {
                 setDoomedId(onScreenId)
                 open({ kind: 'delete' })
@@ -503,7 +567,14 @@ export default function Watchlist() {
               }
               onView={prefRef ? () => open({ kind: 'view' }) : undefined} // F6, F10
               kind={kindOfRef(otherRef)} // M8.6: the menu follows the list on screen
-              onImport={v2 ? () => open({ kind: 'import' }) : undefined} // F15
+              onImport={
+                v2
+                  ? () =>
+                      unsaved
+                        ? ask({ after: () => {}, sheet: { kind: 'import' } })
+                        : open({ kind: 'import' })
+                  : undefined
+              } // F15; review M4
               onExport={v2 ? () => open({ kind: 'export' }) : undefined} // F15
               alert={v2 ? listAlert : undefined} // F17; switch off: today's menu (review H1)
               newSectionOff={
@@ -515,7 +586,9 @@ export default function Watchlist() {
                     tabs={tabs}
                     activeRef={activeRef}
                     fed={fedIds}
-                    onSelect={selectRef}
+                    onSelect={(ref) =>
+                      unsaved ? ask({ after: () => selectRef(ref) }) : selectRef(ref)
+                    } // review M4
                     onAll={() => open({ kind: 'lists' })}
                   />
                 ) : undefined
@@ -645,10 +718,16 @@ export default function Watchlist() {
           fed={fedIds}
           activeRef={activeRef}
           onPick={(ref) => {
-            selectRef(ref)
-            close()
+            if (unsaved)
+              ask({ after: () => selectRef(ref) }, true) // review M4
+            else {
+              selectRef(ref)
+              close()
+            }
           }}
-          onNew={() => swap({ kind: 'new' })}
+          onNew={() =>
+            unsaved ? ask({ after: () => {}, sheet: { kind: 'new' } }, true) : swap({ kind: 'new' })
+          } // review M4
           newOff={watchlists.lists.length >= MAX_LISTS ? LISTS_FULL : null}
         />
       )}
@@ -684,6 +763,18 @@ export default function Watchlist() {
           alertFor={alertFor}
           onSwap={swap}
           onClose={close}
+        />
+      )}
+
+      {v2 && (
+        // Review M4: leaving edit mode with moves not saved.
+        <UnsavedSheet
+          open={questionShown && leaving !== null && !leaving.answered}
+          listName={active?.name ?? 'the list'}
+          busy={arrange.edit?.busy === true}
+          onSave={() => void answer('save')}
+          onDiscard={() => void answer('discard')}
+          onKeep={() => void answer('keep')}
         />
       )}
 
