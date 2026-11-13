@@ -520,9 +520,11 @@ Five findings of the mid-point review (H2, M2, M3, L11, L12) and its W5 bullet, 
 
 Lane W is merged into lane F (no conflicts; the duplicate M8.4 to M8.8 rows of `STATUS.md` are one row each).
 - **`refs`.** The local `PushNames` type is replaced by the generated `Push`. `refsOf(push)` returns
-  `push.refs` when it is an array: every ref the write changed, each once, in order, and an empty one
-  names no list, so a favourites write, a flag rename or a note alone reads no list's view (flags and
-  favourites still read their own state and counts by `why`). Only where `refs` is absent (an older
+  `push.refs` when it is an array: every ref the write changed, each once, in order. An empty one is
+  lane W's two cases (a change that touched no list's members, or one whose list the hook could not
+  tell), so a push from another screen with an empty `refs` reads every open view as the "lists"
+  fallback did, except a push whose `why` is `favourites` or `prefs`, which reads no list view (flags
+  and favourites still read their own state and counts by `why`). Only where `refs` is absent (an older
   server) it reads the single `ref`; `isPush` accepts both shapes. A move's push names the target and
   the source and each is read, and no other.
 - **`lists_version`.** Every write goes through `callOp`, which counts a write in flight and, when its

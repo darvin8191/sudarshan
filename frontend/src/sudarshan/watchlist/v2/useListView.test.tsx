@@ -163,10 +163,18 @@ describe('the change push', () => {
     expect(keysOf(spy)).toContain(`${JSON.stringify(viewKey('list:7'))}!`)
   })
 
-  it('refreshes no list for an empty refs (a favourites write, a flag rename, a note alone)', () => {
+  it('reads the open views for an empty refs, but none for favourites or prefs', () => {
     const { client } = setup()
     const spy = watch(client)
-    applyPushes(client, [{ ...push('a:3'), refs: [] }])
+    applyPushes(client, [{ ...push('a:3', 'items'), refs: [] }])
+    expect(keysOf(spy)).toEqual(
+      expect.arrayContaining([JSON.stringify([...V2_KEY, 'view']), lists])
+    )
+    spy.mockClear()
+    applyPushes(client, [
+      { ...push('a:4', 'favourites'), refs: [] },
+      { ...push('a:5', 'prefs'), refs: [] },
+    ])
     expect(keysOf(spy).filter((key) => key.includes('"view"'))).toEqual([])
     expect(keysOf(spy)).not.toContain(lists)
   })

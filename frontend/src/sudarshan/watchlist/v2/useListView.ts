@@ -105,8 +105,10 @@ export function useLists(wanted = true) {
 }
 
 /**
- * Every ref a push names: `refs` when it carries them (an empty `refs` names no list), else the
- * one `ref` (maybe "lists") for an older server that sends no `refs`.
+ * Every ref a push names: `refs` when it carries them, else the one `ref` (maybe "lists") for an
+ * older server that sends no `refs`. An empty `refs` is lane W's two cases: a change that touched
+ * no list's members (favourites, a flag rename, a note), or one whose list the hook could not
+ * tell. `keysFor` reads every open view for the second, so it is not decided here.
  */
 export function refsOf(push: Push): string[] {
   if (Array.isArray(push.refs)) return push.refs.filter((r) => typeof r === 'string')
@@ -130,7 +132,10 @@ const OWN = (ref: string) => ref === 'lists' || ref.startsWith('list:')
  * reads each named list's view; "lists" with no names reads every open one.
  */
 export function keysFor(push: Push): Reread[] {
-  const refs = refsOf(push)
+  const named = refsOf(push)
+  // An empty refs from another screen reads every open view, except a favourites or prefs push.
+  const refs =
+    named.length === 0 && push.why !== 'favourites' && push.why !== 'prefs' ? ['lists'] : named
   const views = (): Reread[] =>
     refs.map((ref) =>
       ref === 'lists'

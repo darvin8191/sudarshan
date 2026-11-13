@@ -65,7 +65,7 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers())
 
 describe('a push names every list it changed (refs)', () => {
-  it('refreshes exactly those lists: two refs for a move, none for an empty refs', async () => {
+  it('refreshes exactly those lists: two refs for a move; an empty refs reads the open view, but not for favourites', async () => {
     const { socket, spy } = setup()
     socket.fire(EVENT_PUSH, push('a:2', ['list:1', 'list:2']))
     await settle()
@@ -73,11 +73,15 @@ describe('a push names every list it changed (refs)', () => {
     expect(keys.filter((k) => k.includes('"view"'))).toHaveLength(2)
     expect(keys.some((k) => k.includes('list:3'))).toBe(false)
     spy.mockClear()
-    socket.fire(EVENT_PUSH, { v: 'a:3', ref: 'lists', refs: [], why: 'flags' })
+    socket.fire(EVENT_PUSH, { v: 'a:3', ref: 'lists', refs: [], why: 'favourites' })
+    await settle()
+    const none = spy.mock.calls.map(([f]) => JSON.stringify(f?.queryKey))
+    expect(none.filter((k) => k.includes('"view"'))).toEqual([])
+    spy.mockClear()
     socket.fire(EVENT_PUSH, push('a:4', []))
     await settle()
     const empty = spy.mock.calls.map(([f]) => JSON.stringify(f?.queryKey))
-    expect(empty.filter((k) => k.includes('list:'))).toEqual([])
+    expect(empty.filter((k) => k.includes('"view"')).length).toBeGreaterThan(0)
   })
 
   it('reads the one ref when an older server sends no refs', async () => {
