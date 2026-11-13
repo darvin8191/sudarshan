@@ -212,8 +212,8 @@ RECORDS = {
     "Excursion": "source:ExcursionSource, mae_paise:int|null, mfe_paise:int|null, "
     "mae_ms:int|null, mfe_ms:int|null, capture_pct:string|null, note:string|null",
     "WeekVsIndex": "account_pct:string|null, account_state:RatioState, index_pct:string|null",
-    "Beta": "beta:string|null, correlation:string|null, state:RatioState, days:int, "
-    "need:int, note:string|null",
+    "Beta": "beta:string|null, correlation:string|null, state:RatioState, "
+    "correlation_state:RatioState, days:int, need:int, note:string|null",
     "ChargeParts": "brokerage_paise:int, stt_paise:int, exchange_paise:int, sebi_paise:int, "
     "stamp_paise:int, gst_paise:int, total_paise:int",
     "ChargeEstimate": "parts:ChargeParts, modelled:bool, plan:ChargePlan, orders:int",

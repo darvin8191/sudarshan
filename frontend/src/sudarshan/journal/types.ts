@@ -344,6 +344,7 @@ export interface Beta {
   beta: string | null
   correlation: string | null
   state: RatioState
+  correlation_state: RatioState
   days: number
   need: number
   note: string | null
