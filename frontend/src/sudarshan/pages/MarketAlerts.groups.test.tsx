@@ -92,6 +92,8 @@ const group = (id: number) => document.querySelector(`[data-group="${id}"]`) as 
 async function settle() {
   await act(async () => {
     for (let i = 0; i < 10; i += 1) await Promise.resolve()
+    // The query cache tells its watchers on a timer: let it run.
+    await vi.advanceTimersByTimeAsync(50)
   })
   act(() => frames.flush())
 }
