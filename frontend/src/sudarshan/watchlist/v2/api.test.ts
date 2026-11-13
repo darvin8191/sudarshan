@@ -11,6 +11,7 @@ vi.mock('@/api/client', async () => {
 })
 
 import { callOp, routeOf, WatchlistsError } from './api'
+import { OPS } from './types'
 
 const b = () => bridge.current as NonNullable<typeof bridge.current>
 
@@ -30,6 +31,36 @@ describe('routes', () => {
 
   it('refuses a request that lacks the field its path needs, in words', () => {
     expect(() => routeOf('section_remove', {})).toThrow(WatchlistsError)
+  })
+})
+
+describe('every op, in the shape the bridge reads', () => {
+  // contract.py: a GET or DELETE reads its fields from the query string, every other method from
+  // the JSON body. The mock bridge refuses the other place, so a request built wrongly fails here
+  // as it would against the real bridge.
+  it.each(OPS.map((spec) => [spec.name, spec.method] as const))('%s (%s)', async (name, method) => {
+    b().on(name, () => ({}))
+    const req = { id: 3, ref: 'list:1', version: '5', list: 1, k: 'NSE:INFY' }
+    await callOp(name, req as never)
+    const [call] = b().calls
+    if (method === 'GET' || method === 'DELETE') {
+      expect(call.body).toBeUndefined()
+      expect(call.params.version).toBe('5')
+    } else {
+      expect(call.params).toEqual({})
+      expect(call.body).toMatchObject({ version: '5' })
+    }
+  })
+
+  it('sends a DELETE field in the query, never in the body', async () => {
+    b().on('section_remove', () => ({ version: '6', id: 7, words: null }))
+    await callOp('section_remove', { id: 7, version: '3' })
+    expect(b().calls[0]).toMatchObject({
+      method: 'DELETE',
+      path: '/sudarshan/watchlists/api/sections/7',
+      params: { version: '3' },
+    })
+    expect(b().calls[0].body).toBeUndefined()
   })
 })
 
@@ -80,7 +111,7 @@ describe('callOp', () => {
     })
     expect(await callOp('state', {}).catch((e) => e)).toMatchObject({ code: 'unanswered' })
     const html = b().client
-    vi.spyOn(html, 'get').mockResolvedValueOnce({ data: '<html>' } as never)
+    vi.spyOn(html, 'request').mockResolvedValueOnce({ data: '<html>' } as never)
     expect(await callOp('state', {}).catch((e) => e)).toMatchObject({ code: 'unreadable' })
   })
 })

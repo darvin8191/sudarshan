@@ -33,10 +33,40 @@ export function createBridge() {
   const answer = (status: number, data: unknown) =>
     ({ status, data, statusText: '', headers: {}, config: {} }) as AxiosResponse
 
+  /** What the real bridge answers for a request it cannot read (`_Bad`): `invalid`, a field named. */
+  const invalid = (field: string) =>
+    new AxiosError(
+      'refused',
+      'ERR_BAD_REQUEST',
+      undefined,
+      undefined,
+      answer(400, {
+        status: 'error',
+        code: 'invalid',
+        message: 'SUDARSHAN could not understand that change.',
+        field,
+      })
+    )
+
   const send = async (method: string, path: string, params: object, body: unknown) => {
     const op = match(method, path)
     if (!op) throw new Error(`no such route: ${method} ${path}`)
-    const call = { op, method, path, params: params as Record<string, unknown>, body }
+    // The bridge reads a GET or DELETE from the query string (primitives only) and every other
+    // method from the JSON body (`_read`); a field in the other place is not seen, so a request
+    // built that way is refused here too instead of passing against a shape the bridge never reads.
+    const queried = method === 'GET' || method === 'DELETE'
+    if (queried && body !== undefined) throw invalid('body')
+    if (!queried && Object.keys(params).length > 0) throw invalid('query')
+    for (const [name, value] of Object.entries(params)) {
+      if (value !== null && typeof value === 'object') throw invalid(name)
+    }
+    // On the wire a query value is text, and an absent or null one is not sent (axios).
+    const wire = Object.fromEntries(
+      Object.entries(params)
+        .filter(([, value]) => value !== null && value !== undefined)
+        .map(([name, value]) => [name, String(value)])
+    )
+    const call = { op, method, path, params: wire as Record<string, unknown>, body }
     calls.push(call)
     const handler = handlers.get(op)
     if (!handler) throw new Error(`no handler for ${op}`)
@@ -58,8 +88,8 @@ export function createBridge() {
   const client = {
     get: (path: string, config: { params?: object } = {}) =>
       send('GET', path, config.params ?? {}, undefined),
-    request: (config: { method: string; url: string; data?: unknown }) =>
-      send(config.method, config.url, {}, config.data),
+    request: (config: { method: string; url: string; data?: unknown; params?: object }) =>
+      send(config.method, config.url, config.params ?? {}, config.data),
   }
 
   return {

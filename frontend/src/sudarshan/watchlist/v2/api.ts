@@ -88,6 +88,9 @@ const WAIT: Record<Cls, number> = {
   preview: 15_000,
 }
 
+/** The methods whose fields travel in the query string (contract.py: primitives only). */
+const QUERY_METHODS = new Set<string>(['GET', 'DELETE'])
+
 const SPECS = new Map(OPS.map((spec) => [spec.name, spec]))
 
 /** The path an op's request is made on, and the fields the path took (`/sections/<id>`). */
@@ -117,17 +120,11 @@ export async function callOp<N extends OpName>(
     const { path, used } = routeOf(op, req)
     const fields = Object.fromEntries(Object.entries(req).filter(([name]) => !used.has(name)))
     const timeout = WAIT[spec.cls]
-    const answer =
-      spec.method === 'GET'
-        ? await webClient.get(path, { params: fields, timeout, signal })
-        : await webClient.request({
-            method: spec.method,
-            url: path,
-            // A write carries the whole request, the path's fields too.
-            data: req,
-            timeout,
-            signal,
-          })
+    // The contract's rule, which the bridge reads the same way: a GET or DELETE carries its
+    // fields in the query string, every other method carries the whole request as a JSON body.
+    const answer = QUERY_METHODS.has(spec.method)
+      ? await webClient.request({ method: spec.method, url: path, params: fields, timeout, signal })
+      : await webClient.request({ method: spec.method, url: path, data: req, timeout, signal })
     body = answer.data
   } catch (error) {
     if (axios.isCancel(error)) throw error

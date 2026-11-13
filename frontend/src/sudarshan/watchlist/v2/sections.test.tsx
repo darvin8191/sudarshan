@@ -268,8 +268,7 @@ describe('the section menu and its writes', () => {
     ).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Remove' }))
     await waitFor(() => expect(b().count('section_remove')).toBe(1))
-    expect(b().calls.find((call) => call.op === 'section_remove')?.body).toEqual({
-      id: 10,
+    expect(b().calls.find((call) => call.op === 'section_remove')?.params).toEqual({
       version: 'a:7',
     })
   })
