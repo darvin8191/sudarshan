@@ -7,10 +7,11 @@ back if the app does not come up healthy.
 
 ## v0.8.0 (13 Nov 2026)
 
-A logout on one device now signs out every device, and the nightly backup can keep an encrypted
-copy in your own Oracle storage bucket. It includes everything in v0.7.0. **Publish it only after
-v0.7.0 has installed and run one trading day.** Nothing you trade with changes: orders, risk
-limits, the price feed and API-key calls work as before.
+A logout on one device now signs out every device, the nightly backup can keep an encrypted copy
+in your own Oracle storage bucket, and five fixes to the Risk page from the sandbox test of the
+daily loss lock. It includes everything in v0.7.0. **Publish it only after v0.7.0 has installed and
+run one trading day.** Nothing you trade with changes: orders, the risk rules themselves, the price
+feed and API-key calls work as before.
 
 ### What changes for you
 - **A logout ends every device's session.** A logout, a password change or a password reset on one
@@ -29,6 +30,18 @@ limits, the price feed and API-key calls work as before.
   local backup is fine." once a day per cause, after three tries for a busy or unreachable bucket;
   and a reminder every day from 14 days before the upload link expires. A good night is one journal
   line, no message.
+- **The Risk page, from the sandbox test of the daily loss lock:**
+  - every box that asks for the confirm phrase now says "Type your confirm phrase. It is STOP unless
+    you changed it.", with its own reason beside it;
+  - a forgotten phrase can be set back to STOP on the server (the command is in `sudarshan/README.md`,
+    "The risk layer's confirm phrase, if it is forgotten"). It writes a History line, tells you on
+    Telegram and works at the next try, with no restart. The phrase card says so;
+  - a wrong phrase is now written in History, from the app or Telegram, for a settings change and
+    for turning the kill switch on: what was asked and how many tries in a row, never what was typed;
+  - after saving a daily limit at or below the day's loss, the warning "saving locks new orders until
+    tomorrow" no longer stays on the card; the day card's chip says the rest;
+  - in Analyze mode a refused order's message reads "NIFTY17NOV2825200CE: Daily loss limit reached:
+    ...", without the word "Error".
 
 ### What you must do
 - Nothing when you publish. The install adds one small table for the logout time.
