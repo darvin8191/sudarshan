@@ -101,7 +101,7 @@ def test_status_changes_not_a_byte_of_an_existing_file(tmp_path):
     done = _run(path, "--status")
     assert done.returncode == 0 and "Up to date. Nothing to do." in done.stdout, done.stdout
     assert path.read_bytes() == before  # SQLite's own -wal and -shm may appear; the file does not
-    assert _dump(path)["wl_symbol"] == [("owner", "NSE", "INFY", 2, 5, "results soon", 6, 7)]
+    assert _dump(path)["wl_symbol"] == [("owner", "NSE", "INFY", 2, 5, "results soon", 3, 6, 7)]
 
 
 def test_a_populated_copy_forced_back_keeps_every_row_and_value(tmp_path):
