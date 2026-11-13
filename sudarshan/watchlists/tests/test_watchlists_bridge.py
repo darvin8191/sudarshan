@@ -35,6 +35,8 @@ NOT_BUILT = {op.name for op in contract.OPS} - {
     "section_add",
     "section_edit",
     "section_remove",
+    "arrange",
+    "copy",
 }
 
 BODIES = {
@@ -86,7 +88,14 @@ def test_only_handled_ops_get_a_route():
     }
     assert rules == {
         contract.API_PREFIX + route
-        for route in ("/state", "/view", "/sections", "/sections/<int:id>")
+        for route in (
+            "/state",
+            "/view",
+            "/sections",
+            "/sections/<int:id>",
+            "/copy",
+            "/lists/<int:id>/arrange",
+        )
     }
 
 
