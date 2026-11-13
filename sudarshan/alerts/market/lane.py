@@ -216,19 +216,25 @@ class MarketLane:
     # -- internals ------------------------------------------------------------------------------
 
     async def _slot(self) -> None:
-        """Wait for a market slot: never while order alerts wait, never over the lane's budget.
-        A line that turns MAX_AGE old meanwhile is told not sent at once (review M1)."""
+        """Wait for a market slot: never while order alerts wait, never while a server notice has
+        waited its limit for one (review L2), never over the lane's budget. A line that turns
+        MAX_AGE old meanwhile is told not sent at once (review M1)."""
         while True:
             self._expire()
             if not self._pending:
                 return
-            if self.pacer.orders_waiting():
+            if self.pacer.orders_waiting() or self._gives_way():
                 await asyncio.sleep(POLL_S)
                 continue
             wait = self.pacer.allowed_at(MARKET) - time.monotonic()
             if wait <= 0:
                 return
             await asyncio.sleep(min(wait, 4 * POLL_S))  # an order may arrive meanwhile
+
+    def _gives_way(self) -> bool:
+        """The Pacer says this lane takes no slot now (a notice has waited its limit)."""
+        blocked = getattr(self.pacer, "blocked", None)
+        return bool(blocked(MARKET)) if blocked is not None else False
 
     def _expire(self) -> None:
         """Lines older than MAX_AGE are never sent late (design 6): each is told not sent, with
