@@ -309,6 +309,40 @@ def is_contract_expired_now(expiry_date, exchange, now=None, symbol=None):
     return now.time() >= close_time
 
 
+def _now_ist():
+    return datetime.now(pytz.timezone("Asia/Kolkata"))
+
+
+def stopped_contract_words(symbol, exchange, expiry, now=None):
+    """SUDARSHAN (v0.8.1 review L5): why Analyze mode refuses an order on an NFO or BFO contract
+    that has stopped trading, or None while it trades.
+
+    On its expiry day a contract stops at its regime's stop (expiry_close_time: 15:40 until
+    6 Dec 2026; from 7 Dec 15:30 for an index contract, 15:45 for a stock contract), whatever the
+    settlement timing says, and the exchange refuses any order after it. ``expiry`` is the
+    master's text (08-DEC-26) or a date.
+    """
+    if exchange not in REGIME_EXCHANGES or not expiry:
+        return None
+    if isinstance(expiry, str):
+        for shape in ("%d-%b-%y", "%d-%b-%Y"):
+            try:
+                expiry = datetime.strptime(expiry.strip().upper(), shape).date()
+                break
+            except ValueError:
+                continue
+        else:
+            return None
+    now = now or _now_ist()
+    stop = expiry_close_time(expiry, exchange, symbol)
+    if now.date() < expiry or (now.date() == expiry and now.time() < stop):
+        return None
+    return (
+        f"This contract stopped trading at {stop:%H:%M} on its expiry day; "
+        "the exchange would refuse it."
+    )
+
+
 def get_expiry_settlement_price(position):
     """Settlement price for an expired position, per sandbox config.
 

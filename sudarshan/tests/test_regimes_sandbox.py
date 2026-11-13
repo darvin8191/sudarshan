@@ -166,3 +166,72 @@ def test_a_master_being_downloaded_leaves_the_known_index_names(pm, master):
     db_session.commit()
     assert "FOCIT" in index_contracts.underlyings().indices  # read at once, not in ten minutes
     assert index_contracts.has_futures("RELIANCE") and not index_contracts.has_futures("NIFTY")
+
+
+# ---- an order after the contract's stop (review L5) -----------------------------------------------
+@pytest.mark.parametrize(
+    ("expiry", "symbol", "clock", "stop"),
+    [
+        (date(2026, 12, 1), "NIFTY01DEC2625900CE", "15:39", None),  # before the change: 15:40
+        (date(2026, 12, 1), "NIFTY01DEC2625900CE", "15:40", "15:40"),
+        (date(2026, 12, 8), "NIFTY08DEC2625900CE", "15:29", None),
+        (date(2026, 12, 8), "NIFTY08DEC2625900CE", "15:30", "15:30"),  # an index's from 7 Dec
+        (date(2026, 12, 8), "NIFTY08DEC2625900CE", "15:35", "15:30"),
+        (date(2026, 12, 29), "RELIANCE29DEC261400CE", "15:35", None),  # a stock's trades on
+        (date(2026, 12, 29), "RELIANCE29DEC261400CE", "15:45", "15:45"),
+    ],
+)
+def test_the_sandbox_says_a_contract_has_stopped_trading(pm, expiry, symbol, clock, stop):
+    words = pm.stopped_contract_words(symbol, "NFO", expiry.strftime("%d-%b-%y").upper(),
+                                      now=at(expiry, clock))  # fmt: skip
+    expected = None
+    if stop is not None:
+        expected = (
+            f"This contract stopped trading at {stop} on its expiry day; "
+            "the exchange would refuse it."
+        )
+    assert words == expected
+    # The settlement timing does not move the exchange's stop.
+    pm.settings["expiry_settlement_timing"] = "next_day"
+    assert pm.stopped_contract_words(symbol, "NFO", expiry, now=at(expiry, clock)) == expected
+    # The day before trades; the day after has stopped; other exchanges are not asked.
+    assert pm.stopped_contract_words(symbol, "NFO", expiry, now=at(date(2026, 11, 30), "15:50")) is None
+    assert pm.stopped_contract_words(symbol, "MCX", expiry, now=at(expiry, "23:00")) is None
+
+
+@pytest.mark.parametrize(("clock", "refused"), [("15:29", False), ("15:30", True)])
+def test_analyze_mode_refuses_an_order_on_8_december_after_the_stop(pm, monkeypatch, clock, refused):
+    """Tue 8 Dec 15:35 in Analyze mode, a MARKET buy of the expiring NIFTY contract filled at its last
+    price; the exchange refuses it. It is refused with a sentence from 15:30, before any fill, fund
+    or position is touched."""
+    from types import SimpleNamespace
+
+    import sandbox.order_manager as order_manager
+
+    day = date(2026, 12, 8)
+    monkeypatch.setattr(pm, "_now_ist", lambda: at(day, clock))
+    monkeypatch.setattr(order_manager, "get_symbol_info", lambda symbol, exchange: SimpleNamespace(
+        symbol=symbol, exchange=exchange, expiry="08-DEC-26", lotsize=65))  # fmt: skip
+    reached = []
+
+    def margins_reached(self, *args, **kwargs):  # the first step after the checks this adds
+        reached.append(True)
+        raise RuntimeError("stop here: the order went past the expiry check")
+
+    monkeypatch.setattr(order_manager.OrderManager, "_validate_order", lambda self, data: (True, ""))
+    manager = order_manager.OrderManager("tester")
+    monkeypatch.setattr(manager.fund_manager, "check_and_block_margin", margins_reached, raising=False)
+    order = {"symbol": "NIFTY08DEC2625900CE", "exchange": "NFO", "action": "BUY", "quantity": 65,
+             "price_type": "MARKET", "product": "NRML"}  # fmt: skip
+    try:
+        ok, answer, code = manager.place_order(order)
+    except RuntimeError:
+        ok, answer, code = None, {}, None
+    if refused:
+        assert (ok, code) == (False, 400)
+        assert answer["message"] == (
+            "This contract stopped trading at 15:30 on its expiry day; the exchange would refuse it."
+        )
+        assert answer["mode"] == "analyze"
+    else:
+        assert answer.get("message", "").find("stopped trading") == -1
