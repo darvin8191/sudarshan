@@ -23,7 +23,7 @@ import { SectionSheets } from '../SectionMenus'
 import type { LiveRow } from '../useLiveRows'
 import { overlayOf, useOverlay } from '../useOverlay'
 import { WatchlistRows } from '../WatchlistRows'
-import { BUILT_IN, LISTS_FULL, roomWords } from './arrange'
+import { BUILT_IN, draftOf, fitTo, LISTS_FULL, roomWords } from './arrange'
 import type { Entry, Row, Section, View } from './types'
 import { useListView } from './useListView'
 
@@ -185,6 +185,9 @@ describe('arranging in edit mode', () => {
     await user.click(await screen.findByRole('button', { name: 'Move CCC to section' }))
     await user.click(await screen.findByRole('button', { name: 'IT' }))
     expect(body('arrange')).toEqual([])
+    // The sheet closes by going back in history, which the router applies after the tap returns.
+    // While it is still mounted the dialog hides the page behind it from the accessibility tree.
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     await user.click(screen.getByRole('button', { name: 'Save order' }))
     await waitFor(() => expect(body('arrange')).toHaveLength(1))
     const item = (symbol: string, section_id: number | null) => ({
@@ -261,6 +264,18 @@ describe('arranging in edit mode', () => {
     expect(await screen.findByText(sentence)).toBeVisible()
     expect(screen.getByRole('button', { name: 'Save order' })).not.toBeDisabled()
     await waitFor(() => expect(b().count('view')).toBeGreaterThan(reads))
+  })
+})
+
+describe('a removed symbol', () => {
+  it('leaves the draft and the order it would save', () => {
+    const draft = draftOf(view(), ITEMS)
+    const rest = ITEMS.filter((each) => each.id !== 3)
+    const fitted = fitTo(draft, rest)
+    expect(fitted.rows.map((each) => each.id)).toEqual(
+      draft.rows.map((each) => each.id).filter((id) => id !== 3)
+    )
+    expect(fitTo(draft, ITEMS)).toBe(draft)
   })
 })
 
