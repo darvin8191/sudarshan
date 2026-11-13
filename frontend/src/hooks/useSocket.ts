@@ -341,8 +341,10 @@ export function useSocket() {
       const apiType = data.request.api_type || ''
 
       if (data.response.status === 'error') {
-        message = `Error: ${data.response.message}`
-        if (symbol) message = `${symbol} - ${message}`
+        // SUDARSHAN: the server's own sentence after the symbol, never "Error:" (it reads as a
+        // fault the trader caused when it is a limit the platform kept).
+        message = data.response.message || ''
+        if (symbol) message = message ? `${symbol}: ${message}` : symbol
       } else if (apiType === 'cancelorder') {
         message = orderid ? `Order Cancelled - ID: ${orderid}` : 'Order Cancelled'
       } else if (apiType === 'cancelallorder') {

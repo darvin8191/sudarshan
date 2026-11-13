@@ -17,6 +17,7 @@ const toast = vi.hoisted(() => ({
 vi.mock('@/api/risk', () => ({ riskApi: api }))
 vi.mock('@/utils/toast', () => ({ showToast: toast }))
 
+import { PHRASE_HINT } from './phrase'
 import { openNow, ResumeSheet, secondsLeft } from './ResumeSheet'
 
 function state(resumeInS: number): KillSwitchState {
@@ -56,6 +57,12 @@ beforeEach(() => {
 })
 
 describe('resuming', () => {
+  it('says what to type in the phrase box', () => {
+    renderSheet(state(-1))
+    expect(screen.getByText(PHRASE_HINT)).toBeInTheDocument()
+    expect(PHRASE_HINT).toBe('Type your confirm phrase. It is STOP unless you changed it.')
+  })
+
   it('waits out the minute, whatever is typed', async () => {
     renderSheet(state(30))
     fireEvent.change(screen.getByLabelText('Confirm phrase'), { target: { value: 'STOP' } })

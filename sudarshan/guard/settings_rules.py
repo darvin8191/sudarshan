@@ -127,7 +127,7 @@ def change(values: dict, *, phrase: object, by: str) -> tuple[int, str, RiskSett
     from .killswitch import phrase_matches
 
     try:
-        settings = risk_store.STORE.settings()
+        settings = risk_store.STORE.settings(fresh=True)  # the phrase is judged as saved just now
     except Exception:
         logger.exception("The risk settings could not be read for a change")
         return 503, words.KS_SETTINGS_UNREADABLE, None
@@ -140,6 +140,11 @@ def change(values: dict, *, phrase: object, by: str) -> tuple[int, str, RiskSett
     looser = loosens(settings, changes)
     if looser and not phrase_matches(phrase, settings.confirm_phrase):
         if str(phrase or "").strip():
+            from .killswitch import note_phrase_refused
+
+            note_phrase_refused(
+                "app", by, words.phrase_asked_settings(sorted(changes)), changes=sorted(changes)
+            )
             return 400, words.PHRASE_WRONG, settings
         if looser == ["confirm_phrase"]:
             return 400, words.PHRASE_CHANGE_NEEDS_PHRASE, settings

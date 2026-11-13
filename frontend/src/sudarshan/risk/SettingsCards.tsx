@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { RISK_AUDIT_KEY, RISK_STATUS_KEY } from './parts'
+import { PHRASE_FORGOTTEN, PHRASE_HINT } from './phrase'
 
 /**
  * The owner's own limits on Settings > Risk (M20.7, M5.14): the daily loss limit, the price
@@ -136,9 +137,16 @@ function SaveRow({
           <Label htmlFor={`${id}-phrase`} className="text-[0.875rem] font-semibold">
             Confirm phrase
           </Label>
-          <p className="text-[0.8125rem] text-[color:var(--text-secondary)]">{phraseHint}</p>
+          <p
+            id={`${id}-hint`}
+            className="text-[0.8125rem] text-[color:var(--text-secondary)]"
+            data-testid="phrase-hint"
+          >
+            <span>{phraseHint}</span> <span>{PHRASE_HINT}</span>
+          </p>
           <Input
             id={`${id}-phrase`}
+            aria-describedby={`${id}-hint`}
             className="h-12 text-base"
             autoComplete="off"
             autoCapitalize="characters"
@@ -319,7 +327,9 @@ export function DailyLimitEditor({
   }, [settings.updated_at, saver.phraseNeeded])
   const typed = numberOf(text)
   const loss = lossToday(days)
-  const locks = !Number.isNaN(typed) && typed > 0 && loss !== null && typed <= loss
+  // Only while the typed limit is not the saved one: once saved, the day card says the rest.
+  const locks =
+    !Number.isNaN(typed) && typed > 0 && typed !== current && loss !== null && typed <= loss
   const asking = locks && confirmed === typed
   const save = () => {
     if (locks && !asking) {
@@ -560,6 +570,7 @@ export function PhraseCard() {
         Typed to turn the kill switch on or off and to loosen any limit here. It is never shown
         again once saved.
       </p>
+      <p className="text-[0.8125rem] text-[color:var(--text-secondary)]">{PHRASE_FORGOTTEN}</p>
       <TextField label="New phrase" value={next} onChange={setNext} />
       <SaveRow
         saver={saver}

@@ -93,6 +93,24 @@ def phrase_matches(given: object, expected: str) -> bool:
     )
 
 
+def note_phrase_refused(surface: str, actor: str, asked: str, **detail: Any) -> None:
+    """A wrong confirm phrase goes to History: what was being asked, never what was typed.
+
+    Tries in a row within a minute share one line, counted up. One try, never fails the refusal.
+    """
+    try:
+        risk_store.STORE.audit(
+            "phrase_refused",
+            words.phrase_refused(asked),
+            surface=surface,
+            actor=actor,
+            detail={"asked": asked, **detail} or None,
+            merge_key=f"phrase_refused:{surface}:{asked}",
+        )
+    except Exception:
+        logger.exception("A refused confirm phrase could not be audited")
+
+
 def _clock(at: datetime | None) -> str:
     return "" if at is None else at.astimezone(IST).strftime("%H:%M")
 
@@ -104,7 +122,7 @@ def activate(owner: Owner, *, exit_all: bool, phrase: object = None, phrase_need
     """Turn the kill switch on, then clear up; returns an ``Answer`` and the report in its state."""
     if flag.stage() == flag.OFF:
         return Answer(503, words.KS_NOT_HERE)
-    settings = _settings()
+    settings = _settings(fresh=phrase_needed)
     if phrase_needed:
         # Unreadable settings: the default phrase applies, so it can always be turned on.
         expected = (
@@ -113,6 +131,11 @@ def activate(owner: Owner, *, exit_all: bool, phrase: object = None, phrase_need
             else risk_store.RiskSettings().confirm_phrase
         )
         if not phrase_matches(phrase, expected):
+            note_phrase_refused(
+                owner.surface,
+                owner.actor,
+                words.PHRASE_ASKED_KS_EXIT if exit_all else words.PHRASE_ASKED_KS_ON,
+            )
             return Answer(400, words.PHRASE_WRONG)
     recover()
     activation_id = "ks-" + uuid.uuid4().hex[:12]
@@ -962,7 +985,7 @@ def _gtt_stops(rows: list, triggers: list[dict]) -> tuple[list[dict], set]:
 
 def resume(owner: Owner, *, phrase: object) -> Answer:
     """Turn the kill switch off, for the owner only, with the phrase, after the hold."""
-    settings = _settings()
+    settings = _settings(fresh=True)
     if settings is None:
         return Answer(503, words.KS_SETTINGS_UNREADABLE)
     if not phrase_matches(phrase, settings.confirm_phrase):
@@ -1040,9 +1063,9 @@ def _refused(owner: Owner, answer: Answer) -> Answer:
 # -- shared ------------------------------------------------------------------------------------------
 
 
-def _settings():
+def _settings(*, fresh: bool = False):
     try:
-        return risk_store.STORE.settings()
+        return risk_store.STORE.settings(fresh=fresh)
     except Exception:
         logger.exception("The risk settings could not be read")
         return None

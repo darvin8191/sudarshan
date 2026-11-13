@@ -501,6 +501,23 @@ def ks_resume_wait(seconds: int) -> str:
     )
 
 
+def phrase_refused(asked: str) -> str:
+    """The audit's line for a wrong confirm phrase: what was being asked, never what was typed."""
+    return f"A wrong confirm phrase was refused when asked to {asked}."
+
+
+PHRASE_ASKED_KS_ON = "turn the kill switch on"
+PHRASE_ASKED_KS_EXIT = "turn the kill switch on and exit every position"
+
+
+def phrase_asked_settings(names: list[str]) -> str:
+    listed = ", ".join(_SETTING_LABELS.get(name, name) for name in names)
+    return f"change {listed}"
+
+
+PHRASE_RESET_AUDIT = "The confirm phrase was set back to the default on the server."
+
+
 def ks_resume_refused(said: str) -> str:
     """The audit's line for a resume that was refused, with what the owner was told."""
     return f"Resume refused. {said}"
