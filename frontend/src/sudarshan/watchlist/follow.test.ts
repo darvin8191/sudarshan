@@ -117,6 +117,9 @@ describe('the window of a list longer than 250', () => {
 
 describe('keys', () => {
   it('turns a cache key back into an instrument', () => {
-    expect(instrumentOf('NSE_INDEX:NIFTY 50')).toEqual({ exchange: 'NSE_INDEX', symbol: 'NIFTY 50' })
+    expect(instrumentOf('NSE_INDEX:NIFTY 50')).toEqual({
+      exchange: 'NSE_INDEX',
+      symbol: 'NIFTY 50',
+    })
   })
 })
