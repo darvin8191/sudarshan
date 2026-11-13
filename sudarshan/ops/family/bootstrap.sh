@@ -66,7 +66,11 @@ act() { if [[ ${DRY} -eq 1 ]]; then return 0; fi; "$@"; }   # a change, made unl
 # ---- 0. What it needs, checked before anything is changed --------------------------------------------
 if [[ -z "${ROOT}" && ${EUID} -ne 0 ]]; then stop "Run this as root (sudo)."; fi
 for cmd in systemctl nft useradd stat; do
-    command -v "${cmd}" > /dev/null 2>&1 || stop "This server has no ${cmd} command, which the set-up needs."
+    if command -v "${cmd}" > /dev/null 2>&1; then continue; fi
+    if [[ "${cmd}" == nft ]]; then
+        stop "This server has no nft command, which the set-up needs. Install it with: apt install nftables, then run this again."
+    fi
+    stop "This server has no ${cmd} command, which the set-up needs."
 done
 NFT_BIN="$(command -v nft)"
 want_uid=0   # what root's own files are owned by; in a test folder they are the test's own

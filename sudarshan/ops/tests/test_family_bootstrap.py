@@ -163,10 +163,12 @@ class Server:
         rec = self.fake / f"owner-{hashlib.sha256(str(path).encode()).hexdigest()[:16]}"
         return rec.read_text().strip() if rec.exists() else ""
 
-    def run(self, *args: str, tool: bool = True) -> subprocess.CompletedProcess:
+    def run(
+        self, *args: str, tool: bool = True, path: str | None = None
+    ) -> subprocess.CompletedProcess:
         env = {
             **os.environ,
-            "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}",
+            "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH'] if path is None else path}",
             "FAKE": str(self.fake),
             "BOOTSTRAP_ROOT": str(self.root),
             "TMPDIR": str(self.tmp),
@@ -334,6 +336,21 @@ def test_a_deploy_tool_that_cannot_be_found_is_asked_for(server):
 def test_no_deploy_settings_no_set_up(server):
     (server.root / "etc" / "sudarshan" / "deploy.env").unlink()
     nothing_changed(server, server.run())
+
+
+def test_a_server_without_nft_is_told_how_to_install_it(server):
+    """L8: the owner is given the action, not only the missing command."""
+    (server.bin / "nft").unlink()
+    dirs = [d for d in os.environ["PATH"].split(os.pathsep) if d and not (Path(d) / "nft").exists()]
+    if shutil.which("bash", path=os.pathsep.join(dirs)) is None:
+        pytest.skip("nft sits beside bash on this machine")
+    done = server.run(path=os.pathsep.join(dirs))
+    nothing_changed(server, done)
+    assert done.stdout.splitlines() == [
+        "This server has no nft command, which the set-up needs. Install it with: apt install "
+        "nftables, then run this again.",
+        "Nothing was changed.",
+    ]
 
 
 def test_it_is_for_root(tmp_path):
