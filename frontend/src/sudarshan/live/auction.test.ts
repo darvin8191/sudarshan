@@ -34,9 +34,10 @@ describe('closing auction words', () => {
 })
 
 /**
- * Each day of sudarshan/tests/regimes_vectors.json, as the server sends a stock's window that day
- * (sessions.py: 15:15-15:35 with the price at about 15:30 until 6 Dec 2026, 15:30-15:40 with the
- * price at about 15:40 from 7 Dec, when every stock closes by auction): the words name it.
+ * Each day of sudarshan/tests/regimes_vectors.json, as the server sends the window of a stock with
+ * derivatives that day (sessions.py: 15:15-15:35 with the price at about 15:30 until 6 Dec 2026,
+ * 15:30-15:40 with the price at about 15:40 from 7 Dec): the words name it. A stock without
+ * derivatives gets no window, so no auction line.
  */
 const VECTORS = JSON.parse(
   readFileSync(join(process.cwd(), '..', 'sudarshan', 'tests', 'regimes_vectors.json'), 'utf8')

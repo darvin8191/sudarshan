@@ -92,7 +92,7 @@ def test_the_closing_auction_and_the_7_december_timings(segment, day, auction, h
     [
         (WED, None, ("15:15", "15:35"), "15:30"),  # 27 Oct 2026: printed at 15:28:09 (X6j)
         (MUHURAT, "14:05-15:40", ("15:15", "15:35"), "15:30"),  # also on 8 Nov 2026 (X6b)
-        (DEC7, None, ("15:30", "15:40"), "15:40"),  # every stock's auction 15:30-15:40
+        (DEC7, None, ("15:30", "15:40"), "15:40"),  # a stock with derivatives: 15:30-15:40
     ],
 )
 def test_the_auction_window_a_cas_key_carries(day, window, expected, close):
@@ -121,7 +121,9 @@ def test_the_auction_window_a_cas_key_carries(day, window, expected, close):
         ("NSE_EQ", WED, True, True),
         ("NSE_EQ", WED, False, False),  # no futures: trades on to 15:30
         ("BSE_EQ", WED, True, True),  # BSE taken as NSE's list until a BSE check
-        ("NSE_EQ", DEC7, False, True),  # from 7 Dec 2026 every stock
+        ("NSE_EQ", DEC7, False, False),  # from 7 Dec 2026 too: NSE, circulars of 6 Nov 2026
+        ("NSE_EQ", DEC7, True, True),
+        ("BSE_EQ", date(2026, 12, 10), False, False),
         ("NSE_INDEX", WED, True, False),
         ("NSE_FO", DEC7, True, False),
     ],

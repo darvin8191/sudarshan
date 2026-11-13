@@ -163,8 +163,10 @@ def test_cas_keys_follow_the_master_and_the_7_december_rule():
               A("BSE_EQ|500112", "SBIN")]  # fmt: skip
     oct21 = days.cas_keys(alerts, date(2026, 10, 21), frozenset({"SBIN"}))
     assert oct21 == {SBIN, "BSE_EQ|500112"}
-    dec7 = days.cas_keys(alerts, date(2026, 12, 7), frozenset())
-    assert dec7 == {SBIN, "NSE_EQ|INE000X", "BSE_EQ|500112"}
+    # From 7 Dec 2026 too, only a stock with derivatives (NSE's circulars of 6 Nov 2026).
+    assert days.cas_keys(alerts, date(2026, 12, 7), frozenset()) == set()
+    dec10 = days.cas_keys(alerts, date(2026, 12, 10), frozenset({"SBIN"}))
+    assert dec10 == {SBIN, "BSE_EQ|500112"}  # SMALLCO, with no futures, keeps its usual close
 
 
 def test_the_master_gives_the_companies_with_stock_futures(tmp_path):

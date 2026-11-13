@@ -55,6 +55,25 @@ def test_each_day_s_sessions_and_auction_as_sessions_py_gives_them(case):
     closes = sessions.auction_close("NSE_EQ", day, trading_day=True)
     assert clock(closes, day) == case["auction_close"]
     assert sessions.closes_by_auction("NSE_EQ", day, derivatives=False) is case["every_stock"]
+    assert sessions.closes_by_auction("NSE_EQ", day, derivatives=True) is True
+
+
+def test_on_10_december_a_stock_with_derivatives_closes_by_auction_and_one_without_does_not():
+    """NSE's circulars of 6 Nov 2026: from 7 Dec the auction stays with stocks that have
+    derivatives. Such a stock trades to 15:30, then its auction runs to 15:40 with the price
+    expected at 15:40; a stock without derivatives ends at 15:30 with no auction to wait for."""
+    day = date(2026, 12, 10)
+    assert sessions.closes_by_auction("NSE_EQ", day, derivatives=True)
+    cas = sessions.session("NSE_EQ", day, trading_day=True, auction=True)
+    assert cas.segment == "NSE_EQ+auction"
+    assert [clock(cas.start, day), clock(cas.end, day)] == ["09:15", "15:30"]
+    assert clock(cas.auction_until, day) == "15:40" and clock(cas.auction_close, day) == "15:40"
+    assert not sessions.closes_by_auction("NSE_EQ", day, derivatives=False)
+    assert not sessions.closes_by_auction("BSE_EQ", day, derivatives=False)
+    plain = sessions.session("NSE_EQ", day, trading_day=True)
+    assert plain.segment == "NSE_EQ"
+    assert [clock(plain.start, day), clock(plain.end, day)] == ["09:15", "15:30"]
+    assert (plain.auction_until, plain.auction_close) == (None, None)
 
 
 @pytest.mark.parametrize("case", EXPIRIES, ids=[case["symbol"] for case in EXPIRIES])

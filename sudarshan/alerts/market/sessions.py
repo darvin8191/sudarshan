@@ -9,8 +9,9 @@ Continuous trading in IST on a trading day, the end not included, in two regimes
                                                       15:28-15:30, the price at once
       NSE_FO, BSE_FO                                 09:15-15:40
     from 7 Dec 2026 (SEBI HO/47/11/11(3)2025-MRD-POD2/I/23843/2026 of 15 Oct 2026):
-      cash, every stock, and indices                 09:15-15:30; every stock's auction
-                                                      15:30-15:40
+      cash (every stock) and indices                 09:15-15:30; a stock with derivatives then
+                                                      closes by auction 15:30-15:40 (NSE's
+                                                      circulars of 6 Nov 2026)
       NSE_FO, BSE_FO                                 09:15-15:45; an expiring index contract
                                                       stops at 15:30 on its expiry day
 
@@ -25,7 +26,8 @@ auction's random close (the owner's probe of 27 Oct 2026, X6j: every stock print
 otherwise). It is the official close: it belongs to the day's last candle on the cash session's
 grid (the 15:29 minute, the 15:15-15:30 candle, the day). Which stocks close by auction is the
 runtime's to say each morning (``closes_by_auction``: a stock with futures in the master
-contract; from 7 Dec 2026 every stock). Indices have no auction window (X6k): their value settles
+contract, from 7 Dec 2026 too; a stock without trades to the cash close and keeps its usual close).
+Indices have no auction window (X6k): their value settles
 with the prints and their session ends with the cash close. Trades of the post-close session
 (15:50-16:00, at the closing price) are refused by the gate.
 
@@ -180,7 +182,8 @@ def sessions_of(
 
 def closes_by_auction(segment: str, day: date, *, derivatives: bool) -> bool:
     """Whether a cash stock closes by auction on ``day`` (a CAS key): one with derivatives in
-    the master contract since 3 Aug 2026, every stock from 7 Dec 2026. BSE's list is taken to be
+    the master contract, since 3 Aug 2026 and from 7 Dec 2026 too (NSE's circulars of 6 Nov 2026;
+    the exception on a scheme of arrangement's ex-date is not modelled). BSE's list is taken to be
     NSE's until a check of BSE's says otherwise."""
     return segment in AUCTION_SEGMENTS and (derivatives or _regime(day).every_stock)
 

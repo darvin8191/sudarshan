@@ -1540,7 +1540,7 @@
     },
     {
       "id": "AU7",
-      "says": "from 7 Dec 2026: continuous trading to 15:30 for every stock, the auction's print after it",
+      "says": "from 7 Dec 2026: a stock with derivatives trades to 15:30, the auction's print after it",
       "day": "2026-12-07",
       "auction": true,
       "alert": {"params": {"op": "crosses_above", "level": "100"}, "frequency": "every_time"},
@@ -1738,6 +1738,30 @@
         {"at": "15:39:59", "ltp": 22751.0, "check": "outside_hours"}
       ],
       "fires": []
+    },
+    {
+      "id": "AU22",
+      "says": "10 Dec 2026: a stock without derivatives trades to 15:30 and has no auction; a trade at 15:39 is no trade",
+      "day": "2026-12-10",
+      "alert": {"params": {"op": "crosses_above", "level": "100"}, "frequency": "every_time"},
+      "steps": [
+        {"at": "15:29:00", "ltp": 99.95},
+        {"at": "15:29:59", "ltp": 100.05},
+        {"at": "15:39:40", "ltp": 99.9, "check": "outside_hours"}
+      ],
+      "fires": [{"at": "15:29:59", "auction": false}]
+    },
+    {
+      "id": "AU23",
+      "says": "10 Dec 2026: a stock with derivatives trades to 15:30; its auction's print at 15:39 is told as the auction's",
+      "day": "2026-12-10",
+      "auction": true,
+      "alert": {"params": {"op": "crosses_above", "level": "100"}, "frequency": "every_time"},
+      "steps": [
+        {"at": "15:29:30", "ltp": 99.9, "vtt": 1000},
+        {"at": "15:39:40", "ltp": 100.2, "vtt": 3000, "check": "ok"}
+      ],
+      "fires": [{"at": "15:39:40", "value": "100.20", "auction": true}]
     }
   ],
   "calendar": {"holidays": ["2026-10-20", "2026-11-10"], "windows": {"2026-11-08": "14:05-15:40"}},

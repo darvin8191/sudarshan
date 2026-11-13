@@ -122,7 +122,7 @@ def test_the_last_cash_boundary_waits_for_the_auction_prints_until_15_35_05():
     [
         (date(2026, 12, 4), "15:30", "15:35"),  # the Friday before: auction to 15:35
         (date(2026, 12, 3), "15:30", "15:35"),  # a SENSEX expiry before the change
-        (date(2026, 12, 8), "15:30", "15:40"),  # every stock's auction 15:30-15:40 (a NIFTY expiry)
+        (date(2026, 12, 8), "15:30", "15:40"),  # auction stocks: 15:30-15:40 (a NIFTY expiry)
         (date(2026, 12, 10), "15:30", "15:40"),
     ],
 )

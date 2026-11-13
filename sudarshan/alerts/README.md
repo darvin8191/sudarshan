@@ -459,8 +459,9 @@ sudarshan-feed (one Upstox socket) -> ZMQ 127.0.0.1:5581 (ticks, __health__)
 - **The gate.** A value is judged only inside its segment's session on a trading day, with the
   exchange's status open (pushed by the feed as it changes), a feed connected, live and heard in
   the last 12 s, and the value fresh (5 s). A stock with futures closes by auction from 15:15
-  (from 7 Dec 2026 every stock, from 15:30; `sessions.py`): its print is told as the closing
-  auction's.
+  (from 7 Dec 2026 from 15:30, still only a stock with derivatives; `sessions.py`): its print is
+  told as the closing auction's. A stock without derivatives trades to 15:30 and keeps its usual
+  close.
 - **Pauses.** The feed down, unheard or silent on the whole socket for more than 10 s inside a
   session, or this service not running (from the last moment it was known checking), is a pause
   in market.db. A crossing first seen after one is told "seen after a pause"; one over a minute

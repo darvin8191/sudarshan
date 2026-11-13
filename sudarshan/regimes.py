@@ -8,9 +8,9 @@ Continuous trading in IST on a trading day, the end not included:
                                                       from 15:20, a random close in 15:28-15:30
       F&O (NSE_FO, BSE_FO: OpenAlgo's NFO and BFO)    09:15-15:40, an expiring contract to 15:40
     from 7 Dec 2026 (SEBI HO/47/11/11(3)2025-MRD-POD2/I/23843/2026 of 15 Oct 2026, para 4.2):
-      cash, every stock, and indices                 09:15-15:30; every stock's closing auction
-                                                      15:30-15:40, order entry closing at a random
-                                                      moment in 15:38-15:40
+      cash (every stock) and indices                 09:15-15:30; a stock with derivatives then
+                                                      closes by auction 15:30-15:40, order entry
+                                                      closing at a random moment in 15:38-15:40
       F&O                                            09:15-15:45; an expiring index contract stops
                                                       at 15:30 on its expiry day, a stock contract
                                                       trades to 15:45
@@ -20,10 +20,10 @@ The cash market's pre-open starts at 09:00 (``PRE_OPEN``) in both.
 What SEBI's circular of 15 Oct 2026 states (para 4.2, read 13 Nov 2026): the auction 15:30-15:40
 with its random close from 15:38, index derivatives to 15:45 and an expiring one to 15:30 on its
 expiry day, stock derivatives to 15:45 on every day, the post-close session 15:50-16:00. It does not
-say which stocks the auction covers. Reports of NSE's two circulars of 6 Nov 2026 say it stays with
-stocks that have derivatives on an exchange (not on the ex-date of a scheme of arrangement); NSE's
-own text was not reached. ``every_stock`` of the second regime follows the owner's reading (every
-stock); if NSE's circular says otherwise, setting it to False is the whole change.
+say which stocks the auction covers. NSE's two circulars of 6 Nov 2026, as reported, keep it for
+securities with derivatives contracts on at least one exchange, subject to exceptions (not on the
+ex-date of a scheme of arrangement, which is not modelled here): so ``every_stock`` is False in
+both regimes, and from 7 Dec a stock without derivatives ends at 15:30 with no auction.
 
 Every reader takes its times from here, never from a constant of its own:
 
@@ -68,14 +68,15 @@ class Regime:
     print_after_cash: int
     #: The auction's price is expected this many minutes after the cash close (X6j).
     close_after_cash: int
-    #: Every cash stock closes by auction, not only those with derivatives.
+    #: Every cash stock closes by auction, not only those with derivatives (False in both
+    #: regimes: NSE keeps the auction for stocks with derivatives, circulars of 6 Nov 2026).
     every_stock: bool
 
 
 #: Each regime from its first day; the first one also covers earlier days.
 REGIMES: tuple[Regime, ...] = (
     Regime(date(2026, 8, 3), (555, 930), (555, 915), (555, 940), 940, 5, 0, False),
-    Regime(date(2026, 12, 7), (555, 930), (555, 930), (555, 945), 930, 10, 10, True),
+    Regime(date(2026, 12, 7), (555, 930), (555, 930), (555, 945), 930, 10, 10, False),
 )
 #: Underlyings of index derivatives: an OpenAlgo derivative symbol starts with one, then DDMMMYY.
 INDEX_UNDERLYINGS = ("NIFTYNXT50", "MIDCPNIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX50", "BANKEX",
