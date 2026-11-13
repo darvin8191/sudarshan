@@ -9,9 +9,11 @@ date of any tab, so that "the same money in the index" has a level for every flo
   governor ships switched off: then it is said once in the journal and the closing record's top-up
   goes on alone.
 * One-year requests, newest first, one request every 2 seconds, at most 30 in a run.
-* Only after the day's last close plus 5 minutes (15:45 on a normal day, 15:50 from 7 Dec 2026)
-  on trading days, or at any hour on a day the exchange is closed, so market-hours candle calls
-  of other services never share the moment (sessions.py through the calendar).
+* Only after the day's last close plus 5 minutes, and once the governor takes bulk requests again
+  (16:00; 16:05 from 7 Dec 2026, its market hours ending 20 minutes after the F&O close), on
+  trading days, or at any hour on a day the exchange is closed, so market-hours candle calls of
+  other services never share the moment (sessions.py through the calendar). A run the governor
+  still refuses as early is not recorded, and is made again at the next check (review L2).
 * It stops where the data ends: a year with no candle is the end, and the day it ends at is kept
   in the job's note so that the next run does not ask again.
 * NIFTY 500's key is looked up in the master contract. If it is not there, NIFTY 50 goes on alone,
@@ -30,6 +32,9 @@ from decimal import Decimal
 from typing import Any
 from urllib.parse import quote
 
+from sudarshan.autologin.schedule import usual_on
+from sudarshan.feed.rest import MARKET_HOURS as BULK_HOURS
+
 from .core.days import IST_OFFSET_MS, MS_PER_DAY, day_of_instant, from_date, to_date
 from .core.kinds import PRICE_SCALE
 from .feedlink import CLIENT, INDEX_KEYS, json_of
@@ -43,12 +48,15 @@ OWNER = Scope.owner()
 PAUSE_S = 2.0
 MAX_REQUESTS = 30
 CLOSED_AFTER_MIN = 5  # minutes after the day's last close
-NOT_BEFORE_MIN = 16 * 60  # and never before 16:00 IST
+#: A run the governor refused as too early (bulk-hours): not recorded, asked again (review L2).
+WAITING = "waiting"
 BENCHMARK_OF = dict(zip(INDEX_KEYS, ("nifty50", "nifty500"), strict=True))
 WORDS = {
     "off": "Index history is not asked for: the feed's request governor is switched off. "
     "Benchmarks fill in day by day from the closing record.",
     "missing": "NIFTY 500 is not in the master contract, so only NIFTY 50 is followed.",
+    "waiting": "Index history waits for the feed to take history downloads again, after the "
+    "market's hours; it is asked again then.",
 }
 BEGINS = re.compile(r"(nifty50|nifty500) begins (\d{8})")
 
@@ -116,7 +124,8 @@ class Backfill:
         if close is None:
             return False
         midnight = (now + IST_OFFSET_MS) // MS_PER_DAY * MS_PER_DAY - IST_OFFSET_MS
-        start = max(close + CLOSED_AFTER_MIN * 60_000, midnight + NOT_BEFORE_MIN * 60_000)
+        opens = usual_on(day, BULK_HOURS)[1]  # when the governor takes bulk requests again
+        start = max(close + CLOSED_AFTER_MIN * 60_000, midnight + opens * 60_000)
         return now >= start
 
     async def keys(self) -> tuple[list[str], str | None]:
@@ -168,9 +177,12 @@ class Backfill:
                     headers={"X-Sudarshan-Client": CLIENT, "X-Sudarshan-Priority": "bulk"},
                 )
                 if answer is None or answer.status_code != 200:
-                    if answer is not None and answer.headers.get("x-sudarshan-reason") == "off":
+                    reason = answer.headers.get("x-sudarshan-reason") if answer is not None else None
+                    if reason == "off":
                         self.say_once("off", WORDS["off"])
                         return "skipped", WORDS["off"]
+                    if reason == "bulk-hours" and not stored:  # too early, never a failed day
+                        return WAITING, WORDS["waiting"]
                     notes.append("the feed did not give index history; it will be asked again")
                     return "failed", "; ".join(notes)
                 found = candles(json_of(answer))
@@ -210,6 +222,9 @@ async def benchmark_step(service: Any, now: int) -> str | None:
     if done is not None or not runner.due(now):
         return None
     status, note = await runner.run(now)
+    if status == WAITING:
+        runner.say_once(WAITING, note)
+        return None
     await loop.run_in_executor(
         None,
         lambda: service.store.write(

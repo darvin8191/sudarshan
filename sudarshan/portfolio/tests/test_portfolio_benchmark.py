@@ -273,6 +273,40 @@ def test_it_runs_after_the_close_on_a_trading_day_and_any_time_on_a_closed_day(
     assert Backfill(rig.svc).due(ist(day, h, m)) is due
 
 
+@pytest.mark.parametrize(
+    ("day", "mo", "h", "m", "due"),
+    [
+        (4, 12, 15, 59, False),  # Fri 4 Dec: the governor takes bulk requests from 16:00, as before
+        (4, 12, 16, 0, True),
+        (10, 12, 16, 0, False),  # Thu 10 Dec: F&O to 15:45, bulk requests only from 16:05 (L2)
+        (10, 12, 16, 4, False),
+        (10, 12, 16, 5, True),
+    ],
+)
+def test_it_waits_for_the_governor_s_bulk_hours_to_end_on_both_sides_of_7_december(
+    make, day, mo, h, m, due
+):
+    rig = make()
+    assert Backfill(rig.svc).due(ist(day, h, m, mo=mo)) is due
+
+
+def test_a_run_the_governor_refuses_as_early_is_asked_again_never_a_failed_day(make):
+    """Thu 10 Dec at 16:00:30 the governor answered "bulk-hours" until 16:05 and the day was written
+    as failed, not asked again before the next day (review L2). It is not recorded now, and the run
+    at the next check after 16:05 takes the history."""
+    rig = make()
+    flow(rig, 20261001)
+    rig.feed.candle_rows[INDEX_KEYS[0]] = [("2026-12-09", 26_100.0)]
+    rig.feed.governor = "bulk-hours"
+    runner = rig.svc._backfill = Backfill(rig.svc)
+    runner.due = lambda now: True  # a check that came early (a special day, a clock a minute out)
+    assert asyncio.run(_step(rig, ist(10, 16, 0, 30, mo=12))) is None
+    assert rig.job("benchmark", 20261210) is None
+    rig.feed.governor = "on"
+    assert asyncio.run(_step(rig, ist(10, 16, 6, mo=12))) == "ok"
+    assert rig.job("benchmark", 20261210)["status"] == "ok"
+
+
 def test_a_special_day_uses_its_own_close(make):
     rig = make(extra="2026-11-08 14:05-15:40  # Muhurat\n")
     runner = Backfill(rig.svc)
