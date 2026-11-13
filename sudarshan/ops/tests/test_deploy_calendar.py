@@ -1015,11 +1015,29 @@ FAKES = {
     "systemctl": 'echo "$*" >> "${FAKE_WEB}/systemctl"\nif [[ "$1" == "is-active" ]]; then echo active; fi',
     "uv": "exit 0",
     "sleep": "exit 0",
-    # chown -R of the app and backup folders needs root, and the ring's user is not on this machine;
-    # both are only recorded. Any other chown is the real one.
+    # chown -R of the app and backup folders needs root, and the ring's accounts (sudarshan and
+    # sudarshan-family) are not on this machine; both are only recorded. Any other chown is the real
+    # one. The owner named is the first word that is not an option (the forms the tool writes).
     "chown": (
         'echo "$*" >> "${FAKE_WEB}/chown"\n'
-        'if [[ "$1" == "-R" || "$1" == "sudarshan:sudarshan" ]]; then exit 0; fi\nexec CHOWN "$@"'
+        'if [[ "$1" == "-R" ]]; then exit 0; fi\n'
+        "spec=\n"
+        'for a in "$@"; do\n'
+        '    case "$a" in --reference=*) exec CHOWN "$@" ;; -*) ;; *) spec="$a"; break ;; esac\n'
+        "done\n"
+        'case "${spec}" in sudarshan:*|*:sudarshan|*:sudarshan-family) exit 0 ;; esac\n'
+        'exec CHOWN "$@"'
+    ),
+    # stat -c %U on a folder under the ring's state (FAKE_RINGVAR) names sudarshan, as on the server,
+    # unless a test wrote the owner of that path in web/owner-<sha256 of the path, 16 hex>. Every
+    # other stat is the real one.
+    "stat": (
+        'if [[ "$1" == "-c" && "$2" == "%U" && "$3" == "--" && $# -eq 4 ]]; then\n'
+        '    key="$(printf %s "$4" | sha256sum | cut -c1-16)"\n'
+        '    if [[ -f "${FAKE_WEB}/owner-${key}" ]]; then cat "${FAKE_WEB}/owner-${key}"; exit 0; fi\n'
+        '    if [[ -n "${FAKE_RINGVAR:-}" && "$4" == "${FAKE_RINGVAR}"/* ]]; then echo sudarshan; exit 0; fi\n'
+        "fi\n"
+        'exec STAT "$@"'
     ),
     "date": (
         'if [[ "$1" == "+%u %H%M %F" ]]; then\n'
@@ -1063,6 +1081,7 @@ class Box:
         _shim(self.app / ".venv" / "bin", "python", 'exit "${FAKE_MIGRATIONS}"')  # migrate_all.py
         for name, body in FAKES.items():
             body = body.replace("CHOWN", shutil.which("chown") or "chown")
+            body = body.replace("STAT", shutil.which("stat") or "stat")
             _shim(self.bin, name, body.replace("DATE", shutil.which("date") or "date"))
         user = pwd.getpwuid(os.geteuid()).pw_name
         (self.etc / "deploy.env").write_text(
@@ -1124,7 +1143,22 @@ class Box:
         log = self.web / "requests"
         return log.read_text().splitlines() if log.exists() else []
 
-    def run(self, *args: str, timeout: float = 120) -> subprocess.CompletedProcess:
+    def owner(self, path: Path, account: str) -> None:
+        """What ``stat -c %U`` names as the owner of ``path`` on this server."""
+        (self.web / f"owner-{self.key(str(path))}").write_text(f"{account}\n")
+
+    def feed_tokens_in_place(self) -> None:
+        """The price feed's client tokens as the tool makes them once on every server (a test that
+        compares /etc/sudarshan before and after a run starts with them there)."""
+        folder = self.etc / "feed-clients"
+        folder.mkdir(mode=0o750, exist_ok=True)
+        for name in ("alerts", "screener", "portfolio", "journal", "family", "protect"):
+            (folder / f"sudarshan-{name}").write_text("t" * 43 + "\n")
+
+    def run(
+        self, *args: str, timeout: float = 120, prefix: tuple[str, ...] = ()
+    ) -> subprocess.CompletedProcess:
+        """The whole tool on this server; ``prefix`` goes before bash (strace, for one)."""
         script = (
             DEPLOY_TOOL.read_text()
             .replace("/etc/sudarshan", str(self.etc))
@@ -1136,7 +1170,7 @@ class Box:
         )
         (self.web / "later").unlink(missing_ok=True)
         return subprocess.run(
-            ["bash", "-c", script, "sudarshan-deploy", *args],
+            [*prefix, "bash", "-c", script, "sudarshan-deploy", *args],
             capture_output=True,
             text=True,
             errors="replace",
@@ -1147,6 +1181,7 @@ class Box:
                 "TMPDIR": str(self.tmp),
                 "LC_ALL": "C.UTF-8",
                 "FAKE_WEB": str(self.web),
+                "FAKE_RINGVAR": str(self.ringvar),
                 "FAKE_NOW": self.now,
                 "FAKE_NOW_LATER": self.later,
                 "FAKE_MIGRATIONS": self.migrations,
@@ -1552,6 +1587,7 @@ def test_an_install_applies_its_list_with_a_backup(tmp_path):
 def test_a_broken_list_never_blocks_an_install(tmp_path, code, listing, cut, says):
     box = Box(tmp_path, latest="v1.0.1")
     box.calendar("v1.0.1", listing, code, cut)
+    box.feed_tokens_in_place()  # made once by an earlier run: the run below changes nothing in etc
     before = _snapshot(box.etc)
     done = box.run()
     assert done.returncode == 0, done.stdout + done.stderr
