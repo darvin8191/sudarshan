@@ -24,6 +24,11 @@ on the cash session's grid (the 15:15-15:30 candle, the day): an alert at candle
 that candle when the print arrives, or, with no print, when the print's time is over
 (cross-design X6c). A day high or low and a VWAP take continuous trades only.
 
+From 7 Dec 2026 an index's closing value may come after the cash close (clock.closing, review
+M2): price-level and % move alerts judge it as the day's last value, in the day's last candle, and
+an alert at candle close judges that candle when the value's time is over (15:45:05). With no
+such value its result is the same, judged then.
+
 The print is a trade (X6i, the owner's probe of 27 Oct 2026): a frame of a CAS key counts as it
 only when its cumulative volume (``vtt``) rose against the key's last frame. From 15:20 Upstox
 sends such a key one frame a minute with its ltt on the minute, the last continuous price and the
@@ -42,10 +47,13 @@ from typing import NamedTuple
 from sudarshan.alerts.market import conditions
 from sudarshan.alerts.market.clock import (
     AUCTION_PRINT,
+    CLOSING_VALUE,
     OK,
+    OUTSIDE_HOURS,
     Market,
     auction,
     candle,
+    closing,
     gate,
     within,
 )
@@ -62,7 +70,7 @@ from sudarshan.alerts.market.engine import (
     timer,
 )
 from sudarshan.alerts.market.grain import paise
-from sudarshan.alerts.market.sessions import AUCTION, day_key
+from sudarshan.alerts.market.sessions import AUCTION, INDEX_SEGMENTS, day_key
 from sudarshan.alerts.market.spec import AT_CLOSE, BREAK, CROSS, PER_CANDLE, Alert
 from sudarshan.autologin.schedule import IST
 
@@ -79,6 +87,8 @@ AUCTION_KINDS = frozenset({"price", "move"})
 #: A CAS key's frame in its auction's time whose volume did not rise: the auction's book, never
 #: a trade (X6i).
 NOT_A_TRADE = "not_a_trade"
+#: Values made after a session's end that are the day's last: a print, an index's closing value.
+LAST_VALUES = frozenset({AUCTION_PRINT, CLOSING_VALUE})
 
 
 def _ms(value) -> int | None:
@@ -219,7 +229,9 @@ class Book:
                     rose = volume is not None and last is not None and volume > last
                     if trade == AUCTION_PRINT and not rose:
                         trade = NOT_A_TRADE  # its volume did not move: the auction's book
-                if trade == OK or trade == AUCTION_PRINT:
+                elif trade == OUTSIDE_HOURS and segment in INDEX_SEGMENTS:  # its closing value?
+                    trade = closing(market, segment, ltt, recv, now)
+                if trade == OK or trade == AUCTION_PRINT or trade == CLOSING_VALUE:
                     self._trades[key] = identity
                 if trade == AUCTION_PRINT:
                     if self._printed.get(key) == market.today:
@@ -233,11 +245,12 @@ class Book:
         for alert in alerts:
             cond = alert.cond
             source = cond.source
-            printed = False
+            printed = last = False
             if source == "ltp":
-                if trade != OK and (trade != AUCTION_PRINT or alert.kind not in AUCTION_KINDS):
+                if trade != OK and (trade not in LAST_VALUES or alert.kind not in AUCTION_KINDS):
                     continue
                 raw, at, printed = ltp, ltt, trade == AUCTION_PRINT
+                last = printed or trade == CLOSING_VALUE  # the day's last candle takes it
             else:
                 raw = frame.get(source)  # "bid" or "ask"
                 if raw is None:
@@ -265,10 +278,12 @@ class Book:
                     start_state = old._replace(derived=got.derived)
             if alert.frequency in CANDLED:
                 grid = market.sessions[segment]  # the cash grid, a CAS key's too
-                k, start, end = candle(grid, alert.candle_min, grid.end - 1 if printed else at)
+                k, start, end = candle(grid, alert.candle_min, grid.end - 1 if last else at)
                 due = None
                 if cls != segment and end == grid.end and alert.kind in AUCTION_KINDS:
                     due = market.sessions[cls].auction_until + CLOSE_CHECK_MS  # waits for it
+                elif grid.close_until is not None and end == grid.end and alert.kind in AUCTION_KINDS:
+                    due = grid.close_until + CLOSE_CHECK_MS  # an index's closing value (M2)
                 obs = Obs(value, at, today, up, down, k, start, end, due)
             else:
                 obs = Obs(value, at, today, up, down)
@@ -336,9 +351,9 @@ class Book:
             and session is not None
             and (
                 session.start <= at < session.end
-                or (source == "ltp" and session.end <= at <= (session.auction_until or 0))
+                or (source == "ltp" and session.end <= at <= _last_until(session))
             )
-        )  # a CAS key's print (the official close) seeds too
+        )  # a CAS key's print (the official close), or an index's closing value, seeds too
         before = day == market.previous and carries(alert, State(day, 0), market.previous)
         if not (today or before) or day < state.session:
             return False
@@ -394,6 +409,12 @@ class Book:
             self._keys.pop(key, None)
             self._printed.pop(key, None)
             self._volumes.pop(key, None)
+
+
+def _last_until(session) -> int:
+    """The last moment a value after the session's end may be the day's (a print, an index's
+    closing value), or 0 when none may be."""
+    return session.auction_until or session.close_until or 0
 
 
 def _close_at_print(

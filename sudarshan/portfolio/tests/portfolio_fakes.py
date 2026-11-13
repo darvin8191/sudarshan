@@ -157,6 +157,10 @@ class FakeFeed:
                         return self._send(
                             503, {"error": "switched off"}, {"X-Sudarshan-Reason": "off"}
                         )
+                    if feed.governor == "bulk-hours":  # the governor's market hours (G4)
+                        return self._send(
+                            503, {"error": "market hours"}, {"X-Sudarshan-Reason": "bulk-hours"}
+                        )
                     if "/historical-candle/" in url.path:
                         import time
                         from urllib.parse import unquote

@@ -132,10 +132,18 @@ def session_of(day: date) -> tuple[int, int]:
     return (regimes.PRE_OPEN, regimes.fo_close(day))
 
 
-def usual_on(day: date, usual: tuple[int, int]) -> tuple[int, int]:
+def usual_on(
+    day: date, usual: tuple[int, int], written: tuple[int, int] | None = None
+) -> tuple[int, int]:
     """A reader's usual hours on ``day``: the margins ``usual`` keeps around SESSION, kept around
     the day's own session. ``usual`` itself until 6 Dec 2026; from 7 Dec its end moves with the
-    F&O close (the feed's 08:58-15:50 is 08:58-15:55 then, auto-login's 08:30-15:40 08:30-15:45)."""
+    F&O close (the feed's 08:58-15:50 is 08:58-15:55 then, auto-login's 08:30-15:40 08:30-15:45).
+
+    ``written``: the reader's own usual window, written against SESSION, when ``usual`` is a
+    setting the owner may have changed. A setting that ends where it ends moves with it; one the
+    owner made end anywhere else (08:30-09:15, 09:00-23:55) keeps its end (review L3)."""
+    if written is not None and usual[1] != written[1]:
+        return usual
     return with_margins(session_of(day), usual)
 
 

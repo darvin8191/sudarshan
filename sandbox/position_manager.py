@@ -31,7 +31,7 @@ from sandbox.position_locks import holds_position_lock, position_lock  # noqa: F
 from sandbox.session_boundary import IST, last_session_expiry_utc
 from services.market_data_service import get_market_data_service
 from services.quotes_service import get_multiquotes, get_quotes
-from sudarshan import regimes  # SUDARSHAN: the exchange's expiry-day stops by date
+from sudarshan import index_contracts, regimes  # SUDARSHAN: expiry-day stops by date
 from utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -194,12 +194,13 @@ def expiry_close_time(expiry_date, exchange, symbol=None):
     """When a contract expiring on ``expiry_date`` stops trading that day (IST).
 
     SUDARSHAN: NFO and BFO from the exchange's timing table, by the day: an
-    index contract (NIFTY..., SENSEX...) stops at the regime's index expiry
-    stop, any other at the F&O close. Without a symbol the F&O close applies.
-    Other exchanges keep EXCHANGE_CLOSE_TIMES.
+    index contract (NIFTY..., SENSEX..., NIFTYFPI..., any index derivative the
+    master lists) stops at the regime's index expiry stop, any other at the F&O
+    close. Without a symbol the F&O close applies. Other exchanges keep
+    EXCHANGE_CLOSE_TIMES.
     """
     if exchange in REGIME_EXCHANGES:
-        index = bool(symbol) and regimes.index_derivative(str(symbol))
+        index = bool(symbol) and index_contracts.is_index_contract(str(symbol))  # L1: the master
         minute = regimes.expiry_stop(expiry_date, index=index)
         return dt_time(minute // 60, minute % 60)
     return EXCHANGE_CLOSE_TIMES.get(exchange, DEFAULT_CLOSE_TIME)
@@ -306,6 +307,40 @@ def is_contract_expired_now(expiry_date, exchange, now=None, symbol=None):
         return False
     close_time = expiry_close_time(expiry_date, exchange, symbol)  # SUDARSHAN: by the day
     return now.time() >= close_time
+
+
+def _now_ist():
+    return datetime.now(pytz.timezone("Asia/Kolkata"))
+
+
+def stopped_contract_words(symbol, exchange, expiry, now=None):
+    """SUDARSHAN (v0.8.1 review L5): why Analyze mode refuses an order on an NFO or BFO contract
+    that has stopped trading, or None while it trades.
+
+    On its expiry day a contract stops at its regime's stop (expiry_close_time: 15:40 until
+    6 Dec 2026; from 7 Dec 15:30 for an index contract, 15:45 for a stock contract), whatever the
+    settlement timing says, and the exchange refuses any order after it. ``expiry`` is the
+    master's text (08-DEC-26) or a date.
+    """
+    if exchange not in REGIME_EXCHANGES or not expiry:
+        return None
+    if isinstance(expiry, str):
+        for shape in ("%d-%b-%y", "%d-%b-%Y"):
+            try:
+                expiry = datetime.strptime(expiry.strip().upper(), shape).date()
+                break
+            except ValueError:
+                continue
+        else:
+            return None
+    now = now or _now_ist()
+    stop = expiry_close_time(expiry, exchange, symbol)
+    if now.date() < expiry or (now.date() == expiry and now.time() < stop):
+        return None
+    return (
+        f"This contract stopped trading at {stop:%H:%M} on its expiry day; "
+        "the exchange would refuse it."
+    )
 
 
 def get_expiry_settlement_price(position):
