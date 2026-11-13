@@ -7,6 +7,7 @@ import { directionOf, formatPercent, formatPrice } from '@/sudarshan/dashboard/f
 import { TREND_TEXT, TrendArrow } from '@/sudarshan/dashboard/Trend'
 import { ChipMark } from '@/sudarshan/screener/ChipMark'
 import type { Chip } from '@/sudarshan/screener/types'
+import { type ArrangeEdit, ArrangeRows } from './ArrangeSheet'
 import { describe, formatChange, priceDecimals, type TickDirection } from './rows'
 import { SectionHeader } from './SectionHeader'
 import type { LiveRow } from './useLiveRows'
@@ -234,6 +235,7 @@ export function WatchlistRows({
   onAdd,
   tags,
   sections,
+  arrange,
 }: {
   rows: LiveRow[]
   loading: boolean
@@ -247,6 +249,8 @@ export function WatchlistRows({
   tags?: ReadonlyMap<string, Chip>
   /** v2 (F3): the rows in sections. Absent with the switch off, and while editing (flat). */
   sections?: SectionLayout
+  /** v2 (F5): edit mode as a draft with sections. Absent with the switch off. */
+  arrange?: ArrangeEdit
 }) {
   if (loading) {
     return (
@@ -260,6 +264,10 @@ export function WatchlistRows({
       </ul>
     )
   }
+
+  // F5: editing an own list in v2 arranges a draft.
+  if (editing && arrange)
+    return <ArrangeRows edit={arrange} items={rows.map((row) => row.item)} onRemove={onRemove} />
 
   const sectioned = sections && !editing && sections.groups.length > 1
   if (rows.length === 0 && !sectioned) {

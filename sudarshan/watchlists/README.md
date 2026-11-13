@@ -335,6 +335,28 @@ between lists is F5's. Tests: `v2/sections.test.tsx` against `mockBridge.ts`.
 Not covered: Back does not close the list menu itself (a Radix dropdown, not an address entry); the
 sheets it opens do.
 
+## F5 - arranging, copying and moving on the phone
+
+With v2 on and an own list open, "Reorder or remove" edits a draft (`ArrangeSheet.tsx`, `useArrange`; the
+pure parts in `v2/arrange.ts`). Symbols keep their 48 dp up and down, now inside their section; each
+symbol gains "Move to section" (a sheet of No section and the list's sections, `?sheet=to-section&ci=<item>`)
+and each section gains up and down for the whole section. "Save order" sends one `arrange` with the draft's
+section order, every symbol's section and the item order (No section first, then each section), on the
+version the last `view` answered; Remove stays an immediate write as before, and the draft drops that
+symbol. A `conflict` shows its sentence, reads the list again and starts the draft over from it; the
+`failed` sentence is shown as it comes and Save stays on for another try. The symbol sheet gains "Move to
+section" (written at once, one `arrange`) and "Copy to another list"; a section's menu gains "Move to
+another list" and "Copy to another list". All four open the list picker (`ListPicker.tsx`,
+`?sheet=to-list&ci=<item>` or `&section=<id>`, `&move=1` for a move): the owner's other lists as "Swing
+- 24 of 250", and New list (off at 50 lists, with the server's sentence). A list picked asks for an optional
+section of it (read through `view`, whose version is then sent as `version`) and sends one `copy`, with `move`
+only for a move. The 250-symbol room is checked before sending from the target's own rows when read (so
+symbols it already holds do not count), in W8's sentence. After every write the affected lists and the
+page's lists are read again whatever the answer. A built-in, ranked or flag list shows "A built-in list
+cannot be changed. Make a copy to arrange it." where its rows would be. With the switch off the page is as it was
+and the F5 sheets are unknown to the address. Follow rows are F11's and are not moved. Tests:
+`v2/arrange.test.tsx`.
+
 ## W7 - sections (`store/sections.py`, `ops/sections.py`, `words/sections.py`)
 
 `section_add`, `section_edit` and `section_remove` act on own lists only (`list:<id>`): a list or a

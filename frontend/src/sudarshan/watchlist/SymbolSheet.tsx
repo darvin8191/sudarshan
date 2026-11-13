@@ -1,5 +1,15 @@
 import { useQuery } from '@tanstack/react-query'
-import { BellPlus, CandlestickChart, Clock, Layers, Pin, PinOff, Trash2 } from 'lucide-react'
+import {
+  BellPlus,
+  CandlestickChart,
+  Clock,
+  Copy,
+  FolderInput,
+  Layers,
+  Pin,
+  PinOff,
+  Trash2,
+} from 'lucide-react'
 import { useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { oiProfileApi } from '@/api/oi-profile'
@@ -32,6 +42,13 @@ import { Figures, figuresOf } from './WatchlistRows'
 export function chainPath(chain: { exchange: string; underlying: string }): string {
   const query = new URLSearchParams({ exchange: chain.exchange, underlying: chain.underlying })
   return `/optionchain?${query}`
+}
+
+/** F5: what the symbol sheet offers an own list in v2. */
+export interface ArrangeActions {
+  /** Absent while the list has no sections. */
+  onSection?: (item: WatchlistItem) => void
+  onCopy: (item: WatchlistItem) => void
 }
 
 const ACTION =
@@ -273,6 +290,7 @@ export function SymbolSheet({
   onAlert,
   onRemove,
   pin,
+  arrange,
 }: {
   row: LiveRow | null
   listName: string
@@ -289,6 +307,8 @@ export function SymbolSheet({
   onRemove?: (item: WatchlistItem) => void
   /** A row a screener put here: Pin keeps it in the list while it stops matching (M9 UI7). */
   pin?: PinControl | null
+  /** v2 (F5): Move to section and Copy to another list; absent where the list is not an own one. */
+  arrange?: ArrangeActions
 }) {
   if (!row) return null
   return (
@@ -305,6 +325,7 @@ export function SymbolSheet({
       onAlert={onAlert}
       onRemove={onRemove}
       pin={pin}
+      arrange={arrange}
     />
   )
 }
@@ -321,6 +342,7 @@ function Sheet({
   onAlert,
   onRemove,
   pin,
+  arrange,
 }: Parameters<typeof SymbolSheet>[0] & { row: LiveRow }) {
   const { item } = row
   const named = describe(item.symbol, item.exchange)
@@ -468,6 +490,21 @@ function Sheet({
                 {pin.problem}
               </p>
             )}
+          </div>
+        )}
+
+        {arrange && (
+          <div className="grid grid-cols-2 gap-2">
+            {arrange.onSection && (
+              <button type="button" onClick={() => arrange.onSection?.(item)} className={OUTLINED}>
+                <FolderInput aria-hidden="true" className="size-5" />
+                Move to section
+              </button>
+            )}
+            <button type="button" onClick={() => arrange.onCopy(item)} className={OUTLINED}>
+              <Copy aria-hidden="true" className="size-5" />
+              Copy to another list
+            </button>
           </div>
         )}
 

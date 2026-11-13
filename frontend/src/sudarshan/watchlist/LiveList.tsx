@@ -6,7 +6,8 @@ import { LiveLine } from '@/sudarshan/dashboard/LiveLine'
 import { keyOf, type MarketOpen } from '@/sudarshan/dashboard/live'
 import type { MemberRow } from '@/sudarshan/screener/api'
 import { exitedToday, tagsOf, usePin } from '@/sudarshan/screener/feed'
-import { type OrderRequest, SymbolSheet } from './SymbolSheet'
+import type { ArrangeEdit } from './ArrangeSheet'
+import { type ArrangeActions, type OrderRequest, SymbolSheet } from './SymbolSheet'
 import { useLiveRows } from './useLiveRows'
 import { type SectionLayout, WatchlistRows } from './WatchlistRows'
 
@@ -37,6 +38,8 @@ export const LiveList = memo(function LiveList({
   onAlert,
   members,
   sections,
+  arrange,
+  symbolActions,
 }: {
   items: WatchlistItem[]
   apiKey: string | null
@@ -60,6 +63,9 @@ export const LiveList = memo(function LiveList({
   members?: readonly MemberRow[]
   /** v2 (F3): the open own list's sections; absent with the switch off. */
   sections?: SectionLayout
+  /** v2 (F5): edit mode as a draft, and what the symbol sheet adds. */
+  arrange?: ArrangeEdit
+  symbolActions?: ArrangeActions
 }) {
   const tags = useMemo(() => tagsOf(members ?? NO_MEMBERS), [members])
   const byKey = useMemo(
@@ -110,6 +116,7 @@ export const LiveList = memo(function LiveList({
           onAdd={onAdd}
           tags={tags}
           sections={sections}
+          arrange={arrange} // F5
         />
       </section>
       {exited.length > 0 && (
@@ -134,6 +141,7 @@ export const LiveList = memo(function LiveList({
         onAlert={onAlert}
         onRemove={onRemove}
         pin={pin}
+        arrange={symbolActions} // F5
       />
     </>
   )

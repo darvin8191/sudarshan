@@ -19,6 +19,8 @@ import type { OrderRequest } from './SymbolSheet'
  * - `?sheet=lists` (M8.5, v2 only): the All lists sheet. A sheet of v2 is
  *   known to the address only while v2 is on (`useOverlay(true)`), so with the
  *   switch off the page reads its address exactly as it did.
+ * - `?sheet=to-section&ci=<item>` and `?sheet=to-list&ci=<item>` or `&section=<id>`, with `&move=1`
+ *   for a move (M8.4 F5, v2 only): the section picker and the list picker.
  * - `?sheet=section&section=<id>` (M8.4 F3, v2 only): a section's menu; `?sheet=section-name`
  *   names a new section, or renames the one in `&section=<id>`; `?sheet=section-remove&section=<id>`
  *   asks before removing it.
@@ -35,6 +37,8 @@ export type Overlay =
   | { kind: 'section'; sectionId: number }
   | { kind: 'sectionName'; sectionId: number | null }
   | { kind: 'sectionRemove'; sectionId: number }
+  | { kind: 'pickSection'; item: number }
+  | { kind: 'pickList'; item: number | null; section: number | null; move: boolean }
 
 export type OverlayRequest =
   | Exclude<Overlay, { kind: 'order' } | { kind: 'alert' }>
@@ -43,7 +47,14 @@ export type OverlayRequest =
 
 const SHEETS = new Set(['add', 'new', 'rename', 'delete', 'order', 'alert'])
 /** The sheets only v2 opens; later v2 sheets are added here. */
-const V2_SHEETS = new Set(['lists', 'section', 'section-name', 'section-remove'])
+const V2_SHEETS = new Set([
+  'lists',
+  'section',
+  'section-name',
+  'section-remove',
+  'to-section',
+  'to-list',
+])
 const SECTION_KINDS: Record<string, 'section' | 'sectionName' | 'sectionRemove'> = {
   section: 'section',
   'section-name': 'sectionName',
@@ -74,6 +85,15 @@ export function overlayOf(params: URLSearchParams, state: unknown, v2 = false): 
   if (!sheet || !(SHEETS.has(sheet) || (v2 && V2_SHEETS.has(sheet)))) return null
   if (sheet === 'order') return { kind: 'order', order: entryState(state).order ?? null }
   if (sheet === 'alert') return { kind: 'alert', alert: entryState(state).alert ?? null }
+  const ci = Number(params.get('ci'))
+  const pick = Number.isInteger(ci) && ci > 0 ? ci : null
+  const sec = Number(params.get('section'))
+  const section = Number.isInteger(sec) && sec > 0 ? sec : null
+  if (sheet === 'to-section') return pick === null ? null : { kind: 'pickSection', item: pick }
+  if (sheet === 'to-list') {
+    if ((pick === null) === (section === null)) return null
+    return { kind: 'pickList', item: pick, section, move: params.get('move') === '1' }
+  }
   const kind = SECTION_KINDS[sheet]
   if (kind) {
     const id = Number(params.get('section'))
@@ -98,7 +118,17 @@ function withOverlay(params: URLSearchParams, next: OverlayRequest | null): URLS
   out.delete('item')
   out.delete('sheet')
   out.delete('section')
-  if (next?.kind === 'item') out.set('item', String(next.itemId))
+  out.delete('ci')
+  out.delete('move')
+  if (next?.kind === 'pickSection') {
+    out.set('sheet', 'to-section')
+    out.set('ci', String(next.item))
+  } else if (next?.kind === 'pickList') {
+    out.set('sheet', 'to-list')
+    if (next.item !== null) out.set('ci', String(next.item))
+    if (next.section !== null) out.set('section', String(next.section))
+    if (next.move) out.set('move', '1')
+  } else if (next?.kind === 'item') out.set('item', String(next.itemId))
   else if (next && 'sectionId' in next) {
     out.set('sheet', SECTION_SHEET[next.kind])
     if (next.sectionId !== null) out.set('section', String(next.sectionId))

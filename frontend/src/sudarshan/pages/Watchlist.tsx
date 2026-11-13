@@ -27,6 +27,7 @@ import { useFedLists, useListMembership } from '@/sudarshan/screener/feed'
 import { useScreenerPush } from '@/sudarshan/screener/push'
 import { AddSymbolSheet } from '@/sudarshan/watchlist/AddSymbolSheet'
 import { AllListsSheet } from '@/sudarshan/watchlist/AllListsSheet'
+import { ArrangeSheets, useArrange } from '@/sudarshan/watchlist/ArrangeSheet'
 import { DeleteDialog, NameDialog } from '@/sudarshan/watchlist/ListDialogs'
 import { ListStrip, ownId, ownRef, tabsFor } from '@/sudarshan/watchlist/ListStrip'
 import { LISTS_FULL, ListTabs, PANEL_ID, tabId } from '@/sudarshan/watchlist/ListTabs'
@@ -35,6 +36,7 @@ import { SectionSheets } from '@/sudarshan/watchlist/SectionMenus'
 import type { OrderRequest } from '@/sudarshan/watchlist/SymbolSheet'
 import { useOverlay } from '@/sudarshan/watchlist/useOverlay'
 import { MAX_ITEMS, MAX_LISTS, useWatchlists } from '@/sudarshan/watchlist/useWatchlists'
+import { BUILT_IN } from '@/sudarshan/watchlist/v2/arrange'
 import { groupsOf, SECTIONS_FULL, useCollapsed } from '@/sudarshan/watchlist/v2/sections'
 import { LIMITS } from '@/sudarshan/watchlist/v2/types'
 import { useListView, useV2State } from '@/sudarshan/watchlist/v2/useListView'
@@ -178,6 +180,29 @@ export default function Watchlist() {
         : undefined,
     [view, sectionsRef, folds.collapsed, folds.toggle, open]
   )
+  // F5 (v2): edit mode as a draft saved with one `arrange`, the symbol sheet's actions, the pickers.
+  const arrange = useArrange({
+    ref: sectionsRef,
+    listId: active?.id ?? null,
+    view,
+    items,
+    editing,
+    open: (id) => open({ kind: 'pickSection', item: id }),
+  })
+  const symbolActions = useMemo(
+    () =>
+      view && sectionsRef
+        ? {
+            onSection:
+              view.sections.length > 0
+                ? (item: WatchlistItem) => swap({ kind: 'pickSection', item: item.id })
+                : undefined,
+            onCopy: (item: WatchlistItem) =>
+              swap({ kind: 'pickList', item: item.id, section: null, move: false }),
+          }
+        : undefined,
+    [view, sectionsRef, swap]
+  )
   const { move, removeItem: removeFromList } = watchlists
   const openSheet = useCallback((itemId: number) => open({ kind: 'item', itemId }), [open])
   const moveItem = useCallback(
@@ -316,6 +341,7 @@ export default function Watchlist() {
               className="rounded-[1.125rem] border bg-card px-4 py-6 text-center text-sm font-medium"
             >
               The rows of {foreign.name} are not shown on this screen yet.
+              {foreign.kind !== 'list' && <span className="mt-2 block">{BUILT_IN}</span>}
             </section>
           ) : (
             <LiveList
@@ -336,6 +362,8 @@ export default function Watchlist() {
               onAlert={setAlert}
               members={members}
               sections={sectionLayout}
+              arrange={arrange.edit} // F5
+              symbolActions={symbolActions} // F5
             />
           )}
         </>
@@ -362,6 +390,18 @@ export default function Watchlist() {
           view={view}
           listId={active?.id ?? null}
           onSwap={swap}
+          onClose={close}
+        />
+      )}
+
+      {v2 && (
+        <ArrangeSheets
+          overlay={overlay}
+          view={view}
+          items={items}
+          listId={active?.id ?? null}
+          sendTo={arrange.sendTo}
+          sectionOf={arrange.sectionOf}
           onClose={close}
         />
       )}

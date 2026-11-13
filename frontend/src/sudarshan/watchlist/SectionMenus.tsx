@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { Check, Pencil, Trash2 } from 'lucide-react'
+import { Check, Copy, MoveRight, Pencil, Trash2 } from 'lucide-react'
 import { type FormEvent, useEffect, useState } from 'react'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
@@ -7,6 +7,7 @@ import { BottomSheet } from './BottomSheet'
 import { MARK_IDS, MARKS, MarkGlyph } from './marks'
 import type { Overlay, OverlayRequest } from './useOverlay'
 import { callOp } from './v2/api'
+import { NOTHING } from './v2/arrange'
 import { NAME_LONG, removeWords, SECTIONS_FULL, writeSection } from './v2/sections'
 import { LIMITS, type Section, type View } from './v2/types'
 
@@ -52,6 +53,7 @@ function SectionMenu({
   onClose: () => void
 }) {
   const { busy, problem, run } = useWrite(view)
+  const fixed = view.rows.filter((row) => row.item !== null && row.section_id === section.id).length
   const setMark = async (mark: number) => {
     if (mark !== section.mark)
       await run((version) => callOp('section_edit', { id: section.id, mark, version }))
@@ -71,6 +73,35 @@ function SectionMenu({
         <Pencil aria-hidden="true" className="size-5" />
         Rename
       </button>
+      {/* F5: the section's symbols to another list. */}
+      {fixed === 0 ? (
+        <p className="px-3 py-2 text-[0.8125rem] font-medium text-[color:var(--text-tertiary)]">
+          {NOTHING}
+        </p>
+      ) : (
+        <>
+          <button
+            type="button"
+            className={ROW}
+            onClick={() =>
+              onSwap({ kind: 'pickList', item: null, section: section.id, move: true })
+            }
+          >
+            <MoveRight aria-hidden="true" className="size-5" />
+            Move to another list
+          </button>
+          <button
+            type="button"
+            className={ROW}
+            onClick={() =>
+              onSwap({ kind: 'pickList', item: null, section: section.id, move: false })
+            }
+          >
+            <Copy aria-hidden="true" className="size-5" />
+            Copy to another list
+          </button>
+        </>
+      )}
       <fieldset className="m-0 border-0 p-0">
         <legend className="px-3 pt-3 pb-1 text-[0.8125rem] font-bold text-[color:var(--text-secondary)]">
           Mark
