@@ -704,3 +704,38 @@ can change them. If `/etc/sudarshan` itself exists with a stricter mode, it need
 others (`sudo chmod o+x /etc/sudarshan`) so the app's user can reach the folder. Nothing needs a restart:
 open the list again and it is read. At each index review, retype the file with the new date in its
 header line; the lists say the date they are as of, so a file that was not updated shows its old date.
+
+## W17 - the search and strikes ops (`ops/search.py`, `words/strikes.py`)
+
+Two read ops over the one master generation (`master.shared().index()`: built once per snapshot in
+slices that yield to the hub, behind the single flight, dropped with the snapshot; this module keeps
+nothing of its own, starts no thread and makes no Upstox call).
+
+- **`search`** (class `search`, 300 a minute) takes `q`, `seg` (the chip), `limit` (at most 50), `p`
+  (the underlying's price from the page's own tick, which only orders options by distance and
+  resolves ATM) and `list` (the OpenAlgo list the sheet adds to). It answers the hits grouped in the
+  design's order, stocks, indices, futures, options, commodities, each group keeping the grammar's
+  order, so the page prints one heading a group; each hit is the group, the title ("NIFTY 25,900
+  CE"), the detail ("NFO · 24 Nov 2026 · lot 65"), the master's `Contract` and `added` (true when the
+  list holds that exchange and symbol; a list that is not the owner's is `gone`). `understood` is the
+  query in one line, `underlying` is set when options exist (Pick a strike) and `suggestion` is
+  the near miss ("No exact match for RELAINCE. Did you mean RELIANCE?"), also said when the chip
+  hides what All would show ("Nothing for RELIANCE under Indices. Try All."); it is null while
+  the answer waits for a price (ATM with none sent). A blank query answers empty: Recent is the
+  page's. `contract.py` gained the optional `list` field of `search` and `types.ts` was regenerated.
+- **`strikes`** takes `u` (the underlying), `x` (its exchange), `exp` (an ISO date from the answer,
+  else the nearest), `n` (strikes each side, default 10, at most 25) and `p`. It answers the open
+  expiries ("Nearest 24 Nov", "1 Dec", "29 Dec (month)", with `month` true for the last expiry of a
+  calendar month, the nearest one included), and for the chosen expiry the strikes ATM plus or minus
+  `n` with `atm` true on one of them (W14's rule: nearest, a tie to the lower), each with its CE and
+  PE `Contract` from the master, never a built name. A side the master lacks is null and said in
+  `words`. With no price no strike is marked: the middle of the ladder is shown and `words` says the
+  price is not known yet, so the page asks again with `p` on the first tick. An expiry is open until
+  its session close (the calendar's, read at most once a minute, else 15:30 IST): on its last day it
+  is offered and `words` says when it ends, and after the close it is gone, asking for it is
+  `invalid` with field `exp`.
+
+Both answer `failed` in words while the master is not loaded and `off` with the switch off. Tests:
+`tests/test_watchlists_search_ops.py` (the grammar's vectors through the bridge, grouping, Added, the
+understood line and near miss, chips, strikes with and without a price, a last-day expiry, a missing
+side, the class limit, one generation and no new thread, and timing on 120,000 synthetic rows).
