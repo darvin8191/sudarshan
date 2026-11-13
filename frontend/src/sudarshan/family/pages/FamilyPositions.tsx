@@ -1,11 +1,12 @@
-// SUDARSHAN P6 D2: a placeholder, replaced by D4 in this same branch.
+// SUDARSHAN P6 D4 (M3.1): the member's view of the owner's positions. Read only; the marked
+// `readOnly` path of PositionCards carries it.
+import { PositionCards } from '@/sudarshan/books/cards/PositionCards'
+import type { MaskedPosition } from '../books'
+import { useFamilyBoard } from '../useBoard'
+import { useFamilyScreen } from '../useBook'
+
 export default function FamilyPositions() {
-  return (
-    <section className="flex flex-col gap-2 rounded-[1.125rem] border bg-card px-4 py-5 shadow-[var(--shadow-card)]">
-      <h2 className="text-base font-bold">Positions</h2>
-      <p className="text-sm text-[color:var(--text-secondary)]">
-        This screen is not ready yet. It will appear here in a later update.
-      </p>
-    </section>
-  )
+  useFamilyScreen('positions')
+  const board = useFamilyBoard<MaskedPosition>('positions')
+  return <PositionCards {...board} />
 }

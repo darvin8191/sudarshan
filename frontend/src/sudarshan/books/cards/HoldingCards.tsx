@@ -35,6 +35,7 @@ import {
   StaleBookNote,
   useSandbox,
 } from './parts'
+import { ReadOnlyHoldings, type ReadOnlyHoldingsProps } from './ReadOnlyHoldings'
 import { useBookOverlay, usePageDialog } from './useBookOverlay'
 import { type PricedRow, useFramePrices } from './useFramePrices'
 import { useLatest } from './useLatest'
@@ -57,6 +58,7 @@ export interface HoldingOrder {
 }
 
 export interface HoldingCardsProps {
+  readOnly?: never
   holdings: Holding[]
   /** The broker's own totals, shown until a price has moved. */
   stats: HoldingsStats | null
@@ -119,7 +121,7 @@ function totalsOf(rows: PricedRow<Holding>[], stats: HoldingsStats | null) {
   return calculateLiveStats(priced, stats ?? {}) as HoldingsStats
 }
 
-export function HoldingCards(props: HoldingCardsProps) {
+function OwnerHoldingCards(props: HoldingCardsProps) {
   const onRefresh = useLatest(props.onRefresh)
   const onOrder = useLatest(props.onOrder)
   const onOrderClose = useLatest(props.onOrderClose)
@@ -545,4 +547,11 @@ function HoldingSheet({
       </div>
     </BottomSheet>
   )
+}
+
+// SUDARSHAN P6 D4 (M6.7): `readOnly` is the viewer's path, a board of its own with no Buy more, no
+// Sell and no order ticket. The owner's board above it is unchanged.
+export function HoldingCards(props: HoldingCardsProps | ReadOnlyHoldingsProps) {
+  if (props.readOnly) return <ReadOnlyHoldings {...props} />
+  return <OwnerHoldingCards {...props} />
 }
