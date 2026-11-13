@@ -297,6 +297,46 @@ describe('the lines under a row', () => {
     )
   })
 
+  it('asks a row whose read keeps failing after 2 s, then 5 s, then every 15 s (review L13)', async () => {
+    let at = 1_000_000
+    let fail = true
+    const send = vi.fn(async () => {
+      if (fail) throw new Error('x')
+      return [answer(25900)]
+    })
+    const resolver = new FollowResolver({
+      send,
+      now: () => at,
+      problem: () => 'The strike could not be read just now.',
+    })
+    resolver.sync([rule()])
+    await flush() // the first read fails
+    expect(send).toHaveBeenCalledTimes(1)
+    const tickAt = async (ms: number) => {
+      at += ms
+      resolver.tick(new Map([['NSE_INDEX:NIFTY', { price: 25910, at }]]), true)
+      await flush()
+    }
+    for (const [wait, calls] of [
+      [1_999, 1],
+      [1, 2], // 2 s after the first failure
+      [4_999, 2],
+      [1, 3], // 5 s after the second
+      [14_999, 3],
+      [1, 4], // 15 s after the third
+      [14_999, 4],
+      [1, 5], // and every 15 s while it fails
+    ] as const) {
+      await tickAt(wait)
+      expect(send).toHaveBeenCalledTimes(calls)
+    }
+    fail = false
+    await tickAt(15_000)
+    expect(send).toHaveBeenCalledTimes(6)
+    expect(resolver.rows.get(1)?.fails).toBe(0)
+    expect(lineOf(resolver.rows.get(1)!, at)).toBeNull()
+  })
+
   it('says a failed read in words while the row has no contract', async () => {
     const resolver = new FollowResolver({
       send: vi.fn().mockRejectedValue(new Error('x')),

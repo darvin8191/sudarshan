@@ -228,6 +228,42 @@ describe('when a row asks the server again', () => {
     expect(resolves()).toHaveLength(2)
   })
 
+  // Review L6: the phone's clock ahead of the server's. At valid_until the server has not rolled by
+  // its own clock and answers the same valid_until, now in the phone's past.
+  it('asks again 5 s and 30 s after a roll the server had not made yet, then stops', async () => {
+    const roll = T0 + 10 * 60_000
+    answers.set(1, () => answer(25900, { band, valid_until: roll }))
+    mount({ rules: [rule()] })
+    await settle()
+    // This file's clock also moves with real time, so every check keeps a second from its timer.
+    await settle(10 * 60_000 + 1_000) // the ask at valid_until: the same answer comes back
+    expect(resolves()).toHaveLength(2)
+    await settle(3_000)
+    expect(resolves()).toHaveLength(2)
+    await settle(2_000) // 5 s after it
+    expect(resolves()).toHaveLength(3)
+    await settle(28_000)
+    expect(resolves()).toHaveLength(3)
+    await settle(2_000) // 30 s after that
+    expect(resolves()).toHaveLength(4)
+    await settle(30 * 60_000) // then it stops: a return or a reconnect asks
+    expect(resolves()).toHaveLength(4)
+  })
+
+  it('stops asking once the server has rolled the row', async () => {
+    const roll = T0 + 10 * 60_000
+    answers.set(1, () => answer(25900, { band, valid_until: roll }))
+    mount({ rules: [rule()] })
+    await settle()
+    await settle(10 * 60_000 + 1_000)
+    expect(resolves()).toHaveLength(2)
+    answers.set(1, () => answer(25900, { band, valid_until: roll + 7 * 86_400_000 }))
+    await settle(5_000) // the server has rolled by the late ask
+    expect(resolves()).toHaveLength(3)
+    await settle(30 * 60_000)
+    expect(resolves()).toHaveLength(3)
+  })
+
   it('asks once after a reconnect and once on returning to the page', async () => {
     mount({ rules: [rule()] })
     await settle()

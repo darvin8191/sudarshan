@@ -31,6 +31,13 @@ export const NOTE_MS = 60_000
 /** A row is asked about at most this often when its price leaves the band or the first price comes. */
 export const GAP_MS = 2_000
 
+/**
+ * Review L13: a row whose read failed and that has no contract is asked again on its ticks after
+ * 2 s, then 5 s, then every 15 s while it keeps failing, instead of every 2 s (30 a minute). An
+ * answer starts it again from 2 s.
+ */
+export const RETRY_MS = [2_000, 5_000, 15_000] as const
+
 /** The server takes at most this many rows in one `resolve`. */
 export const MAX_ROWS = 100
 
@@ -275,6 +282,8 @@ export interface RowState {
   /** When a tick last made the row ask (a band exit or the first price), and whether an ask is in flight. */
   askedAt: number | null
   flying: boolean
+  /** Reads that failed in a row since its last answer (review L13). */
+  fails?: number
 }
 
 export type Reason = 'first' | 'band' | 'valid' | 'reconnect' | 'return' | 'unwait'
@@ -420,7 +429,7 @@ export class FollowResolver {
         continue
       }
       const paced = reason === 'band' || reason === 'unwait'
-      if (paced && row.askedAt !== null && now - row.askedAt < GAP_MS) continue
+      if (paced && row.askedAt !== null && now - row.askedAt < gapOf(row)) continue
       send.push(id)
     }
     for (let from = 0; from < send.length; from += MAX_ROWS)
@@ -463,8 +472,15 @@ export class FollowResolver {
       if (!row) continue
       row.flying = false
       const got = answers?.find((each) => each.id === id)
-      if (got) this.apply(row, got, landed)
-      else row.problem = said || row.problem
+      if (got) {
+        row.fails = 0
+        this.apply(row, got, landed)
+      } else {
+        row.fails = (row.fails ?? 0) + 1
+        row.problem = said || row.problem
+        // Review L13: a row with no contract waits from the failure, whatever asked.
+        if (row.answer === null) row.askedAt = landed
+      }
     }
     this.changed()
     const again = [...this.later.keys()].filter((id) => ids.includes(id))
@@ -525,6 +541,12 @@ export class FollowResolver {
       )
       .map(([id]) => id)
   }
+}
+
+/** How long a row waits between asks its ticks make: longer while a read keeps failing (review L13). */
+function gapOf(row: RowState): number {
+  const failing = row.answer === null && row.problem !== null && (row.fails ?? 0) > 0
+  return failing ? RETRY_MS[Math.min((row.fails ?? 1) - 1, RETRY_MS.length - 1)] : GAP_MS
 }
 
 /** The line under a row now, or null: the page's note while it lasts, else the server's words for the state. */
