@@ -52,7 +52,15 @@ from sudarshan.vault import (
 from . import messages
 from .config import ConfigError, Settings, read_openalgo_env, setup_logging
 from .handoff import LinkError, OpenAlgoLink, call_max_s
-from .schedule import IST, TradingCalendar, minute_of_day, trading_session_start, usual_on
+from .schedule import (
+    DEFAULT_WINDOW,
+    IST,
+    TradingCalendar,
+    minute_of_day,
+    parse_window,
+    trading_session_start,
+    usual_on,
+)
 from .totp import InvalidSecret, normalize_secret, seconds_left, totp
 from .upstox import CALL_MAX_S as UPSTOX_CALL_MAX_S
 from .upstox import LoginResult, request_token
@@ -444,7 +452,8 @@ def _main(args, env, clock) -> int:
         if not calendar.is_trading_day(now.astimezone(IST).date()):
             log.info("not a trading day: nothing to do")
             return EXIT_OK
-        start, end = usual_on(now.astimezone(IST).date(), settings.window)  # to the F&O close
+        day = now.astimezone(IST).date()  # to the F&O close, or the owner's own end (L3)
+        start, end = usual_on(day, settings.window, parse_window(DEFAULT_WINDOW))
         if not start <= minute_of_day(now) < end:
             log.info("outside the auto-login window: nothing to do")
             return EXIT_OK
