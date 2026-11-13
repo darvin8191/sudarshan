@@ -185,7 +185,7 @@ RECORDS = {
 
 _ROW = "list:int, section_id?:int|null, version:string"
 _FOLLOW = (
-    "kind:FollowKind, underlying:string, underlying_exchange:UnderlyingExchange, "
+    "kind:FollowKind, underlying:string, underlying_exchange:string, "
     "expiry_rule?:ExpiryRule, strike_rule?:StrikeRule, offset?:int, strike?:number, "
     "opt_right?:OptRight|null"
 )

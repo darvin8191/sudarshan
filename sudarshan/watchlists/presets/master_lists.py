@@ -92,7 +92,7 @@ def current_futures(prepared: Prepared, now_ms: int, closes: dict) -> Built:
     rows, until = [], None
     for _, listed in prepared.futures:
         for iso, row in listed:
-            close = dynamic.close_ms(iso, closes)
+            close = dynamic.close_ms(iso, closes, index=True, exchange=row.exchange)
             if close > now_ms:
                 rows.append(row)
                 until = close if until is None else min(until, close)

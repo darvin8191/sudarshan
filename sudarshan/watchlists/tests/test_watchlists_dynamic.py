@@ -31,14 +31,14 @@ def strikes(name):
 
 @pytest.mark.parametrize("c", V["pick"])
 def test_pick_expiries(c):
-    got = dynamic.pick_expiries(V["expiries"], ms(c["now"]))
+    got = dynamic.pick_expiries(V["expiries"], ms(c["now"]), index=True)
     assert got == {k: c[k] for k in ("nearest", "next", "month", "next_month")}
 
 
 @pytest.mark.parametrize("c", V["closes_pick"], ids=lambda c: c["name"])
 def test_closes_from_the_calendar(c):
     closes = {d: ms(t) for d, t in c["closes"].items()}
-    got = dynamic.pick_expiries(c["expiries"], ms(c["now"]), closes)
+    got = dynamic.pick_expiries(c["expiries"], ms(c["now"]), closes, index=True)
     assert got["nearest"] == c["nearest"]
 
 
@@ -120,7 +120,9 @@ def run(c):
     if "sides" in c:
         sides = {(s["expiry"], s["strike"]): tuple(s["rights"]) for s in c["sides"]}
     price = Price(*c["price"])
-    return dynamic.resolve(c["row"], expiries, by, ms(c["now"]), price, c["held"], None, sides)
+    return dynamic.resolve(
+        c["row"], expiries, by, ms(c["now"]), price, c["held"], None, sides, index=True
+    )
 
 
 @pytest.mark.parametrize("c", V["resolve"], ids=lambda c: c["name"])
@@ -138,7 +140,7 @@ def test_resolve(c):
 
 def test_valid_until_is_the_expiry_close_for_a_month_future():
     r = run(V["resolve"][-1])
-    assert r.valid_until == ms("2026-11-24T15:30:00+05:30")
+    assert r.valid_until == ms("2026-11-24T15:40:00+05:30")
 
 
 def test_quiet_page_price_is_not_stale_after_a_long_gap():
@@ -198,6 +200,6 @@ def test_the_module_is_pure():
     tree = ast.parse(Path(dynamic.__file__).read_text(encoding="utf-8"))
     names = {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
     names |= {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)}
-    assert names <= {"__future__", "datetime", "fractions", "typing"}
+    assert names <= {"__future__", "fractions", "typing", "sudarshan.watchlists"}
     attrs = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
     assert not attrs & {"now", "utcnow", "time", "monotonic", "sleep"}

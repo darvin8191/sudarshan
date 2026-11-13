@@ -68,12 +68,50 @@ the phone PR that uses it.
 
 Pure rules for ATM, strike and current-month future rows. Expiries come from the master as listed;
 a row rolls at the session close of expiry day, taken from OpenAlgo's market calendar and passed in
-as `closes` (15:30 IST when the calendar has no row). The ATM is the strike nearest the price, a tie
+as `closes` (a special session day's own end only; any other day stops by `expiry.stop_ms`, see
+W15's regime paragraph). The ATM is the strike nearest the price, a tie
 going to the lower strike (a test holds it equal to OpenAlgo's own function); a held strike is kept
 while the price stays inside its band (midpoint to the neighbour plus 10% of the gap, open ends).
 The price is the page's own tick while its socket is up, however old, then the page snapshot, then
 the feed's; none means "waiting". Vectors: `tests/vectors/dynamic.json`. `numfmt.py` holds the
 Indian number and IST time formats the words use.
+
+## W15 - follow rows (`store/rows.py`, `ops/rows.py`, `resolver.py`, `sessions.py`, `feedsnap.py`, `words/rows.py`)
+
+`row_add`, `row_edit` and `row_remove` keep a list's follow rows in `wl_row` under the list's version,
+as sections do: one transaction whose first statement claims the version, then the change; the bridge
+bumps once and pushes the list (why `rows`). A write that would change nothing (adding a row the list
+already follows, an edit to the same values) rolls its claim back, answers the version it was given
+and bumps and pushes nothing. 20 rows a list (the 250-instrument cap, with a strike row counting 2, is
+the phone's). NSE and BSE underlyings only: the request's `underlying_exchange` is a string so MCX and
+the rest are refused in words (the contract changed once for this; `types.ts` regenerated). A row's
+underlying must be in today's master with options (or futures, for a future row) on NFO or BFO.
+
+`resolve` (a read) takes, for each row, the page's price, its time, its source and the strike the row
+last showed (`held`), and `connected`. The expiry is the first whose session close is after now:
+`sessions.closes` reads OpenAlgo's calendar for a dated special-session or holiday-open window and
+otherwise `expiry.stop_ms` stops it by the regime of the day (below). The calendar's default F&O
+close is deliberately not used. The price is the page's tick while
+connected, its snapshot, the feed's last tick (one `/snapshot` read for every row that needs it, 0.5 s,
+through the shared httpx client; any failure is an empty answer), then the page's last price when the
+exchange is closed by the calendar, else the row waits. The answer carries the contracts looked up in the
+master (never built), the band of the ATM, `valid_until`, and the words; a side the master lacks is
+named and no contract is answered. For the first minute after a roll the words are "Rolled to ...".
+Nothing is written and no thread or timer is started. Tests: `tests/test_watchlists_rows.py`,
+`tests/test_watchlists_follow.py`.
+
+**One rule for when an expiring contract stops (`expiry.py`).** `expiry.stop_ms(day, index=...,
+exchange=..., window_end_ms=...)` answers the instant a contract stops on its expiry day, and
+`dynamic.close_ms` (so the expiry pick, `valid_until` and the "Rolled to ... at HH:MM" words of
+`resolve`, and the roll and `valid_until` of the Index futures list) asks nothing else. It reads the
+regime from `sudarshan.alerts.market.sessions` (`expiry_close`, `INDEX_UNDERLYINGS`), the repository's
+one table of sessions. Until 6 Dec 2026 an expiring index contract trades to the F&O close, 15:40, as a
+stock contract does. From 7 Dec 2026 (SEBI circular of 15 Oct 2026) an index contract stops at 15:30 on
+its expiry day while a stock contract trades to the F&O close, 15:45. A special session day takes its
+end from OpenAlgo's calendar, passed as the date's entry of `closes` (`get_special_session`,
+`get_holiday_exchange_window`), in either regime. A row is an index row when its underlying is in
+`INDEX_UNDERLYINGS`. The older rules are gone: W12's calendar default close (15:40 on every day, which
+the calendar's effective window gave) and W15's fixed 15:30. Tests: `tests/test_watchlists_expiry.py`.
 
 ## W16 - the search grammar (`search.py`, `words/search.py`)
 
@@ -858,7 +896,7 @@ Three built-in lists made from today's master: **Indices**, **F&O stocks** and *
 (`presets/__init__.py`: id, name, kind, rule or file, and the two pure functions that build a list)
 is found by discovery like the other registries: a source is a module with `ENTRIES`, so W13's typed
 files add `presets/typed_lists.py` (kind `typed`, an `ORDER` below `master_lists`' 20 puts them
-first) and edit nothing here. `presets/master_lists.py` holds the pure builders over the master's
+first); W13 also made the catalogue asked at each call (see W13). `presets/master_lists.py` holds the pure builders over the master's
 rows as `search.Index` keeps them (references to the snapshot's own rows, never copies).
 
 - **Indices** are a typed list of the 24 OpenAlgo index symbols of design 3.5, in code, checked
@@ -875,11 +913,10 @@ rows as `search.Index` keeps them (references to the snapshot's own rows, never 
   today: ABC.") where the screener drops it without a word.
 - **Index futures** are, per index underlying (NFO and BFO, so SENSEX and BANKEX are in; the
   screener's index futures read NFO only), the first future whose expiry close is still ahead
-  (3.7's roll): at the close of expiry day the row is the next month's. The close is OpenAlgo's
-  market calendar's for NFO, asked for only when an expiry falls today (any other day closes before
-  or after now whatever the calendar says), and 15:30 IST when the calendar has no window
-  (`dynamic.close_ms`). Note that OpenAlgo's default NFO window ends at 15:40, so on a normal
-  expiry day the calendar's close, not 15:30, rolls the row. An underlying with no future left is
+  (3.7's roll): at the stop of expiry day the row is the next month's. The stop is
+  `expiry.stop_ms`, the one rule of the regime of the day (see W15), the same as a follow row's. The
+  market calendar is asked for NFO only when an expiry falls today, and only for a special session
+  day's own end (any other day stops before or after now whatever the calendar says). An underlying with no future left is
   not listed. The list depends on the clock, so only what the master fixes is cached.
 
 **One generation.** `refs/preset.py` builds from `master.shared()` and keeps each prepared list
@@ -912,3 +949,93 @@ list. `keys` are taken in the order sent (the order shown: the server cannot kno
 or change); with none the whole list in its own order. Over 250 it copies the first 250 and the
 answer's `words` say "Copied the first 250 of 500, in the order shown. A list holds 250." The
 contract did not change.
+
+## W13 - built-in lists from typed files (`presets/typed_lists.py`, `tests/vectors/typed.json`)
+
+Fifteen built-in lists made from files a person typed: NIFTY 50 and NIFTY BANK (the repository's
+two files, the screener's), NIFTY 100, 200 and 500, and ten sector lists. Nothing is downloaded from
+NSE or anywhere else, ever, and no constituent file is added to the repository (the two it has were
+the screener's already; they now carry the header line `# as of 2026-09-30`, X1).
+
+**Where a file comes from.** The server folder `/etc/sudarshan/universes/` first (the environment
+name `SUDARSHAN_UNIVERSES_DIR` points a test, or an install that keeps it elsewhere, at another
+folder), then, for NIFTY 50 and NIFTY BANK only, the repository's `sudarshan/screener/universes/`.
+The server copy of a name wins. A list whose file is in neither place is not offered: it is not in
+`lists`, `symbol` does not look in it, and `view?ref=preset:<id>` answers that it is not offered
+("That built-in list is not offered. Pick another list."). A folder that cannot be read (a file
+or folder the app's user has no right to, a loop of links) is treated as absent and logged once, and
+logged again only after it has been readable in between; a folder that is simply not there is the
+normal state before the owner makes it, and is not logged. A file over 1 MB is not a list somebody
+typed and is treated the same way.
+
+**The files the owner types on the server** (a list is offered the moment its file is there):
+
+| list | ref | file |
+|---|---|---|
+| NIFTY 50 | `preset:nifty50` | `NIFTY50.txt` (also shipped in the repository) |
+| NIFTY BANK | `preset:niftybank` | `NIFTYBANK.txt` (also shipped in the repository) |
+| NIFTY 100 | `preset:nifty100` | `NIFTY100.txt` |
+| NIFTY 200 | `preset:nifty200` | `NIFTY200.txt` |
+| NIFTY 500 | `preset:nifty500` | `NIFTY500.txt` |
+| NIFTY IT | `preset:niftyit` | `NIFTYIT.txt` |
+| NIFTY AUTO | `preset:niftyauto` | `NIFTYAUTO.txt` |
+| NIFTY PHARMA | `preset:niftypharma` | `NIFTYPHARMA.txt` |
+| NIFTY METAL | `preset:niftymetal` | `NIFTYMETAL.txt` |
+| NIFTY FMCG | `preset:niftyfmcg` | `NIFTYFMCG.txt` |
+| NIFTY PSU BANK | `preset:niftypsubank` | `NIFTYPSUBANK.txt` |
+| NIFTY PRIVATE BANK | `preset:niftypvtbank` | `NIFTYPVTBANK.txt` |
+| NIFTY REALTY | `preset:niftyrealty` | `NIFTYREALTY.txt` |
+| NIFTY ENERGY | `preset:niftyenergy` | `NIFTYENERGY.txt` |
+| NIFTY FINANCIAL SERVICES | `preset:niftyfinservice` | `NIFTYFINSERVICE.txt` |
+
+**The format.** One NSE symbol a line, in capital letters, digits, `&`, `-` or `_` (`M&M`,
+`BAJAJ-AUTO`); `#` starts a comment, alone or after a symbol; blank lines are ignored; the date of
+the index review is the header line `# as of YYYY-MM-DD`. A file with no such line reads "date not
+recorded". A line that is not a symbol (a space in it, lower case) or that repeats a symbol already
+on an earlier line is left out of the list and named by its line number in the list's words; the
+rest of the list stands. The screener's reader is more forgiving (it upper-cases a lower-case line);
+for the two shipped files, which are clean, both readers give the same symbols and a test holds
+them equal. Example (made-up symbols):
+
+```
+# as of 2026-09-30
+AAAA
+BBBB   # a comment may follow a symbol
+```
+
+**Words.** "Built-in list, locked. NIFTY 50 as of 30 Sep 2026: 50 symbols." (the file's own date, never
+the master's; "NIFTY 50 (date not recorded)" for a file with no header), then the window line when
+the list is over 250, then the names today's master lacks in W12's words ("2 names in this list are
+not in today's contract list: ABC, XYZ. The list is checked at each index review."), then the lines
+left out ("2 lines in this list's file were left out: line 3 ("ab cd" is not a symbol), line 5 (AAA
+is already on line 2). Symbols are capital letters and digits.", the first five named). Names are
+mapped to NSE cash listings of the master (EQ rows), in the file's order. Over 250 (NIFTY 500) W12's
+window line applies and `copy` cuts at 250 with W12's sentence ("Copied the first 250 of 300, in the
+order shown. A list holds 250."). On the wire a typed list is the same `View` as W12's: `locked`,
+version "0", `as_of` the file's ISO date or null, `missing` as `NSE:<SYMBOL>`; `lists` gives each
+offered list its `count` and `note` ("As of 30 Sep 2026", or null for a file with no date).
+
+**A changed file is read again, without a restart.** One `stat` per call (path, modification time,
+size and inode) is the check; the symbols are parsed again only when it changes. The prepared list
+(references to the master's own rows and the names the master lacks) stays tied to the master's
+generation as W12's are, and `refs/preset.py` now keeps it with that stamp too, so the next call
+after the file changed prepares it again against the same generation. No thread, timer or file
+watcher. The seam W12 left grew by one idea: `presets.CATALOGUE` is now asked at each call (a module
+attribute that answers the lists offered now), because a typed list comes and goes with its file;
+an `Entry` may carry `offered` and `stamp`, and a `Prepared` or `Built` may carry `notes`.
+
+**To add or update a file on the server** (the owner, as the server's administrator; the app runs as
+its own user, which only needs to read the folder and the files):
+
+```
+sudo mkdir -p /etc/sudarshan/universes
+sudo chmod 755 /etc/sudarshan/universes
+sudo nano /etc/sudarshan/universes/NIFTY100.txt      # type or paste the symbols, with the header line
+sudo chmod 644 /etc/sudarshan/universes/NIFTY100.txt
+```
+
+Mode 755 on the folder and 644 on each file let the app's user read them while only an administrator
+can change them. If `/etc/sudarshan` itself exists with a stricter mode, it needs the execute bit for
+others (`sudo chmod o+x /etc/sudarshan`) so the app's user can reach the folder. Nothing needs a restart:
+open the list again and it is read. At each index review, retype the file with the new date in its
+header line; the lists say the date they are as of, so a file that was not updated shows its old date.

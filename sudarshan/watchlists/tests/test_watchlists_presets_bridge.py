@@ -147,8 +147,8 @@ def test_the_view_of_indices_names_what_the_master_lacks(client, box):
 def test_index_futures_follow_the_clock_and_the_calendar(client, box, monkeypatch):
     day(box)
     monkeypatch.setattr(reader, "calendar_close", lambda iso: None)
-    for now, want in (("2026-11-24T15:29:59+05:30", "NIFTY24NOV26FUT"),
-                      ("2026-11-24T15:30:00+05:30", "NIFTY29DEC26FUT")):  # fmt: skip
+    for now, want in (("2026-11-24T15:39:59+05:30", "NIFTY24NOV26FUT"),
+                      ("2026-11-24T15:40:00+05:30", "NIFTY29DEC26FUT")):  # fmt: skip
         monkeypatch.setattr(reader, "now_ms", lambda now=now: ms(now))
         data = view(client, "index_futures").get_json()["data"]
         assert data["rows"][0]["contract"]["symbol"] == want
@@ -349,7 +349,7 @@ def test_members_are_contracts_with_the_roll_instant_and_no_notes(client, box, m
     monkeypatch.setattr(reader, "now_ms", lambda: ms("2026-11-10T10:00:00+05:30"))
     got = reader.members("index_futures", "owner")
     assert [m["key"] for m in got["members"]] == V["index_futures"][0]["rows"]
-    assert got["valid_until"] == ms("2026-11-24T15:30:00+05:30")
+    assert got["valid_until"] == ms("2026-11-24T15:40:00+05:30")
     assert got["ref"] == "preset:index_futures" and got["version"] == versions.read()
     fno = reader.members("fno_stocks", "owner")
     assert fno["valid_until"] is None and fno["left_out"] == [

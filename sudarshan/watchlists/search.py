@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 from typing import Any, NamedTuple
 
-from sudarshan.watchlists import dynamic
+from sudarshan.watchlists import dynamic, expiry
 
 MAX_HITS = 50
 MAX_SUGGESTIONS = 3
@@ -253,13 +253,15 @@ def parse(query: str, price: float | None = None) -> dict:
     return out
 
 
-def _spec_expiries(spec, expiries: list[str], now_ms: int, closes) -> list[str]:
-    live = sorted(e for e in set(expiries) if dynamic.close_ms(e, closes) > now_ms)
+def _spec_expiries(
+    spec, expiries: list[str], now_ms: int, closes, index: bool = False
+) -> list[str]:
+    live = sorted(e for e in set(expiries) if dynamic.close_ms(e, closes, index=index) > now_ms)
     if spec is None:
         return live
     kind = spec[0]
     if kind in ("nearest", "next", "month", "next_month"):
-        got = dynamic.pick_expiries(expiries, now_ms, closes)[kind]
+        got = dynamic.pick_expiries(expiries, now_ms, closes, index=index)[kind]
         return [got] if got else []
     if kind == "date":
         return [e for e in live if e == spec[1]]
@@ -300,6 +302,7 @@ def search(
     k = key_of(name)
     cash = sorted(index.cash.get(k, []), key=lambda r: (r.exchange.endswith("BSE"), r.exchange))
     u = index.display.get(k, name)
+    ix = expiry.is_index(u)
     opt_by = index.options.get(u, {})
     spec = p.get("expiry")
     rows: list = []
@@ -308,12 +311,12 @@ def search(
     needs_price = False
     if p.get("future") and not wants_options:
         iso_rows = index.futures.get(u, [])
-        allowed = set(_spec_expiries(spec, [i for i, _ in iso_rows], now_ms, closes))
+        allowed = set(_spec_expiries(spec, [i for i, _ in iso_rows], now_ms, closes, ix))
         rows = [r for i, r in iso_rows if i in allowed]
         exps = sorted(allowed)
     elif wants_options:
         pool = list(opt_by)
-        exps = _spec_expiries(spec, pool, now_ms, closes)
+        exps = _spec_expiries(spec, pool, now_ms, closes, ix)
         if spec is None and p["strike"] is None:
             exps = exps[:1]
         for e in exps:
@@ -336,7 +339,7 @@ def search(
     else:
         rows = list(cash)
         iso_rows = index.futures.get(u, [])
-        allowed = set(_spec_expiries(spec, [i for i, _ in iso_rows], now_ms, closes))
+        allowed = set(_spec_expiries(spec, [i for i, _ in iso_rows], now_ms, closes, ix))
         rows += [r for i, r in iso_rows if i in allowed]
         exps = sorted(allowed) if spec else []
     und = Understood(
@@ -354,9 +357,9 @@ def _done(rows, und, pick, sug, segment, limit) -> Result:
     return Result(hits[:limit], und, pick, tuple(sug))
 
 
-def _first_live(futures, now_ms: int, closes) -> list:
+def _first_live(futures, now_ms: int, closes, index: bool = False) -> list:
     """The nearest future still open, for an underlying that has no cash listing."""
-    live = [r for iso, r in futures if dynamic.close_ms(iso, closes) > now_ms]
+    live = [r for iso, r in futures if dynamic.close_ms(iso, closes, index=index) > now_ms]
     return live[:1]
 
 
@@ -369,7 +372,9 @@ def _by_name(index: Index, text: str, segment: str, limit: int, now_ms: int, clo
     rank: dict[int, tuple[int, Any]] = {}
     for sym, shown in index.display.items():
         tier = 0 if sym == k else 1 if sym.startswith(k) else 2 if k in sym else None
-        rows = index.cash.get(sym) or _first_live(index.futures.get(shown, []), now_ms, closes)
+        rows = index.cash.get(sym) or _first_live(
+            index.futures.get(shown, []), now_ms, closes, expiry.is_index(shown)
+        )
         for r in rows if tier is not None else ():
             rank[id(r)] = (tier, r)
     for nk, r in index.names:
