@@ -159,8 +159,8 @@ def record(
     compacted to its newest ``KEEP_LINES`` lines once it has grown past ``COMPACT_ABOVE``.
 
     ``file_mode`` is the mode a new file is created with (0o640 for a spool another account
-    reads); compaction keeps the file's mode. A folder is made only when it is missing (private,
-    0o700): one that exists is never changed.
+    reads), whatever the umask; compaction keeps the file's mode. A folder is made only when it is
+    missing (private, 0o700): one that exists is never changed.
     """
     path = Path(path)
     if kind not in KINDS or src not in SOURCES or not ID.fullmatch(event_id):
@@ -173,8 +173,15 @@ def record(
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         payload = (json.dumps(line, ensure_ascii=False, separators=(",", ":")) + "\n").encode()
         flags = os.O_RDWR | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
-        fd = os.open(path, flags, file_mode)
         try:
+            fd, made = os.open(path, flags | os.O_EXCL, file_mode), True
+        except FileExistsError:
+            fd, made = os.open(path, flags, file_mode), False
+        try:
+            if (
+                made
+            ):  # a unit's UMask (0077 for the family service) takes bits off the creation mode
+                os.fchmod(fd, file_mode)
             _append(fd, payload)
         finally:
             os.close(fd)

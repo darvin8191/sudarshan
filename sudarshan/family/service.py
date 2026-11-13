@@ -26,13 +26,15 @@ from typing import Any
 from sudarshan.tasks import cancel_and_wait
 
 from . import accounts as accounts_module
-from . import health, sessions, ws
+from . import audit, backup, health, sessions, ws
 from . import store as store_module
 from .accounts import Accounts, Hasher
 from .admin_api import SealedDoors
 from .config import ConfigError, Keys, Settings, setup_logging
-from .errors import FamilyError, SchemaTooNew, StoreError
+from .contract import AUDIT_KINDS, LIMITS
+from .errors import FamilyError, Invalid, SchemaTooNew, StoreError
 from .listener import Listener, Request, Response, Router
+from .notices import Notices
 from .store import DB_FILENAME, FamilyStore
 from .viewer_api import ViewerApi
 
@@ -81,6 +83,10 @@ class FamilyService(Router):
         self.hasher = hasher or Hasher()
         self.dialect: ws.Dialect = dialect or ws.Plain()
         self.registry = ws.Registry()
+        self.notices = Notices(settings.export_dir / "events.jsonl",
+                               name_members=settings.name_members, clock=self.clock)  # fmt: skip
+        #: The last copy for the nightly backup: when, and whether it was made.
+        self.copy_state: dict[str, Any] = {"at": None, "ok": None}
         self.store: FamilyStore | None = None
         self.accounts: Accounts | None = None
         self.viewer: Any = Viewer()
@@ -95,7 +101,7 @@ class FamilyService(Router):
         )
         self.jobs: dict[str, asyncio.Task] = {}
         self._job_makers: dict[str, Job] = (
-            {"prune": _prune, "sockets": _sweep} if jobs is None else jobs
+            {"prune": _prune, "sockets": _sweep, "copy": backup.copy_job} if jobs is None else jobs
         )
         self._retry_s = port_retry_s
         self._state = "starting"
@@ -121,12 +127,30 @@ class FamilyService(Router):
         built = {name: via(name) for name in names}
         built["member_list"] = self._member_list
         built["state"] = self._admin_state
+        built["audit_list"] = self._audit_list
         return built
 
     async def _member_list(self, args: dict[str, Any]) -> Any:
         if self.accounts is None:
             raise self.off_error or FamilyError("off")
         return await self.accounts.member_list()
+
+    async def _audit_list(self, args: dict[str, Any]) -> dict[str, Any]:
+        """The audit for the owner's page: newest first, 200 a page, by member and kind."""
+        if self.store is None:
+            raise self.off_error or FamilyError("off")
+        member_id, kind, before = args.get("member_id"), args.get("kind"), args.get("before")
+        limit = args.get("limit", LIMITS["audit_page"])
+        for value, field in ((member_id, "member_id"), (before, "before")):
+            if value is not None and (not isinstance(value, int) or isinstance(value, bool)):
+                raise Invalid(field=field)
+        if kind is not None and kind not in AUDIT_KINDS:
+            raise Invalid(field="kind")
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 200:
+            raise Invalid(field="limit")
+        return await self.store.read(
+            lambda tx: audit.page(tx, member_id=member_id, kind=kind, before=before, limit=limit)
+        )
 
     async def _admin_state(self, args: dict[str, Any]) -> dict[str, Any]:
         counts = await self.counts()
@@ -247,13 +271,15 @@ class FamilyService(Router):
             log.error("family.db was written by a newer release (%s): the family view stays off",
                       exc.cause)  # fmt: skip
             self._keep_off(exc)
+            self.notices("store_newer", key=f"v{exc.found}")  # once for this file, not per start
             return
         except StoreError as exc:
             log.error("family.db could not be opened (%s): the family view stays off", exc.cause)
             self._keep_off(exc)
             return
         self.accounts = Accounts(self.store, clock=self.clock, hasher=self.hasher,
-                                 revoked=self.revoked, max_members=self.settings.max_members,
+                                 notify=self.notices, revoked=self.revoked,
+                                 max_members=self.settings.max_members,
                                  max_devices=self.settings.max_devices)  # fmt: skip
         if isinstance(self.viewer, Viewer):  # a test may have seated its own
             self.viewer = ViewerApi(self.accounts, self.keys.store)

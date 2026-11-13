@@ -30,6 +30,8 @@ def document(service: Any, counts: dict[str, int]) -> dict[str, Any]:
         "sessions": counts.get("sessions", 0),
         "sockets": len(service.registry),
         "sealed": dict(service.doors.counts),
+        "notices": dict(service.notices.counts),
+        "copy": dict(service.copy_state),
         "jobs": {
             job: ("running" if not task.done() else "ended") for job, task in service.jobs.items()
         },  # fmt: skip

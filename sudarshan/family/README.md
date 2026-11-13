@@ -5,10 +5,12 @@ credential, and nothing in this service can place, change or cancel an order. It
 service that takes input from people other than the owner (sign-ins, phones, Telegram chats), so it
 runs as its own account and can read none of the owner's secrets.
 
-Status: the contract (F0) is in; the store, the accounts, the service, the viewer API and the owner
-notices follow on this branch (`feat/family-a`); the data plane, the WebSocket dialect, the bot and
-Web Push are other lanes. `sudarshan/STATUS.md` has one row per feature. The service ships switched
-off (`SUDARSHAN_FAMILY=off`).
+Status: on this branch (`feat/family-a`): the contract (F0), the store (F1), the accounts (F3), the
+service and its unit (F2), the viewer API for sign-in and the member's own account (F4), and the
+owner's notices, the store's nightly copy and the audit op (F11). The data plane, the WebSocket
+dialect, the bot and Web Push are other lanes; their routes answer "not ready" until they land.
+`sudarshan/STATUS.md` has one row per feature. The service ships switched off
+(`SUDARSHAN_FAMILY=off`).
 
 ```
 Family phone (Chrome, PWA)
@@ -49,3 +51,26 @@ the deploy, the owner   -> GET  127.0.0.1:5585/health                 (counts an
 
 The one-time set-up that makes the account, the folders and the firewall allow-list is
 `ops/family/bootstrap.sh`; `sudarshan/README.md` says how the owner runs it.
+
+## For the pages
+
+- Read `GET /family/api/me` once when a page opens: it answers the member (or 401 in words) and sets
+  the CSRF cookie `__Host-sudarshan_family_csrf` when the browser has none. Every request that is not
+  a GET carries that cookie's value in `X-Family-CSRF` and a JSON body; sign-in and join included.
+- A 401 is `signed_out` with the sentence to show (expired, signed out on this device, removed,
+  paused); a wrong sign-in name, password or code is one answer, `signin_failed`; `locked` (429)
+  names the time to try again.
+- The WebSocket closes with 4401 and "Signed out on this device." when the session ends: go to the
+  sign-in page, do not reconnect.
+
+## Modules
+
+| path | what | built in |
+|---|---|---|
+| `contract.py`, `gentypes.py` | the contract and its twin on the phone | F0 |
+| `store.py`, `migrations.py`, `migrate.py`, `audit.py`, `errors.py`, `words.py` | family.db, its steps and `--status`, the audit, the refusals and their sentences | F1 |
+| `accounts.py`, `sessions.py`, `invites.py`, `lockout.py`, `members.py` | passwords, codes, sign-ins, sessions, invites, lockout, the owner's members | F3 |
+| `service.py`, `listener.py`, `ws.py`, `admin_api.py`, `health.py`, `config.py`, `__main__.py` | the process, its one listener and its doors | F2 |
+| `viewer_api.py` | the viewer API: cookies, CSRF, sign-in, the member's own account | F4 |
+| `notices.py`, `backup.py` | the owner's notices, the store's copy for the nightly backup | F11 |
+| `derive.py`, `check.py` | the one-time set-up's pieces (the deploy runs them) | O2' |
