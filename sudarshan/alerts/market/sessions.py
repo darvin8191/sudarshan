@@ -19,8 +19,8 @@ A stock that closes by auction (a CAS key, cross-design X6) has its own session,
 ``NSE_EQ+auction`` (``auction=True``): its continuous trading ends 15 minutes before the cash
 close, and after that its quotes are the auction's order book, never judged. The auction's print
 is no trade of that session: it may come from the continuous end until ``Session.auction_until``
-(the cash close plus 5 minutes, 15:35; from 7 Dec 2026 the auction's end, 15:40), and
-clock.auction judges it on its own terms. The price is expected at ``Session.auction_close``, the
+(five minutes after the auction's latest close: 15:35; from 7 Dec 2026 15:45, the auction closing
+by 15:40), and clock.auction judges it on its own terms. The price is expected at ``Session.auction_close``, the
 auction's random close (the owner's probe of 27 Oct 2026, X6j: every stock printed at 15:28:09, so
 "price at about 15:30"; from 7 Dec 2026 the auction's end, 15:40, until a circular says
 otherwise). It is the official close: it belongs to the day's last candle on the cash session's

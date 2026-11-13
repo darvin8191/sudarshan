@@ -64,7 +64,9 @@ class Regime:
     fo: tuple[int, int]
     #: An expiring index contract stops at this minute on its expiry day.
     index_expiry_end: int
-    #: The auction's print may come until this many minutes after the cash close.
+    #: The auction's print may come until this many minutes after the cash close: five minutes
+    #: after the auction's latest close in both regimes (15:35, and from 7 Dec 2026 15:45), so a
+    #: print stamped a moment after a random close in its last second is still the auction's.
     print_after_cash: int
     #: The auction's price is expected this many minutes after the cash close (X6j).
     close_after_cash: int
@@ -76,7 +78,7 @@ class Regime:
 #: Each regime from its first day; the first one also covers earlier days.
 REGIMES: tuple[Regime, ...] = (
     Regime(date(2026, 8, 3), (555, 930), (555, 915), (555, 940), 940, 5, 0, False),
-    Regime(date(2026, 12, 7), (555, 930), (555, 930), (555, 945), 930, 10, 10, False),
+    Regime(date(2026, 12, 7), (555, 930), (555, 930), (555, 945), 930, 15, 10, False),
 )
 #: Underlyings of index derivatives: an OpenAlgo derivative symbol starts with one, then DDMMMYY.
 INDEX_UNDERLYINGS = ("NIFTYNXT50", "MIDCPNIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX50", "BANKEX",

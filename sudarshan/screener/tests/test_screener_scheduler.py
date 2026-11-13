@@ -122,13 +122,14 @@ def test_the_last_cash_boundary_waits_for_the_auction_prints_until_15_35_05():
     [
         (date(2026, 12, 4), "15:30", "15:35"),  # the Friday before: auction to 15:35
         (date(2026, 12, 3), "15:30", "15:35"),  # a SENSEX expiry before the change
-        (date(2026, 12, 8), "15:30", "15:40"),  # auction stocks: 15:30-15:40 (a NIFTY expiry)
-        (date(2026, 12, 10), "15:30", "15:40"),
+        (date(2026, 12, 8), "15:30", "15:45"),  # auction 15:30-15:40, prints to 15:45 (L4)
+        (date(2026, 12, 10), "15:30", "15:45"),
     ],
 )
 def test_the_last_cash_boundary_waits_for_the_prints_on_both_sides_of_7_december(day, close, latest):
     """From 7 Dec 2026 a stock that closes by auction trades to the cash end and prints 10 minutes
-    later: its 15:15-15:30 candle still waits for the print, now to 15:40:05."""
+    later: its 15:15-15:30 candle still waits for the print, now to 15:45:05 (the print may come
+    until five minutes after the auction's latest close, 15:40)."""
     found = sessions_of(day, trading_day=True)
     last = sch.boundaries(CAS, found)[-1]
     assert times(day, [last]) == [close]

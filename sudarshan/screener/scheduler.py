@@ -15,8 +15,8 @@ at 10:16 after a restart").
 A stock that closes by auction has no continuous trade after the cash close until its print
 (X6): a screen whose universe holds such stocks holds its last cash boundary of the day until
 every one has printed, or at the latest until the auction window's end plus the grace (S12:
-15:35:05 on a normal day; from 7 Dec 2026, when the auction runs 15:30-15:40 after the cash close,
-15:40:05). ``due`` takes ``printed(screen) -> bool`` for that.
+15:35:05 on a normal day; from 7 Dec 2026, when the auction runs 15:30-15:40 after the cash close
+and its print may come until 15:45, 15:45:05). ``due`` takes ``printed(screen) -> bool`` for that.
 
 A screen made, resumed or edited during the session starts a new version (``Screen.since``, the
 moment it began), and its run key is new for every boundary of the day. It gets one run, on the

@@ -24,7 +24,7 @@ A stock that closes by auction (a CAS key, sessions.py) has its own session, so 
 trading ends before the auction, and its quotes after that (the auction's order book) never pass.
 The auction's print is no trade of that session: ``auction`` lets it through on its own terms
 (cross-design X6c: made from the continuous end up to ``Session.auction_until``, 15:35 and
-15:40 from 7 Dec 2026, arrived within the 5 s grace after it, on a healthy feed, fresh, whatever
+15:45 from 7 Dec 2026, arrived within the 5 s grace after it, on a healthy feed, fresh, whatever
 the exchange's status then says), so a crossing it alone makes is told as the closing auction's,
 never as an ordinary trade.
 Only a trade can be the print: the Book passes a frame here only when its volume rose (X6i); the

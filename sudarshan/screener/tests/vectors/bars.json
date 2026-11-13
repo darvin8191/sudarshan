@@ -6484,7 +6484,7 @@
      "due": {
       "boundary": "15:30"
      },
-     "is": "15:40:05.000"
+     "is": "15:45:05.000"
     },
     {
      "at": "15:38:20.100",
@@ -6653,7 +6653,7 @@
   },
   {
    "id": "B13n",
-   "says": "7 Dec 2026: the window ends at 15:40; ltt 15:40:00.001 is past it",
+   "says": "7 Dec 2026: the window ends at 15:45, five minutes after the auction's latest close (L4); ltt 15:45:00.001 is past it",
    "day": "2026-12-08",
    "auction": [
     "NSE_EQ|INE002A01018"
@@ -6700,6 +6700,67 @@
      ]
     },
     {
+     "at": "15:45:00.200",
+     "tick": {
+      "ltt": "15:45:00.001",
+      "ltp": 811.6,
+      "ltq": 2500,
+      "vtt": 103000
+     },
+     "check": "outside_hours"
+    }
+   ]
+  },
+  {
+   "id": "B13v",
+   "says": "7 Dec 2026: order entry closed in its last second; ltt 15:40:00.001 is still the auction's print (L4), the 15:29 minute's close",
+   "day": "2026-12-08",
+   "auction": [
+    "NSE_EQ|INE002A01018"
+   ],
+   "bars": [
+    {
+     "at": "15:29",
+     "o": 81200,
+     "h": 81210,
+     "l": 81160,
+     "c": 81160,
+     "v": 103000,
+     "flags": [],
+     "until": "15:40:00.001"
+    }
+   ],
+   "cum": 103000,
+   "printed": true,
+   "steps": [
+    {
+     "at": "15:29:10.050",
+     "tick": {
+      "ltt": "15:29:10.000",
+      "ltp": 812.0,
+      "ltq": 5,
+      "vtt": 100000
+     },
+     "check": "ok"
+    },
+    {
+     "at": "15:29:59.550",
+     "tick": {
+      "ltt": "15:29:59.500",
+      "ltp": 812.1,
+      "ltq": 3,
+      "vtt": 100500
+     },
+     "check": "ok"
+    },
+    {
+     "at": "15:30:05.000",
+     "clock": true,
+     "sealed": [
+      "15:29"
+     ]
+    },
+    {
      "at": "15:40:00.200",
      "tick": {
       "ltt": "15:40:00.001",
@@ -6707,7 +6768,10 @@
       "ltq": 2500,
       "vtt": 103000
      },
-     "check": "outside_hours"
+     "check": "auction",
+     "sealed": [
+      "15:29"
+     ]
     }
    ]
   },
