@@ -67,7 +67,7 @@ def exists(ref: str, user: str) -> bool | None:
     if kind == "preset":
         return ident in presets()
     if kind == "ranked":
-        return ranked.parse_ref(ref) is not None
+        return True if ranked.parse_ref(ref) is not None else None  # offered, or not a ranking
     return True if ident in {str(n) for n in FLAGS} else None  # the five flags always exist
 
 

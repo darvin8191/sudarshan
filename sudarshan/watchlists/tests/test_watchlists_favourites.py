@@ -259,7 +259,7 @@ def test_a_list_with_no_preference_reads_as_the_defaults_and_a_read_writes_nothi
 
 def test_a_preference_round_trips_and_only_the_fields_sent_change(client, emitted):
     (a,) = make_lists("Swing")
-    ref = f"list:{a}"
+    ref, before = f"list:{a}", versions.read()
     assert set_pref(client, ref, sort="change", descending=True).get_json()["status"] == "ok"
     assert pref_of(client, a) == {"sort": "change", "descending": True, "basis": "close",
                                   "held": False}  # fmt: skip
@@ -269,7 +269,7 @@ def test_a_preference_round_trips_and_only_the_fields_sent_change(client, emitte
     assert set_pref(client, ref, descending=False).status_code == 200
     assert pref_of(client, a)["descending"] is False
     assert len(rows(schema.PrefRow)) == 1
-    assert emitted == [] and versions.read().endswith(":0")  # a preference bumps nothing
+    assert emitted == [] and versions.read() == before  # a preference bumps nothing
 
 
 def test_a_preference_can_be_kept_for_a_ranked_list_and_is_refused_for_what_is_not_there(client):

@@ -163,15 +163,27 @@ def test_the_mirror_only_moves_forward_and_a_late_load_cannot_undo_a_commit():
     assert versions.flags() == 5
 
 
+def read_state():
+    """The state op called as the bridge calls it, inside a request (it names the session's user
+    for the favourites) and over OpenAlgo's own lists."""
+    from flask import Flask
+
+    from database import watchlist_db as oa
+
+    oa.Base.metadata.create_all(oa.engine)
+    with Flask("state-for-tests").test_request_context():
+        return state_ops.state({})
+
+
 def test_a_store_that_cannot_be_read_leaves_the_two_out_and_never_raises(emitted, store):
     assert not store.exists()
     assert versions.snapshot() == {"lists": versions.read()}
     versions.bump("items", ["list:1"])
     assert set(emitted[-1][1]) == {"v", "ref", "why"}
-    assert "versions" not in state_ops.state({})
+    assert "versions" not in read_state()
     engine.ready()
     assert set(versions.snapshot()) == {"lists", "favourites", "flags"}
-    assert state_ops.state({})["versions"] == versions.snapshot()
+    assert read_state()["versions"] == versions.snapshot()
 
 
 def test_the_boot_part_changes_at_each_process_start():
@@ -218,7 +230,7 @@ def test_state_answers_the_three_versions():
     got = client.get(contract.API_PREFIX + "/state").get_json()["data"]["versions"]
     assert got == versions.snapshot() and set(got) == {"lists", "favourites", "flags"}
     assert got["favourites"] == 0 and got["flags"] == 0
-    assert state_ops.state({})["versions"] == versions.snapshot()
+    assert read_state()["versions"] == versions.snapshot()
 
 
 # -- the hook ----------------------------------------------------------------------------------

@@ -392,6 +392,7 @@ def put_favourites(server, headers, ref, version):
 
 def test_two_writers_on_one_favourites_version_one_wins_and_the_other_is_told_conflict(server_on):
     headers = server_on.login()
+    server_on.request("GET", "/sudarshan/watchlists/api/state", headers=headers)  # makes the store
     for _ in range(4):  # a race is only seen when the threads really overlap: try again
         rows = store_rows(server_on, "SELECT value FROM wl_meta WHERE name = 'favourites_version'")
         held = int(rows[0][0]) if rows else 0  # round 0 is the first write: no row yet
