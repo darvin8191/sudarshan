@@ -766,3 +766,30 @@ favourite keeps the list's `created_at` in `wl_favourite.oa_created_at`, written
 so a favourite never follows another list that was handed a deleted list's id. The column is part
 of schema 1 itself (added in `schema.py`, so the W2 migration's create path makes it) because schema
 1 has not shipped in any release; there is no upgrade step for it.
+
+## F17 - Alert on this list or section
+
+The list menu (the options button beside the tabs) offers "Alert on this list" for the list on show,
+and each section's menu "Alert on this section". Each opens the Alerts page's list form through
+`listAlertAddress({ ref, name, count, fed })` (`alerts/useAlertOverlay.ts`) and builds nothing else
+by hand; `watchlist/v2/listAlert.ts` decides the offer (`offerFor`) and `useAlertOffers` gives the
+page its offers.
+- **What it opens with.** The ref of the list on show (`list:<id>`, `preset:...`, `flag:<n>`), or a
+  section's `list:<id>/section:<id>` (the form the alert service reads); the name; the row count (the
+  list's rows, or the section's own count). A built-in list whose tab has no count yet passes 0, and
+  the form's heading, which is only a hint, says so; the service's answer is the truth.
+- **Off, with the reason, never hidden.** One sentence, the first that applies: the watchlist features
+  off ("Alerts on a list need the new watchlist features, which are switched off on the server."); a
+  ranked list ("A ranked list changes with every read. Set the alert on a list or a built-in list
+  instead."); market alerts off (the Alerts state's `enabled` is false: "Market alerts are switched
+  off on the server, so a list cannot be watched."). An unread Alerts state offers the item and the
+  Alerts page says what it finds. With the v2 switch off the menus are as before apart from this
+  disabled item and its sentence.
+- **`fed`.** The phone already knows which lists a screener screen fills (`useFedLists`, from the
+  screener state it reads already), so `fed=1` is added for an own list (and its sections) a screen
+  feeds. No server call was added; a built-in or flag list is never fed.
+- **A ranked list** (`ranked:` refs) arrives in a later change; the refusal is in place for it.
+- **Tests:** `v2/listAlert.test.tsx` (each address, the ranked refusal, the three off states, the
+  500 ms guard on the section sheet), `pages/MarketAlerts.listAlert.test.tsx` (the address opens
+  lane A's form, headed "Every symbol of Swing (24)").
+

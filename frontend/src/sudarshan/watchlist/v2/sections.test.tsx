@@ -116,7 +116,18 @@ function Harness({ withSections = true }: { withSections?: boolean }) {
         onRemove={() => {}}
         sections={withSections ? layout : undefined}
       />
-      <SectionSheets overlay={overlay} view={data} listId={1} onSwap={swap} onClose={close} />
+      <SectionSheets
+        overlay={overlay}
+        view={data}
+        listId={1}
+        alertFor={(ref, name, count) => ({
+          href: `/m?${ref}${name}${count}`,
+          off: null,
+          go: () => {},
+        })}
+        onSwap={swap}
+        onClose={close}
+      />
     </>
   )
 }

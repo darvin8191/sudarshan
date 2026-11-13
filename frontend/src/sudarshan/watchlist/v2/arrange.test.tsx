@@ -136,7 +136,18 @@ function Harness({ editing = false }: { editing?: boolean }) {
         onRemove={() => {}}
         arrange={a.edit}
       />
-      <SectionSheets overlay={overlay} view={data} listId={1} onSwap={swap} onClose={close} />
+      <SectionSheets
+        overlay={overlay}
+        view={data}
+        listId={1}
+        alertFor={(ref, name, count) => ({
+          href: `/m?${ref}${name}${count}`,
+          off: null,
+          go: () => {},
+        })}
+        onSwap={swap}
+        onClose={close}
+      />
       <ArrangeSheets
         overlay={overlay}
         view={data}

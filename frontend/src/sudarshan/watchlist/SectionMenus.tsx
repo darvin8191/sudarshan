@@ -1,13 +1,15 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { Check, Copy, MoveRight, Pencil, Trash2 } from 'lucide-react'
+import { BellPlus, Check, Copy, MoveRight, Pencil, Trash2 } from 'lucide-react'
 import { type FormEvent, useEffect, useState } from 'react'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { BottomSheet } from './BottomSheet'
+import { ownRef } from './ListStrip'
 import { MARK_IDS, MARKS, MarkGlyph } from './marks'
 import type { Overlay, OverlayRequest } from './useOverlay'
 import { callOp } from './v2/api'
 import { NOTHING } from './v2/arrange'
+import { type AlertOffer, sectionRef } from './v2/listAlert'
 import { NAME_LONG, removeWords, SECTIONS_FULL, writeSection } from './v2/sections'
 import { LIMITS, type Section, type View } from './v2/types'
 
@@ -46,11 +48,13 @@ function SectionMenu({
   section,
   onSwap,
   onClose,
+  alert,
 }: {
   view: View
   section: Section
   onSwap: (next: OverlayRequest) => void
   onClose: () => void
+  alert: AlertOffer
 }) {
   const { busy, problem, run } = useWrite(view)
   const fixed = view.rows.filter((row) => row.item !== null && row.section_id === section.id).length
@@ -101,6 +105,25 @@ function SectionMenu({
             Copy to another list
           </button>
         </>
+      )}
+      {/* F17: the section's own alert; off with its reason, never hidden. */}
+      <button
+        type="button"
+        className={ROW}
+        disabled={alert.href === null}
+        aria-describedby={alert.off ? 'sd-section-alert-off' : undefined}
+        onClick={() => alert.href && alert.go(alert.href)}
+      >
+        <BellPlus aria-hidden="true" className="size-5" />
+        Alert on this section
+      </button>
+      {alert.off && (
+        <p
+          id="sd-section-alert-off"
+          className="px-3 pb-2 text-[0.8125rem] font-medium text-[color:var(--text-tertiary)]"
+        >
+          {alert.off}
+        </p>
       )}
       <fieldset className="m-0 border-0 p-0">
         <legend className="px-3 pt-3 pb-1 text-[0.8125rem] font-bold text-[color:var(--text-secondary)]">
@@ -254,12 +277,15 @@ export function SectionSheets({
   overlay,
   view,
   listId,
+  alertFor,
   onSwap,
   onClose,
 }: {
   overlay: Overlay | null
   view: View | undefined
   listId: number | null
+  /** F17: the offer to alert on a section, by its list's ref, its name and its row count. */
+  alertFor: (ref: string, name: string, count: number) => AlertOffer
   onSwap: (next: OverlayRequest) => void
   onClose: () => void
 }) {
@@ -282,7 +308,15 @@ export function SectionSheets({
     )
   }
   if (overlay.kind === 'section' && section)
-    return <SectionMenu view={view} section={section} onSwap={onSwap} onClose={onClose} />
+    return (
+      <SectionMenu
+        view={view}
+        section={section}
+        onSwap={onSwap}
+        onClose={onClose}
+        alert={alertFor(sectionRef(ownRef(listId), section.id), section.name, section.count)}
+      />
+    )
   if (overlay.kind === 'sectionRemove' && section)
     return <RemoveSheet view={view} section={section} onClose={onClose} />
   return null

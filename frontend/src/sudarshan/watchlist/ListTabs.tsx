@@ -1,5 +1,6 @@
 import {
   ArrowUpDown,
+  BellPlus,
   Check,
   FolderPlus,
   MoreVertical,
@@ -21,6 +22,7 @@ import {
 import { cn } from '@/lib/utils'
 import { useOpenGuard } from './openGuard'
 import { MAX_LISTS } from './useWatchlists'
+import type { AlertOffer } from './v2/listAlert'
 
 export const PANEL_ID = 'sd-watchlist-panel'
 export const tabId = (listId: number) => `sd-watchlist-tab-${listId}`
@@ -51,6 +53,7 @@ export function ListTabs({
   onNewSection,
   newSectionOff,
   onView,
+  alert,
 }: {
   lists: Watchlist[]
   activeId: number | null
@@ -70,6 +73,8 @@ export function ListTabs({
   newSectionOff?: string | null
   /** F6 (v2): opens the View sheet; absent for a list the sheet does not apply to. */
   onView?: () => void
+  /** F17: "Alert on this list", for the list on show; off with its reason, never hidden. */
+  alert?: AlertOffer
 }) {
   // F3: with v2 on the menu ignores taps for its first half second (openGuard.ts).
   const [menuOpen, setMenuOpen] = useState(false)
@@ -209,6 +214,27 @@ export function ListTabs({
               <SlidersHorizontal aria-hidden="true" className="size-5" />
               View
             </DropdownMenuItem>
+          )}
+          {alert && (
+            <>
+              <DropdownMenuItem
+                className={MENU_ITEM}
+                disabled={activeId === null || alert.href === null}
+                aria-describedby={alert.off ? 'sd-list-alert-off' : undefined}
+                onSelect={() => alert.href && alert.go(alert.href)}
+              >
+                <BellPlus aria-hidden="true" className="size-5" />
+                Alert on this list
+              </DropdownMenuItem>
+              {alert.off && (
+                <p
+                  id="sd-list-alert-off"
+                  className="px-2 pb-2 text-xs leading-snug font-medium text-muted-foreground"
+                >
+                  {alert.off}
+                </p>
+              )}
+            </>
           )}
           <DropdownMenuItem className={MENU_ITEM} disabled={activeId === null} onSelect={onEdit}>
             {editing ? (

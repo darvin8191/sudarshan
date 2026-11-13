@@ -38,6 +38,7 @@ import { useOverlay } from '@/sudarshan/watchlist/useOverlay'
 import { MAX_ITEMS, MAX_LISTS, useWatchlists } from '@/sudarshan/watchlist/useWatchlists'
 import { useViewPref } from '@/sudarshan/watchlist/ViewSheet'
 import { BUILT_IN } from '@/sudarshan/watchlist/v2/arrange'
+import { useAlertOffers } from '@/sudarshan/watchlist/v2/listAlert'
 import { FLAG_LIST_WORDS, itemsOf } from '@/sudarshan/watchlist/v2/marks'
 import { groupsOf, SECTIONS_FULL, useCollapsed } from '@/sudarshan/watchlist/v2/sections'
 import { LIMITS } from '@/sudarshan/watchlist/v2/types'
@@ -175,6 +176,20 @@ export default function Watchlist() {
   const activeRef = flagRef ?? (foreign ? foreign.ref : active ? ownRef(active.id) : null)
 
   const activeId = active?.id ?? null
+  // F17: "Alert on this list" is for the list on show: an own list, a built-in, ranked or flag one.
+  const alertFor = useAlertOffers(v2, fedIds)
+  const listAlert = flagRef
+    ? alertFor(
+        flagRef,
+        tabs.find((tab) => tab.ref === flagRef)?.name ?? 'Flag',
+        flagItems.length,
+        'flag'
+      )
+    : foreign
+      ? alertFor(foreign.ref, foreign.name, foreign.count ?? 0, foreign.kind)
+      : active
+        ? alertFor(ownRef(active.id), active.name, items.length)
+        : undefined
   // F3 (v2): the open own list in sections, read from the `view` op; flat while it is not read.
   const sectionsRef = v2 && active && !foreign && !flagRef ? ownRef(active.id) : null
   const view = useListView(sectionsRef).data
@@ -338,6 +353,7 @@ export default function Watchlist() {
                 sectionsRef ? () => open({ kind: 'sectionName', sectionId: null }) : undefined
               }
               onView={sectionsRef ? () => open({ kind: 'view' }) : undefined} // F6
+              alert={listAlert} // F17
               newSectionOff={
                 view && view.sections.length >= LIMITS.sections_per_list ? SECTIONS_FULL : null
               }
@@ -423,6 +439,7 @@ export default function Watchlist() {
           overlay={overlay}
           view={view}
           listId={active?.id ?? null}
+          alertFor={alertFor}
           onSwap={swap}
           onClose={close}
         />
