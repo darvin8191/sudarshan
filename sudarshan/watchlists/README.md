@@ -208,30 +208,31 @@ store's integers (`wl_meta.favourites_version`, `flags_version`; an absent row r
 the writes of favourites and flags (W9, W10) name the version they were decided on and a stale one
 is a `conflict`, across restarts. `versions.py` keeps an in-memory mirror of the two, loaded once
 from the store on first use and moved forward by a writer right after its commit
-(`advance_favourites` or `advance_flags` inside the write's transaction, one atomic update, then
-`committed(kind, n)`); a store that cannot be read leaves them out of the push and of `state`, never
-raises, and is left alone for five seconds (`STORE_RETRY_S`, a `LockedTTLCache`), so a run of
-pushes while it is broken opens it and logs the cause once instead of once per write. A lists bump and the mirror are under a real lock (`utils.real_threading`) whose critical
-section is the increment or one comparison. `versions.bump(why, refs)` bumps the lists version once
-and calls `versions.push`, which emits `contract.EVENT_PUSH` (`{v, ref, refs, why}` plus
-`favourites` and `flags` when known) to the room `sudarshan:watchlists:owner` through
-`extensions.emit_from_any_thread`. `refs` is every ref whose members the write changed, in the
-order named and each once: the target and then the source of a move, the old and the new flag list
-of a mark (the design's bump table), so a per-ref sync (lane F's `group_sync`, A5) knows every list
-to follow. It is empty when the change touched no list's members (a favourites write, a flag
-rename, a note alone) or when the hook could not tell which list it was (OpenAlgo's answer named
-none; the alerts' one-minute version check catches that). An open page reads its open list again
-on every push, and `state` or `lists` when `why` names them, whatever `refs` says. `ref` is the one
-ref changed, else `lists`: the phone reads `ref` today, so
-it stays in the push until lane F moves to `refs`, and is then dropped as a contract change of its
-own. A push that cannot be sent is logged, never raised. A write's answer (the `Done`, `CopyDone`
-and `TvDone` records) carries `lists_version`, the lists version its bump produced (the push's
-`v`), so the phone that wrote knows the push of its own write and skips it instead of reading
-again; a write that bumped nothing (a favourites or preference write, a write that changed nothing)
-answers without it, and a refusal answers the error alone (the page reads the list again after any
-refusal). `state` answers
-`versions`. An app joins the room with `contract.EVENT_JOIN` (an ack): the owner's session only, and
-refused in words with the switch off.
+(`advance_favourites` or `advance_flags` inside the write's transaction, one compare-and-set on the
+version the write was decided on, `versions.Stale` when it has moved, the delete prune alone
+advancing the favourites without one; then `committed(kind, n)`); a store that cannot be read leaves
+them out of the push and of `state`, never raises, and is left alone for five seconds
+(`STORE_RETRY_S`, a `LockedTTLCache`), so a run of pushes while it is broken opens it and logs the
+cause once instead of once per write. A lists bump and the mirror are under a real lock
+(`utils.real_threading`) whose critical section is the increment or one comparison.
+`versions.bump(why, refs)` bumps the lists version once and calls `versions.push`, which emits
+`contract.EVENT_PUSH` (`{v, ref, refs, why}` plus `favourites` and `flags` when known) to the room
+`sudarshan:watchlists:owner` through `extensions.emit_from_any_thread`. `refs` is every ref whose
+members the write changed, in the order named and each once: the target and then the source of a
+move, the old and the new flag list of a mark (the design's bump table), so a per-ref sync (lane F's
+`group_sync`, A5) knows every list to follow. It is empty when the change touched no list's members
+(a favourites write, a flag rename, a note alone) or when the hook could not tell which list it was
+(OpenAlgo's answer named none; the alerts' one-minute version check catches that). An open page
+reads its open list again on every push, and `state` or `lists` when `why` names them, whatever
+`refs` says. `ref` is the one ref changed, else `lists`: the phone reads `ref` today, so it stays in
+the push until lane F moves to `refs`, and is then dropped as a contract change of its own. A push
+that cannot be sent is logged, never raised. A write's answer (the `Done`, `CopyDone` and `TvDone`
+records) carries `lists_version`, the lists version its bump produced (the push's `v`), so the phone
+that wrote knows the push of its own write and skips it instead of reading again; a write that
+bumped nothing (a favourites or preference write, a write that changed nothing) answers without it,
+and a refusal answers the error alone (the page reads the list again after any refusal). `state`
+answers `versions`. An app joins the room with `contract.EVENT_JOIN` (an ack): the owner's session
+only, and refused in words with the switch off.
 
 The one rule: every write that changes what a list, a section or a flag list holds bumps the lists
 version once, after its transaction commits, from one of two sources and never both. (1) The hook:
