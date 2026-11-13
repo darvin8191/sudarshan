@@ -132,3 +132,165 @@ class FakeFeed(_Server):
             do_GET = do_PUT = do_DELETE = do_POST = _do
 
         return Handler
+
+
+class FakePortfolio(_Server):
+    """sudarshan-portfolio's sealed API as the journal uses it: ``POST /v1/<op>`` under the
+    journal purpose. ``answers[op]`` is the ``data`` of the envelope (or ``(status, body)``);
+    every call is recorded as (op, args, principal)."""
+
+    def __init__(self, key=None):
+        super().__init__()
+        self.key = PORTFOLIO_KEY if key is None else key
+        self.answers: dict[str, object] = {}
+        self.calls: list[tuple[str, dict, str]] = []
+        self.down = False
+
+    def handler(fake):  # noqa: N805 - a closure over the fake, not a method
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def _send(self, status, body):
+                data = json.dumps(body).encode()
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def do_POST(self):  # noqa: N802 - the stdlib's name
+                length = int(self.headers.get("Content-Length") or 0)
+                blob = self.rfile.read(length)
+                if fake.down:
+                    self.connection.close()
+                    return
+                op = self.path.rpartition("/")[2]
+                try:
+                    message = json.loads(fake.key.decrypt(blob, ttl=60))
+                except Exception:  # noqa: BLE001 - a seal this key does not open
+                    return self._send(403, {"status": "error", "code": "forbidden"})
+                if message.get("op") != op:
+                    return self._send(403, {"status": "error", "code": "forbidden"})
+                fake.calls.append((op, message.get("args") or {}, message.get("principal")))
+                answer = fake.answers.get(op)
+                if isinstance(answer, tuple):
+                    return self._send(*answer)
+                if answer is None:
+                    return self._send(501, {"status": "error", "code": "not_ready"})
+                return self._send(200, {"status": "success", "data": answer})
+
+        return Handler
+
+
+# ---- OpenAlgo's databases, as files a test writes (synthetic rows only) ---------------------------
+def make_openalgo_db(path, *, symtoken=(), order_logs=(), analyzer_logs=()):
+    """openalgo.db with the three tables the journal reads. ``symtoken`` rows are dicts with
+    token, symbol, exchange, expiry, lotsize, instrumenttype (and name); log rows have api_type,
+    request_data and response_data (dicts) and created_at (text)."""
+    import sqlite3
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS symtoken (id INTEGER PRIMARY KEY, symbol TEXT, "
+            "brsymbol TEXT, name TEXT, exchange TEXT, brexchange TEXT, token TEXT, expiry TEXT, "
+            "strike REAL, lotsize INTEGER, instrumenttype TEXT, tick_size REAL)"
+        )
+        for table in ("order_logs", "analyzer_logs"):
+            conn.execute(
+                f"CREATE TABLE IF NOT EXISTS {table} (id INTEGER PRIMARY KEY, api_type TEXT, "
+                "request_data TEXT, response_data TEXT, created_at TEXT)"
+            )
+        for row in symtoken:
+            conn.execute(
+                "INSERT INTO symtoken (symbol, brsymbol, name, exchange, token, expiry, lotsize, "
+                "instrumenttype) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (row["symbol"], row["symbol"], row.get("name", ""), row["exchange"],
+                 row["token"], row.get("expiry", ""), row.get("lotsize", 1),
+                 row.get("instrumenttype", "")),
+            )  # fmt: skip
+        for table, rows in (("order_logs", order_logs), ("analyzer_logs", analyzer_logs)):
+            for row in rows:
+                conn.execute(
+                    f"INSERT INTO {table} (api_type, request_data, response_data, created_at) "
+                    "VALUES (?, ?, ?, ?)",
+                    (row["api_type"], json.dumps(row["request_data"]),
+                     json.dumps(row["response_data"]), row["created_at"]),
+                )  # fmt: skip
+    return path
+
+
+def make_latency_db(path, rows=()):
+    """latency.db's order_latency with (order_id, rtt_ms, total_latency_ms) rows."""
+    import sqlite3
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS order_latency (id INTEGER PRIMARY KEY, order_id TEXT, "
+            "rtt_ms REAL, total_latency_ms REAL, request_body TEXT, response_body TEXT)"
+        )
+        conn.executemany(
+            "INSERT INTO order_latency (order_id, rtt_ms, total_latency_ms) VALUES (?, ?, ?)", rows
+        )
+    return path
+
+
+def make_sandbox_db(path, trades=()):
+    """sandbox.db's sandbox_trades; each trade a dict with the table's columns."""
+    import sqlite3
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS sandbox_trades (id INTEGER PRIMARY KEY, tradeid TEXT, "
+            "orderid TEXT, user_id TEXT, symbol TEXT, exchange TEXT, action TEXT, quantity INTEGER, "
+            "price NUMERIC, product TEXT, strategy TEXT, trade_timestamp TEXT)"
+        )
+        for t in trades:
+            conn.execute(
+                "INSERT INTO sandbox_trades (tradeid, orderid, user_id, symbol, exchange, action, "
+                "quantity, price, product, strategy, trade_timestamp) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (t["tradeid"], t["orderid"], "owner", t["symbol"], t["exchange"], t["action"],
+                 t["quantity"], t["price"], t["product"], t.get("strategy"), t["trade_timestamp"]),
+            )  # fmt: skip
+    return path
+
+
+def make_risk_db(path, *, kill_switch=False, since=None, locks=()):
+    """db/sudarshan_risk.db's two tables the journal reads: risk_state row 1 and daily_locks
+    (pipe, ist_date, at) rows; times are naive UTC text, as the risk store writes them."""
+    import sqlite3
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS risk_state (id INTEGER PRIMARY KEY, ks_on BOOLEAN NOT NULL "
+            "DEFAULT 0, ks_since DATETIME)"
+        )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS daily_locks (pipe TEXT, ist_date TEXT, at DATETIME, "
+            "figure REAL, loss_limit REAL, PRIMARY KEY (pipe, ist_date))"
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO risk_state (id, ks_on, ks_since) VALUES (1, ?, ?)",
+            (1 if kill_switch else 0, since),
+        )
+        conn.executemany(
+            "INSERT INTO daily_locks (pipe, ist_date, at, figure, loss_limit) VALUES (?,?,?,?,?)",
+            [(p, d, a, -1000.0, 1000.0) for p, d, a in locks],
+        )
+    return path
+
+
+def trade_row(trade_id, order_id, *, key="NSE_FO|50001", symbol="NIFTY 25000 CE 25 NOV 26",
+              product="I", side="BUY", qty=65, price_u=1_000_000, at=None, placed=None):  # fmt: skip
+    """One of the portfolio's ``trades_day`` rows (its parsed shape: qty_u x 10^6, price_u)."""
+    return {
+        "trade_id": trade_id, "order_id": order_id, "exchange_order_id": None,
+        "instrument_key": key, "exchange": "NFO", "symbol": symbol, "product": product,
+        "order_type": "MARKET", "transaction_type": side, "qty_u": qty * 1_000_000,
+        "price_u": price_u, "amount_paise": qty * price_u // 100, "placed_at": placed,
+        "exchange_at": at,
+    }  # fmt: skip

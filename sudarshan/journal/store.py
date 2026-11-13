@@ -370,6 +370,135 @@ class Tx:
         t = self._t(table)
         return bool(self.conn.execute(delete(t).where(t.c.id == row_id, self._mine(t))).rowcount)
 
+    # ---- fills: what Upstox and the sandbox reported (JB3') ----
+    #: What a later read of the same trade may correct in its row (the instrument named once the
+    #: master is in, the exchange's time once Upstox gives it); the rest is the trade itself.
+    FILL_FIXABLE = ("exchange", "symbol", "instrument_key", "product", "exch_ts_ms", "order_ts_ms",
+                    "day")  # fmt: skip
+
+    def fills_upsert(self, fills: Iterable[Mapping[str, Any]], now: int) -> dict[str, int]:
+        """Write each fill once, by (principal, mode, trade_id) (mutation target 22). A trade seen
+        again keeps its first source and row, takes what ``FILL_FIXABLE`` corrects, and comes back
+        from ``withdrawn`` if Upstox lists it again. Returns counts: new, fixed, back."""
+        t = self._t("fill")
+        counts = {"new": 0, "fixed": 0, "back": 0}
+        for fill in fills:
+            have = (
+                self.conn.execute(
+                    select(t).where(
+                        self._mine(t), t.c.mode == fill["mode"], t.c.trade_id == fill["trade_id"]
+                    )
+                )
+                .mappings()
+                .first()
+            )
+            if have is None:
+                values = {**fill, "principal": self.who, "created_at": now, "updated_at": now}
+                self.conn.execute(insert(t).values(**values))
+                counts["new"] += 1
+                continue
+            fixes = {k: fill[k] for k in self.FILL_FIXABLE if k in fill and fill[k] != have[k]}
+            values = dict(fixes)
+            if have["source"] == "withdrawn":
+                values["source"] = fill["source"]
+                counts["back"] += 1
+            counts["fixed"] += 1 if fixes else 0
+            if values:
+                self.conn.execute(
+                    update(t)
+                    .where(t.c.id == have["id"], self._mine(t))
+                    .values(**values, updated_at=now)
+                )
+        return counts
+
+    def fills_of(self, mode: str, *, day: int | None = None, since_ms: int | None = None,
+                 key: tuple[str, str] | None = None) -> list[dict[str, Any]]:  # fmt: skip
+        """Fills of a mode, oldest first: of one day, from an instant on, and of one instrument
+        (exchange, symbol) when asked."""
+        t = self._t("fill")
+        query = select(t).where(self._mine(t), t.c.mode == mode)
+        if day is not None:
+            query = query.where(t.c.day == day)
+        if since_ms is not None:
+            query = query.where(t.c.exch_ts_ms >= since_ms)
+        if key is not None:
+            query = query.where(t.c.exchange == key[0], t.c.symbol == key[1])
+        found = self.conn.execute(query.order_by(t.c.exch_ts_ms, t.c.trade_id)).mappings()
+        return [self.out(row) for row in found]
+
+    def fills_withdraw(self, mode: str, day: int, listed: Iterable[str], now: int) -> int:
+        """Mark the day's fills of ``mode`` that Upstox's whole list for the day no longer holds
+        as withdrawn: kept, and left out of the pairing (design 4.2). Returns how many."""
+        t = self._t("fill")
+        keep = set(listed)
+        gone = [
+            row["id"]
+            for row in self.conn.execute(
+                select(t.c.id, t.c.trade_id).where(
+                    self._mine(t), t.c.mode == mode, t.c.day == day, t.c.source != "withdrawn"
+                )
+            ).mappings()
+            if row["trade_id"] not in keep
+        ]
+        for batch in chunks(gone):
+            self.conn.execute(
+                update(t)
+                .where(self._mine(t), t.c.id.in_(batch))
+                .values(source="withdrawn", updated_at=now)
+            )
+        return len(gone)
+
+    # ---- order references: the label behind each order (JB3', M12.12) ----
+    def order_refs(self, mode: str, order_ids: Iterable[str] | None = None,
+                   surface: str | None = None) -> dict[str, dict]:  # fmt: skip
+        """The order references of a mode, by order id (all of them, those named, or those of
+        one surface: ``unknown`` lists the orders still waiting for their label)."""
+        t = self._t("order_ref")
+        query = select(t).where(self._mine(t), t.c.mode == mode)
+        if surface is not None:
+            query = query.where(t.c.surface == surface)
+        found: dict[str, dict] = {}
+        if order_ids is None:
+            for row in self.conn.execute(query).mappings():
+                found[row["order_id"]] = self.out(row)
+            return found
+        for batch in chunks(sorted(set(order_ids))):
+            for row in self.conn.execute(query.where(t.c.order_id.in_(batch))).mappings():
+                found[row["order_id"]] = self.out(row)
+        return found
+
+    def order_ref_note(self, mode: str, order_id: str, first_fill_ms: int, now: int) -> bool:
+        """An order seen for the first time gets a reference, its label still unknown; an order
+        already known keeps its row (its first fill moves earlier when an earlier one appears).
+        True when the row was made."""
+        t = self._t("order_ref")
+        where = (self._mine(t), t.c.mode == mode, t.c.order_id == order_id)
+        have = self.conn.execute(select(t.c.first_fill_ms).where(*where)).first()
+        if have is None:
+            self.conn.execute(
+                insert(t).values(
+                    principal=self.who, mode=mode, order_id=order_id, first_fill_ms=first_fill_ms,
+                    surface="unknown", created_at=now, updated_at=now,
+                )
+            )  # fmt: skip
+            return True
+        if first_fill_ms < have[0]:
+            self.conn.execute(
+                update(t).where(*where).values(first_fill_ms=first_fill_ms, updated_at=now)
+            )
+        return False
+
+    def order_ref_set(self, mode: str, order_id: str, values: Mapping[str, Any], now: int) -> bool:
+        """The label of an order once it is known (strategy, surface, type, latency)."""
+        t = self._t("order_ref")
+        return bool(
+            self.conn.execute(
+                update(t)
+                .where(self._mine(t), t.c.mode == mode, t.c.order_id == order_id)
+                .values(**values, updated_at=now)
+            ).rowcount
+        )
+
     # ---- the settings: one document per principal, one version ----
     def settings(self) -> dict[str, Any]:
         """The principal's report settings with their version (the seeded defaults filled in
