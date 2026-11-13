@@ -182,6 +182,8 @@ def test_a_settings_file_that_is_not_the_one_root_made_is_refused_and_left_alone
     assert elsewhere.read_bytes() == b""  # a link is never followed
     if what in ("other owner", "others read"):
         assert path.read_bytes() == b""
+    if what == "other owner":  # both causes named: not run as sudarshan, or someone else's file
+        assert "not this user's to write" in terminal.text and "as sudarshan" in terminal.text
     if what == "missing":
         assert not path.exists()  # never made here: root makes it, with install
         assert "sudo install -o sudarshan -g sudarshan -m 600 /dev/null" in terminal.text

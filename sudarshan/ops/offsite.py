@@ -197,12 +197,21 @@ def _remove_and_again(path: Path, what: str) -> str:
     )
 
 
+def _not_this_users(path: Path) -> str:
+    """The file is not the running user's to write: either this was not run as sudarshan, or the
+    file was made by someone else. Both are named, since either can be the cause."""
+    return (
+        f"Not saved: {path} is not this user's to write. The .bat runs this as sudarshan; if it "
+        f"did, remove the file (sudo rm {path}) and run the .bat again: it makes the file afresh."
+    )
+
+
 def _kind_problem(path: Path, info: os.stat_result, euid: int) -> str:
     """What is wrong with the file the settings go into; "" when nothing is."""
     if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
         return _remove_and_again(path, "is not a plain file")
     if info.st_uid != euid:
-        return _remove_and_again(path, "belongs to another user, not to sudarshan")
+        return _not_this_users(path)
     if info.st_mode & 0o077:
         return (
             f"Not saved: other users can read {path}. Make it private (sudo chmod 600 {path}) "
@@ -241,7 +250,7 @@ def write_settings(path: Path, config: Config, *, euid: int | None = None) -> st
         return _not_there(path)
     except OSError as exc:
         if exc.errno in (errno.EACCES, errno.EPERM):
-            return _remove_and_again(path, "cannot be written by sudarshan")
+            return _not_this_users(path)
         return _remove_and_again(path, "is not a plain file")  # a link, a folder, a pipe
     try:
         problem = _kind_problem(path, os.fstat(fd), euid)
