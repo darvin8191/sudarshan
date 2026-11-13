@@ -1,0 +1,25 @@
+{
+  "source": "RFC 8188 (Encrypted Content-Encoding for HTTP), sections 3.1 and 3.2. Typed by hand from the RFC text with its presentation whitespace removed; never produced by the code under test. They check the test's own decryptor before it is trusted with what the code under test makes. Every binary value is base64url without padding.",
+  "single_record": {
+    "plaintext_utf8": "I am the walrus",
+    "ikm": "yqdlZ-tYemfogSmv7Ws5PQ",
+    "record_size": 4096,
+    "keyid_utf8": "",
+    "body": "I1BsxtFttlv3u_Oo94xnmwAAEAAA-NAVub2qFgBEuQKRapoZu-IxkIva3MEB1PD-ly8Thjg",
+    "body_length": 53,
+    "body_length_note": "Section 3.1 says 54 octets. RFC erratum 5516 (held for document update) corrects it to 53: a 21-octet header, 15 octets of text, the delimiter and the 16-octet tag, which is what the body above decodes to.",
+    "salt": "I1BsxtFttlv3u_Oo94xnmw",
+    "prk": "zyeH5phsIsgUyd4oiSEIy35x-gIi4aM7y0hCF8mwn9g",
+    "cek": "_wniytB-ofscZDh4tbSjHw",
+    "nonce": "Bcs8gkIRKLI8GeI8",
+    "padded_plaintext": "SSBhbSB0aGUgd2FscnVzAg"
+  },
+  "multiple_records": {
+    "plaintext_utf8": "I am the walrus",
+    "ikm": "BO3ZVPxUlnLORbVGMpbT1Q",
+    "record_size": 25,
+    "keyid_utf8": "a1",
+    "body": "uNCkWiNYzKTnBN9ji3-qWAAAABkCYTHOG8chz_gnvgOqdGYovxyjuqRyJFjEDyoF1Fvkj6hQPdPHI51OEUKEpgz3SsLWIqS_uA",
+    "body_length": 73
+  }
+}
