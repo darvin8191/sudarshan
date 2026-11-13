@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -118,6 +118,26 @@ describe('the audit list', () => {
     await userEvent.dblClick(more)
     expect(api.auditList).toHaveBeenCalledTimes(2)
     finish({ lines: [], older: null })
+  })
+
+  it('asks for the older page once for two taps in the same frame, and does not drop the first', async () => {
+    let finish!: (page: unknown) => void
+    api.auditList
+      .mockResolvedValueOnce({ lines: [lineOf({ id: 20 })], older: 20 })
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          finish = resolve
+        })
+      )
+    mount()
+    const more = await screen.findByRole('button', { name: 'Load older' })
+    act(() => {
+      more.click()
+      more.click()
+    })
+    expect(api.auditList).toHaveBeenCalledTimes(2)
+    await act(async () => finish({ lines: [lineOf({ id: 10, kind: 'logout' })], older: null }))
+    expect((await lines()).getByText('Signed out')).toBeInTheDocument()
   })
 
   it('says when nothing matches, and offers a retry when it cannot be read', async () => {

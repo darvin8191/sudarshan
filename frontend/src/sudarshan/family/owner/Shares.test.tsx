@@ -133,6 +133,23 @@ describe('sharing watchlists', () => {
     await act(async () => finish(shareOf()))
   })
 
+  it('sends once for two taps in the same frame, before the switches are disabled', async () => {
+    let finish!: (share: unknown) => void
+    api.shareSet.mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve
+      })
+    )
+    mount()
+    const morning = await screen.findByRole('switch', { name: 'Share Morning list' })
+    act(() => {
+      morning.click()
+      morning.click()
+    })
+    expect(api.shareSet).toHaveBeenCalledTimes(1)
+    await act(async () => finish(shareOf()))
+  })
+
   it('says not confirmed for a write that was not answered, and reads the shares again', async () => {
     api.shareSet.mockRejectedValue(
       new OwnerError(
