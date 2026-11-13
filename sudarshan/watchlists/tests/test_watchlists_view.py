@@ -117,6 +117,22 @@ def test_the_refs_package_finds_the_list_reader_and_nothing_unbuilt():
         assert refs.reader_of(ref) is None, ref
 
 
+def test_the_readers_are_found_once_and_a_view_lists_and_imports_nothing(monkeypatch, client):
+    """Review L14: the directory was listed and every reader imported on every view request."""
+    from types import SimpleNamespace
+
+    assert set(refs.readers()) == {"list"}  # found and kept before the two go away
+    monkeypatch.setattr(
+        refs, "pkgutil", SimpleNamespace(iter_modules=lambda *a: pytest.fail("listed"))
+    )
+    monkeypatch.setattr(
+        refs, "importlib", SimpleNamespace(import_module=lambda *a: pytest.fail("imported"))
+    )
+    assert refs.reader_of("list:7")[1] == "7" and refs.readers() is refs.readers()
+    lid, _ = make_list()
+    assert get(client, f"list:{lid}").status_code == 200
+
+
 def test_every_reader_gives_the_interface_and_members_is_documented_not_built():
     for kind, module in refs.readers().items():
         assert module.KIND == kind and callable(module.view) and callable(module.members)

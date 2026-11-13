@@ -255,7 +255,9 @@ gthread worker).
 
 `view` (GET, class read) answers the `View` record of a `list:<id>` ref: OpenAlgo's list and the
 overlay merged. `ops/view.py` picks the reader by the ref's kind; `refs/` is found with
-`pkgutil.iter_modules` and each module names its `KIND` and gives `view(ident, user)` and
+`pkgutil.iter_modules` once, when the package is imported, and each reader is imported and kept on
+its first use (`utils/lazy`), so a `view` request lists and imports nothing and importing the
+bridge loads no reader. Each module names its `KIND` and gives `view(ident, user)` and
 `members(ident, user)` (the sealed members route's reader, documented in `refs/__init__.py` and
 implemented in W23; until then it raises `NotImplementedError` and nothing calls it). A kind that
 is not built (preset W12, flag W9, ranked W22), a ref that is not `<kind>:<id>` and a list id that

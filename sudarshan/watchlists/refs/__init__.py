@@ -24,26 +24,43 @@ Every reader module exposes:
     reader that has not built it raises ``NotImplementedError``, and nothing calls it before W23.
 
 Pure of threads, like the rest of this package; a reader opens its sessions as ``with`` blocks.
+
+The readers are found once: the package's modules are listed when it is imported, and imported
+and kept on their first use (``utils/lazy``), so a ``view`` request never lists the directory or
+imports again, and importing the package (and so the bridge) loads no reader and no master.
 """
 
 from __future__ import annotations
 
 import importlib
 import pkgutil
-from types import ModuleType
+from collections.abc import Mapping
+from types import MappingProxyType, ModuleType
 
 from sudarshan.watchlists import contract
+from utils.lazy import LazyInit
+
+#: The modules of this package, listed once, at import.
+_NAMES = tuple(info.name for info in pkgutil.iter_modules(__path__))
 
 
-def readers() -> dict[str, ModuleType]:
-    """The reader of each kind that has one, by kind."""
+def _discover() -> Mapping[str, ModuleType]:
     found: dict[str, ModuleType] = {}
-    for info in pkgutil.iter_modules(__path__):
-        module = importlib.import_module(f"{__name__}.{info.name}")
+    for name in _NAMES:
+        module = importlib.import_module(f"{__name__}.{name}")
         kind = getattr(module, "KIND", None)
         if kind in contract.ENUMS["RefKind"]:
             found[kind] = module
-    return found
+    return MappingProxyType(found)
+
+
+#: The reader of each kind, built on first use and kept (it only imports this package's modules).
+_readers: LazyInit[Mapping[str, ModuleType]] = LazyInit(_discover, "watchlists-refs")
+
+
+def readers() -> Mapping[str, ModuleType]:
+    """The reader of each kind that has one, by kind (read-only, the same map every call)."""
+    return _readers.get()
 
 
 def split(ref: str) -> tuple[str, str] | None:
