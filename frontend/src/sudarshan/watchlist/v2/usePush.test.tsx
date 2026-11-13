@@ -10,8 +10,8 @@ vi.mock('@/components/socket/SocketProvider', () => ({
 
 import { createQueryClient } from '@/app/providers'
 import { EVENT_JOIN, EVENT_PUSH, type Push } from './types'
-import { JOIN_WAIT_MS, SETTLE_MS, usePush } from './usePush'
 import { viewKey } from './useListView'
+import { JOIN_WAIT_MS, SETTLE_MS, usePush } from './usePush'
 
 type Handler = (...args: unknown[]) => void
 
@@ -85,7 +85,7 @@ describe('usePush', () => {
 
   it('reads once for several pushes inside 200 ms, and not before', () => {
     const { client, socket } = setup()
-    client.setQueryData(viewKey('list:1'), { version: 'a:1' })
+    client.setQueryData(viewKey('list:1'), { version: '1' })
     const spy = vi.spyOn(client, 'invalidateQueries')
     act(() => socket.fire('connect'))
     act(() => {
@@ -96,7 +96,7 @@ describe('usePush', () => {
     })
     expect(spy).not.toHaveBeenCalled()
     act(() => vi.advanceTimersByTime(1))
-    expect(spy).toHaveBeenCalledTimes(2) // the view and the counts, once each
+    expect(spy).toHaveBeenCalledTimes(3) // the view, the counts and OpenAlgo's lists, once each
   })
 
   it('ignores a push that is not shaped as one', () => {
@@ -118,7 +118,7 @@ describe('usePush', () => {
     act(() => socket.fire('disconnect'))
     act(() => socket.fire('connect'))
     act(() => socket.joins[1](null, { ok: true }))
-    expect(spy).toHaveBeenCalledTimes(1)
+    expect(spy).toHaveBeenCalledTimes(2) // every v2 read, and OpenAlgo's lists
   })
 
   it('removes every listener and pending read when the page is left', () => {

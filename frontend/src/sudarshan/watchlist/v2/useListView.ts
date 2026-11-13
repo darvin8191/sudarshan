@@ -1,4 +1,5 @@
 import { type QueryClient, type QueryKey, useQuery, useQueryClient } from '@tanstack/react-query'
+import { WATCHLISTS_KEY } from '../useWatchlists'
 import { callOp, type WatchlistsError } from './api'
 import type { Lists, Push, State, View } from './types'
 
@@ -16,34 +17,48 @@ export const LISTS_KEY = [...V2_KEY, 'lists'] as const
 export const viewKey = (ref: string) => [...V2_KEY, 'view', ref] as const
 
 /**
- * Which of two list versions (`"<boot>:<n>"`) is newer: 1, -1, 0 when equal, and null when they
- * cannot be told apart (another boot: the server restarted and its counter began again).
+ * Two versions, and each is used where it belongs.
+ *
+ * The lists version (`state.versions.lists`, `lists.version`, every push's `v`) is `"<boot>:<n>"`:
+ * a word that says "the lists as of this moment", compared for equality only, never ordered. It
+ * decides whether a push says something the page does not already know.
+ *
+ * A list's own version (`view.version`) is a plain number as text ("0" until the list is written,
+ * then the epoch milliseconds of a write, one more for each). It is only the version a write is
+ * decided on, and the one rule below that keeps a slow read from replacing a newer one.
  */
-export function compareVersions(a: string, b: string): -1 | 0 | 1 | null {
-  if (a === b) return 0
-  const ia = a.lastIndexOf(':')
-  const ib = b.lastIndexOf(':')
-  if (ia < 0 || ib < 0 || a.slice(0, ia) !== b.slice(0, ib)) return null
-  const na = Number(a.slice(ia + 1))
-  const nb = Number(b.slice(ib + 1))
-  if (!Number.isInteger(na) || !Number.isInteger(nb)) return null
-  return na > nb ? 1 : -1
-}
+const WHOLE = /^\d+$/
 
 /**
- * The version rule: an older answer never replaces a newer one. A read that began before a change
- * can finish after the read that saw it; whichever is older is dropped for what is held. Answers
- * from different boots cannot be ordered, and the one that arrives last (a restart in between) wins.
+ * The view rule: an older answer never replaces a newer one. A read that began before a change
+ * can finish after the read that saw it; the older is dropped for what is held. Both versions
+ * must be whole numbers to be ordered, and "0" (a list with no overlay row: new, or its row was
+ * pruned and the id reused) is never taken for older, because it can stand for a different list.
  */
 export function keepNewer<T extends { version: string }>(held: T | undefined, got: T): T {
-  return held && compareVersions(got.version, held.version) === -1 ? held : got
+  if (!held || !WHOLE.test(held.version) || !WHOLE.test(got.version) || got.version === '0') {
+    return got
+  }
+  return Number(got.version) < Number(held.version) ? held : got
+}
+
+/** The lists version this page last saw, per client: from a `state` or `lists` answer or a push. */
+const seenLists = new WeakMap<QueryClient, string>()
+
+export function rememberListsVersion(client: QueryClient, version: string | null | undefined) {
+  if (typeof version === 'string' && version) seenLists.set(client, version)
 }
 
 /** The state read: whether v2 is on, its limits, the flag names, the favourites. */
 export function useV2State() {
+  const client = useQueryClient()
   return useQuery<State, WatchlistsError>({
     queryKey: STATE_KEY,
-    queryFn: ({ signal }) => callOp('state', {}, signal),
+    queryFn: async ({ signal }) => {
+      const got = await callOp('state', {}, signal)
+      rememberListsVersion(client, got.versions?.lists)
+      return got
+    },
     staleTime: 30_000,
     retry: false,
   })
@@ -79,7 +94,8 @@ export function useLists(wanted = true) {
     queryKey: LISTS_KEY,
     queryFn: async ({ signal }) => {
       const got = await callOp('lists', {}, signal)
-      return keepNewer(client.getQueryData<Lists>(LISTS_KEY), got)
+      rememberListsVersion(client, got.version)
+      return got
     },
     enabled: on && wanted,
     staleTime: 30_000,
@@ -87,38 +103,90 @@ export function useLists(wanted = true) {
   })
 }
 
-/** What a push changed, as the reads to run again. */
-export function keysFor(push: Push): QueryKey[] {
+/**
+ * A push as lane W sends it: `ref` is the one list a write changed, or "lists" when several did,
+ * and `refs` is every ref it changed.
+ *
+ * Local extension: remove it, and read `push.refs` from `Push`, when lane W's contract change that
+ * adds `refs` merges in and the types are regenerated.
+ */
+export type PushNames = Push & { refs?: string[] }
+
+/** Every ref a push names: `refs` when it carries them, else the one `ref` (maybe "lists"). */
+export function refsOf(push: PushNames): string[] {
+  const named = Array.isArray(push.refs) ? push.refs.filter((r) => typeof r === 'string') : []
+  return named.length > 0 ? named : [push.ref]
+}
+
+/** One read to run again; `exact` keeps a key that is a prefix of others to itself. */
+interface Reread {
+  key: QueryKey
+  exact: boolean
+}
+
+const OWN = (ref: string) => ref === 'lists' || ref.startsWith('list:')
+
+/**
+ * What a push changed, as the reads to run again.
+ *
+ * The rows and the tabs come from OpenAlgo's lists (`WATCHLISTS_KEY`), not from `view`, so a push
+ * that changes what a list holds, or which lists there are, reads them again beside the open
+ * views: a symbol added on /trading shows on the phone. A push naming several lists (a move)
+ * reads each named list's view; "lists" with no names reads every open one.
+ */
+export function keysFor(push: PushNames): Reread[] {
+  const refs = refsOf(push)
+  const views = (): Reread[] =>
+    refs.map((ref) =>
+      ref === 'lists'
+        ? { key: [...V2_KEY, 'view'], exact: false }
+        : { key: viewKey(ref), exact: true }
+    )
+  const lists: Reread = { key: WATCHLISTS_KEY, exact: true }
+  const own = refs.some(OWN)
   switch (push.why) {
     case 'flags':
       // Flag names, the flag counts, and the markers every open view carries.
-      return [STATE_KEY, LISTS_KEY, [...V2_KEY, 'view'], [...V2_KEY, 'symbol']]
+      return [
+        { key: STATE_KEY, exact: true },
+        { key: LISTS_KEY, exact: true },
+        { key: [...V2_KEY, 'view'], exact: false },
+        { key: [...V2_KEY, 'symbol'], exact: false },
+      ]
     case 'favourites':
-      return [STATE_KEY, LISTS_KEY]
+      return [
+        { key: STATE_KEY, exact: true },
+        { key: LISTS_KEY, exact: true },
+      ]
     case 'lists':
-      return [LISTS_KEY, viewKey(push.ref)]
+      return [{ key: LISTS_KEY, exact: true }, lists, ...views()]
     case 'items':
-      return [viewKey(push.ref), LISTS_KEY]
+      return [...views(), { key: LISTS_KEY, exact: true }, ...(own ? [lists] : [])]
+    case 'arranged':
+      return [...views(), ...(own ? [lists] : [])]
     default:
-      // sections, arranged, rows, prefs
-      return [viewKey(push.ref)]
+      // sections, rows, prefs: the overlay only
+      return views()
   }
 }
 
 /**
  * Read again what these pushes changed, once each however many pushes named it. A push whose
- * version is the one the named view already holds, or an older one, changes nothing and reads
- * nothing (the version rule): this device made the change and already has it.
+ * lists version is the one this page last saw says nothing new and reads nothing (equality only;
+ * the flag and favourite versions have their own and are never skipped). While a read is in
+ * flight the page does not know whether that read saw the change, so nothing is skipped then.
  */
-export function applyPushes(client: QueryClient, pushes: Push[]): void {
-  const keys = new Map<string, QueryKey>()
+export function applyPushes(client: QueryClient, pushes: PushNames[]): void {
+  const wanted = new Map<string, Reread>()
+  const quiet = client.isFetching({ queryKey: V2_KEY }) === 0
   for (const push of pushes) {
-    if (push.ref) {
-      const held = client.getQueryData<View>(viewKey(push.ref))
-      const order = held ? compareVersions(push.v, held.version) : null
-      if (order !== null && order <= 0 && push.why !== 'flags') continue
+    const known = quiet && push.v === seenLists.get(client)
+    if (!known || push.why === 'flags' || push.why === 'favourites') {
+      for (const read of keysFor(push)) wanted.set(JSON.stringify([read.key, read.exact]), read)
     }
-    for (const key of keysFor(push)) keys.set(JSON.stringify(key), key)
+    rememberListsVersion(client, push.v)
   }
-  for (const key of keys.values()) void client.invalidateQueries({ queryKey: key })
+  for (const { key, exact } of wanted.values()) {
+    void client.invalidateQueries({ queryKey: key, exact })
+  }
 }

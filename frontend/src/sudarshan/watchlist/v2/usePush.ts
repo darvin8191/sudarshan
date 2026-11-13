@@ -2,8 +2,9 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import type { Socket } from 'socket.io-client'
 import { useSocketContext } from '@/components/socket/SocketProvider'
-import { applyPushes, V2_KEY } from './useListView'
-import { EVENT_JOIN, EVENT_PUSH, type Push } from './types'
+import { WATCHLISTS_KEY } from '../useWatchlists'
+import { EVENT_JOIN, EVENT_PUSH } from './types'
+import { applyPushes, type PushNames, V2_KEY } from './useListView'
 
 /** Pushes this close together make one read. */
 export const SETTLE_MS = 200
@@ -15,8 +16,8 @@ export const RETRY_MS = [2_000, 5_000, 10_000] as const
 /** Whether this screen hears the owner's room: `joined` from the ack until the connection drops. */
 export type Hearing = 'unknown' | 'joined' | 'not_joined'
 
-function isPush(value: unknown): value is Push {
-  const push = value as Partial<Push> | null
+function isPush(value: unknown): value is PushNames {
+  const push = value as Partial<PushNames> | null
   return (
     push !== null &&
     typeof push === 'object' &&
@@ -45,7 +46,7 @@ export function usePush(on: boolean): Hearing {
       return
     }
     const timers = new Set<ReturnType<typeof setTimeout>>()
-    let pending: Push[] = []
+    let pending: PushNames[] = []
     let settle: ReturnType<typeof setTimeout> | null = null
     let connection = 0
     let live = true
@@ -67,7 +68,10 @@ export function usePush(on: boolean): Hearing {
           }
           setHearing(ack?.ok === true ? 'joined' : 'not_joined')
           // A reconnect: what was pushed while the connection was down went to nobody.
-          if (ack?.ok === true && mine > 1) void client.invalidateQueries({ queryKey: V2_KEY })
+          if (ack?.ok === true && mine > 1) {
+            void client.invalidateQueries({ queryKey: V2_KEY })
+            void client.invalidateQueries({ queryKey: WATCHLISTS_KEY, exact: true })
+          }
         })
     }
 
