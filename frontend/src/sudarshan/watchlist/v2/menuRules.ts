@@ -34,3 +34,24 @@ export function menuFor(kind: RefKind | string): ListMenu {
       return NOTHING
   }
 }
+
+/** F15 (M8.12): what the list menu offers for TradingView, for the list on screen. */
+export interface TvMenu {
+  /** "Import into this list": only an own list. (A new list can be made from any screen.) */
+  importHere: boolean
+  /** Export for TradingView: every kind the `tv_export` op reads; a kind not written here has none. */
+  export: boolean
+}
+
+export function tvFor(kind: RefKind | string): TvMenu {
+  switch (kind) {
+    case 'list':
+      return { importHere: true, export: true }
+    case 'preset':
+    case 'ranked':
+    case 'flag':
+      return { importHere: false, export: true }
+    default:
+      return { importHere: false, export: false }
+  }
+}

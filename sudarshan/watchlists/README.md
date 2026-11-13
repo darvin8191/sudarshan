@@ -1143,8 +1143,8 @@ an underlying) and `recents.ts`.
   held set covers a symbol added a moment ago). A full list disables Add and says why, as the old sheet did.
 - **Underlying with options.** `underlying` set shows Pick a strike, Add ATM row and Add current-month FUT row. The
   last two open F11's form through the page's `swap` with `{ mode: 'add', kind, underlying, exchange, sectionId:
-  null }`; the exchange is read from the answer's own cash hit for that name, else from where the options trade
-  (NFO or BFO) and whether the name is a known index, and with neither the offer is not made.
+  null }`; the exchange is the answer's `underlying_exchange` (from the master, as the server sent it; null exactly
+  when `underlying` is null, and then the offer is not made). The page guesses nothing.
 - **The seam for F14.** Pass `onPickStrike(underlying, exchange)` to `SearchSheet`; while it is absent Pick a strike is
   shown disabled. The page passes nothing yet. F14 should call `strikes` with `u` and `x` from that callback.
 - **Recent.** An empty field shows the last 20 symbols added from this sheet on this device (title, detail, Add or
@@ -1371,6 +1371,41 @@ socket is there. With the switch off nothing changes: the address is not known a
   and on a tab change, the cap, Add CE and Add PE and Added, the form's seam, 48 dp, the 500 ms guard, the
   switch off) and `Watchlist.search.test.tsx` (from the search to the picker to the form, and a reload).
 
+## F15 - the TradingView import and export sheet
+
+Two items of the list menu with the switch on (`?sheet=import`, `?sheet=export`, both v2-only in
+`useOverlay.ts`); with it off the menu and the address read as today's. Logic apart from drawing is in
+`watchlist/tvTransfer.ts`, the sheets are `ImportSheet.tsx` and `ExportSheet.tsx`.
+- **Import from TradingView** is in every list's menu (a new list can be made from any screen);
+  "Import into this list" is offered only for the own list on screen (`menuRules.ts`, `tvFor`:
+  `importHere` for kind `list` alone, `export` for `list`, `preset`, `ranked` and `flag`, nothing for a
+  kind not written there). "Pick the .txt file you downloaded from TradingView, or paste its text." A
+  48 dp file button (`accept=".txt,text/plain"`, read with `FileReader` in the browser) and a paste box.
+  Over 64 KiB (`LIMITS.tv_file_bytes`, UTF-8 bytes for pasted text) is refused with the server's own
+  sentence before the file is read and before anything is sent. The file name, without its extension,
+  fills the new list's name, which stays editable.
+- **Preview.** One `tv_preview` per press of Preview (the op is limited to 6 a minute), sent with
+  `name` for a new list or `list` for this one; the server's `words` are shown in order and nothing is
+  written. The preview is dropped when the text, the target or the file changes, so Import always sends
+  what was shown; editing only the new list's name keeps it (the server checks the name at import, so a
+  name that is taken is refused in words, and the preview's split line may still carry the old name).
+  "Import {matched} symbols" is disabled at 0 matched and with a new list that has no name.
+- **Import.** `tv_import` with the preview's `hash`, and `name` (new list) or `list` and `version` (the
+  version `view` answered for the open list). The toast is `TvDone.words`; the first list made (or this
+  one) is opened; the lists, the All lists answer and the list's view are read again, whatever the
+  answer. `callOp` notes `lists_version`, so the push of this write is skipped (F, "the push's refs").
+  Every refusal is shown as the server sent it under the button, and the sheet stays open: the changed
+  file, a taken name, a stale version, the 50 lists, 250 symbols, 20 sections, and a part-way failure
+  with how many went in.
+- **Export for TradingView** reads `tv_export` for the ref of the list on screen each time it opens
+  and shows the server's `words`; the file `text` is downloaded as `filename` (Blob and a link) only when
+  `symbols` is above 0. A refusal is shown as sent. A section's own export (`list:7/section:3`) is
+  accepted by `ExportSheet` through its `listRef`, but no section menu entry opens it yet.
+- Both sheets are `BottomSheet`s, so they ignore taps for the first 500 ms (`openGuard.ts`).
+- Also in this change: `STATUS.md` has one row for each M-id again (the merge of lane W had left two
+  for M8.4 to M8.12; the lane W text is kept inside the one row).
+- **Tests:** `pages/Watchlist.tv.test.tsx`.
+
 ## W17 - the search and strikes ops (`ops/search.py`, `words/strikes.py`)
 
 Two read ops over the one master generation (`master.shared().index()`: built once per snapshot in
@@ -1463,3 +1498,51 @@ A list reads its view once, resolves its month-future rows with the same code as
 Tests: `tests/test_watchlists_members.py` (the readers) and `tests/test_watchlists_internal.py` (the
 seal, each kind of ref, futures, the versions, the switch, and the alerts service's own members
 client reading the route through a test app).
+
+## F16 - ranked lists on the phone
+
+A ranked list (`ranked:<futures|options>:<INDEX|STOCK|COMMODITY>:<category>`, from W22) opens like any list
+and is read from the `ranked` op alone, never from `view` (the page needs `state`, `made_at` and `read_at`, which
+`view` does not carry). `useRanked.ts` is its one reader, `RankedLine.tsx` what is said over the rows,
+`v2/ranked.ts` the pure words and rules, and `LiveList` and `WatchlistRows` take one optional `metrics` map
+(EXCHANGE:SYMBOL to the ranking's own figure) for each row's second line. With the switch off nothing here is
+reached: the page opens no ranked list and `ranked` is never asked.
+- **All lists.** The block "Ranked by Upstox" is grouped Futures then Options, each by Index, Stock and
+  Commodity, each row named by its category ("OI gainers") with "Ranked by Upstox · Index futures" under it. Only
+  what the server's catalogue offers is shown (MTF never is); a ref the page cannot place is listed after the
+  groups under its own name. A ranked list opened from the sheet gets a tab named as the server names it
+  ("Index options · OI gainers").
+- **Locked.** No Add, edit mode, move, sections or View, and the list menu follows `menuFor('ranked')`: nothing
+  that edits. "Alert on this list" stays, off, with F17's sentence. Rows show name, price and change from the feed
+  under F9's rules; the figure Upstox ranked on ("OI +12.4%", "Traded ₹1,320.9 cr", "Costs ₹4,350 to buy") is on
+  the second line, as read. A contract keeps its row id from the first read that showed it, so an open sheet stays
+  on its contract when a later read moves it.
+- **The age line.** "Ranked by Upstox · 2 min ago", from `made_at` ("just now", "6 min ago", "2 h ago"), redrawn
+  once a minute while the page is visible (and once a second only while the Refresh button counts its minute);
+  the redraw asks for nothing. A tap shows "Ranking made 10:41:05, read 10:43:10". After ten minutes the line takes
+  the stale style (a clock icon, bold, the age) and adds "Pull down to read it again". `unavailable` and `wait`
+  keep their old rows under the same line; `closed` shows the server's "Market closed · ranking from ..." as sent;
+  `signin` shows the server's sentence, no rows and a Sign in button to the Auto login page (the page every other
+  sign-in notice uses); the left-out sentence is the server's, taken from the end of `words`.
+- **When it reads, and only then.** Opening the list; coming back after more than 15 s away (`visibilitychange`
+  visible, with the time hidden measured on the phone); a pull down from the top of the page (80 px); and the
+  48 dp Refresh ranking button. A pull or the button inside 60 s of the last read (an `ok`, `stale` or `closed`
+  answer) makes no request and shows that read: the button is off and says "Read 20 s ago". An `unavailable`,
+  `wait` or `signin` answer is not held, so the next pull asks again (the server answers from its own cache or
+  its 3 s failure window). A page that is hidden asks for nothing: a read owed to a list opened while hidden is
+  made when the page is shown. There is no timer that asks for anything; thirty minutes of fake time with the list
+  open make one request in the test.
+- **Rows move only at a read.** The order is the answer's, never a tick's. After a read that changed the order the
+  line says for one minute "Ranking updated 10:44 · 1 new: NIFTY 26,050 PE" (three names at most, then "and N
+  more"; "the order changed" when only the order moved). A read of another size (see below) is not an update.
+- **The underlying chip.** One chip per underlying present (most contracts first, eight at most, each with its
+  count); a tap filters the rows on the phone and says "2 of the top 4 are NIFTY contracts", a second tap clears it.
+- **20 rows, 50 on request.** Owner decision 8: the first read is 20 rows; "Show the top 50" reads again with
+  `size` 50 (the server's cache already holds the 50-row page) and the chip says "of the top 50".
+- **Make a copy** (48 dp, F10's button and name dialog) sends one `copy {from: {ref, keys}}` with every key shown,
+  in the order shown and after the chip's filter, shows the server's words as sent and opens the new list.
+- **Tests.** `v2/ranked.test.ts` (the words and refs, hand-typed), `pages/Watchlist.ranked.test.tsx` (the groups,
+  opening reads once, locked, the figure, the age line and its stale style, thirty minutes with no request, the
+  15 s return rule, a hidden page, a pull inside a minute with "Read 20 s ago", rows that do not move on a tick,
+  "Ranking updated", each state's words and the Sign in button, the chip, Make a copy in the order shown, the 500 ms
+  guard, the switch off).

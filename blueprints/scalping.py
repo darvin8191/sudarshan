@@ -15,6 +15,7 @@ Order constants (docs/prompt/order-constants.md):
 
 import math
 import re
+import time
 from datetime import datetime, timedelta
 
 import pytz
@@ -323,7 +324,26 @@ def expiry():
 
     raw_dates = response.get("data", []) or []
     normalized = [_normalize_expiry(d) for d in raw_dates]
-    return jsonify({"status": "success", "data": normalized})
+    # SUDARSHAN (review M3): today's expiry leaves at its contract's stop, not at the F&O close.
+    offered, rolls_at = _offered_expiries(normalized, underlying, exchange)
+    return jsonify({"status": "success", "data": offered, "rolls_at": rolls_at})
+
+
+def _offered_expiries(expiries: list[str], underlying: str, exchange: str):
+    """SUDARSHAN (review M3): the expiries still trading now and when the nearest stops today
+    (``rolls_at``, epoch ms, for the page to ask again then): an expiring NFO or BFO contract
+    stops at 15:30 on its expiry day from 7 Dec 2026 if it is an index's, at the F&O close
+    otherwise (15:40 until 6 Dec). A list for another exchange is left as it is."""
+    if exchange not in ("NFO", "BFO"):
+        return expiries, None
+    from sudarshan import index_contracts, instrument_session
+
+    index = underlying in index_contracts.underlyings().indices
+    return instrument_session.offered_expiries(expiries, _now_ms(), index=index)
+
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)
 
 
 def _parse_expiry(s: str):

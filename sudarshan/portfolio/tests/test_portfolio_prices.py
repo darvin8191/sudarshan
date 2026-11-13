@@ -234,8 +234,9 @@ def test_a_stock_with_futures_closes_by_auction_and_one_without_does_not(tmp_pat
 
 def test_on_10_december_only_the_stock_with_futures_waits_for_an_auction(tmp_path, feed):
     """NSE's circulars of 6 Nov 2026: from 7 Dec the auction stays with stocks that have
-    derivatives. RELIANCE's price waits for its auction from 15:30, expected at 15:40; TCS, with
-    no futures, closes at 15:30 with no auction line and keeps its usual close."""
+    derivatives. RELIANCE's price waits for its auction from 15:30, expected at 15:40 and taken
+    until 15:45; TCS, with no futures, closes at 15:30 with no auction line and keeps its usual
+    close."""
     from datetime import date
 
     from sudarshan.alerts.market.sessions import epoch_ms
@@ -245,7 +246,7 @@ def test_on_10_december_only_the_stock_with_futures_waits_for_an_auction(tmp_pat
     day = date(2026, 12, 10)
     noon = epoch_ms(day, 12 * 60)
     assert rig.pb.auction_for("RELIANCE", "NSE", noon) == (
-        True, epoch_ms(day, 15 * 60 + 30), epoch_ms(day, 15 * 60 + 40), epoch_ms(day, 15 * 60 + 40)
+        True, epoch_ms(day, 15 * 60 + 30), epoch_ms(day, 15 * 60 + 45), epoch_ms(day, 15 * 60 + 40)
     )  # fmt: skip
     assert rig.pb.auction_for("TCS", "NSE", noon) == (False, None, None, None)
     friday = epoch_ms(date(2026, 12, 4), 12 * 60)  # before the change: 15:15-15:35, price at 15:30

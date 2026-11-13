@@ -29,6 +29,8 @@ export interface ExpiryResponse {
   status: string
   data: string[] // DDMMMYY, e.g. "28OCT25"
   message?: string
+  /** SUDARSHAN (review M3): epoch ms the nearest expiry stops today, when it does. */
+  rolls_at?: number | null
 }
 
 export interface OptionLeg {

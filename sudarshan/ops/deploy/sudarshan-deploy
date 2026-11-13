@@ -67,7 +67,9 @@ day_trading() {   # $1 = date, $2 = ISO weekday, $3 = HHMM, $4 = holiday file, $
     local t=$((10#$3))
     # 08:30-16:00 (SUDARSHAN M0.1): clear of auto-login's wake-ups, the alerts' 08:45 opening and
     # the feed's 08:58; until the alerts' 16:00 close, after the F&O close at 15:40 and the feed's
-    # tail to 15:50
+    # tail to 15:50. From 7 Dec 2026 F&O closes at 15:45, the feed's tail is 15:55 and the alerts
+    # close at 16:05; the gate stays 16:00 (the owner's rule), so an install from 16:01 to 16:05
+    # can restart the alerts while connected (the v0.8.1 notes say so)
     (( t >= 830 && t <= 1600 ))
 }
 market_open() {   # 0 = trading hours (do not restart), 1 = safe. Trading when the day files say so as
