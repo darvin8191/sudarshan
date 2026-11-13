@@ -5,6 +5,7 @@ import {
   CheckCheck,
   CircleSlash,
   Download,
+  FileSpreadsheet,
   FileText,
   FileType2,
   LoaderCircle,
@@ -21,6 +22,7 @@ import {
   builtWords,
   deliveryOf,
   downloadName,
+  hasCsv,
   kindTitle,
   periodWords,
   type ReportRow,
@@ -109,6 +111,17 @@ function Row({
           >
             No file
           </span>
+        )}
+        {hasCsv(report) && (
+          <a
+            className={`${BUTTON} col-span-2`}
+            href={reportFileUrl(report.id, 'csv')}
+            download={downloadName(report, 'csv')}
+            aria-label={`Download CSV of ${kindTitle(report.kind)} ${periodWords(report.period_key)}`}
+          >
+            <FileSpreadsheet aria-hidden="true" className="size-4" />
+            Download CSV
+          </a>
         )}
       </div>
     </li>

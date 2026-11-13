@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Report } from '../journal/types'
-import { ALERTS_OFF, deliveryOf, downloadName, periodWords } from './words'
+import { ALERTS_OFF, deliveryOf, downloadName, hasCsv, periodWords } from './words'
 
 const report = (over: Partial<Report> = {}): Report => ({
   id: 1,
@@ -47,6 +47,16 @@ describe('names and periods', () => {
     expect(
       downloadName(report({ kind: 'monthly', period_key: '202610', file_name: 'a.csv' }))
     ).toBe('SUDARSHAN_Monthly_statement_202610.csv')
+    const statement = report({ kind: 'monthly', period_key: '202610' })
+    expect(downloadName(statement, 'csv')).toBe('SUDARSHAN_Monthly_statement_202610.csv')
+    expect(downloadName(statement)).toBe('SUDARSHAN_Monthly_statement_202610.pdf')
+  })
+
+  it('offers a CSV for the monthly statement only', () => {
+    expect(hasCsv(report({ kind: 'monthly' }))).toBe(true)
+    for (const kind of ['eod', 'brief', 'weekly', 'fy'] as const) {
+      expect(hasCsv(report({ kind }))).toBe(false)
+    }
   })
 
   it('words each key', () => {

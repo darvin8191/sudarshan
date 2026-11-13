@@ -486,6 +486,54 @@ def test_a_csv_keeps_its_type_without_a_charset(bridge, journal):
     assert response.headers["Content-Type"] == "text/csv" and response.data == data
 
 
+CSV = b"Date,Symbol,Side,Net\n2026-11-09,NIFTY,LONG,812.50\n"
+CSV_NAME = "SUDARSHAN_Monthly-statement_202610.csv"
+
+
+def test_a_monthly_statements_csv_is_asked_for_with_format_and_comes_as_its_own_file(
+    bridge, journal
+):
+    """JB9: the service answers a statement's CSV for format=csv; the bridge forwards exactly
+    that and sends it as an attachment under its stored ASCII name, text/csv and nosniff."""
+    journal.answers["report_file"] = stored(CSV, CSV_NAME, "text/csv")
+    as_owner(bridge)
+    response = bridge.get(PREFIX + "/reports/3/file?format=csv")
+    assert response.status_code == 200 and response.data == CSV
+    assert response.headers["Content-Type"] == "text/csv"
+    assert response.headers["Content-Disposition"] == f'attachment; filename="{CSV_NAME}"'
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+    assert response.headers["Cache-Control"] == "no-store"
+    assert journal.calls == [("report_file", {"id": 3, "format": "csv"})]
+    bridge.get(PREFIX + "/reports/3/file?format=")  # empty: the stored file, as without it
+    assert journal.calls[1] == ("report_file", {"id": 3})
+
+
+@pytest.mark.parametrize("value", ["pdf", "CSV", "csv%20", "xlsx", "csv,pdf", "csv%0A"])
+def test_any_other_format_is_refused_in_words_and_nothing_is_sent(bridge, journal, value):
+    as_owner(bridge)
+    response = bridge.get(f"{PREFIX}/reports/3/file?format={value}", headers=JSON)
+    assert response.status_code == 400
+    assert error_of(response) == {"code": "bad_request", "message": WORDS["format"]}
+    assert "Content-Disposition" not in response.headers
+    assert journal.calls == []
+
+
+def test_a_csv_asked_for_must_come_back_as_a_csv(bridge, journal):
+    as_owner(bridge)
+    journal.answers["report_file"] = stored()  # the statement's PDF where its CSV was asked for
+    pdf = bridge.get(PREFIX + "/reports/3/file?format=csv", headers=JSON)
+    assert error_of(pdf) == {"code": "unavailable", "message": WORDS["bad_file"]}
+    assert "Content-Disposition" not in pdf.headers
+    journal.answers["report_file"] = stored(CSV, CSV_NAME.replace(".csv", ".pdf"), "text/csv")
+    renamed = bridge.get(PREFIX + "/reports/3/file?format=csv", headers=JSON)
+    assert error_of(renamed) == {"code": "unavailable", "message": WORDS["bad_file"]}
+    journal.answers["report_file"] = (
+        200, {"status": "success", "data": {"file_name": None, "file_b64": None}},
+    )  # fmt: skip
+    none = bridge.get(PREFIX + "/reports/3/file?format=csv", headers=JSON)
+    assert error_of(none) == {"code": "not_found", "message": WORDS["no_csv"]}
+
+
 @pytest.mark.parametrize(
     "answer",
     [

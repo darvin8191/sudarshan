@@ -89,6 +89,32 @@ describe('Archive', () => {
     expect(within(items[1]).queryByRole('link')).toBeNull()
   })
 
+  it('offers a monthly statement as a CSV too, next to Download, and no other report', async () => {
+    serve([
+      row({
+        id: 5,
+        kind: 'monthly',
+        period_key: '202610',
+        file_name: 'SUDARSHAN_Monthly-statement_202610.pdf',
+      }),
+      row({ id: 1, built_ms: 1_762_000_000_000 }),
+    ])
+    renderBook('/reports', <Reports />)
+    const items = await screen.findAllByTestId('report')
+    const monthly = within(items[0])
+    expect(monthly.getByText('Monthly statement')).toBeTruthy()
+    const csv = monthly.getByRole('link', {
+      name: 'Download CSV of Monthly statement October 2026',
+    })
+    expect(csv.getAttribute('href')).toMatch(/\/reports\/5\/file\?format=csv$/)
+    expect(csv.getAttribute('download')).toBe('SUDARSHAN_Monthly_statement_202610.csv')
+    expect(csv.textContent).toBe('Download CSV')
+    const pdf = monthly.getByRole('link', { name: 'Download Monthly statement October 2026' })
+    expect(pdf.getAttribute('href')).toMatch(/\/reports\/5\/file$/)
+    expect(within(items[1]).getByText('Day report')).toBeTruthy()
+    expect(within(items[1]).queryByRole('link', { name: /CSV/ })).toBeNull()
+  })
+
   it('says the alerts service is off when the server says so', async () => {
     serve([row({ status: 'not_sent' })], { ...SETTINGS, alerts_on: false })
     renderBook('/reports', <Reports />)

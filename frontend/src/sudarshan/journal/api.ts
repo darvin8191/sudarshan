@@ -192,10 +192,15 @@ function bodyOf(args: Record<string, unknown>): Record<string, unknown> {
   return rest
 }
 
-/** The address a download is opened from (the bridge's file route); the session is the key. */
-export function reportFileUrl(id: number): string {
+/**
+ * The address a download is opened from (the bridge's file route); the session is the key.
+ * `csv` asks for a monthly statement's trades as its CSV instead of the report's own file.
+ */
+export function reportFileUrl(id: number, format?: 'csv'): string {
   const spec = SPECS.get('report_file')
-  return spec ? pathOf(spec, { id }) : ''
+  if (!spec) return ''
+  const path = pathOf(spec, { id })
+  return format === 'csv' ? `${path}?format=csv` : path
 }
 
 /** One op at the bridge. Throws a `JournalError` in the owner's words. */

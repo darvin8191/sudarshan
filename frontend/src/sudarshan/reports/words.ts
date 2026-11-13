@@ -82,12 +82,18 @@ export function deliveryOf(
 
 const ascii = (text: string): string => text.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
 
-/** SUDARSHAN_<Kind>_<period>.pdf, ASCII only; the extension is the file's own when it has one. */
-export function downloadName(report: Report): string {
+/**
+ * SUDARSHAN_<Kind>_<period>.pdf, ASCII only; the extension is the file's own when it has one, and
+ * .csv for a monthly statement's CSV (`format`).
+ */
+export function downloadName(report: Report, format?: 'csv'): string {
   const own = report.file_name?.match(/\.([A-Za-z0-9]{2,4})$/)?.[1]?.toLowerCase()
-  const ext = own ?? (report.file_mime === 'text/csv' ? 'csv' : 'pdf')
+  const ext = format === 'csv' ? 'csv' : (own ?? (report.file_mime === 'text/csv' ? 'csv' : 'pdf'))
   return `SUDARSHAN_${ascii(kindTitle(report.kind))}_${ascii(report.period_key)}.${ext}`
 }
+
+/** Which reports also come as a CSV of their trades: the monthly statement (JB9). */
+export const hasCsv = (report: Report): boolean => report.kind === 'monthly'
 
 const BUILT = new Intl.DateTimeFormat('en-IN', {
   timeZone: 'Asia/Kolkata',
