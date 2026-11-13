@@ -831,27 +831,47 @@ fam_once() {   # $1 = the file that keeps the note logged last, $2 = this run's 
 # all. Made once with system tools on every server, at every run, and never written again: a token that
 # is there stays as it is. What is made is not logged; a failure is logged once while it holds. The
 # family account cannot read this folder and gets a copy of its own token (fam_provision).
+# The first time, all six appear at once (review L1): the feed reads the folder again within a second
+# and refuses every client without a file once any file is there, so the folder is filled beside it
+# (${FEED_DIR}.new, as a dot file) and renamed into place whole. A single token missing later is made
+# on its own, through a file beside it and a hard link.
 FEED_CLIENTS=(sudarshan-alerts sudarshan-screener sudarshan-portfolio sudarshan-journal sudarshan-family sudarshan-protect)
+feed_token() {   # $1 = a new file (or the empty one mktemp made): a new token in it, root:sudarshan 640.
+                 # 0 = written
+    local tok
+    tok="$(head -c 32 /dev/urandom | base64 -w 0 | tr -- '+/' '-_' | tr -d '=')"
+    [[ "${tok}" =~ ^[A-Za-z0-9_-]{43}$ ]] \
+        && { printf '%s\n' "${tok}" > "$1" && chmod 640 -- "$1" && chown -- "root:${RING_USER}" "$1"; } 2>/dev/null
+}
 feed_tokens() (
     set +eEu; trap - ERR
-    local name dest tmpf tok note=""
+    local name dest tmpf note="" new="${FEED_DIR%/*}/.${FEED_DIR##*/}.new"
     umask 077
     if [[ -L "${FEED_DIR}" ]] || { [[ -e "${FEED_DIR}" ]] && ! cal_dir_ok "${FEED_DIR}"; }; then
         note="WARNING: feed: ${FEED_DIR} is not a folder owned by root and closed to others, so no client token is made there"
     elif [[ ! -e "${FEED_DIR}" ]] && ! cal_dir_ok "${CAL_DIR}"; then
         note="WARNING: feed: ${CAL_DIR} is not a folder owned by root and closed to others, so no client token is made"
-    elif [[ ! -e "${FEED_DIR}" ]] && ! { mkdir -m 750 -- "${FEED_DIR}" && chown -- "root:${RING_USER}" "${FEED_DIR}"; } 2>/dev/null; then
-        rmdir -- "${FEED_DIR}" 2>/dev/null
-        note="WARNING: feed: ${FEED_DIR} could not be made, so no client token is made"
+    elif [[ ! -e "${FEED_DIR}" ]]; then
+        rm -rf -- "${new}" 2>/dev/null   # left by a killed run: this tool holds deploy.lock, so it is stale
+        if ! { mkdir -m 750 -- "${new}" && chown -- "root:${RING_USER}" "${new}"; } 2>/dev/null; then
+            note="WARNING: feed: ${FEED_DIR} could not be made, so no client token is made"
+        else
+            for name in "${FEED_CLIENTS[@]}"; do
+                feed_token "${new}/${name}" || { note="WARNING: feed: the client tokens in ${FEED_DIR} could not be made"; break; }
+            done
+            if [[ -z "${note}" ]] && ! mv -T -- "${new}" "${FEED_DIR}" 2>/dev/null; then
+                note="WARNING: feed: ${FEED_DIR} could not be put in place, so no client token is made"
+            fi
+        fi
+        rm -rf -- "${new}" 2>/dev/null   # gone after the rename; what a failure left
     else
         find "${FEED_DIR}" -maxdepth 1 -type f -name '.sudarshan-*.??????' -mmin +10 -delete 2>/dev/null   # left by a killed run
         for name in "${FEED_CLIENTS[@]}"; do
             dest="${FEED_DIR}/${name}"
             if [[ -e "${dest}" || -L "${dest}" ]]; then continue; fi
-            tok="$(head -c 32 /dev/urandom | base64 -w 0 | tr -- '+/' '-_' | tr -d '=')"; tmpf=""
-            if [[ "${tok}" =~ ^[A-Za-z0-9_-]{43}$ ]] && tmpf="$(mktemp -p "${FEED_DIR}" ".${name}.XXXXXX" 2>/dev/null)" \
-                    && { printf '%s\n' "${tok}" > "${tmpf}" && chmod 640 -- "${tmpf}" && chown -- "root:${RING_USER}" "${tmpf}" \
-                         && ln -T -- "${tmpf}" "${dest}"; } 2>/dev/null; then
+            tmpf=""
+            if tmpf="$(mktemp -p "${FEED_DIR}" ".${name}.XXXXXX" 2>/dev/null)" && feed_token "${tmpf}" \
+                    && ln -T -- "${tmpf}" "${dest}" 2>/dev/null; then
                 :   # in place; a hard link takes no name another run made meanwhile
             else
                 note="WARNING: feed: the client token ${dest} could not be made"
