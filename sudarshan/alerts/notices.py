@@ -304,7 +304,10 @@ def _waiting(event: Event, now: datetime) -> list[str]:
 
 #: Facts of the family kinds come from another account's file, so a value goes into a sentence
 #: only when it matches one of these narrow patterns; anything else is left out of the sentence.
-_DEVICE = re.compile(r"[A-Za-z0-9][A-Za-z0-9 .+()/\u00b7-]{0,39}")
+#: A device label has no slash (Telegram makes "/word" a command the owner can tap) and is left out
+#: when it reads like a web address ("name.tld"), which Telegram makes a link (review L11).
+_DEVICE = re.compile(r"[A-Za-z0-9][A-Za-z0-9 .+()\u00b7-]{0,39}")
+_LINKISH = re.compile(r"[A-Za-z0-9-]+\.[A-Za-z]{2,}")
 _ATTEMPTS = re.compile(r"[0-9]{1,2}")
 _EPOCH = re.compile(r"[0-9]{9,11}")
 _HANDLE = re.compile(r"[a-z0-9][a-z0-9._-]{0,31}")
@@ -321,7 +324,7 @@ def _handle(event: Event) -> str:
 
 def _device(event: Event) -> str:
     device = event.fact("device")
-    return device if _DEVICE.fullmatch(device) else ""
+    return device if _DEVICE.fullmatch(device) and not _LINKISH.search(device) else ""
 
 
 def _lockout(event: Event, now: datetime) -> list[str]:
@@ -448,7 +451,8 @@ def compose(events: Sequence[Event], now: datetime) -> str:
 class Pace(Protocol):
     """What the desk asks before a send, and tells it after: when the next may start.
 
-    ``now`` is the service clock in seconds; a pace that keeps its own time may ignore it.
+    ``now`` is the service clock in seconds; a pace that keeps its own time may ignore it. The
+    desk also says ``idle()`` when it has nothing ready to go (a pace may leave it out).
     """
 
     def wait(self, now: float) -> float:
@@ -489,23 +493,41 @@ class LanePace:
     """The notices' place in the one outbox.Pacer of the process (R8, Y18).
 
     The Pacer (alerts/outbox.py) hands out the send slots of every lane: one gap and one minute
-    budget for all, so a notice can make a fill wait one gap and no more. A notice is the lowest
-    priority there: it takes no slot while order alerts wait. Wired where AlertService builds the
-    desk: ``pace=LanePace(self.outbox.pacer)``.
+    budget for all, so a notice can make a fill wait one gap and no more. A notice takes no slot
+    while order alerts wait. It tells the Pacer from when a notice ready to go has found no slot,
+    so that through a market storm the market lane gives way once it has waited
+    outbox.NOTICE_WAIT_S (review L2). Wired where AlertService builds the desk:
+    ``pace=LanePace(self.outbox.pacer)``.
     """
 
     LANE = "notices"
 
     def __init__(self, pacer, lane: str = LANE) -> None:
         self.pacer, self.lane = pacer, lane
+        self._clock = getattr(pacer, "clock", time.monotonic)
+        #: The Pacer's time a notice ready to go first found no slot; None while none waits.
+        self._since: float | None = None
+        if hasattr(pacer, "set_waiting"):
+            pacer.set_waiting(lane, lambda: self._since is not None, since=lambda: self._since)
 
     def wait(self, now: float) -> float:
         if self.pacer.orders_waiting():
-            return GIVE_WAY_S
-        return max(0.0, self.pacer.allowed_at(self.lane) - time.monotonic())
+            wait = GIVE_WAY_S
+        else:
+            wait = max(0.0, self.pacer.allowed_at(self.lane) - self._clock())
+        if wait <= 0:
+            self._since = None  # it goes now: the desk takes the slot before it next awaits
+        elif self._since is None:
+            self._since = self._clock()
+        return wait
 
     def took(self, now: float) -> None:
+        self._since = None
         self.pacer.took(self.lane)
+
+    def idle(self) -> None:
+        """Nothing is ready to go (none due, or a run still settling): no wait to count."""
+        self._since = None
 
 
 class NoticeDesk:
@@ -573,8 +595,10 @@ class NoticeDesk:
         now = self.clock().timestamp()
         events = self._due(self._unsent(now))
         if (wait := self._settling(events, now)) > 0:
+            self._idle()
             return wait + 0.5
         if not events:
+            self._idle()
             self._failures = self._unconfirmed = 0
             return POLL_S
         if (wait := self.pace.wait(now)) > 0:  # before the claim: a notice held back is not ours
@@ -610,6 +634,12 @@ class NoticeDesk:
         return self._after(outcome, ids, now)
 
     # -- internals ------------------------------------------------------------------------------
+
+    def _idle(self) -> None:
+        """Nothing is ready to go: the pace stops counting a wait for a slot (LanePace, L2)."""
+        idle = getattr(self.pace, "idle", None)
+        if idle is not None:
+            idle()
 
     def _unsent(self, now: float) -> list[Event]:
         """The notices not told yet, oldest first; the ones too old to matter are marked."""

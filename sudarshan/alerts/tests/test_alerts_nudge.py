@@ -30,6 +30,7 @@ from sudarshan.alerts.nudge import (
     receivers_for,
 )
 from sudarshan.autologin.handoff import NonceBook, open_sealed
+from sudarshan.tasks import cancel_and_wait
 
 ME = os.getuid()
 FAMILY_UID = ME + 4242  # the account sudarshan-family, another one
@@ -304,6 +305,71 @@ def test_a_slow_receiver_does_not_hold_the_other_one(tmp_path, quick):
             await asyncio.sleep(0.1)
             assert sender.stats["posted"] == 1  # the journal's, while the family's waits
             await stop(sender, task)
+
+    run(scenario())
+
+
+class LosingCancel(Receiving):
+    """A receiver whose connection loses the first cancel and then answers: httpx 0.28 with anyio
+    4.14 can swallow a cancel while it connects (sudarshan/tasks.py), and the sending task then
+    carries on to its next wait."""
+
+    def __init__(self):
+        super().__init__()
+        self.entered: asyncio.Event | None = None
+        self.lost = 0
+
+    async def __call__(self, request):
+        self.posts.append((str(request.url), request.content))
+        self.entered.set()
+        try:
+            await asyncio.sleep(5.0)
+        except asyncio.CancelledError:
+            self.lost += 1  # swallowed
+        return httpx.Response(204)
+
+
+def test_a_stop_with_a_nudge_in_flight_ends_in_bounded_time_when_a_cancel_is_lost(tmp_path):
+    """M2: close() stops the senders with cancel_and_wait, never one cancel and a gather."""
+
+    async def scenario():
+        fake = LosingCancel()
+        fake.entered = asyncio.Event()
+        async with fake.client() as client:
+            sender = NudgeSender([journal()], client, tables=proc(tmp_path, row(5586, ME)))
+            task = await running(sender)
+            sender.note("orders", False)
+            await asyncio.wait_for(fake.entered.wait(), 2.0)
+            try:
+                began = asyncio.get_running_loop().time()
+                await asyncio.wait_for(sender.close(), 2.0)
+                assert asyncio.get_running_loop().time() - began < 1.5
+                assert fake.lost == 1 and all(t.done() for t in sender._tasks)
+            finally:
+                await cancel_and_wait(task, *sender._tasks)
+
+    run(scenario())
+
+
+def test_one_cancel_of_the_running_sender_ends_it_when_a_cancel_is_lost(tmp_path):
+    """M2: run() waits on its senders without gather, so one cancel of it is enough, and its own
+    stop cancels each sender until it has ended."""
+
+    async def scenario():
+        fake = LosingCancel()
+        fake.entered = asyncio.Event()
+        async with fake.client() as client:
+            sender = NudgeSender([journal()], client, tables=proc(tmp_path, row(5586, ME)))
+            task = await running(sender)
+            sender.note("orders", False)
+            await asyncio.wait_for(fake.entered.wait(), 2.0)
+            try:
+                task.cancel()
+                done, _ = await asyncio.wait({task}, timeout=2.0)
+                assert task in done and task.cancelled()
+                assert fake.lost == 1 and all(t.done() for t in sender._tasks)
+            finally:
+                await cancel_and_wait(task, *sender._tasks)
 
     run(scenario())
 

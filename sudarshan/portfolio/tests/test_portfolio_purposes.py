@@ -312,6 +312,113 @@ async def test_shares_for_viewer_names_the_tabs_the_levels_and_what_is_hidden(ri
     }  # fmt: skip
 
 
+# ---- H1: a member is told only what their tabs reach ---------------------------------------------
+def second_owner(rig):
+    """A second member with an account of their own, used only on the tab that is not shared."""
+    member = rig.book.member_create(OWNER, "m-2", "Second member", now=NOW)
+    account = rig.book.account_create(OWNER, "a-2", member["id"], "Second bank", "bank", now=NOW)
+    return member, account
+
+
+@scenario
+async def test_a_member_with_no_share_sees_no_member_no_account_and_no_job(rig):
+    second_owner(rig)
+    status, body = await rig.family("9", "state")
+    assert status == 200
+    data = body["data"]
+    assert data["tabs"] == [] and data["members"] == [] and data["accounts"] == []
+    assert "jobs" not in data and "amfi" not in data
+    owner = await rig.owner("state")  # the owner's own state is whole
+    assert {a["name"] for a in owner["accounts"]} == {"Upstox", "Zerodha", "Second bank"}
+    assert {m["name"] for m in owner["members"]} == {"Me", "Second member"}
+    assert "jobs" in owner and "amfi" in owner
+
+
+@scenario
+async def test_a_member_sees_only_the_accounts_of_their_tabs_and_those_accounts_members(rig):
+    member, bank = second_owner(rig)
+    version = next(t for t in rig.book.tabs(OWNER) if t["id"] == rig.other["id"])["version"]
+    entry = {
+        "kind": "BUY", "trade_date": 20261002, "account_id": bank["id"],
+        "asset_id": rig.gold["id"], "qty_u": 1_000_000, "amount_paise": 600_000,
+    }  # fmt: skip
+    rig.book.activity_create(OWNER, rig.other["id"], version, entry, "e-bank", now=NOW)
+    rig.svc.store.write(
+        OWNER,
+        lambda tx: tx.change("account", rig.account["id"], 1, {"note": "the owner's own"}, NOW),
+    )
+    await rig.grant("7", [rig.tab["id"]])
+    data = (await rig.family("7", "state"))[1]["data"]
+    assert [a["name"] for a in data["accounts"]] == ["Zerodha"]  # not Upstox, not Second bank
+    assert [m["name"] for m in data["members"]] == ["Me"]
+    assert "note" not in data["accounts"][0]  # quantities are shown to 7: the note is still his
+    await rig.grant("8", [rig.other["id"]])
+    data = (await rig.family("8", "state"))[1]["data"]
+    assert {a["name"] for a in data["accounts"]} == {"Zerodha", "Second bank"}
+    assert {m["name"] for m in data["members"]} == {"Me", "Second member"}
+    assert member["id"] in {m["id"] for m in data["members"]}
+
+
+@scenario
+async def test_a_transfer_names_the_account_it_goes_to_for_the_member_too(rig):
+    _, bank = second_owner(rig)
+    move = {
+        "kind": "TRANSFER", "trade_date": 20261003, "account_id": rig.account["id"],
+        "to_account_id": bank["id"], "asset_id": rig.gold["id"], "qty_u": 1_000_000,
+    }  # fmt: skip
+    rig.book.activity_create(OWNER, rig.tab["id"], rig.version(), move, "e-move", now=NOW)
+    await rig.grant("7", [rig.tab["id"]])
+    status, body = await rig.family("7", "tab_get", id=rig.tab["id"])
+    assert status == 200, body
+    by_account = {bar["label"] for bar in body["data"]["allocation"]["account"]}
+    assert by_account == {"Zerodha", "Second bank"}
+    data = (await rig.family("7", "state"))[1]["data"]
+    assert {a["name"] for a in data["accounts"]} == {"Zerodha", "Second bank"}
+
+
+@scenario
+async def test_a_loan_on_no_tab_is_never_shown_to_a_member(rig):
+    def loose(tx):  # a loan v0.5.0 made, on no tab
+        loan = tx.insert(
+            "asset", {"kind": "liability", "name": "Car loan", "asset_class": "other"}, NOW
+        )
+        tx.set_price_point(loan["id"], 20261001, 30_000_000_000, NOW)
+
+    rig.svc.store.write(OWNER, loose)
+    await rig.grant("7", [rig.tab["id"]])
+    owner = await rig.owner("tab_get", id=rig.tab["id"])
+    assert [loan["name"] for loan in owner["loose_loans"]] == ["Car loan"]
+    status, body = await rig.family("7", "tab_get", id=rig.tab["id"])
+    assert status == 200 and body["data"]["loose_loans"] == []
+    assert "Car loan" not in str(body["data"])
+
+
+@scenario
+async def test_a_members_scope_reads_no_table_their_tabs_do_not_reach(rig):
+    """The store narrows every table for a scope with tabs and refuses the rest, so an op that
+    forgets to narrow a read cannot leak it."""
+    from sudarshan.portfolio.store import OutOfScope, Scope
+
+    second_owner(rig)
+    await rig.grant("7", [rig.tab["id"]], role="child")
+    scope = Scope("owner", frozenset({rig.tab["id"]}))
+    read = lambda fn: rig.svc.store.read(scope, fn)  # noqa: E731
+    assert [a["name"] for a in read(lambda tx: tx.rows("account"))] == ["Zerodha"]
+    assert [m["name"] for m in read(lambda tx: tx.rows("member"))] == ["Me"]
+    assert [a["name"] for a in read(lambda tx: tx.rows("asset"))] == ["Gold coin"]
+    assert read(lambda tx: tx.rows("upstox_eod", "day")) == []  # its tab is not shared
+    assert read(lambda tx: tx.index_closes()) == {}  # market data a tab's comparison reads
+    for table in ("tab_share", "member_privacy", "import_batch", "report_cache"):
+        with pytest.raises(OutOfScope):
+            read(lambda tx, table=table: tx.rows(table))
+    for name in ("job_runs", "nav_day", "mf_count"):
+        with pytest.raises(OutOfScope):
+            read(lambda tx, name=name: getattr(tx, name)())
+    nobody = Scope("owner", frozenset())
+    assert rig.svc.store.read(nobody, lambda tx: tx.rows("member")) == []
+    assert rig.svc.store.read(nobody, lambda tx: tx.rows("account")) == []
+
+
 # ---- Y6: the stored floor, the caller can only add -----------------------------------------------
 @scenario
 async def test_the_stored_floor_hides_pnl_even_when_the_caller_sends_an_empty_mask(rig):
@@ -324,12 +431,30 @@ async def test_the_stored_floor_hides_pnl_even_when_the_caller_sends_an_empty_ma
         "unrealised_paise",
         "overall_gain_paise",
         "absolute_return_pct",
-        "today",
+        "paise",  # the P&L of the day, inside a Today figure
+        "base_paise",  # what the day's P&L is taken from: with the value it gives it away
         "realised_paise",
     }
     assert not pnl_names & keys(quiet)
     assert pnl_names <= keys(loud)
     assert "value_paise" in keys(quiet) and "qty_u" in keys(quiet)  # quantities are shown to 7
+
+
+@scenario
+async def test_hiding_pnl_keeps_the_trading_date(rig):
+    """L4: ``today`` is also the trading date of state, summary and a tab; hiding P&L hides the
+    figures inside a Today block, never the date."""
+    await rig.grant("7", [rig.tab["id"]], shown={"pnl": False, "qty": True, "funds": False,
+                                                   "orders": True})  # fmt: skip
+    await rig.owner("share_set", tab_id=rig.tab["id"], viewer="8", level="view")  # no privacy row
+    day = 20261026
+    for member in ("7", "8"):
+        for op in ("state", "summary"):
+            assert (await rig.family(member, op))[1]["data"]["today"] == day, (member, op)
+        tab = (await rig.family(member, "tab_get", id=rig.tab["id"]))[1]["data"]
+        assert tab["today"] == day
+    quiet = (await rig.family("7", "tab_get", id=rig.tab["id"]))[1]["data"]
+    assert set(quiet["totals"]["today"]) == {"state", "counted", "unknown", "pending"}
 
 
 @scenario
@@ -363,7 +488,8 @@ async def test_with_quantities_hidden_pnl_is_hidden_whatever_the_row_says(rig):
 
     rig.svc.store.write(OWNER, tamper)
     data = (await rig.family("7", "tab_get", id=rig.tab["id"]))[1]["data"]
-    assert not {"unrealised_paise", "overall_gain_paise", "today", "qty_u", "lines"} & keys(data)
+    hidden = {"unrealised_paise", "overall_gain_paise", "paise", "base_paise", "qty_u", "lines"}
+    assert not hidden & keys(data)
 
 
 @scenario
@@ -379,12 +505,65 @@ async def test_a_restricted_share_shows_no_figures_and_a_view_share_shows_them(r
 
 
 @scenario
-async def test_the_restricted_mask_of_one_share_covers_every_tab_of_the_answer(rig):
+async def test_a_restricted_share_hides_the_figures_of_its_own_tab_only(rig):
+    """L6: one restricted tab no longer takes the figures of the member's other tabs, in a tab's
+    view, its performance, the Upstox book or the summary's entries."""
+    for tab in (rig.tab, rig.other):  # pinned, so that the summary carries both
+        version = next(t for t in rig.book.tabs(OWNER) if t["id"] == tab["id"])["version"]
+        rig.book.tab_update(OWNER, tab["id"], version, {"pinned": True}, now=NOW)
+    await rig.owner("share_set", tab_id=rig.tab["id"], viewer="7", level="view")
+    await rig.owner("share_set", tab_id=rig.other["id"], viewer="7", level="restricted")
+    await rig.owner("share_set", tab_id=rig.upstox_tab, viewer="7", level="view")
+    await rig.owner("member_privacy_set", member="7", shown=ALL)
+
+    def figures(data):
+        return {k for k in keys(data) if hidden_by(k, serialize.VIEWER_MASK)}
+
+    seen = (await rig.family("7", "tab_get", id=rig.tab["id"]))[1]["data"]
+    cut = (await rig.family("7", "tab_get", id=rig.other["id"]))[1]["data"]
+    assert {"qty_u", "totals", "lines"} <= keys(seen) and not figures(cut)
+    assert [r["asset"]["name"] for r in cut["rows"]] == ["Gold coin"]  # names stay
+    assert "series" in (await rig.family("7", "performance", id=rig.tab["id"]))[1]["data"]
+    assert not figures((await rig.family("7", "performance", id=rig.other["id"]))[1]["data"])
+    book = (await rig.family("7", "upstox_book", parts=["holdings"]))[1]["data"]
+    assert "qty_u" in keys(book)
+    entries = {
+        e["tab"]["name"]: e for e in (await rig.family("7", "summary"))[1]["data"]["entries"]
+    }
+    assert set(entries) == {"Upstox", "Long term", "Private"}
+    assert "qty_u" in keys(entries["Long term"]) and "qty_u" in keys(entries["Upstox"])
+    assert not figures(entries["Private"]) and entries["Private"]["tab"]["id"] == rig.other["id"]
+    await rig.owner("share_set", tab_id=rig.upstox_tab, viewer="7", level="restricted", version=1)
+    book = (await rig.family("7", "upstox_book", parts=["holdings"]))[1]["data"]
+    entries = {
+        e["tab"]["name"]: e for e in (await rig.family("7", "summary"))[1]["data"]["entries"]
+    }
+    assert not figures(book) and not figures(entries["Upstox"])
+    assert "qty_u" in keys(entries["Long term"])
+
+
+@scenario
+async def test_the_way_out_masks_a_restricted_tabs_part_whatever_the_op_did(rig):
+    """L6, mutation target 8: an op that forgets the restricted mask of an entry is still masked
+    on the way out."""
     await rig.owner("share_set", tab_id=rig.tab["id"], viewer="7", level="view")
     await rig.owner("share_set", tab_id=rig.other["id"], viewer="7", level="restricted")
     await rig.owner("member_privacy_set", member="7", shown=ALL)
-    data = (await rig.family("7", "tab_get", id=rig.tab["id"]))[1]["data"]
-    assert "qty_u" not in keys(data)  # the union of the masks: nothing shows figures
+
+    async def leaky(ctx, message):
+        return {
+            "entries": [
+                {"tab": {"id": t["id"]}, "live": {"qty_u": 5}} for t in (rig.tab, rig.other)
+            ]
+        }
+
+    rig.svc.api.registry = {**rig.svc.api.registry, "summary": leaky}
+    status, body = await rig.family("7", "summary")
+    assert status == 200
+    assert body["data"]["entries"] == [
+        {"tab": {"id": rig.tab["id"]}, "live": {"qty_u": 5}},
+        {"tab": {"id": rig.other["id"]}, "live": {}},
+    ]
 
 
 def hidden_by(key, mask):
@@ -471,6 +650,19 @@ async def test_the_family_and_the_owner_share_one_upstox_read(rig, fake):
 
 
 @scenario
+async def test_three_family_reads_in_a_second_leave_the_owners_read_ok(rig, fake):
+    """M4: a member cannot ask past the five seconds of memory (max_age 0 reads as 5), so family
+    screens never spend the per-second reads of the owner's own tab."""
+    await rig.grant("7", [rig.upstox_tab])
+    for _ in range(3):
+        status, body = await rig.family("7", "upstox_book", parts=["holdings"], max_age=0)
+        assert status == 200 and body["data"]["holdings"]["state"] == "ok"
+    owner = (await rig.owner("upstox_book", parts=["holdings"], max_age=0))["holdings"]
+    assert owner["state"] == "ok" and owner["note"] is None
+    assert fake.count("holdings") == 2  # one read for the family, then the owner's own
+
+
+@scenario
 async def test_the_family_summary_carries_only_the_shared_tabs_and_the_upstox_row_when_shared(rig):
     await rig.grant("7", [rig.tab["id"]])
     status, body = await rig.family("7", "summary")
@@ -480,6 +672,26 @@ async def test_the_family_summary_carries_only_the_shared_tabs_and_the_upstox_ro
     (entry,) = body["data"]["entries"]
     assert entry["tab"]["system"] and entry["upstox"]["state"] == "ok"
     assert "qty_u" in keys(entry["upstox"]["holdings"])
+
+
+@scenario
+async def test_the_family_summary_of_a_member_with_no_privacy_row_still_reads_upstox(rig, caplog):
+    """M1: quantities hidden (a member with no privacy row) take the part's note away; the row
+    still says what was read, with no figure, and nothing is logged as a failure."""
+    await rig.owner("share_set", tab_id=rig.upstox_tab, viewer="7", level="view")
+    with caplog.at_level(logging.ERROR):
+        status, body = await rig.family("7", "summary")
+    assert status == 200
+    (entry,) = body["data"]["entries"]
+    row = entry["upstox"]
+    assert row["state"] == "ok" and row["read_at"] == NOW
+    assert row["holdings"] and all(h["name"] for h in row["holdings"])  # names stay
+    found = keys(row)
+    assert "note" not in found and not {k for k in found if k.endswith(("_paise", "_pct"))}
+    assert {k for k in found if k.endswith("_u")} <= set(privacy.json_never_hidden())
+    assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+    owner = (await rig.owner("summary"))["entries"]
+    assert next(e for e in owner if e["tab"]["system"])["upstox"]["state"] == "ok"
 
 
 # ---- PJ: the journal's reads ---------------------------------------------------------------------
