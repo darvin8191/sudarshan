@@ -28,6 +28,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useMarketData } from '@/hooks/useMarketData'
 import { findLegSL, type SLState, useTrailingSL } from '@/hooks/useTrailingSL'
+import { pickExpiry, rollRefetchMs } from '@/lib/scalpingExpiry'
 import { priceDecimals } from '@/lib/scalpingPrice'
 import { buildPositionRows } from '@/lib/scalpingRows'
 import { mergeTick, type TickView } from '@/lib/scalpingTick'
@@ -418,12 +419,15 @@ export default function Scalping() {
     queryKey: ['scalping', 'expiry', exchange, underlying],
     queryFn: () => scalpingApi.getExpiry(underlying, exchange, 'options'),
     enabled: optionsMode && !!underlying,
+    // SUDARSHAN (review M3): asked again when today's expiry stops (15:30 for an index's).
+    refetchInterval: (query) => rollRefetchMs(query.state.data?.rolls_at),
   })
   const expiries = expiryResp?.data ?? []
   useEffect(() => {
-    if (optionsMode && underlying && !expiry && expiries.length > 0) {
-      setExpiry(expiries[0]) // nearest expiry
-    }
+    if (!optionsMode || !underlying || expiries.length === 0) return
+    // The nearest expiry, and the next one once the picked contract has stopped for the day.
+    const next = pickExpiry(expiry, expiries)
+    if (next !== expiry) setExpiry(next)
   }, [expiries, underlying, expiry, optionsMode])
 
   // Option chain (depends on underlying + expiry).

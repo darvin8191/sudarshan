@@ -12,6 +12,9 @@ M1, M2, M3). The phone never computes sessions: the chart's calendar is the exch
   and 15:45 for a stock contract. The chart opens no candle after it, the countdown ends at it,
   and the marker and the order dialogs say the contract has stopped trading.
 
+``offered_expiries`` is the same stop for the scalping terminal: today's expiry leaves the list it
+offers at its contract's stop, not at the F&O close, so the nearest expiry then is the next one.
+
 Both are epoch milliseconds. The day's window is OpenAlgo's calendar for the exchange (special
 sessions and holidays included), the same one the chart's calendar is built from; the times are
 the regime table's; index contracts and stocks with futures are the master's
@@ -20,6 +23,7 @@ the regime table's; index contracts and stocks with futures are the master's
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -65,9 +69,28 @@ def stop_of(
     return min(stop, session_end_ms)
 
 
+def offered_expiries(
+    expiries: Sequence[str], now_ms: int, *, index: bool
+) -> tuple[list[str], int | None]:
+    """The expiries (DDMMMYY, nearest first) still trading at ``now_ms``, and when the nearest of
+    them stops today (epoch ms), or None: today's expiry leaves the list at its contract's stop
+    (15:40 until 6 Dec 2026; from 7 Dec 15:30 for an index's, 15:45 for a stock's)."""
+    day = datetime.fromtimestamp(now_ms / 1000, IST).date()
+    offered, rolls_at = [], None
+    for text in expiries:
+        expiry = parse_expiry(text)
+        if expiry == day:
+            stop = midnight_ms(day) + regimes.expiry_stop(expiry, index=index) * MINUTE_MS
+            if now_ms >= stop:
+                continue
+            rolls_at = stop if not offered else rolls_at
+        offered.append(text)
+    return offered, rolls_at
+
+
 def parse_expiry(text: Any) -> date | None:
-    """The master's expiry (08-DEC-26), or None."""
-    for shape in ("%d-%b-%y", "%d-%b-%Y"):
+    """The master's expiry (08-DEC-26), or the scalping terminal's (08DEC26), or None."""
+    for shape in ("%d-%b-%y", "%d-%b-%Y", "%d%b%y"):
         try:
             return datetime.strptime(str(text or "").strip().upper(), shape).date()
         except ValueError:
