@@ -290,14 +290,48 @@ def due(
     return out
 
 
-def next_at(screens: Iterable[Screen], sessions: Mapping[str, Session], now: int) -> int | None:
-    """The next moment any screen runs today, or None when today has no more."""
+def _hold_end(prints: int | None, index: int | None, waits: Waits, now: int) -> int | None:
+    """When the hold on a boundary ends if it is held at ``now`` (the later of the holds that
+    apply, as ``_released`` reads them), else None."""
+    ends: list[int] = []
+    if prints is not None and waits.printed is None and now < prints:
+        ends.append(prints)
+    if index is not None and waits.index and now < index:
+        ends.append(index)
+    return max(ends) if ends else None
+
+
+def next_at(
+    screens: Iterable[Screen],
+    sessions: Mapping[str, Session],
+    now: int,
+    waits: Callable[[Screen], Waits] | None = None,
+) -> int | None:
+    """The next moment any screen runs today, or None when today has no more. With ``waits`` (the
+    same members' word ``due`` takes), a boundary whose moment has come but which is held reads as
+    the moment its hold ends (review N8): the prints' window end plus the grace, or an index's.
+    A held boundary holds the later ones, so none of them is named before it."""
     best: int | None = None
     for screen in screens:
+        found: Waits | None = None
         for boundary in boundaries(screen, sessions):
-            if boundary.at > now and (best is None or boundary.at < best):
-                best = boundary.at
-                break
+            if boundary.at <= now:
+                if waits is None:
+                    continue
+                prints = _held_until(screen, sessions, boundary)
+                index = _index_hold(screen, sessions, boundary)
+                if prints is None and index is None:
+                    continue
+                found = waits(screen) if found is None else found
+                until = _hold_end(prints, index, found, now)
+                if until is None:
+                    continue
+                at = until
+            else:
+                at = boundary.at
+            if best is None or at < best:
+                best = at
+            break
     return best
 
 
