@@ -174,11 +174,22 @@ function visibility(value: 'visible' | 'hidden') {
   document.dispatchEvent(new Event('visibilitychange'))
 }
 
-/** Pull the page down from its top, as a finger does. */
-function pullDown() {
-  fireEvent.touchStart(window, { touches: [{ clientY: 10 }] })
-  fireEvent.touchMove(window, { touches: [{ clientY: 150 }] })
-  fireEvent.touchEnd(window)
+/**
+ * Pull the page down from its top, as a finger does: from the ranked list unless told where, 140 px
+ * down and `sideways` px across.
+ */
+function pullDown(from?: Element | Window, sideways = 0) {
+  const start = from ?? (document.querySelector('[data-ranked-line]') as Element)
+  const at = (x: number, y: number) => ({
+    touches: [{ clientX: x, clientY: y }],
+    changedTouches: [{ clientX: x, clientY: y }],
+  })
+  fireEvent.touchStart(start, at(100, 10))
+  fireEvent.touchMove(start, at(100 + sideways, 150))
+  fireEvent.touchEnd(start, {
+    touches: [],
+    changedTouches: [{ clientX: 100 + sideways, clientY: 150 }],
+  })
 }
 
 const advance = (ms: number) => act(async () => void vi.advanceTimersByTime(ms))
@@ -374,6 +385,49 @@ describe('when a ranking is read', () => {
     await waitFor(() => expect(rankedCalls()).toBe(2))
   })
 
+  // Review M1: Chrome's own pull-to-reload is the same gesture, and a pull under a sheet is not one.
+  it('holds off the browser’s own pull-to-reload while a ranked list is on show, and gives it back', async () => {
+    const root = document.documentElement
+    root.style.overscrollBehaviorY = ''
+    mount()
+    await screen.findByRole('tab', { name: /Main/ })
+    expect(root.style.overscrollBehaviorY).toBe('')
+    await openRanked()
+    expect(root.style.overscrollBehaviorY).toBe('contain')
+    expect(document.body.style.overscrollBehaviorY).toBe('contain')
+    // Back to his own list, through All lists (a ranked favourite open, Main has no tab).
+    fireEvent.click(screen.getByRole('button', { name: /All lists/ }))
+    const own = await screen.findByRole('region', { name: 'Your lists' })
+    fireEvent.click(within(own).getByRole('button', { name: /^Main/ }))
+    await waitFor(() => expect(root.style.overscrollBehaviorY).toBe(''))
+    expect(document.body.style.overscrollBehaviorY).toBe('')
+  })
+
+  it('takes a pull only on the list: not in an open sheet, not outside the list, not sideways', async () => {
+    mount()
+    await openRanked()
+    await screen.findByText('OI +12.4%')
+    await advance(61_000) // past the minute in which a pull shows the last read
+    // A sheet open over the list: a drag in it is the sheet's.
+    fireEvent.click(document.querySelector('li button[aria-haspopup="dialog"]') as Element)
+    const sheet = await screen.findByRole('dialog')
+    pullDown(sheet)
+    pullDown(sheet.querySelector('button') as Element)
+    await advance(100)
+    expect(rankedCalls()).toBe(1)
+    fireEvent.keyDown(sheet, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    // Outside the list (the page's title, the window), and a drag that is mostly sideways.
+    pullDown(screen.getByRole('heading', { name: 'Watchlist' }))
+    pullDown(window)
+    pullDown(undefined, 120)
+    await advance(100)
+    expect(rankedCalls()).toBe(1)
+    // On the rows themselves, it reads.
+    pullDown(document.querySelector('li button[aria-haspopup="dialog"]') as Element)
+    await waitFor(() => expect(rankedCalls()).toBe(2))
+  })
+
   it('reads from the Refresh ranking button once its minute has passed', async () => {
     mount()
     await openRanked()
@@ -413,7 +467,7 @@ describe('when a ranking is read', () => {
 })
 
 describe('the states, in the server’s words', () => {
-  it('signin: the sentence, no rows, and a Sign in button to the broker login', async () => {
+  it('signin: the sentence, no rows, and the ways out the price notice offers (review L2)', async () => {
     const said =
       'Sign in to Upstox to read rankings. Ranked lists use your daily Upstox sign-in, which has not been done today.'
     b().on('ranked', () =>
@@ -424,8 +478,25 @@ describe('the states, in the server’s words', () => {
     fireEvent.click(screen.getByRole('tab', { name: /Index options · OI gainers/ }))
     expect(await screen.findByText(said)).toBeInTheDocument()
     expect(screen.queryByText('This list is empty')).toBeNull()
-    fireEvent.click(screen.getByRole('link', { name: 'Sign in' }))
+    expect(screen.queryByRole('link', { name: 'Sign in' })).toBeNull()
+    expect(screen.getByRole('link', { name: 'Dashboard' })).toHaveAttribute('href', '/dashboard')
+    fireEvent.click(screen.getByRole('link', { name: 'Auto login' }))
     expect(await screen.findByText('Auto login page')).toBeInTheDocument()
+  })
+
+  it('a ranking with no time from Upstox says when it was read, never no age (review L3)', async () => {
+    b().on('ranked', () => ranked({ made_at: null, read_at: NOW - 125_000 }))
+    mount()
+    await screen.findByRole('tab', { name: /Index options · OI gainers/ })
+    fireEvent.click(screen.getByRole('tab', { name: /Index options · OI gainers/ }))
+    const line = await screen.findByRole('button', { name: 'Ranked by Upstox · read 2 min ago' })
+    expect(line).toHaveAttribute('data-age-line', 'fresh')
+    await advance(10 * 60_000)
+    expect(
+      screen.getByRole('button', {
+        name: 'Ranked by Upstox · read 12 min ago · Pull down to read it again',
+      })
+    ).toHaveAttribute('data-age-line', 'stale')
   })
 
   it('wait: the sentence, the old rows stay with their age', async () => {
@@ -503,6 +574,19 @@ describe('the underlying chip', () => {
     expect(rankedCalls()).toBe(1)
     fireEvent.click(screen.getByRole('button', { name: /^NIFTY 2$/ }))
     expect(shownOrder()).toHaveLength(4)
+  })
+
+  it('lets go of an underlying a new read no longer holds, rather than show nothing (review L16)', async () => {
+    mount()
+    await openRanked()
+    await screen.findByText('OI +12.4%')
+    fireEvent.click(screen.getByRole('button', { name: /^BANKNIFTY 1$/ }))
+    expect(await screen.findByText('1 of the top 4 are BANKNIFTY contracts')).toBeInTheDocument()
+    b().on('ranked', () => ranked({ rows: [NEW, A, C, D].map(contract), read_at: NOW + 70_000 }))
+    await advance(70_000)
+    fireEvent.click(await screen.findByRole('button', { name: 'Refresh ranking' }))
+    await waitFor(() => expect(shownOrder()).toHaveLength(4))
+    expect(screen.queryByText(/of the top 4 are BANKNIFTY/)).toBeNull()
   })
 })
 

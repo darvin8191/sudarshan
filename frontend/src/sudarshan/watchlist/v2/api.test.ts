@@ -105,6 +105,14 @@ describe('callOp', () => {
     expect(error.message).not.toMatch(/\d{3}|\/sudarshan|HTTP/)
   })
 
+  // Review L14: `limit` is a cap (the rate limit is `busy`), said as the server says it.
+  it('speaks for a limit that came without a sentence as the cap it is, not as a rate', async () => {
+    b().on('state', () => ({ status: 'error', code: 'limit', message: '' }))
+    const error = await callOp('state', {}).catch((e) => e)
+    expect(error.code).toBe('limit')
+    expect(error.message).toBe('That is more than a list can hold.')
+  })
+
   it('says so when no answer came or the answer is not the bridge', async () => {
     b().on('state', () => {
       throw new AxiosError('Network Error', 'ERR_NETWORK')

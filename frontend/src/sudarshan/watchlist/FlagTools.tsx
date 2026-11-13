@@ -2,6 +2,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { Clock, Pencil } from 'lucide-react'
 import { useState } from 'react'
 import { MarkGlyph } from './marks'
+import { useOpenGuard } from './openGuard'
 import { callOp } from './v2/api'
 import { FLAG_IDS, FLAG_LIST_WORDS, flagName, PRIVATE_WORDS, readAgain } from './v2/marks'
 import type { FlagName } from './v2/types'
@@ -9,6 +10,10 @@ import { LIMITS } from './v2/types'
 
 const BUTTON =
   'flex min-h-12 items-center gap-2 rounded-xl px-3 text-[0.9375rem] font-semibold text-primary outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50'
+
+/** Review L8: notes are his words, so Clear expired asks first. */
+export const CLEAR_EXPIRED_ASK =
+  'Clear the flags and notes of contracts that are no longer listed? Your notes on them go too, and cannot be brought back.'
 
 /**
  * The Flags block's own controls in All lists (M8.6 F8): what a flag list is, Rename flags (five
@@ -22,6 +27,9 @@ export function FlagTools({ names, version }: { names: readonly FlagName[]; vers
   const [draft, setDraft] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [said, setSaid] = useState<{ text: string; bad: boolean } | null>(null)
+  const [asking, setAsking] = useState(false)
+  // The question takes the button's place under the finger: half a second before it takes a tap.
+  const guard = useOpenGuard(asking)
 
   const run = async (act: () => Promise<string | null>) => {
     setBusy(true)
@@ -122,13 +130,50 @@ export function FlagTools({ names, version }: { names: readonly FlagName[]; vers
           <button
             type="button"
             disabled={busy}
-            onClick={() => void run(async () => (await callOp('expired_clear', { version })).words)}
+            onClick={() => {
+              setSaid(null)
+              setAsking(true)
+            }}
             className={BUTTON}
           >
             <Clock aria-hidden="true" className="size-5" />
             Clear expired
           </button>
         </div>
+      )}
+      {asking && !renaming && (
+        <fieldset
+          aria-label="Clear expired"
+          onPointerDownCapture={guard.handlers.onPointerDownCapture}
+          onClickCapture={guard.handlers.onClickCapture}
+          onKeyDownCapture={guard.handlers.onKeyDownCapture}
+          data-settling={guard.settling || undefined}
+          className="m-0 flex min-w-0 flex-col gap-2 border-0 p-0 pt-1"
+        >
+          <p className="text-sm font-medium">{CLEAR_EXPIRED_ASK}</p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() =>
+                void run(async () => (await callOp('expired_clear', { version })).words).then(() =>
+                  setAsking(false)
+                )
+              }
+              className={`${BUTTON} text-[color:var(--down)]`}
+            >
+              Clear them
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setAsking(false)}
+              className={BUTTON}
+            >
+              Keep them
+            </button>
+          </div>
+        </fieldset>
       )}
       {said && (
         <p
