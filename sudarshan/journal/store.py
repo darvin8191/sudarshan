@@ -653,6 +653,26 @@ class Tx:
             )
         return self.settings()
 
+    # ---- a trip's tracked price span (JB6) ----
+    def trip_track_get(self, trip_id: int) -> dict[str, Any] | None:
+        t = self._t("trip_track")
+        row = (
+            self.conn.execute(select(t).where(self._mine(t), t.c.round_trip_id == trip_id))
+            .mappings()
+            .first()
+        )
+        return self.out(row)
+
+    def trip_track_put(self, trip_id: int, values: Mapping[str, Any], now: int) -> None:
+        """The tracked span of a trip: its first point, its low and high with their times."""
+        t = self._t("trip_track")
+        self.conn.execute(delete(t).where(self._mine(t), t.c.round_trip_id == trip_id))
+        self.conn.execute(
+            insert(t).values(
+                **values, round_trip_id=trip_id, principal=self.who, created_at=now, updated_at=now
+            )  # fmt: skip
+        )
+
     # ---- the day's close and Upstox's own P&L report (JB5) ----
     def day_close_get(self, mode: str, day: int) -> dict[str, Any] | None:
         t = self._t("day_close")
