@@ -39,14 +39,29 @@ def flag_names() -> list[dict]:
         return [{"mark": n, "name": w} for n, w in enumerate(DEFAULT_FLAG_NAMES, 1)]
 
 
+def ranked_availability(user: str) -> dict | None:
+    """Whether ranked lists can be read today, or why not, in words. No Upstox call: it reads
+    OpenAlgo's own sign-in. A sign-in that cannot be read leaves the field out."""
+    from sudarshan.watchlists.ops import ranked as ranked_op
+
+    try:
+        return ranked_op.availability(user, session.get("broker"))
+    except Exception:
+        logger.exception("Watchlists: today's Upstox sign-in could not be read for ranked lists")
+        return None
+
+
 def state(args: dict) -> dict:
     got = versions.snapshot()
     answer = {
         "enabled": True,
         "limits": dict(contract.LIMITS),
         "flag_names": flag_names(),
-        # ranked and alerts availability: W22.
+        # alerts availability: A-lane.
     }
+    ranked = ranked_availability(session.get("user") or "")
+    if ranked is not None:
+        answer["ranked"] = ranked
     from sudarshan.watchlists.ops import lists  # it imports this module for the flag names
 
     answer["favourites"] = lists.favourites_of(session.get("user") or "")

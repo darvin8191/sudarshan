@@ -21,7 +21,8 @@ from sudarshan.watchlists.dynamic import Price
 from sudarshan.watchlists.words import dynamic as dwords
 from sudarshan.watchlists.words import rows as words
 
-#: A row that has just rolled says so for this long (the page shows the line for a minute).
+#: A row that has just rolled says so for this long (the page shows the line for a minute), and
+#: its answer carries ``rolled`` true for the same time, so the page need not read the words.
 ROLL_WINDOW_MS = 60_000
 
 
@@ -108,7 +109,7 @@ def _closes(
 def _entry(rule_id: int, state: str, text: str, **more) -> dict:
     return {"id": rule_id, "state": state, "ce": None, "pe": None, "future": None,
             "strike": None, "band": None, "valid_until": None, "price": None,
-            "price_at": None, "words": text, **more}  # fmt: skip
+            "price_at": None, "words": text, "rolled": False, **more}  # fmt: skip
 
 
 def resolve_rows(
@@ -171,6 +172,7 @@ def resolve_rows(
         )  # fmt: skip
         text = dwords.describe(res, name, rule, now_ms)
         got: dict[str, Any] = {}
+        rolled = False
         if res.state in ("ok", "closed"):
             if futures:
                 got["future"] = _contract(listed[res.expiry], isin)
@@ -185,11 +187,12 @@ def resolve_rows(
             old = before[rule["expiry_rule"]]
             if old and old != res.expiry:
                 text = dwords.rolled(res.expiry, dynamic.close_ms(old, closes, **regime))
+                rolled = True
         out.append(_entry(
             i, res.state, text, strike=res.strike,
             band=None if res.band is None else {"low": res.band[0], "high": res.band[1]},
             valid_until=res.valid_until, price=None if futures else res.price.value,
-            price_at=None if futures else res.price.at_ms, **got,
+            price_at=None if futures else res.price.at_ms, rolled=rolled, **got,
         ))  # fmt: skip
     return out
 

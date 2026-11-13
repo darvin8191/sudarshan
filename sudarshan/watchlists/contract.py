@@ -119,6 +119,13 @@ ENUMS = {
 }
 
 #: Shapes the ops answer with and take in their requests.
+_ROW = "list:int, section_id?:int|null, version:string"
+_FOLLOW = (
+    "kind:FollowKind, underlying:string, underlying_exchange:string, "
+    "expiry_rule?:ExpiryRule, strike_rule?:StrikeRule, offset?:int, strike?:number, "
+    "opt_right?:OptRight|null"
+)
+
 RECORDS = {
     "Limits": ", ".join(f"{k}:int" for k in LIMITS),
     "Versions": "lists:string, favourites:int, flags:int",
@@ -146,10 +153,12 @@ RECORDS = {
     "Band": "low:number|null, high:number|null",
     "ResolveItem": "id:int, price:number|null, price_at:int|null, source:PriceSource|null, "
     "held:number|null",
+    "Draft": "section_id?:int|null, " + _FOLLOW + ", price?:number|null, price_at?:int|null, "
+    "source?:PriceSource|null, held?:number|null",
     "Resolved": "id:int, state:ResolveState, ce:Contract|null, pe:Contract|null, "
     "future:Contract|null, strike:number|null, band:Band|null, valid_until:int|null, "
-    "price:number|null, price_at:int|null, words:string",
-    "Resolve": "rows:Resolved[]",
+    "price:number|null, price_at:int|null, words:string, rolled:bool",
+    "Resolve": "rows:Resolved[], drafts?:Resolved[]",
     "Expiry": "date:string, label:string, month:bool",
     "Strike": "strike:number, atm:bool, ce:Contract|null, pe:Contract|null",
     "Strikes": "underlying:string, exchange:string, expiries:Expiry[], expiry:string|null, "
@@ -183,12 +192,6 @@ RECORDS = {
     "Version": "version:string",
 }
 
-_ROW = "list:int, section_id?:int|null, version:string"
-_FOLLOW = (
-    "kind:FollowKind, underlying:string, underlying_exchange:string, "
-    "expiry_rule?:ExpiryRule, strike_rule?:StrikeRule, offset?:int, strike?:number, "
-    "opt_right?:OptRight|null"
-)
 
 
 class Field(NamedTuple):
@@ -229,11 +232,12 @@ OPS = (
     OpSpec("lists", "GET", "/lists", "read", "", "Lists"),
     OpSpec("view", "GET", "/view", "read", "ref:string", "View"),
     OpSpec("symbol", "GET", "/symbol", "read", "k:string", "SymbolInfo"),
-    OpSpec("resolve", "POST", "/resolve", "read", "rows:ResolveItem[], connected:bool", "Resolve"),
+    OpSpec("resolve", "POST", "/resolve", "read",
+           "rows:ResolveItem[], connected:bool, drafts?:Draft[]", "Resolve"),
     OpSpec("strikes", "GET", "/strikes", "read",
            "u:string, x:string, exp?:string, n?:int, p?:number", "Strikes"),
     OpSpec("search", "GET", "/search", "search",
-           "q:string, seg?:Segment, limit?:int, p?:number", "Search"),
+           "q:string, seg?:Segment, limit?:int, p?:number, list?:int", "Search"),
     OpSpec("ranked", "GET", "/ranked", "ranked",
            "src:RankSource, asset:RankAsset, cat:RankCategory, size?:int", "Ranked"),
     OpSpec("tv_preview", "POST", "/tv/preview", "preview", "text:string", "TvPreview"),

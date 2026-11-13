@@ -59,6 +59,9 @@ APP = textwrap.dedent(
 
     handlers = {op.name: echo(op.name) for op in contract.OPS}
     handlers.update(ops.discover())  # the real state op where there is one
+    # No master is loaded in this server, so the concurrency test of a read with its own fields
+    # keeps an echo for ``strikes`` (the real op is tested in-process, test_watchlists_search_ops).
+    handlers["strikes"] = echo("strikes")
     app.register_blueprint(bridge.attach(
         Blueprint("wl_gthread", __name__, url_prefix=contract.API_PREFIX), handlers))
 
@@ -92,6 +95,51 @@ APP = textwrap.dedent(
 
     wl_lists.own_lists = lambda user: []
 
+    # W22: the real ranked op, over a fake Upstox that counts its calls and takes half a second, a
+    # fake sign-in and a small master. Nothing here is real data.
+    import time as _time
+
+    from sudarshan.watchlists import master as wl_master, sessions, smartlist
+    from sudarshan.watchlists.ops import ranked as wl_ranked
+
+    class _Row:
+        def __init__(self, **kw):
+            self.__dict__.update(kw)
+
+    _rows = [_Row(symbol=f"F{i}25NOVFUT", name=f"F{i}", exchange="NFO", instrumenttype="FUT",
+                  underlying=f"F{i}", expiry="25-NOV-26", strike=None, lotsize=10, tick_size=0.05,
+                  token=f"NSE_FO|{i}") for i in range(30)]
+    _snap = _Row(by_exchange={"NFO": tuple(_rows)}, by_token={r.token: r for r in _rows},
+                 by_symbol_exchange={(r.symbol, r.exchange): r for r in _rows}, session_start=None)
+    upstox_calls = []
+
+    class _Reply:
+        status_code = 200
+
+        def json(self):
+            from datetime import datetime, timedelta, timezone
+
+            made = datetime.now(timezone(timedelta(hours=5, minutes=30))).isoformat()
+            return {"data": {"time_stamp": made, "data": [
+                {"instrument_key": r.token, "price": {}, "metric": {"current": 5, "change_pct": 1.0}}
+                for r in _rows]}}
+
+    class _Upstox:
+        def get(self, url, **kw):
+            upstox_calls.append(kw["params"]["category"])
+            _time.sleep(0.5)  # long enough for every other thread to arrive and wait
+            return _Reply()
+
+    wl_master.openalgo_snapshot = lambda: _snap
+    smartlist.get_httpx_client = lambda: _Upstox()
+    wl_ranked.owner_token = lambda user: "tok-" + "Q7r8" * 8  # fake, test only
+    wl_ranked.stored_broker = lambda user: "upstox"
+    sessions.market_open = lambda exchange, now: True
+
+    @app.route("/upstox_calls")
+    def upstox_calls_made():
+        return jsonify(upstox_calls)
+
     @app.route("/emitted")
     def emitted_pushes():
         return jsonify(emitted)
@@ -103,6 +151,8 @@ APP = textwrap.dedent(
     @app.route("/login")
     def login():
         session["in"] = "owner"
+        session["user"] = "owner"
+        session["broker"] = "upstox"
         return jsonify(csrf=generate_csrf())
     """
 )
@@ -480,3 +530,40 @@ def test_two_renames_on_one_flags_version_one_wins_and_the_version_moves_once(se
             (str(round_no + 1),)
         ]
     assert len(store_rows(server_on, "SELECT 1 FROM wl_flag")) == 1
+
+
+# -- W22: the Smartlist read is one call for any number of requests -----------------------------------
+RANKED = "/sudarshan/watchlists/api/ranked?src=futures&asset=INDEX&cat=OI_GAINERS"
+
+
+def upstox_calls(server):
+    status, raw, _ = server.request("GET", "/upstox_calls")
+    assert status == 200
+    return json.loads(raw)
+
+
+def test_eight_threads_asking_one_category_at_once_make_one_upstox_call(server_on):
+    headers = server_on.login()
+    results = at_once(8, lambda i: server_on.request("GET", RANKED, headers=headers))
+    bodies = [json.loads(raw) for _, raw, _ in results]
+    assert [status for status, _, _ in results] == [200] * 8
+    assert all(b["status"] == "ok" and b["data"]["state"] == "ok" for b in bodies)
+    assert all(len(b["data"]["rows"]) == 20 for b in bodies)
+    assert len({b["data"]["read_at"] for b in bodies}) == 1, "the requests were not one read"
+    assert upstox_calls(server_on) == ["OI_GAINERS"], "single flight made more than one call"
+
+
+def test_a_second_device_inside_the_minute_costs_no_call_and_another_category_costs_one(server_on):
+    headers = server_on.login()
+    other = server_on.login()  # a second device
+    assert server_on.request("GET", RANKED, headers=headers)[0] == 200
+    assert server_on.request("GET", RANKED + "&size=50", headers=other)[0] == 200
+    assert upstox_calls(server_on) == ["OI_GAINERS"]
+    results = at_once(
+        4,
+        lambda i: server_on.request(
+            "GET", RANKED.replace("OI_GAINERS", "OI_LOSERS"), headers=headers if i % 2 else other
+        ),
+    )
+    assert [status for status, _, _ in results] == [200] * 4
+    assert sorted(upstox_calls(server_on)) == ["OI_GAINERS", "OI_LOSERS"]

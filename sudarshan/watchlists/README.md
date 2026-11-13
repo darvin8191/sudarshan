@@ -96,9 +96,23 @@ connected, its snapshot, the feed's last tick (one `/snapshot` read for every ro
 through the shared httpx client; any failure is an empty answer), then the page's last price when the
 exchange is closed by the calendar, else the row waits. The answer carries the contracts looked up in the
 master (never built), the band of the ATM, `valid_until`, and the words; a side the master lacks is
-named and no contract is answered. For the first minute after a roll the words are "Rolled to ...".
+named and no contract is answered. For the first minute after a roll the words are "Rolled to ..." and the answer row's `rolled` is true
+(false otherwise, for every state): the phone reads the flag, never the prefix of the words, which stay.
 Nothing is written and no thread or timer is started. Tests: `tests/test_watchlists_rows.py`,
 `tests/test_watchlists_follow.py`.
+
+**Draft rows (M8.10, the add form's preview).** `resolve` also takes `drafts`, rows the page has not
+stored: the fields of `row_add` without `list` and `version` (`section_id` is accepted and ignored),
+and the page's `price`, `price_at`, `source` and `held` as for a stored row, all optional. Each is
+checked as `row_add` checks a row (the rule, then today's master: `invalid` with the field, `failed`
+with the master not loaded), resolved by the same code, and answered in the same `Resolved` shape,
+in the order sent, under `drafts` with `id` 0 (a stored row's id is above 0). `drafts` is in the
+answer only when the request had it, so the answer to a request without it is as before. A draft
+reads nothing and writes nothing, so the add form can show "Now: NIFTY 25,900 CE, 24 Nov 2026
+(NIFTY at 25,912.35)" before the row exists. Drafts count with the stored `rows` in the limit of
+100 (`invalid`, field `drafts`, when the total is over it; field `rows` when the stored rows alone
+are). Ids for the drafts inside the request sit above every id the page sent, so one is never taken
+for the other.
 
 **One rule for when an expiring contract stops (`expiry.py`).** `expiry.stop_ms(day, index=...,
 exchange=..., window_end_ms=...)` answers the instant a contract stops on its expiry day, and
@@ -148,9 +162,76 @@ contracts the master does not have. Smartlist ranks futures, options and MTF onl
 offers futures and options for Index, Stock and Commodity (commodities with the first four
 categories), 44 rankings, never MTF. Words say "Ranked by Upstox" and the age (stale after ten
 minutes), never "Live"; the sign-in, closed, unavailable and wait lines are here too. No read is
-made here: the Smartlist client is a later PR. The answer's exact envelope, the unit of traded
+made here: the Smartlist client is W22's. The answer's exact envelope, the unit of traded
 value and of premium, and the base of `previous` are checked on a real read (design facts W-1 and
 W-10). Vectors: `tests/vectors/ranked.json`.
+
+## W22 - ranked lists from Upstox (`smartlist.py`, `ops/ranked.py`, `refs/ranked.py`)
+
+`smartlist.fetch` is the one read: `GET https://api.upstox.com/v2/market/smartlist/<futures|options>?
+asset_type=&category=&page_number=1&page_size=50` with OpenAlgo's daily access token for the owner's
+session as a bearer header (read with `auth_db.get_auth_token`, never the Analytics Token). It goes
+through the shared httpx client (connect 1 s, read 8 s, no redirects, no retry) after the Upstox
+plugin's standard limiter has given its turn; the limiter refusing under gthread is a `wait`. It
+returns an outcome and raises nothing: `ok`, `token` (401 or 403), `wait` (429 or the plugin's
+rate-limit code) or `failed` (a timeout, another status, an error body). The token goes in the
+header only: it is in no log line, no answer and no message, and only a 16-character digest of it
+is kept, to tell one sign-in from the next.
+
+`ranked` (GET, class ranked) answers the `Ranked` record, always as an ok answer with a `state`
+(the phone reads `state`, not an error code), in this order: no token today, or a token of another
+broker, is `signin` with the design's words and **no call at all** (the broker is the web session's,
+else the stored sign-in's); a fresh answer in the cache is served with no call; otherwise one call,
+in a single flight per category (`utils/keyed_locks`; the requests that waited share what the first
+read). Upstox refusing the token is `signin` ("Your Upstox sign-in has expired. Sign in to read it
+again.", with the old ranking's age when this token read one, and no rows): the refusal is cached
+for the minute so a pull does not ask again, nothing retries it, and the session and OpenAlgo's
+stored token are never touched. Upstox asking us to wait is `wait`, also cached for the minute.
+No usable answer is `unavailable`: the last ranking read with this token stays, with `made_at`
+and the sentence "Showing the ranking from 10:41."; a failure is shared for 3 seconds only, so the
+owner's next pull tries again. An answer is `ok`, `stale` after ten minutes and `closed` while the
+exchange is shut by OpenAlgo's calendar (NFO, MCX for commodities): Upstox's own last ranking and
+its time ("Market closed · ranking from 15:29 yesterday"). `rows` are 20 by default and 50 on
+request (`size`, never more), `made_at` is Upstox's `time_stamp`, `read_at` the read, `left_out`
+the rows the master lacks and `words` the status line followed by the left-out sentence. Each row
+is the master's contract (looked up by instrument key through the snapshot, no map built), the
+owner's flag and whether a note exists, and the ranking's own figure in `metric`. A combination the
+page does not offer (MTF, a commodity premium) is `invalid` with no call.
+
+The cache is `LockedTTLCache`: 60 s for answers, refusals and waits, 3 s for failures, and the last
+good ranking of a token for 20 hours; all three are cleared the moment the token's digest changes,
+and an answer in flight when it changes is not stored (the cache's generation) and carries the
+digest it was read with, so a ranking of one token is never shown under another. The cache holds
+Upstox's answer for the 50-row page, so 20 and 50 rows, and two devices, are one read. `state`
+carries `ranked`: `{ok, message}` from OpenAlgo's own sign-in, with no Upstox call. `refs/ranked.py`
+serves `ranked:<source>:<asset>:<category>` for `view` (locked, version "0", 20 rows, one line of
+words), through the op's own path and cache, keeping nothing of its own. Its `members` (the 50
+contracts, `valid_until` null, the unknown keys as left-out entries, no flag or note; `signin` with
+the words, or `failed` when there is nothing to show, never an empty list) is not reached by the
+sealed route: after the merge with W23 the route refuses a ranked ref in words first (a consumer
+must not take a changing ranking for a list), and the reader keeps `members` for the interface.
+
+`copy` takes a ranked source (M8.9, "Make a copy"): `from: {ref: "ranked:...", keys: [...]}`, the
+keys being `EXCHANGE:SYMBOL` in the order the page shows the rows, as for a built-in list. The server
+does not read Upstox again for it (the fixture of the test fails on a call): a key is checked
+against today's master only, a key it lacks is left out and counted in `words` ("2 symbols are not in
+today's contract list and were left out of the copy."), and nothing in the master is `invalid` with
+field `from` ("None of these 3 symbols are in today's contract list, so nothing was copied."). No
+`keys`, a `section_id`, more than 50 keys or a key that is not `EXCHANGE:SYMBOL` is `invalid`, and
+`move` is `invalid` ("This is a ranking from Upstox. Make a copy of it to keep it."). The master not
+loaded is `failed` in words. The 250 cut of a built-in list does not arise with 50 rows.
+No thread, timer or loop. Tests: `tests/test_watchlists_ranked_bridge.py` (a fake client that
+fails the test when called where it must not be) and `test/test_gthread_watchlists.py` (eight
+threads, one category, one call).
+
+To check on a live session (design section 8, reads only): W-1, that Smartlist answers for futures
+and options with OpenAlgo's daily session (INDEX), with the parameter spellings and the bearer
+header used here; how often `time_stamp` moves; which indices INDEX options covers; COMMODITY; the
+unit of PREMIUM and DISCOUNT and of traded value; that `metric.previous` is the base of each
+category's change; the answer's envelope (rows under `data.data`, `time_stamp` beside them); and
+what Upstox answers once the day's token has lapsed (here 401 or 403 is read as a refusal of the
+token). W-2, that every Smartlist `instrument_key` is in OpenAlgo's master (`left_out` should be
+0 or small).
 
 ## W11 - master access (`master.py`) and the exception's tests (`tests/test_exception.py`)
 
@@ -653,8 +734,9 @@ the list again.
 
 `copy` takes `from` (`ref` of an own list, plus `keys` of `EXCHANGE:SYMBOL` or one `section_id`,
 never both) and `to` (an existing `list`, or a new `name`; `section_id` only for an existing list),
-and `move: true` for a move (there is no op of its own). A built-in or ranked source, a ref that is
-not a list, a symbol the source does not hold and the same list as source and target are `invalid`
+and `move: true` for a move (there is no op of its own). A built-in list and a ranked list can be
+the source of a copy only (a move is `invalid`; W12, and M8.9 below). A ref that is not one of the three, a
+symbol the source does not hold and the same list as source and target are `invalid`
 with the field named. Everything that can be refused is refused first, in words with the numbers:
 a stale `version` when a section is to be set (`conflict`), 250 symbols a list holds ("Swing has
 room for 3 more symbols; this section has 8. Make room in Swing or pick another list."), 50 lists
@@ -1128,3 +1210,107 @@ can change them. If `/etc/sudarshan` itself exists with a stricter mode, it need
 others (`sudo chmod o+x /etc/sudarshan`) so the app's user can reach the folder. Nothing needs a restart:
 open the list again and it is read. At each index review, retype the file with the new date in its
 header line; the lists say the date they are as of, so a file that was not updated shows its old date.
+
+## Refs: the grammar
+
+A ref is a string naming one list. The phone builds them and so does the alerts service, so the
+grammar is written here once; `refs.split` and the readers of `refs/` are its code.
+
+| ref | what it names |
+|---|---|
+| `list:<id>` | one of the owner's lists, `<id>` being OpenAlgo's list id (a whole number) |
+| `list:<id>/section:<sid>` | one section of that list (members only: a view is of the whole list) |
+| `preset:<id>` | a built-in list, `<id>` from the catalogue (`indices`, `fno_stocks`, `index_futures`, a typed list's file name) |
+| `flag:<n>` | every symbol carrying flag `n`, 1 to 5 |
+| `ranked:<source>:<asset>:<category>` | a live ranking from Upstox, for example `ranked:futures:INDEX:TOP_TRADED` |
+
+A ranked list changes with every read, so it has rows but no members: the members route and the
+alerts refuse it in words. A section ref is only for members (a list alert on one section).
+
+## W17 - the search and strikes ops (`ops/search.py`, `words/strikes.py`)
+
+Two read ops over the one master generation (`master.shared().index()`: built once per snapshot in
+slices that yield to the hub, behind the single flight, dropped with the snapshot; this module keeps
+nothing of its own, starts no thread and makes no Upstox call).
+
+- **`search`** (class `search`, 300 a minute) takes `q`, `seg` (the chip), `limit` (at most 50), `p`
+  (the underlying's price from the page's own tick, which only orders options by distance and
+  resolves ATM) and `list` (the OpenAlgo list the sheet adds to). It answers the hits grouped in the
+  design's order, stocks, indices, futures, options, commodities, each group keeping the grammar's
+  order, so the page prints one heading a group; each hit is the group, the title ("NIFTY 25,900
+  CE"), the detail ("NFO · 24 Nov 2026 · lot 65"), the master's `Contract` and `added` (true when the
+  list holds that exchange and symbol; a list that is not the owner's is `gone`). `understood` is the
+  query in one line, `underlying` is set when options exist (Pick a strike) and `suggestion` is
+  the near miss ("No exact match for RELAINCE. Did you mean RELIANCE?"), also said when the chip
+  hides what All would show ("Nothing for RELIANCE under Indices. Try All."); it is null while
+  the answer waits for a price (ATM with none sent). A blank query answers empty: Recent is the
+  page's. `contract.py` gained the optional `list` field of `search` and `types.ts` was regenerated.
+- **`strikes`** takes `u` (the underlying), `x` (its exchange), `exp` (an ISO date from the answer,
+  else the nearest), `n` (strikes each side, default 10, at most 25) and `p`. It answers the open
+  expiries ("Nearest 24 Nov", "1 Dec", "29 Dec (month)", with `month` true for the last expiry of a
+  calendar month, the nearest one included), and for the chosen expiry the strikes ATM plus or minus
+  `n` with `atm` true on one of them (W14's rule: nearest, a tie to the lower), each with its CE and
+  PE `Contract` from the master, never a built name. A side the master lacks is null and said in
+  `words`. With no price no strike is marked: the middle of the ladder is shown and `words` says the
+  price is not known yet, so the page asks again with `p` on the first tick. An expiry is open until
+  it stops by the one rule of `expiry.stop_ms` (see "One rule for when an expiring contract stops"),
+  not by a close of its own: an expiring index contract at 15:40 until 6 Dec 2026 and 15:30 from
+  7 Dec, a stock contract at the F&O close (15:40, then 15:45), a special session day at the
+  calendar's end of that day (read at most once a minute for each exchange). On its last day it is
+  offered and `words` says that real time ("This expiry ends today at 15:40."); after it the expiry
+  is gone, and asking for it is `invalid` with field `exp`. An MCX underlying is not covered by the
+  rule, so `words` says nothing about its end time rather than a wrong one, and its expiry drops at
+  the end of MCX's own calendar window for the day if the calendar has one, else at the end of the
+  day.
+
+The add form's preview of the row a chosen strike or ATM rule would make is `resolve` with `drafts` (W15,
+"Draft rows"): the page sends the underlying and rule it picked from these two answers, never a stored
+id, and reads `words` and `rolled` back.
+
+Both answer `failed` in words while the master is not loaded and `off` with the switch off. Tests:
+`tests/test_watchlists_search_ops.py` (the grammar's vectors through the bridge, grouping, Added, the
+understood line and near miss, chips, strikes with and without a price, a last-day expiry, a missing
+side, the class limit, one generation and no new thread, and timing on 120,000 synthetic rows).
+
+## W23 - the sealed members route (`bridge/internal.py`, `members.py`, `words/members.py`)
+
+`POST /sudarshan/watchlists/internal/read?op=members|version` is how `sudarshan-alerts` reads a
+list. It follows the screener's internal route: no session and no CSRF token (the service has no
+browser; its seal is its proof), one Fernet token as the body under the vault purpose
+`WATCHLISTS_INTERNAL_INFO`, a nonce book that refuses a replayed request (`NoncesFull` answers 503
+rather than forget a nonce that could still be replayed), 16 KiB at most, and a 404 for any request
+that carries a proxy header (the service calls 127.0.0.1 directly). The seal is checked before the
+switch, so an unsealed caller learns nothing. The route is found by discovery (`bridge/internal.py`
+defines `install(app)`), reads only, and is not in `contract.WRITE_ROUTES`; a viewer's session is no
+key to it. The helpers are the screener's (`open_sealed`, `NonceBook`, `fernet_for`); only the proxy
+header list is repeated, and a test keeps it equal to the screener's.
+
+`members {ref}` answers `{version, ref_version, created_at, list_key, rows, left_out, valid_until}`:
+
+- `version` is the lists version, the text `op=version` answers alone. `ref_version` is the ref's
+  own: a 12 character digest of its instruments and what it leaves out, so a consumer can tell its
+  own list changed when the lists version moved for another's.
+- `created_at` and `list_key` (the same text) are a `list:` ref's identity, OpenAlgo's `created_at`
+  of the list. OpenAlgo gives a deleted list's id to the next list made; the alerts compare it and
+  stop a group whose list id now names another list. Absent for built-in and flag lists. The alerts
+  client reads the field `created_at`.
+- `rows`: `{symbol, exchange, instrument_key, tick_size, expiry, lot, valid_until?}` through the
+  master, in the list's order, one per instrument. A future (a month-future follow row resolved to
+  the contract valid at the call, or a future held as a symbol, or a built-in list's) carries
+  `valid_until`, the epoch ms its contract stops by `expiry.stop_ms` (a special session day's close
+  from the calendar); the consumer asks again then. The answer's own `valid_until` is the earliest.
+- `left_out`: `{symbol, why, reason}`. `atm` is an at-the-money follow row and `strike` a strike
+  row, both left out because they change contract during the day; `missing` is a symbol today's
+  master lacks (or a future row with no contract this month). `reason` is words for the owner.
+- Never a flag, a note or a price.
+
+Refusals use the bridge's envelope: `off` with the switch off (both ops; the alerts freeze the group
+on it), `gone` (404) for a list, section or built-in list that is not there, `invalid` for a ref that
+is not one (and, in words, for a ranked ref), `failed` when today's contract list is not loaded, so
+the caller changes nothing and asks again. The readers (`refs/list.py`, `refs/flag.py`,
+`refs/preset.py`) each build a `Members` record; `members.py` is the pure part (cuts, the record).
+A list reads its view once, resolves its month-future rows with the same code as `resolve`
+(`resolver.resolve_rows`, no price needed) and takes OpenAlgo's `created_at` from the same read.
+Tests: `tests/test_watchlists_members.py` (the readers) and `tests/test_watchlists_internal.py` (the
+seal, each kind of ref, futures, the versions, the switch, and the alerts service's own members
+client reading the route through a test app).

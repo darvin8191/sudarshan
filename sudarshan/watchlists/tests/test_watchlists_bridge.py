@@ -32,6 +32,7 @@ CHANGING = [op for op in contract.OPS if op.method in ("POST", "PUT", "PATCH", "
 NOT_BUILT = {op.name for op in contract.OPS} - {
     "state",
     "view",
+    "ranked",
     "section_add",
     "section_edit",
     "section_remove",
@@ -48,6 +49,8 @@ NOT_BUILT = {op.name for op in contract.OPS} - {
     "row_edit",
     "row_remove",
     "resolve",
+    "search",
+    "strikes",
 }
 
 BODIES = {
@@ -110,12 +113,15 @@ def test_only_handled_ops_get_a_route():
             "/favourites",
             "/prefs/<ref>",
             "/symbol",
+            "/ranked",
             "/symbols/<k>",
             "/flags",
             "/symbols/expired/clear",
             "/rows",
             "/rows/<int:id>",
             "/resolve",
+            "/search",
+            "/strikes",
         )
     }
 
@@ -262,6 +268,9 @@ def test_switched_off_state_says_so_and_every_other_op_says_off(
 
 
 def test_the_switch_is_read_at_each_request(monkeypatch):
+    from database import watchlist_db as oa
+
+    oa.Base.metadata.create_all(oa.engine)  # state reads OpenAlgo's own lists; make them, as below
     reset_users()
     client = make_app(ops.discover(), real=True).test_client()
     login_session(client)
@@ -271,8 +280,11 @@ def test_the_switch_is_read_at_each_request(monkeypatch):
     assert client.get(contract.API_PREFIX + "/state").get_json()["data"]["enabled"] is True
 
 
-def test_state_answers_only_what_needs_no_later_change():
+def test_state_answers_only_what_needs_no_later_change(monkeypatch):
     from database import watchlist_db as oa
+    from sudarshan.watchlists.ops import ranked as ranked_op
+
+    monkeypatch.setattr(ranked_op, "owner_token", lambda user: None)  # no sign-in: nothing read
 
     oa.Base.metadata.create_all(oa.engine)  # the favourites read OpenAlgo's own lists
     reset_users()
@@ -283,7 +295,7 @@ def test_state_answers_only_what_needs_no_later_change():
     body = r.get_json()
     assert body["status"] == "ok"
     assert set(body["data"]) == {
-        "enabled", "limits", "flag_names", "versions", "favourites",
+        "enabled", "limits", "flag_names", "versions", "favourites", "ranked",
     }  # fmt: skip
     assert body["data"]["enabled"] is True
     assert body["data"]["limits"] == contract.LIMITS

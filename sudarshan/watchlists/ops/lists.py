@@ -17,7 +17,7 @@ Not read here, on purpose:
   is not readable in this process; the page marks them from the screener's state as it does today.
 * Built-in lists are catalogued by name only (``presets()``); their counts and dates are read by
   ``lists`` alone, from the one master generation, and are null while the master is not loaded.
-* Whether a ranked list is available today (the Upstox sign-in) is W22's: ``state`` will say.
+* Whether a ranked list is available today (the Upstox sign-in) is ``state``'s (W22).
 """
 
 from __future__ import annotations

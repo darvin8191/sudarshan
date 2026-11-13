@@ -2,9 +2,12 @@
 
 A ref is ``<kind>:<id>``. Each module of this package names its kind (``KIND``) and gives the
 ``view`` op's dispatcher the reader of that kind; a module added here is found by
-``pkgutil.iter_modules`` and needs no edit elsewhere. Built so far: ``list`` (W6), ``flag`` (W9)
-and ``preset`` (W12). The ranked kind (W22) comes later, and until then a ref of that kind is
-refused as ``invalid`` with field ``ref``.
+``pkgutil.iter_modules`` and needs no edit elsewhere. Built: ``list`` (W6), ``flag`` (W9),
+``preset`` (W12) and ``ranked`` (W22; its ident is ``<source>:<asset>:<category>``). A kind that is
+not built, or an ident the kind does not offer, is refused as ``invalid`` with field ``ref``. The
+ranked reader gives ``view`` its rows from the live ranking; the sealed members route refuses a ranked
+ref in words before it reaches ``members`` (W23), since a consumer must never take a changing ranking
+for a list.
 
 Every reader module exposes:
 
@@ -20,8 +23,9 @@ Every reader module exposes:
     The ``Members`` record of the sealed members route (W23): ``{ref, version, members: Contract[],
     valid_until, left_out: Cut[]}``, the contracts a ref holds today, follow rows resolved, with
     ``valid_until`` the epoch ms at which a rolling row would resolve differently (None when none
-    does). Same refusals as ``view``. Defined with the interface in W6 and implemented later: a
-    reader that has not built it raises ``NotImplementedError``, and nothing calls it before W23.
+    does). A ``Cut`` may carry ``why`` (``atm``, ``strike`` or ``missing``). A reader of a list
+    adds ``created_at``, OpenAlgo's own text for the list (its identity, review M4). Never a flag
+    or a note. Same refusals as ``view``.
 
 Pure of threads, like the rest of this package; a reader opens its sessions as ``with`` blocks.
 

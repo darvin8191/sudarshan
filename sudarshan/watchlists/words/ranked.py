@@ -16,6 +16,9 @@ SIGNIN_TODAY = (
     "Sign in to Upstox to read rankings. Ranked lists use your daily Upstox sign-in, which has "
     "not been done today."
 )
+EXPIRED = "Your Upstox sign-in has expired. Sign in to read it again."
+CLOSED_NO_TIME = "Market closed · the ranking is Upstox's last, and Upstox gave no time for it"
+NOT_IN_MASTER = "Not in today's contract list"
 OTHER_BROKER = "Ranked lists come from Upstox. Sign in to Upstox to use them."
 WAIT = "Upstox asked us to wait. Pull down again in a minute."
 NO_ALERT = (
@@ -30,6 +33,28 @@ CATEGORY = {
     "IV_LOSERS": "IV losers", "UNDER_5000": "Under ₹5,000 to buy",
     "UNDER_10000": "Under ₹10,000 to buy",
 }  # fmt: skip
+
+
+LOCKED = "This is a ranking from Upstox. Make a copy of it to keep it."
+
+
+def copy_left_out(n: int) -> str | None:
+    """``2 symbols are not in today's contract list and were left out of the copy.``"""
+    if not n:
+        return None
+    one = n == 1
+    return (
+        f"{n} symbol{'' if one else 's'} {'is' if one else 'are'} not in today's contract list "
+        f"and {'was' if one else 'were'} left out of the copy."
+    )
+
+
+def copy_nothing(n: int) -> str:
+    return (
+        "That symbol is not in today's contract list, so nothing was copied."
+        if n == 1
+        else f"None of these {n} symbols are in today's contract list, so nothing was copied."
+    )
 
 
 def label(source: str, asset: str, category: str) -> str:
