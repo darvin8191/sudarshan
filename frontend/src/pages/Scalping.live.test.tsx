@@ -254,3 +254,27 @@ describe('the expiry on an expiry day', () => {
     expect(toastInfo).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('a page left open past midnight in India (review N3)', () => {
+  it("asks for the new day's expiry list once at the date change and never on a poll", async () => {
+    // Mon 7 Dec 2026, 23:59:50 in India: the list fetched now is Monday's, with no stop in it.
+    vi.setSystemTime(Date.UTC(2026, 11, 7, 18, 29, 50))
+    getExpiry
+      .mockResolvedValueOnce({ status: 'success', data: ['08DEC26', '15DEC26'], rolls_at: null })
+      .mockResolvedValue({
+        status: 'success',
+        data: ['08DEC26', '15DEC26'],
+        rolls_at: Date.UTC(2026, 11, 8, 10, 0),
+      })
+    renderScalping()
+    await pass(0)
+    expect(getExpiry).toHaveBeenCalledTimes(1)
+    await pass(10_000) // 00:00:00, a moment short of the timer
+    expect(getExpiry).toHaveBeenCalledTimes(1)
+    await pass(1_000)
+    expect(getExpiry).toHaveBeenCalledTimes(2)
+    // Tuesday's list carries today's stop; the page then waits for it, with no poll in between.
+    await pass(60 * 60_000)
+    expect(getExpiry).toHaveBeenCalledTimes(2)
+  })
+})

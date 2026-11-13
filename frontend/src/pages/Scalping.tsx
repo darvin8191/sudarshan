@@ -32,6 +32,7 @@ import { type ExpiryStop, pickExpiry, rollNotice, rollRefetchMs } from '@/lib/sc
 import { priceDecimals } from '@/lib/scalpingPrice'
 import { buildPositionRows } from '@/lib/scalpingRows'
 import { mergeTick, type TickView } from '@/lib/scalpingTick'
+import { watchIstDay } from '@/lib/trading/dayWatch'
 import { useAuthStore } from '@/stores/authStore'
 import { useThemeStore } from '@/stores/themeStore'
 // SUDARSHAN: broker order updates, re-syncs, the status line and tick direction (src/sudarshan/books).
@@ -415,7 +416,7 @@ export default function Scalping() {
   }, [allUnderlyings, underlyingQuery])
 
   // Options expiry for the derivative underlying.
-  const { data: expiryResp } = useQuery({
+  const { data: expiryResp, refetch: refetchExpiry } = useQuery({
     queryKey: ['scalping', 'expiry', exchange, underlying],
     queryFn: () => scalpingApi.getExpiry(underlying, exchange, 'options'),
     enabled: optionsMode && !!underlying,
@@ -424,6 +425,14 @@ export default function Scalping() {
   })
   const expiries = expiryResp?.data ?? []
   const rollsAt = expiryResp?.rolls_at
+  // SUDARSHAN (review N3): a page left open past midnight in India asks for the day's list again
+  // (`rolls_at` is the day it was fetched's); once at the date change, never on a timer of its own.
+  const refetchExpiryRef = useRef(refetchExpiry)
+  refetchExpiryRef.current = refetchExpiry
+  useEffect(() => {
+    if (!optionsMode || !underlying) return
+    return watchIstDay(() => void refetchExpiryRef.current())
+  }, [optionsMode, underlying])
   // SUDARSHAN (review N5): the stop the server last named for the nearest expiry, for the notice.
   const lastStop = useRef<ExpiryStop | null>(null)
   useEffect(() => {
