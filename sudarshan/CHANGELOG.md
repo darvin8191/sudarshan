@@ -26,8 +26,10 @@ feed and API-key calls work as before.
   refuses, a live connection refused after a logout elsewhere), before it goes to the login page.
   Before, it stayed until the next page load.
 - **A logout that could not sign the other devices out says so.** If the server could not record
-  the time, a logout, a password change or a reset tells you, instead of "Logged out
-  successfully"; log in and log out once more. A password change or reset also keeps the
+  the time, a logout from the menu at the top right, a password change or a reset tells you,
+  instead of "Logged out successfully"; log in and log out once more from that menu. The Sign out
+  buttons on a few other pages (Playground, Historify, the Flow editor, the broker sign-in page and
+  the error page) do not say it yet. A password change or reset also keeps the
   auto-login's entry in Active Sessions, so an old session's next page no longer ends the Upstox
   login the change kept.
 - **Old rows leave Active Sessions.** Rows of sessions the 03:00 expiry had already ended (the two
@@ -64,7 +66,7 @@ feed and API-key calls work as before.
     a box left empty is asked for again, not recorded;
   - after saving a daily limit at or below the day's loss, the warning "saving locks new orders until
     tomorrow" no longer stays on the card; the day card's chip says the rest;
-  - in Analyze mode a refused order's message reads "NIFTY17NOV2825200CE: Daily loss limit reached:
+  - in Analyze mode a refused order's message reads "NIFTY17NOV2625200CE: Daily loss limit reached:
     ...", without the word "Error".
 
 ### What you must do

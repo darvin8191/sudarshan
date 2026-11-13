@@ -121,7 +121,9 @@ def test_the_limits_and_modes_the_readme_gives_for_an_install_are_the_tools():
 # ---- the offsite copy against a taken-over server (release review v0.8.0, H1) -------------------
 
 CHANGELOG = (SUDARSHAN / "CHANGELOG.md").read_text()
-STANZA = " ".join(CHANGELOG.split("\n## ")[1].split())  # the newest release's stanza, one line
+STANZA = " ".join(  # the v0.8.0 stanza by its heading, one line (a later release goes above it)
+    next(part for part in CHANGELOG.split("\n## ") if part.startswith("v0.8.0 ")).split()
+)
 
 
 def test_no_claim_says_a_taken_over_server_cannot_upload_and_each_says_what_it_can():

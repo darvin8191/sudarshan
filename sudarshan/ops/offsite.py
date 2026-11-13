@@ -105,7 +105,7 @@ class Config:
 class Outcome:
     state: str  # off, ok, failed
     reason: str = ""
-    days_left: int | None = None  # set from 14 days before the expiry, also when the upload worked
+    days_left: int | None = None  # set from 15 days before the expiry, also when the upload worked
     expires: date | None = None
 
 
