@@ -801,7 +801,13 @@ def test_a_failed_flush_is_put_back_before_the_next_flush_runs(alerts, quick, mo
 
 
 def test_states_a_failed_flush_could_not_save_are_saved_by_the_next(alerts, quick, monkeypatch):
-    """Mutant R12: a flush that fails puts what it held back, for the next flush."""
+    """Mutant R12: a flush that fails puts what it held back, for the next flush.
+
+    The trade's state is the Book's only once its frame is judged. The test used to move the
+    clock past the next flush as soon as it had sent that frame, so on a loaded box the flush ran
+    first with nothing to save, and no later flush came before the wait ran out: the only flush
+    refused was the stop's, 5 s on (CI runs 43495929221 and 43498291959). Here the frame always
+    arrives a second late, and the test waits until it is judged before it moves the clock."""
     from sudarshan.alerts.market.store import StoreError
 
     real, calls = MarketStore.save_states, []
@@ -821,7 +827,11 @@ def test_states_a_failed_flush_could_not_save_are_saved_by_the_next(alerts, quic
             settings = alerts(notify)
             create(settings, clock())
             rt, task = await started(settings, feed, clock)
+            deliver_late(rt, 99.95, 1.0)
+            beat = rt._health  # the receive already waiting would take the frame on time:
+            await wait_until(lambda: rt._health is not beat)  # one health frame lets it end
             await trade(feed, clock, 99.95)
+            await wait_until(lambda: rt.stats["judged"] == 1)  # only now is it the Book's
             clock.advance(2)
             await wait_until(lambda: calls)  # the first flush, refused
             clock.advance(2)
