@@ -6,6 +6,7 @@ from __future__ import annotations
 import subprocess
 import sys
 import textwrap
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -634,7 +635,11 @@ def test_writes_yield_to_the_hub_between_items(monkeypatch):
     src = make_list(many(40), "Source")
     dst = make_list((), "Other")
     pauses = []
-    monkeypatch.setattr(copy_ops.time, "sleep", lambda s: pauses.append(s))
+    mine = threading.get_ident()
+    # time.sleep is the process's one: record only this thread's pauses, never another thread's
+    monkeypatch.setattr(
+        copy_ops.time, "sleep", lambda s: pauses.append(s) if threading.get_ident() == mine else None
+    )
     keys = [("NSE", s) for s in many(40)]
     assert copy_ops.add_all(OWNER, dst, keys) == 40
     assert pauses == [0] * 40
