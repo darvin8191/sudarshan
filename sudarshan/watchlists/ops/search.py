@@ -21,7 +21,7 @@ import time
 
 from flask import session
 
-from sudarshan.watchlists import dynamic, master, numfmt, search
+from sudarshan.watchlists import dynamic, numfmt, search
 from sudarshan.watchlists import view as merge_view
 from sudarshan.watchlists.ops import OpError
 from sudarshan.watchlists.words import presets as preset_words
@@ -52,6 +52,8 @@ def _closes(now: int) -> dict[str, int]:
 
 
 def _index() -> search.Index:
+    from sudarshan.watchlists import master  # not at import: the bridge imports no master
+
     ix = master.shared().index()
     if ix is None:
         raise OpError("failed", preset_words.NOT_LOADED)
@@ -59,7 +61,7 @@ def _index() -> search.Index:
 
 
 def _contract(row) -> dict:
-    return merge_view.contract(row.exchange, row.symbol, row, master.Master.isin(row))
+    return merge_view.contract(row.exchange, row.symbol, row, search.isin_of(row.token))
 
 
 def _held(lid: int | None) -> set[tuple[str, str]]:
