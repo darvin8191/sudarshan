@@ -547,6 +547,8 @@ export interface RankedReq {
 
 export interface TvPreviewReq {
   text: string
+  name?: string
+  list?: number
 }
 
 export interface TvExportReq {
