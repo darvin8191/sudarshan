@@ -12,6 +12,8 @@ from urllib.parse import urlsplit
 from sudarshan.autologin.schedule import EXTRA_TRADING_DAYS_FILE, window_setting
 from sudarshan.ops.release import DEPLOYED_TAG_FILE  # M18.1
 
+from .client_auth import CLIENTS_DIR, ENV_DIR  # FL1
+
 log = logging.getLogger("sudarshan.feed")
 
 PKG_DIR = Path(__file__).resolve().parent
@@ -59,6 +61,8 @@ class Settings:
     record_keep_days: int
     #: M18.1: where the deploy tool records the installed release (shown in /health)
     deployed_tag_file: Path = DEPLOYED_TAG_FILE
+    #: FL1: one token file per client (SUDARSHAN_FEED_CLIENTS_DIR); no file at all keeps writes open
+    clients_dir: Path = Path(CLIENTS_DIR)
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> Settings:
@@ -90,4 +94,5 @@ class Settings:
             record_keep_days=int(get("SUDARSHAN_FEED_RECORD_KEEP_DAYS", "7")),
             # M18.1
             deployed_tag_file=Path(get("SUDARSHAN_DEPLOYED_TAG_FILE") or DEPLOYED_TAG_FILE),
+            clients_dir=Path(get(ENV_DIR) or CLIENTS_DIR),  # FL1
         )

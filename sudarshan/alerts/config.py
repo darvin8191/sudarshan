@@ -65,6 +65,12 @@ def _switch(env: Mapping[str, str], name: str, default: bool) -> bool:
     raise ConfigError(f"{name} must be on or off")
 
 
+def _soft_switch(env: Mapping[str, str], name: str) -> bool:
+    """A switch that is off unless it clearly says on. A mistyped one is off, never an error: a
+    setting of a receiver of nudges must not stop the order alerts."""
+    return (env.get(name) or "").strip().lower() in _ON
+
+
 def switched_off(env: Mapping[str, str] | None = None) -> bool:
     """The kill switch, read before anything else: off means no other setting matters."""
     return not _switch(os.environ if env is None else env, "SUDARSHAN_ORDER_ALERTS", True)
@@ -96,10 +102,15 @@ class Settings:
     openalgo_url: str
     window: tuple[int, int]  # IST minutes after midnight: [open, close)
     always_on: bool
-    #: The files the deploy tool and the backup job record their notices in (notices.py).
+    #: The files the deploy tool, the backup job and the family service record their notices in
+    #: (notices.py). A file that is not there (no family service) is normal and silent.
     notice_spools: tuple[Path, ...] = DEFAULT_SPOOLS
     #: Where the deploy tool records the installed release (shown on the health page).
     deployed_tag_file: Path = DEPLOYED_TAG_FILE
+    #: Nudges ("orders changed", nudge.py) to the family service and to the journal, each off until
+    #: its switch (``SUDARSHAN_FAMILY=on``, ``SUDARSHAN_JOURNAL=on``) is set in alerts.env.
+    nudge_family: bool = False
+    nudge_journal: bool = False
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> Settings:
@@ -138,6 +149,8 @@ class Settings:
             always_on=_switch(env, "SUDARSHAN_ALERTS_ALWAYS_ON", False),
             notice_spools=_paths(get("SUDARSHAN_NOTICE_SPOOLS")) or DEFAULT_SPOOLS,
             deployed_tag_file=Path(get("SUDARSHAN_DEPLOYED_TAG_FILE") or DEPLOYED_TAG_FILE),
+            nudge_family=_soft_switch(env, "SUDARSHAN_FAMILY"),
+            nudge_journal=_soft_switch(env, "SUDARSHAN_JOURNAL"),
         )
 
 

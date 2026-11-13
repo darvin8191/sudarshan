@@ -107,7 +107,7 @@ def test_a_populated_v2_file_gains_the_cache_and_keeps_every_row(tmp_path):
     with sqlite3.connect(path) as conn:
         before = conn.execute("SELECT id, name FROM tab ORDER BY id").fetchall()
     again = PortfolioStore(path, now=NOW + 1)
-    assert again.applied == [3] and migrations.LATEST == 3
+    assert again.applied == [3, 4] and migrations.LATEST == 4
     with sqlite3.connect(path) as conn:
         assert conn.execute("SELECT id, name FROM tab ORDER BY id").fetchall() == before
         assert conn.execute("SELECT count(*) FROM report_cache").fetchone() == (0,)

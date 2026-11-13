@@ -6,9 +6,8 @@
 * ``out`` is the single door every op answers through. It removes from the answer whatever the
   scope's mask names: with the owner's scope (an empty mask) it returns the answer as it is. A mask
   entry is a field name, or ``*suffix`` for every field that ends so. ``VIEWER_MASK`` is what a
-  family viewer would carry: values, quantities, prices, gains, percentages and funds go;
-  symbols, names and the direction of an entry (``kind``) stay. v1 builds only the owner, and the
-  test with a synthetic viewer holds the rest of the design to this.
+  family viewer would carry; it is built from the privacy table (privacy.py). The owner's purpose
+  builds the owner; the family purpose builds a scope from the member's stored floor (P2).
 """
 
 from __future__ import annotations
@@ -16,40 +15,21 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from . import privacy
+from .core.kinds import PRIVACY_CATEGORIES
 from .store import Scope
 
-#: What a viewer never sees. Keys ending in these (paise, scaled quantity and price, percentages)
-#: and these names (lines hold each account's quantity; the series and the flows are values).
-VIEWER_MASK = frozenset(
-    {
-        "*_paise",
-        "*_u",
-        "*_pct",
-        "pct",
-        "lines",
-        "series",
-        "benchmarks",
-        "xirr",
-        "twr",
-        "by_fy",
-        "income",
-        "price",
-        "fresh",
-        "totals",
-        "fixed",
-        "allocation",
-        "liabilities",
-        "words",
-        "note",
-        "effect",
-        "ratio_num",
-        "ratio_den",
-        "charges_detail",
-    }
-)
+#: What a viewer who is shown no figures never sees: everything the ``pnl`` and ``qty`` categories
+#: hide, read from the one table (``sudarshan/family/privacy_fields.json``, cross-design Y24). Keys
+#: ending in the patterns (paise, scaled quantity, percentages) and the names (lines hold each
+#: account's quantity; the series and the flows are values) go; symbols, names and the direction of
+#: an entry (``kind``) stay.
+VIEWER_MASK = privacy.viewer_mask()
 
 
 def hidden(key: str, mask: frozenset[str]) -> bool:
+    if not isinstance(key, str):
+        return False
     return key in mask or any(m.startswith("*") and key.endswith(m[1:]) for m in mask)
 
 
@@ -134,3 +114,17 @@ ACTIVITY = (
 
 def activity(row: Mapping[str, Any]) -> dict[str, Any]:
     return _pick(row, tuple(ACTIVITY))
+
+
+def share(row: Mapping[str, Any]) -> dict[str, Any]:
+    return _pick(row, ("tab_id", "viewer", "level", "expires_at", "version"))
+
+
+def member_privacy(row: Mapping[str, Any]) -> dict[str, Any]:
+    """A member's privacy as the owner's admin flow reads it: each category as shown or hidden."""
+    return {
+        "member": row["member"],
+        "role": row.get("role"),
+        "shown": {name: bool(row[f"show_{name}"]) for name in PRIVACY_CATEGORIES},
+        "version": row["version"],
+    }

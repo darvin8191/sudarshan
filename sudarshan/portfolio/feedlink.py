@@ -25,6 +25,8 @@ from typing import Any
 
 import httpx
 
+from sudarshan.feed.client_auth import with_auth  # FL1
+
 log = logging.getLogger("sudarshan.portfolio.feed")
 
 CLIENT = "sudarshan-portfolio"
@@ -72,6 +74,7 @@ class FeedClient:
         try:
             if self.call_timeout is not None:
                 kwargs.setdefault("timeout", self.call_timeout)
+            kwargs["headers"] = with_auth(CLIENT, kwargs.get("headers"))  # FL1
             answer = await self.client.request(method, self.url + path, **kwargs)
         except httpx.HTTPError:
             if not self.down:

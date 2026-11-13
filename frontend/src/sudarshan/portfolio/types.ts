@@ -219,7 +219,7 @@ export const ALLOCATION_BY = ['class', 'sector', 'mcap', 'account', 'member', 't
 export type AllocationBy = (typeof ALLOCATION_BY)[number]
 export const HELD_FILTERS = ['over', 'under'] as const
 export type HeldFilter = (typeof HELD_FILTERS)[number]
-export const UPSTOX_PARTS = ['holdings', 'positions', 'mtf', 'funds'] as const
+export const UPSTOX_PARTS = ['holdings', 'positions', 'mtf', 'funds', 'orders', 'trades'] as const
 export type UpstoxPartName = (typeof UPSTOX_PARTS)[number]
 export const REPORT_SEGMENTS = ['EQ', 'FO', 'COM', 'CD', 'MF'] as const
 export type ReportSegment = (typeof REPORT_SEGMENTS)[number]
@@ -1082,11 +1082,59 @@ export interface UpstoxPart<T> {
   data: T | null
 }
 
+/** One order of the day (the family and the journal read it; the portfolio page does not show it). */
+export interface UpstoxOrder {
+  order_id: string
+  exchange_order_id: string | null
+  parent_order_id: string | null
+  instrument_key: string
+  exchange: string | null
+  symbol: string | null
+  product: string
+  order_type: string | null
+  validity: string | null
+  variety: string | null
+  transaction_type: 'BUY' | 'SELL'
+  status: string
+  status_message: string | null
+  is_amo: boolean
+  tag: string | null
+  qty_u: QtyU
+  filled_qty_u: QtyU | null
+  pending_qty_u: QtyU | null
+  disclosed_qty_u: QtyU | null
+  price_u: PriceU | null
+  trigger_price_u: PriceU | null
+  avg_price_u: PriceU | null
+  placed_at: EpochMs | null
+  exchange_at: EpochMs | null
+}
+
+/** One execution of the day. */
+export interface UpstoxTrade {
+  trade_id: string
+  order_id: string
+  exchange_order_id: string | null
+  instrument_key: string
+  exchange: string | null
+  symbol: string | null
+  product: string
+  order_type: string | null
+  transaction_type: 'BUY' | 'SELL'
+  qty_u: QtyU
+  price_u: PriceU
+  amount_paise: Paise
+  placed_at: EpochMs | null
+  exchange_at: EpochMs | null
+}
+
 export interface UpstoxBook {
   holdings?: UpstoxPart<UpstoxHolding[]>
   positions?: UpstoxPart<UpstoxPosition[]>
   mtf?: UpstoxPart<UpstoxPosition[]>
   funds?: UpstoxPart<UpstoxFunds>
+  orders?: UpstoxPart<UpstoxOrder[]>
+  trades?: UpstoxPart<UpstoxTrade[]>
 }
 
 export interface UpstoxEodDay {

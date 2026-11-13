@@ -12,7 +12,9 @@ service's own user (loopback.py).
 
 Pace: Telegram asks for about one message per second per chat, and OpenAlgo allows /notify 30
 times a minute per address. So: at least MIN_GAP_S between two messages and at most PER_MINUTE a
-minute, counted across every lane of the process by one Pacer (M10.5). The market alerts lane
+minute, counted across every lane of the process by one Pacer (M10.5; the class is
+``sudarshan/common/pacer.py``, this module keeps the owner bot's lanes: orders, market, notices
+and reports, in that order of service). The market alerts lane
 (market/lane.py) takes at most MARKET_PER_MINUTE of those and no slot while order alerts wait,
 so the order lane always keeps at least PER_MINUTE - MARKET_PER_MINUTE a minute, and a fill
 during a market storm waits at most the burst pause plus one gap. Each lane sends from its own
@@ -31,11 +33,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections import OrderedDict, deque
+from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 
 import httpx
+
+from sudarshan.common.pacer import Lane
+from sudarshan.common.pacer import Pacer as _Pacer
 
 from . import loopback, messages
 from .orders import Alert
@@ -79,45 +84,67 @@ DROP_REASONS = {
 #: A refusal that is neither of the above, in the owner's words.
 REFUSED = "OpenAlgo refused the message"
 
-# Lanes of the Pacer.
-ORDERS, MARKET = "orders", "market"
+# Lanes of the Pacer, in their order of service.
+ORDERS, MARKET, NOTICES, REPORTS = "orders", "market", "notices", "reports"
+#: Server notices (notices.py) and the journal's reports (a later change) share the 12 a minute
+#: that are left after the order lane's 8: a notice is at most 1 a minute, a report at most 4
+#: (two slots each: its text, then its file).
+NOTICES_PER_MINUTE = 1
+REPORTS_PER_MINUTE = 4
 
 
-class Pacer:
-    """Send slots for every lane of the process: one gap and one minute budget for them all.
+def _notices_cap() -> int:
+    """The notice lane's cap is ``notices.NOTICES_PER_MINUTE``, read when asked (its tests and the
+    desk's own NoticePace read the same constant). Imported here, not at the top: notices.py
+    imports this module."""
+    from . import notices
 
-    The order lane is served first: the market lane takes no slot while order alerts wait, and
-    at most MARKET_PER_MINUTE a minute. Limits are read when asked, so tests can shrink them.
+    return notices.NOTICES_PER_MINUTE
+
+
+class Pacer(_Pacer):
+    """The owner bot's send slots: the lanes orders, market, notices and reports (Y18).
+
+    A ``sudarshan.common.pacer.Pacer`` with the owner bot's numbers, read from this module when
+    asked so tests can shrink them. The order lane is served first and always keeps at least
+    PER_MINUTE - MARKET_PER_MINUTE a minute of its own: the other lanes together get the rest, and
+    the market lane takes at most MARKET_PER_MINUTE of it. The market lane and the notices lane
+    take no slot while order alerts wait; the reports lane takes none while order alerts wait or
+    the market lane has messages waiting.
     """
 
     def __init__(self) -> None:
-        self._starts: deque[tuple[float, str]] = deque()  # (monotonic start, lane), last minute
-        self.orders_waiting: Callable[[], bool] = lambda: False
-        #: Set while order alerts are flushed at a stop: what the market lane sent in the last
-        #: minute no longer counts against them, so they never lose to its share (review L10).
-        self.flushing_orders = False
+        super().__init__(
+            (
+                Lane(ORDERS),
+                Lane(MARKET, lambda: MARKET_PER_MINUTE, yields_to=(ORDERS,)),
+                Lane(NOTICES, _notices_cap, yields_to=(ORDERS,)),
+                Lane(REPORTS, lambda: REPORTS_PER_MINUTE, yields_to=(ORDERS, MARKET)),
+            ),
+            gap_s=lambda: MIN_GAP_S,
+            per_minute=lambda: PER_MINUTE,
+            minute_s=lambda: MINUTE_S,
+            reserved={ORDERS: lambda: PER_MINUTE - MARKET_PER_MINUTE},
+        )
 
-    def allowed_at(self, lane: str) -> float:
-        """The earliest monotonic time a message of ``lane`` may start."""
-        starts = self._recent()
-        allowed = starts[-1][0] + MIN_GAP_S if starts else 0.0
-        counted = [at for at, which in starts if not (self.flushing_orders and which == MARKET)]
-        if len(counted) >= PER_MINUTE:
-            allowed = max(allowed, counted[-PER_MINUTE] + MINUTE_S)
-        if lane == MARKET:
-            market = [at for at, which in starts if which == MARKET]
-            if len(market) >= MARKET_PER_MINUTE:
-                allowed = max(allowed, market[-MARKET_PER_MINUTE] + MINUTE_S)
-        return allowed
+    @property
+    def orders_waiting(self) -> Callable[[], bool]:
+        """Whether order alerts wait (the Outbox sets it; a test may set a stand-in)."""
+        return lambda: self.waiting(ORDERS)
 
-    def took(self, lane: str) -> None:
-        self._starts.append((time.monotonic(), lane))
+    @orders_waiting.setter
+    def orders_waiting(self, waiting: Callable[[], bool]) -> None:
+        self.set_waiting(ORDERS, waiting)
 
-    def _recent(self) -> deque[tuple[float, str]]:
-        cutoff = time.monotonic() - MINUTE_S
-        while self._starts and self._starts[0][0] <= cutoff:
-            self._starts.popleft()
-        return self._starts
+    @property
+    def flushing_orders(self) -> bool:
+        """Set while order alerts are flushed at a stop: what the other lanes sent in the last
+        minute no longer counts against them, so they never lose to its share (review L10)."""
+        return self.flushing_reserved
+
+    @flushing_orders.setter
+    def flushing_orders(self, value: bool) -> None:
+        self.flushing_reserved = value
 
 
 class Throttle:

@@ -1,6 +1,6 @@
-"""The two stacked branches' steps together: step 2 (a loan's tab) and step 3 (the reports cache).
-A store written by the v0.5.0 code (version 1) and one at the old step 2 both reach 3, keep every
-owner row, and --status says so before and after."""
+"""The stacked steps together: step 2 (a loan's tab), step 3 (the reports cache) and step 4 (tab
+shares and member privacy). A store written by the v0.5.0 code (version 1) and one at the old
+step 2 both reach 4, keep every owner row, and --status says so before and after."""
 
 from __future__ import annotations
 
@@ -38,12 +38,12 @@ def status(path, capsys):
     return capsys.readouterr().out.replace(str(path), "<file>")
 
 
-def test_the_latest_step_is_three_and_step_two_is_still_the_loan_table():
-    assert migrations.LATEST == 3
-    assert [n for n, _ in migrations.STEPS] == [1, 2, 3]
+def test_the_latest_step_is_four_and_step_two_is_still_the_loan_table():
+    assert migrations.LATEST == 4
+    assert [n for n, _ in migrations.STEPS] == [1, 2, 3, 4]
 
 
-def test_a_v050_store_goes_from_1_to_3_and_status_says_so(tmp_path, capsys):
+def test_a_v050_store_goes_from_1_to_4_and_status_says_so(tmp_path, capsys):
     path = tmp_path / "s" / DB_FILENAME
     path.parent.mkdir()
     with sqlite3.connect(path) as conn:
@@ -51,19 +51,19 @@ def test_a_v050_store_goes_from_1_to_3_and_status_says_so(tmp_path, capsys):
         conn.execute("PRAGMA user_version = 1")
     before = snapshot(path)
     said = status(path, capsys)
-    assert "version: file 1, code 3" in said and "pending: [2, 3]" in said
+    assert "version: file 1, code 4" in said and "pending: [2, 3, 4]" in said
     assert snapshot(path) == before  # --status wrote nothing
     opened = PortfolioStore(path, now=NOW)
-    assert opened.applied == [2, 3]
+    assert opened.applied == [2, 3, 4]
     opened.close()
     assert snapshot(path) == before
-    assert rows(path, "PRAGMA user_version") == [(3,)]
+    assert rows(path, "PRAGMA user_version") == [(4,)]
     names = {r[0] for r in rows(path, "SELECT name FROM sqlite_master WHERE type = 'table'")}
-    assert {"tab_liability", "report_cache"} <= names
-    assert "version: file 3, code 3" in status(path, capsys)
+    assert {"tab_liability", "report_cache", "tab_share", "member_privacy"} <= names
+    assert "version: file 4, code 4" in status(path, capsys)
 
 
-def test_a_store_at_the_old_step_two_goes_from_2_to_3_and_keeps_its_loan_links(tmp_path, capsys):
+def test_a_store_at_the_old_step_two_goes_from_2_to_4_and_keeps_its_loan_links(tmp_path, capsys):
     path = tmp_path / "s" / DB_FILENAME
     made = PortfolioStore(path, now=NOW)
     made.close()
@@ -76,10 +76,10 @@ def test_a_store_at_the_old_step_two_goes_from_2_to_3_and_keeps_its_loan_links(t
         )
         conn.execute("PRAGMA user_version = 2")
     said = status(path, capsys)
-    assert "version: file 2, code 3" in said and "pending: [3]" in said
+    assert "version: file 2, code 4" in said and "pending: [3, 4]" in said
     again = PortfolioStore(path, now=NOW)
-    assert again.applied == [3]
+    assert again.applied == [3, 4]
     again.close()
     assert rows(path, "SELECT tab_id, asset_id FROM tab_liability") == [(7, 9)]
-    assert rows(path, "PRAGMA user_version") == [(3,)]
-    assert "version: file 3, code 3" in status(path, capsys)
+    assert rows(path, "PRAGMA user_version") == [(4,)]
+    assert "version: file 4, code 4" in status(path, capsys)

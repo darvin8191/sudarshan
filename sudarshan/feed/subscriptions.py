@@ -12,10 +12,11 @@ the highest mode anyone holds it in (ltpc < option_greeks < full < full_d30), so
 downgrades or removes a key another one needs, and ``/unsubscribe`` cannot take a claimed key
 away. Upstox's caps are checked on that effective set; a change that would break one changes
 nothing, but a change that only takes keys away or lowers modes is never refused, so a client
-can always let go of its keys. Each client also has a quota (cross-design R1: screener 700,
-alerts 300, portfolio 200, any other 50), at most MAX_OTHER_CLIENTS clients not named there may
-hold claims at once (their 50 keys each fill the ring's headroom over the named quotas, so a
-named service always reaches its own), and every claim together may hold at most 1,400 keys; a
+can always let go of its keys. Each client also has a quota (cross-design R1 and Y12: screener
+700, alerts 300, portfolio 200, family 100, journal 50, protect 50, any other 50), at most
+MAX_OTHER_CLIENTS clients not named there may hold claims at once (their 50 keys each fill the
+ring's headroom over the named quotas, so a named service always reaches its own), and every
+claim together may hold at most 1,450 keys; a
 refusal names the client. A client that has not renewed its claims for 7 days loses them, so a
 removed service cannot hold keys forever. ``subscriptions.json`` is version 2 (``claims``);
 version 1 still loads.
@@ -47,10 +48,19 @@ CLIENT_RE = re.compile(r"[a-z][a-z0-9-]{0,39}")
 #: Claims not renewed for this long are dropped.
 CLAIM_TTL_S = 7 * 86400
 #: Keys one client may claim (cross-design R1); a client not named here may claim OTHER_QUOTA.
-QUOTAS = {"sudarshan-screener": 700, "sudarshan-alerts": 300, "sudarshan-portfolio": 200}
+#: Every ring client is named (Y12): family 100, journal 50 and protect 50 beside the first three.
+QUOTAS = {
+    "sudarshan-screener": 700,
+    "sudarshan-alerts": 300,
+    "sudarshan-portfolio": 200,
+    "sudarshan-family": 100,
+    "sudarshan-journal": 50,
+    "sudarshan-protect": 50,
+}
 OTHER_QUOTA = 50
-#: Keys every client's claims may hold together; a key two clients hold counts once.
-RING_CEILING = 1_400
+#: Keys every client's claims may hold together; a key two clients hold counts once. The base set
+#: (12 keys) and this stay under the 1,500 combined cap, and one unnamed slot remains (Y12).
+RING_CEILING = 1_450
 #: Clients not named in QUOTAS that may hold claims at once (review L6): their quotas together
 #: are the ring's headroom over the named ones.
 MAX_OTHER_CLIENTS = (RING_CEILING - sum(QUOTAS.values())) // OTHER_QUOTA
@@ -256,8 +266,9 @@ class Subscriptions:
             raise CapError(f"{client} may claim at most {limit} keys; it asked for {len(keys)}")
         others = sum(1 for c in self.claims if c not in QUOTAS and c != client)
         if keys and client not in QUOTAS and others >= MAX_OTHER_CLIENTS:
+            many = "client" if MAX_OTHER_CLIENTS == 1 else "clients"
             raise CapError(
-                f"{client}: at most {MAX_OTHER_CLIENTS} clients other than "
+                f"{client}: at most {MAX_OTHER_CLIENTS} {many} other than "
                 f"{', '.join(sorted(QUOTAS))} may hold claims at once"
             )
         claims = {c: v for c, v in self.claims.items() if c != client}

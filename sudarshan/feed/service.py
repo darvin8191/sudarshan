@@ -37,6 +37,7 @@ from sudarshan.tasks import cancel_and_wait
 from . import __version__, protocol
 from .bus import HEALTH_TOPIC, Publisher
 from .claims import ClaimsMixin  # M18.1: per-client subscription claims
+from .client_auth import ClientTokens  # FL1
 from .config import Settings, is_loopback_url, setup_logging
 from .http_api import start_http
 from .rest import RestGovernor  # M18.9: the REST governor
@@ -172,6 +173,7 @@ class FeedService(ClaimsMixin):
         self._last_error: dict | None = None
         self._last_disconnect: dict | None = None
         self._stats = dict.fromkeys(STATS, 0)
+        self.client_tokens = ClientTokens(cfg.clients_dir)  # FL1: read at start, then as it changes
         self.rest = RestGovernor(self)  # M18.9: GET /upstox/... on the HTTP port (rest.py)
 
     # ---- lifecycle -------------------------------------------------------------------------
@@ -182,6 +184,7 @@ class FeedService(ClaimsMixin):
         async with contextlib.AsyncExitStack() as stack:
             self.pub = Publisher(self.cfg.zmq_port)
             stack.callback(self.pub.close)
+            self.client_tokens.start()  # FL1: which clients have a key, or that none has
             self.http = await start_http(self, self.cfg.http_port)
             stack.push_async_callback(self._close_http)
             self._client = httpx.AsyncClient(timeout=10.0)

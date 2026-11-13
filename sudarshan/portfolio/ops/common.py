@@ -5,8 +5,10 @@ store or the ledger and the code from this table."""
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import logging
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from typing import Any
 
 from .. import serialize
@@ -16,6 +18,33 @@ from ..store import Invalid, NotFound, Refused, Scope, StoreError, VersionConfli
 log = logging.getLogger(__name__)
 
 OWNER = Scope.owner()
+
+
+@dataclass(frozen=True)
+class Caller:
+    """Who an op answers: the purpose its seal opened under, the principal inside the seal, and
+    the scope the rows and the mask come from. The family purpose builds the scope from the
+    member's shares and privacy (sharing.py); the owner's and the journal's are the owner's."""
+
+    purpose: str = "owner"
+    principal: str = "owner"
+    scope: Scope = OWNER
+    #: Family only: what the member may see of the account (sharing.Access).
+    access: Any = field(default=None, compare=False)
+
+
+#: Set by the API around one op; an op never sets it. Unset means the owner.
+CALLER: contextvars.ContextVar[Caller] = contextvars.ContextVar("portfolio_caller")
+
+
+def caller() -> Caller:
+    return CALLER.get(Caller())
+
+
+def scope_now() -> Scope:
+    """The scope of the request being answered. Read it on the loop, before handing work to a
+    thread: a thread started by ``run_in_executor`` does not carry the request's context."""
+    return caller().scope
 
 
 async def work(call: Callable[[], Any]) -> Any:
@@ -81,7 +110,8 @@ async def warmed(ctx: Any) -> None:
 async def answer(call: Callable[[], Any], shape: Callable[[Any], Any] = lambda data: data) -> Any:
     """Run store work, shape what it returns for the phone and pass it through the scope's mask:
     every op ends here, so the mask is applied in one place."""
-    return serialize.out(OWNER, shape(await work(call)))
+    scope = scope_now()
+    return serialize.out(scope, shape(await work(call)))
 
 
 def given(message: Mapping[str, Any], *names: str) -> dict[str, Any]:

@@ -27,7 +27,12 @@ from typing import Any
 
 from sudarshan.ops.release import installed_release
 from sudarshan.tasks import cancel_and_wait
-from sudarshan.vault import PORTFOLIO_API_INFO, fernet_for
+from sudarshan.vault import (
+    PORTFOLIO_API_INFO,
+    PORTFOLIO_FAMILY_API_INFO,
+    PORTFOLIO_JOURNAL_API_INFO,
+    fernet_for,
+)
 
 from . import __version__
 from .api import PortfolioApi
@@ -89,10 +94,14 @@ class Service:
         opener: Callable[[Settings], Any] = open_store,
         closer: Callable[[Any], None] = close_store,
         port_retry_s: float = PORT_RETRY_S,
+        family_fernet=None,
+        journal_fernet=None,
     ):
         self.settings = settings
         self.enabled = settings.enabled
-        self.api = PortfolioApi(self, fernet)
+        self.api = PortfolioApi(
+            self, fernet, family_fernet=family_fernet, journal_fernet=journal_fernet
+        )
         self.store: Any = None
         #: Why the portfolio is off when the switch is on (a newer file, a store that will not
         #: open), in the owner's words; the API answers every op with it.
@@ -325,7 +334,13 @@ def main() -> int:
     setup_logging({"SUDARSHAN_PORTFOLIO_LOG_LEVEL": settings.log_level})
     fernet = fernet_for(pepper, PORTFOLIO_API_INFO)
     try:
-        asyncio.run(_serve(Service(settings, fernet)))
+        service = Service(
+            settings,
+            fernet,
+            family_fernet=fernet_for(pepper, PORTFOLIO_FAMILY_API_INFO),
+            journal_fernet=fernet_for(pepper, PORTFOLIO_JOURNAL_API_INFO),
+        )
+        asyncio.run(_serve(service))
     except Exception:  # a bug: systemd restarts it
         log.exception("sudarshan-portfolio stopped unexpectedly")
         return 1

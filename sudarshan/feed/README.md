@@ -86,9 +86,34 @@ header get 403). JSON in and out; use `127.0.0.1`, not `localhost` (which may re
 | `GET /upstox/<Upstox path>` | the REST governor (M18.9, below): Upstox's market-data reads for the other SUDARSHAN services |
 | `POST /subscribe` `{"mode": "ltpc", "keys": [...]}` | 200 with counts; 400 bad mode or key; 409 over an Upstox cap |
 | `POST /unsubscribe` `{"keys": [...]}` | 200 with counts; a key a client claims stays on the socket |
-| `PUT /claims/<client>` `{"keys": {"NSE_EQ|INE002A01018": "full"}}` | replaces that client's whole set and renews it: 200 `{ok, claimed, subscribed, applied_live}`; 400 bad client id, key or mode; 409 over the client's quota, the ring's 1,400 or an Upstox cap (nothing changes; the message names the client and gives the numbers) |
+| `PUT /claims/<client>` `{"keys": {"NSE_EQ|INE002A01018": "full"}}` | replaces that client's whole set and renews it: 200 `{ok, claimed, subscribed, applied_live}`; 400 bad client id, key or mode; 409 over the client's quota, the ring's 1,450 or an Upstox cap (nothing changes; the message names the client and gives the numbers) |
 | `DELETE /claims/<client>` | drops the client's set |
 | `GET /claims` | every client: renewed_at, keys, by_mode |
+
+**Client tokens (FL1).** The writes (`PUT` and `DELETE /claims/<client>`, `POST /subscribe`,
+`POST /unsubscribe`, and every `/upstox/` call) carry `Authorization: Bearer <token>` of the
+client they name: the path for `/claims/<client>`, `X-Sudarshan-Client` for the rest. Reads
+(`/health`, `/snapshot`, `/snapshot/all`, `/subscriptions`, `GET /claims`) stay open. A token is
+one line (43 characters, urlsafe base64 without padding) in `/etc/sudarshan/feed-clients/<client>`
+(folder root:sudarshan 750, files 640), made once at every deploy for `sudarshan-alerts`,
+`sudarshan-screener`, `sudarshan-portfolio`, `sudarshan-journal`, `sudarshan-family` and
+`sudarshan-protect`; the folder is `SUDARSHAN_FEED_CLIENTS_DIR`. The feed reads the folder at
+start and again whenever a file in it changes (looked at most once a second, on a request: no
+thread), compares in constant time, and never logs a token.
+
+- **No token files at all** (a dev box, or a server before the deploy made them): writes stay
+  open as before and the journal says so once, `writes to the price feed are open to every local
+  process`.
+- **As soon as one token exists**, a write for a client with no token file, or with a missing,
+  wrong or another client's token, is answered 401 with a sentence for the owner ("the part of
+  SUDARSHAN sending it did not show its key ... a fault in SUDARSHAN itself"). The journal has
+  the client's name and a count (the 1st, 10th, 100th and 1000th refusal), never the token.
+- **Each client** gets its header from `sudarshan/feed/client_auth.py`, `auth_headers(name)`:
+  it reads its own file, caches it and reads it again when it changes; an absent file sends no
+  header.
+- The state folder is closed to other accounts: the unit says `StateDirectoryMode=0750` and
+  `UMask=0027` (Y25.1), so `subscriptions.json`, which holds every client's claimed keys, is not
+  readable beyond the `sudarshan` group.
 
 `last_error` and `last_disconnect` describe the most recent such event and stay after recovery
 (history, not current health): `state` says what is happening now, and comparing their `at` with
@@ -156,7 +181,7 @@ curl -s -H 'X-Sudarshan-Client: sudarshan-portfolio' -H 'X-Sudarshan-Priority: i
 ```
 
 Every request names its service in `X-Sudarshan-Client` (`sudarshan-screener`,
-`sudarshan-portfolio` or `sudarshan-alerts`; anything else is 403) and its class in
+`sudarshan-portfolio`, `sudarshan-alerts` or `sudarshan-journal`; anything else is 403) and its class in
 `X-Sudarshan-Priority`: `repair` (a gap after a feed pause), `interactive` (the owner is waiting,
 a morning snapshot) or `bulk` (warm starts, backfills, the 16:10 option chains).
 
@@ -188,7 +213,13 @@ hour ever holds more.
 | `sudarshan-screener` (30%) | 15 | 150 | 600 |
 | `sudarshan-portfolio` (5%) | 2 | 25 | 100 |
 | `sudarshan-alerts` (5%) | 2 | 25 | 100 |
+| `sudarshan-journal` | 1 | 10 | 50 |
 
+- **The ceilings may sum above SUDARSHAN's total** (G3b): with the journal they come to 20 a
+  second, 210 a minute and 850 per 30 minutes. SUDARSHAN's 20, 200 and 800 bind first come
+  within a priority, so one service cannot take more than its ceiling and all of them together
+  never pass the total. The journal's candle calls are bulk (after 16:00); the family service
+  gets the same share when the phone chart arrives (M4.15), not before.
 - **Order of service**: repair, then interactive, then bulk; first come first served within a
   class. At most 4 calls are in flight to Upstox and 64 wait; a request waits at most 30 s. When
   64 wait, the last of them in that order is told it is busy: the newcomer, unless it outranks
@@ -226,6 +257,7 @@ hour ever holds more.
 | 503 | `restarting`, `off` | the feed is stopping; the governor is switched off (the default, until `SUDARSHAN_FEED_REST=on`) | 60 |
 | 502 | `too-large` | Upstox's answer is over 8 MiB | - |
 | 502, 504 | `no-answer` | Upstox could not be reached, or did not answer within 30 s | - |
+| 401 | (none: the HTTP API answers before the governor) | no key, a wrong key, or another client's key, once any client key exists | - |
 | 403 | `client`, `not-allowed` | an unknown `X-Sudarshan-Client`; a path or method outside the list | - |
 | 400 | `bad-request` | a missing priority, a bad key, a missing or extra query parameter | - |
 
@@ -348,9 +380,10 @@ about 300 full keys, with or without the candle.
   up, then `sub` for keys new to it. Caps are checked on that effective set when a change adds
   a key or raises a mode; a change that only takes keys away or lowers modes is never refused,
   so a client can always let go of its keys. Each client has a quota (`sudarshan-screener` 700,
-  `sudarshan-alerts` 300, `sudarshan-portfolio` 200, any other client 50), at most 4 other
-  clients hold claims at once (their 200 keys are the ring's headroom over the named quotas),
-  and every client's claims together hold at most 1,400 keys, a key two clients hold counting
+  `sudarshan-alerts` 300, `sudarshan-portfolio` 200, `sudarshan-family` 100, `sudarshan-journal`
+  50, `sudarshan-protect` 50, any other client 50), at most 1 other client holds claims at once
+  (its 50 keys are the ring's headroom over the named quotas, 1,400), and every client's claims
+  together hold at most 1,450 keys (with the 12 base keys, under Upstox's 1,500 combined cap), a key two clients hold counting
   once; a claim over any of these is refused with 409 and the message names the client. A
   client that has not renewed its claims for 7 days loses them (checked at start and at each
   day's close); a stored claim over its quota, or claims that would break a cap or the ceiling
@@ -395,6 +428,7 @@ live service holds 5581):
 | `SUDARSHAN_FEED_RECORD` | `1` |
 | `SUDARSHAN_FEED_RECORD_MAX_MB` / `SUDARSHAN_FEED_RECORD_KEEP_DAYS` | `1024` / `7` |
 | `SUDARSHAN_FEED_LOG_LEVEL` | `INFO` |
+| `SUDARSHAN_FEED_CLIENTS_DIR` | `/etc/sudarshan/feed-clients`: one token file per client (FL1); no file at all keeps writes open |
 | `SUDARSHAN_DEPLOYED_TAG_FILE` | `/var/lib/sudarshan/deployed_tag` (where the deploy tool records the installed release; `/health` shows it as `release`) |
 | `SUDARSHAN_FEED_REST` | `off`: every `/upstox/` request is answered 503 `off`; the owner sets `on` in `/etc/sudarshan/feed.env` at G7, when the ring's REST callers start |
 | `SUDARSHAN_UPSTOX_API_BASE` | `https://api.upstox.com` (tests point it at a local fake; https is required otherwise) |

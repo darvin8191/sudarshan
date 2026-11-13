@@ -315,6 +315,39 @@ read); Today = quantity x (tick - Upstox's close). This is Upstox's convention, 
 with the Upstox app; custom tabs use the exact rule above. The funds tree is data-driven (groups
 of labelled lines). Funds are not read between 00:00 and 05:30 IST.
 
+### Other purposes: the family and the journal (ring prep, v0.10.0)
+
+The listener opens three seal purposes, told apart by which key opens the seal
+(`sudarshan/vault/keys.py`); nothing here changes the owner's screens, and no caller of the other
+two exists in this release. Each purpose has its own principal and its own list of ops
+(`core/kinds.py`); an op not on its list answers 403 and is logged once a minute.
+
+| purpose | principal | ops |
+|---|---|---|
+| owner (`PORTFOLIO_API_INFO`) | `owner` | the contract's ops, plus `share_set`, `share_remove`, `shares_list`, `member_privacy_set` |
+| family (`PORTFOLIO_FAMILY_API_INFO`) | `viewer:<member id>` | reads: `state`, `summary`, `tab_get`, `performance`, `upstox_book`, `upstox_history`, `shares_for_viewer` |
+| journal (`PORTFOLIO_JOURNAL_API_INFO`) | `sudarshan-journal` | reads: `trades_day`, `order_history`, `historical_trades`, `pnl_report`, `positions`, `funds`, `benchmark_closes` |
+
+* **Family scope** (`sharing.py`): built here, never taken from the caller. Tabs are the member's
+  unexpired `tab_share` rows (the member's own row beats their role's) intersected with
+  `args.tabs`; the mask is the stored floor from `member_privacy` union `args.mask` (a caller can
+  only add) union the viewer mask when any shared tab is `restricted`. A member with no privacy
+  row sees no figures. The Upstox book is read only for a member the Upstox tab is shared with
+  and funds only while their `funds` category is shown (the funds share); otherwise "Not shared
+  with you." The answer passes the mask once more on its way out.
+* **One table of fields** (`sudarshan/family/privacy_fields.json`, `privacy.py`): `pnl`, `qty`,
+  `funds`, `orders`. P&L is offered only with quantities; `value_paise` and `invested_paise`
+  belong to `qty`. `serialize.VIEWER_MASK` is built from it.
+* **Orders and trades** are two more parts of the Upstox reader (`UPSTOX_PARTS`); the owner's
+  `upstox_book` still reads the four of `UPSTOX_PAGE_PARTS` and the page shows neither.
+* **Budget** (`budget.py`): a principal other than `owner` takes a token only while the API's
+  30-minute bucket holds at least 100 and its minute bucket at least 10. The day's trades have a
+  bucket (`day_trades`) apart from the trade history's (`trades`).
+* **Start-up probe** (`probe.py`): one line in the journal with the HTTP status the Analytics Token
+  got from retrieve-all, get-trades-for-day and order history. Read it with
+  `journalctl -u sudarshan-portfolio | grep "Analytics Token probe"`.
+* **Schema step 4** adds `tab_share` and `member_privacy`.
+
 ### Import and export
 
 `import_preview` takes the file as UTF-8 text (`text`), at most 900,000 bytes and 5,000 rows;

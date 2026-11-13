@@ -7,6 +7,10 @@ sockets on that port are looked up in ``/proc/net/tcp`` and ``/proc/net/tcp6`` (
 LISTEN), and the key is sent only when every listener a connection to the loopback address could
 reach belongs to this process's own user. The answer can change between the check and the
 connection; the check narrows that window to moments, it does not close it.
+
+A service that runs as its own account holds its own port: the nudge to the family service (nudge.py)
+asks for the uid of ``sudarshan-family`` instead (``holder(url, expected_uid=...)``, Y14), and the
+journal's, which runs as this user, for ours.
 """
 
 from __future__ import annotations
@@ -61,17 +65,30 @@ def _port(url: str) -> int:
     return parts.port or (443 if parts.scheme in ("https", "wss") else 80)
 
 
-def holder(url: str, tables=TCP_TABLES) -> str:
-    """Who listens on ``url``'s port: OURS (this user only), NOBODY, OTHER or UNKNOWN."""
+def holder(url: str, tables=TCP_TABLES, *, expected_uid: int | None = None) -> str:
+    """Who listens on ``url``'s port: OURS (the expected user only), NOBODY, OTHER or UNKNOWN.
+
+    The expected user is this process's own unless ``expected_uid`` names another: a service that
+    runs as its own account (the family service, ``sudarshan-family``) is expected to hold its own
+    port, and the check then wants that uid, never this one (Y14).
+    """
     uids = listener_uids(_port(url), tables)
     if uids is None:
         return UNKNOWN
     if not uids:
         return NOBODY
-    return OURS if uids == {os.getuid()} else OTHER
+    wanted = os.getuid() if expected_uid is None else expected_uid
+    return OURS if uids == {wanted} else OTHER
 
 
-def refusal(url: str, tables=TCP_TABLES) -> str | None:
+def holder_uid(url: str, tables=TCP_TABLES) -> int | None:
+    """The uid owning the listener on ``url``'s port: None when nobody listens, the table cannot
+    be read, or several users listen (it cannot then be said to be one)."""
+    uids = listener_uids(_port(url), tables)
+    return next(iter(uids)) if uids and len(uids) == 1 else None
+
+
+def refusal(url: str, tables=TCP_TABLES, *, expected_uid: int | None = None) -> str | None:
     """None when the key may go to ``url``; otherwise why not, in words."""
     port = _port(url)
     return {
@@ -79,4 +96,8 @@ def refusal(url: str, tables=TCP_TABLES) -> str | None:
         NOBODY: f"nothing listens on port {port} of this server",
         OTHER: f"port {port} of this server is held by another user's program",
         UNKNOWN: f"it cannot be checked who listens on port {port} of this server",
-    }[holder(url, tables)]
+    }[
+        holder(url, tables)
+        if expected_uid is None
+        else holder(url, tables, expected_uid=expected_uid)
+    ]

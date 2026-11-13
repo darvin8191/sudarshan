@@ -7,8 +7,20 @@ The browser never calls this. OpenAlgo's blueprint (blueprints/sudarshan_portfol
 owner's session, CSRF and that he is the owner, then forwards each request sealed under a key
 derived from OpenAlgo's pepper (``sudarshan.vault.keys.PORTFOLIO_API_INFO``), which only a
 process that can read OpenAlgo's .env can make. A seal lives 60 s, its nonce is accepted once,
-the op in the path must be the op inside it, and a seal under any other purpose never opens
-here. The nonces sit in a NonceBook that answers 503 when full instead of forgetting one still
+the op in the path must be the op inside it, and a seal under a purpose this service does not
+serve never opens here.
+
+Three purposes open here, each with its own key, principal and list of ops (cross-design Y4, Y6):
+
+    owner    principal ``owner``                  the portfolio's own ops (the owner's bridge)
+    family   principal ``viewer:<member id>``     read ops only; the scope (the member's shared
+                                                  tabs and the mask) is built here from the stored
+                                                  shares and privacy, never taken from the caller
+    journal  principal ``sudarshan-journal``      account reads only
+
+Which purpose a seal belongs to is which key opens it. A principal that is not the purpose's, or an
+op that is not on its list (every write op under family or journal), answers 403 and is logged.
+The answer of a non-owner purpose passes the scope's mask once more on its way out. The nonces sit in a NonceBook that answers 503 when full instead of forgetting one still
 valid (cross-design X9). Sizes: a sealed request is at most 64 KiB, an import's at most
 ``kinds.IMPORT_MAX_BYTES`` (the file as text seals to 1.5 to 1.9 MiB, see kinds.py), and the limit
 is checked from Content-Length before a byte of the body is read.
@@ -20,8 +32,8 @@ reading time-limited (an op that has started finishes), one listener per port (c
 Every answer is the bridge's envelope, ``{"status": "success", "data": ...}`` or ``{"status":
 "error", "code": ..., "message": ..., "field": ...}`` with the message in the owner's words.
 Switched off, every op answers ``{"enabled": false, ...}`` and does nothing. An op nobody has
-built yet answers "This part of the portfolio is not ready yet." This service serves the owner
-only (principal ``owner``).
+built yet answers "This part of the portfolio is not ready yet." The owner's purpose serves
+principal ``owner``; the family and journal purposes are above.
 """
 
 from __future__ import annotations
@@ -30,6 +42,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import re
 import time
 from collections.abc import Callable, Mapping
 from typing import Any, Protocol
@@ -45,8 +58,10 @@ from sudarshan.autologin.handoff import (
 )
 
 from . import ops as ops_module
+from . import serialize, sharing
 from .core import kinds
 from .errors import ApiError
+from .ops import common as ops_common
 
 log = logging.getLogger("sudarshan.portfolio")
 
@@ -55,9 +70,17 @@ HEALTH_PATH = "/health"
 OPS_PREFIX = "/v1/"
 #: The largest sealed request an op takes: 64 KiB, an upload's (``import_preview``) the import limit.
 MAX_SEALED = kinds.API_MAX_BYTES
-LIMITS = {
+LIMITS = dict.fromkeys(kinds.SERVICE_OP_NAMES, kinds.API_MAX_BYTES) | {
     spec.name: kinds.IMPORT_MAX_BYTES if spec.upload else kinds.API_MAX_BYTES for spec in kinds.OPS
 }
+OWNER_PURPOSE, FAMILY, JOURNAL = "owner", "family", "journal"
+#: The ops each purpose opens (the family and journal lists are all reads).
+ALLOWED = {
+    OWNER_PURPOSE: frozenset((*kinds.OP_NAMES, *kinds.OWNER_EXTRA_OPS)),
+    FAMILY: frozenset(kinds.FAMILY_OPS),
+    JOURNAL: frozenset(kinds.JOURNAL_OPS),
+}
+FAMILY_PRINCIPAL = re.compile(re.escape(kinds.FAMILY_PRINCIPAL_PREFIX) + r"[A-Za-z0-9_-]{1,40}")
 #: The bridge lets through about 190 requests a minute (120 reads, 60 writes, 10 imports); the
 #: book holds 2 x 60 s x 8 a second, X9's rule for a route's peak, and answers 503 past it.
 PEAK_PER_S = 8
@@ -82,6 +105,7 @@ WORDS = {
     "off": "The portfolio is switched off on the server.",
     "not_ready": "This part of the portfolio is not ready yet.",
     "size": "That is too large for the portfolio service. Send a smaller file.",
+    "op": "This request is not one the portfolio service answers for that caller.",
 }
 
 
@@ -112,8 +136,16 @@ class PortfolioApi:
         registry: Mapping[str, ops_module.Handler] | None = None,
         nonces: NonceBook | None = None,
         clock: Callable[[], float] = time.time,
+        family_fernet: Fernet | None = None,
+        journal_fernet: Fernet | None = None,
     ):
         self.desk, self.fernet, self.clock = desk, fernet, clock
+        #: The purposes this listener serves, in the order their keys are tried.
+        self.purposes: list[tuple[str, Fernet]] = [(OWNER_PURPOSE, fernet)]
+        if family_fernet is not None:
+            self.purposes.append((FAMILY, family_fernet))
+        if journal_fernet is not None:
+            self.purposes.append((JOURNAL, journal_fernet))
         self.registry = ops_module.REGISTRY if registry is None else registry
         self.nonces = nonces if nonces is not None else NonceBook(NONCES)
         self.server: asyncio.Server | None = None
@@ -201,10 +233,14 @@ class PortfolioApi:
             raise ApiError(404, "not_found", "not found")
         if method != "POST":
             raise ApiError(405, "method", "method not allowed")
-        message = self._open(op, body)
-        if message.get("principal") != OWNER:
-            self._note(op, "principal")
+        purpose, message = self._open(op, body)
+        principal = message.get("principal")
+        if not self._principal_ok(purpose, principal):
+            self._note(op, f"principal under {purpose}")
             raise ApiError(403, "principal", WORDS["principal"])
+        if op not in ALLOWED[purpose]:
+            self._refuse(purpose, op, principal)
+            raise ApiError(403, "forbidden", WORDS["op"])
         if not self.desk.enabled:
             return {"status": "success", "data": off_data(getattr(self.desk, "off_reason", None))}
         handler = self.registry.get(op)
@@ -215,23 +251,80 @@ class PortfolioApi:
             args = {}
         if not isinstance(args, dict):
             raise ApiError(400, "bad_request", WORDS["failed"])
-        # The arguments are what the bridge put under "args"; op, nonce and principal stay the seal's.
-        return {"status": "success", "data": await handler(self.desk, args)}
-
-    def _open(self, op: str, body: bytes) -> dict[str, Any]:
+        caller = await self._caller(purpose, principal, args)
+        token = ops_common.CALLER.set(caller)
         try:
-            return open_sealed(
-                self.fernet, body, op=op, seen=self.nonces, now=self.clock(),
-                max_bytes=LIMITS[op],
-            )  # fmt: skip
-        except NoncesFull:
-            log.warning(
-                "the portfolio's API is refusing requests: too many in the last two minutes"
+            # The arguments are what the bridge put under "args"; op, nonce and principal stay
+            # the seal's.
+            data = await handler(self.desk, args)
+        finally:
+            ops_common.CALLER.reset(token)
+        if purpose != OWNER_PURPOSE:
+            data = serialize.out(caller.scope, data)  # the mask once more, on the way out (Y6)
+        return {"status": "success", "data": data}
+
+    @staticmethod
+    def _principal_ok(purpose: str, principal: Any) -> bool:
+        if not isinstance(principal, str):
+            return False
+        if purpose == OWNER_PURPOSE:
+            return principal == OWNER
+        if purpose == FAMILY:
+            return FAMILY_PRINCIPAL.fullmatch(principal) is not None
+        return principal == kinds.JOURNAL_PRINCIPAL
+
+    async def _caller(self, purpose: str, principal: str, args: dict) -> ops_common.Caller:
+        """Who the op answers. For the family purpose the scope is built here from the stored
+        shares and privacy; ``args.tabs`` can only narrow it and ``args.mask`` only add to it."""
+        if purpose != FAMILY:
+            return ops_common.Caller(purpose, principal)
+        store = ops_common.need(self.desk)
+        member = principal[len(kinds.FAMILY_PRINCIPAL_PREFIX) :]
+        clock = getattr(self.desk, "clock", None)  # the service's own, in milliseconds
+        now = int(clock()) if clock is not None else int(self.clock() * 1000)
+        access = await ops_common.work(
+            lambda: store.read(
+                ops_common.OWNER,
+                lambda tx: sharing.access_for(tx, member, now, args.get("tabs"), args.get("mask")),
             )
-            raise ApiError(503, "busy", WORDS["busy"]) from None
-        except HandoffRejected as exc:
-            self._note(op, str(exc))
-            raise ApiError(403, "forbidden", WORDS["forbidden"]) from None
+        )
+        return ops_common.Caller(purpose, principal, access.scope, access)
+
+    def _refuse(self, purpose: str, op: str, principal: Any) -> None:
+        """An op that is not on the purpose's list: a security event, said once a minute per op
+        and purpose (a flood of them is one line)."""
+        log.debug("the portfolio's API refused %s under the %s purpose", op, purpose)
+        key = f"{purpose}:{op}"
+        now = time.monotonic()
+        if now - self._warned.get(key, -1e9) >= 60:
+            self._warned[key] = now
+            log.warning(
+                "the portfolio's API refused the op %s under the %s purpose (principal %s): "
+                "that purpose opens read ops only", op, purpose, str(principal)[:60],
+            )  # fmt: skip
+
+    def _open(self, op: str, body: bytes) -> tuple[str, dict[str, Any]]:
+        """The purpose whose key opens the seal, and the message. A seal no key opens is refused
+        as one that was not sealed by this server's OpenAlgo; any other reason (size, expiry, the
+        wrong op, a replayed nonce) ends the search at once."""
+        reason = "seal"
+        for purpose, fernet in self.purposes:
+            try:
+                return purpose, open_sealed(
+                    fernet, body, op=op, seen=self.nonces, now=self.clock(),
+                    max_bytes=LIMITS[op],
+                )  # fmt: skip
+            except NoncesFull:
+                log.warning(
+                    "the portfolio's API is refusing requests: too many in the last two minutes"
+                )
+                raise ApiError(503, "busy", WORDS["busy"]) from None
+            except HandoffRejected as exc:
+                reason = str(exc)
+                if reason != "seal":
+                    break
+        self._note(op, reason)
+        raise ApiError(403, "forbidden", WORDS["forbidden"])
 
     def _note(self, op: str, reason: str) -> None:
         """A refused request: at debug always, a warning at most once in 10 minutes."""

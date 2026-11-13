@@ -270,7 +270,7 @@ def test_an_import_may_be_far_larger_than_any_other_request():
 
 
 def test_every_op_has_a_limit_and_only_the_upload_has_the_larger_one():
-    assert set(api_module.LIMITS) == set(kinds.OP_NAMES)
+    assert set(api_module.LIMITS) == set(kinds.SERVICE_OP_NAMES) >= set(kinds.OP_NAMES)
     larger = {name for name, size in api_module.LIMITS.items() if size > 64 * 1024}
     assert larger == {spec.name for spec in kinds.OPS if spec.upload} == {"import_preview"}
 

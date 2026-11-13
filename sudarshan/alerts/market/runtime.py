@@ -75,6 +75,7 @@ from sudarshan.alerts.market.store import DB_FILENAME, MarketStore, NotFound, St
 from sudarshan.alerts.outbox import OpenAlgoTelegram, Pacer, Throttle
 from sudarshan.alerts.owner import Owner, OwnerError
 from sudarshan.autologin.schedule import IST, TradingCalendar
+from sudarshan.feed.client_auth import auth_headers  # FL1
 from sudarshan.tasks import cancel_and_wait
 
 log = logging.getLogger("sudarshan.alerts.market")
@@ -1159,7 +1160,9 @@ class ReleasedClaims:
                 if self._stop.is_set():
                     return
                 try:
-                    answer = await client.delete(link, timeout=5.0)
+                    answer = await client.delete(
+                        link, timeout=5.0, headers=auth_headers("sudarshan-alerts")
+                    )
                 except httpx.HTTPError:
                     continue
                 if answer.status_code == 200:
