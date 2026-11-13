@@ -5,6 +5,12 @@ I/O, no clock, no logging. The file is exchange-prefixed symbols separated by co
 ends; ``###Name`` opens a section. A symbol is matched against the master as written, then with
 each ``_`` as ``-``, then as ``&`` (``BAJAJ_AUTO``, ``M_M``). ``NAME1!`` and ``NAME2!`` become
 current-month and next-month future rows, up to the follow rows a list may hold.
+
+Until one real TradingView file confirms how TradingView names them (design fact W-5), the futures
+of an index other than NIFTY and BANKNIFTY (whose chart name and derivative root are one word),
+every BSE future and every BSE option are left out with their own reason, as the export leaves
+them out (v0.9.0 review M3): ``unchecked_future`` and ``unchecked_option``. An index with no futures
+at all is a follow row here, which the op leaves out as having no futures.
 """
 
 from __future__ import annotations
@@ -30,8 +36,18 @@ INDEX_ALIASES = {
 _BSE_INDICES = ("SENSEX", "BANKEX")
 _FOLLOW = re.compile(r"^(.+?)([12])!$")
 _RULES = {"1": "month", "2": "next_month"}
+#: The index futures whose TradingView name is the index's own word, so the form is not in doubt.
+CHECKED_INDEX_FUTURES = frozenset({"NIFTY", "BANKNIFTY"})
+#: Left out until a real TradingView file confirms the form (W-5): a future, or a BSE option.
+UNCHECKED_FUTURE, UNCHECKED_OPTION = "unchecked_future", "unchecked_option"
+#: An option as the export writes one: root, YYMMDD, C or P, strike (``SENSEX261126C80000``).
+_OPTION = re.compile(r"^[A-Z0-9&_-]+?\d{6}[CP]\d+(?:\.\d+)?$")
 
 Known = Callable[[str, str], bool]
+
+
+def _any_futures(exchange: str, symbol: str) -> bool:
+    return True
 
 
 class Item(NamedTuple):
@@ -45,7 +61,8 @@ class Item(NamedTuple):
 
 
 class Cut(NamedTuple):
-    """A token left out, and why: not_indian, no_exchange, not_recognised, mcx_follow, empty."""
+    """A token left out, and why: not_indian, no_exchange, not_recognised, mcx_follow, empty,
+    unchecked_future, unchecked_option."""
 
     token: str
     reason: str
@@ -111,24 +128,36 @@ def _symbol(exchange: str, name: str, known: Known) -> Item | Cut | None:
     for cand in tries:
         if known(exchange, cand):
             return Item("fixed", exchange, cand)
+    if exchange == "BSE" and _OPTION.match(name):
+        return Cut("", UNCHECKED_OPTION)
     return None
 
 
-def _follow(exchange: str, name: str, rule: str, known: Known) -> Item | Cut | None:
+def _follow(exchange: str, name: str, rule: str, known: Known, futures: Known) -> Item | Cut | None:
     if exchange == "MCX":
         return Cut("", "mcx_follow")
-    if name in INDEX_ALIASES:
-        target = INDEX_ALIASES[name]
-        ex = "BSE_INDEX" if target in _BSE_INDICES else "NSE_INDEX"
-        return Item("follow", ex, target, rule) if known(ex, target) else None
+    if exchange == "BSE":  # no BSE future's TradingView form is checked yet (W-5)
+        return Cut("", UNCHECKED_FUTURE)
+    target = INDEX_ALIASES.get(name, name)
+    ex = "BSE_INDEX" if target in _BSE_INDICES else "NSE_INDEX"
+    if name in INDEX_ALIASES or known(ex, target):  # an index's future
+        if not known(ex, target):
+            return None
+        if target in CHECKED_INDEX_FUTURES or not futures(ex, target):
+            return Item("follow", ex, target, rule)  # checked, or no futures to name (said later)
+        return Cut("", UNCHECKED_FUTURE)
     for cand in (name, name.replace("_", "-"), name.replace("_", "&")):
         if known(exchange, cand):
             return Item("follow", exchange, cand, rule)
     return None
 
 
-def parse(text: str, known: Known, follow_room: int = FOLLOW_ROWS) -> Plan:
-    """The file as sections of mapped items, with what was left out and why."""
+def parse(
+    text: str, known: Known, follow_room: int = FOLLOW_ROWS, futures: Known = _any_futures
+) -> Plan:
+    """The file as sections of mapped items, with what was left out and why. ``futures(exchange,
+    symbol)`` says whether an index has futures at all (the op asks the master); one with none is
+    not said to wait for a checked form."""
     raw_sections: list[list] = [[None, []]]
     headers: list[str] = []
     for tok in tokens(text):
@@ -155,7 +184,7 @@ def parse(text: str, known: Known, follow_room: int = FOLLOW_ROWS) -> Plan:
                 continue
             m = _FOLLOW.match(rest)
             got = (
-                _follow(ex, m.group(1), _RULES[m.group(2)], known)
+                _follow(ex, m.group(1), _RULES[m.group(2)], known, futures)
                 if m
                 else _symbol(ex, rest, known)
             )

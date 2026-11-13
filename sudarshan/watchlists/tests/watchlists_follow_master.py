@@ -32,10 +32,20 @@ class Snap:
         self.by_token = {r.token: r for r in rows}
 
 
-def build_master(drop=()):
+def new_index_rows(expiries=("01-DEC-26", "29-DEC-26")):
+    """An index underlying no fixed list names (NEWINDEX: synthetic), listed as an index with
+    futures on ``expiries``: the master says it is an index's, the old tuple did not (review M1)."""
+    rows = [cash("NEWINDEX", "NSE_INDEX")]
+    for iso in expiries:
+        rows.append(fo(f"NEWINDEX{iso.replace('-', '')}FUT", "NEWINDEX", "NFO", "FUT", iso))
+    return rows
+
+
+def build_master(drop=(), more=()):
     """NIFTY (index, options on three expiries, futures), SBIN (cash, futures only), SENSEX on
-    the BSE side. ``drop`` names option symbols the master lacks."""
+    the BSE side. ``drop`` names option symbols the master lacks; ``more`` are rows added."""
     rows = [cash("NIFTY", "NSE_INDEX"), cash("SBIN", "NSE"), cash("SENSEX", "BSE_INDEX")]
+    rows += list(more)
     for iso in EXPIRIES:
         tag = iso.replace("-", "")
         rows.append(fo(f"NIFTY{tag}FUT", "NIFTY", "NFO", "FUT", iso))

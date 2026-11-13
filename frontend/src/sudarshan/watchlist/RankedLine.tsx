@@ -1,11 +1,14 @@
 import { Clock, RefreshCw, TrendingUp } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { type RefObject, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { cn } from '@/lib/utils'
+import { PANEL_ID } from './ListTabs'
 import type { Ranking } from './useRanked'
 import {
   ageLine,
+  ageWords,
   HOLD_MS,
+  isStale,
   leftOutSentence,
   readAgo,
   timesLine,
@@ -57,21 +60,79 @@ function useTick(fast: boolean): void {
   }, [fast])
 }
 
+/**
+ * Review L3: a ranking Upstox sent without its own time says when it was read instead, with the
+ * same stale style past ten minutes, so a ranking always says its age.
+ */
+function readLine(readMs: number, nowMs: number): { text: string; stale: boolean } {
+  const stale = isStale(readMs, nowMs)
+  const text = `Ranked by Upstox · read ${ageWords(readMs, nowMs)}`
+  return { text: stale ? `${text} · Pull down to read it again` : text, stale }
+}
+
 /** Pulling the page down from its top asks for a read, as the Refresh button does. */
 const PULL_PX = 80
 
-function usePullDown(onPull: () => void): boolean {
+/**
+ * Review M1: on a phone Chrome reloads the page on a pull from the top, the same gesture as the
+ * ranked list's refresh, and a reload drops the open ranked list. While a ranked list is on show the
+ * page holds that off (`overscroll-behavior-y: contain` on the root scroller, here the document, and
+ * on body, which some versions read), and gives the old value back when the list goes.
+ */
+function useNoPullToReload(): void {
+  useEffect(() => {
+    const roots = [document.documentElement, document.body]
+    const before = roots.map((root) => root.style.overscrollBehaviorY)
+    for (const root of roots) root.style.overscrollBehaviorY = 'contain'
+    return () => {
+      roots.forEach((root, at) => {
+        root.style.overscrollBehaviorY = before[at]
+      })
+    }
+  }, [])
+}
+
+/** Whether a touch began on the ranked list itself: its line or its rows, never a sheet over it. */
+function onTheList(target: EventTarget | null, line: HTMLElement | null): boolean {
+  if (!(target instanceof Node)) return false
+  const element = target instanceof Element ? target : target.parentElement
+  if (element?.closest('[role="dialog"]')) return false
+  return !!line?.contains(target) || !!document.getElementById(PANEL_ID)?.contains(target)
+}
+
+/**
+ * The pull: one finger, from the page's top, starting on the list (review M1), mostly downward (a
+ * sideways swipe of the underlying chips is not a pull), and not while a sheet is open over it.
+ */
+function usePullDown(
+  onPull: () => void,
+  line: RefObject<HTMLElement | null>,
+  off: boolean
+): boolean {
   const [pulling, setPulling] = useState(false)
   useEffect(() => {
-    let from: number | null = null
+    if (off) {
+      setPulling(false)
+      return
+    }
+    let from: { x: number; y: number } | null = null
     let far = false
     const start = (event: TouchEvent) => {
-      from = window.scrollY <= 0 ? (event.touches[0]?.clientY ?? null) : null
+      const touch = event.touches[0]
+      from =
+        touch &&
+        event.touches.length === 1 &&
+        window.scrollY <= 0 &&
+        onTheList(event.target, line.current)
+          ? { x: touch.clientX, y: touch.clientY }
+          : null
       far = false
     }
     const move = (event: TouchEvent) => {
-      if (from === null) return
-      far = (event.touches[0]?.clientY ?? from) - from >= PULL_PX
+      const touch = event.touches[0]
+      if (from === null || !touch) return
+      const down = touch.clientY - from.y
+      far = down >= PULL_PX && down > 2 * Math.abs(touch.clientX - from.x)
       setPulling(far)
     }
     const end = () => {
@@ -90,11 +151,20 @@ function usePullDown(onPull: () => void): boolean {
       window.removeEventListener('touchend', end)
       window.removeEventListener('touchcancel', end)
     }
-  }, [onPull])
+  }, [onPull, line, off])
   return pulling
 }
 
-export function RankedLine({ ranking, name }: { ranking: Ranking; name: string }) {
+export function RankedLine({
+  ranking,
+  name,
+  pullOff = false,
+}: {
+  ranking: Ranking
+  name: string
+  /** A sheet is open over the list: a drag there is the sheet's, never a pull (review M1). */
+  pullOff?: boolean
+}) {
   const { data, problem, reading, got, held, rows, size, underlying } = ranking
   const holding =
     data !== null &&
@@ -104,16 +174,20 @@ export function RankedLine({ ranking, name }: { ranking: Ranking; name: string }
   useTick(holding)
   const now = Date.now() // the tick above only redraws; the time is read at the draw
   const [both, setBoth] = useState(false)
-  const pulling = usePullDown(ranking.pull)
+  const line = useRef<HTMLElement>(null)
+  useNoPullToReload()
+  const pulling = usePullDown(ranking.pull, line, pullOff)
   const inWindow = holding && got !== null && now - got < HOLD_MS
-  const age =
-    data?.made_at != null && ['ok', 'stale', 'unavailable', 'wait'].includes(data.state)
+  const aged = data !== null && ['ok', 'stale', 'unavailable', 'wait'].includes(data.state)
+  const age = !aged
+    ? null
+    : data.made_at != null
       ? ageLine(data.made_at, now)
-      : null
+      : data.read_at != null
+        ? readLine(data.read_at, now) // review L3
+        : null
   const left =
-    data && (data.state === 'ok' || data.state === 'stale')
-      ? leftOutSentence(data.words, data.left_out)
-      : null
+    data && (data.state === 'ok' || data.state === 'stale') ? leftOutSentence(data) : null
   // The server's words for every state but ok and stale, whose line is the age line drawn here.
   const said =
     data && data.state !== 'ok' && data.state !== 'stale' && data.words.trim() ? data.words : null
@@ -128,6 +202,7 @@ export function RankedLine({ ranking, name }: { ranking: Ranking; name: string }
 
   return (
     <section
+      ref={line}
       aria-label={`${name}, ranked by Upstox`}
       data-ranked-line="true"
       className="flex flex-col gap-1 px-1"
@@ -186,9 +261,15 @@ export function RankedLine({ ranking, name }: { ranking: Ranking; name: string }
         </output>
       )}
       {data?.state === 'signin' && (
-        <Link to="/autologin" className={cn(BUTTON, 'self-start')}>
-          Sign in
-        </Link>
+        // Review L2: the same two ways out as the price notice, named as those pages name them.
+        <div className="flex flex-wrap gap-2">
+          <Link to="/autologin" className={BUTTON}>
+            Auto login
+          </Link>
+          <Link to="/dashboard" className={BUTTON}>
+            Dashboard
+          </Link>
+        </div>
       )}
       {chips.length > 1 && (
         <fieldset

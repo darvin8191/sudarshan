@@ -28,9 +28,9 @@ def entry(spec: str) -> tvexport.Entry:
         return tvexport.Entry("follow", ex, sym, p[2])
     if p[0] == "fut":
         ex, _, sym = p[1].partition(":")
-        return tvexport.Entry(
-            "row", ex, sym, None, "FUT", None, None, p[2], None if p[3] == "none" else p[3]
-        )
+        cont = None if p[3] == "none" else p[3]
+        index = p[4:] == ["index"]  # the master lists its underlying as an index's
+        return tvexport.Entry("row", ex, sym, None, "FUT", None, None, p[2], cont, index=index)
     if p[0] == "opt":
         ex, _, sym = p[1].partition(":")
         return tvexport.Entry(
@@ -113,21 +113,59 @@ def test_the_words():
     assert (
         said[2] == "NSE:NIFTY2! is the next-month future of NIFTY, and follows it on TradingView."
     )
+    assert said[4] == "Left out until its TradingView form is checked: 1 index future (FINNIFTY)."
     c = next(c for c in V["cases"] if c["name"] == "a contract an ATM or strike row shows today")
-    assert words.all_words("Swing", tvexport.build(blocks(c)))[1] == (
-        "3 at-the-money or strike rows were written as the contract they show today: "
-        "NSE:NIFTY261124C25800, NSE:NIFTY261124P25800, BSE:SENSEX261126C80000. "
-        "They will not follow the price on TradingView."
-    )
+    assert words.all_words("Swing", tvexport.build(blocks(c)))[1:] == [
+        "2 at-the-money or strike rows were written as the contract they show today: "
+        "NSE:NIFTY261124C25800, NSE:NIFTY261124P25800. "
+        "They will not follow the price on TradingView.",
+        "Left out until its TradingView form is checked: 1 BSE option (BFO:SENSEX26NOV2680000CE).",
+    ]
     c = next(c for c in V["cases"] if c["name"].startswith("what has no"))
     said = words.all_words("Swing", tvexport.build(blocks(c)))
     assert said[1:] == [
-        "These indices have no name TradingView reads: NSE_INDEX:NIFTYBANKX, NIFTYBANKX.",
+        "These indices have no name TradingView reads: NSE_INDEX:NIFTYBANKX.",
         "These are on exchanges TradingView lists cannot take here, so they are left out: "
         "MCX:GOLDM26DEC26FUT, CDS:USDINR26NOV26FUT, GOLD.",
         "These are futures of one month. TradingView lists take only the rolling contract "
         "(NAME1! and NAME2!), so they are left out: NFO:NIFTY27JAN27FUT.",
+        "Left out until its TradingView form is checked: 1 index future (NIFTYBANKX).",
     ]
+    c = next(c for c in V["cases"] if c["name"].startswith("index futures other than"))
+    said = words.all_words("Swing", tvexport.build(blocks(c)))
+    assert said[-1] == (
+        "Left out until their TradingView form is checked: 7 index futures (MIDCPNIFTY, "
+        "NIFTYNXT50, SENSEX, BANKEX, NFO:FINNIFTY26NOV26FUT, NFO:NIFTYFPI26NOV26FUT, "
+        "BFO:SENSEX26NOV26FUT) and 1 BSE option (BFO:BANKEX26NOV2660000PE)."
+    )
+
+
+def test_an_index_future_the_master_names_is_held_back_and_a_stock_future_is_not():
+    """Review M3 with M1's rule: which futures are an index's is the master's answer (``index``),
+    so an index future outside the alias table is held back too, and a stock's is written."""
+
+    def fut(underlying: str, index: bool) -> tvexport.Entry:
+        sym = f"{underlying}26NOV26FUT"
+        return tvexport.Entry("row", "NFO", sym, None, "FUT", None, None, underlying, "month",
+                              index=index)  # fmt: skip
+
+    assert tvexport.tv_symbol(fut("NIFTYFPI", True)) == (None, "unchecked_future")
+    assert tvexport.tv_symbol(fut("NIFTYFPI", False)) == ("NSE:NIFTYFPI1!", None)
+    assert tvexport.tv_symbol(fut("NIFTY", True)) == ("NSE:NIFTY1!", None)
+    assert tvexport.tv_symbol(fut("BANKNIFTY", True)) == ("NSE:BANKNIFTY1!", None)
+    assert tvexport.tv_symbol(fut("BAJAJ-AUTO", False)) == ("NSE:BAJAJ_AUTO1!", None)
+
+
+def test_the_import_holds_back_what_the_export_holds_back():
+    """Review M3: the same futures and BSE options are left out on the way in, with the same
+    sentence; an index with no futures at all is a follow row the op says has none."""
+    text = "NSE:CNXFINANCE1!,BSE:SENSEX1!,BSE:SENSEX261126C80000,NSE:NIFTY1!"
+    plan = tvimport.parse(text, known)
+    assert [c.reason for c in plan.cuts] == ["unchecked_future", "unchecked_future",
+                                             "unchecked_option"]  # fmt: skip
+    assert [i.symbol for s in plan.sections for i in s.items] == ["NIFTY"]
+    vix = tvimport.parse("NSE:INDIAVIX1!", known, futures=lambda exchange, symbol: False)
+    assert vix.cuts == () and vix.sections[0].items[0].symbol == "INDIAVIX"
     nothing = tvexport.build(
         [tvexport.Block(None, (tvexport.Entry("row", "MCX", "GOLD", None, "FUT"),))]
     )

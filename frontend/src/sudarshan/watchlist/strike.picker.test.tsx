@@ -61,7 +61,8 @@ const settle = async (ms = 0) => {
 }
 
 const EXP = [
-  ['24NOV', '2026-11-24', 'Nearest 24 Nov', false],
+  // 24 Nov 2026 is November's monthly, the last NIFTY expiry of its month, as the server marks it.
+  ['24NOV', '2026-11-24', 'Nearest 24 Nov', true],
   ['01DEC', '2026-12-01', '1 Dec', false],
   ['08DEC', '2026-12-08', '8 Dec', false],
   ['29DEC', '2026-12-29', '29 Dec (month)', true],
@@ -426,13 +427,15 @@ describe('adding', () => {
     fireEvent.click(
       within(strikeRow(25950)).getByRole('button', { name: 'Add as one row at 25,950' })
     )
+    // Review M3: the open expiries go with it, so the form can say the date and when the row moves.
+    const expiries = EXP.map(([, date, label, month]) => ({ date, label, month }))
     expect(onFollow).toHaveBeenLastCalledWith({
       mode: 'add',
       kind: 'strike_pair',
       underlying: 'NIFTY',
       exchange: 'NSE_INDEX',
       sectionId: null,
-      fixed: { strike: 25950, expiry: 'nearest' },
+      fixed: { strike: 25950, expiry: 'nearest', expiries },
     })
     fireEvent.click(within(picker()).getByRole('button', { name: '1 Dec' }))
     await settle()
@@ -440,7 +443,7 @@ describe('adding', () => {
       within(strikeRow(25900)).getByRole('button', { name: 'Add as one row at 25,900' })
     )
     expect(onFollow).toHaveBeenLastCalledWith(
-      expect.objectContaining({ fixed: { strike: 25900, expiry: 'next' } })
+      expect.objectContaining({ fixed: { strike: 25900, expiry: 'next', expiries } })
     )
     fireEvent.click(within(picker()).getByRole('button', { name: '29 Dec (month)' }))
     await settle()
@@ -448,7 +451,7 @@ describe('adding', () => {
       within(strikeRow(25900)).getByRole('button', { name: 'Add as one row at 25,900' })
     )
     expect(onFollow).toHaveBeenLastCalledWith(
-      expect.objectContaining({ fixed: { strike: 25900, expiry: 'next_month' } })
+      expect.objectContaining({ fixed: { strike: 25900, expiry: 'next_month', expiries } })
     )
   })
 

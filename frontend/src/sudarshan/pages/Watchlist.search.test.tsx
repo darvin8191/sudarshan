@@ -224,7 +224,15 @@ describe('?sheet=add', () => {
       x: 'NSE_INDEX',
     })
     await user.click(await screen.findByRole('button', { name: 'Add as one row at 25,900' }))
-    expect(await screen.findByText(/kept for good/)).toBeInTheDocument()
+    // Review M3: the form says the expiry it is on today and that it moves, never "kept for good".
+    expect(
+      await screen.findByText('Strike 25,900, fixed: it does not move with the price.')
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        'NIFTY 25,900 CE and PE as one row, nearest expiry (24 Nov today). When 24 Nov expires, this row moves to the expiry after it.'
+      )
+    ).toBeInTheDocument()
   })
 
   it('does not reopen a picker that came back with a reload, and knows no picker with the switch off', async () => {

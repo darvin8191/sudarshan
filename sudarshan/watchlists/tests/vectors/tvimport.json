@@ -51,6 +51,15 @@
      "sections": [[null, ["fixed MCX:CRUDEOIL"]]], "cuts": [["MCX:GOLD1!", "mcx_follow"]], "found_sections": 0, "found_symbols": 2, "matched": 1},
     {"name": "a dated contract is not recognised until its form is confirmed", "text": "NSE:NIFTY241128F",
      "sections": [[null, []]], "cuts": [["NSE:NIFTY241128F", "not_recognised"]], "found_sections": 0, "found_symbols": 1, "matched": 0},
+    {"name": "index futures other than NIFTY and BANKNIFTY wait for a checked form, in either spelling", "text": "NSE:NIFTY1!,NSE:BANKNIFTY2!,NSE:CNXFINANCE1!,NSE:FINNIFTY1!,NSE:NIFTY_MID_SELECT1!,NSE:MIDCPNIFTY2!,BSE:SENSEX1!,BSE:BSX1!",
+     "sections": [[null, ["follow NSE_INDEX:NIFTY month", "follow NSE_INDEX:BANKNIFTY next_month"]]],
+     "cuts": [["NSE:CNXFINANCE1!", "unchecked_future"], ["NSE:FINNIFTY1!", "unchecked_future"], ["NSE:NIFTY_MID_SELECT1!", "unchecked_future"], ["NSE:MIDCPNIFTY2!", "unchecked_future"], ["BSE:SENSEX1!", "unchecked_future"], ["BSE:BSX1!", "unchecked_future"]],
+     "found_sections": 0, "found_symbols": 8, "matched": 2, "follow": 2,
+     "preview": ["Found 0 sections and 8 symbols. 2 match.", "Left out until their TradingView form is checked: 6 index futures (NSE:CNXFINANCE1!, NSE:FINNIFTY1!, NSE:NIFTY_MID_SELECT1!, NSE:MIDCPNIFTY2!, BSE:SENSEX1!, BSE:BSX1!).", "NIFTY1! becomes a current-month FUT row that follows NIFTY.", "BANKNIFTY2! becomes a next-month FUT row that follows BANKNIFTY."]},
+    {"name": "a BSE option waits for a checked form, an NSE one is not read yet", "text": "BSE:SENSEX261126C80000,NSE:NIFTY261124C25800,BSE:RELIANCE",
+     "sections": [[null, ["fixed BSE:RELIANCE"]]], "cuts": [["BSE:SENSEX261126C80000", "unchecked_option"], ["NSE:NIFTY261124C25800", "not_recognised"]],
+     "found_sections": 0, "found_symbols": 3, "matched": 1,
+     "preview": ["Found 0 sections and 3 symbols. 1 match.", "Not recognised and left out: NSE:NIFTY261124C25800. Add them from search.", "Left out until its TradingView form is checked: 1 BSE option (BSE:SENSEX261126C80000)."]},
     {"name": "an empty file", "text": "", "sections": [[null, []]], "cuts": [], "found_sections": 0, "found_symbols": 0, "matched": 0}
   ],
   "split": [

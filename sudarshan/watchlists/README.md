@@ -413,9 +413,10 @@ request and a change without its token are refused before they count, so nobody 
 spend his budget (behind nginx every request arrives from one address, so an address key would
 have let anyone who reached the paths keep his reads `busy`). Then the switch `SUDARSHAN_WATCHLISTS_V2`, read at
 each request and shipped `off` in `openalgo-env.conf`: off, `state` answers `{"enabled": false}`,
-every other op `off`, and nothing is opened or read. Then the record check (`engine.ready()`, its
-outcome kept five seconds in a `LockedTTLCache`, a newer or unreadable file answers `record` in the
-owner's words), then the request is read against the contract (query string for GET and DELETE, JSON
+every other op `off`, and the bridge opens and reads nothing (a list deleted or cleared in
+OpenAlgo still clears its overlay: one small write to the watchlists file, W5 below). Then the
+record check (`engine.ready()`, its outcome kept five seconds in a `LockedTTLCache`, a newer or
+unreadable file answers `record` in the owner's words), then the request is read against the contract (query string for GET and DELETE, JSON
 otherwise; a route's id must equal the same field of the body, else `invalid` with that field).
 `state` answers the switch, `contract.LIMITS` and the five default flag names; versions and the push
 come with W5, favourites W10, ranked and alerts availability W22. Tests: `tests/test_watchlists_bridge.py`

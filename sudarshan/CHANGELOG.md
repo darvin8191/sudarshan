@@ -5,6 +5,113 @@ publish. The owner publishes each release on GitHub. The server's deploy timer t
 outside 08:30-16:00 IST on trading days (09:00-15:45 until v0.3.1), keeps backups, and rolls
 back if the app does not come up healthy.
 
+## v0.9.0 (14 Nov 2026)
+
+The new watchlists: sections inside a list, rows that follow an index's ATM option or its
+current-month future by themselves, built-in lists, rankings from Upstox, favourite tabs, flags and
+notes, a line with what you hold, copy and move between lists, TradingView import and export, and
+alerts on a whole list. **All of it ships switched off** (`SUDARSHAN_WATCHLISTS_V2` is off): until a
+later release turns it on, the watchlist page on the phone and the lists on /trading work exactly
+as in v0.8.1, and nothing you trade with changes. It includes everything in v0.8.1. **Publish it
+only after v0.8.1 has installed and run one trading day.**
+
+### What changes for you from the day you install it
+- **Nothing you can see.** The watchlist page, /trading's lists, the Holdings page and market alerts
+  read as they do in v0.8.1.
+- **Upstox holdings carry each row's ISIN inside the app** (the new watchlists match a holding to
+  its NSE or BSE row by it). Nothing shows it yet, and every reader of the holdings was checked:
+  none changes what it shows or decides.
+- **A new file, `db/sudarshan_watchlists.db`.** The deploy creates it, backs it up with the app's
+  database before each install and puts it back on a rollback. While the switch is off, the only
+  write to it comes when a list is deleted or cleared (on /trading or the phone): that list's
+  sections and layout there are cleared with it.
+- **Market alerts' own database gains a table for alerts on a list** when the service starts, and the
+  service reads it once a minute during market hours (there are none while the switch is off). It
+  makes no call to the app or to Upstox for this. A rollback puts the old file back.
+- **The release's build takes longer**, because the tests have grown: allow about 40 minutes after
+  you tap Publish before its files are attached. The server installs it after that, outside market
+  hours as before.
+
+### What the new watchlists do, once they are turned on
+- **Sections** inside a list (up to 20), each with one of five marks (a colour with its shape and
+  name, never colour alone); a folded section stays folded on that phone. Edit mode saves a new order
+  in one go; a symbol can be moved to a section, or copied or moved to another list.
+- **Rows that follow:** an index's ATM option, ATM+2 and so on or a fixed strike, as one contract or
+  as a strike row (CE, strike and PE in one row), or its current-month future. They roll by themselves
+  at the close of expiry day and say "Rolled to ..." for a minute. Up to 20 in a list. Buy and Sell
+  in their sheets open the usual order ticket on the contract the row shows.
+- **Built-in lists:** Indices, NIFTY 50, NIFTY BANK, F&O stocks and Index futures, locked, with Make a
+  copy. NIFTY 100, 200 and 500 and ten sector lists appear once their files are put on the server
+  (`/etc/sudarshan/universes/`).
+- **Rankings from Upstox** (gainers, losers, most active and Upstox's other categories, for index,
+  stock and commodity futures and options): 20 rows, 50 on request, marked "Ranked by Upstox" with
+  the ranking's age, never "Real-time". Pull down on a ranking to read it again.
+- **Seven favourite tabs** (your first seven lists until you pin your own), **five flags** (Watch,
+  Breakout, Results, Long term, Avoid; you can rename them) and **notes** of up to 500 characters on a
+  symbol. Flags and notes are yours alone: the family view will never show them.
+- **Sort** per list, high first or A to Z, with the change measured from the previous close or from
+  today's open, saved on the server so the phone and a tablet agree.
+- **"Show what I hold"** per list, off by default: each row adds the quantity you hold and your net
+  position. While it is on, the page reads Holdings and Positions when it opens, after an order, on a
+  reconnect and every 45 s while a market is open, as the Holdings page does.
+- **Symbol search** that understands expiry words, strikes, ATM, ISIN and futures, with a suggestion
+  for a typo.
+- **TradingView:** export a list to the text TradingView imports (sections kept), and import a
+  TradingView export into your lists (a file longer than 250 symbols is split).
+- **Alerts on a list** (market alerts must be on too): one alert watches every symbol of a list or a
+  section, follows the list's changes at once, and sends several firings close together as one
+  Telegram message.
+- **A change on any device reaches the phone within a second,** /trading's panel included.
+- **Limits:** 50 lists, 250 symbols in a list, 20 sections. A list longer than 250 rows follows the 120
+  rows around where you are scrolled; a row the page is not following shows its last price in grey
+  with its time, never as current.
+
+### What you must do
+- **Nothing when you publish.** The deploy creates the watchlists file and adds
+  `SUDARSHAN_WATCHLISTS_V2='off'` to the app's settings. No other setting changes.
+- **On the first trading day after it installs,** open Holdings on the phone and on the web: the same
+  rows, quantities and P&L as before. That is the check your rules ask for when a field is added to
+  a broker's book; the ISIN itself is checked against Upstox's raw answer in the tests.
+- **Turning it on is a later release's job,** after you say so. On the first day it is on, check:
+  - a ranking opens with rows and an age that moves, and says how many contracts it left out, if any
+    (Upstox's real answer has not been seen yet);
+  - a symbol added on /trading appears on the phone within a second;
+  - an ATM row's strike matches the option chain page's ATM, and on the next NIFTY expiry day the ATM
+    and future rows roll at the close;
+  - a quote read after 09:15 gives each row its open (change from today's open shows a dash until
+    then);
+  - two devices each on a 250-row list stay connected past 10 minutes;
+  - pull down on a ranking: it reads again, and Chrome does not reload the page;
+  - in Analyze mode, one Buy from a follow row's sheet and one from a ranking's sheet open the
+    ticket on the right contract (your rules ask for one use of each new way into the ticket);
+  - export one watchlist from TradingView and hand the file to the next work session, so the forms
+    of index futures and BSE contracts can be checked (until then they are left out of export and
+    import, with a sentence saying so).
+
+### What is refused now that used to be accepted
+- Nothing, while the switch is off.
+
+### Still to check, or not modelled
+- **Upstox's rankings are built from its documentation.** If its real answer has another shape, a
+  ranking says it could not be read; it never shows an empty or wrong list as current.
+- **TradingView's forms for index futures other than NIFTY and BANKNIFTY, and for BSE futures and
+  options, are not checked yet,** so those rows are left out of an export and an import with a
+  sentence naming them, until one real TradingView export confirms the forms.
+- **A strike row added from a dated expiry tab follows the nearest expiry, not that date.** The form
+  says so and says when it moves; a row that stays on one dated expiry needs a database step in a
+  later release.
+- **A note you are typing is lost if the symbol's sheet closes before Save** (Back, a tap outside,
+  Buy). Your choice for a later release: save it when the sheet closes, or ask first.
+- **Moves not saved in edit mode:** every way off the list asks first ("Save the new order?"), except
+  leaving the page with the bottom bar, which drops them.
+- **A section's menu has no Export yet;** export works from the list's menu.
+- **Copying or importing 250 symbols into an existing list takes about 2 s** (measured on a test
+  machine; the aim was under 1 s). The page stays usable meanwhile; it is to be measured on the
+  server before turning it on, with the app's memory after a trading day with the switch on.
+- **On a special-session expiry day** (none is announced), a follow row on an index contract rolls at
+  the session's end rather than at the index's 15:30 stop, and the built-in Index futures list rolls
+  its BSE futures at NSE's close for that day.
+
 ## v0.8.1 (13 Nov 2026)
 
 The market's timings change on **Monday 7 Dec 2026** (SEBI's circular of 15 Oct 2026, NSE's of

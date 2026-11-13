@@ -101,7 +101,18 @@ def test_a_fill_goes_out_within_the_burst_pause_and_one_gap_during_a_market_stor
     asyncio.run(scenario())
 
 
-def test_the_minute_budgets_hold_across_lanes(quick, monkeypatch):
+def _windows_hold(starts: list[tuple[float, str]]) -> bool:
+    """At most 5 starts, 3 of them market, in every one-second window that opens at a start."""
+    for t0, _ in starts:
+        window = [lane_ for t, lane_ in starts if t0 <= t < t0 + 1.0]
+        if len(window) > 5 or window.count(MARKET) > 3:
+            return False
+    return True
+
+
+def _budgets_run(monkeypatch, late_first_s: float = 0.0):
+    """Fills arriving into a market storm under small budgets. Returns the starts as the pacer
+    recorded them (the times its budgets are kept on) and as the sender's clock read them."""
     monkeypatch.setattr(outbox, "MINUTE_S", 1.0)
     monkeypatch.setattr(outbox, "PER_MINUTE", 5)
     monkeypatch.setattr(outbox, "MARKET_PER_MINUTE", 3)
@@ -111,8 +122,33 @@ def test_the_minute_budgets_hold_across_lanes(quick, monkeypatch):
 
     async def scenario():
         sender, pacer = Sender(), Pacer()
-        orders = Outbox(sender.lane(ORDERS), lambda: AT, pacer)
-        market = MarketLane(sender.lane(MARKET), lambda: AT, pacer, Results())
+        recorded: list[tuple[float, str]] = []
+        took = pacer.took
+
+        def took_and_record(lane_: str, slots: int = 1) -> None:
+            took(lane_, slots)
+            recorded.extend(list(pacer._starts)[-max(1, slots) :])  # the pacer's own times
+
+        pacer.took = took_and_record
+        if late_first_s:  # the first send reads its clock late; nothing is held back
+            send_orders, send_market = sender.lane(ORDERS), sender.lane(MARKET)
+
+            def late(send):
+                async def wrapped(text: str):
+                    first = not sender.sent
+                    outcome = await send(text)
+                    if first:
+                        at, name, said = sender.sent[0]
+                        sender.sent[0] = (at + late_first_s, name, said)
+                    return outcome
+
+                return wrapped
+
+            orders = Outbox(late(send_orders), lambda: AT, pacer)
+            market = MarketLane(late(send_market), lambda: AT, pacer, Results())
+        else:
+            orders = Outbox(sender.lane(ORDERS), lambda: AT, pacer)
+            market = MarketLane(sender.lane(MARKET), lambda: AT, pacer, Results())
         tasks = await _running(orders, market)
         try:
             market.add([line(n) for n in range(20)])
@@ -121,13 +157,29 @@ def test_the_minute_budgets_hold_across_lanes(quick, monkeypatch):
             await asyncio.sleep(2.2)
         finally:
             await _cancel(tasks)
-        starts = [(t, lane_) for t, lane_, _ in sender.sent]
-        for t0, _ in starts:  # every one-second window
-            window = [lane_ for t, lane_ in starts if t0 <= t < t0 + 1.0]
-            assert len(window) <= 5 and window.count(MARKET) <= 3
-        assert sum(lane_ == ORDERS for _, lane_ in starts) == 6  # orders kept their share
+        return recorded, [(t, lane_) for t, lane_, _ in sender.sent]
 
-    asyncio.run(scenario())
+    return asyncio.run(scenario())
+
+
+def test_the_minute_budgets_hold_across_lanes(quick, monkeypatch):
+    """Judged on the pacer's own start times: those are what its budgets are kept on. The sender's
+    clock is read a moment after the slot is taken, and a pause there (a GC pass, a loaded CI
+    runner) put a sixth start inside a one-second window the pacer had kept to five (CI run
+    43494809732); the next test makes that certain."""
+    recorded, sent = _budgets_run(monkeypatch)
+    assert _windows_hold(recorded)
+    assert sum(lane_ == ORDERS for _, lane_ in sent) == 6  # orders kept their share
+    assert [lane_ for _, lane_ in recorded] == [lane_ for _, lane_ in sent]  # one start, one send
+
+
+def test_the_budget_check_reads_the_pacers_clock_not_the_senders(quick, monkeypatch):
+    """The race, made certain: the first send reads its clock 50 ms late (a pause between the
+    pacer's start and the sender's reading). The sender's times then show six starts in a
+    second; the pacer's own times show it kept to five, so the check above reads those."""
+    recorded, sent = _budgets_run(monkeypatch, late_first_s=0.05)
+    assert not _windows_hold(sent)  # the old measurement fails on a schedule that was kept
+    assert _windows_hold(recorded)
 
 
 @pytest.mark.parametrize(

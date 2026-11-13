@@ -1,15 +1,15 @@
 import type { QueryClient, QueryKey } from '@tanstack/react-query'
 import type { WatchlistItem } from '@/api/watchlist'
-import { WATCHLISTS_KEY } from '../useWatchlists'
+import { MAX_NAME_LENGTH, WATCHLISTS_KEY } from '../useWatchlists'
 import { problemOf } from './api'
 import { groupsOf } from './sections'
-import { type ArrangeReq, LIMITS, type View } from './types'
+import type { ArrangeReq, View } from './types'
 import { viewKey } from './useListView'
 
 /** M8.4 F5: the words of arranging, copying and moving, the same as the server's where it says them. */
 export const BUILT_IN = 'A built-in list cannot be changed. Make a copy to arrange it.'
-export const LISTS_FULL = `You have ${LIMITS.lists} lists, the most there can be. Delete one to make a new list.`
-export const NAME_LONG = 'List names can be up to 64 letters.'
+export { LISTS_FULL } from '../useWatchlists' // review L14: one sentence, the menu's
+export const NAME_LONG = `List names can be up to ${MAX_NAME_LENGTH} letters.`
 export const NOTHING = 'This section has no symbols to copy.'
 
 const symbols = (n: number) => `${n} ${n === 1 ? 'symbol' : 'symbols'}`

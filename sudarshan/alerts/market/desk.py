@@ -223,15 +223,18 @@ class OwnerDesk:
         A route that cannot be asked changes nothing. Returns the group's brief."""
         rt = self._running()
         group = await self._write(rt.store.group, OWNER, group_id)
-        self._ask.pop(group_id, None)
         if group is None or group["status"] == "stopped" or rt.members is None:
+            self._ask.pop(group_id, None)
             return None
         try:
             answer = await rt.members.members(group["ref"])
         except Unavailable as exc:
+            # A re-ask at a future's end stays (review L4): the next check asks again, rather
+            # than the group keeping an expired contract until the lists version next moves.
             log.info("the list of group %d could not be read just now: %s", group_id, exc)
             self._unread = True
             return None
+        self._ask.pop(group_id, None)
         self._unread, self._off = False, answer.state == groups.OFF
         deadline = asyncio.get_running_loop().time() + CHANGE_WAIT_S
         async with self._turn(deadline), self._claims(deadline):
@@ -285,6 +288,18 @@ class OwnerDesk:
         left = list(plan.left_out) + ([groups.LEFT_OUT_OTHER.format(n=quantity(skipped))]
                                       if skipped else [])  # fmt: skip
         frozen = plan.action == "freeze"
+        if (not frozen and not built and not plan.remove
+                and plan.covered - skipped == group["covered"] and left == group["left_out"]
+                and (group["status"] != "active" or plan.note == group["status_reason"])):  # fmt: skip
+            # Review L1: the lists version moved for another list, a screener apply or a restart,
+            # and this group's list holds what it held. Only the version it is in step with is
+            # written; nothing on its card changed, so nothing is pushed.
+            await self._write(rt.store.mark_synced, OWNER, group_id, answer.version, now)
+            if plan.ask_again_at is not None:
+                self._ask[group_id] = plan.ask_again_at
+            log.debug("list alert group %d: its list is unchanged (%s)", group_id,
+                      answer.ref_version)  # fmt: skip
+            return _group_brief(group)
         fit = groups.fit_check(config.max_instruments, config.max_active)
 
         def write():

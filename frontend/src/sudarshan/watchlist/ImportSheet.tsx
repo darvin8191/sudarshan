@@ -199,7 +199,10 @@ export function ImportSheet({
               aria-label="New list name"
               value={name}
               maxLength={MAX_NAME_LENGTH}
-              onChange={(event) => setName(event.target.value)}
+              onChange={(event) => {
+                setName(event.target.value)
+                stale() // review L11: a preview names the list it was read for; read it again
+              }}
               className="h-12 rounded-[0.875rem] border border-input bg-card px-3 text-base"
             />
           )}

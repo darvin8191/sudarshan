@@ -309,4 +309,29 @@ describe('with the switch off', () => {
     expect(screen.queryByRole('menuitem', { name: 'Rename this flag' })).toBeNull()
     expect(b().count('view')).toBe(0)
   })
+
+  // Review H1: v0.8.1's menu exactly, in its order, and no request the v0.8.1 page did not make.
+  it('offers no Alert on this list and reads nothing of the alerts', async () => {
+    const { V2_OFF } = await import('@/sudarshan/watchlist/v2/listAlert')
+    b().on('state', () => ({ ...stateOf(false), enabled: false }))
+    const user = userEvent.setup()
+    mount()
+    await screen.findByRole('tab', { name: /Main/ })
+    await openMenu(user)
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
+      'New list',
+      'Rename list',
+      'Reorder or remove',
+      'Delete list',
+    ])
+    expect(screen.queryByRole('menuitem', { name: 'Alert on this list' })).toBeNull()
+    expect(document.body.textContent).not.toContain(V2_OFF)
+    // Through the client: v0.8.1's screener read (the Auto marker) and the one read of the switch
+    // itself, nothing else; no alerts state.
+    expect(b().requests.filter((request) => request.path.includes('/alerts/'))).toEqual([])
+    expect(b().requests.map((request) => `${request.method} ${request.path}`).sort()).toEqual([
+      'GET /sudarshan/screener/api/state',
+      'GET /sudarshan/watchlists/api/state',
+    ])
+  })
 })

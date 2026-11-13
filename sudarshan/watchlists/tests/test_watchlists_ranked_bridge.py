@@ -298,13 +298,40 @@ def test_a_category_the_page_does_not_offer_is_refused_before_any_call(client, u
     assert upstox.fake.calls == []
 
 
-def test_unknown_keys_are_counted_in_words_and_left_out(client, upstox):
+def test_unknown_keys_are_counted_and_said_in_their_own_field(client, upstox):
+    """Phone review L1: the left-out sentence is its own field, so the phone shows it as sent
+    instead of cutting it out of ``words`` with a pattern; ok and stale words do not repeat it."""
     upstox.fake.allow(Reply(200, answer(3, extra=[smart_row(0, key="NSE_FO|99999"),
                                                   smart_row(0, key="NSE_FO|99998")])))  # fmt: skip
     d = data(get(client))
     assert len(d["rows"]) == 3 and d["left_out"] == 2
-    assert d["words"].endswith(
-        "2 contracts from Upstox are not in today's contract list and are left out.")  # fmt: skip
+    assert d["left_out_words"] == (
+        "2 contracts from Upstox are not in today's contract list and are left out."
+    )
+    assert d["words"] == "Ranked by Upstox · 1 min ago"
+    r = client.get(f"{API}/view?ref=ranked:futures:INDEX:OI_GAINERS", headers=client.headers)
+    assert data(r)["lines"] == [d["words"], d["left_out_words"]]  # the view keeps both lines
+
+
+def test_nothing_left_out_is_null_and_each_state_carries_the_field(client, upstox, monkeypatch):
+    upstox.fake.allow(ok(), Reply(200, answer(2, extra=[smart_row(0, key="NSE_FO|99999")])),
+                      Reply(503))  # fmt: skip
+    first = data(get(client))
+    assert first["left_out"] == 0 and first["left_out_words"] is None
+    assert set(first) == {f.name for f in contract.record("Ranked")}
+    upstox.clock.advance(61)
+    monkeypatch.setattr(sessions, "market_open", lambda exchange, now: False)
+    closed = data(get(client))
+    one = "1 contract from Upstox is not in today's contract list and is left out."
+    assert closed["state"] == "closed" and closed["left_out_words"] == one
+    assert closed["words"] == f"Market closed · ranking from 10:42. {one}"  # whole, with a stop
+    upstox.clock.advance(61)
+    kept = data(get(client))  # Upstox fails: the last ranking stays, with its own count
+    assert kept["state"] == "unavailable" and kept["left_out"] == 1
+    assert kept["left_out_words"] == one and one not in kept["words"]
+    upstox.token["now"] = None
+    signin = data(get(client))
+    assert signin["state"] == "signin" and signin["left_out_words"] is None
 
 
 def test_the_master_not_loaded_is_failed_in_words_and_no_call(client, upstox):
@@ -509,12 +536,91 @@ def test_a_ranking_open_market_older_than_ten_minutes_is_stale(client, upstox):
     )
 
 
-def test_an_answer_without_a_time_says_so_and_stays_ok(client, upstox):
+def test_an_answer_without_a_time_says_the_reads_age_never_the_rankings(client, upstox):
+    """Review M2: the read's time was shown as the ranking's ("Ranked by Upstox · just now")."""
     body = answer(3)
     del body["data"]["time_stamp"]
     upstox.fake.allow(Reply(200, body))
     d = data(get(client))
-    assert d["state"] == "ok" and d["made_at"] is None and d["words"].startswith("Ranked by Upstox")
+    assert d["state"] == "ok" and d["made_at"] is None and len(d["rows"]) == 3
+    assert d["words"] == "Read just now · Upstox gave no time for this ranking"
+    assert "Ranked by Upstox" not in d["words"]
+
+
+# -- an answer in a shape this version cannot read (review M2) ------------------------------------
+def renamed_rows(n=3, stamp="2026-11-09T10:43:00+05:30"):
+    """Upstox's answer with its rows under a name the docs do not use."""
+    return {"status": "success", "data": {"time_stamp": stamp,
+                                          "entries": [smart_row(i) for i in range(n)]}}  # fmt: skip
+
+
+def test_rows_under_another_name_keep_the_last_ranking_and_are_said_unreadable(
+    client, upstox, caplog
+):
+    caplog.set_level(logging.WARNING)
+    upstox.fake.allow(ok(), Reply(200, renamed_rows()), Reply(200, renamed_rows()), Reply(503))
+    good = data(get(client))
+    upstox.clock.advance(61)
+    d = data(get(client))
+    assert d["state"] == "unavailable" and d["rows"] == good["rows"]
+    assert d["made_at"] == good["made_at"] and d["read_at"] == good["read_at"]
+    assert d["words"] == (
+        "Upstox's ranking could not be read just now. Showing the ranking from 10:42."
+    )
+    assert "Ranked by Upstox" not in d["words"]
+    upstox.clock.advance(op.SHARE_S + 1)  # the owner pulls again: read again, not cached a minute
+    assert data(get(client))["rows"] == good["rows"]
+    upstox.clock.advance(op.SHARE_S + 1)  # and a failure after it still has the good one
+    assert data(get(client))["made_at"] == good["made_at"]
+    assert len(upstox.fake.calls) == 4
+    said = [r.getMessage() for r in caplog.records if "cannot read" in r.getMessage()]
+    assert len(said) == 1 and "entries" in said[0]  # once for the shape, by its key names
+    assert not any(TOKEN in r.getMessage() for r in caplog.records)
+
+
+def test_rows_whose_key_has_another_name_are_unreadable_not_missing_from_the_master(client, upstox):
+    body = answer(3)
+    for row in body["data"]["data"]:
+        row["instrumentKey"] = row.pop("instrument_key")
+    upstox.fake.allow(Reply(200, body))
+    d = data(get(client))
+    assert d["state"] == "unavailable" and d["rows"] == [] and d["left_out"] == 0
+    assert d["words"] == "Upstox's ranking could not be read just now. Pull down to try again."
+    assert "contract list" not in d["words"]
+
+
+def test_figures_sent_as_text_are_read_and_one_that_is_not_a_number_is_left_out(client, upstox):
+    """Review M2: a metric as text raised TypeError in the figure and the whole ranking answered
+    the general failure."""
+    body = answer(3)
+    rows = body["data"]["data"]
+    rows[0]["metric"] = {k: str(v) for k, v in rows[0]["metric"].items()}
+    rows[1]["metric"]["change_pct"] = "n/a"
+    upstox.fake.allow(Reply(200, body))
+    d = data(get(client))
+    assert d["state"] == "ok" and len(d["rows"]) == 3
+    assert [r["metric"] for r in d["rows"]] == ["OI +11.0%", None, "OI +11.2%"]
+    upstox.fake.allow(Reply(200, answer(2)))
+    upstox.clock.advance(61)
+    top = data(get(client, cat="TOP_TRADED"))
+    assert top["state"] == "ok"
+    upstox.fake.allow(Reply(200, {"status": "success", "data": {"data": [
+        {"instrument_key": "NSE_FO|35000", "metric": {"current": "13209000000"}}]}}))  # fmt: skip
+    upstox.clock.advance(61)
+    assert data(get(client, cat="MOST_ACTIVE"))["rows"][0]["metric"] == "Volume 13,20,90,00,000"
+
+
+def test_an_empty_ranking_is_shown_but_never_replaces_the_last_one_with_rows(client, upstox):
+    empty = {"status": "success", "data": {"time_stamp": "2026-11-09T10:43:50+05:30", "data": []}}
+    upstox.fake.allow(ok(), Reply(200, empty), Reply(503))
+    good = data(get(client))
+    upstox.clock.advance(61)
+    d = data(get(client))
+    assert d["state"] == "ok" and d["rows"] == [] and d["words"].startswith("Ranked by Upstox")
+    upstox.clock.advance(61)
+    after = data(get(client))
+    assert after["state"] == "unavailable" and after["rows"] == good["rows"]
+    assert after["made_at"] == good["made_at"]
 
 
 # -- the exception's limits ---------------------------------------------------------------------------

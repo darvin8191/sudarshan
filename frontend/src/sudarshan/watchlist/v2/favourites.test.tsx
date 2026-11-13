@@ -189,6 +189,8 @@ describe('the All lists sheet', () => {
     ).toHaveLength(2)
     expect(screen.getByRole('region', { name: 'Flags' })).toBeInTheDocument()
     expect(screen.getByText(PICK_HINT)).toBeInTheDocument()
+    // Review L9: the tabs carry no number, so the sentence promises none.
+    expect(PICK_HINT).toBe('Pick your favourites here. The tabs then show only your favourites.')
   })
 
   it('pins a favourite and unpins it, writing the slots with the version it read', async () => {

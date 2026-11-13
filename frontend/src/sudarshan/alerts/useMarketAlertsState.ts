@@ -9,15 +9,21 @@ import { STATE_KEY } from './stateCache'
  * server pushes, which marketAlerts.ts applies to this cache, and read again only where that says
  * to, after a reconnect, or when the phone comes back to a page older than half a minute. Never on
  * a timer. A failed read is shown at once, in the server's words, rather than tried again.
+ *
+ * `enabled` false reads nothing and binds nothing: the watchlist page passes its v2 switch, so with
+ * the switch off it makes no request it did not make before (review H1).
  */
-export function useMarketAlertsState() {
+export function useMarketAlertsState(enabled = true) {
   const client = useQueryClient()
-  useEffect(() => bindMarketAlertsCache(client), [client])
+  useEffect(() => {
+    if (enabled) bindMarketAlertsCache(client)
+  }, [client, enabled])
   return useQuery<MarketAlertsState, AlertsError>({
     queryKey: STATE_KEY,
     queryFn: marketAlertsApi.state,
     staleTime: 30_000,
     retry: false,
+    enabled,
   })
 }
 

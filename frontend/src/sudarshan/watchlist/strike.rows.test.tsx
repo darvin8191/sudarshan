@@ -272,10 +272,24 @@ describe('the form, with Both as one row', () => {
     })
   })
 
-  it("keeps a picked strike fixed (the seam of F14's picker)", async () => {
-    sheet(adding({ kind: 'strike_pair', fixed: { strike: 25900, expiry: 'next' } }))
+  it("keeps a picked strike fixed (the seam of F14's picker), and says when its expiry moves", async () => {
+    const expiries = [
+      { date: '2026-11-24', label: 'Nearest 24 Nov', month: true },
+      { date: '2026-12-01', label: '1 Dec', month: false },
+      { date: '2026-12-08', label: '8 Dec', month: false },
+    ]
+    sheet(adding({ kind: 'strike_pair', fixed: { strike: 25900, expiry: 'next', expiries } }))
     expect(screen.queryByLabelText('Strike')).toBeNull()
-    expect(screen.getByText('Strike 25,900, kept for good')).toBeInTheDocument()
+    // Review M3: the strike is fixed, the expiry is not, and the form says the date and the move.
+    expect(
+      screen.getByText('Strike 25,900, fixed: it does not move with the price.')
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        'NIFTY 25,900 CE and PE as one row, next expiry (1 Dec today). When 24 Nov expires, this row moves to 8 Dec.'
+      )
+    ).toBeInTheDocument()
+    expect(screen.getByRole('dialog').textContent).not.toMatch(/for good|stays where it is/)
     fireEvent.click(screen.getByRole('button', { name: 'Add row' }))
     await settle()
     expect(
@@ -292,5 +306,15 @@ describe('the form, with Both as one row', () => {
       strike_rule: 'fixed',
       strike: 25900,
     })
+  })
+
+  it('says how a fixed strike moves when the dates are not known, and never that it is kept for good', () => {
+    sheet(adding({ kind: 'strike_pair', fixed: { strike: 25900, expiry: 'month' } }))
+    expect(
+      screen.getByText(
+        "NIFTY 25,900 CE and PE as one row, this month's expiry. When it expires, this row moves to next month's expiry."
+      )
+    ).toBeInTheDocument()
+    expect(screen.getByRole('dialog').textContent).not.toMatch(/for good|stays where it is/)
   })
 })
