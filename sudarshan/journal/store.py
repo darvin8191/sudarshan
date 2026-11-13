@@ -309,6 +309,14 @@ class Tx:
         )
         return self.conn.execute(query).scalar()
 
+    def min_of(self, table: str, column: str, **equal: Any) -> Any:
+        """The smallest value of ``column`` among the principal's rows (None when none)."""
+        t = self._t(table)
+        query = select(func.min(t.c[column])).where(
+            self._mine(t), *(t.c[k] == v for k, v in equal.items())
+        )
+        return self.conn.execute(query).scalar()
+
     def by_request(self, table: str, request_id: str) -> dict[str, Any] | None:
         """The row an earlier attempt of the same create made, if any."""
         t = self._t(table)

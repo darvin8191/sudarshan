@@ -52,6 +52,7 @@ from sudarshan.autologin.handoff import (
 )
 
 from . import ops as ops_module
+from . import serialize
 from .core import kinds
 from .errors import ApiError
 from .ops import common as ops_common
@@ -62,6 +63,9 @@ HEALTH_PATH = "/health"
 OPS_PREFIX = "/v1/"
 #: The order the purposes' keys are tried in.
 PURPOSE_ORDER = ("api", "delivery", "nudge", "family")
+#: Purposes whose answers leave through the viewer's mask (serialize.py): no money, no price,
+#: no quantity, whatever the op answers.
+MASKED_PURPOSES = frozenset({"family"})
 #: The ops each purpose opens.
 ALLOWED = {
     "api": frozenset(op.name for op in kinds.OPS),
@@ -251,12 +255,13 @@ class JournalApi:
         if handler is None:
             raise ApiError(501, "not_ready", WORDS["not_ready"])
         args = self._args(purpose, message)
-        token = ops_common.CALLER.set(ops_common.Caller(purpose.name, principal))
+        scope = serialize.viewer() if purpose.name in MASKED_PURPOSES else ops_common.OWNER
+        token = ops_common.CALLER.set(ops_common.Caller(purpose.name, principal, scope))
         try:
             data = await handler(self.desk, args)
         finally:
             ops_common.CALLER.reset(token)
-        return {"status": "success", "data": data}
+        return {"status": "success", "data": serialize.apply(data, scope)}
 
     @staticmethod
     def _args(purpose: Purpose, message: Mapping[str, Any]) -> dict[str, Any]:

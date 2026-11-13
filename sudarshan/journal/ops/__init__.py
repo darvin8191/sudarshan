@@ -36,6 +36,7 @@ def op(name: str, registry: dict[str, Handler] | None = None) -> Callable[[Handl
 
 # One import line per part that adds ops, in merge order:
 from . import (  # noqa: E402
+    analytics_ops,  # noqa: F401  (JB10: analytics)
     nudge_ops,  # noqa: F401  (JB3': nudge)
     playbook_ops,  # noqa: F401  (JB4: playbooks_list, playbook_create, playbook_update)
     report_ops,  # noqa: F401  (JB7: reports_list, report_get, report_file, report_build, delivery)

@@ -347,6 +347,10 @@ def record(name: str) -> tuple[Field, ...]:
     return parse_fields(RECORDS[name])
 
 
+# The analytics filter: ``period`` today, week, month (when nothing is sent), fy or all, or the
+# days ``from`` and ``to`` in its place; ``expiry`` expiry (opened on an index expiry day or the
+# instrument's own) or non_expiry. Calendar keys are 20261109, 2026W45 and 202611; the heat
+# map's weekday 0 is Monday.
 _FILTER = (
     "mode?:Mode, strategy?:string, tag?:int, playbook?:int, from?:int, to?:int, "
     "expiry?:string, period?:string"
