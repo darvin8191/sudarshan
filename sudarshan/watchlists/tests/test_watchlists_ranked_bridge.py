@@ -553,3 +553,86 @@ def test_two_threads_asking_one_category_make_one_call(client, upstox):
     for t in threads:
         t.join(30)
     assert len(out) == 2 and out[0] is out[1] and len(upstox.fake.calls) == 1
+
+
+# -- a ranked list can be copied as shown (M8.9, "Make a copy") ---------------------------------
+RANKED = "ranked:futures:INDEX:OI_GAINERS"
+
+
+@pytest.fixture
+def clean(upstox):
+    """OpenAlgo's tables outlive a test's store: start each copy test with no list."""
+    from database import watchlist_db as oa
+
+    oa.db_session.query(oa.WatchlistItem).delete()
+    oa.db_session.query(oa.Watchlist).delete()
+    oa.db_session.commit()
+    oa.db_session.remove()
+
+
+def copy(client, keys, to=None, **more):
+    body = {"from": {"ref": RANKED, "keys": keys}, "to": to or {"name": "Copied"}, **more}
+    return client.post(f"{API}/copy", json=body, headers=client.headers)
+
+
+def list_named(name):
+    from database import watchlist_db as oa
+
+    try:
+        w = oa.db_session.query(oa.Watchlist).filter_by(name=name).first()
+        return None if w is None else [
+            (i.exchange, i.symbol) for i in sorted(w.items, key=lambda i: i.position)]  # fmt: skip
+    finally:
+        oa.db_session.remove()
+
+
+def test_a_ranked_list_is_copied_in_the_order_the_page_sent_with_no_upstox_call(client, upstox, clean):
+    r = copy(client, ["NFO:FUT7" + "25NOVFUT", "NFO:FUT2" + "25NOVFUT", "NFO:FUT5" + "25NOVFUT"])
+    assert r.status_code == 200, r.get_json()
+    done = r.get_json()["data"]
+    assert done["added"] == 3 and done["skipped"] == 0 and done["words"] is None
+    assert list_named("Copied") == [("NFO", "FUT725NOVFUT"), ("NFO", "FUT225NOVFUT"),
+                                    ("NFO", "FUT525NOVFUT")]  # fmt: skip
+    assert upstox.fake.calls == []  # the fixture also fails the test on a call
+
+
+def test_keys_not_in_todays_master_are_left_out_and_counted_in_words(client, upstox, clean):
+    r = copy(client, ["NFO:FUT125NOVFUT", "NFO:GONE25NOVFUT", "NFO:ALSO25NOVFUT"])
+    done = r.get_json()["data"]
+    assert r.status_code == 200 and done["added"] == 1
+    assert done["words"] == "2 symbols are not in today's contract list and were left out of the copy."
+    assert list_named("Copied") == [("NFO", "FUT125NOVFUT")]
+    r = copy(client, ["NFO:FUT225NOVFUT", "NFO:GONE25NOVFUT"], {"name": "Second"})
+    assert r.get_json()["data"]["words"] == (
+        "1 symbol is not in today's contract list and was left out of the copy.")  # fmt: skip
+
+
+def test_a_ranked_copy_that_leaves_everything_out_writes_nothing(client, upstox, clean):
+    r = copy(client, ["NFO:GONE25NOVFUT"])
+    assert r.status_code == 400 and r.get_json()["field"] == "from"
+    assert "nothing was copied" in r.get_json()["message"]
+    assert list_named("Copied") is None
+
+
+def test_a_ranked_copy_needs_keys_in_a_shape_and_cannot_be_a_move_or_a_section(client, upstox, clean):
+    for keys in ([], ["NFO"], [":X"], ["NFO:"]):
+        r = copy(client, keys)
+        assert r.status_code == 400 and r.get_json()["field"] == "from", keys
+    too_many = [f"NFO:FUT{i}25NOVFUT" for i in range(51)]
+    assert copy(client, too_many).status_code == 400
+    r = client.post(f"{API}/copy", headers=client.headers, json={
+        "from": {"ref": RANKED, "section_id": 1}, "to": {"name": "X"}})  # fmt: skip
+    assert r.status_code == 400
+    r = copy(client, ["NFO:FUT125NOVFUT"], move=True)
+    assert r.status_code == 400 and r.get_json()["message"] == words.LOCKED
+    r = client.post(f"{API}/copy", headers=client.headers, json={
+        "from": {"ref": "ranked:futures:INDEX:NOPE", "keys": ["NFO:FUT125NOVFUT"]},
+        "to": {"name": "X"}})  # fmt: skip
+    assert r.status_code == 400 and r.get_json()["field"] == "from"
+    assert list_named("Copied") is None and list_named("X") is None
+
+
+def test_a_ranked_copy_with_the_master_not_loaded_is_failed_in_words(client, upstox, clean):
+    upstox.box.snap = None
+    r = copy(client, ["NFO:FUT125NOVFUT"])
+    assert r.status_code == 500 and "contract list is not loaded" in r.get_json()["message"]

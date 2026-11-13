@@ -191,9 +191,21 @@ digest it was read with, so a ranking of one token is never shown under another.
 Upstox's answer for the 50-row page, so 20 and 50 rows, and two devices, are one read. `state`
 carries `ranked`: `{ok, message}` from OpenAlgo's own sign-in, with no Upstox call. `refs/ranked.py`
 serves `ranked:<source>:<asset>:<category>` for `view` (locked, version "0", 20 rows, one line of
-words) and for the sealed members route (W23: the 50 contracts, `valid_until` null, the unknown keys
-as left-out entries, no flag or note; `signin` with the words, or `failed` when there is nothing
-to show, never an empty list), through the op's own path and cache, keeping nothing of its own.
+words), through the op's own path and cache, keeping nothing of its own. Its `members` (the 50
+contracts, `valid_until` null, the unknown keys as left-out entries, no flag or note; `signin` with
+the words, or `failed` when there is nothing to show, never an empty list) is not reached by the
+sealed route: after the merge with W23 the route refuses a ranked ref in words first (a consumer
+must not take a changing ranking for a list), and the reader keeps `members` for the interface.
+
+`copy` takes a ranked source (M8.9, "Make a copy"): `from: {ref: "ranked:...", keys: [...]}`, the
+keys being `EXCHANGE:SYMBOL` in the order the page shows the rows, as for a built-in list. The server
+does not read Upstox again for it (the fixture of the test fails on a call): a key is checked
+against today's master only, a key it lacks is left out and counted in `words` ("2 symbols are not in
+today's contract list and were left out of the copy."), and nothing in the master is `invalid` with
+field `from` ("None of these 3 symbols are in today's contract list, so nothing was copied."). No
+`keys`, a `section_id`, more than 50 keys or a key that is not `EXCHANGE:SYMBOL` is `invalid`, and
+`move` is `invalid` ("This is a ranking from Upstox. Make a copy of it to keep it."). The master not
+loaded is `failed` in words. The 250 cut of a built-in list does not arise with 50 rows.
 No thread, timer or loop. Tests: `tests/test_watchlists_ranked_bridge.py` (a fake client that
 fails the test when called where it must not be) and `test/test_gthread_watchlists.py` (eight
 threads, one category, one call).
@@ -457,8 +469,9 @@ the list again.
 
 `copy` takes `from` (`ref` of an own list, plus `keys` of `EXCHANGE:SYMBOL` or one `section_id`,
 never both) and `to` (an existing `list`, or a new `name`; `section_id` only for an existing list),
-and `move: true` for a move (there is no op of its own). A built-in or ranked source, a ref that is
-not a list, a symbol the source does not hold and the same list as source and target are `invalid`
+and `move: true` for a move (there is no op of its own). A built-in list and a ranked list can be
+the source of a copy only (a move is `invalid`; W12, and M8.9 below). A ref that is not one of the three, a
+symbol the source does not hold and the same list as source and target are `invalid`
 with the field named. Everything that can be refused is refused first, in words with the numbers:
 a stale `version` when a section is to be set (`conflict`), 250 symbols a list holds ("Swing has
 room for 3 more symbols; this section has 8. Make room in Swing or pick another list."), 50 lists

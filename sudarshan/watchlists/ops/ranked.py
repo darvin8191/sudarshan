@@ -29,6 +29,7 @@ from flask import session
 from sudarshan.watchlists import ranked, sessions, smartlist
 from sudarshan.watchlists import view as merge_view
 from sudarshan.watchlists.ops import OpError
+from sudarshan.watchlists.words import arrange as arrange_words
 from sudarshan.watchlists.words import presets as preset_words
 from sudarshan.watchlists.words import ranked as words
 from utils import real_threading
@@ -237,6 +238,47 @@ def ranked_op(args: dict) -> dict:
         raise OpError("invalid", field="cat")
     return answer(args["src"], args["asset"], args["cat"], args.get("size"),
                   session.get("user") or "", session.get("broker"))[0]  # fmt: skip
+
+
+def is_ranked(spec: dict) -> bool:
+    """True when a copy's ``from`` names a ranked list."""
+    return str(spec.get("ref", "")).startswith("ranked:")
+
+
+def copy_source(spec: dict) -> tuple[int, dict, list, bool]:
+    """``(BUILTIN, {name, items, note}, picked keys, False)``, as ``copy._source`` answers, for a
+    ranked source (M8.9, "Make a copy").
+
+    The phone sends ``keys`` (``EXCHANGE:SYMBOL``) in the order it shows them, as for a built-in
+    list, and the server does not read Upstox again for it: the rows are the ones the page holds.
+    A key today's master lacks is left out and counted in the answer's words. At most 50 keys (a
+    ranking's page), so the 250 cut of a built-in list does not arise.
+    """
+    from sudarshan.watchlists import master
+    from sudarshan.watchlists.ops import presets as presets_op
+
+    parts = ranked.parse_ref(spec["ref"])
+    if parts is None:
+        raise OpError("invalid", field="from")
+    if "section_id" in spec or "keys" not in spec:
+        raise OpError("invalid", arrange_words.PICK_NOTHING, "from")
+    keys = list(dict.fromkeys(spec["keys"]))
+    if not keys or len(keys) > ranked.MAX_SIZE:
+        raise OpError("invalid", arrange_words.PICK_NOTHING, "from")
+    wanted = []
+    for text in keys:
+        exchange, colon, symbol = text.partition(":")
+        if not colon or not exchange or not symbol:
+            raise OpError("invalid", field="from")
+        wanted.append((exchange, symbol))
+    m = master.shared()
+    if not m.loaded():
+        raise OpError("failed", preset_words.NOT_LOADED)
+    picked = [k for k in wanted if m.known(*k)]
+    if not picked:
+        raise OpError("invalid", words.copy_nothing(len(wanted)), "from")
+    note = words.copy_left_out(len(wanted) - len(picked))
+    return presets_op.BUILTIN, {"name": words.label(*parts), "items": [], "note": note}, picked, False
 
 
 HANDLERS = {"ranked": ranked_op}

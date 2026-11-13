@@ -35,10 +35,12 @@ from sqlalchemy import func
 from sudarshan.watchlists import contract, engine, refs
 from sudarshan.watchlists.ops import UNCHANGED, OpError, bumps
 from sudarshan.watchlists.ops import presets as presets_op
+from sudarshan.watchlists.ops import ranked as ranked_op
 from sudarshan.watchlists.ops.sections import _held
 from sudarshan.watchlists.store import items as store_items
 from sudarshan.watchlists.store import sections as store
 from sudarshan.watchlists.words import arrange as words
+from sudarshan.watchlists.words import ranked as ranked_words
 from sudarshan.watchlists.words import sections as section_words
 from sudarshan.watchlists.words import view as view_words
 from utils.logging import get_logger
@@ -96,6 +98,8 @@ def _source(spec: dict) -> tuple[int, dict, list, bool]:
 
     if presets_op.is_preset(spec):  # a built-in list: the symbols picked, or all of it
         return presets_op.copy_source(spec)
+    if ranked_op.is_ranked(spec):  # a ranked list: the keys the page shows, in its order
+        return ranked_op.copy_source(spec)
     parts = refs.split(spec["ref"])
     if parts is None or parts[0] != listref.KIND:
         raise OpError("invalid", field="from")
@@ -249,6 +253,8 @@ def copy(args: dict) -> dict:
     user, move = _user(), bool(args.get("move", False))
     if move and presets_op.is_preset(args["from"]):  # a move would take symbols out of it
         raise presets_op.refuse_locked("from")
+    if move and ranked_op.is_ranked(args["from"]):  # nothing to take out of Upstox's ranking
+        raise OpError("invalid", ranked_words.LOCKED, "from")
     src, source, picked, from_section = _source(args["from"])
     to = args["to"]
     target, new = _target(to, picked, from_section, src)

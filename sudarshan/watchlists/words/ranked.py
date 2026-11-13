@@ -35,6 +35,28 @@ CATEGORY = {
 }  # fmt: skip
 
 
+LOCKED = "This is a ranking from Upstox. Make a copy of it to keep it."
+
+
+def copy_left_out(n: int) -> str | None:
+    """``2 symbols are not in today's contract list and were left out of the copy.``"""
+    if not n:
+        return None
+    one = n == 1
+    return (
+        f"{n} symbol{'' if one else 's'} {'is' if one else 'are'} not in today's contract list "
+        f"and {'was' if one else 'were'} left out of the copy."
+    )
+
+
+def copy_nothing(n: int) -> str:
+    return (
+        "That symbol is not in today's contract list, so nothing was copied."
+        if n == 1
+        else f"None of these {n} symbols are in today's contract list, so nothing was copied."
+    )
+
+
 def label(source: str, asset: str, category: str) -> str:
     """``Index futures · OI gainers``."""
     return f"{ASSET[asset]} {source} · {CATEGORY[category]}"
