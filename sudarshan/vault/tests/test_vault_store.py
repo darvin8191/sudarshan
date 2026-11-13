@@ -23,6 +23,7 @@ from sudarshan.vault import (
     SCREENER_API_INFO,
     SCREENER_INTERNAL_INFO,
     VAULT_INFO,
+    WATCHLISTS_INTERNAL_INFO,
     SecretUnreadable,
     Vault,
     VaultKeyError,
@@ -142,7 +143,7 @@ def test_every_purpose_is_its_own_and_none_opens_anothers_seal():
     import sudarshan.vault.keys as keys
 
     declared = {name: value for name, value in vars(keys).items() if name.endswith("_INFO")}
-    assert set(declared.values()) == set(PURPOSES) and len(PURPOSES) == len(set(PURPOSES)) == 8
+    assert set(declared.values()) == set(PURPOSES) and len(PURPOSES) == len(set(PURPOSES)) == 9
     assert all(info.startswith(b"sudarshan/") and info.endswith(b"/v1") for info in PURPOSES)
     derived = {derive_key(PEPPER, info) for info in PURPOSES}
     assert len(derived) == len(PURPOSES)
@@ -158,6 +159,7 @@ def test_every_purpose_is_its_own_and_none_opens_anothers_seal():
     assert PORTFOLIO_API_INFO == b"sudarshan/portfolio/api/v1"
     assert SCREENER_API_INFO == b"sudarshan/screener/api/v1"
     assert SCREENER_INTERNAL_INFO == b"sudarshan/screener/internal/v1"
+    assert WATCHLISTS_INTERNAL_INFO == b"sudarshan/watchlists/internal/v1"
 
 
 def test_vault_key_is_not_openalgos_broker_token_key(monkeypatch):
