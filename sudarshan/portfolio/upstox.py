@@ -58,6 +58,9 @@ PATHS = {
     "trades": ("/v2/order/trades/get-trades-for-day", {}),
 }
 assert set(PATHS) == set(UPSTOX_PARTS)
+#: The budget's name for a part's API where the part's own name is taken: the reports reader keeps
+#: Upstox's trade history (a different API) under ``trades``, so the day's trades have their own.
+API_OF = {"trades": "day_trades"}
 RATE_CODE = "UDAPI10005"
 WORDS = {
     "token_missing": "SUDARSHAN cannot find its Upstox token on this server. Check the server; "
@@ -557,15 +560,16 @@ class UpstoxReader:
             self._told.discard("401")
         if name == "funds" and in_funds_window(now):
             return self._window(memory, now)
-        left = self.budget.paused_for(name)
+        api = API_OF.get(name, name)
+        left = self.budget.paused_for(api)
         if left:
             return self._fail(memory, now, WORDS["slow"], figures=" They refresh in a minute.")
         token = self._token()
         if token is None:
             self._say_once("token", "The Upstox token file is missing or unreadable.")
             return self._fail(memory, now, WORDS["token_missing"])
-        if not self.budget.take(name, principal):
-            if principal != OWNER and self.budget.can_take(name):
+        if not self.budget.take(api, principal):
+            if principal != OWNER and self.budget.can_take(api):
                 return "held"  # the owner could still read: the reserve is what said no
             return self._fail(memory, now, WORDS["busy"], figures=" They refresh in a moment.")
         path, extra = PATHS[name]
@@ -588,7 +592,7 @@ class UpstoxReader:
         if status == 423 and name == "funds":
             return self._window(memory, now)
         if status == 429 or self._rate_coded(answer):
-            self.budget.pause(name, PAUSE_S)
+            self.budget.pause(api, PAUSE_S)
             log.warning("Upstox asked for a pause on %s: %d seconds", name, int(PAUSE_S))
             return self._fail(memory, now, WORDS["slow"], figures=" They refresh in a minute.")
         if status >= 500:

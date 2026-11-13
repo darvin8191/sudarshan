@@ -436,6 +436,42 @@ OP_NAMES = tuple(op.name for op in OPS)
 #: limiter instead of the write limiter, and the service changes nothing.
 DRY_RUN_OPS = ("activity_create", "activity_update")
 
+# ---- the other purposes of the sealed API (cross-design Y4, Y6; P1, P2, PJ) -----------------------
+#: Ops the owner's purpose also opens, and that have no route of the owner's bridge: the family
+#: admin flow in OpenAlgo seals them (a tab shared with a member, a member's privacy floor).
+OWNER_EXTRA_OPS = ("share_set", "share_remove", "shares_list", "member_privacy_set")
+#: The only ops under the family purpose (principal ``viewer:<member id>``): reads. Anything else
+#: under it answers 403 and is logged.
+FAMILY_OPS = (
+    "state",
+    "summary",
+    "tab_get",
+    "performance",
+    "upstox_book",
+    "upstox_history",
+    "shares_for_viewer",
+)
+#: The only ops under the journal purpose (principal ``sudarshan-journal``): account reads.
+JOURNAL_OPS = (
+    "trades_day",
+    "order_history",
+    "historical_trades",
+    "pnl_report",
+    "positions",
+    "funds",
+    "benchmark_closes",
+)
+FAMILY_PRINCIPAL_PREFIX = "viewer:"
+JOURNAL_PRINCIPAL = "sudarshan-journal"
+#: A tab share's level: ``view`` shows what the member's privacy allows; ``restricted`` shows no
+#: figures at all (symbols, names and directions only).
+SHARE_LEVELS = ("view", "restricted")
+#: The four categories of a member's privacy (family design 3.1; Y24).
+PRIVACY_CATEGORIES = ("pnl", "qty", "funds", "orders")
+SERVICE_OP_NAMES = tuple(
+    dict.fromkeys((*OP_NAMES, *OWNER_EXTRA_OPS, *FAMILY_OPS, *JOURNAL_OPS))
+)
+
 # ---- what types.ts repeats -----------------------------------------------------------------
 #: The numbers, lists, labels, strings and sentences the phone's types.ts carries a copy of, by
 #: their name there (the test compares each one).

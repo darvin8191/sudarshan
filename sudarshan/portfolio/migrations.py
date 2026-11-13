@@ -329,8 +329,52 @@ def _v3(conn: Connection) -> None:
         conn.exec_driver_sql(sql)
 
 
+#: V4 (M7.37, cross-design Y6, Y28): what the owner shares with a family member, and what each member
+#: may see. ``tab_share`` is one row per tab and viewer (a member id, or ``role:<role>``) with a
+#: level (``view`` shows what the member's privacy allows, ``restricted`` shows no figures) and an
+#: optional expiry. ``member_privacy`` holds the four categories as shown (1) or hidden (0), beside
+#: the member's role; the family purpose applies it as a floor the caller can only add to. Additive:
+#: two new tables, no existing row touched, so a populated file loses and changes nothing.
+V4 = (
+    """CREATE TABLE IF NOT EXISTS tab_share (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        principal TEXT NOT NULL,
+        tab_id INTEGER NOT NULL,
+        viewer TEXT NOT NULL,
+        level TEXT NOT NULL CHECK (level IN ('view', 'restricted')),
+        expires_at INTEGER,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1
+    )""",
+    """CREATE UNIQUE INDEX IF NOT EXISTS tab_share_one
+        ON tab_share (principal, tab_id, viewer)""",
+    "CREATE INDEX IF NOT EXISTS tab_share_viewer ON tab_share (principal, viewer)",
+    """CREATE TABLE IF NOT EXISTS member_privacy (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        principal TEXT NOT NULL,
+        member TEXT NOT NULL,
+        role TEXT,
+        show_pnl INTEGER NOT NULL DEFAULT 0,
+        show_qty INTEGER NOT NULL DEFAULT 0,
+        show_funds INTEGER NOT NULL DEFAULT 0,
+        show_orders INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1
+    )""",
+    """CREATE UNIQUE INDEX IF NOT EXISTS member_privacy_one
+        ON member_privacy (principal, member)""",
+)
+
+
+def _v4(conn: Connection) -> None:
+    for sql in V4:
+        conn.exec_driver_sql(sql)
+
+
 Step = tuple[int, Callable[[Connection], None]]
-STEPS: tuple[Step, ...] = ((1, _v1), (2, _v2), (3, _v3))
+STEPS: tuple[Step, ...] = ((1, _v1), (2, _v2), (3, _v3), (4, _v4))
 LATEST = STEPS[-1][0]
 
 

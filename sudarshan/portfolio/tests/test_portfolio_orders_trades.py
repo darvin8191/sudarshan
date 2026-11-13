@@ -168,7 +168,7 @@ def test_each_part_has_its_own_bucket(fake, token_file):
     book = run(go())
     assert book["trades"]["state"] == "ok" and book["positions"]["state"] == "ok"
     assert fake.count("day_orders") == 2
-    assert reader.budget._of("orders") is not reader.budget._of("trades")
+    assert reader.budget._of("orders") is not reader.budget._of("day_trades")
 
 
 # ---- Y5: the owner's reserve -----------------------------------------------------------------
@@ -240,7 +240,7 @@ def test_a_nudge_storm_with_a_family_screen_open_leaves_every_owner_resync_answe
 
 def test_a_read_the_reserve_refuses_does_not_tell_the_owner_it_failed(fake, token_file):
     reader, clock = make(fake, token_file)
-    reader.budget._of("trades")[2].tokens = 50.0  # below the reserve: the family is held back
+    reader.budget._of("day_trades")[2].tokens = 50.0  # below the reserve: the family is held back
 
     async def go():
         held = (await reader.book(["trades"], 0, FAMILY))["trades"]

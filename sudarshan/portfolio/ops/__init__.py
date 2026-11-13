@@ -13,7 +13,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
-from ..core.kinds import OP_NAMES
+from ..core.kinds import SERVICE_OP_NAMES
 
 Handler = Callable[[Any, Mapping[str, Any]], Awaitable[Any]]
 REGISTRY: dict[str, Handler] = {}
@@ -24,7 +24,7 @@ def op(name: str, registry: dict[str, Handler] | None = None) -> Callable[[Handl
     book = REGISTRY if registry is None else registry
 
     def register(handler: Handler) -> Handler:
-        if name not in OP_NAMES:
+        if name not in SERVICE_OP_NAMES:
             raise ValueError(f"{name} is not an op of the contract")
         if name in book:
             raise ValueError(f"the op {name} is registered twice")
@@ -38,7 +38,9 @@ def op(name: str, registry: dict[str, Handler] | None = None) -> Callable[[Handl
 from . import (
     book_ops,  # noqa: E402,F401  (members, accounts, assets, values, entries)
     import_ops,  # noqa: E402,F401  (M7.22: import_preview, import_commit, import_discard, export_csv)
+    journal_ops,  # noqa: E402,F401  (PJ: the journal purpose's account reads)
     mf_ops,  # noqa: E402,F401  (M7.24: mf_search)
+    share_ops,  # noqa: E402,F401  (M7.37: shares, member privacy, shares_for_viewer)
     tab_ops,  # noqa: E402,F401  (state, summary, tabs, performance, layout, views)
     upstox_ops,  # noqa: E402,F401  (M7.1-M7.4: upstox_book, upstox_history)
 )

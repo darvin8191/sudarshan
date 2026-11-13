@@ -53,11 +53,25 @@ THREAD_PREFIX = "portfolio-store"
 
 #: Columns that hold JSON text, and columns that are flags; the store converts at the boundary.
 JSON_COLUMNS = frozenset({"tags", "charges_detail", "spec", "preview", "funds", "payload"})
-FLAG_COLUMNS = frozenset({"system", "pinned", "archived", "is_default", "late"})
+FLAG_COLUMNS = frozenset(
+    {
+        "system",
+        "pinned",
+        "archived",
+        "is_default",
+        "late",
+        "show_pnl",
+        "show_qty",
+        "show_funds",
+        "show_orders",
+    }
+)
 #: Never leave the store: who owns a row, and the client's retry key.
 HIDDEN_COLUMNS = ("principal", "request_id")
 #: Tables whose rows carry a ``version`` the owner's write must name.
-VERSIONED = frozenset({"member", "account", "tab", "asset", "tab_layout", "saved_view"})
+VERSIONED = frozenset(
+    {"member", "account", "tab", "asset", "tab_layout", "saved_view", "tab_share", "member_privacy"}
+)
 
 WORDS = {
     "opened": SHARED_WORDS["store_failed"],
@@ -392,6 +406,7 @@ class Tx:
             ("saved_view", "tab_id"),
             ("import_batch", "tab_id"),
             ("tab_liability", "tab_id"),
+            ("tab_share", "tab_id"),
         ):
             t = self._t(name)
             self.conn.execute(delete(t).where(t.c[column] == tab_id, self._mine(t)))

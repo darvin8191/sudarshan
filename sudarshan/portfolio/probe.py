@@ -19,6 +19,8 @@ from typing import Any
 
 import httpx
 
+from .upstox import API_OF
+
 log = logging.getLogger("sudarshan.portfolio.probe")
 
 #: A moment after start, so the feed link and the store are up before the first read.
@@ -39,7 +41,7 @@ async def probe(upstox: Any) -> dict[str, int | str]:
         found = {name: "no token" for name, _, _ in PROBES}
     else:
         for name, path, params in PROBES:
-            if not upstox.budget.take(name):
+            if not upstox.budget.take(API_OF.get(name, name)):
                 found[name] = "budget"
                 continue
             try:
