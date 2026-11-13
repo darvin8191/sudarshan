@@ -78,6 +78,7 @@ export const OP_NAMES = [
   'reconcile_now',
   'delivery',
   'family_day',
+  'nudge',
 ] as const
 
 export type Mode = 'live' | 'sandbox'
@@ -124,6 +125,7 @@ export type RatioState =
   | 'no_capital'
 export type DurationState = 'none' | 'recovered' | 'still_in_drawdown'
 export type Cls = 'read' | 'write' | 'download' | 'reconcile'
+export type NudgeKind = 'orders' | 'holdings'
 
 export interface Fill {
   trade_id: string
@@ -394,6 +396,15 @@ export interface Report {
   version: number
 }
 
+export interface ReportFile {
+  id: number
+  file_name: string | null
+  file_mime: string | null
+  file_sha256: string | null
+  file_b64: string | null
+  version: number
+}
+
 export interface ReportEvent {
   id: string
   src: string
@@ -418,6 +429,13 @@ export interface Settings {
 export interface FamilyDay {
   day: number
   line: string | null
+}
+
+export interface FamilyCounts {
+  day: number
+  trades: number
+  won: number
+  lost: number
 }
 
 export interface State {
@@ -604,6 +622,12 @@ export interface FamilyDayReq {
   day: number
 }
 
+export interface NudgeReq {
+  kind: NudgeKind
+  sandbox: boolean
+  at: number
+}
+
 export interface JournalOps {
   state: { req: StateReq; res: State }
   trips: { req: TripsReq; res: Trip[] }
@@ -618,11 +642,12 @@ export interface JournalOps {
   analytics: { req: AnalyticsReq; res: Analytics }
   reports_list: { req: ReportsListReq; res: Report[] }
   report_get: { req: ReportGetReq; res: Report }
-  report_file: { req: ReportFileReq; res: Version }
+  report_file: { req: ReportFileReq; res: ReportFile }
   report_build: { req: ReportBuildReq; res: Done }
   settings_get: { req: SettingsGetReq; res: Settings }
   settings_set: { req: SettingsSetReq; res: Done }
   reconcile_now: { req: ReconcileNowReq; res: Done }
   delivery: { req: DeliveryReq; res: Done }
-  family_day: { req: FamilyDayReq; res: FamilyDay }
+  family_day: { req: FamilyDayReq; res: FamilyCounts }
+  nudge: { req: NudgeReq; res: Done }
 }

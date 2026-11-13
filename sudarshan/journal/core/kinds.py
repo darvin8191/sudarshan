@@ -42,6 +42,21 @@ PURPOSES = {
 DELIVERY_OPS = ("report_get", "report_file", "delivery")
 #: The only op the family purpose opens (cross-design Y16): counts, never a paise field.
 FAMILY_OPS = ("family_day",)
+#: The only op the nudge purpose opens (cross-design Y17): "orders changed", nothing else.
+NUDGE_OPS = ("nudge",)
+#: Who may seal under each purpose: the seal's ``principal`` must be exactly this.
+PRINCIPALS = {
+    "api": "owner",
+    "delivery": "sudarshan-alerts",
+    "nudge": "sudarshan-alerts",
+    "family": "sudarshan-family",
+}
+#: The largest sealed request each purpose takes (cross-design X9), checked before it is opened.
+SEAL_LIMITS = {"api": 64 * 1024, "delivery": 16 * 1024, "nudge": 4 * 1024, "family": 4 * 1024}
+#: The largest answer the API gives: a report's file, base64 inside the envelope (design 7.2).
+ANSWER_MAX_BYTES = 8 * 1024 * 1024
+#: What a nudge says changed (``sudarshan/alerts/nudge.py``): a CNC fill is ``holdings``.
+NUDGE_KINDS = ("orders", "holdings")
 
 # ---- units -----------------------------------------------------------------------------------
 PAISE_PER_RUPEE = 100
@@ -140,6 +155,7 @@ OP_NAMES = (
     "reconcile_now",
     "delivery",
     "family_day",
+    "nudge",
 )
 #: Classes of op and what the bridge lets through a minute (design 7.3).
 LIMITS_PER_MIN = {"read": 120, "write": 60, "download": 20, "reconcile": 2}
@@ -166,6 +182,7 @@ ENUMS = {
     "RatioState": RATIO_STATES,
     "DurationState": DURATION_STATES,
     "Cls": tuple(LIMITS_PER_MIN),
+    "NudgeKind": NUDGE_KINDS,
 }
 
 RECORDS = {
@@ -223,11 +240,21 @@ RECORDS = {
     "Report": "id:int, kind:ReportKind, period_key:string, built_ms:int, status:ReportStatus, "
     "text:string, file_name:string|null, file_mime:string|null, file_sha256:string|null, "
     "reconciled_at:int|null, version:int",
+    # The stored file of a report, base64 in the envelope; all four file fields are null until
+    # the renderer has made one (the bridge then says the report has no file to download).
+    "ReportFile": "id:int, file_name:string|null, file_mime:string|null, "
+    "file_sha256:string|null, file_b64:string|null, version:int",
     "ReportEvent": "id:string, src:string, kind:string, report:int, report_kind:ReportKind, "
     "sha256:string|null",
     "Settings": "capital_base_paise:int|null, eod_on:bool, brief_on:bool, weekly_on:bool, "
     "monthly_on:bool, fy_on:bool, report_language:string, charges_plan:ChargePlan, version:int",
+    # The family service's per-member line (``core/words.family_day``), which it builds itself
+    # from the counts below and the member's own privacy categories (cross-design Y16).
     "FamilyDay": "day:int, line:string|null",
+    # The answer of ``family_day``: counts only, no paise field (Y16). Trades are the live trips
+    # closed on that day; won and lost are those whose net (after est. charges) is above or
+    # below zero, so a flat trade is in ``trades`` and in neither of the other two.
+    "FamilyCounts": "day:int, trades:int, won:int, lost:int",
     "State": "enabled:bool, fills_today:int, open_trips:int, last_reconcile_ms:int|null, "
     "limits:Limits",
     "Limits": ", ".join(f"{k}:int" for k in LIMITS),
@@ -331,7 +358,7 @@ OPS = (
     OpSpec("analytics", "GET", "/analytics", "read", _FILTER, "Analytics"),
     OpSpec("reports_list", "GET", "/reports", "read", "kind?:ReportKind, limit?:int", "Report[]"),
     OpSpec("report_get", "GET", "/reports/<id>", "read", "id:int", "Report"),
-    OpSpec("report_file", "GET", "/reports/<id>/file", "download", "id:int", "Version"),
+    OpSpec("report_file", "GET", "/reports/<id>/file", "download", "id:int", "ReportFile"),
     OpSpec("report_build", "POST", "/reports/build", "write",
            "kind:ReportKind, period?:string", "Done"),
     OpSpec("settings_get", "GET", "/settings", "read", "", "Settings"),
@@ -340,9 +367,11 @@ OPS = (
            "weekly_on?:bool, monthly_on?:bool, fy_on?:bool, charges_plan?:ChargePlan", "Done"),
     OpSpec("reconcile_now", "POST", "/reconcile", "reconcile", "", "Done"),
 )  # fmt: skip
-#: Ops that no route of the bridge carries: the alerts desk and the family service call them.
+#: Ops that no route of the bridge carries: the alerts desk, the family service and the alerts'
+#: nudge call them. A nudge's three fields sit in the seal itself, beside ``op`` (alerts/nudge.py).
 SERVICE_OPS = (
     OpSpec("delivery", "POST", "", "write",
            "report_id:int, channel:string, status:ReportStatus, reason?:string|null", "Done"),
-    OpSpec("family_day", "GET", "", "read", "day:int", "FamilyDay"),
+    OpSpec("family_day", "GET", "", "read", "day:int", "FamilyCounts"),
+    OpSpec("nudge", "POST", "", "write", "kind:NudgeKind, sandbox:bool, at:int", "Done"),
 )  # fmt: skip
