@@ -12,6 +12,7 @@ import { FOLLOW_CAP } from './follow'
 import { type FollowForm, followsWords, underlyingKey } from './followRows'
 import { figuresFor, type HeldFigures, HeldSwitch, indexBook, isinsOf } from './HoldingLine'
 import { PresetLine } from './PresetLine'
+import { StrikeRowItem } from './StrikeRow'
 import {
   type ArrangeActions,
   type FollowSheet,
@@ -19,7 +20,7 @@ import {
   SymbolSheet,
 } from './SymbolSheet'
 import { DEFAULT_PREF, isDefaultView } from './sort'
-import { SHEET_BASE, useFollowRows, useFollowTicks } from './useFollowRows'
+import { peItemIdOf, SHEET_BASE, useFollowRows, useFollowTicks } from './useFollowRows'
 import { useHeld } from './useHeld'
 import { type FollowOptions, useLiveRows } from './useLiveRows'
 import { useSortOrder } from './useSortOrder'
@@ -168,11 +169,26 @@ export const LiveList = memo(function LiveList({
   }, [sheetPin, current?.item])
   const followItems = useMemo(
     () => [
-      ...fr.states.flatMap((each) => (each.item ? [each.item] : [])),
+      ...fr.states.flatMap((each) => [
+        ...(each.item ? [each.item] : []),
+        ...(each.peItem ? [each.peItem] : []), // F12: a strike row's PE
+      ]),
       ...(pinnedItem ? [pinnedItem] : []),
     ],
     [fr.states, pinnedItem]
   )
+  // F12: a strike row counts 2 in the cap (its CE and its PE) and follows both in Quote mode (open interest).
+  const strikeKeys = useMemo(() => {
+    const map = new Map<string, readonly string[]>()
+    for (const each of fr.states)
+      if (each.item && each.peItem)
+        map.set(keyOf(each.item.symbol, each.item.exchange), [
+          keyOf(each.item.symbol, each.item.exchange),
+          keyOf(each.peItem.symbol, each.peItem.exchange),
+        ])
+    return map
+  }, [fr.states])
+  const quoteKeys = useMemo(() => [...strikeKeys.values()].flat(), [strikeKeys])
   const followKeys = followItems
     .map((each) => `${each.id}:${keyOf(each.symbol, each.exchange)}`)
     .join(',')
@@ -195,9 +211,16 @@ export const LiveList = memo(function LiveList({
   const follow = useMemo<FollowOptions | undefined>(
     () =>
       v2
-        ? { sheet: openKey ? [openKey] : [], underlyings, order: order?.split(','), listKey }
+        ? {
+            sheet: openKey ? [openKey] : [],
+            underlyings,
+            order: order?.split(','),
+            listKey,
+            strikes: strikeKeys, // F12
+            quote: quoteKeys, // F12
+          }
         : undefined,
-    [v2, openKey, underlyings, order, listKey]
+    [v2, openKey, underlyings, order, listKey, strikeKeys, quoteKeys]
   )
   const live = useLiveRows({
     items: liveItems,
@@ -272,17 +295,28 @@ export const LiveList = memo(function LiveList({
             render: (sectionId) =>
               fr.states
                 .filter((each) => (each.rule.section_id ?? null) === sectionId)
-                .map((each) => (
-                  <FollowRowItem
-                    key={`follow-${each.id}`}
-                    state={each}
-                    live={liveById.get(-each.id) ?? null}
-                    now={live.now}
-                    onOpen={(rowId) =>
-                      each.item ? onOpenRow?.(rowId) : onForm?.({ mode: 'edit', rowId })
-                    }
-                  />
-                )),
+                .map((each) =>
+                  each.rule.kind === 'strike_pair' ? ( // F12
+                    <StrikeRowItem
+                      key={`follow-${each.id}`}
+                      state={each}
+                      ce={liveById.get(-each.id) ?? null}
+                      pe={liveById.get(peItemIdOf(each.id)) ?? null}
+                      now={live.now}
+                      onOpen={(rowId) => onOpenRow?.(rowId)}
+                    />
+                  ) : (
+                    <FollowRowItem
+                      key={`follow-${each.id}`}
+                      state={each}
+                      live={liveById.get(-each.id) ?? null}
+                      now={live.now}
+                      onOpen={(rowId) =>
+                        each.item ? onOpenRow?.(rowId) : onForm?.({ mode: 'edit', rowId })
+                      }
+                    />
+                  )
+                ),
           }
         : undefined,
     [followOn, fr.states, liveById, live.now, onOpenRow, onForm]

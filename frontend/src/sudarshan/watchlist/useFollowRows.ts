@@ -14,12 +14,19 @@ const LONGEST_WAIT_MS = 2 ** 30
 export const itemIdOf = (rowId: number): number => -rowId
 /** A contract the open sheet stays on after its row has moved on: its own id, never a row's. */
 export const SHEET_BASE = 1_000_000_000
+/** F12: a strike row's PE is a second item, `PE_BASE` further from zero than its CE (the CE keeps `-rowId`). */
+export const PE_BASE = 500_000_000
+export const peItemIdOf = (rowId: number): number => -(PE_BASE + rowId)
+/** F12: the strike sheet's other expiries, one item each while it is open. */
+export const EXTRA_BASE = 1_500_000_000
 
 /** One follow row as the page draws it. */
 export interface FollowState extends RowState {
   id: number
   /** The contract's place among the live rows, or null while the row has none. */
   item: WatchlistItem | null
+  /** F12: a strike row's PE (`item` is its CE), or null. */
+  peItem: WatchlistItem | null
 }
 
 /**
@@ -90,6 +97,14 @@ export function useFollowRows(rules: readonly Rule[] | undefined, enabled: boole
                       id: itemIdOf(rule.id),
                       symbol: row.shown.contract.symbol,
                       exchange: row.shown.contract.exchange,
+                      position: 0,
+                    }
+                  : null,
+                peItem: row.shown?.pair
+                  ? {
+                      id: peItemIdOf(rule.id),
+                      symbol: row.shown.pair.pe.symbol,
+                      exchange: row.shown.pair.pe.exchange,
                       position: 0,
                     }
                   : null,

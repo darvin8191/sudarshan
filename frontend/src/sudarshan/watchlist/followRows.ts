@@ -37,6 +37,12 @@ const NUMBER = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 })
 export const num = (value: number): string => NUMBER.format(value)
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+/** "2026-11-24" as "24 Nov" (F12: the middle of a strike row). */
+export function dayShort(iso: string): string {
+  const [, month, day] = iso.split('-').map(Number)
+  return month && day ? `${day} ${MONTHS[month - 1]}` : iso
+}
+
 /** "2026-11-24" as "24 Nov 2026". */
 export function dayLabel(iso: string): string {
   const [year, month, day] = iso.split('-').map(Number)
@@ -62,7 +68,7 @@ export function chipOf(rule: Rule): string {
 /** The row's title once the contract is known: NIFTY 25,900 CE, NIFTY FUT. */
 export function titleOf(rule: Rule, strike: number | null): string {
   if (rule.kind === 'month_future') return `${rule.underlying} FUT`
-  const right = rule.opt_right ?? ''
+  const right = isPair(rule) ? (strike === null ? 'CE and PE' : '') : (rule.opt_right ?? '') // F12
   return strike === null
     ? `${rule.underlying} ${chipOf(rule)} ${right}`.trim()
     : `${rule.underlying} ${num(strike)} ${right}`.trim()
@@ -74,9 +80,13 @@ export function detailOf(rule: Rule, contract: Contract | null): string {
   return `${derivativesExchange(rule)}${expiry} · follows ${rule.underlying}`
 }
 
-/** The contract a resolved row stands on: its future, or the side the rule asked for. */
+/** F12: a strike row follows the CE and the PE of one strike. */
+export const isPair = (rule: Pick<Rule, 'kind'>): boolean => rule.kind === 'strike_pair'
+
+/** The contract a resolved row stands on: its future, the side the rule asked for, or a pair's CE (F12). */
 export function contractOf(rule: Rule, got: Resolved): Contract | null {
   if (rule.kind === 'month_future') return got.future
+  if (isPair(rule)) return got.ce && got.pe ? got.ce : null // F12: both, or neither
   return rule.opt_right === 'PE' ? got.pe : rule.opt_right === 'CE' ? got.ce : null
 }
 
@@ -94,7 +104,8 @@ export function leftBand(
 /** "Moved from 25,850 CE at 10:12 (NIFTY 25,931)": the server's `words.dynamic.moved`, in the page's hands. */
 export function movedWords(rule: Rule, from: number, at: number, price: number | null): string {
   const under = price === null ? '' : ` (${rule.underlying} ${num(price)})`
-  return `Moved from ${num(from)} ${rule.opt_right ?? ''} at ${CLOCK.format(at)}${under}`
+  const right = rule.opt_right ? ` ${rule.opt_right}` : '' // F12: a strike row has no side
+  return `Moved from ${num(from)}${right} at ${CLOCK.format(at)}${under}`
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -134,25 +145,40 @@ export type FollowForm =
       exchange: string
       /** The section of the symbol the row was asked for from, or null. */
       sectionId: number | null
+      /**
+       * F12, the seam of F14's strike picker ("Add as one row"): `kind: 'strike_pair'` with `fixed` adds a
+       * row on this strike for ever, instead of the ATM plus an offset. `expiry` is the rule the picked
+       * expiry stands for (nearest when absent).
+       */
+      fixed?: { strike: number; expiry?: ExpiryRule }
     }
   | { mode: 'edit'; rowId: number }
   | { mode: 'remove'; rowId: number }
 
 /** What the form holds. */
 export interface Draft {
+  /** `strike_pair` is the side "Both, as one row" (F12). */
   kind: FollowKind
   expiry: ExpiryRule
   offset: number
   right: OptRight
+  /** F12: a row on one strike for ever (from the strike picker); null follows the ATM. */
+  strike: number | null
 }
 
 /** The form's start: from a new row of this kind, or from the row being edited. */
-export function draftOf(kind: FollowKind, rule?: Rule): Draft {
+export function draftOf(
+  kind: FollowKind,
+  rule?: Rule,
+  fixed?: { strike: number; expiry?: ExpiryRule }
+): Draft {
+  const strike = rule?.strike_rule === 'fixed' ? rule.strike : (fixed?.strike ?? null)
   return {
     kind,
-    expiry: rule?.expiry_rule ?? defaultExpiry(kind),
+    expiry: rule?.expiry_rule ?? fixed?.expiry ?? defaultExpiry(kind),
     offset: rule?.offset ?? 0,
     right: rule?.opt_right ?? 'CE',
+    strike,
   }
 }
 
@@ -160,7 +186,10 @@ export function draftOf(kind: FollowKind, rule?: Rule): Draft {
 export function previewOf(name: string, draft: Draft): string {
   const expiry = EXPIRIES.find((each) => each.rule === draft.expiry)?.words ?? ''
   if (draft.kind === 'month_future') return `${name} future, ${expiry}.`
-  return `${name} ${offsetLabel(draft.offset)} ${draft.right}, ${expiry}. The strike is picked from the price when the row is added, and moves with it.`
+  const side = draft.kind === 'strike_pair' ? 'CE and PE as one row' : draft.right // F12
+  if (draft.strike !== null)
+    return `${name} ${num(draft.strike)} ${side}, ${expiry}. The strike stays where it is.`
+  return `${name} ${offsetLabel(draft.offset)} ${side}, ${expiry}. The strike is picked from the price when the row is added, and moves with it.`
 }
 
 /** The fields of `row_add` for a draft (the list and its version are the caller's). */
@@ -176,21 +205,23 @@ export function addBody(
     expiry_rule: draft.expiry,
     ...(section === null ? {} : { section_id: section }),
   }
-  return draft.kind === 'month_future'
-    ? base
-    : { ...base, strike_rule: 'atm' as const, offset: draft.offset, opt_right: draft.right }
+  return draft.kind === 'month_future' ? base : { ...base, ...optionFields(draft) }
+}
+
+/** F12: what an option row says besides its expiry: ATM and an offset, or a fixed strike; a side, or both. */
+function optionFields(draft: Draft) {
+  const strike =
+    draft.strike === null
+      ? { strike_rule: 'atm' as const, offset: draft.offset }
+      : { strike_rule: 'fixed' as const, strike: draft.strike }
+  return draft.kind === 'strike_pair' ? strike : { ...strike, opt_right: draft.right }
 }
 
 /** The fields of `row_edit` for a draft: what the form can change, nothing of the underlying. */
 export function editBody(draft: Draft) {
   return draft.kind === 'month_future'
     ? { expiry_rule: draft.expiry }
-    : {
-        expiry_rule: draft.expiry,
-        strike_rule: 'atm' as const,
-        offset: draft.offset,
-        opt_right: draft.right,
-      }
+    : { expiry_rule: draft.expiry, kind: draft.kind, ...optionFields(draft) }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -200,6 +231,8 @@ export function editBody(draft: Draft) {
 export interface Shown {
   contract: Contract
   strike: number | null
+  /** F12: a strike row's two legs (`contract` is its CE). */
+  pair?: { ce: Contract; pe: Contract }
 }
 
 /** One row as the resolver holds it. */
@@ -423,7 +456,12 @@ export class FollowResolver {
     row.problem = null
     const contract = got.state === 'ok' || got.state === 'closed' ? contractOf(rule, got) : null
     if (got.state === 'missing') row.shown = null
-    else if (contract) row.shown = { contract, strike: got.strike }
+    else if (contract)
+      row.shown = {
+        contract,
+        strike: got.strike,
+        ...(isPair(rule) && got.ce && got.pe ? { pair: { ce: got.ce, pe: got.pe } } : {}), // F12
+      }
     if (!contract) return
     if (isRoll(got.words)) {
       row.note = { text: got.words, until: at + NOTE_MS }

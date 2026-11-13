@@ -58,6 +58,8 @@ export interface FollowOptions {
   underlyings?: readonly string[]
   /** A strike row follows its CE and PE: its key, and the two (F12). */
   strikes?: ReadonlyMap<string, readonly string[]>
+  /** F12: the keys followed in Quote mode (open interest): a strike row's two legs and the strike sheet's. */
+  quote?: readonly string[]
   /** The rows in the order they are shown, as keys, when that is not the list's own (a sort). */
   order?: readonly string[]
   /** Changes when another list opens: the window starts at its top. */
@@ -106,6 +108,8 @@ export function useLiveRows({
   readAll: () => Promise<ReadonlyMap<string, Snapshot> | null>
   /** F11: the newest cache line of every followed instrument, for the follow rows' underlyings. */
   lines: ReadonlyMap<string, SymbolData>
+  /** F12: the direction of each followed instrument's last tick (the strike sheet's other expiries). */
+  directions: ReadonlyMap<string, TickDirection>
 } {
   const itemsKey = useMemo(
     () => items.map((item) => keyOf(item.symbol, item.exchange)).join(','),
@@ -145,11 +149,39 @@ export function useLiveRows({
   )
   const reason: 'cap' | 'window' = plan?.window ? 'window' : 'cap'
 
-  const { lines, directions, feed } = useFrameLines({
-    instruments: followed,
+  // F12: a strike row's legs and the strike sheet follow in Quote mode (they carry open interest), the
+  // rest in LTP mode; an instrument is in exactly one of the two.
+  const quoteJoined = follow?.quote?.join(',') ?? ''
+  // biome-ignore lint/correctness/useExhaustiveDependencies: quoteJoined is the identity of the quote keys
+  const split = useMemo(() => {
+    const quoted = new Set(quoteJoined === '' ? [] : quoteJoined.split(','))
+    if (quoted.size === 0) return { ltp: followed, quote: [] as typeof followed }
+    const isQuoted = (each: { symbol: string; exchange: string }) =>
+      quoted.has(keyOf(each.symbol, each.exchange))
+    return { ltp: followed.filter((each) => !isQuoted(each)), quote: followed.filter(isQuoted) }
+  }, [followed, quoteJoined])
+  const main = useFrameLines({
+    instruments: split.ltp,
     mode: 'LTP',
     enabled: apiKey !== null,
   })
+  const quoted = useFrameLines({
+    instruments: split.quote,
+    mode: 'Quote',
+    enabled: apiKey !== null,
+  })
+  const { feed } = main
+  const lines = useMemo(
+    () => (split.quote.length === 0 ? main.lines : new Map([...main.lines, ...quoted.lines])),
+    [split.quote.length, main.lines, quoted.lines]
+  )
+  const directions = useMemo(
+    () =>
+      split.quote.length === 0
+        ? main.directions
+        : new Map([...main.directions, ...quoted.directions]),
+    [split.quote.length, main.directions, quoted.directions]
+  )
   const now = useNow()
   const snapshot = useQuoteSnapshot({
     apiKey,
@@ -266,5 +298,6 @@ export function useLiveRows({
     retry: snapshot.retry,
     readAll: snapshot.readAll, // F9
     lines, // F11
+    directions, // F12
   }
 }

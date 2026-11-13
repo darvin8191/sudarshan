@@ -11,6 +11,7 @@ import {
   editBody,
   expiriesFor,
   type FollowForm,
+  num,
   offsetLabel,
   previewOf,
   STRIKE_CHOICES,
@@ -110,7 +111,8 @@ function Form({
   const client = useQueryClient()
   const kind = form.mode === 'add' ? form.kind : (rule?.kind ?? 'atm_option')
   const name = form.mode === 'add' ? form.underlying : (rule?.underlying ?? '')
-  const [draft, setDraft] = useState<Draft>(() => draftOf(kind, rule ?? undefined))
+  const fixed = form.mode === 'add' ? form.fixed : undefined // F12
+  const [draft, setDraft] = useState<Draft>(() => draftOf(kind, rule ?? undefined, fixed))
   const [problem, setProblem] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const sent = useRef(false)
@@ -172,7 +174,12 @@ function Form({
         value={draft.expiry}
         onChange={(expiry) => setDraft({ ...draft, expiry })}
       />
-      {option && (
+      {option && draft.strike !== null && (
+        <p className="text-sm font-semibold" data-follow-fixed="true">
+          {`Strike ${num(draft.strike)}, kept for good`}
+        </p>
+      )}
+      {option && draft.strike === null && (
         <label className="flex flex-col gap-1">
           <span className="text-xs font-semibold text-[color:var(--text-secondary)]">Strike</span>
           <select
@@ -189,15 +196,22 @@ function Form({
         </label>
       )}
       {option && (
-        <Choices<OptRight>
+        <Choices<OptRight | 'both'>
           legend="Side"
           name="follow-side"
           options={[
             { value: 'CE', label: 'CE' },
             { value: 'PE', label: 'PE' },
+            { value: 'both', label: 'Both, as one row' }, // F12
           ]}
-          value={draft.right}
-          onChange={(right) => setDraft({ ...draft, right })}
+          value={draft.kind === 'strike_pair' ? 'both' : draft.right}
+          onChange={(side) =>
+            setDraft(
+              side === 'both'
+                ? { ...draft, kind: 'strike_pair' }
+                : { ...draft, kind: 'atm_option', right: side }
+            )
+          }
         />
       )}
       <p
@@ -309,7 +323,9 @@ export function FollowRowSheet({
     form.mode === 'add'
       ? form.kind === 'month_future'
         ? 'Add current-month FUT row'
-        : 'Add ATM row'
+        : form.fixed
+          ? 'Add as one row' // F12
+          : 'Add ATM row'
       : form.mode === 'edit'
         ? 'Change this row'
         : 'Remove this row'
@@ -328,7 +344,11 @@ export function FollowRowSheet({
         <RemoveRow view={view} rule={rule} onClose={onClose} />
       ) : form.mode !== 'remove' ? (
         <Form
-          key={form.mode === 'add' ? `add-${form.kind}-${form.underlying}` : `row-${form.rowId}`}
+          key={
+            form.mode === 'add'
+              ? `add-${form.kind}-${form.underlying}-${form.fixed?.strike ?? ''}`
+              : `row-${form.rowId}`
+          }
           form={form}
           view={view}
           rule={rule}

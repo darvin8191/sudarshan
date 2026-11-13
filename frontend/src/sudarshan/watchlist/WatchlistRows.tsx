@@ -132,11 +132,17 @@ export function Figures({
   outsideAt: _outsideAt,
   size = 'row',
   decimals = 2,
-}: FigureValues & { size?: 'row' | 'sheet'; decimals?: number }) {
+  align = 'end', // F12: a strike row's CE block sits on the left
+}: FigureValues & { size?: 'row' | 'sheet'; decimals?: number; align?: 'start' | 'end' }) {
   const day = change === null ? 'flat' : directionOf(change, decimals)
   stale = stale || outside !== undefined // F9: a figure that is not followed is grey like a stale one
   return (
-    <span className="flex shrink-0 flex-col items-end gap-0.5 text-right">
+    <span
+      className={cn(
+        'flex shrink-0 flex-col gap-0.5',
+        align === 'end' ? 'items-end text-right' : 'items-start text-left'
+      )}
+    >
       <span
         data-tick={direction ?? undefined}
         className={cn(

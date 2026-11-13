@@ -57,3 +57,15 @@ export const futureAnswer = (id: number, over: Partial<Resolved> = {}): Resolved
   words: 'Now: NIFTY future, 24 Nov 2026',
   ...over,
 })
+
+/** F12: the server's answer for a strike row: both legs of one strike. */
+export const pairAnswer = (strike: number, over: Partial<Resolved> = {}): Resolved => ({
+  ...answer(strike),
+  pe: contract(strike, '2026-11-24', 'PE'),
+  words: `Now: NIFTY ${strike} CE and PE, 24 Nov 2026 (NIFTY at ${strike + 12.35})`,
+  ...over,
+})
+
+/** F12: the rule of a strike row. */
+export const pairRule = (over: Partial<FollowRow> = {}): FollowRow =>
+  rule({ kind: 'strike_pair', opt_right: null, ...over })
