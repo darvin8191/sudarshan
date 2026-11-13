@@ -28,8 +28,11 @@ grid (the 15:29 minute, the 15:15-15:30 candle, the day). Which stocks close by 
 runtime's to say each morning (``closes_by_auction``: a stock with futures in the master
 contract, from 7 Dec 2026 too; a stock without trades to the cash close and keeps its usual close).
 Indices have no auction window (X6k): their value settles
-with the prints and their session ends with the cash close. Trades of the post-close session
-(15:50-16:00, at the closing price) are refused by the gate.
+with the prints and their session ends with the cash close. From 7 Dec 2026 the prints come after
+the cash close, so an index's closing value may too (whether NSE sends it then is to be seen on
+7 Dec): a value made from the cash close until ``Session.close_until`` (15:45, as a stock's print)
+is the day's last value, and belongs to the day's last candle (``closing_window``, review M2).
+Trades of the post-close session (15:50-16:00, at the closing price) are refused by the gate.
 
 It decides when a value is inside the session (the gate), where the last candle of a day ends,
 what "today" means for a % move or a day high, when a contract's alerts stop on its expiry day
@@ -94,6 +97,9 @@ class Session:
     auction_until: int | None = None
     #: ... and is expected about this moment, its auction's random close (epoch ms, X6j).
     auction_close: int | None = None
+    #: An index's closing value may come from ``end`` up to this (epoch ms): from 7 Dec 2026,
+    #: when the closing auction's prints come after the cash close (review M2).
+    close_until: int | None = None
 
 
 def segment_of(instrument_key: str) -> str:
@@ -155,6 +161,9 @@ def session(
     if span is None:
         return None
     start, end = epoch_ms(day, span[0]), epoch_ms(day, span[1])
+    if segment in INDEX_SEGMENTS:
+        late = closing_window(segment, day, trading_day=trading_day, window=window)
+        return Session(segment, day_key(day), start, end, close_until=late and late[1])
     if not (auction and segment in AUCTION_SEGMENTS):
         return Session(segment, day_key(day), start, end)
     cash, regime = hours(segment, window, day=day), _regime(day)
@@ -208,6 +217,25 @@ def auction_close(
     (``auction_close``) for the words "price at about 15:30" (X6j)."""
     found = session(segment, day, trading_day=trading_day, window=window, auction=True)
     return None if found is None else found.auction_close
+
+
+def closing_window(
+    segment: str, day: date, *, trading_day: bool, window: tuple[int, int] | None = None
+) -> tuple[int, int] | None:
+    """When a closing print after the cash close may come on ``day``, (from, until) in epoch ms,
+    both ends included: from 7 Dec 2026, when the closing auction's price comes after the cash
+    close (``Regime.close_after_cash``), a CAS key's print and an index's closing value (review
+    M1, M2), from the cash close to the print's last moment (15:30-15:45). It belongs to the day's
+    last candle on the cash grid. None for F&O, for a day without a session and before 7 Dec 2026,
+    when the price came inside the cash session. Whether a cash stock closes by auction is the
+    caller's (``closes_by_auction``). What the chart gets with an instrument's session facts."""
+    if segment not in AUCTION_SEGMENTS and segment not in INDEX_SEGMENTS:
+        return None
+    regime = _regime(day)
+    span = hours(segment, window, day=day) if trading_day else None
+    if span is None or regime.close_after_cash <= 0:
+        return None
+    return epoch_ms(day, span[1]), epoch_ms(day, span[1] + regime.print_after_cash)
 
 
 def expiry_close(segment: str, expiry: date, *, index: bool = False) -> int | None:

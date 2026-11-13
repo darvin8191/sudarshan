@@ -33,6 +33,13 @@ the exchange's status, which does not show the auction (X6l). Until the print, t
 (``status``: CLOSING_AUCTION, "price at about 15:30"; 15:40 from 7 Dec 2026), never "Real-time"
 or "Stale".
 
+An index has no auction, but from 7 Dec 2026 its closing value is fixed by the auction's prints,
+after the cash close (review M2; whether NSE sends it then is to be seen on 7 Dec). ``closing``
+lets a value made from the session's end up to ``Session.close_until`` (15:45) through on the
+same terms as the print (arrived within the grace, a healthy feed, fresh, the exchange's status not
+asked): it is the day's last value and belongs to the day's last candle. Before 7 Dec, or when
+no such value comes, nothing changes.
+
 A pause is a stretch longer than GAP_S in which market alerts were not checking: the price feed
 reconnecting, or the service not running. A crossing first seen after one may have happened
 inside it, so its fire says so; a candle that held one is not judged at its close. Only the part
@@ -59,6 +66,8 @@ STALE = "stale"
 AUCTION_PRINT = "auction"
 #: A CAS key between its continuous end and its auction's print (``status``).
 CLOSING_AUCTION = "closing_auction"
+#: An index's value made after the cash close that is its closing value (``closing``, M2).
+CLOSING_VALUE = "closing_value"
 #: A trade made before the session's end still counts when it arrives this soon after it.
 ARRIVAL_GRACE_MS = 5_000
 #: A value older than this when it is judged is dropped.
@@ -151,6 +160,19 @@ def auction(market: Market, segment: str, at: int, recv: int, now: int) -> str:
         return OUTSIDE_HOURS
     check = _feed(market, recv, now)
     return AUCTION_PRINT if check == OK else check
+
+
+def closing(market: Market, segment: str, at: int, recv: int, now: int) -> str:
+    """CLOSING_VALUE when an index's value is its closing value: made from its session's end up to
+    ``Session.close_until`` (from 7 Dec 2026, review M2) and arrived no later than the arrival
+    grace after that, on a healthy feed and fresh. Otherwise the first check it fails. The
+    exchange's status is not asked: it says closed once the cash session has ended."""
+    session = market.sessions.get(segment)
+    until = session.close_until if session is not None else None
+    if until is None or not (session.end <= at <= until and recv <= until + ARRIVAL_GRACE_MS):
+        return OUTSIDE_HOURS
+    check = _feed(market, recv, now)
+    return CLOSING_VALUE if check == OK else check
 
 
 def status(market: Market, segment: str, now: int, *, printed: bool = False) -> str:

@@ -164,3 +164,24 @@ def test_a_master_with_no_cash_stocks_makes_no_guess():
     rows = [("RELIANCE29DEC26FUT", "FUT"), ("NIFTYFPI29DEC26FUT", "FUT")]
     assert regimes.index_underlyings(rows) == frozenset(regimes.INDEX_UNDERLYINGS)
     assert regimes.index_underlyings([]) == frozenset(regimes.INDEX_UNDERLYINGS)
+
+
+@pytest.mark.parametrize("case", DAYS, ids=[case["date"] for case in DAYS])
+def test_each_day_s_closing_window_after_the_cash_close(case):
+    """Review M1, M2: from 7 Dec a stock's auction print and an index's closing value may come after
+    the cash close, until the print's last moment; they belong to the day's last candle. None before
+    7 Dec, when the print came inside the cash session, and none for F&O."""
+    day = date.fromisoformat(case["date"])
+    for segment in ("NSE_EQ", "BSE_EQ", "NSE_INDEX", "BSE_INDEX"):
+        found = sessions.closing_window(segment, day, trading_day=True)
+        expected = case["closing"]
+        assert (found and [clock(found[0], day), clock(found[1], day)]) == expected, segment
+    assert sessions.closing_window("NSE_FO", day, trading_day=True) is None
+    assert sessions.closing_window("NSE_INDEX", day, trading_day=False) is None
+    index = sessions.session("NSE_INDEX", day, trading_day=True)
+    late = sessions.closing_window("NSE_INDEX", day, trading_day=True)
+    assert index.close_until == (late[1] if late else None)
+    assert index.auction_until is None  # an index has no auction: "Closing auction" never shows
+    if late:  # a stock's print and an index's closing value share the window's end
+        cas = sessions.session("NSE_EQ", day, trading_day=True, auction=True)
+        assert (cas.end, cas.auction_until) == late

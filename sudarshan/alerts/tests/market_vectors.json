@@ -1786,6 +1786,85 @@
         {"at": "15:45:01", "ltp": 100.2, "vtt": 3000, "check": "outside_hours"}
       ],
       "fires": []
+    },
+    {
+      "id": "IX1",
+      "says": "10 Dec 2026: NIFTY's closing value after the cash close is the day's last value (review M2)",
+      "day": "2026-12-10",
+      "instrument": "nifty",
+      "alert": {"params": {"op": "crosses_above", "level": "26000"}, "frequency": "every_time"},
+      "steps": [
+        {"at": "15:29:59", "ltp": 25999.0},
+        {"at": "15:39:40", "ltp": 26031.5, "check": "ok"}
+      ],
+      "fires": [{"at": "15:39:40", "value": "26031.50", "auction": false}]
+    },
+    {
+      "id": "IX2",
+      "says": "4 Dec 2026: before the change an index value after 15:30 is outside the hours, as it was",
+      "day": "2026-12-04",
+      "instrument": "nifty",
+      "alert": {"params": {"op": "crosses_above", "level": "26000"}, "frequency": "every_time"},
+      "steps": [
+        {"at": "15:29:59", "ltp": 25999.0},
+        {"at": "15:39:40", "ltp": 26031.5, "check": "outside_hours"}
+      ],
+      "fires": []
+    },
+    {
+      "id": "IX3",
+      "says": "10 Dec 2026: at candle close, NIFTY's last 15-minute candle takes its closing value and is judged at 15:45:05",
+      "day": "2026-12-10",
+      "instrument": "nifty",
+      "alert": {"params": {"op": "crosses_above", "level": "26000"}, "frequency": "at_close", "candle": 15},
+      "steps": [
+        {"at": "15:10:00", "ltp": 25990.0},
+        {"at": "15:29:59", "ltp": 25995.0},
+        {"at": "15:30:05", "clock": true},
+        {"at": "15:39:40", "ltp": 26031.5, "check": "ok"},
+        {"at": "15:45:04.999", "clock": true},
+        {"at": "15:45:05", "clock": true}
+      ],
+      "fires": [{"at": "15:45:05", "trade_time": "15:39:40", "value": "26031.50", "candle": 24}]
+    },
+    {
+      "id": "IX4",
+      "says": "10 Dec 2026: no closing value comes; the last candle is judged on its last value, at 15:45:05",
+      "day": "2026-12-10",
+      "instrument": "nifty",
+      "alert": {"params": {"op": "crosses_above", "level": "26000"}, "frequency": "at_close", "candle": 15},
+      "steps": [
+        {"at": "15:10:00", "ltp": 25990.0},
+        {"at": "15:29:59", "ltp": 26005.0},
+        {"at": "15:30:05", "clock": true},
+        {"at": "15:45:05", "clock": true}
+      ],
+      "fires": [{"at": "15:45:05", "trade_time": "15:29:59", "value": "26005.00", "candle": 24}]
+    },
+    {
+      "id": "IX5",
+      "says": "4 Dec 2026: before the change NIFTY's last candle is judged at 15:30:05, as it was",
+      "day": "2026-12-04",
+      "instrument": "nifty",
+      "alert": {"params": {"op": "crosses_above", "level": "26000"}, "frequency": "at_close", "candle": 15},
+      "steps": [
+        {"at": "15:10:00", "ltp": 25990.0},
+        {"at": "15:29:59", "ltp": 26005.0},
+        {"at": "15:30:05", "clock": true}
+      ],
+      "fires": [{"at": "15:30:05", "trade_time": "15:29:59", "value": "26005.00", "candle": 24}]
+    },
+    {
+      "id": "IX6",
+      "says": "10 Dec 2026: an index value after 15:45 is outside the hours",
+      "day": "2026-12-10",
+      "instrument": "nifty",
+      "alert": {"params": {"op": "crosses_above", "level": "26000"}, "frequency": "every_time"},
+      "steps": [
+        {"at": "15:29:59", "ltp": 25999.0},
+        {"at": "15:45:01", "ltp": 26031.5, "check": "outside_hours"}
+      ],
+      "fires": []
     }
   ],
   "calendar": {"holidays": ["2026-10-20", "2026-11-10"], "windows": {"2026-11-08": "14:05-15:40"}},
