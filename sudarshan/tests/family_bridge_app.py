@@ -121,6 +121,13 @@ def internal_seal(pepper: str | None = None, info: bytes = FAMILY_INTERNAL_INFO,
     return seal(fernet, fields.pop("op", bp_module.INTERNAL_OP), **fields)
 
 
+class _Server(ThreadingHTTPServer):
+    daemon_threads = True
+    #: socketserver's default backlog of 5 drops a burst of connects while the acceptor lags,
+    #: and a dropped one waits out the bridge's 1 s connect timeout (test_gthread_family_bridge).
+    request_queue_size = 128
+
+
 class FakeFamily:
     """sudarshan-family's admin door as the bridge meets it, on 127.0.0.1:<free port>.
 
@@ -167,8 +174,7 @@ class FakeFamily:
                     status, answer if isinstance(answer, bytes) else json.dumps(answer).encode()
                 )
 
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        self.server.daemon_threads = True
+        self.server = _Server(("127.0.0.1", 0), Handler)
         self.thread = threading.Thread(
             target=self.server.serve_forever, kwargs={"poll_interval": 0.05},
             name="family-admin-test", daemon=True,

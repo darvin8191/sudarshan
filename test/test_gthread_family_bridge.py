@@ -104,6 +104,18 @@ def _free_port() -> int:
         return sock.getsockname()[1]
 
 
+#: The stand-in's listen backlog. socketserver's default of 5 overflows when a burst of connects
+#: arrives while its acceptor lags on a busy machine: the kernel drops the extra SYNs and the
+#: bridge's 1 s connect timeout expires before the retransmit, so a request reads as "not
+#: answering" (two runs of this file failed that way; the control test below measures it).
+BACKLOG = 128
+
+
+class _DoorServer(ThreadingHTTPServer):
+    daemon_threads = True
+    request_queue_size = BACKLOG
+
+
 class FamilyDoor:
     """The family service's admin door: opens each seal with the real key, counts each op once."""
 
@@ -148,8 +160,7 @@ class FamilyDoor:
                 self.end_headers()
                 self.wfile.write(data)
 
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        self.server.daemon_threads = True
+        self.server = _DoorServer(("127.0.0.1", 0), Handler)
         self.thread = threading.Thread(target=self.server.serve_forever,
                                        name="family-door-test", daemon=True)  # fmt: skip
         self.thread.start()
@@ -295,6 +306,38 @@ def test_the_harness_sees_a_lost_update_in_a_counter_that_checks_then_acts():
 
     at_once(12, racy)
     assert box["n"] < 12
+
+
+def connects_completed(backlog: int, count: int = 12) -> int:
+    """Connects that complete when ``count`` arrive together at a listener nobody accepts on yet."""
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(backlog)
+    port = listener.getsockname()[1]
+    done = []
+
+    def connect(i):
+        with socket.socket() as sock:
+            sock.settimeout(1.0)  # the bridge's connect timeout
+            try:
+                sock.connect(("127.0.0.1", port))
+                done.append(i)
+            except OSError:
+                pass
+        return True
+
+    try:
+        at_once(count, connect)
+    finally:
+        listener.close()
+    return len(done)
+
+
+def test_a_door_with_socketservers_backlog_drops_a_burst_and_ours_does_not():
+    """The control for BACKLOG: with the default of 5 some of twelve connects time out while the
+    acceptor lags; with the stand-in's backlog every one completes."""
+    assert connects_completed(5) < 12
+    assert connects_completed(BACKLOG) == 12
 
 
 def test_twelve_cold_owner_reads_at_once_each_answer_for_themselves(server, door):
