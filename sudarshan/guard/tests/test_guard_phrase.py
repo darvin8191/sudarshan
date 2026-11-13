@@ -309,7 +309,7 @@ def test_the_release_notes_name_the_reset_its_history_line_and_its_notice():
     changelog = (Path(__file__).resolve().parents[2] / "CHANGELOG.md").read_text()
     stanza = " ".join(changelog.split("\n## ")[1].split())
     assert stanza.startswith("v0.8.0")
-    assert "\"The risk layer's confirm phrase, if it is forgotten\"" in stanza
+    assert '"The risk layer\'s confirm phrase, if it is forgotten"' in stanza
     assert (
         "cd /opt/sudarshan/apps/openalgo && sudo -u sudarshan .venv/bin/python "
         "-m sudarshan.guard.phrase --reset"

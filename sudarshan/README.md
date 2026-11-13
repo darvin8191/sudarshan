@@ -433,7 +433,8 @@ empty settings file, with `install`; the settings are written by `sudarshan`, th
    pre-authenticated request: target Bucket, access type **Permit object writes** (not reads; leave
    Enable object listing off), and an expiration date. Pick the furthest date the console allows.
 5. Copy the address the console shows (the pre-authenticated request URL) into your password
-   manager, and write the expiration date beside it. The console shows the address only once.
+   manager, and write the expiration date beside it as year-month-day, for example 2027-11-12.
+   The console shows the address only once.
 6. On the laptop, open PowerShell and make a folder for the key: `mkdir $HOME\sudarshan-backup-key`
    then `cd $HOME\sudarshan-backup-key`.
 7. Make the key pair. Git for Windows ships openssl at `C:\Program Files\Git\usr\bin\openssl.exe`;
@@ -493,7 +494,8 @@ empty settings file, with `install`; the settings are written by `sudarshan`, th
    What you should see, in this order:
    - `The certificate on this laptop:` and a line that starts `sha256 Fingerprint=`, then 32 pairs
      of letters and digits such as `4D:E1:53:...`.
-   - `[sudo] password for ...:` from the server: your own password there, typed once.
+   - scp and ssh may first ask for your SSH password or key passphrase, as when you log in; then
+     `[sudo] password for ...:` from the server: your own password there, typed once.
    - `The certificate the server received has this SHA-256 fingerprint:` and 32 pairs, then
      `Type yes if the two are the same, or press Enter to stop:`. The pairs must be the same as
      the laptop's line. If they are, type `yes` and press Enter. If they are not, press Enter:
