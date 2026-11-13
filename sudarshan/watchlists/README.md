@@ -75,6 +75,30 @@ The price is the page's own tick while its socket is up, however old, then the p
 the feed's; none means "waiting". Vectors: `tests/vectors/dynamic.json`. `numfmt.py` holds the
 Indian number and IST time formats the words use.
 
+## W15 - follow rows (`store/rows.py`, `ops/rows.py`, `resolver.py`, `sessions.py`, `feedsnap.py`, `words/rows.py`)
+
+`row_add`, `row_edit` and `row_remove` keep a list's follow rows in `wl_row` under the list's version,
+as sections do: one transaction whose first statement claims the version, then the change; the bridge
+bumps once and pushes the list (why `rows`). A write that would change nothing (adding a row the list
+already follows, an edit to the same values) rolls its claim back, answers the version it was given
+and bumps and pushes nothing. 20 rows a list (the 250-instrument cap, with a strike row counting 2, is
+the phone's). NSE and BSE underlyings only: the request's `underlying_exchange` is a string so MCX and
+the rest are refused in words (the contract changed once for this; `types.ts` regenerated). A row's
+underlying must be in today's master with options (or futures, for a future row) on NFO or BFO.
+
+`resolve` (a read) takes, for each row, the page's price, its time, its source and the strike the row
+last showed (`held`), and `connected`. The expiry is the first whose session close is after now:
+`sessions.closes` reads OpenAlgo's calendar for a dated special-session or holiday-open window and
+otherwise `dynamic.close_ms` closes at 15:30 IST. The calendar's default F&O close of 15:40 is
+deliberately not used, because an expiring contract stops at 15:30. The price is the page's tick while
+connected, its snapshot, the feed's last tick (one `/snapshot` read for every row that needs it, 0.5 s,
+through the shared httpx client; any failure is an empty answer), then the page's last price when the
+exchange is closed by the calendar, else the row waits. The answer carries the contracts looked up in the
+master (never built), the band of the ATM, `valid_until`, and the words; a side the master lacks is
+named and no contract is answered. For the first minute after a roll the words are "Rolled to ...".
+Nothing is written and no thread or timer is started. Tests: `tests/test_watchlists_rows.py`,
+`tests/test_watchlists_follow.py`.
+
 ## W16 - the search grammar (`search.py`, `words/search.py`)
 
 Pure grammar over reference maps of the master (`Index`, built from rows in slices by
