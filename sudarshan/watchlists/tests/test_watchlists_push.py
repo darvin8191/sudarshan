@@ -126,6 +126,17 @@ def test_the_lists_version_reads_boot_and_count_and_the_other_two_are_the_stores
     assert versions.bump("items", ["list:1"]) != first["lists"]
 
 
+def test_a_favourites_advance_on_a_held_version_refuses_a_stale_one_and_changes_nothing():
+    engine.ready()
+    with engine.open_session() as s, s.begin():
+        assert versions.advance_favourites(s, 0) == 1  # no row yet: 0 is what it holds
+        assert versions.advance_favourites(s, 1) == 2
+    for held in (0, 1, 3):
+        with engine.open_session() as s, pytest.raises(versions.StaleVersion), s.begin():
+            versions.advance_favourites(s, held)
+    assert stored("favourites_version") == "2"
+
+
 def test_a_writer_adds_one_in_its_own_transaction_and_a_rollback_adds_nothing():
     engine.ready()
     with engine.open_session() as s, s.begin():
@@ -166,15 +177,27 @@ def test_the_mirror_only_moves_forward_and_a_late_load_cannot_undo_a_commit():
     assert versions.flags() == 5
 
 
+def read_state():
+    """The state op called as the bridge calls it, inside a request (it names the session's user
+    for the favourites) and over OpenAlgo's own lists."""
+    from flask import Flask
+
+    from database import watchlist_db as oa
+
+    oa.Base.metadata.create_all(oa.engine)
+    with Flask("state-for-tests").test_request_context():
+        return state_ops.state({})
+
+
 def test_a_store_that_cannot_be_read_leaves_the_two_out_and_never_raises(emitted, store):
     assert not store.exists()
     assert versions.snapshot() == {"lists": versions.read()}
     versions.bump("items", ["list:1"])
     assert set(emitted[-1][1]) == {"v", "ref", "refs", "why"}
-    assert "versions" not in state_ops.state({})
+    assert "versions" not in read_state()
     engine.ready()
     assert set(versions.snapshot()) == {"lists", "favourites", "flags"}
-    assert state_ops.state({})["versions"] == versions.snapshot()
+    assert read_state()["versions"] == versions.snapshot()
 
 
 def test_an_unreadable_store_is_opened_and_logged_once_for_a_run_of_pushes(
@@ -263,7 +286,7 @@ def test_state_answers_the_three_versions():
     got = client.get(contract.API_PREFIX + "/state").get_json()["data"]["versions"]
     assert got == versions.snapshot() and set(got) == {"lists", "favourites", "flags"}
     assert got["favourites"] == 0 and got["flags"] == 0
-    assert state_ops.state({})["versions"] == versions.snapshot()
+    assert read_state()["versions"] == versions.snapshot()
 
 
 # -- the hook ----------------------------------------------------------------------------------

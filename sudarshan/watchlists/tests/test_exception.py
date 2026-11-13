@@ -257,9 +257,11 @@ def run_every_registered_op(monkeypatch, tmp_path):
     from watchlists_bridge_app import csrf_headers, login_session, make_app, path_of, reset_users
 
     import blueprints.sudarshan_watchlists as bridge
+    from database import watchlist_db as oa
     from sudarshan.watchlists import contract, engine, ops
 
     monkeypatch.setenv(contract.DB_ENV, str(tmp_path / "wl.db"))
+    oa.Base.metadata.create_all(oa.engine)  # `state` and `lists` read OpenAlgo's own lists
     reset_users()
     client = make_app(ops.discover(), real=True).test_client()
     login_session(client)

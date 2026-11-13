@@ -33,7 +33,7 @@ FROZEN = {
     ),
     "wl_symbol": "principal exchange symbol flag flag_at note note_at updated_at",
     "wl_flag": "principal mark name",
-    "wl_favourite": "principal slot ref updated_at",
+    "wl_favourite": "principal slot ref updated_at oa_created_at",
     "wl_pref": "principal ref sort descending basis held updated_at",
     "wl_meta": "name value",
 }

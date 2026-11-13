@@ -87,6 +87,11 @@ APP = textwrap.dedent(
     listref.read_live = lambda user, lid: {
         "id": lid, "name": "L", "created_at": "2026-01-01 00:00:00", "items": []}
 
+    # W10: the real favourites op; OpenAlgo's lists are not under test, so none are read
+    from sudarshan.watchlists.ops import lists as wl_lists
+
+    wl_lists.own_lists = lambda user: []
+
     @app.route("/emitted")
     def emitted_pushes():
         return jsonify(emitted)
@@ -391,3 +396,38 @@ def test_two_first_writes_to_one_list_make_one_row_and_the_other_is_told_conflic
         assert len(rows) == 1 and rows[0][0] > 10**12  # one row, at the epoch ms (review L2)
         sections = store_rows(server_on, f"SELECT 1 FROM wl_section WHERE list_id = {list_id}")
         assert len(sections) == 1
+
+
+FAVOURITES = "/sudarshan/watchlists/api/favourites"
+
+
+def put_favourites(server, headers, ref, version):
+    status, raw, _ = server.request(
+        "PUT", FAVOURITES, {"slots": [{"slot": 1, "ref": ref}], "version": version}, headers
+    )
+    return status, json.loads(raw)
+
+
+def test_two_writers_on_one_favourites_version_one_wins_and_the_other_is_told_conflict(server_on):
+    headers = server_on.login()
+    server_on.request("GET", "/sudarshan/watchlists/api/state", headers=headers)  # makes the store
+    for _ in range(4):  # a race is only seen when the threads really overlap: try again
+        rows = store_rows(server_on, "SELECT value FROM wl_meta WHERE name = 'favourites_version'")
+        held = int(rows[0][0]) if rows else 0  # round 0 is the first write: no row yet
+        got = at_once(
+            8, lambda i, v=held: put_favourites(server_on, headers, f"flag:{i % 5 + 1}", v)
+        )
+        assert sorted(status for status, _ in got) == [200] + [409] * 7, got  # never a 500
+        assert {body["code"] for status, body in got if status == 409} == {"conflict"}
+        (winner,) = (body for status, body in got if status == 200)
+        assert winner["data"]["version"] == str(held + 1)
+        (now,) = store_rows(
+            server_on, "SELECT value FROM wl_meta WHERE name = 'favourites_version'"
+        )
+        assert int(now[0]) == held + 1
+        assert len(store_rows(server_on, "SELECT 1 FROM wl_favourite")) == 1  # one set of slots
+    status, raw, _ = server_on.request("GET", "/emitted")
+    pushed = json.loads(raw)
+    assert [p["favourites"] for p in pushed] == [1, 2, 3, 4]  # one push per win, none for a loss
+    assert {p["why"] for p in pushed} == {"favourites"}
+    assert len({p["v"] for p in pushed}) == 1  # and the lists version never moved

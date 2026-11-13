@@ -116,22 +116,38 @@ def snapshot() -> dict:
     return out
 
 
-def _advance(s, kind: str) -> int:
+class StaleVersion(Exception):
+    """A write named a stored version that is not the current one: nothing was advanced."""
+
+
+def _advance(s, kind: str, held: int | None = None) -> int:
     """Add one to the stored version inside the caller's open transaction; the new value. One
-    atomic update, so two writers never read the same number; a row that is absent is made."""
+    atomic update, so two writers never read the same number; a row that is absent is made.
+    With ``held`` it is a compare-and-set: the UPDATE is guarded on that number and checked by its
+    row count (``held`` 0 matches an absent row), else ``StaleVersion``."""
     name = STORED[kind]
-    done = s.execute(update(MetaRow).where(MetaRow.name == name).values(
+    where = [MetaRow.name == name]
+    if held is not None:
+        where.append(cast(MetaRow.value, Integer) == held)
+    done = s.execute(update(MetaRow).where(*where).values(
         value=cast(cast(MetaRow.value, Integer) + 1, String)))  # fmt: skip
     if done.rowcount == 0:
+        if (
+            held not in (None, 0)
+            or s.scalar(select(MetaRow.value).where(MetaRow.name == name)) is not None
+        ):
+            raise StaleVersion  # a row is there that is not ``held``, or ``held`` is not 0
         s.add(MetaRow(name=name, value="1"))
         s.flush()
     return int(s.scalar(select(MetaRow.value).where(MetaRow.name == name)))
 
 
-def advance_favourites(s) -> int:
+def advance_favourites(s, held: int | None = None) -> int:
     """For the favourites writer (W10) and the delete prune: inside the write's transaction, then
-    ``committed("favourites", n)`` after it commits."""
-    return _advance(s, "favourites")
+    ``committed("favourites", n)`` after it commits. The writer passes the version its request was
+    decided on and a stale one raises ``StaleVersion``; the prune (a delete that has already
+    happened, which cannot be refused) passes none."""
+    return _advance(s, "favourites", held)
 
 
 def advance_flags(s) -> int:
@@ -142,7 +158,9 @@ def advance_flags(s) -> int:
 
 def push(why: str, refs: Iterable[str] = (), version: str | None = None) -> None:
     """Tell the owner's open apps what changed: ``{v, ref, refs, why}`` (with the favourites and
-    flags versions when the store gives them) to the owner's room.
+    flags versions when the store gives them) to the owner's room. ``bump`` calls it after moving
+    the lists version; a change that alters no list's membership (the favourites) calls it alone,
+    and the lists version stays where it is.
 
     ``refs`` is every ref the change touched (the target and the source of a move, the old and the
     new flag list of a mark), in the order named, each once; it is empty when the change cannot be

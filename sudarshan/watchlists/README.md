@@ -403,3 +403,48 @@ Tests: `tests/test_watchlists_arrange.py`, which includes the yield under a real
 subprocess (a second greenlet runs 240+ times during a 250-item copy, and not at all with the yield
 removed).
 
+
+## W10 - favourites, preferences and lists (`store/favourites.py`, `store/prefs.py`, `ops/favourites.py`, `ops/prefs.py`, `ops/lists.py`, `words/favourites.py`)
+
+`favourites` (PUT) replaces the seven slots as a whole: at most seven entries, each a `slot` and a
+`ref` (`list:<id>`, `preset:<id>`, `ranked:<source>:<asset>:<category>`, `flag:<n>`), on the
+favourites version `state` or `lists` answered. A list, preset or flag that does not exist is `gone`,
+a ref that cannot name anything (a ranking that is not offered, flag 6, text) is `invalid` with
+field `slots`, an eighth slot is `limit` ("Seven favourites at most. Remove one first."), and a ref
+or a slot twice is `invalid`. The transaction's first statement is the version's compare-and-set
+(`store.favourites.claim`: an UPDATE guarded on the held number, then `versions.advance_favourites`),
+so a stale version is `conflict` and changes nothing; after the commit the mirror moves
+(`versions.committed`) and one push goes out. It changes no list's membership, so the lists version
+does not move: `versions.push(why)` is the push without the bump (`versions.bump` now calls it), and
+carries the new favourites version. `pref` (PUT `/prefs/<ref>`) writes only the fields sent, on the
+server, in one UPDATE (a ref with no row gets one, the rest at the table's defaults); it moves no
+version and pushes nothing, and a ref with no row reads as the defaults and is never written as if
+chosen. `refs/list.py` now reads a list's preference even when the overlay has no guard row for it
+yet (before, a preference written before any section would not have shown in `view`).
+
+The suggestion: with no slot stored and the favourites version never moved (0), `state` and `lists`
+offer the first seven own lists in OpenAlgo's order, computed at read and never stored. Once the
+owner has written (even an empty set) the version is above 0 and nothing is suggested. A slot that
+names a deleted list, or a preset or flag that does not exist, is dropped at read and its row is
+left for the delete hook or the next write.
+
+`lists` answers the All lists sheet: own lists in OpenAlgo's order with `count` (symbols plus the
+follow rows of a list whose overlay guard matches) and `room`; `presets` (empty until W12 builds
+the built-in lists, so no `preset:<id>` exists yet); `ranked` (the 44 entries of
+`ranked.catalogue()`, locked; whether Upstox is signed in today is W22's, in `state`); the five
+`flags` with the count of symbols carrying each, read from `wl_symbol` directly so this change does
+not wait for W9, and a renamed flag's name from `wl_flag`; and the favourites resolved. Lists a
+screen feeds are not marked here: the screener is a service of its own, its state is not readable
+in this process, and the page keeps marking them from the screener's state as it does today.
+Tests: `tests/test_watchlists_favourites.py`; `test/test_gthread_watchlists.py` (eight threads on
+one favourites version: one wins, seven `conflict`, one push for each win).
+
+Two decisions from the mid-point review. (1) The favourites advance is a compare-and-set:
+`versions.advance_favourites(s, held)` guards its UPDATE on the held number, checks the row count
+and raises `versions.StaleVersion` (the op answers `conflict`); only the delete prune, which cannot
+be refused, calls it without one (`advance_flags` is W9's and is unchanged here). (2) A `list:`
+favourite keeps the list's `created_at` in `wl_favourite.oa_created_at`, written as
+`view.created_key` gives it, and a slot whose value differs from the live list's is dropped at read,
+so a favourite never follows another list that was handed a deleted list's id. The column is part
+of schema 1 itself (added in `schema.py`, so the W2 migration's create path makes it) because schema
+1 has not shipped in any release; there is no upgrade step for it.
