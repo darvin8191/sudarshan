@@ -16,6 +16,9 @@ SIGNIN_TODAY = (
     "Sign in to Upstox to read rankings. Ranked lists use your daily Upstox sign-in, which has "
     "not been done today."
 )
+EXPIRED = "Your Upstox sign-in has expired. Sign in to read it again."
+CLOSED_NO_TIME = "Market closed · the ranking is Upstox's last, and Upstox gave no time for it"
+NOT_IN_MASTER = "Not in today's contract list"
 OTHER_BROKER = "Ranked lists come from Upstox. Sign in to Upstox to use them."
 WAIT = "Upstox asked us to wait. Pull down again in a minute."
 NO_ALERT = (
