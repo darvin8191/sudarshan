@@ -8,9 +8,13 @@ vi.mock('@/components/socket/SocketProvider', () => ({
   useSocketContext: () => ({ playAlertSound: () => {}, socket: sockets.current }),
 }))
 
+import { marketAlertsApi } from '@/api/marketAlerts'
 import { createQueryClient } from '@/app/providers'
+import { WATCHLISTS_KEY } from '../useWatchlists'
+import { STATE_KEY as ALERTS_STATE_KEY } from '@/sudarshan/alerts/stateCache'
+import { resetOwnWrites, trackWrite } from './ownWrites'
 import { EVENT_JOIN, EVENT_PUSH, type Push } from './types'
-import { viewKey } from './useListView'
+import { STATE_KEY, V2_KEY, viewKey } from './useListView'
 import { JOIN_WAIT_MS, SETTLE_MS, usePush } from './usePush'
 
 type Handler = (...args: unknown[]) => void
@@ -121,6 +125,31 @@ describe('usePush', () => {
     expect(spy).toHaveBeenCalledTimes(2) // every v2 read, and OpenAlgo's lists
   })
 
+  // Review L12: a return to the page within 30 s reads nothing on its own, so the first join does.
+  it('reads again at the first join when its reads were cached before the page opened', () => {
+    const client = createQueryClient()
+    client.setQueryData(STATE_KEY, { enabled: true }, { updatedAt: Date.now() - 10_000 })
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client }, children)
+    const socket = fakeSocket()
+    sockets.current = socket
+    renderHook(() => usePush(true), { wrapper })
+    const spy = vi.spyOn(client, 'invalidateQueries')
+    act(() => socket.fire('connect'))
+    act(() => socket.joins[0](null, { ok: true }))
+    expect(spy).toHaveBeenCalledWith({ queryKey: V2_KEY })
+    expect(spy).toHaveBeenCalledWith({ queryKey: WATCHLISTS_KEY, exact: true })
+  })
+
+  it('reads nothing at the first join when its reads are this page’s own', () => {
+    const { client, socket } = setup()
+    client.setQueryData(STATE_KEY, { enabled: true })
+    const spy = vi.spyOn(client, 'invalidateQueries')
+    act(() => socket.fire('connect'))
+    act(() => socket.joins[0](null, { ok: true }))
+    expect(spy).not.toHaveBeenCalled()
+  })
+
   it('removes every listener and pending read when the page is left', () => {
     const { client, socket, unmount } = setup()
     const spy = vi.spyOn(client, 'invalidateQueries')
@@ -132,5 +161,92 @@ describe('usePush', () => {
     ).toBe(0)
     act(() => vi.advanceTimersByTime(5_000))
     expect(spy).not.toHaveBeenCalled()
+  })
+})
+
+// Review M5: a list alert follows its list at once (design 2.5), from the refs a push names.
+describe('a pushed change of a list that carries a list alert', () => {
+  const alerts = {
+    enabled: true,
+    groups: [
+      { id: 3, ref: 'list:7', status: 'active' },
+      { id: 4, ref: 'list:7/section:2', status: 'active' },
+    ],
+    groups_by_ref: { 'list:7': [3], 'list:7/section:2': [4] },
+  }
+  const named = (v: string, refs: string[], why: Push['why'] = 'items'): Push => ({
+    v,
+    ref: refs.length === 1 ? refs[0] : 'lists',
+    refs,
+    why,
+  })
+  const sync = () => vi.spyOn(marketAlertsApi, 'syncGroups').mockResolvedValue({ groups: [] })
+
+  beforeEach(() => resetOwnWrites())
+  afterEach(() => vi.restoreAllMocks())
+
+  it('asks the alerts to follow the list and its sections at once, once each per batch', async () => {
+    const asked = sync()
+    const { client, socket } = setup()
+    client.setQueryData(ALERTS_STATE_KEY, alerts)
+    act(() => socket.fire('connect'))
+    act(() => {
+      socket.fire(EVENT_PUSH, named('a:2', ['list:7']))
+      socket.fire(EVENT_PUSH, named('a:3', ['list:7'], 'arranged'))
+      vi.advanceTimersByTime(SETTLE_MS - 1)
+    })
+    await act(async () => {})
+    expect(asked).not.toHaveBeenCalled()
+    await act(async () => void vi.advanceTimersByTime(1))
+    expect(asked.mock.calls).toEqual([['list:7'], ['list:7/section:2']])
+  })
+
+  it('asks for a write this page made itself too: its push is skipped for reading only', async () => {
+    const asked = sync()
+    const { client, socket } = setup()
+    client.setQueryData(ALERTS_STATE_KEY, alerts)
+    await trackWrite(async () => ({ lists_version: 'a:9' }))
+    const reads = vi.spyOn(client, 'invalidateQueries')
+    act(() => socket.fire('connect'))
+    await act(async () => {
+      socket.fire(EVENT_PUSH, named('a:9', ['list:7'], 'sections'))
+      vi.advanceTimersByTime(SETTLE_MS)
+    })
+    expect(reads).not.toHaveBeenCalled()
+    expect(asked.mock.calls).toEqual([['list:7'], ['list:7/section:2']])
+  })
+
+  it('asks nothing for a list with no list alert, a favourites push, or with market alerts off', async () => {
+    const asked = sync()
+    const { client, socket } = setup()
+    client.setQueryData(ALERTS_STATE_KEY, alerts)
+    act(() => socket.fire('connect'))
+    await act(async () => {
+      socket.fire(EVENT_PUSH, named('a:2', ['list:8']))
+      socket.fire(EVENT_PUSH, named('a:2', [], 'favourites'))
+      vi.advanceTimersByTime(SETTLE_MS)
+    })
+    client.setQueryData(ALERTS_STATE_KEY, { ...alerts, enabled: false })
+    await act(async () => {
+      socket.fire(EVENT_PUSH, named('a:3', ['list:7']))
+      vi.advanceTimersByTime(SETTLE_MS)
+    })
+    expect(asked).not.toHaveBeenCalled()
+  })
+
+  it('still reads the list again when the request to the alerts cannot even be made', async () => {
+    vi.spyOn(marketAlertsApi, 'syncGroups').mockImplementation(() => {
+      throw new TypeError('no client')
+    })
+    const { client, socket } = setup()
+    client.setQueryData(ALERTS_STATE_KEY, alerts)
+    client.setQueryData(viewKey('list:7'), { version: '1' })
+    const reads = vi.spyOn(client, 'invalidateQueries')
+    act(() => socket.fire('connect'))
+    await act(async () => {
+      socket.fire(EVENT_PUSH, named('a:2', ['list:7']))
+      vi.advanceTimersByTime(SETTLE_MS)
+    })
+    expect(reads).toHaveBeenCalledWith({ queryKey: viewKey('list:7'), exact: true })
   })
 })

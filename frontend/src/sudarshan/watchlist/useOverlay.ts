@@ -33,6 +33,8 @@ import type { OrderRequest } from './SymbolSheet'
  * - `?sheet=section&section=<id>` (M8.4 F3, v2 only): a section's menu; `?sheet=section-name`
  *   names a new section, or renames the one in `&section=<id>`; `?sheet=section-remove&section=<id>`
  *   asks before removing it.
+ * - `?sheet=unsaved` (M8.4, review M4, v2 only): leaving edit mode or the list with moves not saved
+ *   asks first; what the tap was for stays with the page, so a reload never reopens it.
  */
 export type Overlay =
   | { kind: 'item'; itemId: number }
@@ -55,6 +57,7 @@ export type Overlay =
   | { kind: 'sectionRemove'; sectionId: number }
   | { kind: 'pickSection'; item: number }
   | { kind: 'pickList'; item: number | null; section: number | null; move: boolean }
+  | { kind: 'unsaved' } // review M4
 
 export type OverlayRequest =
   | Exclude<
@@ -88,6 +91,7 @@ const V2_SHEETS = new Set([
   'section-remove',
   'to-section',
   'to-list',
+  'unsaved', // review M4
 ])
 const SECTION_KINDS: Record<string, 'section' | 'sectionName' | 'sectionRemove'> = {
   section: 'section',

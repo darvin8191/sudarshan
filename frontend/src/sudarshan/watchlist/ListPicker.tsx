@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils'
 import { toast } from '@/utils/toast'
 import { BottomSheet } from './BottomSheet'
 import { ownId } from './ListStrip'
+import { MAX_NAME_LENGTH } from './useWatchlists'
 import { callOp } from './v2/api'
 import {
   arrangeKeys,
@@ -75,7 +76,7 @@ export function ListPicker({
     if (fresh > left) refusal = roomWords(target.name, left, keys.length, sectionId !== null)
   }
   const newName = name.trim()
-  const tooLong = [...newName].length > 64
+  const tooLong = [...newName].length > MAX_NAME_LENGTH
 
   const send = async () => {
     if (!target || busy || refusal) return
@@ -113,6 +114,7 @@ export function ListPicker({
   return (
     <BottomSheet
       open
+      step={target === null ? 'pick' : 'send'} // review M6: the details and their Move take the list's place, guarded again
       onOpenChange={(next) => !next && onClose()}
       title={`${verb} to another list`}
       description={label}

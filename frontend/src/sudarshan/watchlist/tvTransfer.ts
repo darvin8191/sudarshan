@@ -67,6 +67,12 @@ export function importTv(client: QueryClient, text: string, hash: string, target
 export const exportTv = (ref: string, signal?: AbortSignal): Promise<TvExport> =>
   callOp('tv_export', { ref }, signal)
 
+/**
+ * How long the file's address lives after the tap (review L10): some browsers start the download
+ * after the click returns, and cancel it when the address is already gone.
+ */
+export const REVOKE_MS = 60_000
+
 /** Give the owner the file: a download of `text` named `filename`. */
 export function downloadText(text: string, filename: string): void {
   const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }))
@@ -76,5 +82,5 @@ export function downloadText(text: string, filename: string): void {
   document.body.appendChild(link)
   link.click()
   link.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 0)
+  setTimeout(() => URL.revokeObjectURL(url), REVOKE_MS)
 }

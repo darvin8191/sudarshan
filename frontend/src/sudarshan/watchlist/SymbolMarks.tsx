@@ -16,6 +16,9 @@ export function SymbolMarks({ k, names }: { k: string; names: readonly FlagName[
   const client = useQueryClient()
   const info = useSymbolInfo(k)
   const [problem, setProblem] = useState<string | null>(null)
+  // Review L7: one flag write at a time; a second tap meanwhile would be decided on the old
+  // version and come back as "Changed on another screen" about his own tap.
+  const [flagging, setFlagging] = useState(false)
   const data = info.data
 
   const write = async (change: Pick<MarkReq, 'flag' | 'note'>): Promise<string | null> => {
@@ -60,7 +63,14 @@ export function SymbolMarks({ k, names }: { k: string; names: readonly FlagName[
         <FlagPicker
           value={data.flag}
           names={names}
-          onChange={(flag) => void write({ flag }).then(setProblem)}
+          disabled={flagging}
+          onChange={(flag) => {
+            if (flagging) return
+            setFlagging(true)
+            void write({ flag })
+              .then(setProblem)
+              .finally(() => setFlagging(false))
+          }}
         />
       </div>
       {problem && (

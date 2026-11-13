@@ -6,6 +6,7 @@ import {
   detailOf,
   draftOf,
   editBody,
+  fixedWords,
   FollowResolver,
   GAP_MS,
   leftBand,
@@ -82,6 +83,67 @@ describe('the form', () => {
       /^NIFTY ATM\+1 CE, nearest expiry\./
     )
     expect(previewOf('NIFTY', draftOf('month_future'))).toBe("NIFTY future, this month's expiry.")
+  })
+
+  // Review M3: every rule is relative, so a row on a picked strike still moves to another expiry.
+  describe('a row on a fixed strike', () => {
+    const open = [
+      { date: '2026-11-24', label: 'Nearest 24 Nov', month: true },
+      { date: '2026-12-01', label: '1 Dec', month: false },
+      { date: '2026-12-08', label: '8 Dec', month: false },
+      { date: '2026-12-29', label: '29 Dec (month)', month: true },
+      { date: '2027-01-26', label: '26 Jan (month)', month: true },
+    ]
+    const pair = (expiry: 'nearest' | 'next' | 'month' | 'next_month') =>
+      draftOf('strike_pair', undefined, { strike: 25900, expiry })
+
+    it('says the date it is on today and where it moves, from the open expiries', () => {
+      expect(previewOf('NIFTY', pair('nearest'), open)).toBe(
+        'NIFTY 25,900 CE and PE as one row, nearest expiry (24 Nov today). When 24 Nov expires, this row moves to 1 Dec.'
+      )
+      expect(previewOf('NIFTY', pair('next'), open)).toBe(
+        'NIFTY 25,900 CE and PE as one row, next expiry (1 Dec today). When 24 Nov expires, this row moves to 8 Dec.'
+      )
+      expect(previewOf('NIFTY', pair('month'), open)).toBe(
+        "NIFTY 25,900 CE and PE as one row, this month's expiry (24 Nov today). When 24 Nov expires, this row moves to 29 Dec."
+      )
+      expect(previewOf('NIFTY', pair('next_month'), open)).toBe(
+        "NIFTY 25,900 CE and PE as one row, next month's expiry (29 Dec today). When 24 Nov expires, this row moves to 26 Jan."
+      )
+      const one = {
+        ...draftOf('atm_option', undefined, { strike: 25900, expiry: 'next' }),
+        right: 'PE' as const,
+      }
+      expect(previewOf('NIFTY', one, open)).toBe(
+        'NIFTY 25,900 PE, next expiry (1 Dec today). When 24 Nov expires, this row moves to 8 Dec.'
+      )
+    })
+
+    it('says where it moves in words when the dates are not known, and never that it stays', () => {
+      expect(previewOf('NIFTY', pair('nearest'))).toBe(
+        'NIFTY 25,900 CE and PE as one row, nearest expiry. When it expires, this row moves to the next expiry.'
+      )
+      expect(previewOf('NIFTY', pair('next'))).toBe(
+        'NIFTY 25,900 CE and PE as one row, next expiry. When the nearest expiry ends, this row moves to the one after it.'
+      )
+      expect(previewOf('NIFTY', pair('month'))).toBe(
+        "NIFTY 25,900 CE and PE as one row, this month's expiry. When it expires, this row moves to next month's expiry."
+      )
+      expect(previewOf('NIFTY', pair('next_month'))).toBe(
+        "NIFTY 25,900 CE and PE as one row, next month's expiry. When this month's expiry ends, this row moves to the month after."
+      )
+      for (const rule of ['nearest', 'next', 'month', 'next_month'] as const) {
+        for (const said of [previewOf('NIFTY', pair(rule)), previewOf('NIFTY', pair(rule), open)])
+          expect(said).not.toMatch(/for good|for ever|stays where it is/)
+      }
+      expect(fixedWords(25900)).toBe('Strike 25,900, fixed: it does not move with the price.')
+    })
+
+    it('says the expiry after it when the contract list does not show it yet', () => {
+      expect(previewOf('NIFTY', pair('next_month'), open.slice(0, 4))).toBe(
+        "NIFTY 25,900 CE and PE as one row, next month's expiry (29 Dec today). When 24 Nov expires, this row moves to the expiry after it."
+      )
+    })
   })
 })
 
@@ -233,6 +295,46 @@ describe('the lines under a row', () => {
     expect(lineOf(resolver.rows.get(1)!, 0)).toBe(
       "NIFTY 25,900 CE is not in today's contract list."
     )
+  })
+
+  it('asks a row whose read keeps failing after 2 s, then 5 s, then every 15 s (review L13)', async () => {
+    let at = 1_000_000
+    let fail = true
+    const send = vi.fn(async () => {
+      if (fail) throw new Error('x')
+      return [answer(25900)]
+    })
+    const resolver = new FollowResolver({
+      send,
+      now: () => at,
+      problem: () => 'The strike could not be read just now.',
+    })
+    resolver.sync([rule()])
+    await flush() // the first read fails
+    expect(send).toHaveBeenCalledTimes(1)
+    const tickAt = async (ms: number) => {
+      at += ms
+      resolver.tick(new Map([['NSE_INDEX:NIFTY', { price: 25910, at }]]), true)
+      await flush()
+    }
+    for (const [wait, calls] of [
+      [1_999, 1],
+      [1, 2], // 2 s after the first failure
+      [4_999, 2],
+      [1, 3], // 5 s after the second
+      [14_999, 3],
+      [1, 4], // 15 s after the third
+      [14_999, 4],
+      [1, 5], // and every 15 s while it fails
+    ] as const) {
+      await tickAt(wait)
+      expect(send).toHaveBeenCalledTimes(calls)
+    }
+    fail = false
+    await tickAt(15_000)
+    expect(send).toHaveBeenCalledTimes(6)
+    expect(resolver.rows.get(1)?.fails).toBe(0)
+    expect(lineOf(resolver.rows.get(1)!, at)).toBeNull()
   })
 
   it('says a failed read in words while the row has no contract', async () => {

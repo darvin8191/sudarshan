@@ -10,6 +10,14 @@ import type { FollowRow as Rule } from './v2/types'
 /** A timer cannot wait longer than this; a later `valid_until` is waited for in steps. */
 const LONGEST_WAIT_MS = 2 ** 30
 
+/**
+ * Review L6: when the phone's clock is ahead of the server's, the ask at `valid_until` comes back
+ * with the same `valid_until`, now in the phone's past, and no timer was aimed after it, so at the
+ * close of expiry day (no tick follows) the row stayed on the expired contract. Such a row is asked
+ * once more after 5 s and once after 30 s more; then a return or a reconnect asks.
+ */
+export const LATE_MS = [5_000, 30_000] as const
+
 /** The id a follow row's contract has among the list's items: negative, so it is never an OpenAlgo item's. */
 export const itemIdOf = (rowId: number): number => -rowId
 /** A contract the open sheet stays on after its row has moved on: its own id, never a row's. */
@@ -66,19 +74,29 @@ export function useFollowRows(rules: readonly Rule[] | undefined, enabled: boole
   }, [core, enabled])
 
   const [step, setStep] = useState(0)
+  const late = useRef(0)
   // The roll: one timeout aimed at the earliest `valid_until`, set again when an answer changes it.
+  // A row whose roll the server has not made yet by its clock (its `valid_until` already past here)
+  // is asked again after 5 s and 30 s, whichever comes first with the next roll (review L6).
   // biome-ignore lint/correctness/useExhaustiveDependencies: rev says when an answer changed
   useEffect(() => {
     if (!enabled) return
-    const next = core.nextValid(Date.now())
-    if (next === null) return
+    const now = Date.now()
+    const next = core.nextValid(now)
+    const behind = core.due(now).length > 0
+    if (!behind) late.current = 0
+    const lateWait = behind ? LATE_MS[late.current] : undefined
+    const untilNext = next === null ? null : Math.min(next - now, LONGEST_WAIT_MS)
+    if (untilNext === null && lateWait === undefined) return
+    const isLate = lateWait !== undefined && (untilNext === null || lateWait <= untilNext)
     const timer = setTimeout(
       () => {
+        if (isLate) late.current += 1
         const due = core.due(Date.now())
         if (due.length > 0) void core.ask('valid', due)
         else setStep((count) => count + 1) // too far for one timeout: aim again
       },
-      Math.min(next - Date.now(), LONGEST_WAIT_MS)
+      isLate ? (lateWait as number) : (untilNext as number)
     )
     return () => clearTimeout(timer)
   }, [core, enabled, rev, step])

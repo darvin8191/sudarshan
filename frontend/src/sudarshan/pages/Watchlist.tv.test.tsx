@@ -260,6 +260,27 @@ describe('the preview', () => {
     expect(pasted.body).toEqual(fromFile.body)
   })
 
+  // Review L11: the preview's lines name the list they were read for.
+  it('drops the preview when the new list’s name is changed, until it is read again', async () => {
+    const user = userEvent.setup()
+    mount()
+    const sheet = await pasteAndPreview(user)
+    await within(sheet).findAllByRole('listitem')
+    await user.type(within(sheet).getByRole('textbox', { name: 'New list name' }), ' 2')
+    expect(within(sheet).queryAllByRole('listitem')).toHaveLength(0)
+    expect(within(sheet).getByRole('button', { name: /^Import/ })).toBeDisabled()
+    await user.click(within(sheet).getByRole('button', { name: 'Preview' }))
+    await waitFor(() => expect(b().count('tv_preview')).toBe(2))
+    expect(
+      b()
+        .calls.filter((call) => call.op === 'tv_preview')
+        .at(-1)?.body
+    ).toEqual({
+      text: TEXT,
+      name: 'Swing 2',
+    })
+  })
+
   it('shows the server’s words in order and writes nothing', async () => {
     const user = userEvent.setup()
     mount()

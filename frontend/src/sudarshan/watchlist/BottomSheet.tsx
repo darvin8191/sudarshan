@@ -24,6 +24,7 @@ export function BottomSheet({
   aside,
   children,
   className,
+  step,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -33,8 +34,10 @@ export function BottomSheet({
   aside?: ReactNode
   children: ReactNode
   className?: string
+  /** What the sheet shows, when it swaps one step for another in place: a new step takes the half second again. */
+  step?: string
 }) {
-  const guard = useOpenGuard(open)
+  const guard = useOpenGuard(open, step)
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>

@@ -411,6 +411,15 @@ export const marketAlertsApi = {
     call<{ deleted: boolean; alerts: number }>(
       webClient.delete(`${BASE}/groups/${id}`, { timeout: CHANGE_MS })
     ),
+  /**
+   * The list alerts on `ref` follow their list now (M8.14, design 2.5): the watchlist page asks it
+   * when a pushed change names a list, a section or a flag list that carries one. The answer is each
+   * group's brief; the service also pushes the changed cards.
+   */
+  syncGroups: (ref: string) =>
+    call<{ groups: GroupBrief[] }>(
+      webClient.post(`${BASE}/groups/sync`, { ref }, { timeout: CHANGE_MS })
+    ),
   /** Where alerts go when an alert does not say: the default for every alert, on every device. */
   prefs: () => call<Prefs>(webClient.get(`${BASE}/prefs`, { timeout: READ_MS })),
   setPrefs: (prefs: Prefs) =>
