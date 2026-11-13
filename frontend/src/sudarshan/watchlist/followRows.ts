@@ -124,6 +124,20 @@ export const STRIKE_CHOICES: readonly number[] = [
 export const offsetLabel = (offset: number): string =>
   offset === 0 ? 'ATM' : `ATM${offset > 0 ? '+' : '-'}${Math.abs(offset)}`
 
+/** The form the phone has open (F11): the seam F13's search sheet opens the same form through. */
+export type FollowForm =
+  | {
+      mode: 'add'
+      kind: FollowKind
+      underlying: string
+      /** The underlying's exchange: NSE_INDEX, NSE, BSE_INDEX or BSE. */
+      exchange: string
+      /** The section of the symbol the row was asked for from, or null. */
+      sectionId: number | null
+    }
+  | { mode: 'edit'; rowId: number }
+  | { mode: 'remove'; rowId: number }
+
 /** What the form holds. */
 export interface Draft {
   kind: FollowKind
@@ -452,4 +466,12 @@ export function lineOf(row: RowState, now: number): string | null {
   if (state === 'waiting' || state === 'closed' || state === 'missing')
     return row.answer?.words ?? null
   return row.shown ? null : row.problem
+}
+
+/** What a row's sheet says once the row has moved on from the contract the sheet opened with. */
+export function followsWords(rule: Rule, shown: Shown | null): string {
+  if (!shown) return `This row follows ${rule.underlying} again`
+  if (rule.kind === 'month_future')
+    return `This row now follows ${rule.underlying} FUT${shown.contract.expiry ? `, ${dayLabel(shown.contract.expiry)}` : ''}`
+  return `This row now follows ${shown.strike === null ? '' : `${num(shown.strike)} `}${rule.opt_right ?? ''}`.trim()
 }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router'
 import type { AlertPrefill } from '@/sudarshan/alerts/AlertForm'
+import type { FollowForm } from './followRows'
 import type { OrderRequest } from './SymbolSheet'
 
 /**
@@ -23,6 +24,9 @@ import type { OrderRequest } from './SymbolSheet'
  * - `?sheet=copy` (M8.8 F10, v2 only): the name dialog of Make a copy on a built-in list.
  * - `?sheet=to-section&ci=<item>` and `?sheet=to-list&ci=<item>` or `&section=<id>`, with `&move=1`
  *   for a move (M8.4 F5, v2 only): the section picker and the list picker.
+ * - `?sheet=follow-row&fr=<row id>` (M8.10 F11, v2 only): the sheet of a row that follows the price;
+ *   `?sheet=follow` is its form (add, change or remove), which rides in the entry's state as the
+ *   ticket's order does, so a form is never reopened by a reload.
  * - `?sheet=section&section=<id>` (M8.4 F3, v2 only): a section's menu; `?sheet=section-name`
  *   names a new section, or renames the one in `&section=<id>`; `?sheet=section-remove&section=<id>`
  *   asks before removing it.
@@ -39,15 +43,18 @@ export type Overlay =
   | { kind: 'view' } // F6
   | { kind: 'copy' } // F10
   | { kind: 'section'; sectionId: number }
+  | { kind: 'followRow'; rowId: number } // F11
+  | { kind: 'follow'; form: FollowForm | null } // F11
   | { kind: 'sectionName'; sectionId: number | null }
   | { kind: 'sectionRemove'; sectionId: number }
   | { kind: 'pickSection'; item: number }
   | { kind: 'pickList'; item: number | null; section: number | null; move: boolean }
 
 export type OverlayRequest =
-  | Exclude<Overlay, { kind: 'order' } | { kind: 'alert' }>
+  | Exclude<Overlay, { kind: 'order' } | { kind: 'alert' } | { kind: 'follow' }>
   | { kind: 'order'; order: OrderRequest }
   | { kind: 'alert'; alert: AlertPrefill }
+  | { kind: 'follow'; form: FollowForm }
 
 const SHEETS = new Set(['add', 'new', 'rename', 'delete', 'order', 'alert'])
 /** The sheets only v2 opens; later v2 sheets are added here. */
@@ -55,6 +62,8 @@ const V2_SHEETS = new Set([
   'lists',
   'view', // F6
   'copy', // F10
+  'follow-row', // F11
+  'follow', // F11
   'section',
   'section-name',
   'section-remove',
@@ -77,6 +86,7 @@ interface EntryState {
   sdOverlay?: boolean
   order?: OrderRequest
   alert?: AlertPrefill
+  follow?: FollowForm
 }
 
 function entryState(state: unknown): EntryState {
@@ -91,6 +101,11 @@ export function overlayOf(params: URLSearchParams, state: unknown, v2 = false): 
   if (!sheet || !(SHEETS.has(sheet) || (v2 && V2_SHEETS.has(sheet)))) return null
   if (sheet === 'order') return { kind: 'order', order: entryState(state).order ?? null }
   if (sheet === 'alert') return { kind: 'alert', alert: entryState(state).alert ?? null }
+  if (sheet === 'follow') return { kind: 'follow', form: entryState(state).follow ?? null }
+  if (sheet === 'follow-row') {
+    const row = Number(params.get('fr'))
+    return Number.isInteger(row) && row > 0 ? { kind: 'followRow', rowId: row } : null
+  }
   const ci = Number(params.get('ci'))
   const pick = Number.isInteger(ci) && ci > 0 ? ci : null
   const sec = Number(params.get('section'))
@@ -116,6 +131,7 @@ function stateFor(next: OverlayRequest, own: boolean): EntryState {
     sdOverlay: own,
     ...(next.kind === 'order' ? { order: next.order } : {}),
     ...(next.kind === 'alert' ? { alert: next.alert } : {}),
+    ...(next.kind === 'follow' ? { follow: next.form } : {}),
   }
 }
 
@@ -126,7 +142,11 @@ function withOverlay(params: URLSearchParams, next: OverlayRequest | null): URLS
   out.delete('section')
   out.delete('ci')
   out.delete('move')
-  if (next?.kind === 'pickSection') {
+  out.delete('fr')
+  if (next?.kind === 'followRow') {
+    out.set('sheet', 'follow-row')
+    out.set('fr', String(next.rowId))
+  } else if (next?.kind === 'pickSection') {
     out.set('sheet', 'to-section')
     out.set('ci', String(next.item))
   } else if (next?.kind === 'pickList') {
@@ -211,7 +231,9 @@ export function useOverlay(v2 = false): {
 
   // A ticket or an alert form restored with the page (a reload, the phone
   // bringing the app back) is not reopened: each opens only from a tap.
-  const restoredTicket = useRef(overlay?.kind === 'order' || overlay?.kind === 'alert')
+  const restoredTicket = useRef(
+    overlay?.kind === 'order' || overlay?.kind === 'alert' || overlay?.kind === 'follow'
+  )
   useEffect(() => {
     if (!restoredTicket.current) return
     restoredTicket.current = false
