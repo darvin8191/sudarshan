@@ -326,6 +326,23 @@ def test_the_limit_of_a_class_lets_no_more_through_than_it_allows(server_on):
     assert busy["code"] == "busy" and busy["status"] == "error"
 
 
+def test_requests_without_a_session_released_together_spend_none_of_the_owners_limit(server_on):
+    """The limit counts after the session check: strangers arriving at once (all from one address,
+    as behind nginx) are refused as signed out and leave the owner's whole budget."""
+    from sudarshan.watchlists import contract
+
+    allowed = contract.LIMITS_PER_MIN["preview"]
+    path = "/sudarshan/watchlists/api/tv/preview"
+    strangers = at_once(allowed * 4, lambda i: server_on.request("POST", path, body={"text": "x"}))
+    assert {status for status, _, _ in strangers} == {401}
+    assert {json.loads(raw)["code"] for _, raw, _ in strangers} == {"session"}
+    headers = server_on.login()
+    mine = at_once(
+        allowed, lambda i: server_on.request("POST", path, body={"text": "x"}, headers=headers)
+    )
+    assert [status for status, _, _ in mine] == [200] * allowed
+
+
 # -- W7: the section writes decide on a version, as one compare-and-set -----------------------------
 SECTIONS = "/sudarshan/watchlists/api/sections"
 

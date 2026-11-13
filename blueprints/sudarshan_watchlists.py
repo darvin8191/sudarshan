@@ -5,11 +5,14 @@ Every route is built from ``contract.OPS`` and exists only when a handler for it
 ``sudarshan/watchlists/ops/``. Each request is checked in this order: an OpenAlgo session
 (``session``, in the envelope, never a redirect), the owner himself (``owner_only`` for any other
 session, reads included), CSRF on POST, PUT, PATCH and DELETE (a lapsed token is ``session``),
-and the class's limiter (``busy``; the shared limiter acts as the request arrives, so it can
-answer before the checks above). Then the switch ``SUDARSHAN_WATCHLISTS_V2``: off, ``state``
-answers ``{"enabled": false}`` and every other op ``off``, and nothing is opened or read. Then the
-record check (the store opens once; the outcome is kept for a few seconds so a broken file is not
-reopened on every request), then the request is read against the contract and the handler runs.
+and then the class's limit (``busy``). The limit wraps only what runs after those checks and is
+counted per owner, so a request without a session, another sign-in's request or a forged one is
+refused before it counts and can never spend the owner's budget (the alerts and portfolio bridges
+put their limiters inside their checks the same way). Then the switch ``SUDARSHAN_WATCHLISTS_V2``:
+off, ``state`` answers ``{"enabled": false}`` and every other op ``off``, and nothing is opened or
+read. Then the record check (the store opens once; the outcome is kept for a few seconds so a
+broken file is not reopened on every request), then the request is read against the contract and
+the handler runs.
 
 Answers are ``{"status": "ok", "data": ...}`` or ``{"status": "error", "code", "message",
 "field"?}`` with ``contract.ERROR_STATUS[code]`` as the HTTP status. Messages are sentences for
@@ -20,7 +23,7 @@ import math
 import re
 from functools import wraps
 
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, current_app, jsonify, request, session
 from flask_wtf.csrf import CSRFError
 from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 
@@ -154,8 +157,16 @@ def _record_outcome() -> str | None:
     return outcome
 
 
-def _guarded(op: contract.OpSpec, handler):
-    @wraps(handler)
+def _owner_key() -> str:
+    """The limiter's key: the session's user. Only a request that passed the session, owner and
+    CSRF checks reaches the limiter, so this is always the owner, from whichever device."""
+    return f"owner:{session.get('user') or ''}"
+
+
+def _checked(limited):
+    """The checks a request meets before it counts against its class: an OpenAlgo session, the
+    owner, CSRF on a change. Only then is ``limited`` (the class's limit around the op) called."""
+
     def view(**route):
         try:
             if not is_session_valid():
@@ -173,6 +184,17 @@ def _guarded(op: contract.OpSpec, handler):
                 csrf.protect()
             except CSRFError:
                 return _error("session")
+        return limited(**route)
+
+    return view
+
+
+def _served(op: contract.OpSpec, handler):
+    """What a request meets once it passed the checks and its class's limit: the switch, the
+    record check, the request read against the contract, the handler and its bump."""
+
+    @wraps(handler)
+    def view(**route):
         if not enabled():
             if op.name == "state":
                 return _answer({"status": "ok", "data": {"enabled": False}})
@@ -206,11 +228,14 @@ def attach(bp: Blueprint, handlers: dict) -> Blueprint:
     for op in contract.OPS:
         if op.name not in handlers:
             continue  # not built yet: no route, so a request is the app's own 404
-        view = _guarded(op, handlers[op.name])
-        view.__name__ = f"{bp.name}_{op.name}"  # one name per blueprint for the limiter
-        guarded = limiter.shared_limit(LIMITS[op.cls], scope=SCOPES[op.cls])(view)
+        served = _served(op, handlers[op.name])
+        served.__name__ = f"{bp.name}_{op.name}"  # one name per blueprint and op for the limiter
+        limited = limiter.shared_limit(LIMITS[op.cls], scope=SCOPES[op.cls],
+                                       key_func=_owner_key)(served)  # fmt: skip
+        view = _checked(limited)
+        view.__name__ = f"{bp.name}_{op.name}_checked"
         bp.add_url_rule(
-            op.route.replace("<id>", "<int:id>"), endpoint=op.name, view_func=guarded,
+            op.route.replace("<id>", "<int:id>"), endpoint=op.name, view_func=view,
             methods=[op.method],
         )  # fmt: skip
 
