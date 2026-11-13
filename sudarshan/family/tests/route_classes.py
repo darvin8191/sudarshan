@@ -23,17 +23,17 @@ a user who is not the owner. What the suite holds each class to:
                    hands out a logged-in session (nor does any other route, to any caller).
 ``webhook``        Authenticated by a key or token in the request, not by a session: 400 (a body
                    without the key), 401, 403 or 404 (a token it does not know); never "success".
-``internal``       A ring service's sealed hand-off: 401, 403 or 404 to every caller, 404 to
-                   anything nginx forwarded.
+``internal``       A ring service's sealed hand-off, which answers 404 to anything nginx
+                   forwarded: 401, 403 or 404 to every caller; never "success".
 
 No route may raise, open a connection, look up a name, start a process or publish an event other
 than a refusal's ``...FailedEvent`` while it answers any of these callers.
 
 A line is ``<class> <rule> <endpoint>``, then ``# <reason>``; a ``## <reason>`` line gives the
-reason for the lines below it, up to the next blank line, that have none of their own. Every line of public_static,
-public_auth, webhook and internal needs a reason: a route is public because someone wrote down
-why. A line's class follows what the route must be, not what it answers today; a route that
-refuses every caller, but not cleanly, keeps its class and is listed in FINDINGS below.
+reason for the lines below it, up to the next blank line, that have none of their own. Every line
+of public_static, public_auth, webhook and internal needs a reason: a route is public because
+someone wrote down why. A line's class follows what the route must be, not what it answers today;
+a route that refuses every caller, but not cleanly, keeps its class and is listed in FINDINGS.
 """
 
 from __future__ import annotations

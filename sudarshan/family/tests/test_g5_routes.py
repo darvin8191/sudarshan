@@ -227,7 +227,8 @@ def test_every_rule_the_app_registers_is_classified(report):
     lines = [f"classify this route: {r['rule']} ({r['endpoint']}, "
              f"{', '.join(r['methods']) or 'OPTIONS'})" for r in unknown]  # fmt: skip
     lines.append("Add a line for each to sudarshan/family/tests/route_classes.py, protected unless "
-                 "it must be public, and say why if it is:")  # fmt: skip
+                 "it must be public, and say why if it is (a React page whose view only calls "
+                 "serve_react_app() is public_shell):")  # fmt: skip
     lines += [f"  {classes.line_for(r['rule'], r['endpoint'])}" for r in unknown]
     assert not unknown, "\n".join(lines)
 
