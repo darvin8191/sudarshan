@@ -313,6 +313,31 @@ def test_a_built_in_list_answers_its_futures_with_each_ones_stop_and_no_list_key
     assert [c["why"] for c in stocks["left_out"]] == ["missing"]
 
 
+def test_a_bse_future_expiring_today_takes_bses_calendar_not_nses(client, monkeypatch):
+    """Review L2: the route asked NSE's calendar ("NFO") whatever the row's exchange, so a BFO
+    future expiring on a BSE special session day took NSE's close, or none."""
+    from sudarshan.watchlists import sessions
+
+    snap, _ = snapshot_of(PRESETS["master"] + indices_rows(), datetime(2026, 11, 9, 8, 40))
+    use(snap, monkeypatch)
+    day = int(datetime.fromisoformat("2026-11-26T11:00:00+05:30").timestamp() * 1000)
+    monkeypatch.setattr(preset_reader, "now_ms", lambda: day)
+    monkeypatch.setattr(internal, "reader_now", lambda: day)
+    bse_end = int(datetime.fromisoformat("2026-11-26T18:30:00+05:30").timestamp() * 1000)
+    asked = []
+
+    def closes(dates, exchange):
+        asked.append((exchange, tuple(dates)))
+        return dict.fromkeys(dates, bse_end) if exchange == "BFO" else {}
+
+    monkeypatch.setattr(sessions, "closes", closes)
+    got = data_of(ask(client, ref="preset:index_futures"))
+    (sensex,) = [r for r in got["rows"] if r["exchange"] == "BFO"]
+    assert sensex["expiry"] == "2026-11-26" and sensex["valid_until"] == bse_end
+    assert asked == [("BFO", ("2026-11-26",))]  # only the exchange a row expires today on
+    assert all(r["valid_until"] > bse_end for r in got["rows"] if r["exchange"] == "NFO")
+
+
 def test_a_flag_list_answers_its_rows_and_never_a_flag_or_a_note(client):
     lid, _ = make_list(("SBIN",))
     c = make_app(ops.discover(), real=True).test_client()
