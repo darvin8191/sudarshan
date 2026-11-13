@@ -601,7 +601,7 @@ export interface RowAddReq {
   version: string
   kind: FollowKind
   underlying: string
-  underlying_exchange: UnderlyingExchange
+  underlying_exchange: string
   expiry_rule?: ExpiryRule
   strike_rule?: StrikeRule
   offset?: number
@@ -615,7 +615,7 @@ export interface RowEditReq {
   section_id?: number | null
   kind?: FollowKind
   underlying?: string
-  underlying_exchange?: UnderlyingExchange
+  underlying_exchange?: string
   expiry_rule?: ExpiryRule
   strike_rule?: StrikeRule
   offset?: number

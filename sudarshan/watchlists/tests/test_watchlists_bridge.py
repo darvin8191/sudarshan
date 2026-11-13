@@ -44,6 +44,10 @@ NOT_BUILT = {op.name for op in contract.OPS} - {
     "flags",
     "symbol",
     "expired_clear",
+    "row_add",
+    "row_edit",
+    "row_remove",
+    "resolve",
 }
 
 BODIES = {
@@ -109,6 +113,9 @@ def test_only_handled_ops_get_a_route():
             "/symbols/<k>",
             "/flags",
             "/symbols/expired/clear",
+            "/rows",
+            "/rows/<int:id>",
+            "/resolve",
         )
     }
 
