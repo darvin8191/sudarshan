@@ -32,7 +32,8 @@
   "auction": "auction",
   "not_a_trade": "not_a_trade",
   "bad_value": "bad_value",
-  "nothing_new": "nothing_new"
+  "nothing_new": "nothing_new",
+  "closing_value": "closing_value"
  },
  "cases": [
   {
@@ -12268,6 +12269,193 @@
        "flags": []
       }
      ]
+    }
+   ]
+  },
+  {
+   "id": "B14i",
+   "says": "10 Dec 2026: NIFTY's closing values after the cash close become the 15:29 minute's close (review M2)",
+   "day": "2026-12-10",
+   "key": "NSE_INDEX|Nifty 50",
+   "bars": [
+    {
+     "at": "15:29",
+     "o": 2600000,
+     "h": 2603150,
+     "l": 2600000,
+     "c": 2603000,
+     "v": 0,
+     "flags": [],
+     "until": "15:39:41.000"
+    }
+   ],
+   "steps": [
+    {
+     "at": "15:29:10.050",
+     "tick": {
+      "ltt": "15:29:10.000",
+      "ltp": 26000.0
+     },
+     "check": "ok"
+    },
+    {
+     "at": "15:29:59.550",
+     "tick": {
+      "ltt": "15:29:59.500",
+      "ltp": 26004.0
+     },
+     "check": "ok"
+    },
+    {
+     "at": "15:30:05.000",
+     "clock": true,
+     "sealed": [
+      "15:29"
+     ]
+    },
+    {
+     "at": "15:39:40.100",
+     "tick": {
+      "ltt": "15:39:40.000",
+      "ltp": 26031.5
+     },
+     "check": "closing_value",
+     "sealed": [
+      "15:29"
+     ]
+    },
+    {
+     "at": "15:39:41.100",
+     "tick": {
+      "ltt": "15:39:41.000",
+      "ltp": 26030.0
+     },
+     "check": "closing_value",
+     "sealed": [
+      "15:29"
+     ]
+    },
+    {
+     "at": "15:39:41.100",
+     "read": {
+      "tf": 15,
+      "boundary": "15:30"
+     },
+     "forming": false,
+     "candles": [
+      {
+       "start": "15:15",
+       "end": "15:30",
+       "o": 2600000,
+       "h": 2603150,
+       "l": 2600000,
+       "c": 2603000,
+       "v": 0,
+       "flags": []
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "B14j",
+   "says": "4 Dec 2026: before the change an index value after 15:30 is outside the hours, as it was",
+   "day": "2026-12-04",
+   "key": "NSE_INDEX|Nifty 50",
+   "bars": [
+    {
+     "at": "15:29",
+     "o": 2600000,
+     "h": 2600400,
+     "l": 2600000,
+     "c": 2600400,
+     "v": 0,
+     "flags": [],
+     "until": "15:29:59.500"
+    }
+   ],
+   "steps": [
+    {
+     "at": "15:29:10.050",
+     "tick": {
+      "ltt": "15:29:10.000",
+      "ltp": 26000.0
+     },
+     "check": "ok"
+    },
+    {
+     "at": "15:29:59.550",
+     "tick": {
+      "ltt": "15:29:59.500",
+      "ltp": 26004.0
+     },
+     "check": "ok"
+    },
+    {
+     "at": "15:30:05.000",
+     "clock": true,
+     "sealed": [
+      "15:29"
+     ]
+    },
+    {
+     "at": "15:39:40.100",
+     "tick": {
+      "ltt": "15:39:40.000",
+      "ltp": 26031.5
+     },
+     "check": "outside_hours"
+    }
+   ]
+  },
+  {
+   "id": "B14k",
+   "says": "10 Dec 2026: an index value after 15:45 is outside the hours",
+   "day": "2026-12-10",
+   "key": "NSE_INDEX|Nifty 50",
+   "bars": [
+    {
+     "at": "15:29",
+     "o": 2600000,
+     "h": 2600400,
+     "l": 2600000,
+     "c": 2600400,
+     "v": 0,
+     "flags": [],
+     "until": "15:29:59.500"
+    }
+   ],
+   "steps": [
+    {
+     "at": "15:29:10.050",
+     "tick": {
+      "ltt": "15:29:10.000",
+      "ltp": 26000.0
+     },
+     "check": "ok"
+    },
+    {
+     "at": "15:29:59.550",
+     "tick": {
+      "ltt": "15:29:59.500",
+      "ltp": 26004.0
+     },
+     "check": "ok"
+    },
+    {
+     "at": "15:30:05.000",
+     "clock": true,
+     "sealed": [
+      "15:29"
+     ]
+    },
+    {
+     "at": "15:45:01.100",
+     "tick": {
+      "ltt": "15:45:01.000",
+      "ltp": 26031.5
+     },
+     "check": "outside_hours"
     }
    ]
   }

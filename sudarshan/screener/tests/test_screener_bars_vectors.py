@@ -384,6 +384,7 @@ def test_the_flag_bits_and_check_names_typed_in_the_vectors_are_the_codes():
         "feed_down": clock.FEED_DOWN,
         "stale": clock.STALE,
         "auction": clock.AUCTION_PRINT,
+        "closing_value": clock.CLOSING_VALUE,
         "not_a_trade": alerts_book.NOT_A_TRADE,
         "bad_value": alerts_book.BAD_VALUE,
         "nothing_new": alerts_book.NOTHING_NEW,

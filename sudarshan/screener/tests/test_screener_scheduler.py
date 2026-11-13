@@ -248,3 +248,32 @@ def test_an_edit_in_the_evening_runs_the_days_last_candle_once_on_time():
     screen = sch.Screen(7, 2, "close", 3, frozenset({"NSE_EQ"}), since=edited)
     found = sch.due([screen], NORMAL, edited + 1_000, lambda key: False)
     assert ends(found) == [("15:30", False)]
+
+
+INDICES = sch.Screen(6, 1, "close", 15, frozenset({"NSE_INDEX"}))
+WATCH = sch.Screen(7, 1, "close", 15, frozenset({"NSE_EQ", "NSE_EQ+auction", "NSE_INDEX"}))
+
+
+@pytest.mark.parametrize(
+    ("day", "latest"),
+    [(date(2026, 12, 4), None), (date(2026, 12, 10), "15:45")],
+)
+def test_an_index_screen_waits_for_the_closing_value_from_7_december(day, latest):
+    """Review M2: from 7 Dec an index's closing value may come after the cash close, until 15:45.
+    A screen of indices holds its 15:15-15:30 candle until 15:45:05, prints or not (a closing value
+    cannot be told from a later one); before 7 Dec it runs at 15:30:05, as it did."""
+    found = sessions_of(day, trading_day=True)
+    last = sch.boundaries(INDICES, found)[-1]
+    assert times(day, [last]) == ["15:30"]
+    at_close = hm(day, "15:30") + 5_000
+    for screen in (INDICES, WATCH):
+        due = sch.due([screen], found, at_close, lambda k: False, printed=lambda s: True)
+        ran = last.k in [d.boundary.k for d in due]
+        assert ran is (latest is None), screen.segments
+        if latest is not None:
+            for at, runs in ((hm(day, latest) + 4_999, False), (hm(day, latest) + 5_000, True)):
+                due = sch.due([screen], found, at, lambda k: False, printed=lambda s: True)
+                assert (last.k in [d.boundary.k for d in due]) is runs
+    # A screen without indices is not held for them.
+    plain = sch.due([CASH], found, at_close, lambda k: False)
+    assert [d.boundary.end for d in plain][-1] == last.end
