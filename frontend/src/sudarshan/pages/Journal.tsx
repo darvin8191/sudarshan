@@ -5,6 +5,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { LoaderCircle, Power, RefreshCw, TriangleAlert } from 'lucide-react'
 import type { ReactNode } from 'react'
+import { Analytics } from '@/sudarshan/journal/Analytics'
 import { journalCall, problemOf } from '@/sudarshan/journal/api'
 import { JOURNAL_STATE_KEY } from '@/sudarshan/journal/keys'
 import { ModeChip } from '@/sudarshan/journal/ModeChip'
@@ -103,6 +104,8 @@ export default function Journal() {
     body =
       view === 'trades' ? (
         <TripsList mode={mode} onOpen={(tradeId) => open({ kind: 'trade', tradeId })} />
+      ) : view === 'analytics' ? (
+        <Analytics mode={mode} />
       ) : (
         <Stub part={view} />
       )

@@ -27,7 +27,6 @@ describe('the address', () => {
       kind: 'playbook',
       playbookId: null,
     })
-    expect(journalOverlayOf(new URLSearchParams('sheet=filters'))).toEqual({ kind: 'filters' })
     expect(journalOverlayOf(new URLSearchParams('sheet=order'))).toBeNull()
   })
 })
@@ -43,8 +42,8 @@ function Probe() {
       <button type="button" onClick={() => open({ kind: 'trade', tradeId: 5 })}>
         trade 5
       </button>
-      <button type="button" onClick={() => open({ kind: 'filters' })}>
-        filters
+      <button type="button" onClick={() => open({ kind: 'playbook', playbookId: null })}>
+        new playbook
       </button>
       <button type="button" onClick={close}>
         close
@@ -124,8 +123,8 @@ describe('useJournalOverlay', () => {
     const user = userEvent.setup()
     renderAt(['/dashboard', '/journal'])
     await user.click(screen.getByText('trade 5'))
-    await user.click(screen.getByText('filters'))
-    expect(at()).toBe('/journal?sheet=filters')
+    await user.click(screen.getByText('new playbook'))
+    expect(at()).toBe('/journal?sheet=new-playbook')
     await user.click(screen.getByText('back'))
     expect(at()).toBe('/journal')
   })
@@ -143,7 +142,7 @@ describe('useJournalOverlay', () => {
   it('a reload never reopens a form, but a link to a trade opens it', async () => {
     renderAt([
       '/dashboard',
-      { pathname: '/journal', search: '?sheet=filters', state: { sdOverlay: true } },
+      { pathname: '/journal', search: '?sheet=new-playbook', state: { sdOverlay: true } },
     ])
     await act(async () => {})
     expect(shown()).toBe('trades|live|none')

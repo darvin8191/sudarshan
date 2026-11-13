@@ -11,12 +11,11 @@ import type { Mode } from './types'
  *   entry, so Back never walks back through them;
  * - `?trade=<id>`: the trade's sheet;
  * - `?sheet=playbook` with `&playbook=<id>` to change one, or `?sheet=new-playbook`: the playbook sheet;
- * - `?sheet=filters`: the analytics filters.
  *
  * Opening pushes a history entry marked as this page's own and closing goes back, so Back and the
  * close button leave the same history behind. A sheet the page did not open (a link, a reload)
  * is closed by replacing the entry, so closing never leaves the app. A reload never reopens a
- * form: the playbook sheet and the filters are closed when the page finds one open on arrival,
+ * form: the playbook sheet is closed when the page finds one open on arrival,
  * as the watchlist does with its ticket. The trade's sheet is a read of a trade, with its notes
  * to edit, and the address alone names it, so a link to a trade (from a report) still opens it.
  * Opening over another sheet takes its place and its mark. Closing twice for one entry goes
@@ -28,7 +27,6 @@ export type JournalView = (typeof VIEWS)[number]
 export type JournalOverlay =
   | { kind: 'trade'; tradeId: number }
   | { kind: 'playbook'; playbookId: number | null }
-  | { kind: 'filters' }
 
 function idOf(params: URLSearchParams, name: string): number | null {
   const raw = params.get(name)
@@ -52,7 +50,6 @@ export function journalOverlayOf(params: URLSearchParams): JournalOverlay | null
     const trade = idOf(params, 'trade')
     return trade === null ? null : { kind: 'trade', tradeId: trade }
   }
-  if (sheet === 'filters') return { kind: 'filters' }
   if (sheet === 'new-playbook') return { kind: 'playbook', playbookId: null }
   if (sheet === 'playbook') {
     const id = idOf(params, 'playbook')
@@ -68,7 +65,6 @@ function withOverlay(params: URLSearchParams, next: JournalOverlay | null): URLS
   out.delete('playbook')
   if (!next) return out
   if (next.kind === 'trade') out.set('trade', String(next.tradeId))
-  else if (next.kind === 'filters') out.set('sheet', 'filters')
   else if (next.playbookId === null) out.set('sheet', 'new-playbook')
   else {
     out.set('sheet', 'playbook')
