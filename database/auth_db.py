@@ -538,13 +538,33 @@ def remove_expired_sessions(username, now=None):
         boundary = last_daily_expiry(now or _now_ist())
         if boundary is None:
             return
+        # "fetch" (review L8): a row the request already loaded leaves its identity map with the
+        # delete, or the next insert, which SQLite gives the highest deleted id, collides with it.
+        # Not "evaluate": it would compare the naive stored times with an aware boundary.
         ActiveSession.query.filter(
             ActiveSession.username == username, ActiveSession.login_time < boundary
-        ).delete(synchronize_session=False)
+        ).delete(synchronize_session="fetch")
         db_session.commit()
     except Exception:
         db_session.rollback()
         logger.exception("Could not remove the expired session rows")
+
+
+def clear_browser_sessions(username):
+    """SUDARSHAN (review L7): clear the session rows of ``username`` that browsers hold, and keep
+    the rows with no address. Only a login made on the server itself records none: auto-login,
+    which makes no cookie, so its row keeps no device signed in. A password change or reset keeps
+    the Upstox login, and the 03:00 expiry of a stale cookie reads that row as the login after the
+    rollover (utils.session._has_fresher_session); with it removed, an old cookie's next request
+    revoked the Upstox login the change had kept. Never raises."""
+    try:
+        ActiveSession.query.filter(
+            ActiveSession.username == username, ActiveSession.ip_address.isnot(None)
+        ).delete(synchronize_session="fetch")
+        db_session.commit()
+    except Exception:
+        db_session.rollback()
+        logger.exception("Could not clear the browser session rows")
 
 
 #: SUDARSHAN (review HIGH-2): each user's SessionCutoff time (None for none), asked by every

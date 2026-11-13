@@ -160,6 +160,40 @@ def devices_listed() -> list[str]:
     return sorted(row["device_info"] for row in auth_db.get_active_sessions(OWNER))
 
 
+def answer_to(http, ending: str):
+    """The answer a logout, a password change (the Profile page's or the older form's) or a reset
+    gives the device it came from."""
+    if ending == "logout":
+        return http.post("/auth/logout", headers=csrf_headers(http))
+    if ending == "password change":
+        fields = {"old_password": OWNER_PASSWORD, "new_password": NEW_PASSWORD,
+                  "confirm_password": NEW_PASSWORD}  # fmt: skip
+        return http.post("/auth/change-password", data=fields, headers=csrf_headers(http))
+    if ending == "password form":
+        fields = {"old_password": OWNER_PASSWORD, "new_password": NEW_PASSWORD}
+        return http.post("/auth/change", json=fields, headers=csrf_headers(http))
+    assert ending == "reset"
+    import pyotp
+
+    email = user_db.find_user_by_username().email
+    code = pyotp.TOTP(user_db.find_user_by_username().get_totp_secret()).now()
+    user_db.db_session.remove()
+    http.post("/auth/reset-password", json={"step": "email", "email": email},
+              headers=csrf_headers(http))  # fmt: skip
+    token = http.post(
+        "/auth/reset-password", json={"step": "totp", "email": email, "totp_code": code},
+        headers=csrf_headers(http),
+    ).get_json()["token"]  # fmt: skip
+    return http.post(
+        "/auth/reset-password",
+        json={"step": "password", "email": email, "token": token, "password": NEW_PASSWORD},
+        headers=csrf_headers(http),
+    )  # fmt: skip
+
+
+ENDINGS = ["logout", "password change", "password form", "reset"]
+
+
 @pytest.mark.parametrize("ending", ["logout", "password change"])
 def test_ending_every_session_on_one_device_ends_the_others_on_their_next_request(world, ending):
     """Before: after the laptop's logout or password change the phone's socket was let back in on
@@ -297,6 +331,120 @@ def test_a_logout_record_that_cannot_be_read_signs_nobody_out_and_is_read_again(
     with app.test_request_context("/"):
         session_utils.end_every_session(OWNER)
     assert not answered(phone)
+
+
+@pytest.mark.parametrize("ending", ENDINGS)
+def test_a_logout_time_that_cannot_be_written_is_tried_again_and_then_said(
+    world, monkeypatch, ending
+):
+    """Review L6: the write of the logout time failed silently (the database locked past its
+    retries, or a full disk): the answer said logged out, or that the password was changed, and
+    every other device stayed signed in until 03:00. Now it is tried once more, and when that
+    fails too the answer says the other devices were not signed out and what to do."""
+    app, connect, teardown = world
+    laptop = device(app, "192.0.2.1")
+    log_in(laptop)
+    calls = []
+
+    def cannot_write(username, when):
+        calls.append(when)
+        return False
+
+    monkeypatch.setattr(auth_db, "set_sessions_valid_after", cannot_write)
+    answer = answer_to(laptop, ending)
+
+    assert answer.status_code == 200, answer.get_data(as_text=True)
+    body = answer.get_json()
+    assert body["status"] == "error"
+    assert "your other devices could not be signed out" in body["message"]
+    assert "log out" in body["message"].lower()  # what to do
+    assert len(calls) == 2  # tried once more, at the same moment
+    assert calls[0] == calls[1]
+
+
+@pytest.mark.parametrize("ending", ENDINGS)
+def test_a_logout_time_written_on_the_second_try_ends_the_other_devices(world, monkeypatch, ending):
+    app, connect, teardown = world
+    laptop, phone = device(app, "192.0.2.1"), device(app, "192.0.2.2")
+    log_in(laptop)
+    log_in(phone)
+    real, tries = auth_db.set_sessions_valid_after, []
+
+    def second_try_works(username, when):
+        tries.append(when)
+        return False if len(tries) == 1 else real(username, when)
+
+    monkeypatch.setattr(auth_db, "set_sessions_valid_after", second_try_works)
+    answer = answer_to(laptop, ending)
+
+    assert answer.get_json()["status"] == "success", answer.get_json()
+    assert len(tries) == 2
+    assert not answered(phone)
+
+
+@pytest.mark.parametrize("ending", ["password change", "password form", "reset"])
+def test_a_password_change_keeps_the_auto_login_s_row_so_an_old_cookie_revokes_nothing(
+    world, ending
+):
+    """Review L7. Auto-login signs Upstox in at 08:45 and records a session row with no address
+    (it makes no cookie); a password change at 11:00 keeps the Upstox login. Before, the change
+    removed that row with the rest, so a tablet still holding yesterday's cookie that opened a page
+    before the laptop signed in again found no login after the rollover on record, and the daily
+    expiry's teardown revoked the Upstox login the change had kept, and told every screen to log
+    out. The row is kept now: it is no device's session, every cookie is still ended by the
+    logout time. A logout still removes it, as it revokes the Upstox login anyway."""
+    from blueprints.sudarshan_autologin import AUTOLOGIN_DEVICE
+
+    app, connect, teardown = world
+    laptop, tablet = device(app, "192.0.2.1"), device(app, "192.0.2.3")
+    log_in(laptop)
+    assert auth_db.register_session(OWNER, "a" * 64, AUTOLOGIN_DEVICE, None, "upstox")
+    with tablet.session_transaction() as cookie:  # signed in yesterday, before the rollover
+        cookie.update(user=OWNER, logged_in=True, broker="upstox", session_id="t" * 64,
+                      login_time=(datetime.now(IST) - timedelta(days=1)).isoformat())  # fmt: skip
+    teardown.clear()
+
+    assert answer_to(laptop, ending).get_json()["status"] == "success"
+    page = tablet.get("/page-for-tests")
+
+    assert page.status_code == 302 and page.headers["Location"].endswith("/auth/login")
+    assert auth_db.get_auth_token(OWNER) == TOKEN  # the Upstox login the change kept
+    assert teardown == []  # no feed teardown
+    assert devices_listed() == [AUTOLOGIN_DEVICE]  # and no browser's row
+
+
+def test_a_logout_still_removes_the_auto_login_s_row(world):
+    from blueprints.sudarshan_autologin import AUTOLOGIN_DEVICE
+
+    app, connect, teardown = world
+    laptop = device(app, "192.0.2.1")
+    log_in(laptop)
+    assert auth_db.register_session(OWNER, "a" * 64, AUTOLOGIN_DEVICE, None, "upstox")
+    assert answer_to(laptop, "logout").get_json()["status"] == "success"
+    assert devices_listed() == []
+
+
+def test_removing_ended_rows_leaves_none_of_them_in_the_request_s_identity_map(world):
+    """Review L8: remove_expired_sessions deleted with synchronize_session=False, which leaves a
+    row the request had already loaded in the session's identity map. SQLite gives the next
+    insert the highest deleted id, and the new row then collided with the stale object (CI
+    logged "SAWarning: Identity map already had an identity for (ActiveSession, (1,))")."""
+    import warnings
+
+    from sqlalchemy.exc import SAWarning
+
+    assert auth_db.register_session(OWNER, "o" * 64, "October phone", "198.51.100.9", "upstox")
+    row = auth_db.ActiveSession.query.filter_by(session_id="o" * 64).one()
+    row.login_time = row.last_seen = datetime(2026, 10, 21, 9, 15)  # IST, long ended
+    auth_db.db_session.commit()
+    loaded = auth_db.ActiveSession.query.filter_by(session_id="o" * 64).one()  # in the map
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", SAWarning)
+        assert auth_db.register_session(OWNER, "n" * 64, "new phone", "198.51.100.10", "upstox")
+
+    assert devices_listed() == ["new phone"]
+    assert loaded not in auth_db.db_session  # the deleted row left the session with the delete
 
 
 # -- the migration --------------------------------------------------------------------------
