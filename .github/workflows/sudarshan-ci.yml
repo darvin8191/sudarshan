@@ -65,3 +65,19 @@ jobs:
           else
             echo "no sudarshan tests yet"
           fi
+
+  # The upstream gthread-migration job's command, so every dispatched run checks the gthread
+  # suite on GitHub's machines instead of each builder running it on a small box.
+  gthread:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - run: uv sync
+      - run: uv pip install "gunicorn>=25.0,<26" "eventlet==0.41.2"
+      - name: Run every gthread migration test file
+        run: .venv/bin/python -m pytest test/test_gthread_*.py -o addopts="" --timeout=120 -rs
