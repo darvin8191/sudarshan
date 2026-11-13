@@ -266,6 +266,9 @@ def test_switched_off_state_says_so_and_every_other_op_says_off(
 
 
 def test_the_switch_is_read_at_each_request(monkeypatch):
+    from database import watchlist_db as oa
+
+    oa.Base.metadata.create_all(oa.engine)  # state reads OpenAlgo's own lists; make them, as below
     reset_users()
     client = make_app(ops.discover(), real=True).test_client()
     login_session(client)
