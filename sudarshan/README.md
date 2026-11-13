@@ -43,6 +43,9 @@ never a move to another port.
 | 5582 | `sudarshan-alerts`: the market alerts' sealed local API, and `GET /health` (the release installed and what the service is doing; the one listener, no other port) |
 | 5583 | `sudarshan-portfolio`: its sealed local API, and `GET /health` (the release installed and what the service is doing; the one listener, no other port; a taken port is tried again every minute) |
 | 5584 | `sudarshan-screener`: its sealed local API |
+| 5585 | `sudarshan-family` (P6, not built yet): the family view's one listener: the viewer API and its WebSocket that nginx forwards (`/family/api/`, `/family/ws`), the sealed admin and nudge routes, and `GET /health`. It runs as its own account, `sudarshan-family` |
+| 5586 | `sudarshan-journal` (P7, not built yet): its sealed local API and `GET /health` |
+| 5587 | reserved for `sudarshan-protect` (later) |
 
 **Sealed routes.** Each has its own key purpose in `sudarshan/vault/keys.py` (HKDF from OpenAlgo's
 pepper; a seal of one purpose never opens another's), a 60 s seal, a nonce accepted once, and a

@@ -143,7 +143,7 @@ def test_every_purpose_is_its_own_and_none_opens_anothers_seal():
     import sudarshan.vault.keys as keys
 
     declared = {name: value for name, value in vars(keys).items() if name.endswith("_INFO")}
-    assert set(declared.values()) == set(PURPOSES) and len(PURPOSES) == len(set(PURPOSES)) == 9
+    assert set(declared.values()) == set(PURPOSES) and len(PURPOSES) == len(set(PURPOSES)) == 18
     assert all(info.startswith(b"sudarshan/") and info.endswith(b"/v1") for info in PURPOSES)
     derived = {derive_key(PEPPER, info) for info in PURPOSES}
     assert len(derived) == len(PURPOSES)

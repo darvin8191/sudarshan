@@ -44,6 +44,24 @@ SCREENER_API_INFO = b"sudarshan/screener/api/v1"
 SCREENER_INTERNAL_INFO = b"sudarshan/screener/internal/v1"
 #: Seals the market alerts' reads of OpenAlgo's watchlist members route (list alerts, M8.14).
 WATCHLISTS_INTERNAL_INFO = b"sudarshan/watchlists/internal/v1"
+#: Seals OpenAlgo's owner bridge to the family service's admin ops (sudarshan-family, 5585; P6).
+FAMILY_ADMIN_INFO = b"sudarshan/family/admin/v1"
+#: Seals the market alerts' "orders changed" nudges to the family service (no order data in them).
+FAMILY_NUDGE_INFO = b"sudarshan/family/nudge/v1"
+#: Seals the family service's calls to OpenAlgo's one internal route (the shared watchlists).
+FAMILY_INTERNAL_INFO = b"sudarshan/family/internal/v1"
+#: Seals the family service's read-only portfolio calls under a viewer principal (reads only).
+PORTFOLIO_FAMILY_API_INFO = b"sudarshan/portfolio/api/family/v1"
+#: Seals the journal's read-only portfolio calls (principal sudarshan-journal; account reads, G2).
+PORTFOLIO_JOURNAL_API_INFO = b"sudarshan/portfolio/api/journal/v1"
+#: Seals OpenAlgo's bridge to the journal's local API (sudarshan-journal, 127.0.0.1:5586; P7).
+JOURNAL_API_INFO = b"sudarshan/journal/api/v1"
+#: Seals the alerts' report desk calls to the journal: report_get, report_file and delivery only.
+JOURNAL_DELIVERY_INFO = b"sudarshan/journal/delivery/v1"
+#: Seals the market alerts' "orders changed" nudges to the journal (no order data in them).
+JOURNAL_NUDGE_INFO = b"sudarshan/journal/nudge/v1"
+#: Seals the family service's read of the journal's counts-only family line (no money field).
+JOURNAL_FAMILY_INFO = b"sudarshan/journal/family/v1"
 #: Every purpose: a key derived for one never opens another's seal (a test holds them apart).
 PURPOSES = (
     VAULT_INFO,
@@ -55,6 +73,15 @@ PURPOSES = (
     SCREENER_API_INFO,
     SCREENER_INTERNAL_INFO,
     WATCHLISTS_INTERNAL_INFO,
+    FAMILY_ADMIN_INFO,
+    FAMILY_NUDGE_INFO,
+    FAMILY_INTERNAL_INFO,
+    PORTFOLIO_FAMILY_API_INFO,
+    PORTFOLIO_JOURNAL_API_INFO,
+    JOURNAL_API_INFO,
+    JOURNAL_DELIVERY_INFO,
+    JOURNAL_NUDGE_INFO,
+    JOURNAL_FAMILY_INFO,
 )
 _FINGERPRINT_LABEL = b"sudarshan/vault/key-fingerprint/v1"
 
