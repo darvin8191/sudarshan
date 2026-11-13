@@ -304,7 +304,10 @@ def _waiting(event: Event, now: datetime) -> list[str]:
 
 #: Facts of the family kinds come from another account's file, so a value goes into a sentence
 #: only when it matches one of these narrow patterns; anything else is left out of the sentence.
-_DEVICE = re.compile(r"[A-Za-z0-9][A-Za-z0-9 .+()/\u00b7-]{0,39}")
+#: A device label has no slash (Telegram makes "/word" a command the owner can tap) and is left out
+#: when it reads like a web address ("name.tld"), which Telegram makes a link (review L11).
+_DEVICE = re.compile(r"[A-Za-z0-9][A-Za-z0-9 .+()\u00b7-]{0,39}")
+_LINKISH = re.compile(r"[A-Za-z0-9-]+\.[A-Za-z]{2,}")
 _ATTEMPTS = re.compile(r"[0-9]{1,2}")
 _EPOCH = re.compile(r"[0-9]{9,11}")
 _HANDLE = re.compile(r"[a-z0-9][a-z0-9._-]{0,31}")
@@ -321,7 +324,7 @@ def _handle(event: Event) -> str:
 
 def _device(event: Event) -> str:
     device = event.fact("device")
-    return device if _DEVICE.fullmatch(device) else ""
+    return device if _DEVICE.fullmatch(device) and not _LINKISH.search(device) else ""
 
 
 def _lockout(event: Event, now: datetime) -> list[str]:
