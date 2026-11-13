@@ -1,4 +1,5 @@
-"""When the service is connected: trading days, 08:45-16:00 IST by default.
+"""When the service is connected: trading days, 08:45-16:00 IST by default (08:45-16:05 from
+7 Dec 2026, when F&O trades to 15:45: the margins are kept around each day's session).
 
 Trading days come from auto-login's calendar (sudarshan/autologin/schedule.py): weekends and
 ``/etc/sudarshan/nse_holidays.txt`` are closed, a date in ``nse_extra_trading_days.txt`` (a
@@ -11,9 +12,9 @@ deploy tool's calendar list ships it)::
     2026-11-08 14:05-15:40  # Muhurat, NSE circulars 149/2026 (cash) and 142/2026 (F&O to 15:40)
 
 The alerts keep their usual margins around that session, as around 09:00-15:40 on any day (15
-minutes before, 20 after: 13:50-16:00 here), so an update that follows the close, such as the
-exchange cancelling an open order, is still told. On a weekday that trades anyway the window is
-added to the usual hours. Auto-login reads only the first word of a line and the deploy tool only
+minutes before, 20 after: 13:50-16:00 here; around 09:00-15:45 from 7 Dec 2026), so an update
+that follows the close, such as the exchange cancelling an open order, is still told. On a
+weekday that trades anyway the window is added to the usual hours. Auto-login reads only the first word of a line and the deploy tool only
 the date at its start, so both keep working with the window there (a test holds each to it).
 """
 
@@ -26,12 +27,13 @@ from pathlib import Path
 
 from sudarshan.autologin.schedule import (
     IST,
-    SESSION,
     TradingCalendar,
     day_windows,
     minute_of_day,
     read_calendar_file,
+    session_of,
     union,
+    usual_on,
     with_margins,
 )
 
@@ -81,15 +83,16 @@ class AlertWindow:
         self._days = _DayWindows(extra_days_file)
 
     def spans(self, day: date) -> tuple[tuple[int, int], ...]:
-        """When the alerts are connected on a trading day, in IST minutes: the usual window, or a
-        special session's own window with the usual margins, added to the usual window on a day
-        that trades anyway."""
+        """When the alerts are connected on a trading day, in IST minutes: the usual window (its
+        margins around the day's session: to 16:05 from 7 Dec 2026), or a special session's own
+        window with the usual margins, added to the usual window on a day that trades anyway."""
+        usual = usual_on(day, self.default)
         own = self._days.get(day)
         if own is None:
-            return (self.default,)
+            return (usual,)
         session = with_margins(own, self.default)
         if self.calendar.trades_anyway(day):
-            return union([self.default, session])
+            return union([usual, session])
         return (session,)
 
     def status(self, now: datetime) -> tuple[bool, str]:
@@ -126,10 +129,11 @@ class AlertWindow:
             return None
         day = now.astimezone(IST).date()
         own = self._days.get(day)
+        opens = session_of(day)[0]
         if own is None:
-            start = SESSION[0]
+            start = opens
         elif self.calendar.trades_anyway(day):
-            start = min(SESSION[0], own[0])
+            start = min(opens, own[0])
         else:
             start = own[0]
         return datetime.combine(day, dtime(start // 60, start % 60), IST)

@@ -13,6 +13,11 @@ extra-days file may give the day's own window after the date, for a special sess
 circulars give the times; the window runs from the start of the pre-open to the F&O close)::
 
     2026-11-08 14:05-15:40  # Muhurat, NSE circulars 149/2026 (cash) and 142/2026 (F&O to 15:40)
+
+Every usual window here and in the ring (auto-login's, the feed's, the alerts', the backup's) is
+written against ``SESSION``, the 09:00 pre-open to the 15:40 F&O close of the regime from 3 Aug
+2026, and keeps its margins around each day's own session (``usual_on``): the F&O close moves to
+15:45 from 7 Dec 2026 (sudarshan/regimes.py), and each end moves with it.
 """
 
 from __future__ import annotations
@@ -25,25 +30,29 @@ from datetime import date, datetime, timedelta, timezone
 from datetime import time as dtime
 from pathlib import Path
 
+from sudarshan import regimes
+
 log = logging.getLogger("sudarshan.autologin")
 
 IST = timezone(timedelta(hours=5, minutes=30), "IST")  # India keeps no daylight saving
 #: The timer's three wake-ups on weekdays; the first that succeeds ends the day's work.
 SCHEDULE = ("08:35", "08:45", "08:55")
 #: Continuous trading, to the F&O close: NSE's equity derivatives trade to 15:40 since
-#: 3 Aug 2026 (the cash market closes at 15:30). A new login then would cut off a live session.
-#: A day listed in the extra-days file with its own window trades in that window instead (see
-#: ``TradingCalendar.market_spans``).
+#: 3 Aug 2026 and to 15:45 from 7 Dec 2026 (the cash market closes at 15:30). A new login then
+#: would cut off a live session. Written against SESSION, so its end is the day's F&O close
+#: (``usual_on``). A day listed in the extra-days file with its own window trades in that window
+#: instead (see ``TradingCalendar.market_spans``).
 MARKET_HOURS = ("09:15", "15:40")
 #: From the pre-open to the F&O close: Test now, which replaces today's login, is refused then
-#: while the login works. A listed day's own window replaces it the same way.
+#: while the login works (to 15:45 from 7 Dec 2026). A listed day's own window replaces it the
+#: same way.
 TEST_BLOCKED = ("09:00", "15:40")
 #: Upstox's daily access tokens stop working at 03:30 IST. OpenAlgo's own session rollover is
 #: 03:00, so a login between the two is on record as today's while its token is already dead.
 UPSTOX_TOKEN_EXPIRY = "03:30"
-#: When a scheduled wake-up may log in: from before the first wake-up to the F&O close. A wake-up
-#: outside it (a deploy restart in the evening, Persistent= catching up after a night-time boot)
-#: is ignored.
+#: When a scheduled wake-up may log in: from before the first wake-up to the F&O close (to 15:45
+#: from 7 Dec 2026, ``usual_on``). A wake-up outside it (a deploy restart in the evening,
+#: Persistent= catching up after a night-time boot) is ignored.
 DEFAULT_WINDOW = "08:30-15:40"
 #: When the owner should have logged in by hand if auto-login could not.
 HAND_LOGIN_DEADLINE = "09:15"
@@ -51,10 +60,12 @@ HOLIDAYS_FILE = "/etc/sudarshan/nse_holidays.txt"
 #: Optional: days the exchange opens although they are a weekend or in the holiday file (a
 #: Muhurat session, a special Saturday session). Same format; missing or empty means none.
 EXTRA_TRADING_DAYS_FILE = "/etc/sudarshan/nse_extra_trading_days.txt"
-#: NSE's usual session in IST minutes: the 09:00 pre-open to the 15:40 F&O close. A reader's usual
-#: hours keep their own margins around it (the feed 2 and 10 minutes, the alerts 15 and 20), and
-#: keep the same margins around a special session's own window (with_margins).
-SESSION = (9 * 60, 15 * 60 + 40)
+#: NSE's usual session in IST minutes as from 3 Aug 2026: the 09:00 pre-open to the 15:40 F&O
+#: close (the first regime of sudarshan/regimes.py). A reader's usual hours are written against it
+#: and keep their own margins around it (the feed 2 and 10 minutes, the alerts 15 and 20), around
+#: each day's own session (``usual_on``: to the 15:45 close from 7 Dec 2026) and around a special
+#: session's own window (with_margins).
+SESSION = (regimes.PRE_OPEN, regimes.REGIMES[0].fo[1])
 
 
 _HHMM = re.compile(r"(\d{1,2}):(\d{2})", re.ASCII)
@@ -113,6 +124,24 @@ def with_margins(own: tuple[int, int], usual: tuple[int, int]) -> tuple[int, int
     start = max(0, own[0] - (SESSION[0] - usual[0]))
     end = min(24 * 60, own[1] + (usual[1] - SESSION[1]))
     return (start, end) if start < end else own
+
+
+def session_of(day: date) -> tuple[int, int]:
+    """NSE's session on ``day`` in IST minutes: the 09:00 pre-open to that day's F&O close
+    (15:40; from 7 Dec 2026 15:45, sudarshan/regimes.py)."""
+    return (regimes.PRE_OPEN, regimes.fo_close(day))
+
+
+def usual_on(day: date, usual: tuple[int, int]) -> tuple[int, int]:
+    """A reader's usual hours on ``day``: the margins ``usual`` keeps around SESSION, kept around
+    the day's own session. ``usual`` itself until 6 Dec 2026; from 7 Dec its end moves with the
+    F&O close (the feed's 08:58-15:50 is 08:58-15:55 then, auto-login's 08:30-15:40 08:30-15:45)."""
+    return with_margins(session_of(day), usual)
+
+
+def blocked_hours_on(day: date) -> tuple[int, int]:
+    """When Test now is refused on a usual trading ``day``: 09:00 to the day's F&O close."""
+    return usual_on(day, (minutes(TEST_BLOCKED[0]), minutes(TEST_BLOCKED[1])))
 
 
 def union(spans: list[tuple[int, int]]) -> tuple[tuple[int, int], ...]:
@@ -406,17 +435,18 @@ class TradingCalendar:
         if not self.is_trading_day(day):
             return False
         now = minute_of_day(local)
-        spans = self.market_spans(day, (minutes(usual[0]), minutes(usual[1])))
+        spans = self.market_spans(day, usual_on(day, (minutes(usual[0]), minutes(usual[1]))))
         return any(start <= now < end for start, end in spans)
 
     def in_market_hours(self, at: datetime) -> bool:
-        """09:15-15:40 on a trading day, or a listed day's own window: a new login must not be
-        made then while the stored one cannot be checked, because it would end that one."""
+        """09:15 to the F&O close on a trading day (15:40; 15:45 from 7 Dec 2026), or a listed
+        day's own window: a new login must not be made then while the stored one cannot be
+        checked, because it would end that one."""
         return self._within(at, MARKET_HOURS)
 
     def blocks_test_now(self, at: datetime) -> bool:
-        """09:00-15:40 on a trading day, or a listed day's own window: Test now must not replace
-        a working login then."""
+        """09:00 to the F&O close on a trading day (15:40; 15:45 from 7 Dec 2026), or a listed
+        day's own window: Test now must not replace a working login then."""
         return self._within(at, TEST_BLOCKED)
 
     def slots(self, day: date) -> list[datetime]:

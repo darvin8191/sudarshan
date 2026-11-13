@@ -18,7 +18,7 @@ import pytest
 
 from sudarshan.autologin import schedule
 from sudarshan.autologin.config import Settings
-from sudarshan.autologin.messages import MESSAGES
+from sudarshan.autologin.messages import MESSAGES, hours_on, message_for
 from sudarshan.autologin.schedule import (
     DEFAULT_WINDOW,
     IST,
@@ -246,16 +246,22 @@ def test_the_last_upstox_token_expiry(at, since):
 
 
 def test_the_page_and_the_answer_give_the_hours_test_now_is_refused():
-    """F&O trades to 15:40 since 3 Aug 2026: the guards, the page and the answer all say so, and
-    that a special session has its own hours (the guards follow a listed day's own window)."""
+    """F&O trades to 15:40 since 3 Aug 2026 and to 15:45 from 7 Dec 2026: the guards, the page
+    and the answer say so for the day in question, and that a special session has its own hours
+    (the guards follow a listed day's own window). The constants are written against SESSION."""
     assert MARKET_HOURS == ("09:15", "15:40") and TEST_BLOCKED == ("09:00", "15:40")
-    hours = (
-        f"(usually from {TEST_BLOCKED[0]} to {TEST_BLOCKED[1]} on a trading day; "
-        "a special session has its own hours)"
-    )
+    for day, close in ((date(2026, 12, 4), "15:40"), (date(2026, 12, 10), "15:45")):
+        hours = f"(usually from 09:00 to {close} on a trading day; a special session has its own hours)"
+        assert hours in message_for("market_hours", day)
+        assert hours_on(day) == f"from 09:00 to {close} on a trading day"
+    assert "from 09:00 to 15:40 on a trading day" in message_for("market_hours")  # no day given
+    assert "{" not in message_for("market_hours", date(2026, 12, 10))
+    assert MESSAGES["crashed"] == message_for("crashed", date(2026, 12, 10))
     page = REPO / "frontend" / "src" / "sudarshan" / "pages" / "AutoLogin.tsx"
-    assert hours in " ".join(page.read_text(encoding="utf-8").split())
-    assert hours in MESSAGES["market_hours"]
+    assert (
+        "(usually from 09:00 to 15:40 on a trading day; a special session has its own hours)"
+        in " ".join(page.read_text(encoding="utf-8").split())
+    )
 
 
 @pytest.mark.parametrize(

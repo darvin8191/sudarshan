@@ -7,13 +7,23 @@ Telegram path sends with parse_mode Markdown.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
-from .schedule import HAND_LOGIN_DEADLINE, TEST_BLOCKED, hhmm
+from .schedule import HAND_LOGIN_DEADLINE, TEST_BLOCKED, blocked_hours_on, hhmm
 
 BRAND = "सुदर्शन / SUDARSHAN"
-#: The hours Test now is refused on a usual trading day, as the Auto login page words them too.
+#: The hours Test now is refused on a usual trading day as from 3 Aug 2026; ``hours_on`` says a
+#: day's own (to 15:45 from 7 Dec 2026).
 HOURS = f"from {TEST_BLOCKED[0]} to {TEST_BLOCKED[1]} on a trading day"
+
+
+def hours_on(day: date | None) -> str:
+    """The hours Test now is refused on a usual trading day, as ``day`` has them: "from 09:00 to
+    15:45 on a trading day" from 7 Dec 2026. The Auto login page shows the same words."""
+    if day is None:
+        return HOURS
+    start, end = blocked_hours_on(day)
+    return f"from {start // 60:02d}:{start % 60:02d} to {end // 60:02d}:{end % 60:02d} on a trading day"
 
 #: Said once wherever a pause begins or is shown. Only a newly saved TOTP key or PIN ends a pause:
 #: switching auto-login off and on does not, so a refused key and PIN are not sent again by mistake.
@@ -69,8 +79,9 @@ MESSAGES = {
         "Test now."
     ),
     "already_logged_in": "Upstox is already connected for today. Nothing to do.",
+    # The day's own hours go in place of {hours} (message_for).
     "market_hours": (
-        f"Not available during market hours while Upstox is connected (usually {HOURS}; a special "
+        "Not available during market hours while Upstox is connected (usually {hours}; a special "
         "session has its own hours): Test now replaces today's login, which would cut off the "
         "live session."
     ),
@@ -92,13 +103,16 @@ MESSAGES = {
 }
 
 
-def message_for(code: str) -> str:
-    return MESSAGES.get(code, MESSAGES["crashed"])
+def message_for(code: str, day: date | None = None) -> str:
+    """The owner's words for ``code``; a sentence that names the market's hours names those of
+    ``day`` (the day of the attempt), the hours as from 3 Aug 2026 when no day is given."""
+    text = MESSAGES.get(code, MESSAGES["crashed"])
+    return text.format(hours=hours_on(day)) if code == "market_hours" else text
 
 
-def paused_message(paused_code: str) -> str:
+def paused_message(paused_code: str, day: date | None = None) -> str:
     """The cause of a pause, then the pause and how to end it, each said once."""
-    return f"{message_for(paused_code)} {PAUSE_NOTE}"
+    return f"{message_for(paused_code, day)} {PAUSE_NOTE}"
 
 
 def telegram_ok(at: datetime, *, test: bool) -> str:

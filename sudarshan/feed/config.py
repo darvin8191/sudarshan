@@ -18,7 +18,8 @@ PKG_DIR = Path(__file__).resolve().parent
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 TOKEN_FILE = "/etc/sudarshan/upstox_analytics_token"
 HOLIDAYS_FILE = "/etc/sudarshan/nse_holidays.txt"
-#: 2 minutes before the 09:00 pre-open to 10 minutes after the 15:40 F&O close (window.py).
+#: 2 minutes before the 09:00 pre-open to 10 minutes after the 15:40 F&O close (window.py), as
+#: margins kept around each day's session: 08:58-15:55 from 7 Dec 2026 (F&O to 15:45).
 DEFAULT_WINDOW = "08:58-15:50"
 STATE_DIR = "/var/lib/sudarshan-feed"
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"

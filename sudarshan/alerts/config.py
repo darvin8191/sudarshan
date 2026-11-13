@@ -24,7 +24,8 @@ log = logging.getLogger("sudarshan.alerts")
 REPO_ROOT = Path(__file__).resolve().parents[2]
 STATE_DIR = "/var/lib/sudarshan-alerts"
 #: Trading days only, 15 minutes before the 09:00 pre-open to 20 minutes after the 15:40 F&O
-#: close (IST); a special session's own window gets the same margins (window.py).
+#: close (IST), margins kept around each day's session (08:45-16:05 from 7 Dec 2026, F&O to
+#: 15:45); a special session's own window gets the same margins (window.py).
 DEFAULT_WINDOW = "08:45-16:00"
 PROXY_URL = "ws://127.0.0.1:8765"
 OPENALGO_URL = "http://127.0.0.1:5000"

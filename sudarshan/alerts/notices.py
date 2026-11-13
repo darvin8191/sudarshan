@@ -29,9 +29,10 @@ read when a notice is due and none is loaded.
   Paced. A notice never jumps the queue for Telegram: at least outbox.MIN_GAP_S between two
         messages and at most NOTICES_PER_MINUTE a minute (NoticePace). The slot is taken just
         before the send, after the claim is known to be ours.
-  Quiet in market hours. While the market trades (09:15-15:40, or a listed day's own window) only
-        a run that holds a failure (FAILURES) goes out; the rest wait for the close, still inside
-        MAX_AGE_S. The owner's phone is for fills and rejections then.
+  Quiet in market hours. While the market trades (09:15 to the F&O close: 15:40, 15:45 from
+        7 Dec 2026; or a listed day's own window) only a run that holds a failure (FAILURES) goes
+        out; the rest wait for the close, still inside MAX_AGE_S. The owner's phone is for fills
+        and rejections then.
 
 M10.5 hook: once the process has one outbox.Pacer for every lane, pass ``pace=LanePace(pacer)``
 where AlertService builds the desk (marked there); a notice is then the lowest priority in it.

@@ -1,4 +1,5 @@
-"""When the feed may hold its socket: NSE trading days, 08:58-15:50 IST by default.
+"""When the feed may hold its socket: NSE trading days, 08:58-15:50 IST by default (08:58-15:55
+from 7 Dec 2026, when F&O trades to 15:45).
 
 Trading days come from auto-login's calendar (sudarshan/autologin/schedule.py), the one the alerts
 use: weekends and ``/etc/sudarshan/nse_holidays.txt`` are closed, a date in
@@ -6,12 +7,14 @@ use: weekends and ``/etc/sudarshan/nse_holidays.txt`` are closed, a date in
 in one read, when it changes.
 
 NSE's session starts with the 09:00 pre-open; continuous trading runs to 15:30 in the cash market
-and to 15:40 in equity derivatives (since 3 Aug 2026). The usual window keeps two margins around
-it: it opens 2 minutes before the pre-open, so the socket is authorised, connected and subscribed
-when the session's first data comes, and it closes 10 minutes after the F&O close, so the updates
-that follow the close still arrive. The stall watchdog runs only in continuous trading,
-09:15-15:40, where a quiet socket means a stalled one. Its clock starts at the open: a socket that
-heard nothing in the minutes before 09:15 gets the full stall time after it, not none.
+and to 15:40 in equity derivatives (since 3 Aug 2026; to 15:45 from 7 Dec 2026). The usual window
+keeps two margins around it: it opens 2 minutes before the pre-open, so the socket is authorised,
+connected and subscribed when the session's first data comes, and it closes 10 minutes after the
+F&O close, so the updates that follow the close still arrive. Those margins are kept around each
+day's own session (schedule.usual_on), so the window ends at 15:55 from 7 Dec 2026. The stall
+watchdog runs only in continuous trading, 09:15 to the day's F&O close, where a quiet socket means
+a stalled one. Its clock starts at the open: a socket that heard nothing in the minutes before
+09:15 gets the full stall time after it, not none.
 
 A special session's line gives its own window, from the start of its pre-open to its F&O close::
 
@@ -38,14 +41,18 @@ from sudarshan.autologin.schedule import (  # noqa: F401  parse_holidays: import
     TradingCalendar,
     parse_holidays,
     union,
+    usual_on,
     window_text,
     with_margins,
 )
+from sudarshan.regimes import REGIMES, regime_on
 
 log = logging.getLogger("sudarshan.feed")
 
 IST = timezone(timedelta(hours=5, minutes=30), "IST")  # India keeps no daylight saving
-CORE_SESSION = (9 * 60 + 15, 15 * 60 + 40)  # continuous trading, F&O included: the stall watchdog
+#: Continuous trading, F&O included, as written against SESSION (09:15-15:40): the stall watchdog.
+#: A usual day's own is ``regime_on(day).fo`` (to 15:45 from 7 Dec 2026).
+CORE_SESSION = REGIMES[0].fo
 Span = tuple[int, int]  # IST minutes after midnight, [start, end)
 
 
@@ -107,7 +114,8 @@ class MarketWindow:
         calendar = self.calendar
         if not calendar.is_trading_day(day):
             return DayPlan(closed="weekend" if day.weekday() >= 5 else "NSE holiday")
-        usual = DayPlan(spans=((self.start, self.end),), cores=(CORE_SESSION,))
+        core = regime_on(day).fo  # to the day's F&O close
+        usual = DayPlan(spans=(usual_on(day, (self.start, self.end)),), cores=(core,))
         if day not in calendar.extra_days():
             return usual
         trades_anyway = calendar.trades_anyway(day)
@@ -118,15 +126,13 @@ class MarketWindow:
             hours = window_text(usual.spans[0])
             label = f": extra trading day, usual hours {hours}, watchdog after the first trade"
             return replace(usual, first_trade=True, label=label)
-        window, core = self._moved(own)
+        window, own_core = self._moved(own)
         if trades_anyway:
             spans = union([*usual.spans, window])
             label = f": own window {window_text(own)} added to the usual hours, feed "
-            return DayPlan(
-                "", spans, union([CORE_SESSION, core]), False, label + _spans_text(spans)
-            )
+            return DayPlan("", spans, union([core, own_core]), False, label + _spans_text(spans))
         label = f": extra trading day, own window {window_text(own)}, feed {window_text(window)}"
-        return DayPlan("", (window,), union([core]), False, label)
+        return DayPlan("", (window,), union([own_core]), False, label)
 
     def status(self, now: float) -> tuple[bool, str]:
         if self.always_on:
