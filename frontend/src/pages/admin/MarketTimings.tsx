@@ -17,6 +17,35 @@ import {
 import type { MarketTiming, TodayTiming } from '@/types/admin'
 import { showToast } from '@/utils/toast'
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/** SUDARSHAN: "15:45 from 7 Dec 2026", a change of a row's close the server derives by itself. */
+export function changeText(change: { from: string; end_time: string }): string {
+  const [y, m, d] = change.from.split('-').map(Number)
+  return `${change.end_time} from ${d} ${MONTHS[m - 1]} ${y}`
+}
+
+/**
+ * SUDARSHAN: an exchange's hours for the info box, as the server gives them for today; on a day it
+ * does not trade, the row's own hours with the changes from on or before today.
+ */
+export function hoursOn(
+  code: string,
+  today: string,
+  todayTimings: readonly TodayTiming[],
+  timings: readonly MarketTiming[]
+): string | null {
+  const live = todayTimings.find((t) => t.exchange === code)
+  if (live) return `${live.start_time} - ${live.end_time}`
+  const row = timings.find((t) => t.exchange === code)
+  if (!row) return null
+  const end = (row.changes ?? []).reduce(
+    (found, change) => (today && change.from <= today ? change.end_time : found),
+    row.end_time
+  )
+  return `${row.start_time} - ${end}`
+}
+
 export default function MarketTimingsPage() {
   const [timings, setTimings] = useState<MarketTiming[]>([])
   const [todayTimings, setTodayTimings] = useState<TodayTiming[]>([])
@@ -203,6 +232,12 @@ export default function MarketTimingsPage() {
                         ) : (
                           <span className="font-mono">{timing.end_time}</span>
                         )}
+                        {editingExchange !== timing.exchange &&
+                          (timing.changes ?? []).map((change) => (
+                            <span key={change.from} className="block text-xs text-muted-foreground">
+                              {changeText(change)}
+                            </span>
+                          ))}
                       </TableCell>
                       <TableCell>
                         {editingExchange === timing.exchange ? (
@@ -348,15 +383,20 @@ export default function MarketTimingsPage() {
               <h4 className="font-semibold text-foreground mb-2">Equity Markets (NSE, BSE)</h4>
               <ul className="list-disc list-inside space-y-1">
                 <li>Pre-open session: 09:00 - 09:15</li>
-                <li>Normal market: 09:15 - 15:30</li>
-                <li>Post-close session: 15:40 - 16:00</li>
+                <li>
+                  Normal market: {hoursOn('NSE', today, todayTimings, timings) ?? '09:15 - 15:30'}
+                </li>
+                <li>Post-close session to 16:00, at the closing price</li>
               </ul>
             </div>
             <div>
               <h4 className="font-semibold text-foreground mb-2">F&O Markets (NFO, BFO)</h4>
               <ul className="list-disc list-inside space-y-1">
-                <li>Normal market: 09:15 - 15:30</li>
-                <li>Same timings as equity markets</li>
+                <li>
+                  Normal market:{' '}
+                  {hoursOn('NFO', today, todayTimings, timings) ?? '09:15 to the F&O close'}
+                </li>
+                <li>Trades on after the cash market closes</li>
               </ul>
             </div>
             <div>

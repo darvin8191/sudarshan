@@ -4,6 +4,12 @@
  * Since 3 Aug 2026 (NSE/CMTR/75479) a stock with derivatives stops continuous
  * trading at 15:15 and closes by auction: orders from 15:20, a random close in
  * 15:28-15:30, and the price at once (27 Oct 2026: every stock at 15:28:09).
+ * From 7 Dec 2026 every stock trades to 15:30 and the auction runs from 15:30
+ * to 15:40, order entry closing at a random moment from 15:38 to 15:40 (SEBI's
+ * circular of 15 Oct 2026): "price at about 15:40". Which stocks close by
+ * auction, and when, is the server's to say for each day (sessions.py, every
+ * stock from 7 Dec as sudarshan/regimes.py has it), so these words follow it
+ * with no rule of their own.
  * Until its auction's price comes, its last price is not "Real-time" and not
  * "Stale": it is waiting for the auction. The price that comes is the closing
  * auction price, and the stock's close for the day is the auction close.
@@ -23,7 +29,7 @@ const IST_MINUTE = new Intl.DateTimeFormat('en-IN', {
   hourCycle: 'h23',
 })
 
-/** "15:30": a moment as the clock in India shows it, to the minute. */
+/** "15:30" (or "15:40" from 7 Dec 2026): a moment as the clock in India shows it, to the minute. */
 function istMinute(at: number): string {
   return IST_MINUTE.format(at)
 }
@@ -34,7 +40,7 @@ export const AUCTION_PRICE = 'closing auction price'
 /** A stock's close for the day when it closes by auction. */
 export const AUCTION_CLOSE = 'auction close'
 
-/** From the end of continuous trading until the print: "Closing auction · price at about 15:30". */
+/** From the end of continuous trading until the print: "Closing auction · price at about 15:30" (15:40 from 7 Dec 2026). */
 export function auctionWaiting(auctionClose: number): string {
   return `Closing auction · price at about ${istMinute(auctionClose)}`
 }

@@ -257,11 +257,11 @@ def test_the_page_and_the_answer_give_the_hours_test_now_is_refused():
     assert "from 09:00 to 15:40 on a trading day" in message_for("market_hours")  # no day given
     assert "{" not in message_for("market_hours", date(2026, 12, 10))
     assert MESSAGES["crashed"] == message_for("crashed", date(2026, 12, 10))
+    # The page names the hours the status sends (``test.hours``), today's own.
     page = REPO / "frontend" / "src" / "sudarshan" / "pages" / "AutoLogin.tsx"
-    assert (
-        "(usually from 09:00 to 15:40 on a trading day; a special session has its own hours)"
-        in " ".join(page.read_text(encoding="utf-8").split())
-    )
+    source = " ".join(page.read_text(encoding="utf-8").split())
+    assert "(usually {testHours}; a special session has its own hours)" in source
+    assert "data.test.hours ?? 'from 09:00 to the F&O close on a trading day'" in source
 
 
 @pytest.mark.parametrize(

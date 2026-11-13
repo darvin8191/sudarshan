@@ -12,6 +12,14 @@
  * either failing leaves every chart without a calendar (which is how the
  * chart behaved before), and the answer is fetched once per IST day for the
  * whole page rather than per pane, per symbol or per render.
+ *
+ * SUDARSHAN: a timing row may carry `changes`, the days its close moves on by
+ * itself (the server derives them from sudarshan/regimes.py: an NFO or BFO row
+ * holding a shipped close ends at 15:45 from 7 Dec 2026). The weekly hours are
+ * the ones of the day the calendar is built for, and every weekday of the
+ * years the holiday list covers whose close differs gets its own window, so a
+ * candle before and after the change opens and ends on that day's clock.
+ * sudarshan/tests/regimes_vectors.json pins this against the server.
  */
 import {
   attachSessionShading,
@@ -44,7 +52,15 @@ export interface HolidayRow {
   open_exchanges: { exchange: string; start_time: number; end_time: number }[]
 }
 
-export type TimingRow = Pick<MarketTiming, 'exchange' | 'start_offset' | 'end_offset'>
+/** A row's close from a date on, as the server sends it (SUDARSHAN: `changes`). */
+export interface TimingChange {
+  from: string
+  end_offset: number
+}
+
+export type TimingRow = Pick<MarketTiming, 'exchange' | 'start_offset' | 'end_offset'> & {
+  changes?: readonly TimingChange[]
+}
 
 /** The exchange whose calendar an instrument follows: an index trades the hours of its exchange. */
 export function calendarExchange(exchange: string): string {
@@ -73,29 +89,59 @@ function sessionWindow(start: unknown, end: unknown, date: string): string | nul
   return `${hhmm(open.minutes)}-${hhmm(close.minutes)}`
 }
 
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
+
+/** Monday to Friday, for an ISO date read as a calendar date (no zone). */
+function isWeekday(date: string): boolean {
+  const [y, m, d] = date.split('-').map(Number)
+  const weekday = new Date(Date.UTC(y, m - 1, d)).getUTCDay()
+  return weekday >= 1 && weekday <= 5
+}
+
+/** Every ISO date of the given years, in order. */
+function datesOf(years: readonly number[]): string[] {
+  const found: string[] = []
+  for (const year of years) {
+    for (let at = Date.UTC(year, 0, 1); new Date(at).getUTCFullYear() === year; at += DAY_MS)
+      found.push(new Date(at).toISOString().slice(0, 10))
+  }
+  return found
+}
+
 /**
  * The calendar spec for one exchange, or null when the backend has no hours
  * for it (NCDEX and the global indices, for instance), in which case the
- * chart keeps working without a calendar.
+ * chart keeps working without a calendar. `day` is the IST date the calendar
+ * is built for (today by default): the weekly hours are that day's.
  */
 export function calendarSpec(
   exchange: string,
   timings: readonly TimingRow[],
-  holidays: readonly HolidayRow[]
+  holidays: readonly HolidayRow[],
+  day: string = istClock(Date.now()).date
 ): SessionCalendarSpec | null {
   const code = calendarExchange(exchange)
   const row = timings.find((t) => t.exchange === code)
   if (!row) return null
   const start = Number(row.start_offset)
-  const end = Number(row.end_offset)
-  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end > DAY_MS || end <= start)
-    return null
+  const valid = (end: number) => Number.isFinite(end) && end <= DAY_MS && end > start
+  if (!Number.isFinite(start) || start < 0 || !valid(Number(row.end_offset))) return null
+  // SUDARSHAN: the close on a date, after the changes from on or before it.
+  const changes = (row.changes ?? []).filter(
+    (c) => ISO_DATE.test(c.from) && valid(Number(c.end_offset))
+  )
+  const endOn = (date: string) =>
+    changes.reduce(
+      (end, c) => (c.from <= date ? Number(c.end_offset) : end),
+      Number(row.end_offset)
+    )
   const allDay = ROUND_THE_CLOCK.has(code)
   // 00:00 to 23:59:59 is how the backend writes a day without a close.
-  const window =
+  const windowTo = (end: number) =>
     start === 0 && end >= DAY_MS - 60_000
       ? '0000-0000'
       : `${hhmm(Math.floor(start / 60_000))}-${hhmm(Math.floor(end / 60_000))}`
+  const window = windowTo(endOn(ISO_DATE.test(day) ? day : istClock(Date.now()).date))
   const exceptions: Record<string, string[]> = {}
   if (!allDay) {
     for (const h of holidays) {
@@ -109,6 +155,14 @@ export function calendarSpec(
       if (open.length) exceptions[h.date] = open
       else if (h.closed_exchanges?.includes(code) || h.holiday_type === 'SPECIAL_SESSION')
         exceptions[h.date] = []
+    }
+    // SUDARSHAN: a weekday whose close differs from the weekly one opens on its own window.
+    if (changes.length && ISO_DATE.test(day)) {
+      for (const date of datesOf(yearsAround(day))) {
+        if (date in exceptions || !isWeekday(date)) continue
+        const own = windowTo(endOn(date))
+        if (own !== window) exceptions[date] = [own]
+      }
     }
   }
   return {
@@ -198,7 +252,7 @@ function calendarOf(source: Book, exchange: string): SessionCalendar | null {
   if (cached !== undefined) return cached
   let calendar: SessionCalendar | null = null
   try {
-    const spec = calendarSpec(exchange, source.timings, source.holidays)
+    const spec = calendarSpec(exchange, source.timings, source.holidays, source.day)
     calendar = spec ? new SessionCalendar(spec) : null
   } catch {
     calendar = null

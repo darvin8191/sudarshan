@@ -60,6 +60,8 @@ export interface MarketTiming {
   end_time: string
   start_offset: number
   end_offset: number
+  /** SUDARSHAN: the days this row's close moves on by itself (15:45 from 7 Dec 2026 for NFO and BFO). */
+  changes?: { from: string; end_offset: number; end_time: string }[]
 }
 
 export interface TodayTiming {
