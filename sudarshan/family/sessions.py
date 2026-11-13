@@ -71,12 +71,14 @@ def id_hash(session_id: str) -> str:
     return hashlib.sha256(session_id.encode("utf-8")).hexdigest()
 
 
-def mint(tx: Tx, member_id: int, device: Device, now: int) -> tuple[str, list[str]]:
+def mint(
+    tx: Tx, member_id: int, device: Device, now: int, max_devices: int = LIMITS["max_devices"]
+) -> tuple[str, list[str]]:
     """A new session for the member; its id (for the cookie, never stored) and the hashes of the
     sessions revoked to keep within the device limit (oldest first)."""
     revoked = []
     live = tx.sessions_live(member_id, now)
-    while len(live) >= LIMITS["max_devices"]:
+    while len(live) >= max_devices:
         oldest = live.pop(0)
         tx.session_revoke(oldest["id_hash"], now, "device_limit")
         audit.record(tx, at=now, actor="system", kind="session_revoked", member_id=member_id,
@@ -119,7 +121,12 @@ def verdict(tx: Tx, session_id: str | None, now: int) -> Session | FamilyError:
     commit: a session found expired is marked so (audited once), and a used one is touched."""
     if not session_id or len(session_id) > 200:
         return FamilyError("signed_out")
-    hashed = id_hash(session_id)
+    return judge(tx, id_hash(session_id), now)
+
+
+def judge(tx: Tx, hashed: str, now: int) -> Session | FamilyError:
+    """``verdict`` for a session known by its hash (an open socket's): the same checks, the same
+    marks."""
     row = tx.row("viewer_session", id_hash=hashed)
     if row is None:
         return FamilyError("signed_out")

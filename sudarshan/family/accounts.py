@@ -214,8 +214,11 @@ class Accounts:
         hasher: Hasher | None = None,
         notify: Notify | None = None,
         revoked: Revoked | None = None,
+        max_members: int = LIMITS["max_members"],
+        max_devices: int = LIMITS["max_devices"],
     ):
         self.store, self.clock = store, clock
+        self.max_members, self.max_devices = max_members, max_devices
         self.hasher = hasher or Hasher()
         self.notify: Notify = notify or (lambda kind, member, **facts: None)
         self.revoked: Revoked = revoked or (lambda hashes: None)
@@ -288,7 +291,8 @@ class Accounts:
             )
             return Outcome(FamilyError("signed_out", "suspended"))
         new_phone = not tx.label_seen(member_id, device.label, now - NEW_DEVICE_MS)
-        return _signed_in(tx, member, device, now, {"new_device": new_phone}, new_phone)
+        detail = {"new_device": new_phone}
+        return _signed_in(tx, member, device, now, detail, new_phone, self.max_devices)
 
     async def join_info(self, code: Any) -> dict[str, Any]:
         now = self.clock()
@@ -319,7 +323,10 @@ class Accounts:
 
         await self.store.read(before)
         hashed = await self.hasher.hash(password)
-        return await self._write(lambda tx, at: _join(tx, code, name, hashed, totp, device, at))
+        limit = self.max_devices
+        return await self._write(
+            lambda tx, at: _join(tx, code, name, hashed, totp, device, at, limit)
+        )
 
     async def logout(self, session: Session, everywhere: bool = False) -> Outcome:
         def decide(tx: Tx, now: int) -> Outcome:
@@ -407,7 +414,8 @@ class Accounts:
 
     async def member_create(self, args: dict[str, Any]) -> dict[str, Any]:
         def decide(tx: Tx, now: int) -> Outcome:
-            return Outcome(data=members.card(tx, members.create(tx, args, now), now))
+            made = members.create(tx, args, now, self.max_members)
+            return Outcome(data=members.card(tx, made, now))
 
         return (await self._write(decide)).data
 
@@ -534,8 +542,8 @@ def _failed(tx: Tx, member: dict[str, Any], credential: dict[str, Any], part: st
 
 
 def _signed_in(tx: Tx, member: dict[str, Any], device: Device, now: int, detail: dict[str, Any],
-               new_phone: bool) -> Outcome:  # fmt: skip
-    session_id, revoked = sessions.mint(tx, member["id"], device, now)
+               new_phone: bool, max_devices: int) -> Outcome:  # fmt: skip
+    session_id, revoked = sessions.mint(tx, member["id"], device, now, max_devices)
     hashed = sessions.id_hash(session_id)
     audit.record(tx, at=now, actor=audit.member_actor(member["id"]), kind="login_ok",
                  member_id=member["id"], session=hashed, ip_hash=device.place,
@@ -545,8 +553,8 @@ def _signed_in(tx: Tx, member: dict[str, Any], device: Device, now: int, detail:
     return Outcome(session_id=session_id, session=session, notices=notices, revoked=revoked)
 
 
-def _join(tx: Tx, code: Any, handle: str, hashed: str, totp: Any, device: Device,
-          now: int) -> Outcome:  # fmt: skip
+def _join(tx: Tx, code: Any, handle: str, hashed: str, totp: Any, device: Device, now: int,
+          max_devices: int) -> Outcome:  # fmt: skip
     invite, member = invites.usable(tx, code, now)
     if tx.handle_taken(handle, member["id"]):
         raise Invalid("handle_taken", field="handle")
@@ -571,6 +579,6 @@ def _join(tx: Tx, code: Any, handle: str, hashed: str, totp: Any, device: Device
         ip_hash=device.place,
         detail={"invite": invite["id"]},
     )
-    outcome = _signed_in(tx, joined, device, now, {"joined": True}, new_phone=False)
+    outcome = _signed_in(tx, joined, device, now, {"joined": True}, False, max_devices)
     outcome.notices.append(("invite_used", joined, {}))
     return outcome
