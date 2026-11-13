@@ -46,6 +46,28 @@ export function ruleFor(expiries: readonly Expiry[], date: string): ExpiryRule |
   return date === monthly[1]?.date ? 'next_month' : null
 }
 
+/**
+ * Where a rule stands among the open expiries, as the server moves it (`dynamic.pick_expiries`): the
+ * expiry it is on now (`on`), the one whose close moves it (`ends`: the nearest for Nearest and Next,
+ * this month's for both monthly rules), and the one it moves to (`to`, null when the contract list
+ * does not show it yet). Null when the rule names no open expiry. Every rule is relative, so a row
+ * kept on a picked strike still moves to another expiry, and the form says when (review M3).
+ */
+export function rollOf(
+  expiries: readonly Expiry[],
+  rule: ExpiryRule
+): { on: string; ends: string; to: string | null } | null {
+  const dates = expiries.map((each) => each.date)
+  const monthly = expiries.filter((each) => each.month).map((each) => each.date)
+  const [on, ends, to] = {
+    nearest: [dates[0], dates[0], dates[1]],
+    next: [dates[1], dates[0], dates[2]],
+    month: [monthly[0], monthly[0], monthly[1]],
+    next_month: [monthly[1], monthly[0], monthly[2]],
+  }[rule]
+  return on && ends ? { on, ends, to: to ?? null } : null
+}
+
 /** Said under Add as one row on a tab no rule can follow. */
 export const NO_RULE =
   'A row can follow the nearest, the next, this month’s or next month’s expiry only. Add CE and Add PE work on this one.'

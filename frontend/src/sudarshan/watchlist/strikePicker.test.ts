@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { atmOf, ruleFor } from './strikePicker'
+import { atmOf, rollOf, ruleFor } from './strikePicker'
 import type { Expiry } from './v2/types'
 
 describe('atmOf', () => {
@@ -40,7 +40,9 @@ describe('ruleFor', () => {
   ]
   // The same on 26 Nov, after the November monthly's close and before the end of November: the
   // server answers nearest 1 Dec, next 8 Dec, month 29 Dec, next_month 26 Jan (review M2).
-  const after = before.slice(1).map((each, i) => (i === 0 ? { ...each, label: 'Nearest 1 Dec' } : each))
+  const after = before
+    .slice(1)
+    .map((each, i) => (i === 0 ? { ...each, label: 'Nearest 1 Dec' } : each))
 
   it('says the first tab is Nearest and the second Next', () => {
     expect(ruleFor(before, '2026-11-24')).toBe('nearest')
@@ -70,8 +72,40 @@ describe('ruleFor', () => {
   it('has no rule for a weekly further out, a month after next, or a date not listed', () => {
     for (const date of ['2026-12-08', '2026-12-15', '2026-12-22', '2027-01-26', '2026-12-30'])
       expect(ruleFor(before, date)).toBeNull()
-    for (const date of ['2026-12-15', '2026-12-22'])
-      expect(ruleFor(after, date)).toBeNull()
+    for (const date of ['2026-12-15', '2026-12-22']) expect(ruleFor(after, date)).toBeNull()
+  })
+
+  it('says where each rule stands today, whose close moves it and where it goes (rollOf)', () => {
+    // On 18 Nov: next is 1 Dec today, and leaves it for 8 Dec when 24 Nov expires (review M3).
+    expect(rollOf(before, 'nearest')).toEqual({
+      on: '2026-11-24',
+      ends: '2026-11-24',
+      to: '2026-12-01',
+    })
+    expect(rollOf(before, 'next')).toEqual({
+      on: '2026-12-01',
+      ends: '2026-11-24',
+      to: '2026-12-08',
+    })
+    expect(rollOf(before, 'month')).toEqual({
+      on: '2026-11-24',
+      ends: '2026-11-24',
+      to: '2026-12-29',
+    })
+    expect(rollOf(before, 'next_month')).toEqual({
+      on: '2026-12-29',
+      ends: '2026-11-24',
+      to: '2027-01-26',
+    })
+    // On 26 Nov: this month's is 29 Dec, and next month's moves on 29 Dec to a month not listed yet.
+    expect(rollOf(after, 'month')).toEqual({
+      on: '2026-12-29',
+      ends: '2026-12-29',
+      to: '2027-01-26',
+    })
+    expect(rollOf(after, 'next_month')).toEqual({ on: '2027-01-26', ends: '2026-12-29', to: null })
+    expect(rollOf([], 'nearest')).toBeNull()
+    expect(rollOf(before.slice(0, 1), 'next')).toBeNull()
   })
 
   it('takes monthly-only expiries (a stock’s) in order: the third has no rule', () => {

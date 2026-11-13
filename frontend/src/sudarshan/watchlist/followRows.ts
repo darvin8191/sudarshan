@@ -8,9 +8,11 @@
  * `valid_until`, after a reconnect, on returning to the page and on the first tick after "waiting".
  * It never asks on a clock that repeats.
  */
+import { rollOf } from './strikePicker'
 import { CLOCK } from './ViewSheet'
 import type {
   Contract,
+  Expiry,
   ExpiryRule,
   FollowKind,
   OptRight,
@@ -147,10 +149,11 @@ export type FollowForm =
       sectionId: number | null
       /**
        * F12, the seam of F14's strike picker ("Add as one row"): `kind: 'strike_pair'` with `fixed` adds a
-       * row on this strike for ever, instead of the ATM plus an offset. `expiry` is the rule the picked
-       * expiry stands for (nearest when absent).
+       * row on this strike, instead of the ATM plus an offset. `expiry` is the rule the picked expiry
+       * stands for (nearest when absent); every rule is relative, so the row still moves to another
+       * expiry, and `expiries` (the open expiries the picker showed) lets the form say when (review M3).
        */
-      fixed?: { strike: number; expiry?: ExpiryRule }
+      fixed?: { strike: number; expiry?: ExpiryRule; expiries?: readonly Expiry[] }
     }
   | { mode: 'edit'; rowId: number }
   | { mode: 'remove'; rowId: number }
@@ -162,7 +165,7 @@ export interface Draft {
   expiry: ExpiryRule
   offset: number
   right: OptRight
-  /** F12: a row on one strike for ever (from the strike picker); null follows the ATM. */
+  /** F12: a row on one strike (from the strike picker), its expiry still moving by the rule; null follows the ATM. */
   strike: number | null
 }
 
@@ -182,13 +185,36 @@ export function draftOf(
   }
 }
 
-/** The preview line over the buttons: what the row will follow, in the words of the form. */
-export function previewOf(name: string, draft: Draft): string {
+/** The form's line for a row kept on one strike: the strike is fixed, the expiry is not (review M3). */
+export const fixedWords = (strike: number): string =>
+  `Strike ${num(strike)}, fixed: it does not move with the price.`
+
+/** When a row on a fixed strike moves to another expiry, when the dates are not known (an edit). */
+const MOVES: Record<ExpiryRule, string> = {
+  nearest: 'When it expires, this row moves to the next expiry.',
+  next: 'When the nearest expiry ends, this row moves to the one after it.',
+  month: "When it expires, this row moves to next month's expiry.",
+  next_month: "When this month's expiry ends, this row moves to the month after.",
+}
+
+/**
+ * The preview line over the buttons: what the row will follow, in the words of the form. A row on a
+ * fixed strike still moves to another expiry, because every rule the server keeps is relative (a rule
+ * on a date needs a schema step), so the line says the date it is on today and when it moves, from the
+ * open expiries the strike picker showed: "NIFTY 25,900 CE and PE as one row, next expiry (1 Dec
+ * today). When 24 Nov expires, this row moves to 8 Dec." (review M3).
+ */
+export function previewOf(name: string, draft: Draft, expiries?: readonly Expiry[]): string {
   const expiry = EXPIRIES.find((each) => each.rule === draft.expiry)?.words ?? ''
   if (draft.kind === 'month_future') return `${name} future, ${expiry}.`
   const side = draft.kind === 'strike_pair' ? 'CE and PE as one row' : draft.right // F12
-  if (draft.strike !== null)
-    return `${name} ${num(draft.strike)} ${side}, ${expiry}. The strike stays where it is.`
+  if (draft.strike !== null) {
+    const what = `${name} ${num(draft.strike)} ${side}, ${expiry}`
+    const roll = expiries ? rollOf(expiries, draft.expiry) : null
+    if (!roll) return `${what}. ${MOVES[draft.expiry]}`
+    const to = roll.to ? dayShort(roll.to) : 'the expiry after it'
+    return `${what} (${dayShort(roll.on)} today). When ${dayShort(roll.ends)} expires, this row moves to ${to}.`
+  }
   return `${name} ${offsetLabel(draft.offset)} ${side}, ${expiry}. The strike is picked from the price when the row is added, and moves with it.`
 }
 
