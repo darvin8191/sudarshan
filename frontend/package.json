@@ -68,6 +68,7 @@
     "openalgo-charts": "2.6.4",
     "openalgo-script": "0.8.1",
     "plotly.js-dist-min": "^3.3.1",
+    "qrcode-generator": "2.0.4",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-markdown": "^10.1.0",
