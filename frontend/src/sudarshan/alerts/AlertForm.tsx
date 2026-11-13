@@ -73,7 +73,7 @@ interface Picked {
   tick: string | null
 }
 
-interface Form {
+export interface Form {
   instrument: Picked | null
   kind: AlertKind
   op: PriceOp
@@ -95,7 +95,7 @@ interface Form {
   note: string
 }
 
-function initialForm(row: AlertRow | null, prefill: AlertPrefill | null): Form {
+export function initialForm(row: AlertRow | null, prefill: AlertPrefill | null): Form {
   const blank: Form = {
     instrument: null,
     kind: 'price',
@@ -151,7 +151,7 @@ function initialForm(row: AlertRow | null, prefill: AlertPrefill | null): Form {
   }
 }
 
-function paramsOf(form: Form): Params {
+export function paramsOf(form: Form): Params {
   if (form.kind === 'price') return { op: form.op, level: form.level.trim(), source: form.source }
   if (form.kind === 'move') {
     return { base: form.base, direction: form.move, percent: form.percent.trim() }
@@ -186,13 +186,13 @@ const KINDS: Array<{ value: AlertKind; label: string }> = [
   { value: 'vwap', label: 'VWAP' },
 ]
 const OPS = Object.entries(OP_WORDS).map(([value, label]) => ({ value: value as PriceOp, label }))
-const FREQUENCIES: Array<{ value: Frequency; label: string }> = [
+export const FREQUENCIES: Array<{ value: Frequency; label: string }> = [
   { value: 'once', label: 'Once' },
   { value: 'per_candle', label: 'Once per candle' },
   { value: 'at_close', label: 'At candle close' },
   { value: 'every_time', label: 'Every time' },
 ]
-const CANDLES: Array<{ value: Candle; label: string }> = [
+export const CANDLES: Array<{ value: Candle; label: string }> = [
   { value: 1, label: '1 min' },
   { value: 5, label: '5 min' },
   { value: 15, label: '15 min' },
@@ -200,9 +200,9 @@ const CANDLES: Array<{ value: Candle; label: string }> = [
   { value: 60, label: '60 min' },
   { value: 'day', label: 'Day' },
 ]
-const WAITS = [0, 60, 300, 900, 1800, 3600]
+export const WAITS = [0, 60, 300, 900, 1800, 3600]
 
-function waitWords(seconds: number): string {
+export function waitWords(seconds: number): string {
   if (seconds === 0) return 'No wait'
   if (seconds % 3600 === 0) return seconds === 3600 ? '1 hour' : `${seconds / 3600} hours`
   if (seconds % 60 === 0) return `${seconds / 60} min`
@@ -210,7 +210,7 @@ function waitWords(seconds: number): string {
 }
 
 /** The day today in India, YYYY-MM-DD, the earliest end date. */
-function istToday(): string {
+export function istToday(): string {
   return new Date(Date.now() + 5.5 * 3_600_000).toISOString().slice(0, 10)
 }
 
@@ -221,19 +221,19 @@ const DAY_MONTH = new Intl.DateTimeFormat('en-IN', {
 })
 
 /** An edit's end as it is now: the last day it works, or none of its own. */
-function endWords(endsAt: number | null): string {
+export function endWords(endsAt: number | null): string {
   // The end is the moment it stops, the midnight after its last day.
   return endsAt === null ? 'No end date' : `Works through ${DAY_MONTH.format(endsAt - 1)}`
 }
 
-const FIELD = 'flex flex-col gap-1.5'
-const LEGEND = 'pb-1 text-xs font-semibold text-[color:var(--text-secondary)]'
-const BOX = 'h-12 text-base'
-const SELECT =
+export const FIELD = 'flex flex-col gap-1.5'
+export const LEGEND = 'pb-1 text-xs font-semibold text-[color:var(--text-secondary)]'
+export const BOX = 'h-12 text-base'
+export const SELECT =
   'h-12 w-full rounded-md border border-input bg-card px-3 text-base outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50'
 
 /** A row of choices: one pressed; one that cannot be had is off, and says why under the row. */
-function Choices<T extends string | number>({
+export function Choices<T extends string | number>({
   legend,
   value,
   options,
@@ -287,7 +287,7 @@ function Choices<T extends string | number>({
 }
 
 /** A field: its label, for its control alone, then what is said under it. */
-function Field({
+export function Field({
   id,
   label,
   children,
@@ -310,7 +310,7 @@ function Field({
 }
 
 /** A field's own error from the answer: the server's sentence, with a mark beside it. */
-function FieldError({ id, text }: { id: string; text: string | null }) {
+export function FieldError({ id, text }: { id: string; text: string | null }) {
   if (!text) return null
   return (
     <p
@@ -986,7 +986,7 @@ export function toastAlertSet(row: AlertRow, go: (to: string) => void, created =
   })
 }
 
-const NO_ANSWER_SAVE =
+export const NO_ANSWER_SAVE =
   'No answer came, so this alert may or may not be saved. Your alerts are read again; look there before saving it again.'
 
 /** How recent a new alert must be to be this form's, when the alerts before the tap are not known. */
@@ -1042,7 +1042,7 @@ async function savedMeanwhile(
 }
 
 /** A kind as it starts: its own frequency, candle and wait (contract 1.3). */
-function kindDefaults(kind: AlertKind): Partial<Form> {
+export function kindDefaults(kind: AlertKind): Partial<Form> {
   const start = KIND_DEFAULTS[kind]
   return { kind, frequency: start.frequency, candle: start.candle, cooldown: start.cooldown }
 }

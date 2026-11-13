@@ -14,6 +14,8 @@ import type {
   Channel,
   Delivery,
   EventsPage,
+  GroupBrief,
+  GroupRow,
   MarketAlertPush,
   MarketAlertsState,
   MarketAlertsStatePush,
@@ -120,7 +122,8 @@ export function applyStatePush(
   }
   const removed = new Set(push.removed ?? [])
   const changed = new Map((push.alerts ?? []).map((row) => [row.id, row]))
-  let reread = changed.size === 0 && removed.size === 0
+  const groupsNamed = (push.groups?.length ?? 0) + (push.removed_groups?.length ?? 0) > 0
+  let reread = changed.size === 0 && removed.size === 0 && !groupsNamed
   const held = new Set(state.alerts.map((row) => row.id))
   for (const id of changed.keys()) if (!held.has(id)) reread = true
 
@@ -143,9 +146,59 @@ export function applyStatePush(
       fired_today: next.fired_today,
     })
   }
+  const applied = applyGroupPush(state.groups, push)
+  if (applied.reread) reread = true
   return {
-    state: { ...state, engine: push.engine ?? state.engine, alerts, server_time: push.server_time },
+    state: {
+      ...state,
+      engine: push.engine ?? state.engine,
+      alerts,
+      ...(applied.groups ? { groups: applied.groups } : {}),
+      server_time: push.server_time,
+    },
     reread,
+  }
+}
+
+/**
+ * The group cards after a push (M8.14): a card the push names as removed goes; a changed card
+ * takes the push's status, words and coverage. A group the cache does not hold, and a newer
+ * version than the cache's (an edit elsewhere changed its condition and words too), are read
+ * again; the cache keeps its own copy until then. A card's "could not read the list" words clear
+ * only when the push shows a later sync. `groups` is undefined when nothing changed.
+ */
+function applyGroupPush(
+  held: GroupRow[] | undefined,
+  push: Pick<MarketAlertsStatePush, 'groups' | 'removed_groups'>
+): { groups: GroupRow[] | undefined; reread: boolean } {
+  const changed = new Map((push.groups ?? []).map((brief) => [brief.id, brief]))
+  const removed = new Set(push.removed_groups ?? [])
+  if (changed.size === 0 && removed.size === 0) return { groups: undefined, reread: false }
+  const cards = held ?? []
+  let reread = false
+  for (const id of changed.keys()) if (!cards.some((card) => card.id === id)) reread = true
+  const groups = cards
+    .filter((card) => !removed.has(card.id))
+    .map((card) => {
+      const brief = changed.get(card.id)
+      if (!brief || brief.version < card.version) return card
+      if (brief.version > card.version) reread = true
+      return briefed(card, brief)
+    })
+  return { groups, reread }
+}
+
+function briefed(card: GroupRow, brief: GroupBrief): GroupRow {
+  const synced = (brief.synced_at ?? 0) > (card.synced_at ?? 0)
+  return {
+    ...card,
+    status: brief.status,
+    status_reason: brief.status_reason,
+    covered: brief.covered,
+    left_out: brief.left_out,
+    synced_at: brief.synced_at,
+    members: synced ? brief.covered : card.members,
+    follow: synced ? '' : card.follow,
   }
 }
 
@@ -183,4 +236,31 @@ export function putRow(state: MarketAlertsState, row: AlertRow): MarketAlertsSta
 /** An alert deleted, here or on another screen. */
 export function dropRow(state: MarketAlertsState, id: number): MarketAlertsState {
   return { ...state, alerts: state.alerts.filter((row) => row.id !== id) }
+}
+
+/** The server's answer to a make or a change of a list alert, in place of what the cache held. */
+export function putGroup(state: MarketAlertsState, group: GroupRow): MarketAlertsState {
+  const held = state.groups ?? []
+  const has = held.some((each) => each.id === group.id)
+  const groups = has
+    ? held.map((each) => (each.id === group.id && each.version <= group.version ? group : each))
+    : [...held, group]
+  const refs = { ...(state.groups_by_ref ?? {}) }
+  refs[group.ref] = [...new Set([...(refs[group.ref] ?? []), group.id])]
+  return { ...state, groups, groups_by_ref: refs }
+}
+
+/** A list alert deleted, here or on another screen, with its member alerts. */
+export function dropGroup(state: MarketAlertsState, id: number): MarketAlertsState {
+  const refs: Record<string, number[]> = {}
+  for (const [ref, ids] of Object.entries(state.groups_by_ref ?? {})) {
+    const kept = ids.filter((each) => each !== id)
+    if (kept.length > 0) refs[ref] = kept
+  }
+  return {
+    ...state,
+    groups: (state.groups ?? []).filter((each) => each.id !== id),
+    groups_by_ref: refs,
+    alerts: state.alerts.filter((row) => row.group_id !== id),
+  }
 }

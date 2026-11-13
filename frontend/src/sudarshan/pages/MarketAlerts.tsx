@@ -13,6 +13,7 @@ import { AlertFormSheet } from '@/sudarshan/alerts/AlertForm'
 import { AlertSheet } from '@/sudarshan/alerts/AlertSheet'
 import { droppedHere } from '@/sudarshan/alerts/actions'
 import { HistoryList } from '@/sudarshan/alerts/HistoryList'
+import { ListAlertFormSheet } from '@/sudarshan/alerts/ListAlertForm'
 import { LineText } from '@/sudarshan/alerts/lines'
 import { needsQuote, segmentOpen } from '@/sudarshan/alerts/measure'
 import { SettingsSheet } from '@/sudarshan/alerts/SettingsSheet'
@@ -44,6 +45,7 @@ const NOT_RECEIVING = {
 
 /** An alert whose sheet or form is open went on another screen. */
 const GONE = 'This alert was deleted.'
+const GROUP_GONE = 'This list alert was deleted.'
 
 const HEADER_BUTTON =
   'inline-flex min-h-12 items-center gap-1.5 rounded-[0.875rem] px-4 text-[0.9375rem] font-semibold outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:bg-muted disabled:text-[color:var(--text-tertiary)] disabled:shadow-[inset_0_0_0_1px_var(--border-strong)]'
@@ -139,15 +141,24 @@ export default function MarketAlerts() {
   // off) is closed once the alerts are known, rather than left open over nothing. An alert that
   // went on another screen says so; one deleted here has said so already.
   const enabled = state?.enabled === true
+  // A list alert (A6): its form needs market alerts on; editing one needs the group.
+  const groupId = overlay?.kind === 'group' ? overlay.id : null
+  const shownGroup =
+    groupId === null ? null : ((state?.groups ?? []).find((each) => each.id === groupId) ?? null)
   const orphan =
     overlay !== null &&
     state !== undefined &&
-    (overlay.kind === 'new' ? !enabled : overlay.kind !== 'settings' && selected === null)
+    (overlay.kind === 'new' || overlay.kind === 'list'
+      ? !enabled
+      : overlay.kind === 'group'
+        ? shownGroup === null
+        : overlay.kind !== 'settings' && selected === null)
   useEffect(() => {
     if (!orphan) return
-    if (shownId !== null && !droppedHere(shownId)) toast.info(GONE)
+    if (groupId !== null) toast.info(GROUP_GONE)
+    else if (shownId !== null && !droppedHere(shownId)) toast.info(GONE)
     close()
-  }, [orphan, close, shownId])
+  }, [orphan, close, shownId, groupId])
 
   const openAlert = useCallback((id: number) => open({ kind: 'alert', id }), [open])
   const editAlert = useCallback((id: number) => open({ kind: 'edit', id }), [open])
@@ -296,6 +307,16 @@ export default function MarketAlerts() {
         onEdit={editAlert}
       />
       {overlay?.kind === 'new' && enabled && <AlertFormSheet onClose={close} onSaved={saved} />}
+      {overlay?.kind === 'list' && enabled && (
+        <ListAlertFormSheet
+          key={`${overlay.ref}`}
+          target={{ ref: overlay.ref, name: overlay.name, count: overlay.count, fed: overlay.fed }}
+          onClose={close}
+        />
+      )}
+      {overlay?.kind === 'group' && shownGroup && (
+        <ListAlertFormSheet key={shownGroup.id} group={shownGroup} onClose={close} />
+      )}
       {overlay?.kind === 'settings' && <SettingsSheet onClose={close} />}
       {overlay?.kind === 'edit' && selected && (
         <AlertFormSheet key={selected.id} row={selected} onClose={close} onSaved={saved} />
