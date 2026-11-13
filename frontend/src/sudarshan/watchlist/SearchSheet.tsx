@@ -9,7 +9,7 @@ import { SEARCH_DEBOUNCE_MS, SEARCH_LIMIT, SEARCH_MIN_LENGTH } from './AddSymbol
 import { BottomSheet } from './BottomSheet'
 import type { FollowForm } from './followRows'
 import { clearRecents, pushRecent, type Recent, readRecents } from './recents'
-import { CHIPS, GROUP_TITLE, runsOf, underlyingExchange } from './searchSheet'
+import { CHIPS, GROUP_TITLE, runsOf } from './searchSheet'
 import { MAX_ITEMS } from './useWatchlists'
 import { callOp } from './v2/api'
 import type { Hit, Segment } from './v2/types'
@@ -151,7 +151,7 @@ export function SearchSheet({
     void add(hit.contract.symbol, hit.contract.exchange, hit.title, hit.detail)
 
   const underlying = answer?.underlying ?? null
-  const base = underlying ? underlyingExchange(underlying, hits) : null
+  const base = underlying ? (answer?.underlying_exchange ?? null) : null // the master's, as the server sent it
   const follow = (kind: 'atm_option' | 'month_future') =>
     underlying &&
     base &&

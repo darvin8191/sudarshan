@@ -154,6 +154,7 @@ beforeEach(() => {
       { group: 'indices', title: 'NIFTY', detail: 'NSE_INDEX', added: false, contract: NIFTY },
     ],
     underlying: 'NIFTY',
+    underlying_exchange: 'NSE_INDEX',
     suggestion: null,
   }))
 })

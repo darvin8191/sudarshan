@@ -46,6 +46,7 @@ const answer = (over: Partial<Search> = {}): Search => ({
   understood: '',
   hits: [],
   underlying: null,
+  underlying_exchange: null,
   suggestion: null,
   ...over,
 })
@@ -199,7 +200,11 @@ describe('the answer, as sent', () => {
 
   it('gives every control at least 48 dp, and the rows 56', async () => {
     b().on('search', () =>
-      answer({ hits: [hit('indices', 'NIFTY'), hit('stocks', 'SBIN')], underlying: 'NIFTY' })
+      answer({
+        hits: [hit('indices', 'NIFTY'), hit('stocks', 'SBIN')],
+        underlying: 'NIFTY',
+        underlying_exchange: 'NSE_INDEX',
+      })
     )
     mount({}, [])
     await type('NIFTY')
@@ -308,14 +313,26 @@ describe('Add and Recent', () => {
 
 describe('an underlying with options', () => {
   it('shows Pick a strike disabled while F14 is not wired', async () => {
-    b().on('search', () => answer({ underlying: 'NIFTY', hits: [hit('indices', 'NIFTY')] }))
+    b().on('search', () =>
+      answer({
+        underlying: 'NIFTY',
+        underlying_exchange: 'NSE_INDEX',
+        hits: [hit('indices', 'NIFTY')],
+      })
+    )
     mount()
     await type('NIFTY')
     expect(screen.getByRole('button', { name: 'Pick a strike' })).toBeDisabled()
   })
 
   it('opens F11’s form for the ATM row and the FUT row with the underlying and its exchange', async () => {
-    b().on('search', () => answer({ underlying: 'NIFTY', hits: [hit('indices', 'NIFTY')] }))
+    b().on('search', () =>
+      answer({
+        underlying: 'NIFTY',
+        underlying_exchange: 'NSE_INDEX',
+        hits: [hit('indices', 'NIFTY')],
+      })
+    )
     const { onFollow } = mount()
     await type('NIFTY')
     fireEvent.click(screen.getByRole('button', { name: 'Add ATM row' }))
@@ -336,20 +353,41 @@ describe('an underlying with options', () => {
     })
   })
 
-  it('reads the exchange from where the options trade when no cash hit came back', async () => {
+  it.each([
+    ['NIFTY', 'NSE_INDEX'],
+    ['RELIANCE', 'NSE'],
+    ['SENSEX', 'BSE_INDEX'],
+  ])('takes the exchange of %s from the server, as sent', async (underlying, exchange) => {
+    // The hits say nothing of it: the answer's own field is what is used.
     b().on('search', () =>
-      answer({ underlying: 'RELIANCE', hits: [hit('options', 'RELIANCE24NOV262900CE')] })
+      answer({
+        underlying,
+        underlying_exchange: exchange,
+        hits: [hit('options', `${underlying}CE`)],
+      })
     )
     const { onFollow } = mount()
-    await type('RELIANCE 2900 CE')
+    await type(`${underlying} 2900 CE`)
     fireEvent.click(screen.getByRole('button', { name: 'Add ATM row' }))
-    expect(onFollow).toHaveBeenCalledWith(
-      expect.objectContaining({ underlying: 'RELIANCE', exchange: 'NSE' })
-    )
+    expect(onFollow).toHaveBeenCalledWith(expect.objectContaining({ underlying, exchange }))
+  })
+
+  it('offers no row to follow and no strike picker when the answer has no underlying', async () => {
+    b().on('search', () => answer({ hits: [hit('stocks', 'SBIN')] }))
+    mount()
+    await type('SBIN')
+    expect(screen.queryByRole('button', { name: 'Add ATM row' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Pick a strike' })).toBeNull()
   })
 
   it('opens F14’s picker with the underlying and its exchange once it is wired', async () => {
-    b().on('search', () => answer({ underlying: 'NIFTY', hits: [hit('indices', 'NIFTY')] }))
+    b().on('search', () =>
+      answer({
+        underlying: 'NIFTY',
+        underlying_exchange: 'NSE_INDEX',
+        hits: [hit('indices', 'NIFTY')],
+      })
+    )
     const onPickStrike = vi.fn()
     mount({ onPickStrike })
     await type('NIFTY')

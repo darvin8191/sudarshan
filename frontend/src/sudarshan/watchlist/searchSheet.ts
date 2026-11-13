@@ -28,27 +28,3 @@ export function runsOf(hits: readonly Hit[]): Array<{ group: Group; hits: Hit[] 
   }
   return runs
 }
-
-const NSE_INDICES = new Set(['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'NIFTYNXT50'])
-const BSE_INDICES = new Set(['SENSEX', 'BANKEX', 'SENSEX50'])
-
-/**
- * The exchange of the underlying a row can follow (NSE_INDEX, NSE, BSE_INDEX or BSE), or null when it is
- * not one the server follows. The answer's own cash hit says it; else it is read from where the options
- * trade (NFO or BFO) and whether the name is an index.
- */
-export function underlyingExchange(underlying: string, hits: readonly Hit[]): string | null {
-  const name = underlying.toUpperCase()
-  const cash = hits
-    .filter(
-      (h) =>
-        (h.group === 'stocks' || h.group === 'indices') && h.contract.symbol.toUpperCase() === name
-    )
-    .map((h) => h.contract.exchange)
-  const seen = ['NSE_INDEX', 'NSE', 'BSE_INDEX', 'BSE'].find((x) => cash.includes(x))
-  if (seen) return seen
-  const options = hits.find((h) => h.group === 'options')?.contract.exchange
-  if (options === 'NFO') return NSE_INDICES.has(name) ? 'NSE_INDEX' : 'NSE'
-  if (options === 'BFO') return BSE_INDICES.has(name) ? 'BSE_INDEX' : 'BSE'
-  return null
-}
