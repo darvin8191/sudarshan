@@ -262,7 +262,7 @@ of what the server cannot rebuild:
 | --- | --- |
 | `db/*.db` | OpenAlgo's databases (`openalgo.db`, `sandbox.db`, `logs.db`, ...) |
 | `db/sudarshan-*/` | SUDARSHAN's own folders under `db/`, the sealed owner vault included, with their modes kept (folder 700, files 600) |
-| `ring/sudarshan-*/*.db` | the ring's databases from `/var/lib` (alerts, market state, later portfolio and screener) |
+| `ring/sudarshan-*/*.db` | the ring's databases from `/var/lib` (alerts, market state, later portfolio and screener); the family view's store as the copy it leaves for this job, `sudarshan-family-export/family-copy.db` (the only file taken from that folder). The family view's own folder belongs to its own account and is closed to this job: it is passed over by name, never counted as a folder that could not be read |
 | `etc/sudarshan/` | the machine keys, the settings and the NSE day files |
 | `app/openalgo.env` | OpenAlgo's `.env`: without its keys a restored `openalgo.db` and the vault cannot be read |
 | `MANIFEST.json` | written last: every file with its size and SHA-256, the release installed, anything that could not be saved |

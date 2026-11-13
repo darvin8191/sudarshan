@@ -9,7 +9,9 @@ What goes in, of what exists (a source that is there and cannot be read makes a 
   db/sudarshan-*/            SUDARSHAN's own folders under db/ as they are (the sealed vault: the
                              folder 700, its files 600, kept as such inside the archive)
   /etc/sudarshan/            the machine keys and settings, the NSE day files
-  /var/lib/sudarshan-*/*.db  the ring's databases (alerts.db, market.db, ...)
+  /var/lib/sudarshan-*/*.db  the ring's databases (alerts.db, market.db, ...); the family service's
+                             store as the copy it leaves for this job
+                             (sudarshan-family-export/family-copy.db), its own folder never
   the app's .env             without it a restored openalgo.db and the vault cannot be decrypted
                              (the archive therefore holds the keys that protect it: keep it as
                              private as the .env itself, and encrypt it before it leaves the server)
@@ -142,6 +144,14 @@ FORMAT = 1
 DB_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.db")
 FILE_NAME = re.compile(r"[A-Za-z0-9._-][A-Za-z0-9._-]{0,127}")
 OWN_DIR = re.compile(r"sudarshan-[a-z0-9-]{1,60}")
+#: The family service's own state folder (P6) belongs to its own account and is closed (0700) to
+#: this job, which runs as sudarshan: it is passed over by name, never counted as a folder that could
+#: not be read. The family service leaves a copy of its store for this job in its export folder
+#: (cross-design Y9), and that copy is the one file taken from there: the folder is written by the
+#: family account, which takes input from outside, so nothing else it holds is packed.
+FAMILY_STATE = "sudarshan-family"
+FAMILY_EXPORT = "sudarshan-family-export"
+FAMILY_COPY = "family-copy.db"
 SIDE_FILES = (".db-wal", ".db-shm", ".db-journal")  # a database's own, never packed apart from it
 MAX_PLAIN_FILE = 32 << 20  # a plain file bigger than this is not a key or a setting
 MAX_PLAIN_TOTAL = 64 << 20
@@ -443,17 +453,20 @@ def _add_sealed(found: Found, folder: os.DirEntry, info: os.stat_result) -> None
 
 
 def _add_ring(found: Found, settings: Settings) -> None:
-    """The databases in the state folders of the ring's services (not this job's own)."""
+    """The databases in the state folders of the ring's services (not this job's own, and not the
+    family service's, whose store comes as the copy it leaves in its export folder)."""
     own_state = settings.state_dir.resolve()
     for entry in _entries(settings.ring_var, found, "ring"):
         info = _stat(entry)
-        if not _is_dir(info) or not OWN_DIR.fullmatch(entry.name):
+        if not _is_dir(info) or not OWN_DIR.fullmatch(entry.name) or entry.name == FAMILY_STATE:
             continue
         if Path(entry.path).resolve() == own_state:
             continue
         for inner in _entries(Path(entry.path), found, f"ring/{entry.name}"):
             inner_info = _stat(inner)
             if not _is_file(inner_info):
+                continue
+            if entry.name == FAMILY_EXPORT and inner.name != FAMILY_COPY:
                 continue
             if DB_NAME.fullmatch(inner.name):
                 _add_folder(found, f"ring/{entry.name}", info)
