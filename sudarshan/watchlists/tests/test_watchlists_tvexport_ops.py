@@ -237,6 +237,42 @@ def test_future_rows_atm_rows_and_strike_rows(client, monkeypatch):
     assert any(w.startswith("These are futures of one month") for w in d["words"])
 
 
+def test_index_futures_and_bse_contracts_wait_for_a_checked_form(client, monkeypatch):
+    """Review M3: until a real TradingView file confirms how TradingView names them (W-5), the
+    futures of an index other than NIFTY and BANKNIFTY and every BSE contract are left out,
+    counted and named. Which futures are an index's is the master's answer (review M1): NEWINDEX
+    (synthetic) is one only the master names."""
+    from sudarshan import index_contracts
+
+    extra = [cash("NEWINDEX", "NSE_INDEX"),
+             fo("NEWINDEX26NOV26FUT", "NEWINDEX", "NFO", "FUT", "24-NOV-26"),
+             fo("SENSEX26NOV2680000CE", "SENSEX", "BFO", "CE", "26-NOV-26", 80000.0)]  # fmt: skip
+    snap = Snap(list(make_snap().by_exchange["ALL"]) + extra)
+    monkeypatch.setattr(master, "openalgo_snapshot", lambda: snap)
+    master.shared().drop()
+    known = index_contracts.KNOWN
+    named = known._replace(indices=known.indices | {"NEWINDEX"})
+    monkeypatch.setattr(index_contracts, "underlyings", lambda: named)
+    lid = make_list([("NFO", "NIFTY26NOV26FUT"), ("NFO", "FINNIFTY26NOV26FUT"),
+                     ("BFO", "SENSEX26NOV26FUT"), ("NFO", "NEWINDEX26NOV26FUT"),
+                     ("BFO", "SENSEX26NOV2680000CE"), ("NSE", "RELIANCE")])  # fmt: skip
+    add_row(client, lid, **follow("month", underlying="FINNIFTY"))
+    add_row(client, lid, **follow("month", underlying="BANKNIFTY"))
+    d = data(export(client, f"list:{lid}"))
+    assert d["text"] == "NSE:BANKNIFTY1!,NSE:NIFTY1!,NSE:RELIANCE" and d["symbols"] == 3
+    assert [(x["token"], x["reason"]) for x in d["left_out"]] == [
+        ("FINNIFTY", "unchecked_future"), ("NFO:FINNIFTY26NOV26FUT", "unchecked_future"),
+        ("BFO:SENSEX26NOV26FUT", "unchecked_future"), ("NFO:NEWINDEX26NOV26FUT", "unchecked_future"),
+        ("BFO:SENSEX26NOV2680000CE", "unchecked_option"),
+    ]  # fmt: skip
+    assert d["words"][-1] == (
+        "Left out until their TradingView form is checked: 4 index futures (FINNIFTY, "
+        "NFO:FINNIFTY26NOV26FUT, BFO:SENSEX26NOV26FUT, NFO:NEWINDEX26NOV26FUT) and 1 BSE option "
+        "(BFO:SENSEX26NOV2680000CE)."
+    )
+    assert not any("CNXFINANCE" in w or "BSE:SENSEX" in w for w in [d["text"], *d["words"]])
+
+
 def test_an_atm_row_with_no_price_is_left_out_in_words(client):
     lid = make_list([("NSE", "SBIN")])
     add_row(client, lid, kind="atm_option", underlying="NIFTY", underlying_exchange="NSE_INDEX",

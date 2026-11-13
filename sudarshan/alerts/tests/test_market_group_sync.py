@@ -325,6 +325,87 @@ def test_a_future_that_expires_is_asked_again_after_its_end(alerts, quick):
     run(scenario)
 
 
+def test_a_re_ask_at_a_futures_end_stays_when_the_list_cannot_be_read(alerts, quick):
+    """Review L4: the re-ask was dropped before the read, so a read that failed at the roll left
+    the group on the expired future until the lists version next moved or the morning sync."""
+
+    async def scenario():
+        clock = Clock(ist(2026, 10, 21, 10, 0))
+        async with FakeFeed(clock) as feed, FakeOpenAlgo() as notify:
+            settings = alerts(notify)
+            group = make_group(settings, clock, [1])
+            soon = ms(clock()) + 5_000
+            stub = StubMembers({REF: [row(1, valid_until=soon)]})
+            office, rt, task = await ready(settings, feed, clock, stub)
+            await office.sync(group["id"])
+            assert office._ask == {group["id"]: soon}
+            clock.advance(6)
+            stub.down = True  # OpenAlgo does not answer at the roll
+            office._group_next = 0
+            office._group_step(rt.now_ms())
+            await rt.group_task
+            assert office._ask == {group["id"]: soon}  # kept: the next check asks again
+            stub.down = False
+            stub.lists[REF] = [row(2)]  # the next contract
+            office._group_next = 0
+            office._group_step(rt.now_ms())
+            await rt.group_task
+            assert members_of(settings, group["id"]) == ["S2"]
+            assert group["id"] not in office._ask
+            await closed(rt, task)
+
+    run(scenario)
+
+
+def test_a_version_moved_for_another_list_writes_the_version_only_and_pushes_nothing(alerts, quick):
+    """Review L1: any list's change, a screener apply or a restart moves the lists version, and
+    every group then wrote sync_group and pushed a brief though its own list held what it held."""
+
+    async def scenario():
+        clock = Clock(ist(2026, 10, 21, 10, 0))
+        async with FakeFeed(clock) as feed, FakeOpenAlgo() as notify:
+            settings = alerts(notify)
+            group = make_group(settings, clock, [1, 2])
+            stub = StubMembers({REF: [row(1), row(2)]}, version="v1")
+            office, rt, task = await ready(settings, feed, clock, stub)
+            await office.sync(group["id"])  # in step with v1
+            before = record(settings, "group", group["id"])
+            pushed, syncs = [], []
+            real_push, real_sync = office._push, rt.store.sync_group
+            office._push = lambda now, *a, **k: pushed.append(k) or real_push(now, *a, **k)
+            rt.store.sync_group = lambda *a, **k: syncs.append(1) or real_sync(*a, **k)
+            clock.advance(60)
+            stub.current = "v2"  # another list changed
+            brief = await office.sync(group["id"])
+            after = record(settings, "group", group["id"])
+            assert after["synced_version"] == "v2" and after["synced_at"] == ms(clock())
+            assert syncs == [] and pushed == []  # no sync_group, no brief
+            assert (after["covered"], after["left_out"], after["version"], after["updated_at"]) == (
+                before["covered"],
+                before["left_out"],
+                before["version"],
+                before["updated_at"],
+            )
+            assert brief["covered"] == 2
+            assert members_of(settings, group["id"]) == ["S1", "S2"]
+            stub.lists[REF] = [row(1)]  # its own list changes: written and pushed as before
+            stub.current = "v3"
+            await office.sync(group["id"])
+            assert syncs == [1] and len(pushed) == 1
+            assert members_of(settings, group["id"]) == ["S1"]
+            await closed(rt, task)
+
+    run(scenario)
+
+
+def test_the_members_answer_carries_the_refs_own_version():
+    got = members_mod.read({"status": "ok", "data": {"version": "b:4", "ref_version": "0a1b2c3d4e5f",
+                                                     "rows": [], "left_out": []}})  # fmt: skip
+    assert got.ref_version == "0a1b2c3d4e5f" and got.version == "b:4"
+    assert members_mod.read({"status": "ok", "data": {"version": "b:4"}}).ref_version is None
+    assert members_mod.read({"status": "ok", "data": {"ref_version": 7}}).ref_version is None
+
+
 def test_the_sealed_route_is_asked_with_its_op_and_its_answers_are_read(monkeypatch):
     fernet = Fernet(Fernet.generate_key())
     seen: list[dict] = []

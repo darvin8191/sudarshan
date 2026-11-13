@@ -11,6 +11,7 @@ slices, so the caller can yield between them).
 from __future__ import annotations
 
 import re
+from collections.abc import Collection
 from typing import Any, NamedTuple
 
 from sudarshan.watchlists import dynamic, expiry
@@ -280,9 +281,11 @@ def _order_key(price):
 
 def search(
     index: Index, query: str, *, price: float | None = None, now_ms: int, segment: str = "all",
-    limit: int = MAX_HITS, closes: dict[str, int] | None = None,
+    limit: int = MAX_HITS, closes: dict[str, int] | None = None, indices: Collection[str],
 ) -> Result:  # fmt: skip
-    """Rows for a query, grouped and ordered as the design says; at most ``limit`` (50)."""
+    """Rows for a query, grouped and ordered as the design says; at most ``limit`` (50).
+    ``indices`` are the index underlyings the master lists (review M1): which expiries are still
+    open on an expiry day depends on it from 7 Dec 2026."""
     p = parse(query)
     limit = min(limit, MAX_HITS)
     if "isin" in p:
@@ -298,11 +301,11 @@ def search(
                 break
     wants_options = bool(p["side"] or p["strike"] is not None or "atm" in p or segment == "options")
     if name is None:
-        return _by_name(index, " ".join(words), segment, limit, now_ms, closes)
+        return _by_name(index, " ".join(words), segment, limit, now_ms, closes, indices)
     k = key_of(name)
     cash = sorted(index.cash.get(k, []), key=lambda r: (r.exchange.endswith("BSE"), r.exchange))
     u = index.display.get(k, name)
-    ix = expiry.is_index(u)
+    ix = expiry.is_index(u, indices)
     opt_by = index.options.get(u, {})
     spec = p.get("expiry")
     rows: list = []
@@ -363,7 +366,9 @@ def _first_live(futures, now_ms: int, closes, index: bool = False) -> list:
     return live[:1]
 
 
-def _by_name(index: Index, text: str, segment: str, limit: int, now_ms: int, closes) -> Result:
+def _by_name(
+    index: Index, text: str, segment: str, limit: int, now_ms: int, closes, indices
+) -> Result:
     """No underlying was named: exact symbol, then prefix, then substring, then company name."""
     k = key_of(text)
     und = Understood()
@@ -373,7 +378,7 @@ def _by_name(index: Index, text: str, segment: str, limit: int, now_ms: int, clo
     for sym, shown in index.display.items():
         tier = 0 if sym == k else 1 if sym.startswith(k) else 2 if k in sym else None
         rows = index.cash.get(sym) or _first_live(
-            index.futures.get(shown, []), now_ms, closes, expiry.is_index(shown)
+            index.futures.get(shown, []), now_ms, closes, expiry.is_index(shown, indices)
         )
         for r in rows if tier is not None else ():
             rank[id(r)] = (tier, r)
