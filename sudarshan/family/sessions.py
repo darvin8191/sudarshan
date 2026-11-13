@@ -71,12 +71,14 @@ def id_hash(session_id: str) -> str:
     return hashlib.sha256(session_id.encode("utf-8")).hexdigest()
 
 
-def mint(tx: Tx, member_id: int, device: Device, now: int) -> tuple[str, list[str]]:
+def mint(
+    tx: Tx, member_id: int, device: Device, now: int, max_devices: int = LIMITS["max_devices"]
+) -> tuple[str, list[str]]:
     """A new session for the member; its id (for the cookie, never stored) and the hashes of the
     sessions revoked to keep within the device limit (oldest first)."""
     revoked = []
     live = tx.sessions_live(member_id, now)
-    while len(live) >= LIMITS["max_devices"]:
+    while len(live) >= max_devices:
         oldest = live.pop(0)
         tx.session_revoke(oldest["id_hash"], now, "device_limit")
         audit.record(tx, at=now, actor="system", kind="session_revoked", member_id=member_id,
