@@ -360,7 +360,8 @@ def test_health_carries_counts_and_states_and_no_one(tmp_path):
             assert status == 200 and doc["service"] == "sudarshan-family"
             state = doc["family_state"]
             assert (state["enabled"], state["members"], state["sessions"]) == (True, 2, 0)
-            assert state["store_version"] == 1 and state["jobs"] == {"prune": "running"}
+            assert state["store_version"] == 1
+            assert state["jobs"] == {"prune": "running", "sockets": "running"}
             text = json.dumps(doc)
             assert not re.search(r"[0-9a-f]{16,}", text), "an id or a hash on /health"
             assert "Member" not in text and "endpoint" not in text and "handle" not in text

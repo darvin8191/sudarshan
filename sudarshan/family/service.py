@@ -34,6 +34,7 @@ from .config import ConfigError, Keys, Settings, setup_logging
 from .errors import FamilyError, SchemaTooNew, StoreError
 from .listener import Listener, Request, Response, Router
 from .store import DB_FILENAME, FamilyStore
+from .viewer_api import ViewerApi
 
 log = logging.getLogger("sudarshan.family")
 
@@ -41,6 +42,9 @@ log = logging.getLogger("sudarshan.family")
 PORT_RETRY_S = 60.0
 #: Ended sessions older than 90 days are forgotten this often.
 PRUNE_EVERY_S = 6 * 3600.0
+#: The open sockets' sessions are checked this often: one that ended by the clock, or by a change
+#: made elsewhere, closes within this (a revoke made here closes its sockets at once).
+SWEEP_EVERY_S = 2.0
 Job = Callable[["FamilyService"], Awaitable[None]]
 
 
@@ -90,7 +94,9 @@ class FamilyService(Router):
             off_words=lambda: str(self.off_error or FamilyError("off")),
         )
         self.jobs: dict[str, asyncio.Task] = {}
-        self._job_makers: dict[str, Job] = {"prune": _prune} if jobs is None else jobs
+        self._job_makers: dict[str, Job] = (
+            {"prune": _prune, "sockets": _sweep} if jobs is None else jobs
+        )
         self._retry_s = port_retry_s
         self._state = "starting"
         self._stop = asyncio.Event()
@@ -249,6 +255,8 @@ class FamilyService(Router):
         self.accounts = Accounts(self.store, clock=self.clock, hasher=self.hasher,
                                  revoked=self.revoked, max_members=self.settings.max_members,
                                  max_devices=self.settings.max_devices)  # fmt: skip
+        if isinstance(self.viewer, Viewer):  # a test may have seated its own
+            self.viewer = ViewerApi(self.accounts, self.keys.store)
 
     def _keep_off(self, error: FamilyError) -> None:
         self.enabled, self.off_error = False, error
@@ -289,6 +297,32 @@ async def _prune(service: FamilyService) -> None:
             except StoreError as exc:
                 log.error("old sessions could not be forgotten this time (%s)", exc.cause)
         await asyncio.sleep(PRUNE_EVERY_S)
+
+
+async def _sweep(service: FamilyService) -> None:
+    """Close the sockets of sessions that no longer sign their member in, every two seconds."""
+    while True:
+        await asyncio.sleep(SWEEP_EVERY_S)
+        hashes = service.registry.sessions()
+        if not hashes or service.store is None:
+            continue
+        now = service.clock()
+
+        try:
+            gone = await service.store.write(
+                lambda tx, hashes=hashes, now=now: _ended(tx, hashes, now)
+            )
+        except StoreError as exc:
+            log.error("the open sockets could not be checked this time (%s)", exc.cause)
+            continue
+        if gone:
+            service.registry.close_sessions(gone)
+
+
+def _ended(tx: store_module.Tx, hashes: list[str], now: int) -> list[str]:
+    """Which of these sessions no longer sign their member in (an ended one is marked, a used
+    one touched, as any check does)."""
+    return [h for h in hashes if isinstance(sessions.judge(tx, h, now), FamilyError)]
 
 
 async def _run_with_signals(service: FamilyService) -> None:

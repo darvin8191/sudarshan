@@ -121,7 +121,12 @@ def verdict(tx: Tx, session_id: str | None, now: int) -> Session | FamilyError:
     commit: a session found expired is marked so (audited once), and a used one is touched."""
     if not session_id or len(session_id) > 200:
         return FamilyError("signed_out")
-    hashed = id_hash(session_id)
+    return judge(tx, id_hash(session_id), now)
+
+
+def judge(tx: Tx, hashed: str, now: int) -> Session | FamilyError:
+    """``verdict`` for a session known by its hash (an open socket's): the same checks, the same
+    marks."""
     row = tx.row("viewer_session", id_hash=hashed)
     if row is None:
         return FamilyError("signed_out")
