@@ -1,13 +1,26 @@
-// SUDARSHAN P6 D2: a placeholder for a screen another lane builds (D5). It says in one
-// sentence that the screen is not ready, so a route that is registered never shows a blank page.
-// The lane that builds the screen replaces this file's body and keeps its name and default export.
+// SUDARSHAN P6 D5 (M6.7): the member's view of the owner's order book. Read only; the marked
+// `readOnly` path of OrderCards carries it. A member whose mask hides orders is told so and
+// nothing is read for them: the screen is absent from their menu, and a direct visit is not a
+// way round it.
+
+import { OrderCards } from '@/sudarshan/books/cards/OrderCards'
+import { EmptyCard } from '@/sudarshan/books/cards/parts'
+import { NOT_SHARED } from '@/sudarshan/books/cards/ReadOnlyOrders'
+import type { MaskedOrder } from '../ordersView'
+import { useFamilyMeOptional } from '../session'
+import { useFamilyBoard } from '../useBoard'
+import { useFamilyScreen } from '../useBook'
+
+function Orders() {
+  useFamilyScreen('orders')
+  const board = useFamilyBoard<MaskedOrder>('orders')
+  return <OrderCards {...board} />
+}
+
 export default function FamilyOrders() {
-  return (
-    <section className="flex flex-col gap-2 rounded-[1.125rem] border bg-card px-4 py-5 shadow-[var(--shadow-card)]">
-      <h2 className="text-base font-bold">Orders</h2>
-      <p className="text-sm text-[color:var(--text-secondary)]">
-        This screen is not ready yet. It will appear here in a later update.
-      </p>
-    </section>
-  )
+  const me = useFamilyMeOptional()
+  if (me && (me.hidden.includes('orders') || !me.privacy.orders)) {
+    return <EmptyCard title={NOT_SHARED} />
+  }
+  return <Orders />
 }

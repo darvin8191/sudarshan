@@ -19,6 +19,7 @@ import {
   SideChip,
   StaleBookNote,
 } from './parts'
+import { ReadOnlyTrades, type ReadOnlyTradesProps } from './ReadOnlyTrades'
 import { useLatest } from './useLatest'
 
 /**
@@ -28,6 +29,8 @@ import { useLatest } from './useLatest'
  */
 
 export interface TradeCardsProps {
+  // SUDARSHAN P6 D5: the owner's board is never the read-only one (see TradeCards below).
+  readOnly?: never
   trades: Trade[]
   loading: boolean
   error: string | null
@@ -35,9 +38,16 @@ export interface TradeCardsProps {
   onRefresh: (showRefresh?: boolean) => unknown
 }
 
-export function TradeCards(props: TradeCardsProps) {
+function OwnerTradeCards(props: TradeCardsProps) {
   const onRefresh = useLatest(props.onRefresh)
   return <TradeBoard {...props} onRefresh={onRefresh} />
+}
+
+// SUDARSHAN P6 D5 (M6.7): `readOnly` is the viewer's path, a board of its own. A fill is done, so
+// there is nothing to do on it, and the owner's card links to the chart, an owner page.
+export function TradeCards(props: TradeCardsProps | ReadOnlyTradesProps) {
+  if (props.readOnly) return <ReadOnlyTrades {...props} />
+  return <OwnerTradeCards {...props} />
 }
 
 const TradeBoard = memo(function TradeBoard({
