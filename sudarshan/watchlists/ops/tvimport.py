@@ -16,6 +16,7 @@ between its commits.
 from __future__ import annotations
 
 import time
+from functools import partial
 
 from flask import session
 
@@ -57,6 +58,11 @@ def _chunk_names(name: str, n: int) -> list[str]:
     return out
 
 
+def _has_futures(ix, exchange: str, symbol: str) -> bool:
+    """Whether the master lists futures for ``symbol`` on the derivatives exchange of ``exchange``."""
+    return any(r.exchange == _fo(exchange) for _, r in ix.futures.get(symbol, ()))
+
+
 def _futureless(plan: Plan, ix) -> Plan:
     """A row that follows a future, or is a future, for an underlying with no futures on its
     derivatives exchange is left out in words, not stored as a row that can never resolve."""
@@ -64,8 +70,8 @@ def _futureless(plan: Plan, ix) -> Plan:
     for sec in plan.sections:
         keep = []
         for it in sec.items:
-            if it.kind in ("follow", "fixed_future") and not any(
-                r.exchange == _fo(it.exchange) for _, r in ix.futures.get(it.symbol, ())
+            if it.kind in ("follow", "fixed_future") and not _has_futures(
+                ix, it.exchange, it.symbol
             ):
                 bang = "1!" if it.rule == "month" else "2!"
                 prefix = "NSE" if it.exchange.startswith("NSE") else "BSE"
@@ -102,7 +108,8 @@ class Read:
                 self.follow_used = rows_store.count(s, list_id)
         room = max(0, contract.LIMITS["rows_per_list"] - self.follow_used)
         self.master, self.ix = m, ix
-        self.plan = _futureless(tvimport.parse(text, m.known, room), ix)
+        has = partial(_has_futures, ix)
+        self.plan = _futureless(tvimport.parse(text, m.known, room, futures=has), ix)
 
 
 def _own_lists(user: str, names: list[str]) -> tuple[int, set[str]]:
