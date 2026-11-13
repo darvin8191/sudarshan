@@ -44,7 +44,8 @@ trades 14:20-15:30 in cash (14:20-15:15 for such stocks, NSE/CMTR/76941, their a
 
 Pure: whether a day trades and its own window are arguments. The runtime reads both through
 sudarshan.autologin.schedule (``TradingCalendar.is_trading_day`` and ``day_windows``); nothing
-here opens a file or reads the clock.
+here opens a file or reads the clock. The regimes themselves are sudarshan/regimes.py's table, the
+one OpenAlgo's market calendar, the sandbox and the ring's own hours read too.
 """
 
 from __future__ import annotations
@@ -54,53 +55,29 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
 from sudarshan.autologin.schedule import IST
+from sudarshan.regimes import (  # noqa: F401  Regime, REGIMES, INDEX_UNDERLYINGS: read from here too
+    INDEX_UNDERLYINGS,
+    REGIMES,
+    Regime,
+    expiry_stop,
+    index_derivative,
+)
+from sudarshan.regimes import regime_on as _regime
 
-#: Continuous trading per segment, in IST minutes after midnight: (start, end), as from 3 Aug 2026
-#: (the regimes below refine it by day; this is what an alert's form checks its times against).
-SEGMENTS: dict[str, tuple[int, int]] = {
-    "NSE_EQ": (555, 930),
-    "BSE_EQ": (555, 930),
-    "NSE_INDEX": (555, 930),
-    "BSE_INDEX": (555, 930),
-    "NSE_FO": (555, 940),
-    "BSE_FO": (555, 940),
-}
 INDEX_SEGMENTS = frozenset({"NSE_INDEX", "BSE_INDEX"})
 FO_SEGMENTS = frozenset({"NSE_FO", "BSE_FO"})
+#: The segments market alerts cover, each with its continuous trading in IST minutes after
+#: midnight as from 3 Aug 2026 (the first regime); ``hours`` gives a day's own.
+SEGMENTS: dict[str, tuple[int, int]] = {
+    segment: REGIMES[0].fo if segment in FO_SEGMENTS else REGIMES[0].cash
+    for segment in ("NSE_EQ", "BSE_EQ", "NSE_INDEX", "BSE_INDEX", "NSE_FO", "BSE_FO")
+}
 #: Cash segments where a stock with derivatives closes by auction; its session key's suffix.
 AUCTION_SEGMENTS = frozenset({"NSE_EQ", "BSE_EQ"})
 AUCTION = "+auction"
 #: A special day's window starts with its pre-open; normal trading starts this much later.
 PRE_OPEN_MIN = 15
 
-
-@dataclass(frozen=True, slots=True)
-class Regime:
-    """The exchange's timings from one day on, in IST minutes after midnight."""
-
-    since: date
-    cash: tuple[int, int]
-    #: Continuous trading of a stock that closes by auction.
-    auction: tuple[int, int]
-    fo: tuple[int, int]
-    #: An expiring index contract stops at this minute on its expiry day.
-    index_expiry_end: int
-    #: The auction's print may come until this many minutes after the cash close.
-    print_after_cash: int
-    #: The auction's price is expected this many minutes after the cash close (X6j).
-    close_after_cash: int
-    #: Every cash stock closes by auction, not only those with derivatives.
-    every_stock: bool
-
-
-#: Each regime from its first day; the first one also covers earlier days.
-REGIMES: tuple[Regime, ...] = (
-    Regime(date(2026, 8, 3), (555, 930), (555, 915), (555, 940), 940, 5, 0, False),
-    Regime(date(2026, 12, 7), (555, 930), (555, 930), (555, 945), 930, 10, 10, True),
-)
-#: Underlyings of index derivatives: an OpenAlgo derivative symbol starts with one, then DDMMMYY.
-INDEX_UNDERLYINGS = ("NIFTYNXT50", "MIDCPNIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX50", "BANKEX",
-                     "SENSEX", "NIFTY")  # fmt: skip
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,17 +111,6 @@ def epoch_ms(day: date, minute: int) -> int:
     """``minute`` minutes after midnight IST on ``day``, in epoch milliseconds."""
     midnight = datetime(day.year, day.month, day.day, tzinfo=IST)
     return int((midnight + timedelta(minutes=minute)).timestamp()) * 1000
-
-
-def _regime(day: date | None) -> Regime:
-    """The regime in force on ``day``; the newest one when no day is given."""
-    if day is None:
-        return REGIMES[-1]
-    found = REGIMES[0]
-    for regime in REGIMES:
-        if regime.since <= day:
-            found = regime
-    return found
 
 
 def hours(
@@ -241,27 +207,13 @@ def auction_close(
     return None if found is None else found.auction_close
 
 
-def index_derivative(symbol: str) -> bool:
-    """True for an OpenAlgo derivative symbol on an index: NIFTY25NOV2625900CE, BANKNIFTY...FUT."""
-    for name in INDEX_UNDERLYINGS:
-        rest = symbol[len(name) :]
-        if (
-            symbol.startswith(name)
-            and len(rest) >= 7
-            and rest[:2].isdigit()
-            and rest[2:5].isalpha()
-        ):
-            return rest[5:7].isdigit()
-    return False
-
-
 def expiry_close(segment: str, expiry: date, *, index: bool = False) -> int | None:
     """Epoch ms a contract stops trading on its expiry day: the derivatives' close, but from
-    7 Dec 2026 an expiring index contract stops at 15:30."""
+    7 Dec 2026 an expiring index contract stops at 15:30 (``regimes.expiry_stop``)."""
     span = hours(segment, day=expiry)
     if span is None:
         return None
-    end = _regime(expiry).index_expiry_end if index and segment in FO_SEGMENTS else span[1]
+    end = expiry_stop(expiry, index=index) if segment in FO_SEGMENTS else span[1]
     return epoch_ms(expiry, end)
 
 
