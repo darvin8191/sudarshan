@@ -704,3 +704,62 @@ can change them. If `/etc/sudarshan` itself exists with a stricter mode, it need
 others (`sudo chmod o+x /etc/sudarshan`) so the app's user can reach the folder. Nothing needs a restart:
 open the list again and it is read. At each index review, retype the file with the new date in its
 header line; the lists say the date they are as of, so a file that was not updated shows its old date.
+
+## Refs: the grammar
+
+A ref is a string naming one list. The phone builds them and so does the alerts service, so the
+grammar is written here once; `refs.split` and the readers of `refs/` are its code.
+
+| ref | what it names |
+|---|---|
+| `list:<id>` | one of the owner's lists, `<id>` being OpenAlgo's list id (a whole number) |
+| `list:<id>/section:<sid>` | one section of that list (members only: a view is of the whole list) |
+| `preset:<id>` | a built-in list, `<id>` from the catalogue (`indices`, `fno_stocks`, `index_futures`, a typed list's file name) |
+| `flag:<n>` | every symbol carrying flag `n`, 1 to 5 |
+| `ranked:<source>:<asset>:<category>` | a live ranking from Upstox, for example `ranked:futures:INDEX:TOP_TRADED` |
+
+A ranked list changes with every read, so it has rows but no members: the members route and the
+alerts refuse it in words. A section ref is only for members (a list alert on one section).
+
+## W23 - the sealed members route (`bridge/internal.py`, `members.py`, `words/members.py`)
+
+`POST /sudarshan/watchlists/internal/read?op=members|version` is how `sudarshan-alerts` reads a
+list. It follows the screener's internal route: no session and no CSRF token (the service has no
+browser; its seal is its proof), one Fernet token as the body under the vault purpose
+`WATCHLISTS_INTERNAL_INFO`, a nonce book that refuses a replayed request (`NoncesFull` answers 503
+rather than forget a nonce that could still be replayed), 16 KiB at most, and a 404 for any request
+that carries a proxy header (the service calls 127.0.0.1 directly). The seal is checked before the
+switch, so an unsealed caller learns nothing. The route is found by discovery (`bridge/internal.py`
+defines `install(app)`), reads only, and is not in `contract.WRITE_ROUTES`; a viewer's session is no
+key to it. The helpers are the screener's (`open_sealed`, `NonceBook`, `fernet_for`); only the proxy
+header list is repeated, and a test keeps it equal to the screener's.
+
+`members {ref}` answers `{version, ref_version, created_at, list_key, rows, left_out, valid_until}`:
+
+- `version` is the lists version, the text `op=version` answers alone. `ref_version` is the ref's
+  own: a 12 character digest of its instruments and what it leaves out, so a consumer can tell its
+  own list changed when the lists version moved for another's.
+- `created_at` and `list_key` (the same text) are a `list:` ref's identity, OpenAlgo's `created_at`
+  of the list. OpenAlgo gives a deleted list's id to the next list made; the alerts compare it and
+  stop a group whose list id now names another list. Absent for built-in and flag lists. The alerts
+  client reads the field `created_at`.
+- `rows`: `{symbol, exchange, instrument_key, tick_size, expiry, lot, valid_until?}` through the
+  master, in the list's order, one per instrument. A future (a month-future follow row resolved to
+  the contract valid at the call, or a future held as a symbol, or a built-in list's) carries
+  `valid_until`, the epoch ms its contract stops by `expiry.stop_ms` (a special session day's close
+  from the calendar); the consumer asks again then. The answer's own `valid_until` is the earliest.
+- `left_out`: `{symbol, why, reason}`. `atm` is an at-the-money follow row and `strike` a strike
+  row, both left out because they change contract during the day; `missing` is a symbol today's
+  master lacks (or a future row with no contract this month). `reason` is words for the owner.
+- Never a flag, a note or a price.
+
+Refusals use the bridge's envelope: `off` with the switch off (both ops; the alerts freeze the group
+on it), `gone` (404) for a list, section or built-in list that is not there, `invalid` for a ref that
+is not one (and, in words, for a ranked ref), `failed` when today's contract list is not loaded, so
+the caller changes nothing and asks again. The readers (`refs/list.py`, `refs/flag.py`,
+`refs/preset.py`) each build a `Members` record; `members.py` is the pure part (cuts, the record).
+A list reads its view once, resolves its month-future rows with the same code as `resolve`
+(`resolver.resolve_rows`, no price needed) and takes OpenAlgo's `created_at` from the same read.
+Tests: `tests/test_watchlists_members.py` (the readers) and `tests/test_watchlists_internal.py` (the
+seal, each kind of ref, futures, the versions, the switch, and the alerts service's own members
+client reading the route through a test app).
