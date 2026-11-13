@@ -146,6 +146,19 @@ class HeldCheck:
         return self.box["client"]
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _stop_the_market_health_thread():
+    """Importing ``blueprints.websocket_example`` (above) builds the market data service, whose
+    connection health monitor starts a thread that wakes every 5 seconds for the life of the
+    process. No test here needs it, so it is stopped when this module's tests are done, instead of
+    looping in the interpreter for the rest of the suite. ``stop()`` is the monitor's own switch:
+    the thread leaves at its next wake."""
+    yield
+    from services.market_data_service import get_market_data_service
+
+    get_market_data_service().health_monitor.stop()
+
+
 @pytest.fixture
 def world(monkeypatch):
     """The bridge app with Socket.IO bound as app.py binds it, app.py's default error handler
