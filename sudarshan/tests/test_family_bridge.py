@@ -804,3 +804,43 @@ def test_the_internal_route_leaves_no_descriptor_open(bridge, lists):
     for _ in range(30):
         assert post_internal(bridge, internal_seal(list_ids=[lists["swing"]])).status_code == 200
     watch.assert_clean()
+
+
+def test_the_family_services_admin_door_opens_what_the_bridge_sends(bridge, family):
+    """Once the service's admin door (F2, another lane) is in the same tree: every op the bridge
+    seals opens there as that op, under the owner's principal, with the op's fields as its
+    arguments. Skipped until then (it runs at integration)."""
+    import asyncio
+    import importlib
+
+    try:
+        admin_api = importlib.import_module("sudarshan.family.admin_api")
+        listener = importlib.import_module("sudarshan.family.listener")
+    except ModuleNotFoundError:
+        pytest.skip("the family service's admin door (F2) is not in this tree yet")
+    seen = {}
+
+    def handler(name):
+        async def run(args):
+            seen[name] = args
+            return {"ran": name}
+
+        return run
+
+    doors = admin_api.SealedDoors(
+        admin_key=fernet_for(os.environ["API_KEY_PEPPER"], FAMILY_ADMIN_INFO),
+        nudge_key=fernet_for(os.environ["API_KEY_PEPPER"], FAMILY_NUDGE_INFO),
+        ops={op.name: handler(op.name) for op in OPS},
+        nudged=lambda *args: True,
+        enabled=lambda: True,
+        off_words=lambda: "The family view is switched off on the server.",
+    )
+    headers = as_owner(bridge)
+    for op in OPS:
+        assert send(bridge, op, headers=headers).status_code == 200
+    for (op_name, _), body in zip(family.calls, family.bodies, strict=True):
+        request = listener.Request(method="POST", path=f"{contract.ADMIN_PREFIX}{op_name}",
+                                   query={}, headers={}, door="admin", head=b"", body=body)  # fmt: skip
+        response = asyncio.run(doors.admin(request))
+        assert response.payload == {"status": "success", "data": {"ran": op_name}}
+    assert seen == {op.name: SAMPLE[op.name] for op in OPS}
