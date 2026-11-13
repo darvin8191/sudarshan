@@ -51,6 +51,9 @@ NOT_BUILT = {op.name for op in contract.OPS} - {
     "resolve",
     "search",
     "strikes",
+    "tv_preview",
+    "tv_import",
+    "tv_export",
 }
 
 BODIES = {
@@ -122,6 +125,9 @@ def test_only_handled_ops_get_a_route():
             "/resolve",
             "/search",
             "/strikes",
+            "/tv/preview",
+            "/tv/import",
+            "/tv/export",
         )
     }
 

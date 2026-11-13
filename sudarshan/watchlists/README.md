@@ -152,6 +152,75 @@ letters, a repeat gets a number, an empty section is kept, duplicates are droppe
 than 250 symbols into lists at section boundaries. The alias table is completed against one real
 export (design fact W-5). Vectors: `tests/vectors/tvimport.json`.
 
+## W19 - TradingView import (`ops/tvimport.py`, `words/tvimport.py`)
+
+`tv_preview` (class `preview`, 6 a minute) takes `text` and, to say more, `name` (the new list's
+name, from the file name) and `list` (the open list); both were added to the contract and
+`types.ts` regenerated. A file over 64 KiB is refused in words before the master is read. It
+answers W18's counts, left-out lines and conversions, then: for the open list "Swing · room for 203"
+(and, when the file's new symbols exceed the room, how many it has), for a new list the split line
+("... Swing (1) with 250 and Swing (2) with 62, split at a section."), OpenAlgo's 50 lists ("You have
+50 lists, the most there can be. Delete one to import."), a name already taken and a list with more
+than 20 sections. `hash` is `tvimport.text_hash(text)`; `lists` is the lists the import would make
+or write into, each with `count` (its symbols plus its follow rows; the sum is `matched`). A follow
+row, or a future past the 20 rows a list holds, for an underlying with no futures on its derivatives
+exchange is left out with reason `no_futures`. Nothing is written and nothing is bumped.
+
+`tv_import` (class `write`) takes the same `text` and the preview's `hash` (a mismatch is `invalid`,
+field `hash`: "The file changed since its preview. Preview it again."), then parses again, so what is
+written is what the preview said. It writes into new lists (`name`; a file over 250 makes `name (1)`,
+`name (2)` split at a section) or into the open list (`list` and the `version` `view` answered,
+refused as `conflict` when stale, before any write; `list` and `name` together are `invalid`).
+Everything refusable is refused first with its numbers: the 50 lists, a name taken, 250 symbols, 20
+sections. A new list goes through `create_watchlist` with its items in one call. Into an existing
+list OpenAlgo's `add_item` runs once per symbol through `ops.copy.add_all`, yielding to the hub
+(`time.sleep(0)`) after each commit, never inside an overlay transaction; `tests/` measure it under
+a real eventlet hub as W8's do. Sections are made as W7 makes them (a section of the open list with
+the same name is used again), follow rows as W15 makes them (`month_future`, rule `month` or
+`next_month`), both in one overlay transaction that claims the version after OpenAlgo's writes (W8's
+order and its reason); a future past the follow-row room is imported as the contract of today found
+through the same resolver as a follow row. The answer is `TvDone`: `lists` (ids), `added` (symbols
+plus follow rows written), `version` (the one list's new version; null for several), `words` ("Swing:
+45 symbols in 2 sections.") and `lists_version`. The bump is `items` with every list changed, once. A
+failure part way says how many went in and where ("Added 2 of 4 symbols to Swing. The rest were not
+added; try again."; "Only Swing (1) was made, with 250 of the file's 312 symbols ...") and names
+what it committed (`OpError.changed`), so the lists version is bumped once with those refs. An
+import that finds everything already in the open list bumps nothing. No thread, timer or loop; the
+parse is one pass over at most 64 KiB. Tests: `tests/test_watchlists_tvimport_ops.py`, with
+`vectors/tvimport.json` through both ops.
+
+## W20 - TradingView export (`tvexport.py`, `ops/tvexport.py`, `words/tvexport.py`)
+
+`tv_export` (class `read`, 120 a minute: the bridge's table has a row for it, `tv_export`, so no class
+was invented) takes `ref`, where the contract used to say `list`: `list:7`, `list:7/section:3` (one
+section), `preset:<id>`, `flag:<n>` or `ranked:<source>:<asset>:<category>`, read as `view` reads them
+(a ranked list asks Upstox as `view` does). The answer is `TvExport`: `text`, `filename` (the list's
+name, or `List - Section`, without what a file name cannot hold, ending `.txt`), `symbols` and
+`sections` written, `left_out` (`token`, `reason`: `no_tv_name`, `no_form`, `dated_future`, `expired`,
+`waiting`, `no_contract`) and `words`. Nothing is written, bumped or pushed; no thread is started.
+
+The mapping is W18's in reverse and pure (`tvexport.build`, with the rows read as `Block` and `Entry`
+records): the text is one line of exchange-prefixed symbols separated by commas, `###Name` opening a
+section, rows in no section first, a follow row before the rows of its section; the same symbol
+twice is written once. A cash symbol is `NSE:INFY`, `-` and `&` written `_`; an index is its
+TradingView name through the import's alias table in reverse (an index with none is left out); a
+row that follows a future is `NSE:NIFTY1!` or `NSE:NIFTY2!`, and so is a dated future that is
+today's current-month or next-month contract (found through the follow rows' own resolver); any
+other dated future, and anything on another exchange, is left out with its reason. An at-the-money
+or strike row (or an option contract in a list) is written as the contract it shows today,
+`NSE:NIFTY261124C25800` (underlying, expiry YYMMDD, C or P, strike), found through `resolve`'s
+resolver from the feed's last price; the answer says in words that it will not follow on
+TradingView, and a row with no price is left out in words. The import does not read that form, so
+those rows do not come back; every other row does (`tests/vectors/tvexport.json`, through
+`tvimport.parse`, and each of W18's vectors in reverse). The option form is written from the
+shape TradingView shows and is still to be checked against a real export (design fact W-5).
+
+A comma inside a section name would split it in TradingView's import, so it is dropped from the
+name, and the answer says "2 section names had a comma, which TradingView cannot read; it was left
+out." A name that was only commas becomes `Section`. The master is read only when a row needs it
+(a derivative contract, a rule other than the current or next month, an at-the-money row).
+Tests: `tests/test_watchlists_tvexport.py`, `tests/test_watchlists_tvexport_ops.py`.
+
 ## W21 - ranked rows (`ranked.py`, `words/ranked.py`)
 
 Pure mapping of an Upstox Smartlist answer to rows, through the master by instrument key, in
@@ -1315,7 +1384,12 @@ nothing of its own, starts no thread and makes no Upstox call).
   order, so the page prints one heading a group; each hit is the group, the title ("NIFTY 25,900
   CE"), the detail ("NFO · 24 Nov 2026 · lot 65"), the master's `Contract` and `added` (true when the
   list holds that exchange and symbol; a list that is not the owner's is `gone`). `understood` is the
-  query in one line, `underlying` is set when options exist (Pick a strike) and `suggestion` is
+  query in one line, `underlying` is set when options exist (Pick a strike) and `underlying_exchange`
+  beside it is the exchange `strikes` takes as `x` (`NSE_INDEX`, `NSE`, `BSE_INDEX`, `BSE`, `MCX`),
+  read from the master and never guessed (the cash listing on the exchange the options trade
+  against, so RELIANCE answers `NSE` though BSE lists it too; an underlying with no cash row takes
+  its derivatives exchange); both are null together, and `underlying` keeps the name it always
+  had, so an older page is unaffected. `suggestion` is
   the near miss ("No exact match for RELAINCE. Did you mean RELIANCE?"), also said when the chip
   hides what All would show ("Nothing for RELIANCE under Indices. Try All."); it is null while
   the answer waits for a price (ATM with none sent). A blank query answers empty: Recent is the

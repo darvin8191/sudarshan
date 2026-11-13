@@ -164,14 +164,16 @@ RECORDS = {
     "Strikes": "underlying:string, exchange:string, expiries:Expiry[], expiry:string|null, "
     "atm:number|null, strikes:Strike[], words:string",
     "Hit": "group:Group, title:string, detail:string, contract:Contract, added:bool",
-    "Search": "understood:string, hits:Hit[], underlying:string|null, suggestion:string|null",
+    "Search": "understood:string, hits:Hit[], underlying:string|null, "
+    "underlying_exchange:string|null, suggestion:string|null",
     "Ranked": "ref:string, state:RankState, made_at:int|null, read_at:int|null, rows:Row[], "
     "left_out:int, words:string",
     "Cut": "token:string, reason:string",
     "TvSection": "name:string, count:int",
     "TvPreview": "hash:string, sections:int, symbols:int, matched:int, follow:int, "
     "left_out:Cut[], lists:TvSection[], words:string[]",
-    "TvExport": "text:string, filename:string, left_out:Cut[], words:string[]",
+    "TvExport": "text:string, filename:string, symbols:int, sections:int, left_out:Cut[], "
+    "words:string[]",
     # A write's answer: ``lists_version`` is the lists version its bump produced (the ``v`` of the
     # push it sent), so the phone knows the push of its own write and skips it; absent when the
     # write bumped nothing (it changed no list's members, or nothing at all).
@@ -191,7 +193,6 @@ RECORDS = {
     "left_out:Cut[]",
     "Version": "version:string",
 }
-
 
 
 class Field(NamedTuple):
@@ -240,8 +241,9 @@ OPS = (
            "q:string, seg?:Segment, limit?:int, p?:number, list?:int", "Search"),
     OpSpec("ranked", "GET", "/ranked", "ranked",
            "src:RankSource, asset:RankAsset, cat:RankCategory, size?:int", "Ranked"),
-    OpSpec("tv_preview", "POST", "/tv/preview", "preview", "text:string", "TvPreview"),
-    OpSpec("tv_export", "POST", "/tv/export", "read", "list:int", "TvExport"),
+    OpSpec("tv_preview", "POST", "/tv/preview", "preview",
+           "text:string, name?:string, list?:int", "TvPreview"),
+    OpSpec("tv_export", "POST", "/tv/export", "read", "ref:string", "TvExport"),
     OpSpec("section_add", "POST", "/sections", "write",
            "list:int, name:string, mark?:int, version:string", "Done"),
     OpSpec("section_edit", "PATCH", "/sections/<id>", "write",

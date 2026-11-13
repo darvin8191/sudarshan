@@ -309,6 +309,7 @@ export interface Search {
   understood: string
   hits: Hit[]
   underlying: string | null
+  underlying_exchange: string | null
   suggestion: string | null
 }
 
@@ -346,6 +347,8 @@ export interface TvPreview {
 export interface TvExport {
   text: string
   filename: string
+  symbols: number
+  sections: number
   left_out: Cut[]
   words: string[]
 }
@@ -547,10 +550,12 @@ export interface RankedReq {
 
 export interface TvPreviewReq {
   text: string
+  name?: string
+  list?: number
 }
 
 export interface TvExportReq {
-  list: number
+  ref: string
 }
 
 export interface SectionAddReq {
