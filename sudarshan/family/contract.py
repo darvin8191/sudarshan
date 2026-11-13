@@ -191,6 +191,7 @@ WORD_KEYS = (
     "ws_signed_out",
     "password_changed",
     "signed_out_everywhere",
+    "store_failed",
 )
 
 PRIMITIVES = ("string", "int", "number", "bool", "json")
