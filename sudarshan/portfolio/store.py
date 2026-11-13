@@ -125,6 +125,26 @@ class UnknownPrincipal(ValueError):
     """A caller asked for someone this store does not serve (a programming error)."""
 
 
+class OutOfScope(RuntimeError):
+    """A read under a member's scope (a scope with tabs) of a table that scope never reaches: an
+    op of the family purpose that reads more than a shared tab needs (a programming error)."""
+
+
+#: What a scope with tabs (a family member's, cross-design Y6) reaches, and how each table is
+#: narrowed in ``Tx._mine``: the tab rows to the shared tabs, the rows that hang on a tab to those
+#: tabs, the accounts to those the shared tabs' entries name and the members to those accounts'
+#: owners, the assets to those the entries name and the loans linked to a shared tab (an asset's
+#: aliases and prices follow it), the Upstox account's closing records only while its tab is
+#: shared. A table not named here (the shares and privacy of every member, import batches, the
+#: report cache) raises OutOfScope, so an op cannot leak a table by forgetting to narrow it.
+SCOPED_BY_TAB = ("activity", "tab_layout", "saved_view", "tab_liability")
+SCOPED_BY_ASSET = ("asset_alias", "price_point", "price_eod")
+SCOPED_UPSTOX = ("upstox_eod", "upstox_eod_holding")
+#: The shared tables (no principal) a shared tab's view reads: the index closes of its
+#: comparison. The job log and the fund list are the service's own and stay out (OutOfScope).
+SCOPED_SHARED = ("benchmark_close",)
+
+
 @dataclass(frozen=True)
 class Scope:
     """Whose rows a read may see (6.5): the principal, the tabs (None: all) and the fields masked
@@ -245,20 +265,79 @@ def open_read_only(path: Path) -> Engine:
 # ---- one transaction's queries -------------------------------------------------------------
 class Tx:
     """The queries of one transaction for one principal. Every statement filters by
-    ``principal`` (``_mine``); a scope with tabs also limits tabs and entries to them."""
+    ``principal`` (``_mine``); a scope with tabs also narrows every table to what those tabs
+    reach (``SCOPED_*``) and refuses the rest (OutOfScope)."""
 
     def __init__(self, conn: Connection, tables: Mapping[str, Table], scope: Scope):
         self.conn, self._tables, self.scope, self.who = conn, tables, scope, scope.principal
 
     def _t(self, name: str) -> Table:
+        """A table by name. The tables that belong to no one (market data, the job log) carry no
+        principal for ``_mine`` to narrow, so a scope with tabs reaches only ``SCOPED_SHARED``."""
+        if (
+            self.scope.tab_ids is not None
+            and name in migrations.SHARED_TABLES
+            and name not in SCOPED_SHARED
+        ):
+            raise OutOfScope(name)
         return self._tables[name]
 
     def _mine(self, table: Table):
         clause = table.c.principal == self.who
         ids = self.scope.tab_ids
-        if ids is not None and table.name in ("tab", "activity"):
-            clause = and_(clause, (table.c.id if table.name == "tab" else table.c.tab_id).in_(ids))
-        return clause
+        if ids is None:
+            return clause
+        return and_(clause, self._shared_part(table, ids))
+
+    def _shared_part(self, table: Table, ids: frozenset[int]):
+        """The rows of ``table`` a scope with tabs reaches (``SCOPED_*`` above); OutOfScope for a
+        table it never reaches."""
+        name = table.name
+        if name == "tab":
+            return table.c.id.in_(ids)
+        if name in SCOPED_BY_TAB:
+            return table.c.tab_id.in_(ids)
+        if name == "account":
+            return self._accounts_of(table.c.id, ids)
+        if name == "member":
+            account = self._t("account")
+            owners = select(account.c.member_id).where(
+                account.c.principal == self.who, self._accounts_of(account.c.id, ids)
+            )
+            return table.c.id.in_(owners)
+        if name == "asset":
+            return self._assets_of(table.c.id, ids)
+        if name in SCOPED_BY_ASSET:
+            return self._assets_of(table.c.asset_id, ids)
+        if name in SCOPED_UPSTOX:
+            tab = self._t("tab")
+            shared = select(tab.c.id).where(
+                tab.c.principal == self.who, tab.c.system == 1, tab.c.id.in_(ids)
+            )
+            return shared.exists()
+        raise OutOfScope(name)
+
+    def _accounts_of(self, column, ids: frozenset[int]):
+        """``column`` is an account a shared tab's entries name (as the account or the account
+        a transfer goes to)."""
+        act = self._t("activity")
+        named = and_(act.c.principal == self.who, act.c.tab_id.in_(ids))
+        return or_(
+            column.in_(select(act.c.account_id).where(named)),
+            column.in_(select(act.c.to_account_id).where(named)),
+        )
+
+    def _assets_of(self, column, ids: frozenset[int]):
+        """``column`` is an asset a shared tab's entries name, or a loan linked to a shared tab."""
+        act, link = self._t("activity"), self._t("tab_liability")
+        return or_(
+            column.in_(
+                select(act.c.asset_id).where(act.c.principal == self.who, act.c.tab_id.in_(ids))
+            ),
+            column.in_(
+                select(link.c.asset_id).where(link.c.principal == self.who, link.c.tab_id.in_(ids))
+            ),
+        )
 
     @staticmethod
     def _out(row: Mapping | None) -> dict[str, Any] | None:

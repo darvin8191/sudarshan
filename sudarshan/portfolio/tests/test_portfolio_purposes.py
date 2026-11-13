@@ -312,6 +312,113 @@ async def test_shares_for_viewer_names_the_tabs_the_levels_and_what_is_hidden(ri
     }  # fmt: skip
 
 
+# ---- H1: a member is told only what their tabs reach ---------------------------------------------
+def second_owner(rig):
+    """A second member with an account of their own, used only on the tab that is not shared."""
+    member = rig.book.member_create(OWNER, "m-2", "Second member", now=NOW)
+    account = rig.book.account_create(OWNER, "a-2", member["id"], "Second bank", "bank", now=NOW)
+    return member, account
+
+
+@scenario
+async def test_a_member_with_no_share_sees_no_member_no_account_and_no_job(rig):
+    second_owner(rig)
+    status, body = await rig.family("9", "state")
+    assert status == 200
+    data = body["data"]
+    assert data["tabs"] == [] and data["members"] == [] and data["accounts"] == []
+    assert "jobs" not in data and "amfi" not in data
+    owner = await rig.owner("state")  # the owner's own state is whole
+    assert {a["name"] for a in owner["accounts"]} == {"Upstox", "Zerodha", "Second bank"}
+    assert {m["name"] for m in owner["members"]} == {"Me", "Second member"}
+    assert "jobs" in owner and "amfi" in owner
+
+
+@scenario
+async def test_a_member_sees_only_the_accounts_of_their_tabs_and_those_accounts_members(rig):
+    member, bank = second_owner(rig)
+    version = next(t for t in rig.book.tabs(OWNER) if t["id"] == rig.other["id"])["version"]
+    entry = {
+        "kind": "BUY", "trade_date": 20261002, "account_id": bank["id"],
+        "asset_id": rig.gold["id"], "qty_u": 1_000_000, "amount_paise": 600_000,
+    }  # fmt: skip
+    rig.book.activity_create(OWNER, rig.other["id"], version, entry, "e-bank", now=NOW)
+    rig.svc.store.write(
+        OWNER,
+        lambda tx: tx.change("account", rig.account["id"], 1, {"note": "the owner's own"}, NOW),
+    )
+    await rig.grant("7", [rig.tab["id"]])
+    data = (await rig.family("7", "state"))[1]["data"]
+    assert [a["name"] for a in data["accounts"]] == ["Zerodha"]  # not Upstox, not Second bank
+    assert [m["name"] for m in data["members"]] == ["Me"]
+    assert "note" not in data["accounts"][0]  # quantities are shown to 7: the note is still his
+    await rig.grant("8", [rig.other["id"]])
+    data = (await rig.family("8", "state"))[1]["data"]
+    assert {a["name"] for a in data["accounts"]} == {"Zerodha", "Second bank"}
+    assert {m["name"] for m in data["members"]} == {"Me", "Second member"}
+    assert member["id"] in {m["id"] for m in data["members"]}
+
+
+@scenario
+async def test_a_transfer_names_the_account_it_goes_to_for_the_member_too(rig):
+    _, bank = second_owner(rig)
+    move = {
+        "kind": "TRANSFER", "trade_date": 20261003, "account_id": rig.account["id"],
+        "to_account_id": bank["id"], "asset_id": rig.gold["id"], "qty_u": 1_000_000,
+    }  # fmt: skip
+    rig.book.activity_create(OWNER, rig.tab["id"], rig.version(), move, "e-move", now=NOW)
+    await rig.grant("7", [rig.tab["id"]])
+    status, body = await rig.family("7", "tab_get", id=rig.tab["id"])
+    assert status == 200, body
+    by_account = {bar["label"] for bar in body["data"]["allocation"]["account"]}
+    assert by_account == {"Zerodha", "Second bank"}
+    data = (await rig.family("7", "state"))[1]["data"]
+    assert {a["name"] for a in data["accounts"]} == {"Zerodha", "Second bank"}
+
+
+@scenario
+async def test_a_loan_on_no_tab_is_never_shown_to_a_member(rig):
+    def loose(tx):  # a loan v0.5.0 made, on no tab
+        loan = tx.insert(
+            "asset", {"kind": "liability", "name": "Car loan", "asset_class": "other"}, NOW
+        )
+        tx.set_price_point(loan["id"], 20261001, 30_000_000_000, NOW)
+
+    rig.svc.store.write(OWNER, loose)
+    await rig.grant("7", [rig.tab["id"]])
+    owner = await rig.owner("tab_get", id=rig.tab["id"])
+    assert [loan["name"] for loan in owner["loose_loans"]] == ["Car loan"]
+    status, body = await rig.family("7", "tab_get", id=rig.tab["id"])
+    assert status == 200 and body["data"]["loose_loans"] == []
+    assert "Car loan" not in str(body["data"])
+
+
+@scenario
+async def test_a_members_scope_reads_no_table_their_tabs_do_not_reach(rig):
+    """The store narrows every table for a scope with tabs and refuses the rest, so an op that
+    forgets to narrow a read cannot leak it."""
+    from sudarshan.portfolio.store import OutOfScope, Scope
+
+    second_owner(rig)
+    await rig.grant("7", [rig.tab["id"]], role="child")
+    scope = Scope("owner", frozenset({rig.tab["id"]}))
+    read = lambda fn: rig.svc.store.read(scope, fn)  # noqa: E731
+    assert [a["name"] for a in read(lambda tx: tx.rows("account"))] == ["Zerodha"]
+    assert [m["name"] for m in read(lambda tx: tx.rows("member"))] == ["Me"]
+    assert [a["name"] for a in read(lambda tx: tx.rows("asset"))] == ["Gold coin"]
+    assert read(lambda tx: tx.rows("upstox_eod", "day")) == []  # its tab is not shared
+    assert read(lambda tx: tx.index_closes()) == {}  # market data a tab's comparison reads
+    for table in ("tab_share", "member_privacy", "import_batch", "report_cache"):
+        with pytest.raises(OutOfScope):
+            read(lambda tx, table=table: tx.rows(table))
+    for name in ("job_runs", "nav_day", "mf_count"):
+        with pytest.raises(OutOfScope):
+            read(lambda tx, name=name: getattr(tx, name)())
+    nobody = Scope("owner", frozenset())
+    assert rig.svc.store.read(nobody, lambda tx: tx.rows("member")) == []
+    assert rig.svc.store.read(nobody, lambda tx: tx.rows("account")) == []
+
+
 # ---- Y6: the stored floor, the caller can only add -----------------------------------------------
 @scenario
 async def test_the_stored_floor_hides_pnl_even_when_the_caller_sends_an_empty_mask(rig):
