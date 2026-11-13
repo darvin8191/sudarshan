@@ -103,7 +103,8 @@ restart knows its pause; the first start of a day counts from the window's openi
 
 ## When it runs
 
-Connected on trading days from 08:45 to 16:00 IST, with the calendar auto-login uses
+Connected on trading days from 08:45 to 16:00 IST (to 16:05 from 7 Dec 2026, when F&O trades to
+15:45: the margins below are kept around each day's session), with the calendar auto-login uses
 (`sudarshan/autologin/schedule.py`): weekends and the dates in `/etc/sudarshan/nse_holidays.txt`
 are closed, a date in `/etc/sudarshan/nse_extra_trading_days.txt` is open. Both files are read
 again when they change. Outside the window the process stays up, disconnected, and connects again
@@ -117,10 +118,10 @@ give it, from the start of the pre-open to the F&O close. For the Muhurat sessio
 2026-11-08 14:05-15:40  # Muhurat, NSE circulars 149/2026 (cash) and 142/2026 (F&O to 15:40)
 ```
 
-The alerts keep the margins 08:45-16:00 keeps around an ordinary session (09:00-15:40): 15 minutes
-before its start and 20 after its end, within the day. So that Sunday they are connected from
-13:50 to 16:00, and an update after the close, such as the exchange cancelling an open order, is
-told as on any day. On a weekday that trades anyway, the session's window is added to 08:45-16:00
+The alerts keep the margins 08:45-16:00 keeps around an ordinary session (09:00-15:40; 09:00-15:45
+from 7 Dec 2026): 15 minutes before its start and 20 after its end, within the day. So that
+Sunday they are connected from 13:50 to 16:00, and an update after the close, such as the
+exchange cancelling an open order, is told as on any day. On a weekday that trades anyway, the session's window is added to 08:45-16:00
 (an evening session gives a second window; the order book read when it opens covers the hours in
 between). The next trading day's catch-up counts its pause from that day's opening and reads the
 order book Upstox gives that day, so it is the margins, not the catch-up, that cover the special
@@ -189,8 +190,8 @@ nightly backup job records) every 20 seconds and sends through the same path as 
 - **A release that fails again** at each of the deploy timer's 10-minute runs is told once per
   cause, not once per try (the event id names the release, the cause and whether the earlier
   version is running).
-- **Quiet while the market trades.** From 09:15 to 15:40 (a listed day's own window instead, on a
-  special session) only a failure is told: a release that could not be installed, a service
+- **Quiet while the market trades.** From 09:15 to the F&O close (15:40; 15:45 from 7 Dec 2026; a
+  listed day's own window instead, on a special session) only a failure is told: a release that could not be installed, a service
   file the safety check refused, or a backup that failed. A release that is ready, or installed,
   waits for the close and goes out then, in one message, if it is still under 12 hours old. The
   phone is for fills and rejections while the market runs.
@@ -278,7 +279,7 @@ tool starts ring services again after each release.
 | `SUDARSHAN_ORDER_ALERTS` | `on` | `off`: nothing is sent and OpenAlgo is not contacted for order alerts; the service exits only when `SUDARSHAN_MARKET_ALERTS` is off too |
 | `SUDARSHAN_ORDER_ALERTS_CANCELLED` | `all` | `part-filled`: only cancellations of an order that was part filled |
 | `SUDARSHAN_ORDER_ALERTS_SANDBOX` | `off` | `on`: Analyze-mode (sandbox) orders too, each line starting with "Sandbox" |
-| `SUDARSHAN_ALERTS_WINDOW` | `08:45-16:00` | IST, on trading days; a special day's own window gets the same margins around it. A value that is not HH:MM-HH:MM (the start first) logs a warning and the usual hours are used |
+| `SUDARSHAN_ALERTS_WINDOW` | `08:45-16:00` | IST, on trading days, its margins kept around each day's session (08:45-16:05 from 7 Dec 2026); a special day's own window gets the same margins around it. A value that is not HH:MM-HH:MM (the start first) logs a warning and the usual hours are used |
 | `SUDARSHAN_ALERTS_ALWAYS_ON` | `0` | `1`: ignore the window and the calendar (tests, an evening sandbox check) |
 | `SUDARSHAN_ALERTS_STATE_DIR` | systemd's `$STATE_DIRECTORY` | `/var/lib/sudarshan-alerts` |
 | `SUDARSHAN_NOTICE_SPOOLS` | the deploy tool's and the backup job's files | colon-separated files the server's notices are read from (`/var/lib/sudarshan/events.jsonl:/var/lib/sudarshan-backup/events.jsonl`) |
@@ -458,7 +459,8 @@ sudarshan-feed (one Upstox socket) -> ZMQ 127.0.0.1:5581 (ticks, __health__)
 - **The gate.** A value is judged only inside its segment's session on a trading day, with the
   exchange's status open (pushed by the feed as it changes), a feed connected, live and heard in
   the last 12 s, and the value fresh (5 s). A stock with futures closes by auction from 15:15
-  (`sessions.py`): its print is told as the closing auction's.
+  (from 7 Dec 2026 every stock, from 15:30; `sessions.py`): its print is told as the closing
+  auction's.
 - **Pauses.** The feed down, unheard or silent on the whole socket for more than 10 s inside a
   session, or this service not running (from the last moment it was known checking), is a pause
   in market.db. A crossing first seen after one is told "seen after a pause"; one over a minute

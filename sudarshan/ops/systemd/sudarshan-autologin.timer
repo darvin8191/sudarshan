@@ -5,7 +5,7 @@
 # holds a working login, so the first success ends the day's work. Mirrors SCHEDULE in
 # sudarshan/autologin/schedule.py (a test compares the two). Persistent: a wake-up missed while
 # the server was down runs at boot, and the worker ignores it unless it falls inside 08:30-15:40
-# IST (to the F&O close) on a trading day.
+# IST (to the F&O close: 08:30-15:45 from 7 Dec 2026) on a trading day.
 
 [Unit]
 Description=SUDARSHAN Upstox auto-login schedule (trading mornings, IST)

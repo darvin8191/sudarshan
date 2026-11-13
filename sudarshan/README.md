@@ -9,7 +9,7 @@ read-only Analytics Token (market data, portfolio reads) — never with an order
 | dir | service | what it is |
 |---|---|---|
 | `feed/` | `sudarshan-feed` | The **single** Upstox Feed V3 WebSocket for all of SUDARSHAN (the socket budget is below). Subscribes once, keeps a tick snapshot, republishes over local ZMQ, records ticks (gzip JSON lines) for replay, exposes `/snapshot` over HTTP, and (with M18.1's claims) takes each ring service's subscriptions. The REST governor for Upstox market-data reads is built here (below) and off by default. |
-| `alerts/` | `sudarshan-alerts` | **Today (M6.8): order alerts.** Fills, part fills, rejections (with the broker's reason), cancellations and stop-order triggers from OpenAlgo's order stream (`ws://127.0.0.1:8765`, `subscribe_orders`) to the owner's Telegram through OpenAlgo `/api/v1/telegram/notify`; once only (claims in `/var/lib/sudarshan-alerts/alerts.db`), the order book read again after any pause, bursts merged, trading days 08:45-16:00 IST; `SUDARSHAN_ORDER_ALERTS=off` turns it off (the service exits only when market alerts are off too); `127.0.0.1:5582/health` names the installed release and what the service is doing. **Also (M10, off until `SUDARSHAN_MARKET_ALERTS=on`):** the market alert engine, which judges price, % move, day high or low, VWAP, bid/ask and candle-close alerts on the feed's ticks, not in a browser tab, with the Alerts page, history and delivery on Telegram and in the app; it stays off unless switched on, and `alerts/README.md` says how. **Planned:** volume, OI change/build-up, IV, indicator cross, Greeks, time, P&L, screener hit, feed health and rollover alerts; the family bot separately, Web Push later. |
+| `alerts/` | `sudarshan-alerts` | **Today (M6.8): order alerts.** Fills, part fills, rejections (with the broker's reason), cancellations and stop-order triggers from OpenAlgo's order stream (`ws://127.0.0.1:8765`, `subscribe_orders`) to the owner's Telegram through OpenAlgo `/api/v1/telegram/notify`; once only (claims in `/var/lib/sudarshan-alerts/alerts.db`), the order book read again after any pause, bursts merged, trading days 08:45-16:00 IST (16:05 from 7 Dec 2026); `SUDARSHAN_ORDER_ALERTS=off` turns it off (the service exits only when market alerts are off too); `127.0.0.1:5582/health` names the installed release and what the service is doing. **Also (M10, off until `SUDARSHAN_MARKET_ALERTS=on`):** the market alert engine, which judges price, % move, day high or low, VWAP, bid/ask and candle-close alerts on the feed's ticks, not in a browser tab, with the Alerts page, history and delivery on Telegram and in the app; it stays off unless switched on, and `alerts/README.md` says how. **Planned:** volume, OI change/build-up, IV, indicator cross, Greeks, time, P&L, screener hit, feed health and rollover alerts; the family bot separately, Web Push later. |
 | `screener/` | `sudarshan-screener` | Scheduled scans (1/5/15 min, EOD) over universes (NIFTY 50/100/200/500, F&O list, custom watchlists, option chains) with a rule builder (price action, indicators via TA-Lib, OI build-up classes, IV rank/percentile, PCR, basis, bhavcopy fields). Results feed **membership-table watchlists** (first_seen / last_seen / hits / exited / pinned / score) in OpenAlgo's watchlist DB and raise digest alerts; every run is stored for rewind and forward-return backtests. |
 | `portfolio/` | `sudarshan-portfolio` | Upstox tab (holdings, positions, MTF, funds tree, trade history, trade-wise P&L + charges, GTT, MF, portfolio stream) on the Analytics Token + daily snapshots, dividends from corporate actions, sector tags; and the **custom manual portfolio engine**: activity model (BUY/SELL/DIVIDEND/FEE/INTEREST/TRANSFER/SPLIT/BONUS), any asset, tags, imports (CSV/tradebook), FIFO lots, STCG/LTCG (ITA 2025 sections, "verify with CA"), XIRR/TWR, allocation, goals, custom tab layouts. |
 | `family/` | `sudarshan-family` | View-only layer for family members: own users/sessions/TOTP, privacy mode, invitations, per-user watchlists/alerts, audit log, viewer UI variants, family Telegram bot. Backed by the Analytics-Token data plane only; every OpenAlgo write/admin/bot route must answer 401/403 to a viewer. |
@@ -286,7 +286,8 @@ then renamed into place: a stop or a full disk leaves nothing that looks like an
 
 **When it runs, and when it does not:**
 
-- Never from 08:30 to 16:00 on a trading day. A listed special day (a Muhurat evening) is kept
+- Never from 08:30 to 16:00 on a trading day (to 16:05 from 7 Dec 2026, 20 minutes after the F&O
+  close, which moves to 15:45 that day). A listed special day (a Muhurat evening) is kept
   for its session's own window widened by the margins the order alerts and the feed use, 30
   minutes before and 20 after: 13:35 to 16:00 for a session from 14:05 to 15:40. (The deploy tool
   is stricter and keeps a listed day for the market all day.) A run the timer or a boot starts
@@ -502,7 +503,8 @@ holds no Telegram or OpenAlgo secret and cannot be made to send anything:
   newest 200 lines; `--check` records nothing;
 - a release that fails at every timer run is recorded once per release and cause; a release that
   waits is recorded once; the facts of one run share a run id and are told in one message;
-- the owner's phone stays quiet while the market trades: from 09:15 to 15:40 only a failure
+- the owner's phone stays quiet while the market trades: from 09:15 to the F&O close (15:40;
+  15:45 from 7 Dec 2026) only a failure
   (a rollback, a refused service file, a failed backup) is told, the rest goes out after the close,
   and no more than one message a minute ever goes out;
 - the tool of the release before this one made no record, so the first run of a tool that records
