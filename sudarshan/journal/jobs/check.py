@@ -53,6 +53,10 @@ async def check_day(service: Any, today: int, now: int, late: bool) -> str:
         ),
     )
     service.counts["last_reconcile_ms"] = now
+    from ..reports import build_eod
+
+    # the day report already kept says what the check found; it is not sent again
+    await build_eod(service, today, now, announce=False, create=False)
     return f"live: {live.line()}; sandbox: {sandbox.line()}"
 
 

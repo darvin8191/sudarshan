@@ -193,11 +193,18 @@ async def close_day(service: Any, today: int, now: int, late: bool) -> str:
 
     values = await _thread(lambda: service.store.write(OWNER, write))
     positions = "read" if figure is not None else "not read"
-    return (
+    line = (
         f"positions {positions}, {values['trades_closed']} trades closed, "
         f"{values['fills_live']} fills recorded live, "
         f"{len(values['positions_overnight'])} carried"
     )
+    from ..reports import build_eod, report_switch
+
+    if await report_switch(service, "eod_on"):
+        line += f"; day report {await build_eod(service, today, now)} kept"
+    else:
+        line += "; the day report is switched off"
+    return line
 
 
 def register_jobs() -> None:

@@ -395,15 +395,14 @@ export interface Report {
   file_sha256: string | null
   reconciled_at: number | null
   version: number
+  reason: string | null
 }
 
 export interface ReportFile {
-  id: number
   file_name: string | null
   file_mime: string | null
   file_sha256: string | null
   file_b64: string | null
-  version: number
 }
 
 export interface ReportEvent {
@@ -425,6 +424,23 @@ export interface Settings {
   report_language: string
   charges_plan: ChargePlan
   version: number
+  alerts_on: boolean
+  rate_card: RateCard
+  times: ReportTimes
+}
+
+export interface RateCard {
+  version: string
+  from_day: number
+}
+
+export interface ReportTimes {
+  brief: string | null
+  eod: string | null
+  check: string | null
+  weekly: string
+  monthly: string
+  fy: string
 }
 
 export interface FamilyDay {
@@ -716,6 +732,7 @@ export interface SettingsSetReq {
   monthly_on?: boolean
   fy_on?: boolean
   charges_plan?: ChargePlan
+  report_language?: string
 }
 
 export type ReconcileNowReq = Record<string, never>

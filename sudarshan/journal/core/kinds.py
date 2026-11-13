@@ -240,17 +240,26 @@ RECORDS = {
     "Analytics": "metrics:Metrics, hold:HoldBucketRow[], calendar:Calendar, equity:Equity, "
     "heat:HeatCell[], by_strategy:BlockRow[], by_tag:BlockRow[], by_playbook:BlockRow[], "
     "expiry:ExpirySplit, beta:Beta|null",
+    # ``period_key``: 20261109 for a day, 2026W45 a week, 202610 a month, FY2627 a year;
+    # ``reason``: why the last delivery did not send it whole, in the owner's words.
     "Report": "id:int, kind:ReportKind, period_key:string, built_ms:int, status:ReportStatus, "
     "text:string, file_name:string|null, file_mime:string|null, file_sha256:string|null, "
-    "reconciled_at:int|null, version:int",
+    "reconciled_at:int|null, version:int, reason:string|null",
     # The stored file of a report, base64 in the envelope; all four file fields are null until
     # the renderer has made one (the bridge then says the report has no file to download).
-    "ReportFile": "id:int, file_name:string|null, file_mime:string|null, "
-    "file_sha256:string|null, file_b64:string|null, version:int",
+    "ReportFile": "file_name:string|null, file_mime:string|null, file_sha256:string|null, "
+    "file_b64:string|null",
     "ReportEvent": "id:string, src:string, kind:string, report:int, report_kind:ReportKind, "
     "sha256:string|null",
+    # ``alerts_on``: false while nothing delivers reports (the alerts service, or its report
+    # desk, switched off: cross-design Y38); ``times``: when each report is built, as the page
+    # prints them (the day ones for today, or the next trading day).
     "Settings": "capital_base_paise:int|null, eod_on:bool, brief_on:bool, weekly_on:bool, "
-    "monthly_on:bool, fy_on:bool, report_language:string, charges_plan:ChargePlan, version:int",
+    "monthly_on:bool, fy_on:bool, report_language:string, charges_plan:ChargePlan, version:int, "
+    "alerts_on:bool, rate_card:RateCard, times:ReportTimes",
+    "RateCard": "version:string, from_day:int",
+    "ReportTimes": "brief:string|null, eod:string|null, check:string|null, weekly:string, "
+    "monthly:string, fy:string",
     # The family service's per-member line (``core/words.family_day``), which it builds itself
     # from the counts below and the member's own privacy categories (cross-design Y16).
     "FamilyDay": "day:int, line:string|null",
@@ -385,7 +394,8 @@ OPS = (
     OpSpec("settings_get", "GET", "/settings", "read", "", "Settings"),
     OpSpec("settings_set", "PUT", "/settings", "write",
            "version:int, capital_base_paise?:int|null, eod_on?:bool, brief_on?:bool, "
-           "weekly_on?:bool, monthly_on?:bool, fy_on?:bool, charges_plan?:ChargePlan", "Done"),
+           "weekly_on?:bool, monthly_on?:bool, fy_on?:bool, charges_plan?:ChargePlan, "
+           "report_language?:string", "Done"),
     OpSpec("reconcile_now", "POST", "/reconcile", "reconcile", "", "Done"),
 )  # fmt: skip
 #: Ops that no route of the bridge carries: the alerts desk, the family service and the alerts'

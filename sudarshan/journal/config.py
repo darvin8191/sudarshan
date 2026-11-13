@@ -53,6 +53,8 @@ STATE_DIR = "/var/lib/sudarshan-journal"
 FEED_URL = f"http://{LOCAL_HOST}:5580"
 FEED_ZMQ = f"tcp://{LOCAL_HOST}:5581"
 PORTFOLIO_URL = f"http://{LOCAL_HOST}:5583"
+#: The alerts service, whose report desk delivers the reports (its /health says it runs).
+ALERTS_URL = f"http://{LOCAL_HOST}:5582"
 TICKS_DIR = "/var/lib/sudarshan-feed/ticks"
 RISK_DB = "db/sudarshan_risk.db"
 #: The most keys this client may claim at the feed (cross-design Y12: the journal's quota).
@@ -174,6 +176,7 @@ class Settings:
     feed_url: str = FEED_URL
     feed_zmq: str = FEED_ZMQ
     portfolio_url: str = PORTFOLIO_URL
+    alerts_url: str = ALERTS_URL
     max_claims: int = MAX_CLAIMS_CEILING
     eod_after_min: int = 5
     check_after_min: int = 5
@@ -212,6 +215,7 @@ class Settings:
             feed_url=_loopback_url(env, "SUDARSHAN_JOURNAL_FEED_URL", FEED_URL),
             feed_zmq=_loopback_url(env, "SUDARSHAN_JOURNAL_FEED_ZMQ", FEED_ZMQ, "tcp"),
             portfolio_url=_loopback_url(env, "SUDARSHAN_JOURNAL_PORTFOLIO_URL", PORTFOLIO_URL),
+            alerts_url=_loopback_url(env, "SUDARSHAN_JOURNAL_ALERTS_URL", ALERTS_URL),
             max_claims=_number(
                 env, "SUDARSHAN_JOURNAL_MAX_CLAIMS", MAX_CLAIMS_CEILING, 1, MAX_CLAIMS_CEILING
             ),

@@ -326,6 +326,20 @@ class OpenAlgoRecords:
                 found.add(day)
         return found
 
+    def index_expiry_names(self, day: int) -> list[str]:
+        """The indices whose options expire on ``day``, by the master's names (the brief's
+        "NIFTY expiry today")."""
+        rows = self.main.query(
+            "SELECT name, MIN(symbol) AS symbol FROM symtoken "
+            "WHERE exchange IN ('NFO', 'BFO') AND instrumenttype IN ('CE', 'PE') "
+            "AND expiry = :e GROUP BY name",
+            e=master_expiry(day),
+        )
+        return sorted(
+            str(row["name"]) for row in rows
+            if row["name"] and regimes.index_derivative(str(row["symbol"] or ""))
+        )  # fmt: skip
+
     # ---- the sandbox --------------------------------------------------------------------------
     def sandbox_trades(self, day: int) -> list[dict[str, Any]]:
         """The sandbox's fills of one IST day, oldest first."""

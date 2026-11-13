@@ -74,7 +74,8 @@ def test_the_day_close_takes_the_guards_figure_and_the_journals_counts(rig):
     ]
     assert (row["kill_switch"], row["daily_lock"], row["read_at"]) == ("off", "13:42", CLOSE - 1000)
     assert row["reconciled_at"] is None
-    assert line == "positions read, 1 trades closed, 3 fills recorded live, 2 carried"
+    assert line.startswith("positions read, 1 trades closed, 3 fills recorded live, 2 carried; ")
+    assert line.endswith(" kept")  # the day report (JB7)
 
 
 def test_a_row_with_the_days_values_is_checked_against_its_own_trades(rig):

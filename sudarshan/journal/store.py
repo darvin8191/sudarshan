@@ -673,6 +673,13 @@ class Tx:
             )  # fmt: skip
         )
 
+    # ---- a report's file (JB7): its bytes never leave through ``out`` ----
+    def report_bytes(self, report_id: int) -> bytes | None:
+        t = self._t("report")
+        return self.conn.execute(
+            select(t.c.file_bytes).where(t.c.id == report_id, self._mine(t))
+        ).scalar()
+
     # ---- the day's close and Upstox's own P&L report (JB5) ----
     def day_close_get(self, mode: str, day: int) -> dict[str, Any] | None:
         t = self._t("day_close")
