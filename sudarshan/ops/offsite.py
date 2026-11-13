@@ -28,32 +28,37 @@ job does not try, and says so. Without the file the step is off: one line in the
 from __future__ import annotations
 
 import contextlib
+import errno
 import getpass
+import hashlib
 import http.client
 import json
 import logging
 import os
-import pwd
 import re
 import shutil
 import ssl
+import stat
 import subprocess
 import sys
 import tempfile
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import quote, urlsplit
+from zoneinfo import ZoneInfo
 
 from .files import read_regular
 
 log = logging.getLogger("sudarshan.backup")
 
+IST = ZoneInfo("Asia/Kolkata")
 CONFIG_NAME = "offsite.json"
 WARN_DAYS = 14
 MAX_CONFIG = 32 << 10
+MAX_CERT = 64 << 10
 CHUNK = 1 << 20
 TRIES = 3
 PAUSE_S = 30.0
@@ -63,6 +68,9 @@ REASONS = ("openssl", "encrypt", "space", "network", "refused", "busy", "expired
 _PAR_END = re.compile(r".*/o/?")
 _LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1"})
 _CERT_BEGIN = "-----BEGIN CERTIFICATE-----"
+_PEM_CERT = re.compile(
+    r"-----BEGIN CERTIFICATE-----\r?\n[A-Za-z0-9+/=\r\n]+?-----END CERTIFICATE-----"
+)
 
 
 class OffsiteError(Exception):
@@ -100,11 +108,23 @@ def object_name(archive: str, release: str | None) -> str:
 
 
 def load(etc_dir: Path) -> Config | None:
-    """The settings, or None when the file is not there. A file that is there and cannot be used
-    raises ``OffsiteError("config")``: the owner meant it to work."""
+    """The settings, or None when the file is not there or is empty (the set-up makes it empty as
+    root, then fills it in as ``sudarshan``). A file that is there and cannot be used raises
+    ``OffsiteError("config")``, whatever the reason: one this user cannot read, a link, a folder,
+    or unreadable settings. The owner meant it to work, so he is told (review L2)."""
     path = etc_dir / CONFIG_NAME
+    try:
+        os.lstat(path)
+    except FileNotFoundError:
+        return None
+    except OSError:
+        log.error("%s cannot be looked at by this user", CONFIG_NAME)
+        raise OffsiteError("config") from None
     raw = read_regular(path, MAX_CONFIG)
     if raw is None:
+        log.error("%s is there but is not a plain file this user can read", CONFIG_NAME)
+        raise OffsiteError("config")
+    if not raw.strip():
         return None
     try:
         data = json.loads(raw)
@@ -135,25 +155,129 @@ def _problem(config: Config) -> str:
     return ""
 
 
-def write_config(etc_dir: Path, config: Config) -> Path:
-    """Write the file whole and private (root runs this; the job's own user owns the result)."""
+def render(config: Config) -> bytes:
+    """The settings file's whole content."""
     document = {
         "par_url": config.par_url,
         "expires": config.expires.isoformat(),
         "certificate": config.certificate,
     }
-    target = etc_dir / CONFIG_NAME
-    fd, temp = tempfile.mkstemp(dir=etc_dir, prefix=f".{CONFIG_NAME}.")
-    with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        json.dump(document, handle, indent=2)
-        handle.write("\n")
-    os.chmod(temp, 0o600)
-    if os.geteuid() == 0:
-        with contextlib.suppress(KeyError):
-            account = pwd.getpwnam("sudarshan")
-            os.chown(temp, account.pw_uid, account.pw_gid)
-    os.replace(temp, target)
-    return target
+    return (json.dumps(document, indent=2) + "\n").encode("utf-8")
+
+
+def _not_there(path: Path) -> str:
+    return (
+        f"Not saved: {path} is not there. The .bat makes it first; by hand: "
+        f"sudo install -o sudarshan -g sudarshan -m 600 /dev/null {path}"
+    )
+
+
+def _remove_and_again(path: Path, what: str) -> str:
+    return (
+        f"Not saved: {path} {what}. Remove it (sudo rm -r {path}) and run the .bat again: "
+        "it makes the file afresh."
+    )
+
+
+def _kind_problem(path: Path, info: os.stat_result, euid: int) -> str:
+    """What is wrong with the file the settings go into; "" when nothing is."""
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+        return _remove_and_again(path, "is not a plain file")
+    if info.st_uid != euid:
+        return _remove_and_again(path, "belongs to another user, not to sudarshan")
+    if info.st_mode & 0o077:
+        return (
+            f"Not saved: other users can read {path}. Make it private (sudo chmod 600 {path}) "
+            "and run the .bat again."
+        )
+    return ""
+
+
+def settings_file_problem(path: Path, euid: int | None = None) -> str:
+    """Whether the settings could be written into ``path`` now, looked at without opening it;
+    "" when they could. Asked before the owner types anything."""
+    euid = os.geteuid() if euid is None else euid
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        return _not_there(path)
+    except OSError:
+        return _remove_and_again(path, "cannot be looked at")
+    return _kind_problem(path, info, euid)
+
+
+def write_settings(path: Path, config: Config, *, euid: int | None = None) -> str:
+    """Write the settings into the file the set-up made, in place; "" when done, else why not.
+
+    Root makes the file, empty, owner ``sudarshan``, mode 600, with coreutils (``install``), and
+    runs no Python from the app folder (review H2). This runs as the file's owner and never
+    replaces the file or changes its owner or mode. It refuses a file that is not there (never
+    made here), a link (never followed), anything but a plain file, a file of another user, and
+    one other users could read.
+    """
+    euid = os.geteuid() if euid is None else euid
+    flags = os.O_WRONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    try:
+        fd = os.open(path, flags)
+    except FileNotFoundError:
+        return _not_there(path)
+    except OSError as exc:
+        if exc.errno in (errno.EACCES, errno.EPERM):
+            return _remove_and_again(path, "cannot be written by sudarshan")
+        return _remove_and_again(path, "is not a plain file")  # a link, a folder, a pipe
+    try:
+        problem = _kind_problem(path, os.fstat(fd), euid)
+        if problem:
+            return problem
+        try:
+            os.ftruncate(fd, 0)
+            view = memoryview(render(config))
+            while view:
+                view = view[os.write(fd, view) :]
+            os.fsync(fd)
+        except OSError:
+            with contextlib.suppress(OSError):
+                os.ftruncate(fd, 0)  # empty reads as "not set up", never as half a file
+            return (
+                f"Not saved: {path} could not be written. Check that the server's disk has free "
+                "space (df -h /etc), then run the .bat again."
+            )
+    finally:
+        os.close(fd)
+    return ""
+
+
+def first_certificate(text: str) -> str | None:
+    """The first PEM certificate in ``text``, alone and tidy; None when there is none."""
+    found = _PEM_CERT.search(text)
+    return found.group(0).replace("\r\n", "\n") + "\n" if found else None
+
+
+def fingerprint(certificate: str) -> str:
+    """The certificate's SHA-256 fingerprint as ``openssl x509 -fingerprint -sha256`` prints it
+    (``AB:CD:...``), so the owner can hold the server's against his laptop's (review M1)."""
+    block = first_certificate(certificate)
+    if block is None:
+        raise ValueError("not a certificate")
+    digest = hashlib.sha256(ssl.PEM_cert_to_DER_cert(block)).hexdigest().upper()
+    return ":".join(digest[i : i + 2] for i in range(0, len(digest), 2))
+
+
+def can_encrypt_to(certificate: str) -> bool:
+    """Run the nightly encryption once, on a few bytes, to ``certificate`` (review L3): an EC key
+    passes every look at the PEM and then fails every night. Raises ``OffsiteError("openssl")``
+    when there is no openssl. The trial runs in a private folder of its own with a random name."""
+    with tempfile.TemporaryDirectory(prefix="sudarshan-offsite-") as folder:
+        work = Path(folder)
+        sample = work / "sample.txt"
+        sample.write_bytes(b"SUDARSHAN offsite set-up check\n")
+        try:
+            encrypt(sample, work / "sample.cms", certificate, work, work / "openssl.log")
+        except OffsiteError as exc:
+            if exc.reason == "openssl":
+                raise
+            return False
+    return True
 
 
 # ---- encrypt and upload -----------------------------------------------------------------------
@@ -266,24 +390,128 @@ def send(
 # ---- the owner's one-time setup ---------------------------------------------------------------
 
 
-def configure(etc_dir: Path, certificate_file: Path) -> int:
-    """``--configure``: asks for the PAR URL (not shown as it is typed) and its expiry date, reads
-    the public certificate from a file, checks all three and writes the settings."""
-    try:
-        certificate = certificate_file.read_text(encoding="ascii")
-        expires = date.fromisoformat(input("PAR expiry date (YYYY-MM-DD): ").strip())
-    except (OSError, ValueError):
-        sys.stderr.write("The certificate file or the date could not be read.\n")
+class Terminal:
+    """The owner's terminal (``/dev/tty``). The questions are asked and answered here because
+    standard input carries the certificate (review M1); ``getpass`` reads this same terminal, and
+    falls back to standard input only when there is no terminal, which ``main`` refuses."""
+
+    def __init__(self, path: str = "/dev/tty"):
+        self.fd = os.open(path, os.O_RDWR | os.O_NOCTTY | getattr(os, "O_CLOEXEC", 0))
+
+    def _write(self, data: bytes) -> None:
+        view = memoryview(data)
+        while view:
+            view = view[os.write(self.fd, view) :]
+
+    def say(self, text: str) -> None:
+        self._write((text + "\n").encode("utf-8", "replace"))
+
+    def ask(self, prompt: str) -> str:
+        """One line, as typed (the terminal shows it)."""
+        self._write(prompt.encode("utf-8", "replace"))
+        line = b""
+        while not line.endswith(b"\n") and len(line) < 4096:
+            chunk = os.read(self.fd, 4096)
+            if not chunk:  # Ctrl-D
+                break
+            line += chunk
+        return line.decode("utf-8", "replace").strip()
+
+    def ask_hidden(self, prompt: str) -> str:
+        """One line that is not shown as it is typed or pasted."""
+        return getpass.getpass(prompt)
+
+    def close(self) -> None:
+        os.close(self.fd)
+
+
+NOT_ROOT = (
+    "Not saved: run this as sudarshan, not as root: cd /opt/sudarshan/apps/openalgo && "
+    "sudo -u sudarshan .venv/bin/python -m sudarshan.ops.offsite --configure "
+    "< sudarshan-backup.crt (the .bat does this)."
+)
+CHECK_COMMAND = (
+    "cd /opt/sudarshan/apps/openalgo && "
+    "sudo -u sudarshan .venv/bin/python -m sudarshan.ops.backup --check"
+)
+
+
+def configure(
+    etc_dir: Path,
+    certificate_text: str,
+    terminal,
+    *,
+    today: date | None = None,
+    euid: int | None = None,
+) -> int:
+    """``--configure``: check the public certificate that came on standard input, show its
+    fingerprint, and once the owner types yes ask for the link's expiry date and the link (not
+    shown as it is typed); then write the settings into the file root made. 0 saved, 1 the owner
+    stopped it, 2 not saved for a reason it names. Nothing is asked before the certificate and
+    the file have been checked, so nothing is typed for nothing."""
+    euid = os.geteuid() if euid is None else euid
+    say = terminal.say
+    path = etc_dir / CONFIG_NAME
+    if euid == 0:
+        say(NOT_ROOT)
         return 2
-    config = Config(
-        getpass.getpass("PAR URL (hidden): ").strip(), expires, certificate.strip() + "\n"
-    )
+    certificate = first_certificate(certificate_text)
+    if certificate is None or "PRIVATE KEY" in certificate_text:
+        say(
+            "Not saved: what came in is not a public certificate. The .bat sends "
+            "sudarshan-backup.crt; the .key file never leaves the laptop."
+        )
+        return 2
+    problem = settings_file_problem(path, euid)
+    if problem:
+        say(problem)
+        return 2
+    try:
+        usable = can_encrypt_to(certificate)
+    except OffsiteError:
+        say(
+            "Not saved: openssl is not installed on the server. Install it "
+            "(sudo apt install openssl) and run the .bat again."
+        )
+        return 2
+    if not usable:
+        say(
+            "Not saved: this certificate cannot be used for the nightly encryption. Make the key "
+            "pair exactly as step 7 shows, then run the .bat again."
+        )
+        return 2
+    say("The certificate the server received has this SHA-256 fingerprint:")
+    say(f"  {fingerprint(certificate)}")
+    say("The laptop printed its own before sending it (after sha256 Fingerprint=).")
+    if terminal.ask("Type yes if the two are the same, or press Enter to stop: ").lower() != "yes":
+        say("Not saved. Nothing was changed.")
+        return 1
+    typed = terminal.ask("Expiry date of the upload link, as the console shows it (YYYY-MM-DD): ")
+    try:
+        expires = date.fromisoformat(typed)
+    except ValueError:
+        say("Not saved: that is not a date written like 2027-11-12. Run the .bat again.")
+        return 2
+    if expires <= (today or datetime.now(IST).date()):
+        say(
+            "Not saved: that date is today or has passed, and the link stops working on it. "
+            "Make a new link (steps 4 and 5) and run the .bat again."
+        )
+        return 2
+    link = terminal.ask_hidden(
+        "Upload link (nothing shows as you paste or type it; press Enter after it): "
+    ).strip()
+    config = Config(link, expires, certificate)
     problem = _problem(config)
     if problem:
-        sys.stderr.write(f"Not saved: {problem}.\n")
+        say(f"Not saved: {problem}. Run the .bat again.")
         return 2
-    path = write_config(etc_dir, config)
-    sys.stdout.write(f"Saved {path} (mode 600). Run the check to see it: backup --check\n")
+    problem = write_settings(path, config, euid=euid)
+    if problem:
+        say(problem)
+        return 2
+    say("Saved. The next night's backup sends the first offsite copy.")
+    say(f"Check it now: {CHECK_COMMAND}")
     return 0
 
 
@@ -293,15 +521,40 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m sudarshan.ops.offsite")
     parser.add_argument(
         "--configure",
-        metavar="CERTIFICATE",
-        help="save the offsite settings (run with sudo; asks for the PAR URL and its expiry date)",
+        action="store_true",
+        help=(
+            "save the offsite settings: run as sudarshan with the public certificate on standard "
+            "input (--configure < sudarshan-backup.crt); asks for the link's expiry date and the "
+            "link on the terminal"
+        ),
     )
     parser.add_argument("--etc-dir", default="/etc/sudarshan", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     if not args.configure:
         parser.print_help()
         return 2
-    return configure(Path(args.etc_dir), Path(args.configure))
+    if sys.stdin is None or sys.stdin.isatty():
+        sys.stderr.write(
+            "Give the public certificate on standard input: ... --configure "
+            "< sudarshan-backup.crt (the .bat does this).\n"
+        )
+        return 2
+    text = sys.stdin.buffer.read(MAX_CERT + 1)
+    if len(text) > MAX_CERT:
+        sys.stderr.write("Not saved: what came in is too long to be a certificate.\n")
+        return 2
+    try:
+        terminal = Terminal()
+    except OSError:
+        sys.stderr.write(
+            "Not saved: this asks questions on a terminal and none is open. Log in with "
+            "ssh -t, as the .bat does.\n"
+        )
+        return 2
+    try:
+        return configure(Path(args.etc_dir), text.decode("ascii", "replace"), terminal)
+    finally:
+        terminal.close()
 
 
 if __name__ == "__main__":

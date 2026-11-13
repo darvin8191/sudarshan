@@ -1063,7 +1063,8 @@ def _note_disabled(settings: Settings, day: date) -> None:
         if marker.read_text().strip() == day.isoformat():
             return
     log.info(
-        "offsite copy is off: %s is not on the server (set-up steps are in the README)",
+        "offsite copy is off: %s is not on the server, or is empty "
+        "(set-up steps are in the README)",
         offsite.CONFIG_NAME,
     )
     with contextlib.suppress(OSError):

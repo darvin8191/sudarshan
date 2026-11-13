@@ -49,14 +49,19 @@ feed and API-key calls work as before.
   the phone. It should show the login page. Log in again on both (a logout also ends the Upstox
   login, as it always has). The two October rows should be gone from Active Sessions.
 - When you want the offsite copy: the 12 steps in `sudarshan/README.md`, "Setting up the offsite
-  copy" (the Oracle console, a key pair made on the laptop, one `.bat` that sends only the public
-  certificate and asks for the upload link in a hidden prompt). The next morning, look for one file
-  in the bucket.
+  copy": the Oracle console, a key pair made on the laptop, and one `.bat`. The `.bat` sends only
+  the public certificate, shows its fingerprint on the laptop and again on the server, and saves
+  nothing until you type yes; then it asks for the link's expiry date and, in a hidden prompt, the
+  upload link. On the server, root only makes the empty settings file; the settings are written by
+  the job's own user, and no program from the app folder runs as root. The next morning, look for
+  one file in the bucket.
 
 ### What is refused now that used to be accepted
 - A device signed in before a logout, a password change or a password reset elsewhere is sent to the
   login page at its next page, read or reconnect.
-- The offsite settings refuse a private key: only the public certificate goes to the server.
+- The offsite set-up refuses a private key (only the public certificate goes to the server), a
+  certificate the nightly encryption cannot use, a run as root, and a settings file it did not
+  make; each says what to do instead.
 
 ### Not in this release yet
 - **The offsite copy has not met a real bucket yet**: the first night after your console steps is

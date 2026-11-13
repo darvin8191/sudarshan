@@ -104,8 +104,16 @@ def decrypt(sealed: bytes, key: Path, cert: Path, tmp: Path) -> bytes | None:
     return out.read_bytes() if done.returncode == 0 and out.exists() else None
 
 
+def write_file(server: Server, config: offsite.Config) -> Path:
+    """The settings file as the set-up leaves it: made empty with mode 600, then filled in."""
+    path = server.etc / "offsite.json"
+    path.write_bytes(offsite.render(config))
+    path.chmod(0o600)
+    return path
+
+
 def set_up(server: Server, par: str, cert: Path, expires: date = TODAY + timedelta(days=60)):
-    offsite.write_config(server.etc, offsite.Config(par, expires, cert.read_text()))
+    write_file(server, offsite.Config(par, expires, cert.read_text()))
 
 
 # ---- what is in the archive ---------------------------------------------------------------
@@ -203,7 +211,7 @@ def test_a_certificate_that_holds_a_private_key_or_a_link_that_is_not_https_is_r
         "https://objectstorage.example.com/p/x/n/a/b/c/o/?x=1": good,
     }
     for par, cert in cases.items():
-        offsite.write_config(server.etc, offsite.Config("https://h/o/", TODAY, good))
+        write_file(server, offsite.Config("https://h/o/", TODAY, good))
         data = json.loads((server.etc / "offsite.json").read_text())
         data.update(par_url=par, certificate=cert)
         (server.etc / "offsite.json").write_text(json.dumps(data))
@@ -323,18 +331,4 @@ def test_a_file_that_cannot_be_used_is_a_notice_and_never_a_failed_local_backup(
     assert event.fact("reason") == "config"
 
 
-def test_the_setup_command_checks_what_it_is_given_and_writes_a_private_file(
-    server, tmp_path, monkeypatch, capsys
-):
-    _key, cert = make_pair(tmp_path / "pair")
-    monkeypatch.setattr("builtins.input", lambda _prompt="": "2026-12-31")
-    monkeypatch.setattr(offsite.getpass, "getpass", lambda _prompt="": "https://h.example/p/x/o/")
-
-    code = offsite.main(["--configure", str(cert), "--etc-dir", str(server.etc)])
-
-    assert code == 0 and "x/o" not in capsys.readouterr().out  # the link is never echoed back
-    path = server.etc / "offsite.json"
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
-    assert offsite.load(server.etc).expires == date(2026, 12, 31)
-    monkeypatch.setattr(offsite.getpass, "getpass", lambda _prompt="": "http://h.example/o/")
-    assert offsite.main(["--configure", str(cert), "--etc-dir", str(server.etc)]) == 2
+# The owner's set-up command (--configure) has its own tests: test_offsite_configure.py.
