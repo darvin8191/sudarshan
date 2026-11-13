@@ -1,4 +1,3 @@
-import { istDay } from '@/sudarshan/dashboard/live'
 import type { Expiry, ExpiryRule } from './v2/types'
 
 /** The strikes asked for each side of the ATM (the picker shows ATM plus or minus this many). */
@@ -25,31 +24,26 @@ export function atmOf(price: number | null, strikes: readonly number[]): number 
   return best
 }
 
-/** The month of an ISO date, as `YYYY-MM`, and the next one. */
-const monthOf = (day: string) => day.slice(0, 7)
-const nextMonth = (month: string) => {
-  const [year, number] = month.split('-').map(Number)
-  return number === 12 ? `${year + 1}-01` : `${year}-${String(number + 1).padStart(2, '0')}`
-}
-
 /**
- * The expiry rule the form can keep a row on for the tab picked, or null when no rule says it: the first
- * tab is Nearest, the second Next, a monthly expiry in this calendar month is This month's and one in
- * the next is Next month's. A weekly further out has no rule, and a row cannot follow it.
+ * The expiry rule the form can keep a row on for the tab picked, or null when no rule says it. The
+ * server's own rule decides (`dynamic.pick_expiries`): the tabs are the open expiries in order, `month`
+ * is the first open month-end expiry and `next_month` the one after it, so from a monthly expiry's close
+ * to the end of its calendar month "This month's" is already next month's contract (review M2). No
+ * clock is read here.
+ *
+ * The first tab is Nearest. The first monthly tab is This month's, even in second place: Next would
+ * leave that date when the nearest expires, This month's keeps it until its own close. Then the second
+ * tab is Next and the second monthly tab Next month's. A weekly further out has no rule, and a row
+ * cannot follow it.
  */
-export function ruleFor(
-  expiries: readonly Expiry[],
-  date: string,
-  now: number = Date.now()
-): ExpiryRule | null {
+export function ruleFor(expiries: readonly Expiry[], date: string): ExpiryRule | null {
   const at = expiries.findIndex((each) => each.date === date)
   if (at < 0) return null
   if (at === 0) return 'nearest'
+  const monthly = expiries.filter((each) => each.month)
+  if (date === monthly[0]?.date) return 'month'
   if (at === 1) return 'next'
-  if (!expiries[at].month) return null
-  const month = monthOf(istDay(now))
-  if (monthOf(date) === month) return 'month'
-  return monthOf(date) === nextMonth(month) ? 'next_month' : null
+  return date === monthly[1]?.date ? 'next_month' : null
 }
 
 /** Said under Add as one row on a tab no rule can follow. */

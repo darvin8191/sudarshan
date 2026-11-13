@@ -61,7 +61,8 @@ const settle = async (ms = 0) => {
 }
 
 const EXP = [
-  ['24NOV', '2026-11-24', 'Nearest 24 Nov', false],
+  // 24 Nov 2026 is November's monthly, the last NIFTY expiry of its month, as the server marks it.
+  ['24NOV', '2026-11-24', 'Nearest 24 Nov', true],
   ['01DEC', '2026-12-01', '1 Dec', false],
   ['08DEC', '2026-12-08', '8 Dec', false],
   ['29DEC', '2026-12-29', '29 Dec (month)', true],
