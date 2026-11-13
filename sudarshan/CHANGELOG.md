@@ -54,7 +54,10 @@ Friday 4 Dec**, so it is installed before the Monday it is for.
   of indices makes its 15:30 check at 15:45:05 (on time, not marked late). **That is after F&O
   closes at 15:45, so that day such an alert or check cannot be acted on in F&O**; until 6 Dec it
   came at 15:30:05, with 10 minutes of F&O left. A screen with no index among its instruments, a
-  watchlist screen included, does not wait for it.
+  watchlist screen included, does not wait for it. A watchlist screen that holds an index and F&O
+  contracts makes its later checks after its 15:30 check, so at 15:45:05, after F&O closes (on a
+  1-minute screen that is every check from 15:31 to 15:44); keep the index in a screen of its own
+  to keep those checks on time.
 - **A stock without derivatives** closes at 15:30 with no auction and keeps its usual close.
 - **Auto-login** may log in until 15:45. Test now is refused from 09:00 to 15:45 while Upstox is
   connected, and the page names the day's hours.
@@ -135,6 +138,12 @@ Friday 4 Dec**, so it is installed before the Monday it is for.
   until you reload it.** On an expiry day such a chart does not know its contract stops at 15:30:
   it opens flat candles after 15:30 and says "Stale", and such a scalping page stays on the
   expiring contract. Reload them, or open them again, each morning.
+- **While a 15:30 check waits** (for an auction price or an index's closing value), the Screener
+  page's "next check" line can name the next trading day, or a 15:35 or 15:40 check that will only
+  come after the waiting one. The checks themselves run in order; only the line is wrong.
+- **A stock with derivatives that the screener does not follow** (past its limit of 320
+  instruments) never gets an auction price there, so a screen holding one waits to 15:45:05 every
+  day, and its later checks with it. Keep such screens smaller than the limit.
 - **Deploy gate:** installs are still kept out only until 16:00, as your rules say. From 7 Dec an
   install between 16:01 and 16:05 can restart the order alerts while they are connected; they read
   the order book again afterwards.
