@@ -89,12 +89,12 @@ async def summary(ctx, message):
     now, scope, who = ctx.clock(), scope_now(), caller()
     found = await answer(lambda: views.summary(scope, now=now))
     entries = found.get("entries") if isinstance(found, dict) else None
-    if entries and any(e["tab"]["system"] for e in entries):
-        row = await _upstox_within(ctx, scope, who.principal)
-        for entry in entries:
-            if entry["tab"]["system"]:
-                entry["upstox"] = row
-    return found
+    system = next((e for e in entries or () if e["tab"]["system"]), None)
+    if system is not None:
+        # A member's entries are masked each by its own tab's share (L6): the Upstox row too.
+        about = scope if who.access is None else who.access.scope_about({system["tab"]["id"]})
+        system["upstox"] = await _upstox_within(ctx, about, who.principal)
+    return found if who.access is None else who.access.by_tab(found)
 
 
 @op("tab_create")

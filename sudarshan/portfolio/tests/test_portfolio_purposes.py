@@ -505,12 +505,65 @@ async def test_a_restricted_share_shows_no_figures_and_a_view_share_shows_them(r
 
 
 @scenario
-async def test_the_restricted_mask_of_one_share_covers_every_tab_of_the_answer(rig):
+async def test_a_restricted_share_hides_the_figures_of_its_own_tab_only(rig):
+    """L6: one restricted tab no longer takes the figures of the member's other tabs, in a tab's
+    view, its performance, the Upstox book or the summary's entries."""
+    for tab in (rig.tab, rig.other):  # pinned, so that the summary carries both
+        version = next(t for t in rig.book.tabs(OWNER) if t["id"] == tab["id"])["version"]
+        rig.book.tab_update(OWNER, tab["id"], version, {"pinned": True}, now=NOW)
+    await rig.owner("share_set", tab_id=rig.tab["id"], viewer="7", level="view")
+    await rig.owner("share_set", tab_id=rig.other["id"], viewer="7", level="restricted")
+    await rig.owner("share_set", tab_id=rig.upstox_tab, viewer="7", level="view")
+    await rig.owner("member_privacy_set", member="7", shown=ALL)
+
+    def figures(data):
+        return {k for k in keys(data) if hidden_by(k, serialize.VIEWER_MASK)}
+
+    seen = (await rig.family("7", "tab_get", id=rig.tab["id"]))[1]["data"]
+    cut = (await rig.family("7", "tab_get", id=rig.other["id"]))[1]["data"]
+    assert {"qty_u", "totals", "lines"} <= keys(seen) and not figures(cut)
+    assert [r["asset"]["name"] for r in cut["rows"]] == ["Gold coin"]  # names stay
+    assert "series" in (await rig.family("7", "performance", id=rig.tab["id"]))[1]["data"]
+    assert not figures((await rig.family("7", "performance", id=rig.other["id"]))[1]["data"])
+    book = (await rig.family("7", "upstox_book", parts=["holdings"]))[1]["data"]
+    assert "qty_u" in keys(book)
+    entries = {
+        e["tab"]["name"]: e for e in (await rig.family("7", "summary"))[1]["data"]["entries"]
+    }
+    assert set(entries) == {"Upstox", "Long term", "Private"}
+    assert "qty_u" in keys(entries["Long term"]) and "qty_u" in keys(entries["Upstox"])
+    assert not figures(entries["Private"]) and entries["Private"]["tab"]["id"] == rig.other["id"]
+    await rig.owner("share_set", tab_id=rig.upstox_tab, viewer="7", level="restricted", version=1)
+    book = (await rig.family("7", "upstox_book", parts=["holdings"]))[1]["data"]
+    entries = {
+        e["tab"]["name"]: e for e in (await rig.family("7", "summary"))[1]["data"]["entries"]
+    }
+    assert not figures(book) and not figures(entries["Upstox"])
+    assert "qty_u" in keys(entries["Long term"])
+
+
+@scenario
+async def test_the_way_out_masks_a_restricted_tabs_part_whatever_the_op_did(rig):
+    """L6, mutation target 8: an op that forgets the restricted mask of an entry is still masked
+    on the way out."""
     await rig.owner("share_set", tab_id=rig.tab["id"], viewer="7", level="view")
     await rig.owner("share_set", tab_id=rig.other["id"], viewer="7", level="restricted")
     await rig.owner("member_privacy_set", member="7", shown=ALL)
-    data = (await rig.family("7", "tab_get", id=rig.tab["id"]))[1]["data"]
-    assert "qty_u" not in keys(data)  # the union of the masks: nothing shows figures
+
+    async def leaky(ctx, message):
+        return {
+            "entries": [
+                {"tab": {"id": t["id"]}, "live": {"qty_u": 5}} for t in (rig.tab, rig.other)
+            ]
+        }
+
+    rig.svc.api.registry = {**rig.svc.api.registry, "summary": leaky}
+    status, body = await rig.family("7", "summary")
+    assert status == 200
+    assert body["data"]["entries"] == [
+        {"tab": {"id": rig.tab["id"]}, "live": {"qty_u": 5}},
+        {"tab": {"id": rig.other["id"]}, "live": {}},
+    ]
 
 
 def hidden_by(key, mask):
