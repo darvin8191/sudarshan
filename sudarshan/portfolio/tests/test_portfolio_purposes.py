@@ -431,12 +431,30 @@ async def test_the_stored_floor_hides_pnl_even_when_the_caller_sends_an_empty_ma
         "unrealised_paise",
         "overall_gain_paise",
         "absolute_return_pct",
-        "today",
+        "paise",  # the P&L of the day, inside a Today figure
+        "base_paise",  # what the day's P&L is taken from: with the value it gives it away
         "realised_paise",
     }
     assert not pnl_names & keys(quiet)
     assert pnl_names <= keys(loud)
     assert "value_paise" in keys(quiet) and "qty_u" in keys(quiet)  # quantities are shown to 7
+
+
+@scenario
+async def test_hiding_pnl_keeps_the_trading_date(rig):
+    """L4: ``today`` is also the trading date of state, summary and a tab; hiding P&L hides the
+    figures inside a Today block, never the date."""
+    await rig.grant("7", [rig.tab["id"]], shown={"pnl": False, "qty": True, "funds": False,
+                                                   "orders": True})  # fmt: skip
+    await rig.owner("share_set", tab_id=rig.tab["id"], viewer="8", level="view")  # no privacy row
+    day = 20261026
+    for member in ("7", "8"):
+        for op in ("state", "summary"):
+            assert (await rig.family(member, op))[1]["data"]["today"] == day, (member, op)
+        tab = (await rig.family(member, "tab_get", id=rig.tab["id"]))[1]["data"]
+        assert tab["today"] == day
+    quiet = (await rig.family("7", "tab_get", id=rig.tab["id"]))[1]["data"]
+    assert set(quiet["totals"]["today"]) == {"state", "counted", "unknown", "pending"}
 
 
 @scenario
@@ -470,7 +488,8 @@ async def test_with_quantities_hidden_pnl_is_hidden_whatever_the_row_says(rig):
 
     rig.svc.store.write(OWNER, tamper)
     data = (await rig.family("7", "tab_get", id=rig.tab["id"]))[1]["data"]
-    assert not {"unrealised_paise", "overall_gain_paise", "today", "qty_u", "lines"} & keys(data)
+    hidden = {"unrealised_paise", "overall_gain_paise", "paise", "base_paise", "qty_u", "lines"}
+    assert not hidden & keys(data)
 
 
 @scenario
