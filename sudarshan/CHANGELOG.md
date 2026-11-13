@@ -34,8 +34,10 @@ feed and API-key calls work as before.
   the bucket's size after the first weeks (README, "What it costs").
 - **Told on Telegram when it matters:** "Tonight's offsite backup did not upload: (the reason). The
   local backup is fine." once a day per cause, after three tries for a busy or unreachable bucket;
-  and a reminder every day from 14 days before the upload link expires. A good night is one journal
-  line, no message.
+  and a reminder every day from 15 days before the upload link's expiry date. That date is the
+  one the console shows, and the last copy goes the day before it, because the console's expiry
+  has a time of day. A refusal names the next step (a new upload link, or the set-up again). A
+  good night is one journal line, no message.
 - **The Risk page, from the sandbox test of the daily loss lock:**
   - every box that asks for the confirm phrase now says "Type your confirm phrase. It is STOP unless
     you changed it.", with its own reason beside it;

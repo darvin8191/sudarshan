@@ -349,7 +349,7 @@ one). The causes: `source` (a file could not be copied, or was not taken for the
 partial archive is made without it; a database that fails SQLite's check is kept, called out and
 also makes the archive partial, cause `integrity`),
 `space`, `cap`, `write` (the disk refused the archive or it did not read back whole), `offsite`
-(the offsite copy failed, or its command did; the archive is safe on the server), `offsite_soon` (not a failure: the offsite upload link expires within 14 days), `lock` (the deploy tool's lock
+(the offsite copy failed, or its command did; the archive is safe on the server), `offsite_soon` (not a failure: the offsite upload link's expiry date is 15 days away or less), `lock` (the deploy tool's lock
 cannot be opened, so an install cannot be told from none: nothing is saved until it can),
 `overdue` (a run stood aside and the newest complete archive is more than 30 hours old) and
 `settings` (a setting in `backup.env` cannot be used: the job exits with status 2 and changes
@@ -389,8 +389,8 @@ Storage bucket of the owner's, which keeps every version (what that costs is in 
 | Names | `sudarshan-backup-YYYYMMDD-HHMMSS-<release>.tar.gz.cms`: the date and the release, no host name. |
 | Retention | Two OCI lifecycle rules the owner sets (step 3): the newest version of a copy becomes a previous version after 30 days, and a previous version is deleted 30 days after it stopped being the newest, so a copy is kept about 60 days in all. The job never deletes an object, and the upload link could not. |
 | What it costs | About 60 nights of copies are stored at a time (above). Oracle's Always Free allowance is 20 GB of Object Storage. On a Pay As You Go account that is an allowance, not a cap: storage past it is billed, and so is whatever someone holding the upload link uploads. Set a budget alert at a small amount (console: Billing, Budgets), look at the bucket's size after the first weeks, and shorten both rules of step 3 if about 60 nights of copies would pass 20 GB. |
-| Expiry | A PAR stops working on its date. From 14 days before it, the owner is told once a day on Telegram (cause `offsite_soon`) and the copies still go. After the date nothing is tried and the owner is told why (cause `offsite`, "the access link ... has expired"). The date is the last day it works. |
-| Failure | One notice: "Tonight's offsite backup did not upload: <reason>. The local backup is fine." The reasons are in words (no encryption tool, could not reach Oracle's storage, storage refused the file, storage busy, link expired, settings unusable). A busy or unreachable bucket is tried 3 times, 30 seconds apart; the local archive is never touched, and the next night uploads the next archive (the missed night's archive stays on the server for the local retention). Success is one journal line. |
+| Expiry | The date in the file is the expiry date the console shows for the link. The console gives it a time of day, so the link may stop at any time on that date: the job takes that date as the first day the link is not used, and the last copy goes the day before. From 15 days before the date, the owner is told once a day on Telegram (cause `offsite_soon`) and the copies still go. From the date on, nothing is tried and the owner is told why (cause `offsite`, "the upload link has reached its expiry date"). |
+| Failure | One notice: "Tonight's offsite backup did not upload: <reason>. The local backup is fine." The reasons are in words, with the next step where there is one: no encryption tool; could not reach Oracle's storage; storage refused the file (if the upload link is no longer listed in the bucket, make a new one with steps 4, 5 and 9); storage busy; the link has reached its expiry date (steps 4, 5 and 9); settings unusable or the backup could not be encrypted (run step 9 again). An answer the storage gives before it has read the whole file counts as what it says, so a link that is gone is told as a refusal and tried once. A busy or unreachable bucket is tried 3 times, 30 seconds apart; the local archive is never touched, and the next night uploads the next archive (the missed night's archive stays on the server for the local retention). Success is one journal line. |
 | Not set up | Without the file, or with the empty file the set-up makes before the settings are typed in, the step is off: one journal line a day says so, and the local backup is unaffected. `--check` prints `offsite: not set`. |
 
 `SUDARSHAN_BACKUP_OFFSITE_CMD` (the older hook below) still works for anyone who prefers their own
@@ -510,14 +510,15 @@ empty settings file, with `install`; the settings are written by `sudarshan`, th
    it names and double-click the file again.
 10. On the server, check it as the job's own user: `cd /opt/sudarshan/apps/openalgo && sudo -u
     sudarshan .venv/bin/python -m sudarshan.ops.backup --check`. The last line should say
-    `offsite: set (the link works N more days)`.
+    `offsite: set (the link stops working in N days, on <the date you typed>)`. If it says
+    `not set`, step 9 did not save: double-click the `.bat` again and read its last lines.
 11. The next night's backup uploads one object. Look for it in the bucket the next morning
     (Objects: one `sudarshan-backup-...-v0.8.0.tar.gz.cms`), and check that Object versioning
     still reads Enabled.
-12. Before the PAR expires, the owner is told on Telegram 14 days ahead: repeat steps 4, 5 and 9 (the
-    certificate stays the same, and the `.bat` writes the new link over the old one). Then delete
-    the old link in the console (Management, Pre-authenticated requests): until its date, anyone
-    who copied it could still upload with it.
+12. From 15 days before the link's expiry date you are told on Telegram, every day until it is
+    renewed: repeat steps 4, 5 and 9 (the certificate stays the same, and the `.bat` writes the
+    new link over the old one). Then delete the old link in the console (Management,
+    Pre-authenticated requests): until its date, anyone who copied it could still upload with it.
 
 ### Restoring from the offsite copy
 

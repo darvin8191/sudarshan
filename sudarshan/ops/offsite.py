@@ -7,7 +7,7 @@ What the server holds, in ``/etc/sudarshan/offsite.json`` (owner ``sudarshan``, 
 the repository, never in a log line, a notice or the archive itself):
 
     par_url      the write-only PAR URL of the bucket, ending in ``/o/``
-    expires      the date the PAR stops working, ``YYYY-MM-DD`` (the owner copies it from the console)
+    expires      the PAR's expiry date as the console shows it, ``YYYY-MM-DD``: not used from then
     certificate  the public X.509 certificate (PEM) the archive is encrypted to
 
 The server holds no OCI credential and no decryption key. The private key is made on the owner's
@@ -27,8 +27,10 @@ not authenticate by itself; the archive inside carries a manifest of SHA-256 sum
 a forged one (whoever holds the PAR can make an archive whose manifest matches): the bucket's
 versions and their upload times do that.
 
-A PAR expires. From 14 days before the date in the file the owner is told once a day; after it the
-job does not try, and says so. Without the file the step is off: one line in the journal a day.
+A PAR expires. The date in the file is the expiry date the console shows, which has a time of day,
+so it is the first day the link is not used (review L1). From 15 days before it the owner is told
+once a day; from that date the job does not try, and says so. Without the file, or with the empty
+file the set-up makes first, the step is off: one line in the journal a day.
 """
 
 from __future__ import annotations
@@ -62,7 +64,12 @@ log = logging.getLogger("sudarshan.backup")
 
 IST = ZoneInfo("Asia/Kolkata")
 CONFIG_NAME = "offsite.json"
-WARN_DAYS = 14
+#: The owner is told every day from this many days before the expiry date (review L1: the date is
+#: the first day the link is not used, so the last copy goes the day before it).
+WARN_DAYS = 15
+#: How long to wait for an answer the storage may have sent before the connection closed.
+EARLY_ANSWER_S = 10.0
+MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 MAX_CONFIG = 32 << 10
 MAX_CERT = 64 << 10
 CHUNK = 1 << 20
@@ -100,6 +107,11 @@ class Outcome:
     reason: str = ""
     days_left: int | None = None  # set from 14 days before the expiry, also when the upload worked
     expires: date | None = None
+
+
+def say_date(day: date) -> str:
+    """'26 Nov 2026', whatever the locale."""
+    return f"{day.day} {MONTHS[day.month - 1]} {day.year}"
 
 
 def object_name(archive: str, release: str | None) -> str:
@@ -336,12 +348,28 @@ def upload(par_url: str, path: Path, name: str, timeout: float = SOCKET_TIMEOUT_
                 conn.send(chunk)
         status = conn.getresponse().status
     except (OSError, http.client.HTTPException):
-        raise OffsiteError("network") from None
+        status = _early_answer(conn)
+        if status is None:
+            raise OffsiteError("network") from None
     finally:
         conn.close()
     if status in (200, 201, 204):
         return
     raise OffsiteError("busy" if status == 429 or status >= 500 else "refused")
+
+
+def _early_answer(conn: http.client.HTTPConnection) -> int | None:
+    """The status of an answer the storage sent before it read the whole file, or None when none
+    came (review L4). A link that is gone is refused as soon as the request's headers arrive, and
+    the connection is closed under the upload: that is a refusal, not a network fault, and trying
+    it again changes nothing."""
+    if conn.sock is None:  # never connected
+        return None
+    try:
+        conn.sock.settimeout(EARLY_ANSWER_S)
+        return conn.getresponse().status
+    except Exception:
+        return None
 
 
 def send(
@@ -363,7 +391,7 @@ def send(
     if config is None:
         return Outcome("off")
     left = (config.expires - today).days
-    if left < 0:
+    if left <= 0:  # the expiry date the console shows: the link may stop at any time that day
         return Outcome("failed", "expired", left, config.expires)
     warn = left if left <= WARN_DAYS else None
     name = object_name(archive.name, release)

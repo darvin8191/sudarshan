@@ -154,3 +154,41 @@ def test_the_readme_says_what_a_restore_needs_and_what_the_bucket_can_cost():
     assert "Decrypting needs free memory of about three times the file's size" in README
     assert "Billing, Budgets" in README and "20 GB" in README
     assert "Always Free)" not in STANZA  # the free allowance is not the whole story
+
+
+def _offsite_steps() -> dict[int, str]:
+    """The numbered steps of "Setting up the offsite copy", each as one line of text."""
+    part = RAW_README.split("### Setting up the offsite copy")[1].split("\n### ")[0]
+    steps: dict[int, str] = {}
+    for found in re.finditer(r"^(\d+)\. (.*?)(?=^\d+\. |\Z)", part, re.MULTILINE | re.DOTALL):
+        steps[int(found.group(1))] = " ".join(found.group(2).split())
+    return steps
+
+
+def test_the_steps_a_notice_names_are_the_steps_that_do_it():
+    """Review L4: a refused upload, an expired link and unusable settings name the README steps
+    that make a new link (4, 5, 9) or save the settings (9)."""
+    from sudarshan.alerts import notices
+
+    steps = _offsite_steps()
+    assert sorted(steps) == list(range(1, 13))
+    assert "Create pre-authenticated request" in steps[4] and "Permit object writes" in steps[4]
+    assert "only once" in steps[5]
+    assert "sudarshan-offsite.bat" in steps[9]
+    assert notices.NEW_LINK_STEPS == "(offsite set-up steps 4, 5 and 9 in the README)"
+    assert notices.SET_UP_AGAIN == "Run the offsite set-up again (step 9 in the README)"
+
+
+def test_the_expiry_the_readme_describes_is_the_one_the_code_keeps():
+    """Review L1: the date typed is the expiry date the console shows, the first day the link is
+    not used; the warnings start 15 days before it, and the check names the date (its words are
+    tested in test_backup_offsite.py)."""
+    from sudarshan.ops import offsite
+
+    assert offsite.WARN_DAYS == 15
+    assert "From 15 days before the date" in README
+    assert "From 15 days before the link's expiry date" in README
+    assert "the last copy goes the day before" in README
+    assert "Expiry date of the upload link, as the console shows it" in README
+    assert "`offsite: set (the link stops working in N days, on <the date you typed>)`" in README
+    assert "set (the link stops working" in inspect.getsource(backup._offsite_state)

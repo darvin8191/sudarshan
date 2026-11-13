@@ -328,14 +328,45 @@ LOOK = "if it is incomplete again, have the server looked at."
             "The local backup is fine.",
         ),
         (
-            {"why": "offsite_soon", "days": "14", "date": "2026-11-26"},
-            "The access link for the offsite backup expires in 14 days, on 26 Nov 2026. Make a "
-            "new one before then (steps are in the README), or the offsite copies will stop.",
+            {"why": "offsite", "reason": "refused"},
+            "Tonight's offsite backup did not upload: Oracle's storage refused the file. If the "
+            "upload link is no longer listed in the bucket, make a new one (offsite set-up steps "
+            "4, 5 and 9 in the README). The local backup is fine.",
+        ),
+        (
+            {"why": "offsite", "reason": "expired"},
+            "Tonight's offsite backup did not upload: the upload link has reached its expiry "
+            "date. Make a new one (offsite set-up steps 4, 5 and 9 in the README). The local "
+            "backup is fine.",
+        ),
+        (
+            {"why": "offsite", "reason": "config"},
+            "Tonight's offsite backup did not upload: the offsite settings on the server cannot "
+            "be used. Run the offsite set-up again (step 9 in the README). The local backup is "
+            "fine.",
+        ),
+        (
+            {"why": "offsite", "reason": "encrypt"},
+            "Tonight's offsite backup did not upload: the backup could not be encrypted. Run the "
+            "offsite set-up again (step 9 in the README). The local backup is fine.",
+        ),
+        (
+            {"why": "offsite_soon", "days": "15", "date": "2026-11-26"},
+            "The upload link for the offsite backup expires in 15 days, on 26 Nov 2026. Make a "
+            "new one before then (offsite set-up steps 4, 5 and 9 in the README), or the "
+            "offsite copies will stop.",
+        ),
+        (
+            {"why": "offsite_soon", "days": "1", "date": "2026-11-26"},
+            "The upload link for the offsite backup expires tomorrow, on 26 Nov 2026. Make a "
+            "new one before then (offsite set-up steps 4, 5 and 9 in the README), or the "
+            "offsite copies will stop.",
         ),
         (
             {"why": "offsite_soon", "days": "0", "date": "2026-11-26"},
-            "The access link for the offsite backup expires today, on 26 Nov 2026. Make a "
-            "new one before then (steps are in the README), or the offsite copies will stop.",
+            "The upload link for the offsite backup expires today, on 26 Nov 2026. Make a "
+            "new one before then (offsite set-up steps 4, 5 and 9 in the README), or the "
+            "offsite copies will stop.",
         ),
         (
             {"why": "settings"},

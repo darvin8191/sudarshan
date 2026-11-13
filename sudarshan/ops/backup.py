@@ -1042,7 +1042,7 @@ def _offsite_step(settings: Settings, started: datetime, result: Result) -> None
         _note_disabled(settings, day)
     elif outcome.state == "failed":
         result.failures.append(Failure(OFFSITE, facts={"reason": outcome.reason}))
-    if outcome.days_left is not None and outcome.days_left >= 0 and outcome.expires:
+    if outcome.days_left is not None and outcome.days_left > 0 and outcome.expires:
         record(
             settings.spool,
             kind="backup_failed",
@@ -1456,7 +1456,12 @@ def _offsite_state(settings: Settings, now: datetime) -> str:
     if config is None:
         return "not set"
     left = (config.expires - now.astimezone(IST).date()).days
-    return "expired, no copy is sent" if left < 0 else f"set (the link works {left} more days)"
+    when = offsite.say_date(config.expires)
+    if left <= 0:  # the expiry date is the first day the link is not used (review L1)
+        return f"the link stopped working on {when}, so no copy is sent"
+    return (
+        f"set (the link stops working {'tomorrow' if left == 1 else f'in {left} days'}, on {when})"
+    )
 
 
 def _verify_command(path: Path) -> int:

@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import http.server
 import json
+import os
 import shutil
+import socket
 import stat
 import subprocess
 import tarfile
@@ -226,10 +228,12 @@ def soon_events(server):
     return [e for e in server.events() if e.fact("why") == "offsite_soon"]
 
 
-@pytest.mark.parametrize(("days", "told"), [(14, True), (0, True), (15, False), (60, False)])
-def test_the_owner_is_warned_from_14_days_before_the_expiry_and_the_copy_still_goes(
+@pytest.mark.parametrize(("days", "told"), [(15, True), (1, True), (16, False), (60, False)])
+def test_the_owner_is_warned_from_15_days_before_the_date_and_the_copy_still_goes(
     server, bucket, tmp_path, days, told
 ):
+    """The date typed is the expiry date the console shows, the first day the link may not work
+    (review L1): the copies go up to the day before it, and the warnings start 15 days ahead."""
     _key, cert = make_pair(tmp_path / "pair")
     server.populate()
     set_up(server, bucket.par, cert, TODAY + timedelta(days=days))
@@ -241,8 +245,41 @@ def test_the_owner_is_warned_from_14_days_before_the_expiry_and_the_copy_still_g
     assert len(events) == (1 if told else 0)
     if told:
         (line,) = _backup_failed(events[0])
-        assert "Make a new one" in line
-        assert ("expires today" if days == 0 else f"expires in {days} days") in line
+        assert "Make a new one" in line and "steps 4, 5 and 9" in line
+        assert ("expires tomorrow" if days == 1 else f"expires in {days} days") in line
+
+
+def test_on_the_date_the_console_shows_nothing_is_sent_and_the_owner_is_told(
+    server, bucket, tmp_path
+):
+    """Review L1: the console's expiry has a time of day (10:15 say), so on that date a run at
+    16:30 found the link refused and told the owner it "may have been removed", beside a warning
+    that it "expires today". The date is now the first day the link is not used."""
+    _key, cert = make_pair(tmp_path / "pair")
+    server.populate()
+    set_up(server, bucket.par, cert, TODAY)
+
+    result = go(server)
+
+    assert bucket.puts == [] and (result.outcome, result.offsite) == (OK, "failed")
+    assert [e.fact("reason") for e in server.events() if e.fact("why") == "offsite"] == ["expired"]
+    assert soon_events(server) == []  # no "expires today" beside it
+    shown = backup.check(server.settings(), NIGHT)
+    assert "offsite: the link stopped working on 27 Oct 2026, so no copy is sent" in shown
+
+
+@pytest.mark.parametrize(
+    ("days", "words"),
+    [
+        (1, "stops working tomorrow, on 28 Oct 2026"),
+        (30, "stops working in 30 days, on 26 Nov 2026"),
+    ],
+)
+def test_the_check_says_when_the_link_stops_working(server, tmp_path, days, words):
+    _key, cert = make_pair(tmp_path / "pair")
+    set_up(server, "https://objectstorage.example.com/p/x/n/a/b/c/o/", cert,
+           TODAY + timedelta(days=days))  # fmt: skip
+    assert f"offsite: set (the link {words})" in backup.check(server.settings(), NIGHT)
 
 
 def test_after_the_expiry_nothing_is_sent_and_the_local_backup_is_fine(server, bucket, tmp_path):
@@ -256,7 +293,7 @@ def test_after_the_expiry_nothing_is_sent_and_the_local_backup_is_fine(server, b
     assert (result.outcome, result.offsite) == (OK, "failed")
     (event,) = [e for e in server.events() if e.fact("why") == "offsite"]
     (line,) = _backup_failed(event)
-    assert line.startswith("Tonight's offsite backup did not upload: the access link")
+    assert line.startswith("Tonight's offsite backup did not upload: the upload link has reached")
     assert line.endswith("The local backup is fine.")
 
 
@@ -282,6 +319,80 @@ def test_a_refused_upload_is_told_in_words_and_leaves_the_local_backup_alone(
     assert str(status) not in line and "http" not in line.lower()
     assert len(bucket.puts) == (3 if status == 503 else 1)  # only a busy bucket is tried again
     assert server.status()["offsite"] == "failed"
+
+
+class EarlyAnswer:
+    """A bucket that answers ``status`` as soon as it has the request's headers and closes the
+    connection without reading the file, as storage does for a link that is gone (review L4)."""
+
+    def __init__(self, status: int):
+        self.status = status
+        self.connections = 0
+        self.listener = socket.create_server(("127.0.0.1", 0))
+        threading.Thread(target=self._serve, daemon=True).start()
+
+    def _serve(self):
+        while True:
+            try:
+                conn, _ = self.listener.accept()
+            except OSError:
+                return
+            self.connections += 1
+            with conn:
+                seen = b""
+                while b"\r\n\r\n" not in seen:
+                    chunk = conn.recv(65536)
+                    if not chunk:
+                        break
+                    seen += chunk
+                conn.sendall(
+                    f"HTTP/1.1 {self.status} Answer\r\nContent-Length: 0\r\n"
+                    "Connection: close\r\n\r\n".encode()
+                )
+
+    @property
+    def par(self) -> str:
+        return f"http://127.0.0.1:{self.listener.getsockname()[1]}/p/{TOKEN}/n/ns/b/bk/o/"
+
+    def close(self):
+        self.listener.close()
+
+
+@pytest.mark.parametrize(("status", "reason", "tries"), [(404, "refused", 1), (503, "busy", 3)])
+def test_an_answer_given_before_the_file_was_read_is_told_by_what_it_said(
+    tmp_path, status, reason, tries
+):
+    """Before: the connection closed under the upload, the answer already sent was never read,
+    and a removed link read as a network fault, tried three times, 30 seconds apart."""
+    big = tmp_path / "sealed.cms"
+    big.write_bytes(os.urandom(20 << 20))  # larger than what the sockets buffer
+    early = EarlyAnswer(status)
+    try:
+        with pytest.raises(offsite.OffsiteError) as raised:
+            offsite.upload(early.par, big, "x.cms")
+        assert raised.value.reason == reason
+        archive = tmp_path / "a.tar.gz"
+        archive.write_bytes(os.urandom(20 << 20))  # the job's own path, on a copy as large
+        early.connections = 0
+        outcome = offsite.send(
+            etc_dir=_settings_dir(tmp_path, early.par), archive=archive, work=tmp_path / "w",
+            log_file=tmp_path / "o.log", release="v0.8.0", today=TODAY, free_bytes=1 << 40,
+            sleep=lambda _s: None,
+        )  # fmt: skip
+        assert (outcome.state, outcome.reason, early.connections) == ("failed", reason, tries)
+    finally:
+        early.close()
+
+
+def _settings_dir(tmp_path: Path, par: str) -> Path:
+    folder = tmp_path / "etc"
+    folder.mkdir()
+    _key, cert = make_pair(tmp_path / "pair")
+    (folder / "offsite.json").write_bytes(
+        offsite.render(offsite.Config(par, TODAY + timedelta(days=60), cert.read_text()))
+    )
+    (folder / "offsite.json").chmod(0o600)
+    return folder
 
 
 def test_a_bucket_that_cannot_be_reached_is_a_network_notice(server, tmp_path):
