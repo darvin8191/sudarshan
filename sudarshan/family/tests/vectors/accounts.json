@@ -1,0 +1,41 @@
+{
+  "note": "Golden vectors for the family accounts (P6 F3). Every value is synthetic or published: the TOTP secret and codes are RFC 6238 Appendix B (SHA-1; a 6-digit code is the last 6 of the 8 the RFC prints); the user agents are made up in the browsers' published formats.",
+  "totp": {
+    "secret": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+    "cases": [
+      [59, "287082"],
+      [1111111109, "081804"],
+      [1111111111, "050471"],
+      [1234567890, "005924"],
+      [2000000000, "279037"],
+      [20000000000, "353130"]
+    ]
+  },
+  "lockout": [
+    [1, null], [2, null], [3, null], [4, null], [5, 900], [6, null], [9, null], [10, 3600],
+    [11, null], [14, null], [15, 86400], [16, null], [19, null], [20, 86400], [24, null],
+    [25, 86400], [26, null]
+  ],
+  "levels": [[0, 0], [4, 0], [5, 1], [9, 1], [10, 2], [14, 2], [15, 3], [40, 3]],
+  "handles": {
+    "valid": [["abc", "abc"], ["member_a", "member_a"], ["  Member_B ", "member_b"],
+              ["a1b2c3d4e5f6g7h8i9j0", "a1b2c3d4e5f6g7h8i9j0"], ["___", "___"], ["abc\n", "abc"]],
+    "invalid": ["", "ab", "a1b2c3d4e5f6g7h8i9j0k", "a-b", "a b", "a.b", "mémber",
+                "सुदर्शन"]
+  },
+  "passwords": {"valid_lengths": [12, 13, 64, 256], "invalid_lengths": [0, 1, 11, 257, 1000]},
+  "devices": [
+    ["Mozilla/5.0 (Linux; Android 15; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Mobile Safari/537.36",
+     "Android 15 · Chrome 142"],
+    ["Mozilla/5.0 (Linux; Android 14; SM-A156E) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/28.0 Chrome/130.0.0.0 Mobile Safari/537.36",
+     "Android 14 · Samsung Internet 28"],
+    ["Mozilla/5.0 (Android 13; Mobile; rv:133.0) Gecko/133.0 Firefox/133.0",
+     "Android 13 · Firefox 133"],
+    ["Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36 Edg/142.0.0.0",
+     "Windows · Edge 142"],
+    ["Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/142.0 Mobile/15E148 Safari/604.1",
+     "iPhone · Chrome 142"],
+    ["", "Phone"],
+    ["curl/8.5.0", "Phone"]
+  ]
+}
