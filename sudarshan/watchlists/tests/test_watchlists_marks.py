@@ -186,6 +186,23 @@ def test_one_bump_and_one_push_per_write_with_the_flag_lists_that_changed(client
     mark(client, "NSE:INFY", version=v, flag=None)
     assert [(p["why"], p["ref"]) for p in emitted[3:]] == [("flags", "flag:4")]
     assert len(emitted) == 4 and len({p["v"] for p in emitted}) == 4
+    # every flag list a mark changed reaches the push, old first: the phone follows each one
+    assert [p["refs"] for p in emitted] == [["flag:2"], ["flag:2", "flag:4"], [], ["flag:4"]]
+
+
+def test_a_mark_that_changes_nothing_writes_nothing_and_pushes_nothing(client, emitted):
+    """Review L3 for W9: the same flag and note again (or a clear of a symbol with no row) is no
+    change, so the symbol keeps its version and no screen is told; a real change is."""
+    v = mark(client, "NSE:INFY", flag=2, note="watch it").get_json()["data"]["version"]
+    before, pushes = table("wl_symbol"), len(emitted)
+    for fields in ({"flag": 2, "note": "watch it"}, {"flag": 2}, {"note": " watch it "}):
+        r = mark(client, "NSE:INFY", version=v, **fields)
+        assert r.status_code == 200 and r.get_json()["data"]["version"] == v
+    r = mark(client, "NSE:TCS", flag=None, note=None)  # no row, and none is wanted
+    assert r.status_code == 200 and r.get_json()["data"]["version"] is None
+    assert table("wl_symbol") == before and len(emitted) == pushes
+    assert mark(client, "NSE:INFY", version=v, flag=3).status_code == 200
+    assert [p["refs"] for p in emitted[pushes:]] == [["flag:2", "flag:3"]]
 
 
 def test_a_refused_write_makes_no_bump_and_no_push(client, emitted):
@@ -308,6 +325,7 @@ def test_clear_expired_removes_only_the_expired_and_moves_the_flags_version(clie
     ] == "INFY"
     assert (info(client, "NSE:INFY")["flag"], info(client, "NSE:INFY")["note"]) == (1, "live")
     assert [(p["why"], p["ref"], p["flags"]) for p in emitted] == [("flags", "flag:2", at + 1)]
+    lists = versions.read()
     again = clear_expired(client, at + 1)  # nothing left: said so, nothing moved
     assert again.get_json()["data"] == {
         "version": str(at + 1),
@@ -315,6 +333,7 @@ def test_clear_expired_removes_only_the_expired_and_moves_the_flags_version(clie
         "words": words.NONE_EXPIRED,
     }
     assert versions.flags() == at + 1
+    assert versions.read() == lists and len(emitted) == 1  # and nobody is told of nothing
 
 
 def test_clear_expired_on_a_stale_flags_version_is_conflict_and_removes_nothing(client):

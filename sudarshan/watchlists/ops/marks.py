@@ -7,8 +7,11 @@ flags version, each checked as one compare-and-set in the transaction's first st
 against the master except the expired reading and ``expired_clear``; a flag on a contract that
 left it is kept. The bridge bumps the lists version once after a handler returns (``ops.bumps``),
 never after a refusal: ``mark`` names ``flag:<old>`` and ``flag:<new>`` only when the flag changed
-(a note alone changes no flag list's members), ``flags`` and ``expired_clear`` as the answers say.
-Notes and flags are the owner's alone.
+(a note alone changes no flag list's members), and both reach the push's ``refs``; ``flags`` and
+``expired_clear`` as the answers say. A write that changes nothing bumps nothing (``ops.UNCHANGED``):
+a ``mark`` that sets the flag and the note the symbol already has writes nothing and keeps the
+symbol's version, and a clear that finds nothing expired rolls back. Each op is one transaction in
+one file, so none can commit part of its change. Notes and flags are the owner's alone.
 """
 
 from __future__ import annotations
@@ -16,7 +19,7 @@ from __future__ import annotations
 from flask import session
 
 from sudarshan.watchlists import contract, engine, versions
-from sudarshan.watchlists.ops import OpError, bumps
+from sudarshan.watchlists.ops import UNCHANGED, OpError, bumps
 from sudarshan.watchlists.store import symbols as store
 from sudarshan.watchlists.words import marks as words
 
@@ -24,9 +27,11 @@ MAX_VERSION = 2**63 - 1
 
 
 class Done(dict):
-    """The ``Done`` record, with the flag lists it changed for ``ops.bumps``."""
+    """The ``Done`` record, with the flag lists it changed for ``ops.bumps``, and ``unchanged`` for
+    a write that changed nothing, which bumps and pushes nothing."""
 
     refs: tuple[str, ...] = ()
+    unchanged: bool = False
 
 
 def _key(raw: str) -> tuple[str, str]:
@@ -51,8 +56,8 @@ def _note(raw: str | None) -> str | None:
     return note or None
 
 
-def _refs(args: dict, data: Done) -> list[str]:
-    return list(data.refs)
+def _refs(args: dict, data: Done):
+    return UNCHANGED if data.unchanged else list(data.refs)
 
 
 @bumps("flags", _refs)
@@ -75,9 +80,12 @@ def mark(args: dict) -> dict:
             flag = before
         if "note" not in args:
             note = None if old is None else old.note
-        version = store.write(s, exchange, symbol, old, held, flag, note)
+        same = flag == before and note == (None if old is None else old.note)
+        version = held if same else store.write(s, exchange, symbol, old, held, flag, note)
     done = Done(version=None if version is None else str(version), id=None, words=None)
-    if before != flag:
+    if same:  # nothing to write: the symbol keeps its version and no screen is told
+        done.unchanged = True
+    elif before != flag:
         done.refs = tuple(f"flag:{n}" for n in (before, flag) if n is not None)
     return done
 
@@ -144,8 +152,10 @@ def expired_clear(args: dict) -> dict:
 
     try:
         version = _flags_write(args["version"], change)
-    except _Nothing:
-        return Done(version=str(args["version"]), id=None, words=words.NONE_EXPIRED)
+    except _Nothing:  # rolled back: the flags version stays and nothing is pushed
+        done = Done(version=str(args["version"]), id=None, words=words.NONE_EXPIRED)
+        done.unchanged = True
+        return done
     done = Done(version=str(version), id=None, words=words.cleared(len(gone)))
     done.refs = tuple(sorted({f"flag:{f}" for _, _, f in gone if f}))
     return done

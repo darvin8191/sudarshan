@@ -449,7 +449,12 @@ built-in lists (W12) join `lists` as more `Held` records after the own ones.
 Bumps (`ops.bumps`): `mark` bumps once with why `flags`, naming `flag:<old>` and `flag:<new>` only
 when the flag changed (a note alone changes no membership, so the push says `lists`); `flags` bumps
 once with why `flags` and no refs; `expired_clear` once, naming the flag lists it removed rows from.
-A refused write bumps nothing. Tests: `tests/test_watchlists_marks.py`;
+The refs reach the push's `refs` (the old flag list first), so a per-ref sync follows each one. A
+refused write bumps nothing, and so does a write that changes nothing (`ops.UNCHANGED`, review L3):
+a `mark` that sets the flag and the note the symbol already has writes nothing and keeps the
+symbol's version, and a clear that finds nothing expired rolls back. Each of these ops is one
+transaction in one file, so none can commit part of its change (the partial-write rule of W5 never
+applies). Tests: `tests/test_watchlists_marks.py`;
 `test/test_gthread_watchlists.py` (eight threads marking one symbol on one version: one wins, seven
 `conflict`, including the first write to a symbol; eight renames on one flags version).
 
