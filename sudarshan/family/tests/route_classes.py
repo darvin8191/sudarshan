@@ -96,6 +96,7 @@ public_shell  /historify/charts/<symbol>             react.react_historify_chart
 public_shell  /holdings                              react.react_holdings
 public_shell  /ivchart                               react.react_ivchart
 public_shell  /ivsmile                               react.react_ivsmile
+public_shell  /journal                               react.react_journal
 public_shell  /latency                               react.react_latency
 public_shell  /leverage                              react.react_leverage
 public_shell  /login                                 react.react_login
@@ -130,6 +131,7 @@ public_shell  /python/<strategy_id>/schedule         react.react_python_schedule
 public_shell  /python/guide                          react.react_python_guide
 public_shell  /python/new                            react.react_python_new
 public_shell  /rate-limited                          react.react_rate_limited
+public_shell  /reports                               react.react_reports
 public_shell  /reset-password                        react.react_reset_password
 public_shell  /risk                                  react.react_risk
 public_shell  /sandbox                               react.react_sandbox
