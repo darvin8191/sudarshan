@@ -38,6 +38,7 @@ import { useOverlay } from '@/sudarshan/watchlist/useOverlay'
 import { MAX_ITEMS, MAX_LISTS, useWatchlists } from '@/sudarshan/watchlist/useWatchlists'
 import { useViewPref } from '@/sudarshan/watchlist/ViewSheet'
 import { BUILT_IN } from '@/sudarshan/watchlist/v2/arrange'
+import { FLAG_LIST_WORDS, itemsOf } from '@/sudarshan/watchlist/v2/marks'
 import { groupsOf, SECTIONS_FULL, useCollapsed } from '@/sudarshan/watchlist/v2/sections'
 import { LIMITS } from '@/sudarshan/watchlist/v2/types'
 import { useListView, useV2State } from '@/sudarshan/watchlist/v2/useListView'
@@ -99,6 +100,10 @@ export default function Watchlist() {
   const [editing, setEditing] = useState(false)
   // A favourite that is not one of his own lists (built-in, ranked, flag): its rows come in later changes.
   const [otherRef, setOtherRef] = useState<string | null>(null)
+  // F8 (v2): a flag list is read from `view` alone: its rows are the flagged symbols, newest flag first.
+  const flagRef = v2 && otherRef?.startsWith('flag:') ? otherRef : null
+  const flagView = useListView(flagRef).data
+  const flagItems = useMemo(() => itemsOf(flagView), [flagView])
 
   // What is open over the list lives in the address, so Back closes it.
   const { overlay, open, swap, close } = useOverlay(v2)
@@ -114,7 +119,8 @@ export default function Watchlist() {
   const orphan =
     overlay !== null &&
     settled &&
-    ((overlay.kind === 'item' && !items.some((item) => item.id === overlay.itemId)) ||
+    ((overlay.kind === 'item' &&
+      !(flagRef ? flagItems : items).some((item) => item.id === overlay.itemId)) ||
       (overlay.kind === 'order' && overlay.order === null) ||
       (overlay.kind === 'alert' && overlay.alert === null) ||
       (overlay.kind !== 'item' &&
@@ -162,11 +168,11 @@ export default function Watchlist() {
   }, [v2, v2State?.favourites, watchlists.lists, active, otherRef])
   const foreign =
     v2 && otherRef !== null ? (tabs.find((tab) => tab.ref === otherRef) ?? null) : null
-  const activeRef = foreign ? foreign.ref : active ? ownRef(active.id) : null
+  const activeRef = flagRef ?? (foreign ? foreign.ref : active ? ownRef(active.id) : null)
 
   const activeId = active?.id ?? null
   // F3 (v2): the open own list in sections, read from the `view` op; flat while it is not read.
-  const sectionsRef = v2 && active && !foreign ? ownRef(active.id) : null
+  const sectionsRef = v2 && active && !foreign && !flagRef ? ownRef(active.id) : null
   const view = useListView(sectionsRef).data
   const folds = useCollapsed(sectionsRef)
   const viewPref = useViewPref(sectionsRef, view) // F6
@@ -268,7 +274,7 @@ export default function Watchlist() {
         ) : (
           <button
             type="button"
-            disabled={!active || apiKey === null || full || foreign !== null}
+            disabled={!active || apiKey === null || full || foreign !== null || flagRef !== null}
             aria-describedby={full ? 'sd-watchlist-full' : undefined}
             onClick={() => open({ kind: 'add' })}
             className={cn(HEADER_BUTTON, 'bg-primary text-primary-foreground hover:bg-primary/90')}
@@ -336,7 +342,14 @@ export default function Watchlist() {
             />
           )}
 
-          {foreign ? (
+          {
+            flagRef && (
+              <p className="px-1 text-[0.8125rem] font-medium text-[color:var(--text-secondary)]">
+                {FLAG_LIST_WORDS}
+              </p>
+            ) /* F8 */
+          }
+          {foreign && !flagRef ? (
             <section
               id={PANEL_ID}
               role="tabpanel"
@@ -348,28 +361,30 @@ export default function Watchlist() {
             </section>
           ) : (
             <LiveList
-              items={items}
+              items={flagRef ? flagItems : items}
               apiKey={apiKey}
               isOpen={isOpen}
               loading={watchlists.loading}
-              editing={editing}
+              editing={editing && !flagRef}
               listName={active?.name ?? 'the list'}
               openItemId={openItemId}
               panel={panel}
               onOpen={openSheet}
               onMove={moveItem}
               onRemove={removeItem}
-              onAdd={startAdding}
+              onAdd={flagRef ? undefined : startAdding}
               onCloseSheet={close}
               onOrder={placeOrder}
               onAlert={setAlert}
-              members={members}
+              members={flagRef ? undefined : members}
               sections={sectionLayout}
               arrange={arrange.edit} // F5
               symbolActions={symbolActions} // F5
               viewPref={sectionsRef ? viewPref : undefined} // F6
               viewOpen={overlay?.kind === 'view'} // F6
-              view={sectionsRef ? view : undefined} // F7
+              view={flagRef ? flagView : sectionsRef ? view : undefined} // F7, F8
+              flagNames={v2 ? (v2State?.flag_names ?? []) : undefined} // F8
+              noRemove={flagRef !== null} // F8
             />
           )}
         </>

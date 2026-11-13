@@ -399,6 +399,32 @@ edit outside the page: Upstox's holdings mapping (`broker/upstox/mapping/order_d
 `isin` it already receives, only when it is there, because the holdings payload dropped it. Tests:
 `held.test.ts`, `held.view.test.tsx`.
 
+## F8 - flags and notes on the phone
+
+With v2 on, a row shows its flag's glyph (the F4 marks) before the name and a note icon after it when a note
+exists; a screen reader hears "Flag: Breakout. Has a note." (the glyph is decorative, the words are in the
+row). Markers come from the `view` rows (`flag`, `has_note`, `expired`; `v2/marks.ts`, `marksOf`) and the
+names from `state.flag_names`; the note itself is never in a view. The symbol sheet (`SymbolMarks.tsx`) reads
+`symbol` when it opens and adds Flag (`FlagPicker.tsx`: a radio group of the five flags and None, each 48 dp
+with its glyph and name), Note (`NoteField.tsx`: a text field, "123 of 500", Save, "Saved"; a 501st character
+is refused before anything is sent with the server's sentence, "A note can be up to 500 characters.") and In
+lists ("Swing, Momentum, NIFTY 50 (built-in)", the `symbol` answer's `lists`, a built-in one gets the suffix).
+Every write is one `mark` carrying the symbol's `version` as `symbol` answered it (null when the symbol has no
+row); a refusal puts its own sentence on the sheet, a `conflict` included, and the symbol, the flag lists
+and every open view are read again either way, so the next write names the version the last one made.
+"Notes and flags are yours: the family never sees them." stands under the Note. In All lists the Flags block
+lists each flag as "Breakout · 7" (the shape and the name), says "Flagged across your lists. Flag or unflag a
+symbol from its sheet.", and holds Rename flags (five fields of up to 24 letters, one `flags` write on
+`versions.flags`) and Clear expired (`expired_clear` on the same version; the answer's own words, "Cleared 2
+expired contracts." or "There are no expired contracts to clear.", are shown). Picking a flag list opens it
+(`pages/Watchlist.tsx`): its rows are `view`'s, newest flag first, read live like any list but with no Add,
+no edit mode and no Remove. A flag or note on a contract no longer in the master shows "Expired" with a clock
+on the row and in the sheet; nothing is deleted until Clear expired. A family render (`readOnly` on `LiveList`,
+`SymbolSheet` and `AllListsSheet`) has no markers, no flag picker, no note field, no rename, no Clear expired and
+no Flags block at all, and reads no `symbol`: the block's rows are the owner's alone, a step past the design,
+which names only rename. With the switch off nothing here is drawn or read. Tests: `flags.view.test.tsx`,
+`pages/Watchlist.flags.test.tsx`.
+
 ## W7 - sections (`store/sections.py`, `ops/sections.py`, `words/sections.py`)
 
 `section_add`, `section_edit` and `section_remove` act on own lists only (`list:<id>`): a list or a

@@ -3,7 +3,9 @@ import { ChevronDown, ChevronUp, Flag, Lock, Plus, Star, TrendingUp } from 'luci
 import { type ReactNode, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { BottomSheet } from './BottomSheet'
+import { FlagTools } from './FlagTools'
 import { ownId } from './ListStrip'
+import { MarkGlyph } from './marks'
 import { callOp } from './v2/api'
 import type { Entry, Favourite, FavSlot } from './v2/types'
 import { LIMITS } from './v2/types'
@@ -52,6 +54,7 @@ export function AllListsSheet({
   onPick,
   onNew,
   newOff,
+  readOnly,
 }: {
   open: boolean
   onClose: () => void
@@ -61,10 +64,15 @@ export function AllListsSheet({
   onNew: () => void
   /** Why New list is off, or null. */
   newOff: string | null
+  /** v2 (F8): a family render. The Flags block is the owner's alone and is absent. */
+  readOnly?: boolean
 }) {
   const client = useQueryClient()
   const lists = useLists(open)
-  const version = useV2State().data?.versions?.favourites ?? 0
+  const state = useV2State().data
+  const version = state?.versions?.favourites ?? 0
+  const flagsVersion = state?.versions?.flags ?? 0 // F8
+  const flagNames = state?.flag_names ?? [] // F8
   const [busy, setBusy] = useState(false)
   const [problem, setProblem] = useState<string | null>(null)
   const data = lists.data
@@ -99,6 +107,7 @@ export function AllListsSheet({
   const row = (entry: Pick<Entry, 'ref' | 'kind' | 'name' | 'count'>, extra?: ReactNode) => {
     const on = pinnedRefs.has(entry.ref)
     const Glyph = entry.kind === 'preset' ? Lock : entry.kind === 'ranked' ? TrendingUp : Flag
+    const flagNo = entry.kind === 'flag' ? Number(entry.ref.slice(5)) : 0 // F8
     const words = fed.has(ownId(entry.ref) ?? 0) ? 'Fed by a screen' : KIND_WORDS[entry.kind]
     return (
       <li key={entry.ref} className="flex min-h-14 items-center">
@@ -115,12 +124,17 @@ export function AllListsSheet({
             )}
           >
             {entry.name}
+            {entry.kind === 'flag' && entry.count !== null && ` · ${entry.count}`}
             {entry.ref === activeRef && <span className="sr-only"> (open)</span>}
           </span>
           <span className="flex items-center gap-1 text-xs font-medium text-[color:var(--text-tertiary)]">
-            {entry.kind !== 'list' && <Glyph aria-hidden="true" className="size-3" />}
+            {entry.kind === 'flag' && flagNo >= 1 && flagNo <= 5 ? (
+              <MarkGlyph mark={flagNo} className="size-3" /> // F8
+            ) : (
+              entry.kind !== 'list' && <Glyph aria-hidden="true" className="size-3" />
+            )}
             {words}
-            {entry.count !== null && <span>, {entry.count}</span>}
+            {entry.kind !== 'flag' && entry.count !== null && <span>, {entry.count}</span>}
           </span>
         </button>
         {extra}
@@ -220,8 +234,11 @@ export function AllListsSheet({
           {data.ranked.length > 0 && (
             <Block title="Ranked by Upstox">{data.ranked.map((entry) => row(entry))}</Block>
           )}
-          {data.flags.length > 0 && (
-            <Block title="Flags">{data.flags.map((entry) => row(entry))}</Block>
+          {!readOnly && (
+            <Block title="Flags">
+              {data.flags.map((entry) => row(entry))}
+              <FlagTools names={flagNames} version={flagsVersion} /> {/* F8 */}
+            </Block>
           )}
         </div>
       )}
