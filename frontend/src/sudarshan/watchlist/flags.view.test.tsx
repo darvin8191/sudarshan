@@ -270,6 +270,35 @@ describe('the symbol sheet', () => {
     })
   })
 
+  // Review L7: a second flag tap while the first is being written would carry the old version.
+  it('takes one flag write at a time, the picker held while it is out', async () => {
+    let answer: () => void = () => {}
+    b().on('mark', (call) => {
+      const body = call.body as { flag?: number | null }
+      return new Promise((resolve) => {
+        answer = () => {
+          server.info = {
+            ...server.info,
+            flag: body.flag ?? null,
+            version: (server.info.version ?? 0) + 1,
+          }
+          resolve({ version: String(server.info.version), id: null, words: null })
+        }
+      })
+    })
+    const user = userEvent.setup()
+    await mount({ openItemId: 1 })
+    await user.click(await screen.findByRole('radio', { name: 'Avoid' }))
+    await waitFor(() => expect(b().count('mark')).toBe(1))
+    expect(screen.getByRole('radio', { name: 'None' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('radio', { name: 'None' }))
+    await act(async () => {})
+    expect(b().count('mark')).toBe(1)
+    await act(async () => answer())
+    await waitFor(() => expect(screen.getByRole('radio', { name: 'None' })).toBeEnabled())
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
   it('takes no tap for the first half second after it opens (the open guard)', async () => {
     OPEN_GUARD.ms = 60_000
     await mount({ openItemId: 1 })

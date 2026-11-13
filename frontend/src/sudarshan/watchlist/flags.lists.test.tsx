@@ -3,7 +3,7 @@
  * The bridge is the v2 mock.
  */
 import { QueryClientProvider } from '@tanstack/react-query'
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -19,6 +19,7 @@ vi.mock('@/api/client', async () => {
 
 import { createQueryClient } from '@/app/providers'
 import { AllListsSheet } from './AllListsSheet'
+import { CLEAR_EXPIRED_ASK } from './FlagTools'
 import { OPEN_GUARD } from './openGuard'
 import type { FlagName, Lists, State } from './v2/types'
 
@@ -147,9 +148,38 @@ describe('the Flags block of All lists', () => {
       lists([flagEntry(2, 'Breakout', cleared ? 5 : 7), flagEntry(5, 'Avoid', 1)])
     )
     await user.click(await screen.findByRole('button', { name: 'Clear expired' }))
+    // Review L8: notes are his words, so it asks first; nothing is sent until he says so.
+    expect(screen.getByText(CLEAR_EXPIRED_ASK)).toBeInTheDocument()
+    expect(calls).toEqual([])
+    await user.click(screen.getByRole('button', { name: 'Clear them' }))
     expect(await screen.findByText('Cleared 2 expired contracts.')).toBeInTheDocument()
     expect(calls).toEqual([{ version: 6 }])
     expect(await screen.findByText('Breakout · 5')).toBeInTheDocument()
+    expect(screen.queryByText(CLEAR_EXPIRED_ASK)).toBeNull()
+  })
+
+  it('keeps everything when he says Keep them, and takes no tap on the question for half a second', async () => {
+    const user = userEvent.setup()
+    const calls: unknown[] = []
+    b().on('expired_clear', (call) => {
+      calls.push(call.body)
+      return { version: '7', id: null, words: 'Cleared 2 expired contracts.' }
+    })
+    mountSheet()
+    await user.click(await screen.findByRole('button', { name: 'Clear expired' }))
+    await user.click(screen.getByRole('button', { name: 'Keep them' }))
+    expect(screen.queryByText(CLEAR_EXPIRED_ASK)).toBeNull()
+    expect(calls).toEqual([])
+    OPEN_GUARD.ms = 500
+    fireEvent.click(screen.getByRole('button', { name: 'Clear expired' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Clear them' })) // the tail of a double tap
+    await act(async () => {})
+    expect(calls).toEqual([])
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 550))
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Clear them' }))
+    await waitFor(() => expect(calls).toEqual([{ version: 6 }]))
   })
 
   it('is absent in a family render', async () => {
