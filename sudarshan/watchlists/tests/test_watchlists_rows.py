@@ -444,7 +444,7 @@ def test_a_draft_row_is_previewed_in_the_shape_of_a_stored_one_and_nothing_is_wr
     assert fut["future"]["symbol"] == "NIFTY24NOV26FUT" and fut["strike"] is None
     assert two["strike"] == 26000.0  # in the order sent, each its own rule
     assert (len(emitted), (table("wl_row"), table("wl_list"))) == (n, before)
-    assert table("wl_row") == [r_ for r_ in before[0]]  # still the one stored row
+    assert table("wl_row") == before[0] and len(before[0]) == 1  # still the one stored row
 
 
 def test_a_draft_without_stored_rows_and_without_drafts_keeps_the_old_answer(client, world):
