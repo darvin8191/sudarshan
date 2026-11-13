@@ -148,9 +148,64 @@ contracts the master does not have. Smartlist ranks futures, options and MTF onl
 offers futures and options for Index, Stock and Commodity (commodities with the first four
 categories), 44 rankings, never MTF. Words say "Ranked by Upstox" and the age (stale after ten
 minutes), never "Live"; the sign-in, closed, unavailable and wait lines are here too. No read is
-made here: the Smartlist client is a later PR. The answer's exact envelope, the unit of traded
+made here: the Smartlist client is W22's. The answer's exact envelope, the unit of traded
 value and of premium, and the base of `previous` are checked on a real read (design facts W-1 and
 W-10). Vectors: `tests/vectors/ranked.json`.
+
+## W22 - ranked lists from Upstox (`smartlist.py`, `ops/ranked.py`, `refs/ranked.py`)
+
+`smartlist.fetch` is the one read: `GET https://api.upstox.com/v2/market/smartlist/<futures|options>?
+asset_type=&category=&page_number=1&page_size=50` with OpenAlgo's daily access token for the owner's
+session as a bearer header (read with `auth_db.get_auth_token`, never the Analytics Token). It goes
+through the shared httpx client (connect 1 s, read 8 s, no redirects, no retry) after the Upstox
+plugin's standard limiter has given its turn; the limiter refusing under gthread is a `wait`. It
+returns an outcome and raises nothing: `ok`, `token` (401 or 403), `wait` (429 or the plugin's
+rate-limit code) or `failed` (a timeout, another status, an error body). The token goes in the
+header only: it is in no log line, no answer and no message, and only a 16-character digest of it
+is kept, to tell one sign-in from the next.
+
+`ranked` (GET, class ranked) answers the `Ranked` record, always as an ok answer with a `state`
+(the phone reads `state`, not an error code), in this order: no token today, or a token of another
+broker, is `signin` with the design's words and **no call at all** (the broker is the web session's,
+else the stored sign-in's); a fresh answer in the cache is served with no call; otherwise one call,
+in a single flight per category (`utils/keyed_locks`; the requests that waited share what the first
+read). Upstox refusing the token is `signin` ("Your Upstox sign-in has expired. Sign in to read it
+again.", with the old ranking's age when this token read one, and no rows): the refusal is cached
+for the minute so a pull does not ask again, nothing retries it, and the session and OpenAlgo's
+stored token are never touched. Upstox asking us to wait is `wait`, also cached for the minute.
+No usable answer is `unavailable`: the last ranking read with this token stays, with `made_at`
+and the sentence "Showing the ranking from 10:41."; a failure is shared for 3 seconds only, so the
+owner's next pull tries again. An answer is `ok`, `stale` after ten minutes and `closed` while the
+exchange is shut by OpenAlgo's calendar (NFO, MCX for commodities): Upstox's own last ranking and
+its time ("Market closed · ranking from 15:29 yesterday"). `rows` are 20 by default and 50 on
+request (`size`, never more), `made_at` is Upstox's `time_stamp`, `read_at` the read, `left_out`
+the rows the master lacks and `words` the status line followed by the left-out sentence. Each row
+is the master's contract (looked up by instrument key through the snapshot, no map built), the
+owner's flag and whether a note exists, and the ranking's own figure in `metric`. A combination the
+page does not offer (MTF, a commodity premium) is `invalid` with no call.
+
+The cache is `LockedTTLCache`: 60 s for answers, refusals and waits, 3 s for failures, and the last
+good ranking of a token for 20 hours; all three are cleared the moment the token's digest changes,
+and an answer in flight when it changes is not stored (the cache's generation) and carries the
+digest it was read with, so a ranking of one token is never shown under another. The cache holds
+Upstox's answer for the 50-row page, so 20 and 50 rows, and two devices, are one read. `state`
+carries `ranked`: `{ok, message}` from OpenAlgo's own sign-in, with no Upstox call. `refs/ranked.py`
+serves `ranked:<source>:<asset>:<category>` for `view` (locked, version "0", 20 rows, one line of
+words) and for the sealed members route (W23: the 50 contracts, `valid_until` null, the unknown keys
+as left-out entries, no flag or note; `signin` with the words, or `failed` when there is nothing
+to show, never an empty list), through the op's own path and cache, keeping nothing of its own.
+No thread, timer or loop. Tests: `tests/test_watchlists_ranked_bridge.py` (a fake client that
+fails the test when called where it must not be) and `test/test_gthread_watchlists.py` (eight
+threads, one category, one call).
+
+To check on a live session (design section 8, reads only): W-1, that Smartlist answers for futures
+and options with OpenAlgo's daily session (INDEX), with the parameter spellings and the bearer
+header used here; how often `time_stamp` moves; which indices INDEX options covers; COMMODITY; the
+unit of PREMIUM and DISCOUNT and of traded value; that `metric.previous` is the base of each
+category's change; the answer's envelope (rows under `data.data`, `time_stamp` beside them); and
+what Upstox answers once the day's token has lapsed (here 401 or 403 is read as a refusal of the
+token). W-2, that every Smartlist `instrument_key` is in OpenAlgo's master (`left_out` should be
+0 or small).
 
 ## W11 - master access (`master.py`) and the exception's tests (`tests/test_exception.py`)
 

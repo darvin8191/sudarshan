@@ -104,11 +104,11 @@ def test_created_key_is_the_text_sqlite_writes():
 
 # -- the refs interface --------------------------------------------------------------------------
 def test_the_refs_package_finds_the_built_readers_and_nothing_unbuilt():
-    # W6, W9 and W12; ranked comes later
-    assert set(refs.readers()) == {"list", "flag", "preset"}
+    # W6, W9, W12 and W22: every kind of the contract is built
+    assert set(refs.readers()) == {"list", "flag", "preset", "ranked"}
+    assert refs.reader_of("ranked:futures:INDEX:TOP_TRADED")[1] == "futures:INDEX:TOP_TRADED"
     assert refs.reader_of("list:7")[1] == "7"
     for ref in (
-        "ranked:futures:INDEX:TOP_TRADED",
         "nope:1",
         "list",
         "list:",
@@ -120,7 +120,12 @@ def test_the_readers_are_found_once_and_a_view_lists_and_imports_nothing(monkeyp
     """Review L14: the directory was listed and every reader imported on every view request."""
     from types import SimpleNamespace
 
-    assert set(refs.readers()) == {"list", "flag", "preset"}  # found and kept before they go away
+    assert set(refs.readers()) == {
+        "list",
+        "flag",
+        "preset",
+        "ranked",
+    }  # found and kept before they go away
     monkeypatch.setattr(
         refs, "pkgutil", SimpleNamespace(iter_modules=lambda *a: pytest.fail("listed"))
     )
@@ -136,7 +141,7 @@ def test_every_reader_gives_the_interface_and_members_is_documented_not_built():
     for kind, module in refs.readers().items():
         assert module.KIND == kind and callable(module.view) and callable(module.members)
         assert module.members.__doc__
-        if kind == "preset":  # W12 built it (the others are W23's)
+        if kind in ("preset", "ranked"):  # W12 and W22 built theirs (the others are W23's)
             continue
         with pytest.raises(NotImplementedError):
             module.members("1", OWNER)
@@ -298,7 +303,7 @@ def test_a_list_that_does_not_exist_is_gone_and_another_users_list_too(client):
         assert body["code"] == "gone" and body["message"] == words.LIST_GONE
 
 
-@pytest.mark.parametrize("ref", ["flag:6", "ranked:futures:INDEX:TOP_TRADED",
+@pytest.mark.parametrize("ref", ["flag:6", "ranked:futures:INDEX:NOPE", "ranked:mtf:INDEX:TOP_TRADED",
                                  "list:abc", "list:", "nonsense", "list:0"])  # fmt: skip
 def test_an_unbuilt_kind_or_a_bad_ref_is_invalid_with_the_ref_field(client, ref):
     r = get(client, ref)
