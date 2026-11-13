@@ -25,6 +25,7 @@ import {
   type AnalyticsFilter,
   dayToField,
   EXPIRY_CHOICES,
+  EXPIRY_WORDS,
   type ExpiryChoice,
   fieldToDay,
   filterOf,
@@ -199,6 +200,9 @@ function FilterRow({
           </select>
         </label>
       </div>
+      {filter.expiry !== '' && (
+        <p className="text-[0.8125rem] text-[color:var(--text-secondary)]">{EXPIRY_WORDS}</p>
+      )}
       {narrowed > 0 && (
         <button
           type="button"
@@ -440,6 +444,9 @@ function ExpirySplit({ split }: { split: AnalyticsAnswer['expiry'] }) {
   return (
     <section aria-label="Expiry days" className={`${SECTION} flex flex-col gap-3`}>
       <h2 className="text-base font-bold">Expiry days</h2>
+      <p className="text-[0.8125rem] text-[color:var(--text-secondary)]">
+        By the day each trade opened.
+      </p>
       <div className="overflow-x-auto">{table('Index expiry', rows)}</div>
       <div className="overflow-x-auto">{table('Instrument expiry', own)}</div>
     </section>

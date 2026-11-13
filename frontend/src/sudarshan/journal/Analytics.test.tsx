@@ -42,6 +42,7 @@ vi.mock('./EquityChart', () => ({ EquityChart: () => <p data-testid="equity">equ
 import { renderBook, where } from '@/test/bookPages'
 import { fakeClock } from '@/test/frames'
 import { Analytics } from './Analytics'
+import { EXPIRY_WORDS } from './filters'
 import { analytics, metrics } from './fixtures'
 import type { Analytics as Answer, Mode, Playbook, Tag } from './types'
 
@@ -206,8 +207,13 @@ describe('the filters', () => {
       })
     )
     expect(where()).toContain('strategy=ORB')
+    // the service's meaning: opened on an index's expiry day or the contract's own
+    const expiry = screen.getByLabelText('Expiry') as HTMLSelectElement
+    expect(expiry.selectedOptions[0].textContent).toBe('Opened on an expiry day')
+    expect(screen.getByText(EXPIRY_WORDS)).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'Clear 4 filters' }))
     await waitFor(() => expect(reads().at(-1)).toEqual({ mode: 'live', period: 'week' }))
+    expect(screen.queryByText(EXPIRY_WORDS)).toBeNull()
   })
 
   it('open on a filter in the address', async () => {

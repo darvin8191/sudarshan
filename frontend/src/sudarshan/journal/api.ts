@@ -26,7 +26,10 @@ export interface TripDetail extends Trip {
   note?: TripNote | null
   excursion?: Excursion | null
   charges?: ChargeEstimate | null
-  /** "order answered in 412 ms": the order's own latency, when the platform recorded one. */
+  /**
+   * "First entry order: answered in 412 ms": the round trip of the trade's first entry order, when
+   * the platform recorded one (the service's `latency_ms`); never a later order's.
+   */
   latency_ms?: number | null
 }
 

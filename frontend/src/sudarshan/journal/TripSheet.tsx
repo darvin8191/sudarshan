@@ -1,8 +1,9 @@
 // SUDARSHAN M14.4, M14.5, JD3: one trade in a sheet. What happened (fills, averages, gross,
-// charges, net, hold, how far it went for and against, how fast the order was answered) and what
-// the owner makes of it (strategy, playbook, risk, checklist, mistakes, mood, notes). Save sends
-// once, with the version the sheet was opened at; a conflict is said in one sentence and nothing
-// is saved. Prices and money are the contract's integers, shown through dashboard/format.ts.
+// charges, net, hold, how far it went for and against, how fast its first entry order was
+// answered) and what the owner makes of it (strategy, playbook, risk, checklist, mistakes, mood,
+// notes). Save sends once, with the version the sheet was opened at; a conflict is said in one
+// sentence and nothing is saved. Prices and money are the contract's integers, shown through
+// dashboard/format.ts.
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowDown,
@@ -10,6 +11,7 @@ import {
   ChartCandlestick,
   Check,
   FlaskConical,
+  History,
   LoaderCircle,
 } from 'lucide-react'
 import { useMemo, useRef, useState } from 'react'
@@ -71,11 +73,22 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   )
 }
 
-function FillsTable({ fills }: { fills: readonly Fill[] | undefined }) {
+/**
+ * A trade the journal paired again after the owner wrote on it is kept as it was, with no fills
+ * of its own, so his words are not lost (the service's "orphan"; it is never in the lists).
+ */
+export const ORPHAN_WORDS =
+  'This trade’s fills changed after you wrote on it, so the journal paired them again. This is the record as it was, kept so your notes are not lost; the trade as it is now is in the list.'
+export const ORPHAN_FILLS =
+  'This earlier record keeps no fills: they belong to the trade as it is now.'
+
+function FillsTable({ fills, kept }: { fills: readonly Fill[] | undefined; kept: boolean }) {
   if (!fills || fills.length === 0) {
     return (
       <p className="text-sm text-[color:var(--text-secondary)]">
-        The fills of this trade are not available yet. Open it again in a minute.
+        {kept
+          ? ORPHAN_FILLS
+          : 'The fills of this trade are not available yet. Open it again in a minute.'}
       </p>
     )
   }
@@ -536,6 +549,8 @@ export function TripSheet({
     )
   } else {
     const closed = trip.status !== 'open'
+    const kept = trip.status === 'orphan'
+    const stillOpen = kept ? '-' : 'Still open'
     const charges = trip.charges_actual_paise ?? trip.charges_est_paise
     const capture = captureOf(trip.net_paise, trip.mfe_paise, trip.excursion?.capture_pct)
     body = (
@@ -546,12 +561,21 @@ export function TripSheet({
             Sandbox trade
           </p>
         )}
+        {kept && (
+          <p
+            role="note"
+            className="flex items-start gap-2 rounded-[0.875rem] border border-[color:var(--border-strong)] px-3 py-2 text-sm font-medium"
+          >
+            <History aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+            {ORPHAN_WORDS}
+          </p>
+        )}
         <Section title="Result">
           <dl className="flex flex-col gap-1.5">
             <Row label="Quantity">{closed ? trip.qty_max : openQty(trip)}</Row>
             <Row label="Entry average">{priceText(trip.entry_avg_u)}</Row>
             <Row label="Exit average">
-              {trip.exit_avg_u === null ? 'Still open' : priceText(trip.exit_avg_u)}
+              {trip.exit_avg_u === null ? stillOpen : priceText(trip.exit_avg_u)}
             </Row>
             <Row label="Gross">
               {trip.gross_paise === null ? '-' : <Signed paise={trip.gross_paise} />}
@@ -583,15 +607,15 @@ export function TripSheet({
               )}
             </Row>
             <Row label="Held">
-              {trip.hold_s === null ? 'Still open' : holdWords(trip.hold_s * 1000)}
+              {trip.hold_s === null ? stillOpen : holdWords(trip.hold_s * 1000)}
             </Row>
             {trip.latency_ms !== null && trip.latency_ms !== undefined && (
-              <Row label="Order latency">order answered in {trip.latency_ms} ms</Row>
+              <Row label="First entry order">answered in {trip.latency_ms} ms</Row>
             )}
           </dl>
         </Section>
         <Section title="Fills">
-          <FillsTable fills={trip.fills} />
+          <FillsTable fills={trip.fills} kept={kept} />
         </Section>
         <Section title="How far it went">
           <Excursion trip={trip} capture={capture} />
@@ -627,7 +651,15 @@ export function TripSheet({
           {trip && <SideChip side={trip.side} />}
         </span>
       }
-      description={trip ? (trip.status === 'open' ? 'Open trade' : 'Closed trade') : undefined}
+      description={
+        trip
+          ? trip.status === 'open'
+            ? 'Open trade'
+            : trip.status === 'orphan'
+              ? 'Earlier record, kept for your notes'
+              : 'Closed trade'
+          : undefined
+      }
     >
       {body}
     </BottomSheet>
