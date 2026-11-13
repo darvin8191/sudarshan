@@ -103,10 +103,14 @@ class Pusher:
             cards = [c for c in old.get("alerts", ()) if c["id"] not in newer]
             cards += list(data.get("alerts", ()))
             old["alerts"] = [c for c in cards if c["id"] not in removed]
-            if old.get("groups") or data.get("groups"):  # list alerts' cards fold the same way
+            if old.get("groups") or data.get("groups") or data.get("removed_groups"):
+                gone = set(old.get("removed_groups", ())) | set(data.get("removed_groups", ()))
                 newest = {card["id"] for card in data.get("groups", ())}
-                old["groups"] = [c for c in old.get("groups", ()) if c["id"] not in newest]
-                old["groups"] += list(data.get("groups", ()))
+                kept = [c for c in old.get("groups", ()) if c["id"] not in newest]
+                old["groups"] = [c for c in kept + list(data.get("groups", ()))
+                                 if c["id"] not in gone]  # fmt: skip
+                if gone:  # list alerts' cards fold the same way
+                    old["removed_groups"] = sorted(gone)
             old["removed"] = sorted(removed)
             old["engine"], old["server_time"] = data["engine"], data["server_time"]
             if data.get("resync"):

@@ -137,6 +137,8 @@ def _v1(conn: Connection) -> None:
         conn.exec_driver_sql(sql)
 
 
+#: ``list_key`` is the OpenAlgo list's own created_at text, taken at creation: OpenAlgo hands a deleted
+#: list's id to the next list made, so ``ref`` alone could name another list (review M4).
 #: Step 2 (M8.14, list alerts): a group is one definition over a watchlist; its members are
 #: ordinary alert rows that point back with ``group_id``. Nothing is backfilled: every existing
 #: alert has no group (NULL), and no CHECK constraint is written (SQLite cannot alter one later;
@@ -162,6 +164,7 @@ V2 = (
         left_out TEXT NOT NULL DEFAULT '[]',
         synced_version TEXT,
         synced_at INTEGER,
+        list_key TEXT,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL,
         version INTEGER NOT NULL DEFAULT 1

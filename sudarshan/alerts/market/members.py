@@ -7,7 +7,7 @@ transport in this one module.
 
 The contract this was written against (a stub until the route exists, tests/groups_fakes.py):
 
-    members {ref} -> ok:  {status: "ok", data: {version, rows: [{symbol, exchange, instrument_key,
+    members {ref} -> ok:  {status: "ok", data: {version, created_at, rows: [{symbol, exchange, instrument_key,
                           tick_size, expiry, lot, valid_until?}], left_out: [{symbol?, why, reason}]}}
     version       -> ok:  {status: "ok", data: {version}}
     the watchlist feature switched off -> {status: "error", code: "off", ...}   (a freeze)
@@ -50,6 +50,8 @@ class Answer(NamedTuple):
     version: str | None = None
     rows: tuple[groups.Row, ...] = ()
     left_out: tuple[Mapping[str, Any], ...] = ()
+    #: The list's own created_at text: a reused list id is told apart by it (review M4).
+    list_key: str | None = None
 
 
 class MembersSource(Protocol):
@@ -102,4 +104,6 @@ def read(payload: Mapping[str, Any], status: int = 200) -> Answer:
         raise Unavailable("rows could not be read") from exc
     if version is not None and not isinstance(version, str | int):
         raise Unavailable("version could not be read")
-    return Answer(groups.OK, None if version is None else str(version), rows, left_out)
+    key = data.get("created_at")
+    return Answer(groups.OK, None if version is None else str(version), rows, left_out,
+                  None if key is None else str(key))  # fmt: skip

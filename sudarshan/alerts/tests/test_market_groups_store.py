@@ -178,7 +178,7 @@ def test_two_groups_made_at_once_cannot_both_take_the_last_room(store):
         t.start()
     for t in threads:
         t.join(30)
-    assert sorted(type(r).__name__ for r in results) == ["GroupRefused", "dict"]
+    assert sorted(type(r).__name__ for r in results) == ["GroupLimit", "dict"]
     assert len(store.alerts("owner")) == 2 and len(store.groups("owner")) == 1
 
 
@@ -309,3 +309,12 @@ def test_a_group_row_is_the_owners_only(store, path):
 def test_an_unknown_delivery_is_refused(store):
     with pytest.raises(ValueError):
         store.create_group("owner", GROUP | {"delivery": "hourly"}, [member(1)], NOW)
+
+
+def test_a_group_keeps_the_identity_of_its_list(path, store):
+    """Review M4: OpenAlgo reuses a deleted list's id, so the group stores the list's created_at."""
+    made = store.create_group("owner", GROUP | {"list_key": "2026-10-01 09:00:00"},
+                              [member(1)], NOW)  # fmt: skip
+    assert made["list_key"] == "2026-10-01 09:00:00"
+    assert store.group("owner", made["id"])["list_key"] == "2026-10-01 09:00:00"
+    assert store.create_group("owner", GROUP, [member(2)], NOW)["list_key"] is None

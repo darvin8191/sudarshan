@@ -858,6 +858,12 @@ class MarketRuntime:
         once it is in the Book: the desk claims such a key in full mode before it saves."""
         return bool(self._today) and alert.key in cas_keys([alert], self._today, self._fno)
 
+    def master_loaded(self, day: date) -> bool:
+        """Whether ``day``'s master contract has been read at or after 09:00, once the day's login
+        had downloaded it: the list alerts ask their lists again then, so a current-month future
+        resolves against it (the morning build runs before, on the day's first tick)."""
+        return self._master_read == (day, True)
+
     def _read_master(self, now: int) -> None:
         """The CAS keys' source (X6a): read at start, and again at or after 09:00, once the day's
         login has downloaded the master. Only a read that finds stock futures counts; a failed

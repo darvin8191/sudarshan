@@ -94,6 +94,7 @@ GROUP_DELIVERY = ("first_then_digest", "each")
 GROUP_FIELDS = (
     "ref", "name", "kind", "params", "frequency", "candle_min", "cooldown_s", "ends_at",
     "delivery", "digest_min", "note", "covered", "left_out", "synced_version", "synced_at",
+    "list_key",
 )  # fmt: skip
 #: What an edit of a group sets on every member as well (the instrument stays each member's own).
 GROUP_SHARED = ("params", "frequency", "candle_min", "cooldown_s", "ends_at", "note")
@@ -121,6 +122,7 @@ alert_group = Table(
     Column("status", String), Column("status_reason", String), Column("delivery", String),
     Column("digest_min", Integer), Column("note", String), Column("covered", Integer),
     Column("left_out", String), Column("synced_version", String), Column("synced_at", Integer),
+    Column("list_key", String),
     Column("created_at", Integer), Column("updated_at", Integer), Column("version", Integer),
 )  # fmt: skip
 STATE_FIELDS = State._fields[:9]
@@ -192,6 +194,10 @@ class Refused(StoreError):
 class GroupRefused(StoreError):
     """A group that does not fit the limits, or a move its status does not allow: the words are
     the owner's, and nothing was made or changed."""
+
+
+class GroupLimit(GroupRefused):
+    """A group the limits cannot hold (the fit check's words, both numbers in them)."""
 
 
 class UnknownPrincipal(ValueError):
@@ -1022,7 +1028,7 @@ def _admit(conn, who: str, fit, new_keys: list[str]) -> None:
         alert.c.principal == who, alert.c.status == "active")).scalars().all()  # fmt: skip
     words = fit(frozenset(keys), len(keys), new_keys)
     if words:
-        raise GroupRefused(words)
+        raise GroupLimit(words)
 
 
 def _add_members(conn, who, group_id, members, now, status: str = "active") -> None:

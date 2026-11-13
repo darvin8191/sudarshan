@@ -22,6 +22,7 @@ class StubMembers:
     def __init__(self, lists: dict[str, list[dict]] | None = None, version: str = "v1"):
         self.lists = lists or {}
         self.left_out: dict[str, list[dict]] = {}
+        self.created: dict[str, str] = {}  # a list's created_at; "list:7" is a reused id when it moves
         self.state, self.gone, self.down, self.current = groups.OK, set(), False, version
         self.calls: list[tuple[str, ...]] = []
 
@@ -33,7 +34,8 @@ class StubMembers:
         if ref in self.gone:
             return Answer(groups.GONE)
         rows = tuple(groups.Row.of(r) for r in self.lists.get(ref, ()))
-        return Answer(groups.OK, self.current, rows, tuple(self.left_out.get(ref, ())))
+        return Answer(groups.OK, self.current, rows, tuple(self.left_out.get(ref, ())),
+                      self.created.get(ref, "2026-10-01 09:00:00"))
 
     async def version(self) -> Answer:
         self.calls.append(("version",))

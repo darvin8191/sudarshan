@@ -29,6 +29,14 @@ RANKED = (
     "A ranked list changes with every read. Set the alert on a list or a built-in list instead."
 )
 NOT_A_LIST = "This kind of list cannot carry an alert. Set it on a list or a built-in list."
+PRICE_LEVEL = (
+    "A price level is per symbol. For a list, pick a % move, a day high or low break, or a VWAP "
+    "cross."
+)
+NOT_READ = (
+    "The list could not be read just now, so this alert keeps its last {n} symbols and asks again "
+    "in a minute."
+)
 LEFT_OUT_FIXED = "ATM and strike rows change contract during the day and are left out: {n}."
 LEFT_OUT_OTHER = "Rows without a contract to follow are left out: {n}."
 SWITCHED_OFF = "The watchlist feature is switched off, so this alert keeps its last {n} symbols."
@@ -106,10 +114,11 @@ def left_out_words(items: Iterable[Mapping[str, Any]]) -> tuple[str, ...]:
 
 def check(
     new_keys: Sequence[str], in_use_keys: Collection[str], in_use_alerts: int,
-    max_instruments: int, max_active: int,
+    max_instruments: int, max_active: int, done: str = "made",
 ) -> Fit:  # fmt: skip
     """Does a group of one alert per key fit both limits? ``in_use_*`` is what Active alerts
-    hold now. The words carry both numbers, fit or not."""
+    hold now. The words carry both numbers, fit or not; a refusal says nothing was ``done``
+    ("made" for a new group, "changed" for a resume or an edit)."""
     keys = set(new_keys)
     new_instruments = len(keys - set(in_use_keys))
     used_keys, alerts = len(set(in_use_keys)), len(new_keys)
@@ -126,16 +135,19 @@ def check(
     if new_instruments > free_keys:
         short.append(f"it needs {quantity(new_instruments)} more instruments and "
                      f"{quantity(max(free_keys, 0))} of the {quantity(max_instruments)} are free")  # fmt: skip
-    return Fit(False, f"It does not fit: {'; and '.join(short)}. Nothing was made.")
+    return Fit(False, f"It does not fit: {'; and '.join(short)}. Nothing was {done}.")
 
 
 def fit_check(
-    max_instruments: int, max_active: int
+    max_instruments: int, max_active: int, done: str = "made", said: list[str] | None = None
 ) -> Callable[[frozenset[str], int, list[str]], str | None]:
-    """The store's ``fit`` callback: refusal words, or None to admit."""
+    """The store's ``fit`` callback: refusal words, or None to admit. The words of either answer
+    (both numbers, as the transaction read them) are appended to ``said`` when it is given."""
 
     def fit(in_use_keys: frozenset[str], in_use_alerts: int, new_keys: list[str]) -> str | None:
-        result = check(new_keys, in_use_keys, in_use_alerts, max_instruments, max_active)
+        result = check(new_keys, in_use_keys, in_use_alerts, max_instruments, max_active, done)
+        if said is not None:
+            said.append(result.words)
         return None if result.ok else result.words
 
     return fit
@@ -178,15 +190,18 @@ def plan(
     state: str, rows: Sequence[Row], members: Sequence[Member],
     holders: Mapping[str, Collection[int]], *, name: str, active: bool,
     max_instruments: int, max_active: int, left_out: Iterable[Mapping[str, Any]] = (),
+    list_key: tuple[str | None, str | None] = (None, None),
 ) -> Plan:  # fmt: skip
     """What the sync does with the list's answer. ``state`` is ok, off (the feature is switched
     off: freeze, never an empty list or an error) or gone (the list was deleted: stop).
+    ``list_key`` is the list's created_at as the group stored it and as the route says now.
     ``holders`` is every Active alert's instrument key -> alert ids; ``active`` is whether the
     group is Active (a Paused group adds without being held to the limits)."""
     if state == OFF:
         return Plan("freeze", covered=len(members), total=len(members),
                     note=SWITCHED_OFF.format(n=quantity(len(members))))  # fmt: skip
-    if state == GONE:
+    stored, now = list_key  # (the group's, the route's): a reused list id is another list
+    if state == GONE or (stored is not None and now is not None and stored != now):
         return Plan("stop", note=LIST_DELETED.format(name=name))
     add, remove = diff(members, rows)
     keep = len(members) - len(remove)
