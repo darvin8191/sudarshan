@@ -1147,7 +1147,18 @@ class Box:
         """What ``stat -c %U`` names as the owner of ``path`` on this server."""
         (self.web / f"owner-{self.key(str(path))}").write_text(f"{account}\n")
 
-    def run(self, *args: str, timeout: float = 120) -> subprocess.CompletedProcess:
+    def feed_tokens_in_place(self) -> None:
+        """The price feed's client tokens as the tool makes them once on every server (a test that
+        compares /etc/sudarshan before and after a run starts with them there)."""
+        folder = self.etc / "feed-clients"
+        folder.mkdir(mode=0o750, exist_ok=True)
+        for name in ("alerts", "screener", "portfolio", "journal", "family", "protect"):
+            (folder / f"sudarshan-{name}").write_text("t" * 43 + "\n")
+
+    def run(
+        self, *args: str, timeout: float = 120, prefix: tuple[str, ...] = ()
+    ) -> subprocess.CompletedProcess:
+        """The whole tool on this server; ``prefix`` goes before bash (strace, for one)."""
         script = (
             DEPLOY_TOOL.read_text()
             .replace("/etc/sudarshan", str(self.etc))
@@ -1159,7 +1170,7 @@ class Box:
         )
         (self.web / "later").unlink(missing_ok=True)
         return subprocess.run(
-            ["bash", "-c", script, "sudarshan-deploy", *args],
+            [*prefix, "bash", "-c", script, "sudarshan-deploy", *args],
             capture_output=True,
             text=True,
             errors="replace",
@@ -1576,6 +1587,7 @@ def test_an_install_applies_its_list_with_a_backup(tmp_path):
 def test_a_broken_list_never_blocks_an_install(tmp_path, code, listing, cut, says):
     box = Box(tmp_path, latest="v1.0.1")
     box.calendar("v1.0.1", listing, code, cut)
+    box.feed_tokens_in_place()  # made once by an earlier run: the run below changes nothing in etc
     before = _snapshot(box.etc)
     done = box.run()
     assert done.returncode == 0, done.stdout + done.stderr

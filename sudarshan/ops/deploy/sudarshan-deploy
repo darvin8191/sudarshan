@@ -16,7 +16,11 @@
 # sudarshan/ops/deploy/nse-calendar.conf, on every run, also when nothing is installed and in market
 # hours (a shipped date is added when missing; only a line an earlier release shipped is replaced,
 # and nothing that could open the market gate on the day changes outside an install).
-# Usage: sudarshan-deploy [--check | --redeploy | --force]
+# And on every run the price feed's client tokens in /etc/sudarshan/feed-clients are made once if
+# missing (feed_tokens), and, only once the owner's one-time set-up for the family view
+# (sudarshan/ops/family/bootstrap.sh) has made /etc/sudarshan-family, that account's keys are kept
+# there and its check is run (fam_provision). Before that set-up nothing of the family is touched.
+# Usage: sudarshan-deploy [--check | --redeploy | --force | --family-provision]
 #   --check     show latest Release / deployed tag / market state and the .env settings and
 #               calendar lines that release would change, change nothing
 #   --redeploy  install the latest Release again even if it is already deployed (still gated)
@@ -26,6 +30,10 @@
 #               backup folder, remove the unit file; its state folder and /etc/sudarshan/<service>.env
 #               stay (an owner's settings are never deleted). The next release that still ships the
 #               unit installs it again.
+#   --family-provision
+#               the family view's provision step alone (the feed tokens, the keys, the check), saying
+#               everything it does; bootstrap.sh runs it. Waits up to 15 minutes for a running
+#               install. Exit 0 = the check passed, 1 = it did not, 2 = no /etc/sudarshan-family yet.
 set -Eeuo pipefail
 MODE="deploy"; FORCE=0; REDEPLOY=0; REMOVE_RING=""
 case "${1:-}" in
@@ -33,13 +41,19 @@ case "${1:-}" in
     --redeploy) REDEPLOY=1 ;;
     --force) FORCE=1; REDEPLOY=1 ;;
     --remove-ring) MODE="remove-ring"; REMOVE_RING="${2:-}" ;;
+    --family-provision) MODE="family" ;;
     "") ;;
-    *) echo "usage: sudarshan-deploy [--check|--redeploy|--force|--remove-ring sudarshan-<service>]" >&2; exit 2 ;;
+    *) echo "usage: sudarshan-deploy [--check|--redeploy|--force|--remove-ring sudarshan-<service>|--family-provision]" >&2; exit 2 ;;
 esac
 # shellcheck disable=SC1091
 source /etc/sudarshan/deploy.env
 STATE="/var/lib/sudarshan"; mkdir -p "${STATE}"
-exec 9> "${STATE}/deploy.lock"; flock -n 9 || { echo "another deploy is running"; exit 0; }
+exec 9> "${STATE}/deploy.lock"
+if [[ "${MODE}" == "family" ]]; then   # the owner is waiting at the set-up: an install is waited for, not skipped
+    flock -w 900 9 || { echo "An install is still running. Nothing was changed: run the set-up again in a few minutes."; exit 75; }
+else
+    flock -n 9 || { echo "another deploy is running"; exit 0; }
+fi
 # The nightly backup runs as the ring's user and opens this lock to wait for an install: a lock it cannot
 # open, or a folder it cannot walk into, is read as "no tool here" and lets the backup run in the middle
 # of an install. So both are made readable, on every run, whatever umask the unit has.
@@ -52,6 +66,7 @@ FAM_USER="sudarshan-family"; FAM_UNIT="${FAM_USER}.service"   # the family view 
                         # (P6), and unit_ok allows that account for that unit alone
 RING_VAR="/var/lib"     # where the ring services keep their state: ${RING_VAR}/sudarshan-<service>/
 FAM_DIR="/etc/sudarshan-family"         # the family account's keys (root:sudarshan-family 750, files 640)
+FEED_DIR="/etc/sudarshan/feed-clients"  # the price feed's client tokens (root:sudarshan 750, files 640)
 log() { echo "[$(date '+%F %T %Z')] $*"; }
 listed() {   # 0 = date $1 starts a line of file $2 (a trailing comment is allowed, as auto-login reads
              # it). Only a regular file is read: grep would wait forever on a FIFO.
@@ -770,8 +785,16 @@ ring_remove() {   # $1 = sudarshan-<service>.service
     mkdir -m 700 -p "${bdir}"
     systemctl disable --now "${n}" > /dev/null 2>&1 || log "ring: ${n} was not running"
     if [[ "${folder}" != "sudarshan-feed" ]]; then   # the keys it claimed at the feed (under its name) go with it
-        local code
-        code="$(curl -s --max-time 5 -o /dev/null -w '%{http_code}' -X DELETE "http://127.0.0.1:5580/claims/${folder}" 2>/dev/null)" || code=""
+        local code work="" tokf="${FEED_DIR}/${folder}"
+        local -a auth=()
+        # The feed takes a change of a client's claims only with that client's token (Y3.3). It is
+        # handed to curl in a file of root's own, never on the command line, where ps would show it.
+        if [[ -f "${tokf}" && ! -L "${tokf}" ]] && work="$(mktemp -d)" \
+                && { printf 'Authorization: Bearer '; head -n 1 -- "${tokf}"; } > "${work}/auth" 2>/dev/null; then
+            auth=(-H "@${work}/auth")
+        fi
+        code="$(curl -s --max-time 5 -o /dev/null -w '%{http_code}' "${auth[@]}" -X DELETE "http://127.0.0.1:5580/claims/${folder}" 2>/dev/null)" || code=""
+        if [[ -n "${work}" ]]; then rm -rf -- "${work}"; fi
         if [[ "${code}" == "200" ]]; then log "ring: the price feed no longer keeps ${folder}'s instruments"
         else log "WARNING: ring: the price feed did not drop ${folder}'s instruments (is sudarshan-feed running?); it lets them go after 7 days without a renewal"; fi
     fi
@@ -795,13 +818,304 @@ ring_remove() {   # $1 = sudarshan-<service>.service
     systemctl daemon-reload > /dev/null 2>&1 || true
     log "ring: removed ${n}; its state in ${RING_VAR}/${folder} and ${CAL_DIR}/${folder#sudarshan-}.env stay; databases copied to ${bdir}"
 }
+fam_once() {   # $1 = the file that keeps the note logged last, $2 = this run's note ("" when all is well):
+               # a note is logged once while it holds
+    local said=""
+    if [[ -z "$2" ]]; then rm -f -- "$1"; return 0; fi
+    said="$(cat -- "$1" 2>/dev/null)" || said=""
+    if [[ "$2" != "${said}" ]]; then log "$2"; printf '%s\n' "$2" 2>/dev/null > "$1" || true; fi
+}
+# ---- The price feed's client tokens (cross-design Y3.3; the feed checks them): one per ring client,
+# ${FEED_DIR}/<client>, 32 random bytes as urlsafe base64 without padding (43 characters, one line). The
+# folder is root:sudarshan 750 and each file root:sudarshan 640, so the feed (user sudarshan) reads them
+# all. Made once with system tools on every server, at every run, and never written again: a token that
+# is there stays as it is. What is made is not logged; a failure is logged once while it holds. The
+# family account cannot read this folder and gets a copy of its own token (fam_provision).
+FEED_CLIENTS=(sudarshan-alerts sudarshan-screener sudarshan-portfolio sudarshan-journal sudarshan-family sudarshan-protect)
+feed_tokens() (
+    set +eEu; trap - ERR
+    local name dest tmpf tok note=""
+    umask 077
+    if [[ -L "${FEED_DIR}" ]] || { [[ -e "${FEED_DIR}" ]] && ! cal_dir_ok "${FEED_DIR}"; }; then
+        note="WARNING: feed: ${FEED_DIR} is not a folder owned by root and closed to others, so no client token is made there"
+    elif [[ ! -e "${FEED_DIR}" ]] && ! cal_dir_ok "${CAL_DIR}"; then
+        note="WARNING: feed: ${CAL_DIR} is not a folder owned by root and closed to others, so no client token is made"
+    elif [[ ! -e "${FEED_DIR}" ]] && ! { mkdir -m 750 -- "${FEED_DIR}" && chown -- "root:${RING_USER}" "${FEED_DIR}"; } 2>/dev/null; then
+        rmdir -- "${FEED_DIR}" 2>/dev/null
+        note="WARNING: feed: ${FEED_DIR} could not be made, so no client token is made"
+    else
+        find "${FEED_DIR}" -maxdepth 1 -type f -name '.sudarshan-*.??????' -mmin +10 -delete 2>/dev/null   # left by a killed run
+        for name in "${FEED_CLIENTS[@]}"; do
+            dest="${FEED_DIR}/${name}"
+            if [[ -e "${dest}" || -L "${dest}" ]]; then continue; fi
+            tok="$(head -c 32 /dev/urandom | base64 -w 0 | tr -- '+/' '-_' | tr -d '=')"; tmpf=""
+            if [[ "${tok}" =~ ^[A-Za-z0-9_-]{43}$ ]] && tmpf="$(mktemp -p "${FEED_DIR}" ".${name}.XXXXXX" 2>/dev/null)" \
+                    && { printf '%s\n' "${tok}" > "${tmpf}" && chmod 640 -- "${tmpf}" && chown -- "root:${RING_USER}" "${tmpf}" \
+                         && ln -T -- "${tmpf}" "${dest}"; } 2>/dev/null; then
+                :   # in place; a hard link takes no name another run made meanwhile
+            else
+                note="WARNING: feed: the client token ${dest} could not be made"
+            fi
+            if [[ -n "${tmpf}" ]]; then rm -f -- "${tmpf}"; fi
+        done
+    fi
+    fam_once "${STATE}/feed_tokens_note" "${note}"
+)
+# ---- The family view's account (P6; cross-design Y1-Y3, Y13, Y25). The family service runs as its own
+# account, sudarshan-family, which can read none of the owner's secrets: not OpenAlgo's .env, db/ or log/,
+# and not /etc/sudarshan (root:sudarshan 750). What it needs is handed to it in ${FAM_DIR}
+# (root:sudarshan-family 750, files 640), which the owner's one-time set-up makes
+# (sudarshan/ops/family/bootstrap.sh). While that folder exists, and only then, at every run (and once
+# more after an install, with the release it brought):
+#   - sudarshan, who can read the pepper, is asked for the family's seal keys (python -m
+#     sudarshan.family.derive). Root never runs the app's Python (Y2): it checks each line it is handed (a
+#     known name, 44 characters of urlsafe base64, nothing else) and writes seal-<name>.key through a
+#     temporary file in that folder, renamed into place only when it differs;
+#   - store.key (32 random bytes, base64) and the VAPID P-256 key pair (vapid_private.pem; the public key's
+#     uncompressed point as urlsafe base64 without padding in vapid_public.txt) are made once by root with
+#     system tools (head, base64, openssl) and never written again;
+#   - the NSE day files and the family's feed token are copied in when they differ;
+#   - python -m sudarshan.family.check runs as sudarshan-family, and provisioned (the family unit's
+#     ConditionPathExists) is written only after it passes. After a failure it is removed, the family unit
+#     is stopped if it runs, and one notice is recorded for the owner while the failure lasts
+#     (family_check_failed).
+# A run says nothing unless something changed or failed (each failure once while it holds); the set-up
+# (--family-provision) says everything. A failure costs the family view, never an install.
+FAM_KEYS=(admin nudge internal portfolio-family journal-family)   # the purposes derive prints, by these names
+FAM_MADE=(store.key vapid_private.pem vapid_public.txt feed-token)   # what must be there besides the seal keys
+FAM_DAYS=(nse_holidays.txt nse_extra_trading_days.txt)
+FAM_EPISODE="${STATE}/family_failing"   # while a failure lasts: the id its notice was recorded under
+FAM_SAID="${STATE}/family_said"         # the failure logged last
+FAM_TALK=0                              # 1 in --family-provision: every step is said, for the owner
+fam_say() { if [[ "${FAM_TALK}" == 1 ]]; then printf 'family: %s\n' "$*"; else log "family: $*"; fi; }
+fam_note() {   # $1 = the file that keeps the note logged last, $2 = this run's note: the set-up says it, a run
+               # logs it once while it holds
+    if [[ "${FAM_TALK}" == 1 ]]; then if [[ -n "$2" ]]; then printf '%s\n' "$2"; fi; return 0; fi
+    fam_once "$1" "$2"
+}
+fam_holds() {   # $1 = a name in FAM_DIR, $2 = a file with what it should hold: 0 when it holds that already,
+                # with mode 640 (then nothing is written, and the folder is not touched)
+    local dest="${FAM_DIR}/$1"
+    [[ -f "${dest}" && ! -L "${dest}" && "$(stat -c %a -- "${dest}" 2>/dev/null)" == "640" ]] && cmp -s -- "$2" "${dest}"
+}
+fam_place() {   # $1 = a temporary file in FAM_DIR, root's and written whole, $2 = its name there: made
+                # root:sudarshan-family 640 and renamed over that name only when its content or mode differ.
+                # Prints "written" or "same"; 1 = not put in place (the temporary file is removed)
+    local dest="${FAM_DIR}/$2"
+    if ! { chmod 640 -- "$1" && chown -- "root:${FAM_USER}" "$1"; } 2>/dev/null; then rm -f -- "$1"; return 1; fi
+    if [[ -f "${dest}" && ! -L "${dest}" ]] && cmp -s -- "$1" "${dest}" \
+            && [[ "$(stat -c %a -- "${dest}" 2>/dev/null)" == "640" ]]; then
+        rm -f -- "$1"; echo same; return 0
+    fi
+    if mv -fT -- "$1" "${dest}" 2>/dev/null; then echo written; return 0; fi
+    rm -f -- "$1"; return 1
+}
+fam_create() {   # $1 = a temporary file in FAM_DIR, $2 = its name there: root:sudarshan-family 640, put in place
+                 # only while nothing has that name (a hard link fails on a taken name). 0 = made
+    local rc=1
+    if { chmod 640 -- "$1" && chown -- "root:${FAM_USER}" "$1" && ln -T -- "$1" "${FAM_DIR}/$2"; } 2>/dev/null; then rc=0; fi
+    rm -f -- "$1"
+    return "${rc}"
+}
+fam_copy() {   # $1 = a plain file in a folder only root can write, $2 = its name in FAM_DIR: copied in when it
+               # differs. Prints "written" or "same"; 1 = not copied
+    local tmpf
+    [[ -f "$1" && ! -L "$1" ]] || return 1
+    if fam_holds "$2" "$1"; then echo same; return 0; fi
+    tmpf="$(mktemp -p "${FAM_DIR}" ".$2.XXXXXX" 2>/dev/null)" || return 1
+    if ! cat -- "$1" 2>/dev/null > "${tmpf}"; then rm -f -- "${tmpf}"; return 1; fi
+    fam_place "${tmpf}" "$2"
+}
+fam_failed() {   # $1 = why (folder, files or check), $2 = what, in words, then lines that go with it (a run logs
+                 # them, the set-up has said them): the family view stays off until a check passes, and the owner
+                 # is told once while the failure lasts
+    local why="$1" what="$2" id said line
+    shift 2
+    if [[ -e "${FAM_DIR}/provisioned" || -L "${FAM_DIR}/provisioned" ]] && rm -f -- "${FAM_DIR}/provisioned" 2>/dev/null; then
+        fam_say "${FAM_DIR}/provisioned removed: the family view cannot start until the check passes again"
+    fi
+    if [[ -f "${MANAGED}" ]] && grep -qx -- "${FAM_UNIT}" "${MANAGED}" && systemctl is-active --quiet "${FAM_UNIT}" 2>/dev/null; then
+        if systemctl stop "${FAM_UNIT}" > /dev/null 2>&1; then fam_say "${FAM_UNIT} stopped: its check failed"; fi
+    fi
+    said="$(cat -- "${FAM_SAID}" 2>/dev/null)" || said=""
+    if [[ "${FAM_TALK}" == 1 || "${said}" != "${why}: ${what}" ]]; then
+        fam_say "FAIL: ${what}"
+        if [[ "${FAM_TALK}" != 1 ]]; then for line in "$@"; do fam_say "${line}"; done; fi
+        printf '%s\n' "${why}: ${what}" 2>/dev/null > "${FAM_SAID}" || true
+    fi
+    id="$(cat -- "${FAM_EPISODE}" 2>/dev/null)" || id=""
+    if [[ ! "${id}" =~ ^[0-9]{8}-[0-9]{6}-[0-9]+$ ]]; then   # a new failure: its own id (time and this run's pid)
+        id="$(date +%Y%m%d-%H%M%S)-$$"; printf '%s\n' "${id}" 2>/dev/null > "${FAM_EPISODE}" || true
+    fi
+    notice family_check_failed "deploy-family-check-${id}" why="${why}" what="${what:0:150}"
+}
+fam_provision() (   # $1 = run or setup. 0 = the check passed and provisioned is in place; 1 = the family view stays
+                    # off (a step failed); 2 = there is no ${FAM_DIR} (the set-up has not run): nothing was done
+    set +eEu; trap - ERR
+    local mode="$1" had=0 out rc r line name tmpf fresh=0 pub work note=""
+    local -a lines=() changed=() missing=() fails=() said=()
+    local -A keys=()
+    if [[ "${mode}" == "setup" ]]; then FAM_TALK=1; fi
+    [[ -e "${FAM_DIR}" || -L "${FAM_DIR}" ]] || exit 2
+    umask 077
+    if ! cal_dir_ok "${FAM_DIR}"; then
+        fam_failed folder "${FAM_DIR} is not a folder owned by root and closed to others; run the family set-up again"
+        exit 1
+    fi
+    if [[ -f "${FAM_DIR}/provisioned" ]]; then had=1; fi
+    find "${FAM_DIR}" -maxdepth 1 -type f \( -name '.seal-*.key.??????' -o -name '.store.key.??????' \
+        -o -name '.vapid_*.??????' -o -name '.feed-token.??????' -o -name '.nse_*.txt.??????' \
+        -o -name '.provisioned.??????' \) -mmin +10 -delete 2>/dev/null   # left by a run that was killed
+    # 1. The seal keys: derived by sudarshan, checked and written by root, which runs none of the app's code.
+    out="$(cd -- "${APP_DIR}" && timeout 60 sudo -u "${RING_USER}" -H -- "${APP_DIR}/.venv/bin/python" -m sudarshan.family.derive 2>/dev/null)"; rc=$?
+    if [[ ${rc} -ne 0 ]]; then
+        note="family: the seal keys could not be derived (exit ${rc}); the keys in place stay"
+    else
+        mapfile -t lines < <(printf '%s\n' "${out}")
+        for line in "${lines[@]}"; do
+            if [[ "${line}" =~ ^([a-z-]+)\ ([A-Za-z0-9_-]{43}=)$ ]]; then
+                name="${BASH_REMATCH[1]}"
+                if [[ " ${FAM_KEYS[*]} " == *" ${name} "* && -z "${keys[${name}]+set}" ]]; then keys[${name}]="${BASH_REMATCH[2]}"; continue; fi
+            fi
+            keys=(); break   # a line that is not one of ours: nothing of the answer is used
+        done
+        if [[ ${#keys[@]} -ne ${#FAM_KEYS[@]} ]]; then
+            note="family: the derived seal keys were not five known names with a key each; nothing was written, the keys in place stay"
+        else
+            for name in "${FAM_KEYS[@]}"; do
+                # compared through a pipe: a key is never a command's argument, where ps would show it
+                if fam_holds "seal-${name}.key" <(printf '%s\n' "${keys[${name}]}"); then continue; fi
+                tmpf="$(mktemp -p "${FAM_DIR}" ".seal-${name}.key.XXXXXX" 2>/dev/null)" || { note="family: seal-${name}.key could not be written"; continue; }
+                if printf '%s\n' "${keys[${name}]}" 2>/dev/null > "${tmpf}" && r="$(fam_place "${tmpf}" "seal-${name}.key")"; then
+                    if [[ "${r}" == "written" ]]; then changed+=("seal-${name}.key"); fi
+                else
+                    rm -f -- "${tmpf}"; note="family: seal-${name}.key could not be written"
+                fi
+            done
+        fi
+    fi
+    out=""; keys=()
+    fam_note "${STATE}/family_keys_note" "${note}"
+    # 2. Made once, never written again: store.key, and the VAPID pair (the public key whenever it is missing).
+    if [[ ! -e "${FAM_DIR}/store.key" && ! -L "${FAM_DIR}/store.key" ]]; then
+        tmpf="$(mktemp -p "${FAM_DIR}" .store.key.XXXXXX 2>/dev/null)" || tmpf=""
+        if [[ -n "${tmpf}" ]] && head -c 32 /dev/urandom 2>/dev/null | base64 2>/dev/null > "${tmpf}" \
+                && [[ "$(wc -c < "${tmpf}")" -eq 45 ]] && fam_create "${tmpf}" store.key; then
+            changed+=(store.key)
+        elif [[ -n "${tmpf}" ]]; then rm -f -- "${tmpf}"; fi
+    fi
+    if [[ ! -e "${FAM_DIR}/vapid_private.pem" && ! -L "${FAM_DIR}/vapid_private.pem" ]]; then
+        tmpf="$(mktemp -p "${FAM_DIR}" .vapid_private.pem.XXXXXX 2>/dev/null)" || tmpf=""
+        if [[ -n "${tmpf}" ]] && openssl ecparam -name prime256v1 -genkey -noout -out "${tmpf}" > /dev/null 2>&1 \
+                && openssl ec -in "${tmpf}" -noout -check > /dev/null 2>&1 && fam_create "${tmpf}" vapid_private.pem; then
+            changed+=(vapid_private.pem); fresh=1
+        elif [[ -n "${tmpf}" ]]; then rm -f -- "${tmpf}"; fi
+    fi
+    if [[ -f "${FAM_DIR}/vapid_private.pem" && ! -L "${FAM_DIR}/vapid_private.pem" ]] \
+            && [[ ${fresh} -eq 1 || ! ( -e "${FAM_DIR}/vapid_public.txt" || -L "${FAM_DIR}/vapid_public.txt" ) ]]; then
+        pub=""; work="$(mktemp -d 2>/dev/null)" || work=""
+        # SubjectPublicKeyInfo of a P-256 key is 91 bytes and ends with the 65-byte uncompressed point (04 x y)
+        if [[ -n "${work}" ]] && openssl ec -in "${FAM_DIR}/vapid_private.pem" -pubout -outform DER -out "${work}/pub.der" > /dev/null 2>&1 \
+                && [[ "$(wc -c < "${work}/pub.der")" -eq 91 ]]; then
+            pub="$(tail -c 65 -- "${work}/pub.der" | base64 -w 0 | tr -- '+/' '-_' | tr -d '=')"
+        fi
+        if [[ -n "${work}" ]]; then rm -rf -- "${work}"; fi
+        tmpf=""
+        if [[ "${pub}" =~ ^B[A-P][A-Za-z0-9_-]{85}$ ]] && tmpf="$(mktemp -p "${FAM_DIR}" .vapid_public.txt.XXXXXX 2>/dev/null)" \
+                && printf '%s\n' "${pub}" > "${tmpf}" && r="$(fam_place "${tmpf}" vapid_public.txt)"; then
+            if [[ "${r}" == "written" ]]; then changed+=(vapid_public.txt); fi
+        elif [[ -n "${tmpf}" ]]; then rm -f -- "${tmpf}"; fi
+    fi
+    # 3. Copies of what the account may read but not reach where it lives: the NSE day files (Y1.3, for the
+    #    family's trading calendar; a day file that is gone takes its copy with it) and its own feed token.
+    if cal_dir_ok "${CAL_DIR}"; then
+        for name in "${FAM_DAYS[@]}"; do
+            if [[ -f "${CAL_DIR}/${name}" && ! -L "${CAL_DIR}/${name}" ]]; then
+                if r="$(fam_copy "${CAL_DIR}/${name}" "${name}")" && [[ "${r}" == "written" ]]; then changed+=("${name}"); fi
+            elif [[ ! -e "${CAL_DIR}/${name}" && ! -L "${CAL_DIR}/${name}" && -f "${FAM_DIR}/${name}" ]]; then
+                if rm -f -- "${FAM_DIR}/${name}"; then changed+=("${name} (removed: ${CAL_DIR} has none)"); fi
+            fi
+        done
+    fi
+    if cal_dir_ok "${FEED_DIR}" && r="$(fam_copy "${FEED_DIR}/${FAM_USER}" feed-token)" && [[ "${r}" == "written" ]]; then
+        changed+=(feed-token)
+    fi
+    if [[ ${#changed[@]} -gt 0 ]]; then fam_say "written in ${FAM_DIR}: ${changed[*]}"
+    elif [[ "${FAM_TALK}" == 1 ]]; then fam_say "nothing to write: every key and copy in ${FAM_DIR} was already in place"; fi
+    for name in "${FAM_KEYS[@]}"; do
+        if [[ ! -f "${FAM_DIR}/seal-${name}.key" || -L "${FAM_DIR}/seal-${name}.key" ]]; then missing+=("seal-${name}.key"); fi
+    done
+    for name in "${FAM_MADE[@]}"; do
+        if [[ ! -f "${FAM_DIR}/${name}" || -L "${FAM_DIR}/${name}" ]]; then missing+=("${name}"); fi
+    done
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        fam_failed files "the family's keys are not all in ${FAM_DIR} yet (missing: ${missing[*]})"
+        exit 1
+    fi
+    # 4. The check, as the family account itself: what it can and cannot reach. Nothing secret is in its output.
+    out="$(cd -- "${APP_DIR}" && timeout 120 sudo -u "${FAM_USER}" -H -- "${APP_DIR}/.venv/bin/python" -m sudarshan.family.check 2>&1)"; rc=$?
+    mapfile -t lines < <(printf '%s\n' "${out}" | head -n 60)
+    for line in "${lines[@]}"; do
+        line="${line//[^ -~]/?}"; line="${line:0:300}"
+        [[ -n "${line}" ]] || continue
+        said+=("check: ${line}")
+        if [[ "${FAM_TALK}" == 1 ]]; then fam_say "check: ${line}"; fi
+        if [[ "${line}" == "FAIL "* ]]; then fails+=("${line#FAIL }"); fi
+    done
+    if [[ ${rc} -ne 0 ]]; then
+        if [[ ${#fails[@]} -gt 0 ]]; then
+            fam_failed check "${fails[0]}" "${said[@]}"
+        else
+            fam_failed check "the family check could not run as ${FAM_USER} (exit ${rc}): that account must be able to enter every folder down to ${APP_DIR} and read .venv and sudarshan/ there" "${said[@]:0:10}"
+        fi
+        exit 1
+    fi
+    if [[ ${had} -eq 0 ]]; then
+        tmpf="$(mktemp -p "${FAM_DIR}" .provisioned.XXXXXX 2>/dev/null)" || tmpf=""
+        if [[ -n "${tmpf}" ]] && printf 'the family check passed at %s\n' "$(date '+%F %T %Z')" > "${tmpf}" \
+                && fam_create "${tmpf}" provisioned; then
+            fam_say "the check passed: ${FAM_DIR}/provisioned written, so the family view may start"
+        else
+            if [[ -n "${tmpf}" ]]; then rm -f -- "${tmpf}"; fi
+            fam_failed files "${FAM_DIR}/provisioned could not be written"
+            exit 1
+        fi
+    elif [[ "${FAM_TALK}" == 1 ]]; then
+        fam_say "the check passed; ${FAM_DIR}/provisioned was already there"
+    fi
+    rm -f -- "${FAM_EPISODE}" "${FAM_SAID}"
+    # a family view its check had kept off starts again (a unit that is not installed or not enabled is left alone)
+    if [[ ${had} -eq 0 && -f "${MANAGED}" ]] && grep -qx -- "${FAM_UNIT}" "${MANAGED}" \
+            && systemctl is-enabled --quiet "${FAM_UNIT}" 2>/dev/null && ! systemctl is-active --quiet "${FAM_UNIT}" 2>/dev/null; then
+        if systemctl start "${FAM_UNIT}" > /dev/null 2>&1; then fam_say "${FAM_UNIT} started"; fi
+    fi
+    if [[ "${FAM_TALK}" == 1 ]]; then fam_say "PASS: the family account is set up, and its check finds it closed off from the owner's secrets"; fi
+    exit 0
+)
+fam_backup() (   # an install's backup: ${FAM_DIR} into ${bdir}/etc-family (Y1.4); a rollback never puts it back (as R12)
+    set +eEu; trap - ERR
+    [[ -e "${FAM_DIR}" || -L "${FAM_DIR}" ]] || exit 0
+    if cal_dir_ok "${FAM_DIR}" && cp -a -- "${FAM_DIR}" "${bdir}/etc-family" 2>/dev/null; then
+        log "family: ${FAM_DIR} copied into the backup (a rollback never puts it back)"
+    else
+        rm -rf -- "${bdir}/etc-family"; log "WARNING: family: ${FAM_DIR} could not be copied into the backup"
+    fi
+)
 if [[ "${MODE}" == "remove-ring" ]]; then ring_remove "${REMOVE_RING}"; exit 0; fi
+if [[ "${MODE}" == "family" ]]; then
+    feed_tokens || true
+    rc=0; fam_provision setup || rc=$?
+    if [[ ${rc} -eq 2 ]]; then echo "family: there is no ${FAM_DIR} yet; the family set-up (sudarshan/ops/family/bootstrap.sh) makes it"; fi
+    exit "${rc}"
+fi
 deployed="$(cat "${STATE}/deployed_tag" 2>/dev/null || echo none)"
 # ---- every run, also one that installs nothing or runs in market hours: keep the day files as they
 # are for the market gate (gate_view), then apply the installed release's calendar list (cal_run).
 if [[ "${MODE}" != "check" ]]; then
     if gate_view; then cal_run || log "WARNING: calendar: the day files could not be checked"
     else log "WARNING: calendar: the day files could not be kept for the market gate, so this run leaves them alone"; fi
+    feed_tokens || true
+    fam_provision run || true   # nothing at all until the owner's family set-up has made its folder
     notice_catch_up
 fi
 json="$(curl -fsSL --max-time "${FETCH_TIMEOUT}" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${OWNER_REPO}/releases/latest" 2>/dev/null)" \
@@ -1026,6 +1340,7 @@ for db in "${APP_DIR}"/db/*.db; do
 done
 if [[ -f "${APP_DIR}/db/historify.duckdb" ]]; then file_copy_out "${SVC_USER}" "${APP_DIR}/db/historify.duckdb" "${bdir}/historify.duckdb"; fi
 ring_db_backup   # X8: the ring is stopped; its databases are copied under ${bdir}/ring, apart from db/
+fam_backup || true   # the family account's keys under ${bdir}/etc-family, never put back by a rollback
 tar -czf "${bdir}/frontend-dist-prev.tar.gz.partial" -C "${APP_DIR}/frontend" dist
 mv -f "${bdir}/frontend-dist-prev.tar.gz.partial" "${bdir}/frontend-dist-prev.tar.gz"
 chmod -R go-rwx "${bdir}"
@@ -1170,6 +1485,7 @@ ring_health() {   # $1 = sudarshan-<service>.service
         log "WARNING: ring: $1 did not answer on 127.0.0.1:${port}/health within 30 s; see journalctl -u $1"
     ) || true
 }
+fam_provision run || true   # with the release just installed, before the ring starts: its own check decides
 ring_deploy || log "WARNING: ring service step failed - OpenAlgo itself is deployed"
 # keep the 10 newest backups: the folders this tool makes (<date>-<time>-<tag>), by their names, which
 # sort by time; whatever else is in the folder is not the tool's to remove
