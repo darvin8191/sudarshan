@@ -148,6 +148,7 @@ ruleset() {
 # Written by sudarshan/ops/family/bootstrap.sh: where the ${ACCOUNT} account may connect.
 # A table of its own, so nothing else in this server's firewall is touched; loading this file again
 # replaces this table only. A refusal is "administratively prohibited", so it is told at once.
+# The "ct state" rule turns connection tracking on for the whole server if it was off.
 table inet ${TABLE}
 delete table inet ${TABLE}
 table inet ${TABLE} {
@@ -175,11 +176,15 @@ unit_text() {
     cat <<EOF
 # Written by sudarshan/ops/family/bootstrap.sh. Loads the ${ACCOUNT} account's allow-list of outgoing
 # connections (${NFT_PATH}) at boot. Its name does not start with sudarshan-, so the deploy tool never
-# manages it. It has no stop command: stopping the unit leaves the rules in place.
+# manages it. It has no stop command: stopping the unit leaves the rules in place. The server's own
+# /etc/nftables.conf usually starts with "flush ruleset", which takes this table away too, so a
+# restart or a reload of nftables.service loads the list again after it (PartOf, ReloadPropagatedFrom).
 [Unit]
 Description=SUDARSHAN family account: allow-list of outgoing connections (nftables)
 After=nftables.service netfilter-persistent.service ufw.service
 Before=sudarshan-family.service
+PartOf=nftables.service
+ReloadPropagatedFrom=nftables.service
 
 [Service]
 Type=oneshot

@@ -470,6 +470,18 @@ def test_the_unit_loads_it_at_boot_and_has_no_stop(server):
     assert "Before=sudarshan-family.service" in unit and "WantedBy=multi-user.target" in unit
 
 
+def test_the_unit_loads_the_list_again_after_the_servers_firewall_is_reloaded(server):
+    """L9: a stock /etc/nftables.conf starts with flush ruleset, so a restart or a reload of
+    nftables.service takes the family table away; the unit follows both, after it."""
+    assert server.run().returncode == 0
+    unit = server.unit_file.read_text()
+    head = unit.split("[Service]")[0]
+    assert re.search(r"^After=.*\bnftables\.service\b", head, re.M)
+    assert re.search(r"^PartOf=nftables\.service$", head, re.M)
+    assert re.search(r"^ReloadPropagatedFrom=nftables\.service$", head, re.M)
+    assert re.search(r"^ExecReload=\S*nft -f /etc/nftables-sudarshan-family\.nft$", unit, re.M)
+
+
 def test_the_script_touches_no_other_service_or_table():
     code = [line for line in SCRIPT.read_text().splitlines() if not line.lstrip().startswith("#")]
     text = "\n".join(code)
