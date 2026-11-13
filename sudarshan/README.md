@@ -263,7 +263,7 @@ Left out on purpose: `historify.duckdb` (market history, fetched again; DuckDB h
 backup), nginx and the certificates (root's, issued again in minutes), and links, which are never
 followed (a link could lead into another system's files). The archive holds the keys that protect
 it (the `.env` is in it), so keep it as private as the `.env` itself and encrypt it before it
-leaves the server (the offsite step below does).
+leaves the server (the offsite step below does, to the owner's public certificate).
 
 **Never left out quietly.** Inside the places the job takes whole (`/etc/sudarshan`, the sealed
 folders under `db/`, the `.env`), and for a database, what it does not take is named, not skipped:
@@ -349,7 +349,7 @@ one). The causes: `source` (a file could not be copied, or was not taken for the
 partial archive is made without it; a database that fails SQLite's check is kept, called out and
 also makes the archive partial, cause `integrity`),
 `space`, `cap`, `write` (the disk refused the archive or it did not read back whole), `offsite`
-(the offsite command failed; the archive is safe on the server), `lock` (the deploy tool's lock
+(the offsite copy failed, or its command did; the archive is safe on the server), `offsite_soon` (not a failure: the offsite upload link expires within 14 days), `lock` (the deploy tool's lock
 cannot be opened, so an install cannot be told from none: nothing is saved until it can),
 `overdue` (a run stood aside and the newest complete archive is more than 30 hours old) and
 `settings` (a setting in `backup.env` cannot be used: the job exits with status 2 and changes
@@ -369,21 +369,83 @@ value that cannot be used is refused by name and the owner is told):
 | `SUDARSHAN_BACKUP_MIN_FREE_GB` | 2 | free space to leave beyond the archive (0 and up) |
 | `SUDARSHAN_BACKUP_MIN_GAP_HOURS` | 8 | a complete archive newer than this ends a run (0 to 72) |
 | `SUDARSHAN_BACKUP_DEPLOY_WAIT_MIN` | 20 | how long to wait for an install to end (0 to 600) |
-| `SUDARSHAN_BACKUP_OFFSITE_CMD` | empty | the offsite command (below); empty does nothing |
+| `SUDARSHAN_BACKUP_OFFSITE_CMD` | empty | an own offsite command (below); empty uses the built-in upload when `offsite.json` exists |
 | `SUDARSHAN_BACKUP_OFFSITE_TIMEOUT_MIN` | 60 | the offsite command is stopped after this (1 to 720) |
 
-**Offsite (needs the owner's keys; does nothing until set).** The plan is `rclone` to OCI Object
-Storage through an rclone `crypt` remote, so that only encrypted files leave the server. The hook
-is `SUDARSHAN_BACKUP_OFFSITE_CMD`: a command line, run without a shell after each good archive
-with `{archive}` (the file's full path), `{name}` and `{dir}` (the folder of archives) replaced in
-it, and it must name `{archive}` or `{dir}`. It runs as `sudarshan` with nothing from the job's
-environment but `PATH`, `HOME` (the state folder) and `LANG`, in the state folder, under the same
-shared deploy lock as the copy (an install that starts meanwhile waits for the next timer tick
-instead of restarting the unit and cutting the upload short; the timeout below bounds the wait);
-its output goes to `offsite.log` there (mode 600) and a failure is told to the owner. Two shapes: `rclone copyto {archive} remote:bucket/{name}` sends that file only;
-`rclone copy --immutable {dir} remote:bucket` sends whatever is not there yet, so an upload that
-failed or was stopped is made up on the next night. Not exercised against a real remote: the
-keys do not exist yet.
+**Offsite (from M18.11 part 2; does nothing until the owner has done the console steps below).**
+After each good archive the job encrypts a copy on the server and uploads it to one OCI Object
+Storage bucket (Always Free). Code: `ops/offsite.py`.
+
+| Choice | What and why |
+| --- | --- |
+| Encryption | `openssl cms -encrypt` to the owner's public X.509 certificate: AES-256-CBC, key wrapped with RSA-OAEP. openssl is on every Ubuntu, so nothing is installed and nothing can be "missing" but openssl itself (then the notice says so). It streams: a 300 MB archive takes about 13 MB of memory. |
+| The key | The private key is made on the owner's laptop and never reaches the server (a second copy offline). A server that is taken over can neither read the offsite copies nor delete them. |
+| What is inside | The same archive as the local one, `.env` included. A restore needs OpenAlgo's `APP_KEY` and `API_KEY_PEPPER`: without them `openalgo.db`'s encrypted columns and the vault cannot be read, and a second secret kept elsewhere is one more thing to lose. The copy that leaves the server can only be opened with the private key. The upload link itself (`offsite.json`) is not in any archive: it is a write credential, and a restore makes a new one. |
+| Integrity | CBC does not authenticate by itself; after decrypting, `backup --verify` checks every file against the archive's SHA-256 manifest. |
+| Upload | One `PUT` to a write-only pre-authenticated request (PAR) address for one bucket. The server holds no OCI credential. The address is in `/etc/sudarshan/offsite.json` only, never in a log, a notice, `status.json`, a process argument or an archive. |
+| The file | `/etc/sudarshan/offsite.json`, mode 600, owner `sudarshan` (not root: the job runs as `sudarshan`, because the unit policy refuses root units, so a root-only file could not be read by it; no group or other can). It holds `par_url`, `expires` (`YYYY-MM-DD`) and `certificate` (public, PEM). A private key in it is refused. |
+| Names | `sudarshan-backup-YYYYMMDD-HHMMSS-<release>.tar.gz.cms`: the date and the release, no host name. |
+| Retention | An OCI lifecycle rule the owner sets (for example 30 days). The job never deletes an object, and a write-only link could not. |
+| Expiry | A PAR stops working on its date. From 14 days before it, the owner is told once a day on Telegram (cause `offsite_soon`) and the copies still go. After the date nothing is tried and the owner is told why (cause `offsite`, "the access link ... has expired"). The date is the last day it works. |
+| Failure | One notice: "Tonight's offsite backup did not upload: <reason>. The local backup is fine." The reasons are in words (no encryption tool, could not reach Oracle's storage, storage refused the file, storage busy, link expired, settings unusable). A busy or unreachable bucket is tried 3 times, 30 seconds apart; the local archive is never touched, and the next night uploads the next archive (the missed night's archive stays on the server for the local retention). Success is one journal line. |
+| Not set up | Without the file the step is off: one journal line a day says so, and the local backup is unaffected. `--check` prints `offsite: not set`. |
+
+`SUDARSHAN_BACKUP_OFFSITE_CMD` (the older hook below) still works for anyone who prefers their own
+tool; when it is set it is used instead of the built-in upload, not as well as it. It is a command
+line, run without a shell after each good archive with `{archive}` (the file's full path), `{name}`
+and `{dir}` replaced in it, and it must name `{archive}` or `{dir}`. It runs as `sudarshan` with
+nothing from the job's environment but `PATH`, `HOME` (the state folder) and `LANG`, in the state
+folder, under the same shared deploy lock as the copy; its output goes to `offsite.log` there
+(mode 600) and a failure is told to the owner.
+
+### Setting up the offsite copy: the owner's steps
+
+There is no console `.bat` helper in this repository (the one the owner uses for keys lives on his
+laptop). Step 9 is the smallest safe way: the PAR address is typed into a hidden prompt on the
+server over SSH, so it never appears on a screen, in a file on the laptop or in the shell history.
+
+1. In the OCI console, open Storage, then Object Storage, in the region the server uses.
+2. Choose Create Bucket. Any name, Standard tier, Private. Leave versioning off.
+3. Open the bucket, then Lifecycle Policy Rules, then Create Rule: action Delete, object age 30
+   days (or what you like), all objects, enabled. This is the only thing that ever deletes.
+4. Open Pre-Authenticated Requests, then Create: type Bucket, access "Permit object writes" (not
+   reads, not listing), and an expiry date. Pick the furthest date the console allows.
+5. Copy the PAR address the console shows, into a password manager, and write the expiry date
+   beside it. The console shows the address once.
+6. On the laptop, open PowerShell and make a folder for the key: `mkdir $HOME\sudarshan-backup-key`
+   then `cd $HOME\sudarshan-backup-key`.
+7. Make the key pair (Git for Windows ships openssl; or `winget install ShiningLight.OpenSSL.Light`):
+   `& "C:\Program Files\Git\usr\bin\openssl.exe" req -x509 -newkey rsa:4096 -keyout sudarshan-backup.key -out sudarshan-backup.crt -days 36500 -subj "/CN=sudarshan-backup"`
+   It asks for a passphrase twice: choose one and keep it with the key.
+8. Copy `sudarshan-backup.key` to a second place that is not the server and not this laptop (a
+   USB stick kept offline). Without the key no backup in the bucket can ever be opened. Never copy
+   it to the server.
+9. Save this as `sudarshan-offsite.bat` next to the files (change `USER@SERVER` to the login you
+   already use), and double-click it. It asks for the expiry date, then the PAR address (hidden):
+
+   ```bat
+   @echo off
+   scp sudarshan-backup.crt USER@SERVER:/tmp/sudarshan-backup.crt
+   ssh -t USER@SERVER "cd /opt/sudarshan/apps/openalgo && sudo .venv/bin/python -m sudarshan.ops.offsite --configure /tmp/sudarshan-backup.crt && rm /tmp/sudarshan-backup.crt"
+   pause
+   ```
+10. On the server, check it as the job's own user: `cd /opt/sudarshan/apps/openalgo && sudo -u
+    sudarshan .venv/bin/python -m sudarshan.ops.backup --check`. The last line should say
+    `offsite: set (the link works N more days)`.
+11. The next night's backup uploads one object. Look for it in the bucket the next morning.
+12. Before the PAR expires, the owner is told on Telegram 14 days ahead: repeat steps 4, 5 and 9 (the
+    certificate stays the same).
+
+### Restoring from the offsite copy
+
+1. In the console, open the bucket and download the object for the day wanted
+   (`...-v0.7.0.tar.gz.cms`).
+2. On the laptop, decrypt it with the private key (it asks for the passphrase):
+   `& "C:\Program Files\Git\usr\bin\openssl.exe" cms -decrypt -inform DER -in <the .cms file> -inkey sudarshan-backup.key -recip sudarshan-backup.crt -out sudarshan-backup-restore.tar.gz`
+3. Copy the `.tar.gz` to the server into a private folder (mode 700), and `--verify` it there
+   (`python -m sudarshan.ops.backup --verify FILE`).
+4. Restore from it with the manual steps under "Restoring" above. Then delete the decrypted file
+   from the laptop and the server: it holds the `.env`.
 
 **Looking at them.** `python -m sudarshan.ops.backup --check` says what a run would do now and
 changes nothing: the hours (open, blocked, or not started this close to the market), the sources,

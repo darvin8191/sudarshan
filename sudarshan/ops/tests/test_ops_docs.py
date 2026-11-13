@@ -88,6 +88,7 @@ def test_every_cause_a_failed_backup_can_give_is_in_both_readmes():
         backup.SETTINGS,
         backup.LOCK,
         backup.OVERDUE,
+        backup.OFFSITE_SOON,
     }
     assert {"lock", "overdue"} <= causes
     for cause in sorted(causes):

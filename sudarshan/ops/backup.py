@@ -113,7 +113,7 @@ from sudarshan.autologin.schedule import (
     with_margins,
 )
 
-from . import retention
+from . import offsite, retention
 from .events import MAX_VALUE, record
 from .release import DEPLOYED_TAG_FILE, installed_release
 
@@ -159,6 +159,8 @@ OK, PARTIAL, FAILED, SKIPPED = "ok", "partial", "failed", "skipped"
 SPACE, CAP, WRITE, SOURCE, INTEGRITY, OFFSITE, SETTINGS, LOCK, OVERDUE, OTHER = (
     "space", "cap", "write", "source", "integrity", "offsite", "settings", "lock", "overdue", "other",
 )  # fmt: skip
+#: Not a failure: the offsite upload link is within 14 days of expiring.
+OFFSITE_SOON = "offsite_soon"
 #: The reasons a run steps aside (Result.reason) that leave the night undone, so that it may be late.
 STEPPED_ASIDE = frozenset({"market", "soon", "busy", "deploy"})
 
@@ -479,6 +481,8 @@ def _walk_plain(found: Found, folder: Path, arc: str, *, depth: int, budget: lis
         here = f"{arc}/{entry.name}"
         if not (_is_dir(inner) or _is_file(inner)):
             continue
+        if arc == "etc/sudarshan" and entry.name == offsite.CONFIG_NAME:
+            continue  # the offsite upload link: a write credential, not something to restore
         if not FILE_NAME.fullmatch(entry.name):
             found.skipped.append(here)
         elif _is_dir(inner):
@@ -1013,6 +1017,59 @@ def send_offsite(settings: Settings, archive: Path) -> str:
     return "ok"
 
 
+def _offsite_step(settings: Settings, started: datetime, result: Result) -> None:
+    """The offsite copy of the archive just made. The command hook, when the owner set one, is
+    used as before; otherwise the built-in encrypted upload (``offsite.py``) when its file exists.
+    Never fails the local backup: a failure is a notice and ``offsite: failed``."""
+    archive = settings.archive_dir / result.archive
+    if settings.offsite_cmd:
+        result.offsite = send_offsite(settings, archive)
+        if result.offsite == "failed":
+            result.failures.append(Failure(OFFSITE))
+        return
+    day = started.astimezone(IST).date()
+    outcome = offsite.send(
+        etc_dir=settings.etc_dir,
+        archive=archive,
+        work=settings.work_dir,
+        log_file=settings.state_dir / "offsite.log",
+        release=installed_release(settings.deployed_tag_file),
+        today=day,
+        free_bytes=free_bytes(settings.archive_dir),
+    )
+    result.offsite = outcome.state
+    if outcome.state == "off":
+        _note_disabled(settings, day)
+    elif outcome.state == "failed":
+        result.failures.append(Failure(OFFSITE, facts={"reason": outcome.reason}))
+    if outcome.days_left is not None and outcome.days_left >= 0 and outcome.expires:
+        record(
+            settings.spool,
+            kind="backup_failed",
+            event_id=f"backup-failed-{day:%Y%m%d}-{OFFSITE_SOON}",
+            at=started.timestamp(),
+            run=f"backup-{started.astimezone(IST):%Y%m%d-%H%M%S}",
+            src="backup",
+            why=OFFSITE_SOON,
+            days=str(outcome.days_left),
+            date=outcome.expires.isoformat(),
+        )
+
+
+def _note_disabled(settings: Settings, day: date) -> None:
+    """One journal line a day while the offsite copy is not set up."""
+    marker = settings.state_dir / "offsite.noted"
+    with contextlib.suppress(OSError):
+        if marker.read_text().strip() == day.isoformat():
+            return
+    log.info(
+        "offsite copy is off: %s is not on the server (set-up steps are in the README)",
+        offsite.CONFIG_NAME,
+    )
+    with contextlib.suppress(OSError):
+        marker.write_text(day.isoformat() + "\n")
+
+
 # ---- one run ----------------------------------------------------------------------------------
 
 
@@ -1095,9 +1152,7 @@ def _attempt(
                 # The upload goes on under the same shared lock (review L9): an install that
                 # started meanwhile would restart this unit and cut the upload short.
                 if result.archive and result.outcome in (OK, PARTIAL):
-                    result.offsite = send_offsite(settings, settings.archive_dir / result.archive)
-                    if result.offsite == "failed":
-                        result.failures.append(Failure(OFFSITE))
+                    _offsite_step(settings, started, result)
     _write_status(settings, started, result)
     _tell(settings, started, result)
     return result
@@ -1385,9 +1440,22 @@ def check(settings: Settings, now: datetime) -> str:
         *([f"cannot be read: {', '.join(unreadable)}"] if unreadable else []),
         f"archives: {len(existing)} now, {len(settled.keep)} kept, {len(settled.delete)} to remove",
         f"cap: {_gb(settings.max_bytes)} GB, over: {'yes' if settled.over_cap else 'no'}",
-        f"offsite: {'set' if settings.offsite_cmd else 'not set'}",
+        "offsite: " + _offsite_state(settings, now),
     ]
     return "\n".join(lines) + "\n"
+
+
+def _offsite_state(settings: Settings, now: datetime) -> str:
+    if settings.offsite_cmd:
+        return "set (command)"
+    try:
+        config = offsite.load(settings.etc_dir)
+    except offsite.OffsiteError:
+        return "the settings file cannot be used"
+    if config is None:
+        return "not set"
+    left = (config.expires - now.astimezone(IST).date()).days
+    return "expired, no copy is sent" if left < 0 else f"set (the link works {left} more days)"
 
 
 def _verify_command(path: Path) -> int:
