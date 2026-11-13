@@ -28,7 +28,7 @@ def claim(s, held: int) -> int:
     back, so a refused claim changes nothing)."""
     try:
         return versions.advance_favourites(s, held)  # an UPDATE first: the write lock at once
-    except versions.StaleVersion:
+    except versions.Stale:
         raise Stale from None
 
 

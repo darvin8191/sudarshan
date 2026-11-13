@@ -103,12 +103,11 @@ def test_created_key_is_the_text_sqlite_writes():
 
 
 # -- the refs interface --------------------------------------------------------------------------
-def test_the_refs_package_finds_the_list_reader_and_nothing_unbuilt():
-    assert set(refs.readers()) == {"list"}
+def test_the_refs_package_finds_the_built_readers_and_nothing_unbuilt():
+    assert set(refs.readers()) == {"list", "flag"}  # W6 and W9; preset and ranked come later
     assert refs.reader_of("list:7")[1] == "7"
     for ref in (
         "preset:nifty",
-        "flag:2",
         "ranked:futures:INDEX:TOP_TRADED",
         "nope:1",
         "list",
@@ -121,7 +120,7 @@ def test_the_readers_are_found_once_and_a_view_lists_and_imports_nothing(monkeyp
     """Review L14: the directory was listed and every reader imported on every view request."""
     from types import SimpleNamespace
 
-    assert set(refs.readers()) == {"list"}  # found and kept before the two go away
+    assert set(refs.readers()) == {"list", "flag"}  # found and kept before the two go away
     monkeypatch.setattr(
         refs, "pkgutil", SimpleNamespace(iter_modules=lambda *a: pytest.fail("listed"))
     )
@@ -297,7 +296,7 @@ def test_a_list_that_does_not_exist_is_gone_and_another_users_list_too(client):
         assert body["code"] == "gone" and body["message"] == words.LIST_GONE
 
 
-@pytest.mark.parametrize("ref", ["preset:nifty", "flag:2", "ranked:futures:INDEX:TOP_TRADED",
+@pytest.mark.parametrize("ref", ["preset:nifty", "flag:6", "ranked:futures:INDEX:TOP_TRADED",
                                  "list:abc", "list:", "nonsense", "list:0"])  # fmt: skip
 def test_an_unbuilt_kind_or_a_bad_ref_is_invalid_with_the_ref_field(client, ref):
     r = get(client, ref)

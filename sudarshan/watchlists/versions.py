@@ -8,8 +8,9 @@ because a write of favourites or flags names the version it was decided on and a
 ``conflict``, across restarts. This module keeps an in-memory mirror of those two, loaded once from
 the store on first use (a store that cannot be read leaves them out of ``snapshot`` and the push,
 and never raises) and updated by a writer right after its commit: ``advance_favourites`` and
-``advance_flags`` add one inside the writer's own transaction, ``committed`` publishes the number
-once it has committed. The push and ``state`` read the mirror, so a request opens a store session
+``advance_flags`` add one inside the writer's own transaction, as one compare-and-set on the
+version the write was decided on (``Stale`` when it has moved; only the delete prune advances the
+favourites without one), and ``committed`` publishes the number once it has committed. The push and ``state`` read the mirror, so a request opens a store session
 only for its own write (and for that first load). Every lock's critical section is bookkeeping and
 nothing else, so it is correct under eventlet, gthread and the dev server. The push is emitted
 after the bump, outside the lock, through ``extensions.emit_from_any_thread``, and names every ref
@@ -27,6 +28,7 @@ import secrets
 from collections.abc import Iterable
 
 from sqlalchemy import Integer, String, cast, select, update
+from sqlalchemy.exc import IntegrityError
 
 from extensions import emit_from_any_thread
 from sudarshan.watchlists import contract, engine
@@ -116,44 +118,52 @@ def snapshot() -> dict:
     return out
 
 
-class StaleVersion(Exception):
-    """A write named a stored version that is not the current one: nothing was advanced."""
+class Stale(Exception):
+    """The stored version a write was decided on is not the current one: nothing was advanced, and
+    the caller's transaction rolls back, so the write changes nothing."""
 
 
 def _advance(s, kind: str, held: int | None = None) -> int:
     """Add one to the stored version inside the caller's open transaction; the new value. One
-    atomic update, so two writers never read the same number; a row that is absent is made.
-    With ``held`` it is a compare-and-set: the UPDATE is guarded on that number and checked by its
-    row count (``held`` 0 matches an absent row), else ``StaleVersion``."""
+    atomic UPDATE, the writer's first statement, so it takes SQLite's write lock at once and two
+    writers never read the same number; an absent row reads as 0 and is made at 1. With ``held`` it
+    is a compare-and-set: the UPDATE is guarded on that number and checked by its row count
+    (``held`` 0 matches an absent row), else ``Stale``. Without ``held`` (the delete prune, which
+    cannot be refused) it always advances."""
     name = STORED[kind]
     where = [MetaRow.name == name]
     if held is not None:
         where.append(cast(MetaRow.value, Integer) == held)
     done = s.execute(update(MetaRow).where(*where).values(
         value=cast(cast(MetaRow.value, Integer) + 1, String)))  # fmt: skip
-    if done.rowcount == 0:
-        if (
-            held not in (None, 0)
-            or s.scalar(select(MetaRow.value).where(MetaRow.name == name)) is not None
-        ):
-            raise StaleVersion  # a row is there that is not ``held``, or ``held`` is not 0
+    if done.rowcount == 1:
+        if held is not None:
+            return held + 1
+        return int(s.scalar(select(MetaRow.value).where(MetaRow.name == name)))
+    if held not in (None, 0) or (
+        s.scalar(select(MetaRow.value).where(MetaRow.name == name)) is not None
+    ):
+        raise Stale  # a row is there that is not ``held``, or ``held`` is not 0
+    try:
         s.add(MetaRow(name=name, value="1"))
         s.flush()
-    return int(s.scalar(select(MetaRow.value).where(MetaRow.name == name)))
+    except IntegrityError:
+        raise Stale from None  # another first write made the row between the two statements
+    return 1
 
 
 def advance_favourites(s, held: int | None = None) -> int:
-    """For the favourites writer (W10) and the delete prune: inside the write's transaction, then
-    ``committed("favourites", n)`` after it commits. The writer passes the version its request was
-    decided on and a stale one raises ``StaleVersion``; the prune (a delete that has already
-    happened, which cannot be refused) passes none."""
+    """For the favourites writer (W10), which names the version its request was decided on, and the
+    delete prune, which names none: inside the write's transaction, then
+    ``committed("favourites", n)`` after it commits. A stale version raises ``Stale``."""
     return _advance(s, "favourites", held)
 
 
-def advance_flags(s) -> int:
-    """For the flags writer (W9): inside the write's transaction, then ``committed("flags", n)``
-    after it commits."""
-    return _advance(s, "flags")
+def advance_flags(s, held: int) -> int:
+    """For the flags writers (W9's rename and clear), which always name the version they were
+    decided on: inside the write's transaction, then ``committed("flags", n)`` after it commits. A
+    stale version raises ``Stale``."""
+    return _advance(s, "flags", held)
 
 
 def push(why: str, refs: Iterable[str] = (), version: str | None = None) -> None:
