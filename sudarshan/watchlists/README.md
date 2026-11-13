@@ -731,9 +731,15 @@ nothing of its own, starts no thread and makes no Upstox call).
   PE `Contract` from the master, never a built name. A side the master lacks is null and said in
   `words`. With no price no strike is marked: the middle of the ladder is shown and `words` says the
   price is not known yet, so the page asks again with `p` on the first tick. An expiry is open until
-  its session close (the calendar's, read at most once a minute, else 15:30 IST): on its last day it
-  is offered and `words` says when it ends, and after the close it is gone, asking for it is
-  `invalid` with field `exp`.
+  it stops by the one rule of `expiry.stop_ms` (see "One rule for when an expiring contract stops"),
+  not by a close of its own: an expiring index contract at 15:40 until 6 Dec 2026 and 15:30 from
+  7 Dec, a stock contract at the F&O close (15:40, then 15:45), a special session day at the
+  calendar's end of that day (read at most once a minute for each exchange). On its last day it is
+  offered and `words` says that real time ("This expiry ends today at 15:40."); after it the expiry
+  is gone, and asking for it is `invalid` with field `exp`. An MCX underlying is not covered by the
+  rule, so `words` says nothing about its end time rather than a wrong one, and its expiry drops at
+  the end of MCX's own calendar window for the day if the calendar has one, else at the end of the
+  day.
 
 Both answer `failed` in words while the master is not loaded and `off` with the switch off. Tests:
 `tests/test_watchlists_search_ops.py` (the grammar's vectors through the bridge, grouping, Added, the

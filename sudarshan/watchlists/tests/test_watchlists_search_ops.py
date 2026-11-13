@@ -16,7 +16,7 @@ from test_watchlists_search import NOW, V, make_rows
 from watchlists_bridge_app import OWNER, csrf_headers, login_session, make_app, reset_users
 
 import blueprints.sudarshan_watchlists as bp_module
-from sudarshan.watchlists import contract, engine, master, ops, versions
+from sudarshan.watchlists import contract, engine, master, ops, sessions, versions
 from sudarshan.watchlists.ops import search as search_ops
 from sudarshan.watchlists.refs import preset as preset_reader
 from sudarshan.watchlists.words import search as words
@@ -296,24 +296,86 @@ def test_with_no_price_the_strikes_carry_no_atm_and_say_so(client):
     assert data["words"] == strike_words.NO_PRICE
 
 
-def test_an_expiry_on_its_last_day_is_offered_until_its_close(client, monkeypatch):
-    monkeypatch.setattr(search_ops, "now_ms", lambda: ist("2026-11-24T15:29:00+05:30"))
+def at(monkeypatch, when):
+    monkeypatch.setattr(search_ops, "now_ms", lambda: ist(when))
+    search_ops._close.clear()
+
+
+def test_an_index_expiry_before_7_dec_runs_to_the_fo_close_1540(client, monkeypatch):
+    at(monkeypatch, "2026-11-24T15:35:00+05:30")  # 15:30 would already have dropped it
     data = strikes(client, p=25900, n=0)
     assert data["expiries"][0]["label"] == "Nearest 24 Nov" and data["expiry"] == "2026-11-24"
-    assert data["words"] == "This expiry ends today at 15:30."
-    monkeypatch.setattr(search_ops, "now_ms", lambda: ist("2026-11-24T15:31:00+05:30"))
-    search_ops._close.clear()
+    assert data["words"] == "This expiry ends today at 15:40."
+    at(monkeypatch, "2026-11-24T15:41:00+05:30")
     after = strikes(client, p=25900, n=0)
     assert [e["label"] for e in after["expiries"]] == ["Nearest 1 Dec", "29 Dec (month)"]
     assert after["expiry"] == "2026-12-01" and after["words"] == ""
     assert get(client, "strikes", u="NIFTY", x="NSE_INDEX", exp="2026-11-24").status_code == 400
 
 
-def test_the_calendars_close_moves_the_last_day(client, monkeypatch):
-    monkeypatch.setattr(preset_reader, "calendar_close", lambda iso: ist(f"{iso}T15:40:00+05:30"))
-    monkeypatch.setattr(search_ops, "now_ms", lambda: ist("2026-11-24T15:35:00+05:30"))
+def test_an_index_expiry_from_7_dec_stops_at_1530(client, monkeypatch):
+    at(monkeypatch, "2026-12-29T15:29:00+05:30")
     data = strikes(client, p=25900, n=0)
-    assert data["expiry"] == "2026-11-24" and data["words"] == "This expiry ends today at 15:40."
+    assert data["expiry"] == "2026-12-29" and data["words"] == "This expiry ends today at 15:30."
+    at(monkeypatch, "2026-12-29T15:31:00+05:30")  # 15:40 would still hold it
+    gone = strikes(client, p=25900, n=0)
+    assert gone["expiries"] == [] and gone["words"] == strike_words.no_open_expiry("NIFTY")
+
+
+def test_a_stock_expiry_runs_to_the_fo_close_before_and_after_7_dec(client, monkeypatch):
+    at(monkeypatch, "2026-11-24T15:39:00+05:30")
+    before = strikes(client, u="RELIANCE", x="NSE", p=950, n=0)
+    assert (
+        before["expiry"] == "2026-11-24" and before["words"] == "This expiry ends today at 15:40."
+    )
+    at(monkeypatch, "2026-11-24T15:41:00+05:30")
+    assert strikes(client, u="RELIANCE", x="NSE", p=950, n=0)["expiry"] == "2026-12-29"
+    at(monkeypatch, "2026-12-29T15:44:00+05:30")  # an index would be gone at 15:30
+    after = strikes(client, u="RELIANCE", x="NSE", p=950, n=0)
+    assert after["expiry"] == "2026-12-29" and after["words"] == "This expiry ends today at 15:45."
+    at(monkeypatch, "2026-12-29T15:46:00+05:30")
+    assert strikes(client, u="RELIANCE", x="NSE", p=950, n=0)["expiries"] == []
+
+
+def test_a_special_session_day_takes_its_close_from_the_calendar(client, monkeypatch):
+    monkeypatch.setattr(preset_reader, "calendar_close", lambda iso: ist(f"{iso}T19:15:00+05:30"))
+    at(monkeypatch, "2026-11-24T18:00:00+05:30")  # the regime's 15:40 has passed
+    data = strikes(client, p=25900, n=0)
+    assert data["expiry"] == "2026-11-24" and data["words"] == "This expiry ends today at 19:15."
+    at(monkeypatch, "2026-11-24T19:16:00+05:30")
+    assert strikes(client, p=25900, n=0)["expiry"] == "2026-12-01"
+
+
+def mcx_rows():
+    rows = []
+    for e in ("24-NOV-26", "18-DEC-26"):
+        for k in (6000, 6050):
+            for t in ("CE", "PE"):
+                rows.append(PlainRow(symbol=f"CRUDEOIL{e}{k}{t}", name="CRUDEOIL", exchange="MCX",
+                                     token=f"MCX_FO|{e}{k}{t}", instrumenttype=t,
+                                     underlying="CRUDEOIL", expiry=e, strike=float(k),
+                                     lotsize=100))  # fmt: skip
+    return rows
+
+
+def test_an_mcx_expiry_says_no_end_time_and_stays_to_the_end_of_the_day(client, box, monkeypatch):
+    box.snap = snap_of(make_rows() + mcx_rows())
+    at(monkeypatch, "2026-11-24T23:45:00+05:30")  # after any F&O close, MCX is still trading
+    data = strikes(client, u="CRUDEOIL", x="MCX", p=6010, n=0)
+    assert data["expiry"] == "2026-11-24" and data["words"] == ""
+    at(monkeypatch, "2026-11-25T00:01:00+05:30")
+    assert strikes(client, u="CRUDEOIL", x="MCX", p=6010, n=0)["expiry"] == "2026-12-18"
+
+
+def test_an_mcx_expiry_drops_by_the_calendars_window_when_it_has_one(client, box, monkeypatch):
+    box.snap = snap_of(make_rows() + mcx_rows())
+    monkeypatch.setattr(sessions, "closes", lambda dates, ex: {d: ist(f"{d}T17:00:00+05:30")
+                                                               for d in dates if ex == "MCX"})  # fmt: skip
+    at(monkeypatch, "2026-11-24T16:59:00+05:30")
+    data = strikes(client, u="CRUDEOIL", x="MCX", p=6010, n=0)
+    assert data["expiry"] == "2026-11-24" and data["words"] == ""
+    at(monkeypatch, "2026-11-24T17:01:00+05:30")
+    assert strikes(client, u="CRUDEOIL", x="MCX", p=6010, n=0)["expiry"] == "2026-12-18"
 
 
 def test_a_side_missing_from_the_master_is_said_never_built(client, box):

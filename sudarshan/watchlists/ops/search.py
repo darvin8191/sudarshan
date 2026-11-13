@@ -18,10 +18,12 @@ distance from it and resolves ATM, it is never read from here.
 from __future__ import annotations
 
 import time
+from datetime import datetime, timedelta
 
 from flask import session
 
 from sudarshan.watchlists import dynamic, numfmt, search
+from sudarshan.watchlists import expiry as stops
 from sudarshan.watchlists import view as merge_view
 from sudarshan.watchlists.ops import OpError
 from sudarshan.watchlists.words import presets as preset_words
@@ -33,22 +35,42 @@ from utils.thread_safe_cache import LockedTTLCache
 GROUPS = ("stocks", "indices", "futures", "options", "commodities")
 MAX_QUERY = 100
 MAX_SIDE = 25
-#: Today's session close from the market calendar, by IST date: at most one read a minute.
-_close = LockedTTLCache(maxsize=4, ttl=60)
+#: Today's dated session close from the market calendar, by exchange and IST date: at most one
+#: read a minute for each.
+_close = LockedTTLCache(maxsize=8, ttl=60)
+#: The derivatives exchanges the roll rule (``expiry.py``) covers. Anything else (MCX) has hours
+#: of its own that the rule does not know, so the picker never states an end time for it.
+_RULED = frozenset({"NFO", "BFO"})
 
 
 def now_ms() -> int:
     return int(time.time() * 1000)
 
 
-def _closes(now: int) -> dict[str, int]:
-    """The calendar's close of today's expiry (any other day closes before or after now whatever
-    the calendar says); empty when it has no window, and the rule then closes at 15:30 IST."""
+def _closes(now: int, fo: str = "NFO") -> dict[str, int]:
+    """The calendar's dated close of today on ``fo`` (any other day closes before or after now
+    whatever the calendar says); empty when it has no row for today, and the regime of the day
+    (``expiry.stop_ms``) then decides."""
+    from sudarshan.watchlists import sessions
     from sudarshan.watchlists.refs import preset as reader
 
     today = numfmt.ist_date(now).isoformat()
-    got = _close.get_or_load(today, lambda: reader.calendar_close(today))
+    ask = reader.calendar_close if fo == "NFO" else lambda iso: sessions.closes([iso], fo).get(iso)
+    got = _close.get_or_load((fo, today), lambda: ask(today))
     return {} if got is None else {today: got}
+
+
+def _stop_ms(expiry: str, name: str, fo: str, closes: dict[str, int]) -> int:
+    """The instant a contract expiring on ``expiry`` stops: the one rule of ``expiry.py`` for NFO
+    and BFO (an index contract by its regime of the day, a stock's at the F&O close, a special
+    session from the calendar). MCX is not in that rule: its own calendar window if it has one for
+    the day, else the end of the day."""
+    if fo in _RULED:
+        return dynamic.close_ms(expiry, closes, index=stops.is_index(name), exchange=fo)
+    if expiry in closes:
+        return closes[expiry]
+    nxt = datetime.fromisoformat(expiry).date() + timedelta(days=1)
+    return int(datetime.combine(nxt, datetime.min.time(), numfmt.IST).timestamp() * 1000)
 
 
 def _index() -> search.Index:
@@ -142,8 +164,9 @@ def strikes_op(args: dict) -> dict:
     listed = cash or {rows[0].exchange for rows in by.values() if rows}
     if args["x"] not in listed:
         raise OpError("invalid", strike_words.EXCHANGE_BAD, "x")
-    closes = _closes(now)
-    live = sorted(e for e in by if dynamic.close_ms(e, closes) > now)
+    fo = next((rows[0].exchange for rows in by.values() if rows), "NFO")
+    closes = _closes(now, fo)
+    live = sorted(e for e in by if _stop_ms(e, name, fo, closes) > now)
     answer = {"underlying": name, "exchange": args["x"], "expiries": [], "expiry": None,
               "atm": None, "strikes": [], "words": strike_words.no_open_expiry(name)}  # fmt: skip
     if not live:
@@ -177,9 +200,8 @@ def strikes_op(args: dict) -> dict:
                      "ce": _contract(pair["CE"]) if "CE" in pair else None,
                      "pe": _contract(pair["PE"]) if "PE" in pair else None})  # fmt: skip
         absent += [(s, side) for side in ("CE", "PE") if side not in pair]
-    close = dynamic.close_ms(chosen, closes)
-    if chosen == numfmt.ist_date(now).isoformat():
-        lines.insert(0, strike_words.ends_today(close))
+    if chosen == numfmt.ist_date(now).isoformat() and fo in _RULED:  # MCX: no end time is said
+        lines.insert(0, strike_words.ends_today(_stop_ms(chosen, name, fo, closes)))
     if absent:
         lines.append(strike_words.missing_sides(absent))
     answer.update(expiry=chosen, atm=centre, strikes=rows, words=" ".join(lines))
