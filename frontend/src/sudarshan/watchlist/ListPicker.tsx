@@ -113,6 +113,7 @@ export function ListPicker({
   return (
     <BottomSheet
       open
+      step={target === null ? 'pick' : 'send'} // review M6: the details and their Move take the list's place, guarded again
       onOpenChange={(next) => !next && onClose()}
       title={`${verb} to another list`}
       description={label}

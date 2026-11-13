@@ -4,6 +4,7 @@
  */
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { useState } from 'react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -57,6 +58,7 @@ import { followPlan } from './follow'
 import { answer, contract, futureAnswer, rule } from './followFixtures'
 import type { FollowForm } from './followRows'
 import { LiveList } from './LiveList'
+import { OPEN_GUARD } from './openGuard'
 import type { FollowRow, Resolved, View } from './v2/types'
 
 const T0 = Date.UTC(2026, 10, 13, 4, 42) // 10:12 IST
@@ -454,6 +456,34 @@ describe('the form', () => {
     expect(calls).toHaveLength(1)
     expect(calls[0].params).toMatchObject({ version: '41' })
     expect(done).toHaveBeenCalledTimes(1)
+  })
+
+  // Review M6: Remove takes the place of Change in the same open sheet, where "Remove this row" was
+  // tapped; the second tap of a double tap must not land on the confirmation's Remove.
+  it('ignores taps on the remove confirmation for half a second after it takes the form’s place', async () => {
+    b().on('row_remove', () => ({ version: '42', id: 1, words: null }))
+    OPEN_GUARD.ms = 500
+    function Swapping() {
+      const [form, setForm] = useState<FollowForm>({ mode: 'edit', rowId: 1 })
+      return (
+        <FollowRowSheet form={form} view={view([rule()])} onClose={() => {}} onSwap={setForm} />
+      )
+    }
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <Swapping />
+      </QueryClientProvider>
+    )
+    await settle(600) // past the sheet's own half second
+    fireEvent.click(screen.getByRole('button', { name: 'Remove this row' }))
+    const remove = await screen.findByRole('button', { name: 'Remove' })
+    fireEvent.click(remove) // the tail of a double tap
+    await settle()
+    expect(b().calls.filter((call) => call.op === 'row_remove')).toHaveLength(0)
+    await settle(550)
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }))
+    await settle()
+    expect(b().calls.filter((call) => call.op === 'row_remove')).toHaveLength(1)
   })
 
   it("says the server's words when it refuses, and sends again only on a new tap", async () => {

@@ -335,6 +335,7 @@ export function FollowRowSheet({
   return (
     <BottomSheet
       open
+      step={form.mode} // review M6: Remove takes the place of Change under the finger, guarded again
       onOpenChange={(open) => {
         if (!open) onClose()
       }}

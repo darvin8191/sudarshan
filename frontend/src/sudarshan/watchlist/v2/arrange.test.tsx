@@ -392,6 +392,23 @@ describe('copy and move to another list', () => {
     )
   })
 
+  // Review M6: the details step and its Copy take the list's place in the same open sheet, under the
+  // finger that picked the list; the second tap of a double tap must not send.
+  it('ignores taps on the details step for half a second after it takes the list’s place', async () => {
+    OPEN_GUARD.ms = 500
+    setup('/watchlist?sheet=to-list&ci=2')
+    const swing = await screen.findByRole('button', { name: 'Swing · 24 of 250' })
+    await new Promise((resolve) => setTimeout(resolve, 600)) // past the sheet's own half second
+    fireEvent.click(swing)
+    const copy = await screen.findByRole('button', { name: 'Copy 1' })
+    fireEvent.click(copy) // the tail of a double tap
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(body('copy')).toEqual([])
+    await new Promise((resolve) => setTimeout(resolve, 550))
+    fireEvent.click(screen.getByRole('button', { name: 'Copy 1' }))
+    await waitFor(() => expect(body('copy')).toHaveLength(1))
+  })
+
   it('turns New list off at 50 lists and says why', async () => {
     setup('/watchlist?sheet=to-list&ci=2')
     b().on('lists', () => lists(Array.from({ length: 50 }, (_, i) => entry(i + 1, `L${i + 1}`, 1))))
