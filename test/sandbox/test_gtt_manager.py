@@ -2093,13 +2093,17 @@ class TestFandOCloseFollowsCAS:
 
     def test_expiry_settlement_matches_the_new_close(self):
         """Settling at 15:30 would close an expiring contract before it stops
-        trading."""
+        trading. SUDARSHAN: the stop comes from the regime table by date
+        (15:40 until 6 Dec 2026; from 7 Dec an index contract stops at 15:30
+        and a stock contract at 15:45, sudarshan/tests/test_regimes_sandbox.py)."""
+        from datetime import date
         from datetime import time as dt_time
 
-        from sandbox.position_manager import EXCHANGE_CLOSE_TIMES
+        from sandbox.position_manager import expiry_close_time
 
-        assert EXCHANGE_CLOSE_TIMES["NFO"] == dt_time(15, 40)
-        assert EXCHANGE_CLOSE_TIMES["BFO"] == dt_time(15, 40)
+        for ex in ("NFO", "BFO"):
+            assert expiry_close_time(date(2026, 12, 4), ex) == dt_time(15, 40)
+            assert expiry_close_time(date(2026, 12, 4), ex, "NIFTY04DEC2625900CE") == dt_time(15, 40)
 
     def test_migration_only_touches_rows_still_on_the_old_close(self):
         """An admin's customised timing must not be reset to a default."""

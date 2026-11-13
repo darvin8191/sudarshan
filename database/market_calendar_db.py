@@ -20,6 +20,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import scoped_session, sessionmaker
 from sqlalchemy.pool import NullPool
 
+from sudarshan import regimes  # SUDARSHAN: the exchange's own timing changes (7 Dec 2026)
 from utils.constants import CRYPTO_EXCHANGES, EXCHANGE_CRYPTO
 from utils.logging import get_logger
 from utils.thread_safe_cache import MISSING, LockedTTLCache
@@ -63,6 +64,8 @@ DEFAULT_MARKET_TIMINGS = {
     # its close is derived by auction, while the derivatives segment keeps
     # trading to roughly 15:40. Cutting NFO/BFO off at 15:30 would make the last
     # ten minutes of live F&O invisible to anything driven by these timings.
+    # From 7 Dec 2026 F&O trades to 15:45: a row holding this close reads 15:45 on those dates
+    # (timing_changes below), so a date before then keeps 15:40 on every install.
     "NFO": {"start_offset": 33300000, "end_offset": 56400000},  # 09:15 - 15:40
     "BFO": {"start_offset": 33300000, "end_offset": 56400000},  # 09:15 - 15:40
     "CDS": {"start_offset": 32400000, "end_offset": 61200000},  # 09:00 - 17:00
@@ -71,6 +74,47 @@ DEFAULT_MARKET_TIMINGS = {
     "NCO": {"start_offset": 32400000, "end_offset": 86100000},  # 09:00 - 23:55 (NSE Commodities mirrors MCX)
     "CRYPTO": {"start_offset": 0, "end_offset": 86399000},  # 00:00 - 23:59:59 (24/7)
 }
+
+
+#: SUDARSHAN: the NFO and BFO closes OpenAlgo or SUDARSHAN shipped, in ms after midnight: 15:30
+#: before SEBI's closing auction, 15:40 from 3 Aug 2026 (DEFAULT_MARKET_TIMINGS above and
+#: migrate_fo_close_for_cas below). A row holding one follows each later change of the exchange's
+#: F&O close from its first day on (sudarshan/regimes.py: 15:45 from 7 Dec 2026). A close an admin
+#: set to anything else is theirs on every date, and only the close moves, never the open.
+SHIPPED_FO_ENDS = frozenset({55800000, 56400000})
+REGIME_EXCHANGES = frozenset({"NFO", "BFO"})
+
+
+def _hhmm_of(offset_ms: int) -> str:
+    return f"{offset_ms // 3600000:02d}:{offset_ms % 3600000 // 60000:02d}"
+
+
+def timing_changes(exchange: str, timings: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """SUDARSHAN: the days a timing row's close changes on by itself, each with the close from
+    then on (``from`` an ISO date, ``end_offset`` in ms, ``end_time`` HH:MM): an NFO or BFO row that
+    holds a shipped close follows the exchange's own F&O close; any other row has none."""
+    try:
+        end = int((timings or {}).get("end_offset") or 0)
+    except (TypeError, ValueError):
+        return []
+    if (exchange or "").upper() not in REGIME_EXCHANGES or end not in SHIPPED_FO_ENDS:
+        return []
+    return [
+        {"from": since.isoformat(), "end_offset": fo[1] * 60000, "end_time": _hhmm_of(fo[1] * 60000)}
+        for since, fo in regimes.fo_changes()
+    ]
+
+
+def timing_on(exchange: str, timings: dict[str, Any], query_date: date) -> dict[str, Any]:
+    """SUDARSHAN: a timing row as it stands on ``query_date``: the last change from on or before
+    that day (``timing_changes``) gives the close; the row as it is otherwise. Keys kept."""
+    found = timings
+    for change in timing_changes(exchange, timings):
+        if date.fromisoformat(change["from"]) <= query_date:
+            found = {**timings, "end_offset": change["end_offset"]}
+            if "end_time" in timings:
+                found["end_time"] = change["end_time"]
+    return found
 
 
 class Holiday(Base):
@@ -687,6 +731,7 @@ def get_market_timings_for_date(query_date: date) -> list[dict[str, Any]]:
                 for exchange in SUPPORTED_EXCHANGES:
                     timings = timing_offsets.get(exchange, DEFAULT_MARKET_TIMINGS.get(exchange, {}))
                     if timings:
+                        timings = timing_on(exchange, timings, query_date)  # SUDARSHAN
                         result.append(
                             {
                                 "exchange": exchange,
@@ -730,6 +775,7 @@ def get_market_timings_for_date(query_date: date) -> list[dict[str, Any]]:
         for exchange in SUPPORTED_EXCHANGES:
             timings = timing_offsets.get(exchange, DEFAULT_MARKET_TIMINGS.get(exchange, {}))
             if timings:
+                timings = timing_on(exchange, timings, query_date)  # SUDARSHAN: 15:45 from 7 Dec
                 result.append(
                     {
                         "exchange": exchange,
@@ -936,6 +982,7 @@ def get_effective_session_window(
         timings = _get_timing_offsets().get(exch, DEFAULT_MARKET_TIMINGS.get(exch, {}))
         if not timings:
             return None
+        timings = timing_on(exch, timings, query_date)  # SUDARSHAN: F&O to 15:45 from 7 Dec 2026
         return {
             "start_ms": midnight_ms + timings["start_offset"],
             "end_ms": midnight_ms + timings["end_offset"],
@@ -1147,6 +1194,8 @@ def get_all_market_timings() -> list[dict[str, Any]]:
                     "end_time": t.end_time,
                     "start_offset": t.start_offset,
                     "end_offset": t.end_offset,
+                    # SUDARSHAN: the days this row's close changes on by itself (the chart's hours)
+                    "changes": timing_changes(t.exchange_code, {"end_offset": t.end_offset}),
                 }
                 for t in timings
             ]
@@ -1169,6 +1218,7 @@ def get_all_market_timings() -> list[dict[str, Any]]:
                     "end_time": f"{end_hours:02d}:{end_mins:02d}",
                     "start_offset": start_offset,
                     "end_offset": end_offset,
+                    "changes": timing_changes(exchange, timing),  # SUDARSHAN
                 }
             )
         return result
@@ -1373,6 +1423,7 @@ def get_market_hours_status() -> dict[str, Any]:
             else:
                 # Closed today
                 is_open = False
+                timing = timing_on(exch, timing, today) if timing else timing  # SUDARSHAN
                 start_offset = timing["start_offset"] if timing else 0
                 end_offset = timing["end_offset"] if timing else 0
                 start_label = timing["start_time"] if timing else ""

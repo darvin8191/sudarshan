@@ -491,7 +491,7 @@ def _sandbox_unrealised(user_id: str, held: list) -> tuple[float, datetime]:
     settled: dict[int, object] = {}
     for index, row in enumerate(held):
         expiry = get_contract_expiry(row.symbol, row.exchange)
-        if expiry is not None and is_contract_expired_now(expiry, row.exchange):
+        if expiry is not None and is_contract_expired_now(expiry, row.exchange, symbol=row.symbol):
             settled[index] = get_expiry_settlement_price(row)
     wanted = sorted(
         {(row.symbol, row.exchange) for index, row in enumerate(held) if index not in settled}

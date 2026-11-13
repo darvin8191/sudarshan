@@ -31,6 +31,7 @@ from sandbox.position_locks import holds_position_lock, position_lock  # noqa: F
 from sandbox.session_boundary import IST, last_session_expiry_utc
 from services.market_data_service import get_market_data_service
 from services.quotes_service import get_multiquotes, get_quotes
+from sudarshan import regimes  # SUDARSHAN: the exchange's expiry-day stops by date
 from utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -174,20 +175,34 @@ def get_contract_expiry(symbol, exchange):
 # Exchange close times (IST) used for expiry-day settlement. Distinct from the
 # MIS square-off times in sandbox config (15:15 etc.), which are deliberately
 # BEFORE close -- an expiring contract trades right up to the closing bell.
+# SUDARSHAN: NFO and BFO are not listed here. Their expiry-day stop comes from
+# the exchange's timing table (sudarshan/regimes.py, through
+# expiry_close_time): 15:40 for every contract until 6 Dec 2026; from 7 Dec
+# 2026 an expiring index contract stops at 15:30 and a stock contract trades
+# to 15:45.
 EXCHANGE_CLOSE_TIMES = {
-    # 15:40, not 15:30: SEBI's Closing Auction Session (effective 2026-08-03)
-    # pauses continuous trading in the cash segment at 15:15 and derives its
-    # close by auction, while the derivatives segment keeps trading to roughly
-    # 15:40. Settling an expiring contract at 15:30 would close it ten minutes
-    # before it actually stops trading.
-    "NFO": dt_time(15, 40),
-    "BFO": dt_time(15, 40),
     "CDS": dt_time(17, 0),
     "BCD": dt_time(17, 0),
     "MCX": dt_time(23, 30),
     "NCDEX": dt_time(17, 0),
 }
 DEFAULT_CLOSE_TIME = dt_time(15, 30)
+REGIME_EXCHANGES = ("NFO", "BFO")  # SUDARSHAN: their stop is the regime table's
+
+
+def expiry_close_time(expiry_date, exchange, symbol=None):
+    """When a contract expiring on ``expiry_date`` stops trading that day (IST).
+
+    SUDARSHAN: NFO and BFO from the exchange's timing table, by the day: an
+    index contract (NIFTY..., SENSEX...) stops at the regime's index expiry
+    stop, any other at the F&O close. Without a symbol the F&O close applies.
+    Other exchanges keep EXCHANGE_CLOSE_TIMES.
+    """
+    if exchange in REGIME_EXCHANGES:
+        index = bool(symbol) and regimes.index_derivative(str(symbol))
+        minute = regimes.expiry_stop(expiry_date, index=index)
+        return dt_time(minute // 60, minute % 60)
+    return EXCHANGE_CLOSE_TIMES.get(exchange, DEFAULT_CLOSE_TIME)
 
 
 def claim_position_for_settlement(position, observed_quantity, *conditions) -> bool:
@@ -253,7 +268,7 @@ def _notify_position_feed_closed(user_id, symbol, exchange):
         logger.debug("Position feed release failed (non-fatal)", exc_info=True)
 
 
-def is_contract_expired_now(expiry_date, exchange, now=None):
+def is_contract_expired_now(expiry_date, exchange, now=None, symbol=None):
     """Return True when an F&O contract should be treated as expired right now.
 
     Timing is governed by the ``expiry_settlement_timing`` sandbox config:
@@ -271,6 +286,8 @@ def is_contract_expired_now(expiry_date, exchange, now=None):
         expiry_date: datetime.date of contract expiry (None returns False)
         exchange: Exchange code, used to pick the closing time
         now: Optional aware datetime for testing; defaults to IST now
+        symbol: The contract's symbol: an index contract on NFO or BFO stops
+            at 15:30 on its expiry day from 7 Dec 2026 (expiry_close_time)
     """
     if expiry_date is None:
         return False
@@ -287,7 +304,7 @@ def is_contract_expired_now(expiry_date, exchange, now=None):
     # Expiry day itself: settle from exchange close, if so configured.
     if get_config("expiry_settlement_timing", "expiry_day_close") != "expiry_day_close":
         return False
-    close_time = EXCHANGE_CLOSE_TIMES.get(exchange, DEFAULT_CLOSE_TIME)
+    close_time = expiry_close_time(expiry_date, exchange, symbol)  # SUDARSHAN: by the day
     return now.time() >= close_time
 
 
@@ -378,7 +395,9 @@ class PositionManager:
                 continue
 
             # Check if contract has expired (timing per expiry_settlement_timing config)
-            is_expired = is_contract_expired_now(expiry_date, position.exchange)
+            is_expired = is_contract_expired_now(
+                expiry_date, position.exchange, symbol=position.symbol
+            )
 
             # For already closed positions (qty=0), just keep them
             # These are today's closed trades - show them regardless of expiry
@@ -1422,7 +1441,9 @@ def cleanup_expired_contracts():
         for position in all_fo_positions:
             expiry_date = get_contract_expiry(position.symbol, position.exchange)
 
-            if expiry_date and is_contract_expired_now(expiry_date, position.exchange):
+            if expiry_date and is_contract_expired_now(
+                expiry_date, position.exchange, symbol=position.symbol
+            ):
                 expired_positions.append(position)
                 logger.debug(
                     f"Found expired contract: {position.symbol} "

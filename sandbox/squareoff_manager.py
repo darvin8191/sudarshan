@@ -204,7 +204,7 @@ class SquareOffManager:
                 # Same timing rule as position settlement: with the default
                 # expiry_day_close config an order dies at the closing bell of
                 # expiry day, not the following midnight.
-                if not is_contract_expired_now(expiry_date, order.exchange):
+                if not is_contract_expired_now(expiry_date, order.exchange, symbol=order.symbol):
                     continue
 
                 try:

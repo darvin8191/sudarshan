@@ -37,7 +37,12 @@ from typing import Any
 
 from cachetools import TTLCache
 
-from database.market_calendar_db import IST, get_effective_session_window, get_market_timing
+from database.market_calendar_db import (
+    IST,
+    get_effective_session_window,
+    get_market_timing,
+    timing_on,
+)
 from services.strategy_module.symbol_resolver import CASH_EXCHANGE_FOR
 from services.symbol_service import get_symbol_info
 from utils.constants import (
@@ -128,17 +133,19 @@ def _midnight_ms(on_date: date) -> int:
     return int(IST.localize(datetime.combine(on_date, datetime.min.time())).timestamp() * 1000)
 
 
-def _regular_session(calendar_exchange: str) -> dict[str, Any] | None:
-    """The exchange's regular window from the calendar's timing table.
+def _regular_session(calendar_exchange: str, on_date: date) -> dict[str, Any] | None:
+    """The exchange's regular window from the calendar's timing table, as it stands on a date.
 
     None when the calendar holds no timing for the exchange. That is stated as
     no session rather than a borrowed one: host-interface.md 4.3 reads a missing
     session as an instrument whose schedule the host does not hold, which is
     true, and a wrong one would move every session fact on the chart.
+    SUDARSHAN: the date's own close (``timing_on``: F&O to 15:45 from 7 Dec 2026).
     """
     timing = get_market_timing(calendar_exchange)
     if not timing:
         return None
+    timing = timing_on(calendar_exchange, timing, on_date)
     days = _EVERY_DAY if calendar_exchange in CRYPTO_EXCHANGES else _TRADING_WEEKDAYS
     return {
         "start": _clock(int(timing["start_offset"]), closing=False),
@@ -309,7 +316,7 @@ def get_instrument_facts(symbol: str, exchange: str, on_date: date | None = None
     instrument["hasOpenInterest"] = _has_open_interest(exchange, code, kind)
 
     calendar_exchange = _calendar_exchange(exchange)
-    session = _regular_session(calendar_exchange)
+    session = _regular_session(calendar_exchange, on_date)
     if session is not None:
         instrument["session"] = session
 
