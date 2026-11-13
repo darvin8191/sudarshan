@@ -55,6 +55,7 @@ from .nudge import NudgeSender, is_sandbox, nudge_kind, receivers_for
 from .orders import Alert, OrderTracker
 from .outbox import OpenAlgoTelegram, Outbox, Pacer, Throttle
 from .owner import Owner, OwnerError, load_openalgo_modules, prepare_openalgo_env, read_owner
+from .reports_desk import ReportDesk, report_desk_for  # M15.7: the journal's reports
 from .resync import Books, BookUnavailable, read_books
 from .store import DB_FILENAME, Store
 from .window import AlertWindow
@@ -132,6 +133,7 @@ class AlertService:
         self.outbox: Outbox | None = None
         self.notices: NoticeDesk | None = None  # M18.x
         self.nudges: NudgeSender | None = None  # Y17: "orders changed" to the family and journal
+        self.reports: ReportDesk | None = None  # M15.7: the journal's reports (SUDARSHAN_JOURNAL)
         self.client: httpx.AsyncClient | None = None
         self._stop = asyncio.Event()
         self._state, self._detail = "starting", ""
@@ -182,6 +184,8 @@ class AlertService:
                 pace=LanePace(self.outbox.pacer),
             )
             notices = asyncio.create_task(self.notices.run(), name="order alerts: server notices")
+            self.reports = report_desk_for(self, telegram, client)  # M15.7: None unless switched on
+            reports = self.reports and asyncio.create_task(self.reports.run(), name="reports")
             # Y17: after each order update, one sealed nudge to each receiver switched on (both
             # off by default). Beside the Telegram path, never in front of it (nudge.py).
             receivers = receivers_for(
@@ -201,16 +205,17 @@ class AlertService:
                 for task in unfinished:  # a pause still unread is told as such (_resync)
                     task.cancel()
                 await asyncio.gather(*unfinished, return_exceptions=True)
-                left, _ = await asyncio.gather(  # M18.x: a notice on its way gets the same grace
-                    self.outbox.flush(STOP_FLUSH_S), self.notices.close(STOP_FLUSH_S)
+                left, *_ = await asyncio.gather(  # M18.x: a notice on its way gets the same grace
+                    self.outbox.flush(STOP_FLUSH_S),
+                    self.notices.close(STOP_FLUSH_S),
+                    *([self.reports.close(STOP_FLUSH_S)] if self.reports else []),  # M15.7
                 )
                 if left:
                     log.warning("%d order alerts were not sent before stopping", left)
                 if nudger is not None:
                     await self.nudges.close()
-                await cancel_and_wait(
-                    sender, ticker, notices, nudger
-                )  # a cancel lost in httpx is sent again
+                # A cancel lost in httpx is sent again (M15.7: the report desk's task too).
+                await cancel_and_wait(sender, ticker, notices, nudger, reports)
                 self.store.close()
                 self._set_state("stopped")
 

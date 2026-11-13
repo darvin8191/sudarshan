@@ -217,6 +217,33 @@ nightly backup job records) every 20 seconds and sends through the same path as 
 the install of the tool before it, which made no record, once, if it was within the last 12
 hours; so v0.3.3's own install is told by the next timer run after it.
 
+## Reports (M15.7)
+
+With `SUDARSHAN_JOURNAL=on` the report desk (`reports_desk.py`) delivers the trade journal's reports.
+The journal writes one line per report to `/var/lib/sudarshan-journal/events.jsonl` (the report's
+id, its kind and the sha256 of its file; never its text). The desk claims each line once in
+alerts.db, asks the journal for the text and then the file over the journal's sealed local API
+(127.0.0.1:5586, key `sudarshan/journal/delivery/v1`, which opens only `report_get`, `report_file`
+and `delivery`), sends the text through OpenAlgo's `/notify` and the file through
+`/notify-file`, and tells the journal how it went: `sent`, `text_only` or `not_sent`, with the
+reason in the owner's words ("OpenAlgo's Telegram bot is stopped", "the owner's chat is not
+linked", "Telegram did not confirm it after 3 tries").
+
+- **Paced** on the reports lane of the one pacer: no slot while order alerts or market alerts wait,
+  at most 4 messages a minute (a report with a file is two), and order alerts may go between a
+  report's text and its file.
+- **Text first.** A 404 from `/notify-file` is an OpenAlgo without the route: the text has gone, and
+  it ends with "Open the full report: SUDARSHAN > Reports" (added when the journal's text lacks it).
+- **Checked.** A file whose bytes do not match the line's sha256 is never sent, and the journal is
+  told why.
+- **Not quiet.** A report is not due while the market trades, so the notices' quiet hours do not
+  apply to it.
+- **Once, across restarts.** A row in alerts.db records how far each report got, so a restart
+  after the text sends only the file. A report older than a day that never went is not sent, and
+  the journal is told.
+
+With sudarshan-alerts stopped (order alerts off and market alerts off), nothing delivers reports.
+
 ## Health page (M18.1)
 
 The market alerts' local API is the only listener on 5582, and its `GET /health` returns this document
@@ -284,6 +311,9 @@ tool starts ring services again after each release.
 | `SUDARSHAN_ALERTS_STATE_DIR` | systemd's `$STATE_DIRECTORY` | `/var/lib/sudarshan-alerts` |
 | `SUDARSHAN_NOTICE_SPOOLS` | the deploy tool's and the backup job's files | colon-separated files the server's notices are read from (`/var/lib/sudarshan/events.jsonl:/var/lib/sudarshan-backup/events.jsonl`) |
 | `SUDARSHAN_DEPLOYED_TAG_FILE` | `/var/lib/sudarshan/deployed_tag` | where the deploy tool records the installed release; the health page shows it as `release` |
+| `SUDARSHAN_JOURNAL` | `off` | `on`: the journal's reports are delivered (Reports, above) and the journal is nudged after each order update; any other value is off, never an error |
+| `SUDARSHAN_JOURNAL_SPOOL` | `/var/lib/sudarshan-journal/events.jsonl` | where the journal records the reports it made |
+| `SUDARSHAN_JOURNAL_API_URL` | `http://127.0.0.1:5586` | the journal's local API; plain http on this server only, anything else is ignored |
 | `SUDARSHAN_ALERTS_LOG_LEVEL` | `INFO` | |
 | `SUDARSHAN_NSE_HOLIDAYS_FILE` | `/etc/sudarshan/nse_holidays.txt` | shared with auto-login and the feed |
 | `SUDARSHAN_NSE_EXTRA_DAYS_FILE` | `/etc/sudarshan/nse_extra_trading_days.txt` | |
