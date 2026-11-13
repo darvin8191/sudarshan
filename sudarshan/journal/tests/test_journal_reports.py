@@ -230,8 +230,8 @@ def test_report_build_makes_the_day_report_and_the_brief_on_request(rig, a_repor
     brief = call(rig, "report_build", kind="brief")
     assert brief["words"] == "The morning brief is in the archive."
     with pytest.raises(ApiError) as caught:
-        call(rig, "report_build", kind="weekly")
-    assert (caught.value.status, caught.value.code) == (501, "not_ready")
+        call(rig, "report_build", kind="weekly", period="45")  # JB9: a week is 2026W45
+    assert (caught.value.status, caught.value.code) == (400, "bad_request")
     with pytest.raises(ApiError) as caught:
         call(rig, "report_build", kind="eod", period="20261110")
     assert caught.value.status == 422

@@ -714,6 +714,7 @@ export interface ReportGetReq {
 
 export interface ReportFileReq {
   id: number
+  format?: string
 }
 
 export interface ReportBuildReq {
