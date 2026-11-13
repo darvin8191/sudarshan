@@ -1,8 +1,9 @@
 """The ``copy`` op, with ``move`` as its flag (M8.4, W8): symbols or one whole section of an own
 list, into another own list or a new one; a move then removes them from the source.
 
-Only own lists (``list:<id>``) can be the source for now: a built-in (W12) or ranked (W22) source
-is ``invalid`` with field ``from``. Every refusal that can be known is made, with its numbers,
+Only own lists (``list:<id>``) and built-in lists (``preset:<id>``, ``ops/presets.py``; a copy
+only, a move is refused because the list is locked) can be the source: a ranked (W22) source is
+``invalid`` with field ``from``. Every refusal that can be known is made, with its numbers,
 before anything is written: the version (when a section is to be set), the 250 symbols a list
 holds, the 50 lists there can be, a name taken.
 
@@ -33,6 +34,7 @@ from sqlalchemy import func
 
 from sudarshan.watchlists import contract, engine, refs
 from sudarshan.watchlists.ops import UNCHANGED, OpError, bumps
+from sudarshan.watchlists.ops import presets as presets_op
 from sudarshan.watchlists.ops.sections import _held
 from sudarshan.watchlists.store import items as store_items
 from sudarshan.watchlists.store import sections as store
@@ -92,6 +94,8 @@ def _source(spec: dict) -> tuple[int, dict, list, bool]:
     """``(list id, live list, picked keys (a pick in the order given, a section in the list's order), picked by section)``."""
     from sudarshan.watchlists.refs import list as listref
 
+    if presets_op.is_preset(spec):  # a built-in list: the symbols picked, or all of it
+        return presets_op.copy_source(spec)
     parts = refs.split(spec["ref"])
     if parts is None or parts[0] != listref.KIND:
         raise OpError("invalid", field="from")
@@ -196,8 +200,10 @@ def _check_section(live: dict, to: dict, args: dict) -> int | None:
     return held
 
 
-def _answer(list_id: int, added: int, skipped: int, version, changed: list) -> Done:
-    done = Done(list=list_id, added=added, skipped=skipped, version=version, words=None)
+def _answer(
+    list_id: int, added: int, skipped: int, version, changed: list, said: str | None = None
+) -> Done:
+    done = Done(list=list_id, added=added, skipped=skipped, version=version, words=said)
     done.refs = tuple(changed)
     return done
 
@@ -241,6 +247,8 @@ def _changed(args: dict, data: Done):
 @bumps("items", _changed)
 def copy(args: dict) -> dict:
     user, move = _user(), bool(args.get("move", False))
+    if move and presets_op.is_preset(args["from"]):  # a move would take symbols out of it
+        raise presets_op.refuse_locked("from")
     src, source, picked, from_section = _source(args["from"])
     to = args["to"]
     target, new = _target(to, picked, from_section, src)
@@ -280,7 +288,7 @@ def copy(args: dict) -> dict:
     if placed is not None:  # every symbol went in, but not into the section picked
         said = words.placed_elsewhere(len(new), tname, placed, move)
         raise OpError("conflict" if placed == words.STALE else "failed", said, changed=changed)
-    return _answer(tid, len(new), skipped, version, changed)
+    return _answer(tid, len(new), skipped, version, changed, source.get("note"))
 
 
 HANDLERS = {"copy": copy}
