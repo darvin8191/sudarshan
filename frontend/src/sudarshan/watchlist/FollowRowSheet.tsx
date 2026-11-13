@@ -326,7 +326,7 @@ export function FollowRowSheet({
     >
       {form.mode === 'remove' && rule ? (
         <RemoveRow view={view} rule={rule} onClose={onClose} />
-      ) : (
+      ) : form.mode !== 'remove' ? (
         <Form
           key={form.mode === 'add' ? `add-${form.kind}-${form.underlying}` : `row-${form.rowId}`}
           form={form}
@@ -335,7 +335,7 @@ export function FollowRowSheet({
           onClose={onClose}
           onRemove={(rowId) => onSwap({ mode: 'remove', rowId })}
         />
-      )}
+      ) : null}
     </BottomSheet>
   )
 }

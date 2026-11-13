@@ -265,7 +265,11 @@ export class FollowResolver {
   private held = new Map<number, number | null>()
   private disposed = false
 
-  constructor(private deps: Deps) {}
+  private deps: Deps
+
+  constructor(deps: Deps) {
+    this.deps = deps
+  }
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener)
