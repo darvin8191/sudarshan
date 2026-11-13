@@ -66,6 +66,11 @@ function setVisibility(state: 'visible' | 'hidden') {
 
 beforeEach(() => {
   vi.useFakeTimers()
+  // A fixed evening (Tue 10 Nov 2026, 20:00 IST), well away from midnight in India: when the date
+  // turns, the market timings count as not known until read again, and the page reads once then,
+  // markets shut or not. Run near midnight on the real clock, the minutes these tests pass on
+  // the fake one crossed it and counted that read (CI run 43482114410, at 23:57 IST).
+  vi.setSystemTime(new Date('2026-11-10T14:30:00Z'))
   socket.clear()
   marketOpen = false
   getTrades.mockReset().mockResolvedValue({ status: 'success', data: [] })
