@@ -9,10 +9,20 @@ import { exitedToday, tagsOf, usePin } from '@/sudarshan/screener/feed'
 import type { ArrangeEdit } from './ArrangeSheet'
 import { FollowRowItem, followNames } from './FollowRows'
 import { FOLLOW_CAP } from './follow'
-import { type FollowForm, followsWords, underlyingKey } from './followRows'
+import {
+  dayLabel,
+  derivativesExchange,
+  type FollowForm,
+  followsWords,
+  lineOf,
+  num,
+  underlyingKey,
+} from './followRows'
 import { figuresFor, type HeldFigures, HeldSwitch, indexBook, isinsOf } from './HoldingLine'
 import { PresetLine } from './PresetLine'
-import { StrikeRowItem } from './StrikeRow'
+import { chainOf } from './rows'
+import { StrikeRowItem, strikeNames } from './StrikeRow'
+import { StrikeSheet } from './StrikeSheet'
 import {
   type ArrangeActions,
   type FollowSheet,
@@ -20,13 +30,21 @@ import {
   SymbolSheet,
 } from './SymbolSheet'
 import { DEFAULT_PREF, isDefaultView } from './sort'
-import { peItemIdOf, SHEET_BASE, useFollowRows, useFollowTicks } from './useFollowRows'
+import {
+  EXTRA_BASE,
+  PE_BASE,
+  peItemIdOf,
+  SHEET_BASE,
+  useFollowRows,
+  useFollowTicks,
+} from './useFollowRows'
 import { useHeld } from './useHeld'
 import { type FollowOptions, useLiveRows } from './useLiveRows'
+import { useSameStrike } from './useSameStrike'
 import { useSortOrder } from './useSortOrder'
 import { ViewLine, type ViewPref, ViewSheet } from './ViewSheet'
 import { marksOf } from './v2/marks'
-import type { FlagName, FollowRow, View } from './v2/types'
+import type { Contract, FlagName, FollowRow, View } from './v2/types'
 import { type FollowSlots, type SectionLayout, WatchlistRows } from './WatchlistRows'
 
 /**
@@ -55,6 +73,8 @@ interface Pin {
   symbol: string
   exchange: string
   names: ReturnType<typeof followNames>
+  /** F12: a strike row's two legs, the strike and the expiry the sheet opened with. */
+  pair?: { ce: Contract; pe: Contract; strike: number | null }
 }
 
 export const LiveList = memo(function LiveList({
@@ -147,8 +167,9 @@ export const LiveList = memo(function LiveList({
   if (openRowId === null) {
     if (sheetPin !== null) setSheetPin(null)
   } else if (sheetPin?.rowId !== openRowId && current?.shown) {
-    const { contract } = current.shown
+    const { contract, pair } = current.shown
     setSheetPin({
+      ...(pair ? { pair: { ...pair, strike: current.shown.strike } } : {}),
       rowId: openRowId,
       key: keyOf(contract.symbol, contract.exchange),
       symbol: contract.symbol,
@@ -156,26 +177,66 @@ export const LiveList = memo(function LiveList({
       names: followNames(current),
     })
   }
-  const pinnedItem = useMemo<WatchlistItem | null>(() => {
-    if (!sheetPin) return null
+  const pinnedItems = useMemo<WatchlistItem[]>(() => {
+    if (!sheetPin) return []
+    const at = (id: number, c: { symbol: string; exchange: string }): WatchlistItem => ({
+      id,
+      symbol: c.symbol,
+      exchange: c.exchange,
+      position: 0,
+    })
+    const stands = (item: WatchlistItem | null | undefined, c: Contract) =>
+      item !== null && item !== undefined && keyOf(item.symbol, item.exchange) === c.key
+    if (sheetPin.pair) {
+      const { ce, pe } = sheetPin.pair // F12
+      return stands(current?.item, ce) && stands(current?.peItem, pe)
+        ? [] // the row still stands on them: its own items serve
+        : [at(-(SHEET_BASE + sheetPin.rowId), ce), at(-(SHEET_BASE + PE_BASE + sheetPin.rowId), pe)]
+    }
     return current?.item && keyOf(current.item.symbol, current.item.exchange) === sheetPin.key
-      ? null // the row still stands on it: its own item serves
-      : {
-          id: -(SHEET_BASE + sheetPin.rowId),
-          symbol: sheetPin.symbol,
-          exchange: sheetPin.exchange,
-          position: 0,
+      ? [] // the row still stands on it: its own item serves
+      : [at(-(SHEET_BASE + sheetPin.rowId), sheetPin)]
+  }, [sheetPin, current?.item, current?.peItem])
+  // F12: the same strike on the next expiries, followed (first in the cap, Quote mode) only while the sheet is open.
+  const same = useSameStrike(
+    sheetPin?.pair && sheetPin.pair.strike !== null && sheetPin.pair.ce.expiry && current
+      ? {
+          underlying: current.rule.underlying,
+          exchange: derivativesExchange(current.rule),
+          strike: sheetPin.pair.strike,
+          after: sheetPin.pair.ce.expiry,
         }
-  }, [sheetPin, current?.item])
+      : null,
+    apiKey
+  )
+  const extraItems = useMemo<WatchlistItem[]>(
+    () =>
+      same.rows.flatMap((each, index) =>
+        [each.ce, each.pe].flatMap((c, side) =>
+          c
+            ? [
+                {
+                  id: -(EXTRA_BASE + index * 2 + side),
+                  symbol: c.symbol,
+                  exchange: c.exchange,
+                  position: 0,
+                },
+              ]
+            : []
+        )
+      ),
+    [same.rows]
+  )
   const followItems = useMemo(
     () => [
       ...fr.states.flatMap((each) => [
         ...(each.item ? [each.item] : []),
         ...(each.peItem ? [each.peItem] : []), // F12: a strike row's PE
       ]),
-      ...(pinnedItem ? [pinnedItem] : []),
+      ...pinnedItems,
+      ...extraItems, // F12
     ],
-    [fr.states, pinnedItem]
+    [fr.states, pinnedItems, extraItems]
   )
   // F12: a strike row counts 2 in the cap (its CE and its PE) and follows both in Quote mode (open interest).
   const strikeKeys = useMemo(() => {
@@ -201,26 +262,30 @@ export const LiveList = memo(function LiveList({
     () => (followOn ? [...new Set(fr.states.map((each) => underlyingKey(each.rule)))] : undefined),
     [followOn, fr.states]
   )
-  const openKey = useMemo(() => {
-    if (sheetPin) return sheetPin.key
+  const openKeys = useMemo(() => {
+    if (sheetPin) {
+      // F12: a strike sheet follows both legs and the other expiries, all counted first in the cap
+      const legs = sheetPin.pair ? [sheetPin.pair.ce.key, sheetPin.pair.pe.key] : [sheetPin.key]
+      return [...legs, ...extraItems.map((each) => keyOf(each.symbol, each.exchange))]
+    }
     const open = openItemId === null ? undefined : items.find((item) => item.id === openItemId)
-    return open ? keyOf(open.symbol, open.exchange) : null
-  }, [items, openItemId, sheetPin])
+    return open ? [keyOf(open.symbol, open.exchange)] : []
+  }, [items, openItemId, sheetPin, extraItems])
   const [order, setOrder] = useState<string | null>(null)
   const listKey = viewPref?.ref ?? ''
   const follow = useMemo<FollowOptions | undefined>(
     () =>
       v2
         ? {
-            sheet: openKey ? [openKey] : [],
+            sheet: openKeys,
             underlyings,
             order: order?.split(','),
             listKey,
             strikes: strikeKeys, // F12
-            quote: quoteKeys, // F12
+            quote: sheetPin?.pair ? [...quoteKeys, ...openKeys] : quoteKeys, // F12
           }
         : undefined,
-    [v2, openKey, underlyings, order, listKey, strikeKeys, quoteKeys]
+    [v2, openKeys, underlyings, order, listKey, strikeKeys, quoteKeys, sheetPin?.pair]
   )
   const live = useLiveRows({
     items: liveItems,
@@ -273,11 +338,13 @@ export const LiveList = memo(function LiveList({
     () => (flagNames && !readOnly ? marksOf(view?.rows, flagNames) : undefined),
     [flagNames, readOnly, view]
   )
-  const sheetRow = sheetPin
-    ? (live.rows.find((row) => row.key === sheetPin.key) ?? null) // F11: the contract it opened with
-    : openItemId === null
-      ? null
-      : (live.rows.find((row) => row.item.id === openItemId) ?? null)
+  const sheetRow = sheetPin?.pair
+    ? null // F12: a strike row's sheet is the strike sheet
+    : sheetPin
+      ? (live.rows.find((row) => row.key === sheetPin.key) ?? null) // F11: the contract it opened with
+      : openItemId === null
+        ? null
+        : (live.rows.find((row) => row.item.id === openItemId) ?? null)
   const pin = usePin(sheetRow ? byKey.get(sheetRow.key) : undefined)
   const exited = exitedToday(members ?? NO_MEMBERS, live.now)
   const nothingShown = ownRows.length > 0 && ownRows.every((row) => row.view.ltp === null)
@@ -322,7 +389,9 @@ export const LiveList = memo(function LiveList({
     [followOn, fr.states, liveById, live.now, onOpenRow, onForm]
   )
   // A row's sheet that has no contract to show (it went missing meanwhile) opens the row's form instead.
-  const pending = openRowId !== null && current !== undefined && !current.shown && !sheetPin
+  const isPair = current?.rule.kind === 'strike_pair' // F12: a pair with no contract says why in its sheet
+  const pending =
+    openRowId !== null && current !== undefined && !current.shown && !sheetPin && !isPair
   useEffect(() => {
     if (pending && openRowId !== null) onForm?.({ mode: 'edit', rowId: openRowId })
   }, [pending, openRowId, onForm])
@@ -340,6 +409,57 @@ export const LiveList = memo(function LiveList({
       onRemove: () => onForm?.({ mode: 'remove', rowId: openRowId }),
     }
   }, [sheetPin, current, openRowId, onForm])
+  // F12: the sheet of a strike row, on the legs it opened with.
+  const liveByKey = useMemo(() => new Map(live.rows.map((row) => [row.key, row])), [live.rows])
+  const names = current ? strikeNames(current) : null
+  const strikeSheet = (() => {
+    if (!current || !isPair || openRowId === null || !names) return null
+    const pair = sheetPin?.pair
+    const now = current.shown?.pair
+    const moved =
+      pair && now && (now.ce.key !== pair.ce.key || now.pe.key !== pair.pe.key)
+        ? { words: followsWords(current.rule, current.shown), onShow: () => setSheetPin(null) }
+        : null
+    const chain = chainOf(current.rule.underlying, current.rule.underlying_exchange)
+    return (
+      <StrikeSheet
+        title={`${current.rule.underlying} ${pair?.strike === null || !pair ? names.middle : num(pair.strike)}`}
+        detail={`${derivativesExchange(current.rule)}${pair?.ce.expiry ? ` · ${dayLabel(pair.ce.expiry)}` : ''} · follows ${current.rule.underlying}`}
+        chip={names.chip}
+        help={names.help}
+        words={lineOf(current, live.now)}
+        moved={moved}
+        strike={pair?.strike ?? null}
+        expiry={pair?.ce.expiry ?? null}
+        legs={
+          pair
+            ? {
+                ce: { contract: pair.ce, live: liveByKey.get(pair.ce.key) ?? null },
+                pe: { contract: pair.pe, live: liveByKey.get(pair.pe.key) ?? null },
+              }
+            : null
+        }
+        lines={live.lines}
+        others={{
+          state: same.state,
+          retry: same.retry,
+          rows: same.rows.map((each) => ({
+            expiry: each.expiry,
+            ce: each.ce ? (liveByKey.get(each.ce.key) ?? null) : null,
+            pe: each.pe ? (liveByKey.get(each.pe.key) ?? null) : null,
+          })),
+        }}
+        chain={chain}
+        feed={live.feed}
+        now={live.now}
+        marketOpen={isOpen('NFO')}
+        onClose={onCloseSheet}
+        onOrder={onOrder}
+        onEdit={() => onForm?.({ mode: 'edit', rowId: openRowId })}
+        onRemove={() => onForm?.({ mode: 'remove', rowId: openRowId })}
+      />
+    )
+  })()
   const offer = useMemo(
     () =>
       followOn && symbolActions
@@ -439,6 +559,8 @@ export const LiveList = memo(function LiveList({
         follow={followSheet} // F11
         offer={offer} // F11
       />
+
+      {strikeSheet}
 
       {viewPref && pref && (
         <ViewSheet

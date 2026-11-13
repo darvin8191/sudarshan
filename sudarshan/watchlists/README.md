@@ -943,6 +943,41 @@ the form.
   own once added. Tests: `followRows.test.ts` (the rules, the resolver), `follow.rows.test.tsx` (rows, ticks,
   the sheet, the form, the switch off).
 
+## F12 - strike rows and the strike sheet
+
+A strike row (`kind: strike_pair`, W15) is one row that follows the CE and the PE of one strike. The form of
+F11 gains Side "Both, as one row" (an ATM row sends `strike_pair` with `strike_rule: atm` and the offset, no
+side). `StrikeRow.tsx` draws it as three blocks: the CE's price and signed change on the left, the strike
+and expiry in the middle ("25,900 · 24 Nov", with the chip), the PE's on the right, each price with its own
+tick arrow; the line under it is a follow row's. The resolver keeps `Shown.pair` (both legs; `contract` is
+the CE); a pair the master lacks a side of answers `missing` with both contracts null, and the row and the
+sheet say the server's words and have no prices. The row is two items of the list (the CE at `-rowId`, the
+PE at `-(PE_BASE + rowId)`), counts 2 in `follow.ts` through `FollowOptions.strikes` and follows both in
+Quote mode through `FollowOptions.quote`: `useLiveRows` runs a second `useFrameLines` in Quote mode for the
+keys in `quote`, and an instrument is in exactly one of the two sets (with the option off nothing changes).
+- **The sheet** (`StrikeSheet.tsx`, pure parts in `strikeSheet.ts`): both legs' price and change, OI, IV,
+  Delta, Theta, Gamma and Vega, "Straddle 340.55", Buy CE, Sell CE, Buy PE and Sell PE (the existing ticket
+  through the page's `onOrder`, the contract's lot and tick from the server's answer, nothing added to the
+  order path; the sheet's own 500 ms guard covers the first taps), Open option chain (`chainPath`), Edit and
+  Remove. OI change is not shown. IV and Greeks are `lib/optionGreeks.ts`: the forward is the strike plus the CE
+  price minus the PE price (the chain's parity), a leg's price its mid when it has a book else its last, time
+  to expiry to 15:30 IST of the expiry date. "IV not worked out: no price on one side yet." stands in their
+  place while a side has no price. The sheet stays on the contracts it opened with ("This row now follows
+  25,950" with Show), those being followed too while it is open.
+- **Other expiries.** The next four expiries after the row's, CE and PE of the same strike, tick while the
+  sheet is open: they are items of the list while it is open, in `follow.sheet` (counted first in the cap)
+  and Quote mode, and gone when it closes. Their contracts come from the page's own instrument search
+  (`useSameStrike.ts`, `searchSymbols` for "<underlying> <strike>", filtered to the underlying, strike and
+  later expiries), because the server's `strikes` op (W17) is not on this branch; when it lands, replace
+  `useSameStrike`'s read and nothing else.
+- **Two things differ from the design.** The option chain page has no interest-rate preference in this fork
+  (it prices with the default 0, as the server does), so `CHAIN_RATE_PCT` is 0 and is the one place that will
+  follow a preference. The other expiries' change comes from the one snapshot read when they join the list.
+- **The seam for F14.** Open `{ kind: 'follow', form: { mode: 'add', kind: 'strike_pair', underlying,
+  exchange, sectionId, fixed: { strike, expiry } } }` (`FollowForm` in `followRows.ts`; `expiry` is an
+  `ExpiryRule`, nearest when absent): the form shows "Strike 25,900, kept for good" and sends `strike_rule:
+  fixed` with the strike. Tests: `strike.rows.test.tsx`, `strike.sheet.test.tsx`, `strikeSheet.test.ts`.
+
 ## W12 - built-in lists from the master (`presets/`, `refs/preset.py`, `ops/presets.py`, `words/presets.py`)
 
 Three built-in lists made from today's master: **Indices**, **F&O stocks** and **Index futures**

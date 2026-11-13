@@ -152,7 +152,6 @@ export function useLiveRows({
   // F12: a strike row's legs and the strike sheet follow in Quote mode (they carry open interest), the
   // rest in LTP mode; an instrument is in exactly one of the two.
   const quoteJoined = follow?.quote?.join(',') ?? ''
-  // biome-ignore lint/correctness/useExhaustiveDependencies: quoteJoined is the identity of the quote keys
   const split = useMemo(() => {
     const quoted = new Set(quoteJoined === '' ? [] : quoteJoined.split(','))
     if (quoted.size === 0) return { ltp: followed, quote: [] as typeof followed }
