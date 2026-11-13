@@ -66,10 +66,13 @@ def read_overlay(lid: int, items: list) -> dict:
                                .where(sym.principal == OWNER,
                                       tuple_(sym.exchange, sym.symbol).in_(pairs))).all()
         } if pairs else {}  # fmt: skip
+        pref = schema.PrefRow  # a preference is kept for a list that has no guard row yet (W10)
+        p = s.scalars(select(pref).where(pref.principal == OWNER, pref.ref == ref)).first()
+        out["pref"] = None if p is None else {"sort": p.sort, "descending": p.descending,
+                                              "basis": p.basis, "held": p.held}  # fmt: skip
         if guard is None:
             return out
-        sec, item, fol, pref = (schema.SectionRow, schema.SectionItemRow, schema.FollowRow,
-                                schema.PrefRow)  # fmt: skip
+        sec, item, fol = schema.SectionRow, schema.SectionItemRow, schema.FollowRow
         out["sections"] = [
             {"id": r.id, "name": r.name, "mark": r.mark, "position": r.position}
             for r in s.scalars(select(sec).where(sec.principal == OWNER, sec.list_id == lid))
@@ -85,9 +88,6 @@ def read_overlay(lid: int, items: list) -> dict:
              "strike_paise": r.strike_paise, "opt_right": r.opt_right}
             for r in s.scalars(select(fol).where(fol.principal == OWNER, fol.list_id == lid))
         ]  # fmt: skip
-        p = s.scalars(select(pref).where(pref.principal == OWNER, pref.ref == ref)).first()
-        out["pref"] = None if p is None else {"sort": p.sort, "descending": p.descending,
-                                              "basis": p.basis, "held": p.held}  # fmt: skip
     return out
 
 

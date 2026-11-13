@@ -37,6 +37,9 @@ NOT_BUILT = {op.name for op in contract.OPS} - {
     "section_remove",
     "arrange",
     "copy",
+    "favourites",
+    "pref",
+    "lists",
 }
 
 BODIES = {
@@ -95,6 +98,9 @@ def test_only_handled_ops_get_a_route():
             "/sections/<int:id>",
             "/copy",
             "/lists/<int:id>/arrange",
+            "/lists",
+            "/favourites",
+            "/prefs/<ref>",
         )
     }
 
@@ -194,6 +200,9 @@ def test_the_switch_is_read_at_each_request(monkeypatch):
 
 
 def test_state_answers_only_what_needs_no_later_change():
+    from database import watchlist_db as oa
+
+    oa.Base.metadata.create_all(oa.engine)  # the favourites read OpenAlgo's own lists
     reset_users()
     client = make_app(ops.discover(), real=True).test_client()
     login_session(client)
@@ -201,7 +210,9 @@ def test_state_answers_only_what_needs_no_later_change():
     assert r.status_code == 200 and r.headers["Cache-Control"] == "no-store"
     body = r.get_json()
     assert body["status"] == "ok"
-    assert set(body["data"]) == {"enabled", "limits", "flag_names", "versions"}
+    assert set(body["data"]) == {
+        "enabled", "limits", "flag_names", "versions", "favourites",
+    }  # fmt: skip
     assert body["data"]["enabled"] is True
     assert body["data"]["limits"] == contract.LIMITS
     assert [f["name"] for f in body["data"]["flag_names"]] == [

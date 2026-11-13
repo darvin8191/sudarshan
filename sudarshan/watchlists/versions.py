@@ -129,16 +129,12 @@ def advance_flags(s) -> int:
     return _advance(s, "flags")
 
 
-def bump(why: str, refs: Iterable[str] = ()) -> str:
-    """Bump the lists version once and push ``{v, ref, why}`` (with the other two versions when
-    the store gives them) to the owner's room. ``ref`` is the one ref changed, or ``lists`` when
-    none or several were."""
-    global _lists
-    with _lock:  # the increment and nothing else
-        _lists += 1
-        version = f"{BOOT}:{_lists}"
+def push(why: str, refs: Iterable[str] = (), version: str | None = None) -> None:
+    """Push ``{v, ref, why}`` (with the other two versions when the store gives them) to the
+    owner's room without moving the lists version: for a change that alters no list's membership
+    (the favourites). ``ref`` is the one ref changed, or ``lists`` when none or several were."""
     refs = list(refs)
-    push = {"v": version, "ref": refs[0] if len(refs) == 1 else "lists", "why": why}
+    push = {"v": version or read(), "ref": refs[0] if len(refs) == 1 else "lists", "why": why}
     for kind, got in (("favourites", favourites()), ("flags", flags())):
         if got is not None:
             push[kind] = got
@@ -146,6 +142,16 @@ def bump(why: str, refs: Iterable[str] = ()) -> str:
         emit_from_any_thread(contract.EVENT_PUSH, push, to=contract.ROOM, namespace="/")
     except Exception:
         logger.exception("Watchlists: the change push could not be sent")
+
+
+def bump(why: str, refs: Iterable[str] = ()) -> str:
+    """Bump the lists version once and push it (``push``). ``ref`` is the one ref changed, or
+    ``lists`` when none or several were."""
+    global _lists
+    with _lock:  # the increment and nothing else
+        _lists += 1
+        version = f"{BOOT}:{_lists}"
+    push(why, refs, version)
     return version
 
 
