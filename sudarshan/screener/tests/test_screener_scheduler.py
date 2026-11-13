@@ -3,13 +3,21 @@ runs, recorded keys, the after-close run, the auction hold and the next check.""
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import date
 
 import pytest
 
 from sudarshan.alerts.market.sessions import epoch_ms, sessions_of
+from sudarshan.screener import membership as mem
 from sudarshan.screener import scheduler as sch
-from sudarshan.screener.types import RunKey
+from sudarshan.screener.runs import Member
+from sudarshan.screener.types import HIT, MISS, RunKey
+
+#: A screen whose stocks that close by auction have not all printed yet.
+NOT_PRINTED = sch.Waits(printed=None)
+#: ... and one whose prints are in (or that holds no such stock).
+PRINTED = sch.Waits(printed=0)
 
 DAY = date(2026, 10, 28)  # a normal trading Wednesday
 MUHURAT = date(2026, 11, 8)  # 14:05-15:40 window: cash 14:20-15:30, F&O 14:20-15:40
@@ -101,18 +109,18 @@ def test_the_last_cash_boundary_waits_for_the_auction_prints_until_15_35_05():
     assert [d.boundary.k for d in untouched][-1] == 24, (
         "a screen without auction stocks runs at 15:30:05"
     )
-    held = sch.due([CAS], NORMAL, at_close, lambda k: False, printed=lambda s: False)
+    held = sch.due([CAS], NORMAL, at_close, lambda k: False, waits=lambda s: NOT_PRINTED)
     assert [d.boundary.k for d in held][-1] == 23, "the 15:15-15:30 candle waits for the prints"
-    printed = sch.due([CAS], NORMAL, at_close, lambda k: False, printed=lambda s: True)
+    printed = sch.due([CAS], NORMAL, at_close, lambda k: False, waits=lambda s: PRINTED)
     assert [d.boundary.k for d in printed][-1] == 24
     latest = sch.due(
-        [CAS], NORMAL, hm(DAY, "15:35") + 5_000, lambda k: False, printed=lambda s: False
+        [CAS], NORMAL, hm(DAY, "15:35") + 5_000, lambda k: False, waits=lambda s: NOT_PRINTED
     )
     assert [d.boundary.k for d in latest][-1] == 24, "15:35:05 at the latest (S12)"
     assert [
         d.boundary.k
         for d in sch.due(
-            [CAS], NORMAL, hm(DAY, "15:35") + 4_999, lambda k: False, printed=lambda s: False
+            [CAS], NORMAL, hm(DAY, "15:35") + 4_999, lambda k: False, waits=lambda s: NOT_PRINTED
         )
     ][-1] == 23
 
@@ -136,12 +144,12 @@ def test_the_last_cash_boundary_waits_for_the_prints_on_both_sides_of_7_december
     at_close = hm(day, close) + 5_000
     plain = sch.due([CASH], found, at_close, lambda k: False)
     assert [d.boundary.end for d in plain][-1] == last.end, "without auction stocks: on time"
-    held = sch.due([CAS], found, at_close, lambda k: False, printed=lambda s: False)
+    held = sch.due([CAS], found, at_close, lambda k: False, waits=lambda s: NOT_PRINTED)
     assert last.k not in [d.boundary.k for d in held], "the last candle waits for the prints"
-    printed = sch.due([CAS], found, at_close, lambda k: False, printed=lambda s: True)
+    printed = sch.due([CAS], found, at_close, lambda k: False, waits=lambda s: PRINTED)
     assert [d.boundary.k for d in printed][-1] == last.k
     for at, runs in ((hm(day, latest) + 4_999, False), (hm(day, latest) + 5_000, True)):
-        due = sch.due([CAS], found, at, lambda k: False, printed=lambda s: False)
+        due = sch.due([CAS], found, at, lambda k: False, waits=lambda s: NOT_PRINTED)
         assert (last.k in [d.boundary.k for d in due]) is runs
 
 
@@ -251,7 +259,11 @@ def test_an_edit_in_the_evening_runs_the_days_last_candle_once_on_time():
 
 
 INDICES = sch.Screen(6, 1, "close", 15, frozenset({"NSE_INDEX"}))
-WATCH = sch.Screen(7, 1, "close", 15, frozenset({"NSE_EQ", "NSE_EQ+auction", "NSE_INDEX"}))
+#: The segments a watchlist screen gets from its universe's kind (screen_ops.SEGMENTS_OF).
+WATCHLIST = frozenset({"NSE_EQ", "NSE_EQ+auction", "NSE_FO", "NSE_INDEX"})
+WATCH = sch.Screen(7, 1, "close", 15, WATCHLIST)
+#: Holds an index among its members.
+INDEXED = sch.Waits(printed=0, index=True)
 
 
 @pytest.mark.parametrize(
@@ -260,20 +272,246 @@ WATCH = sch.Screen(7, 1, "close", 15, frozenset({"NSE_EQ", "NSE_EQ+auction", "NS
 )
 def test_an_index_screen_waits_for_the_closing_value_from_7_december(day, latest):
     """Review M2: from 7 Dec an index's closing value may come after the cash close, until 15:45.
-    A screen of indices holds its 15:15-15:30 candle until 15:45:05, prints or not (a closing value
-    cannot be told from a later one); before 7 Dec it runs at 15:30:05, as it did."""
+    A screen holding an index holds its 15:15-15:30 candle until 15:45:05, prints or not (a closing
+    value cannot be told from a later one); before 7 Dec it runs at 15:30:05, as it did."""
     found = sessions_of(day, trading_day=True)
     last = sch.boundaries(INDICES, found)[-1]
     assert times(day, [last]) == ["15:30"]
     at_close = hm(day, "15:30") + 5_000
     for screen in (INDICES, WATCH):
-        due = sch.due([screen], found, at_close, lambda k: False, printed=lambda s: True)
+        due = sch.due([screen], found, at_close, lambda k: False, waits=lambda s: INDEXED)
         ran = last.k in [d.boundary.k for d in due]
         assert ran is (latest is None), screen.segments
         if latest is not None:
             for at, runs in ((hm(day, latest) + 4_999, False), (hm(day, latest) + 5_000, True)):
-                due = sch.due([screen], found, at, lambda k: False, printed=lambda s: True)
+                due = sch.due([screen], found, at, lambda k: False, waits=lambda s: INDEXED)
                 assert (last.k in [d.boundary.k for d in due]) is runs
     # A screen without indices is not held for them.
     plain = sch.due([CASH], found, at_close, lambda k: False)
     assert [d.boundary.end for d in plain][-1] == last.end
+
+
+# ---- the holds are the members', and a screen's runs keep their order (review N1) --------------
+def walk(
+    screen: sch.Screen,
+    day: date,
+    start: str,
+    end: str,
+    waits: Callable[[int], sch.Waits],
+    made_before: str | None = None,
+) -> list[tuple[sch.Due, int]]:
+    """Every run made for ``screen`` from ``start`` to ``end``, the runner's tick each second,
+    each recorded as it is made: (the run, the moment it was made). Every boundary due before
+    ``made_before`` (``start`` when not given: the service was down in between) counts as made on
+    time. ``waits(now)`` is what the members say at ``now``."""
+    sessions = sessions_of(day, trading_day=True)
+    first, done_by = hm(day, start), hm(day, made_before or start)
+    done = {
+        str(RunKey(screen.id, screen.version, sessions["NSE_EQ"].key, b.tf, b.k))
+        for b in sch.boundaries(screen, sessions)
+        if b.at < done_by
+    }
+    made: list[tuple[sch.Due, int]] = []
+    for now in range(first, hm(day, end) + 1, 1_000):
+        said = waits(now)
+        for item in sch.due([screen], sessions, now, done.__contains__, waits=lambda s, w=said: w):
+            done.add(str(item.key))
+            made.append((item, now))
+    return made
+
+
+def clock(day: date, at: int) -> str:
+    return times(day, [sch.Boundary(0, 0, at, at, "")])[0]
+
+
+def made_at(day: date, made: list[tuple[sch.Due, int]]) -> list[tuple[str, str]]:
+    """(candle end, moment made) per run, in the order made."""
+    return [(clock(day, item.boundary.end), clock(day, now)) for item, now in made]
+
+
+@pytest.mark.parametrize("day", [date(2026, 12, 4), date(2026, 12, 10)])
+def test_the_index_hold_is_decided_by_the_members_not_by_the_universes_kind(day):
+    """Review N1: a watchlist screen trades under every segment a list may hold, NSE_INDEX among
+    them, so the first fix held the 15:30 check of every watchlist screen until 15:45:05, after
+    the F&O close, whatever the list held. Only a screen whose members include an index waits for
+    the index's closing value; one whose members do not runs at 15:30:05, on both sides of 7 Dec,
+    as a screen of indices whose universe is not built yet does."""
+    found = sessions_of(day, trading_day=True)
+    at_close = hm(day, "15:30") + 5_000
+    last = next(b for b in sch.boundaries(WATCH, found) if clock(day, b.end) == "15:30")
+    for screen, waits in ((WATCH, PRINTED), (INDICES, PRINTED), (WATCH, sch.NO_WAITS)):
+        due = sch.due([screen], found, at_close, lambda k: False, waits=lambda s, w=waits: w)
+        assert last.end in [d.boundary.end for d in due], (screen.segments, waits)
+    held = sch.due([WATCH], found, at_close, lambda k: False, waits=lambda s: INDEXED)
+    assert (last.end in [d.boundary.end for d in held]) is (day < date(2026, 12, 7))
+
+
+def test_the_members_say_what_the_last_candle_waits_for():
+    """``waits_of``: an index among the members, and the auction prints of the stocks that close
+    by auction (when the last one arrived; None while one has not come)."""
+    nifty = Member("NSE_INDEX|Nifty 50", "NIFTY", "NSE_INDEX", "NSE_INDEX")
+    reliance = Member("NSE_EQ|INE002A01018", "RELIANCE", "NSE", "NSE_EQ", cas=True)
+    sbin = Member("NSE_EQ|INE062A01020", "SBIN", "NSE", "NSE_EQ", cas=True)
+    plain = Member("NSE_EQ|INE009A01099", "PLAIN", "NSE", "NSE_EQ")
+    arrived = {reliance: 1_000, sbin: 2_000}
+    assert sch.waits_of([], arrived.get) == sch.NO_WAITS
+    assert sch.waits_of([plain], arrived.get) == sch.Waits(printed=0, index=False)
+    assert sch.waits_of([plain, nifty], arrived.get) == sch.Waits(printed=0, index=True)
+    assert sch.waits_of([reliance, sbin, plain], arrived.get) == sch.Waits(printed=2_000)
+    assert sch.waits_of([nifty, reliance], {}.get) == sch.Waits(printed=None, index=True)
+    assert sch.waits_of(iter([sbin, nifty]), arrived.get) == sch.Waits(2_000, True)
+    assert sch.waits_of([reliance], {reliance: 0}.get) == sch.Waits(printed=0), "arrival unknown"
+
+
+def test_a_held_index_check_holds_the_screens_later_checks_in_order():
+    """Thu 10 Dec, a 5-minute watchlist screen holding an index: its 15:30 check waits until
+    15:45:05, and its 15:35 and 15:40 checks wait with it instead of running first (the first fix
+    ran them at 15:35:05 and 15:40:05); at 15:45:05 all four run in boundary order."""
+    day = date(2026, 12, 10)
+    screen = sch.Screen(9, 1, "close", 5, WATCHLIST)
+    made = walk(screen, day, "15:30", "15:46", lambda now: INDEXED)
+    assert made_at(day, made) == [
+        ("15:30", "15:45:05"), ("15:35", "15:45:05"), ("15:40", "15:45:05"), ("15:45", "15:45:05"),
+    ]  # fmt: skip
+
+
+def test_a_check_held_for_the_prints_holds_the_screens_later_checks_in_order():
+    """Thu 10 Dec, a 5-minute watchlist screen with stocks that close by auction and no index:
+    the prints arrive at 15:39:40. The 15:35 check no longer runs before the held 15:30 one; both
+    run as the prints arrive, then 15:40 and 15:45 on time."""
+    day = date(2026, 12, 10)
+    screen = sch.Screen(9, 1, "close", 5, WATCHLIST)
+    prints = hm(day, "15:39") + 40_000
+
+    def waits(now: int) -> sch.Waits:
+        return sch.Waits(printed=prints) if now >= prints else NOT_PRINTED
+
+    made = walk(screen, day, "15:30", "15:46", waits)
+    assert made_at(day, made) == [
+        ("15:30", "15:39:40"), ("15:35", "15:39:40"), ("15:40", "15:40:05"), ("15:45", "15:45:05"),
+    ]  # fmt: skip
+
+
+def test_before_7_december_a_missing_print_holds_a_one_minute_screen_in_order():
+    """Fri 4 Dec: a 1-minute watchlist screen with a stock whose print has not come holds its
+    15:30 check until 15:35:05, the window's end; its 15:31 to 15:34 checks (F&O trades to 15:40)
+    wait with it and then run in order, instead of running first."""
+    day = date(2026, 12, 4)
+    screen = sch.Screen(9, 1, "close", 1, WATCHLIST)
+    made = walk(screen, day, "15:30", "15:37", lambda now: NOT_PRINTED)
+    assert made_at(day, made) == [
+        ("15:30", "15:35:05"), ("15:31", "15:35:05"), ("15:32", "15:35:05"),
+        ("15:33", "15:35:05"), ("15:34", "15:35:05"), ("15:35", "15:35:05"),
+        ("15:36", "15:36:05"),
+    ]  # fmt: skip
+    on_time = walk(screen, day, "15:30", "15:33", lambda now: PRINTED)
+    assert made_at(day, on_time) == [
+        ("15:30", "15:30:05"), ("15:31", "15:31:05"), ("15:32", "15:32:05"),
+    ]  # fmt: skip
+
+
+def test_no_member_is_marked_missing_and_then_back_because_of_the_hold():
+    """The review's case on Thu 10 Dec: a member of a 5-minute screen holding an index that does
+    not match on the 15:25-15:30 candle and matches from 15:35. Its runs applied as they are made
+    enter it at 15:35 and keep it; the first fix applied 15:35 and 15:40 first, then the held
+    15:30 run marked it missing, and 15:45 put it back."""
+    day = date(2026, 12, 10)
+    screen = sch.Screen(9, 1, "close", 5, WATCHLIST)
+    outcome = {"15:30": MISS, "15:35": HIT, "15:40": HIT, "15:45": HIT}
+    row, events = None, []
+    for item, _ in walk(screen, day, "15:30", "15:46", lambda now: INDEXED):
+        end = clock(day, item.boundary.end)
+        result = mem.Result("NSE_FO|1", "FUT", "NFO", outcome[end], price=10_000)
+        run = mem.Run(item.boundary.k, item.boundary.end, item.key.session, last=item.last)
+        row, event = mem.step(row, result, run, mem.Grace(mem.RUNS, 1))
+        events.append((end, event))
+    assert events == [
+        ("15:30", None), ("15:35", mem.EV_ENTERED), ("15:40", mem.EV_STILL),
+        ("15:45", mem.EV_STILL),
+    ]  # fmt: skip
+    assert row is not None and row.status == mem.ACTIVE and row.first_seen_at == hm(day, "15:35")
+
+
+# ---- a held run is late only when made late after its hold ended (review N2) --------------------
+CAS_15 = sch.Screen(10, 1, "close", 15, frozenset({"NSE_EQ", "NSE_EQ+auction"}))
+
+
+def late_at(day: date, made: list[tuple[sch.Due, int]]) -> list[tuple[str, str, bool]]:
+    """(candle end, moment made, marked late) per run, in the order made."""
+    return [(clock(day, d.boundary.end), clock(day, now), d.late) for d, now in made]
+
+
+def prints_at(at: int) -> Callable[[int], sch.Waits]:
+    """The members' word when every print has arrived by ``at``."""
+    return lambda now: sch.Waits(printed=at) if now >= at else NOT_PRINTED
+
+
+def test_a_held_check_made_as_its_hold_ends_is_not_late():
+    """Thu 10 Dec: the 15:30 check of an F&O stocks screen made as the prints arrive (15:39:40),
+    or at 15:45:05 when one never comes, and of an index screen at 15:45:05, is on time; so are
+    the later checks the hold kept waiting. The first fix marked every one "checked late ... after
+    a restart", on the Screener page and in the Telegram digest, when nothing had restarted."""
+    day = date(2026, 12, 10)
+    prints = hm(day, "15:39") + 40_000
+    assert late_at(day, walk(CAS_15, day, "15:30", "15:46", prints_at(prints))) == [
+        ("15:30", "15:39:40", False),
+    ]
+    assert late_at(day, walk(CAS_15, day, "15:30", "15:46", lambda now: NOT_PRINTED)) == [
+        ("15:30", "15:45:05", False),
+    ]
+    assert late_at(day, walk(INDICES, day, "15:30", "15:46", lambda now: INDEXED)) == [
+        ("15:30", "15:45:05", False),
+    ]
+    five = sch.Screen(9, 1, "close", 5, WATCHLIST)
+    assert late_at(day, walk(five, day, "15:30", "15:46", lambda now: INDEXED)) == [
+        ("15:30", "15:45:05", False), ("15:35", "15:45:05", False),
+        ("15:40", "15:45:05", False), ("15:45", "15:45:05", False),
+    ]  # fmt: skip
+    assert late_at(day, walk(five, day, "15:30", "15:46", prints_at(prints))) == [
+        ("15:30", "15:39:40", False), ("15:35", "15:39:40", False),
+        ("15:40", "15:40:05", False), ("15:45", "15:45:05", False),
+    ]  # fmt: skip
+
+
+def test_a_restart_past_the_hold_is_still_late():
+    """Thu 10 Dec, the service down from 15:20 to 15:50 (a restart forgets the prints it saw): the
+    held checks made at 15:50 are late, each counted from its hold's end, 15:45:05. A restart that
+    ended inside the hold delays nothing: the checks come at 15:45:05, on time. A check made more
+    than a minute after the last print arrived is late too."""
+    day = date(2026, 12, 10)
+    back = hm(day, "15:50")
+    five = sch.Screen(9, 1, "close", 5, WATCHLIST)
+    for screen, waits in ((CAS_15, NOT_PRINTED), (INDICES, INDEXED), (five, INDEXED)):
+        due = sch.due([screen], sessions_of(day, trading_day=True), back, set().__contains__,
+                      waits=lambda s, w=waits: w)  # fmt: skip
+        mine = [d for d in due if d.boundary.end >= hm(day, "15:30")]
+        assert mine and all(d.late for d in mine), screen.segments
+    for screen, waits in ((CAS_15, NOT_PRINTED), (INDICES, INDEXED)):
+        made = walk(screen, day, "15:44", "15:46", lambda now, w=waits: w, made_before="15:20")
+        assert late_at(day, made) == [("15:30", "15:45:05", False)], screen.segments
+    prints = hm(day, "15:39") + 40_000
+    for when, late in ((prints + 60_000, False), (prints + 61_000, True)):
+        due = sch.due([CAS_15], sessions_of(day, trading_day=True), when, set().__contains__,
+                      waits=lambda s: sch.Waits(printed=prints))  # fmt: skip
+        assert [(clock(day, d.boundary.end), d.late) for d in due][-1] == ("15:30", late)
+
+
+def test_before_7_december_a_check_is_late_as_it_was():
+    """Fri 4 Dec: the prints come inside the session (15:28:09), so the 15:30 check is made at
+    15:30:05, on time, and one a restart delayed past its moment is late, as before. A print that
+    never comes holds it to 15:35:05, the window's end: on time, where the first fix said late."""
+    day = date(2026, 12, 4)
+    sessions = sessions_of(day, trading_day=True)
+    early = sch.Waits(printed=hm(day, "15:28") + 9_000)
+    assert late_at(day, walk(CAS_15, day, "15:29", "15:31", lambda now: early)) == [
+        ("15:30", "15:30:05", False),
+    ]
+    restarted = sch.due([CAS_15], sessions, hm(day, "15:32"), lambda k: False, waits=lambda s: early)
+    assert [(clock(day, d.boundary.end), d.late) for d in restarted][-1] == ("15:30", True)
+    missed = sch.due(
+        [CAS_15], sessions, hm(day, "15:40"), lambda k: False, waits=lambda s: NOT_PRINTED
+    )
+    assert [(clock(day, d.boundary.end), d.late) for d in missed][-1] == ("15:30", True)
+    assert late_at(day, walk(CAS_15, day, "15:30", "15:36", lambda now: NOT_PRINTED)) == [
+        ("15:30", "15:35:05", False),
+    ]

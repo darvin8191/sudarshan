@@ -28,7 +28,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useMarketData } from '@/hooks/useMarketData'
 import { findLegSL, type SLState, useTrailingSL } from '@/hooks/useTrailingSL'
-import { pickExpiry, rollRefetchMs } from '@/lib/scalpingExpiry'
+import { type ExpiryStop, pickExpiry, rollNotice, rollRefetchMs } from '@/lib/scalpingExpiry'
 import { priceDecimals } from '@/lib/scalpingPrice'
 import { buildPositionRows } from '@/lib/scalpingRows'
 import { mergeTick, type TickView } from '@/lib/scalpingTick'
@@ -423,12 +423,20 @@ export default function Scalping() {
     refetchInterval: (query) => rollRefetchMs(query.state.data?.rolls_at),
   })
   const expiries = expiryResp?.data ?? []
+  const rollsAt = expiryResp?.rolls_at
+  // SUDARSHAN (review N5): the stop the server last named for the nearest expiry, for the notice.
+  const lastStop = useRef<ExpiryStop | null>(null)
   useEffect(() => {
     if (!optionsMode || !underlying || expiries.length === 0) return
     // The nearest expiry, and the next one once the picked contract has stopped for the day.
     const next = pickExpiry(expiry, expiries)
-    if (next !== expiry) setExpiry(next)
-  }, [expiries, underlying, expiry, optionsMode])
+    if (next !== expiry) {
+      const notice = rollNotice(expiry, next, lastStop.current)
+      if (notice) showToast.info(notice)
+      setExpiry(next)
+    }
+    if (typeof rollsAt === 'number') lastStop.current = { expiry: expiries[0], at: rollsAt }
+  }, [expiries, underlying, expiry, optionsMode, rollsAt])
 
   // Option chain (depends on underlying + expiry).
   const { data: chainResp } = useQuery({

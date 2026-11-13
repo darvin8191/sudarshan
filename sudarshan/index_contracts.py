@@ -11,13 +11,21 @@ The master is read at most once every ten minutes. A read that fails, or finds n
 table is emptied and filled again by the morning's download), answers the names every reader knows
 (``regimes.INDEX_UNDERLYINGS``) and is not kept, so the next question reads again.
 
+An index underlying the master gives beyond those names is named in the log once a day, in
+words (the v0.8.1 second review's decision 3): a stock whose F&O and cash names differ for a while,
+during a rename say, would read as an index's and stop 15 minutes early on its expiry day, and the
+line is where that shows. BSE's Focused IT (FOCIT in Upstox's master) is expected in it.
+
 Runs inside OpenAlgo: ORM reads on OpenAlgo's own symbol session (released by the request's
-teardown, or by the caller's session cleanup off a request), no thread, no file, no clock of its own.
+teardown, or by the caller's session cleanup off a request), no thread, no file; the clock only
+for the day of that log line.
 """
 
 from __future__ import annotations
 
+from datetime import date, datetime
 from typing import NamedTuple
+from zoneinfo import ZoneInfo
 
 from sudarshan import regimes
 from utils.logging import get_logger
@@ -32,6 +40,9 @@ INDEX_EXCHANGES = ("NSE_INDEX", "BSE_INDEX")
 KEEP_S = 600
 _KEY = "master"
 _cache = LockedTTLCache(maxsize=1, ttl=KEEP_S)
+IST = ZoneInfo("Asia/Kolkata")
+#: The day the index underlyings beyond the known names were last named in the log, and which.
+_named: tuple[date, frozenset[str]] | None = None
 
 
 class Underlyings(NamedTuple):
@@ -76,6 +87,27 @@ def forget() -> None:
     _cache.clear()
 
 
+def _today() -> date:
+    return datetime.now(IST).date()
+
+
+def _name_unknown(indices: frozenset[str]) -> None:
+    """Name in the log, once a day, the index underlyings beyond the names every reader knows."""
+    global _named
+    extra = indices - frozenset(regimes.INDEX_UNDERLYINGS)
+    today = _today()
+    if not extra or _named == (today, extra):
+        return
+    _named = (today, extra)
+    logger.warning(
+        "The master contract lists index derivatives on %s, beyond the index names SUDARSHAN "
+        "knows. Their contracts are taken as an index's: from 7 Dec 2026 they stop at 15:30 on "
+        "their expiry day in Analyze mode, on the charts and in the scalping terminal. If one of "
+        "them is a stock, its contracts would stop there 15 minutes before the F&O close.",
+        ", ".join(sorted(extra)),
+    )
+
+
 def _read() -> Underlyings | None:
     from sqlalchemy import or_
 
@@ -108,4 +140,5 @@ def _read() -> Underlyings | None:
     cash, indices = listed(CASH_EXCHANGES), listed(INDEX_EXCHANGES)
     pairs = [(symbol or "", kind or "") for symbol, kind in futures]
     index_names = regimes.index_underlyings(pairs, cash=cash, indices=indices)
+    _name_unknown(index_names)
     return Underlyings(index_names, frozenset(name for name in names if name in cash) - index_names)

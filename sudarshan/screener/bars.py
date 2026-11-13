@@ -452,6 +452,14 @@ class Bars:
         state = self._keys.get(key)
         return state is not None and state.printed == today
 
+    def printed_at(self, key: str, today: int) -> int | None:
+        """When today's closing auction print of ``key`` arrived (epoch ms; 0 for a print restored
+        from the store, whose arrival is not known), or None while it has not come."""
+        state = self._keys.get(key)
+        if state is None or state.printed != today:
+            return None
+        return state.printed_at if state.printed_at is not None else 0
+
     def auction_of(self, key: str, market: Market) -> tuple[int | None, bool]:
         """(the end of the last candle, whether the auction's price has come) for a stock that
         closes by auction: what the engine's Subject carries. (None, False) for any other key."""

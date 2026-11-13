@@ -20,3 +20,30 @@ export function pickExpiry(current: string, offered: readonly string[]): string 
   if (!offered.length) return current
   return current && offered.includes(current) ? current : offered[0]
 }
+
+const IST_HHMM = new Intl.DateTimeFormat('en-IN', {
+  timeZone: 'Asia/Kolkata',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+})
+
+/** When the page last learned the nearest expiry stops: that expiry and its stop (epoch ms). */
+export interface ExpiryStop {
+  expiry: string
+  at: number
+}
+
+/**
+ * SUDARSHAN (v0.8.1 review N5): what the page says when the expiry it showed is no longer
+ * offered and it moves on to the next one, so a key pressed a moment later is not a surprise.
+ * Nothing when nothing was picked yet (the first load) or nothing moved.
+ */
+export function rollNotice(current: string, next: string, stop?: ExpiryStop | null): string | null {
+  if (!current || !next || current === next) return null
+  const stopped =
+    stop && stop.expiry === current
+      ? `stopped trading at ${IST_HHMM.format(stop.at)}`
+      : 'is no longer traded'
+  return `The ${current} expiry ${stopped}. Now showing ${next}.`
+}
