@@ -4,7 +4,8 @@
  * "No trade yet" rather than "Stale".
  */
 import { render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { resetInstrumentSessions } from '@/lib/trading/instrumentSession'
 
 vi.mock('@/lib/MarketDataManager', () => import('@/test/marketDataHarness'))
 
@@ -51,5 +52,71 @@ describe('QuoteStatus', () => {
       />
     )
     expect(screen.getByText(/Stale/)).toBeInTheDocument()
+  })
+})
+
+/**
+ * SUDARSHAN review M3: from 7 Dec 2026 an expiring index contract stops at
+ * 15:30 on its expiry day while F&O trades to 15:45. The order dialogs said
+ * its quote was old; they now say it stopped trading, from the server's stop.
+ */
+describe('QuoteStatus for an expiring contract (review M3)', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+    resetInstrumentSessions()
+  })
+
+  const stopsAt = Date.UTC(2026, 11, 8, 10, 0) // 15:30 in India on Tue 8 Dec 2026
+  function serve(stops: number | null) {
+    resetInstrumentSessions()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          status: 'success',
+          data: { day: '2026-12-08', stops_at: stops, closing: null },
+        }),
+      }))
+    )
+  }
+  const stale = (now: number) => ({
+    lastTickAt: null,
+    lastUpdateAt: now - 30_000,
+    due: 1,
+    connected: true,
+    noTrade: false,
+  })
+
+  it('says the contract stopped trading at 15:30, never Stale, once its stop has passed', async () => {
+    vi.useFakeTimers({ now: stopsAt + 35_000, toFake: ['Date'] })
+    serve(stopsAt)
+    render(
+      <QuoteStatus
+        exchange="NFO"
+        symbol="NIFTY08DEC2625900CE"
+        calendar={open}
+        feed={stale(Date.now())}
+      />
+    )
+    expect(await screen.findByText('Stopped trading at 15:30')).toBeInTheDocument()
+    expect(screen.queryByText(/Stale/)).toBeNull()
+  })
+
+  it('reads as before while the contract still trades, and for a contract without a stop', async () => {
+    vi.useFakeTimers({ now: stopsAt - 60_000, toFake: ['Date'] })
+    serve(stopsAt)
+    render(
+      <QuoteStatus
+        exchange="NFO"
+        symbol="NIFTY08DEC2625900CE"
+        calendar={open}
+        feed={stale(Date.now())}
+      />
+    )
+    expect(await screen.findByText(/Stale/)).toBeInTheDocument()
+    expect(screen.queryByText(/Stopped trading/)).toBeNull()
   })
 })

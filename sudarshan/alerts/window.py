@@ -25,11 +25,13 @@ from datetime import date, datetime, timedelta
 from datetime import time as dtime
 from pathlib import Path
 
+from sudarshan.alerts.config import DEFAULT_WINDOW
 from sudarshan.autologin.schedule import (
     IST,
     TradingCalendar,
     day_windows,
     minute_of_day,
+    parse_window,
     read_calendar_file,
     session_of,
     union,
@@ -38,6 +40,9 @@ from sudarshan.autologin.schedule import (
 )
 
 log = logging.getLogger("sudarshan.alerts")
+#: The alerts' usual window (config.DEFAULT_WINDOW), written against SESSION: a setting that ends
+#: where it ends moves with the F&O close, any other keeps its end (review L3).
+WRITTEN = parse_window(DEFAULT_WINDOW)
 
 
 def parse_day_windows(text: str) -> dict[date, tuple[int, int]]:
@@ -86,7 +91,7 @@ class AlertWindow:
         """When the alerts are connected on a trading day, in IST minutes: the usual window (its
         margins around the day's session: to 16:05 from 7 Dec 2026), or a special session's own
         window with the usual margins, added to the usual window on a day that trades anyway."""
-        usual = usual_on(day, self.default)
+        usual = usual_on(day, self.default, WRITTEN)  # the owner's own end stays (L3)
         own = self._days.get(day)
         if own is None:
             return (usual,)

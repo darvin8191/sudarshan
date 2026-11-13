@@ -2,6 +2,8 @@ import {
   ArrowUpDown,
   BellPlus,
   Check,
+  FileDown, // F15
+  FileUp, // F15
   FolderPlus,
   MoreVertical,
   Pencil,
@@ -23,7 +25,7 @@ import { cn } from '@/lib/utils'
 import { useOpenGuard } from './openGuard'
 import { MAX_LISTS } from './useWatchlists'
 import type { AlertOffer } from './v2/listAlert'
-import { menuFor } from './v2/menuRules'
+import { menuFor, tvFor } from './v2/menuRules'
 
 export const PANEL_ID = 'sd-watchlist-panel'
 export const tabId = (listId: number) => `sd-watchlist-tab-${listId}`
@@ -56,6 +58,8 @@ export function ListTabs({
   onView,
   alert,
   kind = 'list',
+  onImport, // F15
+  onExport, // F15
 }: {
   lists: Watchlist[]
   activeId: number | null
@@ -79,6 +83,9 @@ export function ListTabs({
   alert?: AlertOffer
   /** The ref kind of the list on show: `menuFor` says which of Rename, Reorder or remove and Delete it has. */
   kind?: string
+  /** F15: Import from TradingView (v2); Export for TradingView is offered only where `tvFor` says. */
+  onImport?: () => void
+  onExport?: () => void
 }) {
   // F3: with v2 on the menu ignores taps for its first half second (openGuard.ts).
   const [menuOpen, setMenuOpen] = useState(false)
@@ -94,6 +101,7 @@ export function ListTabs({
 
   const full = lists.length >= MAX_LISTS
   const menu = menuFor(kind)
+  const tv = tvFor(kind) // F15
 
   const step = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
     const count = lists.length
@@ -224,6 +232,26 @@ export function ListTabs({
             <DropdownMenuItem className={MENU_ITEM} disabled={activeId === null} onSelect={onView}>
               <SlidersHorizontal aria-hidden="true" className="size-5" />
               View
+            </DropdownMenuItem>
+          )}
+          {onImport && (
+            <DropdownMenuItem
+              className={MENU_ITEM}
+              disabled={activeId === null}
+              onSelect={onImport}
+            >
+              <FileUp aria-hidden="true" className="size-5" />
+              Import from TradingView
+            </DropdownMenuItem>
+          )}
+          {onExport && tv.export && (
+            <DropdownMenuItem
+              className={MENU_ITEM}
+              disabled={activeId === null}
+              onSelect={onExport}
+            >
+              <FileDown aria-hidden="true" className="size-5" />
+              Export for TradingView
             </DropdownMenuItem>
           )}
           {alert && (

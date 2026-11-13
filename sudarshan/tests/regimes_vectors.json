@@ -1,5 +1,5 @@
 {
-  "about": "The exchange's timings by date (\"auction\": the window of a stock with derivatives; a stock without has none in either regime, \"every_stock\": false): the contract between sudarshan/regimes.py (with everything that reads it on the server: sessions.py, OpenAlgo's market calendar, the sandbox, auto-login's schedule) and the phone chart's hours built from the server's timing rows (frontend/src/lib/trading/sessionHours.ts). test_regimes.py runs the days and expiries through the Python side; sessionHours.test.ts builds the chart's calendar from `timings` and checks the same days. Expiry days are the exchanges' weekly ones (NIFTY on Tuesday, SENSEX on Thursday): the code has no weekday rule of its own, the master contract gives each contract's expiry.",
+  "about": "The exchange's timings by date (\"auction\": the window of a stock with derivatives, from its continuous end to the last moment its print may come, five minutes after the auction's latest close; a stock without has none in either regime, \"every_stock\": false): the contract between sudarshan/regimes.py (with everything that reads it on the server: sessions.py, OpenAlgo's market calendar, the sandbox, auto-login's schedule) and the phone chart's hours built from the server's timing rows (frontend/src/lib/trading/sessionHours.ts). test_regimes.py runs the days and expiries through the Python side; sessionHours.test.ts builds the chart's calendar from `timings` and checks the same days. \"closing\": from 7 Dec a closing print stamped after the cash close and up to this moment, a stock with derivatives' auction print or an index's closing value, belongs to the day's last intraday candle on the cash grid (sessions.closing_window; none before, when the auction's print comes inside the cash session). Expiry days are the exchanges' weekly ones (NIFTY on Tuesday, SENSEX on Thursday): the code has no weekday rule of its own, the master contract gives each contract's expiry.",
   "timings": [
     {"exchange": "NSE", "start_offset": 33300000, "end_offset": 55800000, "changes": []},
     {"exchange": "BSE", "start_offset": 33300000, "end_offset": 55800000, "changes": []},
@@ -7,13 +7,13 @@
     {"exchange": "BFO", "start_offset": 33300000, "end_offset": 56400000, "changes": [{"from": "2026-12-07", "end_offset": 56700000, "end_time": "15:45"}]}
   ],
   "days": [
-    {"date": "2026-07-31", "note": "before the first regime: the first one covers it", "cash": ["09:15", "15:30"], "fo": ["09:15", "15:40"], "session": ["09:00", "15:40"], "auction": ["15:15", "15:35"], "auction_close": "15:30", "every_stock": false},
-    {"date": "2026-08-03", "note": "SEBI's closing auction begins", "cash": ["09:15", "15:30"], "fo": ["09:15", "15:40"], "session": ["09:00", "15:40"], "auction": ["15:15", "15:35"], "auction_close": "15:30", "every_stock": false},
-    {"date": "2026-12-03", "note": "Thursday, a SENSEX expiry before the change", "cash": ["09:15", "15:30"], "fo": ["09:15", "15:40"], "session": ["09:00", "15:40"], "auction": ["15:15", "15:35"], "auction_close": "15:30", "every_stock": false},
-    {"date": "2026-12-04", "note": "Friday, the last day before the change", "cash": ["09:15", "15:30"], "fo": ["09:15", "15:40"], "session": ["09:00", "15:40"], "auction": ["15:15", "15:35"], "auction_close": "15:30", "every_stock": false},
-    {"date": "2026-12-07", "note": "Monday, the first day of SEBI's circular of 15 Oct 2026", "cash": ["09:15", "15:30"], "fo": ["09:15", "15:45"], "session": ["09:00", "15:45"], "auction": ["15:30", "15:40"], "auction_close": "15:40", "every_stock": false},
-    {"date": "2026-12-08", "note": "Tuesday, a NIFTY expiry after the change", "cash": ["09:15", "15:30"], "fo": ["09:15", "15:45"], "session": ["09:00", "15:45"], "auction": ["15:30", "15:40"], "auction_close": "15:40", "every_stock": false},
-    {"date": "2026-12-10", "note": "Thursday, a SENSEX expiry after the change", "cash": ["09:15", "15:30"], "fo": ["09:15", "15:45"], "session": ["09:00", "15:45"], "auction": ["15:30", "15:40"], "auction_close": "15:40", "every_stock": false}
+    {"date": "2026-07-31", "note": "before the first regime: the first one covers it", "cash": ["09:15", "15:30"], "fo": ["09:15", "15:40"], "session": ["09:00", "15:40"], "auction": ["15:15", "15:35"], "auction_close": "15:30", "closing": null, "every_stock": false},
+    {"date": "2026-08-03", "note": "SEBI's closing auction begins", "cash": ["09:15", "15:30"], "fo": ["09:15", "15:40"], "session": ["09:00", "15:40"], "auction": ["15:15", "15:35"], "auction_close": "15:30", "closing": null, "every_stock": false},
+    {"date": "2026-12-03", "note": "Thursday, a SENSEX expiry before the change", "cash": ["09:15", "15:30"], "fo": ["09:15", "15:40"], "session": ["09:00", "15:40"], "auction": ["15:15", "15:35"], "auction_close": "15:30", "closing": null, "every_stock": false},
+    {"date": "2026-12-04", "note": "Friday, the last day before the change", "cash": ["09:15", "15:30"], "fo": ["09:15", "15:40"], "session": ["09:00", "15:40"], "auction": ["15:15", "15:35"], "auction_close": "15:30", "closing": null, "every_stock": false},
+    {"date": "2026-12-07", "note": "Monday, the first day of SEBI's circular of 15 Oct 2026", "cash": ["09:15", "15:30"], "fo": ["09:15", "15:45"], "session": ["09:00", "15:45"], "auction": ["15:30", "15:45"], "auction_close": "15:40", "closing": ["15:30", "15:45"], "every_stock": false},
+    {"date": "2026-12-08", "note": "Tuesday, a NIFTY expiry after the change", "cash": ["09:15", "15:30"], "fo": ["09:15", "15:45"], "session": ["09:00", "15:45"], "auction": ["15:30", "15:45"], "auction_close": "15:40", "closing": ["15:30", "15:45"], "every_stock": false},
+    {"date": "2026-12-10", "note": "Thursday, a SENSEX expiry after the change", "cash": ["09:15", "15:30"], "fo": ["09:15", "15:45"], "session": ["09:00", "15:45"], "auction": ["15:30", "15:45"], "auction_close": "15:40", "closing": ["15:30", "15:45"], "every_stock": false}
   ],
   "expiries": [
     {"symbol": "NIFTY01DEC2625900CE", "exchange": "NFO", "expiry": "2026-12-01", "index": true, "stop": "15:40"},
@@ -23,6 +23,9 @@
     {"symbol": "BANKNIFTY29DEC26FUT", "exchange": "NFO", "expiry": "2026-12-29", "index": true, "stop": "15:30"},
     {"symbol": "SENSEX10DEC2682000PE", "exchange": "BFO", "expiry": "2026-12-10", "index": true, "stop": "15:30"},
     {"symbol": "RELIANCE29DEC261400CE", "exchange": "NFO", "expiry": "2026-12-29", "index": false, "stop": "15:45"},
-    {"symbol": "BANKBARODA29DEC26FUT", "exchange": "NFO", "expiry": "2026-12-29", "index": false, "stop": "15:45"}
+    {"symbol": "BANKBARODA29DEC26FUT", "exchange": "NFO", "expiry": "2026-12-29", "index": false, "stop": "15:45"},
+    {"symbol": "NIFTYFPI01DEC2618000CE", "exchange": "NFO", "expiry": "2026-12-01", "index": true, "stop": "15:40"},
+    {"symbol": "NIFTYFPI29DEC2618000CE", "exchange": "NFO", "expiry": "2026-12-29", "index": true, "stop": "15:30"},
+    {"symbol": "BANKINDIA29DEC26120CE", "exchange": "NFO", "expiry": "2026-12-29", "index": false, "stop": "15:45"}
   ]
 }

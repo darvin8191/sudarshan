@@ -3,7 +3,8 @@ the backup keep their margins around each day's session (schedule.usual_on), so 
 with the F&O close from 15:40 to 15:45. Before 7 Dec each is exactly as configured.
 
 Days: Fri 4 Dec and Thu 3 Dec (a SENSEX expiry) before, Tue 8 Dec (a NIFTY expiry) and Thu 10 Dec
-after. A window the owner set keeps its own margins the same way, as on a special day.
+after. A window the owner set moves the same way only when it ends where the usual one ends; any
+other end the owner chose stays as set (review L3).
 """
 
 from __future__ import annotations
@@ -53,7 +54,7 @@ def test_the_day_s_session_runs_from_the_pre_open_to_its_f_and_o_close():
         ("08:30-15:40", "08:30-15:45"),  # auto-login's wake-ups
         ("09:15-15:40", "09:15-15:45"),  # market hours: no new login while unchecked
         ("09:00-15:40", "09:00-15:45"),  # Test now refused
-        ("09:00-15:30", "09:00-15:35"),  # a window the owner set keeps its own margins
+        ("09:00-15:30", "09:00-15:35"),  # any window written against the session moves with it
     ],
 )
 def test_usual_hours_are_as_configured_before_and_move_with_the_close_after(usual, after):
@@ -169,3 +170,49 @@ def test_the_backup_keeps_out_to_20_minutes_after_the_close(holidays):
         assert market_blocks(calendar, at(day, "16:03"))
         assert not market_blocks(calendar, at(day, "16:05"))
     assert minutes("16:30") > block_spans(calendar, AFTER[-1])[0][1]  # the timer runs after it
+
+
+# ---- a window the owner set keeps its own end (review L3) ------------------------------------------
+@pytest.mark.parametrize(
+    ("setting", "written", "after"),
+    [
+        ("08:30-09:15", "08:30-15:40", "08:30-09:15"),  # auto-login: no login after the open
+        ("08:30-12:00", "08:30-15:40", "08:30-12:00"),
+        ("08:30-15:40", "08:30-15:40", "08:30-15:45"),  # the usual end moves with the close
+        ("08:58-15:50", "08:58-15:50", "08:58-15:55"),  # the feed's usual window
+        ("08:58-16:10", "08:58-15:50", "08:58-16:10"),  # an end the owner chose
+        ("09:00-23:55", "08:45-16:00", "09:00-23:55"),  # the alerts kept on all evening
+        ("08:45-16:00", "08:45-16:00", "08:45-16:05"),  # the alerts' usual window
+    ],
+)
+def test_a_window_the_owner_set_keeps_its_own_end_unless_it_is_the_usual_one(setting, written, after):
+    for day in BEFORE:
+        assert text(usual_on(day, parse_window(setting), parse_window(written))) == setting
+    for day in AFTER:
+        assert text(usual_on(day, parse_window(setting), parse_window(written))) == after
+
+
+def test_the_feed_and_the_alerts_keep_an_end_the_owner_set(holidays):
+    from sudarshan.alerts.window import AlertWindow
+    from sudarshan.feed.window import MarketWindow
+
+    feed = MarketWindow(holidays, window=parse_window("08:58-16:10"))
+    alerts = AlertWindow(TradingCalendar(holidays), parse_window("09:00-23:55"), always_on=False)
+    for day in (*BEFORE, *AFTER):
+        assert [text(s) for s in feed.plan(day).spans] == ["08:58-16:10"]
+        assert [text(s) for s in alerts.spans(day)] == ["09:00-23:55"]
+
+
+def test_an_auto_login_window_ending_at_the_open_is_not_stretched_past_it(holidays, monkeypatch, caplog):
+    """SUDARSHAN_AUTOLOGIN_WINDOW=08:30-09:15 means no scheduled login after the open: from 7 Dec
+    it read 08:30-09:20. It stays 08:30-09:15."""
+    monkeypatch.setattr(worker, "read_openalgo_env", lambda path: (_ for _ in ()).throw(
+        ConfigError("not read in this test")))  # fmt: skip
+    caplog.set_level(logging.INFO, logger="sudarshan.autologin")
+    env = {"SUDARSHAN_NSE_HOLIDAYS_FILE": str(holidays), "SUDARSHAN_AUTOLOGIN_WINDOW": "08:30-09:15"}
+    thursday = date(2026, 12, 10)
+    assert worker.main([], env=env, clock=lambda: at(thursday, "09:16")) == 0
+    assert "outside the auto-login window" in caplog.text
+    caplog.clear()
+    assert worker.main([], env=env, clock=lambda: at(thursday, "09:14")) == 2
+    assert "outside the auto-login window" not in caplog.text

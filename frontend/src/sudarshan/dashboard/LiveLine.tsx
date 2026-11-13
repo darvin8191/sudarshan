@@ -4,6 +4,18 @@ import { ago, type FeedLine } from './live'
 
 const TEXT = 'inline-flex items-center gap-1.5 text-xs font-semibold whitespace-nowrap'
 
+const IST_MINUTE = new Intl.DateTimeFormat('en-IN', {
+  timeZone: 'Asia/Kolkata',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+})
+
+/** "Stopped trading at 15:30": a contract that stopped on its expiry day (review M3). */
+export function stoppedWords(stoppedAt: number): string {
+  return `Stopped trading at ${IST_MINUTE.format(stoppedAt)}`
+}
+
 /**
  * The words for a line that is not real-time, with the age of the figures
  * where it has one. Shared with the chart's own marker, which draws them
@@ -15,7 +27,7 @@ export function feedWords(
 ): string {
   switch (line.kind) {
     case 'closed':
-      return 'Market closed'
+      return line.stoppedAt === undefined ? 'Market closed' : stoppedWords(line.stoppedAt)
     case 'waiting':
       return 'Waiting for prices'
     case 'delayed':
@@ -64,7 +76,11 @@ export function LiveLine({
   return (
     <span
       data-feed={
-        (line.kind === 'delayed' || line.kind === 'polling') && stale ? 'stale' : line.kind
+        (line.kind === 'delayed' || line.kind === 'polling') && stale
+          ? 'stale'
+          : line.kind === 'closed' && line.stoppedAt !== undefined
+            ? 'stopped'
+            : line.kind
       }
       className={cn(
         TEXT,

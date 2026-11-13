@@ -1018,6 +1018,7 @@ export default function OrderBook() {
                 modifyingOrder && (
                   <QuoteStatus
                     exchange={modifyingOrder.exchange}
+                    symbol={modifyingOrder.symbol}
                     feed={quoteFeed}
                     calendar={quoteCalendar}
                   />

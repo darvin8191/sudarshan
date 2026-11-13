@@ -61,9 +61,12 @@ function Name({
   holding,
   position,
   mark,
+  metric,
 }: {
   symbol: string
   exchange: string
+  /** F16: a ranked list's own figure for the row, as read. */
+  metric?: string
   /** F8: the flag, the note and the expired reading. */
   mark?: RowMark
   /** SUDARSHAN M9 UI7: what a screener says about this row (New, Held, Pinned), an icon and a word. */
@@ -109,6 +112,14 @@ function Name({
         </span>
         {/* F7: "Holding 25" and "Position +65", in ink; nothing for zero. */}
         <HoldingLine holding={holding} position={position} />
+        {metric && (
+          <span
+            data-metric="true"
+            className="min-w-0 truncate text-xs leading-tight font-semibold text-[color:var(--text-secondary)]"
+          >
+            {metric /* F16 */}
+          </span>
+        )}
       </span>
     </span>
   )
@@ -200,10 +211,12 @@ const PriceRow = memo(function PriceRow({
   holding,
   position,
   mark,
+  metric,
   onOpen,
   rowIndex,
   ...figures
 }: FigureValues & {
+  metric?: string // F16
   /** F9: its place in a list longer than the cap, which the window is worked out from. */
   rowIndex?: number
   mark?: RowMark // F8
@@ -224,6 +237,7 @@ const PriceRow = memo(function PriceRow({
         holding={holding}
         position={position}
         mark={mark}
+        metric={metric} // F16
       />
       <Figures {...figures} decimals={priceDecimals(exchange)} />
     </>
@@ -367,7 +381,10 @@ export function WatchlistRows({
   held,
   marks,
   follow,
+  metrics,
 }: {
+  /** v2 (F16): a ranked list's own figure per row, by EXCHANGE:SYMBOL. */
+  metrics?: ReadonlyMap<string, string>
   /** v2 (F11): the rows that follow the price. Absent with the switch off. */
   follow?: FollowSlots
   /** v2 (F8): the flag, note and expired reading of each row, by EXCHANGE:SYMBOL. Absent with the switch off. */
@@ -460,6 +477,7 @@ export function WatchlistRows({
               holding={held?.get(row.key)?.holding} // F7
               position={held?.get(row.key)?.position} // F7
               mark={marks?.get(row.key)} // F8
+              metric={metrics?.get(row.key)} // F16
               onOpen={onOpen}
               rowIndex={rows.length > FOLLOW_CAP ? index : undefined} // F9
               {...figuresOf(row)}

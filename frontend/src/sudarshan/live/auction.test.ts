@@ -36,7 +36,7 @@ describe('closing auction words', () => {
 /**
  * Each day of sudarshan/tests/regimes_vectors.json, as the server sends the window of a stock with
  * derivatives that day (sessions.py: 15:15-15:35 with the price at about 15:30 until 6 Dec 2026,
- * 15:30-15:40 with the price at about 15:40 from 7 Dec): the words name it. A stock without
+ * 15:30-15:45 with the price at about 15:40 from 7 Dec): the words name it. A stock without
  * derivatives gets no window, so no auction line.
  */
 const VECTORS = JSON.parse(
@@ -59,6 +59,8 @@ describe('closing auction words on either side of 7 Dec 2026', () => {
       `Closing auction · bid and ask are not checked after ${day.auction[0]}`
     )
     expect(inAuction(at(day.date, '15:34'), from, until)).toBe(true)
-    expect(inAuction(at(day.date, '15:36'), from, until)).toBe(day.auction[1] === '15:40')
+    // Until 6 Dec the print may come to 15:35; from 7 Dec to 15:45 (L4).
+    expect(inAuction(at(day.date, '15:36'), from, until)).toBe(day.auction[1] > '15:36')
+    expect(inAuction(at(day.date, '15:44'), from, until)).toBe(day.auction[1] === '15:45')
   })
 })

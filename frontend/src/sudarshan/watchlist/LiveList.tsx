@@ -120,7 +120,10 @@ export const LiveList = memo(function LiveList({
   preset,
   followRows,
   picker,
+  metrics,
 }: {
+  /** v2 (F16): a ranked list's own figure per row, by EXCHANGE:SYMBOL. */
+  metrics?: ReadonlyMap<string, string>
   /** v2 (F14): the strike picker, open or absent. */
   picker?: PickerProps
   /** v2 (F11): the open own list's rows that follow the price; absent for any other list and with the switch off. */
@@ -580,6 +583,7 @@ export const LiveList = memo(function LiveList({
           held={held} // F7
           marks={marks} // F8
           follow={slots} // F11
+          metrics={metrics} // F16
         />
       </section>
       {exited.length > 0 && (

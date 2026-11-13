@@ -1,8 +1,9 @@
 # सुदर्शन / SUDARSHAN order alerts (M6.8): fills, part fills, rejections, cancellations and
 # stop-order triggers from OpenAlgo's order stream (ws://127.0.0.1:8765), sent to the owner's
 # Telegram through OpenAlgo (http://127.0.0.1:5000/api/v1/telegram/notify).
-# Connected only on trading days 08:45-16:00 IST (weekends and /etc/sudarshan/nse_holidays.txt are
-# closed, a day in /etc/sudarshan/nse_extra_trading_days.txt is open); idle otherwise.
+# Connected only on trading days 08:45-16:00 IST, 08:45-16:05 from 7 Dec 2026, 20 minutes after the
+# 15:45 F&O close (weekends and /etc/sudarshan/nse_holidays.txt are closed, a day in
+# /etc/sudarshan/nse_extra_trading_days.txt is open); idle otherwise.
 # Docs: sudarshan/alerts/README.md. Optional settings: /etc/sudarshan/alerts.env
 # (root:sudarshan 640); SUDARSHAN_ORDER_ALERTS=off there turns order alerts off; the service exits at once
 # (and stays stopped until the next restart) only when SUDARSHAN_MARKET_ALERTS is off too.

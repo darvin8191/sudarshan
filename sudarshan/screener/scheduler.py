@@ -15,8 +15,13 @@ at 10:16 after a restart").
 A stock that closes by auction has no continuous trade after the cash close until its print
 (X6): a screen whose universe holds such stocks holds its last cash boundary of the day until
 every one has printed, or at the latest until the auction window's end plus the grace (S12:
-15:35:05 on a normal day; from 7 Dec 2026, when the auction runs 15:30-15:40 after the cash close,
-15:40:05). ``due`` takes ``printed(screen) -> bool`` for that.
+15:35:05 on a normal day; from 7 Dec 2026, when the auction runs 15:30-15:40 after the cash close
+and its print may come until 15:45, 15:45:05). ``due`` takes ``printed(screen) -> bool`` for that.
+
+From 7 Dec 2026 an index's closing value may come after the cash close too (review M2): a screen
+whose universe holds indices holds that boundary until the window's end plus the grace (15:45:05),
+whatever has come, since a closing value cannot be told from a later one. The values it judges are
+the same when none comes.
 
 A screen made, resumed or edited during the session starts a new version (``Screen.since``, the
 moment it began), and its run key is new for every boundary of the day. It gets one run, on the
@@ -137,6 +142,18 @@ def _held_until(screen: Screen, sessions: Mapping[str, Session], boundary: Bound
     return None
 
 
+def _index_hold(screen: Screen, sessions: Mapping[str, Session], boundary: Boundary) -> int | None:
+    """For a screen with indices, from 7 Dec 2026: the moment its last cash boundary waits until
+    for their closing value (the window's end plus the grace, review M2), else None."""
+    if screen.on == AFTER_CLOSE:
+        return None
+    for name in screen.segments:
+        span = sessions.get(name)
+        if span is not None and span.close_until is not None and boundary.end == span.end:
+            return span.close_until + GRACE_MS
+    return None
+
+
 def _first(today: Sequence[Boundary], since: int) -> int:
     """The index of the screen's first run today: the latest boundary whose candle had closed when
     its version began (its run moment, end plus the grace, may still be seconds away: the loop
@@ -175,6 +192,9 @@ def due(
                 break
             hold = _held_until(screen, sessions, boundary)
             if hold is not None and now < hold and not printed(screen):
+                continue
+            wait = _index_hold(screen, sessions, boundary)
+            if wait is not None and now < wait:
                 continue
             key = RunKey(screen.id, screen.version, session, boundary.tf, boundary.k)
             if recorded(str(key)):
