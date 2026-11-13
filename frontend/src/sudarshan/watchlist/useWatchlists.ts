@@ -21,6 +21,9 @@ export const MAX_NAME_LENGTH = 64
 /** The most lists the server keeps for one user (`MAX_LISTS_PER_USER`). */
 export const MAX_LISTS = 50
 
+/** Why New list is off at the cap, the one sentence for it on the phone (review L14). */
+export const LISTS_FULL = `You have ${MAX_LISTS} lists, the most there can be. Delete one to make another.`
+
 /** The most instruments the server keeps in one list (`MAX_ITEMS_PER_LIST`). */
 export const MAX_ITEMS = 250
 

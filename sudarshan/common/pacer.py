@@ -7,7 +7,10 @@ bot and the family bot build their own from this one class:
 
   lanes     the lanes in their order of service. A lane may name the lanes it ``yields_to``: it takes
             no slot while one of those has messages waiting (the ``waiting(lane)`` callback each
-            lane sets).
+            lane sets). It may also name lanes it ``yields_after`` a number of seconds: it takes no
+            slot while a message of one of those has waited longer than that (the lane says since
+            when, ``set_waiting(lane, waiting, since)``), so a busy lane cannot hold a small one
+            back without a bound.
   gap_s     the least time between the starts of two messages, across every lane.
   per_minute  the most messages a minute across every lane; each lane may have a smaller cap of
             its own (``Lane.per_minute``).
@@ -42,12 +45,14 @@ def _read(limit: Limit | None) -> float | None:
 
 @dataclass(frozen=True)
 class Lane:
-    """One kind of message: its name, its own cap a minute (None: only the shared budgets) and the
-    lanes whose waiting messages it gives way to."""
+    """One kind of message: its name, its own cap a minute (None: only the shared budgets), the
+    lanes whose waiting messages it gives way to, and the lanes it gives way to once a message of
+    theirs has waited longer than the seconds named with each."""
 
     name: str
     per_minute: Limit | None = None
     yields_to: tuple[str, ...] = ()
+    yields_after: tuple[tuple[str, Limit], ...] = ()
 
 
 class Pacer:
@@ -67,7 +72,7 @@ class Pacer:
         if not names or len(set(names)) != len(names):
             raise ValueError("a pacer needs lanes with distinct names")
         for lane in lanes:
-            unknown = set(lane.yields_to) - set(names)
+            unknown = (set(lane.yields_to) | {other for other, _ in lane.yields_after}) - set(names)
             if unknown:
                 raise ValueError(f"lane {lane.name} gives way to unknown lanes {sorted(unknown)}")
         for name in reserved or {}:
@@ -79,16 +84,25 @@ class Pacer:
         self.clock = clock
         self._starts: deque[tuple[float, str]] = deque()  # (start, lane), the last minute
         self._waiting: dict[str, Callable[[], bool]] = {}
+        self._since: dict[str, Callable[[], float | None]] = {}
         #: While the reserved lanes are flushed at a stop, what the other lanes sent in the last
         #: minute no longer counts against them (review L10).
         self.flushing_reserved = False
 
     # -- the lanes' waiting messages --------------------------------------------------------------
 
-    def set_waiting(self, lane: str, waiting: Callable[[], bool]) -> None:
-        """How the pacer asks whether ``lane`` has messages waiting."""
+    def set_waiting(
+        self,
+        lane: str,
+        waiting: Callable[[], bool],
+        since: Callable[[], float | None] | None = None,
+    ) -> None:
+        """How the pacer asks whether ``lane`` has messages waiting, and (``since``) from when its
+        oldest has waited, on the pacer's clock (None: none waits)."""
         self._check(lane)
         self._waiting[lane] = waiting
+        if since is not None:
+            self._since[lane] = since
 
     def waiting(self, lane: str) -> bool:
         """True when ``lane`` has messages waiting (False when it never said)."""
@@ -96,10 +110,25 @@ class Pacer:
         ask = self._waiting.get(lane)
         return bool(ask()) if ask is not None else False
 
+    def waited(self, lane: str) -> float:
+        """How long the oldest waiting message of ``lane`` has waited, in seconds; 0 when none
+        waits or the lane never said since when."""
+        if not self.waiting(lane):
+            return 0.0
+        ask = self._since.get(lane)
+        since = ask() if ask is not None else None
+        return 0.0 if since is None else max(0.0, self.clock() - since)
+
     def blocked(self, lane: str) -> bool:
-        """True while a lane that ``lane`` gives way to has messages waiting: take no slot."""
+        """True while a lane that ``lane`` gives way to has messages waiting, or one it gives way
+        to after a time has had a message waiting longer than that: take no slot."""
         self._check(lane)
-        return any(self.waiting(other) for other in self.lanes[lane].yields_to)
+        spec = self.lanes[lane]
+        if any(self.waiting(other) for other in spec.yields_to):
+            return True
+        return any(
+            self.waited(other) > float(_read(after) or 0.0) for other, after in spec.yields_after
+        )
 
     # -- the slots ---------------------------------------------------------------------------------
 

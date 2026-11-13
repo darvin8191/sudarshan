@@ -255,6 +255,31 @@ def test_a_read_the_reserve_refuses_does_not_tell_the_owner_it_failed(fake, toke
     assert fake.count("day_trades") == 1
 
 
+def test_a_family_read_the_per_second_bucket_refuses_never_marks_the_owners_figures(
+    fake, token_file
+):
+    """M4: the per-second bucket is the owner's too. A family read that finds it empty is held
+    back; it never sets the shared memory stale ("busy") for the owner's next two seconds."""
+    reader, clock = make(fake, token_file)
+
+    async def go():
+        await reader.book(["holdings"], 0)  # the owner read it at 11:00:00
+        clock.advance(6)  # older than the five seconds of memory
+        second = reader.budget._of("holdings")[0]
+        second.tokens, second.at = 0.0, clock.mono  # this second's two reads are spent
+        held = (await reader.book(["holdings"], 5, FAMILY))["holdings"]
+        second.tokens = 2.0  # the next second
+        owner = (await reader.book(["holdings"], 5, "owner"))["holdings"]
+        await reader.aclose()
+        return held, owner
+
+    held, owner = run(go())
+    assert held["state"] == "stale" and held["read_at"] == ist(11)
+    assert "keeping its Upstox reads for the account owner" in held["note"]
+    assert owner["state"] == "ok" and owner["note"] is None and owner["read_at"] == ist(11, 0, 6)
+    assert fake.count("holdings") == 2
+
+
 def test_a_held_read_answers_the_figures_it_has_as_old(fake, token_file):
     reader, clock = make(fake, token_file)
 
@@ -300,6 +325,61 @@ def test_the_probe_without_a_token_says_so_and_asks_nothing(fake, tmp_path, capl
     with caplog.at_level(logging.INFO, logger="sudarshan.portfolio.probe"):
         found = run(_probe(reader))
     assert set(found.values()) == {"no token"} and fake.count() == 0
+
+
+class ProbeService:
+    """What the probe's job reads of the service: its state folder, its clock and the reader."""
+
+    def __init__(self, folder, reader, clock):
+        self.settings = type("Settings", (), {"state_dir": folder})()
+        self.clock, self._reader = clock, reader
+
+    def ensure_upstox(self):
+        return self._reader
+
+
+def test_the_probe_asks_upstox_at_most_once_a_day(fake, token_file, tmp_path, caplog):
+    """L7: three Upstox calls at the first start of a day, none at a restart the same day."""
+    reader, clock = make(fake, token_file)
+    service = ProbeService(tmp_path, reader, clock)
+
+    async def go():
+        found = [await probe.at_start(service, 0), await probe.at_start(service, 0)]
+        clock.advance(24 * 3600)  # the next day
+        found.append(await probe.at_start(service, 0))
+        await reader.aclose()
+        return found
+
+    with caplog.at_level(logging.INFO, logger="sudarshan.portfolio.probe"):
+        first, again, next_day = run(go())
+    assert first == {"orders": 200, "trades": 200, "order_history": 200} and again is None
+    assert next_day == first
+    assert (fake.count("day_orders"), fake.count("day_trades"), fake.count("order_history")) == (
+        2,
+        2,
+        2,
+    )
+    assert caplog.text.count("Analytics Token probe:") == 2
+    assert (tmp_path / probe.DAY_FILE).read_text().strip() == "20261027"
+
+
+def test_a_probe_upstox_did_not_answer_is_tried_again_at_the_next_start(fake, tmp_path):
+    folder = tmp_path / "state"
+    folder.mkdir()
+    reader, clock = make(fake, tmp_path / "missing-token")
+    service = ProbeService(folder, reader, clock)
+
+    async def go():
+        first = await probe.at_start(service, 0)
+        (tmp_path / "missing-token").write_text(TOKEN + "\n")  # the token arrives
+        second = await probe.at_start(service, 0)
+        await reader.aclose()
+        return first, second
+
+    first, second = run(go())
+    assert set(first.values()) == {"no token"}
+    assert second == {"orders": 200, "trades": 200, "order_history": 200}
+    assert fake.count("day_orders") == 1
 
 
 def test_a_refused_token_in_the_probe_does_not_pause_the_tabs_reads(fake, token_file):

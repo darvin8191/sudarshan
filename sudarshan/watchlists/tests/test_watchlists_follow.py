@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from watchlists_follow_master import build_master
 
+from sudarshan import regimes
 from sudarshan.watchlists import feedsnap, resolver, search
 from sudarshan.watchlists.store import rows as store
 
@@ -38,11 +39,13 @@ def index_of(snap):
 class World:
     """The outside of ``resolve_rows``: a master, a calendar, a market and a feed, all typed."""
 
-    def __init__(self, drop=(), closes=None, open_=True, feed=None):
-        self.snap = build_master(drop)
+    def __init__(self, drop=(), closes=None, open_=True, feed=None, indices=None, more=()):
+        self.snap = build_master(drop, more)
         self.ix = index_of(self.snap)
         self.cal = {k: ms(v) for k, v in (closes or {}).items()}
         self.open_, self.feed_has, self.asked = open_, feed or {}, []
+        # the master's index underlyings (review M1); by default the names every reader knows
+        self.indices = regimes.INDEX_UNDERLYINGS if indices is None else indices
 
     def feed(self, keys):
         self.asked.append(list(keys))
@@ -53,7 +56,7 @@ class World:
             rules, items, now_ms=ms(now), connected=connected, ix=self.ix,
             row_of=lambda x, s: self.snap.by_symbol_exchange.get((s, x)), isin=lambda r: None,
             closes_of=lambda fo, dates: {d: self.cal[d] for d in dates if d in self.cal},
-            is_open=lambda exch, at: self.open_, feed=self.feed,
+            is_open=lambda exch, at: self.open_, feed=self.feed, indices=self.indices,
         )  # fmt: skip
 
 

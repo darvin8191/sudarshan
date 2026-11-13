@@ -58,13 +58,30 @@ describe('the age', () => {
 })
 
 describe('the sentences', () => {
-  it('takes the left-out sentence from the end of the server’s words', () => {
-    const said =
-      'Ranked by Upstox · 2 min ago 2 contracts from Upstox are not in today’s contract list and are left out.'
-    expect(leftOutSentence(said.replace('’', "'"), 2)).toBe(
-      "2 contracts from Upstox are not in today's contract list and are left out."
+  const two = "2 contracts from Upstox are not in today's contract list and are left out."
+
+  it('shows the server’s left-out sentence as sent, whatever its wording', () => {
+    expect(leftOutSentence({ left_out: 2, left_out_words: two })).toBe(two)
+    const reworded = 'Two of Upstox’s contracts are missing from today’s list.'
+    expect(leftOutSentence({ left_out: 2, left_out_words: reworded })).toBe(reworded)
+  })
+
+  it('is nothing when the server says nothing was left out, and never reads `words`', () => {
+    expect(leftOutSentence({ left_out: 0, left_out_words: null })).toBeNull()
+    const answer = {
+      left_out: 0,
+      left_out_words: null,
+      words: `Ranked by Upstox · 2 min ago ${two}`,
+    }
+    expect(leftOutSentence(answer)).toBeNull()
+  })
+
+  it('writes the sentence from the count for an answer that predates the field', () => {
+    expect(leftOutSentence({ left_out: 2 })).toBe(two)
+    expect(leftOutSentence({ left_out: 1 })).toBe(
+      "1 contract from Upstox is not in today's contract list and is left out."
     )
-    expect(leftOutSentence('Ranked by Upstox · 2 min ago', 0)).toBeNull()
+    expect(leftOutSentence({ left_out: 0 })).toBeNull()
   })
 
   it('says what is new after a read that changed the order', () => {

@@ -147,6 +147,30 @@ def test_an_index_contract_the_master_lists_settles_at_15_30_from_7_december(pm,
     assert pm.expiry_close_time(dec1, "NFO", "RELIANCE01DEC261400CE") == dt_time(15, 40)
 
 
+def test_an_index_name_beyond_the_known_ones_is_named_in_the_log_once_a_day(
+    master, monkeypatch, caplog
+):
+    """The v0.8.1 second review's decision 3: a stock whose F&O and cash names differ for a while
+    would read as an index's and stop at 15:30 on its expiry day; the log names every index
+    underlying the master gives beyond the known names, once a day, in words."""
+    import logging
+
+    from sudarshan import index_contracts
+
+    days = iter([date(2026, 12, 7), date(2026, 12, 7), date(2026, 12, 8)])
+    monkeypatch.setattr(index_contracts, "_today", lambda: next(days))
+    monkeypatch.setattr(index_contracts, "_named", None)
+    with caplog.at_level(logging.WARNING, logger=index_contracts.__name__):
+        master(UPSTOX_MASTER)
+        for _ in range(3):  # Mon 7 Dec, again that day, Tue 8 Dec
+            index_contracts.forget()
+            assert "FOCIT" in index_contracts.underlyings().indices
+    named = [r.getMessage() for r in caplog.records if r.name == index_contracts.__name__]
+    assert len(named) == 2, named
+    assert named[0].startswith("The master contract lists index derivatives on FOCIT, beyond")
+    assert "NIFTYFPI" not in named[0], "a name every reader knows is not named"
+
+
 def test_a_master_being_downloaded_leaves_the_known_index_names(pm, master):
     """No futures in the table (the morning's download empties it first): the names every reader
     knows stand in, and nothing is kept, so the next question reads the master again."""

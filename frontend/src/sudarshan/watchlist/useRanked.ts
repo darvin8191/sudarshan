@@ -93,6 +93,15 @@ export function useRanked(ref: string | null): Ranking {
         const sameSize = latest.current.answered === wanted
         latest.current = { data: answer, got: stamp, size: wanted, answered: wanted }
         setData(answer)
+        // Review L16: an underlying the new ranking does not hold no longer filters it to nothing.
+        setUnderlying((picked) =>
+          picked !== null &&
+          !answer.rows.some(
+            (row) => underlyingOf(row.contract.symbol, row.contract.exchange) === picked
+          )
+            ? null
+            : picked
+        )
         setGot(stamp)
         setProblem(null)
         const was = before?.rows.map((row) => row.contract.key) ?? []

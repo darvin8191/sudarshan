@@ -47,10 +47,11 @@ export function offerFor(
  * The offers of one page: `v2` is the watchlist switch; market alerts are off only when the
  * Alerts state says so (an unread state offers the item, and the Alerts page says what it finds).
  * A list a screener screen fills is told to the form with `fed`, from the screens the page knows.
+ * With `v2` off the Alerts state is not read at all: the page is today's page (review H1).
  */
 export function useAlertOffers(v2: boolean, fedIds: ReadonlySet<number>) {
   const navigate = useNavigate()
-  const alerts = useMarketAlertsState().data?.enabled !== false
+  const alerts = useMarketAlertsState(v2).data?.enabled !== false
   const go = useCallback((href: string) => navigate(href), [navigate])
   return useCallback(
     (ref: string, name: string, count: number | undefined, kind: RefKind = 'list') => {

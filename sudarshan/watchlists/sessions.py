@@ -6,8 +6,9 @@ own window); a date it has no such row for is left out, and ``expiry.stop_ms`` s
 the regime of the day (the one rule of the watchlists package, read from the alerts sessions
 table). The calendar's *default* F&O close is deliberately not used: only a dated row for a
 special day overrides the regime. ``market_open`` says whether the underlying's
-own exchange is trading at an instant, by the calendar's effective window. Request-driven reads of
-OpenAlgo's own tables; no clock here (the instant is an argument), no thread, no timer. The
+own exchange is trading at an instant, by the calendar's effective window. ``index_underlyings``
+says which underlyings' contracts are an index's, as the master contract says. Request-driven reads
+of OpenAlgo's own tables; no clock here (the instant is an argument), no thread, no timer. The
 calendar's scoped session is removed after each question.
 """
 
@@ -20,6 +21,17 @@ from sudarshan.watchlists import numfmt
 from utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def index_underlyings() -> frozenset[str]:
+    """The underlyings whose contracts are an index's (their expiry stops at 15:30 from 7 Dec
+    2026): OpenAlgo's one rule, the master contract's answer (``sudarshan.index_contracts``, which
+    the sandbox, the scalping terminal and the chart ask too, v0.8.1 review L1). Read at most every
+    ten minutes; while the master cannot be read, the names every reader knows, never a guess
+    (v0.9.0 review M1). Its symbol session is released by the request's teardown."""
+    from sudarshan import index_contracts
+
+    return index_contracts.underlyings().indices
 
 
 def closes(dates: Iterable[str], exchange: str) -> dict[str, int]:

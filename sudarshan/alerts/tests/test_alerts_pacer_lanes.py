@@ -20,6 +20,7 @@ from sudarshan.alerts.owner import Owner
 from sudarshan.alerts.service import AlertService
 from sudarshan.common import pacer as common
 from sudarshan.ops.events import record
+from sudarshan.tasks import cancel_and_wait
 
 
 def slots(pacer: Pacer, lane: str) -> list[float]:
@@ -97,6 +98,76 @@ def test_a_waiting_order_alert_holds_back_the_market_notices_and_reports():
     assert pacer.orders_waiting() is True
     pacer.orders_waiting = lambda: False
     assert not any(pacer.blocked(lane) for lane in pacer.lanes)
+
+
+def test_a_notice_that_has_waited_its_limit_holds_back_the_market_lane(monkeypatch):
+    """L2: the notice lane tells the Pacer from when a notice ready to go found no slot; once it
+    has waited NOTICE_WAIT_S the market lane takes no slot until the notice has taken one."""
+    assert outbox.NOTICE_WAIT_S == 60.0
+    monkeypatch.setattr(outbox, "MIN_GAP_S", 0.0)
+    monkeypatch.setattr(notices, "NOTICES_PER_MINUTE", 1)
+    now = {"t": 1000.0}
+    pacer = Pacer()
+    pacer.clock = lambda: now["t"]
+    pace = LanePace(pacer)
+    for _ in range(12):  # a market storm has used the twelve slots the lanes share
+        pacer.took(MARKET)
+    assert pace.wait(0.0) > 0 and pacer.waiting(NOTICES) and not pacer.blocked(MARKET)
+    now["t"] += 59.0
+    assert pace.wait(0.0) > 0 and not pacer.blocked(MARKET)  # the wait counts from the first ask
+    now["t"] += 2.0
+    assert pacer.blocked(MARKET) and not pacer.blocked(NOTICES)
+    assert [lane for lane in pacer.lanes if pacer.blocked(lane)] == [MARKET]
+    pace.took(0.0)
+    assert not pacer.waiting(NOTICES) and not pacer.blocked(MARKET)
+    assert pace.wait(0.0) > 0 and pacer.waiting(NOTICES)  # the next notice waits a minute
+    pace.idle()  # nothing ready to go after all
+    assert not pacer.waiting(NOTICES)
+    now["t"] += 100.0
+    assert pace.wait(0.0) == 0.0 and not pacer.waiting(NOTICES)  # a slot: nothing waits
+
+
+def test_a_market_storm_holds_a_notice_back_no_longer_than_its_limit(monkeypatch):
+    """L2: a steady storm takes every slot the lanes share, and the notice desk, which looks again
+    just after a slot frees (0.05 s), loses each one to the market lane, which is there on time.
+    Once the notice has waited NOTICE_WAIT_S it takes the next slot. A minute is two seconds here,
+    and the gap between two messages (0.1 s) is longer than the desk's lateness, as the real one
+    (1.1 s) is."""
+    from sudarshan.alerts.market import lane as market_lane
+    from sudarshan.alerts.market.lane import Line, MarketLane
+
+    monkeypatch.setattr(outbox, "MINUTE_S", 2.0)
+    monkeypatch.setattr(outbox, "MIN_GAP_S", 0.1)
+    monkeypatch.setattr(outbox, "NOTICE_WAIT_S", 2.0)
+    monkeypatch.setattr(notices, "NOTICES_PER_MINUTE", 1)
+    for name, value in {"COALESCE_S": 0.01, "POLL_S": 0.01, "MAX_LINES": 1}.items():
+        monkeypatch.setattr(market_lane, name, value)
+    at = ist(2026, 10, 21, 10, 42, 5)
+    sent: list[tuple[float, str]] = []
+
+    async def send_market(text):
+        sent.append((time.monotonic(), MARKET))
+        return outbox.SENT, ""
+
+    async def scenario():
+        pacer = Pacer()
+        market = MarketLane(send_market, lambda: at, pacer, lambda *a: None)
+        market.add([Line(n, f"Alert: line {n}", at) for n in range(150)])
+        task = asyncio.create_task(market.run())
+        try:
+            await wait_until(lambda: len(sent) >= 12, 3)  # the shared slots are taken
+            pace, began = LanePace(pacer), time.monotonic()
+            while (wait := pace.wait(0.0)) > 0:  # the desk's own loop: look, sleep, look again
+                await asyncio.sleep(wait + 0.05)
+                assert time.monotonic() - began < 5.0, "the storm held the notice back"
+            pace.took(0.0)
+            waited = time.monotonic() - began
+            assert waited < outbox.NOTICE_WAIT_S + 1.0, waited  # the limit, then one slot
+            assert len(market) > 0  # the storm was still on when the notice went
+        finally:
+            await cancel_and_wait(task)
+
+    asyncio.run(scenario())
 
 
 def test_a_waiting_market_message_holds_back_the_reports_and_nothing_else():

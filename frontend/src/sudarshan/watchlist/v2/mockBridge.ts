@@ -19,6 +19,8 @@ type Handler = (call: Call) => unknown | Promise<unknown>
 export function createBridge() {
   const handlers = new Map<OpName, Handler>()
   const calls: Call[] = []
+  /** Every request the page asked of the client, a route the bridge does not know included. */
+  const requests: Array<{ method: string; path: string }> = []
 
   const match = (method: string, path: string): OpName | null => {
     const bare = path.slice(API_PREFIX.length)
@@ -49,6 +51,7 @@ export function createBridge() {
     )
 
   const send = async (method: string, path: string, params: object, body: unknown) => {
+    requests.push({ method, path })
     const op = match(method, path)
     if (!op) throw new Error(`no such route: ${method} ${path}`)
     // The bridge reads a GET or DELETE from the query string (primitives only) and every other
@@ -95,12 +98,14 @@ export function createBridge() {
   return {
     client,
     calls,
+    requests,
     /** What an op answers: its data, or a ready envelope (an error one is thrown as the client sees it). */
     on: (op: OpName, handler: Handler) => handlers.set(op, handler),
     count: (op: OpName) => calls.filter((call) => call.op === op).length,
     reset: () => {
       handlers.clear()
       calls.length = 0
+      requests.length = 0
     },
   }
 }

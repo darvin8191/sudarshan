@@ -1060,6 +1060,28 @@ def test_the_desk_takes_its_slot_from_a_shared_pacer(tmp_path):
     asyncio.run(scenario())
 
 
+def test_a_notice_that_is_no_longer_ready_stops_counting_as_waiting(tmp_path):
+    """L2: the market lane gives way only to a notice ready to go. One the desk no longer has to
+    send (sent elsewhere, settling, waiting for the close) stops counting at its next look."""
+    clock = Clock(T0)
+    spool = tmp_path / "events.jsonl"
+    note(spool, "installed", "i1", tag="v0.3.3")
+    pacer = outbox.Pacer()
+    for _ in range(12):  # the twelve slots the lanes share are taken
+        pacer.took(outbox.MARKET)
+    d, send = desk(tmp_path, clock, pace=LanePace(pacer))
+
+    async def scenario():
+        await settle(d, clock)
+        assert await d.sweep() > 1.0 and send.texts == []
+        assert pacer.waiting(outbox.NOTICES)
+        spool.unlink()  # nothing left to tell
+        await d.sweep()
+        assert not pacer.waiting(outbox.NOTICES)
+
+    asyncio.run(scenario())
+
+
 @pytest.mark.skipif(
     not hasattr(outbox, "Pacer"), reason="outbox.Pacer arrives with the market alerts lanes"
 )

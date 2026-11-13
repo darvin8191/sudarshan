@@ -228,6 +228,14 @@ class LiveSource:
     def printed(self, member: Member) -> bool:
         return self.bars.printed(member.key, self.market.today)
 
+    def printed_at(self, member: Member) -> int | None:
+        return self.bars.printed_at(member.key, self.market.today)
+
+    def follows(self, member: Member) -> bool:
+        """Whether the screener follows the instrument: one cut by the key limit is never claimed,
+        so it can never print here and no screen waits for it (review N9)."""
+        return member.key not in self._over
+
     # ---- a preview (6.3): the screen judged now on the last closed candle, nothing saved -----------------
     async def preview(self, plan: Plan, stored: Mapping[str, Any], now: int) -> dict[str, Any]:
         from . import runs, scheduler, screen_ops, words

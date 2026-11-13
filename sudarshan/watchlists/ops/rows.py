@@ -241,7 +241,7 @@ def resolve(args: dict) -> dict:
     answered = resolver.resolve_rows(
         rules, items, now_ms=now, connected=args["connected"], ix=ix,
         row_of=m.row, isin=m.isin, closes_of=lambda fo, dates: sessions.closes(dates, fo),
-        is_open=sessions.market_open, feed=feedsnap.read,
+        is_open=sessions.market_open, feed=feedsnap.read, indices=sessions.index_underlyings(),
     )  # fmt: skip
     out = {"rows": [r for r in answered if r["id"] < base]}
     if drafts is not None:

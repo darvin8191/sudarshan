@@ -19,6 +19,7 @@ closes come in as arguments.
 
 from __future__ import annotations
 
+from sudarshan import regimes
 from sudarshan.watchlists import dynamic, search
 from sudarshan.watchlists.presets import Built, Entry, Prepared
 
@@ -36,11 +37,20 @@ INDICES = (
     ("SENSEX", BSE_INDEX),
     ("BANKEX", BSE_INDEX),
 )  # fmt: skip
-#: The index underlyings, in the order Index futures show them. The screener's set
-#: (``sudarshan.alerts.market.sessions.INDEX_UNDERLYINGS``), which a test holds equal.
-INDEX_UNDERLYINGS = (
+#: The order Index futures show the index underlyings in; any other name of the shared list comes
+#: after these, A to Z.
+SHOWN_FIRST = (
     "NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50", "SENSEX", "BANKEX", "SENSEX50",
 )  # fmt: skip
+#: The index underlyings: the one list the screener and the alerts read
+#: (``sudarshan.regimes.INDEX_UNDERLYINGS``), imported rather than copied, so the two cannot drift
+#: (a copy here missed NIFTYFPI when v0.8.1 added it: v0.9.0 review M1). In the order shown.
+INDEX_UNDERLYINGS = tuple(
+    sorted(
+        regimes.INDEX_UNDERLYINGS,
+        key=lambda u: (SHOWN_FIRST.index(u) if u in SHOWN_FIRST else len(SHOWN_FIRST), u),
+    )
+)
 
 
 def _row(ix: search.Index, symbol: str, exchange: str, types: tuple = ()):

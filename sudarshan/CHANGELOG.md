@@ -5,14 +5,178 @@ publish. The owner publishes each release on GitHub. The server's deploy timer t
 outside 08:30-16:00 IST on trading days (09:00-15:45 until v0.3.1), keeps backups, and rolls
 back if the app does not come up healthy.
 
+## v0.10.0 (14 Nov 2026)
+
+Groundwork for the family view and the trade journal, which come in the next releases. Nothing you
+trade with or look at changes. It includes everything in v0.9.0. **Publish it only after v0.9.0 has
+installed and run one trading day.**
+
+### What changes for you from the day you install it
+- **Nothing on your screens.** Orders, the risk rules, charts, alerts, the screener, the watchlists
+  and the portfolio work as in v0.9.0.
+- **The price feed knows its clients.** At the deploy's next run, about ten minutes after the
+  install, six key files appear together in `/etc/sudarshan/feed-clients/`, one for each SUDARSHAN
+  service that asks the feed for prices. From then on the feed changes what it follows for a service
+  only when that service shows its own key, so one service can no longer drop another's prices.
+  Everything keeps running while this happens. A service that cannot read its key keeps the prices
+  it already follows and says the feed did not take its new ones; no screen says "Real-time"
+  without ticks.
+- **The portfolio checks the Upstox Analytics Token once a day,** at its first start that day (three
+  reads), so a lapsed token is said early.
+- **Server notices on Telegram take turns with order and market alerts.** During a burst of market
+  alerts a server notice waits a minute at most.
+- **The portfolio's database gains two empty tables** (for tabs you may later share with family),
+  made when the service starts; a rollback puts the old file back.
+- **The price feed's state folder can be read only by the SUDARSHAN account and its group,** as the
+  other services' folders already are.
+
+### What you must do
+- **Nothing when you publish.**
+- **For the family view, when you want it** (it comes in a later release, switched off): run the
+  one-time set-up from your SSH session, as written in `sudarshan/README.md` under "The family view's
+  one-time set-up". It makes the family account, its own folder of keys and its own firewall rules,
+  then checks that the account cannot read any of your secrets, and ends with `PASS.` Nothing else on
+  the server changes, nothing runs for the family until that release arrives and you turn it on, and
+  running it again is safe. Put ` --dry-run` after it to see first what it would do.
+
+### What is refused now that used to be accepted
+- **A request that changes what the price feed follows, without a service's key,** once the key
+  files exist. Only SUDARSHAN's own services make such requests; the `curl` examples in
+  `sudarshan/feed/README.md` now need the key's header.
+
+### Still to check, or not modelled
+- **The family and journal parts in this release do nothing yet:** the portfolio's reads for family
+  members (a member sees only what the tabs shared with them reach, never another member's name or
+  account), the family check and the family notices stay switched off until their own releases.
+- **Upstox's orders and trades answers,** which the family view and the journal will read, were
+  built from Upstox's documented fields, not from a captured answer. They are compared with the live
+  book on the first session that uses them.
+- **In the family view, a member not shown quantities would also miss the line saying how old the
+  figures are** (that line travels with the quantities). This is settled before the family view is
+  turned on.
+- **If the alerts service cannot show the feed its key,** its log says "The price feed is not
+  answering", which is not the cause. The prices it already follows keep coming.
+- **If the server runs out of open files while the feed lists its key folder,** the feed reads the
+  folder as empty and accepts requests without a key until its next listing.
+
+## v0.9.0 (14 Nov 2026)
+
+The new watchlists: sections inside a list, rows that follow an index's ATM option or its
+current-month future by themselves, built-in lists, rankings from Upstox, favourite tabs, flags and
+notes, a line with what you hold, copy and move between lists, TradingView import and export, and
+alerts on a whole list. **All of it ships switched off** (`SUDARSHAN_WATCHLISTS_V2` is off): until a
+later release turns it on, the watchlist page on the phone and the lists on /trading work exactly
+as in v0.8.1, and nothing you trade with changes. It includes everything in v0.8.1. **Publish it
+only after v0.8.1 has installed and run one trading day.**
+
+### What changes for you from the day you install it
+- **Nothing you can see.** The watchlist page, /trading's lists, the Holdings page and market alerts
+  read as they do in v0.8.1.
+- **Upstox holdings carry each row's ISIN inside the app** (the new watchlists match a holding to
+  its NSE or BSE row by it). Nothing shows it yet, and every reader of the holdings was checked:
+  none changes what it shows or decides.
+- **A new file, `db/sudarshan_watchlists.db`.** The deploy creates it, backs it up with the app's
+  database before each install and puts it back on a rollback. While the switch is off, the only
+  write to it comes when a list is deleted or cleared (on /trading or the phone): that list's
+  sections and layout there are cleared with it.
+- **Market alerts' own database gains a table for alerts on a list** when the service starts, and the
+  service reads it once a minute during market hours (there are none while the switch is off). It
+  makes no call to the app or to Upstox for this. A rollback puts the old file back.
+- **The release's build takes longer**, because the tests have grown: allow about 40 minutes after
+  you tap Publish before its files are attached. The server installs it after that, outside market
+  hours as before.
+
+### What the new watchlists do, once they are turned on
+- **Sections** inside a list (up to 20), each with one of five marks (a colour with its shape and
+  name, never colour alone); a folded section stays folded on that phone. Edit mode saves a new order
+  in one go; a symbol can be moved to a section, or copied or moved to another list.
+- **Rows that follow:** an index's ATM option, ATM+2 and so on or a fixed strike, as one contract or
+  as a strike row (CE, strike and PE in one row), or its current-month future. They roll by themselves
+  at the close of expiry day and say "Rolled to ..." for a minute. Up to 20 in a list. Buy and Sell
+  in their sheets open the usual order ticket on the contract the row shows.
+- **Built-in lists:** Indices, NIFTY 50, NIFTY BANK, F&O stocks and Index futures, locked, with Make a
+  copy. NIFTY 100, 200 and 500 and ten sector lists appear once their files are put on the server
+  (`/etc/sudarshan/universes/`).
+- **Rankings from Upstox** (gainers, losers, most active and Upstox's other categories, for index,
+  stock and commodity futures and options): 20 rows, 50 on request, marked "Ranked by Upstox" with
+  the ranking's age, never "Real-time". Pull down on a ranking to read it again.
+- **Seven favourite tabs** (your first seven lists until you pin your own), **five flags** (Watch,
+  Breakout, Results, Long term, Avoid; you can rename them) and **notes** of up to 500 characters on a
+  symbol. Flags and notes are yours alone: the family view will never show them.
+- **Sort** per list, high first or A to Z, with the change measured from the previous close or from
+  today's open, saved on the server so the phone and a tablet agree.
+- **"Show what I hold"** per list, off by default: each row adds the quantity you hold and your net
+  position. While it is on, the page reads Holdings and Positions when it opens, after an order, on a
+  reconnect and every 45 s while a market is open, as the Holdings page does.
+- **Symbol search** that understands expiry words, strikes, ATM, ISIN and futures, with a suggestion
+  for a typo.
+- **TradingView:** export a list to the text TradingView imports (sections kept), and import a
+  TradingView export into your lists (a file longer than 250 symbols is split).
+- **Alerts on a list** (market alerts must be on too): one alert watches every symbol of a list or a
+  section, follows the list's changes at once, and sends several firings close together as one
+  Telegram message.
+- **A change on any device reaches the phone within a second,** /trading's panel included.
+- **Limits:** 50 lists, 250 symbols in a list, 20 sections. A list longer than 250 rows follows the 120
+  rows around where you are scrolled; a row the page is not following shows its last price in grey
+  with its time, never as current.
+
+### What you must do
+- **Nothing when you publish.** The deploy creates the watchlists file and adds
+  `SUDARSHAN_WATCHLISTS_V2='off'` to the app's settings. No other setting changes.
+- **On the first trading day after it installs,** open Holdings on the phone and on the web: the same
+  rows, quantities and P&L as before. That is the check your rules ask for when a field is added to
+  a broker's book; the ISIN itself is checked against Upstox's raw answer in the tests.
+- **Turning it on is a later release's job,** after you say so. On the first day it is on, check:
+  - a ranking opens with rows and an age that moves, and says how many contracts it left out, if any
+    (Upstox's real answer has not been seen yet);
+  - a symbol added on /trading appears on the phone within a second;
+  - an ATM row's strike matches the option chain page's ATM, and on the next NIFTY expiry day the ATM
+    and future rows roll at the close;
+  - a quote read after 09:15 gives each row its open (change from today's open shows a dash until
+    then);
+  - two devices each on a 250-row list stay connected past 10 minutes;
+  - pull down on a ranking: it reads again, and Chrome does not reload the page;
+  - in Analyze mode, one Buy from a follow row's sheet and one from a ranking's sheet open the
+    ticket on the right contract (your rules ask for one use of each new way into the ticket);
+  - export one watchlist from TradingView and hand the file to the next work session, so the forms
+    of index futures and BSE contracts can be checked (until then they are left out of export and
+    import, with a sentence saying so).
+
+### What is refused now that used to be accepted
+- Nothing, while the switch is off.
+
+### Still to check, or not modelled
+- **Upstox's rankings are built from its documentation.** If its real answer has another shape, a
+  ranking says it could not be read; it never shows an empty or wrong list as current.
+- **TradingView's forms for index futures other than NIFTY and BANKNIFTY, and for BSE futures and
+  options, are not checked yet,** so those rows are left out of an export and an import with a
+  sentence naming them, until one real TradingView export confirms the forms.
+- **A strike row added from a dated expiry tab follows the nearest expiry, not that date.** The form
+  says so and says when it moves; a row that stays on one dated expiry needs a database step in a
+  later release.
+- **A note you are typing is lost if the symbol's sheet closes before Save** (Back, a tap outside,
+  Buy). Your choice for a later release: save it when the sheet closes, or ask first.
+- **Moves not saved in edit mode:** every way off the list asks first ("Save the new order?"), except
+  leaving the page with the bottom bar, which drops them.
+- **A section's menu has no Export yet;** export works from the list's menu.
+- **Copying or importing 250 symbols into an existing list takes about 2 s** (measured on a test
+  machine; the aim was under 1 s). The page stays usable meanwhile; it is to be measured on the
+  server before turning it on, with the app's memory after a trading day with the switch on.
+- **On a special-session expiry day** (none is announced), a follow row on an index contract rolls at
+  the session's end rather than at the index's 15:30 stop, and the built-in Index futures list rolls
+  its BSE futures at NSE's close for that day.
+
 ## v0.8.1 (13 Nov 2026)
 
 The market's timings change on **Monday 7 Dec 2026** (SEBI's circular of 15 Oct 2026, NSE's of
 6 Nov 2026): F&O trades to 15:45, an expiring index contract stops at 15:30 on its expiry day, and
 a stock with derivatives closes by auction from 15:30 to 15:40. SUDARSHAN switches to them that
-morning by itself; nothing changes before 7 Dec. It includes everything in v0.8.0. **Publish it
-only after v0.8.0 has installed and run one trading day, and no later than Friday 4 Dec**, so it is
-installed before the Monday it is for.
+morning by itself. Before 7 Dec the hours stay as they are. Two things change from the day you
+install it: what you see once an expiring contract stops at 15:40 on its expiry day (the second
+item below), and a screen's 15:30 check that waits for an auction price that has not come is not
+marked late and keeps the screen's later checks behind it (the fourth). It includes everything in
+v0.8.0. **Publish it only after v0.8.0 has installed and run one trading day, and no later than
+Friday 4 Dec**, so it is installed before the Monday it is for.
 
 ### What changes for you on 7 Dec 2026
 - **F&O runs to 15:45 everywhere:** the charts on the phone and on /trading (the 15:40 five-minute
@@ -25,20 +189,36 @@ installed before the Monday it is for.
   NIFTYFPI and the others; a stock contract trades to 15:45). Its chart opens no candle after
   15:30 and its countdown ends at 15:30; the chart's marker and the order ticket say "Stopped
   trading at 15:30", never "Stale". The scalping terminal moves to the next expiry by itself at
-  15:30. Until 6 Dec every expiring contract stops at 15:40, and the same happens then.
+  15:30 and says so ("The 08DEC26 expiry stopped trading at 15:30. Now showing 15DEC26."). Until
+  6 Dec every expiring contract stops at 15:40, and from the day you install this the same happens
+  then: the chart's marker and the order ticket say "Stopped trading at 15:40" where they said
+  "Market closed", the scalping terminal moves on and says so, and Analyze mode refuses the
+  contract's orders (see below).
 - **Analyze mode settles an expiring index contract** at 15:30 on its expiry day, and a stock
   contract at 15:45. Until 6 Dec every expiring contract settles at 15:40. Your MIS square-off time
   does not change. An index contract is told from the master contract, so NIFTYFPI's and BSE's
   Focused IT's contracts settle at 15:30 too.
 - **A stock with derivatives** trades to 15:30, then closes by auction. It shows "Closing auction ·
-  price at about 15:40" until its price comes, and alerts and screens wait for it until 15:45 at
-  the latest (a price stamped a moment after 15:40 still counts). On the charts its auction price
-  becomes the close of the day's last candle (the 15:29 minute, the 15:25 five-minute candle, the
-  15:15 hourly candle), on every timeframe, and never opens a candle after 15:30.
+  price at about 15:40" until its price comes, and alerts wait for it until 15:45 at the latest (a
+  price stamped a moment after 15:40 still counts). A screen holding such stocks (F&O stocks, a
+  NIFTY list, a watchlist with one) makes its 15:30 check when their prices are all in, at about
+  15:40, and at 15:45:05 at the latest. The check is on time, not marked late, and a watchlist
+  screen's later checks (15:35 and 15:40 on a short timeframe) wait for it and come after it, in
+  order. Before 7 Dec the same wait ends at 15:35:05 when a price has not come by 15:30:05, with
+  the same rules. On the charts its auction price becomes the close of the day's last candle (the
+  15:29 minute, the 15:25 five-minute candle, the 15:15 hourly candle), on every timeframe, and
+  never opens a candle after 15:30.
 - **An index's closing value**, if NSE sends it after 15:30 with the auction's prices, is taken
   until 15:45 as the day's last value: price and % move alerts judge it, the screener's index
-  candles and the charts close at it. An index alert at candle close judges its last candle at
-  15:45:05, and a screen with indices runs its 15:30 check at 15:45:05, whether or not it comes.
+  candles and the charts close at it. Whether or not it comes, a price or % move alert on an index
+  at candle close judges the day's last candle (the one ending at 15:30) at 15:45:05, and a screen
+  of indices makes its 15:30 check at 15:45:05 (on time, not marked late). **That is after F&O
+  closes at 15:45, so that day such an alert or check cannot be acted on in F&O**; until 6 Dec it
+  came at 15:30:05, with 10 minutes of F&O left. A screen with no index among its instruments, a
+  watchlist screen included, does not wait for it. A watchlist screen that holds an index and F&O
+  contracts makes its later checks after its 15:30 check, so at 15:45:05, after F&O closes (on a
+  1-minute screen that is every check from 15:31 to 15:44); keep the index in a screen of its own
+  to keep those checks on time.
 - **A stock without derivatives** closes at 15:30 with no auction and keeps its usual close.
 - **Auto-login** may log in until 15:45. Test now is refused from 09:00 to 15:45 while Upstox is
   connected, and the page names the day's hours.
@@ -58,8 +238,8 @@ installed before the Monday it is for.
   8 Dec an expiring NIFTY, BANKNIFTY or SENSEX contract cannot be traded after 15:30 on its expiry
   day. Check any exit you set for after 15:30: a strategy's exit time, a Python strategy's stop
   time, a Flow time window, an NRML position you meant to close near the old 15:40. From 15:30 the
-  scalping terminal shows the next expiry by itself, and its Close cannot close a position in the
-  expiring contract either.
+  scalping terminal shows the next expiry by itself and says so, and its Close cannot close a
+  position in the expiring contract either.
 - **If you set your own NFO or BFO close** on the timings page, it stays as you set it on every
   date. Set it back to 15:40 to let it follow by itself, or to 15:45.
 - **If you set your own window** in `SUDARSHAN_FEED_WINDOW`, `SUDARSHAN_ALERTS_WINDOW` or
@@ -69,11 +249,17 @@ installed before the Monday it is for.
   timings page shows NFO today as 09:15-15:45; the feed's health shows hours 08:58-15:55.
 - **That afternoon, check:** after 15:40 a NIFTY future's phone chart still forms candles (the 15:40
   candle opens); after about 15:40 RELIANCE's 15:25 five-minute candle closes at its auction price;
-  in the feed's record, what NIFTY 50 and SENSEX send from 15:30 to 15:45; after 16:05 the
-  portfolio's index history runs.
-- **On Tue 8 Dec (NIFTY expiry), check:** after 15:30 the expiring NIFTY contract's chart opens no
-  candle and says "Stopped trading at 15:30", the scalping terminal shows the next expiry, and an
-  Analyze order on the contract is refused; its Analyze position settles at 15:30.
+  from 15:30 to 15:45, NIFTY 50's and SENSEX's prices on their phone charts: whether they stay at
+  their 15:29 value, change once at about 15:40 (the closing value), or keep changing (see "Still
+  to check" below). Note which, for the next release.
+- **Left to the server session that evening:** whether the portfolio's index history for the
+  benchmarks ran after 16:05. Nothing on the phone shows it; the session reads
+  `sudo journalctl -u sudarshan-portfolio -n 200 --no-pager`, where the day's line after 16:05 says
+  "index history ok" (or "skipped" with nothing to fetch), never "failed".
+- **On Tue 8 Dec (NIFTY expiry), check,** on charts and a scalping page opened that day: after 15:30
+  the expiring NIFTY contract's chart opens no candle and says "Stopped trading at 15:30", the
+  scalping terminal shows the next expiry and a notice saying so, and an Analyze order on the
+  contract is refused; its Analyze position settles at 15:30.
 
 ### What is refused now that used to be accepted
 - **In Analyze mode, an order on an expiring contract after its stop on its expiry day** (15:40
@@ -86,9 +272,15 @@ installed before the Monday it is for.
   line. Which stocks close by auction comes from reports of NSE's circulars of 6 Nov 2026 (stocks
   with derivatives on any exchange); NSE's own text was not read.
 - **An index's closing value after 15:30 is not confirmed.** Whether NSE sends NIFTY 50's and
-  SENSEX's closing value with the auction's prices is to be seen on 7 Dec in the feed's record. If
-  nothing comes, nothing changes, apart from the index alerts at candle close and the index screens
-  being judged at 15:45:05.
+  SENSEX's closing value with the auction's prices is to be seen on 7 Dec (the afternoon check
+  above). If nothing comes, nothing changes, apart from the index alerts at candle close and the
+  screens of indices being judged at 15:45:05.
+- **Every index value from 15:30 to 15:45 counts as the closing value.** If NSE sends values during
+  the auction (as it does in the pre-open), each one is judged as it comes: a price alert can fire
+  on one that is not the close, and the day's last candle on the charts and in the screener takes
+  its high or low (one at 26,100 at 15:31 and the close at 26,020 at 15:40 leave the 15:25
+  five-minute candle with a high of 26,100 and a close of 26,020). If the 7 Dec check shows values
+  during the auction, only the last one should count; that needs a fix.
 - **Upstox's intraday history after 7 Dec is not seen yet.** If it gives the auction's price a
   candle of its own after 15:30, that candle shows on a chart loaded later; the live chart puts the
   price in the day's last candle. An hourly candle from 15:15 (and a 30-minute one) spans the close
@@ -96,8 +288,23 @@ installed before the Monday it is for.
 - **BSE's Focused IT index contracts** are told from the master in Analyze mode, the charts and the
   scalping terminal. Market alerts and the screener know index contracts by name (NIFTYFPI added),
   so a market alert on a Focused IT contract runs to 15:45 on its expiry day.
+- **A stock is told from an index by the master contract**: an F&O name the master does not list
+  as a cash stock reads as an index's. A stock whose F&O and cash names differ for a while (during
+  a rename, say) would stop at 15:30 on its expiry day in Analyze mode, on the charts and in the
+  scalping terminal. The app's log names every such name once a day (FOCIT, BSE's Focused IT, is
+  expected there), so the server session can spot one.
 - **The charts and the order ticket ask the server for an instrument's own hours when they open**;
   if the server cannot answer, they keep the exchange's hours, as before.
+- **A chart, order ticket or scalping page left open from the previous day keeps that day's hours
+  until you reload it.** On an expiry day such a chart does not know its contract stops at 15:30:
+  it opens flat candles after 15:30 and says "Stale", and such a scalping page stays on the
+  expiring contract. Reload them, or open them again, each morning.
+- **While a 15:30 check waits** (for an auction price or an index's closing value), the Screener
+  page's "next check" line can name the next trading day, or a 15:35 or 15:40 check that will only
+  come after the waiting one. The checks themselves run in order; only the line is wrong.
+- **A stock with derivatives that the screener does not follow** (past its limit of 320
+  instruments) never gets an auction price there, so a screen holding one waits to 15:45:05 every
+  day, and its later checks with it. Keep such screens smaller than the limit.
 - **Deploy gate:** installs are still kept out only until 16:00, as your rules say. From 7 Dec an
   install between 16:01 and 16:05 can restart the order alerts while they are connected; they read
   the order book again afterwards.

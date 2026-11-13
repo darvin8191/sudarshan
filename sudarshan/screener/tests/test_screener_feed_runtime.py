@@ -250,3 +250,181 @@ def test_a_screen_needing_more_candles_than_a_day_holds_says_it_waits_for_histor
         "Not checked: needs 151 candles of 15 minutes; a day gives 25, and history before today "
         "waits for its download (not set up yet)"
     ), f"the warm-up reads as progress that cannot come today: {reason!r}, {run['matched']} matched"
+
+
+# ---- the 15:30 check held for the closing auction, from 7 Dec 2026 (v0.8.1 review N2) ----------
+THURSDAY = "2026-12-10"
+#: Close above 100.00 on the 15-minute candle: only the auction's price (105.00) makes it.
+ABOVE = {**SPEC, "target": None}
+
+
+@pytest.fixture
+def december(tmp_path, master_fixture):  # noqa: F811
+    store = ScreenerStore(tmp_path / "screener.db")
+    settings = config.Settings.from_env({"SUDARSHAN_SCREENER": "on"})
+    clock = {"now": ms(THURSDAY, "09:14:00")}
+    source = LiveSource(
+        store, FakeFeed(), master_fixture, settings, lambda: clock["now"], Calendar()
+    )
+    source.new_day(clock["now"])
+    source.refresh_universes([{"kind": "fno_stocks"}], clock["now"])
+    yield store, source, clock
+    store.close()
+    store_module.stop()
+
+
+def _trade_to_the_close(source, clock) -> None:
+    """RELIANCE and SBIN trade at 99.00 every minute from 15:15 to 15:29, each minute sealed."""
+    vtt, sealed = 0, []
+    for minute in range(15):
+        at = ms(THURSDAY, "15:15:20") + minute * 60_000
+        sealed += source.on_frame(HEALTH, health(at - 500), at - 500)
+        vtt += 10
+        for key in (RELIANCE, SBIN):
+            sealed += source.on_frame(key, frame(key, at, 99.0, vtt, ltq=10), at)
+        clock["now"] = at + 45_000
+        sealed += source.on_frame(HEALTH, health(clock["now"]), clock["now"])
+        sealed += source.on_clock(clock["now"])
+    source.persist(sealed)
+
+
+def _last_run(store, screen_id: int):
+    return store.read(OWNER, lambda tx: tx.runs_page(screen_id, None, 1))[0]
+
+
+def test_the_check_held_for_the_closing_auction_is_on_time_when_nothing_restarted(december):
+    """Thu 10 Dec: the 15:30 check of an F&O stocks screen waits for the auction prints, which
+    arrive at 15:39:40 and 15:39:41, and is made then with their price. Its history line and its
+    Telegram digest say nothing of a late check: nothing restarted (the first fix said "checked
+    late at 15:39 after a restart")."""
+    store, source, clock = december
+    screen = store.write(
+        OWNER,
+        lambda tx: tx.screen_insert("Above", spec.check(ABOVE), "active", ms(THURSDAY, "15:29")),
+    )
+    made = runner.Runner(store, source, lambda: clock["now"], Calendar())
+    clock["now"] = ms(THURSDAY, "15:29:01")
+    assert asyncio.run(made.tick()) == 1, "its first check: the 15:00-15:15 candle"
+    _trade_to_the_close(source, clock)
+    clock["now"] = ms(THURSDAY, "15:30:05")
+    source.on_frame(HEALTH, health(clock["now"]), clock["now"])
+    assert asyncio.run(made.tick()) == 0, "the 15:15-15:30 candle waits for the prints"
+    sealed = []
+    for key, at, vtt in ((RELIANCE, "15:39:40", 400), (SBIN, "15:39:41", 400)):
+        moment = ms(THURSDAY, at)
+        sealed += source.on_frame(HEALTH, health(moment - 500), moment - 500)
+        sealed += source.on_frame(key, frame(key, moment, 105.0, vtt, ltq=250), moment)
+    source.persist(sealed)
+    assert source.printed_at(source.members({"kind": "fno_stocks"})[1]) == ms(THURSDAY, "15:39:41")
+    clock["now"] = ms(THURSDAY, "15:39:42")
+    assert asyncio.run(made.tick()) == 1
+    run = _last_run(store, screen["id"])
+    assert run["candle_end"] == ms(THURSDAY, "15:30") and run["matched"] == 2
+    assert "late" not in (run["marks"] or {}), run["marks"]
+    digest = next(
+        r
+        for r in store.read(OWNER, lambda tx: tx.outbox_due(clock["now"] + 10**6, 100))
+        if r["kind"] == "digest" and r["ref"] == run["run_key"]
+    )
+    assert digest["payload"]["late_at"] is None
+
+
+def test_a_restart_past_the_auction_hold_is_still_called_late(december):
+    """The same day with the service down from 15:30:10 to 15:50: it never saw the prints, so the
+    15:30 check is made at 15:50, five minutes after its hold ended at 15:45:05, and is marked
+    late, as a check a restart delayed is."""
+    store, source, clock = december
+    screen = store.write(
+        OWNER,
+        lambda tx: tx.screen_insert("Above", spec.check(ABOVE), "active", ms(THURSDAY, "15:29")),
+    )
+    made = runner.Runner(store, source, lambda: clock["now"], Calendar())
+    clock["now"] = ms(THURSDAY, "15:29:01")
+    asyncio.run(made.tick())
+    _trade_to_the_close(source, clock)
+    clock["now"] = ms(THURSDAY, "15:30:05")
+    assert asyncio.run(made.tick()) == 0
+    clock["now"] = ms(THURSDAY, "15:50:00")
+    again = LiveSource(
+        store, FakeFeed(), source.master, source.settings, lambda: clock["now"], Calendar()
+    )
+    again.new_day(clock["now"])
+    again.refresh_universes([{"kind": "fno_stocks"}], clock["now"])
+    restarted = runner.Runner(store, again, lambda: clock["now"], Calendar())
+    assert asyncio.run(restarted.tick()) == 1
+    run = _last_run(store, screen["id"])
+    assert run["candle_end"] == ms(THURSDAY, "15:30")
+    assert (run["marks"] or {}).get("late") == ms(THURSDAY, "15:50:00"), run["marks"]
+
+
+def test_only_a_screen_holding_an_index_waits_for_its_closing_value(december):
+    """Thu 10 Dec (v0.8.1 review N1): a screen of indices holds its 15:30 check until 15:45:05 for
+    the index's closing value, on time then; a watchlist screen whose list holds no index (INFY
+    only) checks at 15:30:05, although a watchlist may hold indices. The first fix held both."""
+    store, source, clock = december
+    watch = {"kind": "watchlist", "list_id": 3}
+    source.refresh_universes(
+        [{"kind": "indices"}, watch],
+        clock["now"],
+        lists={3: [{"symbol": "INFY", "exchange": "NSE"}]},
+    )
+    assert [m.segment for m in source.members(watch)] == ["NSE_EQ"]
+    assert {m.segment for m in source.members({"kind": "indices"})} == {"NSE_INDEX"}
+    made_at = ms(THURSDAY, "15:29")
+    ids = {
+        kind: store.write(
+            OWNER,
+            lambda tx, name=kind, u=universe: tx.screen_insert(
+                name, spec.check({**ABOVE, "universe": u}), "active", made_at
+            ),
+        )["id"]
+        for kind, universe in (("indices", {"kind": "indices"}), ("watchlist", watch))
+    }
+    made = runner.Runner(store, source, lambda: clock["now"], Calendar())
+    clock["now"] = ms(THURSDAY, "15:29:01")
+    assert asyncio.run(made.tick()) == 2, "each screen's first check: the 15:00-15:15 candle"
+    clock["now"] = ms(THURSDAY, "15:30:05")
+    assert asyncio.run(made.tick()) == 1
+    assert _last_run(store, ids["watchlist"])["candle_end"] == ms(THURSDAY, "15:30")
+    assert _last_run(store, ids["indices"])["candle_end"] == ms(THURSDAY, "15:15")
+    clock["now"] = ms(THURSDAY, "15:45:04")
+    assert asyncio.run(made.tick()) == 0
+    clock["now"] = ms(THURSDAY, "15:45:05")
+    assert asyncio.run(made.tick()) == 2, "the held index check, and the watchlist's 15:45 one"
+    run = _last_run(store, ids["indices"])
+    assert run["candle_end"] == ms(THURSDAY, "15:30")
+    assert "late" not in (run["marks"] or {}), run["marks"]
+
+
+def test_an_auction_stock_the_screener_does_not_follow_is_not_waited_for(world, monkeypatch):
+    """Review N9: SBIN is past the key limit (max_keys 1), so no print of it can ever arrive; a
+    screen holding both waits only for RELIANCE's print and, once that has come, is free at once
+    instead of waiting to the window's end for a print it cannot receive."""
+    store, source, clock = world
+    source.new_day(clock["now"])
+    source.refresh_universes([{"kind": "fno_stocks"}], clock["now"])
+    members = source.members({"kind": "fno_stocks"})
+    assert [m.cas for m in members] == [True, True]
+    assert [source.follows(m) for m in members] == [True, False]
+    row = {"spec": {"universe": {"kind": "fno_stocks"}}}
+    run = runner.Runner(store, source, lambda: clock["now"], Calendar())
+    arrived = {RELIANCE: None}
+    monkeypatch.setattr(source.bars, "printed_at", lambda key, today: arrived.get(key))
+    assert run._waits(row).printed is None, "the followed stock has not printed yet"
+    arrived[RELIANCE] = ms(DAY, "15:41")
+    assert run._waits(row).printed == ms(DAY, "15:41"), "the unfollowed one is not waited for"
+    # a source that cannot say which it follows counts every member, as before
+    monkeypatch.delattr(LiveSource, "follows")
+    assert run._waits(row).printed is None
+
+
+def test_waits_of_skips_what_the_screener_does_not_follow():
+    from sudarshan.screener import scheduler as sch
+    from sudarshan.screener.runs import Member
+
+    kept = Member("NSE_EQ|A", "A", "NSE", "NSE_EQ", cas=True)
+    cut = Member("NSE_EQ|B", "B", "NSE", "NSE_EQ", cas=True)
+    arrived = {kept: 1_000}
+    assert sch.waits_of([kept, cut], arrived.get) == sch.Waits(printed=None)
+    assert sch.waits_of([kept, cut], arrived.get, lambda m: m is kept) == sch.Waits(printed=1_000)
+    assert sch.waits_of([cut], arrived.get, lambda m: False) == sch.Waits(printed=0)

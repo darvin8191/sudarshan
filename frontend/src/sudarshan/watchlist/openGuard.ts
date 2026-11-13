@@ -47,12 +47,17 @@ function typing(target: EventTarget | null): boolean {
  * handlers, are swallowed before they reach it (Enter in a field can still
  * submit its form; Space there is only a space), and a tap outside it does not
  * close it. Escape still closes: a key is never the tail of a double tap.
+ *
+ * `step` names what an open sheet shows: when it changes while the sheet stays
+ * open (a form swapped for its confirmation in place), the window starts again,
+ * as if the confirmation had just opened (review M6). Left out, nothing changes.
  */
-export function useOpenGuard(open: boolean): OpenGuard {
+export function useOpenGuard(open: boolean, step?: string): OpenGuard {
   const until = useRef(0)
   const [settling, setSettling] = useState(false)
 
   // Before the first paint of what opened, so no event can reach it unguarded.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new `step` is a new opening; the effect reads nothing of it
   useLayoutEffect(() => {
     if (!open) {
       until.current = 0
@@ -65,7 +70,7 @@ export function useOpenGuard(open: boolean): OpenGuard {
     setSettling(true)
     const timer = setTimeout(() => setSettling(false), ms)
     return () => clearTimeout(timer)
-  }, [open])
+  }, [open, step])
 
   const handlers = useMemo(() => {
     const swallow: Handler = (event) => {

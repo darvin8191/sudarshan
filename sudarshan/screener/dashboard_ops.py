@@ -44,6 +44,7 @@ from .screen_ops import (
     result_rows,
     run_row,
     sched_screen,
+    waits_for,
 )
 from .store import (
     OWNER,
@@ -148,7 +149,11 @@ def _card(
             need, _day_span(screen, sessions, datetime.fromtimestamp(now / 1000, IST).date())
         ),
         # today's next check, else the next trading day's, as the engine line words it
-        "next_at": next_check(ctx, now, [sched_screen(screen)], sessions) if active else None,
+        "next_at": (
+            next_check(ctx, now, [sched_screen(screen)], sessions, waits_for(ctx, [screen]))
+            if active
+            else None
+        ),
         "rows_pending": pending,
         "run": None,
         "matches": None,
@@ -245,10 +250,11 @@ def _read(ctx, pick):
         out = pick(tx, layout, make)
         active = [sched_screen(r) for r in screens.values() if r["status"] == "active"]
         newest = tx.runs_page_all(1)
-        return layout, out, active, (newest[0]["id"] if newest else 0)
+        waits = waits_for(ctx, [r for r in screens.values() if r["status"] == "active"])
+        return layout, out, active, (newest[0]["id"] if newest else 0), waits
 
-    layout, out, active, last_run_id = translate(lambda: store.read(OWNER, read))
-    return now, layout, out, engine_of(ctx, now, active, sessions), last_run_id
+    layout, out, active, last_run_id, waits = translate(lambda: store.read(OWNER, read))
+    return now, layout, out, engine_of(ctx, now, active, sessions, waits), last_run_id
 
 
 @op("dashboard")

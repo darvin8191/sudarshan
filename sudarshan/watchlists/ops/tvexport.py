@@ -18,7 +18,7 @@ import time
 
 from flask import session
 
-from sudarshan.watchlists import refs
+from sudarshan.watchlists import refs, sessions
 from sudarshan.watchlists.ops import OpError
 from sudarshan.watchlists.tvexport import Block, Entry, build
 from sudarshan.watchlists.words import rows as rows_words
@@ -83,17 +83,20 @@ def _resolve(rules: dict[int, dict], *, price: bool) -> dict[int, dict]:
         rules, {i: {"id": i} for i in rules}, now_ms=_now_ms(), connected=False,
         ix=ix, row_of=m.row, isin=m.isin, closes_of=lambda fo, dates: sessions.closes(dates, fo),
         is_open=sessions.market_open, feed=feedsnap.read if price else (lambda keys: {}),
+        indices=sessions.index_underlyings(),
     )  # fmt: skip
     return {r["id"]: r for r in got}
 
 
-def _entry(row, contract: dict, *, today: bool = False) -> Entry:
-    """The entry of a master row (None: only its contract record is known)."""
+def _entry(row, contract: dict, *, today: bool = False, indices=frozenset()) -> Entry:
+    """The entry of a master row (None: only its contract record is known). ``indices`` are the
+    index underlyings the master lists (review M1), which say whether a future is an index's."""
+    under = getattr(row, "underlying", None) or getattr(row, "name", None) or ""
     return Entry(
         "row", contract["exchange"], contract["symbol"], None,
         getattr(row, "instrumenttype", None), contract.get("expiry"),
         getattr(row, "strike", None) or None,
-        getattr(row, "name", None) or None, None, today,
+        getattr(row, "name", None) or None, None, today, under in indices,
     )  # fmt: skip
 
 
@@ -112,6 +115,7 @@ def _blocks(got: dict, only: int | None) -> list[Block]:
     m = master.shared() if (derivs or not fixed_rule) else None
     if m is not None and not m.loaded():
         raise OpError("failed", rows_words.NOT_LOADED)
+    indices = sessions.index_underlyings() if m is not None else frozenset()
 
     # month futures the file may need today: the follow rows of other rules and every dated future
     need: dict[int, dict] = {}
@@ -168,7 +172,7 @@ def _blocks(got: dict, only: int | None) -> list[Block]:
                 )
             for c in made:
                 row = m.row(c["exchange"], c["symbol"])
-                e = _entry(row, c, today=f["kind"] != "month_future")
+                e = _entry(row, c, today=f["kind"] != "month_future", indices=indices)
                 entries.append(_with_cont(e, row, today))
         for r in rows:
             if r["section_id"] != where:
@@ -182,7 +186,7 @@ def _blocks(got: dict, only: int | None) -> list[Block]:
                 if m is not None and c["exchange"] not in _CASH
                 else None
             )
-            entries.append(_with_cont(_entry(row, c), row, today))
+            entries.append(_with_cont(_entry(row, c, indices=indices), row, today))
         out.append(
             Block(None if where is None else names.get(where, ""), tuple(entries), tuple(cuts))
         )

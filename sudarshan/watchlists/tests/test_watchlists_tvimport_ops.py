@@ -203,6 +203,24 @@ def test_a_follow_row_for_an_underlying_without_futures_is_left_out(client):
     assert d["left_out"] == [{"token": "NSE:INDIAVIX1!", "reason": "no_futures"}]
 
 
+def test_index_futures_and_bse_contracts_wait_for_a_checked_form_on_the_way_in(client):
+    """Review M3: the import mirrors the export. An index future other than NIFTY's and
+    BANKNIFTY's, in the chart's spelling or the index's own, any BSE future and a BSE option are
+    left out with one sentence, not turned into rows; INDIAVIX, with no futures at all, still
+    says so (above)."""
+    text = "NSE:CNXFINANCE1!,NSE:FINNIFTY1!,BSE:SENSEX1!,BSE:SENSEX261126C80000,NSE:NIFTY1!"
+    d = data(preview(client, text))
+    assert d["matched"] == 1 and d["follow"] == 1
+    assert [(x["token"], x["reason"]) for x in d["left_out"]] == [
+        ("NSE:CNXFINANCE1!", "unchecked_future"), ("NSE:FINNIFTY1!", "unchecked_future"),
+        ("BSE:SENSEX1!", "unchecked_future"), ("BSE:SENSEX261126C80000", "unchecked_option"),
+    ]  # fmt: skip
+    assert (
+        "Left out until their TradingView form is checked: 3 index futures (NSE:CNXFINANCE1!, "
+        "NSE:FINNIFTY1!, BSE:SENSEX1!) and 1 BSE option (BSE:SENSEX261126C80000)."
+    ) in d["words"]
+
+
 def test_nothing_matched_says_so(client):
     d = data(preview(client, "NASDAQ:AAPL"))
     assert d["words"][0].startswith("None of these symbols could be matched") and d["lists"] == []

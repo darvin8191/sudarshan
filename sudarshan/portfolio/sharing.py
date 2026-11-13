@@ -17,7 +17,7 @@ caller runs them on the store's thread) plus ``Access``, what a request is allow
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -144,13 +144,50 @@ def shown_of(row: Mapping[str, Any] | None) -> dict[str, bool] | None:
 @dataclass(frozen=True)
 class Access:
     """What one family request may touch: the member, their shared tabs (with levels), the
-    categories hidden from them and the scope built from all of it."""
+    categories hidden from them and the scope built from all of it.
+
+    ``scope`` is the base: every shared tab, and the stored floor plus what the caller added. A
+    ``restricted`` share shows no figures of that tab, and only of that tab (L6): an answer about
+    some tabs takes its scope from ``scope_about``, and ``by_tab`` masks each part of an answer
+    that names a restricted tab."""
 
     member: str
     scope: Scope
     shares: tuple[dict[str, Any], ...]
     hidden: frozenset[str]
     upstox_tab_id: int | None
+
+    @property
+    def restricted(self) -> frozenset[int]:
+        """The shared tabs whose share is ``restricted``."""
+        return frozenset(s["tab_id"] for s in self.shares if s["level"] == "restricted")
+
+    def scope_about(self, tab_ids: Iterable[int] | None = None) -> Scope:
+        """The scope of an answer about ``tab_ids`` (None: every shared tab): narrowed to them,
+        and with no figures at all when one of them is restricted."""
+        shared = self.scope.tab_ids or frozenset()
+        ids = shared if tab_ids is None else frozenset(tab_ids) & shared
+        cut = serialize.VIEWER_MASK if ids & self.restricted else frozenset()
+        return Scope(self.scope.principal, ids, self.scope.mask | cut)
+
+    def by_tab(self, data: Any) -> Any:
+        """``data`` with every part that names a restricted tab (a mapping whose ``tab`` is that
+        tab: a summary entry, a tab's view) left without figures, at any depth."""
+        restricted = self.restricted
+        if not restricted:
+            return data
+
+        def walk(node: Any) -> Any:
+            if isinstance(node, Mapping):
+                tab = node.get("tab")
+                if isinstance(tab, Mapping) and tab.get("id") in restricted:
+                    return serialize.masked(node, serialize.VIEWER_MASK)
+                return {key: walk(value) for key, value in node.items()}
+            if isinstance(node, (list, tuple)):
+                return [walk(item) for item in node]
+            return node
+
+        return walk(data)
 
     @property
     def funds_shown(self) -> bool:
@@ -207,8 +244,8 @@ def access_for(tx: Tx, member: str, now: int, tabs: Any = None, mask: Any = None
 
     * tabs: the shared tabs (own rows beat the role's), unexpired, intersected with ``tabs`` when
       the caller names some;
-    * mask: the stored floor, plus what the caller adds, plus the mask of every ``restricted``
-      share.
+    * mask: the stored floor, plus what the caller adds. A ``restricted`` share's mask goes with
+      its own tab only (``Access.scope_about`` and ``Access.by_tab``).
     """
     row = privacy_row(tx, member)
     rows = tx.rows("tab_share", viewer=member)
@@ -226,12 +263,7 @@ def access_for(tx: Tx, member: str, now: int, tabs: Any = None, mask: Any = None
     shared = frozenset(shares) if wanted is None else frozenset(shares) & wanted
     hidden = privacy.hidden_categories(shown_of(row))
     floor = privacy.mask_of(hidden)
-    restricted = (
-        serialize.VIEWER_MASK
-        if any(shares[t]["level"] == "restricted" for t in shared)
-        else frozenset()
-    )
-    scope = Scope("owner", shared, floor | args_mask(mask) | restricted)
+    scope = Scope("owner", shared, floor | args_mask(mask))
     system = tx.rows("tab", system=1)
     upstox_tab = system[0]["id"] if system else None
     return Access(

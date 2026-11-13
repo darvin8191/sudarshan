@@ -26,16 +26,18 @@ UPSTOX_WAIT_S = 1.0
 
 
 async def _upstox_row(ctx, scope=OWNER, principal: str = "owner") -> dict[str, Any]:
-    """The Upstox row as the reader gives it; a failure is the row saying it was not read."""
+    """The Upstox row as the reader gives it; a failure is the row saying it was not read. The part
+    has passed the scope's mask, so a field the mask took (a member with quantities hidden loses
+    the note) is read as absent: the row says what the mask allows, never "not read"."""
     try:
         extra = {} if principal == "owner" else {"principal": principal}
         book = await ctx.ensure_upstox().book(["holdings"], **extra)
         part = serialize.out(scope, book)["holdings"]
         return {
-            "state": part["state"],
-            "read_at": part["read_at"],
-            "note": part["note"],
-            "holdings": part["data"] or [],
+            "state": part.get("state"),
+            "read_at": part.get("read_at"),
+            "note": part.get("note"),
+            "holdings": part.get("data") or [],
         }
     except Exception:
         # The card still shows the owner's own tabs; the Upstox row says it was not read.
@@ -87,12 +89,12 @@ async def summary(ctx, message):
     now, scope, who = ctx.clock(), scope_now(), caller()
     found = await answer(lambda: views.summary(scope, now=now))
     entries = found.get("entries") if isinstance(found, dict) else None
-    if entries and any(e["tab"]["system"] for e in entries):
-        row = await _upstox_within(ctx, scope, who.principal)
-        for entry in entries:
-            if entry["tab"]["system"]:
-                entry["upstox"] = row
-    return found
+    system = next((e for e in entries or () if e["tab"]["system"]), None)
+    if system is not None:
+        # A member's entries are masked each by its own tab's share (L6): the Upstox row too.
+        about = scope if who.access is None else who.access.scope_about({system["tab"]["id"]})
+        system["upstox"] = await _upstox_within(ctx, about, who.principal)
+    return found if who.access is None else who.access.by_tab(found)
 
 
 @op("tab_create")

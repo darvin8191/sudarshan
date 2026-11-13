@@ -51,3 +51,18 @@ export function fakeClock(): void {
     toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'],
   })
 }
+
+/**
+ * Fake timers and a fake clock that move only when the test moves them, the frames above left
+ * alone. For a test that checks the moment just before a timer is due (299 ms of a 300 ms wait):
+ * `fakeClock()`'s clock also moves with real time (a real interval adds 20 ms every 20 real ms,
+ * and `advanceTimersByTimeAsync` gives it the chance to run), so on a loaded machine the timer
+ * fires early and the test fails at random. Nothing here waits on real time: no `waitFor` and no
+ * `findBy` (they poll on timers this clock holds still).
+ */
+export function manualClock(): void {
+  vi.useFakeTimers({
+    shouldAdvanceTime: false,
+    toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'],
+  })
+}

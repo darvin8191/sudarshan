@@ -320,6 +320,7 @@ export interface Ranked {
   read_at: number | null
   rows: Row[]
   left_out: number
+  left_out_words: string | null
   words: string
 }
 

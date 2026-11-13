@@ -96,8 +96,9 @@ export function useArrange({
     [client, view, ref, listId]
   )
 
-  const save = useCallback(async () => {
-    if (!held || !ref) return
+  /** Save order: true once the order is written (review M4: leaving edit mode waits for it). */
+  const save = useCallback(async (): Promise<boolean> => {
+    if (!held || !ref) return false
     setSaid(null)
     const { draft } = held
     const out = await write(draft)
@@ -108,6 +109,7 @@ export function useArrange({
       const fresh = client.getQueryData<View>(viewKey(ref))
       if (fresh) setHeld({ draft: draftOf(fresh, items), base: draftOf(fresh, items) })
     }
+    return out.code === null
   }, [held, ref, write, client, items])
 
   const names = useMemo(
@@ -143,7 +145,7 @@ export function useArrange({
     (edit ? edit.draft.rows.find((row) => row.id === id)?.section : undefined) ??
     view?.rows.find((row) => row.item === id)?.section_id ??
     null
-  return { edit, sendTo, sectionOf }
+  return { edit, sendTo, sectionOf, save }
 }
 
 /** Edit mode of an own list in v2: sections with up and down, and each symbol's own controls. */
@@ -254,7 +256,13 @@ export function ArrangeRows({
           ]
         })}
       </ul>
-      <div className="flex flex-col gap-2 border-t border-[color:var(--divider)] p-3">
+      <div
+        // Review M4: Save order stays on screen while the list scrolls, just above the bottom bar
+        // (on a wide screen there is none). The card clips with overflow-clip in edit mode, as
+        // overflow-hidden would hold a sticky bar to the end of the list.
+        data-save-bar="true"
+        className="sticky bottom-[calc(4.75rem+env(safe-area-inset-bottom))] z-10 flex flex-col gap-2 border-t border-[color:var(--divider)] bg-card p-3 md:bottom-0"
+      >
         {edit.said && (
           <p role="alert" className="text-sm font-medium text-[color:var(--down)]">
             {edit.said}
@@ -275,6 +283,67 @@ export function ArrangeRows({
         )}
       </div>
     </>
+  )
+}
+
+/**
+ * Review M4: leaving edit mode, or the list, while the moves are not saved asks first (`?sheet=
+ * unsaved`, v2 only). Save order writes the draft and goes on; Discard moves drops it and goes on;
+ * Keep editing, the close button, a tap outside or Back stays in edit mode with the moves.
+ */
+export function UnsavedSheet({
+  open,
+  listName,
+  busy,
+  onSave,
+  onDiscard,
+  onKeep,
+}: {
+  open: boolean
+  listName: string
+  busy: boolean
+  onSave: () => void
+  onDiscard: () => void
+  onKeep: () => void
+}) {
+  return (
+    <BottomSheet
+      open={open}
+      onOpenChange={(next) => !next && onKeep()}
+      title="Save the new order?"
+      description={listName}
+    >
+      <div className="flex flex-col gap-3">
+        <p className="text-sm font-medium">
+          You moved symbols in {listName} and have not saved the new order.
+        </p>
+        <div className="flex flex-col gap-2">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onSave}
+            className={cn(BUTTON, 'bg-primary text-primary-foreground hover:bg-primary/90')}
+          >
+            {busy ? 'Saving' : 'Save order'}
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onDiscard}
+            className={cn(BUTTON, 'border border-input bg-card hover:bg-accent')}
+          >
+            Discard moves
+          </button>
+          <button
+            type="button"
+            onClick={onKeep}
+            className={cn(BUTTON, 'border border-input bg-card hover:bg-accent')}
+          >
+            Keep editing
+          </button>
+        </div>
+      </div>
+    </BottomSheet>
   )
 }
 

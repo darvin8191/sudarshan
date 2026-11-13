@@ -116,6 +116,9 @@ class ReplaySource:
     def printed(self, member: Member) -> bool:
         return self.bars.printed(member.key, self.market.today)
 
+    def printed_at(self, member: Member) -> int | None:
+        return self.bars.printed_at(member.key, self.market.today)
+
 
 @dataclass
 class RunLine:
@@ -197,7 +200,7 @@ async def replay_day(
         market_now = Market(*market[:4], Feed("replay", True, now), (), True, auction)
         source.market = market_now
         for due in scheduler.due(sched, market_now.sessions, now, recorded.__contains__,
-                                 printed=lambda s: _printed(source, universes, screens, s)):  # fmt: skip
+                                 waits=lambda s: _waits(source, screens, s)):  # fmt: skip
             recorded.add(str(due.key))
             row = next(r for r in screens if r["id"] == due.screen.id)
             plan = plans[row["id"]]
@@ -230,10 +233,10 @@ def _on_the_day(screen: scheduler.Screen, day: date) -> scheduler.Screen:
     return screen if start <= screen.since < end else replace(screen, since=0)
 
 
-def _printed(source, universes, screens, screen_sched) -> bool:
+def _waits(source, screens, screen_sched) -> scheduler.Waits:
+    """What the screen's members make its last cash candle wait for, as the service asks."""
     row = next(r for r in screens if r["id"] == screen_sched.id)
-    cas = [m for m in source.members(row["spec"]["universe"]) if m.cas]
-    return all(source.printed(m) for m in cas) if cas else True
+    return scheduler.waits_of(source.members(row["spec"]["universe"]), source.printed_at)
 
 
 def _apply(
