@@ -70,11 +70,13 @@ class Runner:
             self._day = key
         return self._sessions
 
-    def _printed(self, screen_row: Mapping[str, Any]):
+    def _waits(self, screen_row: Mapping[str, Any]) -> scheduler.Waits:
+        """What the screen's members make its last cash candle wait for today (review N1): their
+        auction prints, an index's closing value. A source that cannot say when a print came
+        makes nothing wait for the prints."""
         members = self.source.members(screen_row["spec"]["universe"])
-        cas = [m for m in members if m.cas]
-        printed = getattr(self.source, "printed", None)
-        return all(printed(m) for m in cas) if (cas and printed is not None) else True
+        printed_at = getattr(self.source, "printed_at", None) or (lambda member: 0)
+        return scheduler.waits_of(members, printed_at)
 
     def prune(self, now: int) -> dict[str, int] | None:
         """Retention (6.1): runs 100 days (never under 90), values 7, done outbox rows 2; at
@@ -117,7 +119,7 @@ class Runner:
             sessions,
             now,
             recorded.__contains__,
-            printed=lambda s: self._printed(rows[s.id]),
+            waits=lambda s: self._waits(rows[s.id]),
         )
         made = 0
         for item in due:

@@ -16,12 +16,19 @@ A stock that closes by auction has no continuous trade after the cash close unti
 (X6): a screen whose universe holds such stocks holds its last cash boundary of the day until
 every one has printed, or at the latest until the auction window's end plus the grace (S12:
 15:35:05 on a normal day; from 7 Dec 2026, when the auction runs 15:30-15:40 after the cash close
-and its print may come until 15:45, 15:45:05). ``due`` takes ``printed(screen) -> bool`` for that.
+and its print may come until 15:45, 15:45:05).
 
 From 7 Dec 2026 an index's closing value may come after the cash close too (review M2): a screen
-whose universe holds indices holds that boundary until the window's end plus the grace (15:45:05),
+whose universe holds an index holds that boundary until the window's end plus the grace (15:45:05),
 whatever has come, since a closing value cannot be told from a later one. The values it judges are
 the same when none comes.
+
+Both holds are decided by the screen's members today, never by its universe's kind alone (review
+N1: a watchlist screen may hold no index): ``due`` takes ``waits(screen) -> Waits``, which the
+runtime builds from the members with ``waits_of``. A held boundary holds the screen's later
+boundaries too, so its runs are made, recorded and applied to its list in boundary order: a 15:35
+or 15:40 run of a short timeframe never comes before the held 15:30 run, and no member is marked
+missing and then back because of the hold.
 
 A screen made, resumed or edited during the session starts a new version (``Screen.since``, the
 moment it began), and its run key is new for every boundary of the day. It gets one run, on the
@@ -37,9 +44,16 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from typing import Any
 
 from sudarshan.alerts.market.clock import ARRIVAL_GRACE_MS
-from sudarshan.alerts.market.sessions import AUCTION, Session, epoch_ms, key_day
+from sudarshan.alerts.market.sessions import (
+    AUCTION,
+    INDEX_SEGMENTS,
+    Session,
+    epoch_ms,
+    key_day,
+)
 from sudarshan.autologin.schedule import IST
 
 from .types import RunKey
@@ -94,6 +108,35 @@ class Due:
     last: bool = False
 
 
+@dataclass(frozen=True, slots=True)
+class Waits:
+    """What a screen's members make its last cash boundary of the day wait for (review N1). The
+    runtime asks the screen's universe (``waits_of``); the scheduler stays pure."""
+
+    #: Its stocks that close by auction: None while one has not printed; else when the last of
+    #: their prints arrived (epoch ms), 0 when it holds none or no arrival is known.
+    printed: int | None = 0
+    #: Whether it holds an index, whose closing value may come after the cash close (review M2).
+    index: bool = False
+
+
+#: A screen whose members make nothing wait.
+NO_WAITS = Waits()
+
+
+def waits_of(members: Iterable[Any], printed_at: Callable[[Any], int | None]) -> Waits:
+    """A screen's ``Waits`` from its members today (each with ``cas`` and ``segment``, as
+    ``runs.Member``): ``printed_at(member)`` is when a stock's closing auction print arrived (0
+    when not known), or None while it has not come."""
+    found = tuple(members)
+    last: int | None = 0
+    for member in found:
+        if member.cas and last is not None:
+            arrived = printed_at(member)
+            last = None if arrived is None else max(last, arrived)
+    return Waits(last, any(member.segment in INDEX_SEGMENTS for member in found))
+
+
 def _spans(screen: Screen, sessions: Mapping[str, Session]) -> list[Session]:
     return [sessions[name] for name in sorted(screen.segments) if name in sessions]
 
@@ -143,8 +186,9 @@ def _held_until(screen: Screen, sessions: Mapping[str, Session], boundary: Bound
 
 
 def _index_hold(screen: Screen, sessions: Mapping[str, Session], boundary: Boundary) -> int | None:
-    """For a screen with indices, from 7 Dec 2026: the moment its last cash boundary waits until
-    for their closing value (the window's end plus the grace, review M2), else None."""
+    """For a screen whose universe may hold indices, from 7 Dec 2026: the moment its last cash
+    boundary waits until for their closing value (the window's end plus the grace, review M2),
+    else None. Whether it holds one today is its members' (``Waits.index``, review N1)."""
     if screen.on == AFTER_CLOSE:
         return None
     for name in screen.segments:
@@ -152,6 +196,26 @@ def _index_hold(screen: Screen, sessions: Mapping[str, Session], boundary: Bound
         if span is not None and span.close_until is not None and boundary.end == span.end:
             return span.close_until + GRACE_MS
     return None
+
+
+def _released(prints: int | None, index: int | None, waits: Waits, now: int) -> int | None:
+    """Whether a boundary that may be held (``prints``: the latest moment it waits for the
+    auction prints; ``index``: for an index's closing value) is free at ``now``: None while it is
+    held, else the moment its hold ended (0 when nothing held it). The prints end their hold when
+    the last one arrived, at the latest at its window's end; an index's, at its window's end."""
+    ended = 0
+    if prints is not None:
+        if waits.printed is not None:
+            ended = min(waits.printed, prints)
+        elif now < prints:
+            return None
+        else:
+            ended = prints
+    if index is not None and waits.index:
+        if now < index:
+            return None
+        ended = max(ended, index)
+    return ended
 
 
 def _first(today: Sequence[Boundary], since: int) -> int:
@@ -173,13 +237,15 @@ def due(
     now: int,
     recorded: Callable[[str], bool],
     *,
-    printed: Callable[[Screen], bool] = lambda screen: True,
+    waits: Callable[[Screen], Waits] = lambda screen: NO_WAITS,
     session_key: int | None = None,
 ) -> list[Due]:
     """Every run to make now, oldest boundary first: its moment has come, it is not recorded, and
-    (for the last cash candle of a screen with auction stocks) the prints are in or the window has
-    ended. ``recorded(run_key)`` answers from the store. A version that began during the day
-    starts from the latest boundary closed by then (``_first``), not late."""
+    (for the last cash candle of a screen with auction stocks or an index) its hold has ended: the
+    prints are in or their window has ended, and an index's window has ended. A held boundary holds
+    the screen's later ones (review N1). ``recorded(run_key)`` answers from the store and
+    ``waits(screen)`` from the screen's members. A version that began during the day starts from
+    the latest boundary closed by then (``_first``), not late."""
     out: list[Due] = []
     for screen in screens:
         spans = _spans(screen, sessions)
@@ -187,18 +253,19 @@ def due(
             continue
         session = session_key if session_key is not None else spans[0].key
         today = boundaries(screen, sessions)
+        found: Waits | None = None  # the members' word, asked once and only when a hold applies
         for boundary in today[_first(today, screen.since) :]:
             if now < boundary.at:
                 break
-            hold = _held_until(screen, sessions, boundary)
-            if hold is not None and now < hold and not printed(screen):
-                continue
-            wait = _index_hold(screen, sessions, boundary)
-            if wait is not None and now < wait:
-                continue
             key = RunKey(screen.id, screen.version, session, boundary.tf, boundary.k)
             if recorded(str(key)):
                 continue
+            prints = _held_until(screen, sessions, boundary)
+            index = _index_hold(screen, sessions, boundary)
+            if prints is not None or index is not None:
+                found = waits(screen) if found is None else found
+                if _released(prints, index, found, now) is None:
+                    break  # held: its later boundaries wait for it, in order
             late = now - max(boundary.at, screen.since) > LATE_MS
             out.append(Due(key, screen, boundary, late, boundary is today[-1]))
     out.sort(key=lambda item: (item.boundary.at, item.screen.id))
@@ -238,11 +305,14 @@ __all__ = [
     "AFTER_CLOSE_MIN",
     "GRACE_MS",
     "LATE_MS",
+    "NO_WAITS",
     "Boundary",
     "Due",
     "Screen",
+    "Waits",
     "boundaries",
     "due",
     "next_at",
     "next_trading_boundary",
+    "waits_of",
 ]
