@@ -51,6 +51,7 @@ from .config import ConfigError, Settings, setup_logging, switched_off
 from .health import health_document  # M18.1: the health document (served by the market API)
 from .market.config import MarketSettings, feed_url_of, http_port_of, market_on  # M10.1
 from .notices import LanePace, NoticeDesk  # M18.x: the server's own notices (deploy, backup)
+from .nudge import NudgeSender, is_sandbox, nudge_kind, receivers_for
 from .orders import Alert, OrderTracker
 from .outbox import OpenAlgoTelegram, Outbox, Pacer, Throttle
 from .owner import Owner, OwnerError, load_openalgo_modules, prepare_openalgo_env, read_owner
@@ -130,6 +131,7 @@ class AlertService:
         self.tracker: OrderTracker | None = None
         self.outbox: Outbox | None = None
         self.notices: NoticeDesk | None = None  # M18.x
+        self.nudges: NudgeSender | None = None  # Y17: "orders changed" to the family and journal
         self.client: httpx.AsyncClient | None = None
         self._stop = asyncio.Event()
         self._state, self._detail = "starting", ""
@@ -180,6 +182,17 @@ class AlertService:
                 pace=LanePace(self.outbox.pacer),
             )
             notices = asyncio.create_task(self.notices.run(), name="order alerts: server notices")
+            # Y17: after each order update, one sealed nudge to each receiver switched on (both
+            # off by default). Beside the Telegram path, never in front of it (nudge.py).
+            receivers = receivers_for(
+                self.settings.nudge_family, self.settings.nudge_journal, os.environ
+            )
+            self.nudges = NudgeSender(receivers, client)
+            nudger = (
+                asyncio.create_task(self.nudges.run(), name="order alerts: nudges")
+                if self.nudges
+                else None
+            )
             try:
                 await self._supervise()
             finally:
@@ -193,8 +206,10 @@ class AlertService:
                 )
                 if left:
                     log.warning("%d order alerts were not sent before stopping", left)
+                if nudger is not None:
+                    await self.nudges.close()
                 await cancel_and_wait(
-                    sender, ticker, notices
+                    sender, ticker, notices, nudger
                 )  # a cancel lost in httpx is sent again
                 self.store.close()
                 self._set_state("stopped")
@@ -537,8 +552,21 @@ class AlertService:
         except Exception:  # one bad update must cost one message, never the stream
             self._throttle(logging.ERROR, "update", "an order update could not be handled")
             log.debug("order update handling failed", exc_info=True)
+            self._nudge(message)
             return
         self._queue(alerts)
+        self._nudge(message)
+
+    def _nudge(self, message: dict) -> None:
+        """Y17: tell the receivers switched on that an order changed (no order data goes). Only
+        a note in memory here: the posts are made by tasks of their own, after the alert."""
+        if not self.nudges:
+            return
+        try:
+            self.nudges.note(nudge_kind(message), is_sandbox(message))
+        except Exception:  # a nudge is only a hint; it must never cost an alert
+            self._throttle(logging.ERROR, "nudge", "an order update could not be passed on")
+            log.debug("nudge failed", exc_info=True)
 
     async def _tick(self) -> None:
         while True:
