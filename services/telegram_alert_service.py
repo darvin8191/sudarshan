@@ -23,6 +23,9 @@ from database.telegram_db import (
     get_telegram_user_by_username,
 )
 
+# SUDARSHAN M15.7: which report files may go to Telegram, and with which Bot API method.
+from sudarshan.alerts import report_files
+
 # SUDARSHAN M6.9: titles and lines for an exit, and an Exit all or a Cancel all that did not do
 # it all.
 from sudarshan.books.telegram_words import (
@@ -47,6 +50,8 @@ alert_executor = ThreadPoolExecutor(max_workers=5, thread_name_prefix="telegram_
 _http_client = httpx.Client(timeout=30.0)
 
 TELEGRAM_API_BASE = "https://api.telegram.org"
+#: SUDARSHAN M15.7: one report file's whole upload and Telegram's answer (send_file_sync).
+FILE_TIMEOUT_S = 30.0
 
 
 class TelegramAlertService:
@@ -389,6 +394,51 @@ class TelegramAlertService:
             logger.exception(f"Error sending telegram alert: {e}")
             add_notification(telegram_id, message, priority=8)
             return False
+
+    # SUDARSHAN M15.7: one report file to one chat, for POST /api/v1/telegram/notify-file.
+    def send_file_sync(
+        self, telegram_id: int, file_name: str, data: bytes, caption: str = ""
+    ) -> bool:
+        """Send one file to one chat: sendDocument for a PDF or a CSV, sendPhoto for a PNG.
+
+        The bytes are the caller's (the route takes them from its request; nothing is read from
+        disk). One multipart POST on this module's httpx client with a 30 s timeout and no
+        asyncio: a green socket wait under eventlet, one pool thread under gthread. The bot token
+        stays in this process and is never logged (it is part of the URL). A file is never queued
+        for later: False means Telegram did not take it.
+        """
+        kind = report_files.kind_of(file_name)
+        if kind is None:
+            logger.error("A file whose name cannot be sent to Telegram was not sent")
+            return False
+        bot_token = self._get_bot_token()
+        if not bot_token:
+            logger.error("No bot token configured; the file was not sent")
+            return False
+        form = {"chat_id": str(telegram_id)}
+        if caption:
+            form["caption"] = caption
+        try:
+            resp = _http_client.post(
+                f"{TELEGRAM_API_BASE}/bot{bot_token}/{kind.method}",
+                data=form,
+                files={kind.field: (file_name, data, kind.mime)},
+                timeout=FILE_TIMEOUT_S,
+            )
+        except httpx.TimeoutException:
+            logger.error("Timeout sending a file to Telegram")
+            return False
+        except httpx.HTTPError:
+            logger.error("Telegram could not be reached to send a file")
+            return False
+        except Exception:
+            logger.exception("Error sending a file to Telegram")
+            return False
+        if resp.status_code == 200:
+            logger.info(f"Telegram file sent to {telegram_id}")
+            return True
+        logger.error(f"Telegram API error {resp.status_code} for a file: {resp.text[:300]}")
+        return False
 
     def send_order_alert(
         self,
