@@ -6,7 +6,7 @@ import { WATCHLISTS_KEY } from '../useWatchlists'
 import { syncListAlerts } from './alertSync'
 import { afterWrites } from './ownWrites'
 import { EVENT_JOIN, EVENT_PUSH, type Push } from './types'
-import { applyPushes, V2_KEY } from './useListView'
+import { applyPushes, STATE_KEY, V2_KEY } from './useListView'
 
 /** Pushes this close together make one read. */
 export const SETTLE_MS = 200
@@ -50,6 +50,8 @@ export function usePush(on: boolean): Hearing {
       return
     }
     const timers = new Set<ReturnType<typeof setTimeout>>()
+    // Review L12: reads cached before this page opened may miss what was pushed while it was away.
+    const openedAt = Date.now()
     let pending: Push[] = []
     let settle: ReturnType<typeof setTimeout> | null = null
     let connection = 0
@@ -72,8 +74,16 @@ export function usePush(on: boolean): Hearing {
             return
           }
           setHearing(ack?.ok === true ? 'joined' : 'not_joined')
-          // A reconnect: what was pushed while the connection was down went to nobody.
-          if (ack?.ok === true && mine > 1) {
+          // A reconnect: what was pushed while the connection was down went to nobody. The first
+          // join after the page opens on reads cached earlier (a return within their 30 s, which
+          // reads nothing on its own) is read again too, unless a read is already on its way.
+          const cached = client.getQueryState(STATE_KEY)?.dataUpdatedAt ?? 0
+          const earlier =
+            mine === 1 &&
+            cached > 0 &&
+            cached < openedAt &&
+            client.isFetching({ queryKey: V2_KEY }) === 0
+          if (ack?.ok === true && (mine > 1 || earlier)) {
             void client.invalidateQueries({ queryKey: V2_KEY })
             void client.invalidateQueries({ queryKey: WATCHLISTS_KEY, exact: true })
           }
