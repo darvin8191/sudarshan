@@ -103,13 +103,14 @@ export const profileMenuItems: NavItem[] = [
   { href: '/risk', label: 'Risk', icon: ShieldAlert },
   { href: '/telegram', label: 'Telegram Bot', icon: MessageSquare },
   { href: '/whatsapp', label: 'WhatsApp Bot', icon: MessageCircle },
-  // SUDARSHAN M8.2: the watchlist, for a wide screen where the bottom bar is hidden.
+  // SUDARSHAN (cross-design Y36): Watchlist, Screener, Portfolio, Journal, Reports, then Holdings.
+  // M8.2: the watchlist, for a wide screen where the bottom bar is hidden.
   { href: '/watchlist', label: 'Watchlist', icon: Bookmark },
-  // SUDARSHAN M7.18: the portfolio, right after the watchlist (never between API Key and Action Center).
-  { href: '/portfolio', label: 'Portfolio', icon: Briefcase },
-  // SUDARSHAN M9: the screener, right after the portfolio (Watchlist, Portfolio, Screener).
+  // SUDARSHAN M9: the screener, right after the watchlist.
   { href: '/screener', label: 'Screener', icon: ScanSearch },
-  // SUDARSHAN M14: the trade journal, right after the screener (before Holdings).
+  // SUDARSHAN M7.18: the portfolio, right after the screener (never between API Key and Action Center).
+  { href: '/portfolio', label: 'Portfolio', icon: Briefcase },
+  // SUDARSHAN M14: the trade journal, right after the portfolio (before Reports and Holdings).
   { href: '/journal', label: 'Journal', icon: NotebookPen },
   // SUDARSHAN M15.10: the reports archive, right after the journal.
   { href: '/reports', label: 'Reports', icon: FileBarChart2 },
