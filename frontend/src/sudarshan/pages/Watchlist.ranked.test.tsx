@@ -174,11 +174,22 @@ function visibility(value: 'visible' | 'hidden') {
   document.dispatchEvent(new Event('visibilitychange'))
 }
 
-/** Pull the page down from its top, as a finger does. */
-function pullDown() {
-  fireEvent.touchStart(window, { touches: [{ clientY: 10 }] })
-  fireEvent.touchMove(window, { touches: [{ clientY: 150 }] })
-  fireEvent.touchEnd(window)
+/**
+ * Pull the page down from its top, as a finger does: from the ranked list unless told where, 140 px
+ * down and `sideways` px across.
+ */
+function pullDown(from?: Element | Window, sideways = 0) {
+  const start = from ?? (document.querySelector('[data-ranked-line]') as Element)
+  const at = (x: number, y: number) => ({
+    touches: [{ clientX: x, clientY: y }],
+    changedTouches: [{ clientX: x, clientY: y }],
+  })
+  fireEvent.touchStart(start, at(100, 10))
+  fireEvent.touchMove(start, at(100 + sideways, 150))
+  fireEvent.touchEnd(start, {
+    touches: [],
+    changedTouches: [{ clientX: 100 + sideways, clientY: 150 }],
+  })
 }
 
 const advance = (ms: number) => act(async () => void vi.advanceTimersByTime(ms))
@@ -371,6 +382,49 @@ describe('when a ranking is read', () => {
     const again = await screen.findByRole('button', { name: 'Refresh ranking' })
     expect(again).toBeEnabled()
     pullDown()
+    await waitFor(() => expect(rankedCalls()).toBe(2))
+  })
+
+  // Review M1: Chrome's own pull-to-reload is the same gesture, and a pull under a sheet is not one.
+  it('holds off the browser’s own pull-to-reload while a ranked list is on show, and gives it back', async () => {
+    const root = document.documentElement
+    root.style.overscrollBehaviorY = ''
+    mount()
+    await screen.findByRole('tab', { name: /Main/ })
+    expect(root.style.overscrollBehaviorY).toBe('')
+    await openRanked()
+    expect(root.style.overscrollBehaviorY).toBe('contain')
+    expect(document.body.style.overscrollBehaviorY).toBe('contain')
+    // Back to his own list, through All lists (a ranked favourite open, Main has no tab).
+    fireEvent.click(screen.getByRole('button', { name: /All lists/ }))
+    const own = await screen.findByRole('region', { name: 'Your lists' })
+    fireEvent.click(within(own).getByRole('button', { name: /^Main/ }))
+    await waitFor(() => expect(root.style.overscrollBehaviorY).toBe(''))
+    expect(document.body.style.overscrollBehaviorY).toBe('')
+  })
+
+  it('takes a pull only on the list: not in an open sheet, not outside the list, not sideways', async () => {
+    mount()
+    await openRanked()
+    await screen.findByText('OI +12.4%')
+    await advance(61_000) // past the minute in which a pull shows the last read
+    // A sheet open over the list: a drag in it is the sheet's.
+    fireEvent.click(document.querySelector('li button[aria-haspopup="dialog"]') as Element)
+    const sheet = await screen.findByRole('dialog')
+    pullDown(sheet)
+    pullDown(sheet.querySelector('button') as Element)
+    await advance(100)
+    expect(rankedCalls()).toBe(1)
+    fireEvent.keyDown(sheet, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    // Outside the list (the page's title, the window), and a drag that is mostly sideways.
+    pullDown(screen.getByRole('heading', { name: 'Watchlist' }))
+    pullDown(window)
+    pullDown(undefined, 120)
+    await advance(100)
+    expect(rankedCalls()).toBe(1)
+    // On the rows themselves, it reads.
+    pullDown(document.querySelector('li button[aria-haspopup="dialog"]') as Element)
     await waitFor(() => expect(rankedCalls()).toBe(2))
   })
 

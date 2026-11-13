@@ -531,7 +531,7 @@ export default function Watchlist() {
             ) /* F8 */
           }
           {rankedRef && (
-            <RankedLine ranking={ranking} name={rankedName} /> // F16
+            <RankedLine ranking={ranking} name={rankedName} pullOff={overlay !== null} /> // F16; review M1
           )}
           {presetRef && !presetView ? (
             <section
