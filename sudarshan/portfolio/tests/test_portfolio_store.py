@@ -177,6 +177,8 @@ def test_the_steps_run_once_in_all_even_when_the_second_opener_takes_the_later_o
 ):
     """The split the test above used to demand ([0, all]) is not promised: held here by hand, the
     first opener runs step 1, the second wins the lock after that commit and runs the rest."""
+    if len(ALL_STEPS) < 3:
+        pytest.skip("the split needs a first step, a second and a later one; this file has fewer")
     monkeypatch.setattr(database, "LOCK_RETRY_BUDGET_S", 10.0)
     first_done, second_done = threading.Event(), threading.Event()
     begins = {"race-0": 0, "race-1": 0}
