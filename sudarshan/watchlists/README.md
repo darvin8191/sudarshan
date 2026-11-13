@@ -499,16 +499,13 @@ Five findings of the mid-point review (H2, M2, M3, L11, L12) and its W5 bullet, 
   flight, which may not have seen the change). A list's own version in `view` is a whole number as
   text ("0", then epoch milliseconds, one more per write): the page uses it as the version a write is
   decided on, and `keepNewer` orders two view answers by it as numbers ("0" is never taken for older,
-  because a list made anew after its id was reused starts there). Writes are not skipped by their own
-  push: the write's answer carries the list's version, not the lists version, so the push of a
-  device's own write costs one extra read of what the write already re-read. Lane W could add the
-  lists version to a write's answer to close that.
+  because a list made anew after its id was reused starts there). A write's own push is skipped since lane W sends `lists_version` in the answer (see
+  "F - the push's refs and the write's lists version").
 - **A push refreshes what the page shows (M2).** The rows and tabs come from OpenAlgo's lists
   (`WATCHLISTS_KEY`), so a push of why `items`, `lists` or `arranged` that names an own list (or
   `lists`) reads them again beside the views it names; a symbol added on /trading shows on the
   phone. A push names every list it changed: `refs` when present, else `ref`, and "lists" alone reads
-  every open view. `PushNames` in `useListView.ts` is a local extension carrying `refs`: remove it
-  and read `Push.refs` when lane W's contract change is merged and the types are regenerated. A
+  every open view. The generated `Push` carries `refs` now (the local `PushNames` is gone). A
   reconnect reads `WATCHLISTS_KEY` too. Sections, rows and preferences read the named views only.
 - **A record refusal (L11).** When `state` answers `record` (the store is newer than this app, or
   cannot be read) the page shows the server's sentence above the lists, which keep working as
@@ -518,6 +515,26 @@ Five findings of the mid-point review (H2, M2, M3, L11, L12) and its W5 bullet, 
   only what it changed. `V2_KEY` stays where it is.
 - **W5 decision.** "`ref` is the one ref changed, else `lists`" is no longer all a push says: the
   phone reads `refs` and falls back to `ref` only for a bridge that does not send it.
+
+## F - the push's refs and the write's lists version
+
+Lane W is merged into lane F (no conflicts; the duplicate M8.4 to M8.8 rows of `STATUS.md` are one row each).
+- **`refs`.** The local `PushNames` type is replaced by the generated `Push`. `refsOf(push)` returns
+  `push.refs` when it is an array: every ref the write changed, each once, in order, and an empty one
+  names no list, so a favourites write, a flag rename or a note alone reads no list's view (flags and
+  favourites still read their own state and counts by `why`). Only where `refs` is absent (an older
+  server) it reads the single `ref`; `isPush` accepts both shapes. A move's push names the target and
+  the source and each is read, and no other.
+- **`lists_version`.** Every write goes through `callOp`, which counts a write in flight and, when its
+  answer (`Done`, `CopyDone`, `TvDone`) carries `lists_version`, notes it (`v2/ownWrites.ts`). A push
+  with that `v` is the push of this page's own write: `applyPushes` skips it and reads nothing more
+  (the write already re-read what it changed), whichever of the two arrives first. A push is held
+  while a write of this page is in flight (at most 3 s) so the answer can be noted first, then read
+  if it is not ours. A push from another screen has another `v` and is read as before; an answer
+  without `lists_version` notes nothing. A flags or favourites push is never skipped (their own
+  versions). Noted versions are dropped when matched or after 30 s.
+- **Tests:** `useListView.test.tsx` (the refs and the fallback), `ownWrites.test.tsx` (own push after
+  and before the answer, another screen's push, no `lists_version`, the bound, two refs, empty refs).
 
 ## F9 - the cap, the window and last ticks
 

@@ -9,6 +9,7 @@ import {
   type OpName,
   type WatchlistOps,
 } from './types'
+import { trackWrite } from './ownWrites'
 
 /**
  * The v2 watchlist bridge (`blueprints/sudarshan_watchlists.py`), reached through the routes the
@@ -108,7 +109,18 @@ export function routeOf(op: OpName, req: object): { path: string; used: Set<stri
 }
 
 /** One op of the bridge. Throws a `WatchlistsError` with the server's words. */
-export async function callOp<N extends OpName>(
+export function callOp<N extends OpName>(
+  op: N,
+  req: WatchlistOps[N]['req'],
+  signal?: AbortSignal
+): Promise<WatchlistOps[N]['res']> {
+  // A write is counted while in flight and its `lists_version` noted (ownWrites.ts).
+  return SPECS.get(op)?.cls === 'write'
+    ? trackWrite(() => send(op, req, signal))
+    : send(op, req, signal)
+}
+
+async function send<N extends OpName>(
   op: N,
   req: WatchlistOps[N]['req'],
   signal?: AbortSignal

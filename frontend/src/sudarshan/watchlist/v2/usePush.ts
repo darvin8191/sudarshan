@@ -3,8 +3,9 @@ import { useEffect, useState } from 'react'
 import type { Socket } from 'socket.io-client'
 import { useSocketContext } from '@/components/socket/SocketProvider'
 import { WATCHLISTS_KEY } from '../useWatchlists'
-import { EVENT_JOIN, EVENT_PUSH } from './types'
-import { applyPushes, type PushNames, V2_KEY } from './useListView'
+import { afterWrites } from './ownWrites'
+import { EVENT_JOIN, EVENT_PUSH, type Push } from './types'
+import { applyPushes, V2_KEY } from './useListView'
 
 /** Pushes this close together make one read. */
 export const SETTLE_MS = 200
@@ -16,13 +17,15 @@ export const RETRY_MS = [2_000, 5_000, 10_000] as const
 /** Whether this screen hears the owner's room: `joined` from the ack until the connection drops. */
 export type Hearing = 'unknown' | 'joined' | 'not_joined'
 
-function isPush(value: unknown): value is PushNames {
-  const push = value as Partial<PushNames> | null
+function isPush(value: unknown): value is Push {
+  const push = value as Partial<Push> | null
   return (
     push !== null &&
     typeof push === 'object' &&
     typeof push.v === 'string' &&
     typeof push.ref === 'string' &&
+    // `refs` is absent from an older server: refsOf falls back to `ref` then.
+    (push.refs === undefined || Array.isArray(push.refs)) &&
     typeof push.why === 'string'
   )
 }
@@ -46,10 +49,11 @@ export function usePush(on: boolean): Hearing {
       return
     }
     const timers = new Set<ReturnType<typeof setTimeout>>()
-    let pending: PushNames[] = []
+    let pending: Push[] = []
     let settle: ReturnType<typeof setTimeout> | null = null
     let connection = 0
     let live = true
+    const release = new Set<() => void>()
 
     const join = (mine: number, attempt: number) => {
       ;(socket as Socket)
@@ -88,7 +92,15 @@ export function usePush(on: boolean): Hearing {
         settle = null
         const batch = pending
         pending = []
-        applyPushes(client, batch)
+        // A write of this page still in flight: wait for its answer, so its own push is known.
+        let ran = false
+        let cancel: (() => void) | undefined
+        cancel = afterWrites(() => {
+          ran = true
+          if (cancel) release.delete(cancel)
+          applyPushes(client, batch)
+        })
+        if (!ran) release.add(cancel)
       }, SETTLE_MS)
     }
 
@@ -103,6 +115,7 @@ export function usePush(on: boolean): Hearing {
       socket.off(EVENT_PUSH, onPush)
       if (settle) clearTimeout(settle)
       for (const timer of timers) clearTimeout(timer)
+      for (const cancel of release) cancel()
     }
   }, [on, socket, client])
 

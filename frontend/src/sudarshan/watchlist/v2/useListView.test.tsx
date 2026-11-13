@@ -29,7 +29,8 @@ import {
 
 const b = () => bridge.current as NonNullable<typeof bridge.current>
 const view = (version: string): View => ({ ref: 'list:1', version }) as View
-const push = (v: string, why: Push['why'] = 'items', ref = 'list:1'): Push => ({ v, ref, why })
+const push = (v: string, why: Push['why'] = 'items', ref = 'list:1'): Push =>
+  ({ v, ref, why }) as Push // no refs: what an older server sends
 
 function setup() {
   const client = createQueryClient()
@@ -158,8 +159,16 @@ describe('the change push', () => {
     applyPushes(client, [push('a:2', 'items', 'lists')])
     expect(keysOf(spy)).toContain(JSON.stringify([...V2_KEY, 'view']))
     spy.mockClear()
+    applyPushes(client, [push('a:3', 'items', 'list:7')]) // one named ref, no refs
+    expect(keysOf(spy)).toContain(`${JSON.stringify(viewKey('list:7'))}!`)
+  })
+
+  it('refreshes no list for an empty refs (a favourites write, a flag rename, a note alone)', () => {
+    const { client } = setup()
+    const spy = watch(client)
     applyPushes(client, [{ ...push('a:3'), refs: [] }])
-    expect(keysOf(spy)).toContain(view1)
+    expect(keysOf(spy).filter((key) => key.includes('"view"'))).toEqual([])
+    expect(keysOf(spy)).not.toContain(lists)
   })
 
   it('reads nothing for a push whose lists version this page already saw', async () => {

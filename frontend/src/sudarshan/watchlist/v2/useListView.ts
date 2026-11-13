@@ -1,6 +1,7 @@
 import { type QueryClient, type QueryKey, useQuery, useQueryClient } from '@tanstack/react-query'
 import { WATCHLISTS_KEY } from '../useWatchlists'
 import { callOp, type WatchlistsError } from './api'
+import { takeOwn } from './ownWrites'
 import type { Lists, Push, State, View } from './types'
 
 /**
@@ -104,18 +105,12 @@ export function useLists(wanted = true) {
 }
 
 /**
- * A push as lane W sends it: `ref` is the one list a write changed, or "lists" when several did,
- * and `refs` is every ref it changed.
- *
- * Local extension: remove it, and read `push.refs` from `Push`, when lane W's contract change that
- * adds `refs` merges in and the types are regenerated.
+ * Every ref a push names: `refs` when it carries them (an empty `refs` names no list), else the
+ * one `ref` (maybe "lists") for an older server that sends no `refs`.
  */
-export type PushNames = Push & { refs?: string[] }
-
-/** Every ref a push names: `refs` when it carries them, else the one `ref` (maybe "lists"). */
-export function refsOf(push: PushNames): string[] {
-  const named = Array.isArray(push.refs) ? push.refs.filter((r) => typeof r === 'string') : []
-  return named.length > 0 ? named : [push.ref]
+export function refsOf(push: Push): string[] {
+  if (Array.isArray(push.refs)) return push.refs.filter((r) => typeof r === 'string')
+  return [push.ref]
 }
 
 /** One read to run again; `exact` keeps a key that is a prefix of others to itself. */
@@ -134,7 +129,7 @@ const OWN = (ref: string) => ref === 'lists' || ref.startsWith('list:')
  * views: a symbol added on /trading shows on the phone. A push naming several lists (a move)
  * reads each named list's view; "lists" with no names reads every open one.
  */
-export function keysFor(push: PushNames): Reread[] {
+export function keysFor(push: Push): Reread[] {
   const refs = refsOf(push)
   const views = (): Reread[] =>
     refs.map((ref) =>
@@ -172,16 +167,20 @@ export function keysFor(push: PushNames): Reread[] {
 
 /**
  * Read again what these pushes changed, once each however many pushes named it. A push whose
- * lists version is the one this page last saw says nothing new and reads nothing (equality only;
+ * lists version is the one this page last saw, or the one a write of this page answered with
+ * (`ownWrites.ts`), says nothing new and reads nothing (equality only;
  * the flag and favourite versions have their own and are never skipped). While a read is in
  * flight the page does not know whether that read saw the change, so nothing is skipped then.
  */
-export function applyPushes(client: QueryClient, pushes: PushNames[]): void {
+export function applyPushes(client: QueryClient, pushes: Push[]): void {
   const wanted = new Map<string, Reread>()
   const quiet = client.isFetching({ queryKey: V2_KEY }) === 0
   for (const push of pushes) {
+    const separate = push.why === 'flags' || push.why === 'favourites'
+    // The push of a write this page made: its answer already re-read what it changed.
+    const own = !separate && takeOwn(push.v)
     const known = quiet && push.v === seenLists.get(client)
-    if (!known || push.why === 'flags' || push.why === 'favourites') {
+    if (!own && (!known || separate)) {
       for (const read of keysFor(push)) wanted.set(JSON.stringify([read.key, read.exact]), read)
     }
     rememberListsVersion(client, push.v)
