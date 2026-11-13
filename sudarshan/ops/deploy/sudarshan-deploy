@@ -47,8 +47,11 @@ chmod 644 "${STATE}/deploy.lock" 2>/dev/null || true
 chmod o+x "${STATE}" 2>/dev/null || true
 OWNER_REPO="${REPO#https://github.com/}"
 as_svc() { sudo -u "${SVC_USER}" -H -- "$@"; }
-RING_USER="sudarshan"   # the user every ring service runs as (unit_ok insists on it)
+RING_USER="sudarshan"   # the user every ring service runs as (unit_ok insists on it), but one:
+FAM_USER="sudarshan-family"; FAM_UNIT="${FAM_USER}.service"   # the family view runs as its own account
+                        # (P6), and unit_ok allows that account for that unit alone
 RING_VAR="/var/lib"     # where the ring services keep their state: ${RING_VAR}/sudarshan-<service>/
+FAM_DIR="/etc/sudarshan-family"         # the family account's keys (root:sudarshan-family 750, files 640)
 log() { echo "[$(date '+%F %T %Z')] $*"; }
 listed() {   # 0 = date $1 starts a line of file $2 (a trailing comment is allowed, as auto-login reads
              # it). Only a regular file is read: grep would wait forever on a FIFO.
@@ -644,8 +647,10 @@ cal_preview() {   # $1 = the list a release brings, $2 = a new private folder. I
 UNIT_DIR="/etc/systemd/system"; MANAGED="${STATE}/managed_units"
 managed_units() { [[ -f "${MANAGED}" ]] && grep -E '^sudarshan(-[a-z0-9-]+\.(service|timer)|\.slice)$' "${MANAGED}" || true; }
 ring_services() { managed_units | grep '\.service$' || true; }
-unit_ok() {   # $1 = downloaded unit file, $2 = unit name; 0 = acceptable
-    local f="$1" n="$2" ws='[[:space:]]*'
+unit_ok() {   # $1 = downloaded unit file, $2 = unit name; 0 = acceptable. It reads nothing but its arguments and
+              # log, so the units' own tests can cut it out alone: the names default to the tool's values.
+    local f="$1" n="$2" ws='[[:space:]]*' line waits=0
+    local who="${RING_USER:-sudarshan}" fam="${FAM_USER:-sudarshan-family}" fam_dir="${FAM_DIR:-/etc/sudarshan-family}"
     if [[ "${n}" == "sudarshan.slice" ]]; then   # the ring's slice (R11): only resource limits and a description
         if grep -Eiv "^${ws}(#.*|\[(Unit|Slice)\]|Description${ws}=.*|(CPUWeight|CPUQuota|MemoryHigh|MemoryMax|TasksMax|IOWeight)${ws}=${ws}[0-9]+[%GMK]?|)${ws}$" "${f}" | grep -q .; then
             log "unit ${n}: a slice may carry only resource limits"; return 1
@@ -654,13 +659,24 @@ unit_ok() {   # $1 = downloaded unit file, $2 = unit name; 0 = acceptable
     fi
     [[ "${n}" =~ ^sudarshan-[a-z0-9-]+\.(service|timer)$ ]] || { log "unit ${n}: bad name"; return 1; }
     case "${n}" in sudarshan-deploy.*|sudarshan-claude.*|sudarshan-dev.*) log "unit ${n}: reserved name"; return 1 ;; esac
-    # every User=/Group= line must name sudarshan (an empty value would reset to root)
-    if grep -Ei "^${ws}(User|Group)${ws}=" "${f}" | grep -Eiqv "=${ws}sudarshan${ws}$"; then log "unit ${n}: User/Group other than sudarshan"; return 1; fi
+    # The family view (P6) takes input from people who are not the owner, so it runs as its own account,
+    # which can read none of the owner's secrets, and only once its check has passed: that one unit must
+    # say User=sudarshan-family, may name no other user or group, and must wait for the file the check
+    # writes. Every other unit must say User=sudarshan.
+    if [[ "${n}" == "${fam}.service" ]]; then
+        who="${fam}"
+        while IFS= read -r line || [[ -n "${line}" ]]; do   # systemd skips a start until the check has passed
+            if [[ "${line//[[:space:]]/}" == "ConditionPathExists=${fam_dir}/provisioned" ]]; then waits=1; fi
+        done < "${f}"
+        [[ ${waits} -eq 1 ]] || { log "unit ${n}: must say ConditionPathExists=${fam_dir}/provisioned"; return 1; }
+    fi
+    # every User=/Group= line must name that user (an empty value would reset to root)
+    if grep -Ei "^${ws}(User|Group)${ws}=" "${f}" | grep -Eiqv "=${ws}${who}${ws}$"; then log "unit ${n}: User/Group other than ${who}"; return 1; fi
     if grep -Eq "^${ws}Exec[A-Za-z]*${ws}=${ws}[-@:]*[+!]" "${f}"; then log "unit ${n}: privileged exec prefix (+ or !)"; return 1; fi
     if grep -Eiq "^${ws}(AmbientCapabilities|CapabilityBoundingSet|SupplementaryGroups|PermissionsStartOnly|DynamicUser|RootDirectory|RootImage|PAMName|CPUSchedulingPolicy|CPUSchedulingPriority|IOSchedulingClass|IOSchedulingPriority)${ws}=" "${f}"; then log "unit ${n}: forbidden setting"; return 1; fi
     if grep -Eiq "^${ws}(Nice|OOMScoreAdjust)${ws}=${ws}-" "${f}"; then log "unit ${n}: negative Nice/OOMScoreAdjust"; return 1; fi
     if [[ "${n}" == *.service ]]; then
-        grep -Eq "^${ws}User${ws}=${ws}sudarshan${ws}$" "${f}" || { log "unit ${n}: must say User=sudarshan"; return 1; }
+        grep -Eq "^${ws}User${ws}=${ws}${who}${ws}$" "${f}" || { log "unit ${n}: must say User=${who}"; return 1; }
         grep -Eiq "^${ws}NoNewPrivileges${ws}=${ws}(yes|true)${ws}$" "${f}" || { log "unit ${n}: must say NoNewPrivileges=yes"; return 1; }
     elif grep -Eq "^${ws}Unit${ws}=" "${f}" && ! grep -Eq "^${ws}Unit${ws}=${ws}sudarshan-[a-z0-9-]+\.service${ws}$" "${f}"; then
         log "unit ${n}: timer starts a non-SUDARSHAN unit"; return 1
@@ -734,6 +750,14 @@ dist_put() {   # $1 = a tarball (root's) holding dist/: it replaces frontend/dis
 # Both run in a subshell with their own error handling: a ring database that cannot be copied or put
 # back is logged and never stops an install or a rollback (trading does not depend on the ring).
 ring_name_ok() { [[ "$1" =~ ^sudarshan-[a-z0-9-]+$ && "$2" =~ ^[A-Za-z0-9._-]+\.db$ ]]; }   # $1 = folder, $2 = file
+ring_owner() {   # $1 = a ring state folder: prints the account that owns it (as stat names it). 0 when that is a
+                 # ring account, sudarshan or sudarshan-family (Y13): its databases are copied, put back and
+                 # asked about as that account. 1 for any other owner: nothing there is done, never as root
+    local u
+    u="$(stat -c %U -- "$1" 2>/dev/null)" || return 1
+    printf '%s\n' "${u}"
+    [[ "${u}" == "${RING_USER}" || "${u}" == "${FAM_USER}" ]]
+}
 # ---- --remove-ring: one ring service taken out by hand (an uninstall path besides a release dropping
 # its unit). Its databases are copied into a backup folder first; the state folder and the settings
 # file stay, so putting it back is a later release's unit install.
@@ -752,15 +776,19 @@ ring_remove() {   # $1 = sudarshan-<service>.service
         else log "WARNING: ring: the price feed did not drop ${folder}'s instruments (is sudarshan-feed running?); it lets them go after 7 days without a renewal"; fi
     fi
     if [[ -d "${RING_VAR}/${folder}" && ! -L "${RING_VAR}/${folder}" ]]; then
-        local f name
-        for f in "${RING_VAR}/${folder}"/*.db; do
-            [[ -f "${f}" && ! -L "${f}" ]] || continue
-            name="$(basename -- "${f}")"
-            ring_name_ok "${folder}" "${name}" || continue
-            mkdir -p "${bdir}/ring/${folder}"
-            if db_copy_out "${RING_USER}" "${f}" "${bdir}/ring/${folder}/${name}"; then log "ring: backed up ${folder}/${name} before removal"
-            else log "WARNING: ring: could not back up ${folder}/${name}"; fi
-        done
+        local f name owner
+        if ! owner="$(ring_owner "${RING_VAR}/${folder}")"; then
+            log "WARNING: ring: ${folder} belongs to ${owner:-an unknown account}, not to ${RING_USER} or ${FAM_USER} - its databases are not copied"
+        else
+            for f in "${RING_VAR}/${folder}"/*.db; do
+                [[ -f "${f}" && ! -L "${f}" ]] || continue
+                name="$(basename -- "${f}")"
+                ring_name_ok "${folder}" "${name}" || continue
+                mkdir -p "${bdir}/ring/${folder}"
+                if db_copy_out "${owner}" "${f}" "${bdir}/ring/${folder}/${name}"; then log "ring: backed up ${folder}/${name} before removal"
+                else log "WARNING: ring: could not back up ${folder}/${name}"; fi
+            done
+        fi
     fi
     rm -f "${UNIT_DIR:?}/${n}"
     if [[ -f "${MANAGED}" ]]; then grep -vx "${n}" "${MANAGED}" > "${MANAGED}.new" || true; mv -f "${MANAGED}.new" "${MANAGED}"; fi
@@ -853,16 +881,24 @@ UV=(env UV_PYTHON_DOWNLOADS=never /usr/local/bin/uv pip install --quiet --python
 ring_db_backup() {
     (
         set +eEu; trap - ERR
-        local dir folder f name dest
+        local dir folder f name dest owner
         for dir in "${RING_VAR}"/sudarshan-*/; do
             [[ -d "${dir}" && ! -L "${dir%/}" ]] || continue
             folder="$(basename "${dir}")"
+            # The family store's copy for the nightly backup (Y9), not a store: the store itself is copied
+            # from the family's own folder, and a copy put back as 600 would shut the nightly job out of it.
+            [[ "${folder}" != "${FAM_USER}-export" ]] || continue
+            owner=""
             for f in "${dir}"*.db; do
                 [[ -f "${f}" && ! -L "${f}" ]] || continue
                 name="$(basename "${f}")"
                 ring_name_ok "${folder}" "${name}" || { log "ring: ${folder}/${name}: unusual name - not backed up"; continue; }
+                if [[ -z "${owner}" ]] && ! owner="$(ring_owner "${dir%/}")"; then   # copied as the folder's own account
+                    log "WARNING: ring: ${folder} belongs to ${owner:-an unknown account}, not to ${RING_USER} or ${FAM_USER} - its databases are not backed up"
+                    break
+                fi
                 dest="${bdir}/ring/${folder}/${name}"
-                if mkdir -p "${bdir}/ring/${folder}" && rm -f "${dest}" && db_copy_out "${RING_USER}" "${f}" "${dest}"; then
+                if mkdir -p "${bdir}/ring/${folder}" && rm -f "${dest}" && db_copy_out "${owner}" "${f}" "${dest}"; then
                     log "ring: backed up ${folder}/${name}"
                 else
                     rm -f "${dest}"; log "WARNING: ring: could not back up ${folder}/${name} - a rollback leaves it as it is"
@@ -874,32 +910,43 @@ ring_db_backup() {
 ring_db_restore() {
     (
         set +eEu; trap - ERR
-        local f folder name dir dest
+        local f folder name dir dest owner
         for f in "${bdir}"/ring/*/*.db; do
             [[ -f "${f}" && ! -L "${f}" ]] || continue
             folder="$(basename "$(dirname "${f}")")"; name="$(basename "${f}")"
             ring_name_ok "${folder}" "${name}" || continue
             dir="${RING_VAR}/${folder}"; dest="${dir}/${name}"
             [[ -d "${dir}" && ! -L "${dir}" ]] || { log "ring: ${folder} is gone - ${name} not put back"; continue; }
+            if ! owner="$(ring_owner "${dir}")"; then   # written by the folder's own account, never by root
+                log "WARNING: ring: ${folder} belongs to ${owner:-an unknown account}, not to ${RING_USER} or ${FAM_USER} - ${name} not put back"
+                continue
+            fi
             # the copy is written whole beside the database first, so a failure leaves the database and its journal as they were
-            if db_copy_in "${RING_USER}" "${f}" "${dest}"; then log "ring: put back ${folder}/${name}"
+            if db_copy_in "${owner}" "${f}" "${dest}"; then log "ring: put back ${folder}/${name}"
             else log "WARNING: ring: could not put back ${folder}/${name}"; fi
         done
     ) || true
 }
 ring_status() {   # $1 = a ring service (sudarshan-<service>.service): before it starts, log what every migrate module
-                  # it has says with --status (sudarshan/<service>/migrate.py, and one folder down). No module, no line.
+                  # it has says with --status (sudarshan/<service>/migrate.py, and one folder down), run as the account
+                  # that owns the service's state folder. No module, no line; no state folder yet (no store), no line.
     (
         set +eEu; trap - ERR
-        local svc="${1#sudarshan-}" m mod out rc
+        local svc="${1#sudarshan-}" m mod out rc dir owner
         svc="${svc%.service}"
         [[ "${svc}" =~ ^[a-z0-9_]+$ ]] || exit 0
+        dir="${RING_VAR}/sudarshan-${svc}"
+        [[ -d "${dir}" && ! -L "${dir}" ]] || exit 0
+        if ! owner="$(ring_owner "${dir}")"; then
+            log "WARNING: ring: sudarshan-${svc} belongs to ${owner:-an unknown account}, not to ${RING_USER} or ${FAM_USER} - its migration status is not asked"
+            exit 0
+        fi
         cd "${APP_DIR}" || exit 0
         for m in "sudarshan/${svc}/migrate.py" "sudarshan/${svc}"/*/migrate.py; do
             [[ -f "${m}" && ! -L "${m}" ]] || continue
             mod="${m%.py}"; mod="${mod//\//.}"
             [[ "${mod}" =~ ^sudarshan(\.[a-z0-9_]+)+\.migrate$ ]] || continue
-            out="$(timeout 60 sudo -u "${RING_USER}" -H -- "${APP_DIR}/.venv/bin/python" -m "${mod}" --status 2>&1)"; rc=$?
+            out="$(timeout 60 sudo -u "${owner}" -H -- "${APP_DIR}/.venv/bin/python" -m "${mod}" --status 2>&1)"; rc=$?
             if [[ -n "${out}" ]]; then
                 printf '%s\n' "${out}" | head -n 30 | while IFS= read -r line; do log "ring: ${mod} --status: ${line:0:300}"; done
             fi
@@ -1020,7 +1067,7 @@ fi
 # ---- ring services: install the unit files of this release and (re)start them. A failing ring
 # service is reported but never rolls back OpenAlgo (trading does not depend on them).
 ring_deploy() {
-    local list n f names=() changed=0 old
+    local list n f names=() changed=0 old state
     list="$(curl -fsSL --max-time "${FETCH_TIMEOUT}" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${OWNER_REPO}/contents/sudarshan/ops/systemd?ref=${tag}" 2>/dev/null)" || list='[]'
     mkdir -p "${tmp}/units"
     while IFS= read -r n; do
@@ -1058,10 +1105,20 @@ ring_deploy() {
         sleep 5
         for n in "${names[@]}"; do
             [[ "${n}" == *.slice ]] && continue
-            log "ring: ${n} $(systemctl is-active "${n}" 2>/dev/null || true)"
+            state="$(systemctl is-active "${n}" 2>/dev/null || true)"
+            if [[ "${n}" == *.service && "${state}" != "active" ]] && ring_skipped "${n}"; then
+                log "ring: ${n} not started: its start condition is not met yet"   # not a failure: nothing to wait for
+                continue
+            fi
+            log "ring: ${n} ${state}"
             [[ "${n}" == *.service ]] && ring_health "${n}"
         done
     fi
+}
+ring_skipped() {   # $1 = a service: 0 when its last start was skipped because a Condition...= line did not hold
+                   # (the family view's until its set-up has passed its check). systemd reports such a start as
+                   # done and leaves the unit inactive: it is not a failed start, so no warning, no health wait
+    [[ "$(systemctl show -p ConditionResult --value -- "$1" 2>/dev/null)" == "no" ]]
 }
 # ---- a ring service's own settings file, /etc/sudarshan/<service>.env (root:sudarshan 640, cross-design
 # R3): a release may ship sudarshan/ops/deploy/<service>-env.conf in openalgo-env.conf's format; each key
@@ -1070,16 +1127,20 @@ ring_deploy() {
 ring_env() {   # $1 = sudarshan-<service>.service
     (
         set +eEu; trap - ERR
-        local svc="${1#sudarshan-}" conf out got envf work
+        local svc="${1#sudarshan-}" conf out got envf work dir="${CAL_DIR}" group="${RING_USER}"
         svc="${svc%.service}"
         [[ "${svc}" =~ ^[a-z0-9]+$ ]] || exit 0
+        if [[ "$1" == "${FAM_UNIT}" ]]; then   # its account cannot read /etc/sudarshan (Y1): its file is in its own folder,
+            dir="${FAM_DIR}"; group="${FAM_USER}"   # which exists only after the owner's set-up (until then the unit cannot start)
+            cal_dir_ok "${FAM_DIR}" || exit 0
+        fi
         conf="${tmp}/${svc}-env.conf"
         release_file "${svc}-env.conf" "${tag}" "${conf}"; got=$?
         [[ ${got} -eq 0 && -s "${conf}" ]] || { [[ ${got} -eq 1 ]] && log "ring: the settings list of ${svc} could not be fetched whole; its file stays as it is"; exit 0; }
-        envf="${CAL_DIR}/${svc}.env"
+        envf="${dir}/${svc}.env"
         if [[ -L "${envf}" ]]; then log "ring: ${envf} is a link - left alone"; exit 0; fi
         if [[ ! -e "${envf}" ]]; then
-            install -m 640 -o root -g "${RING_USER}" /dev/null "${envf}" 2>/dev/null || install -m 640 /dev/null "${envf}" || { log "ring: ${envf} could not be made"; exit 0; }
+            install -m 640 -o root -g "${group}" /dev/null "${envf}" 2>/dev/null || install -m 640 /dev/null "${envf}" || { log "ring: ${envf} could not be made"; exit 0; }
             log "ring: made ${envf}"
         fi
         work="${tmp}/ring-env-${svc}"; mkdir -m 700 -p "${work}"
@@ -1090,7 +1151,8 @@ ring_env() {   # $1 = sudarshan-<service>.service
 # answering within 30 s is a WARNING with what the owner can check, never a rollback: trading does
 # not depend on the ring.
 ring_port() { case "$1" in sudarshan-feed.service) echo 5580 ;; sudarshan-alerts.service) echo 5582 ;;
-              sudarshan-portfolio.service) echo 5583 ;; sudarshan-screener.service) echo 5584 ;; *) echo "" ;; esac; }
+              sudarshan-portfolio.service) echo 5583 ;; sudarshan-screener.service) echo 5584 ;;
+              sudarshan-family.service) echo 5585 ;; sudarshan-journal.service) echo 5586 ;; *) echo "" ;; esac; }
 ring_health() {   # $1 = sudarshan-<service>.service
     (
         set +eEu; trap - ERR

@@ -185,23 +185,27 @@ them apart from the databases it has always backed up:
 
 - the ring is stopped before an install; then every `*.db` in every `/var/lib/sudarshan-*/` folder
   is copied with SQLite's online backup (rows still in the write-ahead log come with it; a plain
-  file copy would lose them) into `<backup>/ring/<folder>/<name>`. The copy is made by `sudarshan`,
-  who owns the folder, and streamed to the tool (next section). Never at the top of the backup
+  file copy would lose them) into `<backup>/ring/<folder>/<name>`. The copy is made by the account
+  that owns the folder (`stat -c %U`), `sudarshan`, or `sudarshan-family` for the family view's own
+  folder, and streamed to the tool (next section); a folder any other account owns is left out with
+  a warning, and nothing there is ever done as root. `sudarshan-family-export` holds only the family
+  store's copy for the nightly backup, not a store, and is left out. Never at the top of the backup
   folder: a rollback puts every top-level `*.db` there into OpenAlgo's `db/` by name, and
   `market.db` exists in both places;
 - a rollback puts each copy back in its own folder before OpenAlgo or any ring service starts
-  again: `sudarshan` writes it as a new file beside the database (mode 600), removes the old
-  `-wal`, `-shm` and `-journal` files and renames the new file over the database. A folder that is
-  gone is not made up. A database that cannot be put back is logged and left as it was found, and
-  the rollback carries on;
+  again: the folder's own account writes it as a new file beside the database (mode 600), removes
+  the old `-wal`, `-shm` and `-journal` files and renames the new file over the database. A folder
+  that is gone is not made up. A database that cannot be put back is logged and left as it was
+  found, and the rollback carries on;
 - the sealed owner vault (`db/sudarshan-vault/`) is in neither direction: the deploy backup does
   not hold it, and a rollback never replaces what the owner saved after the backup was made;
 - only plain names are used (`sudarshan-<name>` folders, file names of letters, digits, `.`, `_`
   and `-`) and no link is followed, so a file name cannot become a command or a path;
 - before a ring service starts, in an install and in a rollback, the tool logs what
   `python -m sudarshan.<service>.migrate --status` says for each migrate module of that service
-  (run as `sudarshan`, 60 s at most, the first 30 lines, each cut at 300 characters). No module, no
-  line; a status that fails is one log line and never stops the install;
+  (run as the account that owns the service's state folder, 60 s at most, the first 30 lines, each
+  cut at 300 characters). No module, no line; no state folder yet (so no store), no line; a status
+  that fails is one log line and never stops the install;
 - a failure in any of this costs the copy or the line, never the install or the rollback.
 
 The tool that does an install is the one already on the server (it updates itself from each
@@ -220,7 +224,8 @@ server during a rollback. So:
 
 - root opens, copies, renames and re-owns nothing by a path in those folders. OpenAlgo's
   databases, the ring's, the market history file (`historify.duckdb`) and the frontend are taken
-  out and put back by `sudarshan` itself (`sudo -u sudarshan`); the data crosses through a pipe
+  out and put back by the account that owns them (`sudo -u sudarshan`, or `sudo -u sudarshan-family`
+  for the family view's store); the data crosses through a pipe
   from or to a file in the backup folder, which only root opens. A file put back is written whole
   as a new file beside its place and renamed over it, and a rename replaces a link and follows
   none;
