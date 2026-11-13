@@ -35,6 +35,7 @@ import { ListStrip, ownId, ownRef, tabsFor } from '@/sudarshan/watchlist/ListStr
 import { LISTS_FULL, ListTabs, PANEL_ID, tabId } from '@/sudarshan/watchlist/ListTabs'
 import { LiveList } from '@/sudarshan/watchlist/LiveList'
 import { copyName, copyPreset } from '@/sudarshan/watchlist/PresetLine'
+import { SearchSheet } from '@/sudarshan/watchlist/SearchSheet' // F13
 import { SectionSheets } from '@/sudarshan/watchlist/SectionMenus'
 import type { OrderRequest } from '@/sudarshan/watchlist/SymbolSheet'
 import { useOverlay } from '@/sudarshan/watchlist/useOverlay'
@@ -610,8 +611,26 @@ export default function Watchlist() {
         />
       )}
 
+      {v2 && active !== null && (
+        // F13: with the switch on, the search sheet takes the place of today's Add sheet.
+        <SearchSheet
+          open={overlay?.kind === 'add' && otherRef === null}
+          onOpenChange={(next) => {
+            if (!next) close()
+          }}
+          listId={active.id}
+          listName={active.name}
+          held={held}
+          full={full}
+          onAdd={async (symbol, exchange) => {
+            await watchlists.addItem(active.id, symbol, exchange)
+          }}
+          onFollow={openFollowForm}
+        />
+      )}
+
       <AddSymbolSheet
-        open={overlay?.kind === 'add' && active !== null && otherRef === null}
+        open={!v2 && overlay?.kind === 'add' && active !== null && otherRef === null}
         onOpenChange={(next) => {
           if (!next) close()
         }}

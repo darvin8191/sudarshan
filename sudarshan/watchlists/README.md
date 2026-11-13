@@ -1048,10 +1048,8 @@ keys in `quote`, and an instrument is in exactly one of the two sets (with the o
   25,950" with Show), those being followed too while it is open.
 - **Other expiries.** The next four expiries after the row's, CE and PE of the same strike, tick while the
   sheet is open: they are items of the list while it is open, in `follow.sheet` (counted first in the cap)
-  and Quote mode, and gone when it closes. Their contracts come from the page's own instrument search
-  (`useSameStrike.ts`, `searchSymbols` for "<underlying> <strike>", filtered to the underlying, strike and
-  later expiries), because the server's `strikes` op (W17) is not on this branch; when it lands, replace
-  `useSameStrike`'s read and nothing else.
+  and Quote mode, and gone when it closes. Their contracts come from the server's `strikes` op since F13 (see
+  "F13 - the search sheet"); F12 had read the page's own instrument search before that op was on this branch.
 - **Two things differ from the design.** The option chain page has no interest-rate preference in this fork
   (it prices with the default 0, as the server does), so `CHAIN_RATE_PCT` is 0 and is the one place that will
   follow a preference. The other expiries' change comes from the one snapshot read when they join the list.
@@ -1059,6 +1057,41 @@ keys in `quote`, and an instrument is in exactly one of the two sets (with the o
   exchange, sectionId, fixed: { strike, expiry } } }` (`FollowForm` in `followRows.ts`; `expiry` is an
   `ExpiryRule`, nearest when absent): the form shows "Strike 25,900, kept for good" and sends `strike_rule:
   fixed` with the strike. Tests: `strike.rows.test.tsx`, `strike.sheet.test.tsx`, `strikeSheet.test.ts`.
+
+## F13 - the search sheet
+
+With the switch on, `?sheet=add` is `SearchSheet.tsx` (M8.18), not today's Add sheet; with it off the page renders
+`AddSymbolSheet` exactly as before. The pure parts are `searchSheet.ts` (the chips, the group headings, the exchange of
+an underlying) and `recents.ts`.
+- **What it asks.** One `search` op per search the owner typed or chip he touched: `q`, `seg`, `limit` 50 and `list`
+  (the open list's id, so the server marks `added`). Typing waits 250 ms for a pause and starts at two letters; a
+  chip sends at once; a request that is overtaken is aborted. Nothing asks on a clock, and the sheet sends no `p`,
+  so a query that needs the underlying's price (ATM) is answered by the server in its own words.
+- **What it shows.** The field "Symbol, name or contract"; the chips All, Stocks, Futures, Options, Indices and
+  Commodities (48 dp, scrolling sideways, the chosen one with a tick as well as a tint); the understood line and the
+  near-miss sentence exactly as sent; the hits in the server's order with one heading for each run of the same group;
+  each hit's title and detail as sent with Add, or Added when the server marks it or the list holds it (the page's own
+  held set covers a symbol added a moment ago). A full list disables Add and says why, as the old sheet did.
+- **Underlying with options.** `underlying` set shows Pick a strike, Add ATM row and Add current-month FUT row. The
+  last two open F11's form through the page's `swap` with `{ mode: 'add', kind, underlying, exchange, sectionId:
+  null }`; the exchange is read from the answer's own cash hit for that name, else from where the options trade
+  (NFO or BFO) and whether the name is a known index, and with neither the offer is not made.
+- **The seam for F14.** Pass `onPickStrike(underlying, exchange)` to `SearchSheet`; while it is absent Pick a strike is
+  shown disabled. The page passes nothing yet. F14 should call `strikes` with `u` and `x` from that callback.
+- **Recent.** An empty field shows the last 20 symbols added from this sheet on this device (title, detail, Add or
+  Added), newest first, with Clear recents. They live in `localStorage` under `sudarshan-watchlist-recents`; every read
+  and write is wrapped, so a refused storage leaves the sheet working with no recents and no error. A refused add
+  records nothing.
+- **`useSameStrike`** now reads the server's `strikes` op: one answer for the open expiries, then one for each of the
+  next four after the row's, each asked for the strike alone (`p` the strike, `n` 0) on the underlying's own exchange
+  (`underlying_exchange`, no longer the derivatives one). It keeps F12's subscription: the contracts are followed only
+  while the strike sheet is open, and the reads are aborted with it. The `expiry` and `strike` fields F12 added to
+  `SearchResult`, `otherExpiries` and `expiryIso` are removed, since nothing else used them.
+- **One fix on the merge.** `followFixtures.ts` gains `rolled: false`, which lane W's generated `Resolved` now requires.
+- **Tests.** `search.sheet.test.tsx` (the chips and their `seg`, the debounce, grouping, Added, the understood line
+  and the near miss, Add and recents, the last 20 and Clear recents, a refused storage, 48 dp, the 500 ms guard, the
+  ATM and FUT forms, F14's callback), `Watchlist.search.test.tsx` (the switch on and off, the form from the page),
+  and `strike.sheet.test.tsx` (the `strikes` op and the release on close).
 
 ## W12 - built-in lists from the master (`presets/`, `refs/preset.py`, `ops/presets.py`, `words/presets.py`)
 
