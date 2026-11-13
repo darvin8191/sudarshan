@@ -112,6 +112,7 @@ from blueprints.sudarshan_screener import (  # SUDARSHAN M9 screener bridge
     sudarshan_screener_bp,
     sudarshan_screener_internal_bp,
 )
+from blueprints.sudarshan_session import sudarshan_session_bp  # SUDARSHAN: an instrument's hours
 from blueprints.system_permissions import (
     system_permissions_bp,  # Import the system permissions blueprint
 )
@@ -365,6 +366,7 @@ def create_app():
     app.register_blueprint(sudarshan_risk_bp)  # SUDARSHAN M5.13: sudarshan/guard (kill switch)
     app.register_blueprint(sudarshan_screener_bp)  # SUDARSHAN M9: sudarshan/screener/README.md
     app.register_blueprint(sudarshan_screener_internal_bp)  # SUDARSHAN M9: internal routes
+    app.register_blueprint(sudarshan_session_bp)  # SUDARSHAN: v0.8.1 review M1-M3, chart hours
 
     # Remote MCP (HTTP + OAuth) — opt-in via MCP_HTTP_ENABLED. Off by default.
     # Pre-flight refusal: must NEVER coexist with FLASK_DEBUG=True (debug-mode
