@@ -30,6 +30,13 @@ boundaries too, so its runs are made, recorded and applied to its list in bounda
 or 15:40 run of a short timeframe never comes before the held 15:30 run, and no member is marked
 missing and then back because of the hold.
 
+A held run is made when its hold ends, so it is late only when made more than ``LATE_MS`` after
+that (review N2), and so is each later boundary the hold kept waiting: the prints' hold ends when
+the last print arrived, at the latest at its window's end plus the grace; an index's at its
+window's end plus the grace. The 15:30 run of an F&O stocks screen made as the prints arrive at
+about 15:40, or of an index screen at 15:45:05, is on time; one a restart delayed past that is
+late. A print the screener saw again after a restart counts from that sighting.
+
 A screen made, resumed or edited during the session starts a new version (``Screen.since``, the
 moment it began), and its run key is new for every boundary of the day. It gets one run, on the
 latest candle closed by then, on time (not marked late unless a restart delayed it past
@@ -102,7 +109,8 @@ class Due:
     key: RunKey
     screen: Screen
     boundary: Boundary
-    #: True when the run is more than LATE_MS after its moment (a restart): marked on the run.
+    #: True when the run is more than LATE_MS after its moment (a restart), or after the end of
+    #: the hold that kept it waiting: marked on the run.
     late: bool
     #: The screen's last boundary of the day: a day-end grace ends with it.
     last: bool = False
@@ -243,9 +251,10 @@ def due(
     """Every run to make now, oldest boundary first: its moment has come, it is not recorded, and
     (for the last cash candle of a screen with auction stocks or an index) its hold has ended: the
     prints are in or their window has ended, and an index's window has ended. A held boundary holds
-    the screen's later ones (review N1). ``recorded(run_key)`` answers from the store and
-    ``waits(screen)`` from the screen's members. A version that began during the day starts from
-    the latest boundary closed by then (``_first``), not late."""
+    the screen's later ones (review N1), and lateness counts from the hold's end (review N2).
+    ``recorded(run_key)`` answers from the store and ``waits(screen)`` from the screen's members.
+    A version that began during the day starts from the latest boundary closed by then
+    (``_first``), not late."""
     out: list[Due] = []
     for screen in screens:
         spans = _spans(screen, sessions)
@@ -254,6 +263,7 @@ def due(
         session = session_key if session_key is not None else spans[0].key
         today = boundaries(screen, sessions)
         found: Waits | None = None  # the members' word, asked once and only when a hold applies
+        held_to = 0  # when the hold that kept this boundary (or an earlier one) waiting ended
         for boundary in today[_first(today, screen.since) :]:
             if now < boundary.at:
                 break
@@ -264,9 +274,11 @@ def due(
             index = _index_hold(screen, sessions, boundary)
             if prints is not None or index is not None:
                 found = waits(screen) if found is None else found
-                if _released(prints, index, found, now) is None:
+                ended = _released(prints, index, found, now)
+                if ended is None:
                     break  # held: its later boundaries wait for it, in order
-            late = now - max(boundary.at, screen.since) > LATE_MS
+                held_to = max(held_to, ended)
+            late = now - max(boundary.at, screen.since, held_to) > LATE_MS
             out.append(Due(key, screen, boundary, late, boundary is today[-1]))
     out.sort(key=lambda item: (item.boundary.at, item.screen.id))
     return out

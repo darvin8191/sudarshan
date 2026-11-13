@@ -306,6 +306,11 @@ the pre-open volume is in no bar.
   restart delayed, and every check a restart missed after it, is made late and marked so. A screen
   changed in the evening has one check on the day's last candle, at the change. A screen whose lines read only
   day candles is judged on the forming day candle at each close of its run's timeframe.
+- From 7 Dec 2026 the 15:30 check of a screen whose members include stocks that close by auction
+  waits for their prints (until 15:45:05 at the latest), and that of a screen whose members include
+  an index waits until 15:45:05 for its closing value; the members decide, so a watchlist screen
+  without either checks at 15:30:05. A held check holds the screen's later checks, which then run
+  in order, and it is marked late only when made more than a minute after its hold ended.
 
 ## Not built yet
 

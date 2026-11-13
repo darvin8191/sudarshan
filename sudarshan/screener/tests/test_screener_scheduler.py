@@ -293,17 +293,23 @@ def test_an_index_screen_waits_for_the_closing_value_from_7_december(day, latest
 
 # ---- the holds are the members', and a screen's runs keep their order (review N1) --------------
 def walk(
-    screen: sch.Screen, day: date, start: str, end: str, waits: Callable[[int], sch.Waits]
+    screen: sch.Screen,
+    day: date,
+    start: str,
+    end: str,
+    waits: Callable[[int], sch.Waits],
+    made_before: str | None = None,
 ) -> list[tuple[sch.Due, int]]:
     """Every run made for ``screen`` from ``start`` to ``end``, the runner's tick each second,
     each recorded as it is made: (the run, the moment it was made). Every boundary due before
-    ``start`` counts as made on time. ``waits(now)`` is what the members say at ``now``."""
+    ``made_before`` (``start`` when not given: the service was down in between) counts as made on
+    time. ``waits(now)`` is what the members say at ``now``."""
     sessions = sessions_of(day, trading_day=True)
-    first = hm(day, start)
+    first, done_by = hm(day, start), hm(day, made_before or start)
     done = {
         str(RunKey(screen.id, screen.version, sessions["NSE_EQ"].key, b.tf, b.k))
         for b in sch.boundaries(screen, sessions)
-        if b.at < first
+        if b.at < done_by
     }
     made: list[tuple[sch.Due, int]] = []
     for now in range(first, hm(day, end) + 1, 1_000):
@@ -424,3 +430,88 @@ def test_no_member_is_marked_missing_and_then_back_because_of_the_hold():
         ("15:45", mem.EV_STILL),
     ]  # fmt: skip
     assert row is not None and row.status == mem.ACTIVE and row.first_seen_at == hm(day, "15:35")
+
+
+# ---- a held run is late only when made late after its hold ended (review N2) --------------------
+CAS_15 = sch.Screen(10, 1, "close", 15, frozenset({"NSE_EQ", "NSE_EQ+auction"}))
+
+
+def late_at(day: date, made: list[tuple[sch.Due, int]]) -> list[tuple[str, str, bool]]:
+    """(candle end, moment made, marked late) per run, in the order made."""
+    return [(clock(day, d.boundary.end), clock(day, now), d.late) for d, now in made]
+
+
+def prints_at(at: int) -> Callable[[int], sch.Waits]:
+    """The members' word when every print has arrived by ``at``."""
+    return lambda now: sch.Waits(printed=at) if now >= at else NOT_PRINTED
+
+
+def test_a_held_check_made_as_its_hold_ends_is_not_late():
+    """Thu 10 Dec: the 15:30 check of an F&O stocks screen made as the prints arrive (15:39:40),
+    or at 15:45:05 when one never comes, and of an index screen at 15:45:05, is on time; so are
+    the later checks the hold kept waiting. The first fix marked every one "checked late ... after
+    a restart", on the Screener page and in the Telegram digest, when nothing had restarted."""
+    day = date(2026, 12, 10)
+    prints = hm(day, "15:39") + 40_000
+    assert late_at(day, walk(CAS_15, day, "15:30", "15:46", prints_at(prints))) == [
+        ("15:30", "15:39:40", False),
+    ]
+    assert late_at(day, walk(CAS_15, day, "15:30", "15:46", lambda now: NOT_PRINTED)) == [
+        ("15:30", "15:45:05", False),
+    ]
+    assert late_at(day, walk(INDICES, day, "15:30", "15:46", lambda now: INDEXED)) == [
+        ("15:30", "15:45:05", False),
+    ]
+    five = sch.Screen(9, 1, "close", 5, WATCHLIST)
+    assert late_at(day, walk(five, day, "15:30", "15:46", lambda now: INDEXED)) == [
+        ("15:30", "15:45:05", False), ("15:35", "15:45:05", False),
+        ("15:40", "15:45:05", False), ("15:45", "15:45:05", False),
+    ]  # fmt: skip
+    assert late_at(day, walk(five, day, "15:30", "15:46", prints_at(prints))) == [
+        ("15:30", "15:39:40", False), ("15:35", "15:39:40", False),
+        ("15:40", "15:40:05", False), ("15:45", "15:45:05", False),
+    ]  # fmt: skip
+
+
+def test_a_restart_past_the_hold_is_still_late():
+    """Thu 10 Dec, the service down from 15:20 to 15:50 (a restart forgets the prints it saw): the
+    held checks made at 15:50 are late, each counted from its hold's end, 15:45:05. A restart that
+    ended inside the hold delays nothing: the checks come at 15:45:05, on time. A check made more
+    than a minute after the last print arrived is late too."""
+    day = date(2026, 12, 10)
+    back = hm(day, "15:50")
+    five = sch.Screen(9, 1, "close", 5, WATCHLIST)
+    for screen, waits in ((CAS_15, NOT_PRINTED), (INDICES, INDEXED), (five, INDEXED)):
+        due = sch.due([screen], sessions_of(day, trading_day=True), back, set().__contains__,
+                      waits=lambda s, w=waits: w)  # fmt: skip
+        mine = [d for d in due if d.boundary.end >= hm(day, "15:30")]
+        assert mine and all(d.late for d in mine), screen.segments
+    for screen, waits in ((CAS_15, NOT_PRINTED), (INDICES, INDEXED)):
+        made = walk(screen, day, "15:44", "15:46", lambda now, w=waits: w, made_before="15:20")
+        assert late_at(day, made) == [("15:30", "15:45:05", False)], screen.segments
+    prints = hm(day, "15:39") + 40_000
+    for when, late in ((prints + 60_000, False), (prints + 61_000, True)):
+        due = sch.due([CAS_15], sessions_of(day, trading_day=True), when, set().__contains__,
+                      waits=lambda s: sch.Waits(printed=prints))  # fmt: skip
+        assert [(clock(day, d.boundary.end), d.late) for d in due][-1] == ("15:30", late)
+
+
+def test_before_7_december_a_check_is_late_as_it_was():
+    """Fri 4 Dec: the prints come inside the session (15:28:09), so the 15:30 check is made at
+    15:30:05, on time, and one a restart delayed past its moment is late, as before. A print that
+    never comes holds it to 15:35:05, the window's end: on time, where the first fix said late."""
+    day = date(2026, 12, 4)
+    sessions = sessions_of(day, trading_day=True)
+    early = sch.Waits(printed=hm(day, "15:28") + 9_000)
+    assert late_at(day, walk(CAS_15, day, "15:29", "15:31", lambda now: early)) == [
+        ("15:30", "15:30:05", False),
+    ]
+    restarted = sch.due([CAS_15], sessions, hm(day, "15:32"), lambda k: False, waits=lambda s: early)
+    assert [(clock(day, d.boundary.end), d.late) for d in restarted][-1] == ("15:30", True)
+    missed = sch.due(
+        [CAS_15], sessions, hm(day, "15:40"), lambda k: False, waits=lambda s: NOT_PRINTED
+    )
+    assert [(clock(day, d.boundary.end), d.late) for d in missed][-1] == ("15:30", True)
+    assert late_at(day, walk(CAS_15, day, "15:30", "15:36", lambda now: NOT_PRINTED)) == [
+        ("15:30", "15:35:05", False),
+    ]
