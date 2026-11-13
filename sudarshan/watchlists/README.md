@@ -1143,8 +1143,8 @@ an underlying) and `recents.ts`.
   held set covers a symbol added a moment ago). A full list disables Add and says why, as the old sheet did.
 - **Underlying with options.** `underlying` set shows Pick a strike, Add ATM row and Add current-month FUT row. The
   last two open F11's form through the page's `swap` with `{ mode: 'add', kind, underlying, exchange, sectionId:
-  null }`; the exchange is read from the answer's own cash hit for that name, else from where the options trade
-  (NFO or BFO) and whether the name is a known index, and with neither the offer is not made.
+  null }`; the exchange is the answer's `underlying_exchange` (from the master, as the server sent it; null exactly
+  when `underlying` is null, and then the offer is not made). The page guesses nothing.
 - **The seam for F14.** Pass `onPickStrike(underlying, exchange)` to `SearchSheet`; while it is absent Pick a strike is
   shown disabled. The page passes nothing yet. F14 should call `strikes` with `u` and `x` from that callback.
 - **Recent.** An empty field shows the last 20 symbols added from this sheet on this device (title, detail, Add or
@@ -1370,6 +1370,41 @@ socket is there. With the switch off nothing changes: the address is not known a
   the 2 s gap, 30 minutes asking nothing, a tab change, an ended expiry, every subscription released on close
   and on a tab change, the cap, Add CE and Add PE and Added, the form's seam, 48 dp, the 500 ms guard, the
   switch off) and `Watchlist.search.test.tsx` (from the search to the picker to the form, and a reload).
+
+## F15 - the TradingView import and export sheet
+
+Two items of the list menu with the switch on (`?sheet=import`, `?sheet=export`, both v2-only in
+`useOverlay.ts`); with it off the menu and the address read as today's. Logic apart from drawing is in
+`watchlist/tvTransfer.ts`, the sheets are `ImportSheet.tsx` and `ExportSheet.tsx`.
+- **Import from TradingView** is in every list's menu (a new list can be made from any screen);
+  "Import into this list" is offered only for the own list on screen (`menuRules.ts`, `tvFor`:
+  `importHere` for kind `list` alone, `export` for `list`, `preset`, `ranked` and `flag`, nothing for a
+  kind not written there). "Pick the .txt file you downloaded from TradingView, or paste its text." A
+  48 dp file button (`accept=".txt,text/plain"`, read with `FileReader` in the browser) and a paste box.
+  Over 64 KiB (`LIMITS.tv_file_bytes`, UTF-8 bytes for pasted text) is refused with the server's own
+  sentence before the file is read and before anything is sent. The file name, without its extension,
+  fills the new list's name, which stays editable.
+- **Preview.** One `tv_preview` per press of Preview (the op is limited to 6 a minute), sent with
+  `name` for a new list or `list` for this one; the server's `words` are shown in order and nothing is
+  written. The preview is dropped when the text, the target or the file changes, so Import always sends
+  what was shown; editing only the new list's name keeps it (the server checks the name at import, so a
+  name that is taken is refused in words, and the preview's split line may still carry the old name).
+  "Import {matched} symbols" is disabled at 0 matched and with a new list that has no name.
+- **Import.** `tv_import` with the preview's `hash`, and `name` (new list) or `list` and `version` (the
+  version `view` answered for the open list). The toast is `TvDone.words`; the first list made (or this
+  one) is opened; the lists, the All lists answer and the list's view are read again, whatever the
+  answer. `callOp` notes `lists_version`, so the push of this write is skipped (F, "the push's refs").
+  Every refusal is shown as the server sent it under the button, and the sheet stays open: the changed
+  file, a taken name, a stale version, the 50 lists, 250 symbols, 20 sections, and a part-way failure
+  with how many went in.
+- **Export for TradingView** reads `tv_export` for the ref of the list on screen each time it opens
+  and shows the server's `words`; the file `text` is downloaded as `filename` (Blob and a link) only when
+  `symbols` is above 0. A refusal is shown as sent. A section's own export (`list:7/section:3`) is
+  accepted by `ExportSheet` through its `listRef`, but no section menu entry opens it yet.
+- Both sheets are `BottomSheet`s, so they ignore taps for the first 500 ms (`openGuard.ts`).
+- Also in this change: `STATUS.md` has one row for each M-id again (the merge of lane W had left two
+  for M8.4 to M8.12; the lane W text is kept inside the one row).
+- **Tests:** `pages/Watchlist.tv.test.tsx`.
 
 ## W17 - the search and strikes ops (`ops/search.py`, `words/strikes.py`)
 

@@ -28,8 +28,10 @@ import { useScreenerPush } from '@/sudarshan/screener/push'
 import { AddSymbolSheet } from '@/sudarshan/watchlist/AddSymbolSheet'
 import { AllListsSheet } from '@/sudarshan/watchlist/AllListsSheet'
 import { ArrangeSheets, useArrange } from '@/sudarshan/watchlist/ArrangeSheet'
+import { ExportSheet } from '@/sudarshan/watchlist/ExportSheet' // F15
 import { FollowRowSheet } from '@/sudarshan/watchlist/FollowRowSheet'
 import type { FollowForm } from '@/sudarshan/watchlist/followRows'
+import { ImportSheet } from '@/sudarshan/watchlist/ImportSheet' // F15
 import { DeleteDialog, NameDialog } from '@/sudarshan/watchlist/ListDialogs'
 import { ListStrip, ownId, ownRef, tabsFor } from '@/sudarshan/watchlist/ListStrip'
 import { LISTS_FULL, ListTabs, PANEL_ID, tabId } from '@/sudarshan/watchlist/ListTabs'
@@ -44,7 +46,7 @@ import { useViewPref } from '@/sudarshan/watchlist/ViewSheet'
 import { BUILT_IN } from '@/sudarshan/watchlist/v2/arrange'
 import { useAlertOffers } from '@/sudarshan/watchlist/v2/listAlert'
 import { FLAG_LIST_WORDS, flagName, itemsOf, renameFlag } from '@/sudarshan/watchlist/v2/marks'
-import { kindOfRef } from '@/sudarshan/watchlist/v2/menuRules'
+import { kindOfRef, tvFor } from '@/sudarshan/watchlist/v2/menuRules'
 import { groupsOf, SECTIONS_FULL, useCollapsed } from '@/sudarshan/watchlist/v2/sections'
 import { LIMITS, type RefKind } from '@/sudarshan/watchlist/v2/types'
 import { useListView, useV2State } from '@/sudarshan/watchlist/v2/useListView'
@@ -155,6 +157,7 @@ export default function Watchlist() {
     settled &&
     ((overlay.kind === 'item' && !shownItems.some((item) => item.id === overlay.itemId)) ||
       (overlay.kind === 'copy' && (presetRef === null || copyKeys === null)) || // F10
+      (overlay.kind === 'export' && !tvFor(kindOfRef(otherRef)).export) || // F15
       (otherRef !== null && !actsOnScreen(overlay.kind, flagRef !== null)) || // M8.6
       (overlay.kind === 'order' && overlay.order === null) ||
       (overlay.kind === 'follow' && overlay.form === null) || // F11
@@ -468,6 +471,8 @@ export default function Watchlist() {
               }
               onView={prefRef ? () => open({ kind: 'view' }) : undefined} // F6, F10
               kind={kindOfRef(otherRef)} // M8.6: the menu follows the list on screen
+              onImport={v2 ? () => open({ kind: 'import' }) : undefined} // F15
+              onExport={v2 ? () => open({ kind: 'export' }) : undefined} // F15
               alert={listAlert} // F17
               newSectionOff={
                 view && view.sections.length >= LIMITS.sections_per_list ? SECTIONS_FULL : null
@@ -600,6 +605,29 @@ export default function Watchlist() {
           onNew={() => swap({ kind: 'new' })}
           newOff={watchlists.lists.length >= MAX_LISTS ? LISTS_FULL : null}
         />
+      )}
+
+      {v2 && (
+        // F15: Import from TradingView; "this list" only for the own list on screen, on the version read.
+        <ImportSheet
+          open={overlay?.kind === 'import'}
+          onClose={close}
+          here={
+            active && otherRef === null
+              ? { id: active.id, name: active.name, version: view?.version ?? null }
+              : null
+          }
+          onDone={(done, opened) => {
+            toast.success(done.words)
+            select(opened)
+            close()
+          }}
+        />
+      )}
+
+      {v2 && (
+        // F15: Export for TradingView, for the list on screen.
+        <ExportSheet open={overlay?.kind === 'export'} onClose={close} listRef={activeRef} />
       )}
 
       {v2 && (
