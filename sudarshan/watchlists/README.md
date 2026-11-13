@@ -162,15 +162,14 @@ route `types.ts` gives it (`callOp`), unwraps the envelope and throws `Watchlist
 server's own sentence, or the page's words when there was no answer or the answer was not the
 bridge's; a status code or an address never reaches a screen. `useListView.ts` holds the query keys
 and the reads: `useV2State` is the only read made while the switch is off, and `useListView` and
-`useLists` wait for it to say `enabled`. The version rule is `keepNewer`: versions are `<boot>:<n>`,
-an older answer than the one held is dropped (looked at when the answer arrives, not when the read
-began), and two boots cannot be ordered so the later answer wins. `usePush.ts` joins the owner's
-room after each connect with an ack, collects pushes for 200 ms into one read (`applyPushes`, which
-skips a push whose version the view already holds), and reads everything again after a reconnect;
+`useLists` wait for it to say `enabled`. The two versions and what each is used for are
+under "F fixes after the mid-point review" below. `usePush.ts` joins the owner's
+room after each connect with an ack, collects pushes for 200 ms into one read (`applyPushes`),
+and reads everything again after a reconnect;
 nothing is read on a timer. `useOverlay(v2)` knows `?sheet=lists` only when v2 is on, so Back closes
 a sheet first as before and a bookmarked address reads as nothing while it is off. Tests run against
-`mockBridge.ts`, a stand-in that answers the contract's routes. Still to check on a real bridge:
-whether a write wants its path fields in the body as well as the path (the client sends both).
+`mockBridge.ts`, a stand-in that answers the contract's routes and reads a request as the bridge
+does (see the fixes below). A write sends its path fields in the body as well as the path.
 
 
 ## F2 - seven favourite tabs and the All lists sheet
@@ -424,6 +423,43 @@ on the row and in the sheet; nothing is deleted until Clear expired. A family re
 no Flags block at all, and reads no `symbol`: the block's rows are the owner's alone, a step past the design,
 which names only rename. With the switch off nothing here is drawn or read. Tests: `flags.view.test.tsx`,
 `pages/Watchlist.flags.test.tsx`.
+
+## F fixes after the mid-point review
+
+Seven findings of the mid-point review (H2, M2, M3, L11, L12, and the W5 bullet), all in the phone.
+
+- **Where fields travel (H2).** `callOp` follows the contract and the bridge: a GET or DELETE
+  sends its fields (the path's own excluded) in the query string, every other method sends the whole
+  request as a JSON body. `mockBridge.ts` reads a request the same way and refuses what the bridge
+  would not see (a body on a GET or DELETE, a query on any other method, a non-primitive query
+  value), and hands its handlers query values as text, as the wire does. `api.test.ts` drives every
+  op in `OPS` through it. Remove section no longer answers `invalid`.
+- **Two versions (M3).** The lists version (`state.versions.lists`, `lists.version`, every push's `v`)
+  is `"<boot>:<n>"` and is compared for equality only; it decides whether a push says anything new
+  (`applyPushes` skips a push whose `v` is the last one seen, from a `state` or `lists` answer or a
+  push; never a flags or favourites push, whose lists version does not move; never while a read is in
+  flight, which may not have seen the change). A list's own version in `view` is a whole number as
+  text ("0", then epoch milliseconds, one more per write): the page uses it as the version a write is
+  decided on, and `keepNewer` orders two view answers by it as numbers ("0" is never taken for older,
+  because a list made anew after its id was reused starts there). Writes are not skipped by their own
+  push: the write's answer carries the list's version, not the lists version, so the push of a
+  device's own write costs one extra read of what the write already re-read. Lane W could add the
+  lists version to a write's answer to close that.
+- **A push refreshes what the page shows (M2).** The rows and tabs come from OpenAlgo's lists
+  (`WATCHLISTS_KEY`), so a push of why `items`, `lists` or `arranged` that names an own list (or
+  `lists`) reads them again beside the views it names; a symbol added on /trading shows on the
+  phone. A push names every list it changed: `refs` when present, else `ref`, and "lists" alone reads
+  every open view. `PushNames` in `useListView.ts` is a local extension carrying `refs`: remove it
+  and read `Push.refs` when lane W's contract change is merged and the types are regenerated. A
+  reconnect reads `WATCHLISTS_KEY` too. Sections, rows and preferences read the named views only.
+- **A record refusal (L11).** When `state` answers `record` (the store is newer than this app, or
+  cannot be read) the page shows the server's sentence above the lists, which keep working as
+  before; the switch off, an unreachable bridge or a busy one say nothing.
+- **Exact keys (L12).** `WATCHLISTS_KEY` is a prefix of every v2 key, so every invalidation and
+  cancel of it is `exact` (`writeThenRead`, `useWatchlists`, the screener push): a write re-reads
+  only what it changed. `V2_KEY` stays where it is.
+- **W5 decision.** "`ref` is the one ref changed, else `lists`" is no longer all a push says: the
+  phone reads `refs` and falls back to `ref` only for a bridge that does not send it.
 
 ## W7 - sections (`store/sections.py`, `ops/sections.py`, `words/sections.py`)
 
