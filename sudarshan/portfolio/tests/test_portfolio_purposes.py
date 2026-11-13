@@ -589,6 +589,26 @@ async def test_the_family_summary_carries_only_the_shared_tabs_and_the_upstox_ro
     assert "qty_u" in keys(entry["upstox"]["holdings"])
 
 
+@scenario
+async def test_the_family_summary_of_a_member_with_no_privacy_row_still_reads_upstox(rig, caplog):
+    """M1: quantities hidden (a member with no privacy row) take the part's note away; the row
+    still says what was read, with no figure, and nothing is logged as a failure."""
+    await rig.owner("share_set", tab_id=rig.upstox_tab, viewer="7", level="view")
+    with caplog.at_level(logging.ERROR):
+        status, body = await rig.family("7", "summary")
+    assert status == 200
+    (entry,) = body["data"]["entries"]
+    row = entry["upstox"]
+    assert row["state"] == "ok" and row["read_at"] == NOW
+    assert row["holdings"] and all(h["name"] for h in row["holdings"])  # names stay
+    found = keys(row)
+    assert "note" not in found and not {k for k in found if k.endswith(("_paise", "_pct"))}
+    assert {k for k in found if k.endswith("_u")} <= set(privacy.json_never_hidden())
+    assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+    owner = (await rig.owner("summary"))["entries"]
+    assert next(e for e in owner if e["tab"]["system"])["upstox"]["state"] == "ok"
+
+
 # ---- PJ: the journal's reads ---------------------------------------------------------------------
 @scenario
 async def test_trades_day_carries_read_at_and_shares_the_family_read(rig, fake):
