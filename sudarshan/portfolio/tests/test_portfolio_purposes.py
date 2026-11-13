@@ -578,6 +578,19 @@ async def test_the_family_and_the_owner_share_one_upstox_read(rig, fake):
 
 
 @scenario
+async def test_three_family_reads_in_a_second_leave_the_owners_read_ok(rig, fake):
+    """M4: a member cannot ask past the five seconds of memory (max_age 0 reads as 5), so family
+    screens never spend the per-second reads of the owner's own tab."""
+    await rig.grant("7", [rig.upstox_tab])
+    for _ in range(3):
+        status, body = await rig.family("7", "upstox_book", parts=["holdings"], max_age=0)
+        assert status == 200 and body["data"]["holdings"]["state"] == "ok"
+    owner = (await rig.owner("upstox_book", parts=["holdings"], max_age=0))["holdings"]
+    assert owner["state"] == "ok" and owner["note"] is None
+    assert fake.count("holdings") == 2  # one read for the family, then the owner's own
+
+
+@scenario
 async def test_the_family_summary_carries_only_the_shared_tabs_and_the_upstox_row_when_shared(rig):
     await rig.grant("7", [rig.tab["id"]])
     status, body = await rig.family("7", "summary")

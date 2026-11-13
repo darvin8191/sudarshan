@@ -255,6 +255,31 @@ def test_a_read_the_reserve_refuses_does_not_tell_the_owner_it_failed(fake, toke
     assert fake.count("day_trades") == 1
 
 
+def test_a_family_read_the_per_second_bucket_refuses_never_marks_the_owners_figures(
+    fake, token_file
+):
+    """M4: the per-second bucket is the owner's too. A family read that finds it empty is held
+    back; it never sets the shared memory stale ("busy") for the owner's next two seconds."""
+    reader, clock = make(fake, token_file)
+
+    async def go():
+        await reader.book(["holdings"], 0)  # the owner read it at 11:00:00
+        clock.advance(6)  # older than the five seconds of memory
+        second = reader.budget._of("holdings")[0]
+        second.tokens, second.at = 0.0, clock.mono  # this second's two reads are spent
+        held = (await reader.book(["holdings"], 5, FAMILY))["holdings"]
+        second.tokens = 2.0  # the next second
+        owner = (await reader.book(["holdings"], 5, "owner"))["holdings"]
+        await reader.aclose()
+        return held, owner
+
+    held, owner = run(go())
+    assert held["state"] == "stale" and held["read_at"] == ist(11)
+    assert "keeping its Upstox reads for the account owner" in held["note"]
+    assert owner["state"] == "ok" and owner["note"] is None and owner["read_at"] == ist(11, 0, 6)
+    assert fake.count("holdings") == 2
+
+
 def test_a_held_read_answers_the_figures_it_has_as_old(fake, token_file):
     reader, clock = make(fake, token_file)
 
