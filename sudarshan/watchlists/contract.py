@@ -24,8 +24,9 @@ INTERNAL_PREFIX = "/sudarshan/watchlists/internal"
 SWITCH_ENV = "SUDARSHAN_WATCHLISTS_V2"
 DB_ENV = "SUDARSHAN_WATCHLISTS_DB"
 #: Every open app of the owner joins it with ``EVENT_JOIN``; the push is ``{v, ref, refs, why}``:
-#: ``refs`` is every ref the change touched, ``ref`` the one of them or ``lists`` (kept for the
-#: phone until it reads ``refs``).
+#: ``refs`` is every ref whose members the change touched (none for a favourites write, a flag
+#: rename or a note), ``ref`` the one of them or ``lists`` (kept for the phone until it reads
+#: ``refs``).
 ROOM = "sudarshan:watchlists:owner"
 EVENT_PUSH = "sudarshan_watchlists"
 EVENT_JOIN = "sudarshan_watchlists_join"

@@ -215,11 +215,14 @@ pushes while it is broken opens it and logs the cause once instead of once per w
 section is the increment or one comparison. `versions.bump(why, refs)` bumps the lists version once
 and calls `versions.push`, which emits `contract.EVENT_PUSH` (`{v, ref, refs, why}` plus
 `favourites` and `flags` when known) to the room `sudarshan:watchlists:owner` through
-`extensions.emit_from_any_thread`. `refs` is every ref the write changed, in the order named and
-each once: the target and then the source of a move, the old and the new flag list of a mark (the
-design's bump table), so a per-ref sync (lane F's `group_sync`, A5) knows every list to follow; it
-is empty when the change cannot be pinned to a ref (OpenAlgo's answer named no list), which means
-read everything again. `ref` is the one ref changed, else `lists`: the phone reads `ref` today, so
+`extensions.emit_from_any_thread`. `refs` is every ref whose members the write changed, in the
+order named and each once: the target and then the source of a move, the old and the new flag list
+of a mark (the design's bump table), so a per-ref sync (lane F's `group_sync`, A5) knows every list
+to follow. It is empty when the change touched no list's members (a favourites write, a flag
+rename, a note alone) or when the hook could not tell which list it was (OpenAlgo's answer named
+none; the alerts' one-minute version check catches that). An open page reads its open list again
+on every push, and `state` or `lists` when `why` names them, whatever `refs` says. `ref` is the one
+ref changed, else `lists`: the phone reads `ref` today, so
 it stays in the push until lane F moves to `refs`, and is then dropped as a contract change of its
 own. A push that cannot be sent is logged, never raised. `state` answers
 `versions`. An app joins the room with `contract.EVENT_JOIN` (an ack): the owner's session only, and
@@ -470,7 +473,9 @@ or a slot twice is `invalid`. The transaction's first statement is the version's
 so a stale version is `conflict` and changes nothing; after the commit the mirror moves
 (`versions.committed`) and one push goes out. It changes no list's membership, so the lists version
 does not move: `versions.push(why)` is the push without the bump (`versions.bump` now calls it), and
-carries the new favourites version. `pref` (PUT `/prefs/<ref>`) writes only the fields sent, on the
+carries the new favourites version and no `refs` (no list's members changed). Each W10 write is one
+transaction in one file, so the partial-write rule of W5 has nothing to name in it; a favourites
+write always moves the favourites version (its claim), so it is never a write that changed nothing. `pref` (PUT `/prefs/<ref>`) writes only the fields sent, on the
 server, in one UPDATE (a ref with no row gets one, the rest at the table's defaults); it moves no
 version and pushes nothing, and a ref with no row reads as the defaults and is never written as if
 chosen. `refs/list.py` now reads a list's preference even when the overlay has no guard row for it

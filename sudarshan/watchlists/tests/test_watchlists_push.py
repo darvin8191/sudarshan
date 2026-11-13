@@ -253,7 +253,7 @@ def test_a_bump_pushes_v_ref_why_and_the_other_versions_to_the_owners_room(emitt
     assert (emitted[-1][1]["ref"], emitted[-1][1]["refs"]) == ("lists", ["list:1", "list:2"])
 
 
-def test_the_push_names_every_ref_once_in_order_and_none_means_read_everything(emitted):
+def test_the_push_names_every_ref_once_in_order_and_may_name_none(emitted):
     """``refs`` carries every ref a write changed (a move's two lists, a mark's two flag lists),
     which the phone's per-ref sync needs; ``ref`` collapses them and stays for the phone."""
     engine.ready()

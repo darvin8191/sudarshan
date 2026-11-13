@@ -172,12 +172,16 @@ def push(why: str, refs: Iterable[str] = (), version: str | None = None) -> None
     the lists version; a change that alters no list's membership (the favourites) calls it alone,
     and the lists version stays where it is.
 
-    ``refs`` is every ref the change touched (the target and the source of a move, the old and the
-    new flag list of a mark), in the order named, each once; it is empty when the change cannot be
-    pinned to a ref (OpenAlgo's answer did not name its list), which means "read everything again".
-    ``ref`` is the one of them, or ``lists`` when there are none or several: the phone reads it until
-    it moves to ``refs``. ``v`` is the lists version, ``version`` when the caller has just bumped it.
-    A push that cannot be sent is logged and never raised: the change it follows has committed."""
+    ``refs`` is every ref whose members the change touched (the target and the source of a move, the
+    old and the new flag list of a mark), in the order named, each once: what a per-ref follower
+    (a list alert group) must read again. It is empty when the change touched no list's members (a
+    favourites write, a flag rename, a note alone) or when the hook could not tell which list it was
+    (OpenAlgo's answer named none; the alerts' one-minute check of the version catches that). An
+    open page reads its open list again on every push and ``state`` or ``lists`` when ``why`` names
+    them, whatever ``refs`` says. ``ref`` is the one of them, or ``lists`` when there are none or
+    several: the phone reads it until it moves to ``refs``. ``v`` is the lists version, ``version``
+    when the caller has just bumped it. A push that cannot be sent is logged and never raised: the
+    change it follows has committed."""
     named = list(dict.fromkeys(refs))
     payload = {"v": version or read(), "ref": named[0] if len(named) == 1 else "lists",
                "refs": named, "why": why}  # fmt: skip
