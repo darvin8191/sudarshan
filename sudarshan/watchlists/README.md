@@ -117,8 +117,9 @@ W-10). Vectors: `tests/vectors/ranked.json`.
 ## W11 - master access (`master.py`) and the exception's tests (`tests/test_exception.py`)
 
 `master.py` is the one reader of OpenAlgo's symbol master. `master.shared()` is the process's one
-`Master` (made lazily with `utils/lazy`), and every reader uses it: `refs/list.py` now, and the
-built-in lists, follow rows, search and the members route (W12, W13, W15, W17, W23) when they come;
+`Master` (made lazily with `utils/lazy`), and every reader uses it: `refs/list.py`, `refs/flag.py`
+and the `symbol` and `expired_clear` ops (W9) now, and the built-in lists, follow rows, search and
+the members route (W12, W13, W15, W17, W23) when they come;
 no module builds a `Master` of its own (a test scans for one). It keeps one generation of reference
 maps (`search.Index`: the snapshot's own rows, never copies) tied to the snapshot it came from,
 builds it in slices that yield to the hub behind a keyed single flight (the first caller builds,

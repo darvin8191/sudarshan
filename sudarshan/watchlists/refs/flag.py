@@ -39,7 +39,7 @@ def view(ident: str, user: str) -> dict:
             schema.PrefRow.principal == OWNER, schema.PrefRow.ref == ref)).first()  # fmt: skip
         raw = None if pref is None else {"sort": pref.sort, "descending": pref.descending,
                                          "basis": pref.basis, "held": pref.held}  # fmt: skip
-    m = master.Master()
+    m = master.shared()  # the process's one master: a request never builds its own
     return merge_view.merge_flag(mark, name, rows, m.row, loaded=m.loaded(), isin=m.isin,
                                  pref=raw, lines=[words.FLAG_LIST])  # fmt: skip
 

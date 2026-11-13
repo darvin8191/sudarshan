@@ -131,7 +131,7 @@ def expired_clear(args: dict) -> dict:
     """Remove the flag and note of every symbol the master no longer lists, and only those."""
     from sudarshan.watchlists import master
 
-    m = master.Master()
+    m = master.shared()  # the process's one master: a request never builds its own
     if not m.loaded():
         raise OpError("failed", words.NOT_LOADED)
     gone: list = []
@@ -161,7 +161,7 @@ def symbol(args: dict) -> dict:
         names = {f["mark"]: f["name"] for f in store.flag_names(s)}
         found = None if row is None else (row.flag, row.note, row.note_at, row.version)
     flag, note, note_at, version = found or (None, None, None, None)
-    m = master.Master()
+    m = master.shared()  # the process's one master: a request never builds its own
     # Own lists only. Built-in lists (W12) join this answer as `Held` records after them.
     held = [{"ref": f"list:{i}", "name": n}
             for i, n in listref.holding(session.get("user") or "", exchange, name)]  # fmt: skip
