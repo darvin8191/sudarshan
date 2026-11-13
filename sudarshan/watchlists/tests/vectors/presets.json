@@ -1,0 +1,86 @@
+{
+  "note": "Typed by hand from the design's rules (3.5, 3.7), never made by the code under test. Rows: [symbol, exchange, type, underlying or null, expiry or null]. A symbol that lists a ':' in a key is EXCHANGE:SYMBOL.",
+  "indices": [
+    "NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50", "INDIAVIX",
+    "NIFTY100", "NIFTY200", "NIFTY500", "NIFTYMIDCAP100", "NIFTYSMLCAP100",
+    "NIFTYIT", "NIFTYAUTO", "NIFTYPHARMA", "NIFTYFMCG", "NIFTYMETAL", "NIFTYREALTY",
+    "NIFTYENERGY", "NIFTYMEDIA", "NIFTYPSUBANK", "NIFTYPVTBANK", "NIFTYINFRA",
+    "SENSEX", "BANKEX"
+  ],
+  "bse_indices": ["SENSEX", "BANKEX"],
+  "index_missing_one": "NIFTYMEDIA",
+  "master": [
+    ["RELIANCE", "NSE", "EQ", null, null],
+    ["RELIANCE", "BSE", "EQ", null, null],
+    ["RELIANCE24NOV26FUT", "NFO", "FUT", "RELIANCE", "24-NOV-26"],
+    ["RELIANCE29DEC26FUT", "NFO", "FUT", "RELIANCE", "29-DEC-26"],
+    ["RELIANCE26JAN27FUT", "NFO", "FUT", "RELIANCE", "26-JAN-27"],
+    ["RELIANCE24NOV262500CE", "NFO", "CE", "RELIANCE", "24-NOV-26"],
+    ["FARCO", "NSE", "EQ", null, null],
+    ["FARCO30MAR27FUT", "NFO", "FUT", "FARCO", "30-MAR-27"],
+    ["M&M", "NSE", "EQ", null, null],
+    ["M&M24NOV26FUT", "NFO", "FUT", "M&M", "24-NOV-26"],
+    ["BAJAJ-AUTO", "NSE", "EQ", null, null],
+    ["BAJAJ-AUTO24NOV26FUT", "NFO", "FUT", "BAJAJ-AUTO", "24-NOV-26"],
+    ["GHOSTCO24NOV26FUT", "NFO", "FUT", "GHOSTCO", "24-NOV-26"],
+    ["NOFUTCO", "NSE", "EQ", null, null],
+    ["NIFTY", "NSE_INDEX", "INDEX", null, null],
+    ["NIFTY24NOV26FUT", "NFO", "FUT", "NIFTY", "24-NOV-26"],
+    ["NIFTY29DEC26FUT", "NFO", "FUT", "NIFTY", "29-DEC-26"],
+    ["NIFTY26JAN27FUT", "NFO", "FUT", "NIFTY", "26-JAN-27"],
+    ["BANKNIFTY24NOV26FUT", "NFO", "FUT", "BANKNIFTY", "24-NOV-26"],
+    ["BANKNIFTY29DEC26FUT", "NFO", "FUT", "BANKNIFTY", "29-DEC-26"],
+    ["FINNIFTY24NOV26FUT", "NFO", "FUT", "FINNIFTY", "24-NOV-26"],
+    ["SENSEX26NOV26FUT", "BFO", "FUT", "SENSEX", "26-NOV-26"],
+    ["SENSEX31DEC26FUT", "BFO", "FUT", "SENSEX", "31-DEC-26"]
+  ],
+  "fno_stocks": {
+    "rows": ["NSE:BAJAJ-AUTO", "NSE:FARCO", "NSE:M&M", "NSE:RELIANCE"],
+    "missing": ["NSE:GHOSTCO"],
+    "never": ["NSE:NIFTY", "NSE:BANKNIFTY", "NSE:NOFUTCO", "BSE:RELIANCE"]
+  },
+  "index_futures": [
+    {
+      "name": "a normal day: every index on its first expiry still ahead",
+      "now": "2026-11-10T10:00:00+05:30",
+      "closes": {},
+      "rows": ["NFO:NIFTY24NOV26FUT", "NFO:BANKNIFTY24NOV26FUT", "NFO:FINNIFTY24NOV26FUT", "BFO:SENSEX26NOV26FUT"],
+      "valid_until": "2026-11-24T15:40:00+05:30"
+    },
+    {
+      "name": "expiry day, one second before 15:40: still the expiring month",
+      "now": "2026-11-24T15:39:59+05:30",
+      "closes": {},
+      "rows": ["NFO:NIFTY24NOV26FUT", "NFO:BANKNIFTY24NOV26FUT", "NFO:FINNIFTY24NOV26FUT", "BFO:SENSEX26NOV26FUT"],
+      "valid_until": "2026-11-24T15:40:00+05:30"
+    },
+    {
+      "name": "expiry day from 15:40: the next month; FINNIFTY has none left and is not listed",
+      "now": "2026-11-24T15:40:00+05:30",
+      "closes": {},
+      "rows": ["NFO:NIFTY29DEC26FUT", "NFO:BANKNIFTY29DEC26FUT", "BFO:SENSEX26NOV26FUT"],
+      "valid_until": "2026-11-26T15:40:00+05:30"
+    },
+    {
+      "name": "a special session ending at 15:55 holds the expiring month at 15:45",
+      "now": "2026-11-24T15:45:00+05:30",
+      "closes": {"2026-11-24": "2026-11-24T15:55:00+05:30"},
+      "rows": ["NFO:NIFTY24NOV26FUT", "NFO:BANKNIFTY24NOV26FUT", "NFO:FINNIFTY24NOV26FUT", "BFO:SENSEX26NOV26FUT"],
+      "valid_until": "2026-11-24T15:55:00+05:30"
+    },
+    {
+      "name": "the day after: every index is on the next month",
+      "now": "2026-11-25T09:20:00+05:30",
+      "closes": {},
+      "rows": ["NFO:NIFTY29DEC26FUT", "NFO:BANKNIFTY29DEC26FUT", "BFO:SENSEX26NOV26FUT"],
+      "valid_until": "2026-11-26T15:40:00+05:30"
+    },
+    {
+      "name": "everything past: the list is empty and nothing is valid",
+      "now": "2027-02-01T09:20:00+05:30",
+      "closes": {},
+      "rows": [],
+      "valid_until": null
+    }
+  ]
+}

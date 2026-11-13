@@ -317,8 +317,10 @@ def test_the_shipped_list_on_a_fresh_install(tmp_path):
     assert after["SUDARSHAN_RISK_GUARD"] == "sandbox"  # M5.13: Analyze mode first
     assert after["UPSTOX_ORDER_MAX_PER_SECOND"] == "5"  # M5.14: orders paced at 5 a second
     assert after["SUDARSHAN_PORTFOLIO"] == "on"  # M7: the portfolio is switched on by the release
+    assert after["SUDARSHAN_WATCHLISTS_V2"] == "off"  # M8.4: Watchlists v2 ships off
     managed = {
         "SUDARSHAN_PORTFOLIO",
+        "SUDARSHAN_WATCHLISTS_V2",
         "MAX_WEBSOCKET_CONNECTIONS",
         "WEBSOCKET_BROKER_LINGER_SECONDS",
         "SUDARSHAN_RISK_GUARD",

@@ -98,6 +98,8 @@ MIGRATIONS = [
     ("migrate_sudarshan_risk.py", "SUDARSHAN Risk Layer (kill switch and order guards)"),
     # SUDARSHAN review HIGH-2: a logout of every device ends every device's session
     ("migrate_session_cutoffs.py", "SUDARSHAN Session Cutoffs (logout of every device)"),
+    # SUDARSHAN M8.4: the watchlist store, db/sudarshan_watchlists.db. Listed, not required (L14).
+    ("migrate_sudarshan_watchlists.py", "SUDARSHAN Watchlists v2 (sections, follow rows, flags)"),
 ]
 
 # Legacy migrations historically used non-zero exits for best-effort warnings,

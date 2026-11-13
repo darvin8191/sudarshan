@@ -1,0 +1,66 @@
+{
+  "about": "Hand-typed from the field table of Upstox's Smartlist page (design 0.6), not from the options example. Each row is instrument_key, price {current, close_price, change_abs, change_pct}, metric {current, previous, change_abs, change_pct}.",
+  "master": {
+    "NSE_FO|35003": ["NIFTY25NOVFUT", "NFO", "NIFTY 25 NOV FUT", "NIFTY", 65],
+    "NSE_FO|35010": ["BANKNIFTY25NOVFUT", "NFO", "BANKNIFTY 25 NOV FUT", "BANKNIFTY", 30],
+    "NSE_FO|41001": ["NIFTY24NOV2625900CE", "NFO", "NIFTY 25900 CE 24 NOV 26", "NIFTY", 65],
+    "MCX_FO|55001": ["CRUDEOIL18DEC26FUT", "MCX", "CRUDEOIL FUT", "CRUDEOIL", 100]
+  },
+  "cases": [
+    {"name": "OI gainers and losers, an unknown key left out", "category": "OI_GAINERS",
+     "answer": {"status": "success", "data": {"time_stamp": "2026-11-09T10:42:05+05:30", "metric_key": "oi_change_pct", "data": [
+       {"instrument_key": "NSE_FO|35003", "price": {"current": 25950.5, "close_price": 25900.0, "change_abs": 50.5, "change_pct": 0.19}, "metric": {"current": 112400, "previous": 100000, "change_abs": 12400, "change_pct": 12.4}},
+       {"instrument_key": "NSE_FO|35010", "price": {"current": 58100.0, "close_price": 58300.0, "change_abs": -200.0, "change_pct": -0.34}, "metric": {"current": 96860, "previous": 100000, "change_abs": -3140, "change_pct": -3.14}},
+       {"instrument_key": "NSE_FO|99999", "price": {"current": 1.0, "close_price": 1.0, "change_abs": 0, "change_pct": 0}, "metric": {"current": 1, "previous": 1, "change_abs": 0, "change_pct": 0}}]}},
+     "made": "2026-11-09T10:42:05+05:30", "metric_key": "oi_change_pct", "left_out": 1,
+     "rows": [[1, "NIFTY25NOVFUT", "OI +12.4%"], [2, "BANKNIFTY25NOVFUT", "OI −3.1%"]]},
+    {"name": "top traded in crore", "category": "TOP_TRADED",
+     "answer": {"data": {"time_stamp": "2026-11-09T10:42:05+05:30", "data": [
+       {"instrument_key": "NSE_FO|41001", "price": {}, "metric": {"current": 13209000000, "previous": null, "change_abs": null, "change_pct": null}}]}},
+     "rows": [[1, "NIFTY24NOV2625900CE", "Traded ₹1,320.9 cr"]]},
+    {"name": "most active, Indian grouping", "category": "MOST_ACTIVE",
+     "answer": {"data": {"data": [{"instrument_key": "NSE_FO|35003", "price": {}, "metric": {"current": 245600}}]}},
+     "rows": [[1, "NIFTY25NOVFUT", "Volume 2,45,600"]]},
+    {"name": "IV with its change", "category": "IV_GAINERS",
+     "answer": {"data": {"data": [
+       {"instrument_key": "NSE_FO|41001", "price": {}, "metric": {"current": 14.2, "previous": 13.1, "change_abs": 1.1, "change_pct": 8.4}},
+       {"instrument_key": "NSE_FO|35003", "price": {}, "metric": {"current": 14.2, "previous": 14.6, "change_abs": -0.4, "change_pct": -2.7}}]}},
+     "rows": [[1, "NIFTY24NOV2625900CE", "IV 14.2%, +1.1"], [2, "NIFTY25NOVFUT", "IV 14.2%, −0.4"]]},
+    {"name": "premium and discount keep two decimals", "category": "PREMIUM",
+     "answer": {"data": {"data": [{"instrument_key": "NSE_FO|35003", "price": {}, "metric": {"current": 38.4, "previous": null}}]}},
+     "rows": [[1, "NIFTY25NOVFUT", "Premium 38.40"]]},
+    {"name": "discount shows the size of the gap", "category": "DISCOUNT",
+     "answer": {"data": {"data": [{"instrument_key": "NSE_FO|35003", "price": {}, "metric": {"current": -12.5, "previous": null}}]}},
+     "rows": [[1, "NIFTY25NOVFUT", "Discount 12.50"]]},
+    {"name": "margin categories have no previous", "category": "UNDER_5000",
+     "answer": {"data": {"data": [{"instrument_key": "NSE_FO|41001", "price": {"current": 12.0}, "metric": {"current": 4350, "previous": null, "change_abs": null, "change_pct": null}}]}},
+     "rows": [[1, "NIFTY24NOV2625900CE", "Costs ₹4,350 to buy"]]},
+    {"name": "price gainers use the price block", "category": "PRICE_GAINERS",
+     "answer": {"data": {"data": [{"instrument_key": "NSE_FO|35003", "price": {"current": 26000, "close_price": 25390, "change_abs": 610, "change_pct": 2.43}, "metric": {"current": 2.43}}]}},
+     "rows": [[1, "NIFTY25NOVFUT", "Price +2.4%"]]},
+    {"name": "a commodity row", "category": "TOP_TRADED",
+     "answer": {"data": {"data": [{"instrument_key": "MCX_FO|55001", "price": {}, "metric": {"current": 5000000000}}]}},
+     "rows": [[1, "CRUDEOIL18DEC26FUT", "Traded ₹500 cr"]]},
+    {"name": "no rows", "category": "OI_GAINERS", "answer": {"status": "success", "data": {"time_stamp": 1794200000, "data": []}},
+     "rows": [], "left_out": 0},
+    {"name": "garbage reads as no rows", "category": "OI_GAINERS", "answer": "nonsense", "rows": [], "left_out": 0, "no_time": true}
+  ],
+  "times": [
+    {"value": "2026-11-09T10:42:05+05:30", "iso": "2026-11-09T10:42:05+05:30"},
+    {"value": "2026-11-09T10:42:05", "iso": "2026-11-09T10:42:05+05:30"},
+    {"value": "2026-11-09T05:12:05Z", "iso": "2026-11-09T10:42:05+05:30"},
+    {"value": 1794200000, "iso": "2026-11-09T10:23:20+05:30"},
+    {"value": 1794200000000, "iso": "2026-11-09T10:23:20+05:30"},
+    {"value": "1794200000", "iso": "2026-11-09T10:23:20+05:30"},
+    {"value": null, "iso": null},
+    {"value": "soon", "iso": null}
+  ],
+  "ages": [
+    {"made": "2026-11-09T10:42:05+05:30", "now": "2026-11-09T10:42:35+05:30", "age": "just now", "stale": false},
+    {"made": "2026-11-09T10:42:05+05:30", "now": "2026-11-09T10:48:05+05:30", "age": "6 min ago", "stale": false},
+    {"made": "2026-11-09T10:42:05+05:30", "now": "2026-11-09T10:52:05+05:30", "age": "10 min ago", "stale": false},
+    {"made": "2026-11-09T10:42:05+05:30", "now": "2026-11-09T10:52:05.001+05:30", "age": "10 min ago", "stale": true},
+    {"made": "2026-11-09T10:42:05+05:30", "now": "2026-11-09T12:50:00+05:30", "age": "2 h ago", "stale": true},
+    {"made": "2026-11-07T10:42:05+05:30", "now": "2026-11-09T12:50:00+05:30", "age": "2 d ago", "stale": true}
+  ]
+}

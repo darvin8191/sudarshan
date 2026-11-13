@@ -1,0 +1,300 @@
+"""The ``copy`` op, with ``move`` as its flag (M8.4, W8): symbols or one whole section of an own
+list, into another own list or a new one; a move then removes them from the source.
+
+Only own lists (``list:<id>``) and built-in lists (``preset:<id>``, ``ops/presets.py``; a copy
+only, a move is refused because the list is locked) can be the source: a ranked (W22) source is
+``invalid`` with field ``from``. Every refusal that can be known is made, with its numbers,
+before anything is written: the version (when a section is to be set), the 250 symbols a list
+holds, the 50 lists there can be, a name taken.
+
+Two files, never one transaction, OpenAlgo first. OpenAlgo's own committed functions add the
+symbols (a new list in one call), one commit each with a yield to the hub between them; then the
+target's section rows for the symbols added are written in one overlay transaction that claims the
+target's version; then, for a move, OpenAlgo removes the symbols from the source and the overlay
+drops their section rows. The section rows come after the adds on purpose (README W8): written
+first, they would be rows for symbols the list does not hold yet, which an arrange from another
+screen in that window deletes, and the copy would answer done with its symbols in No section.
+
+A failure between the steps leaves a valid state (symbols OpenAlgo has and the overlay does not know
+read as No section; a section row for a symbol the source no longer has is ignored) and the op says
+what was done, in words that hold whatever ran in between: how many went in, where they are when
+the section step met another screen's change (``conflict``) or could not be written, and what a
+move left in the source. Whatever it committed before refusing, it names (``OpError.changed``), so
+the bridge bumps the lists version once and pushes those lists. A symbol already in the target is
+not added twice and is not an error; a move still takes it out of the source. The target's version
+is needed only to set a section; copying into No section or a new list claims nothing.
+"""
+
+from __future__ import annotations
+
+import time
+
+from flask import session
+from sqlalchemy import func
+
+from sudarshan.watchlists import contract, engine, refs
+from sudarshan.watchlists.ops import UNCHANGED, OpError, bumps
+from sudarshan.watchlists.ops import presets as presets_op
+from sudarshan.watchlists.ops import ranked as ranked_op
+from sudarshan.watchlists.ops.sections import _held
+from sudarshan.watchlists.store import items as store_items
+from sudarshan.watchlists.store import sections as store
+from sudarshan.watchlists.words import arrange as words
+from sudarshan.watchlists.words import ranked as ranked_words
+from sudarshan.watchlists.words import sections as section_words
+from sudarshan.watchlists.words import view as view_words
+from utils.logging import get_logger
+
+logger = get_logger(__name__)
+NAME_MAX = 64  # the width of OpenAlgo's list name
+
+
+class Done(dict):
+    """The ``CopyDone`` record, with the refs it changed for ``ops.bumps``."""
+
+    refs: tuple = ()
+
+
+def _user() -> str:
+    return session.get("user") or ""
+
+
+def add_all(user: str, list_id: int, keys: list) -> int:
+    """Add each ``(exchange, symbol)`` through OpenAlgo's own function, one commit each, yielding
+    to the hub between them (SQLite's file I/O does not). Stops at the first that fails; the count
+    added so far."""
+    from database import watchlist_db as oa
+
+    done = 0
+    try:
+        for exchange, symbol in keys:
+            if oa.add_item(user, list_id, symbol, exchange) is None:
+                break
+            done += 1
+            time.sleep(0)
+    finally:
+        oa.db_session.remove()
+    return done
+
+
+def remove_all(user: str, list_id: int, item_ids: list) -> int:
+    """Remove each item through OpenAlgo's own function; the count removed."""
+    from database import watchlist_db as oa
+
+    done = 0
+    try:
+        for item_id in item_ids:
+            if oa.remove_item(user, list_id, item_id):
+                done += 1
+            time.sleep(0)
+    finally:
+        oa.db_session.remove()
+    return done
+
+
+def _source(spec: dict) -> tuple[int, dict, list, bool]:
+    """``(list id, live list, picked keys (a pick in the order given, a section in the list's order), picked by section)``."""
+    from sudarshan.watchlists.refs import list as listref
+
+    if presets_op.is_preset(spec):  # a built-in list: the symbols picked, or all of it
+        return presets_op.copy_source(spec)
+    if ranked_op.is_ranked(spec):  # a ranked list: the keys the page shows, in its order
+        return ranked_op.copy_source(spec)
+    parts = refs.split(spec["ref"])
+    if parts is None or parts[0] != listref.KIND:
+        raise OpError("invalid", field="from")
+    try:
+        lid = listref.list_id(parts[1])
+    except OpError:
+        raise OpError("invalid", field="from") from None
+    live = listref.read_live(_user(), lid)
+    if live is None:
+        raise OpError("gone", view_words.LIST_GONE)
+    flat = sorted(live["items"], key=lambda i: (i[3], i[0]))
+    has = {(e, y) for _, e, y, _ in flat}
+    if ("keys" in spec) == ("section_id" in spec):
+        raise OpError(
+            "invalid", words.PICK_ONE_WAY if "keys" in spec else words.PICK_NOTHING, "from"
+        )
+    if "keys" in spec:
+        want = []
+        for text in spec["keys"]:
+            exchange, _, symbol = text.partition(":")
+            if (exchange, symbol) not in has:
+                raise OpError("invalid", field="from")
+            want.append((exchange, symbol))
+        return lid, live, list(dict.fromkeys(want)), False
+    overlay = listref.read_overlay(lid, live["items"])
+    trusted = overlay.get("oa_created_at") in (None, live["created_at"])
+    known = {s["id"] for s in overlay.get("sections", ())} if trusted else set()
+    if spec["section_id"] not in known:
+        raise OpError("gone", section_words.SECTION_GONE)
+    placed = overlay["items"]
+    return (
+        lid,
+        live,
+        [(e, y) for _, e, y, _ in flat if placed.get((e, y)) == spec["section_id"]],
+        True,
+    )
+
+
+def _own_lists(user: str, name: str) -> tuple[int, bool]:
+    """How many lists the user has, and whether one is called ``name`` (as OpenAlgo's own create
+    compares it): two small queries through OpenAlgo's models, never every list with its items,
+    which with 49 full lists took a fifth of a second on the hub."""
+    from database import watchlist_db as oa
+
+    lists = oa.Watchlist
+    try:
+        have = oa.db_session.query(func.count(lists.id)).filter(lists.user_id == user).scalar()
+        taken = (oa.db_session.query(lists.id)
+                 .filter(lists.user_id == user, lists.name == name).first()) is not None  # fmt: skip
+    finally:
+        oa.db_session.remove()
+    return int(have or 0), taken
+
+
+def _target(to: dict, picked: list, from_section: bool, src: int) -> tuple[dict | None, list]:
+    """``(live target or None for a new list, the keys it does not hold yet)``, refused with the
+    numbers when it cannot take them."""
+    from sudarshan.watchlists.refs import list as listref
+
+    if ("list" in to) == ("name" in to):
+        raise OpError("invalid", field="to")
+    if "name" in to:
+        name = to["name"].strip()
+        if not name or len(name) > NAME_MAX:
+            raise OpError("invalid", words.NAME_EMPTY if not name else words.NAME_LONG, "name")
+        if to.get("section_id") is not None:
+            raise OpError("invalid", words.NEW_LIST_SECTION, "to")
+        have, taken = _own_lists(_user(), name)
+        if have >= contract.LIMITS["lists"]:
+            raise OpError("limit", words.LISTS_FULL)
+        if taken:
+            raise OpError("invalid", words.name_taken(name), "name")
+        if len(picked) > contract.LIMITS["list_items"]:
+            raise OpError("limit", words.too_many(len(picked)))
+        return None, picked
+    if to["list"] == src:
+        raise OpError("invalid", words.SAME_LIST, "to")
+    live = listref.read_live(_user(), to["list"]) if 0 < to["list"] <= listref.MAX_ID else None
+    if live is None:
+        raise OpError("gone", view_words.LIST_GONE)
+    holds = {(e, y) for _, e, y, _ in live["items"]}
+    new = [k for k in picked if k not in holds]
+    left = contract.LIMITS["list_items"] - len(holds)
+    if len(new) > left:
+        raise OpError("limit", words.room(live["name"], left, len(picked), from_section))
+    return live, new
+
+
+def _check_section(live: dict, to: dict, args: dict) -> int | None:
+    """The held version when a section is to be set; refuses a stale one before any write."""
+    if to.get("section_id") is None:
+        return None
+    if "version" not in args:
+        raise OpError("invalid", words.NEED_VERSION, "version")
+    held = _held(args["version"])
+    with engine.open_session() as s:
+        if not store_items.current(s, live["id"], live["created_at"], held):
+            raise OpError("conflict", section_words.CONFLICT)
+        found = store.find(s, to["section_id"])
+        if found is None or found.list_id != live["id"]:
+            raise OpError("gone", section_words.SECTION_GONE)
+    return held
+
+
+def _answer(
+    list_id: int, added: int, skipped: int, version, changed: list, said: str | None = None
+) -> Done:
+    done = Done(list=list_id, added=added, skipped=skipped, version=version, words=said)
+    done.refs = tuple(changed)
+    return done
+
+
+def _make(user: str, name: str, keys: list) -> int:
+    """A new list with every symbol in one call (one commit, so nothing or all of it); its id."""
+    from database import watchlist_db as oa
+
+    try:
+        made = oa.create_watchlist(user, name, [{"exchange": e, "symbol": y} for e, y in keys])
+    finally:
+        oa.db_session.remove()
+    if made is None:
+        raise OpError("failed")  # nothing was written
+    return made["id"]
+
+
+def _place(target: dict, added: list, section_id: int, held: int) -> tuple[str | None, str | None]:
+    """The section rows of the symbols just added, under the target's version claim, in one
+    overlay transaction: ``(new version, None)``, or ``(None, why)`` when the claim met another
+    screen's change (``STALE``) or the rows could not be written (``LOST``). Either way the
+    symbols are in the list; they read as No section until placed."""
+    try:
+        with engine.open_session() as s, s.begin():
+            version = str(store.claim(s, target["id"], target["created_at"], held))
+            store_items.put(s, target["id"], dict.fromkeys(added, section_id), replace=False)
+        return version, None
+    except store.Stale:
+        return None, words.STALE
+    except Exception:
+        logger.exception("Watchlists: the section of copied symbols could not be set")
+        return None, words.LOST
+
+
+def _changed(args: dict, data: Done):
+    """The lists the copy changed; ``UNCHANGED`` for one that found every symbol already in the
+    target and took nothing out of a source (no bump, no push)."""
+    return list(data.refs) or UNCHANGED
+
+
+@bumps("items", _changed)
+def copy(args: dict) -> dict:
+    user, move = _user(), bool(args.get("move", False))
+    if move and presets_op.is_preset(args["from"]):  # a move would take symbols out of it
+        raise presets_op.refuse_locked("from")
+    if move and ranked_op.is_ranked(args["from"]):  # nothing to take out of Upstox's ranking
+        raise OpError("invalid", ranked_words.LOCKED, "from")
+    src, source, picked, from_section = _source(args["from"])
+    to = args["to"]
+    target, new = _target(to, picked, from_section, src)
+    held = _check_section(target, to, args) if target is not None else None
+    skipped = len(picked) - len(new)
+    changed: list[str] = []  # the lists whose change has committed, for the push
+    version = placed = None  # placed: why the section was not set, when it was asked and missed
+    if target is None:
+        tname = to["name"].strip()
+        tid = _make(user, tname, new)
+        changed.append(f"list:{tid}")
+    else:
+        tid, tname = target["id"], target["name"]
+        added = add_all(user, tid, new)
+        if added:
+            changed.append(f"list:{tid}")
+        if held is not None and added:
+            version, placed = _place(target, new[:added], to["section_id"], held)
+        if added < len(new):  # a move takes nothing out of the source after a short add
+            said = words.added_some(
+                added, len(new), tname, placed, source["name"] if move else None
+            )
+            raise OpError("failed", said, changed=changed)
+    if move:
+        gone = {(e, y): n for n, e, y, _ in source["items"]}
+        out = remove_all(user, src, [gone[k] for k in picked])
+        if out:
+            changed.append(f"list:{src}")
+        if out < len(picked):
+            said = words.not_removed(len(picked) - out, tname, source["name"], placed)
+            raise OpError("failed", said, changed=changed)
+        try:
+            with engine.open_session() as s, s.begin():
+                store_items.drop(s, src, picked)
+        except Exception:
+            logger.exception("Watchlists: the section rows of moved symbols could not be dropped")
+    if placed is not None:  # every symbol went in, but not into the section picked
+        said = words.placed_elsewhere(len(new), tname, placed, move)
+        raise OpError("conflict" if placed == words.STALE else "failed", said, changed=changed)
+    return _answer(tid, len(new), skipped, version, changed, source.get("note"))
+
+
+HANDLERS = {"copy": copy}

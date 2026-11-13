@@ -1,0 +1,24 @@
+{
+  "note": "Hand-typed cases for the typed-list format (M8.8, W13). Symbols are made up. A problem is [line, kind, text, other line].",
+  "parse": [
+    {"name": "the as-of header is read", "text": "# a comment\n# as of 2026-09-30\nAAA\nBBB\n",
+     "symbols": ["AAA", "BBB"], "as_of": "2026-09-30", "problems": []},
+    {"name": "a file with no header reads date not recorded", "text": "# comment only\nAAA\nBBB\n",
+     "symbols": ["AAA", "BBB"], "as_of": null, "problems": []},
+    {"name": "the header may be written in capitals and with spaces", "text": "#   AS  OF   2026-03-31  \nAAA\n",
+     "symbols": ["AAA"], "as_of": "2026-03-31", "problems": []},
+    {"name": "a bad line is named by its number and left out", "text": "# as of 2026-09-30\nAAA\nab cd\nlower\nBBB\n",
+     "symbols": ["AAA", "BBB"], "as_of": "2026-09-30",
+     "problems": [[3, "symbol", "ab cd", 0], [4, "symbol", "lower", 0]]},
+    {"name": "a duplicate is named and the first kept", "text": "AAA\nBBB\n\nAAA # again\nCCC\n",
+     "symbols": ["AAA", "BBB", "CCC"], "as_of": null, "problems": [[4, "repeat", "AAA", 1]]},
+    {"name": "a comment may follow a symbol, blank lines and a byte order mark are fine",
+     "text": "﻿AAA # first\n\n  BBB  \nM&M\nBAJAJ-AUTO\n",
+     "symbols": ["AAA", "BBB", "M&M", "BAJAJ-AUTO"], "as_of": null, "problems": []},
+    {"name": "a date that is not a date records no date and is named", "text": "# as of 2026-13-40\nAAA\n",
+     "symbols": ["AAA"], "as_of": null, "problems": [[1, "date", "2026-13-40", 0]]},
+    {"name": "the first valid date wins", "text": "# as of 2026-03-31\n# as of 2026-09-30\nAAA\n",
+     "symbols": ["AAA"], "as_of": "2026-03-31", "problems": []},
+    {"name": "an empty file is an empty list", "text": "", "symbols": [], "as_of": null, "problems": []}
+  ]
+}

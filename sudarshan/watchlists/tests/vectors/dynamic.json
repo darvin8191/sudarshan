@@ -1,0 +1,96 @@
+{
+  "about": "Hand-typed from the design (3.7); an expiring index contract stops at 15:40 until 6 Dec 2026 and at 15:30 from 7 Dec 2026. Times are IST ISO strings; the test converts them itself.",
+  "ladder": [25800, 25850, 25900, 25950, 26000],
+  "expiries": ["2026-11-10", "2026-11-17", "2026-11-24", "2026-12-01", "2026-12-29", "2027-01-25"],
+  "pick": [
+    {"now": "2026-11-24T10:00:00+05:30", "nearest": "2026-11-24", "next": "2026-12-01", "month": "2026-11-24", "next_month": "2026-12-29"},
+    {"now": "2026-11-24T15:39:59.999+05:30", "nearest": "2026-11-24", "next": "2026-12-01", "month": "2026-11-24", "next_month": "2026-12-29"},
+    {"now": "2026-11-24T15:40:00.000+05:30", "nearest": "2026-12-01", "next": "2026-12-29", "month": "2026-12-29", "next_month": "2027-01-25"},
+    {"now": "2026-11-01T09:00:00+05:30", "nearest": "2026-11-10", "next": "2026-11-17", "month": "2026-11-24", "next_month": "2026-12-29"},
+    {"now": "2026-12-29T15:30:00+05:30", "nearest": "2027-01-25", "next": null, "month": "2027-01-25", "next_month": null},
+    {"now": "2027-01-25T15:30:00+05:30", "nearest": null, "next": null, "month": null, "next_month": null}
+  ],
+  "closes_pick": [
+    {"name": "a special session closing at 15:40 holds the row until then", "expiries": ["2026-11-08", "2026-11-10"], "closes": {"2026-11-08": "2026-11-08T15:40:00+05:30"}, "now": "2026-11-08T15:35:00+05:30", "nearest": "2026-11-08"},
+    {"name": "and rolls at that close, not at 15:30", "expiries": ["2026-11-08", "2026-11-10"], "closes": {"2026-11-08": "2026-11-08T15:40:00+05:30"}, "now": "2026-11-08T15:40:00+05:30", "nearest": "2026-11-10"},
+    {"name": "a session closing early at 13:00 rolls at 13:00", "expiries": ["2026-11-10", "2026-11-17"], "closes": {"2026-11-10": "2026-11-10T13:00:00+05:30"}, "now": "2026-11-10T13:00:00+05:30", "nearest": "2026-11-17"},
+    {"name": "a date with no calendar row rolls at 15:30", "expiries": ["2026-11-10", "2026-11-17"], "closes": {}, "now": "2026-11-10T15:29:59+05:30", "nearest": "2026-11-10"},
+    {"name": "no calendar row, the regime stop at 15:40", "expiries": ["2026-11-10", "2026-11-17"], "closes": {}, "now": "2026-11-10T15:40:00+05:30", "nearest": "2026-11-17"}
+  ],
+  "atm": [
+    {"price": 25912.35, "strikes": "ladder", "atm": 25900},
+    {"price": 25925.00, "strikes": "ladder", "atm": 25900},
+    {"price": 25925.01, "strikes": "ladder", "atm": 25950},
+    {"price": 25800, "strikes": "ladder", "atm": 25800},
+    {"price": 20000, "strikes": "ladder", "atm": 25800},
+    {"price": 30000, "strikes": "ladder", "atm": 26000},
+    {"price": 25912.35, "strikes": [], "atm": null},
+    {"price": 1430, "strikes": [1400, 1420, 1440, 1460, 1480], "atm": 1420},
+    {"price": 1431, "strikes": [1400, 1420, 1440, 1460, 1480], "atm": 1440},
+    {"price": 91.2, "strikes": [85, 87.5, 90, 92.5, 95], "atm": 90},
+    {"price": 91.3, "strikes": [85, 87.5, 90, 92.5, 95], "atm": 92.5}
+  ],
+  "uneven": [25600, 25700, 25800, 25850, 25900, 25950, 26000, 26100, 26200],
+  "band": [
+    {"strikes": "ladder", "strike": 25900, "low": 25870, "high": 25930},
+    {"strikes": "ladder", "strike": 25950, "low": 25920, "high": 25980},
+    {"strikes": "ladder", "strike": 25800, "low": null, "high": 25830},
+    {"strikes": "ladder", "strike": 26000, "low": 25970, "high": null},
+    {"strikes": "uneven", "strike": 25900, "low": 25870, "high": 25930},
+    {"strikes": "uneven", "strike": 25800, "low": 25740, "high": 25830},
+    {"strikes": "uneven", "strike": 26000, "low": 25970, "high": 26060},
+    {"strikes": [1400, 1420, 1440, 1460, 1480], "strike": 1440, "low": 1428, "high": 1452}
+  ],
+  "hold": [
+    {"price": 25929.95, "held": 25900, "strike": 25900},
+    {"price": 25930.00, "held": 25900, "strike": 25950},
+    {"price": 25870.05, "held": 25900, "strike": 25900},
+    {"price": 25870.00, "held": 25900, "strike": 25850},
+    {"price": 25930.00, "held": null, "strike": 25950},
+    {"price": 25930.00, "held": 25777, "strike": 25950},
+    {"price": 25821.00, "held": 25800, "strike": 25800},
+    {"price": 25830.00, "held": 25800, "strike": 25850}
+  ],
+  "offset": [
+    {"atm": 25900, "offset": 2, "strike": 26000},
+    {"atm": 25900, "offset": -2, "strike": 25800},
+    {"atm": 25900, "offset": 0, "strike": 25900},
+    {"atm": 25900, "offset": 3, "strike": null},
+    {"atm": 25800, "offset": -1, "strike": null}
+  ],
+  "ten_below_lowest": {"atm": 25800, "offset": -10, "strike": null},
+  "price": [
+    {"name": "a 40 s old tick on a connected socket is accepted", "tick": [25912.35, 1000], "connected": true, "expect": [25912.35, 1000, "tick", "ok"]},
+    {"name": "a tick on a dead socket is not used, the page snapshot is", "tick": [25912.35, 1000], "connected": false, "snapshot": [25900.0, 900], "expect": [25900.0, 900, "snapshot", "ok"]},
+    {"name": "the feed's snapshot when the page has none", "connected": true, "feed": [25890.0, 800], "expect": [25890.0, 800, "feed", "ok"]},
+    {"name": "no price at all waits", "connected": true, "expect": [null, null, null, "waiting"]},
+    {"name": "closed, last price said so", "closed": true, "last": [25912.35, 700], "expect": [25912.35, 700, "last", "closed"]},
+    {"name": "closed with nothing at all still waits", "closed": true, "expect": [null, null, null, "waiting"]},
+    {"name": "closed with a tick keeps it and says closed", "tick": [25912.35, 1000], "connected": true, "closed": true, "expect": [25912.35, 1000, "tick", "closed"]}
+  ],
+  "resolve": [
+    {"name": "ATM+2 call", "row": {"kind": "atm_option", "expiry_rule": "nearest", "strike_rule": "atm", "offset": 2, "opt_right": "CE"}, "now": "2026-11-24T10:00:00+05:30", "price": [25912.35, 1, "tick", "ok"], "held": null, "expect": {"state": "ok", "expiry": "2026-11-24", "strike": 26000, "valid_until": "2026-11-24T15:40:00+05:30"}},
+    {"name": "next-month rule", "row": {"kind": "atm_option", "expiry_rule": "next_month", "strike_rule": "atm", "offset": 0, "opt_right": "PE"}, "now": "2026-11-24T10:00:00+05:30", "price": [25912.35, 1, "tick", "ok"], "held": null, "expect": {"state": "ok", "expiry": "2026-12-29", "strike": 25900}},
+    {"name": "held strike kept inside its band", "row": {"kind": "atm_option", "expiry_rule": "nearest", "strike_rule": "atm", "offset": 0, "opt_right": "CE"}, "now": "2026-11-24T10:00:00+05:30", "price": [25929.95, 1, "tick", "ok"], "held": 25900, "expect": {"state": "ok", "strike": 25900, "band": [25870, 25930]}},
+    {"name": "moves outside the band", "row": {"kind": "atm_option", "expiry_rule": "nearest", "strike_rule": "atm", "offset": 0, "opt_right": "CE"}, "now": "2026-11-24T10:00:00+05:30", "price": [25930.0, 1, "tick", "ok"], "held": 25900, "expect": {"state": "ok", "strike": 25950, "band": [25920, 25980]}},
+    {"name": "waiting for a price", "row": {"kind": "atm_option", "expiry_rule": "nearest", "strike_rule": "atm", "offset": 0, "opt_right": "CE"}, "now": "2026-11-24T10:00:00+05:30", "price": [null, null, null, "waiting"], "held": null, "expect": {"state": "waiting", "strike": null, "why": "no_price"}},
+    {"name": "closed uses the last price", "row": {"kind": "atm_option", "expiry_rule": "nearest", "strike_rule": "atm", "offset": 0, "opt_right": "CE"}, "now": "2026-11-24T16:00:00+05:30", "price": [25912.35, 1, "last", "closed"], "held": null, "expect": {"state": "closed", "expiry": "2026-12-01", "strike": 25900}},
+    {"name": "past the end", "row": {"kind": "atm_option", "expiry_rule": "nearest", "strike_rule": "atm", "offset": -10, "opt_right": "PE"}, "now": "2026-11-24T10:00:00+05:30", "price": [25800.0, 1, "tick", "ok"], "held": null, "expect": {"state": "missing", "why": "past_end", "steps": -10}},
+    {"name": "fixed strike present", "row": {"kind": "atm_option", "expiry_rule": "nearest", "strike_rule": "fixed", "strike": 26000, "opt_right": "CE"}, "now": "2026-11-24T10:00:00+05:30", "price": [null, null, null, "waiting"], "held": null, "expect": {"state": "ok", "strike": 26000}},
+    {"name": "fixed strike absent", "row": {"kind": "atm_option", "expiry_rule": "nearest", "strike_rule": "fixed", "strike": 26025, "opt_right": "CE"}, "now": "2026-11-24T10:00:00+05:30", "price": [null, null, null, "waiting"], "held": null, "expect": {"state": "missing", "why": "no_strike"}},
+    {"name": "no expiry left", "row": {"kind": "atm_option", "expiry_rule": "next_month", "strike_rule": "atm", "offset": 0, "opt_right": "CE"}, "now": "2026-12-29T15:30:00+05:30", "price": [25912.35, 1, "tick", "ok"], "held": null, "expect": {"state": "missing", "why": "no_expiry"}},
+    {"name": "the put side is missing at the strike", "row": {"kind": "strike_pair", "expiry_rule": "nearest", "strike_rule": "atm", "offset": 0}, "now": "2026-11-24T10:00:00+05:30", "price": [25912.35, 1, "tick", "ok"], "held": null, "sides": [{"expiry": "2026-11-24", "strike": 25900, "rights": ["CE"]}], "expect": {"state": "missing", "why": "no_side", "missing": ["PE"], "strike": 25900}},
+    {"name": "both sides present", "row": {"kind": "strike_pair", "expiry_rule": "nearest", "strike_rule": "atm", "offset": 0}, "now": "2026-11-24T10:00:00+05:30", "price": [25912.35, 1, "tick", "ok"], "held": null, "sides": [{"expiry": "2026-11-24", "strike": 25900, "rights": ["CE", "PE"]}], "expect": {"state": "ok", "strike": 25900}},
+    {"name": "current-month future rolls at the close of expiry day", "row": {"kind": "month_future", "expiry_rule": "month"}, "now": "2026-11-24T15:40:00+05:30", "price": [null, null, null, "waiting"], "held": null, "expect": {"state": "ok", "expiry": "2026-12-29", "strike": null}},
+    {"name": "current-month future before it", "row": {"kind": "month_future", "expiry_rule": "month"}, "now": "2026-11-24T15:39:59+05:30", "price": [null, null, null, "waiting"], "held": null, "expect": {"state": "ok", "expiry": "2026-11-24", "valid_until": "2026-11-24T15:40:00+05:30"}}
+  ],
+  "words": [
+    {"name": "waiting", "case": "waiting", "text": "Waiting for NIFTY's price to pick the strike"},
+    {"name": "closed", "case": "closed", "price": 25912.35, "at": "2026-11-24T15:29:59+05:30", "text": "Market closed · strike from NIFTY's last price 25,912.35 (15:29:59)"},
+    {"name": "moved", "case": "moved", "text": "Moved from 25,850 CE at 10:12 (NIFTY 25,931)"},
+    {"name": "rolled", "case": "rolled", "text": "Rolled to 1 Dec 2026 at 15:30"},
+    {"name": "past the end", "case": "past_end", "text": "No strike 10 above the ATM in the 24 Nov 2026 expiry."},
+    {"name": "now", "case": "now", "text": "Now: NIFTY 25,900 CE, 24 Nov 2026 (NIFTY at 25,912.35)"},
+    {"name": "now with an old price", "case": "now_old", "text": "Now: NIFTY 25,900 CE, 24 Nov 2026 (NIFTY at 25,912.35, price from 10:00:00)"}
+  ]
+}

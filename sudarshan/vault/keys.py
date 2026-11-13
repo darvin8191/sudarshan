@@ -42,6 +42,8 @@ PORTFOLIO_API_INFO = b"sudarshan/portfolio/api/v1"
 SCREENER_API_INFO = b"sudarshan/screener/api/v1"
 #: Seals the screener's calls into OpenAlgo (its watchlist and push routes).
 SCREENER_INTERNAL_INFO = b"sudarshan/screener/internal/v1"
+#: Seals the market alerts' reads of OpenAlgo's watchlist members route (list alerts, M8.14).
+WATCHLISTS_INTERNAL_INFO = b"sudarshan/watchlists/internal/v1"
 #: Every purpose: a key derived for one never opens another's seal (a test holds them apart).
 PURPOSES = (
     VAULT_INFO,
@@ -52,6 +54,7 @@ PURPOSES = (
     PORTFOLIO_API_INFO,
     SCREENER_API_INFO,
     SCREENER_INTERNAL_INFO,
+    WATCHLISTS_INTERNAL_INFO,
 )
 _FINGERPRINT_LABEL = b"sudarshan/vault/key-fingerprint/v1"
 
