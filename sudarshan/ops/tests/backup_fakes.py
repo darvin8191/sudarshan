@@ -252,15 +252,6 @@ class Server:
         return path
 
 
-def open_files() -> list[str]:
-    """What this process holds open, by target (the listing's own descriptor is there both times)."""
-    found = []
-    for number in os.listdir("/proc/self/fd"):
-        with contextlib.suppress(OSError):
-            found.append(os.readlink(f"/proc/self/fd/{number}"))
-    return sorted(found)
-
-
 def no_sleep(_seconds: float) -> None:
     return None
 

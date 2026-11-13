@@ -31,6 +31,7 @@ from sudarshan.feed import http_api, rest
 from sudarshan.feed.config import Settings
 from sudarshan.feed.rest import RATE_LIMITED, MarketHours, Refused, delay, resolve
 from sudarshan.feed.service import FeedService
+from sudarshan.tests.fdwatch import FdWatch
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 FEED_CMD = (sys.executable, "-m", "sudarshan.feed")
@@ -1114,24 +1115,22 @@ def test_a_client_that_stops_reading_loses_its_answer_and_holds_nothing(feed_env
     async def big(path: str):
         return 200, body, {}
 
-    def open_fds() -> int:
-        return len(os.listdir("/proc/self/fd"))
-
     async def scenario():
         async with running(feed_env) as (svc, fake, http):
             fake.rest_answer = big
             assert (await ask(http, LTP)).status_code == 200  # every pool warmed up first
             stuck = socket.socket()
             stuck.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)  # takes almost nothing
-            before = open_fds()  # with the client's own socket, before the feed accepts it
+            watch = FdWatch()  # with the client's own socket, before the feed accepts it
             stuck.connect(("127.0.0.1", svc.http_port))
             stuck.sendall(
                 f"GET /upstox{LTP} HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Sudarshan-Client: "
                 "sudarshan-screener\r\nX-Sudarshan-Priority: interactive\r\n\r\n".encode()
             )
-            await ff.wait_until(lambda: open_fds() > before)  # the feed holds its connection
+            await ff.wait_until(watch.new)  # the feed holds its connection
             await asyncio.sleep(1.5)  # the call, then the write limit
-            assert open_fds() == before and svc.health()["rest"]["in_flight"] == 0
+            await watch.aassert_clean()
+            assert svc.health()["rest"]["in_flight"] == 0
             stuck.setblocking(False)
             got = 0
             with contextlib.suppress(BlockingIOError, ConnectionError):
@@ -1206,16 +1205,13 @@ def test_a_caller_that_hangs_up_while_waiting_never_reaches_upstox(feed_env, mon
 
     monkeypatch.setattr(http_api, "_serve", tracking)
 
-    def open_fds() -> int:
-        return len(os.listdir("/proc/self/fd"))
-
     async def scenario():
         async with running(feed_env) as (svc, fake, http):
             held = Held(fake)
             holders = [asyncio.create_task(ask(http, f"{LTP[:-4]}{n:04d}")) for n in range(4)]
             try:
                 await ff.wait_until(lambda: len(held.arrived) == 4)
-                before = open_fds()
+                watch = FdWatch()
                 s = socket.create_connection(("127.0.0.1", svc.http_port))
                 s.sendall(
                     f"GET /upstox{OHLC} HTTP/1.1\r\nHost: x\r\nX-Sudarshan-Client: "
@@ -1224,7 +1220,7 @@ def test_a_caller_that_hangs_up_while_waiting_never_reaches_upstox(feed_env, mon
                 await ff.wait_until(lambda: svc.rest.health()["waiting"] == 1)
                 s.close()
                 await ff.wait_until(lambda: svc.rest.health()["waiting"] == 0, 2)  # gone at once
-                await ff.wait_until(lambda: open_fds() == before, 2)  # its socket closed too
+                await watch.aassert_clean()  # its socket closed too
             finally:
                 held.open()
             got = await asyncio.gather(*holders)

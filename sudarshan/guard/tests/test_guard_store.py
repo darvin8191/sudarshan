@@ -15,6 +15,7 @@ from sqlalchemy.pool import NullPool
 
 from sudarshan.guard import schema, store
 from sudarshan.guard.store import KillSwitchState, RiskSettings, RiskStore
+from sudarshan.tests.fdwatch import FdWatch
 
 WAIT = 10
 JOIN_S = 120  # generous: a commit's fsync can stall for seconds while the disk is busy
@@ -232,15 +233,14 @@ def test_a_table_another_creator_makes_between_check_and_create_is_no_failure(
 def test_many_operations_hold_no_file_open(risk_store):
     """NullPool: each operation opens and closes its own connection (FD hygiene)."""
     risk_store.settings()
-    fd_dir = "/proc/self/fd"
-    if not os.path.isdir(fd_dir):
+    if not os.path.isdir("/proc/self/fd"):
         pytest.skip("needs /proc")
-    before = len(os.listdir(fd_dir))
+    watch = FdWatch()
     for n in range(100):
         risk_store.save_settings("owner", burst_n=10 + n)
         risk_store.state()
         risk_store.audit("settings_changed", "x", merge_key="k")
-    assert len(os.listdir(fd_dir)) <= before + 2  # what the interpreter opened meanwhile
+    watch.assert_clean()
 
 
 def test_the_single_row_tables_give_every_not_null_column_a_default():
